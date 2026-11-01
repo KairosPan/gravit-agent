@@ -8,7 +8,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { proposeBotId } from "../client/botId.js";
+import { proposeBotId } from "../client/js/wire/botId.js";
 import { isBotId } from "../src/bots.ts";
 
 /* The grammar is the face's own since dsh 0.2.0, which requires only a

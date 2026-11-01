@@ -102,6 +102,18 @@ export const presetRowId = (id: string): string => `preset-${id}`;
 export const SYSTEM_PROMPT_ROW_ID = "system-prompt";
 
 /**
+ * The face's webserver bind: `FACE_BIND` from the process environment, else
+ * loopback. The ONE way to widen the bind — the overlay's webserver row
+ * composes last, so no operator patch row can move it; only the environment
+ * the face is started with can. Its one intended use is the agent docker box,
+ * whose compose file sets `0.0.0.0` and publishes the port on the host's
+ * loopback alone. An empty value is unset.
+ */
+export function faceBind(env: NodeJS.ProcessEnv = process.env): string {
+  return env.FACE_BIND || "127.0.0.1";
+}
+
+/**
  * The face's patch layer: the host rows dsh-base does not mount.
  * @param port - the webserver's TCP port; `0` asks the OS for a free one.
  * @param defaultPreset - the `gravit` preset definition, declared statically
@@ -116,7 +128,7 @@ export const SYSTEM_PROMPT_ROW_ID = "system-prompt";
  * before the MCP tools exist.
  * @returns one insert patch, in the order the rows are listed below.
  */
-export function faceOverlay(port: number, defaultPreset: AgentPresetConfig): FacePatchEntry[] {
+export function faceOverlay(port: number, defaultPreset: AgentPresetConfig, host: string = faceBind()): FacePatchEntry[] {
   return [{
     insert: [
       /* --- host transport. Static: no inject, no webStartup/webRuntime
@@ -128,8 +140,13 @@ export function faceOverlay(port: number, defaultPreset: AgentPresetConfig): Fac
        * the choice is visible and type-checked: web-app runs gzip (web-app
        * :169-177), and gzip here would also wrap the face's own `/data` JSON
        * routes. */
+      /* `host` is FACE_BIND's value or loopback (faceBind). The row's schema
+       * admits only the two literals `127.0.0.1` and `0.0.0.0` (NEW
+       * packages/host/webserver, `WebServer.Config`'s `host` union), so
+       * the cast is checked at boot: any other FACE_BIND fails the row there
+       * rather than binding somewhere unnamed. */
       { id: "webserver", name: "@deepseek-ai/dsh-host-webserver",
-        config: { host: "127.0.0.1", port, compression: "none" } satisfies WebServerConfig },
+        config: { host: host as WebServerConfig["host"], port, compression: "none" } satisfies WebServerConfig },
       /* No new required key at 0.2.0. The row's inject changed from
        * `webServer` to `credentials` (NEW packages/client/connection/src/
        * index.ts:89, 92-115), which dsh-base's `credentials` row provides

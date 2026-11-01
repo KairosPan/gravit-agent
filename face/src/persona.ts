@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
  * `cwd`": NEW packages/core/system-prompt/README.md:70; unchanged at 0.2.0-rc.2). */
 export const PERSONA_VARIABLES: readonly string[] = ["model", "cwd"];
 
-/** Resolved from this module, never from the working directory (data.ts does the same). */
+/** Resolved from this module, never from the working directory. */
 export const PERSONA_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "dsh", "profile", "persona.md");
 
 /** `undefined` when the text will render; otherwise one reason. Stricter than

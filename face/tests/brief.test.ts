@@ -17,7 +17,7 @@ import { BRIEF_INDEXES, BRIEF_SECTORS, BRIEF_SYMBOLS_MAX, NEAR_PCT, briefProduce
 import { loadHoldings, loadLevels } from "../src/desk-book.ts";
 import { HttpError } from "../src/http.ts";
 import { capText, PRODUCER_TEXT_MAX, type ProducerInput, type ProducerOutput } from "../src/producer.ts";
-import type { LiveQuote, ProviderState, QuoteIdentity, QuotePayload } from "../src/quote-types.ts";
+import type { UsLiveQuote as LiveQuote, UsProviderState as ProviderState, UsQuoteIdentity as QuoteIdentity, UsQuotePayload as QuotePayload } from "../src/us-quotes.ts";
 import { STANDING_TEXT_MAX_BYTES } from "../src/standing.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));

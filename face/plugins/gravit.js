@@ -7,8 +7,10 @@
  * the list of its roles (`gravit:roles`, from the `roles` config key, which
  * `gravitRows` fills from `roles/`), the research-cycle contract
  * (`gravit:cycle`, from the `cycle` config key, which `composeFace` fills from
- * `dsh/profile/cycle.md` through src/cycle.ts) and the desk's contract
- * (`gravit:desk`, from the `desk` config key; THE DESK, below).
+ * `dsh/profile/cycle.md` through src/cycle.ts), the run protocols (one
+ * section per entry of the `protocols` config key, which `composeFace` fills
+ * from `dsh/profile/` through src/protocols.ts: `lunhui:run` and `lunhui:module`),
+ * and the desk's contract (`gravit:desk`, from the `desk` config key; THE DESK, below).
  *
  * WHY A DATE. The 2026-10-10 prompt trace found no date anywhere in the
  * assembled prompt, so Gravit could not tell a fresh bar from a stale one or
@@ -98,7 +100,18 @@
  * the assembling scope; this plugin never registers or restricts a tool: the
  * `role_<id>` tools come from the sibling rows (bots-smoke S3 pins the roster).
  *
- * `interpolate: false` on all four sections because their text is prose, not a
+ * THE PROTOCOLS. Each entry of `protocols` - `{ name, probe, text }` - is a
+ * section named `name` at `DEPLOYMENT_PERSONA_SUFFIX - 60 + index` (its index
+ * in the list), just before the cycle, gated as the cycle is but on its own
+ * probe: `isRootOrFork(context) && canCall(ctx, context, probe)`. Two ship:
+ * `lunhui:run` (`dsh/profile/lunhui-run.md`, modules spec A9, §5.10) and, one
+ * step after it, `lunhui:module` (`dsh/profile/lunhui-module.md`, modules-cards
+ * spec G4), both probed on `lunhui_read_run`. The Lunhui tools are registered tree-wide, so the probe
+ * only says the Lunhui rows mounted: the preset scope keeps the section from a
+ * bot, the header from a spawn child, and the allow list (no `lunhui_read_run`)
+ * with the header from a role child.
+ *
+ * `interpolate: false` on every section because their text is prose, not a
  * template: the dsh system prompt is a strict `{{...}}` template with no
  * escape. The date's order is the persona slot's + 1, so the date follows
  * identity - harness identity, the persona prefix, then the date - and
@@ -121,6 +134,20 @@ export const CYCLE_SECTION = "gravit:cycle";
 /** The desk's contract. Registered only when the config carries `desk`; its own
  *  name, like the date's. */
 export const DESK_SECTION = "gravit:desk";
+/** The run protocol's section name. src/protocols.ts `LUNHUI_RUN_SECTION` hands it in the config;
+ *  this file imports nothing, so it is spelled here too, and tests/protocols.test.ts pins the two
+ *  equal. */
+export const LUNHUI_RUN_SECTION = "lunhui:run";
+
+/** The module protocol's section name, spelled here as the run protocol's is; src/protocols.ts
+ *  `LUNHUI_MODULE_SECTION` hands it in the config and tests/protocols.test.ts pins the two equal. */
+export const LUNHUI_MODULE_SECTION = "lunhui:module";
+
+/** A protocol's section name: a namespace, a colon, a dashed name. */
+const PROTOCOL_NAME = /^[a-z]+:[a-z-]+$/;
+
+/** A probe: a tool name as dsh registers one. */
+const TOOL_NAME = /^[a-z][a-z0-9_]*$/;
 
 /** What a role is, said once above the list. The list's lines follow it. */
 const ROLES_INTRO = "Roles. One-shot delegates on your team, each with its own persona and tools; call one by its tool name with a self-contained brief, and treat its report as a claim to check, never a result to copy. Every report carries four headings: status, what was measured, paths, limits.";
@@ -130,15 +157,15 @@ const ROLES_INTRO = "Roles. One-shot delegates on your team, each with its own p
 const ROLE_TOOL = /^role_[a-z0-9_]+$/;
 
 /** What would fail at mount or render, as a reason; `undefined` when the config
- *  is valid. `{}` is valid (no roles, no cycle, no desk); the row in Gravit's
- *  own preset carries `roles` and `cycle`, the desk's row (src/desk-preset.ts)
- *  `desk` alone. All three are optional keys, checked here when present so a
- *  malformed value refuses the mount, loudly, instead of loading a silently dead
- *  config - and `cycle` and `desk` exclude each other: a preset carries one
- *  contract or the other. */
+ *  is valid. `{}` is valid (no roles, no cycle, no protocols, no desk); the row in
+ *  Gravit's own preset carries `roles`, `cycle` and `protocols`, the desk's row
+ *  (src/desk-preset.ts) `desk` alone. Each is an optional key, checked here when
+ *  present so a malformed value refuses the mount, loudly, instead of loading a
+ *  silently dead config - and `cycle` and `desk` exclude each other: a preset
+ *  carries one contract or the other. */
 export function validateGravitConfig(config) {
   if (config === null || typeof config !== "object" || Array.isArray(config)) return "config must be an object";
-  const { cycle, desk, roles } = config;
+  const { cycle, desk, roles, protocols } = config;
   if (cycle !== undefined && (typeof cycle !== "string" || cycle.trim() === "")) return "cycle must be a non-empty string";
   if (desk !== undefined && (typeof desk !== "string" || desk.trim() === "")) return "desk must be a non-empty string";
   if (cycle !== undefined && desk !== undefined) return "a preset carries the cycle contract or the desk contract, not both";
@@ -148,6 +175,19 @@ export function validateGravitConfig(config) {
       if (role === null || typeof role !== "object" || Array.isArray(role)) return `roles[${index}] must be an object with tool and summary`;
       if (typeof role.tool !== "string" || !ROLE_TOOL.test(role.tool)) return `roles[${index}].tool must match ${ROLE_TOOL}`;
       if (typeof role.summary !== "string" || role.summary.trim() === "") return `roles[${index}].summary must be a non-empty string`;
+    }
+  }
+  if (protocols !== undefined) {
+    if (!Array.isArray(protocols)) return "protocols must be an array of { name, probe, text }";
+    const seen = new Set();
+    for (const [index, protocol] of protocols.entries()) {
+      if (protocol === null || typeof protocol !== "object" || Array.isArray(protocol)) return `protocols[${index}] must be an object with name, probe and text`;
+      if (typeof protocol.name !== "string" || !PROTOCOL_NAME.test(protocol.name)) return `protocols[${index}].name must match ${PROTOCOL_NAME}`;
+      if ([TODAY_SECTION, ROLES_SECTION, CYCLE_SECTION, DESK_SECTION].includes(protocol.name)) return `protocols[${index}].name ${protocol.name} is one of this plugin's own sections`;
+      if (seen.has(protocol.name)) return `protocols[${index}].name ${protocol.name} is given twice`;
+      seen.add(protocol.name);
+      if (typeof protocol.probe !== "string" || !TOOL_NAME.test(protocol.probe)) return `protocols[${index}].probe must be a tool name matching ${TOOL_NAME}`;
+      if (typeof protocol.text !== "string" || protocol.text.trim() === "") return `protocols[${index}].text must be a non-empty string`;
     }
   }
   return undefined;
@@ -251,6 +291,17 @@ export function apply(ctx, config) {
       order: ctx.systemPrompt.getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 50,
       interpolate: false,
       text: (context) => isRootOrFork(context) ? config.desk : "",
+    }));
+  }
+  /* Ten before the cycle, in their listed order (the run protocol, then the module protocol, one
+   * step after), each on its own probe: they read only where the Lunhui rows mounted, for Gravit
+   * and a fork child (the same text, the same cached prefix). */
+  for (const [index, protocol] of (config.protocols ?? []).entries()) {
+    ctx.effect(() => ctx.systemPrompt.section({
+      name: protocol.name,
+      order: ctx.systemPrompt.getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 60 + index,
+      interpolate: false,
+      text: (context) => isRootOrFork(context) && canCall(ctx, context, protocol.probe) ? protocol.text : "",
     }));
   }
 }

@@ -26,7 +26,7 @@ import {
   deskReadDecision, deskSecretDecision, deskSecretNames, deskSecrets, deskWriteDecision, installDeskGuard,
   type DeskGuardCtxLike, type DeskGuardExecution, type DeskGuardToolsLike, type DeskPreDecision,
 } from "../src/desk-tools.ts";
-import type { QuotePayload } from "../src/quote-types.ts";
+import type { UsQuotePayload } from "../src/us-quotes.ts";
 import { recorder } from "./route-recorder.ts";
 
 /** The repository root the face runs from (main.ts passes `process.cwd()` as `installDesk`'s `root`). */
@@ -1267,7 +1267,7 @@ test("installDesk installs the guard with the tools, whatever enabled says, and 
     return made;
   };
   const watch = { setInterval: () => 1, clearInterval: () => {} };
-  const hub = { snapshot: async (): Promise<QuotePayload> => ({ ok: true, generated_at: "2026-10-21T14:00:00.000Z", quotes: [], providers: [] }) };
+  const hub = { snapshot: async (): Promise<UsQuotePayload> => ({ ok: true, generated_at: "2026-10-21T14:00:00.000Z", quotes: [], providers: [] }) };
   const deskWrite = write("GRAVIT.md", agentOn(DESK_PRESET));
   const deskRead = call("read", { file_path: `${REPO}/.env.alpaca` }, agentOn(DESK_PRESET));
   /* installDesk hands the guard its `log`: the install line goes there, and nothing reaches stderr. */

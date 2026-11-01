@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "action": {
+    "type": "setWatch",
+    "venue": "ex",
+    "symbol": "BTC/USDT",
+    "on": "true",
+    "nonce": 1792854221986
+  },
+  "primaryType": "AccountTransaction:SetWatch",
+  "domain": {
+    "name": "AgentAccountSignTransaction",
+    "version": "1",
+    "chainId": 424242
+  },
+  "accountChain": "Simulation",
+  "shown": [
+    {
+      "name": "venue",
+      "value": "ex"
+    },
+    {
+      "name": "symbol",
+      "value": "BTC/USDT"
+    },
+    {
+      "name": "on",
+      "value": "true"
+    },
+    {
+      "name": "nonce",
+      "value": "1792854221986"
+    }
+  ]
+}

@@ -26,7 +26,7 @@
  * ledger's usage is exact: 40 uncached in, 6 out, 30 cache read and 4 cache write per model call. The
  * operator's `alpaca-kit` row is tests/fixtures/mcp-standin.js under the server name `market-standin`, a stdio
  * child dsh spawns, so `DESK_ALLOW`'s `mcp__*__<raw>` wildcards meet real MCP-minted names under a name that
- * is not the production one. The order tool is the drill's stand-in `mcp__drill__place_order`, registered
+ * is not the production one. The order tool is the drill's stand-in `mcp__drill__portfolio_live_order`, registered
  * after boot with nothing behind it; AKShare is off; the quote hub is a fake that is never asked.
  *
  * Own file, gated: one boot per process (smoke.test.ts).
@@ -56,7 +56,6 @@ import {
   DESK_READ_CWD_TOOLS, DESK_READ_GLOB_ARGS, DESK_READ_PATH_ARGS, DESK_READ_TOOLS, DESK_WRITE_PATH_ARGS, DESK_WRITE_TOOLS,
   type DeskReadTool, type DeskWriteTool,
 } from "../src/desk-tools.ts";
-import { OPERATOR_GATED_MARKER } from "../src/orders.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
 import type { MessageLike } from "../src/room-rules.ts";
 import { setupFaceProfile } from "../src/setup.ts";
@@ -92,7 +91,7 @@ const GUARDED: readonly (readonly [string, string])[] = [
 
 /** The drill's order stand-in (tests/order-gate-smoke.test.ts): a raw name Gate 2 claims, its description marked
  *  as the real alpaca-kit tool's is. `DESK_ALLOW` never names it, so the desk's mask hides it. */
-const ORDER_STAND_IN = "mcp__drill__place_order";
+const ORDER_STAND_IN = "mcp__drill__portfolio_live_order";
 /** Gate 2's refusal for an order tool the calling scope cannot see (src/orders.ts `orderApprovalDecision`). */
 const HIDDEN_ORDER = `${ORDER_STAND_IN} is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run`;
 
@@ -259,7 +258,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
       requests.set(id, [...(requests.get(id) ?? []), r]);
       const { said, tools: results } = lastSaid(r);
       if (said.includes("ORDER_PROBE")) {
-        return results === 0 ? { kind: "tool", name: ORDER_STAND_IN, args: { symbol: "AAPL", qty: 1, side: "buy" } } : { kind: "text", text: "the order was refused" };
+        return results === 0 ? { kind: "tool", name: ORDER_STAND_IN, args: { venue: "paper-1", symbol: "AAPL", side: "buy", usd: 100 } } : { kind: "text", text: "the order was refused" };
       }
       if (said.includes("WRITE_PROBE")) {
         if (results === 0) return { kind: "tool", name: "read", args: { file_path: "../levels.yml" } };
@@ -294,7 +293,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     let orderRan = false;
     tools.register({
       name: ORDER_STAND_IN,
-      description: `place a PAPER order - desk-smoke stand-in, nothing behind it ${OPERATOR_GATED_MARKER}`,
+      description: `an Account seat write - desk-smoke stand-in, nothing behind it`,
       parameters: { type: "object", properties: { symbol: { type: "string" }, qty: { type: "number" }, side: { type: "string" } } },
       output: { schema: { type: "object" }, render: () => [{ type: "text", text: "ok" }] },
       execute: async () => { orderRan = true; return {}; },

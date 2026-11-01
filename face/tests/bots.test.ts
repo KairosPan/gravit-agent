@@ -16,6 +16,9 @@ import {
 } from "../src/bots.ts";
 import { DESK_PRESET } from "../src/desk-preset.ts";
 import { HttpError } from "../src/http.ts";
+import { BOTS_ROOT } from "../src/overlay.ts";
+import { LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
+import { expandAllow } from "../plugins/bot.js";
 
 const noPresets = async () => [] as { id: string; broken?: string }[];
 
@@ -89,10 +92,43 @@ test("DEFAULT_ALLOW names read and speak tools only - never orders, delegation, 
   for (const forbidden of ["subagent", "subagent_fork", "workflow", "ralph", "create_goal", "todo_write", "mcp__*__place_order", "mcp__*__cancel_order", "mcp__*__orders"]) {
     assert.equal(DEFAULT_ALLOW.includes(forbidden), false, forbidden);
   }
-  for (const kept of ["bash", "read", "grep", "glob", "edit", "write", "web_search", "skill", "ask_user_question", "mcp__*__daily_bars"]) {
+  for (const kept of ["bash", "read", "grep", "glob", "edit", "write", "web_search", "skill", "ask_user_question"]) {
     assert.equal(DEFAULT_ALLOW.includes(kept), true, kept);
   }
   assert.equal(DEFAULT_ALLOW.some((n) => n.startsWith("agent_")), false);
+});
+
+test("DEFAULT_ALLOW names none of the alpaca-kit reads: they left with the server", () => {
+  for (const gone of ["earnings", "daily_bars", "calendar", "corp_actions", "market_snapshot", "screen", "breadth"]) {
+    assert.equal(DEFAULT_ALLOW.includes(`mcp__*__${gone}`), false, gone);
+  }
+  assert.equal(DEFAULT_ALLOW.some((n) => n.startsWith("mcp__")), false, "no MCP pattern is left in the default");
+});
+
+/* The Lunhui tools are registered tree-wide (spec §5.12); a bot sees one only
+ * if its allow list names it. Expanded against a tree that HAS them - the way
+ * plugins/bot.js masks - neither the default nor any bot shipped under bots/
+ * admits a `lunhui_` name. */
+test("no bot sees a lunhui_ tool: DEFAULT_ALLOW and every shipped bot's allow list admit none", async () => {
+  assert.deepEqual([...LUNHUI_TOOL_NAMES], [
+    "lunhui_read_run", "lunhui_freeze_quotes", "lunhui_freeze_limit_up", "lunhui_freeze_boards", "lunhui_freeze_index",
+    "lunhui_read_environment_context", "lunhui_submit_environment",
+    "lunhui_read_sentiment_context", "lunhui_submit_sentiment",
+    "lunhui_read_theme_context", "lunhui_submit_theme",
+    "lunhui_read_leader_context", "lunhui_submit_leader",
+    "lunhui_read_mode_context", "lunhui_submit_mode",
+    "lunhui_read_counterevidence_context", "lunhui_submit_counterevidence",
+    "lunhui_present",
+  ], "the eighteen tools the rows register, every one masked below");
+  const known = new Set([...DEFAULT_ALLOW, "subagent", "ralph", "mcp__akshare__stock_zh_a_hist", "mcp__account__portfolio_balances", ...LUNHUI_TOOL_NAMES]);
+  const isLunhui = (name: string) => name.startsWith("lunhui_");
+  assert.deepEqual(expandAllow([...DEFAULT_ALLOW], known).allow.filter(isLunhui), [], "DEFAULT_ALLOW");
+  const shipped = await listBots(BOTS_ROOT, noPresets);
+  assert.ok(shipped.some((bot) => bot.allow.length > 0), "the shipped bots were read");
+  for (const bot of shipped) {
+    assert.deepEqual(expandAllow(bot.allow, known).allow.filter(isLunhui), [], bot.id);
+    assert.deepEqual(bot.allow.filter(isLunhui), [], `${bot.id} names no lunhui_ tool`);
+  }
 });
 
 test("createBot copies the template, writes the three files, renders the composition, and refuses a second time", async () => {

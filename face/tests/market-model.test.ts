@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   LEGACY_STORAGE_KEY, STORAGE_KEY, filterWatchlist, normalizeAsset, number, percent, price, quoteTime,
   readWatchlist, saveWatchlist, signed, sortWatchlist,
-} from "../client/market-model.js";
+} from "../client/js/wire/market-model.js";
 
 const us = normalizeAsset({ market: "us", symbol: "BTC", name: "Bitcoin ETF", exchange: "NYSE" })!;
 const cn = normalizeAsset({ market: "cn", symbol: "000001", name: "平安银行", aliases: ["Ping An Bank"] })!;

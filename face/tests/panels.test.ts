@@ -8,7 +8,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import {
   agentsListing, authFromProbe, connectLocalAgent, defaultAgentProber, defaultAuthProber,
-  disconnectLocalAgent, hasExec, hostInfo, isAgentBin, memoryListing, panelDeps, parseClaudeRun, parseCodexRun, pluginListing,
+  disconnectLocalAgent, hasExec, hostInfo, isAgentBin, lunhuiMounted, memoryListing, panelDeps, parseClaudeRun, parseCodexRun, pluginListing,
   readAgentsMeta, registerPanelRoutes, scrubbedEnv, skillDetail, skillGroup,
   syncAgentTools, toolNameFor,
   type AgentToolDefinition, type AgentToolRegistry, type PanelDeps, type SkillBody, type SkillRow,
@@ -233,6 +233,7 @@ test("scrubbedEnv drops credential overrides, endpoint redirects and workbench s
       OPENAI_API_KEY: "o", CODEX_API_KEY: "c", OPENAI_BASE_URL: "ou",
       CLAUDE_CODE_USE_BEDROCK: "1", CLAUDE_CODE_USE_VERTEX: "1", CLAUDE_CODE_USE_FOUNDRY: "1",
       APCA_API_KEY_ID: "k", APCA_API_SECRET_KEY: "s", DEEPSEEK_API_KEY: "d",
+      IFIND_REFRESH_TOKEN: "x", IFIND_ACCESS_TOKEN: "y",
     }),
     { PATH: "/bin", HOME: "/h", CLAUDE_CODE_OAUTH_TOKEN: "keep", CLAUDE_CONFIG_DIR: "/c", CODEX_HOME: "/x" });
 });
@@ -333,6 +334,18 @@ test("skillDetail: body through, bad name 400, unknown 404", async () => {
   await assert.rejects(skillDetail(deps, "../evil"), (err: { status?: number }) => err.status === 400);
   await assert.rejects(skillDetail(deps, "Not-Kebab"), (err: { status?: number }) => err.status === 400);
   await assert.rejects(skillDetail(deps, "absent-skill"), (err: { status?: number }) => err.status === 404);
+});
+
+test("lunhuiMounted: the include:lunhui-runs row, enabled and active; disabled, failed, pending or absent is not mounted", () => {
+  const row = (extra: object) => ({ id: "include:lunhui-runs", options: { name: "file:///x/runs-row.mjs" }, ...extra });
+  assert.equal(lunhuiMounted([row({ fiber: { state: 2 } })]), true);
+  assert.equal(lunhuiMounted([row({ fiber: { state: 2 }, disabled: true })]), false);
+  assert.equal(lunhuiMounted([row({ fiber: { state: 3 } })]), false);
+  assert.equal(lunhuiMounted([row({ fiber: { state: 0 } })]), false);
+  assert.equal(lunhuiMounted([row({})]), false);
+  const other = { id: "include:lunhui-environment", options: {}, fiber: { state: 2 } };
+  assert.equal(lunhuiMounted([other]), false);
+  assert.equal(lunhuiMounted([]), false);
 });
 
 test("pluginListing: rows projected, groups and root dropped, MCP paired with its tools, agent tools listed", () => {

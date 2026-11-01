@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  accountMode, money, number, orderMatches, pct, sign, signedMoney, text, unrealizedTotal,
-} from "../client/account-model.js";
+  money, number, orderMatches, pct, sign, signedMoney, text, unrealizedTotal,
+} from "../client/js/wire/account-model.js";
 
 test("missing and malformed broker amounts never become zero or a balance", () => {
   for (const value of [undefined, null, "", " \n ", true, false, {}, [], [3], NaN, Infinity, -Infinity, "NaN", "Infinity", "n/a"]) {
@@ -43,18 +43,6 @@ test("percentage and color read the fraction's sign, while flat stays neutral", 
   assert.equal(text(0), "0");
   assert.equal(text(false), "false");
   for (const value of [null, undefined, "", "  "]) assert.equal(text(value), "—");
-});
-
-test("paper and live badges require their exact read host, independently of the mutation pin", () => {
-  assert.deepEqual(accountMode({ available: true, host: "paper-api.alpaca.markets" }), { label: "Paper · 模拟", tone: "paper" });
-  assert.deepEqual(accountMode({ host: "api.alpaca.markets" }), { label: "Live · 实盘", tone: "live" });
-  for (const host of ["paper-api.alpaca.markets.evil.test", "https://paper-api.alpaca.markets", "paper-api.alpaca.markets@api.alpaca.markets", "other.test"]) {
-    assert.deepEqual(accountMode({ host, orders_gate: { paper_pin: "paper-api.alpaca.markets" } }), { label: "自定义账户", tone: "neutral" });
-  }
-  for (const value of [{}, null, undefined, { host: " " }, { host: 42 }]) {
-    assert.deepEqual(accountMode(value), { label: "账户类型未知", tone: "neutral" });
-  }
-  assert.deepEqual(accountMode({ available: false, host: "paper-api.alpaca.markets" }), { label: "未连接", tone: "neutral" });
 });
 
 test("unrealized P&L is a net total only when every position reports its amount", () => {

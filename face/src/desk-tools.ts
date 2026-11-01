@@ -63,8 +63,7 @@ import { agentFileNameOf, DESK_PRESET, fenceNameOf, foldName, isDotName, type Ag
 import type { DeskStatus } from "./desk.ts";
 import { etClock, etDate } from "./et.ts";
 import { HttpError } from "./http.ts";
-import type { QuoteHub } from "./quotes.ts";
-import type { LiveQuote, QuoteIdentity, QuotePayload } from "./quote-types.ts";
+import type { UsLiveQuote as LiveQuote, UsQuoteIdentity as QuoteIdentity, UsQuotePayload as QuotePayload, UsQuoteSource } from "./us-quotes.ts";
 
 /** Diagnostic label, the same string every other `${BIN}:`-prefixed line in this program uses. */
 const BIN = "gravit-face";
@@ -93,7 +92,7 @@ export interface DeskToolDefinition {
 /** What the two tools close over: the quote hub's snapshot, the desk's status, read on every call, and
  * `now` (default `Date.now`), the clock a quote's time is dated against, for tests. */
 export interface DeskToolDeps {
-  hub: Pick<QuoteHub, "snapshot">;
+  hub: UsQuoteSource;
   readState: () => Promise<DeskStatus>;
   now?: () => number;
 }

@@ -1,4 +1,0 @@
-[submodule "demo"]
-	path = demo
-	url = https://github.com/linqizhe07/buyer-agent-demo
-	branch = main

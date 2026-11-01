@@ -27,7 +27,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -36,9 +35,13 @@ import { request } from "node:http";
 import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace } from "../src/boot.ts";
 import { registerStatic, type IndexAuth } from "../src/static.ts";
-import { registerDataRoutes } from "../src/data.ts";
 import { installDesk } from "../src/desk.ts";
+import { createSymbolSearch, registerSymbolSearchRoute } from "../src/symbol-search.ts";
+import { registerLunhuiViewRoute, type LunhuiViewService } from "../src/lunhui-view.ts";
+import { isTrustedDataRequest } from "../src/http.ts";
 import { hasApprovalGrant, type ApprovalEventLike } from "../src/orders.ts";
+import { LUNHUI_ROW_IDS, LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
+import { panelDeps, pluginListing } from "../src/panels.ts";
 import { remote, signIn } from "./remote.ts";
 
 const gated = process.env.FACE_SMOKE !== "1";
@@ -201,7 +204,7 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
   // This smoke owns a scratch profile and must not start the operator's data server.
-  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n`);
+  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n`);
   /* Booted the way main.ts boots: `deferReady`, so the browser streams open
    * only when `commitReady()` runs after the face's own routes (step 7 below
    * drills both sides of that commit). Every other smoke takes the default,
@@ -245,6 +248,23 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
     for (const withheld of ["web_fetch", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]) {
       assert.equal(toolNames.includes(withheld), false, `${withheld} must not be registered (policy D6/D7)`);
     }
+    /* The Lunhui rows (src/lunhui.ts), live: composed is not registered, so
+     * the running registry must carry all eighteen tools, and the listing
+     * `/data/plugins.json` serves (pluginListing over the booted tree, called
+     * directly: main.ts, not bootFace, mounts the panel routes) must show the
+     * twelve rows enabled and ACTIVE - the six module rows and the present
+     * row mount only once the backbone has provided `lunhuiRuns`. */
+    for (const name of LUNHUI_TOOL_NAMES) {
+      assert.ok(toolNames.includes(name), `${name} must be registered; saw ${toolNames.join(", ")}`);
+    }
+    const listedRows = pluginListing(panelDeps(ctx, process.cwd(), home)).rows;
+    for (const id of LUNHUI_ROW_IDS) {
+      // The listing carries the Loader's id, the row id under its include path.
+      const row = listedRows.find((r) => r.id.endsWith(`:${id}`));
+      assert.ok(row, `${id} must be listed; saw ${listedRows.map((r) => r.id).join(", ")}`);
+      assert.equal(row.phase, "active", id);
+      assert.equal(row.enabled, true, id);
+    }
     /* The services the overlay's Remote rows exist to provide, by the keys the
      * rest of the face reads them under: the room engine resumes cold sessions
      * through `sessionController`, Gate 2's answerer rides `typertGateway`, and
@@ -281,12 +301,12 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
     const index = await fetch(`${base}/`, { headers: { cookie }, redirect: "manual" });
     assert.equal(index.status, 200);
     assert.equal(index.headers.get("content-type"), "text/html; charset=utf-8");
-    assert.match(await index.text(), /GRAVIT/);
+    assert.match(await index.text(), /<title>Gravit<\/title>/, "the page at / is gravit-ui (spec 2026-10-19)");
 
     // the `prefix /client` route - registerStatic's other half, and the only
     // place it is exercised against a real webserver rather than a recorder.
     // Deliberately WITHOUT the cookie: assets stay public (PLAN D8).
-    const asset = await fetch(`${base}/client/chat.css`);
+    const asset = await fetch(`${base}/client/css/app.css`);
     assert.equal(asset.status, 200);
     assert.equal(asset.headers.get("content-type"), "text/css; charset=utf-8");
     await asset.body?.cancel();
@@ -387,45 +407,54 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
       tabB.close();
     }
 
-    // The other two pages registerStatic mounts. Static documents, so what is
-    // proven here is the MOUNT — an exact route answering with the right file —
-    // and not what they render, which is the client's own to test. No cookie:
-    // only `/` is behind the sign-in (D8).
+    // The old instrument pages are gone (stage 2): Markets and Account are
+    // screens of the client at `/`, and nothing answers at their old addresses.
     for (const path of ["/market", "/account"]) {
       const page = await fetch(`${base}${path}`);
-      assert.equal(page.status, 200, path);
-      assert.match(await page.text(), /GRAVIT/);
+      assert.equal(page.status, 404, path);
+      await page.body?.cancel();
     }
 
-    /* 8. The data plumbing, end to end through a STUB producer: route → cache →
-     * spawn → JSON on the wire, with everything but Python real. The producer
-     * itself is exercised by the python suite; running it here would make the
-     * smoke depend on a captured bed and pay a bed walk. `/data` is unchanged
-     * by 0.2.0: still fence-only, no cookie (PLAN D8).
+    /* 8. The face's own `/data` wire, end to end: the symbol search route →
+     * the search → JSON on the wire, with everything but the provider real (a
+     * fake fetch answers Tencent's shape). `/data` is unchanged by 0.2.0:
+     * still fence-only, no cookie (PLAN D8).
      *
-     * Registered HERE and nowhere else in this file: `registerDataRoutes`
-     * throws on a duplicate (kind, path), which is the guard, so the smoke
-     * must claim the two `/data` paths exactly once. */
-    const stub = join(home, "stub.sh");
-    writeFileSync(stub, `#!/bin/sh\necho '{"ok":true,"stub":true,"generated_at":"x"}'\n`, { mode: 0o755 });
-    registerDataRoutes(ctx.webServer, {
-      // The injected seam's real shape: `argv` arrives as [script, mode] with
-      // the script path fixed by the route, so only the mode word is passed
-      // on, and `timeoutMs` is honoured rather than dropped.
-      spawn: (argv, timeoutMs) => new Promise((resolve, reject) => {
-        execFile(stub, argv.slice(1), { timeout: timeoutMs }, (err, stdout) =>
-          err ? reject(err) : resolve({ stdout: String(stdout), code: 0 }));
-      }),
+     * Registered HERE and nowhere else in this file: the webserver throws on a
+     * duplicate (kind, path), which is the guard, so the smoke must claim the
+     * path exactly once. */
+    registerSymbolSearchRoute(ctx.webServer, createSymbolSearch({
+      fetch: async () => new Response('v_hint="sh~603986~\\u5146\\u6613\\u521b\\u65b0~zycx~GP-A";'),
+    }));
+    const searchRes = await fetch(`${base}/data/symbols/search?q=603986&market=cn`);
+    assert.equal(searchRes.status, 200);
+    assert.deepEqual(((await searchRes.json()) as { assets: { id: string }[] }).assets.map((asset) => asset.id), ["cn:603986"]);
+
+    /* The run view's route (src/lunhui-view.ts), wired as main.ts wires it:
+     * through `ctx.get("lunhuiRuns")`. A run that does not exist answers 404
+     * (NO_SUCH_RUN, or NOT_A_STRATEGY where the root has no cn-market), not
+     * 503 - the booted tree provides the service the route reaches. */
+    registerLunhuiViewRoute(ctx.webServer, {
+      isTrusted: isTrustedDataRequest,
+      runs: () => ctx.get("lunhuiRuns") as LunhuiViewService | undefined,
     });
-    const dataRes = await fetch(`${base}/data/market.json`);
-    assert.equal(dataRes.status, 200);
-    assert.equal(((await dataRes.json()) as { stub?: boolean }).stub, true);
+    const viewRes = await fetch(`${base}/data/lunhui/view?strategy=cn-market&run=20990101T000000Z-00000000`);
+    assert.equal(viewRes.status, 404);
+    assert.equal(((await viewRes.json()) as { ok: boolean }).ok, false);
+
+    // The face's own producers and `/data/bars` left with stage 3 of the
+    // graft: their old addresses answer the ordinary 404.
+    for (const path of ["/data/account.json", "/data/market.json", "/data/watchlist.json", "/data/bars?symbol=AAPL&days=30"]) {
+      const gone = await fetch(`${base}${path}`);
+      assert.equal(gone.status, 404, path);
+      await gone.body?.cancel();
+    }
 
     // And the SAME fence over `/data`. It is a second implementation
-    // (data.ts's own `isLoopbackHost`, not dsh-client-connection's) guarding a
-    // route that carries the operator's positions and orders, so it is drilled
-    // separately rather than assumed to ride along with the `/api` one above.
-    const forgedData = await sendWithHost(port, "/data/market.json", "evil.example.com");
+    // (http.ts's own `isLoopbackHost`, not dsh-client-connection's) guarding
+    // every `/data` route, so it is drilled separately rather than assumed to
+    // ride along with the `/api` one above.
+    const forgedData = await sendWithHost(port, "/data/symbols/search?q=603986&market=cn", "evil.example.com");
     assert.equal(forgedData, 403);
 
     /* 9. The desk (src/desk.ts) on the real webserver: `installDesk` mounts

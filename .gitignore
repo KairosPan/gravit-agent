@@ -6,53 +6,13 @@
 .claude/settings.local.json
 .mcp.json
 
-# Python
-__pycache__/
-*.pyc
-.venv/
-venv/
-*.egg-info/
-
-# Data / model artifacts (大文件与生成物,避免污染版本库)
-/data/
-# remounted PIT beds (2yr, broad) — large, regenerable, never commit
-/data/pit/
-*.parquet
-*.feather
-checkpoints/
-*.ckpt
-*.safetensors
+# SDD workspaces (ledgers, briefs, review packages — scratch, never committed)
 .superpowers/
 
-# run-store(compare 运行结果落盘,YOUZI_RUNS_DIR 默认目录)
-runs/
-
-# US rebuild
-__pycache__/
-*.pyc
-.venv/
-*.egg-info/
-.pytest_cache/
-/snap/
-/runs/
-*.parquet
-
-# Verdict run artifacts (PIT stores + rendered outputs — regenerable, keep local, never commit)
-/verdict_pit*/
-/verdict_*.json
-/verdict_universe.txt
-
-# Secrets / local credentials — NEVER commit (Alpaca + LLM keys)
+# Secrets / local credentials — NEVER commit (LLM keys and any provider's)
 .env
 .env.*
 *.env
-
-# Live brain + teaching sessions (regenerable local state)
-/state/
-
-# Hermes vendor-feasibility spike — gitignored clone
-spikes/2026-06-26-hermes-vendor-feasibility/_hermes/
-.pytest-cache/
 
 # scratch / run artifacts (CLAUDE.md §7)
 decisions/
@@ -122,3 +82,10 @@ deck.png
 !/desk/journal/.gitkeep
 /strategies/*/levels.yml
 /face/tests/tmp/
+
+# the Lunhui corpus and the runs' evidence files stay out of the public repository (spec 2026-10-25 A26, D11)
+/docs/research/lunhui/corpus/
+strategies/*/analysis/*/evidence-*.json
+# and a run write's crash leftovers: its staging files (residual R39)
+strategies/*/analysis/*/*.pending.json
+strategies/*/analysis/*/*.tmp

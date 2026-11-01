@@ -108,8 +108,10 @@ const SCRUBBED_ENV = [
   "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS", "OPENAI_BASE_URL",
   // cloud-provider billing switches
   "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
-  // the workbench's own secrets — no business in a coding agent's child
-  "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "DEEPSEEK_API_KEY",
+  // the workbench's own secrets — no business in a coding agent's child; the
+  // APCA_* pair outlives the removed Python layer because the operator's shell
+  // may still carry those Alpaca keys
+  "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "DEEPSEEK_API_KEY", "IFIND_REFRESH_TOKEN", "IFIND_ACCESS_TOKEN",
   // the desk's Telegram bot token: the face's own bridge (telegram.ts) is its one user
   "TELEGRAM_BOT_TOKEN",
 ] as const;
@@ -354,10 +356,9 @@ export async function runAgentRecipe(deps: PanelDeps, req: RunRequest): Promise<
     }
     const parsed = spec.parse(out.stdout, lastMessage);
     const isError = parsed.isError || out.code !== 0 || out.timedOut || out.truncated;
-    /* Unlike data.ts (whose producer runs WITH the APCA keys, so a traceback
-     * could echo them), this child's env is scrubbed, it is the operator's
-     * own CLI, and its diagnostics are what the caller needs to see — so the
-     * stderr TAIL is returned, error runs only. */
+    /* This child's env is scrubbed, it is the operator's own CLI, and its
+     * diagnostics are what the caller needs to see — so the stderr TAIL is
+     * returned, error runs only. */
     const stderr = out.stderr.trim();
     return {
       ...parsed, bin, cwd: workdir, isError,

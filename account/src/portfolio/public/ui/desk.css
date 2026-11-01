@@ -1,0 +1,146 @@
+/* THE DESK pane (ui/desk.js), in the Clean cards look: the hero (the name, LIVE and its clock, the objective, the equity with its curve,
+   the rail to the target), the open leads (ui/live.css cards), the trade tape (a bar a close), the big closes (five slots), the room (the
+   funnel, the lines with their role tags, the routines), the roster (a seat each, its charter under it), the brain; and the hiring form.
+   Colours only from ui/tokens.css; a role is named by its tag, its tint only repeats it. Motion: the curve draws in once (stroke-dashoffset),
+   a filled slot rises in, the rail's fill scales (transform); none of it under reduced motion. */
+.dk { min-width: 0; }
+.dk-grid { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+.dk-grid > .col-main { flex: 999 1 560px; }
+.dk-grid > .col-side { flex: 1 1 340px; max-width: 420px; }
+
+/* the hero */
+.dk-hero-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.dk-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.dk-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.dk-live { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 12px; }
+.dk-objective { font-size: 15px; line-height: 1.5; }
+.dk-eq { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.dk-eq-n { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.dk-eq-n .num { position: relative; z-index: 0; }
+.dk-eq-c { font-size: 14px; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.dk-eq-c.flat { color: var(--dim); }
+.dk-curve-box { flex: 1 1 260px; min-width: 0; max-width: 460px; }
+.dk-curve { height: 110px; }
+/* the curve draws itself in once, left to right */
+.dk-curve .line { stroke: var(--accent); stroke-dasharray: 2400; stroke-dashoffset: 2400; animation: dk-draw 900ms ease-out forwards; }
+.dk-curve .area { fill: color-mix(in srgb, var(--accent) 7%, transparent); }
+@keyframes dk-draw { to { stroke-dashoffset: 0; } }
+.dk-nocurve { margin: 0; }
+/* the rail to the target: a track with four marks; the fill is a layer scaled from the left (transform), tinted down below zero */
+.dk-target { display: flex; flex-direction: column; gap: 8px; }
+.dk-target-h { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.dk-rail { position: relative; height: 10px; border-radius: var(--radius-pill); background: var(--surface-2); margin-bottom: 18px; }
+.dk-rail-fill { position: absolute; inset: 0; border-radius: var(--radius-pill); background: linear-gradient(90deg, var(--warn), var(--accent)); transform-origin: left center; transform: scaleX(calc(var(--p, 0) / 100)); transition: transform 600ms cubic-bezier(.2, .8, .2, 1); }
+.dk-rail-fill.down { background: var(--down); }
+.dk-tick { position: absolute; top: -3px; width: 2px; height: 16px; background: var(--border); transform: translateX(-1px); }
+.dk-tick i { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); font-style: normal; font-size: 11px; font-weight: 600; color: var(--dim); font-variant-numeric: tabular-nums; }
+.dk-tick.on { background: var(--accent); }
+.dk-tick.on i { color: var(--text); }
+
+/* the open leads waiting on a card: a row each, the owner's two keys at its end */
+.dk-waiting { display: flex; flex-direction: column; gap: 8px; }
+.dk-wait { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--warn-edge); background: var(--warn-fill); border-radius: var(--radius-s); }
+.dk-wait > div:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dk-wait b { font-weight: 600; }
+
+/* the tape: a bar a close, up from the baseline or down from it */
+.dk-wl { display: flex; gap: 6px; }
+.dk-bars { width: 100%; height: 104px; display: block; }
+.dk-bars .base { stroke: var(--border); stroke-width: 1; }
+.dk-bars rect.up { fill: var(--up); }
+.dk-bars rect.down { fill: var(--down); }
+.dk-bars rect { transform-box: fill-box; transform-origin: center bottom; animation: dk-grow 300ms cubic-bezier(.2, .8, .2, 1) backwards; }
+.dk-bars rect.down { transform-origin: center top; }
+@keyframes dk-grow { from { transform: scaleY(0); } }
+.dk-tape-f { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+/* the big closes: five slots in a row (two rows on a narrow card); a filled one rises in */
+.dk-big-sum { font-size: 22px; }
+.dk-slots { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.dk-slot { border: 1px solid var(--card-border); border-radius: var(--radius-s); background: var(--bg); padding: 10px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 118px; text-align: center; }
+.dk-slot.filled { background: var(--surface); box-shadow: var(--shadow-card); animation: dk-rise 360ms cubic-bezier(.2, .8, .2, 1) backwards; }
+.dk-slot b { font-size: 14px; }
+.dk-slot-p { font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; }
+.dk-q { font-size: 22px; font-weight: 800; }
+@keyframes dk-rise { from { opacity: 0; transform: translateY(8px); } }
+@media (max-width: 1319px) { .dk-slots { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); } }
+
+/* the room */
+.dk-funnel { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--dim); }
+.dk-fn b { color: var(--text); font-variant-numeric: tabular-nums; }
+.dk-arrow { color: var(--border); }
+.dk-msgs { display: flex; flex-direction: column; gap: 2px; max-height: 480px; overflow-y: auto; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 6px 0; scroll-behavior: smooth; }
+.dk-msg { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 6px 4px; border-radius: var(--radius-s); font-size: 13px; line-height: 1.45; }
+.dk-msg:hover { background: var(--hover); }
+.dk-text { overflow-wrap: anywhere; white-space: pre-wrap; }
+.dk-text .mono { font-size: 12px; }
+.dk-at { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; padding-top: 2px; }
+.dk-k-cycle .dk-text { color: var(--dim); }
+.dk-k-halt .dk-text, .dk-k-refusal .dk-text { color: var(--down); font-weight: 600; }
+.dk-k-report .dk-text, .dk-k-review .dk-text { background: var(--surface-2); border-radius: var(--radius-s); padding: 8px 10px; }
+.dk-k-exit .dk-text, .dk-k-order .dk-text { font-weight: 600; }
+/* a role's tag: the name written, a tint of its own behind it (a tint never alone) */
+.dk-role { display: inline-block; font-family: var(--font-mono); font-size: 10px; font-weight: 500; letter-spacing: 0.02em; padding: 2px 6px; border-radius: 4px; background: var(--surface-2); color: var(--text); white-space: nowrap; line-height: 1.5; }
+.dk-head { background: var(--primary); color: var(--on-primary); }
+.dk-search { background: color-mix(in srgb, var(--alloc-equity) 18%, transparent); }
+.dk-risk { background: color-mix(in srgb, var(--alloc-rwa) 22%, transparent); }
+.dk-sniper { background: color-mix(in srgb, var(--alloc-event) 20%, transparent); }
+.dk-exit { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.dk-watch { background: color-mix(in srgb, var(--alloc-earn) 24%, transparent); }
+.dk-flow { background: color-mix(in srgb, var(--alloc-stable) 22%, transparent); }
+.dk-sentiment { background: color-mix(in srgb, var(--down) 16%, transparent); }
+.dk-you { background: var(--accent); color: var(--on-accent); }
+.dk-account { border: 1px dashed var(--border); background: transparent; }
+.dk-routines { display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: center; padding-top: 4px; }
+.dk-routines .link { font-size: 12px; }
+
+/* the roster: a seat a row, its charter folded under it */
+.dk-seats { display: flex; flex-direction: column; }
+.dk-seat { border-top: 1px solid var(--border); }
+.dk-seat:first-child { border-top: 0; }
+.dk-seat summary { display: flex; align-items: center; gap: 10px; padding: 10px 0; cursor: pointer; list-style: none; min-height: 44px; }
+.dk-seat summary::-webkit-details-marker { display: none; }
+.dk-seat-n { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.dk-seat-n b { font-weight: 600; font-size: 14px; }
+.dk-charter { display: flex; flex-direction: column; gap: 8px; padding: 0 0 12px 86px; font-size: 13px; }
+.dk-charter b { display: block; font-size: 12px; color: var(--dim); }
+.dk-charter p { margin: 0; line-height: 1.45; }
+.dk-charter .acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-top: 4px; }
+
+/* hiring: four steps in one card */
+.dk-hire-f { display: flex; flex-direction: column; gap: 16px; }
+.dk-step { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
+.dk-step textarea, .dk-step input:not([type=checkbox]), .dk-step select { font-family: var(--font-sans); font-size: 15px; font-weight: 500; min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--bg); color: var(--text); width: 100%; }
+.dk-step textarea { resize: vertical; line-height: 1.45; }
+.dk-step textarea:focus, .dk-step input:focus, .dk-step select:focus { border-color: var(--rule); outline: none; box-shadow: 0 0 0 1px var(--rule); }
+.dk-step label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--dim); min-width: 0; }
+.dk-roles, .dk-outside { display: flex; flex-direction: column; gap: 6px; }
+.dk-role-pick { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border: 1px solid var(--card-border); border-radius: var(--radius-s); background: var(--surface); font-size: 13px; font-weight: 500; color: var(--text); }
+.dk-role-pick input { margin-top: 3px; accent-color: var(--text); }
+.dk-role-pick .dk-role { margin-top: 2px; min-width: 64px; text-align: center; }
+.dk-role-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.dk-role-t b { font-weight: 600; }
+.dk-role-t .dim { line-height: 1.4; }
+.dk-ch summary { font-size: 12px; color: var(--dim); cursor: pointer; }
+.dk-ch div { font-size: 12px; color: var(--dim); margin-top: 4px; line-height: 1.4; }
+.dk-ch div b { color: var(--text); font-weight: 600; }
+.dk-hire-go { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 4px; }
+.dk-hire-go .msg { flex-basis: 100%; }
+.dk-own .acts { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.dk-knock { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--warn-edge); background: var(--warn-fill); border-radius: var(--radius-s); font-size: 13px; }
+
+@media (max-width: 900px) {
+  .dk-charter { padding-left: 0; }
+  .dk-msg { grid-template-columns: 64px minmax(0, 1fr); }
+  .dk-at { grid-column: 2; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dk-curve .line { animation: none; stroke-dashoffset: 0; }
+  .dk-rail-fill { transition: none; }
+  .dk-bars rect, .dk-slot.filled { animation: none; }
+  .dk-msgs { scroll-behavior: auto; }
+}
+
+/* the brain's price: in and out, side by side */
+.dk-price { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.dk-brain-of[hidden] { display: none; }

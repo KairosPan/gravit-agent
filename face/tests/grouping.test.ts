@@ -9,7 +9,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 // grouping.js is plain ESM JS (it ships to the browser); tsconfig `allowJs`
 // lets this test import it and read its JSDoc-declared types.
-import { ARCHIVED_KEY, BOT_KEY_PREFIX, bucketFor, DESK_KEY, isBotKey, UNGROUPED_KEY } from "../client/grouping.js";
+import { ARCHIVED_KEY, BOT_KEY_PREFIX, bucketFor, DESK_KEY, isBotKey, UNGROUPED_KEY } from "../client/js/wire/grouping.js";
 
 test("two channels renamed to the SAME title still get DIFFERENT bucket keys", () => {
   const a = bucketFor({ workspaceId: "ws-a", title: "sentiment" }, false, null);

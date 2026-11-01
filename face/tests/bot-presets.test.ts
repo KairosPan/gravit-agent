@@ -22,6 +22,7 @@ import { declareBots, definitionFor } from "../src/bot-presets.ts";
 import { BOT_PLUGIN_RELATIVE, DEFAULT_ALLOW, createBot, isBotId, renderComposition, updateSoul } from "../src/bots.ts";
 import { GRAVIT_PLUGIN_URL, ROLES_ROOT, gravitRows, readRoles } from "../src/roles.ts";
 import { CYCLE_PATH, readCycle } from "../src/cycle.ts";
+import { readProtocols } from "../src/protocols.ts";
 import { GRAVIT_PLUGIN_ABS, makeBotsRoot, PLUGIN_ABS, REPO } from "./bots-fixture.ts";
 
 const SKILLS_PLUGIN = "@deepseek-ai/dsh-skill-filesystem";
@@ -99,13 +100,14 @@ test("every shipped bot's plugin row lands on the real face/plugins/bot.js, and 
   const gravit = definitionFor(botsRoot, "gravit");
   const roles = readRoles(ROLES_ROOT);
   const cycle = readCycle(CYCLE_PATH);
+  const protocols = readProtocols();
   const gravitUrl = pathToFileURL(GRAVIT_PLUGIN_ABS).href;
-  assert.deepEqual(rowsOf(gravit).map((row) => row.id), ["gravit", "role-backtester", "role-reviewer", "role-screener"]);
-  assert.deepEqual(gravit.plugins[0], { id: "gravit", name: gravitUrl, config: { roles: roles.map((r) => ({ tool: r.tool, summary: r.description })), cycle } },
+  assert.deepEqual(roles.map((role) => role.id), ["cn-market-analyst", "cn-reviewer", "cn-stock-analyst"], "the repository ships three roles: the two analysts and the reviewer");
+  assert.deepEqual(rowsOf(gravit).map((row) => row.id), ["gravit", "role-cn-market-analyst", "role-cn-reviewer", "role-cn-stock-analyst"], "Gravit's preset has its three role rows");
+  assert.deepEqual(gravit.plugins[0], { id: "gravit", name: gravitUrl, config: { roles: roles.map((role) => ({ tool: role.tool, summary: role.description })), cycle, protocols } },
     "the mirror's relative plugin path rebases to the real face/plugins/gravit.js");
-  assert.ok(rowsOf(gravit).slice(1).every((row) => row.name === "@deepseek-ai/dsh-tool-subagent"), "every other row is a role's subagent tool");
-  assert.deepEqual(gravit.plugins, gravitRows(roles, { plugin: gravitUrl, cycle }),
-    "the shipped default composes the gravit plugin and the three role rows; none of them masks a host tool, so the host roster is kept");
+  assert.deepEqual(gravit.plugins, gravitRows(roles, { plugin: gravitUrl, cycle, protocols }),
+    "the shipped default composes the gravit plugin and the role rows; it masks no host tool, so the host roster is kept");
   assert.equal(typeof gravit.name, "string");
 });
 

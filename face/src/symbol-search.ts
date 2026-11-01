@@ -1,15 +1,16 @@
-/** On-demand instrument discovery. Only individual queries are cached, in
- * memory; this service never downloads or persists a market directory.
- * Provider suggestions identify instruments, and deliberately carry no quote.
+/** On-demand A-share discovery through Tencent's smartbox. Only individual
+ * queries are cached, in memory; this service never downloads or persists a
+ * market directory. Suggestions identify instruments, and deliberately carry no
+ * quote.
  */
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { ServerResponse } from "node:http";
 import type { RouteRegistrar } from "./static.ts";
-import { FORBIDDEN, HttpError } from "./http.ts";
+import { FORBIDDEN, HttpError, isTrustedDataRequest } from "./http.ts";
 
-export type SearchMarket = "all" | "us" | "cn" | "crypto";
+export type SearchMarket = "cn";
 export interface SearchAsset {
   id: string;
-  market: Exclude<SearchMarket, "all">;
+  market: SearchMarket;
   symbol: string;
   name: string;
   currency: string;
@@ -33,11 +34,13 @@ export const SEARCH_CACHE_LIMIT = 128;
 export const SEARCH_FLIGHT_LIMIT = 32;
 export const SEARCH_RESPONSE_LIMIT = 256 * 1024;
 const RESULT_LIMIT = 30;
-const YAHOO_LIMIT = 20;
 export type SearchFetch = (url: URL, options: RequestInit) => Promise<Response>;
+/** One search, as {@link createSymbolSearch} makes it: a bounded query and a market in, a result out. */
+export type SymbolSearch = (query: string, market: SearchMarket) => Promise<SearchResult>;
 
-/** Normalize only user input. Market selection controls provider filtering,
- * never a host or path. The bounded query is always URL-encoded upstream. */
+/** Normalize only user input. `market` may name `cn` or `all` — both the A
+ * shares, the one market searched — and nothing else; it never picks a host or
+ * path. The bounded query is always URL-encoded upstream. */
 export function parseSearchRequest(rawUrl: string): { query: string; market: SearchMarket } {
   if (rawUrl.length > 2048 || /%(?![a-f\d]{2})/i.test(rawUrl)) throw new HttpError(400, "invalid search query");
   const url = new URL(rawUrl, "http://localhost");
@@ -49,9 +52,15 @@ export function parseSearchRequest(rawUrl: string): { query: string; market: Sea
   const query = raw.trim().normalize("NFKC");
   if (!query || [...query].length > 80 || Buffer.byteLength(query) > 240) throw new HttpError(400, "invalid search query");
   const market = url.searchParams.get("market") ?? "all";
-  if (!["all", "us", "cn", "crypto"].includes(market)) throw new HttpError(400, "invalid market");
-  return { query, market: market as SearchMarket };
+  if (market !== "all" && market !== "cn") throw new HttpError(400, "invalid market");
+  return { query, market: "cn" };
 }
+
+/** The kinds Tencent files an A share under: `GP-A`, and `GP-A-KCB` on the STAR
+ * Market, its CDRs among them. An index (`ZS`), a fund (`ETF`, `LOF`, `KJ`) and
+ * a B share (`GP-B`) are none: their codes collide with an A share's
+ * (`sh000001`, the index, beside `sz000001`) or are no code the quote wire files. */
+const A_SHARE_KINDS = new Set(["GP-A", "GP-A-KCB"]);
 
 /** Tencent's smartbox returns a JavaScript string assignment, not executable
  * data. Parse the quoted string as JSON; never evaluate vendor JavaScript. */
@@ -66,7 +75,7 @@ export function parseTencentSearch(body: string): ProviderResult {
   for (const row of rows) {
     if (row.split("~").length < 5) throw new Error("invalid provider response");
     const [venue, symbol, name, alias, kind] = row.split("~");
-    if (!venue || !["sh", "sz", "bj"].includes(venue) || kind !== "GP-A"
+    if (!venue || !["sh", "sz", "bj"].includes(venue) || !A_SHARE_KINDS.has(kind ?? "")
       || !symbol || !/^\d{6}$/.test(symbol) || !name?.trim()) continue;
     const asset: SearchAsset = {
       id: `cn:${symbol}`, market: "cn", symbol, name: name.trim(), currency: "CNY",
@@ -75,36 +84,6 @@ export function parseTencentSearch(body: string): ProviderResult {
     assets.set(asset.id, asset);
   }
   return { assets: [...assets.values()], truncated: rows.length >= 10 };
-}
-
-const US_EXCHANGES = new Set(["NMS", "NGM", "NCM", "NYQ", "ASE", "PCX", "BTS", "PNK", "OQB", "OQX", "OEM"]);
-function record(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-/** Yahoo includes foreign listings, indices and non-USD crypto pairs in its
- * suggestions. Only supported US stocks/ETFs and USD crypto pairs become
- * watchlist assets, retaining the application's existing stable ids. */
-export function parseYahooSearch(body: string, market: "us" | "crypto" | "all"): ProviderResult {
-  const payload: unknown = JSON.parse(body);
-  if (!record(payload) || !Array.isArray(payload.quotes)) throw new Error("invalid provider response");
-  const assets = new Map<string, SearchAsset>();
-  for (const row of payload.quotes) {
-    if (!record(row) || typeof row.symbol !== "string") continue;
-    const name = typeof row.longname === "string" ? row.longname : row.shortname;
-    if (typeof name !== "string" || !name.trim()) continue;
-    if (market !== "us" && row.quoteType === "CRYPTOCURRENCY" && /^[A-Z0-9]{1,15}-USD$/.test(row.symbol)) {
-      const symbol = row.symbol.replace(/-USD$/, "/USD");
-      assets.set(`crypto:${symbol}`, { id: `crypto:${symbol}`, market: "crypto", symbol,
-        name: name.trim(), currency: "USD", exchange: "CRYPTO", aliases: [row.symbol, symbol.split("/")[0]!] });
-    } else if (market !== "crypto" && ["EQUITY", "ETF"].includes(String(row.quoteType))
-      && US_EXCHANGES.has(String(row.exchange)) && /^[A-Z][A-Z0-9.-]{0,14}$/.test(row.symbol)) {
-      const symbol = row.symbol;
-      assets.set(`us:${symbol}`, { id: `us:${symbol}`, market: "us", symbol,
-        name: name.trim(), currency: "USD", exchange: typeof row.exchDisp === "string" ? row.exchDisp : String(row.exchange), aliases: [] });
-    }
-  }
-  return { assets: [...assets.values()], truncated: payload.quotes.length >= YAHOO_LIMIT };
 }
 
 /** Read a bounded streaming body, including providers without Content-Length. */
@@ -135,29 +114,18 @@ async function readProvider(response: Response, encoding: string): Promise<strin
   return new TextDecoder(encoding).decode(Buffer.concat(chunks));
 }
 
-/** Test seams replace network/clock/deadline; production always uses these two
- * fixed HTTPS endpoints, without redirects or user-supplied credentials. */
-export function createSymbolSearch(options: { fetch?: SearchFetch; now?: () => number; timeoutMs?: number } = {}):
-  (query: string, market: SearchMarket) => Promise<SearchResult> {
+/** Test seams replace network/clock/deadline; production always uses this one
+ * fixed HTTPS endpoint, without redirects or user-supplied credentials. */
+export function createSymbolSearch(options: { fetch?: SearchFetch; now?: () => number; timeoutMs?: number } = {}): SymbolSearch {
   const fetcher = options.fetch ?? fetch;
   const now = options.now ?? Date.now;
   const cache = new Map<string, { at: number; result: SearchResult }>();
   const inflight = new Map<string, Promise<SearchResult>>();
 
-  async function upstream(id: string, query: string, market: SearchMarket): Promise<ProviderResult> {
-    const url = id === "tencent" ? new URL("https://smartbox.gtimg.cn/s3/")
-      : new URL("https://query1.finance.yahoo.com/v1/finance/search");
-    // Yahoo searches its dash spelling; the watchlist displays BTC/USD.
-    const providerQuery = id === "yahoo" && /^[A-Z0-9]{1,15}\/USD$/i.test(query)
-      ? query.toUpperCase().replace("/", "-") : query;
-    url.searchParams.set("q", providerQuery);
-    if (id === "tencent") url.searchParams.set("t", "all");
-    else {
-      url.searchParams.set("quotesCount", String(YAHOO_LIMIT));
-      url.searchParams.set("newsCount", "0");
-      url.searchParams.set("listsCount", "0");
-      url.searchParams.set("enableFuzzyQuery", "false");
-    }
+  async function upstream(query: string): Promise<ProviderResult> {
+    const url = new URL("https://smartbox.gtimg.cn/s3/");
+    url.searchParams.set("q", query);
+    url.searchParams.set("t", "all");
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<never>((_resolve, reject) => {
@@ -169,36 +137,21 @@ export function createSymbolSearch(options: { fetch?: SearchFetch; now?: () => n
     const request = async (): Promise<ProviderResult> => {
       const response = await fetcher(url, { signal: controller.signal, redirect: "error",
         headers: { accept: "application/json, text/plain, */*", "user-agent": "Mozilla/5.0 Gravit-Symbol-Search" } });
-      const body = await readProvider(response, id === "tencent" ? "gb18030" : "utf-8");
-      return id === "tencent" ? parseTencentSearch(body) : parseYahooSearch(body, market === "cn" ? "all" : market);
+      return parseTencentSearch(await readProvider(response, "gb18030"));
     };
     try { return await Promise.race([request(), deadline]); }
     finally { clearTimeout(timer); controller.abort(); }
   }
 
-  async function run(query: string, market: SearchMarket): Promise<SearchResult> {
-    const ids = market === "cn" ? ["tencent"] : market === "all" ? ["tencent", "yahoo"] : ["yahoo"];
-    const responses = await Promise.allSettled(ids.map((id) => upstream(id, query, market)));
-    const providers: ProviderStatus[] = [];
-    const assets = new Map<string, SearchAsset>();
-    let truncated = false;
-    responses.forEach((response, index) => {
-      const id = ids[index]!;
-      if (response.status === "rejected") {
-        providers.push({ id, status: "error", message: "搜索服务暂时不可用，请稍后重试。" });
-      } else {
-        providers.push({ id, status: "ok" });
-        truncated ||= response.value.truncated;
-        for (const asset of response.value.assets) assets.set(asset.id, asset);
-      }
-    });
-    const failed = providers.filter((provider) => provider.status === "error").length;
-    return { ok: failed < providers.length, assets: [...assets.values()].slice(0, RESULT_LIMIT), providers,
-      partial: failed > 0 && failed < providers.length, truncated: truncated || assets.size > RESULT_LIMIT,
-      ...(failed === providers.length ? { error: "搜索服务暂时不可用，请稍后重试。" } : {}),
-      note: failed === providers.length ? "搜索服务暂时不可用，请稍后重试。"
-        : failed > 0 ? "部分搜索服务暂时不可用，结果可能不完整，请稍后重试。"
-          : "在线搜索结果由数据服务提供；搜索结果不含实时行情。" };
+  async function run(query: string): Promise<SearchResult> {
+    let found: ProviderResult;
+    try { found = await upstream(query); } catch {
+      const message = "搜索服务暂时不可用，请稍后重试。";
+      return { ok: false, assets: [], providers: [{ id: "tencent", status: "error", message }], partial: false, truncated: false,
+        error: message, note: message };
+    }
+    return { ok: true, assets: found.assets.slice(0, RESULT_LIMIT), providers: [{ id: "tencent", status: "ok" }], partial: false,
+      truncated: found.truncated || found.assets.length > RESULT_LIMIT, note: "在线搜索结果由数据服务提供；搜索结果不含实时行情。" };
   }
 
   return async (query, market) => {
@@ -213,9 +166,9 @@ export function createSymbolSearch(options: { fetch?: SearchFetch; now?: () => n
     const pending = inflight.get(key);
     if (pending) return pending;
     if (inflight.size >= SEARCH_FLIGHT_LIMIT) throw new HttpError(429, "搜索请求过多，请稍后重试。");
-    const flight = run(query, market).then((result) => {
+    const flight = run(query).then((result) => {
       // Retry a failed provider on the next query instead of masking its outage.
-      if (result.ok && !result.partial) {
+      if (result.ok) {
         cache.set(key, { at: now(), result });
         if (cache.size > SEARCH_CACHE_LIMIT) cache.delete(cache.keys().next().value!);
       }
@@ -228,17 +181,19 @@ export function createSymbolSearch(options: { fetch?: SearchFetch; now?: () => n
   };
 }
 
-/** Mount behind the same browser trust predicate as the existing data routes.
- * The predicate is injected by data.ts to avoid a circular module dependency. */
-export function registerSymbolSearchRoutes(webServer: RouteRegistrar,
-  options: { isTrusted: (req: IncomingMessage) => boolean; fetch?: SearchFetch; now?: () => number }): void {
-  const search = createSymbolSearch(options);
+/** Mount `/data/symbols/search` behind the face's `/data` fence (http.ts's
+ * {@link isTrustedDataRequest}), answering from `search`.
+ * @param webServer - the host webserver service, or a test recorder.
+ * @param search - the search to answer from: {@link createSymbolSearch}'s, with its seams for tests.
+ * @returns the route's unwind: it unregisters the route when the registrar gave a disposer back.
+ */
+export function registerSymbolSearchRoute(webServer: RouteRegistrar, search: SymbolSearch): () => void {
   const send = (res: ServerResponse, status: number, body: string): void => {
     res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
     res.end(body);
   };
-  webServer.register({ kind: "exact", path: "/data/symbols/search", handler: async (req, res) => {
-    if (!options.isTrusted(req)) return send(res, 403, FORBIDDEN);
+  const unregister = webServer.register({ kind: "exact", path: "/data/symbols/search", handler: async (req, res) => {
+    if (!isTrustedDataRequest(req)) return send(res, 403, FORBIDDEN);
     if (req.method !== "GET") return send(res, 405, JSON.stringify({ ok: false, error: "method not allowed" }));
     try {
       const { query, market } = parseSearchRequest(req.url ?? "");
@@ -249,4 +204,5 @@ export function registerSymbolSearchRoutes(webServer: RouteRegistrar,
         JSON.stringify({ ok: false, error: error instanceof HttpError ? error.message : "搜索服务暂时不可用，请稍后重试。" }));
     }
   } });
+  return () => { if (typeof unregister === "function") unregister(); };
 }

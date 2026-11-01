@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "ready": false,
+  "path": "/var/folders/kq/w_lw73j15_372jzqj3kw5zf00000gn/T/ui-standin-NiyzKo/credentials/alpaca-paper/api-key.json",
+  "fields": [
+    "keyId",
+    "secret"
+  ],
+  "message": "there is no key file at credentials/alpaca-paper/api-key.json. Create it as /var/folders/kq/w_lw73j15_372jzqj3kw5zf00000gn/T/ui-standin-NiyzKo/credentials/alpaca-paper/api-key.json — {\"keyId\": \"…\", \"secret\": \"…\"} (the keys of your Alpaca PAPER account: in the dashboard switch to Paper, then Generate New Keys) — then: chmod 600 on the file"
+}

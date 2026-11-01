@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
-import { CYCLE_SECTION, DESK_SECTION, ROLES_SECTION, TODAY_SECTION, apply, canCall, inject, isRootOrFork, name, resolveZone, rolesText, todayText, validateGravitConfig } from "../plugins/gravit.js";
+import { CYCLE_SECTION, DESK_SECTION, LUNHUI_MODULE_SECTION, LUNHUI_RUN_SECTION, ROLES_SECTION, TODAY_SECTION, apply, canCall, inject, isRootOrFork, name, resolveZone, rolesText, todayText, validateGravitConfig } from "../plugins/gravit.js";
 
 const dshSectionOrder = (slot: "DEPLOYMENT_PERSONA_PREFIX" | "DEPLOYMENT_PERSONA_SUFFIX" | "TOOL_SUBAGENT"): number => SystemPrompt.prototype.getSectionOrder(slot);
 
@@ -43,9 +43,9 @@ test("validateGravitConfig: {} is valid; cycle and roles are checked when presen
   assert.match(validateGravitConfig(null) ?? "", /object/);
   assert.match(validateGravitConfig({ cycle: "" }) ?? "", /cycle/);
   assert.equal(validateGravitConfig({ cycle: "Open one goal per cycle." }), undefined);
-  assert.match(validateGravitConfig({ roles: [{ tool: "screener", summary: "x" }] }) ?? "", /role_/);
-  assert.match(validateGravitConfig({ roles: [{ tool: "role_screener", summary: "" }] }) ?? "", /summary/);
-  assert.equal(validateGravitConfig({ roles: [{ tool: "role_screener", summary: "runs the screen" }] }), undefined);
+  assert.match(validateGravitConfig({ roles: [{ tool: "probe", summary: "x" }] }) ?? "", /role_/);
+  assert.match(validateGravitConfig({ roles: [{ tool: "role_probe", summary: "" }] }) ?? "", /summary/);
+  assert.equal(validateGravitConfig({ roles: [{ tool: "role_probe", summary: "probes the fixture" }] }), undefined);
 });
 
 test("todayText renders the LOCAL date of the zone, ISO date then weekday", () => {
@@ -111,7 +111,7 @@ test("an unusable TZ is rendered in UTC and labelled, never thrown at assembly",
  * reads them as a root. */
 test("gravit: the roles section follows dsh's subagent section and lists exactly the roles the assembling scope can call", () => {
   const tree = fakeScope();
-  const roles = [{ tool: "role_screener", summary: "runs the screen" }, { tool: "role_reviewer", summary: "audits" }];
+  const roles = [{ tool: "role_probe", summary: "probes the fixture" }, { tool: "role_auditor", summary: "audits" }];
   apply(tree.ctx, { roles });
   const section = tree.sections.find((s) => s.name === ROLES_SECTION)!;
   assert.ok(section, "registered");
@@ -119,23 +119,23 @@ test("gravit: the roles section follows dsh's subagent section and lists exactly
   assert.equal(section.interpolate, false);
   assert.equal(tree.lookups.length, 0, "nothing is looked up at mount: the gate is read at every assembly");
   const textFor = (visible: string[]) => (section.text as (c: unknown) => string)({ scope: { visible } });
-  const all = textFor(["read", "role_screener", "role_reviewer"]);
+  const all = textFor(["read", "role_probe", "role_auditor"]);
   assert.equal(all, rolesText(roles), "every role tool visible: the whole list, as Gravit and a fork child read it");
   assert.match(all, /^Roles\. /);
-  assert.ok(all.includes("- role_screener — runs the screen") && all.includes("- role_reviewer — audits"));
+  assert.ok(all.includes("- role_probe — probes the fixture") && all.includes("- role_auditor — audits"));
   assert.equal(textFor(["read", "grep"]), "", "no role tool visible (a role child's allow list removed them): nothing");
-  assert.equal(textFor(["role_reviewer"]), rolesText([roles[1]]), "one of two visible: that one only");
-  assert.equal(textFor(["role_reviewer"]).includes("role_screener"), false);
+  assert.equal(textFor(["role_auditor"]), rolesText([roles[1]]), "one of two visible: that one only");
+  assert.equal(textFor(["role_auditor"]).includes("role_probe"), false);
 });
 
 test("canCall is the registry's view of the assembling scope: tools.get(name, context.scope)", () => {
   const tree = fakeScope();
-  const scope = { visible: ["role_screener"] };
-  assert.equal(canCall(tree.ctx, { scope }, "role_screener"), true);
-  assert.equal(canCall(tree.ctx, { scope }, "role_reviewer"), false);
-  assert.deepEqual(tree.lookups.map((l) => [l.name, l.scope === scope]), [["role_screener", true], ["role_reviewer", true]], "each lookup is handed the context's own scope");
-  assert.equal(canCall(tree.ctx, {}, "role_screener"), false, "no scope is the global view, where no preset-scoped tool lives");
-  assert.equal(canCall(tree.ctx, undefined, "role_screener"), false, "total on a missing context");
+  const scope = { visible: ["role_probe"] };
+  assert.equal(canCall(tree.ctx, { scope }, "role_probe"), true);
+  assert.equal(canCall(tree.ctx, { scope }, "role_auditor"), false);
+  assert.deepEqual(tree.lookups.map((l) => [l.name, l.scope === scope]), [["role_probe", true], ["role_auditor", true]], "each lookup is handed the context's own scope");
+  assert.equal(canCall(tree.ctx, {}, "role_probe"), false, "no scope is the global view, where no preset-scoped tool lives");
+  assert.equal(canCall(tree.ctx, undefined, "role_probe"), false, "total on a missing context");
 });
 
 test("gravit: without a roles key there is no roles section; an empty list renders nothing", () => {
@@ -176,10 +176,10 @@ test("gravit: the cycle section sits just before the persona suffix, is literal,
  * scope here resolves every tool, so only the header can blank a section. */
 test("gravit: both sections are blank for a delegated child that is not a fork, and Gravit's text for a fork child and a root session", () => {
   const tree = fakeScope();
-  const roles = [{ tool: "role_screener", summary: "runs the screen" }, { tool: "role_reviewer", summary: "audits" }];
+  const roles = [{ tool: "role_probe", summary: "probes the fixture" }, { tool: "role_auditor", summary: "audits" }];
   const cycle = "# The research cycle\n\nStep 0 — ask once.";
   apply(tree.ctx, { roles, cycle });
-  const everything = { visible: ["read", "create_goal", "update_goal", "role_screener", "role_reviewer"] };
+  const everything = { visible: ["read", "create_goal", "update_goal", "role_probe", "role_auditor"] };
   const textOf = (sectionName: string, header?: object): string =>
     (tree.sections.find((s) => s.name === sectionName)!.text as (c: unknown) => string)(
       header === undefined ? { scope: everything } : { scope: everything, agent: { session: { header } } });
@@ -249,5 +249,71 @@ test("the desk section registers only with a desk key, after the persona, and is
     const other = fakeScope();
     apply(other.ctx, config);
     assert.equal(other.sections.some((s) => s.name === DESK_SECTION), false, `no desk key, no desk section: ${JSON.stringify(config)}`);
+  }
+});
+
+const PROTOCOL = { name: "lunhui:run", probe: "lunhui_read_run", text: "# 市场研究运行\n\n先冻结 {run}。" };
+const MODULE_PROTOCOL = { name: "lunhui:module", probe: "lunhui_read_run", text: "# 单模块" };
+
+test("validateGravitConfig: protocols are checked when present - an array of { name, probe, text }, names unique", () => {
+  assert.equal(LUNHUI_RUN_SECTION, "lunhui:run");
+  assert.equal(LUNHUI_MODULE_SECTION, "lunhui:module");
+  assert.equal(validateGravitConfig({ protocols: [] }), undefined);
+  assert.equal(validateGravitConfig({ protocols: [PROTOCOL] }), undefined);
+  assert.match(validateGravitConfig({ protocols: PROTOCOL }) ?? "", /protocols must be an array/);
+  assert.match(validateGravitConfig({ protocols: [null] }) ?? "", /protocols\[0\] must be an object/);
+  assert.match(validateGravitConfig({ protocols: [{ ...PROTOCOL, name: "lunhui-run" }] }) ?? "", /protocols\[0\]\.name/);
+  assert.match(validateGravitConfig({ protocols: [{ ...PROTOCOL, name: "Lunhui:run" }] }) ?? "", /protocols\[0\]\.name/);
+  assert.match(validateGravitConfig({ protocols: [{ ...PROTOCOL, probe: "" }] }) ?? "", /protocols\[0\]\.probe/);
+  assert.match(validateGravitConfig({ protocols: [{ ...PROTOCOL, probe: "lunhui read run" }] }) ?? "", /protocols\[0\]\.probe/);
+  assert.match(validateGravitConfig({ protocols: [{ ...PROTOCOL, text: " " }] }) ?? "", /protocols\[0\]\.text/);
+  assert.match(validateGravitConfig({ protocols: [PROTOCOL, PROTOCOL] }) ?? "", /protocols\[1\]\.name .*twice/);
+  for (const own of [TODAY_SECTION, ROLES_SECTION, CYCLE_SECTION, DESK_SECTION]) {
+    assert.match(validateGravitConfig({ protocols: [{ ...PROTOCOL, name: own }] }) ?? "", /protocols\[0\]\.name .*this plugin's own sections/, `${own} is reserved`);
+  }
+  assert.throws(() => apply(fakeScope().ctx, { protocols: [{ ...PROTOCOL, text: "" }] }), /gravit: .*protocols/);
+});
+
+/* A protocol is gated as the cycle is - on the header and on what the assembling scope can call -
+ * with its own probe: `lunhui:run` reads `lunhui_read_run`, so it is there only when the Lunhui rows
+ * mounted. The first sits ten below the cycle and each later one a step after, so the run protocol and
+ * then the module protocol read just before the cycle contract. A
+ * role child fails both halves (its allow list carries no lunhui_read_run, and it is no fork); a
+ * plain spawn child sees the probe (the Lunhui tools are tree-wide) and only the header blanks it. */
+test("gravit: a protocol section sits just before the cycle, is literal, and reads only for a root or fork that can call its probe", () => {
+  const tree = fakeScope();
+  apply(tree.ctx, { cycle: "# The research cycle", protocols: [PROTOCOL, MODULE_PROTOCOL] });
+  const section = tree.sections.find((s) => s.name === LUNHUI_RUN_SECTION)!;
+  const module = tree.sections.find((s) => s.name === LUNHUI_MODULE_SECTION)!;
+  assert.ok(section, "registered under the protocol's own name");
+  assert.ok(module, "the second protocol registered under its own name");
+  const cycleOrder = tree.sections.find((s) => s.name === CYCLE_SECTION)!.order;
+  assert.equal(section.order, dshSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 60);
+  assert.equal(module.order, section.order + 1, "the second protocol one order step after the first, in their listed order");
+  assert.ok(section.order < cycleOrder && module.order < cycleOrder, "both before the cycle contract");
+  assert.equal(tree.lookups.length, 0, "nothing is looked up at mount: the gate is read at every assembly");
+  for (const [registered, protocol] of [[section, PROTOCOL], [module, MODULE_PROTOCOL]] as const) {
+    assert.equal(registered.interpolate, false);
+    const textFor = (visible: string[], header?: object) =>
+      (registered.text as (c: unknown) => string)(header === undefined ? { scope: { visible } } : { scope: { visible }, agent: { session: { header } } });
+    const withProbe = ["read", "create_goal", "lunhui_read_run", "lunhui_freeze_index"];
+    assert.equal(textFor(withProbe, { id: "root", isSeeded: false }), protocol.text, `${protocol.name}: a root session that can call the probe: the text, verbatim`);
+    assert.equal(textFor(withProbe, { id: "fork", origin: "subagent", isSeeded: true }), protocol.text, `${protocol.name}: a fork child: the same text`);
+    assert.equal(textFor(withProbe, { id: "spawn", origin: "subagent", isSeeded: false }), "", `${protocol.name}: a spawn child that can call the probe: nothing`);
+    assert.equal(textFor(["skill", "lunhui_read_environment_context", "lunhui_submit_environment"], { id: "role", origin: "subagent", isSeeded: false }), "", `${protocol.name}: a role child: nothing`);
+    assert.equal(textFor(["read", "create_goal"], { id: "root", isSeeded: false }), "", `${protocol.name}: the probe hidden (the Lunhui rows did not mount): nothing, even for a root`);
+  }
+  assert.deepEqual([...new Set(tree.lookups.map((l) => l.name))], ["lunhui_read_run"], "the probe is the protocols' own");
+  tree.unload();
+  assert.equal(tree.sections.length, 0, "unloading the preset revision takes the protocols out with the rest");
+});
+
+test("gravit: without a protocols key, or with an empty list, no protocol section is registered", () => {
+  for (const config of [{}, { protocols: [] }]) {
+    const tree = fakeScope();
+    apply(tree.ctx, config);
+    assert.equal(tree.sections.some((s) => s.name === LUNHUI_RUN_SECTION), false);
+    assert.equal(tree.sections.some((s) => s.name === LUNHUI_MODULE_SECTION), false);
+    tree.unload();
   }
 });

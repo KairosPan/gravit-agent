@@ -9,14 +9,14 @@ import { contentTypeFor, registerStatic, resolveClientPath, type IndexAuth } fro
 
 test("content types", () => {
   assert.equal(contentTypeFor("index.html"), "text/html; charset=utf-8");
-  assert.equal(contentTypeFor("chat.css"), "text/css; charset=utf-8");
+  assert.equal(contentTypeFor("app.css"), "text/css; charset=utf-8");
   assert.equal(contentTypeFor("api.js"), "text/javascript; charset=utf-8");
   assert.equal(contentTypeFor("x.unknown"), "application/octet-stream");
 });
 
 test("resolveClientPath refuses traversal out of the client dir", () => {
   assert.equal(resolveClientPath("/client/../../etc/passwd", "/srv/client"), null);
-  assert.equal(resolveClientPath("/client/chat.css", "/srv/client"), "/srv/client/chat.css");
+  assert.equal(resolveClientPath("/client/css/app.css", "/srv/client"), "/srv/client/css/app.css");
 });
 
 /* `req.url` is a request-target, not a path. Without the cut, a cache-busted
@@ -25,8 +25,8 @@ test("resolveClientPath refuses traversal out of the client dir", () => {
  * prefix case is the containment check earning its `+ sep`: `/srv/client-old`
  * starts with the string `/srv/client`, but is not inside it. */
 test("resolveClientPath cuts the query/fragment and holds the directory boundary", () => {
-  assert.equal(resolveClientPath("/client/chat.css?v=2", "/srv/client"), "/srv/client/chat.css");
-  assert.equal(resolveClientPath("/client/chat.css#top", "/srv/client"), "/srv/client/chat.css");
+  assert.equal(resolveClientPath("/client/css/app.css?v=2", "/srv/client"), "/srv/client/css/app.css");
+  assert.equal(resolveClientPath("/client/css/app.css#top", "/srv/client"), "/srv/client/css/app.css");
   assert.equal(resolveClientPath("/client/../client-old/secret", "/srv/client"), null);
   // A nested path is fine; only escaping the root is not.
   assert.equal(resolveClientPath("/client/a/b.js", "/srv/client"), "/srv/client/a/b.js");
@@ -63,16 +63,14 @@ function recorder(): { rec: Recorded; res: ServerResponse } {
  * that carries a valid cookie. */
 const ALWAYS_SIGNED_IN: IndexAuth = { authorizeIndex: () => true };
 
-/** A client dir with the three pages and one asset, plus a secret OUTSIDE it. */
+/** A client dir with the page and one asset, plus a secret OUTSIDE it. */
 function fixture(auth: IndexAuth = ALWAYS_SIGNED_IN): { clientDir: string; routes: WebRoute[] } {
   const root = mkdtempSync(join(tmpdir(), "face-client-"));
   const clientDir = join(root, "client");
   writeFileSync(join(root, "secret.txt"), "do not serve me");
   mkdirSync(clientDir);
   writeFileSync(join(clientDir, "index.html"), "<p>page</p>");
-  writeFileSync(join(clientDir, "market.html"), "<p>market</p>");
-  writeFileSync(join(clientDir, "account.html"), "<p>account</p>");
-  writeFileSync(join(clientDir, "chat.css"), "body{}");
+  writeFileSync(join(clientDir, "app.css"), "body{}");
   const routes: WebRoute[] = [];
   registerStatic({ register: (route) => routes.push(route) }, clientDir, auth);
   return { clientDir, routes };
@@ -87,8 +85,8 @@ async function call(routes: WebRoute[], kind: WebRoute["kind"], path: string, ur
   return rec;
 }
 
-/* The route SHAPE is the contract with the host webserver: three named pages
- * and `prefix /client` for everything else the face owns. Asserting it here is
+/* The route SHAPE is the contract with the host webserver: one page, `/`, and
+ * `prefix /client` for everything else the face owns. Asserting it here is
  * what catches a mount that registered, say, `prefix /` - which would
  * typecheck, boot, serve index.html for every asset request, and look fine
  * until the browser tried to parse HTML as CSS. */
@@ -96,7 +94,7 @@ test("registerStatic mounts exactly the routes it claims", () => {
   const { routes } = fixture();
   assert.deepEqual(
     routes.map((r) => `${r.kind} ${r.path}`).sort(),
-    ["exact /", "exact /account", "exact /market", "prefix /client"],
+    ["exact /", "prefix /client"],
   );
 });
 
@@ -108,23 +106,18 @@ test("the / route serves index.html as html", async () => {
   assert.equal(String(rec.body), "<p>page</p>");
 });
 
-/* Each instrument route must serve its OWN page. A copy-paste that pointed
- * both at one file would satisfy a route-shape assertion and still show the
- * operator the market when they asked for the account. */
-test("the instrument routes serve their own page file", async () => {
+/* Markets and Account are screens of the client at `/` (#/markets, #/account)
+ * since stage 2: the old instrument pages are gone, and no route answers for
+ * them - the host webserver 404s an address nobody registered. */
+test("/market and /account reach no route", () => {
   const { routes } = fixture();
-  for (const [path, body] of [["/market", "<p>market</p>"], ["/account", "<p>account</p>"]] as const) {
-    const rec = await call(routes, "exact", path, path);
-    assert.equal(rec.status, 200);
-    assert.equal(rec.headers["content-type"], "text/html; charset=utf-8");
-    assert.equal(String(rec.body), body);
-  }
+  for (const path of ["/market", "/account"]) assert.equal(routes.find((r) => r.path === path), undefined, path);
 });
 
 test("the /client route serves assets, 404s misses, and 403s traversal", async () => {
   const { routes } = fixture();
 
-  const css = await call(routes, "prefix", "/client", "/client/chat.css");
+  const css = await call(routes, "prefix", "/client", "/client/app.css");
   assert.equal(css.status, 200);
   assert.equal(css.headers["content-type"], "text/css; charset=utf-8");
   assert.equal(String(css.body), "body{}");
@@ -185,17 +178,13 @@ test("/ writes nothing of its own when the gate answers the token exchange", asy
   assert.equal(rec.body, undefined);
 });
 
-/* D8: only `/` is gated, because only `/` can mint the cookie. The instrument
- * pages and the assets stay open, as every non-`/api` route was at 0.1.1 and
- * as upstream's own dist server keeps non-index assets. A gate that throws
- * proves none of them even asks. */
-test("the instrument pages and /client assets never consult the index gate", async () => {
+/* D8: only `/` is gated, because only `/` can mint the cookie. The assets stay
+ * open, as every non-`/api` route was at 0.1.1 and as upstream's own dist
+ * server keeps non-index assets. A gate that throws proves they never ask. */
+test("/client assets never consult the index gate", async () => {
   const tripwire: IndexAuth = {
     authorizeIndex() { throw new Error("only / may consult the index gate"); },
   };
   const { routes } = fixture(tripwire);
-  for (const path of ["/market", "/account"]) {
-    assert.equal((await call(routes, "exact", path, path)).status, 200, path);
-  }
-  assert.equal((await call(routes, "prefix", "/client", "/client/chat.css")).status, 200);
+  assert.equal((await call(routes, "prefix", "/client", "/client/app.css")).status, 200);
 });

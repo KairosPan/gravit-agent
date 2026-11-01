@@ -3,120 +3,29 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
-import { createQuoteHub, parseQuoteRequest, registerQuoteRoutes, QUOTE_CLIENT_LIMIT } from "../src/quotes.ts";
-import { isTrustedDataRequest } from "../src/data.ts";
-import type { ProviderState, QuoteIdentity, QuotePayload, QuoteUpdate, SnapshotResult, StreamCallbacks } from "../src/quote-types.ts";
+import { createQuoteHub, parseInstrumentId, parseQuoteRequest, registerQuoteRoutes, QUOTE_CLIENT_LIMIT, type QuoteHub } from "../src/quotes.ts";
+import { isTrustedDataRequest } from "../src/http.ts";
+import type { ProviderState, QuoteIdentity, QuotePayload, QuoteUpdate, SnapshotResult } from "../src/quote-types.ts";
 
-const US: QuoteIdentity = { id: "us:AAPL", market: "us", symbol: "AAPL" };
-const BTC: QuoteIdentity = { id: "crypto:BTC/USD", market: "crypto", symbol: "BTC/USD" };
 const CN: QuoteIdentity = { id: "cn:603986", market: "cn", symbol: "603986" };
-const DAY = Date.parse("2026-09-15T15:00:00Z");
-const usState: ProviderState = { id: "alpaca", market: "us", status: "connected", source: "Alpaca", feed: "iex", transport: "poll", message: "IEX 单交易所行情" };
-const update = (extra: Partial<QuoteUpdate> = {}): QuoteUpdate => ({ id: US.id, source: "Alpaca", feed: "iex", basis: "previous_close",
-  price: 100, prev_close: 80, volume: 1000, as_of: new Date(DAY).toISOString(), volume_as_of: "2026-09-15T04:00:00Z", market_status: "open", ...extra });
+const CN2: QuoteIdentity = { id: "cn:600519", market: "cn", symbol: "600519" };
+const DAY = Date.parse("2026-09-15T05:00:00Z");
+const cnState: ProviderState = { id: "tencent", market: "cn", status: "connected", source: "腾讯", feed: "snapshot", transport: "poll", message: "腾讯行情" };
+const update = (extra: Partial<QuoteUpdate> = {}): QuoteUpdate => ({ id: CN.id, source: "腾讯", feed: "snapshot", basis: "previous_close",
+  price: 100, prev_close: 80, volume: 1000, as_of: new Date(DAY).toISOString(), volume_as_of: "2026-09-15T01:30:00Z", market_status: "unknown", ...extra });
 const empty = (): SnapshotResult => ({ updates: [], providers: [] });
 
-test("quote requests accept only bounded canonical watchlist identities", () => {
-  assert.deepEqual(parseQuoteRequest("/data/quotes?ids=us:AAPL,cn:603986,crypto:BTC%2FUSD,us:AAPL"), [US, CN, BTC]);
+test("quote requests accept only bounded canonical cn identities", () => {
+  assert.deepEqual(parseQuoteRequest("/data/quotes?ids=cn:603986,cn:600519,cn:603986"), [CN, CN2]);
   assert.deepEqual(parseQuoteRequest("/data/quotes?ids="), []);
-  for (const suffix of ["", "?ids=us:AAPL&ids=us:MSFT", "?ids=https://evil.example", "?ids=cn:603986:extra", "?ids=cn:123", "?ids=us:aapl", "?ids=us:AA%00", "?ids=%ZZ", "?ids=" + Array(101).fill("us:AAPL").join(",")]) {
+  for (const suffix of ["", "?ids=cn:603986&ids=cn:600519", "?ids=https://evil.example", "?ids=cn:603986:extra", "?ids=cn:123", "?ids=us:aapl", "?ids=us:*", "?ids=crypto:BTC", "?ids=cn:60398%00", "?ids=%ZZ", "?ids=" + Array(101).fill("cn:603986").join(",")]) {
     assert.throws(() => parseQuoteRequest(`/data/quotes${suffix}`), suffix);
   }
 });
 
-test("hub shares overlapping browser subscriptions and removes unused upstream identities", async () => {
-  const subscriptions: string[][] = [];
-  const requests: string[][] = [];
-  const hub = createQuoteHub({ now: () => DAY, snapshots: { async load(assets) { requests.push(assets.map((a) => a.id)); return empty(); } },
-    streams: () => ({ setAssets: (assets) => subscriptions.push(assets.map((a) => a.id)), close() {} }) });
-  try {
-    const received: QuotePayload[] = [];
-    const a = hub.subscribe([US, BTC], (payload) => received.push(payload));
-    const b = hub.subscribe([US, CN], () => {});
-    await hub.snapshot([US, CN, BTC]);
-    assert.deepEqual(subscriptions.at(-1), [US.id, BTC.id, CN.id]);
-    assert.deepEqual(received[0]!.quotes.map((quote) => quote.id), [US.id, BTC.id]);
-    assert.deepEqual(requests.flat().sort(), [US.id, BTC.id, CN.id].sort());
-    a(); assert.deepEqual(subscriptions.at(-1), [US.id, CN.id]);
-    b(); assert.deepEqual(subscriptions.at(-1), []);
-    await hub.snapshot([]);
-    assert.equal(requests.flat().length, 3);
-  } finally { hub.close(); }
-});
-
-test("unconfigured markets carry messages and null values, while other markets keep real quotes", async () => {
-  const hub = createQuoteHub({ now: () => DAY, snapshots: { async load() { return { updates: [update(),
-    { id: CN.id, source: "iFinD", feed: "realtime", basis: "previous_close", message: "A 股行情待配置 iFinD" }], providers: [usState,
-    { id: "ifind", market: "cn", status: "unconfigured", source: "iFinD", feed: "realtime", transport: "poll", message: "A 股行情待配置 iFinD" }] }; } },
-    streams: () => ({ setAssets() {}, close() {} }) });
-  try {
-    const result = await hub.snapshot([US, CN]);
-    assert.equal(result.quotes[0]!.change, 20);
-    assert.equal(result.quotes[0]!.change_pct, 25);
-    assert.equal(result.quotes[0]!.quote_status, "live");
-    assert.equal(result.quotes[1]!.price, null);
-    assert.equal(result.quotes[1]!.change_pct, null);
-    assert.equal(result.quotes[1]!.quote_status, "unavailable");
-    assert.match(result.quotes[1]!.message, /iFinD/);
-  } finally { hub.close(); }
-});
-
-test("late REST results cannot overwrite a newer stream trade or same-day cumulative volume", async () => {
-  let callbacks!: StreamCallbacks;
-  let release!: (result: SnapshotResult) => void;
-  const gate = new Promise<SnapshotResult>((resolve) => { release = resolve; });
-  const hub = createQuoteHub({ now: () => DAY, snapshots: { load: () => gate }, streams: (handlers) => {
-    callbacks = handlers; return { setAssets() {}, close() {} };
-  } });
-  try {
-    const pending = hub.snapshot([US]);
-    callbacks.onStatus({ ...usState, transport: "stream" });
-    callbacks.onQuote(update({ price: 105, volume: 2000, as_of: "2026-09-15T15:00:00.123456789Z" }));
-    release({ updates: [update({ price: 101, volume: 1500, as_of: "2026-09-15T15:00:00.123123123Z" })], providers: [usState] });
-    const quote = (await pending).quotes[0]!;
-    assert.equal(quote.price, 105);
-    assert.equal(quote.volume, 2000);
-    assert.equal(quote.as_of, "2026-09-15T15:00:00.123456789Z");
-    callbacks.onQuote(update({ price: 106, volume: 2200, as_of: "2026-09-15T15:00:01Z" }));
-    assert.equal((await hub.snapshot([US])).quotes[0]!.price, 106);
-  } finally { hub.close(); }
-});
-
-test("a failed refresh keeps the last price and flags it stale; delayed SIP and old trades stay explicit", async () => {
-  let clock = DAY;
-  let failing = false;
-  const hub = createQuoteHub({ now: () => clock, snapshots: { async load() {
-    return failing ? { updates: [], providers: [{ ...usState, status: "error", message: "连接失败" }] }
-      : { updates: [update()], providers: [usState] };
-  } }, streams: () => ({ setAssets() {}, close() {} }) });
-  try {
-    await hub.snapshot([US]); failing = true; clock += 6000;
-    const result = await hub.snapshot([US]);
-    assert.equal(result.quotes[0]!.price, 100);
-    assert.equal(result.quotes[0]!.quote_status, "stale");
-    assert.equal(result.quotes[0]!.as_of, new Date(DAY).toISOString());
-  } finally { hub.close(); }
-  const delayed = createQuoteHub({ now: () => DAY, snapshots: { async load() { return {
-    updates: [update({ feed: "delayed_sip", as_of: new Date(DAY - 15 * 60_000).toISOString() })],
-    providers: [{ ...usState, feed: "delayed_sip" }],
-  }; } }, streams: () => ({ setAssets() {}, close() {} }) });
-  try { assert.equal((await delayed.snapshot([US])).quotes[0]!.quote_status, "delayed"); }
-  finally { delayed.close(); }
-});
-
-test("snapshot cache coalesces concurrent reads and connection limits do not start extra streams", async () => {
-  let calls = 0;
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  const hub = createQuoteHub({ now: () => DAY, snapshots: { async load() { calls++; await gate; return empty(); } },
-    streams: () => ({ setAssets() {}, close() {} }) });
-  try {
-    const first = hub.snapshot([US]), second = hub.snapshot([US]);
-    release(); await Promise.all([first, second]); assert.equal(calls, 1);
-    const stops = Array.from({ length: QUOTE_CLIENT_LIMIT }, () => hub.subscribe([US], () => {}));
-    assert.throws(() => hub.subscribe([US], () => {}), /连接过多/);
-    stops.forEach((stop) => stop());
-  } finally { hub.close(); }
+test("parseInstrumentId accepts the cn grammar alone", () => {
+  assert.deepEqual(parseInstrumentId(" cn:603986 "), CN);
+  for (const bad of ["us:AAPL", "crypto:BTC/USD", "cn:12345", "cn:60398A", "cn:603986:X", "603986", "cn:", ""]) assert.equal(parseInstrumentId(bad), null, bad);
 });
 
 class ResponseMock extends EventEmitter {
@@ -131,23 +40,133 @@ class ResponseMock extends EventEmitter {
   end(chunk?: string) { if (chunk) this.chunks.push(chunk); if (!this.destroyed) { this.destroyed = true; this.emit("close"); } }
   destroy() { this.hardClosed = true; this.end(); return this; }
 }
-test("quote routes fence requests before reads, emit named SSE updates/heartbeats, and release on close", async (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
+function routesOf(hub: QuoteHub) {
   const routes: WebRoute[] = [];
-  let calls = 0, stops = 0;
-  const example: QuotePayload = { ok: true, generated_at: new Date(DAY).toISOString(), quotes: [], providers: [] };
-  const dispose = registerQuoteRoutes({ register: (route) => routes.push(route) }, { isTrusted: isTrustedDataRequest,
-    hub: { async snapshot() { calls++; return example; }, subscribe(_assets, listener) { calls++; listener(example); return () => { stops++; }; }, close() {} } });
+  const dispose = registerQuoteRoutes({ register: (route) => routes.push(route) }, { isTrusted: isTrustedDataRequest, hub });
   const invoke = async (stream: boolean, url: string, method = "GET", host = "localhost:3090") => {
     const res = new ResponseMock();
     await routes[stream ? 1 : 0]!.handler({ url, method, headers: { host } } as IncomingMessage, res as unknown as ServerResponse);
     return res;
   };
-  assert.equal((await invoke(false, "/data/quotes?ids=us:AAPL", "GET", "evil.example")).status, 403);
-  assert.equal((await invoke(false, "/data/quotes?ids=us:AAPL", "POST")).status, 405);
+  return { invoke, dispose };
+}
+
+test("a us or crypto id is no longer quoted by the face", async () => {
+  const asked: string[] = [];
+  const hub = createQuoteHub({ now: () => DAY, snapshots: { async load(assets) {
+    asked.push(...assets.map((asset) => asset.id));
+    return { updates: assets.map((asset) => update({ id: asset.id })), providers: [cnState] };
+  } } });
+  const { invoke, dispose } = routesOf(hub);
+  try {
+    const alone = await invoke(false, "/data/quotes?ids=us:AAPL");
+    assert.equal(alone.status, 200);
+    const body = JSON.parse(alone.chunks.join("")) as QuotePayload;
+    assert.deepEqual(body.quotes, [], "no quote, and no provider, for us:AAPL");
+    assert.deepEqual(body.providers.map((provider) => [provider.id, provider.market, provider.source]), [["tencent", "cn", "腾讯"]]);
+    const mixed = JSON.parse((await invoke(false, "/data/quotes?ids=us:AAPL,crypto:BTC%2FUSD,cn:603986")).chunks.join("")) as QuotePayload;
+    assert.deepEqual(mixed.quotes.map((quote) => quote.id), [CN.id]);
+    assert.deepEqual(mixed.providers.map((provider) => provider.id), ["tencent"]);
+    const stream = await invoke(true, "/data/quotes/stream?ids=crypto:BTC%2FUSD,cn:603986");
+    const first = JSON.parse(/data: (.*)\n/.exec(stream.chunks.join("").split("event: quotes\n")[1]!)![1]!) as QuotePayload;
+    assert.deepEqual(first.quotes.map((quote) => quote.id), [CN.id]);
+    assert.deepEqual(first.providers.map((provider) => provider.id), ["tencent"]);
+    stream.end();
+    assert.deepEqual([...new Set(asked)], [CN.id], "the snapshots were never asked for a us or crypto id");
+  } finally { dispose(); }
+});
+
+test("hub polls the subscribed cn ids and stops asking for unused ones", async () => {
+  const requests: string[][] = [];
+  const hub = createQuoteHub({ now: () => DAY, snapshots: { async load(assets) { requests.push(assets.map((a) => a.id)); return empty(); } } });
+  try {
+    const received: QuotePayload[] = [];
+    const a = hub.subscribe([CN], (payload) => received.push(payload));
+    const b = hub.subscribe([CN, CN2], () => {});
+    await hub.snapshot([CN, CN2]);
+    assert.deepEqual(received[0]!.quotes.map((quote) => quote.id), [CN.id]);
+    assert.deepEqual(received[0]!.quotes.map((quote) => quote.transport), ["poll"]);
+    assert.deepEqual(requests.flat().sort(), [CN.id, CN2.id].sort());
+    a(); b();
+    await hub.snapshot([]);
+    assert.equal(requests.flat().length, 2);
+  } finally { hub.close(); }
+});
+
+test("a provider in error carries its message and null values", async () => {
+  const hub = createQuoteHub({ now: () => DAY, snapshots: { async load() { return { updates: [
+    { id: CN.id, source: "腾讯", feed: "snapshot", basis: "previous_close", message: "腾讯行情暂不可用，稍后重试" }], providers: [
+    { id: "tencent", market: "cn", status: "error", source: "腾讯", feed: "snapshot", transport: "poll", message: "腾讯行情暂不可用，稍后重试" }] }; } } });
+  try {
+    const result = await hub.snapshot([CN]);
+    assert.equal(result.quotes[0]!.price, null);
+    assert.equal(result.quotes[0]!.change_pct, null);
+    assert.equal(result.quotes[0]!.quote_status, "unavailable");
+    assert.match(result.quotes[0]!.message, /腾讯/);
+    assert.equal(result.providers[0]!.status, "error");
+  } finally { hub.close(); }
+});
+
+test("a quote carries its change against the previous close", async () => {
+  const hub = createQuoteHub({ now: () => DAY, snapshots: { async load() { return { updates: [update()], providers: [cnState] }; } } });
+  try {
+    const quote = (await hub.snapshot([CN])).quotes[0]!;
+    assert.equal(quote.change, 20);
+    assert.equal(quote.change_pct, 25);
+    assert.equal(quote.quote_status, "live");
+    assert.equal(quote.transport, "poll");
+  } finally { hub.close(); }
+});
+
+test("a failed refresh keeps the last price and flags it stale; an old trade stays explicit", async () => {
+  let clock = DAY;
+  let failing = false;
+  const hub = createQuoteHub({ now: () => clock, snapshots: { async load() {
+    return failing ? { updates: [], providers: [{ ...cnState, status: "error", message: "连接失败" }] }
+      : { updates: [update()], providers: [cnState] };
+  } } });
+  try {
+    await hub.snapshot([CN]); failing = true; clock += 6000;
+    const result = await hub.snapshot([CN]);
+    assert.equal(result.quotes[0]!.price, 100);
+    assert.equal(result.quotes[0]!.quote_status, "stale");
+    assert.equal(result.quotes[0]!.as_of, new Date(DAY).toISOString());
+  } finally { hub.close(); }
+  const old = createQuoteHub({ now: () => DAY, snapshots: { async load() { return {
+    updates: [update({ as_of: new Date(DAY - 6 * 60_000).toISOString() })], providers: [cnState],
+  }; } } });
+  try {
+    const quote = (await old.snapshot([CN])).quotes[0]!;
+    assert.equal(quote.quote_status, "stale");
+    assert.match(quote.message, /最近成交时间较早/);
+  } finally { old.close(); }
+});
+
+test("snapshot cache coalesces concurrent reads and connection limits refuse extra subscribers", async () => {
+  let calls = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const hub = createQuoteHub({ now: () => DAY, snapshots: { async load() { calls++; await gate; return empty(); } } });
+  try {
+    const first = hub.snapshot([CN]), second = hub.snapshot([CN]);
+    release(); await Promise.all([first, second]); assert.equal(calls, 1);
+    const stops = Array.from({ length: QUOTE_CLIENT_LIMIT }, () => hub.subscribe([CN], () => {}));
+    assert.throws(() => hub.subscribe([CN], () => {}), /连接过多/);
+    stops.forEach((stop) => stop());
+  } finally { hub.close(); }
+});
+
+test("quote routes fence requests before reads, emit named SSE updates/heartbeats, and release on close", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  let calls = 0, stops = 0;
+  const example: QuotePayload = { ok: true, generated_at: new Date(DAY).toISOString(), quotes: [], providers: [] };
+  const { invoke, dispose } = routesOf({ async snapshot() { calls++; return example; }, subscribe(_assets, listener) { calls++; listener(example); return () => { stops++; }; }, close() {} });
+  assert.equal((await invoke(false, "/data/quotes?ids=cn:603986", "GET", "evil.example")).status, 403);
+  assert.equal((await invoke(false, "/data/quotes?ids=cn:603986", "POST")).status, 405);
+  assert.equal((await invoke(false, "/data/quotes?ids=cn:*", "GET")).status, 400);
   assert.equal((await invoke(false, "/data/quotes?ids=us:*", "GET")).status, 400);
   assert.equal(calls, 0);
-  const res = await invoke(true, "/data/quotes/stream?ids=us:AAPL");
+  const res = await invoke(true, "/data/quotes/stream?ids=cn:603986");
   assert.equal(res.status, 200);
   assert.match(res.headers["content-type"]!, /text\/event-stream/);
   assert.match(res.chunks.join(""), /event: quotes/);
@@ -156,12 +175,12 @@ test("quote routes fence requests before reads, emit named SSE updates/heartbeat
   res.end(); assert.equal(stops, 1);
   const size = res.chunks.length;
   t.mock.timers.tick(30_000); assert.equal(res.chunks.length, size);
-  const slow = await invoke(true, "/data/quotes/stream?ids=us:AAPL");
+  const slow = await invoke(true, "/data/quotes/stream?ids=cn:603986");
   slow.writableLength = 300 * 1024;
   t.mock.timers.tick(15_000);
   assert.equal(slow.hardClosed, true);
   assert.equal(stops, 2);
-  const open = await invoke(true, "/data/quotes/stream?ids=us:AAPL");
+  const open = await invoke(true, "/data/quotes/stream?ids=cn:603986");
   dispose();
   assert.equal(open.destroyed, true);
   assert.equal(stops, 3);
@@ -171,12 +190,13 @@ test("concurrent distinct snapshots are pinned until delivered and excess work i
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const hub = createQuoteHub({ now: () => DAY, snapshots: { async load(assets) {
-    await gate; return { updates: assets.map((asset) => update({ id: asset.id })), providers: [usState] };
-  } }, streams: () => ({ setAssets() {}, close() {} }) });
+    await gate; return { updates: assets.map((asset) => update({ id: asset.id })), providers: [cnState] };
+  } } });
   try {
-    const promises = Array.from({ length: 7 }, (_, batch) => hub.snapshot(Array.from({ length: 100 }, (_, index) => ({
-      id: `us:A${batch}B${index}`, market: "us" as const, symbol: `A${batch}B${index}`,
-    }))));
+    const promises = Array.from({ length: 7 }, (_, batch) => hub.snapshot(Array.from({ length: 100 }, (_, index) => {
+      const symbol = String(batch * 100 + index).padStart(6, "0");
+      return { id: `cn:${symbol}`, market: "cn" as const, symbol };
+    })));
     const resultPromise = Promise.allSettled(promises);
     release();
     const results = await resultPromise;
@@ -187,16 +207,21 @@ test("concurrent distinct snapshots are pinned until delivered and excess work i
 
 test("a new trading day clears old volume and baseline until current-session data arrives", async () => {
   let clock = DAY;
-  let callbacks!: StreamCallbacks;
-  const hub = createQuoteHub({ now: () => clock, snapshots: { async load() { return { updates: [update()], providers: [usState] }; } },
-    streams: (handlers) => { callbacks = handlers; return { setAssets() {}, close() {} }; } });
+  let next = update();
+  const hub = createQuoteHub({ now: () => clock, snapshots: { async load() { return { updates: [next], providers: [cnState] }; } } });
   try {
-    await hub.snapshot([US]);
+    await hub.snapshot([CN]);
     clock += 86_400_000;
-    callbacks.onQuote({ id: US.id, source: "Alpaca", feed: "iex", basis: "previous_close", price: 120, as_of: new Date(clock).toISOString() });
-    // The next REST response is deliberately yesterday's snapshot; it cannot
-    // repopulate yesterday's cumulative volume or price-change baseline.
-    const quote = (await hub.snapshot([US])).quotes[0]!;
+    next = { id: CN.id, source: "腾讯", feed: "snapshot", basis: "previous_close", price: 120, as_of: new Date(clock).toISOString() };
+    let quote = (await hub.snapshot([CN])).quotes[0]!;
+    assert.equal(quote.price, 120);
+    assert.equal(quote.prev_close, null);
+    assert.equal(quote.volume, null);
+    // A late response carrying yesterday's snapshot cannot repopulate
+    // yesterday's cumulative volume or price-change baseline.
+    clock += 6000;
+    next = update();
+    quote = (await hub.snapshot([CN])).quotes[0]!;
     assert.equal(quote.price, 120);
     assert.equal(quote.prev_close, null);
     assert.equal(quote.change_pct, null);
@@ -205,31 +230,30 @@ test("a new trading day clears old volume and baseline until current-session dat
 });
 
 test("an explicit missing current-session volume clears it without erasing the valid price", async () => {
-  let callbacks!: StreamCallbacks;
-  const hub = createQuoteHub({ now: () => DAY, snapshots: { async load() { return { updates: [update()], providers: [usState] }; } },
-    streams: (handlers) => { callbacks = handlers; return { setAssets() {}, close() {} }; } });
+  let clock = DAY;
+  let next = update();
+  const hub = createQuoteHub({ now: () => clock, snapshots: { async load() { return { updates: [next], providers: [cnState] }; } } });
   try {
-    await hub.snapshot([US]);
-    callbacks.onQuote(update({ price: 110, as_of: "2026-09-15T15:00:01Z", volume: null, volume_as_of: null }));
-    const quote = (await hub.snapshot([US])).quotes[0]!;
+    await hub.snapshot([CN]);
+    clock += 6000;
+    next = update({ price: 110, as_of: new Date(DAY + 1000).toISOString(), volume: null, volume_as_of: null });
+    const quote = (await hub.snapshot([CN])).quotes[0]!;
     assert.equal(quote.volume, null);
     assert.equal(quote.price, 110);
   } finally { hub.close(); }
 });
 
-test("IEX marks only the first 30 active US symbols as streamed, keeping other quotes explicitly polled", async () => {
-  let callbacks!: StreamCallbacks;
-  const assets = Array.from({ length: 31 }, (_, i) => ({ id: `us:A${i}`, market: "us" as const, symbol: `A${i}` }));
-  const hub = createQuoteHub({ now: () => DAY, snapshots: { async load(selected) { return {
-    updates: selected.map((asset) => update({ id: asset.id })), providers: [usState],
-  }; } }, streams: (handlers) => { callbacks = handlers; return { setAssets() {}, close() {} }; } });
-  try {
-    const stop = hub.subscribe(assets, () => {});
-    callbacks.onStatus({ ...usState, status: "limited", transport: "stream" });
-    const result = await hub.snapshot(assets);
-    assert.equal(result.quotes.filter((quote) => quote.transport === "stream").length, 30);
-    assert.equal(result.quotes.filter((quote) => quote.transport === "poll").length, 1);
-    stop();
-    assert.equal((await hub.snapshot(assets)).quotes.filter((quote) => quote.transport === "poll").length, 31);
-  } finally { hub.close(); }
+test("a closed or midday market's old quote is never stale; an open market's is", async () => {
+  const at = async (market_status: QuoteUpdate["market_status"]) => {
+    const hub = createQuoteHub({ now: () => DAY, snapshots: { async load() { return {
+      updates: [update({ as_of: new Date(DAY - 10 * 60_000).toISOString(), market_status, turnover: 8_257_380_000, name: "贵州茅台" })], providers: [cnState],
+    }; } } });
+    try { return (await hub.snapshot([CN])).quotes[0]!; } finally { hub.close(); }
+  };
+  assert.equal((await at("closed")).quote_status, "live");
+  assert.equal((await at("midday")).quote_status, "live");
+  const open = await at("open");
+  assert.equal(open.quote_status, "stale");
+  assert.equal(open.turnover, 8_257_380_000);
+  assert.equal(open.name, "贵州茅台");
 });

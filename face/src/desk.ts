@@ -71,13 +71,12 @@ import { appendFile, lstat, mkdir, open, readFile, rename, stat, unlink } from "
 import type { IncomingMessage } from "node:http";
 import { basename, extname, join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
-import { isTrustedDataRequest } from "./data.ts";
 import { createDeskConversation, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
 import type { DeskClock, DeskSessionDeps, SessionEventsOn } from "./desk-session.ts";
 import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskGuardCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
-import { fencedGet, fencedPost, HttpError } from "./http.ts";
-import type { QuoteHub } from "./quotes.ts";
+import { fencedGet, fencedPost, HttpError, isTrustedDataRequest } from "./http.ts";
+import type { UsQuoteSource } from "./us-quotes.ts";
 import type { FiringRouteCtx, ScheduleDeps, ScheduleHandle } from "./schedule.ts";
 import type { StandingStatus } from "./standing.ts";
 import type { RouteRegistrar } from "./static.ts";
@@ -1299,7 +1298,7 @@ export function installDesk(
     version?: string;
     watch?: Partial<Omit<AsleepWatchOptions, "append">>;
     ctx?: DeskGuardCtxLike;
-    hub?: Pick<QuoteHub, "snapshot">;
+    hub?: UsQuoteSource;
     root?: string;
     route?: { provider: string; model: string };
     sessionCtx?: DeskConversationCtxLike & Partial<FiringRouteCtx>;
@@ -1383,7 +1382,7 @@ export function installDesk(
       schedule = scheduleModule.createDeskSchedule({
         home,
         root: wiring.root,
-        python: deps.python ?? "python3",
+        python: deps.python ?? (process.env.FACE_PYTHON || "python3"),
         hub: deps.hub,
         session: wiring.session,
         sessionCtx: wiring.sessionCtx,

@@ -52,8 +52,7 @@ import {
   type AgentToolDefinition, type AgentToolRegistry, type RunOptions, type RunOutcome,
 } from "./agents.ts";
 import type { RegistryLike } from "./channels.ts";
-import { isJsonBody, isTrustedDataRequest } from "./data.ts";
-import { FORBIDDEN, HttpError, readBody } from "./http.ts";
+import { FORBIDDEN, HttpError, isJsonBody, isTrustedDataRequest, readBody } from "./http.ts";
 import { DSH_PIN } from "./version.ts";
 
 /* Re-exported so panels.test.ts and any other existing consumer keep working
@@ -77,6 +76,17 @@ const SKILL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const FIBER_PHASE: ReadonlyArray<string | null> = [
   "pending", "loading", "active", "failed", null, "unloading",
 ];
+
+/** Whether the Lunhui runs row is mounted: a loader entry `include:lunhui-runs` that is not
+ * disabled and whose fiber is ACTIVE ({@link FIBER_PHASE}'s "active"). Disabled, pending, failed,
+ * fiberless or absent is not mounted. What `/data/modules.json` answers as `mounted`. */
+export function lunhuiMounted(entries: Iterable<{ id: string; disabled?: boolean; fiber?: { state: number } }>): boolean {
+  for (const entry of entries) {
+    if (entry.id === "include:lunhui-runs" && entry.disabled !== true && entry.fiber !== undefined
+      && FIBER_PHASE[entry.fiber.state] === "active") return true;
+  }
+  return false;
+}
 
 /** What a skill summary looks like to these routes (dsh-skill's SkillSummary,
  * structurally): enough to list and to group by pack directory. */
@@ -574,8 +584,8 @@ export interface PluginRow {
  * The plugin listing: the live composed rows, the MCP servers with their
  * registered tools, and the agent tools the face itself registered.
  *
- * SECURITY: a row's `options.config` is NEVER serialized — the MCP row's env
- * block carries the operator's APCA keys. The one field read out of any
+ * SECURITY: a row's `options.config` is NEVER serialized — an MCP row's env
+ * block may carry an operator's keys. The one field read out of any
  * config is the MCP row's `serverName`, a validated `[A-Za-z0-9_-]` token.
  */
 export function pluginListing(deps: PanelDeps): {

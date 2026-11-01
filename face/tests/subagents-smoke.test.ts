@@ -76,7 +76,7 @@ test("native subagents: continuable and foreground calls, parent notices, read-o
      * (NEW packages/core/agent-default-model/src/index.ts:74-91; PLAN D1/D2).
      * So the scratch profile names the stub route up front, the same way the
      * operator names theirs, and the boot below asserts it took. */
-    writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n` +
+    writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n` +
       `- id: agent-default-model\n  config:\n    provider: stub\n    model: echo\n`);
     let booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots });
     stop = booted.dispose;

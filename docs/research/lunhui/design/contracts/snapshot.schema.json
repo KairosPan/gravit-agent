@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lunhui.invalid/contracts/snapshot.schema.json",
+  "title": "snapshot",
+  "description": "Proposed design contract; not an implemented trading interface.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0"
+    },
+    "snapshot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "as_of": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "clock": {
+      "enum": [
+        "REPLAY",
+        "LIVE"
+      ]
+    },
+    "universe_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "market_rules_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "data_quality": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "VALID",
+            "PARTIAL",
+            "INVALID"
+          ]
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "status",
+        "missing",
+        "warnings"
+      ],
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "enum": [
+              "PLAN",
+              "MARKET",
+              "THEME",
+              "ANNOUNCEMENT",
+              "RULE",
+              "ACCOUNT"
+            ]
+          },
+          "source_ref": {
+            "type": "string",
+            "minLength": 1
+          },
+          "event_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "available_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ingested_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revision_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "published_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "received_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "historical_available_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "availability_basis": {
+            "enum": [
+              "LIVE_RECEIPT",
+              "VERIFIED_HISTORICAL",
+              "SYNTHETIC"
+            ]
+          },
+          "availability_proof_ref": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "evidence_id",
+          "kind",
+          "source_ref",
+          "event_time",
+          "available_at",
+          "ingested_at",
+          "revision_id",
+          "content_hash",
+          "payload",
+          "published_at",
+          "received_at",
+          "historical_available_at",
+          "availability_basis",
+          "availability_proof_ref"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "availability_basis": {
+                  "const": "LIVE_RECEIPT"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "received_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "historical_available_at": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "availability_basis": {
+                  "const": "VERIFIED_HISTORICAL"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "historical_available_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "availability_proof_ref": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "minItems": 1
+    },
+    "snapshot_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "schema_version",
+    "snapshot_id",
+    "as_of",
+    "clock",
+    "universe_version",
+    "market_rules_version",
+    "data_quality",
+    "evidence",
+    "snapshot_hash"
+  ],
+  "additionalProperties": false
+}

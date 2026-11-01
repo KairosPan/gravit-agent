@@ -8,14 +8,14 @@
  * membership, and order. See docs/superpowers/specs/2026-09-03-channels-design.md.
  * @module
  */
-import { cp, readdir, readFile, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { cp, lstat, open, readdir, readFile, realpath, stat, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { load } from "js-yaml";
 import type { RouteRegistrar } from "./static.ts";
 import { isBotId } from "./bots.ts";
-import { isJsonBody, isTrustedDataRequest } from "./data.ts";
-import { FORBIDDEN, HttpError, readBody } from "./http.ts";
+import { FORBIDDEN, HttpError, isJsonBody, isTrustedDataRequest, readBody } from "./http.ts";
 import { botsFor, logBotsWrite, logRosterWrite, rosterFor, seedRoster, setBots, setRoster } from "./roster.ts";
 import { ROOM_CAPS } from "./room-rules.ts";
 import { NAME_RE } from "./channel-name.ts";
@@ -150,13 +150,321 @@ const JOURNAL_RE = /^-\s*(\d{4}-\d{2}-\d{2})\s*:\s*(.*)$/;
 /** A dated backtest filename: `YYYY-MM-DD-<label>.json`. */
 const BACKTEST_RE = /^(\d{4}-\d{2}-\d{2})-.*\.json$/;
 
+/** A Lunhui research run's directory name under `analysis/`, exactly the form `newRunId` in
+ * `face/plugins/lunhui/lib/runs.mjs` makes: the run's UTC second, `Z-`, then eight lowercase hex.
+ * Stricter than that module's `RUN_ID_RE`, which `notes` or `2026-10-19` pass too, so a stray
+ * directory beside the runs never lists as one. Copied, not imported: the face does not import
+ * from `plugins/`; `tests/channels.test.ts` lists directories `openRun` made, which ties the copy
+ * to its source. */
+const ANALYSIS_RUN_RE = /^\d{8}T\d{6}Z-[0-9a-f]{8}$/;
+
+/** The most runs the channel page lists, the newest by id. */
+const ANALYSIS_RUNS_CAP = 50;
+
+/** The caps on a run's files the card reads, each measured on the compact JSON as
+ * {@link readBoundedJson} does (modules spec §5.11): `run.json` - the manifest, a few hundred bytes
+ * per evidence entry and at most eight freezes - and one module artifact. */
+const RUN_MANIFEST_MAX_BYTES = 8 * 1024;
+const RUN_ARTIFACT_MAX_BYTES = 24 * 1024;
+
+/** The Lunhui modules in a run's order, each with its artifact's file in the run directory and
+ * the headline fields the card shows of it: `MODULES` in `face/plugins/lunhui/lib/modules.mjs`,
+ * copied as the run-id form is - the server owns its table, and `tests/channels.test.ts` holds
+ * this copy equal to it field for field. */
+export const MODULE_HEADLINES: readonly { name: string; file: string; headline: readonly string[] }[] = [
+  { name: "environment", file: "environment.json", headline: ["index_state", "liquidity_state", "cycle_anchor"] },
+  { name: "sentiment", file: "sentiment.json", headline: ["state", "money_effect", "freeze_type"] },
+  { name: "theme", file: "theme.json", headline: ["mainline_candidates", "theme_stage", "rotation"] },
+  { name: "leader", file: "leader.json", headline: ["leader_candidates", "top_pattern_flags"] },
+  { name: "mode", file: "mode.json", headline: ["mode", "preconditions", "research_only_matches", "expectation", "expectation_review"] },
+  { name: "counterevidence", file: "counterevidence.json", headline: ["items"] },
+];
+
+/** The most the newest dated backtest may weigh and still be parsed into the latest-evidence
+ * block, measured on the compact JSON the page is sent. A results file records a window, the
+ * parameters and a handful of statistics, so a megabyte leaves room for a series without letting
+ * one file swell the page. */
+export const BACKTEST_MAX_BYTES = 1024 * 1024;
+
+/** The most of a backtest file read from disk: four times {@link BACKTEST_MAX_BYTES}, because a
+ * pretty-printed file (`indent=2`) spreads most series two to four times (a daily series about
+ * twice, a list of small numbers about three and a half) - so most files at the compact cap still
+ * parse. A denser or deeper one spreads further and is refused below the cap, still listed; no
+ * file is ever read past this. */
+export const BACKTEST_MAX_DISK_BYTES = 4 * BACKTEST_MAX_BYTES;
+
+/** How deep a JSON file the page reads - a run file or the newest backtest - may nest and still
+ * count as parsed. The Lunhui artifacts nest a handful of levels and a backtest's statistics a few;
+ * the overview's `JSON.stringify` throws from about 7,000, which would leave the whole channel
+ * page with nothing but an error. */
+const JSON_FILE_MAX_DEPTH = 32;
+
+/** One accepted module artifact as a run's row carries it: its top-level `status`
+ * (`"NOT_EVALUABLE"` for a module whose evidence was missing, spec §5.4), its `contract_version`
+ * (A19), its headline fields that are present, by {@link MODULE_HEADLINES}, its `missing_sources`
+ * (`[]` unless an array of strings only) and its `market_run` (null unless a string). */
+export interface RunArtifact {
+  accepted: true;
+  status: string | null;
+  contractVersion: string | null;
+  headline: Record<string, unknown>;
+  missingSources: string[];
+  marketRun: string | null;
+}
+
+/** One Lunhui research run under `analysis/` (modules spec A14). `asOf`, `session`, `snapshotId`,
+ * `sealed` and `kind` come from `run.json`, null (`sealed` false) when it is absent, not a regular
+ * one-link file, unparseable, over its cap, nested too deep, or the field is off its type; `asOf`
+ * is the wall clock the newest evidence came in, `session` the trading day it belongs to.
+ * `artifacts` holds each module that `run.json`'s `artifacts` names (A10: what a submit landed)
+ * whose file is a regular one-link file and parses within its cap and depth as an object; any
+ * other is left out, so a run.json that cannot be read accepts none. `marketRun` is the accepted
+ * `mode.json`'s `market_run`, else null. `bytes` is every regular one-link file directly in the
+ * run directory, by its size - evidence included, its content never read. `openedAt` and
+ * `sealedAt` are `run.json`'s `opened_at` and `sealed_at` when strings, and `frozen` the string
+ * `source` of each object in its `evidence` array, in order, `[]` when it is not an array. */
+export interface RunRow {
+  run: string;
+  asOf: string | null;
+  session: string | null;
+  snapshotId: string | null;
+  sealed: boolean;
+  kind: "market" | "strategy" | null;
+  artifacts: { [module: string]: RunArtifact };
+  marketRun: string | null;
+  bytes: number;
+  openedAt: string | null;
+  sealedAt: string | null;
+  frozen: string[];
+  /** The `provider` of `run.json`'s evidence entry whose `source` is `boards` (`"东方财富"` or
+   * `"同花顺问财"`); null when absent, an older run, or not a string. */
+  boardsProvider: string | null;
+}
+
+/** The first `boards` evidence entry's `provider`, when a string; null otherwise. */
+function boardsProviderOf(evidence: unknown): string | null {
+  if (!Array.isArray(evidence)) return null;
+  const entry = evidence.find((e) => isRecord(e) && e.source === "boards");
+  return isRecord(entry) && typeof entry.provider === "string" ? entry.provider : null;
+}
+
+/** The newest listed run that is sealed and holds an accepted artifact, each artifact whole beside
+ * its headline. */
+export interface LatestRun {
+  run: string;
+  asOf: string | null;
+  session: string | null;
+  snapshotId: string | null;
+  artifacts: { [module: string]: { headline: Record<string, unknown>; json: Record<string, unknown> } };
+  marketRun: string | null;
+}
+
 /** Everything the landing page derives from a channel's own files. */
 export interface ChannelBody {
   thesis: { markdown: string; isTemplate: boolean } | null;
   journal: { date: string; text: string }[];
+  /** The regular files directly under a real `backtests/` directory, never a link, dated
+   * `YYYY-MM-DD-*.json` newest first, then the rest by name; a `backtests` link lists nothing. */
   backtests: { file: string; bytes: number }[];
+  /** The newest dated backtest, parsed; null when there is none, or when it is not a regular
+   * one-link file, does not parse, is over {@link BACKTEST_MAX_BYTES} or nests deeper than
+   * {@link JSON_FILE_MAX_DEPTH} ({@link readBoundedJson}). It still lists in `backtests`. */
   latest: { file: string; json: unknown } | null;
   files: { name: string; bytes: number; mtime: string }[];
+  /** The Lunhui research runs under a real `analysis/` directory, newest first, at most
+   * {@link ANALYSIS_RUNS_CAP}. */
+  runs: RunRow[];
+  /** How many run directories the cap left out of `runs`, 0 when every one is listed. */
+  runsOmitted: number;
+  latestRun: LatestRun | null;
+}
+
+/** The three blocks of {@link ChannelBody} the runs card reads from `analysis/`. */
+export type AnalysisRuns = Pick<ChannelBody, "runs" | "runsOmitted" | "latestRun">;
+
+/** Whether a parsed JSON value nests at most `levels` arrays or objects deep. It stops at the
+ * bound, so it never recurses past it however deep the value goes. */
+function nestsWithin(value: unknown, levels: number): boolean {
+  if (value === null || typeof value !== "object") return true;
+  if (levels === 0) return false;
+  for (const child of Object.values(value)) if (!nestsWithin(child, levels - 1)) return false;
+  return true;
+}
+
+/**
+ * One JSON file the channel page reads - a Lunhui run file or the newest backtest: its size, and
+ * its JSON when that parses within `cap` and {@link JSON_FILE_MAX_DEPTH} levels - otherwise
+ * `parsed: false`, the size still counted.
+ *
+ * The file is opened without following a link (O_NOFOLLOW) or waiting on a FIFO (O_NONBLOCK), and
+ * read only when the handle is a regular file with one link, as runs.mjs reads its own files.
+ * Anything else, or a file that cannot be opened, is null. The cap is measured on the compact
+ * JSON - as the Lunhui server measures its files, and as the page is sent - while files on disk
+ * are often pretty-printed. So the file is read only up to `diskCap`, and a larger one is never
+ * read at all: twice the cap by default; a caller whose files spread more passes its own.
+ */
+async function readBoundedJson(path: string, cap: number, diskCap = 2 * cap): Promise<{ bytes: number; parsed: boolean; json: unknown } | null> {
+  let handle: FileHandle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch {
+    return null; // absent, a link, or not openable
+  }
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.nlink !== 1) return null;
+    const unparsed = { bytes: info.size, parsed: false, json: undefined };
+    if (info.size > diskCap) return unparsed;
+    /* one byte past the size: a file still growing is not one the server finished */
+    const raw = Buffer.alloc(info.size + 1);
+    let length = 0;
+    while (length < raw.length) {
+      const { bytesRead } = await handle.read(raw, length, raw.length - length, length);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > info.size) return unparsed;
+    let json: unknown;
+    try {
+      json = JSON.parse(raw.toString("utf8", 0, length));
+    } catch {
+      return unparsed;
+    }
+    /* the depth first: JSON.stringify of a deeper value throws */
+    if (!nestsWithin(json, JSON_FILE_MAX_DEPTH) || Buffer.byteLength(JSON.stringify(json)) > cap) return unparsed;
+    return { bytes: info.size, parsed: true, json };
+  } catch {
+    return null; // the stat or a read failed
+  } finally {
+    await handle.close().catch(() => {});
+  }
+}
+
+/** Whether a parsed JSON value is an object, not an array or null. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** A field that is a string, else null - nothing off the wire's types passes through. */
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+/** A field that is an array of strings only, copied, else `[]` - one non-string member voids it. */
+function stringsOrEmpty(value: unknown): string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? [...value] : [];
+}
+
+/** The headline fields `fields` names that the artifact carries, in the table's order. */
+function headlineOf(json: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {
+  const headline: Record<string, unknown> = {};
+  for (const field of fields) if (Object.hasOwn(json, field)) headline[field] = json[field];
+  return headline;
+}
+
+/** Whether `path` is still a real directory whose realpath is exactly `expected` - the listed
+ * directory, not one swapped for a link since, nor reached through one (the idea of runs.mjs's
+ * `stillResolved`). O_NOFOLLOW guards only a path's last component, so each directory a read
+ * passes through is checked this way just before the read. Any failure is false. */
+async function stillAt(path: string, expected: string): Promise<boolean> {
+  try {
+    return (await lstat(path)).isDirectory() && (await realpath(path)) === expected;
+  } catch {
+    return false;
+  }
+}
+
+/** Every regular one-link file directly in a run directory, by its lstat size - no content read,
+ * a link or a hard link counted as nothing, an entry gone since the listing skipped. Null when the
+ * directory itself can no longer be listed - gone or unreadable since the listing. */
+async function runBytes(runDir: string): Promise<number | null> {
+  let names: string[];
+  try {
+    names = await readdir(runDir);
+  } catch {
+    return null;
+  }
+  let total = 0;
+  for (const name of names) {
+    try {
+      const info = await lstat(join(runDir, name));
+      if (info.isFile() && info.nlink === 1) total += info.size;
+    } catch { /* gone since the listing */ }
+  }
+  return total;
+}
+
+/**
+ * The runs card's blocks from a channel's `analysis/` (modules spec §5.11): run directories by the
+ * id form, newest first, the newest `options.cap` (default {@link ANALYSIS_RUNS_CAP}) read and
+ * listed and the rest counted. Only a real directory is read: an `analysis` link could point anywhere outside the
+ * strategy, and what is read here reaches the page. Just before a run's reads, `analysis/` and the
+ * run directory are checked to be still where the listing found them ({@link stillAt}); a run
+ * that fails the check, or whose directory can no longer be listed, is skipped - not listed, not
+ * counted. The evidence files are never opened. Throws when the strategy directory or
+ * `analysis/` is absent (`ENOENT`) or cannot be read, and `ENOTDIR` when `analysis/` is a file or
+ * a link rather than a real directory.
+ */
+export async function readAnalysisRuns(strategyDir: string, options: { cap?: number } = {}): Promise<AnalysisRuns> {
+  const cap = options.cap ?? ANALYSIS_RUNS_CAP;
+  const out: AnalysisRuns = { runs: [], runsOmitted: 0, latestRun: null };
+  const analysisDir = join(strategyDir, "analysis");
+  const realAnalysis = join(await realpath(strategyDir), "analysis");
+  /* a file or a link where analysis/ should be is not "no runs yet" but a channel that cannot be
+   * read: ENOTDIR, which readChannelBody swallows and readModulesChannels lists unreadable */
+  if (!(await lstat(analysisDir)).isDirectory()) throw Object.assign(new Error("analysis/ is not a directory"), { code: "ENOTDIR" });
+  /* run directories only - a link, a file or a stray name is not a run - newest first by id,
+   * which opens with the run's UTC second, so name order is time order */
+  const runs = (await readdir(analysisDir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && ANALYSIS_RUN_RE.test(entry.name))
+    .map((entry) => entry.name)
+    .sort()
+    .reverse();
+  out.runsOmitted = Math.max(0, runs.length - cap);
+  for (const run of runs.slice(0, cap)) {
+    const runDir = join(analysisDir, run);
+    if (!(await stillAt(analysisDir, realAnalysis)) || !(await stillAt(runDir, join(realAnalysis, run)))) continue;
+    const read = await readBoundedJson(join(runDir, "run.json"), RUN_MANIFEST_MAX_BYTES);
+    const manifest = read?.parsed === true && isRecord(read.json) ? read.json : {};
+    const named = Array.isArray(manifest.artifacts) ? manifest.artifacts : [];
+    const artifacts: RunRow["artifacts"] = {};
+    const whole: LatestRun["artifacts"] = {};
+    for (const { name, file, headline: fields } of MODULE_HEADLINES) {
+      if (!named.includes(name)) continue;
+      const artifact = await readBoundedJson(join(runDir, file), RUN_ARTIFACT_MAX_BYTES);
+      if (artifact?.parsed !== true || !isRecord(artifact.json)) continue;
+      const headline = headlineOf(artifact.json, fields);
+      artifacts[name] = {
+        accepted: true, status: stringOrNull(artifact.json.status), contractVersion: stringOrNull(artifact.json.contract_version), headline,
+        missingSources: stringsOrEmpty(artifact.json.missing_sources), marketRun: stringOrNull(artifact.json.market_run),
+      };
+      whole[name] = { headline, json: artifact.json };
+    }
+    const bytes = await runBytes(runDir);
+    if (bytes === null) continue;
+    const row: RunRow = {
+      run,
+      asOf: stringOrNull(manifest.as_of),
+      session: stringOrNull(manifest.session),
+      snapshotId: stringOrNull(manifest.snapshot_id),
+      sealed: typeof manifest.sealed_at === "string" && manifest.sealed_at !== "",
+      kind: manifest.kind === "market" || manifest.kind === "strategy" ? manifest.kind : null,
+      artifacts,
+      marketRun: stringOrNull(whole.mode?.json.market_run),
+      bytes,
+      openedAt: stringOrNull(manifest.opened_at),
+      sealedAt: stringOrNull(manifest.sealed_at),
+      frozen: Array.isArray(manifest.evidence)
+        ? manifest.evidence.filter(isRecord).map((entry) => entry.source).filter((source): source is string => typeof source === "string")
+        : [],
+      boardsProvider: boardsProviderOf(manifest.evidence),
+    };
+    out.runs.push(row);
+    if (out.latestRun === null && row.sealed && Object.keys(whole).length > 0) {
+      out.latestRun = { run, asOf: row.asOf, session: row.session, snapshotId: row.snapshotId, artifacts: whole, marketRun: row.marketRun };
+    }
+  }
+  return out;
 }
 
 /**
@@ -165,7 +473,9 @@ export interface ChannelBody {
  * never fails the others, so one bad artifact cannot blank a channel's page.
  */
 export async function readChannelBody(dir: string): Promise<ChannelBody> {
-  const body: ChannelBody = { thesis: null, journal: [], backtests: [], latest: null, files: [] };
+  const body: ChannelBody = {
+    thesis: null, journal: [], backtests: [], latest: null, files: [], runs: [], runsOmitted: 0, latestRun: null,
+  };
 
   try {
     const markdown = await readFile(join(dir, "THESIS.md"), "utf8");
@@ -184,11 +494,23 @@ export async function readChannelBody(dir: string): Promise<ChannelBody> {
   } catch { /* no journal yet */ }
 
   try {
-    const entries = await readdir(join(dir, "backtests"), { withFileTypes: true });
+    const backtestsDir = join(dir, "backtests");
+    /* only a real directory: a `backtests` link could point anywhere outside the strategy, and the
+     * newest file read here reaches the page - the runs card treats `analysis/` the same way */
+    if (!(await lstat(backtestsDir)).isDirectory()) throw new Error("backtests/ is not a directory");
+    const entries = await readdir(backtestsDir, { withFileTypes: true });
     const rows: { file: string; bytes: number; dated: string | null }[] = [];
     for (const entry of entries) {
       if (!entry.isFile() || entry.name.startsWith(".")) continue;
-      const info = await stat(join(dir, "backtests", entry.name));
+      /* lstat, not stat: an entry swapped for a link after the listing is skipped, never followed;
+       * one that vanished since the listing is skipped, not allowed to empty the whole list */
+      let info;
+      try {
+        info = await lstat(join(backtestsDir, entry.name));
+      } catch {
+        continue;
+      }
+      if (!info.isFile()) continue;
       rows.push({ file: entry.name, bytes: info.size, dated: BACKTEST_RE.exec(entry.name)?.[1] ?? null });
     }
     /* dated JSONs newest-first, then everything else by name */
@@ -200,12 +522,18 @@ export async function readChannelBody(dir: string): Promise<ChannelBody> {
     });
     body.backtests = rows.map((r) => ({ file: r.file, bytes: r.bytes }));
     const newest = rows.find((r) => r.dated !== null);
-    if (newest !== undefined) {
-      try {
-        body.latest = { file: newest.file, json: JSON.parse(await readFile(join(dir, "backtests", newest.file), "utf8")) };
-      } catch { /* the file still lists; only the rendered summary is lost */ }
+    /* the directory checked again just before the read: one swapped for a link since the listing
+     * is not followed */
+    if (newest !== undefined && (await stillAt(backtestsDir, join(await realpath(dir), "backtests")))) {
+      /* bounded as the run files are; anything unread still lists, only the summary is lost */
+      const read = await readBoundedJson(join(backtestsDir, newest.file), BACKTEST_MAX_BYTES, BACKTEST_MAX_DISK_BYTES);
+      if (read?.parsed === true) body.latest = { file: newest.file, json: read.json };
     }
-  } catch { /* no backtests/ yet */ }
+  } catch { /* no backtests/ yet, or not a directory */ }
+
+  try {
+    Object.assign(body, await readAnalysisRuns(dir));
+  } catch { /* no analysis/ yet, not a directory, or its listing failed */ }
 
   try {
     const entries = await readdir(dir, { withFileTypes: true });
@@ -515,6 +843,80 @@ export async function createChannel(root: string, rawName: unknown): Promise<Cha
   return { name, dir: target, isRoot: false };
 }
 
+/* ---------- the module cards' listing: /data/modules.json (Lunhui module cards spec 2026-10-28) ---------- */
+
+/** How many runs per channel `/data/modules.json` lists, newest first. */
+export const MODULES_RUNS_CAP = 12;
+
+/** The market read's channel - the same string as `MARKET_CHANNEL` in
+ * `plugins/lunhui/lib/freeze-tool.mjs` (a test pins the two equal). */
+export const MARKET_CHANNEL = "cn-market";
+
+/** One run as a module card reads it: {@link RunRow} without the runs card's `bytes`, `sealed`,
+ * `snapshotId`, `kind`, `marketRun` and each artifact's `accepted` and `contractVersion`. */
+export interface ModuleRunRow {
+  run: string;
+  session: string | null;
+  asOf: string | null;
+  openedAt: string | null;
+  sealedAt: string | null;
+  frozen: string[];
+  boardsProvider: string | null;
+  artifacts: { [module: string]: { status: string | null; missingSources: string[]; headline: Record<string, unknown>; marketRun: string | null } };
+}
+
+/** One channel's runs for the module cards. `unreadable` is set only when its `analysis/` could not
+ * be read for a reason other than not existing yet; its runs are then empty. */
+export interface ModulesChannel {
+  channel: string;
+  workspaceId: string;
+  kind: "market" | "strategy";
+  runs: ModuleRunRow[];
+  runsOmitted: number;
+  unreadable?: true;
+}
+
+function moduleRunRow(row: RunRow): ModuleRunRow {
+  const artifacts: ModuleRunRow["artifacts"] = {};
+  for (const [name, a] of Object.entries(row.artifacts)) {
+    artifacts[name] = { status: a.status, missingSources: a.missingSources, headline: a.headline, marketRun: a.marketRun };
+  }
+  return {
+    run: row.run, session: row.session, asOf: row.asOf, openedAt: row.openedAt, sealedAt: row.sealedAt,
+    frozen: row.frozen, boardsProvider: row.boardsProvider, artifacts,
+  };
+}
+
+/**
+ * Every channel but the root and a missing directory, in the order given, with its newest
+ * {@link MODULES_RUNS_CAP} runs. `kind` is `"market"` for {@link MARKET_CHANNEL}, else
+ * `"strategy"`. A `read` that throws `ENOENT` (no `analysis/` yet) is a channel with no runs; any
+ * other throw lists the channel `unreadable`, its runs empty - nothing from the error is kept, and
+ * one channel's failure never fails the others.
+ */
+export async function readModulesChannels(
+  rows: readonly ChannelRow[],
+  read: (dir: string, options: { cap: number }) => Promise<AnalysisRuns> = readAnalysisRuns,
+): Promise<ModulesChannel[]> {
+  const out: ModulesChannel[] = [];
+  for (const row of rows) {
+    if (row.isRoot || row.missingDir) continue;
+    const channel: ModulesChannel = {
+      channel: row.name, workspaceId: row.workspaceId, kind: row.name === MARKET_CHANNEL ? "market" : "strategy",
+      runs: [], runsOmitted: 0,
+    };
+    try {
+      const { runs, runsOmitted } = await read(row.dir, { cap: MODULES_RUNS_CAP });
+      channel.runs = runs.map(moduleRunRow);
+      channel.runsOmitted = runsOmitted;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException | null)?.code !== "ENOENT") channel.unreadable = true;
+    }
+    out.push(channel);
+  }
+  return out;
+}
+
 /** What the routes need of the booted tree. Injected so the tests drive them
  * without a harness. */
 export interface ChannelRouteDeps {
@@ -531,16 +933,30 @@ export interface ChannelRouteDeps {
   connectedBins(): Promise<string[]>;
   /** Every bot directory with dsh's view merged in (`listBots` in bots.ts, narrowed). */
   listBots(): Promise<{ id: string; name: string; broken?: string; listed: boolean }[]>;
+  /** Whether the Lunhui runs row is mounted (`lunhuiMounted` in panels.ts over the loader's entries). */
+  lunhuiMounted(): boolean;
 }
 
-/** Mount the four channel routes. Same trust posture as data.ts: the fence
+/** Mount the channel routes and the module cards' listing. Same trust posture as every `/data` route: http.ts's fence
  * runs FIRST on every route, the refusal body is fixed text, and nothing
  * attacker-controlled is ever echoed. A workspace id from a body is only ever
  * COMPARED against the reconciled list - it never becomes a path. */
 export function registerChannelRoutes(webServer: RouteRegistrar, deps: ChannelRouteDeps): void {
+  /** Serialize first, then write the head. A body JSON.stringify refuses - a value nested too
+   * deep, a BigInt - answers one 500 with fixed text; written the other way round, the head went
+   * out first, the throw reached the route's catch, its 500 could not be written any more, and the
+   * page got a dead socket. */
   const send = (res: ServerResponse, status: number, body: unknown): void => {
-    res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-    res.end(typeof body === "string" ? body : JSON.stringify(body));
+    let code = status;
+    let text: string;
+    try {
+      text = typeof body === "string" ? body : JSON.stringify(body);
+    } catch {
+      code = 500;
+      text = JSON.stringify({ ok: false, error: "response could not be serialized" });
+    }
+    res.writeHead(code, { "content-type": "application/json; charset=utf-8" });
+    res.end(text);
   };
 
   /** One reconcile, plus the heads it ran on - the listing route answers the
@@ -585,6 +1001,23 @@ export function registerChannelRoutes(webServer: RouteRegistrar, deps: ChannelRo
           // sessionId → header preset: the client's fallback where a 0.2 list
           // row's projection block does not name one (presetHintsOf).
           presets: presetHintsOf(heads),
+        });
+      } catch {
+        /* nothing from the filesystem error reaches the body */
+        return send(res, 500, { ok: false, error: "listing failed" });
+      }
+    },
+  });
+
+  webServer.register({
+    kind: "exact",
+    path: "/data/modules.json",
+    handler: async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+      if (!isTrustedDataRequest(req)) return send(res, 403, FORBIDDEN);
+      try {
+        const { channels } = await reconcile();
+        return send(res, 200, {
+          ok: true, mounted: deps.lunhuiMounted(), root: deps.root, channels: await readModulesChannels(channels),
         });
       } catch {
         /* nothing from the filesystem error reaches the body */

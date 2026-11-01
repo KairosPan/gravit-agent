@@ -13,7 +13,7 @@ import { DESK_PRESET } from "../src/desk-preset.ts";
 import { appendEvent, installDesk, type DeskRun, type DeskStatus } from "../src/desk.ts";
 import { deskToolDefinitions, installDeskTools, type DeskAgentLike, type DeskGuardCtxLike, type DeskToolDefinition } from "../src/desk-tools.ts";
 import { HttpError } from "../src/http.ts";
-import type { LiveQuote, QuoteIdentity, QuotePayload } from "../src/quote-types.ts";
+import type { UsLiveQuote as LiveQuote, UsQuoteIdentity as QuoteIdentity, UsQuotePayload as QuotePayload } from "../src/us-quotes.ts";
 import { recorder } from "./route-recorder.ts";
 
 type Listener = (event: { agent: DeskAgentLike }) => undefined;

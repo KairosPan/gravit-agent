@@ -1,0 +1,575 @@
+{
+  "ok": true,
+  "venues": [
+    {
+      "connector": "live:exchange:okx",
+      "name": "OKX",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"okx\"",
+      "terms": {
+        "url": "https://www.okx.com/help/risk-compliance-disclosure",
+        "read": "2026-10-08",
+        "says": "…may restrict or prohibit use of all or a portion of the Services from Restricted Locations, which at this time include Afghanistan, Canada, Cuba, Hong Kong, …",
+        "note": "It also restricts “certain jurisdictions within the United States of America”, unnamed, and limits some services in Australia, the Bahamas, Brazil, Eritrea, Russia, South Korea and the United Kingdom; residents of OKX US’s approved US locations are served by OKX Inc. (OKX US) under its own terms."
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:okxus",
+      "name": "OKX US",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"okxus\"",
+      "terms": {
+        "url": "https://www.okx.com/en-us/help/us-licenses",
+        "read": "2026-10-08",
+        "says": "OKX INC. does not provide services to residents of the following states and territories at this time",
+        "note": "The page lists a licence or registration for 44 states, the District of Columbia and Puerto Rico; California, Hawaii, Massachusetts, Montana, Utah and Wyoming are neither listed nor excluded there."
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:kraken",
+      "name": "Kraken",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"kraken\"",
+      "terms": {
+        "url": "https://support.kraken.com/articles/where-is-kraken-licensed-or-regulated",
+        "read": "2026-10-08",
+        "says": "At this time, Kraken … does not offer services to residents of: … Maine … New York … We do not serve clients, or permit cash and crypto deposits, from the following regions: …",
+        "note": "The page sends readers to Kraken’s Terms of Service for the complete criteria, which also bar any sanctioned or embargoed jurisdiction and any place where Kraken has restricted its services; clients in Canada, and UK retail clients, cannot trade derivatives."
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:coinbase",
+      "name": "Coinbase",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"coinbase\"",
+      "terms": {
+        "url": "https://www.coinbase.com/legal/user_agreement",
+        "read": "2026-10-08",
+        "says": "",
+        "note": "Coinbase keeps a user agreement per region (this link opens the visitor’s own); the US one, with Coinbase, Inc. (read from a web.archive.org copy of 2026-10-05), asks that its users reside in the United States.",
+        "unread": "when this table was made (2026-10-08), coinbase.com and help.coinbase.com answered its reader with a browser check (HTTP 403), and web.archive.org’s copies of Coinbase’s list of places (coinbase.com/places) hold only its home page since mid-2026: no list of the places Coinbase serves could be read"
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:bybit",
+      "name": "Bybit",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"bybit\"",
+      "terms": {
+        "url": "https://www.bybit.com/en/help-center/article/Service-Restricted-Countries",
+        "read": "2026-10-08",
+        "says": "…Bybit does not offer services or products to Users in a few excluded jurisdictions including the United States, the Chinese Mainland, Hong Kong, Singapore, Canada, …",
+        "note": "The page also names “Rostov” among the Russian-controlled regions of Ukraine (Ukraine has no Rostov region, so it is not coded), Dubai for Bybit’s UAE company only, and persons in Seychelles other than international business companies (coded SC).",
+        "via": "web.archive.org snapshot 2026-10-02"
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:binance",
+      "name": "Binance",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"binance\"",
+      "terms": {
+        "url": "https://www.binance.com/en/about-legal/list-of-prohibited-countries",
+        "read": "2026-10-08",
+        "says": "The below Countries, and such other locations, as designated by Binance from time to time, form the List of Prohibited Countries … United States … Canada … Netherlands",
+        "note": "The United States line also covers US citizens wherever they are; US persons are served by Binance.US, run by a separate company (BAM Trading Services Inc.) under its own terms.",
+        "via": "web.archive.org snapshot 2026-10-03; the list itself is the PDF that page embeds from bin.bnbstatic.com, Binance’s own file host, read there"
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:binanceus",
+      "name": "Binance.US",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"binanceus\"",
+      "terms": {
+        "url": "https://support.binance.us/en/articles/9842798-list-of-supported-and-unsupported-states-and-regions",
+        "read": "2026-10-08",
+        "says": "This article includes all of the states and regions where Binance.US services are available.",
+        "note": "Kansas and Wisconsin are crypto only; its Terms of Use (June 5, 2026) say individuals must be US citizens or residents. Unsupported: Alaska, Connecticut, Georgia, Maine, New York, North Carolina, North Dakota, Ohio, Oregon, Texas, Vermont, Washington and the territories but Puerto Rico."
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:kucoin",
+      "name": "KuCoin",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"kucoin\"",
+      "terms": {
+        "url": "https://www.kucoin.com/legal/terms-of-use",
+        "read": "2026-10-08",
+        "says": "…“Restricted Locations” shall include the United States (including its territories such as Puerto Rico, Guam, the Northern Mariana Islands, American Samoa, etc), Singapore, …"
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:gate",
+      "name": "Gate",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"gate\"",
+      "terms": {
+        "url": "https://www.gate.com/legal/user-agreement",
+        "read": "2026-10-08",
+        "says": "The Restricted Locations include but are not limited to the United States of America, Mainland China, Singapore, Canada, France, Germany, Hong Kong, …",
+        "via": "web.archive.org snapshot 2026-09-21"
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:bitget",
+      "name": "Bitget",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"bitget\"",
+      "terms": {
+        "url": "https://www.bitget.com/support/articles/360014944032",
+        "read": "2026-10-08",
+        "says": "Prohibited Countries means the following countries and such other locations as designated by Bitget from time to time, including Austria, Canada, Crimea, Cuba, …"
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:mexc",
+      "name": "MEXC",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"mexc\"",
+      "terms": {
+        "url": "https://www.mexc.com/terms",
+        "read": "2026-10-08",
+        "says": "Currently, MEXC does not provide Services, nor do we accept registration of Users or trade applications, in the following countries: North Korea, Cuba, Sudan, Iran, …",
+        "note": "Also any country under comprehensive EU or OFAC sanctions or on the FATF blacklist, which the page does not name.",
+        "via": "web.archive.org snapshot 2026-10-02"
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:deribit",
+      "name": "Deribit",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"deribit\"",
+      "terms": {
+        "url": "https://support.deribit.com/hc/en-us/articles/25944487427741-Restricted-Jurisdictions",
+        "read": "2026-10-08",
+        "says": "The access and use of our platform, and the services we offer, are not allowed if you are located … in, or a resident of, any of the jurisdictions in the overview below",
+        "note": "Retail investors in Panama and the UAE may only trade spot products, and UK retail clients are not allowed (coded GB); the Belarus and Russia lines also cover their nationals abroad without EEA or Swiss nationality or residence, and “Congo”, as written, is coded as both Congos (CG, CD)."
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:krakenfutures",
+      "name": "Kraken Futures",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"krakenfutures\"",
+      "terms": {
+        "url": "https://support.kraken.com/articles/360023786632-kraken-derivatives-eligibility",
+        "read": "2026-10-08",
+        "says": "Kraken Derivatives (non-US) allows clients to trade perpetual futures … Kraken Derivatives is not available to clients in the regions listed below:",
+        "note": "The page names the product Kraken Derivatives (non-US), US clients having Kraken Derivatives US, and opens it in Australia (and its territories) only to wholesale clients and in the UK only to professional clients; it needs a verified Kraken account, so Kraken’s own places apply too."
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:kucoinfutures",
+      "name": "KuCoin Futures",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"kucoinfutures\"",
+      "terms": {
+        "url": "https://www.kucoin.com/announcement/en-futures-terms-of-use",
+        "read": "2026-10-08",
+        "says": "…not be a resident of any jurisdictions or regions where futures and derivative trading is prohibited or restricted by applicable laws and regulations (such as Spain and Australia)",
+        "note": "These terms are supplemental to KuCoin’s Terms of Use, so KuCoin’s Restricted Locations apply too."
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:cryptocom",
+      "name": "Crypto.com",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"cryptocom\"",
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:gemini",
+      "name": "Gemini",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"gemini\"",
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:bitstamp",
+      "name": "Bitstamp",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"bitstamp\"",
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:bitfinex",
+      "name": "Bitfinex",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"bitfinex\"",
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:exchange:htx",
+      "name": "HTX",
+      "group": "Exchanges",
+      "needs": "key-file",
+      "verdict": "closed",
+      "said": "the exchange library knows no exchange called \"htx\"",
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:paper",
+      "name": "Paper account (nothing to connect)",
+      "group": "Paper",
+      "needs": "none",
+      "verdict": "connectable",
+      "connected": true,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:alpaca",
+      "name": "Alpaca",
+      "group": "Brokers",
+      "needs": "key-file",
+      "verdict": "no-answer",
+      "said": "Alpaca did not answer just now (HTTP 599); connecting asks again",
+      "terms": {
+        "url": "https://alpaca.markets/support/countries-alpaca-is-available",
+        "read": "2026-10-08",
+        "says": "Please contact support at … for more information regarding whether your country is supported.",
+        "note": "Alpaca publishes no list of the countries it serves; for US residents it asks for a residential address in the 50 states or Puerto Rico."
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:alpaca-paper",
+      "name": "Alpaca · paper",
+      "group": "Brokers",
+      "needs": "key-file",
+      "verdict": "connectable",
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:robinhood",
+      "name": "Robinhood",
+      "group": "Brokers",
+      "needs": "sign-in",
+      "verdict": "no-answer",
+      "said": "Robinhood did not answer",
+      "terms": {
+        "url": "https://robinhood.com/us/en/support/articles/what-you-need-to-get-started/",
+        "read": "2026-10-08",
+        "says": "Have a legal United States (US) residential address within the 50 states, Puerto Rico, or the US Virgin Islands (exceptions may apply for active US military personnel stationed abroad)",
+        "note": "An allow-list: the page names where its customers must live, read here as the United States (the District of Columbia with the 50 states), Puerto Rico and the US Virgin Islands."
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:robinhood-crypto",
+      "name": "Robinhood Crypto",
+      "group": "Brokers",
+      "needs": "key-file",
+      "verdict": "no-answer",
+      "said": "Robinhood Crypto did not answer just now (HTTP 599); connecting asks again",
+      "terms": {
+        "url": "https://robinhood.com/us/en/support/articles/crypto-api/",
+        "read": "2026-10-08",
+        "says": "It’s available to Robinhood Crypto customers in the United States.",
+        "note": "An allow-list: a Robinhood Crypto account opens with a Robinhood account, whose address must be in the 50 states, Puerto Rico or the US Virgin Islands (the robinhood entry); some coins cannot be traded in New York or Texas."
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:kalshi",
+      "name": "Kalshi",
+      "group": "Markets and tokens",
+      "needs": "key-file",
+      "verdict": "no-answer",
+      "said": "Kalshi did not answer just now (HTTP 599); connecting asks again",
+      "terms": {
+        "url": "https://kalshi.com/docs/kalshi-member-agreement.pdf",
+        "read": "2026-10-08",
+        "says": "…you are prohibited to access, use, or trade Contracts on the Platform if you are domiciled in, organized in, or located in any of the following jurisdictions (collectively, the “Restricted Jurisdictions”): Afghanistan, Algeria, Angola, …",
+        "note": "This is the newest copy that could be read; a later version of the agreement may name other places.",
+        "via": "web.archive.org snapshot 2026-02-22 (the agreement’s v1.6): kalshi.com, and every later snapshot of it, answer with a security checkpoint"
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:polymarket-us",
+      "name": "Polymarket US",
+      "group": "Markets and tokens",
+      "needs": "key-file",
+      "verdict": "no-answer",
+      "said": "Polymarket US did not answer just now (HTTP 599); connecting asks again",
+      "terms": {
+        "url": "https://polymarketexchange.com/files/legal/latest/participant-agreement",
+        "read": "2026-10-08",
+        "says": "…you are prohibited from accessing, using, or trading Contracts on the System if you are domiciled, a resident of, or located in: (a) any country, territory, or region that is the target of comprehensive economic sanctions …",
+        "note": "Its Participant Agreement also excludes every jurisdiction on FATF's black and grey lists, unnamed, and any that bans or warns against selling retail binary options; its docs call it “Built for US residents”, and sign-up asks for a Social Security number."
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:metamask",
+      "name": "MetaMask Agent Wallet",
+      "group": "Wallets",
+      "needs": "cli",
+      "verdict": "setup",
+      "said": "mm could not say whether it is signed in: the stand-in runs no mm command line",
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:wallet",
+      "name": "A wallet (a browser wallet, or an address watched)",
+      "group": "Wallets",
+      "needs": "address",
+      "verdict": "no-answer",
+      "said": "none of the chains' public endpoints answered just now (Ethereum, Optimism, BNB Chain, Polygon, Base, Arbitrum, Robinhood Chain); connecting asks again",
+      "connected": false,
+      "readOnly": true,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:hyperliquid",
+      "name": "Hyperliquid · by address",
+      "group": "Markets and tokens",
+      "needs": "address",
+      "verdict": "no-answer",
+      "said": "Hyperliquid did not answer just now (HTTP 599); connecting asks again",
+      "terms": {
+        "url": "https://app.hyperliquid.xyz/terms",
+        "read": "2026-10-08",
+        "says": "The Interface is not available to “Restricted Persons.” … who reside in, are located in … the United States of America or Ontario, Canada; (b) … jurisdictions subject to applicable economic and trade sanctions",
+        "note": "The terms do not list the sanctioned territories: the ones held here are the account’s own reading in location.ts (comprehensive sanctions: Cuba, Iran, North Korea, Syria, and Crimea, Sevastopol, Donetsk and Luhansk); §1.6 also covers citizens of those territories wherever they are. “The United States of America” is read here with its territories (Puerto Rico, Guam, the US Virgin Islands, American Samoa, the Northern Mariana Islands, the minor outlying islands)."
+      },
+      "connected": false,
+      "readOnly": true,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:hyperliquid-trade",
+      "name": "Hyperliquid",
+      "group": "Markets and tokens",
+      "needs": "key-file",
+      "verdict": "no-answer",
+      "said": "Hyperliquid did not answer just now (HTTP 599); connecting asks again",
+      "terms": {
+        "url": "https://app.hyperliquid.xyz/terms",
+        "read": "2026-10-08",
+        "says": "The Interface is not available to “Restricted Persons.” … who reside in, are located in … the United States of America or Ontario, Canada; (b) … jurisdictions subject to applicable economic and trade sanctions",
+        "note": "The terms do not list the sanctioned territories: the ones held here are the account’s own reading in location.ts (comprehensive sanctions: Cuba, Iran, North Korea, Syria, and Crimea, Sevastopol, Donetsk and Luhansk); §1.6 also covers citizens of those territories wherever they are. “The United States of America” is read here with its territories (Puerto Rico, Guam, the US Virgin Islands, American Samoa, the Northern Mariana Islands, the minor outlying islands)."
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:hyperliquid-paper",
+      "name": "Hyperliquid · paper (testnet)",
+      "group": "Markets and tokens",
+      "needs": "key-file",
+      "verdict": "no-answer",
+      "said": "Hyperliquid's testnet did not answer just now (HTTP 599); connecting asks again",
+      "terms": {
+        "url": "https://app.hyperliquid.xyz/terms",
+        "read": "2026-10-08",
+        "says": "The Interface is not available to “Restricted Persons.” … who reside in, are located in … the United States of America or Ontario, Canada; (b) … jurisdictions subject to applicable economic and trade sanctions",
+        "note": "The terms do not list the sanctioned territories: the ones held here are the account’s own reading in location.ts (comprehensive sanctions: Cuba, Iran, North Korea, Syria, and Crimea, Sevastopol, Donetsk and Luhansk); §1.6 also covers citizens of those territories wherever they are. “The United States of America” is read here with its territories (Puerto Rico, Guam, the US Virgin Islands, American Samoa, the Northern Mariana Islands, the minor outlying islands)."
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:polymarket",
+      "name": "Polymarket · by address",
+      "group": "Markets and tokens",
+      "needs": "address",
+      "verdict": "no-answer",
+      "said": "Polymarket's data API did not answer just now (HTTP 599); connecting asks again",
+      "terms": {
+        "url": "https://docs.polymarket.com/api-reference/geoblock",
+        "read": "2026-10-08",
+        "says": "Polymarket restricts order placement from certain geographic locations due to regulatory requirements and compliance with international sanctions.",
+        "note": "Its Terms of Use adopt this list and also name Hungary and Slovenia; Malta is listed for sports markets only, and where a place is close-only, positions already open may still be closed. In the United States, Polymarket US (QCX LLC, a CFTC-regulated Designated Contract Market) is a separate exchange under its own terms."
+      },
+      "connected": false,
+      "readOnly": true,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:polymarket-trade",
+      "name": "Polymarket",
+      "group": "Markets and tokens",
+      "needs": "key-file",
+      "verdict": "no-answer",
+      "said": "Polymarket's location check did not answer: nothing goes to Polymarket without it",
+      "terms": {
+        "url": "https://docs.polymarket.com/api-reference/geoblock",
+        "read": "2026-10-08",
+        "says": "Polymarket restricts order placement from certain geographic locations due to regulatory requirements and compliance with international sanctions.",
+        "note": "Its Terms of Use adopt this list and also name Hungary and Slovenia; Malta is listed for sports markets only, and where a place is close-only, positions already open may still be closed. In the United States, Polymarket US (QCX LLC, a CFTC-regulated Designated Contract Market) is a separate exchange under its own terms."
+      },
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:ondo",
+      "name": "Ondo · OUSG",
+      "group": "Markets and tokens",
+      "needs": "address",
+      "verdict": "no-answer",
+      "said": "Ethereum's public endpoint did not answer just now (HTTP 599); connecting asks again",
+      "connected": false,
+      "readOnly": true,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:standin-exchange",
+      "name": "Stand-in Exchange",
+      "group": "Markets and tokens",
+      "needs": "cli",
+      "verdict": "connectable",
+      "connected": true,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:standin-pubex",
+      "name": "Stand-in Public Exchange",
+      "group": "Markets and tokens",
+      "needs": "cli",
+      "verdict": "connectable",
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.965Z"
+    },
+    {
+      "connector": "live:standin-pubperps",
+      "name": "Stand-in Perp Exchange",
+      "group": "Markets and tokens",
+      "needs": "cli",
+      "verdict": "connectable",
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.966Z"
+    },
+    {
+      "connector": "live:standin-paper",
+      "name": "Stand-in Paper Exchange",
+      "group": "Markets and tokens",
+      "needs": "cli",
+      "verdict": "connectable",
+      "connected": true,
+      "asked": "2026-10-24T15:03:41.966Z"
+    },
+    {
+      "connector": "live:standin-events",
+      "name": "Stand-in Predictions",
+      "group": "Markets and tokens",
+      "needs": "cli",
+      "verdict": "connectable",
+      "connected": true,
+      "asked": "2026-10-24T15:03:41.966Z"
+    },
+    {
+      "connector": "live:standin-pubevents",
+      "name": "Stand-in Event Exchange",
+      "group": "Markets and tokens",
+      "needs": "cli",
+      "verdict": "connectable",
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.966Z"
+    },
+    {
+      "connector": "live:standin-wallet",
+      "name": "Stand-in Wallet",
+      "group": "Markets and tokens",
+      "needs": "cli",
+      "verdict": "connectable",
+      "connected": true,
+      "asked": "2026-10-24T15:03:41.966Z"
+    },
+    {
+      "connector": "live:standin-broker",
+      "name": "Stand-in Broker",
+      "group": "Markets and tokens",
+      "needs": "cli",
+      "verdict": "connectable",
+      "connected": true,
+      "asked": "2026-10-24T15:03:41.966Z"
+    },
+    {
+      "connector": "live:standin-geo",
+      "name": "Stand-in Geo Exchange",
+      "group": "Markets and tokens",
+      "needs": "cli",
+      "verdict": "connectable",
+      "connected": false,
+      "asked": "2026-10-24T15:03:41.966Z"
+    }
+  ]
+}

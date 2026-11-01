@@ -20,10 +20,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import vm from "node:vm";
-import ts from "typescript";
-import { call, openMux, randomUuid } from "../client/api.js";
-import { mapFrame } from "../client/mapper.js";
+import { call, openMux, randomUuid } from "../client/js/wire/api.js";
+import { mapFrame } from "../client/js/wire/mapper.js";
 
 interface Sent {
   url: string;
@@ -1001,103 +999,6 @@ class FakeNode {
     this.parent = null;
   }
 }
-
-test("the page: answers that won across a reconnect read as the operator's choice; one that lost still reads settled elsewhere", async () => {
-  // End to end over chat.js's OWN gate code (loaded from its source, as
-  // subagents.test.ts does) and the real mux. chat.js has a second path to the
-  // same lie: its own purgeUndeliveredGates (GATE_REPLAY_GRACE_MS) records an
-  // in-flight gate in `lostRaces`, which its approval and question success
-  // branches used to read as "settled elsewhere". A resolved answer is now
-  // never relabelled by it.
-  const chatSource = ts.createSourceFile("chat.js", readFileSync(new URL("../client/chat.js", import.meta.url), "utf8"),
-    ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  const statuses: string[] = [];
-  const cards = new Map<string, FakeNode>();
-  const context = vm.createContext({
-    gates: new Map(), gateNodes: new Map(), gateDelivery: new Map(), answering: new Set(), lostRaces: new Set(),
-    eventsGeneration: 0, activeSession: "s1", convRows: new Map(), mux: null,
-    el: (tag: string, cls?: string, text?: string) => new FakeNode(tag, cls, text),
-    dash: (value: unknown) => (typeof value === "string" && value !== "" ? value : "—"),
-    gateWho: () => "Gravit",
-    status: (text: string) => { statuses.push(text); },
-    failed: (err: unknown) => { statuses.push(`failed: ${String(err)}`); },
-    renderStrip: () => {}, scheduleListRefresh: () => {}, memberSessionIds: () => new Set(), waitingChip: () => new FakeNode("span"),
-    // renderGate's own choice of card (chat.js renderGate), minus the placement in the flow.
-    renderGate: (view: { id: string; kind: string }) => {
-      const node = view.kind === "approval" ? context.approvalNode(view) : context.questionNode(view);
-      context.gateNodes.set(view.id, node);
-      cards.set(view.id, node);
-    },
-  });
-  const names = new Set(["approvalNode", "questionNode", "settle", "liveMux", "gateIsLive", "closeStaleGate", "refusedAnswer",
-    "acceptGate", "acceptGateResolved", "purgeUndeliveredGates"]);
-  const declarations = chatSource.statements.filter((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && names.has(node.name?.text ?? ""));
-  assert.equal(declarations.length, names.size, "the test runs chat.js's own gate code");
-  vm.runInContext(declarations.map((node) => node.getText(chatSource)).join("\n"), context);
-
-  const host = holdAnswers();
-  const graceMs = 15; // chat.js's GATE_REPLAY_GRACE_MS, shortened as replaySettleMs is
-  await withMux({
-    reconnectMs: 5, replaySettleMs: 10,
-    // chat.js's own mux wiring (the openMux call at the bottom of chat.js).
-    onReady: () => {
-      context.eventsGeneration += 1;
-      const generation = context.eventsGeneration;
-      setTimeout(() => context.purgeUndeliveredGates(generation), graceMs);
-    },
-    onGate: (frame) => {
-      if (typeof frame?.eventId === "string") context.gateDelivery.set(frame.eventId, context.eventsGeneration);
-      const view = mapFrame(frame);
-      if (view.kind === "approval" || view.kind === "question") context.acceptGate(view);
-    },
-    onGateGone: (eventId) => context.acceptGateResolved(mapFrame({ type: "cancel", eventId })),
-  }, async ({ mux, socket }) => {
-    // In a browser the page and api.js share one realm. Here chat.js runs in a
-    // vm context, so an answer object it builds is cloned into this realm, as
-    // the wire would carry it (api.js tests a plain object by its prototype).
-    context.mux = { answer: (eventId: string, value: unknown) => mux.answer(eventId, structuredClone(value)) };
-    const outcome = (id: string) => cards.get(id)?.querySelector(".gate-outcome")?.textContent;
-    const button = (id: string, label: string) => {
-      const found = cards.get(id)?.querySelectorAll("button").find((node) => node.textContent === label);
-      assert.ok(found, `no ${label} button on ${id}'s card`);
-      return found;
-    };
-
-    // Won: the reviewer's race, as the operator sees it - an approval and a
-    // question answered, both POSTs still out when the socket drops.
-    socket(0).ready("client-P1");
-    socket(0).event(approvalFrame("ev-won"));
-    socket(0).event({ type: "waterfall", event: "user-questions/request", eventId: "ev-asked", agentId: "s1",
-      request: { questions: [{ id: "q1", question: "How many shares on paper?" }] } });
-    const approved = button("ev-won", "Approve").dispatch("click");
-    const field = cards.get("ev-asked")?.querySelector(".ask-input");
-    assert.ok(field, "the free-text answer field");
-    field.value = "10";
-    await field.dispatch("input");
-    const sent = button("ev-asked", "Send").dispatch("click");
-    socket(0).drop();
-    await sleep(20);
-    socket(1).ready("client-P2"); // nothing to replay: this tab's answers settled both
-    await sleep(60); // api.js's retirement AND chat.js's own purge ran while the POSTs were out
-    host.release("ev-won");
-    host.release("ev-asked");
-    await Promise.all([approved, sent]);
-    assert.equal(outcome("ev-won"), "answered · approve", "the card says what the operator chose - and the host took");
-    assert.equal(outcome("ev-asked"), "answered", "a question answered through the same race reads answered too");
-    assert.ok(statuses.includes("approval allowed-once"), statuses.join("\n"));
-    assert.ok(statuses.includes("answer sent"), statuses.join("\n"));
-    assert.ok(!statuses.some((line) => /came too late|settled elsewhere|not applied|failed/.test(line)), statuses.join("\n"));
-    assert.equal(context.lostRaces.size, 0, "no stale race record is left behind");
-
-    // Lost: the host withdrew the gate from the ANSWERING generation while the POST was out.
-    socket(1).event(approvalFrame("ev-lost"));
-    const lost = button("ev-lost", "Approve").dispatch("click");
-    socket(1).event({ type: "cancel", eventId: "ev-lost" });
-    host.release("ev-lost"); // the no-op `ok` of an answer to a settled gate (gateway/src/index.ts:618-621)
-    await lost;
-    assert.equal(outcome("ev-lost"), "closed · settled elsewhere", "a real lost race still says so");
-  }, host.reply);
-});
 
 test("close() inside the reconnect window is honoured: no second socket, ever", async () => {
   const events: unknown[] = [];

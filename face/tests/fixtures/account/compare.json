@@ -1,0 +1,56 @@
+{
+  "ok": true,
+  "base": "ETH",
+  "side": "buy",
+  "rows": [
+    {
+      "venue": "ex",
+      "venueName": "Stand-in Exchange",
+      "symbol": "ETH/USDT",
+      "name": "ETH / USDT",
+      "kind": "spot",
+      "base": "ETH",
+      "quote": "USDT",
+      "price": 2455.75,
+      "priceIs": "ask",
+      "bid": 2455.45,
+      "ask": 2455.75,
+      "spreadPct": 0.0122,
+      "open": true,
+      "canTrade": true,
+      "ready": true,
+      "best": true
+    },
+    {
+      "venue": "wallet",
+      "venueName": "Stand-in Wallet",
+      "symbol": "WETH/USDC@Base",
+      "name": "Wrapped Ether on Base",
+      "kind": "token",
+      "base": "WETH",
+      "quote": "USDC",
+      "price": 2458.55,
+      "priceIs": "ask",
+      "bid": 2451.17,
+      "ask": 2458.55,
+      "spreadPct": 0.3006,
+      "open": true,
+      "canTrade": true,
+      "ready": true,
+      "note": "swapped by the stand-in wallet itself: nothing for a browser wallet to send",
+      "worse": 0.114
+    }
+  ],
+  "missing": [
+    {
+      "venue": "predict",
+      "venueName": "Stand-in Predictions",
+      "why": "lists no ETH market priced in dollars to compare (event contracts are not compared)"
+    },
+    {
+      "venue": "broker",
+      "venueName": "Stand-in Broker",
+      "why": "lists no ETH market priced in dollars to compare"
+    }
+  ]
+}

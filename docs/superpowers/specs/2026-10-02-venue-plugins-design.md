@@ -9,6 +9,10 @@ answered one by one. The five conflicts between the two shapes — where the gat
 network, one card per write, the ledger — are the next charter's agenda; the demo's README (回灌 Gravit)
 maps its pieces to the seams named here; the conflict record, both positions side by side and the three
 postures, is §12 of the handoff brief (`docs/superpowers/plans/2026-10-05-venue-plugins-unification-handoff.md`).
+**2026-10-20:** posture A was taken for paper venues only — Gravit as a seat at the Account through the face's
+`mcp-account` row, the face's Gate 2 carding every seat write before the Account's own card
+(`2026-10-20-account-seat-design.md`); the `demo/` submodule left the tree, the Account being a program the
+operator installs. C1–C5 for real money remain the next charter's.
 As written: a design extending the skeleton design
 (`2026-08-29-market-strategy-account-skeleton-design.md`, the `alpaca_kit` seam) and the bots design
 (`2026-09-07-bots-and-rooms-design.md`, the tool mask); it prepares, and does not itself fire, the

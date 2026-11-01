@@ -1,0 +1,131 @@
+{
+  "fixture_only": true,
+  "snapshot": {
+    "schema_version": "0.1.0",
+    "snapshot_id": "snapshot-fixture-01",
+    "as_of": "2026-09-30T10:02:00+08:00",
+    "clock": "REPLAY",
+    "universe_version": "synthetic-mainboard-v1",
+    "market_rules_version": "unverified-synthetic",
+    "data_quality": {
+      "status": "PARTIAL",
+      "missing": [
+        "verified_market_rules",
+        "account_snapshot",
+        "calibrated_strategy_predicates"
+      ],
+      "warnings": [
+        "仅有合成证据，不可用于交易或收益估计"
+      ]
+    },
+    "evidence": [
+      {
+        "evidence_id": "e-plan",
+        "kind": "PLAN",
+        "source_ref": "fixture://e-plan",
+        "event_time": "2026-09-30T09:10:00+08:00",
+        "available_at": "2026-09-30T09:10:00+08:00",
+        "ingested_at": "2026-09-30T09:10:00+08:00",
+        "revision_id": "fixture-v1",
+        "content_hash": "862de14b8f34b5ae64f13f31abccfc8ec8f5096ea678f887eaecc4f01c9553f3",
+        "payload": {
+          "plan_id": "plan-fixture-01",
+          "frozen_at": "2026-09-30T09:10:00+08:00",
+          "revision": 1,
+          "observing_from": "2026-09-30T09:30:00+08:00",
+          "expected": "主线核心在确认窗口内修复，题材广度同步改善；否则仅观察。",
+          "invalidate_if": [
+            "主线核心进一步破位",
+            "题材广度恶化",
+            "账户或证券规则无法确认"
+          ],
+          "note": "合成研究计划，不含经过回测校准的阈值。"
+        },
+        "published_at": null,
+        "received_at": "2026-09-30T09:10:00+08:00",
+        "historical_available_at": null,
+        "availability_basis": "SYNTHETIC",
+        "availability_proof_ref": "fixture://generated"
+      },
+      {
+        "evidence_id": "e-market",
+        "kind": "MARKET",
+        "source_ref": "fixture://e-market",
+        "event_time": "2026-09-30T10:02:00+08:00",
+        "available_at": "2026-09-30T10:02:00+08:00",
+        "ingested_at": "2026-09-30T10:02:00+08:00",
+        "revision_id": "fixture-v1",
+        "content_hash": "76939ab0cf02f7b66622d4e7661feac4cccf78b1afa05cb8cc4a4ebd515ca092",
+        "payload": {
+          "symbol": "SYNTHETIC-01",
+          "last_price": "10.20",
+          "relative_strength_direction": "IMPROVING",
+          "recovery_observations": 3,
+          "synthetic": true
+        },
+        "published_at": null,
+        "received_at": "2026-09-30T10:02:00+08:00",
+        "historical_available_at": null,
+        "availability_basis": "SYNTHETIC",
+        "availability_proof_ref": "fixture://generated"
+      },
+      {
+        "evidence_id": "e-theme",
+        "kind": "THEME",
+        "source_ref": "fixture://e-theme",
+        "event_time": "2026-09-30T10:01:59+08:00",
+        "available_at": "2026-09-30T10:01:59+08:00",
+        "ingested_at": "2026-09-30T10:01:59+08:00",
+        "revision_id": "fixture-v1",
+        "content_hash": "6aa07ce1747355fd66a05a7a365c08b6251eafec0c9621746826f39b9bff2064",
+        "payload": {
+          "theme_id": "SYNTHETIC-THEME",
+          "breadth_direction": "IMPROVING",
+          "members_known_at_observation": 12,
+          "synthetic": true
+        },
+        "published_at": null,
+        "received_at": "2026-09-30T10:01:59+08:00",
+        "historical_available_at": null,
+        "availability_basis": "SYNTHETIC",
+        "availability_proof_ref": "fixture://generated"
+      }
+    ],
+    "snapshot_hash": "57d988195f8acd61f5b52be6e4a461878c8fe579e93d24accc2b46ed3d6185ef"
+  },
+  "decision": {
+    "schema_version": "0.1.0",
+    "decision_id": "decision-fixture-wait",
+    "run_id": "run-fixture-wait",
+    "snapshot_id": "snapshot-fixture-01",
+    "as_of": "2026-09-30T10:02:00.200+08:00",
+    "valid_until": "2026-09-30T10:02:05.200+08:00",
+    "mode": "replay",
+    "strategy_id": "NONE",
+    "strategy_version": "research-draft-0.1",
+    "plan_id": "plan-fixture-01",
+    "action": "WAIT",
+    "summary": "关键数据缺失，保持观察。",
+    "evidence_ids": [
+      "e-plan",
+      "e-market",
+      "e-theme"
+    ],
+    "claims": [
+      "本快照不足以支持新增风险。"
+    ],
+    "counterevidence": [
+      "已有方向性改善信号，但不能替代缺失数据。"
+    ],
+    "invalidate_if": [
+      "新快照补齐缺失数据后重新判断"
+    ],
+    "intent": null,
+    "plan_revision": 1,
+    "plan_hash": "862de14b8f34b5ae64f13f31abccfc8ec8f5096ea678f887eaecc4f01c9553f3",
+    "task_revision": 1,
+    "exit_policy_version": null,
+    "exit_policy_hash": null
+  },
+  "expected_order_count": 0
+}

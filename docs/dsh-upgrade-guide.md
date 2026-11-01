@@ -151,6 +151,11 @@ These are the upgrade's real work. Everything else in §3.2 fails a test first.
 | I12 | state outside `~/.dsh` and the repo is `tmpdir()` scratch only | `agents.ts`, `alpaca_kit/mcp/cache.py` | a new state directory the backup misses |
 | — | the operator's MCP server name, as the roles spell it: every `mcp__alpaca-kit__…` in `roles/*/role.yml` must equal `mcp__<serverName>__…` for the row's `serverName` | `~/.dsh/profiles/face/cordis.patch.yml` (`serverName: alpaca-kit`); `roles/*/role.yml` | a renamed server, or a dsh that mints MCP tool names differently: each delegation that names the tools fails at `tools.restrict()` (never the boot) |
 | — | the MCP live roster: `/data/plugins.json` = `alpaca-kit active 10`, `akshare active 14` | runbook §7 A | the only visible sign of G4 |
+| J1 (2026-10-26) | the Lunhui rows' tools are `defineTool` objects from `@deepseek-ai/dsh-tools` (declared exactly in `face/package.json`): `parameters` as `{type, description, required?}` per key, `output.schema`, `execute(args, exec)`; a thrown `LunhuiError` reaches the model as `Error: <CODE> …` | `face/plugins/lunhui/runs-row.mjs`, `lib/freeze-tool.mjs`, `lib/module-tool.mjs` | a changed parameter grammar, a required-key spelling or a different error-to-text mapping: `lunhui-rows`, `lunhui-module-tool` and `smoke` (the seventeen tools registered) fail first, but the `Error: ` prefix the role personas and the protocol rely on is pinned only by the module tests' message matches |
+| J2 (2026-10-26) | the backbone `ctx.provide("lunhuiRuns", service)` under `ctx.effect`, and ten rows `inject = ["tools", "lunhuiRuns"]` as a required service: without the backbone a row stays pending and the strict row audit refuses the boot | `face/plugins/lunhui/*-row.mjs`; `boot.ts`'s audit | a cordis that resolves an unprovided required service differently (a silent skip instead of pending) mounts rows with no service; the boot refusal is reasoned from the audit's code and not pinned by a boot (`DEVELOPMENT.md` §4.3) |
+| J3 (2026-10-26) | the caller gate reads `exec.agent.session.header`: `origin === "subagent"` and not `isSeeded` is a delegated child (`NOT_GRAVIT` on a freeze), and the same predicate admits a module submit (`NOT_A_ROLE` otherwise, A23) | `face/plugins/lunhui/lib/errors.mjs` `callerIsChild`, `callerIsRole` | a header that renames or drops `origin` or `isSeeded`, or an `exec` without `agent.session`: every submit refused, or every freeze admitted from a child; `roles-smoke` (a role child's submit lands, Gravit's is `NOT_A_ROLE`) fails first under `FACE_SMOKE=1` only |
+| J4 (2026-10-26) | a module context is at most 30 KiB of UTF-8 JSON (A24), under dsh-base's spill cap `maxInlineTokens: 12500` (D18): a role has no file tool to read a spilled result | `face/plugins/lunhui/lib/contract-core.mjs` `MAX_CONTEXT_BYTES`; installed `dsh-base/cordis.patch.yml` `spill-policy` | a lower spill cap, or one counted in another unit, spills a maximal context (the mode's reads 30,233 bytes at every input's maximum) and the role sees a preview; no test boots a maximal context through the spill policy |
+| J5 (2026-10-26) | the Lunhui rows compose as eleven file-plugin rows by absolute `file:` URL in one insert after the seat; `bootFace` structured-clones every patch, so a row's config carries data only (a freeze row's test `now` cannot cross, hence the smokes' `Date` shift) | `face/src/lunhui.ts` `lunhuiPatches`; `tests/boot.test.ts` | a Loader that resolves `file:` names differently, or keeps functions in config, changes what a patch can carry; `boot.test.ts` pins the insert |
 
 ### 3.2 By test: the pinned seams and what fails first
 
@@ -575,3 +580,20 @@ first-request measurements are still the operator's to run (§5, `DEVELOPMENT.md
   pin sweep never sees them. Decide: declare them exact.
 - The README "Run" sample boot line lists seven presets; the operator's live face declares nine
   (two untracked bots). Not an error; the sample will not match a real boot.
+
+### 7.5 Seams the Lunhui rows use (dated 2026-10-26, plans 1–4 of the modules spec)
+
+Entered as J1–J5 in §3.1 and in the seams inventory's 2026-10-26 addition. Re-check at every pin:
+
+- `defineTool`'s object shape and the thrown-error text (J1): the role personas, the protocol and
+  the repair lines all read refusals as `Error: <CODE> …`, and a module's `修复：` repair line rides
+  in the same message;
+- `ctx.provide` / `inject` of the `lunhuiRuns` service and the pending-service audit (J2): ten rows
+  depend on one provider; a boot pinning the refusal is still owed;
+- `exec.agent.session.header`'s `origin` and `isSeeded` (J3): the only fence between Gravit and a
+  module submit, and it admits any unseeded child (R44), since dsh's header cannot tell a role
+  child from a plain spawn child;
+- the spill cap against the 30 KiB contexts (J4): the mode's maximal context is 30,233 bytes and
+  the reviewer's 30,703 (the module tests' pins), both under the cap in either unit today;
+- the structured clone of patches (J5), which forced the smokes to shift `globalThis.Date` for a
+  boot's lifetime instead of passing a clock.

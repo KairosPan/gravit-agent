@@ -60,8 +60,7 @@ import { quoteTime } from "./desk-tools.ts";
 import { etClock, etTime } from "./et.ts";
 import { HttpError } from "./http.ts";
 import type { BuiltinProducer, ProducerInput, ProducerOutput } from "./producer.ts";
-import type { QuoteHub } from "./quotes.ts";
-import type { LiveQuote, ProviderState, QuoteIdentity, QuotePayload } from "./quote-types.ts";
+import type { UsLiveQuote as LiveQuote, UsProviderState as ProviderState, UsQuoteIdentity as QuoteIdentity, UsQuotePayload as QuotePayload, UsQuoteSource } from "./us-quotes.ts";
 import { isEtDate } from "./standing.ts";
 
 /* ---------- the symbols ---------- */
@@ -106,7 +105,7 @@ const PROVIDER_STATES: ReadonlySet<string> = new Set<ProviderState["status"]>(["
  * `desk_quotes`), the repository root its files are read under, and `now` (default `Date.now`), the clock the
  * brief's times are read against, for tests. */
 export interface BriefDeps {
-  hub: Pick<QuoteHub, "snapshot">;
+  hub: UsQuoteSource;
   root: string;
   now?: () => number;
   /** The symbol bound, {@link BRIEF_SYMBOLS_MAX} by default; for tests. */

@@ -1,0 +1,274 @@
+// Every sheet's fields, title, go word and draft (spec 2026-10-22 §6.3–§6.4, plan 2 Task 4): each draft the Account's own
+// shape for its type (the owner-path map §1.4–§1.5, §3.8–§3.10, §3.12, §3.14, §3.15, §3.17, §4.3) — nothing added, nothing
+// renamed — or, while the form is not complete, the words for what is missing; and which sheet grants an agent's ask.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { SHEET_KINDS, fieldsOf, draftOf, titleOf, goWord, grantOf, limitSeedOf, letDeviceSeedOf, paperSeedOf } from '../../client/js/host/sheet-view.js';
+import { venuesOf } from '../../client/js/host/account-view.js';
+
+const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
+const NOW = Date.UTC(2026, 9, 22, 7, 35, 46);
+const DAY = 86_400_000;
+const ZERO = '0x0000000000000000000000000000000000000000';
+// the form as the owner left it: each named field's value set, the rest as fieldsOf drew them
+const set = (fields, values) => fields.map(f => (Object.hasOwn(values, f.name) ? { ...f, value: values[f.name] } : f));
+const valueOf = (fields, name) => fields.find(f => f.name === name)?.value;
+const AGENT = '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6';
+
+test('SHEET_KINDS: every kind with a title and its go word', () => {
+  assert.deepEqual(SHEET_KINDS, ['letIn', 'limit', 'endLimit', 'revoke', 'connect', 'paper', 'topUp', 'resetPaper', 'disconnect',
+    'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order']);
+  assert.deepEqual(SHEET_KINDS.map(k => goWord(k)), ['Let it in', 'Give the limit', 'End the limit', 'Revoke', 'Connect', 'Open the account',
+    'Top up', 'Start over', 'Disconnect', 'Approve', 'Decline', 'Let it sign', 'Sign out', 'Sign and place']);
+  assert.equal(goWord('approveCard', { decision: 'reject' }), 'Reject');
+  assert.equal(goWord('approveCard', { decision: 'approve' }), 'Approve');
+  for (const k of SHEET_KINDS) assert.ok(titleOf(k, {}).length > 0, k);
+  assert.equal(titleOf('letIn', { name: 'Claude Code' }), 'Let Claude Code in');
+  assert.equal(goWord('nonsense'), '');
+});
+
+test('letIn: approveAgent for the knocking key, its address lower-cased, good for the days picked', () => {
+  const seed = { address: '0x3A087530887BD175CCC38828EE3776E5B6EA1AC6', name: 'Claude Code' };
+  const fields = fieldsOf('letIn', seed);
+  assert.deepEqual(fields.map(f => [f.name, f.type]), [['address', 'text'], ['name', 'text'], ['days', 'seg']]);
+  assert.deepEqual(valueOf(fields, 'days'), '30');
+  assert.deepEqual(fields.find(f => f.name === 'days').options.map(o => o.value), ['1', '7', '30', '90']);
+  assert.deepEqual(draftOf('letIn', set(fields, { days: '7' }), seed, NOW),
+    { type: 'approveAgent', agentAddress: AGENT, agentName: 'Claude Code', validUntil: NOW + 7 * DAY });
+  assert.equal(typeof draftOf('letIn', set(fields, { address: '' }), seed, NOW), 'string');
+  assert.equal(typeof draftOf('letIn', set(fields, { address: '0x3a08' }), seed, NOW), 'string');
+  assert.equal(typeof draftOf('letIn', set(fields, { name: '  ' }), seed, NOW), 'string');
+});
+
+test('limit: approveSpend over the venues picked, paper first, the amounts as typed', () => {
+  const venues = venuesOf(fx('account'));
+  const seed = { address: AGENT, name: 'Claude Code', venues };
+  const fields = fieldsOf('limit', seed);
+  assert.deepEqual(fields.map(f => [f.name, f.type]), [['allow', 'pick'], ['perPayment', 'number'], ['budget', 'number'], ['days', 'seg']]);
+  const ids = fields.find(f => f.name === 'allow').options.map(o => o.value);
+  assert.deepEqual(ids.slice(0, 2), ['paper', 'paper-momentum']);
+  assert.equal(ids.length, venues.length);
+  assert.deepEqual(valueOf(fields, 'allow'), []);
+  const done = set(fields, { allow: ['ex', 'paper-momentum'], perPayment: '100', budget: '1000', days: '30' });
+  assert.deepEqual(draftOf('limit', done, seed, NOW), {
+    type: 'approveSpend', agent: AGENT, scope: 'trade', allow: 'paper-momentum,ex', perPayment: '100', budget: '1000', windowHours: 0, validUntil: NOW + 30 * DAY,
+  });
+  // what is still missing, in words
+  assert.equal(draftOf('limit', set(done, { allow: [] }), seed, NOW), 'Pick at least one venue');
+  assert.equal(draftOf('limit', set(done, { perPayment: '' }), seed, NOW), 'Type an amount');
+  assert.equal(draftOf('limit', set(done, { budget: '' }), seed, NOW), 'Type a budget');
+  assert.equal(typeof draftOf('limit', set(done, { perPayment: '0' }), seed, NOW), 'string');
+  assert.equal(typeof draftOf('limit', set(done, { perPayment: '1e3' }), seed, NOW), 'string');
+  assert.equal(draftOf('limit', set(done, { perPayment: '2000' }), seed, NOW), 'The amount per order is more than the budget');
+});
+
+test('limit: allow is never *, and never a venue the seed does not list', () => {
+  const seed = { address: AGENT, name: 'Claude Code', venues: [{ id: '*', name: 'Every venue' }, { id: 'paper', name: 'Paper', paper: true }] };
+  const fields = fieldsOf('limit', seed);
+  assert.deepEqual(fields.find(f => f.name === 'allow').options.map(o => o.value), ['paper']);
+  const draft = draftOf('limit', set(fields, { allow: ['*', 'paper', 'okx'], perPayment: '10', budget: '10' }), seed, NOW);
+  assert.equal(draft.allow, 'paper');
+  assert.equal(draftOf('limit', set(fields, { allow: ['*'], perPayment: '10', budget: '10' }), seed, NOW), 'Pick at least one venue');
+  // a standing limit's venues and an asked one are ticked only where the venue is listed
+  assert.deepEqual(valueOf(fieldsOf('limit', { ...seed, current: { allow: ['paper', '*'], perPayment: '', budget: '' }, asked: 'standin-pubex' }), 'allow'), ['paper']);
+});
+
+test('endLimit: the same agent, scope and venues at zero, for a day', () => {
+  assert.deepEqual(fieldsOf('endLimit', { address: AGENT, allow: 'paper,ex' }), []);
+  assert.deepEqual(draftOf('endLimit', [], { address: AGENT, allow: 'paper,ex' }, NOW),
+    { type: 'approveSpend', agent: AGENT, scope: 'trade', allow: 'paper,ex', perPayment: '0', budget: '0', windowHours: 0, validUntil: NOW + DAY });
+  assert.equal(draftOf('endLimit', [], { address: AGENT, allow: ['paper', 'ex'] }, NOW).allow, 'paper,ex');
+  assert.equal(typeof draftOf('endLimit', [], { address: '', allow: 'paper' }, NOW), 'string');
+});
+
+test('revoke: approveAgent with the zero address and the key\'s name, until 0', () => {
+  assert.deepEqual(draftOf('revoke', fieldsOf('revoke', { name: 'Claude Code' }), { name: 'Claude Code' }, NOW),
+    { type: 'approveAgent', agentAddress: ZERO, agentName: 'Claude Code', validUntil: 0 });
+  assert.equal(typeof draftOf('revoke', [], {}, NOW), 'string');
+});
+
+test('connect: connectVenue with the connector picked, the venue, its name and the key file\'s path', () => {
+  const options = fx('account').connectLive.options;
+  const seed = { options };
+  const fields = fieldsOf('connect', seed);
+  assert.deepEqual(fields.map(f => [f.name, f.type]), [['connector', 'select'], ['exchange', 'select'], ['venue', 'text'], ['label', 'text'], ['credentialRef', 'text']]);
+  assert.deepEqual(fields.find(f => f.name === 'exchange').options.map(o => o.value), ['binance', 'okx', 'bybit', 'kraken']);
+  const connectors = fields.find(f => f.name === 'connector').options.map(o => o.value);
+  assert.ok(connectors.includes('live:exchange'));
+  assert.ok(!connectors.includes('live:paper'));   // a paper account is its own sheet
+  const done = set(fields, { connector: 'live:alpaca-paper', venue: 'alpaca-paper', label: 'Alpaca paper', credentialRef: 'credentials/alpaca-paper/keys.json' });
+  assert.deepEqual(draftOf('connect', done, seed, NOW),
+    { type: 'connectVenue', venue: 'alpaca-paper', connector: 'live:alpaca-paper', label: 'Alpaca paper', credentialRef: 'credentials/alpaca-paper/keys.json' });
+  // the path left blank is the option's own default, for this venue
+  assert.equal(draftOf('connect', set(done, { credentialRef: '' }), seed, NOW).credentialRef, 'credentials/alpaca-paper/api-key.json');
+  assert.equal(draftOf('connect', set(done, { connector: '' }), seed, NOW), 'Pick what to connect');
+  assert.equal(draftOf('connect', set(done, { venue: '' }), seed, NOW), 'Type a venue id');
+  assert.equal(draftOf('connect', set(done, { label: '' }), seed, NOW), 'Type a name');
+});
+
+test('connect: an exchange account signs live:exchange:<the exchange picked>, its venue id the exchange\'s unless typed', () => {
+  const seed = { options: fx('account').connectLive.options };
+  const fields = set(fieldsOf('connect', seed), { connector: 'live:exchange', exchange: 'okx', venue: 'okx-main', label: 'OKX main' });
+  assert.deepEqual(draftOf('connect', fields, seed, NOW),
+    { type: 'connectVenue', venue: 'okx-main', connector: 'live:exchange:okx', label: 'OKX main', credentialRef: 'credentials/okx-main/api-key.json' });
+  const plain = draftOf('connect', set(fields, { venue: '' }), seed, NOW);
+  assert.equal(plain.venue, 'okx');
+  assert.equal(plain.connector, 'live:exchange:okx');
+  assert.equal(plain.credentialRef, 'credentials/okx/api-key.json');
+  assert.equal(draftOf('connect', set(fields, { exchange: '' }), seed, NOW), 'Pick the exchange');
+  assert.equal(draftOf('connect', set(fields, { exchange: 'coinbase' }), seed, NOW), 'Pick the exchange');
+  // an option that already names its exchange signs as it is
+  const named = { options: [{ connector: 'live:exchange:okx', kind: 'exchange', needs: 'key-file', label: 'OKX', defaultRef: 'credentials/<venue>/api-key.json', venues: ['okx'] }] };
+  const namedFields = fieldsOf('connect', named);
+  assert.ok(!namedFields.some(f => f.name === 'exchange'));
+  assert.equal(draftOf('connect', set(namedFields, { connector: 'live:exchange:okx', venue: 'okx', label: 'OKX' }), named, NOW).connector, 'live:exchange:okx');
+});
+
+test('paper: a new paper account from its name and starting dollars, or a kept book continued', () => {
+  const books = [{ venue: 'paper-swing', name: 'Swing · paper', cashUsd: 9000, startCashUsd: 10000, addedUsd: 0, createdAt: '', updatedAt: '', holdings: 0, positions: 0, open: 0 }];
+  const seed = { books };
+  const fields = fieldsOf('paper', seed);
+  assert.deepEqual(fields.map(f => [f.name, f.type]), [['book', 'select'], ['label', 'text'], ['usd', 'number']]);
+  assert.deepEqual(fields.find(f => f.name === 'book').options.map(o => o.value), ['', 'paper-swing']);
+  assert.deepEqual(draftOf('paper', set(fields, { label: 'Momentum', usd: '25000' }), seed, NOW),
+    { type: 'connectVenue', venue: 'paper-momentum', connector: 'live:paper', label: 'Momentum', credentialRef: '25000' });
+  assert.deepEqual(draftOf('paper', set(fields, { book: 'paper-swing' }), seed, NOW),
+    { type: 'connectVenue', venue: 'paper-swing', connector: 'live:paper', label: 'Swing · paper', credentialRef: '' });
+  assert.equal(draftOf('paper', set(fields, { label: '', usd: '25000' }), seed, NOW), 'Type a name');
+  assert.equal(draftOf('paper', set(fields, { label: 'Momentum', usd: '' }), seed, NOW), 'Type an amount');
+});
+
+test('paper: a new id already in use on the page or by a kept book takes -2, -3…', () => {
+  const seed = { books: [{ venue: 'paper-swing', name: 'Swing · paper' }], venues: [{ id: 'paper-momentum' }, { id: 'paper-momentum-2' }] };
+  const fields = fieldsOf('paper', seed);
+  assert.equal(draftOf('paper', set(fields, { label: 'Momentum', usd: '1000' }), seed, NOW).venue, 'paper-momentum-3');
+  assert.equal(draftOf('paper', set(fields, { label: 'Swing', usd: '1000' }), seed, NOW).venue, 'paper-swing-2');
+  assert.equal(draftOf('paper', set(fields, { label: 'Value', usd: '1000' }), seed, NOW).venue, 'paper-value');
+});
+
+test('topUp and resetPaper: the paper venue and the dollars; an empty amount is what is missing', () => {
+  const seed = { venue: 'paper-momentum', name: 'Momentum · paper' };
+  const top = fieldsOf('topUp', seed);
+  assert.deepEqual(top.map(f => [f.name, f.type]), [['usd', 'number']]);
+  assert.deepEqual(draftOf('topUp', set(top, { usd: '5000' }), seed, NOW), { type: 'topUpPaper', venue: 'paper-momentum', usd: '5000' });
+  assert.equal(draftOf('topUp', top, seed, NOW), 'Type an amount');
+  assert.equal(typeof draftOf('topUp', set(top, { usd: 'lots' }), seed, NOW), 'string');
+  const reset = fieldsOf('resetPaper', seed);
+  assert.deepEqual(draftOf('resetPaper', set(reset, { usd: '10000' }), seed, NOW), { type: 'resetPaper', venue: 'paper-momentum', usd: '10000' });
+  assert.equal(draftOf('resetPaper', set(reset, { usd: '' }), seed, NOW), 'Type an amount');
+});
+
+test('disconnect, declineAsk, signOut: one field each from the seed', () => {
+  assert.deepEqual(draftOf('disconnect', fieldsOf('disconnect', { venue: 'ex' }), { venue: 'ex' }, NOW), { type: 'disconnectVenue', venue: 'ex' });
+  assert.deepEqual(draftOf('declineAsk', [], { ask: 'ask-0001' }, NOW), { type: 'answerAsk', ask: 'ask-0001', decision: 'decline' });
+  assert.deepEqual(draftOf('signOut', [], { kid: 'a5048199a8081854' }, NOW), { type: 'signOut', device: 'device:a5048199a8081854' });
+  assert.equal(typeof draftOf('disconnect', [], {}, NOW), 'string');
+  assert.equal(typeof draftOf('declineAsk', [], {}, NOW), 'string');
+  assert.equal(typeof draftOf('signOut', [], {}, NOW), 'string');
+});
+
+test('approveCard: the card, its hash and the decision, as the page shows them', () => {
+  const card = fx('account').cards[0];
+  const seed = { card: card.id, hash: card.hash, decision: 'approve' };
+  const draft = draftOf('approveCard', fieldsOf('approveCard', seed), seed, NOW);
+  assert.deepEqual(draft, { type: 'approveCard', card: 'card-0001', action: card.hash, decision: 'approve' });
+  assert.equal(draftOf('approveCard', [], { ...seed, decision: 'reject' }, NOW).decision, 'reject');
+  assert.equal(typeof draftOf('approveCard', [], { ...seed, decision: 'maybe' }, NOW), 'string');
+  // the Account's preparation of such a draft carries exactly its fields and the nonce
+  const prepared = fx('prepared-card').action;
+  assert.deepEqual(Object.keys(prepared).filter(k => k !== 'nonce').sort(), Object.keys(draft).sort());
+});
+
+test('letDevice: the signers JSON, the owners and the new device sorted without repeats, threshold 1', () => {
+  const seed = { owners: ['device:ffff000011112222', { id: 'device:a5048199a8081854' }, 'device:ffff000011112222'], kid: '0123456789abcdef' };
+  const draft = draftOf('letDevice', fieldsOf('letDevice', seed), seed, NOW);
+  assert.deepEqual(Object.keys(draft), ['type', 'signers']);
+  assert.equal(draft.type, 'convertToMultiSigUser');
+  assert.equal(draft.signers, '{"authorizedUsers":["device:0123456789abcdef","device:a5048199a8081854","device:ffff000011112222"],"threshold":1}');
+  // a device already among the owners is listed once
+  const again = draftOf('letDevice', [], { owners: ['device:0123456789abcdef'], kid: '0123456789abcdef' }, NOW);
+  assert.deepEqual(JSON.parse(again.signers), { authorizedUsers: ['device:0123456789abcdef'], threshold: 1 });
+  assert.equal(typeof draftOf('letDevice', [], { owners: [] }, NOW), 'string');
+  // the list replaces the owners: with none to keep it would drop every device that signs, so it is never drafted
+  assert.equal(draftOf('letDevice', [], { owners: [], kid: '0123456789abcdef' }, NOW), 'No owner device to sign with');
+  assert.equal(draftOf('letDevice', [], { kid: '0123456789abcdef' }, NOW), 'No owner device to sign with');
+});
+
+// plan 2 Task 13 fix round M3: the two seeds the wiring built, here beside limitSeedOf
+test("letDeviceSeedOf: the page's owners and this page's own device (signing before any page names it), once each, and the waiting key", () => {
+  const page = fx('account');
+  assert.deepEqual(letDeviceSeedOf(page, { role: 'signs', kid: 'ded8a5bf01a7a593' }, 'feedface00000001'),
+    { owners: ['device:a5048199a8081854', 'device:ded8a5bf01a7a593'], kid: 'feedface00000001' });
+  const named = { ...page, signers: { ...page.signers, owners: [...page.signers.owners, { id: 'device:ded8a5bf01a7a593', kind: 'device' }] } };
+  assert.deepEqual(letDeviceSeedOf(named, { kid: 'ded8a5bf01a7a593' }, 'feedface00000001').owners, ['device:a5048199a8081854', 'device:ded8a5bf01a7a593'], 'once');
+  assert.deepEqual(letDeviceSeedOf(null, { kid: '' }, undefined), { owners: [], kid: '' }, 'no page and no key: nothing to keep');
+  // the draft it seeds keeps every owner
+  const draft = draftOf('letDevice', [], letDeviceSeedOf(page, { kid: 'ded8a5bf01a7a593' }, 'feedface00000001'), NOW);
+  assert.deepEqual(JSON.parse(draft.signers).authorizedUsers, ['device:a5048199a8081854', 'device:ded8a5bf01a7a593', 'device:feedface00000001']);
+});
+
+test("paperSeedOf: the kept books read and the page's venue ids, so a new paper id is never one in use", () => {
+  const page = fx('account');
+  const books = { ok: true, books: [{ venue: 'paper-old', name: 'Old', cashUsd: 900 }, { name: 'no venue' }] };
+  const seed = paperSeedOf(page, books);
+  assert.deepEqual(seed.books.map(b => b.venue), ['paper-old']);
+  assert.deepEqual(seed.venues, venuesOf(page).map(v => ({ id: v.id })));
+  assert.deepEqual(paperSeedOf(null, null), { books: [], venues: [] });
+  const fields = set(fieldsOf('paper', seed), { label: 'Momentum', usd: '1000' });
+  assert.equal(draftOf('paper', fields, seed, NOW).venue, 'paper-momentum-2', "the page's paper-momentum in use");
+});
+
+test('grantOf: a limit or a venue asks for a limit, a knock to be let in, a top-up a top-up; the rest are the Account page\'s', () => {
+  const page = fx('account');
+  const [limit, venue] = page.asks;
+  const venues = [
+    { id: 'paper', name: 'Stand-in Paper', paper: true }, { id: 'paper-momentum', name: 'Momentum · paper', paper: true },
+    { id: 'broker', name: 'Stand-in Broker', paper: false }, { id: 'ex', name: 'Stand-in Exchange', paper: false },
+    { id: 'agent-claude-code', name: 'Agent wallet · Claude Code', paper: false }, { id: 'wallet', name: 'Stand-in Wallet', paper: false },
+    { id: 'predict', name: 'Stand-in Predictions', paper: false },
+  ];
+  const current = { allow: ['ex', 'predict', 'wallet'], perPayment: '150', budget: '600' };
+  assert.deepEqual(grantOf(limit, page), { kind: 'limit', seed: { address: AGENT, name: 'Claude Code', venues, current, asked: 'ex', budget: '1000' } });
+  assert.deepEqual(grantOf(venue, page), { kind: 'limit', seed: { address: AGENT, name: 'Claude Code', venues, current, asked: 'standin-pubex', budget: '' } });
+  const ask = over => ({ id: 'ask-0009', agent: AGENT, agentName: 'Claude Code', venue: '', usd: '', text: '', at: '', expiresAt: '', ...over });
+  assert.deepEqual(grantOf(ask({ kind: 'letIn' })), { kind: 'letIn', seed: { address: AGENT, name: 'Claude Code' } });
+  assert.deepEqual(grantOf(ask({ kind: 'topup', venue: 'paper-momentum', usd: '500' })), { kind: 'topUp', seed: { venue: 'paper-momentum', usd: '500' } });
+  for (const kind of ['session', 'leverage', 'mode', 'memory']) assert.equal(grantOf(ask({ kind })), null, kind);
+  assert.equal(grantOf(null), null);
+  // a granted top-up opens with its dollars filled in
+  assert.equal(valueOf(fieldsOf('topUp', grantOf(ask({ kind: 'topup', venue: 'paper-momentum', usd: '500' })).seed), 'usd'), '500');
+});
+
+test('a granted limit keeps the agent\'s standing venues and amounts, the asked venue ticked and the asked budget', () => {
+  const page = fx('account');
+  const [limit, venue] = page.asks;
+  const { seed } = grantOf(limit, page);
+  const fields = fieldsOf('limit', seed);
+  assert.deepEqual(valueOf(fields, 'allow'), ['ex', 'predict', 'wallet']);
+  assert.equal(valueOf(fields, 'perPayment'), '150');
+  assert.equal(valueOf(fields, 'budget'), '1000');
+  assert.deepEqual(draftOf('limit', fields, seed, NOW), {
+    type: 'approveSpend', agent: AGENT, scope: 'trade', allow: 'ex,wallet,predict', perPayment: '150', budget: '1000', windowHours: 0, validUntil: NOW + 30 * DAY,
+  });
+  // a venue ask for a venue not on the page keeps the standing limit as it is
+  const asked = fieldsOf('limit', grantOf(venue, page).seed);
+  assert.deepEqual(valueOf(asked, 'allow'), ['ex', 'predict', 'wallet']);
+  assert.equal(valueOf(asked, 'budget'), '600');
+  // an asked budget under the standing per-order amount brings the per-order amount down to it
+  assert.equal(valueOf(fieldsOf('limit', grantOf({ ...limit, usd: '100' }, page).seed), 'perPayment'), '100');
+  // a venue asked for that is on the page is ticked beside the standing ones
+  assert.deepEqual(valueOf(fieldsOf('limit', grantOf({ ...limit, venue: 'paper' }, page).seed), 'allow'), ['ex', 'predict', 'wallet', 'paper']);
+});
+
+test('limitSeedOf: the page\'s venues, paper first, and the agent\'s standing trade limit by address in any case', () => {
+  const page = fx('account');
+  const seed = limitSeedOf(page, AGENT.toUpperCase().replace('0X', '0x'), 'Claude Code');
+  assert.deepEqual(seed.venues.slice(0, 2).map(v => v.id), ['paper', 'paper-momentum']);
+  assert.deepEqual(seed.current, { allow: ['ex', 'predict', 'wallet'], perPayment: '150', budget: '600' });
+  // the venues and payees rows are not the trade limit; an agent with none starts blank
+  assert.equal(limitSeedOf(page, '0x1111111111111111111111111111111111111111', 'Other').current, null);
+  page.spend[0].expired = true;
+  assert.equal(limitSeedOf(page, AGENT, 'Claude Code').current, null);
+  assert.deepEqual(limitSeedOf({ ok: false }, AGENT, 'Claude Code'), { address: AGENT, name: 'Claude Code', venues: [], current: null });
+});

@@ -35,9 +35,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join, relative, resolve } from "node:path";
 import { entryListSchema } from "@deepseek-ai/cordis-plugin-include";
 import { dump, load } from "js-yaml";
-import { isJsonBody, isTrustedDataRequest } from "./data.ts";
 import { DESK_PRESET } from "./desk-names.ts";
-import { FORBIDDEN, HttpError, readBody } from "./http.ts";
+import { FORBIDDEN, HttpError, isJsonBody, isTrustedDataRequest, readBody } from "./http.ts";
 import { DEFAULT_PRESET, LEGACY_PRESET } from "./overlay.ts";
 import type { RouteRegistrar } from "./static.ts";
 
@@ -63,21 +62,20 @@ export const isBotId = (value: unknown): value is string =>
 export const BOT_PLUGIN_RELATIVE = "../../face/plugins/bot.js";
 
 /** What a voice keeps of Gravit's roster (spec §2.2.1): the shell, file read
- *  and edit, search, web, skills, the question tool, and the market-data reads
- *  of the alpaca-kit MCP server under whatever the operator named it. Absent
- *  by design: delegation (`subagent*`, `workflow`, `ralph`), goals and todos,
- *  background jobs, every `agent_<bin>`, and every order or account tool -
- *  `orders`, `place_order`, `cancel_order`. Names come from the tree the face
- *  boots (`tools.schemas()`, dumped 2026-09-07); `mcp__*__<raw>` expands
- *  against the live tree in the plugin, again after every tool change.
+ *  and edit, search, web, skills and the question tool. Absent by design:
+ *  delegation (`subagent*`, `workflow`, `ralph`), goals and todos, background
+ *  jobs, every `agent_<bin>`, and every order or account tool - the Account
+ *  seat's included. The alpaca-kit market reads left with that server (stage 3
+ *  of the Account graft). Names come from the tree the face boots
+ *  (`tools.schemas()`, dumped 2026-09-07); an `mcp__*__<raw>` entry, where a
+ *  bot names one, expands against the live tree in the plugin, again after
+ *  every tool change.
  *  `str_replace_editor` left dsh-base at 0.2.0 (commit 36a4665144) and exists
  *  only while the face's policy layer keeps it (PLAN D9); without it the
  *  plugin logs the name as missing and masks to the rest. */
 export const DEFAULT_ALLOW: readonly string[] = [
   "ask_user_question", "bash", "edit", "glob", "grep", "read", "read_image", "skill",
   "str_replace_editor", "web_search", "write",
-  "mcp__*__earnings", "mcp__*__daily_bars", "mcp__*__calendar", "mcp__*__corp_actions",
-  "mcp__*__market_snapshot", "mcp__*__screen", "mcp__*__breadth",
 ];
 
 /** The persona a fresh copy carries until the form or `updateSoul` replaces it. */

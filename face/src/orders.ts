@@ -1,13 +1,15 @@
-/** The per-order approval gate: what makes `place_order` raise a card.
+/** Gate 2, the per-order approval gate: what makes a write of the Account
+ * seat raise a card.
  *
- * Gate 1 is registration — `ALPACA_KIT_ENABLE_ORDERS=1` plus both APCA keys, in
- * the operator's harness, decides whether the mutating tools exist at all
- * (`alpaca_kit/mcp/tools.py:298`). Gate 2 is this: given that they DO exist,
- * every call to one stops for a human first.
+ * Gravit's only order path is its seat at Linqi's Account (`account-seat.ts`):
+ * the seat's twelve writes — every tool that places, changes or cancels an
+ * order, moves money, pays or sets leverage — and any tool under the face's
+ * own seat prefix the face has not classified stop for a human here first,
+ * and then again on the Account's own Guard card. Nothing else is gated: the
+ * seat's reads and words, AKShare, the host's tools pass untouched.
  *
- * Until 2026-09-04 Gate 2 did not exist for orders. The approval CHANNEL was
- * real and drilled, but its only producer was a sandbox escalation, and an MCP
- * call never takes that path — so arming the flag would have let `place_order`
+ * The approval CHANNEL's only producer used to be a sandbox escalation, and an
+ * MCP call never takes that path — so without this module an order tool would
  * run with no card and no `approval/asked` event. This module is the producer.
  *
  * WHAT IT IS NOT. `tools/execute` runs AFTER the guard below, is handed the
@@ -15,29 +17,89 @@
  * — the declaration says only `exec.signal` may change, `:155-158`, but the
  * object is a plain unfrozen spread, `:1445`), and the body then re-resolves
  * the tool by its CURRENT name (`:1578`) — so a `tools/execute` wrapper can
- * rename a guard-approved call into `place_order` after the fact. Nothing here changes that, and Gravit has an unrestricted
- * shell besides. Per charter Rule 2 — enforce below the layer that runs
- * arbitrary code, or admit the gate is prose — this gates the model's ordinary
- * tool calls. It is not containment. `face/README.md` says so where an operator
- * will read it.
+ * rename a guard-approved call into a seat write after the fact. Nothing here
+ * changes that, and Gravit has an unrestricted shell besides. Per charter
+ * Rule 2 — enforce below the layer that runs arbitrary code, or admit the gate
+ * is prose — this gates the model's ordinary tool calls. It is not
+ * containment. `face/README.md` says so where an operator will read it.
  * @module
  */
 
-/** The mutating tools, matched by their RAW names rather than by a full public
- * name. dsh mints `mcp__<serverName>__<rawName>` (NEW
- * `packages/mcp/mcp-client/src/tools.ts:81-87`, `publicToolName`)
- * and the serverName is the OPERATOR's — it lives in their cordis patch, not in
- * this repo — so a constant list of full names would quietly stop matching the
- * day they rename the row. Anchoring on the raw suffix survives that rename.
- *
- * The read-only `orders` listing (`alpaca_kit/mcp/tools.py:292`) deliberately
- * does NOT match: a substring test for "order" would gate a harmless query. */
-const ORDER_RAW_NAMES = ["place_order", "cancel_order"] as const;
+import { SEAT_TOOL_PREFIX } from "./account-seat.ts";
 
-/** The marker alpaca-kit stamps on both mutating tools' descriptions
- * (`alpaca_kit/mcp/tools.py:303,307`). Cross-checked against the name test in
- * {@link auditOrderTools} so a rename on either side is caught by the other. */
-export const OPERATOR_GATED_MARKER = "(operator-gated)";
+/** The Account seat's write tools (src/account-seat.ts; spec 2026-10-20 §5.2):
+ * everything that places, changes or cancels an order, moves money, pays or
+ * sets leverage at Linqi's Account — read at buyer-agent-demo @ 133b9a7 — plus
+ * the three the seat registers only against a simulated service. Its reads
+ * (`portfolio_account`, `portfolio_holdings`, `portfolio_wait`, …) and its
+ * signed words (`portfolio_ask`, `portfolio_report`, `portfolio_remember`,
+ * `portfolio_forget`, `portfolio_desk_say`) grant nothing and move nothing, so
+ * they are not here.
+ *
+ * Matched by their RAW names rather than by a full public name. dsh mints
+ * `mcp__<serverName>__<rawName>` (NEW `packages/mcp/mcp-client/src/tools.ts:81-87`,
+ * `publicToolName`), and an operator may mount the seat under a server name of
+ * their own, so a constant list of full names would quietly stop matching the
+ * day they rename the row. Anchoring on the raw suffix survives that rename;
+ * a substring test for "order" would gate a harmless read. A rename on the
+ * Account's side is caught by the seat smoke (`tests/account-seat-smoke.test.ts`),
+ * and under the face's own prefix by the unclassified-tool rule below. */
+export const SEAT_WRITE_RAW_NAMES = [
+  "portfolio_live_order", "portfolio_live_batch", "portfolio_live_amend", "portfolio_live_cancel", "portfolio_live_close",
+  "portfolio_live_leverage", "portfolio_live_move", "portfolio_live_earn", "portfolio_pay",
+  "portfolio_order", "portfolio_execute", "portfolio_transfer",
+] as const;
+
+/** The seat's reads, waits and signed words at the same pin: the tools the
+ * face has classified as NOT a write. A tool under the face's own seat prefix
+ * (`mcp__account__`) that is in neither list — one the Account grew after the
+ * pin — is carded like a write until it is classified here: a card per call
+ * is the safe default, and it never refuses the boot (the Account moves fast;
+ * a boot refusal for a new read would brick the operator's face). Only the
+ * face's own server name gets this fallback; a renamed seat server keeps the
+ * twelve by raw suffix and nothing more. */
+export const SEAT_READ_RAW_NAMES = [
+  "portfolio_overview", "portfolio_read", "portfolio_markets", "portfolio_quote", "portfolio_account", "portfolio_approval",
+  "portfolio_wait", "portfolio_statement", "portfolio_explore", "portfolio_holdings", "portfolio_history", "portfolio_asset",
+  "portfolio_candles", "portfolio_book", "portfolio_receive", "portfolio_venues", "portfolio_earn", "portfolio_watchlist",
+  "portfolio_report", "portfolio_ask", "portfolio_memory", "portfolio_remember", "portfolio_forget", "portfolio_desk",
+  "portfolio_desk_say", "portfolio_live_preview", "portfolio_live_markets", "portfolio_live_compare", "portfolio_live_positions",
+  "portfolio_openness",
+] as const;
+
+/** The retired order tools: alpaca-kit's pair, which left the tree in stage 3
+ * of the Account graft. The seat is the only order path, so one of these that
+ * still registers — an operator's leftover row pointing at an install outside
+ * this tree — is never carded and never approved: the guard denies it outright
+ * under any server name, and the boot refuses a registry that carries one.
+ * Residual: dsh hashes a tool name longer than 64 characters or carrying a
+ * character outside [A-Za-z0-9_-], and neither the raw-suffix deny nor the boot
+ * audit sees a retired tool under such a hashed name (unreachable for a
+ * realistic server name). */
+export const RETIRED_ORDER_RAW_NAMES = ["place_order", "cancel_order"] as const;
+
+/** Whether `name` is a retired order tool, by raw suffix under any server name. */
+export function isRetiredOrderTool(name: string): boolean {
+  return prefixBefore(name, RETIRED_ORDER_RAW_NAMES) !== undefined;
+}
+
+/** The denial for a retired order tool: nobody is asked, nothing approves it. */
+function retiredReason(name: string): string {
+  return `${name} is a retired order tool - the Account seat is the only order path, so nothing approves it;` +
+    ` remove its MCP row from the profile`;
+}
+
+/** A tool under the face's own seat prefix that is neither a known write nor a known read. */
+function isUnclassifiedSeatTool(name: string): boolean {
+  return name.startsWith(SEAT_TOOL_PREFIX) && !SEAT_READ_RAW_NAMES.some((raw) => name === `${SEAT_TOOL_PREFIX}${raw}`);
+}
+
+/** The `mcp__<server>__` prefix (or `""` when bare) under which `name` carries
+ * one of `raws` as its raw suffix; `undefined` when it carries none. */
+function prefixBefore(name: string, raws: readonly string[]): string | undefined {
+  const raw = raws.find((r) => name === r || name.endsWith(`__${r}`));
+  return raw === undefined ? undefined : name.slice(0, name.length - raw.length);
+}
 
 /** Every approval policy this gate distinguishes. `never` is the one that
  * matters: it auto-rejects without reaching an answerer, so no card appears. */
@@ -68,11 +130,18 @@ export interface ToolSchemaLike {
   description?: string;
 }
 
-/** Is this the name of a tool that MOVES money (or cancels something that
- * would)? Matches the raw name itself and any `mcp__<server>__<raw>` minting of
- * it, so an operator's server rename cannot slip a live order tool past. */
+/** Is this the name of a tool Gate 2 cards: one of the seat's twelve writes —
+ * the raw name itself or any `mcp__<server>__<raw>` minting of it, so an
+ * operator's server rename cannot slip a write past — or a tool under the
+ * face's own seat prefix the face has not classified. */
 export function isOrderTool(name: string): boolean {
-  return ORDER_RAW_NAMES.some((raw) => name === raw || name.endsWith(`__${raw}`));
+  return isSeatWriteTool(name) || isUnclassifiedSeatTool(name);
+}
+
+/** Whether `name` is one of the Account seat's twelve write tools (by the same
+ * raw-suffix rule). */
+export function isSeatWriteTool(name: string): boolean {
+  return prefixBefore(name, SEAT_WRITE_RAW_NAMES) !== undefined;
 }
 
 /** Reconstruct the policy an ask would resolve under, from PUBLIC surface only.
@@ -104,7 +173,9 @@ export function effectiveApprovalPolicy(
  * The gate's decision for one pending call.
  *
  * Returns `null` for anything that is not an order tool — the caller delegates
- * to `next()`, leaving every other tool exactly as it was.
+ * to `next()`, leaving every other tool exactly as it was — and for a retired
+ * order tool ({@link RETIRED_ORDER_RAW_NAMES}), even one under the seat prefix:
+ * the guard denies it regardless, so no card is raised for a call that cannot run.
  *
  * Under policy `never` this DENIES rather than asking. Returning `ask` there
  * would be worse than useless: `ApprovalService.request` short-circuits on
@@ -144,7 +215,7 @@ export function orderApprovalDecision(
   args?: unknown,
   visible = true,
 ): PreToolDecision | null {
-  if (!isOrderTool(name)) return null;
+  if (!isOrderTool(name) || isRetiredOrderTool(name)) return null;
   if (!visible) {
     return {
       kind: "deny",
@@ -161,7 +232,19 @@ export function orderApprovalDecision(
         `and try again.`,
     };
   }
-  const reason = `PAPER order - ${describeOrder(name, args)}`;
+  /* A key field the card could not show whole is not asked about: a cut could
+   * hide an address's tail or a payee's host, and an operator approving what
+   * they cannot read is a click-through. Denied in our own words, nobody asked. */
+  const bad = unshowableKeyField(args);
+  if (bad !== undefined) {
+    return {
+      kind: "deny",
+      reason: `${name}: its ${bad.key} ${bad.why}, so nothing was asked and the call does not run.`,
+    };
+  }
+  /* Every card is the seat's, and says so: the face does not know a venue's
+   * kind, and the Account's own card says PAPER in its own words. */
+  const reason = `Account seat - ${describeOrder(name, args)}`;
   /* `displayReason` is what a localized approval UI prefers to render - the
    * upstream panel draws it INSTEAD of `reason` whenever it is present
    * (NEW packages/client/ui-approval/src/client/ApprovalPanel.tsx:17, fed by
@@ -171,6 +254,104 @@ export function orderApprovalDecision(
    * whichever field a client draws, the human sees symbol, side and size -
    * never a bare tool name. Presentation only: never persisted (types.ts:72). */
   return { kind: "ask", reason, displayReason: { en: reason } };
+}
+
+/** The argument keys the operator decides on — where a cut could hide what
+ * matters (an address's tail, an id's tail, a venue, a symbol); a URL is its
+ * own case ({@link urlWord}). */
+const WHOLE_KEYS = ["venue", "from", "to", "symbol", "order", "asset", "account", "base", "order_id", "product", "body"];
+
+/** The shape of a key the line writes bare: a key is never quoted, so one that
+ * is not a name — `x venue`, `a=b`, `legs;` — could pass itself off as another
+ * pair when the client reads the line back for its card's title; the gate
+ * denies such a call before any card, at any depth. */
+const KEY_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Most characters a key field may have and still be shown whole on a card;
+ * past it the call is denied rather than carded with a cut ({@link unshowableKeyField}). */
+const MAX_KEY_FIELD = 120;
+
+/** A payee's URL as the card may show it: whole, when it is http or https,
+ * carries no userinfo, parses, and fits {@link MAX_KEY_FIELD} — else why not.
+ * The text shown is the parsed `href`, the form the consumer resolves, so the
+ * card and the venue agree on what was approved. */
+function urlShown(value: unknown): { shown: string } | { why: string } {
+  let u: URL;
+  try {
+    u = new URL(String(value));
+  } catch {
+    return { why: "does not parse" };
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return { why: "is not http or https" };
+  if (u.username !== "" || u.password !== "") return { why: "carries userinfo" };
+  if (u.href.length > MAX_KEY_FIELD) return { why: `is ${u.href.length} characters, too long to show whole on a card` };
+  return { shown: u.href };
+}
+
+/** The most legs a card shows: the Account takes at most ten in one batch. */
+const MAX_LEGS = 10;
+
+/** One scalar the card could not show whole under `key`'s rule, at `at`:
+ * a key field too long, or a URL the card cannot show. */
+function unshowableScalar(key: string, value: unknown, at: string): { key: string; why: string } | undefined {
+  if (key === "url") {
+    const u = urlShown(value);
+    return "why" in u ? { key: at, why: u.why } : undefined;
+  }
+  if (!WHOLE_KEYS.includes(key)) return undefined;
+  const text = String(value);
+  return text.length > MAX_KEY_FIELD ? { key: at, why: `is ${text.length} characters, too long to show whole on a card` } : undefined;
+}
+
+/** The first value in `row` the card could not show, its path prefixed by
+ * `path`: a key field too long or a URL the card cannot show — under its own
+ * key, or its parent key's rule inside a list (`to[2]`, `url[1]`); a value
+ * nested deeper than the one level a card draws (`depth` 1 is already inside
+ * a nested object or a list entry: a card draws it as `?`, and what a card
+ * cannot show it must not approve); a list longer than a card shows. */
+function unshowableIn(row: Record<string, unknown>, path: string, depth: number): { key: string; why: string } | undefined {
+  for (const [key, value] of Object.entries(row)) {
+    const at = `${path}${key}`;
+    if (!KEY_NAME.test(key)) return { key: `${path}${JSON.stringify(key)}`, why: "is not a name a card can show" };
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "object") {
+      const bad = unshowableScalar(key, value, at);
+      if (bad !== undefined) return bad;
+      continue;
+    }
+    if (depth > 0) return { key: at, why: "is nested deeper than a card shows" };
+    if (!Array.isArray(value)) {
+      const bad = unshowableIn(value as Record<string, unknown>, `${at}.`, 1);
+      if (bad !== undefined) return bad;
+      continue;
+    }
+    if (value.length > MAX_LEGS) return { key: at, why: `has ${value.length} entries, more than the ten a card shows` };
+    for (const [i, entry] of value.entries()) {
+      const here = `${at}[${i + 1}]`;
+      if (entry === undefined || entry === null) continue;
+      if (typeof entry !== "object") {
+        const bad = unshowableScalar(key, entry, here);
+        if (bad !== undefined) return bad;
+        continue;
+      }
+      if (Array.isArray(entry)) return { key: here, why: "is nested deeper than a card shows" };
+      const bad = unshowableIn(entry as Record<string, unknown>, `${here}.`, 1);
+      if (bad !== undefined) return bad;
+    }
+  }
+  return undefined;
+}
+
+/** The first thing the card could not show whole — a key field too long, a
+ * URL that is not http(s), carries userinfo or does not parse, a value nested
+ * deeper than a card draws, a list longer than a card shows — at the top
+ * level, inside a nested object (`intent.to`) or inside a list's entries
+ * (`legs[2].symbol`, `to[1]`), so the gate denies the call instead of raising
+ * a card with a cut or a `?` that could hide what matters; `undefined` when
+ * everything can be shown. */
+function unshowableKeyField(args: unknown): { key: string; why: string } | undefined {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
+  return unshowableIn(args as Record<string, unknown>, "", 0);
 }
 
 /** One line an operator can actually decide on.
@@ -193,33 +374,86 @@ export function orderApprovalDecision(
  */
 export function describeOrder(name: string, args: unknown): string {
   if (args === null || typeof args !== "object" || Array.isArray(args)) return name;
-  const row = args as Record<string, unknown>;
-  const scalar = (key: string): string | undefined => {
+  const summary = pairsOf(args as Record<string, unknown>, 0);
+  return summary === "" ? name : `${name}: ${summary}`;
+}
+
+/* The Account seat's keys (portfolio_live_order's venue, symbol, side, orderType, qty or
+ * usd, limitPrice, stopPrice; amend and cancel's order; move's kind, from,
+ * asset, amount; leverage; pay's url and maxAmount), with the snake_case
+ * spellings an order key may also arrive in, in a readable order:
+ * side, size, symbol, type, then the venue. The same order inside a batch's
+ * legs and a nested object. Unknown keys are appended rather than dropped, so
+ * a tool that grows a field still shows it (charter Rule 5: what is never
+ * surfaced is never governed). */
+const KNOWN_KEYS = [
+  "side", "qty", "usd", "symbol", "order_type", "orderType", "limit_price", "limitPrice", "stopPrice", "order_id", "order",
+  "venue", "kind", "from", "asset", "product", "amount", "leverage", "url", "maxAmount", "method", "body",
+];
+
+/** One scalar on the card. Model-controlled text on the operator's only line
+ * of information: bound it so a crafted field cannot push a plausible
+ * sentence past the real one — but never cut what the operator decides on: a
+ * payee's URL, an address, an id, a venue or a symbol is shown WHOLE up to
+ * MAX_KEY_FIELD, and a call whose key field cannot be shown whole is denied
+ * before any card ({@link unshowableKeyField}); the cuts below those keys
+ * never reach a card and only keep this function total. */
+function scalarWord(key: string, value: unknown): string {
+  if (key === "url") {
+    const u = urlShown(value);
+    return "shown" in u ? shown(u.shown) : "?";
+  }
+  const text = String(value);
+  if (WHOLE_KEYS.includes(key)) return shown(text.length > MAX_KEY_FIELD ? `${text.slice(0, MAX_KEY_FIELD)}…` : text);
+  return shown(text.length > 40 ? `${text.slice(0, 40)}…` : text);
+}
+
+/** A value as the line carries it: bare when it reads back as one word, else a
+ * JSON string. The client titles its card from this line and nothing else
+ * (`face/client/js/host/kinds.js` `reasonArgs`), so a value carrying
+ * whitespace, a quote, a bracket or a semicolon — which could pass itself off
+ * as another pair, a leg or the end of one — is quoted, cut first where it is cut. */
+function shown(text: string): string {
+  return /^[^\s"[\]{};]*$/.test(text) ? text : JSON.stringify(text);
+}
+
+/** A nested value on the card: a list as `[1: …; 2: …]` (a batch's legs, each
+ * described as an order; a scalar entry by its parent key's rule), an object
+ * as `{k=v …}`; one level only — deeper is `?`, which the gate never lets a
+ * card approve ({@link unshowableKeyField}). */
+function nestedWord(value: object, key: string): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry, i) => {
+      const word = entry === null || entry === undefined ? "?"
+        : typeof entry === "object" ? (Array.isArray(entry) ? "?" : pairsOf(entry as Record<string, unknown>, 1))
+          : scalarWord(key, entry);
+      return `${i + 1}: ${word}`;
+    }).join("; ")}]`;
+  }
+  return `{${pairsOf(value as Record<string, unknown>, 1)}}`;
+}
+
+/** `key=value` pairs of one object, the known keys first in their readable
+ * order, then the rest; a nested object or list one level deep at the top
+ * (`depth` 0), `?` below that. */
+function pairsOf(row: Record<string, unknown>, depth: number): string {
+  const word = (key: string): string | undefined => {
     const value = row[key];
     if (value === undefined || value === null) return undefined;
-    if (typeof value === "object") return undefined;
-    /* Model-controlled text on the operator's only line of information: bound it
-     * so a crafted field cannot push a plausible sentence past the real one. */
-    const text = String(value);
-    return text.length > 40 ? `${text.slice(0, 40)}…` : text;
+    if (typeof value === "object") return depth === 0 ? nestedWord(value, key) : "?";
+    return scalarWord(key, value);
   };
-  /* place_order(symbol, qty, side, order_type, limit_price) and
-   * cancel_order(order_id) - alpaca_kit/mcp/tools.py:298-307. Unknown keys are
-   * appended rather than dropped, so a tool that grows a field still shows it
-   * (charter Rule 5: what is never surfaced is never governed). */
-  const known = ["side", "qty", "symbol", "order_type", "limit_price", "order_id"];
-  const parts = known.map((key) => {
-    const value = scalar(key);
+  const parts = KNOWN_KEYS.map((key) => {
+    const value = word(key);
     return value === undefined ? undefined : `${key}=${value}`;
   }).filter((part): part is string => part !== undefined);
   const extra = Object.keys(row)
-    .filter((key) => !known.includes(key))
+    .filter((key) => !KNOWN_KEYS.includes(key))
     .map((key) => {
-      const value = scalar(key);
+      const value = word(key);
       return value === undefined ? `${key}=?` : `${key}=${value}`;
     });
-  const summary = [...parts, ...extra].join(" ");
-  return summary === "" ? name : `${name}: ${summary}`;
+  return [...parts, ...extra].join(" ");
 }
 
 /** One session event, structurally - only the fields the grant check reads. */
@@ -278,60 +512,51 @@ export function hasApprovalGrant(
   );
 }
 
-/** Is this call subject to the gate at all - by name, or by the marker on its
- * live description? The description half is what catches a tool that registered
- * AFTER boot (dsh-mcp-client activates even when its first connection failed,
- * so the boot audit can run against a registry that has not filled in yet) and
- * one whose public name took a hash suffix (dsh normalizes and hashes any name
- * over 64 chars or carrying a character outside [A-Za-z0-9_-], so the raw-name
- * suffix anchor does not always hold).
- *
- * The marker test is confined to `mcp__` names: it is a substring test on
- * operator-supplied text, and an unrelated tool that happened to carry the
- * phrase would otherwise be denied with a message blaming a rename.
- * @param name - `exec.name`.
- * @param description - the live registry's description for it, if any.
- * @returns true when the gate must have a grant before this call dispatches.
- */
-export function isGatedTool(name: string, description: string | undefined): boolean {
-  if (isOrderTool(name)) return true;
-  return name.startsWith("mcp__") && (description ?? "").includes(OPERATOR_GATED_MARKER);
-}
-
 /** What {@link auditOrderTools} found in the live registry. */
 export interface OrderToolAudit {
-  /** Registered order tools this gate covers. */
+  /** Registered tools this gate covers. */
   gated: string[];
-  /** Registered tools alpaca-kit marked operator-gated that this gate would
-   * NOT stop — a rename that opened a hole. Boot refuses on any of these. */
-  ungated: string[];
+  /** Each server prefix (`mcp__<server>__`, `""` when bare) that carries the
+   * seat's tools while the gate covers none of them — the seat is mounted and
+   * Gate 2 would cover nothing of it. Boot refuses on any of these. */
+  uncovered: string[];
+  /** Registered retired order tools ({@link RETIRED_ORDER_RAW_NAMES}) under any
+   * server name — an order path that is not the seat. Boot refuses on any of these. */
+  retired: string[];
 }
 
 /**
- * Cross-check the live registry against the gate, in both directions.
+ * Cross-check the live registry against the seat's lists.
  *
- * The face cannot read `ALPACA_KIT_ENABLE_ORDERS`: it is passed to the
- * alpaca-kit row's own `env:` block in the operator's cordis patch, not to this
- * process. So the flag cannot be asserted on — the REGISTRY is the only honest
- * source of whether order tools are live, and this reads it.
- *
- * The direction that matters is `ungated`: alpaca-kit stamps both mutating
- * tools `(operator-gated)`, so a tool carrying that marker whose name this gate
- * does not match means someone renamed one side and the gate now misses a live
- * order tool. That is the failure this whole module exists to prevent, and it
- * would otherwise be invisible — the face would come up healthy with the gate
- * quietly covering nothing.
+ * The REGISTRY is the only honest source of whether the seat's writes are
+ * live, and this reads it. A server carrying the seat's tools — its classified
+ * reads or writes by raw suffix, or anything under the face's own seat prefix
+ * — is a mounted seat; one of them the gate covers none of means the Account
+ * renamed its writes and they no longer match {@link SEAT_WRITE_RAW_NAMES}.
+ * That is the failure this whole module exists to prevent, and it would
+ * otherwise be invisible — the face would come up healthy with the gate quietly
+ * covering nothing. (Under the face's own prefix a renamed write is carded as
+ * unclassified, so only a seat under another server name can land here.) The
+ * seat registers its writes with its reads, in one listing, so a seat with
+ * reads and no write is never a normal state.
  * @param schemas - `ctx.tools.schemas()`, the live registry.
- * @returns the covered names and the dangerous ones.
+ * @returns the covered names, the seats the gate covers nothing of, and the retired order tools.
  */
 export function auditOrderTools(schemas: readonly ToolSchemaLike[]): OrderToolAudit {
   const gated: string[] = [];
-  const ungated: string[] = [];
-  for (const schema of schemas) {
-    if (isOrderTool(schema.name)) gated.push(schema.name);
-    else if (isGatedTool(schema.name, schema.description)) ungated.push(schema.name);
+  const retired: string[] = [];
+  const seats = new Set<string>();
+  const covered = new Set<string>();
+  for (const { name } of schemas) {
+    if (isRetiredOrderTool(name)) retired.push(name);
+    const seat = prefixBefore(name, [...SEAT_WRITE_RAW_NAMES, ...SEAT_READ_RAW_NAMES])
+      ?? (name.startsWith(SEAT_TOOL_PREFIX) ? SEAT_TOOL_PREFIX : undefined);
+    if (seat !== undefined) seats.add(seat);
+    if (!isOrderTool(name)) continue;
+    gated.push(name);
+    if (seat !== undefined) covered.add(seat);
   }
-  return { gated, ungated };
+  return { gated, uncovered: [...seats].filter((seat) => !covered.has(seat)), retired };
 }
 
 /**
@@ -340,10 +565,11 @@ export function auditOrderTools(schemas: readonly ToolSchemaLike[]): OrderToolAu
  * Extracted so it can be drilled: a guard is evaluated on every allow and is the
  * only monotonic layer here, which makes it the piece that most needs testing
  * and the piece hardest to reach through the pipeline. Charter Rule 4 - a guard
- * that has never been drilled is presumed broken.
+ * that has never been drilled is presumed broken. It reads the name alone,
+ * per call, so a seat write that registered AFTER boot (dsh-mcp-client
+ * activates even when its first connection failed) is guarded all the same,
+ * and a retired order tool is denied outright, whatever the log holds.
  * @param name - `exec.name`.
- * @param description - the LIVE registry description, read per call rather than
- *   snapshotted at boot: the registry fills in asynchronously.
  * @param events - the session log (`snapshotEvents()`), when there is a
  *   session. `undefined` means "no session", i.e. no log that could hold a
  *   grant; a session whose log cannot be READ is a different failure and is
@@ -353,16 +579,13 @@ export function auditOrderTools(schemas: readonly ToolSchemaLike[]): OrderToolAu
  */
 export function orderGuardReason(
   name: string,
-  description: string | undefined,
   events: readonly ApprovalEventLike[] | undefined,
   callId: unknown,
 ): string | undefined {
-  if (!isGatedTool(name, description)) return undefined;
+  if (isRetiredOrderTool(name)) return retiredReason(name);
+  if (!isOrderTool(name)) return undefined;
   if (events !== undefined && hasApprovalGrant(events, callId, name)) return undefined;
-  return isOrderTool(name)
-    ? `${name} reached dispatch without a logged allowed-once approval for this call`
-    : `${name} is marked ${OPERATOR_GATED_MARKER} but the order gate does not recognise its name,` +
-      ` so it can never be approved - add its raw name to ORDER_RAW_NAMES in face/src/orders.ts`;
+  return `${name} reached dispatch without a logged allowed-once approval for this call`;
 }
 
 /** A calling session as the guard reads it, structurally. dsh 0.2.0 removed the
@@ -401,7 +624,8 @@ export function unreadableSessionLogReason(name: string, why = "no snapshotEvent
  * The guard's decision given the calling SESSION rather than its events:
  * the one function `boot.ts`'s `tools.guard` calls.
  *
- * Three cases, each with its own sentence:
+ * A retired order tool is denied first, in its own sentence, whatever the
+ * session. Then three cases, each with its own sentence:
  * - no session (an agentless call): no log could hold a grant, so a gated
  *   call gets {@link orderGuardReason}'s "without a logged allowed-once";
  * - a session with no `snapshotEvents` function, or one that throws: the
@@ -412,7 +636,6 @@ export function unreadableSessionLogReason(name: string, why = "no snapshotEvent
  * Non-gated tools return `undefined` before the session is touched, so a
  * drifted Session API can never brick a tool this gate does not own.
  * @param name - `exec.name`.
- * @param description - the LIVE registry description (`tools.get(name, agent)?.description`).
  * @param session - `exec.agent?.session`. Typed `unknown` on purpose: the
  *   caller must not have to assert a shape this function exists to CHECK
  *   (a `GuardSessionLike` parameter would also reject, at compile time, the
@@ -422,12 +645,12 @@ export function unreadableSessionLogReason(name: string, why = "no snapshotEvent
  */
 export function orderGuardReasonForSession(
   name: string,
-  description: string | undefined,
   session: unknown,
   callId: unknown,
 ): string | undefined {
-  if (!isGatedTool(name, description)) return undefined;
-  if (session === undefined || session === null) return orderGuardReason(name, description, undefined, callId);
+  if (isRetiredOrderTool(name)) return retiredReason(name);
+  if (!isOrderTool(name)) return undefined;
+  if (session === undefined || session === null) return orderGuardReason(name, undefined, callId);
   const read = typeof session === "object" || typeof session === "function"
     ? (session as GuardSessionLike).snapshotEvents
     : undefined;
@@ -439,5 +662,5 @@ export function orderGuardReasonForSession(
     return unreadableSessionLogReason(name, "snapshotEvents threw");
   }
   if (!Array.isArray(events)) return unreadableSessionLogReason(name, "snapshotEvents returned no event list");
-  return orderGuardReason(name, description, events, callId);
+  return orderGuardReason(name, events, callId);
 }

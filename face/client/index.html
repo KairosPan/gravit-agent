@@ -3,65 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GRAVIT</title>
-<!-- Absolute paths: the page is served at `/` (static.ts's exact route) while
-     its assets live under the `/client` prefix, so a relative href would ask
-     for `/chat.css` and 404. -->
-<link rel="stylesheet" href="/client/chat.css">
+<title>Gravit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/client/css/tokens.css">
+<link rel="stylesheet" href="/client/css/app.css">
+<script>
+  // the theme before the first paint: the saved choice, else the system's own
+  try { const t = JSON.parse(localStorage.getItem('gravit-ui.prefs') ?? '{}').theme; if (t === 'cream' || t === 'black') document.documentElement.dataset.theme = t; } catch {}
+</script>
 </head>
 <body>
-<!-- The r4 kit's own skeleton, live: two panes, one flow, one composer. Every
-     list and every message is built by chat.js through the DOM API — this file
-     holds the frame and not one byte of host data. -->
-<div class="chat-app">
-  <nav class="rail" data-navigation="chat" aria-label="primary navigation"></nav>
-  <aside class="sidebar" data-panel="strategy">
-    <div class="side-head">
-      <div class="side-brand">Gravit</div>
-      <button id="new-session" class="side-new" type="button" title="start a new conversation">+ new</button>
-    </div>
-    <div id="conv-list" class="conv-list"></div>
-    <!-- The rail's other faces - the desk (desk-panel.js), agent, memory,
-         plugin; chat.js fills each on first open and hides all but the
-         active one. -->
-    <div id="panel-desk" class="side-panel" hidden></div>
-    <div id="panel-agent" class="side-panel" hidden></div>
-    <div id="panel-memory" class="side-panel" hidden></div>
-    <div id="panel-plugin" class="side-panel" hidden></div>
-    <div class="side-foot">live · loopback only</div>
-  </aside>
-
-  <main class="main">
-    <header class="topbar">
-      <span id="topbar-name" class="topbar-name">new session</span>
-      <span id="topbar-raw" class="raw">raw</span>
-    </header>
-
-    <!-- The participants strip: who is in the room and what each is doing,
-         built by chat.js from the room projection and the members' own pulses.
-         Hidden unless the session on screen is in a channel with bots. -->
-    <div id="strip" class="strip" hidden></div>
-    <section id="subagent-dock" class="subagent-dock" aria-label="临时子任务" hidden></section>
-
-    <div id="scroll" class="flow">
-      <div id="flow" class="flow-inner"></div>
-    </div>
-
-    <!-- The right-pane detail view: what a sidebar panel row opens (a skill's
-         body, an MCP server's tools, the main agent's cards). Shown in place
-         of the flow + composer while `.main` carries `detail-mode`; picking a
-         session (or "+ new") brings the chat back. chat.js builds it all. -->
-    <div id="detail" class="detail"></div>
-
-    <footer class="composer">
-      <form id="composer" class="composer-row">
-        <input id="composer-input" class="composer-input" type="text" placeholder="Message Gravit…" autocomplete="off">
-        <button id="stop" class="composer-stop" type="button" title="stop the active turn">stop</button>
-      </form>
-      <div id="status" class="composer-note">starting…</div>
-    </footer>
-  </main>
-</div>
-<script type="module" src="/client/chat.js"></script>
+<div id="app" class="app"></div>
+<script type="module" src="/client/js/app.js"></script>
 </body>
 </html>

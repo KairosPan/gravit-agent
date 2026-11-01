@@ -7,12 +7,10 @@
  * forgot to wire is exactly the shape of the `ask_user_question` outage this
  * codebase already lived through once.
  *
- * WHY A STAND-IN NAME, NOT THE REAL TOOL. `face/README.md` forbids drilling
- * with the order tools: arming `ALPACA_KIT_ENABLE_ORDERS` to exercise Gate 2
- * disarms Gate 1 to do it. The gate matches on the RAW name suffix, so
- * `mcp__drill__place_order` exercises the identical code path with nothing
- * behind it — no keys, no broker, no order. This is a better drill than the
- * real tool, not a weaker one.
+ * WHY A STAND-IN NAME, NOT THE REAL TOOL. The gate matches the seat's writes
+ * on the RAW name suffix, so `mcp__drill__portfolio_live_order` exercises the
+ * identical code path with nothing behind it — no seat, no Account, no venue,
+ * no order. This is a better drill than the real tool, not a weaker one.
  *
  * WHAT THIS DOES NOT PROVE: that the approval CARD renders, or that an
  * APPROVED order dispatches. The card needs a human looking at a browser: with
@@ -50,16 +48,16 @@ import { setupFaceProfile } from "../src/setup.ts";
 import { armOrderGate, bootFace } from "../src/boot.ts";
 import { DESK_PRESET } from "../src/desk-preset.ts";
 import {
-  OPERATOR_GATED_MARKER, orderGuardReasonForSession, unreadableSessionLogReason, type PreToolDecision,
+  orderGuardReasonForSession, unreadableSessionLogReason, type PreToolDecision,
 } from "../src/orders.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
 
 const gated = process.env.FACE_SMOKE !== "1";
 
-/** The listener's refusal of `mcp__drill__place_order` from a caller that
+/** The listener's refusal of `mcp__drill__portfolio_live_order` from a caller that
  * cannot see it, verbatim (src/orders.ts orderApprovalDecision). */
-const HIDDEN_PLACE_ORDER =
-  "mcp__drill__place_order is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run";
+const HIDDEN_SEAT_ORDER =
+  "mcp__drill__portfolio_live_order is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run";
 
 /** An empty session exactly as the REAL `ApprovalService.overrideOf` reads
  * one at dsh 0.2.0: it walks `session.seq - 1` down to 0 through
@@ -111,7 +109,7 @@ class ListedTools extends Service {
   }
 
   get(name: string): { description: string } | undefined {
-    return this.config.visible.includes(name) ? { description: `drill stand-in ${OPERATOR_GATED_MARKER}` } : undefined;
+    return this.config.visible.includes(name) ? { description: `drill stand-in` } : undefined;
   }
 
   guard(): () => void {
@@ -136,12 +134,12 @@ class FakeApproval extends Service {
  * `exec.agent?.session` to this function (PLAN S7 item 1); the real-tree half
  * is the guard case at the end of the smoke below. */
 test("guard: a session without snapshotEvents is denied with the distinct reason", () => {
-  const reason = orderGuardReasonForSession("mcp__drill__place_order", undefined, emptySession(), "drill-guard");
-  assert.equal(reason, unreadableSessionLogReason("mcp__drill__place_order"));
+  const reason = orderGuardReasonForSession("mcp__drill__portfolio_live_order", emptySession(), "drill-guard");
+  assert.equal(reason, unreadableSessionLogReason("mcp__drill__portfolio_live_order"));
   assert.doesNotMatch(reason ?? "", /without a logged allowed-once/, "unreadable must never read as 'no grant'");
   // The same session WITH the log read passes the ordinary check.
   const readable = { ...emptySession(), snapshotEvents: () => [] };
-  assert.match(orderGuardReasonForSession("mcp__drill__place_order", undefined, readable, "drill-guard") ?? "",
+  assert.match(orderGuardReasonForSession("mcp__drill__portfolio_live_order", readable, "drill-guard") ?? "",
     /without a logged allowed-once/);
 });
 
@@ -165,26 +163,26 @@ test("ask listener: a hidden order tool is denied before any card; the registry 
     /* No registry: nothing to look in, so the listener decides as it did
      * before it looked - a card. (The guard, waiting for tools, has not armed:
      * that order would still be denied at dispatch, with no logged grant.) */
-    assert.equal((await firePreExecute(root, pending("mcp__drill__place_order", order))).kind, "ask");
+    assert.equal((await firePreExecute(root, pending("mcp__drill__portfolio_live_order", order))).kind, "ask");
 
     /* A registry that does not resolve the tool for this caller: refused in
      * the gate's own words, before any card could be raised. */
     const hiding = root.plugin(ListedTools, { visible: [] });
     await hiding;
-    assert.deepEqual(await firePreExecute(root, pending("mcp__drill__place_order", order)),
-      { kind: "deny", reason: HIDDEN_PLACE_ORDER });
+    assert.deepEqual(await firePreExecute(root, pending("mcp__drill__portfolio_live_order", order)),
+      { kind: "deny", reason: HIDDEN_SEAT_ORDER });
     /* Only order tools are looked up: anything else still falls through. And
      * an agentless call keeps its own sentence - the session check comes first. */
     assert.equal((await firePreExecute(root, pending("bash"))).kind, "allow");
-    const agentlessDecision = await firePreExecute(root, agentless("mcp__drill__place_order"));
+    const agentlessDecision = await firePreExecute(root, agentless("mcp__drill__portfolio_live_order"));
     assert.match(agentlessDecision.kind === "deny" ? agentlessDecision.reason : "", /no session to ask in/);
 
     /* Replaced by a registry that resolves it: the very next call asks. The
      * listener read the live registry, and it did not re-arm to do so. */
     await hiding.dispose();
-    const showing = root.plugin(ListedTools, { visible: ["mcp__drill__place_order"] });
+    const showing = root.plugin(ListedTools, { visible: ["mcp__drill__portfolio_live_order"] });
     await showing;
-    assert.equal((await firePreExecute(root, pending("mcp__drill__place_order", order))).kind, "ask");
+    assert.equal((await firePreExecute(root, pending("mcp__drill__portfolio_live_order", order))).kind, "ask");
     assert.equal(hooks().length, 1);
     assert.equal(hooks()[0], armed, "the same listener record throughout: tools is not in its inject list");
   } finally {
@@ -209,7 +207,7 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
   // This smoke owns a scratch profile and must not start the operator's data server.
-  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n`);
+  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n`);
   const { ctx, dispose } = await bootFace({ profileName: "face", port: 0, dshHome: home });
   try {
     /* The registry's own terminal (`firePreExecute`, above): a decision below
@@ -234,10 +232,10 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
      * gates these by name alone (orders.ts `isGatedTool`), and the boot audit
      * ran before they existed. */
     const ran: unknown[] = [];
-    for (const name of ["mcp__drill__place_order", "mcp__drill__cancel_order", "mcp__whatever_they_call_it__place_order"]) {
+    for (const name of ["mcp__drill__portfolio_live_order", "mcp__drill__portfolio_live_cancel", "mcp__whatever_they_call_it__portfolio_pay"]) {
       registry.register({
         name,
-        description: "place or cancel a PAPER order - drill stand-in, nothing behind it",
+        description: "an Account seat write - drill stand-in, nothing behind it",
         parameters: {
           type: "object",
           properties: { symbol: { type: "string" }, qty: { type: "number" }, side: { type: "string" }, order_id: { type: "string" } },
@@ -254,26 +252,31 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
      * whole change rests on: the listener is registered, it reaches the live
      * approval service, that service's default policy is `ask`, and the gate
      * therefore raises a card rather than denying or allowing. */
-    const decision = await fire(pending("mcp__drill__place_order", {
-      symbol: "AAPL", qty: 1, side: "buy",
+    const decision = await fire(pending("mcp__drill__portfolio_live_order", {
+      venue: "paper-1", symbol: "AAPL", side: "buy", usd: 100,
     }));
-    assert.equal(decision.kind, "ask", "an order under the default policy must raise a card");
+    assert.equal(decision.kind, "ask", "a seat order under the default policy must raise a card");
     /* And the card must be decidable - a human approving a tool NAME is a
-     * click-through, not an approval. */
+     * click-through, not an approval - and it is the seat's, never PAPER. */
     const reason = decision.kind === "ask" ? decision.reason ?? "" : "";
     assert.match(reason, /AAPL/, `the card must name the order; saw ${JSON.stringify(reason)}`);
     assert.match(reason, /side=buy/);
+    assert.match(reason, /^Account seat - .*venue=paper-1/);
 
-    assert.equal((await fire(pending("mcp__drill__cancel_order", { order_id: "x" }))).kind, "ask");
+    assert.equal((await fire(pending("mcp__drill__portfolio_live_cancel", { venue: "paper-1", order: "x" }))).kind, "ask");
+    assert.equal((await fire(pending("mcp__drill__portfolio_account", {}))).kind, "allow", "a seat read is never gated");
 
     /* No session, nobody to ask: deny in our own words rather than let the
      * registry report a refusal nobody made. */
-    assert.equal((await fire(agentless("mcp__drill__place_order"))).kind, "deny");
+    assert.equal((await fire(agentless("mcp__drill__portfolio_live_order"))).kind, "deny");
 
-    /* The read-only listing must pass. This is the assertion that would catch a
-     * substring match on "order" - gating a harmless query is a real cost, and
-     * the kind of over-reach that gets a gate switched off wholesale. */
-    assert.equal((await fire(pending("mcp__drill__orders"))).kind, "allow");
+    /* A name that merely mentions an order must pass. This is the assertion
+     * that would catch a substring match on "order" - gating a harmless query
+     * is a real cost, and the kind of over-reach that gets a gate switched off
+     * wholesale. */
+    for (const name of ["mcp__drill__orders", "mcp__drill__portfolio_live_positions"]) {
+      assert.equal((await fire(pending(name))).kind, "allow", name);
+    }
 
     // And the rest of the toolset is untouched.
     for (const name of ["bash", "ask_user_question", "mcp__drill__account"]) {
@@ -283,20 +286,22 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
     /* The gate is name-anchored, so an operator renaming their MCP server does
      * not open a hole. Drilled with a server name sharing no substring with the
      * real one. */
-    assert.equal((await fire(pending("mcp__whatever_they_call_it__place_order"))).kind, "ask");
+    assert.equal((await fire(pending("mcp__whatever_they_call_it__portfolio_pay"))).kind, "ask");
 
     /* THE GUARD, through the real pipeline. Registered AFTER boot on purpose:
      * that is the case the boot audit structurally cannot catch, and the one
      * `dsh-mcp-client` makes reachable by defaulting `failOnStartupError` to
      * false, so a server whose first connection failed still activates and
-     * registers its tools later. The name does not match, so the listener does
-     * not claim it and the waterfall falls through to its terminal ALLOW - the
-     * denial below can therefore only have come from the guard (it runs on
-     * every allow, NEW `packages/core/tools/src/index.ts:1519`). */
+     * registers its tools later. An outer `tools/pre-execute` listener swallows
+     * the gate's ask and ALLOWS - the override a sighting-based guard would wave
+     * through - so the denial below can only have come from the guard (it runs
+     * on every allow, NEW `packages/core/tools/src/index.ts:1519`), which asks
+     * the session log for a grant rather than any listener. */
+    const STAND_IN = "mcp__drill__portfolio_live_close";
     let bodyRan = false;
     const unregister = registry.register({
-      name: "mcp__drill__submit_order",
-      description: "submit a PAPER order (operator-gated)",
+      name: STAND_IN,
+      description: "place an order - drill stand-in, nothing behind it",
       parameters: {},
       output: { schema: { type: "object" }, render: () => [{ type: "text", text: "ok" }] },
       execute: async () => {
@@ -304,25 +309,31 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
         return {};
       },
     });
+    const swallow = (ctx.on as unknown as (
+      name: "tools/pre-execute",
+      listener: (exec: { callId?: string }, next: () => Promise<PreToolDecision>) => Promise<PreToolDecision>,
+      options: { prepend: boolean },
+    ) => () => void).call(ctx, "tools/pre-execute", (exec, next) =>
+      exec.callId?.startsWith("drill-guard") === true ? Promise.resolve({ kind: "allow" }) : next(), { prepend: true });
     try {
       const result = await registry.execute({
         callId: "drill-guard",
-        name: "mcp__drill__submit_order",
+        name: STAND_IN,
         arguments: {},
         signal: new AbortController().signal,
       });
-      assert.equal(result.isError, true, "a marked tool the gate cannot name must not dispatch");
+      assert.equal(result.isError, true, "a seat write whose ask was swallowed must not dispatch");
       assert.equal(bodyRan, false, "the tool body must never run");
-      assert.match(result.content?.[0]?.text ?? "", /ORDER_RAW_NAMES/);
+      assert.match(result.content?.[0]?.text ?? "", /without a logged allowed-once approval/);
 
       /* The same gated tool, called by an agent whose session cannot hand
        * over its log (no `snapshotEvents` - the dsh 0.2.0 drift shape). The
        * real guard must fail closed AND say why: "cannot read this session's
-       * log", never the "no grant" or "rename" sentence that hid the
-       * regression. Integration half of the offline test above. */
+       * log", never the "no grant" sentence that hid the regression.
+       * Integration half of the offline test above. */
       const unreadable = await registry.execute({
         callId: "drill-guard-unreadable",
-        name: "mcp__drill__submit_order",
+        name: STAND_IN,
         arguments: {},
         agent: { session: emptySession() },
         signal: new AbortController().signal,
@@ -331,6 +342,7 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
       assert.equal(bodyRan, false, "the tool body must never run");
       assert.match(unreadable.content?.[0]?.text ?? "", /cannot read this session's log/);
     } finally {
+      swallow();
       unregister();
     }
 
@@ -358,8 +370,8 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
         assert.ok(agent !== undefined, `session/create must leave a live agent for ${created.sessionId}`);
         return agent;
       };
-      const NAME = "mcp__drill__place_order";
-      const ORDER = { symbol: "AAPL", qty: 1, side: "buy" };
+      const NAME = "mcp__drill__portfolio_live_order";
+      const ORDER = { venue: "paper-1", symbol: "AAPL", side: "buy", usd: 100 };
       const desk = await open(DESK_PRESET);
       const gravit = await open();
       /* The premise, from the registry itself: the same global stand-in is
@@ -389,26 +401,26 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
         });
         desk.session.append("turn/end", { turn: 1, reason: { kind: "completed" } });
         assert.equal(refused.isError, true, "a hidden order tool must not dispatch");
-        assert.equal(refused.content?.[0]?.text, `Error: ${HIDDEN_PLACE_ORDER}`,
+        assert.equal(refused.content?.[0]?.text, `Error: ${HIDDEN_SEAT_ORDER}`,
           "refused in the gate's own words - not dsh's `unknown tool`, not a rejection nobody made");
         assert.deepEqual(cards, [], "no approval card was raised for it");
         assert.equal(desk.session.snapshotEvents().some((event) => event.type === "approval/asked"), false,
           "and no approval/asked is in the desk's log");
         /* The listener's own decision, isolated from the rest of the pipeline. */
-        assert.deepEqual(await fire({ ...pending(NAME, ORDER), agent: desk }), { kind: "deny", reason: HIDDEN_PLACE_ORDER });
+        assert.deepEqual(await fire({ ...pending(NAME, ORDER), agent: desk }), { kind: "deny", reason: HIDDEN_SEAT_ORDER });
 
         /* GRAVIT, the same tool on the same tree: visible, so it still asks -
          * and through the registry the card is raised, logged and answered
          * (`rejected` by the recorder), never dispatched. */
         const asked = await fire({ ...pending(NAME, ORDER), agent: gravit });
         assert.equal(asked.kind, "ask", "a Gravit session calling the same tool still gets ask");
-        assert.match(asked.kind === "ask" ? asked.reason ?? "" : "", /PAPER order - .*symbol=AAPL/);
+        assert.match(asked.kind === "ask" ? asked.reason ?? "" : "", /^Account seat - .*symbol=AAPL/);
         gravit.session.append("turn/start", { turn: 1 });
         const answered = await registry.execute({
           callId: "drill-gravit-visible", name: NAME, arguments: ORDER, agent: gravit, signal: new AbortController().signal,
         });
         gravit.session.append("turn/end", { turn: 1, reason: { kind: "completed" } });
-        assert.match(answered.content?.[0]?.text ?? "", /the user rejected tool "mcp__drill__place_order"/);
+        assert.match(answered.content?.[0]?.text ?? "", /the user rejected tool "mcp__drill__portfolio_live_order"/);
         assert.deepEqual(cards, [{ toolName: NAME, callId: "drill-gravit-visible" }], "exactly one card was raised: Gravit's");
         assert.ok(gravit.session.snapshotEvents().some((event) =>
           event.type === "approval/asked" && event.data?.callId === "drill-gravit-visible"), "and it is in Gravit's log");
@@ -417,7 +429,7 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
          * registered at all, and Gravit's model names one anyway. "Not
          * registered here" is the sentence's first cause: refused the same
          * way, with no card that could never dispatch. */
-        const unregistered = "mcp__nowhere__place_order";
+        const unregistered = "mcp__nowhere__portfolio_live_order";
         assert.equal(registry.get(unregistered, gravit), undefined, "nothing registers it");
         gravit.session.append("turn/start", { turn: 2 });
         const unseen = await registry.execute({
@@ -425,7 +437,7 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
         });
         gravit.session.append("turn/end", { turn: 2, reason: { kind: "completed" } });
         assert.equal(unseen.content?.[0]?.text,
-          "Error: mcp__nowhere__place_order is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run");
+          "Error: mcp__nowhere__portfolio_live_order is not available to this session - it is not registered here, or this session's preset hides it - so no approval card is raised and the order does not run");
         assert.equal(cards.length, 1, "no second card: Gravit's visible order raised the only one");
         assert.equal(gravit.session.snapshotEvents().some((event) =>
           event.type === "approval/asked" && event.data?.callId === "drill-gravit-unregistered"), false);
@@ -434,6 +446,36 @@ test("order gate: registered on a real tree, asks for orders, leaves everything 
         offCards();
       }
     });
+    /* A RETIRED order tool (the alpaca-kit pair) registered by an operator's
+     * leftover row: the seat is the only order path, so the listener raises
+     * no card for it and the guard denies it outright on its allow, under any
+     * server name, with or without a session. */
+    for (const name of ["mcp__drill__place_order", "mcp__elsewhere__cancel_order"]) {
+      let retiredRan = false;
+      const off = registry.register({
+        name,
+        description: "an alpaca-kit order tool, retired - drill stand-in, nothing behind it",
+        parameters: {},
+        output: { schema: { type: "object" }, render: () => [{ type: "text", text: "ok" }] },
+        execute: async () => {
+          retiredRan = true;
+          return {};
+        },
+      });
+      try {
+        for (const exec of [
+          { callId: `drill-retired-${name}`, name, arguments: { symbol: "AAPL", qty: 1, side: "buy" }, signal: new AbortController().signal },
+          { callId: `drill-retired-s-${name}`, name, arguments: {}, agent: { session: { ...emptySession(), snapshotEvents: () => [] } }, signal: new AbortController().signal },
+        ]) {
+          const result = await registry.execute(exec);
+          assert.equal(result.isError, true, `${name} must not dispatch`);
+          assert.match(result.content?.[0]?.text ?? "", /is a retired order tool/);
+        }
+        assert.equal(retiredRan, false, "a retired tool's body never runs");
+      } finally {
+        off();
+      }
+    }
   } finally {
     await dispose();
   }

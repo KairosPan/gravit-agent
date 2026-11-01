@@ -1,6 +1,6 @@
 /** Gravit's research-cycle contract - `dsh/profile/cycle.md`, the one file that tells Gravit how
- * to run a cycle: one batched question, then a goal-driven loop of role calls to a verdict (spec
- * §6). {@link readCycle} reads it where `composeFace` renders Gravit's default preset
+ * to run a cycle: one batched question, then a goal-driven loop of rounds - the Account's reads
+ * and a forward paper trade - to a verdict (spec §6; account-graft §12). {@link readCycle} reads it where `composeFace` renders Gravit's default preset
  * (src/boot.ts) and hands the text to `gravitRows` (src/roles.ts) as the `gravit` row's `cycle`
  * key, which `plugins/gravit.js` turns into the `gravit:cycle` section of every prompt a ROOT or
  * FORK session that can call `create_goal` assembles: Gravit's, and a `subagent_fork` child's. A
@@ -28,8 +28,10 @@ import { fileURLToPath } from "node:url";
 /** Resolved from this module, never from the working directory (persona.ts does the same). */
 export const CYCLE_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "dsh", "profile", "cycle.md");
 
-/** The largest `cycle.md`, in bytes as `wc -c` counts them. */
-export const CYCLE_MAX_BYTES = 3000;
+/** The largest `cycle.md`, in bytes as `wc -c` counts them. 3,000 until 2026-10-24, when the
+ * operator-approved forward-paper text of steps 2 to 5 (account-graft §12) made the file 3,161;
+ * kept a whole number of three-byte em dashes for tests/cycle.test.ts. */
+export const CYCLE_MAX_BYTES = 3300;
 
 /** Beside `cycle.md`, resolved from this module the same way. */
 export const DESK_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "dsh", "profile", "desk.md");

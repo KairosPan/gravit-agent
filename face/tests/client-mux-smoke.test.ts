@@ -39,8 +39,8 @@ import { join } from "node:path";
 import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace } from "../src/boot.ts";
 // allowJs (tsconfig): the browser modules are imported as they ship, untranspiled.
-import { call, openMux } from "../client/api.js";
-import { mapFrame } from "../client/mapper.js";
+import { call, openMux } from "../client/js/wire/api.js";
+import { mapFrame } from "../client/js/wire/mapper.js";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import { mountClient, signIn } from "./remote.ts";
 
@@ -90,7 +90,7 @@ test("client mux smoke: the page's own api.js + mapper.js against a real host - 
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
   // This smoke owns a scratch profile and must not start the operator's data server.
-  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n`);
+  writeFileSync(patchPath, `${patch}\n- id: mcp-akshare\n  disabled: true\n- id: mcp-account\n  disabled: true\n`);
   const { ctx, dispose } = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot() });
 
   const scope = globalThis as Record<string, unknown>;

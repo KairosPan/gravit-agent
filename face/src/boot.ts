@@ -32,7 +32,7 @@
  *    service, and the operator's default model lives in the profile patch.
  * 3. No `installProxyFromEnvironment` (D10): 0.1.1 had no proxy policy, and it
  *    is not a no-op when `HTTP(S)_PROXY` is set — it would reroute the face's
- *    own quote and Alpaca fetches too (NEW packages/util/http-proxy/src/
+ *    own A-share quote and symbol-search fetches too (NEW packages/util/http-proxy/src/
  *    install.ts:62-68, 296-303).
  * 4. No `createProcessShutdown`, no SIGINT/SIGTERM and no `installFailLoud`
  *    here: `main.ts` owns process lifetime and installs `installFailLoud`
@@ -125,8 +125,11 @@ import { GRAVIT_PLUGIN_URL, ROLES_ROOT, gravitRows, readRoles } from "./roles.ts
 import { PERSONA_PATH, readPersona } from "./persona.ts";
 import { CYCLE_PATH, DESK_PATH, readCycle, readDesk } from "./cycle.ts";
 import { declareDeskPreset, deskPresetDefinition, deskRosterProblem } from "./desk-preset.ts";
+import { readProtocols } from "./protocols.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, instructionsPatch } from "./instructions.ts";
 import { aksharePatches } from "./akshare.ts";
+import { accountSeatPatches } from "./account-seat.ts";
+import { lunhuiPatches } from "./lunhui.ts";
 import { facePolicyPatches } from "./policy.ts";
 import {
   auditOrderTools, effectiveApprovalPolicy, isOrderTool, orderApprovalDecision, orderGuardReasonForSession,
@@ -229,6 +232,11 @@ export interface FaceBootOptions {
    * plugin loads - and {@link bootFace} declares the `gravit-desk` preset from it
    * (src/desk-preset.ts). */
   deskPath?: string;
+  /** The directory the run protocols are read from (`dsh/profile/`, src/protocols.ts); tests point
+   * it at a fixture. Defaults to the repository's. {@link composeFace} reads them beside the cycle
+   * and hands them to Gravit's default preset as the `gravit` row's `protocols`, refusing the
+   * compose the same way, path-first. */
+  protocolsDir?: string;
   /** Leave the gateway's readiness uncommitted: the caller commits it with
    * {@link BootedFace.commitReady} once its OWN routes are mounted. `main.ts`
    * sets it, because it registers `/`, the `/data` routes, the room engine and
@@ -288,7 +296,8 @@ function composedRowIds(layers: readonly FacePatchList[]): Set<string> {
  * {@link FaceBootOptions.extraPatches} (usually none), the telemetry switch,
  * the hmr switch, Gravit's persona, the instructions patch (src/instructions.ts),
  * then the face's host rows last - among them the default preset, rendered
- * here from `roles/` (src/roles.ts) and `dsh/profile/cycle.md` (src/cycle.ts)
+ * here from `roles/` (src/roles.ts), `dsh/profile/cycle.md` (src/cycle.ts) and the
+ * run protocols (src/protocols.ts)
  * rather than read from `bots/gravit`. The desk's contract,
  * `dsh/profile/desk.md`, is read beside the cycle and handed back rather than
  * composed: no static row carries it, and {@link bootFace} declares the
@@ -305,9 +314,9 @@ function composedRowIds(layers: readonly FacePatchList[]): Set<string> {
  * contract, trimmed (the `gravit-desk` preset's `desk`).
  * @throws when the profile does not exist, a bundle was skipped, a
  * patch file cannot load, the roles directory is missing, a role under
- * `roles/` is malformed, or the cycle or desk file is missing, empty, oversized
- * or unreadable (the message opens with the absolute path of the directory or
- * file at fault).
+ * `roles/` is malformed, or the cycle file, the desk file or a protocol file is
+ * missing, empty, oversized or unreadable
+ * (the message opens with the absolute path of the directory or file at fault).
  */
 export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; rootConfig: string; profile: Profile; desk: string } {
   const home = resolveDshHome(opts.dshHome);
@@ -346,13 +355,19 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
     (line) => { process.stderr.write(`${BIN}: warning: ${line}\n`); },
   );
   const marketPatches = aksharePatches();
+  /* The Account seat (src/account-seat.ts): the same project layer, right
+   * after AKShare, below everything the operator writes. */
+  const seatPatches = accountSeatPatches();
+  /* The Lunhui rows (src/lunhui.ts, modules spec §5.12): the same project
+   * layer, right after the seat, below everything the operator writes. */
+  const lunhuiRows = lunhuiPatches();
   const homePatches = loadOptionalPatches(BIN, join(home, PROFILE_PATCH_FILENAME)) ?? [];
   /* Cloned: the include's patch algorithm pushes inserted rows by reference
    * and later patches assign into them, so composing the caller's own objects
    * could rewrite them under the caller. */
   const extraPatches: FacePatchList = structuredClone(opts.extraPatches ?? []);
   const patches: FacePatchList = [
-    ...bundlePatches, ...policyPatches, ...marketPatches, ...profile.patches, ...homePatches, ...extraPatches,
+    ...bundlePatches, ...policyPatches, ...marketPatches, ...seatPatches, ...lunhuiRows, ...profile.patches, ...homePatches, ...extraPatches,
   ];
   /* Both switches below are guarded on the row actually being in the composed
    * tree. A patch that matches nothing is inert and — measured, not assumed —
@@ -363,7 +378,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * never mounted the row. (With the policy layer disabling
    * `session-telemetry-otel` by default the env switch is redundant until an
    * operator re-enables the row - and then it still wins, composing after.) */
-  const below = composeEntries([bundlePatches, policyPatches, marketPatches, profile.patches, homePatches, extraPatches]);
+  const below = composeEntries([bundlePatches, policyPatches, marketPatches, seatPatches, lunhuiRows, profile.patches, homePatches, extraPatches]);
   const rows = new Set(below.flatMap((row) => (typeof row.id === "string" ? [row.id] : [])));
   /* app-boot exports the CLI's own resolver now (NEW packages/boot/app-boot/
    * src/profile-context.ts:52-55): ANY non-empty value disables, and a
@@ -419,8 +434,9 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
   }
   /* The static `preset-gravit` row is RENDERED from `roles/` here, in memory
    * (src/roles.ts `gravitRows`): the face's `gravit.js` row - the date section,
-   * the role summaries and the research-cycle contract (`readCycle`, read beside
-   * the roles and refusing the compose the same way), named by an absolute
+   * the role summaries, the research-cycle contract (`readCycle`, read beside
+   * the roles and refusing the compose the same way) and the run protocols
+   * (`readProtocols`, read and refused the same way), named by an absolute
    * `file:` URL - then one `@deepseek-ai/dsh-tool-subagent` row per role, each
    * registering a `role_<id>` tool. None of them masks a host tool, so Gravit's
    * roster is the host's plus the role tools; no persona is shadowed. `bots/gravit`
@@ -443,7 +459,8 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * rather than listing `gravit-desk` broken once the tree is up. Gravit's own
    * row never carries it: a preset carries one contract or the other. */
   const desk = readDesk(opts.deskPath ?? DESK_PATH);
-  const gravit = definitionFor(opts.botsRoot ?? BOTS_ROOT, DEFAULT_PRESET, gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, cycle }));
+  const protocols = readProtocols(opts.protocolsDir);
+  const gravit = definitionFor(opts.botsRoot ?? BOTS_ROOT, DEFAULT_PRESET, gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, cycle, protocols }));
   patches.push(...faceOverlay(opts.port, gravit));
   return { patches, rootConfig, profile, desk };
 }
@@ -643,10 +660,10 @@ interface GateApprovalLike {
 
 /** The tool registry as Gate 2 reads it: the guard seam itself
  * (`ToolGuard`, NEW packages/core/tools/src/index.ts:731, 1136-1142) and the
- * live lookup `get(name, scope)` - the guard reads a call's description
- * through it, the ask listener whether the calling scope sees the tool at all. */
+ * live lookup `get(name, scope)`, through which the ask listener asks whether
+ * the calling scope sees the tool at all. */
 interface GateToolsLike {
-  get(name: string, scope?: unknown): { description?: string } | undefined;
+  get(name: string, scope?: unknown): unknown;
   guard(check: (exec: { name: string; callId?: unknown; agent?: { session: unknown } }) => string | undefined): () => void;
 }
 
@@ -764,8 +781,8 @@ export function armOrderGate(hostCtx: Context): OrderGateFibers {
   const guard = hostCtx.inject(["tools"], function orderGateGuard(gateCtx) {
     const tools = gateCtx.get("tools") as GateToolsLike | undefined;
     if (tools === undefined) throw new Error(`${BIN}: order gate: the tools service vanished before the guard armed`);
-    /* The backstop, evaluated per call on every allow. It reads the LIVE
-     * description rather than a boot snapshot because the registry fills in
+    /* The backstop, evaluated per call on every allow, by the call's name
+     * rather than a boot snapshot because the registry fills in
      * asynchronously: `dsh-mcp-client` defaults `failOnStartupError` to false
      * (NEW packages/mcp/mcp-client/src/index.ts:128, 138), so a server whose
      * first connection failed still activates and can register its tools after
@@ -780,14 +797,7 @@ export function armOrderGate(hostCtx: Context): OrderGateFibers {
      * since a full snapshot copies the log once per append and this runs on
      * every allow of every tool - and gives an UNREADABLE log its own denial,
      * distinct from a missing grant. */
-    tools.guard((exec) =>
-      orderGuardReasonForSession(
-        exec.name,
-        tools.get(exec.name, exec.agent)?.description,
-        exec.agent?.session,
-        exec.callId,
-      )
-    );
+    tools.guard((exec) => orderGuardReasonForSession(exec.name, exec.agent?.session, exec.callId));
   });
   return { listener, guard };
 }
@@ -850,9 +860,10 @@ async function assertOrderGateArmed(gate: OrderGateFibers | undefined): Promise<
  * declarations, and the readiness commit (already done unless deferred).
  * @throws after disposing the tree when any enabled row did not activate, a
  * required service is missing, the `ask_user_question` tool did not register,
- * either half of Gate 2 did not arm, an operator-gated tool escapes the order
- * gate, the preset roster cannot supply its own default, the registry refuses
- * the desk's preset or lists it missing or broken, or a declared bot is
+ * either half of Gate 2 did not arm, a mounted Account seat has no write the
+ * order gate covers, a retired order tool is registered, the preset roster cannot
+ * supply its own default, the registry refuses the desk's preset or lists it
+ * missing or broken, or a declared bot is
  * not listed; `StartupError`
  * (from `boot`) when a required dsh entry is inactive; and whatever `boot`
  * throws when the plugin tree fails to load.
@@ -955,11 +966,18 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
      * registry against it. */
     await assertOrderGateArmed(gate);
     const audit = auditOrderTools(tools.schemas());
-    if (audit.ungated.length > 0) {
+    if (audit.uncovered.length > 0) {
       throw new Error(
-        `${BIN}: ${audit.ungated.join(", ")} ${audit.ungated.length === 1 ? "is" : "are"} marked` +
-          ` operator-gated but would not stop at the order gate - Gate 2 would cover nothing while` +
-          ` looking healthy (a renamed tool or MCP server; see face/src/orders.ts)`,
+        `${BIN}: the Account seat's tools are registered under ${audit.uncovered.map((p) => `${p}*`).join(", ")}` +
+          ` but the order gate covers none of them - Gate 2 would cover nothing while looking healthy` +
+          ` (the Account renamed its writes; add their raw names to SEAT_WRITE_RAW_NAMES in face/src/orders.ts)`,
+      );
+    }
+    if (audit.retired.length > 0) {
+      throw new Error(
+        `${BIN}: ${audit.retired.join(", ")} ${audit.retired.length === 1 ? "is a retired order tool" : "are retired order tools"}` +
+          ` - the Account seat is the only order path and Gate 2 denies them outright; remove their MCP row` +
+          ` from the profile (an alpaca-kit row left over from before stage 3)`,
       );
     }
     if (audit.gated.length > 0) {

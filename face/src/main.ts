@@ -21,17 +21,25 @@ import { bootFace, type BootedFace } from "./boot.ts";
 import { listBots, registerBotRoutes } from "./bots.ts";
 import { installBotRuntime, registerBotRuntimeRoutes } from "./bot-runtime.ts";
 import { readBotJournal } from "./bot-journal.ts";
-import { BOTS_ROOT } from "./overlay.ts";
-import { registerDataRoutes } from "./data.ts";
+import { BOTS_ROOT, faceBind } from "./overlay.ts";
+import { isTrustedDataRequest } from "./http.ts";
+import { createSymbolSearch, registerSymbolSearchRoute } from "./symbol-search.ts";
+import { registerQuoteRoutes } from "./quotes.ts";
+import { createCnRank, registerCnRankRoute } from "./cn-rank.ts";
+import { createCnCandles, registerCnCandlesRoute } from "./cn-candles.ts";
+import { registerLunhuiViewRoute, type LunhuiViewService } from "./lunhui-view.ts";
+import { registerAccountProxy } from "./account-proxy.ts";
+import { composedSeatRow, type SeatEntryLike } from "./account-seat.ts";
+import { registerSeatRoute } from "./seat.ts";
 import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
 import type { DeskConversationCtxLike } from "./desk-conversation.ts";
 import { resolveDeskRoute } from "./desk-session.ts";
 import { telegramConfigFromEnv } from "./telegram.ts";
-import { createQuoteHub } from "./quotes.ts";
+import { unwiredUsQuotes } from "./us-quotes.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { registerSessionRoutes } from "./sessions.ts";
 import { listSessionHeads, registerChannelRoutes, type RegistryLike } from "./channels.ts";
-import { hasExec, panelDeps, readAgentsMeta, registerPanelRoutes } from "./panels.ts";
+import { hasExec, lunhuiMounted, panelDeps, readAgentsMeta, registerPanelRoutes } from "./panels.ts";
 import { installRoom, registerRoomRoutes, type RoomContextLike } from "./room.ts";
 
 /** Diagnostic label, the same string boot.ts uses for `BIN`. Not imported
@@ -98,6 +106,9 @@ let disposeData: (() => void) | undefined;
  * release the room engine, the data routes and the tree, so a disposer that
  * throws cannot cost the run its `shutdown` line. */
 let desk: DeskHandle | undefined;
+/** The Account proxy's own unwind (src/account-proxy.ts): its kept answers and every open stream's upstream. Run AFTER the
+ * tree's dispose, once the web server has stopped and no browser can open another stream through it; idempotent. */
+let disposeProxy: (() => void) | undefined;
 
 /** Tear the tree down, then leave with `code`. A dispose that rejects still
  * exits, and says why: a signal the process has already acknowledged must not
@@ -110,6 +121,7 @@ async function shutdown(code: number): Promise<void> {
     disposeRoom?.();
     disposeData?.();
     await dispose?.();
+    disposeProxy?.();
   } catch (err) {
     console.error(`${BIN}: dispose failed during shutdown:`, err);
     code ||= 1;
@@ -139,6 +151,7 @@ installFailLoud(BIN, process, async () => {
   disposeRoom?.();
   disposeData?.();
   await dispose?.();
+  disposeProxy?.();
 });
 
 /* A `StartupError` is dsh's own grouped diagnostic for a required entry that
@@ -175,15 +188,42 @@ if (connection === undefined) {
   throw new Error(`${BIN}: the connection service is missing - / could not sign the browser in`);
 }
 registerStatic(booted.ctx.webServer, clientDir, connection);
-/* The live quote hub, one per process: `/data/quotes` and the desk's
- * `desk_quotes` read the same cache over the same upstream. */
-const hub = createQuoteHub(); // closed by disposeData (the quote routes' disposer), which only the two exits above run
-/* The instruments' data, on the same webserver as the page that reads it.
- * Given the hub above and otherwise left at its defaults on purpose: the
- * producer is spawned with `$FACE_PYTHON` (else `python3`) from the repo root
- * this process just chdir'd to, and no injection seam belongs on the entry
- * point — `spawn`/`now` exist for the tests. */
-disposeData = registerDataRoutes(booted.ctx.webServer, { hub });
+/* The face's own wire, on the same webserver as the page that reads it: the
+ * symbol search (src/symbol-search.ts) and the quotes (src/quotes.ts), both
+ * behind http.ts's `/data` fence. Left at their defaults on purpose: no
+ * injection seam belongs on the entry point — `fetch`/`now`/`hub` exist for the
+ * tests. */
+const disposeSearch = registerSymbolSearchRoute(booted.ctx.webServer, createSymbolSearch());
+const disposeQuotes = registerQuoteRoutes(booted.ctx.webServer, { isTrusted: isTrustedDataRequest });
+const disposeRank = registerCnRankRoute(booted.ctx.webServer, createCnRank());
+const disposeCandles = registerCnCandlesRoute(booted.ctx.webServer, createCnCandles());
+/* A sealed Lunhui run's view model (src/lunhui-view.ts), read through the plugin's
+ * `lunhuiRuns` service as provided at the moment of each request — the face
+ * imports nothing from plugins/. Behind the same `/data` fence. */
+const disposeView = registerLunhuiViewRoute(booted.ctx.webServer, {
+  isTrusted: isTrustedDataRequest,
+  runs: () => booted.ctx.get("lunhuiRuns") as LunhuiViewService | undefined,
+});
+disposeData = () => { disposeSearch(); disposeQuotes(); disposeRank(); disposeCandles(); disposeView(); };
+/* The Account's reads for the screens (src/account-proxy.ts) and the seat's
+ * standing for its box (src/seat.ts): loopback reads of the Account at the URL
+ * of the `mcp-account` row AS COMPOSED — an operator patch may have pointed it
+ * elsewhere, renamed the seat or disabled the row — so neither reports an
+ * Account or a seat the face did not mount; the proxy follows the same row as
+ * the box, and a disabled row disables both. The box finds the seat under the
+ * row's seat name and reads through the proxy's own `account` reader, so
+ * /data/seat.json and /data/account share one upstream read. Neither touches a
+ * key or a home. */
+const seatLoader = booted.ctx.get("loader") as { entries(): Iterable<SeatEntryLike> } | undefined;
+const seatRow = seatLoader === undefined ? undefined : composedSeatRow(seatLoader.entries());
+const proxy = registerAccountProxy(booted.ctx.webServer, seatRow === undefined ? {} : seatRow.disabled ? { disabled: true } : { url: seatRow.url });
+disposeProxy = proxy.dispose;
+registerSeatRoute(
+  booted.ctx.webServer,
+  seatRow === undefined
+    ? { reader: proxy.reader }
+    : seatRow.disabled ? { disabled: true } : { url: seatRow.url, seatName: seatRow.seatName, reader: proxy.reader },
+);
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it
  * there. `dshHome` is resolved the same way every other route family here
@@ -264,6 +304,12 @@ registerChannelRoutes(booted.ctx.webServer, {
   connectedBins: async () => (await readAgentsMeta(dshHome)).connected
     .map((row) => row.bin).filter((bin) => hasExec(bin)),
   listBots: allBots,
+  /* the same live row tree panelDeps wraps, read on each request: whether include:lunhui-runs
+   * is active now, not at boot */
+  lunhuiMounted: () => {
+    const loader = booted.ctx.get("loader") as { entries(): Parameters<typeof lunhuiMounted>[0] } | undefined;
+    return loader === undefined ? false : lunhuiMounted(loader.entries());
+  },
 });
 /* Delete + archive, which the host's own Remote surface still lacks a delete
  * for (no delete Remote in session-controller or workspace-controller at
@@ -313,7 +359,7 @@ await registerPanelRoutes(booted.ctx.webServer, deps);
 /* The desk (desk.ts): `/data/desk/status`, the Desk panel's
  * `POST /data/desk/pause` (it only pauses; a terminal resumes) and the two
  * desk tools always - every `gravit-desk` agent gets `desk_quotes` over the
- * hub above and `desk_state` (desk-tools.ts), so an old desk conversation
+ * unwired US source (src/us-quotes.ts) and `desk_state` (desk-tools.ts), so an old desk conversation
  * keeps its tools in a face with the desk off; the ledger's `boot` and the
  * sleep watch unless `FACE_DESK=0`, the switch for a second face beside the
  * service (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.2), which
@@ -341,9 +387,7 @@ await registerPanelRoutes(booted.ctx.webServer, deps);
  *
  * With the desk on, the standing orders' clock (schedule.ts) runs on that
  * conversation too, loaded on first use: `standing.yml` beside the ledger, fired
- * on the XNYS calendar that `scripts/market_clock.py` gives under `FACE_PYTHON ||
- * python3` - the interpreter `face_data.py` already needs, here with
- * pandas_market_calendars - which also runs a standing order's script producer. */
+ * on the XNYS calendar (src/market-clock.ts). */
 const deskEnabled = process.env.FACE_DESK !== "0";
 const deskRoute = deskEnabled
   ? await resolveDeskRoute(booted.ctx as unknown as RoomContextLike, process.env.FACE_DESK_MODEL, console.log)
@@ -352,13 +396,12 @@ desk = installDesk(booted.ctx.webServer, {
   home: dshHome,
   enabled: deskEnabled,
   ctx: booted.ctx,
-  hub,
+  hub: unwiredUsQuotes(),
   root: process.cwd(),
   route: deskRoute,
   sessionCtx: booted.ctx as unknown as DeskConversationCtxLike,
   installModelSelection: (agentCtx, ref) => installModelSelection(agentCtx as unknown as Context, ref),
   telegram: telegramConfigFromEnv(process.env),
-  python: process.env.FACE_PYTHON || "python3",
 });
 console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "rows disabled (FACE_DESK=0)"}`);
 /* Every route is mounted: only now may the gateway admit a browser stream
@@ -379,8 +422,16 @@ booted.commitReady();
  * exact authority — `127.0.0.1:3090` and `localhost:3090` are two sign-ins
  * (browser-auth.ts:69-78, 106-108) — and its signing secret persists in the
  * credentials store, so it survives restarts for its 30 days. */
-const baseUrl = `http://${booted.ctx.webServer.host}:${booted.ctx.webServer.port}/`;
-console.log(`${BIN}: ${connection.authenticatedUrl(baseUrl)} (profile: ${profileName})`);
+/* Under FACE_BIND (the agent box) the bound host is not where a browser goes:
+ * the URL stays loopback, where the box publishes the port, and the line
+ * names the bind instead. */
+const bind = faceBind();
+const widened = bind !== "127.0.0.1";
+const baseUrl = `http://${widened ? "127.0.0.1" : booted.ctx.webServer.host}:${booted.ctx.webServer.port}/`;
+console.log(
+  `${BIN}: ${connection.authenticatedUrl(baseUrl)} (profile: ${profileName})` +
+    (widened ? ` · listening on ${bind}` : ""),
+);
 console.log(
   `${BIN}: the ?token= is a per-process secret: it mints a 30-day cookie for this host:port;` +
     ` later visits to the plain URL work`,

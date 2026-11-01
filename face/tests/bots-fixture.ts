@@ -61,15 +61,16 @@ export async function makeRepoBotsRoot(): Promise<string> {
   return populateBotsRoot(await mkdtemp(join(REPO, ".bots-smoke-")));
 }
 
-/** A throwaway roles root with one valid role (`probe`) beside `_template`; the
- *  caller breaks it, or hands it to `composeFace` as `rolesRoot`. The caller
- *  removes it. */
+/** A throwaway roles root: the repository's own `roles/_template`, copied, and
+ *  one valid role (`probe`) made from a second copy of it, with its own persona
+ *  and a one-tool `allow` (`read`). A test of the role mechanism reads this
+ *  root, not the shipped library; the caller breaks it, or hands it
+ *  to `composeFace` as `rolesRoot`. The caller removes it. */
 export async function makeRolesRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "face-roles-"));
-  await mkdir(join(root, ROLE_TEMPLATE));
-  await writeFile(join(root, ROLE_TEMPLATE, "ROLE.md"), "You are <role name>.\n");
-  await mkdir(join(root, "probe"));
+  await cp(join(REPO, "roles", ROLE_TEMPLATE), join(root, ROLE_TEMPLATE), { recursive: true });
+  await cp(join(REPO, "roles", ROLE_TEMPLATE), join(root, "probe"), { recursive: true });
   await writeFile(join(root, "probe", "ROLE.md"), "You are the probe, a test role.\n");
-  await writeFile(join(root, "probe", "role.yml"), "name: Probe\ndescription: a test role\nallow:\n  - read\n  - mcp__alpaca-kit__earnings\n");
+  await writeFile(join(root, "probe", "role.yml"), "name: Probe\ndescription: a test role\nallow:\n  - read\n");
   return root;
 }

@@ -53,7 +53,7 @@ import {
 } from "./firing.ts";
 import { createMarketCalendar, pythonMarketClock, sessionFor, type DayAnswer, type MarketCalendar, type MarketSession } from "./market-clock.ts";
 import { defaultProducerRunner, formatProducer } from "./producer.ts";
-import type { QuoteHub } from "./quotes.ts";
+import type { UsQuoteSource } from "./us-quotes.ts";
 import { anchorInstant, GRACE_MS, parseStanding, STANDING_FILE, type FiringSummary, type StandingOrder, type StandingStatus } from "./standing.ts";
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; desk lines add `desk:`. */
@@ -993,7 +993,7 @@ export function createDeskSchedule(opts: {
   home: string;
   root: string;
   python: string;
-  hub?: Pick<QuoteHub, "snapshot">;
+  hub?: UsQuoteSource;
   session: DeskSessionDeps;
   sessionCtx: Partial<FiringRouteCtx>;
   on: SessionEventsOn;

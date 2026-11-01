@@ -35,7 +35,8 @@
  *
  * {@link gravitRows} renders the roles as Gravit's composition: the `gravit` plugin row,
  * whose config carries each role's tool and summary for the `gravit:roles` section
- * (plugins/gravit.js), then one `@deepseek-ai/dsh-tool-subagent` row per role.
+ * (plugins/gravit.js) and, when given, the cycle and the run protocols, then one
+ * `@deepseek-ai/dsh-tool-subagent` row per role.
  * {@link renderGravitComposition} dumps those rows as `bots/gravit/agent.cordis.yml`, a
  * GENERATED mirror (`cd face && npm run render:roles`); tests/roles.test.ts fails while the
  * committed file differs from the render.
@@ -49,6 +50,7 @@ import type { Config as ToolSubagentConfig } from "@deepseek-ai/dsh-tool-subagen
 import { dump, load } from "js-yaml";
 import type { PresetRow } from "./bot-presets.ts";
 import { MODEL_ROUTE_RE } from "./bots.ts";
+import type { Protocol } from "./protocols.ts";
 import { GRAVIT_PLUGIN_RELATIVE } from "./overlay.ts";
 
 /** The repository's role directory - where the face reads the role library from.
@@ -74,16 +76,17 @@ export const TOOL_NAME_MAX = 64;
 /** What a role never carries, and why: for each reason, the exact `names`, the name `prefixes`,
  *  and the `rawNames` it covers - a raw MCP name refused bare and under ANY server
  *  (`entry === raw` or `entry.endsWith("__" + raw)`), the match src/orders.ts `isOrderTool`
- *  applies to the order tools, so a server the operator mounts under another name than
- *  `alpaca-kit` cannot slip an account or order tool in. {@link readMeta} refuses an `allow`
- *  entry that matches, with the reason in the message. The shipped roles obey it, and
- *  tests/roles.test.ts holds an independent copy of the names. */
+ *  applies to the order tools, so a server the operator mounts under a name of their own
+ *  cannot slip an account or order tool in. {@link readMeta} refuses an `allow` entry that
+ *  matches, with the reason in the message. Every role the repository ships obeys it
+ *  (`cn-market-analyst`, `cn-reviewer` and `cn-stock-analyst` today), and tests/roles.test.ts holds an independent
+ *  copy of the names. */
 const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly string[]; prefixes: readonly string[]; rawNames: readonly string[] }> = [
   { what: "a tool that needs a human",
     because: "a delegated child has no human to ask or to review a plan (dsh refuses ask_user_question to it with DELEGATED_CALLER); a role that needs the operator says so in its report",
     names: ["ask_user_question", "exit_plan_mode"], prefixes: [], rawNames: [] },
   { what: "a web tool",
-    because: "the open web carries no as-of guard, and a role reads the market only through the PIT channels",
+    because: "a role works with the tree's own tools, never the open web",
     names: ["web_search", "web_fetch"], prefixes: [], rawNames: [] },
   { what: "a delegation tool",
     because: "Gravit alone delegates; a role is one hand, not a team",
@@ -96,10 +99,15 @@ const NEVER: ReadonlyArray<{ what: string; because: string; names: readonly stri
     because: "run_code is the reserved PTC mode presentation transport, which tools.restrict() refuses to name, so every delegation would fail; name the end-capability tools instead",
     names: ["run_code"], prefixes: [], rawNames: [] },
   { what: "an account or order tool",
-    because: "orders stay behind the two order gates, and a role has no reason to read the account",
-    names: [], prefixes: [], rawNames: ["account", "positions", "orders", "place_order", "cancel_order"] },
+    because: "orders go through the Account seat alone, behind its one gate (the face's per-order card); the seat is Gravit's, and a role has no reason to read the account",
+    names: [], prefixes: ["mcp__account__"],
+    rawNames: ["account", "positions", "orders", "place_order", "cancel_order",
+      /* the Account seat's twelve writes (src/orders.ts SEAT_WRITE_RAW_NAMES; spec 2026-10-20 §5.3), under any server name */
+      "portfolio_live_order", "portfolio_live_batch", "portfolio_live_amend", "portfolio_live_cancel", "portfolio_live_close",
+      "portfolio_live_leverage", "portfolio_live_move", "portfolio_live_earn", "portfolio_pay",
+      "portfolio_order", "portfolio_execute", "portfolio_transfer"] },
   { what: "an AKShare tool",
-    because: "the AKShare tools carry no point-in-time guard and are never backtest evidence",
+    because: "the AKShare tools carry no point-in-time guard and are never evidence; the evidence is forward paper trading at the Account",
     names: [], prefixes: ["mcp__akshare__"], rawNames: [] },
 ];
 
@@ -194,7 +202,7 @@ function readMeta(file: string): Pick<RoleFile, "name" | "description" | "allow"
   const seen = new Set<string>();
   const allow = listed.map((entry: unknown, index: number): string => {
     if (typeof entry !== "string") throw refusal(file, `allow entry ${index + 1} is not a string`);
-    if (entry.includes("*")) throw refusal(file, `allow entry ${JSON.stringify(entry)}: wildcards are not accepted; name the exact tool, e.g. mcp__alpaca-kit__screen`);
+    if (entry.includes("*")) throw refusal(file, `allow entry ${JSON.stringify(entry)}: wildcards are not accepted; name the exact tool, e.g. read or mcp__<server>__<raw>`);
     if (!TOOL_NAME_RE.test(entry)) throw refusal(file, `allow entry ${JSON.stringify(entry)} is not a tool name (letters, digits, _ and - only)`);
     const never = neverCarries(entry);
     if (never !== undefined) throw refusal(file, `allow entry ${JSON.stringify(entry)}: ${never}`);
@@ -270,12 +278,14 @@ export interface GravitRowsOptions {
   plugin: string;
   /** The text of the `gravit:cycle` section; absent when there is none. */
   cycle?: string;
+  /** The run protocols, one section each (src/protocols.ts); absent when there are none. */
+  protocols?: readonly Protocol[];
 }
 
 /**
  * Gravit's composition rows for `roles`: the `gravit` plugin row first, its config the
- * summaries (and the cycle text, when given) the plugin turns into sections, then one
- * `@deepseek-ai/dsh-tool-subagent` row per role. The role row is a one-shot spawn child with
+ * summaries (and the cycle text and the protocols, when given) the plugin turns into
+ * sections, then one `@deepseek-ai/dsh-tool-subagent` row per role. The role row is a one-shot spawn child with
  * the role's persona, an exact tool allow-list, and its route when `role.yml` names one;
  * `dsh-tool-subagent` has no description key, which is why the summaries ride on the first
  * row. Pure: the same roles give the same rows.
@@ -288,6 +298,7 @@ export function gravitRows(roles: readonly RoleFile[], options: GravitRowsOption
       config: {
         roles: roles.map((role) => ({ tool: role.tool, summary: role.description })),
         ...(options.cycle === undefined ? {} : { cycle: options.cycle }),
+        ...(options.protocols === undefined ? {} : { protocols: options.protocols.map(({ name, probe, text }) => ({ name, probe, text })) }),
       },
     },
     ...roles.map((role): PresetRow => ({
@@ -307,14 +318,14 @@ export function gravitRows(roles: readonly RoleFile[], options: GravitRowsOption
 }
 
 const GENERATED_HEADER =
-  "# GENERATED by face/src/roles.ts renderGravitComposition from roles/ and dsh/profile/cycle.md - do not hand-edit.\n" +
-  "# A role's summary, persona and tools are edited in roles/<id>/ (the cycle in dsh/profile/cycle.md), then:\n" +
+  "# GENERATED by face/src/roles.ts renderGravitComposition from roles/, dsh/profile/cycle.md, dsh/profile/lunhui-run.md and lunhui-module.md - do not hand-edit.\n" +
+  "# A role's summary, persona and tools are edited in roles/<id>/ (the cycle in dsh/profile/cycle.md, the run protocols in dsh/profile/lunhui-run.md and lunhui-module.md), then:\n" +
   "# cd face && npm run render:roles   (tests/roles.test.ts fails while this file differs from the render)\n";
 
 /** The text of `bots/gravit/agent.cordis.yml`: the generated header, then {@link gravitRows}
  *  with the plugin spelled by its shipped relative path, dumped in the Loader's own dialect
  *  as `renderComposition` (src/bots.ts) dumps a bot's. `face/scripts/render-roles.ts` writes it. */
-export function renderGravitComposition(roles: readonly RoleFile[], options: { cycle?: string }): string {
-  const rows = gravitRows(roles, { plugin: GRAVIT_PLUGIN_RELATIVE, cycle: options.cycle });
+export function renderGravitComposition(roles: readonly RoleFile[], options: { cycle?: string; protocols?: readonly Protocol[] }): string {
+  const rows = gravitRows(roles, { plugin: GRAVIT_PLUGIN_RELATIVE, cycle: options.cycle, protocols: options.protocols });
   return GENERATED_HEADER + dump(rows, { schema: entryListSchema, lineWidth: -1, noRefs: true });
 }
