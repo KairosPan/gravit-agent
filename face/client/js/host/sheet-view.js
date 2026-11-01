@@ -4,11 +4,12 @@
 // form is not complete, the words for what is missing; and the connect sheet's check (what to ask, its words). The sheet engine
 // (host/sheet.js) prepares the draft, the renderer draws the fields; the Account judges everything else in its own words. `now` is the caller's clock in milliseconds; `validUntil`
 // values are numbers (the Account's u64 fields), the dollar amounts strings as typed. No DOM, no store.
-import { pageOk, venuesOf, keyfileWords, paperBooksOf } from './account-view.js';
+import { pageOk, venuesOf, keyfileWords, paperBooksOf, writesOn } from './account-view.js';
 import { tradeFieldsOf, tradeDraftOf } from './trade-view.js';
 import { MARKET_KINDS, marketTitleOf, marketGoOf, marketFieldsOf, marketDraftOf } from './sheet-market.js';
 import { RULES_KINDS, rulesTitleOf, rulesGoOf, rulesFieldsOf, rulesDraftOf } from './sheet-rules.js';
 import { MONEY_KINDS, moneyTitleOf, moneyGoOf, moneyFieldsOf, moneyRefieldsOf, moneyDraftOf } from './sheet-money.js';
+import { canMove, servedHere } from './money-view.js';
 
 const DAY = 86_400_000;
 const ZERO = '0x0000000000000000000000000000000000000000';
@@ -56,7 +57,10 @@ export function titleOf(kind, seed, fields) {
   switch (kind) {
     case 'letIn': return `Let ${str(s.name) || 'a key'} in`;
     case 'limit': return `Give ${str(s.name) || 'the agent'} a limit`;
-    case 'endLimit': return str(s.name) ? `End ${s.name}'s trading limit` : 'End the trading limit';
+    case 'endLimit': {
+      const what = scopeOf(s.scope).limit;
+      return str(s.name) ? `End ${s.name}'s ${what}` : `End the ${what}`;
+    }
     case 'revoke': return `Revoke ${str(s.name) || 'the key'}`;
     case 'connect': return 'Connect an account';
     case 'paper': return 'Open a paper account';
@@ -98,18 +102,112 @@ const sameAddress = (a, b) => typeof a === 'string' && typeof b === 'string' && 
 // a dollar figure of the Account's as the string a field holds
 const dollarsText = v => (typeof v === 'number' && Number.isFinite(v) ? String(v) : str(v));
 
-/** A limit sheet's seed for an agent, from the page: the venues it may name (`{ id, name, paper }`, paper first) and its standing
- *  trade limit (`current: { allow, perPayment, budget }`, the page's `spend` row of `scope: 'trade'` at its address, in any case,
- *  not expired), or null. Give a limit and a granted ask open on the same shape, so a new limit starts from the standing one —
- *  one standing approval per agent and scope, a new one replacing it. */
-export function limitSeedOf(page, address, name) {
-  const seed = { address: str(address), name: str(name), venues: [], current: null };
+// ── the kinds of limit (portfolio.js:1186-1200 pfLimitForm, agents-mount.js:193-196) ──
+
+/** The kinds of limit an agent is given, in the Account page's words: what it may do, what one of its amounts is (an order, a
+ *  move, each time, a payment) and the limit's name. */
+export const LIMIT_SCOPES = [
+  { value: 'trade', label: 'Trading', per: 'per order', limit: 'trading limit' },
+  { value: 'venues', label: 'Moving money between your accounts', per: 'per move', limit: 'limit to move money' },
+  { value: 'earn', label: 'Putting money into earn', per: 'each time', limit: 'earn limit' },
+  { value: 'payees', label: 'Paying for things', per: 'per payment', limit: 'payments limit' },
+];
+const scopeOf = v => LIMIT_SCOPES.find(x => x.value === v) ?? LIMIT_SCOPES[0];
+// core.js:254 — the venues the Account is connected to, as its page lists them
+const connectedOf = page => records(page.venues).filter(v => v.live === true && str(v.id) && v.id !== '*');
+// core.js:1277, :1299 — an order can be placed there: the Account takes writes, the venue trades, its key may (or has not said),
+// it is not a watched address, it is served here
+const canTrade = (v, page) => writesOn(page) && isRecord(v.trade) && v.trade.can !== false && !(v.address && !v.proven) && servedHere(v);
+// portfolio.js:1196 — the venues each kind of limit may name: where it trades; where money moves, and the agent wallets (money
+// moves into them); where earn takes money and is served here. A payees limit names hosts, no venue
+function scopeVenues(page, scope) {
+  const L = connectedOf(page);
+  if (scope === 'trade') return L.filter(v => canTrade(v, page));
+  if (scope === 'venues') return [...L.filter(v => canMove(v, page)), ...L.filter(v => v.id.startsWith('agent-') && !canMove(v, page))];
+  if (scope === 'earn') return L.filter(v => isRecord(v.earn) && v.earn.can !== false && servedHere(v));
+  return [];
+}
+const venueRow = v => ({ id: v.id, name: str(v.name), paper: v.paper === true });
+const paperFirst = list => [...list.filter(v => v.paper), ...list.filter(v => !v.paper)];
+
+/** A limit sheet's seed for an agent, from the page: the kinds of limit the page can serve (`scopes`, each `{ value, label,
+ *  venues }` — the venues `{ id, name, paper }`, paper first, by portfolio.js:1196's rule for that kind; a payees limit, which
+ *  names hosts, always), the agent's standing limit of each (`standing[scope]: { allow, perPayment, budget }`, the page's
+ *  `spend` row of that scope at its address, in any case, not expired), and the kind asked (`scope`: the one given where the
+ *  page serves it, else the first it does) with its venues and its standing limit (`venues`, `current`, or null). Give a limit
+ *  and a granted ask open on the same shape, so a new limit starts from the standing one — one standing approval per agent and
+ *  scope, a new one replacing it. */
+export function limitSeedOf(page, address, name, scope = 'trade') {
+  const seed = { address: str(address), name: str(name), scope: str(scope) || 'trade', scopes: [], standing: {}, venues: [], current: null };
   if (!pageOk(page)) return seed;
-  const venues = venuesOf(page).map(v => ({ id: v.id, name: v.name, paper: v.paper }));
-  seed.venues = [...venues.filter(v => v.paper), ...venues.filter(v => !v.paper)];
-  const row = records(page.spend).find(r => r.scope === 'trade' && r.expired !== true && sameAddress(r.agent, address));
-  if (row) seed.current = { allow: listOf(row.allow), perPayment: dollarsText(row.perPaymentUsd), budget: dollarsText(row.budgetUsd) };
+  seed.scopes = LIMIT_SCOPES.map(x => ({ value: x.value, label: x.label, venues: paperFirst(scopeVenues(page, x.value).map(venueRow)) }))
+    .filter(x => x.value === 'payees' || x.venues.length);
+  for (const x of seed.scopes) {
+    const row = records(page.spend).find(r => r.scope === x.value && r.expired !== true && sameAddress(r.agent, address));
+    if (row) seed.standing[x.value] = { allow: listOf(row.allow), perPayment: dollarsText(row.perPaymentUsd), budget: dollarsText(row.budgetUsd) };
+  }
+  if (!seed.scopes.some(x => x.value === seed.scope)) seed.scope = seed.scopes[0]?.value ?? seed.scope;
+  seed.venues = seed.scopes.find(x => x.value === seed.scope)?.venues ?? [];
+  seed.current = seed.standing[seed.scope] ?? null;
   return seed;
+}
+
+// the kinds of limit a seed offers: its own, or — a seed with none (a trade limit's, as the sheet was first seeded) — trading
+// over its venues
+function scopesOfSeed(s) {
+  const list = records(s.scopes).filter(x => LIMIT_SCOPES.some(y => y.value === x.value));
+  return list.length ? list : [{ value: 'trade', label: 'Trading', venues: records(s.venues) }];
+}
+// the standing limit of a kind: the seed's, or its `current` for the kind it was seeded on
+const standingOf = (s, scope) => (isRecord(s.standing?.[scope]) ? s.standing[scope]
+  : (str(s.scope) || 'trade') === scope && isRecord(s.current) ? s.current : null);
+
+// a limit's fields for a kind: the kind, where (the venues to tick, or for a payees limit the hosts and Any payee, as
+// agents-mount.js:193-196), then the amounts and how long. `values` keeps what the form holds across a change of kind; without
+// them, the standing limit of the kind with the asked venue ticked, the asked budget over its own, the amount per order never
+// above the budget. The where-field records the kind it was built for, so a change of kind is told from any other change
+function limitFields(s, scope, values = null) {
+  const scopes = scopesOfSeed(s);
+  const kind = scopeOf(scope);
+  const current = standingOf(s, scope);
+  const head = { name: 'scope', label: 'For', type: 'seg', options: scopes.map(x => ({ value: x.value, label: str(x.label) || scopeOf(x.value).label })), value: scope };
+  let where;
+  if (scope === 'payees') {
+    const allow = listOf(current?.allow);
+    where = [
+      { name: 'payees', label: 'May pay', type: 'text', placeholder: 'api.example.com, data.example.com', value: allow.includes('*') ? '' : allow.join(', '), scope },
+      { name: 'anyPayee', label: 'Any payee', type: 'check', value: allow.includes('*') },
+    ];
+  } else {
+    const options = venueOptions({ venues: scopes.find(x => x.value === scope)?.venues });
+    const known = new Set(options.map(o => o.value));
+    const asked = values ? [] : listOf(s.asked);
+    where = [{ name: 'allow', label: 'Venues', type: 'pick', options, value: [...new Set([...listOf(current?.allow), ...asked].filter(id => known.has(id)))], scope }];
+  }
+  let perPayment, budget, days = '30';
+  if (values) ({ perPayment, budget, days } = values);
+  else {
+    budget = str(s.budget) || str(current?.budget);
+    const standing = str(current?.perPayment);
+    perPayment = standing && AMOUNT.test(budget) && Number(standing) > Number(budget) ? budget : standing;
+  }
+  const per = kind.per[0].toUpperCase() + kind.per.slice(1);
+  return [
+    head, ...where,
+    { name: 'perPayment', label: `${per}, in dollars`, type: 'number', placeholder: '100', value: perPayment },
+    { name: 'budget', label: 'Budget, in dollars', type: 'number', placeholder: '1000', value: budget },
+    { name: 'days', label: 'Good for', type: 'seg', options: DAYS, value: DAYS.some(o => o.value === days) ? days : '30' },
+  ];
+}
+// a limit's fields after one changed: the kind changed — the pick swapped for that kind's (its standing limit's), the amounts
+// and how long kept; any other change, the fields as they are
+function limitRefieldsOf(fields, seed) {
+  if (!Array.isArray(fields)) return fields;
+  const s = isRecord(seed) ? seed : {};
+  const scope = text(fields, 'scope');
+  const built = fields.find(f => isRecord(f) && (f.name === 'allow' || f.name === 'payees'))?.scope;
+  if (!scopesOfSeed(s).some(x => x.value === scope) || built === scope) return fields;
+  return limitFields(s, scope, { perPayment: amount(fields, 'perPayment'), budget: amount(fields, 'budget'), days: text(fields, 'days') });
 }
 
 /** Let it sign's seed: the owners the new list keeps — the page's (`signers.owners`), and this page's own `device:<kid>`, which
@@ -141,21 +239,8 @@ export function fieldsOf(kind, seed) {
       { name: 'days', label: 'Good for', type: 'seg', options: DAYS, value: '30' },
     ];
     case 'limit': {
-      // the standing limit's venues with the asked one ticked; its amounts, the asked budget over its own, the per-order
-      // amount never above the budget
-      const options = venueOptions(s);
-      const known = new Set(options.map(o => o.value));
-      const current = isRecord(s.current) ? s.current : null;
-      const allow = [...new Set([...listOf(current?.allow), ...listOf(s.asked)].filter(id => known.has(id)))];
-      const budget = str(s.budget) || str(current?.budget);
-      const standing = str(current?.perPayment);
-      const perPayment = standing && AMOUNT.test(budget) && Number(standing) > Number(budget) ? budget : standing;
-      return [
-        { name: 'allow', label: 'Venues', type: 'pick', options, value: allow },
-        { name: 'perPayment', label: 'Per order, in dollars', type: 'number', placeholder: '100', value: perPayment },
-        { name: 'budget', label: 'Budget, in dollars', type: 'number', placeholder: '1000', value: budget },
-        { name: 'days', label: 'Good for', type: 'seg', options: DAYS, value: '30' },
-      ];
+      const scopes = scopesOfSeed(s);
+      return limitFields(s, scopes.some(x => x.value === s.scope) ? s.scope : scopes[0].value);
     }
     case 'connect': {
       const options = connectOptions(s);
@@ -200,6 +285,7 @@ export function fieldsOf(kind, seed) {
 export function refieldsOf(kind, fields, seed) {
   if (isMoney(kind)) return moneyRefieldsOf(kind, fields, seed);
   if (kind === 'connect') return connectRefieldsOf(fields, seed);
+  if (kind === 'limit') return limitRefieldsOf(fields, seed);
   return fields;
 }
 
@@ -249,21 +335,34 @@ export function draftOf(kind, fields, seed, now) {
     case 'limit': {
       const agent = str(s.address);
       if (!agent) return 'No agent to give a limit to';
-      const picked = new Set(listOf(valueOf(fields, 'allow')));
-      const allow = venueOptions(s).map(o => o.value).filter(id => picked.has(id));
-      if (allow.length === 0) return 'Pick at least one venue';
+      const scope = text(fields, 'scope');
+      const offered = scopesOfSeed(s).find(x => x.value === scope);
+      if (!offered) return 'Pick what the limit is for';
+      let allow;
+      if (scope === 'payees') {
+        // agents-mount.js:193 — the hosts it may pay, lower-cased, or any payee
+        const any = valueOf(fields, 'anyPayee');
+        allow = any === true || any === 'true' ? '*' : text(fields, 'payees').split(',').map(x => x.trim().toLowerCase()).filter(Boolean).join(',');
+        if (!allow) return 'Name the hosts it may pay, or tick any payee';
+      } else {
+        // only the venues this kind may name, in their order, never *
+        const picked = new Set(listOf(valueOf(fields, 'allow')));
+        allow = venueOptions({ venues: offered.venues }).map(o => o.value).filter(id => picked.has(id)).join(',');
+        if (!allow) return 'Pick at least one venue';
+      }
       const perPayment = amount(fields, 'perPayment'), budget = amount(fields, 'budget');
       const missing = amountMissing(perPayment, 'Type an amount') ?? amountMissing(budget, 'Type a budget');
       if (missing) return missing;
-      if (Number(perPayment) > Number(budget)) return 'The amount per order is more than the budget';
+      if (Number(perPayment) > Number(budget)) return `The amount ${scopeOf(scope).per} is more than the budget`;
       const days = daysOf(fields);
       if (days === null) return 'Pick how long';
-      return { type: 'approveSpend', agent, scope: 'trade', allow: allow.join(','), perPayment, budget, windowHours: 0, validUntil: now + days * DAY };
+      return { type: 'approveSpend', agent, scope, allow, perPayment, budget, windowHours: 0, validUntil: now + days * DAY };
     }
+    // agents-mount.js:123 — the end of one limit: the same agent, kind and places, a budget of nothing
     case 'endLimit': {
       const agent = str(s.address), allow = listOf(s.allow).join(',');
       if (!agent || !allow) return 'No limit to end';
-      return { type: 'approveSpend', agent, scope: 'trade', allow, perPayment: '0', budget: '0', windowHours: 0, validUntil: now + DAY };
+      return { type: 'approveSpend', agent, scope: scopeOf(s.scope).value, allow, perPayment: '0', budget: '0', windowHours: 0, validUntil: now + DAY };
     }
     case 'revoke':
       if (!str(s.name)) return 'No key to revoke';

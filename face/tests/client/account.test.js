@@ -457,32 +457,39 @@ test("the owner's keys on Agents and Cards: Let in, Give a limit, End limit, Rev
   const box = (html, label) => html.match(new RegExp(`<section class="cardbox" aria-label="${label}">[\\s\\S]*?</section>`))?.[0] ?? '';
   const sheetKey = (kind, data, word, cl = 'btn-sm') => `<button type="button" class="${cl}" data-action="openSheet" data-kind="${kind}"${Object.entries(data).map(([k, v]) => ` data-${k}="${v}"`).join('')}>${word}</button>`;
 
-  // Agents: a knocking key's Let in…, an agent's Give a limit…, End limit on its trade limit, Revoke…; Gravit's own row none
+  // Agents: a knocking key's Let in…, an agent's Give a limit…, End limit… on each limit by its kind, Revoke…
   const agents = box(draw(signing(state({ tab: 'agents', seat: seatView(), page: knocks }))), 'Agents');
   has(agents, `<span class="dim">0xab12 · ${hhmm('2026-10-22T07:30:00.000Z')}</span></span><span class="btn-row">${sheetKey('letIn', { address: '0xab12', name: 'Scout' }, 'Let in…')}</span></div>`);
   has(agents, '<span class="dim">Cards 1 · Open orders 1</span></span><span class="btn-row">' +
     sheetKey('limit', { address: CC, name: 'Claude Code' }, 'Give a limit…') +
-    sheetKey('endLimit', { address: CC, name: 'Claude Code', allow: 'ex,predict,wallet' }, 'End limit') +
+    sheetKey('endLimit', { address: CC, name: 'Claude Code', scope: 'trade', allow: 'ex,predict,wallet' }, 'End limit…') +
+    sheetKey('endLimit', { address: CC, name: 'Claude Code', scope: 'venues', allow: 'ex,agent-claude-code' }, 'End limit…') +
+    sheetKey('endLimit', { address: CC, name: 'Claude Code', scope: 'payees', allow: 'api.example.com' }, 'End limit…') +
     `<button type="button" class="btn-danger" data-action="askRevoke" data-address="${CC}" data-name="Claude Code">Revoke…</button></span></div>`);
-  assert.equal((agents.match(/data-kind="endLimit"/g) ?? []).length, 1, 'the trade limit alone: venues and payees are not ended here');
-  has(agents, '<span class="dim">Cards 0 · Open orders 0</span></span></div>', "Gravit's row: no key — the seat is admitted on the Account page");
+  assert.equal((agents.match(/data-kind="endLimit"/g) ?? []).length, 4, "every limit standing, Gravit's trade limit among them");
   // Revoke… asks twice: the confirm for this agent stands in its place
   const asking = box(draw(R.askConfirm(signing(state({ tab: 'agents', seat: seatView() })), { action: 'revoke', name: 'Claude Code', address: CC })), 'Agents');
-  has(asking, 'data-allow="ex,predict,wallet">End limit</button><span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, revoke</button><button type="button" class="btn-sm" data-action="cancelConfirm">No</button></span></span></div>');
-  lacks(asking, 'data-action="askRevoke"');
+  has(asking, 'data-allow="api.example.com">End limit…</button><span class="dim">Revoke Claude Code? Its key can do nothing on this account from then on, and cannot be let in again under the same key: a new key is needed. Its limits end with it.</span>' +
+    '<span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, revoke</button><button type="button" class="btn-sm" data-action="cancelConfirm">No</button></span></span></div>');
+  lacks(asking, `data-action="askRevoke" data-address="${CC}"`);
+  has(asking, 'data-action="askRevoke" data-address="0xab12" data-name="Gravit"', "Gravit's own stands");
   has(box(draw(R.askConfirm(signing(state({ tab: 'agents' })), { action: 'revoke', name: 'Someone else', address: '0xb0b' })), 'Agents'), 'data-action="askRevoke"', 'a confirm for another agent leaves this one');
-  // each trade limit standing gets End limit, its ids comma-joined, never *; an expired one, or one naming nothing, none
+  // each limit standing gets End limit…, its ids comma-joined, never * (but a payees limit's any payee); an expired one, or one
+  // naming nothing, none
   const agentsBody = fx('agents');
   const more = { ...agentsBody, agents: [{ ...agentsBody.agents[0], limits: [
     { id: 'spend-1', scope: 'trade', allow: ['ex'], perPaymentUsd: 10, budgetUsd: 20 },
     { id: 'spend-2', scope: 'trade', allow: ['*', 'paper', 'broker'], perPaymentUsd: 10, budgetUsd: 20 },
     { id: 'spend-3', scope: 'trade', allow: ['wallet'], expired: true },
     { id: 'spend-4', scope: 'trade', allow: ['*'] },
+    { id: 'spend-5', scope: 'payees', allow: ['*'] },
+    { id: 'spend-6', scope: 'earn', allow: ['*', 'ex'] },
+    { id: 'spend-7', allow: ['ex'] },
   ] }] };
-  const ends = [...draw(signing(state({ tab: 'agents', agents: more }))).matchAll(/data-kind="endLimit"[^>]*data-allow="([^"]*)"/g)].map(m => m[1]);
-  assert.deepEqual(ends, ['ex', 'paper,broker']);
+  const ends = [...draw(signing(state({ tab: 'agents', agents: more }))).matchAll(/data-kind="endLimit"[^>]*data-scope="([^"]*)" data-allow="([^"]*)"/g)].map(m => `${m[1]}:${m[2]}`);
+  assert.deepEqual(ends, ['trade:ex', 'trade:paper,broker', 'payees:*', 'earn:ex']);
   // an agent with no address: Revoke… by its name alone; nothing that needs the address; every seed escaped
-  const odd = draw(signing(state({ tab: 'agents', agents: { ok: true, agents: [{ name: 'Bob "<b>"', status: 'ok', limits: [{ scope: 'trade', allow: ['ex'] }] }] } })));
+  const odd = box(draw(signing(state({ tab: 'agents', agents: { ok: true, agents: [{ name: 'Bob "<b>"', status: 'ok', limits: [{ scope: 'trade', allow: ['ex'] }] }] } }))), 'Agents');
   has(odd, '<button type="button" class="btn-danger" data-action="askRevoke" data-address="" data-name="Bob &quot;&lt;b&gt;&quot;">Revoke…</button>');
   lacks(odd, 'data-action="openSheet"');
   const quoted = draw(signing(state({ tab: 'agents', page: { ...page, requests: [{ address: '0x"><i>', name: '<Scout>', at: '' }] } })));
@@ -512,6 +519,77 @@ test("the owner's keys on Agents and Cards: Let in, Give a limit, End limit, Rev
       for (const k of ['data-action="openSheet"', 'data-action="askRevoke"', 'data-action="grant"', 'Let in…', 'Give a limit…', 'End limit', 'Revoke…', 'Approve', 'Reject', 'Decline']) lacks(out, k, `${role} ${tab}: ${k}`);
       if (line) has(out, `<p class="acct-note">${line}`, `${role}: the device line`);
     }
+  }
+});
+
+// plan 4b Task 5: the Agent wallets, each with Top up… and Take back… through the move sheet, and Open an agent wallet…; Gravit's
+// own row with Give a limit…, End limit… and Revoke… while admitted, and Let in… while it knocks
+const sheetKeyOf = (kind, data, word) => `<button type="button" class="btn-sm" data-action="openSheet" data-kind="${kind}"${Object.entries(data).map(([k, v]) => ` data-${k}="${v}"`).join('')}>${word}</button>`;
+const boxOf = (html, label) => html.match(new RegExp(`<section class="cardbox" aria-label="${label}">[\\s\\S]*?</section>`))?.[0] ?? '';
+const signingAs = (s, role = 'signs') => R.ownerStanding(s, { role, kid: 'a5048199a8081854' });
+
+test("the Agents tab's wallet rows and keys", () => {
+  const wallets = boxOf(draw(signingAs(state({ tab: 'agents', seat: seatView() }))), 'Agent wallets');
+  has(wallets, '<div class="cardbox-title">Agent wallets</div><div class="venues"><div class="venue"><span><b>Claude Code</b><br>' +
+    '<span class="dim">pays for Claude Code · 0x7f89224d3ad6cacd933242ba0c07e1187e3467c2 · $47.37 of up to $100.00</span></span><span class="btn-row">' +
+    sheetKeyOf('move', { from: 'ex', to: 'agent-claude-code' }, 'Top up…') + sheetKeyOf('move', { from: 'agent-claude-code' }, 'Take back…') + '</span></div></div>' +
+    `<div class="btn-row">${sheetKeyOf('subWallet', {}, 'Open an agent wallet…')}</div>`);
+  // Top up… from the first account money moves from that is not an agent wallet; none such: no Top up…
+  const page = fx('account');
+  const lone = { ...page, venues: page.venues.map(v => (v.id === 'ex' ? { ...v, liveCan: { ...v.liveCan, withdraw: false, transfer: false, swap: false } } : v)) };
+  const noSource = boxOf(draw(signingAs(state({ tab: 'agents', page: lone }))), 'Agent wallets');
+  lacks(noSource, 'Top up…');
+  has(noSource, sheetKeyOf('move', { from: 'agent-claude-code' }, 'Take back…'));
+  // a wallet the page does not list as a venue it moves from: no Take back…; an amount that does not parse is —
+  const away = { ...page, subAccounts: [{ ...page.subAccounts[0], name: 'Elsewhere', capUsd: 'n/a' }] };
+  const elsewhere = boxOf(draw(signingAs(state({ tab: 'agents', page: away }))), 'Agent wallets');
+  has(elsewhere, '$47.37 of up to —');
+  lacks(elsewhere, 'Take back…');
+  has(elsewhere, sheetKeyOf('move', { from: 'ex', to: 'agent-elsewhere' }, 'Top up…'));
+  // a read-only Account, or a page that does not sign: the rows, no key
+  const readOnly = { ...page, connectLive: { ...page.connectLive, writes: { on: false, capUsd: 250 } } };
+  for (const html of [boxOf(draw(signingAs(state({ tab: 'agents', page: readOnly }))), 'Agent wallets'), boxOf(draw(signingAs(state({ tab: 'agents' }), 'pending')), 'Agent wallets')]) {
+    has(html, 'pays for Claude Code');
+    lacks(html, 'data-action="openSheet"');
+  }
+  // no wallet: the page's words; nobody let in: the words for that, and nothing to open
+  has(boxOf(draw(signingAs(state({ tab: 'agents', page: { ...page, subAccounts: [] } }))), 'Agent wallets'), '<p class="acct-note">No agent wallet yet.</p>');
+  const nobody = boxOf(draw(signingAs(state({ tab: 'agents', page: { ...page, subAccounts: [], keys: [] } }))), 'Agent wallets');
+  has(nobody, '<p class="acct-note">Let an agent in first: a wallet pays for one agent.</p>');
+  lacks(nobody, 'Open an agent wallet…');
+  // every word escaped
+  const odd = { ...page, subAccounts: [{ ...page.subAccounts[0], name: '<b>x</b>', agentName: '"Bob"' }] };
+  has(boxOf(draw(signingAs(state({ tab: 'agents', page: odd }))), 'Agent wallets'), '<b>&lt;b&gt;x&lt;/b&gt;</b><br><span class="dim">pays for &quot;Bob&quot; · ');
+});
+
+test("Gravit's row: Revoke…, Give a limit… and End limit… on a page that signs, none on one that does not; Let in… while it knocks", () => {
+  const gravitRow = html => boxOf(html, 'Agents').match(/<div class="venue"><span><b>Gravit · [\s\S]*?<\/div>/)?.[0] ?? '';
+  const row = gravitRow(draw(signingAs(state({ tab: 'agents', seat: seatView() }))));
+  has(row, '<span class="dim">Cards 0 · Open orders 0</span></span><span class="btn-row">' +
+    sheetKeyOf('limit', { address: '0xab12', name: 'Gravit' }, 'Give a limit…') +
+    sheetKeyOf('endLimit', { address: '0xab12', name: 'Gravit', scope: 'trade', allow: 'paper-1' }, 'End limit…') +
+    '<button type="button" class="btn-danger" data-action="askRevoke" data-address="0xab12" data-name="Gravit">Revoke…</button></span></div>');
+  // Revoke… asked first, in words that say Gravit's orders stop
+  const asking = gravitRow(draw(R.askConfirm(signingAs(state({ tab: 'agents', seat: seatView() })), { action: 'revoke', name: 'Gravit', address: '0xab12' })));
+  has(asking, `<span class="dim">Revoke Gravit? Its key can do nothing on this account from then on: ${esc("Gravit's")} orders stop, and it places and moves nothing more. ` +
+    'It cannot be let in again under the same key: a new key is needed. Its limits end with it.</span><span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, revoke</button>');
+  // a page that does not sign: Gravit's row has no key
+  for (const role of ['pending', 'none', 'needs-code', 'signed-out', 'unknown']) {
+    const quiet = gravitRow(draw(signingAs(state({ tab: 'agents', seat: seatView() }), role)));
+    has(quiet, 'Gravit · admitted', role);
+    for (const k of ['data-action="openSheet"', 'data-action="askRevoke"']) lacks(quiet, k, `${role}: ${k}`);
+  }
+  // knocking: Let in… seeded from the page's request under the seat's name, listed once; no limit or Revoke… yet
+  const page = { ...fx('account'), requests: [{ address: '0xfeed', name: 'Gravit', at: '2026-10-22T07:30:00.000Z' }, { address: '0xab34', name: 'Scout', at: '' }] };
+  const knocks = seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] } });
+  const agents = boxOf(draw(signingAs(state({ tab: 'agents', seat: knocks, page }))), 'Agents');
+  has(gravitRow(agents), `<span class="btn-row">${sheetKeyOf('letIn', { address: '0xfeed', name: 'Gravit' }, 'Let in…')}</span></div>`);
+  for (const k of ['data-kind="limit"', 'data-action="askRevoke" data-address="0xfeed"']) lacks(gravitRow(agents), k);
+  assert.equal((agents.match(/data-address="0xfeed"/g) ?? []).length, 1, 'the seat knocks on its own row, not again under Knocking');
+  has(agents, sheetKeyOf('letIn', { address: '0xab34', name: 'Scout' }, 'Let in…'));
+  // knocking with no request under its name, or an expired or revoked seat: no key on its row
+  for (const seat of [knocks, seatView({ seat: { name: 'Gravit', status: 'expired', address: '0xab12', limits: [] } }), seatView({ seat: { name: 'Gravit', status: 'revoked', address: '0xab12', limits: [] } })]) {
+    lacks(gravitRow(draw(signingAs(state({ tab: 'agents', seat })))), 'data-action=', seat.seat.status);
   }
 });
 

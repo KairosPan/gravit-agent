@@ -48,7 +48,7 @@ export function seatWords(data) {
   const s = data.seat && typeof data.seat === 'object' ? data.seat : {};
   const name = typeof s.name === 'string' && s.name ? s.name : 'Gravit';
   const seat = s.status === 'admitted' ? `${name} · admitted${isNum(s.validUntil) ? ` until ${fmtDate(s.validUntil)}` : ''}`
-    : s.status === 'knocking' ? `${name} · knocking — admit it on the Account page`
+    : s.status === 'knocking' ? `${name} · knocking — let it in under Agents`
       : s.status === 'expired' ? `${name} · expired`
         : s.status === 'revoked' ? `${name} · revoked`
           : s.status === 'unknown' ? `${name} · on the account · standing unknown`
@@ -275,8 +275,10 @@ const agentRow = a => ({
  *  while the seat view carries no address (knocking: no key yet); it is left out of the list while Gravit's row stands, so
  *  Gravit is listed once, and a display name alone never hides a row an address could tell. With no seat view to stand on,
  *  the Account's list is the whole answer. The knocking keys are the page's (`requestsOf`). Every row carries its address
- *  (Gravit's the seat view's) and each limit as `{ id, scope, allow, expired, words }` — what the owner's keys name back. */
-export function agentsOf(agentsBody, seatView) {
+ *  and each limit as `{ id, scope, allow, expired, words }` — what the owner's keys name back. Gravit's row also carries the
+ *  seat's status (`seatStatus`) and, while it knocks, the page's request under the seat's name (`request: { address, name }`,
+ *  in any case; else null) — its address is then the row's, so Let in… lets in the key that knocks. */
+export function agentsOf(agentsBody, seatView, page = null) {
   const w = seatWords(seatView);
   const read = agentsBody?.ok === true && Array.isArray(agentsBody.agents);
   const agents = read ? records(agentsBody.agents) : [];
@@ -285,8 +287,11 @@ export function agentsOf(agentsBody, seatView) {
   const name = typeof s.name === 'string' && s.name ? s.name : 'Gravit';   // the name seatWords gives the seat
   const isSeat = typeof s.address === 'string' && s.address ? a => sameAddress(a.address, s.address) : a => sameName(a.name, name);
   const seats = agents.filter(isSeat);
+  const knock = s.status === 'knocking' ? requestsOf(page).find(r => r.address && sameName(r.name, name)) ?? null : null;
   return [
-    { gravit: true, name, address: str(s.address), standing: w.seat, limits: records(s.limits).map(l => limitOf(l, l.perOrderUsd)),
+    { gravit: true, name, address: str(s.address) || (knock ? knock.address : ''), standing: w.seat, seatStatus: str(s.status),
+      request: knock ? { address: knock.address, name: knock.name } : null,
+      limits: records(s.limits).map(l => limitOf(l, l.perOrderUsd)),
       cards: read ? seats.reduce((n, a) => n + cardCount(a), 0) : null,
       orders: read ? seats.reduce((n, a) => n + openCount(a), 0) : null },
     ...agents.filter(a => !isSeat(a)).map(agentRow),
@@ -322,6 +327,21 @@ export function asksOf(page) {
   return records(page.asks).map(a => ({
     id: str(a.id), agent: str(a.agent), agentName: str(a.agentName), kind: str(a.kind), venue: str(a.venue), usd: str(a.usd),
     text: str(a.text), expiresAt: str(a.expiresAt),
+  }));
+}
+
+// core.js:621 — the Account page's slug, an agent wallet's venue id being `agent-<slug of its name>` (portfolio.js:23)
+const slug = v => String(v).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+
+/** The agent wallets (the page's `subAccounts`): each its id, name, the agent it pays for (its address, and its name as the
+ *  Account gives it), its own address, how much it keeps at most and holds (`capUsd`, `balanceUsd`; null when they do not
+ *  parse), and the venue it is on the page as (`agent-<slug of its name>`, portfolio.js:23) — what Top up and Take back move to
+ *  and from. */
+export function walletsOf(page) {
+  if (!pageOk(page)) return [];
+  return records(page.subAccounts).filter(w => str(w.name)).map(w => ({
+    id: str(w.id), name: w.name, agent: str(w.agent), agentName: str(w.agentName), address: str(w.address),
+    capUsd: number(w.capUsd), balanceUsd: number(w.balanceUsd), venue: `agent-${slug(w.name)}`,
   }));
 }
 

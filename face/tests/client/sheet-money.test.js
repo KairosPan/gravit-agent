@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { moveSeedOf, moveHintsOf, routesWordsOf } from '../../client/js/host/sheet-money.js';
+import { moveSeedOf, moveHintsOf, routesWordsOf, subWalletSeedOf } from '../../client/js/host/sheet-money.js';
 import { fieldsOf, draftOf, titleOf, goWord, refieldsOf } from '../../client/js/host/sheet-view.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
@@ -300,4 +300,48 @@ test('the earn sheet through the owner reducer: Take out picked, All of it ticke
   assert.deepEqual(s.sheet.fields.map(f => f.name), ['side', 'product', 'amount', 'all']);
   s = R.sheetField(s, { name: 'all', value: true });
   assert.equal(draftOf('earn', s.sheet.fields, seed, NOW).amount, 'all');
+});
+
+// ── An agent wallet (plan 4b Task 5; portfolio.js pfWalletForm :1263-1279) ──
+
+const CC = '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6';
+const keysPage = () => {
+  const p = fx('account');
+  p.keys = [...p.keys, { address: '0xABCDEF0000000000000000000000000000000001', name: 'Scout', status: 'ok' }, { address: '0x02', name: 'Old', status: 'expired' }];
+  return p;
+};
+
+test('subWallet drafts createSubAccount with the agent lowercased', () => {
+  const seed = subWalletSeedOf(keysPage(), { agent: '0xabcdef0000000000000000000000000000000001' });
+  const fields = fieldsOf('subWallet', seed);
+  assert.deepEqual(fields.map(f => [f.name, f.type, f.label]), [['name', 'text', 'Name'], ['agent', 'select', 'For agent'], ['float', 'number', 'Keeps up to ($)']]);
+  // the keys let in and standing, by address; an expired one is not offered; the preset's picked, in any case
+  assert.deepEqual(fields[1].options, [{ value: CC, label: 'Claude Code' }, { value: '0xABCDEF0000000000000000000000000000000001', label: 'Scout' }]);
+  assert.equal(valueOf(fields, 'agent'), '0xABCDEF0000000000000000000000000000000001');
+  assert.deepEqual(draftOf('subWallet', set(fields, { name: ' research bot ', float: '50' }), seed, NOW),
+    { type: 'createSubAccount', name: 'research bot', agent: '0xabcdef0000000000000000000000000000000001', float: '50' });
+  assert.equal(titleOf('subWallet', seed), 'An agent wallet');
+  assert.equal(goWord('subWallet', seed), 'Make it');
+  // no preset: the first key; a preset that is no key let in: the first too
+  assert.equal(valueOf(fieldsOf('subWallet', subWalletSeedOf(keysPage())), 'agent'), CC);
+  assert.equal(valueOf(fieldsOf('subWallet', subWalletSeedOf(keysPage(), { agent: '0x02' })), 'agent'), CC);
+  // the preset's name and float fill the form (an ask's: portfolio.js:1266)
+  const asked = fieldsOf('subWallet', subWalletSeedOf(keysPage(), { name: 'Claude', float: 25 }));
+  assert.deepEqual([valueOf(asked, 'name'), valueOf(asked, 'float')], ['Claude', '25']);
+  assert.deepEqual(subWalletSeedOf({ ok: false }), { agent: '', name: '', float: '', keys: [] });
+});
+
+test("subWallet's words: a name of letters and digits up to 16, how much it keeps, an agent let in", () => {
+  const seed = subWalletSeedOf(keysPage());
+  const fields = set(fieldsOf('subWallet', seed), { name: 'research', float: '50' });
+  for (const name of ['', '  ', '-lead', '_x', 'a'.repeat(17), 'bad!name', 'émile']) {
+    assert.equal(draftOf('subWallet', set(fields, { name }), seed, NOW), 'A name of letters and digits, up to 16', JSON.stringify(name));
+  }
+  for (const name of ['a', 'A1 b_c-d', 'x'.repeat(16)]) assert.equal(draftOf('subWallet', set(fields, { name }), seed, NOW).name, name);
+  for (const float of ['', '0', '-5', 'lots']) assert.equal(draftOf('subWallet', set(fields, { float }), seed, NOW), 'How much it keeps at most', float);
+  assert.equal(draftOf('subWallet', set(fields, { agent: '0x02' }), seed, NOW), 'Pick the agent it pays for');
+  // nobody let in: no agent to pick
+  const none = subWalletSeedOf({ ...fx('account'), keys: [] });
+  assert.deepEqual(fieldsOf('subWallet', none)[1].options, []);
+  assert.equal(draftOf('subWallet', set(fieldsOf('subWallet', none), { name: 'research', float: '50' }), none, NOW), 'Pick the agent it pays for');
 });

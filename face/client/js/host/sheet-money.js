@@ -13,8 +13,8 @@ const str = v => (typeof v === 'string' ? v : '');
 const figure = v => (typeof v === 'number' && Number.isFinite(v) ? String(v) : str(v));
 const opts = list => list.map(x => ({ value: x, label: x }));
 
-/** The Money tab's sheet kinds: Move, and Earn (plan 4b Task 3). */
-export const MONEY_KINDS = ['move', 'earn'];
+/** The Money tab's sheet kinds: Move, and Earn (plan 4b Task 3); and the agent wallet Agents opens (plan 4b Task 5). */
+export const MONEY_KINDS = ['move', 'earn', 'subWallet'];
 
 const FILL_IN = 'Fill it in to see where it goes and what it costs.';
 const CONNECT_FIRST = 'Connect where it should go first.';
@@ -131,6 +131,7 @@ function build(seed, values) {
  *  first), `to` the preset's where it is offered, the amount the preset's. */
 export function moneyFieldsOf(kind, seed) {
   if (kind === 'earn') return earnFieldsOf(seed);
+  if (kind === 'subWallet') return subWalletFieldsOf(seed);
   if (kind !== 'move') return [];
   const s = isRecord(seed) ? seed : {};
   const amount = Number(s.amount) > 0 ? str(s.amount) : '';
@@ -151,6 +152,7 @@ export function moneyRefieldsOf(kind, fields, seed) {
 /** The sheet's title: the source picked. */
 export function moneyTitleOf(kind, seed, fields) {
   if (kind === 'earn') return 'Earn';
+  if (kind === 'subWallet') return 'An agent wallet';
   if (kind !== 'move') return '';
   const id = (fields !== undefined ? valueOf(fields, 'from') : '') || str(seed?.from);
   const src = sourceOf(seed, id) ?? sourcesOf(seed)[0];
@@ -160,6 +162,7 @@ export function moneyTitleOf(kind, seed, fields) {
 /** The sheet's go key: an earn's by the side its fields picked (earn.js:83). */
 export function moneyGoOf(kind, seed, fields) {
   if (kind === 'move') return 'Sign and move';
+  if (kind === 'subWallet') return 'Make it';
   if (kind !== 'earn') return '';
   return earnSideOf(seed, fields) === 'withdraw' ? 'Sign and take out' : 'Sign and put in';
 }
@@ -168,6 +171,7 @@ export function moneyGoOf(kind, seed, fields) {
  *  fields the sheet has now are read: a field the kind does not have is ''. */
 export function moneyDraftOf(kind, fields, seed) {
   if (kind === 'earn') return earnDraftOf(fields, seed);
+  if (kind === 'subWallet') return subWalletDraftOf(fields, seed);
   if (kind !== 'move') return 'Nothing to sign here';
   const from = valueOf(fields, 'from');
   const src = sourceOf(seed, from);
@@ -359,4 +363,43 @@ export function earnSaidOf(body) {
   if (!isRecord(e)) return '';
   const status = str(e.status);
   return `${e.kind === 'withdraw' ? 'Taking out' : 'Putting in'} ${e.all ? 'all' : qty(Number(e.amount))} ${str(e.asset)} · ${str(e.productName)}: ${status === 'done' ? 'done' : status}${str(e.note) ? ` · ${e.note}` : ''}`;
+}
+
+// ── An agent wallet (plan 4b Task 5; account/src/portfolio/public/ui/portfolio.js pfWalletForm, :1263-1279, and money.js
+// renderWallets, :381-389) ──
+
+// portfolio.js:1270 — a wallet's name: a letter or a digit, then letters, digits, spaces, _ and -, up to 16 in all
+const WALLET_NAME = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,15}$/;
+// the keys an agent wallet can be made for: the ones let in and standing (money.js:381, `status === 'ok'`), each by its address
+const walletKeysOf = seed => records(seed?.keys).filter(k => k.status === 'ok' && str(k.address));
+
+/** The agent wallet sheet's seed from the page at the press: the preset (`agent` — its address —, `name`, `float`) and the keys
+ *  let in (the page's `keys`: `{ address, name, status }`), so the sheet never reads the page again. */
+export function subWalletSeedOf(page, preset = {}) {
+  const p = isRecord(preset) ? preset : {};
+  const keys = pageOk(page) ? records(page.keys).map(k => ({ address: str(k.address), name: str(k.name), status: str(k.status) })) : [];
+  return { agent: str(p.agent), name: str(p.name), float: figure(p.float), keys };
+}
+
+// portfolio.js:1266 — the name, the agent it pays for (the preset's where it is let in, else the first), how much it keeps at most
+function subWalletFieldsOf(seed) {
+  const s = isRecord(seed) ? seed : {};
+  const keys = walletKeysOf(s);
+  const asked = keys.find(k => k.address.toLowerCase() === str(s.agent).toLowerCase());
+  return [
+    { name: 'name', label: 'Name', type: 'text', placeholder: 'research', value: str(s.name) },
+    { name: 'agent', label: 'For agent', type: 'select', options: keys.map(k => ({ value: k.address, label: k.name || k.address })), value: asked ? asked.address : keys[0]?.address ?? '' },
+    { name: 'float', label: 'Keeps up to ($)', type: 'number', placeholder: '50', value: str(s.float) },
+  ];
+}
+
+// portfolio.js:1268-1275 — the Account's createSubAccount: the name as typed, the agent's address lower-cased, the float
+function subWalletDraftOf(fields, seed) {
+  const name = valueOf(fields, 'name');
+  if (!WALLET_NAME.test(name)) return 'A name of letters and digits, up to 16';
+  const agent = valueOf(fields, 'agent');
+  if (!walletKeysOf(seed).some(k => k.address === agent)) return 'Pick the agent it pays for';
+  const float = valueOf(fields, 'float');
+  if (!(Number(float) > 0)) return 'How much it keeps at most';
+  return { type: 'createSubAccount', name, agent: agent.toLowerCase(), float };
 }

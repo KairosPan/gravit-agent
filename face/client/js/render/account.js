@@ -3,11 +3,13 @@
 // Open orders), Money (plan 4b Task 2: Receive, an address per account and network on a press; Move, the move sheet from each
 // account money moves from, on a page that signs for an Account that takes writes; the payments waiting for the operator's
 // wallet), Venues (each venue with its health and what it does, its Details drawer; the A-share quotes line; the seat
-// box), Agents (Gravit's seat first, then the Account's agents and the keys knocking), Cards (what waits for the owner, and
+// box), Agents (Gravit's seat first — on a page that signs, while admitted, its Give a limit…, End limit… and Revoke…, and while it
+// knocks its Let in… — then the Account's agents and the keys knocking; plan 4b Task 5: the Agent wallets, each with Top up… and
+// Take back… through the move sheet, and Open an agent wallet…), Cards (what waits for the owner, and
 // the agents' asks), Rules (plan 4a Task 5: the mode with its door-by-door rules, the cap on each move, the agents' session and
 // their leverage; Guard one unsigned click, the rest signed, their keys only on a page that signs) — the Statement drawer, the Settings drawer with Devices; the owner device's line under
 // the head (render/owner.js), and for a page that signs the keys that open the owner's sheets on Venues, Agents and Cards
-// (Connect an account, Open a paper account, Disconnect, Top up, Start over; Let in, Give a limit, End limit, Revoke,
+// (Connect an account, Open a paper account, Disconnect, Top up, Start over; Let in, Give a limit of every kind, End limit, Revoke,
 // Approve, Reject, Grant, Decline) — and, for an Account that takes writes, each position's Close… (Sell…) and a perpetual's
 // Leverage… on Portfolio (plan 4a Task 3). Every figure and word is a view's (host/account-view.js);
 // this module draws them.
@@ -17,7 +19,7 @@ import { money, signedMoney, sign } from '../wire/account-model.js';
 import { price } from '../wire/market-model.js';
 import {
   pageOk, headOf, worthOf, changeOf, assetsOf, positionsOf, openOrdersOf, missingWords, statementLinesOf,
-  venuesOf, agentsOf, cardsOf, asksOf, requestsOf, seatWords, writesOn,
+  venuesOf, agentsOf, cardsOf, asksOf, requestsOf, seatWords, writesOn, walletsOf,
 } from '../host/account-view.js';
 import { amendSeedOf, closeSeedOf, leverageSeedOf } from '../host/sheet-market.js';
 import { rulesOf } from '../host/rules-view.js';
@@ -284,30 +286,69 @@ export function positionKeys(position, page, quotes = null) {
   return [close ? marketKey('close', close, sells ? 'Sell…' : 'Close…') : '', lev ? marketKey('leverage', lev, 'Leverage…') : ''].filter(Boolean);
 }
 
-// an agent's keys: Give a limit…, End limit on each trade limit standing (its ids comma-joined, never *), Revoke… — asked twice,
-// the confirm for this agent in its place. Gravit's own row has none: its seat is admitted on the Account page.
+// agents-mount.js:228 — what revoking a key does, asked before its sheet; Gravit's seat revoked stops Gravit's orders too
+const revokeWords = r => (r.gravit
+  ? `Revoke ${r.name}? Its key can do nothing on this account from then on: ${r.name}'s orders stop, and it places and moves nothing more. It cannot be let in again under the same key: a new key is needed. Its limits end with it.`
+  : `Revoke ${r.name}? Its key can do nothing on this account from then on, and cannot be let in again under the same key: a new key is needed. Its limits end with it.`);
+
+// an agent's keys, by its address: Give a limit…, End limit… on each limit standing by its scope (its ids comma-joined, never *
+// but a payees limit's any payee), Revoke… — asked twice, the Account's words and the confirm for this agent in its place.
+// Gravit's own row has them while its seat is admitted (by the seat view's address and the seat's name) and, while it knocks,
+// Let in… on the page's request under the seat's name; any other standing, none.
 function agentKeys(r, state) {
-  if (r.gravit) return '';
+  if (r.gravit && r.seatStatus !== 'admitted') {
+    return r.seatStatus === 'knocking' && r.request ? rowKeys([sheetKey('letIn', { 'data-address': r.request.address, 'data-name': r.request.name || r.name }, 'Let in…')]) : '';
+  }
   const keys = [];
   if (r.address) {
     keys.push(sheetKey('limit', { 'data-address': r.address, 'data-name': r.name }, 'Give a limit…'));
     for (const l of r.limits) {
-      const allow = l.allow.filter(id => id !== '*');
-      if (l.scope === 'trade' && !l.expired && allow.length) keys.push(sheetKey('endLimit', { 'data-address': r.address, 'data-name': r.name, 'data-allow': allow.join(',') }, 'End limit'));
+      const allow = l.scope === 'payees' ? l.allow : l.allow.filter(id => id !== '*');
+      if (l.scope && !l.expired && allow.length) keys.push(sheetKey('endLimit', { 'data-address': r.address, 'data-name': r.name, 'data-scope': l.scope, 'data-allow': allow.join(',') }, 'End limit…'));
     }
   }
   if (r.name) {
     const c = state.confirm;
-    keys.push(c?.action === 'revoke' && c.name === r.name && (c.address ?? '') === r.address ? confirmPair('Yes, revoke')
+    keys.push(c?.action === 'revoke' && c.name === r.name && (c.address ?? '') === r.address ? `<span class="dim">${esc(revokeWords(r))}</span>${confirmPair('Yes, revoke')}`
       : `<button${attrs({ type: 'button', class: 'btn-danger', 'data-action': 'askRevoke', 'data-address': r.address, 'data-name': r.name })}>Revoke…</button>`);
   }
   return rowKeys(keys);
 }
 
+// an agent wallet (money.js renderWallets, :371-385): its name, whom it pays for, its address, what it holds of how much it keeps
+// at most; on a page that signs for an Account that takes writes, Top up… (the move sheet to it, from the only account money
+// moves from that is not an agent wallet — or the first of them, the From select picking another) and Take back… (the move
+// sheet from it), each while the page offers it
+function agentWalletRow(w, sources, keys) {
+  const usd = n => (n === null ? '—' : money(n));
+  const words = [`pays for ${w.agentName || w.agent || 'an agent'}`, w.address, `${usd(w.balanceUsd)} of up to ${usd(w.capUsd)}`].join(' · ');
+  const out = [];
+  if (keys) {
+    const from = sources.find(x => !x.agent);
+    if (from) out.push(sheetKey('move', { 'data-from': from.id, 'data-to': w.venue }, 'Top up…'));
+    if (sources.some(x => x.id === w.venue)) out.push(sheetKey('move', { 'data-from': w.venue }, 'Take back…'));
+  }
+  return `<div class="venue"><span>${lines(w.name, [words])}</span>${rowKeys(out)}</div>`;
+}
+
+// the Agent wallets (plan 4b Task 5): a row a wallet, and Open an agent wallet… while a key is let in to pay for
+function walletsBox(state) {
+  const a = state.account;
+  if (!pageOk(a.data)) return '';
+  const keys = signs(state) && writesOn(a.data);
+  const sources = moveSourcesOf(a.data);
+  const rows = walletsOf(a.data).map(w => agentWalletRow(w, sources, keys)).join('');
+  const standing = (Array.isArray(a.data.keys) ? a.data.keys : []).some(k => k?.status === 'ok' && typeof k.address === 'string' && k.address);
+  const none = standing ? 'No agent wallet yet.' : 'Let an agent in first: a wallet pays for one agent.';
+  const open = keys && standing ? `<div class="btn-row">${sheetKey('subWallet', {}, 'Open an agent wallet…')}</div>` : '';
+  return box(`${title('Agent wallets')}${rows ? `<div class="venues">${rows}</div>` : note(none)}${open}`, 'Agent wallets');
+}
+
 function agentsTab(state, now) {
   const a = state.account;
   const owner = signs(state);
-  const rows = agentsOf(a.agents.data, state.seat.data).map(r => {
+  const all = agentsOf(a.agents.data, state.seat.data, a.data);
+  const rows = all.map(r => {
     const limits = r.limits.map(l => l.words);
     return `<div class="venue"><span>${r.gravit
       ? lines(r.standing, [...limits, countsOf(r)])
@@ -315,10 +356,13 @@ function agentsTab(state, now) {
       `${owner ? agentKeys(r, state) : ''}</div>`;
   }).join('');
   const status = a.agents.data === null ? note(a.agents.status === 'error' ? 'Agents unavailable' : 'Loading…') : rows ? '' : note('No agents');
-  const knocking = requestsOf(a.data).map(q => `<div class="venue"><span>${lines(q.name || 'An agent', [[q.address, when(q.at, now)].filter(Boolean).join(' · ')])}</span>` +
+  // the seat's own knock is let in on Gravit's row: listed once
+  const seatKnock = all.find(r => r.gravit)?.request?.address ?? '';
+  const knocking = requestsOf(a.data).filter(q => !seatKnock || q.address.toLowerCase() !== seatKnock.toLowerCase())
+    .map(q => `<div class="venue"><span>${lines(q.name || 'An agent', [[q.address, when(q.at, now)].filter(Boolean).join(' · ')])}</span>` +
     `${owner ? rowKeys([sheetKey('letIn', { 'data-address': q.address, 'data-name': q.name }, 'Let in…')]) : ''}</div>`).join('');
   return `<div class="cards">${box(`${title('Agents')}${rows ? `<div class="venues">${rows}</div>` : ''}${status}` +
-    `${knocking ? `<div class="label">Knocking</div><div class="venues">${knocking}</div>` : ''}`, 'Agents')}</div>`;
+    `${knocking ? `<div class="label">Knocking</div><div class="venues">${knocking}</div>` : ''}`, 'Agents')}${walletsBox(state)}</div>`;
 }
 
 // ── Cards ──

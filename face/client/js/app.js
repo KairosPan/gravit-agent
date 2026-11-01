@@ -39,7 +39,7 @@ import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
 import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
-import { moveSeedOf, earnSeedOf, earnSaidOf } from './host/sheet-money.js';
+import { moveSeedOf, earnSeedOf, earnSaidOf, subWalletSeedOf } from './host/sheet-money.js';
 import { startSellMany } from './host/sell-many.js';
 import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf, connectOptionOf, isWalletOption } from './host/sheet-view.js';
 import { startTrade } from './host/trade.js';
@@ -754,8 +754,9 @@ export function boot(win, host = {}) {
     const page = store.get().account.data;
     switch (d.kind) {
       case 'letIn': void sheet.open('letIn', { address: d.address ?? '', name: d.name ?? '' }); break;
-      case 'limit': void sheet.open('limit', limitSeedOf(page, d.address, d.name)); break;
-      case 'endLimit': void sheet.open('endLimit', { ...limitSeedOf(page, d.address, d.name), allow: d.allow ?? '' }); break;
+      // a limit of the kind the key names (plan 4b Task 5), trading where it names none
+      case 'limit': void sheet.open('limit', limitSeedOf(page, d.address, d.name, d.scope || 'trade')); break;
+      case 'endLimit': void sheet.open('endLimit', { ...limitSeedOf(page, d.address, d.name, d.scope || 'trade'), scope: d.scope || 'trade', allow: d.allow ?? '' }); break;
       case 'approveCard': void sheet.open('approveCard', { card: d.card ?? '', hash: d.hash ?? '', decision: d.decision ?? '' }); break;
       case 'declineAsk': void sheet.open('declineAsk', { ask: d.ask ?? '' }); break;
       case 'topUp': case 'resetPaper': void sheet.open(d.kind, { venue: d.venue ?? '', name: d.name ?? '' }); break;
@@ -774,6 +775,8 @@ export function boot(win, host = {}) {
       case 'move': if (writesOn(page)) void sheet.open('move', moveSeedOf(page, { from: d.from ?? '', to: d.to ?? '', kind: d.moveKind ?? '', amount: d.amount ?? '' })); break;
       // Earn's Put in… and Take out… (plan 4b Task 3): seeded from the earn read, read first when it never was
       case 'earn': if (writesOn(page)) void openEarn({ venue: d.venue ?? '', side: d.side ?? '', product: d.product ?? '' }); break;
+      // Agents' Open an agent wallet… (plan 4b Task 5): the keys let in as the page stands
+      case 'subWallet': if (writesOn(page)) void sheet.open('subWallet', subWalletSeedOf(page, { agent: d.agent ?? '', name: d.name ?? '', float: d.float ?? '' })); break;
       // the Rules tab's (plan 4a Task 5): each seeded from the page as it stands — the cap now, whether the session ended, their
       // leverage now; the three limits only for an Account that takes writes
       // Beast only while it is not in force: a signature that changes nothing is never asked

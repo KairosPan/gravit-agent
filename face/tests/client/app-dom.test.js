@@ -1692,6 +1692,37 @@ test('Grant opens the limit sheet on the ask, Decline its own, Revoke… asks tw
   store.timers.clear();
 });
 
+// plan 4b Task 5: the limit sheet's kind of limit, End limit… by its kind, Open an agent wallet…, Top up… and Take back…
+test('Agents: a limit changes kind on the seg, End limit… ends its own kind, an agent wallet opens on the keys let in, Top up… and Take back… open the move sheet', async () => {
+  const f = fakeWindow({ hash: '#/account/agents', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page() } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  const CC = '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6';
+  const field = name => store.get().sheet.fields.find(x => x.name === name);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'limit', address: CC, name: 'Claude Code' } });
+  assert.deepEqual([store.get().sheet.kind, field('scope').value], ['limit', 'trade']);
+  f.click({ tagName: 'BUTTON', name: 'scope', dataset: { action: 'sheetField', value: 'payees' } });
+  assert.deepEqual([field('scope').value, field('payees').value, field('allow')], ['payees', 'api.example.com', undefined], 'the pick swapped for the hosts');
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'endLimit', address: CC, name: 'Claude Code', scope: 'venues', allow: 'ex,agent-claude-code' } });
+  await until(() => store.get().sheet.status === 'ready', 'the preparation');
+  assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { ...door.sent('/data/account/prepare').at(-1).draft, type: 'approveSpend', agent: CC, scope: 'venues', allow: 'ex,agent-claude-code', budget: '0' });
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'subWallet' } });
+  assert.deepEqual([store.get().sheet.kind, field('agent').value], ['subWallet', CC]);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'move', from: 'ex', to: 'agent-claude-code' } });
+  assert.deepEqual([store.get().sheet.kind, field('from').value, field('to')?.value], ['move', 'ex', 'agent-claude-code']);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'move', from: 'agent-claude-code' } });
+  assert.deepEqual([store.get().sheet.kind, field('from').value], ['move', 'agent-claude-code']);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  store.timers.clear();
+});
+
 test("Settings' Let it sign seeds the owners and the waiting key; Sign out, signed, signs this page out and the next page pairs nothing", async () => {
   const f = fakeWindow({ hash: '#/account/portfolio', storage: memoryStorage() });
   const door = ownerDoor();
