@@ -345,9 +345,11 @@ export const LINES = {
   /** `firings.jsonl` cannot be read. */
   ledgerUnreadable: (path: string, code: string): string =>
     `the firing ledger ${path} cannot be read (${code}), so no standing order runs until it can`,
-  /** No calendar for the day. */
+  /** No calendar for the day: the FACE_PYTHON hint only for an interpreter without pandas_market_calendars (P2 Task
+   * 8's ruling 2) - any other error, the line without it. */
   noCalendar: (python: string, error: string): string =>
-    `no standing order runs today: the market calendar failed in ${python} (${error}). FACE_PYTHON must name an interpreter with pandas_market_calendars`,
+    `no standing order runs today: the market calendar failed in ${python} (${error})`
+    + (/is not importable in /.test(error) ? ". FACE_PYTHON must name an interpreter with pandas_market_calendars" : ""),
   /** A phone post while the budget is spent: src/desk.ts `budgetReplyLine`, the conversation's own. */
   budgetReply: budgetReplyLine,
 } as const;
@@ -472,7 +474,7 @@ export function diffFiles(before: ReadonlyMap<string, FileInfo>, after: Readonly
  * by name; `createAgent` a fresh desk agent (src/desk-session.ts `createDeskAgent`); `resolveRoute` an order's model as
  * a route ({@link resolveFiringRoute}); `on` the root bus; `supervise` src/desk-session.ts `superviseDeskTurns`, the
  * default; `deliver` the desk conversation's; `budget` the day's (src/desk.ts `readBudget`); `log` where a line goes
- * (stderr). */
+ * (stderr); `carry` what a rotation its appends set off hands on. */
 export interface FiringDeps {
   home: string;
   root: string;
@@ -486,6 +488,9 @@ export interface FiringDeps {
   deliver(text: string): Promise<DeliverResult>;
   budget(): Promise<BudgetState>;
   log?: (line: string) => void;
+  /** What a rotation of `firings.jsonl` that one of the firing's own appends sets off hands on to the new file -
+   * the clock row's carry (src/schedule.ts), so the day's keys survive it; nothing when absent. */
+  carry?: (rotated: string) => readonly string[];
 }
 
 /**
@@ -655,6 +660,10 @@ interface Run {
   begun: number;
 }
 
+/** A firing's own appends to `firings.jsonl`: its log, and the clock row's carry. */
+const ledgerOpts = (run: Run): { log: (line: string) => void; carry?: (rotated: string) => readonly string[] } =>
+  (run.deps.carry === undefined ? { log: run.log } : { log: run.log, carry: run.deps.carry });
+
 /** The clock now, as a record's `t`. */
 const stamp = (deps: FiringDeps): string => new Date(deps.clock.now()).toISOString();
 
@@ -781,7 +790,7 @@ async function finish(
       : { producer: { spec: quoted.spec, ok: output.ok, ...(output.ok ? {} : { error: output.error }) } }),
     ...rest,
   };
-  await appendRecord(deps.home, FIRINGS_FILE, record, { log: run.log });
+  await appendRecord(deps.home, FIRINGS_FILE, record, ledgerOpts(run));
   return run.signal.aborted ? undefined : record;
 }
 
@@ -817,8 +826,8 @@ function cancelTurn(run: Run, agent: AgentLike, reason: string): void {
   }
 }
 
-/** The repo-relative form of `cwd`, `/`-joined: `desk/journal`, `strategies/<name>`. */
-const repoRelative = (root: string, cwd: string): string => relative(resolve(root), resolve(cwd)).split(sep).join("/");
+/** The repo-relative form of `cwd`, `/`-joined: `desk/journal`, `strategies/<name>`. The clock row's too. */
+export const repoRelative = (root: string, cwd: string): string => relative(resolve(root), resolve(cwd)).split(sep).join("/");
 
 /** How the wait for a firing's turn ended: the supervisor's record, the watchdog, or a wake that never went. */
 type TurnEnd = { kind: "turn"; record: DeskTurnRecord } | { kind: "watchdog"; started: boolean } | { kind: "error"; error: string };
@@ -938,7 +947,7 @@ async function fire(run: Run): Promise<FinishedRecord | undefined> {
     if (produced === ABORTED) return undefined;
     quoted = produced.quoted;
     const record: ProducerRecord = { t: stamp(deps), kind: "producer", key: item.key, ...produced.record };
-    await appendRecord(deps.home, FIRINGS_FILE, record, { log: run.log });
+    await appendRecord(deps.home, FIRINGS_FILE, record, ledgerOpts(run));
     if (signal.aborted) return undefined;
   }
   if (item.order.wake) return wake(run, quoted);
@@ -1016,7 +1025,7 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
   let offBus: (() => void) | undefined;
   let watchdog: unknown;
   try {
-    await appendRecord(deps.home, FIRINGS_FILE, { t: stamp(deps), kind: "woke", key, sessionId: session.sessionId, route: `${route.provider}/${route.model}` } satisfies WokeRecord, { log });
+    await appendRecord(deps.home, FIRINGS_FILE, { t: stamp(deps), kind: "woke", key, sessionId: session.sessionId, route: `${route.provider}/${route.model}` } satisfies WokeRecord, ledgerOpts(run));
     if (signal.aborted) return undefined;
 
     /* 4. the wake, and 5. its watchdog */

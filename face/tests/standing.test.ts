@@ -198,6 +198,11 @@ test("parseStanding reads the mapping under CORE_SCHEMA: dates stay strings, onl
   const tab = errorsOf(parseStanding("orders:\n\t- id: a\n"), "a tab");
   assert.ok(tab[0].startsWith("standing.yml is not YAML:"), tab[0]);
   assert.ok(!tab[0].includes("\n"), "one line");
+  /* the parser's line quotes the file: cut at 60 characters and every control or direction character escaped (p2-m13) */
+  const tagged = errorsOf(parseStanding(`budget: !\u202e${"x".repeat(200)} 1\n`), "an unknown tag");
+  assert.ok(tagged[0].startsWith("standing.yml is not YAML: unknown tag"), tagged[0]);
+  assert.ok(tagged[0].includes("\\u202e") && !tagged[0].includes("\u202e"), `the override is escaped: ${tagged[0]}`);
+  assert.ok(tagged[0].endsWith("…") && [...tagged[0].slice("standing.yml is not YAML: ".length)].length <= 70, tagged[0]);
   assert.deepEqual(parseStanding("- id: a\n"), { ok: false, errors: ["standing.yml must be a mapping of budget: and orders:"] });
   assert.deepEqual(errorsOf(parseStanding("budget:\n"), "a bare budget"), ["budget must be a mapping with dailyTokens"]);
   assert.equal(errorsOf(parseStanding("orders: [1]\n"), "an order that is not a mapping")[0], "orders[0]: must be a mapping of an order's keys");

@@ -57,6 +57,7 @@
  */
 import { constants as fsConstants, type Stats } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";
+import { cut, escaped } from "./echo.ts";
 import { isEtDate, readDeskYaml, sha256Hex } from "./standing.ts";
 
 /* ---------- the limits ---------- */
@@ -86,10 +87,6 @@ const LINE_BREAK_RE = /[\n\r\v\f\u0085\u2028\u2029]/;
 /** What a one-line text field may not hold: a control character other than a tab (C0, DEL, C1), or a
  * direction embedding, override or isolate (U+202A to U+202E, U+2066 to U+2069). */
 const UNSAFE_TEXT_RE = /[\x00-\x08\x0a-\x1f\x7f-\x9f\u{202a}-\u{202e}\u{2066}-\u{2069}]/u;
-/** What an echo writes as its escape: the same, and the line and paragraph separators. */
-const UNSAFE_ECHO_RE = /[\x00-\x08\x0a-\x1f\x7f-\x9f\u{2028}\u{2029}\u{202a}-\u{202e}\u{2066}-\u{2069}]/gu;
-/** The most characters of a value a refusal quotes, and of the parser's line. */
-const SHOWN_MAX = 60;
 
 /* ---------- the shapes ---------- */
 
@@ -164,18 +161,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** Whether `value` is a finite number. */
 function isNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
-}
-
-/** `text` cut to {@link SHOWN_MAX} characters (code points), the last a `…` when it is cut. */
-function cut(text: string): string {
-  const chars = [...text];
-  return chars.length <= SHOWN_MAX ? text : `${chars.slice(0, SHOWN_MAX - 1).join("")}…`;
-}
-
-/** `text` with each control, line-separator and direction character ({@link UNSAFE_ECHO_RE}) written as its
- * `\uXXXX` escape: the only form in which a refusal echoes one. */
-function escaped(text: string): string {
-  return text.replace(UNSAFE_ECHO_RE, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }
 
 /** A value as a refusal quotes it: a string in JSON quotes, {@link cut} and {@link escaped}; a list of at most

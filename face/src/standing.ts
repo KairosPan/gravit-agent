@@ -54,6 +54,7 @@ import { isDeepStrictEqual } from "node:util";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { CORE_SCHEMA, load } from "js-yaml";
 import { NAME_RE } from "./channel-name.ts";
+import { cut, escaped } from "./echo.ts";
 import { deskDir, type TurnUsage } from "./desk.ts";
 import { etDayStart } from "./et.ts";
 import type { MarketSession } from "./market-clock.ts";
@@ -517,7 +518,8 @@ export function parseStanding(text: string): StandingLoad {
   try {
     doc = readDeskYaml(text);
   } catch (error) {
-    return { ok: false, errors: [`${STANDING_FILE} is not YAML: ${(error as Error).message}`] };
+    /* the parser's line quotes the file: cut and escaped, as a book refusal's is, since it reaches the phone */
+    return { ok: false, errors: [`${STANDING_FILE} is not YAML: ${escaped(cut((error as Error).message))}`] };
   }
   if (doc === undefined || doc === null) return { ok: true, orders: [] };
   if (!isRecord(doc)) return { ok: false, errors: [`${STANDING_FILE} must be a mapping of budget: and orders:`] };

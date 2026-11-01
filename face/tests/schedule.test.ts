@@ -14,6 +14,7 @@ import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { appendEvent, appendRecord, clearOff, deskDir, FIRINGS_FILE, readBudget, readEvents, readRecords, writeOff, type DeskEvent } from "../src/desk.ts";
+import type { DeliverResult } from "../src/desk-conversation.ts";
 import type { DeskSessionCtxLike } from "../src/desk-session.ts";
 import {
   checkFiring, isFiringRecord, LINES, type FinishedRecord, type FiringDeps, type FiringItem, type FiringRecord, type runFiring, type Verified,
@@ -22,6 +23,13 @@ import { createMarketCalendar, type MarketCalendar, type MarketSession, type Mar
 import { defaultProducerRunner } from "../src/producer.ts";
 import { createDeskSchedule, decide, installSchedule, SCHEDULE_TICK_MS, type ScheduleDeps, type ScheduleHandle } from "../src/schedule.ts";
 import { parseStanding, rehashOrder, renderOrder, sha256Hex, STANDING_FILE, writeStanding, type ArmEntry } from "../src/standing.ts";
+
+/** The errors parseStanding refuses `text` with. */
+const parseStandingErrors = (text: string): string[] => {
+  const load = parseStanding(text);
+  if (load.ok) throw new Error("it loads");
+  return load.errors;
+};
 import { fakeAgents, fakeBus, fakeCalendar, recordingDeliver, WallClock } from "./desk-fakes.ts";
 
 /* ---------- fixtures, inside the repository ---------- */
@@ -140,9 +148,10 @@ function rig(fx: Fixture, start: string, opts: {
   hold?: (call: RunCall, deps: FiringDeps) => Promise<void>;
   run?: typeof runFiring;
   bootedAt?: number;
+  answer?: (text: string, n: number) => DeliverResult;
 } = {}): Rig {
   const clock = new WallClock(start);
-  const out = recordingDeliver();
+  const out = recordingDeliver(opts.answer);
   const lines: string[] = [];
   const runs: RunCall[] = [];
   const agents = fakeAgents();
@@ -353,7 +362,7 @@ test("missed as down, missed as late, and an order armed after its anchor", asyn
 
 /* ---------- the ledger's own records ---------- */
 
-test("a started firing with no end is interrupted at boot, once, and never re-run", async () => {
+test("a started firing with no end is interrupted once its deadline and slack have passed, once, and never re-run", async () => {
   const fx = await fixture();
   await arm(fx.home, [ENTRY]);
   const startedAt = "2026-11-27T17:30:10.000Z";
@@ -365,23 +374,29 @@ test("a started firing with no end is interrupted at boot, once, and never re-ru
   await appendRecord(fx.home, FIRINGS_FILE, { t: "2026-11-25T20:34:10.000Z", kind: "finished", key: "preclose:2026-11-25", order: "preclose", date: "2026-11-25", wallMs: 240_000 });
   await appendRecord(fx.home, FIRINGS_FILE, { ...started, t: startedAt, key: "preclose:2026-11-27", date: "2026-11-27", anchor: "2026-11-27T17:30:00.000Z" });
 
+  /* booted 50 s after the started, inside its 10-minute deadline and the minute's slack: perhaps a live firing on
+   * another face on this home (M2) - not judged yet, and never run here */
   const r = rig(fx, "2026-11-27T17:31:00Z");
   await r.clock.advance(0);
-  await waitFor("the boot's line", () => r.out.texts.length === 1);
   await r.schedule.tick();
   await idle(r.schedule);
-  assert.deepEqual(r.out.texts, ["preclose · 2026-11-27 was cut off by a restart; a standing order never runs twice"]);
-  assert.deepEqual(await ofKind(fx.home, "interrupted"), [{
-    t: "2026-11-27T17:31:00.000Z", kind: "interrupted", key: "preclose:2026-11-27", order: "preclose", date: "2026-11-27", startedAt,
-  }]);
+  assert.deepEqual(r.out.texts, [], "too young to call cut off");
   await at(r, "2026-11-27T17:31:30Z");
   assert.equal(r.runs.length, 0, "inside its grace, and never run again");
+  await at(r, "2026-11-27T17:41:09Z");
+  assert.deepEqual(r.out.texts, [], "a second before its deadline and slack have passed");
+  await at(r, "2026-11-27T17:41:10Z");
+  assert.deepEqual(r.out.texts, ["preclose · 2026-11-27 was cut off by a restart; a standing order never runs twice"]);
+  assert.deepEqual(await ofKind(fx.home, "interrupted"), [{
+    t: "2026-11-27T17:41:10.000Z", kind: "interrupted", key: "preclose:2026-11-27", order: "preclose", date: "2026-11-27", startedAt,
+  }]);
+  assert.equal(r.runs.length, 0);
   assert.equal(r.schedule.status().orders[0].last?.outcome, "interrupted");
   await r.schedule.dispose();
 
-  const again = rig(fx, "2026-11-27T17:32:00Z");
+  const again = rig(fx, "2026-11-27T17:42:00Z");
   await again.clock.advance(0);
-  await at(again, "2026-11-27T17:32:00Z");
+  await at(again, "2026-11-27T17:42:00Z");
   assert.deepEqual(again.out.texts, [], "reported once, across restarts");
   assert.equal((await ofKind(fx.home, "interrupted")).length, 1);
   await again.schedule.dispose();
@@ -997,7 +1012,7 @@ test("dispose aborts the running firing and stops the ticks", async () => {
 
 /* ---------- the ledger's rotation ---------- */
 
-test("a rotation of firings.jsonl hands the day's started lines to the new file", async () => {
+test("a rotation of firings.jsonl hands the day's started lines and their ends to the new file", async () => {
   const fx = await fixture();
   await arm(fx.home, [ENTRY]);
   const startedOn = (key: string, date: string, t: string): string => JSON.stringify({
@@ -1018,11 +1033,20 @@ test("a rotation of firings.jsonl hands the day's started lines to the new file"
   assert.ok(names.includes("firings.2026-11-27T17-30-10.000Z.jsonl"), names.join(", "));
   const lines = (await readFile(ledgerPath(fx.home), "utf8")).split("\n").filter(Boolean);
   assert.equal(lines[0], today, "today's started, as written, opens the new file");
-  assert.deepEqual(lines.slice(1).map((line) => [JSON.parse(line).kind, JSON.parse(line).key]), [
+  assert.equal(lines[1], ended("noon:2026-11-27", "2026-11-27", "2026-11-27T17:04:00.000Z"), "with its finished: the key ended (p2-m28)");
+  assert.deepEqual(lines.slice(2).map((line) => [JSON.parse(line).kind, JSON.parse(line).key]), [
     ["started", "preclose:2026-11-27"],
     ["finished", "preclose:2026-11-27"],
   ], "and nothing else of the old file came with it");
   await r.schedule.dispose();
+
+  /* a restart after the rotation reads the delivered firing as ended: no false interrupted */
+  const again = rig(fx, "2026-11-27T17:50:00Z");
+  await again.clock.advance(0);
+  await at(again, "2026-11-27T17:50:00Z");
+  assert.deepEqual(again.out.texts, [], "nothing was cut off");
+  assert.deepEqual(await ofKind(fx.home, "interrupted"), []);
+  await again.schedule.dispose();
 });
 
 /* ---------- the face's defaults ---------- */
@@ -1083,5 +1107,192 @@ test("createDeskSchedule: the market clock under the face's interpreter, its fai
   ]);
   assert.equal(lines.filter((line) => line.startsWith("gravit-face: desk: schedule calendar: ")).length, 1, "a run with nothing on stderr logs nothing");
   assert.equal(schedule.dailyTokens(), undefined, "no budget: no cap");
+  await schedule.dispose();
+});
+
+/* ---------- the fix wave: nothing lost while paused (I4), the edges (p2-m30..m33) ---------- */
+
+test("lines held back while paused are not counted as phoned: each event lands once, each line goes out after the resume", async () => {
+  const fx = await fixture();
+  await arm(fx.home, [ENTRY, { ...ENTRY, id: "old", expires: "2026-11-30" }]);
+  let paused = true;
+  const answer = (): DeliverResult => (paused ? { undelivered: "paused" } : { sent: [1] });
+  /* 2026-12-02 is a date the calendar cannot answer, and the day after "old" expired */
+  const r = rig(fx, "2026-12-02T15:00:00Z", { answer });
+  await writeOff(fx.home, { by: "terminal" }, () => r.clock.now());
+  await r.clock.advance(0);
+  await at(r, "2026-12-02T15:00:00Z");
+  await at(r, "2026-12-02T15:00:30Z");
+  const expired = "old expired after 2026-11-30 and no longer fires; extend it with npm run desk -- rearm old --expires <YYYY-MM-DD> to keep it";
+  const calendar = "no standing order runs today: the market calendar failed in python3 (the fake calendar has no 2026-12-02)";
+  assert.ok(r.out.texts.length >= 4, `each line was tried and held, and tried again: ${r.out.texts.join(" | ")}`);
+  assert.ok(r.out.texts.every((text) => text === expired || text.startsWith(calendar)), r.out.texts.join(" | "));
+  assert.equal((await ofKind(fx.home, "expired")).length, 1, "the expiry is recorded once");
+  const errors = await eventsOf(fx.home, "calendar-error");
+  assert.equal(errors.length, 1, "the calendar's failure is recorded once");
+  assert.equal(errors[0].phoned, false, "and says its line was held");
+
+  await clearOff(fx.home, "terminal", () => r.clock.now());
+  paused = false;
+  const before = r.out.texts.length;
+  await at(r, "2026-12-02T15:01:00Z");
+  const after = r.out.texts.slice(before);
+  assert.deepEqual(after.filter((text) => text === expired), [expired], "the held expiry goes out once");
+  assert.equal(after.filter((text) => text.startsWith(calendar)).length, 1, "the calendar's line once, its failure still standing");
+  await at(r, "2026-12-02T15:01:30Z");
+  assert.equal(r.out.texts.length, before + after.length, "and nothing again");
+  await r.schedule.dispose();
+});
+
+test("a standing.yml refused while paused is phoned once the pause lifts, while it still stands; its event lands once", async () => {
+  const fx = await fixture();
+  let paused = true;
+  const r = rig(fx, "2026-11-27T15:00:00Z", { answer: () => (paused ? { undelivered: "paused" } : { sent: [1] }) });
+  await writeStanding(fx.home, "orders: [\n");
+  await r.clock.advance(0);
+  await at(r, "2026-11-27T15:00:00Z");
+  await at(r, "2026-11-27T15:00:30Z");
+  const refusedLines = () => r.out.texts.filter((text) => text.startsWith("standing.yml is refused"));
+  assert.ok(refusedLines().length >= 2, "tried at each tick while held");
+  const events = await eventsOf(fx.home, "standing-error");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].phoned, undefined, "no OFF file: the event did not know the outlet would answer paused");
+  paused = false;
+  const before = r.out.texts.length;
+  await at(r, "2026-11-27T15:01:00Z");
+  await at(r, "2026-11-27T15:01:30Z");
+  assert.equal(r.out.texts.length, before + 1, "phoned once after the lift");
+  assert.equal((await eventsOf(fx.home, "standing-error")).length, 1);
+  await r.schedule.dispose();
+});
+
+test("a refusal whose line the pause held is recorded reported: false, and the line goes out after the lift", async () => {
+  const fx = await fixture();
+  await arm(fx.home, [ENTRY]);
+  let paused = true;
+  const r = rig(fx, "2026-11-27T17:30:00Z", { answer: () => (paused ? { undelivered: "paused" } : { sent: [1] }) });
+  await writeFile(join(fx.root, "desk", "STANDING.md"), "# changed\n");
+  await r.clock.advance(0);
+  await at(r, "2026-11-27T17:30:00Z");
+  const [refused] = await ofKind(fx.home, "refused");
+  assert.deepEqual([refused?.reason, refused?.reported], ["hash", false]);
+  paused = false;
+  await at(r, "2026-11-27T17:30:30Z");
+  assert.equal(r.out.texts.at(-1), "preclose · 2026-11-27 refused: desk/STANDING.md changed since arming. Review it, then: npm run desk -- rearm preclose");
+  await r.schedule.dispose();
+});
+
+test("boot seeds what events.jsonl says was phoned: an unchanged refusal and today's calendar failure are not phoned again; a held one is", async () => {
+  const fx = await fixture();
+  await writeStanding(fx.home, "orders: [\n");
+  const first = rig(fx, "2026-11-27T15:00:00Z");
+  await first.clock.advance(0);
+  await at(first, "2026-11-27T15:00:00Z");
+  assert.equal(first.out.texts.length, 1);
+  await first.schedule.dispose();
+  const again = rig(fx, "2026-11-27T15:10:00Z");
+  await again.clock.advance(0);
+  await at(again, "2026-11-27T15:10:00Z");
+  assert.deepEqual(again.out.texts, [], "the same refusal, already phoned, is not phoned after a restart");
+  assert.equal((await eventsOf(fx.home, "standing-error")).length, 1, "nor recorded twice");
+  await again.schedule.dispose();
+
+  const held = await fixture();
+  await writeStanding(held.home, "orders: [\n");
+  await appendEvent(held.home, { t: "2026-11-27T14:00:00.000Z", kind: "standing-error", errors: parseStandingErrors("orders: [\n"), phoned: false });
+  const resumed = rig(held, "2026-11-27T15:10:00Z");
+  await resumed.clock.advance(0);
+  await at(resumed, "2026-11-27T15:10:00Z");
+  assert.equal(resumed.out.texts.length, 1, "one the pause held before the restart is phoned now");
+  assert.equal((await eventsOf(held.home, "standing-error")).length, 1, "and not recorded again");
+  await resumed.schedule.dispose();
+});
+
+test("an anchor that passed while the order was disabled is settled, not missed, when it is enabled again (p2-m31)", async () => {
+  const fx = await fixture();
+  await writeStanding(fx.home, `orders:\n${renderOrder(ENTRY, 2).replace("enabled: true", "enabled: false")}`);
+  const r = rig(fx, "2026-11-27T17:29:00Z");
+  await r.clock.advance(0);
+  await at(r, "2026-11-27T17:29:00Z");
+  await at(r, "2026-11-27T17:31:00Z");
+  await arm(fx.home, [ENTRY]);
+  await at(r, "2026-11-27T17:40:00Z");
+  assert.deepEqual(await ofKind(fx.home, "missed"), [], "it was not in force for that anchor");
+  assert.deepEqual(r.out.texts, []);
+  assert.equal(r.runs.length, 0);
+  await r.schedule.dispose();
+});
+
+test("an unreadable standing.yml fails closed for its tick and is phoned once per code, however often it recurs (p2-m33)", async () => {
+  const fx = await fixture();
+  await arm(fx.home, [ENTRY]);
+  const path = join(deskDir(fx.home), STANDING_FILE);
+  const text = await readFile(path, "utf8");
+  const r = rig(fx, "2026-11-27T15:00:00Z");
+  await r.clock.advance(0);
+  await at(r, "2026-11-27T15:00:00Z");
+  for (const minute of ["01", "02", "03"]) {
+    /* a directory where the file was: stat answers, the read fails EISDIR - a failure that comes and goes */
+    await rm(path);
+    await mkdir(path);
+    await at(r, `2026-11-27T15:${minute}:00Z`);
+    assert.equal(r.schedule.status().file.state, "refused", "fail closed");
+    await rm(path, { recursive: true });
+    await writeStanding(fx.home, text);
+    await at(r, `2026-11-27T15:${minute}:30Z`);
+    assert.equal(r.schedule.status().file.state, "loaded");
+  }
+  assert.deepEqual(r.out.texts, ["standing.yml is refused, so no standing order runs until it is fixed: standing.yml cannot be read (EISDIR)"],
+    "one line for the code");
+  await r.schedule.dispose();
+});
+
+test("a started record that cannot be written is a ledger failure: its line, the ledger read again, and no late miss (p2-m30)", async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip("root writes a 0400 file");
+    return;
+  }
+  const fx = await fixture();
+  await arm(fx.home, [ENTRY]);
+  const r = rig(fx, "2026-11-27T17:29:00Z");
+  await r.clock.advance(0);
+  await at(r, "2026-11-27T17:29:59Z");
+  /* a ledger the face can read and cannot write: the once-only append fails */
+  const ledger = join(deskDir(fx.home), FIRINGS_FILE);
+  await writeFile(ledger, "");
+  await chmod(ledger, 0o400);
+  await at(r, "2026-11-27T17:30:00Z");
+  await at(r, "2026-11-27T17:30:30Z");
+  await at(r, "2026-11-27T17:31:00Z");
+  const told = r.out.texts.filter((text) => text.startsWith(`the firing ledger ${ledger} cannot be read (the started record could not be written)`));
+  assert.equal(told.length, 1, `one line, however often the append fails: ${r.out.texts.join(" | ")}`);
+  assert.equal((await eventsOf(fx.home, "standing-error")).length, 1);
+  await chmod(ledger, 0o600);
+  await at(r, "2026-11-27T17:40:00Z");
+  assert.equal(r.schedule.status().ledger, undefined, "read again, and readable");
+  assert.deepEqual(await ofKind(fx.home, "missed"), [], "no miss reported late for it");
+  assert.equal(r.runs.length, 0);
+  await r.schedule.dispose();
+});
+
+test("createDeskSchedule reads its owner's now when no clock seam is given (M7)", async () => {
+  const fx = await fixture();
+  await arm(fx.home, [ENTRY]);
+  const calendar = fakeCalendar(DAYS);
+  const ctx: DeskSessionCtxLike = {
+    agents: { get: () => undefined, create: async () => { throw new Error("none"); }, resume: async () => { throw new Error("none"); } },
+    agentPresets: { mount: async (_agentCtx, id) => ({ id }) },
+    permissionPresets: { set: () => {}, current: () => "workspace-write" },
+  };
+  const schedule = createDeskSchedule({
+    home: fx.home, root: fx.root, python: "python3",
+    session: { ctx, root: fx.root, home: fx.home, route: { provider: "stub", model: "echo" }, installModelSelection: () => () => {} },
+    sessionCtx: {}, on: fakeBus().on, deliver: recordingDeliver().deliver, log: () => {},
+    now: () => Date.parse("2026-11-24T15:00:00Z"),
+    seams: { calendar, tickMs: DAY_MS },
+  });
+  await schedule.tick();
+  assert.deepEqual(calendar.asked, ["2026-11-24"], "the day is the owner's, not the wall clock's");
+  assert.equal(schedule.status().calendar.today?.date, "2026-11-24");
   await schedule.dispose();
 });

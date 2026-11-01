@@ -37,17 +37,17 @@
  * @module
  */
 import { readFile, stat } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import { join } from "node:path";
 import { briefProducer } from "./brief.ts";
 import {
-  appendEvent, appendRecord, appendRecordOnce, ASLEEP_THRESHOLD_MS, deskDir, FIRINGS_FILE, noteBudgetSpent, readBudget, readRecords,
+  appendEvent, appendRecord, appendRecordOnce, ASLEEP_THRESHOLD_MS, deskDir, FIRINGS_FILE, noteBudgetSpent, readBudget, readEvents, readOffState, readRecords,
   type BudgetState,
 } from "./desk.ts";
 import type { DeliverResult } from "./desk-conversation.ts";
 import { createDeskAgent, type DeskClock, type DeskSessionDeps, type SessionEventsOn } from "./desk-session.ts";
 import { etDate } from "./et.ts";
 import {
-  checkFiring, firingKey, isFiringRecord, LINES, outcomeOf, resolveFiringRoute, runFiring,
+  checkFiring, FIRING_SLACK_MS, firingKey, isFiringRecord, LINES, outcomeOf, repoRelative, resolveFiringRoute, runFiring,
   type ExpiredRecord, type FiringDeps, type FiringItem, type FiringRecord, type InterruptedRecord, type MissedRecord, type Refusal,
   type RefusedRecord, type StartedRecord, type Verified,
 } from "./firing.ts";
@@ -135,6 +135,14 @@ type HashState = StandingStatus["orders"][number]["hash"];
 /** Whether a line of the firing ledger, its object, is a record of `kind` for `key`. */
 const recordOf = (kind: FiringRecord["kind"], key: string) => (x: unknown): boolean => isFiringRecord(x) && x.kind === kind && x.key === key;
 
+/** The kinds a rotation hands on for today's keys (p2-m28). */
+const CARRIED: ReadonlySet<string> = new Set(["started", "finished", "interrupted", "missed", "refused"]);
+
+/** The keys the records show ended: a `finished` or an `interrupted`. */
+function endedKeys(records: readonly FiringRecord[]): Set<string> {
+  return new Set(records.flatMap((r) => (r.kind === "finished" || r.kind === "interrupted") && typeof r.key === "string" ? [r.key] : []));
+}
+
 /** A line of the firing ledger as a record, or `undefined`: not JSON, or not a record. */
 function lineRecord(line: string): FiringRecord | undefined {
   try {
@@ -168,15 +176,6 @@ function summaryOf(r: FiringRecord): FiringSummary | undefined {
   };
 }
 
-/** The phone's line for a day the calendar cannot answer: src/firing.ts `LINES.noCalendar` - its FACE_PYTHON hint
- * only for an interpreter without pandas_market_calendars (P2 Task 8's ruling 2); any other error, the line without it. */
-function noCalendarLine(python: string, error: string): string {
-  return /is not importable in /.test(error) ? LINES.noCalendar(python, error) : `no standing order runs today: the market calendar failed in ${python} (${error})`;
-}
-
-/** The repo-relative form of `cwd`, `/`-joined: `desk/journal`, `strategies/<name>`. */
-const repoRelative = (root: string, cwd: string): string => relative(resolve(root), resolve(cwd)).split(sep).join("/");
-
 /** An order's script producer, as its refusal names it. */
 const scriptOf = (order: StandingOrder): string => (order.producer === undefined ? "its producer" : order.producer.kind === "script" ? order.producer.script : formatProducer(order.producer));
 
@@ -207,27 +206,67 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   };
   const recover = (what: string): void => { failing.delete(what); };
 
-  /** Send a line through `deliver`, which never rejects; one that does is one face line. */
-  const send = async (text: string): Promise<void> => {
+  /** Send a line through `deliver`, which never rejects; one that does is one face line. Whether the line got past
+   * the pause: `false` only when `deliver` answered `{ undelivered: "paused" }` - the line held back, so whatever
+   * dedupes it must not count it as phoned (P2 fix wave, I4); any other answer is final. */
+  const send = async (text: string): Promise<boolean> => {
     try {
-      await deps.deliver(text);
+      const answer = await deps.deliver(text);
+      return !("undelivered" in answer && answer.undelivered === "paused");
     } catch (err) {
       log(`${BIN}: desk: a standing order's line could not be sent: ${errText(err)}`);
+      return true;
     }
   };
 
-  /** The firing ledger's appends: a rotation hands the new file today's `started` lines, as written, so the once-only
-   * append - which reads the current file alone - still finds today's keys (P2 Task 8's ruling 5). */
-  const ledgerOpts = {
-    log,
-    carry: (rotated: string): string[] => {
-      const today = etDate(new Date(clock.now()));
-      return rotated.split("\n").filter((line) => {
-        const r = lineRecord(line);
-        return r?.kind === "started" && r.date === today;
-      });
-    },
+  /** Whether a line sent now would get past the pause - read before an event is written, so a held line's event says
+   * `phoned: false`. The switch is read as the conversation reads it; a switch that cannot be read reads as paused. */
+  const deliverable = async (): Promise<boolean> => {
+    try {
+      const { state, expired } = await readOffState(home, () => clock.now());
+      return state === undefined || expired;
+    } catch {
+      return false;
+    }
   };
+
+  /** The one-shot lines the pause held back - a missed anchor, a cut-off firing, an expiry, a firing's refusal - in
+   * the order they came, each sent again at every tick until an answer is not `paused`. */
+  const held: string[] = [];
+  /** A one-shot line: sent, or held while the pause holds. */
+  const sendOnce = async (text: string): Promise<boolean> => {
+    if (held.length > 0) {
+      held.push(text); // behind the ones held before it, so the phone hears them in order
+      return false;
+    }
+    const reached = await send(text);
+    if (!reached) held.push(text);
+    return reached;
+  };
+  /** The held lines, sent in order until one is held again. */
+  const flushHeld = async (): Promise<void> => {
+    while (held.length > 0) {
+      if (!(await send(held[0]))) return;
+      held.shift();
+    }
+  };
+
+  /** What a rotation of the firing ledger hands the new file, as written: today's `started` lines, so the once-only
+   * append - which reads the current file alone - still finds today's keys (P2 Task 8's ruling 5); today's
+   * `finished`, `interrupted`, `missed` and `refused` lines, so a restart after the rotation reads each carried key
+   * as it ended and phones no false `interrupted`; and the `expired` lines of the loaded orders' expiries, so an
+   * expiry is not phoned twice (p2-m28). The clock row's own appends and a firing's carry it alike. */
+  const carry = (rotated: string): string[] => {
+    const today = etDate(new Date(clock.now()));
+    const expiryKeys = new Set(orders.map((order) => firingKey(order.id, order.expires)));
+    return rotated.split("\n").filter((line) => {
+      const r = lineRecord(line);
+      if (r === undefined) return false;
+      if (r.kind === "expired") return expiryKeys.has(r.key);
+      return CARRIED.has(r.kind) && "date" in r && r.date === today;
+    });
+  };
+  const ledgerOpts = { log, carry };
 
   /* ---- what the ledger and this face know, by key and by order ---- */
   const started = new Set<string>();
@@ -240,6 +279,10 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   const expiries = new Set<string>();
   /** The latest instant each order was found expired: a later anchor today is settled by it (P2 Task 8's ruling 4). */
   const expiredAt = new Map<string, number>();
+  /** The latest instant each order was found disabled: an anchor today it passed while disabled is settled by it. */
+  const disabledAt = new Map<string, number>();
+  /** The keys whose `started` could not be written: their grace passes as a ledger failure, not a miss. */
+  const unwritten = new Set<string>();
   const lastOf = new Map<string, FiringSummary>();
   let recent: FiringSummary[] = [];
   /** Each order's pins as its last check found them, and the pins it checked. */
@@ -282,28 +325,51 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   let fileState: StandingStatus["file"]["state"] = "missing";
   let loadedAt: string | undefined;
   let refused: string[] | undefined;
-  /** The refusal last phoned, its errors joined; cleared by a good load, so a new break is phoned again. */
+  /** The refusal last recorded and the one last phoned, its errors joined; both cleared by a good load, so a new
+   * break is recorded and phoned again. They differ while the pause holds the line back: the next tick phones it. */
+  let eventedRefusal: string | undefined;
   let phonedRefusal: string | undefined;
+  /** The code of a refusal for a file the face could not read, while that is the refusal in force. */
+  let unreadableCode: string | undefined;
+  /** The codes of an unreadable `standing.yml` already phoned, one line each for this face's life - a transient
+   * EMFILE fails closed for its tick, and is not phoned again each time it recurs (p2-m33). */
+  const phonedUnreadable = new Set<string>();
   /** The last good load. */
   let orders: StandingOrder[] = [];
   let cap: number | undefined;
 
-  const refuse = async (errors: string[], now: number): Promise<void> => {
-    fileState = "refused";
-    refused = errors;
+  /** The refusal in force, phoned unless it was already - by its joined errors, or for an unreadable file by its
+   * code - and unless the pause holds it back, in which case the next tick tries again while it stands. */
+  const phoneRefusal = async (errors: readonly string[]): Promise<void> => {
     const joined = errors.join("\n");
-    if (phonedRefusal === joined) return;
-    phonedRefusal = joined;
-    await appendEvent(home, { t: iso(now), kind: "standing-error", errors }, { log });
-    await send(LINES.standingRefused(errors));
+    if (unreadableCode !== undefined ? phonedUnreadable.has(unreadableCode) : phonedRefusal === joined) return;
+    if (!(await send(LINES.standingRefused(errors)))) return;
+    if (unreadableCode !== undefined) phonedUnreadable.add(unreadableCode);
+    else phonedRefusal = joined;
   };
 
-  /** A file the face cannot stat or read: refused like one it cannot parse, and read whole at the next tick that can,
-   * moved or not. */
+  const refuse = async (errors: string[], now: number, code?: string): Promise<void> => {
+    fileState = "refused";
+    refused = errors;
+    unreadableCode = code;
+    const joined = errors.join("\n");
+    if (eventedRefusal !== joined) {
+      eventedRefusal = joined;
+      const phoned = code !== undefined ? phonedUnreadable.has(code) : phonedRefusal === joined;
+      /* its line is phoned next; held back by the pause, the event says so, and a restart phones it again */
+      const reached = phoned || (await deliverable());
+      await appendEvent(home, { t: iso(now), kind: "standing-error", errors, ...(reached ? {} : { phoned: false as const }) }, { log });
+    }
+    await phoneRefusal(errors);
+  };
+
+  /** A file the face cannot stat or read: refused like one it cannot parse - fail closed, even for a transient code -
+   * and read whole at the next tick that can, moved or not; its line goes out once per code. */
   const unreadable = async (err: unknown, now: number): Promise<void> => {
     fail("reload", err);
     signature = undefined;
-    await refuse([`${STANDING_FILE} cannot be read (${reasonOf(err)})`], now);
+    const code = reasonOf(err);
+    await refuse([`${STANDING_FILE} cannot be read (${code})`], now, code);
   };
 
   /** `standing.yml` read again when it moved. */
@@ -343,13 +409,47 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     fileState = next === "missing" ? "missing" : "loaded";
     loadedAt = next === "missing" ? undefined : iso(now);
     refused = undefined;
+    unreadableCode = undefined;
+    eventedRefusal = undefined;
     phonedRefusal = undefined;
   };
 
   /* ---- the firing ledger ---- */
   let ledgerRead = false;
+  /** Whether the ledger has been read whole once, its records noted and its cut-off firings found. */
+  let ledgerReadOnce = false;
   let ledgerError: string | undefined;
+  /** The ledger failure last recorded and the one last phoned, by reason; the second only once a line got past the
+   * pause. */
+  let eventedLedger: string | undefined;
   let phonedLedger: string | undefined;
+  /** Which failure the two above are about: a read clears a read failure's, a written `started` a write failure's. */
+  let ledgerFailing: "read" | "write" | undefined;
+  /** A `started` with no end that was younger than its turn's deadline and the slack at boot - perhaps a live firing
+   * on another face on this home (M2): judged once it is that old, by the ledger as it then reads. */
+  const young = new Map<string, { record: StartedRecord; at: number }>();
+
+  /** A ledger failure - unreadable, or a `started` that could not be written: recorded once and phoned once per
+   * reason, the line tried again at each tick the pause holds it back; every firing stops until the ledger reads. */
+  const ledgerFailure = async (reason: string, now: number, kind: "read" | "write" = "read"): Promise<void> => {
+    ledgerRead = false;
+    ledgerError = reason;
+    ledgerFailing = kind;
+    const errors = [`${ledgerPath} cannot be read (${reason})`];
+    if (eventedLedger !== reason) {
+      eventedLedger = reason;
+      await appendEvent(home, { t: iso(now), kind: "standing-error", errors, ...((await deliverable()) ? {} : { phoned: false as const }) }, { log });
+    }
+    if (phonedLedger !== reason && (await send(LINES.ledgerUnreadable(ledgerPath, reason)))) phonedLedger = reason;
+  };
+
+  /** One `started` the last run left without an end: `interrupted`, recorded once and phoned once. */
+  const interrupt = async (r: StartedRecord, now: number): Promise<void> => {
+    const record: InterruptedRecord = { t: iso(now), kind: "interrupted", key: r.key, order: r.order, date: r.date, startedAt: r.t };
+    const outcome = await appendRecordOnce(home, FIRINGS_FILE, record, recordOf("interrupted", r.key), ledgerOpts);
+    note(record);
+    if (outcome !== "duplicate") await sendOnce(LINES.interrupted(r.order, r.date));
+  };
 
   /** The ledger read - every key it holds, every firing a restart cut off - or `false`, with its line once per
    * distinct reason, when it cannot be: then nothing fires until it can. */
@@ -358,34 +458,58 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     try {
       records = (await readRecords(home, FIRINGS_FILE, isFiringRecord)).records;
     } catch (err) {
-      const code = reasonOf(err);
-      ledgerError = code;
-      if (phonedLedger !== code) {
-        phonedLedger = code;
-        await appendEvent(home, { t: iso(now), kind: "standing-error", errors: [`${ledgerPath} cannot be read (${code})`] }, { log });
-        await send(LINES.ledgerUnreadable(ledgerPath, code));
-      }
+      await ledgerFailure(reasonOf(err), now);
       return false;
     }
+    const first = !ledgerReadOnce;
+    ledgerReadOnce = true;
     ledgerRead = true;
     ledgerError = undefined;
+    if (ledgerFailing === "read") {
+      eventedLedger = undefined;
+      phonedLedger = undefined;
+      ledgerFailing = undefined;
+    }
+    /* a re-read after a failure knows the records already noted */
+    if (!first) return true;
     for (const r of records) note(r);
-    const ended = new Set(records.flatMap((r) => (r.kind === "finished" || r.kind === "interrupted") && typeof r.key === "string" ? [r.key] : []));
+    const ended = endedKeys(records);
     for (const r of records) {
       if (r.kind !== "started" || typeof r.key !== "string" || typeof r.order !== "string" || typeof r.date !== "string" || ended.has(r.key)) continue;
       ended.add(r.key);
-      const record: InterruptedRecord = { t: iso(now), kind: "interrupted", key: r.key, order: r.order, date: r.date, startedAt: r.t };
-      const outcome = await appendRecordOnce(home, FIRINGS_FILE, record, recordOf("interrupted", r.key), ledgerOpts);
-      note(record);
-      if (outcome !== "duplicate") await send(LINES.interrupted(r.order, r.date));
+      const at = Date.parse(r.t) + (typeof r.deadlineMs === "number" ? r.deadlineMs : 0) + FIRING_SLACK_MS;
+      if (Number.isFinite(at) && at > now) {
+        young.set(r.key, { record: r, at });
+        continue;
+      }
+      await interrupt(r, now);
     }
     return true;
+  };
+
+  /** The young `started` records now old enough to judge: each still without an end in the ledger is interrupted. */
+  const judgeYoung = async (now: number): Promise<void> => {
+    const due = [...young.values()].filter((y) => y.at <= now);
+    if (due.length === 0) return;
+    let ended: Set<string>;
+    try {
+      ended = endedKeys((await readRecords(home, FIRINGS_FILE, isFiringRecord)).records);
+    } catch (err) {
+      fail("ledger", err);
+      return; // the next tick asks again
+    }
+    for (const y of due) {
+      young.delete(y.record.key);
+      if (!ended.has(y.record.key)) await interrupt(y.record, now);
+    }
   };
 
   /* ---- the calendar ---- */
   /** This face's last answer from the calendar. */
   let answer: DayAnswer | undefined;
-  /** The dates whose failure was phoned. */
+  /** The dates whose failure was recorded, and those whose line got past the pause: a held one is phoned at the next
+   * tick that still finds the date failed. Seeded from `events.jsonl` at boot (p2-m32). */
+  const calendarEvented = new Set<string>();
   const calendarPhoned = new Set<string>();
 
   const askCalendar = async (now: number): Promise<DayAnswer | undefined> => {
@@ -398,11 +522,14 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     }
     recover("calendar");
     answer = got;
-    if (!got.ok && !calendarPhoned.has(got.date)) {
-      calendarPhoned.add(got.date);
-      await appendEvent(home, { t: iso(now), kind: "calendar-error", date: got.date, python: deps.calendar.python, error: got.error }, { log });
-      await send(noCalendarLine(deps.calendar.python, got.error));
+    if (!got.ok && !calendarEvented.has(got.date)) {
+      calendarEvented.add(got.date);
+      const reached = await deliverable();
+      await appendEvent(home, {
+        t: iso(now), kind: "calendar-error", date: got.date, python: deps.calendar.python, error: got.error, ...(reached ? {} : { phoned: false as const }),
+      }, { log });
     }
+    if (!got.ok && !calendarPhoned.has(got.date) && (await send(LINES.noCalendar(deps.calendar.python, got.error)))) calendarPhoned.add(got.date);
     return got;
   };
 
@@ -424,7 +551,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     const record: ExpiredRecord = { t: iso(now), kind: "expired", key, order: order.id, date: order.expires, expires: order.expires };
     const outcome = await appendRecordOnce(home, FIRINGS_FILE, record, recordOf("expired", key), ledgerOpts);
     note(record);
-    if (outcome !== "duplicate") await send(LINES.expired(order.id, order.expires));
+    if (outcome !== "duplicate") await sendOnce(LINES.expired(order.id, order.expires));
   };
 
   /** An anchor found past its grace: why, recorded and phoned once. */
@@ -437,15 +564,19 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     };
     const outcome = await appendRecordOnce(home, FIRINGS_FILE, record, recordOf("missed", key), ledgerOpts);
     note(record);
-    if (outcome !== "duplicate") await send(LINES.missed(record));
+    if (outcome !== "duplicate") await sendOnce(LINES.missed(record));
   };
 
   /** One order on one session: queued when due, recorded when missed. */
   const weigh = async (order: StandingOrder, session: MarketSession, now: number, since: number | undefined): Promise<void> => {
     const anchorMs = anchorInstant(order.anchor, session);
     const key = firingKey(order.id, session.date);
-    /* found expired at or after this anchor: the order was not in force for it, whatever a later rearm says */
+    /* found expired, or disabled, at or after this anchor: the order was not in force for it, whatever a later rearm
+     * or re-enable says (p2-m31) */
     if ((expiredAt.get(order.id) ?? -Infinity) >= anchorMs) return;
+    if ((disabledAt.get(order.id) ?? -Infinity) >= anchorMs) return;
+    /* a started append that failed: a ledger failure, never a miss to report late (p2-m30) */
+    if (unwritten.has(key) && now - anchorMs > graceMs) return;
     const verdict = decide({
       anchorMs, nowMs: now, graceMs, armedFromMs: Date.parse(order.armedAt),
       started: started.has(key), missed: missed.has(key), refused: refusals.has(key), pending: pending(key),
@@ -456,19 +587,53 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
 
   /* ---- the tick ---- */
   let lastTickAt: number | undefined;
+  let seeded = false;
+
+  /** At boot: what `events.jsonl` says this home already recorded and phoned today - the last refusal of
+   * `standing.yml` and today's calendar failure - so a restart neither records nor phones them twice; one held back
+   * by the pause (`phoned: false`) is phoned again. An unreadable ledger seeds nothing. */
+  const seed = async (now: number): Promise<void> => {
+    let events: Awaited<ReturnType<typeof readEvents>>["events"];
+    try {
+      events = (await readEvents(home)).events;
+    } catch {
+      return;
+    }
+    const today = etDate(new Date(now));
+    const ledgerError = `${ledgerPath} cannot be read (`;
+    for (const e of events) {
+      if (e.kind === "standing-error" && Array.isArray(e.errors) && !(e.errors.length === 1 && String(e.errors[0]).startsWith(ledgerError))) {
+        eventedRefusal = e.errors.join("\n");
+        phonedRefusal = e.phoned === false ? undefined : eventedRefusal;
+      } else if (e.kind === "calendar-error" && e.date === today) {
+        calendarEvented.add(e.date);
+        if (e.phoned !== false) calendarPhoned.add(e.date);
+      }
+    }
+  };
 
   const runTick = async (): Promise<void> => {
     if (disposed) return;
     const now = clock.now();
     const since = lastTickAt;
     lastTickAt = now;
+    if (!seeded) {
+      seeded = true;
+      await seed(now);
+    }
+    await flushHeld();
     await reload(now);
+    if (fileState === "refused" && refused !== undefined) await phoneRefusal(refused);
     if (!ledgerRead && !(await readLedger(now))) return;
+    await judgeYoung(now);
     if (fileState === "refused") return;
     const today = etDate(new Date(now));
     const day = orders.some((order) => order.enabled && today <= order.expires) ? await askCalendar(now) : undefined;
     for (const order of orders) {
-      if (!order.enabled) continue;
+      if (!order.enabled) {
+        disabledAt.set(order.id, now);
+        continue;
+      }
       if (today > order.expires) {
         await expire(order, now);
         continue;
@@ -522,6 +687,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   /** The deps a firing runs on: the clock row's, its session's id noted as the run makes it. */
   const runDeps = (key: string): FiringDeps => ({
     ...deps,
+    carry,
     createAgent: async (opts) => {
       const made = await deps.createAgent(opts);
       if (inHand?.key === key && inHand.started !== undefined) inHand.started.sessionId = made.sessionId;
@@ -600,12 +766,13 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     const last = refusals.get(item.key);
     if (last !== undefined && last.reason === refusal.reason && last.detail === detail) return;
     const line = await refusalLine(item, refusal, now);
+    /* its line held back by the pause is no report: `reported: false`, and the line goes out once the pause lifts */
+    const reported = line !== undefined && (await sendOnce(line));
     const record: RefusedRecord = {
       t: iso(now), kind: "refused", key: item.key, order: item.order.id, date: item.date, reason: refusal.reason,
-      ...(detail === undefined ? {} : { detail }), reported: line !== undefined,
+      ...(detail === undefined ? {} : { detail }), reported,
     };
     note(record);
-    if (line !== undefined) await send(line);
     await appendRecord(home, FIRINGS_FILE, record, ledgerOpts);
   };
 
@@ -635,7 +802,17 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
       wake: order.wake, deadlineMs: order.turnDeadlineMs,
     };
     const outcome = await appendRecordOnce(home, FIRINGS_FILE, record, recordOf("started", item.key), ledgerOpts);
-    if (outcome === "failed") return; // the ledger's line says why; the next tick inside the grace asks again
+    if (outcome === "failed") {
+      /* a ledger that cannot take the key stops every firing until it reads again; the key, past its grace, is no miss */
+      unwritten.add(item.key);
+      await ledgerFailure("the started record could not be written", clock.now(), "write");
+      return;
+    }
+    if (ledgerFailing === "write") {
+      eventedLedger = undefined;
+      phonedLedger = undefined;
+      ledgerFailing = undefined;
+    }
     started.add(item.key);
     if (outcome === "duplicate") {
       log(`${BIN}: desk: another face on this home started ${item.key}; this one does not run it`);
@@ -657,7 +834,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
         try {
           await fire(item);
         } catch (err) {
-          log(`${BIN}: desk: standing order ${item.key} failed: ${errText(err)}`);
+          fail(`firing ${item.key}`, err);
         } finally {
           inHand = undefined;
         }
@@ -801,7 +978,8 @@ const FACE_CLOCK: DeskClock = {
  * @param opts - `home` the harness home; `root` the repository root; `python` the face's interpreter (`FACE_PYTHON ||
  *   python3`); `hub` the quote hub; `session` the desk session's deps; `sessionCtx` the booted ROOT context, whose
  *   `agentDefaultModel` and `llm` a firing's route needs - a firing on a context without them could not run; `on` the
- *   root bus; `deliver` the desk conversation's; `log`, stderr by default; `seams`, for tests.
+ *   root bus; `deliver` the desk conversation's; `log`, stderr by default; `now`, the owner's clock - the wall clock
+ *   by default - under the face's timers; `seams`, for tests.
  */
 export function createDeskSchedule(opts: {
   home: string;
@@ -813,11 +991,14 @@ export function createDeskSchedule(opts: {
   on: SessionEventsOn;
   deliver: (text: string) => Promise<DeliverResult>;
   log?: (line: string) => void;
+  now?: () => number;
   seams?: { clock?: DeskClock; marketClockSha256?: string } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;
 }): ScheduleHandle {
   const log = opts.log ?? defaultLog;
   const seams = opts.seams ?? {};
-  const clock = seams.clock ?? FACE_CLOCK;
+  /* the clock seam, else the face's - on `now` when the owner's desk reads one (installDesk's), so the budget's day
+   * and a firing's stamps agree with the conversation's (M7) */
+  const clock = seams.clock ?? (opts.now === undefined ? FACE_CLOCK : { ...FACE_CLOCK, now: opts.now });
   let toldTail: string | undefined;
   /* one runner for the clock and a script producer: the face's interpreter, isolated */
   const runScript = seams.runScript ?? defaultProducerRunner(opts.python);

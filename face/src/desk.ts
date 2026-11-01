@@ -135,7 +135,9 @@ export interface TurnUsage {
  * did. P2's clock adds three: a `standing-error`, when `standing.yml` is refused or the firing ledger
  * cannot be read - the errors that say why; a `calendar-error`, a session date the market calendar did
  * not answer for - the date, the interpreter asked and its error; and a `budget-spent`, once per ET
- * date ({@link noteBudgetSpent}) - the date, the tokens used and the day's cap. */
+ * date ({@link noteBudgetSpent}) - the date, the tokens used and the day's cap. A `standing-error` or
+ * `calendar-error` whose phone line the pause held back carries `phoned: false`, so a restart phones it
+ * again rather than never. */
 export type DeskEvent =
   | { t: string; kind: "boot"; pid: number; version: string; deskEnabled: boolean }
   | { t: string; kind: "shutdown"; pid: number; code: number }
@@ -148,8 +150,8 @@ export type DeskEvent =
     wallMs: number; usage?: TurnUsage; cancel?: string; error?: string;
   }
   | { t: string; kind: "desk-refused"; reason: string; path?: string }
-  | { t: string; kind: "standing-error"; errors: string[] }
-  | { t: string; kind: "calendar-error"; date: string; python: string; error: string }
+  | { t: string; kind: "standing-error"; errors: string[]; phoned?: false }
+  | { t: string; kind: "calendar-error"; date: string; python: string; error: string; phoned?: false }
   | { t: string; kind: "budget-spent"; date: string; used: number; dailyTokens: number };
 
 /** Every kind {@link DeskEvent} has, and only those. A record over the union rather than a list,
@@ -412,6 +414,7 @@ function objectOf(line: string): object | undefined {
 /** Whether a line's object is an event: a string `t` and a known `kind`. Only those two fields are
  * checked - the face is the file's one writer, and the rest of the shape is the writer's to keep. */
 function isDeskEvent(x: unknown): x is DeskEvent {
+  if (typeof x !== "object" || x === null || Array.isArray(x)) return false;
   const { t, kind } = x as { t?: unknown; kind?: unknown };
   return typeof t === "string" && typeof kind === "string" && Object.hasOwn(KINDS, kind);
 }
@@ -1387,6 +1390,8 @@ export function installDesk(
         on: wiring.on,
         deliver: (text) => conversation.deliver(text),
         log,
+        /* the schedule's clock reads the same now as the conversation's, unless a test hands it a clock of its own */
+        ...(deps.now === undefined ? {} : { now: deps.now }),
         seams: deps.schedule,
       });
       return schedule;
