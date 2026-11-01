@@ -2097,6 +2097,30 @@ test("Sign in at Robinhood opens a tab inside the press, sends it to the venue's
   store.timers.clear();
 });
 
+test('a sign-in the Account refuses says its words once, however many times it is pressed', async () => {
+  const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  f.win.open = () => ({ opener: {}, location: { href: '' }, close() {} });
+  const door = walletDoor();
+  const inner = door.post;
+  door.post = async (path, body) => (path === '/data/account/signin/start'
+    ? (door.posts.push([path, body]), { status: 502, body: { ok: false, refusal: { code: 'E_VENUE_UNREACHABLE', message: 'Robinhood did not answer' } } })
+    : inner(path, body));
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/venues': fx('venues'), '/data/account/connect/reach': { ok: true, reach: [] } } });
+  const store = bootOwner(f, h, door, fakeMarkets());
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await openConnect(f, store);
+  pickConnector(f, 'live:robinhood');
+  await settle();
+  for (let i = 1; i <= 3; i += 1) {
+    f.click({ tagName: 'BUTTON', dataset: { action: 'connectSignIn' } });
+    await until(() => door.sent('/data/account/signin/start').length === i && store.get().account.signIn.status === 'failed', `refusal ${i}`);
+    await settle();
+    assert.equal(f.html().split('Robinhood did not answer').length - 1, 1, `said once after ${i} presses`);
+  }
+  store.timers.clear();
+});
+
 test('Close to agents on a page that does not sign posts the revoke; Reopen… needs a page that signs', async () => {
   const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
   const door = walletDoor({ role: 'pending' });

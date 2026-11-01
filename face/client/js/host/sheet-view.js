@@ -664,7 +664,7 @@ const short = a => (/^0x[0-9a-fA-F]{16,}$/.test(a) ? `${a.slice(0, 8)}…${a.sli
  *  (`more.wallet`, the slice's `connectWallet`) for the wallet kind, the option's own example for another address and for a
  *  command line (what to run on this machine), a sign-in's words (`more.signIn`), and the key file's check —
  *  `Key file found: <path>`, `Missing: a, b`, else the Account's sentence — only when it was asked for the form as it stands
- *  (`keyfileAskOf`). `keyfile` and `reach` are the account slice's reads. Another sheet, or nothing picked: ''. */
+ *  (`keyfileAskOf`), each sentence once. `keyfile` and `reach` are the account slice's reads. Another sheet, or nothing picked: ''. */
 export function connectCheckOf(sheet, keyfile, reach, more = {}) {
   const option = pickedOption(sheet);
   if (!option) return '';
@@ -685,5 +685,6 @@ export function connectCheckOf(sheet, keyfile, reach, more = {}) {
       parts.push(w.ready ? (w.path ? `Key file found: ${w.path}` : 'Key file found') : w.missing.length ? `Missing: ${w.missing.join(', ')}` : w.message);
     }
   }
-  return parts.filter(Boolean).join(' · ');
+  // one sentence once: a venue that did not answer here says so, and a sign-in it refused may say the same
+  return [...new Set(parts.filter(Boolean))].join(' · ');
 }
