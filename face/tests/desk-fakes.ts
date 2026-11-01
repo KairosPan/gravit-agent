@@ -277,9 +277,9 @@ export function recordingDeliver(result?: DeliverResult | ((text: string, n: num
  * window, from the first named to the last - `undefined` for none, and, as the face's calendar has no window before
  * its first ask returns, `undefined` until the first `today()` has settled; `peek()` likewise.
  * @param days - New York date → its session (its `date` the same) or `"closed"`.
- * @param python - the interpreter the calendar names.
+ * @param clock - the clock the calendar names.
  */
-export function fakeCalendar(days: Record<string, MarketSession | "closed">, python = "python3"): MarketCalendar & { readonly asked: string[] } {
+export function fakeCalendar(days: Record<string, MarketSession | "closed">, clock = "fake clock"): MarketCalendar & { readonly asked: string[] } {
   const asked: string[] = [];
   const dates = Object.keys(days).sort();
   let window: MarketWindow | undefined;
@@ -290,7 +290,6 @@ export function fakeCalendar(days: Record<string, MarketSession | "closed">, pyt
       from: dates[0],
       days: Math.round((last - first) / 86_400_000) + 1,
       source: "fake calendar",
-      python,
       sessions: dates.flatMap((date) => {
         const day = days[date];
         return day === "closed" ? [] : [day];
@@ -300,7 +299,7 @@ export function fakeCalendar(days: Record<string, MarketSession | "closed">, pyt
   let answered = false;
   let latest: DayAnswer | undefined;
   return {
-    python,
+    clock,
     asked,
     async today(now) {
       const date = etDate(new Date(now));

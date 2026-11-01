@@ -226,7 +226,7 @@ test("formatStatus prints the standing and budget lines after the telegram line"
     turnsToday: noTurns, telegram: { configured: true, polling: true, lastPollAt: "2026-11-27T15:59:00.000Z", dropped: 0, queued: 0 },
     budget: { dailyTokens: 2_000_000, used, spent: false },
     standing: {
-      file: { path: "/d/standing.yml", state: "loaded" }, calendar: { python: "python3", state: "failed", error: "exit 1" },
+      file: { path: "/d/standing.yml", state: "loaded" }, calendar: { clock: "fake clock", state: "failed", error: "exit 1" },
       orders: [order, { ...order, id: "weekly", dir: "strategies/alpha", file: "WEEKLY.md", hash: "changed", last: undefined }], queued: [], recent: [],
     },
   };
@@ -237,14 +237,14 @@ test("formatStatus prints the standing and budget lines after the telegram line"
     "answering at http://127.0.0.1:3090 · up 1h 30m since 2026-11-27T14:30:00.000Z · desk on",
     "telegram: polling, last poll 10:59 ET, 0 dropped, 0 queued",
     "budget: 1,234,567 of 2,000,000 tokens today",
-    "standing orders: no calendar today, python3: exit 1",
+    "standing orders: no calendar today, fake clock: exit 1",
     "standing preclose: close-30m, next 12:30 ET; last delivered 2026-11-26 15:31 ET",
     "standing weekly: strategies/alpha/WEEKLY.md changed since arming (npm run desk -- rearm weekly)",
     "sign in: no URL in the log yet (npm run service -- logs)",
   ]);
   assert.deepEqual(lines({ ...status, ledgerError: "EACCES", budget: { dailyTokens: 2_000_000, used: { ...used, total: 0 }, spent: false, error: "EACCES" } }).slice(3, -1), [
     "budget: 0 of 2,000,000 tokens today (ledger unreadable: EACCES)",
-    "standing orders: no calendar today, python3: exit 1",
+    "standing orders: no calendar today, fake clock: exit 1",
     "standing preclose: close-30m, next 12:30 ET; last delivered 2026-11-26 15:31 ET",
     "standing weekly: strategies/alpha/WEEKLY.md changed since arming (npm run desk -- rearm weekly)",
     "ledger: unreadable (EACCES)",

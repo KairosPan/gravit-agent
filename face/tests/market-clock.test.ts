@@ -1,112 +1,171 @@
 // face/tests/market-clock.test.ts
-/** The market clock (src/market-clock.ts): reading the clock's JSON, a window's sessions and closed days,
- * running the clock (its argv, its keyless environment, its deadline, how each failure reads and the tail of
- * a failed run's stderr), and the calendar's cache - one ask per New York date, shared by concurrent calls, a
- * failed ask answered from a window that still covers the date and asked again every ten minutes until a
- * window holds it; and the clock's pin - the tracked file hashes to MARKET_CLOCK_SHA256, and a changed or missing
- * clock never runs. Offline: a fake runner and a fake ask, except one test that runs scripts/market_clock.py under
- * the face's interpreter and skips when that interpreter has no pandas_market_calendars. A run's private copy is
- * made under tests/tmp/market-clock-<pid>/, removed afterwards. */
-import test, { after, before } from "node:test";
+/** The market clock (src/market-clock.ts): the builtin XNYS rules - the cases the retired pytest of
+ * scripts/market_clock.py held (a ten-day window, empty windows, the 2026 count and early closes, both DST
+ * changes, no weekend session, the year's end, refused arguments), ported to Node, plus every 2026 and 2027
+ * NYSE holiday and early close against the exchange's published schedule - a window's sessions and closed
+ * days, and the calendar's cache: one ask per New York date, shared by concurrent calls, a failed ask
+ * answered from a window that still covers the date and asked again every ten minutes until a window holds
+ * it. Offline and pure: no interpreter, no network, no file. */
+import test from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { etDate } from "../src/et.ts";
 import {
-  CALENDAR_DAYS, CALENDAR_RETRY_MS, MARKET_CLOCK_SHA256, MARKET_CLOCK_TIMEOUT_MS, createMarketCalendar, parseMarketWindow, pythonMarketClock, sessionFor, windowCovers,
+  CALENDAR_DAYS, CALENDAR_RETRY_MS, MAX_WINDOW_DAYS, XNYS_AD_HOC_CLOSURES, XNYS_CLOCK, builtinMarketClock, createMarketCalendar, easterSunday,
+  sessionFor, windowCovers, xnysEarlyCloses, xnysHolidays, xnysWindow,
   type DayAnswer, type MarketClock, type MarketSession, type MarketWindow,
 } from "../src/market-clock.ts";
-import { baseEnv, type ProducerRunner, type RunResult } from "../src/producer.ts";
-
-const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TEST_DIR = join(dirname(fileURLToPath(import.meta.url)), "tmp", `market-clock-${process.pid}`);
-/** The run base a test's clock copies itself into, as the face's `<desk dir>/run`. */
-const RUN_BASE = join(TEST_DIR, "run");
-before(async () => {
-  await rm(TEST_DIR, { recursive: true, force: true });
-  await mkdir(TEST_DIR, { recursive: true });
-});
-after(() => rm(TEST_DIR, { recursive: true, force: true }));
 
 const S = (date: string, open: string, close: string, early = false): MarketSession => ({ date, open, close, early });
 const FULL = (date: string): MarketSession => S(date, `${date}T14:30:00Z`, `${date}T21:00:00Z`);
 
-/** What scripts/market_clock.py prints for `sessions --from 2026-11-24 --days 10`. */
-const WINDOW = {
-  ok: true,
-  calendar: "XNYS",
-  source: "pandas_market_calendars 5.4.0",
-  python: "/x/bin/python3",
+/** The ten days from 2026-11-24, as the retired script printed them. */
+const WINDOW: MarketWindow = {
   from: "2026-11-24",
   days: 10,
+  source: "a stand-in clock",
   sessions: [
     FULL("2026-11-24"), FULL("2026-11-25"), S("2026-11-27", "2026-11-27T14:30:00Z", "2026-11-27T18:00:00Z", true),
     FULL("2026-11-30"), FULL("2026-12-01"), FULL("2026-12-02"), FULL("2026-12-03"),
   ],
 };
 
-/** WINDOW with `edit` applied to a deep copy, as the clock's stdout. */
-function edited(edit: (w: any) => void): string {
-  const copy = structuredClone(WINDOW);
-  edit(copy);
-  return JSON.stringify(copy);
-}
-
 const at = (iso: string): number => Date.parse(iso);
 
-/* ---------- reading the clock ---------- */
+/** Every session from `from` through `to` inclusive, asked as windows of at most 31 days. */
+function sessionsThrough(from: string, to: string): MarketSession[] {
+  const out: MarketSession[] = [];
+  let start = from;
+  while (start <= to) {
+    const span = Math.min(MAX_WINDOW_DAYS, Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000) + 1);
+    const window = xnysWindow(start, span);
+    out.push(...window.sessions);
+    start = new Date(Date.parse(`${start}T00:00:00Z`) + span * 86_400_000).toISOString().slice(0, 10);
+  }
+  return out;
+}
 
-test("parseMarketWindow reads the clock's JSON and refuses anything else", () => {
-  const w = parseMarketWindow(JSON.stringify(WINDOW));
-  assert.equal(w.sessions.length, 7);
-  assert.deepEqual(w, { from: "2026-11-24", days: 10, source: "pandas_market_calendars 5.4.0", python: "/x/bin/python3", sessions: WINDOW.sessions });
-  assert.deepEqual(parseMarketWindow(edited((c) => { c.extra = 1; c.sessions[0].extra = 2; })).sessions[0], FULL("2026-11-24"), "unknown keys are dropped");
-  assert.deepEqual(parseMarketWindow(edited((c) => { c.sessions = []; })).sessions, [], "a window may hold no session");
+/* ---------- the rules (the retired pytest's cases, ported) ---------- */
 
-  assert.throws(() => parseMarketWindow('{"ok":false,"error":"pandas_market_calendars is not importable in /x"}'),
-    { message: "pandas_market_calendars is not importable in /x" });
-  assert.throws(() => parseMarketWindow(JSON.stringify({ ok: false, error: `boom\n${"x".repeat(1_000)}` })),
-    (e: Error) => !e.message.includes("\n") && e.message.startsWith("boom x") && e.message.endsWith("…") && [...e.message].length === 300,
-    "the clock's own error is carried on one line, cut at 300 characters");
-  assert.throws(() => parseMarketWindow('{"ok":false}'), { message: "the clock failed and gave no error" });
-
-  const faults: [string, string][] = [
-    ["", "not JSON"],
-    ["nope", "not JSON"],
-    ["null", "not a JSON object"],
-    ["[]", "not a JSON object"],
-    [edited((c) => { delete c.ok; }), "window has a bad ok"],
-    [edited((c) => { c.calendar = "XLON"; }), "window has a bad calendar"],
-    [edited((c) => { c.from = "2026-11-31"; }), "window has a bad from"],
-    [edited((c) => { c.days = 0; }), "window has a bad days"],
-    [edited((c) => { c.days = 32; }), "window has a bad days"],
-    [edited((c) => { c.days = 9.5; }), "window has a bad days"],
-    [edited((c) => { c.source = ""; }), "window has a bad source"],
-    [edited((c) => { c.python = 3; }), "window has a bad python"],
-    [edited((c) => { delete c.sessions; }), "sessions is not a list"],
-    [edited((c) => { c.sessions = {}; }), "sessions is not a list"],
-    [edited((c) => { c.sessions[1] = "2026-11-25"; }), "session 1 is not an object"],
-    [edited((c) => { c.sessions[0].date = "2026-11-31"; }), "session 0 has a bad date"],
-    [edited((c) => { c.sessions[0].close = "21:00"; }), "session 0 has a bad close"],
-    [edited((c) => { c.sessions[0].open = "2026-11-24T14:30:00+00:00"; }), "session 0 has a bad open"],
-    [edited((c) => { c.sessions[0].open = "2026-11-24T14:30:00.000Z"; }), "session 0 has a bad open"],
-    [edited((c) => { c.sessions[0].open = "2026-11-25T14:30:00Z"; }), "session 0 has a bad open"],     // not its date
-    [edited((c) => { c.sessions[0].open = "2026-11-24T04:30:00Z"; }), "session 0 has a bad open"],     // 23:30 ET the day before
-    [edited((c) => { c.sessions[0].close = "2026-11-24T14:30:00Z"; }), "session 0 has a bad close"],   // not after its open
-    [edited((c) => { c.sessions[0].close = "2026-11-25T05:30:00Z"; }), "session 0 has a bad close"],   // 00:30 ET the day after
-    [edited((c) => { c.sessions[2].early = "yes"; }), "session 2 has a bad early"],
-    [edited((c) => { [c.sessions[0], c.sessions[1]] = [c.sessions[1], c.sessions[0]]; }), "sessions are out of order"],
-    [edited((c) => { c.sessions[1] = c.sessions[0]; }), "sessions are out of order"],
-    [edited((c) => { c.sessions.push(FULL("2026-12-04")); }), "session 2026-12-04 is outside the window"],
-    [edited((c) => { c.sessions.unshift(FULL("2026-11-23")); }), "session 2026-11-23 is outside the window"],
-  ];
-  for (const [stdout, message] of faults) assert.throws(() => parseMarketWindow(stdout), { message }, `${message} <- ${stdout.slice(0, 60)}`);
+test("xnysWindow: ten days from 2026-11-24 - Thanksgiving closed, the day after closing early at 18:00Z, the weekends closed", () => {
+  assert.deepEqual(xnysWindow("2026-11-24", 10), { ...WINDOW, source: XNYS_CLOCK });
 });
 
+test("xnysWindow: a closed stretch is an empty window - Thanksgiving alone, a weekend", () => {
+  assert.deepEqual(xnysWindow("2026-11-26", 1), { from: "2026-11-26", days: 1, source: XNYS_CLOCK, sessions: [] });
+  assert.deepEqual(xnysWindow("2026-11-28", 2), { from: "2026-11-28", days: 2, source: XNYS_CLOCK, sessions: [] });
+});
+
+test("2026 has 251 sessions and two early closes, both at 18:00Z", () => {
+  const sessions = sessionsThrough("2026-01-01", "2026-12-31");
+  assert.equal(sessions.length, 251);
+  assert.deepEqual(sessions.filter((s) => s.early).map((s) => [s.date, s.close]), [["2026-11-27", "2026-11-27T18:00:00Z"], ["2026-12-24", "2026-12-24T18:00:00Z"]]);
+});
+
+test("the DST instants: the last EST Friday, the first EDT Monday, the last EDT Friday, the first EST Monday; July 2 is a full day", () => {
+  const by = new Map(sessionsThrough("2026-01-01", "2026-12-31").map((s) => [s.date, s]));
+  assert.deepEqual(["2026-03-06", "2026-03-09", "2026-10-30", "2026-11-02"].map((d) => by.get(d)?.open),
+    ["2026-03-06T14:30:00Z", "2026-03-09T13:30:00Z", "2026-10-30T13:30:00Z", "2026-11-02T14:30:00Z"]);
+  assert.deepEqual(["2026-03-06", "2026-03-09"].map((d) => by.get(d)?.close), ["2026-03-06T21:00:00Z", "2026-03-09T20:00:00Z"]);
+  assert.deepEqual(by.get("2026-07-02"), S("2026-07-02", "2026-07-02T13:30:00Z", "2026-07-02T20:00:00Z"));
+  for (const holiday of ["2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25", "2026-06-19", "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25"]) {
+    assert.equal(by.has(holiday), false, holiday);
+  }
+});
+
+test("2026 and 2027: 502 sessions, none on a weekend, every open and close on its own New York date; the DST changes fall on Sundays", () => {
+  const sessions = sessionsThrough("2026-01-01", "2027-12-31");
+  assert.equal(sessions.length, 502);
+  assert.deepEqual(sessions.filter((s) => [0, 6].includes(new Date(`${s.date}T12:00:00Z`).getUTCDay())), []);
+  for (const s of sessions) {
+    assert.equal(etDate(new Date(s.open)), s.date, `${s.date} open`);
+    assert.equal(etDate(new Date(s.close)), s.date, `${s.date} close`);
+    assert.ok(Date.parse(s.close) > Date.parse(s.open), s.date);
+  }
+  /* where New York's offset at 00:00 and at 23:00 differ - read from Intl, not from the module's own rule */
+  const offset = (iso: string): string => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "shortOffset" }).formatToParts(new Date(iso)).find((p) => p.type === "timeZoneName")!.value;
+  const changes: string[] = [];
+  for (let ms = Date.parse("2026-01-01T12:00:00Z"); ms < Date.parse("2028-01-01T12:00:00Z"); ms += 86_400_000) {
+    const day = new Date(ms).toISOString().slice(0, 10);
+    if (offset(`${day}T05:30:00Z`) !== offset(`${day}T23:59:00Z`)) changes.push(day);
+  }
+  assert.deepEqual(changes, ["2026-03-08", "2026-11-01", "2027-03-14", "2027-11-07"]);
+  for (const day of changes) assert.equal(new Date(`${day}T12:00:00Z`).getUTCDay(), 0, `${day} is a Sunday`);
+  /* and the module's offsets agree with Intl's on every session */
+  for (const s of sessions) {
+    const [hh, mm] = new Intl.DateTimeFormat("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(s.open)).split(":");
+    assert.equal(`${hh}:${mm}`, "09:30", `${s.date} opens 09:30 in New York`);
+  }
+});
+
+test("the year's end: the window runs across it, New Year's Day closed, and a Saturday New Year closes no Friday", () => {
+  assert.deepEqual(xnysWindow("2026-12-28", 10).sessions.map((s) => s.date),
+    ["2026-12-28", "2026-12-29", "2026-12-30", "2026-12-31", "2027-01-04", "2027-01-05", "2027-01-06"]);
+  /* 2028-01-01 is a Saturday: NYSE does not close the Friday before */
+  assert.deepEqual(xnysWindow("2027-12-29", 6).sessions.map((s) => [s.date, s.early]),
+    [["2027-12-29", false], ["2027-12-30", false], ["2027-12-31", false], ["2028-01-03", false]]);
+});
+
+test("xnysWindow refuses a malformed date and a day count outside 1 to 31, as the script's usage line did", () => {
+  for (const days of [0, 32, 1.5, -1, Number.NaN]) {
+    assert.throws(() => xnysWindow("2026-11-24", days), { message: `the market clock takes 1 to 31 days, not ${String(days)}` }, String(days));
+  }
+  for (const from of ["2026-13-01", "2026-02-30", "20261124", "", "2026-11-24T00:00"]) {
+    assert.throws(() => xnysWindow(from, 10), /the market clock takes a YYYY-MM-DD date/, from);
+  }
+});
+
+/* ---------- the published schedule ---------- */
+
+/* NYSE's published 2026 and 2027 holidays and early closes, hard-coded here from the exchange's schedule as
+ * known when this test was written (not fetched), so the rules are checked against an independent list. */
+const PUBLISHED: Record<number, { holidays: string[]; early: string[] }> = {
+  2026: {
+    holidays: ["2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25", "2026-06-19", "2026-07-03", "2026-09-07", "2026-11-26", "2026-12-25"],
+    early: ["2026-11-27", "2026-12-24"],
+  },
+  2027: {
+    holidays: ["2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26", "2027-05-31", "2027-06-18", "2027-07-05", "2027-09-06", "2027-11-25", "2027-12-24"],
+    early: ["2027-11-26"],
+  },
+};
+
+test("every 2026 and 2027 NYSE holiday and early close matches the published schedule", () => {
+  for (const [year, published] of Object.entries(PUBLISHED)) {
+    assert.deepEqual(xnysHolidays(Number(year)), published.holidays, `${year} holidays`);
+    assert.deepEqual(xnysEarlyCloses(Number(year)), published.early, `${year} early closes`);
+    const sessions = sessionsThrough(`${year}-01-01`, `${year}-12-31`);
+    const dates = new Set(sessions.map((s) => s.date));
+    for (const day of published.holidays) assert.equal(dates.has(day), false, `${day} has no session`);
+    assert.deepEqual(sessions.filter((s) => s.early).map((s) => s.date), published.early, `${year}: the early sessions`);
+    for (const s of sessions.filter((x) => x.early)) assert.equal(etDate(new Date(s.close)) === s.date && s.close.slice(11, 16), "18:00", `${s.date} closes 13:00 EST`);
+  }
+});
+
+test("Easter by the computus, Good Friday two days before it, and the ad-hoc closures closed", () => {
+  assert.deepEqual([2024, 2025, 2026, 2027, 2028, 2029].map(easterSunday), ["2024-03-31", "2025-04-20", "2026-04-05", "2027-03-28", "2028-04-16", "2029-04-01"]);
+  assert.ok(xnysHolidays(2025).includes("2025-04-18"));
+  for (const day of Object.keys(XNYS_AD_HOC_CLOSURES)) assert.deepEqual(xnysWindow(day, 1).sessions, [], day);
+  assert.deepEqual(xnysWindow("2025-01-08", 3).sessions.map((s) => s.date), ["2025-01-08", "2025-01-10"], "the Carter day of mourning");
+  /* Juneteenth from 2022 only, and July 3 early only when it falls Monday to Thursday */
+  assert.equal(xnysHolidays(2021).some((d) => d.endsWith("-06-18") || d.endsWith("-06-19")), false);
+  assert.deepEqual(xnysEarlyCloses(2025), ["2025-07-03", "2025-11-28", "2025-12-24"]);
+  assert.deepEqual(xnysEarlyCloses(2024), ["2024-07-03", "2024-11-29", "2024-12-24"]);
+});
+
+test("the clock is Node alone: market-clock.ts imports only et.ts, spawns nothing and fetches nothing", async () => {
+  const src = await readFile(fileURLToPath(new URL("../src/market-clock.ts", import.meta.url)), "utf8");
+  const imports = [...src.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1]);
+  assert.deepEqual(imports, ["./et.ts"]);
+  for (const word of ["spawn", "execFile", "fetch(", "child_process", "process.env"]) assert.equal(src.includes(word), false, word);
+  assert.deepEqual(await builtinMarketClock()("2026-11-24", 10), xnysWindow("2026-11-24", 10));
+});
+
+/* ---------- a window ---------- */
+
 test("sessionFor: a session, closed inside the window, undefined outside it", () => {
-  const w = parseMarketWindow(JSON.stringify(WINDOW));
+  const w = WINDOW;
   assert.equal((sessionFor(w, "2026-11-27") as MarketSession).early, true);
   assert.deepEqual(sessionFor(w, "2026-11-24"), FULL("2026-11-24"));
   assert.equal(sessionFor(w, "2026-11-26"), "closed"); assert.equal(sessionFor(w, "2026-11-28"), "closed");
@@ -117,113 +176,6 @@ test("sessionFor: a session, closed inside the window, undefined outside it", ()
   const year = { ...w, from: "2026-12-28", days: 10, sessions: [] };
   assert.equal(windowCovers(year, "2027-01-06"), true, "a window runs across the year's end");
   assert.equal(windowCovers(year, "2027-01-07"), false);
-});
-
-/* ---------- running the clock ---------- */
-
-test("pythonMarketClock runs the clock with the face's interpreter, no market keys and a 30 s deadline", async () => {
-  const calls: { argv: string[]; opts: Parameters<ProducerRunner>[1] }[] = [];
-  let result: RunResult = { code: 0, stdout: JSON.stringify(WINDOW), stderr: "", timedOut: false };
-  const run: ProducerRunner = async (argv, opts) => {
-    calls.push({ argv, opts });
-    return result;
-  };
-  const root = REPO_ROOT;
-  const saved = process.env.APCA_API_KEY_ID;
-  process.env.APCA_API_KEY_ID = "PK-TEST";
-  try {
-    const clock = pythonMarketClock({ root, python: "python3", runBase: RUN_BASE, run });
-    assert.equal((await clock("2026-11-24", 10)).sessions.length, 7);
-    const [copy, ...rest] = calls[0].argv;
-    assert.deepEqual(rest, ["sessions", "--from", "2026-11-24", "--days", "10"]);
-    assert.equal(basename(copy), "market_clock.py");
-    assert.equal(dirname(dirname(copy)), RUN_BASE, "a private copy in the run base runs, never the file in scripts/");
-    assert.equal(existsSync(dirname(copy)), false, "its run directory is gone");
-    assert.equal(calls[0].opts.cwd, root);
-    assert.equal(calls[0].opts.timeoutMs, MARKET_CLOCK_TIMEOUT_MS);
-    assert.equal(MARKET_CLOCK_TIMEOUT_MS, 30_000);
-    assert.equal(calls[0].opts.stdin, undefined);
-    assert.equal(calls[0].opts.env.APCA_API_KEY_ID, undefined, "no market key reaches the clock");
-    assert.deepEqual(calls[0].opts.env, baseEnv(process.env));
-
-    const rejects = async (r: RunResult, message: string): Promise<void> => {
-      result = r;
-      await assert.rejects(clock("2026-11-24", 10), { message }, message);
-    };
-    const ended = { stderr: "", timedOut: false };
-    await rejects({ ...ended, code: 1, stdout: '{"ok": false, "error": "pandas_market_calendars is not importable in /x"}' },
-      "pandas_market_calendars is not importable in /x");
-    await rejects({ ...ended, code: 2, stdout: '{"ok": false, "error": "usage: market_clock.py sessions --from YYYY-MM-DD --days N (1-31)"}' },
-      "usage: market_clock.py sessions --from YYYY-MM-DD --days N (1-31)");
-    await rejects({ ...ended, code: 1, stdout: "", stderr: "Traceback (most recent call last):" }, "exit 1");
-    await rejects({ ...ended, code: 137, stdout: JSON.stringify(WINDOW) }, "exit 137");
-    await rejects({ code: null, stdout: "", stderr: "", timedOut: true }, "timed out after 30 s");
-    await rejects({ ...ended, code: null, stdout: "", error: "ENOENT" }, "could not start python3: ENOENT");
-    await rejects({ ...ended, code: null, stdout: "x", error: "stdout over 1 MiB" }, "stdout over 1 MiB");
-    await rejects({ ...ended, code: null, stdout: "", error: "stderr over 1 MiB" }, "stderr over 1 MiB");
-    await rejects({ ...ended, code: 0, stdout: "nope" }, "not JSON");
-    await rejects({ ...ended, code: 0, stdout: '{"ok":false,"error":"the XNYS calendar failed: RuntimeError: x"}' },
-      "the XNYS calendar failed: RuntimeError: x");
-
-    const slow = pythonMarketClock({ root, python: "/opt/py/bin/python3", runBase: RUN_BASE, run, timeoutMs: 60_000 });
-    result = { code: null, stdout: "", stderr: "", timedOut: true };
-    await assert.rejects(slow("2026-11-24", 10), { message: "timed out after 1 min" });
-    assert.equal(calls.at(-1)!.opts.timeoutMs, 60_000);
-    result = { code: null, stdout: "", stderr: "", timedOut: false, error: "EACCES" };
-    await assert.rejects(slow("2026-11-24", 10), { message: "could not start /opt/py/bin/python3: EACCES" });
-  } finally {
-    if (saved === undefined) delete process.env.APCA_API_KEY_ID;
-    else process.env.APCA_API_KEY_ID = saved;
-  }
-});
-
-test("pythonMarketClock over the real script: the face's interpreter answers ten days from 2026-11-24", async (t) => {
-  const python = process.env.FACE_PYTHON || "python3";
-  let window: MarketWindow;
-  try {
-    window = await pythonMarketClock({ root: REPO_ROOT, python, runBase: RUN_BASE })("2026-11-24", CALENDAR_DAYS);
-  } catch (error) {
-    const message = (error as Error).message;
-    if (/is not importable in|^could not start/.test(message)) {
-      t.skip(`no calendar in ${python}: ${message}`);
-      return;
-    }
-    throw error;
-  }
-  assert.equal(window.from, "2026-11-24");
-  assert.equal(window.days, 10);
-  assert.match(window.source, /^pandas_market_calendars \d/);
-  assert.deepEqual(window.sessions.map((s) => s.date), ["2026-11-24", "2026-11-25", "2026-11-27", "2026-11-30", "2026-12-01", "2026-12-02", "2026-12-03"]);
-  assert.deepEqual(sessionFor(window, "2026-11-27"), S("2026-11-27", "2026-11-27T14:30:00Z", "2026-11-27T18:00:00Z", true));
-  assert.equal(sessionFor(window, "2026-11-26"), "closed");
-});
-
-test("the clock is pinned: the tracked scripts/market_clock.py hashes to MARKET_CLOCK_SHA256", async () => {
-  const bytes = await readFile(join(REPO_ROOT, "scripts", "market_clock.py"));
-  assert.equal(createHash("sha256").update(bytes).digest("hex"), MARKET_CLOCK_SHA256,
-    "scripts/market_clock.py changed: review it, then move MARKET_CLOCK_SHA256 in src/market-clock.ts to its new hash");
-});
-
-test("a changed or missing clock never runs: the ask rejects, naming it, and the runner is never called", async () => {
-  const runs: string[][] = [];
-  const run: ProducerRunner = async (argv) => { runs.push(argv); return { code: 0, stdout: JSON.stringify(WINDOW), stderr: "", timedOut: false }; };
-  const root = join(TEST_DIR, "repo");
-  await mkdir(join(root, "scripts"), { recursive: true });
-  const script = join(root, "scripts", "market_clock.py");
-  const ask = pythonMarketClock({ root, python: "python3", runBase: RUN_BASE, run });
-  await assert.rejects(ask("2026-11-24", 10), { message: "scripts/market_clock.py is missing" });
-  await writeFile(script, `${await readFile(join(REPO_ROOT, "scripts", "market_clock.py"), "utf8")}\nimport os  # an edit\n`);
-  await assert.rejects(ask("2026-11-24", 10), { message: "scripts/market_clock.py changed since this face was built" });
-  assert.deepEqual(runs, [], "neither ran");
-  /* the face's real calendar turns the refusal into a failed day: no anchored order fires */
-  const day = await createMarketCalendar({ ask, python: "python3" }).today(Date.parse("2026-11-24T15:00:00Z"));
-  assert.deepEqual(day, { ok: false, date: "2026-11-24", error: "scripts/market_clock.py changed since this face was built" });
-  /* the same bytes run once the pin is theirs - the seam a stand-in clock's test uses */
-  const repinned = pythonMarketClock({ root, python: "python3", runBase: RUN_BASE, run, sha256: createHash("sha256").update(await readFile(script)).digest("hex") });
-  assert.equal((await repinned("2026-11-24", 10)).sessions.length, 7);
-  assert.equal(runs.length, 1);
-  await assert.rejects(pythonMarketClock({ root: REPO_ROOT, python: "python3", runBase: join(TEST_DIR, "no-such", "run"), run })("2026-11-24", 10),
-    { message: "could not start python3: ENOENT" }, "a run base that cannot be made is a failure to start");
 });
 
 /* ---------- the calendar ---------- */
@@ -244,30 +196,23 @@ function fakeAsk(windows: Record<string, MarketWindow>): { ask: MarketClock; ask
   return state;
 }
 
-const W24 = parseMarketWindow(JSON.stringify(WINDOW));
-const W25 = parseMarketWindow(edited((c) => {
-  c.from = "2026-11-25";
-  c.source = "pandas_market_calendars 5.4.0 (25th)";
-  c.sessions = c.sessions.slice(1);
-}));
-const W26 = parseMarketWindow(edited((c) => {
-  c.from = "2026-11-26";
-  c.source = "pandas_market_calendars 5.4.1";
-  c.sessions = [...c.sessions.slice(2), FULL("2026-12-04")];
-}));
+
+const W24: MarketWindow = WINDOW;
+const W25: MarketWindow = { ...WINDOW, from: "2026-11-25", source: "a stand-in clock (25th)", sessions: WINDOW.sessions.slice(1) };
+const W26: MarketWindow = { ...WINDOW, from: "2026-11-26", source: "a stand-in clock (26th)", sessions: [...WINDOW.sessions.slice(2), FULL("2026-12-04")] };
 
 test("createMarketCalendar asks once per ET date, falls back to a covering window, and asks a failed date again every ten minutes until a window holds it", async () => {
   assert.equal(CALENDAR_RETRY_MS, 600_000);
   const windows: Record<string, MarketWindow> = { "2026-11-24": W24, "2026-11-26": W26 };
   const fake = fakeAsk(windows);
-  const cal = createMarketCalendar({ ask: fake.ask, python: "python3" });
-  assert.equal(cal.python, "python3");
+  const cal = createMarketCalendar({ ask: fake.ask, clock: "a stand-in clock" });
+  assert.equal(cal.clock, "a stand-in clock");
   assert.equal(cal.peek(), undefined);
   assert.equal(cal.window(), undefined);
 
   const first = await cal.today(at("2026-11-24T15:00:00Z"));
   assert.deepEqual(fake.asks, [["2026-11-24", 10]]);
-  assert.deepEqual(first, { ok: true, date: "2026-11-24", session: FULL("2026-11-24"), source: "pandas_market_calendars 5.4.0" });
+  assert.deepEqual(first, { ok: true, date: "2026-11-24", session: FULL("2026-11-24"), source: "a stand-in clock" });
   assert.deepEqual(cal.peek(), first);
   assert.equal(cal.window(), W24);
 
@@ -276,12 +221,12 @@ test("createMarketCalendar asks once per ET date, falls back to a covering windo
   assert.equal(fake.asks.length, 1);
 
   // 05:00Z is midnight in New York: the 25th asks, the ask fails, and the 24th's window still holds the 25th
-  fake.fail = "pandas_market_calendars is not importable in /x";
+  fake.fail = "the clock is down";
   const stale = await cal.today(at("2026-11-25T05:00:00Z"));
   assert.deepEqual(fake.asks, [["2026-11-24", 10], ["2026-11-25", 10]]);
   assert.deepEqual(stale, {
-    ok: true, date: "2026-11-25", session: FULL("2026-11-25"), source: "pandas_market_calendars 5.4.0",
-    stale: { error: "pandas_market_calendars is not importable in /x" },
+    ok: true, date: "2026-11-25", session: FULL("2026-11-25"), source: "a stand-in clock",
+    stale: { error: "the clock is down" },
   });
 
   // inside ten minutes of the failed ask, nothing is asked; at ten it is asked again, fails again, and stays stale
@@ -296,7 +241,7 @@ test("createMarketCalendar asks once per ET date, falls back to a covering windo
   assert.deepEqual(await cal.today(at("2026-11-25T05:19:59Z")), stale, "not yet ten minutes since the last ask");
   assert.equal(fake.asks.length, 3);
   const fresh = await cal.today(at("2026-11-25T05:20:00Z"));
-  assert.deepEqual(fresh, { ok: true, date: "2026-11-25", session: FULL("2026-11-25"), source: "pandas_market_calendars 5.4.0 (25th)" });
+  assert.deepEqual(fresh, { ok: true, date: "2026-11-25", session: FULL("2026-11-25"), source: "a stand-in clock (25th)" });
   assert.equal(fake.asks.length, 4);
   assert.deepEqual(await cal.today(at("2026-11-25T20:59:00Z")), fresh);
   assert.equal(fake.asks.length, 4);
@@ -306,14 +251,14 @@ test("createMarketCalendar asks once per ET date, falls back to a covering windo
   // the next date asks again: Thanksgiving, closed, from the fresh window
   const closed = await cal.today(at("2026-11-26T15:00:00Z"));
   assert.deepEqual(fake.asks.at(-1), ["2026-11-26", 10]);
-  assert.deepEqual(closed, { ok: true, date: "2026-11-26", session: "closed", source: "pandas_market_calendars 5.4.1" });
+  assert.deepEqual(closed, { ok: true, date: "2026-11-26", session: "closed", source: "a stand-in clock (26th)" });
   assert.equal(cal.window(), W26);
 
   // a fresh calendar whose first ask fails: { ok: false } until an ask ten minutes on answers - a transient
   // failure at the first ask after a boot costs ten minutes, not the day's anchored orders
   const failing = fakeAsk({ "2026-11-24": W24, "2026-11-25": W25 });
   failing.fail = "timed out after 30 s";
-  const lone = createMarketCalendar({ ask: failing.ask, python: "/opt/py/bin/python3", days: 7 });
+  const lone = createMarketCalendar({ ask: failing.ask, clock: "another clock", days: 7 });
   const none: DayAnswer = { ok: false, date: "2026-11-24", error: "timed out after 30 s" };
   assert.deepEqual(await lone.today(at("2026-11-24T15:00:00Z")), none);
   assert.deepEqual(await lone.today(at("2026-11-24T15:09:00Z")), none);
@@ -322,18 +267,18 @@ test("createMarketCalendar asks once per ET date, falls back to a covering windo
   assert.equal(lone.window(), undefined);
   failing.fail = undefined;
   const answered = await lone.today(at("2026-11-24T15:10:00Z"));
-  assert.deepEqual(answered, { ok: true, date: "2026-11-24", session: FULL("2026-11-24"), source: "pandas_market_calendars 5.4.0" });
+  assert.deepEqual(answered, { ok: true, date: "2026-11-24", session: FULL("2026-11-24"), source: "a stand-in clock" });
   assert.deepEqual(failing.asks, [["2026-11-24", 7], ["2026-11-24", 7]]);
   assert.deepEqual(await lone.today(at("2026-11-24T21:30:00Z")), answered);
   assert.equal(failing.asks.length, 2, "a date its own ask answered is never asked again");
   assert.equal(lone.window(), W24);
-  assert.deepEqual(await lone.today(at("2026-11-25T15:00:00Z")), { ok: true, date: "2026-11-25", session: FULL("2026-11-25"), source: "pandas_market_calendars 5.4.0 (25th)" });
+  assert.deepEqual(await lone.today(at("2026-11-25T15:00:00Z")), { ok: true, date: "2026-11-25", session: FULL("2026-11-25"), source: "a stand-in clock (25th)" });
   assert.deepEqual(failing.asks.at(-1), ["2026-11-25", 7]);
 
   // a re-ask under way is shared: two calls ten minutes on make one ask
   const flaky = fakeAsk({});
   flaky.fail = "exit 1";
-  const shared = createMarketCalendar({ ask: flaky.ask, python: "python3" });
+  const shared = createMarketCalendar({ ask: flaky.ask, clock: "a stand-in clock" });
   await shared.today(at("2026-11-24T15:00:00Z"));
   const [one, two] = await Promise.all([shared.today(at("2026-11-24T15:10:00Z")), shared.today(at("2026-11-24T15:10:01Z"))]);
   assert.deepEqual(one, two);
@@ -344,42 +289,11 @@ test("createMarketCalendar asks once per ET date, falls back to a covering windo
   assert.equal(flaky.asks.length, 3);
 });
 
-test("pythonMarketClock hands the tail of a failed run's stderr - its last 300 characters, on one line - to stderr", async () => {
-  let result: RunResult = { code: 0, stdout: JSON.stringify(WINDOW), stderr: "", timedOut: false };
-  const run: ProducerRunner = async () => result;
-  const told: string[] = [];
-  const clock = pythonMarketClock({ root: REPO_ROOT, python: "python3", runBase: RUN_BASE, run, stderr: (tail) => { told.push(tail); } });
-  const fails = async (r: RunResult, message: string): Promise<void> => {
-    result = r;
-    await assert.rejects(clock("2026-11-24", 10), { message });
-  };
-  await fails({ code: 1, stdout: "", stderr: "Traceback (most recent call last):\n  File \"x\", line 1\nSystemError: boom\n", timedOut: false }, "exit 1");
-  assert.deepEqual(told, ["Traceback (most recent call last): File \"x\", line 1 SystemError: boom"]);
-  await fails({ code: 1, stdout: "", stderr: `${"a".repeat(1_000)}\nthe end\n`, timedOut: false }, "exit 1");
-  const tail = told.at(-1) ?? "";
-  assert.ok(tail.startsWith("…a") && tail.endsWith("a the end") && [...tail].length === 300, tail);
-  await fails({ code: null, stdout: "", stderr: "still loading\n", timedOut: true }, "timed out after 30 s");
-  await fails({ code: 0, stdout: "nope", stderr: "a warning\n", timedOut: false }, "not JSON");
-  assert.deepEqual(told.slice(2), ["still loading", "a warning"], "any run that answers no window hands its stderr");
-  await fails({ code: 1, stdout: '{"ok":false,"error":"pandas_market_calendars is not importable in /x"}', stderr: "", timedOut: false },
-    "pandas_market_calendars is not importable in /x");
-  await fails({ code: 1, stdout: "", stderr: " \n\t\n", timedOut: false }, "exit 1");
-  assert.equal(told.length, 4, "no stderr, or only blanks: nothing");
-  result = { code: 0, stdout: JSON.stringify(WINDOW), stderr: "DeprecationWarning: x\n", timedOut: false };
-  assert.equal((await clock("2026-11-24", 10)).sessions.length, 7);
-  assert.equal(told.length, 4, "a run that answered hands nothing");
-
-  /* a hook that throws costs the ask nothing but the line: the ask still rejects with its own error */
-  const throwing = pythonMarketClock({ root: REPO_ROOT, python: "python3", runBase: RUN_BASE, run, stderr: () => { throw new Error("a broken log"); } });
-  result = { code: 1, stdout: "", stderr: "boom\n", timedOut: false };
-  await assert.rejects(throwing("2026-11-24", 10), { message: "exit 1" });
-});
-
 test("createMarketCalendar: two concurrent today() calls share one ask", async () => {
   let release!: (w: MarketWindow) => void;
   const asks: string[] = [];
   const cal = createMarketCalendar({
-    python: "python3",
+    clock: "a stand-in clock",
     ask: (from) => {
       asks.push(from);
       return new Promise<MarketWindow>((resolve) => { release = resolve; });
@@ -397,22 +311,22 @@ test("createMarketCalendar: two concurrent today() calls share one ask", async (
 
 test("createMarketCalendar: a throwing ask, a window that does not hold the date, and asks that settle out of order", async () => {
   // an ask that throws instead of rejecting is a failed ask like any other: today() still answers
-  const throwing = createMarketCalendar({ python: "python3", ask: () => { throw new Error("spawn refused"); } });
+  const throwing = createMarketCalendar({ clock: "a stand-in clock", ask: () => { throw new Error("spawn refused"); } });
   assert.deepEqual(await throwing.today(at("2026-11-24T15:00:00Z")), { ok: false, date: "2026-11-24", error: "spawn refused" });
 
   // a window that does not hold the date asked is refused, and the newest good window still serves
   const fake = fakeAsk({ "2026-11-24": W24, "2026-12-04": W24, "2026-12-05": W26 });
-  const cal = createMarketCalendar({ ask: fake.ask, python: "python3" });
+  const cal = createMarketCalendar({ ask: fake.ask, clock: "a stand-in clock" });
   await cal.today(at("2026-11-24T15:00:00Z"));
   assert.deepEqual(await cal.today(at("2026-12-04T15:00:00Z")), {
     ok: false, date: "2026-12-04", error: "the market clock answered a window from 2026-11-24 for 10 days, which does not hold 2026-12-04",
   });
   assert.equal(cal.window(), W24);
-  assert.deepEqual(await cal.today(at("2026-12-05T15:00:00Z")), { ok: true, date: "2026-12-05", session: "closed", source: "pandas_market_calendars 5.4.1" });
+  assert.deepEqual(await cal.today(at("2026-12-05T15:00:00Z")), { ok: true, date: "2026-12-05", session: "closed", source: "a stand-in clock (26th)" });
   assert.equal(cal.window(), W26);
 
   // a long error is carried on one line, cut at 300 characters
-  const noisy = createMarketCalendar({ python: "python3", ask: async () => { throw new Error(`line one\nline two ${"y".repeat(500)}`); } });
+  const noisy = createMarketCalendar({ clock: "a stand-in clock", ask: async () => { throw new Error(`line one\nline two ${"y".repeat(500)}`); } });
   const loud = await noisy.today(at("2026-11-24T15:00:00Z"));
   assert.equal(loud.ok, false);
   const error = (loud as { error: string }).error;
@@ -421,7 +335,7 @@ test("createMarketCalendar: a throwing ask, a window that does not hold the date
   // the older date's ask settling last neither replaces the newer window nor what peek() says
   const gates: Record<string, (w: MarketWindow) => void> = {};
   const racing = createMarketCalendar({
-    python: "python3",
+    clock: "a stand-in clock",
     ask: (from) => new Promise<MarketWindow>((resolve) => { gates[from] = resolve; }),
   });
   const older = racing.today(at("2026-11-24T15:00:00Z"));
@@ -429,7 +343,7 @@ test("createMarketCalendar: a throwing ask, a window that does not hold the date
   gates["2026-11-26"](W26);
   assert.equal((await newer).date, "2026-11-26");
   gates["2026-11-24"](W24);
-  assert.deepEqual(await older, { ok: true, date: "2026-11-24", session: FULL("2026-11-24"), source: "pandas_market_calendars 5.4.0" });
+  assert.deepEqual(await older, { ok: true, date: "2026-11-24", session: FULL("2026-11-24"), source: "a stand-in clock" });
   assert.equal(racing.window(), W26);
   assert.equal(racing.peek()?.date, "2026-11-26");
 });

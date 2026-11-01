@@ -1061,7 +1061,7 @@ test("readRecords reads any desk JSONL through a guard; events.jsonl takes the t
 
   const fresh: DeskEvent[] = [
     { t: "2026-11-27T17:00:00.000Z", kind: "standing-error", errors: ["orders[0] (preclose): not armed: npm run desk -- arm desk --id preclose"] },
-    { t: "2026-11-27T17:00:30.000Z", kind: "calendar-error", date: "2026-11-27", python: "python3", error: "pandas_market_calendars is not importable in /x" },
+    { t: "2026-11-27T17:00:30.000Z", kind: "calendar-error", date: "2026-11-27", clock: "fake clock", error: "the clock is down" },
     { t: "2026-11-27T17:30:10.000Z", kind: "budget-spent", date: "2026-11-27", used: 2_013_402, dailyTokens: 2_000_000 },
   ];
   const ledger = await home();
@@ -1084,7 +1084,7 @@ test("deskStatus carries the budget and passes the standing provider through", a
   const used = { uncachedInputTokens: 150, outputTokens: 15, cacheReadTokens: 1000, cacheWriteTokens: 5, total: 1170 };
   const standing: StandingStatus = {
     file: { path: join(deskDir(h), "standing.yml"), state: "loaded", loadedAt: "2026-11-27T16:59:30.000Z" },
-    calendar: { python: "python3", state: "ok", today: { date: "2026-11-27", open: "2026-11-27T14:30:00.000Z", close: "2026-11-27T18:00:00.000Z", early: true } },
+    calendar: { clock: "fake clock", state: "ok", today: { date: "2026-11-27", open: "2026-11-27T14:30:00.000Z", close: "2026-11-27T18:00:00.000Z", early: true } },
     orders: [], queued: [], recent: [],
   };
   let asked = 0;
@@ -1138,7 +1138,7 @@ test("standingLines and budgetLine print the orders, the calendar and the budget
   };
   const loaded: StandingStatus = {
     file: { path: "/h/face/desk/standing.yml", state: "loaded", loadedAt: "2026-11-27T15:59:30.000Z" },
-    calendar: { python: "python3", state: "ok", today: { date: "2026-11-27", open: "2026-11-27T14:30:00.000Z", close: "2026-11-27T18:00:00.000Z", early: true } },
+    calendar: { clock: "fake clock", state: "ok", today: { date: "2026-11-27", open: "2026-11-27T14:30:00.000Z", close: "2026-11-27T18:00:00.000Z", early: true } },
     orders: [{ ...bare, last }], queued: [], recent: [last],
   };
   const lastLine = "standing preclose: close-30m, next 12:30 ET; last delivered 2026-11-26 15:31 ET";
@@ -1183,13 +1183,13 @@ test("standingLines and budgetLine print the orders, the calendar and the budget
     lastLine,
   ], "the last good load's orders still listed");
   assert.deepEqual(standingLines({ ...loaded, ledger: { error: "EISDIR" } }, now), ["standing orders stopped: the firing ledger cannot be read (EISDIR)", lastLine]);
-  assert.deepEqual(standingLines({ ...loaded, calendar: { python: "python3", state: "failed", error: "pandas_market_calendars is not importable in /usr/bin/python3" } }, now),
-    ["standing orders: no calendar today, python3: pandas_market_calendars is not importable in /usr/bin/python3", lastLine]);
-  assert.deepEqual(standingLines({ ...loaded, calendar: { python: "python3", state: "stale" } }, now), [lastLine], "a stale window still covers today");
-  assert.deepEqual(standingLines({ ...loaded, orders: [], ledger: { error: "EACCES" }, calendar: { python: "python3", state: "failed", error: "exit 1" } }, now), [
+  assert.deepEqual(standingLines({ ...loaded, calendar: { clock: "fake clock", state: "failed", error: "the clock is down" } }, now),
+    ["standing orders: no calendar today, fake clock: the clock is down", lastLine]);
+  assert.deepEqual(standingLines({ ...loaded, calendar: { clock: "fake clock", state: "stale" } }, now), [lastLine], "a stale window still covers today");
+  assert.deepEqual(standingLines({ ...loaded, orders: [], ledger: { error: "EACCES" }, calendar: { clock: "fake clock", state: "failed", error: "exit 1" } }, now), [
     "standing orders: none armed (npm run desk -- arm)",
     "standing orders stopped: the firing ledger cannot be read (EACCES)",
-    "standing orders: no calendar today, python3: exit 1",
+    "standing orders: no calendar today, fake clock: exit 1",
   ]);
 
   const used = (total: number): BudgetState["used"] => ({ uncachedInputTokens: 0, outputTokens: total, cacheReadTokens: 0, cacheWriteTokens: 0, total });

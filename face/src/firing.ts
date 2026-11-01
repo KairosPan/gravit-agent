@@ -353,11 +353,9 @@ export const LINES = {
   /** `firings.jsonl` cannot be read. */
   ledgerUnreadable: (path: string, code: string): string =>
     `the firing ledger ${path} cannot be read (${code}), so no standing order runs until it can`,
-  /** No calendar for the day: the FACE_PYTHON hint only for an interpreter without pandas_market_calendars (P2 Task
-   * 8's ruling 2) - any other error, the line without it. */
-  noCalendar: (python: string, error: string): string =>
-    `no standing order runs today: the market calendar failed in ${python} (${error})`
-    + (/is not importable in /.test(error) ? ". FACE_PYTHON must name an interpreter with pandas_market_calendars" : ""),
+  /** No calendar for the day, naming the clock that failed. */
+  noCalendar: (clock: string, error: string): string =>
+    `no standing order runs today: the market calendar failed in ${clock} (${error})`,
   /** A phone post while the budget is spent: src/desk.ts `budgetReplyLine`, the conversation's own. */
   budgetReply: budgetReplyLine,
 } as const;

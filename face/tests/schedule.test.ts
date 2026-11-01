@@ -6,8 +6,8 @@
  * real checkFiring over a fixture root and harness home, and a run that records its calls (tests/desk-fakes.ts). The
  * ticks are driven by hand - `tick()` at a time the test sets - so no case depends on how many turns of the event loop
  * a tick's I/O takes. Each case's repository root and harness home sit INSIDE the repository, under
- * tests/tmp/schedule-<pid>/, and are removed afterwards; createDeskSchedule's case runs a stand-in clock - JavaScript
- * under scripts/market_clock.py, pinned by its own hash and run by node itself (process.execPath) from its private copy. */
+ * tests/tmp/schedule-<pid>/, and are removed afterwards; createDeskSchedule's cases run the builtin XNYS
+ * rules (src/market-clock.ts) or a fake calendar. */
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -19,7 +19,7 @@ import type { DeskSessionCtxLike } from "../src/desk-session.ts";
 import {
   checkFiring, isFiringRecord, LINES, type FinishedRecord, type FiringDeps, type FiringItem, type FiringRecord, type runFiring, type Verified,
 } from "../src/firing.ts";
-import { createMarketCalendar, type MarketCalendar, type MarketSession, type MarketWindow } from "../src/market-clock.ts";
+import { createMarketCalendar, XNYS_CLOCK, type MarketCalendar, type MarketSession, type MarketWindow } from "../src/market-clock.ts";
 import { defaultProducerRunner } from "../src/producer.ts";
 import { createDeskSchedule, decide, installSchedule, SCHEDULE_TICK_MS, type ScheduleDeps, type ScheduleHandle } from "../src/schedule.ts";
 import { parseStanding, rehashOrder, renderOrder, sha256Hex, STANDING_FILE, writeStanding, type ArmEntry } from "../src/standing.ts";
@@ -96,7 +96,7 @@ function windowFrom(from: string, days = 10): MarketWindow {
   const [y, m, d] = from.split("-").map(Number);
   const end = new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
   const sessions = Object.values(DAYS).filter((day): day is MarketSession => day !== "closed" && day.date >= from && day.date < end);
-  return { from, days, source: "a stand-in clock", python: "python3", sessions };
+  return { from, days, source: "a stand-in clock", sessions };
 }
 
 /* ---------- the schedule's world ---------- */
@@ -690,7 +690,7 @@ test("a tick that throws is one face line per distinct failure, and the next tic
   await arm(fx.home, [{ ...ENTRY, id: "afternoon", at: "15:30" }]);
   /* a calendar answering a session whose open is no time: a wall-clock anchor cannot be placed on it */
   const broken: MarketCalendar = {
-    python: "python3",
+    clock: "fake clock",
     today: async () => ({
       ok: true, date: "2026-11-27", source: "a broken calendar",
       session: { date: "2026-11-27", open: "at the bell", close: "2026-11-27T18:00:00Z", early: true },
@@ -744,9 +744,9 @@ test("no covering calendar: one calendar-error and one line a day, nothing that 
   const fx = await fixture();
   await arm(fx.home, [ENTRY]);
   const asks: string[] = [];
-  const clockState: { failure?: string } = { failure: "pandas_market_calendars is not importable in /x" };
+  const clockState: { failure?: string } = { failure: "the clock is down" };
   const calendar = createMarketCalendar({
-    python: "python3",
+    clock: "fake clock",
     ask: async (from) => {
       asks.push(from);
       if (clockState.failure !== undefined) throw new Error(clockState.failure);
@@ -756,11 +756,11 @@ test("no covering calendar: one calendar-error and one line a day, nothing that 
   const r = rig(fx, "2026-11-27T15:00:00Z", { calendar });
   await at(r, "2026-11-27T15:00:00Z");
   assert.deepEqual(r.out.texts, [
-    "no standing order runs today: the market calendar failed in python3 (pandas_market_calendars is not importable in /x). FACE_PYTHON must name an interpreter with pandas_market_calendars",
+    "no standing order runs today: the market calendar failed in fake clock (the clock is down)",
   ]);
-  assert.deepEqual((await eventsOf(fx.home, "calendar-error")).map((e) => [e.date, e.python, e.error]),
-    [["2026-11-27", "python3", "pandas_market_calendars is not importable in /x"]]);
-  assert.deepEqual(r.schedule.status().calendar, { python: "python3", state: "failed", error: "pandas_market_calendars is not importable in /x" });
+  assert.deepEqual((await eventsOf(fx.home, "calendar-error")).map((e) => [e.date, e.clock, e.error]),
+    [["2026-11-27", "fake clock", "the clock is down"]]);
+  assert.deepEqual(r.schedule.status().calendar, { clock: "fake clock", state: "failed", error: "the clock is down" });
   await at(r, "2026-11-27T15:05:00Z");
   assert.deepEqual(asks, ["2026-11-27"], "not asked again inside ten minutes");
   await at(r, "2026-11-27T15:10:00Z");
@@ -770,38 +770,38 @@ test("no covering calendar: one calendar-error and one line a day, nothing that 
   assert.equal(r.out.texts.length, 1, "one line a day, however often it is asked");
   assert.equal((await eventsOf(fx.home, "calendar-error")).length, 1);
 
-  /* the next date asks again; an error that is not a missing pandas_market_calendars names no FACE_PYTHON */
+  /* the next date asks again; another error, another line */
   clockState.failure = "timed out after 30 s";
   await at(r, "2026-11-30T15:00:00Z");
   assert.equal(asks.at(-1), "2026-11-30");
-  assert.deepEqual(r.out.texts.slice(1), ["no standing order runs today: the market calendar failed in python3 (timed out after 30 s)"]);
+  assert.deepEqual(r.out.texts.slice(1), ["no standing order runs today: the market calendar failed in fake clock (timed out after 30 s)"]);
   /* a transient failure costs nothing once the clock answers inside the day */
   clockState.failure = undefined;
   await at(r, "2026-11-30T15:10:00Z");
   assert.deepEqual(r.schedule.status().calendar, {
-    python: "python3", state: "ok", source: "a stand-in clock", today: { date: "2026-11-30", open: "2026-11-30T14:30:00Z", close: "2026-11-30T21:00:00Z", early: false },
+    clock: "fake clock", state: "ok", source: "a stand-in clock", today: { date: "2026-11-30", open: "2026-11-30T14:30:00Z", close: "2026-11-30T21:00:00Z", early: false },
   });
   await at(r, "2026-11-30T20:30:10Z");
   assert.deepEqual(r.runs.map((call) => call.key), ["preclose:2026-11-30"]);
 
   assert.deepEqual((await eventsOf(fx.home, "calendar-error")).map((e) => [e.date, e.error]),
-    [["2026-11-27", "pandas_market_calendars is not importable in /x"], ["2026-11-30", "timed out after 30 s"]]);
+    [["2026-11-27", "the clock is down"], ["2026-11-30", "timed out after 30 s"]]);
   await r.schedule.dispose();
 
   /* the real calendar turns an ask that throws into a failed day: the event and the line */
   const throwing = await fixture();
   await arm(throwing.home, [ENTRY]);
-  const t = rig(throwing, "2026-11-27T15:00:00Z", { calendar: createMarketCalendar({ python: "python3", ask: () => { throw new Error("spawn refused"); } }) });
+  const t = rig(throwing, "2026-11-27T15:00:00Z", { calendar: createMarketCalendar({ clock: "fake clock", ask: () => { throw new Error("spawn refused"); } }) });
   await at(t, "2026-11-27T15:00:00Z");
-  assert.deepEqual(t.out.texts, ["no standing order runs today: the market calendar failed in python3 (spawn refused)"]);
-  assert.deepEqual((await eventsOf(throwing.home, "calendar-error")).map((e) => [e.date, e.python, e.error]), [["2026-11-27", "python3", "spawn refused"]]);
+  assert.deepEqual(t.out.texts, ["no standing order runs today: the market calendar failed in fake clock (spawn refused)"]);
+  assert.deepEqual((await eventsOf(throwing.home, "calendar-error")).map((e) => [e.date, e.clock, e.error]), [["2026-11-27", "fake clock", "spawn refused"]]);
   await t.schedule.dispose();
 
   /* a calendar whose today() itself rejects: one face line per distinct failure, never a throw, the next tick armed */
   const standIn = await fixture();
   await arm(standIn.home, [ENTRY]);
   const rejecting: MarketCalendar = {
-    python: "python3",
+    clock: "fake clock",
     today: async () => { throw new Error("the stand-in's today failed"); },
     peek: () => undefined,
     window: () => undefined,
@@ -954,7 +954,7 @@ test("status: hash state, next anchor, last outcome, running, queued and recent"
   ], "newest first");
   assert.deepEqual([s.running, s.queued, s.ledger], [undefined, [], undefined]);
   assert.deepEqual(s.calendar, {
-    python: "python3", state: "ok", source: "fake calendar", today: { date: "2026-11-25", open: "2026-11-25T14:30:00Z", close: "2026-11-25T21:00:00Z", early: false },
+    clock: "fake clock", state: "ok", source: "fake calendar", today: { date: "2026-11-25", open: "2026-11-25T14:30:00Z", close: "2026-11-25T21:00:00Z", early: false },
   });
   /* an order on its last day, armed after today's anchor: no anchor ahead today, and none past its expires */
   await arm(fx.home, [ENTRY, { ...ENTRY, id: "second" }, { ...ENTRY, id: "lastday", at: "10:00", expires: "2026-11-25", armedAt: "2026-11-25T20:59:00.000Z" }], 2_000_000);
@@ -1051,62 +1051,28 @@ test("a rotation of firings.jsonl hands the day's started lines and their ends t
 
 /* ---------- the face's defaults ---------- */
 
-test("createDeskSchedule: the market clock under the face's interpreter, its failures phoned once a day and its stderr's tail logged once", async () => {
+test("createDeskSchedule: the builtin market clock - no interpreter, no script - answers the day", async () => {
   const fx = await fixture();
   await arm(fx.home, [ENTRY]);
-  await mkdir(join(fx.root, "scripts"), { recursive: true });
-  /* A stand-in clock: on the 27th the interpreter dies with a traceback on stderr; on the 30th it answers that it has no calendar. */
-  await writeFile(join(fx.root, "scripts", "market_clock.py"), [
-    "const from = process.argv[process.argv.indexOf('--from') + 1];",
-    "if (from === '2026-11-27') {",
-    "  process.stderr.write('Traceback (most recent call last):\\n  File \"scripts/market_clock.py\", line 3\\n' + 'x'.repeat(400) + '\\nSystemError: the calendar crashed\\n');",
-    "  process.exit(1);",
-    "}",
-    "process.stdout.write(JSON.stringify({ ok: false, error: 'pandas_market_calendars is not importable in /x' }));",
-    "process.exit(1);",
-    "",
-  ].join("\n"));
-  const clock = new WallClock("2026-11-27T15:00:00Z");
-  const out = recordingDeliver();
-  const lines: string[] = [];
   const ctx: DeskSessionCtxLike = {
-    agents: {
-      get: () => undefined,
-      create: async () => { throw new Error("no firing runs here"); },
-      resume: async () => { throw new Error("no firing runs here"); },
-    },
+    agents: { get: () => undefined, create: async () => { throw new Error("none"); }, resume: async () => { throw new Error("none"); } },
     agentPresets: { mount: async (_agentCtx, id) => ({ id }) },
     permissionPresets: { set: () => {}, current: () => "workspace-write" },
   };
+  const out = recordingDeliver();
   const schedule = createDeskSchedule({
-    home: fx.home, root: fx.root, python: process.execPath,
+    home: fx.home, root: fx.root, python: "/no/such/python",
     session: { ctx, root: fx.root, home: fx.home, route: { provider: "stub", model: "echo" }, installModelSelection: () => () => {} },
-    sessionCtx: {},
-    on: fakeBus().on,
-    deliver: (text) => out.deliver(text),
-    log: (line) => { lines.push(line); },
-    /* the stand-in is JavaScript under the clock's name: node runs its private copy, pinned by its own hash */
-    seams: { clock, tickMs: DAY_MS, runScript: defaultProducerRunner(process.execPath, []), marketClockSha256: sha256Hex(await readFile(join(fx.root, "scripts", "market_clock.py"))) },
+    sessionCtx: {}, on: fakeBus().on, deliver: out.deliver, log: () => {},
+    now: () => Date.parse("2026-11-27T15:00:00Z"),
+    seams: { tickMs: DAY_MS },
   });
-  clock.set("2026-11-27T15:00:00Z");
   await schedule.tick();
-  clock.set("2026-11-27T15:10:00Z");
-  await schedule.tick();
-  const tails = lines.filter((line) => line.startsWith("gravit-face: desk: schedule calendar: "));
-  assert.equal(tails.length, 1, `one line for the same stderr, however often it is asked: ${lines.join(" | ")}`);
-  const tail = tails[0].slice(tails[0].indexOf("its stderr ends: ") + "its stderr ends: ".length);
-  assert.ok(tails[0].startsWith(`gravit-face: desk: schedule calendar: scripts/market_clock.py under ${process.execPath} failed; its stderr ends: …`), tails[0]);
-  assert.ok(tail.endsWith("SystemError: the calendar crashed") && !tail.includes("\n") && [...tail].length === 300, tail);
-  assert.deepEqual(out.texts, [`no standing order runs today: the market calendar failed in ${process.execPath} (exit 1)`], "not a missing calendar: no FACE_PYTHON");
-  assert.deepEqual(schedule.status().calendar, { python: process.execPath, state: "failed", error: "exit 1" });
-
-  clock.set("2026-11-30T15:00:00Z");
-  await schedule.tick();
-  assert.deepEqual(out.texts.slice(1), [
-    `no standing order runs today: the market calendar failed in ${process.execPath} (pandas_market_calendars is not importable in /x). FACE_PYTHON must name an interpreter with pandas_market_calendars`,
-  ]);
-  assert.equal(lines.filter((line) => line.startsWith("gravit-face: desk: schedule calendar: ")).length, 1, "a run with nothing on stderr logs nothing");
-  assert.equal(schedule.dailyTokens(), undefined, "no budget: no cap");
+  assert.deepEqual(schedule.status().calendar, {
+    clock: XNYS_CLOCK, state: "ok", source: XNYS_CLOCK,
+    today: { date: "2026-11-27", open: "2026-11-27T14:30:00Z", close: "2026-11-27T18:00:00Z", early: true },
+  }, "the day after Thanksgiving closes early, from the rules, with no interpreter that could run");
+  assert.deepEqual(out.texts, [], "no calendar line");
   await schedule.dispose();
 });
 
@@ -1124,7 +1090,7 @@ test("lines held back while paused are not counted as phoned: each event lands o
   await at(r, "2026-12-02T15:00:00Z");
   await at(r, "2026-12-02T15:00:30Z");
   const expired = "old expired after 2026-11-30 and no longer fires; extend it with npm run desk -- rearm old --expires <YYYY-MM-DD> to keep it";
-  const calendar = "no standing order runs today: the market calendar failed in python3 (the fake calendar has no 2026-12-02)";
+  const calendar = "no standing order runs today: the market calendar failed in fake clock (the fake calendar has no 2026-12-02)";
   assert.ok(r.out.texts.length >= 4, `each line was tried and held, and tried again: ${r.out.texts.join(" | ")}`);
   assert.ok(r.out.texts.every((text) => text === expired || text.startsWith(calendar)), r.out.texts.join(" | "));
   assert.equal((await ofKind(fx.home, "expired")).length, 1, "the expiry is recorded once");

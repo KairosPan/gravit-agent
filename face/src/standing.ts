@@ -574,7 +574,7 @@ export interface StandingStatus {
   file: { path: string; state: "missing" | "loaded" | "refused"; loadedAt?: string; errors?: string[] };
   ledger?: { error: string };
   calendar: {
-    python: string;
+    clock: string;
     state: "unknown" | "ok" | "stale" | "failed";
     source?: string;
     today?: { date: string; closed: true } | { date: string; open: string; close: string; early: boolean };

@@ -1,40 +1,39 @@
 /** The market clock: which days the New York Stock Exchange trades, and when (rulings P2-1, P2-10).
  *
- * The calendar's facts stay in Python. `scripts/market_clock.py` prints a window of XNYS sessions from
- * pandas_market_calendars - each session's date, its open and its close as UTC instants, and whether
- * the close is early - and this module runs it, reads its JSON and keeps the answer. A holiday or a
- * weekend is a date the window holds with no session; DST is already inside the instants, so an
- * anchor is plain arithmetic on them.
+ * THE CALENDAR IS A RULE TABLE IN THIS FILE, in Node, with no Python and no network: the desk's runtime
+ * depends on no Python environment (the operator's ruling of 2026-11-01: runtime in Node, research in
+ * Python, kept apart). {@link xnysWindow} answers a window of XNYS sessions - each session's New York
+ * date, its open and its close as UTC instants, and whether the close is early - from:
  *
- * {@link pythonMarketClock} runs the script through a {@link ProducerRunner} under the face's interpreter
- * (`FACE_PYTHON || python3`, the one `face_data.py` runs on) as `python -I` - isolated: no user site, no
- * `PYTHON*` variable, neither the repository nor the script's directory on `sys.path` - cwd the repository root,
- * a {@link MARKET_CLOCK_TIMEOUT_MS} deadline and {@link baseEnv}'s environment - PATH, HOME, LANG, TZ and LC_*,
- * never a market key: the calendar is offline and needs none. It is PINNED BY A CONSTANT IN THE FACE'S OWN CODE:
- * each ask reads `scripts/market_clock.py` once, runs it only when those bytes hash to
- * {@link MARKET_CLOCK_SHA256}, and runs a private copy of them in the desk's run base (producer.ts
- * `runPinnedScript`, the copy path a standing order's producer takes), so an edit to the file in the tree never
- * runs: the clock answers no window - `scripts/market_clock.py changed since this face was built` - until the
- * constant moves with it, which a test of the tracked file holds in CI. The face's own code is not pinned
- * (`DEVELOPMENT.md` §9, R37). A run that answers no window hands the tail of its stderr - a Python traceback
- * ends in its cause - to its owner, one line, which the clock row logs. The calendar is as good as the
- * pandas_market_calendars installed in that interpreter: a closure announced after its release is unknown
- * until an upgrade.
+ * - the full-day holidays as NYSE observes them: New Year's Day (Sunday → Monday; a Saturday New Year
+ *   is not observed on the Friday before), Martin Luther King Jr. Day (third Monday of January),
+ *   Washington's Birthday (third Monday of February), Good Friday (two days before Easter Sunday, by the
+ *   Gregorian computus), Memorial Day (last Monday of May), Juneteenth (from 2022), Independence Day,
+ *   Labor Day (first Monday of September), Thanksgiving (fourth Thursday of November) and Christmas -
+ *   Juneteenth, Independence Day and Christmas on a Saturday observed the Friday before, on a Sunday the
+ *   Monday after;
+ * - the early closes at 13:00 ET: July 3 when it falls Monday to Thursday, the day after Thanksgiving,
+ *   and December 24 when it falls Monday to Thursday;
+ * - {@link XNYS_AD_HOC_CLOSURES}, the small explicit table of the exchange's one-off closures (a national
+ *   day of mourning, a storm). A closure announced after this file was last edited is unknown until it is
+ *   added here; nothing fetches one.
+ *
+ * Regular hours are 09:30-16:00 New York time. New York's offset comes from the US rule in force since
+ * 2007 (daylight time from the second Sunday of March to the first Sunday of November); both changes fall
+ * on a Sunday, when XNYS never trades, so a session date's offset is the same all day.
  *
  * {@link createMarketCalendar} keeps the answer. It asks for a {@link CALENDAR_DAYS}-day window once per
  * New York date - at the first `today()`, then whenever `etDate(now)` changes - and concurrent calls
  * share the ask. A failed ask is asked again, at most every {@link CALENDAR_RETRY_MS}, until an ask
- * returns a window that holds the date (P2 Task 8's ruling 1: a transient failure at the first ask after
- * a boot must not cost the day's anchored orders). Meanwhile the date is answered from the newest window
- * that still holds it, marked `stale`, and with none it is `{ ok: false }`, so no calendar-anchored order
- * fires until a window comes.
+ * returns a window that holds the date. Meanwhile the date is answered from the newest window that still
+ * holds it, marked `stale`, and with none it is `{ ok: false }`, so no calendar-anchored order fires
+ * until a window comes. The builtin clock does not fail on a real date; the fallbacks stay for an ask a
+ * test or a later clock supplies.
  *
- * Of the face's modules it imports only `producer.ts` and `et.ts`, and the pause switch (`npm run desk`)
- * does not load it.
+ * Of the face's modules it imports only `et.ts`, and the pause switch (`npm run desk`) does not load it.
  * @module
  */
 import { etDate } from "./et.ts";
-import { baseEnv, defaultProducerRunner, formatDuration, isOverflow, runPinnedScript, type ProducerRunner, type RunResult } from "./producer.ts";
 
 /* ---------- the window ---------- */
 
@@ -47,26 +46,31 @@ export interface MarketSession {
   early: boolean;
 }
 
-/** Every XNYS session from `from` through the `days`-th day, the clock's `source`
- * (`pandas_market_calendars 5.4.0`) and the `python` it ran in. A date inside it with no session is a
- * closed day; a date outside it is unknown. */
+/** Every XNYS session from `from` through the `days`-th day, and the clock's `source`. A date inside it
+ * with no session is a closed day; a date outside it is unknown. */
 export interface MarketWindow {
   from: string;
   days: number;
   source: string;
-  python: string;
   sessions: MarketSession[];
 }
 
-/** The only calendar the clock answers for. */
-const CALENDAR = "XNYS";
-/** The most days one window holds: the script's own limit. */
-const MAX_WINDOW_DAYS = 31;
-/** The most characters of an error the clock or an ask gives, carried on one line into a status and a phone line. */
-const ERROR_MAX = 300;
+/** The most days one window holds. */
+export const MAX_WINDOW_DAYS = 31;
+
+/** The builtin clock's name, carried as a window's `source` and as the calendar's `clock`. */
+export const XNYS_CLOCK = "builtin XNYS rules (face/src/market-clock.ts)";
+
+/** The exchange's one-off full-day closures that no rule gives, by New York date. Add one when NYSE
+ * announces it; nothing fetches them. */
+export const XNYS_AD_HOC_CLOSURES: Readonly<Record<string, string>> = {
+  "2012-10-29": "Hurricane Sandy",
+  "2012-10-30": "Hurricane Sandy",
+  "2018-12-05": "National Day of Mourning for President George H. W. Bush",
+  "2025-01-09": "National Day of Mourning for President Jimmy Carter",
+};
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
 /** Whether `value` is a real calendar date written `YYYY-MM-DD`: `2026-02-30` is not. */
 function isDateText(value: unknown): value is string {
@@ -75,96 +79,138 @@ function isDateText(value: unknown): value is string {
   return new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10) === value;
 }
 
-/** Whether `value` is a real UTC instant written `YYYY-MM-DDTHH:MM:SSZ`; V8 would read `2026-02-30` as March 2. */
-function isInstantText(value: unknown): value is string {
-  if (typeof value !== "string" || !INSTANT_RE.test(value)) return false;
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) && new Date(ms).toISOString() === `${value.slice(0, 19)}.000Z`;
-}
-
 /** The date `n` days after `date` (`YYYY-MM-DD`). */
 function addDays(date: string, n: number): string {
   const [y, m, d] = date.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+/** `YYYY-MM-DD` of a year, a month (1-12) and a day. */
+function ymd(y: number, m: number, d: number): string {
+  return new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10);
 }
 
-/** `text` on one line, at most {@link ERROR_MAX} characters (code points; a cut ends in `…`). */
-function oneLine(text: string): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  const chars = [...flat];
-  return chars.length <= ERROR_MAX ? flat : `${chars.slice(0, ERROR_MAX - 1).join("")}…`;
+/** The weekday of a date: 0 Sunday … 6 Saturday. */
+function weekday(date: string): number {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
-/** The end of `text` on one line, at most {@link ERROR_MAX} characters (code points; a cut opens with `…`), or
- * `undefined` when it holds nothing but blanks. */
-function lastLine(text: string): string | undefined {
-  const flat = text.replace(/\s+/g, " ").trim();
-  if (flat === "") return undefined;
-  const chars = [...flat];
-  return chars.length <= ERROR_MAX ? flat : `…${chars.slice(chars.length - (ERROR_MAX - 1)).join("")}`;
-}
-
-/** The clock's own `error`, one line; a missing one is named. */
-function clockError(error: unknown): string {
-  return typeof error === "string" && error.trim() !== "" ? oneLine(error) : "the clock failed and gave no error";
-}
-
-/** One session of the clock's JSON, checked: its fields' shapes, its open and close on its own New York
- * date, its close after its open. Unknown keys are dropped. */
-function sessionOf(raw: unknown, i: number): MarketSession {
-  if (!isRecord(raw)) throw new Error(`session ${i} is not an object`);
-  const { date, open, close, early } = raw;
-  if (!isDateText(date)) throw new Error(`session ${i} has a bad date`);
-  if (!isInstantText(open) || etDate(new Date(open)) !== date) throw new Error(`session ${i} has a bad open`);
-  if (!isInstantText(close) || etDate(new Date(close)) !== date || Date.parse(close) <= Date.parse(open)) {
-    throw new Error(`session ${i} has a bad close`);
+/** The `n`-th (1-based) `wd` weekday of a month; `n = -1` is the last. */
+function nthWeekday(y: number, m: number, wd: number, n: number): string {
+  if (n > 0) {
+    const first = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
+    return ymd(y, m, 1 + ((wd - first + 7) % 7) + 7 * (n - 1));
   }
-  if (typeof early !== "boolean") throw new Error(`session ${i} has a bad early`);
-  return { date, open, close, early };
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const last = new Date(Date.UTC(y, m - 1, lastDay)).getUTCDay();
+  return ymd(y, m, lastDay - ((last - wd + 7) % 7));
+}
+
+/** Easter Sunday of a Gregorian year (the anonymous Gregorian computus, Meeus/Jones/Butcher). */
+export function easterSunday(y: number): string {
+  const a = y % 19;
+  const b = Math.floor(y / 100);
+  const c = y % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return ymd(y, month, day);
+}
+
+/** A fixed holiday as observed: Saturday → the Friday before, Sunday → the Monday after. */
+function observed(date: string): string {
+  const wd = weekday(date);
+  return wd === 6 ? addDays(date, -1) : wd === 0 ? addDays(date, 1) : date;
 }
 
 /**
- * Read the clock's stdout as a window. Unknown keys are dropped; nothing else is forgiven.
- * @param stdout - what `scripts/market_clock.py sessions …` printed.
- * @returns the window: `from`, `days`, `source`, `python` and the sessions, in date order.
- * @throws Error - the clock's own `error` when it answered `ok: false` (on one line, at most 300
- *   characters), else the fault: `not JSON`; `not a JSON object`; `window has a bad <field>` (`ok`,
- *   `calendar` - XNYS only -, `from`, `days` - 1 to 31 -, `source`, `python`); `sessions is not a list`;
- *   `session <i> is not an object`; `session <i> has a bad <field>` (`date`, `open`, `close`, `early`;
- *   `i` from 0; an open or a close off the session's New York date, or a close not after the open, is
- *   bad); `sessions are out of order` (a repeated date too); `session <date> is outside the window`.
+ * The XNYS full-day holidays of a year that fall in it, by the rules in the module doc, ad-hoc closures
+ * aside. New Year's Day on a Saturday is not observed (NYSE's rule), so it closes no day of either year.
+ * @param y - the year.
+ * @returns the holidays' dates, sorted.
  */
-export function parseMarketWindow(stdout: string): MarketWindow {
-  let data: unknown;
-  try {
-    data = JSON.parse(stdout);
-  } catch {
-    throw new Error("not JSON");
+export function xnysHolidays(y: number): string[] {
+  const days = new Set<string>();
+  const newYear = ymd(y, 1, 1);
+  if (weekday(newYear) !== 6) days.add(observed(newYear));
+  days.add(nthWeekday(y, 1, 1, 3));
+  days.add(nthWeekday(y, 2, 1, 3));
+  days.add(addDays(easterSunday(y), -2));
+  days.add(nthWeekday(y, 5, 1, -1));
+  if (y >= 2022) days.add(observed(ymd(y, 6, 19)));
+  days.add(observed(ymd(y, 7, 4)));
+  days.add(nthWeekday(y, 9, 1, 1));
+  days.add(nthWeekday(y, 11, 4, 4));
+  days.add(observed(ymd(y, 12, 25)));
+  return [...days].filter((date) => date.startsWith(`${y}-`)).sort();
+}
+
+/**
+ * The XNYS early closes (13:00 ET) of a year: July 3 when it falls Monday to Thursday, the day after
+ * Thanksgiving, December 24 when it falls Monday to Thursday.
+ * @param y - the year.
+ * @returns their dates, sorted.
+ */
+export function xnysEarlyCloses(y: number): string[] {
+  const days: string[] = [];
+  const july3 = ymd(y, 7, 3);
+  if (weekday(july3) >= 1 && weekday(july3) <= 4) days.push(july3);
+  days.push(addDays(nthWeekday(y, 11, 4, 4), 1));
+  const dec24 = ymd(y, 12, 24);
+  if (weekday(dec24) >= 1 && weekday(dec24) <= 4) days.push(dec24);
+  return days;
+}
+
+/** Whether New York keeps daylight time on a date (the US rule since 2007: from the second Sunday of
+ * March to the first Sunday of November). Read only for a weekday, which is never a change day. */
+function isDaylight(date: string): boolean {
+  const y = Number(date.slice(0, 4));
+  return date >= nthWeekday(y, 3, 0, 2) && date < nthWeekday(y, 11, 0, 1);
+}
+
+/** A New York wall time on a session date as a UTC instant to the second. */
+function nyInstant(date: string, hour: number, minute: number): string {
+  const [y, m, d] = date.split("-").map(Number);
+  const offset = isDaylight(date) ? 4 : 5;
+  return new Date(Date.UTC(y, m - 1, d, hour + offset, minute)).toISOString().replace(".000Z", "Z");
+}
+
+/** That date's XNYS session, or `undefined` when the exchange is closed (a weekend, a holiday, an ad-hoc closure). */
+function xnysSession(date: string): MarketSession | undefined {
+  const wd = weekday(date);
+  if (wd === 0 || wd === 6 || XNYS_AD_HOC_CLOSURES[date] !== undefined) return undefined;
+  const y = Number(date.slice(0, 4));
+  if (xnysHolidays(y).includes(date)) return undefined;
+  const early = xnysEarlyCloses(y).includes(date);
+  return { date, open: nyInstant(date, 9, 30), close: nyInstant(date, early ? 13 : 16, 0), early };
+}
+
+/**
+ * Every XNYS session from `from` through the `days`-th day.
+ * @param from - the first New York date, `YYYY-MM-DD`.
+ * @param days - how many days, 1 to {@link MAX_WINDOW_DAYS}.
+ * @returns the window, its `source` {@link XNYS_CLOCK}.
+ * @throws Error - `the market clock takes a YYYY-MM-DD date, not "<from>"` or `the market clock takes 1 to 31
+ *   days, not <days>`.
+ */
+export function xnysWindow(from: string, days: number): MarketWindow {
+  if (!isDateText(from)) throw new Error(`the market clock takes a YYYY-MM-DD date, not ${JSON.stringify(String(from).slice(0, 40))}`);
+  if (!Number.isInteger(days) || days < 1 || days > MAX_WINDOW_DAYS) throw new Error(`the market clock takes 1 to ${MAX_WINDOW_DAYS} days, not ${String(days)}`);
+  const sessions: MarketSession[] = [];
+  for (let n = 0; n < days; n++) {
+    const session = xnysSession(addDays(from, n));
+    if (session !== undefined) sessions.push(session);
   }
-  if (!isRecord(data)) throw new Error("not a JSON object");
-  if (data.ok === false) throw new Error(clockError(data.error));
-  if (data.ok !== true) throw new Error("window has a bad ok");
-  if (data.calendar !== CALENDAR) throw new Error("window has a bad calendar");
-  const { from, days, source, python, sessions } = data;
-  if (!isDateText(from)) throw new Error("window has a bad from");
-  if (typeof days !== "number" || !Number.isInteger(days) || days < 1 || days > MAX_WINDOW_DAYS) throw new Error("window has a bad days");
-  if (typeof source !== "string" || source === "") throw new Error("window has a bad source");
-  if (typeof python !== "string") throw new Error("window has a bad python");
-  if (!Array.isArray(sessions)) throw new Error("sessions is not a list");
-  const end = addDays(from, days);
-  const read: MarketSession[] = [];
-  for (const [i, raw] of sessions.entries()) {
-    const session = sessionOf(raw, i);
-    const previous = read.at(-1);
-    if (previous !== undefined && session.date <= previous.date) throw new Error("sessions are out of order");
-    if (session.date < from || session.date >= end) throw new Error(`session ${session.date} is outside the window`);
-    read.push(session);
-  }
-  return { from, days, source, python, sessions: read };
+  return { from, days, source: XNYS_CLOCK, sessions };
 }
 
 /**
@@ -188,108 +234,24 @@ export function sessionFor(window: MarketWindow, date: string): MarketSession | 
   return window.sessions.find((session) => session.date === date) ?? "closed";
 }
 
-/* ---------- running the clock ---------- */
+/* ---------- the clock ---------- */
 
 /** Ask the clock for the window of `days` days from the New York date `from`. Rejects with why it has none. */
 export type MarketClock = (from: string, days: number) => Promise<MarketWindow>;
 
-/** How long one run of the clock may take: a whole spawn measured 0.70 s. */
-export const MARKET_CLOCK_TIMEOUT_MS = 30_000;
-
-/** The clock's file, repo-relative. */
-export const MARKET_CLOCK_SCRIPT = "scripts/market_clock.py";
-
-/** The hex SHA-256 of the only `scripts/market_clock.py` the face runs. An edit to the script moves this with it:
- * tests/market-clock.test.ts hashes the tracked file against it, so a change that forgets it fails CI, not a
- * trading afternoon. */
-export const MARKET_CLOCK_SHA256 = "9f3bdfdad49902d2560961596bda260cd535f8326478e9dfdfd98ba03097c3fa";
-
-/** The clock's own error when `stdout` is its `{ "ok": false, "error": … }`, else `undefined`. */
-function failureOf(stdout: string): string | undefined {
-  try {
-    const data: unknown = JSON.parse(stdout);
-    if (isRecord(data) && data.ok === false) return clockError(data.error);
-  } catch {
-    /* not the clock's JSON: the exit code is all that is known */
-  }
-  return undefined;
+/** The face's clock: {@link xnysWindow}, as a {@link MarketClock}. */
+export function builtinMarketClock(): MarketClock {
+  return async (from, days) => xnysWindow(from, days);
 }
 
-/**
- * The face's clock: `scripts/market_clock.py` under `python -I`, pinned by {@link MARKET_CLOCK_SHA256} (the module
- * doc). Each ask runs a private copy of the verified bytes in `runBase` with the arguments `sessions --from <from>
- * --days <days>`, cwd `root`, `baseEnv(process.env)` as read at that ask (no market key), no stdin and the
- * deadline. Its stderr never reaches the answer: a crash reads `exit <code>`. A run that answers no window -
- * whatever its exit - hands its stderr's tail to `stderr` when it wrote anything but blanks: its last 300
- * characters on one line (a cut opens with `…`), where a Python traceback names its cause (P2 Task 8's ruling 2).
- * A hook that throws costs nothing but its line.
- * @param opts - `root` the repository root; `python` the interpreter, named in a failure to start; `runBase` where
- *   the private copy is made - the desk's `<desk dir>/run`; `run` the runner, `defaultProducerRunner(python)` (with
- *   `-I`) by default; `timeoutMs` the deadline, {@link MARKET_CLOCK_TIMEOUT_MS} by default; `stderr`, where a failed
- *   run's stderr tail goes - dropped when absent; `log`, for a run directory left behind (stderr by default);
- *   `sha256`, the pin, {@link MARKET_CLOCK_SHA256} by default - a seam for tests that run a stand-in clock.
- * @returns a {@link MarketClock} that resolves with {@link parseMarketWindow}'s window of an exit 0, and rejects
- *   with `scripts/market_clock.py changed since this face was built` or `scripts/market_clock.py is missing` (or
- *   `leaves scripts/`, `is not a regular file`) - nothing run -, the clock's own `error` (an exit with
- *   `{ ok: false }`, or `ok: false` at exit 0), `exit <code>` (an exit without it), `timed out after 30 s`, `stdout
- *   over 1 MiB` or `stderr over 1 MiB`, `could not start <python>: <code>` (a spawn failure: `ENOENT`, `EACCES`, …,
- *   or a run base that cannot be used), or parseMarketWindow's fault.
- */
-export function pythonMarketClock(opts: {
-  root: string;
-  python: string;
-  runBase: string;
-  run?: ProducerRunner;
-  timeoutMs?: number;
-  stderr?: (tail: string) => void;
-  log?: (line: string) => void;
-  sha256?: string;
-}): MarketClock {
-  const run = opts.run ?? defaultProducerRunner(opts.python);
-  const timeoutMs = opts.timeoutMs ?? MARKET_CLOCK_TIMEOUT_MS;
-  const log = opts.log ?? ((line: string): void => { console.error(line); });
-  /** The window a run answered, or why it answered none. */
-  const windowOf = (result: RunResult): MarketWindow => {
-    if (result.timedOut) throw new Error(`timed out after ${formatDuration(timeoutMs)}`);
-    if (result.error !== undefined) {
-      throw new Error(isOverflow(result.error) ? result.error : `could not start ${opts.python}: ${result.error}`);
-    }
-    if (result.code !== 0) throw new Error(failureOf(result.stdout) ?? `exit ${result.code}`);
-    return parseMarketWindow(result.stdout);
-  };
-  return async (from, days) => {
-    const pinned = await runPinnedScript({
-      root: opts.root,
-      script: MARKET_CLOCK_SCRIPT,
-      sha256: opts.sha256 ?? MARKET_CLOCK_SHA256,
-      changed: "changed since this face was built",
-      runBase: opts.runBase,
-      run,
-      args: ["sessions", "--from", from, "--days", String(days)],
-      cwd: opts.root,
-      env: baseEnv(process.env),
-      timeoutMs,
-      label: "the market clock",
-      log,
-    });
-    /* a changed or missing clock never runs: a calendar failure, which no anchored order outlives */
-    if ("refused" in pinned) throw new Error(pinned.error);
-    if ("failed" in pinned) throw new Error(`could not start ${opts.python}: ${pinned.failed}`);
-    const result = pinned.ran;
-    try {
-      return windowOf(result);
-    } catch (error) {
-      const tail = lastLine(result.stderr);
-      if (tail !== undefined) {
-        try {
-          opts.stderr?.(tail);
-        } catch {
-          /* the owner's log failed: the ask's own error still answers */
-        }
-      }
-      throw error;
-    }
-  };
+/** The most characters of an error the calendar carries on one line into a status and a phone line. */
+const ERROR_MAX = 300;
+
+/** `text` on one line, at most {@link ERROR_MAX} characters (code points; a cut ends in `…`). */
+function oneLine(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  const chars = [...flat];
+  return chars.length <= ERROR_MAX ? flat : `${chars.slice(0, ERROR_MAX - 1).join("")}…`;
 }
 
 /* ---------- the calendar ---------- */
@@ -310,8 +272,8 @@ export type DayAnswer =
 
 /** The face's calendar: today's session, from a window it keeps. */
 export interface MarketCalendar {
-  /** The interpreter the clock runs in, for the lines that name it. */
-  readonly python: string;
+  /** The clock the calendar asks, for the lines that name it: {@link XNYS_CLOCK} in the face. */
+  readonly clock: string;
   /** The answer for `etDate(now)`. Asks the clock only when that date differs from the last one asked, or
    * when its last ask failed {@link CALENDAR_RETRY_MS} or more before `now`; never rejects for a failed ask. */
   today(now: number): Promise<DayAnswer>;
@@ -332,8 +294,8 @@ function errorText(error: unknown): string {
 
 /**
  * The face's calendar over `ask`.
- * @param opts - `ask` the clock ({@link pythonMarketClock} in the face); `python` its interpreter, kept for
- *   the lines that name it; `days` the window asked for, {@link CALENDAR_DAYS} by default.
+ * @param opts - `ask` the clock, {@link builtinMarketClock} by default; `clock` its name, kept for the lines that
+ *   name it, {@link XNYS_CLOCK} by default; `days` the window asked for, {@link CALENDAR_DAYS} by default.
  * @returns a {@link MarketCalendar}. Its `today(now)` asks once per New York date, and calls for the date
  *   being asked share the one ask. A date whose own ask returned a window is answered from it, and never
  *   asked again. A failed ask - a rejection, a throw, or a window that does not hold the date - is answered
@@ -342,8 +304,9 @@ function errorText(error: unknown): string {
  *   asks again, until an ask returns a window that holds the date. An ask settling after a later date's
  *   replaces neither the newest window nor what `peek()` says.
  */
-export function createMarketCalendar(opts: { ask: MarketClock; python: string; days?: number }): MarketCalendar {
+export function createMarketCalendar(opts: { ask?: MarketClock; clock?: string; days?: number } = {}): MarketCalendar {
   const days = opts.days ?? CALENDAR_DAYS;
+  const ask = opts.ask ?? builtinMarketClock();
   /** The newest window any ask returned: the fallback for a date whose own ask failed. */
   let newest: MarketWindow | undefined;
   /** The ask for the date asked last: when it began, settling to its window or its error, and - once it has
@@ -354,7 +317,7 @@ export function createMarketCalendar(opts: { ask: MarketClock; python: string; d
 
   const askFor = async (date: string): Promise<AskResult> => {
     try {
-      const window = await opts.ask(date, days);
+      const window = await ask(date, days);
       if (!windowCovers(window, date)) {
         return { error: `the market clock answered a window from ${window.from} for ${window.days} days, which does not hold ${date}` };
       }
@@ -381,7 +344,7 @@ export function createMarketCalendar(opts: { ask: MarketClock; python: string; d
   };
 
   return {
-    python: opts.python,
+    clock: opts.clock ?? XNYS_CLOCK,
     async today(now) {
       const date = etDate(new Date(now));
       let flight = asked;

@@ -1253,8 +1253,8 @@ test("LINES: every row of the phone-line table, exactly", () => {
   assert.equal([...errors].length, 500, "the errors cut at 500 characters");
   assert.ok(errors.startsWith("orders[0] (o0): at is missing; orders[1]") && errors.endsWith("…"));
   assert.equal(LINES.ledgerUnreadable("/h/face/desk/firings.jsonl", "EISDIR"), "the firing ledger /h/face/desk/firings.jsonl cannot be read (EISDIR), so no standing order runs until it can");
-  assert.equal(LINES.noCalendar("python3", "pandas_market_calendars is not importable in /x"),
-    "no standing order runs today: the market calendar failed in python3 (pandas_market_calendars is not importable in /x). FACE_PYTHON must name an interpreter with pandas_market_calendars");
+  assert.equal(LINES.noCalendar("fake clock", "the clock is down"),
+    "no standing order runs today: the market calendar failed in fake clock (the clock is down)");
 });
 
 test("cutoffOf: the close for close-Nm, the open for open-Nm, nothing for an anchor at or after its moment", () => {
@@ -1328,21 +1328,21 @@ test("the fakes: a WallClock fires due timers in order and a jump fires none; a 
   assert.throws(() => new WallClock("not a time"), RangeError);
 
   const calendar = fakeCalendar({ "2026-11-26": "closed", "2026-11-27": EARLY, "2026-11-30": REGULAR });
-  assert.equal(calendar.python, "python3");
+  assert.equal(calendar.clock, "fake clock");
   assert.equal(calendar.peek(), undefined);
   assert.equal(calendar.window(), undefined, "no window before an answer, as the face's calendar has none before its first ask");
   const first = calendar.today(Date.parse("2026-11-27T17:30:00Z"));
   assert.equal(calendar.window(), undefined, "nor while the first ask is under way");
   assert.deepEqual(await first, { ok: true, date: "2026-11-27", session: EARLY, source: "fake calendar" });
-  assert.deepEqual(calendar.window(), { from: "2026-11-26", days: 5, source: "fake calendar", python: "python3", sessions: [EARLY, REGULAR] });
+  assert.deepEqual(calendar.window(), { from: "2026-11-26", days: 5, source: "fake calendar", sessions: [EARLY, REGULAR] });
   assert.deepEqual(await calendar.today(Date.parse("2026-11-27T04:59:00Z")), { ok: true, date: "2026-11-26", session: "closed", source: "fake calendar" }, "a New York date");
   assert.deepEqual(await calendar.today(Date.parse("2026-11-27T04:59:30Z")), { ok: true, date: "2026-11-26", session: "closed", source: "fake calendar" });
   const unknown = { ok: false, date: "2026-12-01", error: "the fake calendar has no 2026-12-01" };
   assert.deepEqual(await calendar.today(Date.parse("2026-12-01T15:00:00Z")), unknown);
   assert.deepEqual(calendar.asked, ["2026-11-27", "2026-11-26", "2026-12-01"], "a date once each time it changes");
   assert.deepEqual(calendar.peek(), unknown, "the latest date's answer");
-  assert.deepEqual(calendar.window(), { from: "2026-11-26", days: 5, source: "fake calendar", python: "python3", sessions: [EARLY, REGULAR] });
-  const empty = fakeCalendar({}, "/x/python");
+  assert.deepEqual(calendar.window(), { from: "2026-11-26", days: 5, source: "fake calendar", sessions: [EARLY, REGULAR] });
+  const empty = fakeCalendar({}, "another clock");
   assert.deepEqual(await empty.today(Date.parse("2026-11-27T17:30:00Z")), { ok: false, date: "2026-11-27", error: "the fake calendar has no 2026-11-27" });
   assert.equal(empty.window(), undefined, "no days, no window");
 

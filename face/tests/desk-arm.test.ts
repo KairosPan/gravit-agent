@@ -14,7 +14,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runDesk } from "../scripts/desk.ts";
 import { deskDir } from "../src/desk.ts";
-import type { MarketClock } from "../src/market-clock.ts";
+import { XNYS_CLOCK, type MarketClock } from "../src/market-clock.ts";
 import { STANDING_FILE, parseStanding, sha256Hex, type StandingOrder } from "../src/standing.ts";
 
 const TEST_DIR = join(dirname(fileURLToPath(import.meta.url)), "tmp", `desk-arm-${process.pid}`);
@@ -26,15 +26,15 @@ const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume | arm <desk 
 /** 14:00 ET on Tuesday 2026-10-20 (EDT). */
 const NOW = Date.parse("2026-10-20T18:00:00Z");
 const ARMED_AT = "2026-10-20T18:00:00.000Z";
-/** The interpreter a calendar refusal names: the face's. */
-const PYTHON = process.env.FACE_PYTHON || "python3";
+/** The clock a calendar refusal names: the builtin one (src/market-clock.ts). */
+const CLOCK = XNYS_CLOCK;
 const STANDING_MD = "# Pre-close\nBrief me before the close.\n";
 const P_PY = "print('p')\n";
 
 /** A fake clock: the asked date's session, 09:30 to 16:00 EDT; each ask's date lands in `calls`. */
 const goodClock = (calls: string[]): MarketClock => async (from, days) => {
   calls.push(from);
-  return { from, days, source: "a fake calendar", python: "fake", sessions: [{ date: from, open: `${from}T13:30:00Z`, close: `${from}T20:00:00Z`, early: false }] };
+  return { from, days, source: "a fake calendar", sessions: [{ date: from, open: `${from}T13:30:00Z`, close: `${from}T20:00:00Z`, early: false }] };
 };
 
 interface Rig {
@@ -227,15 +227,14 @@ test("arm refuses a taken id, a bad --at, a past --expires, a non-.py script, a 
   assert.deepEqual(await readFile(r.standing), before);
 
   /* a failed calendar */
-  const failing = await rig(() => async () => { throw new Error("No module named 'pandas_market_calendars'"); });
+  const failing = await rig(() => async () => { throw new Error("the clock is down"); });
   assert.equal(await runDesk("arm", PRECLOSE, failing.deps), 1);
   const [calendar] = failing.take();
-  assert.equal(calendar, `cannot arm preclose: the market calendar failed in ${PYTHON}: No module named 'pandas_market_calendars'; FACE_PYTHON must name an interpreter with pandas_market_calendars`);
-  assert.ok(calendar.endsWith("pandas_market_calendars"));
+  assert.equal(calendar, `cannot arm preclose: the market calendar failed in ${CLOCK}: the clock is down`);
   assert.equal(existsSync(failing.standing), false, "nothing written");
-  const holey = await rig(() => async (_from, days) => ({ from: "2026-10-21", days, source: "fake", python: "fake", sessions: [] }));
+  const holey = await rig(() => async (_from, days) => ({ from: "2026-10-21", days, source: "fake", sessions: [] }));
   assert.equal(await runDesk("arm", PRECLOSE, holey.deps), 1);
-  assert.deepEqual(holey.take(), [`cannot arm preclose: the market calendar failed in ${PYTHON}: the market clock answered a window from 2026-10-21 for 10 days, which does not hold 2026-10-20; FACE_PYTHON must name an interpreter with pandas_market_calendars`]);
+  assert.deepEqual(holey.take(), [`cannot arm preclose: the market calendar failed in ${CLOCK}: the market clock answered a window from 2026-10-21 for 10 days, which does not hold 2026-10-20`]);
 
   /* a file refused for orders that are not armed: the way out, since arm adds nothing to a refused file */
   const unarmed = await rig();
@@ -414,7 +413,7 @@ test("arm and rearm write only over the file they read: an edit made in between 
       await mkdir(dirname(standing), { recursive: true });
       await writeFile(standing, edit);
     }
-    return { from, days, source: "a fake calendar", python: "fake", sessions: [{ date: from, open: `${from}T13:30:00Z`, close: `${from}T20:00:00Z`, early: false }] };
+    return { from, days, source: "a fake calendar", sessions: [{ date: from, open: `${from}T13:30:00Z`, close: `${from}T20:00:00Z`, early: false }] };
   });
   const changed = (verb: string, id: string): string => `cannot ${verb} ${id}: cannot write ${r.standing}: it changed since it was read; run the command again`;
 

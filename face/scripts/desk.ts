@@ -55,7 +55,7 @@ export interface DeskDeps {
   now?: () => number;
   /** The repository whose files `arm` and `rearm` pin, this script's own by default. */
   root?: string;
-  /** The market clock `arm` asks, `pythonMarketClock` under `FACE_PYTHON || python3` by default. */
+  /** The market clock `arm` asks, the builtin XNYS rules (src/market-clock.ts) by default. */
   marketClock?: MarketClock;
 }
 
@@ -364,18 +364,9 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
   if (!load.ok) return refuse(`${path} is refused, so nothing is added to it until it is fixed: ${refusedFile(m, load.errors)}`);
   if (load.orders.some((order) => order.id === id)) return refuse(`${id} is already armed; npm run desk -- rearm ${id} takes a changed file's new hash`);
 
-  const python = process.env.FACE_PYTHON || "python3";
-  /* the clock runs from a private copy in the desk's run base, as the face's does: its directory first */
-  if (deps.marketClock === undefined) {
-    try {
-      await mkdir(deskDir(deps.home), { recursive: true });
-    } catch (err) {
-      return refuse(`cannot make ${deskDir(deps.home)}: ${reasonOf(err)}`);
-    }
-  }
-  const ask = deps.marketClock ?? m.clock.pythonMarketClock({ root, python, runBase: join(deskDir(deps.home), "run") });
-  const day = await m.clock.createMarketCalendar({ ask, python }).today(now);
-  if (!day.ok) return refuse(`the market calendar failed in ${python}: ${day.error}; FACE_PYTHON must name an interpreter with pandas_market_calendars`);
+  const calendar = m.clock.createMarketCalendar(deps.marketClock === undefined ? {} : { ask: deps.marketClock });
+  const day = await calendar.today(now);
+  if (!day.ok) return refuse(`the market calendar failed in ${calendar.clock}: ${day.error}`);
 
   const producerText = spec === undefined ? undefined : m.producer.formatProducer(spec);
   const next = standing.appendOrder(read.text, {

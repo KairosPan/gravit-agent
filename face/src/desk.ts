@@ -150,7 +150,7 @@ export type DeskEvent =
   }
   | { t: string; kind: "desk-refused"; reason: string; path?: string }
   | { t: string; kind: "standing-error"; errors: string[]; phoned?: false }
-  | { t: string; kind: "calendar-error"; date: string; python: string; error: string; phoned?: false }
+  | { t: string; kind: "calendar-error"; date: string; clock: string; error: string; phoned?: false }
   | { t: string; kind: "budget-spent"; date: string; used: number; dailyTokens: number };
 
 /** Every kind {@link DeskEvent} has, and only those. A record over the union rather than a list,
@@ -1105,7 +1105,7 @@ function orderState(order: StandingStatus["orders"][number], running: StandingSt
  * first what holds the whole book - `standing orders: none armed (npm run desk -- arm)` while it has no
  * order and is not refused, else `standing orders stopped: standing.yml is refused: <its errors, joined by
  * "; " and cut at 200 characters>`; `standing orders stopped: the firing ledger cannot be read (<code>)`;
- * `standing orders: no calendar today, <python>: <error>` - then a line per order of the last good load,
+ * `standing orders: no calendar today, <clock>: <error>` - then a line per order of the last good load,
  * `standing <id>: <state>` ({@link orderState}), with `; last <outcome> <time>` after it once the order
  * has fired. Times are New York's, as {@link deskTime} shows them.
  * @param s - the standing orders' status.
@@ -1117,7 +1117,7 @@ export function standingLines(s: StandingStatus, now: Date): string[] {
     lines.push(`standing orders stopped: standing.yml is refused: ${cutText((s.file.errors ?? []).join("; "), REFUSED_SHOWN_MAX)}`);
   } else if (s.orders.length === 0) lines.push("standing orders: none armed (npm run desk -- arm)");
   if (s.ledger !== undefined) lines.push(`standing orders stopped: the firing ledger cannot be read (${s.ledger.error})`);
-  if (s.calendar.state === "failed") lines.push(`standing orders: no calendar today, ${s.calendar.python}: ${s.calendar.error ?? "no reason given"}`);
+  if (s.calendar.state === "failed") lines.push(`standing orders: no calendar today, ${s.calendar.clock}: ${s.calendar.error ?? "no reason given"}`);
   for (const order of s.orders) {
     const last = order.last === undefined ? "" : `; last ${order.last.outcome} ${statusTime(order.last.t, now)}`;
     lines.push(`standing ${order.id}: ${orderState(order, s.running, now)}${last}`);
@@ -1281,8 +1281,8 @@ export interface DeskHandle {
  *   is unset; `deskDeadlineMs`, every desk turn's deadline, handed to the conversation as its
  *   `deadlineMs` (its own five minutes when absent) - a test seam, which tests/telegram-smoke.test.ts
  *   sets to 1,500 so a parked card is cut in a second and a half; main.ts never passes it;
- *   `python`, the face's interpreter (`FACE_PYTHON || python3`, main.ts's), which runs the market
- *   clock and a script producer - `python3` when absent; `schedule`, the clock's seams for tests - its
+ *   `python`, the interpreter a `.py` script producer runs under - `FACE_PYTHON || python3` when absent
+ *   (no calendar needs it: the market clock is builtin); `schedule`, the clock's seams for tests - its
  *   clock, calendar, script runner, builtins, tick and grace; `log`,
  *   where every line of the desk's goes - the guard's, its line at install naming what the secret
  *   check covers included, the tools', the ledger's, the conversation's, the bridge's and the clock's -

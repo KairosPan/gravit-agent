@@ -51,7 +51,7 @@ import {
   type ExpiredRecord, type FiringDeps, type FiringItem, type FiringRecord, type InterruptedRecord, type MissedRecord, type Refusal,
   type RefusedRecord, type StartedRecord, type Verified,
 } from "./firing.ts";
-import { createMarketCalendar, pythonMarketClock, sessionFor, type DayAnswer, type MarketCalendar, type MarketSession } from "./market-clock.ts";
+import { createMarketCalendar, sessionFor, type DayAnswer, type MarketCalendar, type MarketSession } from "./market-clock.ts";
 import { defaultProducerRunner, formatProducer } from "./producer.ts";
 import type { UsQuoteSource } from "./us-quotes.ts";
 import { anchorInstant, GRACE_MS, parseStanding, STANDING_FILE, type FiringSummary, type StandingOrder, type StandingStatus } from "./standing.ts";
@@ -530,10 +530,10 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
       calendarEvented.add(got.date);
       const reached = await deliverable();
       await appendEvent(home, {
-        t: iso(now), kind: "calendar-error", date: got.date, python: deps.calendar.python, error: got.error, ...(reached ? {} : { phoned: false as const }),
+        t: iso(now), kind: "calendar-error", date: got.date, clock: deps.calendar.clock, error: got.error, ...(reached ? {} : { phoned: false as const }),
       }, { log });
     }
-    if (!got.ok && !calendarPhoned.has(got.date) && (await send(LINES.noCalendar(deps.calendar.python, got.error)))) calendarPhoned.add(got.date);
+    if (!got.ok && !calendarPhoned.has(got.date) && (await send(LINES.noCalendar(deps.calendar.clock, got.error)))) calendarPhoned.add(got.date);
     return got;
   };
 
@@ -892,13 +892,13 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
 
   /** The calendar as today's answer says it: none asked today is `unknown`. */
   const calendarStatus = (today: string): StandingStatus["calendar"] => {
-    const python = deps.calendar.python;
+    const clockName = deps.calendar.clock;
     const day = answer?.date === today ? answer : undefined;
-    if (day === undefined) return { python, state: "unknown" };
-    if (!day.ok) return { python, state: "failed", error: day.error };
+    if (day === undefined) return { clock: clockName, state: "unknown" };
+    if (!day.ok) return { clock: clockName, state: "failed", error: day.error };
     const session = day.session;
     return {
-      python,
+      clock: clockName,
       state: day.stale === undefined ? "ok" : "stale",
       source: day.source,
       today: session === "closed" ? { date: day.date, closed: true } : { date: day.date, open: session.open, close: session.close, early: session.early },
@@ -975,16 +975,13 @@ const FACE_CLOCK: DeskClock = {
 
 /**
  * The clock row as the face runs it: {@link installSchedule} with the face's defaults - the market calendar over
- * scripts/market_clock.py, pinned by src/market-clock.ts `MARKET_CLOCK_SHA256` and run from a private copy in
- * `<desk dir>/run` under `python -I` (a failed run's stderr tail one line, once per distinct tail until a good ask),
- * a script producer under the same runner, `builtin:brief` over the quote hub when there is one (src/brief.ts),
+ * the builtin XNYS rules (src/market-clock.ts), a script producer under `python -I` (src/producer.ts), `builtin:brief` over the quote hub when there is one (src/brief.ts),
  * a fresh desk agent per firing (src/desk-session.ts `createDeskAgent`), the order's route (src/firing.ts
  * `resolveFiringRoute`, on the booted context's default model and model calls), and the day's budget against the last
  * good load's cap. `seams` replaces the clock - the wall clock by default, its timers `unref`'d - the calendar, the
- * runner (the clock's and a script producer's), the clock's pin (for a stand-in clock), the builtins, the tick and
- * the grace.
- * @param opts - `home` the harness home; `root` the repository root; `python` the face's interpreter (`FACE_PYTHON ||
- *   python3`); `hub` the quote hub; `session` the desk session's deps; `sessionCtx` the booted ROOT context, whose
+ * script producer's runner, the builtins, the tick and the grace.
+ * @param opts - `home` the harness home; `root` the repository root; `python` the interpreter a `.py` script producer runs
+ *   under; `hub` the desk's US quote source (src/us-quotes.ts); `session` the desk session's deps; `sessionCtx` the booted ROOT context, whose
  *   `agentDefaultModel` and `llm` a firing's route needs - a firing on a context without them could not run; `on` the
  *   root bus; `deliver` the desk conversation's; `log`, stderr by default; `now`, the owner's clock - the wall clock
  *   by default - under the face's timers; `seams`, for tests.
@@ -1000,38 +997,16 @@ export function createDeskSchedule(opts: {
   deliver: (text: string) => Promise<DeliverResult>;
   log?: (line: string) => void;
   now?: () => number;
-  seams?: { clock?: DeskClock; marketClockSha256?: string } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;
+  seams?: { clock?: DeskClock } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;
 }): ScheduleHandle {
   const log = opts.log ?? defaultLog;
   const seams = opts.seams ?? {};
   /* the clock seam, else the face's - on `now` when the owner's desk reads one (installDesk's), so the budget's day
    * and a firing's stamps agree with the conversation's (M7) */
   const clock = seams.clock ?? (opts.now === undefined ? FACE_CLOCK : { ...FACE_CLOCK, now: opts.now });
-  let toldTail: string | undefined;
-  /* one runner for the clock and a script producer: the face's interpreter, isolated */
+  /* the script producer's runner: the given interpreter, isolated */
   const runScript = seams.runScript ?? defaultProducerRunner(opts.python);
-  const clockAsk = pythonMarketClock({
-    root: opts.root,
-    python: opts.python,
-    runBase: join(deskDir(opts.home), "run"),
-    run: runScript,
-    log,
-    ...(seams.marketClockSha256 === undefined ? {} : { sha256: seams.marketClockSha256 }),
-    stderr: (tail) => {
-      if (tail === toldTail) return;
-      toldTail = tail;
-      log(`${BIN}: desk: schedule calendar: scripts/market_clock.py under ${opts.python} failed; its stderr ends: ${tail}`);
-    },
-  });
-  const calendar = seams.calendar ?? createMarketCalendar({
-    python: opts.python,
-    /* a good ask clears the tail last told, so the same failure after a recovery is logged again (p2-m32) */
-    ask: async (from, days) => {
-      const window = await clockAsk(from, days);
-      toldTail = undefined;
-      return window;
-    },
-  });
+  const calendar = seams.calendar ?? createMarketCalendar();
   const { sessionCtx } = opts;
   const handle: ScheduleHandle = installSchedule({
     home: opts.home,

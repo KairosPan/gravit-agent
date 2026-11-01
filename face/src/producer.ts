@@ -3,8 +3,8 @@
  * A producer is `scripts/<file>.py`, a Python script directly under the repository's `scripts/` whose
  * bytes `arm` hash-pins, or `builtin:<name>`, a face-side builder with nothing to hash
  * ({@link BUILTIN_PRODUCERS}; an unknown name is refused). A script runs through a
- * {@link ProducerRunner}: `execFile` of the face's interpreter (`FACE_PYTHON || python3`, the caller's
- * to choose - the one `scripts/face_data.py` runs on) isolated (`-I`, {@link PYTHON_FLAGS}: no user
+ * {@link ProducerRunner}: `execFile` of an interpreter (`FACE_PYTHON || python3`, the caller's to
+ * choose; the desk itself needs none - its market clock is Node, src/market-clock.ts) isolated (`-I`, {@link PYTHON_FLAGS}: no user
  * site, no `PYTHON*` variable, no script directory on `sys.path`), with no shell, the argv as given, cwd
  * the repository root, the {@link ProducerInput} as JSON on stdin, an environment cut to an allow-list
  * ({@link producerEnv}: never `DEEPSEEK_*` or `TELEGRAM_*`) and `SIGKILL` to its whole process group at
@@ -14,24 +14,22 @@
  * not this module's.
  *
  * The runner executes exactly the bytes it verified ({@link runPinnedScript}, which
- * {@link runScriptProducer} and the market clock share): it reads the script once, checks those bytes
- * against the hash pinned - at arming, or in the face's own code for the clock - and runs a private copy
+ * {@link runScriptProducer} uses): it reads the script once, checks those bytes against the hash pinned
+ * at arming, and runs a private copy
  * of them, never the file in `scripts/`, which another process could swap between the check and the
  * exec. The copy lives in a run base the caller names - a firing's is `<desk dir>/run`, under
  * `$DSH_HOME/face/desk/`, which neither the desk's sandbox nor a sandboxed workbench session can write
  * (both can write under `$TMPDIR`, so the copy never lives there). The residual: an unsandboxed process
  * running as the operator can still race the copy - and such a process can read the keys anyway.
  *
- * THE PIN COVERS THE SCRIPT'S BYTES; WHAT IT IMPORTS FROM THE REPOSITORY TREE (VIA `GRAVIT_ROOT`) IS NOT
- * PINNED. The copy lives outside the repository, so a producer that needs the repository's code finds it
- * through `GRAVIT_ROOT`, set in its environment, and opens with:
- *
- *     sys.path.insert(0, os.environ.get("GRAVIT_ROOT") or str(Path(__file__).resolve().parents[1]))
- *
- * After that line a module under the root - `alpaca_kit/`, or a `<root>/json.py` shadowing the standard
- * library - runs with the producer's environment, the market keys included, and a workbench session can
- * write it. `-I` closes the interpreter's own routes in (the user site, `PYTHONPATH`, the script's
- * directory), not that one. No script producer ships yet; P4's first one decides its import story.
+ * THE PIN COVERS THE SCRIPT'S BYTES, AND NOTHING IS IMPORTED FROM THE TREE. The repository holds no
+ * Python (since 2026-10-24) and ships no script producer. This runner is the entry for a separate Python
+ * research package: that package is INSTALLED into the interpreter the producer runs under (its
+ * site-packages, which `-I` keeps), never imported from the repository tree - a producer puts nothing on
+ * `sys.path`, so no module a workbench session can write under the root runs with the producer's
+ * environment. `GRAVIT_ROOT` (the absolute repository root, also the cwd) is set so a producer can find
+ * the files it reads, never as an import path. `-I` closes the interpreter's own routes in (the user
+ * site, `PYTHONPATH`, the script's directory).
  *
  * Self-contained: it imports none of the face's modules and the pause switch (`npm run desk`) does not
  * load it.
