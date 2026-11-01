@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { renderAccountScreen, renderStatement, renderSettings } from '../../client/js/render/account.js';
+import { renderAccountScreen, renderStatement, renderSettings, positionKeys, changeKey } from '../../client/js/render/account.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { parseHash, toHash } from '../../client/js/router.js';
@@ -652,4 +652,16 @@ test('Rules on a page that does not sign: the Guard seg live, no Beast sheet key
   // an unread page: its note, no rule
   lacks(draw(state({ tab: 'rules', page: null })), 'data-action="setGuard"');
   has(draw(state({ tab: 'rules', page: { ok: true } })), 'Account unreadable');
+});
+
+test("a Leverage key carries the most and the modes the market's read says; a Change key is not drawn for an order that cannot be changed", () => {
+  const page = JSON.parse(readFileSync(new URL('./../fixtures/account/account.json', import.meta.url), 'utf8'));
+  const perp = { venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', kind: 'perp', leverage: 3 };
+  const [bare] = positionKeys(perp, page).filter(k => k.includes('data-kind="leverage"'));
+  assert.doesNotMatch(bare, /data-max-leverage|data-margin-modes/, 'nothing said, nothing drawn');
+  const [said] = positionKeys(perp, page, { 'ex|BTC/USDT:USDT': { maxLeverage: 50, marginModes: ['cross', 'isolated'] } }).filter(k => k.includes('data-kind="leverage"'));
+  assert.match(said, /data-leverage="3" data-max-leverage="50" data-margin-modes="cross,isolated"/);
+  const order = { id: 'ord-0004', venue: 'ex', type: 'stop', kind: 'spot', qty: 0.6, stopPrice: 137.83, side: 'sell', base: 'SOL' };
+  assert.match(changeKey(order, page), /Change…/);
+  for (const flag of ['waitingForWallet', 'canceling', 'unfollowed', 'changing']) assert.equal(changeKey({ ...order, [flag]: true }, page), '', flag);
 });

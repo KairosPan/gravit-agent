@@ -18,7 +18,12 @@ const LIMITED = new Set(['limit', 'stop_limit']);
 const STOPPED = new Set(['stop', 'stop_limit']);
 /** The order types a Change sheet changes: the resting ones, with a price to move. */
 export const CHANGEABLE = new Set(['limit', 'stop', 'stop_limit']);
-const MARGINS = [{ value: '', label: 'Keep it' }, { value: 'cross', label: 'Cross' }, { value: 'isolated', label: 'Isolated' }];
+const MARGIN_LABELS = { cross: 'Cross', isolated: 'Isolated' };
+// the margin modes a seed offers: a list, or the comma-joined string a key's data-* drew it as; only the two the Account knows
+const modesOf = v => (Array.isArray(v) ? v : str(v).split(','))
+  .map(x => (typeof x === 'string' ? x.trim() : '')).filter((x, i, all) => Object.hasOwn(MARGIN_LABELS, x) && all.indexOf(x) === i);
+// the most leverage a seed allows: a whole figure of 1 or more, else none said
+const maxOf = v => { const n = Number(figure(v)); return Number.isInteger(n) && n >= 1 ? n : null; };
 
 /** The Market half's sheet kinds. */
 export const MARKET_KINDS = ['close', 'amend', 'leverage'];
@@ -68,10 +73,15 @@ export function marketFieldsOf(kind, seed) {
         ...(STOPPED.has(type) ? [{ name: 'stopPrice', label: event ? 'Stop, in cents' : 'Stop price', type: 'number', placeholder: shownPrice(s.stopPrice, event) || null, value: '' }] : []),
       ];
     }
-    case 'leverage': return [
-      { name: 'leverage', label: 'Leverage', type: 'number', placeholder: figure(s.leverage) || '1', value: '' },
-      { name: 'marginMode', label: 'Margin', type: 'select', options: MARGINS, value: '' },
-    ];
+    case 'leverage': {
+      const max = maxOf(s.maxLeverage);
+      const modes = modesOf(s.marginModes);
+      return [
+        { name: 'leverage', label: max ? `Leverage, 1 to ${max}` : 'Leverage', type: 'number', placeholder: figure(s.leverage) || '1', value: '' },
+        // a Margin choice only where the venue says which modes it sets
+        ...(modes.length ? [{ name: 'marginMode', label: 'Margin', type: 'select', options: [{ value: '', label: 'Keep it' }, ...modes.map(value => ({ value, label: MARGIN_LABELS[value] }))], value: '' }] : []),
+      ];
+    }
     default: return [];
   }
 }
@@ -113,8 +123,10 @@ export function marketDraftOf(kind, fields, seed) {
       if (!str(s.venue) || !str(s.symbol)) return 'No market to set leverage on';
       const leverage = text(fields, 'leverage');
       if (!/^\d{1,3}$/.test(leverage) || Number(leverage) < 1) return 'Leverage is a whole number, 1 or more';
-      const picked = text(fields, 'marginMode');
-      const marginMode = MARGINS.some(m => m.value === picked) ? picked : '';
+      const max = maxOf(s.maxLeverage);
+      if (max !== null && Number(leverage) > max) return `Leverage is at most ${max}x here`;
+      const marginMode = text(fields, 'marginMode');
+      if (marginMode !== '' && !modesOf(s.marginModes).includes(marginMode)) return 'That margin mode is not offered here';
       return { type: 'liveLeverage', venue: s.venue, symbol: s.symbol, leverage, marginMode };
     }
     default: return 'Nothing to sign here';
@@ -127,10 +139,12 @@ export function marketDraftOf(kind, fields, seed) {
 const canAt = (page, venue) => venuesOf(page).find(v => v.id === venue)?.tradeCan ?? { amend: false, leverage: false, close: false };
 
 /** A working order's Change seed (an openOrdersOf row), or null: only an order with an id, at a venue the page says changes
- *  orders in place, of a resting type. */
+ *  orders in place, of a resting type — and one the Account's own page would let you change: not waiting for its wallet to send
+ *  it, not being canceled, not unfollowed since a restart, with no change the venue has yet to confirm. */
 export function amendSeedOf(order, page) {
   const o = isRecord(order) ? order : {};
   if (!str(o.id) || !str(o.venue) || !CHANGEABLE.has(o.type) || !canAt(page, o.venue).amend) return null;
+  if (o.waitingForWallet === true || o.canceling === true || o.unfollowed === true || o.changing === true) return null;
   return {
     venue: o.venue, order: o.id, type: o.type, kind: str(o.kind), qty: figure(o.qty), limitPrice: figure(o.limitPrice),
     stopPrice: figure(o.stopPrice), side: str(o.side), base: str(o.base),
@@ -144,20 +158,32 @@ export function closeSeedOf(position) {
   return { venue: p.venue, symbol: p.symbol, name: str(p.name) || p.symbol, side: str(p.side), qty: figure(p.qty), kind: str(p.kind) };
 }
 
-/** A perpetual position's Leverage seed, or null: only a `perp` at a venue the page says sets leverage. */
-export function leverageSeedOf(position, page) {
+// what the venue says of a market's leverage, as the Account page's ticket reads it: the most it takes (the market read's
+// `maxLeverage`) and the margin modes it sets (the market read's `marginModes`, else the venue's `trade.marginModes`) — `quotes`
+// the markets' reads by `venue|symbol`; nothing said is left out
+function limitsAt(page, quotes, venue, symbol) {
+  const read = isRecord(quotes) && Object.hasOwn(quotes, `${venue}|${symbol}`) ? quotes[`${venue}|${symbol}`] : null;
+  const v = (isRecord(page) && Array.isArray(page.venues) ? page.venues : []).find(x => isRecord(x) && x.id === venue);
+  const given = Array.isArray(read?.marginModes) ? read.marginModes : isRecord(v?.trade) && Array.isArray(v.trade.marginModes) ? v.trade.marginModes : [];
+  const max = maxOf(read?.maxLeverage), modes = modesOf(given);
+  return { ...(max !== null ? { maxLeverage: String(max) } : {}), ...(modes.length ? { marginModes: modes.join(',') } : {}) };
+}
+
+/** A perpetual position's Leverage seed, or null: only a `perp` at a venue the page says sets leverage. `quotes` (optional) are
+ *  the market reads by `venue|symbol`: what the venue says of the most leverage and the margin modes of it. */
+export function leverageSeedOf(position, page, quotes = null) {
   const p = isRecord(position) ? position : {};
   if (p.kind !== 'perp' || !str(p.venue) || !str(p.symbol) || !canAt(page, p.venue).leverage) return null;
-  return { venue: p.venue, venueName: str(p.venueName), symbol: p.symbol, name: str(p.name) || p.symbol, leverage: figure(p.leverage) };
+  return { venue: p.venue, venueName: str(p.venueName), symbol: p.symbol, name: str(p.name) || p.symbol, leverage: figure(p.leverage), ...limitsAt(page, quotes, p.venue, p.symbol) };
 }
 
 /** A perpetual's market page Leverage seed: its first connected line at a venue the page says sets leverage, the leverage held
  *  there when a position at that line says it — or null. `item` is the market (its kind `perp`), `legs` its lines, `positions`
  *  what is held at them (positionsOf rows). */
-export function marketLeverageSeedOf(item, legs, positions, page) {
+export function marketLeverageSeedOf(item, legs, positions, page, quotes = null) {
   if (!isRecord(item) || item.kind !== 'perp') return null;
   const leg = (Array.isArray(legs) ? legs : []).find(l => isRecord(l) && l.connected === true && str(l.venue) && str(l.symbol) && canAt(page, l.venue).leverage);
   if (!leg) return null;
   const held = (Array.isArray(positions) ? positions : []).find(p => isRecord(p) && p.venue === leg.venue && p.symbol === leg.symbol);
-  return { venue: leg.venue, venueName: str(leg.venueName), symbol: leg.symbol, name: str(item.name) || leg.symbol, leverage: figure(held?.leverage) };
+  return { venue: leg.venue, venueName: str(leg.venueName), symbol: leg.symbol, name: str(item.name) || leg.symbol, leverage: figure(held?.leverage), ...limitsAt(page, quotes, leg.venue, leg.symbol) };
 }

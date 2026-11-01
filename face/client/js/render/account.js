@@ -109,7 +109,7 @@ function positionsBox(lens, state) {
   const rows = positionsOf(lens.data).map(p => [
     lines(p.symbol, [[p.venueName || p.venue, p.side, numWord(p.qty)].filter(Boolean).join(' · ')], p.paper ? 'Paper' : ''),
     esc(money(p.usd)), esc(price(p.entryPrice)), esc(price(p.markPrice)), `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>`,
-    ...(keyed ? [rowKeys(positionKeys(p, state.account.data))] : []),
+    ...(keyed ? [rowKeys(positionKeys(p, state.account.data, state.markets?.accountQuotes))] : []),
   ]);
   const head = ['Position', 'Value', 'Entry', 'Mark', 'P&L', ...(keyed ? [''] : [])];
   return rows.length ? box(`${title('Positions')}${table(head, rows)}`, 'Positions') : '';
@@ -237,7 +237,7 @@ export const marketKeysOn = state => signs(state) && writesOn(state.account?.dat
 const SEED_ATTRS = {
   venue: 'data-venue', venueName: 'data-venue-name', symbol: 'data-symbol', name: 'data-name', side: 'data-side', qty: 'data-qty',
   kind: 'data-market-kind', order: 'data-order', type: 'data-type', limitPrice: 'data-limit-price', stopPrice: 'data-stop-price',
-  base: 'data-base', leverage: 'data-leverage',
+  base: 'data-base', leverage: 'data-leverage', maxLeverage: 'data-max-leverage', marginModes: 'data-margin-modes',
 };
 const seedAttrs = seed => Object.fromEntries(Object.entries(seed).filter(([k]) => Object.hasOwn(SEED_ATTRS, k)).map(([k, v]) => [SEED_ATTRS[k], String(v)]));
 /** The key that opens a Market sheet on its seed. */
@@ -248,9 +248,9 @@ export function changeKey(order, page) {
   return seed ? marketKey('amend', seed, 'Change…') : '';
 }
 /** A position's keys: Close… (Sell… for a stock or an event), and Leverage… on a perpetual whose venue sets it. */
-export function positionKeys(position, page) {
+export function positionKeys(position, page, quotes = null) {
   const close = closeSeedOf(position);
-  const lev = leverageSeedOf(position, page);
+  const lev = leverageSeedOf(position, page, quotes);
   const sells = close && (close.kind === 'stock' || close.kind === 'event');
   return [close ? marketKey('close', close, sells ? 'Sell…' : 'Close…') : '', lev ? marketKey('leverage', lev, 'Leverage…') : ''].filter(Boolean);
 }

@@ -286,9 +286,11 @@ test('close, amend and leverage: the sheet view delegates each to the Market hal
   assert.deepEqual(fieldsOf('amend', amend).map(f => f.name), ['qty', 'limitPrice']);
   assert.deepEqual(draftOf('amend', { limitPrice: '62' }, amend, NOW), { type: 'liveAmend', venue: 'predict', order: 'ord-0020', qty: '', limitPrice: '0.62', stopPrice: '' });
   assert.equal(draftOf('amend', {}, amend, NOW), 'Type what changes');
-  const lev = { venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', leverage: '3' };
+  const lev = { venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', leverage: '3', maxLeverage: '20', marginModes: 'cross,isolated' };
   assert.equal(titleOf('leverage', lev), 'Leverage · BTC perpetual');
   assert.equal(goWord('leverage', lev), 'Sign leverage');
   assert.deepEqual(draftOf('leverage', { leverage: '5', marginMode: 'isolated' }, lev, NOW), { type: 'liveLeverage', venue: 'ex', symbol: 'BTC/USDT:USDT', leverage: '5', marginMode: 'isolated' });
   assert.equal(draftOf('leverage', { leverage: '0' }, lev, NOW), 'Leverage is a whole number, 1 or more');
+  assert.equal(draftOf('leverage', { leverage: '21' }, lev, NOW), 'Leverage is at most 20x here');
+  assert.equal(draftOf('leverage', { leverage: '5', marginMode: 'portfolio' }, lev, NOW), 'That margin mode is not offered here');
 });

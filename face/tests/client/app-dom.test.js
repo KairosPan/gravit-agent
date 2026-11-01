@@ -2022,7 +2022,7 @@ test("the Portfolio's BTC perpetual offers Close… and Leverage…", async () =
   assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'liveClose', venue: 'ex', symbol: 'BTC/USDT:USDT', qty: '' });
   assert.match(f.html(), /aria-label="Close BTC perpetual"[\s\S]*How much[\s\S]*placeholder="All 0\.01"[\s\S]*>Sign and close<\/button>/);
   // Leverage…: a whole number typed, prepared after the quiet
-  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'leverage', venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', leverage: '3' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'leverage', venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', leverage: '3', maxLeverage: '20', marginModes: 'cross,isolated' } });
   assert.equal(store.get().sheet.kind, 'leverage');
   assert.match(f.html(), /aria-label="Leverage · BTC perpetual"[\s\S]*placeholder="3"[\s\S]*<option value="" selected>Keep it<\/option>/);
   typeIn(f, 'leverage', '5');

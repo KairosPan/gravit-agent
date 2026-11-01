@@ -77,20 +77,37 @@ test('amend draws only the fields its type has', () => {
     { type: 'liveAmend', venue: 'predict', order: 'ord-0020', qty: '', limitPrice: '', stopPrice: '0.3' });
 });
 
-test('leverage refuses a fraction and keeps the margin mode blank by default', () => {
+test('leverage refuses a fraction and offers a margin mode only where the venue says which', () => {
   const seed = { venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', leverage: '3' };
   assert.equal(marketTitleOf('leverage', seed), 'Leverage · BTC perpetual');
   assert.equal(marketGoOf('leverage', seed), 'Sign leverage');
   const fields = marketFieldsOf('leverage', seed);
-  assert.deepEqual(fields, [
-    { name: 'leverage', label: 'Leverage', type: 'number', placeholder: '3', value: '' },
-    { name: 'marginMode', label: 'Margin', type: 'select', options: [{ value: '', label: 'Keep it' }, { value: 'cross', label: 'Cross' }, { value: 'isolated', label: 'Isolated' }], value: '' },
-  ]);
+  assert.deepEqual(fields, [{ name: 'leverage', label: 'Leverage', type: 'number', placeholder: '3', value: '' }], 'no mode said, no Margin choice');
   assert.equal(marketFieldsOf('leverage', { ...seed, leverage: '' })[0].placeholder, '1', 'none held: 1');
   for (const leverage of ['2.5', '', '0', '1000', 'x']) assert.equal(marketDraftOf('leverage', { leverage }, seed), 'Leverage is a whole number, 1 or more', leverage);
   assert.deepEqual(marketDraftOf('leverage', set(fields, { leverage: '5' }), seed), { type: 'liveLeverage', venue: 'ex', symbol: 'BTC/USDT:USDT', leverage: '5', marginMode: '' });
-  assert.equal(marketDraftOf('leverage', { leverage: '5', marginMode: 'cross' }, seed).marginMode, 'cross');
-  assert.equal(marketDraftOf('leverage', { leverage: '5', marginMode: 'portfolio' }, seed).marginMode, '', 'only the modes offered');
+  assert.equal(marketDraftOf('leverage', { leverage: '5', marginMode: 'cross' }, seed), 'That margin mode is not offered here', 'none offered: none taken');
+  assert.equal(marketDraftOf('leverage', { leverage: '5', marginMode: 'portfolio' }, seed), 'That margin mode is not offered here');
+});
+
+test("leverage is bounded by the market's own most and offers the modes the venue reports", () => {
+  const seed = { venue: 'ex', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', leverage: '3', maxLeverage: '20', marginModes: 'cross,isolated' };
+  const fields = marketFieldsOf('leverage', seed);
+  assert.deepEqual(fields, [
+    { name: 'leverage', label: 'Leverage, 1 to 20', type: 'number', placeholder: '3', value: '' },
+    { name: 'marginMode', label: 'Margin', type: 'select', options: [{ value: '', label: 'Keep it' }, { value: 'cross', label: 'Cross' }, { value: 'isolated', label: 'Isolated' }], value: '' },
+  ]);
+  assert.deepEqual(marketDraftOf('leverage', { leverage: '20', marginMode: 'isolated' }, seed), { type: 'liveLeverage', venue: 'ex', symbol: 'BTC/USDT:USDT', leverage: '20', marginMode: 'isolated' }, 'the most itself is allowed');
+  assert.equal(marketDraftOf('leverage', { leverage: '21' }, seed), 'Leverage is at most 20x here');
+  assert.equal(marketDraftOf('leverage', { leverage: '100' }, seed), 'Leverage is at most 20x here');
+  assert.equal(marketDraftOf('leverage', { leverage: '5', marginMode: 'portfolio' }, seed), 'That margin mode is not offered here');
+  // one mode only (an exchange whose orders go in cross margin), given as a list or as the string a key drew
+  const cross = { ...seed, marginModes: ['cross'] };
+  assert.deepEqual(marketFieldsOf('leverage', cross)[1].options, [{ value: '', label: 'Keep it' }, { value: 'cross', label: 'Cross' }]);
+  assert.equal(marketDraftOf('leverage', { leverage: '5', marginMode: 'isolated' }, cross), 'That margin mode is not offered here', 'isolated is not offered there');
+  assert.equal(marketDraftOf('leverage', { leverage: '5', marginMode: 'cross' }, cross).marginMode, 'cross');
+  // a most that is not a whole figure of 1 or more says nothing
+  for (const maxLeverage of ['', 'x', '0', '2.5', undefined]) assert.equal(marketDraftOf('leverage', { leverage: '100' }, { ...seed, maxLeverage }).leverage, '100', String(maxLeverage));
 });
 
 test("the seeds from the stand-in's rows: Change on a resting order at a venue that amends, Leverage on a perpetual where its venue sets it", () => {
@@ -101,6 +118,9 @@ test("the seeds from the stand-in's rows: Change on a resting order at a venue t
   assert.deepEqual(amendSeedOf(orders[2], page), { venue: 'ex', order: 'ord-0004', type: 'stop', kind: 'spot', qty: '0.6', limitPrice: '', stopPrice: '137.83', side: 'sell', base: 'SOL' });
   assert.equal(amendSeedOf({ ...orders[0], type: 'market' }, page), null, 'a market order does not rest');
   assert.equal(amendSeedOf({ ...orders[0], id: '' }, page), null);
+  // the Account page's own rule: no Change on an order waiting for its wallet, being canceled, not followed, or mid-change
+  assert.notEqual(amendSeedOf(orders[2], page), null);
+  for (const flag of ['waitingForWallet', 'canceling', 'unfollowed', 'changing']) assert.equal(amendSeedOf({ ...orders[2], [flag]: true }, page), null, flag);
   const positions = positionsOf(fx('holdings'));
   assert.deepEqual(closeSeedOf(positions[0]), { venue: 'ex', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', side: 'long', qty: '0.01', kind: 'perp' });
   assert.equal(closeSeedOf(positions[2]).kind, 'event');
@@ -108,9 +128,18 @@ test("the seeds from the stand-in's rows: Change on a resting order at a venue t
   assert.equal(leverageSeedOf(positions[2], page), null, 'an event is no perpetual');
   assert.equal(leverageSeedOf({ ...positions[0], venue: 'broker' }, page), null, 'the broker sets no leverage');
   // a perpetual's page: its first connected line whose venue sets leverage, with the leverage held there
+  // what the venue says of the market, from its read (`quotes` by venue|symbol) before the venue's own `trade.marginModes`
+  const quotes = { 'ex|BTC/USDT:USDT': { maxLeverage: 50, marginModes: ['cross', 'isolated'] } };
+  assert.deepEqual(leverageSeedOf(positions[0], page, quotes),
+    { venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', leverage: '3', maxLeverage: '50', marginModes: 'cross,isolated' });
+  const venued = { ...page, venues: page.venues.map(v => (v.id === 'ex' ? { ...v, trade: { ...v.trade, marginModes: ['cross', 'bogus'] } } : v)) };
+  assert.equal(leverageSeedOf(positions[0], venued).marginModes, 'cross', "the venue's modes where the market's read says none, only the two the Account knows");
+  assert.equal(leverageSeedOf(positions[0], venued, { 'ex|BTC/USDT:USDT': { marginModes: [] } }).marginModes, undefined, "a market's read of none is the market's word");
   const legs = [{ venue: 'broker', symbol: 'X', connected: true }, { venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', connected: true }];
   assert.deepEqual(marketLeverageSeedOf({ kind: 'perp', name: 'BTC perpetual' }, legs, positions, page),
     { venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', leverage: '3' });
+  assert.deepEqual(marketLeverageSeedOf({ kind: 'perp', name: 'BTC perpetual' }, legs, positions, page, quotes),
+    { venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'BTC/USDT:USDT', name: 'BTC perpetual', leverage: '3', maxLeverage: '50', marginModes: 'cross,isolated' });
   assert.equal(marketLeverageSeedOf({ kind: 'spot' }, legs, positions, page), null);
   assert.equal(marketLeverageSeedOf({ kind: 'perp' }, [{ ...legs[1], connected: false }], positions, page), null, 'a public listing only');
 });

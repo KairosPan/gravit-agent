@@ -161,6 +161,10 @@ export function orderRowsOf(orders, keys) {
       kind: str(o.kind), stopPrice: number(o.stopPrice), base: str(o.base),
       who: o.authority === 'owner' ? 'You' : name ? `Agent · ${name}` : 'An agent',
       paper: o.paper === true,
+      // what keeps an order from being changed (the Account page's tkAmendable, and the Account's own refusal of a change not yet
+      // confirmed): waiting for the wallet to send it, being canceled, not followed since a restart, a change the venue has not confirmed
+      waitingForWallet: Boolean(o.walletTxs) && !str(o.ref), canceling: o.canceling === true, unfollowed: Boolean(o.unfollowed),
+      changing: Boolean(o.changing),
     };
   });
 }

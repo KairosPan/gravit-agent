@@ -237,7 +237,7 @@ function costWords(c, unit) {
 // You here: the venues the sheet could not read; the holding, the positions with their cost and keys, the owner's open orders
 // with Change…; and under What agents do here a line per agent action — an order of theirs working here (with its Change…), a
 // statement line by them — so an agent's order is drawn once. A market the asset read does not name (an event no venue connected lists) holds nothing here.
-function youHere(view, part, here, keyed, page, now) {
+function youHere(view, part, here, keyed, page, now, quotes = null) {
   if (!assetKeyOf(view.item)) return empty('You don’t hold any.');
   const unit = view.priced.unit;
   const tail = keys => (keys.length ? `<span class="btn-row">${keys.join('')}</span>` : '');
@@ -247,7 +247,7 @@ function youHere(view, part, here, keyed, page, now) {
       ...(h ? [line('·', esc(`${[qtyWord(h.amount), h.asset].filter(Boolean).join(' ')} · ${money(h.usd)}`), esc(costWords(costOf(here, { key: h.key }), unit)))] : []),
       ...here.positions.map(p => line('·', `${esc(`${p.venueName || p.venue} · ${[p.side, qtyWord(p.qty), p.symbol].filter(Boolean).join(' ')} · `)}` +
         `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>${p.paper ? ` ${tag('Paper')}` : ''}`,
-        esc(costWords(costOf(here, p), unit)), '', keyed ? tail(positionKeys(p, page)) : '')),
+        esc(costWords(costOf(here, p), unit)), '', keyed ? tail(positionKeys(p, page, quotes)) : '')),
       ...here.orders.filter(o => o.who === 'You').map(o => line('·', esc(orderWords(o)), '', '', keyed ? tail([changeKey(o, page)].filter(Boolean)) : '')),
     ];
     const agents = here.agents.map(a => (a.type === 'order' ? line('·', esc(orderWords(a.order)), '', '', keyed ? tail([changeKey(a.order, page)].filter(Boolean)) : '')
@@ -335,7 +335,7 @@ function accountPage(id, view, state, now) {
   const depth = Object.fromEntries(['here', 'book', 'trades', 'funding'].map(k => [k, isRecord(own(kept, k)) ? kept[k] : {}]));
   const here = hereOf(depth.here.data, page);
   const hereAnswered = depth.here.data != null;
-  right.push(section('You here', youHere(view, depth.here, here, keyed, page, now)));
+  right.push(section('You here', youHere(view, depth.here, here, keyed, page, now, state.markets?.accountQuotes)));
   // the order book and the latest trades at the line the page follows
   const follows = followOf(view.item) !== null;
   if (follows) {
@@ -365,7 +365,7 @@ function accountPage(id, view, state, now) {
   const holds = hereAnswered ? here.held !== null || here.positions.length > 0 : view.held.assets.length > 0 || view.held.positions.length > 0;
   const trade = state.owner?.role === 'signs' && tradeableOf(view.item) ? { held: holds } : null;
   // a perpetual's Leverage…: its first connected line whose venue sets leverage, the leverage held there
-  const leverage = keyed ? marketLeverageSeedOf(view.item, view.legs, hereAnswered ? here.positions : view.held.positions, page) : null;
+  const leverage = keyed ? marketLeverageSeedOf(view.item, view.legs, hereAnswered ? here.positions : view.held.positions, page, state.markets?.accountQuotes) : null;
   return pageHtml(who, keysHtml(id, view.watched, trade, leverage), top, left, right);
 }
 

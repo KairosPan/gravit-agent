@@ -688,7 +688,7 @@ export function boot(win, host = {}) {
         venue: d.venue ?? '', order: d.order ?? '', type: d.type ?? '', kind: d.marketKind ?? '', qty: d.qty ?? '',
         limitPrice: d.limitPrice ?? '', stopPrice: d.stopPrice ?? '', side: d.side ?? '', base: d.base ?? '',
       }); break;
-      case 'leverage': void sheet.open('leverage', { venue: d.venue ?? '', venueName: d.venueName ?? '', symbol: d.symbol ?? '', name: d.name ?? '', leverage: d.leverage ?? '' }); break;
+      case 'leverage': void sheet.open('leverage', { venue: d.venue ?? '', venueName: d.venueName ?? '', symbol: d.symbol ?? '', name: d.name ?? '', leverage: d.leverage ?? '', maxLeverage: d.maxLeverage ?? '', marginModes: d.marginModes ?? '' }); break;
       // the Rules tab's (plan 4a Task 5): each seeded from the page as it stands — the cap now, whether the session ended, their
       // leverage now; the three limits only for an Account that takes writes
       // Beast only while it is not in force: a signature that changes nothing is never asked

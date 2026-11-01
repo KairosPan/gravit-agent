@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   seatWords,
-  pageOk, headOf, worthOf, changeOf, assetsOf, positionsOf, openOrdersOf, missingWords, statementLinesOf, statementCsvOf,
+  pageOk, headOf, worthOf, changeOf, assetsOf, positionsOf, openOrdersOf, orderRowsOf, missingWords, statementLinesOf, statementCsvOf,
   venuesOf, agentsOf, cardsOf, asksOf, requestsOf, connectOptionsOf, paperBooksOf, keyfileWords, writesOn,
 } from '../../client/js/host/account-view.js';
 import { grantOf, fieldsOf, draftOf, keyfileAskOf, reachAskOf, connectCheckOf } from '../../client/js/host/sheet-view.js';
@@ -160,7 +160,7 @@ test('openOrdersOf: only open, partial and pending; who is You or the agent name
   assert.deepEqual(open.map(o => [o.id, o.status, o.who]), [
     ['ord-0010', 'open', 'Agent · Claude Code'], ['ord-0009', 'pending', 'You'], ['ord-0004', 'open', 'You'], ['ord-0003', 'open', 'You'], ['ord-0002', 'open', 'You'],
   ], "an agent's order is named through the page's keys by its agent address");
-  assert.deepEqual(open[1], { id: 'ord-0009', venue: 'broker', venueName: 'Stand-in Broker', symbol: 'SPY', side: 'buy', type: 'limit', qty: 0.25, filledQty: 0, limitPrice: 660.07, status: 'pending', kind: 'stock', stopPrice: null, base: 'SPY', who: 'You', paper: false });
+  assert.deepEqual(open[1], { id: 'ord-0009', venue: 'broker', venueName: 'Stand-in Broker', symbol: 'SPY', side: 'buy', type: 'limit', qty: 0.25, filledQty: 0, limitPrice: 660.07, status: 'pending', kind: 'stock', stopPrice: null, base: 'SPY', who: 'You', paper: false, waitingForWallet: false, canceling: false, unfollowed: false, changing: false });
   assert.equal(open[2].type, 'stop'); assert.equal(open[2].limitPrice, null, 'a stop carries no limit price');
   assert.deepEqual([open[2].kind, open[2].stopPrice, open[2].base], ['spot', 137.83, 'SOL'], "a stop's own price, the market's kind and base");
   const hand = openOrdersOf({ ...page,
@@ -178,6 +178,17 @@ test('openOrdersOf: only open, partial and pending; who is You or the agent name
   assert.deepEqual(hand.map(o => [o.id, o.who, o.paper, o.filledQty]), [
     ['p1', 'Agent · Gravit', true, 0.5], ['p2', 'An agent', false, null], ['p3', 'An agent', false, null], ['p4', 'You', false, null], ['p5', 'An agent', false, null],
   ]);
+});
+
+test("orderRowsOf carries what keeps an order from being changed: waiting for a wallet, canceling, unfollowed, a change unconfirmed", () => {
+  const flags = o => { const [r] = orderRowsOf([{ id: 'o', status: 'open', authority: 'owner', ...o }], []); return [r.waitingForWallet, r.canceling, r.unfollowed, r.changing]; };
+  assert.deepEqual(flags({}), [false, false, false, false]);
+  assert.deepEqual(flags({ walletTxs: [{ to: '0x1' }] }), [true, false, false, false], 'transactions and no ref: the wallet has not sent it');
+  assert.deepEqual(flags({ walletTxs: [{ to: '0x1' }], ref: 'v-1' }), [false, false, false, false], 'sent, so followed');
+  assert.deepEqual(flags({ canceling: true }), [false, true, false, false]);
+  assert.deepEqual(flags({ unfollowed: true }), [false, false, true, false]);
+  assert.deepEqual(flags({ changing: { qty: 2 } }), [false, false, false, true]);
+  assert.deepEqual(flags({ canceling: 'yes', unfollowed: 0 }), [false, false, false, false], 'only what the Account says plainly');
 });
 
 test('statementLinesOf and statementCsvOf: newest first; the CSV header and a quoted description', () => {
