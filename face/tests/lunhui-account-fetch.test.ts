@@ -7,6 +7,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  ACCOUNT_UNAVAILABLE,
   accountFetch,
   accountOrigin,
   DEFAULT_ACCOUNT_URL,
@@ -108,23 +109,28 @@ test("the relay's refusals become the codes fetchBytes knows", async () => {
   const url = "https://qt.gtimg.cn/q=sh600000";
   assert.equal((await rejectsWith(account(() => refused(504, "timeout")).fetch(url))).code, "PROVIDER_TIMEOUT");
   assert.equal((await rejectsWith(account(() => refused(502, "too-large")).fetch(url))).code, "RESPONSE_TOO_LARGE");
-  for (const [status, word] of [[403, "not-listed"], [502, "unreachable"], [503, "off"]] as const) {
+  // the upstream not answering the Account is the upstream's failure: code-less
+  const far = await rejectsWith(account(() => refused(502, "unreachable")).fetch(url));
+  assert.equal(far.code, undefined);
+  assert.match(far.message, /unreachable/);
+  // the Account's own refusals are the Account's
+  for (const [status, word] of [[403, "not-listed"], [503, "off"]] as const) {
     const e = await rejectsWith(account(() => refused(status, word)).fetch(url));
-    assert.equal(e.code, undefined);
+    assert.equal(e.code, ACCOUNT_UNAVAILABLE);
     assert.match(e.message, new RegExp(word));
   }
 });
 
-test("an Account without the relay, or none at all, is a code-less failure naming the Account", async () => {
+test("an Account without the relay, or none at all, is the Account's failure, naming it", async () => {
   const url = "https://qt.gtimg.cn/q=sh600000";
   let e = await rejectsWith(account(() => new Response("Not Found", { status: 404 })).fetch(url));
-  assert.equal(e.code, undefined);
+  assert.equal(e.code, ACCOUNT_UNAVAILABLE);
   assert.match(e.message, /http:\/\/127\.0\.0\.1:4820/);
   assert.match(e.message, /HTTP 404/);
 
   const down = new TypeError("fetch failed");
   e = await rejectsWith(account(() => Promise.reject(down)).fetch(url));
-  assert.equal(e.code, undefined);
+  assert.equal(e.code, ACCOUNT_UNAVAILABLE);
   assert.equal(e.cause, down);
   assert.match(e.message, /http:\/\/127\.0\.0\.1:4820/);
 });
@@ -159,10 +165,10 @@ test("the 问财 query goes to the iFinD route, its token-free body only", async
   assert.equal((await rejectsWith(post(() => refused(504, "timeout", "ifind")))).code, "PROVIDER_TIMEOUT");
   assert.equal((await rejectsWith(post(() => refused(502, "too-large", "ifind")))).code, "RESPONSE_TOO_LARGE");
   const other = await rejectsWith(post(() => refused(400, "not-the-query", "ifind")));
-  assert.equal(other.code, undefined);
+  assert.equal(other.code, ACCOUNT_UNAVAILABLE);
   assert.match(other.message, /not-the-query/);
   const old = await rejectsWith(post(() => new Response("Not Found", { status: 404 })));
-  assert.equal(old.code, undefined);
+  assert.equal(old.code, ACCOUNT_UNAVAILABLE);
   assert.match(old.message, /127\.0\.0\.1:4820/);
 });
 

@@ -21,19 +21,26 @@
  *   nothing sent.
  *
  * An answer with neither header (an Account older than this, or something else on that port) and a
- * request that never gets an answer are code-less errors naming the Account, which `upstreamError`
- * words `UPSTREAM_INVALID` and writes to stderr; an abort of the caller's signal is rethrown as it is.
+ * request that never gets an answer are `ACCOUNT_UNAVAILABLE` errors naming the Account, which
+ * `upstreamError` words as the Account's failure, not the upstream's, and writes to stderr; an abort
+ * of the caller's signal is rethrown as it is.
  */
 
 export const DEFAULT_ACCOUNT_URL = "http://127.0.0.1:4820";
 export const WENCAI_QUERY_URL = "https://quantapi.51ifind.com/api/v1/smart_stock_picking";
 /** the codes the adapter throws for the iFinD route's two answers Lunhui words itself */
 export const IFIND_UNCONFIGURED = "IFIND_UNCONFIGURED", IFIND_CREDENTIAL = "IFIND_CREDENTIAL";
+/** the code of a failure that is the Account's own: no answer, an answer without the route, or its refusal */
+export const ACCOUNT_UNAVAILABLE = "ACCOUNT_UNAVAILABLE";
 
 /** The caller's headers the relay forwards upstream; the Account forwards no others. */
 const RELAYED_HEADERS = ["accept", "referer", "user-agent"];
 /** Refusal words that are codes `fetchBytes` already raises, and the iFinD route's own two. */
 const SHARED_CODES = { timeout: "PROVIDER_TIMEOUT", "too-large": "RESPONSE_TOO_LARGE" };
+/** The refusal word that is the upstream's failure, not the Account's: the code-less one. */
+const UPSTREAM_WORDS = new Set(["unreachable"]);
+/** An error the Account itself caused, so `upstreamError` names the Account. */
+const accountError = (message, options) => Object.assign(new Error(message, options), { code: ACCOUNT_UNAVAILABLE });
 const RELAY = { mark: "x-cn-relay", key: "relay", route: "relay", codes: SHARED_CODES };
 const IFIND = { mark: "x-cn-ifind", key: "ifind", route: "iFinD route", codes: { ...SHARED_CODES, unconfigured: IFIND_UNCONFIGURED, credential: IFIND_CREDENTIAL } };
 
@@ -76,7 +83,7 @@ export function accountFetch(origin, { fetchImpl = (u, i) => globalThis.fetch(u,
       return await fetchImpl(url, init);
     } catch (error) {
       if (signal?.aborted) throw error;
-      throw new Error(`the Account at ${base} did not answer`, { cause: error });
+      throw accountError(`the Account at ${base} did not answer`, { cause: error });
     }
   }
 
@@ -85,7 +92,7 @@ export function accountFetch(origin, { fetchImpl = (u, i) => globalThis.fetch(u,
     const said = response.headers.get(mark);
     if (said === "upstream") return response;
     if (said !== "refused") {
-      throw new Error(`the Account at ${base} answered without its ${route} (HTTP ${response.status}): restart it from this tree`);
+      throw accountError(`the Account at ${base} answered without its ${route} (HTTP ${response.status}): restart it from this tree`);
     }
     let word;
     try {
@@ -96,7 +103,7 @@ export function accountFetch(origin, { fetchImpl = (u, i) => globalThis.fetch(u,
     }
     const text = typeof word === "string" ? word : "an unreadable refusal";
     const error = new Error(`the Account at ${base} refused through its ${route}: ${text}`);
-    const code = typeof word === "string" && Object.hasOwn(codes, word) ? codes[word] : undefined;
+    const code = typeof word === "string" && Object.hasOwn(codes, word) ? codes[word] : UPSTREAM_WORDS.has(word) ? undefined : ACCOUNT_UNAVAILABLE;
     throw code ? Object.assign(error, { code }) : error;
   }
 
