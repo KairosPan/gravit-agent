@@ -16,7 +16,7 @@ import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   BUILTIN_PRODUCERS, PRODUCER_TEXT_MAX, PYTHON_FLAGS, SCRIPT_MAX_BYTES, STDERR_LOG_MAX, STDERR_OVER, STDOUT_OVER, baseEnv, capText,
-  defaultProducerRunner, formatDuration, formatProducer, isOverflow, parseProducer, producerEnv, readScriptBytes, resolveScript,
+  defaultProducerRunner, formatDuration, formatProducer, isOverflow, parseProducer, producerEnv, readFileBytes, readScriptBytes, resolveScript,
   runPinnedScript, runScriptProducer,
   type ProducerInput, type ProducerOutput, type ProducerRunner, type RunResult,
 } from "../src/producer.ts";
@@ -140,7 +140,8 @@ test("baseEnv and producerEnv keep their names and prefixes and nothing else", (
 test("parseProducer: one .py script under scripts/, a known builtin, nothing else", () => {
   assert.deepEqual(parseProducer("scripts/desk_capture.py"), { kind: "script", script: "scripts/desk_capture.py" });
   assert.deepEqual(parseProducer("builtin:brief"), { kind: "builtin", name: "brief" });
-  assert.deepEqual(parseProducer("builtin:report"), { error: 'unknown builtin "report"' });
+  assert.deepEqual(parseProducer("builtin:report"), { kind: "builtin", name: "report" });
+  assert.deepEqual(parseProducer("builtin:nope"), { error: 'unknown builtin "nope"' });
   for (const bad of ["", "builtin:", "python scripts/x.py", "/abs/x.py", "scripts/../x.py", "scripts/sub/x.py", "desk/x.py", "scripts/",
     "scripts/.x.py", "scripts/x.mjs", "scripts/x"]) assert.deepEqual(parseProducer(bad), { error: GRAMMAR }, bad);
   for (const bad of ["scripts/x.py\n", " scripts/x.py", "scripts/x.py ", "scripts/x y.py", "scripts/-x.py", "scripts/x.PY", "./scripts/x.py",
@@ -148,7 +149,7 @@ test("parseProducer: one .py script under scripts/, a known builtin, nothing els
   for (const notText of [["scripts/x.py"], ["builtin:brief"], 7, null, undefined, { script: "scripts/x.py" }]) {
     assert.deepEqual(parseProducer(notText), { error: GRAMMAR }, `a YAML ${JSON.stringify(notText) ?? "undefined"} is not a producer`);
   }
-  assert.deepEqual(BUILTIN_PRODUCERS, ["brief"]);
+  assert.deepEqual(BUILTIN_PRODUCERS, ["brief", "report"]);
 });
 
 test("formatProducer is parseProducer's inverse", () => {
@@ -591,4 +592,75 @@ test("runPinnedScript: the copy path the clock shares - its arguments after the 
   assert.equal(calls.length, 1);
   assert.equal(isOverflow(STDOUT_OVER) && isOverflow(STDERR_OVER), true);
   assert.equal(isOverflow("ENOENT") || isOverflow(undefined), false);
+});
+
+test("an aborted run kills the producer's whole group", async () => {
+  const pidFile = join(TEST_DIR, "abort.pids");
+  /* the child starts a sleeping grandchild that holds its stdout, prints both pids, and sleeps */
+  await writeFile(join(SCRIPTS, "abort-spawner.mjs"), [
+    'import { spawn } from "node:child_process";',
+    'import { writeFileSync } from "node:fs";',
+    'const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "inherit" });',
+    "writeFileSync(process.argv[2], JSON.stringify([process.pid, grandchild.pid]));",
+    'process.stdout.write("started");',
+    "setTimeout(() => {}, 60_000);",
+    "",
+  ].join("\n"));
+  const run = defaultProducerRunner(process.execPath, []);
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 200);
+  const t0 = Date.now();
+  const r = await run([join(SCRIPTS, "abort-spawner.mjs"), pidFile], { cwd: ROOT, env: { PATH: process.env.PATH }, timeoutMs: 30_000, signal: controller.signal });
+  assert.ok(Date.now() - t0 < 2_000, "the run ends at the abort, though a grandchild held the pipe");
+  assert.deepEqual({ code: r.code, timedOut: r.timedOut, error: r.error }, { code: null, timedOut: false, error: "aborted" });
+  const pids = JSON.parse(await readFile(pidFile, "utf8")) as number[];
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      assert.equal((error as NodeJS.ErrnoException).code, "ESRCH");
+      return false;
+    }
+  };
+  for (let i = 0; i < 40 && pids.some(alive); i++) await new Promise((done) => setTimeout(done, 50));
+  for (const pid of pids) assert.equal(alive(pid), false, `${pid} died with its group`);
+
+  /* a signal already aborted starts nothing that outlives it */
+  const gone = new AbortController();
+  gone.abort();
+  const r2 = await run([join(SCRIPTS, "sleep.mjs")], { cwd: ROOT, env: { PATH: process.env.PATH }, timeoutMs: 30_000, signal: gone.signal });
+  assert.deepEqual({ code: r2.code, timedOut: r2.timedOut, error: r2.error }, { code: null, timedOut: false, error: "aborted" });
+});
+
+test("an aborted script producer is { ok: false, error: aborted }, and runPinnedScript passes the signal on", async () => {
+  const seen: Array<AbortSignal | undefined> = [];
+  const run: ProducerRunner = async (_argv, opts) => {
+    seen.push(opts.signal);
+    return { code: null, stdout: "half", stderr: "", timedOut: false, error: "aborted" };
+  };
+  const controller = new AbortController();
+  const ok = await shaOf(join(SCRIPTS, "ok.py"));
+  const r = await runScriptProducer({ root: ROOT, script: "scripts/ok.py", sha256: ok, runBase: RUN_BASE, run, input: INPUT, timeoutMs: 5_000, log: () => {},
+    signal: controller.signal });
+  assert.deepEqual(r.output, { ok: false, error: "aborted" });
+  assert.equal(seen[0], controller.signal);
+  await runScriptProducer({ root: ROOT, script: "scripts/ok.py", sha256: ok, runBase: RUN_BASE, run, input: INPUT, timeoutMs: 5_000, log: () => {} });
+  assert.equal(seen.length, 2);
+  assert.equal(seen[1], undefined, "no signal given, none passed");
+});
+
+test("readFileBytes keeps the failure's code; readScriptBytes still reads it as missing", async () => {
+  const dir = join(TEST_DIR, "bytes");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "f.txt"), "hello");
+  await symlink("f.txt", join(dir, "link.txt"));
+  assert.deepEqual(await readFileBytes(join(dir, "f.txt"), 5), Buffer.from("hello"));
+  assert.equal(await readFileBytes(join(dir, "f.txt"), 4), "oversized");
+  assert.equal(await readFileBytes(join(dir, "link.txt"), 100), "irregular");
+  assert.equal(await readFileBytes(dir, 100), "irregular");
+  assert.deepEqual(await readFileBytes(join(dir, "nope.txt"), 100), { errno: "ENOENT" });
+  assert.deepEqual(await readFileBytes(join(dir, "f.txt", "below"), 100), { errno: "ENOTDIR" });
+  assert.equal(await readScriptBytes(join(dir, "nope.txt")), "missing");
+  assert.equal(await readScriptBytes(join(dir, "link.txt")), "irregular");
 });

@@ -155,8 +155,8 @@ const BACKTEST_RE = /^(\d{4}-\d{2}-\d{2})-.*\.json$/;
  * Stricter than that module's `RUN_ID_RE`, which `notes` or `2026-10-19` pass too, so a stray
  * directory beside the runs never lists as one. Copied, not imported: the face does not import
  * from `plugins/`; `tests/channels.test.ts` lists directories `openRun` made, which ties the copy
- * to its source. */
-const ANALYSIS_RUN_RE = /^\d{8}T\d{6}Z-[0-9a-f]{8}$/;
+ * to its source. The report (src/report.ts) reads its screen line by it too. */
+export const ANALYSIS_RUN_RE = /^\d{8}T\d{6}Z-[0-9a-f]{8}$/;
 
 /** The most runs the channel page lists, the newest by id. */
 const ANALYSIS_RUNS_CAP = 50;
@@ -164,7 +164,7 @@ const ANALYSIS_RUNS_CAP = 50;
 /** The caps on a run's files the card reads, each measured on the compact JSON as
  * {@link readBoundedJson} does (modules spec §5.11): `run.json` - the manifest, a few hundred bytes
  * per evidence entry and at most eight freezes - and one module artifact. */
-const RUN_MANIFEST_MAX_BYTES = 8 * 1024;
+export const RUN_MANIFEST_MAX_BYTES = 8 * 1024;
 const RUN_ARTIFACT_MAX_BYTES = 24 * 1024;
 
 /** The Lunhui modules in a run's order, each with its artifact's file in the run directory and
@@ -394,6 +394,68 @@ async function runBytes(runDir: string): Promise<number | null> {
   return total;
 }
 
+/** A strategy's `analysis/` listed: its path, its real path, and its run directories by the id form, newest
+ * first. Throws as {@link readAnalysisRuns} documents. */
+async function listRuns(strategyDir: string): Promise<{ analysisDir: string; realAnalysis: string; runs: string[] }> {
+  const analysisDir = join(strategyDir, "analysis");
+  const realAnalysis = join(await realpath(strategyDir), "analysis");
+  /* a file or a link where analysis/ should be is not "no runs yet" but a channel that cannot be
+   * read: ENOTDIR, which readChannelBody swallows and readModulesChannels lists unreadable */
+  if (!(await lstat(analysisDir)).isDirectory()) throw Object.assign(new Error("analysis/ is not a directory"), { code: "ENOTDIR" });
+  /* run directories only - a link, a file or a stray name is not a run - newest first by id,
+   * which opens with the run's UTC second, so name order is time order */
+  const runs = (await readdir(analysisDir, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && ANALYSIS_RUN_RE.test(entry.name))
+    .map((entry) => entry.name)
+    .sort()
+    .reverse();
+  return { analysisDir, realAnalysis, runs };
+}
+
+/** One run's manifest as {@link readRunManifests} reads it: its `run.json` as an object; `unusable` when that is
+ * there but cannot be used (a link, a hard link, over the cap, not JSON, not an object); `missing` when there is
+ * none - a run still being opened. */
+export type RunManifest =
+  | { run: string; manifest: Record<string, unknown> }
+  | { run: string; unusable: true }
+  | { run: string; missing: true };
+
+/**
+ * The manifests of a strategy's newest `cap` Lunhui runs, newest first: listed as {@link readAnalysisRuns} lists
+ * them - a real `analysis/` only, run directories by the id form, each checked to be still where the listing found
+ * it ({@link stillAt}) before its read, and skipped when it is not - each `run.json` read as the runs card reads one
+ * ({@link readBoundedJson}, {@link RUN_MANIFEST_MAX_BYTES}). Nothing else in a run is opened. The report's screen
+ * line (src/report.ts) reads it.
+ * @param strategyDir - the strategy's directory, absolute.
+ * @param cap - the most runs read, the newest.
+ * @throws as {@link readAnalysisRuns}: `ENOENT` with no strategy directory or no `analysis/`, `ENOTDIR` when
+ *   `analysis/` is a file or a link, and the listing's own failure.
+ */
+export async function readRunManifests(strategyDir: string, cap: number): Promise<RunManifest[]> {
+  const { analysisDir, realAnalysis, runs } = await listRuns(strategyDir);
+  const out: RunManifest[] = [];
+  for (const run of runs.slice(0, Math.max(0, cap))) {
+    const runDir = join(analysisDir, run);
+    if (!(await stillAt(analysisDir, realAnalysis)) || !(await stillAt(runDir, join(realAnalysis, run)))) continue;
+    const path = join(runDir, "run.json");
+    const read = await readBoundedJson(path, RUN_MANIFEST_MAX_BYTES);
+    if (read === null) {
+      let gone = false;
+      try {
+        await lstat(path);
+      } catch (error) {
+        gone = (error as NodeJS.ErrnoException).code === "ENOENT";
+      }
+      out.push(gone ? { run, missing: true } : { run, unusable: true });
+    } else if (!read.parsed || !isRecord(read.json)) {
+      out.push({ run, unusable: true });
+    } else {
+      out.push({ run, manifest: read.json });
+    }
+  }
+  return out;
+}
+
 /**
  * The runs card's blocks from a channel's `analysis/` (modules spec §5.11): run directories by the
  * id form, newest first, the newest `options.cap` (default {@link ANALYSIS_RUNS_CAP}) read and
@@ -408,18 +470,7 @@ async function runBytes(runDir: string): Promise<number | null> {
 export async function readAnalysisRuns(strategyDir: string, options: { cap?: number } = {}): Promise<AnalysisRuns> {
   const cap = options.cap ?? ANALYSIS_RUNS_CAP;
   const out: AnalysisRuns = { runs: [], runsOmitted: 0, latestRun: null };
-  const analysisDir = join(strategyDir, "analysis");
-  const realAnalysis = join(await realpath(strategyDir), "analysis");
-  /* a file or a link where analysis/ should be is not "no runs yet" but a channel that cannot be
-   * read: ENOTDIR, which readChannelBody swallows and readModulesChannels lists unreadable */
-  if (!(await lstat(analysisDir)).isDirectory()) throw Object.assign(new Error("analysis/ is not a directory"), { code: "ENOTDIR" });
-  /* run directories only - a link, a file or a stray name is not a run - newest first by id,
-   * which opens with the run's UTC second, so name order is time order */
-  const runs = (await readdir(analysisDir, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory() && ANALYSIS_RUN_RE.test(entry.name))
-    .map((entry) => entry.name)
-    .sort()
-    .reverse();
+  const { analysisDir, realAnalysis, runs } = await listRuns(strategyDir);
   out.runsOmitted = Math.max(0, runs.length - cap);
   for (const run of runs.slice(0, cap)) {
     const runDir = join(analysisDir, run);

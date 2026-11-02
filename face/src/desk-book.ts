@@ -68,6 +68,11 @@
  * symbol is. A filing rule lists no A share -
  * filings are SEC's - but `holdings` or `levels` may hold one, and filings.ts skips it. At most {@link RULES_MAX}.
  *
+ * TWO READS FOR P4. {@link readDeskFile} reads any one desk file - a strategy's `status.yaml`, the `levels.yml` a
+ * firing verifies against its pin - on producer.ts's descriptor read (no link followed, no FIFO waited on, the size
+ * capped), and {@link parseLevels} is {@link loadLevels} on text already read, so the report quotes exactly the bytes
+ * the firing checked.
+ *
  * MODULE WEIGHT. It imports standing.ts, and js-yaml with it, so the pause switch (scripts/desk.ts) never
  * imports it eagerly: a command that needs it, as P4's `arm` will, loads it on first use.
  * @module
@@ -75,6 +80,7 @@
 import { constants as fsConstants, type Stats } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";
 import { cut, escaped } from "./echo.ts";
+import { readFileBytes } from "./producer.ts";
 import { isEtDate, isOrderId, readDeskYaml, sha256Hex } from "./standing.ts";
 import { marketOf, SYMBOL_RE, type Market } from "./symbols.ts";
 
@@ -561,6 +567,36 @@ export function levelDistancePct(level: Pick<Level, "price" | "range">, last: nu
 
 /* ---------- the file ---------- */
 
+/** One desk file as {@link readDeskFile} reads it. */
+export type DeskFile =
+  | { state: "absent" }
+  | { state: "unreadable"; reason: string }
+  | { state: "oversize" }
+  | { state: "ok"; bytes: Buffer; text: string };
+
+/**
+ * Read one desk file whole, on producer.ts's descriptor read (`readFileBytes`): a link at the path is never followed
+ * and a FIFO never waited on, and at most one byte past `maxBytes` is read.
+ * @param path - the file.
+ * @param maxBytes - the most bytes it may hold, {@link DESK_FILE_MAX_BYTES} by default.
+ * @returns `absent` for `ENOENT` or `ENOTDIR`; `unreadable` with the failure's code for any other, with `not a
+ *   regular file` for a link, a FIFO, a directory or a device, and with `not UTF-8` for bytes a fatal UTF-8 decode
+ *   refuses; `oversize` past `maxBytes`; else `ok`, the bytes and their text.
+ */
+export async function readDeskFile(path: string, maxBytes: number = DESK_FILE_MAX_BYTES): Promise<DeskFile> {
+  const read = await readFileBytes(path, maxBytes);
+  if (read === "irregular") return { state: "unreadable", reason: "not a regular file" };
+  if (read === "oversized") return { state: "oversize" };
+  if (!Buffer.isBuffer(read)) {
+    return read.errno === "ENOENT" || read.errno === "ENOTDIR" ? { state: "absent" } : { state: "unreadable", reason: read.errno };
+  }
+  try {
+    return { state: "ok", bytes: read, text: new TextDecoder("utf-8", { fatal: true }).decode(read) };
+  } catch {
+    return { state: "unreadable", reason: "not UTF-8" };
+  }
+}
+
 /** A book file as read: missing, refused whole, or its text. */
 type BookRead =
   | { missing: true }
@@ -643,9 +679,9 @@ interface BookRules<T> {
  * @param text - the file's text.
  * @param file - its repo-relative label.
  * @param rules - the cap and the entry's judge.
- * @param pin - the bytes' `sha256` and `mtime`, carried into the result.
+ * @param pin - the bytes' `sha256` and, when they were read from a file, its `mtime`, carried into the result.
  */
-function parseBook<T>(text: string, file: string, rules: BookRules<T>, pin: { sha256: string; mtime: string }): LoadResult<T> {
+function parseBook<T>(text: string, file: string, rules: BookRules<T>, pin: { sha256: string; mtime?: string }): LoadResult<T> {
   const refused = (error: string): LoadResult<T> => ({ file, entries: [], refusals: [], error, ...pin });
   let doc: unknown;
   try {
@@ -706,7 +742,29 @@ export async function loadHoldings(path: string, file: string): Promise<LoadResu
  */
 export async function loadLevels(path: string, file: string, today: string): Promise<LoadResult<Level>> {
   if (!isEtDate(today)) throw new TypeError(`loadLevels takes today as YYYY-MM-DD, not ${JSON.stringify(today)}`);
-  return loadBook(path, file, { max: LEVELS_PER_FILE, capNoun: "levels per file", judge: (raw, index) => judgeLevel(raw, index, file, today) });
+  return loadBook(path, file, levelRules(file, today));
+}
+
+/** How a levels file is judged, at `file` against `today`. */
+function levelRules(file: string, today: string): BookRules<Level> {
+  return { max: LEVELS_PER_FILE, capNoun: "levels per file", judge: (raw, index) => judgeLevel(raw, index, file, today) };
+}
+
+/**
+ * {@link loadLevels} without the read: a levels file's text, already read and verified by the caller, parsed and
+ * judged the same way. Its size cap is the text's UTF-8 length, its `sha256` the caller's, and it has no `mtime`.
+ * `loadLevels` keeps its own read and its own `sha256`, which the watch keys on.
+ * @param text - the file's text.
+ * @param file - its repo-relative label, `strategies/<name>/levels.yml`.
+ * @param today - the date a level's expiry is judged against, YYYY-MM-DD.
+ * @param sha256 - the pin the caller verified the bytes against.
+ * @throws TypeError - when `today` is not a real date written YYYY-MM-DD.
+ */
+export function parseLevels(text: string, file: string, today: string, sha256: string): LoadResult<Level> {
+  if (!isEtDate(today)) throw new TypeError(`parseLevels takes today as YYYY-MM-DD, not ${JSON.stringify(today)}`);
+  const bytes = Buffer.byteLength(text, "utf8");
+  if (bytes > DESK_FILE_MAX_BYTES) return { file, entries: [], refusals: [], error: oversized(file, bytes), sha256 };
+  return parseBook(text, file, levelRules(file, today), { sha256 });
 }
 
 /**

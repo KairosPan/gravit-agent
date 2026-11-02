@@ -10,7 +10,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import {
   BACKTEST_MAX_BYTES, BACKTEST_MAX_DISK_BYTES, createChannel, listChannelDirs, listSessionHeads, mergeSessionHeads,
-  MODULE_HEADLINES, presetHintsOf, readAnalysisRuns, readChannelStatus, readChannelBody, reconcileChannels, registerChannelRoutes, WORKBENCH,
+  ANALYSIS_RUN_RE, MODULE_HEADLINES, presetHintsOf, readAnalysisRuns, readChannelStatus, readChannelBody, readRunManifests, reconcileChannels, registerChannelRoutes,
+  RUN_MANIFEST_MAX_BYTES, WORKBENCH,
 } from "../src/channels.ts";
 import { rosterFor, setRoster } from "../src/roster.ts";
 import { HttpError } from "../src/http.ts";
@@ -1312,4 +1313,46 @@ test("the repository's strategies/cn-market lists as a channel, the market read'
   assert.equal(market.isRoot, false);
   assert.equal(market.dir, join(repoRoot, "strategies", "cn-market"));
   assert.equal((await readChannelStatus(market.dir)).status, "idea");
+});
+
+test("readRunManifests lists run directories by the id form, newest first, and says why a manifest is unusable", async () => {
+  assert.equal(RUN_MANIFEST_MAX_BYTES, 8 * 1024);
+  assert.ok(ANALYSIS_RUN_RE.test("20261127T081000Z-000000a1") && !ANALYSIS_RUN_RE.test("notes"));
+  const outside = await strategyDir("face-manifests-outside-");
+  const foreign = await makeRun(outside, new Date("2026-10-23T01:00:00Z"));
+  const dir = await strategyDir("face-manifests-");
+  const sealed = await makeRun(dir, new Date("2026-10-24T01:00:00Z"), { kind: "market" });
+  const open = await makeRun(dir, new Date("2026-10-23T01:00:00Z"), { open: true });
+  /* a run directory that is a link, and a stray directory: neither listed */
+  await symlink(foreign.runDir, join(dir, "analysis", "20261029T000000Z-dddddddd"));
+  await mkdir(join(dir, "analysis", "notes"));
+  /* no run.json, a symlinked one, a 20 KiB one, one not JSON, one a list */
+  const at = (id: string): string => join(dir, "analysis", id);
+  await mkdir(at("20261028T000000Z-0000000e"));
+  await mkdir(at("20261027T000000Z-0000000f"));
+  await symlink(join(foreign.runDir, "run.json"), join(at("20261027T000000Z-0000000f"), "run.json"));
+  await mkdir(at("20261026T000000Z-00000010"));
+  await writeFile(join(at("20261026T000000Z-00000010"), "run.json"), JSON.stringify({ pad: "x".repeat(20 * 1024) }));
+  await mkdir(at("20261025T000000Z-00000011"));
+  await writeFile(join(at("20261025T000000Z-00000011"), "run.json"), "{ not json");
+  await mkdir(at("20261025T000000Z-00000012"));
+  await writeFile(join(at("20261025T000000Z-00000012"), "run.json"), "[1, 2]");
+  const all = await readRunManifests(dir, 200);
+  assert.deepEqual(all.map((m) => m.run), [
+    "20261028T000000Z-0000000e", "20261027T000000Z-0000000f", "20261026T000000Z-00000010", "20261025T000000Z-00000012", "20261025T000000Z-00000011",
+    sealed.run, open.run,
+  ]);
+  assert.deepEqual(all.slice(0, 5).map((m) => ("missing" in m ? "missing" : "unusable" in m ? "unusable" : "manifest")),
+    ["missing", "unusable", "unusable", "unusable", "unusable"]);
+  const [s, o] = all.slice(5) as Array<{ run: string; manifest: Record<string, unknown> }>;
+  assert.equal(s.manifest.kind, "market");
+  assert.equal(typeof s.manifest.sealed_at, "string");
+  assert.equal(o.manifest.sealed_at, null);
+  assert.deepEqual((await readRunManifests(dir, 2)).map((m) => m.run), ["20261028T000000Z-0000000e", "20261027T000000Z-0000000f"], "the newest cap");
+  /* no analysis/, a linked one, a file: thrown as readAnalysisRuns throws */
+  await assert.rejects(readRunManifests(await strategyDir("face-manifests-bare-"), 5), (err: NodeJS.ErrnoException) => err.code === "ENOENT");
+  const linked = await strategyDir("face-manifests-link-");
+  await symlink(join(dir, "analysis"), join(linked, "analysis"));
+  await assert.rejects(readRunManifests(linked, 5), (err: NodeJS.ErrnoException) => err.code === "ENOTDIR");
+  await assert.rejects(readRunManifests(join(dir, "nowhere"), 5), (err: NodeJS.ErrnoException) => err.code === "ENOENT");
 });

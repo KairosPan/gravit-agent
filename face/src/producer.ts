@@ -31,8 +31,8 @@
  * the files it reads, never as an import path. `-I` closes the interpreter's own routes in (the user
  * site, `PYTHONPATH`, the script's directory).
  *
- * Self-contained: it imports none of the face's modules and the pause switch (`npm run desk`) does not
- * load it.
+ * Self-contained: it imports none of the face's modules - a type from src/symbols.ts aside - and the pause
+ * switch (`npm run desk`) does not load it.
  * @module
  */
 import { spawn, type ChildProcess } from "node:child_process";
@@ -40,6 +40,7 @@ import { createHash } from "node:crypto";
 import { constants as fsConstants, lstat, mkdir, mkdtemp, open, realpath, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { constants } from "node:os";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import type { Market } from "./symbols.ts";
 
 const BIN = "gravit-face";
 
@@ -86,8 +87,9 @@ export function producerEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 /* ---------- the grammar ---------- */
 
-/** The built-in producers: face-side builders, nothing to hash. `brief` is the pre-close brief. */
-export const BUILTIN_PRODUCERS = ["brief"] as const;
+/** The built-in producers: face-side builders, nothing to hash. `brief` is the pre-close brief, `report` a
+ * strategy's pre-market report (src/report.ts). */
+export const BUILTIN_PRODUCERS = ["brief", "report"] as const;
 
 /** A built-in producer's name. */
 export type BuiltinName = (typeof BUILTIN_PRODUCERS)[number];
@@ -164,18 +166,33 @@ export async function resolveScript(root: string, script: string): Promise<{ pat
 
 /* ---------- what a producer gets and gives ---------- */
 
+/** A strategy's `levels.yml` as the firing checked it against the pin taken at arming: the bytes it read and
+ * verified, so a builtin quotes exactly those, never the file again. */
+export interface VerifiedLevels {
+  /** The file's repo-relative label, `<dir>/levels.yml`. */
+  file: string;
+  /** The pin: 64 hex, or `none` when the order was armed with no file. */
+  sha256: string;
+  /** The checked bytes as UTF-8; `null` for `none`. */
+  text: string | null;
+}
+
 /** What a producer is told: the JSON on a script's stdin, the argument to a builtin. */
 export interface ProducerInput {
   /** The standing order's id. */
   order: string;
   /** The firing's key. */
   firing: string;
-  /** The ET date the order fires for, `YYYY-MM-DD`. */
+  /** The date the order fires for, `YYYY-MM-DD`: its market's date (New York's for `us`, Beijing's for `cn`). */
   date: string;
   /** The order's directory, repo-relative. */
   dir: string;
+  /** The order's market; absent is `us`, as every order armed before P4 is. */
+  market?: Market;
   /** That date's market session: its open, its close, and whether the close is early. */
   session: { open: string; close: string; early: boolean };
+  /** The strategy's `levels.yml` as verified at the firing, for an order whose arming pinned it. */
+  levels?: VerifiedLevels;
 }
 
 /** What a producer gives: its text, or why it failed - with the text it wrote, when that is worth quoting. */
@@ -190,8 +207,8 @@ export type BuiltinProducer = (input: ProducerInput, signal: AbortSignal) => Pro
  * How one run of a child ended. Exactly one of: an exit `code` (a death by a signal the face did not
  * send counts as the shell's 128 + n: 137 for `SIGKILL`); `timedOut` (killed at the deadline, `code`
  * null); or an `error` with `code` null - a spawn failure's code (`ENOENT`, `EACCES`, or a refused
- * argument such as `ERR_INVALID_ARG_VALUE`), `stdout over 1 MiB` or `stderr over 1 MiB`. `stdout` and
- * `stderr` hold what was read either way.
+ * argument such as `ERR_INVALID_ARG_VALUE`), `stdout over 1 MiB`, `stderr over 1 MiB`, or
+ * {@link ABORTED} (the caller's signal aborted). `stdout` and `stderr` hold what was read either way.
  */
 export interface RunResult {
   code: number | null;
@@ -201,11 +218,16 @@ export interface RunResult {
   error?: string;
 }
 
-/** Run `argv` under an interpreter the runner was made with. Never rejects: every ending is a {@link RunResult}. */
+/** Run `argv` under an interpreter the runner was made with. Never rejects: every ending is a {@link RunResult}.
+ * `signal`, when given, ends the run as {@link ABORTED} when it aborts - the firing's deadline, the schedule's dispose,
+ * the face's shutdown (ruling 8). */
 export type ProducerRunner = (
   argv: string[],
-  opts: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; stdin?: string },
+  opts: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; stdin?: string; signal?: AbortSignal },
 ) => Promise<RunResult>;
+
+/** A {@link RunResult}'s `error` when the caller's signal aborted the run, and the producer's error with it. */
+export const ABORTED = "aborted";
 
 /** The most a child may write to either stream before it is killed: 1 MiB, in bytes. */
 const STDIO_MAX_BYTES = 1_048_576;
@@ -237,7 +259,8 @@ function codeOf(error: unknown): string {
  * `timeoutMs` that whole group gets `SIGKILL` - a process the script started dies with it, and one holding its
  * stdout open no longer keeps the run waiting; a deadline of zero or less kills at once, never "no deadline". A
  * child that writes more than 1 MiB to either stream is killed the same way, its group with it, what it wrote up
- * to the limit kept. Never rejects: a spawn failure, a refused argument and a broken stdin pipe all end in a
+ * to the limit kept. When `opts.signal` aborts - or has already - the group gets `SIGKILL` too, and the run ends
+ * `{ code: null, timedOut: false, error: "aborted" }` with what was read. Never rejects: a spawn failure, a refused argument and a broken stdin pipe all end in a
  * {@link RunResult}.
  * @param python - the interpreter: an absolute path, or a name looked up on the `PATH` of the environment
  *   each run is GIVEN (none there is `ENOENT`; both allow-lists keep `PATH`). The face passes
@@ -258,6 +281,7 @@ export function defaultProducerRunner(python: string, flags: readonly string[] =
     }
     let timedOut = false;
     let overflow: string | undefined;
+    let aborted = false;
     let settled = false;
     const out: Buffer[] = [];
     const err: Buffer[] = [];
@@ -279,15 +303,27 @@ export function defaultProducerRunner(python: string, flags: readonly string[] =
     /* A zero, negative or non-finite deadline is a deadline at once, never "none". */
     const ms = Number.isFinite(opts.timeoutMs) ? Math.max(1, Math.ceil(opts.timeoutMs)) : 1;
     const deadline = setTimeout(() => {
+      if (aborted) return;
       timedOut = true;
       killGroup();
     }, ms);
+    /** The caller's abort: the group killed, the run ended as aborted once it closes. */
+    const onAbort = (): void => {
+      if (timedOut || settled) return;
+      aborted = true;
+      killGroup();
+    };
     const finish = (result: Omit<RunResult, "stdout" | "stderr">): void => {
       if (settled) return;
       settled = true;
       clearTimeout(deadline);
+      opts.signal?.removeEventListener("abort", onAbort);
       done({ ...result, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") });
     };
+    if (opts.signal !== undefined) {
+      if (opts.signal.aborted) onAbort();
+      else opts.signal.addEventListener("abort", onAbort, { once: true });
+    }
     /** One stream's chunk kept, up to the limit; past it the child is killed as an overflow. */
     const keep = (which: "out" | "err", into: Buffer[], over: string) => (chunk: Buffer): void => {
       if (overflow !== undefined) return;
@@ -309,7 +345,8 @@ export function defaultProducerRunner(python: string, flags: readonly string[] =
       if (child.pid === undefined) finish({ code: null, timedOut: false, error: codeOf(error) });
     });
     child.on("close", (code, signal) => {
-      if (timedOut) finish({ code: null, timedOut: true });
+      if (aborted) finish({ code: null, timedOut: false, error: ABORTED });
+      else if (timedOut) finish({ code: null, timedOut: true });
       else if (overflow !== undefined) finish({ code: null, timedOut: false, error: overflow });
       else if (typeof code === "number") finish({ code, timedOut: false });
       /* a signal the face never sent - a crash, an outside kill - reads as the shell's 128 + n */
@@ -372,6 +409,7 @@ function oneLine(text: string): string {
 /** A finished run as the firing reads it. A spawn failure is the one `error` that is a code. */
 function outputOf(result: RunResult, timeoutMs: number): ProducerOutput {
   if (result.timedOut) return { ok: false, error: `timed out after ${formatDuration(timeoutMs)}` };
+  if (result.error === ABORTED) return { ok: false, error: ABORTED };
   if (isOverflow(result.error)) return { ok: false, error: result.error as string };
   if (result.error !== undefined) return { ok: false, error: `could not start: ${result.error}` };
   if (result.code === 0) return { ok: true, text: result.stdout };
@@ -402,19 +440,18 @@ function sha256Hex(bytes: Uint8Array): string {
 }
 
 /**
- * Read a resolved script's bytes once, from what is still a regular file at the checked path: the open
- * follows no link swapped in for it (`O_NOFOLLOW`; the path is a real path, so a link there is a swap) and
- * never waits on a FIFO (`O_NONBLOCK`), and the type and the size are checked on the descriptor that is read.
- * The firing's read ({@link runScriptProducer}), the market clock's and `npm run desk -- arm`'s, so a script is
- * hashed at arming exactly as strictly as it is read before it runs.
- * @param path - the script's real path, from {@link resolveScript}.
- * @param maxBytes - the most bytes it may hold, {@link SCRIPT_MAX_BYTES} by default; at most one byte past it is
- *   read, so a file that grows under the read is still refused.
- * @returns the bytes; `"irregular"` when the path now holds a link, a FIFO or anything but a regular file;
- *   `"oversized"` when it holds more than `maxBytes`; `"missing"` when it cannot be opened or read at all (gone,
- *   or no longer readable).
+ * Read a file's bytes once, from what is a regular file at `path`: the open follows no link (`O_NOFOLLOW`, so a
+ * link at the path's last component - planted, or swapped in since a check - is never followed) and never waits on
+ * a FIFO (`O_NONBLOCK`), and the type and the size are checked on the descriptor that is read. The descriptor read
+ * the script producers ({@link readScriptBytes}) and the desk's own files (desk-book.ts `readDeskFile`) share.
+ * @param path - the file.
+ * @param maxBytes - the most bytes it may hold; at most one byte past it is read, so a file that grows under the
+ *   read is still refused.
+ * @returns the bytes; `"irregular"` when the path holds a link, a FIFO or anything but a regular file;
+ *   `"oversized"` when it holds more than `maxBytes`; `{ errno }` when it cannot be opened or read at all, with the
+ *   failure's code (`ENOENT`, `ENOTDIR`, `EACCES`; `unknown error` when it has none).
  */
-export async function readScriptBytes(path: string, maxBytes: number = SCRIPT_MAX_BYTES): Promise<Buffer | "irregular" | "oversized" | "missing"> {
+export async function readFileBytes(path: string, maxBytes: number): Promise<Buffer | "irregular" | "oversized" | { errno: string }> {
   let handle: FileHandle | undefined;
   try {
     handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
@@ -431,10 +468,26 @@ export async function readScriptBytes(path: string, maxBytes: number = SCRIPT_MA
     }
     return buffer.subarray(0, length);
   } catch (error) {
-    return codeOf(error) === "ELOOP" ? "irregular" : "missing";
+    const code = codeOf(error);
+    return code === "ELOOP" ? "irregular" : { errno: code };
   } finally {
     await handle?.close().catch(() => {});
   }
+}
+
+/**
+ * Read a resolved script's bytes once ({@link readFileBytes}), from what is still a regular file at the checked
+ * path - the path is a real path, so a link there is a swap. The firing's read ({@link runScriptProducer}), the
+ * market clock's and `npm run desk -- arm`'s, so a script is hashed at arming exactly as strictly as it is read
+ * before it runs.
+ * @param path - the script's real path, from {@link resolveScript}.
+ * @param maxBytes - the most bytes it may hold, {@link SCRIPT_MAX_BYTES} by default.
+ * @returns the bytes; `"irregular"` or `"oversized"` as {@link readFileBytes} reads them; `"missing"` when it
+ *   cannot be opened or read at all (gone, or no longer readable), whatever the code.
+ */
+export async function readScriptBytes(path: string, maxBytes: number = SCRIPT_MAX_BYTES): Promise<Buffer | "irregular" | "oversized" | "missing"> {
+  const read = await readFileBytes(path, maxBytes);
+  return Buffer.isBuffer(read) || typeof read === "string" ? read : "missing";
 }
 
 /**
@@ -478,13 +531,13 @@ export type PinnedRun =
  *
  * Verified bytes are written to a private copy - a fresh `gravit-producer-*` directory (0700) in the run base,
  * `resolve`d first, holding the script's file name (0400) - and `[<copy>, ...args]` runs under `run` with `cwd`,
- * `env`, `stdin` and the deadline as given. The run directory is removed afterwards whatever happened, and one that
+ * `env`, `stdin`, `signal` and the deadline as given. The run directory is removed afterwards whatever happened, and one that
  * cannot be is one `log` line naming `label`; the run base itself stays. A copy that cannot be made (a run base
  * that is not a directory, a full disk) or a runner that broke its never-reject contract ends as a run whose
  * `error` is the code. Never rejects.
  * @param opts - `root` the repository root; `script` the repo-relative `scripts/<file>.py`; `sha256` the hex pin;
  *   `changed` the refusal's words for a moved pin; `runBase` where the copy is made; `run` the runner; `args`
- *   after the copy's path; `cwd`, `env`, `stdin`, `timeoutMs` the run's; `label` the log line's subject; `log`.
+ *   after the copy's path; `cwd`, `env`, `stdin`, `timeoutMs` and `signal` the run's; `label` the log line's subject; `log`.
  */
 export async function runPinnedScript(opts: {
   root: string;
@@ -498,6 +551,7 @@ export async function runPinnedScript(opts: {
   env: NodeJS.ProcessEnv;
   stdin?: string;
   timeoutMs: number;
+  signal?: AbortSignal;
   label: string;
   log: (line: string) => void;
 }): Promise<PinnedRun> {
@@ -523,6 +577,7 @@ export async function runPinnedScript(opts: {
       env: opts.env,
       timeoutMs: opts.timeoutMs,
       ...(opts.stdin === undefined ? {} : { stdin: opts.stdin }),
+      ...(opts.signal === undefined ? {} : { signal: opts.signal }),
     });
   } catch (error) {
     /* The copy could not be made (a run base that is not a directory, a full disk), or a runner broke
@@ -553,15 +608,15 @@ export async function runPinnedScript(opts: {
  * as a producer's own failure report is worth quoting. A kill at the deadline is `timed out after
  * <duration>`, an overflow `stdout over 1 MiB` (or `stderr`), a spawn failure or a copy that could not be
  * made `could not start: <code>`; none of those carries text, since a killed or unstarted child's output
- * cannot be trusted. Any stderr is ONE `log` line, `gravit-face: desk: producer <script> wrote to
+ * cannot be trusted; nor does an abort of `signal`, `aborted` (the runner killed the group). Any stderr is ONE `log` line, `gravit-face: desk: producer <script> wrote to
  * stderr: <its first 2,000 characters, line breaks as ⏎>`, and never in the output. The text is returned
  * whole: capping it is the firing's step. A `script` outside the producer grammar is refused at once,
  * without `refused` (no parsed spec can name one).
  * @param opts - `root` the repository root; `script` the spec's `scripts/<file>.py`; `sha256` the hex hash
  *   pinned at arming; `runBase` the directory a run's private directory is made in - a firing's is
  *   `<desk dir>/run` - made 0700 (no parents) when missing and refused when it is a symlink; `run` the
- *   runner; `input` what the producer is told; `timeoutMs` its deadline; `log` the face's log; `now` the
- *   clock for `wallMs` (`Date.now` by default).
+ *   runner; `input` what the producer is told; `timeoutMs` its deadline; `signal` the firing's, passed to the
+ *   runner; `log` the face's log; `now` the clock for `wallMs` (`Date.now` by default).
  * @returns the output; the exit `code` and `timedOut` as the runner gave them; `wallMs`, the step's wall
  *   time, the checks and the copy included; `chars`, the length of everything it wrote to stdout;
  *   `refused` when nothing ran for want of the armed bytes.
@@ -574,6 +629,7 @@ export async function runScriptProducer(opts: {
   run: ProducerRunner;
   input: ProducerInput;
   timeoutMs: number;
+  signal?: AbortSignal;
   log: (line: string) => void;
   now?: () => number;
 }): Promise<RunScriptResult> {
@@ -593,6 +649,7 @@ export async function runScriptProducer(opts: {
     env: { ...producerEnv(process.env), GRAVIT_ROOT: resolve(opts.root) },
     stdin: JSON.stringify(opts.input),
     timeoutMs: opts.timeoutMs,
+    ...(opts.signal === undefined ? {} : { signal: opts.signal }),
     label: `producer ${opts.script}`,
     log: opts.log,
   });

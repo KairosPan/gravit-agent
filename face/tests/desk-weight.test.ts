@@ -37,6 +37,7 @@ const HEAVY = [
   "/src/channel-name.ts",
   "/src/xshg-clock.ts",
   "/src/watch.ts", "/src/watch-eval.ts", "/src/alert-text.ts", "/src/edgar.ts", "/src/filings.ts",
+  "/src/report.ts",
 ] as const;
 const heavyOf = (urls: readonly string[]): string[] => urls.filter((url) => HEAVY.some((part) => url.includes(part)));
 

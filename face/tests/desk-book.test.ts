@@ -11,14 +11,14 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import fsPromises, { link, lstat, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import fsPromises, { chmod, link, lstat, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DEFAULT_LEVEL_COOLDOWN_MS, DESK_FILE_MAX_BYTES, FILING_FORMS, HOLDINGS_MAX, LEVELS_PER_FILE, PLAN_MAX_CHARS, RULE_KINDS, RULE_PCT_MAX,
   RULES_MAX, SOURCE_MAX_CHARS, SYMBOL_RE,
-  levelDistancePct, loadHoldings, loadLevels, loadRules, resolveSymbols, type Holding, type Level, type LoadRefusal, type Rule,
+  levelDistancePct, loadHoldings, loadLevels, loadRules, parseLevels, readDeskFile, resolveSymbols, type Holding, type Level, type LoadRefusal, type Rule,
 } from "../src/desk-book.ts";
 import { readDeskYaml, sha256Hex } from "../src/standing.ts";
 
@@ -840,4 +840,74 @@ test("levelDistancePct: a price, inside a range, outside it", () => {
   assert.equal(levelDistancePct({ range: [218, 222] }, 218), 0);
   assert.ok(Math.abs(levelDistancePct({ range: [218, 222] }, 225) - -1.3333) < 0.001);
   assert.ok(Math.abs(levelDistancePct({ range: [218, 222] }, 210) - 3.8095) < 0.001);
+});
+
+/* ---------- readDeskFile and parseLevels (P4) ---------- */
+
+test("readDeskFile: absent, a FIFO and a symlink never followed, oversize, not UTF-8, ok", async (t) => {
+  const dir = join(TEST_DIR, "desk-file");
+  await mkdir(dir, { recursive: true });
+  assert.deepEqual(await readDeskFile(join(dir, "nope.yaml")), { state: "absent" });
+  await writeFile(join(dir, "plain"), "x");
+  assert.deepEqual(await readDeskFile(join(dir, "plain", "below")), { state: "absent" }, "ENOTDIR is absent too");
+  await writeFile(join(dir, "ok.yaml"), "status: idea\n");
+  assert.deepEqual(await readDeskFile(join(dir, "ok.yaml")), { state: "ok", bytes: Buffer.from("status: idea\n"), text: "status: idea\n" });
+  await symlink("ok.yaml", join(dir, "link.yaml"));
+  assert.deepEqual(await readDeskFile(join(dir, "link.yaml")), { state: "unreadable", reason: "not a regular file" });
+  await mkdir(join(dir, "sub.yaml"));
+  assert.deepEqual(await readDeskFile(join(dir, "sub.yaml")), { state: "unreadable", reason: "not a regular file" });
+  await writeFile(join(dir, "big.yaml"), "a".repeat(DESK_FILE_MAX_BYTES + 1));
+  assert.deepEqual(await readDeskFile(join(dir, "big.yaml")), { state: "oversize" });
+  await writeFile(join(dir, "full.yaml"), "a".repeat(DESK_FILE_MAX_BYTES));
+  assert.equal((await readDeskFile(join(dir, "full.yaml"))).state, "ok", "exactly the cap reads");
+  await writeFile(join(dir, "latin1.yaml"), Buffer.from([0x73, 0xe9, 0x0a]));
+  assert.deepEqual(await readDeskFile(join(dir, "latin1.yaml")), { state: "unreadable", reason: "not UTF-8" });
+  await writeFile(join(dir, "locked.yaml"), "x");
+  await chmod(join(dir, "locked.yaml"), 0o000);
+  try {
+    const locked = await readDeskFile(join(dir, "locked.yaml"));
+    if (process.getuid?.() !== 0) assert.deepEqual(locked, { state: "unreadable", reason: "EACCES" });
+  } finally {
+    await chmod(join(dir, "locked.yaml"), 0o600);
+  }
+  const fifo = join(dir, "fifo.yaml");
+  try {
+    execFileSync("mkfifo", [fifo]);
+  } catch {
+    t.skip("no mkfifo here");
+    return;
+  }
+  assert.deepEqual(await readDeskFile(fifo), { state: "unreadable", reason: "not a regular file" }, "a FIFO is never waited on");
+});
+
+test("readDeskFile honours its cap", async () => {
+  const dir = join(TEST_DIR, "desk-file-cap");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "ten"), "0123456789");
+  assert.deepEqual(await readDeskFile(join(dir, "ten"), 9), { state: "oversize" });
+  assert.equal((await readDeskFile(join(dir, "ten"), 10)).state, "ok");
+});
+
+test("parseLevels is loadLevels without the read: the same entries, refusals and sha256 for one file", async () => {
+  const text = `${goodLevel("NVDA", 180)}- symbol: AAPL\n  kind: stop\n  price: 200\n  when: cross_down\n  expires: 2026-12-31\n${goodLevel("600519", 1400).replace("600519", '"600519"')}`;
+  const path = await fixture(text);
+  const loaded = await loadLevels(path, LEVELS, TODAY);
+  const sha = sha256Hex(Buffer.from(text));
+  const parsed = parseLevels(text, LEVELS, TODAY, sha);
+  assert.deepEqual(parsed.entries, loaded.entries);
+  assert.deepEqual(parsed.refusals, loaded.refusals);
+  assert.equal(parsed.sha256, loaded.sha256);
+  assert.equal(parsed.sha256, sha);
+  assert.equal(parsed.mtime, undefined, "no read, no mtime");
+  assert.equal(parsed.entries.length, 2);
+  assert.equal(parsed.entries[1].market, "cn");
+  assert.equal(parsed.refusals.length, 1);
+  /* the caller's pin, whatever it is; the cap measured on the text's UTF-8 */
+  assert.equal(parseLevels(text, LEVELS, TODAY, "f".repeat(64)).sha256, "f".repeat(64));
+  const big = parseLevels(`# ${"é".repeat(DESK_FILE_MAX_BYTES / 2)}\n`, LEVELS, TODAY, sha);
+  assert.deepEqual(big.entries, []);
+  assert.match(big.error ?? "", /^desk\/levels\.yml is 65,539 bytes; the limit is 65,536$/);
+  assert.equal(parseLevels("", LEVELS, TODAY, sha).entries.length, 0);
+  assert.match(parseLevels("{", LEVELS, TODAY, sha).error ?? "", /is not YAML/);
+  assert.throws(() => parseLevels(text, LEVELS, "2026-13-01", sha), TypeError);
 });

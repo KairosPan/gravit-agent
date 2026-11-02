@@ -11,8 +11,11 @@
  *
  * An A share's time is read on its own exchange's clock, Asia/Shanghai ({@link bjDate}, {@link bjClock},
  * {@link bjStamp}: `TENCENT 14:03:12 Beijing` on a quote), from a format of its own; Beijing keeps no daylight time.
+ * {@link dateOf} reads a market's date on its own clock, and {@link bjSessionTime} writes an A-share session's time
+ * with New York's beside it.
  * @module
  */
+import type { Market } from "./symbols.ts";
 
 const FORMAT = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
@@ -150,4 +153,25 @@ export function bjClock(d: Date): string {
 export function bjStamp(asOf: Date, now: Date): string {
   const date = bjDate(asOf);
   return date === bjDate(now) ? `${bjClock(asOf)} Beijing` : `${date} ${bjClock(asOf)} Beijing`;
+}
+
+/* ---------- each market's clock ---------- */
+
+/**
+ * A market's date at `now`, on its own exchange's clock: {@link etDate} for `us`, {@link bjDate} for `cn` -
+ * `2026-12-01` in Beijing while New York is still on the 30th.
+ * @param market - the market.
+ * @param now - the instant, in ms since the epoch.
+ */
+export function dateOf(market: Market, now: number): string {
+  return market === "cn" ? bjDate(new Date(now)) : etDate(new Date(now));
+}
+
+/**
+ * An A-share session's time as the desk writes one: Beijing's wall clock to the minute, then New York's -
+ * `"09:30 Beijing (20:30 ET)"`.
+ * @param at - the instant.
+ */
+export function bjSessionTime(at: Date): string {
+  return `${bjClock(at).slice(0, 5)} Beijing (${etTime(at)})`;
 }

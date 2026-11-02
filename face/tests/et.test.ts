@@ -1,7 +1,7 @@
 // face/tests/et.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bjClock, bjDate, bjStamp, etClock, etDate, etDayStart, etTime } from "../src/et.ts";
+import { bjClock, bjDate, bjSessionTime, bjStamp, dateOf, etClock, etDate, etDayStart, etTime } from "../src/et.ts";
 
 test("etTime and etDate render America/New_York across DST", () => {
   assert.equal(etTime(new Date("2026-10-20T18:03:00Z")), "14:03 ET");      // EDT
@@ -58,4 +58,13 @@ test("bjDate, bjClock and bjStamp read Beijing time, which keeps no daylight tim
   assert.equal(bjClock(new Date("2026-11-01T16:00:00Z")), "00:00:00", "midnight is 00, never 24");
   assert.equal(bjStamp(new Date("2026-12-01T06:03:12Z"), new Date("2026-12-01T06:03:20Z")), "14:03:12 Beijing");
   assert.equal(bjStamp(new Date("2026-11-27T07:00:00Z"), new Date("2026-11-30T01:00:00Z")), "2026-11-27 15:00:00 Beijing");
+});
+
+test("dateOf reads each market's date on its own clock, and bjSessionTime writes an A-share time with New York's beside it", () => {
+  assert.equal(dateOf("cn", Date.parse("2026-11-30T23:59:50Z")), "2026-12-01", "07:59 Beijing on the 1st");
+  assert.equal(dateOf("us", Date.parse("2026-11-30T23:59:50Z")), "2026-11-30", "18:59 ET on the 30th");
+  assert.equal(dateOf("us", Date.parse("2026-12-01T04:59:59Z")), "2026-11-30", "still the 30th in New York");
+  assert.equal(bjSessionTime(new Date("2026-11-27T01:30:00Z")), "09:30 Beijing (20:30 ET)");
+  assert.equal(bjSessionTime(new Date("2026-11-27T07:00:00Z")), "15:00 Beijing (02:00 ET)");
+  assert.equal(bjSessionTime(new Date("2026-07-01T01:30:00Z")), "09:30 Beijing (21:30 ET)", "New York on daylight time");
 });

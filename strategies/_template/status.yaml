@@ -1,1 +1,4 @@
 status: idea   # idea | researching | validated | paper | retired
+# one_line: the current conclusion, one sentence (the channel card and the pre-market report show it)
+# next: the next step
+# numbers: { hit_rate: 0.54 }

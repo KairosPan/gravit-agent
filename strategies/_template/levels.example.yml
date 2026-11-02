@@ -1,0 +1,26 @@
+# This strategy's price levels, each with its plan. Copy to levels.yml, which is gitignored: the book stays on this machine.
+# A pre-market report's arming pins levels.yml: after every edit, npm run desk -- rearm <id>.
+- symbol: NVDA
+  kind: buy_zone
+  range: [176, 180]
+  when: enter
+  plan: add a quarter position if the semis hold their 20-day average
+  source: the November base
+  expires: 2026-12-31
+- symbol: NVDA
+  kind: stop
+  price: 168
+  when: cross_down
+  plan: if it closes below 168, sell half at the next open and reread the thesis
+  source: the October swing low
+  expires: 2026-12-31
+  annotate: true
+  cooldown: 30m
+# Six digits is an A share; quote it, or YAML reads a number and the loader refuses it.
+- symbol: "600519"
+  kind: watch
+  price: 1450
+  when: cross_up
+  plan: if it closes above 1450, reread the thesis before adding
+  source: the September high
+  expires: 2026-12-31
