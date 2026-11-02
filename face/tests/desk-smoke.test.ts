@@ -27,7 +27,7 @@
  * operator's `alpaca-kit` row is tests/fixtures/mcp-standin.js under the server name `market-standin`, a stdio
  * child dsh spawns, so `DESK_ALLOW`'s `mcp__*__<raw>` wildcards meet real MCP-minted names under a name that
  * is not the production one. The order tool is the drill's stand-in `mcp__drill__portfolio_live_order`, registered
- * after boot with nothing behind it; AKShare is off; the quote hub is a fake that is never asked.
+ * after boot with nothing behind it; AKShare is off; the quote source is a fake that is never asked.
  *
  * Own file, gated: one boot per process (smoke.test.ts).
  * @module
@@ -304,7 +304,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     const install: NonNullable<DeskSessionDeps["installModelSelection"]> = (agentCtx, ref) => installModelSelection(agentCtx as unknown as Context, ref);
     desk = installDesk(ctx.webServer, {
       home: HOME, enabled: true, ctx, root: ROOT, route: STUB, sessionCtx, installModelSelection: install,
-      hub: { snapshot: async () => ({ ok: true, generated_at: new Date().toISOString(), quotes: [], providers: [] }) },
+      quotes: { snapshot: async () => ({ ok: true, generated_at: new Date().toISOString(), quotes: [], providers: [] }) },
     });
     const conversation = desk.conversation;
     assert.ok(conversation !== undefined, "an enabled desk with a root, a route and the root context has a conversation");

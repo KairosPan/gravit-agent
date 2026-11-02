@@ -53,7 +53,7 @@ import {
 } from "./firing.ts";
 import { createMarketCalendar, sessionFor, type DayAnswer, type MarketCalendar, type MarketSession } from "./market-clock.ts";
 import { defaultProducerRunner, formatProducer } from "./producer.ts";
-import type { UsQuoteSource } from "./us-quotes.ts";
+import type { MarketQuoteSource } from "./market-quotes.ts";
 import { anchorInstant, GRACE_MS, parseStanding, STANDING_FILE, type FiringSummary, type StandingOrder, type StandingStatus } from "./standing.ts";
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; desk lines add `desk:`. */
@@ -975,13 +975,13 @@ const FACE_CLOCK: DeskClock = {
 
 /**
  * The clock row as the face runs it: {@link installSchedule} with the face's defaults - the market calendar over
- * the builtin XNYS rules (src/market-clock.ts), a script producer under `python -I` (src/producer.ts), `builtin:brief` over the quote hub when there is one (src/brief.ts),
+ * the builtin XNYS rules (src/market-clock.ts), a script producer under `python -I` (src/producer.ts), `builtin:brief` over the Market's quote source when there is one (src/brief.ts),
  * a fresh desk agent per firing (src/desk-session.ts `createDeskAgent`), the order's route (src/firing.ts
  * `resolveFiringRoute`, on the booted context's default model and model calls), and the day's budget against the last
  * good load's cap. `seams` replaces the clock - the wall clock by default, its timers `unref`'d - the calendar, the
  * script producer's runner, the builtins, the tick and the grace.
  * @param opts - `home` the harness home; `root` the repository root; `python` the interpreter a `.py` script producer runs
- *   under; `hub` the desk's US quote source (src/us-quotes.ts); `session` the desk session's deps; `sessionCtx` the booted ROOT context, whose
+ *   under; `quotes` the desk's quote source, the Market's reads (src/market-quotes.ts); `session` the desk session's deps; `sessionCtx` the booted ROOT context, whose
  *   `agentDefaultModel` and `llm` a firing's route needs - a firing on a context without them could not run; `on` the
  *   root bus; `deliver` the desk conversation's; `log`, stderr by default; `now`, the owner's clock - the wall clock
  *   by default - under the face's timers; `seams`, for tests.
@@ -990,7 +990,7 @@ export function createDeskSchedule(opts: {
   home: string;
   root: string;
   python: string;
-  hub?: UsQuoteSource;
+  quotes?: MarketQuoteSource;
   session: DeskSessionDeps;
   sessionCtx: Partial<FiringRouteCtx>;
   on: SessionEventsOn;
@@ -1014,7 +1014,7 @@ export function createDeskSchedule(opts: {
     clock,
     calendar,
     runScript,
-    builtins: seams.builtins ?? (opts.hub === undefined ? {} : { brief: briefProducer({ hub: opts.hub, root: opts.root }) }),
+    builtins: seams.builtins ?? (opts.quotes === undefined ? {} : { brief: briefProducer({ quotes: opts.quotes, root: opts.root }) }),
     createAgent: (o) => createDeskAgent(opts.session, o),
     resolveRoute: async (raw) => {
       if (!hasRoutes(sessionCtx)) throw new Error("this face's context names no default model to route a standing order on");

@@ -606,21 +606,27 @@ const originHeader = (req: IncomingMessage): Record<string, string> => {
 /** Mount the twenty-three read routes, the two stream routes, the twelve write routes and the OAuth sign-in's
  * callback (`signin/callback`, behind `isTrustedNavigation`) — thirty-eight in all — on the host webserver.
  * The reader returned is the `account` route's own: it and `/data/account` read through one cache, so the
- * seat route `main.ts` hands it to shares that route's upstream read. `dispose` forgets every kept answer
- * and aborts every open stream's upstream. */
+ * seat route `main.ts` hands it to shares that route's upstream read. `explore` and `quotes` are those two
+ * routes' {@link AccountRouteRead}s, the Market's reads the desk's quotes are taken from (src/market-quotes.ts).
+ * `dispose` forgets every kept answer and aborts every open stream's upstream. */
 /** One read route's reads in-process, through the same cache and flights its `/data/account/<route>` is served from:
  * `query` is one {@link rebuildQuery} would pass on. A disabled row answers `{ unreachable: "disabled" }` and asks nothing.
  * No stale answer is re-served here: a failure is the failure. */
 export type AccountRouteRead = (query: string) => Promise<AccountAnswer>;
 
-export function registerAccountProxy(webServer: RouteRegistrar, deps: AccountProxyDeps = {}): { reader: AccountReader; explore: AccountRouteRead; dispose(): void } {
+export function registerAccountProxy(
+  webServer: RouteRegistrar,
+  deps: AccountProxyDeps = {},
+): { reader: AccountReader; explore: AccountRouteRead; quotes: AccountRouteRead; dispose(): void } {
   const s = settingsOf(deps);
   const accountReads = routeReads("account", s);
   const all: Reads[] = [];
   let exploreReads: Reads | undefined;
+  let quotesReads: Reads | undefined;
   for (const route of READ_ROUTES) {
     const reads = route === "account" ? accountReads : routeReads(route, s);
     if (route === "explore") exploreReads = reads;
+    if (route === "quotes") quotesReads = reads;
     all.push(reads);
     webServer.register({ kind: "exact", path: facePath(route), handler: handler(route, reads, s.disabled) });
   }
@@ -638,9 +644,11 @@ export function registerAccountProxy(webServer: RouteRegistrar, deps: AccountPro
   }
   webServer.register({ kind: "exact", path: "/data/account/signin/callback", handler: callbackHandler(s) });
   const explore = exploreReads as Reads;
+  const quotes = quotesReads as Reads;
   return {
     reader: readerOf(accountReads),
     explore: (query) => explore.read(query, false),
+    quotes: (query) => quotes.read(query, false),
     dispose: () => {
       for (const reads of all) reads.clear();
       for (const stream of open) stream.abort();

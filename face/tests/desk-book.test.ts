@@ -67,7 +67,7 @@ test("the shipped examples load with no refusal", async () => {
   const l = await loadLevels(levelsPath, "desk/levels.example.yml", "2026-10-20");
   assert.equal(l.error, undefined);
   assert.deepEqual(l.refusals, []);
-  assert.deepEqual(new Set(l.entries.map((e) => e.kind)), new Set(["stop", "buy_zone", "target"]));
+  assert.deepEqual(new Set(l.entries.map((e) => e.kind)), new Set(["stop", "buy_zone", "target", "watch"]));
   assert.ok(l.entries.every((e) => e.expires === "2026-12-31"));
 
   /* Each opens with a two-line comment and, between its entries, uses every key the loader takes. */
@@ -191,18 +191,18 @@ test("each bad level is refused by index and the rest load", async () => {
     refusal(7, "AMZN", "plan must be one line"),
     refusal(8, "NFLX", "plan is 301 characters; the limit is 300"),
     refusal(9, "AVGO", "when: enter takes a range; with a price, when is cross_up or cross_down"),
-    refusal(10, undefined, 'symbol must be a ticker: a capital letter, then at most 9 of A-Z, 0-9, . and - (got "nvda")'),
+    refusal(10, undefined, 'symbol must be a US ticker (NVDA, BRK.B) or six digits for an A share (600519) (got "nvda")'),
     refusal(11, "ORCL", 'annotate must be true or false (got "yes")'),
     refusal(12, "CRM", 'cooldown must be <n>m, from 1m to 1440m (got "2h")'),
   ]);
   const want: Level[] = [
     {
-      file: LEVELS, index: 0, symbol: "NVDA", kind: "stop", price: 170, when: "cross_down", plan: "sell half at the next open",
+      file: LEVELS, index: 0, symbol: "NVDA", market: "us", kind: "stop", price: 170, when: "cross_down", plan: "sell half at the next open",
       source: "the August swing low", expires: "2026-12-31", annotate: true, cooldownMs: 1_800_000,
     },
     /* A folded plan is one line once its final newline is trimmed; an expiry of today still holds. */
     {
-      file: LEVELS, index: 13, symbol: "SPY", kind: "buy_zone", range: [550, 560], when: "enter", plan: "add five shares if breadth holds",
+      file: LEVELS, index: 13, symbol: "SPY", market: "us", kind: "buy_zone", range: [550, 560], when: "enter", plan: "add five shares if breadth holds",
       expires: "2026-10-20", annotate: true, cooldownMs: 1_800_000,
     },
   ];
@@ -277,7 +277,7 @@ test("past 40 levels and past 60 holdings, one refusal each", async () => {
   const mixed = await loadLevels(await fixture(`- symbol: bad\n${levels(41).slice("- symbol: L0\n".length)}`), LEVELS, TODAY);
   assert.equal(mixed.entries.length, 39);
   assert.deepEqual(mixed.refusals.map((r) => r.reason), [
-    'symbol must be a ticker: a capital letter, then at most 9 of A-Z, 0-9, . and - (got "bad")',
+    'symbol must be a US ticker (NVDA, BRK.B) or six digits for an A share (600519) (got "bad")',
     "entries 41-41 are past the cap of 40 levels per file",
   ]);
 });
@@ -314,15 +314,15 @@ test("holdings: a duplicate, a lowercase symbol, a zero qty, a string avg_cost a
   assert.equal(h.error, undefined);
   assert.deepEqual(h.refusals, [
     { file: HOLDINGS, index: 1, symbol: "NVDA", reason: "NVDA is held twice; the first entry stands" },
-    { file: HOLDINGS, index: 2, reason: 'symbol must be a ticker: a capital letter, then at most 9 of A-Z, 0-9, . and - (got "aapl")' },
+    { file: HOLDINGS, index: 2, reason: 'symbol must be a US ticker (NVDA, BRK.B) or six digits for an A share (600519) (got "aapl")' },
     { file: HOLDINGS, index: 3, symbol: "MSFT", reason: "qty must be a number other than 0 (got 0)" },
     { file: HOLDINGS, index: 4, symbol: "AMD", reason: 'avg_cost must be a number above 0 (got "150")' },
     { file: HOLDINGS, index: 5, symbol: "TSLA", reason: 'unknown key "cost"' },
   ]);
   const want: Holding[] = [
-    { symbol: "NVDA", qty: 100, avgCost: 120.5, opened: "2026-09-15", broker: "example-broker" },
-    { symbol: "SPY", qty: -20, avgCost: 560 },
-    { symbol: "BRK.B", qty: 0.5, avgCost: 480.25 },
+    { symbol: "NVDA", market: "us", qty: 100, avgCost: 120.5, opened: "2026-09-15", broker: "example-broker" },
+    { symbol: "SPY", market: "us", qty: -20, avgCost: 560 },
+    { symbol: "BRK.B", market: "us", qty: 0.5, avgCost: 480.25 },
   ];
   assert.deepEqual(h.entries, want);
 
@@ -538,12 +538,12 @@ test("a blank optional key is absent: one left empty, and an empty source or bro
   ), LEVELS, TODAY);
   assert.deepEqual(l.refusals, []);
   assert.deepEqual(l.entries, [
-    { file: LEVELS, index: 0, symbol: "A", kind: "watch", price: 1, when: "cross_up", plan: "p", expires: "2026-12-31", annotate: true, cooldownMs: 1_800_000 },
-    { file: LEVELS, index: 1, symbol: "B", kind: "watch", price: 2, when: "cross_up", plan: "p", expires: "2026-12-31", annotate: true, cooldownMs: 1_800_000 },
+    { file: LEVELS, index: 0, symbol: "A", market: "us", kind: "watch", price: 1, when: "cross_up", plan: "p", expires: "2026-12-31", annotate: true, cooldownMs: 1_800_000 },
+    { file: LEVELS, index: 1, symbol: "B", market: "us", kind: "watch", price: 2, when: "cross_up", plan: "p", expires: "2026-12-31", annotate: true, cooldownMs: 1_800_000 },
   ]);
   const h = await loadHoldings(await fixture('- symbol: A\n  qty: 1\n  avg_cost: 1\n  opened:\n  broker:\n- symbol: B\n  qty: 2\n  avg_cost: 2\n  broker: ""\n'), HOLDINGS);
   assert.deepEqual(h.refusals, []);
-  assert.deepEqual(h.entries, [{ symbol: "A", qty: 1, avgCost: 1 }, { symbol: "B", qty: 2, avgCost: 2 }]);
+  assert.deepEqual(h.entries, [{ symbol: "A", market: "us", qty: 1, avgCost: 1 }, { symbol: "B", market: "us", qty: 2, avgCost: 2 }]);
 });
 
 test("a loaded file carries its bytes' sha256 and its mtime; an empty one holds no entries", async () => {
@@ -566,4 +566,30 @@ test("loadLevels takes today as a real date", async () => {
   const path = await fixture(goodLevel("NVDA", 170));
   await assert.rejects(loadLevels(path, LEVELS, "2026-02-30"), TypeError);
   await assert.rejects(loadLevels(path, LEVELS, "today"), TypeError);
+});
+
+test("levels and holdings carry their market; an unquoted 600519 is refused, not coerced", async () => {
+  const l = await loadLevels(await fixture(
+    '- symbol: "600519"\n  kind: watch\n  price: 1400\n  when: cross_down\n  plan: reread the note\n  expires: 2026-12-31\n'
+    + "- symbol: 600519\n  kind: watch\n  price: 1400\n  when: cross_down\n  plan: reread the note\n  expires: 2026-12-31\n"
+    + goodLevel("NVDA", 170),
+  ), LEVELS, TODAY);
+  assert.deepEqual(l.entries.map((e) => [e.index, e.symbol, e.market]), [[0, "600519", "cn"], [2, "NVDA", "us"]]);
+  assert.deepEqual(l.refusals, [
+    { file: LEVELS, index: 1, reason: "symbol must be a US ticker (NVDA, BRK.B) or six digits for an A share (600519) (got 600519)" },
+  ]);
+  const h = await loadHoldings(await fixture('- symbol: "000001"\n  qty: 100\n  avg_cost: 11.2\n- symbol: AAPL\n  qty: 1\n  avg_cost: 200\n- symbol: "60051"\n  qty: 1\n  avg_cost: 1\n'), HOLDINGS);
+  assert.deepEqual(h.entries.map((e) => [e.symbol, e.market]), [["000001", "cn"], ["AAPL", "us"]]);
+  assert.deepEqual(h.refusals.map((r) => r.reason), ['symbol must be a US ticker (NVDA, BRK.B) or six digits for an A share (600519) (got "60051")']);
+  /* a refusal names an A share's code as it names a ticker */
+  const bad = await loadLevels(await fixture('- symbol: "600519"\n  kind: watch\n'), LEVELS, TODAY);
+  assert.equal(bad.refusals[0]?.symbol, "600519");
+});
+
+test("the shipped levels.example.yml loads with no refusal and one A share", async () => {
+  const l = await loadLevels(join(REPO, "desk", "levels.example.yml"), "desk/levels.example.yml", "2026-10-20");
+  assert.deepEqual(l.refusals, []);
+  assert.deepEqual(l.entries.map((e) => e.market), ["us", "us", "us", "cn"]);
+  const moutai = l.entries[3];
+  assert.deepEqual([moutai?.symbol, moutai?.kind, moutai?.price, moutai?.when, moutai?.expires], ["600519", "watch", 1400, "cross_down", "2026-12-31"]);
 });

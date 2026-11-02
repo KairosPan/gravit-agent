@@ -21,3 +21,10 @@
   plan: sell a third and raise the stop to the entry price
   expires: 2026-12-31
   annotate: false           # true by default: a plan-check turn follows the alert
+# Six digits is an A share; quote it, or YAML reads a number and the loader refuses it.
+- symbol: "600519"
+  kind: watch
+  price: 1400
+  when: cross_down
+  plan: if it closes below 1400, reread the thesis before adding
+  expires: 2026-12-31

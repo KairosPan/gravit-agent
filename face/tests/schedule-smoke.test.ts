@@ -27,7 +27,7 @@
  * for python, so `scripts/p.py` holds JavaScript. The phone is a recorder set as the conversation's outlet; the face's
  * lines go to the test's own log, printed when the test fails. A long tool is `mcp__smoke__daily_bars`, a global
  * stand-in the desk's `mcp__*__daily_bars` admits, which answers nothing but its call's abort. AKShare is off; the
- * quote hub is a fake that is never asked. Nothing leaves the machine.
+ * quote source is a fake that is never asked. Nothing leaves the machine.
  *
  * WHERE IT RUNS. `tests/tmp/schedule-smoke-<pid>/`, inside the repository and without a `.git` of its own, as
  * tests/desk-smoke.test.ts explains - the harness home and the bots root there too, since the OS temp areas are
@@ -395,7 +395,7 @@ test("schedule smoke: a real firing end to end, its deadline, refusals, missed a
     const calendar = fakeCalendar({ [DATE]: SESSION });
     desk = installDesk(ctx.webServer, {
       home: HOME, enabled: true, root: ROOT, route: STUB, sessionCtx, installModelSelection: install, ctx,
-      hub: { snapshot: async () => ({ ok: true, generated_at: new Date().toISOString(), quotes: [], providers: [] }) },
+      quotes: { snapshot: async () => ({ ok: true, generated_at: new Date().toISOString(), quotes: [], providers: [] }) },
       python: process.execPath,
       schedule: { clock, calendar, tickMs: TICK_MS, runScript: defaultProducerRunner(process.execPath, []), builtins: { brief: async () => ({ ok: true, text: BRIEF }) } },
       log: (line) => { faceLog.push(line); },

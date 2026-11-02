@@ -11,15 +11,16 @@
  * file an error, and a missing file is `missing` (holdings) or absent from `files` (levels). NOT a strategy's
  * `strategies/<name>/levels.yml`: those sit in directories the research sessions can write, and the brief quotes a
  * level's plan into an unattended turn whose text reaches the phone, so they join the brief only once P4 pins each one
- * at arming (charter D20; the P2 fix wave's I3) - `notYet` says so, and the model does not report them as nothing.
- * Then ONE `hub.snapshot()` over the index ETFs, the sector ETFs, the holdings and the levels' symbols, in that order,
- * each once and at most {@link BRIEF_SYMBOLS_MAX} of them - below the hub's cache limit, which would refuse the whole
- * snapshot as busy - those past the bound named in `quotesOmitted` (p2-m15): the face's live quotes, the numbers
- * `desk_quotes` shows (P2-2 - no Python and no bars). Before any of it, the firing's ET date is checked once: one that
+ * at arming (charter D20; the P2 fix wave's I3) - `scope` says so, and the model does not report them as nothing.
+ * THE BRIEF IS US. An A-share holding or level (src/symbols.ts: six digits) is neither priced nor listed here; the
+ * brief counts them in `aShares`, and the watch and the strategies' reports are theirs (ruling 11).
+ * Then ONE `quotes.snapshot()` over the index ETFs, the sector ETFs, the US holdings and the US levels' symbols, in
+ * that order, each once and at most {@link BRIEF_SYMBOLS_MAX} of them - one Market explore read each - those past the
+ * bound named in `quotesOmitted` (p2-m15): the numbers `desk_quotes` shows (P2-2 - no Python and no bars). Before any of it, the firing's ET date is checked once: one that
  * is not `YYYY-MM-DD` fails the producer with one error, and nothing is read or asked.
  *
  * EVERY NUMBER NAMES ITS SOURCE AND TIME (dsh/profile/desk.md). A price carries `at`, desk-tools.ts's `quoteTime`:
- * the feed and New York's clock to the second (`IEX 15:21:03 ET`), dated when the quote is from another ET day. The
+ * the feed and New York's clock to the second (`NASDAQ 15:21:03 ET`), dated when the quote is from another ET day. The
  * brief's own time is `takenAt`, and the holdings file's last edit is `edited`, as desk.ts's `deskTime` writes a
  * time. Nothing is shown that the snapshot cannot time: a quote without a price - or without the time that price was
  * traded at - shows no number at all (`last`, `prevClose`, `chgPct` and `at` null), and every number measured from
@@ -33,11 +34,11 @@
  * FAILURES ARE DATA. Past the date check, the brief fails - `{ ok: false }` - only when its prices are unavailable,
  * and it still carries itself: the files read, every price null, `quotesError` set, so the firing quotes it and the
  * model can say what is unavailable. `quotesError` is:
- * - `quotes unavailable: busy` when the hub refuses with 429 - its own message is the quotes page's, in Chinese;
- * - `quotes unavailable: <message>` for any other throw - from the Account's source, why it could not be asked
- *   (not reachable, timed out, the seat row disabled);
- * - `quotes unavailable: <reason>`, nothing asked, when the source is `unavailable` (src/us-quotes.ts) - main.ts
- *   wires the Account's market read, so this is a face with no Account wired;
+ * - `quotes unavailable: busy` when the source refuses with 429;
+ * - `quotes unavailable: <message>` for any other throw - why the Account could not be asked (not reachable,
+ *   timed out, the seat row disabled);
+ * - `quotes unavailable: <reason>`, nothing asked, when the source is `unavailable` (src/market-quotes.ts) - main.ts
+ *   wires the Market's reads, so this is a face with no Market read wired;
  * - `quotes unavailable: the source has no price for any symbol (US provider <state>)` when the snapshot answers without a
  *   single price - no keys, or a feed that is down - `<state>` the US provider's state as its English word
  *   (`unconfigured`, `error`, …), and `unknown` when the payload names no US provider or a state that is not one of
@@ -48,7 +49,7 @@
  * A CUT KEEPS THE ERRORS. The firing quotes at most 32,768 characters of a producer's text (producer.ts
  * `PRODUCER_TEXT_MAX`) and cuts the rest, so the brief's keys are written with the long lists last: `quotesError`
  * straight after the session, ahead of every quote; in each block, the file's state and its errors ahead of its rows,
- * near levels and refusals; `notYet` at the very end. A book past the cap loses the tail of its refusals and of its
+ * near levels and refusals; `aShares` and `scope` at the very end. A book past the cap loses the tail of its refusals and of its
  * near levels - nearest first, so the farthest go - before the levels error, with one exception: the holdings rows
  * come ahead of the whole levels block, so many long-labelled holdings can push the levels error past the cap first.
  *
@@ -63,7 +64,7 @@ import { quoteTime } from "./desk-tools.ts";
 import { etClock, etTime } from "./et.ts";
 import { HttpError } from "./http.ts";
 import type { BuiltinProducer, ProducerInput, ProducerOutput } from "./producer.ts";
-import type { UsLiveQuote as LiveQuote, UsProviderState as ProviderState, UsQuoteIdentity as QuoteIdentity, UsQuotePayload as QuotePayload, UsQuoteSource } from "./us-quotes.ts";
+import type { MarketProviderState as ProviderState, MarketQuote as LiveQuote, MarketQuoteIdentity as QuoteIdentity, MarketQuotePayload as QuotePayload, MarketQuoteSource } from "./market-quotes.ts";
 import { isEtDate } from "./standing.ts";
 
 /* ---------- the symbols ---------- */
@@ -74,9 +75,8 @@ export const BRIEF_INDEXES = ["SPY", "QQQ", "IWM", "DIA"] as const;
 /** The eleven Select Sector SPDR ETFs. */
 export const BRIEF_SECTORS = ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY"] as const;
 
-/** The most symbols one brief asks the hub for: well below the hub's cache limit (512, its own and the page's quotes
- * counted with them), past which the hub refuses the snapshot whole. The book's caps (60 holdings, 40 levels) and the
- * 15 ETFs stay under it today; P4's strategies' levels would not. */
+/** The most symbols one brief asks the Market's read for. The book's caps (60 holdings, 40 levels) and the 15 ETFs
+ * stay under it today; P4's strategies' levels would not. */
 export const BRIEF_SYMBOLS_MAX = 200;
 
 /** A quote's status when the brief left its symbol out of the snapshot: past {@link BRIEF_SYMBOLS_MAX}. */
@@ -88,14 +88,13 @@ export const NEAR_PCT = 2;
 /** The book's files, as the brief labels them: repo-relative. */
 const HOLDINGS_FILE = "desk/holdings.yml";
 const DESK_LEVELS_FILE = "desk/levels.yml";
-/** What the brief does not carry yet, said in the brief so the model does not report it as nothing. */
-const NOT_YET = "alerts, suppressed alerts and filings arrive with the watch (P3); strategies' levels.yml join once each is pinned at arming (P4)";
+/** What the brief covers, said in the brief so the model does not report what it leaves out as nothing. */
+export const BRIEF_SCOPE = "desk/ only; A shares and each strategy's levels.yml are the watch's and their reports'";
 
-/** A quote's status when the snapshot holds none for its symbol: the hub's own word for a symbol without a price. */
+/** A quote's status when the snapshot holds none for its symbol: the source's own word for a symbol without a price. */
 const UNAVAILABLE = "unavailable";
 
-/** `quotesError` when the hub refuses with 429, in the plan's words: the hub's own message is the quotes page's, in
- * Chinese, and never reaches the model. */
+/** `quotesError` when the source refuses with 429, in the plan's words. */
 const QUOTES_BUSY = "quotes unavailable: busy";
 
 /** The states a priceless brief may name: quote-types.ts's `ProviderState` status, English words all. Anything else
@@ -104,11 +103,11 @@ const PROVIDER_STATES: ReadonlySet<string> = new Set<ProviderState["status"]>(["
 
 /* ---------- the shapes ---------- */
 
-/** What the brief closes over: the quote hub's snapshot (the one hub main.ts shares with `/data/quotes` and
- * `desk_quotes`), the repository root its files are read under, and `now` (default `Date.now`), the clock the
- * brief's times are read against, for tests. */
+/** What the brief closes over: the Market's quote source (the one main.ts shares with `desk_quotes`), the
+ * repository root its files are read under, and `now` (default `Date.now`), the clock the brief's times are read
+ * against, for tests. */
 export interface BriefDeps {
-  hub: UsQuoteSource;
+  quotes: Pick<MarketQuoteSource, "snapshot" | "unavailable">;
   root: string;
   now?: () => number;
   /** The symbol bound, {@link BRIEF_SYMBOLS_MAX} by default; for tests. */
@@ -116,9 +115,9 @@ export interface BriefDeps {
 }
 
 /** One quote as the brief carries it: the last price; its move from the previous close, in percent; the previous
- * close; `at`, the feed and New York's time (`IEX 15:21:03 ET`); and `status`, the hub's `quote_status`. Without a
- * price, or without the time it was traded at, `last`, `chgPct`, `prevClose` and `at` are all null. The hub's UI
- * message is left out. */
+ * close; `at`, the feed and New York's time (`NASDAQ 15:21:03 ET`); and `status`, the source's `quote_status`.
+ * Without a price, or without the time it was traded at, `last`, `chgPct`, `prevClose` and `at` are all null. The
+ * source's message is left out. */
 export interface BriefQuote {
   symbol: string;
   last: number | null;
@@ -198,7 +197,9 @@ export interface Brief {
     near: NearLevel[];
     refusals: LoadRefusal[];
   };
-  notYet: typeof NOT_YET;
+  /** The A-share holdings and levels the book loaded, which the brief neither prices nor lists. */
+  aShares: { holdings: number; levels: number };
+  scope: typeof BRIEF_SCOPE;
 }
 
 /* ---------- the numbers ---------- */
@@ -210,7 +211,7 @@ function messageOf(error: unknown): string {
   return typeof message === "string" ? message : String(error);
 }
 
-/** Whether `value` is a price as the hub keeps one: a finite number above 0. */
+/** Whether `value` is a price as the source keeps one: a finite number above 0. */
 function isPrice(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
@@ -249,7 +250,7 @@ function levelAt(level: Level): { price: number } | { range: [number, number] } 
 
 /**
  * One quote as the brief carries it ({@link BriefQuote}), from the snapshot's quote for `symbol`. A price counts only
- * with the time it was traded at - the hub's own rule for `unavailable` - and a quote without one shows no number at
+ * with the time it was traded at - the source's own rule for `unavailable` - and a quote without one shows no number at
  * all, its previous close included: a number that cannot name its time is never shown.
  * @param symbol - the ticker.
  * @param quote - the snapshot's quote; `undefined` when the snapshot holds none for it, or failed.
@@ -358,10 +359,11 @@ function sessionTime(instant: string): string {
 
 /**
  * Build the pre-close brief for one firing (see the module header): check the firing's date, read the book, take
- * one snapshot, price the book from it. Never rejects for a file or a hub: what fails is named in the brief.
- * @param deps - the hub, the repository root and the clock.
+ * one snapshot, price the book's US entries from it. Never rejects for a file or a source: what fails is named in
+ * the brief.
+ * @param deps - the quote source, the repository root and the clock.
  * @param input - the firing: `date` is the ET date a level's expiry is judged against, `session` the times shown.
- * @returns `{ ok: true, text }`, the {@link Brief} as JSON; when the prices are unavailable - the hub threw, or its
+ * @returns `{ ok: true, text }`, the {@link Brief} as JSON; when the prices are unavailable - the source threw, or its
  *   snapshot holds no price at all - `{ ok: false, error, text }`, `error` being the brief's `quotesError` and
  *   `text` the brief with every price null; and when `input.date` is not a `YYYY-MM-DD` date, `{ ok: false, error:
  *   "the brief takes the firing's ET date as YYYY-MM-DD, not \"<date>\"" }`, nothing read and nothing asked.
@@ -378,10 +380,14 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
     loadLevels(join(deps.root, "desk", "levels.yml"), DESK_LEVELS_FILE, input.date),
   ]);
   const levelResults = [deskLevels];
-  const levels = levelResults.flatMap((result) => result.entries);
+  const allLevels = levelResults.flatMap((result) => result.entries);
+  /* the brief is US: an A share is counted, never priced or listed */
+  const usHoldings = holdings.entries.filter((holding) => holding.market === "us");
+  const levels = allLevels.filter((level) => level.market === "us");
+  const aShares = { holdings: holdings.entries.length - usHoldings.length, levels: allLevels.length - levels.length };
 
   const symbols = [...new Set<string>([
-    ...BRIEF_INDEXES, ...BRIEF_SECTORS, ...holdings.entries.map((holding) => holding.symbol), ...levels.map((level) => level.symbol),
+    ...BRIEF_INDEXES, ...BRIEF_SECTORS, ...usHoldings.map((holding) => holding.symbol), ...levels.map((level) => level.symbol),
   ])];
   /* the first ones in the order above are asked; the rest are named, never silently dropped */
   const bound = deps.symbolsMax ?? BRIEF_SYMBOLS_MAX;
@@ -390,11 +396,11 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
   const snapshot = new Map<string, LiveQuote>();
   let payload: QuotePayload | undefined;
   let quotesError: string | undefined;
-  if (deps.hub.unavailable !== undefined) {
-    quotesError = `quotes unavailable: ${deps.hub.unavailable}`;
+  if (deps.quotes.unavailable !== undefined) {
+    quotesError = `quotes unavailable: ${deps.quotes.unavailable}`;
   } else try {
     const assets = asked.map((symbol): QuoteIdentity => ({ id: `us:${symbol}`, market: "us", symbol }));
-    payload = await deps.hub.snapshot(assets);
+    payload = await deps.quotes.snapshot(assets);
     for (const quote of payload.quotes) snapshot.set(quote.id, quote);
   } catch (error) {
     quotesError = error instanceof HttpError && error.status === 429 ? QUOTES_BUSY : `quotes unavailable: ${messageOf(error)}`;
@@ -426,17 +432,18 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
       edited: holdings.mtime === undefined ? null : deskTime(new Date(holdings.mtime), new Date(now)),
       ...(holdings.missing === true ? { missing: true as const } : {}),
       ...(holdings.error === undefined ? {} : { error: holdings.error }),
-      rows: holdings.entries.map((holding) => holdingRow(holding, quoteFor(holding.symbol), levels)),
+      rows: usHoldings.map((holding) => holdingRow(holding, quoteFor(holding.symbol), levels)),
       refusals: holdings.refusals,
     },
     levels: {
       files: levelResults.filter((result) => result.missing !== true).map((result) => result.file),
-      loaded: levels.length,
+      loaded: allLevels.length,
       errors: deskLevels.error === undefined ? [] : [{ file: deskLevels.file, error: deskLevels.error }],
       near: nearLevels(levels, quotes),
       refusals: levelResults.flatMap((result) => result.refusals),
     },
-    notYet: NOT_YET,
+    aShares,
+    scope: BRIEF_SCOPE,
   };
   const text = JSON.stringify(brief);
   return quotesError === undefined ? { ok: true, text } : { ok: false, error: quotesError, text };
@@ -450,10 +457,10 @@ function stopped(signal: AbortSignal): ProducerOutput {
 /**
  * The brief as a built-in producer, `builtin:brief`: {@link buildBrief} over `deps` for each firing's input. It stops
  * when `signal` aborts - the firing's deadline - settling at once with `{ ok: false, error: "stopped: <reason>" }`,
- * and starts nothing when the signal has already aborted; what it started (a file read, the hub's shared refresh)
+ * and starts nothing when the signal has already aborted; what it started (a file read, the proxy's shared read)
  * runs on to its own end, unread. It never rejects: anything the brief did not expect is `{ ok: false, error: "the
  * brief failed: <message>" }`.
- * @param deps - the hub, the repository root and the clock.
+ * @param deps - the quote source, the repository root and the clock.
  */
 export function briefProducer(deps: BriefDeps): BuiltinProducer {
   return (input, signal) => {

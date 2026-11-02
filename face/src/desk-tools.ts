@@ -13,15 +13,18 @@
  * the role tools. They unwind with the agent.
  *
  * WHAT THEY CLOSE OVER: process state main.ts owns, as `agent_<bin>` and `dispatch` close over theirs
- * (src/agents.ts, src/room.ts) - the US quote source main.ts creates once over the Account's explore read
- * (src/us-quotes.ts, through src/account-proxy.ts's cache), and
+ * (src/agents.ts, src/room.ts) - the quote source main.ts creates once over the Market's reads
+ * (src/market-quotes.ts, through src/account-proxy.ts's caches), and
  * the desk's status reader, which src/desk.ts `installDesk` binds to the deps of `GET /data/desk/status`,
  * so the tool and the route agree on all but `runs`, which the tool cuts to the last ten. `desk_quotes`
- * asks the source for a snapshot: one Account explore read per symbol, kept by the proxy for 20 seconds. `desk_state` reads the ledger and `OFF` afresh.
+ * asks the source for one snapshot over both markets: one explore read per US symbol, kept by the proxy for 20
+ * seconds, and one quotes read per twelve A shares, kept 3 seconds. `desk_state` reads the ledger and `OFF` afresh.
+ * The market of a symbol is src/symbols.ts's grammar, never desk-book.ts's: the book brings js-yaml.
  *
  * WHAT THE MODEL READS: `desk_quotes` renders one line per quote, its time as the desk contract quotes
- * one (dsh/profile/desk.md: `IEX 15:21:03 ET`), so the model never converts a UTC time itself; its value
- * keeps the hub's own fields, times in UTC. `desk_state` renders its value as JSON.
+ * one - the feed and the exchange's own clock (`NASDAQ 15:21:03 ET`, `TENCENT 14:03:12 Beijing`) - so the model
+ * never converts a UTC time itself; its value keeps the source's own fields, times in UTC. `desk_state` renders
+ * its value as JSON.
  *
  * THE GUARD. This module also holds the desk's guard ({@link installDeskGuard}): one root `tools/pre-execute`
  * listener, and a `tools.guard` behind it that no listener can talk out of a denial, that judge every call a desk
@@ -51,7 +54,7 @@
  * already.
  *
  * Both tools follow the call's cancellation: a cancelled call settles at once. What it started runs on - the
- * hub's refresh is shared with every other reader and keeps its own deadline, so it is not one call's
+ * proxy's read is shared with every other reader and keeps its own deadline, so it is not one call's
  * to stop.
  * @module
  */
@@ -61,9 +64,10 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { agentFileNameOf, DESK_PRESET, fenceNameOf, foldName, isDotName, type AgentFileName, type FenceName } from "./desk-names.ts";
 import type { DeskStatus } from "./desk.ts";
-import { etClock, etDate } from "./et.ts";
+import { bjStamp, etClock, etDate } from "./et.ts";
 import { HttpError } from "./http.ts";
-import type { UsLiveQuote as LiveQuote, UsQuoteIdentity as QuoteIdentity, UsQuotePayload as QuotePayload, UsQuoteSource } from "./us-quotes.ts";
+import type { MarketQuote, MarketQuoteIdentity, MarketQuotePayload, MarketQuoteSource } from "./market-quotes.ts";
+import { CN_SYMBOL_RE, idOf, marketOf, SYMBOL_RE } from "./symbols.ts";
 
 /** Diagnostic label, the same string every other `${BIN}:`-prefixed line in this program uses. */
 const BIN = "gravit-face";
@@ -89,10 +93,10 @@ export interface DeskToolDefinition {
   presentCall(args: unknown): { card: "generic"; title: string; kind: "read"; rawInput?: unknown };
 }
 
-/** What the two tools close over: the quote hub's snapshot, the desk's status, read on every call, and
+/** What the two tools close over: the Market's quote source, the desk's status, read on every call, and
  * `now` (default `Date.now`), the clock a quote's time is dated against, for tests. */
 export interface DeskToolDeps {
-  hub: UsQuoteSource;
+  quotes: Pick<MarketQuoteSource, "snapshot" | "unavailable">;
   readState: () => Promise<DeskStatus>;
   now?: () => number;
 }
@@ -121,20 +125,21 @@ const QUOTES_MAX = 20;
  * ledger keeps them until it rotates at 50 MB, so all of them would grow every call's tokens. */
 const STATE_RUNS = 10;
 
-/** A US ticker as `desk_quotes` takes it: a capital, then up to nine capitals, digits, dots or dashes. */
-const SYMBOL_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
+/** A symbol as `desk_quotes`' schema takes it: a US ticker or an A share's six digits (src/symbols.ts). */
+const QUOTE_SYMBOL_PATTERN = `${SYMBOL_RE.source}|${CN_SYMBOL_RE.source}`;
 
-/** `desk_quotes`' answer when the hub refuses with 429 - its own message is the page's, in Chinese. */
-const BUSY = "busy: the US quote source refused for now; try again shortly";
+/** `desk_quotes`' answer when the source refuses with 429. */
+const BUSY = "busy: the Market read refused for now; try again shortly";
 
 const NUMBER_OR_NULL = { oneOf: [{ type: "number" }, { type: "null" }] };
 const STRING_OR_NULL = { oneOf: [{ type: "string" }, { type: "null" }] };
 
-/** One quote as `desk_quotes` answers it: the hub's own fields, its `quote_status` as `status`. */
+/** One quote as `desk_quotes` answers it: the source's own fields, its `quote_status` as `status`. */
 const QUOTE_SCHEMA = {
   type: "object",
   properties: {
     symbol: { type: "string" },
+    market: { type: "string", enum: ["us", "cn"] },
     price: NUMBER_OR_NULL,
     as_of: STRING_OR_NULL,
     change_pct: NUMBER_OR_NULL,
@@ -143,7 +148,7 @@ const QUOTE_SCHEMA = {
     transport: { type: "string", enum: ["stream", "poll"] },
     status: { type: "string", enum: ["live", "delayed", "stale", "unavailable"] },
   },
-  required: ["symbol", "price", "as_of", "change_pct", "prev_close", "feed", "transport", "status"],
+  required: ["symbol", "market", "price", "as_of", "change_pct", "prev_close", "feed", "transport", "status"],
   additionalProperties: false,
 };
 
@@ -179,26 +184,31 @@ function shown(value: unknown): string {
   return text.length > 40 ? `${text.slice(0, 40)}…` : text;
 }
 
-/** `desk_quotes`' symbols, each once in the order first named. Throws - the registry's error result - on
- * anything but 1 to {@link QUOTES_MAX} tickers that match {@link SYMBOL_RE}. */
-function symbolsOf(args: unknown): string[] {
+/** `desk_quotes`' symbols, each once in the order first named, as the source is asked for them. Throws - the
+ * registry's error result - on anything but 1 to {@link QUOTES_MAX} symbols that match {@link SYMBOL_RE} or
+ * {@link CN_SYMBOL_RE}. */
+function symbolsOf(args: unknown): MarketQuoteIdentity[] {
   const symbols: unknown = args !== null && typeof args === "object" ? (args as { symbols?: unknown }).symbols : undefined;
   if (!Array.isArray(symbols) || symbols.length < 1 || symbols.length > QUOTES_MAX) {
-    throw new Error(`desk_quotes takes symbols: 1 to ${QUOTES_MAX} US tickers`);
+    throw new Error(`desk_quotes takes symbols: 1 to ${QUOTES_MAX} US tickers or six-digit A shares`);
   }
+  const assets: MarketQuoteIdentity[] = [];
   for (const symbol of symbols) {
-    if (typeof symbol !== "string" || !SYMBOL_RE.test(symbol)) {
-      throw new Error(`desk_quotes takes US tickers in capitals (NVDA, BRK.B); ${shown(symbol)} is not one`);
+    const market = marketOf(symbol);
+    if (market === undefined) {
+      throw new Error(`desk_quotes takes US tickers in capitals (NVDA, BRK.B) or six digits for an A share (600519); ${shown(symbol)} is not one`);
     }
+    if (!assets.some((asset) => asset.symbol === symbol)) assets.push({ id: idOf(market, symbol as string), market, symbol: symbol as string });
   }
-  return [...new Set(symbols as string[])];
+  return assets;
 }
 
-/** One hub quote as the desk reads it. `transport` is always set on a payload's quotes; `poll`, the hub's
+/** One quote as the desk reads it. `transport` is always set on a payload's quotes; `poll`, the source's
  * own word for a symbol it is not streaming, stands in should one come without. */
-function deskQuote(quote: LiveQuote) {
+function deskQuote(quote: MarketQuote) {
   return {
     symbol: quote.symbol,
+    market: quote.market,
     price: quote.price,
     as_of: quote.as_of,
     change_pct: quote.change_pct,
@@ -213,12 +223,12 @@ function deskQuote(quote: LiveQuote) {
 type DeskQuote = ReturnType<typeof deskQuote>;
 
 /**
- * A quote's time as the desk contract quotes one (`IEX 15:21:03 ET`): the feed upper-cased, then New
+ * A US quote's time as the desk contract quotes one (`NASDAQ 15:21:03 ET`): the feed upper-cased, then New
  * York's clock to the second, with the New York date before it when that is not `now`'s - a quote from
  * before midnight in New York is dated, whatever the UTC date says. A time `Date` cannot read stays as
- * the hub gave it.
- * @param feed - the quote's feed, `iex`, `sip` or `delayed_sip`; empty when the hub has none.
- * @param asOf - the quote's time, as the hub gave it.
+ * the source gave it.
+ * @param feed - the quote's feed, `robinhood`, `nasdaq` or `cboe delayed`; empty when the source has none.
+ * @param asOf - the quote's time, as the source gave it.
  * @param now - the time the call is answered at, in ms since the epoch.
  */
 export function quoteTime(feed: string, asOf: string, now: number): string {
@@ -228,14 +238,24 @@ export function quoteTime(feed: string, asOf: string, now: number): string {
   return feed === "" ? clock : `${feed.toUpperCase()} ${clock}`;
 }
 
+/** An A share's quote time as the desk quotes one (`TENCENT 14:03:12 Beijing`): the feed upper-cased, then
+ * src/et.ts `bjStamp`, dated when not `now`'s Beijing date. A time `Date` cannot read stays as the source gave it. */
+function cnQuoteTime(feed: string, asOf: string, now: number): string {
+  const at = new Date(asOf);
+  const clock = Number.isNaN(at.getTime()) ? asOf : bjStamp(at, new Date(now));
+  return feed === "" ? clock : `${feed.toUpperCase()} ${clock}`;
+}
+
 /** One quote as one line of `desk_quotes`' text -
- * `NVDA 182.31, +1.20% vs prev close 180.15 | IEX 15:21:03 ET | stream | live` - its change only with a
+ * `NVDA 182.31, +1.20% vs prev close 180.15 | NASDAQ 15:21:03 ET | poll | live`,
+ * `600519 1452.3, +0.85% vs prev close 1440.06 | TENCENT 14:03:12 Beijing | poll | live` - its change only with a
  * previous close, its time only with one, and `no price` when it has none. */
 function quoteLine(quote: DeskQuote, now: number): string {
   const head = quote.price === null ? `${quote.symbol} no price`
     : quote.change_pct === null || quote.prev_close === null ? `${quote.symbol} ${quote.price}`
     : `${quote.symbol} ${quote.price}, ${quote.change_pct > 0 ? "+" : ""}${quote.change_pct.toFixed(2)}% vs prev close ${quote.prev_close}`;
-  const time = quote.as_of === null ? [] : [quoteTime(quote.feed, quote.as_of, now)];
+  const stamp = quote.market === "cn" ? cnQuoteTime : quoteTime;
+  const time = quote.as_of === null ? [] : [stamp(quote.feed, quote.as_of, now)];
   return [head, ...time, quote.transport, quote.status].join(" | ");
 }
 
@@ -267,35 +287,36 @@ const asJson = (_args: unknown, value: unknown): { type: "text"; text: string }[
 
 /**
  * The two desk tools over `deps`, in this order:
- * - `desk_quotes` (`timeoutMs` 15,000): `{ symbols }`, 1 to 20 tickers, each `^[A-Z][A-Z0-9.-]{0,9}$`,
- *   asked of the hub as `us:` assets; answers `{ quotes: [{ symbol, price, as_of, change_pct, prev_close,
- *   feed, transport, status }] }` from the hub's quotes, `status` being its `quote_status` and its UI
- *   `message` left out. A 429 from the hub answers `{ error: "busy: …" }`; a refused argument, and any
- *   other failure, is the call's error. The model reads one line per quote ({@link quoteLine}), its time
- *   in New York as the desk quotes one, or the `error` as it is.
+ * - `desk_quotes` (`timeoutMs` 15,000): `{ symbols }`, 1 to 20 symbols, each a US ticker
+ *   (`^[A-Z][A-Z0-9.-]{0,9}$`) or an A share's six digits, asked of the source in one snapshot as `us:` and `cn:`
+ *   assets; answers `{ quotes: [{ symbol, market, price, as_of, change_pct, prev_close, feed, transport, status }] }`
+ *   from the source's quotes in the order asked, `status` being its `quote_status` and its `message` left out. A
+ *   429 from the source answers `{ error: "busy: …" }`; a refused argument, and any other failure, is the call's
+ *   error. The model reads one line per quote ({@link quoteLine}), its time on its exchange's clock as the desk
+ *   quotes one, or the `error` as it is.
  * - `desk_state` (`timeoutMs` 5,000): no parameters; answers `deps.readState()`'s status with `runs` cut
  *   to the last {@link STATE_RUNS} and `runsInLedger`, how many the ledger holds - the route
  *   `GET /data/desk/status` answers them all.
- * @param deps - the quote hub, the status reader and the clock.
+ * @param deps - the quote source, the status reader and the clock.
  */
 export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
   const now = deps.now ?? Date.now;
   const quotes: DeskToolDefinition = {
     name: "desk_quotes",
     description:
-      "The price now for 1 to 20 US stocks, from the desk's US quote source, one line each: the price and its change on " +
-      "the previous close; the feed and the exchange time in New York (IEX 15:21:03 ET, dated when not today); transport (stream " +
-      "or poll); status (live, delayed, stale or unavailable). The price now, never evidence. The source is the Account's market " +
-      "read; when the Account cannot be asked it answers unavailable and why.",
+      "The price now for 1 to 20 US stocks or A shares (six digits, e.g. 600519), one line each: the price and its change on " +
+      "the previous close; the feed and the exchange time (NASDAQ 15:21:03 ET, TENCENT 14:03:12 Beijing, dated when not today); " +
+      "transport (stream or poll); status (live, delayed, stale or unavailable). The price now, never evidence. The source is " +
+      "the Market's read; when the Account cannot be asked it answers unavailable and why.",
     parameters: {
       type: "object",
       properties: {
         symbols: {
           type: "array",
-          items: { type: "string", pattern: SYMBOL_RE.source },
+          items: { type: "string", pattern: QUOTE_SYMBOL_PATTERN },
           minItems: 1,
           maxItems: QUOTES_MAX,
-          description: "US tickers in capitals, e.g. NVDA, BRK.B",
+          description: "US tickers in capitals, e.g. NVDA, BRK.B, or A shares as six digits, e.g. 600519",
         },
       },
       required: ["symbols"],
@@ -317,12 +338,11 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
     },
     timeoutMs: 15_000,
     async execute(args, exec) {
-      const symbols = symbolsOf(args);
-      if (deps.hub.unavailable !== undefined) return { error: `unavailable: ${deps.hub.unavailable}` };
-      const assets: QuoteIdentity[] = symbols.map((symbol) => ({ id: `us:${symbol}`, market: "us", symbol }));
-      let payload: QuotePayload;
+      const assets = symbolsOf(args);
+      if (deps.quotes.unavailable !== undefined) return { error: `unavailable: ${deps.quotes.unavailable}` };
+      let payload: MarketQuotePayload;
       try {
-        payload = await untilCancelled(exec.signal, () => deps.hub.snapshot(assets));
+        payload = await untilCancelled(exec.signal, () => deps.quotes.snapshot(assets));
       } catch (error) {
         if (error instanceof HttpError && error.status === 429) return { error: BUSY };
         if (exec.signal.aborted) throw error;

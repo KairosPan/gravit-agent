@@ -9,9 +9,13 @@
  * unquoted date stays the text `2026-11-30`, a boolean is CORE's (`true`/`false`, `True`/`TRUE`), so `yes` is
  * text, and duplicate keys are refused. An empty file, or one of comments only, holds no entries, and an
  * optional key left empty (or `~`) is as if it were not there. The face never takes a price from them: prices
- * come from the quote hub.
+ * come from the Market's reads (src/market-quotes.ts).
  *
- * A HOLDING. `symbol`, a ticker ({@link SYMBOL_RE}); `qty`, a number other than 0 (below 0 is a short);
+ * TWO MARKETS. A `symbol` is a US ticker ({@link SYMBOL_RE}, `NVDA`, `BRK.B`) or an A share's six digits (`600519`),
+ * read by src/symbols.ts `marketOf`, and every entry carries its `market`, `us` or `cn`. An A share's code is quoted
+ * in YAML (`symbol: "600519"`): unquoted, YAML reads it as a number, and a number is refused, never coerced.
+ *
+ * A HOLDING. `symbol`, a ticker or a six-digit A share; `qty`, a number other than 0 (below 0 is a short);
  * `avg_cost`, a number above 0; and, if wanted, `opened`, a date (YYYY-MM-DD), and `broker`, one line of at most
  * 40 characters. A symbol is held once: a second entry for a symbol is refused `<SYMBOL> is held twice; the
  * first entry stands`, or `<SYMBOL> is held twice; neither entry loads` when the first was refused for a fault
@@ -60,6 +64,10 @@ import { constants as fsConstants, type Stats } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";
 import { cut, escaped } from "./echo.ts";
 import { isEtDate, readDeskYaml, sha256Hex } from "./standing.ts";
+import { marketOf, SYMBOL_RE, type Market } from "./symbols.ts";
+
+/** A ticker (src/symbols.ts, re-exported for the book's readers). */
+export { SYMBOL_RE };
 
 /* ---------- the limits ---------- */
 
@@ -75,8 +83,6 @@ export const PLAN_MAX_CHARS = 300;
 export const SOURCE_MAX_CHARS = 200;
 /** A level's cooldown when it names none: 30 min. */
 export const DEFAULT_LEVEL_COOLDOWN_MS = 1_800_000;
-/** A ticker: a capital letter, then at most 9 of A-Z, 0-9, `.` and `-` (`BRK.B`, `BF-B`). */
-export const SYMBOL_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
 /** The most characters a holding's broker may hold. */
 const BROKER_MAX_CHARS = 40;
@@ -97,7 +103,7 @@ export interface LoadRefusal {
   file: string;
   /** The entry's place in the file, from 0; absent for the entries past a cap. */
   index?: number;
-  /** The entry's symbol, when it is a ticker ({@link SYMBOL_RE}); a refusal of the symbol itself quotes it. */
+  /** The entry's symbol, when it is a ticker or an A share's code; a refusal of the symbol itself quotes it. */
   symbol?: string;
   reason: string;
 }
@@ -118,6 +124,7 @@ export interface LoadResult<T> {
 /** One holding, as the operator typed it. */
 export interface Holding {
   symbol: string;
+  market: Market;
   qty: number;
   avgCost: number;
   opened?: string;
@@ -132,6 +139,7 @@ export interface Level {
   file: string;
   index: number;
   symbol: string;
+  market: Market;
   kind: LevelKind;
   price?: number;
   range?: [number, number];
@@ -151,7 +159,7 @@ const LEVEL_KINDS: ReadonlySet<string> = new Set<LevelKind>(["buy_zone", "stop",
 
 const NO_PLAN = "a level without a plan is refused: write what to do when it is reached";
 const NO_EXPIRY = "a level without an expiry is refused: write expires: YYYY-MM-DD, the last day it holds";
-const BAD_SYMBOL = "symbol must be a ticker: a capital letter, then at most 9 of A-Z, 0-9, . and -";
+const BAD_SYMBOL = "symbol must be a US ticker (NVDA, BRK.B) or six digits for an A share (600519)";
 
 /* ---------- the values ---------- */
 
@@ -177,9 +185,9 @@ function shown(value: unknown): string {
   return String(value);
 }
 
-/** The entry's symbol, when it is a mapping whose `symbol` is a ticker. */
+/** The entry's symbol, when it is a mapping whose `symbol` is a ticker or an A share's code. */
 function tickerOf(raw: unknown): string | undefined {
-  return isRecord(raw) && typeof raw.symbol === "string" && SYMBOL_RE.test(raw.symbol) ? raw.symbol : undefined;
+  return isRecord(raw) && marketOf(raw.symbol) !== undefined ? raw.symbol as string : undefined;
 }
 
 /** The entry's first key outside `keys`, as a refusal names it. */
@@ -188,10 +196,10 @@ function unknownKey(raw: Record<string, unknown>, keys: ReadonlySet<string>): st
   return key === undefined ? undefined : `unknown key ${shown(key)}`;
 }
 
-/** Why `value` is not a ticker, or `undefined` when it is one. */
+/** Why `value` is neither a ticker nor an A share's code, or `undefined` when it is one. */
 function symbolFault(value: unknown): string | undefined {
   if (value === undefined) return "symbol is missing";
-  return typeof value === "string" && SYMBOL_RE.test(value) ? undefined : `${BAD_SYMBOL} (got ${shown(value)})`;
+  return marketOf(value) !== undefined ? undefined : `${BAD_SYMBOL} (got ${shown(value)})`;
 }
 
 /** Whether a text field is left blank: absent, empty, or nothing but spaces. */
@@ -263,6 +271,7 @@ function holdingVerdict(raw: unknown, first: boolean | undefined): Verdict<Holdi
   return {
     entry: {
       symbol: ticker,
+      market: marketOf(ticker) as Market,
       qty,
       avgCost,
       ...(hasOpened ? { opened: opened as string } : {}),
@@ -334,6 +343,7 @@ function judgeLevel(raw: unknown, index: number, file: string, today: string): V
       file,
       index,
       symbol: ticker,
+      market: marketOf(ticker) as Market,
       kind: kind as LevelKind,
       ...(bounds === undefined ? { price: price as number } : { range: bounds }),
       when,

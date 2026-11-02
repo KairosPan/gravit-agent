@@ -1,7 +1,7 @@
 // face/tests/et.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
-import { etClock, etDate, etDayStart, etTime } from "../src/et.ts";
+import { bjClock, bjDate, bjStamp, etClock, etDate, etDayStart, etTime } from "../src/et.ts";
 
 test("etTime and etDate render America/New_York across DST", () => {
   assert.equal(etTime(new Date("2026-10-20T18:03:00Z")), "14:03 ET");      // EDT
@@ -49,4 +49,13 @@ test("etClock reads New York's wall clock to the second across the fall-back of 
   assert.equal(etClock(new Date("2026-11-02T05:00:00Z")), "00:00:00", "midnight is 00, never 24");
   assert.equal(etClock(new Date("2026-10-20T19:21:03.999Z")), "15:21:03", "a fraction of a second is cut, not rounded");
   assert.equal(etTime(new Date("2026-10-20T19:21:03Z")), "15:21 ET", "etTime still stops at the minute");
+});
+
+test("bjDate, bjClock and bjStamp read Beijing time, which keeps no daylight time", () => {
+  assert.equal(bjDate(new Date("2026-11-01T16:30:00Z")), "2026-11-02");
+  assert.equal(bjClock(new Date("2026-07-01T06:03:12Z")), "14:03:12");
+  assert.equal(bjClock(new Date("2026-12-01T06:03:12Z")), "14:03:12", "the same wall clock in winter: no daylight time");
+  assert.equal(bjClock(new Date("2026-11-01T16:00:00Z")), "00:00:00", "midnight is 00, never 24");
+  assert.equal(bjStamp(new Date("2026-12-01T06:03:12Z"), new Date("2026-12-01T06:03:20Z")), "14:03:12 Beijing");
+  assert.equal(bjStamp(new Date("2026-11-27T07:00:00Z"), new Date("2026-11-30T01:00:00Z")), "2026-11-27 15:00:00 Beijing");
 });

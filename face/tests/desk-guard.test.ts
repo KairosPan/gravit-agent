@@ -26,7 +26,7 @@ import {
   deskReadDecision, deskSecretDecision, deskSecretNames, deskSecrets, deskWriteDecision, installDeskGuard,
   type DeskGuardCtxLike, type DeskGuardExecution, type DeskGuardToolsLike, type DeskPreDecision,
 } from "../src/desk-tools.ts";
-import type { UsQuotePayload } from "../src/us-quotes.ts";
+import type { MarketQuotePayload } from "../src/market-quotes.ts";
 import { recorder } from "./route-recorder.ts";
 
 /** The repository root the face runs from (main.ts passes `process.cwd()` as `installDesk`'s `root`). */
@@ -1267,7 +1267,7 @@ test("installDesk installs the guard with the tools, whatever enabled says, and 
     return made;
   };
   const watch = { setInterval: () => 1, clearInterval: () => {} };
-  const hub = { snapshot: async (): Promise<UsQuotePayload> => ({ ok: true, generated_at: "2026-10-21T14:00:00.000Z", quotes: [], providers: [] }) };
+  const quotes = { snapshot: async (): Promise<MarketQuotePayload> => ({ ok: true, generated_at: "2026-10-21T14:00:00.000Z", quotes: [], providers: [] }) };
   const deskWrite = write("GRAVIT.md", agentOn(DESK_PRESET));
   const deskRead = call("read", { file_path: `${REPO}/.env.alpaca` }, agentOn(DESK_PRESET));
   /* installDesk hands the guard its `log`: the install line goes there, and nothing reaches stderr. */
@@ -1278,7 +1278,7 @@ test("installDesk installs the guard with the tools, whatever enabled says, and 
   for (const enabled of [false, true]) {
     const root = fakeRoot();
     const lines: string[] = [];
-    const desk = installDesk(recorder(), { home: await home(), enabled, watch, ctx: root.ctx, hub, root: REPO, log: (line) => { lines.push(line); } });
+    const desk = installDesk(recorder(), { home: await home(), enabled, watch, ctx: root.ctx, quotes, root: REPO, log: (line) => { lines.push(line); } });
     assert.equal(lines.length, 1, `one line at install, through installDesk's log (enabled: ${enabled})`);
     assert.match(lines[0], /^gravit-face: desk: the secret check covers /);
     assert.equal(root.preExecute.length, 1, `the guard's listener is installed (enabled: ${enabled})`);
@@ -1296,7 +1296,7 @@ test("installDesk installs the guard with the tools, whatever enabled says, and 
     assert.equal(root.guards.length, 0, `and the backstop (enabled: ${enabled})`);
     assert.equal(root.agentCreated.length, 0);
   }
-  /* Given the context alone, the guard - which needs no hub - is installed, and the tools are not. */
+  /* Given the context alone, the guard - which needs no quote source - is installed, and the tools are not. */
   const root = fakeRoot();
   const desk = installDesk(recorder(), { home: await home(), enabled: false, ctx: root.ctx, root: REPO, log: () => {} });
   assert.equal(root.preExecute.length, 1);

@@ -612,7 +612,7 @@ test("wake: false runs only the producer: no session, nothing sent on success, o
    * face line and an undelivered answer */
   for (const [builtins, error] of [
     [{}, "builtin:brief is not available in this face"],
-    [{ brief: async (): Promise<ProducerOutput> => { throw new Error("the hub fell over"); } }, "the hub fell over"],
+    [{ brief: async (): Promise<ProducerOutput> => { throw new Error("the quote source fell over"); } }, "the quote source fell over"],
   ] as const) {
     const fx = await fixture();
     const r = rig(fx, { over: { builtins, deliver: async () => { throw new Error("the outlet fell over"); } } });

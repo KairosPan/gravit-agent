@@ -1185,3 +1185,24 @@ test("funding is read with no venue, as the Account's own page reads it: every v
   assert.equal(bare.status, 200);
   assert.equal(fetched[1], `${URL_}/api/account/funding`);
 });
+
+test("the quotes reader reads through the quotes route's cache", async () => {
+  let clock = NOW;
+  const { routes, fetched, proxy } = proxyWith(answering('{"ok":true,"quotes":[]}'), () => clock);
+  const query = "pairs=china%7C000001%2Cchina%7C600519";
+  const first = await proxy.quotes(query);
+  const second = await proxy.quotes(query);
+  assert.deepEqual(first, { status: 200, body: '{"ok":true,"quotes":[]}' });
+  assert.deepEqual(second, first);
+  assert.deepEqual(fetched, [`${URL_}/api/account/quotes?${query}`], "two reads of one query inside 3 s ask upstream once");
+  /* the browser's /data/account/quotes is served from the same cache */
+  const page = await call(routes, `/data/account/quotes?${query}`);
+  assert.equal(page.status, 200);
+  assert.equal(fetched.length, 1, "the page's read is the cached answer");
+  clock += ACCOUNT_TTL_MS.quotes + 1;
+  await proxy.quotes(query);
+  assert.equal(fetched.length, 2, "past 3 s the reader asks again");
+
+  const off = registerAccountProxy({ register() {} }, { disabled: true });
+  assert.deepEqual(await off.quotes(query), { unreachable: "disabled" });
+});

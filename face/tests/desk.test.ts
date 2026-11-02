@@ -1268,7 +1268,7 @@ test("installDesk loads the schedule only with the conversation; its status reac
   const timer = fakeTimer();
   const desk = installDesk(rec, {
     home: h, enabled: true, now: () => Date.parse("2026-11-27T16:00:00Z"), watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval },
-    ctx: tools.ctx, hub: { snapshot: async () => ({ ok: true, generated_at: "2026-11-27T16:00:00.000Z", quotes: [], providers: [] }) },
+    ctx: tools.ctx, quotes: { snapshot: async () => ({ ok: true, generated_at: "2026-11-27T16:00:00.000Z", quotes: [], providers: [] }) },
     root, route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
     python: "python3",
     schedule: { clock, calendar: fakeCalendar({ "2026-11-27": { date: "2026-11-27", open: "2026-11-27T14:30:00Z", close: "2026-11-27T18:00:00Z", early: true } }), tickMs: 86_400_000 },

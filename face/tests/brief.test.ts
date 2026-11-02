@@ -13,12 +13,12 @@ import { readFileSync } from "node:fs";
 import { mkdir, rm, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BRIEF_INDEXES, BRIEF_SECTORS, BRIEF_SYMBOLS_MAX, NEAR_PCT, briefProducer, buildBrief, type Brief } from "../src/brief.ts";
+import { BRIEF_INDEXES, BRIEF_SCOPE, BRIEF_SECTORS, BRIEF_SYMBOLS_MAX, NEAR_PCT, briefProducer, buildBrief, type Brief } from "../src/brief.ts";
 import { loadHoldings, loadLevels } from "../src/desk-book.ts";
 import { HttpError } from "../src/http.ts";
 import { capText, PRODUCER_TEXT_MAX, type ProducerInput, type ProducerOutput } from "../src/producer.ts";
-import type { UsLiveQuote as LiveQuote, UsProviderState as ProviderState, UsQuoteIdentity as QuoteIdentity, UsQuotePayload as QuotePayload } from "../src/us-quotes.ts";
-import { NO_US_QUOTES, unwiredUsQuotes } from "../src/us-quotes.ts";
+import type { MarketQuote as LiveQuote, MarketProviderState as ProviderState, MarketQuoteIdentity as QuoteIdentity, MarketQuotePayload as QuotePayload } from "../src/market-quotes.ts";
+import { NO_QUOTES, unwiredMarketQuotes } from "../src/market-quotes.ts";
 import { STANDING_TEXT_MAX_BYTES } from "../src/standing.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -138,7 +138,7 @@ test("buildBrief prices indexes, sectors, holdings and near levels from one snap
   await utimes(join(root, "desk", "holdings.yml"), new Date("2026-10-20T13:05:00Z"), new Date("2026-10-20T13:05:00Z"));
   const hub = fakeHub({ SPY: { price: 581.23, prev: 583.68 }, NVDA: { price: 181.2, prev: 179.05 }, AAPL: { price: 228.9 }, MSFT: { price: 420 } });
 
-  const out = await buildBrief({ hub: hub.hub, root, now: () => NOW }, INPUT);
+  const out = await buildBrief({ quotes: hub.hub, root, now: () => NOW }, INPUT);
 
   assert.equal(hub.calls.length, 1, "one snapshot");
   assert.equal(hub.calls[0][0].symbol, "SPY");
@@ -148,7 +148,7 @@ test("buildBrief prices indexes, sectors, holdings and near levels from one snap
   const b = briefOf(out);
   assert.deepEqual(b.indexes[0], { symbol: "SPY", last: 581.23, chgPct: -0.42, prevClose: 583.68, at: "IEX 15:21:03 ET", status: "live" });
   assert.equal(b.takenAt, "15:30:05 ET");
-  assert.equal(b.notYet, "alerts, suppressed alerts and filings arrive with the watch (P3); strategies' levels.yml join once each is pinned at arming (P4)");
+  assert.equal(b.scope, BRIEF_SCOPE);
   assert.deepEqual(b, {
     date: "2026-10-20",
     takenAt: "15:30:05 ET",
@@ -184,11 +184,12 @@ test("buildBrief prices indexes, sectors, holdings and near levels from one snap
       refusals: [],
       errors: [],
     },
-    notYet: "alerts, suppressed alerts and filings arrive with the watch (P3); strategies' levels.yml join once each is pinned at arming (P4)",
+    aShares: { holdings: 0, levels: 0 },
+    scope: BRIEF_SCOPE,
   }, "MSFT's watch is 4.76% away, so it is not near; NVDA's stop is 6.18% away");
   assert.ok(!(out.text ?? "").includes("最近成交"), "the hub's UI message is left out");
-  /* The text's own key order (deepEqual ignores it): the errors ahead of the long lists, notYet last. */
-  assert.deepEqual(Object.keys(b), ["date", "takenAt", "session", "indexes", "sectors", "holdings", "levels", "notYet"]);
+  /* The text's own key order (deepEqual ignores it): the errors ahead of the long lists, scope last. */
+  assert.deepEqual(Object.keys(b), ["date", "takenAt", "session", "indexes", "sectors", "holdings", "levels", "aShares", "scope"]);
   assert.deepEqual(Object.keys(b.holdings), ["file", "edited", "rows", "refusals"]);
   assert.deepEqual(Object.keys(b.levels), ["files", "loaded", "errors", "near", "refusals"]);
 });
@@ -198,7 +199,7 @@ test("a quote from another ET day is dated, and so is a holdings file edited on 
   /* 18:00 ET on the 19th */
   await utimes(join(root, "desk", "holdings.yml"), new Date("2026-10-19T22:00:00Z"), new Date("2026-10-19T22:00:00Z"));
   const hub = fakeHub({ SPY: { price: 583.68, prev: 580.1, asOf: "2026-10-19T19:59:58Z" } });
-  const b = briefOf(await buildBrief({ hub: hub.hub, root, now: () => NOW }, INPUT));
+  const b = briefOf(await buildBrief({ quotes: hub.hub, root, now: () => NOW }, INPUT));
   assert.equal(b.indexes[0].at, "IEX 2026-10-19 15:59:58 ET");
   assert.equal(b.holdings.edited, "2026-10-19 18:00 ET");
   assert.deepEqual(hub.calls[0].filter((asset) => asset.symbol === "SPY").length, 1, "a held index is asked for once");
@@ -212,7 +213,7 @@ test("the session is shown in New York's time, an early close included", async (
     ...INPUT, firing: "preclose:2026-11-27", date: "2026-11-27",
     session: { open: "2026-11-27T14:30:00Z", close: "2026-11-27T18:00:00Z", early: true },
   };
-  const b = briefOf(await buildBrief({ hub: fakeHub({}).hub, root, now: () => Date.parse("2026-11-27T17:30:04Z") }, early));
+  const b = briefOf(await buildBrief({ quotes: fakeHub({}).hub, root, now: () => Date.parse("2026-11-27T17:30:04Z") }, early));
   assert.equal(b.date, "2026-11-27");
   assert.deepEqual(b.session, { open: "09:30 ET", close: "13:00 ET", early: true });
   assert.equal(b.takenAt, "12:30:04 ET");
@@ -222,7 +223,7 @@ test("a hub that throws still gives a block that says the prices are unavailable
   const root = await makeRoot("throws", { "desk/holdings.yml": HOLDINGS_YML, "desk/levels.yml": LEVELS_YML });
   const hub = fakeHub({ SPY: { price: 581.23, prev: 583.68 } }, { fail: HUB_BUSY });
 
-  const out = await buildBrief({ hub: hub.hub, root, now: () => NOW }, INPUT);
+  const out = await buildBrief({ quotes: hub.hub, root, now: () => NOW }, INPUT);
 
   assert.equal(hub.calls.length, 1, "asked once, never retried");
   assert.equal(out.ok, false);
@@ -245,7 +246,7 @@ test("a hub that throws still gives a block that says the prices are unavailable
   assert.equal(b.takenAt, "15:30:05 ET");
 
   /* Any other throw keeps its own message. */
-  const other = await buildBrief({ hub: fakeHub({}, { fail: new Error("socket hang up") }).hub, root, now: () => NOW }, INPUT);
+  const other = await buildBrief({ quotes: fakeHub({}, { fail: new Error("socket hang up") }).hub, root, now: () => NOW }, INPUT);
   assert.equal((other as { error: string }).error, "quotes unavailable: socket hang up");
 });
 
@@ -253,7 +254,7 @@ test("a snapshot with no price at all fails the brief, naming the provider's sta
   const root = await makeRoot("priceless", { "desk/holdings.yml": HOLDINGS_YML, "desk/levels.yml": LEVELS_YML });
   const hub = fakeHub({}, { providers: [alpaca("unconfigured")] });
 
-  const out = await buildBrief({ hub: hub.hub, root, now: () => NOW }, INPUT);
+  const out = await buildBrief({ quotes: hub.hub, root, now: () => NOW }, INPUT);
 
   assert.equal(hub.calls.length, 1);
   assert.equal(out.ok, false, "a brief with no price is no success");
@@ -265,14 +266,14 @@ test("a snapshot with no price at all fails the brief, naming the provider's sta
   assert.equal(b.levels.loaded, 3);
 
   /* No US provider in the payload, or a state that is not one of the hub's words: unknown. */
-  const bare = await buildBrief({ hub: fakeHub({}).hub, root, now: () => NOW }, INPUT);
+  const bare = await buildBrief({ quotes: fakeHub({}).hub, root, now: () => NOW }, INPUT);
   assert.equal((bare as { error: string }).error, "quotes unavailable: the source has no price for any symbol (US provider unknown)");
   const odd = { ...alpaca("error"), status: "断开" as ProviderState["status"] };
-  const strange = await buildBrief({ hub: fakeHub({}, { providers: [odd] }).hub, root, now: () => NOW }, INPUT);
+  const strange = await buildBrief({ quotes: fakeHub({}, { providers: [odd] }).hub, root, now: () => NOW }, INPUT);
   assert.equal((strange as { error: string }).error, "quotes unavailable: the source has no price for any symbol (US provider unknown)");
 
   /* One price anywhere - a holding's, with every index and sector unpriced - and the brief is ok. */
-  const one = await buildBrief({ hub: fakeHub({ AAPL: { price: 228.9 } }, { providers: [alpaca("limited")] }).hub, root, now: () => NOW }, INPUT);
+  const one = await buildBrief({ quotes: fakeHub({ AAPL: { price: 228.9 } }, { providers: [alpaca("limited")] }).hub, root, now: () => NOW }, INPUT);
   assert.equal(one.ok, true);
   assert.equal(briefOf(one).quotesError, undefined);
 });
@@ -283,7 +284,7 @@ test("missing, broken and unlistable inputs are named, not invented", async () =
 
   /* No holdings file; a levels file that is not a list. */
   const broken = await makeRoot("broken", { "desk/levels.yml": "a: 1\n" });
-  const one = await buildBrief({ hub: spy().hub, root: broken, now: () => NOW }, INPUT);
+  const one = await buildBrief({ quotes: spy().hub, root: broken, now: () => NOW }, INPUT);
   assert.equal(one.ok, true, "the producer is still ok");
   const b1 = briefOf(one);
   assert.deepEqual(b1.holdings, { file: "desk/holdings.yml", edited: null, missing: true, rows: [], refusals: [] });
@@ -295,7 +296,7 @@ test("missing, broken and unlistable inputs are named, not invented", async () =
 
   /* A file named strategies: the brief never looks there (I3). */
   const unlistable = await makeRoot("unlistable", { strategies: "not a directory\n" });
-  const two = await buildBrief({ hub: spy().hub, root: unlistable, now: () => NOW }, INPUT);
+  const two = await buildBrief({ quotes: spy().hub, root: unlistable, now: () => NOW }, INPUT);
   assert.equal(two.ok, true, "the producer is still ok");
   assert.deepEqual(briefOf(two).levels, { files: [], loaded: 0, near: [], refusals: [], errors: [] });
 
@@ -304,7 +305,7 @@ test("missing, broken and unlistable inputs are named, not invented", async () =
     "desk/holdings.yml": "- symbol: NVDA\n  qty: 100\n  avg_cost: 120.5\n- symbol: TSLA\n  qty: 0\n  avg_cost: 250\n",
     "desk/levels.yml": "- symbol: NVDA\n  kind: stop\n  price: 170\n  when: cross_down\n  plan: sell half\n  expires: 2026-10-01\n",
   });
-  const b3 = briefOf(await buildBrief({ hub: fakeHub({ NVDA: { price: 181.2 } }).hub, root: refusing, now: () => NOW }, INPUT));
+  const b3 = briefOf(await buildBrief({ quotes: fakeHub({ NVDA: { price: 181.2 } }).hub, root: refusing, now: () => NOW }, INPUT));
   const holdings = await loadHoldings(join(refusing, "desk", "holdings.yml"), "desk/holdings.yml");
   const levels = await loadLevels(join(refusing, "desk", "levels.yml"), "desk/levels.yml", INPUT.date);
   assert.equal(holdings.refusals.length, 1);
@@ -317,14 +318,14 @@ test("missing, broken and unlistable inputs are named, not invented", async () =
   /* A firing date that is not a date fails the brief once, up front: nothing is read and the hub is not asked. */
   const misdatedHub = spy();
   for (const date of ["2026-13-45", "2026-02-30", "20261020"]) {
-    assert.deepEqual(await buildBrief({ hub: misdatedHub.hub, root: refusing, now: () => NOW }, { ...INPUT, date }),
+    assert.deepEqual(await buildBrief({ quotes: misdatedHub.hub, root: refusing, now: () => NOW }, { ...INPUT, date }),
       { ok: false, error: `the brief takes the firing's ET date as YYYY-MM-DD, not "${date}"` });
   }
   assert.equal(misdatedHub.calls.length, 0);
 
   /* A holdings file that is not YAML is the block's error, with no rows. */
   const garbled = await makeRoot("garbled", { "desk/holdings.yml": "- symbol: NVDA\n\tqty: 1\n" });
-  const b4 = briefOf(await buildBrief({ hub: spy().hub, root: garbled, now: () => NOW }, INPUT));
+  const b4 = briefOf(await buildBrief({ quotes: spy().hub, root: garbled, now: () => NOW }, INPUT));
   const garbledLoad = await loadHoldings(join(garbled, "desk", "holdings.yml"), "desk/holdings.yml");
   assert.ok(garbledLoad.error !== undefined);
   assert.equal(b4.holdings.error, garbledLoad.error);
@@ -342,12 +343,12 @@ test("a strategy's levels.yml is not read until P4 pins it: its stop is no stop,
     "levels.yml": level("NVDA", "stop", "price: 212", "cross_down", "the root's stop"),
   });
   const hub = fakeHub({ NVDA: { price: 181.2 }, AMD: { price: 158 } });
-  const b = briefOf(await buildBrief({ hub: hub.hub, root, now: () => NOW }, INPUT));
+  const b = briefOf(await buildBrief({ quotes: hub.hub, root, now: () => NOW }, INPUT));
   assert.equal(b.holdings.rows[0].noStop, true, "a stop only a strategy's file holds is not on file for the desk yet");
   assert.deepEqual(b.levels, { files: [], loaded: 0, errors: [], near: [], refusals: [] });
   assert.ok(!hub.calls[0].some((asset) => asset.symbol === "AMD"), "a strategy-only symbol is never asked for");
   assert.ok(!JSON.stringify(b).includes("ignore previous instructions"), "no strategy's plan reaches the unattended turn");
-  assert.match(b.notYet, /strategies' levels\.yml join once each is pinned at arming \(P4\)/);
+  assert.equal(b.scope, BRIEF_SCOPE);
 });
 
 test("the symbols asked for are bounded below the hub's cache limit, and those left out are named (p2-m15)", async () => {
@@ -357,7 +358,7 @@ test("the symbols asked for are bounded below the hub's cache limit, and those l
   });
   const hub = fakeHub({ AAA: { price: 11 }, BBB: { price: 12 }, CCC: { price: 13 } });
   const bound = BRIEF_INDEXES.length + BRIEF_SECTORS.length + 1;
-  const b = briefOf(await buildBrief({ hub: hub.hub, root, now: () => NOW, symbolsMax: bound }, INPUT));
+  const b = briefOf(await buildBrief({ quotes: hub.hub, root, now: () => NOW, symbolsMax: bound }, INPUT));
   assert.equal(hub.calls[0].length, bound, "the hub is asked for the bound's worth");
   assert.deepEqual(b.quotesOmitted, ["BBB", "CCC"], "the rest named, in the brief's own order");
   assert.deepEqual(b.holdings.rows.map((row) => [row.symbol, row.last, row.status]), [
@@ -384,7 +385,7 @@ test("the nearest stop and target win, a range is measured to its nearest edge, 
     ].join(""),
   });
   const hub = fakeHub({ NVDA: { price: 181.2, prev: 179.05 }, MSFT: { price: 420, prev: 422 }, AAPL: { price: 228.9 }, AMD: { price: 158 }, TSLA: { price: 195 } });
-  const b = briefOf(await buildBrief({ hub: hub.hub, root, now: () => NOW }, INPUT));
+  const b = briefOf(await buildBrief({ quotes: hub.hub, root, now: () => NOW }, INPUT));
 
   const [nvda, msft] = b.holdings.rows;
   assert.deepEqual(nvda.stop, { price: 175, when: "cross_down", distancePct: -3.42, file: "desk/levels.yml" },
@@ -411,7 +412,7 @@ test("the sector ETFs come strongest first, those without a move after them in t
     XLK: { price: 101.5, prev: 100 }, XLE: { price: 97.9, prev: 100 }, XLF: { price: 100.3, prev: 100 }, XLV: { price: 99.5, prev: 100 },
     XLU: { price: 80 }, XLY: { price: 210, prev: 200, asOf: null, status: "unavailable" },
   });
-  const b = briefOf(await buildBrief({ hub: hub.hub, root, now: () => NOW }, INPUT));
+  const b = briefOf(await buildBrief({ quotes: hub.hub, root, now: () => NOW }, INPUT));
   assert.deepEqual(b.sectors.map((quote) => [quote.symbol, quote.chgPct]), [
     ["XLK", 1.5], ["XLF", 0.3], ["XLV", -0.5], ["XLE", -2.1],
     ["XLB", null], ["XLC", null], ["XLI", null], ["XLP", null], ["XLRE", null], ["XLU", null], ["XLY", null],
@@ -428,7 +429,7 @@ test("a stop the price has already gone through carries its when, so it reads as
     "desk/holdings.yml": "- symbol: NVDA\n  qty: 100\n  avg_cost: 120.5\n",
     "desk/levels.yml": level("NVDA", "stop", "price: 190", "cross_down", "sell half"),
   });
-  const b = briefOf(await buildBrief({ hub: fakeHub({ NVDA: { price: 181.2 } }).hub, root, now: () => NOW }, INPUT));
+  const b = briefOf(await buildBrief({ quotes: fakeHub({ NVDA: { price: 181.2 } }).hub, root, now: () => NOW }, INPUT));
   assert.deepEqual(b.holdings.rows[0].stop, { price: 190, when: "cross_down", distancePct: 4.86, file: "desk/levels.yml" },
     "a cross_down stop 4.86% above the price: the price is already through it");
 });
@@ -443,7 +444,7 @@ test("a cut at the firing's cap keeps the files' state: the long lists go first,
     "desk/holdings.yml": held.map((symbol) => `- symbol: ${symbol}\n  qty: 10\n  avg_cost: 90\n  broker: ${"b".repeat(40)}\n`).join(""),
     "desk/levels.yml": symbols.map((symbol) => level(symbol, "watch", "price: 101", "cross_up", "p".repeat(300))).join(""),
   };
-  const priced = await buildBrief({ hub: fakeHub(prices).hub, root: await makeRoot("cut-near", book), now: () => NOW }, INPUT);
+  const priced = await buildBrief({ quotes: fakeHub(prices).hub, root: await makeRoot("cut-near", book), now: () => NOW }, INPUT);
   assert.equal(priced.ok, true);
   assert.ok(priced.text !== undefined && priced.text.length > PRODUCER_TEXT_MAX, `${priced.text?.length} characters, past the cap`);
   const pricedCut = capText(priced.text);
@@ -456,8 +457,8 @@ test("a cut at the firing's cap keeps the files' state: the long lists go first,
 test("briefProducer is the brief as a builtin: it stops with its signal and never rejects", async () => {
   const root = await makeRoot("producer", { "desk/holdings.yml": HOLDINGS_YML, "desk/levels.yml": LEVELS_YML });
   const hub = fakeHub({ SPY: { price: 581.23, prev: 583.68 } });
-  const produce = briefProducer({ hub: hub.hub, root, now: () => NOW });
-  assert.deepEqual(await produce(INPUT, new AbortController().signal), await buildBrief({ hub: hub.hub, root, now: () => NOW }, INPUT));
+  const produce = briefProducer({ quotes: hub.hub, root, now: () => NOW });
+  assert.deepEqual(await produce(INPUT, new AbortController().signal), await buildBrief({ quotes: hub.hub, root, now: () => NOW }, INPUT));
 
   const aborted = new AbortController();
   aborted.abort(new Error("the producer's deadline"));
@@ -466,7 +467,7 @@ test("briefProducer is the brief as a builtin: it stops with its signal and neve
   assert.equal(hub.calls.length, before, "an aborted signal starts nothing");
 
   let asked = 0;
-  const hanging = briefProducer({ hub: { snapshot: () => { asked += 1; return new Promise<QuotePayload>(() => {}); } }, root, now: () => NOW });
+  const hanging = briefProducer({ quotes: { snapshot: () => { asked += 1; return new Promise<QuotePayload>(() => {}); } }, root, now: () => NOW });
   const controller = new AbortController();
   const pending = hanging(INPUT, controller.signal);
   const waitUntil = Date.now() + 5_000;
@@ -477,12 +478,12 @@ test("briefProducer is the brief as a builtin: it stops with its signal and neve
   assert.equal(stopped.ok, false);
   assert.match((stopped as { error: string }).error, /^stopped: /);
 
-  const throwing = briefProducer({ hub: { snapshot: () => { throw new Error("no hub"); } }, root, now: () => NOW });
+  const throwing = briefProducer({ quotes: { snapshot: () => { throw new Error("no hub"); } }, root, now: () => NOW });
   const failed = await throwing(INPUT, new AbortController().signal);
   assert.equal(failed.ok, false);
   assert.equal((failed as { error: string }).error, "quotes unavailable: no hub", "a hub that throws at once is the same failure");
 
-  const broken = briefProducer({ hub: hub.hub, root, now: () => { throw new Error("no clock"); } });
+  const broken = briefProducer({ quotes: hub.hub, root, now: () => { throw new Error("no clock"); } });
   assert.deepEqual(await broken(INPUT, new AbortController().signal), { ok: false, error: "the brief failed: no clock" }, "anything unexpected resolves, never rejects");
 });
 
@@ -496,18 +497,36 @@ test("desk/STANDING.md is the pre-close order", () => {
   assert.ok(text.endsWith("under your directory.\n"), "it ends with the save, and one newline");
 });
 
-test("an unwired US source: the brief asks nothing, every price is null, and quotesError says why", async () => {
+test("an unwired source: the brief asks nothing, every price is null, and quotesError says why", async () => {
   const root = await makeRoot("unwired", { "desk/holdings.yml": HOLDINGS_YML, "desk/levels.yml": LEVELS_YML });
   let asked = 0;
-  const source = unwiredUsQuotes();
-  const out = await buildBrief({ hub: { unavailable: source.unavailable, snapshot: (assets) => { asked += 1; return source.snapshot(assets); } }, root, now: () => NOW }, INPUT);
+  const source = unwiredMarketQuotes();
+  const out = await buildBrief({ quotes: { unavailable: source.unavailable, snapshot: (assets) => { asked += 1; return source.snapshot(assets); } }, root, now: () => NOW }, INPUT);
   assert.equal(asked, 0, "nothing is asked of a source that has no price");
   assert.equal(out.ok, false);
-  assert.equal((out as { error: string }).error, `quotes unavailable: ${NO_US_QUOTES}`);
+  assert.equal((out as { error: string }).error, `quotes unavailable: ${NO_QUOTES}`);
   const b = briefOf(out);
-  assert.equal(b.quotesError, `quotes unavailable: ${NO_US_QUOTES}`);
-  assert.match(b.quotesError ?? "", /no Account read to ask/);
+  assert.equal(b.quotesError, `quotes unavailable: ${NO_QUOTES}`);
+  assert.match(b.quotesError ?? "", /no Market read to ask/);
   for (const quote of [...b.indexes, ...b.sectors, ...b.holdings.rows]) assert.equal(quote.last, null, quote.symbol);
   assert.deepEqual(b.holdings.rows.map((row) => row.symbol), ["NVDA", "AAPL"], "the book is still read");
   assert.equal(b.levels.loaded, 3);
+});
+
+test("the brief prices only US entries and counts the A shares", async () => {
+  const root = await makeRoot("a-shares", {
+    "desk/holdings.yml": '- symbol: NVDA\n  qty: 100\n  avg_cost: 120.5\n- symbol: "600519"\n  qty: 100\n  avg_cost: 1400\n',
+    "desk/levels.yml": level("AAPL", "watch", "price: 229", "cross_up", "reread the thesis")
+      + level('"000001"', "watch", "price: 11", "cross_up", "read the bank's note"),
+  });
+  const hub = fakeHub({ NVDA: { price: 181.2 }, AAPL: { price: 228.9 }, "600519": { price: 1452.3 }, "000001": { price: 11.05 } });
+  const b = briefOf(await buildBrief({ quotes: hub.hub, root, now: () => NOW }, INPUT));
+  assert.deepEqual(hub.calls[0], [...BRIEF_INDEXES, ...BRIEF_SECTORS, "NVDA", "AAPL"].map((symbol) => ({ id: `us:${symbol}`, market: "us", symbol })),
+    "the snapshot is asked for us: ids alone");
+  assert.deepEqual(b.aShares, { holdings: 1, levels: 1 });
+  assert.equal(b.scope, BRIEF_SCOPE);
+  assert.equal(BRIEF_SCOPE, "desk/ only; A shares and each strategy's levels.yml are the watch's and their reports'");
+  assert.deepEqual(b.holdings.rows.map((row) => row.symbol), ["NVDA"], "an A-share holding is not listed");
+  assert.deepEqual(b.levels.near.map((near) => near.symbol), ["AAPL"], "an A-share level is never near here");
+  assert.ok(!JSON.stringify(b).includes("600519") && !JSON.stringify(b).includes("000001"), "no A-share code is listed");
 });

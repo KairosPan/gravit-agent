@@ -8,6 +8,9 @@
  * never `24`; and `timeZoneName: "shortOffset"`, whose `GMT-4` or `GMT-5` is how
  * {@link etDayStart} finds the offset in force at a midnight. EDT and EST both print as `ET`: the
  * operator reads the hour on the wall clock, not the offset.
+ *
+ * An A share's time is read on its own exchange's clock, Asia/Shanghai ({@link bjDate}, {@link bjClock},
+ * {@link bjStamp}: `TENCENT 14:03:12 Beijing` on a quote), from a format of its own; Beijing keeps no daylight time.
  * @module
  */
 
@@ -94,4 +97,57 @@ export function etDayStart(ms: number): number {
   const wall = Date.UTC(Number(year), Number(month) - 1, Number(day));
   const first = wall - offsetAt(wall);
   return wall - offsetAt(first);
+}
+
+/* ---------- Beijing ---------- */
+
+/** Asia/Shanghai, the A shares' clock: UTC+8 all year, with no daylight time. A separate format, so an A share's
+ * time is read on its own exchange's wall clock, as a US share's is read on New York's. */
+const BJ_FORMAT = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Shanghai",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+/** `d` in Beijing, field by field. */
+function bjPartsOf(d: Date): Record<Exclude<Field, "timeZoneName">, string> {
+  const parts = { year: "", month: "", day: "", hour: "", minute: "", second: "" };
+  for (const { type, value } of BJ_FORMAT.formatToParts(d)) {
+    if (Object.hasOwn(parts, type)) parts[type as keyof typeof parts] = value;
+  }
+  return parts;
+}
+
+/**
+ * The date in Beijing: `"2026-11-02"` at 16:30 UTC on the 1st.
+ * @param d - the instant.
+ */
+export function bjDate(d: Date): string {
+  const { year, month, day } = bjPartsOf(d);
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * The wall-clock time in Beijing to the second, bare: `"14:03:12"`, `"00:00:00"` at midnight.
+ * @param d - the instant.
+ */
+export function bjClock(d: Date): string {
+  const { hour, minute, second } = bjPartsOf(d);
+  return `${hour}:${minute}:${second}`;
+}
+
+/**
+ * An A share's quote time as the desk quotes one: `"14:03:12 Beijing"`, or `"2026-11-27 15:00:00 Beijing"` when
+ * `asOf` falls on another Beijing date than `now`.
+ * @param asOf - the quote's time.
+ * @param now - the time the quote is read at.
+ */
+export function bjStamp(asOf: Date, now: Date): string {
+  const date = bjDate(asOf);
+  return date === bjDate(now) ? `${bjClock(asOf)} Beijing` : `${date} ${bjClock(asOf)} Beijing`;
 }

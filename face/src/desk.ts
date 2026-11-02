@@ -76,7 +76,7 @@ import type { DeskClock, DeskSessionDeps, SessionEventsOn } from "./desk-session
 import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskGuardCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet, fencedPost, HttpError, isTrustedDataRequest } from "./http.ts";
-import type { UsQuoteSource } from "./us-quotes.ts";
+import type { MarketQuoteSource } from "./market-quotes.ts";
 import type { FiringRouteCtx, ScheduleDeps, ScheduleHandle } from "./schedule.ts";
 import type { StandingStatus } from "./standing.ts";
 import type { RouteRegistrar } from "./static.ts";
@@ -1229,12 +1229,12 @@ export interface DeskHandle {
  * Mount the desk's rows on a booted face.
  *
  * The status and pause routes ({@link registerDeskRoutes}) are mounted whatever `enabled` says -
- * the switch is the home's, not this face's - and so, given both `ctx` and `hub`, are the two desk
+ * the switch is the home's, not this face's - and so, given both `ctx` and `quotes`, are the two desk
  * tools (src/desk-tools.ts): every `gravit-desk` agent, those already live included, gets
- * `desk_quotes` over `hub` and `desk_state` over {@link deskStatus} with the status route's own
+ * `desk_quotes` over `quotes` and `desk_state` over {@link deskStatus} with the status route's own
  * deps, so the tool and the route agree - but for `runs`, which the tool cuts to the last ten and
  * counts in `runsInLedger` - and a face with the desk off still opens an old desk conversation
- * with its tools. Given `ctx`, hub or none and whatever `enabled` says, the desk's guard
+ * with its tools. Given `ctx`, a quote source or none and whatever `enabled` says, the desk's guard
  * (src/desk-tools.ts `installDeskGuard`) is installed too, its listener and its backstop,
  * anchored on `root`, its secrets taken from `process.env` now: every desk agent's `write`, `edit`
  * or `str_replace_editor` of an instruction file, its read outside `root` or of a key file, and any
@@ -1270,7 +1270,8 @@ export interface DeskHandle {
  * @param deps - `home`, the harness home; `enabled`, whether to mount the desk's rows; `now`
  *   (default `Date.now`) and `version` (default {@link DSH_PIN}), for the events and the status;
  *   `watch`, the sleep watch's clock and timer seams, for tests - not its `append`, which is
- *   always the ledger's; `ctx`, the booted ROOT context, and `hub`, the quote hub main.ts owns,
+ *   always the ledger's; `ctx`, the booted ROOT context, and `quotes`, the Market's quote source main.ts owns
+ *   (src/market-quotes.ts), the tools' and the brief's -
  *   which the desk tools need both of - the guard needs `ctx`, and judges below `root`;
  *   `root`, the repository whose `desk/journal/` the desk session runs in, `route`, its model route
  *   (src/desk-session.ts `resolveDeskRoute`), `sessionCtx`, the booted ROOT context as the
@@ -1298,7 +1299,7 @@ export function installDesk(
     version?: string;
     watch?: Partial<Omit<AsleepWatchOptions, "append">>;
     ctx?: DeskGuardCtxLike;
-    hub?: UsQuoteSource;
+    quotes?: MarketQuoteSource;
     root?: string;
     route?: { provider: string; model: string };
     sessionCtx?: DeskConversationCtxLike & Partial<FiringRouteCtx>;
@@ -1329,8 +1330,8 @@ export function installDesk(
   };
   registerDeskRoutes(webServer, status);
   const removeGuard = deps.ctx === undefined ? async () => {} : installDeskGuard(deps.ctx, deps.root, { log });
-  const removeTools = deps.ctx === undefined || deps.hub === undefined ? () => {} : installDeskTools(deps.ctx, deskToolDefinitions({
-    hub: deps.hub,
+  const removeTools = deps.ctx === undefined || deps.quotes === undefined ? () => {} : installDeskTools(deps.ctx, deskToolDefinitions({
+    quotes: deps.quotes,
     readState: () => deskStatus(status),
   }), { log });
   if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), dispose: async () => { removeTools(); await removeGuard(); } };
@@ -1383,7 +1384,7 @@ export function installDesk(
         home,
         root: wiring.root,
         python: deps.python ?? (process.env.FACE_PYTHON || "python3"),
-        hub: deps.hub,
+        quotes: deps.quotes,
         session: wiring.session,
         sessionCtx: wiring.sessionCtx,
         on: wiring.on,

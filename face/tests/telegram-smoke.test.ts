@@ -395,7 +395,7 @@ test("telegram smoke: one operator, the commands, the outbox through an outage, 
     const install: NonNullable<DeskSessionDeps["installModelSelection"]> = (agentCtx, ref) => installModelSelection(agentCtx as unknown as Context, ref);
     desk = installDesk(ctx.webServer, {
       home: HOME, enabled: true, ctx, root: ROOT, route: STUB, sessionCtx, installModelSelection: install,
-      hub: { snapshot: async () => ({ ok: true, generated_at: new Date().toISOString(), quotes: [], providers: [] }) },
+      quotes: { snapshot: async () => ({ ok: true, generated_at: new Date().toISOString(), quotes: [], providers: [] }) },
       telegram: { ...config!, apiBase: api.base, pollTimeoutS: 1, clock: SHORT_WAITS },
       deskDeadlineMs: DEADLINE_MS,
     });

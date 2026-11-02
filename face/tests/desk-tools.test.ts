@@ -13,8 +13,8 @@ import { DESK_PRESET } from "../src/desk-preset.ts";
 import { appendEvent, installDesk, type DeskRun, type DeskStatus } from "../src/desk.ts";
 import { deskToolDefinitions, installDeskTools, type DeskAgentLike, type DeskGuardCtxLike, type DeskToolDefinition } from "../src/desk-tools.ts";
 import { HttpError } from "../src/http.ts";
-import type { UsLiveQuote as LiveQuote, UsQuoteIdentity as QuoteIdentity, UsQuotePayload as QuotePayload } from "../src/us-quotes.ts";
-import { NO_US_QUOTES, unwiredUsQuotes } from "../src/us-quotes.ts";
+import type { MarketQuote as LiveQuote, MarketQuoteIdentity as QuoteIdentity, MarketQuotePayload as QuotePayload } from "../src/market-quotes.ts";
+import { NO_QUOTES, unwiredMarketQuotes } from "../src/market-quotes.ts";
 import { recorder } from "./route-recorder.ts";
 
 type Listener = (event: { agent: DeskAgentLike }) => undefined;
@@ -117,7 +117,7 @@ function byName(definitions: readonly DeskToolDefinition[], name: string): DeskT
 
 test("a gravit-desk agent gets both tools once; a Gravit agent gets none", () => {
   const root = fakeRoot();
-  const definitions = deskToolDefinitions({ hub: fakeHub().hub, readState: readStatus });
+  const definitions = deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus });
   const dispose = installDeskTools(root.ctx, definitions);
   assert.equal(root.listeners.length, 1, "one root agent/created listener");
 
@@ -148,7 +148,7 @@ test("a desk agent live before install gets both tools from the sweep, once; one
   const gravit = fakeAgent("gravit-before", "gravit");
   const composing = fakeAgent("desk-composing", undefined);
   const root = fakeRoot({ live: [before.agent, gravit.agent, composing.agent] });
-  installDeskTools(root.ctx, deskToolDefinitions({ hub: fakeHub().hub, readState: readStatus }));
+  installDeskTools(root.ctx, deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus }));
   assert.deepEqual(root.calls, ["on", "list"], "the listener first, then the sweep, in the same tick: no agent falls between them");
   assert.deepEqual(before.names(), ["desk_quotes", "desk_state"], "a desk agent already live is swept");
   assert.deepEqual(gravit.names(), [], "a Gravit agent is not");
@@ -168,7 +168,7 @@ test("the listener never throws: a failing register is swallowed and logged", ()
   const root = fakeRoot();
   const lines: string[] = [];
   const log = (line: string): void => void lines.push(line);
-  installDeskTools(root.ctx, deskToolDefinitions({ hub: fakeHub().hub, readState: readStatus }), { log });
+  installDeskTools(root.ctx, deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus }), { log });
   const broken = {
     id: "desk-broken",
     ctx: { preset: DESK_PRESET, tools: { register(): never { throw new Error('tool "desk_quotes" is already registered'); } } },
@@ -179,7 +179,7 @@ test("the listener never throws: a failing register is swallowed and logged", ()
 
   /* A preset registry that cannot answer is the same: logged, never thrown. */
   const orphan = fakeRoot({ presetError: new Error("agentPresets is not in the tree") });
-  installDeskTools(orphan.ctx, deskToolDefinitions({ hub: fakeHub().hub, readState: readStatus }), { log });
+  installDeskTools(orphan.ctx, deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus }), { log });
   const agent = fakeAgent("desk-orphan", DESK_PRESET);
   assert.deepEqual(orphan.create(agent.agent), [undefined]);
   assert.deepEqual(agent.names(), []);
@@ -188,7 +188,7 @@ test("the listener never throws: a failing register is swallowed and logged", ()
 
   /* And so is a sweep that cannot list the live agents; the listener stays for what is created after. */
   const blind = fakeRoot({ listError: new Error("agents is not in the tree") });
-  assert.doesNotThrow(() => installDeskTools(blind.ctx, deskToolDefinitions({ hub: fakeHub().hub, readState: readStatus }), { log }));
+  assert.doesNotThrow(() => installDeskTools(blind.ctx, deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus }), { log }));
   assert.equal(lines.length, 3);
   assert.match(lines[2], /^gravit-face: .*agents is not in the tree/);
   const late = fakeAgent("desk-late", DESK_PRESET);
@@ -198,7 +198,7 @@ test("the listener never throws: a failing register is swallowed and logged", ()
 
 test("desk_quotes validates, caps at 20, maps the hub's fields and survives 429", async () => {
   const { hub, asked } = fakeHub([NVDA]);
-  const quotes = byName(deskToolDefinitions({ hub, readState: readStatus }), "desk_quotes");
+  const quotes = byName(deskToolDefinitions({ quotes: hub, readState: readStatus }), "desk_quotes");
   assert.equal(quotes.timeoutMs, 15_000);
 
   const refused: [unknown, RegExp][] = [
@@ -217,7 +217,7 @@ test("desk_quotes validates, caps at 20, maps the hub's fields and survives 429"
 
   const value = await quotes.execute({ symbols: ["NVDA"] }, exec());
   assert.deepEqual(value, {
-    quotes: [{ symbol: "NVDA", price: 182.31, as_of: "2026-10-20T19:21:03.123456789Z", change_pct: 1.199, prev_close: 180.15, feed: "iex", transport: "stream", status: "live" }],
+    quotes: [{ symbol: "NVDA", price: 182.31, as_of: "2026-10-20T19:21:03.123456789Z", change_pct: 1.199, prev_close: 180.15, feed: "iex", transport: "stream", status: "live", market: "us" }],
   }, "the hub's fields, its quote_status as status, and none of its UI message");
   assert.deepEqual(asked, [[{ id: "us:NVDA", market: "us", symbol: "NVDA" }]]);
 
@@ -228,15 +228,15 @@ test("desk_quotes validates, caps at 20, maps the hub's fields and survives 429"
   assert.deepEqual(asked[2].map((asset) => asset.symbol), ["NVDA", "AAPL"], "a symbol named twice is asked for once");
 
   const busy = byName(deskToolDefinitions({
-    hub: { async snapshot(): Promise<QuotePayload> { throw new HttpError(429, "行情请求过多，请稍后重试。"); } },
+    quotes: { async snapshot(): Promise<QuotePayload> { throw new HttpError(429, "行情请求过多，请稍后重试。"); } },
     readState: readStatus,
   }), "desk_quotes");
   const refusal = await busy.execute({ symbols: ["NVDA"] }, exec());
-  assert.deepEqual(refusal, { error: "busy: the US quote source refused for now; try again shortly" });
+  assert.deepEqual(refusal, { error: "busy: the Market read refused for now; try again shortly" });
   assert.deepEqual(busy.output.render({ symbols: ["NVDA"] }, refusal),
-    [{ type: "text", text: "busy: the US quote source refused for now; try again shortly" }]);
+    [{ type: "text", text: "busy: the Market read refused for now; try again shortly" }]);
   const failing = byName(deskToolDefinitions({
-    hub: { async snapshot(): Promise<QuotePayload> { throw new HttpError(503, "quote service stopped"); } },
+    quotes: { async snapshot(): Promise<QuotePayload> { throw new HttpError(503, "quote service stopped"); } },
     readState: readStatus,
   }), "desk_quotes");
   assert.deepEqual(await failing.execute({ symbols: ["NVDA"] }, exec()), { error: "unavailable: quote service stopped" }, "any other failure is unavailable and why");
@@ -255,7 +255,7 @@ test("desk_quotes renders one line per quote, its time as the desk quotes it: th
     quote("MSFT", { price: 410.25, prev_close: null, change_pct: null, as_of: "2026-10-21T02:30:00Z", feed: "delayed_sip", quote_status: "delayed" }),
     quote("ZZZ", { price: null, prev_close: null, change_pct: null, as_of: null, feed: "", transport: "poll", quote_status: "unavailable" }),
   ]);
-  const quotes = byName(deskToolDefinitions({ hub, readState: readStatus, now: () => now }), "desk_quotes");
+  const quotes = byName(deskToolDefinitions({ quotes: hub, readState: readStatus, now: () => now }), "desk_quotes");
   const value = await quotes.execute({ symbols: ["NVDA", "AAPL", "MSFT", "ZZZ"] }, exec());
   assert.deepEqual(quotes.output.render({ symbols: ["NVDA", "AAPL", "MSFT", "ZZZ"] }, value), [{
     type: "text",
@@ -274,7 +274,7 @@ test("desk_state returns readState(), its runs cut to the last ten and counted i
   let reads = 0;
   const runs: DeskRun[] = Array.from({ length: 12 }, (_, i) => ({ bootedAt: `2026-10-${String(i + 1).padStart(2, "0")}T13:00:00.000Z`, pid: 100 + i, lost: false }));
   const status: DeskStatus = { ...STATUS, runs };
-  const state = byName(deskToolDefinitions({ hub: fakeHub().hub, readState: async () => { reads += 1; return status; } }), "desk_state");
+  const state = byName(deskToolDefinitions({ quotes: fakeHub().hub, readState: async () => { reads += 1; return status; } }), "desk_state");
   assert.equal(state.timeoutMs, 5_000);
   assert.deepEqual(state.parameters, { type: "object", properties: {}, additionalProperties: false }, "no parameters");
   const value = await state.execute({}, exec());
@@ -282,7 +282,7 @@ test("desk_state returns readState(), its runs cut to the last ten and counted i
   assert.equal(status.runs.length, 12, "the status read is not cut in place");
   await state.execute({}, exec());
   assert.equal(reads, 2, "read afresh on every call");
-  const few = byName(deskToolDefinitions({ hub: fakeHub().hub, readState: readStatus }), "desk_state");
+  const few = byName(deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus }), "desk_state");
   assert.deepEqual(await few.execute({}, exec()), { ...STATUS, runsInLedger: 0 }, "ten or fewer: every one");
   assert.deepEqual(state.output.render({}, value), [{ type: "text", text: JSON.stringify(value) }]);
   assert.deepEqual(state.presentCall({}), { card: "generic", title: "Desk state", kind: "read" });
@@ -291,7 +291,7 @@ test("desk_state returns readState(), its runs cut to the last ten and counted i
 test("a cancelled call settles at once, whatever the hub or the ledger is doing", async () => {
   let snapshots = 0;
   const never = new Promise<never>(() => {});
-  const definitions = deskToolDefinitions({ hub: { snapshot: () => { snapshots += 1; return never; } }, readState: () => never });
+  const definitions = deskToolDefinitions({ quotes: { snapshot: () => { snapshots += 1; return never; } }, readState: () => never });
   const controller = new AbortController();
   const pending = byName(definitions, "desk_quotes").execute({ symbols: ["NVDA"] }, exec(controller.signal));
   controller.abort(new Error("turn cancelled"));
@@ -311,7 +311,7 @@ test("a hub that fails after its call was cancelled leaves no unhandled rejectio
   try {
     let fail!: (error: unknown) => void;
     const late = new Promise<QuotePayload>((_, reject) => { fail = reject; });
-    const quotes = byName(deskToolDefinitions({ hub: { snapshot: () => late }, readState: readStatus }), "desk_quotes");
+    const quotes = byName(deskToolDefinitions({ quotes: { snapshot: () => late }, readState: readStatus }), "desk_quotes");
     const controller = new AbortController();
     const pending = quotes.execute({ symbols: ["NVDA"] }, exec(controller.signal));
     controller.abort(new Error("turn cancelled"));
@@ -346,7 +346,7 @@ test("installDesk installs the desk tools whatever enabled says, desk_state read
     const root = fakeRoot();
     const rec = recorder();
     const at = Date.parse("2026-10-20T14:00:00.000Z");
-    const desk = installDesk(rec, { home, enabled, now: () => at, version: "v", watch, ctx: root.ctx, hub: fakeHub().hub, root: "/repo", log: quiet });
+    const desk = installDesk(rec, { home, enabled, now: () => at, version: "v", watch, ctx: root.ctx, quotes: fakeHub().hub, root: "/repo", log: quiet });
     assert.equal(root.listeners.length, 1, `the listener is installed (enabled: ${enabled})`);
     assert.equal(root.guards.length, 1, `and the desk guard beside it (enabled: ${enabled})`);
     assert.equal(root.backstops.length, 1, `with its backstop (enabled: ${enabled})`);
@@ -377,11 +377,61 @@ test("installDesk installs the desk tools whatever enabled says, desk_state read
   await guardOnly.dispose(0);
 });
 
-test("desk_quotes over an unwired US source answers unavailable and why, asks nothing, and still refuses a bad argument", async () => {
-  const quotes = byName(deskToolDefinitions({ hub: unwiredUsQuotes(), readState: readStatus }), "desk_quotes");
+test("desk_quotes over an unwired source answers unavailable and why, asks nothing, and still refuses a bad argument", async () => {
+  const quotes = byName(deskToolDefinitions({ quotes: unwiredMarketQuotes(), readState: readStatus }), "desk_quotes");
   const answer = await quotes.execute({ symbols: ["NVDA"] }, exec());
-  assert.deepEqual(answer, { error: `unavailable: ${NO_US_QUOTES}` });
-  assert.deepEqual(quotes.output.render({ symbols: ["NVDA"] }, answer), [{ type: "text", text: `unavailable: ${NO_US_QUOTES}` }]);
+  assert.deepEqual(answer, { error: `unavailable: ${NO_QUOTES}` });
+  assert.deepEqual(quotes.output.render({ symbols: ["NVDA"] }, answer), [{ type: "text", text: `unavailable: ${NO_QUOTES}` }]);
   await assert.rejects(quotes.execute({ symbols: ["nvda"] }, exec()));
-  assert.match(quotes.description, /Account's market read; when the Account cannot be asked it answers unavailable and why/);
+  assert.match(quotes.description, /the Market's read; when the Account cannot be asked it answers unavailable and why/);
+});
+
+/** The Market's quote for 600519 as a payload carries one: Tencent's, in the trading phase. */
+const MOUTAI: LiveQuote = {
+  id: "cn:600519", market: "cn", symbol: "600519", transport: "poll",
+  price: 1452.3, prev_close: 1440.06, change: 12.24, change_pct: 0.85, volume: 31_200,
+  as_of: "2026-12-01T06:03:12Z", received_at: "2026-12-01T06:03:13.000Z", volume_as_of: null,
+  source: "market", feed: "tencent", basis: "previous_close", quote_status: "live", market_status: "open", message: "",
+  cn: { phase: "trading", lastSession: "2026-12-01" },
+};
+
+test("desk_quotes asks one snapshot over both markets and answers in the order asked", async () => {
+  const ping = { ...MOUTAI, id: "cn:000001", symbol: "000001", price: 11.2, prev_close: 11.1, change_pct: 0.9 };
+  let now = Date.parse("2026-12-01T06:03:20Z");
+  const { hub, asked } = fakeHub([MOUTAI, NVDA, ping]);
+  const quotes = byName(deskToolDefinitions({ quotes: hub, readState: readStatus, now: () => now }), "desk_quotes");
+  const value = await quotes.execute({ symbols: ["600519", "NVDA", "000001"] }, exec()) as { quotes: Record<string, unknown>[] };
+  assert.deepEqual(asked, [[
+    { id: "cn:600519", market: "cn", symbol: "600519" },
+    { id: "us:NVDA", market: "us", symbol: "NVDA" },
+    { id: "cn:000001", market: "cn", symbol: "000001" },
+  ]], "one snapshot; the source splits the markets");
+  assert.deepEqual(value.quotes.map((q) => [q.symbol, q.market]), [["600519", "cn"], ["NVDA", "us"], ["000001", "cn"]]);
+  assert.equal(value.quotes[0]?.feed, "tencent");
+  const lines = (): string[] => (quotes.output.render({}, value)[0]?.text ?? "").split("\n");
+  assert.equal(lines()[0], "600519 1452.3, +0.85% vs prev close 1440.06 | TENCENT 14:03:12 Beijing | poll | live");
+  now = Date.parse("2026-12-02T02:00:00Z");
+  assert.equal(lines()[0], "600519 1452.3, +0.85% vs prev close 1440.06 | TENCENT 2026-12-01 14:03:12 Beijing | poll | live");
+
+  await assert.rejects(quotes.execute({ symbols: ["60051"] }, exec()),
+    { message: 'desk_quotes takes US tickers in capitals (NVDA, BRK.B) or six digits for an A share (600519); "60051" is not one' });
+  await assert.rejects(quotes.execute({ symbols: [600519] }, exec()), /600519 is not one/, "a number is not a code");
+  await assert.rejects(quotes.execute({ symbols: [] }, exec()), { message: "desk_quotes takes symbols: 1 to 20 US tickers or six-digit A shares" });
+  assert.equal((quotes.parameters as { properties: { symbols: { items: { pattern: string } } } }).properties.symbols.items.pattern,
+    "^[A-Z][A-Z0-9.-]{0,9}$|^\\d{6}$");
+  assert.match(quotes.description, /A shares/);
+});
+
+test("desk_quotes' output schema requires market", () => {
+  const quotes = byName(deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus }), "desk_quotes");
+  const items = (quotes.output.schema as { oneOf: { properties: { quotes: { items: { properties: Record<string, unknown>; required: string[] } } } }[] })
+    .oneOf[0]!.properties.quotes.items;
+  assert.deepEqual(items.properties.market, { type: "string", enum: ["us", "cn"] });
+  assert.ok(items.required.includes("market"));
+});
+
+test("desk_quotes on an unwired source answers NO_QUOTES for every symbol", async () => {
+  const quotes = byName(deskToolDefinitions({ quotes: unwiredMarketQuotes(), readState: readStatus }), "desk_quotes");
+  assert.deepEqual(await quotes.execute({ symbols: ["600519", "NVDA"] }, exec()),
+    { error: "unavailable: no quote source is wired: this face has no Market read to ask" });
 });

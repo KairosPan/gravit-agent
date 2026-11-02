@@ -107,7 +107,7 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<number>
       /* The desk's two tools, which main.ts installs through `installDesk` before any session opens;
        * here over stubs, since only their schemas are read - never a quote, never the ledger. */
       const unread = async (): Promise<never> => { throw new Error("schema-sizes reads the desk tools' schemas only"); };
-      const removeDeskTools = installDeskTools(ctx, deskToolDefinitions({ hub: { snapshot: unread }, readState: unread }));
+      const removeDeskTools = installDeskTools(ctx, deskToolDefinitions({ quotes: { snapshot: unread }, readState: unread }));
       try {
         const sessions = ctx.get("sessionController") as {
           create(request: { cwd: string; agentPreset?: string }): Promise<{ sessionId: string; agentPreset?: string }>;

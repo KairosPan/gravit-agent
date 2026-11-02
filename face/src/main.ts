@@ -31,7 +31,7 @@ import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
 import type { DeskConversationCtxLike } from "./desk-conversation.ts";
 import { resolveDeskRoute } from "./desk-session.ts";
 import { telegramConfigFromEnv } from "./telegram.ts";
-import { accountUsQuotes } from "./us-quotes.ts";
+import { marketQuotes } from "./market-quotes.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { registerSessionRoutes } from "./sessions.ts";
 import { listSessionHeads, registerChannelRoutes, type RegistryLike } from "./channels.ts";
@@ -349,7 +349,7 @@ await registerPanelRoutes(booted.ctx.webServer, deps);
 /* The desk (desk.ts): `/data/desk/status`, the Desk panel's
  * `POST /data/desk/pause` (it only pauses; a terminal resumes) and the two
  * desk tools always - every `gravit-desk` agent gets `desk_quotes` over the
- * Account's US quotes (src/us-quotes.ts, the proxy's explore read) and `desk_state` (desk-tools.ts), so an old desk conversation
+ * Market's quotes in both markets (src/market-quotes.ts, the proxy's explore and quotes reads) and `desk_state` (desk-tools.ts), so an old desk conversation
  * keeps its tools in a face with the desk off; the ledger's `boot` and the
  * sleep watch unless `FACE_DESK=0`, the switch for a second face beside the
  * service (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.2), which
@@ -386,7 +386,7 @@ desk = installDesk(booted.ctx.webServer, {
   home: dshHome,
   enabled: deskEnabled,
   ctx: booted.ctx,
-  hub: accountUsQuotes({ explore: proxy.explore }),
+  quotes: marketQuotes({ explore: proxy.explore, quotes: proxy.quotes }),
   root: process.cwd(),
   route: deskRoute,
   sessionCtx: booted.ctx as unknown as DeskConversationCtxLike,
