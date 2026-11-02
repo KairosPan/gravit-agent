@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runDesk } from "../scripts/desk.ts";
-import { OFF_FILE, deskDir, readEvents, readOffState } from "../src/desk.ts";
+import { MUTE_FILE, OFF_FILE, deskDir, readEvents, readMuteState, readOffState, writeMute } from "../src/desk.ts";
 
 /** Every harness home made with {@link home}, removed once the file's tests are done. */
 const homes: string[] = [];
@@ -20,7 +20,7 @@ const home = async (): Promise<string> => {
 };
 const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume | arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD"
   + " [--producer scripts/FILE.py | builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake]"
-  + " | rearm ID [--expires YYYY-MM-DD]";
+  + " | rearm ID [--expires YYYY-MM-DD] | unmute";
 /** 14:00 ET on a Tuesday in October (EDT). */
 const NOW = Date.parse("2026-10-20T18:00:00Z");
 
@@ -70,14 +70,38 @@ test("runDesk dates a pause that ends on another New York day", async () => {
 
 test("runDesk: an unknown command, an extra argument, a zero pause and one past 36,500 days are usage, and write nothing", async () => {
   const cases: [string, string[]][] = [["", []], ["bogus", []], ["status", []], ["pause", ["0m"]], ["pause", ["99999999d"]], ["pause", ["2h", "3h"]],
-    ["resume", ["now"]]];
+    ["resume", ["now"]], ["unmute", ["now"]], ["mute", ["2h"]]];
   for (const [cmd, args] of cases) {
     const h = await home(); const r = rig(h);
     assert.equal(await runDesk(cmd, args, r.deps), 2, [cmd, ...args].join(" "));
     assert.deepEqual(r.take(), [USAGE]);
     assert.deepEqual(await readEvents(h), { events: [], skipped: 0 });
     assert.deepEqual(await readOffState(h), { expired: false });
+    assert.deepEqual(await readMuteState(h), { expired: false });
   }
+});
+
+test("runDesk unmute lifts a mute and says so; with none, not muted; exit 0 both", async () => {
+  const h = await home(); const r = rig(h);
+  await writeMute(h, { by: "telegram", until: NOW + 7_200_000 }, () => NOW);
+  assert.equal(await runDesk("unmute", [], r.deps), 0);
+  assert.deepEqual(r.take(), ["unmuted"]);
+  assert.deepEqual(await readMuteState(h), { expired: false });
+  assert.equal(await runDesk("unmute", [], r.deps), 0);
+  assert.deepEqual(r.take(), ["not muted"]);
+  assert.deepEqual((await readEvents(h)).events, [
+    { t: "2026-10-20T18:00:00.000Z", kind: "mute-set", by: "telegram", until: "2026-10-20T20:00:00.000Z" },
+    { t: "2026-10-20T18:00:00.000Z", kind: "mute-cleared", by: "terminal" },
+  ], "one lift, on the command's clock");
+  assert.deepEqual(await readOffState(h), { expired: false }, "unmute touches no pause");
+
+  const stuck = await home(); const s = rig(stuck);
+  await mkdir(join(deskDir(stuck), MUTE_FILE), { recursive: true }); // a directory: unlink refuses it
+  assert.equal(await runDesk("unmute", [], s.deps), 1);
+  const [line, ...rest] = s.take();
+  assert.deepEqual(rest, []);
+  assert.ok(line.startsWith(`cannot remove ${join(deskDir(stuck), MUTE_FILE)}: `), line);
+  assert.match(line, /: E[A-Z]+$/);
 });
 
 test("runDesk names a switch it cannot write or remove, and exits 1", async () => {

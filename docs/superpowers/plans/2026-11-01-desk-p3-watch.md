@@ -415,7 +415,7 @@ test("a filing rule refuses an A share it lists, and resolves holdings that hold
 
 ### Task 4: The mute, one append chain per file, `/mute` and `unmute`
 
-Unchanged from the old plan's Task 3: its Files, Interfaces, tests and commit. The `DeskEvent` kinds lose `stream-down` and `stream-up`, so it adds three: `mute-set`, `mute-cleared` and `watch-load`. The test `events.jsonl takes the five new kinds` becomes `… the three new kinds`.
+Unchanged from the old plan's Task 3: its Files, Interfaces, tests and commit. The `DeskEvent` kinds lose `stream-down` and `stream-up`, so it adds three: `mute-set`, `mute-cleared` and `watch-load`. The test `events.jsonl takes the five new kinds` becomes `… the three new kinds`. `USAGE` is pinned twice in the tree as built, so Files gains `face/tests/desk-arm.test.ts` beside `desk-cli.test.ts`; the mute and `OFF` share one private switch in `desk.ts` (file, setters, set and lift events), so neither copies the other.
 
 - **Produces** (for the tasks below): `ALERTS_FILE`, `FILINGS_FILE`, `MUTE_FILE`, `WATCH_LEASE_FILE`; `MuteState`, `readMuteState`, `writeMute`, `clearMute`; `appendChain(home, file, opts?): AppendChain` (`append`, `settled`); `muteReplyLine`; `MUTE_USAGE`; `parseCommand`'s `{ cmd: "mute"; arg?: string }`; `scripts/desk.ts`'s `unmute`. `USAGE` ends `| rearm ID [--expires YYYY-MM-DD] | unmute`.
 - **Verify:** `npm test && npm run typecheck` and `FACE_SMOKE=1 npx tsx --test tests/telegram-smoke.test.ts`.

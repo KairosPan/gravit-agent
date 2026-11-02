@@ -10,14 +10,16 @@
  * panel's `POST /data/desk/pause` (the panel itself is client/desk-panel.js, in the chat page rather
  * than a `/desk` page), mounts the two desk tools and the desk's guard, which src/desk-tools.ts
  * defines, and runs the Telegram bridge, src/telegram.ts.
- * Of the ledger's files (§5.7) this module keeps `events.jsonl` and `OFF`; {@link appendRecord} is
- * the append path for the others, the bridge's `telegram.jsonl` and P2's firing ledger,
- * {@link FIRINGS_FILE}, among them, {@link appendRecordOnce} the path for a record that must land
- * once, and {@link readRecords} reads any of them back. `events.jsonl` has eleven kinds of event:
- * P0's `boot`, clean `shutdown` and `asleep` gap in the face's timers; P1's `off-set` and
- * `off-cleared`, a `desk-session` for each desk conversation the face opens, a `desk-turn` for each
- * turn on it, and a `desk-refused` for a turn the face would not open; and P2's `standing-error`,
- * `calendar-error` and `budget-spent`, which the standing orders' clock writes.
+ * Of the ledger's files (§5.7) this module keeps `events.jsonl`, `OFF` and P3's `MUTE`;
+ * {@link appendRecord} is the append path for the others, the bridge's `telegram.jsonl`, P2's firing
+ * ledger, {@link FIRINGS_FILE}, and P3's {@link ALERTS_FILE} and {@link FILINGS_FILE} among them,
+ * {@link appendChain} one writer's ordered queue onto it, {@link appendRecordOnce} the path for a
+ * record that must land once, and {@link readRecords} reads any of them back. `events.jsonl` has
+ * fourteen kinds of event: P0's `boot`, clean `shutdown` and `asleep` gap in the face's timers; P1's
+ * `off-set` and `off-cleared`, a `desk-session` for each desk conversation the face opens, a
+ * `desk-turn` for each turn on it, and a `desk-refused` for a turn the face would not open; P2's
+ * `standing-error`, `calendar-error` and `budget-spent`, which the standing orders' clock writes; and
+ * P3's `mute-set`, `mute-cleared` and `watch-load`.
  *
  * Why a budget (P2, ruling P2-8): the desk spends tokens unattended - the phone's turns, the
  * standing orders' firings - so `standing.yml`'s `budget.dailyTokens` caps the day's: the plain sum
@@ -53,6 +55,12 @@
  * can be read from, `touch OFF` included, is a pause from a terminal. A pause lifts at its
  * `until`, on `npm run desk -- resume` ({@link clearOff}) or when the file is deleted; each set
  * and each lift that goes through this module is an event, written under the switch's lock.
+ *
+ * Why a `MUTE` beside it (P3): the watch's alerts can come in New York's night, and the operator
+ * silences them without pausing the desk. `MUTE` is a second switch on the same rules and its own
+ * lock - the phone sets it (`/mute 2h`, {@link writeMute}) and never shortens one in force, a terminal
+ * lifts it (`npm run desk -- unmute`, {@link clearMute}) - and while it holds, the watch still detects
+ * and still writes its ledger; only the phone lines wait.
  *
  * {@link installDesk} mounts it all on a booted face. The status route ({@link deskStatus}:
  * pid, version, uptime, this run's gaps, the ledger's runs, the pause in force, the desk
@@ -136,7 +144,10 @@ export interface TurnUsage {
  * not answer for - the date, the interpreter asked and its error; and a `budget-spent`, once per ET
  * date ({@link noteBudgetSpent}) - the date, the tokens used and the day's cap. A `standing-error` or
  * `calendar-error` whose phone line the pause held back carries `phoned: false`, so a restart phones it
- * again rather than never. */
+ * again rather than never. P3's watch adds three: a `mute-set` and a `mute-cleared`, the mute's set and
+ * lift as the pause's are, and a `watch-load`, one of the watch's files read - its repo-relative name, the
+ * rows it loaded, each refusal's line, and, for a file refused whole, the `error` the watch keeps its last
+ * good load against. */
 export type DeskEvent =
   | { t: string; kind: "boot"; pid: number; version: string; deskEnabled: boolean }
   | { t: string; kind: "shutdown"; pid: number; code: number }
@@ -151,7 +162,10 @@ export type DeskEvent =
   | { t: string; kind: "desk-refused"; reason: string; path?: string }
   | { t: string; kind: "standing-error"; errors: string[]; phoned?: false }
   | { t: string; kind: "calendar-error"; date: string; clock: string; error: string; phoned?: false }
-  | { t: string; kind: "budget-spent"; date: string; used: number; dailyTokens: number };
+  | { t: string; kind: "budget-spent"; date: string; used: number; dailyTokens: number }
+  | { t: string; kind: "mute-set"; by: MuteState["by"]; until?: string }
+  | { t: string; kind: "mute-cleared"; by: "terminal" | "expiry" }
+  | { t: string; kind: "watch-load"; file: string; loaded: number; refused: string[]; error?: string };
 
 /** Every kind {@link DeskEvent} has, and only those. A record over the union rather than a list,
  * so a kind added to the type and not here fails to compile instead of reading back as skipped. */
@@ -167,6 +181,9 @@ const KINDS: Readonly<Record<DeskEvent["kind"], true>> = {
   "standing-error": true,
   "calendar-error": true,
   "budget-spent": true,
+  "mute-set": true,
+  "mute-cleared": true,
+  "watch-load": true,
 };
 
 /** What a failure is reported as - in the append's failure line and the status's `ledgerError`:
@@ -379,6 +396,42 @@ export async function appendEvent(
   await appendRecord(home, EVENTS_FILE, event, { ...opts, carry: carryDeskSession });
 }
 
+/** One writer's queue onto one of the desk's files ({@link appendChain}). */
+export interface AppendChain {
+  /** Queue `record` behind every record this chain was handed before it. Returns nothing, never throws. */
+  append(record: object): void;
+  /** Resolves once every record handed so far is written or its failure logged; never rejects. */
+  settled(): Promise<void>;
+}
+
+/**
+ * One append chain onto `file` in the desk's directory: {@link appendRecord} once per record, in call
+ * order, each after the last has settled - so a burst from one writer never contends for the file's lock
+ * with itself. Bare appends started together take the lock about one per retry round, and P0 measured 20
+ * at once dropping 6 (P3-6); the watch's alerts, filings and events each go through one chain, and lose
+ * none. Other writers on the file - another face, another of this face's modules - still take the lock as
+ * they always did.
+ *
+ * `append` never throws and its record's write never rejects: a failure is {@link appendRecord}'s one
+ * `log` line (default `console.error`), and the next record is tried as though it had gone. On
+ * {@link EVENTS_FILE} a rotation carries the last `desk-session`, as {@link appendEvent}'s does. A `file`
+ * that is not a plain name is the caller's `TypeError`, thrown here, before anything is touched.
+ * @param home - the harness home.
+ * @param file - the file's name in {@link deskDir} - a name, not a path.
+ * @param opts - `log`, for the failure lines.
+ */
+export function appendChain(home: string, file: string, opts: { log?: (line: string) => void } = {}): AppendChain {
+  requireName("appendChain", file);
+  const append: AppendOptions = { ...(opts.log === undefined ? {} : { log: opts.log }), ...(file === EVENTS_FILE ? { carry: carryDeskSession } : {}) };
+  let tail: Promise<void> = Promise.resolve();
+  return {
+    append(record) {
+      tail = tail.then(() => appendRecord(home, file, record, append)).catch(() => undefined);
+    },
+    settled: () => tail,
+  };
+}
+
 /** What a rotated ledger hands the new one: its last line that is a `desk-session` event, as it was
  * written, or nothing when it has none. Read once per rotation, from the end. */
 function carryDeskSession(rotated: string): string[] {
@@ -583,15 +636,63 @@ export interface OffState {
   until?: string;
 }
 
-/** Every setter {@link OffState} names, and only those. */
-const SETTERS: Readonly<Record<OffState["by"], true>> = { telegram: true, page: true, terminal: true };
+/** The mute's file in {@link deskDir} (P3): while it is there, the watch's alerts are not sent - detection
+ * and the ledger go on. A switch as `OFF` is, beside it, with its own lock. */
+export const MUTE_FILE = "MUTE";
+
+/** What `MUTE` holds: when the mute was set and by whom - the phone, or, for a `MUTE` that says nothing
+ * a state can be read from, a terminal - and, for a timed mute, when it lifts; both times ISO-8601 UTC. */
+export interface MuteState {
+  setAt: string;
+  by: "telegram" | "terminal";
+  until?: string;
+}
+
+/** The watch's alert ledger (P3), beside `events.jsonl`, appended through one {@link appendChain}. */
+export const ALERTS_FILE = "alerts.jsonl";
+/** The watch's filings ledger (P3), the same way. */
+export const FILINGS_FILE = "filings.jsonl";
+/** The watch's lease (P3): which face on this home holds the watch. */
+export const WATCH_LEASE_FILE = "watch.lease";
+
+/** A switch's state: who set it and when, and, for a timed one, when it lifts. */
+type SwitchState = { setAt: string; by: string; until?: string };
+
+/** One of the desk's switches: its file, the setters its state may name, and the events its set and its
+ * lift are. `OFF` ({@link OFF_SWITCH}) and `MUTE` ({@link MUTE_SWITCH}) are the two; every rule below -
+ * the name being there is the switch, the phone never shortens one, one lock per switch, an event only
+ * on a real change - is the same for both. */
+interface Switch<S extends SwitchState> {
+  file: string;
+  setters: Readonly<Record<S["by"], true>>;
+  /** The event a set is, carrying the state. */
+  set(state: S): DeskEvent;
+  /** The event a lift is. */
+  cleared(t: string, by: "terminal" | "expiry"): DeskEvent;
+}
+
+/** The pause: `OFF`, set from the phone, the Desk panel or a terminal. */
+const OFF_SWITCH: Switch<OffState> = {
+  file: OFF_FILE,
+  setters: { telegram: true, page: true, terminal: true },
+  set: (s) => ({ t: s.setAt, kind: "off-set", by: s.by, ...(s.until === undefined ? {} : { until: s.until }) }),
+  cleared: (t, by) => ({ t, kind: "off-cleared", by }),
+};
+
+/** The mute: `MUTE`, set from the phone; a terminal only lifts it, or `touch`es it. */
+const MUTE_SWITCH: Switch<MuteState> = {
+  file: MUTE_FILE,
+  setters: { telegram: true, terminal: true },
+  set: (s) => ({ t: s.setAt, kind: "mute-set", by: s.by, ...(s.until === undefined ? {} : { until: s.until }) }),
+  cleared: (t, by) => ({ t, kind: "mute-cleared", by }),
+};
 
 /** Whether `value` is a time: a string `Date.parse` reads. */
 const isTime = (value: unknown): value is string => typeof value === "string" && !Number.isNaN(Date.parse(value));
 
-/** `OFF`'s text as a state - JSON with a time `setAt`, a known `by` and, if any, a time `until`;
- * other keys dropped - or `undefined` when it is anything else. */
-function offStateOf(text: string): OffState | undefined {
+/** A switch file's text as a state - JSON with a time `setAt`, one of the switch's `by`s and, if any,
+ * a time `until`; other keys dropped - or `undefined` when it is anything else. */
+function switchStateOf<S extends SwitchState>(sw: Switch<S>, text: string): S | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -600,9 +701,83 @@ function offStateOf(text: string): OffState | undefined {
   }
   if (parsed === null || typeof parsed !== "object") return undefined;
   const { setAt, by, until } = parsed as { setAt?: unknown; by?: unknown; until?: unknown };
-  if (!isTime(setAt) || typeof by !== "string" || !Object.hasOwn(SETTERS, by)) return undefined;
+  if (!isTime(setAt) || typeof by !== "string" || !Object.hasOwn(sw.setters, by)) return undefined;
   if (until !== undefined && !isTime(until)) return undefined;
-  return { setAt, by: by as OffState["by"], ...(until === undefined ? {} : { until }) };
+  return { setAt, by, ...(until === undefined ? {} : { until }) } as S;
+}
+
+/** {@link readOffState} for any switch. */
+async function readSwitch<S extends SwitchState>(sw: Switch<S>, home: string, now: () => number): Promise<{ state?: S; expired: boolean }> {
+  const file = join(deskDir(home), sw.file);
+  let text: string | undefined;
+  try {
+    text = await readFile(file, "utf8");
+  } catch {
+    /* nothing to read - no file, a link to nothing, a directory, a file shut to the face: lstat tells which */
+  }
+  const state = text === undefined ? undefined : switchStateOf(sw, text);
+  if (state !== undefined) return { state, expired: state.until !== undefined && Date.parse(state.until) <= now() };
+  let mtime: Date;
+  try {
+    mtime = (await lstat(file)).mtime;
+  } catch (err) {
+    if (isAbsent(err)) return { expired: false };
+    throw err;
+  }
+  return { state: { setAt: mtime.toISOString(), by: "terminal" } as S, expired: false };
+}
+
+/** Whether a switch set until `until` outlasts one in force until `held`, either being `undefined` for
+ * one with no end: an open-ended one outlasts any timed one and is outlasted by none; of two timed
+ * ones, the later `until` outlasts. */
+function outlasts(until: string | undefined, held: string | undefined): boolean {
+  if (held === undefined) return false;
+  if (until === undefined) return true;
+  return Date.parse(until) > Date.parse(held);
+}
+
+/** {@link writeOff} for any switch. */
+async function writeSwitch<S extends SwitchState>(
+  sw: Switch<S>, home: string, input: { by: S["by"]; until?: number }, now: () => number,
+): Promise<S> {
+  const until = input.until === undefined ? undefined : new Date(input.until).toISOString();
+  const dir = deskDir(home);
+  const file = join(dir, sw.file);
+  await mkdir(dir, { recursive: true });
+  return withFileLock(file, async () => {
+    const at = now();
+    if (input.by !== "terminal") {
+      const { state: held, expired } = await readSwitch(sw, home, () => at);
+      if (held !== undefined && !expired && !outlasts(until, held.until)) return held;
+    }
+    const state = { setAt: new Date(at).toISOString(), by: input.by, ...(until === undefined ? {} : { until }) } as S;
+    await writeFileAtomic(file, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+    await appendEvent(home, sw.set(state));
+    return state;
+  });
+}
+
+/** {@link clearOff} for any switch. */
+async function clearSwitch<S extends SwitchState>(sw: Switch<S>, home: string, by: "terminal" | "expiry", now: () => number): Promise<boolean> {
+  const file = join(deskDir(home), sw.file);
+  try {
+    await lstat(file); // nothing there is nothing to lift; something there means the lock's directory exists
+  } catch (err) {
+    if (isAbsent(err)) return false;
+    throw err;
+  }
+  return withFileLock(file, async () => {
+    const at = now();
+    if (by === "expiry" && !(await readSwitch(sw, home, () => at)).expired) return false;
+    try {
+      await unlink(file);
+    } catch (err) {
+      if (isAbsent(err)) return false;
+      throw err;
+    }
+    await appendEvent(home, sw.cleared(new Date(at).toISOString(), by));
+    return true;
+  });
 }
 
 /**
@@ -623,32 +798,7 @@ function offStateOf(text: string): OffState | undefined {
  * @param now - the clock `until` is compared with, default `Date.now`.
  */
 export async function readOffState(home: string, now: () => number = Date.now): Promise<{ state?: OffState; expired: boolean }> {
-  const file = join(deskDir(home), OFF_FILE);
-  let text: string | undefined;
-  try {
-    text = await readFile(file, "utf8");
-  } catch {
-    /* nothing to read - no OFF, a link to nothing, a directory, a file shut to the face: lstat tells which */
-  }
-  const state = text === undefined ? undefined : offStateOf(text);
-  if (state !== undefined) return { state, expired: state.until !== undefined && Date.parse(state.until) <= now() };
-  let mtime: Date;
-  try {
-    mtime = (await lstat(file)).mtime;
-  } catch (err) {
-    if (isAbsent(err)) return { expired: false };
-    throw err;
-  }
-  return { state: { setAt: mtime.toISOString(), by: "terminal" }, expired: false };
-}
-
-/** Whether a pause until `until` outlasts one in force until `held`, either being `undefined` for
- * a pause with no end: an open-ended pause outlasts any timed one and is outlasted by none; of two
- * timed pauses, the later `until` outlasts. */
-function outlasts(until: string | undefined, held: string | undefined): boolean {
-  if (held === undefined) return false;
-  if (until === undefined) return true;
-  return Date.parse(until) > Date.parse(held);
+  return readSwitch(OFF_SWITCH, home, now);
 }
 
 /**
@@ -679,21 +829,7 @@ function outlasts(until: string | undefined, held: string | undefined): boolean 
  * @returns the pause in force afterwards: the one written, or the one that stood.
  */
 export async function writeOff(home: string, input: { by: OffState["by"]; until?: number }, now: () => number = Date.now): Promise<OffState> {
-  const until = input.until === undefined ? undefined : new Date(input.until).toISOString();
-  const dir = deskDir(home);
-  const file = join(dir, OFF_FILE);
-  await mkdir(dir, { recursive: true });
-  return withFileLock(file, async () => {
-    const at = now();
-    if (input.by !== "terminal") {
-      const { state: held, expired } = await readOffState(home, () => at);
-      if (held !== undefined && !expired && !outlasts(until, held.until)) return held;
-    }
-    const state: OffState = { setAt: new Date(at).toISOString(), by: input.by, ...(until === undefined ? {} : { until }) };
-    await writeFileAtomic(file, `${JSON.stringify(state)}\n`, { mode: 0o600 });
-    await appendEvent(home, { t: state.setAt, kind: "off-set", by: state.by, ...(until === undefined ? {} : { until }) });
-    return state;
-  });
+  return writeSwitch(OFF_SWITCH, home, input, now);
 }
 
 /**
@@ -714,25 +850,60 @@ export async function writeOff(home: string, input: { by: OffState["by"]; until?
  * @returns whether a pause was lifted.
  */
 export async function clearOff(home: string, by: "terminal" | "expiry", now: () => number = Date.now): Promise<boolean> {
-  const file = join(deskDir(home), OFF_FILE);
-  try {
-    await lstat(file); // nothing there is nothing to lift; something there means the lock's directory exists
-  } catch (err) {
-    if (isAbsent(err)) return false;
-    throw err;
-  }
-  return withFileLock(file, async () => {
-    const at = now();
-    if (by === "expiry" && !(await readOffState(home, () => at)).expired) return false;
-    try {
-      await unlink(file);
-    } catch (err) {
-      if (isAbsent(err)) return false;
-      throw err;
-    }
-    await appendEvent(home, { t: new Date(at).toISOString(), kind: "off-cleared", by });
-    return true;
-  });
+  return clearSwitch(OFF_SWITCH, home, by, now);
+}
+
+/**
+ * Whether the watch's alerts are muted: `MUTE`'s state, and whether its `until` has come - read as
+ * {@link readOffState} reads `OFF`. Anything by that name that says nothing a state can be read from,
+ * `touch MUTE` included, is a mute by `terminal` with no end.
+ * @param home - the harness home.
+ * @param now - the clock `until` is compared with, default `Date.now`.
+ */
+export async function readMuteState(home: string, now: () => number = Date.now): Promise<{ state?: MuteState; expired: boolean }> {
+  return readSwitch(MUTE_SWITCH, home, now);
+}
+
+/**
+ * Mute the watch's alerts from the phone (`/mute <d>`): write `MUTE` and record a `mute-set` - as
+ * {@link writeOff} writes `OFF`, under `MUTE`'s own lock. The phone never shortens a mute: one in force
+ * stands unless this one outlasts it, and nothing is written or recorded; the mute in force afterwards
+ * is what this returns. A mute from the phone always has an end. Rejects when `MUTE` cannot be written
+ * or its lock taken.
+ * @param home - the harness home.
+ * @param input - `by`, the phone; `until`, when the mute lifts in ms since the epoch.
+ * @param now - the clock `setAt` is read from, default `Date.now`.
+ * @returns the mute in force afterwards: the one written, or the one that stood.
+ */
+export async function writeMute(home: string, input: { by: "telegram"; until: number }, now: () => number = Date.now): Promise<MuteState> {
+  return writeSwitch(MUTE_SWITCH, home, input, now);
+}
+
+/**
+ * Lift the mute: remove `MUTE` and record a `mute-cleared` only when there was one to remove - as
+ * {@link clearOff} lifts `OFF`. `terminal` is `npm run desk -- unmute`, which lifts whatever is there;
+ * `expiry` lifts it only if it is still past its `until` under the lock.
+ * @param home - the harness home.
+ * @param by - what lifts it.
+ * @param now - the clock the event is stamped with and `expiry` judges by, default `Date.now`.
+ * @returns whether a mute was lifted.
+ */
+export async function clearMute(home: string, by: "terminal" | "expiry", now: () => number = Date.now): Promise<boolean> {
+  return clearSwitch(MUTE_SWITCH, home, by, now);
+}
+
+/** What `/mute` with no or a bad duration replies; nothing is muted. */
+export const MUTE_USAGE = "mute needs a duration: /mute 30m, /mute 2h or /mute 1d";
+
+/**
+ * The phone's line for `/mute`, built from the mute in force: its end as {@link deskTime} shows it, or,
+ * for a mute with none (a `touch`ed `MUTE`), `a terminal lifts it`.
+ * @param state - the mute in force.
+ * @param now - the time it is read at.
+ */
+export function muteReplyLine(state: MuteState, now: Date): string {
+  const until = state.until === undefined ? "a terminal lifts it" : deskTime(new Date(state.until), now);
+  return `alerts muted until ${until}; detection and the ledger go on. A terminal lifts it: npm run desk -- unmute`;
 }
 
 /** A pause's length as the phone, the Desk panel and the terminal spell it. */

@@ -2,12 +2,14 @@
  * orders it fires on the exchange calendar. The switch is desk.ts's `OFF` file ({@link writeOff},
  * {@link clearOff}); the phone and the Desk panel can set it too, but nothing but this command, the file's
  * deletion or its own expiry lifts it. The orders are `standing.yml` beside it (src/standing.ts), which only
- * the operator writes: here, or by hand.
+ * the operator writes: here, or by hand. The watch's mute (P3) is desk.ts's `MUTE` beside `OFF`: the phone sets
+ * it, and this command's `unmute`, the file's deletion or its own expiry lifts it.
  * Spec: docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.8; rulings P2-9, P2-16, P2-22, P2-24.
  *
  *   npm run desk -- pause          pause the desk until a resume
  *   npm run desk -- pause 2h       pause it for a while: Nm, Nh or Nd, a whole number of minutes, hours or days
  *   npm run desk -- resume         lift the pause
+ *   npm run desk -- unmute         lift the watch's mute, which only the phone sets (/mute 2h)
  *   npm run desk -- arm desk --id preclose --at close-30m --producer builtin:brief --expires 2026-11-30
  *                                  arm a standing order: pin its text's hash (and its script's), add it to standing.yml
  *   npm run desk -- rearm preclose take a changed text's (or script's) new hash, after reviewing the change
@@ -25,7 +27,7 @@
  * the guard at the end resolves the home and exits with the command's code.
  *
  * MODULE WEIGHT. `arm` and `rearm` load src/standing.ts (with js-yaml), src/producer.ts and
- * src/market-clock.ts on their first use, so `pause` and `resume` load no more than they did.
+ * src/market-clock.ts on their first use, so `pause`, `resume` and `unmute` load no more than they did.
  * @module
  */
 import { existsSync, realpathSync } from "node:fs";
@@ -33,14 +35,14 @@ import { constants as fsConstants, mkdir, open, readFile, type FileHandle } from
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
-import { OFF_FILE, clearOff, deskDir, deskTime, parseDuration, writeOff, type OffState } from "../src/desk.ts";
+import { MUTE_FILE, OFF_FILE, clearMute, clearOff, deskDir, deskTime, parseDuration, writeOff, type OffState } from "../src/desk.ts";
 import { etDate } from "../src/et.ts";
 import type { MarketClock } from "../src/market-clock.ts";
 
 /** What {@link runDesk} prints for a command or an argument it does not know. */
 const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume | arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD"
   + " [--producer scripts/FILE.py | builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake]"
-  + " | rearm ID [--expires YYYY-MM-DD]";
+  + " | rearm ID [--expires YYYY-MM-DD] | unmute";
 
 /** The repository this script sits in: `<root>/face/scripts/desk.ts`. */
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -82,6 +84,8 @@ function reasonOf(err: unknown): string {
  *   [--turn-deadline …] [--producer-deadline …] [--no-wake]`: arms a standing order (see {@link arm}).
  * - `rearm ID [--expires YYYY-MM-DD]`: takes the new hashes of an armed order's changed files; with `--expires`,
  *   extends its last day instead, refused while a pinned file has changed (see {@link rearm}).
+ * - `unmute`: removes `MUTE` and prints `unmuted`, or `not muted` when there was none. An argument is the
+ *   usage line.
  *
  * A switch it cannot write or remove is one line naming the file and the error's code.
  * @param cmd - the command.
@@ -120,6 +124,18 @@ export async function runDesk(cmd: string, args: string[], deps: DeskDeps): Prom
       return 1;
     }
     deps.out(lifted ? "resumed" : "not paused");
+    return 0;
+  }
+  if (cmd === "unmute" && args.length === 0) {
+    const at = now();
+    let lifted: boolean;
+    try {
+      lifted = await clearMute(deps.home, "terminal", () => at);
+    } catch (err) {
+      deps.out(`cannot remove ${join(deskDir(deps.home), MUTE_FILE)}: ${reasonOf(err)}`);
+      return 1;
+    }
+    deps.out(lifted ? "unmuted" : "not muted");
     return 0;
   }
   if (cmd === "arm") return arm(args, deps, now());

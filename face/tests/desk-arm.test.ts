@@ -22,7 +22,7 @@ after(() => rm(TEST_DIR, { recursive: true, force: true }));
 
 const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume | arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD"
   + " [--producer scripts/FILE.py | builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake]"
-  + " | rearm ID [--expires YYYY-MM-DD]";
+  + " | rearm ID [--expires YYYY-MM-DD] | unmute";
 /** 14:00 ET on Tuesday 2026-10-20 (EDT). */
 const NOW = Date.parse("2026-10-20T18:00:00Z");
 const ARMED_AT = "2026-10-20T18:00:00.000Z";

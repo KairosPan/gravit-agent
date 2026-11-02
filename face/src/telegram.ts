@@ -13,11 +13,11 @@
  * source and the time the operator wrote it - Telegram's own `date`, not the time it arrived, which after a
  * night the Mac slept can be hours later. A post the conversation refuses is answered with its line, and an
  * opened turn's answer comes back through the outlet - the bridge is the conversation's outlet from install
- * to dispose. Four commands are the bridge's own: /status, /pause [duration], /new and /stop, in any case,
- * with or without the bot's name after them; any other /word is text for Gravit. There is no /resume: the
- * phone only ever makes the desk quieter (§5.8). A message with no text gets one line. A post or a /new
- * that takes more than 30 s is answered that the desk is slow, and the bridge goes on to the next update;
- * a refusal that comes later is still answered when it does.
+ * to dispose. Five commands are the bridge's own: /status, /pause [duration], /mute <duration>, /new and
+ * /stop, in any case, with or without the bot's name after them; any other /word is text for Gravit. There
+ * is no /resume and no /unmute: the phone only ever makes the desk quieter (§5.8). A message with no text
+ * gets one line. A post or a /new that takes more than 30 s is answered that the desk is slow, and the
+ * bridge goes on to the next update; a refusal that comes later is still answered when it does.
  *
  * THE OFFSET. After each update, whatever happened to it, the offset is set past it and stored in
  * `telegram.offset`, so an update is taken once across restarts, and one the bridge cannot use is never
@@ -62,7 +62,9 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
-import { appendRecord, deskDir, deskStatusLines, deskTime, parseDuration, writeOff, type DeskStatus, type TelegramStatus } from "./desk.ts";
+import {
+  MUTE_USAGE, appendRecord, deskDir, deskStatusLines, deskTime, muteReplyLine, parseDuration, writeMute, writeOff, type DeskStatus, type TelegramStatus,
+} from "./desk.ts";
 import type { DeskConversation, DeskOutlet, PostResult } from "./desk-conversation.ts";
 import type { DeskClock } from "./desk-session.ts";
 import { deskSecrets, secretSpellings } from "./desk-tools.ts";
@@ -179,16 +181,16 @@ export function splitMessage(text: string, max = PART_MAX): string[] {
 }
 
 /** A command the bridge answers itself, and what followed it. */
-export type Command = { cmd: "status" | "pause" | "new" | "stop"; arg?: string };
+export type Command = { cmd: "status" | "pause" | "mute" | "new" | "stop"; arg?: string };
 
-/** The four commands, as Telegram sends them: the word in any case, then the bot's name when the operator
+/** The five commands, as Telegram sends them: the word in any case, then the bot's name when the operator
  * picked the command from the menu, then anything after a space. */
-const COMMAND = /^\/(status|pause|new|stop)(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]*))?$/i;
+const COMMAND = /^\/(status|pause|mute|new|stop)(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]*))?$/i;
 
 /**
- * `text` as one of the bridge's own commands - `/status`, `/pause [duration]`, `/new`, `/stop`, in any case
- * (`/Status`, `/PAUSE@botname 2h`) - with what follows it as `arg`, trimmed, when anything does; anything
- * else, any other `/word` included, is `undefined`: text for Gravit. The argument is left as typed: a
+ * `text` as one of the bridge's own commands - `/status`, `/pause [duration]`, `/mute <duration>`, `/new`,
+ * `/stop`, in any case (`/Status`, `/PAUSE@botname 2h`) - with what follows it as `arg`, trimmed, when
+ * anything does; anything else, any other `/word` included, is `undefined`: text for Gravit. The argument is left as typed: a
  * duration stays exact (src/desk.ts `parseDuration`).
  * @param text - the message's text.
  */
@@ -330,8 +332,9 @@ type Bounded<T> = { settled: true; value: T } | { settled: true; error: unknown 
  * their private chat; then a message with no text gets `text only on the desk`; a command is answered by
  * the bridge - `/status` with the desk's lines (src/desk.ts `deskStatusLines`) and `desk session <id>` and
  * `turns today <n>` after them, `/pause [d]` with the pause in force once it is written (src/desk.ts
- * `writeOff`, set by `telegram`), `/new` and `/stop` with what the conversation did; and a text is posted to
- * the conversation, a refusal answered with its line. A post or a `/new` still under way after 30 s on the
+ * `writeOff`, set by `telegram`), `/mute <d>` with the mute in force once it is written (src/desk.ts
+ * `writeMute`, `muteReplyLine`; no or a bad duration is `MUTE_USAGE`), `/new` and `/stop` with what the
+ * conversation did; and a text is posted to the conversation, a refusal answered with its line. A post or a `/new` still under way after 30 s on the
  * clock is answered `the desk is slow to take this; it will answer when it can`, and what it comes to is
  * answered when it settles. Then the offset is set past the update.
  *
@@ -619,6 +622,17 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     }
   };
 
+  const muteReply = async (arg: string | undefined): Promise<string> => {
+    const ms = arg === undefined ? undefined : parseDuration(arg);
+    if (ms === undefined) return MUTE_USAGE;
+    const at = clock.now();
+    try {
+      return muteReplyLine(await writeMute(home, { by: "telegram", until: at + ms }, () => at), new Date(at));
+    } catch (err) {
+      return `the mute could not be written: ${reasonOf(err)}`;
+    }
+  };
+
   const stopReply = async (): Promise<string> => {
     try {
       return (await conversation.stop(STOP_REASON)) ? "stopped" : "nothing is running";
@@ -657,7 +671,10 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
       return;
     }
     if (command !== undefined) {
-      await reply(command.cmd === "status" ? await statusReply() : command.cmd === "pause" ? await pauseReply(command.arg) : await stopReply());
+      await reply(command.cmd === "status" ? await statusReply()
+        : command.cmd === "pause" ? await pauseReply(command.arg)
+        : command.cmd === "mute" ? await muteReply(command.arg)
+        : await stopReply());
       return;
     }
     const { date } = message;

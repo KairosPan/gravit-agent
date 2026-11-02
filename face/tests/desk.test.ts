@@ -8,9 +8,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import {
-  ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, EVENTS_FILE, FIRINGS_FILE, LEDGER_ROTATE_BYTES, OFF_FILE, appendEvent, appendRecord, appendRecordOnce, budgetLine,
-  budgetReplyLine, budgetState, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastDeskSession, noteBudgetSpent,
-  parseDuration, readBudget, readEvents, readOffState, readRecords, registerDeskRoutes, runsOf, standingLines, writeOff,
+  ALERTS_FILE, ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, EVENTS_FILE, FILINGS_FILE, FIRINGS_FILE, LEDGER_ROTATE_BYTES, MUTE_FILE, MUTE_USAGE, OFF_FILE,
+  WATCH_LEASE_FILE, appendChain, appendEvent, appendRecord, appendRecordOnce, budgetLine, budgetReplyLine, budgetState, clearMute, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastDeskSession, noteBudgetSpent,
+  muteReplyLine, parseDuration, readBudget, readEvents, readMuteState, readOffState, readRecords, registerDeskRoutes, runsOf, standingLines, writeMute,
+  writeOff,
   type BudgetState, type DeskEvent, type DeskStatus, type TurnUsage,
 } from "../src/desk.ts";
 import type { DeskConversationCtxLike } from "../src/desk-conversation.ts";
@@ -1318,4 +1319,129 @@ test("installDesk loads the schedule only with the conversation; its status reac
     assert.equal(quiet.schedule, undefined, `no clock row (${label})`);
     await quiet.dispose(0);
   }
+});
+
+/* ---------- P3: the mute, and one append chain per file ---------- */
+
+test("the watch's files are named beside OFF", () => {
+  assert.deepEqual([ALERTS_FILE, FILINGS_FILE, MUTE_FILE, WATCH_LEASE_FILE], ["alerts.jsonl", "filings.jsonl", "MUTE", "watch.lease"]);
+  assert.equal(MUTE_USAGE, "mute needs a duration: /mute 30m, /mute 2h or /mute 1d");
+});
+
+test("writeMute, readMuteState and clearMute round-trip with ledger events", async () => {
+  const h = await home(); const now = () => Date.parse("2026-11-30T15:00:00Z");
+  assert.deepEqual(await readMuteState(h, now), { expired: false }, "no MUTE: not muted");
+  const s = await writeMute(h, { by: "telegram", until: now() + 7_200_000 }, now);
+  assert.deepEqual(s, { setAt: "2026-11-30T15:00:00.000Z", by: "telegram", until: "2026-11-30T17:00:00.000Z" });
+  assert.equal((await stat(join(deskDir(h), "MUTE"))).mode & 0o777, 0o600);
+  assert.deepEqual(JSON.parse(await readFile(join(deskDir(h), MUTE_FILE), "utf8")), s);
+  assert.deepEqual(await readMuteState(h, now), { state: s, expired: false });
+  assert.equal((await readMuteState(h, () => now() + 7_200_001)).expired, true);
+  assert.equal(await clearMute(h, "expiry", now), false, "a mute in force does not expire");
+  assert.equal(await clearMute(h, "expiry", () => now() + 7_200_001), true);
+  assert.equal(await clearMute(h, "terminal"), false, "nothing to lift, no second event");
+  assert.deepEqual(await readOffState(h), { expired: false }, "the mute is not the pause");
+  assert.deepEqual((await readEvents(h)).events, [
+    { t: "2026-11-30T15:00:00.000Z", kind: "mute-set", by: "telegram", until: "2026-11-30T17:00:00.000Z" },
+    { t: "2026-11-30T17:00:00.001Z", kind: "mute-cleared", by: "expiry" },
+  ]);
+});
+
+test("the phone never shortens a mute, and a touched MUTE mutes with no end", async () => {
+  const h = await home(); const at = Date.parse("2026-11-30T15:00:00Z");
+  const twoHours = await writeMute(h, { by: "telegram", until: at + 7_200_000 }, () => at);
+  assert.deepEqual(await writeMute(h, { by: "telegram", until: at + 60_000 + 3_600_000 }, () => at + 60_000), twoHours, "a 1 h mute stands aside");
+  assert.deepEqual((await readMuteState(h, () => at)).state, twoHours);
+  const longer = await writeMute(h, { by: "telegram", until: at + 60_000 + 10_800_000 }, () => at + 60_000);
+  assert.deepEqual(longer, { setAt: "2026-11-30T15:01:00.000Z", by: "telegram", until: "2026-11-30T18:01:00.000Z" }, "a 3 h one outlasts it");
+  assert.deepEqual((await readEvents(h)).events.map((e) => e.kind), ["mute-set", "mute-set"], "one event per real change");
+
+  const touched = await home();
+  await mkdir(deskDir(touched), { recursive: true });
+  const file = join(deskDir(touched), MUTE_FILE);
+  await writeFile(file, "");
+  const mtime = new Date("2026-11-30T12:34:56.000Z");
+  await utimes(file, mtime, mtime);
+  const asRead = { setAt: "2026-11-30T12:34:56.000Z", by: "terminal" };
+  assert.deepEqual(await readMuteState(touched, () => at + 365 * 86_400_000), { state: asRead, expired: false }, "a mute by terminal, with no end");
+  assert.deepEqual(await writeMute(touched, { by: "telegram", until: at + 60_000 }, () => at), asRead, "the phone cannot shorten it");
+  assert.equal(await readFile(file, "utf8"), "");
+  for (const text of [`{"setAt":"2026-11-30T15:00:00.000Z","by":"page"}`, "junk"]) {
+    await writeFile(file, text);
+    await utimes(file, mtime, mtime);
+    assert.deepEqual((await readMuteState(touched)).state, asRead, `${text}: the mute has no page setter`);
+  }
+  assert.equal(await clearMute(touched, "expiry", () => at + 365 * 86_400_000), false, "it never expires");
+  assert.equal(await clearMute(touched, "terminal"), true);
+  assert.deepEqual((await readEvents(touched)).events.map((e) => [e.kind, (e as { by?: string }).by]), [["mute-cleared", "terminal"]]);
+});
+
+test("the mute and the pause each take their own lock", async () => {
+  const h = await home();
+  await mkdir(deskDir(h), { recursive: true });
+  let muting: Promise<unknown> = Promise.resolve();
+  await withFileLock(join(deskDir(h), MUTE_FILE), async () => {
+    assert.equal((await writeOff(h, { by: "terminal" })).by, "terminal", "OFF is not held by MUTE's lock");
+    muting = writeMute(h, { by: "telegram", until: Date.now() + 60_000 });
+    await new Promise((done) => setTimeout(done, 100));
+    assert.deepEqual(await readMuteState(h), { expired: false }, "nothing written while another holds MUTE's lock");
+  });
+  await muting;
+  assert.equal((await readMuteState(h)).state?.by, "telegram");
+});
+
+test("appendChain writes a burst in order and drops nothing", async () => {
+  const h = await home();
+  const chain = appendChain(h, ALERTS_FILE);
+  for (let i = 0; i < 40; i++) chain.append({ t: `2026-11-30T15:00:00.${String(i).padStart(3, "0")}Z`, kind: "alert", n: i });
+  await chain.settled();
+  assert.deepEqual((await readRecords(h, ALERTS_FILE, (x): x is { n: number } => true)).records.map((r) => r.n), [...Array(40).keys()],
+    "P0 measured 20 bare appends at once, 6 dropped (P3-6); one chain drops none");
+  assert.equal((await stat(join(deskDir(h), ALERTS_FILE))).mode & 0o777, 0o600);
+  chain.append({ t: "2026-11-30T15:00:01.000Z", kind: "alert", n: 40 });
+  await chain.settled();
+  assert.equal((await readRecords(h, ALERTS_FILE, (x): x is object => true)).records.length, 41, "the chain goes on after it settles");
+
+  const stuck = await home();
+  await mkdir(join(deskDir(stuck), FILINGS_FILE), { recursive: true }); // a directory in its place
+  const lines: string[] = [];
+  const failing = appendChain(stuck, FILINGS_FILE, { log: (line) => { lines.push(line); } });
+  for (let i = 0; i < 3; i++) assert.equal(failing.append({ t: "2026-11-30T15:00:00.000Z", n: i }), undefined, "append returns nothing and never throws");
+  await failing.settled();
+  assert.equal(lines.length, 3, "one log line per record");
+  for (const line of lines) assert.match(line, /^gravit-face: the desk ledger at .*filings\.jsonl could not be written: E[A-Z]+$/);
+  assert.throws(() => appendChain(h, "../alerts.jsonl"), TypeError, "a path is the caller's mistake, refused before anything is touched");
+});
+
+test("appendChain on events.jsonl keeps the desk-session a rotation carries", async () => {
+  const h = await home();
+  const chain = appendChain(h, EVENTS_FILE);
+  chain.append({ t: "2026-11-30T15:00:00.000Z", kind: "desk-session", sessionId: "desk-s1", reason: "created" });
+  chain.append({ t: "2026-11-30T15:00:01.000Z", kind: "watch-load", file: "desk/rules.yml", loaded: 2, refused: [] });
+  await chain.settled();
+  assert.equal(lastDeskSession((await readEvents(h)).events), "desk-s1");
+  assert.deepEqual((await readEvents(h)).events.map((e) => e.kind), ["desk-session", "watch-load"]);
+});
+
+test("muteReplyLine names the end, and dates it on another ET day", () => {
+  const now = new Date("2026-11-30T15:00:00Z");
+  assert.equal(muteReplyLine({ setAt: "2026-11-30T15:00:00.000Z", by: "telegram", until: "2026-11-30T17:00:00.000Z" }, now),
+    "alerts muted until 12:00 ET; detection and the ledger go on. A terminal lifts it: npm run desk -- unmute");
+  assert.equal(muteReplyLine({ setAt: "2026-11-30T15:00:00.000Z", by: "telegram", until: "2026-12-01T15:00:00.000Z" }, now),
+    "alerts muted until 2026-12-01 10:00 ET; detection and the ledger go on. A terminal lifts it: npm run desk -- unmute");
+  assert.equal(muteReplyLine({ setAt: "2026-11-30T12:34:56.000Z", by: "terminal" }, now),
+    "alerts muted until a terminal lifts it; detection and the ledger go on. A terminal lifts it: npm run desk -- unmute");
+});
+
+test("events.jsonl takes the three new kinds", async () => {
+  const fresh: DeskEvent[] = [
+    { t: "2026-11-30T15:00:00.000Z", kind: "mute-set", by: "telegram", until: "2026-11-30T17:00:00.000Z" },
+    { t: "2026-11-30T15:30:00.000Z", kind: "mute-cleared", by: "terminal" },
+    { t: "2026-11-30T15:30:01.000Z", kind: "watch-load", file: "desk/rules.yml", loaded: 3, refused: ["#2 NVDA: kind must be move_pct, gap or filing"] },
+    { t: "2026-11-30T15:30:02.000Z", kind: "watch-load", file: "desk/levels.yml", loaded: 0, refused: [], error: "levels.yml: not YAML" },
+  ];
+  const h = await home();
+  for (const event of fresh) await appendEvent(h, event);
+  assert.deepEqual(await readEvents(h), { events: fresh, skipped: 0 });
+  assert.deepEqual(runsOf(fresh), [], "no run in them");
 });

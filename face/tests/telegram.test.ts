@@ -1,5 +1,5 @@
 // face/tests/telegram.test.ts
-/** The Telegram bridge (src/telegram.ts): one operator in a private chat, the four commands, the desk
+/** The Telegram bridge (src/telegram.ts): one operator in a private chat, the five commands, the desk
  * conversation's outlet, the offset across restarts, the outbox, and what a refused or failed poll does.
  * Offline: a fake Bot API answering by URL - no request leaves the process, and nothing here names
  * api.telegram.org - a fake conversation port and a manual clock. Homes sit inside the repository, under
@@ -10,7 +10,7 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { OFF_FILE, deskDir, deskStatusLines, type DeskStatus } from "../src/desk.ts";
+import { MUTE_FILE, MUTE_USAGE, OFF_FILE, deskDir, deskStatusLines, readEvents, type DeskStatus } from "../src/desk.ts";
 import type { DeskConversation, DeskOutlet, PostResult } from "../src/desk-conversation.ts";
 import type { DeskClock } from "../src/desk-session.ts";
 import { deskSecrets } from "../src/desk-tools.ts";
@@ -417,7 +417,7 @@ test("splitMessage never breaks a surrogate pair", () => {
 
 /* ---------- the four commands ---------- */
 
-test("parseCommand reads the four commands in any case, with or without the bot's name; anything else is text", () => {
+test("parseCommand reads the five commands in any case, with or without the bot's name; anything else is text", () => {
   assert.deepEqual(parseCommand("/status"), { cmd: "status" });
   assert.deepEqual(parseCommand("/pause 2h"), { cmd: "pause", arg: "2h" });
   assert.deepEqual(parseCommand("/pause@gravit_desk_bot 2h"), { cmd: "pause", arg: "2h" });
@@ -428,7 +428,10 @@ test("parseCommand reads the four commands in any case, with or without the bot'
   assert.deepEqual(parseCommand("/PAUSE@Gravit_Desk_Bot 2H"), { cmd: "pause", arg: "2H" }, "the word in any case; the argument as typed");
   assert.deepEqual(parseCommand("/New"), { cmd: "new" });
   assert.deepEqual(parseCommand("/sToP@GRAVIT_DESK_BOT"), { cmd: "stop" });
-  for (const other of ["/help", "/start", "/pause2h", "/statuses", "/Statuses", "status", "hi /status", "/resume", "/Resume"]) {
+  assert.deepEqual(parseCommand("/mute 2h"), { cmd: "mute", arg: "2h" });
+  assert.deepEqual(parseCommand("/mute@gravit_desk_bot 2h"), { cmd: "mute", arg: "2h" });
+  assert.deepEqual(parseCommand("/Mute"), { cmd: "mute" });
+  for (const other of ["/help", "/start", "/pause2h", "/statuses", "/Statuses", "status", "hi /status", "/resume", "/Resume", "/mute2h", "/muted", "/unmute"]) {
     assert.equal(parseCommand(other), undefined, other);
   }
 });
@@ -486,6 +489,54 @@ test("/status, /pause 2h, /new and /stop", async () => {
     r.api.push(text(11, "/help"));
     await polled(r, 12);
     assert.deepEqual(r.conversation.posts.map((p) => p.text), ["/help"], "any other /word is");
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("/mute 2h writes MUTE and replies its end; /mute alone or /mute 0m is the usage; a shorter mute replies the one in force", async () => {
+  const r = await rig("mute");
+  try {
+    await polled(r, 1);
+    r.api.push(text(1, "/mute 2h"));
+    await polled(r, 2);
+    assert.equal(r.api.texts()[0], "alerts muted until 16:30 ET; detection and the ledger go on. A terminal lifts it: npm run desk -- unmute");
+    assert.deepEqual(JSON.parse(await fileText(r.home, MUTE_FILE)), { setAt: "2026-10-20T18:30:00.000Z", by: "telegram", until: "2026-10-20T20:30:00.000Z" });
+    r.api.push(text(2, "/Mute@Gravit_Desk_Bot 1h"));
+    await polled(r, 3);
+    assert.equal(r.api.texts()[1], "alerts muted until 16:30 ET; detection and the ledger go on. A terminal lifts it: npm run desk -- unmute",
+      "a shorter mute stands aside: the reply names the mute in force");
+    for (const [id, bad] of [[3, "/mute"], [4, "/mute 0m"], [5, "/mute soon"]] as const) {
+      r.api.push(text(id, bad));
+      await polled(r, id + 1);
+      assert.equal(r.api.texts()[id - 1], MUTE_USAGE, bad);
+    }
+    assert.equal(JSON.parse(await fileText(r.home, MUTE_FILE)).until, "2026-10-20T20:30:00.000Z", "the usage writes nothing");
+    r.api.push(text(6, "/mute 1d"));
+    await polled(r, 7);
+    assert.equal(r.api.texts()[5], "alerts muted until 2026-10-21 14:30 ET; detection and the ledger go on. A terminal lifts it: npm run desk -- unmute");
+    assert.deepEqual((await readEvents(r.home)).events.map((e) => e.kind), ["mute-set", "mute-set"], "one event per real change");
+    assert.equal(existsSync(join(deskDir(r.home), OFF_FILE)), false, "the mute pauses nothing");
+    assert.equal(r.conversation.posts.length, 0, "no /mute is text for Gravit");
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("a mute that cannot be written answers with why", { skip: process.getuid?.() === 0 && "root writes anywhere" }, async () => {
+  const r = await rig("mute-failure");
+  try {
+    await polled(r, 1);
+    await mkdir(deskDir(r.home), { recursive: true });
+    await chmod(deskDir(r.home), 0o500);
+    try {
+      r.api.push(text(1, "/mute 2h"));
+      await polled(r, 2);
+    } finally {
+      await chmod(deskDir(r.home), 0o700);
+    }
+    assert.match(r.api.texts()[0], /^the mute could not be written: EACCES\b/);
+    assert.equal(existsSync(join(deskDir(r.home), MUTE_FILE)), false);
   } finally {
     await r.bridge.dispose();
   }
