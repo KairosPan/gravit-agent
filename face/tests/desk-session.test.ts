@@ -1376,6 +1376,21 @@ test("requeuePending takes out and follows up again the telegram and alert messa
   assert.match(failLines[0], /^gravit-face: desk: a message queued on desk session session-desk could not be queued again, and is lost: the session is closed$/);
 });
 
+test("a cut wakes every source queued behind it: a browser message alone, or a job's notice alone, is sent again and answered", () => {
+  for (const [label, message] of [
+    ["the browser's", createUserMessage({ content: say("from the browser"), source: { kind: "user" } }) as unknown as MessageLike],
+    ["a job's notice", jobNotice() as unknown as MessageLike],
+  ] as const) {
+    const { agent, model, followups } = inboxAgent();
+    model.running = true;
+    agent.followup(message);
+    assert.equal(cancelKeepingQueue(agent, STOPPED, () => assert.fail("no line")), 1, `${label} is sent again`);
+    assert.deepEqual(followups.map((m) => m.id), [message.id, message.id]);
+    assert.equal(model.converge(), true, `so the driver wakes for ${label}`);
+    assert.equal(model.claim()?.id, message.id);
+  }
+});
+
 test("cancelKeepingQueue still answers what waited behind the cut turn", () => {
   const second = queued("second");
   const { agent, model, cancels, followups } = inboxAgent();

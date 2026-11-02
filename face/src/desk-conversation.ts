@@ -56,8 +56,10 @@
  * 0, and one line through {@link DeskConversation.deliver}'s path, so a pause holds it: `a restart cut your message of
  * <time> before it was answered; send it again`; once per session and turn, a `desk-turn` the ledger already holds for
  * it doing neither again. Then the phone texts and alerts still queued are woken (src/desk-session.ts
- * `requeuePending`): a resumed agent sits idle beside its rebuilt inbox. The log is read before the requeue, so a turn
- * the requeue opens is never taken for a cut one.
+ * `requeuePending`): a resumed agent sits idle beside its rebuilt inbox - after the instruction-chain fence, as before a
+ * post: a violation is a `desk-refused` event and leaves them queued, as does a check that fails (one line), for the
+ * next post, which the fence refuses first. The log is read before the requeue, so a turn the requeue opens is never
+ * taken for a cut one.
  *
  * A CUT CUTS ONE TURN. The phone's `/stop` ({@link DeskConversation.stop}), like the deadline, cancels the turn
  * under way and only it: the messages queued behind it are kept and answered, each in its own turn
@@ -353,7 +355,7 @@ type OutletResult = Awaited<ReturnType<DeskOutlet["send"]>>;
 
 /**
  * The desk session's one owner. Nothing runs until a member is called: src/desk.ts `installDesk` calls
- * {@link DeskConversation.start} at once, without awaiting it.
+ * {@link DeskConversation.start} once the Telegram bridge has set the outlet, without awaiting it.
  * @param deps - see {@link DeskConversationDeps}.
  */
 export function createDeskConversation(deps: DeskConversationDeps): DeskConversation {
@@ -541,6 +543,18 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
       log(`${BIN}: desk: desk session ${sessionId}'s log could not be read (${errText(err)}); a phone turn a restart cut there goes unanswered`);
     }
     if (cut !== undefined) await answerCut(sessionId, cut, m);
+    /* the fence first, as before a post: a woken text opens a turn at once, before that turn's own check has run */
+    let violation: string | undefined;
+    try {
+      violation = await m.session.findDeskFenceViolation(root);
+    } catch (err) {
+      log(`${BIN}: desk: the fence check before waking what desk session ${sessionId} still had queued failed (${errText(err)}); it stays queued`);
+      return;
+    }
+    if (violation !== undefined) {
+      await m.desk.appendEvent(home, { t: stamp(), kind: "desk-refused", reason: "fence", path: violation }, { log });
+      return;
+    }
     m.session.requeuePending(agent, log);
   };
 

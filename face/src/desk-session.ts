@@ -793,15 +793,16 @@ type InboxAware = { inbox?: { readonly nextTurn: readonly MessageLike[]; remove(
 
 /**
  * Cancel the turn under way on `agent` with `cause` - and only that turn: what waits in its inbox is kept, and every
- * phone text and alert queued for a turn of its own is answered ({@link requeuePending}); a browser's waits.
+ * message queued for a turn of its own is answered.
  *
  * dsh's `cancel(cause, { keepInbox: true })` keeps the inbox, but a message queued while the turn ran then waits
  * there, unanswered, until something else wakes the agent: once the cut turn has unwound, the driver goes idle
  * without looking at the inbox (dsh-agent-loop lib/index.js `kick`; tests/desk-smoke.test.ts measures it on a real
  * tree). A message sent after the cancel, though, is queued for the next turn and runs once the cut turn has
- * unwound (dsh-agent `Agent.send`). So, in the same tick as the cancel, {@link requeuePending} takes each phone text
- * and alert on the inbox's next-turn list out and sends it again with `followup`, oldest first, in the order the
- * operator sent them, and each is answered in its own turn - with its own deadline, fence check and record. The input waiting
+ * unwound (dsh-agent `Agent.send`). So, in the same tick as the cancel, each message on the inbox's next-turn list -
+ * whatever its source: the phone's, an alert's, the browser's, a job's notice - is taken out and sent again with
+ * `followup`, oldest first: the list ends as it began, in the order the operator sent them, and each is answered in its
+ * own turn - with its own deadline, fence check and record. The input waiting
  * for the next step (a browser's steer) is kept and not sent again: dsh's own stop leaves it so. An agent without an
  * inbox is only cancelled.
  *
@@ -817,18 +818,19 @@ type InboxAware = { inbox?: { readonly nextTurn: readonly MessageLike[]; remove(
  */
 export function cancelKeepingQueue(agent: AgentLike, cause: { kind: "hook"; reason: string }, log: (line: string) => void): number {
   agent.cancel(cause, { keepInbox: true });
-  return requeue(agent, log, " after the cut");
+  return requeue(agent, () => true, log, " after the cut");
 }
 
 /** The message sources {@link requeuePending} wakes the desk for: the phone's texts and the face's alerts. */
 const REQUEUED: ReadonlySet<string> = new Set(["telegram", "alert", "alerts"]);
 
 /**
- * Take each phone text and alert waiting on `agent`'s inbox's next-turn list out, and send it again with `followup`,
- * oldest first, so the agent wakes for them: a message on that list opens no turn of its own until something wakes the
- * agent, and dsh opens none for it after a cut turn ({@link cancelKeepingQueue}) or on a resume - the queued message
- * lives only in the inbox's durable projection, which the resume rebuilds, and the resumed agent sits idle beside it
- * (measured on a real tree, spec §16 H3). A message of any other source - the browser's - stays where it is. A message
+ * The boot's wake: take each phone text and alert waiting on `agent`'s inbox's next-turn list out, and send it again
+ * with `followup`, oldest first, so the agent wakes for them: dsh opens no turn on a resume for a message on that list -
+ * the queued message lives only in the inbox's durable projection, which the resume rebuilds, and the resumed agent sits
+ * idle beside it (measured on a real tree, spec §16 H3). A message of any other source - the browser's, a job's notice -
+ * stays where it is: nobody is at the browser to see its answer at boot. A cut wakes every source
+ * ({@link cancelKeepingQueue}). A message
  * `remove` says is no longer there was taken by a turn since, which answers it: it is skipped, never sent twice. An
  * agent without an inbox has nothing to wake.
  * @param agent - the desk agent.
@@ -836,16 +838,18 @@ const REQUEUED: ReadonlySet<string> = new Set(["telegram", "alert", "alerts"]);
  * @returns how many messages it sent again.
  */
 export function requeuePending(agent: AgentLike, log: (line: string) => void): number {
-  return requeue(agent, log, "");
+  return requeue(agent, (message) => REQUEUED.has(message.source?.kind), log, "");
 }
 
-/** {@link requeuePending}, its loss line naming `when` (` after the cut`, or nothing). */
-function requeue(agent: AgentLike, log: (line: string) => void, when: string): number {
+/** Take each message on `agent`'s next-turn list that `which` keeps out and send it again, oldest first - a cut's
+ * ({@link cancelKeepingQueue}: every one) and a boot's ({@link requeuePending}: the phone's and the alerts') - its loss
+ * line naming `when` (` after the cut`, or nothing). */
+function requeue(agent: AgentLike, which: (message: MessageLike) => boolean, log: (line: string) => void, when: string): number {
   const inbox = (agent as AgentLike & InboxAware).inbox;
   if (inbox === undefined) return 0;
   let sent = 0;
   for (const message of [...inbox.nextTurn]) {
-    if (!REQUEUED.has(message.source?.kind)) continue;
+    if (!which(message)) continue;
     if (!inbox.remove(message.id)) continue; // taken by a turn since: it is answered there
     try {
       agent.followup(message);

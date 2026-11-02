@@ -1001,6 +1001,48 @@ test("a resumed session whose log cannot be read still wakes what was left, with
   await desk.dispose();
 });
 
+test("the boot's wake passes the fence first: a violation is a desk-refused event and leaves the inbox parked", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  h.tree.rebuilt.set(sessionId, [pending("telegram:2", PHONE)]);
+  await put(h.root, "desk/GRAVIT.md"); // planted while the face was down
+  const { desk } = await restarted(h, sessionId);
+  await desk.start();
+  const agent = h.tree.agent(sessionId);
+  assert.deepEqual(agent.followups, [], "nothing woken over a violation");
+  assert.deepEqual(agent.model!.pending.map((m) => m.id), ["telegram:2"], "the text stays queued for the next post, which the fence refuses first");
+  assert.deepEqual((await events(h)).filter((e) => e.kind === "desk-refused"), [{ t: iso(AT), kind: "desk-refused", reason: "fence", path: "desk/GRAVIT.md" }]);
+  assert.deepEqual(h.lines, []);
+  await desk.dispose();
+});
+
+test("a boot fence check that throws fails closed: one line, nothing woken", async (t) => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  h.tree.rebuilt.set(sessionId, [pending("telegram:2", PHONE)]);
+  const desk_ = join(h.root, "desk");
+  const real = fsp.readdir as unknown as (...args: unknown[]) => Promise<unknown>;
+  /* a listing of desk/ that is no list: the chain check's own code throws on it, outside its fail-closed reads */
+  t.mock.method(fsp, "readdir", (async (...args: unknown[]) => (String(args[0]) === desk_ ? 42 : real(...args))) as unknown as typeof fsp.readdir);
+  syncBuiltinESMExports();
+  const { desk } = await restarted(h, sessionId);
+  try {
+    await desk.start();
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  const agent = h.tree.agent(sessionId);
+  assert.deepEqual(agent.followups, []);
+  assert.deepEqual(agent.model!.pending.map((m) => m.id), ["telegram:2"]);
+  assert.equal(h.lines.length, 1);
+  assert.match(h.lines[0], new RegExp(`^gravit-face: desk: the fence check before waking what desk session ${sessionId} still had queued failed \\(.+\\); it stays queued$`));
+  assert.deepEqual((await events(h)).filter((e) => e.kind === "desk-refused"), []);
+  await desk.dispose();
+});
+
 test("the cut-turn line goes through deliver, so OFF holds it", async (t) => {
   const h = await harness();
   const sessionId = await started(h);

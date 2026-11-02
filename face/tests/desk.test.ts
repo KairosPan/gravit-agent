@@ -909,7 +909,16 @@ test("installDesk runs the Telegram bridge only with the desk on, Telegram confi
       home: await own("live"), enabled: true, watch: watch(), telegram: { token, operatorId: 42, apiBase: "https://telegram.test", fetch: live.fetch },
       ...conversationDeps(fake, "live"),
     });
+    /* the conversation starts only once the bridge has set the outlet: a restart's cut-turn line must find it */
+    const order: string[] = [];
+    const conversation = desk.conversation!;
+    const setOutlet = conversation.setOutlet.bind(conversation);
+    const start = conversation.start.bind(conversation);
+    conversation.setOutlet = (outlet) => { order.push(outlet === undefined ? "outlet unset" : "outlet set"); setOutlet(outlet); };
+    conversation.start = () => { order.push("start"); return start(); };
     await until("the bridge's first poll, which installDesk does not await", () => live.state.asked.includes("getUpdates"));
+    await until("the conversation's start, which installDesk does not await", () => order.includes("start"));
+    assert.deepEqual(order, ["outlet set", "start"], "installDesk starts the conversation after the bridge, never before");
     assert.deepEqual(await telegramOf(rec), { configured: true, polling: true, dropped: 0, queued: 0 }, "the status is the bridge's own");
     await until("the conversation's start", () => fake.listeners.size === 1);
     await desk.dispose(0);

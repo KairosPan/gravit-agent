@@ -1574,7 +1574,8 @@ const watchClock = (now: () => number): DeskClock => ({
  * `now()` at this call and the status's uptime origin - and the sleep watch starts at once, writing
  * into the ledger. Given `root`, `route`, `sessionCtx` and `installModelSelection`
  * too, the desk conversation's owner (src/desk-conversation.ts) is created on the same `now` and
- * started without being awaited - its `start` never rejects - so the desk session is ensured and
+ * started without being awaited - its `start` never rejects - once the bridge, if any, has set the outlet,
+ * so a line about a turn a restart cut finds it; so the desk session is ensured and
  * supervised before any phone message, and a turn the operator opens from the browser is timed,
  * fenced and recorded like a phone turn. Given `telegram` as well, the Telegram bridge
  * (src/telegram.ts) runs on that conversation: its module loads on first use and the bridge starts
@@ -1705,7 +1706,6 @@ export function installDesk(
       clock,
       log,
     });
-  void conversation?.start();
   let disposing: Promise<void> | undefined;
   /* The bridge's module loads on first use, as the conversation's machinery does (src/desk-conversation.ts,
    * MODULE WEIGHT): the pause switch and scripts/service.ts import this module and never run a bridge. Not
@@ -1724,6 +1724,10 @@ export function installDesk(
     },
     (err: unknown) => { log(`${BIN}: desk: the Telegram bridge could not be loaded: ${reasonOf(err)}`); },
   );
+  /* The conversation starts once the bridge has set the outlet (or there is no bridge): a start that resumed the desk
+   * session may answer a phone turn the restart cut at once (src/desk-conversation.ts AFTER A RESTART), and that line
+   * must find the outlet. `bridging` never rejects. */
+  void bridging.then(() => conversation?.start());
   /* The standing orders' clock (src/schedule.ts) loads on first use too - with it src/firing.ts, src/standing.ts and
    * js-yaml - once the bridge has set the outlet, so the boot's lines reach the phone. It never rejects: a module that
    * cannot load, or a clock that cannot start, is one line and `undefined`; one that arrives once dispose has begun
