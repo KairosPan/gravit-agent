@@ -23,7 +23,7 @@ import type { MarketQuote, MarketQuoteIdentity, MarketQuotePayload, MarketQuoteS
 import type { Market } from "../src/symbols.ts";
 import type { AlertHit } from "../src/watch-eval.ts";
 import {
-  installWatch, isAnnotatedRecord, LEASE_STALE_MS, MARKS_MAX, pidAlive, WATCH_CN_MAX, WATCH_US_MAX, type WatchHandle,
+  cutAt, installWatch, isAnnotatedRecord, LEASE_STALE_MS, MARKS_MAX, pidAlive, WATCH_CN_MAX, WATCH_US_MAX, type WatchHandle,
 } from "../src/watch.ts";
 import { fakeCalendar, WallClock } from "./desk-fakes.ts";
 
@@ -629,6 +629,35 @@ test("a reply to a message the watch does not know carries nothing", async () =>
   assert.equal(h.watch.contextFor(400), undefined, "past the 48 hours the watch keeps");
   assert.ok(h.watch.contextFor(555) !== undefined);
   await h.watch.dispose();
+});
+
+test("a malformed ledger line costs only its own context: the reply resolves from the good records, or carries nothing", async () => {
+  const good = orphan("a-1", "2026-11-30T15:16:45.000Z");
+  /* passes the rebuild's check, but alertText cannot read it: no trigger, no quote */
+  const { trigger: _t, quote: _q, ...bad } = orphan("a-bad", "2026-11-30T15:17:45.000Z");
+  const h = await overLedger([
+    good, deliveredLine("a-1", "2026-11-30T15:16:46.000Z", [555]),
+    bad, deliveredLine("a-bad", "2026-11-30T15:17:46.000Z", [556]),
+    /* newer, and sent as 555 as well: tried first, skipped */
+    deliveredLine("a-bad", "2026-11-30T15:18:46.000Z", [555]),
+    { t: "2026-11-30T15:18:47.000Z", kind: "delivered", id: "a-1", delivery: { sent: "555" }, latency: {} },
+    annotationLine(["a-1", "a-bad"], "2026-11-30T15:18:48.000Z"),
+    annotatedLine("2026-11-30T15:19:30.000Z", [560], "One met."),
+  ]);
+  await read(h);
+  const now = h.wall.now();
+  const goodText = alertText(good as unknown as AlertHit, now, "none");
+  assert.equal(h.watch.contextFor(555), `${goodText}\n\nannotation:\nOne met.`, "the good alert's send");
+  assert.equal(h.watch.contextFor(556), undefined, "the bad alert's own send carries nothing, and does not throw");
+  assert.equal(h.watch.contextFor(560), `${goodText}\n\nannotation:\nOne met.`, "the annotation names the good alert alone");
+  await h.watch.dispose();
+});
+
+test("the context's cut never splits a surrogate pair", () => {
+  assert.equal(cutAt("abc", 4_000), "abc");
+  assert.equal(cutAt("ab😀", 3), "ab", "the pair at the edge goes whole");
+  assert.equal(cutAt("ab😀c", 4), "ab😀");
+  assert.equal(cutAt("abcd", 3), "abc");
 });
 
 test("an orphan older than ten minutes is one line and a delivered record 'lost to a restart'", async () => {

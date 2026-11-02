@@ -253,6 +253,13 @@ export interface WatchHandle {
 /** The most a reply's context ({@link WatchHandle.contextFor}) carries, in UTF-16 code units: one Telegram message. */
 const CONTEXT_MAX = 4_000;
 
+/** `text` cut to at most `max` UTF-16 code units, never between the two halves of a surrogate pair. */
+export function cutAt(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const code = text.charCodeAt(max - 1);
+  return text.slice(0, code >= 0xd800 && code <= 0xdbff ? max - 1 : max);
+}
+
 /** The lease's contents. */
 interface Lease { pid: number; since: string; beat: string }
 
@@ -1414,30 +1421,51 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   /** What a phone reply to `messageId` answers: see {@link WatchHandle.contextFor}. Newest record first, so a
    * message id Telegram numbered afresh finds the latest send. */
   function contextFor(messageId: number): string | undefined {
+    try {
+      return contextOf(messageId);
+    } catch (err) {
+      fail("context", err);
+      return undefined;
+    }
+  }
+
+  /** {@link contextFor}'s work. A record the ledger kept in a shape `alertText` cannot read - the rebuild checks only
+   * the fields it reads - is skipped, as if the watch had not sent it; the next record that sent the message is tried. */
+  function contextOf(messageId: number): string | undefined {
     const at = clock.now();
     const live = records.filter((r) => at - Date.parse(r.t) <= MEMORY_MS).reverse();
     const sentIt = (sent: unknown): boolean => Array.isArray(sent) && sent.includes(messageId);
     const hitOf = (id: string): AlertHit | undefined => live.find((r): r is AlertHit => r.kind === "alert" && r.id === id);
     const annotatedOf = (pass: string): AnnotatedRecord | undefined => live.find((r): r is AnnotatedRecord => r.kind === "annotated" && r.pass === pass);
     const noteOf = (a: AnnotatedRecord | undefined): string[] => (a === undefined || a.text === "" ? [] : [`annotation:\n${a.text}`]);
+    /** The alert's text as sent with no note; `undefined` for a hit in a shape it cannot be read from. */
+    const textOf = (hit: AlertHit): string | undefined => {
+      try {
+        return alertText(hit, at, "none");
+      } catch {
+        return undefined;
+      }
+    };
     let parts: string[] | undefined;
     for (const r of live) {
-      if (r.kind === "delivered" && sentIt((r.delivery as { sent?: unknown }).sent)) {
+      if (r.kind === "delivered" && typeof r.delivery === "object" && r.delivery !== null && sentIt((r.delivery as { sent?: unknown }).sent)) {
         const hit = hitOf(r.id);
-        if (hit === undefined) continue;
-        const post = live.find((p): p is AlertAnnotation => p.kind === "annotation" && p.alerts.includes(hit.id));
-        parts = [alertText(hit, at, "none"), ...noteOf(post === undefined ? undefined : annotatedOf(post.pass))];
+        const text = hit === undefined ? undefined : textOf(hit);
+        if (hit === undefined || text === undefined) continue;
+        const post = live.find((p): p is AlertAnnotation => p.kind === "annotation" && Array.isArray(p.alerts) && p.alerts.includes(hit.id));
+        parts = [text, ...noteOf(post === undefined ? undefined : annotatedOf(post.pass))];
         break;
       }
       if (r.kind === "annotated" && sentIt(r.sent)) {
         const post = live.find((p): p is AlertAnnotation => p.kind === "annotation" && p.pass === r.pass);
-        const hits = (post?.alerts ?? []).flatMap((id) => { const hit = hitOf(id); return hit === undefined ? [] : [hit]; });
-        parts = [...hits.map((hit) => alertText(hit, at, "none")), ...noteOf(r)];
+        const ids = Array.isArray(post?.alerts) ? post.alerts : [];
+        const texts = ids.flatMap((id) => { const hit = hitOf(id); const text = hit === undefined ? undefined : textOf(hit); return text === undefined ? [] : [text]; });
+        parts = [...texts, ...noteOf(r)];
         break;
       }
     }
     if (parts === undefined || parts.length === 0) return undefined;
-    return parts.join("\n\n").slice(0, CONTEXT_MAX);
+    return cutAt(parts.join("\n\n"), CONTEXT_MAX);
   }
 
   /* ---------- the handle ---------- */
