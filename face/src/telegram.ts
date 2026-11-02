@@ -27,7 +27,9 @@
  * said first; a command answered; anything else handled or dropped - the offset is set past it and stored in
  * `telegram.offset`; the next update waits for that. So a crash before the desk holds a text on disk leaves it
  * for Telegram to deliver again, and the text delivered again is answered once; an update the bridge cannot use
- * is never delivered again. Every update a poll answers is taken, in order - one numbered below the stored offset
+ * is never delivered again. The wait is bounded at five minutes, the phone turn's deadline: past it, an
+ * `unaccepted` record and one line, and the offset moves on and the poll goes on, so a hung desk never leaves
+ * /stop, /pause and /status unheard; a post that lands later is still answered once, by its key. Every update a poll answers is taken, in order - one numbered below the stored offset
  * too, with one line: after about a week with no update Telegram may number them afresh, and passing those
  * over would leave the phone unheard while the status read healthy.
  *
@@ -96,6 +98,9 @@ const RECORD_EVERY_MS = 60_000;
 /** How long an update's post or /new may take before the bridge answers that the desk is slow; it still waits for
  * it before the offset moves on. */
 const POST_BOUND_MS = 30_000;
+/** The longest the bridge waits for an update to be taken - a post or a /new to settle - before it records that
+ * the desk did not take it, moves the offset on and polls again: five minutes, the phone turn's deadline. */
+const ACCEPT_BOUND_MS = 300_000;
 /** How long {@link BridgeHandle.dispose} waits for the update in hand and the sends under way. */
 const DISPOSE_MS = 2_000;
 /** The longest part a message is sent in: 4,000 UTF-16 code units, under Telegram's 4,096. */
@@ -709,7 +714,8 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     ));
   };
 
-  /** Take one update, whatever it is - waiting for its post to settle, however long - then set the offset past it.
+  /** Take one update, whatever it is - waiting for its post to settle, up to {@link ACCEPT_BOUND_MS} - then set the
+   * offset past it.
    * An update numbered below the stored offset is taken too - Telegram has numbered its updates afresh - with one
    * line. */
   const take = async (raw: unknown): Promise<void> => {
@@ -719,10 +725,14 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     if (numbered && offset !== undefined && id < offset) {
       log(`${BIN}: telegram: Telegram update ${id} is below the stored offset ${offset}: Telegram has numbered its updates afresh, so the bridge takes it and goes on from ${id + 1}`);
     }
-    try {
-      await handle(update);
-    } catch (err) {
+    const handled = handle(update).catch((err: unknown) => {
       log(`${BIN}: telegram: update ${numbered ? id : "without an id"} could not be handled: ${reasonOf(err)}`);
+    });
+    const taken = await bounded(ACCEPT_BOUND_MS, handled);
+    if (!taken.settled) {
+      const line = `${BIN}: telegram: the desk did not take update ${numbered ? id : "without an id"} in ${ACCEPT_BOUND_MS / 60_000} min; the bridge goes on, and the text is answered once if it lands later`;
+      log(line);
+      await record({ t: stamp(), kind: "unaccepted", ...(numbered ? { update: id } : {}), waitedMs: ACCEPT_BOUND_MS });
     }
     if (!numbered) return;
     offset = id + 1;

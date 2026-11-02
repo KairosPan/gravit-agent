@@ -626,6 +626,37 @@ test("the offset is stored only after the post is accepted, even when the 30 s s
   }
 });
 
+test("a post that never settles holds the offset for 5 min, then the bridge records it, moves on and answers what came behind it", async () => {
+  const conversation = new FakeConversation();
+  conversation.gate = new Promise(() => {}); // a hung ensure, read or flush
+  const r = await rig("unaccepted", { conversation });
+  try {
+    await polled(r, 1);
+    r.api.push(text(1, "never taken"));
+    await waitFor("the post's bounds", () => conversation.posts.length === 1 && r.clock.has(30_000) && r.clock.has(300_000));
+    r.clock.advance(30_000);
+    await waitFor("the slow line", () => r.api.texts().length === 1);
+    assert.deepEqual(r.api.texts(), [SLOW], "the 30 s slow line, unchanged");
+    r.clock.advance(269_999);
+    await new Promise((done) => setTimeout(done, 20));
+    assert.equal(existsSync(join(deskDir(r.home), "telegram.offset")), false, "no offset before 5 min");
+    assert.equal(r.api.polls().length, 1, "and no poll");
+    r.clock.advance(1);
+    await polled(r, 2);
+    assert.equal(await fileText(r.home, "telegram.offset"), "2\n", "past 5 min the offset moves on");
+    const line = "gravit-face: telegram: the desk did not take update 1 in 5 min; the bridge goes on, and the text is answered once if it lands later";
+    assert.deepEqual(r.lines, [line]);
+    assert.deepEqual((await records(r.home)).filter((x) => x.kind === "unaccepted").map(({ t: _t, ...rest }) => rest), [{ kind: "unaccepted", update: 1, waitedMs: 300_000 }]);
+    r.api.push(text(2, "/status"));
+    await polled(r, 3);
+    assert.equal(r.api.texts().length, 2);
+    assert.ok(r.api.texts()[1].startsWith("up "), "a /status sent behind it is answered");
+    assert.equal(await fileText(r.home, "telegram.offset"), "3\n");
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
 /* A crash after the conversation followed a text up but before its log was flushed: the bridge never stored the
  * offset past it, so Telegram delivers it again - under the same key, which the session now holds. */
 test("an update delivered again after a restart is posted with the same key and answered once", async () => {
