@@ -574,7 +574,7 @@ test("WATCH_LINES render the phone-line table exactly", () => {
 - Create: `face/src/edgar.ts`, `face/tests/edgar.test.ts`, `face/src/filings.ts`, `face/tests/filings.test.ts`
 
 **Interfaces:**
-- **Consumes,** `edgar.ts`: `etDate` alone; its symbols arrive validated. `filings.ts`: `Rule`, `resolveSymbols` (Task 3); `Holding`, `Level` (desk-book.ts); `marketOf` (symbols.ts, Task 1); `etDate`; `MarketCalendar`'s `DayAnswer`.
+- **Consumes,** `edgar.ts`: `etDate` and `etClock` (et.ts) alone; its symbols arrive validated. `filings.ts`: `Rule`, `resolveSymbols` (Task 3); `Holding`, `Level` (desk-book.ts); `marketOf` (symbols.ts, Task 1); `etDate`, `etClock`; `MarketCalendar`'s `DayAnswer`.
 - **Produces, `edgar.ts` (M2).**
   - **Constants:** `EDGAR_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"`; `EDGAR_SUBMISSIONS = (cik: number) => \`https://data.sec.gov/submissions/CIK${String(cik).padStart(10, "0")}.json\``; `EDGAR_SPACING_MS = 200`; `EDGAR_RESPONSE_MAX = 16 * 1024 * 1024`; `EDGAR_REQUEST_TIMEOUT_MS = 20_000`.
   - **Types:**
@@ -595,8 +595,8 @@ test("WATCH_LINES render the phone-line table exactly", () => {
   - **Isolation:** `edgar.ts` imports nothing but `et.ts`.
 - **Produces, `filings.ts`:**
   - **Constants:** `FILINGS_POLL_MS = 300_000`; `FILINGS_STOP_AFTER_MS = 90_000`; `FILINGS_ABORT_MS = 120_000`; `FILINGS_LOOKBACK_DAYS = 7`; `FILINGS_WINDOW_MIN = [420, 1200]`; `FILINGS_SYMBOLS_MAX = 60`.
-  - **Records:** `FilingRecord`, `isFilingRecord`, `baselineFrom(records)` and `diffFilings(base, result, symbols)`, as the old Task 7.
-  - **Decisions:** `allRefused(result)`, `pollDue(now, lastPollAt, sessionToday)` and `inFilingWindow(accepted, sessionToday, now)`, as the old Task 7.
+  - **Records:** `FilingRecord`, `isFilingRecord`, `baselineFrom(records)` and `diffFilings(base, result, symbols)`, as the old Task 7, but `seen` keyed per symbol (`seenKey(symbol, accession)`), so two tickers on one CIK each judge a filing.
+  - **Decisions:** `allRefused(result, symbols)` (the symbols polled: a symbol with no error answered, which the result alone cannot show), `pollDue(now, lastPollAt, sessionToday)` and `inFilingWindow(accepted, sessionToday, now)`, as the old Task 7.
   - **Symbols:** `filingSymbols(rules: Rule[], book: { holdings: Holding[]; levels: Level[] }): { polled: string[]; overCap: string[]; aShares: number }`, holdings first.
 - **Dropped:** `scripts/desk_filings.py`, `alpaca_kit/feeds/edgar.py`, `runFilingsPoll`'s script runner, the `watch:` pin, and `arm-watch` and `rearm-watch` (M2).
 
