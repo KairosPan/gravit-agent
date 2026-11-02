@@ -90,19 +90,20 @@ function standingNotesOf(s) {
   return notes;
 }
 // an order's state past its anchor: its firing running, disabled, expired, its text's or script's pin moved or gone, else when
-// it next falls
+// it next falls — `timed` only then, the one state src/desk.ts orderState says after the order's anchor
 function nextOf(o, running, now) {
-  if (isRecord(running) && str(running.key).startsWith(`${o.id}:`)) return `running since ${deskTime(running.startedAt, now)}`;
-  if (o.enabled !== true) return 'disabled';
-  if (o.expired === true) return `expired after ${str(o.expires)}`;
+  const state = next => ({ next, timed: false });
+  if (isRecord(running) && str(running.key).startsWith(`${o.id}:`)) return state(`running since ${deskTime(running.startedAt, now)}`);
+  if (o.enabled !== true) return state('disabled');
+  if (o.expired === true) return state(`expired after ${str(o.expires)}`);
   const rearm = `changed since arming (npm run desk -- rearm ${o.id})`;
   const text = `${str(o.dir)}/${str(o.file)}`;
-  if (o.hash === 'changed') return `${text} ${rearm}`;
-  if (o.hash === 'missing') return `${text} is missing`;
+  if (o.hash === 'changed') return state(`${text} ${rearm}`);
+  if (o.hash === 'missing') return state(`${text} is missing`);
   const script = str(o.producer) || 'its producer';
-  if (o.producerHash === 'changed') return `${script} ${rearm}`;
-  if (o.producerHash === 'missing') return `${script} is missing`;
-  return o.nextAnchor === undefined ? "no session in the calendar's window" : `next ${deskTime(o.nextAnchor, now)}`;
+  if (o.producerHash === 'changed') return state(`${script} ${rearm}`);
+  if (o.producerHash === 'missing') return state(`${script} is missing`);
+  return { next: o.nextAnchor === undefined ? "no session in the calendar's window" : `next ${deskTime(o.nextAnchor, now)}`, timed: true };
 }
 
 // ---- the watch (src/desk.ts watchLines)
@@ -201,10 +202,12 @@ function alertOf(a, now) {
 }
 function gapWord(ms) {
   const n = count(ms);
-  if (n < 60_000) return `${Math.round(n / 1000)} s`;
-  const h = Math.floor(n / 3_600_000);
-  const m = Math.round((n % 3_600_000) / 60_000);
-  return h ? `${h} h ${m} min` : `${m} min`;
+  const seconds = Math.round(n / 1000);
+  if (seconds < 60) return `${seconds} s`;
+  // the total minutes rounded first, then split: never 60 min, never 1 h 60 min
+  const minutes = Math.round(n / 60_000);
+  const h = Math.floor(minutes / 60);
+  return h ? `${h} h ${minutes % 60} min` : `${minutes} min`;
 }
 
 /** The Desk tab's view of a DeskStatus read at `nowIso` (ruling 15), or null for anything that is not one. Each line is the
@@ -212,7 +215,7 @@ function gapWord(ms) {
  *  without), `watch` the watch's head (null while it does not run); `markets` each market's line (null while it is off) and
  *  its own session date's counts (`today`, null with none) — a market with neither is left out; `pending`, `muted` and
  *  `ledger` the alert lines (null when they do not hold), `filings` the filings' line; `alerts` the watch's recent ones,
- *  newest first; `levels` the watch's marks; `standing` the orders of the last good load and `standingNotes` what holds the
+ *  newest first; `levels` the watch's marks; `standing` the orders of the last good load (`timed` when its state is when it next falls, which its anchor leads) and `standingNotes` what holds the
  *  whole book; `firings` the recent firings; `runs` the last ten, newest first; `asleep` this run's gaps; `files` the watch's
  *  files with a refusal or an error; `ledgerError` the desk ledger's, as the budget names it. */
 export function deskViewOf(status, nowIso) {
@@ -241,7 +244,7 @@ export function deskViewOf(status, nowIso) {
     alerts: w ? records(w.recent).map(a => alertOf(a, now)) : [],
     levels: w ? records(w.marks).map(m => ({ market: MARKET_NAMES[m.market] ?? str(m.market), symbol: str(m.symbol), label: labelOf(m), plan: str(m.plan), file: str(m.file) })) : [],
     standing: standing ? records(standing.orders).map(o => ({
-      id: str(o.id), anchor: str(o.at), next: nextOf(o, standing.running, now), hash: str(o.hash),
+      id: str(o.id), anchor: str(o.at), ...nextOf(o, standing.running, now), hash: str(o.hash),
       last: isRecord(o.last) ? `last ${str(o.last.outcome)} ${deskTime(o.last.t, now)}` : '',
     })) : [],
     standingNotes: standing ? standingNotesOf(standing) : [],

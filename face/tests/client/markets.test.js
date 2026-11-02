@@ -978,3 +978,21 @@ test('a marked row draws its mark after its name; a page draws the plan and file
   assert.match(renderMarketsScreen(withDesk(cn.s), NOW), /<p class="mk-plan"><span class="mk-level">buy_zone 1600-1650<\/span> add 100 shares in the zone · desk\/levels\.yml<\/p>/);
   assert.doesNotMatch(renderMarketsScreen(nvda.s, NOW), /mk-plan/);
 });
+
+test('a level, an alert and a file the operator wrote are text, never markup: on the row, the page and the Desk tab', async () => {
+  const { deskStatus, DESK_NOW } = await import('./helpers/desk-status.js');
+  const EVIL = '<img src=x onerror=alert(1)>';
+  const st = deskStatus();
+  st.watch.marks[0] = { ...st.watch.marks[0], kind: EVIL, level: EVIL, plan: EVIL, file: EVIL };
+  st.watch.recent[0] = { ...st.watch.recent[0], symbol: EVIL, label: EVIL, feed: EVIL, suppressed: EVIL, outcome: 'suppressed' };
+  st.watch.files[0] = { ...st.watch.files[0], file: EVIL, refusals: [{ file: EVIL, index: 0, symbol: EVIL, reason: EVIL }] };
+  st.standing.orders[0] = { ...st.standing.orders[0], id: EVIL, at: EVIL };
+  const withDesk = x => R.deskLoaded(x, { data: st, at: DESK_NOW });
+  const table = renderMarketsScreen(withDesk(screen().s), NOW);
+  const page = renderMarketsScreen(withDesk(screen({ route: { screen: 'markets', id: 'stock:NVDA' }, account: true }).s), NOW);
+  const desk = renderMarketsScreen(withDesk(screen({ tab: 'desk' }).s), DESK_NOW);
+  for (const [name, html] of [['row', rowOf(table, 'stock:NVDA')], ['page', page], ['desk', desk]]) {
+    assert.doesNotMatch(html, /<img/, `${name}: no markup`);
+    assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/, `${name}: the text, escaped`);
+  }
+});

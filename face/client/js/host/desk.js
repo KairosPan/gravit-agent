@@ -1,6 +1,6 @@
 // face/client/js/host/desk.js — the Desk tab's impure half (plan 2026-11-01-desk-p3-watch Task 11): /data/desk/status into the
-// store's desk slice, at once and every DESK_POLL_MS while Markets is on screen in a visible tab — any tab of it, or a market's
-// page, as startMarkets's own show — so the level marks on the rows stay fresh; one read in flight at a time. And the page's
+// store's desk slice, at once (unless read within the poll already) and every DESK_POLL_MS while Markets is on screen in a
+// visible tab — any tab of it, or a market's page, as startMarkets's own show — so the level marks on the rows stay fresh; one read in flight at a time. And the page's
 // one write, Pause: POST /data/desk/pause with no `until` (paused until a terminal resumes), its answer landed at once, then
 // the status read again. There is no resume: the page, like the phone, only pauses (spec §5.7). Nothing here touches the DOM.
 import { DESK_POLL_MS } from './desk-view.js';
@@ -17,10 +17,12 @@ export function startDesk({ store, getJson, postJson, schedule, cancelTimer, now
   let timer = null;
   let flight = null;
   let pausing = null;
+  let readAt = null;   // when the last read was asked: a Markets shown again within the poll reads at the poll's turn, not at once
 
   function read() {
     if (closed) return Promise.resolve();
     if (flight) return flight;
+    readAt = now();
     store.dispatch('deskLoading');
     const current = attempt(() => getJson(STATUS))
       .then(data => {
@@ -32,8 +34,8 @@ export function startDesk({ store, getJson, postJson, schedule, cancelTimer, now
     flight = current;
     return current;
   }
-  function arm() {
-    timer = schedule(() => { timer = null; if (closed || !shown) return; arm(); void read(); }, DESK_POLL_MS);
+  function arm(ms = DESK_POLL_MS) {
+    timer = schedule(() => { timer = null; if (closed || !shown) return; arm(); void read(); }, ms);
   }
   function stop() {
     if (timer !== null) { cancelTimer(timer); timer = null; }
@@ -47,6 +49,10 @@ export function startDesk({ store, getJson, postJson, schedule, cancelTimer, now
       if (next === shown) return;
       shown = next;
       if (!shown) { stop(); return; }
+      // hidden and shown again within the poll (a tab hidden a moment, Markets left and re-entered): the read waits for the
+      // poll's turn, so the status is read at once on entering and every DESK_POLL_MS after, never twice in one
+      const since = readAt === null ? Infinity : now() - readAt;
+      if (since < DESK_POLL_MS) { arm(DESK_POLL_MS - since); return; }
       arm();
       void read();
     },

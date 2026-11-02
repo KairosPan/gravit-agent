@@ -36,9 +36,11 @@ function rig({ status = deskStatus(), pause = { ok: true, off: { setAt: '2026-11
   const schedule = (fn, ms) => { timers.set(++id, { fn, ms }); return id; };
   const cancelTimer = t => { timers.delete(t); };
   const fire = () => { const due = [...timers.entries()]; timers.clear(); for (const [, t] of due) t.fn(); };
-  let t = 1000;
-  const desk = startDesk({ store, getJson, postJson, schedule, cancelTimer, now: () => ++t });
-  return { store, desk, reads, posts, answers, timers, fire, s: () => store.get().desk };
+  const clock = { t: 1000 };
+  const desk = startDesk({ store, getJson, postJson, schedule, cancelTimer, now: () => clock.t });
+  // fire() also moves the clock on by the poll, as the timer it runs would have
+  const tickPoll = () => { clock.t += DESK_POLL_MS; fire(); };
+  return { store, desk, reads, posts, answers, timers, fire: tickPoll, clock, s: () => store.get().desk };
 }
 
 test('the desk slice starts idle with nothing read', () => {
@@ -57,7 +59,7 @@ test('the desk status is read at once and every 10 s while Markets shows, and st
   await settle();
   assert.equal(r.s().status, 'ready');
   assert.equal(r.s().data.watch.state, 'watching');
-  assert.equal(r.s().at, 1001);
+  assert.equal(r.s().at, 1000);
   assert.deepEqual([...r.timers.values()].map(x => x.ms), [DESK_POLL_MS]);
   r.desk.show(true);
   assert.equal(r.reads.length, 1, 'shown again while shown reads nothing more');
@@ -70,15 +72,24 @@ test('the desk status is read at once and every 10 s while Markets shows, and st
   assert.equal(r.reads.length, 3);
   r.desk.show(false);
   assert.equal(r.timers.size, 0, 'leaving Markets cancels the poll');
-  r.fire(); await settle();
-  assert.equal(r.reads.length, 3);
-  // back: at once again
+  // back within the poll (a tab hidden a moment): no second read now, only at the poll's turn — what remains of it
+  r.clock.t += 4_200;
   r.desk.show(true);
-  assert.equal(r.reads.length, 4);
+  assert.equal(r.reads.length, 3, 'shown again 4.2 s after a read: not read twice');
+  assert.deepEqual([...r.timers.values()].map(x => x.ms), [DESK_POLL_MS - 4_200]);
+  r.fire(); await settle();
+  assert.equal(r.reads.length, 4, 'read at the poll\'s turn');
+  assert.deepEqual([...r.timers.values()].map(x => x.ms), [DESK_POLL_MS], 'then every 10 s');
+  // back after a while away: at once again
+  r.desk.show(false);
+  r.clock.t += 60_000;
+  r.desk.show(true);
+  assert.equal(r.reads.length, 5);
   r.desk.dispose();
   assert.equal(r.timers.size, 0);
+  r.clock.t += 60_000;
   r.desk.show(true);
-  assert.equal(r.reads.length, 4, 'nothing after dispose');
+  assert.equal(r.reads.length, 5, 'nothing after dispose');
 });
 
 test('one read in flight at a time: a tick while one is out asks nothing', async () => {
@@ -122,4 +133,24 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
   await r.desk.pause(); await settle();
   assert.equal(r.s().message, 'Pause failed: request failed');
   assert.equal(r.reads.length, n);
+});
+
+test('a persistent failure stays said through the polls on their way: the message is kept while loading, cleared by an answer', async () => {
+  const { renderDeskTab } = await import('../../client/js/render/desk.js');
+  const { deskViewOf } = await import('../../client/js/host/desk-view.js');
+  let release;
+  const r = rig();
+  r.desk.show(true); await settle();
+  r.answers.status = new Error('/data/desk/status: HTTP 503');
+  r.fire(); await settle();
+  r.answers.status = () => new Promise(res => { release = res; });
+  r.fire();
+  assert.equal(r.s().status, 'loading');
+  assert.equal(r.s().message, '/data/desk/status: HTTP 503', 'the read on its way keeps the sentence');
+  const html = renderDeskTab(deskViewOf(r.s().data, new Date(r.clock.t).toISOString()), r.s());
+  assert.match(html, /<p class="mk-note">\/data\/desk\/status: HTTP 503<\/p>/, 'and the tab still says it');
+  release(deskStatus()); await settle();
+  assert.equal(r.s().message, null);
+  // with no view kept: unavailable, said through a poll on its way too
+  assert.match(renderDeskTab(null, { status: 'loading', message: 'HTTP 503' }), /HTTP 503[\s\S]*Desk status unavailable/);
 });

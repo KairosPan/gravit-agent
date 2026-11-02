@@ -40,7 +40,7 @@ test('deskViewOf renders the head, both markets with their own today, the alerts
     { market: 'US', symbol: 'NVDA', label: 'stop 170 · -1.30%', plan: 'sell half on a close below 170', file: 'desk/levels.yml' },
     { market: 'A shares', symbol: '600519', label: 'buy_zone 1600-1650', plan: 'add 100 shares in the zone', file: 'desk/levels.yml' },
   ]);
-  assert.deepEqual(v.standing, [{ id: 'brief', anchor: '09:20', next: 'next 2026-11-03 09:20 ET', hash: 'ok', last: 'last finished 09:31 ET' }]);
+  assert.deepEqual(v.standing, [{ id: 'brief', anchor: '09:20', next: 'next 2026-11-03 09:20 ET', timed: true, hash: 'ok', last: 'last finished 09:31 ET' }]);
   assert.deepEqual(v.standingNotes, []);
   assert.deepEqual(v.firings, [{ order: 'brief', when: '09:31', kind: 'finished', outcome: 'finished' }]);
   // newest first
@@ -101,4 +101,13 @@ test('markOf matches stock:NVDA and cn:600519 to their marks and nothing else', 
   const s = deskStatus();
   s.watch.marks.unshift({ market: 'us', symbol: 'NVDA', kind: 'target', level: '180', when: 'cross_up', plan: 'trim', file: 'desk/levels.yml', distancePct: 0.85 });
   assert.equal(markOf(s, 'stock:NVDA').label, 'target 180 · +0.85%');
+});
+
+test('a sleep gap rounds its total minutes before it splits them; an order not timed says so', () => {
+  const s = deskStatus();
+  const gap = gapMs => ({ from: '2026-11-02T13:00:00.000Z', to: '2026-11-02T14:00:00.000Z', gapMs });
+  s.asleep = [gap(59 * 60_000 + 40_000), gap(3_600_000 + 59 * 60_000 + 40_000), gap(59_600), gap(42_000), gap(3_600_000 + 5 * 60_000)];
+  assert.deepEqual(deskViewOf(s, NOW_ISO).asleep.map(g => g.gap), ['1 h 0 min', '2 h 0 min', '1 min', '42 s', '1 h 5 min']);
+  s.standing.orders = [{ ...s.standing.orders[0], enabled: false }, { ...s.standing.orders[0], id: 'late', nextAnchor: undefined }];
+  assert.deepEqual(deskViewOf(s, NOW_ISO).standing.map(o => [o.next, o.timed]), [['disabled', false], ["no session in the calendar's window", true]]);
 });

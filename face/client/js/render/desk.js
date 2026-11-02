@@ -13,10 +13,12 @@ const feed = lines => (lines.length ? `<div class="mk-feed">${lines.join('')}</d
 const tag = text => `<span class="mk-tag">${esc(text)}</span>`;
 
 /** The Desk tab: `view` deskViewOf's (null before a status has landed), `read` the slice's `{ status, message }` — the last
- *  failure's sentence said over the view kept, or, with none kept, Desk status unavailable under it. */
+ *  failure's sentence (kept while the next read is on its way, cleared when one answers) said over the view kept, or, with
+ *  none kept, Desk status unavailable under it. */
 export function renderDeskTab(view, read = {}) {
-  const said = read.status === 'error' ? note(read.message) : '';
-  if (!view) return `<div class="desk">${said}${empty(read.status === 'error' ? 'Desk status unavailable' : 'Loading…')}</div>`;
+  // the last failure's sentence stays said until a read answers, through the polls on their way after it
+  const said = note(read.message);
+  if (!view) return `<div class="desk">${said}${empty(read.message ? 'Desk status unavailable' : 'Loading…')}</div>`;
   const pause = '<button type="button" class="btn" data-action="deskPause">Pause</button>';
   const status = feed([view.head, view.off, view.telegram, view.budget, view.ledgerError].filter(Boolean).map(w => line('·', esc(w))));
   const head = `<div class="desk-head">${status}${pause}</div>`;
@@ -32,7 +34,7 @@ export function renderDeskTab(view, read = {}) {
     : empty('No levels loaded.');
   // an order's anchor leads its state only when the state is when it next falls, as src/desk.ts orderState says it
   const standing = feed([...view.standingNotes.map(n => line('·', esc(n))),
-    ...view.standing.map(o => ({ ...o, timed: o.next.startsWith('next ') || o.next.startsWith('no session') })).map(o => line('·', esc(`standing ${o.id}: ${o.timed ? `${o.anchor}, ` : ''}${o.next}`), esc([o.hash === 'ok' ? '' : o.hash, o.last].filter(Boolean).join(' · '))))]);
+    ...view.standing.map(o => line('·', esc(`standing ${o.id}: ${o.timed ? `${o.anchor}, ` : ''}${o.next}`), esc([o.hash === 'ok' ? '' : o.hash, o.last].filter(Boolean).join(' · '))))]);
   const firings = view.firings.length ? feed(view.firings.map(f => line('·', esc(`${f.when} · ${f.order}`), esc(f.kind === f.outcome ? f.kind : `${f.kind} · ${f.outcome}`)))) : empty('No firings yet.');
   const runs = feed([...view.runs.map(r => line('·', `${esc(`${r.bootedAt} · pid ${r.pid}`)}${r.lost ? ` ${tag('lost')}` : ''}`)),
     ...view.asleep.map(g => line('·', esc(`asleep ${g.from}–${g.to}`), esc(g.gap)))]);
