@@ -19,9 +19,14 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** The variables the shipped loop registers ("The loop supplies `model` and
- * `cwd`": NEW packages/core/system-prompt/README.md:70; unchanged at 0.2.0-rc.2). */
-export const PERSONA_VARIABLES: readonly string[] = ["model", "cwd"];
+/** The variables the shipped loop registers: `provider` and `model`
+ * (@deepseek-ai/dsh-agent-loop lib/index.js:1591-1592, `systemPrompt.variable(`
+ * at 0.2.1-rc.5). `cwd` left with 0.2.1 (D21, spec 2026-11-02 B3): the
+ * session's directory reaches the model through the `working-directory`
+ * runtime context instead (`Current working directory: "<dir>".`, order 100,
+ * @deepseek-ai/dsh-working-directory lib/index.js:41-47), and a persona that
+ * still named `{{cwd}}` would fail every request. */
+export const PERSONA_VARIABLES: readonly string[] = ["provider", "model"];
 
 /** Resolved from this module, never from the working directory. */
 export const PERSONA_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "dsh", "profile", "persona.md");
@@ -41,12 +46,12 @@ export function validatePersonaTemplate(text: string): string | undefined {
       return `unknown persona variable {{${variable}}} (known: ${PERSONA_VARIABLES.join(", ")})`;
     }
   }
-  /* Stricter than dsh on purpose: once every complete `{{model}}`/`{{cwd}}`
+  /* Stricter than dsh on purpose: once every complete `{{model}}`/`{{provider}}`
    * group is removed, no brace may remain. dsh tolerates a lone `{`, but
    * `{{{model}}}` and `{{ model }}` both throw there (a `{{` with no later
    * `}}` it copies through as literal text instead), and persona prose has no
    * use for a stray brace - refusing them all is the cheaper rule to explain. */
-  if (/[{}]/.test(text.replace(GROUP, ""))) return "unbalanced {{ }} in persona (a brace outside a {{model}}/{{cwd}} group)";
+  if (/[{}]/.test(text.replace(GROUP, ""))) return "unbalanced {{ }} in persona (a brace outside a {{model}}/{{provider}} group)";
   return undefined;
 }
 

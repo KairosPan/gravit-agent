@@ -1,5 +1,5 @@
 /** The face's policy layer (src/policy.ts, PLAN S4): the 0.1.1 tool roster,
- * egress and telemetry posture, restored over dsh-base 0.2.0-rc.2 and
+ * egress and telemetry posture, restored over dsh-base 0.2.1-rc.5 and
  * overridable by the operator. Composition-level, against the INSTALLED
  * dsh-base: every assertion here is about the entry list boot will mount. */
 import test from "node:test";
@@ -36,9 +36,9 @@ function composedRows(home: string) {
  * include's warn sink reaches nothing in a booted face), and a guard that skips
  * it would be silent too: a row renamed upstream would carry its new default
  * straight past this layer. So every target is pinned against the installed
- * dsh-base, and the one insert is pinned ABSENT from it - were base to ship
+ * dsh-base, and each insert is pinned ABSENT from it - were base to ship
  * the row again, the insert would be skipped and this must say so. */
-test("every policy target is a row dsh-base composes, and the insert is one it does not", () => {
+test("every policy target is a row dsh-base composes, and every insert is one it does not", () => {
   const base = bundleRowsOf(freshHome());
   for (const { decision, patch } of POLICY_ID_PATCHES) {
     assert.ok(base.has(patch.id), `${decision}: dsh-base composes no "${patch.id}" row`);
@@ -68,14 +68,20 @@ test("the composed tree keeps the 0.1.1 roster, egress and telemetry posture", (
     "plugin-package-inventory-deepseek", "session-telemetry-otel"]) {
     assert.equal(one(id).disabled, true, `${id} must be disabled`);
   }
-  // D9: ralph back on WITH its base config (a disabled-only patch keeps the config) ...
+  // D9: ralph inserted - dsh-base dropped the row, the package is standalone - WITH the config
+  // dsh-base used to carry (the standalone default is 256 rounds) ...
   const ralph = one("tool-ralph");
-  assert.equal(ralph.disabled, false);
+  assert.equal(ralph.name, "@deepseek-ai/dsh-tool-ralph");
+  assert.notEqual(ralph.disabled, true);
   assert.deepEqual(ralph.config, { subagentProvider: "spawn", maxRounds: 64 });
   // ... and str_replace_editor inserted once, configless (16000 is the schema default now).
   const editor = one("tool-str-replace-editor");
   assert.equal(editor.name, "@deepseek-ai/dsh-tool-str-replace-editor");
   assert.equal(editor.config, undefined);
+  // D19: dsh-base's `working_directory` tool is off - a channel is a directory, no agent moves
+  // its own cwd - while the service and the runtime context that tells the model its directory stay.
+  assert.equal(one("tool-working-directory").disabled, true, "D19: no agent moves its own cwd");
+  assert.notEqual(one("working-directory").disabled, true, "the service and its context stay (B3)");
 });
 
 /* Group 3 - operator override wins. The layer sits BELOW the profile's patch
@@ -88,11 +94,15 @@ test("an operator row overrides a policy default", () => {
     "  config: { fetch: true, searchTimeoutMs: 60000 }",
     "- id: session-log-deepseek",
     "  disabled: false",
+    "- id: tool-ralph",
+    "  disabled: true",
     "",
   ].join("\n"));
   const rows = composedRows(home);
   assert.deepEqual(rows.find((row) => row.id === "tool-web")?.config, { fetch: true, searchTimeoutMs: 60000 });
   assert.equal(rows.find((row) => row.id === "session-log-deepseek")?.disabled, false);
+  // D9's row is an INSERT now, and an operator row still reaches it (B4: one row turns ralph off).
+  assert.equal(rows.find((row) => row.id === "tool-ralph")?.disabled, true);
   // An override is per row: the neighbouring defaults are untouched.
   assert.equal(rows.find((row) => row.id === "web-fetch-http")?.disabled, true);
 });
@@ -121,14 +131,24 @@ test("DSH_TELEMETRY_DISABLED still wins over an operator re-enable", () => {
 test("facePolicyPatches guards on the bundle rows, reports misses, and hands out copies", () => {
   const missing: string[] = [];
   const bare = facePolicyPatches(new Set(), (line) => missing.push(line));
-  assert.deepEqual(bare, [{ insert: [{ id: "tool-str-replace-editor", name: "@deepseek-ai/dsh-tool-str-replace-editor" }] }]);
+  assert.deepEqual(bare, [{
+    insert: [
+      { id: "tool-str-replace-editor", name: "@deepseek-ai/dsh-tool-str-replace-editor" },
+      { id: "tool-ralph", name: "@deepseek-ai/dsh-tool-ralph", config: { subagentProvider: "spawn", maxRounds: 64 } },
+    ],
+  }]);
   assert.equal(missing.length, POLICY_ID_PATCHES.length, "every absent target is reported");
   assert.match(missing[0]!, /session-telemetry-otel/);
 
-  const all = new Set([...POLICY_ID_PATCHES.map(({ patch }) => patch.id), "tool-str-replace-editor"]);
+  const all = new Set([...POLICY_ID_PATCHES.map(({ patch }) => patch.id), ...POLICY_INSERTS.map(({ row }) => row.id)]);
   const full = facePolicyPatches(all, () => assert.fail("nothing is missing"));
   assert.equal(full.length, POLICY_ID_PATCHES.length, "no insert when base already mounts the row");
   const toolWeb = full.find((p) => p.id === "tool-web")!;
   toolWeb.config.fetch = true;
   assert.deepEqual(POLICY_ID_PATCHES.find(({ patch }) => patch.id === "tool-web")!.patch.config, { fetch: false, searchTimeoutMs: 60000 });
+  // An insert's config is a copy too: the nested object a shallow spread of the row would share.
+  // (A fresh call: `assert.deepEqual(bare, ...)` above narrows `bare` to the literal it was given.)
+  const ralph = facePolicyPatches(new Set()).flatMap((patch) => patch.insert ?? []).find((row) => row.id === "tool-ralph")!;
+  ralph.config.maxRounds = 1;
+  assert.deepEqual(POLICY_INSERTS.find(({ row }) => row.id === "tool-ralph")!.row.config, { subagentProvider: "spawn", maxRounds: 64 });
 });

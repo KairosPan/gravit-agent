@@ -41,7 +41,7 @@ import { isTrustedDataRequest } from "../src/http.ts";
 import { hasApprovalGrant, type ApprovalEventLike } from "../src/orders.ts";
 import { LUNHUI_ROW_IDS, LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
 import { panelDeps, pluginListing } from "../src/panels.ts";
-import { remote, signIn } from "./remote.ts";
+import { boundPort, remote, signIn } from "./remote.ts";
 
 const gated = process.env.FACE_SMOKE !== "1";
 
@@ -213,7 +213,7 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
   try {
     const clientDir = join(dirname(fileURLToPath(import.meta.url)), "..", "client");
     registerStatic(ctx.webServer, clientDir, ctx.get("connection") as IndexAuth);
-    const port = ctx.webServer.port;
+    const port = boundPort(ctx);
     const base = `http://127.0.0.1:${port}`;
 
     /* Gravit's VOICE, drilled. `bootFace` already refuses a tree missing the

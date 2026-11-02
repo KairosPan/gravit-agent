@@ -1,9 +1,12 @@
 /** The face's dsh boot: a mirror of the dsh CLI's profile launcher.
  *
- * Source of the mirror, pinned: `@deepseek-ai/dsh` 0.2.0-rc.2, chunk
- * `lib/profile-boot-BZ2ZjNWi.js` — `prepareProfile`, `composeProfile` and
- * `runProfile` (NEW apps/cli/src/profile-boot.ts:167-173, 197-209, 244-326;
- * the chunk is byte-for-byte that logic). The CLI now also publishes them as
+ * Source of the mirror, pinned: `@deepseek-ai/dsh` 0.2.1-rc.5, chunk
+ * `lib/profile-boot-C14i-8IN.js` — `prepareProfile`, `composeProfile` and
+ * `runProfile` (NEW apps/cli/src/profile-boot.ts:167-173, 197-209, 244-326,
+ * the 0.2.0-rc.2 source; the chunk is byte-for-byte that logic). Re-diffed at
+ * 0.2.1-rc.5 (the chunk was `profile-boot-BZ2ZjNWi.js` at 0.2.0-rc.2):
+ * `runProfile`, `composeProfile` and `createAppReady` are unchanged and the
+ * ten divergences below stand. The CLI now also publishes them as
  * `@deepseek-ai/dsh/profile-boot`, a reading aid and NOT a dependency: taking
  * `runProfile` would bring `profileContext`, its own signal and fail-loud
  * handlers, an `appReady` committed before Gate 2 exists, and the whole CLI
