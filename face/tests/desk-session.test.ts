@@ -16,8 +16,8 @@ import { appendEvent, readEvents } from "../src/desk.ts";
 import { AGENT_FILE_NAMES } from "../src/desk-names.ts";
 import { DESK_PRESET } from "../src/desk-preset.ts";
 import {
-  DESK_DEFAULT_ROUTE, FENCE_NAMES, cancelKeepingQueue, createDeskAgent, deskJournalDir, ensureDeskSession, fenceRefusalLine, findChainViolation,
-  findDeskFenceViolation, findFenceViolation, provenanceLine, resolveDeskRoute, superviseDeskTurns,
+  DESK_DEFAULT_ROUTE, FENCE_NAMES, cancelKeepingQueue, createDeskAgent, cutPhoneTurn, cutPhoneTurnLine, deskJournalDir, ensureDeskSession, fenceRefusalLine,
+  findChainViolation, findDeskFenceViolation, findFenceViolation, provenanceLine, requeuePending, resolveDeskRoute, superviseDeskTurns,
   type CreateDeskAgentOptions, type DeskClock, type DeskSessionCtxLike, type DeskSessionDeps, type DeskTurnRecord,
   type SessionEventsOn, type SuperviseDeskTurnsDeps,
 } from "../src/desk-session.ts";
@@ -607,6 +607,8 @@ test("ensureDeskSession: live, cold, missing and fresh paths; records only creat
   tree.live.delete(first.sessionId);
   const cold = await ensureDeskSession(deps);
   assert.deepEqual({ sessionId: cold.sessionId, created: cold.created }, { sessionId: first.sessionId, created: false });
+  assert.equal(cold.resumed, true, "a cold session is marked resumed: what a restart left in it is the owner's to wake");
+  assert.equal(live.resumed, undefined, "a live one is not");
   assert.deepEqual(tree.resumed.map((r) => ({ resumeSessionId: r.resumeSessionId, agentOptions: r.agentOptions })), [
     { resumeSessionId: first.sessionId, agentOptions: ROUTE },
   ]);
@@ -1327,6 +1329,115 @@ test("cancelKeepingQueue with nothing queued, or an agent with no inbox, only ca
   /* A cancel that throws is the caller's: nothing is sent again. */
   const throwing = { id: SID, status: "running", followup: () => assert.fail("nothing sent"), cancel: () => { throw new Error("the loop is gone"); } } as unknown as AgentLike;
   assert.throws(() => cancelKeepingQueue(throwing, STOPPED, () => {}), /the loop is gone/);
+});
+
+/* ---------- what a restart left in the session (spec §16 H3) ---------- */
+
+test("requeuePending takes out and follows up again the telegram and alert messages left on the inbox, in order", () => {
+  const first = queued("first");
+  const browser = createUserMessage({ content: say("from the browser"), source: { kind: "user" } }) as unknown as MessageLike;
+  const flagged = alert() as unknown as MessageLike;
+  const batch = createUserMessage({ content: say("[alerts · 2 · 09:30 ET]\ntwo"), source: { kind: "alerts", count: 2 } as never }) as unknown as MessageLike;
+  const last = queued("last");
+  const { agent, model, followups } = inboxAgent();
+  for (const message of [first, browser, flagged, batch, last]) model.pending.push(message); // what the resume rebuilt
+  const lines: string[] = [];
+  assert.equal(requeuePending(agent, (line) => { lines.push(line); }), 4);
+  assert.deepEqual(followups.map((m) => m.id), [first.id, flagged.id, batch.id, last.id], "each sent again, oldest first");
+  assert.deepEqual(model.pending.map((m) => m.id), [browser.id, first.id, flagged.id, batch.id, last.id],
+    "a browser message is left where it was; the rest queued again behind it, in order");
+  assert.deepEqual(lines, []);
+
+  /* A message a turn already took - remove() says false - is skipped: it is answered there, never twice. */
+  const taken = inboxAgent();
+  const claimed = queued("claimed");
+  const waitingOne = queued("waiting");
+  taken.model.pending.push(claimed, waitingOne);
+  const remove = taken.model.inbox.remove.bind(taken.model.inbox);
+  (taken.model.inbox as { remove(id: string): boolean }).remove = (id) => {
+    if (id === claimed.id) {
+      taken.model.claim(); // the driver took it between the listing and the removal
+      return false;
+    }
+    return remove(id);
+  };
+  assert.equal(requeuePending(taken.agent, () => assert.fail("no line")), 1);
+  assert.deepEqual(taken.followups.map((m) => m.id), [waitingOne.id]);
+
+  /* No inbox: nothing to do. A followup that throws is one line, and the rest still go. */
+  assert.equal(requeuePending({ id: SID, status: "idle" } as unknown as AgentLike, () => assert.fail("no line")), 0);
+  const [a, b] = [queued("a"), queued("b")];
+  const failing = inboxAgent({ failFollowup: (message) => message.id === a.id });
+  failing.model.pending.push(a, b);
+  const failLines: string[] = [];
+  assert.equal(requeuePending(failing.agent, (line) => { failLines.push(line); }), 1);
+  assert.deepEqual(failing.followups.map((m) => m.id), [b.id]);
+  assert.equal(failLines.length, 1);
+  assert.match(failLines[0], /^gravit-face: desk: a message queued on desk session session-desk could not be queued again, and is lost: the session is closed$/);
+});
+
+test("cancelKeepingQueue still answers what waited behind the cut turn", () => {
+  const second = queued("second");
+  const { agent, model, cancels, followups } = inboxAgent();
+  model.running = true;
+  agent.followup(second);
+  assert.equal(cancelKeepingQueue(agent, STOPPED, () => assert.fail("no line")), 1);
+  assert.deepEqual(cancels, [[STOPPED, { keepInbox: true }]]);
+  assert.deepEqual(followups.map((m) => m.id), [second.id, second.id], "sent again after the cancel, through requeuePending");
+  assert.equal(model.converge(), true, "so the driver wakes for it");
+});
+
+/** A session log as dsh-session-persistence reads one back: `[type, data, time]` rows, numbered. */
+const logOf = (rows: readonly (readonly [string, unknown, number?])[]): EventLike[] =>
+  rows.map(([type, data, time], seq) => ({ type, seq, data, ...(time === undefined ? {} : { time }) }) as EventLike);
+const T0 = Date.parse("2026-10-20T18:03:00.000Z");
+const logMessage = (id: string, source: Record<string, unknown>) => ({ id, role: "user", content: say("x"), source });
+const PHONE_SOURCE = { kind: "telegram", from: 42, chat: 42, messageId: 7 };
+const ALERT_SOURCE = { kind: "alert", alert: "a-0001", symbol: "NVDA" };
+
+test("cutPhoneTurn finds a telegram turn with a start and no end, and ignores a browser turn", () => {
+  const done = [
+    ["turn/start", { turn: 1 }, T0],
+    ["user/message", logMessage("telegram:1", PHONE_SOURCE), T0],
+    ["turn/end", { turn: 1, reason: { kind: "completed" } }, T0 + 5],
+  ] as const;
+  /* open at the tail, as a log the loop has not resumed yet reads */
+  assert.deepEqual(cutPhoneTurn(logOf([
+    ...done,
+    ["turn/start", { turn: 2 }, T0 + 60_000],
+    ["user/message", logMessage("desk-state", { kind: "desk", form: "state" }), T0 + 60_000],
+    ["user/message", logMessage("telegram:2", PHONE_SOURCE), T0 + 60_001],
+    ["step/start", { turn: 2, step: 1 }, T0 + 60_002],
+  ])), { turn: 2, at: new Date(T0 + 60_001).toISOString() }, "named after its message, not the desk state before it");
+  /* closed by the resume: dsh-agent-loop appends `interrupted` closers to a log whose tail turn was open (measured) */
+  assert.deepEqual(cutPhoneTurn(logOf([
+    ...done,
+    ["turn/start", { turn: 2 }, T0 + 60_000],
+    ["user/message", logMessage("telegram:2", PHONE_SOURCE), T0 + 60_000],
+    ["turn/end", { turn: 2, reason: { kind: "interrupted" } }, T0 + 90_000],
+  ])), { turn: 2, at: new Date(T0 + 60_000).toISOString() });
+  /* a message with no time of its own is the turn's */
+  assert.deepEqual(cutPhoneTurn(logOf([["turn/start", { turn: 4 }, T0], ["user/message", logMessage("telegram:4", PHONE_SOURCE)]])),
+    { turn: 4, at: new Date(T0).toISOString() });
+
+  assert.equal(cutPhoneTurn(logOf(done)), undefined, "a turn that ended is no cut");
+  assert.equal(cutPhoneTurn(logOf([...done, ["turn/start", { turn: 2 }, T0], ["turn/end", { turn: 2, reason: { kind: "aborted", reason: { kind: "hook", reason: "shutdown" } } }, T0]])),
+    undefined, "nor one a shutdown cancelled: its record is already in the ledger");
+  assert.equal(cutPhoneTurn(logOf([...done, ["turn/start", { turn: 2 }, T0], ["user/message", logMessage("m-2", { kind: "user" }), T0]])),
+    undefined, "a browser turn is answered in its own transcript");
+  assert.equal(cutPhoneTurn(logOf([...done, ["turn/start", { turn: 2 }, T0], ["user/message", logMessage("m-2", ALERT_SOURCE), T0]])), undefined, "nor an alert's");
+  assert.equal(cutPhoneTurn(logOf([...done, ["turn/start", { turn: 2 }, T0]])), undefined, "nor one that claimed no message");
+  /* only the tail: an earlier turn cut and then followed by others was the face's to answer then */
+  assert.equal(cutPhoneTurn(logOf([
+    ["turn/start", { turn: 1 }, T0], ["user/message", logMessage("telegram:1", PHONE_SOURCE), T0],
+    ["turn/end", { turn: 1, reason: { kind: "interrupted" } }, T0],
+    ...done.map(([type, data, time]) => [type, { ...(data as object), turn: 2 }, time] as const).filter(([type]) => type !== "user/message"),
+  ])), undefined);
+  assert.equal(cutPhoneTurn([]), undefined);
+
+  assert.equal(cutPhoneTurnLine(new Date(T0), new Date(T0 + 120_000)), "a restart cut your message of 14:03 ET before it was answered; send it again");
+  assert.equal(cutPhoneTurnLine(new Date(T0), new Date(T0 + 86_400_000)),
+    "a restart cut your message of 2026-10-20 14:03 ET before it was answered; send it again", "dated when the restart came another day");
 });
 
 test("the deadline's cut keeps the operator's later messages and wakes the agent for them; the fence's leaves them parked", async () => {

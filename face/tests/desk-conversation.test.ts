@@ -130,6 +130,9 @@ class FakeDeskTree {
   readonly persisted: string[] = [];
   /** When set, `flush` waits for it. */
   flushGate: Promise<void> | undefined;
+  /** What a resume finds waiting on a session's next-turn list, as dsh rebuilds it from the inbox's durable splices: a
+   * resumed agent with an inbox starts with these pending. */
+  readonly rebuilt = new Map<string, MessageLike[]>();
 
   readonly install = (_agentCtx: AgentCtxLike, _ref: ModelSelectionRefLike): (() => void) => () => {};
 
@@ -159,6 +162,7 @@ class FakeDeskTree {
         this.resumed.push(options);
         if (!this.stored.has(options.resumeSessionId)) throw new Error(`session "${options.resumeSessionId}" not found`);
         const agent = await this.make(options.resumeSessionId, options.setup);
+        agent.model?.pending.push(...(this.rebuilt.get(options.resumeSessionId) ?? []));
         return { agent, dispose: async () => { this.live.delete(options.resumeSessionId); } };
       },
     },
@@ -873,6 +877,159 @@ test("a desk session resumed as a new agent is supervised once: the old supervis
   await waitFor("the record", async () => (await turnsOf(h)).length === 1);
   await new Promise((done) => setTimeout(done, 20));
   assert.equal((await turnsOf(h)).length, 1, "one record per turn, not one per supervision");
+});
+
+/* ---------- what a restart left (spec §16 H3) ---------- */
+
+/** The face restarted on `h`'s home and tree: the old conversation (`h.desk`, or `previous`) disposed, its desk session cold, and a new
+ * conversation over the same tree, bus and clock - its lines in `h.lines`, its outlet recording. */
+async function restarted(h: Harness, sessionId: string, previous: DeskConversation = h.desk): Promise<{ desk: DeskConversation; outlet: ReturnType<typeof recordingOutlet> }> {
+  await previous.dispose();
+  h.tree.live.delete(sessionId);
+  const log = (line: string): void => { h.lines.push(line); };
+  const desk = createDeskConversation({
+    session: { ctx: h.tree.ctx, root: h.root, home: h.home, route: ROUTE, installModelSelection: h.tree.install, now: () => h.time.clock.now(), log },
+    on: h.bus.on,
+    clock: h.time.clock,
+    log,
+  });
+  const outlet = recordingOutlet();
+  desk.setOutlet(outlet);
+  return { desk, outlet };
+}
+/** A message as the inbox holds one: `id`, from `source`. */
+const pending = (id: string, source: Record<string, unknown>): MessageLike =>
+  ({ id, role: "user", content: say(`[${String(source.kind)}]\n${id}`), source }) as unknown as MessageLike;
+/** A session log row: `type`, its `data`, and its `time` in ms. */
+const row = (seq: number, type: string, data: unknown, time = AT): EventLike => ({ type, seq, data, time }) as EventLike;
+/** A log whose tail is phone turn `n`, cut: started, its message claimed, and closed `interrupted` by the resume. */
+const cutLog = (n: number, at: number): EventLike[] => [
+  row(0, "turn/start", { turn: n }, at),
+  row(1, "user/message", { id: `telegram:${n}`, role: "user", content: say("x"), source: PHONE }, at),
+  row(2, "turn/end", { turn: n, reason: { kind: "interrupted" } }, at + 1_000),
+];
+const RESTART_LINE = "a restart cut your message of 13:55 ET before it was answered; send it again";
+
+test("start, after a resume, requeues what the restart left pending", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  assert.equal(h.tree.agent(sessionId).followups.length, 0, "a created session has nothing left to wake");
+  assert.equal(h.tree.persisted.length, 0, "and its log is not read");
+
+  const phoneText = pending("telegram:9", PHONE);
+  const browser = pending("m-browser", BROWSER);
+  const flagged = pending("m-alert", ALERT);
+  h.tree.rebuilt.set(sessionId, [phoneText, browser, flagged]);
+  const { desk, outlet } = await restarted(h, sessionId);
+  await desk.start();
+  const agent = h.tree.agent(sessionId);
+  assert.equal(h.tree.resumed.length, 1);
+  assert.deepEqual(agent.followups.map((m) => m.id), ["telegram:9", "m-alert"], "the phone's text and the alert, sent again in order: the agent wakes for them");
+  assert.deepEqual(agent.model!.pending.map((m) => m.id), ["m-browser", "telegram:9", "m-alert"], "the browser's message is left as it was");
+  assert.deepEqual(h.tree.persisted, ["flush", `open ${sessionId} read`, "read 0", "close"], "the resumed session's log read, flushed first");
+  assert.deepEqual(await turnsOf(h), [], "a log with no cut turn records nothing");
+  assert.deepEqual(outlet.sent, []);
+
+  /* a second start finds the session live: nothing resumed, nothing woken again */
+  await desk.start();
+  assert.equal(agent.followups.length, 2);
+  assert.equal(h.tree.persisted.filter((p) => p.startsWith("open")).length, 1);
+  assert.deepEqual(h.lines, []);
+  await desk.dispose();
+});
+
+test("start answers a phone turn the restart cut with one line, once per session and turn, recorded as a desk-turn cancelled by 'restart'", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  const writtenAt = AT - 8 * 60_000; // 13:55 ET
+  h.tree.logs.set(sessionId, cutLog(3, writtenAt));
+  h.tree.rebuilt.set(sessionId, [pending("telegram:4", PHONE)]);
+  const first = await restarted(h, sessionId);
+  await first.desk.start();
+  await waitFor("the restart's line", () => first.outlet.sent.length === 1);
+  assert.deepEqual(first.outlet.sent, [RESTART_LINE]);
+  assert.deepEqual(await turnsOf(h), [
+    { t: iso(AT), kind: "desk-turn", sessionId, source: "telegram", turn: 3, outcome: "cancelled", wallMs: 0, cancel: "restart" },
+  ]);
+  assert.deepEqual(h.tree.agent(sessionId).followups.map((m) => m.id), ["telegram:4"], "and what waited behind it is woken");
+
+  /* the line comes before the answer of the text it woke, and that turn is recorded after the cut one */
+  turn(h, sessionId, 4, PHONE, "the fourth answer");
+  await waitFor("turn 4's answer", () => first.outlet.sent.length === 2);
+  assert.deepEqual(first.outlet.sent, [RESTART_LINE, "the fourth answer"]);
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.turn, e.outcome]), [[3, "cancelled"], [4, "ended"]]);
+
+  /* another restart with the same log tail: the ledger already holds turn 3's record, so neither is done again */
+  h.tree.rebuilt.delete(sessionId);
+  const second = await restarted(h, sessionId, first.desk);
+  await second.desk.start();
+  await new Promise((done) => setTimeout(done, 20));
+  assert.deepEqual(second.outlet.sent, [], "answered once");
+  assert.equal((await turnsOf(h)).filter((e) => e.turn === 3).length, 1, "recorded once");
+
+  /* a different cut turn on the same session is its own */
+  h.tree.logs.set(sessionId, cutLog(5, writtenAt));
+  const third = await restarted(h, sessionId, second.desk);
+  await third.desk.start();
+  await waitFor("turn 5's line", () => third.outlet.sent.length === 1);
+  assert.deepEqual(third.outlet.sent, [RESTART_LINE]);
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.turn, e.cancel]), [[3, "restart"], [4, undefined], [5, "restart"]]);
+  assert.deepEqual(h.lines, []);
+  await third.desk.dispose();
+});
+
+test("a resumed session whose log cannot be read still wakes what was left, with one line", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  h.tree.rebuilt.set(sessionId, [pending("telegram:2", PHONE)]);
+  const { desk, outlet } = await restarted(h, sessionId);
+  const open = h.tree.ctx.sessionPersistence!.open;
+  h.tree.ctx.sessionPersistence!.open = async () => { throw new Error("the log is locked"); };
+  try {
+    await desk.start();
+  } finally {
+    h.tree.ctx.sessionPersistence!.open = open;
+  }
+  assert.deepEqual(h.tree.agent(sessionId).followups.map((m) => m.id), ["telegram:2"]);
+  assert.deepEqual(h.lines, [
+    `gravit-face: desk: desk session ${sessionId}'s log could not be read (the log is locked); a phone turn a restart cut there goes unanswered`,
+  ]);
+  assert.deepEqual(outlet.sent, []);
+  await desk.dispose();
+});
+
+test("the cut-turn line goes through deliver, so OFF holds it", async (t) => {
+  const h = await harness();
+  const sessionId = await started(h);
+  h.tree.logs.set(sessionId, cutLog(3, AT - 8 * 60_000));
+  await writeOff(h.home, { by: "telegram" }, () => AT);
+  const off = join(deskDir(h.home), OFF_FILE);
+  let offReads = 0;
+  const real = fsp.readFile as unknown as (...args: unknown[]) => Promise<unknown>;
+  t.mock.method(fsp, "readFile", (async (...args: unknown[]) => {
+    try {
+      return await real(...args);
+    } finally {
+      if (String(args[0]) === off) offReads += 1;
+    }
+  }) as unknown as typeof fsp.readFile);
+  syncBuiltinESMExports();
+  const { desk, outlet } = await restarted(h, sessionId);
+  try {
+    await desk.start();
+    await waitFor("the line's delivery reading the switch", () => offReads === 1);
+    await new Promise((done) => setTimeout(done, 20));
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(outlet.sent, [], "held back by the pause");
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.turn, e.cancel]), [[3, "restart"]], "and recorded all the same");
+  assert.deepEqual(h.lines, [], "a pause holding the line back is no failure");
+  await desk.dispose();
 });
 
 test("renew supervises the new session and stop cancels with the reason", async () => {

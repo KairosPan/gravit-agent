@@ -50,6 +50,15 @@
  * no outlet it says so; else it is the outlet's answer, a send that fails or keeps the outlet past a minute
  * being one line and an `undelivered` reason.
  *
+ * AFTER A RESTART (spec §16 H3). When `start`'s ensure resumed a cold desk session - the face came back up - two things
+ * the restart left are dealt with, and only then. A phone turn it cut - the log's last turn, never ended or closed
+ * `interrupted` by the resume (src/desk-session.ts `cutPhoneTurn`) - is a `desk-turn` cancelled by `restart`, wall time
+ * 0, and one line through {@link DeskConversation.deliver}'s path, so a pause holds it: `a restart cut your message of
+ * <time> before it was answered; send it again`; once per session and turn, a `desk-turn` the ledger already holds for
+ * it doing neither again. Then the phone texts and alerts still queued are woken (src/desk-session.ts
+ * `requeuePending`): a resumed agent sits idle beside its rebuilt inbox. The log is read before the requeue, so a turn
+ * the requeue opens is never taken for a cut one.
+ *
  * A CUT CUTS ONE TURN. The phone's `/stop` ({@link DeskConversation.stop}), like the deadline, cancels the turn
  * under way and only it: the messages queued behind it are kept and answered, each in its own turn
  * (src/desk-session.ts `cancelKeepingQueue`). A shutdown keeps nothing.
@@ -164,7 +173,8 @@ export interface DeskConversationDeps {
 /** The desk session's one owner. See the module header; each member's own comment says what it does. */
 export interface DeskConversation {
   /** Ensure the desk session and supervise it, so a turn opened from the browser is supervised before any
-   * post. Never rejects: a failure is one line, and the next post tries again. */
+   * post; when the ensure resumed a cold session, deal with what a restart left in it (the module header's AFTER A
+   * RESTART). Never rejects: a failure is one line, and the next post tries again. */
   start(): Promise<void>;
   /** Open a turn: `text` after the provenance line for `source`, sent with `message` as its source - or the
    * reason it was not, as {@link PostResult}. An alert's post (`message.kind` `alert`) with `replyTo` has its
@@ -509,12 +519,52 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     else retire(old);
   };
 
-  /** The desk session, ensured, and supervised unless the conversation is disposed by then. */
-  const ensure = async (fresh: boolean): Promise<{ agent: AgentLike; sessionId: string }> => {
+  /** The desk session, ensured, and supervised unless the conversation is disposed by then; `resumed` when the ensure
+   * resumed a cold one. */
+  const ensure = async (fresh: boolean): Promise<{ agent: AgentLike; sessionId: string; resumed?: true }> => {
     const m = await loadMachinery();
-    const { agent, sessionId } = await m.session.ensureDeskSession(deps.session, fresh ? { fresh: true } : {});
+    const { agent, sessionId, resumed } = await m.session.ensureDeskSession(deps.session, fresh ? { fresh: true } : {});
     if (!disposed) watch(sessionId, agent, m);
-    return { agent, sessionId };
+    return { agent, sessionId, ...(resumed === undefined ? {} : { resumed }) };
+  };
+
+  /** What a restart left in the desk session `sessionId`, just resumed as `agent` (the module header's AFTER A
+   * RESTART): the phone turn it cut, recorded and answered once, then the texts and alerts still queued, woken. Never
+   * rejects. */
+  const afterRestart = async (agent: AgentLike, sessionId: string, m: Machinery): Promise<void> => {
+    /* the log as the restart left it, read before anything is woken: a turn the requeue opens is no cut */
+    let cut: { turn: number; at: string } | undefined;
+    try {
+      await deps.session.ctx.sessionPersistence?.flush();
+      cut = m.session.cutPhoneTurn(await m.session.readSessionEvents(deps.session.ctx, sessionId));
+    } catch (err) {
+      log(`${BIN}: desk: desk session ${sessionId}'s log could not be read (${errText(err)}); a phone turn a restart cut there goes unanswered`);
+    }
+    if (cut !== undefined) await answerCut(sessionId, cut, m);
+    m.session.requeuePending(agent, log);
+  };
+
+  /** A phone turn a restart cut: a `desk-turn` cancelled by `restart`, then its line through {@link sendOut} after the
+   * deliveries already under way - once per session and turn, the ledger saying whether it was done. Never rejects. */
+  const answerCut = async (sessionId: string, cut: { turn: number; at: string }, m: Machinery): Promise<void> => {
+    const where = `turn ${cut.turn} on desk session ${sessionId}`;
+    try {
+      const { events } = await m.desk.readEvents(home);
+      if (events.some((e) => e.kind === "desk-turn" && e.sessionId === sessionId && e.turn === cut.turn)) return;
+    } catch (err) {
+      log(`${BIN}: desk: the ledger could not be read for ${where}, which a restart cut (${errText(err)}); it goes unanswered`);
+      return;
+    }
+    await m.desk.appendEvent(home, {
+      t: stamp(), kind: "desk-turn", sessionId, source: "telegram", turn: cut.turn, outcome: "cancelled", wallMs: 0, cancel: "restart",
+    }, { log });
+    const now = new Date(clock.now());
+    const line = m.session.cutPhoneTurnLine(new Date(cut.at), now);
+    delivering = delivering.then(async () => {
+      await sendOut(line, undefined, `${BIN}: desk: the line for ${where}, which a restart cut, could not be sent`, "; the next reply goes ahead");
+    }).catch((err: unknown) => {
+      log(`${BIN}: desk: the line for ${where}, which a restart cut, could not be delivered: ${errText(err)}`);
+    });
   };
 
   /** Cancel `w`'s work under way with `cause`; whether the cancel went through. `keep`, the phone's stop: only the
@@ -660,11 +710,14 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     start() {
       return serially(async () => {
         if (disposed) return;
+        let opened: Awaited<ReturnType<typeof ensure>>;
         try {
-          await ensure(false);
+          opened = await ensure(false);
         } catch (err) {
           log(`${BIN}: desk: the desk session could not be opened: ${errText(err)}; the next message tries again`);
+          return;
         }
+        if (opened.resumed === true && !disposed) await afterRestart(opened.agent, opened.sessionId, await loadMachinery());
       });
     },
 
