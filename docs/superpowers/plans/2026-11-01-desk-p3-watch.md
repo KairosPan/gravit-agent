@@ -149,9 +149,10 @@ Each that can be wrong ends with its cost.
   | over a market's cap | `the watch covers <n> <US | A-share> symbols; not watched: <SYMBOL>, …` (cut at 500) |
   | a market's first failed poll of its session date (rejected, or every quote `unavailable`) | `the watch has no <US | A-share> prices today: <reason>` |
   | a watched symbol unpriced on its first three polls of a session date (once per symbol and reason) | `the watch has no price for <SYMBOL> this session: <reason>` |
-  | A shares past the XSHG table (once per Beijing date) | `the A-share calendar ends <last date>; the watch judges A shares on the Market's phase alone until face/src/xshg-clock.ts is extended` |
+  | A shares past the XSHG table (once per Beijing date) | `the A-share calendar ends <last date>; the watch judges A shares on the Beijing bands, the close print and the Market's phase for whether the day trades, until face/src/xshg-clock.ts is extended` |
   | no XNYS calendar (once per ET date) | `the watch is off for US shares today: the market calendar failed (<error>)` |
   | held elsewhere (once per ET date) | `this face does not watch: another face (pid <n>) holds the watch on this home` |
+  | the lease cannot be written (once per ET date; the final review's fix wave) | `the watch is off today: its lease cannot be written (<code or message>)` |
   | filings with no contact (once per ET date, only with a filing rule) | `the watch's filings are off: set ALPHA_EDGAR_USER_AGENT to a contact email (SEC asks for one)` |
   | every symbol refused by SEC (once per ET date) | `the watch's filings are off until tomorrow: SEC refused every request (<error>); check ALPHA_EDGAR_USER_AGENT` |
   | filings over the cap | `the watch's filings cover 60 symbols; not polled: <SYMBOL>, …` (cut at 500) |
@@ -556,7 +557,7 @@ test("a move rule, a gap rule and a filing", () => { /* the old test's three exp
 test("batchText lists at most twenty, then counts the rest", () => { /* the old test */ });
 test("annotationPost: one alert keeps its rule's form, several become the alerts form", () => { /* … */ });
 test("WATCH_LINES render the phone-line table exactly", () => {
-  assert.equal(WATCH_LINES.cnPastTable("2026-12-31"), "the A-share calendar ends 2026-12-31; the watch judges A shares on the Market's phase alone until face/src/xshg-clock.ts is extended");
+  assert.equal(WATCH_LINES.cnPastTable("2026-12-31"), "the A-share calendar ends 2026-12-31; the watch judges A shares on the Beijing bands, the close print and the Market's phase for whether the day trades, until face/src/xshg-clock.ts is extended");
   assert.equal(WATCH_LINES.noPrices("cn", "busy"), "the watch has no A-share prices today: busy");
   assert.equal(WATCH_LINES.unpriced("699999", "no A-share quote for 699999"), "the watch has no price for 699999 this session: no A-share quote for 699999");
   // each other row; the 500-character cuts with "…"
@@ -771,7 +772,7 @@ test("installDesk starts the watch with a source, shares the US calendar with th
 - **Produces, `brief.ts`:** the old Task 9's `home?`, `briefSince`, the `alerts` and `filings` blocks and `BriefAlert` (with `stamp` from `priceStamp` and `market`; its `outcome` gains `pending`, as `AlertSummary`'s, for a send the ledger holds no delivery for) and `BriefFiling`, placed after the whole levels block and before `aShares` and `scope`, each block's counts, `more` and `error` ahead of its newest-first items; times print through `deskTime`, `since` included. A-share alerts are listed too: the brief's prices stay US, its alerts are the day's.
 - **Produces, `desk/STANDING.md`:** the old Task 9's item 4 and closing rule, verbatim.
 - **Produces, `desk.ts`:** `watchLines(w: WatchStatus, now: Date): string[]`, appended by `deskStatusLines` after P2's lines:
-  - `watch: <starting | nothing to watch | stopped | another face (pid <n>) holds the watch on this home | watching>`;
+  - `watch: <starting | nothing to watch | stopped | another face (pid <n>) holds the watch on this home | off today: its lease cannot be written (<error>) | watching>`;
   - per market with a source: `watch <US | A shares>: <no calendar today | closed today | the <date> session opens at <HH:MM ET> | polling the <date> session, <n> symbols, last poll <HH:MM ET> | the <date> session has closed>[; not watched: <k>][; <lastError>]`;
   - per market with a record today: `alerts today (<US | A shares>): <n> sent[, <k> suppressed (<reason> <k>, …)][, <r> repeats in a cooldown]`, counted on that market's session date;
   - `alerts: <k> held for the next hour's batch` when `pending` is above 0, and `alerts: muted until …`, as the old Task 9;

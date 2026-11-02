@@ -2397,9 +2397,10 @@ with the same watch lines.
 | over a market's cap | `the watch covers <n> <US \| A-share> symbols; not watched: <SYMBOL>, …` |
 | a market's first failed poll of its session date | `the watch has no <US \| A-share> prices today: <reason>` |
 | a symbol unpriced on its first three polls | `the watch has no price for <SYMBOL> this session: <reason>` |
-| A shares past the XSHG table (once a Beijing date) | `the A-share calendar ends <last date>; the watch judges A shares on the Market's phase alone until face/src/xshg-clock.ts is extended` |
+| A shares past the XSHG table (once a Beijing date) | `the A-share calendar ends <last date>; the watch judges A shares on the Beijing bands, the close print and the Market's phase for whether the day trades, until face/src/xshg-clock.ts is extended` |
 | no XNYS calendar (once a day) | `the watch is off for US shares today: the market calendar failed (<error>)` |
 | held elsewhere (once a day) | `this face does not watch: another face (pid <n>) holds the watch on this home` |
+| the lease cannot be written (once a day) | `the watch is off today: its lease cannot be written (<code or message>)` |
 | filings with no contact (once a day, with a filing rule) | `the watch's filings are off: set ALPHA_EDGAR_USER_AGENT to a contact email (SEC asks for one)` |
 | every symbol refused by SEC (once a day) | `the watch's filings are off until tomorrow: SEC refused every request (<error>); check ALPHA_EDGAR_USER_AGENT` |
 | filings over the cap | `the watch's filings cover 60 symbols; not polled: <SYMBOL>, …` |
@@ -4745,13 +4746,13 @@ inode.
 ## The desk drill (run after any change to scripts/service.ts, scripts/desk.ts, src/desk*.ts, src/telegram.ts, src/market-quotes.ts, src/symbols.ts, src/{schedule,firing,standing,producer,market-clock,xshg-clock,brief}.ts, src/{watch,watch-eval,alert-text,edgar,filings}.ts or main.ts's exits)
 
 The desk spec's drill (`../docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` §9 and
-§12 and §15), in four parts so far: P0's, the face as a service; P1's, the phone and the Desk
-panel; P2's, the clock and the pre-close brief; and P3's, the watch.
-**Since the merge onto main (2026-11-01)** the steps below are as written for the desk's branch,
-and three things read differently on the merged tree: the Desk panel's steps (P1's 4, 6 and 8,
-P2's 2 and 3) read Markets › Desk since P3 — its status, Pause, standing orders and firings;
-it lists no desk conversation and opens no session, so read those in the conversation list, and
-`npm run service -- status`, the phone's `/status` and the ledgers beside it; a price asked of the
+§12 and §15), in four parts so far: P0's, the face as a service; P1's, the phone and Markets ›
+Desk; P2's, the clock and the pre-close brief; and P3's, the watch.
+**Since the merge onto main (2026-11-01)** the browser's steps read Markets › Desk (`#/markets`,
+the Desk tab, the last), the old client's Desk panel having left with that client: its status,
+Pause, standing orders and firings; it lists no desk conversation and opens no session, so read
+those in the conversation list, and `npm run service -- status`, the phone's `/status` and the
+ledgers beside it. Two more things read differently on the merged tree: a price asked of the
 desk (P1's step 1) and the brief (P2's step 2) come from the Market's reads, so the Account must be
 running (`npm run account`); and the calendar needs no interpreter. The drill is to be run again
 on the merged tree.
@@ -4833,10 +4834,10 @@ step 2's observation and, when it ran, step 7 in `DEVELOPMENT.md` §7.4's **Desk
 **Not yet run.** The automated half passes 2026-10-20; nothing has run against the real
 launchd.
 
-### P1: the phone and the Desk panel
+### P1: the phone and Markets › Desk
 
 PASS is P1's done criterion — the operator has talked to Gravit from the phone, asked a live
-price and got it, and the Desk panel shows it — and the edges a phone meets: a pause, a fresh
+price and got it, and Markets › Desk shows the desk and its bridge — and the edges a phone meets: a pause, a fresh
 conversation, a long answer, a turn cut by its deadline, a `/stop` with a text queued behind it.
 
 **The automated half, no Telegram.** `npm test` runs the desk's suites — `desk`, `desk-cli`,
@@ -4847,7 +4848,7 @@ conversation, a long answer, a turn cut by its deadline, a `/stop` with a text q
 canary among them ("Tests" above). What only this drill checks: a real model on the desk's
 preset and contract; the real Bot API from this Mac; what the phone shows of plain text and of
 an answer in parts; a real turn cut at 5 minutes, and a real `/stop`, each with a text queued
-behind it; the Desk panel in a real browser over the real ledger.
+behind it; Markets › Desk in a real browser over the real ledger.
 
 **The drill**, after "Set up the bot" ("The desk"), with the service running the merged code and
 the browser signed in:
@@ -4863,14 +4864,14 @@ the browser signed in:
    line. A minute later, a text: answered — the pause lifted itself, and the ledger has
    `off-cleared` by `expiry`.
 4. `/new`. PASS: `a new desk conversation`; a `desk-session` line with `"reason":"new"`; the
-   next text is answered in the new conversation, which the Desk panel lists beside the old one.
+   next text is answered in the new conversation, which the conversation list shows beside the
+   old one.
 5. A long answer: ask for one past 4,000 characters — a paragraph on each of the eleven S&P 500
    sectors, say. PASS: it arrives in parts, each cut at a line end, together the whole answer.
 6. A turn cut by the deadline: ask the desk to write a note one directory up,
    `../drill-note.md`. The sandbox refuses the write; when the model retries it with the
    escalation, the browser shows an approval card in the desk session — leave it unanswered.
-   While it waits, the Desk panel shows `waiting` on the desk conversation, and the rail's Desk
-   item a badge when another panel is open; send a second text, `and the S&P?`. PASS: about 5
+   While it waits, send a second text, `and the S&P?`. PASS: about 5
    minutes after the turn began, the phone gets `timed out after 5 min; a card or a long tool was
    pending`, the card closes, the ledger has a `desk-turn` with `"outcome":"timed-out"`, and
    `desk/drill-note.md` does not exist; then the second text is answered, in a turn of its own. A
@@ -4882,13 +4883,12 @@ the browser signed in:
    from the phone"`, and any part of it the phone got ends with `(cut off: stopped from the
    phone)`. A `/stop` that lands after the long answer ended cuts the next turn instead, or finds
    `nothing is running`: try again with a longer ask.
-8. From the browser, the Desk panel (`/#desk`, the rail's first item). PASS: its cards agree
+8. From the browser, Markets › Desk (`#/markets`, then the Desk tab, the last). PASS: it agrees
    with `npm run service -- status` — the desk on, the Telegram bridge polling with its drops
-   and queue, the desk conversation, today's turns and their tokens; Pause for 30 minutes writes
-   `OFF` (the desk card reads paused by `page`), a phone text then gets the paused line, and
-   `npm run desk -- resume` in a terminal lifts it (`resumed`); open the Pause dropdown and hold
-   it across a 30 s refresh: it stays open; a desk session opens in place, the phone's texts in
-   it marked ☎.
+   and queue, today's budget; Pause writes `OFF` with no end (the status reads paused by `page`),
+   a phone text then gets the paused line, and `npm run desk -- resume` in a terminal lifts it
+   (`resumed`); the view re-reads every 10 s. The desk conversation opens from the conversation
+   list, the phone's texts in it marked ☎.
 
 **PASS is steps 1–8.** Record the date, the commit, the desk's model route, step 5's part count
 and what steps 6 and 7 met in `DEVELOPMENT.md` §7.4's P1 **Desk** row.
@@ -4906,7 +4906,7 @@ a deliberately edited `STANDING.md` was refused — and its way back, a re-arm.
 cases in `desk`, `desk-conversation`, `desk-session`, `telegram`, `service`,
 `desk-cli` and `cycle` (`market-clock` holds the calendar's cases the retired pytest held); `FACE_SMOKE=1 npm
 test` boots `schedule-smoke`, the canary's firing half among it ("Tests" above). What only this
-drill checks: a real model writing the brief from its block; the builtin calendar on a real session; the brief on the phone before a real close; the Desk panel over the real ledger.
+drill checks: a real model writing the brief from its block; the builtin calendar on a real session; the brief on the phone before a real close; Markets › Desk over the real ledger.
 
 **The drill**, after P1's, with the service running the merged code and the browser signed in:
 
@@ -4915,13 +4915,13 @@ drill checks: a real model writing the brief from its block; the builtin calenda
    preclose in <the primary checkout>: …`; within 30 s `npm run service -- status` shows `standing
    preclose: close-30m, next 15:30 ET` (12:30 ET on an early close).
 2. On three sessions in a row, the brief. PASS each day: the brief reaches the phone before the
-   close, its prices labelled with their feed and time; the Desk panel's Standing orders card and
+   close, its prices labelled with their feed and time; Markets › Desk's standing orders and
    `status` show `last delivered <time>`; `$DSH_HOME/face/desk/firings.jsonl` holds the day's
    `started`, `producer`, `woke` and `finished`, and `desk/journal/briefs/<date>-preclose.md` the
    message.
 3. Edit one word of `desk/STANDING.md`. PASS: at the next anchor the phone gets `preclose · <date>
    refused: desk/STANDING.md changed since arming. Review it, then: npm run desk -- rearm
-   preclose`, the card shows the pin changed, and no brief comes.
+   preclose`, Markets › Desk's standing orders show the pin changed, and no brief comes.
 4. `npm run desk -- rearm preclose`. PASS: `re-armed preclose: desk/STANDING.md sha256 <12 hex>…`;
    the next anchor runs and delivers — the same day when the re-arm lands inside the 5-minute
    grace. Undo the word afterwards and re-arm again.
