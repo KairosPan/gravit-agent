@@ -389,6 +389,25 @@ test("a keyed post builds its message with the key as its id", async () => {
   assert.deepEqual(h.lines, []);
 });
 
+test("the context is its own part between the provenance line and the operator's text", async () => {
+  const h = await harness();
+  const result = await h.desk.post({
+    text: "why did this fire?", source: { kind: "telegram" }, message: PHONE as { kind: string } & Record<string, unknown>, key: "telegram:43",
+    context: "NVDA 169.82 · ROBINHOOD 10:21:03 ET\n\nannotation:\nStop met.",
+  });
+  const agent = h.tree.agents[0];
+  assert.deepEqual(result, { opened: true, sessionId: agent.id });
+  assert.equal(agent.followups[0].id, "telegram:43", "still keyed");
+  assert.deepEqual(agent.followups[0].content, [
+    { type: "text", text: "[telegram · operator · 14:03 ET]" },
+    { type: "text", text: "the message this replies to:\nNVDA 169.82 · ROBINHOOD 10:21:03 ET\n\nannotation:\nStop met." },
+    { type: "text", text: "why did this fire?" },
+  ]);
+  await post(h, "and a plain one");
+  assert.deepEqual(agent.followups[1].content, [{ type: "text", text: "[telegram · operator · 14:03 ET]\nand a plain one" }], "no context, one part as before");
+  assert.deepEqual(h.lines, []);
+});
+
 test("a key already in the session's log opens nothing and answers duplicate", async () => {
   const h = await harness();
   const sessionId = await started(h);

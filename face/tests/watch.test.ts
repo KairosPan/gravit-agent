@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import {
   ALERTS_FILE, deskDir, FILINGS_FILE, readEvents, WATCH_LEASE_FILE, writeMute, writeOff, type BudgetState,
 } from "../src/desk.ts";
+import { alertText } from "../src/alert-text.ts";
 import type { DeliverResult, PostResult } from "../src/desk-conversation.ts";
 import type { EdgarFetch } from "../src/edgar.ts";
 import { bjDate } from "../src/et.ts";
@@ -20,6 +21,7 @@ import { HttpError } from "../src/http.ts";
 import { deskCalendars, type DeskCalendars, type MarketCalendar, type MarketSession } from "../src/market-clock.ts";
 import type { MarketQuote, MarketQuoteIdentity, MarketQuotePayload, MarketQuoteSource } from "../src/market-quotes.ts";
 import type { Market } from "../src/symbols.ts";
+import type { AlertHit } from "../src/watch-eval.ts";
 import {
   installWatch, isAnnotatedRecord, LEASE_STALE_MS, MARKS_MAX, pidAlive, WATCH_CN_MAX, WATCH_US_MAX, type WatchHandle,
 } from "../src/watch.ts";
@@ -556,6 +558,77 @@ test("noteAnnotated appends the lane's annotated record to alerts.jsonl, and a l
   assert.equal(again.watch.status().ledgerError, undefined);
   assert.deepEqual(again.sent, []);
   await again.watch.dispose();
+});
+
+/* ---------- a reply keeps its alert (spec §16 H1b) ---------- */
+
+const PASS = "p-000000000001";
+/** A delivered record for `id`, its send gone out as the message ids `sent`. */
+const deliveredLine = (id: string, t: string, sent: number[]): Record<string, unknown> =>
+  ({ t, kind: "delivered", id, delivery: { sent }, latency: { tradeMs: 2_000, receivedMs: 1_000 } });
+/** The pass's annotation post, opened, listing `alerts`. */
+const annotationLine = (alerts: string[], t: string): Record<string, unknown> =>
+  ({ t, kind: "annotation", pass: PASS, alerts, result: "opened", sessionId: "session-annotation-1" });
+/** The lane's record of the pass's check, its reply gone out as `sent`. */
+const annotatedLine = (t: string, sent: number[], text: string): Record<string, unknown> =>
+  ({ t, kind: "annotated", pass: PASS, sessionId: "session-annotation-1", outcome: "ended", sent, text });
+/** The watch's ledger once read: the first poll has run. */
+async function read(h: Harness): Promise<void> {
+  await h.wall.advance(0);
+  await until("the first poll", () => h.source.calls.length === 1);
+}
+
+test("a reply to an alert's message carries that alert's text", async () => {
+  const hit = orphan("a-1", "2026-11-30T15:16:45.000Z");
+  const plain = orphan("a-2", "2026-11-30T15:17:45.000Z");
+  const h = await overLedger([
+    hit, deliveredLine("a-1", "2026-11-30T15:16:46.000Z", [555]),
+    { ...plain, pass: "p-000000000002" }, deliveredLine("a-2", "2026-11-30T15:17:46.000Z", [556, 557]),
+    annotationLine(["a-1"], "2026-11-30T15:16:47.000Z"),
+    annotatedLine("2026-11-30T15:17:30.000Z", [560], "Stop met: 169.50 < 170."),
+  ]);
+  await read(h);
+  const now = h.wall.now();
+  assert.equal(h.watch.contextFor(555), `${alertText(hit as unknown as AlertHit, now, "none")}\n\nannotation:\nStop met: 169.50 < 170.`,
+    "the alert, as sent with no note, and its pass's annotation");
+  const unannotated = alertText({ ...plain, pass: "p-000000000002" } as unknown as AlertHit, now, "none");
+  assert.equal(h.watch.contextFor(557), unannotated, "any part of the send, and no annotation when none names its pass");
+  assert.ok(!unannotated.includes("annotation follows"));
+  await h.watch.dispose();
+});
+
+test("a reply to an annotation's message carries its alerts and the annotation", async () => {
+  const one = orphan("a-1", "2026-11-30T15:16:45.000Z");
+  const two = { ...orphan("a-2", "2026-11-30T15:16:45.000Z"), symbol: "AMD", label: "watch" };
+  const h = await overLedger([
+    one, two,
+    deliveredLine("a-1", "2026-11-30T15:16:46.000Z", [555]), deliveredLine("a-2", "2026-11-30T15:16:46.000Z", [556]),
+    annotationLine(["a-1", "a-2"], "2026-11-30T15:16:47.000Z"),
+    annotatedLine("2026-11-30T15:17:30.000Z", [560, 561], "Both met."),
+  ]);
+  await read(h);
+  const now = h.wall.now();
+  const expected = [one, two].map((a) => alertText(a as unknown as AlertHit, now, "none")).join("\n\n") + "\n\nannotation:\nBoth met.";
+  assert.equal(h.watch.contextFor(560), expected);
+  assert.equal(h.watch.contextFor(561), expected, "any part of the reply");
+  h.watch.noteAnnotated({ t: "2026-11-30T15:20:46.000Z", kind: "annotated", pass: PASS, sessionId: "s2", outcome: "ended", sent: [600], text: "x".repeat(5_000) });
+  const long = h.watch.contextFor(600);
+  assert.equal(long?.length, 4_000, "cut at 4,000 characters");
+  assert.ok(long?.startsWith(expected.slice(0, expected.indexOf("annotation:"))), long?.slice(0, 80));
+  await h.watch.dispose();
+});
+
+test("a reply to a message the watch does not know carries nothing", async () => {
+  const h = await overLedger([
+    /* older than the watch's memory: let go at the first read */
+    orphan("a-old", "2026-11-28T15:00:00.000Z"), deliveredLine("a-old", "2026-11-28T15:00:01.000Z", [400]),
+    orphan("a-1", "2026-11-30T15:16:45.000Z"), deliveredLine("a-1", "2026-11-30T15:16:46.000Z", [555]),
+  ]);
+  await read(h);
+  assert.equal(h.watch.contextFor(999), undefined, "no record sent it");
+  assert.equal(h.watch.contextFor(400), undefined, "past the 48 hours the watch keeps");
+  assert.ok(h.watch.contextFor(555) !== undefined);
+  await h.watch.dispose();
 });
 
 test("an orphan older than ten minutes is one line and a delivered record 'lost to a restart'", async () => {

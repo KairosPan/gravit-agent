@@ -111,6 +111,8 @@ const defaultClock: DeskClock = {
 const DESK_DEADLINE_MS = 300_000;
 /** The longest a phone's post waits for the desk state before it goes without (the P3 plan's ruling 6). */
 export const STATE_WAIT_MS = 3_500;
+/** The line a phone reply's context opens with, in its own part of the message (spec §16 H1b). */
+const CONTEXT_HEAD = "the message this replies to:";
 /** The longest a delivery waits on the outlet before the next one goes ahead. */
 const DELIVERY_MS = 60_000;
 /** How long {@link DeskConversation.dispose} gives an agent it cancelled to go idle, so the cut turn is recorded. */
@@ -178,8 +180,12 @@ export interface DeskConversation {
    * signature): the conversation answers no turn as a reply. A phone's (`source.kind` `telegram`) carries the desk state
    * ahead of it when one is ready and nothing is under way. With `key`, the message's id is the key, a key the
    * session already holds answers `duplicate`, and the post answers once the session's log is flushed (the module
-   * header's ONE TEXT, ONE MESSAGE). Never rejects. */
-  post(input: { text: string; source: DeskSource; message: { kind: string } & Record<string, unknown>; replyTo?: number; key?: string }): Promise<PostResult>;
+   * header's ONE TEXT, ONE MESSAGE). With `context` - the bridge's, for a phone reply to an alert or its annotation
+   * (spec §16 H1b, src/watch.ts `contextFor`) - the message is three text parts: the provenance line, the context
+   * headed `the message this replies to:`, then `text`. Never rejects. */
+  post(input: {
+    text: string; source: DeskSource; message: { kind: string } & Record<string, unknown>; replyTo?: number; key?: string; context?: string;
+  }): Promise<PostResult>;
   /** Open another desk conversation (the phone's `/new`), recorded as `new`, and supervise it; resolves its id.
    * Rejects when the ensure does, and when the conversation is disposed before or while it runs. */
   renew(): Promise<{ sessionId: string }>;
@@ -731,8 +737,15 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
           const inject = state !== undefined && !(await busy(agent)) ? (agent as AgentLike & Injecting).inject : undefined;
           if (disposed) return shutDown();
           const now = new Date(clock.now());
-          const text = `${m.session.provenanceLine(input.source, now)}\n${input.text}`;
-          const content = [{ type: "text" as const, text }];
+          const provenance = m.session.provenanceLine(input.source, now);
+          /* a reply's context is its own part, between the provenance line and the operator's text (spec §16 H1b) */
+          const content = input.context === undefined
+            ? [{ type: "text" as const, text: `${provenance}\n${input.text}` }]
+            : [
+              { type: "text" as const, text: provenance },
+              { type: "text" as const, text: `${CONTEXT_HEAD}\n${input.context}` },
+              { type: "text" as const, text: input.text },
+            ];
           const source = input.message as MessageSource;
           const message = key === undefined
             ? m.createUserMessage({ content, source })

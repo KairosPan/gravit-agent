@@ -234,7 +234,9 @@ interface Rig {
  * `secrets`, what the bridge redacts beside the token (none unless given: never this process's environment). */
 async function rig(
   label: string,
-  o: Partial<Omit<Rig, "bridge" | "lines">> & { status?: () => Promise<DeskStatus>; pollTimeoutS?: number; secrets?: readonly string[] } = {},
+  o: Partial<Omit<Rig, "bridge" | "lines">> & {
+    status?: () => Promise<DeskStatus>; pollTimeoutS?: number; secrets?: readonly string[]; contextFor?: (messageId: number) => string | undefined;
+  } = {},
 ): Promise<Rig> {
   const home = o.home ?? await freshHome(label);
   const api = o.api ?? new FakeBotApi();
@@ -244,6 +246,7 @@ async function rig(
   const bridge = installTelegramBridge({
     config: { token: TOKEN, operatorId: OPERATOR, apiBase: API, fetch: api.fetch, clock, ...(o.pollTimeoutS === undefined ? {} : { pollTimeoutS: o.pollTimeoutS }) },
     home, conversation, status: o.status ?? (async () => STATUS), log: (line) => { lines.push(line); }, secrets: o.secrets ?? [],
+    ...(o.contextFor === undefined ? {} : { contextFor: o.contextFor }),
   });
   return { home, api, clock, conversation, lines, bridge };
 }
@@ -333,6 +336,41 @@ test("operator text is posted to the conversation with the telegram source", asy
     assert.deepEqual(r.api.sent, [], "an opened turn answers through the outlet, not here");
     assert.deepEqual(r.api.polls()[1], { offset: 6, timeout: 50, allowed_updates: ["message"] }, "the long poll: 50 s, messages only, past the update");
     assert.deepEqual(r.api.polls()[0], { timeout: 50, allowed_updates: ["message"] }, "no offset before the first update");
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("the bridge resolves reply_to_message.message_id through contextFor and posts it as context", async () => {
+  const asked: number[] = [];
+  const r = await rig("reply-context", {
+    contextFor: (id) => {
+      asked.push(id);
+      if (id === 555) return "NVDA 169.82 · ROBINHOOD 10:21:03 ET";
+      if (id === 13) throw new Error("the watch broke");
+      return undefined;
+    },
+  });
+  try {
+    await polled(r, 1);
+    r.api.push(
+      message(5, { text: "why?", message_id: 7, reply_to_message: { message_id: 555, text: "NVDA 169.82" } }),
+      message(6, { text: "and this?", message_id: 8, reply_to_message: { message_id: 999 } }),
+      message(7, { text: "plain", message_id: 9 }),
+      message(8, { text: "odd", message_id: 10, reply_to_message: { message_id: "555" } }),
+      message(9, { text: "broken", message_id: 11, reply_to_message: { message_id: 13 } }),
+    );
+    await polled(r, 2);
+    assert.deepEqual(r.conversation.posts[0], {
+      text: "why?", source: { kind: "telegram", at: NOW }, message: { kind: "telegram", from: OPERATOR, chat: OPERATOR, messageId: 7 }, key: "telegram:5",
+      context: "NVDA 169.82 · ROBINHOOD 10:21:03 ET",
+    }, "the alert's text rides with the reply, under the update's key");
+    assert.deepEqual(r.conversation.posts.slice(1).map((p) => [p.text, p.context]), [["and this?", undefined], ["plain", undefined], ["odd", undefined], ["broken", undefined]],
+      "an unknown message, no reply, a malformed id and a failing lookup carry nothing");
+    assert.ok(r.conversation.posts.slice(1).every((p) => !("context" in p)));
+    assert.deepEqual(asked, [555, 999, 13], "asked only for a numeric id");
+    assert.equal(r.lines.length, 1);
+    assert.match(r.lines[0], /the message update 9 replies to could not be read: the watch broke/);
   } finally {
     await r.bridge.dispose();
   }

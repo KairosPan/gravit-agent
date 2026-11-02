@@ -1742,6 +1742,9 @@ export function installDesk(
         conversation,
         status: () => deskStatus(status),
         log,
+        /* a reply's alert and its annotation (spec §16 H1b): the watch is installed after the bridge, so it is read at
+         * each reply - none until it runs, and none in a face that runs none */
+        contextFor: (messageId) => watch?.contextFor(messageId),
       });
     },
     (err: unknown) => { log(`${BIN}: desk: the Telegram bridge could not be loaded: ${reasonOf(err)}`); },

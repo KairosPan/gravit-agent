@@ -236,14 +236,22 @@ const isWatchRecord = (x: unknown): x is WatchRecord => isAlertRecord(x) || isAn
 
 /** The running watch. `tick` runs one tick now (after any under way); `stateText` the desk state, `undefined`
  * unless watching; `noteAnnotated` appends an annotation run's record to `alerts.jsonl` and keeps it in memory with
- * the rest; `dispose` stops it and releases the lease. */
+ * the rest; `contextFor` what a phone reply to the message `messageId` answers (spec §16 H1b): from the records of the
+ * last {@link MEMORY_MS}, an alert's message gives that alert's text, as sent with no note, and the annotation of its
+ * pass when there is one; an annotation's message gives its pass's alerts and the annotation - at most
+ * {@link CONTEXT_MAX} characters, and `undefined` for a message the watch did not send; `dispose` stops it and
+ * releases the lease. */
 export interface WatchHandle {
   tick(): Promise<void>;
   status(): WatchStatus;
   stateText(): Promise<string | undefined>;
   noteAnnotated(r: AnnotatedRecord): void;
+  contextFor(messageId: number): string | undefined;
   dispose(): Promise<void>;
 }
+
+/** The most a reply's context ({@link WatchHandle.contextFor}) carries, in UTF-16 code units: one Telegram message. */
+const CONTEXT_MAX = 4_000;
 
 /** The lease's contents. */
 interface Lease { pid: number; since: string; beat: string }
@@ -1401,6 +1409,37 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     return stateBody(view);
   }
 
+  /* ---------- a reply's context (spec §16 H1b) ---------- */
+
+  /** What a phone reply to `messageId` answers: see {@link WatchHandle.contextFor}. Newest record first, so a
+   * message id Telegram numbered afresh finds the latest send. */
+  function contextFor(messageId: number): string | undefined {
+    const at = clock.now();
+    const live = records.filter((r) => at - Date.parse(r.t) <= MEMORY_MS).reverse();
+    const sentIt = (sent: unknown): boolean => Array.isArray(sent) && sent.includes(messageId);
+    const hitOf = (id: string): AlertHit | undefined => live.find((r): r is AlertHit => r.kind === "alert" && r.id === id);
+    const annotatedOf = (pass: string): AnnotatedRecord | undefined => live.find((r): r is AnnotatedRecord => r.kind === "annotated" && r.pass === pass);
+    const noteOf = (a: AnnotatedRecord | undefined): string[] => (a === undefined || a.text === "" ? [] : [`annotation:\n${a.text}`]);
+    let parts: string[] | undefined;
+    for (const r of live) {
+      if (r.kind === "delivered" && sentIt((r.delivery as { sent?: unknown }).sent)) {
+        const hit = hitOf(r.id);
+        if (hit === undefined) continue;
+        const post = live.find((p): p is AlertAnnotation => p.kind === "annotation" && p.alerts.includes(hit.id));
+        parts = [alertText(hit, at, "none"), ...noteOf(post === undefined ? undefined : annotatedOf(post.pass))];
+        break;
+      }
+      if (r.kind === "annotated" && sentIt(r.sent)) {
+        const post = live.find((p): p is AlertAnnotation => p.kind === "annotation" && p.pass === r.pass);
+        const hits = (post?.alerts ?? []).flatMap((id) => { const hit = hitOf(id); return hit === undefined ? [] : [hit]; });
+        parts = [...hits.map((hit) => alertText(hit, at, "none")), ...noteOf(r)];
+        break;
+      }
+    }
+    if (parts === undefined || parts.length === 0) return undefined;
+    return parts.join("\n\n").slice(0, CONTEXT_MAX);
+  }
+
   /* ---------- the handle ---------- */
 
   return {
@@ -1411,6 +1450,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       records.push(r);
       alerts.append(r);
     },
+    contextFor,
     dispose() {
       disposing ??= (async () => {
         stopped = true;

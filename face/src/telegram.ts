@@ -11,7 +11,9 @@
  *
  * WHAT A MESSAGE DOES. A text goes to the desk conversation (src/desk-conversation.ts) with the telegram
  * source and the time the operator wrote it - Telegram's own `date`, not the time it arrived, which after a
- * night the Mac slept can be hours later. A post the conversation refuses is answered with its line, and an
+ * night the Mac slept can be hours later. A text that replies to one of the desk's messages - an alert, or an alert's
+ * annotation - carries that alert, and its annotation when there is one, as the post's context (spec §16 H1b,
+ * src/watch.ts `contextFor`), so the one phone conversation knows what the operator is answering. A post the conversation refuses is answered with its line, and an
  * opened turn's answer comes back through the outlet - the bridge is the conversation's outlet from install
  * to dispose. Five commands are the bridge's own: /status, /pause [duration], /mute <duration>, /new and
  * /stop, in any case, with or without the bot's name after them; any other /word is text for Gravit. There
@@ -223,7 +225,9 @@ export function parseCommand(text: string): Command | undefined {
 /** What {@link installTelegramBridge} needs: the configuration; the harness home, whose desk directory
  * holds the bridge's files; the desk conversation, as the bridge uses it; `status`, what `/status` reads
  * (src/desk.ts `deskStatus`); `log`, where a line goes (stderr); `secrets`, the values redacted as `<secret>`
- * beside the token (src/desk-tools.ts `deskSecrets` of `process.env`, taken at install, unless given). */
+ * beside the token (src/desk-tools.ts `deskSecrets` of `process.env`, taken at install, unless given); `contextFor`, what a reply to
+ * one of the desk's messages carries to the conversation - the watch's alert and its annotation (src/watch.ts
+ * `contextFor`), `undefined` for a message it does not know or while there is no watch. */
 export interface BridgeDeps {
   config: TelegramConfig;
   home: string;
@@ -231,6 +235,7 @@ export interface BridgeDeps {
   status: () => Promise<DeskStatus>;
   log?: (line: string) => void;
   secrets?: readonly string[];
+  contextFor?: (messageId: number) => string | undefined;
 }
 
 /** The running bridge. `status` is what the desk's status reports of it; `send` sends `text` to the
@@ -251,6 +256,7 @@ interface TgMessage {
   chat?: { id?: unknown; type?: unknown } | null;
   date?: unknown;
   text?: unknown;
+  reply_to_message?: { message_id?: unknown } | null;
 }
 type TgUpdate = { update_id?: unknown; message?: TgMessage | null } & Record<string, unknown>;
 
@@ -671,6 +677,20 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     if (late !== "") await reply(late);
   };
 
+  /** What a reply carries to the desk (spec §16 H1b): the context `contextFor` gives the message it replies to, none
+   * for a text that replies to nothing or to a message the watch does not know. A lookup that throws is one line,
+   * and the text goes without. */
+  const replyContext = (message: TgMessage, update: unknown): string | undefined => {
+    const replied = message.reply_to_message?.message_id;
+    if (deps.contextFor === undefined || typeof replied !== "number" || !Number.isSafeInteger(replied)) return undefined;
+    try {
+      return deps.contextFor(replied);
+    } catch (err) {
+      log(`${BIN}: telegram: the message update ${String(update)} replies to could not be read: ${reasonOf(err)}`);
+      return undefined;
+    }
+  };
+
   /** Handle one update; resolves once it is taken - a text's post or a `/new` settled, a command answered. */
   const handle = async (update: TgUpdate): Promise<void> => {
     const message = update.message;
@@ -699,11 +719,13 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     const { date } = message;
     const at = typeof date === "number" && Number.isSafeInteger(date) && date > 0 ? date * 1_000 : undefined;
     const id = update.update_id;
+    const context = replyContext(message, id);
     const posted = conversation.post({
       text: message.text,
       source: { kind: "telegram", ...(at === undefined ? {} : { at }) },
       message: { kind: "telegram", from: operatorId, chat: operatorId, messageId },
       ...(typeof id === "number" && Number.isSafeInteger(id) && id >= 0 ? { key: deliveryKey(id) } : {}),
+      ...(context === undefined ? {} : { context }),
     });
     await answerWithin(posted.then(
       (result: PostResult) => ("refused" in result ? result.line : ""),
