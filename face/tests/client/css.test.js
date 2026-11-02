@@ -26,6 +26,7 @@ import { renderMarkdown } from '../../client/js/wire/markdown.js';
 import { withMiniDocument } from './helpers/mini-dom.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
 import { stockDrawerHtml } from '../../client/js/render/lunhui/stock.js';
+import { deskStatus } from './helpers/desk-status.js';
 
 const NOW = new Date(2026, 9, 19, 14, 7).getTime();
 const css = await readFile(new URL('../../client/css/app.css', import.meta.url), 'utf8');
@@ -91,6 +92,10 @@ function marketStates() {
     // an A share's 5D history: the sessions on one grid, the previous close dashed, a hairline between sessions
     R.candlesLoaded(R.setRange(page('cn:600519'), { id: 'cn:600519', range: '5D' }), { id: 'cn:600519', range: '5D', at: NOW,
       data: { ok: true, range: '5D', sessions: ['2026-10-29', '2026-10-30'].map(date => ({ date, prec: 100, price: [100, 101, 102], amount: [1, 1, 1] })) } }),
+    // the desk (plan 2026-11-01-desk-p3-watch Task 11): the Desk tab, before its status and with it; a level's mark on its row
+    // and on its page
+    R.setMarketsTab(read, 'desk'), R.deskLoaded(R.setMarketsTab(read, 'desk'), { data: deskStatus(), at: NOW }),
+    R.deskLoaded(read, { data: deskStatus(), at: NOW }), R.deskLoaded(page('stock:NVDA'), { data: deskStatus(), at: NOW }),
   ];
 }
 

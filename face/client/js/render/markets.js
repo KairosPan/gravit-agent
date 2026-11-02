@@ -10,7 +10,9 @@
 // among its keys (plan 4a Task 3). An Account market's page draws, from the Account's four reads beside its price (plan 4a
 // Task 4; host/market-depth-view.js): You here — the asset sheet's holding, positions with their cost, open orders with who
 // placed them, and what agents do here — its order book, its latest trades, and a perpetual's funding; each as far as its own
-// read has got. An A share's page reads none of the four.
+// read has got. An A share's page reads none of the four. The last tab is the Desk (plan 2026-11-01-desk-p3-watch Task 11:
+// render/desk.js over the desk's status), and a market the watch holds a level for carries its mark (host/desk-view.js markOf)
+// after its name on its row, and with its plan and file under its price on its page.
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { chgHtml } from '../market-fmt.js';
@@ -31,6 +33,8 @@ import { yuan, fix2 } from './lunhui/block.js';
 import { intradaySvg } from './lunhui/intraday.js';
 import { tradeableOf } from '../host/trade-view.js';
 import { isCnKey } from '../wire/china.js';
+import { DESK_TAB, deskViewOf, markOf } from '../host/desk-view.js';
+import { renderDeskTab } from './desk.js';
 
 const EM = '—';
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -81,9 +85,9 @@ function starCell(r) {
 
 // the tile, the name and under it the sub, Closed past its end, Paper where only a paper account trades it first; a market no
 // read lists, and a star the Account could not find, have no page to open
-function nameCell(r) {
+function nameCell(r, mark = null) {
   const tags = [r.pastEnd ? 'Closed' : '', r.paper ? 'Paper' : ''].filter(Boolean).map(tag).join(' ');
-  const inner = `${mkAv(r.tile)}<span class="mk-nm"><b>${esc(r.name)}</b><span class="mk-sub">${esc(r.sub)}${tags ? ` ${tags}` : ''}</span></span>`;
+  const inner = `${mkAv(r.tile)}<span class="mk-nm"><b>${esc(r.name)}</b>${mark ? levelMark(mark) : ''}<span class="mk-sub">${esc(r.sub)}${tags ? ` ${tags}` : ''}</span></span>`;
   return r.placeholder || r.notListed ? `<span class="mk-who">${inner}</span>`
     : `<button type="button" class="mk-name" data-action="openMarket" data-id="${esc(r.id)}">${inner}</button>`;
 }
@@ -91,17 +95,17 @@ function nameCell(r) {
 // a row's volume: an A share's turnover in yuan (China's rows), else the view's word in its unit
 const volumeCell = p => (p.volumeUnit === 'yuan' ? yuan(p.volume) : volumeWordOf(p));
 
-function row(r) {
-  return `<tr data-id="${esc(r.id)}"><td>${starCell(r)}</td><td class="mk-c-name">${nameCell(r)}</td>` +
+function row(r, markFor) {
+  return `<tr data-id="${esc(r.id)}"><td>${starCell(r)}</td><td class="mk-c-name">${nameCell(r, markFor(r.id))}</td>` +
     `<td class="r">${esc(priceWord(r.price, r.priced.unit))}</td><td class="r mk-c-chg">${moveHtml(r.priced)}</td>` +
     `<td class="r mk-c-vol">${esc(volumeCell(r.priced))}</td><td class="r mk-c-st"><span class="mk-st">${esc(r.sourceWord)}</span></td></tr>`;
 }
 
 // China's table says Today and Turnover where the Account's say 24h and Volume (spec 2026-10-31 §4)
-function table(rows, { china = false } = {}) {
+function table(rows, { china = false, markFor = () => null } = {}) {
   const head = '<tr><th scope="col"><span class="sr-only">Watch</span></th><th scope="col" class="mk-c-name">Market</th><th scope="col" class="r">Price</th>' +
     `<th scope="col" class="r mk-c-chg">${china ? 'Today' : '24h'}</th><th scope="col" class="r mk-c-vol">${china ? 'Turnover' : 'Volume'}</th><th scope="col" class="r mk-c-st">Source</th></tr>`;
-  return `<section class="cardbox mk-tcard" aria-label="Markets"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(row).join('')}</tbody></table></div></section>`;
+  return `<section class="cardbox mk-tcard" aria-label="Markets"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(r => row(r, markFor)).join('')}</tbody></table></div></section>`;
 }
 
 // where the rows would be when there are none, from the read they are from: nothing starred; an answer with nothing in it; a
@@ -147,6 +151,11 @@ export function renderMarketsScreen(state, now) {
     ? `<p class="mk-q">${rows.length} market${rows.length === 1 ? '' : 's'} for “${esc(q)}” <button type="button" class="mk-clear" data-action="mkClear">Clear</button></p>`
     : '<span></span>';
   const bar = `<div class="mk-bar">${left}${rows.length > 1 ? seg(sorts.map(s => [s.label, s.id]), sort, 'mkSort') : ''}</div>`;
+  // the Desk tab (plan 2026-11-01-desk-p3-watch Task 11): the desk's view in place of the table
+  if (m.tab === DESK_TAB && !searching) {
+    const desk = isRecord(state.desk) ? state.desk : {};
+    return screenHtml(m, tabsHtml, renderDeskTab(deskViewOf(desk.data, new Date(now).toISOString()), desk));
+  }
   // the muted lines: the Account's own sentence when the read the rows are from refused, the A-share search's when it failed or
   // answered in part (said once: not again under a table that already says it), the face's wire's state where an A share is
   // drawn, the watchlist's
@@ -156,11 +165,18 @@ export function renderMarketsScreen(state, now) {
   const chinaWords = china ? chinaLines(read, m.rank?.data, session) : '';
   // China's failure is said once, in the face's words: the route's own error text is not a sentence of the Account's
   const words = chinaWords + note(china ? '' : read.message) + note(cnSearch !== emptyText ? cnSearch : '') + (cnDrawn ? note(connectionWord(m.connection)) : '') + note(watchWord(m.watchError));
-  const body = rows.length ? table(rows, { china }) : empty(emptyText);
-  return `<main class="main mkts"><div class="mk-head"><h1 class="head-title">Markets</h1>` +
-    `<div class="search"><label for="mq" class="sr-only">Search markets</label>${icon('search', 18, 2)}<input id="mq" type="search" autocomplete="off" placeholder="Search markets" data-action="mkQuery"${attrs({ value: m.q })}></div></div>` +
-    `<div class="mk">${tabsHtml}${bar}${words}${body}</div></main>`;
+  const body = rows.length ? table(rows, { china, markFor: id => markOf(state.desk?.data, id) }) : empty(emptyText);
+  return screenHtml(m, tabsHtml, `${bar}${words}${body}`);
 }
+
+// the screen: its head with the search, the tabs, and what the tab draws
+const screenHtml = (m, tabsHtml, inner) => `<main class="main mkts"><div class="mk-head"><h1 class="head-title">Markets</h1>` +
+  `<div class="search"><label for="mq" class="sr-only">Search markets</label>${icon('search', 18, 2)}<input id="mq" type="search" autocomplete="off" placeholder="Search markets" data-action="mkQuery"${attrs({ value: m.q })}></div></div>` +
+  `<div class="mk">${tabsHtml}${inner}</div></main>`;
+
+// a level's mark (host/desk-view.js markOf): after a row's name, and on a market's page under its price with its plan and file
+const levelMark = mark => `<span class="mk-level">${esc(mark.label)}</span>`;
+const planHtml = mark => (mark ? `<p class="mk-plan">${levelMark(mark)} ${esc(`${mark.plan} · ${mark.file}`)}</p>` : '');
 
 // ---- a market's page: its head and keys, the price and its facts, then its history and its lines across venues beside what you
 // hold of it, what is working, the conversations that name it and the statement's lines
@@ -309,6 +325,7 @@ function accountPage(id, view, state, now) {
   const facts = [['24h volume', volumeWordOf(priced)], ['Venues', String(view.legs.length)]];
   const top = `<div class="mk-d-px"><span class="mk-big">${esc(priceWord(view.price, unit))}</span>${moved ? `${moveHtml(priced)}<span class="mk-basis">24h</span>` : ''}</div>` +
     `${outcomes.length ? `<div class="mk-outs">${outcomes.join('')}</div>` : ''}${view.sourceWord ? `<p class="mk-asof">${esc(view.sourceWord)}</p>` : ''}` +
+    planHtml(markOf(state.desk?.data, id)) +
     `<dl class="mk-facts">${facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;
 
   const left = [];
@@ -409,7 +426,7 @@ function cnPage(asset, state, now) {
   const stateWord = cnStateWord(quote, m.connection, m.providers);
   const top = `<div class="mk-d-px"><span class="mk-big">${esc(price(quote?.price, asset.currency))}</span>` +
     `${priced ? `${chgHtml(number(quote.change_pct))}<span class="mk-basis">${esc(basisWord(quote))}</span>` : ''}</div>` +
-    `${stateWord ? `<p class="mk-asof">${esc(stateWord)}</p>` : ''}` +
+    `${stateWord ? `<p class="mk-asof">${esc(stateWord)}</p>` : ''}${planHtml(markOf(state.desk?.data, asset.id))}` +
     `<dl class="mk-facts">${view.facts.map(f => `<div><dt>${esc(f.label)}</dt><dd>${esc(factWord(f))}</dd></div>`).join('')}</dl>`;
   const left = [section('Price history', cnHistory(view), seg(CANDLE_RANGES.map(r => [r, r]), view.range, 'setRange', { 'data-id': asset.id }))];
   const about = aboutHtml(state.conversations, asset, now);

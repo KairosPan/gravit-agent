@@ -11,6 +11,7 @@
 import { normalizeAsset, number } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, cnHitsOf } from '../wire/china.js';
 import { MIN, HOUR, DAY } from '../time.js';
+import { DESK_TAB } from './desk-view.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
 
 // the Account's tabs, in the order the table draws them, the sorts its rows take, and the ranges a market's history is read for
@@ -236,8 +237,9 @@ export function chinaRowsOf(markets, atPage = []) {
 /** The table's tabs from All's explore answer: All first, with the Account's count and the cn rows', then the Account's tabs that
  *  have something in them, in ACCOUNT_TABS's order and words (Stocks is the Account's alone: the A shares' home is China). An
  *  answer not read, or one that is not an answer, is All alone. China (`opts.china`, `{ count }`) follows the Account's tabs
- *  (spec 2026-10-31 §4). As the retired page orders them, All results leads while `searching` and Watching closes the row
- *  while `watching` (anything is starred), neither with a count. */
+ *  (spec 2026-10-31 §4). As the retired page orders them, All results leads while `searching` and Watching follows China
+ *  while `watching` (anything is starred), neither with a count; the Desk (`opts.desk`, plan 2026-11-01-desk-p3-watch Task 11)
+ *  closes the row, with no count. */
 export function tabsOf(explore, cnCount, opts) {
   const cn = Math.max(0, number(cnCount) ?? 0);
   const counts = new Map();
@@ -254,6 +256,7 @@ export function tabsOf(explore, cnCount, opts) {
     ...out,
     ...(opts?.china ? [{ id: CHINA_TAB, label: 'China', count: opts.china.count ?? null }] : []),
     ...(opts?.watching ? [{ id: 'watching', label: 'Watching', count: null }] : []),
+    ...(opts?.desk ? [{ id: DESK_TAB, label: 'Desk', count: null }] : []),
   ];
 }
 
@@ -536,7 +539,7 @@ export function sortsOf(rows, kept) {
 /** The table for the slice's tab, query and kept sort, on the renderer's clock (`now`, for the ages beside the source words):
  *  its rows, sorted by the sort in effect (sortsOf's); the sorts offered and that one; its tabs — tabsOf's over All's read, the
  *  A shares counted under All and Stocks, each count the Account's only once All's read has answered (none before), Watching
- *  once anything is starred, All results while searching; and the read the rows are from, `{ status, answered, message }` —
+ *  once anything is starred, All results while searching, the Desk last; and the read the rows are from, `{ status, answered, message }` —
  *  while searching the search's, else the tab's own read once it has answered, else All's — `message` the Account's sentence
  *  when that read refused. The rows: the Account's are `source: 'account'`, each with the word its tile is lettered from, its
  *  figures by kind, the price it shows (`price`: the latest quote at its most traded connected venue, `live`, where that says
@@ -566,8 +569,8 @@ export function tableOf(markets, now = Date.now(), page = null) {
   const counted = all !== undefined && all !== null;
   const watching = starredOf(m).length > 0 || watchlist.length > 0 || atPage.length > 0;
   const chinaCount = rankOf(m) ? Math.max(0, number(rankOf(m).total) ?? 0) : null;
-  const tabs = tabsOf(all, cnStarsOf(m, atPage).length, { watching, searching, china: { count: chinaCount } })
-    .map(t => (counted || t.id === CHINA_TAB ? t : { ...t, count: null }));
+  const tabs = tabsOf(all, cnStarsOf(m, atPage).length, { watching, searching, china: { count: chinaCount }, desk: true })
+    .map(t => (counted || t.id === CHINA_TAB || t.id === DESK_TAB ? t : { ...t, count: null }));
   const mine = own(reads, KIND_TABS.has(m.tab) ? m.tab : 'all');
   const source = onChina ? m.rank : searching ? m.results : mine?.data ? mine : own(reads, 'all');
   const read = { status: str(source?.status) || 'idle', answered: isRecord(source) && source.data != null, message: str(source?.message) || null };

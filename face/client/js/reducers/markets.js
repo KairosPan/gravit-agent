@@ -5,6 +5,7 @@
 // page's range
 import { ACCOUNT_TABS, ACCOUNT_SORTS, CANDLE_RANGES, isAccountKey } from '../host/market-view.js';
 import { number } from '../wire/market-model.js';
+import { DESK_TAB } from '../host/desk-view.js';
 import { chinaProviderOf, isCnKey } from '../wire/china.js';
 
 const mk = (s, patch) => ({ ...s, markets: { ...s.markets, ...patch } });
@@ -15,9 +16,9 @@ const IDLE = { status: 'idle', data: null, at: null };
 // slice's do
 const keyed = (s, field, key, patch) => mk(s, { [field]: { ...s.markets[field], [key]: { ...IDLE, ...own(s.markets[field], key), ...patch } } });
 const read = (s, patch) => mk(s, { results: { ...s.markets.results, ...patch } });
-// the explore reads: All's and each kind's own; the tabs: those, Watching and All results
+// the explore reads: All's and each kind's own; the tabs: those, China, Watching, All results and the Desk
 const EXPLORED = new Set(ACCOUNT_TABS.map(([id]) => id));
-const TABS = new Set([...EXPLORED, 'china', 'watching', 'results']);
+const TABS = new Set([...EXPLORED, 'china', 'watching', 'results', DESK_TAB]);
 // a market's history: an A share's (cn: and its six digits, never another cn: id) or another Account key's, at one of the
 // candle ranges
 const charted = (id, range) => (isCnKey(id) || (isAccountKey(id) && !String(id).startsWith('cn:'))) && CANDLE_RANGES.includes(range);

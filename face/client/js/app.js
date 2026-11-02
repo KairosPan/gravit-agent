@@ -17,6 +17,7 @@ import { mapFrame } from './wire/mapper.js';
 import { startLive } from './host/live.js';
 import { makeActions } from './host/actions.js';
 import { startMarkets } from './host/markets.js';
+import { startDesk } from './host/desk.js';
 import { startAccount } from './host/account.js';
 import { startSeat } from './host/seat.js';
 import { startChannels } from './host/channels.js';
@@ -389,6 +390,8 @@ export function boot(win, host = {}) {
   // Markets: the Account's reads on the app's timers — the A shares' among them — a market's page followed on the stream; the
   // stars in this browser's storage
   const markets = startMarkets({ store, storage, getJson, win, now, stream, schedule, cancelTimer, owner, afterAction });
+  // the desk's status beside the markets (plan 2026-11-01-desk-p3-watch Task 11): the Desk tab, and the level marks on the rows
+  const desk = startDesk({ store, getJson, postJson, schedule, cancelTimer, now });
   // Trade: the kinds' picks on screen, a ticket's order sheet, its line on the stream, Under way's Cancel
   const trade = startTrade({ store, getJson, owner, sheet, stream, schedule, cancelTimer, now, afterAction });
   // a channel's page: its overview read on entering it
@@ -407,8 +410,8 @@ export function boot(win, host = {}) {
   });
   // a room member's trace, read without activating the member's session
   const traces = startTraces({ store, call, loadMemberTrace, now });
-  // the quotes run only while Markets is on screen in a visible tab; Trade's picks only while Trade is
-  const showMarkets = () => markets.show(store.get().route.screen === 'markets' && !doc.hidden);
+  // the quotes, and the desk's status, run only while Markets is on screen in a visible tab; Trade's picks only while Trade is
+  const showMarkets = () => { const on = store.get().route.screen === 'markets' && !doc.hidden; markets.show(on); desk.show(on); };
   const showTrade = () => trade.show(store.get().route.screen === 'trade' && !doc.hidden);
   // the owner's keys act only for a page that signs (the renderers draw them for no other)
   const signs = () => store.get().owner.role === 'signs';
@@ -1004,6 +1007,8 @@ export function boot(win, host = {}) {
     // Markets: the tabs, the sort, Clear, the star, Remove, a row's page, a page's range
     mkTab: el => store.dispatch('setMarketsTab', el.dataset.value),
     mkSort: el => store.dispatch('setMarketsSort', el.dataset.value),
+    // the Desk tab's one control: Pause (no Resume: a terminal resumes)
+    deskPause: () => { void desk.pause(); },
     // the render keeps what an input holds, so Clear empties the box before the query; a search still waiting goes with it
     mkClear: () => {
       const box = doc.getElementById('mq');

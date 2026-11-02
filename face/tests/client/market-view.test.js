@@ -83,6 +83,9 @@ test('tabsOf: the fixture tabs in order, All first; Stocks raised by cn rows; Wa
   assert.deepEqual(tabsOf(explore, 0, { watching: true }).map(t => t.id), ['all', 'crypto', 'stocks', 'rwas', 'perps', 'preipo', 'predictions', 'watching']);
   assert.deepEqual(tabsOf(null, 1, { searching: true }), [RESULTS, { id: 'all', label: 'All', count: 1 }]);
   assert.deepEqual(tabsOf(explore, 2, { searching: false, watching: false }), tabsOf(explore, 2));
+  // the Desk tab (plan 2026-11-01-desk-p3-watch Task 11) closes the row, after Watching, with no count
+  assert.deepEqual(tabsOf(explore, 0, { watching: true, desk: true }).slice(-2), [WATCHING, { id: 'desk', label: 'Desk', count: null }]);
+  assert.deepEqual(tabsOf(null, 0, { desk: true }).map(t => t.id), ['all', 'desk']);
   // ... and rowsOf answers them: the stars under Watching, the search's own rows under All results
   const m = markets({ explore: { all: read(explore) }, watch: ['coin:ETH', 'stock:AAPL'], watchlist: [asset('cn:600519')] });
   assert.deepEqual(rowsOf({ ...m, tab: 'watching' }).map(r => r.id), ['stock:AAPL', 'coin:ETH', 'cn:600519']);
@@ -488,11 +491,11 @@ test('pageOf: the item, its legs, candles for the range, compare rows, held, ord
 test('tableOf: the tabs counted once All answers, the sort in effect, the read the rows are from', () => {
   // before All's read: All alone, with no count it never read; the read on its way
   const unread = tableOf(markets({ explore: { all: { status: 'loading', data: null, at: null } } }), NOW);
-  assert.deepEqual([unread.rows, unread.tabs, unread.read], [[], [{ id: 'all', label: 'All', count: null }, { id: 'china', label: 'China', count: null }], { status: 'loading', answered: false, message: null }]);
+  assert.deepEqual([unread.rows, unread.tabs, unread.read], [[], [{ id: 'all', label: 'All', count: null }, { id: 'china', label: 'China', count: null }, { id: 'desk', label: 'Desk', count: null }], { status: 'loading', answered: false, message: null }]);
   // All answered: the Account's counts, the A shares among them; Watching once anything is starred
   const m = markets({ explore: { all: read(fx('explore-all')) }, watchlist: [asset('cn:600519')] });
   const t = tableOf(m, NOW);
-  assert.deepEqual(t.tabs.map(x => [x.id, x.count]), [['all', 31], ['crypto', 6], ['stocks', 4], ['rwas', 4], ['perps', 6], ['preipo', 1], ['predictions', 9], ['china', null], ['watching', null]]);
+  assert.deepEqual(t.tabs.map(x => [x.id, x.count]), [['all', 31], ['crypto', 6], ['stocks', 4], ['rwas', 4], ['perps', 6], ['preipo', 1], ['predictions', 9], ['china', null], ['watching', null], ['desk', null]]);
   assert.deepEqual(t.read, { status: 'ready', answered: true, message: null });
   assert.deepEqual(t.rows, rowsOf(m, NOW));
   // the sort in effect: the kept one when the rows offer it, else Most traded
@@ -664,7 +667,7 @@ test('Watching and All draw a starred A share as its A-share row', () => {
   for (const id of ['cn:600519', 'cn:000001', 'cn:300750', 'cn:sh600519']) assert.equal(watchedOf(m, id, page), true, id);
   assert.equal(watchedOf(m, 'cn:000001'), false, 'no page: the Account list is not read');
   assert.equal(watchedOf(m, 'cn:688981', page), false);
-  assert.equal(tableOf(m, NOW, page).tabs.at(-1).id, 'watching');
+  assert.equal(tableOf(m, NOW, page).tabs.at(-2).id, 'watching');
 });
 
 test("Watching is the Account's list and the face's together: watchedOf, the rows' watched, the tab, a market's page", () => {
@@ -689,7 +692,7 @@ test("Watching is the Account's list and the face's together: watchedOf, the row
   // the Watching tab for the page's list alone
   const bare = markets({ explore: { all: read(explore) } });
   assert.equal(tableOf(bare, NOW).tabs.some(t => t.id === 'watching'), false);
-  assert.equal(tableOf(bare, NOW, page).tabs.at(-1).id, 'watching');
+  assert.equal(tableOf(bare, NOW, page).tabs.at(-2).id, 'watching');
   assert.deepEqual(rowsOf({ ...bare, tab: 'watching' }, NOW, page).map(r => r.id), ['coin:BTC', 'coin:DOGE']);
   // a page-watched market only a kind's read lists is found there, never a placeholder (the rows by Most traded)
   const both = markets({ explore: { all: read(explore), predictions: read(fx('explore-predictions')) }, tab: 'watching' });
@@ -907,8 +910,8 @@ const china = (over = {}) => markets({ tab: CHINA_TAB, rank: rankRead(), ...over
 
 test('China is the last tab, before Watching, counted by the ranking', () => {
   assert.equal(CHINA_TAB, 'china');
-  assert.deepEqual(tableOf(china({ watchlist: [asset('cn:600519')] }), NOW).tabs.map(t => t.id).slice(-2), ['china', 'watching']);
-  assert.deepEqual(tableOf(china({ explore: { all: read(fx('explore-all')) } }), NOW).tabs.map(t => t.id).slice(-2), ['predictions', 'china']);
+  assert.deepEqual(tableOf(china({ watchlist: [asset('cn:600519')] }), NOW).tabs.map(t => t.id).slice(-3), ['china', 'watching', 'desk']);
+  assert.deepEqual(tableOf(china({ explore: { all: read(fx('explore-all')) } }), NOW).tabs.map(t => t.id).slice(-3), ['predictions', 'china', 'desk']);
   assert.equal(tableOf(china(), NOW).tabs.find(t => t.id === 'china').count, 5577);
   assert.equal(tableOf(markets(), NOW).tabs.find(t => t.id === 'china').count, null, 'no ranking read yet');
 });

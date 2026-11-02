@@ -116,7 +116,7 @@ test('the table: the Account tabs, rows with source words, cents for an event, c
   const tabs = [...html.matchAll(/<button type="button" class="mk-tab" data-action="mkTab" data-value="([^"]+)" aria-pressed="(true|false)">([^<]+)<\/button>/g)].map(m => [m[1], m[2], m[3]]);
   assert.deepEqual(tabs, [
     ['all', 'true', 'All · 30'], ['crypto', 'false', 'Crypto · 6'], ['stocks', 'false', 'Stocks · 4'], ['rwas', 'false', 'RWAs · 4'],
-    ['perps', 'false', 'Perps · 6'], ['preipo', 'false', 'Pre-IPO · 1'], ['predictions', 'false', 'Predictions · 9'], ['china', 'false', 'China'],
+    ['perps', 'false', 'Perps · 6'], ['preipo', 'false', 'Pre-IPO · 1'], ['predictions', 'false', 'Predictions · 9'], ['china', 'false', 'China'], ['desk', 'false', 'Desk'],
   ]);
   assert.match(html, /<th scope="col" class="r">Price<\/th><th scope="col" class="r mk-c-chg">24h<\/th><th scope="col" class="r mk-c-vol">Volume<\/th><th scope="col" class="r mk-c-st">Source<\/th>/);
   // every row of the tab, each by its key, in the view's order: Most traded, the events' smaller volumes last
@@ -928,4 +928,53 @@ test('an Account that answers the book with express’s 404 page, and the trades
     Object.assign(console, saved);
   }
   assert.deepEqual(errors, [], 'no parse error reaches the console');
+});
+
+// ---- the Desk tab and a level's marks (plan 2026-11-01-desk-p3-watch Task 11)
+
+test('the Desk tab is listed last; on it the desk view is drawn in place of the table, with one Pause and no Resume', async () => {
+  const { deskStatus, DESK_NOW } = await import('./helpers/desk-status.js');
+  const { s } = screen({ tab: 'desk' });
+  const html = renderMarketsScreen(R.deskLoaded(s, { data: deskStatus(), at: DESK_NOW }), DESK_NOW);
+  const tabs = [...html.matchAll(/data-action="mkTab" data-value="([^"]+)" aria-pressed="(true|false)"/g)].map(m => [m[1], m[2]]);
+  assert.deepEqual(tabs.at(-1), ['desk', 'true']);
+  assert.doesNotMatch(html, /<table class="mk-t">/, 'no market table on the Desk tab');
+  const t = text(html);
+  for (const words of [
+    'up 3h 5m since 2026-11-02T11:55:00.000Z · desk on', 'watch: watching',
+    'watch US: polling the 2026-11-02 session, 2 symbols, last poll 09:59 ET', 'alerts today (US): 1 sent, 1 suppressed (cap 1)',
+    'watch A shares: the 2026-11-02 session has closed', 'alerts today (A shares): 1 sent, 1 suppressed (muted 1)',
+    'filings: off: set ALPHA_EDGAR_USER_AGENT', 'alerts: muted until 11:00 ET (npm run desk -- unmute)',
+    'NVDA stop · 169.8 ROBINHOOD', '1.8 s', 'suppressed (cap)', 'stop 170 · -1.30%', 'sell half on a close below 170',
+    'desk/levels.yml', '1 of 3 refused: #3 TSLA: price must be a positive number', 'next 2026-11-03 09:20 ET', 'pid 4000', 'lost', '20 min',
+  ]) assert.ok(t.includes(words), words);
+  assert.equal((html.match(/data-action="deskPause"/g) ?? []).length, 1, 'one Pause');
+  assert.doesNotMatch(html, /Resume/);
+  // before the status lands: Loading…; a failed read with nothing kept: unavailable with its message; a failed read over a
+  // view kept: the view, under the message
+  assert.match(renderMarketsScreen(s, NOW), /<p class="mk-empty">Loading…<\/p>/);
+  const failed = R.deskFailed(s, { at: NOW, message: '/data/desk/status: HTTP 503' });
+  assert.match(renderMarketsScreen(failed, NOW), /Desk status unavailable/);
+  const kept = R.deskFailed(R.deskLoaded(s, { data: deskStatus(), at: DESK_NOW }), { at: DESK_NOW, message: '/data/desk/status: HTTP 503' });
+  const keptHtml = renderMarketsScreen(kept, DESK_NOW);
+  assert.ok(text(keptHtml).includes('/data/desk/status: HTTP 503'));
+  assert.ok(text(keptHtml).includes('watch: watching'));
+});
+
+test('a marked row draws its mark after its name; a page draws the plan and file under its price', async () => {
+  const { deskStatus, DESK_NOW } = await import('./helpers/desk-status.js');
+  const withDesk = st => R.deskLoaded(st, { data: deskStatus(), at: DESK_NOW });
+  const { s } = screen({ cn: [MOUTAI], quotes: { 'cn:600519': moutaiQuote() } });
+  const html = renderMarketsScreen(withDesk(s), NOW);
+  assert.match(rowOf(html, 'stock:NVDA'), /<b>NVIDIA[^<]*<\/b><span class="mk-level">stop 170 · -1\.30%<\/span>/);
+  assert.match(rowOf(html, 'cn:600519'), /<span class="mk-level">buy_zone 1600-1650<\/span>/);
+  assert.doesNotMatch(rowOf(html, 'coin:BTC'), /mk-level/);
+  assert.doesNotMatch(renderMarketsScreen(s, NOW), /mk-level/, 'no status, no marks');
+  // the pages: the Account's NVDA and the A share
+  const nvda = screen({ route: { screen: 'markets', id: 'stock:NVDA' }, account: true });
+  const page = renderMarketsScreen(withDesk(nvda.s), NOW);
+  assert.match(page, /<p class="mk-plan"><span class="mk-level">stop 170 · -1\.30%<\/span> sell half on a close below 170 · desk\/levels\.yml<\/p>/);
+  const cn = screen({ route: { screen: 'markets', id: 'cn:600519' }, cn: [MOUTAI], quotes: { 'cn:600519': moutaiQuote() } });
+  assert.match(renderMarketsScreen(withDesk(cn.s), NOW), /<p class="mk-plan"><span class="mk-level">buy_zone 1600-1650<\/span> add 100 shares in the zone · desk\/levels\.yml<\/p>/);
+  assert.doesNotMatch(renderMarketsScreen(nvda.s, NOW), /mk-plan/);
 });
