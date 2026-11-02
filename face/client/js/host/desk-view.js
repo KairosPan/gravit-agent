@@ -87,10 +87,13 @@ function standingNotesOf(s) {
   else if (orders.length === 0) notes.push('standing orders: none armed (npm run desk -- arm)');
   if (isRecord(s.ledger)) notes.push(`standing orders stopped: the firing ledger cannot be read (${str(s.ledger.error)})`);
   if (s.calendar?.state === 'failed') notes.push(`standing orders: no calendar today, ${str(s.calendar.clock)}: ${str(s.calendar.error) || 'no reason given'}`);
+  const cn = s.calendars?.cn;
+  if (cn?.state === 'failed') notes.push(`standing orders: no A-share calendar today, ${str(cn.clock)}: ${str(cn.error) || 'no reason given'}`);
   return notes;
 }
-// an order's state past its anchor: its firing running, disabled, expired, its text's or script's pin moved or gone, else when
-// it next falls — `timed` only then, the one state src/desk.ts orderState says after the order's anchor
+// an order's state past its anchor: its firing running, disabled, expired, its text's or script's pin moved or gone, its
+// strategy's levels.yml changed, gone or unreadable, else when it next falls — `timed` only then, the one state src/desk.ts
+// orderState says after the order's anchor
 function nextOf(o, running, now) {
   const state = next => ({ next, timed: false });
   if (isRecord(running) && str(running.key).startsWith(`${o.id}:`)) return state(`running since ${deskTime(running.startedAt, now)}`);
@@ -103,7 +106,19 @@ function nextOf(o, running, now) {
   const script = str(o.producer) || 'its producer';
   if (o.producerHash === 'changed') return state(`${script} ${rearm}`);
   if (o.producerHash === 'missing') return state(`${script} is missing`);
+  const levels = `${str(o.dir)}/levels.yml`;
+  if (o.levelsHash === 'changed') return state(`${levels} ${rearm}`);
+  if (o.levelsHash === 'missing') return state(`${levels} is gone since arming (npm run desk -- rearm ${o.id})`);
+  if (o.levelsHash === 'unreadable') return state(`${levels} cannot be read`);
   return { next: o.nextAnchor === undefined ? "no session in the calendar's window" : `next ${deskTime(o.nextAnchor, now)}`, timed: true };
+}
+
+// the hash cell: the text's pin, else - the text's and the script's pins ok - the levels.yml pin's state when it is not
+const LEVELS_CELL = { changed: 'levels.yml changed', missing: 'levels.yml gone', unreadable: 'levels.yml unreadable' };
+function hashCell(o) {
+  const hash = str(o.hash);
+  if (hash !== 'ok' || (o.producerHash !== undefined && o.producerHash !== 'ok')) return hash;
+  return LEVELS_CELL[o.levelsHash] ?? hash;
 }
 
 // ---- the watch (src/desk.ts watchLines)
@@ -216,7 +231,9 @@ function gapWord(ms) {
  *  without), `watch` the watch's head (null while it does not run); `markets` each market's line (null while it is off) and
  *  its own session date's counts (`today`, null with none) — a market with neither is left out; `pending`, `muted` and
  *  `ledger` the alert lines (null when they do not hold), `filings` the filings' line; `alerts` the watch's recent ones,
- *  newest first; `levels` the watch's marks; `standing` the orders of the last good load (`timed` when its state is when it next falls, which its anchor leads) and `standingNotes` what holds the
+ *  newest first; `levels` the watch's marks; `standing` the orders of the last good load (`market` its market, `us` when
+ *  it names none; `hash` its pins' state, a strategy's levels.yml named when the text's and the script's hold; `timed` when
+ *  its state is when it next falls, which its anchor leads) and `standingNotes` what holds the
  *  whole book; `firings` the recent firings; `runs` the last ten, newest first; `asleep` this run's gaps; `files` the watch's
  *  files with a refusal or an error; `ledgerError` the desk ledger's, as the budget names it. */
 export function deskViewOf(status, nowIso) {
@@ -245,7 +262,7 @@ export function deskViewOf(status, nowIso) {
     alerts: w ? records(w.recent).map(a => alertOf(a, now)) : [],
     levels: w ? records(w.marks).map(m => ({ market: MARKET_NAMES[m.market] ?? str(m.market), symbol: str(m.symbol), label: labelOf(m), plan: str(m.plan), file: str(m.file) })) : [],
     standing: standing ? records(standing.orders).map(o => ({
-      id: str(o.id), anchor: str(o.at), ...nextOf(o, standing.running, now), hash: str(o.hash),
+      id: str(o.id), market: o.market === 'cn' ? 'cn' : 'us', anchor: str(o.at), ...nextOf(o, standing.running, now), hash: hashCell(o),
       last: isRecord(o.last) ? `last ${str(o.last.outcome)} ${deskTime(o.last.t, now)}` : '',
     })) : [],
     standingNotes: standing ? standingNotesOf(standing) : [],

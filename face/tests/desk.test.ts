@@ -1129,6 +1129,31 @@ test("desk.ts names standing.ts for its types alone", async () => {
 
 /* P2: the standing orders and the day's budget as the terminal's `status` and the phone's /status print them. */
 
+test("standingLines names a changed, gone or unreadable levels.yml, an A-share order's market and the A-share calendar's failure", () => {
+  const now = new Date("2026-11-30T12:00:00Z"); // 07:00 ET
+  type Order = StandingStatus["orders"][number];
+  const report: Order = {
+    id: "demo-report", dir: "strategies/demo", market: "us", file: "STANDING.md", at: "open-90m", producer: "builtin:report", wake: true, enabled: true,
+    expires: "2026-12-31", expired: false, hash: "ok", levelsHash: "ok", nextAnchor: "2026-11-30T13:00:00.000Z",
+  };
+  const calendar: StandingStatus["calendar"] = { clock: "fake clock", state: "ok" };
+  const base: StandingStatus = { file: { path: "/h/face/desk/standing.yml", state: "loaded" }, calendar, orders: [report], queued: [], recent: [] };
+  const one = (fields: Partial<Order>, s: Partial<StandingStatus> = {}): string[] => standingLines({ ...base, ...s, orders: [{ ...report, ...fields }] }, now);
+  assert.deepEqual(one({}), ["standing demo-report: open-90m, next 08:00 ET"]);
+  assert.deepEqual(one({ levelsHash: "changed" }), ["standing demo-report: strategies/demo/levels.yml changed since arming (npm run desk -- rearm demo-report)"]);
+  assert.deepEqual(one({ levelsHash: "missing" }), ["standing demo-report: strategies/demo/levels.yml is gone since arming (npm run desk -- rearm demo-report)"]);
+  assert.deepEqual(one({ levelsHash: "unreadable" }), ["standing demo-report: strategies/demo/levels.yml cannot be read"]);
+  assert.deepEqual(one({ levelsHash: "unknown" }), ["standing demo-report: open-90m, next 08:00 ET"], "a pin not yet checked claims nothing");
+  assert.deepEqual(one({ hash: "changed", levelsHash: "changed" }),
+    ["standing demo-report: strategies/demo/STANDING.md changed since arming (npm run desk -- rearm demo-report)"], "the text's pin before the levels'");
+
+  const cn: StandingStatus["calendar"] = { clock: "fake XSHG", state: "failed", error: "the fake calendar has no 2026-12-01" };
+  assert.deepEqual(one({ id: "lunhui-report", market: "cn", nextAnchor: "2026-12-01T00:00:00.000Z" }, { calendars: { us: calendar, cn } }), [
+    "standing orders: no A-share calendar today, fake XSHG: the fake calendar has no 2026-12-01",
+    "standing lunhui-report: market cn, open-90m, next 19:00 ET",
+  ]);
+});
+
 test("standingLines and budgetLine print the orders, the calendar and the budget exactly", () => {
   const now = new Date("2026-11-27T16:00:00Z"); // 11:00 ET
   const last: FiringSummary = {
@@ -1516,6 +1541,7 @@ test("installDesk starts the watch with a source, shares the US calendar with th
   assert.equal(handle.status().markets.us.state, "closed");
   const routed = JSON.parse(await rec.call("/data/desk/status")) as { body: DeskStatus };
   assert.equal(routed.body.watch?.state, "watching", "the status route carries the watch");
+  assert.equal(routed.body.standing?.calendars?.cn?.clock, "fake XSHG", "the clock row holds the same XSHG calendar as the watch");
 
   /* an alert's annotation turn is cut at alertDeadlineMs */
   await until("the conversation's start", () => fake.listeners.size === 1);

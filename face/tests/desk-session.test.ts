@@ -718,6 +718,24 @@ test("createDeskAgent opens a desk agent in its cwd with the desk's setup and re
   assert.deepEqual(await readEvents(home), { events: [], skipped: 0 }, "a firing is never the phone conversation");
 });
 
+test("createDeskAgent with make: false never makes its cwd: one gone, or not a directory, rejects before any session", async () => {
+  const root = await fixture("make-repo");
+  const home = await fixture("make-home");
+  const tree = new FakeDeskTree();
+  const cwd = join(root, "strategies", "x");
+  await assert.rejects(createDeskAgent(sessionDeps(tree, root, home), { cwd, make: false }), { message: "strategies/x is gone" });
+  await assert.rejects(stat(cwd), { code: "ENOENT" }, "no directory made");
+  await mkdir(join(root, "strategies"), { recursive: true });
+  await writeFile(cwd, "a file\n");
+  await assert.rejects(createDeskAgent(sessionDeps(tree, root, home), { cwd, make: false }), { message: "strategies/x is not a directory" });
+  assert.deepEqual(tree.created, [], "no session was asked for");
+  await rm(cwd);
+  await mkdir(cwd);
+  const there = await createDeskAgent(sessionDeps(tree, root, home), { cwd, make: false });
+  assert.equal(tree.created.length, 1, "a directory that is there opens");
+  await there.dispose();
+});
+
 test("createDeskAgent's dispose disposes the handle once, never throws, and logs a failure", async () => {
   const root = await fixture("dispose-repo");
   const home = await fixture("dispose-home");

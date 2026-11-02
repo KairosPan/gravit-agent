@@ -1260,9 +1260,10 @@ function statusTime(iso: string, now: Date): string {
 }
 
 /** One standing order's state as its line says it: the first of these that holds - its firing running,
- * the order disabled, expired, its text's pin moved or the text gone, the same of its script - else its
- * anchor and when it next falls, or that the calendar's window holds no session for it. A pin not yet
- * checked (`unknown`) claims nothing. A firing's key is `<id>:<date>`, and an id holds no `:`. */
+ * the order disabled, expired, its text's pin moved or the text gone, the same of its script, its
+ * strategy's `levels.yml` changed, gone or unreadable since arming - else its anchor and when it next
+ * falls, or that the calendar's window holds no session for it. A pin not yet checked (`unknown`) claims
+ * nothing. A firing's key is `<id>:<date>`, and an id holds no `:`. */
 function orderState(order: StandingStatus["orders"][number], running: StandingStatus["running"], now: Date): string {
   if (running !== undefined && running.key.startsWith(`${order.id}:`)) return `running since ${statusTime(running.startedAt, now)}`;
   if (!order.enabled) return "disabled";
@@ -1274,6 +1275,10 @@ function orderState(order: StandingStatus["orders"][number], running: StandingSt
   const script = order.producer ?? "its producer";
   if (order.producerHash === "changed") return `${script} ${rearm}`;
   if (order.producerHash === "missing") return `${script} is missing`;
+  const levels = `${order.dir}/levels.yml`;
+  if (order.levelsHash === "changed") return `${levels} ${rearm}`;
+  if (order.levelsHash === "missing") return `${levels} is gone since arming (npm run desk -- rearm ${order.id})`;
+  if (order.levelsHash === "unreadable") return `${levels} cannot be read`;
   return order.nextAnchor === undefined
     ? `${order.at}, no session in the calendar's window`
     : `${order.at}, next ${statusTime(order.nextAnchor, now)}`;
@@ -1284,9 +1289,11 @@ function orderState(order: StandingStatus["orders"][number], running: StandingSt
  * first what holds the whole book - `standing orders: none armed (npm run desk -- arm)` while it has no
  * order and is not refused, else `standing orders stopped: standing.yml is refused: <its errors, joined by
  * "; " and cut at 200 characters>`; `standing orders stopped: the firing ledger cannot be read (<code>)`;
- * `standing orders: no calendar today, <clock>: <error>` - then a line per order of the last good load,
- * `standing <id>: <state>` ({@link orderState}), with `; last <outcome> <time>` after it once the order
- * has fired. Times are New York's, as {@link deskTime} shows them.
+ * `standing orders: no calendar today, <clock>: <error>` for the US calendar, `standing orders: no A-share
+ * calendar today, <clock>: <error>` for the A-share one - then a line per order of the last good load,
+ * `standing <id>: <state>` ({@link orderState}) - `standing <id>: market cn, <state>` for an A-share order -
+ * with `; last <outcome> <time>` after it once the order has fired. Times are New York's, as
+ * {@link deskTime} shows them.
  * @param s - the standing orders' status.
  * @param now - when the lines are read: what "today" is.
  */
@@ -1297,9 +1304,12 @@ export function standingLines(s: StandingStatus, now: Date): string[] {
   } else if (s.orders.length === 0) lines.push("standing orders: none armed (npm run desk -- arm)");
   if (s.ledger !== undefined) lines.push(`standing orders stopped: the firing ledger cannot be read (${s.ledger.error})`);
   if (s.calendar.state === "failed") lines.push(`standing orders: no calendar today, ${s.calendar.clock}: ${s.calendar.error ?? "no reason given"}`);
+  const cn = s.calendars?.cn;
+  if (cn?.state === "failed") lines.push(`standing orders: no A-share calendar today, ${cn.clock}: ${cn.error ?? "no reason given"}`);
   for (const order of s.orders) {
     const last = order.last === undefined ? "" : `; last ${order.last.outcome} ${statusTime(order.last.t, now)}`;
-    lines.push(`standing ${order.id}: ${orderState(order, s.running, now)}${last}`);
+    const market = order.market === "cn" ? "market cn, " : "";
+    lines.push(`standing ${order.id}: ${market}${orderState(order, s.running, now)}${last}`);
   }
   return lines;
 }
@@ -1701,7 +1711,7 @@ export function installDesk(
    * js-yaml - once the bridge has set the outlet, so the boot's lines reach the phone. It never rejects: a module that
    * cannot load, or a clock that cannot start, is one line and `undefined`; one that arrives once dispose has begun
    * starts nothing. The desk's one pair of market calendars (P3's ruling 13) is made here, from the schedule's
-   * module, so src/xshg-clock.ts loads with it and never with this file: the clock row takes its `us`, the watch the
+   * module, so src/xshg-clock.ts loads with it and never with this file: the clock row and the watch share the
    * pair. */
   let calendars: DeskCalendars | undefined;
   const scheduling = wiring === undefined || conversation === undefined ? undefined : bridging
@@ -1725,7 +1735,7 @@ export function installDesk(
         log,
         /* the schedule's clock reads the same now as the conversation's, unless a test hands it a clock of its own */
         ...(deps.now === undefined ? {} : { now: deps.now }),
-        seams: { ...deps.schedule, calendar: calendars.us },
+        seams: { ...deps.schedule, calendar: calendars.us, calendars },
       });
       return schedule;
     })

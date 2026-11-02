@@ -11,29 +11,34 @@
  *   one phone line per distinct refusal; the last good load's orders stay in the status, its budget cap the day's.
  * - The firing ledger is read once, for the keys it holds and the firings a restart cut off; one it cannot read
  *   stops every firing, one `standing-error` event and one line per distinct reason, and is read again each tick.
- * - With an enabled, unexpired order, the market calendar answers for today's New York date (src/market-clock.ts);
- *   a date it cannot answer is one `calendar-error` event and one line, and no anchored order fires until it can.
- * - Each order, in file order: a disabled one is skipped; one past its `expires` is one `expired` record and line per
- *   expiry; a closed day is silent; else {@link decide} says whether today's anchor is due, missed or settled. A
+ * - Per market with an enabled order unexpired on that market's date - `us` on New York's, `cn` on Beijing's
+ *   (src/et.ts `dateOf`; an order with no `market` is `us`) - that market's calendar answers for its date once
+ *   (src/market-clock.ts); a date it cannot answer is one `calendar-error` event and one line, and no order of that
+ *   market fires until it can - the other market's go on.
+ * - Each order, in file order, on its own market's answer and date: a disabled one is skipped; one past its `expires`
+ *   is one `expired` record and line per expiry; a closed day is silent; else {@link decide} says whether today's
+ *   anchor is due, missed or settled. The day's budget stays New York's (src/desk.ts `readBudget`). A
  *   missed anchor says why: the face asleep across it (a gap between two ticks over the sleep watch's threshold),
  *   not running when it came, or finding it late.
  *
- * THE KEY. A firing's key, `<id>:<session date>`, is consumed only by its `started` record, appended through
+ * THE KEY. A firing's key, `<id>:<session date>` - its market's date - is consumed only by its `started` record, appended through
  * src/desk.ts `appendRecordOnce` under the ledger's lock (P2-23): of two faces on one home, one runs it. A refusal
  * consumes nothing - a rearm or a resume inside the grace fires that day - and a key whose grace passes refused is
  * settled, never missed. A `started` with no end at boot was cut off: one `interrupted` record and line, never run
- * again. Earlier days are never back-filled. A rotation of the ledger hands the day's `started` lines to the new file,
- * which is the only one the once-only append reads.
+ * again. Earlier days are never back-filled. A rotation of the ledger hands either market's today's `started` lines to
+ * the new file, which is the only one the once-only append reads.
  *
  * THE RUNNER takes one firing at a time, in queue order - a queued one runs even past its grace (P2-11) - and for
  * each: the order looked up again in the last load; src/firing.ts `checkFiring`, whose refusal is recorded once per
- * key and phoned as {@link refusalLine} says; the `started`; then `runFiring`.
+ * key and phoned as {@link refusalLine} says - a strategy's `levels.yml` pin among them, checked after the fence; the
+ * `started`; then `runFiring`.
  *
  * FAILURES never reach the face (P2-21): a tick, the reload, the calendar, the budget's note - each is caught, one
  * `gravit-face: desk: schedule <what>: <reason>` line per distinct failure, and the next tick is armed regardless.
  *
- * MODULE WEIGHT. This module brings src/firing.ts (src/desk-session.ts, the desk preset, dsh-agent), src/standing.ts
- * (js-yaml), src/brief.ts and src/market-clock.ts: src/desk.ts loads it on first use, so the pause switch never does.
+ * MODULE WEIGHT. This module brings src/firing.ts (src/desk-session.ts, the desk preset, dsh-agent, src/desk-book.ts),
+ * src/standing.ts (js-yaml), src/brief.ts, src/report.ts and src/market-clock.ts (src/xshg-clock.ts): src/desk.ts
+ * loads it on first use, so the pause switch never does.
  * @module
  */
 import { readFile, stat } from "node:fs/promises";
@@ -45,17 +50,24 @@ import {
 } from "./desk.ts";
 import type { DeliverResult } from "./desk-conversation.ts";
 import { createDeskAgent, type DeskClock, type DeskSessionDeps, type SessionEventsOn } from "./desk-session.ts";
-import { etDate } from "./et.ts";
+import { dateOf } from "./et.ts";
 import {
   checkFiring, FIRING_SLACK_MS, firingKey, isFiringRecord, LINES, outcomeOf, repoRelative, resolveFiringRoute, runFiring,
   type ExpiredRecord, type FiringDeps, type FiringItem, type FiringRecord, type InterruptedRecord, type MissedRecord, type Refusal,
   type RefusedRecord, type StartedRecord, type Verified,
 } from "./firing.ts";
-import { createMarketCalendar, sessionFor, type DayAnswer, type MarketCalendar, type MarketSession } from "./market-clock.ts";
+import { deskCalendars, sessionFor, type DayAnswer, type DeskCalendars, type MarketCalendar, type MarketSession } from "./market-clock.ts";
 export { deskCalendars, type DeskCalendars } from "./market-clock.ts";
-import { defaultProducerRunner, formatProducer } from "./producer.ts";
-import type { MarketQuoteSource } from "./market-quotes.ts";
-import { anchorInstant, GRACE_MS, parseStanding, STANDING_FILE, type FiringSummary, type StandingOrder, type StandingStatus } from "./standing.ts";
+import { defaultProducerRunner, formatProducer, type BuiltinName, type BuiltinProducer } from "./producer.ts";
+import { unwiredMarketQuotes, type MarketQuoteSource } from "./market-quotes.ts";
+import { reportProducer } from "./report.ts";
+import {
+  anchorInstant, GRACE_MS, needsLevelsPin, orderMarket, parseStanding, STANDING_FILE, type FiringSummary, type StandingOrder, type StandingStatus,
+} from "./standing.ts";
+import type { Market } from "./symbols.ts";
+
+/** The markets in the order a tick asks their calendars. */
+const MARKETS: readonly Market[] = ["us", "cn"];
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; desk lines add `desk:`. */
 const BIN = "gravit-face";
@@ -111,11 +123,14 @@ export function decide(input: {
 
 /** What the clock row reads of its world: a firing's ({@link FiringDeps}), whose `clock` is its one clock - every
  * tick, every record's `t`, the budget's and the pause's now - and `bootedAt`, when this run began (the clock's now at
- * install by default); `calendar`, the market calendar; `tickMs` and `graceMs`, {@link SCHEDULE_TICK_MS} and
- * src/standing.ts `GRACE_MS` by default; `firing`, the checks and the run (src/firing.ts's, by default). */
+ * install by default); `calendar`, the US market calendar (XNYS, New York dates); `calendars`, either market's - its
+ * `us` in place of `calendar`, its `cn` the A-share one (XSHG, Beijing dates), src/market-clock.ts `deskCalendars()`'s
+ * builtin, offline one by default; `tickMs` and `graceMs`, {@link SCHEDULE_TICK_MS} and src/standing.ts `GRACE_MS` by
+ * default; `firing`, the checks and the run (src/firing.ts's, by default). */
 export interface ScheduleDeps extends FiringDeps {
   bootedAt?: number;
   calendar: MarketCalendar;
+  calendars?: Partial<DeskCalendars>;
   tickMs?: number;
   graceMs?: number;
   firing?: { check: typeof checkFiring; run: typeof runFiring };
@@ -132,6 +147,12 @@ export interface ScheduleHandle {
 
 /** A pin's state against the file on disk, as the status shows it. */
 type HashState = StandingStatus["orders"][number]["hash"];
+/** A `levels.yml` pin's state, as the status shows it. */
+type LevelsState = NonNullable<StandingStatus["orders"][number]["levelsHash"]>;
+
+/** A `levels-hash` refusal's detail as the status names the file's state. */
+const levelsStateOf = (detail: string): LevelsState =>
+  (detail === "missing" ? "missing" : detail.startsWith("unreadable (") ? "unreadable" : "changed");
 
 /** Whether a line of the firing ledger, its object, is a record of `kind` for `key`. */
 const recordOf = (kind: FiringRecord["kind"], key: string) => (x: unknown): boolean => isFiringRecord(x) && x.kind === kind && x.key === key;
@@ -197,6 +218,11 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   const graceMs = deps.graceMs ?? GRACE_MS;
   const bootedAt = deps.bootedAt ?? clock.now();
   const firing = deps.firing ?? { check: checkFiring, run: runFiring };
+  /* each market's calendar: P2's `calendar` is the US one; the A-share one is made only when none is given */
+  const calendars: DeskCalendars = {
+    us: deps.calendars?.us ?? deps.calendar,
+    cn: deps.calendars?.cn ?? deskCalendars().cn,
+  };
   const standingPath = join(deskDir(home), STANDING_FILE);
   const ledgerPath = join(deskDir(home), FIRINGS_FILE);
   let disposed = false;
@@ -262,13 +288,15 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
    * as it ended and phones no false `interrupted`; and the `expired` lines of the loaded orders' expiries, so an
    * expiry is not phoned twice (p2-m28). The clock row's own appends and a firing's carry it alike. */
   const carry = (rotated: string): string[] => {
-    const today = etDate(new Date(clock.now()));
+    const now = clock.now();
+    /* either market's today: an A-share firing at 19:00 ET is dated the next Beijing day */
+    const today = new Set(MARKETS.map((market) => dateOf(market, now)));
     const expiryKeys = new Set(orders.map((order) => firingKey(order.id, order.expires)));
     return rotated.split("\n").filter((line) => {
       const r = lineRecord(line);
       if (r === undefined) return false;
       if (r.kind === "expired") return expiryKeys.has(r.key);
-      return CARRIED.has(r.kind) && "date" in r && r.date === today;
+      return CARRIED.has(r.kind) && "date" in r && typeof r.date === "string" && today.has(r.date);
     });
   };
   const ledgerOpts = { log, carry };
@@ -278,7 +306,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   const missed = new Set<string>();
   /** Each key's last refusal. */
   const refusals = new Map<string, { reason: Refusal["reason"]; detail?: string }>();
-  /** Each order's last phoned detail of a `hash` or a `producer-hash` refusal, by `<order> <reason>`. */
+  /** Each order's last phoned detail of a `hash`, a `producer-hash` or a `levels-hash` refusal, by `<order> <reason>`. */
   const phonedDetail = new Map<string, string>();
   /** The `expired` records' keys, `<id>:<expires>`: one each. */
   const expiries = new Set<string>();
@@ -291,7 +319,9 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   const lastOf = new Map<string, FiringSummary>();
   let recent: FiringSummary[] = [];
   /** Each order's pins as its last check found them, and the pins it checked. */
-  const checked = new Map<string, { sha256: string; producerSha256?: string; hash: HashState; producerHash?: HashState }>();
+  const checked = new Map<string, {
+    sha256: string; producerSha256?: string; levelsSha256?: string; hash: HashState; producerHash?: HashState; levelsHash?: LevelsState;
+  }>();
 
   /** Fold a record into what the clock row knows - from the ledger at its read, or as this face writes it. */
   const note = (r: FiringRecord): void => {
@@ -305,7 +335,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
         break;
       case "refused":
         refusals.set(r.key, { reason: r.reason, ...(r.detail === undefined ? {} : { detail: refusalDetail(r.detail, r.producerDetail) }) });
-        if (r.reported === true && (r.reason === "hash" || r.reason === "producer-hash") && typeof r.detail === "string") {
+        if (r.reported === true && (r.reason === "hash" || r.reason === "producer-hash" || r.reason === "levels-hash") && typeof r.detail === "string") {
           phonedDetail.set(`${r.order} ${r.reason}`, refusalDetail(r.detail, r.producerDetail));
         }
         break;
@@ -509,32 +539,35 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     }
   };
 
-  /* ---- the calendar ---- */
-  /** This face's last answer from the calendar. */
-  let answer: DayAnswer | undefined;
-  /** The dates whose failure was recorded, and those whose line got past the pause: a held one is phoned at the next
-   * tick that still finds the date failed. Seeded from `events.jsonl` at boot (p2-m32). */
+  /* ---- the calendars, one per market ---- */
+  /** This face's last answer from each market's calendar. */
+  const answers: Partial<Record<Market, DayAnswer>> = {};
+  /** The `<market>:<date>`s whose failure was recorded, and those whose line got past the pause: a held one is phoned
+   * at the next tick that still finds the date failed. Seeded from `events.jsonl` at boot (p2-m32). */
   const calendarEvented = new Set<string>();
   const calendarPhoned = new Set<string>();
 
-  const askCalendar = async (now: number): Promise<DayAnswer | undefined> => {
+  const askCalendar = async (market: Market, now: number): Promise<DayAnswer | undefined> => {
+    const calendar = calendars[market];
+    const what = market === "us" ? "calendar" : "A-share calendar";
     let got: DayAnswer;
     try {
-      got = await deps.calendar.today(now);
+      got = await calendar.today(now);
     } catch (err) {
-      fail("calendar", err);
+      fail(what, err);
       return undefined;
     }
-    recover("calendar");
-    answer = got;
-    if (!got.ok && !calendarEvented.has(got.date)) {
-      calendarEvented.add(got.date);
+    recover(what);
+    answers[market] = got;
+    const day = `${market}:${got.date}`;
+    if (!got.ok && !calendarEvented.has(day)) {
+      calendarEvented.add(day);
       const reached = await deliverable();
       await appendEvent(home, {
-        t: iso(now), kind: "calendar-error", date: got.date, clock: deps.calendar.clock, error: got.error, ...(reached ? {} : { phoned: false as const }),
+        t: iso(now), kind: "calendar-error", date: got.date, clock: calendar.clock, error: got.error, ...(reached ? {} : { phoned: false as const }),
       }, { log });
     }
-    if (!got.ok && !calendarPhoned.has(got.date) && (await send(LINES.noCalendar(deps.calendar.clock, got.error)))) calendarPhoned.add(got.date);
+    if (!got.ok && !calendarPhoned.has(day) && (await send(LINES.noCalendar(calendar.clock, got.error, market, got.date)))) calendarPhoned.add(day);
     return got;
   };
 
@@ -595,8 +628,8 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   let seeded = false;
 
   /** At boot: what `events.jsonl` says this home already recorded and phoned today - the last refusal of
-   * `standing.yml` and today's calendar failure - so a restart neither records nor phones them twice; one held back
-   * by the pause (`phoned: false`) is phoned again. An unreadable ledger seeds nothing. */
+   * `standing.yml` and each market's calendar failure on its own today - so a restart neither records nor phones them
+   * twice; one held back by the pause (`phoned: false`) is phoned again. An unreadable ledger seeds nothing. */
   const seed = async (now: number): Promise<void> => {
     let events: Awaited<ReturnType<typeof readEvents>>["events"];
     try {
@@ -604,15 +637,18 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     } catch {
       return;
     }
-    const today = etDate(new Date(now));
     const ledgerError = `${ledgerPath} cannot be read (`;
     for (const e of events) {
       if (e.kind === "standing-error" && Array.isArray(e.errors) && !(e.errors.length === 1 && String(e.errors[0]).startsWith(ledgerError))) {
         eventedRefusal = e.errors.join("\n");
         phonedRefusal = e.phoned === false ? undefined : eventedRefusal;
-      } else if (e.kind === "calendar-error" && e.date === today) {
-        calendarEvented.add(e.date);
-        if (e.phoned !== false) calendarPhoned.add(e.date);
+      } else if (e.kind === "calendar-error") {
+        /* the market whose calendar is the event's clock, on that market's today (the event names no market) */
+        for (const market of MARKETS) {
+          if (calendars[market].clock !== e.clock || e.date !== dateOf(market, now)) continue;
+          calendarEvented.add(`${market}:${e.date}`);
+          if (e.phoned !== false) calendarPhoned.add(`${market}:${e.date}`);
+        }
       }
     }
   };
@@ -632,17 +668,24 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     if (!ledgerRead && !(await readLedger(now))) return;
     await judgeYoung(now);
     if (fileState === "refused") return;
-    const today = etDate(new Date(now));
-    const day = orders.some((order) => order.enabled && today <= order.expires) ? await askCalendar(now) : undefined;
+    /* one ask per market with an order in force on its own date: each order is weighed on its market's answer */
+    const days: Partial<Record<Market, DayAnswer>> = {};
+    for (const market of MARKETS) {
+      const today = dateOf(market, now);
+      if (!orders.some((order) => orderMarket(order) === market && order.enabled && today <= order.expires)) continue;
+      days[market] = await askCalendar(market, now);
+    }
     for (const order of orders) {
       if (!order.enabled) {
         disabledAt.set(order.id, now);
         continue;
       }
-      if (today > order.expires) {
+      const market = orderMarket(order);
+      if (dateOf(market, now) > order.expires) {
         await expire(order, now);
         continue;
       }
+      const day = days[market];
       if (day === undefined || !day.ok || day.session === "closed") continue;
       await weigh(order, day.session, now, since);
     }
@@ -703,12 +746,16 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   /** A check's pins, kept with the pins it checked, for the status. A pause or a budget refuses before any pin is read. */
   const notePins = (order: StandingOrder, verdict: { refuse: Refusal } | { go: Verified }): void => {
     const script = order.producer?.kind === "script";
+    const pinned = needsLevelsPin(order);
     const state = (detail: string): HashState => (detail === "missing" ? "missing" : "changed");
     let hash: HashState;
     let producerHash: HashState | undefined;
+    /* the levels are read last: a refusal before them leaves their state unknown */
+    let levelsHash: LevelsState | undefined = pinned ? "unknown" : undefined;
     if ("go" in verdict) {
       hash = "ok";
       producerHash = script ? "ok" : undefined;
+      levelsHash = pinned ? "ok" : undefined;
     } else {
       const refusal = verdict.refuse;
       if (refusal.reason === "off" || refusal.reason === "budget") return;
@@ -718,6 +765,10 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
       } else if (refusal.reason === "producer-hash") {
         hash = "ok";
         producerHash = state(refusal.detail);
+      } else if (refusal.reason === "levels-hash") {
+        hash = "ok";
+        producerHash = script ? "ok" : undefined;
+        levelsHash = levelsStateOf(refusal.detail);
       } else {
         hash = "ok";
         producerHash = script ? "ok" : undefined;
@@ -726,8 +777,10 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     checked.set(order.id, {
       sha256: order.sha256,
       ...(order.producerSha256 === undefined ? {} : { producerSha256: order.producerSha256 }),
+      ...(order.levelsSha256 === undefined ? {} : { levelsSha256: order.levelsSha256 }),
       hash,
       ...(producerHash === undefined ? {} : { producerHash }),
+      ...(levelsHash === undefined ? {} : { levelsHash }),
     });
   };
 
@@ -744,8 +797,8 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     }
   };
 
-  /** The phone's line for a refusal recorded now, or `undefined`: `off` never; `budget` with the day's note; `hash`
-   * and `producer-hash` when the order's last phoned detail for that reason differs; `fence` always. */
+  /** The phone's line for a refusal recorded now, or `undefined`: `off` never; `budget` with the day's note; `hash`,
+   * `producer-hash` and `levels-hash` when the order's last phoned detail for that reason differs; `fence` always. */
   const refusalLine = async (item: FiringItem, refusal: Refusal, now: number): Promise<string | undefined> => {
     const { order, date } = item;
     switch (refusal.reason) {
@@ -765,6 +818,14 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
       }
       case "fence":
         return LINES.fence(order.id, date, refusal.detail);
+      case "levels-hash": {
+        const told = `${order.id} levels-hash`;
+        if (phonedDetail.get(told) === refusal.detail) return undefined;
+        if (refusal.detail === "missing") return LINES.levelsGone(order.id, date, order.dir);
+        const unreadable = /^unreadable \((.*)\)$/s.exec(refusal.detail);
+        if (unreadable !== null) return LINES.levelsUnreadable(order.id, date, order.dir, unreadable[1]);
+        return LINES.levelsChanged(order.id, date, order.dir);
+      }
     }
   };
 
@@ -808,6 +869,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
       at: order.at, anchor: iso(item.anchorMs), standingSha: verdict.go.standingSha,
       ...(order.producer === undefined ? {} : { producer: formatProducer(order.producer) }),
       ...(verdict.go.producerSha === undefined ? {} : { producerSha: verdict.go.producerSha }),
+      ...(order.levelsSha256 === undefined ? {} : { levelsSha: order.levelsSha256 }),
       wake: order.wake, deadlineMs: order.turnDeadlineMs,
     };
     const outcome = await appendRecordOnce(home, FIRINGS_FILE, record, recordOf("started", item.key), ledgerOpts);
@@ -856,9 +918,9 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   /* ---- the status ---- */
 
   /** Today's anchor while it is ahead and unsettled, else the first later session's in the calendar's window - never
-   * one past the order's `expires`. */
+   * one past the order's `expires` - each on the order's market: its calendar, its date. */
   const nextAnchorOf = (order: StandingOrder, now: number, today: string): string | undefined => {
-    const window = deps.calendar.window();
+    const window = calendars[orderMarket(order)].window();
     if (window === undefined) return undefined;
     const session = sessionFor(window, today);
     if (session !== undefined && session !== "closed" && today <= order.expires) {
@@ -870,9 +932,12 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     return later === undefined ? undefined : iso(anchorInstant(order.anchor, later));
   };
 
-  const orderStatus = (order: StandingOrder, now: number, today: string): StandingStatus["orders"][number] => {
+  const orderStatus = (order: StandingOrder, now: number): StandingStatus["orders"][number] => {
+    const market = orderMarket(order);
+    const today = dateOf(market, now);
     const pins = checked.get(order.id);
-    const current = pins !== undefined && pins.sha256 === order.sha256 && pins.producerSha256 === order.producerSha256 ? pins : undefined;
+    const current = pins !== undefined && pins.sha256 === order.sha256 && pins.producerSha256 === order.producerSha256
+      && pins.levelsSha256 === order.levelsSha256 ? pins : undefined;
     let nextAnchor: string | undefined;
     try {
       nextAnchor = nextAnchorOf(order, now, today);
@@ -881,20 +946,22 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     }
     const last = lastOf.get(order.id);
     return {
-      id: order.id, dir: order.dir, file: order.file, at: order.at,
+      id: order.id, dir: order.dir, market, file: order.file, at: order.at,
       ...(order.producer === undefined ? {} : { producer: formatProducer(order.producer) }),
       wake: order.wake, enabled: order.enabled, expires: order.expires, expired: today > order.expires,
       hash: current?.hash ?? "unknown",
       ...(order.producer?.kind === "script" ? { producerHash: current?.producerHash ?? "unknown" } : {}),
+      ...(needsLevelsPin(order) ? { levelsHash: current?.levelsHash ?? "unknown" } : {}),
       ...(nextAnchor === undefined ? {} : { nextAnchor }),
       ...(last === undefined ? {} : { last }),
     };
   };
 
-  /** The calendar as today's answer says it: none asked today is `unknown`. */
-  const calendarStatus = (today: string): StandingStatus["calendar"] => {
-    const clockName = deps.calendar.clock;
-    const day = answer?.date === today ? answer : undefined;
+  /** A market's calendar as its today's answer says it: none asked today is `unknown`. */
+  const calendarStatus = (market: Market, now: number): StandingStatus["calendar"] => {
+    const clockName = calendars[market].clock;
+    const answer = answers[market];
+    const day = answer?.date === dateOf(market, now) ? answer : undefined;
     if (day === undefined) return { clock: clockName, state: "unknown" };
     if (!day.ok) return { clock: clockName, state: "failed", error: day.error };
     const session = day.session;
@@ -909,8 +976,8 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
 
   const status = (): StandingStatus => {
     const now = clock.now();
-    const today = etDate(new Date(now));
     const running = inHand?.started;
+    const us = calendarStatus("us", now);
     return {
       file: {
         path: standingPath,
@@ -919,8 +986,9 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
         ...(fileState === "refused" && refused !== undefined ? { errors: [...refused] } : {}),
       },
       ...(ledgerError === undefined ? {} : { ledger: { error: ledgerError } }),
-      calendar: calendarStatus(today),
-      orders: orders.map((order) => orderStatus(order, now, today)),
+      calendar: us,
+      calendars: { us, cn: calendarStatus("cn", now) },
+      orders: orders.map((order) => orderStatus(order, now)),
       ...(inHand === undefined || running === undefined
         ? {}
         : { running: { key: inHand.key, startedAt: running.at, ...(running.sessionId === undefined ? {} : { sessionId: running.sessionId }) } }),
@@ -966,6 +1034,30 @@ export type FiringRouteCtx = Parameters<typeof resolveFiringRoute>[0];
 /** Whether `ctx` carries the default model and the model calls a firing's route is resolved on. */
 const hasRoutes = (ctx: Partial<FiringRouteCtx>): ctx is FiringRouteCtx => ctx.agentDefaultModel !== undefined && ctx.llm !== undefined;
 
+/**
+ * The face's builtin producers over the Market's one quote source: `report`, src/report.ts `reportProducer` on the
+ * schedule's clock, and `brief`, src/brief.ts `briefProducer`.
+ * @param opts - `quotes` the source, src/market-quotes.ts `unwiredMarketQuotes()` when there is none - then each
+ *   builtin answers `quotes unavailable: <its reason>`, asking nothing; `root` the repository root; `home` the harness
+ *   home the brief's watch blocks read; `now` the schedule's clock.
+ * @param seams - builtins that replace those of the same name, and only those.
+ */
+export function deskBuiltins(
+  opts: { quotes?: MarketQuoteSource; root: string; home: string; now: () => number },
+  seams: Partial<Record<BuiltinName, BuiltinProducer>> = {},
+): Record<BuiltinName, BuiltinProducer> {
+  const quotes = opts.quotes ?? unwiredMarketQuotes();
+  const builtins: Record<BuiltinName, BuiltinProducer> = {
+    brief: briefProducer({ quotes, root: opts.root, home: opts.home }),
+    report: reportProducer({ quotes, root: opts.root, now: opts.now }),
+  };
+  for (const name of Object.keys(builtins) as BuiltinName[]) {
+    const seam = seams[name];
+    if (seam !== undefined) builtins[name] = seam;
+  }
+  return builtins;
+}
+
 /** The face's clock: the wall clock, and timers `unref`'d, so the clock row never holds the process open (the plan's
  * ruling 1). */
 const FACE_CLOCK: DeskClock = {
@@ -975,12 +1067,14 @@ const FACE_CLOCK: DeskClock = {
 };
 
 /**
- * The clock row as the face runs it: {@link installSchedule} with the face's defaults - the market calendar over
- * the builtin XNYS rules (src/market-clock.ts), a script producer under `python -I` (src/producer.ts), `builtin:brief` over the Market's quote source when there is one (src/brief.ts),
+ * The clock row as the face runs it: {@link installSchedule} with the face's defaults - the market calendars, the
+ * builtin XNYS rules and the builtin XSHG table (src/market-clock.ts `deskCalendars`), a script producer under
+ * `python -I` (src/producer.ts), the builtins over the Market's quote source ({@link deskBuiltins}),
  * a fresh desk agent per firing (src/desk-session.ts `createDeskAgent`), the order's route (src/firing.ts
  * `resolveFiringRoute`, on the booted context's default model and model calls), and the day's budget against the last
- * good load's cap. `seams` replaces the clock - the wall clock by default, its timers `unref`'d - the calendar, the
- * script producer's runner, the builtins, the tick and the grace.
+ * good load's cap. `seams` replaces the clock - the wall clock by default, its timers `unref`'d - the US calendar
+ * (`calendar`), either market's (`calendars`, over it), the script producer's runner, any of the builtins by name, the
+ * tick and the grace.
  * @param opts - `home` the harness home; `root` the repository root; `python` the interpreter a `.py` script producer runs
  *   under; `quotes` the desk's quote source, the Market's reads (src/market-quotes.ts); `session` the desk session's deps; `sessionCtx` the booted ROOT context, whose
  *   `agentDefaultModel` and `llm` a firing's route needs - a firing on a context without them could not run; `on` the
@@ -998,7 +1092,7 @@ export function createDeskSchedule(opts: {
   deliver: (text: string) => Promise<DeliverResult>;
   log?: (line: string) => void;
   now?: () => number;
-  seams?: { clock?: DeskClock } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;
+  seams?: { clock?: DeskClock; calendars?: Partial<DeskCalendars> } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;
 }): ScheduleHandle {
   const log = opts.log ?? defaultLog;
   const seams = opts.seams ?? {};
@@ -1007,15 +1101,16 @@ export function createDeskSchedule(opts: {
   const clock = seams.clock ?? (opts.now === undefined ? FACE_CLOCK : { ...FACE_CLOCK, now: opts.now });
   /* the script producer's runner: the given interpreter, isolated */
   const runScript = seams.runScript ?? defaultProducerRunner(opts.python);
-  const calendar = seams.calendar ?? createMarketCalendar();
+  const calendars = deskCalendars({ ...(seams.calendar === undefined ? {} : { us: seams.calendar }), ...seams.calendars });
   const { sessionCtx } = opts;
   const handle: ScheduleHandle = installSchedule({
     home: opts.home,
     root: opts.root,
     clock,
-    calendar,
+    calendar: calendars.us,
+    calendars,
     runScript,
-    builtins: seams.builtins ?? (opts.quotes === undefined ? {} : { brief: briefProducer({ quotes: opts.quotes, root: opts.root, home: opts.home }) }),
+    builtins: deskBuiltins({ ...(opts.quotes === undefined ? {} : { quotes: opts.quotes }), root: opts.root, home: opts.home, now: () => clock.now() }, seams.builtins),
     createAgent: (o) => createDeskAgent(opts.session, o),
     resolveRoute: async (raw) => {
       if (!hasRoutes(sessionCtx)) throw new Error("this face's context names no default model to route a standing order on");

@@ -11,9 +11,11 @@
  * before any file is read, so a `desk/` swapped for a link is refused before a read could follow it (M9); the order's
  * text, whose bytes must hash to the pin `npm run desk -- arm` recorded, read as strictly as arm read them
  * (src/producer.ts `readScriptBytes`: no link followed, no FIFO waited on, no more than the 16,384 bytes arm took); and
- * a script producer's bytes, likewise - both checked, so a refusal names every pin that moved. A refusal consumes nothing: the clock row records it and may ask again inside the grace. What
- * passes carries the very bytes it hashed ({@link Verified}), so the text the model reads is the text the operator
- * armed - never a second read the file could change under.
+ * a script producer's bytes, likewise - both checked, so a refusal names every pin that moved; then, for an order that
+ * wakes in `strategies/<name>`, its `levels.yml` against the pin arm took (src/desk-book.ts `readDeskFile`, read once).
+ * A refusal consumes nothing: the clock row records it and may ask again inside the grace. What passes carries the
+ * very bytes it hashed ({@link Verified}), so the text the model reads is the text the operator armed, and the levels
+ * a producer quotes are the levels checked - never a second read the file could change under.
  *
  * THE RUN ({@link runFiring}), once the clock row has recorded its `started`:
  * - the producer: a builtin raced against the order's producer deadline, or a script through src/producer.ts
@@ -22,7 +24,8 @@
  *   for a script swapped between the check and the run - is a fact the turn is told, never a reason to skip it;
  *   `wake: false` runs the producer alone and speaks only when it fails.
  * - the session: fresh from src/desk-session.ts `createDeskAgent` - no `desk-session` record, so a firing never
- *   becomes the phone's conversation - in the order's cwd, on the order's route ({@link resolveFiringRoute}), the two
+ *   becomes the phone's conversation - in the order's cwd (made only for the desk's journal: a strategy's directory
+ *   gone since the check is a could-not-run, never recreated), on the order's route ({@link resolveFiringRoute}), the two
  *   together bounded by the order's turn deadline on the clock, so a setup that hangs ends the firing as `error`
  *   rather than holding the runner (M1); supervised with the order's own deadline and the chain fence, and woken
  *   once ({@link wakeMessage}) with the schedule's source.
@@ -46,7 +49,8 @@
  * nothing to `firings.jsonl` and sends nothing. The edge: a record the supervisor queued in a microtask at the instant
  * the supervision ends is dropped with it, so such a turn, rarely, goes uncounted (`DEVELOPMENT.md` §9, R45).
  *
- * AN ABORT - the clock row's shutdown - cancels the turn under way as `shutdown`, records nothing more in
+ * AN ABORT - the clock row's shutdown - kills a script producer's group (its `producer` record `aborted`), cancels
+ * the turn under way as `shutdown`, records nothing more in
  * `firings.jsonl`, sends nothing more, lets the session go and resolves `undefined`: a `started` with no `finished`
  * reads as interrupted at the next boot, and is never run again. One that lands while `finished` is written leaves that
  * record, and still resolves `undefined`.
@@ -67,15 +71,17 @@ import {
   cutOffLine, deskTurnEvent, findChainViolation, provenanceLine, resolveDeskRoute, superviseDeskTurns, type DeskClock, type DeskTurnRecord,
   type SessionEventsOn,
 } from "./desk-session.ts";
-import { etClock } from "./et.ts";
+import { readDeskFile } from "./desk-book.ts";
+import { bjSessionTime, etClock } from "./et.ts";
 import type { MarketSession } from "./market-clock.ts";
 import {
   capText, formatDuration, formatProducer, PRODUCER_TEXT_MAX, readScriptBytes, resolveScript, runScriptProducer,
-  type BuiltinName, type BuiltinProducer, type ProducerInput, type ProducerOutput, type ProducerRunner, type ProducerSpec,
+  type BuiltinName, type BuiltinProducer, type ProducerInput, type ProducerOutput, type ProducerRunner, type ProducerSpec, type VerifiedLevels,
 } from "./producer.ts";
 import type { AgentLike } from "./room.ts";
 import type { MessageLike } from "./room-rules.ts";
-import { orderCwd, sha256Hex, STANDING_TEXT_MAX_BYTES, type StandingOrder } from "./standing.ts";
+import { LEVELS_NONE, needsLevelsPin, orderCwd, orderMarket, sha256Hex, STANDING_TEXT_MAX_BYTES, type StandingOrder } from "./standing.ts";
+import type { Market } from "./symbols.ts";
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; desk lines add `desk:`. */
 const BIN = "gravit-face";
@@ -117,28 +123,33 @@ export const OVERSIZED = "oversized";
 
 /** Why {@link checkFiring} refused a firing. A `hash` or `producer-hash` detail is the sha the file holds now,
  * `missing`, or {@link OVERSIZED}; a `hash` refusal's `producerDetail`, the script producer's, when its pin moved too;
- * a `fence` detail is the violation's path, relative to the repository root. */
+ * a `fence` detail is the violation's path, relative to the repository root; a `levels-hash` detail, a strategy's
+ * `levels.yml` against its pin: the sha it holds now, `<n> bytes` past the desk file limit, `missing`, or
+ * `unreadable (<reason>)`. */
 export type Refusal =
   | { reason: "off" }
   | { reason: "budget"; state: BudgetState }
   | { reason: "hash"; detail: string; producerDetail?: string }
   | { reason: "producer-hash"; detail: string }
-  | { reason: "fence"; detail: string };
+  | { reason: "fence"; detail: string }
+  | { reason: "levels-hash"; detail: string };
 
 /** What {@link checkFiring} let through: the turn's cwd, and the order's text as the bytes it hashed, decoded as UTF-8,
- * with their sha - and a script producer's sha. */
+ * with their sha - a script producer's sha, and for an order that pins its strategy's `levels.yml` the bytes checked
+ * against that pin (src/producer.ts `VerifiedLevels`), which the producer is handed, never the file again. */
 export interface Verified {
   cwd: string;
   standingText: string;
   standingSha: string;
   producerSha?: string;
+  levels?: VerifiedLevels;
 }
 
 /** The clock row's record that a firing began: the one record that consumes its key. `cwd` is repo-relative, `anchor`
  * the anchor's instant, `deadlineMs` the turn's. */
 export type StartedRecord = {
   t: string; kind: "started"; key: string; order: string; date: string; dir: string; cwd: string; at: string; anchor: string;
-  standingSha: string; producer?: string; producerSha?: string; wake: boolean; deadlineMs: number;
+  standingSha: string; producer?: string; producerSha?: string; levelsSha?: string; wake: boolean; deadlineMs: number;
 };
 /** A producer's run: how it ended - its error, a script's exit code, whether its deadline stopped it - its wall time,
  * and how many characters it wrote, counted before the cut. */
@@ -353,9 +364,21 @@ export const LINES = {
   /** `firings.jsonl` cannot be read. */
   ledgerUnreadable: (path: string, code: string): string =>
     `the firing ledger ${path} cannot be read (${code}), so no standing order runs until it can`,
-  /** No calendar for the day, naming the clock that failed. */
-  noCalendar: (clock: string, error: string): string =>
-    `no standing order runs today: the market calendar failed in ${clock} (${error})`,
+  /** No calendar for the day, naming the clock that failed: P2's line for the US calendar, the A-share line, on its
+   * Beijing date, for XSHG's. */
+  noCalendar: (clock: string, error: string, market: Market = "us", date?: string): string =>
+    (market === "cn"
+      ? `no A-share standing order runs on ${date ?? "today"}: the market calendar failed in ${clock} (${error})`
+      : `no standing order runs today: the market calendar failed in ${clock} (${error})`),
+  /** A strategy's `levels.yml` changed, appeared or grew past the limit since arming. */
+  levelsChanged: (id: string, date: string, dir: string): string =>
+    `${of(id, date)} refused: ${dir}/levels.yml changed since arming. Review it, then: npm run desk -- rearm ${id}`,
+  /** A strategy's `levels.yml` pinned at arming is gone. */
+  levelsGone: (id: string, date: string, dir: string): string =>
+    `${of(id, date)} refused: ${dir}/levels.yml is gone since arming. Restore it, or re-arm without it: npm run desk -- rearm ${id}`,
+  /** A strategy's `levels.yml` cannot be read: a link, a FIFO, a second name, bytes that are not UTF-8, a code. */
+  levelsUnreadable: (id: string, date: string, dir: string, reason: string): string =>
+    `${of(id, date)} refused: ${dir}/levels.yml cannot be read (${reason})`,
   /** A phone post while the budget is spent: src/desk.ts `budgetReplyLine`, the conversation's own. */
   budgetReply: budgetReplyLine,
 } as const;
@@ -487,7 +510,8 @@ export interface FiringDeps {
   clock: DeskClock;
   runScript: ProducerRunner;
   builtins: Partial<Record<BuiltinName, BuiltinProducer>>;
-  createAgent(opts: { cwd: string; route: Route }): Promise<{ agent: AgentLike; sessionId: string; dispose(): Promise<void> }>;
+  /** `make`: whether the cwd may be made - the desk's journal; a strategy's directory never is (src/desk-session.ts). */
+  createAgent(opts: { cwd: string; route: Route; make?: boolean }): Promise<{ agent: AgentLike; sessionId: string; dispose(): Promise<void> }>;
   resolveRoute(raw: string | undefined): Promise<Route>;
   on: SessionEventsOn;
   supervise?: typeof superviseDeskTurns;
@@ -507,12 +531,13 @@ export interface FiringDeps {
  * anything but a regular file reads as missing; past 16,384 bytes {@link OVERSIZED}) - refused `hash`, the detail its
  * sha, `missing` or `oversized`, unless its bytes hash to `order.sha256`, with `producerDetail` when the script's pin
  * moved too; and a script producer's bytes, found under `scripts/` and read the same way, against
- * `order.producerSha256` - refused `producer-hash` likewise. A refusal never consumes the key: that is the clock row's
- * `started`.
+ * `order.producerSha256` - refused `producer-hash` likewise; and for an order that pins its strategy's `levels.yml`
+ * (src/standing.ts `needsLevelsPin`, with a `levelsSha256`), that file through src/desk-book.ts `readDeskFile` -
+ * refused `levels-hash` (see {@link Refusal}). A refusal never consumes the key: that is the clock row's `started`.
  * @param deps - `home`, `root`, `clock` (the pause's expiry is judged on it), `budget` and `log`, as {@link FiringDeps}.
  * @param order - the order, as last loaded.
  * @returns `{ refuse }` or `{ go }`: the cwd, the text as the bytes hashed, decoded as UTF-8 - so `go.standingText`'s
- *   UTF-8 hashes to the pin - its sha, and a script producer's.
+ *   UTF-8 hashes to the pin - its sha, a script producer's, and the levels checked.
  * @throws TypeError - for an order whose `dir` is not an order's directory (src/standing.ts `orderCwd`), before
  *   anything is read: the caller's mistake, which a loaded order never makes.
  */
@@ -554,7 +579,39 @@ export async function checkFiring(
     return { refuse: { reason: "hash", detail: standingSha, ...(producerMoved === undefined ? {} : { producerDetail: producerMoved }) } };
   }
   if (producerMoved !== undefined) return { refuse: { reason: "producer-hash", detail: producerMoved } };
-  return { go: { cwd, standingText: text.toString("utf8"), standingSha, ...(producerSha === undefined ? {} : { producerSha }) } };
+  let levels: VerifiedLevels | undefined;
+  if (needsLevelsPin(order) && order.levelsSha256 !== undefined) {
+    const checked = await checkLevels(deps.root, order.dir, order.levelsSha256);
+    if ("detail" in checked) return { refuse: { reason: "levels-hash", detail: checked.detail } };
+    levels = checked;
+  }
+  return {
+    go: {
+      cwd, standingText: text.toString("utf8"), standingSha, ...(producerSha === undefined ? {} : { producerSha }), ...(levels === undefined ? {} : { levels }),
+    },
+  };
+}
+
+/**
+ * A strategy's `levels.yml` against the pin arm took, read once through src/desk-book.ts `readDeskFile` - no link
+ * followed, no FIFO waited on, no second name, no more than the desk file limit: absent matches {@link LEVELS_NONE},
+ * else its bytes must hash to the pin.
+ * @returns the bytes checked as {@link VerifiedLevels}, or the refusal's detail: the sha the file holds now, `<n>
+ *   bytes` past the limit (its `lstat` size), `missing`, or `unreadable (<reason>)`.
+ */
+async function checkLevels(root: string, dir: string, pin: string): Promise<VerifiedLevels | { detail: string }> {
+  const file = `${dir}/levels.yml`;
+  const path = join(root, dir, "levels.yml");
+  const read = await readDeskFile(path);
+  if (read.state === "absent") return pin === LEVELS_NONE ? { file, sha256: LEVELS_NONE, text: null } : { detail: "missing" };
+  if (read.state === "unreadable") return { detail: `unreadable (${read.reason})` };
+  if (read.state === "oversize") {
+    /* the read stops one byte past the limit; the size is the file's own, when it can still be read */
+    const size = await lstat(path).then((info) => info.size, () => undefined);
+    return { detail: size === undefined ? OVERSIZED : `${size} bytes` };
+  }
+  const sha256 = sha256Hex(read.bytes);
+  return sha256 === pin ? { file, sha256, text: read.text } : { detail: sha256 };
 }
 
 /* ---------- the wake message ---------- */
@@ -568,8 +625,8 @@ interface Quoted {
 }
 
 /**
- * The message that wakes a firing's turn: its provenance line ([schedule · <id> · <date>]); the session it fires for,
- * when it fired and when the face cancels it - the deadline from `firedAt`, the supervisor's own from the turn's start
+ * The message that wakes a firing's turn: its provenance line ([schedule · <id> · <date>]); the session it fires for -
+ * an A-share one in Beijing's wall clock with New York's beside it (src/et.ts `bjSessionTime`) - when it fired and when the face cancels it - the deadline from `firedAt`, the supervisor's own from the turn's start
  * - and where its final text goes; then the order's text verbatim between its markers, with the sha it was verified
  * by; then, with a producer, its output between its own: `ok, <n> characters`, `ok, cut to 32,768 of <n> characters`
  * or `failed (<error>)`, its text - none when it has none - and the end marker. Lines are joined with `\n`, so the text
@@ -589,9 +646,11 @@ export function wakeMessage(input: {
   const at = new Date(firedAt);
   const label = `${order.dir}/${order.file}`;
   const early = session.early ? ", an early close" : "";
+  /* an A-share session in Beijing's wall clock, New York's beside it: its open falls on the evening before in ET */
+  const sessionTime = (iso: string): string => (orderMarket(order) === "cn" ? bjSessionTime(new Date(iso)) : deskTime(new Date(iso), at));
   const lines = [
     provenanceLine({ kind: "schedule", order: order.id, date }, at),
-    `Standing order ${order.id}, for the ${date} session (open ${deskTime(new Date(session.open), at)}, close ${deskTime(new Date(session.close), at)}${early}), `
+    `Standing order ${order.id}, for the ${date} session (open ${sessionTime(session.open)}, close ${sessionTime(session.close)}${early}), `
       + `fired at ${etClock(at)} ET. The face cancels this turn at ${etClock(new Date(firedAt + order.turnDeadlineMs))} ET; your final text goes to the operator's phone.`,
     "",
     `--- ${label}, sha256 ${verified.standingSha}, as armed ---`,
@@ -757,7 +816,9 @@ async function produce(run: Run, spec: ProducerSpec): Promise<Produced> {
   const { order } = item;
   const input: ProducerInput = {
     order: order.id, firing: item.key, date: item.date, dir: order.dir,
+    ...(order.market === undefined ? {} : { market: order.market }),
     session: { open: item.session.open, close: item.session.close, early: item.session.early },
+    ...(run.verified.levels === undefined ? {} : { levels: run.verified.levels }),
   };
   const name = formatProducer(spec);
   let output: ProducerOutput;
@@ -774,6 +835,7 @@ async function produce(run: Run, spec: ProducerSpec): Promise<Produced> {
       run: deps.runScript,
       input,
       timeoutMs: order.producerDeadlineMs,
+      signal: run.signal,
       log: run.log,
       now: () => deps.clock.now(),
     });
@@ -959,8 +1021,11 @@ async function fire(run: Run): Promise<FinishedRecord | undefined> {
   const { deps, item, signal } = run;
   if (signal.aborted) return undefined;
   let quoted: Quoted | undefined;
-  if (item.order.producer !== undefined) {
-    const produced = await unlessAborted(produce(run, item.order.producer), signal);
+  const spec = item.order.producer;
+  if (spec !== undefined) {
+    /* a script's run ends at the abort - its group killed (src/producer.ts) - and its record says so; a builtin may
+     * not heed its signal, so the firing stops waiting for it */
+    const produced = spec.kind === "script" ? await produce(run, spec) : await unlessAborted(produce(run, spec), signal);
     if (produced === ABORTED) return undefined;
     quoted = produced.quoted;
     const record: ProducerRecord = { t: stamp(deps), kind: "producer", key: item.key, ...produced.record };
@@ -1000,7 +1065,8 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
   const before = await snapshotFiles(cwd);
   if (signal.aborted) return undefined;
   /* a then-callback, so a create that throws is a rejection, and a could-not-run, like one that rejects */
-  const creating = Promise.resolve().then(() => deps.createAgent({ cwd, route }));
+  /* the desk's journal is made when missing; a strategy's directory never is - one gone is a could-not-run */
+  const creating = Promise.resolve().then(() => deps.createAgent({ cwd, route, make: order.dir === "desk" }));
   /* made after the abort or the bound: nobody else holds it */
   const letGo = (): void => { creating.then((late) => late.dispose(), () => {}).catch(() => {}); };
   let session: Awaited<typeof creating>;

@@ -40,7 +40,7 @@ test('deskViewOf renders the head, both markets with their own today, the alerts
     { market: 'US', symbol: 'NVDA', label: 'stop 170 · -1.30%', plan: 'sell half on a close below 170', file: 'desk/levels.yml' },
     { market: 'A shares', symbol: '600519', label: 'buy_zone 1600-1650', plan: 'add 100 shares in the zone', file: 'desk/levels.yml' },
   ]);
-  assert.deepEqual(v.standing, [{ id: 'brief', anchor: '09:20', next: 'next 2026-11-03 09:20 ET', timed: true, hash: 'ok', last: 'last finished 09:31 ET' }]);
+  assert.deepEqual(v.standing, [{ id: 'brief', market: 'us', anchor: '09:20', next: 'next 2026-11-03 09:20 ET', timed: true, hash: 'ok', last: 'last finished 09:31 ET' }]);
   assert.deepEqual(v.standingNotes, []);
   assert.deepEqual(v.firings, [{ order: 'brief', when: '09:31', kind: 'finished', outcome: 'finished' }]);
   // newest first
@@ -111,4 +111,30 @@ test('a sleep gap rounds its total minutes before it splits them; an order not t
   assert.deepEqual(deskViewOf(s, NOW_ISO).asleep.map(g => g.gap), ['1 h 0 min', '2 h 0 min', '1 min', '42 s', '1 h 5 min']);
   s.standing.orders = [{ ...s.standing.orders[0], enabled: false }, { ...s.standing.orders[0], id: 'late', nextAnchor: undefined }];
   assert.deepEqual(deskViewOf(s, NOW_ISO).standing.map(o => [o.next, o.timed]), [['disabled', false], ["no session in the calendar's window", true]]);
+});
+
+test("a strategy's levels.yml pin shows in its order's hash cell, its market in its market cell, and the A-share calendar's failure in the notes", async () => {
+  const s = deskStatus();
+  const report = {
+    ...s.standing.orders[0], id: 'lunhui-report', dir: 'strategies/demo', market: 'cn', at: 'open-90m', producer: 'builtin:report',
+    hash: 'ok', levelsHash: 'changed', nextAnchor: '2026-11-03T00:00:00.000Z',
+  };
+  s.standing.orders = [s.standing.orders[0], report, { ...report, id: 'gone', levelsHash: 'missing' }, { ...report, id: 'fifo', levelsHash: 'unreadable' },
+    { ...report, id: 'fine', levelsHash: 'ok' }, { ...report, id: 'text', hash: 'changed', levelsHash: 'changed' }];
+  s.standing.calendars = { us: s.standing.calendar, cn: { clock: 'fake XSHG', state: 'failed', error: 'the fake calendar has no 2026-11-03' } };
+  const v = deskViewOf(s, NOW_ISO);
+  assert.deepEqual(v.standing.map(o => [o.id, o.market, o.hash, o.next]), [
+    ['brief', 'us', 'ok', 'next 2026-11-03 09:20 ET'],
+    ['lunhui-report', 'cn', 'levels.yml changed', 'strategies/demo/levels.yml changed since arming (npm run desk -- rearm lunhui-report)'],
+    ['gone', 'cn', 'levels.yml gone', 'strategies/demo/levels.yml is gone since arming (npm run desk -- rearm gone)'],
+    ['fifo', 'cn', 'levels.yml unreadable', 'strategies/demo/levels.yml cannot be read'],
+    ['fine', 'cn', 'ok', 'next 19:00 ET'],
+    ['text', 'cn', 'changed', 'strategies/demo/brief.md changed since arming (npm run desk -- rearm text)'],
+  ]);
+  assert.deepEqual(v.standingNotes, ['standing orders: no A-share calendar today, fake XSHG: the fake calendar has no 2026-11-03']);
+  const { renderDeskTab } = await import('../../client/js/render/desk.js');
+  const html = renderDeskTab(v);
+  assert.ok(html.includes('standing fine: market cn, open-90m, next 19:00 ET'), 'the tab leads an A-share order with its market');
+  assert.ok(html.includes('levels.yml changed'), 'and shows its levels.yml pin');
+  assert.ok(html.includes('standing brief: 09:20, next'), 'a US order as before');
 });

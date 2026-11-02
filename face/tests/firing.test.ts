@@ -11,7 +11,8 @@
  * itself (process.execPath). */
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, readdir, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { chmod, link, mkdir, readdir, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDeskConversation } from "../src/desk-conversation.ts";
@@ -19,7 +20,7 @@ import type { DeliverResult } from "../src/desk-conversation.ts";
 import {
   clearOff, deskDir, FIRINGS_FILE, readEvents, readRecords, writeOff, type BudgetState, type DeskEvent, type TurnUsage,
 } from "../src/desk.ts";
-import type { DeskSessionCtxLike, DeskTurnRecord } from "../src/desk-session.ts";
+import { createDeskAgent, type DeskSessionCtxLike, type DeskTurnRecord } from "../src/desk-session.ts";
 import {
   checkFiring, cutoffOf, diffFiles, FILES_RECORD_MAX, FILES_WALK_MAX, FIRING_DISPOSE_MS, FIRING_SLACK_MS, firingKey, isFiringRecord, LINES, outcomeOf,
   resolveFiringRoute, runFiring, snapshotFiles, wakeMessage,
@@ -1448,4 +1449,200 @@ test("LINES.changed names every pin that moved", () => {
     "p · 2026-11-27 refused: desk/STANDING.md changed since arming. Review it, then: npm run desk -- rearm p");
   assert.equal(LINES.changed("p", "2026-11-27", ["desk/STANDING.md", "scripts/p.py"]),
     "p · 2026-11-27 refused: desk/STANDING.md and scripts/p.py changed since arming. Review them, then: npm run desk -- rearm p");
+});
+
+/* ---------- P4: a strategy's levels.yml pin, its market, its producer's abort ---------- */
+
+/** A strategy's levels as armed. */
+const LEVELS = "- symbol: NVDA\n  kind: stop\n  price: 170\n  when: cross_down\n  expires: 2026-12-31\n  plan: sell half on a close below 170\n";
+
+/** A fixture with strategies/demo/{STANDING.md, levels.yml}; its dir and the levels' path. */
+async function strategyFixture(): Promise<Fixture & { dir: string; levels: string }> {
+  const fx = await fixture();
+  const dir = join(fx.root, "strategies", "demo");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "STANDING.md"), STANDING);
+  await writeFile(join(dir, "levels.yml"), LEVELS);
+  return { ...fx, dir, levels: join(dir, "levels.yml") };
+}
+
+/** The strategy's pre-market report: open-90m, builtin:report, its levels.yml pinned. */
+const REPORT: StandingOrder = {
+  id: "demo-report", dir: "strategies/demo", file: "STANDING.md", sha256: sha256Hex(STANDING), at: "open-90m",
+  anchor: { kind: "open", offsetMin: -90 }, producer: { kind: "builtin", name: "report" }, levelsSha256: sha256Hex(LEVELS), wake: true,
+  turnDeadlineMs: 600_000, producerDeadlineMs: 300_000, expires: "2026-12-31", enabled: true, armedAt: "2026-11-20T15:00:00.000Z",
+};
+const REPORT_ITEM: FiringItem = { key: "demo-report:2026-11-30", order: REPORT, date: "2026-11-30", session: REGULAR, anchorMs: Date.parse("2026-11-30T13:00:00Z") };
+
+test("checkFiring checks a strategy's levels.yml after the fence, through the guarded read", async (t) => {
+  const fx = await strategyFixture();
+  const deps = { home: fx.home, root: fx.root, clock: new WallClock(FIRED), budget: async () => UNSPENT };
+  const levels = (over: Partial<StandingOrder> = {}) => checkFiring(deps, { ...REPORT, ...over });
+  const label = "strategies/demo/levels.yml";
+  assert.deepEqual(await levels(), {
+    go: { cwd: fx.dir, standingText: STANDING, standingSha: sha256Hex(STANDING), levels: { file: label, sha256: sha256Hex(LEVELS), text: LEVELS } },
+  }, "clear: the exact bytes hashed");
+
+  const edited = `${LEVELS}- symbol: AMD\n  kind: watch\n  price: 150\n`;
+  await writeFile(fx.levels, edited);
+  assert.deepEqual(await levels(), { refuse: { reason: "levels-hash", detail: sha256Hex(edited) } });
+  await writeFile(join(fx.dir, "GRAVIT.md"), "steer\n");
+  assert.deepEqual(await levels(), { refuse: { reason: "fence", detail: "strategies/demo/GRAVIT.md" } }, "the fence before the levels");
+  await rm(join(fx.dir, "GRAVIT.md"));
+  await writeFile(join(fx.dir, "STANDING.md"), `${STANDING}more\n`);
+  assert.deepEqual(await levels(), { refuse: { reason: "hash", detail: sha256Hex(`${STANDING}more\n`) } }, "the text before the levels");
+  await writeFile(join(fx.dir, "STANDING.md"), STANDING);
+
+  await rm(fx.levels);
+  assert.deepEqual(await levels(), { refuse: { reason: "levels-hash", detail: "missing" } });
+  await writeFile(join(fx.root, "copy.yml"), LEVELS);
+  await symlink(join(fx.root, "copy.yml"), fx.levels);
+  assert.deepEqual(await levels(), { refuse: { reason: "fence", detail: label } }, "a link to the same bytes: the fence runs first");
+  await rm(fx.levels);
+  await writeFile(fx.levels, "x".repeat(70_000));
+  assert.deepEqual(await levels(), { refuse: { reason: "levels-hash", detail: "70000 bytes" } });
+  await writeFile(fx.levels, Buffer.from([0x2d, 0x20, 0xff, 0x0a]));
+  assert.deepEqual(await levels(), { refuse: { reason: "levels-hash", detail: "unreadable (not UTF-8)" } });
+  await rm(fx.levels);
+  await writeFile(join(fx.root, "other.yml"), LEVELS);
+  await link(join(fx.root, "other.yml"), fx.levels);
+  assert.deepEqual(await levels(), { refuse: { reason: "levels-hash", detail: "unreadable (not a regular file)" } }, "a second name is refused");
+  await rm(fx.levels);
+  let fifo = true;
+  try {
+    execFileSync("mkfifo", [fx.levels]);
+  } catch {
+    fifo = false;
+    t.diagnostic("no mkfifo here: the FIFO case is skipped");
+  }
+  if (fifo) {
+    assert.deepEqual(await levels(), { refuse: { reason: "levels-hash", detail: "unreadable (not a regular file)" } }, "a FIFO is never waited on");
+    await rm(fx.levels);
+  }
+
+  assert.deepEqual(await levels({ levelsSha256: "none" }), {
+    go: { cwd: fx.dir, standingText: STANDING, standingSha: sha256Hex(STANDING), levels: { file: label, sha256: "none", text: null } },
+  }, "pinned none and absent");
+  await writeFile(fx.levels, LEVELS);
+  assert.deepEqual(await levels({ levelsSha256: "none" }), { refuse: { reason: "levels-hash", detail: sha256Hex(LEVELS) } }, "pinned none, then written");
+
+  /* P2's pre-close brief has no pin: a desk/levels.yml edited is the watch's, never the firing's */
+  await writeFile(join(fx.root, "desk", "levels.yml"), edited);
+  assert.deepEqual(await checkFiring(deps, ORDER), { go: verifiedFor(fx) });
+});
+
+test("the bytes checkFiring hashed are the bytes the producer reads, with the order's market when it names one", async () => {
+  for (const market of [undefined, "cn"] as const) {
+    const fx = await strategyFixture();
+    const inputs: ProducerInput[] = [];
+    const r = rig(fx, { over: { builtins: { report: async (input) => { inputs.push(input); return { ok: true, text: "REPORT" }; } } } });
+    const order: StandingOrder = { ...REPORT, ...(market === undefined ? {} : { market }) };
+    const verdict = await checkFiring(r.deps, order);
+    assert.ok("go" in verdict);
+    await writeFile(fx.levels, "- rewritten after the check\n");
+    const running = runFiring(r.deps, { ...REPORT_ITEM, order }, verdict.go, signal());
+    await waitFor("the wake", woken(r));
+    r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "ok" }));
+    await running;
+    assert.deepEqual(inputs[0].levels, { file: "strategies/demo/levels.yml", sha256: sha256Hex(LEVELS), text: LEVELS });
+    if (market === undefined) assert.equal("market" in inputs[0], false, "a P2-shaped order names no market");
+    else assert.equal(inputs[0].market, "cn");
+  }
+});
+
+test("a strategy firing never creates its directory; a desk firing makes its journal", async () => {
+  const fx = await strategyFixture();
+  const ctx: DeskSessionCtxLike = {
+    agents: { get: () => undefined, create: async () => { throw new Error("create was called"); }, resume: async () => { throw new Error("none"); } },
+    agentPresets: { mount: async (_agentCtx, id) => ({ id }) },
+    permissionPresets: { set: () => {}, current: () => "workspace-write" },
+  };
+  const asked: (boolean | undefined)[] = [];
+  const r = rig(fx, {
+    over: {
+      builtins: { report: async () => ({ ok: true, text: "REPORT" }) },
+      createAgent: (o) => {
+        asked.push(o.make);
+        return createDeskAgent({ ctx, root: fx.root, home: fx.home, route: { provider: "stub", model: "echo" }, installModelSelection: () => () => {} }, o);
+      },
+    },
+  });
+  const verdict = await checkFiring(r.deps, REPORT);
+  assert.ok("go" in verdict);
+  await rm(fx.dir, { recursive: true });
+  const finished = await runFiring(r.deps, REPORT_ITEM, verdict.go, signal());
+  assert.equal(finished?.turn?.outcome, "error");
+  assert.deepEqual(r.out.texts, ["demo-report · 2026-11-30 could not run: strategies/demo is gone"]);
+  assert.deepEqual(asked, [false]);
+  await assert.rejects(stat(fx.dir), { code: "ENOENT" }, "nothing recreated it");
+
+  /* the desk's own firing asks for its journal to be made */
+  const desk = await fixture();
+  const made: (boolean | undefined)[] = [];
+  const d = rig(desk, { over: { createAgent: (o) => { made.push(o.make); return d.agents.createAgent(o); } } });
+  const running = runFiring(d.deps, ITEM, verifiedFor(desk), signal());
+  await waitFor("the wake", woken(d));
+  d.sup.calls[0].onTurnEnd(turnEnd({ finalText: "ok" }));
+  await running;
+  assert.deepEqual(made, [true]);
+});
+
+test("a cn wake message dates its session in Beijing and New York", () => {
+  const session: MarketSession = { date: "2026-12-01", open: "2026-12-01T01:30:00Z", close: "2026-12-01T07:00:00Z", early: false };
+  const order: StandingOrder = { ...REPORT, id: "lunhui-report", market: "cn" };
+  const verified: Verified = { cwd: "/repo/strategies/demo", standingText: STANDING, standingSha: sha256Hex(STANDING) };
+  const lines = wakeMessage({
+    item: { key: "lunhui-report:2026-12-01", order, date: "2026-12-01", session, anchorMs: Date.parse("2026-12-01T00:00:00Z") },
+    firedAt: Date.parse("2026-12-01T00:00:10Z"), verified,
+  }).split("\n");
+  assert.equal(lines[0], "[schedule · lunhui-report · 2026-12-01]");
+  assert.ok(lines[1].startsWith(
+    "Standing order lunhui-report, for the 2026-12-01 session (open 09:30 Beijing (20:30 ET), close 15:00 Beijing (02:00 ET)), fired at 19:00:10 ET.",
+  ), lines[1]);
+});
+
+test("a firing aborted while its script producer runs kills the producer and phones nothing", async () => {
+  const script = [
+    'require("fs").writeFileSync(require("path").join(process.env.GRAVIT_ROOT, "producer.pid"), String(process.pid));',
+    "setTimeout(() => {}, 60_000);",
+    "",
+  ].join("\n");
+  const fx = await fixture(script);
+  const r = rig(fx);
+  const item = itemWith({ producer: { kind: "script", script: "scripts/p.py" }, producerSha256: sha256Hex(script) });
+  const controller = new AbortController();
+  const pidFile = join(fx.root, "producer.pid");
+  const running = runFiring(r.deps, item, { ...verifiedFor(fx), producerSha: sha256Hex(script) }, controller.signal);
+  await waitFor("the producer's pid", async () => stat(pidFile).then(() => true, () => false));
+  await quietly(200);
+  controller.abort();
+  assert.equal(await running, undefined);
+  const records = await firings(fx.home);
+  assert.deepEqual(records.map((x) => x.kind), ["producer"]);
+  assert.deepEqual(records[0].kind === "producer" ? [records[0].ok, records[0].error] : [], [false, "aborted"]);
+  assert.deepEqual(r.out.texts, [], "the firing itself was cancelled: no line");
+  assert.deepEqual(r.agents.created, []);
+  const pid = Number(await readFile(pidFile, "utf8"));
+  const alive = (): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      assert.equal((error as NodeJS.ErrnoException).code, "ESRCH");
+      return false;
+    }
+  };
+  await waitFor("the producer's death", () => !alive());
+});
+
+test("LINES: P4's rows, exactly", () => {
+  assert.equal(LINES.levelsChanged("demo-report", "2026-11-30", "strategies/demo"),
+    "demo-report · 2026-11-30 refused: strategies/demo/levels.yml changed since arming. Review it, then: npm run desk -- rearm demo-report");
+  assert.equal(LINES.levelsGone("demo-report", "2026-11-30", "strategies/demo"),
+    "demo-report · 2026-11-30 refused: strategies/demo/levels.yml is gone since arming. Restore it, or re-arm without it: npm run desk -- rearm demo-report");
+  assert.equal(LINES.levelsUnreadable("demo-report", "2026-11-30", "strategies/demo", "not UTF-8"),
+    "demo-report · 2026-11-30 refused: strategies/demo/levels.yml cannot be read (not UTF-8)");
+  assert.equal(LINES.noCalendar("fake XSHG", "the fake calendar has no 2026-12-01", "cn", "2026-12-01"),
+    "no A-share standing order runs on 2026-12-01: the market calendar failed in fake XSHG (the fake calendar has no 2026-12-01)");
+  assert.equal(LINES.noCalendar("fake clock", "down", "us", "2026-12-01"), "no standing order runs today: the market calendar failed in fake clock (down)");
 });

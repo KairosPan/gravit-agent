@@ -405,22 +405,37 @@ function requireWorkspaceWrite(deps: DeskSessionDeps, agent: AgentLike, sessionI
 
 /**
  * Create a desk agent - the `gravit-desk` preset, `workspace-write` pinned, a fresh `session-<uuid>` - in
- * `opts.cwd`, made first (`agents.create` does not make it), on `opts.route` or else the desk's. It writes
- * no ledger record: this is how P2's firings get the desk's setup without becoming the conversation
- * {@link ensureDeskSession} resumes. Rejects when creation does, and when the pin does not hold after
- * publication - the agent is disposed first, so nothing is left live that the face will not prompt.
+ * `opts.cwd`, made first (`agents.create` does not make it) unless `make` is false, on `opts.route` or else the
+ * desk's. With `make: false` - a strategy's firing, whose directory is the operator's and is never recreated - a
+ * cwd that is not there rejects with `<cwd, repo-relative> is gone`, and one that is not a directory with `<cwd>
+ * is not a directory`, before any session exists. It writes no ledger record: this is how P2's firings get the
+ * desk's setup without becoming the conversation {@link ensureDeskSession} resumes. Rejects when creation does,
+ * and when the pin does not hold after publication - the agent is disposed first, so nothing is left live that
+ * the face will not prompt.
  * @param deps - see {@link DeskSessionDeps}.
- * @param opts - `cwd`, the session's working directory; `route`, its model route.
+ * @param opts - `cwd`, the session's working directory; `route`, its model route; `make`, whether the cwd is
+ *   made when missing, `true` by default.
  * @returns the agent, its session id, and `dispose`, which disposes the handle `agents.create` returned:
  *   once however often it is called, never rejecting - a failure is one `gravit-face: desk:` line.
  */
 export async function createDeskAgent(
   deps: DeskSessionDeps,
-  opts: { cwd: string; route?: { provider: string; model: string } },
+  opts: { cwd: string; route?: { provider: string; model: string }; make?: boolean },
 ): Promise<{ agent: AgentLike; sessionId: string; dispose(): Promise<void> }> {
   const route = opts.route ?? deps.route;
   const log = deps.log ?? defaultLog;
-  await mkdir(opts.cwd, { recursive: true });
+  if (opts.make ?? true) await mkdir(opts.cwd, { recursive: true });
+  else {
+    const label = relative(resolve(deps.root), resolve(opts.cwd)).split(sep).join("/");
+    let isDir: boolean;
+    try {
+      isDir = (await lstat(opts.cwd)).isDirectory();
+    } catch (err) {
+      if (codeOf(err) === "ENOENT" || codeOf(err) === "ENOTDIR") throw new Error(`${label} is gone`);
+      throw err;
+    }
+    if (!isDir) throw new Error(`${label} is not a directory`);
+  }
   const sessionId = `session-${randomUUID()}`;
   const handle = await deps.ctx.agents.create({
     sessionId,

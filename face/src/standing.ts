@@ -626,10 +626,12 @@ export interface FiringSummary {
 /** A pin's state against the file on disk. */
 type HashState = "ok" | "changed" | "missing" | "unknown";
 
-/** The standing orders as the status shows them. */
+/** The standing orders as the status shows them. `calendar` is the US calendar's (P2's and P3's readers'), and
+ * `calendars` each market's, its `us` the same. */
 export interface StandingStatus {
   file: { path: string; state: "missing" | "loaded" | "refused"; loadedAt?: string; errors?: string[] };
   ledger?: { error: string };
+  calendars?: Partial<Record<Market, StandingStatus["calendar"]>>;
   calendar: {
     clock: string;
     state: "unknown" | "ok" | "stale" | "failed";
@@ -637,10 +639,13 @@ export interface StandingStatus {
     today?: { date: string; closed: true } | { date: string; open: string; close: string; early: boolean };
     error?: string;
   };
-  /** The last good load's orders. */
+  /** The last good load's orders: each with its market (always set; absent in the file is `us`), its `expired` and
+   * `nextAnchor` on that market's date and calendar, and for an order that pins its strategy's `levels.yml` that pin's
+   * state, `levelsHash`. */
   orders: {
     id: string;
     dir: string;
+    market?: Market;
     file: string;
     at: string;
     producer?: string;
@@ -650,6 +655,7 @@ export interface StandingStatus {
     expired: boolean;
     hash: HashState;
     producerHash?: HashState;
+    levelsHash?: HashState | "unreadable";
     nextAnchor?: string;
     last?: FiringSummary;
   }[];

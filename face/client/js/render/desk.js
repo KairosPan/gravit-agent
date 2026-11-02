@@ -32,9 +32,10 @@ export function renderDeskTab(view, read = {}) {
     ? feed([...view.levels.map(l => line('·', `${esc(`${l.symbol} · ${l.market}`)} <span class="mk-level">${esc(l.label)}</span>`, esc(`${l.plan} · ${l.file}`))),
       ...view.files.map(f => line('!', esc(f.file), esc(f.note), 'down'))])
     : empty('No levels loaded.');
-  // an order's anchor leads its state only when the state is when it next falls, as src/desk.ts orderState says it
+  // an order's anchor leads its state only when the state is when it next falls, as src/desk.ts orderState says it; an
+  // A-share order's market leads both, as standingLines prints it
   const standing = feed([...view.standingNotes.map(n => line('·', esc(n))),
-    ...view.standing.map(o => line('·', esc(`standing ${o.id}: ${o.timed ? `${o.anchor}, ` : ''}${o.next}`), esc([o.hash === 'ok' ? '' : o.hash, o.last].filter(Boolean).join(' · '))))]);
+    ...view.standing.map(o => line('·', esc(`standing ${o.id}: ${o.market === 'cn' ? 'market cn, ' : ''}${o.timed ? `${o.anchor}, ` : ''}${o.next}`), esc([o.hash === 'ok' ? '' : o.hash, o.last].filter(Boolean).join(' · '))))]);
   const firings = view.firings.length ? feed(view.firings.map(f => line('·', esc(`${f.when} · ${f.order}`), esc(f.kind === f.outcome ? f.kind : `${f.kind} · ${f.outcome}`)))) : empty('No firings yet.');
   const runs = feed([...view.runs.map(r => line('·', `${esc(`${r.bootedAt} · pid ${r.pid}`)}${r.lost ? ` ${tag('lost')}` : ''}`)),
     ...view.asleep.map(g => line('·', esc(`asleep ${g.from}–${g.to}`), esc(g.gap)))]);

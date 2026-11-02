@@ -10,18 +10,23 @@
  * rules (src/market-clock.ts) or a fake calendar. */
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { appendEvent, appendRecord, clearOff, deskDir, FIRINGS_FILE, readBudget, readEvents, readRecords, writeOff, type DeskEvent } from "../src/desk.ts";
 import type { DeliverResult } from "../src/desk-conversation.ts";
 import type { DeskSessionCtxLike } from "../src/desk-session.ts";
+import { bjDate } from "../src/et.ts";
 import {
-  checkFiring, isFiringRecord, LINES, type FinishedRecord, type FiringDeps, type FiringItem, type FiringRecord, type runFiring, type Verified,
+  checkFiring, cutoffOf, isFiringRecord, LINES, type FinishedRecord, type FiringDeps, type FiringItem, type FiringRecord, type runFiring, type Verified,
 } from "../src/firing.ts";
-import { createMarketCalendar, XNYS_CLOCK, type MarketCalendar, type MarketSession, type MarketWindow } from "../src/market-clock.ts";
-import { defaultProducerRunner } from "../src/producer.ts";
-import { createDeskSchedule, decide, installSchedule, SCHEDULE_TICK_MS, type ScheduleDeps, type ScheduleHandle } from "../src/schedule.ts";
+import { createMarketCalendar, XNYS_CLOCK, type DeskCalendars, type MarketCalendar, type MarketSession, type MarketWindow } from "../src/market-clock.ts";
+import { unwiredMarketQuotes, type MarketQuoteSource } from "../src/market-quotes.ts";
+import { defaultProducerRunner, type BuiltinProducer, type ProducerInput } from "../src/producer.ts";
+import {
+  createDeskSchedule, decide, deskBuiltins, installSchedule, SCHEDULE_TICK_MS, type ScheduleDeps, type ScheduleHandle,
+} from "../src/schedule.ts";
 import { parseStanding, rehashOrder, renderOrder, sha256Hex, STANDING_FILE, writeStanding, type ArmEntry } from "../src/standing.ts";
 
 /** The errors parseStanding refuses `text` with. */
@@ -145,6 +150,7 @@ const DAY_MS = 86_400_000;
  * (or `calendar`), a delivery that records each line, the budget read as the face reads it. */
 function rig(fx: Fixture, start: string, opts: {
   calendar?: MarketCalendar;
+  calendars?: Partial<DeskCalendars>;
   hold?: (call: RunCall, deps: FiringDeps) => Promise<void>;
   run?: typeof runFiring;
   bootedAt?: number;
@@ -172,6 +178,7 @@ function rig(fx: Fixture, start: string, opts: {
     tickMs: DAY_MS,
     firing: { check: checkFiring, run: opts.run ?? recordingRun(runs, opts.hold) },
     ...(opts.bootedAt === undefined ? {} : { bootedAt: opts.bootedAt }),
+    ...(opts.calendars === undefined ? {} : { calendars: opts.calendars }),
   };
   handle = installSchedule(deps);
   return { fx, clock, schedule: handle, out, lines, runs };
@@ -944,7 +951,7 @@ test("status: hash state, next anchor, last outcome, running, queued and recent"
   r.clock.set("2026-11-25T21:00:00Z");
   const s = r.schedule.status();
   assert.deepEqual(s.orders[0], {
-    id: "preclose", dir: "desk", file: "STANDING.md", at: "close-30m", producer: "builtin:brief", wake: true, enabled: true, expires: "2026-12-31",
+    id: "preclose", dir: "desk", market: "us", file: "STANDING.md", at: "close-30m", producer: "builtin:brief", wake: true, enabled: true, expires: "2026-12-31",
     expired: false, hash: "ok", nextAnchor: "2026-11-27T17:30:00.000Z", last: s.recent[1],
   }, "after its anchor, with the 26th closed, the next is the 27th's early close");
   assert.equal(s.orders[0].last?.outcome, "delivered");
@@ -1261,4 +1268,268 @@ test("createDeskSchedule reads its owner's now when no clock seam is given (M7)"
   assert.deepEqual(calendar.asked, ["2026-11-24"], "the day is the owner's, not the wall clock's");
   assert.equal(schedule.status().calendar.today?.date, "2026-11-24");
   await schedule.dispose();
+});
+
+/* ---------- P4: a strategy's levels.yml pin, the builtins, each order on its own market ---------- */
+
+/** A strategy's levels as armed. */
+const LEVELS = "- symbol: NVDA\n  kind: stop\n  price: 170\n  when: cross_down\n  expires: 2026-12-31\n  plan: sell half on a close below 170\n";
+
+/** A fixture whose root also holds strategies/demo/{STANDING.md, levels.yml}. */
+async function strategyFixture(): Promise<Fixture & { dir: string; levels: string }> {
+  const fx = await fixture();
+  const dir = join(fx.root, "strategies", "demo");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "STANDING.md"), STANDING);
+  await writeFile(join(dir, "levels.yml"), LEVELS);
+  return { ...fx, dir, levels: join(dir, "levels.yml") };
+}
+
+/** The strategy's pre-market report as arm writes it: open-90m, builtin:report, its levels.yml pinned. On 2026-11-30
+ * (open 14:30Z) its anchor is 13:00Z. */
+const REPORT_ENTRY: ArmEntry = {
+  id: "demo-report", dir: "strategies/demo", file: "STANDING.md", sha256: sha256Hex(STANDING), at: "open-90m", producer: "builtin:report",
+  levelsSha256: sha256Hex(LEVELS), wake: true, turnDeadline: "10m", producerDeadline: "5m", expires: "2026-12-31", armedAt: "2026-11-20T15:00:00.000Z",
+};
+
+/** XSHG's sessions in UTC: 09:30 to 15:00 Beijing is 01:30Z to 07:00Z. */
+const xshg = (date: string): MarketSession => ({ date, open: `${date}T01:30:00Z`, close: `${date}T07:00:00Z`, early: false });
+const CN_DAYS: Record<string, MarketSession | "closed"> = { "2026-12-01": xshg("2026-12-01"), "2026-12-02": xshg("2026-12-02") };
+const cnCalendar = (days: Record<string, MarketSession | "closed"> = CN_DAYS): MarketCalendar => fakeCalendar(days, "fake XSHG", (n) => bjDate(new Date(n)));
+
+/** The A-share report: its open-90m is 00:00Z, 19:00 ET the evening before. */
+const CN_ENTRY: ArmEntry = { ...REPORT_ENTRY, id: "lunhui-report", market: "cn" };
+
+const standingText = async (home: string): Promise<string> => readFile(join(deskDir(home), STANDING_FILE), "utf8");
+
+test("a changed levels.yml is refused once per change, and a rearm inside the grace fires", async () => {
+  const fx = await strategyFixture();
+  await arm(fx.home, [REPORT_ENTRY]);
+  const r = rig(fx, "2026-11-30T12:00:00Z");
+  const edited = `${LEVELS}- symbol: AMD\n  kind: watch\n  price: 150\n`;
+  await writeFile(fx.levels, edited);
+  await at(r, "2026-11-30T13:00:10Z");
+  const changed = "demo-report · 2026-11-30 refused: strategies/demo/levels.yml changed since arming. Review it, then: npm run desk -- rearm demo-report";
+  assert.deepEqual(r.out.texts, [changed]);
+  assert.deepEqual((await ofKind(fx.home, "refused")).map((x) => [x.key, x.reason, x.detail, x.reported]), [["demo-report:2026-11-30", "levels-hash", sha256Hex(edited), true]]);
+  await at(r, "2026-11-30T13:00:40Z");
+  assert.equal(r.out.texts.length, 1, "nothing new for the same change");
+  const again = `${edited}- symbol: TSLA\n  kind: watch\n  price: 300\n`;
+  await writeFile(fx.levels, again);
+  await at(r, "2026-11-30T13:01:10Z");
+  assert.deepEqual(r.out.texts, [changed, changed], "a second change, a second line");
+
+  r.clock.set("2026-11-30T13:03:00Z");
+  const rearmed = rehashOrder(await standingText(fx.home), "demo-report", { sha256: sha256Hex(STANDING), levelsSha256: sha256Hex(again) });
+  assert.ok("text" in rearmed);
+  await writeStanding(fx.home, rearmed.text);
+  await at(r, "2026-11-30T13:03:30Z");
+  assert.deepEqual(r.runs.map((call) => [call.key, iso(call.at)]), [["demo-report:2026-11-30", "2026-11-30T13:03:30.000Z"]]);
+  assert.deepEqual(r.runs[0].verified.levels, { file: "strategies/demo/levels.yml", sha256: sha256Hex(again), text: again });
+  assert.deepEqual((await ofKind(fx.home, "started")).map((x) => x.levelsSha), [sha256Hex(again)]);
+  await r.schedule.dispose();
+});
+
+test("a levels.yml removed after arming is refused once, and a rearm pins its absence", async () => {
+  const fx = await strategyFixture();
+  await arm(fx.home, [REPORT_ENTRY]);
+  const r = rig(fx, "2026-11-30T12:00:00Z");
+  await rm(fx.levels);
+  await at(r, "2026-11-30T13:00:10Z");
+  assert.deepEqual(r.out.texts, [
+    "demo-report · 2026-11-30 refused: strategies/demo/levels.yml is gone since arming. Restore it, or re-arm without it: npm run desk -- rearm demo-report",
+  ]);
+  await at(r, "2026-11-30T13:00:40Z");
+  assert.equal(r.out.texts.length, 1);
+  r.clock.set("2026-11-30T13:02:00Z");
+  const rearmed = rehashOrder(await standingText(fx.home), "demo-report", { sha256: sha256Hex(STANDING), levelsSha256: "none" });
+  assert.ok("text" in rearmed);
+  await writeStanding(fx.home, rearmed.text);
+  await at(r, "2026-11-30T13:02:30Z");
+  assert.deepEqual(r.runs.map((call) => call.key), ["demo-report:2026-11-30"]);
+  assert.deepEqual(r.runs[0].verified.levels, { file: "strategies/demo/levels.yml", sha256: "none", text: null });
+  await r.schedule.dispose();
+});
+
+test("a levels.yml that cannot be read is refused with its reason", async () => {
+  const fx = await strategyFixture();
+  await arm(fx.home, [REPORT_ENTRY]);
+  const r = rig(fx, "2026-11-30T12:00:00Z");
+  await writeFile(fx.levels, Buffer.from([0x2d, 0x20, 0xff, 0x0a]));
+  await at(r, "2026-11-30T13:00:10Z");
+  assert.deepEqual(r.out.texts, ["demo-report · 2026-11-30 refused: strategies/demo/levels.yml cannot be read (not UTF-8)"]);
+  assert.equal(r.schedule.status().orders[0].levelsHash, "unreadable");
+  await r.schedule.dispose();
+});
+
+test("a strategy renamed while armed is refused as missing, once, and nothing recreates its directory", async () => {
+  const fx = await strategyFixture();
+  await arm(fx.home, [REPORT_ENTRY]);
+  const r = rig(fx, "2026-11-30T12:00:00Z");
+  await rename(fx.dir, join(fx.root, "strategies", "demo-x"));
+  await at(r, "2026-11-30T13:00:10Z");
+  assert.deepEqual(r.out.texts, [
+    "demo-report · 2026-11-30 refused: strategies/demo/STANDING.md is missing. Restore it, or remove the order from standing.yml",
+  ]);
+  await at(r, "2026-11-30T13:00:40Z");
+  await at(r, "2026-12-01T13:00:10Z");
+  assert.equal(r.out.texts.length, 1, "no second line, on the day or the next");
+  assert.equal(r.schedule.status().orders[0].hash, "missing");
+  assert.equal(r.runs.length, 0);
+  await assert.rejects(stat(fx.dir), { code: "ENOENT" }, "strategies/demo never exists again");
+  await r.schedule.dispose();
+});
+
+test("an A-share order fires on its Beijing session date at 08:00 Beijing, is cut off at the Beijing open, and expires on the Beijing date", async () => { // RF 1
+  const fx = await strategyFixture();
+  await arm(fx.home, [{ ...CN_ENTRY, expires: "2026-12-01" }]);
+  const r = rig(fx, "2026-11-30T23:00:00Z", { calendars: { cn: cnCalendar() } });
+  await at(r, "2026-11-30T23:59:50Z");
+  assert.equal(r.runs.length, 0, "18:59 ET: not yet");
+  await at(r, "2026-12-01T00:00:10Z");
+  assert.deepEqual(r.runs.map((call) => [call.key, call.item.date]), [["lunhui-report:2026-12-01", "2026-12-01"]]);
+  assert.equal(cutoffOf(r.runs[0].item), Date.parse("2026-12-01T01:30:00Z"), "cut off at the Beijing open");
+  assert.equal(r.runs[0].item.anchorMs, Date.parse("2026-12-01T00:00:00Z"));
+  /* 2026-12-02 in Beijing, still 2026-12-01 in New York */
+  await at(r, "2026-12-01T16:00:10Z");
+  await at(r, "2026-12-01T16:00:40Z");
+  assert.deepEqual((await ofKind(fx.home, "expired")).map((x) => [x.key, x.date]), [["lunhui-report:2026-12-01", "2026-12-01"]]);
+  assert.deepEqual(r.out.texts, [LINES.expired("lunhui-report", "2026-12-01")], "its line once");
+  assert.equal(r.schedule.status().orders[0].expired, true);
+  await r.schedule.dispose();
+});
+
+test("a budget spent on ET 2026-11-30 refuses the next Beijing morning's report", async () => { // R2, and RF 1's budget day
+  const fx = await strategyFixture();
+  await arm(fx.home, [CN_ENTRY], 1_000);
+  await appendEvent(fx.home, {
+    t: "2026-11-30T15:00:00.000Z", kind: "desk-turn", sessionId: "s", source: "telegram", turn: 1, outcome: "ended", wallMs: 1,
+    usage: { uncachedInputTokens: 600, outputTokens: 400, cacheReadTokens: 0, cacheWriteTokens: 0, routes: [] },
+  });
+  const r = rig(fx, "2026-11-30T23:00:00Z", { calendars: { cn: cnCalendar() } });
+  await at(r, "2026-12-01T00:00:10Z");
+  assert.deepEqual(r.out.texts, ["standing orders are refused for the rest of the day: the desk's token budget is spent (1,000 of 1,000 tokens since 00:00 ET)"]);
+  assert.deepEqual((await ofKind(fx.home, "refused")).map((x) => [x.key, x.reason]), [["lunhui-report:2026-12-01", "budget"]]);
+  await at(r, "2026-12-02T00:00:10Z");
+  assert.deepEqual(r.runs.map((call) => call.key), ["lunhui-report:2026-12-02"], "a new ET day, a new budget");
+  await r.schedule.dispose();
+});
+
+test("a calendar failure is per market: a cn order stops, a us order fires", async () => {
+  const fx = await strategyFixture();
+  await arm(fx.home, [ENTRY, CN_ENTRY]);
+  const r = rig(fx, "2026-12-01T15:00:00Z", { calendars: { cn: cnCalendar({ "2026-12-02": xshg("2026-12-02") }) } });
+  await at(r, "2026-12-01T15:00:00Z");
+  assert.deepEqual((await eventsOf(fx.home, "calendar-error")).map((e) => [e.clock, e.date, e.error]), [["fake XSHG", "2026-12-01", "the fake calendar has no 2026-12-01"]]);
+  assert.deepEqual(r.out.texts, ["no A-share standing order runs on 2026-12-01: the market calendar failed in fake XSHG (the fake calendar has no 2026-12-01)"]);
+  await at(r, "2026-12-01T15:00:30Z");
+  assert.equal(r.out.texts.length, 1, "one line a market date");
+  assert.equal(r.schedule.status().calendars?.cn?.state, "failed");
+  assert.equal(r.schedule.status().calendar.state, "ok", "the US calendar answered");
+  await at(r, "2026-12-01T20:30:10Z");
+  assert.deepEqual(r.runs.map((call) => call.key), ["preclose:2026-12-01"], "the us order fires");
+  await r.schedule.dispose();
+
+  /* both fail on 2026-12-01: two events, two lines - one market's date never masks the other's */
+  const both = await strategyFixture();
+  await arm(both.home, [ENTRY, CN_ENTRY]);
+  const usDays = { ...DAYS };
+  delete usDays["2026-12-01"];
+  const b = rig(both, "2026-12-01T15:00:00Z", { calendar: fakeCalendar(usDays), calendars: { cn: cnCalendar({ "2026-12-02": xshg("2026-12-02") }) } });
+  await at(b, "2026-12-01T15:00:00Z");
+  assert.deepEqual((await eventsOf(both.home, "calendar-error")).map((e) => [e.clock, e.date]), [["fake clock", "2026-12-01"], ["fake XSHG", "2026-12-01"]]);
+  assert.deepEqual(b.out.texts, [
+    "no standing order runs today: the market calendar failed in fake clock (the fake calendar has no 2026-12-01)",
+    "no A-share standing order runs on 2026-12-01: the market calendar failed in fake XSHG (the fake calendar has no 2026-12-01)",
+  ]);
+  await b.schedule.dispose();
+});
+
+test("a rotation at 2026-12-01T00:30Z carries lunhui-report:2026-12-01's started; a restart then seeds the cn calendar-error for its Beijing date and phones it once", async () => { // R5
+  const fx = await strategyFixture();
+  await arm(fx.home, [CN_ENTRY, { ...CN_ENTRY, id: "lunhui-late", at: "open-60m" }]);
+  const started = JSON.stringify({
+    t: "2026-12-01T00:00:10.000Z", kind: "started", key: "lunhui-report:2026-12-01", order: "lunhui-report", date: "2026-12-01", dir: "strategies/demo",
+    cwd: "strategies/demo", at: "open-90m", anchor: "2026-12-01T00:00:00.000Z", standingSha: sha256Hex(STANDING), levelsSha: sha256Hex(LEVELS), wake: true, deadlineMs: 600_000,
+  });
+  const finished = JSON.stringify({ t: "2026-12-01T00:04:00.000Z", kind: "finished", key: "lunhui-report:2026-12-01", order: "lunhui-report", date: "2026-12-01", wallMs: 1 });
+  const pad = JSON.stringify({ pad: "x".repeat(50 * 1024 * 1024) });
+  await writeFile(ledgerPath(fx.home), [pad, started, finished, ""].join("\n"));
+  const r = rig(fx, "2026-12-01T00:30:00Z", { calendars: { cn: cnCalendar() } });
+  await at(r, "2026-12-01T00:30:10Z");
+  assert.deepEqual(r.runs.map((call) => call.key), ["lunhui-late:2026-12-01"], "the carried key is not run again");
+  const lines = (await readFile(ledgerPath(fx.home), "utf8")).split("\n").filter(Boolean);
+  assert.deepEqual(lines.slice(0, 2), [started, finished], "the new file opens with the Beijing date's started and finished");
+  await r.schedule.dispose();
+
+  /* the cn calendar failing on Beijing 2026-12-02, then a restart: no second event, no second line */
+  const first = rig(fx, "2026-12-01T17:00:00Z", { calendars: { cn: cnCalendar({ "2026-12-01": xshg("2026-12-01") }) } });
+  await first.clock.advance(0);
+  await at(first, "2026-12-01T17:00:00Z");
+  assert.deepEqual(first.out.texts, ["no A-share standing order runs on 2026-12-02: the market calendar failed in fake XSHG (the fake calendar has no 2026-12-02)"]);
+  await first.schedule.dispose();
+  const again = rig(fx, "2026-12-01T17:10:00Z", { calendars: { cn: cnCalendar({ "2026-12-01": xshg("2026-12-01") }) } });
+  await again.clock.advance(0);
+  await at(again, "2026-12-01T17:10:00Z");
+  assert.deepEqual(again.out.texts, []);
+  assert.deepEqual((await eventsOf(fx.home, "calendar-error")).map((e) => [e.clock, e.date]), [["fake XSHG", "2026-12-02"]]);
+  assert.deepEqual(await ofKind(fx.home, "interrupted"), [], "nothing was cut off");
+  await again.schedule.dispose();
+});
+
+test("status carries each order's market and levelsHash, and each market's calendar", async (t) => {
+  const fx = await strategyFixture();
+  await arm(fx.home, [ENTRY, REPORT_ENTRY, CN_ENTRY]);
+  const r = rig(fx, "2026-11-30T23:00:00Z", { calendars: { cn: cnCalendar() } });
+  await at(r, "2026-11-30T23:00:00Z");
+  const before = r.schedule.status();
+  assert.deepEqual(before.orders.map((o) => [o.id, o.market, o.levelsHash]), [["preclose", "us", undefined], ["demo-report", "us", "unknown"], ["lunhui-report", "cn", "unknown"]]);
+  assert.equal(before.orders[2].nextAnchor, "2026-12-01T00:00:00.000Z", "the A-share order's next anchor, on its own calendar");
+  await at(r, "2026-12-01T00:00:10Z");
+  const s = r.schedule.status();
+  assert.equal(s.orders[2].levelsHash, "ok");
+  assert.equal(s.orders[2].nextAnchor, "2026-12-02T00:00:00.000Z");
+  assert.equal(s.calendars?.cn?.clock, "fake XSHG");
+  assert.equal(s.calendars?.cn?.state, "ok");
+  assert.deepEqual(s.calendars?.us, s.calendar);
+  assert.equal("levelsHash" in s.orders[0], false, "a desk order has none");
+
+  await writeFile(fx.levels, `${LEVELS}# edited\n`);
+  await at(r, "2026-12-02T00:00:10Z");
+  assert.equal(r.schedule.status().orders[2].levelsHash, "changed");
+  await rm(fx.levels);
+  let fifo = true;
+  try {
+    execFileSync("mkfifo", [fx.levels]);
+  } catch {
+    fifo = false;
+    t.diagnostic("no mkfifo here: the FIFO case is skipped");
+  }
+  if (fifo) {
+    await at(r, "2026-12-02T00:01:10Z");
+    assert.equal(r.schedule.status().orders[2].levelsHash, "unreadable", "a FIFO is never waited on");
+  }
+  await r.schedule.dispose();
+});
+
+test("deskBuiltins: both builtins over the one source, a seam replaces only its names", async () => {
+  const fx = await strategyFixture();
+  const quotes: MarketQuoteSource = { snapshot: () => Promise.reject(new Error("asked")) };
+  const now = () => Date.parse("2026-11-30T13:00:05Z");
+  const all = deskBuiltins({ quotes, root: fx.root, home: fx.home, now });
+  assert.deepEqual(Object.keys(all).sort(), ["brief", "report"]);
+  const fake: BuiltinProducer = async () => ({ ok: true, text: "fake" });
+  const seamed = deskBuiltins({ quotes, root: fx.root, home: fx.home, now }, { brief: fake });
+  assert.equal(seamed.brief, fake);
+  assert.notEqual(seamed.report, fake);
+
+  const input: ProducerInput = {
+    order: "demo-report", firing: "demo-report:2026-11-30", date: "2026-11-30", dir: "strategies/demo",
+    session: { open: "2026-11-30T14:30:00Z", close: "2026-11-30T21:00:00Z", early: false },
+    levels: { file: "strategies/demo/levels.yml", sha256: sha256Hex(LEVELS), text: LEVELS },
+  };
+  const unwired = await deskBuiltins({ root: fx.root, home: fx.home, now }).report(input, new AbortController().signal);
+  assert.equal(unwired.ok, false);
+  assert.equal(!unwired.ok && unwired.error, `quotes unavailable: ${unwiredMarketQuotes().unavailable}`);
+  assert.equal(JSON.parse(unwired.text ?? "{}").takenAt, "08:00:05 ET", "the report reads the schedule's clock");
 });
