@@ -91,6 +91,7 @@ test("pastOf: the three level readings, the change rules, and no reading without
   assert.equal(pastOf(enter, u("NVDA", 222, S.open)), true, "the range's edges are inside");
   assert.equal(pastOf(enter, u("NVDA", 222.5, S.open)), false);
   assert.equal(pastOf(down, u("NVDA", null, S.open)), undefined);
+  assert.equal(pastOf({ ...enter, trigger: { type: "level", kind: "buy_zone", when: "enter" } }, u("NVDA", 220, S.open)), undefined, "an enter level with no range");
   assert.equal(pastOf(move, u("NVDA", 160, S.open, 170)), true);
   assert.equal(pastOf(move, u("NVDA", 168, S.open, 170)), false);
   assert.equal(pastOf(move, u("NVDA", 160, S.open)), undefined, "no previous close, no reading");
@@ -183,12 +184,17 @@ test("an A-share print is judged only inside 09:30-11:30 and 13:00-15:00 Beijing
   assert.equal(at("2026-11-30T02:00:00Z", "trading"), undefined, "an as_of on 2026-11-30 Beijing while C is 2026-12-01");
   assert.equal(at("2026-12-01T02:00:00Z", "trading", { us: S }), undefined, "no A-share session");
 
-  /* past the table, the Market's phase alone decides on the session's Beijing date */
+  /* past the table the phase makes the day a session, and the bands and the close print still judge its prints */
   const uncovered: WatchSessions = { cn: { date: "2027-01-04", open: "2027-01-04T01:30:00Z", close: "2027-01-04T07:00:00Z", early: false, uncovered: true } };
-  assert.equal(at("2027-01-04T01:22:00Z", "trading", uncovered), "2027-01-04");
+  assert.equal(at("2027-01-04T01:20:00Z", "trading", uncovered), undefined, "09:20, the auction, though the Market says trading");
+  assert.equal(at("2027-01-04T01:22:00Z", "trading", uncovered), undefined, "09:22, still the auction");
+  assert.equal(at("2027-01-04T01:30:00Z", "trading", uncovered), "2027-01-04");
   assert.equal(at("2027-01-04T03:45:00Z", "midday", uncovered), undefined);
-  assert.equal(at("2027-01-03T23:00:00Z", "trading", uncovered), "2027-01-04", "07:00 Beijing on the 4th: no clock past the table");
-  assert.equal(at("2027-01-03T08:00:00Z", "trading", uncovered), undefined, "16:00 Beijing on the 3rd is another date");
+  assert.equal(at("2027-01-04T03:45:00Z", "trading", uncovered), undefined, "the break");
+  assert.equal(at("2027-01-04T07:00:02Z", "closed", uncovered), "2027-01-04", "a 15:00:02 close print");
+  assert.equal(at("2027-01-04T07:00:31Z", "closed", uncovered), undefined);
+  assert.equal(at("2027-01-03T23:00:00Z", "trading", uncovered), undefined, "07:00 Beijing on the 4th is before the open");
+  assert.equal(at("2027-01-03T02:00:00Z", "trading", uncovered), undefined, "10:00 Beijing on the 3rd is another date");
 });
 
 test("an A-share print stamped 15:00:01 Beijing with phase closed is judged once; at 15:00:31 it is not", () => {
@@ -319,6 +325,7 @@ test("rebuildDay restores the day across both markets' session dates", () => {
     alertRecord({ t: "2026-11-30T14:50:00.000Z", key: nvda, id: "a-nvda-repeat", decision: "suppressed", suppressed: "cooldown" }),
     alertRecord({ t: "2026-12-01T01:30:05.000Z", key: cnKey, id: "a-cn", market: "cn", symbol: "600519", date: "2026-12-01" }),
     alertRecord({ t: "2026-11-28T14:30:00.000Z", key: "rule:m:MSFT", symbol: "MSFT", id: "a-ancient", date: "2026-11-27" }),
+    /* its t is bent to 2026-11-29 so the 11-27 record stays inside the 36 h window and the newer date must win */
     alertRecord({ t: "2026-11-29T23:00:00.000Z", key: "rule:g:TSLA", symbol: "TSLA", id: "a-tsla-27", date: "2026-11-27", decision: "suppressed", suppressed: "muted" }),
     alertRecord({ t: "2026-11-30T14:35:00.000Z", key: "rule:g:TSLA", symbol: "TSLA", id: "a-tsla-30", date: "2026-11-30", decision: "suppressed", suppressed: "muted" }),
     "a torn line", { kind: "alert" }, null,
@@ -338,6 +345,15 @@ test("rebuildDay restores the day across both markets' session dates", () => {
   assert.deepEqual(evaluatePass(day, keys, [u("NVDA", 168, "2026-11-30T20:00:00Z"), c("600519", 1390, "2026-12-01T01:34:00Z", "trading")], BOTH, now), []);
   assert.equal(day.keys.get(nvda)?.side, true, "the side is read afresh");
   assert.deepEqual(rebuildDay([], now), emptyDay());
+
+  /* a rebuilt cooldown swallows a crossing after the restart */
+  const restarted = rebuildDay([alertRecord({ t: "2026-11-30T15:00:00.000Z", key: nvda, id: "a-before", gap: false })], T("2026-11-30T15:05:00Z"));
+  const [stop] = keys;
+  assert.deepEqual(evaluatePass(restarted, [stop], [u("NVDA", 171, "2026-11-30T15:06:00Z")], BOTH, T("2026-11-30T15:06:00Z")), []);
+  assert.deepEqual(evaluatePass(restarted, [stop], [u("NVDA", 169, "2026-11-30T15:10:00Z")], BOTH, T("2026-11-30T15:10:00Z")), [], "inside 30 minutes of the last hit");
+  assert.equal(restarted.keys.get(nvda)?.repeats, 1);
+  assert.equal(evaluatePass(restarted, [stop], [u("NVDA", 171, "2026-11-30T15:35:00Z")], BOTH, T("2026-11-30T15:35:00Z")).length, 0);
+  assert.equal(evaluatePass(restarted, [stop], [u("NVDA", 169, "2026-11-30T15:40:00Z")], BOTH, T("2026-11-30T15:40:00Z")).length, 1, "and after it a crossing hits");
 });
 
 test("isAlertRecord accepts the four kinds and rejects a torn or kindless line", () => {

@@ -7,7 +7,9 @@
  * - **A shares.** The Market's phase `trading`, the session's Beijing date, and the Beijing clock in `[09:30, 11:30)`
  *   or `[13:00, 15:00)`, so the auction and the midday break are never judged; and, whatever the phase says, a print
  *   stamped inside `[15:00:00, 15:00:30]` - the close print. Past the XSHG table (a session marked `uncovered`) the
- *   Market's phase alone decides, on the session's Beijing date.
+ *   Market's phase stands in for the calendar only on whether the day is a session; the bands, the phase `trading`
+ *   inside them and the close print still decide which prints are judged, since the Market says `trading` through
+ *   the 09:15-09:25 auction too.
  *
  * Each key judges a print once per `as_of`, and its day is its session's date: a US key and an A-share key judged on
  * one New York evening are on two dates, and a key judged on a new date starts afresh.
@@ -64,7 +66,8 @@ export function watchQuoteOf(q: MarketQuote): WatchQuote {
 }
 
 /** Each market's session for the pass: the XNYS one on its ET date, the XSHG one on its Beijing date - `uncovered`
- * when the date is past the table and the watch judges on the Market's phase alone. */
+ * when the date is past the table and the Market's phase, not the calendar, made the day a session. The prints are
+ * judged as on a covered day. */
 export interface WatchSessions {
   us?: MarketSession;
   cn?: MarketSession & { uncovered?: true };
@@ -92,7 +95,6 @@ export function judgedDate(q: WatchQuote, sessions: WatchSessions): string | und
   }
   const s = sessions.cn;
   if (s === undefined || bjDate(when) !== s.date) return undefined;
-  if (s.uncovered) return q.phase === "trading" ? s.date : undefined;
   const clock = bjClock(when);
   if (clock >= CN_CLOSE_PRINT[0] && clock <= CN_CLOSE_PRINT[1]) return s.date;
   if (q.phase !== "trading") return undefined;
@@ -174,7 +176,7 @@ export function pastOf(k: PriceKey, q: WatchQuote): boolean | undefined {
   if (price === null || !Number.isFinite(price)) return undefined;
   const t = k.trigger;
   if (t.type === "level") {
-    if (t.when === "enter") return t.range !== undefined && price >= t.range[0] && price <= t.range[1];
+    if (t.when === "enter") return t.range === undefined ? undefined : price >= t.range[0] && price <= t.range[1];
     if (t.price === undefined) return undefined;
     return t.when === "cross_down" ? price <= t.price : price >= t.price;
   }
