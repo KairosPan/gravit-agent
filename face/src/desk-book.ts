@@ -575,16 +575,17 @@ export type DeskFile =
   | { state: "ok"; bytes: Buffer; text: string };
 
 /**
- * Read one desk file whole, on producer.ts's descriptor read (`readFileBytes`): a link at the path is never followed
- * and a FIFO never waited on, and at most one byte past `maxBytes` is read.
+ * Read one desk file whole, on producer.ts's descriptor read (`readFileBytes`): a link at the path is never followed,
+ * a FIFO never waited on, a file with a second name (a hard link) refused as the book's loaders refuse one, and at
+ * most one byte past `maxBytes` is read.
  * @param path - the file.
  * @param maxBytes - the most bytes it may hold, {@link DESK_FILE_MAX_BYTES} by default.
  * @returns `absent` for `ENOENT` or `ENOTDIR`; `unreadable` with the failure's code for any other, with `not a
- *   regular file` for a link, a FIFO, a directory or a device, and with `not UTF-8` for bytes a fatal UTF-8 decode
+ *   regular file` for a link, a hard link, a FIFO, a directory or a device, and with `not UTF-8` for bytes a fatal UTF-8 decode
  *   refuses; `oversize` past `maxBytes`; else `ok`, the bytes and their text.
  */
 export async function readDeskFile(path: string, maxBytes: number = DESK_FILE_MAX_BYTES): Promise<DeskFile> {
-  const read = await readFileBytes(path, maxBytes);
+  const read = await readFileBytes(path, maxBytes, { oneName: true });
   if (read === "irregular") return { state: "unreadable", reason: "not a regular file" };
   if (read === "oversized") return { state: "oversize" };
   if (!Buffer.isBuffer(read)) {

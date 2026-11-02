@@ -96,9 +96,8 @@ const str = (v: unknown): string | undefined =>
   typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
 
 /**
- * Read `<dir>/status.yaml`. Absent or unreadable is `{}`; malformed YAML
- * falls back to the `status:` regex, because a hand-mangled file must never
- * remove a channel from the index — status is a badge, not a gate.
+ * Read `<dir>/status.yaml`. Absent or unreadable is `{}`; the text is read
+ * as {@link parseChannelStatus} reads it.
  */
 export async function readChannelStatus(dir: string): Promise<ChannelStatus> {
   let text: string;
@@ -107,6 +106,17 @@ export async function readChannelStatus(dir: string): Promise<ChannelStatus> {
   } catch {
     return {};
   }
+  return parseChannelStatus(text);
+}
+
+/**
+ * A `status.yaml`'s text, read: no file is opened, so a caller that read the
+ * bytes itself (src/report.ts, through a guarded read) parses exactly those.
+ * Malformed YAML falls back to the `status:` regex, because a hand-mangled
+ * file must never remove a channel from the index — status is a badge, not a gate.
+ * @param text - the file's text.
+ */
+export function parseChannelStatus(text: string): ChannelStatus {
   const floor: ChannelStatus = {};
   const word = STATUS_RE.exec(text)?.[1];
   if (word !== undefined) floor.status = word;

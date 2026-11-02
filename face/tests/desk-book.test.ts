@@ -844,7 +844,7 @@ test("levelDistancePct: a price, inside a range, outside it", () => {
 
 /* ---------- readDeskFile and parseLevels (P4) ---------- */
 
-test("readDeskFile: absent, a FIFO and a symlink never followed, oversize, not UTF-8, ok", async (t) => {
+test("readDeskFile: absent, a FIFO, a symlink and a hard link refused, oversize, not UTF-8, ok", async (t) => {
   const dir = join(TEST_DIR, "desk-file");
   await mkdir(dir, { recursive: true });
   assert.deepEqual(await readDeskFile(join(dir, "nope.yaml")), { state: "absent" });
@@ -854,6 +854,8 @@ test("readDeskFile: absent, a FIFO and a symlink never followed, oversize, not U
   assert.deepEqual(await readDeskFile(join(dir, "ok.yaml")), { state: "ok", bytes: Buffer.from("status: idea\n"), text: "status: idea\n" });
   await symlink("ok.yaml", join(dir, "link.yaml"));
   assert.deepEqual(await readDeskFile(join(dir, "link.yaml")), { state: "unreadable", reason: "not a regular file" });
+  await link(join(dir, "ok.yaml"), join(dir, "hard.yaml"));
+  assert.deepEqual(await readDeskFile(join(dir, "hard.yaml")), { state: "unreadable", reason: "not a regular file" }, "a second name is refused");
   await mkdir(join(dir, "sub.yaml"));
   assert.deepEqual(await readDeskFile(join(dir, "sub.yaml")), { state: "unreadable", reason: "not a regular file" });
   await writeFile(join(dir, "big.yaml"), "a".repeat(DESK_FILE_MAX_BYTES + 1));

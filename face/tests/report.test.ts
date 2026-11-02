@@ -6,7 +6,8 @@
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import fsPromises, { link, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadLevels } from "../src/desk-book.ts";
@@ -317,11 +318,15 @@ test("an unavailable source says so; a rejected market stands alone; a strategy 
 });
 
 test("a malformed, a missing and an unreadable status.yaml are named, not invented", async () => {
-  const statusOf = async (name: string, content?: string | "dir" | "link"): Promise<Pick<Report, "statusFile" | "status">> => {
+  const statusOf = async (name: string, content?: string): Promise<Pick<Report, "statusFile" | "status">> => {
     const dir = join(ROOT, "strategies", name);
     await mkdir(dir, { recursive: true });
     if (content === "dir") await mkdir(join(dir, "status.yaml"));
     else if (content === "link") await symlink(join(DEMO, "status.yaml"), join(dir, "status.yaml"));
+    else if (content === "hardlink") {
+      await writeFile(join(dir, "elsewhere.yaml"), STATUS);
+      await link(join(dir, "elsewhere.yaml"), join(dir, "status.yaml"));
+    }
     else if (content !== undefined) await writeFile(join(dir, "status.yaml"), content);
     const { r } = await report({ quotes: fakeSource(TABLE), root: ROOT, now: NOW }, { ...INPUT, dir: `strategies/${name}`, levels: levelsOf(null) });
     return { statusFile: r.statusFile, status: r.status };
@@ -334,7 +339,23 @@ test("a malformed, a missing and an unreadable status.yaml are named, not invent
   assert.deepEqual(await statusOf("st-none"), { statusFile: "missing", status: {} });
   assert.deepEqual(await statusOf("st-dir", "dir"), { statusFile: "unreadable", status: {} });
   assert.deepEqual(await statusOf("st-link", "link"), { statusFile: "unreadable", status: {} }, "a link is never followed, so readChannelStatus never reads its target");
+  assert.deepEqual(await statusOf("st-hard", "hardlink"), { statusFile: "unreadable", status: {} }, "a second name is refused");
   assert.deepEqual(await statusOf("st-template", readFileSync(join(REPO, "strategies", "_template", "status.yaml"), "utf8")), { statusFile: "read", status: { status: "idea" } });
+});
+
+test("status.yaml is opened once, by the guarded read: nothing re-reads its path", async (t) => {
+  const original = fsPromises.readFile;
+  const read: string[] = [];
+  t.mock.method(fsPromises, "readFile", async (...args: unknown[]) => {
+    read.push(String(args[0]));
+    return (original as (...a: unknown[]) => Promise<unknown>)(...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const { r } = await report({ quotes: fakeSource(TABLE), root: ROOT, now: NOW });
+  assert.equal(r.statusFile, "read");
+  assert.equal(r.status.one_line, ONE_LINE, "the values come from the guarded bytes");
+  assert.deepEqual(read.filter((path) => path.endsWith("status.yaml")), []);
 });
 
 test("refused and expired levels are listed, not quoted", async () => {

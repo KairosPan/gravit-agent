@@ -11,7 +11,7 @@ import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -626,11 +626,15 @@ test("an aborted run kills the producer's whole group", async () => {
   for (let i = 0; i < 40 && pids.some(alive); i++) await new Promise((done) => setTimeout(done, 50));
   for (const pid of pids) assert.equal(alive(pid), false, `${pid} died with its group`);
 
-  /* a signal already aborted starts nothing that outlives it */
+  /* a signal already aborted spawns nothing: the marker script never runs */
   const gone = new AbortController();
   gone.abort();
-  const r2 = await run([join(SCRIPTS, "sleep.mjs")], { cwd: ROOT, env: { PATH: process.env.PATH }, timeoutMs: 30_000, signal: gone.signal });
-  assert.deepEqual({ code: r2.code, timedOut: r2.timedOut, error: r2.error }, { code: null, timedOut: false, error: "aborted" });
+  const marker = join(TEST_DIR, "pre-aborted.marker");
+  await writeFile(join(SCRIPTS, "marker.mjs"), `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "ran");\n`);
+  const r2 = await run([join(SCRIPTS, "marker.mjs")], { cwd: ROOT, env: { PATH: process.env.PATH }, timeoutMs: 30_000, signal: gone.signal });
+  assert.deepEqual(r2, { code: null, stdout: "", stderr: "", timedOut: false, error: "aborted" });
+  await new Promise((done) => setTimeout(done, 300));
+  assert.equal(existsSync(marker), false, "no child was spawned");
 });
 
 test("an aborted script producer is { ok: false, error: aborted }, and runPinnedScript passes the signal on", async () => {
@@ -648,6 +652,16 @@ test("an aborted script producer is { ok: false, error: aborted }, and runPinned
   await runScriptProducer({ root: ROOT, script: "scripts/ok.py", sha256: ok, runBase: RUN_BASE, run, input: INPUT, timeoutMs: 5_000, log: () => {} });
   assert.equal(seen.length, 2);
   assert.equal(seen[1], undefined, "no signal given, none passed");
+
+  /* already aborted: no private copy is written and the runner is never called */
+  const gone = new AbortController();
+  gone.abort();
+  const base = join(TEST_DIR, "aborted-home", "run");
+  const pre = await runScriptProducer({ root: ROOT, script: "scripts/ok.py", sha256: ok, runBase: base, run, input: INPUT, timeoutMs: 5_000, log: () => {},
+    signal: gone.signal });
+  assert.deepEqual(pre.output, { ok: false, error: "aborted" });
+  assert.equal(seen.length, 2, "the runner was not called");
+  assert.equal(existsSync(base), false, "no run base, no copy");
 });
 
 test("readFileBytes keeps the failure's code; readScriptBytes still reads it as missing", async () => {
@@ -663,4 +677,9 @@ test("readFileBytes keeps the failure's code; readScriptBytes still reads it as 
   assert.deepEqual(await readFileBytes(join(dir, "f.txt", "below"), 100), { errno: "ENOTDIR" });
   assert.equal(await readScriptBytes(join(dir, "nope.txt")), "missing");
   assert.equal(await readScriptBytes(join(dir, "link.txt")), "irregular");
+  /* a hard link: refused only when one name is asked for; a script producer never refused one, and still reads it */
+  await link(join(dir, "f.txt"), join(dir, "hard.txt"));
+  assert.equal(await readFileBytes(join(dir, "hard.txt"), 100, { oneName: true }), "irregular");
+  assert.deepEqual(await readFileBytes(join(dir, "hard.txt"), 100), Buffer.from("hello"));
+  assert.deepEqual(await readScriptBytes(join(dir, "hard.txt")), Buffer.from("hello"));
 });

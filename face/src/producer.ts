@@ -259,8 +259,9 @@ function codeOf(error: unknown): string {
  * `timeoutMs` that whole group gets `SIGKILL` - a process the script started dies with it, and one holding its
  * stdout open no longer keeps the run waiting; a deadline of zero or less kills at once, never "no deadline". A
  * child that writes more than 1 MiB to either stream is killed the same way, its group with it, what it wrote up
- * to the limit kept. When `opts.signal` aborts - or has already - the group gets `SIGKILL` too, and the run ends
- * `{ code: null, timedOut: false, error: "aborted" }` with what was read. Never rejects: a spawn failure, a refused argument and a broken stdin pipe all end in a
+ * to the limit kept. When `opts.signal` aborts the group gets `SIGKILL` too, and the run ends `{ code: null,
+ * timedOut: false, error: "aborted" }` with what was read; a signal already aborted spawns nothing and ends so at
+ * once. Never rejects: a spawn failure, a refused argument and a broken stdin pipe all end in a
  * {@link RunResult}.
  * @param python - the interpreter: an absolute path, or a name looked up on the `PATH` of the environment
  *   each run is GIVEN (none there is `ENOENT`; both allow-lists keep `PATH`). The face passes
@@ -271,6 +272,10 @@ function codeOf(error: unknown): string {
  */
 export function defaultProducerRunner(python: string, flags: readonly string[] = PYTHON_FLAGS): ProducerRunner {
   return (argv, opts) => new Promise<RunResult>((done) => {
+    if (opts.signal?.aborted === true) {
+      done({ code: null, stdout: "", stderr: "", timedOut: false, error: ABORTED });
+      return;
+    }
     let child: ChildProcess;
     try {
       child = spawn(python, [...flags, ...argv], { cwd: opts.cwd, env: opts.env, detached: true, stdio: ["pipe", "pipe", "pipe"] });
@@ -320,10 +325,7 @@ export function defaultProducerRunner(python: string, flags: readonly string[] =
       opts.signal?.removeEventListener("abort", onAbort);
       done({ ...result, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") });
     };
-    if (opts.signal !== undefined) {
-      if (opts.signal.aborted) onAbort();
-      else opts.signal.addEventListener("abort", onAbort, { once: true });
-    }
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
     /** One stream's chunk kept, up to the limit; past it the child is killed as an overflow. */
     const keep = (which: "out" | "err", into: Buffer[], over: string) => (chunk: Buffer): void => {
       if (overflow !== undefined) return;
@@ -447,16 +449,22 @@ function sha256Hex(bytes: Uint8Array): string {
  * @param path - the file.
  * @param maxBytes - the most bytes it may hold; at most one byte past it is read, so a file that grows under the
  *   read is still refused.
- * @returns the bytes; `"irregular"` when the path holds a link, a FIFO or anything but a regular file;
+ * @param opts - `oneName`: refuse a regular file with a second name (a hard link: a link count other than 1, read on
+ *   the descriptor), as desk-book.ts's loaders and channels.ts's JSON reads do. Off by default: a script producer
+ *   has never been refused for one.
+ * @returns the bytes; `"irregular"` when the path holds a link, a FIFO or anything but a regular file (or, with
+ *   `oneName`, a hard-linked one);
  *   `"oversized"` when it holds more than `maxBytes`; `{ errno }` when it cannot be opened or read at all, with the
  *   failure's code (`ENOENT`, `ENOTDIR`, `EACCES`; `unknown error` when it has none).
  */
-export async function readFileBytes(path: string, maxBytes: number): Promise<Buffer | "irregular" | "oversized" | { errno: string }> {
+export async function readFileBytes(
+  path: string, maxBytes: number, opts: { oneName?: boolean } = {},
+): Promise<Buffer | "irregular" | "oversized" | { errno: string }> {
   let handle: FileHandle | undefined;
   try {
     handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
     const info = await handle.stat();
-    if (!info.isFile()) return "irregular";
+    if (!info.isFile() || (opts.oneName === true && info.nlink !== 1)) return "irregular";
     if (info.size > maxBytes) return "oversized";
     const buffer = Buffer.alloc(maxBytes + 1);
     let length = 0;
@@ -562,6 +570,8 @@ export async function runPinnedScript(opts: {
   if (bytes === "missing") return { refused: "missing", error: `${opts.script} is missing` };
   if (bytes === "irregular") return { refused: "missing", error: `${opts.script} is not a regular file` };
   if (bytes === "oversized" || sha256Hex(bytes) !== opts.sha256) return { refused: "hash", error: changed };
+  /* an abort before the copy: nothing written, nothing run */
+  if (opts.signal?.aborted === true) return { ran: { code: null, stdout: "", stderr: "", timedOut: false, error: ABORTED } };
   const runBase = resolve(opts.runBase);
   const baseProblem = await runBaseProblem(runBase);
   if (baseProblem !== undefined) return { failed: baseProblem };
