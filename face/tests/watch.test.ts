@@ -7,7 +7,7 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -297,7 +297,7 @@ test("a closed XSHG day polls no A share; past the table the watch says so once 
   assert.ok(past.source.calls.length >= 2);
   await until("the line", () => past.sent.length >= 1);
   assert.deepEqual(past.lines(/A-share calendar/), [
-    "the A-share calendar ends 2026-12-31; the watch judges A shares on the Market's phase alone until face/src/xshg-clock.ts is extended",
+    "the A-share calendar ends 2026-12-31; the watch judges A shares on the Beijing bands, the close print and the Market's phase for whether the day trades, until face/src/xshg-clock.ts is extended",
   ]);
   await past.watch.dispose();
 });
@@ -607,7 +607,7 @@ test("nothing to watch: no calendar ask, no poll, no line", async () => {
 
 /* ---------- the gates ---------- */
 
-test("OFF and MUTE record suppressed and send nothing; the tick lifts a mute at its end", async () => {
+test("OFF and MUTE record suppressed and send nothing; a tick lifts an expired mute", async () => {
   const h = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") + level("AMD", "stop", 100, "cross_down") } });
   await writeOff(h.home, { by: "terminal" }, () => h.wall.now());
   h.source.tables.us.set("NVDA", us(169, "2026-11-30T15:20:44Z"));
@@ -929,6 +929,13 @@ test("no deliver goes out once dispose has begun", async () => {
   await new Promise((done) => setTimeout(done, 50));
   assert.equal(h.sent.length, 1, "the second alert is not delivered after dispose began");
   assert.deepEqual(h.posts, []);
+  /* the send cut off by dispose is recorded undelivered, so it is not pending forever */
+  const records = await h.alertRecords();
+  const ids = Object.fromEntries(records.filter((r) => r.kind === "alert").map((r) => [r.symbol, r.id]));
+  const deliveredOf = (id: unknown): unknown => records.find((r) => r.kind === "delivered" && r.id === id)?.delivery;
+  assert.deepEqual(deliveredOf(ids.D0), { sent: [100] });
+  assert.deepEqual(deliveredOf(ids.D1), { undelivered: "the face shut down" });
+  assert.deepEqual(h.watch.status().recent.map((r) => [r.symbol, r.outcome]).sort(), [["D0", "sent"], ["D1", "undelivered"]]);
 });
 
 test("dispose waits at most 2 s for a hanging post, then releases the lease", async () => {
@@ -1017,5 +1024,52 @@ test("an edited plan keeps its level's cooldown", async () => {
   await h.wall.advance(0);
   assert.equal(h.lines(/^NVDA/).length, 1, "the second crossing is inside the cooldown");
   assert.equal(h.watch.status().markets.us.today.repeats, 1);
+  await h.watch.dispose();
+});
+
+/* ---------- the final review's fix wave ---------- */
+
+/** chmod cannot shut root out, so the unwritable case is skipped when the suite runs as root. */
+const AS_ROOT = process.getuid?.() === 0 ? "root writes past a mode of 500" : false;
+
+test("a lease that cannot be written: the watch is off today, says so once, and polls nothing", { skip: AS_ROOT }, async () => {
+  const home = join(TMP, "lease-unwritable", "home");
+  await mkdir(deskDir(home), { recursive: true });
+  await chmod(deskDir(home), 0o500);
+  try {
+    const h = await harness({ start: "2026-11-30T15:20:45Z", home, files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") } });
+    h.source.tables.us.set("NVDA", us(169, "2026-11-30T15:20:44Z"));
+    await h.wall.advance(0);
+    await until("the line", () => h.sent.length === 1);
+    await h.wall.advance(20_000);
+    await h.wall.advance(20_000);
+    assert.deepEqual(h.sent.map((x) => x.text), ["the watch is off today: its lease cannot be written (EACCES)"]);
+    const status = h.watch.status();
+    assert.equal(status.state, "lease-failed");
+    assert.equal(status.leaseError, "EACCES");
+    assert.equal(h.source.calls.length, 0, "no poll");
+    assert.deepEqual(h.calendars.us.asked ?? [], []);
+    await chmod(deskDir(home), 0o700);
+    await h.wall.advance(20_000);
+    await until("watching", () => h.watch.status().state === "watching");
+    assert.equal(h.watch.status().leaseError, undefined);
+    await h.watch.dispose();
+  } finally {
+    await chmod(deskDir(home), 0o700).catch(() => {});
+  }
+});
+
+test("an idle watch still lifts an expired mute, and its status shows the mute until then", async () => {
+  const h = await harness({ start: "2026-11-30T15:00:00Z", files: { "desk/README.md": "nothing here\n" } });
+  await writeMute(h.home, { by: "telegram", until: Date.parse("2026-11-30T15:10:00Z") }, () => h.wall.now());
+  await h.wall.advance(0);
+  assert.equal(h.watch.status().state, "idle");
+  assert.equal(h.watch.status().muted?.by, "telegram");
+  h.wall.set("2026-11-30T15:10:00Z");
+  await h.wall.advance(5_000);
+  await assert.rejects(readFile(join(deskDir(h.home), "MUTE")), "the expired mute is lifted");
+  assert.ok((await readEvents(h.home)).events.some((e) => e.kind === "mute-cleared" && e.by === "expiry"));
+  assert.equal(h.watch.status().muted, undefined);
+  assert.equal(h.sent.length, 0);
   await h.watch.dispose();
 });

@@ -249,9 +249,10 @@ test("WATCH_LINES render the phone-line table exactly", () => {
   assert.equal(WATCH_LINES.noPrices("cn", "busy"), "the watch has no A-share prices today: busy");
   assert.equal(WATCH_LINES.unpriced("699999", "no A-share quote for 699999"), "the watch has no price for 699999 this session: no A-share quote for 699999");
   assert.equal(WATCH_LINES.cnPastTable("2026-12-31"),
-    "the A-share calendar ends 2026-12-31; the watch judges A shares on the Market's phase alone until face/src/xshg-clock.ts is extended");
+    "the A-share calendar ends 2026-12-31; the watch judges A shares on the Beijing bands, the close print and the Market's phase for whether the day trades, until face/src/xshg-clock.ts is extended");
   assert.equal(WATCH_LINES.noCalendar("XNYS has no 2027 table"), "the watch is off for US shares today: the market calendar failed (XNYS has no 2027 table)");
   assert.equal(WATCH_LINES.heldElsewhere(4242), "this face does not watch: another face (pid 4242) holds the watch on this home");
+  assert.equal(WATCH_LINES.leaseFailed("EACCES"), "the watch is off today: its lease cannot be written (EACCES)");
   assert.equal(WATCH_LINES.filingsNoContact(), "the watch's filings are off: set ALPHA_EDGAR_USER_AGENT to a contact email (SEC asks for one)");
   assert.equal(WATCH_LINES.filingsRefused("403 Forbidden"),
     "the watch's filings are off until tomorrow: SEC refused every request (403 Forbidden); check ALPHA_EDGAR_USER_AGENT");
@@ -271,7 +272,7 @@ test("WATCH_LINES cut the long rows at 500 characters with …", () => {
   assert.ok(loaded.endsWith("…"));
   const long = "x".repeat(800);
   for (const line of [WATCH_LINES.fileRefused("desk/levels.yml", long), WATCH_LINES.noPrices("us", long), WATCH_LINES.unpriced("NVDA", long),
-    WATCH_LINES.noCalendar(long), WATCH_LINES.filingsRefused(long)]) {
+    WATCH_LINES.noCalendar(long), WATCH_LINES.filingsRefused(long), WATCH_LINES.leaseFailed(long)]) {
     assert.equal([...line].length, 500);
     assert.ok(line.endsWith("…"));
   }

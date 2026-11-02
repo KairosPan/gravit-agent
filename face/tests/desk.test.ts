@@ -1591,6 +1591,7 @@ test("watchLines: each state, each market phase, the filings' phrases, an unread
   assert.deepEqual(watchLines({ ...bare, state: "stopped" }, now)[0], "watch: stopped");
   assert.deepEqual(watchLines({ ...bare, state: "held-elsewhere", holder: { pid: 4242, since: "2026-11-30T13:00:00.000Z" } }, now)[0],
     "watch: another face (pid 4242) holds the watch on this home");
+  assert.deepEqual(watchLines({ ...bare, state: "lease-failed", leaseError: "EACCES" }, now)[0], "watch: off today: its lease cannot be written (EACCES)");
 
   const session = { date: "2026-11-30", open: "2026-11-30T14:30:00.000Z", close: "2026-11-30T21:00:00.000Z" };
   const us = (m: Partial<MarketWatchStatus>): string[] => watchLines({ ...bare, markets: { us: { ...off(), ...m }, cn: off() } }, now).slice(1, -1);

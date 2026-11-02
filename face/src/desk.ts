@@ -1389,7 +1389,8 @@ function filingsPhrase(f: WatchStatus["filings"], now: Date): string {
 
 /**
  * The watch's lines (src/watch.ts `WatchStatus`), appended by {@link deskStatusLines} after P2's:
- * - `watch: <starting | nothing to watch | stopped | another face (pid <n>) holds the watch on this home | watching>`;
+ * - `watch: <starting | nothing to watch | stopped | another face (pid <n>) holds the watch on this home | off today:
+ *   its lease cannot be written (<error>) | watching>`;
  * - per market with a source (its state not `off`): `watch <US | A shares>: <no calendar today | closed today | the
  *   <date> session opens at <HH:MM ET> | polling the <date> session, <n> symbols, last poll <HH:MM ET> | the <date>
  *   session has closed>[; not watched: <k>][; <its last error>]`;
@@ -1409,7 +1410,8 @@ function filingsPhrase(f: WatchStatus["filings"], now: Date): string {
 export function watchLines(w: WatchStatus, now: Date): string[] {
   const head = w.state === "idle" ? "nothing to watch"
     : w.state === "held-elsewhere" ? `another face${w.holder === undefined ? "" : ` (pid ${w.holder.pid})`} holds the watch on this home`
-      : w.state;
+      : w.state === "lease-failed" ? `off today: its lease cannot be written (${w.leaseError ?? "unknown"})`
+        : w.state;
   const lines = [`watch: ${head}`];
   const markets = ["us", "cn"] as const;
   for (const m of markets) {
@@ -1732,7 +1734,8 @@ export function installDesk(
       return undefined;
     });
   /* The watch (src/watch.ts, P3) loads on first use as well, in the same chain once the clock row is made - only when
-   * `watchRow` is given (main.ts passes `{}`; no test or smoke does, so none polls the operator's book) and the quote
+   * `watchRow` is given (main.ts passes `{}`; tests/desk.test.ts and tests/watch-smoke.test.ts pass theirs over a
+   * scratch home and repo, so none polls the operator's book) and the quote
    * source answers: one source serves both markets, so a face with no Market read watches neither. It never rejects:
    * a module that cannot load is one line and `undefined`; one that arrives once dispose has begun starts nothing. */
   const watchRow = deps.watchRow;

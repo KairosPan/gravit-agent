@@ -230,11 +230,13 @@ export const WATCH_LINES = {
   unpriced: (symbol: string, reason: string): string => cut(`the watch has no price for ${symbol} this session: ${reason}`),
   /** A shares past the XSHG table. */
   cnPastTable: (last: string): string =>
-    cut(`the A-share calendar ends ${last}; the watch judges A shares on the Market's phase alone until face/src/xshg-clock.ts is extended`),
+    cut(`the A-share calendar ends ${last}; the watch judges A shares on the Beijing bands, the close print and the Market's phase for whether the day trades, until face/src/xshg-clock.ts is extended`),
   /** No XNYS calendar today. */
   noCalendar: (error: string): string => cut(`the watch is off for US shares today: the market calendar failed (${error})`),
   /** Another face holds the watch's lease on this home. */
   heldElsewhere: (pid: number): string => `this face does not watch: another face (pid ${pid}) holds the watch on this home`,
+  /** The lease step failed: its code, else its message. */
+  leaseFailed: (error: string): string => cut(`the watch is off today: its lease cannot be written (${error})`),
   /** A filing rule, and no SEC contact. */
   filingsNoContact: (): string => "the watch's filings are off: set ALPHA_EDGAR_USER_AGENT to a contact email (SEC asks for one)",
   /** SEC refused every symbol's request. */

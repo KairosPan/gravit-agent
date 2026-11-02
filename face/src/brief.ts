@@ -11,7 +11,7 @@
  * file an error, and a missing file is `missing` (holdings) or absent from `files` (levels). NOT a strategy's
  * `strategies/<name>/levels.yml`: those sit in directories the research sessions can write, and the brief quotes a
  * level's plan into an unattended turn whose text reaches the phone, so they join the brief only once P4 pins each one
- * at arming (charter D20; the P2 fix wave's I3) - `scope` says so, and the model does not report them as nothing.
+ * at arming (charter D28; the P2 fix wave's I3) - `scope` says so, and the model does not report them as nothing.
  * THE BRIEF IS US. An A-share holding or level (src/symbols.ts: six digits) is neither priced nor listed here; the
  * brief counts them in `aShares`, and the watch and the strategies' reports are theirs (ruling 11).
  * THE WATCH'S BLOCKS (ruling 11). `alerts` and `filings` list what the watch (src/watch.ts) wrote to the desk's
@@ -51,14 +51,17 @@
  * A file that is missing, refused or unreadable is named in its block and never fails the brief.
  * {@link briefProducer} never rejects.
  *
- * A CUT KEEPS THE ERRORS. The firing quotes at most 32,768 characters of a producer's text (producer.ts
- * `PRODUCER_TEXT_MAX`) and cuts the rest, so the brief's keys are written with the long lists last: `quotesError`
+ * A CUT TAKES THE TAIL. The firing quotes at most 32,768 characters of a producer's text (producer.ts
+ * `PRODUCER_TEXT_MAX`) and cuts the rest, so the brief's keys are written with the errors early: `quotesError`
  * straight after the session, ahead of every quote; in each block, the file's state and its errors ahead of its rows,
  * near levels and refusals; the watch's blocks after the levels block, each with its counts, `more` and error ahead of
- * its items, newest first; `aShares` and `scope` at the very end. A brief past the cap loses its oldest filings, then its
- * oldest alerts, then the tail of the levels' refusals and near levels - nearest first, so the farthest go - before
- * any block's counts or error, with one exception: the holdings rows come ahead of the whole levels block, so many
- * long-labelled holdings can push the levels error past the cap first.
+ * its items, newest first; `aShares` and `scope` at the very end. A brief past the cap loses from its end: `scope`,
+ * `aShares`, then the filings' items oldest first and the filings' head, then the alerts' items oldest first and the
+ * alerts' head, then the tail of the levels' refusals and near levels (nearest first, so the farthest go).
+ * `quotesError` and the levels' errors come earlier and survive, with one exception: the holdings rows come ahead of
+ * the whole levels block, so many long-labelled holdings can push the levels error past the cap first. A book at its
+ * caps (60 holdings, 40 levels with long plans) already passes 32,768 characters, so its brief loses both watch blocks
+ * whole, their counts and errors with them (DEVELOPMENT.md R71).
  *
  * MODULE WEIGHT. It brings desk-book.ts (and js-yaml with it) and desk.ts, so only a firing loads it
  * - through the schedule, itself loaded on first use - and the pause switch (scripts/desk.ts) never does.

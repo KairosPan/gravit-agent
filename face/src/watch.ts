@@ -10,22 +10,27 @@
  * {@link LEASE_STALE_MS} old is taken over - a check and a write under P0's lock on the file, then a re-read, so of
  * two faces only the pid the re-read names watches. Another face's live lease leaves this one `held-elsewhere`,
  * which it says once per ET date; the lease is retried each tick and released at `dispose` when it is this face's.
+ * A lease step that throws (`EACCES`, `EROFS`, the lock's timeout) leaves the watch `lease-failed`, the reason in the
+ * status's `leaseError`: it polls nothing and says so once per ET date; the next tick tries again. Either line waits
+ * for a book that names something to watch, a check re-read only when a book file's stamp or the ET date changed.
  *
  * THE TICK, every {@link WATCH_TICK_MS}, each step caught - one `gravit-face: desk: watch <step>: <reason>` line per
  * distinct failure - and the next tick always armed: the lease; the ET date's line memories; the files (ruling 8:
  * `desk/levels.yml`, every `strategies/<name>/levels.yml`, `desk/holdings.yml`, `desk/rules.yml`, re-read on an
  * mtime or size change and on each new ET date, a broken file keeping its last good load, one line per distinct
- * change); nothing to watch is `idle`, and the tick stops there - no calendar, no poll, no line; the ledgers, read
- * once before any pass is judged (`alerts.jsonl` into src/watch-eval.ts `rebuildDay`, `filings.jsonl` into
- * src/filings.ts `baselineFrom`; an unreadable `alerts.jsonl` judges nothing until it reads, with one line); each
+ * change); an expired mute lifted; nothing to watch is `idle`, and the tick stops there - no calendar, no poll, no
+ * line; the ledgers, read once before any pass is judged (`alerts.jsonl` into src/watch-eval.ts `rebuildDay`,
+ * `filings.jsonl` into src/filings.ts `baselineFrom`; an unreadable `alerts.jsonl` judges nothing until it reads,
+ * with one line); each
  * market, its calendar's answer for its own date, its window (ruling 2: 10 minutes before the open to a minute after
- * the close) and a poll when due by its cadence (ruling 3), never two in flight per market; a due batch; an expired
- * mute lifted; and the filings (ruling 9), one single-flight poll when due, aborted at 120 s.
+ * the close) and a poll when due by its cadence (ruling 3), never two in flight per market; a due batch; and the
+ * filings (ruling 9), one single-flight poll when due, aborted at 120 s.
  *
  * A PASS is one market's poll - one snapshot over that market's ids alone - or one filings poll. Its hits are judged
  * synchronously and go on the send chain in order: the flags read once (OFF and MUTE, then the budget when an alert
  * would be annotated), each hit recorded with its gate's decision, each send delivered and its delivery recorded, and
- * then one annotation post on a second chain no pass waits on (ruling 5). A failed poll - rejected, or every quote
+ * then one annotation post on a second chain no pass waits on (ruling 5); a send that dispose cuts off is recorded
+ * `{ undelivered: "the face shut down" }`, never delivered. A failed poll - rejected, or every quote
  * `unavailable` - judges nothing and says so once per session date per market; a watched symbol unpriced on its
  * first {@link UNPRICED_POLLS} polls of a session date says so once (ruling 16).
  *
@@ -181,9 +186,11 @@ export interface WatchMark {
 
 /** What the watch reports: `/data/desk/status`'s `watch`. */
 export interface WatchStatus {
-  state: "starting" | "idle" | "held-elsewhere" | "watching" | "stopped";
+  state: "starting" | "idle" | "held-elsewhere" | "lease-failed" | "watching" | "stopped";
   markets: Record<Market, MarketWatchStatus>;
   holder?: { pid: number; since: string };
+  /** Why the lease step failed, while `lease-failed`: its code, else its message. */
+  leaseError?: string;
   muted?: MuteState;
   files: WatchFileStatus[];
   near: NearView[];
@@ -321,6 +328,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   let state: WatchStatus["state"] = "starting";
   let holder: { pid: number; since: string } | undefined;
   let leaseBeat: number | undefined;
+  let leaseError: string | undefined;
   let muted: MuteState | undefined;
   let day: WatchDay = emptyDay();
   let alertsRead = false;
@@ -436,9 +444,28 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     return false;
   }
 
-  /** Whether the book on disk names anything to watch - a price key or a US filing symbol - read afresh, saying
-   * nothing: a face that does not watch never phones the book's lines, and with nothing to watch sends none. */
+  /** The last {@link bookHasWatch} answer: the stamps it was read under, its ET date and the strategies it listed. */
+  let bookCheck: { stamp: string; date: string; names: string[]; answer: boolean } | undefined;
+
+  /** The book files' stamps (mtime, size, inode - or missing) and the strategies directory's, as one string. */
+  async function bookStamp(names: readonly string[]): Promise<string> {
+    const paths = [holdingsFile.path, levelsFile.path, rulesFile.path, join(root, "strategies"), ...names.map((name) => join(root, "strategies", name, "levels.yml"))];
+    const stamps = await Promise.all(paths.map(async (path) => {
+      try {
+        const s = await lstat(path);
+        return `${s.mtimeMs}:${s.size}:${s.ino}`;
+      } catch (err) {
+        return isAbsent(err) ? "missing" : `error:${reasonOf(err)}`;
+      }
+    }));
+    return stamps.join("|");
+  }
+
+  /** Whether the book on disk names anything to watch - a price key or a US filing symbol - saying nothing: a face
+   * that does not watch never phones the book's lines, and with nothing to watch sends none. It is read afresh only
+   * when a file's stamp or the strategies directory's changed, or on a new ET date; else the last answer stands. */
   async function bookHasWatch(today: string): Promise<boolean> {
+    if (bookCheck !== undefined && bookCheck.date === today && (await bookStamp(bookCheck.names)) === bookCheck.stamp) return bookCheck.answer;
     const loads = async <T>(load: Promise<LoadResult<T>>): Promise<T[]> => (await load.catch(() => undefined))?.entries ?? [];
     let strategies: string[] = [];
     try {
@@ -452,7 +479,9 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       ...await loads(loadLevels(levelsFile.path, levelsFile.file, today)),
       ...(await Promise.all(strategies.map((name) => loads(loadLevels(join(root, "strategies", name, "levels.yml"), `strategies/${name}/levels.yml`, today))))).flat(),
     ];
-    return priceKeys({ holdings, levels, rules }).length > 0 || filingSymbols(rules, { holdings, levels }).polled.length > 0;
+    const answer = priceKeys({ holdings, levels, rules }).length > 0 || filingSymbols(rules, { holdings, levels }).polled.length > 0;
+    bookCheck = { stamp: await bookStamp(strategies), date: today, names: strategies, answer };
+    return answer;
   }
 
   /** The held-elsewhere line, once per ET date, and only when there is something to watch (Starting). */
@@ -462,6 +491,14 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     if (saidOn.has(`held:${today}`)) return;
     if (!(await bookHasWatch(today))) return;
     sayOnce(`held:${today}`, WATCH_LINES.heldElsewhere(holder.pid), { at });
+  }
+
+  /** The lease-failed line, once per ET date, and only when there is something to watch (Starting). */
+  async function leaseFailedLine(at: number, reason: string): Promise<void> {
+    const today = etDate(new Date(at));
+    if (saidOn.has(`leaseFailed:${today}`)) return;
+    if (!(await bookHasWatch(today))) return;
+    sayOnce(`leaseFailed:${today}`, WATCH_LINES.leaseFailed(reason), { at });
   }
 
   /** Release the lease when it is this face's. */
@@ -778,13 +815,17 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       }
       const delivered: { rec: AlertHit; result: DeliverResult }[] = [];
       for (const rec of sends) {
-        if (stopped) return; // dispose has begun: no deliver after it, and no post
+        /* dispose has begun: no deliver after it and no post, and each send left is recorded undelivered, so none
+         * stays pending */
         const note = rec.annotate ? (spent ? "budget" : "follows") : "none";
         let result: DeliverResult;
-        try {
-          result = await deps.deliver(alertText(rec, clock.now(), note));
-        } catch (err) {
-          result = { undelivered: `send failed: ${errText(err)}` };
+        if (stopped) result = { undelivered: "the face shut down" };
+        else {
+          try {
+            result = await deps.deliver(alertText(rec, clock.now(), note));
+          } catch (err) {
+            result = { undelivered: `send failed: ${errText(err)}` };
+          }
         }
         const done = clock.now();
         const sent = "sent" in result;
@@ -799,6 +840,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         alerts.append(d);
         if (!("undelivered" in result)) delivered.push({ rec, result });
       }
+      if (stopped) return;
       const annotated = delivered.filter((d) => d.rec.annotate);
       if (spent || annotated.length === 0) return;
       /* the post replies to the first annotated alert delivered - none when the outlet queued it (ruling 16) */
@@ -1030,16 +1072,54 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     for (const [id, d] of deliveries) if (at - Date.parse(d.t) > MEMORY_MS) deliveries.delete(id);
   }
 
+  /** Both markets and the filings shown off: nothing is polled. */
+  function marketsOff(): void {
+    for (const m of MARKETS) {
+      markets[m].state = "off";
+      markets[m].watched = 0;
+      markets[m].notWatched = [];
+    }
+    filings.state = "off";
+  }
+
+  /** The mute step: an expired mute lifted, and the status's mute read - idle or watching. */
+  async function muteStep(at: number): Promise<void> {
+    try {
+      const m = await readMuteState(home, () => at);
+      if (m.state !== undefined && m.expired) {
+        await clearMute(home, "expiry", () => at);
+        muted = undefined;
+      } else {
+        muted = m.state;
+      }
+    } catch (err) {
+      fail("mute", err);
+    }
+  }
+
   async function runTick(): Promise<void> {
     if (stopped) return;
     const at = clock.now();
     let held = false;
+    let leaseFailure: string | undefined;
     try {
       held = await leaseStep(at);
     } catch (err) {
       fail("lease", err);
+      leaseFailure = reasonOf(err);
     }
     if (stopped) return;
+    leaseError = leaseFailure;
+    if (leaseFailure !== undefined) {
+      state = "lease-failed";
+      marketsOff();
+      try {
+        await leaseFailedLine(at, leaseFailure);
+      } catch (err) {
+        fail("lease line", err);
+      }
+      return;
+    }
     if (!held) {
       if (holder !== undefined && holder.pid !== pid) {
         state = "held-elsewhere";
@@ -1057,15 +1137,11 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     } catch (err) {
       fail("files", err);
     }
+    await muteStep(at);
     const filingsAny = filingSymbols(book.rules, { holdings: book.holdings, levels: book.levels }).polled.length > 0;
     if (keys.length === 0 && !filingsAny) {
       state = "idle";
-      for (const m of MARKETS) {
-        markets[m].state = "off";
-        markets[m].watched = 0;
-        markets[m].notWatched = [];
-      }
-      filings.state = "off";
+      marketsOff();
       return;
     }
     state = "watching";
@@ -1084,17 +1160,6 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       batchStep(at);
     } catch (err) {
       fail("batch", err);
-    }
-    try {
-      const m = await readMuteState(home, () => at);
-      if (m.state !== undefined && m.expired) {
-        await clearMute(home, "expiry", () => at);
-        muted = undefined;
-      } else {
-        muted = m.state;
-      }
-    } catch (err) {
-      fail("mute", err);
     }
     try {
       await filingsStep(at, usAnswer);
@@ -1189,6 +1254,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       state,
       markets: marketsNow,
       ...(holder === undefined ? {} : { holder: { ...holder } }),
+      ...(leaseError === undefined ? {} : { leaseError }),
       ...(muted === undefined ? {} : { muted: { ...muted } }),
       files: fileStatuses().map((f) => structuredClone(f)),
       near: nearOf(lastQuotes, at),

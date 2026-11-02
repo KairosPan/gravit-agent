@@ -7,7 +7,7 @@
  * Market part in-process, through the face's proxy (src/account-proxy.ts: each route's cache and flights,
  * `FACE_ACCOUNT_URL`), no new route and no new host. A snapshot splits what it is asked by market:
  * - a US share: `GET /api/account/explore?q=<SYM>&key=stock:<SYM>&limit=1`, once per symbol, kept 20 s by the proxy.
- *   The Market answers it keyless (the Account's live US quotes: Robinhood's or Nasdaq's real-time quote, else Cboe's delayed
+ *   The Market answers it keyless (the Market's live US quotes: Robinhood's or Nasdaq's real-time quote, else Cboe's delayed
  *   one). The row keyed `stock:<SYM>` with a `price` and its `quoteAt` becomes the quote's `price` and `as_of`,
  *   `change24h` its `change` and `price - change24h` its `prev_close`;
  * - an A share: `GET /api/account/quotes?pairs=china|<code>,…`, at most {@link CN_QUOTES_BATCH} codes a read (the

@@ -68,6 +68,7 @@ test('deskViewOf: a pause, a watch held elsewhere, a market off, held alerts, a 
   assert.equal(v.head, 'up 3h 5m since 2026-11-02T11:55:00.000Z · desk off (FACE_DESK=0)');
   assert.equal(v.off, 'desk: paused since 09:00 ET by page until 2026-11-03 10:00 ET (npm run desk -- resume)');
   assert.equal(v.watch, 'watch: another face (pid 77) holds the watch on this home');
+  assert.equal(deskViewOf({ ...s, watch: { ...s.watch, state: 'lease-failed', leaseError: 'EROFS' } }, NOW_ISO).watch, 'watch: off today: its lease cannot be written (EROFS)');
   assert.deepEqual(v.markets.map(m => m.name), ['US'], 'a market off has no line and, with nothing today, no counts');
   assert.equal(v.pending, "alerts: 3 held for the next hour's batch");
   assert.equal(v.muted, 'alerts: muted until a terminal lifts it (npm run desk -- unmute)');

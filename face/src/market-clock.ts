@@ -222,7 +222,7 @@ export function xnysWindow(from: string, days: number): MarketWindow {
 /**
  * Whether `date` lies inside the window: `from ≤ date < from + days`.
  * @param window - a window.
- * @param date - a New York date, `YYYY-MM-DD`; anything else is never inside.
+ * @param date - the market's date, `YYYY-MM-DD`; anything else is never inside.
  */
 export function windowCovers(window: MarketWindow, date: string): boolean {
   return isDateText(date) && window.from <= date && date < addDays(window.from, window.days);
@@ -231,7 +231,7 @@ export function windowCovers(window: MarketWindow, date: string): boolean {
 /**
  * That date's session in the window.
  * @param window - a window.
- * @param date - a New York date, `YYYY-MM-DD`.
+ * @param date - the market's date, `YYYY-MM-DD`.
  * @returns the session; `"closed"` for a date inside the window with none (a holiday, a weekend);
  *   `undefined` outside the window, where the window knows nothing.
  */

@@ -116,6 +116,7 @@ const FILE_ERROR_SHOWN_MAX = 80;
 function watchHead(w) {
   if (w.state === 'idle') return 'watch: nothing to watch';
   if (w.state === 'held-elsewhere') return `watch: another face${isRecord(w.holder) ? ` (pid ${w.holder.pid})` : ''} holds the watch on this home`;
+  if (w.state === 'lease-failed') return `watch: off today: its lease cannot be written (${str(w.leaseError) || 'unknown'})`;
   return `watch: ${str(w.state)}`;
 }
 function phaseOf(m, now) {
