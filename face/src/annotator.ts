@@ -37,7 +37,8 @@
  *
  * SHUTDOWN ({@link Annotator.dispose}). A turn under way is cancelled as `shutdown`; its run sends nothing and notes
  * nothing, records the cut turn when the supervisor reports it before the agent is let go, and lets the agent go. The
- * dispose waits for the runs, each bounded, so nothing here lands after the conversation's dispose (src/desk.ts
+ * dispose waits for the runs - at most src/firing.ts `FIRING_DISPOSE_MS` and a two-second margin - so nothing here lands
+ * after the conversation's dispose (src/desk.ts
  * `installDesk` disposes the annotator first). Afterwards a post refuses.
  *
  * MODULE WEIGHT. src/desk.ts imports this module, so it imports nothing but types: src/desk.ts, src/desk-session.ts,
@@ -65,8 +66,9 @@ const defaultClock: DeskClock = {
 
 /** The most characters of a reply the `annotated` note keeps (the plan's Global Constraints). */
 export const ANNOTATED_TEXT_MAX = 2_000;
-/** How long {@link Annotator.dispose} waits for the runs under way - each already bounded - before it resolves. */
-const SHUTDOWN_MS = 15_000;
+/** What {@link Annotator.dispose} waits past src/firing.ts `FIRING_DISPOSE_MS` - the bound on letting an agent go - for
+ * the runs under way before it resolves: the whole stays well inside launchd's 20 s `ExitTimeOut`. */
+const SHUTDOWN_MARGIN_MS = 2_000;
 /** The journal, repo-relative: the label a refusal without a violation names, and every annotation's cwd. */
 const JOURNAL = "desk/journal";
 
@@ -239,11 +241,33 @@ export function createAnnotator(deps: AnnotatorDeps): Annotator {
     const deadlineMs = deps.deadlineMs ?? m.desk.ALERT_DEADLINE_MS;
     const cwd = m.session.deskJournalDir(root);
     const route = deps.session.route;
+    /* the making bounded as a firing bounds its open (src/firing.ts): one that never settles must not stall the lane;
+     * an agent made after the bound, or once the shutdown has begun, is let go when it comes */
+    const makeMs = deadlineMs + m.firing.FIRING_SLACK_MS;
+    const creating = Promise.resolve().then(() => (deps.createAgent ?? ((opts) => m.session.createDeskAgent(deps.session, opts)))({ cwd, route }));
+    const letGoLate = (): void => {
+      creating.then((late) => late.dispose(), () => {}).catch(() => {});
+    };
     let made: MadeAgent;
     try {
-      made = await (deps.createAgent ?? ((opts) => m.session.createDeskAgent(deps.session, opts)))({ cwd, route });
+      const within = await new Promise<{ made: MadeAgent } | undefined>((done, fail) => {
+        const timer = clock.setTimeout(() => { done(undefined); }, makeMs);
+        creating.then(
+          (value) => { clock.clearTimeout(timer); done({ made: value }); },
+          (err: unknown) => { clock.clearTimeout(timer); fail(err); },
+        );
+      });
+      if (within === undefined) {
+        letGoLate();
+        return open(failed(new Error(`the desk agent was not made in ${m.session.formatDuration(makeMs)}`)));
+      }
+      made = within.made;
     } catch (err) {
       return open(failed(err));
+    }
+    if (disposed) {
+      letGoLate();
+      return open(shutDown());
     }
     const { agent, sessionId } = made;
     const where = `annotation session ${sessionId}`;
@@ -403,7 +427,8 @@ export function createAnnotator(deps: AnnotatorDeps): Annotator {
       disposing ??= (async () => {
         disposed = true;
         for (const run of runs) run.shutDown();
-        await settlesWithin(SHUTDOWN_MS, (async () => {
+        const loaded = machinery === undefined ? undefined : await machinery.catch(() => undefined);
+        await settlesWithin((loaded?.firing.FIRING_DISPOSE_MS ?? 0) + SHUTDOWN_MARGIN_MS, (async () => {
           await chain;
           while (runs.size > 0) await Promise.all([...runs].map((r) => r.done));
           await recording;

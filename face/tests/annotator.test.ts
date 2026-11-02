@@ -303,6 +303,52 @@ test("a create or a followup that fails refuses with the annotate line, and the 
   await h.annotator.dispose();
 });
 
+test("a create that never settles makes the post refuse at the bound, an agent made late is let go, and the next post opens", async () => {
+  let release: () => void = () => {};
+  let calls = 0;
+  const h = await harness({
+    createAgent: async (opts) => {
+      calls += 1;
+      if (calls === 1) await new Promise<void>((done) => { release = done; }); // the first making hangs
+      return h.agents.createAgent(opts);
+    },
+  });
+  let first: PostResult | undefined;
+  const posting = annotate(h, "a-000000000001", 11).then((r) => { first = r; return r; });
+  await h.clock.advance(149_999);
+  assert.equal(first, undefined, "still waiting inside the bound");
+  await h.clock.advance(1);
+  assert.deepEqual(await posting, { refused: "error", line: "the desk could not annotate this alert: the desk agent was not made in 150 s" },
+    "refused at the deadline plus the slack");
+  assert.deepEqual(await annotate(h, "a-000000000002", 12), { opened: true, sessionId: "session-fake-1" }, "the lane is not stalled");
+  release();
+  await waitFor("the late agent let go", () => h.agents.agents.length === 2 && h.agents.agents[1].disposed === 1);
+  assert.deepEqual(h.agents.agents[1].followups, [], "the late agent is sent nothing");
+  await h.annotator.dispose();
+});
+
+test("an agent made once dispose has begun is let go, sent nothing, and the post refuses as shut down", async () => {
+  let release: () => void = () => {};
+  let making = false;
+  const h = await harness({
+    createAgent: async (opts) => {
+      making = true;
+      await new Promise<void>((done) => { release = done; });
+      return h.agents.createAgent(opts);
+    },
+  });
+  const posting = annotate(h, "a-000000000001", 11);
+  await waitFor("the making under way", () => making);
+  const disposing = h.annotator.dispose();
+  release();
+  assert.deepEqual(await posting, { refused: "error", line: "the desk could not annotate this alert: the desk is shut down" });
+  await disposing;
+  await waitFor("the agent let go", () => h.agents.agents[0]?.disposed === 1);
+  assert.deepEqual(h.agents.agents[0].followups, [], "no followup");
+  assert.equal(h.bus.listeners.size, 0, "nothing supervised");
+  assert.deepEqual(h.sent, []);
+});
+
 test("dispose cancels the turn under way as shutdown, sends nothing, notes nothing, and later posts refuse", async () => {
   const h = await harness();
   const sessionId = sessionOf(await annotate(h, "a-000000000001", 11));
