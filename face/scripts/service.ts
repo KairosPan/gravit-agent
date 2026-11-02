@@ -6,6 +6,7 @@
  *
  *   npm run service -- install      write $DSH_HOME/.env from the repo's key files when the home has none, then run the face in the background, from now on
  *   npm run service -- status       is it loaded, does it answer and since when, how the last run ended, the sign-in URL
+ *   npm run service -- status --check   the same, then the desk's health, as the exit code too: 0 healthy, 1 degraded, 2 down, 3 stopped
  *   npm run service -- start        start it (refused, like install, while anything else answers on the port: a terminal npm start?)
  *   npm run service -- stop         stop it: launchd lets go of the job, and the plist stays for start or the next login
  *   npm run service -- restart      stop it as stop does and start it again (after an update, to pick up new code)
@@ -397,6 +398,81 @@ export async function fetchStatus(port: number, fetchImpl: typeof fetch = fetch)
   }
 }
 
+/** The watch's poll intervals by market, copied from src/watch.ts's `WATCH_US_POLL_MS` and
+ * `WATCH_CN_POLL_MS` - importing watch.ts would load its channels, roster and bots modules into
+ * every `npm run service` - and pinned equal to them by tests/service.test.ts. */
+export const WATCH_POLL_MS = { us: 20_000, cn: 10_000 } as const;
+
+/** How many of a market's poll intervals may pass since its last poll before a `polling` market reads degraded. */
+const STALE_POLLS = 3;
+/** How long a Telegram 409 - another poller holding the token - keeps the bridge degraded. */
+const CONFLICT_WINDOW_MS = 10 * 60_000;
+/** The wait between {@link checkHealth}'s two tries at a face that does not answer. */
+const HEALTH_RETRY_MS = 10_000;
+
+/** {@link checkHealth}'s code: `0` healthy, `1` degraded, `2` down, `3` stopped on purpose. */
+export type HealthCode = 0 | 1 | 2 | 3;
+
+/** What makes an answering face - launchd's own - degraded, the first that holds, or `undefined`. */
+function degradedReason(status: DeskStatus, now: number): string | undefined {
+  const { telegram, watch } = status;
+  if (telegram?.pollFailing !== undefined) return `telegram poll failing since ${telegram.pollFailing.since}: ${telegram.pollFailing.reason}`;
+  if (telegram?.blocked === true) return "telegram blocked: the operator's chat refuses the bot (403)";
+  if (telegram?.conflictAt !== undefined && now - Date.parse(telegram.conflictAt) <= CONFLICT_WINDOW_MS) {
+    return `telegram conflict at ${telegram.conflictAt}: another poller holds the token`;
+  }
+  if (watch?.state === "lease-failed") return `watch lease failed${watch.leaseError === undefined ? "" : `: ${watch.leaseError}`}`;
+  if (watch?.state === "held-elsewhere") return `watch held elsewhere${watch.holder === undefined ? "" : `: pid ${watch.holder.pid} since ${watch.holder.since}`}`;
+  for (const m of ["us", "cn"] as const) {
+    const market = watch?.markets?.[m];
+    if (market?.state !== "polling" || market.lastPollAt === undefined) continue;
+    const limit = STALE_POLLS * WATCH_POLL_MS[m];
+    if (now - Date.parse(market.lastPollAt) > limit) {
+      return `watch ${m.toUpperCase()}: polling, last poll ${market.lastPollAt}, older than ${STALE_POLLS} polls (${limit / 1_000} s)`;
+    }
+  }
+  if (status.ledgerError !== undefined) return `ledger unreadable (${status.ledgerError})`;
+  if (watch?.ledgerError !== undefined) return `watch ledger unreadable (${watch.ledgerError})`;
+  return undefined;
+}
+
+/**
+ * The desk's health, as `status --check` exits with it and the watchdog (spec §16 H4) reads it; the
+ * first rule that holds wins:
+ * - `3` stopped on purpose: no plist (`not installed`), and then neither launchd nor the port is
+ *   asked; or a plist launchd has no job for (`stopped`), and then the port is not asked.
+ * - `2` down: {@link fetchStatus} has no status from the port on two tries `retryMs` apart -
+ *   `no answer on <port>`. A face that answers either try is not down.
+ * - `1` degraded: the face that answers is not launchd's job - its pid is not the job's, a job with
+ *   no pid included - and then nothing else it says is read: its troubles are not the job's; or,
+ *   for launchd's own face, its Telegram poll failing, the bot blocked, a 409 conflict within the
+ *   last 10 minutes, the watch's lease failed or held elsewhere, a market `polling` whose last poll
+ *   is older than three of its intervals ({@link WATCH_POLL_MS}; a market not yet polled is not
+ *   judged), or the desk's or the watch's ledger unreadable.
+ * - `0` otherwise: `healthy`.
+ * @param ctx - what `status` works from: the deps, the port, whether the plist is installed, the home.
+ * @param opts - `retryMs`, the wait between the two tries (default 10,000); `sleep`, how it waits
+ *   (default `ctx.deps.sleep`); `now`, the clock the conflict and the polls are judged by (default `Date.now`).
+ * @returns the code and its reason, one line.
+ */
+export async function checkHealth(
+  ctx: ServiceCtx,
+  opts: { retryMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number } = {},
+): Promise<{ code: HealthCode; reason: string }> {
+  if (!ctx.installed) return { code: 3, reason: "not installed" };
+  const job = jobInfo(ctx);
+  if (!job.loaded) return { code: 3, reason: "stopped" };
+  let answer = await fetchStatus(ctx.port, ctx.deps.fetch);
+  if (answer === undefined) {
+    await (opts.sleep ?? ctx.deps.sleep)(opts.retryMs ?? HEALTH_RETRY_MS);
+    answer = await fetchStatus(ctx.port, ctx.deps.fetch);
+  }
+  if (answer === undefined) return { code: 2, reason: `no answer on ${ctx.port}` };
+  if (answer.pid !== job.pid) return { code: 1, reason: "another face holds the port" };
+  const degraded = degradedReason(answer, (opts.now ?? Date.now)());
+  return degraded === undefined ? { code: 0, reason: "healthy" } : { code: 1, reason: degraded };
+}
+
 /**
  * Whether `install` or `start` may go ahead: refused while anything answers on the port. A second
  * face there would fail to bind, exit 1, and be started again by launchd every 30 s.
@@ -479,8 +555,8 @@ const GUARDED_FOLDERS = ["Desktop", "Documents", "Downloads"] as const;
 /** The commands that drive launchd, refused off darwin; `status`, `logs` and `url` only read. */
 const LAUNCHD_COMMANDS: ReadonlySet<string> = new Set(["install", "uninstall", "start", "stop", "restart"]);
 
-/** What every command works from, worked out once per run. */
-interface ServiceContext {
+/** What every command works from, worked out once per run ({@link contextOf}). */
+export interface ServiceContext {
   deps: ServiceDeps;
   /** The LaunchAgent as install would write it now, on this shell's home (`deps.home`); its `path` is where the plist is. */
   plan: ServicePlan;
@@ -498,7 +574,12 @@ interface ServiceContext {
   domain: string;
   /** `gui/<uid>/com.gravit.face`. */
   job: string;
+  /** `--check`: `status` adds the desk's health ({@link checkHealth}) and exits with its code. */
+  check?: boolean;
 }
+
+/** The context `status` and {@link checkHealth} work from - {@link ServiceContext}'s name in the check's signature. */
+export type ServiceCtx = ServiceContext;
 
 /** What launchd says of the job: loaded when `print` succeeds and says something, and then the state and pid it names. */
 interface JobInfo {
@@ -514,15 +595,21 @@ function asPort(text: string | undefined): number | undefined {
   return port >= 1 && port <= 65_535 ? port : undefined;
 }
 
-/** The arguments after the command: `--port N`, and nothing else. */
-function parseArgs(args: string[]): { port?: number; error?: string } {
+/** The arguments after the command: `--port N` and `--check`, each at most once for `--check`, and nothing else. */
+function parseArgs(args: string[]): { port?: number; check: boolean; error?: string } {
   let port: number | undefined;
-  for (let i = 0; i < args.length; i += 2) {
-    if (args[i] !== "--port") return { error: `unknown argument: ${args[i]}` };
+  let check = false;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--check" && !check) {
+      check = true;
+      continue;
+    }
+    if (args[i] !== "--port") return { check, error: `unknown argument: ${args[i]}` };
     port = asPort(args[i + 1]);
-    if (port === undefined) return { error: `--port takes a port from 1 to 65535${args[i + 1] === undefined ? "" : `, not ${args[i + 1]}`}` };
+    if (port === undefined) return { check, error: `--port takes a port from 1 to 65535${args[i + 1] === undefined ? "" : `, not ${args[i + 1]}`}` };
+    i++;
   }
-  return { port };
+  return { port, check };
 }
 
 /** {@link xml} undone: `&lt;` and `&gt;` first, `&amp;` last, so an escaped `&lt;` comes back as text. */
@@ -596,7 +683,13 @@ async function answersAfterWait(ctx: ServiceContext): Promise<boolean> {
   return answers;
 }
 
-function contextOf(deps: ServiceDeps, flagPort: number | undefined): ServiceContext {
+/**
+ * What the commands work from: the plist's presence and environment read once, the port and home
+ * worked out from them ({@link ServiceContext}).
+ * @param deps - the world the command acts on.
+ * @param flagPort - `--port`, when given.
+ */
+export function contextOf(deps: ServiceDeps, flagPort: number | undefined): ServiceContext {
   const launchAgentsDir = join(deps.homeDir, "Library", "LaunchAgents");
   const plistPath = join(launchAgentsDir, `${LABEL}.plist`);
   const installed = existsSync(plistPath);
@@ -671,6 +764,23 @@ async function ledgerLine(home: string): Promise<string> {
   if (last === undefined) return "ledger: empty";
   const end = last.endedAt === undefined ? "no shutdown event" : `ended ${last.endedAt} code ${last.code}`;
   return `ledger: last boot ${last.bootedAt} (pid ${last.pid}) - ${end}`;
+}
+
+/** `status`'s block for an installed plist: launchd's state, what the face answers ({@link formatStatus}),
+ * then the ledger's line while it does not answer, or a line when the face answering is not launchd's job. */
+async function statusBlock(ctx: ServiceContext): Promise<void> {
+  const { deps, port } = ctx;
+  const job = jobInfo(ctx);
+  const answer = await fetchStatus(port, deps.fetch);
+  const log = readText(ctx.log);
+  deps.out(formatStatus({ label: LABEL, info: job.loaded ? job : { state: "not loaded" }, installed: true, status: answer,
+    url: log === undefined ? undefined : lastTokenUrl(log), port }));
+  if (answer === undefined) deps.out(await ledgerLine(ctx.home));
+  /* The face that answered is not the one launchd runs - a terminal npm start, say - so what it
+   * said above is that face's, not the job's. */
+  else if (job.loaded && job.pid !== undefined && answer.pid !== job.pid) {
+    deps.out(`the face answering on ${port} is pid ${answer.pid}, not launchd's job (pid ${job.pid}): another face holds the port`);
+  }
 }
 
 /** `start`, and `restart`'s answer for a job that is not running and its last step for one it has
@@ -837,23 +947,14 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
 
   async status(ctx) {
     const { deps, port } = ctx;
-    if (!ctx.installed) {
-      deps.out(formatStatus({ label: LABEL, info: {}, installed: false, status: undefined, url: undefined, port }));
-      return 0;
-    }
-    const job = jobInfo(ctx);
-    const answer = await fetchStatus(port, deps.fetch);
-    const log = readText(ctx.log);
-    deps.out(formatStatus({ label: LABEL, info: job.loaded ? job : { state: "not loaded" }, installed: true, status: answer,
-      url: log === undefined ? undefined : lastTokenUrl(log), port }));
-    if (answer === undefined) deps.out(await ledgerLine(ctx.home));
-    /* The face that answered is not the one launchd runs - a terminal npm start, say - so what it
-     * said above is that face's, not the job's. */
-    else if (job.loaded && job.pid !== undefined && answer.pid !== job.pid) {
-      deps.out(`the face answering on ${port} is pid ${answer.pid}, not launchd's job (pid ${job.pid}): another face holds the port`);
-    }
-    return 0;
+    if (!ctx.installed) deps.out(formatStatus({ label: LABEL, info: {}, installed: false, status: undefined, url: undefined, port }));
+    else await statusBlock(ctx);
+    if (!ctx.check) return 0;
+    const { code, reason } = await checkHealth(ctx);
+    deps.out(`health: ${code} ${reason}`);
+    return code;
   },
+
 
   async logs(ctx) {
     const { deps } = ctx;
@@ -891,7 +992,7 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
   },
 };
 
-const USAGE = `usage: npm run service -- ${Object.keys(COMMANDS).join(" | ")} [--port N]`;
+const USAGE = `usage: npm run service -- ${Object.keys(COMMANDS).join(" | ")} [--port N] (status also takes --check)`;
 
 /**
  * Run one command - `npm run service -- <cmd> [--port N]` - and return its exit code: 0 when it is
@@ -907,6 +1008,8 @@ const USAGE = `usage: npm run service -- ${Object.keys(COMMANDS).join(" | ")} [-
  *   face does not answer, one line from the ledger on how its last run ended; when the face that
  *   answers is not launchd's job (its pid is not the job's), one line saying another face holds the
  *   port.
+ *   With `--check` (refused on any other command), then `health: <code> <reason>`
+ *   ({@link checkHealth}), and the code is the exit code; plain `status` returns 0.
  * - `install`: a move of the service's home from the one the installed plist names is said; a
  *   `deps.home` with no profiles/face is refused before any file is written or launchd asked; the
  *   home's .env ({@link ensureHomeEnv}), each finding a line; a job launchd has is booted out first
@@ -943,9 +1046,10 @@ export async function runService(cmd: string, args: string[], deps: ServiceDeps)
     deps.out(USAGE);
     return 2;
   }
-  const { port, error } = parseArgs(args);
-  if (error !== undefined) {
-    deps.out(error);
+  const { port, check, error } = parseArgs(args);
+  const refused = error ?? (check && cmd !== "status" ? "--check is status's alone" : undefined);
+  if (refused !== undefined) {
+    deps.out(refused);
     deps.out(USAGE);
     return 2;
   }
@@ -953,7 +1057,7 @@ export async function runService(cmd: string, args: string[], deps: ServiceDeps)
     deps.out(`${cmd} needs macOS: the service is a launchd LaunchAgent - on ${deps.platform}, run npm start under the system's own service manager`);
     return 1;
   }
-  return COMMANDS[cmd](contextOf(deps, port));
+  return COMMANDS[cmd]({ ...contextOf(deps, port), check });
 }
 
 /** The real deps: launchctl run with its output captured (a failure's error text comes back as
