@@ -1,0 +1,20 @@
+# The operator's urgent-event rules: what the watch (face/src/watch.ts) sends besides price levels.
+# Tracked - it holds no position and no price. Kinds: move_pct, gap, filing; a halt rule is refused.
+# A symbol is a US ticker or six digits for an A share; filings are US only.
+- id: holding-move
+  kind: move_pct           # the move from the previous close reaches move_pct, either way
+  symbols: holdings
+  move_pct: 4
+  cooldown: 60m
+- id: index-move
+  kind: move_pct
+  symbols: [SPY, QQQ]
+  move_pct: 1.5
+- id: filing
+  kind: filing             # a new 8-K, 8-K/A or Form 4: polled every 5 minutes, 07:00-20:00 ET on session days
+  symbols: [holdings, levels]
+  forms: [8-K, 8-K/A, 4]
+# - id: holding-gap        # gap: the session's first judged print is gap_pct or more from the previous close
+#   kind: gap
+#   symbols: holdings
+#   gap_pct: 2

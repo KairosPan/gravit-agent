@@ -4,7 +4,9 @@
  * missing file is `missing`, and an oversized, irregular, unreadable, non-UTF-8, non-YAML or non-list file is
  * an `error` with no entries. A link - symbolic or hard - is refused unopened, so nothing of another file is
  * ever echoed; what a refusal does echo is one line, bounded, with no raw control or direction character, and a
- * plan, a source or a broker holding one is refused. The tracked examples load with no refusal. Offline; the
+ * plan, a source or a broker holding one is refused. The tracked examples load with no refusal. `rules.yml` is
+ * read the same way: each bad rule refused by index, a halt refused, an A share refused from a filing rule, and
+ * the tracked `desk/rules.yml` loads clean. Offline; the
  * fixtures sit under tests/tmp/desk-book-<pid>/ and are removed afterwards. */
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
@@ -14,8 +16,9 @@ import { syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  DEFAULT_LEVEL_COOLDOWN_MS, DESK_FILE_MAX_BYTES, HOLDINGS_MAX, LEVELS_PER_FILE, PLAN_MAX_CHARS, SOURCE_MAX_CHARS, SYMBOL_RE,
-  loadHoldings, loadLevels, type Holding, type Level, type LoadRefusal,
+  DEFAULT_LEVEL_COOLDOWN_MS, DESK_FILE_MAX_BYTES, FILING_FORMS, HOLDINGS_MAX, LEVELS_PER_FILE, PLAN_MAX_CHARS, RULE_KINDS, RULE_PCT_MAX,
+  RULES_MAX, SOURCE_MAX_CHARS, SYMBOL_RE,
+  levelDistancePct, loadHoldings, loadLevels, loadRules, resolveSymbols, type Holding, type Level, type LoadRefusal, type Rule,
 } from "../src/desk-book.ts";
 import { readDeskYaml, sha256Hex } from "../src/standing.ts";
 
@@ -592,4 +595,218 @@ test("the shipped levels.example.yml loads with no refusal and one A share", asy
   assert.deepEqual(l.entries.map((e) => e.market), ["us", "us", "us", "cn"]);
   const moutai = l.entries[3];
   assert.deepEqual([moutai?.symbol, moutai?.kind, moutai?.price, moutai?.when, moutai?.expires], ["600519", "watch", 1400, "cross_down", "2026-12-31"]);
+});
+
+/* ---------- rules.yml ---------- */
+
+const RULES = "desk/rules.yml";
+
+test("the rules' limits and vocabulary", () => {
+  assert.deepEqual(RULE_KINDS, ["move_pct", "gap", "filing"]);
+  assert.deepEqual(FILING_FORMS, ["8-K", "8-K/A", "4"]);
+  assert.equal(RULES_MAX, 20);
+  assert.equal(RULE_PCT_MAX, 50);
+});
+
+test("the shipped desk/rules.yml loads with no refusal", async () => {
+  const r = await loadRules(join(REPO, "desk", "rules.yml"), RULES);
+  assert.equal(r.error, undefined);
+  assert.equal(r.missing, undefined);
+  assert.deepEqual(r.refusals, []);
+  assert.deepEqual(r.entries.map((e) => [e.id, e.kind]), [["holding-move", "move_pct"], ["index-move", "move_pct"], ["filing", "filing"]]);
+  assert.deepEqual(r.entries[2].symbols, { holdings: true, levels: true, symbols: [] });
+  assert.equal(r.entries[0].annotate, false);
+  assert.equal((r.entries[0] as { cooldownMs: number }).cooldownMs, 3_600_000);
+  const want: Rule[] = [
+    { file: RULES, index: 0, id: "holding-move", symbols: { holdings: true, levels: false, symbols: [] }, annotate: false, kind: "move_pct", movePct: 4, cooldownMs: 3_600_000 },
+    { file: RULES, index: 1, id: "index-move", symbols: { holdings: false, levels: false, symbols: ["SPY", "QQQ"] }, annotate: false, kind: "move_pct", movePct: 1.5, cooldownMs: 1_800_000 },
+    { file: RULES, index: 2, id: "filing", symbols: { holdings: true, levels: true, symbols: [] }, annotate: false, kind: "filing", forms: ["8-K", "8-K/A", "4"], cooldownMs: 1_800_000 },
+  ];
+  assert.deepEqual(r.entries, want);
+});
+
+test("each bad rule is refused by index with its reason, and the rest load", async () => {
+  const path = await fixture(`- id: good-move
+  kind: move_pct
+  symbols: [NVDA, holdings, NVDA]
+  move_pct: 3
+  annotate: true
+  plan: check the news before acting
+- id: halt
+  kind: halt
+  symbols: holdings
+- id: no-kind
+  symbols: holdings
+- id: other-kind
+  kind: volume
+  symbols: holdings
+- id: on-key
+  kind: move_pct
+  on: holdings
+  move_pct: 2
+- id: odd-key
+  kind: move_pct
+  symbols: holdings
+  move_pct: 2
+  window: 5m
+- id: wrong-kind-key
+  kind: move_pct
+  symbols: holdings
+  gap_pct: 2
+- id: gap-cooldown
+  kind: gap
+  symbols: holdings
+  gap_pct: 2
+  cooldown: 30m
+- id: empty-symbols
+  kind: move_pct
+  symbols: []
+  move_pct: 2
+- just a line
+- id: bad-move
+  kind: move_pct
+  symbols: holdings
+  move_pct: 51
+- id: no-move
+  kind: move_pct
+  symbols: holdings
+- id: bad-gap
+  kind: gap
+  symbols: holdings
+  gap_pct: 0
+- id: bad-forms
+  kind: filing
+  symbols: holdings
+  forms: [8-K, 10-Q]
+- id: no-plan
+  kind: move_pct
+  symbols: levels
+  move_pct: 2
+  annotate: true
+- id: good-move
+  kind: gap
+  symbols: holdings
+  gap_pct: 2
+- id: good-gap
+  kind: gap
+  symbols: levels
+  gap_pct: 2.5
+  cooldown:
+- id: Bad_Id
+  kind: gap
+  symbols: holdings
+  gap_pct: 2
+- kind: gap
+  symbols: holdings
+  gap_pct: 2
+- id: bad-cooldown
+  kind: filing
+  symbols: holdings
+  cooldown: 2h
+`);
+  const r = await loadRules(path, RULES);
+  assert.equal(r.error, undefined);
+  const refusal = (index: number, reason: string): LoadRefusal => ({ file: RULES, index, reason });
+  assert.deepEqual(r.refusals, [
+    refusal(1, "halts need a trading-status feed; the Market's read carries none"),
+    refusal(2, "a rule needs kind: move_pct, gap or filing"),
+    refusal(3, "kind must be move_pct, gap or filing"),
+    refusal(4, 'unknown key "on": a rule names its symbols under symbols:'),
+    refusal(5, 'unknown key "window"'),
+    refusal(6, "gap_pct is not a key of a move_pct rule"),
+    refusal(7, "cooldown is not a key of a gap rule"),
+    refusal(8, "symbols must be holdings, levels or a list of tickers, holdings and levels"),
+    refusal(9, "a rule must be a mapping: id, kind, symbols, move_pct, gap_pct, forms, cooldown, annotate, plan"),
+    refusal(10, "move_pct must be a number above 0 and at most 50"),
+    refusal(11, "move_pct must be a number above 0 and at most 50"),
+    refusal(12, "gap_pct must be a number above 0 and at most 50"),
+    refusal(13, "forms must be a list of 8-K, 8-K/A and 4"),
+    refusal(14, "annotate: true needs a plan: write what the check is for"),
+    refusal(15, "good-move is defined twice; the first stands"),
+    refusal(17, 'id must be a-z, 0-9 and -, opening with a letter, at most 40 characters (got "Bad_Id")'),
+    refusal(18, "id is missing"),
+    refusal(19, 'cooldown must be <n>m, from 1m to 1440m (got "2h")'),
+  ]);
+  const want: Rule[] = [
+    {
+      file: RULES, index: 0, id: "good-move", symbols: { holdings: true, levels: false, symbols: ["NVDA"] }, annotate: true,
+      plan: "check the news before acting", kind: "move_pct", movePct: 3, cooldownMs: 1_800_000,
+    },
+    { file: RULES, index: 16, id: "good-gap", symbols: { holdings: false, levels: true, symbols: [] }, annotate: false, kind: "gap", gapPct: 2.5 },
+  ];
+  assert.deepEqual(r.entries, want);
+});
+
+test("past 20 rules, one refusal", async () => {
+  const rule = (n: number): string => `- id: move-${n}\n  kind: move_pct\n  symbols: holdings\n  move_pct: 2\n`;
+  const r = await loadRules(await fixture(Array.from({ length: 23 }, (_, i) => rule(i + 1)).join("")), RULES);
+  assert.equal(r.entries.length, 20);
+  assert.deepEqual(r.refusals, [{ file: RULES, reason: "entries 21-23 are past the cap of 20 rules" }]);
+});
+
+test("CORE_SCHEMA keeps 8-K a string and on: a key", async () => {
+  const r = await loadRules(await fixture(`- id: forms
+  kind: filing
+  symbols: [AAPL]
+  forms: [8-K, 4]
+  cooldown: 15m
+- id: on-holdings
+  on: holdings
+  kind: filing
+`), RULES);
+  assert.deepEqual(r.refusals, [{ file: RULES, index: 1, reason: 'unknown key "on": a rule names its symbols under symbols:' }]);
+  const filing = r.entries[0];
+  assert.equal(filing?.kind, "filing");
+  assert.deepEqual((filing as Extract<Rule, { kind: "filing" }>).forms, ["8-K", "4"]);
+  assert.equal((filing as Extract<Rule, { kind: "filing" }>).cooldownMs, 900_000);
+  /* the parser itself: 8-K is text, on is a key, not YAML 1.1's true */
+  assert.deepEqual(readDeskYaml("on: [8-K, 4]"), { on: ["8-K", 4] });
+});
+
+test("a filing rule refuses an A share it lists, and resolves holdings that hold one", async () => {
+  const r = await loadRules(await fixture(`- id: cn-filing
+  kind: filing
+  symbols: [AAPL, "600519"]
+- id: cn-move
+  kind: move_pct
+  symbols: ["600519", "000001"]
+  move_pct: 5
+- id: held-filing
+  kind: filing
+  symbols: holdings
+- id: unquoted
+  kind: move_pct
+  symbols: [600519]
+  move_pct: 5
+- id: everything
+  kind: move_pct
+  symbols: everything
+  move_pct: 5
+`), RULES);
+  assert.deepEqual(r.refusals, [
+    { file: RULES, index: 0, reason: "filings are SEC's: 600519 is an A share" },
+    { file: RULES, index: 3, reason: "symbols must be holdings, levels or a list of tickers, holdings and levels" },
+    { file: RULES, index: 4, reason: "symbols must be holdings, levels or a list of tickers, holdings and levels" },
+  ]);
+  assert.deepEqual(r.entries.map((e) => [e.id, e.symbols]), [
+    ["cn-move", { holdings: false, levels: false, symbols: ["600519", "000001"] }],
+    ["held-filing", { holdings: true, levels: false, symbols: [] }],
+  ]);
+  /* the holdings that hold an A share resolve whole; filings.ts skips it and counts it */
+  assert.deepEqual(resolveSymbols(r.entries[1].symbols, { holdings: ["600519", "AAPL"], levels: ["NVDA"] }), ["600519", "AAPL"]);
+});
+
+test("resolveSymbols takes the two words and the tickers, each once", () => {
+  assert.deepEqual(resolveSymbols({ holdings: true, levels: false, symbols: ["SPY", "NVDA"] }, { holdings: ["NVDA", "AAPL"], levels: ["MSFT"] }), ["AAPL", "NVDA", "SPY"]);
+  assert.deepEqual(resolveSymbols({ holdings: true, levels: true, symbols: [] }, { holdings: ["NVDA"], levels: ["NVDA", "MSFT", "MSFT"] }), ["MSFT", "NVDA"]);
+  assert.deepEqual(resolveSymbols({ holdings: false, levels: false, symbols: ["QQQ"] }, { holdings: ["NVDA"], levels: ["MSFT"] }), ["QQQ"]);
+});
+
+test("levelDistancePct: a price, inside a range, outside it", () => {
+  assert.ok(Math.abs(levelDistancePct({ price: 170 }, 181.2) - ((170 - 181.2) / 181.2) * 100) < 1e-12);
+  assert.ok(Math.abs(levelDistancePct({ price: 170 }, 181.2) - -6.181) < 0.001);
+  assert.equal(levelDistancePct({ range: [218, 222] }, 220), 0);
+  assert.equal(levelDistancePct({ range: [218, 222] }, 218), 0);
+  assert.ok(Math.abs(levelDistancePct({ range: [218, 222] }, 225) - -1.3333) < 0.001);
+  assert.ok(Math.abs(levelDistancePct({ range: [218, 222] }, 210) - 3.8095) < 0.001);
 });

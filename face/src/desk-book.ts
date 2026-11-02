@@ -56,6 +56,15 @@
  * no strategy that is one). `sha256` and `mtime` describe the bytes read, so a result has them whenever the
  * whole file was read: loaded, or refused as not UTF-8, not YAML or not a list.
  *
+ * A RULE (`desk/rules.yml`, tracked: it holds no position and no price). `id`, spelled like a standing order's
+ * (`^[a-z][a-z0-9-]{0,39}$`), once per file; `kind`, move_pct, gap or filing - a halt rule is refused, since the
+ * Market's read carries no trading status; `symbols`, the word `holdings`, the word `levels`, or a non-empty list
+ * of tickers, A shares and those two words, never `on:`; `move_pct` or `gap_pct`, above 0 and at most
+ * {@link RULE_PCT_MAX}, each only on its own kind; `forms`, only on a filing rule, a list of 8-K, 8-K/A and 4, all
+ * three by default; `cooldown`, the level's grammar, 30m by default, on any kind but gap; `annotate`, false by
+ * default, and true only with a `plan`, one line of at most 300 characters. A filing rule lists no A share -
+ * filings are SEC's - but `holdings` or `levels` may hold one, and filings.ts skips it. At most {@link RULES_MAX}.
+ *
  * MODULE WEIGHT. It imports standing.ts, and js-yaml with it, so the pause switch (scripts/desk.ts) never
  * imports it eagerly: a command that needs it, as P4's `arm` will, loads it on first use.
  * @module
@@ -63,7 +72,7 @@
 import { constants as fsConstants, type Stats } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";
 import { cut, escaped } from "./echo.ts";
-import { isEtDate, readDeskYaml, sha256Hex } from "./standing.ts";
+import { isEtDate, isOrderId, readDeskYaml, sha256Hex } from "./standing.ts";
 import { marketOf, SYMBOL_RE, type Market } from "./symbols.ts";
 
 /** A ticker (src/symbols.ts, re-exported for the book's readers). */
@@ -83,6 +92,15 @@ export const PLAN_MAX_CHARS = 300;
 export const SOURCE_MAX_CHARS = 200;
 /** A level's cooldown when it names none: 30 min. */
 export const DEFAULT_LEVEL_COOLDOWN_MS = 1_800_000;
+
+/** The kinds a rule may be. */
+export const RULE_KINDS = ["move_pct", "gap", "filing"] as const;
+/** The forms a filing rule may ask for; all three when it names none. */
+export const FILING_FORMS = ["8-K", "8-K/A", "4"] as const;
+/** The most rules `rules.yml` loads; the entries past them are one refusal. */
+export const RULES_MAX = 20;
+/** The most a rule's `move_pct` or `gap_pct` may be. */
+export const RULE_PCT_MAX = 50;
 
 /** The most characters a holding's broker may hold. */
 const BROKER_MAX_CHARS = 40;
@@ -151,11 +169,41 @@ export interface Level {
   cooldownMs: number;
 }
 
+/** A rule's kind. */
+export type RuleKind = (typeof RULE_KINDS)[number];
+/** A form a filing rule asks for. */
+export type FilingForm = (typeof FILING_FORMS)[number];
+
+/** The symbols a rule names: the two words, and the tickers and A shares it lists, each once, as written. */
+export interface SymbolSet {
+  holdings: boolean;
+  levels: boolean;
+  symbols: string[];
+}
+
+/** One urgent-event rule, with the file and the place it came from. */
+export type Rule = { file: string; index: number; id: string; symbols: SymbolSet; annotate: boolean; plan?: string } & (
+  | { kind: "move_pct"; movePct: number; cooldownMs: number }
+  | { kind: "gap"; gapPct: number }
+  | { kind: "filing"; forms: FilingForm[]; cooldownMs: number }
+);
+
 /** A holding's keys. */
 const HOLDING_KEYS: ReadonlySet<string> = new Set(["symbol", "qty", "avg_cost", "opened", "broker"]);
 /** A level's keys. */
 const LEVEL_KEYS: ReadonlySet<string> = new Set(["symbol", "kind", "price", "range", "when", "plan", "source", "expires", "annotate", "cooldown"]);
 const LEVEL_KINDS: ReadonlySet<string> = new Set<LevelKind>(["buy_zone", "stop", "target", "watch"]);
+
+/** A rule's keys. */
+const RULE_KEYS: ReadonlySet<string> = new Set(["id", "kind", "symbols", "move_pct", "gap_pct", "forms", "cooldown", "annotate", "plan"]);
+/** The keys only some kinds take, and the keys each kind takes of them. */
+const KIND_ONLY_KEYS = ["move_pct", "gap_pct", "forms", "cooldown"] as const;
+const KIND_KEYS: Readonly<Record<RuleKind, ReadonlySet<string>>> = {
+  move_pct: new Set(["move_pct", "cooldown"]),
+  gap: new Set(["gap_pct"]),
+  filing: new Set(["forms", "cooldown"]),
+};
+const BAD_RULE_SYMBOLS = "symbols must be holdings, levels or a list of tickers, holdings and levels";
 
 const NO_PLAN = "a level without a plan is refused: write what to do when it is reached";
 const NO_EXPIRY = "a level without an expiry is refused: write expires: YYYY-MM-DD, the last day it holds";
@@ -356,6 +404,141 @@ function judgeLevel(raw: unknown, index: number, file: string, today: string): V
   };
 }
 
+/** A rule's `symbols`, read: the word `holdings`, the word `levels`, or a non-empty list of tickers, A shares and
+ * those words; `undefined` for anything else - an unquoted six-digit number included. */
+function symbolSet(value: unknown): SymbolSet | undefined {
+  const items = typeof value === "string" ? [value] : value;
+  if (!Array.isArray(items) || items.length === 0) return undefined;
+  const set: SymbolSet = { holdings: false, levels: false, symbols: [] };
+  for (const item of items) {
+    if (item === "holdings") set.holdings = true;
+    else if (item === "levels") set.levels = true;
+    else if (Array.isArray(value) && marketOf(item) !== undefined) {
+      if (!set.symbols.includes(item as string)) set.symbols.push(item as string);
+    } else return undefined;
+  }
+  return set;
+}
+
+/** A filing rule's `forms`: a non-empty list of 8-K, 8-K/A and 4 (CORE reads an unquoted `4` as a number), each
+ * once, in {@link FILING_FORMS} order; all three when absent; `undefined` for anything else. */
+function filingForms(value: unknown): FilingForm[] | undefined {
+  if (value === undefined || value === null) return [...FILING_FORMS];
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const named = value.map((item) => (item === 4 ? "4" : item));
+  if (!named.every((item) => (FILING_FORMS as readonly unknown[]).includes(item))) return undefined;
+  return FILING_FORMS.filter((form) => named.includes(form));
+}
+
+/** One rule, judged, at `index` in `file`. `ids` holds the ids of the rules loaded before it, and takes this
+ * rule's when it loads. */
+function judgeRule(raw: unknown, index: number, file: string, ids: Set<string>): Verdict<Rule> {
+  if (!isRecord(raw)) return { reason: "a rule must be a mapping: id, kind, symbols, move_pct, gap_pct, forms, cooldown, annotate, plan" };
+  if ("on" in raw) return { reason: 'unknown key "on": a rule names its symbols under symbols:' };
+  const unknown = unknownKey(raw, RULE_KEYS);
+  if (unknown !== undefined) return { reason: unknown };
+
+  if (raw.id === undefined) return { reason: "id is missing" };
+  if (!isOrderId(raw.id)) return { reason: `id must be a-z, 0-9 and -, opening with a letter, at most 40 characters (got ${shown(raw.id)})` };
+  const id = raw.id;
+
+  const kind = raw.kind;
+  if (kind === "halt") return { reason: "halts need a trading-status feed; the Market's read carries none" };
+  if (kind === undefined || kind === null) return { reason: "a rule needs kind: move_pct, gap or filing" };
+  if (typeof kind !== "string" || !(RULE_KINDS as readonly string[]).includes(kind)) return { reason: "kind must be move_pct, gap or filing" };
+  const ruleKind = kind as RuleKind;
+  /* A key left empty is as if it were not there, here as everywhere in the book. */
+  const foreign = KIND_ONLY_KEYS.find((key) => raw[key] !== undefined && raw[key] !== null && !KIND_KEYS[ruleKind].has(key));
+  if (foreign !== undefined) return { reason: `${foreign} is not a key of a ${ruleKind} rule` };
+
+  const symbols = symbolSet(raw.symbols);
+  if (symbols === undefined) return { reason: BAD_RULE_SYMBOLS };
+  if (ruleKind === "filing") {
+    const aShare = symbols.symbols.find((symbol) => marketOf(symbol) === "cn");
+    if (aShare !== undefined) return { reason: `filings are SEC's: ${aShare} is an A share` };
+  }
+
+  let body: { kind: "move_pct"; movePct: number } | { kind: "gap"; gapPct: number } | { kind: "filing"; forms: FilingForm[] };
+  if (ruleKind === "filing") {
+    const forms = filingForms(raw.forms);
+    if (forms === undefined) return { reason: "forms must be a list of 8-K, 8-K/A and 4" };
+    body = { kind: "filing", forms };
+  } else {
+    const key = ruleKind === "move_pct" ? "move_pct" : "gap_pct";
+    const pct = raw[key];
+    if (!isNumber(pct) || pct <= 0 || pct > RULE_PCT_MAX) return { reason: `${key} must be a number above 0 and at most ${RULE_PCT_MAX}` };
+    body = ruleKind === "move_pct" ? { kind: "move_pct", movePct: pct } : { kind: "gap", gapPct: pct };
+  }
+
+  let cooldown: number | undefined;
+  if (ruleKind !== "gap") {
+    cooldown = raw.cooldown === undefined || raw.cooldown === null ? DEFAULT_LEVEL_COOLDOWN_MS : cooldownMs(raw.cooldown);
+    if (cooldown === undefined) {
+      return { reason: `cooldown must be <n>m, from ${COOLDOWN_MIN_MINUTES}m to ${COOLDOWN_MAX_MINUTES}m (got ${shown(raw.cooldown)})` };
+    }
+  }
+
+  const annotate = raw.annotate === undefined || raw.annotate === null ? false : raw.annotate;
+  if (typeof annotate !== "boolean") return { reason: `annotate must be true or false (got ${shown(raw.annotate)})` };
+
+  let plan = "";
+  if (!isBlank(raw.plan)) {
+    const line = oneLine("plan", raw.plan, PLAN_MAX_CHARS);
+    if ("reason" in line) return line;
+    plan = line.text;
+  }
+  if (annotate && plan === "") return { reason: "annotate: true needs a plan: write what the check is for" };
+
+  /* Judged last, against the rules that loaded: the first stands only when it did. */
+  if (ids.has(id)) return { reason: `${id} is defined twice; the first stands` };
+  ids.add(id);
+
+  return {
+    entry: {
+      file,
+      index,
+      id,
+      symbols,
+      annotate,
+      ...(plan === "" ? {} : { plan }),
+      ...body,
+      ...(cooldown === undefined ? {} : { cooldownMs: cooldown }),
+    } as Rule,
+  };
+}
+
+/**
+ * The symbols a rule's set names in `book`: the union of its tickers and A shares, the book's holdings when it
+ * says `holdings` and the book's levels' symbols when it says `levels`, each once, sorted.
+ * @param set - the rule's symbols.
+ * @param book - the symbols the book holds and the symbols its levels name.
+ */
+export function resolveSymbols(set: SymbolSet, book: { holdings: string[]; levels: string[] }): string[] {
+  const all = new Set(set.symbols);
+  if (set.holdings) for (const symbol of book.holdings) all.add(symbol);
+  if (set.levels) for (const symbol of book.levels) all.add(symbol);
+  return [...all].sort();
+}
+
+/**
+ * How far `level` is from `last`, in percent of `last`: `(level − last) / last · 100` for a price; for a range, 0
+ * inside it (its edges included), else measured to its nearest edge. Below 0 when the level is under the price.
+ * Unrounded. The brief and the watch both measure with it.
+ * @param level - a level as this module loads it: a price or a range.
+ * @param last - the last price, above 0.
+ */
+export function levelDistancePct(level: Pick<Level, "price" | "range">, last: number): number {
+  let edge: number;
+  if (level.range !== undefined) {
+    const [low, high] = level.range;
+    if (last >= low && last <= high) return 0;
+    edge = last < low ? low : high;
+  } else {
+    edge = level.price as number;
+  }
+  return ((edge - last) / last) * 100;
+}
+
 /* ---------- the file ---------- */
 
 /** A book file as read: missing, refused whole, or its text. */
@@ -504,4 +687,15 @@ export async function loadHoldings(path: string, file: string): Promise<LoadResu
 export async function loadLevels(path: string, file: string, today: string): Promise<LoadResult<Level>> {
   if (!isEtDate(today)) throw new TypeError(`loadLevels takes today as YYYY-MM-DD, not ${JSON.stringify(today)}`);
   return loadBook(path, file, { max: LEVELS_PER_FILE, capNoun: "levels per file", judge: (raw, index) => judgeLevel(raw, index, file, today) });
+}
+
+/**
+ * Load `rules.yml` (see the module header for its keys and refusals).
+ * @param path - where it is.
+ * @param file - its repo-relative label, `desk/rules.yml`, which each rule, refusal and error names.
+ * @returns the rules that load, in file order, with every refusal.
+ */
+export async function loadRules(path: string, file: string): Promise<LoadResult<Rule>> {
+  const ids = new Set<string>();
+  return loadBook(path, file, { max: RULES_MAX, capNoun: "rules", judge: (raw, index) => judgeRule(raw, index, file, ids) });
 }

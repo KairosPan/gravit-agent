@@ -58,7 +58,7 @@
  * @module
  */
 import { join } from "node:path";
-import { loadHoldings, loadLevels, type Holding, type Level, type LevelKind, type LoadRefusal } from "./desk-book.ts";
+import { levelDistancePct, loadHoldings, loadLevels, type Holding, type Level, type LevelKind, type LoadRefusal } from "./desk-book.ts";
 import { deskTime } from "./desk.ts";
 import { quoteTime } from "./desk-tools.ts";
 import { etClock, etTime } from "./et.ts";
@@ -220,25 +220,6 @@ function isPrice(value: unknown): value is number {
 function round2(value: number): number {
   const rounded = (Math.sign(value) * Math.round(Math.abs(value) * 100)) / 100;
   return rounded === 0 ? 0 : rounded;
-}
-
-/**
- * How far `level` is from `last`, in percent of `last`: `(level − last) / last · 100` for a price; for a range, 0
- * inside it (its edges included), else measured to its nearest edge. Below 0 when the level is under the price.
- * Unrounded.
- * @param level - a level as desk-book.ts loads it: a price or a range.
- * @param last - the last price, above 0.
- */
-function levelDistancePct(level: Pick<Level, "price" | "range">, last: number): number {
-  let edge: number;
-  if (level.range !== undefined) {
-    const [low, high] = level.range;
-    if (last >= low && last <= high) return 0;
-    edge = last < low ? low : high;
-  } else {
-    edge = level.price as number;
-  }
-  return ((edge - last) / last) * 100;
 }
 
 /** A level's price, or its range, as the brief writes it. */
