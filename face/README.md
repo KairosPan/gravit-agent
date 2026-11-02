@@ -2307,8 +2307,9 @@ open is held back — arm a long list earlier, `open-120m`, say. **The fence:** 
 — refuses its firings until it is removed. **What the turn writes:** its sandbox lets it write
 anywhere in its strategy; it should write only `reports/`, and anything else it changed is named
 in one line after its text (its walk leaves `analysis/` to the Lunhui rows). **A pre-P4 strategy
-order** that wakes has no `levelsSha256`, so `standing.yml` is refused as `not armed`: delete that
-order's block from `standing.yml`, then `arm` it again. **The budget** is New York's day: a US day
+order** that wakes has no `levelsSha256`: the whole `standing.yml` is refused (`not armed`), every
+other order stopped with it, and `arm` adds nothing to a refused file — its refusal names the way
+out, `remove orders[<i>] (<id>) from standing.yml, then arm it again`. **The budget** is New York's day: a US day
 that spends it refuses the next morning's A-share report, which fires that evening in New York.
 
 **What the phone gets**, besides P2's lines above — `<date>` is the order's market date:
