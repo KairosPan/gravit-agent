@@ -1375,3 +1375,49 @@ test("a desk state that is late, throws or has nothing goes without, the late an
     "gravit-face: desk: the desk state was not ready (sync throw); the message goes without it",
   ]);
 });
+
+test("a turn that starts between the idle check and the inject gets no state: the status is read again at once", async () => {
+  const h = await harness();
+  const { sessionId } = (await post(h, "warm")) as { sessionId: string };
+  const agent = h.tree.agent(sessionId);
+  h.desk.setState(async () => STATE);
+  /* whenIdle answers idle, and a wake turn starts in the macrotask busy() waits through */
+  agent.whenIdle = () => {
+    queueMicrotask(() => { agent.status = "running"; });
+    return Promise.resolve();
+  };
+  await post(h, "NVDA?");
+  assert.deepEqual(agent.calls, ["followup", "followup"], "no inject into the running turn");
+  assert.equal(agent.text(1), "[telegram · operator · 14:03 ET]\nNVDA?");
+  assert.deepEqual(h.lines, []);
+});
+
+test("an inject that throws costs the phone text nothing; a followup that throws after one takes the state back", async () => {
+  const h = await harness();
+  const { sessionId } = (await post(h, "warm")) as { sessionId: string };
+  const agent = h.tree.agent(sessionId);
+  h.desk.setState(async () => STATE);
+  agent.inject = () => { throw new Error("the inbox is closed"); };
+  assert.deepEqual(await post(h, "NVDA?"), { opened: true, sessionId });
+  assert.equal(agent.text(1), "[telegram · operator · 14:03 ET]\nNVDA?");
+  assert.deepEqual(h.lines, ["gravit-face: desk: the desk state could not be injected (the inbox is closed); the message goes without it"]);
+
+  /* an agent with dsh's inbox: the state waits there, and is taken out again when the followup throws */
+  const model = new InboxModel();
+  agent.model = model;
+  agent.inject = (message) => { agent.calls.push("inject"); model.pending.push(message); };
+  agent.failFollowup = "the driver is gone";
+  const refused = await post(h, "AAPL?");
+  assert.deepEqual(refused, { refused: "error", line: "the desk could not open a turn: the driver is gone" });
+  assert.deepEqual(model.pending, [], "no state left as context for the next turn");
+  assert.equal(h.lines.length, 2, "the refusal's own line only");
+
+  /* without an inbox it cannot be taken back: one line says so */
+  agent.model = undefined;
+  agent.inject = (message) => { agent.injects.push(message); };
+  await post(h, "MSFT?");
+  assert.deepEqual(h.lines.slice(2), [
+    "gravit-face: desk: the desk state could not be taken back (the agent has no inbox); it may reach the next turn",
+    "gravit-face: desk: the desk could not open a turn: the driver is gone",
+  ]);
+});

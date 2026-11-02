@@ -31,7 +31,9 @@
  * reject - a send that fails is one line.
  *
  * ANNOTATIONS (P3). An alert's post with `replyTo` keeps it under the alert's id - the newest 50, until that
- * alert's turn ends - and that turn is answered as a reply to the alert's message, whatever it ends in.
+ * alert's turn ends - and that turn is answered as a reply to the alert's message, whatever it ends in. An alert
+ * id whose message another turn claims (a wake or browser turn under way takes it as its own input) stays in the
+ * map until the fifty newer ones evict it, and its annotation goes without a reply.
  *
  * DELIVERY (rulings P2-7, P2-19). Everything the desk sends leaves through {@link DeskConversation.deliver} - a
  * turn's answer, and in P2 and P3 a firing's text and an alert. It holds a text back while the pause is in force
@@ -257,6 +259,8 @@ function alertOf(r: DeskTurnRecord): string | undefined {
 /** dsh-agent's `Agent.inject`, which the structural {@link AgentLike} leaves out: context queued for the next
  * pre-step without waking the driver, so the followup that wakes it claims both. */
 type Injecting = { inject?: (message: MessageLike) => void };
+/** dsh-agent's `Agent.inbox`, the one call the desk state needs: removing a pending message, from either list, by id. */
+type InboxAware = { inbox?: { remove(id: string): boolean } };
 
 /** dsh-agent's `Agent.whenIdle`, which the structural {@link AgentLike} leaves out: it resolves once the
  * agent's driver has retired - after the turn it was running, every turn its inbox held, and any maintenance
@@ -529,6 +533,22 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     }
   };
 
+  /** Take back a desk state injected for a followup that then threw, so it is not context for some later turn:
+   * dsh's inbox removes a pending message from either list by id. With no inbox, or once a step has claimed it,
+   * it cannot be taken back, and that is one line. */
+  const withdraw = (agent: AgentLike, message: MessageLike): void => {
+    const notTaken = (reason: string): void => {
+      log(`${BIN}: desk: the desk state could not be taken back (${reason}); it may reach the next turn`);
+    };
+    const inbox = (agent as AgentLike & InboxAware).inbox;
+    if (inbox === undefined) return notTaken("the agent has no inbox");
+    try {
+      if (!inbox.remove(message.id)) notTaken("it is no longer pending");
+    } catch (err) {
+      notTaken(errText(err));
+    }
+  };
+
   /** Keep `replyTo` for `alert`'s turn, the newest last; past {@link REPLIES_MAX}, the oldest goes. */
   const remember = (alert: string, replyTo: number): void => {
     replies.delete(alert);
@@ -598,16 +618,26 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
           const message = m.createUserMessage({ content: [{ type: "text", text }], source: input.message as MessageSource });
           const alert = input.message.kind === "alert" && typeof input.message.alert === "string" ? input.message.alert : undefined;
           if (alert !== undefined && input.replyTo !== undefined) remember(alert, input.replyTo);
-          /* one synchronous step: the state, then the message it is context for */
-          if (typeof inject === "function" && state !== undefined) {
+          /* one synchronous step: the state, then the message it is context for. `busy` read the desk idle a
+           * macrotask ago; a wake or a browser turn may have started since, and the state would splice into it
+           * (spike 4), so the status is read again here, with nothing awaited before the followup. */
+          let injected: MessageLike | undefined;
+          if (typeof inject === "function" && state !== undefined && agent.status !== "running") {
             const stateText = `${m.session.provenanceLine({ kind: "state" }, now)}\n${state}`;
             const stateSource: DeskStateMessageSource = { kind: "desk", form: "state" };
-            inject.call(agent, m.createUserMessage({ content: [{ type: "text", text: stateText }], source: stateSource }) as unknown as MessageLike);
+            const stateMessage = m.createUserMessage({ content: [{ type: "text", text: stateText }], source: stateSource }) as unknown as MessageLike;
+            try {
+              inject.call(agent, stateMessage);
+              injected = stateMessage;
+            } catch (err) {
+              log(`${BIN}: desk: the desk state could not be injected (${errText(err)}); the message goes without it`);
+            }
           }
           try {
             agent.followup(message as unknown as MessageLike);
           } catch (err) {
             if (alert !== undefined) replies.delete(alert);
+            if (injected !== undefined) withdraw(agent, injected);
             throw err;
           }
           return { opened: true, sessionId };
