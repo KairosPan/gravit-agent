@@ -859,7 +859,7 @@ test("readDeskFile: absent, a FIFO, a symlink and a hard link refused, oversize,
   await mkdir(join(dir, "sub.yaml"));
   assert.deepEqual(await readDeskFile(join(dir, "sub.yaml")), { state: "unreadable", reason: "not a regular file" });
   await writeFile(join(dir, "big.yaml"), "a".repeat(DESK_FILE_MAX_BYTES + 1));
-  assert.deepEqual(await readDeskFile(join(dir, "big.yaml")), { state: "oversize" });
+  assert.deepEqual(await readDeskFile(join(dir, "big.yaml")), { state: "oversize", size: DESK_FILE_MAX_BYTES + 1 }, "the size is the descriptor's");
   await writeFile(join(dir, "full.yaml"), "a".repeat(DESK_FILE_MAX_BYTES));
   assert.equal((await readDeskFile(join(dir, "full.yaml"))).state, "ok", "exactly the cap reads");
   await writeFile(join(dir, "latin1.yaml"), Buffer.from([0x73, 0xe9, 0x0a]));
@@ -886,7 +886,7 @@ test("readDeskFile honours its cap", async () => {
   const dir = join(TEST_DIR, "desk-file-cap");
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, "ten"), "0123456789");
-  assert.deepEqual(await readDeskFile(join(dir, "ten"), 9), { state: "oversize" });
+  assert.deepEqual(await readDeskFile(join(dir, "ten"), 9), { state: "oversize", size: 10 });
   assert.equal((await readDeskFile(join(dir, "ten"), 10)).state, "ok");
 });
 

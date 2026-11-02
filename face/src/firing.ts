@@ -642,7 +642,7 @@ export async function checkFiring(
  * followed, no FIFO waited on, no second name, no more than the desk file limit: absent matches {@link LEVELS_NONE},
  * else its bytes must hash to the pin.
  * @returns the bytes checked as {@link VerifiedLevels}, or the refusal's detail: the sha the file holds now, `<n>
- *   bytes` past the limit (its `lstat` size), `missing`, or `unreadable (<reason>)`.
+ *   bytes` past the limit (the size its descriptor gave), `missing`, or `unreadable (<reason>)`.
  */
 async function checkLevels(root: string, dir: string, pin: string): Promise<VerifiedLevels | { detail: string }> {
   const file = `${dir}/levels.yml`;
@@ -650,11 +650,7 @@ async function checkLevels(root: string, dir: string, pin: string): Promise<Veri
   const read = await readDeskFile(path);
   if (read.state === "absent") return pin === LEVELS_NONE ? { file, sha256: LEVELS_NONE, text: null } : { detail: "missing" };
   if (read.state === "unreadable") return { detail: `unreadable (${read.reason})` };
-  if (read.state === "oversize") {
-    /* the read stops one byte past the limit; the size is the file's own, when it can still be read */
-    const size = await lstat(path).then((info) => info.size, () => undefined);
-    return { detail: size === undefined ? OVERSIZED : `${size} bytes` };
-  }
+  if (read.state === "oversize") return { detail: `${read.size} bytes` };
   const sha256 = sha256Hex(read.bytes);
   return sha256 === pin ? { file, sha256, text: read.text } : { detail: sha256 };
 }

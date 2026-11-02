@@ -670,7 +670,7 @@ test("readFileBytes keeps the failure's code; readScriptBytes still reads it as 
   await writeFile(join(dir, "f.txt"), "hello");
   await symlink("f.txt", join(dir, "link.txt"));
   assert.deepEqual(await readFileBytes(join(dir, "f.txt"), 5), Buffer.from("hello"));
-  assert.equal(await readFileBytes(join(dir, "f.txt"), 4), "oversized");
+  assert.deepEqual(await readFileBytes(join(dir, "f.txt"), 4), { oversized: 5 }, "with the descriptor's size");
   assert.equal(await readFileBytes(join(dir, "link.txt"), 100), "irregular");
   assert.equal(await readFileBytes(dir, 100), "irregular");
   assert.deepEqual(await readFileBytes(join(dir, "nope.txt"), 100), { errno: "ENOENT" });

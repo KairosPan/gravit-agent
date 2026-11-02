@@ -10,7 +10,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import {
   BACKTEST_MAX_BYTES, BACKTEST_MAX_DISK_BYTES, createChannel, listChannelDirs, listSessionHeads, mergeSessionHeads,
-  ANALYSIS_RUN_RE, MODULE_HEADLINES, parseChannelStatus, presetHintsOf, readAnalysisRuns, readChannelStatus, readChannelBody, readRunManifests, reconcileChannels, registerChannelRoutes,
+  ANALYSIS_RUN_RE, MODULE_HEADLINES, parseChannelStatus, presetHintsOf, readAnalysisRuns, readChannelStatus, readChannelBody, readRunManifests, reconcileChannels, registerChannelRoutes, statusOfText,
   RUN_MANIFEST_MAX_BYTES, WORKBENCH,
 } from "../src/channels.ts";
 import { rosterFor, setRoster } from "../src/roster.ts";
@@ -1321,6 +1321,18 @@ test("parseChannelStatus reads a text as readChannelStatus reads the file", asyn
   assert.deepEqual(parseChannelStatus(text), { status: "researching", one_line: "x", numbers: { a: "1" } });
   assert.deepEqual(parseChannelStatus("status: idea\none_line: [torn\n"), { status: "idea" });
   assert.deepEqual(parseChannelStatus(""), {});
+});
+
+test("statusOfText parses a text once: its status as parseChannelStatus reads it, and whether it is malformed", () => {
+  const cases: [string, boolean][] = [
+    ["status: researching\none_line: x\nnumbers: { a: 1 }\n", false],
+    ["", false],
+    ["# only a comment\n", false],
+    ["status: researching\none_line: [unclosed\n", true],
+    ["- a\n- b\n", true],
+    ["just words\n", true],
+  ];
+  for (const [text, malformed] of cases) assert.deepEqual(statusOfText(text), { status: parseChannelStatus(text), malformed }, JSON.stringify(text));
 });
 
 test("readRunManifests lists run directories by the id form, newest first, and says why a manifest is unusable", async () => {

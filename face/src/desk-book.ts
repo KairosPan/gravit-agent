@@ -572,7 +572,7 @@ export function levelDistancePct(level: Pick<Level, "price" | "range">, last: nu
 export type DeskFile =
   | { state: "absent" }
   | { state: "unreadable"; reason: string }
-  | { state: "oversize" }
+  | { state: "oversize"; size: number }
   | { state: "ok"; bytes: Buffer; text: string };
 
 /**
@@ -583,12 +583,12 @@ export type DeskFile =
  * @param maxBytes - the most bytes it may hold, {@link DESK_FILE_MAX_BYTES} by default.
  * @returns `absent` for `ENOENT` or `ENOTDIR`; `unreadable` with the failure's code for any other, with `not a
  *   regular file` for a link, a hard link, a FIFO, a directory or a device, and with `not UTF-8` for bytes a fatal UTF-8 decode
- *   refuses; `oversize` past `maxBytes`; else `ok`, the bytes and their text.
+ *   refuses; `oversize` past `maxBytes`, with the size its descriptor gave; else `ok`, the bytes and their text.
  */
 export async function readDeskFile(path: string, maxBytes: number = DESK_FILE_MAX_BYTES): Promise<DeskFile> {
   const read = await readFileBytes(path, maxBytes, { oneName: true });
   if (read === "irregular") return { state: "unreadable", reason: "not a regular file" };
-  if (read === "oversized") return { state: "oversize" };
+  if (!Buffer.isBuffer(read) && "oversized" in read) return { state: "oversize", size: read.oversized };
   if (!Buffer.isBuffer(read)) {
     return read.errno === "ENOENT" || read.errno === "ENOTDIR" ? { state: "absent" } : { state: "unreadable", reason: read.errno };
   }
@@ -803,11 +803,7 @@ export async function levelsPin(root: string, dir: string, today: string): Promi
     if (read.reason === "not UTF-8") return { error: `${file} is not UTF-8` };
     return { error: `${file} cannot be read (${read.reason})` };
   }
-  if (read.state === "oversize") {
-    /* the read stops one byte past the cap; the size is the file's own, when it can still be read */
-    const size = await lstat(path).then((stats) => stats.size, () => DESK_FILE_MAX_BYTES + 1);
-    return { error: oversized(file, Math.max(size, DESK_FILE_MAX_BYTES + 1)) };
-  }
+  if (read.state === "oversize") return { error: oversized(file, read.size) };
   const sha256 = sha256Hex(read.bytes);
   const parsed = parseLevels(read.text, file, today, sha256);
   if (parsed.error !== undefined) return { error: parsed.error };

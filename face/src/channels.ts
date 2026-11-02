@@ -111,12 +111,23 @@ export async function readChannelStatus(dir: string): Promise<ChannelStatus> {
 
 /**
  * A `status.yaml`'s text, read: no file is opened, so a caller that read the
- * bytes itself (src/report.ts, through a guarded read) parses exactly those.
- * Malformed YAML falls back to the `status:` regex, because a hand-mangled
- * file must never remove a channel from the index — status is a badge, not a gate.
+ * bytes itself parses exactly those. Malformed YAML falls back to the
+ * `status:` regex, because a hand-mangled file must never remove a channel
+ * from the index — status is a badge, not a gate.
  * @param text - the file's text.
  */
 export function parseChannelStatus(text: string): ChannelStatus {
+  return statusOfText(text).status;
+}
+
+/**
+ * {@link parseChannelStatus}'s reading of `text`, parsed once, and whether the
+ * text is malformed: YAML that does not parse, or a document that is neither
+ * empty nor a mapping. src/report.ts names a malformed file from the same
+ * parse that gave its values.
+ * @param text - the file's text.
+ */
+export function statusOfText(text: string): { status: ChannelStatus; malformed: boolean } {
   const floor: ChannelStatus = {};
   const word = STATUS_RE.exec(text)?.[1];
   if (word !== undefined) floor.status = word;
@@ -125,9 +136,11 @@ export function parseChannelStatus(text: string): ChannelStatus {
   try {
     doc = load(text);
   } catch {
-    return floor; // malformed: the regex reading is all we honestly have
+    return { status: floor, malformed: true }; // the regex reading is all we honestly have
   }
-  if (doc === null || typeof doc !== "object") return floor;
+  if (doc === null || doc === undefined) return { status: floor, malformed: false };
+  if (typeof doc !== "object") return { status: floor, malformed: true };
+  const malformed = Array.isArray(doc);
 
   const raw = doc as Record<string, unknown>;
   const out: ChannelStatus = {};
@@ -145,7 +158,7 @@ export function parseChannelStatus(text: string): ChannelStatus {
     }
     if (Object.keys(numbers).length > 0) out.numbers = numbers;
   }
-  return out;
+  return { status: out, malformed };
 }
 
 /** The template's H1 and its placeholder question, byte-exact. A channel

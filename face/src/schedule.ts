@@ -499,6 +499,13 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     unreadableCode = undefined;
     eventedRefusal = undefined;
     phonedRefusal = undefined;
+    /* a boot that read the ledger while standing.yml was refused re-holds its refusals now, once */
+    if (fileState === "loaded" && reholdPending !== undefined) {
+      const pending = reholdPending;
+      reholdPending = undefined;
+      await rehold(pending, now, true);
+      await flushHeld();
+    }
   };
 
   /* ---- the firing ledger ---- */
@@ -515,6 +522,9 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   /** A `started` with no end that was younger than its turn's deadline and the slack at boot - perhaps a live firing
    * on another face on this home (M2): judged once it is that old, by the ledger as it then reads. */
   const young = new Map<string, { record: StartedRecord; at: number }>();
+  /** The ledger's records as the first read found them, while `standing.yml` was refused - no order loaded to build a
+   * refusal's line for: the first good load re-holds their refusals, once. */
+  let reholdPending: readonly FiringRecord[] | undefined;
 
   /** A ledger failure - unreadable, or a `started` that could not be written: recorded once and phoned once per
    * reason, the line tried again at each tick the pause holds it back; every firing stops until the ledger reads. */
@@ -547,9 +557,11 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
    * `held` miss, cut-off firing or expiry, its line as {@link LINES} builds it; and a refusal recorded `reported: false`
    * - `hash`, `fence` or `levels-hash`, the last of its `<order> <reason> <detail>` - for an order still loaded, whose
    * line {@link refusalLine} would send now. Each is followed by its `phoned` once it reaches the phone. A record the
-   * operator's edit left without its fields holds nothing.
+   * operator's edit left without its fields holds nothing. Read while `standing.yml` is refused, no order is loaded:
+   * the records are kept, and the first good load holds their refusals alone ({@link reholdPending}).
    */
-  const rehold = async (records: readonly FiringRecord[], now: number): Promise<void> => {
+  const rehold = async (records: readonly FiringRecord[], now: number, refusalsOnly = false): Promise<void> => {
+    if (!refusalsOnly && fileState === "refused") reholdPending = records;
     const phonedAt = new Map<string, number>();
     const lastRefusal = new Map<string, number>();
     const detailOf = (r: RefusedRecord): string => refusalDetail(String(r.detail), r.producerDetail);
@@ -564,7 +576,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     for (const [i, r] of records.entries()) {
       const t = Date.parse(r.t);
       if (typeof r.key !== "string" || !("order" in r) || typeof r.order !== "string" || !Number.isFinite(t) || now - t > REHOLD_MS) continue;
-      if ((phonedAt.get(idOf(r)) ?? -1) > i) continue;
+      if ((phonedAt.get(idOf(r)) ?? -1) > i || (refusalsOnly && r.kind !== "refused")) continue;
       let text: string | undefined;
       try {
         if (r.kind === "missed" && r.held === true) text = LINES.missed(r);

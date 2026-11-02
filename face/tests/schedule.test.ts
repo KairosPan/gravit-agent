@@ -1748,3 +1748,39 @@ test("a phoned refusal never masks another held refusal of the same key: a resta
   assert.deepEqual(reached, [hash, fence], "and nothing a third time");
   await r3.schedule.dispose();
 });
+
+test("a held refusal of a boot whose standing.yml is refused reaches the phone once the file loads good, once", async () => { // final fix 5
+  const fx = await strategyFixture();
+  await arm(fx.home, [REPORT_ENTRY]);
+  const path = join(deskDir(fx.home), STANDING_FILE);
+  const good = await readFile(path, "utf8");
+  await writeFile(join(fx.dir, "GRAVIT.md"), "steer\n");
+  let paused = true;
+  const reached: string[] = [];
+  const answer = (text: string): DeliverResult => {
+    if (paused) return { undelivered: "paused" };
+    reached.push(text);
+    return { sent: [reached.length] };
+  };
+  const r1 = rig(fx, "2026-11-30T13:00:00Z", { answer });
+  await at(r1, "2026-11-30T13:00:10Z");
+  assert.deepEqual((await ofKind(fx.home, "refused")).map((x) => [x.reason, x.reported]), [["fence", false]]);
+  await r1.schedule.dispose();
+
+  paused = false;
+  await writeFile(path, good.replace("\n  - id:", "\n\t- id:"));
+  const r2 = rig(fx, "2026-11-30T13:10:00Z", { answer });
+  await at(r2, "2026-11-30T13:10:00Z");
+  assert.ok(reached.length === 1 && reached[0].startsWith("standing.yml is refused"), "the refused boot phones its refusal, and holds no fence line");
+  await writeFile(path, good);
+  await at(r2, "2026-11-30T13:10:30Z");
+  const fence = "demo-report · 2026-11-30 refused: strategies/demo/GRAVIT.md exists; it would steer every turn in strategies/demo. Remove it.";
+  assert.deepEqual(reached.slice(1), [fence], "the fixed file re-holds the fence line, once");
+  assert.deepEqual((await ofKind(fx.home, "phoned")).map((x) => [x.key, x.of, x.reason]), [["demo-report:2026-11-30", "refused", "fence"]]);
+  await writeFile(path, good.replace("\n  - id:", "\n\t- id:"));
+  await at(r2, "2026-11-30T13:11:00Z");
+  await writeFile(path, good);
+  await at(r2, "2026-11-30T13:11:30Z");
+  assert.deepEqual(reached.filter((text) => text === fence), [fence], "a second refused-then-good load re-holds nothing");
+  await r2.schedule.dispose();
+});

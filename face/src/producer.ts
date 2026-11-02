@@ -456,25 +456,26 @@ function sha256Hex(bytes: Uint8Array): string {
  *   has never been refused for one.
  * @returns the bytes; `"irregular"` when the path holds a link, a FIFO or anything but a regular file (or, with
  *   `oneName`, a hard-linked one);
- *   `"oversized"` when it holds more than `maxBytes`; `{ errno }` when it cannot be opened or read at all, with the
+ *   `{ oversized }` with the size the descriptor gives when it holds more than `maxBytes` (stat again when it grew
+ *   under the read); `{ errno }` when it cannot be opened or read at all, with the
  *   failure's code (`ENOENT`, `ENOTDIR`, `EACCES`; `unknown error` when it has none).
  */
 export async function readFileBytes(
   path: string, maxBytes: number, opts: { oneName?: boolean } = {},
-): Promise<Buffer | "irregular" | "oversized" | { errno: string }> {
+): Promise<Buffer | "irregular" | { oversized: number } | { errno: string }> {
   let handle: FileHandle | undefined;
   try {
     handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
     const info = await handle.stat();
     if (!info.isFile() || (opts.oneName === true && info.nlink !== 1)) return "irregular";
-    if (info.size > maxBytes) return "oversized";
+    if (info.size > maxBytes) return { oversized: info.size };
     const buffer = Buffer.alloc(maxBytes + 1);
     let length = 0;
     for (;;) {
       const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
       if (bytesRead === 0) break;
       length += bytesRead;
-      if (length > maxBytes) return "oversized";
+      if (length > maxBytes) return { oversized: Math.max(length, (await handle.stat()).size) };
     }
     return buffer.subarray(0, length);
   } catch (error) {
@@ -492,12 +493,13 @@ export async function readFileBytes(
  * before it runs.
  * @param path - the script's real path, from {@link resolveScript}.
  * @param maxBytes - the most bytes it may hold, {@link SCRIPT_MAX_BYTES} by default.
- * @returns the bytes; `"irregular"` or `"oversized"` as {@link readFileBytes} reads them; `"missing"` when it
+ * @returns the bytes; `"irregular"` as {@link readFileBytes} reads it, `"oversized"` for its `{ oversized }`; `"missing"` when it
  *   cannot be opened or read at all (gone, or no longer readable), whatever the code.
  */
 export async function readScriptBytes(path: string, maxBytes: number = SCRIPT_MAX_BYTES): Promise<Buffer | "irregular" | "oversized" | "missing"> {
   const read = await readFileBytes(path, maxBytes);
-  return Buffer.isBuffer(read) || typeof read === "string" ? read : "missing";
+  if (Buffer.isBuffer(read) || read === "irregular") return read;
+  return "oversized" in read ? "oversized" : "missing";
 }
 
 /**

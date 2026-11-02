@@ -9,7 +9,7 @@
  * WHAT IT READS (P4-1). Nothing but:
  * - the strategy's Lunhui runs, `<dir>/analysis/<run>/run.json`, through channels.ts `readRunManifests` - the screen;
  * - `<dir>/status.yaml`, through desk-book.ts `readDeskFile` (no link followed, no FIFO waited on, capped) and then
- *   channels.ts `parseChannelStatus` on the bytes that read gave - the file is opened once;
+ *   channels.ts `statusOfText` on the bytes that read gave - the file is opened and parsed once;
  * - the firing's verified `levels.yml` bytes, `input.levels` - never the file, which a research session can write
  *   between the firing's check and this read;
  * - the Market's quote source: ONE snapshot per market that has symbols, the two in parallel.
@@ -41,9 +41,8 @@
  * @module
  */
 import { join } from "node:path";
-import { load } from "js-yaml";
 import { priceStamp } from "./alert-text.ts";
-import { parseChannelStatus, readRunManifests, type ChannelStatus } from "./channels.ts";
+import { readRunManifests, statusOfText, type ChannelStatus } from "./channels.ts";
 import { levelDistancePct, parseLevels, readDeskFile, type Level, type LevelKind, type LoadRefusal } from "./desk-book.ts";
 import { deskTime } from "./desk.ts";
 import { cut, escaped } from "./echo.ts";
@@ -309,20 +308,14 @@ function boundedStatus(status: ChannelStatus): ChannelStatus {
   return out;
 }
 
-/** `<dir>/status.yaml`: how its read went, and its values - {@link parseChannelStatus} of the text the guarded read
+/** `<dir>/status.yaml`: how its read went, and its values - {@link statusOfText} of the text the guarded read
  * gave, so the file is opened once, and only as a regular file with one name. */
 async function readStatus(root: string, dir: string): Promise<Pick<Report, "statusFile" | "status">> {
   const file = await readDeskFile(join(root, dir, "status.yaml"));
   if (file.state === "absent") return { statusFile: "missing", status: {} };
   if (file.state !== "ok") return { statusFile: "unreadable", status: {} };
-  let malformed = false;
-  try {
-    const doc: unknown = load(file.text);
-    malformed = doc !== null && doc !== undefined && (typeof doc !== "object" || Array.isArray(doc));
-  } catch {
-    malformed = true;
-  }
-  return { statusFile: malformed ? "malformed" : "read", status: boundedStatus(parseChannelStatus(file.text)) };
+  const { status, malformed } = statusOfText(file.text);
+  return { statusFile: malformed ? "malformed" : "read", status: boundedStatus(status) };
 }
 
 /* ---------- the quotes ---------- */
