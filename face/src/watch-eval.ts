@@ -354,13 +354,15 @@ export type AlertHit = {
 };
 
 /** A sent alert's delivery: `tradeMs` from the quote's `as_of`, `receivedMs` from its `receivedAt`, each to the send
- * resolving; both `null` for a send the outlet queued. */
+ * resolving; both `null` for a send the outlet queued, and for a replay. `replayed` marks an orphan sent late at the
+ * ledger's first read ({@link findOrphans}). */
 export type AlertDelivered = {
   t: string;
   kind: "delivered";
   id: string;
   delivery: DeliverResult;
   latency: { tradeMs: number | null; receivedMs: number | null };
+  replayed?: true;
 };
 
 /** One batch of capped alerts: sent, or dropped when it fell due under OFF or MUTE. */
@@ -404,14 +406,46 @@ export function isAlertRecord(x: unknown): x is AlertRecord {
 
 /* ---------- the rebuild ---------- */
 
+/** How old an orphan may be and still be sent late at the ledger's first read: ten minutes (spec §16 H2). */
+export const ALERT_REPLAY_MS = 600_000;
+
+/**
+ * The orphans in `alerts.jsonl` (spec §16 H2): each `send` decision of the last 36 hours with no `delivered` record
+ * for its id - a restart came between the watch's two writes. One younger than {@link ALERT_REPLAY_MS} is to be
+ * replayed, sent late; an older one is lost, named in one line. Each list in the ledger's order.
+ * @param records - the file's lines, parsed; anything not a record is skipped.
+ * @param now - the time of the read.
+ */
+export function findOrphans(records: readonly unknown[], now: number): { replay: AlertHit[]; lost: AlertHit[] } {
+  const delivered = new Set<string>();
+  const sends: { at: number; r: AlertHit }[] = [];
+  for (const r of records) {
+    if (!isAlertRecord(r)) continue;
+    if (r.kind === "delivered") delivered.add(r.id);
+    else if (r.kind === "alert" && r.decision === "send") {
+      const at = Date.parse(r.t);
+      if (Number.isFinite(at) && now - at <= REBUILD_WINDOW_MS) sends.push({ at, r });
+    }
+  }
+  const replay: AlertHit[] = [];
+  const lost: AlertHit[] = [];
+  for (const { at, r } of sends) {
+    if (delivered.has(r.id)) continue;
+    (now - at < ALERT_REPLAY_MS ? replay : lost).push(r);
+  }
+  return { replay, lost };
+}
+
 /**
  * The day as `alerts.jsonl` leaves it, from its `alert` and `batch` records of the last 36 hours: a key's day is its
  * newest record's date, alerted, its `lastHitAt` that date's latest record not suppressed `cooldown`, its side
- * unknown; `sends` the `send` decisions within the hour; `pending` the `cap` alerts no batch lists.
+ * unknown; `sends` the `send` decisions within the hour, but for the `lost` ones - never sent, they spend none of the
+ * hour's cap, though each still starts its key's cooldown; `pending` the `cap` alerts no batch lists.
  * @param records - the file's lines, parsed; anything not a record is skipped.
  * @param now - the time of the rebuild.
+ * @param lost - the ids of the orphans {@link findOrphans} found lost.
  */
-export function rebuildDay(records: readonly unknown[], now: number): WatchDay {
+export function rebuildDay(records: readonly unknown[], now: number, lost: ReadonlySet<string> = new Set()): WatchDay {
   const alerts: { at: number; r: AlertHit }[] = [];
   const batched = new Set<string>();
   for (const r of records) {
@@ -431,7 +465,7 @@ export function rebuildDay(records: readonly unknown[], now: number): WatchDay {
       if (r.suppressed !== "cooldown") kd.lastHitAt = at;
       day.keys.set(r.key, kd);
     }
-    if (r.decision === "send" && now - at < HOUR_MS && at <= now) day.sends.push(at);
+    if (r.decision === "send" && !lost.has(r.id) && now - at < HOUR_MS && at <= now) day.sends.push(at);
     if (r.suppressed === "cap" && !batched.has(r.id)) day.pending.push({ id: r.id, t: at });
   }
   return day;

@@ -150,6 +150,37 @@ export function batchText(hits: readonly AlertHit[], now: number): string {
   return `${head}: ${items.join(", ")}${rest > 0 ? `, and ${rest} more` : ""}`;
 }
 
+/** The most orphans the lost line names (spec §16 H2); the rest are counted. */
+const LOST_ITEMS_MAX = 5;
+
+/**
+ * An orphan sent late at the ledger's first read (spec §16 H2): `late: the face restarted before this alert was sent
+ * (raised <time>)`, then its alert text with no note - a replay is never annotated, since a check would read a market
+ * that has moved.
+ * @param hit - the orphan's record.
+ * @param now - the time it is sent at.
+ */
+export function lateAlertText(hit: AlertHit, now: number): string {
+  const raised = deskTime(new Date(hit.t), new Date(now));
+  return `late: the face restarted before this alert was sent (raised ${raised})\n${alertText(hit, now, "none")}`;
+}
+
+/**
+ * The lost orphans' line (spec §16 H2): `<n> alerts raised before a restart were never sent: <SYMBOL> <label>
+ * <time>, …[, and <k> more]`, at most {@link LOST_ITEMS_MAX} named; `1 alert raised before a restart was never sent:
+ * …` for one; empty for none.
+ * @param hits - the lost orphans, in the ledger's order.
+ * @param now - the time the line goes, for the items' dates.
+ */
+export function lostAlertsLine(hits: readonly AlertHit[], now: number): string {
+  if (hits.length === 0) return "";
+  const at = new Date(now);
+  const items = hits.slice(0, LOST_ITEMS_MAX).map((h) => `${h.symbol} ${h.label} ${deskTime(new Date(h.t), at)}`);
+  const rest = hits.length - items.length;
+  const head = hits.length === 1 ? "1 alert raised before a restart was never sent" : `${hits.length} alerts raised before a restart were never sent`;
+  return cut(`${head}: ${items.join(", ")}${rest > 0 ? `, and ${rest} more` : ""}`);
+}
+
 /**
  * A pass's annotation post: each alert's text, a blank line between, with no note. One alert keeps its rule's form
  * (`[alert · <SYMBOL> · <label>]`, the message naming the alert); several are `[alerts · <n> · …]`, the message

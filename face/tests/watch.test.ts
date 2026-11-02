@@ -488,6 +488,103 @@ test("a restart over the same ledger fires no second gap and keeps the cooldown 
   await second.watch.dispose();
 });
 
+/* ---------- the orphans: a send a restart caught before its delivered record (spec §16 H2) ---------- */
+
+const NVDA_KEY = "level:desk/levels.yml:NVDA:stop:170:cross_down";
+/** An `alert` record decided `send` at `t`, as the watch appends one before it delivers. */
+function orphan(id: string, t: string): Record<string, unknown> {
+  return {
+    t, kind: "alert", id, pass: "p-000000000001", date: "2026-11-30", key: NVDA_KEY, market: "us", symbol: "NVDA", label: "stop",
+    trigger: { type: "level", kind: "stop", price: 170, when: "cross_down" }, gap: false,
+    quote: { market: "us", price: 169.5, asOf: t, feed: "robinhood", status: "live", prevClose: null, chgPct: null, receivedAt: t },
+    holding: null, plan: "plan for NVDA", source: { file: "desk/levels.yml", index: 0 }, decision: "send", annotate: true,
+  };
+}
+/** A harness at 15:20:45Z over a home whose ledger holds `lines`, NVDA priced above its stop so no pass fires. */
+async function overLedger(lines: Record<string, unknown>[], o: Partial<HarnessOpts> = {}): Promise<Harness> {
+  const home = join(TMP, `case-${++cases}`, "home");
+  await mkdir(deskDir(home), { recursive: true });
+  await writeFile(join(deskDir(home), ALERTS_FILE), lines.map((l) => `${JSON.stringify(l)}\n`).join(""));
+  const h = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") }, home, ...o });
+  h.source.tables.us.set("NVDA", us(175, "2026-11-30T15:20:44Z"));
+  return h;
+}
+const deliveredOf = async (h: Harness, id: string): Promise<Record<string, unknown>[]> =>
+  (await h.alertRecords()).filter((r) => r.kind === "delivered" && r.id === id);
+
+test("an orphan younger than ten minutes is delivered once at the first read, recorded replayed, with no annotation post", async () => {
+  const h = await overLedger([orphan("a-young", "2026-11-30T15:16:45.000Z")]);
+  await h.wall.advance(0);
+  await until("the replay's record", async () => (await deliveredOf(h, "a-young")).length === 1);
+  assert.equal(h.sent.length, 1);
+  const [first, ...rest] = h.sent[0].text.split("\n");
+  assert.equal(first, "late: the face restarted before this alert was sent (raised 10:16 ET)");
+  assert.ok(rest[0].startsWith("NVDA 169.5 · ROBINHOOD"), rest[0]);
+  assert.ok(!h.sent[0].text.includes("annotation follows"));
+  const [d] = await deliveredOf(h, "a-young");
+  assert.deepEqual([d.delivery, d.latency, d.replayed], [{ sent: [100] }, { tradeMs: null, receivedMs: null }, true]);
+  await h.wall.advance(20_000);
+  await until("the second poll", () => h.source.calls.length === 2);
+  await h.wall.advance(0);
+  assert.deepEqual(h.posts, [], "no annotation post follows a replay");
+  assert.equal(h.budgetCalls(), 0);
+  assert.deepEqual(h.watch.status().recent.map((r) => [r.id, r.outcome]), [["a-young", "sent"]]);
+  await h.watch.dispose();
+});
+
+test("an orphan older than ten minutes is one line and a delivered record 'lost to a restart'", async () => {
+  const h = await overLedger([orphan("a-old", "2026-11-30T14:50:45.000Z"), orphan("a-young", "2026-11-30T15:15:45.000Z")]);
+  await h.wall.advance(0);
+  await until("both records", async () => (await deliveredOf(h, "a-old")).length === 1 && (await deliveredOf(h, "a-young")).length === 1);
+  assert.equal(h.sent.length, 2);
+  assert.ok(h.sent[0].text.startsWith("late: the face restarted before this alert was sent (raised 10:15 ET)"), "the replay first");
+  assert.equal(h.sent[1].text, "1 alert raised before a restart was never sent: NVDA stop 09:50 ET");
+  const [d] = await deliveredOf(h, "a-old");
+  assert.deepEqual(d.delivery, { undelivered: "lost to a restart" });
+  assert.equal(d.replayed, undefined);
+  assert.deepEqual(h.watch.status().recent.map((r) => [r.id, r.outcome]), [["a-young", "sent"], ["a-old", "undelivered"]]);
+  await h.watch.dispose();
+});
+
+test("a replay while OFF is in force records deliver's answer and sends nothing else", async () => {
+  const h = await overLedger([orphan("a-young", "2026-11-30T15:16:45.000Z")], { deliver: () => ({ undelivered: "paused" }) });
+  await writeOff(h.home, { by: "terminal" }, () => h.wall.now());
+  await h.wall.advance(0);
+  await until("the replay's record", async () => (await deliveredOf(h, "a-young")).length === 1);
+  const [d] = await deliveredOf(h, "a-young");
+  assert.deepEqual([d.delivery, d.replayed], [{ undelivered: "paused" }, true]);
+  await h.wall.advance(20_000);
+  await until("the second poll", () => h.source.calls.length === 2);
+  await h.wall.advance(0);
+  assert.equal(h.sent.length, 1, "the held replay is the only text");
+  assert.deepEqual(h.posts, []);
+  await h.watch.dispose();
+});
+
+test("a later ledger read in the same run replays nothing", async () => {
+  const h = await overLedger([orphan("a-young", "2026-11-30T15:16:45.000Z"), orphan("a-old", "2026-11-30T14:50:45.000Z")]);
+  await h.wall.advance(0);
+  await until("both records", async () => (await deliveredOf(h, "a-old")).length === 1 && (await deliveredOf(h, "a-young")).length === 1);
+  for (let i = 2; i <= 4; i++) {
+    await h.wall.advance(20_000);
+    await until(`poll ${i}`, () => h.source.calls.length === i);
+  }
+  await h.wall.advance(0);
+  assert.equal(h.sent.length, 2);
+  assert.equal((await h.alertRecords()).filter((r) => r.kind === "delivered").length, 2);
+  await h.watch.dispose();
+
+  /* a restart over the same ledger: each orphan now has its delivered record */
+  const again = await harness({ start: "2026-11-30T15:22:45Z", home: h.home, root: h.root, pid: 4343 });
+  again.source.tables.us.set("NVDA", us(175, "2026-11-30T15:22:44Z"));
+  await again.wall.advance(0);
+  await until("the first poll", () => again.source.calls.length === 1);
+  await again.wall.advance(0);
+  assert.equal(again.sent.length, 0);
+  assert.equal((await again.alertRecords()).filter((r) => r.kind === "delivered").length, 2);
+  await again.watch.dispose();
+});
+
 /* ---------- the lease ---------- */
 
 test("a stale lease is taken over: its pid gone, EPERM, or its beat two minutes old", async () => {

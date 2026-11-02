@@ -21,7 +21,7 @@
  * change); an expired mute lifted; nothing to watch is `idle`, and the tick stops there - no calendar, no poll, no
  * line; the ledgers, read once before any pass is judged (`alerts.jsonl` into src/watch-eval.ts `rebuildDay`,
  * `filings.jsonl` into src/filings.ts `baselineFrom`; an unreadable `alerts.jsonl` judges nothing until it reads,
- * with one line); each
+ * with one line; its orphans handled at that first read, see below); each
  * market, its calendar's answer for its own date, its window (ruling 2: 10 minutes before the open to a minute after
  * the close) and a poll when due by its cadence (ruling 3), never two in flight per market; a due batch; and the
  * filings (ruling 9), one single-flight poll when due, aborted at 120 s.
@@ -34,6 +34,13 @@
  * `unavailable` - judges nothing and says so once per session date per market; a watched symbol unpriced on its
  * first {@link UNPRICED_POLLS} polls of a session date says so once (ruling 16).
  *
+ * THE ORPHANS (spec §16 H2). A `send` written with no `delivered` after it is an alert a restart caught between its
+ * decision and its send. At the ledger's first read each is handled once, on the send chain ahead of any pass: one
+ * younger than src/watch-eval.ts `ALERT_REPLAY_MS` is delivered late (alert-text.ts `lateAlertText`) and recorded
+ * `replayed`, with no annotation post - a check would read a market that has moved; the older ones are one line
+ * (`lostAlertsLine`) and each a `{ undelivered: "lost to a restart" }` record, left out of the hour's cap though
+ * still in their keys' cooldowns. Whatever `deliver` answers is recorded, a pause's hold among them.
+ *
  * A SHARES PAST THE XSHG TABLE. A failed A-share calendar answer once the Beijing date is past `XSHG_COVERED` is no
  * missing calendar: the session is 09:30-15:00 Beijing on a weekday, marked `uncovered`, said once per Beijing date.
  *
@@ -44,7 +51,7 @@
 import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
-import { alertText, annotationPost, batchText, priceStamp, stateBody, WATCH_LINES, type DeskStateView, type NearView } from "./alert-text.ts";
+import { alertText, annotationPost, batchText, lateAlertText, lostAlertsLine, priceStamp, stateBody, WATCH_LINES, type DeskStateView, type NearView } from "./alert-text.ts";
 import { listChannelDirs } from "./channels.ts";
 import {
   ALERTS_FILE, appendChain, clearMute, deskDir, deskTime, EVENTS_FILE, FILINGS_FILE, readMuteState, readOffState, readRecords, WATCH_LEASE_FILE,
@@ -66,7 +73,7 @@ import type { DayAnswer, DeskCalendars, MarketSession } from "./market-clock.ts"
 import type { MarketQuoteSource } from "./market-quotes.ts";
 import { idOf, type Market } from "./symbols.ts";
 import {
-  alertId, batchDue, batchId, emptyDay, evaluatePass, gate, isAlertRecord, passId, priceKeys, rebuildDay, snapOf, takeBatch, watchQuoteOf,
+  alertId, batchDue, batchId, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, passId, priceKeys, rebuildDay, snapOf, takeBatch, watchQuoteOf,
   type AlertAnnotation, type AlertBatch, type AlertDelivered, type AlertHit, type AlertRecord, type Hit, type PriceKey, type WatchDay, type WatchQuote,
 } from "./watch-eval.ts";
 import { XSHG_COVERED } from "./xshg-clock.ts";
@@ -1034,17 +1041,56 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     }
   }
 
+  /** The first read's orphans, on the send chain: each young one delivered late and recorded `replayed`, never
+   * posted; then the lost ones as one line, each recorded undelivered. */
+  function queueOrphans({ replay, lost }: { replay: AlertHit[]; lost: AlertHit[] }): void {
+    if (replay.length === 0 && lost.length === 0) return;
+    const record = (id: string, delivery: DeliverResult, replayed: boolean): void => {
+      const d: AlertDelivered = {
+        t: iso(clock.now()), kind: "delivered", id, delivery, latency: { tradeMs: null, receivedMs: null }, ...(replayed ? { replayed: true as const } : {}),
+      };
+      records.push(d);
+      deliveries.set(id, d);
+      alerts.append(d);
+    };
+    onSendChain(async () => {
+      for (const hit of replay) {
+        let result: DeliverResult;
+        if (stopped) result = { undelivered: "the face shut down" };
+        else {
+          try {
+            result = await deps.deliver(lateAlertText(hit, clock.now()));
+          } catch (err) {
+            result = { undelivered: `send failed: ${errText(err)}` };
+          }
+        }
+        record(hit.id, result, true);
+      }
+      if (lost.length === 0) return;
+      if (!stopped) {
+        try {
+          await deps.deliver(lostAlertsLine(lost, clock.now()));
+        } catch (err) {
+          fail("lost alerts line", err);
+        }
+      }
+      for (const hit of lost) record(hit.id, { undelivered: "lost to a restart" }, false);
+    });
+  }
+
   async function ledgersStep(at: number): Promise<void> {
     if (!alertsRead) {
       try {
         const { records: read } = await readRecords(home, ALERTS_FILE, isAlertRecord);
         const merged = [...read.filter((r) => at - Date.parse(r.t) <= MEMORY_MS), ...records];
-        day = rebuildDay(merged, at);
+        const orphans = findOrphans(merged, at);
+        day = rebuildDay(merged, at, new Set(orphans.lost.map((r) => r.id)));
         filingCooldowns(day, merged);
         records = merged;
         for (const r of merged) if (r.kind === "delivered") deliveries.set(r.id, r);
         alertsRead = true;
         ledgerError = undefined;
+        queueOrphans(orphans);
       } catch (err) {
         ledgerError = reasonOf(err);
         sayOnce(`ledger:${ledgerError}`, `the alert ledger ${join(dir, ALERTS_FILE)} cannot be read (${ledgerError}), so the watch sends nothing until it can`, { ever: true, at });

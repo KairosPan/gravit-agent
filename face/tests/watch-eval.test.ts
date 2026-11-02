@@ -10,7 +10,7 @@ import type { MarketSession } from "../src/market-clock.ts";
 import type { MarketQuote } from "../src/market-quotes.ts";
 import {
   ALERTS_PER_HOUR, GAP_RULE_WINDOW_MS, HOUR_MS,
-  alertId, batchDue, batchId, emptyDay, evaluatePass, gate, isAlertRecord, judgedDate, passId, pastOf, priceKeys, rebuildDay, snapOf,
+  ALERT_REPLAY_MS, alertId, batchDue, batchId, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, judgedDate, passId, pastOf, priceKeys, rebuildDay, snapOf,
   takeBatch, watchQuoteOf,
   type AlertHit, type PriceKey, type WatchDay, type WatchQuote, type WatchSessions,
 } from "../src/watch-eval.ts";
@@ -354,6 +354,37 @@ test("rebuildDay restores the day across both markets' session dates", () => {
   assert.equal(restarted.keys.get(nvda)?.repeats, 1);
   assert.equal(evaluatePass(restarted, [stop], [u("NVDA", 171, "2026-11-30T15:35:00Z")], BOTH, T("2026-11-30T15:35:00Z")).length, 0);
   assert.equal(evaluatePass(restarted, [stop], [u("NVDA", 169, "2026-11-30T15:40:00Z")], BOTH, T("2026-11-30T15:40:00Z")).length, 1, "and after it a crossing hits");
+});
+
+/* ---------- the orphans: a send a restart caught before its delivered record (spec §16 H2) ---------- */
+
+const ORPHANS_NOW = T("2026-11-30T15:00:00Z");
+/** Each orphan case's alert key, one per id. */
+const keyOf = (id: string): string => `rule:m:${id}`;
+/** An alert record `id` at `at`, sent or suppressed. */
+const hit = (id: string, at: number, decision: AlertHit["decision"]): AlertHit =>
+  alertRecord({ t: new Date(at).toISOString(), id, key: keyOf(id), ...(decision === "send" ? {} : { decision, suppressed: "muted" as const }) });
+/** The delivered record of alert `id`. */
+const delivered = (id: string): unknown => ({ t: new Date(ORPHANS_NOW - 30_000).toISOString(), kind: "delivered", id, delivery: { sent: [1] }, latency: { tradeMs: null, receivedMs: null } });
+const ORPHAN_RECORDS: unknown[] = [
+  hit("a1", ORPHANS_NOW - 5 * 60_000, "send"), hit("a2", ORPHANS_NOW - 20 * 60_000, "send"),
+  hit("a3", ORPHANS_NOW - 1 * 60_000, "send"), delivered("a3"), hit("a4", ORPHANS_NOW - 60_000, "suppressed"),
+  hit("a5", ORPHANS_NOW - 37 * HOUR_MS, "send"),
+];
+
+test("findOrphans splits a send with no delivered record by its age", () => {
+  assert.equal(ALERT_REPLAY_MS, 600_000);
+  const { replay, lost } = findOrphans(ORPHAN_RECORDS, ORPHANS_NOW);
+  assert.deepEqual(replay.map((r) => r.id), ["a1"]);
+  assert.deepEqual(lost.map((r) => r.id), ["a2"], "a send past the 36 h window is no orphan");
+  assert.deepEqual(findOrphans([hit("a6", ORPHANS_NOW - ALERT_REPLAY_MS, "send")], ORPHANS_NOW).lost.map((r) => r.id), ["a6"], "ten minutes old is lost");
+});
+
+test("rebuildDay leaves a lost send out of the hour's count and keeps its cooldown", () => {
+  const day = rebuildDay(ORPHAN_RECORDS, ORPHANS_NOW, new Set(["a2"]));
+  assert.equal(day.sends.length, 2, "a1 and a3, not a2");
+  assert.equal(typeof day.keys.get(keyOf("a2"))?.lastHitAt, "number");
+  assert.equal(rebuildDay(ORPHAN_RECORDS, ORPHANS_NOW).sends.length, 3, "without the set, a2 counts");
 });
 
 test("isAlertRecord accepts the four kinds and rejects a torn or kindless line", () => {
