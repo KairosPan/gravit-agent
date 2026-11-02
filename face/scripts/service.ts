@@ -442,7 +442,9 @@ function degradedReason(status: DeskStatus, now: number): string | undefined {
  * - `3` stopped on purpose: no plist (`not installed`), and then neither launchd nor the port is
  *   asked; or a plist launchd has no job for (`stopped`), and then the port is not asked.
  * - `2` down: {@link fetchStatus} has no status from the port on two tries `retryMs` apart -
- *   `no answer on <port>`. A face that answers either try is not down.
+ *   `no answer on <port> (launchd: <state>[, pid N])`, launchd as asked after the second try. A
+ *   face that answers either try is not down; after a retry, its pid is compared with launchd's
+ *   job as asked again after the wait, not before it.
  * - `1` degraded: the face that answers is not launchd's job - its pid is not the job's, a job with
  *   no pid included - and then nothing else it says is read: its troubles are not the job's; or,
  *   for launchd's own face, its Telegram poll failing, the bot blocked, a 409 conflict within the
@@ -460,14 +462,20 @@ export async function checkHealth(
   opts: { retryMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number } = {},
 ): Promise<{ code: HealthCode; reason: string }> {
   if (!ctx.installed) return { code: 3, reason: "not installed" };
-  const job = jobInfo(ctx);
+  let job = jobInfo(ctx);
   if (!job.loaded) return { code: 3, reason: "stopped" };
   let answer = await fetchStatus(ctx.port, ctx.deps.fetch);
   if (answer === undefined) {
     await (opts.sleep ?? ctx.deps.sleep)(opts.retryMs ?? HEALTH_RETRY_MS);
     answer = await fetchStatus(ctx.port, ctx.deps.fetch);
+    /* Asked again after the wait: a face launchd respawned meanwhile answers with the new pid,
+     * which the read from before the wait would call another face's. */
+    job = jobInfo(ctx);
   }
-  if (answer === undefined) return { code: 2, reason: `no answer on ${ctx.port}` };
+  if (answer === undefined) {
+    const seen = job.loaded ? `${job.state ?? "state unknown"}${job.pid === undefined ? "" : `, pid ${job.pid}`}` : "not loaded";
+    return { code: 2, reason: `no answer on ${ctx.port} (launchd: ${seen})` };
+  }
   if (answer.pid !== job.pid) return { code: 1, reason: "another face holds the port" };
   const degraded = degradedReason(answer, (opts.now ?? Date.now)());
   return degraded === undefined ? { code: 0, reason: "healthy" } : { code: 1, reason: degraded };

@@ -951,7 +951,7 @@ test("checkHealth 3: not installed, without asking launchd or the port; installe
 
 test("checkHealth 2: no answer on two tries 10 s apart, the wait through the injected sleep", async () => {
   const down = await health();
-  assert.deepEqual([down.code, down.reason], [2, "no answer on 3090"]);
+  assert.deepEqual([down.code, down.reason], [2, "no answer on 3090 (launchd: running, pid 42)"]);
   assert.equal(down.r.urls.length, 2, "two tries");
   assert.deepEqual(down.r.sleeps, [10_000], "10 s between them, through deps.sleep");
   const r = await rig({ launchctl: running42 });
@@ -972,6 +972,25 @@ test("a face that misses the first try and answers the second is not down", asyn
   assert.deepEqual(late.r.sleeps, [10_000]);
   const first = await health({ answer: answering(healthStatus()) });
   assert.deepEqual([first.code, first.reason, first.r.urls.length, first.r.sleeps], [0, "healthy", 1, []], "an answer at once: one try, no wait");
+});
+
+test("a face launchd respawned during the retry is launchd's own: launchd is asked again after the wait", async () => {
+  let prints = 0;
+  let tries = 0;
+  const respawn = await health({
+    launchctl: (args) => (args[0] === "print" ? (prints++ === 0 ? loaded("not running") : loaded("running", 43)) : undefined),
+    answer: () => (tries++ === 0 ? undefined : answering(healthStatus({ pid: 43 }))()),
+  });
+  assert.deepEqual([respawn.code, respawn.reason], [0, "healthy"]);
+  assert.equal(respawn.r.calls.filter((c) => c[0] === "print").length, 2, "once before the first try, once after the wait");
+  const r = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("not running") : undefined) });
+  await putPlist(r);
+  const down = await checkHealth(contextOf(r.deps, undefined));
+  assert.deepEqual([down.code, down.reason], [2, "no answer on 3090 (launchd: not running)"], "the down reason names what launchd saw");
+  let gone = 0;
+  const left = await rig({ launchctl: (args) => (args[0] === "print" && gone++ === 0 ? loaded("running", 42) : undefined) });
+  await putPlist(left);
+  assert.equal((await checkHealth(contextOf(left.deps, undefined))).reason, "no answer on 3090 (launchd: not loaded)");
 });
 
 test("another face on the port reads 1 and nothing else", async () => {
@@ -1047,7 +1066,7 @@ test("status --check returns the code and prints the health line; plain status s
   assert.equal(await runService("status", ["--check"], down.deps), 2);
   const lines = down.text().split("\n");
   assert.equal(lines[0], "com.gravit.face: running (pid 42)");
-  assert.equal(lines.at(-1), "health: 2 no answer on 3090", "the block status prints, then the health line");
+  assert.equal(lines.at(-1), "health: 2 no answer on 3090 (launchd: running, pid 42)", "the block status prints, then the health line");
   assert.ok(lines.includes("not answering on 3090"));
   const ok = await rig({ launchctl: running42, answer: answering(healthStatus()) });
   await putPlist(ok);
