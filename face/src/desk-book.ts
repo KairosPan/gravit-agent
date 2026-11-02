@@ -71,17 +71,18 @@
  * TWO READS FOR P4. {@link readDeskFile} reads any one desk file - a strategy's `status.yaml`, the `levels.yml` a
  * firing verifies against its pin - on producer.ts's descriptor read (no link followed, no FIFO waited on, the size
  * capped), and {@link parseLevels} is {@link loadLevels} on text already read, so the report quotes exactly the bytes
- * the firing checked.
+ * the firing checked. {@link levelsPin} is the pin `arm` and `rearm` take on the same read.
  *
  * MODULE WEIGHT. It imports standing.ts, and js-yaml with it, so the pause switch (scripts/desk.ts) never
- * imports it eagerly: a command that needs it, as P4's `arm` will, loads it on first use.
+ * imports it eagerly: `arm` and `rearm`, which pin a strategy's `levels.yml`, load it on first use.
  * @module
  */
 import { constants as fsConstants, type Stats } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";
+import { join } from "node:path";
 import { cut, escaped } from "./echo.ts";
 import { readFileBytes } from "./producer.ts";
-import { isEtDate, isOrderId, readDeskYaml, sha256Hex } from "./standing.ts";
+import { LEVELS_NONE, isEtDate, isOrderId, readDeskYaml, sha256Hex } from "./standing.ts";
 import { marketOf, SYMBOL_RE, type Market } from "./symbols.ts";
 
 /** A ticker (src/symbols.ts, re-exported for the book's readers). */
@@ -777,4 +778,38 @@ export function parseLevels(text: string, file: string, today: string, sha256: s
 export async function loadRules(path: string, file: string): Promise<LoadResult<Rule>> {
   const seen = new Map<string, boolean>();
   return loadBook(path, file, { max: RULES_MAX, capNoun: "rules", judge: (raw, index) => judgeRule(raw, index, file, seen) });
+}
+
+/**
+ * The pin `arm` and `rearm` take of a strategy's `levels.yml` (`levelsSha256`, P4 ruling 5): the bytes read once
+ * through {@link readDeskFile} - as a firing reads them against the pin - and judged by {@link parseLevels}, so a
+ * file no firing could take is never pinned.
+ * @param root - the repository root.
+ * @param dir - the order's directory, `strategies/<name>`.
+ * @param today - the order's market date, YYYY-MM-DD: a level that expires before it is refused, as the watch
+ *   refuses one.
+ * @returns the bytes' sha256 and the levels that load - {@link LEVELS_NONE} and none when there is no file - or
+ *   the reason not, naming `<dir>/levels.yml`: `is not a regular file`, `is not UTF-8`, `cannot be read (<code>)`,
+ *   `is <n> bytes; the limit is 65,536`, or the parse's whole-file error (`must be a list of entries`, `is not
+ *   YAML: …`). A refused entry is the watch's to report, not the arming's.
+ */
+export async function levelsPin(root: string, dir: string, today: string): Promise<{ sha256: string; levels: Level[] } | { error: string }> {
+  const file = `${dir}/levels.yml`;
+  const path = join(root, dir, "levels.yml");
+  const read = await readDeskFile(path);
+  if (read.state === "absent") return { sha256: LEVELS_NONE, levels: [] };
+  if (read.state === "unreadable") {
+    if (read.reason === "not a regular file") return { error: `${file} is not a regular file` };
+    if (read.reason === "not UTF-8") return { error: `${file} is not UTF-8` };
+    return { error: `${file} cannot be read (${read.reason})` };
+  }
+  if (read.state === "oversize") {
+    /* the read stops one byte past the cap; the size is the file's own, when it can still be read */
+    const size = await lstat(path).then((stats) => stats.size, () => DESK_FILE_MAX_BYTES + 1);
+    return { error: oversized(file, Math.max(size, DESK_FILE_MAX_BYTES + 1)) };
+  }
+  const sha256 = sha256Hex(read.bytes);
+  const parsed = parseLevels(read.text, file, today, sha256);
+  if (parsed.error !== undefined) return { error: parsed.error };
+  return { sha256, levels: parsed.entries };
 }

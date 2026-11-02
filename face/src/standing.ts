@@ -11,35 +11,44 @@
  *
  * AN ORDER. `id` (a-z, 0-9 and -, opening with a letter, at most 40 characters, unique); `dir` - `desk`, whose
  * turn runs in `desk/journal`, or `strategies/<name>`, a channel's directory, never `_template`
- * ({@link orderCwd}); `file`, the order's text in that directory (`STANDING.md` by default), and `sha256`, its
- * bytes' hash at arming; `at`, the anchor ({@link parseAnchor}); `producer` (scripts/<file>.py, its bytes
- * pinned by `producerSha256`, or builtin:<name>, nothing to hash - producer.ts); `wake` (true: the producer's
+ * ({@link orderCwd}); `market`, `us` or `cn`, the exchange whose calendar and date the order keeps - absent is
+ * `us` ({@link orderMarket}), so an order armed before P4 is a US one; `file`, the order's text in that directory
+ * (`STANDING.md` by default), and `sha256`, its bytes' hash at arming; `at`, the anchor ({@link parseAnchor}); `producer` (scripts/<file>.py, its bytes
+ * pinned by `producerSha256`, or builtin:<name>, nothing to hash - producer.ts); `levelsSha256`, the hash of
+ * `<dir>/levels.yml` at arming, or `none` when there was none - only, and always, for an order that wakes in
+ * `strategies/<name>` ({@link needsLevelsPin}); `wake` (true: the producer's
  * text, if any, goes to a turn; false: the producer runs alone, so it needs one); `model`, the turn's route as
  * PROVIDER/MODEL; `turnDeadline` (1 to 30 min, 10 min by default) and `producerDeadline` (10 s to 180 min,
- * 5 min by default), each `<n>s` or `<n>m`; `expires`, the last ET date it fires, inclusive; `enabled`; and
+ * 5 min by default), each `<n>s` or `<n>m`; `expires`, the last date it fires on its market's clock, inclusive;
+ * `enabled`; and
  * `armedAt`, when `arm` wrote it.
  *
  * FAIL CLOSED (P2-9). {@link parseStanding} refuses the whole file for any fault, every error a line opening
  * with the order it is about - `orders[<i>] (<id>): ` - and naming its key; a refused file stops every order
  * until it is fixed. Among the faults:
  * - unknown keys, at the top, in the budget and in an order;
- * - an order without its arming fields (P2-22): no `armedAt`, no `sha256`, or a script producer without
- *   `producerSha256` is `not armed: npm run desk -- arm <dir> …` - never skipped silently;
+ * - an order without its arming fields (P2-22): no `armedAt`, no `sha256`, a script producer without
+ *   `producerSha256`, or a strategy order that wakes without `levelsSha256` is `not armed: npm run desk -- arm
+ *   <dir> …` - never skipped silently;
+ * - `builtin:report` anywhere but a strategy order that wakes ({@link REPORT_PLACE}); an A-share order on a wall
+ *   time, since `HH:MM` is New York's; `builtin:brief` on any market but `us`;
  * - an anchor whose offset would leave its session's ET date (P2-24): `open-Nm` past 570 minutes is before
  *   00:00 ET, `close+Nm` past 479 after 23:59 ET (on a 16:00 close; an early close only moves it earlier);
- * - a `close-Nm` whose N minutes cannot hold the producer's deadline, the turn's and the 5-minute grace
- *   (P2-16): a firing that starts late inside the grace must still end before the close it is about.
+ * - a `close-Nm` or an `open-Nm` whose N minutes cannot hold the producer's deadline, the turn's and the
+ *   5-minute grace (P2-16, P4-10): a firing that starts late inside the grace must still end before the close or
+ *   the open it is about.
  *
  * THE ANCHOR. `open` and `close` are the session's, from the market clock - its DST and its early closes
  * already inside them - plus the offset; `HH:MM` is that wall time on the session's ET date, never moved by
- * an early close ({@link anchorInstant}).
+ * an early close ({@link anchorInstant}). On XSHG (09:30 to 15:00 Beijing) `open-570m` is 00:00 and `close+479m`
+ * 22:59 Beijing, so P2-24's bounds hold on the Beijing date too.
  *
  * THE ARMING EDITS. `arm` and `rearm` edit the file as text, so the operator's comments, spacing and budget
  * stay as they wrote them: {@link appendOrder} adds an entry at the end of `orders:` and {@link rehashOrder}
- * rewrites one order's hash lines - and its `expires`, when `rearm --expires` extends it. Each keeps its edit
- * only when the edited text parses to exactly the old load plus that change; any other shape - a flow-style
- * list, `orders:` before another key, an order whose `- id:` is not its first line - gets the text to paste
- * by hand instead. {@link writeStanding} replaces the file in one step under the face's file lock, refusing
+ * rewrites one order's hash lines (`levelsSha256` among them) - and its `expires`, when `rearm --expires` extends
+ * it. Each keeps its edit only when the edited text parses to exactly the old load plus that change; any other
+ * shape - a flow-style list, `orders:` before another key, an order whose `- id:` is not its first line - gets
+ * the text to paste by hand instead. {@link writeStanding} replaces the file in one step under the face's file lock, refusing
  * a file that changed since the edit read it.
  *
  * MODULE WEIGHT. js-yaml comes with this module, so neither the face's desk (src/desk.ts) nor the pause
@@ -60,6 +69,7 @@ import { etDayStart } from "./et.ts";
 import type { MarketSession } from "./market-clock.ts";
 import { formatDuration, formatProducer, parseProducer, type ProducerSpec } from "./producer.ts";
 import { parseModelRoute } from "./room-rules.ts";
+import type { Market } from "./symbols.ts";
 
 /* ---------- the limits ---------- */
 
@@ -183,22 +193,23 @@ export function anchorInstant(a: Anchor, session: MarketSession): number {
   return Date.parse(a.kind === "open" ? session.open : session.close) + a.offsetMin * 60_000;
 }
 
-/** What an order runs before the close: its producer, its turn, or both - never neither, since an order with
+/** What an order runs before the close or the open: its producer, its turn, or both - never neither, since an order with
  * neither runs nothing and is refused before its room is asked about. Each is the deadline it runs under. */
 export type RoomNeed = { producerMs: number; turnMs?: number } | { producerMs?: number; turnMs: number };
 
 /**
- * Why a `close-Nm` anchor cannot hold what must fit before the close (P2-16) - the producer's deadline when
- * there is a producer, the turn's when it wakes one, and the 5-minute grace - or `undefined` when it can, or
- * when the anchor is anything but `close-Nm`.
+ * Why a `close-Nm` or an `open-Nm` anchor cannot hold what must fit before the close or the open (P2-16, P4-10) -
+ * the producer's deadline when there is a producer, the turn's when it wakes one, and the 5-minute grace - or
+ * `undefined` when it can, or when the anchor is anything but `close-Nm` or `open-Nm`.
  * @param anchor - the anchor.
  * @param need - `producerMs`, the producer's deadline, absent without a producer; `turnMs`, the turn's
  *   deadline, absent when nothing is woken; at least one of the two.
- * @returns `close-<N>m leaves <N> min before the close; its producer (<p>), its turn (<t>) and the 5-minute
- *   grace need <sum>`, the parts present only when they count, durations as producer.ts's `formatDuration`.
+ * @returns `<close | open>-<N>m leaves <N> min before the <close | open>; its producer (<p>), its turn (<t>) and
+ *   the 5-minute grace need <sum>`, the parts present only when they count, durations as producer.ts's
+ *   `formatDuration`.
  */
 export function roomProblem(anchor: Anchor, need: RoomNeed): string | undefined {
-  if (anchor.kind !== "close" || anchor.offsetMin >= 0) return undefined;
+  if (anchor.kind === "time" || anchor.offsetMin >= 0) return undefined;
   const room = -anchor.offsetMin * 60_000;
   const sum = (need.producerMs ?? 0) + (need.turnMs ?? 0) + GRACE_MS;
   if (room >= sum) return undefined;
@@ -207,7 +218,7 @@ export function roomProblem(anchor: Anchor, need: RoomNeed): string | undefined 
     ...(need.turnMs === undefined ? [] : [`its turn (${formatDuration(need.turnMs)})`]),
   ];
   const listed = parts.length === 1 ? `${parts[0]} and ` : `${parts.join(", ")} and `;
-  return `${formatAnchor(anchor)} leaves ${-anchor.offsetMin} min before the close; ${listed}the 5-minute grace need ${formatDuration(sum)}`;
+  return `${formatAnchor(anchor)} leaves ${-anchor.offsetMin} min before the ${anchor.kind}; ${listed}the 5-minute grace need ${formatDuration(sum)}`;
 }
 
 /* ---------- the other values ---------- */
@@ -284,18 +295,42 @@ export function sha256Hex(bytes: Buffer | string): string {
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const FILE_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*\.md$/;
 
+/** `levelsSha256` when the strategy had no `levels.yml` at arming. */
+export const LEVELS_NONE = "none";
+/** Where `builtin:report` may run, as its refusal says. */
+export const REPORT_PLACE = "builtin:report runs only in strategies/<name>, with wake: true";
+
+/**
+ * Whether an order pins its strategy's `levels.yml` (`levelsSha256`): one that wakes a turn in `strategies/<name>`.
+ * @param o - the order's `dir` and `wake`.
+ */
+export function needsLevelsPin(o: { dir: string; wake: boolean }): boolean {
+  return o.dir.startsWith("strategies/") && o.wake;
+}
+
+/**
+ * An order's market: its `market`, `us` when it names none (ruling 1) - every order armed before P4 among them.
+ * @param o - the order, or an entry.
+ */
+export function orderMarket(o: { market?: Market }): Market {
+  return o.market ?? "us";
+}
+
 /* ---------- the load ---------- */
 
 /** One order as the face fires it. `at` is the anchor as written - always {@link formatAnchor}'s spelling. */
 export interface StandingOrder {
   id: string;
   dir: string;
+  /** Only when the file names one; {@link orderMarket} reads it. */
+  market?: Market;
   file: string;
   sha256: string;
   at: string;
   anchor: Anchor;
   producer?: ProducerSpec;
   producerSha256?: string;
+  levelsSha256?: string;
   wake: boolean;
   model?: string;
   turnDeadlineMs: number;
@@ -312,7 +347,7 @@ export type StandingLoad = { ok: true; budget?: { dailyTokens: number }; orders:
 const SECTIONS: readonly string[] = ["budget", "orders"];
 /** An order's keys, in the order its refusals come. */
 const ORDER_KEYS: ReadonlySet<string> = new Set([
-  "id", "dir", "file", "sha256", "at", "producer", "producerSha256", "wake", "model", "turnDeadline", "producerDeadline", "expires", "enabled", "armedAt",
+  "id", "dir", "market", "file", "sha256", "at", "producer", "producerSha256", "levelsSha256", "wake", "model", "turnDeadline", "producerDeadline", "expires", "enabled", "armedAt",
 ]);
 /** The most characters of a value a refusal quotes. */
 const SHOWN_MAX = 60;
@@ -395,6 +430,9 @@ function parseOrder(raw: unknown, i: number, seen: Map<string, number>, errors: 
   if (raw.dir === undefined) fault("dir is missing");
   else if (dir === undefined) fault(`dir must be desk or strategies/NAME (got ${shown(raw.dir)})`);
 
+  const market = raw.market === "us" || raw.market === "cn" ? raw.market : undefined;
+  if (raw.market !== undefined && market === undefined) fault("market must be us or cn");
+
   const file = raw.file === undefined ? STANDING_TEXT_FILE : raw.file;
   if (typeof file !== "string" || !FILE_RE.test(file)) fault(`file must be a .md file's name in the order's directory (got ${shown(raw.file)})`);
 
@@ -405,6 +443,8 @@ function parseOrder(raw: unknown, i: number, seen: Map<string, number>, errors: 
   const anchor = typeof raw.at === "string" ? parseAnchor(raw.at) : undefined;
   if (raw.at === undefined) fault("at is missing");
   else if (anchor === undefined) fault(`at must be open, close, open±Nm, close±Nm or HH:MM, on its session's ET date (got ${shown(raw.at)})`);
+  /* HH:MM is New York's wall time (anchorInstant), so an A-share order keeps to its own session's open and close */
+  else if (market === "cn" && anchor.kind === "time") fault(`an A-share order anchors on the open or the close, not ${raw.at as string}`);
 
   let producer: ProducerSpec | undefined;
   let producerRead = true;
@@ -415,6 +455,9 @@ function parseOrder(raw: unknown, i: number, seen: Map<string, number>, errors: 
       fault(producerFault(parsed.error));
     } else {
       producer = parsed;
+      if (market === "cn" && parsed.kind === "builtin" && parsed.name === "brief") {
+        fault("builtin:brief is the US pre-close brief; it runs only with market: us");
+      }
     }
   }
 
@@ -429,8 +472,19 @@ function parseOrder(raw: unknown, i: number, seen: Map<string, number>, errors: 
   }
 
   const wake = raw.wake === undefined ? true : raw.wake;
+  /* the pin's place is the order's: its directory and its wake, judged once both are good */
+  const pinned = dir !== undefined && typeof wake === "boolean" ? needsLevelsPin({ dir, wake }) : undefined;
+  if (raw.levelsSha256 !== undefined) {
+    if (!(typeof raw.levelsSha256 === "string" && (SHA256_RE.test(raw.levelsSha256) || raw.levelsSha256 === LEVELS_NONE))) {
+      fault("levelsSha256 must be 64 lowercase hex or none");
+    } else if (pinned === false) {
+      fault("levelsSha256 is only for an order that wakes in strategies/<name>");
+    }
+  }
+
   if (typeof wake !== "boolean") fault(`wake must be true or false (got ${shown(raw.wake)})`);
   else if (!wake && producerRead && producer === undefined) fault("wake is false, so it needs a producer: an order with neither runs nothing");
+  if (pinned === false && producer?.kind === "builtin" && producer.name === "report") fault(REPORT_PLACE);
 
   if (raw.model !== undefined && !isModelRoute(raw.model)) fault(`model must be PROVIDER/MODEL (got ${shown(raw.model)})`);
 
@@ -461,7 +515,8 @@ function parseOrder(raw: unknown, i: number, seen: Map<string, number>, errors: 
     if (room !== undefined) fault(room);
   }
 
-  if (raw.armedAt === undefined || raw.sha256 === undefined || (producer?.kind === "script" && raw.producerSha256 === undefined)) {
+  if (raw.armedAt === undefined || raw.sha256 === undefined || (producer?.kind === "script" && raw.producerSha256 === undefined)
+    || (pinned === true && raw.levelsSha256 === undefined)) {
     fault(`not armed: npm run desk -- arm ${dir ?? "<desk | strategies/NAME>"} …`);
   }
 
@@ -469,12 +524,14 @@ function parseOrder(raw: unknown, i: number, seen: Map<string, number>, errors: 
   return {
     id: id as string,
     dir: dir as string,
+    ...(market === undefined ? {} : { market }),
     file: file as string,
     sha256: raw.sha256 as string,
     at: raw.at as string,
     anchor: anchor as Anchor,
     ...(producer === undefined ? {} : { producer }),
     ...(raw.producerSha256 === undefined ? {} : { producerSha256: raw.producerSha256 as string }),
+    ...(raw.levelsSha256 === undefined ? {} : { levelsSha256: raw.levelsSha256 as string }),
     wake: wake as boolean,
     ...(raw.model === undefined ? {} : { model: raw.model as string }),
     turnDeadlineMs: turnDeadlineMs as number,
@@ -608,11 +665,14 @@ export interface StandingStatus {
 export interface ArmEntry {
   id: string;
   dir: string;
+  /** Written only for `cn`: `us` is the default, so a US entry renders as P2's did. */
+  market?: Market;
   file: string;
   sha256: string;
   at: string;
   producer?: string;
   producerSha256?: string;
+  levelsSha256?: string;
   wake: boolean;
   model?: string;
   turnDeadline: string;
@@ -622,8 +682,9 @@ export interface ArmEntry {
 }
 
 /**
- * An entry as block YAML, one list item: the keys in {@link ArmEntry}'s order, `enabled: true` after
- * `expires`, every string scalar double-quoted (JSON's quoting, which YAML reads the same).
+ * An entry as block YAML, one list item: the keys in {@link ArmEntry}'s order - `market` only for `cn`,
+ * `levelsSha256` after the producer's lines - `enabled: true` after `expires`, every string scalar
+ * double-quoted (JSON's quoting, which YAML reads the same).
  * @param entry - the entry.
  * @param indent - the column of its `-`; its keys sit two further in.
  * @returns the lines, each ending in a newline.
@@ -635,11 +696,13 @@ export function renderOrder(entry: ArmEntry, indent: number): string {
   const lines = [
     `${dash}- id: ${q(entry.id)}`,
     `${pad}dir: ${q(entry.dir)}`,
+    ...(entry.market === "cn" ? [`${pad}market: ${q(entry.market)}`] : []),
     `${pad}file: ${q(entry.file)}`,
     `${pad}sha256: ${q(entry.sha256)}`,
     `${pad}at: ${q(entry.at)}`,
     ...(entry.producer === undefined ? [] : [`${pad}producer: ${q(entry.producer)}`]),
     ...(entry.producerSha256 === undefined ? [] : [`${pad}producerSha256: ${q(entry.producerSha256)}`]),
+    ...(entry.levelsSha256 === undefined ? [] : [`${pad}levelsSha256: ${q(entry.levelsSha256)}`]),
     `${pad}wake: ${entry.wake ? "true" : "false"}`,
     ...(entry.model === undefined ? [] : [`${pad}model: ${q(entry.model)}`]),
     `${pad}turnDeadline: ${q(entry.turnDeadline)}`,
@@ -653,10 +716,10 @@ export function renderOrder(entry: ArmEntry, indent: number): string {
 
 /** Whether a parsed order is exactly what `entry` says - checked on its own, so a slip in the rendering is caught. */
 function matchesEntry(order: StandingOrder, entry: ArmEntry): boolean {
-  return order.id === entry.id && order.dir === entry.dir && order.file === entry.file && order.sha256 === entry.sha256
-    && order.at === entry.at
+  return order.id === entry.id && order.dir === entry.dir && orderMarket(order) === orderMarket(entry) && order.file === entry.file
+    && order.sha256 === entry.sha256 && order.at === entry.at
     && (order.producer === undefined ? entry.producer === undefined : formatProducer(order.producer) === entry.producer)
-    && order.producerSha256 === entry.producerSha256 && order.wake === entry.wake && order.model === entry.model
+    && order.producerSha256 === entry.producerSha256 && order.levelsSha256 === entry.levelsSha256 && order.wake === entry.wake && order.model === entry.model
     && order.turnDeadlineMs === parseStandingDuration(entry.turnDeadline, TURN_DEADLINE_MIN_MS, TURN_DEADLINE_MAX_MS)
     && order.producerDeadlineMs === parseStandingDuration(entry.producerDeadline, PRODUCER_DEADLINE_MIN_MS, PRODUCER_DEADLINE_MAX_MS)
     && order.expires === entry.expires && order.enabled && order.armedAt === entry.armedAt;
@@ -733,19 +796,22 @@ export function appendOrder(text: string, entry: ArmEntry): { text: string } | {
 
 /** A line rearm rewrites, at an order's key column: the key, its value - double-quoted, single-quoted or plain -
  * and a comment. */
-const REWRITTEN_LINE_RE = /^( *)(sha256|producerSha256|expires):([ \t]*)("[^"]*"|'[^']*'|[^\s#'"][^\s#]*)([ \t]+#.*)?(\r?)$/;
+const REWRITTEN_LINE_RE = /^( *)(sha256|producerSha256|levelsSha256|expires):([ \t]*)("[^"]*"|'[^']*'|[^\s#'"][^\s#]*)([ \t]+#.*)?(\r?)$/;
 
-/** What `rearm` changes in one order: its text's hash, a script producer's, and - `rearm --expires` - its last day. */
+/** What `rearm` changes in one order: its text's hash, a script producer's, its `levels.yml`'s (`none` among them),
+ * and - `rearm --expires` - its last day. */
 export interface OrderChange {
   sha256: string;
   producerSha256?: string;
+  levelsSha256?: string;
   expires?: string;
 }
 
 /**
  * Rewrite one order's hashes in `standing.yml`'s text - and its `expires`, when `rearm --expires` extends it:
- * the `sha256:` line, and the `producerSha256:` and `expires:` lines when those are given, of the block that
- * opens `- id: <id>` (the id plain or quoted), each value written double-quoted, a comment on the line kept.
+ * the `sha256:` line, and the `producerSha256:`, `levelsSha256:` and `expires:` lines when those are given, of the
+ * block that opens `- id: <id>` (the id plain or quoted), each value written double-quoted, a comment on the line
+ * kept.
  * Each must be there exactly once. Nothing else moves; the edit is kept only when the new text parses to the
  * old load with exactly those values changed.
  * @param text - the file's text.
@@ -758,6 +824,7 @@ export function rehashOrder(text: string, id: string, change: OrderChange): { te
   const wanted = new Map<string, string>([
     ["sha256", change.sha256],
     ...(change.producerSha256 === undefined ? [] : [["producerSha256", change.producerSha256] as [string, string]]),
+    ...(change.levelsSha256 === undefined ? [] : [["levelsSha256", change.levelsSha256] as [string, string]]),
     ...(change.expires === undefined ? [] : [["expires", change.expires] as [string, string]]),
   ]);
   const pasted = [...wanted].map(([key, value]) => `    ${key}: ${JSON.stringify(value)}`);
@@ -791,6 +858,7 @@ export function rehashOrder(text: string, id: string, change: OrderChange): { te
     ...order,
     sha256: change.sha256,
     ...(change.producerSha256 === undefined ? {} : { producerSha256: change.producerSha256 }),
+    ...(change.levelsSha256 === undefined ? {} : { levelsSha256: change.levelsSha256 }),
     ...(change.expires === undefined ? {} : { expires: change.expires }),
   }));
   const got = parseStanding(next);

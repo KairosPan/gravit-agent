@@ -13,8 +13,8 @@ import { fileURLToPath } from "node:url";
 import { deskDir } from "../src/desk.ts";
 import type { MarketSession } from "../src/market-clock.ts";
 import {
-  DEFAULT_PRODUCER_DEADLINE_MS, DEFAULT_TURN_DEADLINE_MS, GRACE_MS, STANDING_FILE, STANDING_TEXT_MAX_BYTES, STANDING_YAML_MAX_BYTES,
-  anchorInstant, appendOrder, formatAnchor, isEtDate, isOrderDir, orderCwd, parseAnchor, parseStanding, parseStandingDuration,
+  DEFAULT_PRODUCER_DEADLINE_MS, DEFAULT_TURN_DEADLINE_MS, GRACE_MS, LEVELS_NONE, REPORT_PLACE, STANDING_FILE, STANDING_TEXT_MAX_BYTES, STANDING_YAML_MAX_BYTES,
+  anchorInstant, appendOrder, formatAnchor, isEtDate, isOrderDir, needsLevelsPin, orderCwd, orderMarket, parseAnchor, parseStanding, parseStandingDuration,
   readDeskYaml, rehashOrder, renderOrder, sha256Hex, unarmedOrders, writeStanding,
   type ArmEntry, type StandingLoad, type StandingOrder,
 } from "../src/standing.ts";
@@ -119,11 +119,11 @@ test("parseStanding reads the mapping under CORE_SCHEMA: dates stay strings, onl
   assert.deepEqual(ok, { ok: true, budget: { dailyTokens: 2_000_000 }, orders: [PRECLOSE] });
 
   /* defaults on a minimal order */
-  const minimal = `orders:\n  - id: m\n    dir: strategies/alpha\n    sha256: ${SHA}\n    at: "15:30"\n    expires: 2026-11-30\n    armedAt: "${ARMED}"\n`;
+  const minimal = `orders:\n  - id: m\n    dir: strategies/alpha\n    sha256: ${SHA}\n    at: "15:30"\n    levelsSha256: none\n    expires: 2026-11-30\n    armedAt: "${ARMED}"\n`;
   assert.deepEqual(parseStanding(minimal), {
     ok: true,
     orders: [{
-      id: "m", dir: "strategies/alpha", file: "STANDING.md", sha256: SHA, at: "15:30", anchor: { kind: "time", hour: 15, minute: 30 },
+      id: "m", dir: "strategies/alpha", file: "STANDING.md", sha256: SHA, at: "15:30", anchor: { kind: "time", hour: 15, minute: 30 }, levelsSha256: "none",
       wake: true, turnDeadlineMs: DEFAULT_TURN_DEADLINE_MS, producerDeadlineMs: DEFAULT_PRODUCER_DEADLINE_MS, expires: "2026-11-30", enabled: true, armedAt: ARMED,
     }],
   }, "file STANDING.md, wake and enabled true, 600,000 and 300,000 ms; no budget is no key");
@@ -237,7 +237,7 @@ test("the room before the close holds the producer, the turn and the 5-minute gr
   assert.deepEqual(parseStanding(FULL.replace("close-30m", "close-16m").replace("producerDeadline: 5m", "producerDeadline: 90s")), { ok: false,
     errors: ["orders[0] (preclose): close-16m leaves 16 min before the close; its producer (90 s), its turn (10 min) and the 5-minute grace need 990 s"] });
   assert.ok(parseStanding(FULL.replace("close-30m", "close-17m").replace("producerDeadline: 5m", "producerDeadline: 90s")).ok, "17 min hold 16.5");
-  for (const free of ["close+10m", "close", "15:30", "open-10m", "open"]) {
+  for (const free of ["close+10m", "close", "15:30", "open-20m", "open"]) {
     assert.ok(parseStanding(FULL.replace("close-30m", free)).ok, `${free}: no room rule`);
   }
 });
@@ -430,4 +430,142 @@ test("writeStanding makes the desk directory and writes standing.yml 0600, and r
   await assert.rejects(writeStanding(fresh, "orders:\n", { expect: "orders:\n" }), /changed since it was read/, "expected a file, found none");
   await writeStanding(fresh, "orders:\n", { expect: null });
   assert.equal(await readFile(join(deskDir(fresh), STANDING_FILE), "utf8"), "orders:\n");
+});
+
+/* ---------- P4: a strategy's market, its levels.yml pin, the room before the open ---------- */
+
+const LSHA = "f".repeat(64);
+/** A strategy's pre-market report, armed: its text's hash and its levels.yml's. */
+const FULL_REPORT = `orders:
+  - id: demo-report
+    dir: strategies/demo
+    file: STANDING.md
+    sha256: ${SHA}
+    at: open-90m
+    producer: builtin:report
+    levelsSha256: ${LSHA}
+    wake: true
+    expires: 2026-12-31
+    armedAt: "${ARMED}"
+`;
+/** FULL_REPORT on the A-share market. */
+const FULL_REPORT_CN = FULL_REPORT.replace("    dir: strategies/demo\n", "    dir: strategies/demo\n    market: cn\n");
+/** FULL_REPORT as parseStanding reads it. */
+const DEMO_REPORT: StandingOrder = {
+  id: "demo-report", dir: "strategies/demo", file: "STANDING.md", sha256: SHA, at: "open-90m", anchor: { kind: "open", offsetMin: -90 },
+  producer: { kind: "builtin", name: "report" }, levelsSha256: LSHA, wake: true, turnDeadlineMs: 600_000, producerDeadlineMs: 300_000,
+  expires: "2026-12-31", enabled: true, armedAt: ARMED,
+};
+
+test("a strategy order that wakes needs levelsSha256; no other order may carry one", () => {
+  assert.equal(ordersOf(parseStanding(FULL_REPORT), "FULL_REPORT")[0].levelsSha256, LSHA);
+  assert.deepEqual(parseStanding(FULL_REPORT), { ok: true, orders: [DEMO_REPORT] });
+  assert.deepEqual(parseStanding(FULL_REPORT_CN), { ok: true, orders: [{ ...DEMO_REPORT, market: "cn" }] }, "the same order on the A-share market");
+  assert.equal(ordersOf(parseStanding(FULL_REPORT.replace(LSHA, "none")), "none")[0].levelsSha256, LEVELS_NONE);
+  assert.equal(LEVELS_NONE, "none");
+  for (const text of [FULL_REPORT, FULL_REPORT_CN]) {
+    assert.deepEqual(parseStanding(text.replace(/^\s*levelsSha256:.*\n/m, "")),
+      { ok: false, errors: ["orders[0] (demo-report): not armed: npm run desk -- arm strategies/demo …"] });
+  }
+  assert.deepEqual(parseStanding(FULL.replace("    wake: true\n", `    levelsSha256: ${LSHA}\n    wake: true\n`)),
+    { ok: false, errors: ["orders[0] (preclose): levelsSha256 is only for an order that wakes in strategies/<name>"] }, "a desk order");
+  const quiet = FULL_REPORT.replace("builtin:report", "scripts/p.py").replace("    wake: true\n", `    producerSha256: ${SHA_B}\n    wake: false\n`);
+  assert.deepEqual(parseStanding(quiet),
+    { ok: false, errors: ["orders[0] (demo-report): levelsSha256 is only for an order that wakes in strategies/<name>"] }, "a strategy order that wakes nothing");
+  assert.ok(parseStanding(quiet.replace(/^\s*levelsSha256:.*\n/m, "")).ok, "and it needs none");
+  for (const bad of ["ABC", "F".repeat(64), "None", "1"]) {
+    assert.deepEqual(parseStanding(FULL_REPORT.replace(LSHA, bad)),
+      { ok: false, errors: ["orders[0] (demo-report): levelsSha256 must be 64 lowercase hex or none"] }, bad);
+  }
+  assert.equal(needsLevelsPin({ dir: "strategies/demo", wake: true }), true);
+  assert.equal(needsLevelsPin({ dir: "strategies/demo", wake: false }), false);
+  assert.equal(needsLevelsPin({ dir: "desk", wake: true }), false);
+});
+
+test("builtin:report runs only in a strategy, with wake", () => {
+  assert.equal(REPORT_PLACE, "builtin:report runs only in strategies/<name>, with wake: true");
+  assert.deepEqual(parseStanding(FULL.replace("builtin:brief", "builtin:report")), { ok: false, errors: [`orders[0] (preclose): ${REPORT_PLACE}`] }, "in desk");
+  assert.deepEqual(parseStanding(FULL_REPORT.replace(/^\s*levelsSha256:.*\n/m, "").replace("wake: true", "wake: false")),
+    { ok: false, errors: [`orders[0] (demo-report): ${REPORT_PLACE}`] }, "with wake: false");
+});
+
+test("an open-Nm anchor too short for the producer, the turn and the grace is refused at load", () => {        // RF 5
+  assert.deepEqual(parseStanding(FULL_REPORT.replace("open-90m", "open-10m")), { ok: false,
+    errors: ["orders[0] (demo-report): open-10m leaves 10 min before the open; its producer (5 min), its turn (10 min) and the 5-minute grace need 20 min"] });
+  assert.deepEqual(parseStanding(FULL_REPORT_CN.replace("open-90m", "open-10m")), { ok: false,
+    errors: ["orders[0] (demo-report): open-10m leaves 10 min before the open; its producer (5 min), its turn (10 min) and the 5-minute grace need 20 min"] },
+  "on either market");
+  assert.ok(parseStanding(FULL_REPORT.replace("open-90m", "open-10m").replace("    wake: true\n", "    wake: true\n    turnDeadline: 1m\n    producerDeadline: 10s\n")).ok,
+    "10 min hold 1 min, 10 s and the grace");
+  assert.ok(parseStanding(FULL_REPORT.replace("open-90m", "open-20m")).ok, "open-20m holds the defaults and the grace");
+  assert.deepEqual(parseStanding(FULL.replace("    producer: builtin:brief\n", "").replace("close-30m", "open-14m")), { ok: false,
+    errors: ["orders[0] (preclose): open-14m leaves 14 min before the open; its turn (10 min) and the 5-minute grace need 15 min"] }, "a turn alone");
+  for (const free of ["open", "open+5m", "close-20m"]) assert.ok(parseStanding(FULL_REPORT.replace("open-90m", free)).ok, free);
+  assert.ok(parseStanding(FULL_REPORT_CN.replace("open-90m", "open-570m")).ok, "open-570m: 00:00 Beijing, still the session's date");
+  assert.ok(parseStanding(FULL_REPORT_CN.replace("open-90m", "close+479m")).ok, "close+479m: 22:59 Beijing");
+  assert.equal(errorsOf(parseStanding(FULL_REPORT_CN.replace("open-90m", "open-571m")), "open-571m").length, 1);
+});
+
+test("market is us by default, cn when written, and anything else refused; a P2 order renders byte-identically", () => {
+  const p2 = ordersOf(parseStanding(`orders:\n${renderOrder(ENTRY, 2)}`), "P2's entry")[0];
+  assert.equal(Object.hasOwn(p2, "market"), false);
+  assert.equal(orderMarket(p2), "us");
+  assert.equal(orderMarket({ market: "cn" }), "cn");
+  assert.equal(renderOrder(ENTRY, 2), renderOrder({ ...ENTRY, market: "us" }, 2), "us is never written");
+  assert.ok(!renderOrder(ENTRY, 2).includes("market"));
+  const written = ordersOf(parseStanding(FULL.replace("    dir: desk\n", "    dir: desk\n    market: us\n")), "market: us")[0];
+  assert.equal(written.market, "us", "a parsed order has the key when the file has it");
+
+  const { producer: _brief, ...bare } = ENTRY;
+  const cn: ArmEntry = { ...bare, market: "cn" };
+  const rendered = renderOrder(cn, 2);
+  assert.ok(rendered.includes('    dir: "desk"\n    market: "cn"\n    file: "STANDING.md"\n'), rendered);
+  assert.equal(ordersOf(parseStanding(`orders:\n${rendered}`), "cn")[0].market, "cn");
+  const appended = appendOrder("", cn);
+  assert.ok("text" in appended, JSON.stringify(appended));
+  assert.ok("text" in appendOrder("", { ...bare, market: "us" }), "an explicit us entry verifies against the order it loads as");
+  assert.deepEqual(parseStanding(FULL.replace("    dir: desk\n", "    dir: desk\n    market: jp\n")),
+    { ok: false, errors: ["orders[0] (preclose): market must be us or cn"] });
+  assert.deepEqual(parseStanding(FULL.replace("    dir: desk\n", "    dir: desk\n    market: CN\n")),
+    { ok: false, errors: ["orders[0] (preclose): market must be us or cn"] }, "case counts");
+});
+
+test("an A-share order may not anchor on a wall time, and builtin:brief runs only on us", () => {
+  assert.deepEqual(parseStanding(FULL_REPORT_CN.replace("open-90m", '"08:00"')),
+    { ok: false, errors: ["orders[0] (demo-report): an A-share order anchors on the open or the close, not 08:00"] });
+  assert.ok(parseStanding(FULL_REPORT.replace("open-90m", '"08:00"')).ok, "a US order may");
+  assert.deepEqual(parseStanding(FULL.replace("    dir: desk\n", "    dir: desk\n    market: cn\n")),
+    { ok: false, errors: ["orders[0] (preclose): builtin:brief is the US pre-close brief; it runs only with market: us"] });
+});
+
+test("renderOrder, appendOrder and rehashOrder carry levelsSha256", () => {
+  const report: ArmEntry = {
+    id: "demo-report", dir: "strategies/demo", file: "STANDING.md", sha256: SHA, at: "open-90m", producer: "builtin:report", levelsSha256: LSHA, wake: true,
+    turnDeadline: "10m", producerDeadline: "5m", expires: "2026-12-31", armedAt: ARMED,
+  };
+  assert.equal(renderOrder({ ...report, market: "cn" }, 2), [
+    '  - id: "demo-report"', '    dir: "strategies/demo"', '    market: "cn"', '    file: "STANDING.md"', `    sha256: "${SHA}"`, '    at: "open-90m"',
+    '    producer: "builtin:report"', `    levelsSha256: "${LSHA}"`, "    wake: true", '    turnDeadline: "10m"', '    producerDeadline: "5m"',
+    '    expires: "2026-12-31"', "    enabled: true", `    armedAt: "${ARMED}"`, "",
+  ].join("\n"), "after the producer's lines, before wake");
+  const script = renderOrder({ ...report, producer: "scripts/p.py", producerSha256: SHA_B }, 2);
+  assert.ok(script.includes(`    producerSha256: "${SHA_B}"\n    levelsSha256: "${LSHA}"\n`), script);
+
+  const appended = appendOrder(`orders:\n${ORDER_A}`, report);
+  assert.ok("text" in appended, JSON.stringify(appended));
+  assert.deepEqual(ordersOf(parseStanding(appended.text), "appended")[1], DEMO_REPORT);
+  assert.ok("error" in appendOrder("", { ...report, levelsSha256: undefined }), "verified: an entry missing its pin is never written");
+  assert.ok("error" in appendOrder("", { ...report, levelsSha256: "abc" }), "nor one with a bad pin");
+
+  const text = `orders:\n${ORDER_A}${renderOrder(report, 2)}`;
+  const none = rehashOrder(text, "demo-report", { sha256: SHA, levelsSha256: LEVELS_NONE });
+  assert.ok("text" in none, JSON.stringify(none));
+  assert.equal(none.text, text.replace(`levelsSha256: "${LSHA}"`, 'levelsSha256: "none"'), "only that line moves");
+  const plain = rehashOrder(FULL_REPORT, "demo-report", { sha256: SHA, levelsSha256: SHA_C });
+  assert.ok("text" in plain, JSON.stringify(plain));
+  assert.equal(plain.text, FULL_REPORT.replace(`sha256: ${SHA}`, `sha256: "${SHA}"`).replace(`levelsSha256: ${LSHA}`, `levelsSha256: "${SHA_C}"`),
+    "plain hashes rewritten double-quoted");
+  assert.deepEqual(rehashOrder(`orders:\n${ORDER_A}`, "a", { sha256: SHA, levelsSha256: LEVELS_NONE, expires: "2027-01-31" }),
+    { error: `standing.yml has a shape rearm cannot rewrite safely; set these keys of a by hand:\n    sha256: "${SHA}"\n    levelsSha256: "none"\n    expires: "2027-01-31"` },
+    "the by-hand keys: levelsSha256 after the hashes, before expires");
 });

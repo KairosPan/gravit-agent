@@ -20,7 +20,7 @@ import { STANDING_FILE, parseStanding, sha256Hex, type StandingOrder } from "../
 const TEST_DIR = join(dirname(fileURLToPath(import.meta.url)), "tmp", `desk-arm-${process.pid}`);
 after(() => rm(TEST_DIR, { recursive: true, force: true }));
 
-const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume | arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD"
+const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume | arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD [--market us | cn]"
   + " [--producer scripts/FILE.py | builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake]"
   + " | rearm ID [--expires YYYY-MM-DD] | unmute";
 /** 14:00 ET on Tuesday 2026-10-20 (EDT). */
@@ -102,11 +102,11 @@ test("arm hashes STANDING.md, checks the calendar, appends a verified 0600 entry
   assert.equal(await runDesk("arm", ["strategies/alpha/", "--id", "alpha-open", "--at", "09:00", "--expires", "2026-10-20",
     "--model", "deepseek-official/deepseek-v4-pro", "--turn-deadline", "90s"], r.deps), 0);
   const alphaSha = sha256Hex("# alpha\nReport before the open.\n");
-  assert.deepEqual(r.take(), [`armed alpha-open in ${r.root}: strategies/alpha/STANDING.md sha256 ${alphaSha.slice(0, 12)}…, at 09:00, expires 2026-10-20; the face reads standing.yml again within 30 s`]);
+  assert.deepEqual(r.take(), [`armed alpha-open in ${r.root}: strategies/alpha/STANDING.md sha256 ${alphaSha.slice(0, 12)}…, at 09:00, expires 2026-10-20, no strategies/alpha/levels.yml; the face reads standing.yml again within 30 s`]);
   const orders = await ordersIn(r);
   assert.deepEqual(orders.map((o) => o.id), ["preclose", "alpha-open"]);
   assert.deepEqual(orders[1], {
-    id: "alpha-open", dir: "strategies/alpha", file: "STANDING.md", sha256: alphaSha, at: "09:00", anchor: { kind: "time", hour: 9, minute: 0 },
+    id: "alpha-open", dir: "strategies/alpha", file: "STANDING.md", sha256: alphaSha, at: "09:00", anchor: { kind: "time", hour: 9, minute: 0 }, levelsSha256: "none",
     wake: true, model: "deepseek-official/deepseek-v4-pro", turnDeadlineMs: 90_000, producerDeadlineMs: 300_000, expires: "2026-10-20", enabled: true,
     armedAt: ARMED_AT,
   });

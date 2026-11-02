@@ -12,6 +12,8 @@
  *   npm run desk -- unmute         lift the watch's mute, which only the phone sets (/mute 2h)
  *   npm run desk -- arm desk --id preclose --at close-30m --producer builtin:brief --expires 2026-11-30
  *                                  arm a standing order: pin its text's hash (and its script's), add it to standing.yml
+ *   npm run desk -- arm strategies/demo --id demo-report --at open-90m --market cn --producer builtin:report --expires 2026-12-31
+ *                                  arm a strategy's pre-market report on the A-share calendar: pin its levels.yml too
  *   npm run desk -- rearm preclose take a changed text's (or script's) new hash, after reviewing the change
  *   npm run desk -- rearm preclose --expires 2026-12-31
  *                                  extend its last day, an expired order's too - refused while a pinned file has
@@ -26,8 +28,9 @@
  * market clock, which the tests drive against temp homes. Importing this file runs nothing; run as a script,
  * the guard at the end resolves the home and exits with the command's code.
  *
- * MODULE WEIGHT. `arm` and `rearm` load src/standing.ts (with js-yaml), src/producer.ts and
- * src/market-clock.ts on their first use, so `pause`, `resume` and `unmute` load no more than they did.
+ * MODULE WEIGHT. `arm` and `rearm` load src/standing.ts (with js-yaml), src/producer.ts, src/market-clock.ts,
+ * src/xshg-clock.ts and src/desk-book.ts on their first use, so `pause`, `resume` and `unmute` load no more than
+ * they did.
  * @module
  */
 import { existsSync, realpathSync } from "node:fs";
@@ -36,11 +39,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import { MUTE_FILE, OFF_FILE, clearMute, clearOff, deskDir, deskTime, parseDuration, writeOff, type OffState } from "../src/desk.ts";
-import { etDate } from "../src/et.ts";
+import { bjDate, dateOf } from "../src/et.ts";
 import type { MarketClock } from "../src/market-clock.ts";
+import type { Market } from "../src/symbols.ts";
 
 /** What {@link runDesk} prints for a command or an argument it does not know. */
-const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume | arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD"
+const USAGE = "usage: npm run desk -- pause [Nm | Nh | Nd] | resume | arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD [--market us | cn]"
   + " [--producer scripts/FILE.py | builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake]"
   + " | rearm ID [--expires YYYY-MM-DD] | unmute";
 
@@ -57,8 +61,10 @@ export interface DeskDeps {
   now?: () => number;
   /** The repository whose files `arm` and `rearm` pin, this script's own by default. */
   root?: string;
-  /** The market clock `arm` asks, the builtin XNYS rules (src/market-clock.ts) by default. */
+  /** The market clock `arm` asks for a US order, the builtin XNYS rules (src/market-clock.ts) by default. */
   marketClock?: MarketClock;
+  /** The market clock `arm` asks for an A-share order, the builtin XSHG table (src/xshg-clock.ts) by default. */
+  cnMarketClock?: MarketClock;
 }
 
 /** A failure as its code when it has one (ENOTDIR, EACCES, EPERM), else its message. */
@@ -80,8 +86,8 @@ function reasonOf(err: unknown): string {
  *   36,500 days - or a second argument is the usage line, and nothing is written.
  * - `resume`: removes `OFF` and prints `resumed`, or `not paused` when there was none. An argument
  *   is the usage line.
- * - `arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD [--producer …] [--model …]
- *   [--turn-deadline …] [--producer-deadline …] [--no-wake]`: arms a standing order (see {@link arm}).
+ * - `arm <desk | strategies/NAME> --id ID --at ANCHOR --expires YYYY-MM-DD [--market us | cn] [--producer …]
+ *   [--model …] [--turn-deadline …] [--producer-deadline …] [--no-wake]`: arms a standing order (see {@link arm}).
  * - `rearm ID [--expires YYYY-MM-DD]`: takes the new hashes of an armed order's changed files; with `--expires`,
  *   extends its last day instead, refused while a pinned file has changed (see {@link rearm}).
  * - `unmute`: removes `MUTE` and prints `unmuted`, or `not muted` when there was none. An argument is the
@@ -91,8 +97,8 @@ function reasonOf(err: unknown): string {
  * @param cmd - the command.
  * @param args - what follows it.
  * @param deps - `home`, the harness home; `out`, the printer; `now`, the clock, default `Date.now` - read once,
- *   where the command needs the time; `root`, the repository `arm` and `rearm` pin files in; `marketClock`, the
- *   clock `arm` asks.
+ *   where the command needs the time; `root`, the repository `arm` and `rearm` pin files in; `marketClock` and
+ *   `cnMarketClock`, the clocks `arm` asks for a US and an A-share order.
  */
 export async function runDesk(cmd: string, args: string[], deps: DeskDeps): Promise<number> {
   const now = deps.now ?? Date.now;
@@ -146,19 +152,23 @@ export async function runDesk(cmd: string, args: string[], deps: DeskDeps): Prom
 
 /* ---------- what arm and rearm load on first use ---------- */
 
-/** src/standing.ts, src/producer.ts and src/market-clock.ts, as arm and rearm use them. */
+/** src/standing.ts, src/producer.ts, src/market-clock.ts, src/xshg-clock.ts and src/desk-book.ts, as arm and rearm use them. */
 interface Machinery {
   standing: typeof import("../src/standing.ts");
   producer: typeof import("../src/producer.ts");
   clock: typeof import("../src/market-clock.ts");
+  xshg: typeof import("../src/xshg-clock.ts");
+  book: typeof import("../src/desk-book.ts");
 }
 
 let machinery: Promise<Machinery> | undefined;
 
 /** The machinery, imported on the first arm or rearm and shared after it (see the module header's MODULE WEIGHT). */
 function loadMachinery(): Promise<Machinery> {
-  machinery ??= Promise.all([import("../src/standing.ts"), import("../src/producer.ts"), import("../src/market-clock.ts")])
-    .then(([standing, producer, clock]) => ({ standing, producer, clock }))
+  machinery ??= Promise.all([
+    import("../src/standing.ts"), import("../src/producer.ts"), import("../src/market-clock.ts"), import("../src/xshg-clock.ts"), import("../src/desk-book.ts"),
+  ])
+    .then(([standing, producer, clock, xshg, book]) => ({ standing, producer, clock, xshg, book }))
     .catch((err: unknown) => {
       machinery = undefined;
       throw err;
@@ -251,20 +261,26 @@ function refusedFile(m: Machinery, errors: readonly string[]): string {
 }
 
 /**
- * Check a new last day as `arm` checks `--expires`: a real date, `YYYY-MM-DD`, not before today in New York.
+ * Check a new last day as `arm` checks `--expires`: a real date, `YYYY-MM-DD`, not before today on the order's
+ * market's clock - New York's for `us`, Beijing's for `cn` (ruling 2).
  * @returns why not, or `undefined`.
  */
-function expiresProblem(m: Machinery, expires: string, now: number): string | undefined {
-  const today = etDate(new Date(now));
+function expiresProblem(m: Machinery, expires: string, now: number, market: Market): string | undefined {
+  const today = dateOf(market, now);
   if (!m.standing.isEtDate(expires)) return `--expires ${expires} is not a date, YYYY-MM-DD`;
-  if (expires < today) return `--expires ${expires} is before today, ${today} ET`;
+  if (expires < today) return `--expires ${expires} is before today, ${today} ${market === "cn" ? "Beijing" : "ET"}`;
   return undefined;
+}
+
+/** A `levels.yml` pin as the success lines print it: `, <dir>/levels.yml sha256 <12 hex>…` or `, no <dir>/levels.yml`. */
+function levelsPart(m: Machinery, dir: string, sha256: string): string {
+  return sha256 === m.standing.LEVELS_NONE ? `, no ${dir}/levels.yml` : `, ${dir}/levels.yml sha256 ${short(sha256)}`;
 }
 
 /* ---------- arm ---------- */
 
 /** arm's flags that take a value. */
-const VALUE_FLAGS: ReadonlySet<string> = new Set(["--id", "--at", "--expires", "--producer", "--model", "--turn-deadline", "--producer-deadline"]);
+const VALUE_FLAGS: ReadonlySet<string> = new Set(["--id", "--at", "--expires", "--market", "--producer", "--model", "--turn-deadline", "--producer-deadline"]);
 
 /** arm's arguments, read: exactly one directory, each flag at most once, `--id`, `--at` and `--expires` given. */
 interface ArmArgs {
@@ -300,21 +316,24 @@ function parseArmArgs(args: string[]): ArmArgs | undefined {
 }
 
 /**
- * `arm <dir> --id ID --at ANCHOR --expires YYYY-MM-DD [--producer scripts/FILE.py | builtin:NAME]
- * [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake]`.
+ * `arm <dir> --id ID --at ANCHOR --expires YYYY-MM-DD [--market us | cn] [--producer scripts/FILE.py |
+ * builtin:NAME] [--model PROVIDER/MODEL] [--turn-deadline DURATION] [--producer-deadline DURATION] [--no-wake]`.
  *
  * An unknown flag or a missing value is the usage line, exit 2, before any file is read or the clock asked.
- * Then, in order: the id; the directory (`desk` or `strategies/NAME`, a trailing slash dropped);
- * `<dir>/STANDING.md` (a regular file, at most 16,384 bytes, UTF-8), hashed; the producer, a script's bytes
- * hashed as a firing reads them (`--no-wake` needs one); `--at`; `--expires`, a date not before today in New
- * York; the deadlines and the room before the close (P2-16); `--model`'s syntax; `standing.yml` loads - a file
- * refused for an order that is not armed names the way out; the id is not taken; the market clock answers for
- * today. The entry - `armedAt` now - is appended ({@link Machinery}'s `appendOrder`) and the file written 0600,
- * unless it changed since it was read.
+ * Then, in order: the id; the directory (`desk` or `strategies/NAME`, a trailing slash dropped); `--market`, `us`
+ * (the default) or `cn`; `<dir>/STANDING.md` (a regular file, at most 16,384 bytes, UTF-8), hashed; the producer,
+ * a script's bytes hashed as a firing reads them (`--no-wake` needs one; `builtin:report` runs only in a strategy,
+ * with a turn; `builtin:brief` only on `us`); `--at` (on `cn`, never a wall time); `--expires`, a date not before
+ * today on the market's clock; the deadlines and the room before the close or the open (P2-16, P4-10); a
+ * strategy order that wakes pins its `levels.yml` (desk-book.ts's `levelsPin`, on the market's date); `--model`'s
+ * syntax; `standing.yml` loads - a file refused for an order that is not armed names the way out; the id is not
+ * taken; the market's calendar answers for its today. The entry - `armedAt` now - is appended
+ * ({@link Machinery}'s `appendOrder`) and the file written 0600, unless it changed since it was read.
  *
- * Prints `armed <id> in <root>: <dir>/STANDING.md sha256 <12 hex>…, at <at>, expires <date>[, producer
- * <spec>[ sha256 <12 hex>…]]; the face reads standing.yml again within 30 s`, exit 0; or one line
- * `cannot arm <id>: <reason>`, exit 1, and nothing written.
+ * Prints `armed <id> in <root>: <dir>/STANDING.md sha256 <12 hex>…, at <at>, expires <date>[, market cn][,
+ * producer <spec>[ sha256 <12 hex>…]][, <dir>/levels.yml sha256 <12 hex>… | , no <dir>/levels.yml]; the face reads
+ * standing.yml again within 30 s`, exit 0, and its notes; or one line `cannot arm <id>: <reason>`, exit 1, and
+ * nothing written.
  */
 async function arm(args: string[], deps: DeskDeps, now: number): Promise<number> {
   const parsed = parseArmArgs(args);
@@ -335,6 +354,10 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
 
   if (!standing.isOrderId(id)) return refuse(`--id ${id} is not an order id: a-z, 0-9 and -, opening with a letter, at most 40 characters`);
   if (!standing.isOrderDir(dir)) return refuse(`${parsed.dir} is not desk or strategies/NAME`);
+  const marketFlag = flags.get("--market") ?? "us";
+  if (marketFlag !== "us" && marketFlag !== "cn") return refuse(`--market ${marketFlag} is not us or cn`);
+  const market: Market = marketFlag;
+  const wake = !parsed.noWake;
   const file = standing.STANDING_TEXT_FILE;
   const text = await hashText(m, root, dir, file);
   if ("error" in text) return refuse(text.error);
@@ -343,6 +366,8 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
   const spec = producerFlag === undefined ? undefined : m.producer.parseProducer(producerFlag);
   if (spec !== undefined && "error" in spec) return refuse(spec.error);
   if (spec === undefined && parsed.noWake) return refuse("--no-wake needs a --producer: an order with neither runs nothing");
+  if (spec?.kind === "builtin" && spec.name === "report" && !standing.needsLevelsPin({ dir, wake })) return refuse(standing.REPORT_PLACE);
+  if (spec?.kind === "builtin" && spec.name === "brief" && market !== "us") return refuse("builtin:brief is the US pre-close brief; it runs only with market: us");
   let scriptSha: string | undefined;
   if (spec?.kind === "script") {
     const script = await hashScript(m, root, spec.script);
@@ -355,9 +380,10 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
   if (anchor === undefined) {
     return refuse(`--at ${atFlag} is not open, close, open±Nm, close±Nm (N 1-600; open-Nm at most 570, close+Nm at most 479) or HH:MM`);
   }
+  if (market === "cn" && anchor.kind === "time") return refuse(`an A-share order anchors on the open or the close, not ${atFlag}`);
 
   const expires = flags.get("--expires") as string;
-  const expiry = expiresProblem(m, expires, now);
+  const expiry = expiresProblem(m, expires, now, market);
   if (expiry !== undefined) return refuse(expiry);
 
   const turnDeadline = flags.get("--turn-deadline") ?? standing.formatStandingDuration(standing.DEFAULT_TURN_DEADLINE_MS);
@@ -370,6 +396,13 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
   const room = standing.roomProblem(anchor, parsed.noWake ? { producerMs } : { ...(spec === undefined ? {} : { producerMs }), turnMs });
   if (room !== undefined) return refuse(room);
 
+  let levels: { sha256: string; levels: readonly { market: Market }[] } | undefined;
+  if (standing.needsLevelsPin({ dir, wake })) {
+    const pin = await m.book.levelsPin(root, dir, dateOf(market, now));
+    if ("error" in pin) return refuse(pin.error);
+    levels = pin;
+  }
+
   const model = flags.get("--model");
   if (model !== undefined && !standing.isModelRoute(model)) return refuse(`--model ${model} is not PROVIDER/MODEL`);
 
@@ -380,16 +413,21 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
   if (!load.ok) return refuse(`${path} is refused, so nothing is added to it until it is fixed: ${refusedFile(m, load.errors)}`);
   if (load.orders.some((order) => order.id === id)) return refuse(`${id} is already armed; npm run desk -- rearm ${id} takes a changed file's new hash`);
 
-  const calendar = m.clock.createMarketCalendar(deps.marketClock === undefined ? {} : { ask: deps.marketClock });
+  const calendar = market === "cn"
+    ? m.clock.createMarketCalendar({ ask: deps.cnMarketClock ?? m.xshg.xshgMarketClock(), clock: m.xshg.XSHG_CLOCK, dateOf: (n) => bjDate(new Date(n)) })
+    : m.clock.createMarketCalendar(deps.marketClock === undefined ? {} : { ask: deps.marketClock });
   const day = await calendar.today(now);
   if (!day.ok) return refuse(`the market calendar failed in ${calendar.clock}: ${day.error}`);
 
   const producerText = spec === undefined ? undefined : m.producer.formatProducer(spec);
   const next = standing.appendOrder(read.text, {
-    id, dir, file, sha256: text.sha256, at: atFlag,
+    id, dir,
+    ...(market === "cn" ? { market } : {}),
+    file, sha256: text.sha256, at: atFlag,
     ...(producerText === undefined ? {} : { producer: producerText }),
     ...(scriptSha === undefined ? {} : { producerSha256: scriptSha }),
-    wake: !parsed.noWake,
+    ...(levels === undefined ? {} : { levelsSha256: levels.sha256 }),
+    wake,
     ...(model === undefined ? {} : { model }),
     turnDeadline, producerDeadline, expires, armedAt: new Date(now).toISOString(),
   });
@@ -399,10 +437,19 @@ async function arm(args: string[], deps: DeskDeps, now: number): Promise<number>
   } catch (err) {
     return refuse(`cannot write ${path}: ${reasonOf(err)}`);
   }
+  const marketPart = market === "cn" ? ", market cn" : "";
   const producerPart = producerText === undefined ? "" : `, producer ${producerText}${scriptSha === undefined ? "" : ` sha256 ${short(scriptSha)}`}`;
-  deps.out(`armed ${id} in ${root}: ${dir}/${file} sha256 ${short(text.sha256)}, at ${atFlag}, expires ${expires}${producerPart}; the face reads standing.yml again within 30 s`);
-  /* orders sharing an anchor run one after another: the later may start late, and a close-Nm one be held back (M5) */
-  const sharing = load.orders.filter((o) => o.enabled && standing.formatAnchor(o.anchor) === standing.formatAnchor(anchor)).map((o) => o.id);
+  const pinPart = levels === undefined ? "" : levelsPart(m, dir, levels.sha256);
+  deps.out(`armed ${id} in ${root}: ${dir}/${file} sha256 ${short(text.sha256)}, at ${atFlag}, expires ${expires}${marketPart}${producerPart}${pinPart}; the face reads standing.yml again within 30 s`);
+  /* a strategy whose every level is an A share was most likely meant for the A-share calendar (R3) */
+  if (market === "us" && levels !== undefined && levels.levels.length > 0 && levels.levels.every((level) => level.market === "cn")) {
+    deps.out(`note: every symbol in ${dir}/levels.yml is an A share; arm with --market cn, or the report fires on New York's open`);
+  }
+  /* orders sharing an anchor on one market run one after another: the later may start late, and a close-Nm one be
+   * held back (M5); the same anchor on the other market is another instant */
+  const sharing = load.orders
+    .filter((o) => o.enabled && standing.orderMarket(o) === market && standing.formatAnchor(o.anchor) === standing.formatAnchor(anchor))
+    .map((o) => o.id);
   if (sharing.length > 0) {
     deps.out(`note: ${sharing.join(", ")} also fire${sharing.length > 1 ? "" : "s"} at ${atFlag}; orders sharing an anchor run one after another, so ${id} may start late - and a close-anchored text that finishes after the close is held back`);
   }
@@ -439,13 +486,15 @@ function parseRearmArgs(args: string[]): { id: string; expires?: string } | unde
  * expired order is never fired and so no firing has refused that edit; the plain rearm re-pins it after review,
  * and `--expires` follows.
  *
- * The order is found first; then the new date is checked as `arm` checks one (a real date, not before today in
- * New York - the clock is read there, after `standing.yml`); then the order's `<dir>/<file>` (and a script
- * producer's bytes) are hashed as `arm` hashes them. When nothing would change it prints `<id>: nothing changed
- * since arming`, exit 0; else only that order's hash lines - or, with `--expires`, its `expires:` line, the hash
- * lines written again as they were - are rewritten (`rehashOrder`; `armedAt` and everything else stay), the file
- * written only if it has not changed since it was read, and it prints `re-armed <id>: <dir>/<file> sha256 <12
- * hex>…[, <script> sha256 <12 hex>…][, expires <date>]`, exit 0. A refusal is one line, `cannot re-arm <id>:
+ * The order is found first; then the new date is checked as `arm` checks one (a real date, not before today on
+ * the order's market's clock - the clock is read there, after `standing.yml`); then the order's `<dir>/<file>`
+ * (and a script producer's bytes) are hashed as `arm` hashes them, and a strategy order that wakes re-takes its
+ * `levels.yml` pin (`levelsPin`, on the market's date). When nothing would change it prints `<id>: nothing
+ * changed since arming`, exit 0; else only that order's hash lines - or, with `--expires`, its `expires:` line,
+ * the hash lines written again as they were - are rewritten (`rehashOrder`; `armedAt` and everything else stay),
+ * the file written only if it has not changed since it was read, and it prints `re-armed <id>: <dir>/<file>
+ * sha256 <12 hex>…[, <script> sha256 <12 hex>…][, <dir>/levels.yml sha256 <12 hex>… | , no <dir>/levels.yml][,
+ * expires <date>]`, each pin that moved marked ` (changed)`, exit 0. A refusal is one line, `cannot re-arm <id>:
  * <reason>` - `no such order in standing.yml` among them - exit 1, and nothing written. Other arguments are the
  * usage line, exit 2. The market clock is not asked.
  */
@@ -470,8 +519,12 @@ async function rearm(args: string[], deps: DeskDeps, now: () => number): Promise
   if (!load.ok) return refuse(`${path} is refused, so nothing in it changes until it is fixed: ${refusedFile(m, load.errors)}`);
   const order = load.orders.find((o) => o.id === id);
   if (order === undefined) return refuse("no such order in standing.yml");
+  const market = standing.orderMarket(order);
+  const pinned = standing.needsLevelsPin(order);
+  /* read once, and only when a date is needed: the new last day's, or the levels' expiry */
+  const at = expires !== undefined || pinned ? now() : undefined;
   if (expires !== undefined) {
-    const expiry = expiresProblem(m, expires, now());
+    const expiry = expiresProblem(m, expires, at as number, market);
     if (expiry !== undefined) return refuse(expiry);
   }
 
@@ -484,24 +537,35 @@ async function rearm(args: string[], deps: DeskDeps, now: () => number): Promise
     if ("error" in hashed) return refuse(hashed.error);
     scriptSha = hashed.sha256;
   }
+  let levelsSha: string | undefined;
+  if (pinned) {
+    const pin = await m.book.levelsPin(root, order.dir, dateOf(market, at as number));
+    if ("error" in pin) return refuse(pin.error);
+    levelsSha = pin.sha256;
+  }
   /* --expires extends what was reviewed and pinned, never an edit made since: an expired order is never fired,
    * so no firing refused that edit - re-pinning it is a plain rearm's, after the operator has read it. */
   const textMoved = text.sha256 !== order.sha256;
   const scriptMoved = script !== undefined && scriptSha !== order.producerSha256;
+  const levelsMoved = pinned && levelsSha !== order.levelsSha256;
   if (expires !== undefined) {
-    /* every pin that moved, the text first (p2-m11) */
-    const changed = [...(textMoved ? [`${order.dir}/${order.file}`] : []), ...(scriptMoved ? [script] : [])];
+    /* every pin that moved, the text first, then the script, then the levels (p2-m11) */
+    const changed = [
+      ...(textMoved ? [`${order.dir}/${order.file}`] : []), ...(scriptMoved ? [script] : []), ...(levelsMoved ? [`${order.dir}/levels.yml`] : []),
+    ];
     if (changed.length > 0) {
-      return refuse(`${changed.join(" and ")} changed since arming; review ${changed.length > 1 ? "them" : "it"}, then: npm run desk -- rearm ${id}`);
+      const named = changed.length < 3 ? changed.join(" and ") : `${changed.slice(0, -1).join(", ")} and ${changed[changed.length - 1]}`;
+      return refuse(`${named} changed since arming; review ${changed.length > 1 ? "them" : "it"}, then: npm run desk -- rearm ${id}`);
     }
   }
-  if (text.sha256 === order.sha256 && scriptSha === order.producerSha256 && (expires === undefined || expires === order.expires)) {
+  if (!textMoved && !scriptMoved && !levelsMoved && (expires === undefined || expires === order.expires)) {
     deps.out(`${id}: nothing changed since arming`);
     return 0;
   }
   const next = standing.rehashOrder(read.text, id, {
     sha256: text.sha256,
     ...(scriptSha === undefined ? {} : { producerSha256: scriptSha }),
+    ...(levelsSha === undefined ? {} : { levelsSha256: levelsSha }),
     ...(expires === undefined ? {} : { expires }),
   });
   if ("error" in next) return refuse(next.error);
@@ -513,8 +577,9 @@ async function rearm(args: string[], deps: DeskDeps, now: () => number): Promise
   /* each pin marked when it moved, so the operator sees what the re-arm took (p2-m11) */
   const moved = (yes: boolean): string => (yes ? " (changed)" : "");
   const scriptPart = script === undefined || scriptSha === undefined ? "" : `, ${script} sha256 ${short(scriptSha)}${moved(scriptMoved)}`;
+  const pinPart = levelsSha === undefined ? "" : `${levelsPart(m, order.dir, levelsSha)}${moved(levelsMoved)}`;
   const expiresPart = expires === undefined ? "" : `, expires ${expires}`;
-  deps.out(`re-armed ${id}: ${order.dir}/${order.file} sha256 ${short(text.sha256)}${moved(textMoved)}${scriptPart}${expiresPart}`);
+  deps.out(`re-armed ${id}: ${order.dir}/${order.file} sha256 ${short(text.sha256)}${moved(textMoved)}${scriptPart}${pinPart}${expiresPart}`);
   return 0;
 }
 

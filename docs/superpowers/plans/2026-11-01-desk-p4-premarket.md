@@ -240,7 +240,7 @@ test("an aborted run kills the producer's whole group", async () => {
 ### Task 2: Arming a strategy order — `market`, the `levels.yml` pin and the `open-Nm` room rule
 
 **Files:**
-- Modify: `face/src/standing.ts`, `face/tests/standing.test.ts`, `face/src/desk-book.ts`, `face/scripts/desk.ts`, `face/tests/desk-cli.test.ts`
+- Modify: `face/src/standing.ts`, `face/tests/standing.test.ts`, `face/src/desk-book.ts`, `face/scripts/desk.ts`, `face/tests/desk-cli.test.ts`, `face/tests/desk-arm.test.ts` (its `USAGE` gains the `--market` part, and its one strategy arming, `alpha-open`, now prints `, no strategies/alpha/levels.yml` and loads `levelsSha256: "none"`)
 
 **Interfaces:**
 - **Consumes:** Task 1 (`readDeskFile`, `parseLevels`, `BUILTIN_PRODUCERS`, `dateOf`); P3 (`Market`, `Level.market`, `bjDate`, `XSHG_CLOCK`, `xshgMarketClock`, `createMarketCalendar`'s `dateOf`); P2's `standing.ts`, `runDesk`, `roomProblem`, `sha256Hex`.
@@ -290,7 +290,7 @@ test("arm without --market over a levels.yml whose every symbol is an A share pr
 ```
 
 - [ ] **Step 2–4:** `cd face && npx tsx --test tests/standing.test.ts tests/desk-cli.test.ts` FAIL, then implement, then PASS with `npm test && npm run typecheck`.
-- [ ] **Step 5: Commit** — the five files, message `feat(face): arming names a strategy's market and reads its date, pins its levels.yml beside its STANDING.md, and an open anchor must hold its deadlines and the grace`.
+- [ ] **Step 5: Commit** — the six files and this plan, message `feat(face): arming names a strategy's market and reads its date, pins its levels.yml beside its STANDING.md, and an open anchor must hold its deadlines and the grace`.
 
 ---
 
