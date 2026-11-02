@@ -175,8 +175,14 @@ const REHOLD_MS = 3 * 86_400_000;
 /** The refusals whose held line a restart sends again: the ones phoned once per change (the fence, each time). */
 const REHELD_REASONS: ReadonlySet<string> = new Set(["hash", "fence", "levels-hash"]);
 
-/** A held line's `phoned` record, as the line carries it until it reaches the phone. */
-type PhonedMark = { key: string; of: PhonedRecord["of"] };
+/** A held line's `phoned` record, as the line carries it until its send resolves final: a refusal's names its reason
+ * and detail, so it matches its own refusal and no other of the key. */
+type PhonedMark = { key: string; of: PhonedRecord["of"]; reason?: Refusal["reason"]; detail?: string };
+
+/** The refusal or record a `phoned` matches, and the `phoned` a record would be matched by: `<of> <key>`, and for a
+ * refusal its reason and its detail as the dedupe compares it. */
+const phonedId = (of: string, key: string, reason?: string, detail?: string): string =>
+  (of === "refused" ? `refused ${key} ${reason ?? ""} ${detail ?? ""}` : `${of} ${key}`);
 
 /** The keys the records show ended: a `finished` or an `interrupted`. */
 function endedKeys(records: readonly FiringRecord[]): Set<string> {
@@ -279,25 +285,32 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
    * the order they came, each sent again at every tick until an answer is not `paused`; those a record says were held
    * carry the `phoned` record that follows them to the phone (P4 ruling 7). */
   const held: { text: string; phoned?: PhonedMark }[] = [];
-  /** A held line's `phoned` record, appended once the line has reached the phone. */
+  /** A held line's `phoned` record, appended once the line's send resolved final. */
   const notePhoned = async (mark: PhonedMark): Promise<void> => {
-    const record: PhonedRecord = { t: iso(clock.now()), kind: "phoned", key: mark.key, of: mark.of };
+    const record: PhonedRecord = {
+      t: iso(clock.now()), kind: "phoned", key: mark.key, of: mark.of,
+      ...(mark.reason === undefined ? {} : { reason: mark.reason }), ...(mark.detail === undefined ? {} : { detail: mark.detail }),
+    };
     await appendRecord(home, FIRINGS_FILE, record, ledgerOpts);
   };
   /** Whether a one-shot line written now would be held - one held before it, or the pause in force - read before its
    * record is appended, so the record says `held` (P4 ruling 7). */
   const holding = async (): Promise<boolean> => held.length > 0 || !(await deliverable());
-  /** A one-shot line: sent, or held while the pause holds. `phoned`, its `phoned` record once it reaches the phone -
-   * at once too unless `phonedNow` is false: a refusal sent at once says so in its own `reported`. */
-  const sendOnce = async (text: string, phoned?: PhonedMark, phonedNow = true): Promise<boolean> => {
-    const entry = phoned === undefined ? { text } : { text, phoned };
+  /** A one-shot line as `entry`, the very object held: sent, or held while the pause holds. Whether it got through. */
+  const sendEntry = async (entry: { text: string; phoned?: PhonedMark }): Promise<boolean> => {
     if (held.length > 0) {
       held.push(entry); // behind the ones held before it, so the phone hears them in order
       return false;
     }
-    const reached = await send(text);
+    const reached = await send(entry.text);
     if (!reached) held.push(entry);
-    else if (phoned !== undefined && phonedNow) await notePhoned(phoned);
+    return reached;
+  };
+  /** A one-shot line: sent, or held while the pause holds; `phoned`, its `phoned` record once its send resolves final,
+   * at once or from {@link flushHeld}. */
+  const sendOnce = async (text: string, phoned?: PhonedMark): Promise<boolean> => {
+    const reached = await sendEntry(phoned === undefined ? { text } : { text, phoned });
+    if (reached && phoned !== undefined) await notePhoned(phoned);
     return reached;
   };
   /** The held lines, sent in order until one is held again, each marked one followed by its `phoned` record. */
@@ -539,15 +552,19 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   const rehold = async (records: readonly FiringRecord[], now: number): Promise<void> => {
     const phonedAt = new Map<string, number>();
     const lastRefusal = new Map<string, number>();
-    const refusalId = (r: RefusedRecord): string => `${r.order} ${r.reason} ${refusalDetail(String(r.detail), r.producerDetail)}`;
+    const detailOf = (r: RefusedRecord): string => refusalDetail(String(r.detail), r.producerDetail);
+    const refusalId = (r: RefusedRecord): string => `${r.order} ${r.reason} ${detailOf(r)}`;
+    /* a record's phoned: its kind and key - a refusal's by its reason and detail too, so one phoned refusal masks no
+     * other of the key */
+    const idOf = (r: FiringRecord): string => (r.kind === "refused" ? phonedId("refused", r.key, r.reason, detailOf(r)) : phonedId(r.kind, r.key));
     records.forEach((r, i) => {
-      if (r.kind === "phoned") phonedAt.set(`${r.of} ${r.key}`, i);
+      if (r.kind === "phoned") phonedAt.set(phonedId(r.of, r.key, r.reason, r.detail), i);
       else if (r.kind === "refused") lastRefusal.set(refusalId(r), i);
     });
     for (const [i, r] of records.entries()) {
       const t = Date.parse(r.t);
       if (typeof r.key !== "string" || !("order" in r) || typeof r.order !== "string" || !Number.isFinite(t) || now - t > REHOLD_MS) continue;
-      if ((phonedAt.get(`${r.kind} ${r.key}`) ?? -1) > i) continue;
+      if ((phonedAt.get(idOf(r)) ?? -1) > i) continue;
       let text: string | undefined;
       try {
         if (r.kind === "missed" && r.held === true) text = LINES.missed(r);
@@ -563,9 +580,9 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
       } catch {
         text = undefined;
       }
-      if (text !== undefined && (r.kind === "missed" || r.kind === "interrupted" || r.kind === "expired" || r.kind === "refused")) {
-        held.push({ text, phoned: { key: r.key, of: r.kind } });
-      }
+      if (text === undefined) continue;
+      if (r.kind === "refused") held.push({ text, phoned: { key: r.key, of: "refused", reason: r.reason, detail: detailOf(r) } });
+      else if (r.kind === "missed" || r.kind === "interrupted" || r.kind === "expired") held.push({ text, phoned: { key: r.key, of: r.kind } });
     }
   };
 
@@ -945,15 +962,25 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     const last = refusals.get(item.key);
     if (last !== undefined && last.reason === refusal.reason && last.detail === (detail === undefined ? undefined : refusalDetail(detail, producerDetail))) return;
     const line = await refusalLine(item, refusal, now);
-    /* its line held back by the pause is no report: `reported: false`, and the line goes out once the pause lifts,
-     * a `phoned` record after it */
-    const reported = line !== undefined && (await sendOnce(line, { key: item.key, of: "refused" }, false));
+    /* its line held back by the pause is no report: `reported: false`, and the line goes out once the pause lifts.
+     * Sent at once, its `reported` says so; held, its `phoned` mark is attached only once the refusal is appended, so
+     * no `phoned` can precede the refusal it marks */
+    const entry: { text: string; phoned?: PhonedMark } | undefined = line === undefined ? undefined : { text: line };
+    const reported = entry !== undefined && (await sendEntry(entry));
     const record: RefusedRecord = {
       t: iso(now), kind: "refused", key: item.key, order: item.order.id, date: item.date, reason: refusal.reason,
       ...(detail === undefined ? {} : { detail }), ...(producerDetail === undefined ? {} : { producerDetail }), reported,
     };
     note(record);
     await appendRecord(home, FIRINGS_FILE, record, ledgerOpts);
+    if (entry === undefined || reported) return;
+    const mark: PhonedMark = {
+      key: item.key, of: "refused", reason: refusal.reason, ...(detail === undefined ? {} : { detail: refusalDetail(detail, producerDetail) }),
+    };
+    /* still held - or in a send under way, which reads the mark once it resolves - it carries the mark; flushed while
+     * the refusal was appended, its phoned goes now, after it */
+    if (held.includes(entry)) entry.phoned = mark;
+    else await notePhoned(mark);
   };
 
   /** One firing, from the queue to its end, on the order as last loaded - dropped, with a line, when the load is

@@ -203,9 +203,14 @@ export type InterruptedRecord = { t: string; kind: "interrupted"; key: string; o
 /** An order past its `expires`, once per expiry: its key is `<id>:<expires>`, its `date` the expiry; `held` as a
  * {@link MissedRecord}'s. */
 export type ExpiredRecord = { t: string; kind: "expired"; key: string; order: string; date: string; expires: string; held?: true };
-/** A held line that reached the phone (P4 ruling 7): the line of the `of` record for `key` - a `held` miss, cut-off
- * firing or expiry, or a refusal recorded `reported: false` - so a restart does not hold it again. */
-export type PhonedRecord = { t: string; kind: "phoned"; key: string; of: "refused" | "missed" | "interrupted" | "expired" };
+/** A held line whose send resolved final (P4 ruling 7) - any answer but `paused`, a `deliver` that throws included,
+ * as P2 reads it; not proof the phone showed it: the line of the `of` record for `key` - a `held` miss, cut-off or
+ * interrupted firing or expiry, or a refusal recorded `reported: false`, then named by its `reason` and its `detail`
+ * as the schedule's dedupe compares it (the text's, and the script's when its pin moved too), so it matches that
+ * refusal and no other of the key - so a restart does not hold it again. */
+export type PhonedRecord = {
+  t: string; kind: "phoned"; key: string; of: "refused" | "missed" | "interrupted" | "expired"; reason?: Refusal["reason"]; detail?: string;
+};
 
 /** One line of `firings.jsonl`. Every record carries `t`, when the face wrote it (ISO-8601 UTC), and its `kind`. */
 export type FiringRecord =

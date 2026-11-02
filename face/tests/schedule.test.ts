@@ -1710,3 +1710,41 @@ test("a fence line held by the pause reaches the phone after a restart once; a h
     await r2.schedule.dispose();
   }
 });
+
+test("a phoned refusal never masks another held refusal of the same key: a restart sends the one still held", async () => { // fix round 1
+  const fx = await strategyFixture();
+  await arm(fx.home, [REPORT_ENTRY]);
+  const hash = "demo-report · 2026-11-30 refused: strategies/demo/STANDING.md changed since arming. Review it, then: npm run desk -- rearm demo-report";
+  const fence = "demo-report · 2026-11-30 refused: strategies/demo/GRAVIT.md exists; it would steer every turn in strategies/demo. Remove it.";
+  /* paused for every line, then for the fence line alone */
+  let mode: "all" | "fence" | "none" = "all";
+  const reached: string[] = [];
+  const answer = (text: string): DeliverResult => {
+    if (mode === "all" || (mode === "fence" && text === fence)) return { undelivered: "paused" };
+    reached.push(text);
+    return { sent: [reached.length] };
+  };
+  const r1 = rig(fx, "2026-11-30T13:00:00Z", { answer });
+  await writeFile(join(fx.dir, "STANDING.md"), "# changed\n");
+  await at(r1, "2026-11-30T13:00:10Z");
+  await writeFile(join(fx.dir, "GRAVIT.md"), "steer\n");
+  await at(r1, "2026-11-30T13:00:40Z");
+  assert.deepEqual((await ofKind(fx.home, "refused")).map((x) => [x.reason, x.reported]), [["hash", false], ["fence", false]]);
+  mode = "fence";
+  await at(r1, "2026-11-30T13:01:10Z");
+  assert.deepEqual(reached, [hash], "the hash line got through; the fence line is held still");
+  assert.deepEqual((await ofKind(fx.home, "phoned")).map((x) => [x.key, x.of, x.reason]), [["demo-report:2026-11-30", "refused", "hash"]]);
+  const kinds = (await firings(fx.home)).map((x) => x.kind);
+  assert.ok(kinds.lastIndexOf("refused") < kinds.indexOf("phoned"), "a phoned never precedes its refusal");
+  await r1.schedule.dispose();
+
+  mode = "none";
+  const r2 = rig(fx, "2026-11-30T13:10:00Z", { answer });
+  await at(r2, "2026-11-30T13:10:00Z");
+  assert.deepEqual(reached, [hash, fence], "the restart sends the fence line, and not the hash line again");
+  await r2.schedule.dispose();
+  const r3 = rig(fx, "2026-11-30T13:20:00Z", { answer });
+  await at(r3, "2026-11-30T13:20:00Z");
+  assert.deepEqual(reached, [hash, fence], "and nothing a third time");
+  await r3.schedule.dispose();
+});
