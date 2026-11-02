@@ -14,6 +14,11 @@
  * at arming (charter D20; the P2 fix wave's I3) - `scope` says so, and the model does not report them as nothing.
  * THE BRIEF IS US. An A-share holding or level (src/symbols.ts: six digits) is neither priced nor listed here; the
  * brief counts them in `aShares`, and the watch and the strategies' reports are theirs (ruling 11).
+ * THE WATCH'S BLOCKS (ruling 11). `alerts` and `filings` list what the watch (src/watch.ts) wrote to the desk's
+ * ledgers since the order's previous brief ({@link briefSince}): `alerts.jsonl`'s alerts - both markets', for the
+ * brief's prices stay US but its alerts are the day's - each with its outcome, and `filings.jsonl`'s filings judged,
+ * each `alerted` or not. Each keeps its newest {@link BRIEF_WATCH_ITEMS_MAX}, newest first, and counts the rest. A
+ * ledger that cannot be read is its block's `error`, and a brief given no home says `no ledger`; neither fails it.
  * Then ONE `quotes.snapshot()` over the index ETFs, the sector ETFs, the US holdings and the US levels' symbols, in
  * that order, each once and at most {@link BRIEF_SYMBOLS_MAX} of them - one Market explore read each - those past the
  * bound named in `quotesOmitted` (p2-m15): the numbers `desk_quotes` shows (P2-2 - no Python and no bars). Before any of it, the firing's ET date is checked once: one that
@@ -49,23 +54,30 @@
  * A CUT KEEPS THE ERRORS. The firing quotes at most 32,768 characters of a producer's text (producer.ts
  * `PRODUCER_TEXT_MAX`) and cuts the rest, so the brief's keys are written with the long lists last: `quotesError`
  * straight after the session, ahead of every quote; in each block, the file's state and its errors ahead of its rows,
- * near levels and refusals; `aShares` and `scope` at the very end. A book past the cap loses the tail of its refusals and of its
- * near levels - nearest first, so the farthest go - before the levels error, with one exception: the holdings rows
- * come ahead of the whole levels block, so many long-labelled holdings can push the levels error past the cap first.
+ * near levels and refusals; the watch's blocks after the levels block, each with its counts, `more` and error ahead of
+ * its items, newest first; `aShares` and `scope` at the very end. A brief past the cap loses its oldest filings, then its
+ * oldest alerts, then the tail of the levels' refusals and near levels - nearest first, so the farthest go - before
+ * any block's counts or error, with one exception: the holdings rows come ahead of the whole levels block, so many
+ * long-labelled holdings can push the levels error past the cap first.
  *
  * MODULE WEIGHT. It brings desk-book.ts (and js-yaml with it) and desk.ts, so only a firing loads it
  * - through the schedule, itself loaded on first use - and the pause switch (scripts/desk.ts) never does.
  * @module
  */
 import { join } from "node:path";
+import { priceStamp } from "./alert-text.ts";
 import { levelDistancePct, loadHoldings, loadLevels, type Holding, type Level, type LevelKind, type LoadRefusal } from "./desk-book.ts";
-import { deskTime } from "./desk.ts";
+import { ALERTS_FILE, deskTime, FILINGS_FILE, FIRINGS_FILE, readRecords } from "./desk.ts";
 import { quoteTime } from "./desk-tools.ts";
-import { etClock, etTime } from "./et.ts";
+import { etClock, etDate, etDayStart, etTime } from "./et.ts";
+import { isFilingRecord, type FilingRecord } from "./filings.ts";
+import { isFiringRecord } from "./firing.ts";
 import { HttpError } from "./http.ts";
 import type { BuiltinProducer, ProducerInput, ProducerOutput } from "./producer.ts";
 import type { MarketProviderState as ProviderState, MarketQuote as LiveQuote, MarketQuoteIdentity as QuoteIdentity, MarketQuotePayload as QuotePayload, MarketQuoteSource } from "./market-quotes.ts";
 import { isEtDate } from "./standing.ts";
+import type { Market } from "./symbols.ts";
+import { isAlertRecord, type AlertDelivered, type AlertHit, type AlertRecord, type QuoteSnap } from "./watch-eval.ts";
 
 /* ---------- the symbols ---------- */
 
@@ -91,6 +103,15 @@ const DESK_LEVELS_FILE = "desk/levels.yml";
 /** What the brief covers, said in the brief so the model does not report what it leaves out as nothing. */
 export const BRIEF_SCOPE = "desk/ only; A shares and each strategy's levels.yml are the watch's and their reports'";
 
+/** The most items each of the brief's watch blocks lists: its newest; `more` counts the rest. */
+export const BRIEF_WATCH_ITEMS_MAX = 50;
+
+/** How many ET dates back the watch blocks reach when the order has no earlier `started` firing. */
+const SINCE_DAYS_BACK = 3;
+
+/** A watch block's `error` when the brief was given no harness home to read the ledgers under. */
+const NO_LEDGER = "no ledger";
+
 /** A quote's status when the snapshot holds none for its symbol: the source's own word for a symbol without a price. */
 const UNAVAILABLE = "unavailable";
 
@@ -109,6 +130,9 @@ const PROVIDER_STATES: ReadonlySet<string> = new Set<ProviderState["status"]>(["
 export interface BriefDeps {
   quotes: Pick<MarketQuoteSource, "snapshot" | "unavailable">;
   root: string;
+  /** The harness home whose desk ledgers (`firings.jsonl`, `alerts.jsonl`, `filings.jsonl`) the watch blocks read;
+   * without one, both blocks carry `error: "no ledger"`. */
+  home?: string;
   now?: () => number;
   /** The symbol bound, {@link BRIEF_SYMBOLS_MAX} by default; for tests. */
   symbolsMax?: number;
@@ -169,6 +193,60 @@ export interface NearLevel {
   distancePct: number;
 }
 
+/** Why the watch held an alert back (src/watch-eval.ts `AlertHit`'s `suppressed`). */
+export type SuppressReason = NonNullable<AlertHit["suppressed"]>;
+
+/** One alert since the last brief: when it fired (New York's time, as {@link deskTime} shows it), its market, symbol
+ * and label (a filing's is its form), whether it fired as a gap, the price it read and that price's stamp
+ * (src/alert-text.ts `priceStamp`: the feed and its exchange's clock) - both null for a filing - and its outcome:
+ * `suppressed` with its reason, else what its `delivered` record says (`sent`, `queued` by the outlet,
+ * `undelivered`), `pending` while the ledger holds no delivery for it - under way, or the face stopped first. */
+export interface BriefAlert {
+  at: string;
+  market: Market;
+  symbol: string;
+  label: string;
+  gap: boolean;
+  price: number | null;
+  stamp: string | null;
+  outcome: "sent" | "queued" | "undelivered" | "suppressed" | "pending";
+  suppressed?: string;
+}
+
+/** One filing the watch judged since the last brief (`filings.jsonl`'s `seen`): its form, SEC's acceptance time in
+ * New York's (as given when `Date` cannot read it), its filing date, items and link, and whether an alert was sent
+ * for it. */
+export interface BriefFiling {
+  symbol: string;
+  form: string;
+  accepted: string | null;
+  filingDate: string;
+  items: string | null;
+  url: string;
+  alerted: boolean;
+}
+
+/** The alerts since the last brief: `since` (New York's time), how many were sent and suppressed, by reason, and
+ * the newest {@link BRIEF_WATCH_ITEMS_MAX}, newest first, `more` counting the rest; `error` when the ledger could
+ * not be read, the counts then zero. */
+export interface BriefAlerts {
+  since: string;
+  error?: string;
+  sent: number;
+  suppressed: number;
+  byReason: Partial<Record<SuppressReason, number>>;
+  more: number;
+  items: BriefAlert[];
+}
+
+/** The filings since the last brief, the same way. */
+export interface BriefFilings {
+  since: string;
+  error?: string;
+  more: number;
+  items: BriefFiling[];
+}
+
 /** The brief, as its text holds it, its keys in the order its text writes them (see the module header: a cut keeps
  * the errors). `session` is the firing's session in New York's time; `holdings.edited` is when `desk/holdings.yml`
  * was last written, null when it was not read; `levels.files` lists the levels files present, read or refused;
@@ -197,6 +275,9 @@ export interface Brief {
     near: NearLevel[];
     refusals: LoadRefusal[];
   };
+  /** The alerts and the filings since the order's last brief, both markets' ({@link briefSince}). */
+  alerts: BriefAlerts;
+  filings: BriefFilings;
   /** The A-share holdings and levels the book loaded, which the brief neither prices nor lists. */
   aShares: { holdings: number; levels: number };
   scope: typeof BRIEF_SCOPE;
@@ -336,6 +417,156 @@ function sessionTime(instant: string): string {
   return Number.isFinite(Date.parse(instant)) ? etTime(new Date(instant)) : instant;
 }
 
+/* ---------- the watch's ledgers ---------- */
+
+/** A ledger's failure as a block names it: its code when it has one (`EISDIR`), else its message. */
+function ledgerReason(error: unknown): string {
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return typeof code === "string" ? code : messageOf(error);
+}
+
+/** 00:00 ET of the ET date {@link SINCE_DAYS_BACK} dates before `now`'s, in ms since the epoch. */
+function sinceFallback(now: number): number {
+  const day = new Date(`${etDate(new Date(now))}T12:00:00Z`);
+  day.setUTCDate(day.getUTCDate() - SINCE_DAYS_BACK);
+  return etDayStart(day.getTime());
+}
+
+/**
+ * Where the watch blocks begin: the `t` of the last `started` firing of `order` for an ET date before `date` - the
+ * order's previous brief, not this firing's own `started` - and with none, 00:00 ET of the ET date three dates
+ * before `now`'s. Rejects when the firing ledger cannot be read, so an unreadable ledger is never an empty one.
+ * @param home - the harness home.
+ * @param order - the standing order's id.
+ * @param date - the firing's ET date, `YYYY-MM-DD`.
+ * @param now - the time the brief is taken, in ms since the epoch.
+ * @returns an ISO-8601 UTC time.
+ */
+export async function briefSince(home: string, order: string, date: string, now: number): Promise<string> {
+  const { records } = await readRecords(home, FIRINGS_FILE, isFiringRecord);
+  let last = Number.NEGATIVE_INFINITY;
+  for (const r of records) {
+    if (r.kind !== "started" || r.order !== order || typeof r.date !== "string" || r.date >= date) continue;
+    const at = Date.parse(r.t);
+    if (Number.isFinite(at) && at <= now && at > last) last = at;
+  }
+  return new Date(Number.isFinite(last) ? last : sinceFallback(now)).toISOString();
+}
+
+/** A print as `alerts.jsonl` keeps it, when it is one the stamp can read: a price and an `asOf`. The watch is the
+ * file's one writer; the guard checks only the fields the rebuild reads, so the rest is checked here. */
+function snapOfRecord(quote: unknown): QuoteSnap | null {
+  if (typeof quote !== "object" || quote === null) return null;
+  const q = quote as Partial<QuoteSnap>;
+  if (!isPrice(q.price) || typeof q.asOf !== "string" || (q.market !== "us" && q.market !== "cn")) return null;
+  return { ...(q as QuoteSnap), feed: typeof q.feed === "string" ? q.feed : "" };
+}
+
+/** An alert's outcome: its gate's decision, then its `delivered` record's answer. */
+function alertOutcome(r: AlertHit, delivery: AlertDelivered | undefined): BriefAlert["outcome"] {
+  if (r.decision === "suppressed") return "suppressed";
+  if (delivery === undefined) return "pending";
+  const d = delivery.delivery as Record<string, unknown>;
+  return "undelivered" in d ? "undelivered" : "sent" in d ? "sent" : "queued";
+}
+
+/** `items` in time order, newest first - file order kept on a tie - cut to {@link BRIEF_WATCH_ITEMS_MAX}, with how
+ * many were cut. */
+function newestFirst<T>(items: readonly { at: number; item: T }[]): { more: number; items: T[] } {
+  const sorted = items.map((x, i) => ({ ...x, i })).sort((a, b) => b.at - a.at || b.i - a.i);
+  /* `more` ahead of `items`, as the text writes them: a cut takes the oldest items first */
+  return { more: Math.max(0, sorted.length - BRIEF_WATCH_ITEMS_MAX), items: sorted.slice(0, BRIEF_WATCH_ITEMS_MAX).map((x) => x.item) };
+}
+
+/** A ledger's records, or why it could not be read. */
+type Read<T> = { records: T[] } | { error: string };
+
+/** `file`'s records under `home`'s desk directory, or its failure as a block names it. */
+function readLedger<T>(home: string, file: string, guard: (x: unknown) => x is T): Promise<Read<T>> {
+  return readRecords(home, file, guard).then(({ records }) => ({ records }), (error: unknown) => ({ error: ledgerReason(error) }));
+}
+
+/** The alerts block: `alerts.jsonl`'s `alert` records at or after `sinceMs`, each joined to its `delivered` record
+ * by id. */
+function alertsBlock(read: Read<AlertRecord>, sinceMs: number, now: number, since: string): BriefAlerts {
+  if ("error" in read) return { since, error: read.error, sent: 0, suppressed: 0, byReason: {}, more: 0, items: [] };
+  const records = read.records;
+  const deliveries = new Map<string, AlertDelivered>();
+  const hits: { at: number; r: AlertHit }[] = [];
+  for (const r of records) {
+    if (r.kind === "delivered") deliveries.set(r.id, r);
+    else if (r.kind === "alert") {
+      const at = Date.parse(r.t);
+      if (Number.isFinite(at) && at >= sinceMs) hits.push({ at, r });
+    }
+  }
+  let sent = 0;
+  let suppressed = 0;
+  const byReason: Partial<Record<SuppressReason, number>> = {};
+  const listed = hits.map(({ at, r }) => {
+    if (r.decision === "send") sent += 1;
+    else {
+      suppressed += 1;
+      if (r.suppressed !== undefined) byReason[r.suppressed] = (byReason[r.suppressed] ?? 0) + 1;
+    }
+    const snap = snapOfRecord(r.quote);
+    const item: BriefAlert = {
+      at: deskTime(new Date(at), new Date(now)), market: r.market, symbol: r.symbol, label: String(r.label), gap: r.gap === true,
+      price: snap?.price ?? null, stamp: snap === null ? null : priceStamp(snap, now), outcome: alertOutcome(r, deliveries.get(r.id)),
+      ...(r.suppressed === undefined ? {} : { suppressed: r.suppressed }),
+    };
+    return { at, item };
+  });
+  return { since, sent, suppressed, byReason, ...newestFirst(listed) };
+}
+
+/** The filings block: `filings.jsonl`'s `seen` records at or after `sinceMs`, each `alerted` when an `alert` record
+ * sent for its symbol and accession. An alert ledger that cannot be read is the alerts block's error; here it only
+ * leaves every `alerted` false. */
+function filingsBlock(read: Read<FilingRecord>, alerts: Read<AlertRecord>, sinceMs: number, now: number, since: string): BriefFilings {
+  if ("error" in read) return { since, error: read.error, more: 0, items: [] };
+  const filings = read.records;
+  const alerted = new Set<string>();
+  for (const r of "error" in alerts ? [] : alerts.records) {
+    if (r.kind !== "alert") continue;
+    /* the guard does not check a trigger, so its fields are read as unknown */
+    const trigger = r.trigger as { type?: unknown; accession?: unknown } | null | undefined;
+    if (r.decision === "send" && trigger?.type === "filing" && typeof trigger.accession === "string") alerted.add(`${r.symbol} ${trigger.accession}`);
+  }
+  const listed: { at: number; item: BriefFiling }[] = [];
+  for (const r of filings) {
+    if (r.kind !== "seen") continue;
+    const at = Date.parse(r.t);
+    if (!Number.isFinite(at) || at < sinceMs) continue;
+    const accepted = r.accepted === null ? null : Number.isFinite(Date.parse(r.accepted)) ? deskTime(new Date(r.accepted), new Date(now)) : r.accepted;
+    listed.push({ at, item: { symbol: r.symbol, form: r.form, accepted, filingDate: r.filingDate, items: r.items, url: r.url, alerted: alerted.has(`${r.symbol} ${r.accession}`) } });
+  }
+  return { since, ...newestFirst(listed) };
+}
+
+/** Both watch blocks since the order's last brief; with no home, both `no ledger`. Never rejects: a ledger that cannot
+ * be read is its block's `error`, and a firing ledger that cannot be read reaches back as far as having none would. */
+async function watchBlocks(home: string | undefined, input: ProducerInput, now: number): Promise<{ alerts: BriefAlerts; filings: BriefFilings }> {
+  let sinceMs = sinceFallback(now);
+  if (home !== undefined) {
+    try {
+      sinceMs = Date.parse(await briefSince(home, input.order, input.date, now));
+    } catch {
+      /* the fallback stands, the last three dates rather than none: a firing whose ledger cannot be read never
+       * starts (src/schedule.ts), so this is a ledger lost between the firing's start and its producer */
+    }
+  }
+  const since = deskTime(new Date(sinceMs), new Date(now));
+  if (home === undefined) {
+    return {
+      alerts: { since, error: NO_LEDGER, sent: 0, suppressed: 0, byReason: {}, more: 0, items: [] },
+      filings: { since, error: NO_LEDGER, more: 0, items: [] },
+    };
+  }
+  const [alerts, filings] = await Promise.all([readLedger(home, ALERTS_FILE, isAlertRecord), readLedger(home, FILINGS_FILE, isFilingRecord)]);
+  return { alerts: alertsBlock(alerts, sinceMs, now, since), filings: filingsBlock(filings, alerts, sinceMs, now, since) };
+}
+
 /* ---------- the brief ---------- */
 
 /**
@@ -396,6 +627,7 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
   if (quotesError === undefined && ![...quotes.values()].some((quote) => quote.last !== null)) {
     quotesError = `quotes unavailable: the source has no price for any symbol (US provider ${usProviderState(payload)})`;
   }
+  const watch = await watchBlocks(deps.home, input, now);
   /* Every symbol the brief prices is one the snapshot was asked for, so each has its quote. */
   const quoteFor = (symbol: string): BriefQuote => quotes.get(symbol) as BriefQuote;
 
@@ -423,6 +655,8 @@ export async function buildBrief(deps: BriefDeps, input: ProducerInput): Promise
       near: nearLevels(levels, quotes),
       refusals: levelResults.flatMap((result) => result.refusals),
     },
+    alerts: watch.alerts,
+    filings: watch.filings,
     aShares,
     scope: BRIEF_SCOPE,
   };

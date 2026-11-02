@@ -288,6 +288,29 @@ test("desk_state returns readState(), its runs cut to the last ten and counted i
   assert.deepEqual(state.presentCall({}), { card: "generic", title: "Desk state", kind: "read" });
 });
 
+test("desk_state carries the watch's block without its marks: near and recent stay (old ruling 15)", async () => {
+  const mark = (symbol: string) => ({ market: "us" as const, symbol, kind: "stop" as const, level: "170", when: "cross_down" as const, plan: "p", file: "desk/levels.yml", distancePct: 1.2 });
+  const near = [{ market: "us" as const, symbol: "NVDA", kind: "stop" as const, level: "170", when: "cross_down" as const, last: 172, at: "ROBINHOOD 10:21:03 ET", distancePct: -1.16, plan: "p", file: "desk/levels.yml" }];
+  const recent = [{ id: "a-1", t: "2026-11-30T15:21:04.000Z", market: "us" as const, symbol: "NVDA", label: "stop 170", gap: false, price: 169.8, feed: "robinhood", outcome: "sent" as const, latencyMs: 1800 }];
+  const today = { sent: 1, suppressed: { cooldown: 0, cap: 0, muted: 0, off: 0, window: 0 }, repeats: 0 };
+  const watch: NonNullable<DeskStatus["watch"]> = {
+    state: "watching", markets: { us: { state: "polling", watched: 1, notWatched: [], today }, cn: { state: "off", watched: 0, notWatched: [], today } },
+    files: [], near, marks: [mark("NVDA"), mark("AAPL"), mark("MSFT")], pending: 0, recent, filings: { state: "off", symbols: 0, aShares: 0, seeded: 0 },
+  };
+  const status: DeskStatus = { ...STATUS, watch };
+  const state = byName(deskToolDefinitions({ quotes: fakeHub().hub, readState: async () => status }), "desk_state");
+  const value = await state.execute({}, exec()) as DeskStatus & { watch: Record<string, unknown> };
+  assert.ok(!Object.hasOwn(value.watch, "marks"), "no marks key");
+  assert.deepEqual(value.watch.near, near);
+  assert.deepEqual(value.watch.recent, recent);
+  const { marks: _marks, ...rest } = watch;
+  assert.deepEqual(value, { ...STATUS, watch: rest, runsInLedger: 0 });
+  assert.equal(status.watch?.marks.length, 3, "the status read keeps its marks: the route carries them");
+  assert.deepEqual((state.output.schema as { properties: Record<string, unknown> }).properties.watch, { type: "object" });
+  assert.deepEqual(await byName(deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus }), "desk_state").execute({}, exec()), { ...STATUS, runsInLedger: 0 },
+    "no watch, no watch key");
+});
+
 test("a cancelled call settles at once, whatever the hub or the ledger is doing", async () => {
   let snapshots = 0;
   const never = new Promise<never>(() => {});

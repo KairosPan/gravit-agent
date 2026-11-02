@@ -8,8 +8,9 @@ Your final text is the message, plain text, at most 1,500 characters, in this or
 1. Indexes: SPY, QQQ and IWM's day moves; then the two strongest and the two weakest sector ETFs.
 2. Holdings: each one's last price, day move, and distance to its stop and its target. Name every holding with no stop on file.
 3. Levels within 2% of triggering: symbol, level, distance, and the first clause of its plan.
-4. Whatever the block says is missing, refused or unavailable, in one line.
-When 2 to 4 have nothing to say, end with: nothing else happened.
+4. Alerts and filings since the last brief, as the block counts them: how many alerts were sent and how many suppressed, each suppressed one in a few words, and each filing for a holding with its form and time.
+5. Whatever the block says is missing, refused or unavailable, in one line.
+When 2 to 5 have nothing to say, end with: nothing else happened.
 
 Every price names its source and time as the block gives them (IEX 15:21:03 ET). Holdings are what the operator typed in desk/holdings.yml: say when that file was last edited.
 

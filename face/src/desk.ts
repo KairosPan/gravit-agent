@@ -1309,8 +1309,9 @@ export function standingLines(s: StandingStatus, now: Date): string[] {
  * `formatStatus`) and in the phone's `/status` (src/telegram.ts): the desk line - how long the face has
  * been up and since when, and whether the desk is on - then, while a pause is in force, the pause line;
  * when the status carries the bridge, the Telegram line; when it carries the day's budget, the budget
- * line ({@link budgetLine}); and when it carries the standing orders - while their clock runs - their
- * lines ({@link standingLines}). Each time is New York's, as {@link deskTime} shows it - dated when it
+ * line ({@link budgetLine}); when it carries the standing orders - while their clock runs - their
+ * lines ({@link standingLines}); and when it carries the watch - while it runs - its lines
+ * ({@link watchLines}). Each time is New York's, as {@link deskTime} shows it - dated when it
  * falls on another New York date than `now`'s; the boot time stays ISO-8601 UTC, which carries its date
  * anyway. The desk line is the tail of `formatStatus`'s `answering at` line, which puts the port before it.
  * @param status - what {@link deskStatus} answered.
@@ -1324,6 +1325,113 @@ export function deskStatusLines(status: DeskStatus, now: Date): string[] {
   if (status.telegram !== undefined) lines.push(telegramLine(status.telegram, now));
   if (status.budget !== undefined) lines.push(budgetLine(status.budget));
   if (status.standing !== undefined) lines.push(...standingLines(status.standing, now));
+  if (status.watch !== undefined) lines.push(...watchLines(status.watch, now));
+  return lines;
+}
+
+/** How many characters of a watch file's error its status line quotes. */
+const FILE_ERROR_SHOWN_MAX = 80;
+/** How many characters of a market's or the filings' last error a status line quotes. */
+const WATCH_ERROR_SHOWN_MAX = 200;
+
+/** A market as the watch's lines name it. */
+const MARKET_NAMES = { us: "US", cn: "A shares" } as const;
+
+/** The reasons an alert is suppressed, in the order the lines count them. */
+const SUPPRESS_ORDER = ["cap", "muted", "off", "cooldown", "window"] as const;
+
+/** One market's phase as its line says it: no calendar, closed, before the open, polling, after the close. */
+function marketPhase(m: WatchStatus["markets"]["us"], now: Date): string {
+  const date = m.session?.date ?? "today's";
+  switch (m.state) {
+    case "no-calendar":
+      return "no calendar today";
+    case "closed":
+      return "closed today";
+    case "waiting":
+      return m.session === undefined ? "waiting for the session" : `the ${date} session opens at ${statusTime(m.session.open, now)}`;
+    case "polling":
+      return `polling the ${date} session, ${m.watched} symbols, ${m.lastPollAt === undefined ? "no poll yet" : `last poll ${statusTime(m.lastPollAt, now)}`}`;
+    case "after-close":
+    default:
+      return `the ${date} session has closed`;
+  }
+}
+
+/** One market's alerts today, or nothing when it has no record on its session date: `<n> sent`, then the
+ * suppressed ones by reason and the repeats in a cooldown, zero counts left out. */
+function todayLine(name: string, today: WatchStatus["markets"]["us"]["today"]): string | undefined {
+  const reasons = SUPPRESS_ORDER.filter((r) => today.suppressed[r] > 0);
+  const suppressed = reasons.reduce((n, r) => n + today.suppressed[r], 0);
+  if (today.sent === 0 && suppressed === 0 && today.repeats === 0) return undefined;
+  const parts = [`${today.sent} sent`];
+  if (suppressed > 0) parts.push(`${suppressed} suppressed (${reasons.map((r) => `${r} ${today.suppressed[r]}`).join(", ")})`);
+  if (today.repeats > 0) parts.push(`${today.repeats} repeats in a cooldown`);
+  return `alerts today (${name}): ${parts.join(", ")}`;
+}
+
+/** The filings' state as its line says it. A poll's error names its first symbol's; the status keeps no count. */
+function filingsPhrase(f: WatchStatus["filings"], now: Date): string {
+  switch (f.state) {
+    case "no-contact":
+      return "off: set ALPHA_EDGAR_USER_AGENT";
+    case "refused-today":
+      return "off until tomorrow: SEC refused the requests";
+    case "polling": {
+      const poll = f.lastPollAt === undefined ? "no poll yet" : `last poll ${statusTime(f.lastPollAt, now)}`;
+      return `polling, ${f.symbols} symbols, ${poll}${f.lastError === undefined ? "" : `; last error ${cutText(f.lastError, WATCH_ERROR_SHOWN_MAX)}`}`;
+    }
+    case "off":
+    default:
+      return "off";
+  }
+}
+
+/**
+ * The watch's lines (src/watch.ts `WatchStatus`), appended by {@link deskStatusLines} after P2's:
+ * - `watch: <starting | nothing to watch | stopped | another face (pid <n>) holds the watch on this home | watching>`;
+ * - per market with a source (its state not `off`): `watch <US | A shares>: <no calendar today | closed today | the
+ *   <date> session opens at <HH:MM ET> | polling the <date> session, <n> symbols, last poll <HH:MM ET> | the <date>
+ *   session has closed>[; not watched: <k>][; <its last error>]`;
+ * - per market with a record on its session date: `alerts today (<US | A shares>): <n> sent[, <k> suppressed
+ *   (<reason> <k>, …)][, <r> repeats in a cooldown]`;
+ * - `alerts: <k> held for the next hour's batch` while any are held; `alerts: muted until <HH:MM ET> (npm run desk --
+ *   unmute)`, or `until a terminal lifts it`; `alerts: the ledger cannot be read (<error>), so the watch sends nothing
+ *   until it can` while it cannot;
+ * - `filings: <off | off: set ALPHA_EDGAR_USER_AGENT | polling, <n> symbols, last poll <HH:MM ET>[; last error <e>] |
+ *   off until tomorrow: SEC refused the requests>`;
+ * - only for files with refusals or an error: `watch files refused: <file> <k> of <n>[; <file> (<error, cut at 80>)]`,
+ *   `<n>` the entries loaded and refused.
+ * Times are New York's, as {@link deskTime} shows them.
+ * @param w - the watch's status.
+ * @param now - when the lines are read: what "today" is.
+ */
+export function watchLines(w: WatchStatus, now: Date): string[] {
+  const head = w.state === "idle" ? "nothing to watch"
+    : w.state === "held-elsewhere" ? `another face${w.holder === undefined ? "" : ` (pid ${w.holder.pid})`} holds the watch on this home`
+      : w.state;
+  const lines = [`watch: ${head}`];
+  const markets = ["us", "cn"] as const;
+  for (const m of markets) {
+    const s = w.markets[m];
+    if (s.state === "off") continue;
+    const notWatched = s.notWatched.length === 0 ? "" : `; not watched: ${s.notWatched.length}`;
+    const error = s.lastError === undefined ? "" : `; ${cutText(s.lastError, WATCH_ERROR_SHOWN_MAX)}`;
+    lines.push(`watch ${MARKET_NAMES[m]}: ${marketPhase(s, now)}${notWatched}${error}`);
+  }
+  for (const m of markets) {
+    const line = todayLine(MARKET_NAMES[m], w.markets[m].today);
+    if (line !== undefined) lines.push(line);
+  }
+  if (w.pending > 0) lines.push(`alerts: ${w.pending} held for the next hour's batch`);
+  if (w.muted !== undefined) {
+    lines.push(`alerts: muted until ${w.muted.until === undefined ? "a terminal lifts it" : statusTime(w.muted.until, now)} (npm run desk -- unmute)`);
+  }
+  if (w.ledgerError !== undefined) lines.push(`alerts: the ledger cannot be read (${w.ledgerError}), so the watch sends nothing until it can`);
+  lines.push(`filings: ${filingsPhrase(w.filings, now)}`);
+  const refused = w.files.flatMap((f) => (f.error !== undefined ? [`${f.file} (${cutText(f.error, FILE_ERROR_SHOWN_MAX)})`]
+    : f.refusals.length > 0 ? [`${f.file} ${f.refusals.length} of ${f.entries + f.refusals.length}`] : []));
+  if (refused.length > 0) lines.push(`watch files refused: ${refused.join("; ")}`);
   return lines;
 }
 

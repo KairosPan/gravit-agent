@@ -251,6 +251,33 @@ test("formatStatus prints the standing and budget lines after the telegram line"
   ], "the ledger's own line after them");
 });
 
+test("formatStatus prints the watch lines after the standing and budget lines", () => {
+  const now = Date.parse("2026-11-30T15:30:00Z"); // 10:30 ET
+  const today = { sent: 2, suppressed: { cooldown: 1, cap: 0, muted: 0, off: 0, window: 0 }, repeats: 0 };
+  const status: DeskStatus = {
+    ok: true, pid: 7, version: "v", bootedAt: "2026-11-30T14:00:00.000Z", uptimeMs: 90 * 60_000, desk: { enabled: true, dir: "/d" }, asleep: [], runs: [],
+    turnsToday: noTurns, budget: { used: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, total: 0 }, spent: false },
+    standing: { file: { path: "/d/standing.yml", state: "loaded" }, calendar: { clock: "fake clock", state: "ok" }, orders: [], queued: [], recent: [] },
+    watch: {
+      state: "watching",
+      markets: {
+        us: { state: "polling", session: { date: "2026-11-30", open: "2026-11-30T14:30:00.000Z", close: "2026-11-30T21:00:00.000Z" }, watched: 3, notWatched: [], lastPollAt: "2026-11-30T15:29:00.000Z", today },
+        cn: { state: "off", watched: 0, notWatched: [], today: { ...today, sent: 0, suppressed: { ...today.suppressed, cooldown: 0 } } },
+      },
+      files: [], near: [], marks: [], pending: 0, recent: [], filings: { state: "off", symbols: 0, aShares: 0, seeded: 0 },
+    },
+  };
+  const lines = formatStatus({ label: LABEL, info: { state: "running", pid: 7 }, installed: true, status, url: undefined, port: 3090, now }).split("\n");
+  assert.deepEqual(lines.slice(2, -1), [
+    "budget: 0 tokens today, cap not set (budget.dailyTokens in standing.yml)",
+    "standing orders: none armed (npm run desk -- arm)",
+    "watch: watching",
+    "watch US: polling the 2026-11-30 session, 3 symbols, last poll 10:29 ET",
+    "alerts today (US): 2 sent, 1 suppressed (cooldown 1)",
+    "filings: off",
+  ]);
+});
+
 const fakeFetch = (status: number, body?: unknown): typeof fetch =>
   (async () => new Response(body === undefined ? null : JSON.stringify(body), { status })) as unknown as typeof fetch;
 const refusing: typeof fetch = (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;

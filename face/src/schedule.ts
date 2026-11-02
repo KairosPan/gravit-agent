@@ -1015,7 +1015,7 @@ export function createDeskSchedule(opts: {
     clock,
     calendar,
     runScript,
-    builtins: seams.builtins ?? (opts.quotes === undefined ? {} : { brief: briefProducer({ quotes: opts.quotes, root: opts.root }) }),
+    builtins: seams.builtins ?? (opts.quotes === undefined ? {} : { brief: briefProducer({ quotes: opts.quotes, root: opts.root, home: opts.home }) }),
     createAgent: (o) => createDeskAgent(opts.session, o),
     resolveRoute: async (raw) => {
       if (!hasRoutes(sessionCtx)) throw new Error("this face's context names no default model to route a standing order on");

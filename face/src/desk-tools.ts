@@ -153,7 +153,9 @@ const QUOTE_SCHEMA = {
 };
 
 /** `desk_state`'s value: the fields of {@link DeskStatus} every status carries - `runs` cut to the last
- * {@link STATE_RUNS} - with `runsInLedger`, and those it carries when there is something to say. Open,
+ * {@link STATE_RUNS} - with `runsInLedger`, and those it carries when there is something to say; `watch`
+ * without its `marks` (every level's distance, the Markets rows' - the route carries them): its `near`, the
+ * nearest levels, and its `recent`, the last alerts, say what the model needs (the old P3 plan's ruling 15). Open,
  * so a field the status gains later is no failure. */
 const STATE_SCHEMA = {
   type: "object",
@@ -171,6 +173,7 @@ const STATE_SCHEMA = {
     deskSession: { type: "string" },
     turnsToday: { type: "object" },
     telegram: { type: "object" },
+    watch: { type: "object" },
     ledgerError: { type: "string" },
   },
   required: ["ok", "pid", "version", "bootedAt", "uptimeMs", "desk", "asleep", "runs", "runsInLedger", "turnsToday"],
@@ -295,8 +298,8 @@ const asJson = (_args: unknown, value: unknown): { type: "text"; text: string }[
  *   error. The model reads one line per quote ({@link quoteLine}), its time on its exchange's clock as the desk
  *   quotes one, or the `error` as it is.
  * - `desk_state` (`timeoutMs` 5,000): no parameters; answers `deps.readState()`'s status with `runs` cut
- *   to the last {@link STATE_RUNS} and `runsInLedger`, how many the ledger holds - the route
- *   `GET /data/desk/status` answers them all.
+ *   to the last {@link STATE_RUNS} and `runsInLedger`, how many the ledger holds, and its `watch` without
+ *   `marks` - the route `GET /data/desk/status` answers them all.
  * @param deps - the quote source, the status reader and the clock.
  */
 export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
@@ -362,13 +365,17 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
       "What the desk knows about itself, read afresh: this face's pid, version, boot time and uptime; whether the desk is enabled, " +
       "and its directory; this run's sleep gaps; the last 10 runs in the ledger (a lost run ended without a clean shutdown) and " +
       "runsInLedger, how many it holds; the pause in force (off), if any; the desk conversation's session id; today's desk turns " +
-      "and their tokens.",
+      "and their tokens; and, while the watch runs, its state (watch): each market's session and today's alerts, the levels " +
+      "nearest their price (near) and the last alerts (recent).",
     parameters: { type: "object", properties: {}, additionalProperties: false },
     output: { schema: STATE_SCHEMA, render: asJson },
     timeoutMs: 5_000,
     execute: (_args, exec) => untilCancelled(exec.signal, async () => {
       const status = await deps.readState();
-      return { ...status, runs: status.runs.slice(-STATE_RUNS), runsInLedger: status.runs.length };
+      const value = { ...status, runs: status.runs.slice(-STATE_RUNS), runsInLedger: status.runs.length };
+      if (status.watch === undefined) return value;
+      const { marks: _marks, ...watch } = status.watch;
+      return { ...value, watch };
     }),
     presentCall: () => ({ card: "generic", title: "Desk state", kind: "read" }),
   };

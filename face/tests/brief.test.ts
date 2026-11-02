@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, rm, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BRIEF_INDEXES, BRIEF_SCOPE, BRIEF_SECTORS, BRIEF_SYMBOLS_MAX, NEAR_PCT, briefProducer, buildBrief, type Brief } from "../src/brief.ts";
+import { BRIEF_INDEXES, BRIEF_SCOPE, BRIEF_SECTORS, BRIEF_SYMBOLS_MAX, NEAR_PCT, briefProducer, briefSince, buildBrief, type Brief } from "../src/brief.ts";
 import { loadHoldings, loadLevels } from "../src/desk-book.ts";
 import { HttpError } from "../src/http.ts";
 import { capText, PRODUCER_TEXT_MAX, type ProducerInput, type ProducerOutput } from "../src/producer.ts";
@@ -184,12 +184,14 @@ test("buildBrief prices indexes, sectors, holdings and near levels from one snap
       refusals: [],
       errors: [],
     },
+    alerts: { since: "2026-10-17 00:00 ET", error: "no ledger", sent: 0, suppressed: 0, byReason: {}, more: 0, items: [] },
+    filings: { since: "2026-10-17 00:00 ET", error: "no ledger", more: 0, items: [] },
     aShares: { holdings: 0, levels: 0 },
     scope: BRIEF_SCOPE,
   }, "MSFT's watch is 4.76% away, so it is not near; NVDA's stop is 6.18% away");
   assert.ok(!(out.text ?? "").includes("最近成交"), "the hub's UI message is left out");
   /* The text's own key order (deepEqual ignores it): the errors ahead of the long lists, scope last. */
-  assert.deepEqual(Object.keys(b), ["date", "takenAt", "session", "indexes", "sectors", "holdings", "levels", "aShares", "scope"]);
+  assert.deepEqual(Object.keys(b), ["date", "takenAt", "session", "indexes", "sectors", "holdings", "levels", "alerts", "filings", "aShares", "scope"]);
   assert.deepEqual(Object.keys(b.holdings), ["file", "edited", "rows", "refusals"]);
   assert.deepEqual(Object.keys(b.levels), ["files", "loaded", "errors", "near", "refusals"]);
 });
@@ -492,7 +494,8 @@ test("desk/STANDING.md is the pre-close order", () => {
   assert.ok(bytes.length <= STANDING_TEXT_MAX_BYTES);
   const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   for (const phrase of ["before the close", "broker app", "desk_quotes", "1,500 characters", "no stop on file", "nothing else happened",
-    "IEX 15:21:03 ET", "desk/holdings.yml", "Never recommend a trade", "briefs/<date>-preclose.md"]) assert.ok(text.includes(phrase), phrase);
+    "IEX 15:21:03 ET", "desk/holdings.yml", "Never recommend a trade", "briefs/<date>-preclose.md",
+    "suppressed", "each filing", "When 2 to 5 have nothing to say"]) assert.ok(text.includes(phrase), phrase);
   assert.ok(text.startsWith("# The pre-close brief\n\n"), "it opens with its title");
   assert.ok(text.endsWith("under your directory.\n"), "it ends with the save, and one newline");
 });
@@ -529,4 +532,138 @@ test("the brief prices only US entries and counts the A shares", async () => {
   assert.deepEqual(b.holdings.rows.map((row) => row.symbol), ["NVDA"], "an A-share holding is not listed");
   assert.deepEqual(b.levels.near.map((near) => near.symbol), ["AAPL"], "an A-share level is never near here");
   assert.ok(!JSON.stringify(b).includes("600519") && !JSON.stringify(b).includes("000001"), "no A-share code is listed");
+});
+
+/* P3: the alerts and filings since the last brief (the P3 plan's Task 10, ruling 11). The ledgers sit under a fresh
+ * harness home's face/desk/, written by hand here: firings.jsonl, alerts.jsonl and filings.jsonl. */
+
+/** The firing on Monday 2026-11-30, taken at 15:30:05 ET; the previous preclose started on Friday the 27th. */
+const P3_INPUT: ProducerInput = { ...INPUT, firing: "preclose:2026-11-30", date: "2026-11-30", session: { open: "2026-11-30T14:30:00Z", close: "2026-11-30T21:00:00Z", early: false } };
+const P3_NOW = Date.parse("2026-11-30T20:30:05Z");
+
+/** A fresh harness home whose desk ledgers hold `ledgers` (file name → records, one JSON line each); its path. */
+async function makeHome(name: string, ledgers: Record<string, unknown[]>): Promise<string> {
+  const home = join(TEST_DIR, `home-${name}`);
+  await rm(home, { recursive: true, force: true });
+  await mkdir(join(home, "face", "desk"), { recursive: true });
+  for (const [file, records] of Object.entries(ledgers)) {
+    await writeFile(join(home, "face", "desk", file), records.map((r) => `${JSON.stringify(r)}\n`).join(""));
+  }
+  return home;
+}
+
+const started = (order: string, date: string, t: string) => ({
+  t, kind: "started", key: `${order}:${date}`, order, date, dir: "desk", cwd: "/r/desk", at: t, anchor: t, standingSha: "s", wake: true, deadlineMs: 600_000,
+});
+
+/** An alert record as the watch writes one; a US level hit on NVDA unless `over` says otherwise. */
+function alertRec(id: string, t: string, over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    t, kind: "alert", id, pass: `p-${id}`, date: t.slice(0, 10), key: `level:desk/levels.yml:0`, market: "us", symbol: "NVDA", label: "stop 170",
+    trigger: { type: "level", kind: "stop", price: 170, when: "cross_down" }, gap: false,
+    quote: { market: "us", price: 169.8, asOf: "2026-11-30T15:21:03Z", feed: "robinhood", status: "live", prevClose: 175, chgPct: -2.97, receivedAt: null },
+    holding: { qty: 100, avgCost: 120.5 }, plan: "sell half", source: { file: "desk/levels.yml", index: 0 }, decision: "send", annotate: false, ...over,
+  };
+}
+const delivered = (id: string, t: string, delivery: Record<string, unknown>) => ({ t, kind: "delivered", id, delivery, latency: { tradeMs: 1800, receivedMs: null } });
+const seen = (symbol: string, accession: string, form: string, t: string, accepted: string | null) => ({
+  t, kind: "seen", symbol, accession, form, filingDate: t.slice(0, 10), accepted, items: form === "8-K" ? "2.02,9.01" : null, url: `https://www.sec.gov/Archives/${accession}`,
+});
+
+test("the brief carries the alerts and filings since the previous preclose firing, newest first, counted", async () => {
+  const root = await makeRoot("p3-alerts", { "desk/holdings.yml": HOLDINGS_YML });
+  const home = await makeHome("alerts", {
+    "firings.jsonl": [
+      started("preclose", "2026-11-26", "2026-11-26T20:30:10.000Z"),
+      started("preclose", "2026-11-27", "2026-11-27T17:30:10.000Z"),
+      started("weekly", "2026-11-29", "2026-11-29T15:00:00.000Z"),
+      started("preclose", "2026-11-30", "2026-11-30T20:30:00.000Z"),
+    ],
+    "alerts.jsonl": [
+      alertRec("a-before", "2026-11-27T16:00:00.000Z"),
+      alertRec("a-sent", "2026-11-30T15:21:04.000Z"),
+      delivered("a-sent", "2026-11-30T15:21:05.000Z", { sent: [11] }),
+      alertRec("a-cap", "2026-11-30T15:40:00.000Z", { decision: "suppressed", suppressed: "cap", symbol: "AAPL", label: "watch 229", gap: true }),
+      alertRec("a-cn", "2026-11-30T02:10:00.000Z", {
+        decision: "suppressed", suppressed: "muted", market: "cn", symbol: "600519", label: "watch 1450", date: "2026-11-30", holding: null,
+        quote: { market: "cn", price: 1452.3, asOf: "2026-11-30T02:09:58Z", feed: "tencent", status: "live", prevClose: 1440, chgPct: 0.85, receivedAt: null },
+      }),
+      alertRec("a-lost", "2026-11-30T16:00:00.000Z"),
+      delivered("a-lost", "2026-11-30T16:00:01.000Z", { undelivered: "send failed: 502" }),
+      alertRec("a-queued", "2026-11-30T16:10:00.000Z"),
+      delivered("a-queued", "2026-11-30T16:10:01.000Z", { queued: true }),
+      alertRec("a-flying", "2026-11-30T16:20:00.000Z"),
+      alertRec("a-filing", "2026-11-30T14:05:00.000Z", {
+        symbol: "AAPL", label: "4", quote: null, key: "filing:f1:AAPL",
+        trigger: { type: "filing", rule: "f1", form: "4", accession: "0001-26-000002", accepted: "2026-11-30T14:00:00.000Z", filingDate: "2026-11-30", items: null, url: "u" },
+      }),
+    ],
+    "filings.jsonl": [
+      { t: "2026-11-20T12:00:00.000Z", kind: "seeded", symbol: "NVDA", accessions: ["0001-26-000000"] },
+      seen("NVDA", "0001-26-000009", "8-K", "2026-11-27T13:00:00.000Z", "2026-11-27T12:59:00.000Z"),
+      seen("NVDA", "0001-26-000001", "8-K", "2026-11-30T13:05:00.000Z", "2026-11-30T13:01:30.000Z"),
+      seen("AAPL", "0001-26-000002", "4", "2026-11-30T14:05:00.000Z", "2026-11-30T14:00:00.000Z"),
+    ],
+  });
+  const out = await buildBrief({ quotes: fakeHub({ SPY: { price: 600 } }).hub, root, home, now: () => P3_NOW }, P3_INPUT);
+  assert.equal(out.ok, true);
+  const b = briefOf(out);
+  assert.equal(await briefSince(home, "preclose", "2026-11-30", P3_NOW), "2026-11-27T17:30:10.000Z",
+    "the last started preclose before the firing's date: neither today's own nor another order's");
+  assert.deepEqual(b.alerts, {
+    since: "2026-11-27 12:30 ET", sent: 5, suppressed: 2, byReason: { cap: 1, muted: 1 }, more: 0,
+    items: [
+      { at: "11:20 ET", market: "us", symbol: "NVDA", label: "stop 170", gap: false, price: 169.8, stamp: "ROBINHOOD 10:21:03 ET", outcome: "pending" },
+      { at: "11:10 ET", market: "us", symbol: "NVDA", label: "stop 170", gap: false, price: 169.8, stamp: "ROBINHOOD 10:21:03 ET", outcome: "queued" },
+      { at: "11:00 ET", market: "us", symbol: "NVDA", label: "stop 170", gap: false, price: 169.8, stamp: "ROBINHOOD 10:21:03 ET", outcome: "undelivered" },
+      { at: "10:40 ET", market: "us", symbol: "AAPL", label: "watch 229", gap: true, price: 169.8, stamp: "ROBINHOOD 10:21:03 ET", outcome: "suppressed", suppressed: "cap" },
+      { at: "10:21 ET", market: "us", symbol: "NVDA", label: "stop 170", gap: false, price: 169.8, stamp: "ROBINHOOD 10:21:03 ET", outcome: "sent" },
+      { at: "09:05 ET", market: "us", symbol: "AAPL", label: "4", gap: false, price: null, stamp: null, outcome: "pending" },
+      { at: "2026-11-29 21:10 ET", market: "cn", symbol: "600519", label: "watch 1450", gap: false, price: 1452.3, stamp: "TENCENT 2026-11-30 10:09:58 Beijing", outcome: "suppressed", suppressed: "muted" },
+    ],
+  }, "the A-share alert is listed too; the one before the last brief is not");
+  assert.deepEqual(Object.keys(b.alerts), ["since", "sent", "suppressed", "byReason", "more", "items"], "the counts ahead of the items");
+  assert.deepEqual(b.filings, {
+    since: "2026-11-27 12:30 ET", more: 0,
+    items: [
+      { symbol: "AAPL", form: "4", accepted: "09:00 ET", filingDate: "2026-11-30", items: null, url: "https://www.sec.gov/Archives/0001-26-000002", alerted: true },
+      { symbol: "NVDA", form: "8-K", accepted: "08:01 ET", filingDate: "2026-11-30", items: "2.02,9.01", url: "https://www.sec.gov/Archives/0001-26-000001", alerted: false },
+    ],
+  });
+  assert.deepEqual(Object.keys(b).slice(-4), ["alerts", "filings", "aShares", "scope"], "after the levels block, before aShares and scope");
+});
+
+test("with no started firing the blocks reach back to 00:00 ET three days before; past 50, the newest are kept and the rest counted", async () => {
+  const records: unknown[] = Array.from({ length: 60 }, (_, i) => alertRec(`a-${i}`, new Date(Date.parse("2026-11-28T14:00:00.000Z") + i * 60_000).toISOString(),
+    { decision: "suppressed", suppressed: i % 2 === 0 ? "cooldown" : "window" }));
+  records.unshift(alertRec("a-old", "2026-11-27T04:59:00.000Z"));
+  const home = await makeHome("fallback", { "alerts.jsonl": records });
+  assert.equal(await briefSince(home, "preclose", "2026-11-30", P3_NOW), "2026-11-27T05:00:00.000Z", "00:00 ET on the 27th");
+  const b = briefOf(await buildBrief({ quotes: fakeHub({ SPY: { price: 600 } }).hub, root: await makeRoot("p3-fallback", {}), home, now: () => P3_NOW }, P3_INPUT));
+  assert.equal(b.alerts.since, "2026-11-27 00:00 ET");
+  assert.equal(b.alerts.sent, 0);
+  assert.equal(b.alerts.suppressed, 60);
+  assert.deepEqual(b.alerts.byReason, { cooldown: 30, window: 30 });
+  assert.equal(b.alerts.items.length, 50);
+  assert.equal(b.alerts.more, 10);
+  assert.equal(b.alerts.items[0].at, "2026-11-28 09:59 ET", "the newest first");
+  assert.equal(b.alerts.items.at(-1)?.at, "2026-11-28 09:10 ET");
+  assert.deepEqual(b.filings, { since: "2026-11-27 00:00 ET", more: 0, items: [] }, "no filings ledger is no filing");
+});
+
+test("an unreadable ledger is named in its block, and the producer stays ok; with no home both blocks say no ledger", async () => {
+  const root = await makeRoot("p3-unreadable", {});
+  const home = await makeHome("unreadable", {});
+  await mkdir(join(home, "face", "desk", "alerts.jsonl"));
+  await mkdir(join(home, "face", "desk", "firings.jsonl"));
+  await assert.rejects(briefSince(home, "preclose", "2026-11-30", P3_NOW), /EISDIR/, "briefSince never reads an unreadable ledger as an empty one");
+  const b = briefOf(await buildBrief({ quotes: fakeHub({ SPY: { price: 600 } }).hub, root, home, now: () => P3_NOW }, P3_INPUT));
+  assert.deepEqual(b.alerts, { since: "2026-11-27 00:00 ET", error: "EISDIR", sent: 0, suppressed: 0, byReason: {}, more: 0, items: [] });
+  assert.deepEqual(b.filings, { since: "2026-11-27 00:00 ET", more: 0, items: [] }, "the brief reaches back three days when the firing ledger cannot be read");
+
+  const out = await buildBrief({ quotes: fakeHub({ SPY: { price: 600 } }).hub, root, now: () => P3_NOW }, P3_INPUT);
+  assert.equal(out.ok, true, "the producer is still ok");
+  const bare = briefOf(out);
+  assert.deepEqual(bare.alerts, { since: "2026-11-27 00:00 ET", error: "no ledger", sent: 0, suppressed: 0, byReason: {}, more: 0, items: [] });
+  assert.deepEqual(bare.filings, { since: "2026-11-27 00:00 ET", error: "no ledger", more: 0, items: [] });
 });

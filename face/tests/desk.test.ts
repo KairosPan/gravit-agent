@@ -10,7 +10,7 @@ import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import {
   ALERTS_FILE, ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, EVENTS_FILE, FILINGS_FILE, FIRINGS_FILE, LEDGER_ROTATE_BYTES, MUTE_FILE, MUTE_USAGE, OFF_FILE,
   ALERT_DEADLINE_MS, WATCH_LEASE_FILE, appendChain, appendEvent, appendRecord, appendRecordOnce, budgetLine, budgetReplyLine, budgetState, clearMute, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastDeskSession, noteBudgetSpent,
-  muteReplyLine, parseDuration, readBudget, readEvents, readMuteState, readOffState, readRecords, registerDeskRoutes, runsOf, standingLines, writeMute,
+  muteReplyLine, parseDuration, readBudget, readEvents, readMuteState, readOffState, readRecords, registerDeskRoutes, runsOf, standingLines, watchLines, writeMute,
   writeOff,
   type BudgetState, type DeskEvent, type DeskStatus, type TurnUsage,
 } from "../src/desk.ts";
@@ -24,6 +24,7 @@ import { fakeCalendar, WallClock } from "./desk-fakes.ts";
 import { unwiredMarketQuotes, type MarketQuoteSource } from "../src/market-quotes.ts";
 import { bjDate } from "../src/et.ts";
 import { recorder } from "./route-recorder.ts";
+import type { MarketWatchStatus, WatchStatus } from "../src/watch.ts";
 
 /** Every harness home made with {@link home}, removed once the file's tests are done. */
 const homes: string[] = [];
@@ -1534,4 +1535,98 @@ test("installDesk starts the watch with a source, shares the US calendar with th
 
   await desk.dispose(0);
   assert.deepEqual(atLetGo, [{ schedule: 0, watch: 0, state: "stopped", lease: false }], "the clock row and the watch stopped, and the lease released, before the conversation let go");
+});
+
+/* P3: the watch's lines (the P3 plan's Task 10), appended by deskStatusLines after P2's. */
+
+const quietToday = (): MarketWatchStatus["today"] => ({ sent: 0, suppressed: { cooldown: 0, cap: 0, muted: 0, off: 0, window: 0 }, repeats: 0 });
+
+/** A watch watching both markets on Monday 2026-11-30: 12 US symbols polled at 10:21 ET, the A shares' Tuesday session ahead. */
+function watching(): WatchStatus {
+  return {
+    state: "watching",
+    markets: {
+      us: {
+        state: "polling", session: { date: "2026-11-30", open: "2026-11-30T14:30:00.000Z", close: "2026-11-30T21:00:00.000Z" }, watched: 12, notWatched: [],
+        lastPollAt: "2026-11-30T15:21:00.000Z", today: { sent: 5, suppressed: { cooldown: 0, cap: 2, muted: 1, off: 0, window: 0 }, repeats: 4 },
+      },
+      cn: {
+        state: "waiting", session: { date: "2026-12-01", open: "2026-12-01T01:30:00.000Z", close: "2026-12-01T07:00:00.000Z" }, watched: 3, notWatched: [],
+        today: { ...quietToday(), sent: 1 },
+      },
+    },
+    muted: { setAt: "2026-11-30T15:00:00.000Z", by: "telegram", until: "2026-11-30T17:00:00.000Z" },
+    files: [
+      { file: "desk/levels.yml", kind: "levels", entries: 7, refusals: [{ file: "desk/levels.yml", index: 2, reason: "r" }, { file: "desk/levels.yml", index: 5, reason: "r" }], loadedAt: "2026-11-30T14:00:00.000Z" },
+      { file: "desk/holdings.yml", kind: "holdings", entries: 2, refusals: [] },
+      { file: "desk/rules.yml", kind: "rules", missing: true, entries: 0, refusals: [] },
+    ],
+    near: [], marks: [], pending: 2, recent: [],
+    filings: { state: "no-contact", symbols: 0, aShares: 0, seeded: 0 },
+  };
+}
+
+test("watchLines print the watch, each market, today's alerts, the batch, the mute, the filings and the refused files exactly", () => {
+  const now = new Date("2026-11-30T15:30:00Z"); // 10:30 ET
+  assert.deepEqual(watchLines(watching(), now), [
+    "watch: watching",
+    "watch US: polling the 2026-11-30 session, 12 symbols, last poll 10:21 ET",
+    "watch A shares: the 2026-12-01 session opens at 20:30 ET",
+    "alerts today (US): 5 sent, 3 suppressed (cap 2, muted 1), 4 repeats in a cooldown",
+    "alerts today (A shares): 1 sent",
+    "alerts: 2 held for the next hour's batch",
+    "alerts: muted until 12:00 ET (npm run desk -- unmute)",
+    "filings: off: set ALPHA_EDGAR_USER_AGENT",
+    "watch files refused: desk/levels.yml 2 of 9",
+  ]);
+});
+
+test("watchLines: each state, each market phase, the filings' phrases, an unreadable alert ledger and a file refused whole", () => {
+  const now = new Date("2026-11-30T15:30:00Z");
+  const off = (): MarketWatchStatus => ({ state: "off", watched: 0, notWatched: [], today: quietToday() });
+  const bare: WatchStatus = { ...watching(), markets: { us: off(), cn: off() }, files: [], pending: 0, filings: { state: "off", symbols: 0, aShares: 0, seeded: 0 } };
+  delete bare.muted;
+  assert.deepEqual(watchLines({ ...bare, state: "starting" }, now), ["watch: starting", "filings: off"], "a market with no source has no line");
+  assert.deepEqual(watchLines({ ...bare, state: "idle" }, now)[0], "watch: nothing to watch");
+  assert.deepEqual(watchLines({ ...bare, state: "stopped" }, now)[0], "watch: stopped");
+  assert.deepEqual(watchLines({ ...bare, state: "held-elsewhere", holder: { pid: 4242, since: "2026-11-30T13:00:00.000Z" } }, now)[0],
+    "watch: another face (pid 4242) holds the watch on this home");
+
+  const session = { date: "2026-11-30", open: "2026-11-30T14:30:00.000Z", close: "2026-11-30T21:00:00.000Z" };
+  const us = (m: Partial<MarketWatchStatus>): string[] => watchLines({ ...bare, markets: { us: { ...off(), ...m }, cn: off() } }, now).slice(1, -1);
+  assert.deepEqual(us({ state: "no-calendar", lastError: "the market calendar failed (exit 1)" }), ["watch US: no calendar today; the market calendar failed (exit 1)"]);
+  assert.deepEqual(us({ state: "closed" }), ["watch US: closed today"]);
+  assert.deepEqual(us({ state: "polling", session, watched: 40, notWatched: ["ZZ1", "ZZ2"] }), ["watch US: polling the 2026-11-30 session, 40 symbols, no poll yet; not watched: 2"]);
+  assert.deepEqual(us({ state: "after-close", session, lastPollAt: "2026-11-29T20:59:00.000Z" }), ["watch US: the 2026-11-30 session has closed"]);
+  assert.deepEqual(us({ state: "closed", today: { ...quietToday(), suppressed: { ...quietToday().suppressed, off: 3, window: 1 } } }),
+    ["watch US: closed today", "alerts today (US): 0 sent, 4 suppressed (off 3, window 1)"], "a market with a suppressed record today has its count");
+  assert.deepEqual(us({ state: "closed", today: { ...quietToday(), repeats: 2 } }), ["watch US: closed today", "alerts today (US): 0 sent, 2 repeats in a cooldown"]);
+
+  const filings = (f: WatchStatus["filings"]): string => watchLines({ ...bare, filings: f }, now).at(-1) as string;
+  assert.equal(filings({ state: "polling", symbols: 14, aShares: 2, seeded: 14, lastPollAt: "2026-11-30T15:25:00.000Z" }), "filings: polling, 14 symbols, last poll 10:25 ET");
+  assert.equal(filings({ state: "polling", symbols: 14, aShares: 0, seeded: 3 }), "filings: polling, 14 symbols, no poll yet");
+  assert.equal(filings({ state: "polling", symbols: 14, aShares: 0, seeded: 13, lastPollAt: "2026-11-30T15:25:00.000Z", lastError: "NVDA: HTTP 500" }),
+    "filings: polling, 14 symbols, last poll 10:25 ET; last error NVDA: HTTP 500");
+  assert.equal(filings({ state: "refused-today", symbols: 14, aShares: 0, seeded: 0, lastError: "403" }), "filings: off until tomorrow: SEC refused the requests");
+
+  assert.deepEqual(watchLines({ ...bare, muted: { setAt: "2026-11-30T15:00:00.000Z", by: "terminal" }, ledgerError: "EACCES" }, now).slice(1, -1), [
+    "alerts: muted until a terminal lifts it (npm run desk -- unmute)",
+    "alerts: the ledger cannot be read (EACCES), so the watch sends nothing until it can",
+  ]);
+  const long = "x".repeat(120);
+  assert.deepEqual(watchLines({ ...bare, files: [
+    { file: "desk/levels.yml", kind: "levels", entries: 3, refusals: [], error: long, loadedAt: "2026-11-30T14:00:00.000Z" },
+    { file: "desk/rules.yml", kind: "rules", entries: 1, refusals: [{ file: "desk/rules.yml", index: 0, reason: "r" }] },
+  ] }, now).at(-1), `watch files refused: desk/levels.yml (${"x".repeat(79)}…); desk/rules.yml 1 of 2`);
+});
+
+test("deskStatusLines appends the watch's lines after P2's", () => {
+  const now = new Date("2026-11-30T15:30:00Z");
+  const base: DeskStatus = {
+    ok: true, pid: 7, version: "v", bootedAt: "2026-11-30T14:00:00.000Z", uptimeMs: 90 * 60_000, desk: { enabled: true, dir: "/d" },
+    asleep: [], runs: [], turnsToday: { count: 0, usage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+    budget: { used: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, total: 0 }, spent: false },
+  };
+  assert.deepEqual(deskStatusLines({ ...base, watch: watching() }, now), [...deskStatusLines(base, now), ...watchLines(watching(), now)]);
+  assert.equal(deskStatusLines({ ...base, watch: watching() }, now).at(-1), "watch files refused: desk/levels.yml 2 of 9");
 });

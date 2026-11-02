@@ -768,14 +768,15 @@ test("installDesk starts the watch with a source, shares the US calendar with th
 
 **Interfaces:**
 - **Consumes:** Task 5 (`isAlertRecord`); Task 7 (`priceStamp`); Task 8 (`isFilingRecord`); Task 9 (`WatchStatus` with `markets[m].today` and `pending`, `DeskStatus.watch`); `FIRINGS_FILE`, `isFiringRecord`.
-- **Produces, `brief.ts`:** the old Task 9's `home?`, `briefSince`, the `alerts` and `filings` blocks and `BriefAlert` (with `stamp` from `priceStamp` and `market`) and `BriefFiling`, placed after the levels errors and before `scope`, newest first. A-share alerts are listed too: the brief's prices stay US, its alerts are the day's.
+- **Produces, `brief.ts`:** the old Task 9's `home?`, `briefSince`, the `alerts` and `filings` blocks and `BriefAlert` (with `stamp` from `priceStamp` and `market`; its `outcome` gains `pending`, as `AlertSummary`'s, for a send the ledger holds no delivery for) and `BriefFiling`, placed after the whole levels block and before `aShares` and `scope`, each block's counts, `more` and `error` ahead of its newest-first items; times print through `deskTime`, `since` included. A-share alerts are listed too: the brief's prices stay US, its alerts are the day's.
 - **Produces, `desk/STANDING.md`:** the old Task 9's item 4 and closing rule, verbatim.
 - **Produces, `desk.ts`:** `watchLines(w: WatchStatus, now: Date): string[]`, appended by `deskStatusLines` after P2's lines:
   - `watch: <starting | nothing to watch | stopped | another face (pid <n>) holds the watch on this home | watching>`;
   - per market with a source: `watch <US | A shares>: <no calendar today | closed today | the <date> session opens at <HH:MM ET> | polling the <date> session, <n> symbols, last poll <HH:MM ET> | the <date> session has closed>[; not watched: <k>][; <lastError>]`;
   - per market with a record today: `alerts today (<US | A shares>): <n> sent[, <k> suppressed (<reason> <k>, …)][, <r> repeats in a cooldown]`, counted on that market's session date;
   - `alerts: <k> held for the next hour's batch` when `pending` is above 0, and `alerts: muted until …`, as the old Task 9;
-  - `filings: <off | off: set ALPHA_EDGAR_USER_AGENT | polling, <n> symbols, last poll <HH:MM ET>[, <k> errors] | off until tomorrow: SEC refused the requests>`;
+  - `alerts: the ledger cannot be read (<error>), so the watch sends nothing until it can` while `ledgerError` is set;
+  - `filings: <off | off: set ALPHA_EDGAR_USER_AGENT | polling, <n> symbols, <last poll <HH:MM ET> | no poll yet>[; last error <lastError>] | off until tomorrow: SEC refused the requests>` (`WatchStatus.filings` keeps the first symbol's error, no count, so the line quotes it);
   - `watch files refused: …`, as the old Task 9.
 - **Produces, `desk-tools.ts`:** `STATE_SCHEMA` gains `watch: { type: "object" }`, and `desk_state`'s value carries `watch` without `marks` (old ruling 15: the ten nearest levels are `near`, the last ten alerts `recent`); the Desk view reads `marks` from the route.
 
