@@ -36,8 +36,9 @@
  *   cwd ({@link snapshotFiles}, {@link diffFiles}) and the fence again.
  * - the delivery, through the desk conversation's `deliver` (P2-7): the final text - held back when the turn ends
  *   after the market moment it was about ({@link cutoffOf}, P2-20) - or the one line that says why there is none;
- *   then one line for a violation the turn left behind. Every line is a {@link LINES} builder: the plan's phone-line
- *   table.
+ *   then one line for a violation the turn left behind, and for a strategy's order one naming what the turn changed
+ *   outside its `reports/` - its walk leaves `analysis/` out, the Lunhui rows' (P4 ruling 11). Every line is a
+ *   {@link LINES} builder: the plan's phone-line table.
  * - letting go: the session's dispose, then the supervision's end, so a turn the dispose drains is still reported;
  *   the dispose is awaited at most {@link FIRING_DISPOSE_MS}, and past it the firing ends with one line, the dispose
  *   and then the supervision's end going on alone.
@@ -190,15 +191,21 @@ export type RefusedRecord = {
   reported: boolean;
 };
 /** An anchor found past its grace: why - the face `asleep` across it (the gap), `down` when it came, or found `late` -
- * and when it was found. */
+ * and when it was found; or a firing still queued when its market moment came (`cutoff`, src/firing.ts
+ * {@link cutoffOf}), `moment` naming which, never started. `held` when its line was held back by the pause as it was
+ * written (P4 ruling 7): a `phoned` record follows it once the line reaches the phone, after a restart too. */
 export type MissedRecord = {
-  t: string; kind: "missed"; key: string; order: string; date: string; anchor: string; why: "asleep" | "down" | "late";
-  asleep?: { from: string; to: string }; foundAt: string;
+  t: string; kind: "missed"; key: string; order: string; date: string; anchor: string; why: "asleep" | "down" | "late" | "cutoff";
+  asleep?: { from: string; to: string }; moment?: "open" | "close"; foundAt: string; held?: true;
 };
-/** A `started` the last run left without a `finished`, found at boot. */
-export type InterruptedRecord = { t: string; kind: "interrupted"; key: string; order: string; date: string; startedAt: string };
-/** An order past its `expires`, once per expiry: its key is `<id>:<expires>`, its `date` the expiry. */
-export type ExpiredRecord = { t: string; kind: "expired"; key: string; order: string; date: string; expires: string };
+/** A `started` the last run left without a `finished`, found at boot; `held` as a {@link MissedRecord}'s. */
+export type InterruptedRecord = { t: string; kind: "interrupted"; key: string; order: string; date: string; startedAt: string; held?: true };
+/** An order past its `expires`, once per expiry: its key is `<id>:<expires>`, its `date` the expiry; `held` as a
+ * {@link MissedRecord}'s. */
+export type ExpiredRecord = { t: string; kind: "expired"; key: string; order: string; date: string; expires: string; held?: true };
+/** A held line that reached the phone (P4 ruling 7): the line of the `of` record for `key` - a `held` miss, cut-off
+ * firing or expiry, or a refusal recorded `reported: false` - so a restart does not hold it again. */
+export type PhonedRecord = { t: string; kind: "phoned"; key: string; of: "refused" | "missed" | "interrupted" | "expired" };
 
 /** One line of `firings.jsonl`. Every record carries `t`, when the face wrote it (ISO-8601 UTC), and its `kind`. */
 export type FiringRecord =
@@ -209,7 +216,8 @@ export type FiringRecord =
   | RefusedRecord
   | MissedRecord
   | InterruptedRecord
-  | ExpiredRecord;
+  | ExpiredRecord
+  | PhonedRecord;
 
 /** Every kind {@link FiringRecord} has, and only those: a record over the union, so a kind added to the type and not
  * here fails to compile. */
@@ -222,6 +230,7 @@ const FIRING_KINDS: Readonly<Record<FiringRecord["kind"], true>> = {
   missed: true,
   interrupted: true,
   expired: true,
+  phoned: true,
 };
 
 /** Whether a line's object is a firing record: a string `t` and a known `kind`, as src/desk.ts reads an event. The
@@ -237,8 +246,8 @@ export function isFiringRecord(x: unknown): x is FiringRecord {
  * fence`, `never started`, `failed` (the model's failure, or a session that could not run), `cancelled` - then
  * `withheld (<reason>)`, then by its delivery: `delivered`, `queued` (any of it waiting in the outbox) or `undelivered
  * (<reason>)`. One without a turn (`wake: false`) reads `producer ran` or `producer failed`. The other kinds read
- * `refused (<reason>)`, `missed`, `interrupted`, `expired` - and `started`, `producer ran`/`producer failed` and `woke`
- * for the steps between.
+ * `refused (<reason>)`, `missed`, `interrupted`, `expired`, `phoned` - and `started`, `producer ran`/`producer failed`
+ * and `woke` for the steps between.
  * @param r - a record.
  */
 export function outcomeOf(r: FiringRecord): string {
@@ -285,6 +294,13 @@ function finishedOutcome(r: FinishedRecord): string {
 
 /** `<id> · <date>`: an order and its session's date, as a firing's lines open. */
 const of = (id: string, date: string): string => `${id} · ${date}`;
+/** A firing as its strategy's lines name it: its order's id and directory, and its session's date. */
+type Named = { order: Pick<StandingOrder, "id" | "dir">; date: string };
+/** Whether a firing is the desk's own, in `desk/` - whose lines keep P2's texts - rather than a strategy's. */
+const isDesk = (item: Named): boolean => item.order.dir === "desk";
+
+/** The most paths the outside-reports line names (Global Constraints). */
+export const OUTSIDE_REPORTS_MAX = 5;
 /** A count as the lines print one: `2,013,402`. */
 const counted = (n: number): string => n.toLocaleString("en-US");
 /** `text` cut to at most `max` characters (code points), a cut ending in `…`. */
@@ -313,16 +329,30 @@ export const LINES = {
   failed: (id: string, date: string, error: string): string => `${of(id, date)} could not answer: ${error}; nothing was done`,
   /** A firing turn something cancelled - the browser's stop, a disposal - before it said anything. */
   cancelled: (id: string, date: string, cancel: string): string => `${of(id, date)} was cancelled (${cancel}); nothing more will be said`,
-  /** The fence refused a firing, before it or at its turn's start. */
-  fence: (id: string, date: string, path: string): string =>
-    `${of(id, date)} refused: ${path} exists; it would steer every desk turn. Remove it.`,
+  /** The fence refused a firing, before it or at its turn's start: P2's text for the desk's, its directory named for a
+   * strategy's. */
+  fence: (item: Named, path: string): string =>
+    `${of(item.order.id, item.date)} refused: ${path} exists; it would steer every ${isDesk(item) ? "desk turn" : `turn in ${item.order.dir}`}. Remove it.`,
   /** The watchdog found no turn. */
   noTurn: (id: string, date: string): string => `${of(id, date)} never started a turn; nothing ran`,
   /** The session could not be made or woken. */
   couldNotRun: (id: string, date: string, reason: string): string => `${of(id, date)} could not run: ${reason}`,
-  /** The turn left a fence violation behind. */
-  leftBehind: (id: string, date: string, path: string): string =>
-    `${of(id, date)} left ${path} behind; every desk turn is refused until it is removed`,
+  /** The turn left a fence violation behind: P2's text for the desk's, its directory named for a strategy's. */
+  leftBehind: (item: Named, path: string): string =>
+    (isDesk(item)
+      ? `${of(item.order.id, item.date)} left ${path} behind; every desk turn is refused until it is removed`
+      : `${of(item.order.id, item.date)} left ${path} behind; every firing in ${item.order.dir} is refused, and every session in it reads it, until it is removed`),
+  /** A strategy firing's turn changed files outside its `reports/` (its walk skips `analysis/`): the repo-relative
+   * paths, sorted, the first {@link OUTSIDE_REPORTS_MAX}, and how many more; `truncated`, the walk's limit when a walk
+   * stopped short - then the listing says so, and with no path, that nothing was listed. */
+  outsideReports: (item: Named, paths: readonly string[], truncated: number | undefined): string => {
+    const sorted = [...paths].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const shown = sorted.slice(0, OUTSIDE_REPORTS_MAX);
+    const more = sorted.length - shown.length;
+    const listed = shown.length === 0 ? "nothing listed" : `${shown.join(", ")}${more > 0 ? `, and ${more} more` : ""}`;
+    const stopped = truncated === undefined ? "" : `; the listing stopped at ${counted(truncated)} entries`;
+    return `${of(item.order.id, item.date)} wrote outside reports/: ${listed}${stopped}`;
+  },
   /** Its text or its script changed since arming - or both, each named (p2-m11). */
   changed: (id: string, date: string, paths: string | readonly string[]): string => {
     const named = typeof paths === "string" ? [paths] : paths;
@@ -340,12 +370,13 @@ export const LINES = {
     `standing orders are refused for the rest of the day: the desk's token budget is spent (${counted(state.used.total)}`
     + `${state.dailyTokens === undefined ? "" : ` of ${counted(state.dailyTokens)}`} tokens since 00:00 ET)`,
   /** An anchor missed: the face asleep across it, not running, or finding it past the grace - each time as it was
-   * when the miss was found. */
-  missed: (r: Pick<MissedRecord, "order" | "date" | "anchor" | "why" | "asleep" | "foundAt">): string => {
+   * when the miss was found - or a firing still queued at its market moment (`cutoff`). */
+  missed: (r: Pick<MissedRecord, "order" | "date" | "anchor" | "why" | "asleep" | "moment" | "foundAt">): string => {
     const found = new Date(r.foundAt);
     const at = (iso: string): string => deskTime(new Date(iso), found);
     let why: string;
-    if (r.why === "asleep") why = r.asleep === undefined ? "the face was asleep" : `the face was asleep from ${at(r.asleep.from)} to ${at(r.asleep.to)}`;
+    if (r.why === "cutoff") why = `it was still queued at the ${r.moment ?? "open"}, behind other firings`;
+    else if (r.why === "asleep") why = r.asleep === undefined ? "the face was asleep" : `the face was asleep from ${at(r.asleep.from)} to ${at(r.asleep.to)}`;
     else if (r.why === "down") why = "the face was not running";
     else why = `found at ${at(r.foundAt)}, past the 5-minute grace`;
     return `${of(r.order, r.date)} missed its ${at(r.anchor)} anchor: ${why}. A standing order never runs late`;
@@ -428,11 +459,17 @@ const isGone = (err: unknown): boolean => codeOf(err) === "ENOENT" || codeOf(err
  * followed - a link is an entry of its own, its target never walked, and a `dir` that is itself a link holds nothing.
  * The walk stops after `max` entries, directories included, with `truncated`. A `dir` that is not there (a cwd not made
  * yet) holds nothing; a directory that cannot be listed, or an entry that cannot be `lstat`ed, for any reason but having
- * gone, sets `truncated` too, the listing then being incomplete. Never rejects.
+ * gone, sets `truncated` too, the listing then being incomplete. The top-level entries named in `skip` are left out
+ * unvisited, uncounted - a strategy's `analysis/`, which the Lunhui rows write (P4 ruling 11). Never rejects.
  * @param dir - the directory, a firing's cwd.
  * @param max - the most entries visited, {@link FILES_WALK_MAX} by default.
+ * @param skip - the names directly under `dir` the walk leaves out; none by default.
  */
-export async function snapshotFiles(dir: string, max: number = FILES_WALK_MAX): Promise<{ files: Map<string, FileInfo>; truncated: boolean }> {
+export async function snapshotFiles(
+  dir: string,
+  max: number = FILES_WALK_MAX,
+  skip: ReadonlySet<string> = new Set(),
+): Promise<{ files: Map<string, FileInfo>; truncated: boolean }> {
   const files = new Map<string, FileInfo>();
   let seen = 0;
   let truncated = false;
@@ -446,6 +483,7 @@ export async function snapshotFiles(dir: string, max: number = FILES_WALK_MAX): 
       return true;
     }
     for (const entry of entries.sort(byName)) {
+      if (rel === "" && skip.has(entry.name)) continue;
       if (seen >= max) {
         truncated = true;
         return false;
@@ -503,7 +541,8 @@ export function diffFiles(before: ReadonlyMap<string, FileInfo>, after: Readonly
  * by name; `createAgent` a fresh desk agent (src/desk-session.ts `createDeskAgent`); `resolveRoute` an order's model as
  * a route ({@link resolveFiringRoute}); `on` the root bus; `supervise` src/desk-session.ts `superviseDeskTurns`, the
  * default; `deliver` the desk conversation's; `budget` the day's (src/desk.ts `readBudget`); `log` where a line goes
- * (stderr); `carry` what a rotation its appends set off hands on. */
+ * (stderr); `carry` what a rotation its appends set off hands on; `filesWalkMax` the most entries a walk of the cwd
+ * visits, {@link FILES_WALK_MAX} by default. */
 export interface FiringDeps {
   home: string;
   root: string;
@@ -521,6 +560,7 @@ export interface FiringDeps {
   /** What a rotation of `firings.jsonl` that one of the firing's own appends sets off hands on to the new file -
    * the clock row's carry (src/schedule.ts), so the day's keys survive it; nothing when absent. */
   carry?: (rotated: string) => readonly string[];
+  filesWalkMax?: number;
 }
 
 /**
@@ -952,7 +992,7 @@ function whatToSay(item: FiringItem, turn: FiringTurn, record: DeskTurnRecord | 
 } {
   const { order, date } = item;
   const id = order.id;
-  if (turn.outcome === "refused") return { text: LINES.fence(id, date, record?.violation ?? cwdRel) };
+  if (turn.outcome === "refused") return { text: LINES.fence(item, record?.violation ?? cwdRel) };
   if (record !== undefined && record.finalText !== "") {
     const chars = record.finalText.length;
     const cutoff = cutoffOf(item);
@@ -991,9 +1031,10 @@ function whatToSay(item: FiringItem, turn: FiringTurn, record: DeskTurnRecord | 
  * 6. the turn's end, recorded as the conversation records a phone turn (`desk-turn`, `desk-refused` for a refused
  *    turn); then the files the turn changed and the fence again;
  * 7. the delivery: the text or the line ({@link LINES}), then `finished` with what `deliver` answered, then the
- *    left-behind line for a violation the turn did not start over, then the session's dispose - awaited at most
- *    {@link FIRING_DISPOSE_MS}, past which one line and the dispose goes on alone - and only after it the supervision's
- *    end.
+ *    left-behind line for a violation the turn did not start over, then - for a strategy's order - one line naming what
+ *    the turn changed outside `reports/` (`analysis/` unwalked), or that its walk stopped short; then the session's
+ *    dispose - awaited at most {@link FIRING_DISPOSE_MS}, past which one line and the dispose goes on alone - and only
+ *    after it the supervision's end.
  * Any turn the supervisor reports once the firing has stopped waiting for its own is recorded in `events.jsonl` alone
  * (the module header's EVERY TURN IT OUTLIVES IS COUNTED). A session that cannot be made or woken - a route, a create
  * or a wake that throws - is outcome `error` with the could-not-run line. An abort cancels the turn under way as
@@ -1062,7 +1103,11 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
   } catch (err) {
     return couldNotRun(run, quoted, errText(err));
   }
-  const before = await snapshotFiles(cwd);
+  /* a strategy's walk leaves out analysis/, the Lunhui rows' (ruling 11); the desk's journal walks whole */
+  const strategy = order.dir !== "desk";
+  const walkMax = deps.filesWalkMax ?? FILES_WALK_MAX;
+  const skip: ReadonlySet<string> = strategy ? new Set(["analysis"]) : new Set();
+  const before = await snapshotFiles(cwd, walkMax, skip);
   if (signal.aborted) return undefined;
   /* a then-callback, so a create that throws is a rejection, and a could-not-run, like one that rejects */
   /* the desk's journal is made when missing; a strategy's directory never is - one gone is a could-not-run */
@@ -1178,9 +1223,16 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
       await count(record);
     }
     let left: Pick<FinishedRecord, "files" | "filesTruncated" | "violation"> = {};
+    /* a strategy's turn that wrote outside reports/, or whose walk stopped short: its line, after the others */
+    let outside: string | undefined;
     if (ending.kind !== "error") {
-      const after = await snapshotFiles(cwd);
+      const after = await snapshotFiles(cwd, walkMax, skip);
       const changes = diffFiles(before.files, after.files);
+      if (strategy) {
+        const paths = changes.filter((c) => !c.path.startsWith("reports/")).map((c) => `${cwdRel}/${c.path}`);
+        const cut = before.truncated || after.truncated;
+        if (paths.length > 0 || cut) outside = LINES.outsideReports(item, paths, cut ? walkMax : undefined);
+      }
       let violation: string | undefined;
       try {
         violation = await findChainViolation(deps.root, cwd);
@@ -1211,7 +1263,11 @@ async function wake(run: Run, quoted: Quoted | undefined): Promise<FinishedRecor
     const violation = left.violation;
     /* a turn the fence refused started over this violation: its line said so already */
     if (violation !== undefined && !(turn.outcome === "refused" && record?.violation === violation)) {
-      const sent = await unlessAborted(send(run, LINES.leftBehind(order.id, date, violation)), signal);
+      const sent = await unlessAborted(send(run, LINES.leftBehind(item, violation)), signal);
+      if (sent === ABORTED) return undefined;
+    }
+    if (outside !== undefined) {
+      const sent = await unlessAborted(send(run, outside), signal);
       if (sent === ABORTED) return undefined;
     }
     return finished;

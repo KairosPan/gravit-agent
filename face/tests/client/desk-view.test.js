@@ -40,7 +40,7 @@ test('deskViewOf renders the head, both markets with their own today, the alerts
     { market: 'US', symbol: 'NVDA', label: 'stop 170 · -1.30%', plan: 'sell half on a close below 170', file: 'desk/levels.yml' },
     { market: 'A shares', symbol: '600519', label: 'buy_zone 1600-1650', plan: 'add 100 shares in the zone', file: 'desk/levels.yml' },
   ]);
-  assert.deepEqual(v.standing, [{ id: 'brief', market: 'us', anchor: '09:20', next: 'next 2026-11-03 09:20 ET', timed: true, hash: 'ok', last: 'last finished 09:31 ET' }]);
+  assert.deepEqual(v.standing, [{ id: 'brief', market: 'us', anchor: '09:20', next: 'next 2026-11-03 09:20 ET', timed: true, hash: 'ok', last: 'last finished 09:31 ET', sessionId: null }]);
   assert.deepEqual(v.standingNotes, []);
   assert.deepEqual(v.firings, [{ order: 'brief', when: '09:31', kind: 'finished', outcome: 'finished' }]);
   // newest first
@@ -137,4 +137,18 @@ test("a strategy's levels.yml pin shows in its order's hash cell, its market in 
   assert.ok(html.includes('standing fine: market cn, open-90m, next 19:00 ET'), 'the tab leads an A-share order with its market');
   assert.ok(html.includes('levels.yml changed'), 'and shows its levels.yml pin');
   assert.ok(html.includes('standing brief: 09:20, next'), 'a US order as before');
+});
+
+test("a standing row links its last firing's session as #/messages/<sessionId>", async () => {
+  const s = deskStatus();
+  s.standing.orders = [
+    { ...s.standing.orders[0], last: { ...s.standing.orders[0].last, sessionId: 'session-7' } },
+    { ...s.standing.orders[0], id: 'missed', last: { ...s.standing.orders[0].last, kind: 'missed', outcome: 'missed' } },
+  ];
+  const v = deskViewOf(s, NOW_ISO);
+  assert.deepEqual(v.standing.map(o => o.sessionId), ['session-7', null]);
+  const { renderDeskTab } = await import('../../client/js/render/desk.js');
+  const html = renderDeskTab(v);
+  assert.ok(html.includes('href="#/messages/session-7"'), html);
+  assert.equal((html.match(/#\/messages\//g) ?? []).length, 1, 'a firing with no session links none');
 });

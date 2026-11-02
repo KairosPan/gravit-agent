@@ -233,7 +233,8 @@ function gapWord(ms) {
  *  `ledger` the alert lines (null when they do not hold), `filings` the filings' line; `alerts` the watch's recent ones,
  *  newest first; `levels` the watch's marks; `standing` the orders of the last good load (`market` its market, `us` when
  *  it names none; `hash` its pins' state, a strategy's levels.yml named when the text's and the script's hold; `timed` when
- *  its state is when it next falls, which its anchor leads) and `standingNotes` what holds the
+ *  its state is when it next falls, which its anchor leads; `sessionId` the session its last firing woke, null for none -
+ *  the tab links it on the Messages route, P4 ruling 6) and `standingNotes` what holds the
  *  whole book; `firings` the recent firings; `runs` the last ten, newest first; `asleep` this run's gaps; `files` the watch's
  *  files with a refusal or an error; `ledgerError` the desk ledger's, as the budget names it. */
 export function deskViewOf(status, nowIso) {
@@ -264,6 +265,7 @@ export function deskViewOf(status, nowIso) {
     standing: standing ? records(standing.orders).map(o => ({
       id: str(o.id), market: o.market === 'cn' ? 'cn' : 'us', anchor: str(o.at), ...nextOf(o, standing.running, now), hash: hashCell(o),
       last: isRecord(o.last) ? `last ${str(o.last.outcome)} ${deskTime(o.last.t, now)}` : '',
+      sessionId: isRecord(o.last) && str(o.last.sessionId) !== '' ? str(o.last.sessionId) : null,
     })) : [],
     standingNotes: standing ? standingNotesOf(standing) : [],
     firings: standing ? records(standing.recent).map(f => ({ order: str(f.order), when: etWhen(f.t, now), kind: str(f.kind), outcome: str(f.outcome) })) : [],

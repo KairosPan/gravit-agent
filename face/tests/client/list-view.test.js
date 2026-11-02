@@ -49,3 +49,16 @@ test('a collapsed group keeps the conversation on screen', () => {
   assert.deepEqual(shut.find(g => g.key === 'w1').shown, []);
   assert.deepEqual(groupsOf(state(convs)).find(g => g.key === 'w1').shown.map(c => c.id), ['a', 'b']);
 });
+
+test('every desk conversation is in the Desk group, never in a channel\'s', () => {
+  const gs = groupsOf(state([
+    conv('r', { channel: { workspaceId: 'w1', name: 'demo' }, updatedAt: 9 }),
+    conv('d', { kind: 'bot', preset: 'gravit-desk', members: ['gravit-desk'], channel: { workspaceId: 'w1', name: 'demo' }, updatedAt: 5 }),
+    conv('j', { kind: 'bot', preset: 'gravit-desk', members: ['gravit-desk'], updatedAt: 3 }),
+  ], { channels: [ch('w0', 'workbench', { isRoot: true, dir: '/r' }), ch('w1', 'demo')] }));
+  assert.deepEqual(keys(gs), ['w0', '__desk', 'w1'], 'right after the root, whatever is newer');
+  const desk = gs[1];
+  assert.deepEqual([desk.kind, desk.label, desk.workspaceId], ['desk', 'Desk', null]);
+  assert.deepEqual(desk.conversations.map(c => c.id), ['d', 'j']);
+  assert.deepEqual(gs[2].conversations.map(c => c.id), ['r'], "the strategy's own group lists none of the desk's");
+});

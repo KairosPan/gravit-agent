@@ -23,7 +23,7 @@ import {
 import { createDeskAgent, type DeskSessionCtxLike, type DeskTurnRecord } from "../src/desk-session.ts";
 import {
   checkFiring, cutoffOf, diffFiles, FILES_RECORD_MAX, FILES_WALK_MAX, FIRING_DISPOSE_MS, FIRING_SLACK_MS, firingKey, isFiringRecord, LINES, outcomeOf,
-  resolveFiringRoute, runFiring, snapshotFiles, wakeMessage,
+  OUTSIDE_REPORTS_MAX, resolveFiringRoute, runFiring, snapshotFiles, wakeMessage,
   type FinishedRecord, type FiringDeps, type FiringItem, type FiringRecord, type Verified,
 } from "../src/firing.ts";
 import type { MarketSession } from "../src/market-clock.ts";
@@ -1225,10 +1225,10 @@ test("LINES: every row of the phone-line table, exactly", () => {
   assert.equal(LINES.noText(id, date), "preclose · 2026-11-27 ended with no text");
   assert.equal(LINES.failed(id, date, "429 rate limit"), "preclose · 2026-11-27 could not answer: 429 rate limit; nothing was done");
   assert.equal(LINES.cancelled(id, date, "stopped in the browser"), "preclose · 2026-11-27 was cancelled (stopped in the browser); nothing more will be said");
-  assert.equal(LINES.fence(id, date, "desk/journal/.git"), "preclose · 2026-11-27 refused: desk/journal/.git exists; it would steer every desk turn. Remove it.");
+  assert.equal(LINES.fence(ITEM, "desk/journal/.git"), "preclose · 2026-11-27 refused: desk/journal/.git exists; it would steer every desk turn. Remove it.");
   assert.equal(LINES.noTurn(id, date), "preclose · 2026-11-27 never started a turn; nothing ran");
   assert.equal(LINES.couldNotRun(id, date, "boom"), "preclose · 2026-11-27 could not run: boom");
-  assert.equal(LINES.leftBehind(id, date, "desk/journal/GRAVIT.md"), "preclose · 2026-11-27 left desk/journal/GRAVIT.md behind; every desk turn is refused until it is removed");
+  assert.equal(LINES.leftBehind(ITEM, "desk/journal/GRAVIT.md"), "preclose · 2026-11-27 left desk/journal/GRAVIT.md behind; every desk turn is refused until it is removed");
   assert.equal(LINES.changed(id, date, "desk/STANDING.md"), "preclose · 2026-11-27 refused: desk/STANDING.md changed since arming. Review it, then: npm run desk -- rearm preclose");
   assert.equal(LINES.missing(id, date, "scripts/p.py"), "preclose · 2026-11-27 refused: scripts/p.py is missing. Restore it, or remove the order from standing.yml");
   assert.equal(LINES.afterClose(id), "preclose finished after the close; not sent - it describes a market that has moved");
@@ -1645,4 +1645,166 @@ test("LINES: P4's rows, exactly", () => {
   assert.equal(LINES.noCalendar("fake XSHG", "the fake calendar has no 2026-12-01", "cn", "2026-12-01"),
     "no A-share standing order runs on 2026-12-01: the market calendar failed in fake XSHG (the fake calendar has no 2026-12-01)");
   assert.equal(LINES.noCalendar("fake clock", "down", "us", "2026-12-01"), "no standing order runs today: the market calendar failed in fake clock (down)");
+});
+
+/* ---------- P4 Task 4: a strategy firing's lines and its walk ---------- */
+
+/** A strategy fixture whose turn is run under the report builtin: the rig, the fixture, and a run of REPORT_ITEM (or
+ * `item`) verified by checkFiring, woken and waiting for its turn's end. */
+async function strategyRun(opts: { item?: FiringItem; over?: Partial<FiringDeps>; start?: string; prepare?: (fx: Fixture & { dir: string }) => Promise<void> } = {}) {
+  const fx = await strategyFixture();
+  await opts.prepare?.(fx);
+  const r = rig(fx, { start: opts.start ?? "2026-11-30T13:00:04Z", over: { builtins: { report: async () => ({ ok: true, text: "REPORT" }) }, ...opts.over } });
+  const item = opts.item ?? REPORT_ITEM;
+  const verdict = await checkFiring(r.deps, item.order);
+  assert.ok("go" in verdict, JSON.stringify(verdict));
+  const running = runFiring(r.deps, item, verdict.go, signal());
+  await waitFor("the wake", woken(r));
+  return { fx, r, running };
+}
+
+test("a strategy firing's fence lines name the strategy, and the desk's keep P2's text", async () => {
+  {
+    const fx = await strategyFixture();
+    await writeFile(join(fx.root, "strategies", "GRAVIT.md"), "steer every strategy\n");
+    const deps = { home: fx.home, root: fx.root, clock: new WallClock("2026-11-30T13:00:04Z"), budget: async () => UNSPENT };
+    assert.deepEqual(await checkFiring(deps, REPORT), { refuse: { reason: "fence", detail: "strategies/GRAVIT.md" } });
+  }
+  assert.equal(LINES.fence(REPORT_ITEM, "strategies/GRAVIT.md"),
+    "demo-report · 2026-11-30 refused: strategies/GRAVIT.md exists; it would steer every turn in strategies/demo. Remove it.");
+  assert.equal(LINES.fence(ITEM, "desk/journal/GRAVIT.md"), "preclose · 2026-11-27 refused: desk/journal/GRAVIT.md exists; it would steer every desk turn. Remove it.");
+  assert.equal(LINES.leftBehind(ITEM, "desk/journal/GRAVIT.md"), "preclose · 2026-11-27 left desk/journal/GRAVIT.md behind; every desk turn is refused until it is removed");
+
+  const { fx, r, running } = await strategyRun();
+  /* planted by the harness while the turn runs: a desk turn's own write of it is denied by the write guard */
+  await mkdir(join(fx.dir, "notes"));
+  await writeFile(join(fx.dir, "notes", "GRAVIT.md"), "steer\n");
+  r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "REPORT TEXT" }));
+  const finished = await running;
+  assert.equal(finished?.violation, "strategies/demo/notes/GRAVIT.md");
+  assert.deepEqual(r.out.texts, [
+    "REPORT TEXT",
+    "demo-report · 2026-11-30 left strategies/demo/notes/GRAVIT.md behind; every firing in strategies/demo is refused, and every session in it reads it, until it is removed",
+    "demo-report · 2026-11-30 wrote outside reports/: strategies/demo/notes/GRAVIT.md",
+  ]);
+});
+
+test("a strategy firing that writes outside reports/ is named once, after its text", async () => {
+  /* added under reports/, a script modified, the thesis removed */
+  {
+    const { fx, r, running } = await strategyRun({
+      prepare: async (f) => {
+        await mkdir(join(f.dir, "reports"));
+        await writeFile(join(f.dir, "screen.py"), "x");
+        await writeFile(join(f.dir, "THESIS.md"), "thesis");
+      },
+    });
+    await writeFile(join(fx.dir, "reports", "2026-11-30-premarket.md"), "report");
+    await writeFile(join(fx.dir, "screen.py"), "xx");
+    await rm(join(fx.dir, "THESIS.md"));
+    r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "REPORT TEXT" }));
+    await running;
+    assert.deepEqual(r.out.texts, ["REPORT TEXT", "demo-report · 2026-11-30 wrote outside reports/: strategies/demo/THESIS.md, strategies/demo/screen.py"]);
+  }
+  /* seven such paths: the first five, sorted, then the count of the rest */
+  {
+    const { fx, r, running } = await strategyRun();
+    for (const name of ["g", "f", "e", "d", "c", "b", "a"]) await writeFile(join(fx.dir, `${name}.md`), name);
+    r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "REPORT TEXT" }));
+    await running;
+    assert.equal(OUTSIDE_REPORTS_MAX, 5);
+    assert.deepEqual(r.out.texts, [
+      "REPORT TEXT",
+      "demo-report · 2026-11-30 wrote outside reports/: strategies/demo/a.md, strategies/demo/b.md, strategies/demo/c.md, strategies/demo/d.md, strategies/demo/e.md, and 2 more",
+    ]);
+  }
+  /* only reports/: no line */
+  {
+    const { fx, r, running } = await strategyRun();
+    await mkdir(join(fx.dir, "reports"));
+    await writeFile(join(fx.dir, "reports", "2026-11-30-premarket.md"), "report");
+    r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "REPORT TEXT" }));
+    const finished = await running;
+    assert.deepEqual(finished?.files, [{ path: "reports/2026-11-30-premarket.md", change: "added" }]);
+    assert.deepEqual(r.out.texts, ["REPORT TEXT"]);
+  }
+  /* P2's pre-close brief writing its journal: no line */
+  {
+    const fx = await fixture();
+    const r = rig(fx);
+    const running = runFiring(r.deps, ITEM, verifiedFor(fx), signal());
+    await waitFor("the wake", woken(r));
+    await writeFile(join(fx.cwd, "2026-11-27.md"), "journal");
+    r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "BRIEF TEXT" }));
+    const finished = await running;
+    assert.deepEqual(finished?.files, [{ path: "2026-11-27.md", change: "added" }]);
+    assert.deepEqual(r.out.texts, ["BRIEF TEXT"]);
+  }
+  /* a walk cut at filesWalkMax, only reports/ written: nothing listed, and where the listing stopped */
+  {
+    const { fx, r, running } = await strategyRun({
+      over: { filesWalkMax: 3 },
+      prepare: async (f) => {
+        await mkdir(join(f.dir, "reports"));
+        for (let i = 0; i < 5; i++) await writeFile(join(f.dir, `z${i}.md`), "z");
+      },
+    });
+    await writeFile(join(fx.dir, "reports", "2026-11-30-premarket.md"), "report");
+    r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "REPORT TEXT" }));
+    const finished = await running;
+    assert.equal(finished?.filesTruncated, true);
+    assert.deepEqual(r.out.texts, ["REPORT TEXT", "demo-report · 2026-11-30 wrote outside reports/: nothing listed; the listing stopped at 3 entries"]);
+  }
+  assert.equal(LINES.outsideReports(REPORT_ITEM, ["strategies/demo/b.md", "strategies/demo/a.md"], 2_000),
+    "demo-report · 2026-11-30 wrote outside reports/: strategies/demo/a.md, strategies/demo/b.md; the listing stopped at 2,000 entries");
+});
+
+test("a failed report turn sends P2's could-not-answer line, then any outside-reports line", async () => {
+  for (const endsAt of [undefined, "2026-11-30T14:31:00Z"]) {
+    const { fx, r, running } = await strategyRun();
+    await writeFile(join(fx.dir, "notes.md"), "notes");
+    if (endsAt !== undefined) r.clock.set(endsAt);
+    r.sup.calls[0].onTurnEnd(turnEnd({ outcome: "failed", error: "429 rate limit", finalText: "" }));
+    const finished = await running;
+    assert.equal(finished?.turn?.outcome, "failed");
+    const turns = (await deskEvents(fx.home)).filter((e) => e.kind === "desk-turn");
+    assert.equal(turns.length, 1);
+    assert.deepEqual(turns.map((e) => (e.kind === "desk-turn" ? [e.source, e.outcome, e.error] : [])), [["schedule", "failed", "429 rate limit"]]);
+    assert.deepEqual(r.out.texts, [
+      "demo-report · 2026-11-30 could not answer: 429 rate limit; nothing was done",
+      "demo-report · 2026-11-30 wrote outside reports/: strategies/demo/notes.md",
+    ], `an empty text is a line, never withheld (${endsAt ?? "before the open"})`);
+    assert.equal(finished?.withheld, undefined);
+  }
+});
+
+test("a strategy whose analysis/ holds 2,100 files, with a turn that writes only reports/, sends no outside-reports line", async () => { // R1
+  const run = "20261127T120000Z-demo";
+  const { fx, r, running } = await strategyRun({
+    prepare: async (f) => {
+      await mkdir(join(f.dir, "analysis", run), { recursive: true });
+      await mkdir(join(f.dir, "reports"));
+      await Promise.all(Array.from({ length: 2_100 }, (_, i) => writeFile(join(f.dir, "analysis", run, `f${i}.json`), "{}")));
+    },
+  });
+  await writeFile(join(fx.dir, "reports", "2026-11-30-premarket.md"), "report");
+  await writeFile(join(fx.dir, "analysis", run, "x.json"), "{}");
+  r.sup.calls[0].onTurnEnd(turnEnd({ finalText: "REPORT TEXT" }));
+  const finished = await running;
+  assert.deepEqual(finished?.files, [{ path: "reports/2026-11-30-premarket.md", change: "added" }]);
+  assert.equal(finished?.filesTruncated, undefined);
+  assert.deepEqual(r.out.texts, ["REPORT TEXT"]);
+  /* the walk's seam: top-level names left out, a deeper one of the same name walked */
+  await mkdir(join(fx.dir, "notes", "analysis"), { recursive: true });
+  await writeFile(join(fx.dir, "notes", "analysis", "n.md"), "n");
+  const walked = await snapshotFiles(fx.dir, FILES_WALK_MAX, new Set(["analysis"]));
+  assert.equal(walked.truncated, false);
+  assert.ok(walked.files.has("notes/analysis/n.md"));
+  assert.ok(![...walked.files.keys()].some((path) => path.startsWith("analysis/")));
+});
+
+test("a phoned record is a firing record that reads phoned", () => {
+  const phoned: FiringRecord = { t: "2026-11-30T20:45:00.000Z", kind: "phoned", key: "preclose:2026-11-30", of: "missed" };
+  assert.equal(isFiringRecord(phoned), true);
+  assert.equal(outcomeOf(phoned), "phoned");
 });

@@ -1527,8 +1527,9 @@ test("installDesk starts the watch with a source, shares the US calendar with th
   const rec = recorder();
   const desk = installDesk(rec, {
     ...base, home: h, sessionCtx: fake.ctx, quotes, alertDeadlineMs: 40,
-    schedule: { clock: scheduleClock, calendar: us, calendars: { cn }, tickMs: 86_400_000 },
-    watchRow: { clock: watchClock, tickMs: 5_000, edgar: null, alive: () => false },
+    /* the XSHG calendar only through the watch's seam: the clock row holds it only through installDesk's one pair */
+    schedule: { clock: scheduleClock, calendar: us, tickMs: 86_400_000 },
+    watchRow: { clock: watchClock, tickMs: 5_000, edgar: null, alive: () => false, calendars: { cn } },
   });
   assert.ok(desk.watchRow !== undefined, "watchRow given: the handle is promised, with no telegram config");
   handle = await desk.watchRow;

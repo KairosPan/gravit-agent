@@ -220,7 +220,9 @@ export interface RunResult {
 
 /** Run `argv` under an interpreter the runner was made with. Never rejects: every ending is a {@link RunResult}.
  * `signal`, when given, ends the run as {@link ABORTED} when it aborts - the firing's deadline, the schedule's dispose,
- * the face's shutdown (ruling 8). */
+ * the face's shutdown (ruling 8). A runner must honour it: a script producer's run is awaited to its end (src/firing.ts),
+ * so a runner that ignores the signal holds the firing - and every firing queued behind it - until the producer's own
+ * deadline. */
 export type ProducerRunner = (
   argv: string[],
   opts: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; stdin?: string; signal?: AbortSignal },

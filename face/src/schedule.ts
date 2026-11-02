@@ -29,9 +29,15 @@
  * the new file, which is the only one the once-only append reads.
  *
  * THE RUNNER takes one firing at a time, in queue order - a queued one runs even past its grace (P2-11) - and for
- * each: the order looked up again in the last load; src/firing.ts `checkFiring`, whose refusal is recorded once per
- * key and phoned as {@link refusalLine} says - a strategy's `levels.yml` pin among them, checked after the fence; the
- * `started`; then `runFiring`.
+ * each: the order looked up again in the last load; one still queued at its market moment (src/firing.ts `cutoffOf`)
+ * is missed as `cutoff`, once, never checked or started; src/firing.ts `checkFiring`, whose refusal is recorded once
+ * per key and phoned as {@link refusalLine} says - a strategy's `levels.yml` pin among them, checked after the fence;
+ * the `started`; then `runFiring`.
+ *
+ * HELD LINES (P4 ruling 7). A one-shot line the pause holds back is sent again at each tick until it gets through; a
+ * miss, a cut-off or interrupted firing or an expiry written while lines are held says `held`, a refusal held says
+ * `reported: false`, and the line that reaches the phone is followed by a `phoned` record - so the ledger's first read
+ * after a restart holds again the last three days' lines no `phoned` follows.
  *
  * FAILURES never reach the face (P2-21): a tick, the reload, the calendar, the budget's note - each is caught, one
  * `gravit-face: desk: schedule <what>: <reason>` line per distinct failure, and the next tick is armed regardless.
@@ -52,9 +58,9 @@ import type { DeliverResult } from "./desk-conversation.ts";
 import { createDeskAgent, type DeskClock, type DeskSessionDeps, type SessionEventsOn } from "./desk-session.ts";
 import { dateOf } from "./et.ts";
 import {
-  checkFiring, FIRING_SLACK_MS, firingKey, isFiringRecord, LINES, outcomeOf, repoRelative, resolveFiringRoute, runFiring,
-  type ExpiredRecord, type FiringDeps, type FiringItem, type FiringRecord, type InterruptedRecord, type MissedRecord, type Refusal,
-  type RefusedRecord, type StartedRecord, type Verified,
+  checkFiring, cutoffOf, FIRING_SLACK_MS, firingKey, isFiringRecord, LINES, outcomeOf, repoRelative, resolveFiringRoute, runFiring,
+  type ExpiredRecord, type FiringDeps, type FiringItem, type FiringRecord, type InterruptedRecord, type MissedRecord, type PhonedRecord,
+  type Refusal, type RefusedRecord, type StartedRecord, type Verified,
 } from "./firing.ts";
 import { deskCalendars, sessionFor, type DayAnswer, type DeskCalendars, type MarketCalendar, type MarketSession } from "./market-clock.ts";
 export { deskCalendars, type DeskCalendars } from "./market-clock.ts";
@@ -161,8 +167,16 @@ const recordOf = (kind: FiringRecord["kind"], key: string) => (x: unknown): bool
 const refusalDetail = (detail: string, producerDetail: string | undefined): string =>
   (producerDetail === undefined ? detail : `${detail} ${producerDetail}`);
 
-/** The kinds a rotation hands on for today's keys (p2-m28). */
-const CARRIED: ReadonlySet<string> = new Set(["started", "finished", "interrupted", "missed", "refused"]);
+/** The kinds a rotation hands on for today's keys (p2-m28) - a `phoned` for any key a carried line has (P4 ruling 7). */
+const CARRIED: ReadonlySet<string> = new Set(["started", "finished", "interrupted", "missed", "refused", "phoned"]);
+
+/** How far back the ledger's first read looks for a held line no `phoned` follows (P4 ruling 7): three days. */
+const REHOLD_MS = 3 * 86_400_000;
+/** The refusals whose held line a restart sends again: the ones phoned once per change (the fence, each time). */
+const REHELD_REASONS: ReadonlySet<string> = new Set(["hash", "fence", "levels-hash"]);
+
+/** A held line's `phoned` record, as the line carries it until it reaches the phone. */
+type PhonedMark = { key: string; of: PhonedRecord["of"] };
 
 /** The keys the records show ended: a `finished` or an `interrupted`. */
 function endedKeys(records: readonly FiringRecord[]): Set<string> {
@@ -262,41 +276,66 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   };
 
   /** The one-shot lines the pause held back - a missed anchor, a cut-off firing, an expiry, a firing's refusal - in
-   * the order they came, each sent again at every tick until an answer is not `paused`. */
-  const held: string[] = [];
-  /** A one-shot line: sent, or held while the pause holds. */
-  const sendOnce = async (text: string): Promise<boolean> => {
+   * the order they came, each sent again at every tick until an answer is not `paused`; those a record says were held
+   * carry the `phoned` record that follows them to the phone (P4 ruling 7). */
+  const held: { text: string; phoned?: PhonedMark }[] = [];
+  /** A held line's `phoned` record, appended once the line has reached the phone. */
+  const notePhoned = async (mark: PhonedMark): Promise<void> => {
+    const record: PhonedRecord = { t: iso(clock.now()), kind: "phoned", key: mark.key, of: mark.of };
+    await appendRecord(home, FIRINGS_FILE, record, ledgerOpts);
+  };
+  /** Whether a one-shot line written now would be held - one held before it, or the pause in force - read before its
+   * record is appended, so the record says `held` (P4 ruling 7). */
+  const holding = async (): Promise<boolean> => held.length > 0 || !(await deliverable());
+  /** A one-shot line: sent, or held while the pause holds. `phoned`, its `phoned` record once it reaches the phone -
+   * at once too unless `phonedNow` is false: a refusal sent at once says so in its own `reported`. */
+  const sendOnce = async (text: string, phoned?: PhonedMark, phonedNow = true): Promise<boolean> => {
+    const entry = phoned === undefined ? { text } : { text, phoned };
     if (held.length > 0) {
-      held.push(text); // behind the ones held before it, so the phone hears them in order
+      held.push(entry); // behind the ones held before it, so the phone hears them in order
       return false;
     }
     const reached = await send(text);
-    if (!reached) held.push(text);
+    if (!reached) held.push(entry);
+    else if (phoned !== undefined && phonedNow) await notePhoned(phoned);
     return reached;
   };
-  /** The held lines, sent in order until one is held again. */
+  /** The held lines, sent in order until one is held again, each marked one followed by its `phoned` record. */
   const flushHeld = async (): Promise<void> => {
     while (held.length > 0) {
-      if (!(await send(held[0]))) return;
+      const [first] = held;
+      if (!(await send(first.text))) return;
       held.shift();
+      if (first.phoned !== undefined) await notePhoned(first.phoned);
     }
   };
 
   /** What a rotation of the firing ledger hands the new file, as written: today's `started` lines, so the once-only
    * append - which reads the current file alone - still finds today's keys (P2 Task 8's ruling 5); today's
    * `finished`, `interrupted`, `missed` and `refused` lines, so a restart after the rotation reads each carried key
-   * as it ended and phones no false `interrupted`; and the `expired` lines of the loaded orders' expiries, so an
-   * expiry is not phoned twice (p2-m28). The clock row's own appends and a firing's carry it alike. */
+   * as it ended and phones no false `interrupted`; the `expired` lines of the loaded orders' expiries, so an
+   * expiry is not phoned twice (p2-m28); and the `phoned` lines of the keys those carry, so a held line a restart
+   * would send again is not (P4 ruling 7). The clock row's own appends and a firing's carry it alike. */
   const carry = (rotated: string): string[] => {
     const now = clock.now();
     /* either market's today: an A-share firing at 19:00 ET is dated the next Beijing day */
     const today = new Set(MARKETS.map((market) => dateOf(market, now)));
     const expiryKeys = new Set(orders.map((order) => firingKey(order.id, order.expires)));
-    return rotated.split("\n").filter((line) => {
-      const r = lineRecord(line);
-      if (r === undefined) return false;
+    const keeps = (r: FiringRecord): boolean => {
       if (r.kind === "expired") return expiryKeys.has(r.key);
       return CARRIED.has(r.kind) && "date" in r && typeof r.date === "string" && today.has(r.date);
+    };
+    const lines = rotated.split("\n");
+    /* a phoned goes with the line it follows: kept when a kept line has its key */
+    const keys = new Set<string>();
+    for (const line of lines) {
+      const r = lineRecord(line);
+      if (r !== undefined && r.kind !== "phoned" && keeps(r)) keys.add(r.key);
+    }
+    return lines.filter((line) => {
+      const r = lineRecord(line);
+      if (r === undefined) return false;
+      return r.kind === "phoned" ? keys.has(r.key) : keeps(r);
     });
   };
   const ledgerOpts = { log, carry };
@@ -480,10 +519,54 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
 
   /** One `started` the last run left without an end: `interrupted`, recorded once and phoned once. */
   const interrupt = async (r: StartedRecord, now: number): Promise<void> => {
-    const record: InterruptedRecord = { t: iso(now), kind: "interrupted", key: r.key, order: r.order, date: r.date, startedAt: r.t };
+    const isHeld = await holding();
+    const record: InterruptedRecord = {
+      t: iso(now), kind: "interrupted", key: r.key, order: r.order, date: r.date, startedAt: r.t, ...(isHeld ? { held: true as const } : {}),
+    };
     const outcome = await appendRecordOnce(home, FIRINGS_FILE, record, recordOf("interrupted", r.key), ledgerOpts);
     note(record);
-    if (outcome !== "duplicate") await sendOnce(LINES.interrupted(r.order, r.date));
+    if (outcome !== "duplicate") await sendOnce(LINES.interrupted(r.order, r.date), isHeld ? { key: r.key, of: "interrupted" } : undefined);
+  };
+
+  /**
+   * At the ledger's first read, the lines a pause held that never reached the phone (P4 ruling 7), held again in ledger
+   * order: of the records written in the last {@link REHOLD_MS} with no `phoned` of their key and kind after them, a
+   * `held` miss, cut-off firing or expiry, its line as {@link LINES} builds it; and a refusal recorded `reported: false`
+   * - `hash`, `fence` or `levels-hash`, the last of its `<order> <reason> <detail>` - for an order still loaded, whose
+   * line {@link refusalLine} would send now. Each is followed by its `phoned` once it reaches the phone. A record the
+   * operator's edit left without its fields holds nothing.
+   */
+  const rehold = async (records: readonly FiringRecord[], now: number): Promise<void> => {
+    const phonedAt = new Map<string, number>();
+    const lastRefusal = new Map<string, number>();
+    const refusalId = (r: RefusedRecord): string => `${r.order} ${r.reason} ${refusalDetail(String(r.detail), r.producerDetail)}`;
+    records.forEach((r, i) => {
+      if (r.kind === "phoned") phonedAt.set(`${r.of} ${r.key}`, i);
+      else if (r.kind === "refused") lastRefusal.set(refusalId(r), i);
+    });
+    for (const [i, r] of records.entries()) {
+      const t = Date.parse(r.t);
+      if (typeof r.key !== "string" || !("order" in r) || typeof r.order !== "string" || !Number.isFinite(t) || now - t > REHOLD_MS) continue;
+      if ((phonedAt.get(`${r.kind} ${r.key}`) ?? -1) > i) continue;
+      let text: string | undefined;
+      try {
+        if (r.kind === "missed" && r.held === true) text = LINES.missed(r);
+        else if (r.kind === "interrupted" && r.held === true) text = LINES.interrupted(r.order, r.date);
+        else if (r.kind === "expired" && r.held === true) text = LINES.expired(r.order, r.expires);
+        else if (r.kind === "refused" && r.reported === false && REHELD_REASONS.has(r.reason) && typeof r.detail === "string" && lastRefusal.get(refusalId(r)) === i) {
+          const order = orders.find((o) => o.id === r.order);
+          const refusal: Refusal | undefined = r.reason === "hash"
+            ? { reason: "hash", detail: r.detail, ...(typeof r.producerDetail === "string" ? { producerDetail: r.producerDetail } : {}) }
+            : r.reason === "fence" || r.reason === "levels-hash" ? { reason: r.reason, detail: r.detail } : undefined;
+          if (order !== undefined && refusal !== undefined) text = await refusalLine({ order, date: r.date }, refusal, now);
+        }
+      } catch {
+        text = undefined;
+      }
+      if (text !== undefined && (r.kind === "missed" || r.kind === "interrupted" || r.kind === "expired" || r.kind === "refused")) {
+        held.push({ text, phoned: { key: r.key, of: r.kind } });
+      }
+    }
   };
 
   /** The ledger read - every key it holds, every firing a restart cut off - or `false`, with its line once per
@@ -508,6 +591,8 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     /* a re-read after a failure knows the records already noted */
     if (!first) return true;
     for (const r of records) note(r);
+    /* the lines a pause held when the last run ended, before the cut-off firings it left: the older first */
+    await rehold(records, now);
     const ended = endedKeys(records);
     for (const r of records) {
       if (r.kind !== "started" || typeof r.key !== "string" || typeof r.order !== "string" || typeof r.date !== "string" || ended.has(r.key)) continue;
@@ -519,6 +604,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
       }
       await interrupt(r, now);
     }
+    await flushHeld();
     return true;
   };
 
@@ -586,23 +672,46 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     expiredAt.set(order.id, now);
     const key = firingKey(order.id, order.expires);
     if (expiries.has(key)) return;
-    const record: ExpiredRecord = { t: iso(now), kind: "expired", key, order: order.id, date: order.expires, expires: order.expires };
+    const isHeld = await holding();
+    const record: ExpiredRecord = {
+      t: iso(now), kind: "expired", key, order: order.id, date: order.expires, expires: order.expires, ...(isHeld ? { held: true as const } : {}),
+    };
     const outcome = await appendRecordOnce(home, FIRINGS_FILE, record, recordOf("expired", key), ledgerOpts);
     note(record);
-    if (outcome !== "duplicate") await sendOnce(LINES.expired(order.id, order.expires));
+    if (outcome !== "duplicate") await sendOnce(LINES.expired(order.id, order.expires), isHeld ? { key, of: "expired" } : undefined);
   };
 
   /** An anchor found past its grace: why, recorded and phoned once. */
   const miss = async (order: StandingOrder, key: string, date: string, anchorMs: number, now: number, since: number | undefined): Promise<void> => {
     const asleep = since !== undefined && now - since > ASLEEP_THRESHOLD_MS && since <= anchorMs ? { from: iso(since), to: iso(now) } : undefined;
+    const isHeld = await holding();
     const record: MissedRecord = {
       t: iso(now), kind: "missed", key, order: order.id, date, anchor: iso(anchorMs),
       why: asleep !== undefined ? "asleep" : anchorMs < bootedAt ? "down" : "late",
-      ...(asleep === undefined ? {} : { asleep }), foundAt: iso(now),
+      ...(asleep === undefined ? {} : { asleep }), foundAt: iso(now), ...(isHeld ? { held: true as const } : {}),
     };
     const outcome = await appendRecordOnce(home, FIRINGS_FILE, record, recordOf("missed", key), ledgerOpts);
     note(record);
-    if (outcome !== "duplicate") await sendOnce(LINES.missed(record));
+    if (outcome !== "duplicate") await sendOnce(LINES.missed(record), isHeld ? { key, of: "missed" } : undefined);
+  };
+
+  /** A firing still queued at its market moment (src/firing.ts `cutoffOf`): missed as `cutoff`, never checked or
+   * started, its record appended only when the key holds no `started` or `missed` - of two faces on one home, the one
+   * that ran it settles it - and its line phoned with it. A duplicate settles the key with no line. */
+  const cutOff = async (item: FiringItem, now: number): Promise<void> => {
+    const isHeld = await holding();
+    const record: MissedRecord = {
+      t: iso(now), kind: "missed", key: item.key, order: item.order.id, date: item.date, anchor: iso(item.anchorMs),
+      why: "cutoff", moment: item.order.anchor.kind === "close" ? "close" : "open", foundAt: iso(now), ...(isHeld ? { held: true as const } : {}),
+    };
+    const outcome = await appendRecordOnce(home, FIRINGS_FILE, record, (x) => (recordOf("started", item.key)(x) || recordOf("missed", item.key)(x)), ledgerOpts);
+    if (outcome === "duplicate") {
+      /* settled by the other face's started or missed, whichever: no tick weighs it again */
+      missed.add(item.key);
+      return;
+    }
+    note(record);
+    await sendOnce(LINES.missed(record), isHeld ? { key: item.key, of: "missed" } : undefined);
   };
 
   /** One order on one session: queued when due, recorded when missed. */
@@ -799,7 +908,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
 
   /** The phone's line for a refusal recorded now, or `undefined`: `off` never; `budget` with the day's note; `hash`,
    * `producer-hash` and `levels-hash` when the order's last phoned detail for that reason differs; `fence` always. */
-  const refusalLine = async (item: FiringItem, refusal: Refusal, now: number): Promise<string | undefined> => {
+  const refusalLine = async (item: Pick<FiringItem, "order" | "date">, refusal: Refusal, now: number): Promise<string | undefined> => {
     const { order, date } = item;
     switch (refusal.reason) {
       case "off":
@@ -817,7 +926,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
         return LINES.changed(order.id, date, both === undefined ? path : [path, scriptOf(order)]);
       }
       case "fence":
-        return LINES.fence(order.id, date, refusal.detail);
+        return LINES.fence(item, refusal.detail);
       case "levels-hash": {
         const told = `${order.id} levels-hash`;
         if (phonedDetail.get(told) === refusal.detail) return undefined;
@@ -836,8 +945,9 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     const last = refusals.get(item.key);
     if (last !== undefined && last.reason === refusal.reason && last.detail === (detail === undefined ? undefined : refusalDetail(detail, producerDetail))) return;
     const line = await refusalLine(item, refusal, now);
-    /* its line held back by the pause is no report: `reported: false`, and the line goes out once the pause lifts */
-    const reported = line !== undefined && (await sendOnce(line));
+    /* its line held back by the pause is no report: `reported: false`, and the line goes out once the pause lifts,
+     * a `phoned` record after it */
+    const reported = line !== undefined && (await sendOnce(line, { key: item.key, of: "refused" }, false));
     const record: RefusedRecord = {
       t: iso(now), kind: "refused", key: item.key, order: item.order.id, date: item.date, reason: refusal.reason,
       ...(detail === undefined ? {} : { detail }), ...(producerDetail === undefined ? {} : { producerDetail }), reported,
@@ -856,6 +966,12 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
       return;
     }
     const item: FiringItem = { ...queued, order };
+    /* still queued at its market moment: missed, never checked or started (P2-11's cut-off at start) */
+    const cutoff = cutoffOf(item);
+    if (cutoff !== undefined && clock.now() >= cutoff) {
+      await cutOff(item, clock.now());
+      return;
+    }
     const verdict = await firing.check(deps, order);
     notePins(order, verdict);
     if ("refuse" in verdict) {

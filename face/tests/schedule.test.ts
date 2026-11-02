@@ -1029,9 +1029,11 @@ test("a rotation of firings.jsonl hands the day's started lines and their ends t
   const yesterday = startedOn("preclose:2026-11-25", "2026-11-25", "2026-11-25T20:30:10.000Z");
   const today = startedOn("noon:2026-11-27", "2026-11-27", "2026-11-27T17:00:10.000Z");
   const pad = JSON.stringify({ pad: "x".repeat(50 * 1024 * 1024) });
+  /* a phoned goes with its key's lines: today's carried, yesterday's left behind (P4 ruling 7) */
+  const phoned = (key: string, t: string): string => JSON.stringify({ t, kind: "phoned", key, of: "refused" });
   await writeFile(ledgerPath(fx.home), [
-    yesterday, ended("preclose:2026-11-25", "2026-11-25", "2026-11-25T20:34:00.000Z"), pad,
-    today, ended("noon:2026-11-27", "2026-11-27", "2026-11-27T17:04:00.000Z"), "",
+    yesterday, ended("preclose:2026-11-25", "2026-11-25", "2026-11-25T20:34:00.000Z"), phoned("preclose:2026-11-25", "2026-11-25T20:35:00.000Z"), pad,
+    today, ended("noon:2026-11-27", "2026-11-27", "2026-11-27T17:04:00.000Z"), phoned("noon:2026-11-27", "2026-11-27T17:05:00.000Z"), "",
   ].join("\n"));
   const r = rig(fx, "2026-11-27T17:30:00Z");
   await at(r, "2026-11-27T17:30:10Z");
@@ -1041,7 +1043,8 @@ test("a rotation of firings.jsonl hands the day's started lines and their ends t
   const lines = (await readFile(ledgerPath(fx.home), "utf8")).split("\n").filter(Boolean);
   assert.equal(lines[0], today, "today's started, as written, opens the new file");
   assert.equal(lines[1], ended("noon:2026-11-27", "2026-11-27", "2026-11-27T17:04:00.000Z"), "with its finished: the key ended (p2-m28)");
-  assert.deepEqual(lines.slice(2).map((line) => [JSON.parse(line).kind, JSON.parse(line).key]), [
+  assert.equal(lines[2], phoned("noon:2026-11-27", "2026-11-27T17:05:00.000Z"), "and the phoned that followed its line");
+  assert.deepEqual(lines.slice(3).map((line) => [JSON.parse(line).kind, JSON.parse(line).key]), [
     ["started", "preclose:2026-11-27"],
     ["finished", "preclose:2026-11-27"],
   ], "and nothing else of the old file came with it");
@@ -1532,4 +1535,178 @@ test("deskBuiltins: both builtins over the one source, a seam replaces only its 
   assert.equal(unwired.ok, false);
   assert.equal(!unwired.ok && unwired.error, `quotes unavailable: ${unwiredMarketQuotes().unavailable}`);
   assert.equal(JSON.parse(unwired.text ?? "{}").takenAt, "08:00:05 ET", "the report reads the schedule's clock");
+});
+
+/* ---------- P4 Task 4: the cut-off at start, held lines across a restart ---------- */
+
+/** strategies/<name>/{STANDING.md, levels.yml} for each name, and an open-90m report entry `id` for each. */
+async function strategies(fx: Fixture, pairs: [id: string, name: string][]): Promise<ArmEntry[]> {
+  const entries: ArmEntry[] = [];
+  for (const [id, name] of pairs) {
+    const dir = join(fx.root, "strategies", name);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "STANDING.md"), STANDING);
+    await writeFile(join(dir, "levels.yml"), LEVELS);
+    entries.push({ ...REPORT_ENTRY, id, dir: `strategies/${name}` });
+  }
+  return entries;
+}
+
+/** A hold that waits `ms` on the firing's clock for the keys it names, and none for the rest. */
+const holdFor = (ms: Record<string, number>) => async (call: RunCall, deps: FiringDeps): Promise<void> => {
+  const wait = ms[call.key];
+  if (wait !== undefined) await new Promise<void>((done) => { deps.clock.setTimeout(done, wait); });
+};
+
+test("reports at one anchor run in file order, and one still queued at the open is missed, never started", async () => { // RF 3
+  const fx = await fixture();
+  await arm(fx.home, await strategies(fx, [["a", "sa"], ["b", "sb"], ["c", "sc"]]));
+  const r = rig(fx, "2026-11-30T12:59:00Z", { hold: holdFor({ "a:2026-11-30": 2_700_000, "b:2026-11-30": 2_760_000 }) });
+  r.clock.set("2026-11-30T13:00:10Z");
+  await r.schedule.tick();
+  await waitFor("a's run", () => r.runs.length === 1);
+  await r.clock.advance(2_700_000);
+  await waitFor("b's run", () => r.runs.length === 2);
+  assert.deepEqual(await ofKind(fx.home, "missed"), [], "b reached at 13:45:10Z, before the open: run, not missed");
+  await r.clock.advance(2_760_000);
+  await idle(r.schedule);
+  assert.deepEqual(r.runs.map((call) => [call.key, iso(call.at)]), [["a:2026-11-30", "2026-11-30T13:00:10.000Z"], ["b:2026-11-30", "2026-11-30T13:45:10.000Z"]]);
+  const missed = await ofKind(fx.home, "missed");
+  assert.deepEqual(missed.map((x) => [x.key, x.why, x.foundAt]), [["c:2026-11-30", "cutoff", "2026-11-30T14:31:10.000Z"]]);
+  assert.deepEqual((await ofKind(fx.home, "started")).map((x) => x.key), ["a:2026-11-30", "b:2026-11-30"], "c never started");
+  assert.equal(r.schedule.status().orders.find((o) => o.id === "c")?.hash, "unknown", "and never checked");
+  assert.deepEqual(r.out.texts, ["c · 2026-11-30 missed its 08:00 ET anchor: it was still queued at the open, behind other firings. A standing order never runs late"]);
+  assert.equal(LINES.missed(missed[0]), r.out.texts[0], "the record carries its line");
+  await at(r, "2026-11-30T14:31:40Z");
+  assert.equal(r.out.texts.length, 1, "missed once");
+  await r.schedule.dispose();
+
+  /* a close-anchored firing still queued at the close */
+  const fy = await fixture();
+  await arm(fy.home, [ENTRY, { ...ENTRY, id: "second" }]);
+  const s = rig(fy, "2026-11-30T20:29:00Z", { hold: holdFor({ "preclose:2026-11-30": 1_860_000 }) });
+  s.clock.set("2026-11-30T20:30:10Z");
+  await s.schedule.tick();
+  await waitFor("preclose's run", () => s.runs.length === 1);
+  await s.clock.advance(1_860_000);
+  await idle(s.schedule);
+  assert.deepEqual(s.runs.map((call) => call.key), ["preclose:2026-11-30"]);
+  assert.deepEqual(s.out.texts, ["second · 2026-11-30 missed its 15:30 ET anchor: it was still queued at the close, behind other firings. A standing order never runs late"]);
+  await s.schedule.dispose();
+});
+
+test("two schedules record a cut-off once, never for a firing the other ran", async () => { // RF 3
+  const fx = await fixture();
+  await arm(fx.home, await strategies(fx, [["a", "sa"], ["b", "sb"], ["c", "sc"]]));
+  const one = rig(fx, "2026-11-30T12:59:00Z", { hold: holdFor({ "a:2026-11-30": 2_700_000 }) });
+  const two = rig(fx, "2026-11-30T12:59:00Z", { hold: holdFor({ "b:2026-11-30": 5_460_000 }) });
+  one.clock.set("2026-11-30T13:00:10Z");
+  two.clock.set("2026-11-30T13:00:10Z");
+  await one.schedule.tick();
+  await waitFor("face 1 runs a", () => one.runs.length === 1);
+  await two.schedule.tick();
+  await waitFor("face 2 skips a and runs b", () => two.runs.length === 1);
+  assert.deepEqual(two.runs.map((call) => call.key), ["b:2026-11-30"]);
+  await one.clock.advance(2_700_000);
+  await idle(one.schedule);
+  assert.deepEqual(one.runs.map((call) => [call.key, iso(call.at)]), [["a:2026-11-30", "2026-11-30T13:00:10.000Z"], ["c:2026-11-30", "2026-11-30T13:45:10.000Z"]], "face 1 skips b and runs c before the open");
+  await two.clock.advance(5_460_000);
+  await idle(two.schedule);
+  assert.deepEqual(two.runs.map((call) => call.key), ["b:2026-11-30"], "face 2 reaches c at 14:31:10Z and never runs it");
+  assert.deepEqual(await ofKind(fx.home, "missed"), [], "the other face's started settles it: no cut-off");
+  assert.deepEqual([...one.out.texts, ...two.out.texts], []);
+  assert.deepEqual((await ofKind(fx.home, "started")).map((x) => x.key).sort(), ["a:2026-11-30", "b:2026-11-30", "c:2026-11-30"]);
+  await at(two, "2026-11-30T14:32:00Z");
+  assert.deepEqual(await ofKind(fx.home, "missed"), [], "and a later tick misses nothing");
+  await Promise.all([one.schedule.dispose(), two.schedule.dispose()]);
+});
+
+test("a line held by the pause is sent after a restart, once", async () => { // RF 5
+  const fx = await fixture();
+  await arm(fx.home, [ENTRY]);
+  let paused = true;
+  /* the rig's deliver answers paused while OFF is set; what reached the phone, in order */
+  const reached: string[] = [];
+  const answer = (text: string): DeliverResult => {
+    if (paused) return { undelivered: "paused" };
+    reached.push(text);
+    return { sent: [reached.length] };
+  };
+  const r1 = rig(fx, "2026-11-30T20:00:00Z", { answer });
+  await writeOff(fx.home, { by: "terminal" }, () => r1.clock.now());
+  await at(r1, "2026-11-30T20:00:00Z");
+  /* asleep across the 20:30Z anchor */
+  await at(r1, "2026-11-30T20:40:00Z");
+  const [missed] = await ofKind(fx.home, "missed");
+  assert.deepEqual([missed?.why, missed?.held], ["asleep", true]);
+  assert.deepEqual(reached, [], "nothing reached the phone");
+  await r1.schedule.dispose();
+
+  await clearOff(fx.home, "terminal", () => Date.parse("2026-11-30T20:45:00Z"));
+  paused = false;
+  const r2 = rig(fx, "2026-11-30T20:45:00Z", { answer });
+  await at(r2, "2026-11-30T20:45:00Z");
+  assert.deepEqual(reached, [LINES.missed(missed)], "the held line, once");
+  assert.deepEqual((await ofKind(fx.home, "phoned")).map((x) => [x.key, x.of]), [[missed.key, "missed"]]);
+  const records = await firings(fx.home);
+  assert.equal(records.at(-1)?.kind, "phoned", "the phoned record follows the line");
+  await at(r2, "2026-11-30T20:45:30Z");
+  await r2.schedule.dispose();
+
+  const r3 = rig(fx, "2026-11-30T20:50:00Z", { answer });
+  await at(r3, "2026-11-30T20:50:00Z");
+  assert.deepEqual(reached, [LINES.missed(missed)], "a third face sends nothing");
+  assert.equal(r3.schedule.status().orders[0].last?.kind, "missed", "the status lists the miss, never the phoned");
+  await r3.schedule.dispose();
+});
+
+test("a fence line held by the pause reaches the phone after a restart once; a hash refusal already phoned is not held again", async () => {
+  {
+    const fx = await strategyFixture();
+    await arm(fx.home, [REPORT_ENTRY]);
+    await writeFile(join(fx.dir, "GRAVIT.md"), "steer\n");
+    let paused = true;
+    const reached: string[] = [];
+    const answer = (text: string): DeliverResult => {
+      if (paused) return { undelivered: "paused" };
+      reached.push(text);
+      return { sent: [reached.length] };
+    };
+    const r1 = rig(fx, "2026-11-30T13:00:00Z", { answer });
+    await at(r1, "2026-11-30T13:00:10Z");
+    const [refused] = await ofKind(fx.home, "refused");
+    assert.deepEqual([refused?.reason, refused?.detail, refused?.reported], ["fence", "strategies/demo/GRAVIT.md", false]);
+    await r1.schedule.dispose();
+
+    paused = false;
+    const r2 = rig(fx, "2026-11-30T13:10:00Z", { answer });
+    await at(r2, "2026-11-30T13:10:00Z");
+    const fence = "demo-report · 2026-11-30 refused: strategies/demo/GRAVIT.md exists; it would steer every turn in strategies/demo. Remove it.";
+    assert.deepEqual(reached, [fence], "the held fence line, once");
+    assert.deepEqual((await ofKind(fx.home, "phoned")).map((x) => [x.key, x.of]), [["demo-report:2026-11-30", "refused"]]);
+    await r2.schedule.dispose();
+    const r3 = rig(fx, "2026-11-30T13:20:00Z", { answer });
+    await at(r3, "2026-11-30T13:20:00Z");
+    assert.deepEqual(reached, [fence], "and never again");
+    await r3.schedule.dispose();
+  }
+  {
+    const fx = await fixture();
+    await arm(fx.home, [ENTRY]);
+    await writeFile(join(fx.root, "desk", "STANDING.md"), "# changed\n");
+    const r1 = rig(fx, "2026-11-24T20:30:00Z");
+    await at(r1, "2026-11-24T20:30:10Z");
+    await at(r1, "2026-11-25T20:30:10Z");
+    assert.deepEqual((await ofKind(fx.home, "refused")).map((x) => [x.key, x.reason, x.reported]), [
+      ["preclose:2026-11-24", "hash", true],
+      ["preclose:2026-11-25", "hash", false],
+    ], "the next day's same detail has no line");
+    assert.equal(r1.out.texts.length, 1);
+    await r1.schedule.dispose();
+    const r2 = rig(fx, "2026-11-25T20:40:00Z");
+    await at(r2, "2026-11-25T20:40:00Z");
+    assert.deepEqual(r2.out.texts, [], "a restart sends nothing for either");
+    assert.deepEqual(await ofKind(fx.home, "phoned"), []);
+    await r2.schedule.dispose();
+  }
 });

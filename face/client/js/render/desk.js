@@ -1,8 +1,8 @@
 // face/client/js/render/desk.js — the Desk tab inside Markets (plan 2026-11-01-desk-p3-watch Task 11, ruling 15), from
 // host/desk-view.js's view: the desk's status and its one control, Pause — no Resume and no arming, both the terminal's
 // (spec §5.7) — then the watch by market with each market's today, today's alerts, the levels as loaded and the refused
-// files, the standing orders and their firings, and the runs and sleep gaps. Every word is the view's; this module lays
-// them out in the Markets screen's sections and lines.
+// files, the standing orders - each linking its last firing's session - and their firings, and the runs and sleep gaps.
+// Every word is the view's; this module lays them out in the Markets screen's sections and lines.
 import { esc } from '../html.js';
 
 const note = text => (text ? `<p class="mk-note">${esc(text)}</p>` : '');
@@ -11,6 +11,8 @@ const section = (label, inner) => `<section class="dsec" aria-label="${esc(label
 const line = (mark, t1, t2 = '', markClass = '') => `<div class="mk-line"><span class="mk-mark${markClass ? ` ${markClass}` : ''}">${mark}</span><div class="mk-line-b"><div class="mk-t1">${t1}</div>${t2 ? `<div class="mk-t2">${t2}</div>` : ''}</div></div>`;
 const feed = lines => (lines.length ? `<div class="mk-feed">${lines.join('')}</div>` : '');
 const tag = text => `<span class="mk-tag">${esc(text)}</span>`;
+// the session an order's last firing woke, on the Messages route (P4 ruling 6): its report, read where it was said
+const sessionLink = id => (id ? `<a href="#/messages/${esc(encodeURIComponent(id))}">its session</a>` : '');
 
 /** The Desk tab: `view` deskViewOf's (null before a status has landed), `read` the slice's `{ status, message }` — the last
  *  failure's sentence (kept while the next read is on its way, cleared when one answers) said over the view kept, or, with
@@ -35,7 +37,8 @@ export function renderDeskTab(view, read = {}) {
   // an order's anchor leads its state only when the state is when it next falls, as src/desk.ts orderState says it; an
   // A-share order's market leads both, as standingLines prints it
   const standing = feed([...view.standingNotes.map(n => line('·', esc(n))),
-    ...view.standing.map(o => line('·', esc(`standing ${o.id}: ${o.market === 'cn' ? 'market cn, ' : ''}${o.timed ? `${o.anchor}, ` : ''}${o.next}`), esc([o.hash === 'ok' ? '' : o.hash, o.last].filter(Boolean).join(' · '))))]);
+    ...view.standing.map(o => line('·', esc(`standing ${o.id}: ${o.market === 'cn' ? 'market cn, ' : ''}${o.timed ? `${o.anchor}, ` : ''}${o.next}`),
+      [esc([o.hash === 'ok' ? '' : o.hash, o.last].filter(Boolean).join(' · ')), sessionLink(o.sessionId)].filter(Boolean).join(' · ')))]);
   const firings = view.firings.length ? feed(view.firings.map(f => line('·', esc(`${f.when} · ${f.order}`), esc(f.kind === f.outcome ? f.kind : `${f.kind} · ${f.outcome}`)))) : empty('No firings yet.');
   const runs = feed([...view.runs.map(r => line('·', `${esc(`${r.bootedAt} · pid ${r.pid}`)}${r.lost ? ` ${tag('lost')}` : ''}`)),
     ...view.asleep.map(g => line('·', esc(`asleep ${g.from}–${g.to}`), esc(g.gap)))]);

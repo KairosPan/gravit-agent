@@ -25,8 +25,8 @@ export const ARCHIVED_KEY = "__archived";
 export const UNGROUPED_KEY = "__ungrouped";
 
 /** Sentinel bucket key for the desk's sessions — never a real `workspaceId`,
- * and no `bot:` key. The strategy list does not show this bucket: the Desk
- * panel (desk-panel.js) lists the desk's sessions instead. */
+ * and no `bot:` key. The conversation list shows it as one Desk group, right
+ * after the root channel (host/list-view.js). */
 export const DESK_KEY = "__desk";
 
 /** Sentinel PREFIX for a bot's home sessions: `bot:<id>` — never a real `workspaceId`. */
