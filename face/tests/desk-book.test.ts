@@ -737,6 +737,37 @@ test("each bad rule is refused by index with its reason, and the rest load", asy
   assert.deepEqual(r.entries, want);
 });
 
+test("a repeated id after a refused first rule loads neither; after a loaded one, the first stands", async () => {
+  const r = await loadRules(await fixture(`- id: twice
+  kind: move_pct
+  symbols: holdings
+  move_pct: 99
+- id: twice
+  kind: move_pct
+  symbols: holdings
+  move_pct: 2
+- id: twice
+  kind: gap
+  symbols: levels
+  gap_pct: 2
+- id: once
+  kind: gap
+  symbols: levels
+  gap_pct: 2
+- id: once
+  kind: gap
+  symbols: levels
+  gap_pct: 3
+`), RULES);
+  assert.deepEqual(r.refusals, [
+    { file: RULES, index: 0, reason: "move_pct must be a number above 0 and at most 50" },
+    { file: RULES, index: 1, reason: "twice is defined twice; neither entry loads" },
+    { file: RULES, index: 2, reason: "twice is defined twice; neither entry loads" },
+    { file: RULES, index: 4, reason: "once is defined twice; the first stands" },
+  ]);
+  assert.deepEqual(r.entries.map((e) => [e.index, e.id]), [[3, "once"]]);
+});
+
 test("past 20 rules, one refusal", async () => {
   const rule = (n: number): string => `- id: move-${n}\n  kind: move_pct\n  symbols: holdings\n  move_pct: 2\n`;
   const r = await loadRules(await fixture(Array.from({ length: 23 }, (_, i) => rule(i + 1)).join("")), RULES);

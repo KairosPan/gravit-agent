@@ -57,12 +57,15 @@
  * whole file was read: loaded, or refused as not UTF-8, not YAML or not a list.
  *
  * A RULE (`desk/rules.yml`, tracked: it holds no position and no price). `id`, spelled like a standing order's
- * (`^[a-z][a-z0-9-]{0,39}$`), once per file; `kind`, move_pct, gap or filing - a halt rule is refused, since the
+ * (`^[a-z][a-z0-9-]{0,39}$`); `kind`, move_pct, gap or filing - a halt rule is refused, since the
  * Market's read carries no trading status; `symbols`, the word `holdings`, the word `levels`, or a non-empty list
  * of tickers, A shares and those two words, never `on:`; `move_pct` or `gap_pct`, above 0 and at most
  * {@link RULE_PCT_MAX}, each only on its own kind; `forms`, only on a filing rule, a list of 8-K, 8-K/A and 4, all
- * three by default; `cooldown`, the level's grammar, 30m by default, on any kind but gap; `annotate`, false by
- * default, and true only with a `plan`, one line of at most 300 characters. A filing rule lists no A share -
+ * three by default; `cooldown`, the level's grammar, 30m by default, on any kind but gap - a kind's own key left
+ * empty on another kind counts as absent, as any empty optional key does; `annotate`, false by default, and true
+ * only with a `plan`, one line of at most 300 characters. An id is defined once: a second rule with it is refused
+ * `<id> is defined twice; the first stands`, or `...; neither entry loads` when the first was refused, as a held
+ * symbol is. A filing rule lists no A share -
  * filings are SEC's - but `holdings` or `levels` may hold one, and filings.ts skips it. At most {@link RULES_MAX}.
  *
  * MODULE WEIGHT. It imports standing.ts, and js-yaml with it, so the pause switch (scripts/desk.ts) never
@@ -277,6 +280,16 @@ function cooldownMs(value: unknown): number | undefined {
   return minutes >= COOLDOWN_MIN_MINUTES && minutes <= COOLDOWN_MAX_MINUTES ? minutes * 60_000 : undefined;
 }
 
+/** Why a cooldown is refused: the level's and the rule's one reason. */
+function cooldownFault(value: unknown): { reason: string } {
+  return { reason: `cooldown must be <n>m, from ${COOLDOWN_MIN_MINUTES}m to ${COOLDOWN_MAX_MINUTES}m (got ${shown(value)})` };
+}
+
+/** Why an annotate is refused: the level's and the rule's one reason. */
+function annotateFault(value: unknown): { reason: string } {
+  return { reason: `annotate must be true or false (got ${shown(value)})` };
+}
+
 /* ---------- the entries ---------- */
 
 /** One entry, judged: what it loads as, or why it is refused. */
@@ -379,11 +392,11 @@ function judgeLevel(raw: unknown, index: number, file: string, today: string): V
   if (expires < today) return { reason: `expired ${expires}` };
 
   const annotate = raw.annotate === undefined || raw.annotate === null ? true : raw.annotate;
-  if (typeof annotate !== "boolean") return { reason: `annotate must be true or false (got ${shown(raw.annotate)})` };
+  if (typeof annotate !== "boolean") return annotateFault(raw.annotate);
 
   const cooldown = raw.cooldown === undefined || raw.cooldown === null ? DEFAULT_LEVEL_COOLDOWN_MS : cooldownMs(raw.cooldown);
   if (cooldown === undefined) {
-    return { reason: `cooldown must be <n>m, from ${COOLDOWN_MIN_MINUTES}m to ${COOLDOWN_MAX_MINUTES}m (got ${shown(raw.cooldown)})` };
+    return cooldownFault(raw.cooldown);
   }
 
   return {
@@ -430,9 +443,19 @@ function filingForms(value: unknown): FilingForm[] | undefined {
   return FILING_FORMS.filter((form) => named.includes(form));
 }
 
-/** One rule, judged, at `index` in `file`. `ids` holds the ids of the rules loaded before it, and takes this
- * rule's when it loads. */
-function judgeRule(raw: unknown, index: number, file: string, ids: Set<string>): Verdict<Rule> {
+/** One rule, judged, at `index` in `file`. `seen` maps each id an earlier rule spelled well to whether that first
+ * rule loaded, and takes this rule's id when it is the first to name it - whatever its verdict. */
+function judgeRule(raw: unknown, index: number, file: string, seen: Map<string, boolean>): Verdict<Rule> {
+  const id = isRecord(raw) && isOrderId(raw.id) ? raw.id : undefined;
+  const first = id === undefined ? undefined : seen.get(id);
+  const verdict = ruleVerdict(raw, index, file, first);
+  if (id !== undefined && first === undefined) seen.set(id, "entry" in verdict);
+  return verdict;
+}
+
+/** One rule's verdict. `first` is whether the first rule with its id loaded; `undefined` when it is that first
+ * rule. */
+function ruleVerdict(raw: unknown, index: number, file: string, first: boolean | undefined): Verdict<Rule> {
   if (!isRecord(raw)) return { reason: "a rule must be a mapping: id, kind, symbols, move_pct, gap_pct, forms, cooldown, annotate, plan" };
   if ("on" in raw) return { reason: 'unknown key "on": a rule names its symbols under symbols:' };
   const unknown = unknownKey(raw, RULE_KEYS);
@@ -441,6 +464,7 @@ function judgeRule(raw: unknown, index: number, file: string, ids: Set<string>):
   if (raw.id === undefined) return { reason: "id is missing" };
   if (!isOrderId(raw.id)) return { reason: `id must be a-z, 0-9 and -, opening with a letter, at most 40 characters (got ${shown(raw.id)})` };
   const id = raw.id;
+  if (first !== undefined) return { reason: `${id} is defined twice; ${first ? "the first stands" : "neither entry loads"}` };
 
   const kind = raw.kind;
   if (kind === "halt") return { reason: "halts need a trading-status feed; the Market's read carries none" };
@@ -474,12 +498,12 @@ function judgeRule(raw: unknown, index: number, file: string, ids: Set<string>):
   if (ruleKind !== "gap") {
     cooldown = raw.cooldown === undefined || raw.cooldown === null ? DEFAULT_LEVEL_COOLDOWN_MS : cooldownMs(raw.cooldown);
     if (cooldown === undefined) {
-      return { reason: `cooldown must be <n>m, from ${COOLDOWN_MIN_MINUTES}m to ${COOLDOWN_MAX_MINUTES}m (got ${shown(raw.cooldown)})` };
+      return cooldownFault(raw.cooldown);
     }
   }
 
   const annotate = raw.annotate === undefined || raw.annotate === null ? false : raw.annotate;
-  if (typeof annotate !== "boolean") return { reason: `annotate must be true or false (got ${shown(raw.annotate)})` };
+  if (typeof annotate !== "boolean") return annotateFault(raw.annotate);
 
   let plan = "";
   if (!isBlank(raw.plan)) {
@@ -488,10 +512,6 @@ function judgeRule(raw: unknown, index: number, file: string, ids: Set<string>):
     plan = line.text;
   }
   if (annotate && plan === "") return { reason: "annotate: true needs a plan: write what the check is for" };
-
-  /* Judged last, against the rules that loaded: the first stands only when it did. */
-  if (ids.has(id)) return { reason: `${id} is defined twice; the first stands` };
-  ids.add(id);
 
   return {
     entry: {
@@ -696,6 +716,6 @@ export async function loadLevels(path: string, file: string, today: string): Pro
  * @returns the rules that load, in file order, with every refusal.
  */
 export async function loadRules(path: string, file: string): Promise<LoadResult<Rule>> {
-  const ids = new Set<string>();
-  return loadBook(path, file, { max: RULES_MAX, capNoun: "rules", judge: (raw, index) => judgeRule(raw, index, file, ids) });
+  const seen = new Map<string, boolean>();
+  return loadBook(path, file, { max: RULES_MAX, capNoun: "rules", judge: (raw, index) => judgeRule(raw, index, file, seen) });
 }
