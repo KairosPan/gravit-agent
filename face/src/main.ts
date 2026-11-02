@@ -392,6 +392,9 @@ desk = installDesk(booted.ctx.webServer, {
   sessionCtx: booted.ctx as unknown as DeskConversationCtxLike,
   installModelSelection: (agentCtx, ref) => installModelSelection(agentCtx as unknown as Context, ref),
   telegram: telegramConfigFromEnv(process.env),
+  /* the watch (src/watch.ts) on the production defaults: the wall clock, the face's calendars, and SEC's filings
+   * only once ALPHA_EDGAR_USER_AGENT names a contact */
+  watchRow: {},
 });
 console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "rows disabled (FACE_DESK=0)"}`);
 /* Every route is mounted: only now may the gateway admit a browser stream

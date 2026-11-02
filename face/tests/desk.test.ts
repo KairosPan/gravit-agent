@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import {
   ALERTS_FILE, ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, EVENTS_FILE, FILINGS_FILE, FIRINGS_FILE, LEDGER_ROTATE_BYTES, MUTE_FILE, MUTE_USAGE, OFF_FILE,
-  WATCH_LEASE_FILE, appendChain, appendEvent, appendRecord, appendRecordOnce, budgetLine, budgetReplyLine, budgetState, clearMute, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastDeskSession, noteBudgetSpent,
+  ALERT_DEADLINE_MS, WATCH_LEASE_FILE, appendChain, appendEvent, appendRecord, appendRecordOnce, budgetLine, budgetReplyLine, budgetState, clearMute, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastDeskSession, noteBudgetSpent,
   muteReplyLine, parseDuration, readBudget, readEvents, readMuteState, readOffState, readRecords, registerDeskRoutes, runsOf, standingLines, writeMute,
   writeOff,
   type BudgetState, type DeskEvent, type DeskStatus, type TurnUsage,
@@ -21,6 +21,8 @@ import type { AgentLike, SessionLike } from "../src/room.ts";
 import type { EventLike } from "../src/room-rules.ts";
 import { renderOrder, sha256Hex, writeStanding, type FiringSummary, type StandingStatus } from "../src/standing.ts";
 import { fakeCalendar, WallClock } from "./desk-fakes.ts";
+import { unwiredMarketQuotes, type MarketQuoteSource } from "../src/market-quotes.ts";
+import { bjDate } from "../src/et.ts";
 import { recorder } from "./route-recorder.ts";
 
 /** Every harness home made with {@link home}, removed once the file's tests are done. */
@@ -1444,4 +1446,87 @@ test("events.jsonl takes the three new kinds", async () => {
   for (const event of fresh) await appendEvent(h, event);
   assert.deepEqual(await readEvents(h), { events: fresh, skipped: 0 });
   assert.deepEqual(runsOf(fresh), [], "no run in them");
+});
+
+/* ---------- P3: the watch row ---------- */
+
+test("installDesk starts the watch with a source, shares the US calendar with the schedule, and disposes schedule, watch, bridge, conversation in order", async () => {
+  assert.equal(ALERT_DEADLINE_MS, 90_000);
+  const h = join(TMP, "watch-home");
+  const root = join(TMP, "repo-watch");
+  await mkdir(join(root, "desk", "journal"), { recursive: true });
+  await writeFile(join(root, "desk", "levels.yml"), [
+    "- symbol: NVDA\n  kind: stop\n  price: 170\n  when: cross_down\n  plan: sell half\n  expires: 2027-12-31\n",
+    "- symbol: \"600519\"\n  kind: watch\n  price: 1400\n  when: cross_down\n  plan: reread the thesis\n  expires: 2027-12-31\n",
+  ].join(""));
+  const timer = fakeTimer();
+  const base = {
+    enabled: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval },
+    root, route: { provider: "stub", model: "echo" }, installModelSelection: () => () => {}, log: () => {},
+  };
+  const asked: string[][] = [];
+  const quotes: MarketQuoteSource = {
+    snapshot: async (assets) => {
+      asked.push(assets.map((a) => a.id));
+      return { ok: true, generated_at: "2026-12-01T02:00:00.000Z", quotes: [], providers: [] };
+    },
+  };
+
+  /* no watchRow, no watch; an unwired source, none either */
+  const none = installDesk(recorder(), { ...base, home: join(TMP, "watch-none"), sessionCtx: conversationRoot(() => "").ctx, quotes });
+  assert.equal(none.watchRow, undefined);
+  await none.dispose(0);
+  const unwired = installDesk(recorder(), {
+    ...base, home: join(TMP, "watch-unwired"), sessionCtx: conversationRoot(() => "").ctx, quotes: unwiredMarketQuotes(), watchRow: { clock: new WallClock("2026-12-01T02:00:00Z") },
+  });
+  assert.equal(await unwired.watchRow, undefined, "a source that cannot answer starts no watch");
+  await unwired.dispose(0);
+
+  const fake = conversationRoot(() => "");
+  const scheduleClock = new WallClock("2026-12-01T02:00:00Z");
+  const watchClock = new WallClock("2026-12-01T02:00:00Z");
+  const us = fakeCalendar({ "2026-11-30": "closed" });
+  const cn = fakeCalendar({ "2026-12-01": { date: "2026-12-01", open: "2026-12-01T01:30:00Z", close: "2026-12-01T07:00:00Z", early: false } }, "fake XSHG", (n) => bjDate(new Date(n)));
+  /* what had stopped when the conversation let go of the bus */
+  const atLetGo: { schedule: number; watch: number; state?: string; lease: boolean }[] = [];
+  let handle: Awaited<NonNullable<ReturnType<typeof installDesk>["watchRow"]>>;
+  const on = fake.ctx.on;
+  fake.ctx.on = (name, listener) => {
+    const off = on(name, listener);
+    return () => {
+      atLetGo.push({ schedule: scheduleClock.pending(), watch: watchClock.pending(), state: handle?.status().state, lease: existsSync(join(deskDir(h), WATCH_LEASE_FILE)) });
+      return off();
+    };
+  };
+  const rec = recorder();
+  const desk = installDesk(rec, {
+    ...base, home: h, sessionCtx: fake.ctx, quotes, alertDeadlineMs: 40,
+    schedule: { clock: scheduleClock, calendar: us, calendars: { cn }, tickMs: 86_400_000 },
+    watchRow: { clock: watchClock, tickMs: 5_000, edgar: null, alive: () => false },
+  });
+  assert.ok(desk.watchRow !== undefined, "watchRow given: the handle is promised, with no telegram config");
+  handle = await desk.watchRow;
+  assert.ok(handle !== undefined);
+  await watchClock.advance(0);
+  await until("the A-share poll", () => asked.length >= 1);
+  assert.equal(handle.status().state, "watching");
+  assert.deepEqual(asked[0], ["cn:600519"]);
+  assert.deepEqual([us.asked, cn.asked], [["2026-11-30"], ["2026-12-01"]], "the schedule's XNYS calendar and the given XSHG one reach the watch");
+  assert.equal(handle.status().markets.us.state, "closed");
+  const routed = JSON.parse(await rec.call("/data/desk/status")) as { body: DeskStatus };
+  assert.equal(routed.body.watch?.state, "watching", "the status route carries the watch");
+
+  /* an alert's annotation turn is cut at alertDeadlineMs */
+  await until("the conversation's start", () => fake.listeners.size === 1);
+  const agent = fake.agents[0];
+  const emit = (type: string, data: Record<string, unknown>): void => {
+    for (const listener of fake.listeners) (listener as (session: { id: string }, event: EventLike) => void)({ id: agent.id }, { type, seq: 0, data });
+  };
+  emit("turn/start", { turn: 1 });
+  emit("user/message", { turn: 1, source: { kind: "alert", alert: "a-000000000001", symbol: "NVDA" } });
+  await until("the 40 ms alert deadline's cancel", () => agent.cancels.length === 1);
+  emit("turn/end", { turn: 1, reason: { kind: "aborted" } });
+
+  await desk.dispose(0);
+  assert.deepEqual(atLetGo, [{ schedule: 0, watch: 0, state: "stopped", lease: false }], "the clock row and the watch stopped, and the lease released, before the conversation let go");
 });

@@ -30,6 +30,7 @@ import type { AlertMessageSource, DeskSource } from "./desk-session.ts";
 import type { LevelKind, LoadRefusal, Level } from "./desk-book.ts";
 import { cnQuoteTime, quoteTime } from "./desk-tools.ts";
 import { etClock } from "./et.ts";
+import { FILINGS_SYMBOLS_MAX } from "./filings.ts";
 import type { Market } from "./symbols.ts";
 import type { AlertHit, QuoteSnap } from "./watch-eval.ts";
 
@@ -37,9 +38,6 @@ import type { AlertHit, QuoteSnap } from "./watch-eval.ts";
 export const BATCH_ITEMS_MAX = 20;
 /** The longest phone line the watch sends of its own, in characters (code points). */
 const LINE_MAX = 500;
-/** The filings' symbol cap, as the table names it: src/filings.ts's `FILINGS_SYMBOLS_MAX` (Task 8), kept here until
- * that file lands, so the copy loads nothing of the filings'. */
-const FILINGS_MAX = 60;
 
 /** Every line break of any kind, as desk-book.ts's `LINE_BREAK_RE` names them. */
 const LINE_BREAKS_RE = /[\n\r\v\f\u0085\u2028\u2029]+/g;
@@ -243,5 +241,5 @@ export const WATCH_LINES = {
   filingsRefused: (error: string): string =>
     cut(`the watch's filings are off until tomorrow: SEC refused every request (${error}); check ALPHA_EDGAR_USER_AGENT`),
   /** The filings' symbols past their cap. */
-  filingsOverCap: (symbols: readonly string[]): string => cut(`the watch's filings cover ${FILINGS_MAX} symbols; not polled: ${symbols.join(", ")}`),
+  filingsOverCap: (symbols: readonly string[]): string => cut(`the watch's filings cover ${FILINGS_SYMBOLS_MAX} symbols; not polled: ${symbols.join(", ")}`),
 } as const;

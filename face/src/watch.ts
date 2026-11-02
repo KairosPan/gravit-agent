@@ -1,0 +1,1221 @@
+// face/src/watch.ts
+/** The watch row (P3): the desk's eye on the operator's book between turns. It polls the Market's read for the US
+ * shares and the A shares the book names, judges the operator's levels and rules on each print (src/watch-eval.ts),
+ * sends each alert to the phone itself, the plan verbatim (src/alert-text.ts), posts one annotation turn per pass on
+ * the desk conversation, and alerts on a held name's new US filings (src/edgar.ts, src/filings.ts). Nothing here
+ * places, cancels or proposes an order (B2).
+ *
+ * ONE WATCH PER HOME (ruling 7). `watch.lease` (`{ pid, since, beat }`, `0600`) names the face that watches; it
+ * beats every {@link LEASE_BEAT_MS}. A lease whose pid is gone (`ESRCH` or `EPERM`) or whose beat is
+ * {@link LEASE_STALE_MS} old is taken over - a check and a write under P0's lock on the file, then a re-read, so of
+ * two faces only the pid the re-read names watches. Another face's live lease leaves this one `held-elsewhere`,
+ * which it says once per ET date; the lease is retried each tick and released at `dispose` when it is this face's.
+ *
+ * THE TICK, every {@link WATCH_TICK_MS}, each step caught - one `gravit-face: desk: watch <step>: <reason>` line per
+ * distinct failure - and the next tick always armed: the lease; the ET date's line memories; the files (ruling 8:
+ * `desk/levels.yml`, every `strategies/<name>/levels.yml`, `desk/holdings.yml`, `desk/rules.yml`, re-read on an
+ * mtime or size change and on each new ET date, a broken file keeping its last good load, one line per distinct
+ * change); nothing to watch is `idle`, and the tick stops there - no calendar, no poll, no line; the ledgers, read
+ * once before any pass is judged (`alerts.jsonl` into src/watch-eval.ts `rebuildDay`, `filings.jsonl` into
+ * src/filings.ts `baselineFrom`; an unreadable `alerts.jsonl` judges nothing until it reads, with one line); each
+ * market, its calendar's answer for its own date, its window (ruling 2: 10 minutes before the open to a minute after
+ * the close) and a poll when due by its cadence (ruling 3), never two in flight per market; a due batch; an expired
+ * mute lifted; and the filings (ruling 9), one single-flight poll when due, aborted at 120 s.
+ *
+ * A PASS is one market's poll - one snapshot over that market's ids alone - or one filings poll. Its hits are judged
+ * synchronously and go on the send chain in order: the flags read once (OFF and MUTE, then the budget when an alert
+ * would be annotated), each hit recorded with its gate's decision, each send delivered and its delivery recorded, and
+ * then one annotation post on a second chain no pass waits on (ruling 5). A failed poll - rejected, or every quote
+ * `unavailable` - judges nothing and says so once per session date per market; a watched symbol unpriced on its
+ * first {@link UNPRICED_POLLS} polls of a session date says so once (ruling 16).
+ *
+ * A SHARES PAST THE XSHG TABLE. A failed A-share calendar answer once the Beijing date is past `XSHG_COVERED` is no
+ * missing calendar: the session is 09:30-15:00 Beijing on a weekday, marked `uncovered`, said once per Beijing date.
+ *
+ * MODULE WEIGHT. src/desk.ts imports this file on first use, after src/schedule.ts, and only for its types
+ * otherwise (tests/desk-weight.test.ts).
+ * @module
+ */
+import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
+import { join } from "node:path";
+import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
+import { alertText, annotationPost, batchText, priceStamp, stateBody, WATCH_LINES, type DeskStateView, type NearView } from "./alert-text.ts";
+import { listChannelDirs } from "./channels.ts";
+import {
+  ALERTS_FILE, appendChain, clearMute, deskDir, deskTime, EVENTS_FILE, FILINGS_FILE, readMuteState, readOffState, readRecords, WATCH_LEASE_FILE,
+  type BudgetState, type MuteState,
+} from "./desk.ts";
+import {
+  levelDistancePct, loadHoldings, loadLevels, loadRules, resolveSymbols, type Holding, type Level, type LevelKind, type LoadRefusal, type LoadResult, type Rule,
+} from "./desk-book.ts";
+import type { DeliverResult, DeskConversation, PostResult } from "./desk-conversation.ts";
+import type { DeskClock } from "./desk-session.ts";
+import { createEdgar, type Edgar, type EdgarFetch, type EdgarResult } from "./edgar.ts";
+import { bjDate, etDate } from "./et.ts";
+import {
+  allRefused, baselineFrom, diffFilings, FILINGS_ABORT_MS, FILINGS_LOOKBACK_DAYS, FILINGS_STOP_AFTER_MS, filingSymbols, inFilingWindow, isFilingRecord, pollDue,
+  seenKey, type Baseline, type FilingRecord,
+} from "./filings.ts";
+import { HttpError } from "./http.ts";
+import type { DayAnswer, DeskCalendars, MarketSession } from "./market-clock.ts";
+import type { MarketQuoteSource } from "./market-quotes.ts";
+import { idOf, type Market } from "./symbols.ts";
+import {
+  alertId, batchDue, batchId, emptyDay, evaluatePass, gate, isAlertRecord, passId, priceKeys, rebuildDay, snapOf, takeBatch, watchQuoteOf,
+  type AlertAnnotation, type AlertBatch, type AlertDelivered, type AlertHit, type AlertRecord, type Hit, type PriceKey, type WatchDay, type WatchQuote,
+} from "./watch-eval.ts";
+import { XSHG_COVERED } from "./xshg-clock.ts";
+
+/** How often the watch ticks: which polls are due, the lease, the files, the batch, the mute, the filings. */
+export const WATCH_TICK_MS = 5_000;
+/** A US poll's cadence: the proxy's 20 s explore cache (ruling 3). */
+export const WATCH_US_POLL_MS = 20_000;
+/** An A-share poll's cadence: two of the Account's 5 s China quote lives. */
+export const WATCH_CN_POLL_MS = 10_000;
+/** The most US symbols polled. */
+export const WATCH_US_MAX = 40;
+/** The most A-share symbols polled. */
+export const WATCH_CN_MAX = 60;
+/** How long before a market's open its polls begin. */
+export const WATCH_LEAD_MS = 600_000;
+/** How long after its close they go on. */
+export const WATCH_TAIL_MS = 60_000;
+/** How often the face that watches rewrites its lease's beat. */
+export const LEASE_BEAT_MS = 30_000;
+/** How old a beat makes a lease stale. */
+export const LEASE_STALE_MS = 120_000;
+/** The most near levels the status and the desk state carry. */
+export const NEAR_MAX = 10;
+/** The most levels the status's `marks` carries, for the Markets rows. */
+export const MARKS_MAX = 100;
+/** How long the desk state waits for each market's snapshot. */
+export const STATE_QUOTES_TIMEOUT_MS = 3_000;
+/** How many polls of a session date a watched symbol may go unpriced before it is said. */
+export const UNPRICED_POLLS = 3;
+
+/** How near a level is "near", in percent of its last price (ruling 6). */
+const NEAR_PCT = 2;
+/** How long `dispose` waits for the passes, the posts and the chains. */
+const DISPOSE_WAIT_MS = 2_000;
+/** How many alerts the status's `recent` lists. */
+const RECENT_MAX = 10;
+/** How long the watch keeps its records and its dated line memories in memory: the rebuild's 36 hours, with room. */
+const MEMORY_MS = 48 * 3_600_000;
+const DAY_MS = 86_400_000;
+const BIN = "gravit-face";
+const MARKETS: readonly Market[] = ["us", "cn"];
+
+/* ---------- the shapes ---------- */
+
+/** What {@link installWatch} needs. `quotes` is the one source for both markets; `calendars` the desk's two;
+ * `deliver`, `post` and `budget` the desk conversation's; `edgar`, SEC's fetch and contact - none, no filings;
+ * `pid` this face's (`process.pid`), `alive` whether a pid lives (`process.kill(pid, 0)`), `tickMs`, `log`. */
+export interface WatchDeps {
+  home: string;
+  root: string;
+  quotes?: MarketQuoteSource;
+  calendars: DeskCalendars;
+  clock: DeskClock;
+  deliver: (text: string, opts?: { replyTo?: number }) => Promise<DeliverResult>;
+  post: DeskConversation["post"];
+  budget: () => Promise<BudgetState>;
+  edgar?: { fetch: EdgarFetch; userAgent: string };
+  pid?: number;
+  alive?: (pid: number) => boolean;
+  tickMs?: number;
+  log?: (line: string) => void;
+}
+
+/** One of the watch's files as it was last read: `missing` with no file, `error` for one refused whole - its
+ * last good load kept, `entries` counting that - and `loadedAt` its last good load. */
+export interface WatchFileStatus {
+  file: string;
+  kind: "levels" | "holdings" | "rules";
+  missing?: true;
+  entries: number;
+  refusals: LoadRefusal[];
+  error?: string;
+  loadedAt?: string;
+}
+
+/** One alert as the status lists it: `feed` the print's, `latencyMs` the delivered record's `tradeMs` - `null` when
+ * the send was queued or never went. */
+export interface AlertSummary {
+  id: string;
+  t: string;
+  market: Market;
+  symbol: string;
+  label: string;
+  gap: boolean;
+  price: number | null;
+  feed: string | null;
+  outcome: "pending" | "sent" | "queued" | "undelivered" | "suppressed";
+  suppressed?: string;
+  latencyMs: number | null;
+  receivedMs?: number;
+}
+
+/** One market's part of the status. `off`: no source, the source `unavailable`, or no symbol in the market. */
+export interface MarketWatchStatus {
+  state: "off" | "no-calendar" | "closed" | "waiting" | "polling" | "after-close";
+  session?: { date: string; open: string; close: string };
+  watched: number;
+  notWatched: string[];
+  lastPollAt?: string;
+  lastError?: string;
+  uncovered?: true;
+  today: { sent: number; suppressed: Record<"cooldown" | "cap" | "muted" | "off" | "window", number>; repeats: number };
+}
+
+/** A level for the Markets rows: its distance from its symbol's last polled price, `null` before one. */
+export interface WatchMark {
+  market: Market;
+  symbol: string;
+  kind: LevelKind;
+  level: string;
+  when: Level["when"];
+  plan: string;
+  file: string;
+  distancePct: number | null;
+}
+
+/** What the watch reports: `/data/desk/status`'s `watch`. */
+export interface WatchStatus {
+  state: "starting" | "idle" | "held-elsewhere" | "watching" | "stopped";
+  markets: Record<Market, MarketWatchStatus>;
+  holder?: { pid: number; since: string };
+  muted?: MuteState;
+  files: WatchFileStatus[];
+  near: NearView[];
+  marks: WatchMark[];
+  pending: number;
+  recent: AlertSummary[];
+  filings: { state: "off" | "no-contact" | "polling" | "refused-today"; symbols: number; aShares: number; seeded: number; lastPollAt?: string; lastError?: string };
+  ledgerError?: string;
+}
+
+/** The running watch. `tick` runs one tick now (after any under way); `stateText` the desk state, `undefined`
+ * unless watching; `dispose` stops it and releases the lease. */
+export interface WatchHandle {
+  tick(): Promise<void>;
+  status(): WatchStatus;
+  stateText(): Promise<string | undefined>;
+  dispose(): Promise<void>;
+}
+
+/** The lease's contents. */
+interface Lease { pid: number; since: string; beat: string }
+
+/** One of the watch's book files. */
+interface BookFile<T> {
+  file: string;
+  path: string;
+  kind: WatchFileStatus["kind"];
+  load: (path: string, file: string, today: string) => Promise<LoadResult<T>>;
+  /** What lstat said last time (mtime, size, inode - or missing), and the ET date it was read on. */
+  stamp?: string;
+  date?: string;
+  /** The last good load's entries and sha256. */
+  good: T[];
+  sha?: string;
+  status: WatchFileStatus;
+}
+
+/** A hit before the gate: its record but for the decision, and a decision taken before the gate (a filing's
+ * window or cooldown). */
+type Pending = { record: Omit<AlertHit, "decision" | "suppressed" | "id">; pre?: "window" | "cooldown" };
+
+/* ---------- small helpers ---------- */
+
+const iso = (ms: number): string => new Date(ms).toISOString();
+const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+const codeOf = (err: unknown): unknown => (err as { code?: unknown } | null | undefined)?.code;
+/** A failure as a line names it: its code when it has one, else its message. */
+const reasonOf = (err: unknown): string => {
+  const code = codeOf(err);
+  return typeof code === "string" ? code : errText(err);
+};
+const isAbsent = (err: unknown): boolean => codeOf(err) === "ENOENT" || codeOf(err) === "ENOTDIR";
+const marketDate = (m: Market, at: number): string => (m === "us" ? etDate(new Date(at)) : bjDate(new Date(at)));
+const levelText = (l: Pick<Level, "price" | "range">): string => (l.range !== undefined ? `${l.range[0]}-${l.range[1]}` : String(l.price));
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/** Whether `pid` lives: `process.kill(pid, 0)` answers without throwing. `ESRCH` (gone) and `EPERM` (another user's
+ * process, so not a face on this home) are both no. */
+export function pidAlive(pid: number, kill: (pid: number, signal: 0) => unknown = (p, s) => process.kill(p, s)): boolean {
+  try {
+    kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The lease's text as a lease, or `undefined` for anything else. */
+function leaseOf(text: string): Lease | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  const { pid, since, beat } = (parsed ?? {}) as Partial<Record<keyof Lease, unknown>>;
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return undefined;
+  if (typeof since !== "string" || typeof beat !== "string" || !Number.isFinite(Date.parse(beat))) return undefined;
+  return { pid, since, beat };
+}
+
+/** The lease on disk; `undefined` with none or one that is no lease. A read that fails otherwise rejects. */
+async function readLease(path: string): Promise<Lease | undefined> {
+  try {
+    return leaseOf(await readFile(path, "utf8"));
+  } catch (err) {
+    if (isAbsent(err)) return undefined;
+    throw err;
+  }
+}
+
+/** One refusal as a `watch-load` event lists it, as the phone line does. */
+function refusalText(r: LoadRefusal): string {
+  const place = r.index === undefined ? "" : `#${r.index + 1}${r.symbol !== undefined ? ` ${r.symbol}` : ""}: `;
+  return `${place}${r.reason}`;
+}
+
+/** The ET date `days` before `date`. */
+function daysBefore(date: string, days: number): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d - days)).toISOString().slice(0, 10);
+}
+
+/** The A-share session past the XSHG table: 09:30-15:00 Beijing on a weekday of the Beijing date of `at`. */
+function cnPastSession(at: number): MarketSession | "closed" {
+  const date = bjDate(new Date(at));
+  const wd = new Date(`${date}T00:00:00Z`).getUTCDay();
+  if (wd === 0 || wd === 6) return "closed";
+  return { date, open: `${date}T01:30:00Z`, close: `${date}T07:00:00Z`, early: false };
+}
+
+const emptyToday = (): MarketWatchStatus["today"] => ({ sent: 0, suppressed: { cooldown: 0, cap: 0, muted: 0, off: 0, window: 0 }, repeats: 0 });
+
+/* ---------- the watch ---------- */
+
+/**
+ * Install the watch: its boot - the ledgers read, then the first tick - on the clock's next timer turn, and a tick
+ * every `tickMs` after (see the module header).
+ * @param deps - see {@link WatchDeps}.
+ */
+export function installWatch(deps: WatchDeps): WatchHandle {
+  const { home, root, clock } = deps;
+  const pid = deps.pid ?? process.pid;
+  const alive = deps.alive ?? ((p: number) => pidAlive(p));
+  const tickMs = deps.tickMs ?? WATCH_TICK_MS;
+  const log = deps.log ?? ((line: string): void => { console.error(line); });
+  const dir = deskDir(home);
+  const leasePath = join(dir, WATCH_LEASE_FILE);
+  const alerts = appendChain(home, ALERTS_FILE, { log });
+  const filingsLedger = appendChain(home, FILINGS_FILE, { log });
+  const events = appendChain(home, EVENTS_FILE, { log });
+  const edgar: Edgar | undefined = deps.edgar === undefined ? undefined : createEdgar({ fetch: deps.edgar.fetch, userAgent: deps.edgar.userAgent, now: () => clock.now() });
+
+  /* ---- what the watch knows ---- */
+  let state: WatchStatus["state"] = "starting";
+  let holder: { pid: number; since: string } | undefined;
+  let leaseBeat: number | undefined;
+  let muted: MuteState | undefined;
+  let day: WatchDay = emptyDay();
+  let alertsRead = false;
+  let ledgerError: string | undefined;
+  let baseline: Baseline = { seeded: new Set(), seen: new Set() };
+  let filingsRead = false;
+  /** The alert records of the last {@link MEMORY_MS}: the rebuild's, then this run's, in order. */
+  let records: AlertRecord[] = [];
+  /** Each delivered record by its alert's id. */
+  const deliveries = new Map<string, AlertDelivered>();
+  /** The last priced print of each `market:symbol`. */
+  const lastQuotes = new Map<string, WatchQuote>();
+  const markets: Record<Market, MarketWatchStatus> = { us: { state: "off", watched: 0, notWatched: [], today: emptyToday() }, cn: { state: "off", watched: 0, notWatched: [], today: emptyToday() } };
+  const inflight: Record<Market, boolean> = { us: false, cn: false };
+  const lastStart: Partial<Record<Market, number>> = {};
+  /** Each market's watched symbols by session date: how many polls answered, and whether one priced it. */
+  const unpriced: Record<Market, { date?: string; seen: Map<string, { polls: number; priced: boolean }> }> = { us: { seen: new Map() }, cn: { seen: new Map() } };
+  const filings: WatchStatus["filings"] = { state: "off", symbols: 0, aShares: 0, seeded: 0 };
+  let filingsInflight = false;
+  let filingsLastStart: number | undefined;
+  let filingsRefusedOn: string | undefined;
+  let filingsAbort: AbortController | undefined;
+
+  /* ---- the book ---- */
+  const bookFile = <T>(file: string, kind: WatchFileStatus["kind"], load: BookFile<T>["load"]): BookFile<T> => ({
+    file, path: join(root, ...file.split("/")), kind, load, good: [], status: { file, kind, entries: 0, refusals: [] },
+  });
+  const holdingsFile = bookFile<Holding>("desk/holdings.yml", "holdings", (p, f) => loadHoldings(p, f));
+  const levelsFile = bookFile<Level>("desk/levels.yml", "levels", (p, f, today) => loadLevels(p, f, today));
+  const rulesFile = bookFile<Rule>("desk/rules.yml", "rules", (p, f) => loadRules(p, f));
+  const strategyFiles = new Map<string, BookFile<Level>>();
+  let filesRead = false;
+  let book: { holdings: Holding[]; levels: Level[]; rules: Rule[] } = { holdings: [], levels: [], rules: [] };
+  let keys: PriceKey[] = [];
+
+  /* ---- the line memories: once ever (the files', the ledger's), once a dated key (the rest) ---- */
+  const saidEver = new Set<string>();
+  const saidOn = new Map<string, number>();
+  const failed = new Set<string>();
+  let lastEt: string | undefined;
+
+  /* ---- the chains: sends in order, posts on their own, and every pass and poll in flight ---- */
+  let sendChain: Promise<void> = Promise.resolve();
+  let postChain: Promise<void> = Promise.resolve();
+  const flights = new Set<Promise<void>>();
+  let tickChain: Promise<void> = Promise.resolve();
+  let ticking: Promise<void> | undefined;
+  let timer: unknown;
+  let stopped = false;
+  let disposing: Promise<void> | undefined;
+
+  /** One line per distinct failure of a step; the step's next success says nothing. */
+  const fail = (step: string, err: unknown): void => {
+    const line = `${BIN}: desk: watch ${step}: ${reasonOf(err)}`;
+    if (failed.has(line)) return;
+    failed.add(line);
+    log(line);
+  };
+  /** Queue `job` behind every send before it; it never rejects. */
+  const onSendChain = (job: () => Promise<void>): void => {
+    sendChain = sendChain.then(job).catch((err: unknown) => { fail("send", err); });
+  };
+  /** Send `text` once for `key`: `ever` for a memory that never lapses. */
+  const sayOnce = (key: string, text: string, opts: { ever?: boolean; at: number; replyTo?: number }): void => {
+    if (opts.ever === true ? saidEver.has(key) : saidOn.has(key)) return;
+    if (opts.ever === true) saidEver.add(key);
+    else saidOn.set(key, opts.at);
+    const replyTo = opts.replyTo;
+    onSendChain(async () => { await deps.deliver(text, replyTo === undefined ? undefined : { replyTo }); });
+  };
+  const track = (work: Promise<void>): void => {
+    flights.add(work);
+    void work.finally(() => { flights.delete(work); });
+  };
+
+  /* ---------- the lease ---------- */
+
+  const stale = (l: Lease, at: number): boolean => !alive(l.pid) || at - Date.parse(l.beat) >= LEASE_STALE_MS;
+
+  /** The lease step: whether this face holds the lease after it, beating or taking it over as due. */
+  async function leaseStep(at: number): Promise<boolean> {
+    if (leaseBeat !== undefined && at - leaseBeat < LEASE_BEAT_MS) return true;
+    await mkdir(dir, { recursive: true });
+    const seen = await readLease(leasePath);
+    if (seen !== undefined && seen.pid !== pid && !stale(seen, at)) return heldBy(seen, at);
+    await withFileLock(leasePath, async () => {
+      if (stopped) return;
+      const current = await readLease(leasePath);
+      if (current !== undefined && current.pid !== pid && !stale(current, at)) return;
+      const since = current?.pid === pid ? current.since : iso(at);
+      await writeFileAtomic(leasePath, `${JSON.stringify({ pid, since, beat: iso(at) } satisfies Lease)}\n`, { mode: 0o600 });
+    });
+    const after = await readLease(leasePath);
+    if (after?.pid !== pid) return after === undefined ? false : heldBy(after, at);
+    leaseBeat = at;
+    holder = { pid, since: after.since };
+    return true;
+  }
+
+  /** Another face holds the lease: say so - one log line per holder, one phone line per ET date. */
+  function heldBy(other: Lease, at: number): false {
+    leaseBeat = undefined;
+    holder = { pid: other.pid, since: other.since };
+    const line = `${BIN}: desk: another face (pid ${other.pid}) runs the watch on this home; this one does not`;
+    if (!failed.has(line)) {
+      failed.add(line);
+      log(line);
+    }
+    sayOnce(`held:${etDate(new Date(at))}`, WATCH_LINES.heldElsewhere(other.pid), { at });
+    return false;
+  }
+
+  /** Release the lease when it is this face's. */
+  async function releaseLease(): Promise<void> {
+    if (leaseBeat === undefined) return;
+    leaseBeat = undefined;
+    try {
+      await withFileLock(leasePath, async () => {
+        if ((await readLease(leasePath))?.pid === pid) await unlink(leasePath);
+      });
+    } catch (err) {
+      fail("lease release", err);
+    }
+  }
+
+  /* ---------- the files ---------- */
+
+  /** Re-read `f` when it changed or the ET date did; whether its entries changed. */
+  async function readBookFile<T>(f: BookFile<T>, today: string, at: number): Promise<boolean> {
+    let stamp: string;
+    try {
+      const s = await lstat(f.path);
+      stamp = `${s.mtimeMs}:${s.size}:${s.ino}`;
+    } catch (err) {
+      stamp = isAbsent(err) ? "missing" : `error:${reasonOf(err)}`;
+    }
+    if (stamp === f.stamp && today === f.date) return false;
+    f.stamp = stamp;
+    f.date = today;
+    const r = await f.load(f.path, f.file, today);
+    if (r.missing === true) {
+      const had = f.good.length > 0;
+      f.good = [];
+      f.sha = undefined;
+      f.status = { file: f.file, kind: f.kind, missing: true, entries: 0, refusals: [] };
+      return had;
+    }
+    if (r.error !== undefined) {
+      const { missing: _missing, ...last } = f.status;
+      f.status = { ...last, entries: f.good.length, refusals: [], error: r.error };
+      if (!saidEver.has(`file:${f.file}:error:${r.error}`)) events.append({ t: iso(at), kind: "watch-load", file: f.file, loaded: f.good.length, refused: [], error: r.error });
+      sayOnce(`file:${f.file}:error:${r.error}`, WATCH_LINES.fileRefused(f.file, r.error), { ever: true, at });
+      return false;
+    }
+    /* the boot's first read is the baseline: a clean file then says nothing */
+    const first = !filesRead;
+    f.good = r.entries;
+    f.status = { file: f.file, kind: f.kind, entries: r.entries.length, refusals: r.refusals, loadedAt: iso(at) };
+    const sha = r.sha256 ?? "";
+    if (r.refusals.length > 0) {
+      const key = `file:${f.file}:${sha}:${JSON.stringify(r.refusals.map(refusalText))}`;
+      if (!saidEver.has(key)) events.append({ t: iso(at), kind: "watch-load", file: f.file, loaded: r.entries.length, refused: r.refusals.map(refusalText) });
+      sayOnce(key, WATCH_LINES.fileLoaded(f.file, r.entries.length, r.refusals), { ever: true, at });
+    } else if (!first && sha !== f.sha) {
+      const key = `file:${f.file}:${sha}`;
+      if (!saidEver.has(key)) events.append({ t: iso(at), kind: "watch-load", file: f.file, loaded: r.entries.length, refused: [] });
+      sayOnce(key, WATCH_LINES.fileChanged(f.file, sha, r.entries.length), { ever: true, at });
+    }
+    f.sha = sha;
+    return true;
+  }
+
+  /** The files step: every book file re-read as due, the book and its keys rebuilt when one changed. */
+  async function filesStep(at: number): Promise<void> {
+    const today = etDate(new Date(at));
+    const wasRead = filesRead;
+    let names: string[] | undefined;
+    try {
+      names = (await listChannelDirs(root)).filter((c) => !c.isRoot).map((c) => c.name);
+    } catch (err) {
+      fail("strategies", err);
+    }
+    let changed = false;
+    if (names !== undefined) {
+      for (const name of [...strategyFiles.keys()]) {
+        if (!names.includes(name)) {
+          changed = changed || (strategyFiles.get(name)?.good.length ?? 0) > 0;
+          strategyFiles.delete(name);
+        }
+      }
+      for (const name of names) {
+        if (!strategyFiles.has(name)) strategyFiles.set(name, bookFile<Level>(`strategies/${name}/levels.yml`, "levels", (p, f, d) => loadLevels(p, f, d)));
+      }
+    }
+    for (const f of [holdingsFile, levelsFile, rulesFile]) {
+      try {
+        if (await readBookFile<unknown>(f as BookFile<unknown>, today, at)) changed = true;
+      } catch (err) {
+        fail(`load ${f.file}`, err);
+      }
+    }
+    for (const f of strategyFiles.values()) {
+      try {
+        if (await readBookFile(f, today, at)) changed = true;
+      } catch (err) {
+        fail(`load ${f.file}`, err);
+      }
+    }
+    filesRead = true;
+    if (!changed && wasRead) return;
+    book = {
+      holdings: holdingsFile.good,
+      levels: [...levelsFile.good, ...[...strategyFiles.values()].flatMap((f) => f.good)],
+      rules: rulesFile.good,
+    };
+    keys = priceKeys(book);
+  }
+
+  const fileStatuses = (): WatchFileStatus[] => [levelsFile.status, ...[...strategyFiles.values()].map((f) => f.status), holdingsFile.status, rulesFile.status];
+
+  /* ---------- the symbols ---------- */
+
+  /** A market's symbols to poll, in rank: the held ones, then the levels' in file order, then the rules', sorted. */
+  function rankedSymbols(m: Market): string[] {
+    const keyed = new Set(keys.filter((k) => k.market === m).map((k) => k.symbol));
+    const out: string[] = [];
+    const add = (s: string): void => {
+      if (keyed.has(s) && !out.includes(s)) out.push(s);
+    };
+    for (const h of book.holdings) if (h.market === m) add(h.symbol);
+    for (const l of book.levels) if (l.market === m) add(l.symbol);
+    for (const s of [...keyed].sort()) add(s);
+    return out;
+  }
+
+  const sourceOk = (): boolean => deps.quotes !== undefined && deps.quotes.unavailable === undefined;
+
+  /* ---------- the markets ---------- */
+
+  /** One market's step: its calendar, its window, and its poll when due. Returns the calendar's answer, when asked. */
+  async function marketStep(m: Market, at: number): Promise<DayAnswer | undefined> {
+    const mk = markets[m];
+    const symbols = sourceOk() ? rankedSymbols(m) : [];
+    const max = m === "us" ? WATCH_US_MAX : WATCH_CN_MAX;
+    mk.watched = Math.min(symbols.length, max);
+    mk.notWatched = symbols.slice(max);
+    if (symbols.length === 0) {
+      mk.state = "off";
+      delete mk.session;
+      delete mk.uncovered;
+      return undefined;
+    }
+    let answer: DayAnswer;
+    try {
+      answer = await deps.calendars[m].today(at);
+    } catch (err) {
+      answer = { ok: false, date: marketDate(m, at), error: errText(err) };
+    }
+    let session: MarketSession | undefined;
+    let uncovered = false;
+    if (!answer.ok) {
+      if (m === "cn" && bjDate(new Date(at)) > XSHG_COVERED.through) {
+        const past = cnPastSession(at);
+        if (past !== "closed") {
+          session = past;
+          uncovered = true;
+        }
+      } else {
+        mk.state = "no-calendar";
+        mk.lastError = answer.error;
+        delete mk.session;
+        delete mk.uncovered;
+        if (m === "us") sayOnce(`noCalendar:${answer.date}`, WATCH_LINES.noCalendar(answer.error), { at });
+        return answer;
+      }
+    } else if (answer.session !== "closed") {
+      session = answer.session;
+    }
+    if (session === undefined) {
+      mk.state = "closed";
+      delete mk.session;
+      delete mk.uncovered;
+      return answer;
+    }
+    mk.session = { date: session.date, open: session.open, close: session.close };
+    if (uncovered) mk.uncovered = true;
+    else delete mk.uncovered;
+    const from = Date.parse(session.open) - WATCH_LEAD_MS;
+    const to = Date.parse(session.close) + WATCH_TAIL_MS;
+    mk.state = at < from ? "waiting" : at >= to ? "after-close" : "polling";
+    if (mk.state !== "polling") return answer;
+    if (uncovered) sayOnce(`pastTable:${session.date}`, WATCH_LINES.cnPastTable(XSHG_COVERED.through), { at });
+    if (mk.notWatched.length > 0) sayOnce(`overCap:${m}:${session.date}:${mk.notWatched.join(",")}`, WATCH_LINES.overCap(m, max, mk.notWatched), { at });
+    const cadence = m === "us" ? WATCH_US_POLL_MS : WATCH_CN_POLL_MS;
+    const last = lastStart[m];
+    if (!inflight[m] && (last === undefined || at - last >= cadence)) {
+      inflight[m] = true;
+      lastStart[m] = at;
+      mk.lastPollAt = iso(at);
+      const watched = symbols.slice(0, max);
+      const sessions = m === "us" ? { us: session } : { cn: uncovered ? { ...session, uncovered: true as const } : session };
+      track((async () => {
+        try {
+          await pricePass(m, watched, session, sessions, at);
+        } catch (err) {
+          fail(`${m} pass`, err);
+        } finally {
+          inflight[m] = false;
+        }
+      })());
+    }
+    return answer;
+  }
+
+  /** A failed poll: its reason the market's `lastError`, said once per session date. */
+  function failedPoll(m: Market, date: string, reason: string, at: number): void {
+    markets[m].lastError = reason;
+    sayOnce(`noPrices:${m}:${date}`, WATCH_LINES.noPrices(m, reason), { at });
+  }
+
+  /** One market's poll: one snapshot over its ids alone, mapped and judged. */
+  async function pricePass(m: Market, watched: string[], session: MarketSession, sessions: Parameters<typeof evaluatePass>[3], at: number): Promise<void> {
+    const source = deps.quotes;
+    if (source === undefined) return;
+    let payload;
+    try {
+      payload = await source.snapshot(watched.map((symbol) => ({ id: idOf(m, symbol), market: m, symbol })));
+    } catch (err) {
+      failedPoll(m, session.date, err instanceof HttpError && err.status === 429 ? "busy" : errText(err), at);
+      return;
+    }
+    const own = payload.quotes.filter((q) => q.market === m);
+    const quotes = own.map(watchQuoteOf);
+    const pricedOf = (q: WatchQuote | undefined): boolean => q !== undefined && q.status !== "unavailable" && q.price !== null;
+    if (!quotes.some(pricedOf)) {
+      failedPoll(m, session.date, own.find((q) => q.message !== "")?.message ?? "the Market read answered no quote", at);
+      return;
+    }
+    delete markets[m].lastError;
+    for (const q of quotes) if (pricedOf(q)) lastQuotes.set(`${m}:${q.symbol}`, q);
+    /* a symbol unpriced on its first polls of the session date (ruling 16) */
+    const u = unpriced[m];
+    if (u.date !== session.date) {
+      u.date = session.date;
+      u.seen = new Map();
+    }
+    for (const symbol of watched) {
+      const q = quotes.find((x) => x.symbol === symbol);
+      const seen = u.seen.get(symbol) ?? { polls: 0, priced: false };
+      seen.polls += 1;
+      if (pricedOf(q)) seen.priced = true;
+      u.seen.set(symbol, seen);
+      if (!seen.priced && seen.polls >= UNPRICED_POLLS) {
+        const reason = own.find((x) => x.symbol === symbol)?.message || "the Market read answered no quote for it";
+        sayOnce(`unpriced:${m}:${session.date}:${symbol}:${reason}`, WATCH_LINES.unpriced(symbol, reason), { at });
+      }
+    }
+    const watchedSet = new Set(watched);
+    const hits = evaluatePass(day, keys.filter((k) => k.market === m && watchedSet.has(k.symbol)), quotes, sessions, at);
+    if (hits.length === 0) return;
+    const pass = passId();
+    queueHits(pass, hits.map((h) => ({ record: priceRecord(h, pass, at) })), at);
+  }
+
+  /** The holding a symbol's alert names. */
+  const holdingOf = (symbol: string): AlertHit["holding"] => {
+    const h = book.holdings.find((x) => x.symbol === symbol);
+    return h === undefined ? null : { qty: h.qty, avgCost: h.avgCost };
+  };
+
+  /** A price hit's record, but for its id and decision. */
+  function priceRecord(h: Hit, pass: string, at: number): Pending["record"] {
+    return {
+      t: iso(at), kind: "alert", pass, date: h.date, key: h.key.key, market: h.key.market, symbol: h.key.symbol, label: h.key.label,
+      trigger: h.key.trigger, gap: h.gap, quote: snapOf(h.quote), holding: holdingOf(h.key.symbol), plan: h.key.plan, source: h.key.source,
+      annotate: h.key.annotate,
+    };
+  }
+
+  /* ---------- the sends ---------- */
+
+  /** OFF and MUTE as in force at `at`; a switch that cannot be read is one line, and not in force. */
+  async function flagsAt(at: number): Promise<{ off: boolean; muted: boolean }> {
+    let off = false;
+    let mute = false;
+    try {
+      const o = await readOffState(home, () => at);
+      off = o.state !== undefined && !o.expired;
+    } catch (err) {
+      fail("OFF", err);
+    }
+    try {
+      const s = await readMuteState(home, () => at);
+      mute = s.state !== undefined && !s.expired;
+    } catch (err) {
+      fail("MUTE", err);
+    }
+    return { off, muted: mute };
+  }
+
+  /** Record a pass's hits, deliver its sends in order, and queue its annotation - on the send chain. */
+  function queueHits(pass: string, pending: Pending[], at: number): void {
+    onSendChain(async () => {
+      const needsGate = pending.some((p) => p.pre === undefined);
+      const flags = needsGate ? await flagsAt(at) : { off: false, muted: false };
+      const decided: AlertHit[] = pending.map((p) => {
+        const id = alertId();
+        const g = p.pre !== undefined ? { send: false as const, suppressed: p.pre } : gate(day, at, flags, id);
+        const rec: AlertHit = g.send ? { ...p.record, id, decision: "send" } : { ...p.record, id, decision: "suppressed", suppressed: g.suppressed };
+        records.push(rec);
+        alerts.append(rec);
+        return rec;
+      });
+      const sends = decided.filter((r) => r.decision === "send");
+      if (sends.length === 0) return;
+      let spent = false;
+      if (sends.some((r) => r.annotate)) {
+        try {
+          spent = (await deps.budget()).spent;
+        } catch (err) {
+          fail("budget", err);
+        }
+      }
+      const delivered: { rec: AlertHit; result: DeliverResult }[] = [];
+      for (const rec of sends) {
+        const note = rec.annotate ? (spent ? "budget" : "follows") : "none";
+        let result: DeliverResult;
+        try {
+          result = await deps.deliver(alertText(rec, clock.now(), note));
+        } catch (err) {
+          result = { undelivered: `send failed: ${errText(err)}` };
+        }
+        const done = clock.now();
+        const sent = "sent" in result;
+        const asOf = rec.quote === null ? Number.NaN : Date.parse(rec.quote.asOf);
+        const received = rec.quote?.receivedAt == null ? Number.NaN : Date.parse(rec.quote.receivedAt);
+        const d: AlertDelivered = {
+          t: iso(done), kind: "delivered", id: rec.id, delivery: result,
+          latency: { tradeMs: sent && Number.isFinite(asOf) ? done - asOf : null, receivedMs: sent && Number.isFinite(received) ? done - received : null },
+        };
+        records.push(d);
+        deliveries.set(rec.id, d);
+        alerts.append(d);
+        if (!("undelivered" in result)) delivered.push({ rec, result });
+      }
+      const annotated = delivered.filter((d) => d.rec.annotate);
+      if (spent || annotated.length === 0) return;
+      /* the post replies to the first annotated alert delivered - none when the outlet queued it (ruling 16) */
+      const first = annotated[0];
+      const replyTo = "sent" in first.result ? first.result.sent[0] : undefined;
+      queuePost(pass, annotated.map((d) => d.rec), replyTo);
+    });
+  }
+
+  /** The pass's annotation post, on the post chain: its record, and a refused post's line as a reply once per ET date. */
+  function queuePost(pass: string, hits: AlertHit[], replyTo: number | undefined): void {
+    postChain = postChain.then(async () => {
+      const at = clock.now();
+      let r: PostResult;
+      try {
+        r = await deps.post({ ...annotationPost(hits, pass, at), ...(replyTo === undefined ? {} : { replyTo }) });
+      } catch (err) {
+        r = { refused: "error", line: `the desk could not annotate this alert: ${errText(err)}` };
+      }
+      const done = clock.now();
+      const rec: AlertAnnotation = "opened" in r
+        ? { t: iso(done), kind: "annotation", pass, alerts: hits.map((h) => h.id), result: "opened", sessionId: r.sessionId }
+        : { t: iso(done), kind: "annotation", pass, alerts: hits.map((h) => h.id), result: "refused", reason: r.refused };
+      records.push(rec);
+      alerts.append(rec);
+      if ("refused" in r) sayOnce(`post:${etDate(new Date(done))}:${r.line}`, r.line, { at: done, ...(replyTo === undefined ? {} : { replyTo }) });
+    }).catch((err: unknown) => { fail("post", err); });
+  }
+
+  /** The batch step: the held alerts, once due, delivered as one line - or dropped under OFF or MUTE. */
+  function batchStep(at: number): void {
+    if (!batchDue(day, at)) return;
+    const ids = takeBatch(day);
+    onSendChain(async () => {
+      const flags = await flagsAt(at);
+      const date = etDate(new Date(at));
+      const base = { t: iso(at), kind: "batch" as const, id: batchId(), date, alerts: ids };
+      let rec: AlertBatch;
+      if (flags.off) rec = { ...base, dropped: "off" };
+      else if (flags.muted) rec = { ...base, dropped: "muted" };
+      else {
+        const byId = new Map(records.flatMap((r) => (r.kind === "alert" ? [[r.id, r] as const] : [])));
+        const held = ids.flatMap((id) => { const r = byId.get(id); return r === undefined ? [] : [r]; });
+        let delivery: DeliverResult;
+        try {
+          delivery = held.length === 0 ? { undelivered: "the held alerts are not in memory" } : await deps.deliver(batchText(held, at));
+        } catch (err) {
+          delivery = { undelivered: `send failed: ${errText(err)}` };
+        }
+        rec = { ...base, delivery };
+      }
+      records.push(rec);
+      alerts.append(rec);
+    });
+  }
+
+  /* ---------- the filings ---------- */
+
+  /** The filings step: its state, and a poll when due. */
+  function filingsStep(at: number, usAnswer: DayAnswer | undefined): Promise<void> | void {
+    const filingRules = book.rules.filter((r) => r.kind === "filing");
+    const { polled, overCap, aShares } = filingSymbols(book.rules, { holdings: book.holdings, levels: book.levels });
+    filings.symbols = polled.length;
+    filings.aShares = aShares;
+    filings.seeded = polled.filter((s) => baseline.seeded.has(s)).length;
+    const today = etDate(new Date(at));
+    if (filingRules.length === 0 || polled.length === 0) {
+      filings.state = "off";
+      return;
+    }
+    if (edgar === undefined) {
+      filings.state = "no-contact";
+      sayOnce(`noContact:${today}`, WATCH_LINES.filingsNoContact(), { at });
+      return;
+    }
+    if (filingsRefusedOn === today) {
+      filings.state = "refused-today";
+      return;
+    }
+    filings.state = "polling";
+    if (overCap.length > 0) sayOnce(`filingsOverCap:${today}:${overCap.join(",")}`, WATCH_LINES.filingsOverCap(overCap), { at });
+    return (async () => {
+      const answer = usAnswer ?? await deps.calendars.us.today(at).catch((err: unknown): DayAnswer => ({ ok: false, date: today, error: errText(err) }));
+      if (!filingsRead || filingsInflight || !pollDue(at, filingsLastStart, answer)) return;
+      filingsInflight = true;
+      filingsLastStart = at;
+      filings.lastPollAt = iso(at);
+      const forms = [...new Set(filingRules.flatMap((r) => (r.kind === "filing" ? r.forms : [])))];
+      const names = { holdings: book.holdings.map((h) => h.symbol), levels: book.levels.map((l) => l.symbol) };
+      track((async () => {
+        try {
+          await filingsPass(polled, filingRules, names, forms, answer, at);
+        } catch (err) {
+          fail("filings pass", err);
+        } finally {
+          filingsInflight = false;
+          filingsAbort = undefined;
+        }
+      })());
+    })();
+  }
+
+  /** One filings poll: the result seeded or judged, each fresh filing one record and one hit per rule it matches. */
+  async function filingsPass(polled: string[], rules: Rule[], names: { holdings: string[]; levels: string[] }, forms: string[], answer: DayAnswer, at: number): Promise<void> {
+    if (edgar === undefined) return;
+    const abort = new AbortController();
+    filingsAbort = abort;
+    const cut = clock.setTimeout(() => { abort.abort(new Error(`the filings poll ran past ${FILINGS_ABORT_MS / 1000} s`)); }, FILINGS_ABORT_MS);
+    let result: EdgarResult;
+    try {
+      result = await edgar.recentFilings(polled, forms, daysBefore(etDate(new Date(at)), FILINGS_LOOKBACK_DAYS), { stopAfterMs: FILINGS_STOP_AFTER_MS, signal: abort.signal });
+    } finally {
+      clock.clearTimeout(cut);
+    }
+    if (stopped) return;
+    const refused = allRefused(result, polled);
+    if (refused !== undefined) {
+      const today = etDate(new Date(at));
+      filingsRefusedOn = today;
+      filings.state = "refused-today";
+      filings.lastError = refused;
+      sayOnce(`filingsRefused:${today}`, WATCH_LINES.filingsRefused(refused), { at });
+      return;
+    }
+    const firstError = result.errors[0];
+    if (firstError === undefined) delete filings.lastError;
+    else filings.lastError = `${firstError.symbol}: ${firstError.error}`;
+    const { seed, fresh } = diffFilings(baseline, result, polled);
+    for (const s of seed) {
+      const rec: FilingRecord = { t: iso(at), kind: "seeded", symbol: s.symbol, accessions: s.accessions };
+      filingsLedger.append(rec);
+      baseline.seeded.add(s.symbol);
+      for (const a of s.accessions) baseline.seen.add(seenKey(s.symbol, a));
+    }
+    const pending: Pending[] = [];
+    const date = etDate(new Date(at));
+    for (const f of fresh) {
+      const rec: FilingRecord = { t: iso(at), kind: "seen", symbol: f.symbol, accession: f.accession, form: f.form, filingDate: f.filingDate, accepted: f.accepted, items: f.items, url: f.url };
+      filingsLedger.append(rec);
+      baseline.seen.add(seenKey(f.symbol, f.accession));
+      for (const rule of rules) {
+        if (rule.kind !== "filing" || !(rule.forms as readonly string[]).includes(f.form) || !resolveSymbols(rule.symbols, names).includes(f.symbol)) continue;
+        const key = `filing:${rule.id}:${f.symbol}`;
+        let pre: Pending["pre"];
+        if (!inFilingWindow(f.accepted, answer, at)) pre = "window";
+        else {
+          const kd = day.keys.get(key);
+          if (kd !== undefined && kd.date === date && kd.lastHitAt !== undefined && at - kd.lastHitAt < rule.cooldownMs) pre = "cooldown";
+        }
+        if (pre !== "cooldown") {
+          /* as src/watch-eval.ts rebuildDay reads the ledger back: any record not suppressed cooldown starts it */
+          const kd = day.keys.get(key);
+          day.keys.set(key, { date, alerted: true, repeats: kd?.date === date ? kd.repeats : 0, lastHitAt: at });
+        }
+        pending.push({
+          pre,
+          record: {
+            t: iso(at), kind: "alert", pass: "", date, key, market: "us", symbol: f.symbol, label: f.form,
+            trigger: { type: "filing", rule: rule.id, form: f.form, accession: f.accession, accepted: f.accepted, filingDate: f.filingDate, items: f.items, url: f.url },
+            gap: false, quote: null, holding: holdingOf(f.symbol), plan: rule.plan ?? null, source: { file: rule.file, index: rule.index }, annotate: rule.annotate,
+          },
+        });
+      }
+    }
+    if (pending.length === 0) return;
+    const pass = passId();
+    queueHits(pass, pending.map((p) => ({ ...p, record: { ...p.record, pass } })), at);
+  }
+
+  /* ---------- the ledgers ---------- */
+
+  async function ledgersStep(at: number): Promise<void> {
+    if (!alertsRead) {
+      try {
+        const { records: read } = await readRecords(home, ALERTS_FILE, isAlertRecord);
+        const merged = [...read.filter((r) => at - Date.parse(r.t) <= MEMORY_MS), ...records];
+        day = rebuildDay(merged, at);
+        records = merged;
+        for (const r of merged) if (r.kind === "delivered") deliveries.set(r.id, r);
+        alertsRead = true;
+        ledgerError = undefined;
+      } catch (err) {
+        ledgerError = reasonOf(err);
+        sayOnce(`ledger:${ledgerError}`, `the alert ledger ${join(dir, ALERTS_FILE)} cannot be read (${ledgerError}), so the watch sends nothing until it can`, { ever: true, at });
+      }
+    }
+    if (!filingsRead) {
+      try {
+        baseline = baselineFrom((await readRecords(home, FILINGS_FILE, isFilingRecord)).records);
+        filingsRead = true;
+      } catch (err) {
+        fail("filings ledger", err);
+      }
+    }
+  }
+
+  /* ---------- the tick ---------- */
+
+  /** A new ET date: the dated line memories and the records older than {@link MEMORY_MS} let go. */
+  function datesStep(at: number): void {
+    const today = etDate(new Date(at));
+    if (today === lastEt) return;
+    lastEt = today;
+    for (const [key, t] of saidOn) if (at - t > MEMORY_MS) saidOn.delete(key);
+    records = records.filter((r) => at - Date.parse(r.t) <= MEMORY_MS);
+    for (const [id, d] of deliveries) if (at - Date.parse(d.t) > MEMORY_MS) deliveries.delete(id);
+  }
+
+  async function runTick(): Promise<void> {
+    if (stopped) return;
+    const at = clock.now();
+    let held = false;
+    try {
+      held = await leaseStep(at);
+    } catch (err) {
+      fail("lease", err);
+    }
+    if (stopped) return;
+    if (!held) {
+      if (holder !== undefined && holder.pid !== pid) state = "held-elsewhere";
+      return;
+    }
+    datesStep(at);
+    try {
+      await filesStep(at);
+    } catch (err) {
+      fail("files", err);
+    }
+    const filingsAny = filingSymbols(book.rules, { holdings: book.holdings, levels: book.levels }).polled.length > 0;
+    if (keys.length === 0 && !filingsAny) {
+      state = "idle";
+      for (const m of MARKETS) {
+        markets[m].state = "off";
+        markets[m].watched = 0;
+        markets[m].notWatched = [];
+      }
+      filings.state = "off";
+      return;
+    }
+    state = "watching";
+    await ledgersStep(at);
+    if (!alertsRead) return;
+    let usAnswer: DayAnswer | undefined;
+    for (const m of MARKETS) {
+      try {
+        const answer = await marketStep(m, at);
+        if (m === "us") usAnswer = answer;
+      } catch (err) {
+        fail(`${m} market`, err);
+      }
+    }
+    try {
+      batchStep(at);
+    } catch (err) {
+      fail("batch", err);
+    }
+    try {
+      const m = await readMuteState(home, () => at);
+      if (m.state !== undefined && m.expired) {
+        await clearMute(home, "expiry", () => at);
+        muted = undefined;
+      } else {
+        muted = m.state;
+      }
+    } catch (err) {
+      fail("mute", err);
+    }
+    try {
+      await filingsStep(at, usAnswer);
+    } catch (err) {
+      fail("filings", err);
+    }
+  }
+
+  /** One tick, after any under way. */
+  const tick = (): Promise<void> => {
+    const run = tickChain.then(runTick).catch((err: unknown) => { fail("tick", err); });
+    tickChain = run;
+    ticking = run;
+    void run.finally(() => { if (ticking === run) ticking = undefined; });
+    return run;
+  };
+  /** The timer's tick: the next armed first, and none started while one is under way. */
+  const onTimer = (): Promise<void> | undefined => {
+    if (stopped) return undefined;
+    timer = clock.setTimeout(onTimer, tickMs);
+    return ticking ?? tick();
+  };
+  timer = clock.setTimeout(onTimer, 0);
+
+  /* ---------- the status ---------- */
+
+  function todayOf(m: Market, at: number): MarketWatchStatus["today"] {
+    const date = marketDate(m, at);
+    const today = emptyToday();
+    for (const r of records) {
+      if (r.kind !== "alert" || r.market !== m || r.date !== date) continue;
+      if (r.decision === "send") today.sent += 1;
+      else if (r.suppressed !== undefined) today.suppressed[r.suppressed] += 1;
+    }
+    const marketOfKey = new Map(keys.map((k) => [k.key, k.market]));
+    for (const [key, kd] of day.keys) if (kd.date === date && (marketOfKey.get(key) ?? (key.startsWith("filing:") ? "us" : undefined)) === m) today.repeats += kd.repeats;
+    return today;
+  }
+
+  /** The levels within {@link NEAR_PCT} of their symbol's price in `prices`, nearest first, at most {@link NEAR_MAX}. */
+  function nearOf(prices: Map<string, WatchQuote>, at: number): NearView[] {
+    const near: NearView[] = [];
+    for (const l of book.levels) {
+      const q = prices.get(`${l.market}:${l.symbol}`);
+      if (q === undefined || q.price === null || !(q.price > 0)) continue;
+      const d = levelDistancePct(l, q.price);
+      if (Math.abs(d) > NEAR_PCT) continue;
+      const snap = snapOf(q);
+      near.push({
+        market: l.market, symbol: l.symbol, kind: l.kind, level: levelText(l), when: l.when, last: q.price, at: snap === null ? "" : priceStamp(snap, at),
+        distancePct: round2(d), plan: l.plan, file: l.file,
+      });
+    }
+    return near.sort((a, b) => Math.abs(a.distancePct) - Math.abs(b.distancePct)).slice(0, NEAR_MAX);
+  }
+
+  function marksOf(): WatchMark[] {
+    const marks: WatchMark[] = book.levels.map((l) => {
+      const q = lastQuotes.get(`${l.market}:${l.symbol}`);
+      const d = q?.price !== null && q?.price !== undefined && q.price > 0 ? round2(levelDistancePct(l, q.price)) : null;
+      return { market: l.market, symbol: l.symbol, kind: l.kind, level: levelText(l), when: l.when, plan: l.plan, file: l.file, distancePct: d };
+    });
+    const rank = (m: WatchMark): number => (m.distancePct === null ? Number.POSITIVE_INFINITY : Math.abs(m.distancePct));
+    return marks.sort((a, b) => rank(a) - rank(b)).slice(0, MARKS_MAX);
+  }
+
+  function recentOf(): AlertSummary[] {
+    const out: AlertSummary[] = [];
+    for (let i = records.length - 1; i >= 0 && out.length < RECENT_MAX; i--) {
+      const r = records[i];
+      if (r.kind !== "alert") continue;
+      const d = deliveries.get(r.id);
+      const outcome: AlertSummary["outcome"] = r.decision === "suppressed" ? "suppressed"
+        : d === undefined ? "pending"
+          : "undelivered" in d.delivery ? "undelivered"
+            : "sent" in d.delivery ? "sent" : "queued";
+      out.push({
+        id: r.id, t: r.t, market: r.market, symbol: r.symbol, label: r.label, gap: r.gap, price: r.quote?.price ?? null, feed: r.quote?.feed ?? null, outcome,
+        ...(r.suppressed === undefined ? {} : { suppressed: r.suppressed }),
+        latencyMs: d?.latency.tradeMs ?? null,
+        ...(d?.latency.receivedMs === null || d?.latency.receivedMs === undefined ? {} : { receivedMs: d.latency.receivedMs }),
+      });
+    }
+    return out;
+  }
+
+  function status(): WatchStatus {
+    const at = clock.now();
+    const marketsNow = {} as Record<Market, MarketWatchStatus>;
+    for (const m of MARKETS) {
+      markets[m].today = todayOf(m, at);
+      marketsNow[m] = structuredClone(markets[m]);
+    }
+    return {
+      state,
+      markets: marketsNow,
+      ...(holder === undefined ? {} : { holder: { ...holder } }),
+      ...(muted === undefined ? {} : { muted: { ...muted } }),
+      files: fileStatuses().map((f) => structuredClone(f)),
+      near: nearOf(lastQuotes, at),
+      marks: marksOf(),
+      pending: day.pending.length,
+      recent: recentOf(),
+      filings: { ...filings },
+      ...(ledgerError === undefined ? {} : { ledgerError }),
+    };
+  }
+
+  /* ---------- the desk state ---------- */
+
+  /** `work`, or why not within {@link STATE_QUOTES_TIMEOUT_MS} on the clock. */
+  function within<T>(work: Promise<T>): Promise<{ ok: true; value: T } | { ok: false; reason: string }> {
+    return new Promise((done) => {
+      const t = clock.setTimeout(() => { done({ ok: false, reason: `it did not answer in ${STATE_QUOTES_TIMEOUT_MS / 1000} s` }); }, STATE_QUOTES_TIMEOUT_MS);
+      work.then(
+        (value) => { clock.clearTimeout(t); done({ ok: true, value }); },
+        (err: unknown) => { clock.clearTimeout(t); done({ ok: false, reason: err instanceof HttpError && err.status === 429 ? "busy" : errText(err) }); },
+      );
+    });
+  }
+
+  async function stateText(): Promise<string | undefined> {
+    if (state !== "watching") return undefined;
+    const at = clock.now();
+    const prices = new Map<string, WatchQuote>();
+    const missing: Partial<Record<Market, string>> = {};
+    await Promise.all(MARKETS.map(async (m) => {
+      const symbols = [...new Set([...book.holdings.filter((h) => h.market === m).map((h) => h.symbol), ...book.levels.filter((l) => l.market === m).map((l) => l.symbol)])];
+      if (symbols.length === 0) return;
+      const source = deps.quotes;
+      const name = m === "us" ? "US" : "A-share";
+      if (source === undefined || source.unavailable !== undefined) {
+        missing[m] = `${name} unavailable: ${source?.unavailable ?? "no quote source"}`;
+        return;
+      }
+      const got = await within(source.snapshot(symbols.map((symbol) => ({ id: idOf(m, symbol), market: m, symbol }))));
+      if (!got.ok) {
+        missing[m] = `${name} unavailable: ${got.reason}`;
+        return;
+      }
+      for (const q of got.value.quotes) if (q.market === m && q.quote_status !== "unavailable" && q.price !== null) prices.set(`${m}:${q.symbol}`, watchQuoteOf(q));
+    }));
+    const sent = MARKETS.reduce((n, m) => n + todayOf(m, at).sent, 0);
+    const suppressed = MARKETS.reduce((n, m) => n + Object.values(todayOf(m, at).suppressed).reduce((a, b) => a + b, 0), 0);
+    const view: DeskStateView = {
+      holdings: book.holdings.map((h) => {
+        const q = prices.get(`${h.market}:${h.symbol}`);
+        const snap = q === undefined ? null : snapOf(q);
+        return { market: h.market, symbol: h.symbol, qty: h.qty, avgCost: h.avgCost, last: q?.price ?? null, at: snap === null ? null : priceStamp(snap, at), chgPct: q?.changePct ?? null };
+      }),
+      near: nearOf(prices, at),
+      alerts: { sent, suppressed },
+      ...(muted === undefined ? {} : { muted: muted.until === undefined ? "with no end" : `until ${deskTime(new Date(muted.until), new Date(at))}` }),
+      ...(Object.keys(missing).length === 0 ? {} : { prices: MARKETS.flatMap((m) => missing[m] ?? []).join("; ") }),
+    };
+    return stateBody(view);
+  }
+
+  /* ---------- the handle ---------- */
+
+  return {
+    tick,
+    status,
+    stateText,
+    dispose() {
+      disposing ??= (async () => {
+        stopped = true;
+        clock.clearTimeout(timer);
+        filingsAbort?.abort(new Error("the face is shutting down"));
+        let wait: NodeJS.Timeout | undefined;
+        const bound = new Promise<void>((done) => { wait = setTimeout(done, DISPOSE_WAIT_MS); wait.unref?.(); });
+        const settled = (async () => {
+          await tickChain;
+          await Promise.all([...flights]);
+          await sendChain;
+          await postChain;
+          await Promise.all([alerts.settled(), filingsLedger.settled(), events.settled()]);
+        })();
+        await Promise.race([settled, bound]);
+        clearTimeout(wait);
+        await releaseLease();
+        state = "stopped";
+      })();
+      return disposing;
+    },
+  };
+}

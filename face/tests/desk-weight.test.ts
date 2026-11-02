@@ -29,13 +29,14 @@ async function resolvedBy(files: readonly string[]): Promise<string[]> {
 }
 
 /** What a pause must never load: js-yaml, the role library and its graph, the desk preset and the desk session, and
- * every module P2 added to src/. */
+ * every module P2 and P3 added to src/ - the watch's among them, which src/desk.ts names for its types alone. */
 const HEAVY = [
   "/node_modules/js-yaml/",
   "/src/roles.ts", "/src/bots.ts", "/src/channels.ts", "/src/desk-preset.ts", "/src/desk-session.ts",
   "/src/producer.ts", "/src/market-clock.ts", "/src/standing.ts", "/src/desk-book.ts", "/src/brief.ts", "/src/firing.ts", "/src/schedule.ts",
   "/src/channel-name.ts",
   "/src/xshg-clock.ts",
+  "/src/watch.ts", "/src/watch-eval.ts", "/src/alert-text.ts", "/src/edgar.ts", "/src/filings.ts",
 ] as const;
 const heavyOf = (urls: readonly string[]): string[] => urls.filter((url) => HEAVY.some((part) => url.includes(part)));
 

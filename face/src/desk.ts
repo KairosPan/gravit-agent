@@ -90,6 +90,9 @@ import type { StandingStatus } from "./standing.ts";
 import type { RouteRegistrar } from "./static.ts";
 import type { BridgeHandle, TelegramConfig } from "./telegram.ts";
 import { DSH_PIN } from "./version.ts";
+import type { DeskCalendars } from "./market-clock.ts";
+import type { EdgarFetch } from "./edgar.ts";
+import type { WatchHandle, WatchStatus } from "./watch.ts";
 
 /** Diagnostic label, the same string every other `${BIN}:`-prefixed line in this program uses
  * (`roster.ts`, `main.ts`) - copied rather than imported, because it is a label rather than a
@@ -1087,7 +1090,8 @@ export interface TelegramStatus {
  * turns recorded since 00:00 America/New_York and their tokens; `budget`, those tokens against the
  * day's cap ({@link BudgetState}) - optional in the type, so a status built by hand may leave it out,
  * and always set by {@link deskStatus}; `standing`, the standing orders as their clock reports them
- * (src/standing.ts `StandingStatus`), present only while a provider has one; `telegram`, the bridge's
+ * (src/standing.ts `StandingStatus`), present only while a provider has one; `watch`, the watch's status
+ * (src/watch.ts `WatchStatus`), present only while the watch runs; `telegram`, the bridge's
  * state, present only when a provider is passed - {@link installDesk} always passes one, so the route
  * and `desk_state` always carry it. `ledgerError` is present only when the ledger could not be
  * read - its code, or its message when it has none - and `asleep` and `runs` are then empty,
@@ -1108,6 +1112,7 @@ export interface DeskStatus {
   budget?: BudgetState;
   standing?: StandingStatus;
   telegram?: TelegramStatus;
+  watch?: WatchStatus;
   ledgerError?: string;
 }
 
@@ -1129,9 +1134,9 @@ export interface DeskStatus {
  * @param deps - `home`, the harness home; `bootedAt`, when this run began, in ms since the epoch;
  *   `enabled`, whether the desk's rows are mounted; `now`, `pid` and `version`, defaulting to
  *   `Date.now`, `process.pid` and {@link DSH_PIN}; `telegram`, the bridge's status, `dailyTokens`,
- *   the day's cap (the standing orders' last good load), and `standing`, the standing orders'
- *   status - each read once per call when given, `dailyTokens` and `standing` answering `undefined`
- *   while there is none.
+ *   the day's cap (the standing orders' last good load), `standing`, the standing orders'
+ *   status, and `watch`, the watch's (src/watch.ts) - each read once per call when given,
+ *   `dailyTokens`, `standing` and `watch` answering `undefined` while there is none.
  */
 export async function deskStatus(deps: {
   home: string;
@@ -1143,6 +1148,7 @@ export async function deskStatus(deps: {
   telegram?: () => TelegramStatus;
   dailyTokens?: () => number | undefined;
   standing?: () => StandingStatus | undefined;
+  watch?: () => WatchStatus | undefined;
 }): Promise<DeskStatus> {
   const at = (deps.now ?? Date.now)();
   const since = new Date(deps.bootedAt).toISOString();
@@ -1167,6 +1173,7 @@ export async function deskStatus(deps: {
   const turnsToday = { count: today.count, usage: { uncachedInputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } };
   const budget = budgetOf(today.used, deps.dailyTokens?.(), ledgerError);
   const standing = deps.standing?.();
+  const watch = deps.watch?.();
   const deskSession = lastDeskSession(events);
   return {
     ok: true,
@@ -1183,6 +1190,7 @@ export async function deskStatus(deps: {
     budget,
     ...(standing === undefined ? {} : { standing }),
     ...(deps.telegram === undefined ? {} : { telegram: deps.telegram() }),
+    ...(watch === undefined ? {} : { watch }),
     ...(ledgerError === undefined ? {} : { ledgerError }),
   };
 }
@@ -1386,15 +1394,29 @@ function busOf(ctx: DeskConversationCtxLike): SessionEventsOn {
  * `conversation` is the desk session's owner (src/desk-conversation.ts), present only when the
  * desk is on and `installDesk` was given what it needs; `schedule`, present with the conversation,
  * settles to the standing orders' clock (src/schedule.ts) once its module has loaded - `undefined` when it
- * could not load, or when the desk was disposed first - and never rejects; `dispose(code)` ends the run. */
+ * could not load, or when the desk was disposed first - and never rejects; `watchRow`, present with the schedule
+ * when `installDesk` was given `watchRow`, settles to the watch (src/watch.ts) once its module has loaded -
+ * `undefined` with no quote source or one `unavailable`, when the schedule or the watch could not load, or when the
+ * desk was disposed first - and never rejects; `dispose(code)` ends the run. */
 export interface DeskHandle {
   enabled: boolean;
   bootedAt: number;
   ready: Promise<void>;
   conversation?: DeskConversation;
   schedule?: Promise<ScheduleHandle | undefined>;
+  watchRow?: Promise<WatchHandle | undefined>;
   dispose(code: number): Promise<void>;
 }
+
+/** An alert's annotation turn's deadline (P3-12): 90 s, then the turn is cut with its own line as a reply. */
+export const ALERT_DEADLINE_MS = 90_000;
+
+/** The watch's timers: the wall clock, `unref`'d, so the watch never holds the process open. */
+const watchClock = (now: () => number): DeskClock => ({
+  now,
+  setTimeout: (fn, ms) => setTimeout(fn, ms).unref(),
+  clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
+});
 
 /**
  * Mount the desk's rows on a booted face.
@@ -1425,8 +1447,13 @@ export interface DeskHandle {
  * orders' clock (src/schedule.ts) runs too: its module loads on first use, once the bridge has set the
  * outlet, and `schedule` settles to it; its firings deliver through the conversation, the status route
  * and `desk_state` read its orders and its cap, and the conversation's budget is the day's tokens
- * against that cap (ruling P2-8). `dispose(code)` stops the clock first - the firing under way
- * aborted, waited for two seconds at most - then the bridge - no phone text is posted from then on,
+ * against that cap (ruling P2-8). Given `watchRow` and a quote source that answers, the watch (src/watch.ts, P3)
+ * runs too, once the clock row is made: its module loads on first use, it shares the clock row's market calendars,
+ * its alerts and lines go out through the conversation's `deliver`, its annotations through its `post` (each alert
+ * turn cut at `alertDeadlineMs`), the conversation's desk state is its `stateText`, and the status route and
+ * `desk_state` carry its status. `dispose(code)` stops the clock first - the firing under way
+ * aborted, waited for two seconds at most - then the watch - its passes and posts waited for two seconds at most,
+ * its lease released - then the bridge - no phone text is posted from then on,
  * and its outbox stays for the next boot -
  * then the conversation, which cancels the desk turns under way as `shutdown`, gives each cut agent
  * two seconds to go idle so the cut turn is recorded, and gives a start, post or renew under way
@@ -1455,7 +1482,11 @@ export interface DeskHandle {
  *   sets to 1,500 so a parked card is cut in a second and a half; main.ts never passes it;
  *   `python`, the interpreter a `.py` script producer runs under - `FACE_PYTHON || python3` when absent
  *   (no calendar needs it: the market clock is builtin); `schedule`, the clock's seams for tests - its
- *   clock, calendar, script runner, builtins, tick and grace; `log`,
+ *   clock, calendar (the XNYS one), calendars (either market's), script runner, builtins, tick and grace;
+ *   `alertDeadlineMs`, an alert's annotation turn's deadline, {@link ALERT_DEADLINE_MS} when absent - a test seam;
+ *   `watchRow`, the watch's switch and seams - its clock (the wall clock, `unref`'d), tick, calendars (over the
+ *   schedule's), whether a pid lives, and `edgar`, SEC's fetch and contact: `null` for none, absent for the face's
+ *   own, the global `fetch` with `ALPHA_EDGAR_USER_AGENT` when that is set; `log`,
  *   where every line of the desk's goes - the guard's, its line at install naming what the secret
  *   check covers included, the tools', the ledger's, the conversation's, the bridge's and the clock's -
  *   stderr when absent, as main.ts leaves it; tests pass their own, or one that drops the line.
@@ -1478,7 +1509,15 @@ export function installDesk(
     telegram?: TelegramConfig;
     deskDeadlineMs?: number;
     python?: string;
-    schedule?: { clock?: DeskClock } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;
+    schedule?: { clock?: DeskClock; calendars?: Partial<DeskCalendars> } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;
+    alertDeadlineMs?: number;
+    watchRow?: {
+      clock?: DeskClock;
+      tickMs?: number;
+      calendars?: Partial<DeskCalendars>;
+      edgar?: { fetch: EdgarFetch; userAgent: string } | null;
+      alive?: (pid: number) => boolean;
+    };
     log?: (line: string) => void;
   },
 ): DeskHandle {
@@ -1494,10 +1533,13 @@ export function installDesk(
   /* The standing orders' clock once it runs: the status's orders and the day's cap are its; until then, and in a
    * face that runs none, there are no orders and no cap. */
   let schedule: ScheduleHandle | undefined;
+  /* The watch once it runs (P3): the status's `watch` is its; until then, and in a face that runs none, there is none. */
+  let watch: WatchHandle | undefined;
   const status = {
     home, bootedAt, enabled, now, version, telegram,
     dailyTokens: () => schedule?.dailyTokens(),
     standing: () => schedule?.status(),
+    watch: () => watch?.status(),
   };
   registerDeskRoutes(webServer, status);
   const removeGuard = deps.ctx === undefined ? async () => {} : installDeskGuard(deps.ctx, deps.root, { log });
@@ -1519,6 +1561,8 @@ export function installDesk(
       session: wiring.session,
       on: wiring.on,
       deadlineMs: deps.deskDeadlineMs,
+      /* an alert's annotation turn is cut at 90 s (P3-12); every other turn keeps the conversation's deadline */
+      deadlineFor: (kind) => (kind === "alert" || kind === "alerts" ? deps.alertDeadlineMs ?? ALERT_DEADLINE_MS : undefined),
       /* the day's budget against the standing orders' cap - none until their clock has read standing.yml (P2-8) */
       budget: () => readBudget(home, now(), schedule?.dailyTokens()),
       clock,
@@ -1546,11 +1590,19 @@ export function installDesk(
   /* The standing orders' clock (src/schedule.ts) loads on first use too - with it src/firing.ts, src/standing.ts and
    * js-yaml - once the bridge has set the outlet, so the boot's lines reach the phone. It never rejects: a module that
    * cannot load, or a clock that cannot start, is one line and `undefined`; one that arrives once dispose has begun
-   * starts nothing. */
+   * starts nothing. The desk's one pair of market calendars (P3's ruling 13) is made here, from the schedule's
+   * module, so src/xshg-clock.ts loads with it and never with this file: the clock row takes its `us`, the watch the
+   * pair. */
+  let calendars: DeskCalendars | undefined;
   const scheduling = wiring === undefined || conversation === undefined ? undefined : bridging
     .then(() => import("./schedule.ts"))
     .then((scheduleModule) => {
       if (disposing !== undefined) return undefined;
+      calendars = scheduleModule.deskCalendars({
+        ...(deps.schedule?.calendar === undefined ? {} : { us: deps.schedule.calendar }),
+        ...deps.schedule?.calendars,
+        ...deps.watchRow?.calendars,
+      });
       schedule = scheduleModule.createDeskSchedule({
         home,
         root: wiring.root,
@@ -1563,12 +1615,48 @@ export function installDesk(
         log,
         /* the schedule's clock reads the same now as the conversation's, unless a test hands it a clock of its own */
         ...(deps.now === undefined ? {} : { now: deps.now }),
-        seams: deps.schedule,
+        seams: { ...deps.schedule, calendar: calendars.us },
       });
       return schedule;
     })
     .catch((err: unknown) => {
       log(`${BIN}: desk: the standing orders' clock could not be loaded: ${reasonOf(err)}`);
+      return undefined;
+    });
+  /* The watch (src/watch.ts, P3) loads on first use as well, in the same chain once the clock row is made - only when
+   * `watchRow` is given (main.ts passes `{}`; no test or smoke does, so none polls the operator's book) and the quote
+   * source answers: one source serves both markets, so a face with no Market read watches neither. It never rejects:
+   * a module that cannot load is one line and `undefined`; one that arrives once dispose has begun starts nothing. */
+  const watchRow = deps.watchRow;
+  const quotes = deps.quotes;
+  const watching = scheduling === undefined || watchRow === undefined || conversation === undefined ? undefined : scheduling
+    .then(async (made) => {
+      if (made === undefined || calendars === undefined || quotes === undefined || quotes.unavailable !== undefined) return undefined;
+      const watchModule = await import("./watch.ts");
+      if (disposing !== undefined) return undefined;
+      const userAgent = process.env.ALPHA_EDGAR_USER_AGENT;
+      const edgar = watchRow.edgar === null ? undefined
+        : watchRow.edgar ?? (userAgent ? { fetch: globalThis.fetch as EdgarFetch, userAgent } : undefined);
+      const handle = watchModule.installWatch({
+        home,
+        root: wiring?.root ?? "",
+        quotes,
+        calendars,
+        clock: watchRow.clock ?? watchClock(now),
+        deliver: (text, opts) => conversation.deliver(text, opts),
+        post: (input) => conversation.post(input),
+        budget: () => readBudget(home, now(), schedule?.dailyTokens()),
+        ...(edgar === undefined ? {} : { edgar }),
+        ...(watchRow.alive === undefined ? {} : { alive: watchRow.alive }),
+        ...(watchRow.tickMs === undefined ? {} : { tickMs: watchRow.tickMs }),
+        log,
+      });
+      watch = handle;
+      conversation.setState(() => handle.stateText());
+      return handle;
+    })
+    .catch((err: unknown) => {
+      log(`${BIN}: desk: the watch could not be loaded: ${reasonOf(err)}`);
       return undefined;
     });
   return {
@@ -1577,9 +1665,12 @@ export function installDesk(
     ready,
     ...(conversation === undefined ? {} : { conversation }),
     ...(scheduling === undefined ? {} : { schedule: scheduling }),
+    ...(watching === undefined ? {} : { watchRow: watching }),
     dispose(code) {
       disposing ??= (async () => {
         await (await scheduling)?.dispose();
+        await (await watching)?.dispose();
+        conversation?.setState(undefined);
         await bridging;
         await bridge?.dispose();
         await conversation?.dispose();
