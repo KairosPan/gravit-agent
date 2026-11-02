@@ -146,6 +146,22 @@ test("a move rule, a gap rule and a filing", () => {
   ]);
 });
 
+test("a filing's form, items and url, and every quoted reason, stay one line", () => {
+  const broken = { ...NVDA_8K, trigger: { ...(NVDA_8K.trigger as FilingTrigger), form: "8-K\nX", items: "2.02\r\n,9.01\u2028Y", url: "https://www.sec.gov/a\nb" } };
+  assert.deepEqual(alertText(broken, NOW, "none").split("\n"), [
+    "NVDA 8-K X · accepted 10:05:12 ET · filed 2026-11-30",
+    "items 2.02, 9.01 Y",
+    "https://www.sec.gov/a b",
+    "filing · desk/rules.yml · held 100 @ 120.50",
+  ]);
+  const reason = "first\nsecond\r\nthird\u2028fourth";
+  for (const line of [WATCH_LINES.noCalendar(reason), WATCH_LINES.filingsRefused(reason), WATCH_LINES.noPrices("us", reason),
+    WATCH_LINES.unpriced("NVDA", reason), WATCH_LINES.fileRefused("desk/levels.yml", reason)]) {
+    assert.doesNotMatch(line, /[\n\r\v\f\u0085\u2028\u2029]/);
+    assert.match(line, /first second third fourth/);
+  }
+});
+
 test("numbers: prices as the feed gave them, signs on change and P&L, none on zero, en-US P&L", () => {
   const flat = { ...NVDA_STOP, quote: us(174.05, "2026-11-30T15:21:03Z", "nasdaq", 174.05) };
   assert.deepEqual(alertText(flat, NOW, "none").split("\n").filter((l) => /P&L|^day:/.test(l)), [

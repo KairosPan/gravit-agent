@@ -3,9 +3,10 @@
  * it; nothing on the desk's own import path does (the plan's module weight).
  *
  * THE STAMP (M4, M11). A price is stamped with its feed, upper-cased, and its exchange's time: a US share's as
- * desk-tools.ts `quoteTime` writes it (`ROBINHOOD 10:21:03 ET`, `CBOE DELAYED 10:05:00 ET`), an A share's with
- * src/et.ts `bjStamp` (`TENCENT 14:03:12 Beijing`), each dated when not `now`'s date on its own clock. A stamp never
- * names a process: the Account serves the read, the feed made the price.
+ * desk-tools.ts `quoteTime` writes it (`ROBINHOOD 10:21:03 ET`, `CBOE DELAYED 10:05:00 ET`), an A share's as its
+ * `cnQuoteTime` does (`TENCENT 14:03:12 Beijing`), each dated when not `now`'s date on its own clock - so the phone
+ * and `desk_quotes` stamp one print alike. A stamp never
+ * names a process: the price is the Market's read, and the feed made it.
  *
  * THE ALERT (spec §5.9). Its lines, in order:
  * - **A level or a price rule:** `<SYMBOL> <price> · <stamp>`; what fired - `<kind> <price | low-high> <when>[ · gap]
@@ -27,8 +28,8 @@
 import { deskTime } from "./desk.ts";
 import type { AlertMessageSource, DeskSource } from "./desk-session.ts";
 import type { LevelKind, LoadRefusal, Level } from "./desk-book.ts";
-import { quoteTime } from "./desk-tools.ts";
-import { bjStamp, etClock } from "./et.ts";
+import { cnQuoteTime, quoteTime } from "./desk-tools.ts";
+import { etClock } from "./et.ts";
 import type { Market } from "./symbols.ts";
 import type { AlertHit, QuoteSnap } from "./watch-eval.ts";
 
@@ -36,13 +37,21 @@ import type { AlertHit, QuoteSnap } from "./watch-eval.ts";
 export const BATCH_ITEMS_MAX = 20;
 /** The longest phone line the watch sends of its own, in characters (code points). */
 const LINE_MAX = 500;
-/** The filings' symbol cap, as the table names it. */
+/** The filings' symbol cap, as the table names it: src/filings.ts's `FILINGS_SYMBOLS_MAX` (Task 8), kept here until
+ * that file lands, so the copy loads nothing of the filings'. */
 const FILINGS_MAX = 60;
 
-/** `text` cut to `max` characters (code points), the last a `…` when it is cut, as desk.ts cuts its own. */
+/** Every line break of any kind, as desk-book.ts's `LINE_BREAK_RE` names them. */
+const LINE_BREAKS_RE = /[\n\r\v\f\u0085\u2028\u2029]+/g;
+
+/** `text` as one line: each run of line breaks a space. */
+const oneLine = (text: string): string => text.replace(LINE_BREAKS_RE, " ");
+
+/** `text` as one line, cut to `max` characters (code points), the last a `…` when it is cut, as desk.ts cuts its own. */
 function cut(text: string, max = LINE_MAX): string {
-  const chars = [...text];
-  return chars.length <= max ? text : `${chars.slice(0, max - 1).join("")}…`;
+  const line = oneLine(text);
+  const chars = [...line];
+  return chars.length <= max ? line : `${chars.slice(0, max - 1).join("")}…`;
 }
 
 /** `n` to two places with its sign: `+1.50`, `-2.43`, and `0.00` for a zero as rounded - en-US grouped when asked. */
@@ -61,10 +70,7 @@ function signed(n: number, grouped: boolean): string {
  * @param now - the time it is read at.
  */
 export function priceStamp(snap: QuoteSnap, now: number): string {
-  if (snap.market === "us") return quoteTime(snap.feed, snap.asOf, now);
-  const at = new Date(snap.asOf);
-  const clock = Number.isNaN(at.getTime()) ? snap.asOf : bjStamp(at, new Date(now));
-  return snap.feed === "" ? clock : `${snap.feed.toUpperCase()} ${clock}`;
+  return (snap.market === "us" ? quoteTime : cnQuoteTime)(snap.feed, snap.asOf, now);
 }
 
 /** The holding line: `held 100 @ 120.50`, with the day's P&L when the print carries a previous close; `not held`. */
@@ -114,10 +120,10 @@ export function alertText(hit: AlertHit, now: number, note: "follows" | "budget"
   if (t.type === "filing") {
     const at = t.accepted === null ? Number.NaN : Date.parse(t.accepted);
     const accepted = Number.isNaN(at) ? "accepted time unknown" : `accepted ${etClock(new Date(at))} ET`;
-    lines.push(`${hit.symbol} ${t.form} · ${accepted} · filed ${t.filingDate}`);
-    const items = (t.items ?? "").split(",").map((i) => i.trim()).filter((i) => i !== "");
+    lines.push(`${hit.symbol} ${oneLine(t.form)} · ${accepted} · filed ${oneLine(t.filingDate)}`);
+    const items = (t.items ?? "").split(",").map((i) => oneLine(i).trim()).filter((i) => i !== "");
     if (items.length > 0) lines.push(`items ${items.join(", ")}`);
-    lines.push(t.url, firedLine(hit));
+    lines.push(oneLine(t.url), firedLine(hit));
     if (hit.plan !== null) lines.push(`plan: ${hit.plan}`);
   } else {
     const q = hit.quote;
@@ -212,7 +218,7 @@ function refusalItem(r: LoadRefusal): string {
 export const WATCH_LINES = {
   /** A book file refused whole. */
   fileRefused: (file: string, error: string): string => cut(`${file} is refused, so the watch keeps its last good load: ${error}`),
-  /** A book file loaded with refusals. */
+  /** A book file loaded with refusals - at least one: a load with none is {@link WATCH_LINES.fileChanged}'s line. */
   fileLoaded: (file: string, loaded: number, refusals: readonly LoadRefusal[]): string =>
     cut(`${file}: ${loaded} loaded, ${refusals.length} refused - ${refusals.map(refusalItem).join("; ")}`),
   /** A book file changed, nothing refused: its new hash's first 8 hex. */

@@ -240,7 +240,7 @@ export function quoteTime(feed: string, asOf: string, now: number): string {
 
 /** An A share's quote time as the desk quotes one (`TENCENT 14:03:12 Beijing`): the feed upper-cased, then
  * src/et.ts `bjStamp`, dated when not `now`'s Beijing date. A time `Date` cannot read stays as the source gave it. */
-function cnQuoteTime(feed: string, asOf: string, now: number): string {
+export function cnQuoteTime(feed: string, asOf: string, now: number): string {
   const at = new Date(asOf);
   const clock = Number.isNaN(at.getTime()) ? asOf : bjStamp(at, new Date(now));
   return feed === "" ? clock : `${feed.toUpperCase()} ${clock}`;
