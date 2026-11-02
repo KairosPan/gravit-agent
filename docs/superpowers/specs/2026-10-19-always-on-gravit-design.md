@@ -1204,3 +1204,98 @@ ones and argue from this section where it and §5.5, §5.9, §5.10 or §12 disag
   half — the seat, orders, limits, Guard, cards — and for the process the proxy reaches. This is the
   controller's reading of the operator's sentence, overturnable at the plan review. M9 and M10 are the
   re-plan brief's rules on carrying the old rulings and the P2 items, recorded in the controller's notes.
+
+## 16. Hardening after the Super-agent review (2026-11-02)
+
+The operator had PR #9 read against DeepSeek's Super-agent prototype (`deepseek-ai/dsh-superagent-prototype`, MIT,
+2026-10-31). Its relevant patterns are:
+
+- a Router session that never does the work itself;
+- one top-level Worker session per ticket;
+- follow-ups routed straight to their ticket's worker;
+- every effect stored before it is done;
+- a watchdog outside the process.
+
+The operator then asked for the gaps to be fixed on the desk branch ("把要一起改进的内容都放在本session").
+
+Where it mattered most, the desk already matched the prototype:
+
+- an alert reaches the phone with no model in its path;
+- every firing is a fresh session whose `started` record pins what the operator armed;
+- a firing's key is consumed once;
+- a failed send waits in the outbox.
+
+The four gaps below were read at `a27355bb` and are fixed in this round. The plan is
+`docs/superpowers/plans/2026-11-02-desk-hardening.md`. Nothing here moves dsh off 0.2.0-rc.2: every seam used below
+exists in it. Upgrading dsh happens on a separate branch.
+
+- **H1 — The annotation lane.**
+  - **What was wrong.** An alert pass's annotation ran on the desk conversation's session. There every phone,
+    browser and wake turn is a turn of its own, with its deadline counted from its own `turn/start`. So an
+    annotation could queue for five minutes behind the operator's turn, and its check then measured a later price
+    than the alert's.
+  - **The lane.** The annotation now runs in a fresh desk agent of its own: `createDeskAgent`,
+    `cwd = desk/journal`, on the desk's route.
+  - **Before the turn.** The deadline stays 90 s. The checks a phone post gets (the pause, the budget, the fence)
+    run first.
+  - **During and after.** Its turn is supervised and recorded as a `desk-turn`, so the day's budget counts it. Its
+    text goes through the conversation's `deliver` as a reply to the first delivered alert's message. If it fails,
+    is cut or says nothing, its own line for that case goes the same way. Its agent is let go after delivery.
+  - **One at a time.** Passes annotate one at a time on the lane's own chain, so a check waits at most behind
+    another check, never behind the operator.
+  - **The record.** `alerts.jsonl` gains an `annotated` record: the pass, the session, the outcome, the ids of the
+    messages sent, and the text (2,000 characters at most).
+- **H1b — A reply keeps its alert.**
+  - The operator's conversation stays one session.
+  - A phone text that replies (Telegram's `reply_to_message`) to an alert's or an annotation's message goes to the
+    desk conversation with that alert's text and its annotation ahead of it, under the provenance line, as the
+    face's own context. This is the prototype's subscription, done by the face rather than by a second session.
+  - The watch resolves the message id over its 48-hour memory. An id it does not know carries nothing.
+- **H2 — An alert a restart caught between its decision and its send.**
+  - **What was wrong.** The watch writes `send` before sending and `delivered` after it. A restart between the two
+    left the alert never sent, still counted in its cooldown and in the hour's cap, and `pending` forever.
+  - **At the ledger's first read,** each such orphan is handled once:
+    - Younger than 10 minutes, it is sent at once and recorded `delivered` with `replayed`. Its message opens with a
+      line saying it is late and why. No check follows it, because a check would measure a market that has moved.
+    - Older than that, it is named in one line and recorded `undelivered: lost to a restart`.
+  - A lost alert keeps its cooldown and no longer counts toward the hour's cap.
+- **H3 — The phone's texts across a restart.**
+  - **The key.** A text is posted under the key `telegram:<update_id>`. The conversation builds its message with
+    that id (`MessageId` + `freezeMessage`, as the prototype's `src/app/delivery.ts` does) and skips a key already
+    in the session's log or inbox.
+  - **The order.** The conversation flushes the session's persistence before it answers that the turn is opened.
+    The bridge stores the offset only after that answer, however long it took.
+  - **What that buys.** A crash before the flush leaves the update for Telegram to deliver again, and an update
+    delivered again is answered once.
+  - **At boot,** once the conversation holds its session:
+    - a text or alert message still waiting in the session's durable inbox is woken, taken out and followed up
+      again as after a cut;
+    - a phone turn the restart cut is answered with one line asking for the text again.
+  - **Still to measure.** What dsh's resume does with a pending message and with a cut turn is measured by the
+    plan's H3 task, and the rulings follow the measurement.
+- **H4 — A watchdog outside the face.**
+  - **Why.** The face cannot report its own death. And because the desk stays silent when nothing happened,
+    silence reads the same as a dead desk.
+  - **The check.** `npm run service -- status --check` exits by the desk's health:
+    - `0` healthy;
+    - `1` degraded: the bridge's poll failing, blocked or in conflict; the watch's lease failed or held elsewhere;
+      a market `polling` whose last poll is older than three intervals; an unreadable ledger; or another face
+      holding the port;
+    - `2` down: installed and loaded, and no answer on two tries 10 s apart;
+    - `3` stopped on purpose: not installed, or not loaded.
+  - **The watchdog.** A second LaunchAgent, `com.gravit.face.watchdog`, runs the check every 300 s, with no dsh
+    and no model:
+    - on `2`, it restarts the face through the service's own restart, once per outage, and sends one line;
+    - on `1` twice in a row, it sends one line;
+    - back at `0` after an outage, it sends one line;
+    - on `3`, it does nothing.
+  - **What it touches.** It reads the bot token and the operator id from `$DSH_HOME/.env` as the face does,
+    redacts the token from every line, and keeps its state in `$DSH_HOME/face/desk/watchdog.json`.
+  - **Under the pause.** It sends nothing while `OFF` is in force, but still restarts a face that does not answer.
+  - **Its limit.** It sleeps when the Mac sleeps. The brief and the reports stay the day's positive signal, and a
+    machine that does not sleep stays §13's.
+- **Not in this round.**
+  - Steering a phone text into a phone turn already under way (`agent.steer`) waits for H1, which leaves the
+    conversation to the operator's turns alone.
+  - Firings stay one at a time. The trigger for running firings in different directories at once is the first
+    queued firing missed at its market's open.
