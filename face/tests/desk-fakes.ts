@@ -159,6 +159,8 @@ export class FakeDeskAgent implements AgentLike {
   failFollowup: string | undefined;
   /** How many times its handle's `dispose` ran. */
   disposed = 0;
+  /** When set, `cancel` runs it after recording the call: a test plays the cut turn's end there. */
+  onCancel: (() => void) | undefined;
   readonly session: SessionLike;
 
   constructor(readonly id: string, cwd: string) {
@@ -172,6 +174,7 @@ export class FakeDeskAgent implements AgentLike {
 
   cancel(...args: unknown[]): void {
     this.cancels.push(args);
+    this.onCancel?.();
   }
 
   /** The text of the `n`th message it was sent. */

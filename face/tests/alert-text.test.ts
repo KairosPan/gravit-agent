@@ -224,14 +224,14 @@ test("annotationPost: one alert keeps its rule's form, several become the alerts
   assert.deepEqual(annotationPost([NVDA_STOP], "p-aaaaaaaaaaaa", NOW), {
     text: alertText(NVDA_STOP, NOW, "none"),
     source: { kind: "alert", symbol: "NVDA", rule: "stop" },
-    message: { kind: "alert", alert: "a-000000000001", symbol: "NVDA" },
+    message: { kind: "alert", alert: "a-000000000001", symbol: "NVDA", pass: "p-aaaaaaaaaaaa" },
   });
   const second = { ...AAPL_ZONE, id: "a-000000000002" };
   const third = { ...NVDA_8K, id: "a-000000000003" };
   assert.deepEqual(annotationPost([NVDA_STOP, second, third], "p-aaaaaaaaaaaa", NOW), {
     text: [alertText(NVDA_STOP, NOW, "none"), alertText(second, NOW, "none"), alertText(third, NOW, "none")].join("\n\n"),
     source: { kind: "alerts", count: 3 },
-    message: { kind: "alert", alert: "p-aaaaaaaaaaaa", symbol: "NVDA,AAPL" },
+    message: { kind: "alert", alert: "p-aaaaaaaaaaaa", symbol: "NVDA,AAPL", pass: "p-aaaaaaaaaaaa" },
   });
 });
 

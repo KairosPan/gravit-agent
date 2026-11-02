@@ -3,7 +3,8 @@
  * §5.3, §5.8; the plan's Global Constraints, docs/superpowers/plans/2026-10-20-desk-p1-bridge.md).
  *
  * ONE OWNER. Whatever reaches the desk session from the face goes through here: the phone's texts (the
- * Telegram bridge posts them, and is the outlet their answers go to) and, in P3, the watch's alerts. It exists
+ * Telegram bridge posts them, and is the outlet their answers go to). The watch's alert annotations do not: they run
+ * in desk agents of their own (src/annotator.ts, spec §16 H1), and only their replies leave through here. It exists
  * whenever the desk is on, Telegram or not - src/desk.ts `installDesk` creates it and calls {@link
  * DeskConversation.start} - because what it does for a turn does not depend on who opened it: a turn the
  * operator opens in the browser gets the same deadline, fence check and ledger record as a phone turn.
@@ -25,8 +26,9 @@
  * wake, one delivery through {@link DeskConversation.deliver}: the fence's refusal line for a refused turn; else
  * its final text - with `(cut off: <what cut it>)` after it when a cut interrupted the answer mid-stream - or,
  * when it said nothing, the timed-out line for a turn the deadline cut and the failed line for one that ended
- * on an error - an alert's annotation having its own lines, and one for a check that ended with no text
- * (P3-15). A browser turn's answer stays in its transcript. Records keep turn order and so do deliveries, each
+ * on an error. An alert's turn - one the boot woke from a session an older face left queued - is answered the same
+ * way, with no reply to its alert; the annotation lane has its own lines (src/annotator.ts). A browser turn's answer
+ * stays in its transcript. Records keep turn order and so do deliveries, each
  * delivery after its own record and none waiting on an outlet more than a minute; nothing at a turn's end can
  * reject - a send that fails is one line.
  *
@@ -39,16 +41,11 @@
  * crash before that leaves the update for Telegram to deliver again, and the text delivered again is answered once.
  * A face with no session persistence refuses a keyed post. A post with no key is built and sent as before.
  *
- * ANNOTATIONS (P3). An alert's post with `replyTo` keeps it under the alert's id - the newest 50, until that
- * alert's turn ends - and that turn is answered as a reply to the alert's message, whatever it ends in. An alert
- * id whose message another turn claims (a wake or browser turn under way takes it as its own input) stays in the
- * map until the fifty newer ones evict it, and its annotation goes without a reply.
- *
  * DELIVERY (rulings P2-7, P2-19). Everything the desk sends leaves through {@link DeskConversation.deliver} - a
- * turn's answer, and in P2 and P3 a firing's text and an alert. It holds a text back while the pause is in force
- * - read, never lifted, so a delivery writes nothing - and holds it back too when the switch cannot be read; with
- * no outlet it says so; else it is the outlet's answer, a send that fails or keeps the outlet past a minute
- * being one line and an `undelivered` reason.
+ * turn's answer, and in P2 and P3 a firing's text, an alert and an annotation's reply. It holds a text back while
+ * the pause is in force - read, never lifted, so a delivery writes nothing - and holds it back too when the switch
+ * cannot be read; with no outlet it says so; else it is the outlet's answer, a send that fails or keeps the outlet
+ * past a minute being one line and an `undelivered` reason.
  *
  * AFTER A RESTART (spec §16 H3). When `start`'s ensure resumed a cold desk session - the face came back up - two things
  * the restart left are dealt with, and only then. A phone turn it cut - the log's last turn, never ended or closed
@@ -114,8 +111,6 @@ const defaultClock: DeskClock = {
 const DESK_DEADLINE_MS = 300_000;
 /** The longest a phone's post waits for the desk state before it goes without (the P3 plan's ruling 6). */
 export const STATE_WAIT_MS = 3_500;
-/** The most alert replies kept waiting for their turns' ends; past it the oldest is dropped. */
-const REPLIES_MAX = 50;
 /** The longest a delivery waits on the outlet before the next one goes ahead. */
 const DELIVERY_MS = 60_000;
 /** How long {@link DeskConversation.dispose} gives an agent it cancelled to go idle, so the cut turn is recorded. */
@@ -123,8 +118,8 @@ const SHUTDOWN_IDLE_MS = 2_000;
 /** How long {@link DeskConversation.dispose} gives a start, post or renew under way to settle. */
 const SHUTDOWN_QUEUE_MS = 5_000;
 
-/** The sources whose answers go to the outlet: the phone, an alert, a wake. A `user` turn is the operator at the
- * browser, answered in its own transcript. */
+/** The sources whose answers go to the outlet: the phone, an alert (one a resumed session still held), a wake. A
+ * `user` turn is the operator at the browser, answered in its own transcript. */
 const DELIVERED: ReadonlySet<string> = new Set(["telegram", "alert", "wake"]);
 
 /** The journal, repo-relative: what a refused turn names when its record carries no violation (the supervisor
@@ -159,7 +154,7 @@ export type DeskConversationCtxLike = DeskSessionCtxLike & {
 
 /** What {@link createDeskConversation} needs. `session` is src/desk-session.ts's ensure deps, whose `root` and
  * `home` this reads too; `on`, the root bus; `deadlineMs`, every turn's deadline (five minutes by default),
- * which `deadlineFor` may only shorten for a source (P3's alerts); `budget`, the day's token budget, read by
+ * which `deadlineFor` may only shorten for a source; `budget`, the day's token budget, read by
  * each post the pause lets through (src/desk.ts `readBudget` over the standing orders' cap) - no budget, no
  * check; `clock`, the timers and the stamps (the global ones); `log`, where a failure line goes (stderr). */
 export interface DeskConversationDeps {
@@ -179,8 +174,8 @@ export interface DeskConversation {
    * RESTART). Never rejects: a failure is one line, and the next post tries again. */
   start(): Promise<void>;
   /** Open a turn: `text` after the provenance line for `source`, sent with `message` as its source - or the
-   * reason it was not, as {@link PostResult}. An alert's post (`message.kind` `alert`) with `replyTo` has its
-   * turn answered as a reply to that message; a phone's (`source.kind` `telegram`) carries the desk state
+   * reason it was not, as {@link PostResult}. `replyTo` is the annotation lane's (src/annotator.ts, which shares this
+   * signature): the conversation answers no turn as a reply. A phone's (`source.kind` `telegram`) carries the desk state
    * ahead of it when one is ready and nothing is under way. With `key`, the message's id is the key, a key the
    * session already holds answers `duplicate`, and the post answers once the session's log is flushed (the module
    * header's ONE TEXT, ONE MESSAGE). Never rejects. */
@@ -197,7 +192,7 @@ export interface DeskConversation {
    * pause past its `until` is not; the switch is read, never lifted, and a switch that cannot be read holds the
    * text back too, with one line), `telegram not configured` with no outlet, `send failed: <reason>` with one line
    * when the send throws or rejects, and, with one line, an outlet that has not answered in a minute. The way
-   * every desk text leaves the face - each turn's answer, a firing's, an alert. Never rejects. */
+   * every desk text leaves the face - each turn's answer, a firing's, an alert, an annotation's. Never rejects. */
   deliver(text: string, opts?: { replyTo?: number }): Promise<DeliverResult>;
   /** Where answers go from now on: read at each delivery, so `undefined` stops them while records go on. */
   setOutlet(outlet: DeskOutlet | undefined): void;
@@ -238,16 +233,18 @@ function loadMachinery(): Promise<Machinery> {
 
 /* ---------- the lines ---------- */
 
-/** The phone's line for a post the pause refused, each time as the desk shows one (src/desk.ts `deskTime`). */
-function pausedLine(state: OffState, now: Date, deskTime: Machinery["desk"]["deskTime"]): string {
+/** The phone's line for a post the pause refused, each time as the desk shows one (src/desk.ts `deskTime`) - the
+ * conversation's and the annotation lane's (src/annotator.ts). */
+export function pausedLine(state: OffState, now: Date, deskTime: (at: Date, now: Date) => string): string {
   const until = state.until === undefined ? "" : ` until ${deskTime(new Date(state.until), now)}`;
   return `paused since ${deskTime(new Date(state.setAt), now)} by ${state.by}${until}; a terminal resumes it: npm run desk -- resume`;
 }
 
-/** The phone's line for a turn its deadline cut before it said anything, the deadline as desk-session.ts's
- * `formatDuration` spells it - the default `5 min`, a firing's alike. */
-function timedOutLine(deadlineMs: number, m: Machinery): string {
-  return `timed out after ${m.session.formatDuration(deadlineMs)}; a card or a long tool was pending`;
+/** The phone's line for a turn its deadline cut before it said anything, the deadline as `format` spells it -
+ * desk-session.ts's `formatDuration`: the default `5 min`, an annotation's `90 s` - the conversation's and the
+ * annotation lane's (src/annotator.ts). */
+export function timedOutLine(deadlineMs: number, format: (ms: number) => string): string {
+  return `timed out after ${format(deadlineMs)}; a card or a long tool was pending`;
 }
 
 /** The phone's line for a turn that ended on an error before it said anything. */
@@ -259,29 +256,16 @@ const notOpenedLine = (reason: string): string => `the desk could not open a tur
 /** Why a keyed post refuses on a face with no session persistence. */
 const NO_PERSISTENCE = "this face has no session persistence, so a phone text cannot be checked against the desk session's log";
 
-/** The phone's line for an alert's annotation whose model call failed before it said anything. */
-const notAnnotatedLine = (error: string): string => `the desk could not annotate this alert: ${error}`;
-/** The phone's line for an alert's annotation that ended, or was cancelled, before it said anything. */
-const NO_CHECK = "the desk's check of this alert ended with no text";
-
 /** What a turn's end sends: the refusal line for a refused turn; else its final text - with a line naming the cut
  * when a cut interrupted it mid-stream; else why it said nothing - cut by its deadline, or failed - and `""`,
  * nothing to send, for one that just ended on a tool or was cancelled before it said anything (the phone's `/stop`
- * is answered by the bridge, a shutdown by nobody). An alert's turn has its own lines for a failure and for no text
- * at all (P3-15): the operator has the alert, and is told its check came to nothing. */
+ * is answered by the bridge, a shutdown by nobody). */
 function replyOf(r: DeskTurnRecord, m: Machinery): string {
   if (r.outcome === "refused") return m.session.fenceRefusalLine(r.violation ?? JOURNAL);
   if (r.finalText !== "") return r.interrupted === true ? `${r.finalText}\n${m.session.cutOffLine(r)}` : r.finalText;
-  if (r.outcome === "timed-out") return timedOutLine(r.deadlineMs, m);
-  const alert = r.source === "alert";
-  if (r.outcome === "failed") return alert ? notAnnotatedLine(r.error ?? "error") : notAnsweredLine(r.error ?? "error");
-  return alert ? NO_CHECK : "";
-}
-
-/** The alert id a turn was opened for: its naming message's `alert`, when that message is an alert's. */
-function alertOf(r: DeskTurnRecord): string | undefined {
-  const alert = r.message?.kind === "alert" ? r.message.alert : undefined;
-  return typeof alert === "string" ? alert : undefined;
+  if (r.outcome === "timed-out") return timedOutLine(r.deadlineMs, m.session.formatDuration);
+  if (r.outcome === "failed") return notAnsweredLine(r.error ?? "error");
+  return "";
 }
 
 /* ---------- agents at rest ---------- */
@@ -367,8 +351,6 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
 
   let outlet: DeskOutlet | undefined;
   let stateOf: (() => Promise<string | undefined>) | undefined;
-  /** Each alert's message to reply to, by the alert's id, oldest first: kept from its post to its turn's end. */
-  const replies = new Map<string, number>();
   /** The conversation supervised now. */
   let current: Watch | undefined;
   /** Conversations a renew left with work under way, each supervised until its agent is idle. */
@@ -451,11 +433,11 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
 
   /** A turn's end, delivered: its reply ({@link replyOf}) through {@link sendOut}, for a source the outlet
    * answers. */
-  const deliverTurn = async (r: DeskTurnRecord, replyTo: number | undefined, m: Machinery): Promise<void> => {
+  const deliverTurn = async (r: DeskTurnRecord, m: Machinery): Promise<void> => {
     if (!DELIVERED.has(r.source)) return;
     const text = replyOf(r, m);
     if (text === "") return; // it ended on a tool: there is nothing to say
-    await sendOut(text, replyTo === undefined ? undefined : { replyTo },
+    await sendOut(text, undefined,
       `${BIN}: desk: the reply to turn ${r.turn} on desk session ${r.sessionId} could not be sent`, "; the next reply goes ahead");
   };
 
@@ -463,15 +445,11 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
    * rejection is a process exit in the face (main.ts `installFailLoud`). */
   const turnEnded = (r: DeskTurnRecord, m: Machinery): void => {
     const where = `turn ${r.turn} on desk session ${r.sessionId}`;
-    /* an alert's reply is taken at its turn's end: forgotten whatever the delivery does */
-    const alert = alertOf(r);
-    const replyTo = alert === undefined ? undefined : replies.get(alert);
-    if (alert !== undefined) replies.delete(alert);
     const recorded = recording.then(() => record(r, m)).catch((err: unknown) => {
       log(`${BIN}: desk: ${where} could not be recorded: ${errText(err)}`);
     });
     recording = recorded;
-    delivering = delivering.then(() => recorded).then(() => deliverTurn(r, replyTo, m)).catch((err: unknown) => {
+    delivering = delivering.then(() => recorded).then(() => deliverTurn(r, m)).catch((err: unknown) => {
       log(`${BIN}: desk: ${where} could not be delivered: ${errText(err)}`);
     });
   };
@@ -689,17 +667,6 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     }
   };
 
-  /** Keep `replyTo` for `alert`'s turn, the newest last; past {@link REPLIES_MAX}, the oldest goes. */
-  const remember = (alert: string, replyTo: number): void => {
-    replies.delete(alert);
-    replies.set(alert, replyTo);
-    while (replies.size > REPLIES_MAX) {
-      const oldest = replies.keys().next().value;
-      if (oldest === undefined) break;
-      replies.delete(oldest);
-    }
-  };
-
   /** The desk state for a phone's post, or `undefined`: none asked for, none given, or - with one line - a provider
    * that threw or had not answered in {@link STATE_WAIT_MS}. Never rejects. */
   const deskState = async (): Promise<string | undefined> => {
@@ -770,8 +737,6 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
           const message = key === undefined
             ? m.createUserMessage({ content, source })
             : m.freezeMessage({ id: m.MessageId(key), role: "user" as const, content, source });
-          const alert = input.message.kind === "alert" && typeof input.message.alert === "string" ? input.message.alert : undefined;
-          if (alert !== undefined && input.replyTo !== undefined) remember(alert, input.replyTo);
           /* one synchronous step: the state, then the message it is context for. `busy` read the desk idle a
            * macrotask ago; a wake or a browser turn may have started since, and the state would splice into it
            * (spike 4), so the status is read again here, with nothing awaited before the followup. */
@@ -790,7 +755,6 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
           try {
             agent.followup(message as unknown as MessageLike);
           } catch (err) {
-            if (alert !== undefined) replies.delete(alert);
             if (injected !== undefined) withdraw(agent, injected);
             throw err;
           }

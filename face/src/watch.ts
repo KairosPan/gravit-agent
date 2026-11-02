@@ -29,8 +29,9 @@
  * A PASS is one market's poll - one snapshot over that market's ids alone - or one filings poll. Its hits are judged
  * synchronously and go on the send chain in order: the flags read once (OFF and MUTE, then the budget when an alert
  * would be annotated), each hit recorded with its gate's decision, each send delivered and its delivery recorded, and
- * then one annotation post on a second chain no pass waits on (ruling 5); a send that dispose cuts off is recorded
- * `{ undelivered: "the face shut down" }`, never delivered. A failed poll - rejected, or every quote
+ * then one annotation post on a second chain no pass waits on (ruling 5) - to the annotation lane
+ * (src/annotator.ts, spec §16 H1), whose run comes back as one `annotated` record ({@link WatchHandle.noteAnnotated});
+ * a send that dispose cuts off is recorded `{ undelivered: "the face shut down" }`, never delivered. A failed poll - rejected, or every quote
  * `unavailable` - judges nothing and says so once per session date per market; a watched symbol unpriced on its
  * first {@link UNPRICED_POLLS} polls of a session date says so once (ruling 16).
  *
@@ -61,7 +62,7 @@ import {
   levelDistancePct, loadHoldings, loadLevels, loadRules, resolveSymbols, type Holding, type Level, type LevelKind, type LoadRefusal, type LoadResult, type Rule,
 } from "./desk-book.ts";
 import type { DeliverResult, DeskConversation, PostResult } from "./desk-conversation.ts";
-import type { DeskClock } from "./desk-session.ts";
+import type { DeskClock, DeskTurnRecord } from "./desk-session.ts";
 import { createEdgar, type Edgar, type EdgarFetch, type EdgarResult } from "./edgar.ts";
 import { bjDate, etDate } from "./et.ts";
 import {
@@ -208,12 +209,39 @@ export interface WatchStatus {
   ledgerError?: string;
 }
 
+/** One annotation run's end, as the annotation lane (src/annotator.ts) reports it and `alerts.jsonl` keeps it (spec §16
+ * H1): the pass it checked, its session, its turn's outcome, the ids of the messages its reply went out as - none when
+ * the reply was held back or queued - and the reply, at most 2,000 characters. */
+export type AnnotatedRecord = {
+  t: string;
+  kind: "annotated";
+  pass: string;
+  sessionId: string;
+  outcome: DeskTurnRecord["outcome"];
+  sent: number[];
+  text: string;
+};
+
+/** Whether `x` is an {@link AnnotatedRecord}, by the fields the watch reads back. */
+export function isAnnotatedRecord(x: unknown): x is AnnotatedRecord {
+  if (typeof x !== "object" || x === null) return false;
+  const r = x as Record<string, unknown>;
+  return r.kind === "annotated" && typeof r.t === "string" && typeof r.pass === "string" && typeof r.sessionId === "string"
+    && typeof r.outcome === "string" && Array.isArray(r.sent) && r.sent.every((n) => typeof n === "number") && typeof r.text === "string";
+}
+
+/** A line of `alerts.jsonl` as the watch keeps it: src/watch-eval.ts's four kinds and the lane's `annotated`. */
+type WatchRecord = AlertRecord | AnnotatedRecord;
+const isWatchRecord = (x: unknown): x is WatchRecord => isAlertRecord(x) || isAnnotatedRecord(x);
+
 /** The running watch. `tick` runs one tick now (after any under way); `stateText` the desk state, `undefined`
- * unless watching; `dispose` stops it and releases the lease. */
+ * unless watching; `noteAnnotated` appends an annotation run's record to `alerts.jsonl` and keeps it in memory with
+ * the rest; `dispose` stops it and releases the lease. */
 export interface WatchHandle {
   tick(): Promise<void>;
   status(): WatchStatus;
   stateText(): Promise<string | undefined>;
+  noteAnnotated(r: AnnotatedRecord): void;
   dispose(): Promise<void>;
 }
 
@@ -343,7 +371,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   let baseline: Baseline = { seeded: new Set(), seen: new Set() };
   let filingsRead = false;
   /** The alert records of the last {@link MEMORY_MS}: the rebuild's, then this run's, in order. */
-  let records: AlertRecord[] = [];
+  let records: WatchRecord[] = [];
   /** Each delivered record by its alert's id. */
   const deliveries = new Map<string, AlertDelivered>();
   /** The last priced print of each `market:symbol`. */
@@ -1025,7 +1053,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   /** The filing keys' cooldowns as the ledger leaves them: src/watch-eval.ts rebuildDay starts a key's cooldown at its
    * date's latest record not suppressed `cooldown`; for a filing key, a record suppressed `window` starts none either,
    * so its `lastHitAt` is its date's latest record that reached the gate, or none. Price keys are rebuildDay's. */
-  function filingCooldowns(rebuilt: WatchDay, read: readonly AlertRecord[]): void {
+  function filingCooldowns(rebuilt: WatchDay, read: readonly WatchRecord[]): void {
     const latest = new Map<string, number>();
     for (const r of read) {
       if (r.kind !== "alert" || !r.key.startsWith("filing:")) continue;
@@ -1081,7 +1109,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   async function ledgersStep(at: number): Promise<void> {
     if (!alertsRead) {
       try {
-        const { records: read } = await readRecords(home, ALERTS_FILE, isAlertRecord);
+        const { records: read } = await readRecords(home, ALERTS_FILE, isWatchRecord);
         const merged = [...read.filter((r) => at - Date.parse(r.t) <= MEMORY_MS), ...records];
         const orphans = findOrphans(merged, at);
         day = rebuildDay(merged, at, new Set(orphans.lost.map((r) => r.id)));
@@ -1379,6 +1407,10 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     tick,
     status,
     stateText,
+    noteAnnotated(r) {
+      records.push(r);
+      alerts.append(r);
+    },
     dispose() {
       disposing ??= (async () => {
         stopped = true;

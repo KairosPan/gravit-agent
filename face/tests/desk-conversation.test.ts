@@ -1545,119 +1545,8 @@ test("a budget that cannot be read is one line, and the desk goes on", async () 
   }
 });
 
-/* ---------- annotations, replies and the desk state (P3) ---------- */
-
-/** An outlet that records each send with the message it replies to, if any. */
-function replyOutlet(): DeskOutlet & { sent: [string, number | undefined][] } {
-  const sent: [string, number | undefined][] = [];
-  return {
-    sent,
-    send(text, opts) {
-      sent.push([text, opts?.replyTo]);
-      return Promise.resolve({ sent: [100 + sent.length] });
-    },
-  };
-}
-
-/** An alert's message source, as the watch posts it. */
-const alertOf = (alert: string, symbol = "NVDA") => ({ kind: "alert", alert, symbol });
-/** Post an alert's annotation, replying to the alert's message `replyTo`. */
-const annotate = (h: Harness, alert: string, replyTo: number | undefined, source: Parameters<DeskConversation["post"]>[0]["source"] = { kind: "alert", symbol: "NVDA", rule: "stop" }) =>
-  h.desk.post({ text: "NVDA 171.20 crossed the stop at 172", source, message: alertOf(alert), ...(replyTo === undefined ? {} : { replyTo }) });
-
-test("an alert post's turn is delivered as a reply to the alert", async () => {
-  const h = await harness();
-  const outlet = replyOutlet();
-  h.desk.setOutlet(outlet);
-  const opened = await annotate(h, "a-000000000001", 11);
-  const { sessionId } = opened as { sessionId: string };
-  const agent = h.tree.agent(sessionId);
-  assert.ok(agent.text(0)?.startsWith("[alert · NVDA · stop]\n"));
-  assert.deepEqual(agent.followups[0].source, alertOf("a-000000000001"));
-  turn(h, sessionId, 1, alertOf("a-000000000001"), "Stop met: 171.20 < 172 (ROBINHOOD 10:21:03 ET).");
-  await waitFor("the reply", () => outlet.sent.length === 1);
-  assert.deepEqual(outlet.sent, [["Stop met: 171.20 < 172 (ROBINHOOD 10:21:03 ET).", 11]]);
-
-  turn(h, sessionId, 2, alertOf("a-000000000001"), "the same alert again, opened elsewhere");
-  turn(h, sessionId, 3, alertOf("a-000000000009"), "an alert no post registered");
-  turn(h, sessionId, 4, PHONE, "a phone answer");
-  await waitFor("three more", () => outlet.sent.length === 4);
-  assert.deepEqual(outlet.sent.slice(1), [
-    ["the same alert again, opened elsewhere", undefined], ["an alert no post registered", undefined], ["a phone answer", undefined],
-  ], "each reply is forgotten at its turn's end; nothing else replies");
-
-  await annotate(h, "a-000000000002", 0); // tested against undefined: 0 is a message id
-  turn(h, sessionId, 5, alertOf("a-000000000002"), "zero");
-  await annotate(h, "a-000000000003", undefined); // a queued alert's annotation: no reply
-  turn(h, sessionId, 6, alertOf("a-000000000003"), "queued");
-  await waitFor("two more", () => outlet.sent.length === 6);
-  assert.deepEqual(outlet.sent.slice(4), [["zero", 0], ["queued", undefined]]);
-  assert.deepEqual(h.lines, []);
-});
-
-test("an alert turn's other ends answer as replies with their own lines; a telegram turn keeps P1's", async () => {
-  const h = await harness({ deadlineFor: (kind) => (kind === "alert" ? 90_000 : undefined) });
-  const outlet = replyOutlet();
-  h.desk.setOutlet(outlet);
-  const { sessionId } = (await annotate(h, "a-000000000001", 11)) as { sessionId: string };
-
-  startTurn(h, sessionId, 1, alertOf("a-000000000001"));
-  await h.time.fake.advance(90_000);
-  endTurn(h, sessionId, 1, ABORTED("desk deadline"));
-  await annotate(h, "a-000000000002", 12);
-  startTurn(h, sessionId, 2, alertOf("a-000000000002"));
-  endTurn(h, sessionId, 2, { kind: "error", error: { message: "429 rate limit", code: "UNKNOWN" } });
-  await annotate(h, "a-000000000003", 13);
-  startTurn(h, sessionId, 3, alertOf("a-000000000003"));
-  endTurn(h, sessionId, 3);
-  await annotate(h, "a-000000000004", 14);
-  startTurn(h, sessionId, 4, alertOf("a-000000000004"));
-  endTurn(h, sessionId, 4, ABORTED("shutdown"));
-  startTurn(h, sessionId, 5, PHONE);
-  endTurn(h, sessionId, 5, { kind: "error", error: { message: "429 rate limit", code: "UNKNOWN" } });
-  startTurn(h, sessionId, 6, PHONE);
-  endTurn(h, sessionId, 6);
-  await annotate(h, "a-000000000005", 15);
-  await put(h.root, "desk/journal/notes/GRAVIT.md"); // planted after the post's own check
-  startTurn(h, sessionId, 7, alertOf("a-000000000005"));
-  await waitFor("the fence's cancel", () => h.tree.agent(sessionId).cancels.length === 2);
-  endTurn(h, sessionId, 7, ABORTED("desk fence"));
-
-  await waitFor("six replies", () => outlet.sent.length === 6);
-  assert.deepEqual(outlet.sent, [
-    ["timed out after 90 s; a card or a long tool was pending", 11],
-    ["the desk could not annotate this alert: 429 rate limit", 12],
-    ["the desk's check of this alert ended with no text", 13],
-    ["the desk's check of this alert ended with no text", 14],
-    ["the desk could not answer: 429 rate limit; nothing was done - send it again later", undefined],
-    ["refused: desk/journal/notes/GRAVIT.md exists; it would steer every later desk turn. Remove it, then write again.", 15],
-  ], "a telegram turn that ended with no text sends nothing, as in P1");
-});
-
-test("a batch post renders the alerts form and replies to the first alert", async () => {
-  const h = await harness();
-  const outlet = replyOutlet();
-  h.desk.setOutlet(outlet);
-  const { sessionId } = (await annotate(h, "b-00000000000a", 21, { kind: "alerts", count: 3 })) as { sessionId: string };
-  const agent = h.tree.agent(sessionId);
-  assert.equal(agent.text(0), "[alerts · 3 · 14:03 ET]\nNVDA 171.20 crossed the stop at 172");
-  turn(h, sessionId, 1, alertOf("b-00000000000a"), "Three plans checked.");
-  await waitFor("the reply", () => outlet.sent.length === 1);
-  assert.deepEqual(outlet.sent, [["Three plans checked.", 21]]);
-});
-
-test("the replies kept are the newest 50", async () => {
-  const h = await harness();
-  const outlet = replyOutlet();
-  h.desk.setOutlet(outlet);
-  let sessionId = "";
-  for (let n = 1; n <= 51; n += 1) sessionId = ((await annotate(h, `a-${String(n).padStart(12, "0")}`, n)) as { sessionId: string }).sessionId;
-  turn(h, sessionId, 1, alertOf(`a-${"1".padStart(12, "0")}`), "the oldest");
-  turn(h, sessionId, 2, alertOf(`a-${"2".padStart(12, "0")}`), "the second");
-  turn(h, sessionId, 3, alertOf(`a-${"51".padStart(12, "0")}`), "the newest");
-  await waitFor("three replies", () => outlet.sent.length === 3);
-  assert.deepEqual(outlet.sent, [["the oldest", undefined], ["the second", 2], ["the newest", 51]]);
-});
+/* ---------- the desk state (P3) ----------
+ * The alert annotations and their replies moved to their own lane (src/annotator.ts): tests/annotator.test.ts. */
 
 const STATE = '{"holdings":[]}';
 
@@ -1677,8 +1566,8 @@ test("a phone post injects the desk state just before its followup, only when no
   assert.deepEqual(agent.calls, ["inject", "followup", "followup"]);
   agent.settle();
 
-  await annotate(h, "a-000000000001", 11);
-  assert.deepEqual(agent.calls.slice(3), ["followup"], "an alert post never injects");
+  await post(h, "NVDA 171.20", { kind: "alert", symbol: "NVDA", rule: "stop" }, ALERT);
+  assert.deepEqual(agent.calls.slice(3), ["followup"], "a post that is not the phone's never injects");
   assert.equal(asked, 2, "nor asks for the state: the busy phone post did, and went without");
 
   delete agent.inject; // an agent without inject

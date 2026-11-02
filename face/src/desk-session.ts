@@ -284,8 +284,8 @@ export function provenanceLine(source: DeskSource, now: Date): string {
 export type TelegramMessageSource = { kind: "telegram"; from: number; chat: number; messageId: number };
 /** A standing order's firing: the order, the firing's key and the trading date it fires for. */
 export type ScheduleMessageSource = { kind: "schedule"; order: string; firing: string; date: string };
-/** An alert the face has already sent: the alert's id and its symbol. */
-export type AlertMessageSource = { kind: "alert"; alert: string; symbol: string };
+/** An alert the face has already sent: the alert's id - or the pass's, for several - its symbol or symbols, and its pass. */
+export type AlertMessageSource = { kind: "alert"; alert: string; symbol: string; pass?: string };
 /** The face's view of the desk, injected before a phone's text: context, never what names a turn. */
 export type DeskStateMessageSource = { kind: "desk"; form: "state" };
 /** The `source` of a message the face sends the desk: the log's, the ledger's and the client's record of

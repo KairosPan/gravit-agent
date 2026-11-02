@@ -21,7 +21,7 @@ import { deskCalendars, type DeskCalendars, type MarketCalendar, type MarketSess
 import type { MarketQuote, MarketQuoteIdentity, MarketQuotePayload, MarketQuoteSource } from "../src/market-quotes.ts";
 import type { Market } from "../src/symbols.ts";
 import {
-  installWatch, LEASE_STALE_MS, MARKS_MAX, pidAlive, WATCH_CN_MAX, WATCH_US_MAX, type WatchHandle,
+  installWatch, isAnnotatedRecord, LEASE_STALE_MS, MARKS_MAX, pidAlive, WATCH_CN_MAX, WATCH_US_MAX, type WatchHandle,
 } from "../src/watch.ts";
 import { fakeCalendar, WallClock } from "./desk-fakes.ts";
 
@@ -530,6 +530,32 @@ test("an orphan younger than ten minutes is delivered once at the first read, re
   assert.equal(h.budgetCalls(), 0);
   assert.deepEqual(h.watch.status().recent.map((r) => [r.id, r.outcome]), [["a-young", "sent"]]);
   await h.watch.dispose();
+});
+
+test("noteAnnotated appends the lane's annotated record to alerts.jsonl, and a later read takes it back with the rest", async () => {
+  const note = {
+    t: "2026-11-30T15:20:50.000Z", kind: "annotated" as const, pass: "p-000000000001", sessionId: "session-annotation-1",
+    outcome: "ended" as const, sent: [101], text: "Stop met: 169.50 < 170 (ROBINHOOD 10:16:45 ET).",
+  };
+  const h = await overLedger([orphan("a-old", "2026-11-30T14:50:45.000Z")]);
+  await h.wall.advance(0);
+  await until("the orphan's record", async () => (await deliveredOf(h, "a-old")).length === 1);
+  h.watch.noteAnnotated(note);
+  await until("the annotated record", async () => (await h.alertRecords()).some((r) => r.kind === "annotated"));
+  assert.deepEqual((await h.alertRecords()).filter((r) => r.kind === "annotated"), [note], "as reported, one line");
+  assert.deepEqual(h.watch.status().recent.map((r) => r.id), ["a-old"], "the alerts the status lists are unchanged");
+  await h.watch.dispose();
+  assert.equal(isAnnotatedRecord(note), true);
+  assert.equal(isAnnotatedRecord({ ...note, sent: ["101"] }), false, "a message id is a number");
+
+  /* the next face reads the ledger with the annotated line in it: no ledger error, and nothing replayed again */
+  const again = await harness({ start: "2026-11-30T15:21:00Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") }, home: h.home });
+  again.source.tables.us.set("NVDA", us(175, "2026-11-30T15:20:59Z"));
+  await again.wall.advance(0);
+  await until("the first poll", () => again.source.calls.length === 1);
+  assert.equal(again.watch.status().ledgerError, undefined);
+  assert.deepEqual(again.sent, []);
+  await again.watch.dispose();
 });
 
 test("an orphan older than ten minutes is one line and a delivered record 'lost to a restart'", async () => {

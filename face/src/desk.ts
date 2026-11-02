@@ -79,6 +79,7 @@ import { appendFile, lstat, mkdir, open, readFile, rename, stat, unlink } from "
 import type { IncomingMessage } from "node:http";
 import { basename, extname, join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
+import { createAnnotator, type Annotator } from "./annotator.ts";
 import { createDeskConversation, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
 import type { DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSessionPersistenceLike, SessionEventsOn } from "./desk-session.ts";
 import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskGuardCtxLike } from "./desk-tools.ts";
@@ -1529,7 +1530,8 @@ function withPersistence(ctx: DeskSessionCtxLike): DeskSessionCtxLike {
 /** What {@link installDesk} hands back. `bootedAt` is when this run began, in ms since the epoch;
  * `ready` settles once the `boot` event is written or its failure logged, and never rejects;
  * `conversation` is the desk session's owner (src/desk-conversation.ts), present only when the
- * desk is on and `installDesk` was given what it needs; `schedule`, present with the conversation,
+ * desk is on and `installDesk` was given what it needs; `annotator`, the alert annotations' lane (src/annotator.ts),
+ * present with the conversation; `schedule`, present with the conversation,
  * settles to the standing orders' clock (src/schedule.ts) once its module has loaded - `undefined` when it
  * could not load, or when the desk was disposed first - and never rejects; `watchRow`, present with the schedule
  * when `installDesk` was given `watchRow`, settles to the watch (src/watch.ts) once its module has loaded -
@@ -1540,12 +1542,14 @@ export interface DeskHandle {
   bootedAt: number;
   ready: Promise<void>;
   conversation?: DeskConversation;
+  annotator?: Annotator;
   schedule?: Promise<ScheduleHandle | undefined>;
   watchRow?: Promise<WatchHandle | undefined>;
   dispose(code: number): Promise<void>;
 }
 
-/** An alert's annotation turn's deadline (P3-12): 90 s, then the turn is cut with its own line as a reply. */
+/** An alert's annotation turn's deadline (P3-12): 90 s from its own `turn/start` in the annotation lane
+ * (src/annotator.ts), then the turn is cut with its own line as a reply. */
 export const ALERT_DEADLINE_MS = 90_000;
 
 /** The watch's timers: the wall clock, `unref`'d, so the watch never holds the process open. */
@@ -1587,11 +1591,14 @@ const watchClock = (now: () => number): DeskClock => ({
  * and `desk_state` read its orders and its cap, and the conversation's budget is the day's tokens
  * against that cap (ruling P2-8). Given `watchRow` and a quote source that answers, the watch (src/watch.ts, P3)
  * runs too, once the clock row is made: its module loads on first use, it shares the clock row's market calendars,
- * its alerts and lines go out through the conversation's `deliver`, its annotations through its `post` (each alert
- * turn cut at `alertDeadlineMs`), the conversation's desk state is its `stateText`, and the status route and
+ * its alerts and lines go out through the conversation's `deliver`, its annotations through the annotation lane
+ * (src/annotator.ts, spec §16 H1: each a fresh desk agent of its own, its turn cut at `alertDeadlineMs`, its reply
+ * through the conversation's `deliver`, its run noted on the watch), the conversation's desk state is its
+ * `stateText`, and the status route and
  * `desk_state` carry its status. `dispose(code)` stops the clock first - the firing under way
  * aborted, waited for two seconds at most - then the watch - its passes and posts waited for two seconds at most,
- * its lease released - then the bridge - no phone text is posted from then on,
+ * its lease released - then the annotation lane - a check under way cancelled as `shutdown`, its agent let go -
+ * then the bridge - no phone text is posted from then on,
  * and its outbox stays for the next boot -
  * then the conversation, which cancels the desk turns under way as `shutdown`, gives each cut agent
  * two seconds to go idle so the cut turn is recorded, and gives a start, post or renew under way
@@ -1699,10 +1706,25 @@ export function installDesk(
       session: wiring.session,
       on: wiring.on,
       deadlineMs: deps.deskDeadlineMs,
-      /* an alert's annotation turn is cut at 90 s (P3-12); every other turn keeps the conversation's deadline */
-      deadlineFor: (kind) => (kind === "alert" || kind === "alerts" ? deps.alertDeadlineMs ?? ALERT_DEADLINE_MS : undefined),
       /* the day's budget against the standing orders' cap - none until their clock has read standing.yml (P2-8) */
       budget: () => readBudget(home, now(), schedule?.dailyTokens()),
+      clock,
+      log,
+    });
+  /* The alert annotations' lane (spec §16 H1): each pass's check in a fresh desk agent of its own, never queued behind
+   * the conversation's turns; its reply leaves through the conversation's `deliver`, and its run is noted on the watch,
+   * read when the run ends - the watch is installed later, after the clock row. */
+  const annotator = wiring === undefined || conversation === undefined
+    ? undefined
+    : createAnnotator({
+      session: wiring.session,
+      home,
+      root: wiring.root,
+      on: wiring.on,
+      deliver: (text, opts) => conversation.deliver(text, opts),
+      budget: () => readBudget(home, now(), schedule?.dailyTokens()),
+      deadlineMs: deps.alertDeadlineMs ?? ALERT_DEADLINE_MS,
+      onAnnotated: (r) => { watch?.noteAnnotated(r); },
       clock,
       log,
     });
@@ -1771,7 +1793,7 @@ export function installDesk(
    * a module that cannot load is one line and `undefined`; one that arrives once dispose has begun starts nothing. */
   const watchRow = deps.watchRow;
   const quotes = deps.quotes;
-  const watching = scheduling === undefined || watchRow === undefined || conversation === undefined ? undefined : scheduling
+  const watching = scheduling === undefined || watchRow === undefined || conversation === undefined || annotator === undefined ? undefined : scheduling
     .then(async (made) => {
       if (made === undefined || calendars === undefined || quotes === undefined || quotes.unavailable !== undefined) return undefined;
       const watchModule = await import("./watch.ts");
@@ -1786,7 +1808,7 @@ export function installDesk(
         calendars,
         clock: watchRow.clock ?? watchClock(now),
         deliver: (text, opts) => conversation.deliver(text, opts),
-        post: (input) => conversation.post(input),
+        post: (input) => annotator.post(input),
         budget: () => readBudget(home, now(), schedule?.dailyTokens()),
         ...(edgar === undefined ? {} : { edgar }),
         ...(watchRow.alive === undefined ? {} : { alive: watchRow.alive }),
@@ -1806,12 +1828,14 @@ export function installDesk(
     bootedAt,
     ready,
     ...(conversation === undefined ? {} : { conversation }),
+    ...(annotator === undefined ? {} : { annotator }),
     ...(scheduling === undefined ? {} : { schedule: scheduling }),
     ...(watching === undefined ? {} : { watchRow: watching }),
     dispose(code) {
       disposing ??= (async () => {
         await (await scheduling)?.dispose();
         await (await watching)?.dispose();
+        await annotator?.dispose();
         conversation?.setState(undefined);
         await bridging;
         await bridge?.dispose();

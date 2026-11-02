@@ -617,11 +617,12 @@ afterAll(() => rm(TMP, { recursive: true, force: true }));
 class FakeAgent implements AgentLike {
   status: "idle" | "running" = "idle";
   readonly cancels: unknown[][] = [];
+  readonly followups: unknown[] = [];
   readonly session: SessionLike;
   constructor(readonly id: string) {
     this.session = { id, header: {}, seq: 0, snapshotEvents: () => [], append: () => undefined };
   }
-  followup(): void {}
+  followup(message: unknown): void { this.followups.push(message); }
   cancel(...args: unknown[]): void { this.cancels.push(args); }
 }
 
@@ -1485,7 +1486,7 @@ test("events.jsonl takes the three new kinds", async () => {
 
 /* ---------- P3: the watch row ---------- */
 
-test("installDesk starts the watch with a source, shares the US calendar with the schedule, and disposes schedule, watch, bridge, conversation in order", async () => {
+test("installDesk starts the watch with a source, shares the US calendar with the schedule, wires the watch's post to the annotator, not to the conversation, and disposes schedule, watch, annotator, bridge, conversation in order", async () => {
   assert.equal(ALERT_DEADLINE_MS, 90_000);
   const h = join(TMP, "watch-home");
   const root = join(TMP, "repo-watch");
@@ -1500,10 +1501,19 @@ test("installDesk starts the watch with a source, shares the US calendar with th
     root, route: { provider: "stub", model: "echo" }, installModelSelection: () => () => {}, log: () => {},
   };
   const asked: string[][] = [];
+  const watchClock = new WallClock("2026-12-01T02:00:00Z");
+  /** 600519's print once the test sets one: none until then. */
+  let price: number | undefined;
   const quotes: MarketQuoteSource = {
     snapshot: async (assets) => {
       asked.push(assets.map((a) => a.id));
-      return { ok: true, generated_at: "2026-12-01T02:00:00.000Z", quotes: [], providers: [] };
+      const at = new Date(watchClock.now()).toISOString();
+      const priced = price === undefined ? [] : assets.filter((a) => a.symbol === "600519").map((a) => ({
+        ...a, change: null, volume: null, volume_as_of: null, source: "market", feed: "tencent", basis: "previous_close" as const,
+        cn: { phase: "trading", lastSession: null }, price: price!, prev_close: 1410, change_pct: null, as_of: at, received_at: at,
+        quote_status: "live", market_status: "open", message: "",
+      }));
+      return { ok: true, generated_at: at, quotes: priced, providers: [] } as Awaited<ReturnType<MarketQuoteSource["snapshot"]>>;
     },
   };
 
@@ -1519,7 +1529,6 @@ test("installDesk starts the watch with a source, shares the US calendar with th
 
   const fake = conversationRoot(() => "");
   const scheduleClock = new WallClock("2026-12-01T02:00:00Z");
-  const watchClock = new WallClock("2026-12-01T02:00:00Z");
   const us = fakeCalendar({ "2026-11-30": "closed" });
   const cn = fakeCalendar({ "2026-12-01": { date: "2026-12-01", open: "2026-12-01T01:30:00Z", close: "2026-12-01T07:00:00Z", early: false } }, "fake XSHG", (n) => bjDate(new Date(n)));
   /* what had stopped when the conversation let go of the bus */
@@ -1553,24 +1562,34 @@ test("installDesk starts the watch with a source, shares the US calendar with th
   assert.equal(routed.body.watch?.state, "watching", "the status route carries the watch");
   assert.equal(routed.body.standing?.calendars?.cn?.clock, "fake XSHG", "the clock row holds the same XSHG calendar as the watch");
 
-  /* an alert's annotation turn is cut at alertDeadlineMs */
+  /* installDesk wires the watch's post to the annotator, not to the conversation (spec §16 H1) */
   await until("the conversation's start", () => fake.listeners.size === 1);
-  const agent = fake.agents[0];
+  const deskAgent = fake.agents[0];
+  assert.ok(desk.annotator !== undefined, "the annotator comes with the conversation");
+  const phone: [string, number | undefined][] = [];
+  desk.conversation?.setOutlet({ send: async (text, opts) => { phone.push([text, opts?.replyTo]); return { sent: [phone.length] }; } });
+  price = 1390; // 600519 under its watch level at its session's first judged print
+  await watchClock.advance(10_000);
+  await until("the annotation's own agent", () => fake.agents.length === 2);
+  const annotation = fake.agents[1];
+  assert.notEqual(annotation.id, deskAgent.id, "a session of its own");
+  assert.equal(annotation.followups.length, 1, "the annotation's message went to it");
+  assert.deepEqual(deskAgent.followups, [], "and nothing to the desk conversation");
   const emit = (type: string, data: Record<string, unknown>): void => {
-    for (const listener of fake.listeners) (listener as (session: { id: string }, event: EventLike) => void)({ id: agent.id }, { type, seq: 0, data });
+    for (const listener of fake.listeners) (listener as (session: { id: string }, event: EventLike) => void)({ id: annotation.id }, { type, seq: 0, data });
   };
+  /* its turn is cut at alertDeadlineMs, and its line goes as a reply under the alert */
   emit("turn/start", { turn: 1 });
-  emit("user/message", { turn: 1, source: { kind: "alert", alert: "a-000000000001", symbol: "NVDA" } });
-  await until("the 40 ms alert deadline's cancel", () => agent.cancels.length === 1);
+  emit("user/message", { turn: 1, source: { kind: "alert", alert: "a-000000000001", symbol: "600519" } });
+  await until("the 40 ms alert deadline's cancel", () => annotation.cancels.length === 1);
   emit("turn/end", { turn: 1, reason: { kind: "aborted" } });
-  /* and a turn named by an `alerts` source is cut the same */
-  emit("turn/start", { turn: 2 });
-  emit("user/message", { turn: 2, source: { kind: "alerts", alert: "p-000000000001", symbol: "NVDA,AMD" } });
-  await until("the 40 ms alerts deadline's cancel", () => agent.cancels.length === 2);
-  emit("turn/end", { turn: 2, reason: { kind: "aborted" } });
+  await until("the cut line under the alert", () => phone.length === 2);
+  assert.deepEqual(phone[1], ["timed out after 0.04 s; a card or a long tool was pending", 1]);
+  await until("the annotated note in alerts.jsonl", () => readFileSync(join(deskDir(h), "alerts.jsonl"), "utf8").includes('"kind":"annotated"'));
 
   await desk.dispose(0);
-  assert.deepEqual(atLetGo, [{ schedule: 0, watch: 0, state: "stopped", lease: false }], "the clock row and the watch stopped, and the lease released, before the conversation let go");
+  assert.deepEqual(atLetGo.at(-1), { schedule: 0, watch: 0, state: "stopped", lease: false }, "the clock row and the watch stopped, and the lease released, before the conversation let go");
+  assert.equal(fake.listeners.size, 0, "the annotation's supervision and the conversation's both let go");
 });
 
 /* P3: the watch's lines (the P3 plan's Task 10), appended by deskStatusLines after P2's. */

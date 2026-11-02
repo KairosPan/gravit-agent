@@ -184,7 +184,8 @@ export function lostAlertsLine(hits: readonly AlertHit[], now: number): string {
 /**
  * A pass's annotation post: each alert's text, a blank line between, with no note. One alert keeps its rule's form
  * (`[alert · <SYMBOL> · <label>]`, the message naming the alert); several are `[alerts · <n> · …]`, the message
- * naming the pass and the symbols, each once, joined by `,`.
+ * naming the pass and the symbols, each once, joined by `,`. Either message carries the pass as `pass`, which the
+ * annotation lane's `annotated` record names (src/annotator.ts).
  * @param hits - the pass's delivered alerts, in order.
  * @param pass - the pass's id.
  * @param now - the time of the post.
@@ -193,10 +194,10 @@ export function annotationPost(hits: readonly AlertHit[], pass: string, now: num
   const text = hits.map((h) => alertText(h, now, "none")).join("\n\n");
   const only = hits.length === 1 ? hits[0] : undefined;
   if (only !== undefined) {
-    return { text, source: { kind: "alert", symbol: only.symbol, rule: only.label }, message: { kind: "alert", alert: only.id, symbol: only.symbol } };
+    return { text, source: { kind: "alert", symbol: only.symbol, rule: only.label }, message: { kind: "alert", alert: only.id, symbol: only.symbol, pass } };
   }
   const symbols = [...new Set(hits.map((h) => h.symbol))].join(",");
-  return { text, source: { kind: "alerts", count: hits.length }, message: { kind: "alert", alert: pass, symbol: symbols } };
+  return { text, source: { kind: "alerts", count: hits.length }, message: { kind: "alert", alert: pass, symbol: symbols, pass } };
 }
 
 /* ---------- the desk state ---------- */
