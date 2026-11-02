@@ -814,6 +814,30 @@ Each refusal is a ledger line and, once, a phone line. None is a number the mode
   **only once the nightly capture exists** (§4.3); until then the report says the screen was not
   run and why.
 
+  **As built (P4, 2026-11-02).** §15 replaces this bullet where they disagree (M6–M8), and the
+  plan `docs/superpowers/plans/2026-11-01-desk-p4-premarket.md` holds the rulings; `DEVELOPMENT.md`
+  §4.2 (`report.ts`) and §9 (R81–R89) hold the mechanism. No capture, no Python and no bars:
+  `builtin:report` reads the strategy's Lunhui runs, its `status.yaml`, its verified `levels.yml`
+  and one Market snapshot per market. What changed from the text above:
+  - **The Lunhui screen line, first** (M7): the newest sealed `analysis/<run>/run.json` by its
+    `sealed_at` instant, `ran: …` when it covers the market's previous session, else `not run for
+    the <prev> session: …` naming it, `not run: no Lunhui run … is sealed`, `cannot tell whether
+    the screen ran: …`, or `no screen is wired for this strategy`; the message quotes it verbatim.
+  - **The per-quote print rule**: each print judged on its own market's date — `pre-market`,
+    `session`, `close` (the previous session's: its distance is the distance at the close),
+    `earlier` (no previous close) or `none`; a price names its feed and exchange time, never a
+    process.
+  - **`market:`** on the order (M8), `us` by default, `cn` on the XSHG table and Beijing dates:
+    `open-90m` is 08:00 Beijing. The budget day stays New York's.
+  - **`levelsSha256`**: `arm` pins the strategy's `levels.yml` beside its `STANDING.md`, each
+    firing refuses a changed one until `rearm`, and the report quotes only the bytes checked —
+    charter D28 held for a strategy's own firings.
+  - **The cut-off at start**: a firing still queued at its market's open is missed, never started.
+  - **The `open-Nm` room rule**: an `open-Nm` must hold the producer's deadline, the turn's and
+    the 5-minute grace, as a `close-Nm` must.
+  - **`reports/`**: the turn saves its message as `reports/<date>-premarket.md` (gitignored), and
+    anything else it changed outside `reports/` and `analysis/` is one phone line after its text.
+
 ### 5.10 Failure behaviour
 
 | Failure | Behaviour |
@@ -1087,7 +1111,9 @@ The first measured week runs between P3 and P4 and sets `budget.dailyTokens`.
   flash by default); if the phone conversation wants the main model while annotations stay cheap,
   the annotations move to short fresh sessions and the conversation keeps its own.
 - **Roles on the desk** are off; the pre-market report's screen, once the capture exists, may
-  want `role_screener` under a longer deadline — decided when P4 is planned.
+  want `role_screener` under a longer deadline — decided when P4 is planned. *Closed by P4
+  (2026-11-02):* roles stay off. The screen is the strategy's Lunhui run, which the research
+  sessions make with their own roles; the report only reads it (§5.9's as-built note, §15 M7).
 
 ## 14. Questions for the operator
 

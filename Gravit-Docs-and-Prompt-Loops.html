@@ -109,9 +109,10 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <body>
 <main>
 <header>
-  <div class="eyebrow">Gravit workbench · 2026-10-19 · local main @ b398dff · dsh 0.2.0-rc.2 · 浏览器两站 2026-10-20 按 gravit-ui 客户端（feat/gravit-face）更新 · 2026-10-24 按账户嫁接第三阶段复读：Python 包、PIT 床、回测与三个角色已删 · 2026-10-26 按轮回模块计划 4（feat/lunhui-modules-3 @ d77bcd3）补入：十一行轮回行、三个角色、<code>lunhui:run</code> 段 · 2026-10-30 按轮回运行视图计划 2（feat/run-view-2 @ 1243cb72）补入：第十二行 <code>lunhui-present</code>、协议的收尾分流、合成回答 · 2026-10-30 按运行视图计划 3（feat/run-view-3 @ 3d1b4443）补入：七种块、个股链接、个股抽屉、追问与 Open run</div>
+  <div class="eyebrow">Gravit workbench · 2026-10-19 · local main @ b398dff · dsh 0.2.0-rc.2 · 浏览器两站 2026-10-20 按 gravit-ui 客户端（feat/gravit-face）更新 · 2026-10-24 按账户嫁接第三阶段复读：Python 包、PIT 床、回测与三个角色已删 · 2026-10-26 按轮回模块计划 4（feat/lunhui-modules-3 @ d77bcd3）补入：十一行轮回行、三个角色、<code>lunhui:run</code> 段 · 2026-10-30 按轮回运行视图计划 2（feat/run-view-2 @ 1243cb72）补入：第十二行 <code>lunhui-present</code>、协议的收尾分流、合成回答 · 2026-10-30 按运行视图计划 3（feat/run-view-3 @ 3d1b4443）补入：七种块、个股链接、个股抽屉、追问与 Open run · 2026-11-02 按台面 P4（feat/desk-p1-p4 @ 55713973）补入：台面的三条环路</div>
   <h1>Gravit 文档与提示词环路</h1>
   <p class="small">2026-11-01 按 feat/two-parts-5 @ 722f3891（账户两部分，计划 1–5）更新：A 股与轮回的上游读取都经账户；AKShare 成为账户的旁车（<code>akshare-mcp</code> 是账户的 stdio 子进程），face 不再挂 <code>mcp-akshare</code>，Gravit 只经席位的 <code>portfolio_akshare</code>（一次读，无卡）问它，所以 MCP 子进程只剩席位、没有 <code>mcp:akshare</code> 段；账户的卡在 face 的 Account › Cards 里答；账户不再提供页面（<code>/</code> 答 404 <code>NO_PAGE</code>），face 是它唯一的页面。只改了环路移动过的地方；2026-10-19 与 10-26 的实测数字（schema 大小等）按其当日原样保留，标注为当日数据。</p>
+  <p class="small">2026-11-02 依据 feat/desk-p1-p4 @ 55713973（台面 P0–P4：服务、手机、时钟与收盘前简报、盯盘、每个策略的盘前报告）补入第 13 节“台面的三条环路”：手机、按市场的时钟（<code>builtin:brief</code> 与 <code>builtin:report</code>）、提醒。只写台面新增的站点；台面回合本身仍走第 10、11 节的两条环路，只是预设换成 <code>gravit-desk</code>。</p>
   <p class="lede">这棵树上给代理看的文档（<code>AGENTS.md</code>、<code>CLAUDE.md</code>、<code>GRAVIT.md</code>、preset、profile）、产品宪章稿、前后端开发稿各自是什么，dsh 原装的 persona 是什么；以及两条环路：操作员的一句话怎样变成一次 Model API 请求，模型的输出又怎样经过工具、审批卡、日志回到操作员眼前。每一站都标出它读到或注入的文档与提示词。</p>
   <div class="meta"><span>依据：仓库文件 + face/node_modules 里安装的 dsh 包源码</span><span>机制以代码为准</span><span>字节数为 wc -c 当日实测</span></div>
   <nav class="toc" aria-label="目录">
@@ -128,6 +129,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
       <li><a href="#loop1">环路一：操作员指令 → Model API</a></li>
       <li><a href="#loop2">环路二：模型输出 → 工具 → 操作员</a></li>
       <li><a href="#side">侧环路：角色、房间、目标回合、标题、压缩</a></li>
+      <li><a href="#desk">台面的三条环路：手机、时钟、提醒</a></li>
       <li><a href="#numbers">已测的数字、未测的数字、未关的发现</a></li>
     </ol>
   </nav>
@@ -497,7 +499,99 @@ no cache_control（10-10 追踪）· 流空闲超时 300 s · 被策略层关掉
 </div>
 
 <!-- ===================================================== -->
-<h2 id="numbers">13. 已测的数字、未测的数字、未关的发现</h2>
+<h2 id="desk">13. 台面的三条环路：手机、时钟、提醒</h2>
+<p>台面（desk）是 Gravit 在操作员手机上的一面：一段长期的台面会话，只告知、从不下单（宪章 §1、B2）。它的回合与浏览器里的回合走同一个 dsh：第 10、11 节的两条环路照旧，只是会话用 <code>gravit-desk</code> 预设——系统提示是 Gravit 的 persona 前缀（<code>persona.md</code>）、<code>deployment:today</code> 与 <code>gravit:desk</code> 段（<code>dsh/profile/desk.md</code>，2,497 B 原文），没有角色段、没有 <code>gravit:cycle</code>；工具是 <code>DESK_ALLOW</code>（十四个精确名，无 shell、无 job、无下单与账户工具、无提问、无委派）与树的交集，再加台面自己的 <code>desk_quotes</code> 与 <code>desk_state</code>；沙箱 <code>workspace-write</code>；<code>GRAVIT.md</code> 基线照常由 <code>agent-instructions</code> 行沿链读入。face 的台面守卫（<code>installDeskGuard</code>）在每次工具调用前判写、判读、判密钥；Gate 2 拒绝台面看不见的下单工具，不出卡。下面三条是台面新增的站点：消息从哪里进来、在哪里出去。</p>
+<div class="legend">
+  <span>芯片图例同上：</span>
+  <span class="chip doc">文档 / 文件</span>
+  <span class="chip prompt">注入的提示词文本</span>
+  <span class="chip event">台面账本记录</span>
+  <span class="chip wire">线上字段 / 路由</span>
+</div>
+
+<h3>13.1 手机：Telegram → 桥 → 台面会话 → 回合 → 交付</h3>
+<ol class="flow flow-down">
+<li class="station"><span class="st-no">1</span><span class="st-where">Telegram Bot API · face/src/telegram.ts</span>
+<h4>桥长轮询 getUpdates，只收操作员私聊里的一种消息</h4>
+<p>只认 <code>TELEGRAM_OPERATOR_ID</code> 在操作员私聊里发来的消息；陌生人、群、编辑过的消息、频道帖都被丢弃、计数、记入 <code>telegram.jsonl</code>，从不回复。每个更新之后 offset 前移并存盘，跨重启只取一次。五个命令是桥自己的：<code>/status</code>、<code>/pause [时长]</code>、<code>/mute &lt;时长&gt;</code>、<code>/new</code>、<code>/stop</code>；没有 <code>/resume</code>、没有 <code>/unmute</code>——手机只能让台面更安静。其余文本连同 Telegram 自己的 <code>date</code>（操作员写下它的时间）交给台面会话。</p>
+<div class="chips"><span class="chip wire">GET /bot&lt;token&gt;/getUpdates（65 s）</span><span class="chip doc">$DSH_HOME/face/desk/telegram.jsonl</span><span class="chip doc">telegram.offset</span></div>
+</li>
+<li class="station"><span class="st-no">2</span><span class="st-where">face/src/desk-conversation.ts · post</span>
+<h4>台面会话的唯一主人按序检查，再把消息放进会话</h4>
+<p>顺序：暂停开关 <code>OFF</code>（到期的先解除，生效的拒绝）→ 当日 token 预算（纽约日；用完回预算那一行，不开回合）→ 指令链围栏（<code>findDeskFenceViolation</code>：日志目录里或 <code>desk/</code> 里的 <code>GRAVIT.md</code>、<code>GRAVIT.local.md</code>、<code>.git</code>、<code>.dsh</code>、<code>.agents</code>，根上的 <code>.dsh</code> / <code>.agents</code>，或一个符号链接，都拒绝）→ 确保台面会话（账本里最新的 <code>desk-session</code>，活的、恢复的或新建的，cwd <code>desk/journal/</code>）→ 会话空闲时先注入台面状态 → 消息，第一行是来源行。</p>
+<div class="chips"><span class="chip prompt">[telegram · operator · 14:03 ET]</span><span class="chip prompt">[desk · state · 14:03 ET]（只在空闲时，最多等 3.5 s）</span><span class="chip doc">desk/journal/（台面会话的 cwd）</span><span class="chip doc">$DSH_HOME/face/desk/OFF</span><span class="chip event">events.jsonl · desk-session / desk-refused</span></div>
+</li>
+<li class="station"><span class="st-no">3</span><span class="st-where">dsh · gravit-desk 预设 · superviseDeskTurns</span>
+<h4>一个受监督的回合：第 10、11 节的环路，换成台面的预设与守卫</h4>
+<p>回合从 <code>turn/start</code> 起有固定的 5 分钟截止，不因卡片而延长；每次 <code>turn/start</code> 再查一次围栏。模型可以用 <code>desk_quotes</code> 问现价（来自 Market 的读：美股 <code>explore</code>、A 股 <code>quotes</code>，每个价格带它的 feed 与交易所时间，如 <code>ROBINHOOD 10:21:03 ET</code>、<code>TENCENT 14:03:12 Beijing</code>），用 <code>desk_state</code> 读台面状态；写只能落在日志目录与临时区，守卫拒绝写指令文件与点文件、拒绝读仓库外与密钥文件、拒绝携带密钥值的调用。手机的 <code>/stop</code> 与截止一样只切当前这一回合，排在后面的消息各自得到回答。</p>
+<div class="chips"><span class="chip doc">dsh/profile/desk.md → gravit:desk</span><span class="chip doc">dsh/profile/persona.md</span><span class="chip doc">GRAVIT.md（链：根 → desk/journal）</span><span class="chip wire">desk_quotes · desk_state</span></div>
+</li>
+<li class="station"><span class="st-no">4</span><span class="st-where">desk-conversation.ts deliver → telegram.ts sendMessage</span>
+<h4>回合结束：一条账本事件，然后一次交付</h4>
+<p><code>turn/end</code> 时写一条 <code>desk-turn</code>（来源、结局、四个 token 桶）。然后交付：最终文本（被切断的加 <code>(cut off: …)</code>），或超时、失败、围栏拒绝的那一行。暂停生效时扣住不发。桥发纯文本，按 4,000 个 UTF-16 单位切分，发出前把 token 与 face 环境里的每个密钥值替换成 <code>&lt;token&gt;</code> / <code>&lt;secret&gt;</code>；发不出去的进 <code>outbox.json</code>，在下一次轮询或发送之前按序重发。</p>
+<div class="chips"><span class="chip event">events.jsonl · desk-turn</span><span class="chip wire">POST /bot&lt;token&gt;/sendMessage</span><span class="chip doc">$DSH_HOME/face/desk/outbox.json</span></div>
+</li>
+</ol>
+
+<h3>13.2 时钟：按市场 tick → 检查（钉与围栏）→ builtin:brief 或 builtin:report → 新的 gravit-desk 会话 → 回合 → 交付或扣下</h3>
+<ol class="flow flow-down">
+<li class="station"><span class="st-no">1</span><span class="st-where">face/src/schedule.ts · 每 30 s 一次 tick</span>
+<h4>按市场问日历，按订单自己的市场日期判定是否到点</h4>
+<p><code>standing.yml</code> 的大小、mtime 或 inode 变了就重读（操作员用 <code>npm run desk -- arm</code> / <code>rearm</code> 写它；任何错误让所有订单停下）。每个有生效订单的市场问一次自己的日历：<code>us</code> 是 XNYS 规则表、纽约日期，<code>cn</code> 是 XSHG 表、北京日期（<code>dateOf</code>）；一个市场的日历失败只停那个市场的订单。每张订单在自己的市场日期上判定：从锚点到 5 分钟宽限之内为到点，睡过、没运行或发现太晚则 <code>missed</code>，从不补跑。键是 <code>&lt;id&gt;:&lt;市场日期&gt;</code>，一个家目录只消耗一次。A 股的 <code>open-90m</code> 是北京 08:00，纽约的前一晚。一次只跑一个，排队到市场时刻还没开始的，记为 <code>missed</code>（<code>why: "cutoff"</code>），从不开始。</p>
+<div class="chips"><span class="chip doc">$DSH_HOME/face/desk/standing.yml</span><span class="chip doc">face/src/market-clock.ts · face/src/xshg-clock.ts</span><span class="chip event">firings.jsonl · missed / expired</span><span class="chip event">events.jsonl · calendar-error</span></div>
+</li>
+<li class="station"><span class="st-no">2</span><span class="st-where">face/src/firing.ts · checkFiring</span>
+<h4>检查：暂停、预算、围栏，然后每一个钉</h4>
+<p>顺序：暂停 → 预算（纽约日）→ 指令链围栏 <code>findChainViolation</code>（在读任何文件之前；策略单的 cwd 是 <code>strategies/&lt;name&gt;</code>）→ 订单文本读一次、对 arm 时的 sha256（<code>hash</code>）→ 脚本生产者的字节（<code>producer-hash</code>）→ 在策略里会唤醒回合的订单，其 <code>levels.yml</code> 经 <code>readDeskFile</code> 读一次、对 <code>levelsSha256</code>（<code>levels-hash</code>；没有文件对 <code>none</code>）。拒绝不消耗键，宽限内 <code>rearm</code> 当天仍会跑；每次变化发一行。通过的检查带着它散列过的字节本身，模型读到的就是操作员 arm 的文本，生产者引用的就是核过的 levels。然后 <code>started</code> 经 <code>appendRecordOnce</code> 写入。</p>
+<div class="chips"><span class="chip doc">desk/STANDING.md · strategies/&lt;name&gt;/STANDING.md</span><span class="chip doc">strategies/&lt;name&gt;/levels.yml（arm 时钉住）</span><span class="chip event">firings.jsonl · refused（reason, detail, reported）· started</span></div>
+</li>
+<li class="station"><span class="st-no">3</span><span class="st-where">face 进程内 · src/brief.ts 或 src/report.ts</span>
+<h4>生产者：face 自己的 builtin，在回合之前</h4>
+<ul>
+<li><strong><code>builtin:brief</code></strong>（收盘前简报，只在 <code>us</code>）：只读 <code>desk/holdings.yml</code> 与 <code>desk/levels.yml</code>，从不读策略的 <code>levels.yml</code>；一次快照拿指数与行业 ETF、美股持仓与价位；附上盯盘自上一份简报以来的提醒与申报块。</li>
+<li><strong><code>builtin:report</code></strong>（策略的盘前报告）：先读屏——<code>analysis/&lt;run&gt;/run.json</code> 里最新封存的轮回运行（按 <code>sealed_at</code> 的时刻），是否覆盖该市场的上一交易日，写成五种屏线之一（<code>ran: …</code>、<code>not run for the &lt;prev&gt; session: …</code>、<code>not run: no Lunhui run … is sealed</code>、<code>cannot tell whether the screen ran: …</code>、<code>no screen is wired for this strategy</code>）；再读 <code>status.yaml</code>（守卫过的字节，只开一次）、firing 核过的 levels（从不再读文件）；最后每个市场一次快照，每个价格在它自己市场的日期上判为 <code>pre-market</code>、<code>session</code>、<code>close</code>、<code>earlier</code> 或 <code>none</code>。</li>
+</ul>
+<p>输出是 JSON 块，最多 32,768 字符（超出则截断并标明）；失败也照样告诉回合，从不成为跳过回合的理由。没有报价源时两个 builtin 都答 <code>quotes unavailable: …</code>。</p>
+<div class="chips"><span class="chip doc">strategies/&lt;name&gt;/analysis/&lt;run&gt;/run.json</span><span class="chip doc">strategies/&lt;name&gt;/status.yaml</span><span class="chip wire">Market 的读：explore（美股）· quotes（A 股，每次十二对）</span><span class="chip event">firings.jsonl · producer</span></div>
+</li>
+<li class="station"><span class="st-no">4</span><span class="st-where">createDeskAgent · wakeMessage</span>
+<h4>一个新的 gravit-desk 会话，被一条唤醒消息叫醒一次</h4>
+<p>会话 cwd 是订单的目录：<code>desk</code> 的在 <code>desk/journal/</code>（缺了就建），策略的在 <code>strategies/&lt;name&gt;</code>（从不新建：不见了就是 could-not-run）。不是手机的那段会话，账本里也没有 <code>desk-session</code>。路由是订单的 <code>model</code>，否则是树的默认模型，不是台面的 flash。唤醒消息原样包住核过的文本与生产者的块，所以夹在标记之间的文本散列正好等于它的钉。系统提示与手机回合相同（<code>gravit:desk</code>）；<code>GRAVIT.md</code> 沿链读到订单目录——围栏保证链上没有别的指令文件。</p>
+<div class="chips"><span class="chip prompt">[schedule · &lt;id&gt; · &lt;date&gt;]</span><span class="chip prompt">Standing order &lt;id&gt;, for the &lt;date&gt; session (open 09:30 Beijing (20:30 ET), …), fired at … ET. The face cancels this turn at … ET; your final text goes to the operator's phone.</span><span class="chip prompt">--- strategies/&lt;name&gt;/STANDING.md, sha256 …, as armed --- … --- end of … ---</span><span class="chip prompt">--- producer builtin:report: ok, &lt;n&gt; characters --- … --- end of producer output ---</span><span class="chip event">firings.jsonl · woke</span></div>
+</li>
+<li class="station"><span class="st-no">5</span><span class="st-where">dsh · superviseDeskTurns · 订单自己的截止</span>
+<h4>回合：在订单的截止（默认 10 分钟）内写出消息</h4>
+<p>模型按 <code>STANDING.md</code> 的顺序写：报告先原样抄屏线，再是策略的 <code>one_line</code>、<code>next</code>、<code>numbers</code>，2% 以内与收盘以来穿过的价位，缺了什么；最多 1,500 字符；不建议交易、不定仓位、不说下了单。消息另存为 <code>reports/&lt;date&gt;-premarket.md</code>（简报存为 <code>desk/journal/briefs/&lt;date&gt;-preclose.md</code>）。<code>turn/start</code> 时再查一次围栏；截止之后 60 s 的看门狗取消监督没收尾的回合。</p>
+<div class="chips"><span class="chip doc">strategies/&lt;name&gt;/reports/&lt;date&gt;-premarket.md（gitignored）</span><span class="chip wire">desk_quotes（只为复核消息依赖的价格）</span></div>
+</li>
+<li class="station"><span class="st-no">6</span><span class="st-where">firing.ts runFiring 收尾 · deliver</span>
+<h4>交付，或在市场时刻之后扣下</h4>
+<p>先记 <code>desk-turn</code>（来源 <code>schedule</code>）。比较回合前后订单目录的文件（策略的不走 <code>analysis/</code>，那是轮回行的）；再查一次围栏，留下违规的发一行。策略单在其后发一行，列出它在 <code>reports/</code> 之外改过的路径（排序，最多五个）。然后交付最终文本——除非回合在它的市场时刻（<code>close-Nm</code> 的收盘、<code>open-Nm</code> 的开盘）或之后才结束，那就扣下并发一行说明（<code>withheld</code>）。<code>finished</code> 记下交付的答复。暂停时扣住的一次性行在解除后按序发出，发出后跟一条 <code>phoned</code>，重启之后也只发一次。</p>
+<div class="chips"><span class="chip event">events.jsonl · desk-turn（source: schedule）</span><span class="chip event">firings.jsonl · finished · phoned</span><span class="chip prompt">&lt;id&gt; · &lt;date&gt; wrote outside reports/: …</span><span class="chip prompt">&lt;id&gt; finished after the open; not sent - it describes a market that has moved</span></div>
+</li>
+</ol>
+
+<h3>13.3 提醒：P3 的轮询盯盘 → 发送 → 批注</h3>
+<ol class="flow flow-up">
+<li class="station"><span class="st-no">1</span><span class="st-where">face/src/watch.ts · 每 5 s 一次 tick</span>
+<h4>轮询：一个家目录只有一个盯盘，在各市场的窗口里按节奏取价</h4>
+<p><code>watch.lease</code> 决定哪张 face 在盯。文件：<code>desk/levels.yml</code>、每个 <code>strategies/&lt;name&gt;/levels.yml</code>（不钉：对盯盘来说宪章 D28 只是记录，不是持有）、<code>desk/holdings.yml</code>、<code>desk/rules.yml</code>，mtime 或大小变了就重读，每次变化发一行 <code>&lt;file&gt; changed (sha256 &lt;8 hex&gt;): &lt;n&gt; loaded</code>。每个市场在自己的窗口（开盘前 10 分钟到收盘后 1 分钟）里取价：美股每 20 s 经 <code>explore</code>，A 股每 10 s 经 <code>quotes</code>（每次十二对）；SEC 申报每 5 分钟一次（07:00–20:00 ET）。没有流，只有轮询。</p>
+<div class="chips"><span class="chip doc">desk/levels.yml · strategies/*/levels.yml · desk/holdings.yml · desk/rules.yml</span><span class="chip doc">$DSH_HOME/face/desk/watch.lease</span><span class="chip wire">Market 的 explore · quotes 读（经 face 的代理，进程内）</span></div>
+</li>
+<li class="station"><span class="st-no">2</span><span class="st-where">face/src/watch-eval.ts · alert-text.ts → desk-conversation.ts deliver</span>
+<h4>判定后由 face 自己发送提醒，计划原文照抄</h4>
+<p>每个价在它自己市场的交易时段内判定（A 股只在相位 <code>trading</code>、09:30–11:30 与 13:00–15:00 北京时间内，加上 15:00:00–15:00:30 的收盘价）；<code>stale</code> 与 <code>unavailable</code> 从不判。命中先过闸：<code>OFF</code>、<code>MUTE</code>、冷却、每小时六条上限、其余并成一批。提醒文本由 face 写（不经模型）：品种、最新价与 feed 和交易所时间、价位、计划原文、是否有批注跟进；经台面会话的 <code>deliver</code> 发出——发送在批注之前。</p>
+<div class="chips"><span class="chip prompt">NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows</span><span class="chip event">alerts.jsonl · alert · delivered（latencyMs）</span><span class="chip wire">POST /bot&lt;token&gt;/sendMessage</span></div>
+</li>
+<li class="station"><span class="st-no">3</span><span class="st-where">desk-conversation.ts post（replyTo）· 台面会话</span>
+<h4>批注：每一轮一次回合，回复在提醒那条消息下</h4>
+<p>价位或规则要求批注（<code>annotate: true</code>）时，这一轮的命中合成一次 post 进台面会话，来源行是 <code>[alert · &lt;SYMBOL&gt; · &lt;rule&gt;]</code>，多条时是 <code>[alerts · &lt;n&gt; · HH:MM ET]</code>；回合有 90 s 截止，逐条核对计划的条件“满足 / 未满足”，不超出计划自己的话。答复作为回复挂在第一条已送达的提醒下；它是一次台面回合，排在正在进行的手机回合之后。</p>
+<div class="chips"><span class="chip prompt">[alert · &lt;SYMBOL&gt; · &lt;rule&gt;]</span><span class="chip event">alerts.jsonl · annotation</span><span class="chip event">events.jsonl · desk-turn（source: alert）</span></div>
+</li>
+</ol>
+
+<!-- ===================================================== -->
+<h2 id="numbers">14. 已测的数字、未测的数字、未关的发现</h2>
 <div class="tablewrap"><table>
 <thead><tr><th>首个请求</th><th class="num">system</th><th class="num">messages</th><th class="num">tools</th><th>备注</th></tr></thead>
 <tbody>
@@ -527,6 +621,7 @@ no cache_control（10-10 追踪）· 流空闲超时 300 s · 被策略层关掉
 <li>“尚未测”的首个请求总量，以及 AKShare 移进账户后（只剩席位）一次实测的 schema 大小；</li>
 <li>账户两部分的现场演练（<code>face/README.md</code> “The two-parts drills” 1–7：账户上的 China、经账户的轮回市场运行、Gravit 经席位问 AKShare、只读与可写账户上的 Rules 及十五项、页面已去、4820 不发布的双盒），2026-11-01 写成，尚未跑；</li>
 <li>角色演练（<code>face/README.md</code> “The role drill”，在家目录副本上；用三个轮回角色），以及实盘的市场运行与策略运行（“Lunhui analysis”：第一次碰真主机、真模型，第一个实盘 <code>S01</code> 与下一交易日的评级）；</li>
+<li>台面演练（<code>face/README.md</code> “The desk drill”，P0–P4 五部分，都在操作员自己的 launchd、家目录、bot 与手机上）：P4 一半在 <code>lunhui-s01-repair</code> 上，<code>open-90m --market cn</code>，三个 XSHG 交易日的报告在北京 09:30 之前到手机、屏线与 <code>analysis/</code> 当天对得上，改一个价位被拒、<code>rearm</code> 后恢复；尚未跑；</li>
 <li>周期演练（“The cycle drill”，真 face 真密钥、真账户带纸面场所，一个周期的用量与纸面订单都是真的）：一次打包提问、<code>create_goal</code>、经席位（AKShare 也经席位）读取并做前向纸面交易（两张卡都答，账户那张在 face 的 Account › Cards 里）的回合与日志条目、<code>status.yaml</code> 的结论、重启后只在“继续”时继续。</li>
 </ul>
 

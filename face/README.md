@@ -2082,9 +2082,10 @@ the `explore` read for each US symbol); with the Account down the brief reads th
 carries every price null, its `quotesError` `quotes unavailable: the Account is not reachable …`.
 The brief is US: an A-share holding or level is counted in `aShares`, not priced, and `scope`
 says A shares are the watch's. Since P3 it also lists the watch's alerts and filings since the
-order's previous brief, newest first, at most 50 each. A strategy's `strategies/<name>/levels.yml` is not read yet: research
-sessions can write it, and the brief's text reaches the phone, so it joins once P4 pins each one
-at arming (`DEVELOPMENT.md` §9, R67); the brief says so.
+order's previous brief, newest first, at most 50 each. A strategy's `strategies/<name>/levels.yml`
+is never the brief's: research sessions can write it, so it reaches the phone pinned, through that
+strategy's own pre-market report ("Strategy reports" below), and through the watch (`DEVELOPMENT.md`
+§9, R67); the brief's `scope` says so.
 
 **Arm it** from a terminal, in `face/` of the checkout the service runs: `arm` hashes that
 checkout's files, and the service checks its own (`DEVELOPMENT.md` §9, R65).
@@ -2101,6 +2102,8 @@ for a script producer, of its script. Its arguments:
 
 - `desk` or `strategies/NAME` — where the order's text lives and its turn runs: `desk` runs in
   `desk/journal/`, `strategies/NAME` in that directory;
+- `--market us | cn` — the exchange whose calendar and date the order keeps, `us` (XNYS, New
+  York's dates) by default; `cn` is the XSHG table on Beijing dates ("Strategy reports" below);
 - `--id` — a-z, 0-9 and `-`, opening with a letter, at most 40 characters;
 - `--at` — `open`, `close`, `open±Nm` or `close±Nm` (N 1–600; `open-Nm` at most 570 and
   `close+Nm` at most 479, so the anchor stays on its session's New York date), or `HH:MM` New
@@ -2110,9 +2113,10 @@ for a script producer, of its script. Its arguments:
   one, the turn's when it wakes one (`close-15m leaves 15 min before the close; its producer
   (5 min), its turn (10 min) and the 5-minute grace need 20 min`; a `--no-wake` order, `close-5m
   leaves 5 min before the close; its producer (5 min) and the 5-minute grace need 10 min`);
-- `--expires YYYY-MM-DD` — required: the last New York date it fires, not before today;
+- `--expires YYYY-MM-DD` — required: the last date it fires on its market's clock (New York's,
+  Beijing's for `cn`), not before today there;
 - `--producer scripts/FILE.py | builtin:NAME` — what runs before the turn, its output quoted in
-  the wake message: `builtin:brief`, or one `.py` file directly under `scripts/`, pinned by its
+  the wake message: `builtin:brief` (US only), `builtin:report` (a strategy's, with a turn), or one `.py` file directly under `scripts/`, pinned by its
   bytes and run from a private copy of them as `python -I` with no shell, cwd the repository root,
   its input as JSON on stdin and an environment of `PATH`, `HOME`, `LANG`, `TZ`, `LC_*`, `APCA_*`,
   `ALPACA_*`, `ALPHA_*` and `GRAVIT_ROOT` (the root, for reading files; never an import path), its
@@ -2217,7 +2221,7 @@ session's date, times New York's:
 | a `--no-wake` producer failed | `<id> · <date> producer <spec> failed (<error>); nothing was woken` |
 | `standing.yml` refused | `standing.yml is refused, so no standing order runs until it is fixed: <errors>` (joined with `; `, cut at 500 characters) |
 | `firings.jsonl` unreadable | `the firing ledger <path> cannot be read (<code>), so no standing order runs until it can` |
-| no calendar | `no standing order runs today: the market calendar failed in <clock> (<error>)` |
+| no calendar | `no standing order runs today: the market calendar failed in <clock> (<error>)` — for the A-share calendar, `no A-share standing order runs on <date>: the market calendar failed in <clock> (<error>)`, its Beijing date, and only the A-share orders stop |
 | a phone text while the budget is spent | `the desk's token budget for today is spent: <used> of <cap> tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml` |
 
 The pause sends none of them: a paused order is refused in silence. A line the pause holds back
@@ -2230,8 +2234,100 @@ supersedes the P2 plan's, which has no `cancelled` row.
 line (`budget: 1,234,567 of 2,000,000 tokens today`) and a line per order —
 `standing preclose: close-30m, next 12:30 ET; last delivered 2026-11-26 15:31 ET`, or what holds
 it (`desk/STANDING.md changed since arming (npm run desk -- rearm preclose)`, `expired after …`,
-`disabled`). Markets › Desk's Standing orders and Firings show the same; `firings.jsonl` holds
-every firing.
+`disabled`); an A-share order's line opens `standing <id>: market cn, …`. Markets › Desk's
+Standing orders and Firings show the same, each order linking `its session`, the one its last
+firing woke, in Messages; `firings.jsonl` holds every firing.
+
+### Strategy reports (src/report.ts, `builtin:report`)
+
+A strategy can have its own standing order: a pre-market report before its market's open (the
+desk spec's P4, §15 M6–M8). The firing runs `builtin:report`, which reads the strategy and the
+last prints, and wakes a fresh `gravit-desk` session in `strategies/<name>` with that block and
+the strategy's armed `STANDING.md`; its final text goes to the phone, informing, never ordering.
+
+**What a report holds**, in the block's order: the **screen line** first — the strategy's Lunhui
+research run, the only screen there is, read from `strategies/<name>/analysis/<run>/run.json` —
+then `status.yaml` (`status`, `one_line`, `next`, `numbers`), and each level against its symbol's
+last print, one Market snapshot per market, every price with its feed and exchange time
+(`ROBINHOOD 07:58:03 ET`, `TENCENT 2026-11-27 15:00:03 Beijing`). The screen line is one of five:
+
+- `ran: Lunhui run <id> (<kind>) sealed <time> covers the <session> session; artifacts: …` — the
+  latest-sealed run for the market's previous session or later;
+- `not run for the <prev> session: the last sealed Lunhui run is <id> (<kind>), for the <session>
+  session, sealed <time>` — sealed runs, none that recent;
+- `not run: no Lunhui run in strategies/<name>/analysis/ is sealed`;
+- `cannot tell whether the screen ran: …` — `analysis/` cannot be read, or the calendar cannot name
+  the previous session;
+- `no screen is wired for this strategy` — no `analysis/`.
+
+A run counts by its `sealed_at` instant; an open run is not counted. Each print is judged on its
+own market's date: `pre-market` (before that date's open; its `sinceClosePct` is the overnight
+gap), `session` (after the open; its move since the previous close), `close` (the previous
+session's close; its `closeDistancePct` is the distance at the close), `earlier` (older, or a
+`stale` quote: no gap, no previous close — the message says `no print since` and its time), or
+`none` (no price). A level crossed since the close is `crossedSinceClose: true`. A file that is
+missing, malformed or refused is named in the block, never invented; quotes the Market cannot
+give read `quotes unavailable: …` (`US quotes unavailable: busy`, …).
+
+**Set it up** in the strategy's directory — a new channel already has the template's files:
+
+1. `STANDING.md` from `strategies/_template/STANDING.md` — the message's order: the screen line
+   verbatim, the strategy, the levels within 2% and those crossed since the close, what is
+   missing; at most 1,500 characters; saved as `reports/<date>-premarket.md` (gitignored).
+2. `status.yaml`'s three commented keys filled: `one_line`, `next`, `numbers`.
+3. `levels.yml` (gitignored) from `levels.example.yml`: `symbol` (a US ticker, or six digits for
+   an A share, quoted — `symbol: "600519"`), `kind`, `price` or `range`, `when`, `plan`, `source`,
+   `expires`.
+
+**Arm it**, from `face/` in the checkout the service runs. The id is lowercase letters, digits and
+dashes, opening with a letter, at most 40 characters — `<name>-report`, say:
+
+```bash
+npm run desk -- arm strategies/<name> --id <name>-report --at open-90m --producer builtin:report --expires <YYYY-MM-DD>
+# an A-share strategy:
+npm run desk -- arm strategies/<name> --id <name>-report --at open-90m --market cn --producer builtin:report --expires <YYYY-MM-DD>
+# armed <id> in <root>: strategies/<name>/STANDING.md sha256 <12 hex>…, at open-90m, expires <date>, market cn, producer builtin:report, strategies/<name>/levels.yml sha256 <12 hex>…; the face reads standing.yml again within 30 s
+```
+
+`arm` pins `STANDING.md` and `levels.yml` (`, no strategies/<name>/levels.yml` when there is none:
+the pin is then its absence). `--market cn` puts the order on the XSHG table and Beijing's dates:
+its `open-90m` is 08:00 Beijing — the evening before in New York, 19:00 ET (20:00 ET in New York's
+summer) — and its `--expires` a Beijing date; an A-share order takes no `HH:MM` anchor. A US order
+whose every level is an A share gets a `note:` naming `--market cn`. `builtin:report` runs only in
+`strategies/<name>` with a turn; `builtin:brief` only on `us`.
+
+**After every edit** to `STANDING.md` or `levels.yml`, `npm run desk -- rearm <id>`: until then
+each firing is refused with its line. **The room rule:** an `open-Nm` must leave room for the
+producer's deadline, the turn's and the 5-minute grace (`open-15m leaves 15 min before the open;
+its producer (5 min), its turn (10 min) and the 5-minute grace need 20 min`). **File order and the
+cut-off:** orders at one anchor run one after another in `standing.yml`'s order; one still queued
+when the open comes is missed with its line, never started, and a report that finishes after the
+open is held back — arm a long list earlier, `open-120m`, say. **The fence:** a `GRAVIT.md`,
+`GRAVIT.local.md`, `.git`, `.dsh` or `.agents` in the strategy's tree — or a symlink anywhere in it
+— refuses its firings until it is removed. **What the turn writes:** its sandbox lets it write
+anywhere in its strategy; it should write only `reports/`, and anything else it changed is named
+in one line after its text (its walk leaves `analysis/` to the Lunhui rows). **A pre-P4 strategy
+order** that wakes has no `levelsSha256`, so `standing.yml` is refused as `not armed`: delete that
+order's block from `standing.yml`, then `arm` it again. **The budget** is New York's day: a US day
+that spends it refuses the next morning's A-share report, which fires that evening in New York.
+
+**What the phone gets**, besides P2's lines above — `<date>` is the order's market date:
+
+| When | Line |
+|---|---|
+| `levels.yml` changed, appeared or grew past 65,536 bytes since arming | `<id> · <date> refused: <dir>/levels.yml changed since arming. Review it, then: npm run desk -- rearm <id>` |
+| it is gone since arming | `<id> · <date> refused: <dir>/levels.yml is gone since arming. Restore it, or re-arm without it: npm run desk -- rearm <id>` |
+| it cannot be read (a link, a FIFO, a hard link, not UTF-8) | `<id> · <date> refused: <dir>/levels.yml cannot be read (<reason>)` |
+| the fence refused a strategy firing | `<id> · <date> refused: <path> exists; it would steer every turn in <dir>. Remove it.` |
+| a strategy firing left a fence violation | `<id> · <date> left <path> behind; every firing in <dir> is refused, and every session in it reads it, until it is removed` |
+| a strategy firing wrote outside `reports/` | `<id> · <date> wrote outside reports/: <paths, sorted, at most five>[, and <k> more][; the listing stopped at <max> entries]` |
+| its directory is gone | `<id> · <date> could not run: <dir> is gone` |
+| still queued at its market moment | `<id> · <date> missed its <HH:MM ET> anchor: it was still queued at the open, behind other firings. A standing order never runs late` (`close` for a close anchor) |
+| the A-share calendar failed | `no A-share standing order runs on <date>: the market calendar failed in <clock> (<error>)` |
+
+A line the pause held reaches the phone once after the lift — after a restart too: a `phoned`
+record follows it in `firings.jsonl`. Reports show in the conversation list's **Desk** group, with
+every desk conversation, never among the strategy's research.
 
 
 ### The watch (src/watch.ts + src/watch-eval.ts + src/alert-text.ts + src/edgar.ts + src/filings.ts + src/xshg-clock.ts)
@@ -3545,7 +3641,7 @@ and `node --test` gives each file its own:
 | `goal-smoke.test.ts` | the goal loop `../dsh/profile/cycle.md` rests on, through the face's own wire (prompts, the Stop button's `session/cancel`, a slash line's `commands/execute`): `create_goal` in a human turn returns the id and revision 1, armed; each round arrives at idle as a user message whose source is `goal` (`<goal_round>`, the objective, `Round: n/N`); the model's `blocked` in round 1 is refused (`blocked requires at least 3 consecutive goal rounds; current round is 1`), in round 3 accepted with the code `model-reported` and followed by the `<goal_blocked>` wrap-up; a second `create_goal` is refused while that goal is blocked (`GOAL_ALREADY_EXISTS`); at the cap the driver blocks with `round-limit` and sends the model nothing more; Stop mid-round pauses the goal, the model's resume of it is refused (`GOAL_TOOL_RESUME_PAUSED`: `the model cannot resume a paused goal; the user must resume it`) and `/goal resume` re-arms it; a face stopped mid-round and booted again on the same home leaves the goal active and disarmed with no request until "continue", whose `update_goal` resume bumps the revision and re-arms the rounds |
 | `desk-smoke.test.ts` | the desk on a real tree, as `main.ts` installs it, its fixture root inside the repository so the repository's `GRAVIT.md` heads the chain: the `gravit-desk` session runs in `desk/journal/` under `workspace-write`; its tools are exactly `DESK_ALLOW` expanded on this tree plus `desk_quotes` and `desk_state`, each `mcp__*__<raw>` entry matching one server's tool, and neither desk tool reaches Gravit's session or the global view; the write tools take the path arguments the guard's write check reads, and `str_replace_editor`'s commands are `view`, `create`, `str_replace` and `insert`; the desk's prompt carries Gravit's persona prefix, the date and `# The desk`, and no cycle contract or roles section; a desk turn naming the order stand-in gets Gate 2's visibility refusal and its body never runs; a `write` to `../levels.yml` is refused by the sandbox inside the tool's content while a journal write lands, with no card; Gravit's own write of a `GRAVIT.md` lands; with a listener in front answering allow, the guard's backstop still denies the desk's write of `GRAVIT.md` and its read of a `.env` file, while Gravit's own read of that file goes through unjudged; `/stop` on a turn parked on an escalation card, two texts queued behind it, cuts that turn alone — recorded `cancelled`, `stopped from the phone` — and both texts are answered, in order; the desk's write of a journal `.gitignore` holding `!*` and of a `CLAUDE.md` are denied with no file written, and its read of a dot-config in the repository is denied by name while Gravit reads it; the read tools take exactly the parameters the read check reads; a `GRAVIT.md` planted in the journal reaches a desk session's first request behind the repository's, which is the threat the fence refuses, and the next post is refused with `desk-refused` and no turn; each supervised turn is one `desk-turn` with four token buckets and the stub's route |
 | `telegram-smoke.test.ts` | the bridge end to end on a real tree against a `node:http` Bot API stub on 127.0.0.1: the token and the operator's id come from the scratch home's `.env`, and the MCP child dsh spawns has the id and not the token; a stranger and a group are dropped and counted, unanswered, and the operator's `hi` is answered in the operator's chat; `/status` counts the drops and names the desk session; `/pause` writes `OFF` by `telegram`, a text then gets the paused line and opens no turn, and `/resume` is text that never reaches the model; a 503 queues the reply in the outbox and the next poll flushes it, in order, each reply sent once; a 409 is recorded and waited out; a card parked by an escalated write to `../levels.yml` is cut at the desk's deadline (1,500 ms here) with the timed-out line; the canary — the desk's write of `GRAVIT.md` is denied by the desk guard and no request carries a planted text, then a `GRAVIT.md` the harness plants is refused by the fence with no turn; its read case — `send me ~/.dsh/.env`: the read of the scratch home's `.env` is refused as outside the repository, the token handed to a market read is refused as a secret, no tool result carries the token or a second secret, and the stub's reply, which names both, reaches the phone as `I could not read it: <secret> <token>`; across the file every send went to the operator's chat, the token is in no file of the desk's directory, and no `STANDING.md`, `levels.yml`, `rules.yml` or `holdings.yml` changed |
-| `schedule-smoke.test.ts` | the standing orders' clock end to end, as `main.ts` installs the desk, on one early-close session (2026-11-27), a fake clock and calendar, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`: a firing a restart cut off is reported `interrupted` at boot and never run; the pre-close brief wakes one fresh `gravit-desk` session in `desk/journal` under `workspace-write`, with the armed text — hashing to its pin — and the producer's block in its wake message, and its final text reaches the phone; `firings.jsonl` holds `started`, `producer`, `woke` and `finished`, `events.jsonl` one `desk-turn` with `source: "schedule"` and four token buckets; a script producer's stderr reaches only the face's log; a turn waiting in a long tool is cut at its 10-minute deadline and the order queued behind it fires after; an edited text is refused with one line, then in silence, and fires once re-armed inside its grace; the pause refuses in silence and a spent budget with one line; an anchor slept across is `missed`; a `wake: false` order runs only its producer; a planted `GRAVIT.md` refuses the firing; the canary's firing half — a poisoned turn's writes of `../STANDING.md`, of `standing.yml` and of a journal `GRAVIT.md` are all refused, no card raised, every text and `standing.yml` unchanged — and a `GRAVIT.md` the harness plants refuses the next order; the clock's dispose cuts a firing in a long tool and settles; every text the desk sent went through the recorder |
+| `schedule-smoke.test.ts` | the standing orders' clock end to end, as `main.ts` installs the desk, on one early-close session (2026-11-27), a fake clock and calendar, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`: a firing a restart cut off is reported `interrupted` at boot and never run; the pre-close brief wakes one fresh `gravit-desk` session in `desk/journal` under `workspace-write`, with the armed text — hashing to its pin — and the producer's block in its wake message, and its final text reaches the phone; `firings.jsonl` holds `started`, `producer`, `woke` and `finished`, `events.jsonl` one `desk-turn` with `source: "schedule"` and four token buckets; a script producer's stderr reaches only the face's log; a turn waiting in a long tool is cut at its 10-minute deadline and the order queued behind it fires after; an edited text is refused with one line, then in silence, and fires once re-armed inside its grace; the pause refuses in silence and a spent budget with one line; an anchor slept across is `missed`; a `wake: false` order runs only its producer; a planted `GRAVIT.md` refuses the firing; the canary's firing half — a poisoned turn's writes of `../STANDING.md`, of `standing.yml` and of a journal `GRAVIT.md` are all refused, no card raised, every text and `standing.yml` unchanged — and a `GRAVIT.md` the harness plants refuses the next order; the clock's dispose cuts a firing in a long tool and settles; every text the desk sent went through the recorder. Then (P4) the strategies' book on 2026-11-30, a fake XSHG calendar beside the XNYS one and one fake quote source, in clock order: an A-share report on its Beijing date naming the screen that ran and its `TENCENT` close print; the canary in a strategy (five calls: it reads and rewrites `STANDING.md` and `levels.yml`, then tries the desk's `STANDING.md`), named by one outside-reports line and holding the next order by each pin in turn; two US reports at one anchor in file order; the fence in a strategy; a producer-only strategy order; the abort last |
 | `watch-smoke.test.ts` | the watch end to end, as `main.ts` installs the desk, on one fake source over a US and an A-share table, fake XNYS and XSHG calendars, a fake SEC, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`, with no route off the host (`FACE_ACCOUNT_URL=http://127.0.0.1:9`, no `ALPHA_EDGAR_USER_AGENT`): nothing polled before the window and the filings seeded silently; a US gap sent with its plan (`NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows`) and its annotation as a reply; a restart firing no second gap; the cooldown; the cap and the batch line; an A-share gap (`600519 1390 · TENCENT 09:30:02 Beijing`), nothing at the midday break; an annotation cut at its deadline and one whose model call fails, each its line as a reply; the phone's text preceded by the desk state naming both markets; an 8-K alerted, the A share never asked of SEC, and the pre-close brief on the same home listing the alerts and the filing; the canary's annotation half — a poisoned annotation's writes of `../rules.yml` and of `MUTE` refused, `levels.yml` and `rules.yml` unchanged, no card |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one
@@ -4743,11 +4839,12 @@ inode.
 
 
 
-## The desk drill (run after any change to scripts/service.ts, scripts/desk.ts, src/desk*.ts, src/telegram.ts, src/market-quotes.ts, src/symbols.ts, src/{schedule,firing,standing,producer,market-clock,xshg-clock,brief}.ts, src/{watch,watch-eval,alert-text,edgar,filings}.ts or main.ts's exits)
+## The desk drill (run after any change to scripts/service.ts, scripts/desk.ts, src/desk*.ts, src/telegram.ts, src/market-quotes.ts, src/symbols.ts, src/{schedule,firing,standing,producer,market-clock,xshg-clock,brief,report}.ts, src/{watch,watch-eval,alert-text,edgar,filings}.ts or main.ts's exits)
 
 The desk spec's drill (`../docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` §9 and
-§12 and §15), in four parts so far: P0's, the face as a service; P1's, the phone and Markets ›
-Desk; P2's, the clock and the pre-close brief; and P3's, the watch.
+§12 and §15), in five parts: P0's, the face as a service; P1's, the phone and Markets ›
+Desk; P2's, the clock and the pre-close brief; P3's, the watch; and P4's, a strategy's pre-market
+report.
 **Since the merge onto main (2026-11-01)** the browser's steps read Markets › Desk (`#/markets`,
 the Desk tab, the last), the old client's Desk panel having left with that client: its status,
 Pause, standing orders and firings; it lists no desk conversation and opens no session, so read
@@ -4990,3 +5087,47 @@ row.
 **Not yet run.** The automated half passes 2026-11-01, and the Desk view passed a browser check
 on a scratch face the same day; the Market's real reads, the phone, SEC and a real model are the
 operator's.
+
+### P4: the pre-market report
+
+PASS is P4's done criterion (the desk spec's §15 M6) — one strategy's report preceded its market's
+open on three sessions and said truthfully what it says about its screen; a Lunhui strategy
+qualifies — and the refusal and re-arm of an edited level.
+
+**The automated half, no network.** `npm test` runs `report` and P4's cases in `channels`,
+`desk-book`, `producer`, `standing`, `desk-cli`, `desk-arm`, `desk-session`, `desk`, `et`,
+`firing`, `schedule`, `desk-weight` and the client's `desk-view` and `list-view`; `FACE_SMOKE=1 npm
+test` boots `schedule-smoke`, whose cases 11–15 are the strategies' ("Tests" above). No test reaches
+the Account, Tencent or Telegram. What only this drill checks: a real model writing the report
+from its block; the Market's real prints at 08:00 Beijing; a real Lunhui run as the screen line;
+the report on the phone before a real open.
+
+**The drill**, after P3's, with the Account running (`npm run account`), the service running this
+code and the browser signed in:
+
+0. Give `lunhui-s01-repair` what the report reads: its `STANDING.md` from the template
+   (`cp strategies/_template/STANDING.md strategies/lunhui-s01-repair/`), and a `levels.yml` from
+   `levels.example.yml` holding at least one quoted A-share level (`symbol: "600519"`).
+1. Arm its report, from `face/` in the checkout the service runs: `npm run desk -- arm
+   strategies/lunhui-s01-repair --id s01-report --at open-90m --market cn --producer
+   builtin:report --expires <YYYY-MM-DD>`. PASS: `armed s01-report in <root>: …, market cn,
+   producer builtin:report, strategies/lunhui-s01-repair/levels.yml sha256 <12 hex>…`; within
+   30 s `npm run service -- status` shows `standing s01-report: market cn, …`.
+2. On three XSHG sessions, the report. PASS each day: it reaches the phone before 09:30 Beijing
+   and quotes each level's print with `TENCENT` and its Beijing time; Markets › Desk shows
+   `delivered`, and its `its session` link opens the report's session in Messages (the Desk group);
+   `strategies/lunhui-s01-repair/reports/<date>-premarket.md` holds the message. Its screen line
+   reads `ran` when a Lunhui run for the previous XSHG session was sealed before the 08:00 Beijing
+   firing, and names the newest sealed run under `analysis/` otherwise — check it against
+   `analysis/` that day.
+3. Edit one level in `levels.yml`. PASS: the next report is refused with its line
+   (`s01-report · <date> refused: strategies/lunhui-s01-repair/levels.yml changed since arming. …`),
+   and Markets › Desk shows `levels.yml changed`. Run `npm run desk -- rearm s01-report`
+   (`… levels.yml sha256 <12 hex>… (changed)`), and the next one runs.
+
+**PASS is steps 0–3.** Record the date, the commit, each day's delivery time (Beijing and ET), its
+screen line against `analysis/`, and the report's tokens (`firings.jsonl`'s `finished`) in
+`DEVELOPMENT.md` §7.4's P4 **Desk** row.
+
+**Not yet run.** The automated half passes 2026-11-02; the Market's real reads, a real Lunhui
+run, the phone and a real model are the operator's.
