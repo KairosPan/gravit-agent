@@ -10,9 +10,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { etDate } from "../src/et.ts";
+import { bjDate, etDate } from "../src/et.ts";
+import { XSHG_CLOCK } from "../src/xshg-clock.ts";
+import { fakeCalendar } from "./desk-fakes.ts";
 import {
-  CALENDAR_DAYS, CALENDAR_RETRY_MS, MAX_WINDOW_DAYS, XNYS_AD_HOC_CLOSURES, XNYS_CLOCK, builtinMarketClock, createMarketCalendar, easterSunday,
+  CALENDAR_DAYS, CALENDAR_RETRY_MS, MAX_WINDOW_DAYS, XNYS_AD_HOC_CLOSURES, XNYS_CLOCK, builtinMarketClock, createMarketCalendar, deskCalendars, easterSunday,
   sessionFor, windowCovers, xnysEarlyCloses, xnysHolidays, xnysWindow,
   type DayAnswer, type MarketClock, type MarketSession, type MarketWindow,
 } from "../src/market-clock.ts";
@@ -154,11 +156,15 @@ test("Easter by the computus, Good Friday two days before it, and the ad-hoc clo
   assert.deepEqual(xnysEarlyCloses(2024), ["2024-07-03", "2024-11-29", "2024-12-24"]);
 });
 
-test("the clock is Node alone: market-clock.ts imports only et.ts, spawns nothing and fetches nothing", async () => {
+test("the clock is Node alone: market-clock.ts imports only et.ts and xshg-clock.ts, which imports only its types; neither spawns nor fetches", async () => {
   const src = await readFile(fileURLToPath(new URL("../src/market-clock.ts", import.meta.url)), "utf8");
   const imports = [...src.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1]);
-  assert.deepEqual(imports, ["./et.ts"]);
-  for (const word of ["spawn", "execFile", "fetch(", "child_process", "process.env"]) assert.equal(src.includes(word), false, word);
+  assert.deepEqual(imports, ["./et.ts", "./xshg-clock.ts"]);
+  const xshg = await readFile(fileURLToPath(new URL("../src/xshg-clock.ts", import.meta.url)), "utf8");
+  assert.deepEqual([...xshg.matchAll(/^import .*$/gm)].map((m) => m[0]), ['import type { MarketClock, MarketSession, MarketWindow } from "./market-clock.ts";']);
+  for (const text of [src, xshg]) {
+    for (const word of ["spawn", "execFile", "fetch(", "child_process", "process.env", "readFile"]) assert.equal(text.includes(word), false, word);
+  }
   assert.deepEqual(await builtinMarketClock()("2026-11-24", 10), xnysWindow("2026-11-24", 10));
 });
 
@@ -346,4 +352,67 @@ test("createMarketCalendar: a throwing ask, a window that does not hold the date
   assert.deepEqual(await older, { ok: true, date: "2026-11-24", session: FULL("2026-11-24"), source: "a stand-in clock" });
   assert.equal(racing.window(), W26);
   assert.equal(racing.peek()?.date, "2026-11-26");
+});
+
+/* ---------- a calendar per market ---------- */
+
+test("a calendar asks for its own market's date", async () => {
+  const asked: string[] = [];
+  const cn = createMarketCalendar({
+    clock: "a stand-in clock",
+    dateOf: (n) => bjDate(new Date(n)),
+    ask: async (from, days) => {
+      asked.push(from);
+      return { from, days, source: "a stand-in clock", sessions: [S(from, `${from}T01:30:00Z`, `${from}T07:00:00Z`)] };
+    },
+  });
+  /* 00:30 UTC on the 2nd is the 1st in New York and the 2nd in Beijing */
+  const answer = await cn.today(at("2026-11-02T00:30:00Z"));
+  assert.deepEqual(asked, ["2026-11-02"]);
+  assert.deepEqual(answer, { ok: true, date: "2026-11-02", session: S("2026-11-02", "2026-11-02T01:30:00Z", "2026-11-02T07:00:00Z"), source: "a stand-in clock" });
+
+  /* with no dateOf, the New York date as before */
+  const us: string[] = [];
+  const nyc = createMarketCalendar({ clock: "a stand-in clock", ask: async (from, days) => { us.push(from); return { from, days, source: "x", sessions: [] }; } });
+  await nyc.today(at("2026-11-02T00:30:00Z"));
+  assert.deepEqual(us, ["2026-11-01"]);
+});
+
+test("deskCalendars' cn calendar is the XSHG table on Beijing dates, and a seam replaces either", async () => {
+  const both = deskCalendars();
+  assert.equal(both.cn.clock, XSHG_CLOCK);
+  assert.equal(both.us.clock, XNYS_CLOCK);
+  const cn = await both.cn.today(at("2026-11-02T00:30:00Z"));
+  assert.equal(cn.ok, true);
+  assert.equal(cn.date, "2026-11-02");
+  assert.equal(cn.ok && cn.session !== "closed" ? cn.session.open : undefined, "2026-11-02T01:30:00Z");
+  assert.equal(cn.ok ? cn.source : undefined, XSHG_CLOCK);
+  /* the same instant is Sunday the 1st in New York: closed */
+  const us = await both.us.today(at("2026-11-02T00:30:00Z"));
+  assert.deepEqual(us, { ok: true, date: "2026-11-01", session: "closed", source: XNYS_CLOCK });
+  /* past the table, the cn calendar answers no session at all */
+  const late = await deskCalendars().cn.today(at("2027-01-04T02:00:00Z"));
+  assert.equal(late.ok, false);
+  assert.match((late as { error: string }).error, /2027-01-04 is past it/);
+
+  const fake = fakeCalendar({});
+  const seamed = deskCalendars({ us: fake });
+  assert.equal(seamed.us, fake);
+  assert.equal(seamed.cn.clock, XSHG_CLOCK);
+  assert.equal(deskCalendars({ cn: fake }).cn, fake);
+});
+
+test("fakeCalendar asks by its dateOf", async () => {
+  const C = S("2026-12-01", "2026-12-01T01:30:00Z", "2026-12-01T07:00:00Z");
+  const cn = fakeCalendar({ "2026-12-01": C }, "fake XSHG", (n) => bjDate(new Date(n)));
+  const answer = await cn.today(at("2026-12-01T01:25:00Z"));
+  assert.deepEqual(answer, { ok: true, date: "2026-12-01", session: C, source: "fake calendar" });
+  assert.deepEqual(cn.asked, ["2026-12-01"]);
+  assert.equal(cn.clock, "fake XSHG");
+
+  const us = fakeCalendar({ "2026-12-01": C });
+  const missed = await us.today(at("2026-12-01T01:25:00Z"));
+  assert.equal(missed.ok, false);
+  assert.equal(missed.date, "2026-11-30");
+  assert.deepEqual(us.asked, ["2026-11-30"]);
 });

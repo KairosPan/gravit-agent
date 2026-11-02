@@ -52,6 +52,7 @@ import {
   type RefusedRecord, type StartedRecord, type Verified,
 } from "./firing.ts";
 import { createMarketCalendar, sessionFor, type DayAnswer, type MarketCalendar, type MarketSession } from "./market-clock.ts";
+export { deskCalendars, type DeskCalendars } from "./market-clock.ts";
 import { defaultProducerRunner, formatProducer } from "./producer.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
 import { anchorInstant, GRACE_MS, parseStanding, STANDING_FILE, type FiringSummary, type StandingOrder, type StandingStatus } from "./standing.ts";

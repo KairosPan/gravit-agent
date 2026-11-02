@@ -35,6 +35,7 @@ const HEAVY = [
   "/src/roles.ts", "/src/bots.ts", "/src/channels.ts", "/src/desk-preset.ts", "/src/desk-session.ts",
   "/src/producer.ts", "/src/market-clock.ts", "/src/standing.ts", "/src/desk-book.ts", "/src/brief.ts", "/src/firing.ts", "/src/schedule.ts",
   "/src/channel-name.ts",
+  "/src/xshg-clock.ts",
 ] as const;
 const heavyOf = (urls: readonly string[]): string[] => urls.filter((url) => HEAVY.some((part) => url.includes(part)));
 
@@ -46,7 +47,7 @@ test("the pause switch stays light: importing src/desk.ts and scripts/desk.ts lo
 
   /* the probe sees what a module loads: the clock row brings the whole of it */
   const clockRow = heavyOf(await resolvedBy(["src/schedule.ts"]));
-  for (const part of ["/node_modules/js-yaml/", "/src/firing.ts", "/src/standing.ts", "/src/market-clock.ts", "/src/desk-session.ts", "/src/desk-preset.ts", "/src/brief.ts"]) {
+  for (const part of ["/node_modules/js-yaml/", "/src/firing.ts", "/src/standing.ts", "/src/market-clock.ts", "/src/desk-session.ts", "/src/desk-preset.ts", "/src/brief.ts", "/src/xshg-clock.ts"]) {
     assert.ok(clockRow.some((url) => url.includes(part)), `src/schedule.ts loads ${part}`);
   }
 });

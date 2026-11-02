@@ -30,10 +30,16 @@
  * until a window comes. The builtin clock does not fail on a real date; the fallbacks stay for an ask a
  * test or a later clock supplies.
  *
- * Of the face's modules it imports only `et.ts`, and the pause switch (`npm run desk`) does not load it.
+ * A CALENDAR PER MARKET. A calendar asks by its own market's date - `dateOf(now)`, the New York date by default -
+ * and {@link deskCalendars} builds the desk's two: `us` on these rules and New York dates, `cn` on the XSHG table
+ * (src/xshg-clock.ts) and Beijing dates.
+ *
+ * Of the face's modules it imports only `et.ts` and `xshg-clock.ts`, and the pause switch (`npm run desk`) does not
+ * load it.
  * @module
  */
-import { etDate } from "./et.ts";
+import { bjDate, etDate } from "./et.ts";
+import { XSHG_CLOCK, xshgMarketClock } from "./xshg-clock.ts";
 
 /* ---------- the window ---------- */
 
@@ -272,10 +278,10 @@ export type DayAnswer =
 
 /** The face's calendar: today's session, from a window it keeps. */
 export interface MarketCalendar {
-  /** The clock the calendar asks, for the lines that name it: {@link XNYS_CLOCK} in the face. */
+  /** The clock the calendar asks, for the lines that name it: {@link XNYS_CLOCK} or {@link XSHG_CLOCK} in the face. */
   readonly clock: string;
-  /** The answer for `etDate(now)`. Asks the clock only when that date differs from the last one asked, or
-   * when its last ask failed {@link CALENDAR_RETRY_MS} or more before `now`; never rejects for a failed ask. */
+  /** The answer for the market's date of `now` (`etDate(now)` for XNYS). Asks the clock only when that date
+   * differs from the last one asked, or when its last ask failed {@link CALENDAR_RETRY_MS} or more before `now`; never rejects for a failed ask. */
   today(now: number): Promise<DayAnswer>;
   /** The latest date's answer so far, without asking; `undefined` before the first. */
   peek(): DayAnswer | undefined;
@@ -295,8 +301,9 @@ function errorText(error: unknown): string {
 /**
  * The face's calendar over `ask`.
  * @param opts - `ask` the clock, {@link builtinMarketClock} by default; `clock` its name, kept for the lines that
- *   name it, {@link XNYS_CLOCK} by default; `days` the window asked for, {@link CALENDAR_DAYS} by default.
- * @returns a {@link MarketCalendar}. Its `today(now)` asks once per New York date, and calls for the date
+ *   name it, {@link XNYS_CLOCK} by default; `days` the window asked for, {@link CALENDAR_DAYS} by default; `dateOf`
+ *   the market's date of an instant, the New York date (`etDate`) by default.
+ * @returns a {@link MarketCalendar}. Its `today(now)` asks once per market date (`dateOf(now)`), and calls for the date
  *   being asked share the one ask. A date whose own ask returned a window is answered from it, and never
  *   asked again. A failed ask - a rejection, a throw, or a window that does not hold the date - is answered
  *   from the newest window that still holds the date, with `stale: { error }`, or with none as
@@ -304,8 +311,11 @@ function errorText(error: unknown): string {
  *   asks again, until an ask returns a window that holds the date. An ask settling after a later date's
  *   replaces neither the newest window nor what `peek()` says.
  */
-export function createMarketCalendar(opts: { ask?: MarketClock; clock?: string; days?: number } = {}): MarketCalendar {
+export function createMarketCalendar(
+  opts: { ask?: MarketClock; clock?: string; days?: number; dateOf?: (now: number) => string } = {},
+): MarketCalendar {
   const days = opts.days ?? CALENDAR_DAYS;
+  const dateOf = opts.dateOf ?? ((now: number) => etDate(new Date(now)));
   const ask = opts.ask ?? builtinMarketClock();
   /** The newest window any ask returned: the fallback for a date whose own ask failed. */
   let newest: MarketWindow | undefined;
@@ -346,7 +356,7 @@ export function createMarketCalendar(opts: { ask?: MarketClock; clock?: string; 
   return {
     clock: opts.clock ?? XNYS_CLOCK,
     async today(now) {
-      const date = etDate(new Date(now));
+      const date = dateOf(now);
       let flight = asked;
       if (flight === undefined || flight.date !== date || (flight.failed && now - flight.at >= CALENDAR_RETRY_MS)) {
         const next = { date, at: now, settled: askFor(date), failed: false };
@@ -359,5 +369,26 @@ export function createMarketCalendar(opts: { ask?: MarketClock; clock?: string; 
     },
     peek: () => latest,
     window: () => newest,
+  };
+}
+
+/* ---------- a calendar per market ---------- */
+
+/** The desk's calendars: `us` for XNYS on New York dates, `cn` for XSHG on Beijing dates. */
+export interface DeskCalendars {
+  us: MarketCalendar;
+  cn: MarketCalendar;
+}
+
+/**
+ * The desk's two calendars.
+ * @param seams - a calendar to use in place of either, for a test.
+ * @returns the seams' calendars, else {@link createMarketCalendar}'s XNYS calendar for `us`, and for `cn` one over
+ *   {@link xshgMarketClock} named {@link XSHG_CLOCK} that asks by the Beijing date.
+ */
+export function deskCalendars(seams: Partial<DeskCalendars> = {}): DeskCalendars {
+  return {
+    us: seams.us ?? createMarketCalendar(),
+    cn: seams.cn ?? createMarketCalendar({ ask: xshgMarketClock(), clock: XSHG_CLOCK, dateOf: (n) => bjDate(new Date(n)) }),
   };
 }

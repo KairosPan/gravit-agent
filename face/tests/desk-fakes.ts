@@ -271,15 +271,21 @@ export function recordingDeliver(result?: DeliverResult | ((text: string, n: num
 /* ---------- the market calendar ---------- */
 
 /**
- * A market calendar over fixed days: each New York date `days` names is its session or `"closed"`; any other date is
+ * A market calendar over fixed days: each market date `days` names is its session or `"closed"`; any other date is
  * `{ ok: false }`, as a calendar whose window does not hold it answers. `asked` lists the dates `today` was asked
  * about, a date once each time it changes, as the face's calendar asks its clock. `window()` is the days as one
  * window, from the first named to the last - `undefined` for none, and, as the face's calendar has no window before
  * its first ask returns, `undefined` until the first `today()` has settled; `peek()` likewise.
- * @param days - New York date → its session (its `date` the same) or `"closed"`.
+ * @param days - market date → its session (its `date` the same) or `"closed"`.
  * @param clock - the clock the calendar names.
+ * @param dateOf - the market's date of an instant, as the face's calendar's `dateOf`: the New York date by default; an
+ *   A-share fake passes `(n) => bjDate(new Date(n))`.
  */
-export function fakeCalendar(days: Record<string, MarketSession | "closed">, clock = "fake clock"): MarketCalendar & { readonly asked: string[] } {
+export function fakeCalendar(
+  days: Record<string, MarketSession | "closed">,
+  clock = "fake clock",
+  dateOf = (n: number) => etDate(new Date(n)),
+): MarketCalendar & { readonly asked: string[] } {
   const asked: string[] = [];
   const dates = Object.keys(days).sort();
   let window: MarketWindow | undefined;
@@ -302,7 +308,7 @@ export function fakeCalendar(days: Record<string, MarketSession | "closed">, clo
     clock,
     asked,
     async today(now) {
-      const date = etDate(new Date(now));
+      const date = dateOf(now);
       if (asked.at(-1) !== date) asked.push(date);
       await Promise.resolve(); // an ask settles after the call, as the face's calendar's does
       const day = Object.hasOwn(days, date) ? days[date] : undefined;
