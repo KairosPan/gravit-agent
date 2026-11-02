@@ -59,7 +59,7 @@ Each that can be wrong ends with its cost.
    - **The A-share close (review R4).** A print stamped inside `[15:00:00, 15:00:30]` Beijing on the session's date is judged as the session's close print whatever its phase says, once per `as_of`.
    - **Never judged,** in either market: a print whose `quote_status` is `stale` or `unavailable`.
    - **The poll windows.** Each market is polled from 10 minutes before its open to 1 minute after its close, and not at all on a closed day.
-   - **Past the XSHG table** (after 2026-12-31) the A-share window is 09:20–15:01 Beijing on weekdays, and the Market's phase alone decides, with one line a Beijing date. A failed cn calendar answer while `bjDate(now) > XSHG_COVERED.through` is this case, never `no-calendar`. P4's anchors still refuse past the table (§15 M5, amended by Task 13).
+   - **Past the XSHG table** (after 2026-12-31) the A-share window is 09:20–15:01 Beijing on weekdays (a 09:30–15:00 session marked `uncovered`), with one line a Beijing date. The Market's phase stands in for the calendar only on whether the day is a session; the bands, the phase `trading` inside them and the close print still decide which prints are judged (the Task 5 review's ruling, reversing the first reading that the phase alone decides: the Market says `trading` through the 09:15–09:25 auction too). A failed cn calendar answer while `bjDate(now) > XSHG_COVERED.through` is this case, never `no-calendar`. P4's anchors still refuse past the table (§15 M5, amended by Task 13).
    - **Dates.** The cn lines (`noPrices`, `overCap`, `unpriced`) and `markets.cn` key on the Beijing session date, the US ones on the ET session date, so one A-share session is one day though its window crosses New York's midnight; `today` counts by each market's session date (review S4).
 
    Cost: a print after the close reaches the operator only through `desk_quotes` or the brief, and a close print stamped after 15:00:30 is not judged.
@@ -850,15 +850,15 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
   - **Calendars.** `{ us: fakeCalendar({ "2026-11-30": 14:30Z-21:00Z, "2026-12-01": 14:30Z-21:00Z }), cn: fakeCalendar({ "2026-11-30": 01:30Z-07:00Z, "2026-12-01": 01:30Z-07:00Z }, "fake XSHG", (n) => bjDate(new Date(n))) }`.
   - **Filings.** `watchRow: { calendars, clock: wall, tickMs: 86_400_000, edgar: { fetch: fakeEdgar, userAgent: "smoke@example.invalid" } }`. The fake `EdgarFetch` serves a ticker map and one submissions body; nothing reaches the network.
 - [ ] **Step 1: Write the smoke** — one boot, these cases in this order:
-  1. **Before the open.** A 14:15Z tick polls no US symbol, because the window opens at 14:20Z (the open minus 10 minutes). A 14:21Z tick polls, and an NVDA print timed 14:29:59Z makes no record.
+  1. **Before the open.** A 14:15Z tick polls no US symbol, because the window opens at 14:20Z (the open minus 10 minutes); that boot tick is already a due filings poll (09:15 ET on a session day, the filing rule there from the start), so NVDA's filings seed silently there. A 14:21Z tick polls, and an NVDA print timed 14:29:59Z makes no record.
   2. **A US gap.** NVDA 168.50 at 14:30:01Z gives one `alert` (`gap`) and one `delivered`. The message opens `NVDA 168.5 · ROBINHOOD 09:30:01 ET` and ends `annotation follows`. The stub sees `[alert · NVDA · stop]` and answers as a reply.
   3. **A restart.** Re-install the watch: NVDA 168.40 makes no record.
   4. **The cooldown.** NVDA 171, then 169.5 inside 30 minutes, makes no record; `repeats` is 1.
-  5. **The cap and the batch.** Six sends; the seventh is recorded `suppressed: cap`; at 15:00:05Z the batch line goes.
+  5. **The cap and the batch.** Watch levels B1–B6 cross in one pass: B1–B5 are sent, with NVDA's the hour's six; B6, the seventh, is recorded `suppressed: cap`; at 15:00:05Z the batch line goes, naming B6.
   6. **An A share.** `wall.set("2026-12-01T01:29:00Z")`; 600519 below its stop at 01:30:02Z (09:30:02 Beijing, phase `trading`) gives a `gap` alert opening `600519 … · TENCENT 09:30:02 Beijing`. A print at 03:45Z (lunch, phase `midday`) makes none.
-  7. **A cut and a failed model call:** the old case 7.
+  7. **A cut and a failed model call:** the old case 7, on two A shares in the Beijing afternoon (`000001` cut at the deadline, `000002` whose model call fails), since on the forward-only clock only the A-share afternoon is in session between cases 6 and 9.
   8. **The phone's state:** the old case 8; the state names both NVDA and 600519.
-  9. **A filing.** `wall.set("2026-12-01T12:00:00Z")` (07:00 ET): the first due poll seeds silently. The fake then adds an 8-K accepted 07:02:12 ET, and the 07:05 ET poll sends `NVDA 8-K · accepted 07:02:12 ET · …`. `600519` is never fetched.
+  9. **A filing.** `wall.set("2026-12-01T12:00:00Z")` (07:00 ET): the due poll finds nothing new (NVDA was seeded in case 1) and sends nothing. The fake then adds an 8-K accepted 07:02:12 ET, and the 07:05 ET poll sends `NVDA 8-K · accepted 07:02:12 ET · …`. `600519` is never fetched. A `builtin:brief` firing on the same home then shows the alerts and filings blocks with no `no ledger` error.
   10. **The canary's annotation half:** the old case 10, unchanged.
 - [ ] **Step 2: Run it** — `cd face && FACE_SMOKE=1 npx tsx --test tests/watch-smoke.test.ts`. Expected: PASS. A failure is fixed in the task that owns the behaviour.
 - [ ] **Step 3: Run the whole suite with the real boots** — `FACE_SMOKE=1 npm test`. Expected: every file green, one real boot more than before.
@@ -877,7 +877,7 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
     - `watch.ts` writes `alerts.jsonl`, `filings.jsonl`, `watch.lease` and its events;
     - `telegram.ts` writes `MUTE`;
     - the operator writes `rules.yml`.
-  - **D17 and D18:** `/mute` from the phone, with what holds it (a required duration, never shortened from the phone, no phone unmute).
+  - **D19 and D20** (the old plan's D17 and D18, renumbered past main's D18): `/mute` from the phone, with what holds it (a required duration, never shortened from the phone, no phone unmute).
   - **D23:** rewritten for both markets in M11's words: the desk's prices are the Market's reads through the proxy (`market-quotes.ts`), US by `explore` every 20 s, A shares by `quotes` every 10 s, the watch and `desk_quotes` among the readers; no sentence calls a price's source the Account.
   - **New row D28**, in the D20 role of the old plan:
 
@@ -891,7 +891,7 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
   - **§5:** the Desk view in Markets.
   - **§7:** `watch-smoke`, fresh counts and the drill's P3 row.
   - **§10:** the desk item.
-  - **§9 residuals, from R68:**
+  - **§9 residuals, from R70** (main took R53 and R54, so the desk's P0–P2 residuals are R55–R69):
     - the US latency floor, the 20 s explore cache plus the reads;
     - a delayed US feed's alert lags its print;
     - `prev_close` is `price − change24h`, the Market read's own;
@@ -935,7 +935,7 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
   - `/mute`;
   - filings in Node.
 
-  Spec §15 M5 is amended in place: past the XSHG table the watch judges A shares on the Market's phase alone, with one line a Beijing date, while P4's anchors still refuse a date past it.
+  Spec §15 M5 is amended in place: past the XSHG table the watch judges A shares, the Market's phase standing in for the calendar only on whether the day trades and the bands and the close print still applied (ruling 2), with one line a Beijing date, while P4's anchors still refuse a date past it.
 - [ ] **Step 6: Verify and commit** — `cd face && npm test && npm run typecheck`, then `FACE_SMOKE=1 npm test`; every count in the documents matches the run. Commit the six documents with `docs: the desk P3 - the watch in both markets, rules.yml, alerts, annotations, mute, filings in Node, the Desk view in Markets; charter D28`.
 
 ---

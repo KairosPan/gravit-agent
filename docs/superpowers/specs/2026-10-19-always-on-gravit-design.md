@@ -682,6 +682,34 @@ hit is recorded and rides the next edition. A hit, in order:
 with an unknown key, a halt rule on a stream that carries no statuses — the file is loaded
 without that entry, the Desk page shows the refusal, and the phone gets one line.
 
+**As built (P3, 2026-11-01).** §15 replaces this section where they disagree, and the plan
+`docs/superpowers/plans/2026-11-01-desk-p3-watch.md` holds the rulings; `DEVELOPMENT.md` §4.2 and
+§9 (R70–R80) hold the mechanism. What changed from the text above:
+- **Polled, not streamed.** No stream exists: US shares are polled every 20 s through the
+  Market's `explore` read (its 20 s cache), A shares every 10 s through its `quotes` read, twelve
+  pairs a read; at most 40 US and 60 A-share symbols, holdings first, the rest named on the phone.
+  The 30 stream slots, their ranking, the `snapshot ≤ 60 s` label and the `IEX` stamp are void; a
+  price names its feed (`ROBINHOOD`, `NASDAQ`, `CBOE DELAYED`, `TENCENT`) and its exchange time.
+- **Judged per market.** A US print inside the XNYS session of its own ET date; an A share's while
+  the Market's phase is `trading`, inside 09:30–11:30 or 13:00–15:00 Beijing, plus the close print
+  stamped 15:00:00–15:00:30; a `stale` or `unavailable` print never. Each market keeps its own
+  session date, cooldowns and counts.
+- **`move_pct` from the previous close**, not from the open (the Market's read carries no open):
+  `price − change24h`. A `gap` kind judges a session's first print that carries one, inside 30
+  minutes of the open.
+- **`kind:` and `symbols:`**, never `on:`: every rule names its kind (`move_pct`, `gap`, `filing`)
+  and its symbols (`holdings`, `levels`, tickers, quoted six-digit A shares); an unknown key or
+  kind is refused.
+- **Halts refused**, with the reason `halts need a trading-status feed; the Market's read carries
+  none`.
+- **One annotation per pass**, `[alerts · <n> · <HH:MM ET>]` for several, replying to the first
+  delivered alert's message; rules default to `annotate: false`.
+- **`/mute <duration>`** from the phone writes `MUTE`, never shortened from the phone and lifted
+  only by `npm run desk -- unmute`, the file's deletion or its own end; detection and the ledger go on.
+- **Filings in Node** (`src/edgar.ts`, `src/filings.ts`): SEC's submissions API, 8-K, 8-K/A and
+  Form 4, every 5 minutes, 07:00–20:00 ET on session days, US symbols only, under
+  `ALPHA_EDGAR_USER_AGENT`; each symbol's first good poll seeds silently.
+
 ### 5.6 The Telegram bridge
 
 `src/telegram.ts`, no library: `fetch` against `https://api.telegram.org/bot<token>/…` (it
@@ -1124,6 +1152,13 @@ ones and argue from this section where it and §5.5, §5.9, §5.10 or §12 disag
   An A-share order needs its sessions ahead of time, so the face gains an XSHG closure table
   copied from the SSE's published 2026 schedule. A date past the table is a calendar failure, said,
   never guessed. Shanghai has no daylight time.
+  *Amended by the P3 build (2026-11-01):* past the XSHG table (after 2026-12-31) the watch still
+  judges A shares: every weekday is polled as a 09:30–15:00 Beijing session, the Market's phase
+  standing in for the calendar's answer on whether the day trades (a holiday's prints are never
+  `trading`), and the Beijing bands, the phase `trading` inside them and the 15:00:00–15:00:30
+  close print still decide which prints are judged (the Market says `trading` through the
+  09:15–09:25 auction too). The phone gets one line a Beijing date. P4's anchors still refuse a
+  date past the table.
 - **M6 — Done, replacing §12's P3 and P4 criteria.**
   - **P3:** a real level crossing reached the phone with its plan, within one poll interval plus
     10 s, for one US and one A-share symbol; an annotation followed inside 90 s as a reply; and one

@@ -1246,8 +1246,9 @@ keys are absent, not disabled, and the device line under the Account head says w
 One table under the search box (`Search markets`). Its tabs are the Account's: **All**, then
 **Crypto · Stocks · RWAs · Perps · Pre-IPO · Predictions** where the Account lists something
 — each with the Account's count once All's read has answered, All counting the starred A shares
-too (Stocks is the Account's alone) — then **China**, the Account's own tab, then **Watching** last once
-anything is starred, with **All results** first while searching;
+too (Stocks is the Account's alone) — then **China**, the Account's own tab, then **Watching** once
+anything is starred, and **Desk** last, the desk's view ("The watch" under "The desk" below), with
+**All results** first while searching;
 a tab starts from Most traded. With two or more rows, the sorts **Most traded · Biggest moves**,
 and **Closing soonest** where a row closes: Most traded ranks the Account's rows by their volume
 (a Kalshi row's contracts by their number), then the A shares by turnover (China's rows, in yuan); Biggest moves by the
@@ -1844,7 +1845,7 @@ cookie and does nothing without an admitted key, but it could ask to sign — so
 device you do not recognise. One stream per tab: three tabs are three of the Account's thirty-two.
 
 
-## The desk (src/desk*.ts + src/telegram.ts + src/us-quotes.ts)
+## The desk (src/desk*.ts + src/telegram.ts + src/market-quotes.ts)
 
 The desk is Gravit on the operator's phone: one long-lived desk conversation that informs and
 never orders (the desk spec's P1,
@@ -1865,11 +1866,12 @@ tool since `alpaca_kit` left the tree). No shell and no
 background jobs: an unattended turn on untrusted text — a forwarded message, a web page, a
 filing — must not read the key files and reach the network. No order or account tool, no
 question tool, no goals, no delegation, no AKShare. Two tools are the desk's own:
-`desk_quotes`, the price now for 1 to 20 US symbols, its source and its time in New York
-(`NASDAQ REAL-TIME 15:21:03 ET`), from the Account's market read (`src/us-quotes.ts`: its
-`explore` row per symbol, through the proxy in-process) — with the Account not running it
-answers `unavailable: the Account is not reachable …`, and a symbol it lists no share for has no
-price; and `desk_state`, what `/data/desk/status` says, with the ledger's
+`desk_quotes`, the price now for 1 to 20 symbols — US tickers or six-digit A shares (`600519`) —
+each with its feed and its exchange's time (`ROBINHOOD 10:21:03 ET`, `TENCENT 14:03:12 Beijing`),
+from the Market's reads (`src/market-quotes.ts`: a US share's `explore` row, A shares' `quotes`
+read, through the proxy in-process, as the Markets screen reads them) — with the Account not
+running it answers `unavailable: the Account is not reachable …`, and a symbol the Market lists
+no share for has no price; and `desk_state`, what `/data/desk/status` says, with the ledger's
 last 10 runs. An order tool the desk names is refused by Gate 2 with no card: the session
 cannot see it.
 
@@ -1960,19 +1962,20 @@ the desk conversation that start resumes too.
 is dropped unanswered, counted, and its sender id recorded in `telegram.jsonl`; `status` shows
 the count. Text goes to the desk under a first line Gravit reads as its provenance —
 `[telegram · operator · 14:03 ET]`, the time you wrote it; a photo, a file or a voice note gets
-`text only on the desk`. Four commands are the bridge's own, in any letter case, with or without
+`text only on the desk`. Five commands are the bridge's own, in any letter case, with or without
 `@<bot>` after them:
 
 | Command | What it does, and the reply |
 |---|---|
-| `/status` | `npm run service -- status`'s desk, pause and Telegram lines, then `desk session <id>` and `turns today <n>` |
+| `/status` | `npm run service -- status`'s desk, pause and Telegram lines — with the budget, standing-order and watch lines after them — then `desk session <id>` and `turns today <n>` |
 | `/pause` | pauses the desk until a terminal resumes it: `paused; a terminal resumes it: npm run desk -- resume` |
 | `/pause 30m` (`Nm`, `Nh`, `Nd`) | pauses it for that long: `paused until 14:33 ET; …`; any other argument pauses nothing and says how to write one |
+| `/mute 30m` (`Nm`, `Nh`, `Nd`) | silences the watch's alerts for that long ("The watch" below): `alerts muted until 14:33 ET; detection and the ledger go on. A terminal lifts it: npm run desk -- unmute`; no or a bad duration mutes nothing and says `mute needs a duration: /mute 30m, /mute 2h or /mute 1d` |
 | `/new` | opens another desk conversation: `a new desk conversation`; a turn under way on the old one still answers |
 | `/stop` | cancels the turn under way, and only it: `stopped`, or `nothing is running`; texts you sent while it ran are answered after it, in order |
 
-Any other `/word` is text for Gravit. There is no `/resume`: the phone only makes the desk
-quieter, and a pause from the phone never shortens one in force — `/pause 1m` during a 2-hour
+Any other `/word` is text for Gravit. There is no `/resume` and no `/unmute`: the phone only makes
+the desk quieter, and a pause or a mute from the phone never shortens one in force — `/pause 1m` during a 2-hour
 pause leaves the 2 hours, and the reply says so.
 
 What comes back: the answer as plain text, in parts of at most 4,000 characters, cut at line
@@ -2004,8 +2007,8 @@ webhook of their own, which the face sees only as a 409 (`conflict at …`).
 
 **The pause.** The switch is a file, `$DSH_HOME/face/desk/OFF`. While it is there the desk opens
 no turn, and a text gets `paused since 14:03 ET by telegram until 16:03 ET; a terminal resumes
-it: npm run desk -- resume`. Set it from the phone (`/pause`), from `POST /data/desk/pause` (the old
-client's Desk panel used it; its gravit-ui port is owed), or from a terminal:
+it: npm run desk -- resume`. Set it from the phone (`/pause`), from `POST /data/desk/pause` (Markets ›
+Desk's **Pause**), or from a terminal:
 
 ```bash
 cd face
@@ -2056,11 +2059,11 @@ session plants.
 The root `GRAVIT.local.md` is not fenced: it is the operator's own overlay, read by every desk
 turn (`DEVELOPMENT.md` §9).
 
-**In the browser.** The Desk panel - the desk's status, the pause and its control, the bridge, the
-conversation, today's turns, the standing orders and the desk's sessions - was built in the old
-client, which main replaced with gravit-ui; it was dropped in the merge (2026-11-01) and its port
-to gravit-ui is owed to P3. Until then gravit-ui lists the desk's sessions as it lists any, and
-`GET /data/desk/status` is the desk's state for a page.
+**In the browser.** Markets › Desk, the Markets screen's last tab (since P3; the old client's Desk
+panel left with that client in the merge): the desk's status and **Pause**, the watch, today's
+alerts, the levels as loaded, the standing orders and their firings, and the runs and sleep gaps,
+read from `GET /data/desk/status` every 10 s ("The watch" below). gravit-ui lists the desk's
+sessions as it lists any.
 Both desk routes, `GET /data/desk/status` and `POST /data/desk/pause`, keep only the `/data`
 loopback fence and no cookie ("Data routes and caches"), so anything on this machine — a shell
 turn included — can read the status and pause the desk: the safe direction (charter D19).
@@ -2074,9 +2077,12 @@ first is the pre-close brief: `desk/STANDING.md`, tracked, with `builtin:brief`,
 producer, which prices the desk's book — `desk/holdings.yml` and `desk/levels.yml`, gitignored,
 with `desk/holdings.example.yml` and `desk/levels.example.yml` tracked beside them — and the
 index and sector ETFs from one snapshot of the desk's US quote source (at most 200 symbols; any
-past that are named in the brief). That source is the Account's market read
-(`src/us-quotes.ts`); with the Account down the brief reads the book and carries every price
-null, its `quotesError` `quotes unavailable: the Account is not reachable …`. A strategy's `strategies/<name>/levels.yml` is not read yet: research
+past that are named in the brief). That source is the Market's reads (`src/market-quotes.ts`,
+the `explore` read for each US symbol); with the Account down the brief reads the book and
+carries every price null, its `quotesError` `quotes unavailable: the Account is not reachable …`.
+The brief is US: an A-share holding or level is counted in `aShares`, not priced, and `scope`
+says A shares are the watch's. Since P3 it also lists the watch's alerts and filings since the
+order's previous brief, newest first, at most 50 each. A strategy's `strategies/<name>/levels.yml` is not read yet: research
 sessions can write it, and the brief's text reaches the phone, so it joins once P4 pins each one
 at arming (`DEVELOPMENT.md` §9, R67); the brief says so.
 
@@ -2224,8 +2230,181 @@ supersedes the P2 plan's, which has no `cancelled` row.
 line (`budget: 1,234,567 of 2,000,000 tokens today`) and a line per order —
 `standing preclose: close-30m, next 12:30 ET; last delivered 2026-11-26 15:31 ET`, or what holds
 it (`desk/STANDING.md changed since arming (npm run desk -- rearm preclose)`, `expired after …`,
-`disabled`). The Desk panel's Standing orders card showed the same; it left with the old client,
-and `firings.jsonl` holds every firing until its gravit-ui port.
+`disabled`). Markets › Desk's Standing orders and Firings show the same; `firings.jsonl` holds
+every firing.
+
+
+### The watch (src/watch.ts + src/watch-eval.ts + src/alert-text.ts + src/edgar.ts + src/filings.ts + src/xshg-clock.ts)
+
+The desk's watch keeps an eye on your book between turns (the desk spec's P3, §5.5 and §15): it
+polls the prices of the US shares and A shares your files name, judges your levels and rules on
+each print, and sends each alert to the phone itself — the plan quoted verbatim, no model in its
+path — with, when the level or rule asks for one, one annotation turn on the desk session that
+answers as a reply. It informs and never orders. It runs in every face with the desk on, once the
+desk conversation and the clock are up, and only when the Market's reads are wired (the Account
+running is what makes them answer); with nothing to watch it asks no calendar, polls nothing and
+says nothing.
+
+**What it reads**, re-read on every edit (an mtime or size change) and on each new New York date:
+`desk/holdings.yml`, `desk/levels.yml`, every `strategies/<name>/levels.yml` — which a research
+session can write, so each edit of one sends the phone a line (`changed (sha256 <8 hex>)` when
+nothing in it is refused; charter D28) — and `desk/rules.yml`. A broken file keeps its last good load, and the phone gets one line
+per distinct load. A symbol is a US ticker (`NVDA`, `BRK.B`) or an A share's six digits, quoted:
+`symbol: "600519"` — unquoted, YAML reads a number, and a number is refused, never coerced. A
+level is `symbol`, `kind` (`buy_zone`, `stop`, `target`, `watch`), `price` with `when: cross_up`
+or `cross_down`, or `range: [low, high]` with `when: enter`, a required one-line `plan`, an
+optional `source`, a required `expires`, `annotate` (true by default) and `cooldown` (`30m` by
+default); `desk/levels.example.yml` shows both markets.
+
+**`desk/rules.yml`** (tracked: it holds no position and no price) is your definition of urgent,
+from a fixed vocabulary — nothing in it is read by a model. At most 20 rules, each with an `id`
+(as a standing order's), a `kind` and its `symbols` (`holdings`, `levels`, or a list of tickers,
+quoted A shares and those two words):
+
+```yaml
+- id: holding-move
+  kind: move_pct           # the move from the previous close reaches move_pct, either way
+  symbols: holdings
+  move_pct: 4
+  cooldown: 60m
+- id: index-move
+  kind: move_pct
+  symbols: [SPY, QQQ]
+  move_pct: 1.5
+- id: filing
+  kind: filing             # a new 8-K, 8-K/A or Form 4, US symbols only
+  symbols: [holdings, levels]
+  forms: [8-K, 8-K/A, 4]
+- id: holding-gap          # the session's first judged print is gap_pct or more from the previous close
+  kind: gap
+  symbols: holdings
+  gap_pct: 2
+```
+
+`move_pct` and `gap_pct` are above 0 and at most 50, each on its own kind; `forms` is a filing
+rule's (all three by default); `cooldown` is any kind's but `gap`'s; `annotate` is false by
+default, and true only with a `plan`. An unknown key or kind, `on:`, and a `halt` rule are
+refused — `halts need a trading-status feed; the Market's read carries none` — and the file
+loads without them.
+
+**When it judges.** Each market on its own session and its own date:
+
+- **US shares**, polled every 20 s — the Market's `explore` read, which the proxy keeps 20 s, so
+  polling faster would only re-read it — from 10 minutes before the XNYS open to a minute after
+  the close; a print is judged when its exchange time is inside the session. At most 40 symbols.
+- **A shares**, polled every 10 s through the Market's `quotes` read, twelve a read, on the XSHG
+  table's sessions (`src/xshg-clock.ts`, the SSE's 2026 notices); a print is judged while the
+  Market says `trading`, inside 09:30–11:30 or 13:00–15:00 Beijing — never the 09:15–09:25 auction
+  or the midday break — and the close print stamped 15:00:00–15:00:30 whatever the phase. At most
+  60 symbols. A-share alerts come in New York's evening and night: that is what `/mute` is for. Past the table
+  (after 2026-12-31) every weekday is polled as a session, with one phone line a day, until the
+  table is extended in code (`DEVELOPMENT.md` §9, R74).
+
+Past a market's cap, holdings come first, then levels, then rule symbols, and the rest are named
+on the phone once. A `stale` or `unavailable` quote is never judged; a market whose poll fails is
+said once a session date, and a symbol unpriced on its first three polls once.
+
+**What fires.** A level or a `move_pct` rule fires on a crossing between two judged prints of one
+session, and once, labelled `gap`, when it is already past at the session's first judged print. A
+`move_pct` or `gap` rule measures from the previous close — `price − change24h`, as the Market's
+read gives it — and a Robinhood-priced US row has none until Cboe's first trade, about 09:45 New
+York; a `gap` rule judges only the first print that has one, and only inside 30 minutes of the
+open (R72). Inside its cooldown a hit is counted, not sent. At most six alerts go in a rolling
+hour; the rest are recorded `suppressed: cap` and go as one line at the first tick of a later
+hour (`1 more alert suppressed: B6 watch 09:40 ET`). An alert looks like:
+
+```
+NVDA 169.82 · ROBINHOOD 10:21:03 ET
+stop 170 cross_down · desk/levels.yml · THESIS.md §3
+held 100 @ 120.50 · day P&L -423.00
+plan: sell half on a close below 170
+day: -2.43% from the previous close 174.05
+annotation follows
+```
+
+— its feed and its exchange's time (`NASDAQ`, `CBOE DELAYED`; an A share `TENCENT 14:03:12
+Beijing`), what fired and from which file, the holding, the plan verbatim, the day's move. The
+last line is `annotation follows`, `no annotation: the desk's token budget for today is spent`,
+or none.
+
+**Annotations.** One annotation turn per poll's hits, posted on the desk session after the
+alerts went — `[alert · <SYMBOL> · <label>]`, or `[alerts · <n> · <HH:MM ET>]` for several — that
+checks each plan's conditions and stops; its answer comes as a reply to the alert, within its 90 s
+deadline. Its own failures come as replies too: `timed out after 90 s; a card or a long tool was
+pending`, `the desk could not annotate this alert: <error>`, `the desk's check of this alert ended
+with no text`. The budget stops annotations, never alerts; a paused desk sends neither, and each
+alert is still recorded (`suppressed: off`). Before each of your phone texts, while the desk
+session is idle, the face adds `[desk · state · <HH:MM ET>]` — every holding, the levels within
+2% and today's counts — so "sell half?" has the alert in context.
+
+**`/mute` and `unmute`.** From the phone, `/mute 30m` (`Nm`, `Nh` or `Nd` — a duration is
+required) silences the alerts: `alerts muted until 14:33 ET; detection and the ledger go on. A
+terminal lifts it: npm run desk -- unmute`. While it holds, every alert is recorded
+`suppressed: muted` and none is sent or annotated, and a batch due under it is dropped. The phone
+never shortens a mute in force and has no unmute; a terminal lifts it:
+
+```bash
+cd face
+npm run desk -- unmute       # unmuted, or not muted
+```
+
+The mute lifts itself at its end too; the file is `$DSH_HOME/face/desk/MUTE`, beside `OFF`.
+
+**Filings.** A `filing` rule's US symbols (at most 60, holdings first; A shares skipped) are
+read from SEC's EDGAR every 5 minutes, 07:00–20:00 ET on session days, by the face itself
+(`src/edgar.ts`). SEC asks for a contact: set it in the harness home's `.env` and restart —
+
+```
+ALPHA_EDGAR_USER_AGENT=you@example.com
+```
+
+— without it the filings are off and nothing is fetched (`the watch's filings are off: set
+ALPHA_EDGAR_USER_AGENT to a contact email (SEC asks for one)`, once a day). Each symbol's first
+good poll seeds what it already has, silently; after that a new 8-K, 8-K/A or Form 4 accepted
+today inside the window alerts (`NVDA 8-K · accepted 07:02:12 ET · filed 2026-12-01`, its items,
+its URL, the rule and the holding); one accepted outside it is recorded `suppressed: window`. A
+poll SEC refuses for every symbol turns filings off until tomorrow, with one line.
+
+**One watch per home.** `$DSH_HOME/face/desk/watch.lease` names the face that watches; a second
+face on the same home stays off and says `this face does not watch: another face (pid <n>) holds
+the watch on this home` once a day, and takes over within 2 minutes when the first is gone. A
+second face on another home with the same Telegram token would watch too — start it with
+`FACE_DESK=0`.
+
+**The ledgers.** `$DSH_HOME/face/desk/alerts.jsonl` holds every alert with its gate's decision, its
+delivery and latency, each batch and each annotation; `filings.jsonl` the filings' baseline and
+every filing seen; `events.jsonl` each mute and each file load. A restart rebuilds the day from
+`alerts.jsonl`, so no gap fires twice and the cooldowns and the hour's count hold (R75 has the
+edges). The pre-close brief lists the alerts and filings since the last brief, and `desk_state`
+carries the watch's state.
+
+**In the browser: Markets › Desk.** The Markets screen's last tab, `Desk`, reads
+`/data/desk/status` when Markets is shown and every 10 s: the desk's status and **Pause**, the
+watch by market with today's counts, the mute, the filings' state, today's alerts with their
+feed, outcome and latency (`latencyMs`, from the print's exchange time to the send), the levels
+as loaded with every refused entry, the standing orders and their firings, the runs and sleep
+gaps. A Markets row with a level shows its nearest level and distance (`stop 170 · -1.30%`), and
+its page the plan and its file under the price. `npm run service -- status` and `/status` end
+with the same watch lines.
+
+**What else the phone gets from the watch:**
+
+| When | Line |
+|---|---|
+| a file refused whole | `<file> is refused, so the watch keeps its last good load: <error>` |
+| a file loaded with refusals | `<file>: <n> loaded, <k> refused - #<i>[ <SYMBOL>]: <reason>; …` |
+| a file changed, nothing refused | `<file> changed (sha256 <8 hex>): <n> loaded` |
+| over a market's cap | `the watch covers <n> <US \| A-share> symbols; not watched: <SYMBOL>, …` |
+| a market's first failed poll of its session date | `the watch has no <US \| A-share> prices today: <reason>` |
+| a symbol unpriced on its first three polls | `the watch has no price for <SYMBOL> this session: <reason>` |
+| A shares past the XSHG table (once a Beijing date) | `the A-share calendar ends <last date>; the watch judges A shares on the Market's phase alone until face/src/xshg-clock.ts is extended` |
+| no XNYS calendar (once a day) | `the watch is off for US shares today: the market calendar failed (<error>)` |
+| held elsewhere (once a day) | `this face does not watch: another face (pid <n>) holds the watch on this home` |
+| filings with no contact (once a day, with a filing rule) | `the watch's filings are off: set ALPHA_EDGAR_USER_AGENT to a contact email (SEC asks for one)` |
+| every symbol refused by SEC (once a day) | `the watch's filings are off until tomorrow: SEC refused every request (<error>); check ALPHA_EDGAR_USER_AGENT` |
+| filings over the cap | `the watch's filings cover 60 symbols; not polled: <SYMBOL>, …` |
+
+Each line is at most 500 characters, cut with `…`.
 
 
 ## Channels (src/channels.ts + src/roster.ts + the list's groups and a channel's page)
@@ -3325,10 +3504,10 @@ D18); a `spill-policy` row in the profile patch changes it.
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 29 isolated real boots; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 30 isolated real boots; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 29 real boots listed below; `FACE_SMOKE=1` runs
+Offline, `npm test` skips the 30 real boots listed below; `FACE_SMOKE=1` runs
 them too. The typecheck includes the dependencies' own `.d.ts`, so a green one
 means the face compiles against the installed dsh, not just against itself.
 
@@ -3366,6 +3545,7 @@ and `node --test` gives each file its own:
 | `desk-smoke.test.ts` | the desk on a real tree, as `main.ts` installs it, its fixture root inside the repository so the repository's `GRAVIT.md` heads the chain: the `gravit-desk` session runs in `desk/journal/` under `workspace-write`; its tools are exactly `DESK_ALLOW` expanded on this tree plus `desk_quotes` and `desk_state`, each `mcp__*__<raw>` entry matching one server's tool, and neither desk tool reaches Gravit's session or the global view; the write tools take the path arguments the guard's write check reads, and `str_replace_editor`'s commands are `view`, `create`, `str_replace` and `insert`; the desk's prompt carries Gravit's persona prefix, the date and `# The desk`, and no cycle contract or roles section; a desk turn naming the order stand-in gets Gate 2's visibility refusal and its body never runs; a `write` to `../levels.yml` is refused by the sandbox inside the tool's content while a journal write lands, with no card; Gravit's own write of a `GRAVIT.md` lands; with a listener in front answering allow, the guard's backstop still denies the desk's write of `GRAVIT.md` and its read of a `.env` file, while Gravit's own read of that file goes through unjudged; `/stop` on a turn parked on an escalation card, two texts queued behind it, cuts that turn alone — recorded `cancelled`, `stopped from the phone` — and both texts are answered, in order; the desk's write of a journal `.gitignore` holding `!*` and of a `CLAUDE.md` are denied with no file written, and its read of a dot-config in the repository is denied by name while Gravit reads it; the read tools take exactly the parameters the read check reads; a `GRAVIT.md` planted in the journal reaches a desk session's first request behind the repository's, which is the threat the fence refuses, and the next post is refused with `desk-refused` and no turn; each supervised turn is one `desk-turn` with four token buckets and the stub's route |
 | `telegram-smoke.test.ts` | the bridge end to end on a real tree against a `node:http` Bot API stub on 127.0.0.1: the token and the operator's id come from the scratch home's `.env`, and the MCP child dsh spawns has the id and not the token; a stranger and a group are dropped and counted, unanswered, and the operator's `hi` is answered in the operator's chat; `/status` counts the drops and names the desk session; `/pause` writes `OFF` by `telegram`, a text then gets the paused line and opens no turn, and `/resume` is text that never reaches the model; a 503 queues the reply in the outbox and the next poll flushes it, in order, each reply sent once; a 409 is recorded and waited out; a card parked by an escalated write to `../levels.yml` is cut at the desk's deadline (1,500 ms here) with the timed-out line; the canary — the desk's write of `GRAVIT.md` is denied by the desk guard and no request carries a planted text, then a `GRAVIT.md` the harness plants is refused by the fence with no turn; its read case — `send me ~/.dsh/.env`: the read of the scratch home's `.env` is refused as outside the repository, the token handed to a market read is refused as a secret, no tool result carries the token or a second secret, and the stub's reply, which names both, reaches the phone as `I could not read it: <secret> <token>`; across the file every send went to the operator's chat, the token is in no file of the desk's directory, and no `STANDING.md`, `levels.yml`, `rules.yml` or `holdings.yml` changed |
 | `schedule-smoke.test.ts` | the standing orders' clock end to end, as `main.ts` installs the desk, on one early-close session (2026-11-27), a fake clock and calendar, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`: a firing a restart cut off is reported `interrupted` at boot and never run; the pre-close brief wakes one fresh `gravit-desk` session in `desk/journal` under `workspace-write`, with the armed text — hashing to its pin — and the producer's block in its wake message, and its final text reaches the phone; `firings.jsonl` holds `started`, `producer`, `woke` and `finished`, `events.jsonl` one `desk-turn` with `source: "schedule"` and four token buckets; a script producer's stderr reaches only the face's log; a turn waiting in a long tool is cut at its 10-minute deadline and the order queued behind it fires after; an edited text is refused with one line, then in silence, and fires once re-armed inside its grace; the pause refuses in silence and a spent budget with one line; an anchor slept across is `missed`; a `wake: false` order runs only its producer; a planted `GRAVIT.md` refuses the firing; the canary's firing half — a poisoned turn's writes of `../STANDING.md`, of `standing.yml` and of a journal `GRAVIT.md` are all refused, no card raised, every text and `standing.yml` unchanged — and a `GRAVIT.md` the harness plants refuses the next order; the clock's dispose cuts a firing in a long tool and settles; every text the desk sent went through the recorder |
+| `watch-smoke.test.ts` | the watch end to end, as `main.ts` installs the desk, on one fake source over a US and an A-share table, fake XNYS and XSHG calendars, a fake SEC, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`, with no route off the host (`FACE_ACCOUNT_URL=http://127.0.0.1:9`, no `ALPHA_EDGAR_USER_AGENT`): nothing polled before the window and the filings seeded silently; a US gap sent with its plan (`NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows`) and its annotation as a reply; a restart firing no second gap; the cooldown; the cap and the batch line; an A-share gap (`600519 1390 · TENCENT 09:30:02 Beijing`), nothing at the midday break; an annotation cut at its deadline and one whose model call fails, each its line as a reply; the phone's text preceded by the desk state naming both markets; an 8-K alerted, the A share never asked of SEC, and the pre-close brief on the same home listing the alerts and the filing; the canary's annotation half — a poisoned annotation's writes of `../rules.yml` and of `MUTE` refused, `levels.yml` and `rules.yml` unchanged, no card |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one
 `observed:` line each (S4, S7), the measurements the bots spec's amendments were
@@ -4562,17 +4742,19 @@ inode.
 
 
 
-## The desk drill (run after any change to scripts/service.ts, scripts/desk.ts, src/desk*.ts, src/telegram.ts, src/us-quotes.ts, src/{schedule,firing,standing,producer,market-clock,brief}.ts or main.ts's exits)
+## The desk drill (run after any change to scripts/service.ts, scripts/desk.ts, src/desk*.ts, src/telegram.ts, src/market-quotes.ts, src/symbols.ts, src/{schedule,firing,standing,producer,market-clock,xshg-clock,brief}.ts, src/{watch,watch-eval,alert-text,edgar,filings}.ts or main.ts's exits)
 
 The desk spec's drill (`../docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` §9 and
-§12), in three parts so far: P0's, the face as a service; P1's, the phone and the Desk panel; and
-P2's, the clock and the pre-close brief.
+§12 and §15), in four parts so far: P0's, the face as a service; P1's, the phone and the Desk
+panel; P2's, the clock and the pre-close brief; and P3's, the watch.
 **Since the merge onto main (2026-11-01)** the steps below are as written for the desk's branch,
 and three things read differently on the merged tree: the Desk panel's steps (P1's 4, 6 and 8,
-P2's 2 and 3) have no panel until its gravit-ui port (P3) — read `npm run service -- status`,
-the phone's `/status` and the ledgers instead; a price asked of the desk (P1's step 1) and the
-brief (P2's step 2) come from the Account's market read, so the Account must be running
-(`npm run account`); and the calendar needs no interpreter. The drill is to be run again on the merged tree.
+P2's 2 and 3) read Markets › Desk since P3 — its status, Pause, standing orders and firings;
+it lists no desk conversation and opens no session, so read those in the conversation list, and
+`npm run service -- status`, the phone's `/status` and the ledgers beside it; a price asked of the
+desk (P1's step 1) and the brief (P2's step 2) come from the Market's reads, so the Account must be
+running (`npm run account`); and the calendar needs no interpreter. The drill is to be run again
+on the merged tree.
 It is the operator's, never an agent's — every step drives the operator's own launchd, harness
 home, bot and phone.
 
@@ -4671,7 +4853,7 @@ behind it; the Desk panel in a real browser over the real ledger.
 the browser signed in:
 
 1. From the phone: `hi`, then `NVDA now?`. PASS: both answered in the bot's chat; the second
-   names the price with its source and time (`IEX 15:21:03 ET`, from `desk_quotes`); the
+   names the price with its feed and time (`ROBINHOOD 15:21:03 ET`, from `desk_quotes`); the
    ledger, `$DSH_HOME/face/desk/events.jsonl`, has a `desk-turn` line for each, with
    `"source":"telegram"`, `"outcome":"ended"` and four token counts.
 2. `/status`. PASS: the desk line, `telegram: polling, last poll …, <n> dropped, <n> queued`,
@@ -4753,3 +4935,58 @@ the desk's interpreter, each day's delivery time and the brief's tokens (`firing
 
 **Not yet run.** The automated half passes 2026-11-01; the calendar, the phone and a real model
 are the operator's.
+
+### P3: the watch
+
+PASS is P3's done criterion (the desk spec's §15 M6) — a real level crossing has reached the
+phone with its plan within one poll interval plus 10 s, for one US and one A-share symbol; an
+annotation has followed inside 90 s as a reply; and one live EDGAR filing alert, or a recorded
+`suppressed:` line, has arrived — and the mute and the re-arm P3 owes.
+
+**The automated half, no network.** `npm test` runs `symbols`, `market-quotes`, `xshg-clock`,
+`watch-eval`, `alert-text`, `edgar`, `filings` and `watch`, the client's `desk-view` and
+`host-desk`, and P3's cases in `desk`, `desk-cli`, `telegram`, `desk-conversation`, `desk-tools`,
+`brief`, `desk-book`, `market-clock`, `desk-weight`, `markets` and `market-view`;
+`FACE_SMOKE=1 npm test` boots `watch-smoke`, the canary's annotation half among it ("Tests"
+above). No test reaches the Account, Tencent, Telegram or SEC. What only this drill checks: the
+Market's real reads and their timing; a real model's annotation; the real Bot API threading a
+reply; SEC's real answers and its acceptance time.
+
+**The drill**, after P2's, with the Account running (`npm run account`), the service running the
+merged code, the browser signed in and Markets › Desk open:
+
+1. In `desk/levels.yml`, a `watch` level a few cents from a liquid US share's price, `when` the
+   side it is about to cross, `annotate: true`, a one-line plan, `expires` today, during the US
+   session. PASS: the phone gets the alert within 30 s of the crossing, with its plan and its
+   feed's stamp (`ROBINHOOD`, `NASDAQ` or `CBOE DELAYED` with the exchange time); Markets › Desk
+   lists it `sent` with its latency — read `latencyMs` there (or in `alerts.jsonl`'s `delivered`
+   record) and record it.
+2. The same for an A share (`symbol: "600519"`, quoted) during Beijing hours, 09:30–11:30 or
+   13:00–15:00 Beijing (20:30–22:30 or 00:00–02:00 ET while New York keeps standard time). PASS: within 20 s, stamped
+   `TENCENT <HH:MM:SS> Beijing`; record its latency.
+3. The annotation. PASS: within 90 s of each alert the desk's check arrives as a reply to it,
+   quoting the plan and each condition met or not met; `alerts.jsonl` has its `annotation` record
+   `opened`, and `events.jsonl` a `desk-turn` with `"source":"alert"`.
+4. From the phone, `/mute 30m`; then let a level cross. PASS: `alerts muted until …`; no alert
+   on the phone; Markets › Desk shows the mute and the alert `suppressed (muted)`, and
+   `alerts.jsonl` its `alert` record with `"suppressed":"muted"`. Then `npm run desk -- unmute`
+   prints `unmuted`, and the ledger has `mute-cleared` by `terminal`.
+5. `npm run desk -- rearm preclose`. P3 changed `desk/STANDING.md` (the watch's alerts and
+   filings in the brief), so the armed `preclose` is refused at its anchor until re-armed. PASS:
+   `re-armed preclose: desk/STANDING.md sha256 <12 hex>… (changed)`, and the next brief arrives with its
+   alerts and filings blocks.
+6. Set `ALPHA_EDGAR_USER_AGENT` (a contact email) in `$DSH_HOME/.env` and restart the face
+   (`npm run service -- restart`), with a `filing` rule on a symbol that files often. PASS: Markets
+   › Desk's filings line says `polling`; the first poll seeds silently (`filings.jsonl`'s `seeded`
+   records); a new 8-K or Form 4 later that session alerts with `accepted <HH:MM:SS> ET`, or one
+   accepted outside the window is recorded `suppressed: window`. Compare one filing's accepted
+   time with its EDGAR index page — they agree, or SEC's `Z` is true UTC (ruling 9; `DEVELOPMENT.md`
+   §9, R76) — and record one poll's wall time and bytes (R77).
+
+**PASS is steps 1–6.** Record the date, the commit, each alert's latency, the annotation's time,
+the filing's comparison and the poll's wall time and bytes in `DEVELOPMENT.md` §7.4's P3 **Desk**
+row.
+
+**Not yet run.** The automated half passes 2026-11-01, and the Desk view passed a browser check
+on a scratch face the same day; the Market's real reads, the phone, SEC and a real model are the
+operator's.
