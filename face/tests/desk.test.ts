@@ -1526,6 +1526,11 @@ test("installDesk starts the watch with a source, shares the US calendar with th
   emit("user/message", { turn: 1, source: { kind: "alert", alert: "a-000000000001", symbol: "NVDA" } });
   await until("the 40 ms alert deadline's cancel", () => agent.cancels.length === 1);
   emit("turn/end", { turn: 1, reason: { kind: "aborted" } });
+  /* and a turn named by an `alerts` source is cut the same */
+  emit("turn/start", { turn: 2 });
+  emit("user/message", { turn: 2, source: { kind: "alerts", alert: "p-000000000001", symbol: "NVDA,AMD" } });
+  await until("the 40 ms alerts deadline's cancel", () => agent.cancels.length === 2);
+  emit("turn/end", { turn: 2, reason: { kind: "aborted" } });
 
   await desk.dispose(0);
   assert.deepEqual(atLetGo, [{ schedule: 0, watch: 0, state: "stopped", lease: false }], "the clock row and the watch stopped, and the lease released, before the conversation let go");

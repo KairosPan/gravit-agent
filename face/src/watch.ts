@@ -389,7 +389,10 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     if (opts.ever === true) saidEver.add(key);
     else saidOn.set(key, opts.at);
     const replyTo = opts.replyTo;
-    onSendChain(async () => { await deps.deliver(text, replyTo === undefined ? undefined : { replyTo }); });
+    onSendChain(async () => {
+      if (stopped) return;
+      await deps.deliver(text, replyTo === undefined ? undefined : { replyTo });
+    });
   };
   const track = (work: Promise<void>): void => {
     flights.add(work);
@@ -420,8 +423,9 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     return true;
   }
 
-  /** Another face holds the lease: say so - one log line per holder, one phone line per ET date. */
+  /** Another face holds the lease: one log line per holder; the phone line is the tick's ({@link heldLine}). */
   function heldBy(other: Lease, at: number): false {
+    void at;
     leaseBeat = undefined;
     holder = { pid: other.pid, since: other.since };
     const line = `${BIN}: desk: another face (pid ${other.pid}) runs the watch on this home; this one does not`;
@@ -429,8 +433,35 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       failed.add(line);
       log(line);
     }
-    sayOnce(`held:${etDate(new Date(at))}`, WATCH_LINES.heldElsewhere(other.pid), { at });
     return false;
+  }
+
+  /** Whether the book on disk names anything to watch - a price key or a US filing symbol - read afresh, saying
+   * nothing: a face that does not watch never phones the book's lines, and with nothing to watch sends none. */
+  async function bookHasWatch(today: string): Promise<boolean> {
+    const loads = async <T>(load: Promise<LoadResult<T>>): Promise<T[]> => (await load.catch(() => undefined))?.entries ?? [];
+    let strategies: string[] = [];
+    try {
+      strategies = (await listChannelDirs(root)).filter((c) => !c.isRoot).map((c) => c.name);
+    } catch (err) {
+      fail("strategies", err);
+    }
+    const holdings = await loads(loadHoldings(holdingsFile.path, holdingsFile.file));
+    const rules = await loads(loadRules(rulesFile.path, rulesFile.file));
+    const levels = [
+      ...await loads(loadLevels(levelsFile.path, levelsFile.file, today)),
+      ...(await Promise.all(strategies.map((name) => loads(loadLevels(join(root, "strategies", name, "levels.yml"), `strategies/${name}/levels.yml`, today))))).flat(),
+    ];
+    return priceKeys({ holdings, levels, rules }).length > 0 || filingSymbols(rules, { holdings, levels }).polled.length > 0;
+  }
+
+  /** The held-elsewhere line, once per ET date, and only when there is something to watch (Starting). */
+  async function heldLine(at: number): Promise<void> {
+    if (holder === undefined || holder.pid === pid) return;
+    const today = etDate(new Date(at));
+    if (saidOn.has(`held:${today}`)) return;
+    if (!(await bookHasWatch(today))) return;
+    sayOnce(`held:${today}`, WATCH_LINES.heldElsewhere(holder.pid), { at });
   }
 
   /** Release the lease when it is this face's. */
@@ -594,6 +625,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         delete mk.session;
         delete mk.uncovered;
         if (m === "us") sayOnce(`noCalendar:${answer.date}`, WATCH_LINES.noCalendar(answer.error), { at });
+        else fail("cn calendar", new Error(`${answer.date}: ${answer.error}`));
         return answer;
       }
     } else if (answer.session !== "closed") {
@@ -673,7 +705,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       seen.polls += 1;
       if (pricedOf(q)) seen.priced = true;
       u.seen.set(symbol, seen);
-      if (!seen.priced && seen.polls >= UNPRICED_POLLS) {
+      if (!seen.priced && seen.polls === UNPRICED_POLLS) {
         const reason = own.find((x) => x.symbol === symbol)?.message || "the Market read answered no quote for it";
         sayOnce(`unpriced:${m}:${session.date}:${symbol}:${reason}`, WATCH_LINES.unpriced(symbol, reason), { at });
       }
@@ -746,6 +778,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       }
       const delivered: { rec: AlertHit; result: DeliverResult }[] = [];
       for (const rec of sends) {
+        if (stopped) return; // dispose has begun: no deliver after it, and no post
         const note = rec.annotate ? (spent ? "budget" : "follows") : "none";
         let result: DeliverResult;
         try {
@@ -778,6 +811,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   /** The pass's annotation post, on the post chain: its record, and a refused post's line as a reply once per ET date. */
   function queuePost(pass: string, hits: AlertHit[], replyTo: number | undefined): void {
     postChain = postChain.then(async () => {
+      if (stopped) return;
       const at = clock.now();
       let r: PostResult;
       try {
@@ -800,6 +834,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     if (!batchDue(day, at)) return;
     const ids = takeBatch(day);
     onSendChain(async () => {
+      if (stopped) return;
       const flags = await flagsAt(at);
       const date = etDate(new Date(at));
       const base = { t: iso(at), kind: "batch" as const, id: batchId(), date, alerts: ids };
@@ -915,8 +950,9 @@ export function installWatch(deps: WatchDeps): WatchHandle {
           const kd = day.keys.get(key);
           if (kd !== undefined && kd.date === date && kd.lastHitAt !== undefined && at - kd.lastHitAt < rule.cooldownMs) pre = "cooldown";
         }
-        if (pre !== "cooldown") {
-          /* as src/watch-eval.ts rebuildDay reads the ledger back: any record not suppressed cooldown starts it */
+        if (pre === undefined) {
+          /* a filing that reaches the gate starts its rule's cooldown; one outside the window or inside the cooldown
+           * does not (the T9 review's ruling), as filingCooldowns reads the ledger back */
           const kd = day.keys.get(key);
           day.keys.set(key, { date, alerted: true, repeats: kd?.date === date ? kd.repeats : 0, lastHitAt: at });
         }
@@ -937,12 +973,32 @@ export function installWatch(deps: WatchDeps): WatchHandle {
 
   /* ---------- the ledgers ---------- */
 
+  /** The filing keys' cooldowns as the ledger leaves them: src/watch-eval.ts rebuildDay starts a key's cooldown at its
+   * date's latest record not suppressed `cooldown`; for a filing key, a record suppressed `window` starts none either,
+   * so its `lastHitAt` is its date's latest record that reached the gate, or none. Price keys are rebuildDay's. */
+  function filingCooldowns(rebuilt: WatchDay, read: readonly AlertRecord[]): void {
+    const latest = new Map<string, number>();
+    for (const r of read) {
+      if (r.kind !== "alert" || !r.key.startsWith("filing:")) continue;
+      if (rebuilt.keys.get(r.key)?.date !== r.date || r.suppressed === "cooldown" || r.suppressed === "window") continue;
+      const at = Date.parse(r.t);
+      if (Number.isFinite(at) && at > (latest.get(r.key) ?? Number.NEGATIVE_INFINITY)) latest.set(r.key, at);
+    }
+    for (const [key, kd] of rebuilt.keys) {
+      if (!key.startsWith("filing:")) continue;
+      const at = latest.get(key);
+      if (at === undefined) delete kd.lastHitAt;
+      else kd.lastHitAt = at;
+    }
+  }
+
   async function ledgersStep(at: number): Promise<void> {
     if (!alertsRead) {
       try {
         const { records: read } = await readRecords(home, ALERTS_FILE, isAlertRecord);
         const merged = [...read.filter((r) => at - Date.parse(r.t) <= MEMORY_MS), ...records];
         day = rebuildDay(merged, at);
+        filingCooldowns(day, merged);
         records = merged;
         for (const r of merged) if (r.kind === "delivered") deliveries.set(r.id, r);
         alertsRead = true;
@@ -985,7 +1041,14 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     }
     if (stopped) return;
     if (!held) {
-      if (holder !== undefined && holder.pid !== pid) state = "held-elsewhere";
+      if (holder !== undefined && holder.pid !== pid) {
+        state = "held-elsewhere";
+        try {
+          await heldLine(at);
+        } catch (err) {
+          fail("held line", err);
+        }
+      }
       return;
     }
     datesStep(at);
@@ -1121,10 +1184,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   function status(): WatchStatus {
     const at = clock.now();
     const marketsNow = {} as Record<Market, MarketWatchStatus>;
-    for (const m of MARKETS) {
-      markets[m].today = todayOf(m, at);
-      marketsNow[m] = structuredClone(markets[m]);
-    }
+    for (const m of MARKETS) marketsNow[m] = { ...structuredClone(markets[m]), today: todayOf(m, at) };
     return {
       state,
       markets: marketsNow,
@@ -1159,20 +1219,31 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     const prices = new Map<string, WatchQuote>();
     const missing: Partial<Record<Market, string>> = {};
     await Promise.all(MARKETS.map(async (m) => {
+      /* the holdings first, then the levels in file order, as the watch ranks them; the snapshot asks at most the
+       * market's watch cap, a symbol past it takes its last polled price, and those with none are counted */
       const symbols = [...new Set([...book.holdings.filter((h) => h.market === m).map((h) => h.symbol), ...book.levels.filter((l) => l.market === m).map((l) => l.symbol)])];
       if (symbols.length === 0) return;
+      const max = m === "us" ? WATCH_US_MAX : WATCH_CN_MAX;
+      const asked = symbols.slice(0, max);
+      const past = symbols.slice(max);
       const source = deps.quotes;
       const name = m === "us" ? "US" : "A-share";
+      const reasons: string[] = [];
       if (source === undefined || source.unavailable !== undefined) {
-        missing[m] = `${name} unavailable: ${source?.unavailable ?? "no quote source"}`;
-        return;
+        reasons.push(`${name} unavailable: ${source?.unavailable ?? "no quote source"}`);
+      } else {
+        const got = await within(source.snapshot(asked.map((symbol) => ({ id: idOf(m, symbol), market: m, symbol }))));
+        if (!got.ok) reasons.push(`${name} unavailable: ${got.reason}`);
+        else for (const q of got.value.quotes) if (q.market === m && q.quote_status !== "unavailable" && q.price !== null) prices.set(`${m}:${q.symbol}`, watchQuoteOf(q));
       }
-      const got = await within(source.snapshot(symbols.map((symbol) => ({ id: idOf(m, symbol), market: m, symbol }))));
-      if (!got.ok) {
-        missing[m] = `${name} unavailable: ${got.reason}`;
-        return;
+      let unpricedPast = 0;
+      for (const symbol of past) {
+        const last = lastQuotes.get(`${m}:${symbol}`);
+        if (last === undefined) unpricedPast += 1;
+        else prices.set(`${m}:${symbol}`, last);
       }
-      for (const q of got.value.quotes) if (q.market === m && q.quote_status !== "unavailable" && q.price !== null) prices.set(`${m}:${q.symbol}`, watchQuoteOf(q));
+      if (unpricedPast > 0) reasons.push(`${unpricedPast} ${name} ${unpricedPast === 1 ? "symbol" : "symbols"} past the cap of ${max} not priced`);
+      if (reasons.length > 0) missing[m] = reasons.join("; ");
     }));
     const sent = MARKETS.reduce((n, m) => n + todayOf(m, at).sent, 0);
     const suppressed = MARKETS.reduce((n, m) => n + Object.values(todayOf(m, at).suppressed).reduce((a, b) => a + b, 0), 0);

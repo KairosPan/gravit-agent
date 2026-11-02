@@ -359,9 +359,10 @@ test("a watched symbol unpriced on every poll of a session sends one line per (s
   assert.deepEqual(h.lines(/no price for/), [], "no line after two polls");
   await h.wall.advance(10_000);
   await until("the line", () => h.lines(/no price for/).length === 1);
+  h.source.tables.cn.set("699999", { unavailable: "the Market read lists no A share 699999" });
   await h.wall.advance(10_000);
   await h.wall.advance(0);
-  assert.deepEqual(h.lines(/no price for/), [line], "none after the fourth");
+  assert.deepEqual(h.lines(/no price for/), [line], "none after the fourth, though its reason changed");
   h.wall.set("2026-12-02T02:00:00Z");
   await h.wall.advance(30_000);
   await until("the next session's line", () => h.lines(/no price for/).length === 2);
@@ -544,6 +545,10 @@ test("two watches started together over a stale lease: one holds it, the other s
   const loser = a.watch.status().state === "held-elsewhere" ? a : b;
   await Promise.all([a.watch.tick(), b.watch.tick()]);
   await until("the line", () => loser.sent.length === 1);
+  await a.wall.advance(120_000);
+  await Promise.all([a.watch.tick(), b.watch.tick()]);
+  await a.wall.advance(0);
+  assert.equal(loser.sent.length, 1, "no second held-elsewhere line");
   assert.match(loser.sent[0].text, /^this face does not watch: another face \(pid 1[12]\) holds the watch on this home$/);
   await a.watch.dispose();
   await b.watch.dispose();
@@ -813,5 +818,204 @@ test("status carries marks nearest first, at most 100, for the Markets rows", as
   assert.equal(priced.length, WATCH_US_MAX, "only the polled symbols are priced");
   for (let i = 1; i < priced.length; i++) assert.ok(Math.abs(priced[i].distancePct ?? 0) >= Math.abs(priced[i - 1].distancePct ?? 0));
   assert.ok(marks.slice(priced.length).every((m) => m.distancePct === null), "the unpriced last");
+  await h.watch.dispose();
+});
+
+/* ---------- the T9 review's hardening round ---------- */
+
+test("a face held elsewhere with nothing to watch sends no line; once the book names something it says so once", async () => {
+  const first = await harness({ start: "2026-11-30T15:00:00Z", files: { "desk/README.md": "empty\n" }, pid: 11, alive: () => true });
+  await first.wall.advance(0);
+  const second = await harness({ start: "", wall: first.wall, home: first.home, root: first.root, pid: 12, alive: () => true });
+  await first.wall.advance(30_000);
+  assert.equal(second.watch.status().state, "held-elsewhere");
+  assert.equal(second.sent.length, 0, "nothing to watch: no line");
+  await writeFile(join(first.root, "desk", "levels.yml"), level("NVDA", "stop", 170, "cross_down"));
+  await first.wall.advance(5_000);
+  await until("the line", () => second.sent.length === 1);
+  await first.wall.advance(30_000);
+  assert.deepEqual(second.sent.map((x) => x.text), ["this face does not watch: another face (pid 11) holds the watch on this home"]);
+  await second.watch.dispose();
+  await first.watch.dispose();
+});
+
+test("an A-share calendar that fails inside the table is one log line", async () => {
+  const h = await harness({
+    start: "2026-12-01T02:00:00Z", files: { "desk/levels.yml": level("600519", "watch", 1400, "cross_down") },
+    calendars: { cn: fakeCalendar({}, "fake XSHG", (t) => bjDate(new Date(t))) },
+  });
+  await h.wall.advance(0);
+  await h.wall.advance(20_000);
+  assert.equal(h.watch.status().markets.cn.state, "no-calendar");
+  assert.deepEqual(h.logs.filter((l) => l.includes("cn calendar")), ["gravit-face: desk: watch cn calendar: 2026-12-01: the fake calendar has no 2026-12-01"]);
+  assert.deepEqual(h.sent, [], "no phone line: the table has no A-share calendar row");
+  await h.watch.dispose();
+});
+
+test("the desk state asks each market at most its watch cap, a symbol past it priced from its last poll or counted", async () => {
+  const names = Array.from({ length: 45 }, (_, i) => `A${i}`);
+  const h = await harness({
+    start: "2026-11-30T12:00:00Z",
+    files: {
+      "desk/levels.yml": names.slice(0, 40).map((x) => level(x, "watch", 10, "cross_down")).join(""),
+      "strategies/demo/levels.yml": names.slice(40).map((x) => level(x, "watch", 10, "cross_down")).join(""),
+    },
+  });
+  for (const x of names) h.source.tables.us.set(x, us(20, "2026-11-30T11:59:00Z"));
+  await h.wall.advance(0);
+  const view = JSON.parse((await h.watch.stateText()) ?? "null") as { prices?: string };
+  assert.deepEqual(h.source.calls.map((c) => c.ids.length), [WATCH_US_MAX]);
+  assert.equal(view.prices, "5 US symbols past the cap of 40 not priced");
+  await h.watch.dispose();
+});
+
+/** Holdings NVDA, a filing rule on holdings, SEC listing NVDA. */
+const FILING_FILES = {
+  "desk/holdings.yml": "- symbol: NVDA\n  qty: 10\n  avg_cost: 100\n",
+  "desk/rules.yml": "- id: filing\n  kind: filing\n  symbols: holdings\n  forms: [8-K]\n",
+};
+const decisions = async (h: Harness): Promise<unknown[][]> =>
+  (await h.alertRecords()).filter((r) => r.kind === "alert").map((r) => [r.decision, r.suppressed]);
+
+test("a filing suppressed window starts no cooldown, live or rebuilt from the ledger", async () => {
+  const sec = fakeSec();
+  const live = await harness({ start: "2026-11-30T14:00:00Z", files: FILING_FILES, edgar: { fetch: sec.fetch, userAgent: "ops@example.com" } });
+  await live.wall.advance(0);
+  await until("the seed", async () => {
+    try {
+      return (await readFile(join(deskDir(live.home), FILINGS_FILE), "utf8")).includes("seeded");
+    } catch {
+      return false;
+    }
+  }, 10_000);
+  sec.filings.push({ accession: "0001045810-26-000010", accepted: "2026-11-30T06:50:00.000Z" }, { accession: "0001045810-26-000011", accepted: "2026-11-30T07:10:00.000Z" });
+  await live.wall.advance(300_000);
+  await until("both records", async () => (await decisions(live)).length === 2, 10_000);
+  assert.deepEqual(await decisions(live), [["suppressed", "window"], ["send", undefined]]);
+  await live.watch.dispose();
+
+  const sec2 = fakeSec();
+  sec2.filings.push({ accession: "0001045810-26-000011", accepted: "2026-11-30T07:10:00.000Z" });
+  const base = join(TMP, `case-${++cases}`);
+  const home = join(base, "home");
+  await mkdir(deskDir(home), { recursive: true });
+  await writeFile(join(deskDir(home), FILINGS_FILE), `${JSON.stringify({ t: "2026-11-30T13:50:00.000Z", kind: "seeded", symbol: "NVDA", accessions: [] })}\n`);
+  await writeFile(join(deskDir(home), ALERTS_FILE), `${JSON.stringify({
+    t: "2026-11-30T13:55:00.000Z", kind: "alert", id: "a-000000000001", pass: "p-000000000001", date: "2026-11-30", key: "filing:filing:NVDA", market: "us",
+    symbol: "NVDA", label: "8-K", gap: false, quote: null, holding: null, plan: null, source: { file: "desk/rules.yml", index: 0 },
+    decision: "suppressed", suppressed: "window", annotate: false,
+    trigger: { type: "filing", rule: "filing", form: "8-K", accession: "0001045810-26-000010", accepted: null, filingDate: "2026-11-30", items: null, url: "u" },
+  })}\n`);
+  const rebuilt = await harness({ start: "2026-11-30T14:00:00Z", files: FILING_FILES, home, edgar: { fetch: sec2.fetch, userAgent: "ops@example.com" } });
+  await rebuilt.wall.advance(0);
+  await until("the alert", () => rebuilt.sent.length === 1, 10_000);
+  assert.ok(rebuilt.sent[0].text.startsWith("NVDA 8-K · accepted 07:10:00 ET"));
+  await rebuilt.watch.dispose();
+});
+
+test("no deliver goes out once dispose has begun", async () => {
+  let release!: (r: DeliverResult) => void;
+  const names = ["D0", "D1"];
+  const h = await harness({
+    start: "2026-11-30T15:00:00Z", files: { "desk/levels.yml": names.map((x) => level(x, "stop", 100, "cross_down")).join("") },
+    deliver: (_text, n) => (n === 0 ? new Promise<DeliverResult>((done) => { release = done; }) : { sent: [100 + n] }),
+  });
+  for (const x of names) h.source.tables.us.set(x, us(90, "2026-11-30T14:59:59Z"));
+  await h.wall.advance(0);
+  await until("the first send", () => h.sent.length === 1);
+  const disposed = h.watch.dispose();
+  release({ sent: [100] });
+  await disposed;
+  await new Promise((done) => setTimeout(done, 50));
+  assert.equal(h.sent.length, 1, "the second alert is not delivered after dispose began");
+  assert.deepEqual(h.posts, []);
+});
+
+test("dispose waits at most 2 s for a hanging post, then releases the lease", async () => {
+  const h = await harness({
+    start: "2026-11-30T15:20:45Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") },
+    post: () => new Promise<PostResult>(() => {}),
+  });
+  h.source.tables.us.set("NVDA", us(169, "2026-11-30T15:20:44Z"));
+  await h.wall.advance(0);
+  await until("the post", () => h.posts.length === 1);
+  const started = Date.now();
+  const keep = setInterval(() => {}, 100); // the bound's own timer is unref'd: hold the loop open while it runs
+  await h.watch.dispose();
+  clearInterval(keep);
+  const took = Date.now() - started;
+  assert.ok(took >= 1_900 && took < 4_000, `dispose took ${took} ms`);
+  assert.equal(h.watch.status().state, "stopped");
+  await assert.rejects(readFile(join(deskDir(h.home), WATCH_LEASE_FILE)));
+});
+
+test("filings past 60 symbols poll the first 60 and name the rest once", async () => {
+  const names = Array.from({ length: 61 }, (_, i) => `F${String(i).padStart(2, "0")}`);
+  const sec = fakeSec();
+  const h = await harness({
+    start: "2026-11-30T14:00:00Z",
+    files: {
+      "desk/levels.yml": names.slice(0, 40).map((x) => level(x, "watch", 10, "cross_down")).join(""),
+      "strategies/demo/levels.yml": names.slice(40).map((x) => level(x, "watch", 10, "cross_down")).join(""),
+      "desk/rules.yml": "- id: filing\n  kind: filing\n  symbols: levels\n  forms: [8-K]\n",
+    },
+    edgar: { fetch: sec.fetch, userAgent: "ops@example.com" },
+  });
+  await h.wall.advance(0);
+  await h.wall.advance(10_000);
+  await until("the line", () => h.lines(/filings cover/).length === 1);
+  await h.wall.advance(10_000);
+  assert.deepEqual(h.lines(/filings cover/), ["the watch's filings cover 60 symbols; not polled: F60"]);
+  assert.equal(h.watch.status().filings.symbols, 60);
+  await h.watch.dispose();
+});
+
+test("a filings poll still running at 120 s is aborted", async () => {
+  const fetch: EdgarFetch = (_url, init) => new Promise<Response>((_done, fail) => {
+    init.signal.addEventListener("abort", () => { fail(init.signal.reason); });
+  });
+  const h = await harness({ start: "2026-11-30T14:00:00Z", files: FILING_FILES, edgar: { fetch, userAgent: "ops@example.com" } });
+  await h.wall.advance(0);
+  await h.wall.advance(119_000);
+  assert.equal(h.watch.status().filings.lastError, undefined, "still under way");
+  await h.wall.advance(1_000);
+  await until("the abort", () => h.watch.status().filings.lastError !== undefined);
+  assert.equal(h.watch.status().filings.lastError, "NVDA: the filings poll ran past 120 s");
+  assert.equal(h.watch.status().filings.seeded, 0, "a failed symbol is not seeded");
+  await h.watch.dispose();
+});
+
+test("a level that expires at the ET date change is refused with its line", async () => {
+  const text = "- symbol: NVDA\n  kind: stop\n  price: 170\n  when: cross_down\n  plan: sell half\n  expires: 2026-11-30\n";
+  const h = await harness({ start: "2026-11-30T23:00:00Z", files: { "desk/levels.yml": text } });
+  await h.wall.advance(0);
+  assert.equal(h.watch.status().files.find((f) => f.file === "desk/levels.yml")?.entries, 1);
+  assert.equal(h.sent.length, 0);
+  h.wall.set("2026-12-01T05:01:00Z");
+  await h.wall.advance(5_000);
+  await until("the line", () => h.sent.length === 1);
+  assert.match(h.sent[0].text, /^desk\/levels\.yml: 0 loaded, 1 refused - #1 NVDA: .*2026-11-30/);
+  assert.equal(h.watch.status().state, "idle", "nothing left to watch");
+  await h.watch.dispose();
+});
+
+test("an edited plan keeps its level's cooldown", async () => {
+  const h = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") } });
+  h.source.tables.us.set("NVDA", us(171, "2026-11-30T15:20:44Z"));
+  await h.wall.advance(0);
+  h.source.tables.us.set("NVDA", us(169, "2026-11-30T15:21:00Z"));
+  await h.wall.advance(20_000);
+  await until("the alert", () => h.sent.length === 1);
+  const path = join(h.root, "desk", "levels.yml");
+  await writeFile(path, level("NVDA", "stop", 170, "cross_down").replace("plan for NVDA", "sell all of it"));
+  await utimes(path, new Date(), new Date(Date.now() + 10_000));
+  h.source.tables.us.set("NVDA", us(171, "2026-11-30T15:21:20Z"));
+  await h.wall.advance(20_000);
+  h.source.tables.us.set("NVDA", us(169, "2026-11-30T15:21:40Z"));
+  await h.wall.advance(20_000);
+  await until("the changed line", () => h.lines(/changed/).length === 1);
+  await h.wall.advance(0);
+  assert.equal(h.lines(/^NVDA/).length, 1, "the second crossing is inside the cooldown");
+  assert.equal(h.watch.status().markets.us.today.repeats, 1);
   await h.watch.dispose();
 });
