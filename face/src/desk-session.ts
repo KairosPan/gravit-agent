@@ -355,10 +355,24 @@ export interface CreateDeskAgentOptions {
   setup: MemberSetup;
 }
 
+/** dsh-session-persistence's service as the desk reads it (lib/types/index.d.ts `open`, `flush`; lib/types/handle.d.ts
+ * `SessionHandle.read`): a stored session's log opened for reading - `read(offset, length)` answers the events from
+ * `offset`, at most `length` of them, and none past the end; the handle is closed by its `Symbol.asyncDispose` - and
+ * `flush`, which resolves once every append made so far is durable. */
+export interface DeskSessionPersistenceLike {
+  open(id: string, access: "read"): Promise<{
+    read(offset?: number, length?: number): Promise<{ events: readonly EventLike[] }>;
+    [Symbol.asyncDispose](): Promise<void>;
+  }>;
+  flush(): Promise<void>;
+}
+
 /** What the desk session reads of the booted ROOT context, stated structurally as src/room.ts states its
  * own: the agent registry, the preset join and the permission fact. `create` and `resume` answer
  * dsh-agent's `AgentHandle`, `{ agent, dispose }` - the disposer only its holder has (dsh-agent
- * lib/types/index.d.ts:129-146); `get` answers a bare agent, someone else's to dispose. */
+ * lib/types/index.d.ts:129-146); `get` answers a bare agent, someone else's to dispose. `sessionPersistence`, the
+ * session logs on disk, is what a keyed post checks and flushes (src/desk-conversation.ts); src/desk.ts hands the
+ * booted context's to a slice that lacks it, and a post with no key never reads it. */
 export interface DeskSessionCtxLike {
   agents: {
     get(id: string): AgentLike | undefined;
@@ -367,6 +381,34 @@ export interface DeskSessionCtxLike {
   };
   agentPresets: RoomContextLike["agentPresets"];
   permissionPresets: RoomContextLike["permissionPresets"];
+  sessionPersistence?: DeskSessionPersistenceLike;
+}
+
+/** How many events {@link readSessionEvents} asks for at a time. */
+const LOG_PAGE = 512;
+
+/**
+ * Session `sessionId`'s log as it is on disk now: opened for reading and read in pages of {@link LOG_PAGE} until a
+ * page comes back empty, then closed. A keyed post's seen set is built from it (src/desk-conversation.ts).
+ * @param ctx - the desk session's slice of the root context, its `sessionPersistence` with it.
+ * @param sessionId - the stored session to read.
+ * @returns every event of the log, in order.
+ * @throws when the slice has no `sessionPersistence`, and when the open or a read rejects.
+ */
+export async function readSessionEvents(ctx: DeskSessionCtxLike, sessionId: string): Promise<EventLike[]> {
+  const persistence = ctx.sessionPersistence;
+  if (persistence === undefined) throw new Error("this face has no session persistence");
+  const handle = await persistence.open(sessionId, "read");
+  try {
+    const events: EventLike[] = [];
+    for (;;) {
+      const page = await handle.read(events.length, LOG_PAGE);
+      if (page.events.length === 0) return events;
+      events.push(...page.events);
+    }
+  } finally {
+    await handle[Symbol.asyncDispose]();
+  }
 }
 
 /** What {@link ensureDeskSession} and {@link createDeskAgent} need. `root` is the repository root, `home`

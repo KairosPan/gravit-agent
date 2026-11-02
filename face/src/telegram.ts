@@ -16,12 +16,18 @@
  * to dispose. Five commands are the bridge's own: /status, /pause [duration], /mute <duration>, /new and
  * /stop, in any case, with or without the bot's name after them; any other /word is text for Gravit. There
  * is no /resume and no /unmute: the phone only ever makes the desk quieter (§5.8). A message with no text
- * gets one line. A post or a /new that takes more than 30 s is answered that the desk is slow, and the
- * bridge goes on to the next update; a refusal that comes later is still answered when it does.
+ * gets one line. A post or a /new that takes more than 30 s is answered that the desk is slow; a refusal that
+ * comes later is still answered when it does.
  *
- * THE OFFSET. After each update, whatever happened to it, the offset is set past it and stored in
- * `telegram.offset`, so an update is taken once across restarts, and one the bridge cannot use is never
- * delivered again. Every update a poll answers is taken, in order - one numbered below the stored offset
+ * ONE TEXT, ONE TURN (spec §16 H3). A text is posted under its update's key, `telegram:<update_id>`
+ * ({@link deliveryKey}): the conversation sends it as a message with that id, answers a key the desk session
+ * already holds as a duplicate, and answers only once the session's log is flushed.
+ *
+ * THE OFFSET. Once an update is taken - a text's post settled, however long it took and whatever the slow line
+ * said first; a command answered; anything else handled or dropped - the offset is set past it and stored in
+ * `telegram.offset`; the next update waits for that. So a crash before the desk holds a text on disk leaves it
+ * for Telegram to deliver again, and the text delivered again is answered once; an update the bridge cannot use
+ * is never delivered again. Every update a poll answers is taken, in order - one numbered below the stored offset
  * too, with one line: after about a week with no update Telegram may number them afresh, and passing those
  * over would leave the phone unheard while the status read healthy.
  *
@@ -87,7 +93,8 @@ const BACKOFF_FIRST_MS = 5_000;
 const BACKOFF_MAX_MS = 60_000;
 /** A conflict, or a failed poll, is recorded at most this often. */
 const RECORD_EVERY_MS = 60_000;
-/** How long an update's post or /new may take before the bridge answers that the desk is slow and goes on. */
+/** How long an update's post or /new may take before the bridge answers that the desk is slow; it still waits for
+ * it before the offset moves on. */
 const POST_BOUND_MS = 30_000;
 /** How long {@link BridgeHandle.dispose} waits for the update in hand and the sends under way. */
 const DISPOSE_MS = 2_000;
@@ -179,6 +186,10 @@ export function splitMessage(text: string, max = PART_MAX): string[] {
   if (rest !== "") parts.push(rest);
   return parts;
 }
+
+/** The key a text from Telegram update `updateId` is posted under: the id of the desk message it becomes, the same
+ * however often Telegram delivers it. */
+export const deliveryKey = (updateId: number): string => `telegram:${updateId}`;
 
 /** A command the bridge answers itself, and what followed it. */
 export type Command = { cmd: "status" | "pause" | "mute" | "new" | "stop"; arg?: string };
@@ -642,7 +653,8 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
   };
 
   /** Wait up to 30 s for `line`, the answer to a post or a `/new`: past that, answer that the desk is slow
-   * and leave `line` to be answered when it settles - an empty one, as an opened turn's is, says nothing. */
+   * and answer `line` when it settles - an empty one, as an opened turn's is, says nothing. Resolves once `line`
+   * has settled, however long that takes: the update is taken only then (the module header's THE OFFSET). */
   const answerWithin = async (line: Promise<string>): Promise<void> => {
     const answered = await bounded(POST_BOUND_MS, line);
     if (answered.settled) {
@@ -650,9 +662,11 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
       return;
     }
     await reply(SLOW);
-    void line.then((late) => (late === "" ? undefined : reply(late)), () => undefined);
+    const late = await line.catch(() => "");
+    if (late !== "") await reply(late);
   };
 
+  /** Handle one update; resolves once it is taken - a text's post or a `/new` settled, a command answered. */
   const handle = async (update: TgUpdate): Promise<void> => {
     const message = update.message;
     const chat = message?.chat;
@@ -679,10 +693,12 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     }
     const { date } = message;
     const at = typeof date === "number" && Number.isSafeInteger(date) && date > 0 ? date * 1_000 : undefined;
+    const id = update.update_id;
     const posted = conversation.post({
       text: message.text,
       source: { kind: "telegram", ...(at === undefined ? {} : { at }) },
       message: { kind: "telegram", from: operatorId, chat: operatorId, messageId },
+      ...(typeof id === "number" && Number.isSafeInteger(id) && id >= 0 ? { key: deliveryKey(id) } : {}),
     });
     await answerWithin(posted.then(
       (result: PostResult) => ("refused" in result ? result.line : ""),
@@ -693,8 +709,9 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     ));
   };
 
-  /** Take one update, whatever it is, then set the offset past it. An update numbered below the stored
-   * offset is taken too - Telegram has numbered its updates afresh - with one line. */
+  /** Take one update, whatever it is - waiting for its post to settle, however long - then set the offset past it.
+   * An update numbered below the stored offset is taken too - Telegram has numbered its updates afresh - with one
+   * line. */
   const take = async (raw: unknown): Promise<void> => {
     const update = (raw !== null && typeof raw === "object" ? raw : {}) as TgUpdate;
     const id = update.update_id;

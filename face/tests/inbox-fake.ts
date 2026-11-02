@@ -12,9 +12,11 @@
  * wakes once the cut turn has unwound. */
 import type { MessageLike } from "../src/room-rules.ts";
 
-/** dsh-agent's `Agent.inbox`, the slice the desk uses: the next-turn list, and removing one message from it. */
+/** dsh-agent's `Agent.inbox`, the slice the desk uses: the next-turn and next-step lists, and removing one message
+ * from either. */
 export interface InboxLike {
   readonly nextTurn: readonly MessageLike[];
+  readonly nextStep: readonly MessageLike[];
   remove(id: string): boolean;
 }
 
@@ -22,6 +24,8 @@ export interface InboxLike {
 export class InboxModel {
   /** The next-turn list: the messages waiting for turns of their own, oldest first. */
   readonly pending: MessageLike[] = [];
+  /** The next-step list: steered messages the turn under way takes at its next step. A test fills it itself. */
+  readonly steps: MessageLike[] = [];
   /** Whether a turn is under way, and whether a cancel has aborted it. */
   running = false;
   aborted = false;
@@ -31,15 +35,22 @@ export class InboxModel {
 
   constructor() {
     const pending = this.pending;
+    const steps = this.steps;
     this.inbox = {
       get nextTurn(): readonly MessageLike[] {
         return [...pending];
       },
+      get nextStep(): readonly MessageLike[] {
+        return [...steps];
+      },
       remove(id: string): boolean {
-        const at = pending.findIndex((message) => message.id === id);
-        if (at < 0) return false;
-        pending.splice(at, 1);
-        return true;
+        for (const list of [pending, steps]) {
+          const at = list.findIndex((message) => message.id === id);
+          if (at < 0) continue;
+          list.splice(at, 1);
+          return true;
+        }
+        return false;
       },
     };
   }

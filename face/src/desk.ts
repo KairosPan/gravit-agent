@@ -80,7 +80,7 @@ import type { IncomingMessage } from "node:http";
 import { basename, extname, join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { createDeskConversation, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
-import type { DeskClock, DeskSessionDeps, SessionEventsOn } from "./desk-session.ts";
+import type { DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSessionPersistenceLike, SessionEventsOn } from "./desk-session.ts";
 import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskGuardCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet, fencedPost, HttpError, isTrustedDataRequest } from "./http.ts";
@@ -1509,6 +1509,23 @@ function busOf(ctx: DeskConversationCtxLike): SessionEventsOn {
   };
 }
 
+/** The desk session's slice of `ctx` with the session persistence a keyed post needs (src/desk-conversation.ts):
+ * `ctx` itself when it carries `sessionPersistence`, or when it has no `get` that answers one; else a slice that
+ * reads `ctx`'s members through it and carries the persistence `ctx.get("sessionPersistence")` answered - main.ts
+ * reads the booted context's services through `get`. */
+function withPersistence(ctx: DeskSessionCtxLike): DeskSessionCtxLike {
+  if (ctx.sessionPersistence !== undefined) return ctx;
+  const get = (ctx as { get?: (name: string) => unknown }).get;
+  const persistence = typeof get === "function" ? get.call(ctx, "sessionPersistence") as DeskSessionPersistenceLike | undefined : undefined;
+  if (persistence === undefined) return ctx;
+  return {
+    get agents() { return ctx.agents; },
+    get agentPresets() { return ctx.agentPresets; },
+    get permissionPresets() { return ctx.permissionPresets; },
+    sessionPersistence: persistence,
+  };
+}
+
 /** What {@link installDesk} hands back. `bootedAt` is when this run began, in ms since the epoch;
  * `ready` settles once the `boot` event is written or its failure logged, and never rejects;
  * `conversation` is the desk session's owner (src/desk-conversation.ts), present only when the
@@ -1674,7 +1691,7 @@ export function installDesk(
   const { root, route, sessionCtx, installModelSelection } = deps;
   const wiring = root === undefined || route === undefined || sessionCtx === undefined || installModelSelection === undefined
     ? undefined
-    : { root, sessionCtx, session: { ctx: sessionCtx, root, home, route, installModelSelection, now, log }, on: busOf(sessionCtx) };
+    : { root, sessionCtx, session: { ctx: withPersistence(sessionCtx), root, home, route, installModelSelection, now, log }, on: busOf(sessionCtx) };
   const conversation = wiring === undefined
     ? undefined
     : createDeskConversation({

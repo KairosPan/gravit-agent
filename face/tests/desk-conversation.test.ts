@@ -124,6 +124,12 @@ class FakeDeskTree {
   gate: Promise<void> | undefined;
   /** When set, every agent made has dsh's inbox and wake ({@link FakeDeskAgent.model}). */
   inboxes = false;
+  /** Each session's durable log as dsh-session-persistence reads it back; a test fills it. */
+  readonly logs = new Map<string, EventLike[]>();
+  /** What was asked of the persistence, in order: `open <id> <access>`, `read <offset>`, `close` and `flush`. */
+  readonly persisted: string[] = [];
+  /** When set, `flush` waits for it. */
+  flushGate: Promise<void> | undefined;
 
   readonly install = (_agentCtx: AgentCtxLike, _ref: ModelSelectionRefLike): (() => void) => () => {};
 
@@ -160,6 +166,23 @@ class FakeDeskTree {
     permissionPresets: {
       set: (session, name) => { this.stored.set(session.id, name); },
       current: (session) => this.stored.get(session.id) ?? "read-only",
+    },
+    sessionPersistence: {
+      open: async (id, access) => {
+        this.persisted.push(`open ${id} ${access}`);
+        const log = this.logs.get(id) ?? [];
+        return {
+          read: async (offset = 0, length = log.length) => {
+            this.persisted.push(`read ${offset}`);
+            return { events: log.slice(offset, offset + length) };
+          },
+          [Symbol.asyncDispose]: async () => { this.persisted.push("close"); },
+        };
+      },
+      flush: async () => {
+        this.persisted.push("flush");
+        if (this.flushGate !== undefined) await this.flushGate;
+      },
     },
   };
 
@@ -326,6 +349,130 @@ test("a phone's provenance line carries when the operator wrote it, dated when t
   const agent = h.tree.agents[0];
   assert.equal(agent.text(0), "[telegram · operator · 12:00 ET]\nwritten at noon");
   assert.equal(agent.text(1), "[telegram · operator · 2026-10-19 22:03 ET]\nwritten last night");
+});
+
+/* ---------- a keyed post: one phone text, one message, across a restart (spec §16 H3) ---------- */
+
+/** A keyed phone post, as the bridge sends one for Telegram update `update`. */
+const keyed = (h: Harness, text: string, key: string) =>
+  h.desk.post({ text, source: { kind: "telegram" }, message: PHONE as { kind: string } & Record<string, unknown>, key });
+/** A `user/message` event as the session's log keeps one, the message's id `id`. */
+const logged = (seq: number, id: string): EventLike => ({ type: "user/message", seq, data: { id, role: "user", content: say("x"), source: PHONE } });
+/** A promise and the hand that settles it. */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve: () => void = () => {};
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+/** The desk session, started, and its id. */
+async function started(h: Harness): Promise<string> {
+  await h.desk.start();
+  const { sessionId } = h.desk.current();
+  assert.ok(sessionId !== undefined, "the conversation holds its session");
+  return sessionId;
+}
+
+test("a keyed post builds its message with the key as its id", async () => {
+  const h = await harness();
+  const result = await keyed(h, "hi", "telegram:42");
+  const agent = h.tree.agents[0];
+  assert.deepEqual(result, { opened: true, sessionId: agent.id });
+  assert.equal(agent.followups[0].id, "telegram:42");
+  assert.equal(agent.followups[0].role, "user");
+  assert.equal(agent.text(0), "[telegram · operator · 14:03 ET]\nhi");
+  assert.deepEqual(agent.followups[0].source, PHONE);
+  assert.ok(Object.isFrozen(agent.followups[0]), "frozen, as dsh publishes a message");
+  assert.deepEqual(h.lines, []);
+});
+
+test("a key already in the session's log opens nothing and answers duplicate", async () => {
+  const h = await harness();
+  const sessionId = await started(h);
+  /* 600 events, read in pages of 512: the key sits in the second page */
+  const log: EventLike[] = [];
+  for (let seq = 0; seq < 600; seq++) log.push(seq === 550 ? logged(seq, "telegram:42") : { type: "step/start", seq, data: { turn: 1, step: seq } });
+  h.tree.logs.set(sessionId, log);
+  assert.deepEqual(await keyed(h, "again", "telegram:42"), { opened: true, sessionId, duplicate: true });
+  const agent = h.tree.agent(sessionId);
+  assert.equal(agent.followups.length, 0, "nothing sent again");
+  assert.deepEqual(h.tree.persisted, ["flush", `open ${sessionId} read`, "read 0", "read 512", "read 600", "close", "flush"],
+    "the log flushed, then read to its end in pages of 512, and flushed again before the answer");
+
+  /* a key the log does not hold opens its turn, and the log is not read again */
+  assert.deepEqual(await keyed(h, "new", "telegram:43"), { opened: true, sessionId });
+  assert.equal(agent.followups[0].id, "telegram:43");
+  /* a message the session logs from now on is seen too: the live `user/message` keeps the set current */
+  h.bus.emit(sessionId, "user/message", { id: "telegram:44", role: "user", content: say("x"), source: PHONE });
+  assert.deepEqual(await keyed(h, "seen live", "telegram:44"), { opened: true, sessionId, duplicate: true });
+  /* and one this conversation sent is seen at once, before any turn takes it */
+  assert.deepEqual(await keyed(h, "new, again", "telegram:43"), { opened: true, sessionId, duplicate: true });
+  assert.equal(agent.followups.length, 1);
+  assert.equal(h.tree.persisted.filter((p) => p.startsWith("open")).length, 1, "the log is read once per session");
+  assert.deepEqual(h.lines, []);
+});
+
+test("a key already waiting in the inbox opens nothing and answers duplicate", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  const agent = h.tree.agent(sessionId);
+  const model = agent.model;
+  assert.ok(model !== undefined);
+  const waiting = (id: string): MessageLike => ({ id, role: "user", content: say("x"), source: PHONE });
+  model.pending.push(waiting("telegram:42"));
+  model.steps.push(waiting("telegram:43"));
+  assert.deepEqual(await keyed(h, "queued", "telegram:42"), { opened: true, sessionId, duplicate: true }, "on the next-turn list");
+  assert.deepEqual(await keyed(h, "steered", "telegram:43"), { opened: true, sessionId, duplicate: true }, "on the next-step list");
+  assert.deepEqual(agent.followups, []);
+  assert.deepEqual(await keyed(h, "fresh", "telegram:44"), { opened: true, sessionId });
+  assert.deepEqual(model.pending.map((m) => m.id), ["telegram:42", "telegram:44"]);
+});
+
+test("a keyed post answers opened only once the persistence flush has resolved", async () => {
+  const h = await harness();
+  const sessionId = await started(h);
+  await keyed(h, "first", "telegram:41");
+  const gate = deferred();
+  h.tree.flushGate = gate.promise;
+  let answered: PostResult | undefined;
+  const posting = keyed(h, "second", "telegram:42").then((result) => { answered = result; });
+  const agent = h.tree.agent(sessionId);
+  await waitFor("the followup", () => agent.followups.length === 2);
+  await new Promise((done) => setTimeout(done, 20));
+  assert.equal(answered, undefined, "followed up, but not answered before the flush");
+  assert.equal(h.tree.persisted.at(-1), "flush");
+  gate.resolve();
+  await posting;
+  assert.deepEqual(answered, { opened: true, sessionId });
+});
+
+test("a keyed post whose flush fails still answers opened, with one line", async () => {
+  const h = await harness();
+  const sessionId = await started(h);
+  await keyed(h, "first", "telegram:41");
+  h.tree.flushGate = Promise.reject(new Error("EIO"));
+  h.tree.flushGate.catch(() => {});
+  assert.deepEqual(await keyed(h, "second", "telegram:42"), { opened: true, sessionId });
+  assert.equal(h.tree.agent(sessionId).followups.length, 2);
+  assert.deepEqual(h.lines, ["gravit-face: desk: the desk session's log could not be flushed (EIO); a crash before the next flush may lose this text"]);
+});
+
+test("an unkeyed post is built by createUserMessage as before", async () => {
+  const h = await harness();
+  assert.deepEqual(await post(h, "hi"), { opened: true, sessionId: h.tree.agents[0].id });
+  const message = h.tree.agents[0].followups[0];
+  assert.ok(message.id !== "" && !message.id.startsWith("telegram:"), "a fresh id of dsh's own");
+  assert.deepEqual(h.tree.persisted, [], "the log is neither read nor flushed");
+});
+
+test("a keyed post on a face with no session persistence refuses with the error line and opens nothing", async () => {
+  const h = await harness();
+  delete (h.tree.ctx as { sessionPersistence?: unknown }).sessionPersistence;
+  const result = await keyed(h, "hi", "telegram:42");
+  const line = "the desk could not open a turn: this face has no session persistence, so a phone text cannot be checked against the desk session's log";
+  assert.deepEqual(result, { refused: "error", line });
+  assert.deepEqual(h.tree.agents[0].followups, []);
+  assert.deepEqual(h.lines, [`gravit-face: desk: ${line}`]);
 });
 
 test("a paused desk refuses with the paused line and opens no turn", async () => {
