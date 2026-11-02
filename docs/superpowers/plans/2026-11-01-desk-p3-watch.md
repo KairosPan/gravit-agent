@@ -2,12 +2,10 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** The face watches the operator's price levels, urgent-event rules and US filings for US and A shares. It sends each alert to the phone itself, quoting the plan and naming the price's source and exchange time. A bounded desk turn then checks the plan, as a reply. Everything shows in the Markets screen's Desk view.
+**Goal:** The face watches the operator's price levels, urgent-event rules and US filings for US and A shares. It sends each alert to the phone itself, quoting the plan and naming the price's feed and exchange time. A bounded desk turn then checks the plan, as a reply. Everything shows in the Markets screen's Desk view.
 
 **Architecture:**
-- **Prices are polled; there is no stream (M4).**
-  - US: `UsQuoteSource.snapshot` (the Account's explore read, `src/us-quotes.ts`) every 20 s.
-  - A shares: `QuoteHub.snapshot` (`src/quotes.ts`, Tencent) every 15 s.
+- **Prices are polled; there is no stream (M4). Both markets are the Market part's reads (M11).** One source, `MarketQuoteSource.snapshot` (`src/market-quotes.ts`, Task 1), reads the Market through the face's proxy (`src/account-proxy.ts`): US symbols by its `explore` read, one a symbol, every 20 s; A shares by its `quotes` read, `pairs=china|<code>` twelve a read, every 10 s. The face holds no market wire of its own.
   - Each poll runs only inside its market's session window, from the XNYS calendar or the new XSHG table.
 - **The watch.** `src/watch.ts` reloads the book through `desk-book.ts`, judges each print with the pure evaluator in `watch-eval.ts`, and records every hit in `alerts.jsonl` through one chain. It sends the text from `alert-text.ts` through the conversation's `deliver`, then posts one annotation per pass, never awaited; the annotation's answer comes as a reply.
 - **Filings.** `src/edgar.ts` reads EDGAR in Node every 5 minutes, 07:00–20:00 ET on XNYS session days. Its symbols are the US ones only, and it reads nothing without `ALPHA_EDGAR_USER_AGENT` (M2).
@@ -15,16 +13,17 @@
 
 **Tech Stack:** Node 22, TypeScript strict via `tsx`, `node:test`; js-yaml 4.3.2 (`CORE_SCHEMA`); global `fetch` (Node 22) for EDGAR, injected everywhere it is tested; the gravit-ui client (plain ESM, fake-DOM tests); dsh 0.2.0-rc.2 unchanged. No dependency added, no Python.
 
-**Spec:** `docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` — §5.5–§5.10, §6, §7, §9, §12 as amended by **§15 (M1–M8), which wins where they disagree**. Binding beside it: `.superpowers/research/desk-p1-p4/controller-notes.md` (the P1 and P2 rulings, and the P3 rulings this plan keeps — see "Rulings carried"), and `replan-brief.md`'s M9 and M10.
+**Spec:** `docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` — §5.5–§5.10, §6, §7, §9, §12 as amended by **§15 (M1–M8, M11), which wins where they disagree**. Binding beside it: `.superpowers/research/desk-p1-p4/controller-notes.md` (the P1 and P2 rulings, and the P3 rulings this plan keeps — see "Rulings carried"), and `replan-brief.md`'s M9 and M10.
 
-**Base:** `feat/desk-p1-p4` at `bae0b7f2` (main merged, P0–P2 re-landed, the desk's US quotes from the Account). Recurring facts:
+**Base:** `feat/desk-p1-p4` at `d3b66764` (main `7f15917f` merged: the face's own market wire is gone, every market is the Account's Market part read through `src/account-proxy.ts`; P0–P2 on that tree, the desk's US quotes already from the proxy's `explore` read). Recurring facts:
 - the outlet's `send(text, { replyTo })` resolves `{ sent: number[]; queued?: true } | { queued: true }`;
 - `DeskConversationDeps.deadlineFor(kind)` already exists;
-- `installDesk`'s `hub` is a `UsQuoteSource`, and `registerQuoteRoutes` builds the A-share hub itself today.
+- `installDesk`'s `hub` is a `UsQuoteSource` from `src/us-quotes.ts` (`accountUsQuotes` over the proxy's `explore` reader): Task 1 renames all three for both markets (M11), and no later task uses the old names;
+- the proxy's `quotes` route (`ACCOUNT_QUERY.quotes = ["pairs"]`, `ACCOUNT_TTL_MS.quotes` 3 s) serves `GET /api/account/quotes?pairs=china|<code>,…`, at most twelve pairs a read (the Account's own cap), each answered row `{ venue, symbol, market?, refusal? }` with `market.cn.phase` one of `trading | midday | closed`.
 - **"The old Task N"** means Task N of `docs/superpowers/plans/2026-10-20-desk-p3-watch.md` (superseded, kept): its text binds where this plan says "as the old Task N", except for what this plan changes or drops.
 
 **Done (§15 M6, P3) — the operator's drill, written by Task 13:**
-- one real level crossing, on a US symbol and on an A-share symbol, reached the phone with its plan within one poll interval plus 10 s (US 30 s, A shares 25 s), read off the Desk view's `latencyMs` (from the quote's `as_of` to the send resolving);
+- one real level crossing, on a US symbol and on an A-share symbol, reached the phone with its plan within one poll interval plus 10 s (US 30 s, A shares 20 s), read off the Desk view's `latencyMs` (from the quote's `as_of` to the send resolving);
 - an annotation followed inside 90 s, as a reply;
 - one live EDGAR filing alert, or a recorded `suppressed:` filing line, arrived.
 
@@ -50,23 +49,23 @@ Each ends with the cost if wrong.
 1. **What fires** (old 1, kept). A level or a `move_pct` key fires on a crossing between two judged observations of one session. It also fires once, labelled `gap`, when already past at its first judged observation of a session and not yet alerted for that session. A `gap` rule judges only that first observation, inside 30 minutes of its market's open. Cost: a `move_pct` and a `gap` rule on one symbol both fire on a large opening gap.
 2. **What is judged (M5).**
    - **US.** A print whose `as_of` lies in `[open, close)` of the XNYS session of its own ET date.
-   - **A shares.** A print whose `market_status` is `open`, whose Beijing date is the session's, and whose Beijing clock lies in `[09:30, 11:30)` or `[13:00, 15:00)`. So the 09:15–09:25 auction and the midday break are never judged.
+   - **A shares.** A print whose `cn.phase` is `trading` (the Market's own phase, M5), whose Beijing date is the session's, and whose Beijing clock lies in `[09:30, 11:30)` or `[13:00, 15:00)`. So the 09:15–09:25 auction and the midday break are never judged. A print whose `quote_status` is `stale` (the proxy re-serving a kept answer) or `unavailable` is never judged, in either market.
    - **The poll windows.** Each market is polled from 10 minutes before its open to 1 minute after its close, and not at all on a closed day.
-   - **Past the XSHG table** (after 2026-12-31) the A-share window is 09:20–15:01 Beijing on weekdays, and Tencent's word alone decides, with one line a day.
+   - **Past the XSHG table** (after 2026-12-31) the A-share window is 09:20–15:01 Beijing on weekdays, and the Market's phase alone decides, with one line a day.
 
    Cost: a print after the close reaches the operator only through `desk_quotes` or the brief.
 3. **Cadence (M4).**
-   - **US:** `WATCH_US_POLL_MS = 20_000`. That is the proxy's explore cache (`ACCOUNT_TTL_MS.explore`), so polling faster only re-reads the cache. It is also the Account page's own explore cadence. The reads go through `accountUsQuotes` at `ACCOUNT_QUOTES_CONCURRENCY` (6).
-   - **A shares:** `WATCH_CN_POLL_MS = 15_000`. That is the hub's own poll floor, and each poll is one batched Tencent GET.
-   - **Caps:** `WATCH_US_MAX = 40`, because the proxy keeps 64 explore answers (`ACCOUNT_CACHE_KEYS`) and the Markets screen needs the rest. `WATCH_CN_MAX = 100` (`QUOTE_LIMIT`). The symbols past a cap are named on the phone once per distinct set, holdings first, then levels, then rule symbols.
+   - **US:** `WATCH_US_POLL_MS = 20_000`. That is the proxy's explore cache (`ACCOUNT_TTL_MS.explore`), so polling faster only re-reads the cache. It is also the Markets screen's own explore cadence. The reads go through the one source at `QUOTES_CONCURRENCY` (6).
+   - **A shares:** `WATCH_CN_POLL_MS = 10_000`: two of the Account's 5 s China quote lives, so each poll is a fresh read while the Markets screen's own 5 s reads share the Account's cache; the proxy's `quotes` cache is 3 s. A poll is `ceil(n / CN_QUOTES_BATCH)` reads of twelve pairs, the Account's cap on one `quotes` read.
+   - **Caps:** `WATCH_US_MAX = 40`, because the proxy keeps 64 explore answers (`ACCOUNT_CACHE_KEYS`) and the Markets screen needs the rest. `WATCH_CN_MAX = 60`: five reads a poll, five of the proxy's 64 `quotes` keys. The symbols past a cap are named on the phone once per distinct set, holdings first, then levels, then rule symbols.
    - **The tick:** `WATCH_TICK_MS = 5_000` decides which polls are due.
 
-   Cost: a US crossing can wait up to 20 s for the cache, plus the reads.
-4. **No server subscription on the hub (a change from M4's wording).** The watch calls `QuoteHub.snapshot` on its own cadence and adds nothing to the hub.
-   - **Why.** `snapshot` makes the same one Tencent request, holds a client slot only while it runs (`QUOTE_CLIENT_LIMIT`), and needs no listener isolation. A `subscribe` would take one of the eight browser slots and run at the hub's 30 s default.
-   - **What changes.** Only `main.ts`, which now owns the hub and hands it to both `registerQuoteRoutes` and `installDesk`.
+   Cost: a US crossing can wait up to 20 s for the cache, plus the reads; an A-share one up to 10 s plus five reads.
+4. **One source for both markets (M4 re-based, M11).** `src/us-quotes.ts` becomes `src/market-quotes.ts`, and `accountUsQuotes` becomes `marketQuotes`, grown to A shares through the proxy's `quotes` reader beside its `explore` reader; `installDesk`, the tools, the brief and the schedule take it as `quotes: MarketQuoteSource`. There is no second type, no hub and nothing of the face's own.
+   - **Why.** The face's A-share wire is gone with main `7f15917f`; the Market part answers every market the same way, and the operator's word (M11) is that the data interfaces are the Market's, named so.
+   - **Stale answers.** A body the proxy re-serves stale (`stale: true`) marks every quote of that read `quote_status: "stale"`; the watch judges `live` and `delayed` prints only.
 
-   Cost: none measured; a later need for a pushed A-share price adds `subscribeServer` then.
+   Cost: a face with no Account read has no price in either market, said once per ET date per market (`noPrices`).
 5. **Repeats, gates, batch, annotation** (old 3–6, kept).
    - **Cooldowns.** A price hit inside its cooldown is counted, not recorded. A filing hit inside its cooldown is recorded `suppressed: cooldown`.
    - **Gates.** They run OFF, then MUTE, then the cap. The budget stops only annotations. A suppressed alert is never annotated.
@@ -87,7 +86,7 @@ Each ends with the cost if wrong.
    - **No contact.** Without `ALPHA_EDGAR_USER_AGENT`, filings are `off` and nothing is fetched.
 
    Cost: a `Z` that is true UTC shifts times by 4–5 hours.
-10. **Halts stay refused, with a new reason:** `halts need a trading-status feed; neither the Account's read nor Tencent's carries one`. Cost: none.
+10. **Halts stay refused, with a new reason:** `halts need a trading-status feed; the Market's read carries none`. Cost: none.
 11. **The brief stays US and the desk's own book (M8, the P2 fix wave's I3).**
     - It prices only US entries and counts the A-share ones in `aShares: { holdings; levels }`.
     - `notYet` becomes `scope`: `desk/ only; A shares and each strategy's levels.yml are the watch's and their reports'`.
@@ -95,13 +94,15 @@ Each ends with the cost if wrong.
     - `desk/STANDING.md` changes, so the armed `preclose` is `refused-hash` until `npm run desk -- rearm preclose`.
 
     Cost: one rearm.
-12. **`desk_quotes` speaks both markets (M1).** Six digits are asked of the A-share hub, a ticker of the Account. Each line names its source. Cost: the tool's schema grows by one pattern.
+12. **`desk_quotes` speaks both markets (M1).** Six digits and tickers go to the one source in one snapshot, which asks the Market's `quotes` read for the former and its `explore` read for the latter. Each line names the quote's feed and exchange time (`TENCENT 14:03:12 Beijing`, `ROBINHOOD 10:21:03 ET`), never a process (M11). Cost: the tool's schema grows by one pattern.
 13. **Names.**
-    - `installDesk` gains `cnHub` and `watchRow`, and `DeskHandle.watchRow` resolves the watch's handle.
+    - `installDesk`'s `hub` becomes `quotes` (Task 1) and it gains `watchRow` (Task 9); `DeskHandle.watchRow` resolves the watch's handle.
     - `ALERT_DEADLINE_MS = 90_000` lives in `desk.ts`, with `alertDeadlineMs` as the smokes' seam.
     - Ids are `a-`, `p-` or `b-` plus 12 lowercase hex characters.
 
     Cost: none.
+14. **Names are the Market's (M11; the operator, 2026-11-01: "我并不是很喜欢用account的说法，数据接口统一到market部分").** The desk's data interfaces — quotes in both markets, a market's phase and calendar — are the Market part's and are named so in code, copy and documents: `market-quotes.ts`, `MarketQuoteSource`, `marketQuotes`, "the Market's read"; a quote's `source` is `market` and its stamp names its feed. No desk sentence calls a price's source "the Account"; the word stays for the wallet half — the seat, orders, limits, Guard, cards — and for the process the proxy reaches (`FACE_ACCOUNT_URL`, the `mcp-account` row), which is what it is. This is the controller's reading of the operator's sentence, overturnable at the review. Cost: one rename across the desk's P2 files and tests, in Task 1.
+15. **Built as asked, pending the operator's answers** (the five questions of `replan-report.md` §3, unanswered at this revision). Each is built as this plan reads it, and the review may flip any with one ruling: the Desk view is a tab in Markets (M1); A-share alerts are sent in New York's night, the mute (Task 4) being the operator's lever; the US floor is the 20 s explore cache plus the reads; an unquoted six-digit symbol is refused, not coerced (M3); P4's drill strategy is `lunhui-s01-repair`. Cost: a flipped answer re-opens one task's copy or one test.
 
 ## Global Constraints
 
@@ -112,11 +113,11 @@ Each ends with the cost if wrong.
   - The watch appends `alerts.jsonl`, `filings.jsonl` and its events each through one `appendChain`.
 - **YAML.** `rules.yml` is read through `readDeskYaml` (CORE_SCHEMA). Every rule has `kind:` (`move_pct`, `gap`, `filing`) and `symbols:`, never `on:`. An unknown key or kind is refused.
 - **No live network in any test (P3-18, M2).**
-  - No test, smoke or browser check reaches the SEC, the Account or Tencent.
+  - No test, smoke or browser check reaches the SEC or the Account, and so no market host (`tests/no-market-hosts.test.ts` pins the sources).
   - `edgar.ts` takes `fetch` as a dependency; the watch's tests and the smoke pass fakes.
-  - The smoke and the browser check boot without `ALPHA_EDGAR_USER_AGENT`, with `FACE_ACCOUNT_URL=http://127.0.0.1:9`, and with no A-share symbol in any book file the real hub would poll.
+  - The smoke and the browser check boot without `ALPHA_EDGAR_USER_AGENT` and with `FACE_ACCOUNT_URL=http://127.0.0.1:9`, so no read leaves the host; their sources are fakes.
 - **Starting (P3-19, reworded).**
-  - The watch starts only when `installDesk` is given `watchRow` (main.ts passes `{}`), with the desk conversation and at least one quote source. A face without `cnHub` watches US only, and one without a US source watches A shares only. A source whose `unavailable` is set counts as absent.
+  - The watch starts only when `installDesk` is given `watchRow` (main.ts passes `{}`), with the desk conversation and a `quotes` source whose `unavailable` is unset. One source serves both markets, so a face with no Account read watches neither.
   - With nothing to watch, it asks no calendar, polls nothing and sends no line.
   - P1's and P2's tests and smokes stay green, unchanged.
 - **Module weight.** Importing `src/desk.ts` or `scripts/desk.ts` loads none of `watch.ts`, `watch-eval.ts`, `alert-text.ts`, `edgar.ts`, `filings.ts` or `xshg-clock.ts`. `installDesk` imports `./watch.ts` on first use.
@@ -130,8 +131,8 @@ Each ends with the cost if wrong.
   | a file loaded with refusals | `<file>: <n> loaded, <k> refused - #<i>[ <SYMBOL>]: <reason>; …` (cut at 500 characters with `…`) |
   | a file changed, nothing refused | `<file> changed (sha256 <8 hex>): <n> loaded` |
   | over a market's cap | `the watch covers <n> <US | A-share> symbols; not watched: <SYMBOL>, …` (cut at 500) |
-  | a US source unavailable at a poll's first failure of the day | `the watch has no US prices today: <reason>` |
-  | A shares past the XSHG table (once per Beijing date) | `the A-share calendar ends <last date>; the watch judges A shares on Tencent's word alone until face/src/xshg-clock.ts is extended` |
+  | the source failing at a market's first failed poll of the day | `the watch has no <US | A-share> prices today: <reason>` |
+  | A shares past the XSHG table (once per Beijing date) | `the A-share calendar ends <last date>; the watch judges A shares on the Market's phase alone until face/src/xshg-clock.ts is extended` |
   | no XNYS calendar (once per ET date) | `the watch is off for US shares today: the market calendar failed (<error>)` |
   | held elsewhere (once per ET date) | `this face does not watch: another face (pid <n>) holds the watch on this home` |
   | filings with no contact (once per ET date, only with a filing rule) | `the watch's filings are off: set ALPHA_EDGAR_USER_AGENT to a contact email (SEC asks for one)` |
@@ -151,41 +152,71 @@ Each ends with the cost if wrong.
 
 1. **A restart, a crash, or a second face.** Expected: no second `gap`; cooldowns and the hour's count kept; a dead face's lease taken over. Tests: Task 5 "rebuildDay restores the day across both markets' session dates"; Task 9 "a restart over the same ledger fires no second gap" and "a stale lease is taken over".
 2. **A burst at the open while an annotation is slow.** Expected: twelve levels past in one poll give twelve records, six sends in order, six held for the next hour, and one `[alerts · 6 · …]` post; a hanging post never delays the next alert. Tests: Task 5 "a burst of twelve gap hits sends six and holds six"; Task 9 "an annotation post that hangs 5 s does not delay the next pass's alert".
-3. **An A-share print in the auction, at lunch, or on a holiday.** Expected: never judged. A Tencent `open` at 09:20 Beijing, or at 11:45, makes no hit, and a closed XSHG day polls nothing. Tests: Task 5 "an A-share print is judged only inside 09:30-11:30 and 13:00-15:00 Beijing with Tencent open"; Task 9 "a closed XSHG day polls no A share".
-4. **The Account slow, refusing or busy.** Expected: a 429 or an unreachable Account makes no hit and no thrown tick. A delayed feed's alert says its feed; one line a day says the US prices are gone. Tests: Task 9 "the Account busy or unreachable sends one line a day and judges nothing"; Task 7 "a delayed US quote's stamp names its feed".
+3. **An A-share print in the auction, at lunch, or on a holiday.** Expected: never judged. A `trading` phase at 09:20 Beijing, or at 11:45, makes no hit, and a closed XSHG day polls nothing. Tests: Task 5 "an A-share print is judged only inside 09:30-11:30 and 13:00-15:00 Beijing with the phase trading"; Task 9 "a closed XSHG day polls no A share".
+4. **The Market's read slow, refusing or busy.** Expected: a 429 or an unreachable Account makes no hit and no thrown tick. A delayed feed's alert says its feed; one line a day per market says its prices are gone. Tests: Task 9 "the Market's read busy or unreachable sends one line a day per market and judges nothing"; Task 7 "a delayed US quote's stamp names its feed".
 5. **A levels file edited while the face runs, or a six-digit symbol typo.** Expected: the next tick reloads it. `60051` is refused as a symbol; an edited plan keeps its cooldown; a broken edit keeps the last good load. Tests: Task 1 "marketOf reads six digits as an A share and refuses five"; Task 9 "levels.yml edited while the face runs is reloaded on the next tick".
 
 ---
 
-### Task 1: Two markets in the book, `desk_quotes` and the brief
+### Task 1: Two markets in the book, the Market's one quote source, `desk_quotes` and the brief
 
 **Files:**
-- Modify: `face/src/desk-book.ts`, `face/src/desk-tools.ts`, `face/src/desk.ts` (`installDesk`'s `cnHub`, passed to the tools only), `face/src/brief.ts`, `face/src/main.ts`, `desk/levels.example.yml`
-- Test: `face/tests/desk-book.test.ts`, `face/tests/desk-tools.test.ts`, `face/tests/brief.test.ts`
+- Rename (`git mv`): `face/src/us-quotes.ts` → `face/src/market-quotes.ts`; `face/tests/us-quotes.test.ts` → `face/tests/market-quotes.test.ts`
+- Modify: `face/src/account-proxy.ts` (the `quotes` reader beside `explore`), `face/src/desk-book.ts`, `face/src/desk-tools.ts`, `face/src/desk.ts` (`installDesk`'s `hub` becomes `quotes`), `face/src/brief.ts`, `face/src/schedule.ts` (`createDeskSchedule`'s `hub` becomes `quotes`), `face/src/main.ts`, `face/scripts/schema-sizes.ts`, `desk/levels.example.yml`
+- Test: `face/tests/market-quotes.test.ts`, `face/tests/account-proxy.test.ts`, `face/tests/desk-book.test.ts`, `face/tests/desk-tools.test.ts`, `face/tests/brief.test.ts`; renamed in place, behaviour unchanged: `desk.test.ts`, `desk-guard.test.ts`, `firing.test.ts`, `desk-smoke.test.ts`, `telegram-smoke.test.ts`, `schedule-smoke.test.ts`
 
 **Interfaces:**
-- Consumes: `SYMBOL_RE`, `loadLevels`, `loadHoldings`, `Level`, `Holding` (desk-book.ts); `QuoteHub`, `createQuoteHub`, `registerQuoteRoutes` (quotes.ts); `UsQuoteSource` (us-quotes.ts); `BriefDeps`, `Brief` (brief.ts); `DeskToolDeps` (desk-tools.ts).
+- Consumes: `SYMBOL_RE`, `loadLevels`, `loadHoldings`, `Level`, `Holding` (desk-book.ts); `AccountAnswer`, `AccountRouteRead`, `registerAccountProxy`, `ACCOUNT_QUERY`, `ACCOUNT_TTL_MS` (account-proxy.ts); at the base, `UsQuoteIdentity`, `UsLiveQuote`, `UsQuotePayload`, `UsQuoteSource`, `accountUsQuotes`, `unwiredUsQuotes`, `NO_US_QUOTES`, `ACCOUNT_QUOTES_CONCURRENCY` (us-quotes.ts); `BriefDeps`, `Brief` (brief.ts); `DeskToolDeps`, `quoteTime` (desk-tools.ts); `HttpError`.
+- Produces, `account-proxy.ts`: `registerAccountProxy` returns `{ reader; explore; quotes: AccountRouteRead; dispose }` — the `quotes` route's in-process read, through the same cache (`ACCOUNT_TTL_MS.quotes`, 3 s) and flights its `/data/account/quotes` is served from, exactly as `explore` is today.
 - Produces, `desk-book.ts`:
   - `type Market = "us" | "cn"`; `CN_SYMBOL_RE = /^\d{6}$/`;
   - `marketOf(symbol: unknown): Market | undefined` — `cn` for `CN_SYMBOL_RE`, `us` for `SYMBOL_RE`, else `undefined`;
   - `Level.market: Market` and `Holding.market: Market`. A symbol neither grammar takes is refused with `symbol must be a US ticker (NVDA, BRK.B) or six digits for an A share (600519)`.
-- Produces, `desk-tools.ts`:
-  - `DeskToolDeps.cnHub?: Pick<QuoteHub, "snapshot">`.
-  - `desk_quotes` takes 1–20 symbols, each matching `SYMBOL_RE` or `CN_SYMBOL_RE`. US symbols go to `hub` and A shares to `cnHub`: one snapshot per market, in parallel, answered in the order asked.
-  - A quote gains `market` and `source` (`"Account"` | `"Tencent"`).
-  - An A share without `cnHub` is `unavailable` with reason `no A-share quote source in this face`.
-  - A line reads `600519 1452.3, +0.85% vs prev close 1440.06 | Tencent 14:03:12 Beijing | live`. The Beijing time comes from `bjClock`, defined in desk-tools.ts until Task 2 moves it into `xshg-clock.ts`.
-- Produces, `desk.ts`: `installDesk` deps gain `cnHub?: Pick<QuoteHub, "snapshot">`, which reaches `deskToolDefinitions`.
-- Produces, `main.ts`: `const quoteHub = createQuoteHub()`, passed as `registerQuoteRoutes(…, { hub: quoteHub })` and as `installDesk(…, { cnHub: quoteHub })`. The data routes' disposer still closes it, after `desk.dispose`.
+- Produces, `market-quotes.ts` — the renamed module, every name the Market's (M11); it imports `Market` and `marketOf` from desk-book.ts, and desk-book.ts imports nothing back:
+  - `interface MarketQuoteIdentity { id: string; market: Market; symbol: string }` (was `UsQuoteIdentity`); `idOf(market: Market, symbol: string): string` — `us:NVDA`, `cn:600519`.
+  - `interface MarketQuote extends MarketQuoteIdentity` (was `UsLiveQuote`): the same fields; `source` is the constant `"market"`; `feed` is the quote's own (`robinhood`, `nasdaq real-time`, `cboe delayed`, `tencent`); `quote_status: "live" | "delayed" | "stale" | "unavailable"`; `market_status` is `open` for an A share in `trading`, `closed` for `midday` and `closed`, `unknown` for a US quote; `cn?: { phase: "trading" | "midday" | "closed"; lastSession: string | null }` on an A share alone.
+  - `interface MarketQuotePayload` (was `UsQuotePayload`), its `providers` one `MarketProviderState` (was `UsProviderState`) per market asked, `id` and `source` `"market"`.
+  - `interface MarketQuoteSource { snapshot(assets: MarketQuoteIdentity[]): Promise<MarketQuotePayload>; readonly unavailable?: string }` (was `UsQuoteSource`).
+  - `NO_QUOTES = "no quote source is wired: this face has no Market read to ask"` (was `NO_US_QUOTES`); `unwiredMarketQuotes(): MarketQuoteSource` (was `unwiredUsQuotes`).
+  - `QUOTES_CONCURRENCY = 6` (was `ACCOUNT_QUOTES_CONCURRENCY`); `CN_QUOTES_BATCH = 12`, the Account's cap on one `quotes` read.
+  - `marketQuotes(deps: { explore: AccountRouteRead; quotes: AccountRouteRead; now?: () => number; concurrency?: number }): MarketQuoteSource` (was `accountUsQuotes`). A snapshot splits its assets by `market` and keeps the order asked:
+    - US, as today: one `explore?q=<SYM>&key=stock:<SYM>&limit=1` per symbol, at most `QUOTES_CONCURRENCY` in flight;
+    - A shares: the codes sorted and cut into reads of at most `CN_QUOTES_BATCH`, each `quotes?pairs=china|<code>,…`, the reads in the same lanes. A row with `market` is the quote: `price`; `quoteAt` → `as_of`; `change24h` → `change`; `changePct24h` → `change_pct`; `cn.prevClose` → `prev_close`; `cn.volume` → `volume`; `cn.quoteStatus` → `quote_status`; `cn.phase` and `cn.lastSession` → `cn`; `feed` `tencent`. A row with `refusal` is `unavailable` with its `message`. A code the answer lacks is `unavailable` with `the Market read lists no A share <code>`;
+    - a body with `stale: true` (the proxy re-serving a kept answer) marks every quote of that read `quote_status: "stale"`, in either market;
+    - the snapshot rejects — an `HttpError` 429 when busy — only when no read of any market was answered, as today.
+- Produces, `desk-tools.ts`: `DeskToolDeps.hub` becomes `quotes: Pick<MarketQuoteSource, "snapshot" | "unavailable">`. `desk_quotes` takes 1–20 symbols, each matching `SYMBOL_RE` or `CN_SYMBOL_RE`, asks one snapshot (the source splits the markets) and answers in the order asked; a quote gains `market`. A line reads `600519 1452.3, +0.85% vs prev close 1440.06 | TENCENT 14:03:12 Beijing | poll | live` — `quoteTime` for a US quote, `TENCENT <bjClock> Beijing` for an A share, `bjClock` defined here until Task 2 moves it into `xshg-clock.ts`. The schema's symbol pattern widens and its description says both markets.
+- Produces, `desk.ts` and `schedule.ts`: `installDesk`'s `hub` is `quotes: MarketQuoteSource`, handed to the tools, the brief and (Task 9) the watch; `createDeskSchedule`'s `hub` is `quotes`, handed to `briefProducer`.
 - Produces, `brief.ts`:
+  - `BriefDeps.hub` becomes `quotes`;
   - `Brief.aShares: { holdings: number; levels: number }`, placed after `levels`;
   - `notYet` replaced by `scope: typeof BRIEF_SCOPE`, with `BRIEF_SCOPE = "desk/ only; A shares and each strategy's levels.yml are the watch's and their reports'"`;
-  - A-share entries are neither priced nor listed.
+  - A-share entries are neither priced nor listed; the snapshot is asked for `us:` ids alone.
+- Produces, `main.ts`: `installDesk(…, { quotes: marketQuotes({ explore: proxy.explore, quotes: proxy.quotes }) })`; its comment says the Market's reads, not the Account's (M11).
 - `desk/levels.example.yml` gains a fourth entry: `symbol: "600519"` (quoted, so YAML keeps it a string), `kind: watch`, `price: 1400`, `when: cross_down`, a one-line plan, `expires: 2026-12-31`. A comment says six digits is an A share. The comment is needed because YAML would read an unquoted `600519` as a number, and the loader refuses a number.
+- Nothing under `face/` names `UsQuoteSource`, `accountUsQuotes`, `unwiredUsQuotes`, `us-quotes` or a desk `hub` afterwards; a `grep` pins it in Step 4.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
+// face/tests/market-quotes.test.ts — the renamed us-quotes.test.ts: its US tests keep every assertion under the new names, then:
+test("an A-share snapshot asks the quotes read twelve pairs at a time, sorted, and maps the China row", async () => {
+  // 13 codes → quotes("pairs=china|000001,…" twelve pairs) then quotes("pairs=china|…" one); a row { venue: "china", symbol: "600519",
+  //   market: { price: 1452.3, quoteAt: "2026-12-01T06:03:12Z", quoteFrom: "Tencent", change24h: 12.24, changePct24h: 0.85,
+  //   cn: { prevClose: 1440.06, phase: "trading", quoteStatus: "live", lastSession: "2026-12-01", volume: 31200 } } }
+  // → { id: "cn:600519", market: "cn", symbol: "600519", price: 1452.3, prev_close: 1440.06, change_pct: 0.85, as_of: "2026-12-01T06:03:12Z",
+  //     feed: "tencent", source: "market", quote_status: "live", market_status: "open", cn: { phase: "trading", lastSession: "2026-12-01" } }
+});
+test("a refused pair, a missing code and a stale body are said, never priced", async () => {
+  // { refusal: { message: "no A-share quote for 000000" } } → unavailable, message that; a code the answer lacks → "the Market read lists no A share 000002";
+  // body.stale === true → every quote of that read quote_status "stale"; an explore body with stale: true → the US quote "stale" too
+});
+test("one snapshot over both markets keeps the order asked and rejects only when no read answered", async () => {
+  // ["600519", "NVDA"] asked as [cn, us] → quotes[0].symbol "600519", quotes[1].symbol "NVDA"; explore and quotes both unreachable →
+  //   rejects "the Account is not reachable"; one answered → resolves, the other's quotes unpriced with that reason
+});
+test("no name of the module says Account", () => { /* the source of face/src/market-quotes.ts matches none of /accountUsQuotes|UsQuoteSource|NO_US_QUOTES/ and no exported name holds "Account" */ });
+// face/tests/account-proxy.test.ts (append)
+test("the quotes reader reads through the quotes route's cache", async () => { /* two reads of one query inside 3 s → one upstream GET /api/account/quotes?pairs=…; a disabled row → { unreachable: "disabled" } */ });
 // face/tests/desk-book.test.ts (append)
 test("marketOf reads six digits as an A share and refuses five", () => {
   assert.equal(marketOf("600519"), "cn"); assert.equal(marketOf("NVDA"), "us"); assert.equal(marketOf("BRK.B"), "us");
@@ -196,21 +227,21 @@ test("levels and holdings carry their market; an unquoted 600519 is refused, not
 });
 test("the shipped levels.example.yml loads with no refusal and one A share", async () => { /* markets ["us","us","us","cn"] */ });
 // face/tests/desk-tools.test.ts (append)
-test("desk_quotes asks each market's source once and answers in the order asked", async () => {
-  // symbols ["600519", "NVDA", "000001"] → hub.snapshot([NVDA]) once, cnHub.snapshot([cn:600519, cn:000001]) once;
-  // quotes[0] { symbol: "600519", market: "cn", source: "Tencent" }; the line "600519 1452.3, +0.85% vs prev close 1440.06 | Tencent 14:03:12 Beijing | live"
+test("desk_quotes asks one snapshot over both markets and answers in the order asked", async () => {
+  // ["600519", "NVDA", "000001"] → quotes.snapshot([cn:600519, us:NVDA, cn:000001]) once; quotes[0] { symbol: "600519", market: "cn", feed: "tencent" };
+  // the line "600519 1452.3, +0.85% vs prev close 1440.06 | TENCENT 14:03:12 Beijing | poll | live"
 });
-test("desk_quotes without cnHub answers an A share unavailable and still prices the US one", async () => { /* reason "no A-share quote source in this face" */ });
+test("desk_quotes on an unwired source answers NO_QUOTES for every symbol", async () => { /* error "unavailable: no quote source is wired: this face has no Market read to ask" */ });
 // face/tests/brief.test.ts (append; P2's tests lose only the notYet assertion)
 test("the brief prices only US entries and counts the A shares", async () => {
-  // holdings NVDA + 600519, levels AAPL + 000001 → hub asked for no six-digit symbol; aShares { holdings: 1, levels: 1 }; scope === BRIEF_SCOPE
+  // holdings NVDA + 600519, levels AAPL + 000001 → the snapshot asked for [us:NVDA, us:AAPL] alone; aShares { holdings: 1, levels: 1 }; scope === BRIEF_SCOPE
 });
 ```
 
-- [ ] **Step 2: Run them to verify they fail** — `cd face && npx tsx --test tests/desk-book.test.ts tests/desk-tools.test.ts tests/brief.test.ts`. Expected: FAIL.
-- [ ] **Step 3: Implement.** The loaders take the symbol through `marketOf`. `desk_quotes` splits by `marketOf` and maps an A-share `LiveQuote` to the desk's quote shape. `main.ts` builds the hub once.
-- [ ] **Step 4: Run them to verify they pass**, then `npm test && npm run typecheck` and `FACE_SMOKE=1 npx tsx --test tests/desk-smoke.test.ts tests/smoke.test.ts`. Expected: PASS.
-- [ ] **Step 5: Commit** — `git add face/src/desk-book.ts face/src/desk-tools.ts face/src/desk.ts face/src/brief.ts face/src/main.ts desk/levels.example.yml face/tests/desk-book.test.ts face/tests/desk-tools.test.ts face/tests/brief.test.ts`, message `feat(face): the desk's book and desk_quotes take A shares as six digits; the brief stays US and counts them`.
+- [ ] **Step 2: Run them to verify they fail** — `cd face && npx tsx --test tests/market-quotes.test.ts tests/account-proxy.test.ts tests/desk-book.test.ts tests/desk-tools.test.ts tests/brief.test.ts`. Expected: FAIL (the renamed module's new tests, the `quotes` reader, `marketOf`).
+- [ ] **Step 3: Implement.** `git mv` the two files first, then the rename across `face/`; the loaders take the symbol through `marketOf`; `marketQuotes` splits by `market`; `desk_quotes` maps an A share's `MarketQuote` to the desk's quote shape; `main.ts` passes both readers.
+- [ ] **Step 4: Run them to verify they pass**, then `npm test && npm run typecheck`, `grep -rnE "accountUsQuotes|UsQuoteSource|unwiredUsQuotes|us-quotes|NO_US_QUOTES" face/src face/scripts face/tests` printing nothing, and `FACE_SMOKE=1 npx tsx --test tests/desk-smoke.test.ts tests/smoke.test.ts tests/schedule-smoke.test.ts tests/telegram-smoke.test.ts`. Expected: PASS.
+- [ ] **Step 5: Commit** — `git add face/src/market-quotes.ts face/tests/market-quotes.test.ts face/src/account-proxy.ts face/src/desk-book.ts face/src/desk-tools.ts face/src/desk.ts face/src/schedule.ts face/src/brief.ts face/src/main.ts face/scripts/schema-sizes.ts desk/levels.example.yml face/tests/account-proxy.test.ts face/tests/desk-book.test.ts face/tests/desk-tools.test.ts face/tests/brief.test.ts face/tests/desk.test.ts face/tests/desk-guard.test.ts face/tests/firing.test.ts face/tests/desk-smoke.test.ts face/tests/telegram-smoke.test.ts face/tests/schedule-smoke.test.ts` (the `git mv` staged the deletions), message `feat(face): the desk's quotes are the Market's reads in both markets - market-quotes.ts over the proxy's explore and quotes reads; six digits are an A share; the brief stays US and counts them`.
 
 ---
 
@@ -284,7 +315,7 @@ test("a calendar asks for its own market's date", async () => {
 
     | Entry | Reason |
     |---|---|
-    | `kind: halt` | `halts need a trading-status feed; neither the Account's read nor Tencent's carries one` |
+    | `kind: halt` | `halts need a trading-status feed; the Market's read carries none` |
     | a filing rule listing a six-digit symbol | `filings are SEC's: <SYMBOL> is an A share` |
 
   - `resolveSymbols(set: SymbolSet, book: { holdings: string[]; levels: string[] }): string[]` — the union, each once, sorted;
@@ -343,13 +374,13 @@ Unchanged from the old plan's Task 3: its Files, Interfaces, tests and commit. T
 - Create: `face/src/watch-eval.ts`, `face/tests/watch-eval.test.ts`
 
 **Interfaces:**
-- **Consumes:** Task 1 (`Market`, `marketOf`); Task 2 (`bjDate`, `bjClock`); Task 3 (`Rule`, `resolveSymbols`, `levelDistancePct`); `Level`, `LevelKind`, `Holding`; `MarketSession`; `DeliverResult`; `etDate`; `UsLiveQuote`; `LiveQuote` (quote-types.ts).
+- **Consumes:** Task 1 (`Market`, `marketOf`, `MarketQuote`); Task 2 (`bjDate`, `bjClock`); Task 3 (`Rule`, `resolveSymbols`, `levelDistancePct`); `Level`, `LevelKind`, `Holding`; `MarketSession`; `DeliverResult`; `etDate`.
 - **Produces** (pure, but for the ids' randomness):
   - **Constants:** `ALERTS_PER_HOUR = 6`, `HOUR_MS = 3_600_000`, `GAP_RULE_WINDOW_MS = 1_800_000`.
   - **The quote the watch judges.**
-    - `interface WatchQuote { market: Market; symbol: string; price: number | null; prevClose: number | null; changePct: number | null; asOf: string | null; receivedAt: string | null; source: "Account" | "Tencent"; feed: string; status: string; open: boolean | null }`.
-    - `open` is Tencent's `market_status === "open"`, and `null` for a US quote.
-    - `watchQuoteOfUs(q: UsLiveQuote): WatchQuote` and `watchQuoteOfCn(q: LiveQuote): WatchQuote`.
+    - `interface WatchQuote { market: Market; symbol: string; price: number | null; prevClose: number | null; changePct: number | null; asOf: string | null; receivedAt: string | null; feed: string; status: "live" | "delayed" | "stale" | "unavailable"; phase: "trading" | "midday" | "closed" | null }`.
+    - `phase` is the Market's `cn.phase`, and `null` for a US quote. Only `live` and `delayed` prints are judged (ruling 2).
+    - `watchQuoteOf(q: MarketQuote): WatchQuote`.
   - **Sessions:** `interface WatchSessions { us?: MarketSession; cn?: MarketSession & { uncovered?: true } }`.
   - **`judgedDate(q: WatchQuote, sessions: WatchSessions): string | undefined`** — the session date a print is judged in (ruling 2), else `undefined`.
   - **Keys:**
@@ -365,7 +396,7 @@ Unchanged from the old plan's Task 3: its Files, Interfaces, tests and commit. T
     - a gap rule's window is measured from its market's session open.
   - **The gate and the batch:** `gate(day, now, flags: { off: boolean; muted: boolean }, id): Gate`, `batchDue(day, now)` and `takeBatch(day)`, as the old Task 4.
   - **Records:**
-    - `QuoteSnap = { market: Market; price; asOf; source: "Account" | "Tencent"; feed; status; prevClose; chgPct; receivedAt }`, from `snapOf(q)`.
+    - `QuoteSnap = { market: Market; price; asOf; feed; status; prevClose; chgPct; receivedAt }`, from `snapOf(q)`.
     - `AlertHit`, `AlertDelivered`, `AlertBatch` and `AlertAnnotation` as the old Task 4. `AlertHit` gains `market` and `date`, and `QuoteSnap` replaces the old one.
     - `isAlertRecord(x)`.
   - **The rebuild:** `rebuildDay(records: unknown[], now: number): WatchDay` reads the `alert` records of the last 36 h.
@@ -374,21 +405,22 @@ Unchanged from the old plan's Task 3: its Files, Interfaces, tests and commit. T
     - `sends` are the `send` decisions within `HOUR_MS`.
     - `pending` holds the `cap` ids no `batch` lists.
   - **Ids:** `alertId()`, `passId()`, `batchId()`.
-- **Dropped from the old Task 4:** `rankPriority`, `STREAM_SLOTS`, `RANK_MARGIN_PCT`, `WATCH_SYMBOLS_MAX` and `via`.
+- **Dropped from the old Task 4:** `rankPriority`, `STREAM_SLOTS`, `RANK_MARGIN_PCT`, `WATCH_SYMBOLS_MAX`, `via` and the `source` word (M11): a quote names its `feed`.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-// face/tests/watch-eval.test.ts — US S: 2026-11-30 14:30Z-21:00Z; CN C: 2026-12-01 01:30Z-07:00Z; u(sym, price, asOf, prev?), c(code, price, asOf, open, prev?)
+// face/tests/watch-eval.test.ts — US S: 2026-11-30 14:30Z-21:00Z; CN C: 2026-12-01 01:30Z-07:00Z; u(sym, price, asOf, prev?), c(code, price, asOf, phase, prev?)
 test("a crossing between two judged prints fires, and only a crossing", () => { /* the old test, on u(...) */ });
 test("past at the first judged observation fires once as gap - a level, a move rule - and a gap rule only within 30 minutes of its open", () => {
   // US as before; CN: 600519 below its stop at 01:31Z → gap; a gap rule at 02:05Z (09:35 Beijing → inside) fires, at 02:01Z+31min no
 });
 test("a US print is judged on as_of inside its own session, not on the clock", () => { /* the old session test, incl. 2026-11-02 DST and the 2026-11-27 early close */ });
-test("an A-share print is judged only inside 09:30-11:30 and 13:00-15:00 Beijing with Tencent open", () => {
-  // 01:20Z (09:20 auction, open true) no; 01:30Z yes; 03:30Z (11:30) no; 03:45Z (11:45, open true) no; 05:00Z (13:00) yes;
-  // 06:59:59Z yes; 07:00Z no; open false at 02:00Z no; an as_of on 2026-11-30 Beijing while C is 2026-12-01 no
+test("an A-share print is judged only inside 09:30-11:30 and 13:00-15:00 Beijing with the phase trading", () => {
+  // 01:20Z (09:20 auction, phase trading) no; 01:30Z yes; 03:30Z (11:30) no; 03:45Z (11:45, phase midday) no; 05:00Z (13:00) yes;
+  // 06:59:59Z yes; 07:00Z no; phase closed at 02:00Z no; an as_of on 2026-11-30 Beijing while C is 2026-12-01 no
 });
+test("a stale or unavailable print is never judged, in either market", () => { /* status stale at 14:31Z inside S → no observation and no hit; the next live print is the first observation */ });
 test("a key's day is its session's: a US gap and an A-share gap on one evening are both first observations", () => { /* … */ });
 test("a repeat inside the cooldown is counted, not a hit; after it a crossing hits again", () => { /* … */ });
 test("gate: OFF before MUTE before the cap, and the seventh send in a rolling hour is held for the batch", () => { /* … */ });
@@ -423,9 +455,9 @@ Unchanged from the old plan's Task 5: its Files, Interfaces, tests, `desk.md` ed
 **Interfaces:**
 - **Consumes:** Task 5 (`AlertHit`, `QuoteSnap`, the triggers); Task 6 (`DeskSource`); Task 2 (`bjClock`, `bjDate`); `quoteTime`; `LoadRefusal`; `deskTime`, `etClock`.
 - **Produces** (pure):
-  - **`priceStamp(snap: QuoteSnap, now: number): string` (M4).**
-    - A US quote is `Account <quoteTime(feed, asOf, now)>`, as in `Account ROBINHOOD 10:21:03 ET` or `Account CBOE DELAYED 10:05:00 ET`.
-    - An A share is `Tencent <bjClock> Beijing`, dated `Tencent 2026-12-01 14:03:12 Beijing` when its Beijing date differs from now's.
+  - **`priceStamp(snap: QuoteSnap, now: number): string` (M4, M11).** The feed, upper-cased, then the exchange time; no process is named.
+    - A US quote is `quoteTime(feed, asOf, now)`, as in `ROBINHOOD 10:21:03 ET` or `CBOE DELAYED 10:05:00 ET`; with no feed, the clock alone.
+    - An A share is `TENCENT <bjClock> Beijing` (its feed is `tencent`), dated `TENCENT 2026-12-01 14:03:12 Beijing` when its Beijing date differs from now's.
   - **`alertText(hit, now, note: "follows" | "budget" | "none")`** keeps the old Task 6's line order and fields, with two changes:
     - line 1 is `<SYMBOL> <price> · <priceStamp>`;
     - line 5 is `day: <signed %, 2 dp> from the previous close <prevClose>`, or `day: no previous close yet`.
@@ -434,7 +466,7 @@ Unchanged from the old plan's Task 5: its Files, Interfaces, tests, `desk.md` ed
   - **The desk state:** `NearView` and `DeskStateView` as the old Task 6, each item gaining `market`; `stateBody(view)`.
   - **`WATCH_LINES`**, the rows of the Global Constraints table:
     - `fileRefused(file, error)`, `fileLoaded(file, loaded, refusals)`, `fileChanged(file, sha256, loaded)`;
-    - `overCap(market, n, symbols)`, `usUnavailable(reason)`, `cnPastTable(last)`, `noCalendar(error)`, `heldElsewhere(pid)`;
+    - `overCap(market, n, symbols)`, `noPrices(market, reason)`, `cnPastTable(last)`, `noCalendar(error)`, `heldElsewhere(pid)`;
     - `filingsNoContact()`, `filingsRefused(error)`, `filingsOverCap(symbols)`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -443,7 +475,7 @@ Unchanged from the old plan's Task 5: its Files, Interfaces, tests, `desk.md` ed
 // face/tests/alert-text.test.ts — NOW = Date.parse("2026-11-30T15:21:04Z")
 test("a US level alert carries the §5.9 fields, the plan verbatim, its source and exchange time", () => {
   assert.equal(alertText(NVDA_STOP /* feed "robinhood", asOf 15:21:03.512Z, prevClose 174.05, held 100 @ 120.5 */, NOW, "follows"), [
-    "NVDA 169.82 · Account ROBINHOOD 10:21:03 ET",
+    "NVDA 169.82 · ROBINHOOD 10:21:03 ET",
     "stop 170 cross_down · desk/levels.yml · THESIS.md §3",
     "held 100 @ 120.50 · day P&L -423.00",
     "plan: sell half on a close below 170",
@@ -451,22 +483,23 @@ test("a US level alert carries the §5.9 fields, the plan verbatim, its source a
     "annotation follows",
   ].join("\n"));
 });
-test("an A-share alert names Tencent and Beijing time", () => {
-  assert.equal(alertText(MOUTAI_WATCH /* 600519 1398.5, asOf 2026-12-01T06:03:12Z, prev 1440.06, not held */, Date.parse("2026-12-01T06:03:20Z"), "none").split("\n")[0],
-    "600519 1398.5 · Tencent 14:03:12 Beijing");
+test("an A-share alert names its feed and Beijing time", () => {
+  assert.equal(alertText(MOUTAI_WATCH /* 600519 1398.5, asOf 2026-12-01T06:03:12Z, feed "tencent", prev 1440.06, not held */, Date.parse("2026-12-01T06:03:20Z"), "none").split("\n")[0],
+    "600519 1398.5 · TENCENT 14:03:12 Beijing");
 });
-test("a delayed US quote's stamp names its feed", () => { /* feed "cboe delayed" → "Account CBOE DELAYED 10:05:00 ET" */ });
+test("a delayed US quote's stamp names its feed", () => { /* feed "cboe delayed" → "CBOE DELAYED 10:05:00 ET"; no stamp holds the word Account */ });
 test("a move rule, a gap rule and a filing", () => { /* the old test's three expectations, line 1 stamps updated */ });
 test("batchText lists at most twenty, then counts the rest", () => { /* the old test */ });
 test("annotationPost: one alert keeps its rule's form, several become the alerts form", () => { /* … */ });
 test("WATCH_LINES render the phone-line table exactly", () => {
-  assert.equal(WATCH_LINES.cnPastTable("2026-12-31"), "the A-share calendar ends 2026-12-31; the watch judges A shares on Tencent's word alone until face/src/xshg-clock.ts is extended");
+  assert.equal(WATCH_LINES.cnPastTable("2026-12-31"), "the A-share calendar ends 2026-12-31; the watch judges A shares on the Market's phase alone until face/src/xshg-clock.ts is extended");
+  assert.equal(WATCH_LINES.noPrices("cn", "busy"), "the watch has no A-share prices today: busy");
   // each other row; the 500-character cuts with "…"
 });
 ```
 
 - [ ] **Step 2–4:** `cd face && npx tsx --test tests/alert-text.test.ts` FAIL, then implement, then PASS with `npm test && npm run typecheck`.
-- [ ] **Step 5: Commit** — `face/src/alert-text.ts face/tests/alert-text.test.ts`, message `feat(face): the alert copy - the plan verbatim, Account or Tencent with the exchange time, the holding, the day's move, the batch and the watch's lines`.
+- [ ] **Step 5: Commit** — `face/src/alert-text.ts face/tests/alert-text.test.ts`, message `feat(face): the alert copy - the plan verbatim, the feed with the exchange time, the holding, the day's move, the batch and the watch's lines`.
 
 ---
 
@@ -547,7 +580,7 @@ test("filingSymbols polls US symbols only, holdings first, at most 60", () => { 
   - **Constants:** `WATCH_TICK_MS = 5_000`, `WATCH_US_POLL_MS = 20_000`, `WATCH_CN_POLL_MS = 15_000`, `WATCH_US_MAX = 40`, `WATCH_CN_MAX = 100`, `WATCH_LEAD_MS = 600_000`, `WATCH_TAIL_MS = 60_000`, `LEASE_BEAT_MS = 30_000`, `LEASE_STALE_MS = 120_000`, `NEAR_MAX = 10`, `MARKS_MAX = 100`, `STATE_QUOTES_TIMEOUT_MS = 3_000`.
   - **`interface WatchDeps`:**
     - `home`, `root`;
-    - `us?: UsQuoteSource` and `cn?: Pick<QuoteHub, "snapshot">`;
+    - `quotes?: MarketQuoteSource` (Task 1), the one source for both markets;
     - `calendars: DeskCalendars`, `clock: DeskClock`;
     - `deliver: (text: string, opts?: { replyTo?: number }) => Promise<DeliverResult>`, `post: DeskConversation["post"]`, `budget: () => Promise<BudgetState>`;
     - `edgar?: { fetch: EdgarFetch; userAgent: string }`;
@@ -555,11 +588,11 @@ test("filingSymbols polls US symbols only, holdings first, at most 60", () => { 
   - **The handle:** `interface WatchHandle { tick(): Promise<void>; status(): WatchStatus; stateText(): Promise<string | undefined>; dispose(): Promise<void> }`, from `installWatch(deps)`.
   - **`WatchStatus`:**
     - `state: "starting" | "idle" | "held-elsewhere" | "watching" | "stopped"`;
-    - `markets: Record<Market, { state: "off" | "no-calendar" | "closed" | "waiting" | "polling" | "after-close"; session?: { date; open; close }; watched: number; notWatched: string[]; lastPollAt?: string; lastError?: string; uncovered?: true }>` — `off` means no source;
+    - `markets: Record<Market, { state: "off" | "no-calendar" | "closed" | "waiting" | "polling" | "after-close"; session?: { date; open; close }; watched: number; notWatched: string[]; lastPollAt?: string; lastError?: string; uncovered?: true }>` — `off` means the source is `unavailable`, or the market has no symbol;
     - `holder?: { pid: number; since: string }`; `muted?: MuteState`; `files: WatchFileStatus[]`;
     - `near: NearView[]`; `marks: { market; symbol; kind: LevelKind; level: string; when; plan: string; file: string; distancePct: number | null }[]` (at most `MARKS_MAX`, nearest first);
     - `today: { sent: number; suppressed: Record<"cooldown" | "cap" | "muted" | "off" | "window", number>; repeats: number; pending: number }`;
-    - `recent: AlertSummary[]`, newest first, at most 10, where `AlertSummary` is the old one with `via` replaced by `source: "Account" | "Tencent" | null` and with `market`;
+    - `recent: AlertSummary[]`, newest first, at most 10, where `AlertSummary` is the old one with `via` replaced by `feed: string | null` and with `market`;
     - `filings: { state: "off" | "no-contact" | "polling" | "refused-today"; symbols: number; aShares: number; seeded: number; lastPollAt?: string; lastError?: string }`;
     - `ledgerError?: string`.
   - **The lease, the boot and the passes:** as the old Task 8, with these changes.
@@ -572,8 +605,8 @@ test("filingSymbols polls US symbols only, holdings first, at most 60", () => { 
       6. a due batch;
       7. an expired mute lifted;
       8. filings (ruling 9): with a filing rule and no `edgar`, `no-contact` and its line; else `pollDue` starts one single-flight poll under an `AbortController` cut at `FILINGS_ABORT_MS`.
-    - **A pass** is one market's poll, or one filings poll. It maps the payload through `watchQuoteOfUs` or `watchQuoteOfCn`, then runs `evaluatePass` with that market's session. Sends go before posts, as before.
-    - **A poll's failure:** a US snapshot that rejects (429 busy, or unreachable) records the market's `lastError` and sends `usUnavailable` once per ET date. A source with `unavailable` set is `off`. Nothing is judged.
+    - **A pass** is one market's poll — `quotes.snapshot` over that market's ids alone — or one filings poll. It maps the payload through `watchQuoteOf`, then runs `evaluatePass` with that market's session. Sends go before posts, as before.
+    - **A poll's failure:** a snapshot that rejects (429 busy, or unreachable) records that market's `lastError` and sends `noPrices(market, reason)` once per ET date per market. A source with `unavailable` set is `off` for both markets. Nothing is judged.
     - **A shares past the table:** the cn session is synthesised (09:30–15:00 Beijing on a weekday), with `uncovered: true` and `cnPastTable` once per Beijing date.
     - **`stateText()`:** at most one snapshot per market, each raced at 3,000 ms.
     - **`dispose()`:** it stops the ticks, aborts a filings poll, waits at most 2,000 ms for passes, posts and chains, and releases the lease.
@@ -583,7 +616,7 @@ test("filingSymbols polls US symbols only, holdings first, at most 60", () => { 
     - `alertDeadlineMs?`, which `deadlineFor("alert")` and `deadlineFor("alerts")` answer;
     - `watchRow?: { clock?: DeskClock; tickMs?: number; calendars?: Partial<DeskCalendars>; edgar?: { fetch: EdgarFetch; userAgent: string } | null; alive? }`. A `null` `edgar` means none; an absent one means production, which is `globalThis.fetch` with `process.env.ALPHA_EDGAR_USER_AGENT` when that is set.
   - **One `DeskCalendars`** is made on first use, as `deskCalendars({ us: schedule.calendar, ...watchRow.calendars })`. Its `us` reaches `createDeskSchedule` through `seams.calendar`.
-  - **The watch starts** only when `watchRow` is given (main.ts passes `{}`; no existing test or smoke does), with the conversation and at least one usable source, once the outlet is set. Then `conversation.setState(() => watch.stateText())`. So no smoke booted in the primary checkout can poll the operator's real book.
+  - **The watch starts** only when `watchRow` is given (main.ts passes `{}`; no existing test or smoke does), with the conversation and a `quotes` source whose `unavailable` is unset, once the outlet is set. Then `conversation.setState(() => watch.stateText())`. So no smoke booted in the primary checkout can poll the operator's real book.
   - `DeskHandle.watchRow?: Promise<WatchHandle | undefined>`.
   - `deskStatus`'s deps gain `watch?: () => WatchStatus | undefined`, and `DeskStatus` gains `watch?`.
   - `dispose` runs schedule → watch → bridge → conversation.
@@ -592,22 +625,23 @@ test("filingSymbols polls US symbols only, holdings first, at most 60", () => { 
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-// face/tests/watch.test.ts — a fake UsQuoteSource and a fake cn snapshot hub, each recording its calls and answering from a table the test edits;
+// face/tests/watch.test.ts — one fake MarketQuoteSource over two tables, one per market, recording each snapshot's ids and answering from the table the test edits;
 // wall = new WallClock("2026-11-30T14:25:00Z"); calendars { us: fakeCalendar({ "2026-11-30": 14:30Z-21:00Z }), cn: fakeCalendar({ "2026-12-01": 01:30Z-07:00Z }) };
 // deliver records { text, opts } and resolves { sent: [100 + n++] }; post resolves { opened: true, sessionId: "s" }; fixtures under face/tests/tmp/watch-<pid>/
-test("a US crossing is recorded, sent with the Account's stamp and the plan, and one annotation post replies to it", async () => {
-  // NVDA 171 then 169.82 at 15:21:03Z on two polls 20 s apart → one AlertHit, deliver opening "NVDA 169.82 · Account ROBINHOOD 10:21:03 ET"
+test("a US crossing is recorded, sent with its feed's stamp and the plan, and one annotation post replies to it", async () => {
+  // NVDA 171 then 169.82 at 15:21:03Z on two polls 20 s apart → one AlertHit, deliver opening "NVDA 169.82 · ROBINHOOD 10:21:03 ET"
   // and ending "annotation follows"; a delivered record whose tradeMs is the fake gap; post({ source: { kind: "alert", symbol: "NVDA", rule: "stop" }, replyTo: 100 })
 });
-test("an A-share crossing is sent with Tencent's stamp; the US poll is not asked outside its window", async () => {
-  // wall 2026-12-01T01:25:00Z: cn polled from 01:20Z every 15 s, us not at all; 600519 1401 then 1398.5 at 02:03:12Z → "600519 1398.5 · Tencent 10:03:12 Beijing"
+test("an A-share crossing is sent with the TENCENT stamp; the US poll is not asked outside its window", async () => {
+  // wall 2026-12-01T01:25:00Z: cn polled from 01:20Z every 10 s, us not at all; 600519 1401 then 1398.5 at 02:03:12Z → "600519 1398.5 · TENCENT 10:03:12 Beijing";
+  // each cn poll is one snapshot over the cn ids alone, and the source splits thirteen codes into reads of twelve and one
 });
 test("each market polls at its cadence, never two in flight, and only inside its window", async () => {
-  // us: 14:20Z first poll, then +20 s; a poll that hangs 30 s → no second us poll until it settles; cn: +15 s; 21:01Z → us stops
+  // us: 14:20Z first poll, then +20 s; a poll that hangs 30 s → no second us poll until it settles; cn: +10 s; 21:01Z → us stops
 });
-test("a closed XSHG day polls no A share; past the table the watch says so once and judges on Tencent's word", async () => { /* … */ });
-test("the Account busy or unreachable sends one line a day and judges nothing", async () => {
-  // snapshot rejects HttpError(429) → markets.us.lastError "busy", "the watch has no US prices today: busy" once; unavailable set → markets.us.state "off", no poll
+test("a closed XSHG day polls no A share; past the table the watch says so once and judges on the Market's phase", async () => { /* … */ });
+test("the Market's read busy or unreachable sends one line a day per market and judges nothing", async () => {
+  // snapshot rejects HttpError(429) → markets.us.lastError "busy", "the watch has no US prices today: busy" once, and the cn poll's own line once; unavailable set → both markets "off", no poll
 });
 test("a symbol cap per market: past 40 US symbols the rest are named once", async () => { /* … */ });
 test("a 09:30 burst records twelve, sends six, posts one annotation and batches six at 10:00", async () => { /* Review Focus 2 */ });
@@ -630,7 +664,7 @@ test("stateText lists both markets' holdings, the levels within 2% and today's c
 test("status carries marks nearest first, at most 100, for the Markets rows", async () => { /* … */ });
 // face/tests/desk.test.ts (append)
 test("installDesk starts the watch with a source, shares the US calendar with the schedule, and disposes schedule, watch, bridge, conversation in order", async () => {
-  // no watchRow given → no watch; watchRow but no usable source → none; a fake US source and cnHub with watchRow → (await desk.watchRow)!.status().state; GET /data/desk/status → body.watch; alertDeadlineMs honoured
+  // no watchRow given → no watch; watchRow with unwiredMarketQuotes() → none; a fake quotes with watchRow → (await desk.watchRow)!.status().state; GET /data/desk/status → body.watch; alertDeadlineMs honoured
 });
 // face/tests/desk-weight.test.ts: the list gains src/watch.ts, src/watch-eval.ts, src/alert-text.ts, src/edgar.ts, src/filings.ts
 ```
@@ -707,7 +741,7 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
 - [ ] **Step 3: Implement** the four modules, the tab, the marks and the CSS.
 - [ ] **Step 4: Verify.** First `npm test && npm run typecheck`. Then the browser check:
   - **The face.** A scratch face from the worktree: `FACE_PORT=3191`, a scratch `DSH_HOME` under `face/tests/tmp/`, `FACE_ACCOUNT_URL=http://127.0.0.1:9`, no Telegram names, no `ALPHA_EDGAR_USER_AGENT`, never `~/.dsh`.
-  - **The seed.** In the scratch home: an `alerts.jsonl` (one US alert sent, one A-share alert sent, one capped, one muted), a `MUTE`, and a `desk/levels.yml` with one refusal and no A share, so Tencent is never asked.
+  - **The seed.** In the scratch home: an `alerts.jsonl` (one US alert sent, one A-share alert sent, one capped, one muted), a `MUTE`, and a `desk/levels.yml` with one refusal; `FACE_ACCOUNT_URL=http://127.0.0.1:9` makes every read fail at once, so nothing leaves the host.
   - **The check.** Open the printed URL and hard-reload. Markets › Desk shows the head, both markets' lines, `filings: off: set ALPHA_EDGAR_USER_AGENT`, the alerts and the refused file. A marked row draws its mark. Take a screenshot.
 - [ ] **Step 5: Commit** — the files above, message `feat(face): the Desk view inside Markets - status, standing orders, the watch, today's alerts, a level's mark on its row and page`.
 
@@ -721,16 +755,16 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
 **Interfaces:**
 - **Consumes:** everything above; `setupFaceProfile`, `bootFace`, `StubAdapter` (with `desk-smoke`'s usage set), `populateBotsRoot`, `GRAVIT_PLUGIN_ABS`, `installModelSelection`, `desk-fakes.ts`.
 - **The scaffold:** the old Task 10's, with these changes.
-  - **Sources.** The hub is two fakes: a `UsQuoteSource` and a cn snapshot hub over in-memory tables. No `createQuoteHub`.
+  - **Sources.** One fake `MarketQuoteSource` over two in-memory tables, one per market, as `installDesk`'s `quotes`.
   - **Books.** `holdings.yml` adds `600519`, and `levels.yml` adds a `600519` stop.
   - **Filings.** `watchRow: { calendars, clock: wall, tickMs: 86_400_000, edgar: { fetch: fakeEdgar, userAgent: "smoke@example.invalid" } }`. The fake `EdgarFetch` serves a ticker map and one submissions body; nothing reaches the network.
 - [ ] **Step 1: Write the smoke** — one boot, these cases in this order:
   1. **Before the open.** A 14:25Z tick polls no US symbol, because the window opens at 14:20Z (the open minus 10 minutes). A 14:21Z tick polls, and an NVDA print timed 14:29:59Z makes no record.
-  2. **A US gap.** NVDA 168.50 at 14:30:01Z gives one `alert` (`gap`) and one `delivered`. The message opens `NVDA 168.5 · Account ROBINHOOD 09:30:01 ET` and ends `annotation follows`. The stub sees `[alert · NVDA · stop]` and answers as a reply.
+  2. **A US gap.** NVDA 168.50 at 14:30:01Z gives one `alert` (`gap`) and one `delivered`. The message opens `NVDA 168.5 · ROBINHOOD 09:30:01 ET` and ends `annotation follows`. The stub sees `[alert · NVDA · stop]` and answers as a reply.
   3. **A restart.** Re-install the watch: NVDA 168.40 makes no record.
   4. **The cooldown.** NVDA 171, then 169.5 inside 30 minutes, makes no record; `repeats` is 1.
   5. **The cap and the batch.** Six sends; the seventh is recorded `suppressed: cap`; at 15:00:05Z the batch line goes.
-  6. **An A share.** `wall.set("2026-12-01T01:29:00Z")`; 600519 below its stop at 01:30:02Z (09:30:02 Beijing) gives a `gap` alert opening `600519 … · Tencent 09:30:02 Beijing`. A print at 03:45Z (lunch) makes none.
+  6. **An A share.** `wall.set("2026-12-01T01:29:00Z")`; 600519 below its stop at 01:30:02Z (09:30:02 Beijing, phase `trading`) gives a `gap` alert opening `600519 … · TENCENT 09:30:02 Beijing`. A print at 03:45Z (lunch, phase `midday`) makes none.
   7. **A cut and a failed model call:** the old case 7.
   8. **The phone's state:** the old case 8; the state names both NVDA and 600519.
   9. **A filing.** The first due poll at 07:00 ET seeds silently. The fake then adds an 8-K accepted 10:05:12 ET, and a poll 5 minutes later sends `NVDA 8-K · accepted 10:05:12 ET · …`. `600519` is never fetched.
@@ -747,13 +781,13 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
 - Modify: `Gravit-Design.md`, `DEVELOPMENT.md`, `face/README.md`, `CLAUDE.md`, `ROADMAP.md`, `docs/superpowers/specs/2026-10-19-always-on-gravit-design.md`. Not `Gravit-Docs-and-Prompt-Loops.html` (P4-7).
 
 - [ ] **Step 1: `Gravit-Design.md`.**
-  - **§3:** the watch row; the A-share hub shared by the Markets screen and the desk.
+  - **§3:** the watch row; both markets read from the Market part through the proxy, as the Markets screen reads them (M11's words).
   - **§4, the write map:**
     - `watch.ts` writes `alerts.jsonl`, `filings.jsonl`, `watch.lease` and its events;
     - `telegram.ts` writes `MUTE`;
     - the operator writes `rules.yml`.
   - **D17 and D18:** `/mute` from the phone, with what holds it (a required duration, never shortened from the phone, no phone unmute).
-  - **D23:** it now also names the watch as a reader of the Account's market read, polled every 20 s.
+  - **D23:** rewritten for both markets in M11's words: the desk's prices are the Market's reads through the proxy (`market-quotes.ts`), US by `explore` every 20 s, A shares by `quotes` every 10 s, the watch and `desk_quotes` among the readers; no sentence calls a price's source the Account.
   - **New row D28**, in the D20 role of the old plan:
 
     | D28 | A strategy's `levels.yml` sits in a directory its research sessions can write, and the watch sends its plans verbatim | the load caps, the alert caps, and the watch's `changed (sha256 <8 hex>)` line for every levels file it re-reads | the first levels change the operator did not make; P4 pins each strategy's `levels.yml` for that strategy's own firings |
@@ -779,7 +813,8 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
     - an annotation queued behind a long phone turn arrives late;
     - two desk-enabled faces with one token;
     - the XSHG table ends 2026-12-31, and extending it is a code edit;
-    - A-share session edges rest on Tencent's word plus the Beijing clock;
+    - A-share session edges rest on the Market's `cn.phase` plus the Beijing clock;
+    - an A-share poll is up to five `quotes` reads of twelve pairs, each one Tencent read at the Account;
     - the watch's lines under OFF are not retried (alerts are in the ledger).
 - [ ] **Step 3: `face/README.md`.**
   - **"The desk" gains "The watch":**
@@ -796,7 +831,7 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
     4. Send `/mute 30m`: a crossing is recorded muted. Then run `npm run desk -- unmute`.
     5. Run `npm run desk -- rearm preclose`.
     6. Set `ALPHA_EDGAR_USER_AGENT` and restart. Compare one filing's accepted time with its EDGAR index page (ruling 9), and record one poll's wall time and bytes.
-- [ ] **Step 4: `CLAUDE.md`.** The desk row names `face/src/{watch,watch-eval,alert-text,edgar,filings,xshg-clock}.ts`, `desk/rules.yml` and the Desk view. The tests row's real-boot count follows a fresh `FACE_SMOKE=1 npm test`.
+- [ ] **Step 4: `CLAUDE.md`.** The desk row names `market-quotes.ts` in place of `us-quotes.ts`, `face/src/{watch,watch-eval,alert-text,edgar,filings,xshg-clock}.ts`, `desk/rules.yml` and the Desk view, and says the desk's prices are the Market's reads. The tests row's real-boot count follows a fresh `FACE_SMOKE=1 npm test`.
 - [ ] **Step 5: `ROADMAP.md` and the spec.** ROADMAP: P0–P3 built, P4 to come, and the P3 entry. Under the spec's §5.5, an "As built (P3)" note pointing at §15 and naming:
   - the polled cadences;
   - the per-market judgement;
@@ -819,7 +854,7 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
 | T1→T3, T5, T8, T9 | `Market`, `marketOf`, `Level.market`, `Holding.market` | the loaders set `market`; nothing else marks it (M3) |
 | T1/T2 | `desk-tools.ts` | T1 adds `bjClock` locally, and T2 moves it to `xshg-clock.ts` — sequential |
 | T1/T3/T10 | `brief.ts` | T1 `aShares` and `scope`, T3 the import of `levelDistancePct`, T10 the blocks — sequential and disjoint |
-| T1/T9 | `desk.ts` `installDesk`, `main.ts` | T1 `cnHub` to the tools; T9 `cnHub` and `watchRow` to the watch — sequential |
+| T1/T9 | `desk.ts` `installDesk`, `main.ts` | T1 renames `hub` to `quotes`, one source for the tools, the brief and the schedule; T9 `watchRow` and the same `quotes` to the watch — sequential |
 | T2→T5, T7, T9 | `bjDate`, `bjClock`, `DeskCalendars`, `deskCalendars`, `XSHG_COVERED` | the watch's cn window and the stamps |
 | T3→T5, T8, T9 | `Rule`, `resolveSymbols`, `levelDistancePct`, `loadRules` | |
 | T4→T9 | `appendChain`, the file names, the mute, `watch-load` | |
@@ -829,7 +864,7 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
 | T7→T9, T10, T11 | `alertText`, `WATCH_LINES`, `priceStamp` | T11 re-spells the phrases on the client |
 | T8→T9, T12 | `createEdgar`, `EdgarFetch`, `filingSymbols`, `diffFilings`, `pollDue` | the smoke's fake fetch |
 | T9→T10, T11 | `WatchStatus` (`markets`, `marks`, `filings`), `DeskStatus.watch`, `AlertSummary` | |
-| T9→existing callers | `installDesk`, with `cnHub` and `watchRow` optional | no book means `idle` |
+| T9→existing callers | `installDesk`, with `quotes` (renamed in T1, every caller updated there) and `watchRow` optional | no book means `idle` |
 
 ### B. Each task against itself
 
@@ -844,7 +879,7 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
 
 | P3 task | P1/P2 file | Collision |
 |---|---|---|
-| T1 | `desk-book.ts`, `desk-tools.ts`, `brief.ts`, `main.ts` | the symbol grammar widens; `notYet` becomes `scope` |
+| T1 | `us-quotes.ts` → `market-quotes.ts`, `account-proxy.ts`, `desk-book.ts`, `desk-tools.ts`, `desk.ts`, `schedule.ts`, `brief.ts`, `main.ts`, their tests | the source and its names are the Market's (M11); the symbol grammar widens; `notYet` becomes `scope` |
 | T2 | `market-clock.ts` | `dateOf` and `deskCalendars` are additions; the US default is unchanged |
 | T4 | `desk.ts`, `scripts/desk.ts`, `desk-cli.test.ts`, `telegram.ts` | additions; the usage line grows |
 | T6 | `desk-session.ts`, `desk-conversation.ts`, `desk.md`, `cycle.test.ts` | as the old T5 |

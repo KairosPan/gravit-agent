@@ -9,7 +9,7 @@
 - **The producer.** `builtin:report` (`face/src/report.ts`) writes one JSON block into the wake message, holding:
   - the screen line, first (M7);
   - `status.yaml`;
-  - one snapshot per market of the level symbols: US through the Account's read, A shares through the hub;
+  - one snapshot per market of the level symbols, through the Market's one source (P3's `MarketQuoteSource`, M11);
   - `levels.yml`, as the bytes `checkFiring` hashed.
 - **The pin.** Arming pins `levels.yml` beside `STANDING.md`.
 - **The schedule.** The clock row judges each order on its own market's calendar and date, through P3's `DeskCalendars`.
@@ -17,14 +17,14 @@
 
 **Tech Stack:** Node 22, TypeScript strict via `tsx`, `node:test`; js-yaml 4.3.2 through P2's `CORE_SCHEMA` readers; the gravit-ui client; no new dependency, no Python; dsh 0.2.0-rc.2 unchanged.
 
-**Spec:** `docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` — §4.3, §5.3–§5.5, §5.9, §7, §9, §12, as amended by **§15 (M1–M8), which wins**. Binding beside it: the P4 rulings in `.superpowers/research/desk-p1-p4/controller-notes.md` this plan keeps (see "Rulings carried"), the P2 rulings where P4 uses P2's machinery, and `replan-brief.md`'s M9 and M10.
+**Spec:** `docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` — §4.3, §5.3–§5.5, §5.9, §7, §9, §12, as amended by **§15 (M1–M8, M11), which wins**. Binding beside it: the P4 rulings in `.superpowers/research/desk-p1-p4/controller-notes.md` this plan keeps (see "Rulings carried"), the P2 rulings where P4 uses P2's machinery, and `replan-brief.md`'s M9 and M10.
 
 **Base:** `feat/desk-p1-p4` after P3's final review (P4-9). It consumes P3's names exactly:
-- `Market`, `marketOf`, `Level.market`, `Holding.market`, `levelDistancePct` (desk-book.ts);
+- `Market`, `marketOf`, `Level.market`, `Holding.market`, `levelDistancePct` (desk-book.ts); `MarketQuoteSource`, `MarketQuote`, `marketQuotes`, `unwiredMarketQuotes` (market-quotes.ts, the renamed us-quotes.ts: nothing is called `UsQuoteSource`, `accountUsQuotes` or `hub` any more);
 - `XSHG_CLOCK`, `XSHG_COVERED`, `bjDate`, `bjClock`, `xshgSession`, `xshgWindow`, `xshgMarketClock` (xshg-clock.ts);
 - `DeskCalendars`, `deskCalendars`, `createMarketCalendar`'s `dateOf` (market-clock.ts);
-- `briefProducer({ hub, root, home })`;
-- `installDesk`'s `cnHub` and `watchRow`; `WatchStatus`; charter D28;
+- `briefProducer({ quotes, root, home })`; `priceStamp` (alert-text.ts);
+- `installDesk`'s `quotes` and `watchRow`; `WatchStatus`; charter D28;
 - the Markets Desk view (`face/client/js/host/desk-view.js` `deskViewOf`, `render/desk.js`).
 
 P2's `firing.ts` has `LINES.failed`, `cutoffOf` and `snapshotFiles`/`diffFiles`. **"The old Task N"** means Task N of `docs/superpowers/plans/2026-10-20-desk-p4-premarket.md` (superseded, kept): its text binds where this plan says "as the old Task N", except for what this plan changes.
@@ -88,20 +88,20 @@ Each ends with the cost if wrong.
    Cost: a held line can go twice if the face dies between the send and the `phoned` append.
 8. **A detached producer dies with the firing (M10).** `ProducerRunner`'s opts gain `signal`. An abort, whether the deadline, the schedule's dispose or the face's shutdown, sends `SIGKILL` to the child's process group. Cost: none.
 9. **No migration** (old ruling 14): an order armed under P2 with no `market` key is `us`, and one with no `levelsSha256` where it needs one is P2's `not armed`.
+10. **Names are the Market's (M11).** The report's block, the template and the strategy lines name a quote's `feed` and its time; the word Account appears in none of them, as P3 ruling 14 holds for the whole desk. Cost: none.
 
 ## Global Constraints
 
 - **B2.** A report informs and never orders. Its template forbids recommending a trade, sizing a position, or saying an order was placed. No tool, mask or gate changes.
 - **Builtins (P2-14, P4-1).** `builtin:report` is face-side, with no Python, no bars and nothing to hash. It reads only:
-  - the US source, `Pick<UsQuoteSource, "snapshot" | "unavailable">`;
-  - the A-share hub, `Pick<QuoteHub, "snapshot">`;
+  - the Market's source, `Pick<MarketQuoteSource, "snapshot" | "unavailable">`, one snapshot per market;
   - `status.yaml`, through `readChannelStatus` after a guarded read;
   - `<dir>/analysis/*/run.json`, guarded;
   - `levels.yml`, as `ProducerInput.levels`.
 - **The fence (P2-4, P2-15, P4-3).** A strategy order runs in `strategies/<name>`. P2's `findChainViolation` refuses before the firing and at its turn's start, and reports after it.
 - **Order, cut-off, room (P2-11, P2-16, P2-20, P2-23, P2-25, P4-4, P4-10).** These are the old plan's Global Constraints, verbatim, applied per market.
 - **B4.** Ignored: `/strategies/*/levels.yml` (already) and `/strategies/*/reports/`. Tracked: `strategies/_template/STANDING.md` and `levels.example.yml`.
-- **No live network in a test.** Never the Account, Tencent, the SEC or Telegram: the report's tests and the smoke pass fake sources.
+- **No live network in a test.** Never the Account (and so no market host), the SEC or Telegram: the report's tests and the smoke pass fake sources.
 - **Module weight.** `report.ts` loads with the schedule, on first use. `src/desk.ts` and `scripts/desk.ts` load none of it, and `arm` imports `desk-book.ts` and `xshg-clock.ts` inside the command.
 - **Phone lines, exact.** These are P4's rows; P2's and P3's tables hold the rest.
 
@@ -145,7 +145,7 @@ Each ends with the cost if wrong.
 - **Consumes:**
   - from P2: `ProducerInput`, `ProducerOutput`, `BuiltinProducer`, `ProducerRunner`, `defaultProducerRunner`, `runScriptProducer`; `loadLevels`, `LoadResult`, `LoadRefusal`, `DESK_FILE_MAX_BYTES`; `STANDING_TEXT_MAX_BYTES`; `quoteTime`.
   - from P3: `Market`, `levelDistancePct`; `bjDate`, `bjClock`, `xshgSession`; `xnysWindow`; `etDate`, `etClock`, `etTime`; `deskTime`.
-  - also: `readChannelStatus`, `ChannelStatus`; `UsQuoteSource`; `QuoteHub`.
+  - also: `readChannelStatus`, `ChannelStatus`; `MarketQuoteSource`, `MarketQuote`.
 - **Produces, `producer.ts`:**
   - `BUILTIN_PRODUCERS = ["brief", "report"] as const`;
   - `interface VerifiedLevels { file: string; sha256: string; text: string | null }`;
@@ -168,37 +168,37 @@ Each ends with the cost if wrong.
     - reads the first `SCREEN_RUNS_MAX` names, sorted descending, that match `RUN_ID_RE`;
     - for each, reads `run.json` with `readDeskFile(…, RUN_JSON_MAX_BYTES)`; a missing, unreadable, oversize or unparseable one, or one with no ISO `sealed_at`, is skipped, and the non-missing ones are counted in `skipped`;
     - from the rest, takes the greatest `sealed_at`; a string `session` and string `artifacts` are kept.
-  - **Quotes:** `type Print = "pre-market" | "session" | "earlier" | "none"`; `ReportQuote` is the old Task 1's, gaining `market` and `source: "Account" | "Tencent"`.
-    - `at` is `Account <quoteTime(feed, as_of, now)>` for a US quote, and `Tencent <bjClock> Beijing` for an A share, dated when the Beijing date differs from now's.
+  - **Quotes:** `type Print = "pre-market" | "session" | "earlier" | "none"`; `ReportQuote` is the old Task 1's, gaining `market`; its `feed` is the quote's (`robinhood`, `tencent`), and no field names a process (M11).
+    - `at` is `priceStamp`'s word (P3 Task 7): `ROBINHOOD 07:58:03 ET` for a US quote, `TENCENT <bjClock> Beijing` for an A share, dated when the Beijing date differs from now's.
     - The print's date is read in its market's zone.
   - **Levels:** `ReportLevel` is the old Task 1's, gaining `market`.
   - **The block:** `interface Report { strategy; market: Market; date; takenAt; session: { open; close; early }; screen: Screen; statusFile; status; quotes: ReportQuote[]; quotesError?: string; levels: { file; rows; refusals; missing?: true; error?: string } }`, in that key order.
     - `takenAt` is `<etClock> ET`.
     - `session` is printed as `<HH:MM ET>` for US, and as `<HH:MM> Beijing (<HH:MM ET>)` for an A share.
-  - **The producer:** `interface ReportDeps { usQuotes?: Pick<UsQuoteSource, "snapshot" | "unavailable">; cnHub?: Pick<QuoteHub, "snapshot">; root: string; now?: () => number }`; `reportProducer(deps): BuiltinProducer`; `buildReport(deps, input): Promise<ProducerOutput>`.
+  - **The producer:** `interface ReportDeps { quotes: Pick<MarketQuoteSource, "snapshot" | "unavailable">; root: string; now?: () => number }`; `reportProducer(deps): BuiltinProducer`; `buildReport(deps, input): Promise<ProducerOutput>`.
 - **The rules `buildReport` keeps:** the old Task 1's, with these changes.
-  - **One snapshot per market** that has symbols, in parallel.
-  - **A market with no source** sets every price of its symbols `null` and `quotesError` to `quotes unavailable: no <US | A-share> quote source in this face`.
-  - **A US 429** is `quotes unavailable: busy`.
+  - **One snapshot per market** that has symbols, in parallel, each over that market's ids alone.
+  - **A source with `unavailable` set** asks nothing, prices nothing and sets `quotesError` to `quotes unavailable: <its reason>`; a market whose snapshot rejects prices nothing of its own and names the reason the same way (`busy` for a 429), the other market's prices standing.
+  - **A `stale` quote** is quoted with its `status`, never as a session print.
   - **`ok: false`** only when no symbol of any market has a timed price.
   - **The screen** comes from `readScreen(root, input.dir, input.market, input.date, now)`, before any quote is asked.
 - **`strategies/_template/STANDING.md`** (tracked) is the old Task 1's text, with three edits:
   - paragraph 2 names the block's `screen.line`: `the face's one snapshot of this strategy's screen line, status, levels and prices`;
   - item 3 reads `3. The screen: its screen.line from the block, verbatim.`;
-  - the source sentence reads `Every price names its source and time as the block gives them (Account ROBINHOOD 07:58:03 ET, Tencent 15:00:03 Beijing).`
+  - the source sentence reads `Every price names its feed and time as the block gives them (ROBINHOOD 07:58:03 ET, TENCENT 15:00:03 Beijing).`
 - **`levels.example.yml`, `status.yaml` and `.gitignore`:** as the old Task 1. `levels.example.yml` adds one A-share entry (`symbol: "600519"`, quoted), so its kinds read `["buy_zone", "stop", "watch"]`.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
 // face/tests/report.test.ts — root face/tests/tmp/report-<pid>/: strategies/demo/status.yaml (researching, ONE_LINE, a next, numbers { hit_rate: 0.54 }),
-// strategies/demo/analysis/<runs>/run.json fixtures; fake usQuotes and cnHub recording each call
+// strategies/demo/analysis/<runs>/run.json fixtures; a fake quotes source recording each snapshot's ids
 const NOW = () => Date.parse("2026-11-27T13:00:05Z");
 test("buildReport quotes both markets from one snapshot each; an earlier print carries no previous close and no gap", async () => { // RF 2
-  // LEVELS: NVDA target 180 cross_up; AAPL buy_zone [218,222]; 600519 stop 1400 cross_down. usQuotes NVDA 181.5 prev 178.2 as_of 12:58:03Z (pre-market),
-  // AAPL as_of 2026-11-25T20:59:58Z; cnHub 600519 1398.5 prev 1420 as_of 2026-11-27T07:00:03Z (15:00:03 Beijing, the date's own close)
-  // → usQuotes.calls [["NVDA","AAPL"]], cnHub.calls [["cn:600519"]]; quotes[0].at "Account ROBINHOOD 07:58:03 ET", print "pre-market", sinceClosePct 1.85;
-  //   quotes[1].print "earlier", prevClose null; quotes[2].at "Tencent 15:00:03 Beijing", source "Tencent"
+  // LEVELS: NVDA target 180 cross_up; AAPL buy_zone [218,222]; 600519 stop 1400 cross_down. the table: NVDA 181.5 prev 178.2 as_of 12:58:03Z feed robinhood (pre-market),
+  // AAPL as_of 2026-11-25T20:59:58Z; 600519 1398.5 prev 1420 as_of 2026-11-27T07:00:03Z feed tencent (15:00:03 Beijing, the date's own close)
+  // → quotes.calls [["us:NVDA","us:AAPL"], ["cn:600519"]] (one snapshot per market); quotes[0].at "ROBINHOOD 07:58:03 ET", print "pre-market", sinceClosePct 1.85;
+  //   quotes[1].print "earlier", prevClose null; quotes[2].at "TENCENT 15:00:03 Beijing", feed "tencent"; no field of the block holds the word Account
 });
 test("the screen line names the newest sealed run and whether it covers the previous session; links and torn runs are skipped", async () => { // RF 3
   // date 2026-11-30 (cn), previous session 2026-11-27: runs r1 sealed 2026-11-27T08:10Z session 2026-11-27 artifacts ["environment","sentiment"];
@@ -213,10 +213,10 @@ test("previousSessionDate walks back over weekends and holidays, and refuses pas
 });
 test("RUN_ID_RE is the Lunhui runs' grammar", () => { /* the source of face/plugins/lunhui/lib/runs.mjs holds the same literal */ });
 test("the screen leads the block, and a full levels file with a 5,000-character next keeps it inside the cap", async () => { /* the old RF 4 test; Object.keys order above */ });
-test("a market with no source says so; a strategy with no levels calls no source", async () => { /* … */ });
+test("an unavailable source says so; a rejected market stands alone; a strategy with no levels calls no source", async () => { /* … */ });
 test("a malformed, a missing and an unreadable status.yaml are named, not invented", async () => { /* the old test */ });
 test("the report reads the verified bytes, never the file, and refuses what is not its own", async () => { /* the old test */ });
-test("the template's STANDING.md is the pre-market order", () => { /* the old phrases, "IEX 07:58:03 ET" replaced by "Tencent 15:00:03 Beijing", plus "screen.line" */ });
+test("the template's STANDING.md is the pre-market order", () => { /* the old phrases, "IEX 07:58:03 ET" replaced by "ROBINHOOD 07:58:03 ET, TENCENT 15:00:03 Beijing", plus "screen.line" */ });
 test("the template's levels.example.yml loads with no refusal", async () => { /* kinds ["buy_zone", "stop", "watch"] */ });
 // face/tests/producer.test.ts (append)
 test("an aborted run kills the producer's whole group", async () => {
@@ -281,7 +281,7 @@ test("arm --market cn pins a Lunhui strategy's report and prints its market", as
 ### Task 3: The schedule per market, the pin at the firing, and wherever an order's state shows
 
 **Files:**
-- Modify: `face/src/schedule.ts`, `face/src/firing.ts`, `face/src/desk.ts` (`installDesk` passes P3's `DeskCalendars` and `cnHub` to `createDeskSchedule`; `standingLines`), `face/src/desk-session.ts` (`createDeskAgent`'s `make`), `face/client/js/host/desk-view.js` (the standing rows' hash cell)
+- Modify: `face/src/schedule.ts`, `face/src/firing.ts`, `face/src/desk.ts` (`installDesk` passes P3's `DeskCalendars` to `createDeskSchedule`, which already holds the one `quotes` source since P3 Task 1; `standingLines`), `face/src/desk-session.ts` (`createDeskAgent`'s `make`), `face/client/js/host/desk-view.js` (the standing rows' hash cell)
 - Test: `face/tests/schedule.test.ts`, `face/tests/firing.test.ts`, `face/tests/desk.test.ts`, `face/tests/desk-session.test.ts`, `face/tests/client/desk-view.test.js`
 
 **Interfaces:**
@@ -294,16 +294,15 @@ test("arm --market cn pins a Lunhui strategy's report and prints its market", as
     - each order is weighed on its own market's answer and date;
     - `expires` is compared with the order's market date;
     - the key is `firingKey(id, <market session date>)`.
-  - **`createDeskSchedule`'s opts** gain `cnHub?: Pick<QuoteHub, "snapshot">`, and its `seams` gain `calendars?: Partial<DeskCalendars>`.
-  - **`deskBuiltins(opts: { usQuotes?: UsQuoteSource; cnHub?: Pick<QuoteHub, "snapshot">; root: string; home: string; now: () => number }, seams?: Partial<Record<BuiltinName, BuiltinProducer>>): Partial<Record<BuiltinName, BuiltinProducer>>`:
-    - `report` is always present: `reportProducer({ usQuotes, cnHub, root, now })`;
-    - `brief` is present only with `usQuotes`;
+  - **`createDeskSchedule`'s opts** keep P3 Task 1's `quotes: MarketQuoteSource`, and its `seams` gain `calendars?: Partial<DeskCalendars>`.
+  - **`deskBuiltins(opts: { quotes: MarketQuoteSource; root: string; home: string; now: () => number }, seams?: Partial<Record<BuiltinName, BuiltinProducer>>): Record<BuiltinName, BuiltinProducer>`:
+    - `report` is `reportProducer({ quotes, root, now })` and `brief` is `briefProducer({ quotes, root, home })`, both always present over the one source (an unwired one makes each say `quotes unavailable`);
     - a seam replaces only the names it gives.
   - **The status:** `StandingStatus.orders[]` gains `market` and `levelsHash?`, as the old Task 3. `nextAnchor` is read from the order's market's window.
   - **Lines:** a `levels-hash` line goes once per changed detail; `started.levelsSha` is recorded, as the old Task 3.
 - **Produces, `firing.ts`:** the old Task 3's `levels-hash` refusal, `Verified.levels`, the check order (OFF, budget, fence, `STANDING.md`, script, levels), `started.levelsSha`, the three `LINES` rows, and `make: order.dir === "desk"`. `ProducerInput.market` is the order's.
 - **Produces, `desk-session.ts`:** `createDeskAgent(deps, { cwd, route?, make? })`, as the old Task 3.
-- **Produces, `desk.ts`:** `standingLines` gains the old Task 3's three lines, and `standing <id>: market cn` when an order is cn. `installDesk` passes its one `DeskCalendars` (P3 Task 9) as `seams.calendars`, and passes `cnHub`.
+- **Produces, `desk.ts`:** `standingLines` gains the old Task 3's three lines, and `standing <id>: market cn` when an order is cn. `installDesk` passes its one `DeskCalendars` (P3 Task 9) as `seams.calendars`.
 - **Produces, client:** `deskViewOf`'s standing rows show `levels.yml changed`, `levels.yml gone` or `levels.yml unreadable` in the hash cell, and the order's market.
 
 - [ ] **Step 1: Write the failing tests** — the old Task 3's `firing.test.ts`, `schedule.test.ts`, `desk.test.ts` and `desk-session.test.ts` cases, unchanged but for the builtins' deps, plus:
@@ -316,7 +315,7 @@ test("an A-share order fires on its Beijing session date at 08:00 Beijing, and e
   //   the next Beijing day (2026-12-02) → one expired record, its line once
 });
 test("a calendar failure is per market: a cn order stops, a us order fires", async () => { /* cn today() { ok: false } → one calendar-error naming "fake XSHG" */ });
-test("deskBuiltins: report is always there, brief only with the US source, a seam replaces only its names", () => { /* … */ });
+test("deskBuiltins: both builtins over the one source, a seam replaces only its names", () => { /* … */ });
 // face/tests/client/desk-view.test.js (append): a changed levels.yml shows in its order's hash cell, with "cn"
 ```
 
@@ -373,7 +372,7 @@ test("every desk conversation is in the Desk group, never in a channel's", () =>
 - **Consumes:** Tasks 1–4; P2's scaffold (`WallClock`, `fakeCalendar`, the recorder, the stub deciding by the wake's first line); P3's `watchRow` seam; `appendOrder`, `writeStanding`, `sha256Hex`.
 - **The scaffold:** the old Task 5's, with these changes.
   - **A quiet watch.** `installDesk` gets `watchRow: { clock, calendars, tickMs: 86_400_000, edgar: null }`, and no book file names a symbol, so the watch is `idle`.
-  - **Fake sources.** A fake `UsQuoteSource` and a fake `cnHub` replace the old hub, and `installDesk` gets `cnHub`.
+  - **The source.** One fake `MarketQuoteSource` over two tables, one per market, as `installDesk`'s `quotes`.
   - **Calendars.** `us` holds 2026-11-30 at 14:30Z–21:00Z. `cn` holds 2026-11-28 and 2026-11-29 closed, and 2026-11-30 at 01:30Z–07:00Z.
   - **Strategies.**
     - `demo-a` (US): an NVDA target, a filled `status.yaml`, no `analysis/`.
@@ -381,10 +380,10 @@ test("every desk conversation is in the Desk group, never in a channel's", () =>
 - [ ] **Step 1: Write the cases**, after P2's ten:
   11. **An A-share report.** `demo-b-report` (`market: cn`, `open-90m`, anchor 2026-11-30T00:00Z) fires at 00:00:10Z in a fresh `gravit-desk` session with cwd `strategies/demo-b`. The stub sees:
       - `[schedule · demo-b-report · 2026-11-30]`;
-      - a block holding `"screen":{"wired":true,"ran":true`, `"market":"cn"`, `"print":"earlier"` and `Tencent`.
+      - a block holding `"screen":{"wired":true,"ran":true`, `"market":"cn"`, `"print":"earlier"` and `TENCENT`, and nowhere the word `Account`.
 
       It writes `reports/2026-11-30-premarket.md` and ends `REPORT-B`; no outside-reports line follows.
-  12. **Two US reports at one anchor.** `demo-a-report`, then `demo-a-second`, both `open-90m` at 13:00Z, run in file order. a's block holds `"screen":{"wired":false` with `no screen is wired for this strategy`, `"print":"pre-market"` and `Account`.
+  12. **Two US reports at one anchor.** `demo-a-report`, then `demo-a-second`, both `open-90m` at 13:00Z, run in file order. a's block holds `"screen":{"wired":false` with `no screen is wired for this strategy`, `"print":"pre-market"` and `ROBINHOOD`.
   13. **The canary in a strategy:** the old case 12, on `demo-b`, at `open-30m` and `open-15m` Beijing, with the old assertions.
   14. **The fence in a strategy:** the old case 13, on `demo-a`.
   15. **A producer-only strategy order:** the old case 14, `close+60m` on `demo-a`.
@@ -427,7 +426,7 @@ test("every desk conversation is in the Desk group, never in a channel's", () =>
     - the screen line's four forms.
   - **"The desk drill" gains its P4 half:**
     1. Arm `lunhui-s01-repair`'s report: `npm run desk -- arm strategies/lunhui-s01-repair --id s01-report --at open-90m --market cn --producer builtin:report --expires <YYYY-MM-DD>`. Do it from the checkout the service runs, after writing its `STANDING.md` from the template.
-    2. On three XSHG sessions, confirm the report reached the phone before 09:30 Beijing and quoted each level's print with `Tencent` and its time. Confirm its screen line matches the newest sealed run under `analysis/`, and that Markets › Desk shows `delivered`.
+    2. On three XSHG sessions, confirm the report reached the phone before 09:30 Beijing and quoted each level's print with `TENCENT` and its Beijing time. Confirm its screen line matches the newest sealed run under `analysis/`, and that Markets › Desk shows `delivered`.
     3. Edit one level: the next report is refused with its line. Run `rearm`, and the next one runs.
 - [ ] **Step 4: `ROADMAP.md`, `CLAUDE.md` and the spec.**
   - **`ROADMAP.md`:** item (2) reads "P0–P4 built (each plan's done criterion is the operator's drill)".
@@ -478,6 +477,6 @@ test("every desk conversation is in the Desk group, never in a channel's", () =>
 | `producer.ts`, `desk-book.ts` (P2; P3 T1, T3) | `report` becomes known; `ProducerInput` gains `market`; the runner gains `signal`; `readDeskFile`, `parseLevels` and `levelsPin` are added; `loadLevels` keeps its read and its `sha256`, which P3's watch keys on |
 | `standing.ts`, `scripts/desk.ts`, `desk-cli.test.ts` (P2; P3 T4) | `market` and `levelsSha256`; the open room rule; P3's `unmute` stays in `USAGE` |
 | `firing.ts`, `schedule.ts` (P2; P3 T10) | the per-market tick; `deskBuiltins` keeps P3's `briefProducer({ …, home })` |
-| `desk.ts` (P1–P3) | `installDesk` hands the schedule P3's calendars and `cnHub`; `standingLines` gains lines |
+| `desk.ts` (P1–P3) | `installDesk` hands the schedule P3's calendars; the one `quotes` source is P3 Task 1's; `standingLines` gains lines |
 | `desk-session.ts` (P1) | `createDeskAgent` gains `make`, defaulting to P1's behaviour |
 | client `list-view.js`, `desk-view.js`, `render/desk.js` (gravit-ui; P3 T11) | the Desk group; two cells |

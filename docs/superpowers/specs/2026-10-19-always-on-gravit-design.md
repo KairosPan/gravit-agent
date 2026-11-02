@@ -1093,14 +1093,17 @@ message, not a new alpaca-kit tool (§5.3, §13).
 
 Main (c06367c3) was merged into the desk at 12b91a0f. It removed what P3 and P4 were planned on:
 alpaca_kit, the PIT beds, every Python reader, the Alpaca IEX stream and the `us:` ids of the face's
-quote hub. P0-P2 were re-landed on main's tree (1e02865b, 54071ae0, 8c4da7f8). The plans
+quote hub. P0-P2 were re-landed on main's tree (1e02865b, 54071ae0, 8c4da7f8). Main `7f15917f` was
+merged next (`d3b66764`, 2026-11-01 evening): the face's own A-share wire is gone too, so every market is
+the Account's Market part read through the proxy, and the operator ruled the data interfaces' names (M11). The plans
 `docs/superpowers/plans/2026-11-01-desk-p3-watch.md` and `…-p4-premarket.md` replace the 2026-10-20
 ones and argue from this section where it and §5.5, §5.9, §5.10 or §12 disagree.
 
 - **M1 — Markets.** Both markets are in scope, US shares and A shares, on the operator's word
   "都统一放进markets部分". The desk reads, shows and speaks them as the face's Markets screen does:
-  US through the Account's read (`src/us-quotes.ts` `accountUsQuotes`), A shares through the face's
-  own Tencent wire (`src/quotes.ts` `QuoteHub`). The dropped Desk panel's content (status, standing
+  both through the Market part's reads carried by the face's proxy (`src/account-proxy.ts`) — US by its
+  `explore` read, A shares by its `quotes` read (`pairs=china|<code>`) — behind one source,
+  `src/market-quotes.ts` (`marketQuotes`), the renamed `us-quotes.ts`. The dropped Desk panel's content (status, standing
   orders, levels, alerts, the watch) is a Desk view inside Markets, and a level shows on its market's
   row and page. This is the controller's reading; the operator may overturn it at review.
 - **M2 — Filings in Node.** The EDGAR reader is face code (`src/edgar.ts`), US symbols only, with
@@ -1109,14 +1112,16 @@ ones and argue from this section where it and §5.5, §5.9, §5.10 or §12 disag
   a drill step.
 - **M3 — Symbols.** A book entry names `symbol:`. Six digits is an A share (`cn:<6>`); anything else
   that matches the US ticker grammar is a US share. Nothing else marks the market.
-- **M4 — Prices, polled.** No stream exists, so the watch polls. US quotes come from the Account's
-  explore read, no faster than its 20 s cache, with at most six reads in flight. A-share quotes come
-  from the hub's Tencent snapshot. Everything stream-shaped in §5.5 (the 30 slots, their ranking, the
-  stream-down line, the IEX labels) is void. Every alert names its source (`Account` or `Tencent`) and
-  the quote's exchange time.
+- **M4 — Prices, polled.** No stream exists, so the watch polls. US quotes come from the Market's
+  `explore` read, no faster than its 20 s cache, with at most six reads in flight. A-share quotes come
+  from the Market's `quotes` read, twelve pairs a read (the Account's cap), polled every 10 s (two of
+  its 5 s China quote lives), the proxy's cache 3 s. Everything stream-shaped in §5.5 (the 30 slots,
+  their ranking, the stream-down line, the IEX labels) is void. Every alert names the quote's feed
+  (`ROBINHOOD`, `CBOE DELAYED`, `TENCENT`) and its exchange time; no alert names a process (M11).
 - **M5 — Sessions.** US prices are judged inside the XNYS session (`src/market-clock.ts`). An A-share
-  price is judged only while Tencent says the market is open, inside 09:30-11:30 or 13:00-15:00
-  Beijing. An A-share order needs its sessions ahead of time, so the face gains an XSHG closure table
+  price is judged only while the Market's read says its phase is `trading` (`cn.phase`), inside
+  09:30-11:30 or 13:00-15:00 Beijing; a `stale` or `unavailable` quote is never judged, in either market.
+  An A-share order needs its sessions ahead of time, so the face gains an XSHG closure table
   copied from the SSE's published 2026 schedule. A date past the table is a calendar failure, said,
   never guessed. Shanghai has no daylight time.
 - **M6 — Done, replacing §12's P3 and P4 criteria.**
@@ -1131,3 +1136,10 @@ ones and argue from this section where it and §5.5, §5.9, §5.10 or §12 disag
   strategy`.
 - **M8 — The strategy's market.** A standing order carries `market: us | cn`, `us` by default; its
   `open-Nm` and `close-Nm` are its market's. The pre-close brief stays US.
+- **M11 — Names (the operator, 2026-11-01: "我并不是很喜欢用account的说法，数据接口统一到market部分").**
+  The desk's data interfaces — quotes in both markets, a market's phase and calendar — are the Market
+  part's, and are named so in code, copy and documents: `market-quotes.ts`, `MarketQuoteSource`,
+  `marketQuotes`, "the Market's read"; a quote's stamp names its feed. "Account" stays for the wallet
+  half — the seat, orders, limits, Guard, cards — and for the process the proxy reaches. This is the
+  controller's reading of the operator's sentence, overturnable at the plan review. M9 and M10 are the
+  re-plan brief's rules on carrying the old rulings and the P2 items, recorded in the controller's notes.
