@@ -13,9 +13,11 @@
  * with src/desk.ts `budgetReplyLine`, no turn and no event, and one that cannot be read lets the post go on,
  * with a line (ruling P2-8: the pause outranks the budget, and a paused post never reads it); the
  * instruction-chain fence - a violation refuses, and is a `desk-refused` event (src/desk-session.ts
- * `findDeskFenceViolation`); the desk session, ensured - live, resumed or created; then the message, its
- * provenance line first. A refusal comes back as a {@link PostResult} carrying the line the phone gets; nothing
- * here sends it.
+ * `findDeskFenceViolation`); the desk session, ensured - live, resumed or created; for a phone's text, the
+ * desk state ({@link DeskConversation.setState}), waited for {@link STATE_WAIT_MS} at most and injected just
+ * before the message only while nothing is under way (the P3 plan's ruling 6: a text queued behind a turn
+ * carries none); then the message, its provenance line first. A refusal comes back as a {@link PostResult}
+ * carrying the line the phone gets; nothing here sends it.
  *
  * EVERY TURN on the session, whoever opened it, is supervised (src/desk-session.ts `superviseDeskTurns`): its
  * deadline and its fence check run from its `turn/start`. At its end it is one ledger event - a `desk-turn`,
@@ -23,9 +25,13 @@
  * wake, one delivery through {@link DeskConversation.deliver}: the fence's refusal line for a refused turn; else
  * its final text - with `(cut off: <what cut it>)` after it when a cut interrupted the answer mid-stream - or,
  * when it said nothing, the timed-out line for a turn the deadline cut and the failed line for one that ended
- * on an error. A browser turn's answer stays in its transcript. Records keep turn order and so do deliveries,
- * each delivery after its own record and none waiting on an outlet more than a minute; nothing at a turn's end
- * can reject - a send that fails is one line.
+ * on an error - an alert's annotation having its own lines, and one for a check that ended with no text
+ * (P3-15). A browser turn's answer stays in its transcript. Records keep turn order and so do deliveries, each
+ * delivery after its own record and none waiting on an outlet more than a minute; nothing at a turn's end can
+ * reject - a send that fails is one line.
+ *
+ * ANNOTATIONS (P3). An alert's post with `replyTo` keeps it under the alert's id - the newest 50, until that
+ * alert's turn ends - and that turn is answered as a reply to the alert's message, whatever it ends in.
  *
  * DELIVERY (rulings P2-7, P2-19). Everything the desk sends leaves through {@link DeskConversation.deliver} - a
  * turn's answer, and in P2 and P3 a firing's text and an alert. It holds a text back while the pause is in force
@@ -65,7 +71,9 @@
  */
 import type { MessageSource } from "@deepseek-ai/dsh-llm";
 import type { BudgetState, OffState } from "./desk.ts";
-import type { DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSource, DeskTurnRecord, SessionEventsOn } from "./desk-session.ts";
+import type {
+  DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSource, DeskStateMessageSource, DeskTurnRecord, SessionEventsOn,
+} from "./desk-session.ts";
 import type { AgentLike } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
 
@@ -82,6 +90,10 @@ const defaultClock: DeskClock = {
 
 /** Every desk turn's deadline unless the owner says otherwise: five minutes (the plan's Global Constraints). */
 const DESK_DEADLINE_MS = 300_000;
+/** The longest a phone's post waits for the desk state before it goes without (the P3 plan's ruling 6). */
+export const STATE_WAIT_MS = 3_500;
+/** The most alert replies kept waiting for their turns' ends; past it the oldest is dropped. */
+const REPLIES_MAX = 50;
 /** The longest a delivery waits on the outlet before the next one goes ahead. */
 const DELIVERY_MS = 60_000;
 /** How long {@link DeskConversation.dispose} gives an agent it cancelled to go idle, so the cut turn is recorded. */
@@ -144,8 +156,10 @@ export interface DeskConversation {
    * post. Never rejects: a failure is one line, and the next post tries again. */
   start(): Promise<void>;
   /** Open a turn: `text` after the provenance line for `source`, sent with `message` as its source - or the
-   * reason it was not, as {@link PostResult}. Never rejects. */
-  post(input: { text: string; source: DeskSource; message: { kind: string } & Record<string, unknown> }): Promise<PostResult>;
+   * reason it was not, as {@link PostResult}. An alert's post (`message.kind` `alert`) with `replyTo` has its
+   * turn answered as a reply to that message; a phone's (`source.kind` `telegram`) carries the desk state
+   * ahead of it when one is ready and nothing is under way. Never rejects. */
+  post(input: { text: string; source: DeskSource; message: { kind: string } & Record<string, unknown>; replyTo?: number }): Promise<PostResult>;
   /** Open another desk conversation (the phone's `/new`), recorded as `new`, and supervise it; resolves its id.
    * Rejects when the ensure does, and when the conversation is disposed before or while it runs. */
   renew(): Promise<{ sessionId: string }>;
@@ -162,6 +176,10 @@ export interface DeskConversation {
   deliver(text: string, opts?: { replyTo?: number }): Promise<DeliverResult>;
   /** Where answers go from now on: read at each delivery, so `undefined` stops them while records go on. */
   setOutlet(outlet: DeskOutlet | undefined): void;
+  /** The desk state from now on: what a phone's post asks for, waited for {@link STATE_WAIT_MS} at most - a
+   * throw or lateness is one line, and the message goes without it, as it does on `undefined`. Read at each
+   * post; `undefined` asks nothing. */
+  setState(provider: (() => Promise<string | undefined>) | undefined): void;
   /** The conversation supervised now, and whether a supervised agent's status reads `running` - a snapshot:
    * maintenance with a followup latched behind it reads idle here, which {@link stop} does not go by. */
   current(): { sessionId?: string; running: boolean };
@@ -209,19 +227,36 @@ const notAnsweredLine = (error: string): string => `the desk could not answer: $
 const SHUT_DOWN = "the desk is shut down";
 const notOpenedLine = (reason: string): string => `the desk could not open a turn: ${reason}`;
 
+/** The phone's line for an alert's annotation whose model call failed before it said anything. */
+const notAnnotatedLine = (error: string): string => `the desk could not annotate this alert: ${error}`;
+/** The phone's line for an alert's annotation that ended, or was cancelled, before it said anything. */
+const NO_CHECK = "the desk's check of this alert ended with no text";
+
 /** What a turn's end sends: the refusal line for a refused turn; else its final text - with a line naming the cut
  * when a cut interrupted it mid-stream; else why it said nothing - cut by its deadline, or failed - and `""`,
  * nothing to send, for one that just ended on a tool or was cancelled before it said anything (the phone's `/stop`
- * is answered by the bridge, a shutdown by nobody). */
+ * is answered by the bridge, a shutdown by nobody). An alert's turn has its own lines for a failure and for no text
+ * at all (P3-15): the operator has the alert, and is told its check came to nothing. */
 function replyOf(r: DeskTurnRecord, m: Machinery): string {
   if (r.outcome === "refused") return m.session.fenceRefusalLine(r.violation ?? JOURNAL);
   if (r.finalText !== "") return r.interrupted === true ? `${r.finalText}\n${m.session.cutOffLine(r)}` : r.finalText;
   if (r.outcome === "timed-out") return timedOutLine(r.deadlineMs, m);
-  if (r.outcome === "failed") return notAnsweredLine(r.error ?? "error");
-  return "";
+  const alert = r.source === "alert";
+  if (r.outcome === "failed") return alert ? notAnnotatedLine(r.error ?? "error") : notAnsweredLine(r.error ?? "error");
+  return alert ? NO_CHECK : "";
+}
+
+/** The alert id a turn was opened for: its naming message's `alert`, when that message is an alert's. */
+function alertOf(r: DeskTurnRecord): string | undefined {
+  const alert = r.message?.kind === "alert" ? r.message.alert : undefined;
+  return typeof alert === "string" ? alert : undefined;
 }
 
 /* ---------- agents at rest ---------- */
+
+/** dsh-agent's `Agent.inject`, which the structural {@link AgentLike} leaves out: context queued for the next
+ * pre-step without waking the driver, so the followup that wakes it claims both. */
+type Injecting = { inject?: (message: MessageLike) => void };
 
 /** dsh-agent's `Agent.whenIdle`, which the structural {@link AgentLike} leaves out: it resolves once the
  * agent's driver has retired - after the turn it was running, every turn its inbox held, and any maintenance
@@ -283,6 +318,9 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
   const stamp = (): string => new Date(clock.now()).toISOString();
 
   let outlet: DeskOutlet | undefined;
+  let stateOf: (() => Promise<string | undefined>) | undefined;
+  /** Each alert's message to reply to, by the alert's id, oldest first: kept from its post to its turn's end. */
+  const replies = new Map<string, number>();
   /** The conversation supervised now. */
   let current: Watch | undefined;
   /** Conversations a renew left with work under way, each supervised until its agent is idle. */
@@ -361,22 +399,27 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
 
   /** A turn's end, delivered: its reply ({@link replyOf}) through {@link sendOut}, for a source the outlet
    * answers. */
-  const deliverTurn = async (r: DeskTurnRecord, m: Machinery): Promise<void> => {
+  const deliverTurn = async (r: DeskTurnRecord, replyTo: number | undefined, m: Machinery): Promise<void> => {
     if (!DELIVERED.has(r.source)) return;
     const text = replyOf(r, m);
     if (text === "") return; // it ended on a tool: there is nothing to say
-    await sendOut(text, undefined, `${BIN}: desk: the reply to turn ${r.turn} on desk session ${r.sessionId} could not be sent`, "; the next reply goes ahead");
+    await sendOut(text, replyTo === undefined ? undefined : { replyTo },
+      `${BIN}: desk: the reply to turn ${r.turn} on desk session ${r.sessionId} could not be sent`, "; the next reply goes ahead");
   };
 
   /** The supervisor's hand at a turn's end. Synchronous, and nothing it starts can reject: an unhandled
    * rejection is a process exit in the face (main.ts `installFailLoud`). */
   const turnEnded = (r: DeskTurnRecord, m: Machinery): void => {
     const where = `turn ${r.turn} on desk session ${r.sessionId}`;
+    /* an alert's reply is taken at its turn's end: forgotten whatever the delivery does */
+    const alert = alertOf(r);
+    const replyTo = alert === undefined ? undefined : replies.get(alert);
+    if (alert !== undefined) replies.delete(alert);
     const recorded = recording.then(() => record(r, m)).catch((err: unknown) => {
       log(`${BIN}: desk: ${where} could not be recorded: ${errText(err)}`);
     });
     recording = recorded;
-    delivering = delivering.then(() => recorded).then(() => deliverTurn(r, m)).catch((err: unknown) => {
+    delivering = delivering.then(() => recorded).then(() => deliverTurn(r, replyTo, m)).catch((err: unknown) => {
       log(`${BIN}: desk: ${where} could not be delivered: ${errText(err)}`);
     });
   };
@@ -486,6 +529,37 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     }
   };
 
+  /** Keep `replyTo` for `alert`'s turn, the newest last; past {@link REPLIES_MAX}, the oldest goes. */
+  const remember = (alert: string, replyTo: number): void => {
+    replies.delete(alert);
+    replies.set(alert, replyTo);
+    while (replies.size > REPLIES_MAX) {
+      const oldest = replies.keys().next().value;
+      if (oldest === undefined) break;
+      replies.delete(oldest);
+    }
+  };
+
+  /** The desk state for a phone's post, or `undefined`: none asked for, none given, or - with one line - a provider
+   * that threw or had not answered in {@link STATE_WAIT_MS}. Never rejects. */
+  const deskState = async (): Promise<string | undefined> => {
+    const provider = stateOf;
+    if (provider === undefined) return undefined;
+    const notReady = (reason: string): undefined => {
+      log(`${BIN}: desk: the desk state was not ready (${reason}); the message goes without it`);
+      return undefined;
+    };
+    let asked: Promise<string | undefined>;
+    try {
+      asked = Promise.resolve(provider());
+    } catch (err) {
+      return notReady(errText(err));
+    }
+    const got = await within(STATE_WAIT_MS, asked);
+    if (got.kind === "ok") return got.value;
+    return notReady(got.kind === "failed" ? errText(got.error) : `it did not answer in ${STATE_WAIT_MS / 1000} s`);
+  };
+
   return {
     start() {
       return serially(async () => {
@@ -515,9 +589,27 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
           if (disposed) return shutDown();
           const { agent, sessionId } = await ensure(false);
           if (disposed) return shutDown();
-          const text = `${m.session.provenanceLine(input.source, new Date(clock.now()))}\n${input.text}`;
+          const state = input.source.kind === "telegram" ? await deskState() : undefined;
+          /* the state only on an idle desk: a text queued behind a turn would find it stale, or claimed by that turn */
+          const inject = state !== undefined && !(await busy(agent)) ? (agent as AgentLike & Injecting).inject : undefined;
+          if (disposed) return shutDown();
+          const now = new Date(clock.now());
+          const text = `${m.session.provenanceLine(input.source, now)}\n${input.text}`;
           const message = m.createUserMessage({ content: [{ type: "text", text }], source: input.message as MessageSource });
-          agent.followup(message as unknown as MessageLike);
+          const alert = input.message.kind === "alert" && typeof input.message.alert === "string" ? input.message.alert : undefined;
+          if (alert !== undefined && input.replyTo !== undefined) remember(alert, input.replyTo);
+          /* one synchronous step: the state, then the message it is context for */
+          if (typeof inject === "function" && state !== undefined) {
+            const stateText = `${m.session.provenanceLine({ kind: "state" }, now)}\n${state}`;
+            const stateSource: DeskStateMessageSource = { kind: "desk", form: "state" };
+            inject.call(agent, m.createUserMessage({ content: [{ type: "text", text: stateText }], source: stateSource }) as unknown as MessageLike);
+          }
+          try {
+            agent.followup(message as unknown as MessageLike);
+          } catch (err) {
+            if (alert !== undefined) replies.delete(alert);
+            throw err;
+          }
           return { opened: true, sessionId };
         } catch (err) {
           return failed(err);
@@ -548,6 +640,10 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
 
     setOutlet(next) {
       outlet = next;
+    },
+
+    setState(provider) {
+      stateOf = provider;
     },
 
     current() {

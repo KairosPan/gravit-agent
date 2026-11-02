@@ -243,18 +243,22 @@ export function fenceRefusalLine(path: string): string {
 
 /** Where a message the face sends the desk came from, as its provenance line names it. A phone's text
  * carries `at`, when the operator wrote it in ms since the epoch (Telegram's own `date`), when the bridge
- * has it. */
+ * has it. `alerts` is a batch of `count` alerts the face has already sent at once; `state`, the face's view of
+ * the desk injected just before a phone's text (src/desk-conversation.ts `setState`). */
 export type DeskSource =
   | { kind: "telegram"; at?: number }
   | { kind: "schedule"; order: string; date: string }
-  | { kind: "alert"; symbol: string; rule: string };
+  | { kind: "alert"; symbol: string; rule: string }
+  | { kind: "alerts"; count: number }
+  | { kind: "state" };
 
 /**
  * The bracketed first line of every message the face sends the desk:
- * `[telegram · operator · 14:03 ET]`, `[schedule · <order> · <YYYY-MM-DD>]`, `[alert · <SYMBOL> · <rule>]`.
- * A phone's time is when the operator wrote it - the source's `at`, else `now` - in America/New_York as
- * src/desk.ts `deskTime` shows it: dated when it falls on another New York date than `now`'s, as a text
- * written before a night the Mac slept through does. A schedule line carries its firing's own date.
+ * `[telegram · operator · 14:03 ET]`, `[schedule · <order> · <YYYY-MM-DD>]`, `[alert · <SYMBOL> · <rule>]`,
+ * `[alerts · <n> · 09:30 ET]` and `[desk · state · 14:03 ET]`, the last two at `now`. A phone's time is
+ * when the operator wrote it - the source's `at`, else `now` - in America/New_York as src/desk.ts
+ * `deskTime` shows it: dated when it falls on another New York date than `now`'s, as a text written before a
+ * night the Mac slept through does. A schedule line carries its firing's own date.
  * `dsh/profile/desk.md` tells the model how to read each form (tests/desk-session.test.ts ties the two).
  * @param source - where the message came from.
  * @param now - when the face sends it.
@@ -267,6 +271,10 @@ export function provenanceLine(source: DeskSource, now: Date): string {
       return `[schedule · ${source.order} · ${source.date}]`;
     case "alert":
       return `[alert · ${source.symbol} · ${source.rule}]`;
+    case "alerts":
+      return `[alerts · ${source.count} · ${deskTime(now, now)}]`;
+    case "state":
+      return `[desk · state · ${deskTime(now, now)}]`;
   }
 }
 
@@ -278,18 +286,21 @@ export type TelegramMessageSource = { kind: "telegram"; from: number; chat: numb
 export type ScheduleMessageSource = { kind: "schedule"; order: string; firing: string; date: string };
 /** An alert the face has already sent: the alert's id and its symbol. */
 export type AlertMessageSource = { kind: "alert"; alert: string; symbol: string };
+/** The face's view of the desk, injected before a phone's text: context, never what names a turn. */
+export type DeskStateMessageSource = { kind: "desk"; form: "state" };
 /** The `source` of a message the face sends the desk: the log's, the ledger's and the client's record of
  * what {@link provenanceLine} tells the model. */
-export type DeskMessageSource = TelegramMessageSource | ScheduleMessageSource | AlertMessageSource;
+export type DeskMessageSource = TelegramMessageSource | ScheduleMessageSource | AlertMessageSource | DeskStateMessageSource;
 
 /* Declared kinds, so `createUserMessage` takes them (dsh-llm's map is merge-extensible; src/room-rules.ts
  * adds the room's the same way). dsh 0.2's v4 log admits any non-empty kind but `plugin`; spike 4
- * measured all three written, replayed and re-booted. */
+ * measured the first three written, replayed and re-booted; `desk` is the desk state's. */
 declare module "@deepseek-ai/dsh-llm" {
   interface MessageSourceMap {
     telegram: TelegramMessageSource;
     schedule: ScheduleMessageSource;
     alert: AlertMessageSource;
+    desk: DeskStateMessageSource;
   }
 }
 
@@ -555,9 +566,10 @@ const defaultClock: DeskClock = {
 };
 
 /** One supervised turn, as its owner records it. `source` is the kind of the turn's first
- * `user/message` (`telegram`, `schedule`, `alert`, ...), or `wake` for a background job's notice
- * (`tool-jobs`) and for a turn that claimed no message. `outcome` is `timed-out` when the supervisor's
- * deadline cut the turn, or `refused` when its fence check found `violation` (repo-relative) while the
+ * `user/message` that is not the desk state (`telegram`, `schedule`, `alert`, ...), or `wake` for a
+ * background job's notice (`tool-jobs`) and for a turn that claimed no other message; `message`, that
+ * message's own `source`, absent when there was none - an alert's id is how its owner answers it as a
+ * reply. `outcome` is `timed-out` when the supervisor's deadline cut the turn, or `refused` when its fence check found `violation` (repo-relative) while the
  * turn ran - the supervisor's own cut wins over whatever the turn ended in; else `cancelled` when
  * something else cancelled it - a shutdown, the phone's `/stop`, the browser's stop - `cancel` saying
  * what ({@link cancelOf}); else `failed` when the turn ended on an error or a blocked pre-step, `error`
@@ -571,6 +583,7 @@ export interface DeskTurnRecord {
   sessionId: string;
   turn: number;
   source: string;
+  message?: Record<string, unknown>;
   outcome: "ended" | "timed-out" | "refused" | "cancelled" | "failed";
   finalText: string;
   interrupted?: true;
@@ -636,6 +649,8 @@ interface OpenTurn {
   /** Every event of the session from `turn/start` on: the slice `deriveTurnTokenUsage` folds. */
   readonly events: EventLike[];
   source?: string;
+  /** The `source` of the message that named it. */
+  message?: Record<string, unknown>;
   deadlineMs: number;
   timer?: unknown;
   /** Why the supervisor cancelled it, once it has. */
@@ -790,9 +805,10 @@ function turnUsage(events: readonly EventLike[]): TurnUsage | undefined {
  * for the next post, if it finds a violation while the turn still runs. A
  * check that rejects while its turn runs counts as a violation at `desk/journal`, with one line; a check
  * that settles after the turn ended, either way, changes nothing and says nothing, and the next turn's
- * check runs again. When the turn's first `user/message` arrives, `deadlineFor` is asked by the
- * source's name as the record gives it. An answer below `deadlineMs` moves the deadline to that long
- * after `turn/start` - or cancels at once, when that moment has passed. No answer, or a non-finite one,
+ * check runs again. When the turn's first `user/message` that is not the desk state (`source.kind`
+ * `desk`, src/desk-conversation.ts's inject) arrives, the turn is named after it and `deadlineFor` is
+ * asked by the source's name as the record gives it. An answer below `deadlineMs` moves the deadline to
+ * that long after `turn/start` - or cancels at once, when that moment has passed. No answer, or a non-finite one,
  * changes nothing; a finite one that is not a deadline a timer can hold (a whole number of milliseconds
  * in 1..2147483647) changes nothing either, with one line, and so does a `deadlineFor` that throws.
  * Only the first cancel of a turn is sent; a cancel that throws is one line.
@@ -873,8 +889,14 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): () => void {
       );
   };
 
+  /** Name `turn` after `event`, its first message that is not the desk state - which is context, never a turn's
+   * name - and ask its deadline there. */
   const firstMessage = (turn: OpenTurn, event: EventLike): void => {
-    turn.source = sourceName((event.data as { source?: { kind?: unknown } } | undefined)?.source?.kind);
+    const source = (event.data as { source?: unknown } | undefined)?.source;
+    const kind = typeof source === "object" && source !== null ? (source as { kind?: unknown }).kind : undefined;
+    if (kind === "desk") return;
+    turn.source = sourceName(kind);
+    if (typeof source === "object" && source !== null) turn.message = source as Record<string, unknown>;
     let ms: number | undefined;
     try {
       ms = deps.deadlineFor?.(turn.source);
@@ -919,6 +941,7 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): () => void {
       sessionId: deps.sessionId,
       turn: turn.turn,
       source: turn.source ?? "wake",
+      ...(turn.message === undefined ? {} : { message: turn.message }),
       outcome,
       finalText,
       ...(cutMidAnswer(turn.events, turn.turn, finalText) ? { interrupted: true as const } : {}),

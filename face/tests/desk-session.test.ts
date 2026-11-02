@@ -404,6 +404,11 @@ test("provenanceLine renders the three forms in ET", () => {
     "dated when it was written on another New York day");
 });
 
+test("provenanceLine renders the alerts and the state forms", () => {
+  assert.equal(provenanceLine({ kind: "alerts", count: 3 }, new Date("2026-11-30T14:30:04Z")), "[alerts · 3 · 09:30 ET]");
+  assert.equal(provenanceLine({ kind: "state" }, new Date("2026-10-20T18:03:00Z")), "[desk · state · 14:03 ET]");
+});
+
 test("the desk contract names every fence name and the provenance forms the code writes", () => {
   const contract = readDesk(DESK_PATH);
   const names = `${FENCE_NAMES.slice(0, -1).join(", ")} or ${FENCE_NAMES.at(-1)}`;
@@ -412,6 +417,8 @@ test("the desk contract names every fence name and the provenance forms the code
   assert.ok(contract.includes(provenanceLine({ kind: "telegram" }, new Date("2026-10-20T18:03:00Z"))), "the telegram line");
   assert.ok(contract.includes("[schedule · "), "the schedule prefix");
   assert.ok(contract.includes("[alert · "), "the alert prefix");
+  assert.ok(contract.includes("[alerts · "), "the batch's prefix");
+  assert.ok(contract.includes(provenanceLine({ kind: "state" }, new Date("2026-10-20T18:03:00Z")).replace("14:03 ET]", "")), "the state's prefix");
   /* and the write guard's other refusals: every other agent's instruction file, in order, and the dot-files */
   const agents = `${AGENT_FILE_NAMES.slice(0, -1).join(", ")} or ${AGENT_FILE_NAMES.at(-1)}`;
   assert.deepEqual(contract.split("\n").filter((line) => line.includes(agents)),
@@ -419,15 +426,16 @@ test("the desk contract names every fence name and the provenance forms the code
     "one line lists them, all of them, in order");
 });
 
-test("telegram, schedule and alert are message sources dsh-llm's createUserMessage accepts", () => {
-  // The augmentation is what makes these three calls type-check (npm run typecheck covers tests/).
+test("telegram, schedule, alert and desk are message sources dsh-llm's createUserMessage accepts", () => {
+  // The augmentation is what makes these four calls type-check (npm run typecheck covers tests/).
   const text = [{ type: "text" as const, text: "x" }];
   const sources = [
     createUserMessage({ content: text, source: { kind: "telegram", from: 42, chat: 42, messageId: 7 } }).source,
     createUserMessage({ content: text, source: { kind: "schedule", order: "preclose", firing: "preclose:2026-10-20", date: "2026-10-20" } }).source,
     createUserMessage({ content: text, source: { kind: "alert", alert: "a-0001", symbol: "NVDA" } }).source,
+    createUserMessage({ content: text, source: { kind: "desk", form: "state" } }).source,
   ];
-  assert.deepEqual(sources.map((s) => s.kind), ["telegram", "schedule", "alert"]);
+  assert.deepEqual(sources.map((s) => s.kind), ["telegram", "schedule", "alert", "desk"]);
 });
 
 /* ---------- the route ---------- */
@@ -851,7 +859,7 @@ test("superviseDeskTurns cancels at the deadline even with a card pending, and r
   endTurn(h, 1, ABORTED);
   await h.time.fake.flush();
   assert.deepEqual(h.records, [{
-    sessionId: SID, turn: 1, source: "telegram", outcome: "timed-out",
+    sessionId: SID, turn: 1, source: "telegram", message: { kind: "telegram", from: 42, chat: 42, messageId: 7 }, outcome: "timed-out",
     finalText: "NVDA closed at 181.50 (IEX 15:59:58 ET); noting it.", usage: RECORDED,
     startedAt: iso(t0), wallMs: 900_000, deadlineMs: 300_000,
   }]);
@@ -887,6 +895,38 @@ test("a second followup during a turn is supervised as its own turn", async () =
   ]);
   assert.deepEqual(h.time.armed, [300_000, 300_000, 300_000], "one timer per turn, each the full deadline");
   assert.equal(h.time.pending.size, 0);
+});
+
+/** The face's view of the desk, injected before a phone's text (src/desk-conversation.ts): context, never the turn's name. */
+const deskState = () => createUserMessage({ content: say('[desk · state · 14:03 ET]\n{"holdings":[]}'), source: { kind: "desk", form: "state" } });
+
+test("a turn is named by its first message that is not desk state, and its deadline asked there", async () => {
+  const asked: string[] = [];
+  const h = supervise({ deadlineFor: (kind) => { asked.push(kind); return kind === "alert" ? 90_000 : undefined; } });
+  startTurn(h, 1, deskState());
+  assert.deepEqual(asked, [], "the state names nothing");
+  h.emit("user/message", phone("NVDA now?"));
+  answer(h, 1, "NVDA 181.50");
+  endTurn(h, 1);
+  startTurn(h, 2, deskState());
+  h.emit("user/message", alert());
+  await h.time.fake.advance(90_000);
+  assert.deepEqual(h.cancels, [DEADLINE_CANCEL], "the alert's own deadline, asked at the alert");
+  endTurn(h, 2, ABORTED);
+  startTurn(h, 3, phone("first"));
+  h.emit("user/message", deskState());
+  endTurn(h, 3);
+  startTurn(h, 4, deskState());
+  endTurn(h, 4);
+  await h.time.fake.flush();
+  assert.deepEqual(asked, ["telegram", "alert", "telegram"], "once per turn, at its first message that is not desk state");
+  assert.deepEqual(h.records.map((r) => [r.turn, r.source, r.message, r.deadlineMs]), [
+    [1, "telegram", { kind: "telegram", from: 42, chat: 42, messageId: 7 }, 300_000],
+    [2, "alert", { kind: "alert", alert: "a-0001", symbol: "NVDA" }, 90_000],
+    [3, "telegram", { kind: "telegram", from: 42, chat: 42, messageId: 7 }, 300_000],
+    [4, "wake", undefined, 300_000],
+  ]);
+  assert.equal("message" in h.records[3], false, "no message key when only the state was claimed");
 });
 
 test("a turn opened by a tool-jobs notice reports source wake", async () => {
