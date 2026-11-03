@@ -58,9 +58,24 @@
  * next post, which the fence refuses first. The log is read before the requeue, so a turn the requeue opens is never
  * taken for a cut one.
  *
+ * WHAT A GRACEFUL STOP CARRIED (spec §16 H3, R93). dsh's teardown clears the desk session's inbox whatever the desk's
+ * own cancel keeps, and on dsh 0.2.1 closes the turn it aborts as `disposed` (measured on a real tree,
+ * .superpowers/sdd/2026-11-02-desk-hardening/graceful-stop-measurement.md), so a graceful stop carries the phone's part
+ * through the ledger instead: {@link DeskConversation.dispose} reads one `desk-carry` in the same tick as it cancels, and
+ * `start` answers every one no `desk-carried` names, oldest first - whether its ensure resumed the session or created
+ * one, and only past the boot's fence check: a violation, or a check that fails, carries nothing and leaves the records
+ * for a later boot; a malformed one is skipped with one line. Each carried text is posted again as a phone's keyed post
+ * is, in order and without the desk state, its provenance line saying `(carried over a restart)` after the time it was
+ * written: a key the session already holds is skipped (ONE TEXT, ONE MESSAGE), and a post refused - the pause, the
+ * budget - stops the carrying, with one line, leaving that carry and every later one for a later boot. Then the turn
+ * the stop cut gets the restart line, unless this boot already sent it or the boot's own cut above already answered
+ * that session and turn (a `desk-turn` cancelled by `restart`); then a `desk-carried` names the carry and what it
+ * posted and skipped. A turn a carry names is no cut to src/desk-session.ts `cutPhoneTurn` when dsh closed it
+ * `disposed`, so it gets one line.
+ *
  * A CUT CUTS ONE TURN. The phone's `/stop` ({@link DeskConversation.stop}), like the deadline, cancels the turn
  * under way and only it: the messages queued behind it are kept and answered, each in its own turn
- * (src/desk-session.ts `cancelKeepingQueue`). A shutdown keeps the queue too, but wakes nobody: the next boot does.
+ * (src/desk-session.ts `cancelKeepingQueue`). A shutdown keeps nothing: the ledger's `desk-carry` does.
  *
  * ONE AT A TIME. `start`, `post` and `renew` run in the order they were called, each once the one before has
  * settled: two ensures at once would both find no conversation in the ledger and open two. `stop`,
@@ -75,23 +90,27 @@
  * supervision stays until that agent is idle (`whenIdle`: the turn running at the switch and any its inbox
  * already held), so a turn under way keeps its deadline, its record and its delivery.
  *
- * SHUTDOWN ({@link DeskConversation.dispose}). Every turn under way, on the conversation and on any it
- * retired, is cancelled as `shutdown` - the inbox kept, for the boot's wake - and its agent gets two seconds to go
- * idle, so the cut turn is recorded; then every supervision ends, a start, post or renew under way gets five seconds
- * to settle, and the records under way are waited for - so nothing the conversation writes lands after the ledger's
- * `shutdown`, which src/desk.ts appends once this has settled.
+ * SHUTDOWN ({@link DeskConversation.dispose}). First the phone's part, from every supervised agent - the
+ * conversation's and any it retired: each phone text dsh has claimed for its open turn and not yet logged (dsh-agent's
+ * `agent/inbox/claimed`, heard through `onClaimed`), then each waiting on its inbox's two lists, at most {@link CARRY_MAX} of them
+ * and each cut at {@link CARRY_TEXT_MAX} characters, and the phone turn under way - is one `desk-carry` in the ledger,
+ * when there is any - read in the same tick as every turn under way is cancelled as `shutdown`, the inbox with it, so
+ * no turn claims a queued text between the two. The carry's write and the cut agents going idle, so the cut turns are
+ * recorded, share two seconds; a failure is one line. Then every supervision
+ * ends, a start, post or renew under way gets five seconds to settle, and the records under way are waited for - so
+ * nothing the conversation writes lands after the ledger's `shutdown`, which src/desk.ts appends once this has settled.
  *
  * MODULE WEIGHT. src/desk.ts imports this module, and `npm run desk` and scripts/service.ts import src/desk.ts.
  * src/desk-session.ts brings src/desk-preset.ts (src/roles.ts, src/bots.ts, js-yaml) and dsh-agent with it,
- * and dsh-llm brings cordis. So this module imports nothing but types: src/desk.ts, src/desk-session.ts and
- * dsh-llm load on a conversation's first use ({@link loadMachinery}). The pause switch loads no more than it
+ * and dsh-llm brings cordis. So this module imports nothing but types: src/desk.ts, src/desk-session.ts, src/watch.ts
+ * (its `cutAt`) and dsh-llm load on a conversation's first use ({@link loadMachinery}). The pause switch loads no more than it
  * did, and the cycle with src/desk.ts has no value edge.
  * @module
  */
 import type { MessageSource } from "@deepseek-ai/dsh-llm";
-import type { BudgetState, OffState } from "./desk.ts";
+import type { BudgetState, DeskEvent, OffState } from "./desk.ts";
 import type {
-  DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSource, DeskStateMessageSource, DeskTurnRecord, SessionEventsOn,
+  DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSource, DeskStateMessageSource, DeskSupervision, DeskTurnRecord, SessionEventsOn,
 } from "./desk-session.ts";
 import type { AgentLike } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
@@ -119,6 +138,11 @@ const DELIVERY_MS = 60_000;
 const SHUTDOWN_IDLE_MS = 2_000;
 /** How long {@link DeskConversation.dispose} gives a start, post or renew under way to settle. */
 const SHUTDOWN_QUEUE_MS = 5_000;
+/** The most phone texts one `desk-carry` holds, oldest first; and the longest each is, in characters. */
+const CARRY_MAX = 20;
+const CARRY_TEXT_MAX = 4_000;
+/** How many phone texts' `at` the conversation remembers by key, newest kept, for a `desk-carry` to name. */
+const AT_KEPT = 200;
 
 /** The sources whose answers go to the outlet: the phone, an alert (one a resumed session still held), a wake. A
  * `user` turn is the operator at the browser, answered in its own transcript. */
@@ -158,7 +182,9 @@ export type DeskConversationCtxLike = DeskSessionCtxLike & {
  * `home` this reads too; `on`, the root bus; `deadlineMs`, every turn's deadline (five minutes by default),
  * which `deadlineFor` may only shorten for a source; `budget`, the day's token budget, read by
  * each post the pause lets through (src/desk.ts `readBudget` over the standing orders' cap) - no budget, no
- * check; `clock`, the timers and the stamps (the global ones); `log`, where a failure line goes (stderr). */
+ * check; `clock`, the timers and the stamps (the global ones); `log`, where a failure line goes (stderr);
+ * `onClaimed`, dsh-agent's `agent/inbox/claimed` on the root context ({@link ClaimsOn}) - without it a text dsh has
+ * claimed for a turn but not yet logged is not seen by a shutdown's carry. */
 export interface DeskConversationDeps {
   session: DeskSessionDeps;
   on: SessionEventsOn;
@@ -167,13 +193,20 @@ export interface DeskConversationDeps {
   budget?: () => Promise<BudgetState>;
   clock?: DeskClock;
   log?: (line: string) => void;
+  onClaimed?: ClaimsOn;
 }
+
+/** dsh-agent's `agent/inbox/claimed` (runtime-types.d.ts: `{ agent, message, turn }`, emitted as dsh-agent-loop's
+ * `preStep` claims a step's input from the inbox - before the turn logs it as `user/message`), subscribed on the root
+ * context, which hears every agent's; it answers the unsubscriber. */
+export type ClaimsOn = (listener: (payload: { agent: { id?: unknown }; message: MessageLike; turn: number }) => void) => () => void;
 
 /** The desk session's one owner. See the module header; each member's own comment says what it does. */
 export interface DeskConversation {
   /** Ensure the desk session and supervise it, so a turn opened from the browser is supervised before any
    * post; when the ensure resumed a cold session, deal with what a restart left in it (the module header's AFTER A
-   * RESTART). Never rejects: a failure is one line, and the next post tries again. */
+   * RESTART), and answer what a graceful stop carried through the ledger (WHAT A GRACEFUL STOP CARRIED). Never
+   * rejects: a failure is one line, and the next post tries again. */
   start(): Promise<void>;
   /** Open a turn: `text` after the provenance line for `source`, sent with `message` as its source - or the
    * reason it was not, as {@link PostResult}. `replyTo` is the annotation lane's (src/annotator.ts, which shares this
@@ -216,11 +249,12 @@ export interface DeskConversation {
 
 /* ---------- what a conversation loads on first use ---------- */
 
-/** src/desk.ts, src/desk-session.ts and dsh-llm's `createUserMessage`, `freezeMessage` and `MessageId`, as a
- * conversation uses them. */
+/** src/desk.ts, src/desk-session.ts, src/watch.ts's `cutAt` and dsh-llm's `createUserMessage`, `freezeMessage` and
+ * `MessageId`, as a conversation uses them. */
 interface Machinery {
   desk: typeof import("./desk.ts");
   session: typeof import("./desk-session.ts");
+  cutAt: (typeof import("./watch.ts"))["cutAt"];
   createUserMessage: (typeof import("@deepseek-ai/dsh-llm"))["createUserMessage"];
   freezeMessage: (typeof import("@deepseek-ai/dsh-llm"))["freezeMessage"];
   MessageId: (typeof import("@deepseek-ai/dsh-llm"))["MessageId"];
@@ -230,9 +264,9 @@ let machinery: Promise<Machinery> | undefined;
 
 /** The machinery, imported on the first call and shared after it (see the module header's MODULE WEIGHT). */
 function loadMachinery(): Promise<Machinery> {
-  machinery ??= Promise.all([import("./desk.ts"), import("./desk-session.ts"), import("@deepseek-ai/dsh-llm")])
-    .then(([desk, session, llm]) => ({
-      desk, session, createUserMessage: llm.createUserMessage, freezeMessage: llm.freezeMessage, MessageId: llm.MessageId,
+  machinery ??= Promise.all([import("./desk.ts"), import("./desk-session.ts"), import("./watch.ts"), import("@deepseek-ai/dsh-llm")])
+    .then(([desk, session, watch, llm]) => ({
+      desk, session, cutAt: watch.cutAt, createUserMessage: llm.createUserMessage, freezeMessage: llm.freezeMessage, MessageId: llm.MessageId,
     }));
   return machinery;
 }
@@ -296,6 +330,41 @@ function loggedId(event: EventLike): string | undefined {
   return typeof id === "string" ? id : undefined;
 }
 
+/** The operator's own words in a phone message the conversation built: the last of a reply's three parts, else its one
+ * part after the provenance line. */
+function operatorText(message: MessageLike): string {
+  const parts = (message.content ?? []).flatMap((part) => (typeof part?.text === "string" ? [part.text] : []));
+  if (parts.length > 1) return parts[parts.length - 1];
+  const only = parts[0] ?? "";
+  const nl = only.indexOf("\n");
+  return nl < 0 ? only : only.slice(nl + 1);
+}
+
+/** A `desk-carry`'s two halves, as a dispose collects them. */
+type Carried = {
+  queued: { key: string; text: string; at?: string }[];
+  cut?: { sessionId: string; turn: number; key?: string; at?: string };
+};
+
+/** A `desk-carry` as the ledger holds one. */
+type Carry = Extract<DeskEvent, { kind: "desk-carry" }>;
+
+/** Whether a ledger line of kind `desk-carry` has the shape a dispose writes: a session id, `queued` an array of
+ * string keys and texts with an optional string `at`, and `cut`, when present, an object with a numeric turn. */
+function isCarry(e: DeskEvent): e is Carry {
+  const x = e as { t?: unknown; sessionId?: unknown; queued?: unknown; cut?: unknown };
+  const optString = (v: unknown): boolean => v === undefined || typeof v === "string";
+  if (typeof x.t !== "string" || typeof x.sessionId !== "string" || !Array.isArray(x.queued)) return false;
+  const textsOk = x.queued.every((q: unknown) => {
+    const y = q as { key?: unknown; text?: unknown; at?: unknown } | null;
+    return typeof y === "object" && y !== null && typeof y.key === "string" && typeof y.text === "string" && optString(y.at);
+  });
+  if (!textsOk) return false;
+  if (x.cut === undefined) return true;
+  const c = x.cut as { turn?: unknown; key?: unknown; at?: unknown } | null;
+  return typeof c === "object" && c !== null && typeof c.turn === "number" && Number.isFinite(c.turn) && optString(c.key) && optString(c.at);
+}
+
 /** dsh-agent's `Agent.whenIdle`, which the structural {@link AgentLike} leaves out: it resolves once the
  * agent's driver has retired - after the turn it was running, every turn its inbox held, and any maintenance
  * with the followup latched behind it. */
@@ -329,11 +398,12 @@ async function busy(agent: AgentLike): Promise<boolean> {
 
 /* ---------- the conversation ---------- */
 
-/** One supervised session: its id, the agent object it was ensured as, and the supervisor's disposer. */
+/** One supervised session: its id, the agent object it was ensured as, and the supervisor's disposer, which also says
+ * which turn it has open (src/desk-session.ts `DeskSupervision`). */
 interface Watch {
   readonly sessionId: string;
   readonly agent: AgentLike;
-  readonly unwatch: () => void;
+  readonly unwatch: DeskSupervision;
 }
 
 /** How a promise settled within a bound: `ok` with its value, `failed` with its error, or `late` - left to settle
@@ -367,6 +437,34 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
   const seen = new Map<string, { ids: Set<string>; loaded?: Promise<void> }>();
   /** The bus listener that keeps {@link seen} current, from the first keyed post to dispose. */
   let unhear: (() => void) | undefined;
+  /** When the operator wrote each keyed phone text this conversation sent, by key - the newest {@link AT_KEPT} - for a
+   * `desk-carry` to name: the message itself keeps it only in its provenance line. */
+  const atOf = new Map<string, number>();
+  /** The cut turns this conversation has sent the restart line for, as `<sessionId> <turn>`: a cut a carry names and the
+   * boot's own cut found get one line between them, even when the ledger record that says so could not be written. */
+  const lined = new Set<string>();
+  /** The phone messages dsh claimed for each agent's latest turn, by agent id: what a turn holds before it logs it. */
+  const claims = new Map<string, { turn: number; messages: MessageLike[] }>();
+  let unclaim: (() => void) | undefined;
+  /** Hear dsh's claims from the first supervision on, until dispose has taken its carry. */
+  const hearClaims = (): void => {
+    if (unclaim !== undefined || deps.onClaimed === undefined || disposed) return;
+    try {
+      unclaim = deps.onClaimed(({ agent, message, turn }) => {
+        if (message?.source?.kind !== "telegram" || typeof agent?.id !== "string") return;
+        const entry = claims.get(agent.id);
+        if (entry === undefined || entry.turn !== turn) claims.set(agent.id, { turn, messages: [message] });
+        else entry.messages.push(message);
+      });
+    } catch (err) {
+      log(`${BIN}: desk: dsh's inbox claims could not be heard (${errText(err)}); a text claimed but not yet logged at a shutdown is not carried`);
+    }
+  };
+  const rememberAt = (key: string, at: number): void => {
+    atOf.delete(key);
+    atOf.set(key, at);
+    if (atOf.size > AT_KEPT) atOf.delete(atOf.keys().next().value as string);
+  };
   const watches = (): Watch[] => [...(current === undefined ? [] : [current]), ...retiring];
 
   /** How `p` settled within `ms` on the clock. Never rejects; a `p` left late is still handled when it
@@ -460,7 +558,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     });
   };
 
-  const supervise = (sessionId: string, agent: AgentLike, m: Machinery): Watch => ({
+  const supervise = (sessionId: string, agent: AgentLike, m: Machinery): Watch => (hearClaims(), {
     sessionId,
     agent,
     unwatch: m.session.superviseDeskTurns({
@@ -514,20 +612,36 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     return { agent, sessionId, ...(resumed === undefined ? {} : { resumed }) };
   };
 
-  /** What a restart left in the desk session `sessionId`, just resumed as `agent` (the module header's AFTER A
-   * RESTART): the phone turn it cut, recorded and answered once, then the texts and alerts still queued, woken. Never
-   * rejects. */
-  const afterRestart = async (agent: AgentLike, sessionId: string, m: Machinery): Promise<void> => {
-    /* the log as the restart left it, read before anything is woken: a turn the requeue opens is no cut */
-    let cut: { turn: number; at: string } | undefined;
+  /** What the boot found in the desk session `sessionId`, just ensured as `agent` (the module header's AFTER A RESTART
+   * and WHAT A GRACEFUL STOP CARRIED): when the ensure resumed it, the phone turn a restart cut, recorded and answered
+   * once; then, past the fence, the texts and alerts still queued, woken, and every carry no boot has answered, oldest
+   * first, posted again. Never rejects. */
+  const afterBoot = async (agent: AgentLike, sessionId: string, resumed: boolean, m: Machinery): Promise<void> => {
+    let ledger: DeskEvent[] | undefined;
     try {
-      await deps.session.ctx.sessionPersistence?.flush();
-      cut = m.session.cutPhoneTurn(await m.session.readSessionEvents(deps.session.ctx, sessionId));
+      ledger = (await m.desk.readEvents(home)).events;
     } catch (err) {
-      log(`${BIN}: desk: desk session ${sessionId}'s log could not be read (${errText(err)}); a phone turn a restart cut there goes unanswered`);
+      log(`${BIN}: desk: the ledger could not be read at boot (${errText(err)}); what a graceful stop carried waits for a later boot`);
     }
-    if (cut !== undefined) await answerCut(sessionId, cut, m);
-    /* the fence first, as before a post: a woken text opens a turn at once, before that turn's own check has run */
+    const carries = ledger === undefined ? [] : pendingCarries(ledger);
+    if (!resumed && carries.length === 0) return;
+    if (resumed) {
+      /* the turns a carry names on this session: their line is the carry's, when dsh closed them `disposed` */
+      const named = new Set((ledger ?? []).flatMap((e) => {
+        const cut = e.kind === "desk-carry" && e.sessionId === sessionId ? (e.cut as { turn?: unknown } | null | undefined) : undefined;
+        return typeof cut?.turn === "number" ? [cut.turn] : [];
+      }));
+      /* the log as the restart left it, read before anything is woken: a turn the requeue opens is no cut */
+      let cut: { turn: number; at: string } | undefined;
+      try {
+        await deps.session.ctx.sessionPersistence?.flush();
+        cut = m.session.cutPhoneTurn(await m.session.readSessionEvents(deps.session.ctx, sessionId), named);
+      } catch (err) {
+        log(`${BIN}: desk: desk session ${sessionId}'s log could not be read (${errText(err)}); a phone turn a restart cut there goes unanswered`);
+      }
+      if (cut !== undefined) await answerCut(sessionId, cut, m);
+    }
+    /* the fence first, as before a post: a woken or carried text opens a turn at once, before that turn's own check has run */
     let violation: string | undefined;
     try {
       violation = await m.session.findDeskFenceViolation(root);
@@ -539,7 +653,87 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
       await m.desk.appendEvent(home, { t: stamp(), kind: "desk-refused", reason: "fence", path: violation }, { log });
       return;
     }
-    m.session.requeuePending(agent, log);
+    if (disposed) return; // a shutdown begun during the fence check: nothing woken, nothing carried
+    if (resumed) m.session.requeuePending(agent, log);
+    /* oldest first; a carry stopped by a refusal holds back every later one, for a later boot */
+    for (const carry of carries) {
+      if (disposed) return;
+      let done: boolean;
+      try {
+        done = await carryOver(carry, m);
+      } catch (err) {
+        log(`${BIN}: desk: the desk-carry of ${carry.t} could not be answered (${errText(err)}); a later boot tries again`);
+        return;
+      }
+      if (!done) return;
+    }
+  };
+
+  /** Every `desk-carry` in `events` that no `desk-carried` names after it, oldest first - a malformed one skipped, with
+   * one line: the ledger's reader checks only `t` and `kind`, and a hand-edited line must never stop the boot. */
+  const pendingCarries = (events: readonly DeskEvent[]): Carry[] => {
+    const pending: Carry[] = [];
+    events.forEach((e, i) => {
+      if (e.kind !== "desk-carry") return;
+      if (events.slice(i + 1).some((later) => later.kind === "desk-carried" && later.of === e.t)) return;
+      if (!isCarry(e)) {
+        log(`${BIN}: desk: the desk-carry of ${String((e as { t?: unknown }).t)} in the ledger is malformed and is skipped`);
+        return;
+      }
+      pending.push(e);
+    });
+    return pending;
+  };
+
+  /** A carry, answered (the module header's WHAT A GRACEFUL STOP CARRIED): each text posted again, in order; then the
+   * cut turn's line, unless this boot or the boot's cut already sent it; then the `desk-carried`. `true` once it is
+   * recorded; `false`, with one line, when a post was refused or the ledger could not be read, and the carry waits for
+   * a later boot. */
+  const carryOver = async (carry: Carry, m: Machinery): Promise<boolean> => {
+    let posted = 0;
+    let skipped = 0;
+    for (const text of carry.queued) {
+      const at = text.at === undefined ? NaN : Date.parse(text.at);
+      const result = await postNow({
+        text: text.text, key: text.key,
+        source: { kind: "telegram", ...(Number.isFinite(at) ? { at } : {}), carried: true },
+        message: { kind: "telegram", carried: true },
+      });
+      if ("refused" in result) {
+        log(`${BIN}: desk: the texts a graceful stop carried could not all be posted again (${result.line}); a later boot tries again`);
+        return false;
+      }
+      if (result.duplicate === true) skipped += 1;
+      else posted += 1;
+    }
+    const cut = carry.cut;
+    if (cut !== undefined) {
+      const where = `turn ${cut.turn} on desk session ${carry.sessionId}`;
+      let answered = lined.has(`${carry.sessionId} ${cut.turn}`);
+      try {
+        const { events } = await m.desk.readEvents(home);
+        answered ||= events.some((e) => e.kind === "desk-turn" && e.sessionId === carry.sessionId && e.turn === cut.turn && e.cancel === "restart");
+      } catch (err) {
+        log(`${BIN}: desk: the ledger could not be read for ${where}, which a graceful stop cut (${errText(err)}); a later boot tries again`);
+        return false;
+      }
+      if (!answered) {
+        lined.add(`${carry.sessionId} ${cut.turn}`);
+        const at = [cut.at, carry.t].map((x) => (x === undefined ? NaN : Date.parse(x))).find(Number.isFinite) ?? clock.now();
+        sendLine(m.session.cutPhoneTurnLine(new Date(at), new Date(clock.now())), `${where}, which a graceful stop cut`);
+      }
+    }
+    await m.desk.appendEvent(home, { t: stamp(), kind: "desk-carried", of: carry.t, posted, skipped }, { log });
+    return true;
+  };
+
+  /** `line` through {@link sendOut}, after the deliveries already under way; its failure lines name `what`. */
+  const sendLine = (line: string, what: string): void => {
+    delivering = delivering.then(async () => {
+      await sendOut(line, undefined, `${BIN}: desk: the line for ${what} could not be sent`, "; the next reply goes ahead");
+    }).catch((err: unknown) => {
+      log(`${BIN}: desk: the line for ${what} could not be delivered: ${errText(err)}`);
+    });
   };
 
   /** A phone turn a restart cut: a `desk-turn` cancelled by `restart`, then its line through {@link sendOut} after the
@@ -556,22 +750,17 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     await m.desk.appendEvent(home, {
       t: stamp(), kind: "desk-turn", sessionId, source: "telegram", turn: cut.turn, outcome: "cancelled", wallMs: 0, cancel: "restart",
     }, { log });
-    const now = new Date(clock.now());
-    const line = m.session.cutPhoneTurnLine(new Date(cut.at), now);
-    delivering = delivering.then(async () => {
-      await sendOut(line, undefined, `${BIN}: desk: the line for ${where}, which a restart cut, could not be sent`, "; the next reply goes ahead");
-    }).catch((err: unknown) => {
-      log(`${BIN}: desk: the line for ${where}, which a restart cut, could not be delivered: ${errText(err)}`);
-    });
+    lined.add(`${sessionId} ${cut.turn}`);
+    sendLine(m.session.cutPhoneTurnLine(new Date(cut.at), new Date(clock.now())), `${where}, which a restart cut`);
   };
 
   /** Cancel `w`'s work under way with `cause`; whether the cancel went through. With `keep`, the phone's stop and the
    * deadline: only the turn under way, the messages queued behind it kept and answered (src/desk-session.ts
-   * `cancelKeepingQueue`); without it, a shutdown: the inbox is kept too, but nobody is woken - a shutdown wants the
-   * agent idle, and the boot's wake (`requeuePending`) answers what waits there (spec §16 H3, R93). */
+   * `cancelKeepingQueue`); without it, a shutdown: the inbox goes too - dsh's teardown would clear it anyway, and the
+   * `desk-carry` written before it holds the phone's part (spec §16 H3, R93). */
   const cancel = (w: Watch, cause: { kind: "hook"; reason: string }, keep?: Machinery): boolean => {
     try {
-      if (keep === undefined) w.agent.cancel(cause, { keepInbox: true });
+      if (keep === undefined) w.agent.cancel(cause);
       else keep.session.cancelKeepingQueue(w.agent, cause, log);
       return true;
     } catch (err) {
@@ -694,6 +883,135 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     return notReady(got.kind === "failed" ? errText(got.error) : `it did not answer in ${STATE_WAIT_MS / 1000} s`);
   };
 
+  /** {@link DeskConversation.post}'s work, run in its turn of the queue - or straight from `start`, which holds it. */
+  const postNow = async (input: Parameters<DeskConversation["post"]>[0]): Promise<PostResult> => {
+    if (disposed) return shutDown();
+    try {
+      const m = await loadMachinery();
+      const paused = await pause(m);
+      if (paused !== undefined) return { refused: "paused", line: pausedLine(paused, new Date(clock.now()), m.desk.deskTime) };
+      const spent = await spentBudget();
+      if (spent !== undefined) return { refused: "budget", line: m.desk.budgetReplyLine(spent) };
+      const path = await m.session.findDeskFenceViolation(root);
+      if (path !== undefined) {
+        await m.desk.appendEvent(home, { t: stamp(), kind: "desk-refused", reason: "fence", path }, { log });
+        return { refused: "fence", path, line: m.session.fenceRefusalLine(path) };
+      }
+      if (disposed) return shutDown();
+      const { agent, sessionId } = await ensure(false);
+      if (disposed) return shutDown();
+      const key = input.key;
+      const ids = key === undefined ? undefined : await seenIn(sessionId, m);
+      if (key !== undefined && (ids?.has(key) === true || waiting(agent, key))) {
+        await flushed();
+        return { opened: true, sessionId, duplicate: true };
+      }
+      if (disposed) return shutDown();
+      /* a carried text goes without the state: the boot posts them one after another, and each wait would hold it */
+      const state = input.source.kind === "telegram" && input.source.carried !== true ? await deskState() : undefined;
+      /* the state only on an idle desk: a text queued behind a turn would find it stale, or claimed by that turn */
+      const inject = state !== undefined && !(await busy(agent)) ? (agent as AgentLike & Injecting).inject : undefined;
+      if (disposed) return shutDown();
+      const now = new Date(clock.now());
+      const provenance = m.session.provenanceLine(input.source, now);
+      /* a reply's context is its own part, between the provenance line and the operator's text (spec §16 H1b) */
+      const content = input.context === undefined
+        ? [{ type: "text" as const, text: `${provenance}\n${input.text}` }]
+        : [
+          { type: "text" as const, text: provenance },
+          { type: "text" as const, text: `${CONTEXT_HEAD}\n${input.context}` },
+          { type: "text" as const, text: input.text },
+        ];
+      const source = input.message as MessageSource;
+      const message = key === undefined
+        ? m.createUserMessage({ content, source })
+        : m.freezeMessage({ id: m.MessageId(key), role: "user" as const, content, source });
+      /* one synchronous step: the state, then the message it is context for. `busy` read the desk idle a
+       * macrotask ago; a wake or a browser turn may have started since, and the state would splice into it
+       * (spike 4), so the status is read again here, with nothing awaited before the followup. */
+      let injected: MessageLike | undefined;
+      if (typeof inject === "function" && state !== undefined && agent.status !== "running") {
+        const stateText = `${m.session.provenanceLine({ kind: "state" }, now)}\n${state}`;
+        const stateSource: DeskStateMessageSource = { kind: "desk", form: "state" };
+        const stateMessage = m.createUserMessage({ content: [{ type: "text", text: stateText }], source: stateSource }) as unknown as MessageLike;
+        try {
+          inject.call(agent, stateMessage);
+          injected = stateMessage;
+        } catch (err) {
+          log(`${BIN}: desk: the desk state could not be injected (${errText(err)}); the message goes without it`);
+        }
+      }
+      try {
+        agent.followup(message as unknown as MessageLike);
+      } catch (err) {
+        if (injected !== undefined) withdraw(agent, injected);
+        throw err;
+      }
+      if (key !== undefined) {
+        ids?.add(key);
+        if (input.source.kind === "telegram" && input.source.at !== undefined) rememberAt(key, input.source.at);
+        await flushed();
+      }
+      return { opened: true, sessionId };
+    } catch (err) {
+      return failed(err);
+    }
+  };
+
+  /** The phone's part of `all` at a shutdown - each phone text waiting on an inbox's two lists, oldest first, at most
+   * {@link CARRY_MAX} and each cut at {@link CARRY_TEXT_MAX} characters, and the phone turn under way - read at once,
+   * before anything is cancelled. */
+  const collectCarry = (all: readonly Watch[], m: Machinery): Carried => {
+    const queued: Carried["queued"] = [];
+    let cut: Carried["cut"];
+    let dropped = 0;
+    for (const w of all) {
+      const inbox = (w.agent as AgentLike & InboxAware).inbox;
+      const open = w.unwatch.openTurn?.();
+      /* claimed for the open turn and not yet logged: out of the inbox, and in no record yet (dsh-agent-loop preStep) */
+      const claim = claims.get(w.agent.id);
+      const held = open !== undefined && claim?.turn === open.turn ? claim.messages.filter((message) => !open.logged.includes(message.id)) : [];
+      const seenHere = new Set<string>();
+      for (const message of [...held, ...(inbox?.nextTurn ?? []), ...(inbox?.nextStep ?? [])]) {
+        if (message.source?.kind !== "telegram" || seenHere.has(message.id)) continue;
+        seenHere.add(message.id);
+        if (queued.length >= CARRY_MAX) {
+          dropped += 1;
+          continue;
+        }
+        const at = atOf.get(message.id);
+        queued.push({ key: message.id, text: m.cutAt(operatorText(message), CARRY_TEXT_MAX), ...(at === undefined ? {} : { at: new Date(at).toISOString() }) });
+      }
+      if (cut === undefined && open?.source === "telegram") {
+        const at = (open.id === undefined ? undefined : atOf.get(open.id)) ?? open.at;
+        cut = {
+          sessionId: w.sessionId, turn: open.turn,
+          ...(open.id === undefined ? {} : { key: open.id }),
+          ...(at === undefined ? {} : { at: new Date(at).toISOString() }),
+        };
+      }
+    }
+    if (dropped > 0) log(`${BIN}: desk: ${dropped} phone text(s) queued past the first ${CARRY_MAX} are not carried over the shutdown`);
+    return { queued, ...(cut === undefined ? {} : { cut }) };
+  };
+
+  /** The `desk-carry` event for what {@link collectCarry} found in `all`, or `undefined` when there is nothing to carry or
+   * it could not be read - that with one line. Synchronous: the shutdown takes it and cancels in the same tick. */
+  const carryEvent = (all: readonly Watch[], m: Machinery | undefined): DeskEvent | undefined => {
+    if (all.length === 0 || m === undefined) return undefined;
+    try {
+      const { queued, cut } = collectCarry(all, m);
+      if (queued.length === 0 && cut === undefined) return undefined;
+      return {
+        t: stamp(), kind: "desk-carry", sessionId: cut?.sessionId ?? all[0].sessionId, queued,
+        ...(cut === undefined ? {} : { cut: { turn: cut.turn, ...(cut.key === undefined ? {} : { key: cut.key }), ...(cut.at === undefined ? {} : { at: cut.at }) } }),
+      };
+    } catch (err) {
+      log(`${BIN}: desk: the phone's texts could not be carried over the shutdown: ${errText(err)}`);
+      return undefined;
+    }
+  };
+
   return {
     start() {
       return serially(async () => {
@@ -705,82 +1023,12 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
           log(`${BIN}: desk: the desk session could not be opened: ${errText(err)}; the next message tries again`);
           return;
         }
-        if (opened.resumed === true && !disposed) await afterRestart(opened.agent, opened.sessionId, await loadMachinery());
+        if (!disposed) await afterBoot(opened.agent, opened.sessionId, opened.resumed === true, await loadMachinery());
       });
     },
 
     post(input) {
-      return serially(async (): Promise<PostResult> => {
-        if (disposed) return shutDown();
-        try {
-          const m = await loadMachinery();
-          const paused = await pause(m);
-          if (paused !== undefined) return { refused: "paused", line: pausedLine(paused, new Date(clock.now()), m.desk.deskTime) };
-          const spent = await spentBudget();
-          if (spent !== undefined) return { refused: "budget", line: m.desk.budgetReplyLine(spent) };
-          const path = await m.session.findDeskFenceViolation(root);
-          if (path !== undefined) {
-            await m.desk.appendEvent(home, { t: stamp(), kind: "desk-refused", reason: "fence", path }, { log });
-            return { refused: "fence", path, line: m.session.fenceRefusalLine(path) };
-          }
-          if (disposed) return shutDown();
-          const { agent, sessionId } = await ensure(false);
-          if (disposed) return shutDown();
-          const key = input.key;
-          const ids = key === undefined ? undefined : await seenIn(sessionId, m);
-          if (key !== undefined && (ids?.has(key) === true || waiting(agent, key))) {
-            await flushed();
-            return { opened: true, sessionId, duplicate: true };
-          }
-          if (disposed) return shutDown();
-          const state = input.source.kind === "telegram" ? await deskState() : undefined;
-          /* the state only on an idle desk: a text queued behind a turn would find it stale, or claimed by that turn */
-          const inject = state !== undefined && !(await busy(agent)) ? (agent as AgentLike & Injecting).inject : undefined;
-          if (disposed) return shutDown();
-          const now = new Date(clock.now());
-          const provenance = m.session.provenanceLine(input.source, now);
-          /* a reply's context is its own part, between the provenance line and the operator's text (spec §16 H1b) */
-          const content = input.context === undefined
-            ? [{ type: "text" as const, text: `${provenance}\n${input.text}` }]
-            : [
-              { type: "text" as const, text: provenance },
-              { type: "text" as const, text: `${CONTEXT_HEAD}\n${input.context}` },
-              { type: "text" as const, text: input.text },
-            ];
-          const source = input.message as MessageSource;
-          const message = key === undefined
-            ? m.createUserMessage({ content, source })
-            : m.freezeMessage({ id: m.MessageId(key), role: "user" as const, content, source });
-          /* one synchronous step: the state, then the message it is context for. `busy` read the desk idle a
-           * macrotask ago; a wake or a browser turn may have started since, and the state would splice into it
-           * (spike 4), so the status is read again here, with nothing awaited before the followup. */
-          let injected: MessageLike | undefined;
-          if (typeof inject === "function" && state !== undefined && agent.status !== "running") {
-            const stateText = `${m.session.provenanceLine({ kind: "state" }, now)}\n${state}`;
-            const stateSource: DeskStateMessageSource = { kind: "desk", form: "state" };
-            const stateMessage = m.createUserMessage({ content: [{ type: "text", text: stateText }], source: stateSource }) as unknown as MessageLike;
-            try {
-              inject.call(agent, stateMessage);
-              injected = stateMessage;
-            } catch (err) {
-              log(`${BIN}: desk: the desk state could not be injected (${errText(err)}); the message goes without it`);
-            }
-          }
-          try {
-            agent.followup(message as unknown as MessageLike);
-          } catch (err) {
-            if (injected !== undefined) withdraw(agent, injected);
-            throw err;
-          }
-          if (key !== undefined) {
-            ids?.add(key);
-            await flushed();
-          }
-          return { opened: true, sessionId };
-        } catch (err) {
-          return failed(err);
-        }
-      });
+      return serially(() => postNow(input));
     },
 
     renew() {
@@ -827,12 +1075,33 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
         const all = watches();
         current = undefined;
         retiring.clear();
-        await Promise.all(all.map(async (w) => {
-          if ((await busy(w.agent)) && cancel(w, { kind: "hook", reason: "shutdown" })) {
-            await within(SHUTDOWN_IDLE_MS, idleWaitOf(w.agent)?.() ?? Promise.resolve());
+        let m: Machinery | undefined;
+        if (all.length > 0) {
+          try {
+            m = await loadMachinery();
+          } catch (err) {
+            log(`${BIN}: desk: the phone's texts could not be carried over the shutdown: ${errText(err)}`);
           }
-          end(w);
-        }));
+        }
+        const working = await Promise.all(all.map((w) => busy(w.agent)));
+        /* one tick: the carry's snapshot, then the cancels - no turn can claim a queued text between the two */
+        const event = carryEvent(all, m);
+        const cut = all.filter((w, i) => working[i] && cancel(w, { kind: "hook", reason: "shutdown" }));
+        unclaim?.();
+        unclaim = undefined;
+        claims.clear();
+        /* the carry's write and the cut agents' unwinding share the one bound */
+        let wrote = event === undefined;
+        const writing = event === undefined || m === undefined
+          ? Promise.resolve()
+          : m.desk.appendEvent(home, event, { log }).then(() => { wrote = true; }, (err: unknown) => {
+            wrote = true;
+            log(`${BIN}: desk: the phone's texts could not be carried over the shutdown: ${errText(err)}`);
+          });
+        const quietly = (p: Promise<void>): Promise<void> => p.then(() => undefined, () => undefined);
+        await within(SHUTDOWN_IDLE_MS, Promise.all([writing, ...cut.map((w) => quietly(idleWaitOf(w.agent)?.() ?? Promise.resolve()))]));
+        if (!wrote) log(`${BIN}: desk: the carry over the shutdown was not written in ${SHUTDOWN_IDLE_MS / 1000} s; the shutdown goes on`);
+        for (const w of all) end(w);
         await within(SHUTDOWN_QUEUE_MS, queue);
         await recording;
       })();

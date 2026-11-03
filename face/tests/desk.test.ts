@@ -649,7 +649,8 @@ function conversationRoot(ledger: () => string) {
     },
     agentPresets: { mount: async (_agentCtx, id) => ({ id }) },
     permissionPresets: { set: (session, name) => { stored.set(session.id, name); }, current: (session) => stored.get(session.id) ?? "read-only" },
-    on: (_name, listener) => {
+    on: (name, listener) => {
+      if (String(name) !== "session/event") return () => {}; // the conversation's agent/inbox/claimed: no bus here
       listeners.add(listener);
       return () => {
         const file = ledger();
@@ -714,7 +715,7 @@ test("installDesk creates the desk conversation only when enabled with root, rou
     agent.status = "running";
     await desk.dispose(0);
     await desk.dispose(0);
-    assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]], "the running desk turn is cancelled once");
+    assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]], "the running desk turn is cancelled once");
     assert.equal(fake.listeners.size, 0);
     assert.equal(fake.letGo.length, 1);
     assert.doesNotMatch(fake.letGo[0], /"kind":"shutdown"/, "the conversation was let go before the shutdown was written");
@@ -1328,6 +1329,7 @@ test("installDesk loads the schedule only with the conversation; its status reac
   const on = fake.ctx.on;
   fake.ctx.on = (name, listener) => {
     const off = on(name, listener);
+    if (String(name) !== "session/event") return off;
     return () => {
       armedAtLetGo.push(clock.pending());
       return off();

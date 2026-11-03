@@ -80,7 +80,7 @@ import type { IncomingMessage } from "node:http";
 import { basename, extname, join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { createAnnotator, type Annotator } from "./annotator.ts";
-import { createDeskConversation, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
+import { createDeskConversation, type ClaimsOn, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
 import type { DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSessionPersistenceLike, SessionEventsOn } from "./desk-session.ts";
 import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskGuardCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
@@ -151,7 +151,12 @@ export interface TurnUsage {
  * again rather than never. P3's watch adds three: a `mute-set` and a `mute-cleared`, the mute's set and
  * lift as the pause's are, and a `watch-load`, one of the watch's files read - its repo-relative name, the
  * rows it loaded, each refusal's line, and, for a file refused whole, the `error` the watch keeps its last
- * good load against. */
+ * good load against. The hardening's graceful stop adds two (spec §16 H3, R93): a `desk-carry`, written by the desk
+ * conversation's dispose before it cancels anything - the phone's texts still queued on the desk session `sessionId`
+ * (`queued`, oldest first: each one's key, the message's id, its text without the provenance or context, and when the
+ * operator wrote it) and the phone turn under way (`cut`: its number, its message's key and when that was written) -
+ * and a `desk-carried`, the boot that answered it: the carry's `t` (`of`), the texts it posted again and those it
+ * skipped as already in the session (src/desk-conversation.ts). */
 export type DeskEvent =
   | { t: string; kind: "boot"; pid: number; version: string; deskEnabled: boolean }
   | { t: string; kind: "shutdown"; pid: number; code: number }
@@ -169,7 +174,12 @@ export type DeskEvent =
   | { t: string; kind: "budget-spent"; date: string; used: number; dailyTokens: number }
   | { t: string; kind: "mute-set"; by: MuteState["by"]; until?: string }
   | { t: string; kind: "mute-cleared"; by: "terminal" | "expiry" }
-  | { t: string; kind: "watch-load"; file: string; loaded: number; refused: string[]; error?: string };
+  | { t: string; kind: "watch-load"; file: string; loaded: number; refused: string[]; error?: string }
+  | {
+    t: string; kind: "desk-carry"; sessionId: string; queued: { key: string; text: string; at?: string }[];
+    cut?: { turn: number; key?: string; at?: string };
+  }
+  | { t: string; kind: "desk-carried"; of: string; posted: number; skipped: number };
 
 /** Every kind {@link DeskEvent} has, and only those. A record over the union rather than a list,
  * so a kind added to the type and not here fails to compile instead of reading back as skipped. */
@@ -188,6 +198,8 @@ const KINDS: Readonly<Record<DeskEvent["kind"], true>> = {
   "mute-set": true,
   "mute-cleared": true,
   "watch-load": true,
+  "desk-carry": true,
+  "desk-carried": true,
 };
 
 /** What a failure is reported as - in the append's failure line and the status's `ledgerError`:
@@ -1510,6 +1522,15 @@ function busOf(ctx: DeskConversationCtxLike): SessionEventsOn {
   };
 }
 
+/** dsh-agent's `agent/inbox/claimed` on the booted root context, as the desk conversation hears it: every agent's
+ * claims (the event is scope-filtered, and the root's listener is unscoped). */
+function claimsOf(ctx: DeskConversationCtxLike): ClaimsOn {
+  return (listener) => {
+    const off = (ctx as unknown as { on(name: string, listener: (payload: never) => void): () => unknown }).on("agent/inbox/claimed", listener);
+    return () => { off(); };
+  };
+}
+
 /** The desk session's slice of `ctx` with the session persistence a keyed post needs (src/desk-conversation.ts):
  * `ctx` itself when it carries `sessionPersistence`, or when it has no `get` that answers one; else a slice that
  * reads `ctx`'s members through it and carries the persistence `ctx.get("sessionPersistence")` answered - main.ts
@@ -1706,6 +1727,7 @@ export function installDesk(
     : createDeskConversation({
       session: wiring.session,
       on: wiring.on,
+      onClaimed: claimsOf(wiring.sessionCtx),
       deadlineMs: deps.deskDeadlineMs,
       /* the day's budget against the standing orders' cap - none until their clock has read standing.yml (P2-8) */
       budget: () => readBudget(home, now(), schedule?.dailyTokens()),
