@@ -3716,12 +3716,12 @@ D18); a `spill-policy` row in the profile patch changes it.
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 32 isolated real boots; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 33 isolated real boots; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 32 real boots listed below; `FACE_SMOKE=1` runs
-them too (2,974 tests in 202 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening merged:
-2,942 pass and 32 skipped offline; 2,975/2,975 under `FACE_SMOKE=1`).
+Offline, `npm test` skips the 33 real boots listed below; `FACE_SMOKE=1` runs
+them too (2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
+graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
 the session's directory AND `/tmp` and `os.tmpdir()` (by real path; `/tmp` is `/private/tmp` on
