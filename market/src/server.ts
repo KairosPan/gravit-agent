@@ -5,7 +5,9 @@
  *   npm run market                    → http://127.0.0.1:4821 · `--port <n>` listens elsewhere; MARKET_BIND widens the listener and
  *                                       MARKET_HOSTS (comma-separated `host:port`) names extra Host values answered as local
  *
- *   GET  /api/health                  {ok: true, service: "market"}
+ *   GET  /api/health                  {ok: true, service: "market", sources, china, akshare, ifind} (protocol.ts; no token named)
+ *   the source protocol               protocol.ts: the sources, the hub, China and a price, for the account's adapters
+ *   Lunhui's reach and AKShare        routes-cn.ts: /api/cn/relay, /api/cn/ifind, /api/akshare/tools, /api/akshare/call
  *
  * Only this machine's own programs talk to it: a foreign Origin, a Sec-Fetch-Site of cross-site or same-site, or a Host that is not this
  * machine's (a DNS-rebinding page) is 403 before any route sees it. No answer is stored by the browser (cache-control: no-store).
@@ -14,6 +16,10 @@
 import express from "express";
 import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
+import { akshareCommand } from "./live/akshare.ts";
+import { realMarketCore } from "./core.ts";
+import { mountProtocol } from "./protocol.ts";
+import { mountCn } from "./routes-cn.ts";
 
 export const MARKET_PORT = 4821;
 
@@ -72,8 +78,9 @@ export async function startMarketServer(o: MarketServerOptions): Promise<MarketS
   // declared gzip that is not would otherwise end in zlib's error instead of the one fixed sentence below
   app.use(express.json({ inflate: false }));
 
-  app.get("/api/health", (_req, res) => void res.json({ ok: true, service: "market" }));
   o.mount?.(app);
+  // the bare health answer, where the routes mounted give none of their own (protocol.ts mountProtocol answers it with the core's parts)
+  app.get("/api/health", (_req, res) => void res.json({ ok: true, service: "market" }));
 
   // A body the JSON parser could not read — not JSON, too large, an encoding it does not take — is answered with one fixed sentence and is
   // neither logged nor said back: the parser's own message quotes what it could not read. Every other error goes on to express as before
@@ -97,11 +104,15 @@ export async function startMarketServer(o: MarketServerOptions): Promise<MarketS
     url: `http://127.0.0.1:${typeof bound === "object" && bound ? bound.port : o.port}`,
     close() {
       closing ??= (async () => {
-        await o.close?.();
-        await new Promise<void>((resolve) => {
-          server.close(() => resolve());
-          server.closeAllConnections();
-        });
+        // the listener closes whatever the core's close does: a throwing close never leaves the port held
+        try {
+          await o.close?.();
+        } finally {
+          await new Promise<void>((resolve) => {
+            server.close(() => resolve());
+            server.closeAllConnections();
+          });
+        }
       })();
       return closing;
     },
@@ -116,12 +127,19 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   };
   const port = Number(at("--port") ?? MARKET_PORT);
   if (!Number.isInteger(port) || port < 0) throw new Error("--port is a port number");
-  const srv = await startMarketServer({ port, bind: process.env.MARKET_BIND || undefined, hosts: parseHosts(process.env.MARKET_HOSTS) }).catch((e: NodeJS.ErrnoException) => {
+  const core = realMarketCore();
+  const mount = (app: express.Express) => {
+    mountProtocol(app, core);
+    mountCn(app, core);
+  };
+  const srv = await startMarketServer({ port, bind: process.env.MARKET_BIND || undefined, hosts: parseHosts(process.env.MARKET_HOSTS), mount, close: () => core.close() }).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "EADDRINUSE") throw e;
     console.error(`port ${port} is already in use: a market is probably running already`);
     process.exit(1);
   });
   console.log(`market at ${srv.url} · keyless public data · Ctrl-C to stop`);
+  console.log(`Lunhui's reach: /api/cn/relay (Tencent, Eastmoney) · ${core.cn?.ifind.configured() ? "iFinD configured" : "iFinD not configured (IFIND_REFRESH_TOKEN or IFIND_ACCESS_TOKEN in this process's environment)"}`);
+  console.log(`AKShare: ${akshareCommand()} · started on first use (/api/akshare/tools, /api/akshare/call)`);
   const stop = () => srv.close().then(() => process.exit(0));
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);

@@ -43,10 +43,10 @@ describe("the AKShare sidecar", () => {
     ]);
   });
 
-  it("akshareCommand reads PORTFOLIO_AKSHARE_BIN, else ~/.local/bin/akshare-mcp", () => {
-    expect(akshareCommand({ PORTFOLIO_AKSHARE_BIN: "/opt/x" })).toBe("/opt/x");
+  it("akshareCommand reads MARKET_AKSHARE_BIN, else ~/.local/bin/akshare-mcp", () => {
+    expect(akshareCommand({ MARKET_AKSHARE_BIN: "/opt/x" })).toBe("/opt/x");
     expect(akshareCommand({})).toBe(join(homedir(), ".local", "bin", "akshare-mcp"));
-    expect(akshareCommand({ PORTFOLIO_AKSHARE_BIN: "" })).toBe(join(homedir(), ".local", "bin", "akshare-mcp"));
+    expect(akshareCommand({ MARKET_AKSHARE_BIN: "" })).toBe(join(homedir(), ".local", "bin", "akshare-mcp"));
   });
 
   it("the child inherits no secret", async () => {

@@ -1,6 +1,6 @@
 /** The AKShare sidecar: `akshare-mcp` (a Python MCP server over AKShare, public A-share and other Chinese market data) run as the
  * Account's own MCP child over stdio. The pin, its fourteen tools and the install line (`uv tool install --python 3.12 --with 'mcp<2'`)
- * live in account/README.md; the command is PORTFOLIO_AKSHARE_BIN, else ~/.local/bin/akshare-mcp - argv only, never a shell.
+ * live in account/README.md; the command is MARKET_AKSHARE_BIN, else ~/.local/bin/akshare-mcp - argv only, never a shell.
  *
  * Started on use, not at boot: one child is shared by every caller while it lives; when it exits (or a start fails) it is forgotten and
  * the next ask starts a new one - no eager restart, no restart loop. A call that times out recycles the child (closed and forgotten), so a
@@ -43,9 +43,9 @@ const passed = (k: string) => PASSED.has(k) || k.startsWith("LC_") || PROXY.has(
 /** a proxy URL without its user:password@ */
 const noUserinfo = (v: string) => v.replace(/^([a-z][a-z0-9+.-]*:\/\/)?[^/@]*@/i, "$1");
 
-/** PORTFOLIO_AKSHARE_BIN when set and not empty, else the uv tool install's default place */
+/** MARKET_AKSHARE_BIN when set and not empty, else the uv tool install's default place */
 export function akshareCommand(env: NodeJS.ProcessEnv = process.env): string {
-  return env.PORTFOLIO_AKSHARE_BIN || join(homedir(), ".local", "bin", "akshare-mcp");
+  return env.MARKET_AKSHARE_BIN || join(homedir(), ".local", "bin", "akshare-mcp");
 }
 
 /** The child's environment: an allowlist of the Account's own (PATH, HOME, USER, LANG and LC_*, the temp dirs, the TLS roots, the proxies

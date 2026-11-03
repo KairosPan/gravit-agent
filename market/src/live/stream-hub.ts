@@ -262,6 +262,16 @@ export interface MarketHub {
   /** the hub carries the market's PRICE alone — no book, no trades (a US share's quote, live/us-quotes.ts): a page is told its quote only.
    * Absent: the hub's markets carry all three */
   pricesOnly?(source: string, symbol: string): boolean;
+  /** THE MARKET'S TRADES RING after a seq (the trades since() counts, by their seq: what a caller elsewhere — the account, over the market's
+   * /api/hub — needs to judge a paper order as since() does here), each with its seq, its moment (ms), its price and whether it came in a
+   * subscription's snapshot; and the seq of the newest trade the ring has let go of (a range from before it is partial). Absent: the hub
+   * keeps no ring (a US share's quote) */
+  ring?(source: string, symbol: string, after: number): HubRing;
+}
+/** a market's trades ring after a seq (MarketHub.ring) */
+export interface HubRing {
+  trades: Array<{ seq: number; at: number; price: number; snap: boolean }>;
+  evictedSeq: number;
 }
 
 /** SEVERAL HUBS AS ONE: the venues' streams, and beside them the US shares' background reader (live/us-quotes.ts UsQuoteFeed) — each market
@@ -279,6 +289,7 @@ export function joinHubs(...hubs: MarketHub[]): MarketHub {
     since: (source, symbol, seq, cut) => of(source, symbol)?.since(source, symbol, seq, cut) ?? { trades: 0, seq: 0 },
     confirmed: async (source, symbol, maxAgeMs, waitMs) => of(source, symbol)?.confirmed(source, symbol, maxAgeMs, waitMs),
     pricesOnly: (source, symbol) => of(source, symbol)?.pricesOnly?.(source, symbol) === true,
+    ring: (source, symbol, after) => of(source, symbol)?.ring?.(source, symbol, after) ?? { trades: [], evictedSeq: 0 },
     onTick: (fn) => {
       const offs = hubs.map((h) => h.onTick(fn));
       return () => offs.forEach((off) => off());
@@ -612,6 +623,12 @@ export class StreamHub implements MarketHub {
       lo = lo === undefined ? t.price : Math.min(lo, t.price);
     }
     return { ...(hi !== undefined ? { hi } : {}), ...(lo !== undefined ? { lo } : {}), trades: n, seq: mk.seq, ...(mk.evictedSeq > seq ? { partial: true as const } : {}) };
+  }
+
+  ring(source: string, symbol: string, after: number): HubRing {
+    const mk = this.markets.get(`${source}|${symbol}`);
+    if (!mk) return { trades: [], evictedSeq: 0 };
+    return { trades: mk.ring.filter((t) => t.seq > after).map((t) => ({ seq: t.seq, at: t.at, price: t.price, snap: t.snap === true })), evictedSeq: mk.evictedSeq };
   }
 
   async confirmed(source: string, symbol: string, maxAgeMs: number, waitMs: number): Promise<HubQuote | undefined> {
