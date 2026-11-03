@@ -62,11 +62,8 @@ import type { AutonomyHook, LiveOrder } from "./account/live-orders.ts";
 import type { LiveEarn } from "./account/live-earn.ts";
 import type { Payment } from "./account/payments.ts";
 import { exploreAcross, type Exploration, type ExploreSort, type ExploreVenue } from "./live/explore.ts";
-import { holdBackMs, KEEP_MS as LISTING_KEEP_MS, publicSources, type PublicSource } from "../../../market/src/live/public-markets.ts";
+import { BOOK_TOP, CHINA_ID, CHINA_NAME, CHINA_NOTE, holdBackMs, KEEP_MS as LISTING_KEEP_MS, RANK_ROWS, type ChinaHistory, type ChinaMarket, type ChinaRange, type ChinaSource, type HubTick, type MarketHub, type Price, type PublicSource } from "./market/shapes.ts";
 import { TABS, type TabId } from "./live/categories.ts";
-import { CHINA_ID, CHINA_NAME, CHINA_NOTE, type ChinaHistory, type ChinaMarket, type ChinaSource } from "../../../market/src/live/china.ts";
-import type { ChinaRange } from "../../../market/src/live/cn-history.ts";
-import { RANK_ROWS } from "../../../market/src/live/cn-rank.ts";
 import { CHAIN_BY_ID, CHAINS, type ChainName } from "./live/chain.ts";
 import { mountPayees, type PayeeWorld } from "./account/payees.ts";
 import { doorOf, EXCHANGES } from "./account/doors.ts";
@@ -90,7 +87,6 @@ import { publicSender } from "./live/chain.ts";
 import { agentStatus, type SubAccount } from "./account/state.ts";
 import { publicChain } from "./live/chain.ts";
 import { realMm } from "./live/metamask.ts";
-import { publicPrices } from "../../../market/src/live/prices.ts";
 import { ROBINHOOD_MCP } from "./live/robinhood.ts";
 import { OAuthSignIn } from "./live/signin.ts";
 import { reachBanUntil, reachKeepMs, reachOf, type Reach } from "./live/reach.ts";
@@ -102,7 +98,6 @@ import { isPlain } from "./account/state.ts";
 import type { AgentAction, Envelope, Hex, OwnerAction } from "./account/sign.ts";
 import { Desk, type Brain, type BrainStatus, type BrainTest, type DeskWorld } from "./account/desk.ts";
 import { AccountStream } from "./account/stream.ts";
-import { BOOK_TOP, joinHubs, StreamHub, type HubTick, type HubVenue, type MarketHub } from "../../../market/src/live/stream-hub.ts";
 import { applyBrainKey, BrainKeyStage, envBlocksOf, envWinsOf, type BrainKeyDone } from "./account/brain-keys.ts";
 import { brainProviders, testBrain } from "./account/brains.ts";
 
@@ -156,16 +151,17 @@ export interface ServiceOptions {
   /** REAL accounts only (the server's default): no simulated venue is mounted, and the account layer has no simulated payee, plug-in
    * or clock. What is on the service is what the owner connected through each venue's own interface */
   real?: boolean | undefined;
-  /** the keyless public market data Markets reads beside the connected venues (default: live/public-markets.ts publicSources over the live
-   * connection's network and exchange library); stand-ins in tests */
-  publicMarkets?: PublicSource[] | undefined;
+  /** the keyless public market data Markets reads beside the connected venues: the market's sources as its link has them now (server.ts
+   * main: market/link.ts sources(), [] until the market answers, read again on each use), or a test's list. Absent: none — a service made
+   * without a link reads no public source */
+  publicMarkets?: PublicSource[] | (() => PublicSource[]) | undefined;
   /** THE DESK (account/desk.ts), on a real account: the brains its house seats may think with and how often its clock ticks (0: only when
    * asked, as in tests). The brains, by default: every provider the Brains place offers (account/brains.ts brainProviders) — Claude through
    * the Anthropic API and each OpenAI-format preset — each ready when its key is there; a scripted one in tests. `env`: the environment
    * those brains read before their key files, as the answer to a key typed on the face says it (envWins); the process's own by default */
   desk?: { brain?: Brain | Brain[] | undefined; tickMs?: number | undefined; firstCycleMs?: number | undefined; env?: NodeJS.ProcessEnv | undefined } | undefined;
-  /** THE VENUES' LIVE STREAMS as a test hands them in (a hub over a stand-in WebSocket, or test/standin's stand-in prices): the real server
-   * starts its own instead (watchStreams), and without either nothing is streamed — every price is a REST read, as before */
+  /** THE VENUES' LIVE STREAMS: the market's hub as the account mirrors it (server.ts main: market/hub.ts RemoteHub), or a test's (a hub
+   * over a stand-in WebSocket, or test/standin's stand-in prices); without one nothing is streamed — every price is a REST read, as before */
   streams?: MarketHub | undefined;
   /** CHINA: the A shares Tencent ranks, quotes, charts and finds (live/china.ts) — the China tab, China's hits in a search, an A share's
    * quote and history. The real server mounts its own (server.ts), as it does `streams`; without one China is not read at all, and nothing
@@ -176,6 +172,8 @@ export interface ServiceOptions {
 /** how long a search waits for China's hits beside the other sources (exploreAcross's per-source budget): late, they are `missing` */
 export const CHINA_SEARCH_WAIT_MS = 4_000;
 const CHINA_NOT_READ = "China is not read on this account";
+/** no price for anything: a service made without the market's link (server.ts main hands its remotePrice in) prices nothing it cannot price itself */
+const noPrice: Price = () => Promise.resolve(undefined);
 
 /** one slice of an order (or any step an agent flies): where, what, and the agent's words for it */
 export interface BatchStep {
@@ -896,12 +894,21 @@ export class PortfolioService {
   }
 
   private publicMade: PublicSource[] | undefined;
-  /** the keyless public sources, made once and kept (what each keeps — its answers for a while, its exchange client — lives in it), each
-   * read through the account's own cache (`keptPublic`) */
+  /** the list publicMade was wrapped from: a new list (the market's, once it answers or changes) is wrapped again */
+  private publicGot: PublicSource[] | undefined;
+  /** how many lists have been wrapped: what a kept answer made from the list (explore) is kept under */
+  private publicGen = 0;
+  /** the keyless public sources as they are handed in (the market's link's latest list, or a test's), each read through the account's own
+   * cache (`keptPublic`) — wrapped again whenever the list handed in is another one, so a list that was empty while the market was down
+   * fills in once it answers, with no restart */
   private publicMarkets(): PublicSource[] {
-    if (!this.publicMade) {
-      const deps = this.liveDeps();
-      this.publicMade = (this.opts.publicMarkets ?? publicSources({ http: deps.http, open: deps.openExchange, clock: deps.clock })).map((s) => this.keptPublic(s));
+    const o = this.opts.publicMarkets;
+    const got = typeof o === "function" ? o() : (o ?? []);
+    if (!this.publicMade || got !== this.publicGot) {
+      this.publicGot = got;
+      this.publicGen++;
+      this.publicRaw.clear();
+      this.publicMade = got.map((s) => this.keptPublic(s));
     }
     return this.publicMade;
   }
@@ -936,7 +943,10 @@ export class PortfolioService {
     });
     // the key exactly as asked (a row's key is not a search: kalshi:KXFED and kalshi:kxfed are not one row), written so that no `|` in it
     // reads as the next part of the question
-    return this.marketReads.get(`explore|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}`, 30_000, async () => {
+    // kept under the public list it was made from (publicGen): a list that fills in or changes (the market answering again) is not hidden
+    // behind an answer made without it
+    const pub = this.publicMarkets();
+    return this.marketReads.get(`explore|${this.publicGen}|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}`, 30_000, async () => {
       const placed = await Promise.all(connected.map(async (v) => ({ ...v, ...(await this.placed(v.connector)) })));
       // what is listed is what serves the network the account runs on: a connected venue that does not now (its place rule, its edge, or
       // its trading line closed here), and a public source whose venue the list of where the user can connect judged not served or with
@@ -946,7 +956,7 @@ export class PortfolioService {
       const refusing = new Set((this.venuesKept?.v ?? []).filter((x) => x.verdict === "not-served" || x.verdict === "closed" || x.verdict === "close-only").map((x) => x.connector));
       const serves = (r: { id: string; connected: boolean; connector?: string | undefined }): boolean => (r.connected ? !away.has(r.id) : !(r.connector !== undefined && refusing.has(r.connector)));
       const [explored, hits] = await Promise.all([
-        exploreAcross({ connected: placed, public: this.publicMarkets() }, { q, ...(key ? { key } : {}), limit, clock: () => this.realNow(), serves, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) }),
+        exploreAcross({ connected: placed, public: pub }, { q, ...(key ? { key } : {}), limit, clock: () => this.realNow(), serves, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) }),
         china ? within(CHINA_SEARCH_WAIT_MS, china.search(q), CHINA_ID, CHINA_NAME) : undefined,
       ]);
       if (hits === undefined) return explored;
@@ -1863,7 +1873,7 @@ export class PortfolioService {
   private liveDeps(): LiveDeps {
     // made once: the chain clients and the price cache are kept between connections
     // a paper account prices itself at the same public sources Markets reads (live/paper.ts), through the service's own keeping of them
-    return (this.liveMade ??= { home: this.opts.home, http: realHttp, clock: Date.now, mm: realMm(this.opts.mm?.bin, this.opts.mm?.timeoutMs), chain: this.opts.liveDeps?.chain ?? publicChain(), price: this.opts.liveDeps?.price ?? publicPrices({ open: this.opts.liveDeps?.openExchange, clock: this.opts.liveDeps?.clock }), signIn: (kind) => this.signIn(kind), publicSources: () => this.publicMarkets(), streams: () => this.hub, ...this.opts.liveDeps, proofs: this.proofs });
+    return (this.liveMade ??= { home: this.opts.home, http: realHttp, clock: Date.now, mm: realMm(this.opts.mm?.bin, this.opts.mm?.timeoutMs), chain: this.opts.liveDeps?.chain ?? publicChain(), price: this.opts.liveDeps?.price ?? noPrice, signIn: (kind) => this.signIn(kind), publicSources: () => this.publicMarkets(), streams: () => this.hub, ...this.opts.liveDeps, proofs: this.proofs });
   }
   private liveMade: LiveDeps | undefined;
 
@@ -2174,32 +2184,22 @@ export class PortfolioService {
 
   // ---- THE VENUES' LIVE STREAMS (live/stream-hub.ts) -------------------------------------------------------------------------------------
 
-  /** the hub the real server started (watchStreams), or the one a test handed in (opts.streams); none: nothing is streamed */
-  private hubMade: MarketHub | undefined;
+  /** the hub handed in (opts.streams: the market's, mirrored by the link — server.ts main — or a test's); none: nothing is streamed */
   private get hub(): MarketHub | undefined {
-    return this.hubMade ?? this.opts.streams;
+    return this.opts.streams;
   }
-  /** THE REAL SERVER STREAMS THE VENUES (never in tests, which hand in their own): the hub made now and listened to — and lazily, no socket
-   * opens until a market is wanted (a paper account's resting order or position, a page showing it), so the server's listen never waits on
-   * it. A venue is streamed only while its keyless REST answers this network (restAnswers). The function it returns closes it */
+  /** THE REAL SERVER LISTENS TO THE STREAMS (a test that hands in a hub may too): the hub handed in is listened to now — the market streams
+   * the venues, and its link mirrors them (market/hub.ts), so nothing opens here until a market is wanted. The function it returns stops
+   * listening */
   watchStreams(): () => void {
-    if (!this.hubMade && !this.opts.streams) {
-      // the venues' streams, and beside them each public source's own background reader (the US stocks line's: live/us-quotes.ts
-      // UsQuoteFeed), joined as one hub — a market is asked of the one that covers it
-      const venues = new StreamHub({ answers: (v) => this.restAnswers(v) });
-      const feeds = this.publicMarkets().flatMap((x) => (x.feed ? [x.feed] : []));
-      this.hubMade = feeds.length ? joinHubs(venues, ...feeds) : venues;
-    }
     this.listenHub();
     return () => this.closeStreams();
   }
-  /** every stream closed and every timer of it let go (the server closing) */
+  /** the hub no longer listened to (the server closing): the hub itself is its maker's to close (server.ts closes the market's link) */
   closeStreams(): void {
     this.hubOff?.();
     this.hubOff = undefined;
     this.hubHeard = undefined;
-    this.hubMade?.close();
-    this.hubMade = undefined;
   }
   /** every paper account's book written as it stands (what a fill a live tick found, or a trailing stop's move, still holds): the server
    * closing */
@@ -2217,20 +2217,6 @@ export class PortfolioService {
     }
     return hub;
   }
-  /** WHETHER A VENUE'S REST ANSWERS THIS NETWORK, as the hub asks before it streams the venue (location-neutral: never by where this
-   * machine is, only by what the venue's own keyless REST said here): its listing answered in this run, through the account's own read
-   * cache, and no refusal that is the venue's rule for this network — its place rule, the server in front of it, a ban — holds it back now.
-   * A REST read that merely timed out or was told to wait does not close a stream; Hyperliquid's REST is either of its two listings */
-  private restAnswers(venue: HubVenue): boolean {
-    const ids = venue === "hyperliquid" ? ["hyperliquid", "hyperliquid-preipo"] : [venue];
-    return ids.some((id) => {
-      const ns = `public:${id}`;
-      const held = this.marketReads.heldOf(ns);
-      if (held && (notServedBy(held) !== undefined || isBan(held))) return false;
-      return !!this.marketReads.healthOf(ns)?.lastOkAt;
-    });
-  }
-
   /** what each page follows: its client's name → each key it follows → the stream it holds for it, and its release */
   private readonly pageHolds = new Map<string, Map<string, { source: string; symbol: string; release: () => void }>>();
   /** the keys the pages follow, by the stream each stands for (`source|symbol` → each key, and how many pages follow it) */

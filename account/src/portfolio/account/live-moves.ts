@@ -22,7 +22,7 @@ import { no } from "../refuse.ts";
 import type { AccountKind } from "../accounts.ts";
 import { STABLECOINS, type ChainName } from "../live/chain.ts";
 import { isStable } from "../live/types.ts";
-import { holdBackMs } from "../../../../market/src/live/public-markets.ts";
+import { holdBackMs } from "../market/shapes.ts";
 import type { LiveTrader } from "../live/trade.ts";
 import type { Landed, LiveReceipt, LiveWriter, WalletTx } from "../live/writes.ts";
 import type { BridgeRoute } from "../live/bridge.ts";

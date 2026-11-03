@@ -15,7 +15,7 @@
 import { isRefusal, type Refusal } from "../../core/errors.ts";
 import { no, unaddressed } from "../refuse.ts";
 import { r2, type Account, type AccountAdapter, type Holding, type Intent } from "../accounts.ts";
-import { holdBackMs } from "../../../../market/src/live/public-markets.ts";
+import { holdBackMs } from "../market/shapes.ts";
 import { isStable, type LiveBalance, type LiveSource } from "../live/types.ts";
 
 export interface LiveAccountOptions {

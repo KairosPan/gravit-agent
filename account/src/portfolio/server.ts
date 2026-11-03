@@ -143,7 +143,6 @@
  *
  * No answer is stored by the browser (cache-control: no-store).
  */
-import { akshareCommand, createAkshare, type Akshare, type AkshareWord } from "../../../market/src/live/akshare.ts";
 import express from "express";
 import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
@@ -168,12 +167,10 @@ import { sessionFrom } from "./openness.ts";
 import type { OrderPlan } from "./router.ts";
 import { isPending, loadOpenness, PortfolioService } from "./service.ts";
 import { defaultHome } from "./home.ts";
-import { chinaSource } from "../../../market/src/live/china.ts";
 import { pairingCode } from "./account/pairing.ts";
 import type { Side } from "./venues.ts";
-import { type CnHttp, cnHosts, realCnHttp } from "../../../market/src/live/cn-http.ts";
-import { type CnRelay, RELAY_URL_MAX, createCnRelay, relayTarget } from "../../../market/src/live/cn-relay.ts";
-import { type CnIfind, IFIND_HOST, IFIND_QUERY, createIfind } from "../../../market/src/live/cn-ifind.ts";
+import { MARKET_DOWN, MARKET_URL_DEFAULT } from "./market/client.ts";
+import { connectMarket, type MarketLink } from "./market/link.ts";
 
 /** what every request outside /api/ is answered (404), with or without the account layer: the Account serves no page */
 export const NO_PAGE = "The Account serves no page: its owner's screens are Gravit's face (Markets, Trade, Account). This address answers its API under /api/.";
@@ -218,18 +215,26 @@ export interface PortfolioServerOptions {
   /** how often the net worth curve gets a point (account/networth.ts), in milliseconds, on the real clock: 300000 (five minutes) unless
    * said; 0 takes none, nor the points a connection or a disconnection adds. Only with the account layer mounted */
   snapshotMs?: number | undefined;
-  /** Lunhui's reach (live/cn-relay.ts, cn-ifind.ts): the relay and the iFinD client behind /api/cn/*; absent, both routes answer `off` and never the network */
-  cn?: { relay: CnRelay; ifind: CnIfind } | undefined;
-  /** how long past a relay target's own limit a request may wait for a slot in the relay's queue (milliseconds): 3000 unless said */
-  cnQueueMs?: number | undefined;
-  /** the AKShare sidecar (live/akshare.ts) behind /api/akshare/*; absent, both routes answer `off` and no child is ever spawned. The server's close ends it */
-  akshare?: Akshare | undefined;
+  /** THE MARKET (market/link.ts): Lunhui's reach (/api/cn/relay, /api/cn/ifind) and the AKShare sidecar (/api/akshare/*) are the market's,
+   * relayed to it byte for byte; absent, the four routes answer `off` and never the network. The server's close closes the link */
+  market?: MarketLink | undefined;
 }
 
-const RELAY_STATUS = { "not-listed": 403, timeout: 504, "too-large": 502, unreachable: 502, off: 503 } as const;
-const IFIND_STATUS = { unconfigured: 503, credential: 502, timeout: 504, "too-large": 502, unreachable: 502, "not-the-query": 400, off: 503 } as const;
-
-const AKSHARE_STATUS = { off: 503, "unknown-tool": 400, "bad-arguments": 400, unavailable: 503, timeout: 504, "too-large": 502 } as const satisfies Record<AkshareWord, number>;
+/** the refusals the four routes answer themselves: with no market (`off`), a request the market would refuse before reading anything, or
+ * the market not answering (`unreachable`, AKShare's `unavailable`) — the market's own refusals come back as it said them */
+const RELAY_STATUS = { "not-listed": 403, unreachable: 502, off: 503 } as const;
+const IFIND_STATUS = { unreachable: 502, "not-the-query": 400, off: 503 } as const;
+const AKSHARE_STATUS = { off: 503, "bad-arguments": 400, unavailable: 503 } as const;
+/** a relay URL's longest (the market's cn-relay.ts RELAY_URL_MAX), and the one query iFinD is asked (its cn-ifind.ts IFIND_QUERY): what the
+ * routes check before they answer `off`, as they did when the account ran them */
+const RELAY_URL_MAX = 2_048;
+const IFIND_QUERY = /^A股 \d{4}年\d{2}月\d{2}日涨跌幅 成交额 主力资金流向 所属概念$/;
+/** how long the account waits for the market's answer to a relay: Lunhui's (the relay's own longest, and its queue's), and AKShare's (its
+ * 120 s call, and the child's start) */
+const CN_RELAY_MS = 20_000;
+const AKSHARE_RELAY_MS = 125_000;
+/** the market's headers a relay answers with, where it sent them */
+const RELAYED_HEADERS = ["content-type", "location", "x-cn-relay", "x-cn-ifind", "x-content-type-options"] as const;
 
 export interface PortfolioServerHandle {
   url: string;
@@ -412,61 +417,70 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   // the fixture's event contracts and the simulated router are the simulated statement's: a real account answers from its venues
   const simulatedOnly = (res: express.Response) => void res.status(409).json({ ok: false, refusal: no("E_ACCOUNT_BAD_ACTION", { message: "this account holds real accounts only: Markets is GET /api/account/explore, a price is GET /api/account/market" }) });
 
-  // Lunhui's reach: two reads (they work on a --read-only account), behind the fence above. Each answers the upstream's status, content type
-  // and bytes unchanged, marked by a header; a refusal is its own word and status
-  app.get("/api/cn/relay", wrap(async (req, res) => {
-    const refuse = (word: keyof typeof RELAY_STATUS) => void res.status(RELAY_STATUS[word]).set("x-cn-relay", "refused").json({ ok: false, relay: word });
-    const raw = req.query.url;
-    if (typeof raw !== "string" || raw.length > RELAY_URL_MAX) return refuse("not-listed");
-    if (!opts.cn) return refuse("off");
-    const target = relayTarget(raw);
-    if (!target) return refuse("not-listed");
-    const headers: Record<string, string> = {};
-    for (const k of ["accept", "referer", "user-agent"]) { const v = req.headers[k]; if (typeof v === "string") headers[k] = v; }
-    // a request queued for a slot has no deadline of its own until it holds one: its whole wait is bounded here
-    let timer: NodeJS.Timeout | undefined;
-    const late = new Promise<"late">((resolve) => { timer = setTimeout(() => resolve("late"), target.timeoutMs + (opts.cnQueueMs ?? 3_000)); });
-    const gone = new AbortController();
-    res.on("close", () => gone.abort());
-    const a = await Promise.race([opts.cn.relay(raw, headers, gone.signal), late]).finally(() => clearTimeout(timer));
-    if (a === "late") { gone.abort(); return refuse("timeout"); }
-    if (a.kind === "refused") return refuse(a.word);
-    res.status(a.status).set("x-cn-relay", "upstream").set("x-content-type-options", "nosniff").set("content-type", a.contentType ?? "application/octet-stream");
-    if (a.status >= 300 && a.status < 400 && a.location) res.set("location", a.location);
-    res.send(Buffer.from(a.bytes));
-  }));
-  app.post("/api/cn/ifind", wrap(async (req, res) => {
-    const refuse = (word: keyof typeof IFIND_STATUS) => void res.status(IFIND_STATUS[word]).set("x-cn-ifind", "refused").json({ ok: false, ifind: word });
-    const q = (req.body as { query?: unknown } | undefined)?.query;
-    if (typeof q !== "string" || !IFIND_QUERY.test(q)) return refuse("not-the-query");
-    if (!opts.cn) return refuse("off");
-    const a = await opts.cn.ifind.ask(q);
-    if (a.kind === "refused") return refuse(a.word);
-    res.status(a.status).set("x-cn-ifind", "upstream").set("x-content-type-options", "nosniff").set("content-type", a.contentType ?? "application/octet-stream").send(Buffer.from(a.bytes));
-  }));
-
-  // The AKShare sidecar: two reads (they work on a --read-only account), behind the fence above, nothing written. The child's answer comes back
-  // unchanged; a refusal is the route's own word and status
-  const akshareRefuse = (res: express.Response, word: AkshareWord, message: string) => void res.status(AKSHARE_STATUS[word]).json({ ok: false, akshare: word, message });
+  // Lunhui's reach and the AKShare sidecar: four reads (they work on a --read-only account), behind the fence above, each the market's —
+  // relayed to it unchanged, and its status, body and headers (RELAYED_HEADERS) answered unchanged, never decoded. A caller that goes away
+  // aborts the market's request (callerGone), so a closed tab does not hold the sidecar. A refusal of the account's own is its word and status
   /** aborted when the caller goes away before the answer is sent */
   const callerGone = (res: express.Response) => {
     const c = new AbortController();
     res.on("close", () => { if (!res.writableFinished) c.abort(); });
     return c.signal;
   };
+  /** the market's answer to `path`, relayed; `down` when it did not answer */
+  const relay = async (res: express.Response, path: string, init: { method: "GET" | "POST"; headers?: Record<string, string>; body?: string; timeoutMs: number }, down: () => void) => {
+    const signal = callerGone(res);
+    const r = await opts.market!.client.raw(path, { ...init, signal });
+    if (isRefusal(r)) return signal.aborted ? undefined : down();
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(await r.arrayBuffer());
+    } catch {
+      return signal.aborted || res.headersSent ? undefined : down();
+    }
+    if (signal.aborted) return;
+    res.status(r.status);
+    for (const h of RELAYED_HEADERS) {
+      const v = r.headers.get(h);
+      if (v !== null) res.setHeader(h, v);
+    }
+    res.end(bytes);
+  };
+  const forwarded = (req: express.Request): Record<string, string> => {
+    const headers: Record<string, string> = {};
+    for (const k of ["accept", "referer", "user-agent"]) { const v = req.headers[k]; if (typeof v === "string") headers[k] = v; }
+    return headers;
+  };
+  app.get("/api/cn/relay", wrap(async (req, res) => {
+    const refuse = (word: keyof typeof RELAY_STATUS) => void res.status(RELAY_STATUS[word]).set("x-cn-relay", "refused").json({ ok: false, relay: word });
+    if (!opts.market) {
+      const raw = req.query.url;
+      if (typeof raw !== "string" || raw.length > RELAY_URL_MAX) return refuse("not-listed");
+      return refuse("off");
+    }
+    const at = req.originalUrl.indexOf("?");
+    await relay(res, `/api/cn/relay${at >= 0 ? req.originalUrl.slice(at) : ""}`, { method: "GET", headers: forwarded(req), timeoutMs: CN_RELAY_MS }, () => refuse("unreachable"));
+  }));
+  app.post("/api/cn/ifind", wrap(async (req, res) => {
+    const refuse = (word: keyof typeof IFIND_STATUS) => void res.status(IFIND_STATUS[word]).set("x-cn-ifind", "refused").json({ ok: false, ifind: word });
+    if (!opts.market) {
+      const q = (req.body as { query?: unknown } | undefined)?.query;
+      if (typeof q !== "string" || !IFIND_QUERY.test(q)) return refuse("not-the-query");
+      return refuse("off");
+    }
+    await relay(res, "/api/cn/ifind", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(req.body ?? {}), timeoutMs: CN_RELAY_MS }, () => refuse("unreachable"));
+  }));
+  const akshareRefuse = (res: express.Response, word: keyof typeof AKSHARE_STATUS, message: string) => void res.status(AKSHARE_STATUS[word]).json({ ok: false, akshare: word, message });
   app.get("/api/akshare/tools", wrap(async (_req, res) => {
-    if (!opts.akshare) return akshareRefuse(res, "off", "this Account runs no AKShare sidecar");
-    const a = await opts.akshare.tools(callerGone(res));
-    if (a.kind === "refused") return akshareRefuse(res, a.word, a.message);
-    res.json({ ok: true, tools: a.value });
+    if (!opts.market) return akshareRefuse(res, "off", "this Account runs no AKShare sidecar");
+    await relay(res, "/api/akshare/tools", { method: "GET", timeoutMs: AKSHARE_RELAY_MS }, () => akshareRefuse(res, "unavailable", MARKET_DOWN));
   }));
   app.post("/api/akshare/call", wrap(async (req, res) => {
-    const body = req.body as { tool?: unknown; arguments?: unknown } | undefined;
-    if (typeof body?.tool !== "string") return akshareRefuse(res, "bad-arguments", "the body is {tool: string, arguments?: object}");
-    if (!opts.akshare) return akshareRefuse(res, "off", "this Account runs no AKShare sidecar");
-    const a = await opts.akshare.call(body.tool, body.arguments, callerGone(res));
-    if (a.kind === "refused") return akshareRefuse(res, a.word, a.message);
-    res.json({ ok: true, tool: body.tool, isError: a.value.isError, content: a.value.content });
+    if (!opts.market) {
+      const body = req.body as { tool?: unknown; arguments?: unknown } | undefined;
+      if (typeof body?.tool !== "string") return akshareRefuse(res, "bad-arguments", "the body is {tool: string, arguments?: object}");
+      return akshareRefuse(res, "off", "this Account runs no AKShare sidecar");
+    }
+    await relay(res, "/api/akshare/call", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(req.body ?? {}), timeoutMs: AKSHARE_RELAY_MS }, () => akshareRefuse(res, "unavailable", MARKET_DOWN));
   }));
 
   app.get("/api/overview", wrap(async (_req, res) => {
@@ -1076,12 +1090,12 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
       // streams closed, and every paper book's last change written
       svc.stream.end();
       svc.closeStreams();
-      // the AKShare child ends whatever the flush does: a throwing flush never leaves it running
+      // the market's link closed whatever the flush does: its hub stream never holds the server, or a test, open
       try {
         await svc.flushPaper();
         await snapping;
       } finally {
-        await opts.akshare?.close();
+        opts.market?.close();
       }
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
@@ -1120,11 +1134,14 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   // a real account continues its earlier runs — the owner's device, the venues, the agents and their limits come back (account/restore.ts);
   // --fresh starts it from nothing
   const fresh = args.includes("--fresh");
-  // China (live/china.ts) is the real server's alone, as its streams are: a service made anywhere else never asks Tencent
-  const service = await PortfolioService.create({ home: at("--home") ?? defaultHome(), live, fresh, china: chinaSource(), ...(liveWrites ? { liveWrites } : {}), ...(code ? { pairingCode: code } : {}), ...(classic ? {} : { venues: "frontline" as const, real: true, openness }) });
-  const cn = { relay: createCnRelay(realCnHttp), ifind: createIfind({ env: () => process.env, http: cnHosts(realCnHttp as CnHttp, [IFIND_HOST]) }) };
-  const akshare = createAkshare({ command: akshareCommand() });
-  const srv = await startPortfolioServer({ port, service, bind: process.env.PORTFOLIO_BIND || undefined, hosts: parseHosts(process.env.PORTFOLIO_HOSTS), cn, akshare }).catch((e: NodeJS.ErrnoException) => {
+  // THE MARKET (market/link.ts): the public sources, the venues' streams, China and a coin's price are the market service's, read over its
+  // protocol — the real server's alone, as its streams were: a service made anywhere else reads no market. Started before the account, so
+  // the source list and the hub stream fill in as soon as the market answers, whenever that is
+  const marketUrl = process.env.PORTFOLIO_MARKET_URL || MARKET_URL_DEFAULT;
+  const market = connectMarket({ url: marketUrl });
+  market.start();
+  const service = await PortfolioService.create({ home: at("--home") ?? defaultHome(), live, fresh, publicMarkets: () => market.sources(), streams: market.hub, china: market.china, liveDeps: { price: market.price }, ...(liveWrites ? { liveWrites } : {}), ...(code ? { pairingCode: code } : {}), ...(classic ? {} : { venues: "frontline" as const, real: true, openness }) });
+  const srv = await startPortfolioServer({ port, service, bind: process.env.PORTFOLIO_BIND || undefined, hosts: parseHosts(process.env.PORTFOLIO_HOSTS), market }).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "EADDRINUSE") throw e;
     // the usual reason: this server is already running in another terminal
     console.error(`port ${port} is already in use: an Account is probably running already. Start a second one with npm run account -- --port ${port + 1} --home <another directory>`);
@@ -1136,15 +1153,14 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   if (liveWrites) console.log(`TRADING IS ON · real orders and movements at the accounts you connect · at most $${liveWrites.capUsd} an order or a movement (--live-cap; --read-only turns it off) · every one is signed by you, or inside a limit you signed for an agent · money leaves a venue only for a place shown to be yours${owned ? "" : `\n  pairing code: ${liveWrites.pairingCode} — the first browser becomes the owner only with this code, typed on Gravit's face (Account)`}`);
   else if (!classic) console.log(`read-only: nothing is traded or moved from this server (started with --read-only)${owned ? "" : `\n  pairing code: ${code} — the first browser becomes the owner only with this code, typed on Gravit's face (Account)`}`);
   console.log(classic ? `simulated statement at ${srv.url} · ${service.accounts().length} accounts · MetaMask ${live ? "LIVE via mm" : "simulated (--mm for live)"} · no account layer · ledger ${service.ledgerPath()} · Ctrl-C to stop` : `your account at ${srv.url} · real accounts only: connect them on Gravit's face · ledger ${service.ledgerPath()} · Ctrl-C to stop`);
-  console.log(`Lunhui's reach: /api/cn/relay (Tencent, Eastmoney) · ${cn.ifind.configured() ? "iFinD configured" : "iFinD not configured (IFIND_REFRESH_TOKEN or IFIND_ACCESS_TOKEN in this process's environment)"}`);
-  console.log(`AKShare: ${akshareCommand()} · started on first use (/api/akshare/tools, /api/akshare/call)`);
+  console.log(`market: ${marketUrl} · ${(await market.ready(3_000)) ? "answering" : "not answering yet: start it with cd market && npm run market"}`);
   // where the owner can connect, kept fresh without anyone asking: the venues' own answers to this network, and their terms matched to where
   // it is (live/availability.ts) — so the face and the agents know before anyone makes a key
   if (!classic && service.account) service.watchVenues();
   // the paper accounts' own clock: their resting orders, stops, days and funding looked at every few seconds (service.ts watchPaper)
   if (!classic && service.account) service.watchPaper();
-  // the venues' own live streams (live/stream-hub.ts): started lazily — nothing opens until a paper order or a page wants a market — so
-  // they never delay the server's listen; each venue only while its REST answers this network
+  // the venues' live streams, as the market's hub streams them and the link mirrors them (market/hub.ts): listened to here — the market
+  // opens a venue's stream only once a paper order or a page wants a market, so nothing delays the server's listen
   if (!classic && service.account) service.watchStreams();
   // while a page listens on the push channel, the account's door follows real venues' orders, payments and earn by itself
   if (!classic && service.account) service.watchDoor();

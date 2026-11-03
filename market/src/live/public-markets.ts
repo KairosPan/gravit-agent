@@ -523,7 +523,9 @@ export function holdBackMs(r: Refusal, now: number = Date.now()): number {
  * as READ_STAMP_DEPTH and READ_STAMP_MOST things — in a weak map beside it: nothing is added to the answer, and nothing is kept once the
  * answer is let go. A listing built afresh from a kept answer (a Kalshi leg from its event's market) takes the stamp of what it was built
  * from (readLike). Read with readAtOf */
-const READ_AT = new WeakMap<object, number>();
+/** one map for the process, shared with the account's copy of readAtOf and readLike (account/src/portfolio/market/shapes.ts) where both
+ * are loaded in one process — a test that hands the account a source of this tree in-process: a stamp either side sets, the other reads */
+const READ_AT: WeakMap<object, number> = ((globalThis as { [k: symbol]: unknown })[Symbol.for("gravit.readAt")] ??= new WeakMap<object, number>()) as WeakMap<object, number>;
 const READ_STAMP_DEPTH = 6;
 const READ_STAMP_MOST = 50_000;
 /** the moment `x` was read from its venue (ms), where it was stamped: a kept answer, something in one, or a listing built from one */

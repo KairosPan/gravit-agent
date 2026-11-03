@@ -56,7 +56,7 @@ import { HOW_TEXT, MAX_NOTES, NOTE_TEXT, TOPIC_WORDS, TOPICS } from "./account/m
 import { mustKey, seatKey as storedSeatKey } from "./account/keystore.ts";
 import { outsideSeatFile } from "./account/desk.ts";
 import { defaultHome } from "./home.ts";
-import { AKSHARE_TOOLS } from "../../../market/src/live/akshare.ts";
+import { AKSHARE_TOOLS } from "./market/shapes.ts";
 import { BRIDGE_CHAINS } from "./live/bridge.ts";
 import { CHAINS, STABLECOINS, type ChainName } from "./live/chain.ts";
 import { STABLES } from "./live/types.ts";
@@ -916,7 +916,7 @@ server.registerTool(
 server.registerTool(
   "portfolio_akshare",
   {
-    description: `AKSHARE — public Chinese market data through the Account's AKShare sidecar (akshare-mcp): A shares, Hong Kong and US listings, boards and fund flows, margin, fundamentals, macro, futures, funds, bonds, indices, options, FX and commodities. \`tool\` is one of the sidecar's tools — ${AKSHARE_TOOLS.join(", ")} — and \`arguments\` are that tool's own. Find a function first with akshare_discover (\`{query: "spot"}\`; an empty query lists every tool and its functions), then call its tool with \`{method: "<function>", params_json?: "<its parameters as JSON>", symbol?, start_date?, end_date?, period?, adjust?, date?}\`: \`{tool: "akshare_stock_a", arguments: {method: "stock_zh_a_spot_tx"}}\` is Tencent's whole A-share snapshot. At most 500 rows come back — check \`truncated\` and \`row_count\`; each call is bounded at 120 s. Live and unguarded, never evidence of a trade: check each result's errors and timestamps; retrieval time is not exchange time. A read: nothing is ordered.`,
+    description: `AKSHARE — public Chinese market data through the AKShare sidecar the market runs, which the Account relays: A shares, Hong Kong and US listings, boards and fund flows, margin, fundamentals, macro, futures, funds, bonds, indices, options, FX and commodities. \`tool\` is one of the sidecar's tools — ${AKSHARE_TOOLS.join(", ")} — and \`arguments\` are that tool's own. Find a function first with akshare_discover (\`{query: "spot"}\`; an empty query lists every tool and its functions), then call its tool with \`{method: "<function>", params_json?: "<its parameters as JSON>", symbol?, start_date?, end_date?, period?, adjust?, date?}\`: \`{tool: "akshare_stock_a", arguments: {method: "stock_zh_a_spot_tx"}}\` is Tencent's whole A-share snapshot. At most 500 rows come back — check \`truncated\` and \`row_count\`; each call is bounded at 120 s. Live and unguarded, never evidence of a trade: check each result's errors and timestamps; retrieval time is not exchange time. A read: nothing is ordered.`,
     inputSchema: { tool: z.string().max(64), arguments: z.record(z.string(), z.unknown()).optional() },
     annotations: { readOnlyHint: true },
   },

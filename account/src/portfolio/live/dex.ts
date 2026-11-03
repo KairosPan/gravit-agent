@@ -50,7 +50,7 @@ import { isRefusal, type Refusal } from "../../core/errors.ts";
 import { no } from "../refuse.ts";
 import { RWA_CATEGORY } from "./categories.ts";
 import { CHAIN_BY_ID, CHAINS, STABLECOINS, type ChainName, type ChainReader, type Mined, type SentTx, type TokenRef } from "./chain.ts";
-import { holdBackMs } from "../../../../market/src/live/public-markets.ts";
+import { holdBackMs } from "../market/shapes.ts";
 import { STOCK_TOKEN_ISSUER, STOCK_TOKEN_TERMS, stockTokens, type StockToken } from "./robinhood.ts";
 import { DONE, badOrder, floorTo, inDollars, pick, plain, type LiveTrader, type Market, type OrderRequest, type OrderState } from "./trade.ts";
 import { edgeRefused, edgeWords, REGION, isStable, notTheApi, notTheApiWords, num, redact, unreachable, venueSaidNo, type Http, type HttpReply, type LiveBalance } from "./types.ts";

@@ -26,7 +26,7 @@ import { canonical } from "../../core/hash.ts";
 import { no } from "../refuse.ts";
 import { isExpired } from "../openness.ts";
 import type { EarnPosition, EarnProduct, EarnState, LiveEarner } from "../live/earn.ts";
-import { holdBackMs } from "../../../../market/src/live/public-markets.ts";
+import { holdBackMs } from "../market/shapes.ts";
 import { plain } from "../live/trade.ts";
 import { isStable } from "../live/types.ts";
 import type { CardLike, Outcome } from "./exchange.ts";

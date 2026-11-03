@@ -3,8 +3,9 @@
  * the venue's answer to the network the Account runs on, asked at the time (live/reach.ts), so someone where a venue serves them gets all of
  * it, and someone where it does not is told so before making a key. This prints those answers.
  *
- *   npm run account:check                    every connection's first, keyless question (live/reach.ts) and every public market source
- *                                            (live/public-markets.ts): no key, token or address is sent anywhere
+ *   npm run account:check                    every connection's first, keyless question (live/reach.ts) and every public market source,
+ *                                            read from the market service (PORTFOLIO_MARKET_URL; market/link.ts): no key, token or address
+ *                                            is sent anywhere
  *   npm run account:check -- --keys          also opens each connection whose key file is in the home, read-only — what the venue says the
  *                                            key may do, the balances it reads, its markets, its earn products — and nothing else: no order,
  *                                            no movement, nothing written to the account's ledger
@@ -27,8 +28,9 @@ import { CONNECTORS, openLive, parseConnector, type LiveDeps } from "./live/inde
 import { realMm } from "./live/metamask.ts";
 import { publicChain } from "./live/chain.ts";
 import { WalletProofs } from "./live/proof.ts";
-import { publicPrices } from "../../../market/src/live/prices.ts";
-import { publicSources, type Listing, type PublicSource } from "../../../market/src/live/public-markets.ts";
+import { MARKET_URL_DEFAULT } from "./market/client.ts";
+import { connectMarket, type MarketLink } from "./market/link.ts";
+import type { Listing, PublicSource } from "./market/shapes.ts";
 import { reachOf, type Reach } from "./live/reach.ts";
 import { ROBINHOOD_MCP } from "./live/robinhood.ts";
 import { OAuthSignIn } from "./live/signin.ts";
@@ -55,6 +57,24 @@ const lateNo = (what: string): Refusal => no("E_VENUE_UNREACHABLE", { message: `
 /** every connection's first question, and every public source's listing, from here; with `keys`, each connection whose key file is in
  * `home`, opened read-only */
 export async function accountCheck(o: { home: string; keys?: boolean; deps?: Partial<LiveDeps> & { sources?: PublicSource[] } } = { home: defaultHome() }): Promise<CheckReport> {
+  // the public sources and a coin's price are the market's: read from it — one link, made only when a test has not handed its own in, given
+  // three seconds to answer (a market that does not answer lists no source), and closed with the check
+  let link: MarketLink | undefined;
+  const market = async (): Promise<MarketLink> => {
+    if (!link) {
+      link = connectMarket({ url: process.env.PORTFOLIO_MARKET_URL || MARKET_URL_DEFAULT });
+      await link.ready(3_000);
+    }
+    return link;
+  };
+  try {
+    return await check(o, market);
+  } finally {
+    link?.close();
+  }
+}
+
+async function check(o: { home: string; keys?: boolean; deps?: Partial<LiveDeps> & { sources?: PublicSource[] } }, market: () => Promise<MarketLink>): Promise<CheckReport> {
   const http = o.deps?.http ?? realHttp;
   const clock = o.deps?.clock ?? Date.now;
   const open = o.deps?.openExchange ?? openExchange;
@@ -74,7 +94,7 @@ export async function accountCheck(o: { home: string; keys?: boolean; deps?: Par
   );
 
   const sources = await Promise.all(
-    (o.deps?.sources ?? publicSources({ http, open, clock })).map(async (s) => {
+    (o.deps?.sources ?? (await market()).sources()).map(async (s) => {
       const got = await within(s.listings({ limit: 200 }).catch((err) => lateNo(`${s.name} (${String((err as Error)?.message ?? err).slice(0, 80)})`)), SOURCE_MS, lateNo(s.name));
       if (isRefusal(got)) return { id: s.id, name: s.name, said: got.message, code: got.code };
       const pre = (got as Listing[]).filter((l) => (l as { implied?: unknown }).implied !== undefined || l.category === "Pre-IPO");
@@ -86,7 +106,7 @@ export async function accountCheck(o: { home: string; keys?: boolean; deps?: Par
   // with keys: each key file in the home, opened as the connection that reads it — read-only: nothing is placed, moved or written
   const dir = join(o.home, "credentials");
   const venues = existsSync(dir) ? readdirSync(dir).filter((v) => existsSync(join(dir, v, "api-key.json"))) : [];
-  const deps: LiveDeps = { home: o.home, http, clock, mm, openExchange: open, proofs: new WalletProofs(), chain: o.deps?.chain ?? publicChain(), price: o.deps?.price ?? publicPrices({ open }), signIn: (k) => (k === "robinhood" ? signIn : undefined), ...(o.deps ?? {}) } as LiveDeps;
+  const deps: LiveDeps = { home: o.home, http, clock, mm, openExchange: open, proofs: new WalletProofs(), chain: o.deps?.chain ?? publicChain(), price: o.deps?.price ?? (await market()).price, signIn: (k) => (k === "robinhood" ? signIn : undefined), ...(o.deps ?? {}) } as LiveDeps;
   const keys = await Promise.all(
     venues.map(async (venue) => {
       const kind = CONNECTORS.find((c) => c.kind === venue && c.needs === "key-file")?.kind;

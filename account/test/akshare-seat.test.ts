@@ -1,4 +1,5 @@
-/** The seat's portfolio_akshare against an Account with the AKShare sidecar (a stand-in child), and against one without the routes. */
+/** The seat's portfolio_akshare against an Account whose market runs the AKShare sidecar (a market in this process, its child a stand-in),
+ * and against one without the routes. */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { createServer, type Server } from "node:http";
@@ -7,7 +8,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createMarketCore } from "../../market/src/core.ts";
 import { createAkshare } from "../../market/src/live/akshare.ts";
+import { mountCn } from "../../market/src/routes-cn.ts";
+import { startMarketServer, type MarketServerHandle } from "../../market/src/server.ts";
+import { connectMarket, type MarketLink } from "../src/portfolio/market/link.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../src/portfolio/server.ts";
 import { PortfolioService } from "../src/portfolio/service.ts";
 
@@ -17,6 +22,8 @@ const FIXTURE = fileURLToPath(new URL("../../market/test/fixtures/fake-akshare-m
 let home: string;
 let svc: PortfolioService;
 let server: PortfolioServerHandle;
+let market: MarketServerHandle;
+let link: MarketLink;
 let bare: Server;
 let bareUrl: string;
 const clients: Client[] = [];
@@ -32,7 +39,10 @@ const ask = (c: Client, args: Record<string, unknown>) => c.callTool({ name: "po
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "akshare-seat-"));
   svc = await PortfolioService.create({ home, venues: "frontline", real: true, publicMarkets: [], liveDeps: { http: async () => ({ status: 599, body: undefined, text: "" }), price: async () => undefined } });
-  server = await startPortfolioServer({ port: 0, service: svc, akshare: createAkshare({ command: process.execPath, args: [FIXTURE] }) });
+  const core = createMarketCore({ akshare: createAkshare({ command: process.execPath, args: [FIXTURE] }) });
+  market = await startMarketServer({ port: 0, mount: (app) => mountCn(app, core), close: () => core.close() });
+  link = connectMarket({ url: market.url });
+  server = await startPortfolioServer({ port: 0, service: svc, market: link });
   bare = createServer((_req, res) => void res.writeHead(404, { "content-type": "text/html" }).end("<html>Cannot POST</html>"));
   await new Promise<void>((r) => bare.listen(0, "127.0.0.1", r));
   bareUrl = `http://127.0.0.1:${(bare.address() as { port: number }).port}`;
@@ -41,6 +51,7 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const c of clients) await c.close();
   await server?.close();
+  await market?.close();
   await new Promise((r) => bare?.close(r));
   rmSync(home, { recursive: true, force: true });
 });
