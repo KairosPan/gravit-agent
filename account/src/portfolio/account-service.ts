@@ -51,10 +51,11 @@ export function plan(serverArgs: string[], o: { node?: string; root?: string; ho
   const log = join(logs, "account.log");
   const errLog = join(logs, "account.err.log");
   const args = [node, join(root, "node_modules", "tsx", "dist", "cli.mjs"), join(root, "src", "portfolio", "server.ts"), ...serverArgs];
-  // the commands the account itself runs (mm for the MetaMask Agent Wallet) are found on the user's own PATH; the home, if moved, moves too
+  // the commands the account itself runs (mm for the MetaMask Agent Wallet) are found on the user's own PATH; the home, if moved, moves too,
+  // and so does the market's address (PORTFOLIO_MARKET_URL), when the market is not on its default 127.0.0.1:4821
   // (without the folders npm puts first on PATH while it runs this script: they are npm's, not the user's)
   const path = (env.PATH ?? "").split(":").filter((d) => d !== "" && !d.includes("/node_modules/")).join(":");
-  const keep = Object.fromEntries(Object.entries({ PATH: path, HOME: env.HOME ?? homedir(), BUYER_HOME: env.BUYER_HOME, ...Object.fromEntries(Object.entries(env).filter(([k]) => k.startsWith("PORTFOLIO_RPC_"))) }).filter(([, v]) => typeof v === "string" && v !== "")) as Record<string, string>;
+  const keep = Object.fromEntries(Object.entries({ PATH: path, HOME: env.HOME ?? homedir(), BUYER_HOME: env.BUYER_HOME, PORTFOLIO_MARKET_URL: env.PORTFOLIO_MARKET_URL, ...Object.fromEntries(Object.entries(env).filter(([k]) => k.startsWith("PORTFOLIO_RPC_"))) }).filter(([, v]) => typeof v === "string" && v !== "")) as Record<string, string>;
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
