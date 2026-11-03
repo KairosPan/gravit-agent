@@ -453,8 +453,8 @@ moment the gateway admits it, so it must never find `/data` half-mounted.
 
 ## AKShare — through the Account
 
-The face mounts no AKShare and runs no AKShare process. AKShare is the Account's
-sidecar (`../account/README.md` "AKShare, the sidecar": the install and its pin, the
+The face mounts no AKShare and runs no AKShare process. AKShare is the market's
+sidecar, relayed by the Account (`../market/README.md` "AKShare, the sidecar": the install and its pin, the
 routes `/api/akshare/*`, the limits); Gravit reaches it through the seat's one read
 tool, `mcp__account__portfolio_akshare` (`src/account-seat.ts`), which takes
 `{tool, arguments}`. Use `akshare_discover` first; the Tencent A-share snapshot is:
@@ -4887,7 +4887,7 @@ and a face browser that signs (`npm run account:owners`, "The owner drill").
    PASS: the run seals as before with every upstream read relayed (`/api/cn/relay`); the face's
    start line sources no iFinD file.
 3. **Gravit asks AKShare through the seat.** Needs: `akshare-mcp` installed on the host
-   (`../account/README.md` "AKShare, the sidecar").
+   (`../market/README.md` "AKShare, the sidecar").
    1. `curl -s 127.0.0.1:4820/api/akshare/tools` lists 14 tools.
    2. In a channel ask Gravit an A-share question (a spot snapshot, say): it answers with
       `portfolio_akshare` (`{tool, arguments}`), and no card is raised.

@@ -267,7 +267,7 @@ seat's call timeout is 130 s, above that deadline. These vendor reads have no lo
 read in the tree has one since 2026-10-24). Since 0.2.0 an MCP server's `instructions` enter the
 system prompt as a `mcp:<serverName>` section with no switch, and instructions over 32 KiB fail the
 connection; stdio negotiation starts a probe process before the serving one, so each MCP server is
-spawned twice per connect. Installation, the routes and the live check are in `account/README.md`
+spawned twice per connect. Installation, the routes and the live check are in `market/README.md`
 "AKShare, the sidecar"; the operator's cleanup (an inert `mcp-akshare` patch row, the start line) is
 in `face/README.md` "AKShare — through the Account".
 
