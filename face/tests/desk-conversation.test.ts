@@ -1062,6 +1062,41 @@ test("a boot fence check that throws fails closed: one line, nothing woken", asy
   await desk.dispose();
 });
 
+/* The re-review's M1: a shutdown that begins while the boot's fence check runs wakes nothing afterwards. */
+test("a dispose that lands during the boot's fence check stops the boot: nothing is woken and nothing carried", async (t) => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  h.tree.rebuilt.set(sessionId, [pending("telegram:2", PHONE)]);
+  await appendEvent(h.home, carryOf(sessionId, [{ key: "telegram:3", text: "third" }]));
+  const desk_ = join(h.root, "desk");
+  const gate = deferred();
+  let reached = false;
+  const real = fsp.readdir as unknown as (...args: unknown[]) => Promise<unknown>;
+  t.mock.method(fsp, "readdir", (async (...args: unknown[]) => {
+    if (String(args[0]) === desk_) {
+      reached = true;
+      await gate.promise;
+    }
+    return real(...args);
+  }) as unknown as typeof fsp.readdir);
+  syncBuiltinESMExports();
+  const { desk } = await restarted(h, sessionId);
+  try {
+    const starting = desk.start();
+    await waitFor("the fence check", () => reached);
+    const disposing = desk.dispose();
+    gate.resolve();
+    await starting;
+    await disposing;
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(h.tree.agent(sessionId).followups, [], "nothing woken, nothing carried after the dispose began");
+  assert.deepEqual(await carriedOf(h), [], "the carry waits for a later boot");
+});
+
 test("the cut-turn line goes through deliver, so OFF holds it", async (t) => {
   const h = await harness();
   const sessionId = await started(h);
@@ -1553,11 +1588,32 @@ test("dispose records the phone's queued texts and the turn under way in one des
   assert.deepEqual(h.lines, []);
 });
 
+/** dsh-agent's `agent/inbox/claimed`, as a test fires it: `onClaimed` for the harness, and `claim(agent, turn)`, which
+ * takes the oldest waiting message off the agent's inbox and tells every listener, as dsh-agent-loop's `preStep` does
+ * before the turn logs it. */
+function claimsBus(): { onClaimed: NonNullable<DeskConversationDeps["onClaimed"]>; claim(agent: FakeDeskAgent, turn: number): MessageLike; listeners: Set<unknown> } {
+  const listeners = new Set<Parameters<NonNullable<DeskConversationDeps["onClaimed"]>>[0]>();
+  return {
+    listeners,
+    onClaimed: (listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    claim(agent, turn) {
+      const message = agent.model!.claim()!;
+      for (const listener of [...listeners]) listener({ agent, message, turn });
+      return message;
+    },
+  };
+}
+
 /* The final review of task 9 (I2): the snapshot and the cancel are one tick, so a turn that ends while the dispose is
- * still asking who is busy, and the next turn that claims a queued text, are both read as they are at the cancel: the
- * claiming turn is the carry's cut, the text no longer queued - never claimed in silence after the snapshot. */
-test("a turn that claims a queued text before the shutdown's snapshot is the carry's cut; after it, the cancel has cleared the inbox", async () => {
-  const h = await harness();
+ * still asking who is busy, and the next turn that claims a queued text and logs it, are both read as they are at the
+ * cancel: the claiming turn is the carry's cut, the text no longer queued. A claimed text not yet logged is the next
+ * test's. */
+test("a turn that claims and logs a queued text before the shutdown's snapshot is the carry's cut; after it, the cancel has cleared the inbox", async () => {
+  const claims = claimsBus();
+  const h = await harness({ onClaimed: claims.onClaimed });
   h.tree.inboxes = true;
   const { sessionId } = (await h.desk.post({ text: "first", source: { kind: "telegram" }, message: PHONE, key: "telegram:1" })) as { sessionId: string };
   const agent = h.tree.agent(sessionId);
@@ -1576,7 +1632,7 @@ test("a turn that claims a queued text before the shutdown's snapshot is the car
       moved = true;
       endTurn(h, sessionId, 1);
       h.bus.emit(sessionId, "turn/start", { turn: 2 });
-      h.bus.emit(sessionId, "user/message", model.claim()!);
+      h.bus.emit(sessionId, "user/message", claims.claim(agent, 2)); // claimed, then logged
     }
     return whenIdle();
   };
@@ -1595,6 +1651,53 @@ test("a turn that claims a queued text before the shutdown's snapshot is the car
   const carries = (await events(h)).filter((e) => e.kind === "desk-carry");
   assert.deepEqual(carries.map((e) => (e.kind === "desk-carry" ? [e.queued.map((q) => q.key), e.cut] : [])),
     [[["telegram:3"], { turn: 2, key: "telegram:2" }]], "the turn that claimed telegram:2 is the cut, telegram:3 still queued");
+});
+
+/* The re-review's N1: dsh claims a step's input in `preStep` and logs its `user/message` only after the prompt is
+ * assembled and the pre-step hooks have run (dsh-agent-loop lib/index.js 906, 1061). A snapshot in that window finds the
+ * text neither in the inbox nor in the open turn's name; dsh-agent's `agent/inbox/claimed` is what says it was taken. */
+test("a text dsh has claimed for the open turn but not yet logged is carried, from agent/inbox/claimed", async () => {
+  const claims = claimsBus();
+  const h = await harness({ onClaimed: claims.onClaimed });
+  h.tree.inboxes = true;
+  const wrote = AT - 3 * 60_000; // 14:00 ET
+  const { sessionId } = (await h.desk.post({ text: "first", source: { kind: "telegram", at: wrote }, message: PHONE, key: "telegram:1" })) as { sessionId: string };
+  await h.desk.post({ text: "second", source: { kind: "telegram" }, message: PHONE, key: "telegram:2" });
+  const agent = h.tree.agent(sessionId);
+  agent.model!.running = true;
+  agent.status = "running";
+  h.bus.emit(sessionId, "turn/start", { turn: 1 });
+  const claimed = claims.claim(agent, 1); // out of the inbox; its user/message not yet logged
+  assert.equal(claimed.id, "telegram:1");
+  assert.deepEqual(agent.model!.pending.map((m) => m.id), ["telegram:2"]);
+  const disposing = h.desk.dispose(); // the snapshot falls in the window
+  await waitFor("the shutdown cancel", () => agent.cancels.length === 1);
+  h.bus.emit(sessionId, "user/message", claimed); // logged only after the snapshot
+  endTurn(h, sessionId, 1, ABORTED("shutdown"));
+  agent.settle();
+  await disposing;
+  const carries = (await events(h)).filter((e) => e.kind === "desk-carry");
+  assert.deepEqual(carries, [{
+    t: iso(AT), kind: "desk-carry", sessionId,
+    queued: [{ key: "telegram:1", text: "first", at: iso(wrote) }, { key: "telegram:2", text: "second" }],
+  }], "the claimed text first, then the one still queued; no cut, the turn was not yet named");
+  assert.equal(claims.listeners.size, 0, "the claims are no longer heard after dispose");
+
+  /* a claim that was logged before the snapshot is the turn's own: the cut, not carried as queued */
+  const logged = claimsBus();
+  const k = await harness({ onClaimed: logged.onClaimed });
+  k.tree.inboxes = true;
+  const { sessionId: other } = (await k.desk.post({ text: "first", source: { kind: "telegram" }, message: PHONE, key: "telegram:1" })) as { sessionId: string };
+  const otherAgent = k.tree.agent(other);
+  otherAgent.status = "running";
+  k.bus.emit(other, "turn/start", { turn: 1 });
+  k.bus.emit(other, "user/message", logged.claim(otherAgent, 1));
+  const disposingK = k.desk.dispose();
+  await waitFor("the shutdown cancel", () => otherAgent.cancels.length === 1);
+  otherAgent.settle();
+  await disposingK;
+  assert.deepEqual((await events(k)).filter((e) => e.kind === "desk-carry").map((e) => (e.kind === "desk-carry" ? [e.queued, e.cut?.key] : [])),
+    [[[], "telegram:1"]]);
 });
 
 test("dispose writes no desk-carry when no phone text waits and no phone turn is under way", async () => {

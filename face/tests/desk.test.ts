@@ -649,7 +649,8 @@ function conversationRoot(ledger: () => string) {
     },
     agentPresets: { mount: async (_agentCtx, id) => ({ id }) },
     permissionPresets: { set: (session, name) => { stored.set(session.id, name); }, current: (session) => stored.get(session.id) ?? "read-only" },
-    on: (_name, listener) => {
+    on: (name, listener) => {
+      if (String(name) !== "session/event") return () => {}; // the conversation's agent/inbox/claimed: no bus here
       listeners.add(listener);
       return () => {
         const file = ledger();
@@ -1328,6 +1329,7 @@ test("installDesk loads the schedule only with the conversation; its status reac
   const on = fake.ctx.on;
   fake.ctx.on = (name, listener) => {
     const off = on(name, listener);
+    if (String(name) !== "session/event") return off;
     return () => {
       armedAtLetGo.push(clock.pending());
       return off();

@@ -80,7 +80,7 @@ import type { IncomingMessage } from "node:http";
 import { basename, extname, join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { createAnnotator, type Annotator } from "./annotator.ts";
-import { createDeskConversation, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
+import { createDeskConversation, type ClaimsOn, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
 import type { DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSessionPersistenceLike, SessionEventsOn } from "./desk-session.ts";
 import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskGuardCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
@@ -1522,6 +1522,15 @@ function busOf(ctx: DeskConversationCtxLike): SessionEventsOn {
   };
 }
 
+/** dsh-agent's `agent/inbox/claimed` on the booted root context, as the desk conversation hears it: every agent's
+ * claims (the event is scope-filtered, and the root's listener is unscoped). */
+function claimsOf(ctx: DeskConversationCtxLike): ClaimsOn {
+  return (listener) => {
+    const off = (ctx as unknown as { on(name: string, listener: (payload: never) => void): () => unknown }).on("agent/inbox/claimed", listener);
+    return () => { off(); };
+  };
+}
+
 /** The desk session's slice of `ctx` with the session persistence a keyed post needs (src/desk-conversation.ts):
  * `ctx` itself when it carries `sessionPersistence`, or when it has no `get` that answers one; else a slice that
  * reads `ctx`'s members through it and carries the persistence `ctx.get("sessionPersistence")` answered - main.ts
@@ -1718,6 +1727,7 @@ export function installDesk(
     : createDeskConversation({
       session: wiring.session,
       on: wiring.on,
+      onClaimed: claimsOf(wiring.sessionCtx),
       deadlineMs: deps.deskDeadlineMs,
       /* the day's budget against the standing orders' cap - none until their clock has read standing.yml (P2-8) */
       budget: () => readBudget(home, now(), schedule?.dailyTokens()),

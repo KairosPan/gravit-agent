@@ -704,13 +704,16 @@ export interface SuperviseDeskTurnsDeps {
 }
 
 /** The turn a supervision has open, as {@link DeskSupervision}'s `openTurn` shows it: its number; once a message
- * named it, the source's name as a record gives it (`telegram`, `alert`, `wake`, ...); and that message's id and
- * logged time (ms since the epoch), when its event had them. */
+ * named it, the source's name as a record gives it (`telegram`, `alert`, `wake`, ...); that message's id and logged
+ * time (ms since the epoch), when its event had them; and the ids of every message it has logged - dsh claims a
+ * message from the inbox before it logs it, so a claimed id missing here is one the turn holds unlogged. */
 export interface OpenTurnView {
   turn: number;
   source?: string;
   id?: string;
   at?: number;
+  /** The id of every `user/message` the turn has logged so far, in order. */
+  logged: string[];
 }
 
 /** What {@link superviseDeskTurns} returns: its disposer, which also says which turn it has open. */
@@ -728,6 +731,8 @@ interface OpenTurn {
   /** That message's id, and when it was logged (ms since the epoch), when the event had them. */
   id?: string;
   at?: number;
+  /** The id of every `user/message` the turn has logged. */
+  readonly logged: string[];
   deadlineMs: number;
   timer?: unknown;
   /** Why the supervisor cancelled it, once it has. */
@@ -1033,7 +1038,7 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): DeskSupervisio
       disarm(open);
       log(`${BIN}: desk: turn ${open.turn} on ${where} saw no turn/end before turn ${n} began; it goes unrecorded`);
     }
-    const turn: OpenTurn = { turn: n, startedAt: clock.now(), events: [event], deadlineMs: deps.deadlineMs };
+    const turn: OpenTurn = { turn: n, startedAt: clock.now(), events: [event], deadlineMs: deps.deadlineMs, logged: [] };
     open = turn;
     arm(turn, deps.deadlineMs);
     const fence = deps.fence;
@@ -1139,6 +1144,8 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): DeskSupervisio
     const turn = open;
     if (turn === undefined) return;
     turn.events.push(event);
+    const logged = event.type === "user/message" ? (event.data as { id?: unknown } | undefined)?.id : undefined;
+    if (typeof logged === "string") turn.logged.push(logged);
     if (event.type === "user/message" && turn.source === undefined) firstMessage(turn, event);
     else if (event.type === "turn/end" && n === turn.turn) end(turn, event);
   });
@@ -1159,6 +1166,7 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): DeskSupervisio
         ...(turn.source === undefined ? {} : { source: turn.source }),
         ...(turn.id === undefined ? {} : { id: turn.id }),
         ...(turn.at === undefined ? {} : { at: turn.at }),
+        logged: [...turn.logged],
       };
     },
   });

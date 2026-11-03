@@ -91,7 +91,8 @@
  * already held), so a turn under way keeps its deadline, its record and its delivery.
  *
  * SHUTDOWN ({@link DeskConversation.dispose}). First the phone's part, from every supervised agent - the
- * conversation's and any it retired: each phone text waiting on its inbox's two lists, at most {@link CARRY_MAX} of them
+ * conversation's and any it retired: each phone text dsh has claimed for its open turn and not yet logged (dsh-agent's
+ * `agent/inbox/claimed`, heard through `onClaimed`), then each waiting on its inbox's two lists, at most {@link CARRY_MAX} of them
  * and each cut at {@link CARRY_TEXT_MAX} characters, and the phone turn under way - is one `desk-carry` in the ledger,
  * when there is any - read in the same tick as every turn under way is cancelled as `shutdown`, the inbox with it, so
  * no turn claims a queued text between the two. The carry's write and the cut agents going idle, so the cut turns are
@@ -181,7 +182,9 @@ export type DeskConversationCtxLike = DeskSessionCtxLike & {
  * `home` this reads too; `on`, the root bus; `deadlineMs`, every turn's deadline (five minutes by default),
  * which `deadlineFor` may only shorten for a source; `budget`, the day's token budget, read by
  * each post the pause lets through (src/desk.ts `readBudget` over the standing orders' cap) - no budget, no
- * check; `clock`, the timers and the stamps (the global ones); `log`, where a failure line goes (stderr). */
+ * check; `clock`, the timers and the stamps (the global ones); `log`, where a failure line goes (stderr);
+ * `onClaimed`, dsh-agent's `agent/inbox/claimed` on the root context ({@link ClaimsOn}) - without it a text dsh has
+ * claimed for a turn but not yet logged is not seen by a shutdown's carry. */
 export interface DeskConversationDeps {
   session: DeskSessionDeps;
   on: SessionEventsOn;
@@ -190,7 +193,13 @@ export interface DeskConversationDeps {
   budget?: () => Promise<BudgetState>;
   clock?: DeskClock;
   log?: (line: string) => void;
+  onClaimed?: ClaimsOn;
 }
+
+/** dsh-agent's `agent/inbox/claimed` (runtime-types.d.ts: `{ agent, message, turn }`, emitted as dsh-agent-loop's
+ * `preStep` claims a step's input from the inbox - before the turn logs it as `user/message`), subscribed on the root
+ * context, which hears every agent's; it answers the unsubscriber. */
+export type ClaimsOn = (listener: (payload: { agent: { id?: unknown }; message: MessageLike; turn: number }) => void) => () => void;
 
 /** The desk session's one owner. See the module header; each member's own comment says what it does. */
 export interface DeskConversation {
@@ -434,6 +443,23 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
   /** The cut turns this conversation has sent the restart line for, as `<sessionId> <turn>`: a cut a carry names and the
    * boot's own cut found get one line between them, even when the ledger record that says so could not be written. */
   const lined = new Set<string>();
+  /** The phone messages dsh claimed for each agent's latest turn, by agent id: what a turn holds before it logs it. */
+  const claims = new Map<string, { turn: number; messages: MessageLike[] }>();
+  let unclaim: (() => void) | undefined;
+  /** Hear dsh's claims from the first supervision on, until dispose has taken its carry. */
+  const hearClaims = (): void => {
+    if (unclaim !== undefined || deps.onClaimed === undefined || disposed) return;
+    try {
+      unclaim = deps.onClaimed(({ agent, message, turn }) => {
+        if (message?.source?.kind !== "telegram" || typeof agent?.id !== "string") return;
+        const entry = claims.get(agent.id);
+        if (entry === undefined || entry.turn !== turn) claims.set(agent.id, { turn, messages: [message] });
+        else entry.messages.push(message);
+      });
+    } catch (err) {
+      log(`${BIN}: desk: dsh's inbox claims could not be heard (${errText(err)}); a text claimed but not yet logged at a shutdown is not carried`);
+    }
+  };
   const rememberAt = (key: string, at: number): void => {
     atOf.delete(key);
     atOf.set(key, at);
@@ -532,7 +558,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     });
   };
 
-  const supervise = (sessionId: string, agent: AgentLike, m: Machinery): Watch => ({
+  const supervise = (sessionId: string, agent: AgentLike, m: Machinery): Watch => (hearClaims(), {
     sessionId,
     agent,
     unwatch: m.session.superviseDeskTurns({
@@ -627,6 +653,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
       await m.desk.appendEvent(home, { t: stamp(), kind: "desk-refused", reason: "fence", path: violation }, { log });
       return;
     }
+    if (disposed) return; // a shutdown begun during the fence check: nothing woken, nothing carried
     if (resumed) m.session.requeuePending(agent, log);
     /* oldest first; a carry stopped by a refusal holds back every later one, for a later boot */
     for (const carry of carries) {
@@ -940,8 +967,14 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     let dropped = 0;
     for (const w of all) {
       const inbox = (w.agent as AgentLike & InboxAware).inbox;
-      for (const message of [...(inbox?.nextTurn ?? []), ...(inbox?.nextStep ?? [])]) {
-        if (message.source?.kind !== "telegram") continue;
+      const open = w.unwatch.openTurn?.();
+      /* claimed for the open turn and not yet logged: out of the inbox, and in no record yet (dsh-agent-loop preStep) */
+      const claim = claims.get(w.agent.id);
+      const held = open !== undefined && claim?.turn === open.turn ? claim.messages.filter((message) => !open.logged.includes(message.id)) : [];
+      const seenHere = new Set<string>();
+      for (const message of [...held, ...(inbox?.nextTurn ?? []), ...(inbox?.nextStep ?? [])]) {
+        if (message.source?.kind !== "telegram" || seenHere.has(message.id)) continue;
+        seenHere.add(message.id);
         if (queued.length >= CARRY_MAX) {
           dropped += 1;
           continue;
@@ -949,7 +982,6 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
         const at = atOf.get(message.id);
         queued.push({ key: message.id, text: m.cutAt(operatorText(message), CARRY_TEXT_MAX), ...(at === undefined ? {} : { at: new Date(at).toISOString() }) });
       }
-      const open = w.unwatch.openTurn?.();
       if (cut === undefined && open?.source === "telegram") {
         const at = (open.id === undefined ? undefined : atOf.get(open.id)) ?? open.at;
         cut = {
@@ -1055,6 +1087,9 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
         /* one tick: the carry's snapshot, then the cancels - no turn can claim a queued text between the two */
         const event = carryEvent(all, m);
         const cut = all.filter((w, i) => working[i] && cancel(w, { kind: "hook", reason: "shutdown" }));
+        unclaim?.();
+        unclaim = undefined;
+        claims.clear();
         /* the carry's write and the cut agents' unwinding share the one bound */
         let wrote = event === undefined;
         const writing = event === undefined || m === undefined

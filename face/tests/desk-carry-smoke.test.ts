@@ -8,7 +8,9 @@
  *    the tree's own dispose - and the process exits;
  * 2. a fresh face on the same home: its boot resumes the desk session, posts `QUEUED` again under its own key with
  *    `(carried over a restart)` in its provenance line, the model answers it once, the phone gets the restart line for
- *    `LONG` and then `QUEUED`'s answer, and the ledger holds the `desk-carry` and its `desk-carried`.
+ *    `LONG` and then `QUEUED`'s answer, and the ledger holds the `desk-carry` and its `desk-carried`; and the root context
+ *    hears dsh-agent's `agent/inbox/claimed` for `QUEUED`, the event the conversation's carry reads a claimed but
+ *    unlogged text from (src/desk.ts `claimsOf`).
  *
  * TWO PROCESSES. A face boots once per process (smoke.test.ts), and a restart is two boots, so the test runs this file
  * twice as a child - `one`, then `two` - on one fixture home, and reads what the second reports as a JSON line. The
@@ -82,6 +84,10 @@ async function bootDesk(base: string, hang: ReadonlySet<string>, outlet?: DeskOu
   const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots });
   const { ctx } = booted;
   const requests: string[] = [];
+  /* what the desk conversation hears through src/desk.ts `claimsOf`: dsh-agent's claims, on the root context */
+  const claimed: string[] = [];
+  (ctx as unknown as { on(name: string, listener: (payload: { message: { id: string } }) => void): unknown })
+    .on("agent/inbox/claimed", ({ message }) => { claimed.push(message.id); });
   class Stub extends StubAdapter {
     override async *stream(o: GenerateOptions): AsyncIterable<StreamChunk> {
       const phone = lastPhone(o);
@@ -102,7 +108,7 @@ async function bootDesk(base: string, hang: ReadonlySet<string>, outlet?: DeskOu
   const conversation = desk.conversation!;
   if (outlet !== undefined) conversation.setOutlet(outlet);
   await waitFor("the desk session", () => conversation.current().sessionId !== undefined);
-  return { booted, ctx, desk, conversation, requests };
+  return { booted, ctx, desk, conversation, requests, claimed };
 }
 
 /** A phone text, keyed as the bridge keys Telegram update `n`, written a minute ago. */
@@ -140,7 +146,7 @@ async function phaseTwo(base: string): Promise<void> {
   await waitFor("QUEUED's answer", () => sent.includes("echo QUEUED"));
   await new Promise((done) => setTimeout(done, 1_000)); // anything sent twice would land by now
   const events = (await readEvents(paths(base).home)).events;
-  console.log(`${REPORT}${JSON.stringify({ requests: d.requests, sent, events })}`);
+  console.log(`${REPORT}${JSON.stringify({ requests: d.requests, sent, events, claimed: d.claimed })}`);
   await d.desk.dispose(0);
   await d.booted.dispose();
 }
@@ -180,7 +186,8 @@ if (process.argv[2] === "one" || process.argv[2] === "two") {
       assert.equal(two.code, 0, `the second face: ${two.err}`);
       const line = two.out.split("\n").find((l) => l.startsWith(REPORT));
       assert.ok(line !== undefined, `the second face reported nothing: ${two.out}\n${two.err}`);
-      const report = JSON.parse(line.slice(REPORT.length)) as { requests: string[]; sent: string[]; events: DeskEvent[] };
+      const report = JSON.parse(line.slice(REPORT.length)) as { requests: string[]; sent: string[]; events: DeskEvent[]; claimed: string[] };
+      assert.ok(report.claimed.includes("telegram:2"), `the root context hears agent/inbox/claimed: ${JSON.stringify(report.claimed)}`);
 
       const carries = report.events.filter((e): e is Extract<DeskEvent, { kind: "desk-carry" }> => e.kind === "desk-carry");
       assert.equal(carries.length, 1, "one carry, from the first face's dispose");

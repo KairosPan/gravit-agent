@@ -1344,8 +1344,9 @@ the mechanism, `face/README.md` "The desk drill" the three live steps, which are
     inside the dispose that claimed a queued text - lost silently on 0.2.1-rc.5, whose tree dispose
     closes that turn `aborted`/`disposed`. So the shutdown cancel keeps nothing again, and the
     conversation's dispose writes one `desk-carry`, read in the same tick as its cancels (the task-9
-    review's I2): the phone texts queued on every supervised agent (key, words, time; at most 20,
-    each cut at 4,000 characters) and the phone turn under way. The next boot, past its fence check,
+    review's I2): the phone texts queued on every supervised agent, and any dsh has claimed for the
+    open turn but not yet logged, heard from `agent/inbox/claimed` (the re-review's N1) (key, words,
+    time; at most 20, each cut at 4,000 characters), and the phone turn under way. The next boot, past its fence check,
     answers every carry no `desk-carried` names, oldest first (I1): it posts each text again under
     its key, without the desk state, marked `(carried over a restart)` in its provenance line, a key
     already in the session skipped; sends the cut turn the restart line unless this boot or the

@@ -896,15 +896,16 @@ test("superviseDeskTurns cancels at the deadline even with a card pending, and r
 
 /* What the desk conversation's dispose carries through the ledger (spec §16 H3, R93): the turn under way, named after
  * its first message that is not the desk state, with that message's id and logged time. */
-test("the supervision says which turn it has open: its number, its source, and its message's id and time", () => {
+test("the supervision says which turn it has open: its number, its source, its message's id and time, and what it logged", () => {
   const h = supervise();
   assert.equal(h.dispose.openTurn(), undefined, "nothing open");
   h.emit("turn/start", { turn: 3 });
-  assert.deepEqual(h.dispose.openTurn(), { turn: 3 }, "not named yet");
+  assert.deepEqual(h.dispose.openTurn(), { turn: 3, logged: [] }, "not named yet");
   h.emit("user/message", { id: "desk-state", role: "user", content: say("state"), source: { kind: "desk", form: "state" } });
   const listener = [...h.listeners][0] as (session: { id: string }, event: EventLike) => void;
   listener({ id: SID }, { type: "user/message", seq: 99, data: { id: "telegram:3", role: "user", content: say("x"), source: { kind: "telegram" } }, time: T0 } as EventLike);
-  assert.deepEqual(h.dispose.openTurn(), { turn: 3, source: "telegram", id: "telegram:3", at: T0 });
+  assert.deepEqual(h.dispose.openTurn(), { turn: 3, source: "telegram", id: "telegram:3", at: T0, logged: ["desk-state", "telegram:3"] },
+    "every message it logged, the desk state among them");
   endTurn(h, 3);
   assert.equal(h.dispose.openTurn(), undefined, "ended");
   h.emit("turn/start", { turn: 4 });
