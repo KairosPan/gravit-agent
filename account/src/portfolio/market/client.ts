@@ -34,6 +34,9 @@ export interface MarketClient {
   staleSince(): number | undefined;
   /** when the market last answered anything, ms; undefined before it has */
   answeredAt(): number | undefined;
+  /** told at the first failure after an answer (the moment staleSince goes from undefined to set), not at each failure after it;
+   * returns the unsubscribe */
+  onFail(fn: () => void): () => void;
 }
 
 /** the longest a refusal is kept: a market that comes back is asked again within this (shapes.ts MARKET_DOWN_HOLD_MS is the same) */
@@ -53,7 +56,18 @@ export function marketClient(o: { url: string; fetch?: typeof fetch; clock?: () 
     stale = undefined;
     lastAnswer = clock();
   };
-  const failed = () => void (stale ??= clock());
+  const failing = new Set<() => void>();
+  const failed = () => {
+    if (stale !== undefined) return;
+    stale = clock();
+    for (const fn of [...failing]) {
+      try {
+        fn();
+      } catch {
+        // a listener's throw is its own: the rest are told
+      }
+    }
+  };
   const kept = new Map<string, { until: number; p: Promise<Got<unknown>> }>();
 
   /** one request, its time bounded (and the caller's signal followed): the Response, or why there is none */
@@ -120,6 +134,10 @@ export function marketClient(o: { url: string; fetch?: typeof fetch; clock?: () 
     },
     staleSince: () => stale,
     answeredAt: () => lastAnswer,
+    onFail(fn) {
+      failing.add(fn);
+      return () => void failing.delete(fn);
+    },
   };
 }
 

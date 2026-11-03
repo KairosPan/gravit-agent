@@ -1,5 +1,7 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
-import { LABEL, plan } from "../../src/market-service.ts";
+import { answers, LABEL, plan } from "../../src/market-service.ts";
 
 /** The LaunchAgent that keeps the market up: what launchd is told to run, and what it is not given */
 describe("the market as a background service", () => {
@@ -45,5 +47,26 @@ describe("the market as a background service", () => {
 
   it("writes what it is given as XML text", () => {
     expect(plan(["--x", "/tmp/a&b<c>"], { node: "/n", root: "/r/market", logs: "/l", env: {} }).plist).toContain("<string>/tmp/a&amp;b&lt;c&gt;</string>");
+  });
+
+  it("status counts only a market as answering", async () => {
+    let reply: { status: number; body: unknown } = { status: 200, body: { ok: true, service: "account" } };
+    const stub = createServer((_req, res) => {
+      res.writeHead(reply.status, { "content-type": "application/json" });
+      res.end(JSON.stringify(reply.body));
+    });
+    await new Promise<void>((go) => stub.listen(0, "127.0.0.1", go));
+    const port = (stub.address() as AddressInfo).port;
+    try {
+      expect(await answers(port)).toBe(false);
+      reply = { status: 200, body: { ok: true, service: "market" } };
+      expect(await answers(port)).toBe(true);
+      reply = { status: 500, body: { ok: true, service: "market" } };
+      expect(await answers(port)).toBe(false);
+    } finally {
+      await new Promise<void>((go) => stub.close(() => go()));
+    }
+    // nothing listening: not answering
+    expect(await answers(port)).toBe(false);
   });
 });

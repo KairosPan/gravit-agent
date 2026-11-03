@@ -12,7 +12,12 @@
  *
  * WHEN THE STREAM DROPS (the market restarting, or gone): every quote and book kept goes `live: false`, each market's `live` tick told, and
  * the stream is opened again after a wait that doubles from BACKOFF_MIN_MS to BACKOFF_MAX_MS; once it is open, every hold and want is sent
- * again. A stream that says nothing for SILENT_MS (the market's heartbeat is every 15 s) is taken for dropped.
+ * again. A stream that says nothing for SILENT_MS (the market's heartbeat is every 15 s) is taken for dropped, and one whose headers have not
+ * come within HUB_HEADERS_MS (a market that took the request and says nothing) is let go and tried again. onDown tells each drop.
+ *
+ * ON THE WIRE, ONE MARKET AT A TIME: every hold and want POST for one `source|symbol` waits for the one before it, so a release asked
+ * after its hold reaches the market after it, however slow the hold was on its way. A market whose last hold is let go, and for which no
+ * want lasts (WANT_LASTS_MS), is forgotten: its quote, book and trades are let go with it (sendAll forgets the same way).
  *
  * EACH STREAM IS AN EPOCH. A market that restarts counts its seqs from 0 again, and even one that did not sends its whole ring again to a
  * stream opened anew. So on each open every market's ring, its latest trades and its evicted seq are let go, and every seq the stream
@@ -34,6 +39,8 @@ export const BACKOFF_MAX_MS = 30_000;
 export const WANT_EVERY_MS = 10_000;
 /** how long a want is remembered, to be sent again on a stream opened again (stream-hub.ts IDLE_MS) */
 const WANT_LASTS_MS = 60_000;
+/** a stream whose headers have not come this long after it was asked for is let go and asked for again (SILENT_MS watches it after) */
+export const HUB_HEADERS_MS = 10_000;
 /** a stream silent this long is dead: three of the market's heartbeats (protocol.ts HEARTBEAT_MS) */
 export const SILENT_MS = 45_000;
 /** the longest /api/hub/confirmed waits at the market (protocol.ts HUB_WAIT_MAX_MS) */
@@ -72,6 +79,11 @@ export class RemoteHub implements MarketHub {
   /** each market wanted, and when it was last sent */
   private readonly wants = new Map<string, { source: string; symbol: string; sentAt: number; wantedAt: number }>();
   private readonly listeners = new Set<(t: HubTick) => void>();
+  private readonly downs = new Set<() => void>();
+  /** each market's last POST on its way (`source|symbol`): the next one for that market is sent once it has ended */
+  private readonly chains = new Map<string, Promise<void>>();
+  /** a market let go while a want for it still lasted: looked at again once that want has run out */
+  private readonly forgetLater = new Map<string, ReturnType<typeof setTimeout>>();
   private started = false;
   private closed = false;
   private open = false;
@@ -136,6 +148,7 @@ export class RemoteHub implements MarketHub {
       if (--now.n > 0) return;
       this.holds.delete(k);
       if (!this.closed) this.sendHold(source, symbol, book, false);
+      this.forget(source, symbol);
     };
   }
 
@@ -205,25 +218,68 @@ export class RemoteHub implements MarketHub {
     this.listeners.add(fn);
     return () => void this.listeners.delete(fn);
   }
+  /** told each time the stream drops, or could not be opened; returns the unsubscribe */
+  onDown(fn: () => void): () => void {
+    this.downs.add(fn);
+    return () => void this.downs.delete(fn);
+  }
+  /** how many markets are mirrored here now */
+  mirrorCount(): number {
+    return this.mirrors.size;
+  }
 
   /** the stream closed for good (the account closing): the market lets this client's holds go with it */
   close(): void {
     this.closed = true;
     if (this.retry) clearTimeout(this.retry);
     if (this.silent) clearTimeout(this.silent);
+    for (const t of this.forgetLater.values()) clearTimeout(t);
+    this.forgetLater.clear();
     this.stream?.abort();
     this.stream = undefined;
     this.open = false;
     this.listeners.clear();
+    this.downs.clear();
   }
 
   // ---- the wire ---------------------------------------------------------------------------------------------------------------------
 
+  /** one POST for one market, sent once the one before it for that market has ended (answered or not) */
+  private inTurn(source: string, symbol: string, path: string, body: unknown): void {
+    const k = `${source}|${symbol}`;
+    const next = (this.chains.get(k) ?? Promise.resolve()).then(() => this.c.post(path, body)).then(
+      () => undefined,
+      () => undefined,
+    );
+    this.chains.set(k, next);
+    void next.then(() => {
+      if (this.chains.get(k) === next) this.chains.delete(k);
+    });
+  }
   private sendHold(source: string, symbol: string, book: boolean, held: boolean): void {
-    void this.c.post("/api/hub/hold", { client: this.o.clientId, source, symbol, book, held }).catch(() => undefined);
+    this.inTurn(source, symbol, "/api/hub/hold", { client: this.o.clientId, source, symbol, book, held });
   }
   private sendWant(source: string, symbol: string): void {
-    void this.c.post("/api/hub/want", { client: this.o.clientId, source, symbol }).catch(() => undefined);
+    this.inTurn(source, symbol, "/api/hub/want", { client: this.o.clientId, source, symbol });
+  }
+  /** a market no hold keeps and no lasting want keeps is let go: its mirror deleted. One a want still keeps is looked at again once that
+   * want has run out (a want asked again meanwhile moves that on) */
+  private forget(source: string, symbol: string): void {
+    const k = `${source}|${symbol}`;
+    const t = this.forgetLater.get(k);
+    if (t) clearTimeout(t);
+    this.forgetLater.delete(k);
+    if (this.closed || this.holds.has(k) || this.holds.has(`${k}|book`)) return;
+    const w = this.wants.get(k);
+    const left = w ? WANT_LASTS_MS - (this.clock() - w.wantedAt) : 0;
+    if (left >= 0 && w) {
+      const later = setTimeout(() => this.forget(source, symbol), left + 1);
+      later.unref?.();
+      this.forgetLater.set(k, later);
+      return;
+    }
+    if (w) this.wants.delete(k);
+    this.mirrors.delete(k);
   }
   /** every hold, and every want still lasting, sent again (a stream opened: the market kept none of them past the last one) */
   private sendAll(): void {
@@ -236,6 +292,11 @@ export class RemoteHub implements MarketHub {
       }
       w.sentAt = now;
       this.sendWant(w.source, w.symbol);
+    }
+    // a market neither held nor wanted any longer is forgotten
+    for (const k of [...this.mirrors.keys()]) {
+      const i = k.indexOf("|");
+      this.forget(k.slice(0, i), k.slice(i + 1));
     }
   }
   private tell(source: string, symbol: string, what: HubTick["what"]): void {
@@ -311,6 +372,13 @@ export class RemoteHub implements MarketHub {
       this.tell(k.slice(0, i), k.slice(i + 1), "live");
     }
     if (this.closed) return;
+    for (const fn of [...this.downs]) {
+      try {
+        fn();
+      } catch {
+        // a listener's throw is its own: the rest are told
+      }
+    }
     const wait = Math.min(BACKOFF_MAX_MS, BACKOFF_MIN_MS * 2 ** Math.min(this.tries, 16));
     this.tries++;
     this.retry = setTimeout(() => {
@@ -329,8 +397,12 @@ export class RemoteHub implements MarketHub {
     const ac = new AbortController();
     this.stream = ac;
     this.connecting = true;
+    // a market that took the request and sends no headers is let go after HUB_HEADERS_MS: the stream is tried again, and a poke is not
+    // held up by a connect that never ends
+    const headers = setTimeout(() => ac.abort(), HUB_HEADERS_MS);
+    headers.unref?.();
     try {
-      const r = await this.http(new URL(`/api/hub?client=${encodeURIComponent(this.o.clientId)}`, this.c.url), { headers: { accept: "text/event-stream" }, signal: ac.signal });
+      const r = await this.http(new URL(`/api/hub?client=${encodeURIComponent(this.o.clientId)}`, this.c.url), { headers: { accept: "text/event-stream" }, signal: ac.signal }).finally(() => clearTimeout(headers));
       if (r.status !== 200 || !r.body) {
         await r.body?.cancel().catch(() => undefined);
         throw new Error(`the market's hub answered ${r.status}`);

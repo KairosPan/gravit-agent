@@ -5,7 +5,9 @@
  *
  * THE SOURCE LIST is GET /api/sources: none until the market first answers, asked again every SOURCES_WAIT_MS while it has not (an account
  * started before its market fills in once the market is up, with no restart) and every SOURCES_EVERY_MS after. A new list is made only
- * when the market's changes (its ids, or what each answers), so the service wraps its sources again only then. */
+ * when the market's changes (its ids, or what each answers), so the service wraps its sources again only then. The first failure after an
+ * answer (the client's onFail) and every drop of the hub stream (the hub's onDown) bring an ask SOURCES_EVERY_MS away to SOURCES_WAIT_MS
+ * away, so a market that comes back is found within seconds of having gone. */
 import { randomBytes } from "node:crypto";
 import { isRefusal } from "../../core/errors.ts";
 import { MARKET_DOWN, marketClient, type MarketClient } from "./client.ts";
@@ -51,6 +53,9 @@ export function connectMarket(o: { url: string; fetch?: typeof fetch; clock?: ()
   let started = false;
   let closed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** the wait the timer was set for */
+  let timerMs = 0;
+  const unsubscribe: Array<() => void> = [];
   let asking: Promise<void> | undefined;
   const waiting = new Set<() => void>();
   /** since when the market has not answered: a request it did not answer (the client's staleSince), or its hub stream down with nothing
@@ -88,8 +93,22 @@ export function connectMarket(o: { url: string; fetch?: typeof fetch; clock?: ()
     if (closed) return;
     // asked again soon while the market has not answered yet, or is not answering now: the ask that finds it back clears the mark and
     // opens the hub stream at once (poke), so a market back after a long while is not waited for through the stream's whole backoff
-    timer = setTimeout(() => void loop(), answered && !old() ? SOURCES_EVERY_MS : SOURCES_WAIT_MS);
+    schedule(answered && !old() ? SOURCES_EVERY_MS : SOURCES_WAIT_MS);
+  };
+  const schedule = (ms: number): void => {
+    if (timer) clearTimeout(timer);
+    timerMs = ms;
+    timer = setTimeout(() => {
+      timer = undefined;
+      void loop();
+    }, ms);
     timer.unref?.();
+  };
+  /** the market failing (a request it did not answer, or the hub stream dropped): an ask a whole SOURCES_EVERY_MS away is brought to
+   * SOURCES_WAIT_MS away. An ask on its way now sets its own wait when it ends, by old() */
+  const soon = (): void => {
+    if (closed || !timer || timerMs !== SOURCES_EVERY_MS) return;
+    schedule(SOURCES_WAIT_MS);
   };
 
   return {
@@ -120,12 +139,15 @@ export function connectMarket(o: { url: string; fetch?: typeof fetch; clock?: ()
     start() {
       if (started || closed) return;
       started = true;
+      unsubscribe.push(client.onFail(soon), hub.onDown(soon));
       void loop();
       hub.start();
     },
     close() {
       closed = true;
       if (timer) clearTimeout(timer);
+      timer = undefined;
+      for (const u of unsubscribe.splice(0)) u();
       hub.close();
       for (const w of [...waiting]) w();
     },

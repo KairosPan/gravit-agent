@@ -101,10 +101,17 @@ const portOf = (args: string[]): number => {
   return i >= 0 ? Number(args[i + 1]) : 4821;
 };
 
-async function answers(port: number): Promise<boolean> {
+/** whether a market answers on this port: its health read is ok and says it is the market's (`service: "market"`), not another program's
+ * on the same port (an account, or anything else that answers /api/health) */
+export async function answers(port: number, http: typeof fetch = fetch): Promise<boolean> {
   try {
-    const r = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(2_000) });
-    return r.ok;
+    const r = await http(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(2_000) });
+    if (!r.ok) {
+      await r.body?.cancel().catch(() => undefined);
+      return false;
+    }
+    const body = (await r.json()) as { service?: unknown } | null;
+    return !!body && typeof body === "object" && body.service === "market";
   } catch {
     return false;
   }

@@ -62,4 +62,17 @@ describe("who the market answers", () => {
     expect(parseHosts(undefined)).toEqual([]);
     expect(parseHosts(" market:4821, ,Other:1 ")).toEqual(["market:4821", "Other:1"]);
   });
+  it("a close that throws rejects once, then closes quietly, and frees the port", async () => {
+    const srv = await startMarketServer({ port: 0, close: async () => { throw new Error("boom"); } });
+    const port = Number(new URL(srv.url).port);
+    await expect(srv.close()).rejects.toThrow("boom");
+    await expect(srv.close()).resolves.toBeUndefined();
+    await expect(srv.close()).resolves.toBeUndefined();
+    const again = await startMarketServer({ port });
+    try {
+      expect((await fetch(`${again.url}/api/health`)).status).toBe(200);
+    } finally {
+      await again.close();
+    }
+  });
 });

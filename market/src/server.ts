@@ -103,19 +103,26 @@ export async function startMarketServer(o: MarketServerOptions): Promise<MarketS
     s.on("error", reject);
   });
   const bound = server.address();
+  // the listener's close, kept on its own: once begun it is the same promise for every caller, and it never rejects
+  let listenerClosed: Promise<void> | undefined;
+  const closeListener = (): Promise<void> =>
+    (listenerClosed ??= new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    }));
   let closing: Promise<void> | undefined;
   return {
     url: `http://127.0.0.1:${typeof bound === "object" && bound ? bound.port : o.port}`,
     close() {
-      closing ??= (async () => {
-        // the listener closes whatever the core's close does: a throwing close never leaves the port held
+      // the first close runs the core's close and says how it went: a close that throws rejects this call alone. Every later one waits
+      // for that first one to end, then only for the listener (never before the core's close is done), so a rejection is never served
+      // again. The listener closes whatever the core's close does: a throwing close never leaves the port held
+      if (closing) return closing.then(closeListener, closeListener);
+      closing = (async () => {
         try {
           await o.close?.();
         } finally {
-          await new Promise<void>((resolve) => {
-            server.close(() => resolve());
-            server.closeAllConnections();
-          });
+          await closeListener();
         }
       })();
       return closing;
