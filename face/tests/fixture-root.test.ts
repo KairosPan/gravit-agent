@@ -24,5 +24,8 @@ test("assertOutsideTempRoots refuses a path under os.tmpdir(), through a symlink
 });
 
 test("assertOutsideTempRoots admits the repository's own face/tests/tmp", () => {
-  assertOutsideTempRoots(join(dirname(fileURLToPath(import.meta.url)), "tmp"));
+  /* gitignored, so a fresh clone has none until a smoke makes it: create it rather than depend on order */
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "tmp");
+  mkdirSync(dir, { recursive: true });
+  assertOutsideTempRoots(dir);
 });

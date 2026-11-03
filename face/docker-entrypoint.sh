@@ -11,4 +11,5 @@ done
 # binds the container's own address, which serves the box's network; the host still reaches the face
 # at 127.0.0.1:3090 through compose's publish. A FACE_BIND already set (docker run -e) wins.
 : "${FACE_BIND:=$(hostname -i | awk '{print $1}')}"; export FACE_BIND
+[ -n "$FACE_BIND" ] || { echo "docker-entrypoint: hostname -i printed no address, so FACE_BIND is empty and the face would bind loopback inside the box; set FACE_BIND" >&2; exit 1; }
 exec "$@"

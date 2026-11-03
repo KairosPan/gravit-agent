@@ -18,6 +18,7 @@ const gated = process.env.FACE_SMOKE !== "1";
 test("bind smoke: bootFace with FACE_BIND=0.0.0.0 rejects, naming the webserver row", { skip: gated && "set FACE_SMOKE=1" }, async () => {
   const home = mkdtempSync(join(tmpdir(), "face-bindsmoke-"));
   const previous = process.env.FACE_BIND;
+  const bots = await makeBotsRoot();
   try {
     setupFaceProfile(home);
     /* A scratch profile must not start the operator's Account seat. */
@@ -26,11 +27,12 @@ test("bind smoke: bootFace with FACE_BIND=0.0.0.0 rejects, naming the webserver 
     writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n`);
     process.env.FACE_BIND = "0.0.0.0";
     await assert.rejects(
-      bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot() }),
+      bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots }),
       (error: Error) => /webserver/.test(error.message),
     );
   } finally {
     if (previous === undefined) delete process.env.FACE_BIND; else process.env.FACE_BIND = previous;
     rmSync(home, { recursive: true, force: true });
+    rmSync(bots, { recursive: true, force: true });
   }
 });
