@@ -1337,15 +1337,17 @@ the mechanism, `face/README.md` "The desk drill" the three live steps, which are
   - A `/stop` or deadline cut still wakes every queued message, of any source, as before; only the
     boot's wake is limited to the phone's and the alerts'. The conversation starts only once the bridge
     has set the outlet, so the cut line finds it.
-  - All of this covers a face that died. A graceful stop (`npm run service -- restart`, `stop`, a
-    logout) still cancels the turn under way as `shutdown` without `keepInbox`: dsh clears what was
-    queued behind it, and no line follows (`DEVELOPMENT.md` §9, R93).
+  - A graceful stop (`npm run service -- restart`, `stop`, a logout) cancels the turn under way as
+    `shutdown` with `keepInbox` and wakes nobody (the final review's I1): what was queued behind it
+    stays in the durable inbox, and the next boot's wake answers it. The turn it cut gets no line:
+    its own `desk-turn` (`cancel: "shutdown"`) makes it no cut to the boot (`DEVELOPMENT.md` §9, R93).
 - **H4** is `npm run service -- status --check` (`checkHealth`) and `face/scripts/watchdog.ts`. The
   2 reason names launchd's state (`no answer on <port> (launchd: <state>[, pid N])`). The watchdog's
   plist has `StartInterval` 300 and `RunAtLoad` false, so the first check comes five minutes after
   `install`. Its logs are `watchdog.log` and `watchdog.err.log` beside the face's. `watchdog.json`
   holds `outageSince`, `degradedChecks`, `degradedSaid`, `degradedSince` and `restartedAt`, and
-  `status` prints a `watchdog:` line from it. A code 1 also closes an outage, with the `answers again`
-  line; that a face other than launchd's can close it is open for the branch's final review.
+  `status` prints a `watchdog:` line from it. A code 1 from launchd's own face also closes an outage, with the
+  `answers again` line; another face on the port (`OTHER_FACE`, Ruling 10's narrowing, the final
+  review's I2) during an outage neither closes it nor is counted, and nothing is said.
   `uninstall` takes the watchdog out first. A service installed before this round has no watchdog
   until `npm run service -- install` runs again.

@@ -714,7 +714,7 @@ test("installDesk creates the desk conversation only when enabled with root, rou
     agent.status = "running";
     await desk.dispose(0);
     await desk.dispose(0);
-    assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]], "the running desk turn is cancelled once");
+    assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]], "the running desk turn is cancelled once");
     assert.equal(fake.listeners.size, 0);
     assert.equal(fake.letGo.length, 1);
     assert.doesNotMatch(fake.letGo[0], /"kind":"shutdown"/, "the conversation was let go before the shutdown was written");
@@ -928,6 +928,37 @@ test("installDesk runs the Telegram bridge only with the desk on, Telegram confi
     assert.deepEqual(await telegramOf(rec), { configured: true, polling: false, dropped: 0, queued: 0 });
   } finally {
     await Promise.all(made.map((h) => rm(h, { recursive: true, force: true })));
+  }
+});
+
+/* The final review's M3: a bridge whose install throws is one line, and the conversation still starts - no unhandled
+ * rejection (a process exit under installFailLoud), and dispose still settles. */
+test("installDesk: a Telegram bridge that throws as it installs is one line, and the conversation starts all the same", async () => {
+  const h = join(TMP, "telegram-throws");
+  await mkdir(h, { recursive: true });
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => { unhandled.push(reason); };
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const fake = conversationRoot(() => "");
+    const lines: string[] = [];
+    const timer = fakeTimer();
+    const telegram = {
+      token: "424242:AAFakeTokenForTheBridgeTests_x9", operatorId: 42,
+      get apiBase(): string { throw new Error("the bridge's config cannot be read"); },
+    };
+    const desk = installDesk(recorder(), {
+      home: h, enabled: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, telegram, log: (line) => { lines.push(line); },
+      root: join(TMP, "repo-telegram-throws"), route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
+    });
+    await until("the conversation's start", () => fake.listeners.size === 1);
+    await new Promise((done) => setTimeout(done, 20));
+    assert.deepEqual(unhandled, [], "no unhandled rejection");
+    assert.deepEqual(lines.filter((l) => l.includes("Telegram bridge")), ["gravit-face: desk: the Telegram bridge could not be started: the bridge's config cannot be read"]);
+    await desk.dispose(0);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+    await rm(h, { recursive: true, force: true });
   }
 });
 

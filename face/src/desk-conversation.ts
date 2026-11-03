@@ -60,7 +60,7 @@
  *
  * A CUT CUTS ONE TURN. The phone's `/stop` ({@link DeskConversation.stop}), like the deadline, cancels the turn
  * under way and only it: the messages queued behind it are kept and answered, each in its own turn
- * (src/desk-session.ts `cancelKeepingQueue`). A shutdown keeps nothing.
+ * (src/desk-session.ts `cancelKeepingQueue`). A shutdown keeps the queue too, but wakes nobody: the next boot does.
  *
  * ONE AT A TIME. `start`, `post` and `renew` run in the order they were called, each once the one before has
  * settled: two ensures at once would both find no conversation in the ledger and open two. `stop`,
@@ -76,9 +76,9 @@
  * already held), so a turn under way keeps its deadline, its record and its delivery.
  *
  * SHUTDOWN ({@link DeskConversation.dispose}). Every turn under way, on the conversation and on any it
- * retired, is cancelled as `shutdown`, and its agent gets two seconds to go idle, so the cut turn is
- * recorded; then every supervision ends, a start, post or renew under way gets five seconds to settle, and
- * the records under way are waited for - so nothing the conversation writes lands after the ledger's
+ * retired, is cancelled as `shutdown` - the inbox kept, for the boot's wake - and its agent gets two seconds to go
+ * idle, so the cut turn is recorded; then every supervision ends, a start, post or renew under way gets five seconds
+ * to settle, and the records under way are waited for - so nothing the conversation writes lands after the ledger's
  * `shutdown`, which src/desk.ts appends once this has settled.
  *
  * MODULE WEIGHT. src/desk.ts imports this module, and `npm run desk` and scripts/service.ts import src/desk.ts.
@@ -565,12 +565,13 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     });
   };
 
-  /** Cancel `w`'s work under way with `cause`; whether the cancel went through. `keep`, the phone's stop: only the
-   * turn under way, the messages queued behind it kept and answered (src/desk-session.ts `cancelKeepingQueue`);
-   * without it, a shutdown: the inbox goes too. */
+  /** Cancel `w`'s work under way with `cause`; whether the cancel went through. With `keep`, the phone's stop and the
+   * deadline: only the turn under way, the messages queued behind it kept and answered (src/desk-session.ts
+   * `cancelKeepingQueue`); without it, a shutdown: the inbox is kept too, but nobody is woken - a shutdown wants the
+   * agent idle, and the boot's wake (`requeuePending`) answers what waits there (spec §16 H3, R93). */
   const cancel = (w: Watch, cause: { kind: "hook"; reason: string }, keep?: Machinery): boolean => {
     try {
-      if (keep === undefined) w.agent.cancel(cause);
+      if (keep === undefined) w.agent.cancel(cause, { keepInbox: true });
       else keep.session.cancelKeepingQueue(w.agent, cause, log);
       return true;
     } catch (err) {

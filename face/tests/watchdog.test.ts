@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkHealth, contextOf, LABEL, servicePlan, type HealthCode, type ServiceDeps } from "../scripts/service.ts";
+import { checkHealth, contextOf, LABEL, OTHER_FACE, servicePlan, type HealthCode, type ServiceDeps } from "../scripts/service.ts";
 import { phoneOf, readWatchdogState, runWatchdog, watchdogStatePath, type WatchdogDeps } from "../scripts/watchdog.ts";
 import { deskTime } from "../src/desk.ts";
 
@@ -105,6 +105,30 @@ test("back to healthy after an outage: one line and a cleared state", async () =
   w.health(2, DOWN);
   await runWatchdog(w.deps);
   assert.equal(w.restarts, 2, "a new outage is restarted once again");
+});
+
+/* Ruling 10's narrowing: during an outage the operator starts a face in a terminal to look. That face answering is not
+ * launchd's face answering: the outage stays open, the restart is not run again, and nothing is said. */
+test("another face answering during an outage neither closes it nor says answers again; launchd's own face does", async () => {
+  const w = await watch();
+  w.health(2, DOWN);
+  await runWatchdog(w.deps);
+  const opened = await readWatchdogState(w.deps.home);
+  w.at(T0 + FIVE_MIN);
+  w.health(1, OTHER_FACE);
+  assert.equal(await runWatchdog(w.deps), 0);
+  assert.equal(w.sent.length, 1, "no line: launchd's face has not answered");
+  assert.deepEqual(await readWatchdogState(w.deps.home), opened, "the state unchanged, the degraded count left alone");
+  w.at(T0 + 2 * FIVE_MIN);
+  w.health(2, DOWN);
+  await runWatchdog(w.deps);
+  assert.equal(w.restarts, 1, "the terminal face closed: the same outage, not restarted again");
+  assert.equal(w.sent.length, 1);
+  w.at(T0 + 3 * FIVE_MIN);
+  w.health(0, "healthy");
+  await runWatchdog(w.deps);
+  assert.deepEqual(w.sent.slice(1), [`the desk answers again (down since ${deskTime(new Date(T0), new Date(T0 + 3 * FIVE_MIN))})`]);
+  assert.deepEqual(await readWatchdogState(w.deps.home), { degradedChecks: 0 });
 });
 
 test("stopped on purpose: nothing sent, the state cleared", async () => {

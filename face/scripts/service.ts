@@ -516,6 +516,10 @@ function degradedReason(status: DeskStatus, now: number): string | undefined {
   return undefined;
 }
 
+/** {@link checkHealth}'s `1` reason when the face answering on the port is not launchd's job: the watchdog reads it
+ * apart (scripts/watchdog.ts), since another face answering neither degrades nor revives launchd's. */
+export const OTHER_FACE = "another face holds the port";
+
 /**
  * The desk's health, as `status --check` exits with it and the watchdog (spec §16 H4) reads it; the
  * first rule that holds wins:
@@ -556,7 +560,7 @@ export async function checkHealth(
     const seen = job.loaded ? `${job.state ?? "state unknown"}${job.pid === undefined ? "" : `, pid ${job.pid}`}` : "not loaded";
     return { code: 2, reason: `no answer on ${ctx.port} (launchd: ${seen})` };
   }
-  if (answer.pid !== job.pid) return { code: 1, reason: "another face holds the port" };
+  if (answer.pid !== job.pid) return { code: 1, reason: OTHER_FACE };
   const degraded = degradedReason(answer, (opts.now ?? Date.now)());
   return degraded === undefined ? { code: 0, reason: "healthy" } : { code: 1, reason: degraded };
 }
@@ -876,7 +880,7 @@ async function statusBlock(ctx: ServiceContext): Promise<void> {
   /* The face that answered is not the one launchd runs - a terminal npm start, say - so what it
    * said above is that face's, not the job's. */
   else if (job.loaded && job.pid !== undefined && answer.pid !== job.pid) {
-    deps.out(`the face answering on ${port} is pid ${answer.pid}, not launchd's job (pid ${job.pid}): another face holds the port`);
+    deps.out(`the face answering on ${port} is pid ${answer.pid}, not launchd's job (pid ${job.pid}): ${OTHER_FACE}`);
   }
 }
 

@@ -821,8 +821,9 @@ export function cancelKeepingQueue(agent: AgentLike, cause: { kind: "hook"; reas
   return requeue(agent, () => true, log, " after the cut");
 }
 
-/** The message sources {@link requeuePending} wakes the desk for: the phone's texts and the face's alerts. */
-const REQUEUED: ReadonlySet<string> = new Set(["telegram", "alert", "alerts"]);
+/** The message sources {@link requeuePending} wakes the desk for: the phone's texts and the face's alerts - one alert's
+ * or a pass's batch, whose message's source is `alert` alike (src/alert-text.ts `annotationPost`). */
+const REQUEUED: ReadonlySet<string> = new Set(["telegram", "alert"]);
 
 /**
  * The boot's wake: take each phone text and alert waiting on `agent`'s inbox's next-turn list out, and send it again

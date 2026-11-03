@@ -5182,9 +5182,11 @@ last check.
      back. PASS: soon after the boot the phone gets `a restart cut your message of <time> before
      it was answered; send it again`, then the queued text's answer. `events.jsonl` has a
      `desk-turn` with `"cancel":"restart"` and `"wallMs":0`, then the woken text's `desk-turn`.
-   - **a graceful restart:** `npm run service -- restart`. By the code, the shutdown clears the
-     inbox, so the queued text is not answered and no line says so (`DEVELOPMENT.md` §9, R93).
-     Record what the phone gets. An answer means the code moved and R93 is to be re-read.
+   - **a graceful restart:** `npm run service -- restart`. PASS: soon after the boot the phone
+     gets the queued text's answer - the shutdown kept it in the session's inbox and the boot's
+     wake answers it - and `events.jsonl` has the cut turn's `desk-turn` with
+     `"cancel":"shutdown"`, then the woken text's. The long turn the restart cut gets no line
+     (`DEVELOPMENT.md` §9, R93).
 3. **The watchdog.** `kill -STOP <pid>`, the face's pid as `status` prints it. PASS: within ten
    minutes the phone gets one line, `the desk has not answered since <time> (no answer on 3090
    (launchd: running, pid <pid>)); the watchdog restarted it`; the face answers again (a new pid in
@@ -5194,7 +5196,7 @@ last check.
    A `…; the restart failed: <reason>` line instead is a finding: a stopped face holds its port until
    launchd kills it, so record the line and `watchdog.log`'s restart lines.
 
-**PASS is the install line and steps 1–3** (step 2's graceful half records what happens). Record
+**PASS is the install line and steps 1–3**, step 2's two halves both. Record
 the date, the commit, step 1's two times, step 2's lines and step 3's line and its time in
 `DEVELOPMENT.md` §7.4's hardening **Desk** row.
 

@@ -10,7 +10,9 @@
  * - `1` degraded: counted; at the second check in a row, once per episode, the phone hears
  *   `the desk is degraded since …: <reason>`. A degraded desk is never restarted - another face on
  *   the port reads 1, and the watchdog never takes a port from a face that is not launchd's. An
- *   answer ends an outage as `0` does, with its line, so a later silence is a new outage.
+ *   answer from launchd's own face ends an outage as `0` does, with its line, so a later silence is a
+ *   new outage; another face's (`OTHER_FACE`) during an outage neither ends it nor is counted - the
+ *   state is saved as it was and nothing is said.
  * - `2` down: the first run that sees it opens the outage and runs the service's own `restart` once
  *   (a kickstart, for a job launchd is about to start again) - written to the state before the
  *   restart, so a run cut short never restarts twice - and the phone hears
@@ -35,7 +37,7 @@ import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { deskDir, deskTime, readOffState } from "../src/desk.ts";
-import { checkHealth, contextOf, realDeps, runService, WATCHDOG_STATE_FILE, type HealthCode } from "./service.ts";
+import { checkHealth, contextOf, OTHER_FACE, realDeps, runService, WATCHDOG_STATE_FILE, type HealthCode } from "./service.ts";
 
 export { WATCHDOG_LABEL } from "./service.ts";
 
@@ -170,7 +172,10 @@ export async function runWatchdog(deps: WatchdogDeps): Promise<number> {
     await say(`the desk has not answered since ${at(iso)} (${reason}); ${failure === undefined ? "the watchdog restarted it" : `the restart failed: ${failure}`}`);
     return written ? 0 : 1;
   }
-  /* 0 or 1: the port answers, which ends an outage. */
+  /* Another face on the port - the operator's own, started to look - is not launchd's answering: in an outage the
+   * outage stays open, nothing is said, and the degraded count is left alone (Ruling 10's narrowing). */
+  if (code === 1 && reason === OTHER_FACE && prev.outageSince !== undefined) return (await save(prev)) ? 0 : 1;
+  /* 0 or 1: launchd's face answers, which ends an outage. */
   if (prev.outageSince !== undefined) await say(`the desk answers again (down since ${at(prev.outageSince)})`);
   if (code === 0) return (await save({ ...CLEAR })) ? 0 : 1;
   const episode = prev.outageSince === undefined ? prev : CLEAR;

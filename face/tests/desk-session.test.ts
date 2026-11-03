@@ -1337,7 +1337,8 @@ test("requeuePending takes out and follows up again the telegram and alert messa
   const first = queued("first");
   const browser = createUserMessage({ content: say("from the browser"), source: { kind: "user" } }) as unknown as MessageLike;
   const flagged = alert() as unknown as MessageLike;
-  const batch = createUserMessage({ content: say("[alerts · 2 · 09:30 ET]\ntwo"), source: { kind: "alerts", count: 2 } as never }) as unknown as MessageLike;
+  /* A pass's batch is `[alerts · …]` in its text, but its message's source is `alert` like one alert's (src/alert-text.ts `annotationPost`). */
+  const batch = createUserMessage({ content: say("[alerts · 2 · 09:30 ET]\ntwo"), source: { kind: "alert", alert: "pass-1", symbol: "NVDA,AMD", pass: "pass-1" } }) as unknown as MessageLike;
   const last = queued("last");
   const { agent, model, followups } = inboxAgent();
   for (const message of [first, browser, flagged, batch, last]) model.pending.push(message); // what the resume rebuilt

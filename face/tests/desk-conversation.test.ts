@@ -1261,7 +1261,7 @@ test("dispose cancels a running turn with the shutdown reason, once", async () =
   agent.settle(); // the cut turn's driver retires
   await first;
   await h.desk.dispose();
-  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]]);
+  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]]);
   assert.equal(h.bus.listeners.size, 0, "the supervision is gone");
   await h.time.fake.advance(600_000);
   assert.equal(agent.cancels.length, 1, "no deadline fires after dispose");
@@ -1269,6 +1269,30 @@ test("dispose cancels a running turn with the shutdown reason, once", async () =
   assert.equal(agent.followups.length, 1);
   await assert.rejects(h.desk.renew(), /the desk is shut down/);
   assert.equal(await h.desk.stop("stopped from the phone"), false);
+});
+
+/* A graceful stop (spec §16 H3, R93): the texts queued behind the turn under way stay on the inbox's next-turn list for
+ * the boot's wake (src/desk-session.ts `requeuePending`) - the shutdown keeps the inbox and wakes nobody. */
+test("a shutdown keeps the messages queued behind the turn it cuts, and does not wake the agent for them", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const { sessionId } = (await post(h, "first")) as { sessionId: string };
+  const agent = h.tree.agent(sessionId);
+  const model = agent.model!;
+  assert.equal(model.claim()?.content[0]?.text, "[telegram · operator · 14:03 ET]\nfirst", "the driver takes the first message for turn 1");
+  model.running = true;
+  agent.status = "running";
+  startTurn(h, sessionId, 1, PHONE);
+  assert.deepEqual(await post(h, "second"), { opened: true, sessionId });
+  assert.equal(model.pending.length, 1);
+  const disposing = h.desk.dispose();
+  await waitFor("the shutdown cancel", () => agent.cancels.length === 1);
+  endTurn(h, sessionId, 1, ABORTED("shutdown"));
+  agent.settle();
+  await disposing;
+  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]], "the inbox kept");
+  assert.deepEqual(agent.inbox?.nextTurn.map((m) => m.content[0]?.text), ["[telegram · operator · 14:03 ET]\nsecond"], "still queued for the boot");
+  assert.equal(agent.followups.length, 2, "nothing sent again: a shutdown wants the agent idle, not woken");
 });
 
 test("a turn cut at shutdown is recorded before dispose resolves", async () => {
@@ -1320,7 +1344,7 @@ test("dispose during a retiring turn cancels it once", async () => {
   endTurn(h, old, 1, ABORTED("shutdown"));
   oldAgent.settle();
   await disposing;
-  assert.deepEqual(oldAgent.cancels, [[{ kind: "hook", reason: "shutdown" }]]);
+  assert.deepEqual(oldAgent.cancels, [[{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]]);
   assert.deepEqual(h.tree.agent(fresh).cancels, [], "the idle new conversation has nothing to cancel");
   assert.equal(h.bus.listeners.size, 0, "every supervision is gone, the retiring one included");
   assert.deepEqual((await turnsOf(h)).map((e) => [e.sessionId, e.turn]), [[old, 1]], "and the retiring turn it cut is recorded");
@@ -1338,7 +1362,7 @@ test("work the status does not show - maintenance with a followup latched - is w
   assert.equal(h.bus.listeners.size, 2, "retired, not ended: whenIdle still waits");
   const disposing = h.desk.dispose();
   await waitFor("the shutdown cancel", () => oldAgent.cancels.length === 2);
-  assert.deepEqual(oldAgent.cancels[1], [{ kind: "hook", reason: "shutdown" }]);
+  assert.deepEqual(oldAgent.cancels[1], [{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]);
   oldAgent.settle();
   await disposing;
   assert.equal(h.bus.listeners.size, 0);
