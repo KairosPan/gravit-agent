@@ -485,8 +485,9 @@ changed (`src/account-seat.ts` records it):
 - `failOnStartupError` stays `false`: a server that cannot start leaves its row
   ACTIVE with no tools, so the boot audit cannot see it. The check is
   `/data/plugins.json` (or **Plugin → <server>**): `account` with the seat's 36
-  tools. The go-live runbook is
-  `../docs/superpowers/runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md`.
+  tools. The go-live runbooks are
+  `../docs/superpowers/runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md` and, for 0.2.1-rc.5,
+  `../docs/superpowers/runbooks/2026-11-02-dsh-0.2.1-rc.5-go-live.md`.
 
 ## The Account seat — Gravit at the Account
 
@@ -3938,7 +3939,8 @@ alone. Three things are new:
 The global CLI is D12's question again: `~/.local/bin/dsh` is 0.2.0-rc.2,
 installed and never run on the home; upgrade it to 0.2.1-rc.5 or keep it off
 this home. The operator's procedure for this pin is the go-live runbook beside
-the 0.2.0 one; the record of the upgrade is `../docs/dsh-upgrade-guide.md` §6.4.
+the 0.2.0 one, `../docs/superpowers/runbooks/2026-11-02-dsh-0.2.1-rc.5-go-live.md`;
+the record of the upgrade is `../docs/dsh-upgrade-guide.md` §6.4.
 
 ## Sessions written before 0.2.0
 

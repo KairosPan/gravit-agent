@@ -39,7 +39,8 @@ model row: `dsh/README.md` "Installed state".
 
 Merged from `face/README.md` "Upgrading dsh — three pins, not one", `DEVELOPMENT.md` §6.7 and
 §10 items 13–14, `dsh/README.md` step 2, and the go-live runbook
-(`docs/superpowers/runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md`). The numbering is the
+(`docs/superpowers/runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md`; for the move to 0.2.1-rc.5,
+`docs/superpowers/runbooks/2026-11-02-dsh-0.2.1-rc.5-go-live.md`, same sections). The numbering is the
 inventory's PART 2, so a step can be cited.
 
 **Read first**
