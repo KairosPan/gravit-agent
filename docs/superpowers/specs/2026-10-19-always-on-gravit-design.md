@@ -1264,7 +1264,9 @@ exists in it. Upgrading dsh happens on a separate branch.
     that id (`MessageId` + `freezeMessage`, as the prototype's `src/app/delivery.ts` does) and skips a key already
     in the session's log or inbox.
   - **The order.** The conversation flushes the session's persistence before it answers that the turn is opened.
-    The bridge stores the offset only after that answer, however long it took.
+    The bridge stores the offset only after that answer, waiting at most five minutes for it (the phone turn's
+    deadline); past that it records `unaccepted`, moves the offset on and keeps polling (a build ruling: a phone
+    that cannot even `/pause` is worse than the rare loss this guards against).
   - **What that buys.** A crash before the flush leaves the update for Telegram to deliver again, and an update
     delivered again is answered once.
   - **At boot,** once the conversation holds its session:
@@ -1299,3 +1301,51 @@ exists in it. Upgrading dsh happens on a separate branch.
     conversation to the operator's turns alone.
   - Firings stay one at a time. The trigger for running firings in different directories at once is the first
     queued firing missed at its market's open.
+
+**As built (2026-11-02):** plan `docs/superpowers/plans/2026-11-02-desk-hardening.md`, commits
+`88a585af..527d868f` on `feat/desk-p1-p4`; `DEVELOPMENT.md` §4.2, §4.5, §7.4 and §9 (R90–R95) carry
+the mechanism, `face/README.md` "The desk drill" the three live steps, which are owed.
+
+- **H1** is `face/src/annotator.ts`, wired by `installDesk`. The checks run in the order the section
+  names; a refusal makes no agent and the watch answers it, as before. Making the agent is bounded at
+  the deadline plus the firing's slack (150 s): past it, the not-annotated line, and the agent is let
+  go when it comes. The turn has the same 150 s watchdog from its followup, beside the supervisor's
+  90 s cut. The `desk-turn` keeps `"source":"alert"`. The watch still writes its `annotation` record
+  (`opened` or `refused`) for the post, and the lane's `annotated` record follows the run. The lane's
+  dispose waits 12 s at most (`FIRING_DISPOSE_MS` plus 2 s), inside launchd's 20 s `ExitTimeOut`, and
+  runs before the bridge's and the conversation's. A message of kind `alert` already in the desk
+  session's inbox, which an older face left there, is still answered by the conversation, without
+  the reply link.
+- **H1b** is the bridge's `contextFor` (`src/watch.ts`). The context is its own text part between the
+  provenance line and the operator's text, opened by `the message this replies to:`, at most 4,000
+  UTF-16 units, never cut inside a surrogate pair. It is resolved over the `delivered`, `annotation`
+  and `annotated` records of the last 48 hours. A resolver that throws only drops the context, and
+  the text still goes.
+- **H2** is as written. The late message opens `late: the face restarted before this alert was sent
+  (raised <time>)`, and the lost line names at most five alerts and counts the rest. A replay is held
+  by `OFF`, through `deliver`, but not by `MUTE`.
+- **H3**, as built:
+  - The acceptance wait is bounded at five minutes (above).
+  - The measurement found that dsh's resume does not run a pending text. The resumed agent sits idle
+    beside its rebuilt inbox. A turn the kill cut is closed in the log by `turn/end {interrupted}`,
+    which the supervisor never sees.
+  - So at boot the conversation reads the log first. A phone turn so cut is recorded as a `desk-turn`
+    `cancelled` by `restart` with `wallMs` 0, and answered with `a restart cut your message of <time>
+    before it was answered; send it again`. Then the instruction-chain fence is checked, and the
+    telegram and alert messages still queued are woken; a violation leaves them queued with a
+    `desk-refused`.
+  - A `/stop` or deadline cut still wakes every queued message, of any source, as before; only the
+    boot's wake is limited to the phone's and the alerts'. The conversation starts only once the bridge
+    has set the outlet, so the cut line finds it.
+  - All of this covers a face that died. A graceful stop (`npm run service -- restart`, `stop`, a
+    logout) still cancels the turn under way as `shutdown` without `keepInbox`: dsh clears what was
+    queued behind it, and no line follows (`DEVELOPMENT.md` §9, R93).
+- **H4** is `npm run service -- status --check` (`checkHealth`) and `face/scripts/watchdog.ts`. The
+  2 reason names launchd's state (`no answer on <port> (launchd: <state>[, pid N])`). The watchdog's
+  plist has `StartInterval` 300 and `RunAtLoad` false, so the first check comes five minutes after
+  `install`. Its logs are `watchdog.log` and `watchdog.err.log` beside the face's. `watchdog.json`
+  holds `outageSince`, `degradedChecks`, `degradedSaid`, `degradedSince` and `restartedAt`, and
+  `status` prints a `watchdog:` line from it. A code 1 also closes an outage, with the `answers again`
+  line; that a face other than launchd's can close it is open for the branch's final review.
+  `uninstall` takes the watchdog out first. A service installed before this round has no watchdog
+  until `npm run service -- install` runs again.

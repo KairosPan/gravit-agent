@@ -1578,8 +1578,8 @@ const watchClock = (now: () => number): DeskClock => ({
  * `now()` at this call and the status's uptime origin - and the sleep watch starts at once, writing
  * into the ledger. Given `root`, `route`, `sessionCtx` and `installModelSelection`
  * too, the desk conversation's owner (src/desk-conversation.ts) is created on the same `now` and
- * started without being awaited - its `start` never rejects - once the bridge, if any, has set the outlet,
- * so a line about a turn a restart cut finds it; so the desk session is ensured and
+ * started without being awaited - its `start` never rejects. It starts once the bridge, if any, has set the
+ * outlet, so a line about a phone turn a restart cut finds it. The desk session is so ensured and
  * supervised before any phone message, and a turn the operator opens from the browser is timed,
  * fenced and recorded like a phone turn. Given `telegram` as well, the Telegram bridge
  * (src/telegram.ts) runs on that conversation: its module loads on first use and the bridge starts
@@ -1597,7 +1597,8 @@ const watchClock = (now: () => number): DeskClock => ({
  * `stateText`, and the status route and
  * `desk_state` carry its status. `dispose(code)` stops the clock first - the firing under way
  * aborted, waited for two seconds at most - then the watch - its passes and posts waited for two seconds at most,
- * its lease released - then the annotation lane - a check under way cancelled as `shutdown`, its agent let go -
+ * its lease released - then the annotation lane - a check under way cancelled as `shutdown`, its agent let go,
+ * waited for 12 s at most -
  * then the bridge - no phone text is posted from then on,
  * and its outbox stays for the next boot -
  * then the conversation, which cancels the desk turns under way as `shutdown`, gives each cut agent

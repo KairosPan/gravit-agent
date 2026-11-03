@@ -11,9 +11,10 @@
  *
  * WHAT A MESSAGE DOES. A text goes to the desk conversation (src/desk-conversation.ts) with the telegram
  * source and the time the operator wrote it - Telegram's own `date`, not the time it arrived, which after a
- * night the Mac slept can be hours later. A text that replies to one of the desk's messages - an alert, or an alert's
- * annotation - carries that alert, and its annotation when there is one, as the post's context (spec §16 H1b,
- * src/watch.ts `contextFor`), so the one phone conversation knows what the operator is answering. A post the conversation refuses is answered with its line, and an
+ * night the Mac slept can be hours later. A text that replies to one of the desk's messages - an alert, or
+ * an alert's annotation - carries that alert, and its annotation when there is one, as the post's context
+ * (spec §16 H1b, src/watch.ts `contextFor`), so the one phone conversation knows what the operator is
+ * answering. A post the conversation refuses is answered with its line, and an
  * opened turn's answer comes back through the outlet - the bridge is the conversation's outlet from install
  * to dispose. Five commands are the bridge's own: /status, /pause [duration], /mute <duration>, /new and
  * /stop, in any case, with or without the bot's name after them; any other /word is text for Gravit. There
@@ -25,13 +26,15 @@
  * ({@link deliveryKey}): the conversation sends it as a message with that id, answers a key the desk session
  * already holds as a duplicate, and answers only once the session's log is flushed.
  *
- * THE OFFSET. Once an update is taken - a text's post settled, however long it took and whatever the slow line
- * said first; a command answered; anything else handled or dropped - the offset is set past it and stored in
- * `telegram.offset`; the next update waits for that. So a crash before the desk holds a text on disk leaves it
- * for Telegram to deliver again, and the text delivered again is answered once; an update the bridge cannot use
- * is never delivered again. The wait is bounded at five minutes, the phone turn's deadline: past it, an
- * `unaccepted` record and one line, and the offset moves on and the poll goes on, so a hung desk never leaves
- * /stop, /pause and /status unheard; a post that lands later is still answered once, by its key. Every update a poll answers is taken, in order - one numbered below the stored offset
+ * THE OFFSET. Once an update is taken - a text's post settled, whatever the slow line said first; a command
+ * answered; anything else handled or dropped - the offset is set past it and stored in `telegram.offset`;
+ * the next update waits for that. So a crash before the desk holds a text on disk leaves it for Telegram to
+ * deliver again, and the text delivered again is answered once; an update the bridge cannot use is never
+ * delivered again. The wait is bounded at five minutes, the phone turn's deadline ({@link ACCEPT_BOUND_MS}):
+ * past it, an `unaccepted` record and one log line, and the offset moves on and the poll goes on, so a hung
+ * desk never leaves /stop, /pause and /status unheard; a post that lands later is still answered once, by its
+ * key, and one that never lands is lost unseen if the face then dies. Every update a poll answers is taken,
+ * in order - one numbered below the stored offset
  * too, with one line: after about a week with no update Telegram may number them afresh, and passing those
  * over would leave the phone unheard while the status read healthy.
  *
@@ -665,7 +668,8 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
 
   /** Wait up to 30 s for `line`, the answer to a post or a `/new`: past that, answer that the desk is slow
    * and answer `line` when it settles - an empty one, as an opened turn's is, says nothing. Resolves once `line`
-   * has settled, however long that takes: the update is taken only then (the module header's THE OFFSET). */
+   * has settled, however long that takes; the update is taken then, or at {@link ACCEPT_BOUND_MS}, whichever comes
+   * first (the module header's THE OFFSET). */
   const answerWithin = async (line: Promise<string>): Promise<void> => {
     const answered = await bounded(POST_BOUND_MS, line);
     if (answered.settled) {

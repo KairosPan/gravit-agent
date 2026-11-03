@@ -33,13 +33,19 @@
  *   dispose is awaited at most src/firing.ts `FIRING_DISPOSE_MS`, past which one line and it goes on alone.
  *
  * ONE AT A TIME. Posts run on the annotator's own chain, each once the one before has delivered and noted its reply -
- * not once its agent is let go, which goes on beside the next run.
+ * not once its agent is let go, which goes on beside the next run. Each wait is bounded, so a check waits behind
+ * another for a bounded time, never behind the operator: the agent's making at the deadline plus src/firing.ts
+ * `FIRING_SLACK_MS` (150 s with the 90 s deadline; past it, the not-annotated line and the lane moves on, the agent let
+ * go when it comes), the turn by the watchdog above (the same 150 s from the followup), and the reply by `deliver`'s
+ * own minute.
  *
  * SHUTDOWN ({@link Annotator.dispose}). A turn under way is cancelled as `shutdown`; its run sends nothing and notes
- * nothing, records the cut turn when the supervisor reports it before the agent is let go, and lets the agent go. The
- * dispose waits for the runs - at most src/firing.ts `FIRING_DISPOSE_MS` and a two-second margin - so nothing here lands
- * after the conversation's dispose (src/desk.ts
- * `installDesk` disposes the annotator first). Afterwards a post refuses.
+ * nothing, records the cut turn when the supervisor reports it before the agent is let go, and lets the agent go; a
+ * post that has not made its agent yet makes none. The dispose waits for the runs at most src/firing.ts
+ * `FIRING_DISPOSE_MS` and a two-second margin - 12 s, inside launchd's 20 s `ExitTimeOut` - and then resolves whatever
+ * is still under way (src/desk.ts `installDesk` disposes the annotator before the conversation). What that bound cuts
+ * off goes on alone and can land after the conversation's dispose: a delivery under way, an agent's dispose that does
+ * not settle, a making that hangs across the shutdown, whose agent is let go when it comes. Afterwards a post refuses.
  *
  * MODULE WEIGHT. src/desk.ts imports this module, so it imports nothing but types: src/desk.ts, src/desk-session.ts,
  * src/desk-conversation.ts, src/firing.ts (for its two bounds) and dsh-llm load on the first post ({@link

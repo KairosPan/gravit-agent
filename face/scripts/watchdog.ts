@@ -14,7 +14,7 @@
  * - `2` down: the first run that sees it opens the outage and runs the service's own `restart` once
  *   (a kickstart, for a job launchd is about to start again) - written to the state before the
  *   restart, so a run cut short never restarts twice - and the phone hears
- *   `the desk has not answered since …(<reason>); the watchdog restarted it`, or `the restart
+ *   `the desk has not answered since … (<reason>); the watchdog restarted it`, or `…; the restart
  *   failed: <reason>`. Later runs in the same outage do neither.
  * - `3` stopped on purpose (no plist, or launchd has no job): the state is cleared, nothing is said.
  * While the desk's `OFF` pause is in force no line is sent - the log says what was not - and the

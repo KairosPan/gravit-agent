@@ -583,10 +583,10 @@ no cache_control（10-10 追踪）· 流空闲超时 300 s · 被策略层关掉
 <p>每个价在它自己市场的交易时段内判定（A 股只在相位 <code>trading</code>、09:30–11:30 与 13:00–15:00 北京时间内，加上 15:00:00–15:00:30 的收盘价）；<code>stale</code> 与 <code>unavailable</code> 从不判。命中先过闸：<code>OFF</code>、<code>MUTE</code>、冷却、每小时六条上限、其余并成一批。提醒文本由 face 写（不经模型）：品种、最新价与 feed 和交易所时间、价位、计划原文、是否有批注跟进；经台面会话的 <code>deliver</code> 发出——发送在批注之前。</p>
 <div class="chips"><span class="chip prompt">NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows</span><span class="chip event">alerts.jsonl · alert · delivered（latencyMs）</span><span class="chip wire">POST /bot&lt;token&gt;/sendMessage</span></div>
 </li>
-<li class="station"><span class="st-no">3</span><span class="st-where">desk-conversation.ts post（replyTo）· 台面会话</span>
+<li class="station"><span class="st-no">3</span><span class="st-where">annotator.ts · 每轮一个新的 gravit-desk 会话（2026-11-02 起，spec §16 H1）</span>
 <h4>批注：每一轮一次回合，回复在提醒那条消息下</h4>
-<p>价位或规则要求批注（<code>annotate: true</code>）时，这一轮的命中合成一次 post 进台面会话，来源行是 <code>[alert · &lt;SYMBOL&gt; · &lt;rule&gt;]</code>，多条时是 <code>[alerts · &lt;n&gt; · HH:MM ET]</code>；回合有 90 s 截止，逐条核对计划的条件“满足 / 未满足”，不超出计划自己的话。答复作为回复挂在第一条已送达的提醒下；它是一次台面回合，排在正在进行的手机回合之后。</p>
-<div class="chips"><span class="chip prompt">[alert · &lt;SYMBOL&gt; · &lt;rule&gt;]</span><span class="chip event">alerts.jsonl · annotation</span><span class="chip event">events.jsonl · desk-turn（source: alert）</span></div>
+<p>价位或规则要求批注（<code>annotate: true</code>）时，这一轮的命中合成一次 post，交给批注通道（<code>face/src/annotator.ts</code>），不进台面会话：先过暂停、预算、围栏三道检查，再在 <code>desk/journal</code> 里新开一个只属于它的 gravit-desk 会话，来源行是 <code>[alert · &lt;SYMBOL&gt; · &lt;rule&gt;]</code>，多条时是 <code>[alerts · &lt;n&gt; · HH:MM ET]</code>；回合有 90 s 截止，逐条核对计划的条件“满足 / 未满足”，不超出计划自己的话。答复经台面会话的 <code>deliver</code> 作为回复挂在第一条已送达的提醒下。它不再排在手机回合之后：各轮批注在通道自己的链上一次一轮，只等前一轮批注（建会话限 150 s，回合限 150 s）；跑完后记一行 <code>annotated</code>，会话随即释放。手机回复这条提醒或批注时，face 把提醒和批注作为上下文附在那条消息里（H1b）。</p>
+<div class="chips"><span class="chip prompt">[alert · &lt;SYMBOL&gt; · &lt;rule&gt;]</span><span class="chip event">alerts.jsonl · annotation · annotated</span><span class="chip event">events.jsonl · desk-turn（source: alert，批注自己的会话）</span></div>
 </li>
 </ol>
 
