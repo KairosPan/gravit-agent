@@ -141,14 +141,23 @@ function described(s: PublicSource) {
 
 /** a client of the hub: its streams open now, its holds (by `source|symbol|book`), what it wants until when, the last ring seq it was sent
  * by market */
-interface HubClient {
+export interface HubClient {
   streams: Set<express.Response>;
   holds: Map<string, { source: string; symbol: string; book: boolean; release: () => void }>;
   wants: Map<string, number>;
   sent: Map<string, number>;
+  /** while it has no stream open: the timer that lets every hold of it go once it has had none for the idle time */
+  idle?: ReturnType<typeof setTimeout> | undefined;
 }
 
-export function mountProtocol(app: express.Express, core: MarketCore): void {
+export interface ProtocolOptions {
+  /** how long a client with holds and no /api/hub stream open keeps them before they are let go: IDLE_MS (60 s) unless said */
+  idleMs?: number | undefined;
+  /** the clients' table, by id (a test's own, to look into; a new one unless said) */
+  clients?: Map<string, HubClient> | undefined;
+}
+
+export function mountProtocol(app: express.Express, core: MarketCore, o: ProtocolOptions = {}): void {
   app.get("/api/health", (_req, res) => void res.json({ ok: true, service: "market", sources: core.sources().length, china: !!core.china, akshare: !!core.akshare, ifind: core.cn?.ifind.configured() ?? false }));
 
   // ---- the sources ---------------------------------------------------------------------------------------------------------------
@@ -322,12 +331,29 @@ export function mountProtocol(app: express.Express, core: MarketCore): void {
     res.json({ ok: true, value: typeof p === "number" && Number.isFinite(p) ? p : null });
   }));
 
-  mountHub(app, core.hub);
+  mountHub(app, core.hub, o.idleMs ?? IDLE_MS, o.clients ?? new Map());
 }
 
 /** the hub's routes: covers, confirmed, the stream, holds and wants */
-function mountHub(app: express.Express, hub: MarketHub | undefined): void {
-  const clients = new Map<string, HubClient>();
+function mountHub(app: express.Express, hub: MarketHub | undefined, idleMs: number, clients: Map<string, HubClient>): void {
+  /** a client gone: every hold of it let go, its timer stopped, and it forgotten */
+  const forget = (id: string, c: HubClient): void => {
+    if (c.idle) clearTimeout(c.idle);
+    c.idle = undefined;
+    for (const h of c.holds.values()) h.release();
+    c.holds.clear();
+    if (clients.get(id) === c) clients.delete(id);
+  };
+  /** a client with no stream open (a hold sent before its stream, or its stream lost while the caller races to open another): its holds
+   * kept for the idle time, then let go — so a hold no stream follows never keeps a venue's subscription open */
+  const idleWatch = (id: string, c: HubClient): void => {
+    if (c.streams.size || c.idle) return;
+    c.idle = setTimeout(() => {
+      c.idle = undefined;
+      if (!c.streams.size) forget(id, c);
+    }, idleMs);
+    c.idle.unref?.();
+  };
   const clientOf = (id: string): HubClient => {
     let c = clients.get(id);
     if (!c) clients.set(id, (c = { streams: new Set(), holds: new Map(), wants: new Map(), sent: new Map() }));
@@ -426,6 +452,8 @@ function mountHub(app: express.Express, hub: MarketHub | undefined): void {
     res.flushHeaders();
     res.write(":\n\n");
     c.streams.add(res);
+    if (c.idle) clearTimeout(c.idle);
+    c.idle = undefined;
     const beat = setInterval(() => res.write(":\n\n"), HEARTBEAT_MS);
     beat.unref?.();
     res.on("close", () => {
@@ -433,8 +461,7 @@ function mountHub(app: express.Express, hub: MarketHub | undefined): void {
       c.streams.delete(res);
       if (c.streams.size) return;
       // the client's last stream closed: every hold of it let go, its wants and what it was sent forgotten
-      for (const h of c.holds.values()) h.release();
-      clients.delete(id!);
+      forget(id!, c);
     });
     // what it holds already (a hold sent before its stream opened, or a stream opened again) is told as the hub has it now
     for (const h of c.holds.values()) {
@@ -459,8 +486,11 @@ function mountHub(app: express.Express, hub: MarketHub | undefined): void {
     const book = x.b.book === true;
     const key = `${x.source}|${x.symbol}${book ? "|book" : ""}`;
     if (x.b.held) {
+      // a market with no hub holds nothing, and keeps no client
+      if (!hub) return void res.json({ ok: true });
       const c = clientOf(x.client);
-      if (!c.holds.has(key) && hub) {
+      idleWatch(x.client, c);
+      if (!c.holds.has(key)) {
         c.holds.set(key, { source: x.source, symbol: x.symbol, book, release: hub.hold(x.source, x.symbol, { book }) });
         tell("quote", x.source, x.symbol, c);
         if (book) tell("book", x.source, x.symbol, c);

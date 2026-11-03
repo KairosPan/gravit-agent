@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { request, type ClientRequest } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { createMarketCore, realMarketCore, type MarketCore } from "../../src/core.ts";
-import { HUB_WAIT_MAX_MS, mountProtocol, type HubEvent } from "../../src/protocol.ts";
+import { HUB_WAIT_MAX_MS, mountProtocol, type HubClient, type HubEvent, type ProtocolOptions } from "../../src/protocol.ts";
 import { startMarketServer, type MarketServerHandle } from "../../src/server.ts";
 import type { HubBook, HubQuote, HubTick, MarketHub } from "../../src/live/stream-hub.ts";
 
@@ -62,8 +62,8 @@ afterEach(async () => {
   for (const s of streams.splice(0)) s.destroy();
   for (const s of servers.splice(0)) await s.close();
 });
-async function serve(core: MarketCore): Promise<string> {
-  const srv = await startMarketServer({ port: 0, mount: (app) => mountProtocol(app, core), close: () => core.close() });
+async function serve(core: MarketCore, o: ProtocolOptions = {}): Promise<string> {
+  const srv = await startMarketServer({ port: 0, mount: (app) => mountProtocol(app, core, o), close: () => core.close() });
   servers.push(srv);
   return srv.url;
 }
@@ -155,6 +155,41 @@ describe("the hub over HTTP", () => {
     s.req.destroy();
     await until(() => f.seen.releases === f.seen.holds);
     expect(f.seen.releases).toBe(3);
+  });
+
+  it("lets a hold go once its client has had no stream for the idle time", async () => {
+    const f = fakeHub();
+    const clients = new Map<string, HubClient>();
+    const url = await serve(createMarketCore({ hub: f.hub }), { idleMs: 150, clients });
+    await post(`${url}/api/hub/hold`, { client: CLIENT, source: "coinbase", symbol: "BTC/USD", book: true, held: true });
+    expect(f.seen.holds).toBe(1);
+    expect(clients.has(CLIENT)).toBe(true);
+    await sleep(60);
+    expect(f.seen.releases).toBe(0);
+    await until(() => f.seen.releases === 1);
+    expect(clients.has(CLIENT)).toBe(false);
+  });
+
+  it("keeps a hold whose client opens its stream within the idle time", async () => {
+    const f = fakeHub();
+    const clients = new Map<string, HubClient>();
+    const url = await serve(createMarketCore({ hub: f.hub }), { idleMs: 150, clients });
+    await post(`${url}/api/hub/hold`, { client: CLIENT, source: "coinbase", symbol: "BTC/USD", book: false, held: true });
+    const s = await open(url);
+    await sleep(400);
+    expect(f.seen.releases).toBe(0);
+    expect(clients.get(CLIENT)?.holds.size).toBe(1);
+    // its stream closed: let go at once, as before
+    s.req.destroy();
+    await until(() => f.seen.releases === 1);
+    expect(clients.has(CLIENT)).toBe(false);
+  });
+
+  it("keeps no client for a hold on a market with no hub", async () => {
+    const clients = new Map<string, HubClient>();
+    const url = await serve(createMarketCore({}), { clients });
+    expect((await post(`${url}/api/hub/hold`, { client: CLIENT, source: "coinbase", symbol: "BTC/USD", book: false, held: true })).body).toEqual({ ok: true });
+    expect(clients.size).toBe(0);
   });
 
   it("sends each ring entry once per client", async () => {
