@@ -52,9 +52,10 @@ export function mountClient(ctx: { get(name: string): unknown; webServer: RouteR
  * The port a booted tree's webserver listens on. `ctx.webServer.port` is
  * `number | undefined` at 0.2.1: `undefined` until `listen` binds, and the
  * OS-assigned value when the config asked for port 0 (@deepseek-ai/
- * dsh-host-webserver lib/index.js:292-295). A smoke hands the port to socket
- * helpers and builds URLs from it, so it asserts the bind once, here, rather
- * than forging `http://127.0.0.1:undefined`.
+ * dsh-host-webserver lib/index.js:292-295). Two smokes read the port off the
+ * tree - `smoke.test.ts` and `order-gate-midboot-smoke.test.ts`, which hand it
+ * to socket helpers and build URLs from it - so the bind is asserted once,
+ * here, rather than forging `http://127.0.0.1:undefined`.
  * @param ctx - the booted root context, or any object carrying its `webServer`.
  * @returns the bound port.
  * @throws an assertion error unless the webserver is bound.

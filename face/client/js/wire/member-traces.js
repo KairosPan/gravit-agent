@@ -4,7 +4,9 @@ import { readProjections } from "./summaries.js";
 /** Read one room answer's process from its member session, without opening,
  * prompting or ACTIVATING that session.
  *
- * The read is two dsh 0.2.0-rc.2 Remotes that never resume an Agent
+ * The read is two dsh Remotes that never resume an Agent (cited below from the
+ * 0.2.0-rc.2 source the module was written against; at 0.2.1-rc.5 both still
+ * observe without promoting, and only the projections answer gained a kind)
  * (NEW packages/api/session-controller/src/history.ts:77-112 `page`;
  * index.ts:490-512 `projections`; both observe through `sessionQuery` and
  * neither promotes, unlike `session/follow`, which background-activates a

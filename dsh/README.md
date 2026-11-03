@@ -26,14 +26,17 @@ on every boot, and the operator adds two rows of their own.
    creates `$DSH_HOME/profiles/face/` (`$DSH_HOME` defaults to `~/.dsh`): a `package.json`
    bundling `dsh-base`, the operator's `cordis.patch.yml` and `pnpm-workspace.yaml`; it never
    overwrites an existing profile (see `face/README.md`). The dsh command line is not part of
-   this install, and another dsh sharing the home changes it: the 0.2.0-rc.2 CLI's first
-   run imports `$DSH_HOME/settings.yaml` into ITS OWN active profile and renames the file
+   this install, and another dsh sharing the home changes it: a 0.2 CLI's first run (the
+   installed `~/.local/bin/dsh` is 0.2.0-rc.2 and has never run on the home) imports
+   `$DSH_HOME/settings.yaml` into ITS OWN active profile and renames the file
    `settings.yaml.imported`, and a 0.1.1-rc.2 CLI or face must never run again on a home that
    0.2.0 has written — it re-heals its module link farm under `profiles/node_modules` and forks
-   the session history (`DEVELOPMENT.md` §4.8, PLAN D12 and D13). A home a 0.1.1 face already
-   uses moves to 0.2.0 by the go-live runbook
-   (`docs/superpowers/runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md`): backup, a dry run on a
-   copy (`face/scripts/check-home.ts`), the decisions, then the first boot.
+   the session history (`DEVELOPMENT.md` §4.8, PLAN D12 and D13). Nor does a 0.2.0 tool run on
+   a home the face at 0.2.1-rc.5 has used: rc.5 writes event types 0.2.0 refuses (D26). A home
+   a 0.1.1 face already uses moved to 0.2.0 by the go-live runbook
+   (`docs/superpowers/runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md`, done 2026-10-01): backup, a
+   dry run on a copy (`face/scripts/check-home.ts`), the decisions, then the first boot; the move
+   to 0.2.1-rc.5 follows the same shape (`docs/dsh-upgrade-guide.md` §2, §6.4).
 2. **Add the operator's rows.** Put them in `$DSH_HOME/profiles/face/cordis.patch.yml` — that
    patch file is the only one to edit there, because `gravit-face` rewrites
    `<profile>/cordis.yml` on every boot (`face/README.md`). Translate
@@ -52,7 +55,10 @@ on every boot, and the operator adds two rows of their own.
    Account seat and host rows — and only a 0.2.0 CLI may run it on this home (step 1).
 3. **Give it the model's key.** `source .env.deepseek` in the shell that launches the face
    (`DEEPSEEK_API_KEY`), or put the variable in the home profile's env block. The file is not
-   loaded automatically and is not in git. No server of this repo's needs a key: the Account
+   loaded automatically and is not in git. Precedence since dsh 0.2.1 (`dsh-credentials-local`):
+   a `refs` value stored in `$DSH_HOME/.credentials.yaml` wins, then the launch environment,
+   then the project's `.env`, then `$DSH_HOME/.env` — at 0.2.0 the launch environment won. So a
+   key stored in the home shadows the one you source: keep one copy, and delete the other. No server of this repo's needs a key: the Account
    seat signs with the Account's own seat key and its AKShare sidecar is keyless (`face/README.md`).
 4. **Gate 2 — per-write human approval — is the face's, not the profile's.**
    `face/src/orders.ts` registers a `tools/pre-execute` listener that raises an approval card
@@ -68,7 +74,7 @@ on every boot, and the operator adds two rows of their own.
    (`docs/research/2026-08-22-deepseek-harness-dsh-survey.md`), not against a live install.
    Expect one adaptation pass; the content is the deliverable, the container is not.
 
-## Installed state — the `face` profile (2026-08-31; re-checked for dsh 0.2.0-rc.2 on 2026-09-30; without the Alpaca MCP row since 2026-10-24)
+## Installed state — the `face` profile (2026-08-31; re-checked for dsh 0.2.0-rc.2 on 2026-09-30; without the Alpaca MCP row since 2026-10-24; re-checked against the dsh 0.2.1-rc.5 packages on 2026-11-02)
 
 The template above is realized, live and drilled, in the face's profile. The shapes that
 actually bound, for the next install or the next pin bump:
@@ -82,11 +88,14 @@ actually bound, for the next install or the next pin bump:
   `$DSH_HOME/profiles/node_modules` is written by nothing, and a stale one is consulted only
   for a row naming a package outside the face's closure — delete it once no 0.1.1 tool runs on
   the home (`DEVELOPMENT.md` §4.8, PLAN D13). Since 0.2.0 stdio negotiation starts a probe
-  process before the serving one, so an MCP server is spawned twice per connect.
+  process before the serving one, so an MCP server is spawned twice per connect. Still true at
+  0.2.1-rc.5: dsh-base mounts no `dsh-mcp-client` row, and the stdio keys the seat row uses are
+  unchanged (the upgrade spec's seam ledger, row 25).
 - **The operator's rows live in `$DSH_HOME/profiles/face/cordis.patch.yml`:** the
   `skill-filesystem` config patch (`customSkillDirs` = the two group roots — a patch REPLACES
   the addressed row's whole config, which is fine here because dsh-base mounts the row
-  configless; the `customSkillDirs` / `includeDefaultRoots` keys are unchanged at 0.2.0-rc.2)
+  configless; the `customSkillDirs` / `includeDefaultRoots` keys are unchanged at 0.2.0-rc.2 and
+  at 0.2.1-rc.5, where the row is still configless)
   and the default-model row (`agent-default-model`, step 2). 0.1.1 took the model from
   `$DSH_HOME/settings.yaml`; the face at 0.2.0 reads no settings file (it provides no
   `profileContext`), so the row is the only place Gravit's model is set. A home that still
@@ -94,6 +103,10 @@ actually bound, for the next install or the next pin bump:
   its `python -m` command names the Python package the tree removed — so remove the row. Should
   any server still register `place_order` or `cancel_order`, the face refuses to boot until that
   row is gone (Gate 2's retired order tools, `face/src/orders.ts`).
+- **The global instruction files.** dsh 0.2.1 reads `$DSH_HOME/AGENTS.md` and
+  `<DSH_AGENTS_HOME or ~/.agents>/AGENTS.md` into every agent's instruction chain, with no row
+  switch; the face names either on stderr at boot when it exists (D25). The face's contract is
+  `GRAVIT.md` alone, so keep neither file on this machine.
 - **An MCP child's env is scrubbed.** dsh drops every `KEY|PASSWORD|SECRET|TOKEN` name from a
   child's environment, a session's bash tool included; a row that needs a variable passes it
   explicitly (`!!js process.env...`).
@@ -102,7 +115,8 @@ actually bound, for the next install or the next pin bump:
   outcomes exercised — deny (command did not run, model saw a rejection result) and approve
   (`allowed-once`, one-shot) — with paired `approval/asked`/`approval/decided` records in the
   session log. At 0.2.0-rc.2 the channel is automated on a real tree (`face/tests/smoke.test.ts`,
-  `order-gate-smoke.test.ts`); the live re-run is owed.
+  `order-gate-smoke.test.ts`), and its deny half ran live on 2026-09-30 on a scratch home; the
+  approve half live is owed, and nothing has run live on 0.2.1-rc.5 yet.
 
 ## Notes
 

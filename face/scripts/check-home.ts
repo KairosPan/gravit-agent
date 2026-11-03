@@ -1,5 +1,6 @@
 /** The operator's read-only dry run of a COPY of their harness home against
- * the dsh this face pins (0.2.0-rc.2): what the first live boot will do to the
+ * the dsh this face pins (`DSH_PIN`; written at 0.2.0-rc.2, 0.2.1-rc.5 since
+ * 2026-11-02): what the first live boot will do to the
  * home, measured on a copy, before it is done to the home. Step 3 of the
  * go-live runbook, docs/superpowers/runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md.
  *
