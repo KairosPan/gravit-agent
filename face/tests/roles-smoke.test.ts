@@ -228,6 +228,30 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
   }
 });
 
+/* D20/B1, a broken role: each role's persona and mask is its own preset, `role-<id>`, declared after boot over
+ * plugins/bot.js, which throws at the mount when NONE of the role's names exists in the tree (a missing one alone
+ * is dropped and admitted when it registers). The registry then lists the preset broken, and bootFace refuses the
+ * boot with the registry's reason rather than letting every call of the role's tool fail at the preset. */
+test("roles smoke: a role none of whose tools exists makes its preset broken, and the boot is refused naming it", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
+  const bots = await makeBotsRoot();
+  const rolesRoot = await mkdtemp(join(tmpdir(), "face-roles-hollow-"));
+  const home = await mkdtemp(join(tmpdir(), "face-roles-home-"));
+  try {
+    await cp(join(ROLES_ROOT, ROLE_TEMPLATE), join(rolesRoot, ROLE_TEMPLATE), { recursive: true });
+    await cp(join(ROLES_ROOT, ROLE_TEMPLATE), join(rolesRoot, "hollow"), { recursive: true });
+    await writeFile(join(rolesRoot, "hollow", "ROLE.md"), "You are the hollow role, whose one tool never exists.\n");
+    await writeFile(join(rolesRoot, "hollow", "role.yml"), "name: hollow\ndescription: the hollow fixture role\nallow:\n  - mcp__fixture__nothing\n");
+    setupFaceProfile(home);
+    const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
+    const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
+    writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n`);
+    await assert.rejects(bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots, rolesRoot }), (error: Error) =>
+      /role preset "role-hollow" is broken: .*none of the allowed tools exist.* - every role_hollow call would fail agent-preset\/invalid/.test(error.message));
+  } finally {
+    await Promise.all([bots, rolesRoot, home].map((dir) => rm(dir, { recursive: true, force: true })));
+  }
+});
+
 /** The text of each tool result a request sends the model, in order. */
 const toolTexts = (request: GenerateOptions) => request.messages.filter((m) => sourceKind(m) === "tool").map(textOf);
 

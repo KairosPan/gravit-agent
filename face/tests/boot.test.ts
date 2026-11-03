@@ -475,6 +475,24 @@ test("composeFace builds preset-gravit from roles/ in memory: the gravit row by 
   } finally { await rm(rolesRoot, { recursive: true, force: true }); }
 });
 
+/* The roles composeFace read are handed back with the patches: bootFace declares one `role-<id>` preset per role
+ * from them once the tree has settled (D20/B1), so the presets and the role rows come from the same read. No
+ * overlay row declares a role preset - eager activation would mount the mask before the MCP rows' tools exist. */
+test("composeFace hands back the roles it read, and no overlay row declares a role preset", async () => {
+  const home = freshHome();
+  const bots = await makeBotsRoot();
+  const rolesRoot = await makeRolesRoot();
+  try {
+    const { patches, roles } = composeFace({ profileName: "face", port: 3090, dshHome: home, botsRoot: bots, rolesRoot });
+    assert.deepEqual(roles, readRoles(rolesRoot));
+    const rows = composeEntries([patches]);
+    assert.equal(rows.some((entry) => entry.id === "preset-role-probe" || (entry.config as { id?: unknown } | undefined)?.id === "role-probe"), false,
+      "the role presets are declared after boot, never as static rows");
+    const gravit = rows.find((entry) => entry.id === "preset-gravit")!.config as unknown as { plugins: Array<{ id: string; config: Record<string, unknown> }> };
+    assert.equal(gravit.plugins.find((p) => p.id === "role-probe")?.config.agentPreset, "role-probe", "the role row selects the preset bootFace declares");
+  } finally { await rm(rolesRoot, { recursive: true, force: true }); }
+});
+
 /* Spec §5.1, fail loud: a role the compose cannot read refuses it, with the
  * file's path - the registry would otherwise mount a default the operator never
  * wrote. (The default's mirror file is not read at all, so its absence or its

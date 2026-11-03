@@ -113,8 +113,10 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
 
       const presets = ctx.get("agentPresets") as { defaultId: string; list(): Promise<{ id: string; broken?: string }[]> };
       const roster = await presets.list();
-      assert.deepEqual(roster.map((p) => p.id).sort(), ["cracked", "gravit", "gravit-desk", "kairos", "probe", "shipped", "trader"],
-        "listed - and never _template; gravit-desk is the desk's preset, which bootFace declares and which is no bot (botPresets.ids() above)");
+      assert.deepEqual(roster.map((p) => p.id).sort(), ["cracked", "gravit", "gravit-desk", "kairos", "probe",
+        "role-cn-market-analyst", "role-cn-reviewer", "role-cn-stock-analyst", "shipped", "trader"],
+        "listed - and never _template; gravit-desk is the desk's preset and role-<id> each shipped role's, which bootFace declares and none of which is a bot (botPresets.ids() above)");
+      for (const id of ["role-cn-market-analyst", "role-cn-reviewer", "role-cn-stock-analyst"]) assert.equal(roster.find((p) => p.id === id)?.broken, undefined, `${id} is listed whole`);
       assert.equal(roster.find((p) => p.id === "gravit-desk")?.broken, undefined, "the desk's preset is listed whole");
       assert.equal(presets.defaultId, "gravit");
       assert.match(roster.find((p) => p.id === "cracked")!.broken ?? "", /list/, "a broken preset carries dsh's reason (Rule 5)");
@@ -155,10 +157,10 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
         "Gravit's tools are the host's plus the role library (spec §5.1)");
       assert.ok(names(tools.schemas(gravit)).includes("bash") && names(tools.schemas(gravit)).includes("read"), "Gravit keeps the host's tools");
       assert.deepEqual(names(tools.schemas(gravit)).filter((name) => name.startsWith("role_")), ["role_cn_market_analyst", "role_cn_reviewer", "role_cn_stock_analyst"], "and its three role tools: no role_screener");
-      /* Compared up to the persona's first `{{`, not its first LINE: line 1 ends
-       * `... your working directory is {{cwd}}.` and renderPrompt substitutes it
-       * (measured: the rendered text carries this session's cwd). The prefix is
-       * still read from the FILE, so rewriting the persona moves this assertion. */
+      /* Compared up to the persona's first `{{` - the whole text since the persona
+       * stopped naming the cwd (D21) - so a template variable added back later is
+       * still cut where renderPrompt would substitute it. The prefix is read from
+       * the FILE, so rewriting the persona moves this assertion. */
       assert.ok((await promptOf(gravit)).includes(readPersona(PERSONA_PATH).split("{{")[0]), "D11 closed: Gravit is told who it is");
       assert.match(await promptOf(gravit), /\nToday is \d{4}-\d{2}-\d{2}, [A-Z][a-z]+ \(.+\)\.\n/, "the date section is in Gravit's prompt (plan 1)");
       assert.ok((await promptOf(gravit)).includes(CYCLE_HEADING), "the cycle contract is in Gravit's prompt (plan 3): `gravit:cycle` is registered in Gravit's preset layer and reads create_goal, which Gravit can call");

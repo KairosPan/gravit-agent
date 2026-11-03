@@ -203,12 +203,19 @@ test("readRoles refuses, naming the file: braces, an empty persona, a wildcard, 
 
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { GRAVIT_PLUGIN_URL, GRAVIT_ROW_ID, gravitRows, renderGravitComposition, roleRowId } from "../src/roles.ts";
+import { BOT_PLUGIN_URL, GRAVIT_PLUGIN_URL, GRAVIT_ROW_ID, gravitRows, renderGravitComposition, roleRosterProblem, rolePresetDefinition, rolePresetId, roleRowId } from "../src/roles.ts";
+import { ROLE_PRESET_PREFIX } from "../src/bots.ts";
+import { entryListProblem } from "@deepseek-ai/dsh-agent-preset-registry";
+import { validateBotConfig } from "../plugins/bot.js";
+import { validateGravitConfig } from "../plugins/gravit.js";
 import { GRAVIT_PLUGIN_RELATIVE } from "../src/overlay.ts";
 import { CYCLE_PATH, readCycle } from "../src/cycle.ts";
 import { readProtocols } from "../src/protocols.ts";
 
-test("gravitRows: the gravit row carries the summaries; one one-shot spawn row per role with persona and an exact allow list", async () => {
+/* D20/B1: at dsh 0.2.1 a `dsh-tool-subagent` row takes no persona, tool filter or background mode (it throws at
+ * load), so a role row names its own preset, `role-<id>`, and carries nothing of the role but its tool name and
+ * route. The persona and the mask live in the preset (rolePresetDefinition, below). */
+test("gravitRows: the gravit row carries the summaries; one spawn row per role that selects the role's preset and carries no persona, filter or mode", async () => {
   const root = await makeRolesRoot();
   try {
     const roles = readRoles(root);
@@ -222,9 +229,56 @@ test("gravitRows: the gravit row carries the summaries; one one-shot spawn row p
     for (const role of roles) {
       const row = rows.find((r) => r.id === roleRowId(role.id))!;
       assert.equal(row.name, "@deepseek-ai/dsh-tool-subagent");
-      assert.deepEqual(Object.keys(row.config).sort(), ["backgroundMode", "persona", "provider", "toolFilter", "toolName"]);
-      assert.deepEqual(row.config, { provider: "spawn", toolName: role.tool, backgroundMode: "one-shot", persona: role.persona, toolFilter: { allow: role.allow } });
+      assert.deepEqual(Object.keys(row.config).sort(), ["agentPreset", "provider", "toolName"]);
+      assert.deepEqual(row.config, { provider: "spawn", toolName: role.tool, agentPreset: rolePresetId(role.id) });
+      for (const gone of ["persona", "toolFilter", "backgroundMode"]) assert.equal(gone in row.config, false, `no ${gone}: rc.5 refuses it on a tool row`);
     }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+/* A role's preset: the face's gravit row with an empty config (the date section alone - no roles list, no cycle,
+ * no desk) and plugins/bot.js carrying the role's persona and its allow list as the mask. Both rows name the
+ * face's real files by absolute `file:` URL, and the registry's and the two plugins' own validators accept them. */
+test("rolePresetDefinition: id role-<id>, the role's name and description, the date row and a persona-and-mask row on bot.js", async () => {
+  const root = await makeRolesRoot();
+  try {
+    const [role] = readRoles(root);
+    assert.equal(ROLE_PRESET_PREFIX, "role-");
+    assert.equal(rolePresetId("probe"), "role-probe");
+    const definition = rolePresetDefinition(role);
+    assert.deepEqual(definition, {
+      id: "role-probe",
+      name: "Probe",
+      description: "a test role",
+      plugins: [
+        { id: GRAVIT_ROW_ID, name: GRAVIT_PLUGIN_URL, config: {} },
+        { id: "role-mask", name: BOT_PLUGIN_URL, config: { persona: "You are the probe, a test role.", allow: ["read"] } },
+      ],
+    });
+    assert.ok(BOT_PLUGIN_URL.startsWith("file:") && BOT_PLUGIN_URL.endsWith("/face/plugins/bot.js"));
+    assert.equal(entryListProblem(definition.plugins), undefined, "the registry's own validator accepts the composition");
+    assert.equal(validateGravitConfig(definition.plugins[0].config), undefined, "the gravit row: the date section alone");
+    assert.equal(validateBotConfig(definition.plugins[1].config), undefined, "the mask row: a persona and an allow list");
+    const allow = (definition.plugins[1].config as { allow: string[] }).allow;
+    assert.notEqual(allow, role.allow, "the allow list is a copy");
+    allow.push("bash");
+    assert.deepEqual(role.allow, ["read"], "so no caller can reach the role through the definition");
+    assert.deepEqual(rolePresetDefinition(role), rolePresetDefinition(role), "pure: the same role gives the same definition");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+/* bootFace's role roster audit (src/boot.ts): a role preset the registry does not list, or lists broken, refuses
+ * the boot instead of failing the role's first call. */
+test("roleRosterProblem: the boot's refusal when a role preset is missing or broken, nothing when every one is listed whole", async () => {
+  const root = await makeRolesRoot();
+  try {
+    const roles = readRoles(root);
+    assert.equal(roleRosterProblem([{ id: "gravit" }, { id: "role-probe" }], roles), undefined);
+    assert.equal(roleRosterProblem([{ id: "gravit" }], roles),
+      'gravit-face: role preset "role-probe" is not in the roster - every role_probe call would fail agent-preset/not-found');
+    assert.equal(roleRosterProblem([{ id: "role-probe", broken: "role-mask (file:///x/bot.js): gravit-bot: none of the allowed tools exist" }], roles),
+      'gravit-face: role preset "role-probe" is broken: role-mask (file:///x/bot.js): gravit-bot: none of the allowed tools exist - every role_probe call would fail agent-preset/invalid');
+    assert.equal(roleRosterProblem([], []), undefined, "no roles, nothing to audit");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -237,7 +291,7 @@ test("gravitRows: a role.yml model becomes the row's agentOptions, provider and 
     await writeFile(join(root, "probe", "role.yml"), "name: Probe\ndescription: a test role\nallow:\n  - read\nmodel: deepseek-official/deepseek-v4-flash\n");
     const row = rowOf();
     assert.deepEqual(row.config.agentOptions, { provider: "deepseek-official", model: "deepseek-v4-flash" });
-    assert.deepEqual(Object.keys(row.config).sort(), ["agentOptions", "backgroundMode", "persona", "provider", "toolFilter", "toolName"]);
+    assert.deepEqual(Object.keys(row.config).sort(), ["agentOptions", "agentPreset", "provider", "toolName"]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

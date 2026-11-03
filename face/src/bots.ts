@@ -22,7 +22,9 @@
  * display metadata), never a bot; nor is `gravit-desk`, the desk's preset,
  * which the face declares from memory after boot (src/desk-preset.ts) - every
  * id in {@link RESERVED_IDS} is refused, declared by no directory, and listed
- * only when it is the default. Ids keep the retired dsh-agent-presets
+ * only when it is the default; nor is any `role-<id>`, a role's preset, which
+ * the face declares from `roles/` after boot (src/roles.ts) and whose prefix
+ * {@link ROLE_PRESET_PREFIX} is refused the same way. Ids keep the retired dsh-agent-presets
  * grammar `[a-z0-9][a-z0-9-]*` (OLD packages/preset/agent-presets/src/preset.ts:18):
  * dsh 0.2.0 requires only a non-blank id (NEW
  * packages/preset/agent-preset-registry/src/index.ts:82), so {@link BOT_ID_RE}
@@ -51,8 +53,13 @@ export const BOT_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
  *  is ever a bot. The desk's id comes from src/desk-names.ts, a leaf that imports
  *  nothing, so no import cycle can read it before it is set. */
 export const RESERVED_IDS: ReadonlySet<string> = new Set([DEFAULT_PRESET, LEGACY_PRESET, DESK_PRESET]);
+/** The namespace of the role presets: a role's preset is `role-<id>` (src/roles.ts `rolePresetId`), which
+ *  the face declares from `roles/` after boot (D20/B1). The grammar admits such an id, so a bot could take
+ *  one, and the registry would then refuse the second declaration (`Duplicate agent preset`); {@link isBotId}
+ *  refuses the prefix. Only the prefix with its dash: `roles` stays a bot id. */
+export const ROLE_PRESET_PREFIX = "role-";
 export const isBotId = (value: unknown): value is string =>
-  typeof value === "string" && BOT_ID_RE.test(value) && !RESERVED_IDS.has(value);
+  typeof value === "string" && BOT_ID_RE.test(value) && !RESERVED_IDS.has(value) && !value.startsWith(ROLE_PRESET_PREFIX);
 
 /** Relative from `bots/<id>/`, the on-disk authoring form every bot ships.
  *  dsh 0.2.0 would resolve it against the DECLARING context's base, not the
@@ -295,7 +302,7 @@ export async function listBots(root: string, presets: PresetLister, declarationE
   }
   const reported = new Map((await presets()).map((p) => [p.id, p] as const));
   const ids = entries
-    .filter((e) => e.isDirectory() && BOT_ID_RE.test(e.name) && (e.name === DEFAULT_PRESET || !RESERVED_IDS.has(e.name)))
+    .filter((e) => e.isDirectory() && (e.name === DEFAULT_PRESET || isBotId(e.name)))
     .map((e) => e.name)
     .sort((a, b) => a.localeCompare(b));
   return Promise.all(ids.map((id) => withBotLock(join(root, id), () => rowFor(root, id, reported, declarationErrors))));
@@ -358,7 +365,7 @@ export async function createBot(root: string, body: Record<string, unknown>): Pr
   const name = typeof body.name === "string" && body.name.trim() !== "" ? body.name.trim() : undefined;
   const id = body.id !== undefined ? body.id : (name === undefined ? undefined : proposeBotId(name));
   if (!isBotId(id)) {
-    throw new HttpError(400, `invalid bot id (lowercase letters, digits and -; starts with a letter or digit; up to 64; not ${[...RESERVED_IDS].join(", ")} or ${TEMPLATE})`);
+    throw new HttpError(400, `invalid bot id (lowercase letters, digits and -; starts with a letter or digit; up to 64; not ${[...RESERVED_IDS].join(", ")} or ${TEMPLATE}, nor starting with ${ROLE_PRESET_PREFIX})`);
   }
   const description = typeof body.description === "string" ? body.description.trim() : "";
   const soul = rejectSoul(body.soul === undefined ? TEMPLATE_SOUL.replace("<bot name>", () => name ?? id) : body.soul);
