@@ -244,8 +244,8 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
     for (const kept of ["str_replace_editor", "ralph"]) {
       assert.ok(toolNames.includes(kept), `${kept} must be registered (policy D9); saw ${toolNames.join(", ")}`);
     }
-    for (const withheld of ["web_fetch", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]) {
-      assert.equal(toolNames.includes(withheld), false, `${withheld} must not be registered (policy D6/D7)`);
+    for (const withheld of ["web_fetch", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource", "working_directory"]) {
+      assert.equal(toolNames.includes(withheld), false, `${withheld} must not be registered (policy D6/D7/D19)`);
     }
     /* The Lunhui rows (src/lunhui.ts), live: composed is not registered, so
      * the running registry must carry all eighteen tools, and the listing

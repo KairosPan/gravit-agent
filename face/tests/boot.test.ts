@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { composeEntries } from "@deepseek-ai/dsh-app-boot";
 import { setupFaceProfile } from "../src/setup.ts";
-import { composeFace } from "../src/boot.ts";
+import { composeFace, globalInstructionAudit, globalInstructionFiles } from "../src/boot.ts";
 import { ACCOUNT_SEAT_ROW_ID } from "../src/account-seat.ts";
 import { LUNHUI_ROW_IDS } from "../src/lunhui.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
@@ -692,5 +692,40 @@ test("composeFace refuses a protocols directory with no lunhui-run.md or no lunh
   } finally {
     await rm(rolesRoot, { recursive: true, force: true });
     await rm(protocolsDir, { recursive: true, force: true });
+  }
+});
+
+/* D25: rc.5's agent-instructions reads a second user-global AGENTS.md from the shared agents root
+ * (@deepseek-ai/dsh-home-paths resolveAgentsHome - $DSH_AGENTS_HOME, else ~/.agents) beside
+ * $DSH_HOME/AGENTS.md, with no row switch. The face cannot close that door, so bootFace names each
+ * file that exists on stderr. The tests hand the environment in; they never read the real ~/.agents. */
+test("globalInstructionFiles: the home's AGENTS.md and the shared agents root's, when they exist", () => {
+  const home = mkdtempSync(join(tmpdir(), "face-ginstr-home-"));
+  const agents = mkdtempSync(join(tmpdir(), "face-ginstr-agents-"));
+  try {
+    assert.deepEqual(globalInstructionFiles(home, { DSH_AGENTS_HOME: agents }), [], "neither file exists");
+    writeFileSync(join(home, "AGENTS.md"), "home\n");
+    assert.deepEqual(globalInstructionFiles(home, { DSH_AGENTS_HOME: agents }), [join(home, "AGENTS.md")]);
+    writeFileSync(join(agents, "AGENTS.md"), "shared\n");
+    assert.deepEqual(globalInstructionFiles(home, { DSH_AGENTS_HOME: agents }), [join(home, "AGENTS.md"), join(agents, "AGENTS.md")]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(agents, { recursive: true, force: true });
+  }
+});
+
+test("globalInstructionAudit: one stderr line per global file, naming the path and the way out", () => {
+  const home = mkdtempSync(join(tmpdir(), "face-ginstr-home-"));
+  const agents = mkdtempSync(join(tmpdir(), "face-ginstr-agents-"));
+  try {
+    writeFileSync(join(agents, "AGENTS.md"), "shared\n");
+    assert.deepEqual(globalInstructionAudit(home, { DSH_AGENTS_HOME: agents }), [
+      `gravit-face: ${join(agents, "AGENTS.md")} exists and would enter every agent's instruction chain (dsh 0.2.1 reads it with no row switch);` +
+        " the face's contract is GRAVIT.md alone - remove it or move it",
+    ]);
+    assert.deepEqual(globalInstructionAudit(home, { DSH_AGENTS_HOME: join(agents, "none") }), [], "a clean home prints nothing");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(agents, { recursive: true, force: true });
   }
 });

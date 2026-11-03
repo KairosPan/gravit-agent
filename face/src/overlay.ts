@@ -109,8 +109,11 @@ export const SYSTEM_PROMPT_ROW_ID = "system-prompt";
  * loopback. The ONE way to widen the bind — the overlay's webserver row
  * composes last, so no operator patch row can move it; only the environment
  * the face is started with can. Its one intended use is the agent docker box,
- * whose compose file sets `0.0.0.0` and publishes the port on the host's
- * loopback alone. An empty value is unset.
+ * whose entrypoint (docker-entrypoint.sh) sets the container's own address and
+ * whose compose file publishes the port on the host's loopback alone. The
+ * webserver's schema admits a concrete local address and refuses the
+ * unspecified one (`0.0.0.0`) at load, so the wildcard is not a value this
+ * can carry (tests/bind-smoke.test.ts). An empty value is unset.
  */
 export function faceBind(env: NodeJS.ProcessEnv = process.env): string {
   return env.FACE_BIND || "127.0.0.1";
@@ -144,12 +147,13 @@ export function faceOverlay(port: number, defaultPreset: AgentPresetConfig, host
        * :169-177), and gzip here would also wrap the face's own `/data` JSON
        * routes. */
       /* `host` is FACE_BIND's value or loopback (faceBind). The row's schema
-       * admits only the two literals `127.0.0.1` and `0.0.0.0` (NEW
-       * packages/host/webserver, `WebServer.Config`'s `host` union), so
-       * the cast is checked at boot: any other FACE_BIND fails the row there
-       * rather than binding somewhere unnamed. */
+       * admits any concrete local address and refuses the unspecified one
+       * (`0.0.0.0`, `::`) at load (@deepseek-ai/dsh-host-webserver; rc.5), so
+       * the value is checked at boot: an address that is not this machine's, or
+       * a wildcard, fails the row there - `webserver` is a required startup id
+       * - rather than binding somewhere unnamed. */
       { id: "webserver", name: "@deepseek-ai/dsh-host-webserver",
-        config: { host: host as WebServerConfig["host"], port, compression: "none" } satisfies WebServerConfig },
+        config: { host, port, compression: "none" } satisfies WebServerConfig },
       /* No new required key at 0.2.0. The row's inject changed from
        * `webServer` to `credentials` (NEW packages/client/connection/src/
        * index.ts:89, 92-115), which dsh-base's `credentials` row provides

@@ -1,6 +1,7 @@
 // compose.yml at the repo root: the two boxes (the spec's §5 and §7), read offline.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { load } from "js-yaml";
@@ -31,7 +32,9 @@ test("compose.yml runs the face and the Account as two boxes, the agent box with
   assert.match(c.services.account.healthcheck.test.join(" "), /\/api\/overview/);
   assert.equal(c.services.account.environment.PORTFOLIO_BIND, "0.0.0.0");
   assert.equal(c.services.account.environment.PORTFOLIO_HOSTS, "account:4820");
-  assert.equal(c.services.agent.environment.FACE_BIND, "0.0.0.0");
+  /* rc.5's webserver refuses a wildcard bind: compose sets no FACE_BIND, the entrypoint binds the container's own address. */
+  assert.equal(c.services.agent.environment.FACE_BIND, undefined);
+  assert.match(readFileSync(new URL("../docker-entrypoint.sh", import.meta.url), "utf8"), /FACE_BIND:=\$\(hostname -i/);
   assert.equal(c.services.agent.environment.FACE_ACCOUNT_URL, "http://account:4820");
   assert.equal(c.services.agent.environment.BUYER_HOME, "/seat-home");
   assert.equal(c.services.agent.environment.DSH_HOME, "/dsh-home");

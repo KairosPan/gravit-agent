@@ -7,6 +7,7 @@ import { entryListSchema } from "@deepseek-ai/cordis-plugin-include";
 import { dump } from "js-yaml";
 import { GRAVIT_PLUGIN_RELATIVE } from "../src/overlay.ts";
 import { ROLE_TEMPLATE } from "../src/roles.ts";
+import { assertOutsideTempRoots } from "./fixture-root.ts";
 
 /** The repository root — the anchor both roots below are measured from. */
 export const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -56,8 +57,11 @@ export async function makeBotsRoot(): Promise<string> {
  *  (src/bot-presets.ts) lands it on the real `face/plugins/bot.js` (and
  *  `gravit.js`), and mounting it executes the path the repository actually
  *  ships, not a fixture substitute. Gitignored as `.bots-smoke-*`; the caller
- *  must remove it. */
+ *  must remove it. A checkout under /tmp or $TMPDIR refuses here (D24): dsh's
+ *  workspace-write grants both, so the fence smokes built on this root would
+ *  pass for the wrong reason (tests/fixture-root.ts). */
 export async function makeRepoBotsRoot(): Promise<string> {
+  assertOutsideTempRoots(REPO);
   return populateBotsRoot(await mkdtemp(join(REPO, ".bots-smoke-")));
 }
 

@@ -27,6 +27,11 @@ test("instructions smoke: GRAVIT.md and its local twin reach every first request
   const bots = await makeBotsRoot();
   const root = await realpath(await mkdtemp(join(tmpdir(), "face-instructions-root-")));
   const home = await mkdtemp(join(tmpdir(), "face-instructions-home-"));
+  /* The shared agents root is the scratch home's too: rc.5 reads $DSH_AGENTS_HOME/AGENTS.md (default
+   * ~/.agents) into every chain, and a test must not see the operator's. */
+  const agentsHome = await mkdtemp(join(tmpdir(), "face-instructions-agents-"));
+  const previousAgentsHome = process.env.DSH_AGENTS_HOME;
+  process.env.DSH_AGENTS_HOME = agentsHome;
   let dispose: (() => Promise<void>) | undefined;
   try {
     await mkdir(join(root, ".git"));
@@ -42,7 +47,18 @@ test("instructions smoke: GRAVIT.md and its local twin reach every first request
     const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
     const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
     writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: stub\n    model: echo\n`);
-    const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots });
+    /* D25, live: a global AGENTS.md in the scratch home is named on stderr by bootFace. */
+    await writeFile(join(home, "AGENTS.md"), "GLOBAL-AGENTS-MARKER\n");
+    const stderrWrite = process.stderr.write;
+    const printed: string[] = [];
+    process.stderr.write = ((chunk: unknown, ...rest: unknown[]) => { printed.push(String(chunk)); return (stderrWrite as (...args: unknown[]) => boolean).call(process.stderr, chunk, ...rest); }) as typeof process.stderr.write;
+    let booted: Awaited<ReturnType<typeof bootFace>>;
+    try {
+      booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots });
+    } finally {
+      process.stderr.write = stderrWrite;
+    }
+    assert.ok(printed.some((line) => line.includes(join(home, "AGENTS.md")) && line.includes("GRAVIT.md alone")), "bootFace names the global AGENTS.md on stderr");
     dispose = booted.dispose;
     const { ctx } = booted;
     ctx.llm.registerAdapter(["stub"], new StubAdapter((_request: GenerateOptions) => ({ kind: "text", text: "ok" })));
@@ -51,9 +67,22 @@ test("instructions smoke: GRAVIT.md and its local twin reach every first request
     const cookie = await signIn(ctx, base);
     const baselineOf = async (request: { cwd: string; agentPreset?: string }): Promise<string> => {
       const { sessionId } = await remote<{ sessionId: string }>(base, cookie, "session/create", { request });
-      await remote(base, cookie, "session/prompt", { request: { requestId: `instr-${crypto.randomUUID()}`, sessionId, mode: "queue", content: [{ type: "text", text: "hello" }] } });
+      /* Wait for the session's own turn/end, subscribed BEFORE the prompt: at rc.5 `whenIdle()` can resolve
+       * before a queued prompt is claimed (B6), and the baseline is published at the first request. */
+      let ended!: () => void;
+      const turnEnded = new Promise<void>((resolve) => { ended = resolve; });
+      const off = ctx.on("session/event", (session: { id: string }, event: { type: string }) => {
+        if (session.id === sessionId && event.type === "turn/end") ended();
+      });
+      const timer = setTimeout(() => ended(), 30_000);
+      try {
+        await remote(base, cookie, "session/prompt", { request: { requestId: `instr-${crypto.randomUUID()}`, sessionId, mode: "queue", content: [{ type: "text", text: "hello" }] } });
+        await turnEnded;
+      } finally {
+        clearTimeout(timer);
+        off();
+      }
       const agent = ctx.agents.get(SessionId(sessionId))!;
-      await agent.whenIdle();
       const baseline = agent.session.snapshotEvents().filter((event) => event.type === "user/message"
         && ((event.data as { source?: { kind?: string } }).source?.kind === "agent-instructions"));
       assert.ok(baseline.length > 0, `${request.cwd}: an agent-instructions baseline was published`);
@@ -71,7 +100,8 @@ test("instructions smoke: GRAVIT.md and its local twin reach every first request
     assert.ok(bot.includes(MARK.root), "the row is host-plane: a bot reads GRAVIT.md too");
     assert.equal(bot.includes(MARK.agents), false);
   } finally {
+    if (previousAgentsHome === undefined) delete process.env.DSH_AGENTS_HOME; else process.env.DSH_AGENTS_HOME = previousAgentsHome;
     await dispose?.();
-    await Promise.all([rm(bots, { recursive: true, force: true }), rm(root, { recursive: true, force: true }), rm(home, { recursive: true, force: true })]);
+    await Promise.all([rm(bots, { recursive: true, force: true }), rm(root, { recursive: true, force: true }), rm(home, { recursive: true, force: true }), rm(agentsHome, { recursive: true, force: true })]);
   }
 });

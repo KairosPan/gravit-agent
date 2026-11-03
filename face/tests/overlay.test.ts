@@ -52,10 +52,11 @@ test("the webserver binds loopback on the requested port, uncompressed", () => {
 });
 
 test("FACE_BIND replaces the webserver host and nothing else", () => {
-  const rows = new Map(faceOverlay(3090, GRAVIT, "0.0.0.0").flatMap(e => e.insert ?? []).map(r => [r.id, r]));
-  assert.deepEqual(rows.get("webserver")!.config, { host: "0.0.0.0", port: 3090, compression: "none" });
+  /* A concrete address: rc.5's webserver refuses the unspecified one at load (tests/bind-smoke.test.ts). */
+  const rows = new Map(faceOverlay(3090, GRAVIT, "10.0.0.5").flatMap(e => e.insert ?? []).map(r => [r.id, r]));
+  assert.deepEqual(rows.get("webserver")!.config, { host: "10.0.0.5", port: 3090, compression: "none" });
   assert.equal(faceBind({}), "127.0.0.1");
-  assert.equal(faceBind({ FACE_BIND: "0.0.0.0" }), "0.0.0.0");
+  assert.equal(faceBind({ FACE_BIND: "10.0.0.5" }), "10.0.0.5");
   assert.equal(faceBind({ FACE_BIND: "" }), "127.0.0.1");
 });
 

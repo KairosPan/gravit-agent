@@ -101,7 +101,7 @@
  * the face's own rows.
  * @module
  */
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Context, FiberState } from "@deepseek-ai/cordis";
@@ -118,7 +118,7 @@ import {
   resolveTelemetryPatch,
   type Profile,
 } from "@deepseek-ai/dsh-app-boot";
-import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
+import { resolveAgentsHome, resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from "@deepseek-ai/dsh-launch-environment";
 import { provideCmdline, type AppReady } from "@deepseek-ai/dsh-cmdline";
 import type { Config as SystemPromptConfig } from "@deepseek-ai/dsh-system-prompt";
@@ -287,6 +287,26 @@ function composedRowIds(layers: readonly FacePatchList[]): Set<string> {
   const ids = new Set<string>();
   for (const row of composeEntries(layers)) if (typeof row.id === "string") ids.add(row.id);
   return ids;
+}
+
+/** The user-global instruction files dsh 0.2.1's `agent-instructions` reads beside the project chain:
+ * `<home>/AGENTS.md` and the shared agents root's `AGENTS.md` (`resolveAgentsHome` in
+ * `@deepseek-ai/dsh-home-paths`: `$DSH_AGENTS_HOME`, else `~/.agents`). The row has no switch for
+ * either, and the face must not move `DSH_AGENTS_HOME` (skill-filesystem resolves its default roots
+ * from the same variable), so the contract - `GRAVIT.md` alone - is kept by naming what would breach
+ * it (D25). Pure with respect to its arguments: the environment is passed in.
+ * @param home - the resolved `$DSH_HOME`.
+ * @param env - where `DSH_AGENTS_HOME` is read from.
+ * @returns the paths among the two that exist, the home's first. */
+export function globalInstructionFiles(home: string, env: Record<string, string | undefined> = process.env): string[] {
+  return [join(home, "AGENTS.md"), join(resolveAgentsHome(undefined, env), "AGENTS.md")].filter((path) => existsSync(path));
+}
+
+/** One line per {@link globalInstructionFiles} path, the text `bootFace` writes to stderr. */
+export function globalInstructionAudit(home: string, env: Record<string, string | undefined> = process.env): string[] {
+  return globalInstructionFiles(home, env).map((path) =>
+    `${BIN}: ${path} exists and would enter every agent's instruction chain (dsh 0.2.1 reads it with no row switch);` +
+      " the face's contract is GRAVIT.md alone - remove it or move it");
 }
 
 /**
@@ -1104,6 +1124,9 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
         ` (default ${presets.defaultId}; bots under ${opts.botsRoot ?? BOTS_ROOT})` +
         (botPresets.errors.size === 0 ? "" : `; ${botPresets.errors.size} bot(s) not declared, see above`),
     );
+    /* D25: the two user-global AGENTS.md files the instructions row reads with no switch. A warning,
+     * not a refusal: the operator's file is theirs, and the other tools that read it still need it. */
+    for (const line of globalInstructionAudit(home)) process.stderr.write(`${line}\n`);
     /* LAST (divergence 5): only now may the gateway admit a browser stream.
      * The CLI's own condition (NEW apps/cli/src/profile-boot.ts:314-318), made
      * a refusal: a root that stopped would otherwise be committed anyway - a
