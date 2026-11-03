@@ -2,7 +2,7 @@
 // policy, the list and its previews, gates and projections, all into the store. The decisions are the old client's
 // (chat.js on main, its open/follow/page/reconcile and host-event handling), ported; nothing here touches the DOM.
 import { foldMembers } from '../wire/room.js';
-import { summaryOf } from '../wire/summaries.js';
+import { summaryOf, readProjections } from '../wire/summaries.js';
 import { rememberCall, toMessages } from './kinds.js';
 import { listConversations, childRowsOf } from './sessions.js';
 import { reducers as host } from '../reducers/host.js';
@@ -136,8 +136,11 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     try {
       const cut = await call('session/projections', { request: { sessionId: id } });
       if (view !== v || token !== openSeq) return;
-      if (!cut || !Number.isSafeInteger(cut.asOfSeq)) throw new Error('the host answered without a projections cut');
-      const pg = await call('session/page', { request: { address: address(id), throughSeq: cut.asOfSeq } });
+      const { asOfSeq, migrationRequired } = readProjections(cut);
+      // rc.5: an older log answers `migration-required` with no cut to page against - the same status line as any refused open
+      if (migrationRequired) throw Object.assign(new Error('the session needs its history migrated before it can be read'), { code: 'session/migration-required' });
+      if (asOfSeq === null) throw new Error('the host answered without a projections cut');
+      const pg = await call('session/page', { request: { address: address(id), throughSeq: asOfSeq } });
       if (view !== v || token !== openSeq) return;
       applySnapshot(id, { projections: cut, records: pg?.records });
     } catch (err) {
@@ -292,8 +295,9 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     for (const c of todo) {
       try {
         const cut = await call('session/projections', { request: { sessionId: c.id } });
-        if (!cut || !Number.isSafeInteger(cut.asOfSeq)) continue;
-        const pg = await call('session/page', { request: { address: address(c.id), throughSeq: cut.asOfSeq, maxMessages: 1 } });
+        const { asOfSeq } = readProjections(cut); // null for a migration-required log too: no cut, no preview
+        if (asOfSeq === null) continue;
+        const pg = await call('session/page', { request: { address: address(c.id), throughSeq: asOfSeq, maxMessages: 1 } });
         if (convOf(c.id)) store.dispatch('hostPreview', { convId: c.id, preview: lastText(pg?.records), at: c.updatedAt });
       } catch { /* a preview is a nicety; the row keeps its title */ }
     }

@@ -16,7 +16,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
 
 // a fake mux: every stream is recorded with its handlers, the options are kept for the test to fire
-function rig({ rows = [], channels = { ok: true, root: '/r', channels: [], ungrouped: [], archived: [], presets: {} }, bots = { bots: [] }, meta = { ok: true, archived: [], deleted: [] }, pages = {}, onReceipt } = {}) {
+function rig({ rows = [], channels = { ok: true, root: '/r', channels: [], ungrouped: [], archived: [], presets: {} }, bots = { bots: [] }, meta = { ok: true, archived: [], deleted: [] }, pages = {}, onReceipt, projections } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   const streams = [];
   let opts = null;
@@ -28,7 +28,7 @@ function rig({ rows = [], channels = { ok: true, root: '/r', channels: [], ungro
   const call = async (endpoint, args) => {
     calls.push([endpoint, args]);
     if (endpoint === 'session/list') return { items: rows };
-    if (endpoint === 'session/projections') return { asOfSeq: 20, values: { title: 'projected' } };
+    if (endpoint === 'session/projections') return projections ? projections(args.request.sessionId) : { asOfSeq: 20, values: { title: 'projected' } };
     if (endpoint === 'session/page') return { records: pages[args.request.address.sessionId] ?? [] };
     return undefined;
   };
@@ -139,6 +139,32 @@ test('the host reports a session alive: its page becomes a follow; gone: its fol
   r.opts().onEvent('api-session/removed', ['s']);
   assert.equal(r.last('session/follow').cancelled, true);
   assert.equal(r.store.get().conversations[0].running, false);
+});
+
+test("rc.5's kinded cut: a sequenced answer pages through its asOfSeq", async () => {
+  const r = rig({ rows: [row('cold')], projections: () => ({ kind: 'sequenced', asOfSeq: 31, values: { title: 'projected' } }), pages: { cold: [fixture(0)] } });
+  await r.ready();
+  r.live.open('cold'); await settle();
+  assert.equal(r.calls.find(c => c[0] === 'session/page' && c[1].request.maxMessages === undefined)[1].request.throughSeq, 31);
+  assert.equal(r.store.get().status.line, '' , 'no status line for a readable session');
+});
+
+test('a session whose log needs migration opens on the status line, never throws, and keeps the list', async () => {
+  const r = rig({ rows: [row('old'), row('new', { updatedAt: 9 })], projections: id => id === 'old' ? { kind: 'migration-required', values: { title: 'old' } } : { kind: 'sequenced', asOfSeq: 4, values: {} } });
+  await r.ready();
+  r.live.open('old'); await settle();
+  assert.match(r.store.get().status.line, /^open: session\/migration-required/);
+  assert.equal(r.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 'old' && c[1].request.maxMessages === undefined), false, 'no page without a cut');
+  assert.deepEqual(r.store.get().conversations.map(c => c.id).sort(), ['new', 'old'], 'the list keeps both rows');
+  r.live.open('new'); await settle();
+  assert.equal(r.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 'new'), true, 'another session still opens');
+});
+
+test('a migration-required row gets no preview and the preview pass goes on to the next row', async () => {
+  const r = rig({ rows: [row('old'), row('new')], pages: { new: [fixture(0), fixture(1)] }, projections: id => id === 'old' ? { kind: 'migration-required', values: {} } : { kind: 'sequenced', asOfSeq: 4, values: {} } });
+  await r.ready();
+  assert.equal(r.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 'old'), false);
+  assert.equal(r.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 'new'), true);
 });
 
 test('a follow the host refuses is reported once on the status line and never retried', async () => {

@@ -1,4 +1,5 @@
 import { isInjectedSource, mapFrame } from "./mapper.js";
+import { readProjections } from "./summaries.js";
 
 /** Read one room answer's process from its member session, without opening,
  * prompting or ACTIVATING that session.
@@ -14,6 +15,10 @@ import { isInjectedSource, mapFrame } from "./mapper.js";
  *      which is exactly the inclusive `throughSeq` a page request must carry
  *      (types.ts:471-484) - the member may keep running while we page, and
  *      every page is read against the same cut. `null` means no such session.
+ *      rc.5 kinds the answer (`SessionProjectionsValue`, session-controller
+ *      lib/types/types.d.ts): `migration-required` carries no `asOfSeq`, so the
+ *      trace is unavailable until that session's log is migrated; `readProjections`
+ *      (summaries.js) reads all three shapes.
  *   2. `session/page` walks backwards from that cut. `beforeSeq` is exclusive
  *      and page boundaries are messages, not turns (history.ts:392-427), so we
  *      keep paging until the answer's own `turn/start` is present. A page is
@@ -82,16 +87,16 @@ export async function loadMemberTrace(call, { sessionId, turn }) {
   }
   const cut = await call("session/projections", { request: { sessionId } });
   if (cut === null) throw new Error("The member session does not exist.");
+  const { asOfSeq, migrationRequired } = readProjections(cut);
+  if (migrationRequired) throw new Error("The member session's history needs a migration before its trace can be read.");
   // throughSeq must be an integer >= -1 (history.ts:305-318); -1 is an empty log.
-  if (!object(cut) || !Number.isSafeInteger(cut.asOfSeq) || cut.asOfSeq < -1) {
-    throw new Error("The trace's history is malformed.");
-  }
+  if (asOfSeq === null || asOfSeq < -1) throw new Error("The trace's history is malformed.");
   const address = { kind: "session", sessionId };
   const entries = new Map();
   let beforeSeq;
   while (true) {
     const page = await call("session/page", {
-      request: { address, throughSeq: cut.asOfSeq, maxMessages: 100, ...(beforeSeq === undefined ? {} : { beforeSeq }) },
+      request: { address, throughSeq: asOfSeq, maxMessages: 100, ...(beforeSeq === undefined ? {} : { beforeSeq }) },
     });
     if (!object(page) || !Array.isArray(page.records) || typeof page.hasMore !== "boolean") {
       throw new Error("The trace's history is malformed.");
