@@ -26,7 +26,8 @@ export interface MarketLink {
   readonly hub: MarketHub;
   readonly china: ChinaSource;
   readonly price: Price;
-  /** since when the market has not answered, in the account's one sentence for it; undefined while it answers */
+  /** since when the market has not answered — a request it left unanswered, or its hub stream down with nothing answered since — in the
+   * account's one sentence for it; undefined while it answers */
   marketOld(): { since: string; message: string } | undefined;
   /** resolves when /api/sources first answers, or false after ms */
   ready(ms: number): Promise<boolean>;
@@ -52,6 +53,15 @@ export function connectMarket(o: { url: string; fetch?: typeof fetch; clock?: ()
   let timer: ReturnType<typeof setTimeout> | undefined;
   let asking: Promise<void> | undefined;
   const waiting = new Set<() => void>();
+  /** since when the market has not answered: a request it did not answer (the client's staleSince), or its hub stream down with nothing
+   * answered since it went down */
+  const old = (): number | undefined => {
+    const since = client.staleSince();
+    if (since !== undefined) return since;
+    const down = hub.downSince();
+    const last = client.answeredAt();
+    return down !== undefined && (last === undefined || last < down) ? down : undefined;
+  };
 
   /** the list asked once (one ask at a time) */
   const refresh = (): Promise<void> =>
@@ -64,6 +74,8 @@ export function connectMarket(o: { url: string; fetch?: typeof fetch; clock?: ()
         shape = now;
         list = rows.map((row) => remoteSource(client, row));
       }
+      // the market answers: a hub stream waiting out its backoff is opened now
+      hub.poke();
       if (!answered) {
         answered = true;
         for (const w of [...waiting]) w();
@@ -74,7 +86,9 @@ export function connectMarket(o: { url: string; fetch?: typeof fetch; clock?: ()
     if (closed) return;
     await refresh();
     if (closed) return;
-    timer = setTimeout(() => void loop(), answered ? SOURCES_EVERY_MS : SOURCES_WAIT_MS);
+    // asked again soon while the market has not answered yet, or is not answering now: the ask that finds it back clears the mark and
+    // opens the hub stream at once (poke), so a market back after a long while is not waited for through the stream's whole backoff
+    timer = setTimeout(() => void loop(), answered && !old() ? SOURCES_EVERY_MS : SOURCES_WAIT_MS);
     timer.unref?.();
   };
 
@@ -85,7 +99,7 @@ export function connectMarket(o: { url: string; fetch?: typeof fetch; clock?: ()
     china,
     price,
     marketOld() {
-      const since = client.staleSince();
+      const since = old();
       return since === undefined ? undefined : { since: new Date(since).toISOString(), message: MARKET_DOWN };
     },
     ready(ms: number): Promise<boolean> {

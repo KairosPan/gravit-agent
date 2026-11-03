@@ -1140,7 +1140,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const marketUrl = process.env.PORTFOLIO_MARKET_URL || MARKET_URL_DEFAULT;
   const market = connectMarket({ url: marketUrl });
   market.start();
-  const service = await PortfolioService.create({ home: at("--home") ?? defaultHome(), live, fresh, publicMarkets: () => market.sources(), streams: market.hub, china: market.china, liveDeps: { price: market.price }, ...(liveWrites ? { liveWrites } : {}), ...(code ? { pairingCode: code } : {}), ...(classic ? {} : { venues: "frontline" as const, real: true, openness }) });
+  const service = await PortfolioService.create({ home: at("--home") ?? defaultHome(), live, fresh, publicMarkets: () => market.sources(), streams: market.hub, china: market.china, marketOld: () => market.marketOld(), liveDeps: { price: market.price }, ...(liveWrites ? { liveWrites } : {}), ...(code ? { pairingCode: code } : {}), ...(classic ? {} : { venues: "frontline" as const, real: true, openness }) });
   const srv = await startPortfolioServer({ port, service, bind: process.env.PORTFOLIO_BIND || undefined, hosts: parseHosts(process.env.PORTFOLIO_HOSTS), market }).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "EADDRINUSE") throw e;
     // the usual reason: this server is already running in another terminal

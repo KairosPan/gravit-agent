@@ -729,6 +729,13 @@ class Pricer {
     return this.sources().find((s) => s.id === id);
   }
 
+  /** the refusal the market's own source gave the last time it was asked for `symbol` and did not list it (the market service not
+   * answering, the venue refusing): what a market with no price now is said in, instead of its not being listed */
+  refusalOf(symbol: string): Refusal | undefined {
+    return this.refused.get(symbol);
+  }
+  private readonly refused = new Map<string, Refusal>();
+
   /** a symbol's listing as it was last read here, and when — by the book's own source where the book has traded it (never another
    * source's market of the same symbol) — or nothing: what a stream's prices stand on (they say the price, the listing what the market is) */
   knownOf(symbol: string, ref: PaperMarketRef | undefined): { source: PublicSource; m: Listing; at: number } | undefined {
@@ -760,16 +767,24 @@ class Pricer {
       : source.line
         ? [lineOf(source)]
         : [() => inTime(source.listings({ q: base, limit: LIST_LIMIT }), SOURCE_MS), () => inTime(source.listings({ q: symbol, limit: LIST_LIMIT }), SOURCE_MS), () => inTime(source.listings({ limit: 60 }), SOURCE_MS)];
+    let refused: Refusal | undefined;
     for (const t of tries) {
       const a = await t();
+      if (isRefusal(a)) refused = a;
       const m = Array.isArray(a) ? a.find((x) => x?.symbol === symbol) : undefined;
       if (m && this.offered(m)) {
         const at = this.clock();
         this.known.set(symbol, { source: source!.id, m, at });
+        this.refused.delete(symbol);
         return { source: source!, m, at };
       }
     }
-    if (source) return undefined;
+    if (source) {
+      if (this.refused.size > 500) this.refused.clear();
+      if (refused) this.refused.set(symbol, refused);
+      else this.refused.delete(symbol);
+      return undefined;
+    }
     for (const q of [base, symbol]) {
       const got = (await this.listAll(q, LIST_LIMIT, symbol)).find((x) => x.m.symbol === symbol && (!ref || x.m.kind === ref.kind));
       if (got) return { ...got, at: this.clock() };
@@ -2699,7 +2714,9 @@ export async function paperSource(req: PaperRequest): Promise<{ source: LiveSour
     async market(symbol) {
       // a ticket's market (the owner, or an agent, about to trade it): its stream wanted, so the order it prepares finds this moment's price
       const q = await quote(symbol, { want: true });
-      if (!q) return no("E_VENUE_REJECTED", { venue, message: `${b.name}: no public source lists ${symbol.slice(0, 60)} just now, so it has no price here` });
+      // its source's own words where it refused (the market service not answering: MARKET_DOWN), else that nothing lists it now
+      const why = q ? undefined : pricer.refusalOf(symbol);
+      if (!q) return no("E_VENUE_REJECTED", { venue, message: why ? `${b.name}: ${why.message}` : `${b.name}: no public source lists ${symbol.slice(0, 60)} just now, so it has no price here` });
       return marketOf(q.source, q.m);
     },
 

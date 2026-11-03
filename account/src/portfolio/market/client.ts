@@ -12,13 +12,15 @@
  * Any request it answers clears it. No `Origin` header is sent (the market's fence refuses a foreign one). */
 import { isRefusal, type Refusal } from "../../core/errors.ts";
 import { no } from "../refuse.ts";
-import { readLike } from "./shapes.ts";
+import { MARKET_DOWN_HOLD_MS, readLike } from "./shapes.ts";
 
 export const MARKET_URL_DEFAULT = "http://127.0.0.1:4821";
 /** the one sentence the account says while the market does not answer */
 export const MARKET_DOWN = "The market service is not answering, so prices here are not current.";
+/** the market not answering: `native.market` "down" marks it as the market service's, not a venue's, so the account holds a source back
+ * for it only MARKET_DOWN_HOLD_MS (shapes.ts holdBackMs) — a market that is back is asked again within seconds */
 export function marketDown(): Refusal {
-  return no("E_VENUE_UNREACHABLE", { venue: "market", message: MARKET_DOWN });
+  return no("E_VENUE_UNREACHABLE", { venue: "market", message: MARKET_DOWN, native: { market: "down" } });
 }
 
 export interface MarketClient {
@@ -30,10 +32,12 @@ export interface MarketClient {
   raw(path: string, init: { method: "GET" | "POST"; headers?: Record<string, string>; body?: string | Uint8Array; signal?: AbortSignal; timeoutMs: number }): Promise<Response | Refusal>;
   /** the first failure since the last answer, ms; undefined while it answers */
   staleSince(): number | undefined;
+  /** when the market last answered anything, ms; undefined before it has */
+  answeredAt(): number | undefined;
 }
 
-/** the longest a refusal is kept: a market that comes back is asked again within this */
-export const REFUSAL_KEEP_MS = 2_000;
+/** the longest a refusal is kept: a market that comes back is asked again within this (shapes.ts MARKET_DOWN_HOLD_MS is the same) */
+export const REFUSAL_KEEP_MS = MARKET_DOWN_HOLD_MS;
 /** past this many kept answers, the ones run out are let go */
 const KEPT_MOST = 500;
 
@@ -44,7 +48,11 @@ export function marketClient(o: { url: string; fetch?: typeof fetch; clock?: () 
   const clock = o.clock ?? Date.now;
   const timeoutMs = o.timeoutMs ?? 8_000;
   let stale: number | undefined;
-  const answered = () => void (stale = undefined);
+  let lastAnswer: number | undefined;
+  const answered = () => {
+    stale = undefined;
+    lastAnswer = clock();
+  };
   const failed = () => void (stale ??= clock());
   const kept = new Map<string, { until: number; p: Promise<Got<unknown>> }>();
 
@@ -111,6 +119,7 @@ export function marketClient(o: { url: string; fetch?: typeof fetch; clock?: () 
       return r;
     },
     staleSince: () => stale,
+    answeredAt: () => lastAnswer,
   };
 }
 

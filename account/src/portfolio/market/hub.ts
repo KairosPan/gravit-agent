@@ -78,6 +78,10 @@ export class RemoteHub implements MarketHub {
   private tries = 0;
   private stream: AbortController | undefined;
   private retry: ReturnType<typeof setTimeout> | undefined;
+  /** a stream being opened now (connect() on its way, before it is open or has failed) */
+  private connecting = false;
+  /** since when the stream has not been open (it dropped, or could not be opened), while it is not */
+  private downAt: number | undefined;
   private silent: ReturnType<typeof setTimeout> | undefined;
   /** this epoch's base (every seq the stream says is this much higher here), the highest seq given out here, and when this epoch began */
   private base = 0;
@@ -184,6 +188,19 @@ export class RemoteHub implements MarketHub {
     return q;
   }
 
+  /** since when the stream has been down — it dropped, or could not be opened — while it is; undefined while it is open, and before it
+   * was first tried */
+  downSince(): number | undefined {
+    return this.downAt;
+  }
+  /** the market answered something else (a source list read): a stream waiting out its backoff is opened now, not after it */
+  poke(): void {
+    if (!this.started || this.closed || this.open || this.connecting) return;
+    if (this.retry) clearTimeout(this.retry);
+    this.retry = undefined;
+    void this.connect();
+  }
+
   onTick(fn: (t: HubTick) => void): () => void {
     this.listeners.add(fn);
     return () => void this.listeners.delete(fn);
@@ -283,6 +300,7 @@ export class RemoteHub implements MarketHub {
   /** the stream lost: every market kept not live, and told; opened again after the backoff */
   private dropped(): void {
     this.open = false;
+    this.downAt ??= this.clock();
     if (this.silent) clearTimeout(this.silent);
     this.silent = undefined;
     for (const [k, m] of this.mirrors) {
@@ -295,7 +313,10 @@ export class RemoteHub implements MarketHub {
     if (this.closed) return;
     const wait = Math.min(BACKOFF_MAX_MS, BACKOFF_MIN_MS * 2 ** Math.min(this.tries, 16));
     this.tries++;
-    this.retry = setTimeout(() => void this.connect(), wait);
+    this.retry = setTimeout(() => {
+      this.retry = undefined;
+      void this.connect();
+    }, wait);
     this.retry.unref?.();
   }
   private heartbeat(ac: AbortController): void {
@@ -307,6 +328,7 @@ export class RemoteHub implements MarketHub {
     if (this.closed) return;
     const ac = new AbortController();
     this.stream = ac;
+    this.connecting = true;
     try {
       const r = await this.http(new URL(`/api/hub?client=${encodeURIComponent(this.o.clientId)}`, this.c.url), { headers: { accept: "text/event-stream" }, signal: ac.signal });
       if (r.status !== 200 || !r.body) {
@@ -314,7 +336,9 @@ export class RemoteHub implements MarketHub {
         throw new Error(`the market's hub answered ${r.status}`);
       }
       this.newEpoch();
+      this.connecting = false;
       this.open = true;
+      this.downAt = undefined;
       this.tries = 0;
       this.heartbeat(ac);
       this.sendAll();
@@ -343,6 +367,7 @@ export class RemoteHub implements MarketHub {
     } catch {
       // the market not answering, or the stream cut: opened again below
     }
+    this.connecting = false;
     if (this.stream === ac) this.stream = undefined;
     this.dropped();
   }

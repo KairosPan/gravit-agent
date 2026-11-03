@@ -62,7 +62,8 @@ import type { AutonomyHook, LiveOrder } from "./account/live-orders.ts";
 import type { LiveEarn } from "./account/live-earn.ts";
 import type { Payment } from "./account/payments.ts";
 import { exploreAcross, type Exploration, type ExploreSort, type ExploreVenue } from "./live/explore.ts";
-import { BOOK_TOP, CHINA_ID, CHINA_NAME, CHINA_NOTE, holdBackMs, KEEP_MS as LISTING_KEEP_MS, RANK_ROWS, type ChinaHistory, type ChinaMarket, type ChinaRange, type ChinaSource, type HubTick, type MarketHub, type Price, type PublicSource } from "./market/shapes.ts";
+import { BOOK_TOP, CHINA_ID, CHINA_NAME, CHINA_NOTE, holdBackMs, KEEP_MS as LISTING_KEEP_MS, MARKET_DOWN_HOLD_MS, RANK_ROWS, type ChinaHistory, type ChinaMarket, type ChinaRange, type ChinaSource, type HubTick, type MarketHub, type Price, type PublicSource } from "./market/shapes.ts";
+import { MARKET_DOWN } from "./market/client.ts";
 import { TABS, type TabId } from "./live/categories.ts";
 import { CHAIN_BY_ID, CHAINS, type ChainName } from "./live/chain.ts";
 import { mountPayees, type PayeeWorld } from "./account/payees.ts";
@@ -167,6 +168,10 @@ export interface ServiceOptions {
    * quote and history. The real server mounts its own (server.ts), as it does `streams`; without one China is not read at all, and nothing
    * here ever asks Tencent */
   china?: ChinaSource | undefined;
+  /** THE MARKET NOT ANSWERING: since when, in the account's one sentence for it (server.ts main: market/link.ts marketOld()), or undefined
+   * while it answers. While it is said, the holdings carry it (their prices are the last the market gave) and no net-worth point is taken.
+   * Absent: the market is never said to be down */
+  marketOld?: (() => { since: string; message: string } | undefined) | undefined;
 }
 
 /** how long a search waits for China's hits beside the other sources (exploreAcross's per-source budget): late, they are `missing` */
@@ -946,7 +951,7 @@ export class PortfolioService {
     // kept under the public list it was made from (publicGen): a list that fills in or changes (the market answering again) is not hidden
     // behind an answer made without it
     const pub = this.publicMarkets();
-    return this.marketReads.get(`explore|${this.publicGen}|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}`, 30_000, async () => {
+    return this.marketReads.get(`explore|${this.publicGen}|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}`, 30_000, async (): Promise<Exploration | Refusal> => {
       const placed = await Promise.all(connected.map(async (v) => ({ ...v, ...(await this.placed(v.connector)) })));
       // what is listed is what serves the network the account runs on: a connected venue that does not now (its place rule, its edge, or
       // its trading line closed here), and a public source whose venue the list of where the user can connect judged not served or with
@@ -963,7 +968,9 @@ export class PortfolioService {
       // China's hits after the dollar rows; a late or refused China half is said in `missing`, the rest answered without it
       if (isRefusal(hits)) return { ...explored, missing: [...explored.missing, { venue: CHINA_ID, venueName: CHINA_NAME, connected: false, why: hits.message, code: hits.code }] };
       return { ...explored, items: [...explored.items, ...hits].slice(0, limit) };
-    });
+      // an answer a source was missing from because the market service did not answer is kept only as long as that holds the source back:
+      // a market that is back is listed again within seconds, not after thirty
+    }, undefined, false, (v) => (!isRefusal(v) && v.missing.some((m) => m.why === MARKET_DOWN) ? MARKET_DOWN_HOLD_MS : undefined));
   }
 
   /** THE CHINA TAB: Tencent's ranking by turnover (`volume`, the default) or by the day's move (`movers`), at most RANK_ROWS rows, with its
@@ -1005,7 +1012,9 @@ export class PortfolioService {
       return pct === undefined || !s ? r : { ...r, changePct24h: Number(pct.toFixed(4)), changeFrom: { venue: s.venue, venueName: s.venueName } };
     });
     // the paper accounts' total is paper money: said as that, apart from the account's own figure
-    const view: HoldingsView = { asOf: page.now, totalUsd: opts.paper ? r2(page.venues.filter((v) => v.paper).reduce((s, v) => s + v.usd, 0)) : page.totalUsd, rows: held, money, change24h: change24h(rows, day.stats), missing: day.missing, ...(opts.paper ? { paper: true } : {}) };
+    // the market not answering: these prices are the last it gave, and the view says so
+    const old = this.opts.marketOld?.();
+    const view: HoldingsView = { asOf: page.now, totalUsd: opts.paper ? r2(page.venues.filter((v) => v.paper).reduce((s, v) => s + v.usd, 0)) : page.totalUsd, rows: held, money, change24h: change24h(rows, day.stats), missing: day.missing, ...(opts.paper ? { paper: true } : {}), ...(old ? { marketOld: old } : {}) };
     if (pos && !isRefusal(pos)) {
       // the paper accounts' orders and positions are the paper view's, the real ones the real view's: a paper buy is never a real cost
       const paper = opts.paper === true;
@@ -1186,6 +1195,8 @@ export class PortfolioService {
    * a restart is still connecting the venues again: a venue that is not back yet is not money gone */
   async snapshot(event?: NetWorthSnapshot["event"]): Promise<{ written: boolean; at: string } | Refusal | undefined> {
     if (!this.account || this.reconnecting) return undefined;
+    // the market not answering: a point at its last prices would be a false record — none is taken, on either curve
+    if (this.opts.marketOld?.()) return { written: false, at: new Date(this.realNow()).toISOString() };
     const page = await this.accountView();
     if (!page) return undefined;
     const byClass: Record<string, number> = {};
@@ -3879,6 +3890,8 @@ export interface HoldingsView {
   positions?: VenuePosition[] | undefined;
   /** asked with `paper`: these are the paper accounts' rows and total, paper money and not the account's */
   paper?: true | undefined;
+  /** only while the market service is not answering: since when, and MARKET_DOWN — the prices above are the last it gave */
+  marketOld?: { since: string; message: string } | undefined;
 }
 
 export interface ReceiveAddress {
@@ -4322,6 +4335,8 @@ const PAPER_BARS_MS = 8_000;
 /* the one rule for how long a refusal holds a venue back lives with the public sources (live/public-markets.ts holdBackMs): the same rule
    for a venue connected with a key and for a keyless source */
 const holdsBack = (r: Refusal): boolean => holdBackMs(r) > 0;
+/** the market service's not answering (market/client.ts marketDown), not a venue's */
+const marketWasDown = (r: Refusal): boolean => (r.native as { market?: unknown } | undefined)?.market === "down";
 /** a read that failed because of the venue or the key, not because of what was asked */
 const venueFailed = (r: Refusal): boolean => holdsBack(r) || r.code === "E_VENUE_PERMISSION";
 /** the venue's ban of this machine's address (its 418, or "banned until"): it covers every request from here, keyless or keyed */
@@ -4473,7 +4488,7 @@ function liveLiquidity(page: AccountPage): Liquidity {
 class ReadCache {
   /** `onRule`: a venue's own rule for the whole network, met by one of its reads and held here (the service remembers it for the keyless gate) */
   constructor(private readonly onRule?: (venue: string, r: Refusal) => void) {}
-  private readonly kept = new Map<string, { at: number; value: Promise<unknown>; failed: boolean; settled: boolean }>();
+  private readonly kept = new Map<string, { at: number; value: Promise<unknown>; failed: boolean; settled: boolean; keepMs?: number | undefined }>();
   private readonly slots = new Map<string, { busy: number; waiting: Array<() => void> }>();
   private readonly health = new Map<string, VenueHealth>();
   /** a venue that said it cannot be asked just now: until when, and the refusal that stands for every read of it meanwhile. A party's own
@@ -4483,14 +4498,15 @@ class ReadCache {
    * was answered */
   private readonly bans = new Map<string, { until: number; refusal: Refusal; at: number }>();
 
-  /** `parties`: the read is one of the venue's trader's (its markets, prices, history), which another party may answer for */
-  get<T>(key: string, ttlMs: number, load: () => Promise<T>, venue?: string, parties = false): Promise<T> {
+  /** `parties`: the read is one of the venue's trader's (its markets, prices, history), which another party may answer for. `keepOf`: a
+   * shorter keep for an answer that says so (an explore made while the market service did not answer) */
+  get<T>(key: string, ttlMs: number, load: () => Promise<T>, venue?: string, parties = false, keepOf?: (v: T) => number | undefined): Promise<T> {
     const now = Date.now();
     const hit = this.kept.get(key);
-    if (hit && (!hit.settled || now - hit.at < (hit.failed ? FAIL_KEEP_MS : ttlMs))) return hit.value as Promise<T>;
+    if (hit && (!hit.settled || now - hit.at < (hit.keepMs ?? (hit.failed ? FAIL_KEEP_MS : ttlMs)))) return hit.value as Promise<T>;
     const held = venue === undefined ? undefined : this.holding(venue, parties);
     if (held) return Promise.resolve(held.refusal as unknown as T);
-    const entry: { at: number; value: Promise<unknown>; failed: boolean; settled: boolean } = { at: now, value: Promise.resolve(), failed: false, settled: false };
+    const entry: { at: number; value: Promise<unknown>; failed: boolean; settled: boolean; keepMs?: number | undefined } = { at: now, value: Promise.resolve(), failed: false, settled: false };
     // a read that waited its turn asks again whether the venue is held: it may have answered a ban, its place rule or an edge page to the
     // reads ahead of it. One turned away is not sent, and changes nothing of the venue's health
     const run =
@@ -4505,8 +4521,12 @@ class ReadCache {
       (v) => {
         entry.settled = true;
         if (isRefusal(v) && this.kept.get(key) === entry) {
-          if (holdsBack(v)) Object.assign(entry, { at: Date.now(), failed: true });
+          // the market service not answering is kept only as long as it holds back (holdBackMs: MARKET_DOWN_HOLD_MS), not FAIL_KEEP_MS
+          if (holdsBack(v)) Object.assign(entry, { at: Date.now(), failed: true, ...(marketWasDown(v) ? { keepMs: holdBackMs(v) } : {}) });
           else this.kept.delete(key);
+        } else if (keepOf) {
+          const ms = keepOf(v);
+          if (ms !== undefined) entry.keepMs = ms;
         }
         return v;
       },

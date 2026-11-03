@@ -163,7 +163,12 @@ export function publicNo(venue: string, name: string, r: HttpReply): Refusal {
  * or has banned this address (a minute when a 429 gave no time), twenty seconds for one not answering, so a page polling every few seconds
  * does not hammer it. Zero for every other refusal, and for a place rule about one pair or product: the next ask asks the venue again.
  * The one rule, for this file's keeper and for the service's read cache */
+/** how long the market service's not answering holds a source back here: the link's own keep of that refusal (client.ts REFUSAL_KEEP_MS) */
+export const MARKET_DOWN_HOLD_MS = 2_000;
 export function holdBackMs(r: Refusal, now: number = Date.now()): number {
+  // the market service not answering (market/client.ts marketDown): held only as long as the link keeps that refusal itself, so a market
+  // that is back is asked again within seconds — a source of the account's own, not a venue that is down
+  if ((r.native as { market?: unknown } | undefined)?.market === "down") return MARKET_DOWN_HOLD_MS;
   // a place rule for one pair, product or feature (detail.scope) holds back nothing else of the venue: its other markets still answer
   if ((r.detail as { scope?: unknown } | undefined)?.scope !== undefined) return 0;
   if (r.code === "E_VENUE_GEOBLOCKED") return 600_000;
