@@ -1,0 +1,4 @@
+This directory comes from Linqi's buyer-agent-demo, https://github.com/linqizhe07/buyer-agent-demo, at commit 133b9a7, by way of this tree's account/.
+Its files came from account/ on 2026-11-03.
+Copied from account/: LICENSE, tsconfig.json, vitest.config.ts, and, mirrored into src/server.ts, the fence, the no-page answer, the JSON parser and the unread-body answer of account/src/portfolio/server.ts. Moved from account/: none yet.
+Licensed under the Apache License, Version 2.0 (see LICENSE); modified in this tree since.

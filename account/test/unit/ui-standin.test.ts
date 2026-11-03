@@ -49,6 +49,9 @@ describe("the stand-in account", () => {
   it("never starts on the real account's port", async () => {
     await expect(startStandin({ port: 4820 })).rejects.toThrow(/4820 is the real account's/);
   });
+  it("never starts on the market's port", async () => {
+    await expect(startStandin({ port: 4821 })).rejects.toThrow(/4821 is the market's/);
+  });
 
   it("the account page: the venues with what they trade, the agent's card, intents, asks, the watchlist, orders of every kind, trading on", async () => {
     const { status, body: a } = await get("/api/account");
