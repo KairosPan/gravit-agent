@@ -243,10 +243,11 @@ export function fenceRefusalLine(path: string): string {
 
 /** Where a message the face sends the desk came from, as its provenance line names it. A phone's text
  * carries `at`, when the operator wrote it in ms since the epoch (Telegram's own `date`), when the bridge
- * has it. `alerts` is a batch of `count` alerts the face has already sent at once; `state`, the face's view of
+ * has it, and `carried` when the boot posts it again after a graceful stop carried it through the ledger
+ * (src/desk-conversation.ts, spec §16 H3). `alerts` is a batch of `count` alerts the face has already sent at once; `state`, the face's view of
  * the desk injected just before a phone's text (src/desk-conversation.ts `setState`). */
 export type DeskSource =
-  | { kind: "telegram"; at?: number }
+  | { kind: "telegram"; at?: number; carried?: true }
   | { kind: "schedule"; order: string; date: string }
   | { kind: "alert"; symbol: string; rule: string }
   | { kind: "alerts"; count: number }
@@ -258,7 +259,8 @@ export type DeskSource =
  * `[alerts · <n> · 09:30 ET]` and `[desk · state · 14:03 ET]`, the last two at `now`. A phone's time is
  * when the operator wrote it - the source's `at`, else `now` - in America/New_York as src/desk.ts
  * `deskTime` shows it: dated when it falls on another New York date than `now`'s, as a text written before a
- * night the Mac slept through does. A schedule line carries its firing's own date.
+ * night the Mac slept through does - and, for a text carried over a restart, `(carried over a restart)` after it:
+ * `[telegram · operator · 13:55 ET (carried over a restart)]`. A schedule line carries its firing's own date.
  * `dsh/profile/desk.md` tells the model how to read each form (tests/desk-session.test.ts ties the two).
  * @param source - where the message came from.
  * @param now - when the face sends it.
@@ -266,7 +268,7 @@ export type DeskSource =
 export function provenanceLine(source: DeskSource, now: Date): string {
   switch (source.kind) {
     case "telegram":
-      return `[telegram · operator · ${deskTime(source.at === undefined ? now : new Date(source.at), now)}]`;
+      return `[telegram · operator · ${deskTime(source.at === undefined ? now : new Date(source.at), now)}${source.carried === true ? " (carried over a restart)" : ""}]`;
     case "schedule":
       return `[schedule · ${source.order} · ${source.date}]`;
     case "alert":
@@ -701,6 +703,19 @@ export interface SuperviseDeskTurnsDeps {
   log?: (line: string) => void;
 }
 
+/** The turn a supervision has open, as {@link DeskSupervision}'s `openTurn` shows it: its number; once a message
+ * named it, the source's name as a record gives it (`telegram`, `alert`, `wake`, ...); and that message's id and
+ * logged time (ms since the epoch), when its event had them. */
+export interface OpenTurnView {
+  turn: number;
+  source?: string;
+  id?: string;
+  at?: number;
+}
+
+/** What {@link superviseDeskTurns} returns: its disposer, which also says which turn it has open. */
+export type DeskSupervision = (() => void) & { openTurn(): OpenTurnView | undefined };
+
 /** A turn between its `turn/start` and its `turn/end`. */
 interface OpenTurn {
   readonly turn: number;
@@ -710,6 +725,9 @@ interface OpenTurn {
   source?: string;
   /** The `source` of the message that named it. */
   message?: Record<string, unknown>;
+  /** That message's id, and when it was logged (ms since the epoch), when the event had them. */
+  id?: string;
+  at?: number;
   deadlineMs: number;
   timer?: unknown;
   /** Why the supervisor cancelled it, once it has. */
@@ -872,13 +890,17 @@ function timeOf(event: EventLike | undefined): number | undefined {
  * The phone turn a restart cut, from the desk session's log as the restart left it: the log's last `turn/start`, when no
  * `turn/end` of that turn follows it - a log the loop has not reopened - or the one that follows says `interrupted`,
  * the closer dsh-agent-loop appends on resume to a log whose tail turn was open (lib/index.js `interruptedTurnClosers`;
- * measured, spec §16 H3); and only when the turn's first `user/message` that is not the desk state names it as the
+ * measured, spec §16 H3), or says `aborted` with a `disposed` cause, which dsh 0.2.1-rc.5's tree dispose writes for a
+ * turn it aborts at a graceful stop (measured: .superpowers/sdd/2026-11-02-desk-hardening/graceful-stop-measurement.md)
+ * - that one only when `carried` does not hold the turn's number: a `desk-carry` that names the turn sends its line from
+ * the boot's carry instead, so it is never sent twice; and only when the turn's first `user/message` that is not the desk state names it as the
  * phone's (`source.kind` `telegram`), as the supervisor names a turn. `at` is when that message was logged (ISO-8601
  * UTC), else when the turn started; dsh stamps every event, and a log with neither time names no cut. A turn that ended any other way - a shutdown's cancel among them, which its own
  * record covers - is no cut; nor is a browser's, an alert's or a wake's.
  * @param events - the session's log, in order (src/desk-session.ts {@link readSessionEvents}).
+ * @param carried - the turns of this session a `desk-carry` in the ledger names as cut (none by default).
  */
-export function cutPhoneTurn(events: readonly EventLike[]): { turn: number; at: string } | undefined {
+export function cutPhoneTurn(events: readonly EventLike[], carried: ReadonlySet<number> = new Set()): { turn: number; at: string } | undefined {
   let start = -1;
   for (let i = events.length - 1; i >= 0; i--) {
     if (events[i].type === "turn/start") {
@@ -891,9 +913,10 @@ export function cutPhoneTurn(events: readonly EventLike[]): { turn: number; at: 
   if (typeof turn !== "number") return undefined;
   let named: EventLike | undefined;
   for (const event of events.slice(start + 1)) {
-    const data = event.data as { turn?: unknown; reason?: { kind?: unknown }; source?: { kind?: unknown } } | undefined;
+    const data = event.data as { turn?: unknown; reason?: { kind?: unknown; reason?: { kind?: unknown } }; source?: { kind?: unknown } } | undefined;
     if (event.type === "turn/end" && data?.turn === turn) {
-      if (data.reason?.kind !== "interrupted") return undefined;
+      const disposed = data.reason?.kind === "aborted" && data.reason.reason?.kind === "disposed" && !carried.has(turn);
+      if (data.reason?.kind !== "interrupted" && !disposed) return undefined;
       break;
     }
     if (event.type === "user/message" && named === undefined && data?.source?.kind !== "desk") named = event;
@@ -962,11 +985,12 @@ function turnUsage(events: readonly EventLike[]): TurnUsage | undefined {
  * running when the supervisor is installed is not this supervisor's; a `turn/start` while a turn is open
  * drops that turn, unrecorded, with one line.
  * @param deps - see {@link SuperviseDeskTurnsDeps}.
- * @returns the disposer: it clears every timer and the listener, and is idempotent.
+ * @returns the disposer: it clears every timer and the listener, and is idempotent - with `openTurn`, the turn it has
+ *   open now, if any ({@link OpenTurnView}), which the desk conversation's dispose carries through the ledger.
  * @throws a `RangeError`, before anything is installed, unless `deadlineMs` is a whole number of
  *   milliseconds in 1..2147483647.
  */
-export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): () => void {
+export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): DeskSupervision {
   if (!isTimerMs(deps.deadlineMs)) {
     throw new RangeError(`superviseDeskTurns: deadlineMs must be a whole number of milliseconds in 1..${MAX_TIMER_MS}, got ${String(deps.deadlineMs)}`);
   }
@@ -1037,6 +1061,10 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): () => void {
     if (kind === "desk") return;
     turn.source = sourceName(kind);
     if (typeof source === "object" && source !== null) turn.message = source as Record<string, unknown>;
+    const id = (event.data as { id?: unknown } | undefined)?.id;
+    if (typeof id === "string") turn.id = id;
+    const at = timeOf(event);
+    if (at !== undefined) turn.at = at;
     let ms: number | undefined;
     try {
       ms = deps.deadlineFor?.(turn.source);
@@ -1115,11 +1143,23 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): () => void {
     else if (event.type === "turn/end" && n === turn.turn) end(turn, event);
   });
 
-  return () => {
+  const dispose = (): void => {
     if (disposed) return;
     disposed = true;
     if (open !== undefined) disarm(open);
     open = undefined;
     off();
   };
+  return Object.assign(dispose, {
+    openTurn: (): OpenTurnView | undefined => {
+      const turn = open;
+      if (turn === undefined) return undefined;
+      return {
+        turn: turn.turn,
+        ...(turn.source === undefined ? {} : { source: turn.source }),
+        ...(turn.id === undefined ? {} : { id: turn.id }),
+        ...(turn.at === undefined ? {} : { at: turn.at }),
+      };
+    },
+  });
 }

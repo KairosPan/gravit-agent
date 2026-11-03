@@ -404,6 +404,14 @@ test("provenanceLine renders the three forms in ET", () => {
     "dated when it was written on another New York day");
 });
 
+/* A text a graceful stop carried through the ledger (spec §16 H3, R93) says so after its time. */
+test("provenanceLine marks a phone text carried over a restart", () => {
+  const at = new Date("2026-10-20T18:03:00Z");
+  assert.equal(provenanceLine({ kind: "telegram", at: Date.parse("2026-10-20T17:55:00Z"), carried: true }, at),
+    "[telegram · operator · 13:55 ET (carried over a restart)]");
+  assert.equal(provenanceLine({ kind: "telegram", carried: true }, at), "[telegram · operator · 14:03 ET (carried over a restart)]");
+});
+
 test("provenanceLine renders the alerts and the state forms", () => {
   assert.equal(provenanceLine({ kind: "alerts", count: 3 }, new Date("2026-11-30T14:30:04Z")), "[alerts · 3 · 09:30 ET]");
   assert.equal(provenanceLine({ kind: "state" }, new Date("2026-10-20T18:03:00Z")), "[desk · state · 14:03 ET]");
@@ -796,7 +804,7 @@ interface Harness {
   records: DeskTurnRecord[];
   lines: string[];
   listeners: Set<unknown>;
-  dispose(): void;
+  dispose: ReturnType<typeof superviseDeskTurns>;
 }
 
 function supervise(over: Partial<SuperviseDeskTurnsDeps> = {}): Harness {
@@ -884,6 +892,24 @@ test("superviseDeskTurns cancels at the deadline even with a card pending, and r
     startedAt: iso(t0), wallMs: 900_000, deadlineMs: 300_000,
   }]);
   assert.equal(h.time.pending.size, 0);
+});
+
+/* What the desk conversation's dispose carries through the ledger (spec §16 H3, R93): the turn under way, named after
+ * its first message that is not the desk state, with that message's id and logged time. */
+test("the supervision says which turn it has open: its number, its source, and its message's id and time", () => {
+  const h = supervise();
+  assert.equal(h.dispose.openTurn(), undefined, "nothing open");
+  h.emit("turn/start", { turn: 3 });
+  assert.deepEqual(h.dispose.openTurn(), { turn: 3 }, "not named yet");
+  h.emit("user/message", { id: "desk-state", role: "user", content: say("state"), source: { kind: "desk", form: "state" } });
+  const listener = [...h.listeners][0] as (session: { id: string }, event: EventLike) => void;
+  listener({ id: SID }, { type: "user/message", seq: 99, data: { id: "telegram:3", role: "user", content: say("x"), source: { kind: "telegram" } }, time: T0 } as EventLike);
+  assert.deepEqual(h.dispose.openTurn(), { turn: 3, source: "telegram", id: "telegram:3", at: T0 });
+  endTurn(h, 3);
+  assert.equal(h.dispose.openTurn(), undefined, "ended");
+  h.emit("turn/start", { turn: 4 });
+  h.dispose();
+  assert.equal(h.dispose.openTurn(), undefined, "disposed");
 });
 
 test("a second followup during a turn is supervised as its own turn", async () => {
@@ -1454,6 +1480,39 @@ test("cutPhoneTurn finds a telegram turn with a start and no end, and ignores a 
   assert.equal(cutPhoneTurnLine(new Date(T0), new Date(T0 + 120_000)), "a restart cut your message of 14:03 ET before it was answered; send it again");
   assert.equal(cutPhoneTurnLine(new Date(T0), new Date(T0 + 86_400_000)),
     "a restart cut your message of 2026-10-20 14:03 ET before it was answered; send it again", "dated when the restart came another day");
+});
+
+/* dsh 0.2.1-rc.5's tree dispose writes the turn it aborts as `turn/end {aborted, disposed}` (measured on a real tree,
+ * .superpowers/sdd/2026-11-02-desk-hardening/graceful-stop-measurement.md, case 2a on B): that tail is a cut too - unless
+ * a `desk-carry` names the turn, whose boot sends its line instead, so it is never sent twice. */
+test("cutPhoneTurn names a phone turn a dispose aborted, unless a desk-carry covers it", () => {
+  const disposedLog = logOf([
+    ["turn/start", { turn: 1 }, T0],
+    ["user/message", logMessage("telegram:1", PHONE_SOURCE), T0],
+    ["turn/end", { turn: 1, reason: { kind: "completed" } }, T0 + 5],
+    ["agent/inbox/spliced", { target: "next-turn", start: 0, removedCount: 1, inserted: [] }, T0 + 60_000],
+    ["turn/start", { turn: 2 }, T0 + 60_001],
+    ["step/start", { turn: 2, step: 1 }, T0 + 60_002],
+    ["user/message", logMessage("telegram:2", PHONE_SOURCE), T0 + 60_002],
+    ["turn/end", { turn: 2, reason: { kind: "aborted", reason: { kind: "disposed" } } }, T0 + 62_000],
+  ]);
+  assert.deepEqual(cutPhoneTurn(disposedLog), { turn: 2, at: new Date(T0 + 60_002).toISOString() }, "the measured 0.2.1-rc.5 tail");
+  assert.deepEqual(cutPhoneTurn(disposedLog, new Set([1])), { turn: 2, at: new Date(T0 + 60_002).toISOString() }, "another turn's carry covers nothing here");
+  assert.equal(cutPhoneTurn(disposedLog, new Set([2])), undefined, "a desk-carry names it: the boot's carry sends its line");
+  /* the resume's own closer is a cut whatever the carry says: the boot's carry checks the ledger before its line */
+  assert.deepEqual(cutPhoneTurn(logOf([
+    ["turn/start", { turn: 2 }, T0], ["user/message", logMessage("telegram:2", PHONE_SOURCE), T0],
+    ["turn/end", { turn: 2, reason: { kind: "interrupted" } }, T0 + 1],
+  ]), new Set([2])), { turn: 2, at: new Date(T0).toISOString() });
+  /* an abort for any other cause is still the turn's own record's */
+  assert.equal(cutPhoneTurn(logOf([
+    ["turn/start", { turn: 2 }, T0], ["user/message", logMessage("telegram:2", PHONE_SOURCE), T0],
+    ["turn/end", { turn: 2, reason: { kind: "aborted", reason: { kind: "parent" } } }, T0 + 1],
+  ])), undefined);
+  assert.equal(cutPhoneTurn(logOf([
+    ["turn/start", { turn: 2 }, T0], ["user/message", logMessage("m-2", { kind: "user" }), T0],
+    ["turn/end", { turn: 2, reason: { kind: "aborted", reason: { kind: "disposed" } } }, T0 + 1],
+  ])), undefined, "a browser turn a dispose aborted is no phone's");
 });
 
 test("the deadline's cut keeps the operator's later messages and wakes the agent for them; the fence's leaves them parked", async () => {

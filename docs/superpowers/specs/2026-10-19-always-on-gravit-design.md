@@ -1337,10 +1337,19 @@ the mechanism, `face/README.md` "The desk drill" the three live steps, which are
   - A `/stop` or deadline cut still wakes every queued message, of any source, as before; only the
     boot's wake is limited to the phone's and the alerts'. The conversation starts only once the bridge
     has set the outlet, so the cut line finds it.
-  - A graceful stop (`npm run service -- restart`, `stop`, a logout) cancels the turn under way as
-    `shutdown` with `keepInbox` and wakes nobody (the final review's I1): what was queued behind it
-    stays in the durable inbox, and the next boot's wake answers it. The turn it cut gets no line:
-    its own `desk-turn` (`cancel: "shutdown"`) makes it no cut to the boot (`DEVELOPMENT.md` §9, R93).
+  - A graceful stop (`npm run service -- restart`, `stop`, a logout) carries the phone's part through
+    the desk ledger (the final re-review's N1 and N2, on the operator's ruling). The final review's
+    I1 had cancelled with `keepInbox`; measured on dsh 0.2.0-rc.2 and 0.2.1-rc.5, that saved nothing,
+    since the root tree's dispose clears the inbox durably a few ms later, and it could wake a turn
+    inside the dispose that claimed a queued text - lost silently on 0.2.1-rc.5, whose tree dispose
+    closes that turn `aborted`/`disposed`. So the shutdown cancel keeps nothing again, and before it
+    the conversation's dispose writes one `desk-carry`: the phone texts queued on every supervised
+    agent (key, words, time; at most 20, each cut at 4,000 characters) and the phone turn under way.
+    The next boot, past its fence check, posts each text again under its key, marked `(carried over a
+    restart)` in its provenance line, a key already in the session skipped; sends the cut turn the
+    restart line unless the boot's own cut already did; and writes `desk-carried`. `cutPhoneTurn`
+    also takes a turn closed `aborted`/`disposed` for a cut unless a carry names it
+    (`DEVELOPMENT.md` §9, R93; `face/tests/desk-carry-smoke.test.ts` on a real tree).
 - **H4** is `npm run service -- status --check` (`checkHealth`) and `face/scripts/watchdog.ts`. The
   2 reason names launchd's state (`no answer on <port> (launchd: <state>[, pid N])`). The watchdog's
   plist has `StartInterval` 300 and `RunAtLoad` false, so the first check comes five minutes after

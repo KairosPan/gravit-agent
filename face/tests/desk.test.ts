@@ -714,7 +714,7 @@ test("installDesk creates the desk conversation only when enabled with root, rou
     agent.status = "running";
     await desk.dispose(0);
     await desk.dispose(0);
-    assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]], "the running desk turn is cancelled once");
+    assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]], "the running desk turn is cancelled once");
     assert.equal(fake.listeners.size, 0);
     assert.equal(fake.letGo.length, 1);
     assert.doesNotMatch(fake.letGo[0], /"kind":"shutdown"/, "the conversation was let go before the shutdown was written");

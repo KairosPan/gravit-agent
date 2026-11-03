@@ -247,7 +247,7 @@ export function fakeSupervise(): FakeSupervise {
     supervise: (deps) => {
       const i = calls.push(deps) - 1;
       disposed.push(0);
-      return () => { disposed[i] += 1; };
+      return Object.assign(() => { disposed[i] += 1; }, { openTurn: () => undefined });
     },
   };
 }

@@ -7,13 +7,14 @@
  * tests/tmp/<pid>/, as src/desk-session.ts's own tests keep theirs, and are removed afterwards. */
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import fsp, { chmod, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import { DESK_PATH, readDesk } from "../src/cycle.ts";
-import { OFF_FILE, clearOff, deskDir, readEvents, readOffState, writeOff, type BudgetState, type DeskEvent } from "../src/desk.ts";
+import { OFF_FILE, appendEvent, clearOff, deskDir, readEvents, readOffState, writeOff, type BudgetState, type DeskEvent } from "../src/desk.ts";
 import {
   createDeskConversation, type DeskConversation, type DeskConversationDeps, type DeskOutlet, type PostResult,
 } from "../src/desk-conversation.ts";
@@ -1093,6 +1094,166 @@ test("the cut-turn line goes through deliver, so OFF holds it", async (t) => {
   await desk.dispose();
 });
 
+/* ---------- what a graceful stop carried (spec §16 H3, R93) ---------- */
+
+/** A `desk-carry` as a dispose writes one, at `t`, on `sessionId`. */
+const carryOf = (sessionId: string, queued: { key: string; text: string; at?: string }[], cut?: { turn: number; key?: string; at?: string }, t = iso(AT - 5 * 60_000)) =>
+  ({ t, kind: "desk-carry" as const, sessionId, queued, ...(cut === undefined ? {} : { cut }) });
+/** 13:55 ET, when the carried texts were written. */
+const WROTE = AT - 8 * 60_000;
+const CARRIED = "[telegram · operator · 13:55 ET (carried over a restart)]";
+/** The ledger's `desk-carried` events. */
+const carriedOf = async (h: Harness) => (await events(h)).filter((e) => e.kind === "desk-carried");
+
+test("the boot posts the carried texts again once, in order, keyed and marked carried, then records desk-carried; a second boot does nothing", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  const carry = carryOf(sessionId, [{ key: "telegram:2", text: "second", at: iso(WROTE) }, { key: "telegram:3", text: "third" }]);
+  await appendEvent(h.home, carry);
+  const first = await restarted(h, sessionId);
+  await first.desk.start();
+  const agent = h.tree.agent(sessionId);
+  assert.deepEqual(agent.followups.map((m) => m.id), ["telegram:2", "telegram:3"], "each under its own key, in order");
+  assert.equal(agent.text(0), `${CARRIED}\nsecond`, "written at 13:55, and said to be carried");
+  assert.equal(agent.text(1), "[telegram · operator · 14:03 ET (carried over a restart)]\nthird", "no time kept: the boot's");
+  assert.deepEqual(agent.followups.map((m) => (m.source as { kind?: unknown } | undefined)?.kind), ["telegram", "telegram"], "answered to the phone");
+  assert.deepEqual(await carriedOf(h), [{ t: iso(AT), kind: "desk-carried", of: carry.t, posted: 2, skipped: 0 }]);
+  assert.deepEqual(first.outlet.sent, [], "no cut, no line");
+  assert.deepEqual(h.lines, []);
+
+  agent.model!.pending.length = 0; // both answered before the next stop: nothing is left to carry again
+  const second = await restarted(h, sessionId, first.desk);
+  await second.desk.start();
+  assert.equal(h.tree.agent(sessionId).followups.length, 0, "carried once");
+  assert.equal((await carriedOf(h)).length, 1);
+  await second.desk.dispose();
+});
+
+test("a carried key the session already holds is skipped and counted", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  h.tree.logs.set(sessionId, [logged(0, "telegram:2")]); // a turn claimed it before the stop: it ran
+  const carry = carryOf(sessionId, [{ key: "telegram:2", text: "second" }, { key: "telegram:3", text: "third" }]);
+  await appendEvent(h.home, carry);
+  const { desk } = await restarted(h, sessionId);
+  await desk.start();
+  assert.deepEqual(h.tree.agent(sessionId).followups.map((m) => m.id), ["telegram:3"]);
+  assert.deepEqual(await carriedOf(h), [{ t: iso(AT), kind: "desk-carried", of: carry.t, posted: 1, skipped: 1 }]);
+  await desk.dispose();
+});
+
+test("the carried cut turn gets the restart line once, after its texts; OFF holds it back and the carry is still done", async () => {
+  const h = await harness();
+  const sessionId = await started(h);
+  const carry = carryOf(sessionId, [], { turn: 4, key: "telegram:4", at: iso(WROTE) });
+  await appendEvent(h.home, carry);
+  const first = await restarted(h, sessionId);
+  await first.desk.start();
+  await waitFor("the line", () => first.outlet.sent.length === 1);
+  assert.deepEqual(first.outlet.sent, [RESTART_LINE]);
+  assert.deepEqual(await carriedOf(h), [{ t: iso(AT), kind: "desk-carried", of: carry.t, posted: 0, skipped: 0 }]);
+  assert.deepEqual(await turnsOf(h), [], "the turn's own record is the shutdown's: none is added");
+  const second = await restarted(h, sessionId, first.desk);
+  await second.desk.start();
+  await new Promise((done) => setTimeout(done, 20));
+  assert.deepEqual(second.outlet.sent, [], "sent once");
+
+  const paused = await harness();
+  const pausedId = await started(paused);
+  await appendEvent(paused.home, carryOf(pausedId, [], { turn: 4, at: iso(WROTE) }));
+  await writeOff(paused.home, { by: "telegram" }, () => AT);
+  const third = await restarted(paused, pausedId);
+  await third.desk.start();
+  await waitFor("the carry done", async () => (await carriedOf(paused)).length === 1);
+  await new Promise((done) => setTimeout(done, 20));
+  assert.deepEqual(third.outlet.sent, [], "held back by the pause");
+  await third.desk.dispose();
+});
+
+test("a carried cut the resume's own closer already answered gets no second line", async () => {
+  const h = await harness();
+  const sessionId = await started(h);
+  h.tree.logs.set(sessionId, cutLog(3, WROTE)); // 0.2.0-rc.2: the resume closed it `interrupted`
+  await appendEvent(h.home, carryOf(sessionId, [], { turn: 3, key: "telegram:3", at: iso(WROTE) }));
+  const { desk, outlet } = await restarted(h, sessionId);
+  await desk.start();
+  await waitFor("the line", () => outlet.sent.length === 1);
+  await new Promise((done) => setTimeout(done, 20));
+  assert.deepEqual(outlet.sent, [RESTART_LINE], "one line");
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.turn, e.cancel]), [[3, "restart"]]);
+  assert.equal((await carriedOf(h)).length, 1);
+  await desk.dispose();
+});
+
+test("a turn a dispose aborted (0.2.1-rc.5's turn/end) is cut once: by the boot's restart line, or by the carry that names it", async () => {
+  const disposedLog = (n: number): EventLike[] => [
+    row(0, "turn/start", { turn: n }, WROTE),
+    row(1, "user/message", { id: `telegram:${n}`, role: "user", content: say("x"), source: PHONE }, WROTE),
+    row(2, "turn/end", { turn: n, reason: { kind: "aborted", reason: { kind: "disposed" } } }, WROTE + 1_000),
+  ];
+  const h = await harness();
+  const sessionId = await started(h);
+  h.tree.logs.set(sessionId, disposedLog(2)); // no carry names it: a turn woken during the dispose
+  const first = await restarted(h, sessionId);
+  await first.desk.start();
+  await waitFor("the line", () => first.outlet.sent.length === 1);
+  assert.deepEqual(first.outlet.sent, [RESTART_LINE]);
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.turn, e.cancel]), [[2, "restart"]]);
+
+  const named = await harness();
+  const namedId = await started(named);
+  named.tree.logs.set(namedId, disposedLog(2));
+  await appendEvent(named.home, carryOf(namedId, [], { turn: 2, key: "telegram:2", at: iso(WROTE) }));
+  const second = await restarted(named, namedId);
+  await second.desk.start();
+  await waitFor("the line", () => second.outlet.sent.length === 1);
+  await new Promise((done) => setTimeout(done, 20));
+  assert.deepEqual(second.outlet.sent, [RESTART_LINE], "one line, the carry's");
+  assert.deepEqual(await turnsOf(named), [], "the boot's closer stood aside");
+  await first.desk.dispose();
+  await second.desk.dispose();
+});
+
+test("a fence violation at boot carries nothing and leaves the carry for a later boot", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  await appendEvent(h.home, carryOf(sessionId, [{ key: "telegram:2", text: "second" }], { turn: 1, at: iso(WROTE) }));
+  await put(h.root, "desk/GRAVIT.md");
+  const first = await restarted(h, sessionId);
+  await first.desk.start();
+  await new Promise((done) => setTimeout(done, 20));
+  assert.deepEqual(h.tree.agent(sessionId).followups, [], "nothing posted over a violation");
+  assert.deepEqual(first.outlet.sent, [], "and no line");
+  assert.deepEqual(await carriedOf(h), [], "the carry is still pending");
+  assert.equal((await events(h)).filter((e) => e.kind === "desk-refused").length, 1);
+
+  await rm(join(h.root, "desk", "GRAVIT.md"));
+  const second = await restarted(h, sessionId, first.desk);
+  await second.desk.start();
+  await waitFor("the line", () => second.outlet.sent.length === 1);
+  assert.deepEqual(h.tree.agent(sessionId).followups.map((m) => m.id), ["telegram:2"], "a later boot carries it");
+  assert.equal((await carriedOf(h)).length, 1);
+  await second.desk.dispose();
+});
+
+test("a carried text the pause refuses stops the carry and leaves it for a later boot", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  await appendEvent(h.home, carryOf(sessionId, [{ key: "telegram:2", text: "second" }]));
+  await writeOff(h.home, { by: "telegram" }, () => AT);
+  const { desk } = await restarted(h, sessionId);
+  await desk.start();
+  assert.deepEqual(h.tree.agent(sessionId).followups, []);
+  assert.deepEqual(await carriedOf(h), []);
+  assert.equal(h.lines.length, 1);
+  assert.match(h.lines[0], /^gravit-face: desk: the texts a graceful stop carried could not all be posted again \(paused since .+\); a later boot tries again$/);
+  await desk.dispose();
+});
+
 test("renew supervises the new session and stop cancels with the reason", async () => {
   const h = await harness();
   const outlet = recordingOutlet();
@@ -1261,7 +1422,7 @@ test("dispose cancels a running turn with the shutdown reason, once", async () =
   agent.settle(); // the cut turn's driver retires
   await first;
   await h.desk.dispose();
-  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]]);
+  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]]);
   assert.equal(h.bus.listeners.size, 0, "the supervision is gone");
   await h.time.fake.advance(600_000);
   assert.equal(agent.cancels.length, 1, "no deadline fires after dispose");
@@ -1271,28 +1432,106 @@ test("dispose cancels a running turn with the shutdown reason, once", async () =
   assert.equal(await h.desk.stop("stopped from the phone"), false);
 });
 
-/* A graceful stop (spec §16 H3, R93): the texts queued behind the turn under way stay on the inbox's next-turn list for
- * the boot's wake (src/desk-session.ts `requeuePending`) - the shutdown keeps the inbox and wakes nobody. */
-test("a shutdown keeps the messages queued behind the turn it cuts, and does not wake the agent for them", async () => {
+/* A graceful stop (spec §16 H3, R93): dsh's teardown clears the desk session's inbox whatever the desk's own cancel
+ * keeps (measured on a real tree, .superpowers/sdd/2026-11-02-desk-hardening/graceful-stop-measurement.md), so the
+ * phone's texts queued behind the turn under way, and that turn, go through the ledger instead: one `desk-carry`,
+ * written before anything is cancelled, which the next boot answers. */
+test("dispose records the phone's queued texts and the turn under way in one desk-carry, before any cancel, and the shutdown cancel keeps nothing", async () => {
   const h = await harness();
   h.tree.inboxes = true;
-  const { sessionId } = (await post(h, "first")) as { sessionId: string };
+  const wroteFirst = AT - 2 * 60_000; // 14:01 ET
+  const wroteSecond = AT - 60_000; // 14:02 ET
+  const first = await h.desk.post({ text: "first", source: { kind: "telegram", at: wroteFirst }, message: PHONE, key: "telegram:1" });
+  const { sessionId } = first as { sessionId: string };
   const agent = h.tree.agent(sessionId);
   const model = agent.model!;
-  assert.equal(model.claim()?.content[0]?.text, "[telegram · operator · 14:03 ET]\nfirst", "the driver takes the first message for turn 1");
+  const claimed = model.claim()!;
   model.running = true;
   agent.status = "running";
-  startTurn(h, sessionId, 1, PHONE);
-  assert.deepEqual(await post(h, "second"), { opened: true, sessionId });
-  assert.equal(model.pending.length, 1);
+  h.bus.emit(sessionId, "turn/start", { turn: 1 });
+  h.bus.emit(sessionId, "user/message", claimed);
+  await h.desk.post({ text: "second", source: { kind: "telegram", at: wroteSecond }, message: PHONE, key: "telegram:2" });
+  await h.desk.post({ text: "a browser's", source: { kind: "telegram" }, message: BROWSER as { kind: string } & Record<string, unknown> });
+  await h.desk.post({ text: "third", source: { kind: "telegram" }, message: PHONE, key: "telegram:3", context: "[alert · NVDA · buy_zone]\nNVDA 181.50" });
+  model.steps.push(pending("telegram:4", PHONE)); // a steer the turn under way has not taken yet
+  assert.deepEqual(model.pending.map((m) => m.id).filter((id) => id.startsWith("telegram:")), ["telegram:2", "telegram:3"]);
+  /* what the ledger held at the moment of the cancel */
+  const ledger = join(deskDir(h.home), "events.jsonl");
+  let atCancel: string[] = [];
+  const cancel = agent.cancel.bind(agent);
+  agent.cancel = (...args: unknown[]) => {
+    atCancel = readFileSync(ledger, "utf8").trim().split("\n").map((line) => (JSON.parse(line) as { kind: string }).kind);
+    cancel(...args);
+  };
   const disposing = h.desk.dispose();
   await waitFor("the shutdown cancel", () => agent.cancels.length === 1);
   endTurn(h, sessionId, 1, ABORTED("shutdown"));
   agent.settle();
   await disposing;
-  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]], "the inbox kept");
-  assert.deepEqual(agent.inbox?.nextTurn.map((m) => m.content[0]?.text), ["[telegram · operator · 14:03 ET]\nsecond"], "still queued for the boot");
-  assert.equal(agent.followups.length, 2, "nothing sent again: a shutdown wants the agent idle, not woken");
+  assert.deepEqual(atCancel, ["desk-session", "desk-carry"], "the carry is written before the cancel");
+  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]], "the shutdown cancel keeps nothing: the ledger carries it");
+  assert.deepEqual(model.pending, [], "dsh clears the inbox");
+  const carries = (await events(h)).filter((e) => e.kind === "desk-carry");
+  assert.deepEqual(carries, [{
+    t: iso(AT), kind: "desk-carry", sessionId,
+    queued: [
+      { key: "telegram:2", text: "second", at: iso(wroteSecond) },
+      { key: "telegram:3", text: "third" },
+      { key: "telegram:4", text: "telegram:4" },
+    ],
+    cut: { turn: 1, key: "telegram:1", at: iso(wroteFirst) },
+  }], "the phone's texts only, the operator's words only, oldest first, the next step's after the next turn's");
+  assert.deepEqual(h.lines, []);
+});
+
+test("dispose writes no desk-carry when no phone text waits and no phone turn is under way", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const { sessionId } = (await post(h, "hi", { kind: "telegram" }, BROWSER)) as { sessionId: string };
+  const agent = h.tree.agent(sessionId);
+  agent.model!.claim();
+  agent.model!.running = true;
+  agent.status = "running";
+  startTurn(h, sessionId, 1, BROWSER); // the browser's turn: no phone's to carry
+  agent.model!.pending.push(pending("m-alert", ALERT)); // an alert waiting: the watch has its own record of it
+  const disposing = h.desk.dispose();
+  await waitFor("the shutdown cancel", () => agent.cancels.length === 1);
+  endTurn(h, sessionId, 1, ABORTED("shutdown"));
+  agent.settle();
+  await disposing;
+  assert.deepEqual(await kinds(h), ["desk-session", "desk-turn"]);
+
+  const idle = await harness();
+  await post(idle, "hi");
+  await idle.desk.dispose();
+  assert.deepEqual(await kinds(idle), ["desk-session"], "an idle desk with nothing queued carries nothing");
+});
+
+test("a carry that cannot be written is one line, and the shutdown goes on", async (t) => {
+  const h = await harness();
+  const { sessionId } = (await post(h, "hi")) as { sessionId: string };
+  const agent = h.tree.agent(sessionId);
+  agent.status = "running";
+  startTurn(h, sessionId, 1, PHONE);
+  const ledger = join(deskDir(h.home), "events.jsonl");
+  const real = fsp.appendFile as unknown as (...args: unknown[]) => Promise<unknown>;
+  t.mock.method(fsp, "appendFile", (async (...args: unknown[]) => {
+    if (String(args[0]) === ledger) throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
+    return real(...args);
+  }) as unknown as typeof fsp.appendFile);
+  syncBuiltinESMExports();
+  try {
+    const disposing = h.desk.dispose();
+    await waitFor("the shutdown cancel", () => agent.cancels.length === 1);
+    agent.settle();
+    await disposing;
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]]);
+  assert.equal(h.lines.length, 1, h.lines.join("\n"));
+  assert.match(h.lines[0], /^gravit-face: the desk ledger at .+events\.jsonl could not be written: ENOSPC$/);
 });
 
 test("a turn cut at shutdown is recorded before dispose resolves", async () => {
@@ -1344,7 +1583,7 @@ test("dispose during a retiring turn cancels it once", async () => {
   endTurn(h, old, 1, ABORTED("shutdown"));
   oldAgent.settle();
   await disposing;
-  assert.deepEqual(oldAgent.cancels, [[{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]]);
+  assert.deepEqual(oldAgent.cancels, [[{ kind: "hook", reason: "shutdown" }]]);
   assert.deepEqual(h.tree.agent(fresh).cancels, [], "the idle new conversation has nothing to cancel");
   assert.equal(h.bus.listeners.size, 0, "every supervision is gone, the retiring one included");
   assert.deepEqual((await turnsOf(h)).map((e) => [e.sessionId, e.turn]), [[old, 1]], "and the retiring turn it cut is recorded");
@@ -1362,7 +1601,7 @@ test("work the status does not show - maintenance with a followup latched - is w
   assert.equal(h.bus.listeners.size, 2, "retired, not ended: whenIdle still waits");
   const disposing = h.desk.dispose();
   await waitFor("the shutdown cancel", () => oldAgent.cancels.length === 2);
-  assert.deepEqual(oldAgent.cancels[1], [{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]);
+  assert.deepEqual(oldAgent.cancels[1], [{ kind: "hook", reason: "shutdown" }]);
   oldAgent.settle();
   await disposing;
   assert.equal(h.bus.listeners.size, 0);
