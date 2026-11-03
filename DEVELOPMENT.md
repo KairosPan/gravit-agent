@@ -1507,7 +1507,7 @@ patches and one insert patch of two rows:
 | D7 MCP resource tools | `mcp-resources` | disabled | three model-facing tools and a prompt section |
 | D9 `ralph` | `tool-ralph` (`@deepseek-ai/dsh-tool-ralph`, declared in `face/package.json`) | inserted with `{subagentProvider: spawn, maxRounds: 64}`, the config dsh-base's row carried (the standalone default is 256 rounds); an id patch `disabled: false` until 2026-11-02 | 0.2.0: disabled; 0.2.1: row removed, the package standalone |
 | D9 `str_replace_editor` | `tool-str-replace-editor` | inserted, configless (0.1.1's 16,000-character cap is now the default) | row removed |
-| D19 `working_directory` | `tool-working-directory` | disabled; the `working-directory` service and its runtime context (`Current working directory: "<dir>".`, which replaced the persona's `{{cwd}}`, D21) stay | 0.2.1: every agent gets `working_directory {cd}`, which moves its session's directory (reads, writes, bash and the instruction chain follow; the sandbox root does not) |
+| D19 `working_directory` | `tool-working-directory` | disabled; the `working-directory` service and its runtime context (`Current working directory: "<dir>".`, which replaced the persona's `{{cwd}}`, PLAN D21) stay | 0.2.1: every agent gets `working_directory {cd}`, which moves its session's directory (reads, writes, bash and the instruction chain follow; the sandbox root does not) |
 
 `facePolicyPatches` guards every id patch on the row being in the bundle composition and
 reports a missing target on stderr (`gravit-face: warning: policy D…`); `tests/policy.test.ts`
