@@ -1,19 +1,42 @@
-# The isolated run: the face and the Account as two boxes (docs/superpowers/specs/
-# 2026-10-27-account-in-repo-design.md §5, §7). The host dev loop — two host processes — stays
-# the default; this file is started on purpose. Run `docker compose` at the repo root: the agent
-# box mounts an allowlist of the repo's paths (sources relative to this file's directory) under
-# `${PWD}`, the shell's directory, so the tree lands in the box at the repo's own host path (dsh
-# records absolute paths). Stop the host face first: the agent box publishes 3090 on the host's
-# loopback. The account box publishes nothing: only the agent box reaches it, at account:4820 on
-# the gravit network. Stopping the host Account too is advised (one Account in sight), not required.
+# The isolated run: the face, the Account and the market as three boxes (docs/superpowers/specs/
+# 2026-10-27-account-in-repo-design.md §5, §7; 2026-11-03-account-split-and-identity-design.md
+# §4). The host dev loop — host processes — stays the default; this file is started on purpose.
+# Run `docker compose` at the repo root: the agent box mounts an allowlist of the repo's paths
+# (sources relative to this file's directory) under `${PWD}`, the shell's directory, so the tree
+# lands in the box at the repo's own host path (dsh records absolute paths). Stop the host face
+# first: the agent box publishes 3090 on the host's loopback. The account box publishes nothing:
+# only the agent box reaches it, at account:4820 on the gravit network. The market box publishes
+# nothing either: the account box reads it at market:4821. Stopping the host Account and market
+# too is advised (one of each in sight), not required.
 #
-# The account box runs AKShare (the sidecar installed in its image); the agent box runs no data source.
+# The market box runs AKShare and holds the iFinD token; the account box holds neither; the agent
+# box runs no data source.
 #
 # The agent box mounts no docker socket and no path of the Account's home: Gravit's shell sees
 # the allowlisted paths and the box's volumes, no other host file (on Docker Desktop
 # host.docker.internal still reaches the Mac's loopback services, as the host dev loop does).
 
 services:
+  market:
+    build: ./market
+    command: ["npm", "run", "market"]
+    environment:
+      # For the box only: the Host fence is the DNS-rebinding defence, not authentication.
+      MARKET_BIND: "0.0.0.0"
+      MARKET_HOSTS: "market:4821"
+    # The iFinD token is the market's alone (POST /api/cn/ifind, relayed by the account); the
+    # account box and the agent box never read it.
+    env_file:
+      - path: .env.ifind
+        required: false
+    expose: ["4821"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4821/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      retries: 12
+      start_period: 20s
+    networks: [gravit]
+
   account:
     build: ./account
     command: ["npm", "run", "account", "--", "--home", "/data"]
@@ -21,10 +44,7 @@ services:
       # For the box only: the Host fence is the DNS-rebinding defence, not authentication.
       PORTFOLIO_BIND: "0.0.0.0"
       PORTFOLIO_HOSTS: "account:4820"
-    # The iFinD token is the Account's alone (POST /api/cn/ifind); the agent box never reads it.
-    env_file:
-      - path: .env.ifind
-        required: false
+      PORTFOLIO_MARKET_URL: "http://market:4821"
     expose: ["4820"]
     volumes: ["account-home:/data"]
     healthcheck:
@@ -32,6 +52,9 @@ services:
       interval: 10s
       retries: 12
       start_period: 20s
+    depends_on:
+      market:
+        condition: service_healthy
     networks: [gravit]
 
   agent:
