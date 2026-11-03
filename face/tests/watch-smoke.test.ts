@@ -1,12 +1,14 @@
 // face/tests/watch-smoke.test.ts
 /** The watch end to end on a REAL composed tree (docs/superpowers/plans/2026-11-01-desk-p3-watch.md, Task 12): the
  * desk as main.ts installs it - `installDesk` with its conversation, its guard, its clock row and its watch row
- * (src/watch.ts) - polling a book in both markets, sending each alert itself and posting its annotation on the desk
- * conversation, and the canary's annotation half. One boot, from 09:15 ET on 2026-11-30, and the cases in this order:
+ * (src/watch.ts) - polling a book in both markets, sending each alert itself and posting its annotation to the
+ * annotation lane (src/annotator.ts), each check in a desk session of its own under `desk/journal`, and the canary's
+ * annotation half. One boot, from 09:15 ET on 2026-11-30, and the cases in this order:
  * 1. before the open: a tick before the window polls no US symbol; one inside it polls, and a print before the open
  *    makes no record - while the boot's filings poll seeds NVDA silently;
  * 2. a US gap: NVDA under its stop at its first judged print is one `alert` (`gap`) and one `delivered`, the message
- *    stamped `ROBINHOOD … ET` and ending `annotation follows`, and the annotation comes back as a reply under it;
+ *    stamped `ROBINHOOD … ET` and ending `annotation follows`, and the annotation - run in its own session, never the
+ *    desk conversation's - comes back as a reply under it, recorded `annotated` with the message it went out as;
  * 3. a restart: the watch re-installed reads the ledger back, and NVDA still under its stop makes no record;
  * 4. the cooldown: NVDA back over its stop and under it again inside 30 minutes makes no record, one repeat;
  * 5. the cap and the batch: five more sends fill the hour's six, the seventh is held `cap`, and the next ET hour's
@@ -71,7 +73,7 @@ import type { MarketQuote, MarketQuoteIdentity, MarketQuoteSource } from "../src
 import { setupFaceProfile } from "../src/setup.ts";
 import { renderOrder, writeStanding, type ArmEntry } from "../src/standing.ts";
 import type { Market } from "../src/symbols.ts";
-import { installWatch, type WatchHandle } from "../src/watch.ts";
+import { installWatch, isAnnotatedRecord, type AnnotatedRecord, type WatchHandle } from "../src/watch.ts";
 import { isAlertRecord, type AlertDelivered, type AlertHit, type AlertRecord } from "../src/watch-eval.ts";
 import { GRAVIT_PLUGIN_ABS, populateBotsRoot } from "./bots-fixture.ts";
 import { fakeCalendar, WallClock } from "./desk-fakes.ts";
@@ -418,6 +420,8 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     });
     const conversation = desk.conversation;
     assert.ok(conversation !== undefined, "an enabled desk with a root, a route and the root context has a conversation");
+    const annotator = desk.annotator;
+    assert.ok(annotator !== undefined, "and an annotation lane beside it");
     /** The phone: every text the desk delivered, numbered from 1 as the outlet answers it. */
     const phone: PhoneText[] = [];
     conversation.setOutlet({
@@ -436,6 +440,17 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     /* ---------- the file's helpers ---------- */
     const alerts = async (): Promise<AlertRecord[]> => (await readRecords(HOME, ALERTS_FILE, isAlertRecord)).records;
     const hits = async (): Promise<AlertHit[]> => (await alerts()).filter((r): r is AlertHit => r.kind === "alert");
+    const annotated = async (): Promise<AnnotatedRecord[]> => (await readRecords(HOME, ALERTS_FILE, isAnnotatedRecord)).records;
+    /** The session the annotation lane ran `alert`'s check in, by the watch's `annotation` record. */
+    const annotationSession = async (alert: string): Promise<string> => {
+      let id: string | undefined;
+      await waitFor(`the annotation record of ${alert}`, async () => {
+        const r = (await alerts()).find((a) => a.kind === "annotation" && a.alerts.includes(alert));
+        id = r?.kind === "annotation" ? r.sessionId : undefined;
+        return id !== undefined;
+      });
+      return id!;
+    };
     const filings = async (): Promise<FilingRecord[]> => (await readRecords(HOME, FILINGS_FILE, isFilingRecord)).records;
     const deskTurns = async (): Promise<DeskTurnEvent[]> =>
       (await readEvents(HOME)).events.filter((e): e is DeskTurnEvent => e.kind === "desk-turn");
@@ -512,11 +527,17 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     assert.ok(answered.includes("[alert · NVDA · stop]"), `the stub answered the post's provenance line; saw ${JSON.stringify(answered)}`);
     let turns = await deskTurns();
     await waitFor("the annotation's desk-turn", async () => { turns = await deskTurns(); return turns.length >= 1; });
-    assert.deepEqual(turns.map((e) => [e.sessionId, e.source, e.outcome]), [[deskId, "alert", "ended"]], "a desk-turn on the desk session, its source the alert");
-    await waitFor("the annotation record", async () => (await alerts()).some((r) => r.kind === "annotation"));
+    const nvdaSession = await annotationSession(nvda.id);
+    assert.ok(nvdaSession !== deskId && created.includes(nvdaSession), "the annotation ran in a session of its own, not the desk conversation's");
+    assert.deepEqual(turns.map((e) => [e.sessionId, e.source, e.outcome]), [[nvdaSession, "alert", "ended"]], "a desk-turn on the annotation's session, its source the alert");
     const annotation = (await alerts()).find((r) => r.kind === "annotation");
-    assert.deepEqual(annotation === undefined ? undefined : [annotation.alerts, annotation.result, annotation.sessionId],
-      [[nvda.id], "opened", deskId], "the annotation record: the alert it covers, opened on the desk session");
+    assert.deepEqual(annotation === undefined ? undefined : [annotation.alerts, annotation.result],
+      [[nvda.id], "opened"], "the annotation record: the alert it covers, opened");
+    await waitFor("the annotated record", async () => (await annotated()).length === 1);
+    const [noted] = await annotated();
+    assert.deepEqual([noted.pass, noted.sessionId, noted.outcome, noted.sent, noted.text], [nvda.pass, nvdaSession, "ended", [2], "NVDA: annotated"],
+      "the lane's annotated record: the pass, its session, the outcome, the message its reply went out as, the reply");
+    assert.equal(requests.get(deskId)?.length ?? 0, 0, "the desk conversation's session reached the model for none of it");
 
     /* ---------- 3. A RESTART ---------- */
     await watch.dispose();
@@ -525,7 +546,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     rewatch = installWatch({
       home: HOME, root: ROOT, quotes, calendars, clock: wall,
       deliver: (text, opts) => conversation.deliver(text, opts),
-      post: (input) => conversation.post(input),
+      post: (input) => annotator.post(input),
       budget: () => readBudget(HOME, wall.now()),
       edgar: { fetch: fakeEdgar, userAgent: UA },
       tickMs: TICK_MS,
@@ -619,7 +640,8 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     heard([phone[expected.length], { text: "timed out after 1.5 s; a card or a long tool was pending", replyTo: slowAt }],
       "the alert, then the cut's line at its 1.5 s deadline, as a reply under it");
     assert.equal(bars[barsAt].aborted, true, "the deadline's cancel reached the waiting tool");
-    assert.equal(bars[barsAt].sessionId, deskId, "the call was the desk session's");
+    assert.equal(bars[barsAt].sessionId, await annotationSession(slow.id), "the call was the annotation's own session's");
+    assert.notEqual(bars[barsAt].sessionId, deskId, "not the desk conversation's");
     print("cn", CRSH, 10.5, "2026-12-01T05:00:15Z", "trading");
     await tickAt("2026-12-01T05:00:20Z");
     const crsh = (await hitsSettled(10))[9];
@@ -729,9 +751,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     assert.ok(phone[expected.length].text.startsWith("CNRY 51 · ROBINHOOD 09:30:02 ET\n"), "its alert");
     heard([phone[expected.length], { text: CANARY_DONE, replyTo: cnryAt }], "CANARY-DONE came as a reply under CNRY's alert");
     const rootAfter = await walk(ROOT);
-    const deskLog = logs.get(deskId) ?? [];
-    const lastStart = deskLog.map((e) => e.type).lastIndexOf("turn/start");
-    const canaryLog = deskLog.slice(lastStart);
+    const canaryLog = logs.get(await annotationSession(cnry.id)) ?? [];
     assert.deepEqual(canaryLog.filter((e) => e.type === "tool/call").map((e) => e.data?.name), ["write", "write", "write"],
       "the poisoned model wrote three times, one call at a time");
     const results = canaryLog.filter((e) => e.type === "tool/result").map((e) => JSON.stringify(e.data));

@@ -284,8 +284,8 @@ export function provenanceLine(source: DeskSource, now: Date): string {
 export type TelegramMessageSource = { kind: "telegram"; from: number; chat: number; messageId: number };
 /** A standing order's firing: the order, the firing's key and the trading date it fires for. */
 export type ScheduleMessageSource = { kind: "schedule"; order: string; firing: string; date: string };
-/** An alert the face has already sent: the alert's id and its symbol. */
-export type AlertMessageSource = { kind: "alert"; alert: string; symbol: string };
+/** An alert the face has already sent: the alert's id - or the pass's, for several - its symbol or symbols, and its pass. */
+export type AlertMessageSource = { kind: "alert"; alert: string; symbol: string; pass?: string };
 /** The face's view of the desk, injected before a phone's text: context, never what names a turn. */
 export type DeskStateMessageSource = { kind: "desk"; form: "state" };
 /** The `source` of a message the face sends the desk: the log's, the ledger's and the client's record of
@@ -355,10 +355,24 @@ export interface CreateDeskAgentOptions {
   setup: MemberSetup;
 }
 
+/** dsh-session-persistence's service as the desk reads it (lib/types/index.d.ts `open`, `flush`; lib/types/handle.d.ts
+ * `SessionHandle.read`): a stored session's log opened for reading - `read(offset, length)` answers the events from
+ * `offset`, at most `length` of them, and none past the end; the handle is closed by its `Symbol.asyncDispose` - and
+ * `flush`, which resolves once every append made so far is durable. */
+export interface DeskSessionPersistenceLike {
+  open(id: string, access: "read"): Promise<{
+    read(offset?: number, length?: number): Promise<{ events: readonly EventLike[] }>;
+    [Symbol.asyncDispose](): Promise<void>;
+  }>;
+  flush(): Promise<void>;
+}
+
 /** What the desk session reads of the booted ROOT context, stated structurally as src/room.ts states its
  * own: the agent registry, the preset join and the permission fact. `create` and `resume` answer
  * dsh-agent's `AgentHandle`, `{ agent, dispose }` - the disposer only its holder has (dsh-agent
- * lib/types/index.d.ts:129-146); `get` answers a bare agent, someone else's to dispose. */
+ * lib/types/index.d.ts:129-146); `get` answers a bare agent, someone else's to dispose. `sessionPersistence`, the
+ * session logs on disk, is what a keyed post checks and flushes (src/desk-conversation.ts); src/desk.ts hands the
+ * booted context's to a slice that lacks it, and a post with no key never reads it. */
 export interface DeskSessionCtxLike {
   agents: {
     get(id: string): AgentLike | undefined;
@@ -367,6 +381,34 @@ export interface DeskSessionCtxLike {
   };
   agentPresets: RoomContextLike["agentPresets"];
   permissionPresets: RoomContextLike["permissionPresets"];
+  sessionPersistence?: DeskSessionPersistenceLike;
+}
+
+/** How many events {@link readSessionEvents} asks for at a time. */
+const LOG_PAGE = 512;
+
+/**
+ * Session `sessionId`'s log as it is on disk now: opened for reading and read in pages of {@link LOG_PAGE} until a
+ * page comes back empty, then closed. A keyed post's seen set is built from it (src/desk-conversation.ts).
+ * @param ctx - the desk session's slice of the root context, its `sessionPersistence` with it.
+ * @param sessionId - the stored session to read.
+ * @returns every event of the log, in order.
+ * @throws when the slice has no `sessionPersistence`, and when the open or a read rejects.
+ */
+export async function readSessionEvents(ctx: DeskSessionCtxLike, sessionId: string): Promise<EventLike[]> {
+  const persistence = ctx.sessionPersistence;
+  if (persistence === undefined) throw new Error("this face has no session persistence");
+  const handle = await persistence.open(sessionId, "read");
+  try {
+    const events: EventLike[] = [];
+    for (;;) {
+      const page = await handle.read(events.length, LOG_PAGE);
+      if (page.events.length === 0) return events;
+      events.push(...page.events);
+    }
+  } finally {
+    await handle[Symbol.asyncDispose]();
+  }
 }
 
 /** What {@link ensureDeskSession} and {@link createDeskAgent} need. `root` is the repository root, `home`
@@ -472,7 +514,9 @@ export async function createDeskAgent(
  * someone else's and never is. With no id, no usable session, or `fresh`, it creates one in the journal
  * ({@link createDeskAgent}) and records it as a `desk-session` event, `created`, or `new` when `fresh`.
  * Only a creation is recorded. Rejects too when the ledger cannot be read (src/desk.ts `readEvents`): a
- * conversation the face could not find again is not opened.
+ * conversation the face could not find again is not opened. `resumed` is there, `true`, when this call resumed a cold
+ * session: what a restart left in it - messages still queued, a turn the restart cut - is the owner's to deal with
+ * ({@link requeuePending}, {@link cutPhoneTurn}).
  *
  * ONE CALLER AT A TIME. Two calls at once would both find no conversation in the ledger and both open
  * one. The desk's one owner, src/desk-conversation.ts, runs each call once the one before has settled;
@@ -483,7 +527,7 @@ export async function createDeskAgent(
 export async function ensureDeskSession(
   deps: DeskSessionDeps,
   opts: { fresh?: boolean } = {},
-): Promise<{ agent: AgentLike; sessionId: string; created: boolean }> {
+): Promise<{ agent: AgentLike; sessionId: string; created: boolean; resumed?: true }> {
   const journal = deskJournalDir(deps.root);
   await mkdir(journal, { recursive: true });
   const log = deps.log ?? defaultLog;
@@ -507,7 +551,7 @@ async function reopenDesk(
   id: string,
   journal: string,
   log: (line: string) => void,
-): Promise<{ agent: AgentLike; sessionId: string; created: false } | undefined> {
+): Promise<{ agent: AgentLike; sessionId: string; created: false; resumed?: true } | undefined> {
   const live = deps.ctx.agents.get(id);
   const resumed = live === undefined ? await resumeDesk(deps, id, log) : undefined;
   const agent = live ?? resumed?.agent;
@@ -524,7 +568,7 @@ async function reopenDesk(
     if (resumed !== undefined) await disposeQuietly(resumed, id, log);
     throw err;
   }
-  return { agent, sessionId: id, created: false };
+  return { agent, sessionId: id, created: false, ...(resumed === undefined ? {} : { resumed: true as const }) };
 }
 
 /** The cold desk conversation `id`, resumed - its handle, so the face can dispose what it resumed - or
@@ -755,9 +799,10 @@ type InboxAware = { inbox?: { readonly nextTurn: readonly MessageLike[]; remove(
  * there, unanswered, until something else wakes the agent: once the cut turn has unwound, the driver goes idle
  * without looking at the inbox (dsh-agent-loop lib/index.js `kick`; tests/desk-smoke.test.ts measures it on a real
  * tree). A message sent after the cancel, though, is queued for the next turn and runs once the cut turn has
- * unwound (dsh-agent `Agent.send`). So, in the same tick as the cancel, each message on the inbox's next-turn list
- * is taken out and sent again with `followup`, oldest first: the list ends as it began, in the order the operator
- * sent them, and each is answered in its own turn - with its own deadline, fence check and record. The input waiting
+ * unwound (dsh-agent `Agent.send`). So, in the same tick as the cancel, each message on the inbox's next-turn list -
+ * whatever its source: the phone's, an alert's, the browser's, a job's notice - is taken out and sent again with
+ * `followup`, oldest first: the list ends as it began, in the order the operator sent them, and each is answered in its
+ * own turn - with its own deadline, fence check and record. The input waiting
  * for the next step (a browser's steer) is kept and not sent again: dsh's own stop leaves it so. An agent without an
  * inbox is only cancelled.
  *
@@ -773,19 +818,99 @@ type InboxAware = { inbox?: { readonly nextTurn: readonly MessageLike[]; remove(
  */
 export function cancelKeepingQueue(agent: AgentLike, cause: { kind: "hook"; reason: string }, log: (line: string) => void): number {
   agent.cancel(cause, { keepInbox: true });
+  return requeue(agent, () => true, log, " after the cut");
+}
+
+/** The message sources {@link requeuePending} wakes the desk for: the phone's texts and the face's alerts - one alert's
+ * or a pass's batch, whose message's source is `alert` alike (src/alert-text.ts `annotationPost`). */
+const REQUEUED: ReadonlySet<string> = new Set(["telegram", "alert"]);
+
+/**
+ * The boot's wake: take each phone text and alert waiting on `agent`'s inbox's next-turn list out, and send it again
+ * with `followup`, oldest first, so the agent wakes for them: dsh opens no turn on a resume for a message on that list -
+ * the queued message lives only in the inbox's durable projection, which the resume rebuilds, and the resumed agent sits
+ * idle beside it (measured on a real tree, spec §16 H3). A message of any other source - the browser's, a job's notice -
+ * stays where it is: nobody is at the browser to see its answer at boot. A cut wakes every source
+ * ({@link cancelKeepingQueue}). A message
+ * `remove` says is no longer there was taken by a turn since, which answers it: it is skipped, never sent twice. An
+ * agent without an inbox has nothing to wake.
+ * @param agent - the desk agent.
+ * @param log - where the line goes for a message that could not be sent again: taken out, it is lost.
+ * @returns how many messages it sent again.
+ */
+export function requeuePending(agent: AgentLike, log: (line: string) => void): number {
+  return requeue(agent, (message) => REQUEUED.has(message.source?.kind), log, "");
+}
+
+/** Take each message on `agent`'s next-turn list that `which` keeps out and send it again, oldest first - a cut's
+ * ({@link cancelKeepingQueue}: every one) and a boot's ({@link requeuePending}: the phone's and the alerts') - its loss
+ * line naming `when` (` after the cut`, or nothing). */
+function requeue(agent: AgentLike, which: (message: MessageLike) => boolean, log: (line: string) => void, when: string): number {
   const inbox = (agent as AgentLike & InboxAware).inbox;
   if (inbox === undefined) return 0;
   let sent = 0;
   for (const message of [...inbox.nextTurn]) {
+    if (!which(message)) continue;
     if (!inbox.remove(message.id)) continue; // taken by a turn since: it is answered there
     try {
       agent.followup(message);
       sent += 1;
     } catch (err) {
-      log(`${BIN}: desk: a message queued on desk session ${agent.id} could not be queued again after the cut, and is lost: ${errText(err)}`);
+      log(`${BIN}: desk: a message queued on desk session ${agent.id} could not be queued again${when}, and is lost: ${errText(err)}`);
     }
   }
   return sent;
+}
+
+/** A session log event's own time, when it has one: dsh stamps each with `time`, in ms since the epoch. */
+function timeOf(event: EventLike | undefined): number | undefined {
+  const time = (event as { time?: unknown } | undefined)?.time;
+  return typeof time === "number" && Number.isFinite(time) ? time : undefined;
+}
+
+/**
+ * The phone turn a restart cut, from the desk session's log as the restart left it: the log's last `turn/start`, when no
+ * `turn/end` of that turn follows it - a log the loop has not reopened - or the one that follows says `interrupted`,
+ * the closer dsh-agent-loop appends on resume to a log whose tail turn was open (lib/index.js `interruptedTurnClosers`;
+ * measured, spec §16 H3); and only when the turn's first `user/message` that is not the desk state names it as the
+ * phone's (`source.kind` `telegram`), as the supervisor names a turn. `at` is when that message was logged (ISO-8601
+ * UTC), else when the turn started; dsh stamps every event, and a log with neither time names no cut. A turn that ended any other way - a shutdown's cancel among them, which its own
+ * record covers - is no cut; nor is a browser's, an alert's or a wake's.
+ * @param events - the session's log, in order (src/desk-session.ts {@link readSessionEvents}).
+ */
+export function cutPhoneTurn(events: readonly EventLike[]): { turn: number; at: string } | undefined {
+  let start = -1;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === "turn/start") {
+      start = i;
+      break;
+    }
+  }
+  if (start < 0) return undefined;
+  const turn = (events[start].data as { turn?: unknown } | undefined)?.turn;
+  if (typeof turn !== "number") return undefined;
+  let named: EventLike | undefined;
+  for (const event of events.slice(start + 1)) {
+    const data = event.data as { turn?: unknown; reason?: { kind?: unknown }; source?: { kind?: unknown } } | undefined;
+    if (event.type === "turn/end" && data?.turn === turn) {
+      if (data.reason?.kind !== "interrupted") return undefined;
+      break;
+    }
+    if (event.type === "user/message" && named === undefined && data?.source?.kind !== "desk") named = event;
+  }
+  if ((named?.data as { source?: { kind?: unknown } } | undefined)?.source?.kind !== "telegram") return undefined;
+  const at = timeOf(named) ?? timeOf(events[start]);
+  return at === undefined ? undefined : { turn, at: new Date(at).toISOString() };
+}
+
+/**
+ * The phone's line for a turn a restart cut: `a restart cut your message of <deskTime> before it was answered; send it
+ * again`, the message's time as src/desk.ts `deskTime` shows it - dated when the restart came on another New York date.
+ * @param at - when the message was logged ({@link cutPhoneTurn}).
+ * @param now - when the face says so.
+ */
+export function cutPhoneTurnLine(at: Date, now: Date): string {
+  return `a restart cut your message of ${deskTime(at, now)} before it was answered; send it again`;
 }
 
 /** The longest delay a timer keeps: 2^31 - 1 ms, about 24.8 days. Node fires a longer one at once. */

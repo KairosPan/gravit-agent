@@ -21,7 +21,7 @@
  * change); an expired mute lifted; nothing to watch is `idle`, and the tick stops there - no calendar, no poll, no
  * line; the ledgers, read once before any pass is judged (`alerts.jsonl` into src/watch-eval.ts `rebuildDay`,
  * `filings.jsonl` into src/filings.ts `baselineFrom`; an unreadable `alerts.jsonl` judges nothing until it reads,
- * with one line); each
+ * with one line; its orphans handled at that first read, see below); each
  * market, its calendar's answer for its own date, its window (ruling 2: 10 minutes before the open to a minute after
  * the close) and a poll when due by its cadence (ruling 3), never two in flight per market; a due batch; and the
  * filings (ruling 9), one single-flight poll when due, aborted at 120 s.
@@ -29,10 +29,18 @@
  * A PASS is one market's poll - one snapshot over that market's ids alone - or one filings poll. Its hits are judged
  * synchronously and go on the send chain in order: the flags read once (OFF and MUTE, then the budget when an alert
  * would be annotated), each hit recorded with its gate's decision, each send delivered and its delivery recorded, and
- * then one annotation post on a second chain no pass waits on (ruling 5); a send that dispose cuts off is recorded
- * `{ undelivered: "the face shut down" }`, never delivered. A failed poll - rejected, or every quote
+ * then one annotation post on a second chain no pass waits on (ruling 5) - to the annotation lane
+ * (src/annotator.ts, spec §16 H1), whose run comes back as one `annotated` record ({@link WatchHandle.noteAnnotated});
+ * a send that dispose cuts off is recorded `{ undelivered: "the face shut down" }`, never delivered. A failed poll - rejected, or every quote
  * `unavailable` - judges nothing and says so once per session date per market; a watched symbol unpriced on its
  * first {@link UNPRICED_POLLS} polls of a session date says so once (ruling 16).
+ *
+ * THE ORPHANS (spec §16 H2). A `send` written with no `delivered` after it is an alert a restart caught between its
+ * decision and its send. At the ledger's first read each is handled once, on the send chain ahead of any pass: one
+ * younger than src/watch-eval.ts `ALERT_REPLAY_MS` is delivered late (alert-text.ts `lateAlertText`) and recorded
+ * `replayed`, with no annotation post - a check would read a market that has moved; the older ones are one line
+ * (`lostAlertsLine`) and each a `{ undelivered: "lost to a restart" }` record, left out of the hour's cap though
+ * still in their keys' cooldowns. Whatever `deliver` answers is recorded, a pause's hold among them.
  *
  * A SHARES PAST THE XSHG TABLE. A failed A-share calendar answer once the Beijing date is past `XSHG_COVERED` is no
  * missing calendar: the session is 09:30-15:00 Beijing on a weekday, marked `uncovered`, said once per Beijing date.
@@ -44,7 +52,7 @@
 import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
-import { alertText, annotationPost, batchText, priceStamp, stateBody, WATCH_LINES, type DeskStateView, type NearView } from "./alert-text.ts";
+import { alertText, annotationPost, batchText, lateAlertText, lostAlertsLine, priceStamp, stateBody, WATCH_LINES, type DeskStateView, type NearView } from "./alert-text.ts";
 import { listChannelDirs } from "./channels.ts";
 import {
   ALERTS_FILE, appendChain, clearMute, deskDir, deskTime, EVENTS_FILE, FILINGS_FILE, readMuteState, readOffState, readRecords, WATCH_LEASE_FILE,
@@ -54,7 +62,7 @@ import {
   levelDistancePct, loadHoldings, loadLevels, loadRules, resolveSymbols, type Holding, type Level, type LevelKind, type LoadRefusal, type LoadResult, type Rule,
 } from "./desk-book.ts";
 import type { DeliverResult, DeskConversation, PostResult } from "./desk-conversation.ts";
-import type { DeskClock } from "./desk-session.ts";
+import type { DeskClock, DeskTurnRecord } from "./desk-session.ts";
 import { createEdgar, type Edgar, type EdgarFetch, type EdgarResult } from "./edgar.ts";
 import { bjDate, etDate } from "./et.ts";
 import {
@@ -66,7 +74,7 @@ import type { DayAnswer, DeskCalendars, MarketSession } from "./market-clock.ts"
 import type { MarketQuoteSource } from "./market-quotes.ts";
 import { idOf, type Market } from "./symbols.ts";
 import {
-  alertId, batchDue, batchId, emptyDay, evaluatePass, gate, isAlertRecord, passId, priceKeys, rebuildDay, snapOf, takeBatch, watchQuoteOf,
+  alertId, batchDue, batchId, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, passId, priceKeys, rebuildDay, snapOf, takeBatch, watchQuoteOf,
   type AlertAnnotation, type AlertBatch, type AlertDelivered, type AlertHit, type AlertRecord, type Hit, type PriceKey, type WatchDay, type WatchQuote,
 } from "./watch-eval.ts";
 import { XSHG_COVERED } from "./xshg-clock.ts";
@@ -201,13 +209,55 @@ export interface WatchStatus {
   ledgerError?: string;
 }
 
+/** One annotation run's end, as the annotation lane (src/annotator.ts) reports it and `alerts.jsonl` keeps it (spec §16
+ * H1): the pass it checked, its session, its turn's outcome, the ids of the messages its reply went out as - none when
+ * the reply was held back or queued - and the reply, at most 2,000 characters. */
+export type AnnotatedRecord = {
+  t: string;
+  kind: "annotated";
+  pass: string;
+  sessionId: string;
+  outcome: DeskTurnRecord["outcome"];
+  sent: number[];
+  text: string;
+};
+
+/** Whether `x` is an {@link AnnotatedRecord}, by the fields the watch reads back. */
+export function isAnnotatedRecord(x: unknown): x is AnnotatedRecord {
+  if (typeof x !== "object" || x === null) return false;
+  const r = x as Record<string, unknown>;
+  return r.kind === "annotated" && typeof r.t === "string" && typeof r.pass === "string" && typeof r.sessionId === "string"
+    && typeof r.outcome === "string" && Array.isArray(r.sent) && r.sent.every((n) => typeof n === "number") && typeof r.text === "string";
+}
+
+/** A line of `alerts.jsonl` as the watch keeps it: src/watch-eval.ts's four kinds and the lane's `annotated`. */
+type WatchRecord = AlertRecord | AnnotatedRecord;
+const isWatchRecord = (x: unknown): x is WatchRecord => isAlertRecord(x) || isAnnotatedRecord(x);
+
 /** The running watch. `tick` runs one tick now (after any under way); `stateText` the desk state, `undefined`
- * unless watching; `dispose` stops it and releases the lease. */
+ * unless watching; `noteAnnotated` appends an annotation run's record to `alerts.jsonl` and keeps it in memory with
+ * the rest; `contextFor` what a phone reply to the message `messageId` answers (spec §16 H1b): from the records of the
+ * last {@link MEMORY_MS}, an alert's message gives that alert's text, as sent with no note, and the annotation of its
+ * pass when there is one; an annotation's message gives its pass's alerts and the annotation - at most
+ * {@link CONTEXT_MAX} characters, and `undefined` for a message the watch did not send; `dispose` stops it and
+ * releases the lease. */
 export interface WatchHandle {
   tick(): Promise<void>;
   status(): WatchStatus;
   stateText(): Promise<string | undefined>;
+  noteAnnotated(r: AnnotatedRecord): void;
+  contextFor(messageId: number): string | undefined;
   dispose(): Promise<void>;
+}
+
+/** The most a reply's context ({@link WatchHandle.contextFor}) carries, in UTF-16 code units: one Telegram message. */
+const CONTEXT_MAX = 4_000;
+
+/** `text` cut to at most `max` UTF-16 code units, never between the two halves of a surrogate pair. */
+export function cutAt(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const code = text.charCodeAt(max - 1);
+  return text.slice(0, code >= 0xd800 && code <= 0xdbff ? max - 1 : max);
 }
 
 /** The lease's contents. */
@@ -336,7 +386,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   let baseline: Baseline = { seeded: new Set(), seen: new Set() };
   let filingsRead = false;
   /** The alert records of the last {@link MEMORY_MS}: the rebuild's, then this run's, in order. */
-  let records: AlertRecord[] = [];
+  let records: WatchRecord[] = [];
   /** Each delivered record by its alert's id. */
   const deliveries = new Map<string, AlertDelivered>();
   /** The last priced print of each `market:symbol`. */
@@ -1018,7 +1068,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   /** The filing keys' cooldowns as the ledger leaves them: src/watch-eval.ts rebuildDay starts a key's cooldown at its
    * date's latest record not suppressed `cooldown`; for a filing key, a record suppressed `window` starts none either,
    * so its `lastHitAt` is its date's latest record that reached the gate, or none. Price keys are rebuildDay's. */
-  function filingCooldowns(rebuilt: WatchDay, read: readonly AlertRecord[]): void {
+  function filingCooldowns(rebuilt: WatchDay, read: readonly WatchRecord[]): void {
     const latest = new Map<string, number>();
     for (const r of read) {
       if (r.kind !== "alert" || !r.key.startsWith("filing:")) continue;
@@ -1034,17 +1084,56 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     }
   }
 
+  /** The first read's orphans, on the send chain: each young one delivered late and recorded `replayed`, never
+   * posted; then the lost ones as one line, each recorded undelivered. */
+  function queueOrphans({ replay, lost }: { replay: AlertHit[]; lost: AlertHit[] }): void {
+    if (replay.length === 0 && lost.length === 0) return;
+    const record = (id: string, delivery: DeliverResult, replayed: boolean): void => {
+      const d: AlertDelivered = {
+        t: iso(clock.now()), kind: "delivered", id, delivery, latency: { tradeMs: null, receivedMs: null }, ...(replayed ? { replayed: true as const } : {}),
+      };
+      records.push(d);
+      deliveries.set(id, d);
+      alerts.append(d);
+    };
+    onSendChain(async () => {
+      for (const hit of replay) {
+        let result: DeliverResult;
+        if (stopped) result = { undelivered: "the face shut down" };
+        else {
+          try {
+            result = await deps.deliver(lateAlertText(hit, clock.now()));
+          } catch (err) {
+            result = { undelivered: `send failed: ${errText(err)}` };
+          }
+        }
+        record(hit.id, result, true);
+      }
+      if (lost.length === 0) return;
+      if (!stopped) {
+        try {
+          await deps.deliver(lostAlertsLine(lost, clock.now()));
+        } catch (err) {
+          fail("lost alerts line", err);
+        }
+      }
+      for (const hit of lost) record(hit.id, { undelivered: "lost to a restart" }, false);
+    });
+  }
+
   async function ledgersStep(at: number): Promise<void> {
     if (!alertsRead) {
       try {
-        const { records: read } = await readRecords(home, ALERTS_FILE, isAlertRecord);
+        const { records: read } = await readRecords(home, ALERTS_FILE, isWatchRecord);
         const merged = [...read.filter((r) => at - Date.parse(r.t) <= MEMORY_MS), ...records];
-        day = rebuildDay(merged, at);
+        const orphans = findOrphans(merged, at);
+        day = rebuildDay(merged, at, new Set(orphans.lost.map((r) => r.id)));
         filingCooldowns(day, merged);
         records = merged;
         for (const r of merged) if (r.kind === "delivered") deliveries.set(r.id, r);
         alertsRead = true;
         ledgerError = undefined;
+        queueOrphans(orphans);
       } catch (err) {
         ledgerError = reasonOf(err);
         sayOnce(`ledger:${ledgerError}`, `the alert ledger ${join(dir, ALERTS_FILE)} cannot be read (${ledgerError}), so the watch sends nothing until it can`, { ever: true, at });
@@ -1327,12 +1416,69 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     return stateBody(view);
   }
 
+  /* ---------- a reply's context (spec §16 H1b) ---------- */
+
+  /** What a phone reply to `messageId` answers: see {@link WatchHandle.contextFor}. Newest record first, so a
+   * message id Telegram numbered afresh finds the latest send. */
+  function contextFor(messageId: number): string | undefined {
+    try {
+      return contextOf(messageId);
+    } catch (err) {
+      fail("context", err);
+      return undefined;
+    }
+  }
+
+  /** {@link contextFor}'s work. A record the ledger kept in a shape `alertText` cannot read - the rebuild checks only
+   * the fields it reads - is skipped, as if the watch had not sent it; the next record that sent the message is tried. */
+  function contextOf(messageId: number): string | undefined {
+    const at = clock.now();
+    const live = records.filter((r) => at - Date.parse(r.t) <= MEMORY_MS).reverse();
+    const sentIt = (sent: unknown): boolean => Array.isArray(sent) && sent.includes(messageId);
+    const hitOf = (id: string): AlertHit | undefined => live.find((r): r is AlertHit => r.kind === "alert" && r.id === id);
+    const annotatedOf = (pass: string): AnnotatedRecord | undefined => live.find((r): r is AnnotatedRecord => r.kind === "annotated" && r.pass === pass);
+    const noteOf = (a: AnnotatedRecord | undefined): string[] => (a === undefined || a.text === "" ? [] : [`annotation:\n${a.text}`]);
+    /** The alert's text as sent with no note; `undefined` for a hit in a shape it cannot be read from. */
+    const textOf = (hit: AlertHit): string | undefined => {
+      try {
+        return alertText(hit, at, "none");
+      } catch {
+        return undefined;
+      }
+    };
+    let parts: string[] | undefined;
+    for (const r of live) {
+      if (r.kind === "delivered" && typeof r.delivery === "object" && r.delivery !== null && sentIt((r.delivery as { sent?: unknown }).sent)) {
+        const hit = hitOf(r.id);
+        const text = hit === undefined ? undefined : textOf(hit);
+        if (hit === undefined || text === undefined) continue;
+        const post = live.find((p): p is AlertAnnotation => p.kind === "annotation" && Array.isArray(p.alerts) && p.alerts.includes(hit.id));
+        parts = [text, ...noteOf(post === undefined ? undefined : annotatedOf(post.pass))];
+        break;
+      }
+      if (r.kind === "annotated" && sentIt(r.sent)) {
+        const post = live.find((p): p is AlertAnnotation => p.kind === "annotation" && p.pass === r.pass);
+        const ids = Array.isArray(post?.alerts) ? post.alerts : [];
+        const texts = ids.flatMap((id) => { const hit = hitOf(id); const text = hit === undefined ? undefined : textOf(hit); return text === undefined ? [] : [text]; });
+        parts = [...texts, ...noteOf(r)];
+        break;
+      }
+    }
+    if (parts === undefined || parts.length === 0) return undefined;
+    return cutAt(parts.join("\n\n"), CONTEXT_MAX);
+  }
+
   /* ---------- the handle ---------- */
 
   return {
     tick,
     status,
     stateText,
+    noteAnnotated(r) {
+      records.push(r);
+      alerts.append(r);
+    },
+    contextFor,
     dispose() {
       disposing ??= (async () => {
         stopped = true;

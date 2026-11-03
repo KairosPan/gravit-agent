@@ -617,11 +617,12 @@ afterAll(() => rm(TMP, { recursive: true, force: true }));
 class FakeAgent implements AgentLike {
   status: "idle" | "running" = "idle";
   readonly cancels: unknown[][] = [];
+  readonly followups: unknown[] = [];
   readonly session: SessionLike;
   constructor(readonly id: string) {
     this.session = { id, header: {}, seq: 0, snapshotEvents: () => [], append: () => undefined };
   }
-  followup(): void {}
+  followup(message: unknown): void { this.followups.push(message); }
   cancel(...args: unknown[]): void { this.cancels.push(args); }
 }
 
@@ -713,7 +714,7 @@ test("installDesk creates the desk conversation only when enabled with root, rou
     agent.status = "running";
     await desk.dispose(0);
     await desk.dispose(0);
-    assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]], "the running desk turn is cancelled once");
+    assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]], "the running desk turn is cancelled once");
     assert.equal(fake.listeners.size, 0);
     assert.equal(fake.letGo.length, 1);
     assert.doesNotMatch(fake.letGo[0], /"kind":"shutdown"/, "the conversation was let go before the shutdown was written");
@@ -909,7 +910,16 @@ test("installDesk runs the Telegram bridge only with the desk on, Telegram confi
       home: await own("live"), enabled: true, watch: watch(), telegram: { token, operatorId: 42, apiBase: "https://telegram.test", fetch: live.fetch },
       ...conversationDeps(fake, "live"),
     });
+    /* the conversation starts only once the bridge has set the outlet: a restart's cut-turn line must find it */
+    const order: string[] = [];
+    const conversation = desk.conversation!;
+    const setOutlet = conversation.setOutlet.bind(conversation);
+    const start = conversation.start.bind(conversation);
+    conversation.setOutlet = (outlet) => { order.push(outlet === undefined ? "outlet unset" : "outlet set"); setOutlet(outlet); };
+    conversation.start = () => { order.push("start"); return start(); };
     await until("the bridge's first poll, which installDesk does not await", () => live.state.asked.includes("getUpdates"));
+    await until("the conversation's start, which installDesk does not await", () => order.includes("start"));
+    assert.deepEqual(order, ["outlet set", "start"], "installDesk starts the conversation after the bridge, never before");
     assert.deepEqual(await telegramOf(rec), { configured: true, polling: true, dropped: 0, queued: 0 }, "the status is the bridge's own");
     await until("the conversation's start", () => fake.listeners.size === 1);
     await desk.dispose(0);
@@ -918,6 +928,37 @@ test("installDesk runs the Telegram bridge only with the desk on, Telegram confi
     assert.deepEqual(await telegramOf(rec), { configured: true, polling: false, dropped: 0, queued: 0 });
   } finally {
     await Promise.all(made.map((h) => rm(h, { recursive: true, force: true })));
+  }
+});
+
+/* The final review's M3: a bridge whose install throws is one line, and the conversation still starts - no unhandled
+ * rejection (a process exit under installFailLoud), and dispose still settles. */
+test("installDesk: a Telegram bridge that throws as it installs is one line, and the conversation starts all the same", async () => {
+  const h = join(TMP, "telegram-throws");
+  await mkdir(h, { recursive: true });
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => { unhandled.push(reason); };
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const fake = conversationRoot(() => "");
+    const lines: string[] = [];
+    const timer = fakeTimer();
+    const telegram = {
+      token: "424242:AAFakeTokenForTheBridgeTests_x9", operatorId: 42,
+      get apiBase(): string { throw new Error("the bridge's config cannot be read"); },
+    };
+    const desk = installDesk(recorder(), {
+      home: h, enabled: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, telegram, log: (line) => { lines.push(line); },
+      root: join(TMP, "repo-telegram-throws"), route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
+    });
+    await until("the conversation's start", () => fake.listeners.size === 1);
+    await new Promise((done) => setTimeout(done, 20));
+    assert.deepEqual(unhandled, [], "no unhandled rejection");
+    assert.deepEqual(lines.filter((l) => l.includes("Telegram bridge")), ["gravit-face: desk: the Telegram bridge could not be started: the bridge's config cannot be read"]);
+    await desk.dispose(0);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+    await rm(h, { recursive: true, force: true });
   }
 });
 
@@ -1476,7 +1517,7 @@ test("events.jsonl takes the three new kinds", async () => {
 
 /* ---------- P3: the watch row ---------- */
 
-test("installDesk starts the watch with a source, shares the US calendar with the schedule, and disposes schedule, watch, bridge, conversation in order", async () => {
+test("installDesk starts the watch with a source, shares the US calendar with the schedule, wires the watch's post to the annotator, not to the conversation, and disposes schedule, watch, annotator, bridge, conversation in order", async () => {
   assert.equal(ALERT_DEADLINE_MS, 90_000);
   const h = join(TMP, "watch-home");
   const root = join(TMP, "repo-watch");
@@ -1491,10 +1532,19 @@ test("installDesk starts the watch with a source, shares the US calendar with th
     root, route: { provider: "stub", model: "echo" }, installModelSelection: () => () => {}, log: () => {},
   };
   const asked: string[][] = [];
+  const watchClock = new WallClock("2026-12-01T02:00:00Z");
+  /** 600519's print once the test sets one: none until then. */
+  let price: number | undefined;
   const quotes: MarketQuoteSource = {
     snapshot: async (assets) => {
       asked.push(assets.map((a) => a.id));
-      return { ok: true, generated_at: "2026-12-01T02:00:00.000Z", quotes: [], providers: [] };
+      const at = new Date(watchClock.now()).toISOString();
+      const priced = price === undefined ? [] : assets.filter((a) => a.symbol === "600519").map((a) => ({
+        ...a, change: null, volume: null, volume_as_of: null, source: "market", feed: "tencent", basis: "previous_close" as const,
+        cn: { phase: "trading", lastSession: null }, price: price!, prev_close: 1410, change_pct: null, as_of: at, received_at: at,
+        quote_status: "live", market_status: "open", message: "",
+      }));
+      return { ok: true, generated_at: at, quotes: priced, providers: [] } as Awaited<ReturnType<MarketQuoteSource["snapshot"]>>;
     },
   };
 
@@ -1510,7 +1560,6 @@ test("installDesk starts the watch with a source, shares the US calendar with th
 
   const fake = conversationRoot(() => "");
   const scheduleClock = new WallClock("2026-12-01T02:00:00Z");
-  const watchClock = new WallClock("2026-12-01T02:00:00Z");
   const us = fakeCalendar({ "2026-11-30": "closed" });
   const cn = fakeCalendar({ "2026-12-01": { date: "2026-12-01", open: "2026-12-01T01:30:00Z", close: "2026-12-01T07:00:00Z", early: false } }, "fake XSHG", (n) => bjDate(new Date(n)));
   /* what had stopped when the conversation let go of the bus */
@@ -1544,24 +1593,34 @@ test("installDesk starts the watch with a source, shares the US calendar with th
   assert.equal(routed.body.watch?.state, "watching", "the status route carries the watch");
   assert.equal(routed.body.standing?.calendars?.cn?.clock, "fake XSHG", "the clock row holds the same XSHG calendar as the watch");
 
-  /* an alert's annotation turn is cut at alertDeadlineMs */
+  /* installDesk wires the watch's post to the annotator, not to the conversation (spec §16 H1) */
   await until("the conversation's start", () => fake.listeners.size === 1);
-  const agent = fake.agents[0];
+  const deskAgent = fake.agents[0];
+  assert.ok(desk.annotator !== undefined, "the annotator comes with the conversation");
+  const phone: [string, number | undefined][] = [];
+  desk.conversation?.setOutlet({ send: async (text, opts) => { phone.push([text, opts?.replyTo]); return { sent: [phone.length] }; } });
+  price = 1390; // 600519 under its watch level at its session's first judged print
+  await watchClock.advance(10_000);
+  await until("the annotation's own agent", () => fake.agents.length === 2);
+  const annotation = fake.agents[1];
+  assert.notEqual(annotation.id, deskAgent.id, "a session of its own");
+  assert.equal(annotation.followups.length, 1, "the annotation's message went to it");
+  assert.deepEqual(deskAgent.followups, [], "and nothing to the desk conversation");
   const emit = (type: string, data: Record<string, unknown>): void => {
-    for (const listener of fake.listeners) (listener as (session: { id: string }, event: EventLike) => void)({ id: agent.id }, { type, seq: 0, data });
+    for (const listener of fake.listeners) (listener as (session: { id: string }, event: EventLike) => void)({ id: annotation.id }, { type, seq: 0, data });
   };
+  /* its turn is cut at alertDeadlineMs, and its line goes as a reply under the alert */
   emit("turn/start", { turn: 1 });
-  emit("user/message", { turn: 1, source: { kind: "alert", alert: "a-000000000001", symbol: "NVDA" } });
-  await until("the 40 ms alert deadline's cancel", () => agent.cancels.length === 1);
+  emit("user/message", { turn: 1, source: { kind: "alert", alert: "a-000000000001", symbol: "600519" } });
+  await until("the 40 ms alert deadline's cancel", () => annotation.cancels.length === 1);
   emit("turn/end", { turn: 1, reason: { kind: "aborted" } });
-  /* and a turn named by an `alerts` source is cut the same */
-  emit("turn/start", { turn: 2 });
-  emit("user/message", { turn: 2, source: { kind: "alerts", alert: "p-000000000001", symbol: "NVDA,AMD" } });
-  await until("the 40 ms alerts deadline's cancel", () => agent.cancels.length === 2);
-  emit("turn/end", { turn: 2, reason: { kind: "aborted" } });
+  await until("the cut line under the alert", () => phone.length === 2);
+  assert.deepEqual(phone[1], ["timed out after 0.04 s; a card or a long tool was pending", 1]);
+  await until("the annotated note in alerts.jsonl", () => readFileSync(join(deskDir(h), "alerts.jsonl"), "utf8").includes('"kind":"annotated"'));
 
   await desk.dispose(0);
-  assert.deepEqual(atLetGo, [{ schedule: 0, watch: 0, state: "stopped", lease: false }], "the clock row and the watch stopped, and the lease released, before the conversation let go");
+  assert.deepEqual(atLetGo.at(-1), { schedule: 0, watch: 0, state: "stopped", lease: false }, "the clock row and the watch stopped, and the lease released, before the conversation let go");
+  assert.equal(fake.listeners.size, 0, "the annotation's supervision and the conversation's both let go");
 });
 
 /* P3: the watch's lines (the P3 plan's Task 10), appended by deskStatusLines after P2's. */

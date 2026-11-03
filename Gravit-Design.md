@@ -16,7 +16,8 @@ desk merged onto main - its phone (the always-on design's P1) and its clock (P2)
 (D5, and the desk's D19-D27, its D17-D25 renumbered past main's D18), §7.3, §8, §9; revised
 2026-11-01 for the desk's watch (P3), in both markets on the Market's reads: §1, §3, §4, §5 (D19,
 D20, D23 and D26; D28 added); revised 2026-11-02 for the desk's per-strategy pre-market report
-(P4), on each strategy's market's calendar: §3, §4, §5 (D28 held for a strategy's own firings);
+(P4), on each strategy's market's calendar: §3, §4, §5 (D28 held for a strategy's own firings); revised
+2026-11-02 for the desk's hardening (the annotation lane and the watchdog): §1, §3;
 §7.2 re-read 2026-11-02 for the dsh 0.2.1-rc.5 upgrade (a role is a preset of its own behind
 the face's blocking tool; a native child reports by notice; the upgrade's own decisions are PLAN
 D19–D27, `DEVELOPMENT.md` §4.8, not this charter's D19–D28) ·
@@ -93,6 +94,7 @@ never orders. The operator trades in their own broker app on what the desk tells
 **What it is not.** Not an automated trading system, not an autonomy ladder, not a hosted or
 multi-user service.
 Nothing starts unattended except a standing order the operator armed in the harness home, with a cap and an expiry, and the watch's annotation of an alert that a level or rule asking for one raised, under a 90 s deadline and the same budget; a standing or annotation turn informs the operator — it never orders, asks, opens a goal or edits what it runs.
+Beside the face's own LaunchAgent a second one runs unattended, the watchdog (`com.gravit.face.watchdog`, every five minutes, no model): it tells the phone when the desk stops answering or degrades and restarts a face that does not answer, once per outage — it informs and restarts, nothing more.
 A research cycle the operator starts runs to
 its verdict inside its strategy directory without further attention; the operator judges it
 afterwards from the journal and the diff.
@@ -195,7 +197,7 @@ shares that `desk/holdings.yml`, the desk's and each strategy's `levels.yml` and
 Markets screen reads them — US shares by its `explore` read every 20 s, A shares by its `quotes`
 read every 10 s — and judged inside each market's own session. An alert goes to the phone from
 the face itself, the plan quoted verbatim and no model in its path, and, when the level or rule
-asks for one, one annotation turn on the desk session follows as a reply; a new 8-K or Form 4 of
+asks for one, one annotation turn follows as a reply, in a fresh desk session of its own so it never waits on the operator's turns; a new 8-K or Form 4 of
 a US name a filing rule covers, read from SEC in the face's own code, alerts the same way. The phone's `/mute` silences the alerts for a while;
 detection and the ledger go on. The face presents saved bot
 settings, actual session configuration, room evidence and child task progress. dsh owns execution, permissions and session history; the face adds no second

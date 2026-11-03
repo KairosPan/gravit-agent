@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import {
   ALERTS_FILE, deskDir, FILINGS_FILE, readEvents, WATCH_LEASE_FILE, writeMute, writeOff, type BudgetState,
 } from "../src/desk.ts";
+import { alertText } from "../src/alert-text.ts";
 import type { DeliverResult, PostResult } from "../src/desk-conversation.ts";
 import type { EdgarFetch } from "../src/edgar.ts";
 import { bjDate } from "../src/et.ts";
@@ -20,8 +21,9 @@ import { HttpError } from "../src/http.ts";
 import { deskCalendars, type DeskCalendars, type MarketCalendar, type MarketSession } from "../src/market-clock.ts";
 import type { MarketQuote, MarketQuoteIdentity, MarketQuotePayload, MarketQuoteSource } from "../src/market-quotes.ts";
 import type { Market } from "../src/symbols.ts";
+import type { AlertHit } from "../src/watch-eval.ts";
 import {
-  installWatch, LEASE_STALE_MS, MARKS_MAX, pidAlive, WATCH_CN_MAX, WATCH_US_MAX, type WatchHandle,
+  cutAt, installWatch, isAnnotatedRecord, LEASE_STALE_MS, MARKS_MAX, pidAlive, WATCH_CN_MAX, WATCH_US_MAX, type WatchHandle,
 } from "../src/watch.ts";
 import { fakeCalendar, WallClock } from "./desk-fakes.ts";
 
@@ -486,6 +488,229 @@ test("a restart over the same ledger fires no second gap and keeps the cooldown 
   assert.equal(second.watch.status().markets.us.today.repeats, 1);
   assert.equal(second.watch.status().pending, 1);
   await second.watch.dispose();
+});
+
+/* ---------- the orphans: a send a restart caught before its delivered record (spec §16 H2) ---------- */
+
+const NVDA_KEY = "level:desk/levels.yml:NVDA:stop:170:cross_down";
+/** An `alert` record decided `send` at `t`, as the watch appends one before it delivers. */
+function orphan(id: string, t: string): Record<string, unknown> {
+  return {
+    t, kind: "alert", id, pass: "p-000000000001", date: "2026-11-30", key: NVDA_KEY, market: "us", symbol: "NVDA", label: "stop",
+    trigger: { type: "level", kind: "stop", price: 170, when: "cross_down" }, gap: false,
+    quote: { market: "us", price: 169.5, asOf: t, feed: "robinhood", status: "live", prevClose: null, chgPct: null, receivedAt: t },
+    holding: null, plan: "plan for NVDA", source: { file: "desk/levels.yml", index: 0 }, decision: "send", annotate: true,
+  };
+}
+/** A harness at 15:20:45Z over a home whose ledger holds `lines`, NVDA priced above its stop so no pass fires. */
+async function overLedger(lines: Record<string, unknown>[], o: Partial<HarnessOpts> = {}): Promise<Harness> {
+  const home = join(TMP, `case-${++cases}`, "home");
+  await mkdir(deskDir(home), { recursive: true });
+  await writeFile(join(deskDir(home), ALERTS_FILE), lines.map((l) => `${JSON.stringify(l)}\n`).join(""));
+  const h = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") }, home, ...o });
+  h.source.tables.us.set("NVDA", us(175, "2026-11-30T15:20:44Z"));
+  return h;
+}
+const deliveredOf = async (h: Harness, id: string): Promise<Record<string, unknown>[]> =>
+  (await h.alertRecords()).filter((r) => r.kind === "delivered" && r.id === id);
+
+test("an orphan younger than ten minutes is delivered once at the first read, recorded replayed, with no annotation post", async () => {
+  const h = await overLedger([orphan("a-young", "2026-11-30T15:16:45.000Z")]);
+  await h.wall.advance(0);
+  await until("the replay's record", async () => (await deliveredOf(h, "a-young")).length === 1);
+  assert.equal(h.sent.length, 1);
+  const [first, ...rest] = h.sent[0].text.split("\n");
+  assert.equal(first, "late: the face restarted before this alert was sent (raised 10:16 ET)");
+  assert.ok(rest[0].startsWith("NVDA 169.5 · ROBINHOOD"), rest[0]);
+  assert.ok(!h.sent[0].text.includes("annotation follows"));
+  const [d] = await deliveredOf(h, "a-young");
+  assert.deepEqual([d.delivery, d.latency, d.replayed], [{ sent: [100] }, { tradeMs: null, receivedMs: null }, true]);
+  await h.wall.advance(20_000);
+  await until("the second poll", () => h.source.calls.length === 2);
+  await h.wall.advance(0);
+  assert.deepEqual(h.posts, [], "no annotation post follows a replay");
+  assert.equal(h.budgetCalls(), 0);
+  assert.deepEqual(h.watch.status().recent.map((r) => [r.id, r.outcome]), [["a-young", "sent"]]);
+  await h.watch.dispose();
+});
+
+test("noteAnnotated appends the lane's annotated record to alerts.jsonl, and a later read takes it back with the rest", async () => {
+  const note = {
+    t: "2026-11-30T15:20:50.000Z", kind: "annotated" as const, pass: "p-000000000001", sessionId: "session-annotation-1",
+    outcome: "ended" as const, sent: [101], text: "Stop met: 169.50 < 170 (ROBINHOOD 10:16:45 ET).",
+  };
+  const h = await overLedger([orphan("a-old", "2026-11-30T14:50:45.000Z")]);
+  await h.wall.advance(0);
+  await until("the orphan's record", async () => (await deliveredOf(h, "a-old")).length === 1);
+  h.watch.noteAnnotated(note);
+  await until("the annotated record", async () => (await h.alertRecords()).some((r) => r.kind === "annotated"));
+  assert.deepEqual((await h.alertRecords()).filter((r) => r.kind === "annotated"), [note], "as reported, one line");
+  assert.deepEqual(h.watch.status().recent.map((r) => r.id), ["a-old"], "the alerts the status lists are unchanged");
+  await h.watch.dispose();
+  assert.equal(isAnnotatedRecord(note), true);
+  assert.equal(isAnnotatedRecord({ ...note, sent: ["101"] }), false, "a message id is a number");
+
+  /* the next face reads the ledger with the annotated line in it: no ledger error, and nothing replayed again */
+  const again = await harness({ start: "2026-11-30T15:21:00Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") }, home: h.home });
+  again.source.tables.us.set("NVDA", us(175, "2026-11-30T15:20:59Z"));
+  await again.wall.advance(0);
+  await until("the first poll", () => again.source.calls.length === 1);
+  assert.equal(again.watch.status().ledgerError, undefined);
+  assert.deepEqual(again.sent, []);
+  await again.watch.dispose();
+});
+
+/* ---------- a reply keeps its alert (spec §16 H1b) ---------- */
+
+const PASS = "p-000000000001";
+/** A delivered record for `id`, its send gone out as the message ids `sent`. */
+const deliveredLine = (id: string, t: string, sent: number[]): Record<string, unknown> =>
+  ({ t, kind: "delivered", id, delivery: { sent }, latency: { tradeMs: 2_000, receivedMs: 1_000 } });
+/** The pass's annotation post, opened, listing `alerts`. */
+const annotationLine = (alerts: string[], t: string): Record<string, unknown> =>
+  ({ t, kind: "annotation", pass: PASS, alerts, result: "opened", sessionId: "session-annotation-1" });
+/** The lane's record of the pass's check, its reply gone out as `sent`. */
+const annotatedLine = (t: string, sent: number[], text: string): Record<string, unknown> =>
+  ({ t, kind: "annotated", pass: PASS, sessionId: "session-annotation-1", outcome: "ended", sent, text });
+/** The watch's ledger once read: the first poll has run. */
+async function read(h: Harness): Promise<void> {
+  await h.wall.advance(0);
+  await until("the first poll", () => h.source.calls.length === 1);
+}
+
+test("a reply to an alert's message carries that alert's text", async () => {
+  const hit = orphan("a-1", "2026-11-30T15:16:45.000Z");
+  const plain = orphan("a-2", "2026-11-30T15:17:45.000Z");
+  const h = await overLedger([
+    hit, deliveredLine("a-1", "2026-11-30T15:16:46.000Z", [555]),
+    { ...plain, pass: "p-000000000002" }, deliveredLine("a-2", "2026-11-30T15:17:46.000Z", [556, 557]),
+    annotationLine(["a-1"], "2026-11-30T15:16:47.000Z"),
+    annotatedLine("2026-11-30T15:17:30.000Z", [560], "Stop met: 169.50 < 170."),
+  ]);
+  await read(h);
+  const now = h.wall.now();
+  assert.equal(h.watch.contextFor(555), `${alertText(hit as unknown as AlertHit, now, "none")}\n\nannotation:\nStop met: 169.50 < 170.`,
+    "the alert, as sent with no note, and its pass's annotation");
+  const unannotated = alertText({ ...plain, pass: "p-000000000002" } as unknown as AlertHit, now, "none");
+  assert.equal(h.watch.contextFor(557), unannotated, "any part of the send, and no annotation when none names its pass");
+  assert.ok(!unannotated.includes("annotation follows"));
+  await h.watch.dispose();
+});
+
+test("a reply to an annotation's message carries its alerts and the annotation", async () => {
+  const one = orphan("a-1", "2026-11-30T15:16:45.000Z");
+  const two = { ...orphan("a-2", "2026-11-30T15:16:45.000Z"), symbol: "AMD", label: "watch" };
+  const h = await overLedger([
+    one, two,
+    deliveredLine("a-1", "2026-11-30T15:16:46.000Z", [555]), deliveredLine("a-2", "2026-11-30T15:16:46.000Z", [556]),
+    annotationLine(["a-1", "a-2"], "2026-11-30T15:16:47.000Z"),
+    annotatedLine("2026-11-30T15:17:30.000Z", [560, 561], "Both met."),
+  ]);
+  await read(h);
+  const now = h.wall.now();
+  const expected = [one, two].map((a) => alertText(a as unknown as AlertHit, now, "none")).join("\n\n") + "\n\nannotation:\nBoth met.";
+  assert.equal(h.watch.contextFor(560), expected);
+  assert.equal(h.watch.contextFor(561), expected, "any part of the reply");
+  h.watch.noteAnnotated({ t: "2026-11-30T15:20:46.000Z", kind: "annotated", pass: PASS, sessionId: "s2", outcome: "ended", sent: [600], text: "x".repeat(5_000) });
+  const long = h.watch.contextFor(600);
+  assert.equal(long?.length, 4_000, "cut at 4,000 characters");
+  assert.ok(long?.startsWith(expected.slice(0, expected.indexOf("annotation:"))), long?.slice(0, 80));
+  await h.watch.dispose();
+});
+
+test("a reply to a message the watch does not know carries nothing", async () => {
+  const h = await overLedger([
+    /* older than the watch's memory: let go at the first read */
+    orphan("a-old", "2026-11-28T15:00:00.000Z"), deliveredLine("a-old", "2026-11-28T15:00:01.000Z", [400]),
+    orphan("a-1", "2026-11-30T15:16:45.000Z"), deliveredLine("a-1", "2026-11-30T15:16:46.000Z", [555]),
+  ]);
+  await read(h);
+  assert.equal(h.watch.contextFor(999), undefined, "no record sent it");
+  assert.equal(h.watch.contextFor(400), undefined, "past the 48 hours the watch keeps");
+  assert.ok(h.watch.contextFor(555) !== undefined);
+  await h.watch.dispose();
+});
+
+test("a malformed ledger line costs only its own context: the reply resolves from the good records, or carries nothing", async () => {
+  const good = orphan("a-1", "2026-11-30T15:16:45.000Z");
+  /* passes the rebuild's check, but alertText cannot read it: no trigger, no quote */
+  const { trigger: _t, quote: _q, ...bad } = orphan("a-bad", "2026-11-30T15:17:45.000Z");
+  const h = await overLedger([
+    good, deliveredLine("a-1", "2026-11-30T15:16:46.000Z", [555]),
+    bad, deliveredLine("a-bad", "2026-11-30T15:17:46.000Z", [556]),
+    /* newer, and sent as 555 as well: tried first, skipped */
+    deliveredLine("a-bad", "2026-11-30T15:18:46.000Z", [555]),
+    { t: "2026-11-30T15:18:47.000Z", kind: "delivered", id: "a-1", delivery: { sent: "555" }, latency: {} },
+    annotationLine(["a-1", "a-bad"], "2026-11-30T15:18:48.000Z"),
+    annotatedLine("2026-11-30T15:19:30.000Z", [560], "One met."),
+  ]);
+  await read(h);
+  const now = h.wall.now();
+  const goodText = alertText(good as unknown as AlertHit, now, "none");
+  assert.equal(h.watch.contextFor(555), `${goodText}\n\nannotation:\nOne met.`, "the good alert's send");
+  assert.equal(h.watch.contextFor(556), undefined, "the bad alert's own send carries nothing, and does not throw");
+  assert.equal(h.watch.contextFor(560), `${goodText}\n\nannotation:\nOne met.`, "the annotation names the good alert alone");
+  await h.watch.dispose();
+});
+
+test("the context's cut never splits a surrogate pair", () => {
+  assert.equal(cutAt("abc", 4_000), "abc");
+  assert.equal(cutAt("ab😀", 3), "ab", "the pair at the edge goes whole");
+  assert.equal(cutAt("ab😀c", 4), "ab😀");
+  assert.equal(cutAt("abcd", 3), "abc");
+});
+
+test("an orphan older than ten minutes is one line and a delivered record 'lost to a restart'", async () => {
+  const h = await overLedger([orphan("a-old", "2026-11-30T14:50:45.000Z"), orphan("a-young", "2026-11-30T15:15:45.000Z")]);
+  await h.wall.advance(0);
+  await until("both records", async () => (await deliveredOf(h, "a-old")).length === 1 && (await deliveredOf(h, "a-young")).length === 1);
+  assert.equal(h.sent.length, 2);
+  assert.ok(h.sent[0].text.startsWith("late: the face restarted before this alert was sent (raised 10:15 ET)"), "the replay first");
+  assert.equal(h.sent[1].text, "1 alert raised before a restart was never sent: NVDA stop 09:50 ET");
+  const [d] = await deliveredOf(h, "a-old");
+  assert.deepEqual(d.delivery, { undelivered: "lost to a restart" });
+  assert.equal(d.replayed, undefined);
+  assert.deepEqual(h.watch.status().recent.map((r) => [r.id, r.outcome]), [["a-young", "sent"], ["a-old", "undelivered"]]);
+  await h.watch.dispose();
+});
+
+test("a replay while OFF is in force records deliver's answer and sends nothing else", async () => {
+  const h = await overLedger([orphan("a-young", "2026-11-30T15:16:45.000Z")], { deliver: () => ({ undelivered: "paused" }) });
+  await writeOff(h.home, { by: "terminal" }, () => h.wall.now());
+  await h.wall.advance(0);
+  await until("the replay's record", async () => (await deliveredOf(h, "a-young")).length === 1);
+  const [d] = await deliveredOf(h, "a-young");
+  assert.deepEqual([d.delivery, d.replayed], [{ undelivered: "paused" }, true]);
+  await h.wall.advance(20_000);
+  await until("the second poll", () => h.source.calls.length === 2);
+  await h.wall.advance(0);
+  assert.equal(h.sent.length, 1, "the held replay is the only text");
+  assert.deepEqual(h.posts, []);
+  await h.watch.dispose();
+});
+
+test("a later ledger read in the same run replays nothing", async () => {
+  const h = await overLedger([orphan("a-young", "2026-11-30T15:16:45.000Z"), orphan("a-old", "2026-11-30T14:50:45.000Z")]);
+  await h.wall.advance(0);
+  await until("both records", async () => (await deliveredOf(h, "a-old")).length === 1 && (await deliveredOf(h, "a-young")).length === 1);
+  for (let i = 2; i <= 4; i++) {
+    await h.wall.advance(20_000);
+    await until(`poll ${i}`, () => h.source.calls.length === i);
+  }
+  await h.wall.advance(0);
+  assert.equal(h.sent.length, 2);
+  assert.equal((await h.alertRecords()).filter((r) => r.kind === "delivered").length, 2);
+  await h.watch.dispose();
+
+  /* a restart over the same ledger: each orphan now has its delivered record */
+  const again = await harness({ start: "2026-11-30T15:22:45Z", home: h.home, root: h.root, pid: 4343 });
+  again.source.tables.us.set("NVDA", us(175, "2026-11-30T15:22:44Z"));
+  await again.wall.advance(0);
+  await until("the first poll", () => again.source.calls.length === 1);
+  await again.wall.advance(0);
+  assert.equal(again.sent.length, 0);
+  assert.equal((await again.alertRecords()).filter((r) => r.kind === "delivered").length, 2);
+  await again.watch.dispose();
 });
 
 /* ---------- the lease ---------- */

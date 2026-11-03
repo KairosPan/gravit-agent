@@ -3,7 +3,8 @@
  * §5.3, §5.8; the plan's Global Constraints, docs/superpowers/plans/2026-10-20-desk-p1-bridge.md).
  *
  * ONE OWNER. Whatever reaches the desk session from the face goes through here: the phone's texts (the
- * Telegram bridge posts them, and is the outlet their answers go to) and, in P3, the watch's alerts. It exists
+ * Telegram bridge posts them, and is the outlet their answers go to). The watch's alert annotations do not: they run
+ * in desk agents of their own (src/annotator.ts, spec §16 H1), and only their replies leave through here. It exists
  * whenever the desk is on, Telegram or not - src/desk.ts `installDesk` creates it and calls {@link
  * DeskConversation.start} - because what it does for a turn does not depend on who opened it: a turn the
  * operator opens in the browser gets the same deadline, fence check and ledger record as a phone turn.
@@ -25,25 +26,41 @@
  * wake, one delivery through {@link DeskConversation.deliver}: the fence's refusal line for a refused turn; else
  * its final text - with `(cut off: <what cut it>)` after it when a cut interrupted the answer mid-stream - or,
  * when it said nothing, the timed-out line for a turn the deadline cut and the failed line for one that ended
- * on an error - an alert's annotation having its own lines, and one for a check that ended with no text
- * (P3-15). A browser turn's answer stays in its transcript. Records keep turn order and so do deliveries, each
+ * on an error. An alert's turn - one the boot woke from a session an older face left queued - is answered the same
+ * way, with no reply to its alert; the annotation lane has its own lines (src/annotator.ts). A browser turn's answer
+ * stays in its transcript. Records keep turn order and so do deliveries, each
  * delivery after its own record and none waiting on an outlet more than a minute; nothing at a turn's end can
  * reject - a send that fails is one line.
  *
- * ANNOTATIONS (P3). An alert's post with `replyTo` keeps it under the alert's id - the newest 50, until that
- * alert's turn ends - and that turn is answered as a reply to the alert's message, whatever it ends in. An alert
- * id whose message another turn claims (a wake or browser turn under way takes it as its own input) stays in the
- * map until the fifty newer ones evict it, and its annotation goes without a reply.
+ * ONE TEXT, ONE MESSAGE (spec §16 H3). A post with a `key` - the bridge's `telegram:<update_id>` - is a message whose
+ * id is that key (dsh-llm's `freezeMessage`, `createUserMessage` taking no id of a caller's), and is sent once: a
+ * key already in the desk session's log, or waiting on either of its inbox's lists, opens nothing and answers
+ * `duplicate`. The log is read once per session - flushed, then read to its end - and kept current from then on by
+ * the root bus's `user/message` events and by the conversation's own sends. A keyed post answers `opened` only once
+ * the persistence's `flush` has settled, so the bridge stores its offset past a text the session holds on disk: a
+ * crash before that leaves the update for Telegram to deliver again, and the text delivered again is answered once.
+ * A face with no session persistence refuses a keyed post. A post with no key is built and sent as before.
  *
  * DELIVERY (rulings P2-7, P2-19). Everything the desk sends leaves through {@link DeskConversation.deliver} - a
- * turn's answer, and in P2 and P3 a firing's text and an alert. It holds a text back while the pause is in force
- * - read, never lifted, so a delivery writes nothing - and holds it back too when the switch cannot be read; with
- * no outlet it says so; else it is the outlet's answer, a send that fails or keeps the outlet past a minute
- * being one line and an `undelivered` reason.
+ * turn's answer, and in P2 and P3 a firing's text, an alert and an annotation's reply. It holds a text back while
+ * the pause is in force - read, never lifted, so a delivery writes nothing - and holds it back too when the switch
+ * cannot be read; with no outlet it says so; else it is the outlet's answer, a send that fails or keeps the outlet
+ * past a minute being one line and an `undelivered` reason.
+ *
+ * AFTER A RESTART (spec §16 H3). When `start`'s ensure resumed a cold desk session - the face came back up - two things
+ * the restart left are dealt with, and only then. A phone turn it cut - the log's last turn, never ended or closed
+ * `interrupted` by the resume (src/desk-session.ts `cutPhoneTurn`) - is a `desk-turn` cancelled by `restart`, wall time
+ * 0, and one line through {@link DeskConversation.deliver}'s path, so a pause holds it: `a restart cut your message of
+ * <time> before it was answered; send it again`; once per session and turn, a `desk-turn` the ledger already holds for
+ * it doing neither again. Then the phone texts and alerts still queued are woken (src/desk-session.ts
+ * `requeuePending`): a resumed agent sits idle beside its rebuilt inbox - after the instruction-chain fence, as before a
+ * post: a violation is a `desk-refused` event and leaves them queued, as does a check that fails (one line), for the
+ * next post, which the fence refuses first. The log is read before the requeue, so a turn the requeue opens is never
+ * taken for a cut one.
  *
  * A CUT CUTS ONE TURN. The phone's `/stop` ({@link DeskConversation.stop}), like the deadline, cancels the turn
  * under way and only it: the messages queued behind it are kept and answered, each in its own turn
- * (src/desk-session.ts `cancelKeepingQueue`). A shutdown keeps nothing.
+ * (src/desk-session.ts `cancelKeepingQueue`). A shutdown keeps the queue too, but wakes nobody: the next boot does.
  *
  * ONE AT A TIME. `start`, `post` and `renew` run in the order they were called, each once the one before has
  * settled: two ensures at once would both find no conversation in the ledger and open two. `stop`,
@@ -59,9 +76,9 @@
  * already held), so a turn under way keeps its deadline, its record and its delivery.
  *
  * SHUTDOWN ({@link DeskConversation.dispose}). Every turn under way, on the conversation and on any it
- * retired, is cancelled as `shutdown`, and its agent gets two seconds to go idle, so the cut turn is
- * recorded; then every supervision ends, a start, post or renew under way gets five seconds to settle, and
- * the records under way are waited for - so nothing the conversation writes lands after the ledger's
+ * retired, is cancelled as `shutdown` - the inbox kept, for the boot's wake - and its agent gets two seconds to go
+ * idle, so the cut turn is recorded; then every supervision ends, a start, post or renew under way gets five seconds
+ * to settle, and the records under way are waited for - so nothing the conversation writes lands after the ledger's
  * `shutdown`, which src/desk.ts appends once this has settled.
  *
  * MODULE WEIGHT. src/desk.ts imports this module, and `npm run desk` and scripts/service.ts import src/desk.ts.
@@ -94,8 +111,8 @@ const defaultClock: DeskClock = {
 const DESK_DEADLINE_MS = 300_000;
 /** The longest a phone's post waits for the desk state before it goes without (the P3 plan's ruling 6). */
 export const STATE_WAIT_MS = 3_500;
-/** The most alert replies kept waiting for their turns' ends; past it the oldest is dropped. */
-const REPLIES_MAX = 50;
+/** The line a phone reply's context opens with, in its own part of the message (spec §16 H1b). */
+const CONTEXT_HEAD = "the message this replies to:";
 /** The longest a delivery waits on the outlet before the next one goes ahead. */
 const DELIVERY_MS = 60_000;
 /** How long {@link DeskConversation.dispose} gives an agent it cancelled to go idle, so the cut turn is recorded. */
@@ -103,8 +120,8 @@ const SHUTDOWN_IDLE_MS = 2_000;
 /** How long {@link DeskConversation.dispose} gives a start, post or renew under way to settle. */
 const SHUTDOWN_QUEUE_MS = 5_000;
 
-/** The sources whose answers go to the outlet: the phone, an alert, a wake. A `user` turn is the operator at the
- * browser, answered in its own transcript. */
+/** The sources whose answers go to the outlet: the phone, an alert (one a resumed session still held), a wake. A
+ * `user` turn is the operator at the browser, answered in its own transcript. */
 const DELIVERED: ReadonlySet<string> = new Set(["telegram", "alert", "wake"]);
 
 /** The journal, repo-relative: what a refused turn names when its record carries no violation (the supervisor
@@ -122,10 +139,10 @@ export interface DeskOutlet {
  * `the pause could not be read: <reason>`, or `the desk could not load: <reason>`. */
 export type DeliverResult = Awaited<ReturnType<DeskOutlet["send"]>> | { undelivered: string };
 
-/** What {@link DeskConversation.post} answers: the turn opened on `sessionId`, or why not, with the line the
- * phone gets. */
+/** What {@link DeskConversation.post} answers: the turn opened on `sessionId` - `duplicate` when its key was already
+ * there, and nothing was sent - or why not, with the line the phone gets. */
 export type PostResult =
-  | { opened: true; sessionId: string }
+  | { opened: true; sessionId: string; duplicate?: true }
   | { refused: "paused"; line: string }
   | { refused: "budget"; line: string }
   | { refused: "fence"; path: string; line: string }
@@ -139,7 +156,7 @@ export type DeskConversationCtxLike = DeskSessionCtxLike & {
 
 /** What {@link createDeskConversation} needs. `session` is src/desk-session.ts's ensure deps, whose `root` and
  * `home` this reads too; `on`, the root bus; `deadlineMs`, every turn's deadline (five minutes by default),
- * which `deadlineFor` may only shorten for a source (P3's alerts); `budget`, the day's token budget, read by
+ * which `deadlineFor` may only shorten for a source; `budget`, the day's token budget, read by
  * each post the pause lets through (src/desk.ts `readBudget` over the standing orders' cap) - no budget, no
  * check; `clock`, the timers and the stamps (the global ones); `log`, where a failure line goes (stderr). */
 export interface DeskConversationDeps {
@@ -155,13 +172,20 @@ export interface DeskConversationDeps {
 /** The desk session's one owner. See the module header; each member's own comment says what it does. */
 export interface DeskConversation {
   /** Ensure the desk session and supervise it, so a turn opened from the browser is supervised before any
-   * post. Never rejects: a failure is one line, and the next post tries again. */
+   * post; when the ensure resumed a cold session, deal with what a restart left in it (the module header's AFTER A
+   * RESTART). Never rejects: a failure is one line, and the next post tries again. */
   start(): Promise<void>;
   /** Open a turn: `text` after the provenance line for `source`, sent with `message` as its source - or the
-   * reason it was not, as {@link PostResult}. An alert's post (`message.kind` `alert`) with `replyTo` has its
-   * turn answered as a reply to that message; a phone's (`source.kind` `telegram`) carries the desk state
-   * ahead of it when one is ready and nothing is under way. Never rejects. */
-  post(input: { text: string; source: DeskSource; message: { kind: string } & Record<string, unknown>; replyTo?: number }): Promise<PostResult>;
+   * reason it was not, as {@link PostResult}. `replyTo` is the annotation lane's (src/annotator.ts, which shares this
+   * signature): the conversation answers no turn as a reply. A phone's (`source.kind` `telegram`) carries the desk state
+   * ahead of it when one is ready and nothing is under way. With `key`, the message's id is the key, a key the
+   * session already holds answers `duplicate`, and the post answers once the session's log is flushed (the module
+   * header's ONE TEXT, ONE MESSAGE). With `context` - the bridge's, for a phone reply to an alert or its annotation
+   * (spec §16 H1b, src/watch.ts `contextFor`) - the message is three text parts: the provenance line, the context
+   * headed `the message this replies to:`, then `text`. Never rejects. */
+  post(input: {
+    text: string; source: DeskSource; message: { kind: string } & Record<string, unknown>; replyTo?: number; key?: string; context?: string;
+  }): Promise<PostResult>;
   /** Open another desk conversation (the phone's `/new`), recorded as `new`, and supervise it; resolves its id.
    * Rejects when the ensure does, and when the conversation is disposed before or while it runs. */
   renew(): Promise<{ sessionId: string }>;
@@ -174,7 +198,7 @@ export interface DeskConversation {
    * pause past its `until` is not; the switch is read, never lifted, and a switch that cannot be read holds the
    * text back too, with one line), `telegram not configured` with no outlet, `send failed: <reason>` with one line
    * when the send throws or rejects, and, with one line, an outlet that has not answered in a minute. The way
-   * every desk text leaves the face - each turn's answer, a firing's, an alert. Never rejects. */
+   * every desk text leaves the face - each turn's answer, a firing's, an alert, an annotation's. Never rejects. */
   deliver(text: string, opts?: { replyTo?: number }): Promise<DeliverResult>;
   /** Where answers go from now on: read at each delivery, so `undefined` stops them while records go on. */
   setOutlet(outlet: DeskOutlet | undefined): void;
@@ -192,11 +216,14 @@ export interface DeskConversation {
 
 /* ---------- what a conversation loads on first use ---------- */
 
-/** src/desk.ts, src/desk-session.ts and dsh-llm's `createUserMessage`, as a conversation uses them. */
+/** src/desk.ts, src/desk-session.ts and dsh-llm's `createUserMessage`, `freezeMessage` and `MessageId`, as a
+ * conversation uses them. */
 interface Machinery {
   desk: typeof import("./desk.ts");
   session: typeof import("./desk-session.ts");
   createUserMessage: (typeof import("@deepseek-ai/dsh-llm"))["createUserMessage"];
+  freezeMessage: (typeof import("@deepseek-ai/dsh-llm"))["freezeMessage"];
+  MessageId: (typeof import("@deepseek-ai/dsh-llm"))["MessageId"];
 }
 
 let machinery: Promise<Machinery> | undefined;
@@ -204,22 +231,26 @@ let machinery: Promise<Machinery> | undefined;
 /** The machinery, imported on the first call and shared after it (see the module header's MODULE WEIGHT). */
 function loadMachinery(): Promise<Machinery> {
   machinery ??= Promise.all([import("./desk.ts"), import("./desk-session.ts"), import("@deepseek-ai/dsh-llm")])
-    .then(([desk, session, llm]) => ({ desk, session, createUserMessage: llm.createUserMessage }));
+    .then(([desk, session, llm]) => ({
+      desk, session, createUserMessage: llm.createUserMessage, freezeMessage: llm.freezeMessage, MessageId: llm.MessageId,
+    }));
   return machinery;
 }
 
 /* ---------- the lines ---------- */
 
-/** The phone's line for a post the pause refused, each time as the desk shows one (src/desk.ts `deskTime`). */
-function pausedLine(state: OffState, now: Date, deskTime: Machinery["desk"]["deskTime"]): string {
+/** The phone's line for a post the pause refused, each time as the desk shows one (src/desk.ts `deskTime`) - the
+ * conversation's and the annotation lane's (src/annotator.ts). */
+export function pausedLine(state: OffState, now: Date, deskTime: (at: Date, now: Date) => string): string {
   const until = state.until === undefined ? "" : ` until ${deskTime(new Date(state.until), now)}`;
   return `paused since ${deskTime(new Date(state.setAt), now)} by ${state.by}${until}; a terminal resumes it: npm run desk -- resume`;
 }
 
-/** The phone's line for a turn its deadline cut before it said anything, the deadline as desk-session.ts's
- * `formatDuration` spells it - the default `5 min`, a firing's alike. */
-function timedOutLine(deadlineMs: number, m: Machinery): string {
-  return `timed out after ${m.session.formatDuration(deadlineMs)}; a card or a long tool was pending`;
+/** The phone's line for a turn its deadline cut before it said anything, the deadline as `format` spells it -
+ * desk-session.ts's `formatDuration`: the default `5 min`, an annotation's `90 s` - the conversation's and the
+ * annotation lane's (src/annotator.ts). */
+export function timedOutLine(deadlineMs: number, format: (ms: number) => string): string {
+  return `timed out after ${format(deadlineMs)}; a card or a long tool was pending`;
 }
 
 /** The phone's line for a turn that ended on an error before it said anything. */
@@ -228,30 +259,19 @@ const notAnsweredLine = (error: string): string => `the desk could not answer: $
 /** What a post refuses as once the conversation is disposed. */
 const SHUT_DOWN = "the desk is shut down";
 const notOpenedLine = (reason: string): string => `the desk could not open a turn: ${reason}`;
-
-/** The phone's line for an alert's annotation whose model call failed before it said anything. */
-const notAnnotatedLine = (error: string): string => `the desk could not annotate this alert: ${error}`;
-/** The phone's line for an alert's annotation that ended, or was cancelled, before it said anything. */
-const NO_CHECK = "the desk's check of this alert ended with no text";
+/** Why a keyed post refuses on a face with no session persistence. */
+const NO_PERSISTENCE = "this face has no session persistence, so a phone text cannot be checked against the desk session's log";
 
 /** What a turn's end sends: the refusal line for a refused turn; else its final text - with a line naming the cut
  * when a cut interrupted it mid-stream; else why it said nothing - cut by its deadline, or failed - and `""`,
  * nothing to send, for one that just ended on a tool or was cancelled before it said anything (the phone's `/stop`
- * is answered by the bridge, a shutdown by nobody). An alert's turn has its own lines for a failure and for no text
- * at all (P3-15): the operator has the alert, and is told its check came to nothing. */
+ * is answered by the bridge, a shutdown by nobody). */
 function replyOf(r: DeskTurnRecord, m: Machinery): string {
   if (r.outcome === "refused") return m.session.fenceRefusalLine(r.violation ?? JOURNAL);
   if (r.finalText !== "") return r.interrupted === true ? `${r.finalText}\n${m.session.cutOffLine(r)}` : r.finalText;
-  if (r.outcome === "timed-out") return timedOutLine(r.deadlineMs, m);
-  const alert = r.source === "alert";
-  if (r.outcome === "failed") return alert ? notAnnotatedLine(r.error ?? "error") : notAnsweredLine(r.error ?? "error");
-  return alert ? NO_CHECK : "";
-}
-
-/** The alert id a turn was opened for: its naming message's `alert`, when that message is an alert's. */
-function alertOf(r: DeskTurnRecord): string | undefined {
-  const alert = r.message?.kind === "alert" ? r.message.alert : undefined;
-  return typeof alert === "string" ? alert : undefined;
+  if (r.outcome === "timed-out") return timedOutLine(r.deadlineMs, m.session.formatDuration);
+  if (r.outcome === "failed") return notAnsweredLine(r.error ?? "error");
+  return "";
 }
 
 /* ---------- agents at rest ---------- */
@@ -259,8 +279,22 @@ function alertOf(r: DeskTurnRecord): string | undefined {
 /** dsh-agent's `Agent.inject`, which the structural {@link AgentLike} leaves out: context queued for the next
  * pre-step without waking the driver, so the followup that wakes it claims both. */
 type Injecting = { inject?: (message: MessageLike) => void };
-/** dsh-agent's `Agent.inbox`, the one call the desk state needs: removing a pending message, from either list, by id. */
-type InboxAware = { inbox?: { remove(id: string): boolean } };
+/** dsh-agent's `Agent.inbox`, the calls the desk needs: its two lists - the next turn's and the next step's - and
+ * removing a pending message, from either list, by id. */
+type InboxAware = { inbox?: { readonly nextTurn?: readonly MessageLike[]; readonly nextStep?: readonly MessageLike[]; remove(id: string): boolean } };
+
+/** Whether `agent`'s inbox holds a message with id `id` on either list. */
+function waiting(agent: AgentLike, id: string): boolean {
+  const inbox = (agent as AgentLike & InboxAware).inbox;
+  return [...(inbox?.nextTurn ?? []), ...(inbox?.nextStep ?? [])].some((message) => message.id === id);
+}
+
+/** The id of the message a `user/message` event logs, when it has one. */
+function loggedId(event: EventLike): string | undefined {
+  if (event.type !== "user/message" || event.data === null || typeof event.data !== "object") return undefined;
+  const id = (event.data as { id?: unknown }).id;
+  return typeof id === "string" ? id : undefined;
+}
 
 /** dsh-agent's `Agent.whenIdle`, which the structural {@link AgentLike} leaves out: it resolves once the
  * agent's driver has retired - after the turn it was running, every turn its inbox held, and any maintenance
@@ -311,7 +345,7 @@ type OutletResult = Awaited<ReturnType<DeskOutlet["send"]>>;
 
 /**
  * The desk session's one owner. Nothing runs until a member is called: src/desk.ts `installDesk` calls
- * {@link DeskConversation.start} at once, without awaiting it.
+ * {@link DeskConversation.start} once the Telegram bridge has set the outlet, without awaiting it.
  * @param deps - see {@link DeskConversationDeps}.
  */
 export function createDeskConversation(deps: DeskConversationDeps): DeskConversation {
@@ -323,14 +357,16 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
 
   let outlet: DeskOutlet | undefined;
   let stateOf: (() => Promise<string | undefined>) | undefined;
-  /** Each alert's message to reply to, by the alert's id, oldest first: kept from its post to its turn's end. */
-  const replies = new Map<string, number>();
   /** The conversation supervised now. */
   let current: Watch | undefined;
   /** Conversations a renew left with work under way, each supervised until its agent is idle. */
   const retiring = new Set<Watch>();
   let disposed = false;
   let disposing: Promise<void> | undefined;
+  /** Each desk session's message ids, by session id: its log's, read once, and every `user/message` since. */
+  const seen = new Map<string, { ids: Set<string>; loaded?: Promise<void> }>();
+  /** The bus listener that keeps {@link seen} current, from the first keyed post to dispose. */
+  let unhear: (() => void) | undefined;
   const watches = (): Watch[] => [...(current === undefined ? [] : [current]), ...retiring];
 
   /** How `p` settled within `ms` on the clock. Never rejects; a `p` left late is still handled when it
@@ -403,11 +439,11 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
 
   /** A turn's end, delivered: its reply ({@link replyOf}) through {@link sendOut}, for a source the outlet
    * answers. */
-  const deliverTurn = async (r: DeskTurnRecord, replyTo: number | undefined, m: Machinery): Promise<void> => {
+  const deliverTurn = async (r: DeskTurnRecord, m: Machinery): Promise<void> => {
     if (!DELIVERED.has(r.source)) return;
     const text = replyOf(r, m);
     if (text === "") return; // it ended on a tool: there is nothing to say
-    await sendOut(text, replyTo === undefined ? undefined : { replyTo },
+    await sendOut(text, undefined,
       `${BIN}: desk: the reply to turn ${r.turn} on desk session ${r.sessionId} could not be sent`, "; the next reply goes ahead");
   };
 
@@ -415,15 +451,11 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
    * rejection is a process exit in the face (main.ts `installFailLoud`). */
   const turnEnded = (r: DeskTurnRecord, m: Machinery): void => {
     const where = `turn ${r.turn} on desk session ${r.sessionId}`;
-    /* an alert's reply is taken at its turn's end: forgotten whatever the delivery does */
-    const alert = alertOf(r);
-    const replyTo = alert === undefined ? undefined : replies.get(alert);
-    if (alert !== undefined) replies.delete(alert);
     const recorded = recording.then(() => record(r, m)).catch((err: unknown) => {
       log(`${BIN}: desk: ${where} could not be recorded: ${errText(err)}`);
     });
     recording = recorded;
-    delivering = delivering.then(() => recorded).then(() => deliverTurn(r, replyTo, m)).catch((err: unknown) => {
+    delivering = delivering.then(() => recorded).then(() => deliverTurn(r, m)).catch((err: unknown) => {
       log(`${BIN}: desk: ${where} could not be delivered: ${errText(err)}`);
     });
   };
@@ -473,25 +505,118 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     else retire(old);
   };
 
-  /** The desk session, ensured, and supervised unless the conversation is disposed by then. */
-  const ensure = async (fresh: boolean): Promise<{ agent: AgentLike; sessionId: string }> => {
+  /** The desk session, ensured, and supervised unless the conversation is disposed by then; `resumed` when the ensure
+   * resumed a cold one. */
+  const ensure = async (fresh: boolean): Promise<{ agent: AgentLike; sessionId: string; resumed?: true }> => {
     const m = await loadMachinery();
-    const { agent, sessionId } = await m.session.ensureDeskSession(deps.session, fresh ? { fresh: true } : {});
+    const { agent, sessionId, resumed } = await m.session.ensureDeskSession(deps.session, fresh ? { fresh: true } : {});
     if (!disposed) watch(sessionId, agent, m);
-    return { agent, sessionId };
+    return { agent, sessionId, ...(resumed === undefined ? {} : { resumed }) };
   };
 
-  /** Cancel `w`'s work under way with `cause`; whether the cancel went through. `keep`, the phone's stop: only the
-   * turn under way, the messages queued behind it kept and answered (src/desk-session.ts `cancelKeepingQueue`);
-   * without it, a shutdown: the inbox goes too. */
+  /** What a restart left in the desk session `sessionId`, just resumed as `agent` (the module header's AFTER A
+   * RESTART): the phone turn it cut, recorded and answered once, then the texts and alerts still queued, woken. Never
+   * rejects. */
+  const afterRestart = async (agent: AgentLike, sessionId: string, m: Machinery): Promise<void> => {
+    /* the log as the restart left it, read before anything is woken: a turn the requeue opens is no cut */
+    let cut: { turn: number; at: string } | undefined;
+    try {
+      await deps.session.ctx.sessionPersistence?.flush();
+      cut = m.session.cutPhoneTurn(await m.session.readSessionEvents(deps.session.ctx, sessionId));
+    } catch (err) {
+      log(`${BIN}: desk: desk session ${sessionId}'s log could not be read (${errText(err)}); a phone turn a restart cut there goes unanswered`);
+    }
+    if (cut !== undefined) await answerCut(sessionId, cut, m);
+    /* the fence first, as before a post: a woken text opens a turn at once, before that turn's own check has run */
+    let violation: string | undefined;
+    try {
+      violation = await m.session.findDeskFenceViolation(root);
+    } catch (err) {
+      log(`${BIN}: desk: the fence check before waking what desk session ${sessionId} still had queued failed (${errText(err)}); it stays queued`);
+      return;
+    }
+    if (violation !== undefined) {
+      await m.desk.appendEvent(home, { t: stamp(), kind: "desk-refused", reason: "fence", path: violation }, { log });
+      return;
+    }
+    m.session.requeuePending(agent, log);
+  };
+
+  /** A phone turn a restart cut: a `desk-turn` cancelled by `restart`, then its line through {@link sendOut} after the
+   * deliveries already under way - once per session and turn, the ledger saying whether it was done. Never rejects. */
+  const answerCut = async (sessionId: string, cut: { turn: number; at: string }, m: Machinery): Promise<void> => {
+    const where = `turn ${cut.turn} on desk session ${sessionId}`;
+    try {
+      const { events } = await m.desk.readEvents(home);
+      if (events.some((e) => e.kind === "desk-turn" && e.sessionId === sessionId && e.turn === cut.turn)) return;
+    } catch (err) {
+      log(`${BIN}: desk: the ledger could not be read for ${where}, which a restart cut (${errText(err)}); it goes unanswered`);
+      return;
+    }
+    await m.desk.appendEvent(home, {
+      t: stamp(), kind: "desk-turn", sessionId, source: "telegram", turn: cut.turn, outcome: "cancelled", wallMs: 0, cancel: "restart",
+    }, { log });
+    const now = new Date(clock.now());
+    const line = m.session.cutPhoneTurnLine(new Date(cut.at), now);
+    delivering = delivering.then(async () => {
+      await sendOut(line, undefined, `${BIN}: desk: the line for ${where}, which a restart cut, could not be sent`, "; the next reply goes ahead");
+    }).catch((err: unknown) => {
+      log(`${BIN}: desk: the line for ${where}, which a restart cut, could not be delivered: ${errText(err)}`);
+    });
+  };
+
+  /** Cancel `w`'s work under way with `cause`; whether the cancel went through. With `keep`, the phone's stop and the
+   * deadline: only the turn under way, the messages queued behind it kept and answered (src/desk-session.ts
+   * `cancelKeepingQueue`); without it, a shutdown: the inbox is kept too, but nobody is woken - a shutdown wants the
+   * agent idle, and the boot's wake (`requeuePending`) answers what waits there (spec §16 H3, R93). */
   const cancel = (w: Watch, cause: { kind: "hook"; reason: string }, keep?: Machinery): boolean => {
     try {
-      if (keep === undefined) w.agent.cancel(cause);
+      if (keep === undefined) w.agent.cancel(cause, { keepInbox: true });
       else keep.session.cancelKeepingQueue(w.agent, cause, log);
       return true;
     } catch (err) {
       log(`${BIN}: desk: the turn on desk session ${w.sessionId} could not be cancelled: ${errText(err)}`);
       return false;
+    }
+  };
+
+  /** The message ids session `sessionId` holds - its log's, flushed and read on the first call for it, and those
+   * logged since. The bus is heard before the log is read, so nothing logged between the two is missed; a read
+   * that rejects is tried again by the next call. */
+  const seenIn = async (sessionId: string, m: Machinery): Promise<Set<string>> => {
+    const persistence = deps.session.ctx.sessionPersistence;
+    if (persistence === undefined) throw new Error(NO_PERSISTENCE);
+    unhear ??= deps.on("session/event", (session, event) => {
+      const id = loggedId(event);
+      if (id !== undefined) seen.get(session.id)?.ids.add(id);
+    });
+    let entry = seen.get(sessionId);
+    if (entry === undefined) {
+      entry = { ids: new Set() };
+      seen.set(sessionId, entry);
+    }
+    const state = entry;
+    state.loaded ??= (async () => {
+      await persistence.flush();
+      for (const event of await m.session.readSessionEvents(deps.session.ctx, sessionId)) {
+        const id = loggedId(event);
+        if (id !== undefined) state.ids.add(id);
+      }
+    })().catch((err: unknown) => {
+      state.loaded = undefined;
+      throw err;
+    });
+    await state.loaded;
+    return state.ids;
+  };
+
+  /** The session logs made durable before a keyed post answers. A flush that fails is one line, and the post still
+   * answers: its message is in the session, and its turn will answer unless the face goes down first. */
+  const flushed = async (): Promise<void> => {
+    try {
+      await deps.session.ctx.sessionPersistence?.flush();
+    } catch (err) {
+      log(`${BIN}: desk: the desk session's log could not be flushed (${errText(err)}); a crash before the next flush may lose this text`);
     }
   };
 
@@ -549,17 +674,6 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     }
   };
 
-  /** Keep `replyTo` for `alert`'s turn, the newest last; past {@link REPLIES_MAX}, the oldest goes. */
-  const remember = (alert: string, replyTo: number): void => {
-    replies.delete(alert);
-    replies.set(alert, replyTo);
-    while (replies.size > REPLIES_MAX) {
-      const oldest = replies.keys().next().value;
-      if (oldest === undefined) break;
-      replies.delete(oldest);
-    }
-  };
-
   /** The desk state for a phone's post, or `undefined`: none asked for, none given, or - with one line - a provider
    * that threw or had not answered in {@link STATE_WAIT_MS}. Never rejects. */
   const deskState = async (): Promise<string | undefined> => {
@@ -584,11 +698,14 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     start() {
       return serially(async () => {
         if (disposed) return;
+        let opened: Awaited<ReturnType<typeof ensure>>;
         try {
-          await ensure(false);
+          opened = await ensure(false);
         } catch (err) {
           log(`${BIN}: desk: the desk session could not be opened: ${errText(err)}; the next message tries again`);
+          return;
         }
+        if (opened.resumed === true && !disposed) await afterRestart(opened.agent, opened.sessionId, await loadMachinery());
       });
     },
 
@@ -609,15 +726,31 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
           if (disposed) return shutDown();
           const { agent, sessionId } = await ensure(false);
           if (disposed) return shutDown();
+          const key = input.key;
+          const ids = key === undefined ? undefined : await seenIn(sessionId, m);
+          if (key !== undefined && (ids?.has(key) === true || waiting(agent, key))) {
+            await flushed();
+            return { opened: true, sessionId, duplicate: true };
+          }
+          if (disposed) return shutDown();
           const state = input.source.kind === "telegram" ? await deskState() : undefined;
           /* the state only on an idle desk: a text queued behind a turn would find it stale, or claimed by that turn */
           const inject = state !== undefined && !(await busy(agent)) ? (agent as AgentLike & Injecting).inject : undefined;
           if (disposed) return shutDown();
           const now = new Date(clock.now());
-          const text = `${m.session.provenanceLine(input.source, now)}\n${input.text}`;
-          const message = m.createUserMessage({ content: [{ type: "text", text }], source: input.message as MessageSource });
-          const alert = input.message.kind === "alert" && typeof input.message.alert === "string" ? input.message.alert : undefined;
-          if (alert !== undefined && input.replyTo !== undefined) remember(alert, input.replyTo);
+          const provenance = m.session.provenanceLine(input.source, now);
+          /* a reply's context is its own part, between the provenance line and the operator's text (spec §16 H1b) */
+          const content = input.context === undefined
+            ? [{ type: "text" as const, text: `${provenance}\n${input.text}` }]
+            : [
+              { type: "text" as const, text: provenance },
+              { type: "text" as const, text: `${CONTEXT_HEAD}\n${input.context}` },
+              { type: "text" as const, text: input.text },
+            ];
+          const source = input.message as MessageSource;
+          const message = key === undefined
+            ? m.createUserMessage({ content, source })
+            : m.freezeMessage({ id: m.MessageId(key), role: "user" as const, content, source });
           /* one synchronous step: the state, then the message it is context for. `busy` read the desk idle a
            * macrotask ago; a wake or a browser turn may have started since, and the state would splice into it
            * (spike 4), so the status is read again here, with nothing awaited before the followup. */
@@ -636,9 +769,12 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
           try {
             agent.followup(message as unknown as MessageLike);
           } catch (err) {
-            if (alert !== undefined) replies.delete(alert);
             if (injected !== undefined) withdraw(agent, injected);
             throw err;
+          }
+          if (key !== undefined) {
+            ids?.add(key);
+            await flushed();
           }
           return { opened: true, sessionId };
         } catch (err) {
@@ -686,6 +822,8 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     dispose() {
       disposing ??= (async () => {
         disposed = true;
+        unhear?.();
+        unhear = undefined;
         const all = watches();
         current = undefined;
         retiring.clear();

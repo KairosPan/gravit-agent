@@ -165,9 +165,15 @@ class FakeBotApi {
 
 type PostInput = Parameters<DeskConversation["post"]>[0];
 
-/** The conversation port as the bridge drives it: what was posted, renewed, stopped and set as its outlet. */
+/** The conversation port as the bridge drives it: what was posted, renewed, stopped and set as its outlet. Its
+ * keys play the desk session's log: a keyed post whose key it holds answers `duplicate`; any other is a turn, its
+ * key held from the followup on - before the post settles, as the real conversation's flush comes after it. */
 class FakeConversation {
   readonly posts: PostInput[] = [];
+  /** The keys the session holds; a test fills it with what an earlier run flushed. */
+  readonly held = new Set<string>();
+  /** The texts of the keyed posts that opened a turn, in order. */
+  readonly turns: string[] = [];
   readonly outlets: (DeskOutlet | undefined)[] = [];
   readonly stops: string[] = [];
   renews = 0;
@@ -182,8 +188,13 @@ class FakeConversation {
   renewGate: Promise<void> | undefined;
   readonly post = async (input: PostInput): Promise<PostResult> => {
     this.posts.push(input);
+    const duplicate = input.key !== undefined && this.held.has(input.key);
+    if (input.key !== undefined && !duplicate) {
+      this.held.add(input.key);
+      this.turns.push(input.text);
+    }
     if (this.gate !== undefined) await this.gate;
-    return this.answers.shift() ?? { opened: true, sessionId: "desk-s1" };
+    return this.answers.shift() ?? { opened: true, sessionId: "desk-s1", ...(duplicate ? { duplicate: true as const } : {}) };
   };
   readonly renew = async (): Promise<{ sessionId: string }> => {
     this.renews += 1;
@@ -223,7 +234,9 @@ interface Rig {
  * `secrets`, what the bridge redacts beside the token (none unless given: never this process's environment). */
 async function rig(
   label: string,
-  o: Partial<Omit<Rig, "bridge" | "lines">> & { status?: () => Promise<DeskStatus>; pollTimeoutS?: number; secrets?: readonly string[] } = {},
+  o: Partial<Omit<Rig, "bridge" | "lines">> & {
+    status?: () => Promise<DeskStatus>; pollTimeoutS?: number; secrets?: readonly string[]; contextFor?: (messageId: number) => string | undefined;
+  } = {},
 ): Promise<Rig> {
   const home = o.home ?? await freshHome(label);
   const api = o.api ?? new FakeBotApi();
@@ -233,6 +246,7 @@ async function rig(
   const bridge = installTelegramBridge({
     config: { token: TOKEN, operatorId: OPERATOR, apiBase: API, fetch: api.fetch, clock, ...(o.pollTimeoutS === undefined ? {} : { pollTimeoutS: o.pollTimeoutS }) },
     home, conversation, status: o.status ?? (async () => STATUS), log: (line) => { lines.push(line); }, secrets: o.secrets ?? [],
+    ...(o.contextFor === undefined ? {} : { contextFor: o.contextFor }),
   });
   return { home, api, clock, conversation, lines, bridge };
 }
@@ -317,11 +331,46 @@ test("operator text is posted to the conversation with the telegram source", asy
     r.api.push(text(5, "hi", 7));
     await polled(r, 2);
     assert.deepEqual(r.conversation.posts, [
-      { text: "hi", source: { kind: "telegram", at: NOW }, message: { kind: "telegram", from: OPERATOR, chat: OPERATOR, messageId: 7 } },
-    ]);
+      { text: "hi", source: { kind: "telegram", at: NOW }, message: { kind: "telegram", from: OPERATOR, chat: OPERATOR, messageId: 7 }, key: "telegram:5" },
+    ], "posted under its update's key");
     assert.deepEqual(r.api.sent, [], "an opened turn answers through the outlet, not here");
     assert.deepEqual(r.api.polls()[1], { offset: 6, timeout: 50, allowed_updates: ["message"] }, "the long poll: 50 s, messages only, past the update");
     assert.deepEqual(r.api.polls()[0], { timeout: 50, allowed_updates: ["message"] }, "no offset before the first update");
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("the bridge resolves reply_to_message.message_id through contextFor and posts it as context", async () => {
+  const asked: number[] = [];
+  const r = await rig("reply-context", {
+    contextFor: (id) => {
+      asked.push(id);
+      if (id === 555) return "NVDA 169.82 · ROBINHOOD 10:21:03 ET";
+      if (id === 13) throw new Error("the watch broke");
+      return undefined;
+    },
+  });
+  try {
+    await polled(r, 1);
+    r.api.push(
+      message(5, { text: "why?", message_id: 7, reply_to_message: { message_id: 555, text: "NVDA 169.82" } }),
+      message(6, { text: "and this?", message_id: 8, reply_to_message: { message_id: 999 } }),
+      message(7, { text: "plain", message_id: 9 }),
+      message(8, { text: "odd", message_id: 10, reply_to_message: { message_id: "555" } }),
+      message(9, { text: "broken", message_id: 11, reply_to_message: { message_id: 13 } }),
+    );
+    await polled(r, 2);
+    assert.deepEqual(r.conversation.posts[0], {
+      text: "why?", source: { kind: "telegram", at: NOW }, message: { kind: "telegram", from: OPERATOR, chat: OPERATOR, messageId: 7 }, key: "telegram:5",
+      context: "NVDA 169.82 · ROBINHOOD 10:21:03 ET",
+    }, "the alert's text rides with the reply, under the update's key");
+    assert.deepEqual(r.conversation.posts.slice(1).map((p) => [p.text, p.context]), [["and this?", undefined], ["plain", undefined], ["odd", undefined], ["broken", undefined]],
+      "an unknown message, no reply, a malformed id and a failing lookup carry nothing");
+    assert.ok(r.conversation.posts.slice(1).every((p) => !("context" in p)));
+    assert.deepEqual(asked, [555, 999, 13], "asked only for a numeric id");
+    assert.equal(r.lines.length, 1);
+    assert.match(r.lines[0], /the message update 9 replies to could not be read: the watch broke/);
   } finally {
     await r.bridge.dispose();
   }
@@ -569,46 +618,137 @@ test("a pause that cannot be written and a stop that fails each answer with why"
 
 /* ---------- a desk that is slow to take a message ---------- */
 
-test("a post the desk is slow to take is answered so after 30 s and the offset moves on; a late refusal still gets its line", async () => {
+const SLOW = "the desk is slow to take this; it will answer when it can";
+const PAUSED = "paused since 14:00 ET by terminal; a terminal resumes it: npm run desk -- resume";
+
+test("the offset is stored only after the post is accepted, even when the 30 s slow line went first", async () => {
   const conversation = new FakeConversation();
-  conversation.gate = new Promise(() => {}); // the first post never settles
+  const taken = deferred();
+  conversation.gate = taken.promise;
   const r = await rig("slow-post", { conversation });
   try {
     await polled(r, 1);
-    r.api.push(text(1, "never taken"));
+    r.api.push(text(1, "taken at 45 s"));
     await waitFor("the post's 30 s", () => conversation.posts.length === 1 && r.clock.has(30_000));
+    r.clock.setTimeout(() => { taken.resolve(); }, 45_000); // the desk takes it 45 s in
     r.clock.advance(29_999);
     await new Promise((done) => setTimeout(done, 20));
     assert.deepEqual(r.api.texts(), [], "not before 30 s");
     r.clock.advance(1);
+    await waitFor("the slow line", () => r.api.texts().length === 1);
+    assert.deepEqual(r.api.texts(), [SLOW]);
+    await new Promise((done) => setTimeout(done, 20));
+    assert.equal(existsSync(join(deskDir(r.home), "telegram.offset")), false, "no offset stored while the post is under way");
+    assert.equal(r.api.polls().length, 1, "and no poll past the update");
+    r.clock.advance(15_000);
     await polled(r, 2);
-    assert.deepEqual(r.api.texts(), ["the desk is slow to take this; it will answer when it can"]);
-    assert.equal(await fileText(r.home, "telegram.offset"), "2\n", "the offset moved on");
+    assert.equal(await fileText(r.home, "telegram.offset"), "2\n", "stored once the desk took it");
+    assert.equal(r.api.polls()[1].offset, 2);
 
+    /* a refusal that comes after the slow line still gets its own, and only then is the offset stored */
     const late = deferred();
     conversation.gate = late.promise;
-    conversation.answers.push({ refused: "paused", line: "paused since 14:00 ET by terminal; a terminal resumes it: npm run desk -- resume" });
-    r.api.push(text(2, "taken late"));
+    conversation.answers.push({ refused: "paused", line: PAUSED });
+    r.api.push(text(2, "refused late"));
     await waitFor("the second post's 30 s", () => conversation.posts.length === 2 && r.clock.has(30_000));
     r.clock.advance(30_000);
-    await polled(r, 3);
-    r.api.push(text(3, "/status"));
-    await polled(r, 4);
-    assert.ok(r.api.texts()[2].startsWith("up "), "the bridge goes on while a post is under way");
+    await waitFor("the second slow line", () => r.api.texts().length === 2);
+    assert.equal(await fileText(r.home, "telegram.offset"), "2\n");
     late.resolve();
-    await waitFor("the late refusal's line", () => r.api.texts().length === 4);
-    assert.deepEqual(r.api.texts(), [
-      "the desk is slow to take this; it will answer when it can",
-      "the desk is slow to take this; it will answer when it can",
-      r.api.texts()[2],
-      "paused since 14:00 ET by terminal; a terminal resumes it: npm run desk -- resume",
-    ]);
+    await polled(r, 3);
+    await waitFor("the late refusal's line", () => r.api.texts().length === 3);
+    assert.deepEqual(r.api.texts(), [SLOW, SLOW, PAUSED]);
+    assert.equal(await fileText(r.home, "telegram.offset"), "3\n");
   } finally {
     await r.bridge.dispose();
   }
 });
 
-test("a /new the desk is slow to open is answered so after 30 s, then with the new conversation when it comes", async () => {
+test("a post that never settles holds the offset for 5 min, then the bridge records it, moves on and answers what came behind it", async () => {
+  const conversation = new FakeConversation();
+  conversation.gate = new Promise(() => {}); // a hung ensure, read or flush
+  const r = await rig("unaccepted", { conversation });
+  try {
+    await polled(r, 1);
+    r.api.push(text(1, "never taken"));
+    await waitFor("the post's bounds", () => conversation.posts.length === 1 && r.clock.has(30_000) && r.clock.has(300_000));
+    r.clock.advance(30_000);
+    await waitFor("the slow line", () => r.api.texts().length === 1);
+    assert.deepEqual(r.api.texts(), [SLOW], "the 30 s slow line, unchanged");
+    r.clock.advance(269_999);
+    await new Promise((done) => setTimeout(done, 20));
+    assert.equal(existsSync(join(deskDir(r.home), "telegram.offset")), false, "no offset before 5 min");
+    assert.equal(r.api.polls().length, 1, "and no poll");
+    r.clock.advance(1);
+    await polled(r, 2);
+    assert.equal(await fileText(r.home, "telegram.offset"), "2\n", "past 5 min the offset moves on");
+    const line = "gravit-face: telegram: the desk did not take update 1 in 5 min; the bridge goes on, and the text is answered once if it lands later";
+    assert.deepEqual(r.lines, [line]);
+    assert.deepEqual((await records(r.home)).filter((x) => x.kind === "unaccepted").map(({ t: _t, ...rest }) => rest), [{ kind: "unaccepted", update: 1, waitedMs: 300_000 }]);
+    r.api.push(text(2, "/status"));
+    await polled(r, 3);
+    assert.equal(r.api.texts().length, 2);
+    assert.ok(r.api.texts()[1].startsWith("up "), "a /status sent behind it is answered");
+    assert.equal(await fileText(r.home, "telegram.offset"), "3\n");
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+/* A crash after the conversation followed a text up but before its log was flushed: the bridge never stored the
+ * offset past it, so Telegram delivers it again - under the same key, which the session now holds. */
+test("an update delivered again after a restart is posted with the same key and answered once", async () => {
+  const home = await freshHome("again");
+  const api = new FakeBotApi();
+  const conversation = new FakeConversation();
+  conversation.gate = new Promise(() => {}); // the flush the crash cut: the post never settles
+  const first = await rig("again", { home, api, conversation });
+  await polled(first, 1);
+  api.push(text(5, "once only"));
+  await waitFor("the post under way", () => conversation.posts.length === 1);
+  const disposing = first.bridge.dispose();
+  await waitFor("the dispose's bound", () => first.clock.has(2_000));
+  first.clock.advance(2_000);
+  await disposing;
+  assert.equal(existsSync(join(deskDir(home), "telegram.offset")), false, "the offset never moved past it");
+
+  conversation.gate = undefined;
+  const second = await rig("again", { home, api, conversation });
+  try {
+    await waitFor("the restarted bridge's held poll", () => api.polls().length === 3 && api.pending === 1);
+    assert.deepEqual(conversation.posts.map((p) => [p.key, p.text]), [["telegram:5", "once only"], ["telegram:5", "once only"]], "the same key both times");
+    assert.deepEqual(conversation.turns, ["once only"], "one turn");
+    assert.deepEqual(api.sent, [], "and nothing said on the phone");
+    assert.equal(await fileText(home, "telegram.offset"), "6\n");
+    assert.equal(api.polls()[2].offset, 6);
+  } finally {
+    await second.bridge.dispose();
+  }
+});
+
+/* Review Focus 2: a crash in which only some of a batch's texts were flushed, and Telegram delivers the batch again. */
+test("a batch delivered again is answered once each, in update order", async () => {
+  const home = await freshHome("batch-again");
+  await putFile(home, "telegram.offset", "2\n"); // update 1 was taken and stored
+  const api = new FakeBotApi();
+  api.updates.push(text(1, "one"), text(2, "two"), text(3, "three"), text(4, "four"));
+  const conversation = new FakeConversation();
+  conversation.held.add("telegram:1").add("telegram:2"); // update 2 was flushed too, but its offset never stored
+  const r = await rig("batch-again", { home, api, conversation });
+  try {
+    await polled(r, 2);
+    assert.equal(api.polls()[0].offset, 2);
+    assert.deepEqual(conversation.posts.map((p) => p.key), ["telegram:2", "telegram:3", "telegram:4"], "each posted in update order");
+    assert.deepEqual(conversation.turns, ["three", "four"], "the flushed one answered once, the rest each once, in order");
+    assert.deepEqual(api.sent, []);
+    assert.equal(await fileText(home, "telegram.offset"), "5\n");
+    assert.deepEqual(r.lines, []);
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("a /new the desk is slow to open is answered so after 30 s, then with the new conversation when it comes; only then does the offset move on", async () => {
   const conversation = new FakeConversation();
   const opened = deferred();
   conversation.renewGate = opened.promise;
@@ -618,11 +758,13 @@ test("a /new the desk is slow to open is answered so after 30 s, then with the n
     r.api.push(text(1, "/new"));
     await waitFor("the renew's 30 s", () => conversation.renews === 1 && r.clock.has(30_000));
     r.clock.advance(30_000);
-    await polled(r, 2);
-    assert.deepEqual(r.api.texts(), ["the desk is slow to take this; it will answer when it can"]);
+    await waitFor("the slow line", () => r.api.texts().length === 1);
+    assert.deepEqual(r.api.texts(), [SLOW]);
+    assert.equal(r.api.polls().length, 1, "no poll past it while the renew is under way");
     opened.resolve();
-    await waitFor("the late answer", () => r.api.texts().length === 2);
-    assert.equal(r.api.texts()[1], "a new desk conversation");
+    await polled(r, 2);
+    assert.deepEqual(r.api.texts(), [SLOW, "a new desk conversation"]);
+    assert.equal(await fileText(r.home, "telegram.offset"), "2\n");
   } finally {
     await r.bridge.dispose();
   }

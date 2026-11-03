@@ -124,6 +124,15 @@ class FakeDeskTree {
   gate: Promise<void> | undefined;
   /** When set, every agent made has dsh's inbox and wake ({@link FakeDeskAgent.model}). */
   inboxes = false;
+  /** Each session's durable log as dsh-session-persistence reads it back; a test fills it. */
+  readonly logs = new Map<string, EventLike[]>();
+  /** What was asked of the persistence, in order: `open <id> <access>`, `read <offset>`, `close` and `flush`. */
+  readonly persisted: string[] = [];
+  /** When set, `flush` waits for it. */
+  flushGate: Promise<void> | undefined;
+  /** What a resume finds waiting on a session's next-turn list, as dsh rebuilds it from the inbox's durable splices: a
+   * resumed agent with an inbox starts with these pending. */
+  readonly rebuilt = new Map<string, MessageLike[]>();
 
   readonly install = (_agentCtx: AgentCtxLike, _ref: ModelSelectionRefLike): (() => void) => () => {};
 
@@ -153,6 +162,7 @@ class FakeDeskTree {
         this.resumed.push(options);
         if (!this.stored.has(options.resumeSessionId)) throw new Error(`session "${options.resumeSessionId}" not found`);
         const agent = await this.make(options.resumeSessionId, options.setup);
+        agent.model?.pending.push(...(this.rebuilt.get(options.resumeSessionId) ?? []));
         return { agent, dispose: async () => { this.live.delete(options.resumeSessionId); } };
       },
     },
@@ -160,6 +170,23 @@ class FakeDeskTree {
     permissionPresets: {
       set: (session, name) => { this.stored.set(session.id, name); },
       current: (session) => this.stored.get(session.id) ?? "read-only",
+    },
+    sessionPersistence: {
+      open: async (id, access) => {
+        this.persisted.push(`open ${id} ${access}`);
+        const log = this.logs.get(id) ?? [];
+        return {
+          read: async (offset = 0, length = log.length) => {
+            this.persisted.push(`read ${offset}`);
+            return { events: log.slice(offset, offset + length) };
+          },
+          [Symbol.asyncDispose]: async () => { this.persisted.push("close"); },
+        };
+      },
+      flush: async () => {
+        this.persisted.push("flush");
+        if (this.flushGate !== undefined) await this.flushGate;
+      },
     },
   };
 
@@ -326,6 +353,149 @@ test("a phone's provenance line carries when the operator wrote it, dated when t
   const agent = h.tree.agents[0];
   assert.equal(agent.text(0), "[telegram · operator · 12:00 ET]\nwritten at noon");
   assert.equal(agent.text(1), "[telegram · operator · 2026-10-19 22:03 ET]\nwritten last night");
+});
+
+/* ---------- a keyed post: one phone text, one message, across a restart (spec §16 H3) ---------- */
+
+/** A keyed phone post, as the bridge sends one for Telegram update `update`. */
+const keyed = (h: Harness, text: string, key: string) =>
+  h.desk.post({ text, source: { kind: "telegram" }, message: PHONE as { kind: string } & Record<string, unknown>, key });
+/** A `user/message` event as the session's log keeps one, the message's id `id`. */
+const logged = (seq: number, id: string): EventLike => ({ type: "user/message", seq, data: { id, role: "user", content: say("x"), source: PHONE } });
+/** A promise and the hand that settles it. */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve: () => void = () => {};
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+/** The desk session, started, and its id. */
+async function started(h: Harness): Promise<string> {
+  await h.desk.start();
+  const { sessionId } = h.desk.current();
+  assert.ok(sessionId !== undefined, "the conversation holds its session");
+  return sessionId;
+}
+
+test("a keyed post builds its message with the key as its id", async () => {
+  const h = await harness();
+  const result = await keyed(h, "hi", "telegram:42");
+  const agent = h.tree.agents[0];
+  assert.deepEqual(result, { opened: true, sessionId: agent.id });
+  assert.equal(agent.followups[0].id, "telegram:42");
+  assert.equal(agent.followups[0].role, "user");
+  assert.equal(agent.text(0), "[telegram · operator · 14:03 ET]\nhi");
+  assert.deepEqual(agent.followups[0].source, PHONE);
+  assert.ok(Object.isFrozen(agent.followups[0]), "frozen, as dsh publishes a message");
+  assert.deepEqual(h.lines, []);
+});
+
+test("the context is its own part between the provenance line and the operator's text", async () => {
+  const h = await harness();
+  const result = await h.desk.post({
+    text: "why did this fire?", source: { kind: "telegram" }, message: PHONE as { kind: string } & Record<string, unknown>, key: "telegram:43",
+    context: "NVDA 169.82 · ROBINHOOD 10:21:03 ET\n\nannotation:\nStop met.",
+  });
+  const agent = h.tree.agents[0];
+  assert.deepEqual(result, { opened: true, sessionId: agent.id });
+  assert.equal(agent.followups[0].id, "telegram:43", "still keyed");
+  assert.deepEqual(agent.followups[0].content, [
+    { type: "text", text: "[telegram · operator · 14:03 ET]" },
+    { type: "text", text: "the message this replies to:\nNVDA 169.82 · ROBINHOOD 10:21:03 ET\n\nannotation:\nStop met." },
+    { type: "text", text: "why did this fire?" },
+  ]);
+  await post(h, "and a plain one");
+  assert.deepEqual(agent.followups[1].content, [{ type: "text", text: "[telegram · operator · 14:03 ET]\nand a plain one" }], "no context, one part as before");
+  assert.deepEqual(h.lines, []);
+});
+
+test("a key already in the session's log opens nothing and answers duplicate", async () => {
+  const h = await harness();
+  const sessionId = await started(h);
+  /* 600 events, read in pages of 512: the key sits in the second page */
+  const log: EventLike[] = [];
+  for (let seq = 0; seq < 600; seq++) log.push(seq === 550 ? logged(seq, "telegram:42") : { type: "step/start", seq, data: { turn: 1, step: seq } });
+  h.tree.logs.set(sessionId, log);
+  assert.deepEqual(await keyed(h, "again", "telegram:42"), { opened: true, sessionId, duplicate: true });
+  const agent = h.tree.agent(sessionId);
+  assert.equal(agent.followups.length, 0, "nothing sent again");
+  assert.deepEqual(h.tree.persisted, ["flush", `open ${sessionId} read`, "read 0", "read 512", "read 600", "close", "flush"],
+    "the log flushed, then read to its end in pages of 512, and flushed again before the answer");
+
+  /* a key the log does not hold opens its turn, and the log is not read again */
+  assert.deepEqual(await keyed(h, "new", "telegram:43"), { opened: true, sessionId });
+  assert.equal(agent.followups[0].id, "telegram:43");
+  /* a message the session logs from now on is seen too: the live `user/message` keeps the set current */
+  h.bus.emit(sessionId, "user/message", { id: "telegram:44", role: "user", content: say("x"), source: PHONE });
+  assert.deepEqual(await keyed(h, "seen live", "telegram:44"), { opened: true, sessionId, duplicate: true });
+  /* and one this conversation sent is seen at once, before any turn takes it */
+  assert.deepEqual(await keyed(h, "new, again", "telegram:43"), { opened: true, sessionId, duplicate: true });
+  assert.equal(agent.followups.length, 1);
+  assert.equal(h.tree.persisted.filter((p) => p.startsWith("open")).length, 1, "the log is read once per session");
+  assert.deepEqual(h.lines, []);
+});
+
+test("a key already waiting in the inbox opens nothing and answers duplicate", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  const agent = h.tree.agent(sessionId);
+  const model = agent.model;
+  assert.ok(model !== undefined);
+  const waiting = (id: string): MessageLike => ({ id, role: "user", content: say("x"), source: PHONE });
+  model.pending.push(waiting("telegram:42"));
+  model.steps.push(waiting("telegram:43"));
+  assert.deepEqual(await keyed(h, "queued", "telegram:42"), { opened: true, sessionId, duplicate: true }, "on the next-turn list");
+  assert.deepEqual(await keyed(h, "steered", "telegram:43"), { opened: true, sessionId, duplicate: true }, "on the next-step list");
+  assert.deepEqual(agent.followups, []);
+  assert.deepEqual(await keyed(h, "fresh", "telegram:44"), { opened: true, sessionId });
+  assert.deepEqual(model.pending.map((m) => m.id), ["telegram:42", "telegram:44"]);
+});
+
+test("a keyed post answers opened only once the persistence flush has resolved", async () => {
+  const h = await harness();
+  const sessionId = await started(h);
+  await keyed(h, "first", "telegram:41");
+  const gate = deferred();
+  h.tree.flushGate = gate.promise;
+  let answered: PostResult | undefined;
+  const posting = keyed(h, "second", "telegram:42").then((result) => { answered = result; });
+  const agent = h.tree.agent(sessionId);
+  await waitFor("the followup", () => agent.followups.length === 2);
+  await new Promise((done) => setTimeout(done, 20));
+  assert.equal(answered, undefined, "followed up, but not answered before the flush");
+  assert.equal(h.tree.persisted.at(-1), "flush");
+  gate.resolve();
+  await posting;
+  assert.deepEqual(answered, { opened: true, sessionId });
+});
+
+test("a keyed post whose flush fails still answers opened, with one line", async () => {
+  const h = await harness();
+  const sessionId = await started(h);
+  await keyed(h, "first", "telegram:41");
+  h.tree.flushGate = Promise.reject(new Error("EIO"));
+  h.tree.flushGate.catch(() => {});
+  assert.deepEqual(await keyed(h, "second", "telegram:42"), { opened: true, sessionId });
+  assert.equal(h.tree.agent(sessionId).followups.length, 2);
+  assert.deepEqual(h.lines, ["gravit-face: desk: the desk session's log could not be flushed (EIO); a crash before the next flush may lose this text"]);
+});
+
+test("an unkeyed post is built by createUserMessage as before", async () => {
+  const h = await harness();
+  assert.deepEqual(await post(h, "hi"), { opened: true, sessionId: h.tree.agents[0].id });
+  const message = h.tree.agents[0].followups[0];
+  assert.ok(message.id !== "" && !message.id.startsWith("telegram:"), "a fresh id of dsh's own");
+  assert.deepEqual(h.tree.persisted, [], "the log is neither read nor flushed");
+});
+
+test("a keyed post on a face with no session persistence refuses with the error line and opens nothing", async () => {
+  const h = await harness();
+  delete (h.tree.ctx as { sessionPersistence?: unknown }).sessionPersistence;
+  const result = await keyed(h, "hi", "telegram:42");
+  const line = "the desk could not open a turn: this face has no session persistence, so a phone text cannot be checked against the desk session's log";
+  assert.deepEqual(result, { refused: "error", line });
+  assert.deepEqual(h.tree.agents[0].followups, []);
+  assert.deepEqual(h.lines, [`gravit-face: desk: ${line}`]);
 });
 
 test("a paused desk refuses with the paused line and opens no turn", async () => {
@@ -728,6 +898,201 @@ test("a desk session resumed as a new agent is supervised once: the old supervis
   assert.equal((await turnsOf(h)).length, 1, "one record per turn, not one per supervision");
 });
 
+/* ---------- what a restart left (spec §16 H3) ---------- */
+
+/** The face restarted on `h`'s home and tree: the old conversation (`h.desk`, or `previous`) disposed, its desk session cold, and a new
+ * conversation over the same tree, bus and clock - its lines in `h.lines`, its outlet recording. */
+async function restarted(h: Harness, sessionId: string, previous: DeskConversation = h.desk): Promise<{ desk: DeskConversation; outlet: ReturnType<typeof recordingOutlet> }> {
+  await previous.dispose();
+  h.tree.live.delete(sessionId);
+  const log = (line: string): void => { h.lines.push(line); };
+  const desk = createDeskConversation({
+    session: { ctx: h.tree.ctx, root: h.root, home: h.home, route: ROUTE, installModelSelection: h.tree.install, now: () => h.time.clock.now(), log },
+    on: h.bus.on,
+    clock: h.time.clock,
+    log,
+  });
+  const outlet = recordingOutlet();
+  desk.setOutlet(outlet);
+  return { desk, outlet };
+}
+/** A message as the inbox holds one: `id`, from `source`. */
+const pending = (id: string, source: Record<string, unknown>): MessageLike =>
+  ({ id, role: "user", content: say(`[${String(source.kind)}]\n${id}`), source }) as unknown as MessageLike;
+/** A session log row: `type`, its `data`, and its `time` in ms. */
+const row = (seq: number, type: string, data: unknown, time = AT): EventLike => ({ type, seq, data, time }) as EventLike;
+/** A log whose tail is phone turn `n`, cut: started, its message claimed, and closed `interrupted` by the resume. */
+const cutLog = (n: number, at: number): EventLike[] => [
+  row(0, "turn/start", { turn: n }, at),
+  row(1, "user/message", { id: `telegram:${n}`, role: "user", content: say("x"), source: PHONE }, at),
+  row(2, "turn/end", { turn: n, reason: { kind: "interrupted" } }, at + 1_000),
+];
+const RESTART_LINE = "a restart cut your message of 13:55 ET before it was answered; send it again";
+
+test("start, after a resume, requeues what the restart left pending", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  assert.equal(h.tree.agent(sessionId).followups.length, 0, "a created session has nothing left to wake");
+  assert.equal(h.tree.persisted.length, 0, "and its log is not read");
+
+  const phoneText = pending("telegram:9", PHONE);
+  const browser = pending("m-browser", BROWSER);
+  const flagged = pending("m-alert", ALERT);
+  h.tree.rebuilt.set(sessionId, [phoneText, browser, flagged]);
+  const { desk, outlet } = await restarted(h, sessionId);
+  await desk.start();
+  const agent = h.tree.agent(sessionId);
+  assert.equal(h.tree.resumed.length, 1);
+  assert.deepEqual(agent.followups.map((m) => m.id), ["telegram:9", "m-alert"], "the phone's text and the alert, sent again in order: the agent wakes for them");
+  assert.deepEqual(agent.model!.pending.map((m) => m.id), ["m-browser", "telegram:9", "m-alert"], "the browser's message is left as it was");
+  assert.deepEqual(h.tree.persisted, ["flush", `open ${sessionId} read`, "read 0", "close"], "the resumed session's log read, flushed first");
+  assert.deepEqual(await turnsOf(h), [], "a log with no cut turn records nothing");
+  assert.deepEqual(outlet.sent, []);
+
+  /* a second start finds the session live: nothing resumed, nothing woken again */
+  await desk.start();
+  assert.equal(agent.followups.length, 2);
+  assert.equal(h.tree.persisted.filter((p) => p.startsWith("open")).length, 1);
+  assert.deepEqual(h.lines, []);
+  await desk.dispose();
+});
+
+test("start answers a phone turn the restart cut with one line, once per session and turn, recorded as a desk-turn cancelled by 'restart'", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  const writtenAt = AT - 8 * 60_000; // 13:55 ET
+  h.tree.logs.set(sessionId, cutLog(3, writtenAt));
+  h.tree.rebuilt.set(sessionId, [pending("telegram:4", PHONE)]);
+  const first = await restarted(h, sessionId);
+  await first.desk.start();
+  await waitFor("the restart's line", () => first.outlet.sent.length === 1);
+  assert.deepEqual(first.outlet.sent, [RESTART_LINE]);
+  assert.deepEqual(await turnsOf(h), [
+    { t: iso(AT), kind: "desk-turn", sessionId, source: "telegram", turn: 3, outcome: "cancelled", wallMs: 0, cancel: "restart" },
+  ]);
+  assert.deepEqual(h.tree.agent(sessionId).followups.map((m) => m.id), ["telegram:4"], "and what waited behind it is woken");
+
+  /* the line comes before the answer of the text it woke, and that turn is recorded after the cut one */
+  turn(h, sessionId, 4, PHONE, "the fourth answer");
+  await waitFor("turn 4's answer", () => first.outlet.sent.length === 2);
+  assert.deepEqual(first.outlet.sent, [RESTART_LINE, "the fourth answer"]);
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.turn, e.outcome]), [[3, "cancelled"], [4, "ended"]]);
+
+  /* another restart with the same log tail: the ledger already holds turn 3's record, so neither is done again */
+  h.tree.rebuilt.delete(sessionId);
+  const second = await restarted(h, sessionId, first.desk);
+  await second.desk.start();
+  await new Promise((done) => setTimeout(done, 20));
+  assert.deepEqual(second.outlet.sent, [], "answered once");
+  assert.equal((await turnsOf(h)).filter((e) => e.turn === 3).length, 1, "recorded once");
+
+  /* a different cut turn on the same session is its own */
+  h.tree.logs.set(sessionId, cutLog(5, writtenAt));
+  const third = await restarted(h, sessionId, second.desk);
+  await third.desk.start();
+  await waitFor("turn 5's line", () => third.outlet.sent.length === 1);
+  assert.deepEqual(third.outlet.sent, [RESTART_LINE]);
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.turn, e.cancel]), [[3, "restart"], [4, undefined], [5, "restart"]]);
+  assert.deepEqual(h.lines, []);
+  await third.desk.dispose();
+});
+
+test("a resumed session whose log cannot be read still wakes what was left, with one line", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  h.tree.rebuilt.set(sessionId, [pending("telegram:2", PHONE)]);
+  const { desk, outlet } = await restarted(h, sessionId);
+  const open = h.tree.ctx.sessionPersistence!.open;
+  h.tree.ctx.sessionPersistence!.open = async () => { throw new Error("the log is locked"); };
+  try {
+    await desk.start();
+  } finally {
+    h.tree.ctx.sessionPersistence!.open = open;
+  }
+  assert.deepEqual(h.tree.agent(sessionId).followups.map((m) => m.id), ["telegram:2"]);
+  assert.deepEqual(h.lines, [
+    `gravit-face: desk: desk session ${sessionId}'s log could not be read (the log is locked); a phone turn a restart cut there goes unanswered`,
+  ]);
+  assert.deepEqual(outlet.sent, []);
+  await desk.dispose();
+});
+
+test("the boot's wake passes the fence first: a violation is a desk-refused event and leaves the inbox parked", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  h.tree.rebuilt.set(sessionId, [pending("telegram:2", PHONE)]);
+  await put(h.root, "desk/GRAVIT.md"); // planted while the face was down
+  const { desk } = await restarted(h, sessionId);
+  await desk.start();
+  const agent = h.tree.agent(sessionId);
+  assert.deepEqual(agent.followups, [], "nothing woken over a violation");
+  assert.deepEqual(agent.model!.pending.map((m) => m.id), ["telegram:2"], "the text stays queued for the next post, which the fence refuses first");
+  assert.deepEqual((await events(h)).filter((e) => e.kind === "desk-refused"), [{ t: iso(AT), kind: "desk-refused", reason: "fence", path: "desk/GRAVIT.md" }]);
+  assert.deepEqual(h.lines, []);
+  await desk.dispose();
+});
+
+test("a boot fence check that throws fails closed: one line, nothing woken", async (t) => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  h.tree.rebuilt.set(sessionId, [pending("telegram:2", PHONE)]);
+  const desk_ = join(h.root, "desk");
+  const real = fsp.readdir as unknown as (...args: unknown[]) => Promise<unknown>;
+  /* a listing of desk/ that is no list: the chain check's own code throws on it, outside its fail-closed reads */
+  t.mock.method(fsp, "readdir", (async (...args: unknown[]) => (String(args[0]) === desk_ ? 42 : real(...args))) as unknown as typeof fsp.readdir);
+  syncBuiltinESMExports();
+  const { desk } = await restarted(h, sessionId);
+  try {
+    await desk.start();
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  const agent = h.tree.agent(sessionId);
+  assert.deepEqual(agent.followups, []);
+  assert.deepEqual(agent.model!.pending.map((m) => m.id), ["telegram:2"]);
+  assert.equal(h.lines.length, 1);
+  assert.match(h.lines[0], new RegExp(`^gravit-face: desk: the fence check before waking what desk session ${sessionId} still had queued failed \\(.+\\); it stays queued$`));
+  assert.deepEqual((await events(h)).filter((e) => e.kind === "desk-refused"), []);
+  await desk.dispose();
+});
+
+test("the cut-turn line goes through deliver, so OFF holds it", async (t) => {
+  const h = await harness();
+  const sessionId = await started(h);
+  h.tree.logs.set(sessionId, cutLog(3, AT - 8 * 60_000));
+  await writeOff(h.home, { by: "telegram" }, () => AT);
+  const off = join(deskDir(h.home), OFF_FILE);
+  let offReads = 0;
+  const real = fsp.readFile as unknown as (...args: unknown[]) => Promise<unknown>;
+  t.mock.method(fsp, "readFile", (async (...args: unknown[]) => {
+    try {
+      return await real(...args);
+    } finally {
+      if (String(args[0]) === off) offReads += 1;
+    }
+  }) as unknown as typeof fsp.readFile);
+  syncBuiltinESMExports();
+  const { desk, outlet } = await restarted(h, sessionId);
+  try {
+    await desk.start();
+    await waitFor("the line's delivery reading the switch", () => offReads === 1);
+    await new Promise((done) => setTimeout(done, 20));
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  assert.deepEqual(outlet.sent, [], "held back by the pause");
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.turn, e.cancel]), [[3, "restart"]], "and recorded all the same");
+  assert.deepEqual(h.lines, [], "a pause holding the line back is no failure");
+  await desk.dispose();
+});
+
 test("renew supervises the new session and stop cancels with the reason", async () => {
   const h = await harness();
   const outlet = recordingOutlet();
@@ -896,7 +1261,7 @@ test("dispose cancels a running turn with the shutdown reason, once", async () =
   agent.settle(); // the cut turn's driver retires
   await first;
   await h.desk.dispose();
-  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }]]);
+  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]]);
   assert.equal(h.bus.listeners.size, 0, "the supervision is gone");
   await h.time.fake.advance(600_000);
   assert.equal(agent.cancels.length, 1, "no deadline fires after dispose");
@@ -904,6 +1269,30 @@ test("dispose cancels a running turn with the shutdown reason, once", async () =
   assert.equal(agent.followups.length, 1);
   await assert.rejects(h.desk.renew(), /the desk is shut down/);
   assert.equal(await h.desk.stop("stopped from the phone"), false);
+});
+
+/* A graceful stop (spec §16 H3, R93): the texts queued behind the turn under way stay on the inbox's next-turn list for
+ * the boot's wake (src/desk-session.ts `requeuePending`) - the shutdown keeps the inbox and wakes nobody. */
+test("a shutdown keeps the messages queued behind the turn it cuts, and does not wake the agent for them", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const { sessionId } = (await post(h, "first")) as { sessionId: string };
+  const agent = h.tree.agent(sessionId);
+  const model = agent.model!;
+  assert.equal(model.claim()?.content[0]?.text, "[telegram · operator · 14:03 ET]\nfirst", "the driver takes the first message for turn 1");
+  model.running = true;
+  agent.status = "running";
+  startTurn(h, sessionId, 1, PHONE);
+  assert.deepEqual(await post(h, "second"), { opened: true, sessionId });
+  assert.equal(model.pending.length, 1);
+  const disposing = h.desk.dispose();
+  await waitFor("the shutdown cancel", () => agent.cancels.length === 1);
+  endTurn(h, sessionId, 1, ABORTED("shutdown"));
+  agent.settle();
+  await disposing;
+  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]], "the inbox kept");
+  assert.deepEqual(agent.inbox?.nextTurn.map((m) => m.content[0]?.text), ["[telegram · operator · 14:03 ET]\nsecond"], "still queued for the boot");
+  assert.equal(agent.followups.length, 2, "nothing sent again: a shutdown wants the agent idle, not woken");
 });
 
 test("a turn cut at shutdown is recorded before dispose resolves", async () => {
@@ -955,7 +1344,7 @@ test("dispose during a retiring turn cancels it once", async () => {
   endTurn(h, old, 1, ABORTED("shutdown"));
   oldAgent.settle();
   await disposing;
-  assert.deepEqual(oldAgent.cancels, [[{ kind: "hook", reason: "shutdown" }]]);
+  assert.deepEqual(oldAgent.cancels, [[{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]]);
   assert.deepEqual(h.tree.agent(fresh).cancels, [], "the idle new conversation has nothing to cancel");
   assert.equal(h.bus.listeners.size, 0, "every supervision is gone, the retiring one included");
   assert.deepEqual((await turnsOf(h)).map((e) => [e.sessionId, e.turn]), [[old, 1]], "and the retiring turn it cut is recorded");
@@ -973,7 +1362,7 @@ test("work the status does not show - maintenance with a followup latched - is w
   assert.equal(h.bus.listeners.size, 2, "retired, not ended: whenIdle still waits");
   const disposing = h.desk.dispose();
   await waitFor("the shutdown cancel", () => oldAgent.cancels.length === 2);
-  assert.deepEqual(oldAgent.cancels[1], [{ kind: "hook", reason: "shutdown" }]);
+  assert.deepEqual(oldAgent.cancels[1], [{ kind: "hook", reason: "shutdown" }, { keepInbox: true }]);
   oldAgent.settle();
   await disposing;
   assert.equal(h.bus.listeners.size, 0);
@@ -1199,119 +1588,8 @@ test("a budget that cannot be read is one line, and the desk goes on", async () 
   }
 });
 
-/* ---------- annotations, replies and the desk state (P3) ---------- */
-
-/** An outlet that records each send with the message it replies to, if any. */
-function replyOutlet(): DeskOutlet & { sent: [string, number | undefined][] } {
-  const sent: [string, number | undefined][] = [];
-  return {
-    sent,
-    send(text, opts) {
-      sent.push([text, opts?.replyTo]);
-      return Promise.resolve({ sent: [100 + sent.length] });
-    },
-  };
-}
-
-/** An alert's message source, as the watch posts it. */
-const alertOf = (alert: string, symbol = "NVDA") => ({ kind: "alert", alert, symbol });
-/** Post an alert's annotation, replying to the alert's message `replyTo`. */
-const annotate = (h: Harness, alert: string, replyTo: number | undefined, source: Parameters<DeskConversation["post"]>[0]["source"] = { kind: "alert", symbol: "NVDA", rule: "stop" }) =>
-  h.desk.post({ text: "NVDA 171.20 crossed the stop at 172", source, message: alertOf(alert), ...(replyTo === undefined ? {} : { replyTo }) });
-
-test("an alert post's turn is delivered as a reply to the alert", async () => {
-  const h = await harness();
-  const outlet = replyOutlet();
-  h.desk.setOutlet(outlet);
-  const opened = await annotate(h, "a-000000000001", 11);
-  const { sessionId } = opened as { sessionId: string };
-  const agent = h.tree.agent(sessionId);
-  assert.ok(agent.text(0)?.startsWith("[alert · NVDA · stop]\n"));
-  assert.deepEqual(agent.followups[0].source, alertOf("a-000000000001"));
-  turn(h, sessionId, 1, alertOf("a-000000000001"), "Stop met: 171.20 < 172 (ROBINHOOD 10:21:03 ET).");
-  await waitFor("the reply", () => outlet.sent.length === 1);
-  assert.deepEqual(outlet.sent, [["Stop met: 171.20 < 172 (ROBINHOOD 10:21:03 ET).", 11]]);
-
-  turn(h, sessionId, 2, alertOf("a-000000000001"), "the same alert again, opened elsewhere");
-  turn(h, sessionId, 3, alertOf("a-000000000009"), "an alert no post registered");
-  turn(h, sessionId, 4, PHONE, "a phone answer");
-  await waitFor("three more", () => outlet.sent.length === 4);
-  assert.deepEqual(outlet.sent.slice(1), [
-    ["the same alert again, opened elsewhere", undefined], ["an alert no post registered", undefined], ["a phone answer", undefined],
-  ], "each reply is forgotten at its turn's end; nothing else replies");
-
-  await annotate(h, "a-000000000002", 0); // tested against undefined: 0 is a message id
-  turn(h, sessionId, 5, alertOf("a-000000000002"), "zero");
-  await annotate(h, "a-000000000003", undefined); // a queued alert's annotation: no reply
-  turn(h, sessionId, 6, alertOf("a-000000000003"), "queued");
-  await waitFor("two more", () => outlet.sent.length === 6);
-  assert.deepEqual(outlet.sent.slice(4), [["zero", 0], ["queued", undefined]]);
-  assert.deepEqual(h.lines, []);
-});
-
-test("an alert turn's other ends answer as replies with their own lines; a telegram turn keeps P1's", async () => {
-  const h = await harness({ deadlineFor: (kind) => (kind === "alert" ? 90_000 : undefined) });
-  const outlet = replyOutlet();
-  h.desk.setOutlet(outlet);
-  const { sessionId } = (await annotate(h, "a-000000000001", 11)) as { sessionId: string };
-
-  startTurn(h, sessionId, 1, alertOf("a-000000000001"));
-  await h.time.fake.advance(90_000);
-  endTurn(h, sessionId, 1, ABORTED("desk deadline"));
-  await annotate(h, "a-000000000002", 12);
-  startTurn(h, sessionId, 2, alertOf("a-000000000002"));
-  endTurn(h, sessionId, 2, { kind: "error", error: { message: "429 rate limit", code: "UNKNOWN" } });
-  await annotate(h, "a-000000000003", 13);
-  startTurn(h, sessionId, 3, alertOf("a-000000000003"));
-  endTurn(h, sessionId, 3);
-  await annotate(h, "a-000000000004", 14);
-  startTurn(h, sessionId, 4, alertOf("a-000000000004"));
-  endTurn(h, sessionId, 4, ABORTED("shutdown"));
-  startTurn(h, sessionId, 5, PHONE);
-  endTurn(h, sessionId, 5, { kind: "error", error: { message: "429 rate limit", code: "UNKNOWN" } });
-  startTurn(h, sessionId, 6, PHONE);
-  endTurn(h, sessionId, 6);
-  await annotate(h, "a-000000000005", 15);
-  await put(h.root, "desk/journal/notes/GRAVIT.md"); // planted after the post's own check
-  startTurn(h, sessionId, 7, alertOf("a-000000000005"));
-  await waitFor("the fence's cancel", () => h.tree.agent(sessionId).cancels.length === 2);
-  endTurn(h, sessionId, 7, ABORTED("desk fence"));
-
-  await waitFor("six replies", () => outlet.sent.length === 6);
-  assert.deepEqual(outlet.sent, [
-    ["timed out after 90 s; a card or a long tool was pending", 11],
-    ["the desk could not annotate this alert: 429 rate limit", 12],
-    ["the desk's check of this alert ended with no text", 13],
-    ["the desk's check of this alert ended with no text", 14],
-    ["the desk could not answer: 429 rate limit; nothing was done - send it again later", undefined],
-    ["refused: desk/journal/notes/GRAVIT.md exists; it would steer every later desk turn. Remove it, then write again.", 15],
-  ], "a telegram turn that ended with no text sends nothing, as in P1");
-});
-
-test("a batch post renders the alerts form and replies to the first alert", async () => {
-  const h = await harness();
-  const outlet = replyOutlet();
-  h.desk.setOutlet(outlet);
-  const { sessionId } = (await annotate(h, "b-00000000000a", 21, { kind: "alerts", count: 3 })) as { sessionId: string };
-  const agent = h.tree.agent(sessionId);
-  assert.equal(agent.text(0), "[alerts · 3 · 14:03 ET]\nNVDA 171.20 crossed the stop at 172");
-  turn(h, sessionId, 1, alertOf("b-00000000000a"), "Three plans checked.");
-  await waitFor("the reply", () => outlet.sent.length === 1);
-  assert.deepEqual(outlet.sent, [["Three plans checked.", 21]]);
-});
-
-test("the replies kept are the newest 50", async () => {
-  const h = await harness();
-  const outlet = replyOutlet();
-  h.desk.setOutlet(outlet);
-  let sessionId = "";
-  for (let n = 1; n <= 51; n += 1) sessionId = ((await annotate(h, `a-${String(n).padStart(12, "0")}`, n)) as { sessionId: string }).sessionId;
-  turn(h, sessionId, 1, alertOf(`a-${"1".padStart(12, "0")}`), "the oldest");
-  turn(h, sessionId, 2, alertOf(`a-${"2".padStart(12, "0")}`), "the second");
-  turn(h, sessionId, 3, alertOf(`a-${"51".padStart(12, "0")}`), "the newest");
-  await waitFor("three replies", () => outlet.sent.length === 3);
-  assert.deepEqual(outlet.sent, [["the oldest", undefined], ["the second", 2], ["the newest", 51]]);
-});
+/* ---------- the desk state (P3) ----------
+ * The alert annotations and their replies moved to their own lane (src/annotator.ts): tests/annotator.test.ts. */
 
 const STATE = '{"holdings":[]}';
 
@@ -1331,8 +1609,8 @@ test("a phone post injects the desk state just before its followup, only when no
   assert.deepEqual(agent.calls, ["inject", "followup", "followup"]);
   agent.settle();
 
-  await annotate(h, "a-000000000001", 11);
-  assert.deepEqual(agent.calls.slice(3), ["followup"], "an alert post never injects");
+  await post(h, "NVDA 171.20", { kind: "alert", symbol: "NVDA", rule: "stop" }, ALERT);
+  assert.deepEqual(agent.calls.slice(3), ["followup"], "a post that is not the phone's never injects");
   assert.equal(asked, 2, "nor asks for the state: the busy phone post did, and went without");
 
   delete agent.inject; // an agent without inject

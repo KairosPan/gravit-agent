@@ -7,9 +7,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  COPIED_KEYS, EXPECTED_KEYS, LABEL, ensureHomeEnv, envLinesOf, fetchStatus, filterPath, formatStatus, installPlan, lastTokenUrl, nodeOnPath,
-  parseLaunchctlPrint, portAnswers, runService, servicePlan, type ServiceDeps,
+  COPIED_KEYS, EXPECTED_KEYS, LABEL, WATCH_POLL_MS, checkHealth, contextOf, ensureHomeEnv, envLinesOf, fetchStatus, filterPath, formatStatus,
+  installPlan, lastTokenUrl, nodeOnPath, parseLaunchctlPrint, portAnswers, runService, servicePlan, WATCHDOG_LABEL, watchdogPlan, type ServiceDeps,
 } from "../scripts/service.ts";
+import { WATCH_CN_POLL_MS, WATCH_US_POLL_MS } from "../src/watch.ts";
 import { deskStatusLines, type DeskStatus } from "../src/desk.ts";
 
 const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-service-"));
@@ -427,15 +428,18 @@ test("install replaces a running job: a bootout still in progress, launchd let g
   const r = await rig(lettingGo());
   await writeFile(join(r.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\n");
   assert.equal(await runService("install", [], r.deps), 0, "bootout's exit code is not the outcome: launchd let go of the job");
-  assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB], ["print", JOB], ["print", JOB], ["enable", JOB], ["bootstrap", "gui/501", r.plist]]);
+  const wdPlist = join(dirname(r.plist), "com.gravit.face.watchdog.plist");
+  assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB], ["print", JOB], ["print", JOB], ["enable", JOB], ["bootstrap", "gui/501", r.plist],
+    ["print", WD_JOB], ["enable", WD_JOB], ["bootstrap", "gui/501", wdPlist]], "then the watchdog beside it");
   assert.deepEqual(r.sleeps, [500, 500, 500], "one poll until launchd let go of the job, two until its face let go of the port");
   assert.ok(r.urls.every((u) => u === "http://127.0.0.1:3090/data/desk/status"));
   const written = await readFile(r.plist, "utf8");
   assert.equal(written, servicePlan({ root: r.deps.root, home: r.deps.home, homeDir: r.deps.homeDir, node: "/usr/local/bin/node", path: "/usr/local/bin:/usr/bin", launchAgentsDir: dirname(r.plist) }).plist);
   assert.equal((await stat(r.plist)).mode & 0o777, 0o644);
   assert.equal((await stat(join(r.deps.home, "face", "service"))).mode & 0o777, 0o700, "the logs directory is the operator's alone");
-  assert.deepEqual(r.text().split("\n").slice(-6), [`installed: ${r.plist}`, `runs: ${join(r.deps.root, "face", "src", "main.ts")}`,
-    `home: ${r.deps.home}`, "node: /usr/local/bin/node", `log: ${join(r.deps.home, "face", "service", "face.log")}`, "next: npm run service -- url"],
+  assert.deepEqual(r.text().split("\n").slice(-7), [`installed: ${r.plist}`, `runs: ${join(r.deps.root, "face", "src", "main.ts")}`,
+    `home: ${r.deps.home}`, "node: /usr/local/bin/node", `log: ${join(r.deps.home, "face", "service", "face.log")}`,
+    `watchdog: ${wdPlist} checks the desk every 5 minutes (log: ${join(r.deps.home, "face", "service", "watchdog.log")})`, "next: npm run service -- url"],
   "what it runs, on which home, with which node; no privacy line for a checkout outside ~/Desktop, ~/Documents and ~/Downloads");
   assert.ok(!r.text().includes("moving"), "no plist named another home");
 });
@@ -826,7 +830,8 @@ test("status, logs and url read the home the installed plist names, else this sh
   assert.equal(r.text().split("\n")[0], `moving the service's home from ${served} to ${r.deps.home}`, "and says it moves the service there, unescaped");
   r.reset();
   await runService("status", [], r.deps);
-  assert.match(r.text(), /\nledger: last boot 2026-10-19T15:00:00\.000Z \(pid 77\) - no shutdown event$/, "and status follows the plist there");
+  assert.match(r.text(), /\nledger: last boot 2026-10-19T15:00:00\.000Z \(pid 77\) - no shutdown event\nwatchdog: not loaded; no check yet$/,
+    "and status follows the plist there, the watchdog's line last");
 
   for (const plist of [`<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n  <key>Label</key><string>${LABEL}</string>\n</dict>\n</plist>\n`,
     servicePlan({ root: r.deps.root, home: "relative/home", homeDir: r.deps.homeDir, node: r.deps.nodePath, path: r.deps.envPath, launchAgentsDir: dirname(r.plist) }).plist]) {
@@ -878,8 +883,8 @@ test("url says the log's URL may be the previous run's while the face does not a
 test("an unknown command or argument prints the usage; the launchd commands refuse off macOS before launchctl", async () => {
   const r = await rig({ platform: "linux" });
   assert.equal(await runService("bogus", [], r.deps), 2);
-  assert.equal(r.text(), "usage: npm run service -- install | uninstall | start | stop | restart | status | logs | url [--port N]");
-  for (const args of [["--port"], ["--port", "0"], ["--port", "3090x"], ["--verbose"]]) {
+  assert.equal(r.text(), "usage: npm run service -- install | uninstall | start | stop | restart | status | logs | url [--port N] (status also takes --check)");
+  for (const args of [["--port"], ["--port", "0"], ["--port", "3090x"], ["--verbose"], ["--check", "--check"]]) {
     const bad = await rig();
     assert.equal(await runService("status", args, bad.deps), 2, args.join(" "));
     assert.match(bad.text(), /usage: npm run service -- /);
@@ -890,6 +895,11 @@ test("an unknown command or argument prints the usage; the launchd commands refu
     assert.equal(off.text().split("\n").length, 1, `${cmd}: one line`);
     assert.match(off.text(), /needs macOS/);
     assert.deepEqual(off.calls, [], `${cmd}: no launchctl`);
+  }
+  for (const cmd of ["logs", "url", "start"]) {
+    const check = await rig();
+    assert.equal(await runService(cmd, ["--check"], check.deps), 2, `${cmd} --check`);
+    assert.match(check.text(), /^--check is status's alone\nusage: /);
   }
   const status = await rig({ platform: "linux" });
   assert.equal(await runService("status", [], status.deps), 0, "status, logs and url run anywhere");
@@ -905,4 +915,246 @@ test("nodeOnPath: the first executable node on PATH, never one under node_module
   await writeFile(join(d, "bin", "node"), ""); await chmod(join(d, "bin", "node"), 0o755);
   assert.equal(nodeOnPath([join(d, "node_modules", ".bin"), join(d, "plain"), "", "relative", join(d, "bin")].join(":")), join(d, "bin", "node"));
   assert.equal(nodeOnPath(join(d, "plain")), undefined);
+});
+
+/* status --check (spec §16 H4): checkHealth over the same rig - a fake launchctl, a fake port, a recorded sleep. */
+
+const HEALTH_NOW = Date.parse("2026-11-30T15:30:00.000Z");
+const running42 = (args: string[]) => (args[0] === "print" ? loaded("running", 42) : undefined);
+const todayOf = { sent: 0, suppressed: { cooldown: 0, cap: 0, muted: 0, off: 0, window: 0 }, repeats: 0 };
+
+/** pid 42's status with `extra` laid over it: a watch watching, both markets off, unless `extra` says otherwise. */
+const healthStatus = (extra: Partial<DeskStatus> = {}): DeskStatus => ({
+  ...deskStatusOf(42),
+  watch: {
+    state: "watching",
+    markets: { us: { state: "off", watched: 0, notWatched: [], today: todayOf }, cn: { state: "off", watched: 0, notWatched: [], today: todayOf } },
+    files: [], near: [], marks: [], pending: 0, recent: [], filings: { state: "off", symbols: 0, aShares: 0, seeded: 0 },
+  },
+  telegram: { configured: true, polling: true, dropped: 0, queued: 0 },
+  ...extra,
+});
+const answering = (status: DeskStatus) => (): Response => new Response(JSON.stringify(status), { status: 200 });
+
+/** checkHealth on an installed rig: pid 42 running unless `launchctl` says otherwise; the sleep recorded, never waited. */
+async function health(o: { answer?: (calls: string[][]) => Response | undefined; launchctl?: Launchctl; installed?: boolean } = {}) {
+  const r = await rig({ launchctl: o.launchctl ?? running42, answer: o.answer });
+  if (o.installed !== false) await putPlist(r);
+  const result = await checkHealth(contextOf(r.deps, undefined), { now: () => HEALTH_NOW });
+  return { ...result, r };
+}
+
+test("checkHealth 3: not installed, without asking launchd or the port; installed and not loaded, without asking the port", async () => {
+  const none = await health({ installed: false, answer: answering(healthStatus()) });
+  assert.deepEqual([none.code, none.reason], [3, "not installed"]);
+  assert.deepEqual([none.r.calls, none.r.urls], [[], []]);
+  const stopped = await health({ launchctl: () => undefined, answer: answering(healthStatus()) });
+  assert.deepEqual([stopped.code, stopped.reason], [3, "stopped"]);
+  assert.deepEqual(stopped.r.urls, [], "a job launchd lacks is stopped whatever answers on the port");
+});
+
+test("checkHealth 2: no answer on two tries 10 s apart, the wait through the injected sleep", async () => {
+  const down = await health();
+  assert.deepEqual([down.code, down.reason], [2, "no answer on 3090 (launchd: running, pid 42)"]);
+  assert.equal(down.r.urls.length, 2, "two tries");
+  assert.deepEqual(down.r.sleeps, [10_000], "10 s between them, through deps.sleep");
+  const r = await rig({ launchctl: running42 });
+  await putPlist(r);
+  const waits: number[] = [];
+  const short = await checkHealth(contextOf(r.deps, undefined), { retryMs: 5, sleep: async (ms) => { waits.push(ms); } });
+  assert.equal(short.code, 2);
+  assert.deepEqual([waits, r.sleeps], [[5], []], "retryMs and sleep as given");
+  const older404 = await health({ answer: () => new Response(null, { status: 404 }) });
+  assert.equal(older404.code, 2, "a 404 is no status: an older face, or not a face");
+});
+
+test("a face that misses the first try and answers the second is not down", async () => {
+  let tries = 0;
+  const late = await health({ answer: () => (tries++ === 0 ? undefined : answering(healthStatus())()) });
+  assert.deepEqual([late.code, late.reason], [0, "healthy"]);
+  assert.equal(late.r.urls.length, 2);
+  assert.deepEqual(late.r.sleeps, [10_000]);
+  const first = await health({ answer: answering(healthStatus()) });
+  assert.deepEqual([first.code, first.reason, first.r.urls.length, first.r.sleeps], [0, "healthy", 1, []], "an answer at once: one try, no wait");
+});
+
+test("a face launchd respawned during the retry is launchd's own: launchd is asked again after the wait", async () => {
+  let prints = 0;
+  let tries = 0;
+  const respawn = await health({
+    launchctl: (args) => (args[0] === "print" ? (prints++ === 0 ? loaded("not running") : loaded("running", 43)) : undefined),
+    answer: () => (tries++ === 0 ? undefined : answering(healthStatus({ pid: 43 }))()),
+  });
+  assert.deepEqual([respawn.code, respawn.reason], [0, "healthy"]);
+  assert.equal(respawn.r.calls.filter((c) => c[0] === "print").length, 2, "once before the first try, once after the wait");
+  const r = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("not running") : undefined) });
+  await putPlist(r);
+  const down = await checkHealth(contextOf(r.deps, undefined));
+  assert.deepEqual([down.code, down.reason], [2, "no answer on 3090 (launchd: not running)"], "the down reason names what launchd saw");
+  let gone = 0;
+  const left = await rig({ launchctl: (args) => (args[0] === "print" && gone++ === 0 ? loaded("running", 42) : undefined) });
+  await putPlist(left);
+  assert.equal((await checkHealth(contextOf(left.deps, undefined))).reason, "no answer on 3090 (launchd: not loaded)");
+});
+
+test("another face on the port reads 1 and nothing else", async () => {
+  const sick = healthStatus({ pid: 99, ledgerError: "EACCES", telegram: { configured: true, polling: false, dropped: 0, queued: 0, blocked: true } });
+  const other = await health({ answer: answering(sick) });
+  assert.deepEqual([other.code, other.reason], [1, "another face holds the port"], "the other face's own troubles are not the job's");
+  const notRunning = await health({ launchctl: (args) => (args[0] === "print" ? loaded("not running") : undefined), answer: answering(healthStatus()) });
+  assert.deepEqual([notRunning.code, notRunning.reason], [1, "another face holds the port"], "a loaded job with no pid runs no face");
+});
+
+test("checkHealth 1: the Telegram bridge's poll failing, blocked, or in conflict within 10 minutes", async () => {
+  const tg = (extra: object) => healthStatus({ telegram: { configured: true, polling: true, dropped: 0, queued: 0, ...extra } });
+  const failing = await health({ answer: answering(tg({ pollFailing: { since: "2026-11-30T15:00:00.000Z", reason: "401 Unauthorized" } })) });
+  assert.deepEqual([failing.code, failing.reason], [1, "telegram poll failing since 2026-11-30T15:00:00.000Z: 401 Unauthorized"]);
+  const blocked = await health({ answer: answering(tg({ blocked: true })) });
+  assert.deepEqual([blocked.code, blocked.reason], [1, "telegram blocked: the operator's chat refuses the bot (403)"]);
+  const conflict = await health({ answer: answering(tg({ conflictAt: "2026-11-30T15:21:00.000Z" })) });
+  assert.deepEqual([conflict.code, conflict.reason], [1, "telegram conflict at 2026-11-30T15:21:00.000Z: another poller holds the token"]);
+  const edge = await health({ answer: answering(tg({ conflictAt: "2026-11-30T15:20:00.000Z" })) });
+  assert.equal(edge.code, 1, "10 minutes ago to the ms is within");
+  const old = await health({ answer: answering(tg({ conflictAt: "2026-11-30T15:19:59.999Z" })) });
+  assert.deepEqual([old.code, old.reason], [0, "healthy"], "an older conflict is over");
+});
+
+test("checkHealth 1: the watch's lease failed or held elsewhere", async () => {
+  const watchIn = (extra: object) => { const s = healthStatus(); return healthStatus({ watch: { ...s.watch!, ...extra } }); };
+  const failed = await health({ answer: answering(watchIn({ state: "lease-failed", leaseError: "EACCES" })) });
+  assert.deepEqual([failed.code, failed.reason], [1, "watch lease failed: EACCES"]);
+  const elsewhere = await health({ answer: answering(watchIn({ state: "held-elsewhere", holder: { pid: 7, since: "2026-11-30T14:00:00.000Z" } })) });
+  assert.deepEqual([elsewhere.code, elsewhere.reason], [1, "watch held elsewhere: pid 7 since 2026-11-30T14:00:00.000Z"]);
+});
+
+test("checkHealth 1: a market polling whose last poll is older than three of its intervals", async () => {
+  const pollingAt = (m: "us" | "cn", lastPollAt: string | undefined, state: "polling" | "after-close" = "polling") => {
+    const s = healthStatus();
+    return healthStatus({ watch: { ...s.watch!, markets: { ...s.watch!.markets, [m]: { ...s.watch!.markets[m], state, ...(lastPollAt === undefined ? {} : { lastPollAt }) } } } });
+  };
+  const ago = (ms: number) => new Date(HEALTH_NOW - ms).toISOString();
+  const usStale = await health({ answer: answering(pollingAt("us", ago(3 * 20_000 + 1))) });
+  assert.deepEqual([usStale.code, usStale.reason], [1, `watch US: polling, last poll ${ago(60_001)}, older than 3 polls (60 s)`]);
+  assert.equal((await health({ answer: answering(pollingAt("us", ago(60_000))) })).code, 0, "three intervals to the ms is not older");
+  const cnStale = await health({ answer: answering(pollingAt("cn", ago(30_001))) });
+  assert.deepEqual([cnStale.code, cnStale.reason], [1, `watch CN: polling, last poll ${ago(30_001)}, older than 3 polls (30 s)`]);
+  assert.equal((await health({ answer: answering(pollingAt("cn", ago(30_000))) })).code, 0);
+  assert.equal((await health({ answer: answering(pollingAt("us", ago(3_600_000), "after-close")) })).code, 0, "only a polling market is judged");
+  assert.equal((await health({ answer: answering(pollingAt("us", undefined)) })).code, 0, "a market not yet polled has no last poll to judge");
+});
+
+test("checkHealth 1: an unreadable ledger, the desk's or the watch's", async () => {
+  const desk = await health({ answer: answering(healthStatus({ ledgerError: "EISDIR" })) });
+  assert.deepEqual([desk.code, desk.reason], [1, "ledger unreadable (EISDIR)"]);
+  const s = healthStatus();
+  const watch = await health({ answer: answering(healthStatus({ watch: { ...s.watch!, ledgerError: "EIO" } })) });
+  assert.deepEqual([watch.code, watch.reason], [1, "watch ledger unreadable (EIO)"]);
+});
+
+test("checkHealth 0: a face with no telegram and no watch in its status is healthy", async () => {
+  const bare = await health({ answer: answering(deskStatusOf(42)) });
+  assert.deepEqual([bare.code, bare.reason], [0, "healthy"]);
+});
+
+test("the watch's poll intervals as service.ts copies them are watch.ts's", () => {
+  assert.deepEqual(WATCH_POLL_MS, { us: WATCH_US_POLL_MS, cn: WATCH_CN_POLL_MS });
+});
+
+test("status --check returns the code and prints the health line; plain status still returns 0", async () => {
+  const down = await rig({ launchctl: running42 });
+  await putPlist(down);
+  assert.equal(await runService("status", [], down.deps), 0, "plain status: 0 though the face does not answer");
+  assert.ok(!down.text().includes("health:"));
+  assert.deepEqual(down.sleeps, [], "plain status never waits");
+  down.reset();
+  assert.equal(await runService("status", ["--check"], down.deps), 2);
+  const lines = down.text().split("\n");
+  assert.equal(lines[0], "com.gravit.face: running (pid 42)");
+  assert.equal(lines.at(-1), "health: 2 no answer on 3090 (launchd: running, pid 42)", "the block status prints, then the health line");
+  assert.ok(lines.includes("not answering on 3090"));
+  const ok = await rig({ launchctl: running42, answer: answering(healthStatus()) });
+  await putPlist(ok);
+  assert.equal(await runService("status", ["--port", "3090", "--check"], ok.deps), 0);
+  assert.equal(ok.text().split("\n").at(-1), "health: 0 healthy");
+  const other = await rig({ launchctl: running42, answer: answering(healthStatus({ pid: 99 })) });
+  await putPlist(other);
+  assert.equal(await runService("status", ["--check", "--port", "3090"], other.deps), 1);
+  assert.deepEqual(other.text().split("\n").slice(-2), [
+    "the face answering on 3090 is pid 99, not launchd's job (pid 42): another face holds the port", "health: 1 another face holds the port",
+  ]);
+  const none = await rig();
+  assert.equal(await runService("status", ["--check"], none.deps), 3);
+  assert.equal(none.text(), "com.gravit.face: not installed (npm run service -- install)\nhealth: 3 not installed");
+  const stopped = await rig();
+  await putPlist(stopped);
+  assert.equal(await runService("status", ["--check"], stopped.deps), 3);
+  assert.equal(stopped.text().split("\n").at(-1), "health: 3 stopped");
+});
+
+/* The watchdog (spec §16 H4): its own LaunchAgent beside the face's, installed and uninstalled with it. */
+
+const WD_JOB = `gui/501/${WATCHDOG_LABEL}`;
+
+test("the watchdog plist carries its label, StartInterval 300, RunAtLoad false and the watchdog script", () => {
+  const p = watchdogPlan({ root: "/repo", home: "/h/.dsh", homeDir: "/h", node: "/usr/local/bin/node", path: "/usr/local/bin:/repo/face/node_modules/.bin", launchAgentsDir: "/h/Library/LaunchAgents" });
+  assert.equal(WATCHDOG_LABEL, "com.gravit.face.watchdog");
+  assert.equal(p.path, "/h/Library/LaunchAgents/com.gravit.face.watchdog.plist");
+  assert.deepEqual(p.args, ["/usr/local/bin/node", "--import", "file:///repo/face/node_modules/tsx/dist/loader.mjs", "/repo/face/scripts/watchdog.ts"]);
+  assert.deepEqual(p.env, { PATH: "/usr/local/bin", HOME: "/h", DSH_HOME: "/h/.dsh" });
+  assert.equal(p.log, "/h/.dsh/face/service/watchdog.log"); assert.equal(p.errLog, "/h/.dsh/face/service/watchdog.err.log");
+  for (const needle of ["<key>Label</key><string>com.gravit.face.watchdog</string>", "<key>StartInterval</key><integer>300</integer>",
+    "<key>RunAtLoad</key><false/>", "<key>Umask</key><integer>63</integer>", "<key>WorkingDirectory</key><string>/repo/face</string>",
+    "    <string>/repo/face/scripts/watchdog.ts</string>\n", `<key>StandardOutPath</key><string>${p.log}</string>`,
+    `<key>StandardErrorPath</key><string>${p.errLog}</string>`]) assert.ok(p.plist.includes(needle), needle);
+  assert.ok(!p.plist.includes("KeepAlive"), "launchd runs it every five minutes, never keeps it alive");
+  assert.doesNotMatch(p.plist, /KEY|TOKEN|SECRET|FACE_PORT/, "no credential and no port in its environment");
+});
+
+test("install and uninstall bootstrap and boot out both jobs", async () => {
+  const r = await rig();
+  await writeFile(join(r.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\n");
+  const wdPlist = join(dirname(r.plist), `${WATCHDOG_LABEL}.plist`);
+  assert.equal(await runService("install", [], r.deps), 0);
+  assert.deepEqual(r.calls, [["print", JOB], ["enable", JOB], ["bootstrap", "gui/501", r.plist], ["print", WD_JOB], ["enable", WD_JOB], ["bootstrap", "gui/501", wdPlist]]);
+  const p = watchdogPlan({ root: r.deps.root, home: r.deps.home, homeDir: r.deps.homeDir, node: r.deps.nodePath, path: r.deps.envPath, launchAgentsDir: dirname(r.plist) });
+  assert.equal(await readFile(wdPlist, "utf8"), p.plist);
+  assert.equal((await stat(wdPlist)).mode & 0o777, 0o644);
+  assert.ok(r.text().includes(`watchdog: ${wdPlist} checks the desk every 5 minutes (log: ${p.log})`));
+  assert.equal(r.text().split("\n").at(-1), "next: npm run service -- url");
+
+  const both = (args: string[], calls: string[][]) =>
+    args[0] === "print" && !calls.some((c) => c[0] === "bootout" && c[1] === args[1]) ? loaded("running", args[1] === JOB ? 42 : 7) : undefined;
+  const again = await rig({ launchctl: both });
+  await putPlist(again);
+  assert.equal(await runService("install", [], again.deps), 0, "a reinstall replaces both jobs");
+  assert.deepEqual(again.calls.filter((c) => c[1] === WD_JOB), [["print", WD_JOB], ["bootout", WD_JOB], ["print", WD_JOB], ["enable", WD_JOB]]);
+
+  const u = await rig({ launchctl: both });
+  await putPlist(u);
+  await mkdir(dirname(u.plist), { recursive: true });
+  const uWd = join(dirname(u.plist), `${WATCHDOG_LABEL}.plist`);
+  await writeFile(uWd, "<plist/>");
+  assert.equal(await runService("uninstall", [], u.deps), 0);
+  assert.deepEqual(u.calls, [["print", WD_JOB], ["bootout", WD_JOB], ["print", WD_JOB], ["print", JOB], ["bootout", JOB], ["print", JOB]],
+    "the watchdog first, so it never restarts a face being uninstalled");
+  await assert.rejects(stat(uWd)); await assert.rejects(stat(u.plist));
+  assert.ok(u.text().includes(`watchdog: launchd no longer runs it and ${uWd} is removed`));
+});
+
+test("status prints the watchdog's last state when it is installed", async () => {
+  const r = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("not running") : undefined) });
+  await putPlist(r);
+  await writeFile(join(dirname(r.plist), `${WATCHDOG_LABEL}.plist`), "<plist/>");
+  await runService("status", [], r.deps);
+  assert.equal(r.text().split("\n").at(-1), "watchdog: not running; no check yet");
+  r.reset();
+  await mkdir(join(r.deps.home, "face", "desk"), { recursive: true });
+  await writeFile(join(r.deps.home, "face", "desk", "watchdog.json"), JSON.stringify({ outageSince: "2026-11-30T15:30:00.000Z", restartedAt: "2026-11-30T15:30:20.000Z", degradedChecks: 0 }));
+  await runService("status", [], r.deps);
+  assert.match(r.text().split("\n").at(-1)!, /^watchdog: not running; last check .+ ET; down since 2026-11-30 10:30 ET, restarted 2026-11-30 10:30 ET$/);
+  const none = await rig();
+  await putPlist(none);
+  await runService("status", [], none.deps);
+  assert.ok(!none.text().includes("watchdog"), "no watchdog plist: no line, and launchd not asked about it");
+  assert.deepEqual(none.calls, [["print", JOB]]);
 });

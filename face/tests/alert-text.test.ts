@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  BATCH_ITEMS_MAX, WATCH_LINES, alertText, annotationPost, batchText, priceStamp, stateBody,
+  BATCH_ITEMS_MAX, WATCH_LINES, alertText, annotationPost, batchText, lateAlertText, lostAlertsLine, priceStamp, stateBody,
   type DeskStateView,
 } from "../src/alert-text.ts";
 import type { AlertHit, FilingTrigger, KeyTrigger, QuoteSnap } from "../src/watch-eval.ts";
@@ -201,18 +201,37 @@ test("batchText lists at most twenty, then counts the rest", () => {
   assert.equal(batchText([], NOW), "");
 });
 
+test("lateAlertText opens with the late line and keeps the alert's text", () => {
+  const later = NOW + 4 * 60_000;
+  const text = lateAlertText(NVDA_STOP, later);
+  const [first, ...rest] = text.split("\n");
+  assert.equal(first, "late: the face restarted before this alert was sent (raised 10:21 ET)");
+  assert.equal(rest.join("\n"), alertText(NVDA_STOP, later, "none"));
+  assert.ok(!text.includes("annotation follows"), "a replay is never annotated");
+  assert.equal(lateAlertText({ ...NVDA_STOP, t: "2026-11-27T20:41:00.000Z" }, later).split("\n")[0],
+    "late: the face restarted before this alert was sent (raised 2026-11-27 15:41 ET)");
+});
+
+test("lostAlertsLine names five and counts the rest", () => {
+  const seven = Array.from({ length: 7 }, (_, i) => held(`S${i}`, "stop", "15:41"));
+  assert.equal(lostAlertsLine(seven, NOW),
+    "7 alerts raised before a restart were never sent: S0 stop 10:41 ET, S1 stop 10:41 ET, S2 stop 10:41 ET, S3 stop 10:41 ET, S4 stop 10:41 ET, and 2 more");
+  assert.equal(lostAlertsLine(seven.slice(0, 5), NOW).includes("more"), false);
+  assert.equal(lostAlertsLine([held("NVDA", "stop", "20:41", "2026-11-27")], NOW), "1 alert raised before a restart was never sent: NVDA stop 2026-11-27 15:41 ET");
+});
+
 test("annotationPost: one alert keeps its rule's form, several become the alerts form", () => {
   assert.deepEqual(annotationPost([NVDA_STOP], "p-aaaaaaaaaaaa", NOW), {
     text: alertText(NVDA_STOP, NOW, "none"),
     source: { kind: "alert", symbol: "NVDA", rule: "stop" },
-    message: { kind: "alert", alert: "a-000000000001", symbol: "NVDA" },
+    message: { kind: "alert", alert: "a-000000000001", symbol: "NVDA", pass: "p-aaaaaaaaaaaa" },
   });
   const second = { ...AAPL_ZONE, id: "a-000000000002" };
   const third = { ...NVDA_8K, id: "a-000000000003" };
   assert.deepEqual(annotationPost([NVDA_STOP, second, third], "p-aaaaaaaaaaaa", NOW), {
     text: [alertText(NVDA_STOP, NOW, "none"), alertText(second, NOW, "none"), alertText(third, NOW, "none")].join("\n\n"),
     source: { kind: "alerts", count: 3 },
-    message: { kind: "alert", alert: "p-aaaaaaaaaaaa", symbol: "NVDA,AAPL" },
+    message: { kind: "alert", alert: "p-aaaaaaaaaaaa", symbol: "NVDA,AAPL", pass: "p-aaaaaaaaaaaa" },
   });
 });
 

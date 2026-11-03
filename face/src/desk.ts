@@ -79,8 +79,9 @@ import { appendFile, lstat, mkdir, open, readFile, rename, stat, unlink } from "
 import type { IncomingMessage } from "node:http";
 import { basename, extname, join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
+import { createAnnotator, type Annotator } from "./annotator.ts";
 import { createDeskConversation, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
-import type { DeskClock, DeskSessionDeps, SessionEventsOn } from "./desk-session.ts";
+import type { DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSessionPersistenceLike, SessionEventsOn } from "./desk-session.ts";
 import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskGuardCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet, fencedPost, HttpError, isTrustedDataRequest } from "./http.ts";
@@ -1509,10 +1510,28 @@ function busOf(ctx: DeskConversationCtxLike): SessionEventsOn {
   };
 }
 
+/** The desk session's slice of `ctx` with the session persistence a keyed post needs (src/desk-conversation.ts):
+ * `ctx` itself when it carries `sessionPersistence`, or when it has no `get` that answers one; else a slice that
+ * reads `ctx`'s members through it and carries the persistence `ctx.get("sessionPersistence")` answered - main.ts
+ * reads the booted context's services through `get`. */
+function withPersistence(ctx: DeskSessionCtxLike): DeskSessionCtxLike {
+  if (ctx.sessionPersistence !== undefined) return ctx;
+  const get = (ctx as { get?: (name: string) => unknown }).get;
+  const persistence = typeof get === "function" ? get.call(ctx, "sessionPersistence") as DeskSessionPersistenceLike | undefined : undefined;
+  if (persistence === undefined) return ctx;
+  return {
+    get agents() { return ctx.agents; },
+    get agentPresets() { return ctx.agentPresets; },
+    get permissionPresets() { return ctx.permissionPresets; },
+    sessionPersistence: persistence,
+  };
+}
+
 /** What {@link installDesk} hands back. `bootedAt` is when this run began, in ms since the epoch;
  * `ready` settles once the `boot` event is written or its failure logged, and never rejects;
  * `conversation` is the desk session's owner (src/desk-conversation.ts), present only when the
- * desk is on and `installDesk` was given what it needs; `schedule`, present with the conversation,
+ * desk is on and `installDesk` was given what it needs; `annotator`, the alert annotations' lane (src/annotator.ts),
+ * present with the conversation; `schedule`, present with the conversation,
  * settles to the standing orders' clock (src/schedule.ts) once its module has loaded - `undefined` when it
  * could not load, or when the desk was disposed first - and never rejects; `watchRow`, present with the schedule
  * when `installDesk` was given `watchRow`, settles to the watch (src/watch.ts) once its module has loaded -
@@ -1523,12 +1542,14 @@ export interface DeskHandle {
   bootedAt: number;
   ready: Promise<void>;
   conversation?: DeskConversation;
+  annotator?: Annotator;
   schedule?: Promise<ScheduleHandle | undefined>;
   watchRow?: Promise<WatchHandle | undefined>;
   dispose(code: number): Promise<void>;
 }
 
-/** An alert's annotation turn's deadline (P3-12): 90 s, then the turn is cut with its own line as a reply. */
+/** An alert's annotation turn's deadline (P3-12): 90 s from its own `turn/start` in the annotation lane
+ * (src/annotator.ts), then the turn is cut with its own line as a reply. */
 export const ALERT_DEADLINE_MS = 90_000;
 
 /** The watch's timers: the wall clock, `unref`'d, so the watch never holds the process open. */
@@ -1557,7 +1578,8 @@ const watchClock = (now: () => number): DeskClock => ({
  * `now()` at this call and the status's uptime origin - and the sleep watch starts at once, writing
  * into the ledger. Given `root`, `route`, `sessionCtx` and `installModelSelection`
  * too, the desk conversation's owner (src/desk-conversation.ts) is created on the same `now` and
- * started without being awaited - its `start` never rejects - so the desk session is ensured and
+ * started without being awaited - its `start` never rejects. It starts once the bridge, if any, has set the
+ * outlet, so a line about a phone turn a restart cut finds it. The desk session is so ensured and
  * supervised before any phone message, and a turn the operator opens from the browser is timed,
  * fenced and recorded like a phone turn. Given `telegram` as well, the Telegram bridge
  * (src/telegram.ts) runs on that conversation: its module loads on first use and the bridge starts
@@ -1569,11 +1591,15 @@ const watchClock = (now: () => number): DeskClock => ({
  * and `desk_state` read its orders and its cap, and the conversation's budget is the day's tokens
  * against that cap (ruling P2-8). Given `watchRow` and a quote source that answers, the watch (src/watch.ts, P3)
  * runs too, once the clock row is made: its module loads on first use, it shares the clock row's market calendars,
- * its alerts and lines go out through the conversation's `deliver`, its annotations through its `post` (each alert
- * turn cut at `alertDeadlineMs`), the conversation's desk state is its `stateText`, and the status route and
+ * its alerts and lines go out through the conversation's `deliver`, its annotations through the annotation lane
+ * (src/annotator.ts, spec §16 H1: each a fresh desk agent of its own, its turn cut at `alertDeadlineMs`, its reply
+ * through the conversation's `deliver`, its run noted on the watch), the conversation's desk state is its
+ * `stateText`, and the status route and
  * `desk_state` carry its status. `dispose(code)` stops the clock first - the firing under way
  * aborted, waited for two seconds at most - then the watch - its passes and posts waited for two seconds at most,
- * its lease released - then the bridge - no phone text is posted from then on,
+ * its lease released - then the annotation lane - a check under way cancelled as `shutdown`, its agent let go,
+ * waited for 12 s at most -
+ * then the bridge - no phone text is posted from then on,
  * and its outbox stays for the next boot -
  * then the conversation, which cancels the desk turns under way as `shutdown`, gives each cut agent
  * two seconds to go idle so the cut turn is recorded, and gives a start, post or renew under way
@@ -1674,25 +1700,40 @@ export function installDesk(
   const { root, route, sessionCtx, installModelSelection } = deps;
   const wiring = root === undefined || route === undefined || sessionCtx === undefined || installModelSelection === undefined
     ? undefined
-    : { root, sessionCtx, session: { ctx: sessionCtx, root, home, route, installModelSelection, now, log }, on: busOf(sessionCtx) };
+    : { root, sessionCtx, session: { ctx: withPersistence(sessionCtx), root, home, route, installModelSelection, now, log }, on: busOf(sessionCtx) };
   const conversation = wiring === undefined
     ? undefined
     : createDeskConversation({
       session: wiring.session,
       on: wiring.on,
       deadlineMs: deps.deskDeadlineMs,
-      /* an alert's annotation turn is cut at 90 s (P3-12); every other turn keeps the conversation's deadline */
-      deadlineFor: (kind) => (kind === "alert" || kind === "alerts" ? deps.alertDeadlineMs ?? ALERT_DEADLINE_MS : undefined),
       /* the day's budget against the standing orders' cap - none until their clock has read standing.yml (P2-8) */
       budget: () => readBudget(home, now(), schedule?.dailyTokens()),
       clock,
       log,
     });
-  void conversation?.start();
+  /* The alert annotations' lane (spec §16 H1): each pass's check in a fresh desk agent of its own, never queued behind
+   * the conversation's turns; its reply leaves through the conversation's `deliver`, and its run is noted on the watch,
+   * read when the run ends - the watch is installed later, after the clock row. */
+  const annotator = wiring === undefined || conversation === undefined
+    ? undefined
+    : createAnnotator({
+      session: wiring.session,
+      home,
+      root: wiring.root,
+      on: wiring.on,
+      deliver: (text, opts) => conversation.deliver(text, opts),
+      budget: () => readBudget(home, now(), schedule?.dailyTokens()),
+      deadlineMs: deps.alertDeadlineMs ?? ALERT_DEADLINE_MS,
+      onAnnotated: (r) => { watch?.noteAnnotated(r); },
+      clock,
+      log,
+    });
   let disposing: Promise<void> | undefined;
   /* The bridge's module loads on first use, as the conversation's machinery does (src/desk-conversation.ts,
    * MODULE WEIGHT): the pause switch and scripts/service.ts import this module and never run a bridge. Not
-   * awaited, and it never rejects; a module that arrives once dispose has begun installs nothing. */
+   * awaited, and it never rejects - a module that cannot load, or a bridge that throws as it installs, is one line; a
+   * module that arrives once dispose has begun installs nothing. */
   const config = deps.telegram;
   const bridging = config === undefined || conversation === undefined ? Promise.resolve() : import("./telegram.ts").then(
     (telegramModule) => {
@@ -1703,10 +1744,20 @@ export function installDesk(
         conversation,
         status: () => deskStatus(status),
         log,
+        /* a reply's alert and its annotation (spec §16 H1b): the watch is installed after the bridge, so it is read at
+         * each reply - none until it runs, and none in a face that runs none */
+        contextFor: (messageId) => watch?.contextFor(messageId),
       });
     },
-    (err: unknown) => { log(`${BIN}: desk: the Telegram bridge could not be loaded: ${reasonOf(err)}`); },
-  );
+  ).catch((err: unknown) => {
+    /* the module's load and the bridge's install alike: one line, and the desk goes on without a bridge */
+    log(`${BIN}: desk: the Telegram bridge could not be started: ${reasonOf(err)}`);
+  });
+  /* The conversation starts once the bridge has set the outlet (or there is no bridge): a start that resumed the desk
+   * session may answer a phone turn the restart cut at once (src/desk-conversation.ts AFTER A RESTART), and that line
+   * must find the outlet. `bridging` never rejects; were it to, the conversation starts all the same. */
+  const startConversation = (): Promise<void> | undefined => conversation?.start();
+  void bridging.then(startConversation, startConversation);
   /* The standing orders' clock (src/schedule.ts) loads on first use too - with it src/firing.ts, src/standing.ts and
    * js-yaml - once the bridge has set the outlet, so the boot's lines reach the phone. It never rejects: a module that
    * cannot load, or a clock that cannot start, is one line and `undefined`; one that arrives once dispose has begun
@@ -1750,7 +1801,7 @@ export function installDesk(
    * a module that cannot load is one line and `undefined`; one that arrives once dispose has begun starts nothing. */
   const watchRow = deps.watchRow;
   const quotes = deps.quotes;
-  const watching = scheduling === undefined || watchRow === undefined || conversation === undefined ? undefined : scheduling
+  const watching = scheduling === undefined || watchRow === undefined || conversation === undefined || annotator === undefined ? undefined : scheduling
     .then(async (made) => {
       if (made === undefined || calendars === undefined || quotes === undefined || quotes.unavailable !== undefined) return undefined;
       const watchModule = await import("./watch.ts");
@@ -1765,7 +1816,7 @@ export function installDesk(
         calendars,
         clock: watchRow.clock ?? watchClock(now),
         deliver: (text, opts) => conversation.deliver(text, opts),
-        post: (input) => conversation.post(input),
+        post: (input) => annotator.post(input),
         budget: () => readBudget(home, now(), schedule?.dailyTokens()),
         ...(edgar === undefined ? {} : { edgar }),
         ...(watchRow.alive === undefined ? {} : { alive: watchRow.alive }),
@@ -1785,12 +1836,14 @@ export function installDesk(
     bootedAt,
     ready,
     ...(conversation === undefined ? {} : { conversation }),
+    ...(annotator === undefined ? {} : { annotator }),
     ...(scheduling === undefined ? {} : { schedule: scheduling }),
     ...(watching === undefined ? {} : { watchRow: watching }),
     dispose(code) {
       disposing ??= (async () => {
         await (await scheduling)?.dispose();
         await (await watching)?.dispose();
+        await annotator?.dispose();
         conversation?.setState(undefined);
         await bridging;
         await bridge?.dispose();

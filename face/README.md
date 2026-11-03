@@ -174,6 +174,8 @@ cd face
 npm run service -- install     # write $DSH_HOME/.env if the home has none; run the face now and at every login
 npm run service -- status      # the default: launchd's state and pid, uptime, the desk, its pause
                                # and Telegram bridge, how the last run ended, the sign-in URL
+npm run service -- status --check   # the same, then the desk's health, also as the exit code:
+                               # 0 healthy, 1 degraded, 2 down, 3 stopped on purpose
 npm run service -- url         # the sign-in URL (?token=) from the face's log
 npm run service -- logs        # the last 40 lines of face.log and face.err.log
 npm run service -- stop        # launchd lets go of the job; the plist stays, so start or the next login brings it back
@@ -192,6 +194,21 @@ holds the port` — so the uptime above it is that face's. `restart` stops a
 running job as `stop` does, with launchd's `bootout` (SIGTERM, then launchd's
 exit timeout), waits up to 10 s for the port to fall silent, and starts it as
 `start` does. The commands that drive launchd refuse off macOS.
+
+**The watchdog** (desk spec §16 H4). `install` puts a second LaunchAgent beside
+the face's, `com.gravit.face.watchdog`, which launchd runs every five minutes
+(the first five minutes after `install`): `scripts/watchdog.ts` checks the desk
+as `status --check` does, with no dsh and no model. On `2` (no answer on two
+tries 10 s apart) it runs the service's own `restart` once per outage and tells
+the phone; on `1` twice in a row it tells the phone once; back at `0` it says
+the desk answers again; on `3` (not installed, or stopped) it does nothing.
+While the desk's `OFF` pause holds it sends nothing, but still restarts. It
+keeps its state in `$DSH_HOME/face/desk/watchdog.json` and logs to
+`watchdog.log` and `watchdog.err.log` beside the face's; `status` prints a
+`watchdog:` line from it, and `npm run watchdog` runs one check by hand.
+`uninstall` takes it out first. A service installed before 2026-11-02 has no
+watchdog until `npm run service -- install` runs again. It sleeps when the Mac
+sleeps (`DEVELOPMENT.md` §9, R95).
 
 **First install on this Mac.** The checkout lives in `~/Desktop`, which macOS
 protects per process, as it does `~/Documents` and `~/Downloads`. A terminal
@@ -2388,8 +2405,8 @@ every desk conversation, never among the strategy's research.
 The desk's watch keeps an eye on your book between turns (the desk spec's P3, §5.5 and §15): it
 polls the prices of the US shares and A shares your files name, judges your levels and rules on
 each print, and sends each alert to the phone itself — the plan quoted verbatim, no model in its
-path — with, when the level or rule asks for one, one annotation turn on the desk session that
-answers as a reply. It informs and never orders. It runs in every face with the desk on, once the
+path — with, when the level or rule asks for one, one annotation turn that answers as a reply,
+in a desk session of its own (`src/annotator.ts`, spec §16 H1), so it never waits on your turns. It informs and never orders. It runs in every face with the desk on, once the
 desk conversation and the clock are up, and only when the Market's reads are wired (the Account
 running is what makes them answer); with nothing to watch it asks no calendar, polls nothing and
 says nothing.
@@ -2476,7 +2493,8 @@ Beijing`), what fired and from which file, the holding, the plan verbatim, the d
 last line is `annotation follows`, `no annotation: the desk's token budget for today is spent`,
 or none.
 
-**Annotations.** One annotation turn per poll's hits, posted on the desk session after the
+**Annotations.** One annotation turn per poll's hits, in a fresh desk session of its own (the
+annotation lane, `src/annotator.ts`; since spec §16 it never queues behind your turns) after the
 alerts went — `[alert · <SYMBOL> · <label>]`, or `[alerts · <n> · <HH:MM ET>]` for several — that
 checks each plan's conditions and stops; its answer comes as a reply to the alert, within its 90 s
 deadline. Its own failures come as replies too: `timed out after 90 s; a card or a long tool was
@@ -2484,7 +2502,8 @@ pending`, `the desk could not annotate this alert: <error>`, `the desk's check o
 with no text`. The budget stops annotations, never alerts; a paused desk sends neither, and each
 alert is still recorded (`suppressed: off`). Before each of your phone texts, while the desk
 session is idle, the face adds `[desk · state · <HH:MM ET>]` — every holding, the levels within
-2% and today's counts — so "sell half?" has the alert in context.
+2% and today's counts — so "sell half?" has the alert in context. A text that replies to an alert
+or to its check carries that alert and its check, as `the message this replies to:` (spec §16 H1b).
 
 **`/mute` and `unmute`.** From the phone, `/mute 30m` (`Nm`, `Nh` or `Nd` — a duration is
 required) silences the alerts: `alerts muted until 14:33 ET; detection and the ledger go on. A
@@ -2521,10 +2540,12 @@ second face on another home with the same Telegram token would watch too — sta
 `FACE_DESK=0`.
 
 **The ledgers.** `$DSH_HOME/face/desk/alerts.jsonl` holds every alert with its gate's decision, its
-delivery and latency, each batch and each annotation; `filings.jsonl` the filings' baseline and
+delivery and latency, each batch and each annotation, with the lane's `annotated` record of each
+check; `filings.jsonl` the filings' baseline and
 every filing seen; `events.jsonl` each mute and each file load. A restart rebuilds the day from
 `alerts.jsonl`, so no gap fires twice and the cooldowns and the hour's count hold (R75 has the
-edges). The pre-close brief lists the alerts and filings since the last brief, and `desk_state`
+edges); an alert a restart caught before it was sent goes late, `late: the face restarted …`, when
+it is younger than 10 minutes, and is named lost in one line otherwise (spec §16 H2, R92). The pre-close brief lists the alerts and filings since the last brief, and `desk_state`
 carries the watch's state.
 
 **In the browser: Markets › Desk.** The Markets screen's last tab, `Desk`, reads
@@ -3749,7 +3770,7 @@ and `node --test` gives each file its own:
 | `desk-smoke.test.ts` | the desk on a real tree, as `main.ts` installs it, its fixture root inside the repository so the repository's `GRAVIT.md` heads the chain: the `gravit-desk` session runs in `desk/journal/` under `workspace-write`; its tools are exactly `DESK_ALLOW` expanded on this tree plus `desk_quotes` and `desk_state`, each `mcp__*__<raw>` entry matching one server's tool, and neither desk tool reaches Gravit's session or the global view; the write tools take the path arguments the guard's write check reads, and `str_replace_editor`'s commands are `view`, `create`, `str_replace` and `insert`; the desk's prompt carries Gravit's persona prefix, the date and `# The desk`, and no cycle contract or roles section; a desk turn naming the order stand-in gets Gate 2's visibility refusal and its body never runs; a `write` to `../levels.yml` is refused by the sandbox inside the tool's content while a journal write lands, with no card; Gravit's own write of a `GRAVIT.md` lands; with a listener in front answering allow, the guard's backstop still denies the desk's write of `GRAVIT.md` and its read of a `.env` file, while Gravit's own read of that file goes through unjudged; `/stop` on a turn parked on an escalation card, two texts queued behind it, cuts that turn alone — recorded `cancelled`, `stopped from the phone` — and both texts are answered, in order; the desk's write of a journal `.gitignore` holding `!*` and of a `CLAUDE.md` are denied with no file written, and its read of a dot-config in the repository is denied by name while Gravit reads it; the read tools take exactly the parameters the read check reads; a `GRAVIT.md` planted in the journal reaches a desk session's first request behind the repository's, which is the threat the fence refuses, and the next post is refused with `desk-refused` and no turn; each supervised turn is one `desk-turn` with four token buckets and the stub's route |
 | `telegram-smoke.test.ts` | the bridge end to end on a real tree against a `node:http` Bot API stub on 127.0.0.1: the token and the operator's id come from the scratch home's `.env`, and the MCP child dsh spawns has the id and not the token; a stranger and a group are dropped and counted, unanswered, and the operator's `hi` is answered in the operator's chat; `/status` counts the drops and names the desk session; `/pause` writes `OFF` by `telegram`, a text then gets the paused line and opens no turn, and `/resume` is text that never reaches the model; a 503 queues the reply in the outbox and the next poll flushes it, in order, each reply sent once; a 409 is recorded and waited out; a card parked by an escalated write to `../levels.yml` is cut at the desk's deadline (1,500 ms here) with the timed-out line; the canary — the desk's write of `GRAVIT.md` is denied by the desk guard and no request carries a planted text, then a `GRAVIT.md` the harness plants is refused by the fence with no turn; its read case — `send me ~/.dsh/.env`: the read of the scratch home's `.env` is refused as outside the repository, the token handed to a market read is refused as a secret, no tool result carries the token or a second secret, and the stub's reply, which names both, reaches the phone as `I could not read it: <secret> <token>`; across the file every send went to the operator's chat, the token is in no file of the desk's directory, and no `STANDING.md`, `levels.yml`, `rules.yml` or `holdings.yml` changed |
 | `schedule-smoke.test.ts` | the standing orders' clock end to end, as `main.ts` installs the desk, on one early-close session (2026-11-27), a fake clock and calendar, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`: a firing a restart cut off is reported `interrupted` at boot and never run; the pre-close brief wakes one fresh `gravit-desk` session in `desk/journal` under `workspace-write`, with the armed text — hashing to its pin — and the producer's block in its wake message, and its final text reaches the phone; `firings.jsonl` holds `started`, `producer`, `woke` and `finished`, `events.jsonl` one `desk-turn` with `source: "schedule"` and four token buckets; a script producer's stderr reaches only the face's log; a turn waiting in a long tool is cut at its 10-minute deadline and the order queued behind it fires after; an edited text is refused with one line, then in silence, and fires once re-armed inside its grace; the pause refuses in silence and a spent budget with one line; an anchor slept across is `missed`; a `wake: false` order runs only its producer; a planted `GRAVIT.md` refuses the firing; the canary's firing half — a poisoned turn's writes of `../STANDING.md`, of `standing.yml` and of a journal `GRAVIT.md` are all refused, no card raised, every text and `standing.yml` unchanged — and a `GRAVIT.md` the harness plants refuses the next order; the clock's dispose cuts a firing in a long tool and settles; every text the desk sent went through the recorder. Then (P4) the strategies' book on 2026-11-30, a fake XSHG calendar beside the XNYS one and one fake quote source, in clock order: an A-share report on its Beijing date naming the screen that ran and its `TENCENT` close print; the canary in a strategy (five calls: it reads and rewrites `STANDING.md` and `levels.yml`, then tries the desk's `STANDING.md`), named by one outside-reports line and holding the next order by each pin in turn; two US reports at one anchor in file order; the fence in a strategy; a producer-only strategy order; the abort last |
-| `watch-smoke.test.ts` | the watch end to end, as `main.ts` installs the desk, on one fake source over a US and an A-share table, fake XNYS and XSHG calendars, a fake SEC, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`, with no route off the host (`FACE_ACCOUNT_URL=http://127.0.0.1:9`, no `ALPHA_EDGAR_USER_AGENT`): nothing polled before the window and the filings seeded silently; a US gap sent with its plan (`NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows`) and its annotation as a reply; a restart firing no second gap; the cooldown; the cap and the batch line; an A-share gap (`600519 1390 · TENCENT 09:30:02 Beijing`), nothing at the midday break; an annotation cut at its deadline and one whose model call fails, each its line as a reply; the phone's text preceded by the desk state naming both markets; an 8-K alerted, the A share never asked of SEC, and the pre-close brief on the same home listing the alerts and the filing; the canary's annotation half — a poisoned annotation's writes of `../rules.yml` and of `MUTE` refused, `levels.yml` and `rules.yml` unchanged, no card |
+| `watch-smoke.test.ts` | the watch end to end, as `main.ts` installs the desk, on one fake source over a US and an A-share table, fake XNYS and XSHG calendars, a fake SEC, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`, with no route off the host (`FACE_ACCOUNT_URL=http://127.0.0.1:9`, no `ALPHA_EDGAR_USER_AGENT`): nothing polled before the window and the filings seeded silently; a US gap sent with its plan (`NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows`) and its annotation as a reply, run in a session of its own (never the desk conversation's, which reaches the model for none of it) and recorded `annotated`; a restart firing no second gap; the cooldown; the cap and the batch line; an A-share gap (`600519 1390 · TENCENT 09:30:02 Beijing`), nothing at the midday break; an annotation cut at its deadline and one whose model call fails, each its line as a reply; the phone's text preceded by the desk state naming both markets; an 8-K alerted, the A share never asked of SEC, and the pre-close brief on the same home listing the alerts and the filing; the canary's annotation half — a poisoned annotation's writes of `../rules.yml` and of `MUTE` refused, `levels.yml` and `rules.yml` unchanged, no card |
 
 `bot-sandbox-smoke.test.ts` and `askuser-noclient-smoke.test.ts` also print one
 `observed:` line each (S4, S7), the measurements the bots spec's amendments were
@@ -5007,12 +5028,12 @@ inode.
 
 
 
-## The desk drill (run after any change to scripts/service.ts, scripts/desk.ts, src/desk*.ts, src/telegram.ts, src/market-quotes.ts, src/symbols.ts, src/{schedule,firing,standing,producer,market-clock,xshg-clock,brief,report}.ts, src/{watch,watch-eval,alert-text,edgar,filings}.ts or main.ts's exits)
+## The desk drill (run after any change to scripts/service.ts, scripts/watchdog.ts, scripts/desk.ts, src/desk*.ts, src/annotator.ts, src/telegram.ts, src/market-quotes.ts, src/symbols.ts, src/{schedule,firing,standing,producer,market-clock,xshg-clock,brief,report}.ts, src/{watch,watch-eval,alert-text,edgar,filings}.ts or main.ts's exits)
 
 The desk spec's drill (`../docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` §9 and
-§12 and §15), in five parts: P0's, the face as a service; P1's, the phone and Markets ›
-Desk; P2's, the clock and the pre-close brief; P3's, the watch; and P4's, a strategy's pre-market
-report.
+§12, §15 and §16), in six parts: P0's, the face as a service; P1's, the phone and Markets ›
+Desk; P2's, the clock and the pre-close brief; P3's, the watch; P4's, a strategy's pre-market
+report; and the hardening's three steps (§16).
 **Since the merge onto main (2026-11-01)** the browser's steps read Markets › Desk (`#/markets`,
 the Desk tab, the last), the old client's Desk panel having left with that client: its status,
 Pause, standing orders and firings; it lists no desk conversation and opens no session, so read
@@ -5231,7 +5252,9 @@ merged code, the browser signed in and Markets › Desk open:
    `TENCENT <HH:MM:SS> Beijing`; record its latency.
 3. The annotation. PASS: within 90 s of each alert the desk's check arrives as a reply to it,
    quoting the plan and each condition met or not met; `alerts.jsonl` has its `annotation` record
-   `opened`, and `events.jsonl` a `desk-turn` with `"source":"alert"`.
+   `opened` and, once the check has run, its `annotated` record; `events.jsonl` has a `desk-turn`
+   with `"source":"alert"` on a session that is not the desk conversation's (since §16 each check
+   runs in a desk session of its own).
 4. From the phone, `/mute 30m`; then let a level cross. PASS: `alerts muted until …`; no alert
    on the phone; Markets › Desk shows the mute and the alert `suppressed (muted)`, and
    `alerts.jsonl` its `alert` record with `"suppressed":"muted"`. Then `npm run desk -- unmute`
@@ -5299,3 +5322,50 @@ screen line against `analysis/`, and the report's tokens (`firings.jsonl`'s `fin
 
 **Not yet run.** The automated half passes 2026-11-02; the Market's real reads, a real Lunhui
 run, the phone and a real model are the operator's.
+
+### After the hardening (spec §16): the busy desk, the restart and the watchdog
+
+**The automated half, no launchd and no network.** `npm test` runs `annotator`, `watchdog` and
+the round's cases in `watch`, `watch-eval`, `alert-text`, `telegram`, `desk-conversation`,
+`desk-session`, `desk` and `service`; `FACE_SMOKE=1 npm test` boots `watch-smoke`, whose checks
+now run in sessions of their own. What only this drill checks: a real model's check while a phone
+turn runs, dsh's real resume after a real restart, and launchd running the watchdog.
+
+**The drill**, after P3's, on the service running this code. First run
+`npm run service -- install` again from the checkout the service runs, so the watchdog's plist is
+written. PASS: `install` prints `watchdog: …/com.gravit.face.watchdog.plist checks the desk every 5
+minutes (…)`, and after five minutes `npm run service -- status` prints a `watchdog:` line with a
+last check.
+
+1. **A busy desk.** From the phone, start a long turn (ask for something that reads several
+   files); while it runs, let an `annotate: true` level cross. PASS: the alert arrives at once, and
+   its check arrives as a reply within 90 s of the alert, before the long turn's answer if that
+   takes longer. `alerts.jsonl` has the pass's `annotated` record, and its `sessionId` is not the
+   desk conversation's (the newest `desk-session` line in `events.jsonl`). Record the alert's and
+   the check's times.
+2. **A restart.** From the phone, start a long turn, then send a second text, which queues behind
+   it. Do it twice, two ways:
+   - **a death:** `kill -9 <pid>`, the pid `status` prints, and let `KeepAlive` bring the face
+     back. PASS: soon after the boot the phone gets `a restart cut your message of <time> before
+     it was answered; send it again`, then the queued text's answer. `events.jsonl` has a
+     `desk-turn` with `"cancel":"restart"` and `"wallMs":0`, then the woken text's `desk-turn`.
+   - **a graceful restart:** `npm run service -- restart`. PASS: soon after the boot the phone
+     gets the queued text's answer - the shutdown kept it in the session's inbox and the boot's
+     wake answers it - and `events.jsonl` has the cut turn's `desk-turn` with
+     `"cancel":"shutdown"`, then the woken text's. The long turn the restart cut gets no line
+     (`DEVELOPMENT.md` §9, R93).
+3. **The watchdog.** `kill -STOP <pid>`, the face's pid as `status` prints it. PASS: within ten
+   minutes the phone gets one line, `the desk has not answered since <time> (no answer on 3090
+   (launchd: running, pid <pid>)); the watchdog restarted it`; the face answers again (a new pid in
+   `status`), and the next check says nothing more. `watchdog.log` holds `health 2 …`, the
+   restart's lines and `sent: …`. If the stopped pid is still there (`ps -p <pid>`) and launchd has
+   not replaced it, `kill -CONT <pid>`. Then `npm run watchdog` by hand logs `health 0 healthy`.
+   A `…; the restart failed: <reason>` line instead is a finding: a stopped face holds its port until
+   launchd kills it, so record the line and `watchdog.log`'s restart lines.
+
+**PASS is the install line and steps 1–3**, step 2's two halves both. Record
+the date, the commit, step 1's two times, step 2's lines and step 3's line and its time in
+`DEVELOPMENT.md` §7.4's hardening **Desk** row.
+
+**Not yet run.** The automated half passes 2026-11-02; launchd, the phone and a real model are the
+operator's.
