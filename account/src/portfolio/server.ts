@@ -126,6 +126,9 @@
  *                                                        bid and ask only, depth "top"); kept a second and a half
  *   GET  /api/account/trades?venue=&symbol=&limit=30      one market's latest trades, newest first; kept three seconds (a source that
  *                                                        publishes no trades at all: an empty list and `none`, the sentence saying so, 200)
+ *   GET  /api/account/connected/{explore,quotes,candles,book,trades}   the same reads, the same queries, for the venues connected to this
+ *                                                        account alone: no public line and no China (explore), and a public source named
+ *                                                        refused by name (409 E_WALLET_NOT_CONNECTED) — its public data is the market's
  *   GET  /api/account/earn?venue=&asset=                 Earn: the products the connected venues offer (the MetaMask Agent Wallet's
  *                                                        vaults through mm, OKX Simple Earn, Kraken Earn), what is in them, and the venues
  *                                                        that could not be read (money in or out is a signed liveEarn / agentLiveEarn)
@@ -840,6 +843,45 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     if (!q) return;
     if (q.limit && !/^\d{1,3}$/.test(q.limit)) return void bad(res, "limit is a count of trades, 1 to 100, in digits");
     answerOf(res, await svc.marketTrades(q.venue, q.symbol, q.limit ? Number(q.limit) : 30));
+  }));
+
+  // A CONNECTED VENUE'S OWN READS (service.ts connectedOnly, connectedExplore, connectedQuotes): what the venues connected to this account
+  // list and price, and one market's history, book and trades at one of them, with the query checks and status codes of the routes above.
+  // A public source named here is refused by name (409 E_WALLET_NOT_CONNECTED): its public data is the market's
+  app.get("/api/account/connected/explore", wrap(async (req, res) => {
+    if (!mounted(res)) return;
+    const q = strings(req, res, { tab: 20, q: 80, key: 240, sort: 20, limit: 6 });
+    if (!q) return;
+    if (q.limit && !/^\d{1,3}$/.test(q.limit)) return void bad(res, "limit is a count of markets, 1 to 200, in digits");
+    answerOf(res, await svc.connectedExplore({ tab: q.tab, q: q.q, key: q.key, sort: q.sort, ...(q.limit ? { limit: Number(q.limit) } : {}) }));
+  }));
+  app.get("/api/account/connected/quotes", wrap(async (req, res) => {
+    if (!mounted(res)) return;
+    const list = (v: unknown): string[] => (Array.isArray(v) ? v : v === undefined ? [] : [v]).filter((x): x is string => typeof x === "string");
+    const pairs = [...list(req.query.pairs).flatMap((x) => x.split(",")), ...list(req.query.pair)].map((x) => x.trim()).filter(Boolean);
+    const parsed = pairs.map((x) => ({ venue: x.slice(0, Math.max(0, x.indexOf("|"))), symbol: x.slice(x.indexOf("|") + 1).slice(0, 160) }));
+    if (parsed.some((p) => !p.venue || !p.symbol)) return void bad(res, "each market is venue|symbol, e.g. okx|BTC/USDT");
+    answerOf(res, await svc.connectedQuotes(parsed), "quotes");
+  }));
+  app.get("/api/account/connected/candles", wrap(async (req, res) => {
+    if (!mounted(res)) return;
+    const q = strings(req, res, { venue: 60, symbol: 200, interval: 4, range: 4, before: 16, limit: 6 });
+    if (!q) return;
+    answerOf(res, svc.connectedOnly(q.venue) ?? await svc.candles(q.venue, q.symbol, q.interval, { range: q.range, before: q.before, limit: q.limit }));
+  }));
+  app.get("/api/account/connected/book", wrap(async (req, res) => {
+    if (!mounted(res)) return;
+    const q = strings(req, res, { venue: 60, symbol: 200, depth: 4 });
+    if (!q) return;
+    if (q.depth && !/^\d{1,2}$/.test(q.depth)) return void bad(res, "depth is a count of levels a side, 1 to 50, in digits");
+    answerOf(res, svc.connectedOnly(q.venue) ?? await svc.marketBook(q.venue, q.symbol, q.depth ? Number(q.depth) : 20));
+  }));
+  app.get("/api/account/connected/trades", wrap(async (req, res) => {
+    if (!mounted(res)) return;
+    const q = strings(req, res, { venue: 60, symbol: 200, limit: 5 });
+    if (!q) return;
+    if (q.limit && !/^\d{1,3}$/.test(q.limit)) return void bad(res, "limit is a count of trades, 1 to 100, in digits");
+    answerOf(res, svc.connectedOnly(q.venue) ?? await svc.marketTrades(q.venue, q.symbol, q.limit ? Number(q.limit) : 30));
   }));
 
   // EARN: the products the venues connected live offer, in one asset when asked, and what is in them (each venue not read is in `missing`)

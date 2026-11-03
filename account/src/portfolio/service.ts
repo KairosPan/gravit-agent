@@ -178,6 +178,8 @@ export interface ServiceOptions {
 export const CHINA_SEARCH_WAIT_MS = 4_000;
 const CHINA_NOT_READ = "China is not read on this account";
 /** no price for anything: a service made without the market's link (server.ts main hands its remotePrice in) prices nothing it cannot price itself */
+/** a Markets question (explore, connectedExplore) */
+type ExploreAsk = { tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined };
 const noPrice: Price = () => Promise.resolve(undefined);
 
 /** one slice of an order (or any step an agent flies): where, what, and the agent's words for it */
@@ -924,42 +926,24 @@ export class PortfolioService {
    * trades, are always read. The same question is answered from what was found for thirty seconds; each venue's reads are kept as `kept`
    * keeps them. `key`, a row's own exactly as `items` names it, keeps only that row (live/explore.ts ExploreOptions.key). Nothing is ordered
    * or signed */
-  async explore(o: { tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined } = {}): Promise<Exploration | Refusal> {
-    if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted" });
-    const tab = o.tab?.trim() || undefined;
-    if (tab !== undefined && !TABS.some((t) => t.id === tab)) return no("E_ACCOUNT_BAD_ACTION", { message: `a tab is one of ${TABS.map((t) => t.id).join(", ")}` });
-    const sort = o.sort?.trim() || undefined;
-    if (sort !== undefined && !EXPLORE_SORTS.includes(sort as ExploreSort)) return no("E_ACCOUNT_BAD_ACTION", { message: `markets are sorted by ${EXPLORE_SORTS.join(", ")}` });
-    const q = (o.q ?? "").trim();
-    if (q.length > 60) return no("E_ACCOUNT_BAD_ACTION", { message: "a search is at most 60 characters" });
-    const key = (o.key ?? "").trim();
-    if (key.length > 200) return no("E_ACCOUNT_BAD_ACTION", { message: "a row's key is at most 200 characters" });
-    const limit = o.limit === undefined ? 60 : Math.floor(o.limit);
-    if (!(limit >= 1 && limit <= 200)) return no("E_ACCOUNT_BAD_ACTION", { message: "a limit is 1 to 200 markets" });
+  async explore(o: ExploreAsk = {}): Promise<Exploration | Refusal> {
+    const ask = this.exploreAsk(o);
+    if (isRefusal(ask)) return ask;
+    const { tab, sort, q, key, limit } = ask;
     // CHINA is its own tab, asked of its own source (which keeps its reads): never kept here, never in All
     if (tab === "china") return this.exploreChina(q, sort, limit);
     // a search on All asks China too, beside the other sources and within their budget; no other tab ever asks it
     const china = q && !key && (tab === undefined || tab === "all") ? this.opts.china : undefined;
     // each connected venue with the connection it was made with: exploreAcross leaves out the public source that connection speaks for
     // and its own place rule for this network, where it has one that bars an order from here (placed)
-    const connected: ExploreVenue[] = this.tradingVenues().map((v) => {
-      const connector = this.adapters.get(v.id)?.account.connector;
-      return { id: v.id, name: v.name, trader: this.kept(v), ...(connector ? { connector } : {}), ...(v.paper ? { paper: true as const } : {}) };
-    });
+    const connected = this.exploreVenues();
     // the key exactly as asked (a row's key is not a search: kalshi:KXFED and kalshi:kxfed are not one row), written so that no `|` in it
     // reads as the next part of the question
     // kept under the public list it was made from (publicGen): a list that fills in or changes (the market answering again) is not hidden
     // behind an answer made without it
     const pub = this.publicMarkets();
     return this.marketReads.get(`explore|${this.publicGen}|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}`, 30_000, async (): Promise<Exploration | Refusal> => {
-      const placed = await Promise.all(connected.map(async (v) => ({ ...v, ...(await this.placed(v.connector)) })));
-      // what is listed is what serves the network the account runs on: a connected venue that does not now (its place rule, its edge, or
-      // its trading line closed here), and a public source whose venue the list of where the user can connect judged not served or with
-      // no way in, are left out — named in a note, without their words
-      const away = new Set(placed.filter((v) => notServedBy(this.shutNow(v.id)) !== undefined || v.place?.rule === "closed").map((v) => v.id));
-      // close-only too, for a venue not connected: nothing held there to sell, and nothing it would take from here
-      const refusing = new Set((this.venuesKept?.v ?? []).filter((x) => x.verdict === "not-served" || x.verdict === "closed" || x.verdict === "close-only").map((x) => x.connector));
-      const serves = (r: { id: string; connected: boolean; connector?: string | undefined }): boolean => (r.connected ? !away.has(r.id) : !(r.connector !== undefined && refusing.has(r.connector)));
+      const { placed, serves } = await this.placedServing(connected);
       const [explored, hits] = await Promise.all([
         exploreAcross({ connected: placed, public: pub }, { q, ...(key ? { key } : {}), limit, clock: () => this.realNow(), serves, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) }),
         china ? within(CHINA_SEARCH_WAIT_MS, china.search(q), CHINA_ID, CHINA_NAME) : undefined,
@@ -971,6 +955,80 @@ export class PortfolioService {
       // an answer a source was missing from because the market service did not answer is kept only as long as that holds the source back:
       // a market that is back is listed again within seconds, not after thirty
     }, undefined, false, (v) => (!isRefusal(v) && v.missing.some((m) => m.why === MARKET_DOWN) ? MARKET_DOWN_HOLD_MS : undefined));
+  }
+
+  /** a Markets question's checks, the same for the account's whole list and for its connected half alone: the tab, the sort, the search,
+   * the row's key and the limit, each in the account's words */
+  private exploreAsk(o: ExploreAsk): { tab: string | undefined; sort: string | undefined; q: string; key: string; limit: number } | Refusal {
+    if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted" });
+    const tab = o.tab?.trim() || undefined;
+    if (tab !== undefined && !TABS.some((t) => t.id === tab)) return no("E_ACCOUNT_BAD_ACTION", { message: `a tab is one of ${TABS.map((t) => t.id).join(", ")}` });
+    const sort = o.sort?.trim() || undefined;
+    if (sort !== undefined && !EXPLORE_SORTS.includes(sort as ExploreSort)) return no("E_ACCOUNT_BAD_ACTION", { message: `markets are sorted by ${EXPLORE_SORTS.join(", ")}` });
+    const q = (o.q ?? "").trim();
+    if (q.length > 60) return no("E_ACCOUNT_BAD_ACTION", { message: "a search is at most 60 characters" });
+    const key = (o.key ?? "").trim();
+    if (key.length > 200) return no("E_ACCOUNT_BAD_ACTION", { message: "a row's key is at most 200 characters" });
+    const limit = o.limit === undefined ? 60 : Math.floor(o.limit);
+    if (!(limit >= 1 && limit <= 200)) return no("E_ACCOUNT_BAD_ACTION", { message: "a limit is 1 to 200 markets" });
+    return { tab, sort, q, key, limit };
+  }
+
+  /** each connected venue with the connection it was made with: exploreAcross leaves out the public source that connection speaks for */
+  private exploreVenues(): ExploreVenue[] {
+    return this.tradingVenues().map((v) => {
+      const connector = this.adapters.get(v.id)?.account.connector;
+      return { id: v.id, name: v.name, trader: this.kept(v), ...(connector ? { connector } : {}), ...(v.paper ? { paper: true as const } : {}) };
+    });
+  }
+
+  /** the connected venues with their own place rule for this network, where one bars an order from here (placed), and what is listed:
+   * what serves the network the account runs on */
+  private async placedServing(connected: ExploreVenue[]): Promise<{ placed: ExploreVenue[]; serves: (r: { id: string; connected: boolean; connector?: string | undefined }) => boolean }> {
+    const placed = await Promise.all(connected.map(async (v) => ({ ...v, ...(await this.placed(v.connector)) })));
+    // what is listed is what serves the network the account runs on: a connected venue that does not now (its place rule, its edge, or
+    // its trading line closed here), and a public source whose venue the list of where the user can connect judged not served or with
+    // no way in, are left out — named in a note, without their words
+    const away = new Set(placed.filter((v) => notServedBy(this.shutNow(v.id)) !== undefined || v.place?.rule === "closed").map((v) => v.id));
+    // close-only too, for a venue not connected: nothing held there to sell, and nothing it would take from here
+    const refusing = new Set((this.venuesKept?.v ?? []).filter((x) => x.verdict === "not-served" || x.verdict === "closed" || x.verdict === "close-only").map((x) => x.connector));
+    const serves = (r: { id: string; connected: boolean; connector?: string | undefined }): boolean => (r.connected ? !away.has(r.id) : !(r.connector !== undefined && refusing.has(r.connector)));
+    return { placed, serves };
+  }
+
+  /** A VENUE CONNECTED TO THIS ACCOUNT, or the refusal that says it is not one: a public source's data, asked here by name, is the
+   * market's (the connected routes, /api/account/connected/…) */
+  connectedOnly(venue: string): Refusal | undefined {
+    const id = venue.trim();
+    if (this.adapters.get(id)?.account.watchOnly && this.liveVenues.get(id)) return undefined;
+    return no("E_WALLET_NOT_CONNECTED", { venue: id, message: `"${id.slice(0, 40)}" is not a venue connected to this account: its public data is the market's` });
+  }
+
+  /** MARKETS, THE CONNECTED HALF: what the venues the owner connected list, with the same checks, the same rule of what serves this network
+   * and the same thirty seconds as explore — and no public line and no China, which are the market's to answer */
+  async connectedExplore(o: ExploreAsk = {}): Promise<Exploration | Refusal> {
+    const ask = this.exploreAsk(o);
+    if (isRefusal(ask)) return ask;
+    const { tab, sort, q, key, limit } = ask;
+    if (tab === "china") return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "China is the market's: its explore answers it" });
+    const connected = this.exploreVenues();
+    return this.marketReads.get(`connected-explore|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}`, 30_000, async (): Promise<Exploration | Refusal> => {
+      const { placed, serves } = await this.placedServing(connected);
+      return exploreAcross({ connected: placed, public: [] }, { q, ...(key ? { key } : {}), limit, clock: () => this.realNow(), serves, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) });
+    });
+  }
+
+  /** a fresh price for each of 1 to 12 markets at the venues connected to this account, by quotes' rules: any other pair carries the
+   * refusal that names it not connected */
+  async connectedQuotes(pairs: Array<{ venue: string; symbol: string }>): Promise<Array<{ venue: string; symbol: string; market?: Market; refusal?: Refusal }> | Refusal> {
+    if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted" });
+    if (!pairs.length || pairs.length > 12) return no("E_ACCOUNT_BAD_ACTION", { message: "quotes are asked for 1 to 12 markets at once, each venue|symbol" });
+    return Promise.all(pairs.map(async (p) => {
+      const not = this.connectedOnly(p.venue);
+      if (not) return { ...p, refusal: not };
+      const r = await this.liveMarket(p.venue, p.symbol);
+      return isRefusal(r) ? { ...p, refusal: r } : { ...p, market: r };
+    }));
   }
 
   /** THE CHINA TAB: Tencent's ranking by turnover (`volume`, the default) or by the day's move (`movers`), at most RANK_ROWS rows, with its
