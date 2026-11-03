@@ -23,7 +23,7 @@ export const GRAVIT_PLUGIN_ABS = join(REPO, "face", "plugins", "gravit.js");
  *  stand-in for the repository's own: one row, the gravit plugin with
  *  `config: {}` (the shipped `bots/gravit/agent.cordis.yml` is the generated
  *  mirror of `roles/` - the gravit row carrying the role summaries, then one
- *  `dsh-tool-subagent` row per role). `gravitPlugin` spells that row's name.
+ *  `plugins/role.mjs` row per role). `gravitPlugin` spells that row's name.
  *  The default is the SHIPPED relative path, which the face's rebase lands on
  *  the real file only from a root two levels above `face/` (see
  *  {@link makeRepoBotsRoot}); a temp root passes {@link GRAVIT_PLUGIN_ABS}.

@@ -7,7 +7,7 @@
  * That set exists because every web-app session mounts a full preset that
  * re-declares the tools; Gravit's `gravit` preset masks no tool (composeFace
  * renders it from `roles/`: the gravit plugin, whose date section and role
- * summaries it carries, and one `dsh-tool-subagent` row per role), so the face
+ * summaries it carries, and one `plugins/role.mjs` row per role), so the face
  * keeps dsh-base's flat host roster and Gravit keeps its tools and gains the
  * `role_*` ones (MAP overlay-rows §5).
  * Static config replaces the webStartup/webRuntime `!!js` expressions: no
@@ -63,7 +63,7 @@ export interface FacePatchEntry {
 export const BOTS_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "bots");
 /** The preset every session that names none joins (spec S3). `composeFace`
  * renders it from `roles/` in memory (src/boot.ts; src/roles.ts `gravitRows`):
- * the face's gravit plugin row, then one `dsh-tool-subagent` row per role. None
+ * the face's gravit plugin row, then one `plugins/role.mjs` row per role. None
  * masks a tool, so Gravit's roster is the host's flat roster plus the `role_*`
  * tools. */
 export const DEFAULT_PRESET = "gravit";
@@ -77,6 +77,9 @@ export const DEFAULT_PRESET = "gravit";
  * default is built in memory and names the plugin by `GRAVIT_PLUGIN_URL`
  * (src/roles.ts), the same URL. */
 export const GRAVIT_PLUGIN_RELATIVE = "../../face/plugins/gravit.js";
+/** The role rows' plugin as the same mirror spells it, rebased the same way; the booted default
+ * names it by `ROLE_PLUGIN_URL` (src/roles.ts). */
+export const ROLE_PLUGIN_RELATIVE = "../../face/plugins/role.mjs";
 /** The agent's preset id before the 2026-10-08 rename. Sessions created before it
  * persist this id, and dsh resolves a session's stored preset through
  * `AgentPresetRegistry.retain` (pkg/dsh-agent-preset-registry/lib/index.js), which
@@ -244,7 +247,7 @@ export function faceOverlay(port: number, defaultPreset: AgentPresetConfig, host
       /* The default preset, declared STATICALLY so it exists before the first
        * `session/create`. Its plugins are what `composeFace` renders from
        * `roles/` (src/boot.ts): the gravit plugin, whose date section and role
-       * summaries it carries, then one `dsh-tool-subagent` row per role. None
+       * summaries it carries, then one `plugins/role.mjs` row per role. None
        * masks a tool, so the host composition's roster is kept and gains the
        * `role_*` tools; the mirror bots/gravit/agent.cordis.yml shows readers
        * the same list. (An empty list is accepted too:

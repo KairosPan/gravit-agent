@@ -106,29 +106,44 @@
           - 只写请求的模块，不补其余；被 ALREADY_SUBMITTED、STALE_MARKET_RUN、MISSING_EVIDENCE 拒绝时如实回报并结束，不换运行、不自行开新的市场运行、不改结论。
           - 最后：cn-market 的 environment、sentiment、theme、counterevidence 调用 lunhui_present 作答并写明 module；leader、mode 与策略频道只报模块要点、是否 NOT_EVALUABLE 及缺哪些来源、行情是否 delayed。
 - id: role-cn-market-analyst
-  name: '@deepseek-ai/dsh-tool-subagent'
+  name: ../../face/plugins/role.mjs
   config:
-    provider: spawn
-    toolName: role_cn_market_analyst
+    tool: role_cn_market_analyst
+    name: CN market analyst
+    summary: Reads one frozen cn-market run's environment, sentiment and theme contexts, in that order, or the one module the brief names, and submits each module's validated artifact through its submit tool.
     agentPreset: role-cn-market-analyst
-    agentOptions:
-      provider: deepseek-official
-      model: deepseek-flash
+    allow:
+      - skill
+      - lunhui_read_environment_context
+      - lunhui_submit_environment
+      - lunhui_read_sentiment_context
+      - lunhui_submit_sentiment
+      - lunhui_read_theme_context
+      - lunhui_submit_theme
+    model: deepseek-official/deepseek-flash
 - id: role-cn-reviewer
-  name: '@deepseek-ai/dsh-tool-subagent'
+  name: ../../face/plugins/role.mjs
   config:
-    provider: spawn
-    toolName: role_cn_reviewer
+    tool: role_cn_reviewer
+    name: CN reviewer
+    summary: Reads one run's counterevidence context, a cn-market run or a strategy run citing a sealed cn-market run, and submits the counterevidence artifact through its submit tool - items against the accepted artifacts the context shows, each citing evidence; an empty list is a result.
     agentPreset: role-cn-reviewer
-    agentOptions:
-      provider: deepseek-official
-      model: deepseek-flash
+    allow:
+      - skill
+      - lunhui_read_counterevidence_context
+      - lunhui_submit_counterevidence
+    model: deepseek-official/deepseek-flash
 - id: role-cn-stock-analyst
-  name: '@deepseek-ai/dsh-tool-subagent'
+  name: ../../face/plugins/role.mjs
   config:
-    provider: spawn
-    toolName: role_cn_stock_analyst
+    tool: role_cn_stock_analyst
+    name: CN stock analyst
+    summary: Reads one strategy run's leader or mode context, citing a sealed cn-market run, and submits that module's validated artifact through its submit tool; a mode is a daily registration, WAIT when its preconditions lack a source.
     agentPreset: role-cn-stock-analyst
-    agentOptions:
-      provider: deepseek-official
-      model: deepseek-flash
+    allow:
+      - skill
+      - lunhui_read_leader_context
+      - lunhui_submit_leader
+      - lunhui_read_mode_context
+      - lunhui_submit_mode
+    model: deepseek-official/deepseek-flash

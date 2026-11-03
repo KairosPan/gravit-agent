@@ -11,11 +11,11 @@
  * `allow` names are EXACT, and a wildcard is refused where the file is read: the list is
  * the role's mask, matched by name.
  *
- * ONE PRESET PER ROLE (spec D20/B1). At dsh 0.2.1 a `dsh-tool-subagent` row takes no
- * persona, tool filter or background mode - it throws at load ("persona is no longer
- * supported; configure persona and tool plugins in an Agent Preset and select it with
- * agentPreset", installed dsh-tool-subagent `lib/index.js`) - so a role's persona and mask
- * live in a preset of its own, `role-<id>` ({@link rolePresetDefinition}): the face's
+ * ONE PRESET PER ROLE (spec D20/B1). At dsh 0.2.1 a delegation tool row takes no persona,
+ * tool filter or background mode (installed dsh-tool-subagent `lib/index.js` throws at load:
+ * "persona is no longer supported; configure persona and tool plugins in an Agent Preset and
+ * select it with agentPreset"), so a role's persona and mask live in a preset of its own,
+ * `role-<id>` ({@link rolePresetDefinition}): the face's
  * `gravit` row with an empty config (the date section alone) and `plugins/bot.js` with
  * `{ persona, allow }`, whose `tools.restrict` mask every child that selects the preset
  * joins. The face declares the presets after boot, beside the bots and the desk
@@ -24,7 +24,7 @@
  * preset none of whose names exists is listed broken, and `bootFace` refuses the boot on
  * it ({@link roleRosterProblem}). Whether a named tool exists when the role is CALLED -
  * an MCP tool exists as `mcp__<server>__<raw>` under the server name the installed profile
- * mounts - is the role tool's check at call time, not this directory's.
+ * mounts - is the role tool's check at call time (plugins/role.mjs), not this directory's.
  *
  * A role never carries what a delegated child cannot use or must not hold: a tool that needs
  * a human, the open web, delegation, the cycle's goal and todo bookkeeping, the reserved PTC
@@ -41,7 +41,8 @@
  * {@link gravitRows} renders the roles as Gravit's composition: the `gravit` plugin row,
  * whose config carries each role's tool and summary for the `gravit:roles` section
  * (plugins/gravit.js) and, when given, the cycle and the run protocols, then one
- * `@deepseek-ai/dsh-tool-subagent` row per role, which selects the role's preset.
+ * `plugins/role.mjs` row per role (D20), whose `role_<id>` tool starts a child on the role's
+ * preset and returns its report.
  * {@link renderGravitComposition} dumps those rows as `bots/gravit/agent.cordis.yml`, a
  * GENERATED mirror (`cd face && npm run render:roles`); tests/roles.test.ts fails while the
  * committed file differs from the render.
@@ -51,13 +52,12 @@ import { readdirSync, readFileSync, type Dirent } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { entryListSchema } from "@deepseek-ai/cordis-plugin-include";
-import type { Config as ToolSubagentConfig } from "@deepseek-ai/dsh-tool-subagent";
 import { dump, load } from "js-yaml";
 import type { PresetDefinition } from "@deepseek-ai/dsh-agent-preset-registry";
 import type { PresetRow } from "./bot-presets.ts";
 import { MODEL_ROUTE_RE, ROLE_PRESET_PREFIX } from "./bots.ts";
 import type { Protocol } from "./protocols.ts";
-import { GRAVIT_PLUGIN_RELATIVE } from "./overlay.ts";
+import { GRAVIT_PLUGIN_RELATIVE, ROLE_PLUGIN_RELATIVE } from "./overlay.ts";
 
 /** The repository's role directory - where the face reads the role library from.
  *  Module-relative, as `BOTS_ROOT` is. */
@@ -272,7 +272,7 @@ export function readRoles(root: string): RoleFile[] {
 
 /** The id of Gravit's own plugin row; `bots/gravit/agent.cordis.yml` leads with it. */
 export const GRAVIT_ROW_ID = "gravit";
-/** The id of a role's `dsh-tool-subagent` row. */
+/** The id of a role's `plugins/role.mjs` row. */
 export const roleRowId = (id: string): string => "role-" + id;
 /** `plugins/gravit.js` as the in-memory form of the row's `name`: an absolute `file:` URL,
  *  module-relative, which the face's rebase passes through untouched (`rebaseName` in
@@ -283,7 +283,9 @@ export const GRAVIT_PLUGIN_URL: string = pathToFileURL(join(dirname(fileURLToPat
  *  DECLARING context's base (NEW agent-preset-registry/src/index.ts:108, src/mount.ts:258-264), so a
  *  relative spelling would miss the file; a `file:` URL resolves the same from any base. */
 export const BOT_PLUGIN_URL: string = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "..", "plugins", "bot.js")).href;
-const TOOL_SUBAGENT_PLUGIN = "@deepseek-ai/dsh-tool-subagent";
+/** `plugins/role.mjs` as a role row's `name` (D20), built the way {@link GRAVIT_PLUGIN_URL} is; the committed
+ *  mirror spells it {@link ROLE_PLUGIN_RELATIVE}, which `definitionFor` rebases to this same URL. */
+export const ROLE_PLUGIN_URL: string = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "..", "plugins", "role.mjs")).href;
 const BIN = "gravit-face";
 
 /** A role's preset id: {@link ROLE_PRESET_PREFIX} plus the role id (`cn-reviewer` is `role-cn-reviewer`).
@@ -294,7 +296,8 @@ export const rolePresetId = (id: string): string => ROLE_PRESET_PREFIX + id;
  *  section, no role list, no cycle, no desk - and `plugins/bot.js` with the role's persona and a COPY of
  *  its allow list as the mask. Pure: every call builds fresh rows, so no caller can reach the role's own
  *  list through one. `model` is not here: a preset carries no route (NEW
- *  agent-preset-registry/src/definition.ts:5-11); it rides on the role's tool row as `agentOptions`. */
+ *  agent-preset-registry/src/definition.ts:5-11); it rides on the role's tool row, which hands it to the
+ *  child as its agent options (plugins/role.mjs). */
 export function rolePresetDefinition(role: RoleFile): PresetDefinition {
   return {
     id: rolePresetId(role.id),
@@ -323,6 +326,8 @@ export function roleRosterProblem(roster: readonly { id: string; broken?: string
 export interface GravitRowsOptions {
   /** The first row's `name`: how this composition spells the plugin. */
   plugin: string;
+  /** Each role row's `name`: how this composition spells `plugins/role.mjs`. */
+  rolePlugin: string;
   /** The text of the `gravit:cycle` section; absent when there is none. */
   cycle?: string;
   /** The run protocols, one section each (src/protocols.ts); absent when there are none. */
@@ -332,12 +337,13 @@ export interface GravitRowsOptions {
 /**
  * Gravit's composition rows for `roles`: the `gravit` plugin row first, its config the
  * summaries (and the cycle text and the protocols, when given) the plugin turns into
- * sections, then one `@deepseek-ai/dsh-tool-subagent` row per role. The role row is a spawn
- * child that selects the role's own preset ({@link rolePresetId}, which carries the persona
- * and the mask) and runs on its route when `role.yml` names one; `dsh-tool-subagent` has no
- * description key, which is why the summaries ride on the first row. Pure: the same roles
- * give the same rows. The row is this upgrade's interim shape: the role tool moves to a
- * face-owned tool that resolves the preset at call time.
+ * sections, then one `plugins/role.mjs` row per role (D20). The role row registers the
+ * role's tool, which starts a one-shot child on the role's own preset ({@link rolePresetId},
+ * which carries the persona and the mask) - resolved when the tool is called, not when a
+ * Gravit agent is created - on the role's route when `role.yml` names one, and returns the
+ * child's report; it carries a copy of the allow list, the names the tool checks before any
+ * child starts. The summary rides on both rows: the tool's description, and the `gravit:roles`
+ * list. Pure: the same roles give the same rows.
  */
 export function gravitRows(roles: readonly RoleFile[], options: GravitRowsOptions): PresetRow[] {
   return [
@@ -352,14 +358,15 @@ export function gravitRows(roles: readonly RoleFile[], options: GravitRowsOption
     },
     ...roles.map((role): PresetRow => ({
       id: roleRowId(role.id),
-      name: TOOL_SUBAGENT_PLUGIN,
+      name: options.rolePlugin,
       config: {
-        provider: "spawn",
-        toolName: role.tool,
+        tool: role.tool,
+        name: role.name,
+        summary: role.description,
         agentPreset: rolePresetId(role.id),
-        /* `model` is `<provider>/<model>` with exactly two segments (MODEL_ROUTE_RE). */
-        ...(role.model === undefined ? {} : { agentOptions: { provider: role.model.split("/")[0], model: role.model.split("/")[1] } }),
-      } satisfies ToolSubagentConfig,
+        allow: [...role.allow],
+        ...(role.model === undefined ? {} : { model: role.model }),
+      },
     })),
   ];
 }
@@ -370,9 +377,9 @@ const GENERATED_HEADER =
   "# cd face && npm run render:roles   (tests/roles.test.ts fails while this file differs from the render)\n";
 
 /** The text of `bots/gravit/agent.cordis.yml`: the generated header, then {@link gravitRows}
- *  with the plugin spelled by its shipped relative path, dumped in the Loader's own dialect
+ *  with the plugins spelled by their shipped relative paths, dumped in the Loader's own dialect
  *  as `renderComposition` (src/bots.ts) dumps a bot's. `face/scripts/render-roles.ts` writes it. */
 export function renderGravitComposition(roles: readonly RoleFile[], options: { cycle?: string; protocols?: readonly Protocol[] }): string {
-  const rows = gravitRows(roles, { plugin: GRAVIT_PLUGIN_RELATIVE, cycle: options.cycle, protocols: options.protocols });
+  const rows = gravitRows(roles, { plugin: GRAVIT_PLUGIN_RELATIVE, rolePlugin: ROLE_PLUGIN_RELATIVE, cycle: options.cycle, protocols: options.protocols });
   return GENERATED_HEADER + dump(rows, { schema: entryListSchema, lineWidth: -1, noRefs: true });
 }

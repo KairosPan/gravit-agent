@@ -124,7 +124,7 @@ import { provideCmdline, type AppReady } from "@deepseek-ai/dsh-cmdline";
 import type { Config as SystemPromptConfig } from "@deepseek-ai/dsh-system-prompt";
 import { BOTS_ROOT, DEFAULT_PRESET, LEGACY_PRESET, SYSTEM_PROMPT_ROW_ID, faceOverlay } from "./overlay.ts";
 import { declareBots, declarePreset, definitionFor, type BotPresets } from "./bot-presets.ts";
-import { GRAVIT_PLUGIN_URL, ROLES_ROOT, gravitRows, readRoles, rolePresetDefinition, roleRosterProblem, type RoleFile } from "./roles.ts";
+import { GRAVIT_PLUGIN_URL, ROLE_PLUGIN_URL, ROLES_ROOT, gravitRows, readRoles, rolePresetDefinition, roleRosterProblem, type RoleFile } from "./roles.ts";
 import { PERSONA_PATH, readPersona } from "./persona.ts";
 import { CYCLE_PATH, DESK_PATH, readCycle, readDesk } from "./cycle.ts";
 import { declareDeskPreset, deskPresetDefinition, deskRosterProblem } from "./desk-preset.ts";
@@ -441,9 +441,9 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * the role summaries, the research-cycle contract (`readCycle`, read beside
    * the roles and refusing the compose the same way) and the run protocols
    * (`readProtocols`, read and refused the same way), named by an absolute
-   * `file:` URL - then one `@deepseek-ai/dsh-tool-subagent` row per role, each
-   * registering a `role_<id>` tool that selects the role's own preset,
-   * `role-<id>` (D20/B1). Those presets are NOT static rows here: `bootFace`
+   * `file:` URL - then one `plugins/role.mjs` row per role (D20), each
+   * registering a `role_<id>` tool that starts a child on the role's own preset,
+   * `role-<id>` (B1), resolved when the tool is called. Those presets are NOT static rows here: `bootFace`
    * declares them from the `roles` this function hands back once the tree has
    * settled, since eager activation would mount their masks before the MCP
    * rows' tools exist and nothing needs them before the first role call. None
@@ -469,7 +469,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * row never carries it: a preset carries one contract or the other. */
   const desk = readDesk(opts.deskPath ?? DESK_PATH);
   const protocols = readProtocols(opts.protocolsDir);
-  const gravit = definitionFor(opts.botsRoot ?? BOTS_ROOT, DEFAULT_PRESET, gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, cycle, protocols }));
+  const gravit = definitionFor(opts.botsRoot ?? BOTS_ROOT, DEFAULT_PRESET, gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, rolePlugin: ROLE_PLUGIN_URL, cycle, protocols }));
   patches.push(...faceOverlay(opts.port, gravit));
   return { patches, rootConfig, profile, desk, roles };
 }
@@ -1044,10 +1044,10 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
      * eagerly at the declaration, so it must find the settled tree - a name the tree lacks is dropped
      * with one warning and admitted when it registers; a preset with none of its names is listed broken,
      * which the roster check below refuses. Not survivable either: a refused declaration throws into this
-     * try's catch. The role rows in Gravit's preset (`dsh-tool-subagent`, `agentPreset: role-<id>`)
-     * check the id when a Gravit agent is created, so a `session/create` racing these declarations fails
-     * agent-preset/not-found loudly rather than joining a role to nothing. Disposed with the root, as the
-     * bots and the desk are. */
+     * try's catch. The role tools in Gravit's preset (plugins/role.mjs, D20) name `role-<id>` only when
+     * they are called, so a `session/create` racing these declarations creates Gravit as usual; a role
+     * called before its preset is declared fails that call with dsh's agent-preset/not-found. Disposed
+     * with the root, as the bots and the desk are. */
     for (const role of roles) await declarePreset(ctx, rolePresetDefinition(role), "role preset");
     let roster: { id: string; broken?: string }[];
     try {

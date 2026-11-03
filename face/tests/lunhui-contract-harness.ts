@@ -26,8 +26,8 @@ const TENCENT = fileURLToPath(new URL("./fixtures/lunhui/", import.meta.url));
 const EASTMONEY = fileURLToPath(new URL("./fixtures/lunhui-eastmoney/", import.meta.url));
 /** Friday 2026-10-23, 15:00 in China: after the close of a covered trading day. */
 const FRIDAY = new Date("2026-10-23T07:00:00.000Z");
-/** A delegated role child's session header. */
-export const ROLE = { origin: "subagent" };
+/** A delegated role child's session header: a spawn child on a role's own preset. */
+export const ROLE = { origin: "subagent", agentPreset: "role-cn-market-analyst" };
 /** The boards the fixtures hold member lists for. */
 export const BOARDS = ["BK0715", "BK1716"];
 

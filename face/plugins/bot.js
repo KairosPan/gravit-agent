@@ -1,7 +1,8 @@
 // face/plugins/bot.js
 /**
  * `gravit-bot` — the one plugin every bot composition mounts, and the mask of
- * the desk's preset (MASK ONLY, below).
+ * the desk's preset (MASK ONLY, below). The same row also carries a role
+ * preset's persona and mask (`role-<id>`, src/roles.ts `rolePresetDefinition`).
  *
  * A bot is a dsh agent preset the FACE declares (src/bot-presets.ts): dsh
  * 0.2.0 scans no directory and reads no preset file (NEW

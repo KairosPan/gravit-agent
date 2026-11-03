@@ -17,7 +17,7 @@
  * S3: `gravit` is rendered from `roles/` (src/roles.ts) and `dsh/profile/cycle.md`
  *     (src/cycle.ts): the face's gravit plugin (the date section, the role
  *     summaries, the research-cycle contract, the run protocol) and one
- *     `dsh-tool-subagent` row per role, none of which masks a tool. Gravit's
+ *     `plugins/role.mjs` row per role, none of which masks a tool. Gravit's
  *     sessions join it: their tool set is the host's global view plus the
  *     `role_*` tools (here `role_cn_market_analyst`, `role_cn_reviewer` and
  *     `role_cn_stock_analyst`, the three roles `roles/` ships), their prompt carries the date, the cycle contract and the run

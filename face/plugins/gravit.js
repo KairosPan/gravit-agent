@@ -33,18 +33,21 @@
  * rebases to that same URL), and a file URL is all the loader needs.
  *
  * THE ROLE LIST. The `role_<id>` tools are registered by the sibling
- * `@deepseek-ai/dsh-tool-subagent` rows, one per role, and that package has no
- * description key: this section is where Gravit reads what each role is for -
- * a sentence on what a role is and why its report is a claim to check, then one
- * line per entry of the `roles` config, `- <tool> — <summary>`. It sits one
+ * `plugins/role.mjs` rows, one per role (D20): this section is where Gravit reads
+ * what each role is for - a sentence on what a role is, that the call returns
+ * the role's report, why that report is a claim to check and that a role child
+ * is never messaged, then one line per entry of the `roles` config,
+ * `- <tool> — <summary>`. It sits one
  * past dsh's own subagent section (`TOOL_SUBAGENT` + 1), so it reads straight
  * after the delegation tool it extends. A `roles: []` config mounts the section
  * and renders nothing: dsh drops an empty section from the prompt.
  *
- * GATED ON WHAT THE ASSEMBLING SCOPE CAN CALL, AND ON WHO IS ASSEMBLING. A child
- * JOINS the preset it was delegated from, so a scoped section reaches it too, and
- * an allow list removes tools but cannot remove a sentence. The three sections
- * this plugin gates - the role list, the cycle contract and the desk contract -
+ * GATED ON WHAT THE ASSEMBLING SCOPE CAN CALL, AND ON WHO IS ASSEMBLING. A role
+ * child composes its own `role-<id>` preset, whose `gravit` row carries no roles,
+ * no cycle and no desk (src/roles.ts `rolePresetDefinition`); a fork or a plain
+ * `subagent` child still JOINS Gravit's preset, so a scoped section reaches it
+ * too, and an allow list removes tools but cannot remove a sentence. The three
+ * sections this plugin gates - the role list, the cycle contract and the desk contract -
  * are therefore functions of the assembly context, and each resolves to `""` for
  * a delegated child that is not a fork: the role list and the cycle by
  * `canCall(ctx, context, name) && isRootOrFork(context)`, the desk contract by
@@ -58,11 +61,12 @@
  * a ralph worker is unrestricted too and passes the visibility half, but it
  * inherits no prefix and cannot open a goal (`create_goal` needs a direct human
  * turn on a top-level agent), so the header half blanks each of them for it. A
- * role child gets `""` either way: its allow list removes the `role_<id>` tools
- * and the goal tools. roles-smoke pins the fork, the spawn and the role child on
- * a real boot. In the role list, a role whose tool never registered (no `spawn`
- * provider, a row that did not mount) is not advertised. The date is left on for
- * every child.
+ * role child gets `""` either way: its own preset registers none of these
+ * sections, and its allow list removes the `role_<id>` tools and the goal
+ * tools. roles-smoke pins the fork, the spawn and the role child on a real
+ * boot. In the role list, a role whose tool never registered (a row that did
+ * not mount) is not advertised; the `spawn` provider is the tool's check at
+ * call time (plugins/role.mjs). The date is left on for every child.
  *
  * THE CYCLE. `gravit:cycle` carries `dsh/profile/cycle.md` - how to run one
  * research cycle, from the single batched question to the verdict - at
@@ -150,7 +154,7 @@ const PROTOCOL_NAME = /^[a-z]+:[a-z-]+$/;
 const TOOL_NAME = /^[a-z][a-z0-9_]*$/;
 
 /** What a role is, said once above the list. The list's lines follow it. */
-const ROLES_INTRO = "Roles. One-shot delegates on your team, each with its own persona and tools; call one by its tool name with a self-contained brief, and treat its report as a claim to check, never a result to copy. Every report carries four headings: status, what was measured, paths, limits.";
+const ROLES_INTRO = "Roles. One-shot delegates on your team, each with its own persona and tools; call one by its tool name with a self-contained brief - the call returns the role's report, which you treat as a claim to check, never a result to copy; never send_message a role child. Every report carries four headings: status, what was measured, paths, limits.";
 
 /** A role's tool name: the `role_` prefix keeps the roster's role tools apart
  *  from every host and MCP tool. */

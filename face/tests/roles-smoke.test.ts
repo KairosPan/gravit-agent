@@ -1,15 +1,18 @@
-/** Role delegation on a real tree: `role_auditor` and `role_worker` spawn a
- * one-shot child whose persona is the role's (shadowing Gravit's), whose tools
- * are exactly the role's allow list (ancestor-layer `role_*` tools removed,
- * `gravit:roles` and `gravit:cycle` blank), and whose result returns through
- * the tool; the auditor's child reads the root `GRAVIT.md` in its
- * `agent-instructions` baseline; a `subagent_fork` child - seeded and
- * unrestricted - is assembled Gravit's system text byte for byte (the roles
- * list and the cycle contract included) and Gravit's tools, the premise of its
- * inherited prefix's cache reuse; a plain `subagent` child - unseeded and as
- * unrestricted - reads neither section although it can call `create_goal` and
- * every role tool; a role naming a tool the tree lacks fails loudly at
- * delegation. The two roles are fixtures made from the real `roles/_template`
+/** Role delegation on a real tree: `role_auditor` and `role_worker` (the face's
+ * role tool, plugins/role.mjs, D20) start a one-shot child on the role's own
+ * preset, `role-<id>`, whose persona is the role's (shadowing Gravit's), whose
+ * tools are exactly the role's allow list (`role_*` tools absent, `gravit:roles`
+ * and `gravit:cycle` blank), and whose report returns through the tool; the
+ * auditor's child reads the root `GRAVIT.md` in its `agent-instructions`
+ * baseline; a `subagent_fork` child - seeded and unrestricted - is assembled
+ * Gravit's system text byte for byte (the roles list and the cycle contract
+ * included) and Gravit's tools, the premise of its inherited prefix's cache
+ * reuse; a plain `subagent` child - unseeded and as unrestricted - reads neither
+ * section although it can call `create_goal` and every role tool; dsh's two
+ * native tools return `started subagent <id>` and report through the parent's
+ * `subagent-settled` notice; cancelling Gravit's turn while a role child is
+ * mid-turn ends the call `aborted` and tears the child down; a role naming a
+ * tool the tree lacks fails loudly at delegation, no child created. The two roles are fixtures made from the real `roles/_template`
  * under the test's own roles root, handed to the boot as `rolesRoot`; the MCP
  * tools they name are stand-ins registered under a server name nothing real
  * uses. The second case boots the shipped cn-market-analyst (a fixture copy on
@@ -75,7 +78,7 @@ async function makeFixtureRolesRoot(): Promise<string> {
   return root;
 }
 
-test("roles smoke: persona, exact tools, the result, the baseline, a fork's identical prefix, a spawn's blank sections, and a loud failure for a missing tool", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
+test("roles smoke: persona, exact tools, the report, the baseline, a fork's identical prefix, a spawn's blank sections, an abort, and a loud failure for a missing tool", { skip: gated && "set FACE_SMOKE=1", timeout: 180_000 }, async () => {
   const bots = await makeBotsRoot();
   const rolesRoot = await makeFixtureRolesRoot();
   const root = await realpath(await mkdtemp(join(tmpdir(), "face-roles-root-")));
@@ -96,7 +99,16 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
     const mcpNames = new Set(readRoles(rolesRoot).flatMap((r) => r.allow).filter((n) => n.startsWith("mcp__")));
     mcpNames.add("mcp__fixture__private");
     const unregister = new Map<string, () => void>();
-    for (const name of mcpNames) unregister.set(name, tools.register({ name, description: `stand-in ${name}`, parameters: {}, output: { schema: { type: "object" }, render: () => [{ type: "text", text: "ok" }] }, execute: async () => ({}) }));
+    /* `mcp__fixture__lookup` holds while `hold` is set, until its call is aborted: the abort case's mid-turn child. */
+    let hold = false;
+    let held = false;
+    const holdUntilAborted = (signal: AbortSignal) => new Promise<object>((resolve) => {
+      held = true;
+      if (signal.aborted) resolve({});
+      signal.addEventListener("abort", () => resolve({}), { once: true });
+    });
+    for (const name of mcpNames) unregister.set(name, tools.register({ name, description: `stand-in ${name}`, parameters: {}, output: { schema: { type: "object" }, render: () => [{ type: "text", text: "ok" }] },
+      execute: async (_args: unknown, exec: { signal: AbortSignal }) => name === "mcp__fixture__lookup" && hold ? holdUntilAborted(exec.signal) : {} }));
     const requested = new Map<string, GenerateOptions[]>();
     /* A one-shot child leaves `ctx.sessions` the moment its result returns, which can be before a 20 ms
      * poll looks (measured: the lookup came back empty in most runs), so each session's header is copied
@@ -112,11 +124,13 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
       const trigger = lastHuman(request);
       const text = trigger ? textOf(trigger) : "";
       if (header?.isSeeded === true) return { kind: "text", text: "FORK_DONE" };
+      if (header?.origin === "subagent" && text.includes("ABORT_FIXTURE")) return { kind: "tool", name: "mcp__fixture__lookup", args: {} };
       if (header?.origin === "subagent") return { kind: "text", text: text.includes("AUDIT_FIXTURE") ? "AUDIT_DONE" : text.includes("SPAWN_FIXTURE") ? "SPAWN_DONE" : "WORK_DONE" };
       if (sourceKind(trigger!) === "user" && text === "RUN_AUDITOR") return { kind: "tool", name: "role_auditor", args: { description: "Audit the fixture", prompt: "AUDIT_FIXTURE: audit the fixture strategy." } };
       if (sourceKind(trigger!) === "user" && text === "RUN_FORK") return { kind: "tool", name: "subagent_fork", args: { description: "Fork the fixture", prompt: "FORK_FIXTURE: continue." } };
-      if (sourceKind(trigger!) === "user" && text === "RUN_SUBAGENT") return { kind: "tool", name: "subagent", args: { description: "Spawn the fixture", prompt: "SPAWN_FIXTURE: check one source.", run_in_background: false } };
+      if (sourceKind(trigger!) === "user" && text === "RUN_SUBAGENT") return { kind: "tool", name: "subagent", args: { description: "Spawn the fixture", prompt: "SPAWN_FIXTURE: check one source." } };
       if (sourceKind(trigger!) === "user" && text === "RUN_WORKER") return { kind: "tool", name: "role_worker", args: { description: "Work one task", prompt: "WORK_FIXTURE: one bounded task." } };
+      if (sourceKind(trigger!) === "user" && text === "RUN_WORKER_ABORT") return { kind: "tool", name: "role_worker", args: { description: "Hold one task", prompt: "ABORT_FIXTURE: hold until stopped." } };
       return { kind: "text", text: "PARENT_DONE" };
     };
     ctx.llm.registerAdapter(["stub"], new StubAdapter(script));
@@ -135,6 +149,11 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
     assert.ok(gravitPrompt.includes(rolesIntro), "Gravit reads the roles intro");
     assert.ok(gravitPrompt.includes(CYCLE_HEADING), "Gravit reads the cycle contract");
     assert.ok(gravitPrompt.includes(gravitPersona), "Gravit is told who it is");
+    /* dsh's native delegation tools report through the parent: a `user/message` whose source is `subagent-settled`. */
+    const settledWith = (marker: string) => gravit.session.snapshotEvents().some((e) => e.type === "user/message"
+      && sourceKind((e.data ?? {}) as { source?: unknown }) === "subagent-settled" && JSON.stringify(e.data).includes(marker));
+    const toolResultsOf = () => gravit.session.snapshotEvents().filter((e) => e.type === "tool/result").map((e) => e.data as { message: { isError?: boolean; content: ReadonlyArray<{ text?: string }> } });
+    const textOfResult = (message: { content: ReadonlyArray<{ text?: string }> }) => message.content.map((b) => b.text ?? "").join("\n");
     const childRequestAfter = async (marker: string) => {
       await waitFor(`child ${marker}`, () => [...requested.entries()].some(([id, rs]) => isChild(id) && rs.some((r) => r.messages.some((m) => textOf(m).includes(marker)))));
       const [id, rs] = [...requested.entries()].find(([id, rs]) => isChild(id) && rs.some((r) => r.messages.some((m) => textOf(m).includes(marker))))!;
@@ -159,9 +178,11 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
     assert.equal(textOf(system).includes(CYCLE_HEADING), false, "and so is the cycle section: its allow list removed create_goal, the visibility `gravit:cycle` is gated on");
     assert.match(textOf(system), /Today is \d{4}-\d{2}-\d{2}/, "the date reaches the child");
     assert.equal(auditor.header.origin, "subagent");
-    assert.equal(auditor.header.agentPreset, "gravit");
+    assert.equal(auditor.header.agentPreset, "role-auditor", "a role child composes its own preset (B1)");
     assert.equal(auditor.header.cwd, root);
-    assert.ok(gravit.session.snapshotEvents().some((e) => e.type === "tool/result" && JSON.stringify(e.data).includes("AUDIT_DONE")), "the child's text returns through the tool");
+    const auditorResult = toolResultsOf().at(-1)!.message;
+    assert.notEqual(auditorResult.isError, true, "the role call succeeded");
+    assert.equal(textOfResult(auditorResult), "AUDIT_DONE", "the child's report is the tool result (D20)");
     /* The workspace map reaches a role child: dsh's agent-instructions row publishes a baseline on every
      * agent's first request, a spawn child's included. Gravit's own first request is the positive pair. */
     const baselineHasMark = (r: GenerateOptions) => r.messages.some((m) => sourceKind(m) === "agent-instructions" && textOf(m).includes(GRAVIT_MARK));
@@ -174,6 +195,7 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
      * (`isRootOrFork`: a root, or a seeded child), which is why both reach the fork unchanged. */
     await prompt("RUN_FORK");
     const fork = await childRequestAfter("FORK_FIXTURE");
+    await waitFor("the fork's settlement notice", () => settledWith("FORK_DONE"));
     await gravit.whenIdle();
     assert.equal(fork.header.isSeeded, true, "a subagent_fork child is seeded");
     const atFork = requested.get(sessionId)!.find((r) => { const t = lastHuman(r); return t !== undefined && sourceKind(t) === "user" && textOf(t) === "RUN_FORK"; })!;
@@ -185,7 +207,9 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
     assert.ok(forkSystem.includes(CYCLE_HEADING), "and the fork child's does too: `gravit:cycle` reads create_goal's visibility and the header, and a seeded, unrestricted child passes both");
     assert.equal(forkSystem, gravitSystem, `the fork child's system text is Gravit's, whole (${forkSystem.length} vs ${gravitSystem.length} characters, first difference at ${firstDifference(forkSystem, gravitSystem)})`);
     assert.deepEqual(fork.request.tools!.map((t) => t.name), atFork.tools!.map((t) => t.name), "and its tools are Gravit's, in order");
-    assert.ok(gravit.session.snapshotEvents().some((e) => e.type === "tool/result" && JSON.stringify(e.data).includes("FORK_DONE")), "the fork's text returns through the tool");
+    assert.ok(toolResultsOf().some((r) => /^started subagent \S+$/.test(textOfResult(r.message))), "subagent_fork returns the child's id at once");
+    assert.equal(toolResultsOf().some((r) => textOfResult(r.message).includes("FORK_DONE")), false, "not its text");
+    assert.ok(settledWith("FORK_DONE"), "the fork's text reaches Gravit through the settlement notice");
     /* spawn: a plain `subagent` child is delegated, unseeded and restricted by nothing, so its scope
      * resolves `create_goal` and every role tool as Gravit's does - the visibility half of the gate
      * admits it. It reads neither section all the same: both are gated on the header too
@@ -193,6 +217,7 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
      * the fork above is this step's positive pair. */
     await prompt("RUN_SUBAGENT");
     const spawn = await childRequestAfter("SPAWN_FIXTURE");
+    await waitFor("the spawn's settlement notice", () => settledWith("SPAWN_DONE"));
     await gravit.whenIdle();
     assert.equal(spawn.header.origin, "subagent");
     assert.equal(spawn.header.isSeeded, false, "a subagent child is not seeded");
@@ -203,7 +228,8 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
     assert.equal(spawnSystem.includes(CYCLE_HEADING), false, "no cycle contract for a delegated child that is not a fork");
     assert.equal(spawnSystem.includes(rolesIntro), false, "and no roles section");
     assert.match(spawnSystem, /Today is \d{4}-\d{2}-\d{2}/, "the date still reaches it");
-    assert.ok(gravit.session.snapshotEvents().some((e) => e.type === "tool/result" && JSON.stringify(e.data).includes("SPAWN_DONE")), "the spawn's text returns through the tool");
+    assert.equal(toolResultsOf().some((r) => textOfResult(r.message).includes("SPAWN_DONE")), false, "subagent returns an id, not the child's text");
+    assert.ok(settledWith("SPAWN_DONE"), "the spawn's text reaches Gravit through the settlement notice");
     /* worker */
     await prompt("RUN_WORKER");
     const worker = await childRequestAfter("WORK_FIXTURE");
@@ -212,15 +238,29 @@ test("roles smoke: persona, exact tools, the result, the baseline, a fork's iden
     assert.ok(["bash", "write", "mcp__fixture__fetch"].every((n) => workerTools.includes(n)));
     assert.equal(workerTools.includes("edit"), false);
     assert.deepEqual([...workerTools].sort(), [...role("worker").allow].sort(), "the worker's tools are exactly its allow list");
+    assert.equal(textOfResult(toolResultsOf().at(-1)!.message), "WORK_DONE", "the worker's report is the tool result");
+    /* abort (Review Focus 1): Gravit's turn cancelled while the role child is mid-turn - its lookup held - ends
+     * the role call `aborted` (plugins/role.mjs disposes the activation on exec.signal) and tears the child down. */
+    hold = true;
+    await prompt("RUN_WORKER_ABORT");
+    const holding = await childRequestAfter("ABORT_FIXTURE");
+    await waitFor("the child's lookup holds", () => held);
+    assert.ok(ctx.agents.get(holding.id) !== undefined, "the role child is live mid-turn");
+    await remote(base, cookie, "session/cancel", { request: { sessionId } });
+    await gravit.whenIdle();
+    hold = false;
+    const aborted = toolResultsOf().at(-1)!.message;
+    assert.equal(aborted.isError, true, "the cancelled role call is an error");
+    assert.match(textOfResult(aborted), /^Error: role role_worker aborted: /, `the role tool's own error, naming aborted: ${textOfResult(aborted)}`);
+    await waitFor("the aborted child's agent is released", () => ctx.agents.get(holding.id) === undefined);
     /* a tool the tree lacks: the delegation fails naming it, no child runs */
     unregister.get("mcp__fixture__fetch")!();
     const childrenBefore = [...requested.keys()].filter(isChild).length;
     await prompt("RUN_WORKER");
     await gravit.whenIdle();
-    const failed = gravit.session.snapshotEvents().filter((e) => e.type === "tool/result").at(-1)!;
-    /* Anchored on the quoted name right after the verb: the payload is stringified, so the quotes carry a
-     * backslash, and a looser pattern would also match the name inside the error's known-tools list. */
-    assert.match(JSON.stringify(failed.data), /names unknown global tools? \\"mcp__fixture__fetch\\"/);
+    const failed = toolResultsOf().at(-1)!.message;
+    assert.equal(failed.isError, true);
+    assert.equal(textOfResult(failed), "Error: role role_worker: the tree has no tool mcp__fixture__fetch; no child was created", "the face's refusal names the missing tool");
     assert.equal([...requested.keys()].filter(isChild).length, childrenBefore, "no child was created");
   } finally {
     await dispose?.();
@@ -318,11 +358,14 @@ test("roles smoke: cn-market-analyst reads and submits as a role, Gravit's own s
         return { kind: "text", text: "MARKET_DONE" };
       }
       if (header?.origin === "subagent" && briefed("SPAWN_FREEZE")) {
-        return results.length === 0 ? { kind: "tool", name: "lunhui_freeze_index", args: { strategy: "cn-market" } } : { kind: "text", text: "SPAWN_DONE" };
+        /* A plain `subagent` child: a freeze, then a module submit - neither is a delegated non-role child's. */
+        if (results.length === 0) return { kind: "tool", name: "lunhui_freeze_index", args: { strategy: "cn-market" } };
+        if (results.length === 1) return { kind: "tool", name: "lunhui_submit_environment", args: { strategy: "cn-market", run, analysis: "{}" } };
+        return { kind: "text", text: "SPAWN_DONE" };
       }
       if (sourceKind(trigger!) === "user" && text === "RUN_ROOT_SUBMIT") return { kind: "tool", name: "lunhui_submit_environment", args: { strategy: "cn-market", run, analysis: "{}" } };
       if (sourceKind(trigger!) === "user" && text === "RUN_MARKET_ANALYST") return { kind: "tool", name: "role_cn_market_analyst", args: { description: "Read the market run", prompt: `MARKET_FIXTURE: cn-market run ${run}.` } };
-      if (sourceKind(trigger!) === "user" && text === "RUN_SPAWN_FREEZE") return { kind: "tool", name: "subagent", args: { description: "Freeze from a child", prompt: "SPAWN_FREEZE: freeze the index.", run_in_background: false } };
+      if (sourceKind(trigger!) === "user" && text === "RUN_SPAWN_FREEZE") return { kind: "tool", name: "subagent", args: { description: "Freeze from a child", prompt: "SPAWN_FREEZE: freeze the index." } };
       return { kind: "text", text: "PARENT_DONE" };
     };
     ctx.llm.registerAdapter(["stub"], new StubAdapter(script));
@@ -371,13 +414,19 @@ test("roles smoke: cn-market-analyst reads and submits as a role, Gravit's own s
     assert.deepEqual([artifact.module, artifact.status, artifact.run], ["environment", "NOT_EVALUABLE", run]);
     assert.equal(resultText(lastResult()), "MARKET_DONE", "the child's report returns through the tool");
 
-    /* A delegated child that can reach a freeze: NOT_GRAVIT. */
+    /* A delegated child that can reach a freeze: NOT_GRAVIT; and, joined to Gravit's preset, no role: NOT_A_ROLE
+     * (Review Focus 5, R44). It runs on dsh's managed `subagent`, which reports through Gravit's settlement notice. */
     await prompt("RUN_SPAWN_FREEZE");
+    await waitFor("the spawn's settlement notice", () => gravit.session.snapshotEvents().some((e) => e.type === "user/message"
+      && sourceKind((e.data ?? {}) as { source?: unknown }) === "subagent-settled" && JSON.stringify(e.data).includes("SPAWN_DONE")));
     const spawn = await childAfter("SPAWN_FREEZE");
     assert.ok(spawn[0].tools!.some((t) => t.name === "lunhui_freeze_index"), "the plain subagent child carries the freeze");
     assert.ok(spawn[0].tools!.some((t) => t.name === "lunhui_read_run"), "and the run protocol's probe");
     assert.equal(textOf(spawn[0].messages[0]).includes(RUN_HEADING), false, "yet no run protocol: it is a delegated child that is not a fork");
     assert.match(toolTexts(spawn.at(-1)!)[0], /NOT_GRAVIT/, "and its call is NOT_GRAVIT");
+    assert.equal(headers.get([...requested.entries()].find(([, rs]) => rs === spawn)![0])?.agentPreset, "gravit", "the plain subagent child joins Gravit's preset");
+    assert.match(toolTexts(spawn.at(-1)!)[1], /^Error: NOT_A_ROLE: /, "so its module submit is NOT_A_ROLE");
+    assert.deepEqual((await service.readRun("cn-market", run)).manifest.artifacts, ["environment"], "and nothing more landed in the run");
   } finally {
     await dispose?.();
     await Promise.all([bots, fixtureRoles, strategies, root, home].map((dir) => rm(dir, { recursive: true, force: true })));

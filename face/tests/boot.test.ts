@@ -17,7 +17,7 @@ import { AGENT_INSTRUCTIONS_ROW_ID, INSTRUCTIONS_CONFIG, instructionsPatch } fro
 import { facePolicyPatches } from "../src/policy.ts";
 import { definitionFor } from "../src/bot-presets.ts";
 import { LEGACY_PRESET_DESCRIPTION } from "../src/overlay.ts";
-import { GRAVIT_PLUGIN_URL, gravitRows, readRoles } from "../src/roles.ts";
+import { GRAVIT_PLUGIN_URL, ROLE_PLUGIN_URL, gravitRows, readRoles } from "../src/roles.ts";
 import { makeBotsRoot, makeRolesRoot } from "./bots-fixture.ts";
 
 /** Every row id {@link faceOverlay} owns, as the composed tree should show them. */
@@ -447,7 +447,7 @@ test("composeFace returns the loaded profile the runtime resolution needs", () =
 
 /* The static `preset-gravit` row is RENDERED from `roles/` in memory at compose
  * time (src/boot.ts; src/roles.ts `gravitRows`): the gravit plugin row, named
- * by an absolute `file:` URL, then one `dsh-tool-subagent` row per role. dsh 0.2
+ * by an absolute `file:` URL, then one `plugins/role.mjs` row per role. dsh 0.2
  * reads no bot directory itself, and `bots/gravit` supplies only the display
  * metadata - its `agent.cordis.yml` is a mirror for readers that roles.test.ts
  * holds to the render. A regression back to reading that file, to a hard-coded
@@ -455,14 +455,14 @@ test("composeFace returns the loaded profile the runtime resolution needs", () =
  * carries the very same definition under the id archived sessions persist. The
  * gravit row also carries `dsh/profile/cycle.md` as its `cycle` key (src/cycle.ts),
  * read by `composeFace` beside the roles. */
-test("composeFace builds preset-gravit from roles/ in memory: the gravit row by absolute URL, one spawn row per role", async () => {
+test("composeFace builds preset-gravit from roles/ in memory: the gravit row by absolute URL, one role.mjs row per role", async () => {
   const home = freshHome();
   const bots = await makeBotsRoot();
   const rolesRoot = await makeRolesRoot();
   try {
     const { patches } = composeFace({ profileName: "face", port: 3090, dshHome: home, botsRoot: bots, rolesRoot });
     const row = composeEntries([patches]).find((entry) => entry.id === "preset-gravit");
-    const expected = definitionFor(bots, "gravit", gravitRows(readRoles(rolesRoot), { plugin: GRAVIT_PLUGIN_URL, cycle: readCycle(CYCLE_PATH), protocols: readProtocols() }));
+    const expected = definitionFor(bots, "gravit", gravitRows(readRoles(rolesRoot), { plugin: GRAVIT_PLUGIN_URL, rolePlugin: ROLE_PLUGIN_URL, cycle: readCycle(CYCLE_PATH), protocols: readProtocols() }));
     assert.deepEqual(row?.config, expected);
     const plugins = (row?.config as unknown as { plugins: Array<{ id: string; name: string; config: unknown }> }).plugins;
     assert.deepEqual(plugins.map((p) => p.id), ["gravit", "role-probe"]);
