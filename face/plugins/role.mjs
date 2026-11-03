@@ -20,10 +20,11 @@
  * dsh-tool-subagent builds its own: the brief as one text block, `parent: exec.agent`, the role's
  * preset, its route, and the depth the `subagent` settings resolve. The call's signal cancels only
  * unpublished work; after publication the caller owns cancellation, so an abort of `exec.signal`
- * disposes the activation at once (its result then settles `aborted`), and every path disposes it in
- * `finally` - after an abort, a second dispose of an activation already released (roles-smoke's abort
- * case runs both). A teardown failure is logged without replacing a result already captured, as
- * dsh-subagent keeps a captured result over a failed cleanup.
+ * disposes the activation at once (its result then settles `aborted`), and every other path disposes it
+ * in `finally`; either way it is disposed exactly once, `finally` awaiting the abort's disposal rather
+ * than starting a second one (roles-smoke's abort case runs that path), so a teardown failure is warned
+ * once. It is logged without replacing a result already captured, as dsh-subagent keeps a captured
+ * result over a failed cleanup.
  *
  * WHAT THE PRESET SUPPLIES. The persona and the mask are the role's own preset, `role-<id>` (src/roles.ts
  * `rolePresetDefinition`, B1), which the face declares after boot; this row only names it. A role child
@@ -129,7 +130,7 @@ export function apply(ctx, config) {
       const maxDepth = ctx.subagents.resolveMaxDepth(undefined);
       const activation = await ctx.subagents.startActivation({
         provider: PROVIDER,
-        label: args.description ?? config.name,
+        label: typeof args.description === "string" && args.description.trim() !== "" ? args.description : config.name,
         request: {
           prompt: [{ type: "text", text: args.prompt }],
           parent,
@@ -141,8 +142,11 @@ export function apply(ctx, config) {
         delivery: "caller",
       });
       /* Published: from here the caller owns cancellation. A signal that fired between publication and
-       * this listener never calls it, so that case is disposed here directly. */
-      const onAbort = () => { activation.dispose().catch(warnTeardown); };
+       * this listener never calls it, so that case is disposed here directly. One disposal, shared: the
+       * abort starts it and `finally` awaits it, so a teardown failure is warned once. */
+      let disposal;
+      const dispose = () => (disposal ??= activation.dispose().catch(warnTeardown));
+      const onAbort = () => { void dispose(); };
       exec.signal.addEventListener("abort", onAbort, { once: true });
       if (exec.signal.aborted) onAbort();
       try {
@@ -151,7 +155,7 @@ export function apply(ctx, config) {
         return { kind: "report", text: reportOf(result.output) };
       } finally {
         exec.signal.removeEventListener("abort", onAbort);
-        await activation.dispose().catch(warnTeardown);
+        await dispose();
       }
     },
   });

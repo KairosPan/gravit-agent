@@ -1,8 +1,10 @@
 /** The operator's read-only dry run of a COPY of their harness home against
  * the dsh this face pins (`DSH_PIN`; written at 0.2.0-rc.2, 0.2.1-rc.5 since
  * 2026-11-02): what the first live boot will do to the
- * home, measured on a copy, before it is done to the home. Step 3 of the
- * go-live runbook, docs/superpowers/runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md.
+ * home, measured on a copy, before it is done to the home. §3 of the go-live
+ * runbooks: docs/superpowers/runbooks/2026-11-02-dsh-0.2.1-rc.5-go-live.md (the
+ * current pin's) and, before it, 2026-09-30-dsh-0.2.0-rc.2-go-live.md (whose §3
+ * walks this tool step by step).
  *
  *     SCRATCH=$(mktemp -d)
  *     cp -a ~/.dsh "$SCRATCH/dsh-dryrun"
@@ -34,7 +36,7 @@
  *    patch files - so no MCP server is spawned and no key leaves the machine.
  * 4. Lists `sessionPersistence.list()` and opens every session READ-ONLY -
  *    `open(id, "read")`, `read()`, `close()`: the in-memory V0..V4 migration
- *    the 0.2.0 host runs before it can page or follow a session, which
+ *    the installed host runs before it can page or follow a session, which
  *    publishes nothing - and records each refusal with its class
  *    ({@link classifyRefusal}), plus the sessions whose header preset is no
  *    longer in the roster.
@@ -138,7 +140,7 @@ export function checkTarget(arg: string | undefined, liveHomes: readonly string[
     const live = identity(home);
     const homeReal = live === undefined ? resolve(home) : realpathSync.native(home);
     if (live === undefined ? resolve(copy) === homeReal : live.dev === target.dev && live.ino === target.ino) {
-      return refuse(`${copy} IS the live harness home (${homeReal}). Dry-run a COPY: see the runbook, step 3`);
+      return refuse(`${copy} IS the live harness home (${homeReal}). Dry-run a COPY: see the runbook, §3`);
     }
     if (live !== undefined && isSameOrAncestor(live, dirname(copy))) {
       return refuse(`${copy} is inside the live harness home ${homeReal}; put the copy outside it (mktemp -d)`);
@@ -403,7 +405,7 @@ export function scanRawSessions(home: string): Map<string, RawSession> {
 
 /* --------------------------------------------------------- classification */
 
-/** Why 0.2.0 refused to read a session, by the upstream edge that refused it. */
+/** Why the installed dsh refused to read a session, by the upstream edge that refused it. */
 export type RefusalClass = "room-source" | "subagent-descriptor" | "seq-gap" | "other";
 
 /**
@@ -434,7 +436,7 @@ const CLASS_LABEL: Record<RefusalClass, string> = {
   "room-source": "kind:'room' message source, refused by the v2->v3 edge (decision D11)",
   "subagent-descriptor": "subagent descriptor version 2, refused by the v0->v1 edge (decision D17)",
   "seq-gap": "corrupt log, seq gap (decision D17)",
-  other: "OTHER - covered by no decision: STOP before go-live (runbook step 3)",
+  other: "OTHER - covered by no decision: STOP before go-live (runbook §3)",
 };
 
 /* ---------------------------------------------------- composition helpers */
@@ -652,7 +654,7 @@ export function summarize(report: CheckHomeReport, reportPath: string): string {
   const s = report.sessions;
   if (report.boot.ok) {
     out.push("");
-    out.push(`Sessions: ${s.listed} listed, ${s.readable} readable, ${s.refused} refused by the 0.2.0 read`);
+    out.push(`Sessions: ${s.listed} listed, ${s.readable} readable, ${s.refused} refused by the dsh ${report.dshPin} read`);
     for (const cls of ["room-source", "subagent-descriptor", "seq-gap", "other"] as const) {
       const ids = s.byClass[cls];
       if (ids.length === 0 && cls !== "other") continue;
@@ -670,7 +672,7 @@ export function summarize(report: CheckHomeReport, reportPath: string): string {
         `(${pct.toFixed(1)}%), ${size(s.bytes.refused)} of ${size(s.bytes.total)} of logs; their files stay on disk unchanged`);
     }
     if (s.notListed.length > 0) {
-      out.push(`  on disk but not listed by 0.2.0 (${s.notListed.length}): ${s.notListed.join(", ")}`);
+      out.push(`  on disk but not listed by dsh ${report.dshPin} (${s.notListed.length}): ${s.notListed.join(", ")}`);
     }
     if (s.orphanedPresets.length > 0) {
       out.push(`  header preset not in the roster (${s.orphanedPresets.length}; readable, but a resume refuses agent-preset/not-found):`);
@@ -685,7 +687,7 @@ export function summarize(report: CheckHomeReport, reportPath: string): string {
   out.push(row === undefined
     ? `  profiles/${report.profile}/cordis.patch.yml: not read (the composition failed before it)`
     : row === null
-      ? `  profiles/${report.profile}/cordis.patch.yml has NO ${DEFAULT_MODEL_ROW_ID} row - add the D2 row (runbook step 4)`
+      ? `  profiles/${report.profile}/cordis.patch.yml has NO ${DEFAULT_MODEL_ROW_ID} row - add the D2 row (runbook §4)`
       : `  profiles/${report.profile}/cordis.patch.yml sets it (${row.source}): ${JSON.stringify(row.config)}`);
   const st = report.settingsYaml;
   out.push(!st.present

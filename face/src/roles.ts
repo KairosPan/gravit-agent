@@ -272,8 +272,9 @@ export function readRoles(root: string): RoleFile[] {
 
 /** The id of Gravit's own plugin row; `bots/gravit/agent.cordis.yml` leads with it. */
 export const GRAVIT_ROW_ID = "gravit";
-/** The id of a role's `plugins/role.mjs` row. */
-export const roleRowId = (id: string): string => "role-" + id;
+/** The id of a role's `plugins/role.mjs` row: spelled as its preset id ({@link rolePresetId}) on purpose,
+ *  one prefix for both, so a role's row and its preset read as one name. */
+export const roleRowId = (id: string): string => ROLE_PRESET_PREFIX + id;
 /** `plugins/gravit.js` as the in-memory form of the row's `name`: an absolute `file:` URL,
  *  module-relative, which the face's rebase passes through untouched (`rebaseName` in
  *  src/bot-presets.ts). The committed mirror spells it {@link GRAVIT_PLUGIN_RELATIVE}. */
@@ -310,16 +311,18 @@ export function rolePresetDefinition(role: RoleFile): PresetDefinition {
   };
 }
 
-/** Why a role cannot be called on this roster, as `bootFace`'s refusal, or `undefined` when the registry
- *  lists every role's preset whole: the first one missing, or listed `broken` with the registry's reason. */
+/** Why roles cannot be called on this roster, as `bootFace`'s refusal, or `undefined` when the registry
+ *  lists every role's preset whole: every one missing, or listed `broken` with the registry's reason, in
+ *  role order, joined by "; " in one message - one boot names them all. */
 export function roleRosterProblem(roster: readonly { id: string; broken?: string }[], roles: readonly RoleFile[]): string | undefined {
+  const problems: string[] = [];
   for (const role of roles) {
     const id = rolePresetId(role.id);
     const listed = roster.find((preset) => preset.id === id);
-    if (listed === undefined) return `${BIN}: role preset "${id}" is not in the roster - every ${role.tool} call would fail agent-preset/not-found`;
-    if (listed.broken !== undefined) return `${BIN}: role preset "${id}" is broken: ${listed.broken} - every ${role.tool} call would fail agent-preset/invalid`;
+    if (listed === undefined) problems.push(`role preset "${id}" is not in the roster - every ${role.tool} call would fail agent-preset/not-found`);
+    else if (listed.broken !== undefined) problems.push(`role preset "${id}" is broken: ${listed.broken} - every ${role.tool} call would fail agent-preset/invalid`);
   }
-  return undefined;
+  return problems.length === 0 ? undefined : `${BIN}: ${problems.join("; ")}`;
 }
 
 /** What {@link gravitRows} takes besides the roles. */

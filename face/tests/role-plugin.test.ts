@@ -151,7 +151,7 @@ test("execute (a): a completed child's text is the tool's report; the activation
   ], "the checks run before the child starts");
 });
 
-test("execute: without a model there is no preflight and no agentOptions; the label falls back to the role's name; an empty report says so", async () => {
+test("execute: without a model there is no preflight and no agentOptions; the label falls back to the role's name, for an empty or blank description too; an empty report says so", async () => {
   const tree = fakeTree();
   const { model: _model, ...noModel } = SHIPPED;
   apply(tree.ctx, noModel);
@@ -162,6 +162,15 @@ test("execute: without a model there is no preflight and no agentOptions; the la
   assert.equal(tree.calls.some((call) => call.startsWith("resolveCallConfig")), false);
   tree.settle({ output: [], stopReason: "completed" });
   assert.deepEqual(await running, { kind: "report", text: "It left no closing message." });
+  for (const description of ["", "   "]) {
+    const blank = fakeTree();
+    apply(blank.ctx, SHIPPED);
+    const call = blank.registered[0].execute({ prompt: "brief", description }, exec());
+    await tick();
+    assert.equal(blank.specs[0].label, "CN reviewer", `a description of ${JSON.stringify(description)} is no label`);
+    blank.settle({ output: [], stopReason: "completed" });
+    await call;
+  }
 });
 
 test("execute (b): a child that ends other than completed is an error naming the stop reason and the diagnostic", async () => {
@@ -201,7 +210,7 @@ test("execute: no calling agent, no spawn provider, or a route the tree does not
   for (const tree of [noAgent, noProvider, unserved]) assert.equal(tree.specs.length, 0);
 });
 
-test("execute (d): an abort after the child started disposes the activation at once, and once more in finally", async () => {
+test("execute (d): an abort after the child started disposes the activation at once, and finally awaits that disposal instead of a second", async () => {
   const tree = fakeTree();
   apply(tree.ctx, SHIPPED);
   const controller = new AbortController();
@@ -212,5 +221,5 @@ test("execute (d): an abort after the child started disposes the activation at o
   assert.equal(tree.disposals(), 1, "the abort disposes the activation");
   tree.settle({ output: [], stopReason: "aborted" });
   await assert.rejects(running, (error: Error) => error.message === "role role_cn_reviewer aborted: no detail");
-  assert.equal(tree.disposals(), 2, "and finally disposes it again");
+  assert.equal(tree.disposals(), 1, "finally awaits the abort's disposal: one dispose, so a teardown failure is warned once");
 });

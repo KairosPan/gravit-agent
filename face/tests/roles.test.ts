@@ -281,6 +281,13 @@ test("roleRosterProblem: the boot's refusal when a role preset is missing or bro
     assert.equal(roleRosterProblem([{ id: "role-probe", broken: "role-mask (file:///x/bot.js): gravit-bot: none of the allowed tools exist" }], roles),
       'gravit-face: role preset "role-probe" is broken: role-mask (file:///x/bot.js): gravit-bot: none of the allowed tools exist - every role_probe call would fail agent-preset/invalid');
     assert.equal(roleRosterProblem([], []), undefined, "no roles, nothing to audit");
+    /* Every failing role in one message, in role order: one boot names them all. */
+    await cp(join(root, "probe"), join(root, "second"), { recursive: true });
+    const two = readRoles(root);
+    assert.equal(roleRosterProblem([{ id: "role-probe", broken: "the mask refused" }], two),
+      'gravit-face: role preset "role-probe" is broken: the mask refused - every role_probe call would fail agent-preset/invalid; ' +
+        'role preset "role-second" is not in the roster - every role_second call would fail agent-preset/not-found');
+    assert.equal(roleRosterProblem([{ id: "role-probe" }, { id: "role-second" }], two), undefined);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

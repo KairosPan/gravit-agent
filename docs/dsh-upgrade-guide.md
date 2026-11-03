@@ -80,7 +80,7 @@ inventory's PART 2, so a step can be cited.
    are deliberate; anything else is drift. Same pass: the `prepare` provides, `createAppReady`,
    the required-id set and the warn-only audit, `resolveTelemetryPatch`, the `hmr` and
    `settings` gating on `profileContext` (A9, B8, B10–B12).
-8. Re-check the frame shapes: `client/api.js`, `client/mapper.js`, `tests/fixtures/events.jsonl`
+8. Re-check the frame shapes: `client/js/wire/api.js`, `client/js/wire/mapper.js`, `tests/fixtures/events.jsonl`
    against the installed `.d.ts` of `dsh-api-gateway` (stream-protocol), `dsh-api-remotes`,
    `dsh-api-session-controller`, `dsh-session`, `dsh-llm`, `dsh-user-approval`,
    `dsh-user-questions`. The fixture is corrected by hand; there is no generator (E1–E9).
@@ -116,8 +116,7 @@ inventory's PART 2, so a step can be cited.
     (`DSH_HOME=$SCRATCH/dsh-drill FACE_PORT=3091 npm start`) — the README's role drill needs
     those rows too, so it runs here and not in step 14's fresh home — then delete it.
 14. Run the README drills in a FRESH scratch home (`npm run setup`, `npm start` on 3092): Gate 2
-    / approval channel, order approval with Gate 1 armed in the scratch home only, ask-user,
-    bots, room (§5).
+    / approval channel (the approval card drill), ask-user, bots, room (§5).
 
 **Go live**
 
@@ -646,6 +645,12 @@ chunk name moved — four places (§1).
   the "any non-empty kind but `plugin`" rule; a stricter edge reopens D11 for 0.2-born rooms.
 - Landed in plan 1 (`5d8c95d`): `dsh/profile/persona.md` named the `report` tool, deleted at
   0.2.0; the sentence is gone.
+- Watch (2026-11-02, the rc.5 spec's B6): of the smokes that pair a Remote `session/prompt` with
+  `agent.whenIdle()`, only `instructions-smoke` moved to the `turn/end` wait; `bot-runtime-smoke`,
+  `goal-smoke`, the two Lunhui run smokes, `roles-smoke`, `room-discussion-smoke` and
+  `subagents-smoke` still pair them, green in both full runs because each also waits on a request
+  or a notice. A follow-up sweep moves them; until then a lone red in one of them is this race
+  first.
 
 ### 7.3 Seams the 2026-10-15 agent redesign adds (spec §8 and §11), and the 0.2.1-rc.5 upgrade's keys
 
