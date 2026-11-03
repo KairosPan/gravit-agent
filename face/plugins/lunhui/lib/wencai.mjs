@@ -6,7 +6,7 @@
  * list. This module is only the client: the query and the parsed rows.
  *
  * - It holds no token, no cache and no environment: the token, its cache and its one re-exchange
- *   are the Account's (`account/src/portfolio/live/cn-ifind.ts`). Through the Account adapter
+ *   are the market's (`market/src/live/cn-ifind.ts`), which the Account relays to. Through the Account adapter
  *   (`account-fetch.mjs`) this one POST goes to the Account's iFinD route; the request here
  *   carries `Content-Type` and `Accept` only.
  * - The query is `A股 <YYYY年MM月DD日>涨跌幅 成交额 主力资金流向 所属概念`, the date the session's.
@@ -14,7 +14,7 @@
  * - This source alone has a 15-second timeout and a 4 MiB cap (S11); `fetchBytes` is GET-only, so
  *   the POST is injected through a wrapping `fetch`.
  * - The Account's two answers Lunhui words itself arrive as the adapter's codes: `IFIND_UNCONFIGURED`
- *   (the Account holds no token) is `NOT_CONFIGURED`, which the boards row turns into its
+ *   (the market holds no token) is `NOT_CONFIGURED`, which the boards row turns into its
  *   备用未配置 sentence; `IFIND_CREDENTIAL` (its exchange refused) is `凭据被拒（令牌换取未通过）`.
  *   An HTTP 401/403 or a token errorcode is `凭据被拒（访问令牌无效）`.
  * - Every refusal is a `LunhuiError` naming 同花顺问财; none carries a token or any of the reply.
@@ -26,7 +26,7 @@ import { fetchBytes } from "./market.mjs";
 import { LunhuiError } from "./runs.mjs";
 
 export const WENCAI_PROVIDER = "同花顺问财";
-/** The code of the refusal for an Account without an iFinD token; the boards row words it. */
+/** The code of the refusal when the market holds no iFinD token; the boards row words it. */
 export const WENCAI_NOT_CONFIGURED = "NOT_CONFIGURED";
 const HOST = "quantapi.51ifind.com";
 /** QuantAPI errorcodes that mean the access token, not the query, was refused. */

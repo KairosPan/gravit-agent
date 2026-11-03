@@ -1,5 +1,5 @@
-// A stand-in for akshare-mcp in the Account's tests: plain Node over the Account's own MCP SDK, no Python, no network. Two of the real
-// server's tools, with methods that answer, fail, hang, exit and flood, so src/portfolio/live/akshare.ts can be driven through each edge.
+// A stand-in for akshare-mcp in the market's tests (and the account's akshare-seat test): plain Node over the MCP SDK, no Python, no network. Two of
+// the real server's tools, with methods that answer, fail, hang, exit and flood, so market/src/live/akshare.ts can be driven through each edge.
 import { appendFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";

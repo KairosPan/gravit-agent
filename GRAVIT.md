@@ -20,8 +20,8 @@ The seat's market reads and AKShare's are live, seconds old, and unguarded: the 
 no lookahead guard since 2026-10-24, by the operator's decision. A number read today is
 today's; nothing here replays the past. Evidence is forward paper trading on the paper venue
 the operator granted at the Account: the Account's own figures as returned, with the order ids.
-`mcp__account__portfolio_akshare` passes one AKShare tool and its `arguments` to the Account's
-sidecar: `akshare_discover` finds a method and its category tool; `stock_zh_a_spot_tx` (under
+`mcp__account__portfolio_akshare` passes one AKShare tool and its `arguments`, through the
+Account, to the market's sidecar: `akshare_discover` finds a method and its category tool; `stock_zh_a_spot_tx` (under
 `akshare_stock_a`) is the verified Tencent A-share snapshot method, while Eastmoney and Xueqiu endpoints may fail or require a
 login. Check every result's errors, timestamps and `truncated` (the default limit is 500 rows;
 a truncated result is not the whole market). Retrieval time is not exchange time.

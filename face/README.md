@@ -479,11 +479,12 @@ Account is down.
   `$DSH_HOME/cordis.patch.yml` is inert now; delete it by hand.
 - `FACE_AKSHARE_MCP_COMMAND` in a start line is unread.
 - The face's start line (`.claude/launch.json`) no longer needs `~/.local/bin` (where
-  `akshare-mcp` lives) on its `PATH`; the Account's line keeps it, or sets
-  `PORTFOLIO_AKSHARE_BIN`.
-- The host Account must be restarted from this tree before Gravit's AKShare works: it
-  spawns `akshare-mcp` (default `~/.local/bin/akshare-mcp`), and an older 4820 answers
-  that the route does not exist.
+  `akshare-mcp` lives) on its `PATH`; the market's line keeps it, or sets
+  `MARKET_AKSHARE_BIN` (since 2026-11-03 the sidecar is the market's, `market/README.md`).
+- The host market (127.0.0.1:4821) must run from this tree, and the host Account be
+  restarted from it, before Gravit's AKShare works: the market spawns `akshare-mcp` (default
+  `~/.local/bin/akshare-mcp`) and the Account relays to it; an older 4820 answers that the
+  route does not exist.
 
 **What dsh 0.2.0 changed for every MCP row** — the Account seat's alike; no config key
 changed (`src/account-seat.ts` records it):
@@ -4759,7 +4760,8 @@ Account › Agents, "The Account seat" above), a channel session.
 the tree's commit (`git rev-parse --short HEAD`).
 
 **Run 2026-10-21 on the stand-in, not the real service** (buyer-agent-demo @ 133b9a7, its
-`ui-standin --no-desk` on 4821, the face on 3097 from a scratch home with `DEEPSEEK_API_KEY`,
+`ui-standin --no-desk` on 4821 — a port the stand-in refuses since 2026-11-03, the market's; it now takes
+`--port 0`, an ephemeral port — the face on 3097 from a scratch home with `DEEPSEEK_API_KEY`,
 `deepseek-flash`): steps 1–6 observed — the box `not on the account` → `knocking` after the first
 read → `admitted until Nov 20` with `trade · paper-momentum · $25 an order · $90.63 of $100 left`
 after the fill; the read answered by three seat reads and no card; the order previewed by the
@@ -4916,9 +4918,9 @@ and a face browser that signs (`npm run account:owners`, "The owner drill").
    5. The rest only on the stand-in, never on 4820: every connector but a paper account (a key
       file, an address, the command-line connector, a browser wallet, the Robinhood sign-in), an
       agent wallet's Top up… and Take back…, Receive, Move and Earn. The stand-in:
-      `cd account && npx tsx test/standin/ui-standin.ts --port 4821` (at its default cap; `--cap
-      <usd>` sets another), a face started with `FACE_ACCOUNT_URL=http://127.0.0.1:4821` on a
-      scratch home. Observed: each sheet started, prepared and shown on the face and signed against
+      `cd account && npx tsx test/standin/ui-standin.ts --port 0` (an ephemeral port, the default;
+      it refuses 4820, the Account's, and 4821, the market's; at its default cap, `--cap <usd>` sets
+      another), a face started with `FACE_ACCOUNT_URL=` the URL it prints, on a scratch home. Observed: each sheet started, prepared and shown on the face and signed against
       simulated venues. The stand-in reaches no network, so a venue's sign-in is expected to end at
       its start (expected, not yet observed: how that start fails with no network, a quick refusal
       or a wait to a timeout, is the drill's to see): the sign-in sheet shows the Account's refusal

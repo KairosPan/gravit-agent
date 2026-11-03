@@ -159,7 +159,7 @@ test("an operator patch now reaches the base-owned storage rows", () => {
   assert.deepEqual(row?.config, { root: "/tmp/x" });
 });
 
-/* AKShare is the Account's (account/README.md): Gravit reaches it through the
+/* AKShare is the market's, relayed by the Account (market/README.md): Gravit reaches it through the
  * seat's portfolio_akshare, and the face composes no AKShare row and runs no
  * AKShare process. The retired env switch and an operator's stale patch both
  * stay inert. */

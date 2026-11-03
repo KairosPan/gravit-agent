@@ -1,47 +1,17 @@
-/** A Kalshi account, read and traded through its trade API v2 (docs.kalshi.com, read 2026-10-05; OpenAPI 3.32.0).
+/** Kalshi's candles, as its trade API v2 answers them (docs.kalshi.com, read 2026-10-05; OpenAPI 3.32.0): what the market keeps of the
+ * account's Kalshi module, which also reads and trades a Kalshi account. Here nothing is signed for and nothing is placed: only how a
+ * window of history becomes Kalshi's candlestick requests.
  *
- *   GET /trade-api/v2/portfolio/balance      balance, in cents
- *   GET /trade-api/v2/portfolio/positions    market_positions[]: ticker, position_fp (contracts; negative = NO), market_exposure_dollars (cost)
- *   GET /trade-api/v2/markets?tickers=…      the held markets, for what a position is worth now: Kalshi reports only what it cost
- *
- * Orders (the trader below):
- *
- *   GET    /trade-api/v2/markets/{ticker}                 one market: *_dollars prices, price_ranges (its price grid), status (`active` trades)
- *   GET    /trade-api/v2/markets?status=open&…            the list a search runs over
- *   GET    /trade-api/v2/exchange/status                  whether Kalshi is taking orders now, per exchange shard
- *   GET    /trade-api/v2/api_keys                         the key's own scopes: `write` or `write::trade` places orders, `read` alone does not
- *   POST   /trade-api/v2/portfolio/events/orders          place (the V2 endpoint; the old /portfolio/orders writes were removed in June 2026)
- *   DELETE /trade-api/v2/portfolio/events/orders/{id}     cancel, with ?market_ticker= so Kalshi routes it to the market's shard
- *   POST   /trade-api/v2/portfolio/events/orders/{id}/amend   a resting order's price or size changed in place (amend-order-v2.md)
- *   GET    /trade-api/v2/portfolio/orders/{id}            what became of it: resting, executed, canceled
- *   GET    /trade-api/v2/portfolio/orders?ticker=         the orders on one market: those resting (a sell counts them), one by its client id
- *   GET    /trade-api/v2/portfolio/fills?order_id=        the price of each fill, in YES and in NO terms, and its fee
- *   GET    /trade-api/v2/portfolio/positions?count_filter=position   what is held, for the trader's positions
- *   GET    /trade-api/v2/markets?tickers=…                those positions' markets, for their names and prices
- *
- * Reading the market (nothing signed for but the request itself, nothing placed):
- *
- *   GET    /trade-api/v2/markets?min_close_ts=&max_close_ts=   the markets closing within a window (get-markets.md)
- *   GET    /trade-api/v2/events?tickers=…                 the events those markets belong to, for their category
  *   GET    /trade-api/v2/markets/candlesticks?market_tickers=   a market's price history (batch-get-market-candlesticks.md)
  *
- * What an order may say (create-order-v2.md): every Kalshi event order is a limit order with a price, and it says how long it stays —
- * good_till_canceled, immediate_or_cancel or fill_or_kill, which V2 requires; a good-till-canceled one may carry an `expiration_time`, which
- * is how a day order is sent. It may be post_only, and reduce_only when it fills at once. Kalshi has no stop orders on event contracts.
- *
- * Each request carries three headers: the key's id, a millisecond timestamp, and a signature over `timestamp + METHOD + path` — the path
- * with its `/trade-api/v2` prefix and without the query string, the body never signed — made with the private key that came with the id:
- * RSA-PSS (SHA-256, MGF1 SHA-256, salt as long as the digest) for an RSA key, the string signed directly for an Ed25519 one. The private
- * key is a PEM file the key file points to; it is read in this process and used for nothing but these signatures.
- *
- * Kalshi's API has no call that moves money in or out: this connection could not start a deposit or a withdrawal if it wanted to. An order
- * moves dollars into contracts and back, inside the Kalshi account.
+ * The account's original (its header names the account, order and fill endpoints, the order rules and the request signature) stays in
+ * account/src/portfolio/live/kalshi.ts.
  */
 // Trimmed copy of account/src/portfolio/live/kalshi.ts at 20ead850 (account split, plan A1): the market's own from here.
 import { limitOf, utcDay } from "./history.ts";
 import { INTERVAL_MS, type Candle, type CandleInterval, type CandlePage, type CandleWindow } from "./trade.ts";
 
-// ---- trading -----------------------------------------------------------------------------------------
+// ---- candles -----------------------------------------------------------------------------------------
 
 /** Kalshi keeps candles of 1, 60 and 1440 minutes (get-market-candlesticks.md; asked for 5 it answers none — OBSERVED): every other size is
  * the finer one it keeps folded together — five and fifteen minutes from one-minute candles, four hours from hourly ones, a week (from

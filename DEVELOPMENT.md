@@ -100,6 +100,11 @@ persona without `{{cwd}}` (§4.3), the kinded projections read (§5.2), the glob
 (§4.1), the temp-root precondition and the counts (§7.1, §7.3), §4.8's new decisions, R29, R44 and
 §10 items 13–14, each read against the code on `claude/dsh-upgrade-51c9f0` @ `8819cad7` (2,903 tests
 in 200 files, 2,871 pass + 32 skipped; typecheck clean).
+**Amended 2026-11-03** for plan A1 of the Account split (spec
+`docs/superpowers/specs/2026-11-03-account-split-and-identity-design.md`): the new §3.10 (the market
+service), §3.9 (China, Lunhui's reach and AKShare as relayed, the three boxes), §3.1's AKShare
+paragraph, §4.6, §7.1, §7.3's compose suite, R1b and Appendix A, each read against the code on
+`feat/account-split-a1` @ `1b9ec11c`.
 
 **Authority.** `Gravit-Design.md` (the charter) outranks this document on intent. This document
 describes mechanism *as built*: where it disagrees with the code, the code is the fact and this
@@ -252,12 +257,12 @@ that closure falls through to `$DSH_HOME/profiles/` itself, where a stale 0.1.1
 `profiles/node_modules` farm would answer with a 0.1.1 package — harmless for the operator's
 rows, and the reason PLAN D13 deletes the farm once no 0.1.1 tool runs on the home.
 
-AKShare is the Account's, not the face's: a Python MCP child (`akshare-mcp`) of the Account service
-(`account/src/portfolio/live/akshare.ts`, §3.9), reached through the seat's one read tool,
-`portfolio_akshare`. The face mounts no AKShare row and runs no AKShare process; nothing falls back
-to a face-side AKShare when the Account is down. The child is started on the first ask and again
+AKShare is the market's, not the face's: a Python MCP child (`akshare-mcp`) of the market service
+(`market/src/live/akshare.ts`, §3.10), which the Account relays, reached through the seat's one read
+tool, `portfolio_akshare`. The face mounts no AKShare row and runs no AKShare process; nothing falls
+back to a face-side AKShare when the Account or the market is down. The child is started on the first ask and again
 after it exits, under one 120 s deadline per ask; a call that times out recycles the child. Its
-environment is an allowlist of the Account's own (no wallet or iFinD secret reaches Python). The
+environment is an allowlist of the market's own (no iFinD secret reaches Python). The
 seat's call timeout is 130 s, above that deadline. These vendor reads have no lookahead guard (no
 read in the tree has one since 2026-10-24). Since 0.2.0 an MCP server's `instructions` enter the
 system prompt as a `mcp:<serverName>` section with no switch, and instructions over 32 KiB fail the
@@ -937,7 +942,7 @@ is not refused without it (R54). The page's tests left with it, `test/unit/ui-su
 copy's one known red) among them; `test/unit/server-no-page.test.ts` pins the 404, and the suite is
 155 files, 2,379 tests, all passing (2026-11-01).
 
-**The AKShare sidecar** (`src/portfolio/live/akshare.ts`; spec `docs/superpowers/specs/2026-11-01-account-two-parts-design.md` §4.3). `createAkshare` runs `akshare-mcp` (`akshareCommand()`: `PORTFOLIO_AKSHARE_BIN`, else `~/.local/bin/akshare-mcp`; argv only, no shell) as an MCP child over stdio with the SDK client. It starts on the first ask and again after it exits, never eagerly. One deadline, `AKSHARE_CALL_MS` (120 s), bounds a cold start, the listing and the call; a call that times out recycles the child (closed and forgotten), so a stuck Python call dies with it and cannot wedge later asks. The child's environment is an allowlist of the Account's own (`sidecarEnv`: `PATH`, `HOME`, `USER`, `LANG`/`LC_*`, the temp dirs, the TLS roots, proxies without userinfo, `FASTMCP_LOG_LEVEL`) plus `PYTHONUNBUFFERED=1` and `AKSHARE_MCP_MAX_ROWS=500`: no wallet or iFinD secret reaches Python; its stderr is the Account's. A reply past `AKSHARE_REPLY_MAX` (4 MiB) is refused `too-large`, arguments past `AKSHARE_ARGS_MAX` (16 KiB) `bad-arguments`. `server.ts` serves two reads behind the `Host` fence, working with `--read-only`, writing nothing: `GET /api/akshare/tools` and `POST /api/akshare/call` (`{tool, arguments}`), refusals `{ok: false, akshare: <word>, message}` with `off`, `unknown-tool`, `bad-arguments`, `unavailable`, `timeout` and `too-large`. The seat's `portfolio_akshare` (`mcp.ts`, `readOnlyHint`) posts to the call route and returns the sidecar's content; the face classifies it a read (`SEAT_READ_RAW_NAMES` in `orders.ts`: no card), and the seat's call timeout (`toolCallTimeoutMs`) is 130 s, above the Account's 120 s. The account image installs the same pin (`account/Dockerfile`, `PORTFOLIO_AKSHARE_BIN=/usr/local/bin/akshare-mcp`); the agent image carries none. The operator restarts the host Account from this tree for it to take effect.
+**The AKShare sidecar** is the market's since 2026-11-03 (§3.10): the account relays `GET /api/akshare/tools` and `POST /api/akshare/call` to it byte for byte (no market: `off`; the market not answering: `503 {ok: false, akshare: "unavailable", message: MARKET_DOWN}`). The seat's `portfolio_akshare` (`mcp.ts`, `readOnlyHint`) posts to the account's call route; the face classifies it a read (`SEAT_READ_RAW_NAMES` in `orders.ts`: no card), and the seat's call timeout (`toolCallTimeoutMs`) is 130 s, above the sidecar's 120 s.
 
 **The one change to the copy: the fence's second address.** `server.ts` listens where
 `PORTFOLIO_BIND` says (default `127.0.0.1`) and admits, beside the loopback `Host` values
@@ -955,66 +960,21 @@ the default refusing `account:4820`, the admitted host, `evil:4820` still refuse
 `Origin` still refused, `/` and the callback refused under a cross-site navigation and the callback
 under a same-site one, and `parseHosts`.
 
-**China, added to the copy (2026-11-01).** The Account's public markets include China, a
-`ChinaSource` (`live/china.ts`, `chinaSource({http, clock})`) that stands beside the public
-sources, not among them: `publicMarkets()` feeds paper pricing, the candles and book routes and
-the venue checks, none of which may meet a CNY market. It is built by the real server alone
-(`server.ts` passes `china: chinaSource()` to `PortfolioService.create`), so a service made
-anywhere else, tests included, never asks Tencent. Its parsers are the face's old ones, moved with
-their limits: `cn-session.ts` (`readCnSession`, the Shanghai-clock phase), `cn-quotes.ts`
-(`parseTencentQuotes`, `decodeGbk`), `cn-rank.ts` (`parseTencentRank`, `mergeMovers`),
-`cn-history.ts` (`gridIndex`, `parseDayQuery`, `parseKline`, `CN_BARS`) and `cn-search.ts`
-(`parseTencentSearch`, Tencent's smartbox). **`CnHttp`** (`cn-http.ts`) is its network, a GET that
-returns the body's raw bytes: the Account's `Http` decodes every body as UTF-8 and keeps 2,000
-characters, which would mangle Tencent's GBK names and cut a ranking short. `cnHosts` guards it,
-after `fixedHosts` in `public-markets.ts`: https, the default port, no user, GET, and one of four
-hosts (`CN_HOSTS`: `qt.gtimg.cn`, `smartbox.gtimg.cn`, `proxy.finance.qq.com`,
-`web.ifzq.gtimg.cn`); no key is held. What it serves: `GET explore?tab=china&sort=volume|movers`
-(the day's top 20 as `ExploreItem`s of kind `ashare`, key `cn:<6 digits>`, `currency: "CNY"`,
-`turnoverCny`, `canTrade: false`, in the `china` tab alone and never in `all`, with a `china`
-read — sort, total, session phase and last session, status); `explore?q=` merges China's hits
-(waiting at most `CHINA_SEARCH_WAIT_MS`) into the other markets'; `quotes?pairs=china|<code>`
-answers a `ChinaMarket` carrying `cn` (`ChinaFacts`: market cap, P/E TTM, turnover rate, limit up
-and down, amplitude, `phase`, `quoteStatus`) and `candles?venue=china` a `ChinaHistory` — 1D and
-5D as Shanghai sessions of minutes, the longer ranges as forward-adjusted day, week and month
-bars; the seat's `portfolio_explore` gains the `china` tab. Reads are kept a short while (`RANK_TTL_MS`
-10 s, `QUOTES_TTL_MS` 5 s, `MINUTES_TTL_MS` 30 s, `BARS_TTL_MS` 600 s, `SEARCH_TTL_MS` 60 s) and
-shared per key; a failure is never kept, and a ranking that fails is answered from the last good
-one for up to `STALE_KEEP_MS` (10 min), flagged stale; a refusal carries the Account's own words,
-never Tencent's text or a URL. Traps carried with the code: STAR shares (688…) report volume in
-shares, the others in lots; Tencent answers GBK with a trailing `~`. There is no lookahead guard
-and no fallback source: when Tencent does not answer, China says so (`ChinaStatus`).
+**China** (added 2026-11-01) is read from the market since 2026-11-03 (§3.10, `remoteChina` over the link): the account still answers `explore?tab=china`, `explore?q=`, `quotes?pairs=china|<code>`, `candles?venue=china` and the seat's `china` tab with the same shapes, view-only (`canTrade: false`), in CNY, in the China tab alone and never in `all`.
 
-**Lunhui's reach (2026-11-01, plan 2 of the Account's two parts).** Two reads serve the Lunhui
-freezes, behind the `Host` fence like every `/api/` route, working on a `--read-only` Account, and
-built only from the injected `cn` option (absent: refused `off`, never the network). `GET
-/api/cn/relay?url=` (`live/cn-relay.ts`, `createCnRelay` over `CnHttp`) forwards one GET to an
-allow-list (`relayTarget`, `RELAY_HOSTS`: `qt.gtimg.cn` `/q=<codes>`, `web.ifzq.gtimg.cn`'s
-`fqkline/get` and `day/query`, `push2ex.eastmoney.com`'s four `getTopic…`/`getYesterdayZTPool`
-pools, `push2` and `push2delay` `clist/get`; https, the default port, no user, no fragment) and
-answers the upstream's status, content type and bytes unchanged, plus `location` on a 3xx, with
-`x-content-type-options: nosniff`; no decoding, no caching, no redirect followed; 7 s and 512 KiB per read, 4 s for
-`day/query`; a 16-slot queue (`RELAY_IN_FLIGHT`) with a 64-waiter cap (`RELAY_WAITING`), an
-abandoned ask leaving it. Three request headers pass (`accept`, `referer`, `user-agent`). `POST
-/api/cn/ifind` (`live/cn-ifind.ts`, `createIfind`) takes `{"query"}` in the boards stand-in's one
-grammar (`IFIND_QUERY`), exchanges the token from `IFIND_REFRESH_TOKEN` or uses `IFIND_ACCESS_TOKEN`
-(the Account process's environment only, held in memory, never in a reply, log line or refusal),
-re-exchanges once on a rejected token, and answers the reply unchanged under one 15 s deadline and
-a 4 MiB cap. A refusal is the route's own word, not a `core/errors.ts` code: `{ok:false,
-relay:<word>}` or `{ok:false, ifind:<word>}`, marked by the header `x-cn-relay` / `x-cn-ifind`
-(`upstream` or `refused`). The start line says whether iFinD is configured. Lunhui's side is
-`face/plugins/lunhui/lib/account-fetch.mjs`.
+**Lunhui's reach** (2026-11-01) is relayed to the market since 2026-11-03 (§3.10): `GET /api/cn/relay?url=` and `POST /api/cn/ifind` pass the caller's hang-up upstream and answer the market's status, bytes and five headers (`RELAYED_HEADERS`: `content-type`, `location`, `x-cn-relay`, `x-cn-ifind`, `x-content-type-options`) unchanged; the market not answering is `502 {ok: false, relay: "unreachable"}` (`ifind: "unreachable"`), and with no market handed in the routes answer their old `off` branches. Lunhui's side is `face/plugins/lunhui/lib/account-fetch.mjs`, unchanged.
 
-**The two boxes.** `compose.yml` at the repo root runs two services, each from its own
-`Dockerfile` on `node:22`, on one private network (`gravit`):
+**The three boxes.** `compose.yml` at the repo root runs three services, each from its own
+`Dockerfile` on `node:22`, on one private network (`gravit`) — the `market` box is §3.10's:
 
 - **`account`** — the image copies `account/` and runs `npm ci` at build; the service runs
   `--home /data` on the volume `account-home`, with `PORTFOLIO_BIND=0.0.0.0` and
   `PORTFOLIO_HOSTS=account:4820`; it publishes no port (`expose: ["4820"]`, no `ports`): only the
   agent box reaches it, at `account:4820` on `gravit`, so its pairing code is read from
   `docker compose logs account` and typed on the face. A health check on `GET /api/overview` (the
-  HTTP status) gates the agent's start. No bind mount; one optional `env_file`, `.env.ifind`, the
-  iFinD token the Account alone reads; its image carries `akshare-mcp`.
+  HTTP status) gates the agent's start. No bind mount and no `env_file`: it reads the market at
+  `PORTFOLIO_MARKET_URL=http://market:4821` and starts once the market box is healthy; its image
+  carries no `akshare-mcp` and it holds no iFinD token, both the market box's.
 - **`agent`** — the face (`face/Dockerfile`, `face/docker-entrypoint.sh`), `FACE_BIND` set by the
   entrypoint to the container's own address (`hostname -i`, the first; it exits loud when there is
   none, and a `FACE_BIND` already in the environment wins) — compose sets none, since dsh 0.2.1
@@ -1035,9 +995,191 @@ The face reaches `http://account:4820`, and the seat (the face's child, same box
 the host reaches the Account only through the face's `127.0.0.1:3090` (its proxy, §4.4).
 What the split buys: the Account's home — the desk's seat keys, `agent-wallets`, the paper book,
 the owner-device registry — is not on any filesystem Gravit's shell can read. What it does not: the
-seat's own key stays with the seat, in the agent box (R50). The two host processes stay the daily
-run and Docker is not involved there — the host Account keeps `127.0.0.1:4820` on loopback; the
-boxes are the isolated run, `face/README.md` "The two-box drill" and `account/README.md` "In the box".
+seat's own key stays with the seat, in the agent box (R50). The three host processes (the face, the
+Account, the market) stay the daily run and Docker is not involved there — the host Account keeps
+`127.0.0.1:4820` and the market `127.0.0.1:4821` on loopback; the boxes are the isolated run,
+`face/README.md` "The two-box drill", `account/README.md` and `market/README.md` "In the box".
+
+### 3.10 The market service (`market/`)
+
+`market/` is the Market part's keyless public data as its own service on 127.0.0.1:4821: the
+public sources and their stream hub, China (Tencent), the AKShare sidecar, Lunhui's relay and
+iFinD. It is its own package (`gravit-market`, `"type": "module"`, Node `^22.19.0 || >=24`, its
+own lockfile and `node_modules` by `npm ci` there), moved out of `account/` on 2026-11-03 (plan A1
+of spec `docs/superpowers/specs/2026-11-03-account-split-and-identity-design.md`). Its code is
+still Linqi's buyer-agent-demo @ 133b9a7 by way of this tree's `account/`: `market/NOTICE` names
+the origin and lists the files, `market/LICENSE` is a byte copy of the account's Apache-2.0 text.
+It holds no wallet, no home and no key file, imports no `viem/accounts`, and writes nothing to
+disk; `test/unit/no-wallet.test.ts` pins all of it (no `home.ts`, `credentials.ts`, `keystore.ts`,
+`sign.ts`, `paper.ts`, `metamask.ts`, `writes.ts`, `earn.ts`, `polymarket-clob.ts`,
+`wallet-bridge.ts` or `ed25519.ts`; no fs write call outside `market-service.ts`, the operator's
+installer; no `BUYER_HOME`).
+
+**What came from the account.** *Moved* with `git mv` (history follows) into `src/live/` from
+`account/src/portfolio/live/`: `akshare`, `china`, the eight `cn-*` modules, `public-markets`,
+`public-rwa`, `public-stocks`, `us-quotes`, `stream-hub`, `prices` and `history-stocks`, with their
+eighteen unit tests, `live-public-markets-fixtures.ts` and `test/fixtures/fake-akshare-mcp.mjs`.
+*Copied* at `20ead850`, the account keeping its own: `src/core/errors.ts`, `src/refuse.ts`,
+`src/calendar.ts`, and into `src/live/` `trade`, `types`, `history`, `history-crypto`,
+`categories`, `preipo`, `hl-rules`, `icons`, `compare`, `explore`, `exchange`, `kalshi`,
+`polymarket-us`, `robinhood`, `dex` and `chain` — seven of them (`types`, `exchange`, `kalshi`,
+`polymarket-us`, `robinhood`, `dex`, `chain`) trimmed to the exports the market uses, each copy
+marked under its header ("Copy of …" or "Trimmed copy of … at 20ead850"). `exchange.ts` carries a
+local `type KeyFile = Record<string, string>` in place of the account's `credentials.ts` import.
+`src/server.ts` mirrors the account server's fence, no-page answer, JSON parser and unread-body
+answer. The account's tests still import `market/src` and `market/test`, so its suite needs
+`cd market && npm ci`; `account/src` imports nothing of the market's.
+
+**Listening and the fence** (`src/server.ts`, `startMarketServer`). It binds `MARKET_BIND`
+(default `127.0.0.1`) on `--port` (default `MARKET_PORT`, 4821), and an address in use is one
+sentence and exit 1. It admits the loopback `Host` values plus the exact `host:port` entries of
+`MARKET_HOSTS` (`parseHosts`, comma-separated), and refuses a foreign `Origin` and a
+`Sec-Fetch-Site` of `cross-site` or `same-site` with `403 {ok: false, error: "this server answers
+only programs on this machine"}`. Every path outside `/api/` is `404 {ok: false, error:
+MARKET_NO_PAGE}` ("The market serves no page: its screens are Gravit's face (Markets). This address
+answers its API under /api/."), and every answer is `cache-control: no-store`.
+`account/test/unit/market-fence-parity.test.ts` drives the same cases at both servers so the two
+fences cannot drift. `GET /api/health` is `{ok: true, service: "market", sources, china, akshare,
+ifind}`, naming no token. The start lines say the address, whether iFinD is configured, and the
+AKShare command (started on first use).
+
+**The core** (`src/core.ts`). `realMarketCore()` builds the public sources (`publicSources()`),
+one hub (`joinHubs` over a `StreamHub` that answers from REST and the venue feeds), `chinaSource()`,
+`publicPrices()`, the Lunhui relay and iFinD, and the AKShare sidecar; nothing opens until asked.
+**The read cache** (`src/read-cache.ts`, the account service's `ReadCache` copied) keeps each
+source's reads (`keptSource`: listings, stats and events `PUBLIC_KEEP_MS` 20 s, a line
+`LINE_KEEP_MS` 3 s, up to `HISTORY_KEPT` 64 histories of `HISTORY_KEPT_BARS` 250,000 bars), holds a
+refusing source back under `public:<id>`, and gives every kept source a `reset()`.
+
+**China** (`src/live/china.ts`, `chinaSource({http, clock})`, added to the account on 2026-11-01
+and moved here) stands beside the public sources, not among them: the public sources feed paper
+pricing, the candles and book routes and the venue checks, none of which may meet a CNY market.
+Only `realMarketCore()` builds it, so a core made anywhere else, tests included, never asks
+Tencent. Its parsers are the face's old ones, moved with their limits: `cn-session.ts`
+(`readCnSession`, the Shanghai-clock phase), `cn-quotes.ts` (`parseTencentQuotes`, `decodeGbk`),
+`cn-rank.ts` (`parseTencentRank`, `mergeMovers`), `cn-history.ts` (`gridIndex`, `parseDayQuery`,
+`parseKline`, `CN_BARS`) and `cn-search.ts` (`parseTencentSearch`, Tencent's smartbox).
+**`CnHttp`** (`cn-http.ts`) is its network, a GET that returns the body's raw bytes (the shared
+`Http` decodes every body as UTF-8 and keeps 2,000 characters, which would mangle Tencent's GBK
+names and cut a ranking short); `cnHosts` guards it, after `fixedHosts` in `public-markets.ts`:
+https, the default port, no user, GET, and one of four hosts (`CN_HOSTS`: `qt.gtimg.cn`,
+`smartbox.gtimg.cn`, `proxy.finance.qq.com`, `web.ifzq.gtimg.cn`); no key is held. It answers the
+day's top 20 by volume or movers (`ExploreItem`s of kind `ashare`, key `cn:<6 digits>`, `currency:
+"CNY"`, `turnoverCny`, `canTrade: false`), search hits, a `ChinaMarket` per code carrying `cn`
+(`ChinaFacts`: market cap, P/E TTM, turnover rate, limit up and down, amplitude, `phase`,
+`quoteStatus`) and a `ChinaHistory` — 1D and 5D as Shanghai sessions of minutes, the longer ranges
+as forward-adjusted day, week and month bars. Reads are kept a short while (`RANK_TTL_MS` 10 s,
+`QUOTES_TTL_MS` 5 s, `MINUTES_TTL_MS` 30 s, `BARS_TTL_MS` 600 s, `SEARCH_TTL_MS` 60 s) and shared per
+key; a failure is never kept, and a ranking that fails is answered from the last good one for up to
+`STALE_KEEP_MS` (10 min), flagged stale; a refusal carries its own words, never Tencent's text or a
+URL. Traps carried with the code: STAR shares (688…) report volume in shares, the others in lots;
+Tencent answers GBK with a trailing `~`. There is no lookahead guard and no fallback source: when
+Tencent does not answer, China says so (`ChinaStatus`). The account's China tab, search, quotes and
+candles read it through `/api/china/*` (§3.9).
+
+**The source protocol** (`src/protocol.ts`, `mountProtocol`) is how the account reads the market.
+Every answer is 200 `{ok: true, value, readAt?}` or `{ok: false, refusal}` (a top-level Map goes
+out as `[key, value][]`, `readAt` is the value's read stamp or a parallel list of them); a bad or
+doubled parameter is 400, an unknown source or a read it has no method for 404.
+
+| Route | What it answers |
+|---|---|
+| `GET /api/sources` | each source's `id`, `name`, `kind`, `connectTo`, `connector`, `readOnly?`, `historyApart?`, `sessions?` (its clock's zone) and `has` (which reads it serves) |
+| `GET /api/source/:id/listings` · `line` · `stats` · `events` · `candles` · `book` · `trades` · `settlement` · `funding` | that source's read, through the read cache; `candles` also takes `range` and `own`; book depth 1–50 (default 20), trades 1–100 (default 30) |
+| `POST /api/source/:id/reset` | the forced re-check: lets the source's hold go |
+| `GET /api/china/rank` · `search` · `quotes` · `history` · `status` | China's reads, each answer carrying China's `status` |
+| `GET /api/price?asset=` | a coin's price or `null` |
+| `GET /api/hub/covers` · `GET /api/hub/confirmed` | whether the hub streams a market (and prices only), and a quote confirmed within `maxAgeMs`, waiting at most `HUB_WAIT_MAX_MS` (5 s) |
+| `GET /api/hub?client=` | the hub's events as SSE: `quote`, `book` (to a book hold only), `trades` (the ring after the last seq sent, `evictedSeq`, the recent trades) and `live`, coalesced 100/100/250 ms per market, a heartbeat every 15 s; a hold taken, or a stream opened by a client that holds, gets the current state at once |
+| `POST /api/hub/hold` · `POST /api/hub/want` | `{client, source, symbol, book?, held}` holds or lets go (the same hold twice is one); a want pushes that market to the client for `IDLE_MS` (60 s) |
+
+A client's last stream closing lets every hold go; a client that holds with no stream open is let
+go after `IDLE_MS`, and a market with no hub keeps no client.
+
+**Lunhui's reach and AKShare** (`src/routes-cn.ts`, `mountCn`, the account's four route bodies
+moved). `GET /api/cn/relay?url=` (`live/cn-relay.ts` over `CnHttp`) forwards one GET to an
+allow-list (`RELAY_HOSTS`: `qt.gtimg.cn`, `web.ifzq.gtimg.cn`'s `fqkline/get` and `day/query`,
+`push2ex.eastmoney.com`'s four `getTopic…`/`getYesterdayZTPool` pools, `push2`/`push2delay`
+`clist/get`; https, the default port, no user, no fragment) and answers the upstream's status,
+content type and bytes unchanged, plus `location` on a 3xx, with `x-content-type-options: nosniff`;
+no decoding, no caching, no redirect followed; three request headers pass (`accept`, `referer`,
+`user-agent`); 7 s and 512 KiB per read, 4 s for `day/query`, a 16-slot queue (`RELAY_IN_FLIGHT`)
+with a 64-waiter cap (`RELAY_WAITING`), an abandoned ask leaving it. `POST /api/cn/ifind` (`live/cn-ifind.ts`) runs the boards
+stand-in's one query (`IFIND_QUERY`) with `IFIND_REFRESH_TOKEN` or `IFIND_ACCESS_TOKEN` from this
+process's environment, held in memory and never in a reply, log line or refusal, re-exchanged
+once on a rejected token, under one 15 s deadline and a 4 MiB cap.
+Refusals are `{ok: false, relay|ifind: <word>}` with `x-cn-relay`/`x-cn-ifind`. The AKShare
+sidecar (`live/akshare.ts`, `createAkshare`) runs `akshare-mcp` (`akshareCommand()`:
+`MARKET_AKSHARE_BIN`, else `~/.local/bin/akshare-mcp`; argv only) as an MCP child over stdio,
+started on the first ask and again after it exits, one 120 s deadline (`AKSHARE_CALL_MS`) per ask,
+recycled on a timeout, an allowlisted environment (no iFinD secret reaches Python), 4 MiB replies
+and 16 KiB arguments; `GET /api/akshare/tools` and `POST /api/akshare/call` answer `{ok: false,
+akshare: <word>, message}` refusals (`off`, `unknown-tool`, `bad-arguments`, `unavailable`,
+`timeout`, `too-large`). Install and limits: `market/README.md`.
+
+**The public reads and the stream** (`src/reads.ts`, `src/stream.ts`, `src/follows.ts`), for the
+face in plan A2; the face does not read them yet. `GET /api/explore`, `/api/quotes`,
+`/api/candles`, `/api/book` and `/api/trades` are the account service's reads with the
+connected-venue branches deleted — the same query limits, 400 sentences, 409 refusals and body
+shapes — and `account/test/unit/market-parity.test.ts` pins that both packages answer alike. A
+non-China pair in `quotes` is refused as an account with nothing connected refuses it. `GET
+/api/stream` and `POST /api/stream/markets` are the account's bus without account events
+(`MarketStream`: `quote`, `trades` and `book` for the markets a page follows, `MAX_FOLLOWS` 16,
+coalesced, a `snapshot` frame on every new stream).
+
+**The account's one link** (`account/src/portfolio/market/`). The account reads the market through
+`connectMarket` (`link.ts`), built only by `server.ts`'s main and `account-check.ts` from
+`PORTFOLIO_MARKET_URL` (default `MARKET_URL_DEFAULT`, `http://127.0.0.1:4821`); a service made
+anywhere else reaches no market unless one is handed in. The link is the transport (`client.ts`:
+answers kept per route, shared in flight, a refusal kept at most 2 s, no Origin sent, redirects
+manual) and four adapters, the four things `service.ts` takes as options: `remoteSource`
+(`sources.ts`, one per `/api/sources` row, defining exactly the reads it `has`, plus `reset`),
+`RemoteHub` (`hub.ts`), `remoteChina` (`china.ts`) and `remotePrice` (`price.ts`, the last price of
+up to 2,000 assets remembered). `shapes.ts` holds the types and pure functions copied from the
+market. The source list is asked every 5 s until the market answers, then every 60 s, so an
+account started first fills in with no restart; the main's start line says `market: <url> ·
+answering` or `not answering yet`. The four `/api/cn/*` and `/api/akshare/*` routes are byte
+relays (§3.9).
+
+**The hub mirror and its reconnect** (`hub.ts`). `RemoteHub` counts local holds per key and POSTs
+the first and the last, sends wants at most every `WANT_EVERY_MS` (10 s), and mirrors the stream's
+last quote, book and a trades ring (`RING_SIZE` 200) per market. When the stream drops every quote
+and book goes `live: false`, `confirmed` answers nothing, and it reopens after a wait doubling from
+`BACKOFF_MIN_MS` (500 ms) to `BACKOFF_MAX_MS` (30 s); a stream silent for `SILENT_MS` (45 s) is taken
+for dropped. Each stream is an epoch: on every open the seqs it says are rebased above every seq
+given out before, every ring, recent list and `evictedSeq` is cleared, trades stamped before the
+stream opened are marked `snap` (paper counts them only if stamped after it last judged), and every
+hold and want is sent again — so a restarted market's trades can never fill a resting paper order
+on an older price.
+
+**The market is down** (`MARKET_DOWN`, "The market service is not answering, so prices here are
+not current."). `MarketLink.marketOld()` is defined while the client is stale or the hub stream is
+down with nothing answered since. Then holdings keep their last price and carry `marketOld`
+(`{since, message}`), a prepare refuses with the sentence ("Paper account: The market service is
+not answering, …", `E_VENUE_REJECTED`), paper waits — it never fills on a price older than the
+market's last answer — and `snapshot()` takes no net-worth or paper point. A market-down refusal
+carries `native: {market: "down"}` and is held only `MARKET_DOWN_HOLD_MS` (2 s), in the source's
+hold, the read cache and explore's answer alike, and while the market is old the link asks the
+source list every 5 s and pokes the hub, so recovery takes about 2 s.
+
+**`market:service` and the box.** `npm run market:service -- install|status|restart|logs|uninstall`
+(`src/market-service.ts`) is the LaunchAgent `com.gravit.market`, the operator's to install, never
+an agent's: the plist runs `node --env-file-if-exists=<repo>/.env.ifind …/tsx/dist/cli.mjs
+src/server.ts`, so the token is read from the file at each start and the plist carries only its
+path; it keeps `PATH`, `HOME` and `MARKET_AKSHARE_BIN`, logs to `~/Library/Logs/gravit-market/`, and
+`status` asks `/api/health`. The `npm run market` script is `tsx --env-file-if-exists=../.env.ifind
+src/server.ts` (`test/unit/market-script.test.ts` pins that tsx hands the flag to node). The account's
+`account:service` keeps `PORTFOLIO_MARKET_URL` when it is set. Under compose the `market` box
+(`market/Dockerfile`: AKShare's pinned install layer, `MARKET_AKSHARE_BIN=/usr/local/bin/akshare-mcp`,
+then `npm ci`; `market/.dockerignore`) runs `npm run market` with `MARKET_BIND=0.0.0.0` and
+`MARKET_HOSTS=market:4821`, `expose: ["4821"]` and no port published, no volume, the optional
+`env_file` `.env.ifind`, and a health check on `/api/health` that the account box waits on;
+`face/tests/compose.test.ts` pins it. `MARKET_BIND` and `MARKET_HOSTS` are for the box only.
+
+**Suites** (2026-11-03, `feat/account-split-a1`): `market/` 29 files, 284 tests, all pass;
+`account/` 143 files, 2,188 tests, all pass (its one clock-dependent case, `ui-standin.test.ts`
+"prices move every few seconds…", can fail on the real clock); the face 2,993 tests, 2,960 pass +
+33 skipped, and with `FACE_SMOKE=1` 2,994, all pass; each package's typecheck clean.
 
 ---
 
@@ -2165,7 +2307,9 @@ face's `WorkspaceLike`). Recorded, not fixed.
 | `FACE_BIND` | `overlay.ts` (`faceBind`), for the `webserver` row; `main.ts` for the boot line | `127.0.0.1` | the webserver's bind (§4.3): a concrete address only (dsh 0.2.1 refuses a wildcard at load); in the compose agent box the entrypoint sets the container's own address (`hostname -i`) — never a LAN address on the host, where it would serve the `/data` routes to the LAN behind a forgeable `Host` fence (§9, R51) |
 | `PORTFOLIO_BIND`, `PORTFOLIO_HOSTS` | `account/src/portfolio/server.ts`, not the face | `127.0.0.1`, none | the Account's listener and the extra `host:port` values its `Host` fence admits (§3.9); set by `compose.yml` for the Account box (`0.0.0.0`, `account:4820`) and nowhere else |
 | `FACE_ACCOUNT_URL` | `account-seat.ts` (`seatUrl`), for the seat, `seat.ts` and `account-proxy.ts`; `lib/account-fetch.mjs` (read at mount) for the four Lunhui freezes | `http://127.0.0.1:4820` | the running Account service the seat, `/data/seat.json`, the proxy's `/data/account…` reads and owner writes and the Lunhui freezes' reads reach, unless a patch composed the `mcp-account` row with another URL |
-| `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN` | the Account process, `account/src/portfolio/live/cn-ifind.ts` (read at ask time from the Account's environment; sourced from `.env.ifind` by the Account's start, `compose.yml`'s `env_file` on the `account` service) | —, — | the Lunhui boards stand-in's credential, the face's environment holds none (`face/README.md`, "Lunhui analysis"); the names stay in `agents.ts`'s `SCRUBBED_ENV` for CLI-agent children, an operator's shell may carry them |
+| `PORTFOLIO_MARKET_URL` | `account/src/portfolio/server.ts` and `account-check.ts`, not the face | `http://127.0.0.1:4821` | the market service the Account reads through its one link (§3.10); set by `compose.yml` for the Account box (`http://market:4821`) |
+| `MARKET_BIND`, `MARKET_HOSTS`, `MARKET_AKSHARE_BIN` | `market/src/server.ts`, `market/src/live/akshare.ts`, not the face | `127.0.0.1`, none, `~/.local/bin/akshare-mcp` | the market's listener and its admitted extra `Host` values (compose's market box: `0.0.0.0`, `market:4821`), and the AKShare sidecar's executable (the market image: `/usr/local/bin/akshare-mcp`) (§3.10) |
+| `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN` | the market process, `market/src/live/cn-ifind.ts` (read at ask time from the market's environment; `npm run market` and the `com.gravit.market` LaunchAgent read `.env.ifind` with `--env-file-if-exists`, `compose.yml`'s `env_file` on the `market` service) | —, — | the Lunhui boards stand-in's credential, the face's environment holds none (`face/README.md`, "Lunhui analysis"); the names stay in `agents.ts`'s `SCRUBBED_ENV` for CLI-agent children, an operator's shell may carry them |
 | `DSH_HOME` | `main.ts`, `boot.ts`, `sessions.ts`, `panels.ts` and dsh itself via `resolveDshHome`; `setup.ts` reads it raw (`?? ~/.dsh`) | `~/.dsh` | written by `bootFace` when a test passes an override; `resolveDshHome` treats an empty or whitespace value as unset and expands `~`, `setup.ts` does neither, so such a value sends `setup` and `start` to different homes |
 | `DSH_TELEMETRY_DISABLED` | `boot.ts` | unset | any non-empty value (`0`, `false` included) disables the telemetry row, and its patch composes after the operator layers, so it wins over an operator's re-enable; the policy layer disables the row by default anyway |
 | `DSH_PERMISSION_MODE` | dsh, not the face | `workspace-write` | `danger-full-access` sets approval policy `never`: it disarms the sandbox-escalation card but **not** Gate 2, which then denies in its own words |
@@ -2192,7 +2336,7 @@ Every child the face spawns for a local agent run or probe has these scrubbed �
 `ANTHROPIC_BASE_URL`, `ANTHROPIC_CUSTOM_HEADERS`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`,
 `CODEX_API_KEY`, the Bedrock/Vertex/Foundry switches, both APCA keys (read nowhere in the tree
 since 2026-10-24, still scrubbed so an operator shell's Alpaca keys never reach a CLI agent),
-`DEEPSEEK_API_KEY`, `IFIND_REFRESH_TOKEN`, `IFIND_ACCESS_TOKEN` (the Account's iFinD credential, which the face no longer reads; an operator's shell may still carry it). Every other variable is inherited, `ANTHROPIC_MODEL` included; deliberately so
+`DEEPSEEK_API_KEY`, `IFIND_REFRESH_TOKEN`, `IFIND_ACCESS_TOKEN` (the market's iFinD credential, which the face no longer reads; an operator's shell may still carry it). Every other variable is inherited, `ANTHROPIC_MODEL` included; deliberately so
 for `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME` (the CLI logs itself in; the face
 never handles its credentials).
 
@@ -4149,8 +4293,10 @@ or was down across, or found past its grace, is `missed`, with one line, and nev
 | `cd face && npm test` | `face/` | nothing — no port, no key | 2,993 tests in 203 files, 2,960 pass, 33 skipped (2026-11-02, the dsh 0.2.1-rc.5 upgrade merged with the desk's hardening and its graceful-stop carry, `claude/dsh-upgrade-51c9f0` @ `ce4fc716`; 2,994/2,994 under `FACE_SMOKE=1`); 2,974 tests in 202 files, 2,942 pass, 32 skipped (2026-11-02, the merge at `817ee2bb`); 2,903 tests in 200 files, 2,871 pass, 32 skipped (2026-11-02, the upgrade alone at `8819cad7`); 2,868 tests in 197 files, 2,838 pass, 30 skipped (2026-11-02, the desk's P4 after its final review, the upgrade's baseline at 0.2.0-rc.2); 2,795 tests in 196 files, 2,765 pass, 30 skipped (2026-11-01, the desk's P3 after its final review's fix wave, `feat/desk-p1-p4`); 2641 tests in 186 files, 2612 pass, 29 skipped (2026-11-01, main `7f15917f` merged into the desk, `feat/desk-p1-p4`); 2482 tests, 2455 pass, 27 skipped (2026-11-01, the desk merged onto main, `feat/desk-p1-p4`); 2169 tests in 163 files, 2143 pass, 26 skipped (2026-11-01, plan 5 of the Account's two parts, `3ec52aa3`); 1961 tests, 1937 pass, 24 skipped (2026-11-01, plan 1 of the Account's two parts); 1910 tests, 1886 pass, 24 skipped (2026-10-30, plan 3 of the run view); 1654 tests, 1631 pass, 23 skipped on 2026-10-27, the Account in the tree |
 | `cd face && npm run typecheck` | `face/` | | clean, the dependencies' `.d.ts` included (`skipLibCheck: false`) |
 | `cd face && FACE_SMOKE=1 npm test` | `face/` | boots thirty-two real trees into `mkdtemp` homes and binds ports; still no LLM or key (four of the smokes also create, and remove, a gitignored `.bots-smoke-*` bots root at the repo root); a checkout outside `/tmp` and `$TMPDIR` (PLAN D24: dsh's `workspace-write` grants both, so a fence smoke there passes for the wrong reason — the room and bots fixtures refuse such a checkout through `tests/fixture-root.ts`, and the desk, telegram, watch and schedule smokes carry the same precondition unguarded) | the thirty-two skipped tests; at 0.2.1-rc.5 every smoke passed during the build (2,883 of 2,888 at `ceb5df9d` with the four Account smokes skipped, the one red, `subagents-smoke`, rewritten at `257c3439` and green alone), the whole run on the upgrade's final tree recorded in `docs/dsh-upgrade-guide.md` §6.4; 2,796/2,796 on 2026-11-01 (the desk's P3 after its final review's fix wave, `watch-smoke` the thirtieth); 2,642/2,642 on 2026-11-01 (main `7f15917f` merged into the desk); 2483 tests, 2483 pass on 2026-11-01 (the desk merged onto main); on 2026-10-30 `smoke`, `gravit-client-smoke` and the new `lunhui-answer-smoke` 3/3 (the whole run not repeated); 1654/1654 on 2026-10-27, the seat and graft smokes running from the repo's `account/` with no `FACE_ACCOUNT_SEAT_DIR`; before that, 1640 of 1642 on 2026-10-26 (plan 4's docs pass over `d77bcd3`), 1611 of 1613 the same day (plan 3's docs pass over `8020a5e`) and 1546 of 1548 at plan 2's `91307f2`, the seat and graft smokes skipped without `FACE_ACCOUNT_SEAT_DIR`; 1263/1263 with one todo at stage 3's Task 6 (2026-10-24, `e77900a`), 1310/1310 at stage 2's `b45c5cc`, each with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7 — without it the seat and graft smokes stay skipped; 2,169/2,169 on 2026-11-01 (plan 5's whole tree, `2ae02f53`: `account-graft-smoke`, `account-market-smoke`, `account-wallet-smoke` and `account-seat-smoke` among them); on 2026-10-30 `smoke`, `gravit-client-smoke` and the new `lunhui-answer-smoke` 3/3 (the whole run not repeated); 1654/1654 on 2026-10-27, the seat and graft smokes running from the repo's `account/` with no `FACE_ACCOUNT_SEAT_DIR`; before that, 1640 of 1642 on 2026-10-26 (plan 4's docs pass over `d77bcd3`), 1611 of 1613 the same day (plan 3's docs pass over `8020a5e`) and 1546 of 1548 at plan 2's `91307f2`, the seat and graft smokes skipped without `FACE_ACCOUNT_SEAT_DIR`; 1263/1263 with one todo at stage 3's Task 6 (2026-10-24, `e77900a`), 1310/1310 at stage 2's `b45c5cc`, each with `FACE_ACCOUNT_SEAT_DIR` naming a checkout of buyer-agent-demo @ 133b9a7 — without it the seat and graft smokes stay skipped |
-| `cd account && npm test` | `account/` | `npm ci` there; a scratch `BUYER_HOME` keeps the run off `~/.buyer-agent-demo`; no network, not 4820 | 155 files, all pass, 2,379 tests, no known red, about 157 s (2026-11-01, plan 5 at `3ec52aa3`: the page and its twenty test files gone, `ui-superagent.test.ts` the origin's known red among them; `ui-standin.test.ts`'s "prices move every few seconds" can fail under a concurrent load and passes alone); 166 files, 165 pass, 1 fail — the known red `test/unit/ui-superagent.test.ts`, the origin's too; 2,900 tests, 2,899 pass; about 162 s (2026-11-01, China in; `ui-standin.test.ts` once failed a timing test while the face's suite ran beside it and passed alone); 158 files, 157 pass, 2,840 tests at the copy (2026-10-27) |
-| `cd account && npm run typecheck` | `account/` | | clean |
+| `cd account && npm test` | `account/` | `npm ci` there and in `market/` (its tests import `market/src` and `market/test`); a scratch `BUYER_HOME` keeps the run off `~/.buyer-agent-demo`; no network, not 4820 | 143 files, 2,188 tests, all pass (2026-11-03, plan A1 at `feat/account-split-a1`: eighteen test files moved to `market/`, the market link's tests added); 155 files, all pass, 2,379 tests, no known red, about 157 s (2026-11-01, plan 5 at `3ec52aa3`: the page and its twenty test files gone, `ui-superagent.test.ts` the origin's known red among them; `ui-standin.test.ts`'s "prices move every few seconds" can fail under a concurrent load and passes alone); 166 files, 165 pass, 1 fail — the known red `test/unit/ui-superagent.test.ts`, the origin's too; 2,900 tests, 2,899 pass; about 162 s (2026-11-01, China in; `ui-standin.test.ts` once failed a timing test while the face's suite ran beside it and passed alone); 158 files, 157 pass, 2,840 tests at the copy (2026-10-27) |
+| `cd account && npm run typecheck` | `account/` | `npm ci` in `market/` too | clean |
+| `cd market && npm test` | `market/` | `npm ci` there; no network, no port but ephemeral ones | 29 files, 284 tests, all pass (2026-11-03, plan A1) |
+| `cd market && npm run typecheck` | `market/` | | clean |
 | `cd face && npm run check:fixture` | `face/` | the installed dsh | 26 fixture lines: 23 validated, 0 rejected, 3 with no upstream validator |
 
 ### 7.2 The Python suite (removed 2026-10-24)
@@ -4455,10 +4601,11 @@ refused, `parseHosts`). The face's:
   action, the stream's data lines stripped too), `standin-helper` (the stand-in's home guard takes a `ui-standin-` directory
   directly under `tmpdir()` and nothing else; no stand-in on 4820; the stand-in's directory
   falling back to the face's `seatDir()`, and the skip naming `npm ci in account/`), `compose`
-  (`compose.yml` read offline: two services; the agent's port on the host's loopback, the Account's
-`expose`d to the network and published to nobody, no service naming 4820 among its ports; the agent waiting
-  on the Account's health check on `/api/overview`; the Account's `PORTFOLIO_BIND`/`PORTFOLIO_HOSTS`,
-  the agent's `FACE_BIND`, `FACE_ACCOUNT_URL`, `BUYER_HOME` and `DSH_HOME`; the account's `PORTFOLIO_AKSHARE_BIN`; the
+  (`compose.yml` read offline: three services; the agent's port on the host's loopback, the Account's
+`expose`d to the network and published to nobody, the market's `4821` likewise, no service naming 4820 or 4821 among its ports; the agent waiting
+  on the Account's health check on `/api/overview` and the Account on the market's on `/api/health`; the Account's `PORTFOLIO_BIND`/`PORTFOLIO_HOSTS`
+  and `PORTFOLIO_MARKET_URL=http://market:4821`, no `env_file` on the Account; the market's `MARKET_BIND`/`MARKET_HOSTS`, its optional `.env.ifind` and no volume;
+  the agent's `FACE_BIND`, `FACE_ACCOUNT_URL`, `BUYER_HOME` and `DSH_HOME`; AKShare at its pin and `MARKET_AKSHARE_BIN` in the market image alone, none in the agent's or the account's; the
   optional `.env.deepseek`; the allowlist at `${PWD}` with no root mount and no `.env` path,
   `account/` read-only and bound once, the read-only tmpfs `.git`, the two module volumes; no
   docker socket and no `account-home` in the agent box; the five volumes), and the room suites
@@ -5452,9 +5599,9 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   damage. (Until 2026-10-24 this row named the Python package's flagless order function and its
   key file at the repo root; both left with the package.)
 - **R1b — Gravit's tools can read the iFinD token file.** `../.env.ifind` (the boards stand-in's
-  credential, `IFIND_REFRESH_TOKEN`) sits in the repo root and is sourced by the Account's start,
-  not the face's: the face's environment holds no token, and under compose only the `account`
-  service reads the file. dsh scrubs `*TOKEN*` names from the *environment* of the children it
+  credential, `IFIND_REFRESH_TOKEN`) sits in the repo root and is read by the market's start,
+  not the face's or the Account's: the face's environment holds no token, and under compose only
+  the `market` service reads the file. dsh scrubs `*TOKEN*` names from the *environment* of the children it
   spawns and `agents.ts` scrubs both `IFIND_*` names from the CLI agents', but a file tool or a
   shell turn can read the file itself, as it can `.env.deepseek` — the same kind as R1. The token
   reaches no evidence file, `run.json`, refusal, reply or log line (pinned by
@@ -6831,10 +6978,12 @@ In order; each with what "done" is and which charter row it reopens.
 | `DSH_PERMISSION_MODE` | dsh | sandbox preset; `danger-full-access` ⇒ approval policy `never` |
 | `DSH_TELEMETRY_DISABLED` | face boot | any non-empty value disables telemetry; composed after the operator layers, it still wins over an operator's re-enable of the row the policy layer disables |
 | `FACE_PORT`, `FACE_PROFILE` | face | port, profile name |
-| `PORTFOLIO_AKSHARE_BIN` | the Account (`live/akshare.ts`, §3.9) | the AKShare sidecar's executable, default `~/.local/bin/akshare-mcp`; the account image sets `/usr/local/bin/akshare-mcp` |
-| `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN` | the Account (`cn-ifind.ts`, §3.9) | the Lunhui boards stand-in's iFinD credential, held by the Account alone |
+| `MARKET_AKSHARE_BIN` | the market (`live/akshare.ts`, §3.10) | the AKShare sidecar's executable, default `~/.local/bin/akshare-mcp`; the market image sets `/usr/local/bin/akshare-mcp` |
+| `MARKET_BIND`, `MARKET_HOSTS` | `market/src/server.ts` | the market's listener and its admitted extra `Host` values, compose's market box only (§3.10) |
+| `PORTFOLIO_MARKET_URL` | `account/src/portfolio/server.ts`, `account-check.ts` | the market the Account reads, default `http://127.0.0.1:4821` (§3.10) |
+| `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN` | the market (`cn-ifind.ts`, §3.10) | the Lunhui boards stand-in's iFinD credential, held by the market alone |
 | `FACE_SMOKE` | face tests | enables the thirty-two real boots |
-| `FASTMCP_LOG_LEVEL` | the Account's AKShare sidecar (a FastMCP server; one of the names its child inherits) | `WARNING` silences FastMCP's INFO noise |
+| `FASTMCP_LOG_LEVEL` | the market's AKShare sidecar (a FastMCP server; one of the names its child inherits) | `WARNING` silences FastMCP's INFO noise |
 | `FACE_PYTHON` | face (`desk.ts`) | the interpreter a standing order's `.py` script producer runs under, `-I`, default `python3`; none ships, and the market clock needs none |
 | `FACE_DESK` | face (`main.ts`) | `0` mounts none of the desk's rows (no ledger events, no sleep watch, no desk conversation, no Telegram bridge); `/data/desk/status` and the Pause route still answer |
 | `FACE_DESK_MODEL` | face (`main.ts`, `resolveDeskRoute`) | the desk session's model route, default `deepseek-official/deepseek-flash`; an unusable one falls back to the tree's default selection, Gravit's, with one line |
