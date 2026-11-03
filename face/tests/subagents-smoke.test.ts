@@ -14,6 +14,16 @@
  * b91e7ce366): a continuable child now reaches its parent with `send_message`,
  * delivered as an `agent-message` relay (NEW
  * packages/subagent/subagent/src/continuation-messages.ts:15-52).
+ *
+ * dsh 0.2.1-rc.5 delegation is managed (B10, D27;
+ * node_modules/@deepseek-ai/dsh-tool-subagent/README.md "Managed delegation"):
+ * `subagent` and `subagent_fork` both return `started subagent <id>` at once and
+ * never the child's text; the child's closing text reaches the parent in a
+ * `user/message` whose source is `{kind:'subagent-settled', form:'notice'}`
+ * (node_modules/@deepseek-ai/dsh-subagent/README.md "Settlement notice"),
+ * delivered by `followup` to an idle parent and `steer` to a running one. Every
+ * local child - a fork's included - is continuable; there is no foreground call
+ * and no one-shot local child any more.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -54,9 +64,14 @@ async function waitFor(label: string, check: () => boolean, ms = 20_000): Promis
 /** One durable child address, as the Remote surface names it. */
 type ChildAddress = { parentSessionId: SessionId; childSessionId: SessionId; mode: "continuable" | "one-shot" };
 /** One catalog row (NEW packages/subagent/subagent/src/projection-types.ts:9-19). */
-type CatalogEntry = { id: string; createdAt: number; mode: "one-shot" | "continuable" | "unknown"; label?: string };
+type CatalogEntry = { id: string; createdAt: number; mode: "one-shot" | "continuable" | "unknown" | "external"; label?: string };
+/** The opening line of a settlement notice (node_modules/@deepseek-ai/dsh-subagent/README.md "Settlement notice"). */
+const finished = (id: string) => `Background subagent ${id} finished and will do no further work unless you send it more.`;
+const stopped = (id: string) => `Background subagent ${id} was stopped before it finished.`;
+/** The acknowledgement every `subagent`/`subagent_fork` call returns (dsh-tool-subagent README "Start result"). */
+const STARTED = /^started subagent (\S+)$/;
 
-test("native subagents: continuable and foreground calls, parent notices, read-only catalog, follow-up, interruption and cold recovery", {
+test("native subagents: managed spawn and fork activations, settlement notices, read-only catalog, follow-up, interruption and cold recovery", {
   skip: gated && "set FACE_SMOKE=1", timeout: 120_000,
 }, async () => {
   const bots = await makeBotsRoot();
@@ -93,8 +108,9 @@ test("native subagents: continuable and foreground calls, parent notices, read-o
       const header = ctx.sessions.get(request.sessionId!)?.header;
       const child = header?.origin === "subagent";
       if (child) {
-        if (text.includes("FOREGROUND_CHILD")) return { kind: "text", text: "FOREGROUND_RESULT" };
         if (text.includes("FOLLOWUP")) return { kind: "text", text: `FOLLOWUP_RESULT: ${text}` };
+        /* A fork is seeded with the parent's completed turns; its own task is the last trigger. */
+        if (header?.isSeeded === true && text.includes("FORK_CHILD")) return { kind: "text", text: "FORK_RESULT" };
         if (source === "tool") return { kind: "text", text: "CHILD_CLOSING_RESULT" };
         /* The 0.1.1 `report` tool is gone; the explicit child-to-parent
          * message is `send_message` addressed to the direct parent. */
@@ -103,8 +119,8 @@ test("native subagents: continuable and foreground calls, parent notices, read-o
       if (source === "user" && text === "START_BACKGROUND") return {
         kind: "tool", name: "subagent", args: { description: "Check fixture evidence", prompt: "CHILD_MAIN: inspect the fixture evidence and report." },
       };
-      if (source === "user" && text === "START_FOREGROUND") return {
-        kind: "tool", name: "subagent", args: { description: "Check foreground evidence", prompt: "FOREGROUND_CHILD", run_in_background: false },
+      if (source === "user" && text === "START_FORK") return {
+        kind: "tool", name: "subagent_fork", args: { description: "Fork the fixture", prompt: "FORK_CHILD: continue from here." },
       };
       return { kind: "text", text: "PARENT_ACKNOWLEDGED" };
     };
@@ -188,6 +204,17 @@ test("native subagents: continuable and foreground calls, parent notices, read-o
     });
     const parentSources = () => parent.session.snapshotEvents().filter((event) => event.type === "user/message")
       .map((event) => sourceOf(event.data as { source?: unknown }));
+    /** The parent's settlement notices, in order: source and model-facing text. */
+    const notices = () => parent.session.snapshotEvents().filter((event) => event.type === "user/message")
+      .map((event) => event.data as GenerateOptions["messages"][number])
+      .filter((message) => sourceOf(message).kind === "subagent-settled")
+      .map((message) => ({ source: sourceOf(message), text: textOf(message) }));
+    /** The child ids the parent's delegation calls acknowledged, in order. */
+    const startedIds = () => parent.session.snapshotEvents().filter((event) => event.type === "tool/result")
+      .map((event) => textOf((event.data as { message: GenerateOptions["messages"][number] }).message).match(STARTED)?.[1])
+      .filter((id): id is string => id !== undefined);
+    const toolResultsInclude = (marker: string) => parent.session.snapshotEvents()
+      .some((event) => event.type === "tool/result" && JSON.stringify(event.data).includes(marker));
     await promptParent("START_BACKGROUND");
     await waitFor("child settlement", () => parentSources().some((source) => source.kind === "subagent-settled"));
     await parent.whenIdle();
@@ -199,6 +226,16 @@ test("native subagents: continuable and foreground calls, parent notices, read-o
     assert.ok(JSON.stringify(parent.session.snapshotEvents()).includes("CHILD_REPORTED_EVIDENCE"));
     assert.ok(JSON.stringify(parent.session.snapshotEvents()).includes("CHILD_CLOSING_RESULT"));
     const childId = SessionId(String(settled.senderSessionId));
+    /* Creation: the call acknowledges the child's id at once and never carries its text (B10). */
+    assert.deepEqual(startedIds(), [childId], "`subagent` returns `started subagent <id>`");
+    assert.equal(toolResultsInclude("CHILD_CLOSING_RESULT"), false, "the tool result is not the child's answer");
+    /* The notice carries the closing text; the explicit message stays in its own relay. */
+    const [firstNotice] = notices();
+    assert.equal(firstNotice.source.form, "notice");
+    assert.equal(firstNotice.source.summary, finished(childId));
+    assert.ok(firstNotice.text.startsWith(finished(childId)), firstNotice.text);
+    assert.ok(firstNotice.text.includes("Its closing message:\nCHILD_CLOSING_RESULT"), firstNotice.text);
+    assert.equal(firstNotice.text.includes("CHILD_REPORTED_EVIDENCE"), false, "the child's send_message is not folded into the notice");
     const address: ChildAddress = { parentSessionId: parentId, childSessionId: childId, mode: "continuable" };
     const countAgents = () => ctx.agents.list().length;
     const beforeRead = countAgents();
@@ -252,22 +289,42 @@ test("native subagents: continuable and foreground calls, parent notices, read-o
     assert.equal((await rpc<{ accepted: boolean }>("subagents/interruptByParent", interrupt(address))).accepted, true);
     await waitFor("interrupted child settlement", () => parentSources().filter((source) => source.kind === "subagent-settled").length === 3);
     await parent.whenIdle();
+    assert.ok(notices()[2].text.startsWith(stopped(childId)), `an interrupted child's notice says it was stopped: ${notices()[2].text}`);
     assert.ok(JSON.stringify(await historyOf(address)).includes("aborted"));
     await followup("FOLLOWUP_AFTER_INTERRUPT");
     await waitFor("post-interrupt settlement", () => parentSources().filter((source) => source.kind === "subagent-settled").length === 4);
     await parent.whenIdle();
     assert.ok(JSON.stringify(await historyOf(address)).includes("FOLLOWUP_RESULT: FOLLOWUP_AFTER_INTERRUPT"));
 
-    await promptParent("START_FOREGROUND");
-    await waitFor("foreground result in parent", () => parent.session.snapshotEvents().some((event) => event.type === "tool/result" && JSON.stringify(event.data).includes("FOREGROUND_RESULT")));
+    /* `subagent_fork` is an activation too (D27): `started subagent <id>`, its text in a notice, and a
+     * continuable child that accepts a follow-up - no foreground call, no one-shot local child. */
+    await promptParent("START_FORK");
+    await waitFor("fork settlement", () => notices().length === 5);
     await parent.whenIdle();
+    const started = startedIds();
+    assert.equal(started.length, 2, `two delegation calls, two acknowledgements: ${started.join(", ")}`);
+    assert.equal(started[0], childId);
+    const forkId = SessionId(started[1]);
+    assert.notEqual(forkId, childId);
+    const forkStored = await readStored(forkId);
+    assert.equal(forkStored.meta.isSeeded, true, "a subagent_fork child is seeded");
+    assert.equal(forkStored.meta.origin, "subagent");
+    assert.equal(forkStored.meta.parentSession, parentId);
+    assert.equal(toolResultsInclude("FORK_RESULT"), false, "the fork's text never returns through its tool");
+    const forkNotice = notices()[4];
+    assert.equal(forkNotice.source.senderSessionId, forkId);
+    assert.ok(forkNotice.text.startsWith(finished(forkId)), forkNotice.text);
+    assert.ok(forkNotice.text.includes("Its closing message:\nFORK_RESULT"), forkNotice.text);
     const allChildren = (await catalogOf(parentId)).entries;
-    const oneShot = allChildren.find((entry) => entry.mode === "one-shot");
-    assert.ok(oneShot, "foreground subagent is cataloged as one-shot");
-    assert.ok(requested.get(oneShot.id)?.length, "the one-shot child reached the adapter");
-    assert.ok(JSON.stringify(await historyOf({ parentSessionId: parentId, childSessionId: SessionId(oneShot.id), mode: "one-shot" })).includes("FOREGROUND_RESULT"));
-    assert.equal(parentSources().filter((source) => source.kind === "subagent-settled").length, 4, "foreground output returns through its tool, not a continuable notice");
-    assert.equal((await rawRpc("subagents/prompt", promptChild({ parentSessionId: parentId, childSessionId: SessionId(oneShot.id), mode: "continuable" }, "invalid continuation"))).ok, false);
+    assert.ok(allChildren.some((entry) => entry.id === forkId && entry.mode === "continuable" && entry.label === "Fork the fixture"), "the fork is cataloged continuable");
+    assert.deepEqual(allChildren.map((entry) => entry.mode), ["continuable", "continuable"], "every local child is continuable");
+    const forkAddress: ChildAddress = { parentSessionId: parentId, childSessionId: forkId, mode: "continuable" };
+    await rpc("subagents/prompt", promptChild(forkAddress, "FOLLOWUP_FORK"));
+    await waitFor("fork follow-up settlement", () => notices().length === 6);
+    await parent.whenIdle();
+    assert.equal(notices()[5].source.senderSessionId, forkId);
+    assert.ok(notices()[5].text.includes("FOLLOWUP_RESULT: FOLLOWUP_FORK"), notices()[5].text);
+    assert.ok(JSON.stringify(await historyOf(forkAddress)).includes("FOLLOWUP_RESULT: FOLLOWUP_FORK"));
 
     await stop();
     stop = undefined;
@@ -288,10 +345,17 @@ test("native subagents: continuable and foreground calls, parent notices, read-o
     assert.equal(countAgents(), coldCount, "cold catalog and history remain read-only");
     const coldSend = await rawRpc("subagents/prompt", promptChild(address, "FOLLOWUP_COLD"));
     assert.equal(coldSend.ok ? undefined : coldSend.error.code, "subagent/parent-unavailable");
-    assert.equal((await rpc<{ sessionId: string }>("session/create", { request: { sessionId: parentId, cwd: root, agentPreset: "gravit" } })).sessionId, parentId);
+    /* At rc.5 `session/create` reuses only a blank Session: a named one with turns gets a fresh id and stays
+     * cold (node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js `claim`). A cold parent
+     * resumes the way the client wakes it - a prompt, which resolves its Agent (`resolveAgent`). */
+    assert.notEqual((await rpc<{ sessionId: string }>("session/create", { request: { sessionId: parentId, cwd: root, agentPreset: "gravit" } })).sessionId, parentId);
+    assert.equal((await catalogOf(parentId)).parentAvailable, false, "creation does not resume a parent with turns");
+    await promptParent("RESUME_PARENT");
+    const restoredParent = ctx.agents.get(parentId)!;
+    assert.ok(restoredParent, "a prompt resumes the cold parent");
+    await restoredParent.whenIdle();
     assert.equal((await catalogOf(parentId)).parentAvailable, true);
     await followup("FOLLOWUP_COLD_RESUMED");
-    const restoredParent = ctx.agents.get(parentId)!;
     await waitFor("cold-resumed child settlement", () => restoredParent.session.snapshotEvents().some((event) => event.type === "user/message"
       && sourceOf(event.data as { source?: unknown }).kind === "subagent-settled" && JSON.stringify(event.data).includes("FOLLOWUP_COLD_RESUMED")));
     await restoredParent.whenIdle();

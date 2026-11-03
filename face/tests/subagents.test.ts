@@ -117,3 +117,13 @@ test("compose: an absent projection is no children; a present non-list is unavai
   const skipped = composeSubagentCatalog({ catalog: [null, { mode: "one-shot" }, { id: "", mode: "one-shot" }, projected[1]], parentSummary: rows[0], rows });
   assert.deepEqual(skipped.entries.map((e) => e.id), ["once"], "malformed rows are skipped as normalize skips them");
 });
+
+test("compose → normalize: an `external` catalog row is the unsupported diagnostic, visible and never controllable (B11)", () => {
+  // dsh 0.2.1-rc.5's catalog v2 records external executions as `mode: 'external'`
+  // (node_modules/@deepseek-ai/dsh-subagent/README.md, "Activation settlement"); the face mounts no external backend.
+  const composed = composeSubagentCatalog({ catalog: [{ id: "ext", createdAt: 5, mode: "external", label: "Codex" }], parentSummary: rows[0], rows });
+  const normalized = normalizeSubagentCatalog(composed);
+  assert.deepEqual(normalized.entries, [{ kind: "diagnostic", id: "ext", reason: "unsupported" }]);
+  assert.equal(subagentAddress("parent", "ext", normalized), null);
+  assert.deepEqual(subagentControls(normalized.entries[0], true), { canRead: false, canPrompt: false, canInterrupt: false, state: "unavailable", reason: "unsupported" });
+});

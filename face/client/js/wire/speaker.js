@@ -53,11 +53,18 @@ export function isDeskPreset(id) {
   return id === DESK_PRESET;
 }
 
+/** The namespace of the role presets: a role child's session carries
+ *  `role-<id>` (src/roles.ts `rolePresetId`; src/bots.ts spells the same
+ *  prefix and refuses it as a bot id, so no roster row can name one). */
+export const ROLE_PRESET_PREFIX = "role-";
+
 /**
- * The voice a session speaks with: a bot's display name when `agentPreset`
- * names one (never a host id, never the desk's, and never a blank string — a header
- * field present but empty is no preset at all), the bot's id when the roster
- * has no name for it, else Gravit - the host's sessions and the desk's.
+ * The voice a session speaks with: `Role · <id>` for a role child's preset
+ * (B11: a role child's page shows its role, not Gravit and not the raw preset
+ * id), a bot's display name when `agentPreset` names one (never a host id,
+ * never the desk's, and never a blank string — a header field present but
+ * empty is no preset at all), the bot's id when the roster has no name for
+ * it, else Gravit - the host's sessions and the desk's.
  * @param {{agentPreset?: unknown}|null|undefined} summary - the session
  *   summary from `session/list` (normalized by summaries.js) or `session/create`,
  *   or `null` for no session.
@@ -67,6 +74,7 @@ export function isDeskPreset(id) {
 export function speakerFor(summary, bots) {
   const id = summary?.agentPreset;
   if (typeof id !== "string" || id.trim() === "" || isHostPreset(id) || isDeskPreset(id)) return HOST_NAME;
+  if (id.startsWith(ROLE_PRESET_PREFIX) && id.length > ROLE_PRESET_PREFIX.length) return `Role · ${id.slice(ROLE_PRESET_PREFIX.length)}`;
   const bot = (Array.isArray(bots) ? bots : []).find((b) => b?.id === id);
   const name = typeof bot?.name === "string" ? bot.name.trim() : "";
   return name === "" ? id : name;
