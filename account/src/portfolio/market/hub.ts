@@ -12,7 +12,14 @@
  *
  * WHEN THE STREAM DROPS (the market restarting, or gone): every quote and book kept goes `live: false`, each market's `live` tick told, and
  * the stream is opened again after a wait that doubles from BACKOFF_MIN_MS to BACKOFF_MAX_MS; once it is open, every hold and want is sent
- * again. A stream that says nothing for SILENT_MS (the market's heartbeat is every 15 s) is taken for dropped. */
+ * again. A stream that says nothing for SILENT_MS (the market's heartbeat is every 15 s) is taken for dropped.
+ *
+ * EACH STREAM IS AN EPOCH. A market that restarts counts its seqs from 0 again, and even one that did not sends its whole ring again to a
+ * stream opened anew. So on each open every market's ring, its latest trades and its evicted seq are let go, and every seq the stream
+ * says is REBASED onto the highest seq the account was told before (`base`): seqs here rise across restarts, so a seq paper judged an
+ * order at (paper.ts judgedAt) stands below every trade of the new epoch, and no trade of an old one is left to touch it. A trade the new
+ * stream carries that was stamped before it opened is marked a snapshot's (`snap`), as a venue's resubscription snapshot is: paper counts it
+ * only if it was stamped after the moment it last judged (SinceCut.snapshotAfter). */
 import { isRefusal } from "../../core/errors.ts";
 import type { PublicTrade } from "../live/trade.ts";
 import type { MarketClient } from "./client.ts";
@@ -72,6 +79,10 @@ export class RemoteHub implements MarketHub {
   private stream: AbortController | undefined;
   private retry: ReturnType<typeof setTimeout> | undefined;
   private silent: ReturnType<typeof setTimeout> | undefined;
+  /** this epoch's base (every seq the stream says is this much higher here), the highest seq given out here, and when this epoch began */
+  private base = 0;
+  private highSeq = 0;
+  private epochAt = 0;
 
   constructor(private readonly c: MarketClient, private readonly o: RemoteHubOptions) {
     this.http = o.fetch ?? fetch;
@@ -163,11 +174,14 @@ export class RemoteHub implements MarketHub {
     // a market whose stream is not open now confirms nothing: no price is taken for this moment's
     if (!this.open) return undefined;
     const p = new URLSearchParams({ source, symbol, maxAgeMs: String(Math.max(0, Math.min(86_400_000, Math.floor(maxAgeMs)))), waitMs: String(Math.max(0, Math.min(CONFIRM_WAIT_MAX_MS, Math.floor(waitMs)))) });
+    const base = this.base;
     const r = await this.c.get<HubQuote | null>(`/api/hub/confirmed?${p}`, 0);
-    if (isRefusal(r) || !r.value) return undefined;
+    // an answer from before a stream opened anew is of another epoch: not taken
+    if (isRefusal(r) || !r.value || base !== this.base || !this.open) return undefined;
+    const q = { ...r.value, seq: this.rebased(r.value.seq) };
     const m = this.mirrors.get(`${source}|${symbol}`);
-    if (m && (!m.quote || r.value.seq >= m.quote.seq)) m.quote = r.value;
-    return r.value;
+    if (m && (!m.quote || q.seq >= m.quote.seq)) m.quote = q;
+    return q;
   }
 
   onTick(fn: (t: HubTick) => void): () => void {
@@ -222,22 +236,42 @@ export class RemoteHub implements MarketHub {
     if (!m) this.mirrors.set(k, (m = { recent: [], ring: [], evictedSeq: 0 }));
     return m;
   }
+  /** a seq the stream said, as it is counted here (this epoch's base under it), and the highest given out kept */
+  private rebased(seq: unknown): number {
+    const n = this.base + Math.max(0, Number(seq) || 0);
+    if (n > this.highSeq) this.highSeq = n;
+    return n;
+  }
+  /** a new epoch (a stream opened): its seqs counted from above every one given out before, and every market's trades let go */
+  private newEpoch(): void {
+    this.base = this.highSeq;
+    this.epochAt = this.clock();
+    for (const m of this.mirrors.values()) {
+      m.ring = [];
+      m.recent = [];
+      m.evictedSeq = 0;
+    }
+  }
   /** what one event says, kept, and told */
   private heard(e: HubEvent): void {
     if (!e || typeof e !== "object" || typeof e.source !== "string" || typeof e.symbol !== "string") return;
     const m = this.mirror(e.source, e.symbol);
     if (e.t === "quote" && e.quote) {
-      m.quote = e.quote;
+      m.quote = { ...e.quote, seq: this.rebased(e.quote.seq) };
       this.tell(e.source, e.symbol, "quote");
     } else if (e.t === "book" && e.book) {
       m.book = e.book;
       this.tell(e.source, e.symbol, "book");
     } else if (e.t === "trades" && Array.isArray(e.ring)) {
       const newest = m.ring.at(-1)?.seq ?? 0;
-      for (const t of e.ring) if (t.seq > newest) m.ring.push(t);
+      for (const t of e.ring) {
+        const seq = this.rebased(t.seq);
+        // a trade stamped before this stream opened: one the market had before, sent again — a snapshot's, as paper counts one
+        if (seq > newest) m.ring.push({ seq, at: t.at, price: t.price, snap: t.snap === true || t.at < this.epochAt });
+      }
       m.ring.sort((a, b) => a.seq - b.seq);
       while (m.ring.length > RING_SIZE) m.evictedSeq = Math.max(m.evictedSeq, m.ring.shift()!.seq);
-      m.evictedSeq = Math.max(m.evictedSeq, Number(e.evictedSeq) || 0);
+      if (Number(e.evictedSeq) > 0) m.evictedSeq = Math.max(m.evictedSeq, this.rebased(e.evictedSeq));
       if (Array.isArray(e.recent)) m.recent = e.recent;
       this.tell(e.source, e.symbol, "trades");
     } else if (e.t === "live") {
@@ -279,6 +313,7 @@ export class RemoteHub implements MarketHub {
         await r.body?.cancel().catch(() => undefined);
         throw new Error(`the market's hub answered ${r.status}`);
       }
+      this.newEpoch();
       this.open = true;
       this.tries = 0;
       this.heartbeat(ac);

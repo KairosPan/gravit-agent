@@ -77,7 +77,7 @@ async function market(sources: PublicSource[]) {
   links.push(link);
   link.start();
   expect(await link.ready(3_000)).toBe(true);
-  return { hub, link };
+  return { hub, link, m };
 }
 const until = async (ok: () => boolean, ms = 6_000): Promise<void> => {
   const t0 = Date.now();
@@ -129,6 +129,52 @@ describe("the account on the market's link", () => {
       req.destroy();
     }
   });
+
+  it("a market that restarts starts its seqs again: nothing of its last run survives, its new trades count, and a resting limit only the old trades would touch does not fill", async () => {
+    const src = "coinbase";
+    const sym = "BTC/USD";
+    const rows = [listing(sym, 62_000)];
+    const { link, hub, m } = await market([fakeSource({ id: src, rows })]);
+    const port = Number(new URL(m.url).port);
+    const { srv, order } = await account({ publicMarkets: () => link.sources(), link });
+    // the market's last run: trades at 60,000, before the order is placed, in the mirror's ring
+    const release = link.hub.hold(src, sym);
+    await until(() => hub.seen.holds.includes(`${src}|${sym}`));
+    hub.quote(src, sym, { bid: 61_999.5, ask: 62_000.5, last: 62_000 });
+    for (let i = 0; i < 3; i++) hub.trade(src, sym, 60_000);
+    hub.quote(src, sym, { bid: 61_999.5, ask: 62_000.5, last: 62_000 });
+    await until(() => link.hub.trades(src, sym, 10).length === 3);
+    await new Promise((go) => setTimeout(go, 20));
+    const resting = await order({ symbol: sym, side: "buy", orderType: "limit", qty: "0.01", limitPrice: "61000" });
+    expect(resting.status).toBe("open");
+    hub.quote(src, sym, { bid: 61_999.5, ask: 62_000.5, last: 62_000 });
+    await new Promise((go) => setTimeout(go, 300));
+    const status = async () => ((await (await fetch(`${srv.url}/api/account`)).json()) as { orders: Array<{ id: string; status: string }> }).orders.find((x) => x.id === resting.id)?.status;
+    expect(await status()).toBe("open");
+    // the market restarts: a new process, a new hub, its seqs from 0, on the same port
+    await m.close();
+    markets.splice(markets.indexOf(m), 1);
+    await until(() => link.hub.quote(src, sym)?.live === false);
+    const again = fakeHub();
+    markets.push(await startMarket(createMarketCore({ sources: [fakeSource({ id: src, rows })], hub: again.hub, price }), port));
+    await until(() => again.seen.holds.includes(`${src}|${sym}`), 8_000);
+    again.quote(src, sym, { bid: 61_999.5, ask: 62_000.5, last: 62_000 });
+    again.trade(src, sym, 62_005);
+    again.quote(src, sym, { bid: 61_999.5, ask: 62_000.5, last: 62_005 });
+    await until(() => link.hub.quote(src, sym)?.live === true && link.hub.trades(src, sym, 10).some((t) => t.price === 62_005));
+    // (a) the new run's trade reaches the mirror, (b) counted, and not partial, (c) nothing of the old run is left
+    expect(link.hub.trades(src, sym, 10).map((t) => t.price)).toEqual([62_005]);
+    const range = link.hub.since(src, sym, 0);
+    expect(range).toMatchObject({ trades: 1, hi: 62_005, lo: 62_005 });
+    expect(range.partial).toBeUndefined();
+    // the seqs go on rising across the restart: what paper judged before stands below every new one
+    expect(range.seq).toBeGreaterThan(5);
+    // (d) the resting limit at 61,000 is touched only by the old run's trades: it stays open
+    again.quote(src, sym, { bid: 61_999.5, ask: 62_000.5, last: 62_005 });
+    await new Promise((go) => setTimeout(go, 500));
+    expect(await status()).toBe("open");
+    release();
+  }, 30_000);
 
   it("values with the market's price", async () => {
     const { link } = await market([fakeSource()]);
