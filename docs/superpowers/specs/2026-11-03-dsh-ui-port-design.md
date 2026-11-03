@@ -2,7 +2,8 @@
 
 **Date:** 2026-11-03.
 
-**Status:** draft for the operator's approval, with three questions open (§12). Nothing is built.
+**Status:** draft for the operator's approval. The builder check's three questions are answered
+(§12). Nothing is built.
 
 **Canvas:** https://claude.ai/artifact/1TvrCZKjovYnwTQprMmqwh (private, the operator's). Six boards:
 *Where the ten picks land* (Main), *Search and pin in the list* (List), *The composer: / menu, @
@@ -68,9 +69,9 @@ are comforts dsh already built for that kind of work:
 - move through a long conversation;
 - read the face in Chinese, at a comfortable size, with the keys at hand.
 
-None of them changes what Gravit is allowed to do or how an order is approved, and nothing goes
-anywhere new: what the operator attaches or references travels to the same model provider as
-their words (§6). The operator's one instruction on looks: up stays green and down stays red in both
+None of them widens what Gravit is allowed to do or changes how an order is approved. Gravit gains
+one read-only role, for reading PDF pages (O8). Nothing goes anywhere new: what the operator
+attaches or references travels to the same model provider as their words (§6). The operator's one instruction on looks: up stays green and down stays red in both
 languages ("不用切换，还是绿涨红跌").
 
 **What success looks like:**
@@ -122,7 +123,8 @@ languages ("不用切换，还是绿涨红跌").
 - N7. No dsh client package imported into the page. dsh's UI packages are React and TypeScript
   for its own bundle; the face ports their behaviour into its own vanilla modules and names the
   package each rule comes from.
-- N8. No new tool for Gravit, and no new sentence in any agent's system prompt (D14).
+- N8. No new tool for Gravit but the PDF role's `role_pdf-page-reader` (O8), and no new sentence
+  in any agent's system prompt (D14). `GRAVIT.md` gains one line about PDFs (§5.6).
 
 **Anti-goals.** Each of these is a failure even if everything else works:
 - A1. A tool call drawn in the thread or in a member's Trace (the 2026-10-28 rule). A background
@@ -259,6 +261,9 @@ languages ("不用切换，还是绿涨红跌").
 | O4 | Not for this product: workspaces and folder pickers, the default agent preset, the Electron shell. |
 | O5 | Up stays green and down stays red in both languages: "不用切换，还是绿涨红跌". 中文 does not switch to red-up. |
 | O6 | The 2026-10-28 rule stands (no tool cards), and the question card stays blocking (no timed questions). |
+| O7 | Search runs on the face's own index, which finds any word in any language (§12, Q1). dsh's `session-query-sqlite` stays closed. |
+| O8 | PDFs: Poppler extracts the text first; when the layout matters, the page is rendered to an image and read by a role that runs a model taking images (§12, Q2). The operator's own proposal. |
+| O9 | A conversation chip in a message to a room's bots is refused this round (§12, Q3). |
 
 ### 4.2 The parent session's calls
 
@@ -282,11 +287,11 @@ each can be overturned at review without a redesign. §5 gives each in context.
 
 | # | Call | Why |
 |---|---|---|
-| D1 | A search hit in a room member's session opens its room. A hit in a subagent child's session, a deleted one, or one the list does not know is dropped. | A member's words are drawn in its room's thread; a child's are drawn nowhere the list reaches. |
+| D1 | The index holds the list's own conversations, a room's log among them; a subagent child's session is not indexed, and a deleted conversation leaves it. | A member's words are drawn in its room's thread; a child's are drawn nowhere the list reaches. |
 | D2 | A title match with no content hit shows the conversation's preview line as its snippet. | Every result then reads the same way. |
 | D3 | An archived result opens as its Archived row opens today. | List ④ drew dsh's "not until it is back"; the face's own rule already opens archived conversations. |
 | D4 | A failed content search keeps the title matches and says "Could not search inside conversations". | dsh's silence would read as "no match" (A5). |
-| D5 | A policy entry opens the search index (`openAt: first-search`, a durable file in the face's directory under the harness home), and `/data/host.json` says whether content search is on. | A default the operator's patch can still override, with no hand edit; the page never guesses "off" from `gateway/internal`. |
+| D5 | Withdrawn: it opened dsh's index with a policy entry. O7 replaces it. | dsh's index finds no Chinese word inside a sentence (§5.1). |
 | D6 | Pinned rows sort newest first among themselves. | The order the rest of the group already uses. |
 | D7 | Archiving a pinned conversation in the face unpins it; un-archiving does not pin again. | The host drops the pin only for its own archive, and PLAN D14 keeps the face's archive apart. |
 | D8 | One draft per conversation, in memory. | Uploads belong to one session. |
@@ -343,28 +348,26 @@ from the host, and where it lands in `face/client`. "D<n>" marks one of my calls
   - **Searching:** skeleton rows and "Searching every conversation…".
   - **Nothing found:** "No matching conversations".
   - **More than 20:** "Showing the first 20. Narrow your search."
-  - **Content search off:** the title matches, then "Titles only. Searching inside conversations
-    is off on this face." in the warn text colour.
+
+  The board's fourth state ("Titles only. Searching inside conversations is off on this face")
+  goes: the face's own index is always on (O7).
 
 **Behaviour:**
 - **Title matches show at once.** The page matches the query, case-insensitive, against the titles
-  and channel labels of the conversations it holds, as dsh's sidebar does. The host never matches
-  titles.
-- **Content matches follow** 250 ms after typing stops: `session/search {request: {query}}` answers
-  `{items: [{sessionId, snippet}], hasMore}`. There are at most 20 items, and each snippet is at most
-  240 characters with the host's highlight markers already stripped. The page drops any answer
-  that is not the latest query's (the face's sequence-token pattern).
-- **The query** is trimmed and capped at 500 characters. The host refuses a longer query, or one
-  with a NUL, with `gateway/bad-request`.
-- **Merge:** title matches first (newest first), then the content matches not already listed, in
-  the host's order, at most 20 in all. "More than 20" shows when the host says `hasMore` or the
-  merge overflows.
-- **Which conversation a hit opens** (D1):
-  - a hit in a conversation the list shows opens it;
-  - a hit in a room member's session opens its room (the list's fold, `memberSessions`), where the
-    member's words are drawn;
-  - a hit in a subagent child's session, in a deleted conversation, or in a session the list does
-    not know is dropped.
+  and channel labels of the conversations it holds, as dsh's sidebar does.
+- **Content matches follow** 250 ms after typing stops, from the face's own index (below). Its
+  route answers `{items: [{sessionId, snippet, match: [start, end]}], hasMore}`: at most 20 items,
+  each snippet at most 240 characters around the first match, with the match's place in it, so the
+  page highlights exactly what matched (P1). The page drops any answer that is not the latest
+  query's (the face's sequence-token pattern).
+- **The query** is trimmed and capped at 500 characters.
+- **Merge:** title matches first (newest first), then the content matches not already listed,
+  newest first, at most 20 in all. "More than 20" shows when the route says `hasMore` or the merge
+  overflows.
+- **What a hit opens** (D1). The index holds the list's own conversations: the root channel's and
+  each channel's, the desk's, a bot's home, and a room's own log, where its members' answers are
+  drawn. So a hit opens its conversation. A subagent child's session is not indexed, and a
+  conversation leaves the index when it is deleted.
 - **A title match with no content hit** shows the conversation's preview line as its snippet (D2).
   Snippets and previews pass through the masking of §5.9.
 - **An archived result opens** as its row in the Archived group opens today (D3). List ④ drew
@@ -373,40 +376,43 @@ from the host, and where it lands in `face/client`. "D<n>" marks one of my calls
 - **A failed content search** keeps the title matches and adds the muted line "Could not search
   inside conversations" (D4). dsh stays silent.
 
-**What it needs from the host** (§6):
-- dsh-base's `session-query-sqlite` row ships `{path: ':memory:', openAt: never}`. Under `never`,
-  `session/search` answers `gateway/internal` ("session search failed: …disabled…"); the host
-  keeps its own `SESSION_QUERY_SEARCH_DISABLED` inside.
-- This design opens it (D5) with a policy entry in `face/src/policy.ts`. The entry restates the
-  row's whole config (a named `config` replaces it): `openAt: first-search`, and `path` a file in
-  the face's own directory under the harness home. Being a policy default, the operator's patch
-  still wins. Under the policy layer's own rule this entry is a decision the operator owns:
-  approving this document makes it.
-- The index fills itself at search time: each search reads every log whose revision changed, plus
-  the live sessions. With a durable path, a restart re-reads only what changed; with `:memory:`,
-  the first search after every restart re-reads all history.
-- Only sessions with a working directory are searched, and only their user and assistant messages
-  on the current surface.
+**Why not dsh's index** (measured 2026-11-03 by the builder check, re-run here):
+- dsh-base's `session-query-sqlite` row ships closed, `{path: ':memory:', openAt: never}`, and a
+  `session/search` call answers `gateway/internal` ("session search failed: …disabled…").
+- Opened, it would still fall short of §1's first success line for the operator's largely Chinese
+  conversations:
+  - It uses SQLite FTS5's `unicode61` tokenizer, which does nothing special for Chinese: a run of
+    Chinese characters with no space or punctuation in it counts as one word. In
+    "贵州茅台的估值很高，宁德时代下跌了", "茅台" and "估值" find nothing; only a whole clause matches.
+    English words and numbers do match.
+  - It searches the current surface only. Compaction marks every message it summarizes as shadowed
+    (the face's thread then drops them too), so what a conversation said before a `/compact` is
+    not found, and the `/` menu makes `/compact` one click.
+  - It indexes user and assistant messages only, so a Lunhui composed answer (a `lunhui_present`
+    tool result) is not found.
+- It stays closed: no policy entry, and no field in `/data/host.json` (O7, replacing D5).
 
-**What dsh's index can find** (measured 2026-11-03 by the builder check, re-run here):
-- It uses SQLite FTS5's `unicode61` tokenizer, which does nothing special for Chinese. A run of
-  Chinese characters with no space or punctuation in it counts as one word. In "贵州茅台的估值很高，宁德时代下跌了",
-  "茅台" and "估值" find nothing, and only a whole clause matches. English words and numbers match.
-- It searches the current surface only. Compaction marks every message it summarizes as shadowed,
-  so a compacted conversation's older messages, which the thread still draws, are not found; the
-  `/` menu makes `/compact` one click.
-- It indexes user and assistant messages only, so a Lunhui composed answer (a `lunhui_present`
-  tool result) is not found.
-- The face's own index is feasible: this Node's SQLite (3.51.3) has the `trigram` tokenizer, which
-  matches any run of three characters or more, and `LIKE` finds a two-character Chinese word
-  (measured).
-
-This falls short of the first success line in §1 for the operator's largely Chinese conversations.
-Which way search goes is the operator's first question (§12, Q1). The rest of this section
-describes the dsh index, and it holds if the answer is to keep it.
-- The page must not guess "off" from `gateway/internal` (A5). `/data/host.json` gains
-  `sessionSearch: {content: true | false}`, read by the face from its composed row (`openAt` is
-  not `never`). With `false`, the page sends no `session/search` and draws the titles-only line.
+**The face's own index** (O7):
+- **What it holds:** what each of the list's conversations said, as the face draws words: the
+  operator's messages, Gravit's and the bots' answers, a room's lines, the words of a Lunhui
+  composed answer, and the messages a compaction has since folded away, with its summary. It holds
+  nothing the face does not draw as words: tool calls, context rows, reasoning.
+- **How it matches:** SQLite FTS5 with the `trigram` tokenizer for a query of three characters or
+  more, and a `LIKE` scan of the stored text for one or two characters. So any word in any language
+  is found, "茅台" inside "贵州茅台的估值很高" included (measured on this Node's SQLite, 3.51.3). Latin
+  letters match regardless of case.
+- **A hit in folded history** opens its conversation. The thread draws the compaction's place, not
+  the folded message, so the snippet is where the operator reads it.
+- **Where it lives:** one SQLite file in the face's own directory under the harness home, beside the
+  face's other state. It is one more copy of the conversations' text (§11).
+- **How it stays current:** lazily, at each search. Every conversation whose log changed since it
+  was last indexed is read again from where the index left off, through the face's in-process read
+  of a stored log (as `desk-session.ts` `readSessionEvents` reads one), never activating a session.
+  The first search after the index is created reads the whole history; later ones read only what
+  changed, across restarts too. A log the host cannot open (the sessions written before 0.2.0) is
+  skipped and counted.
+- **The route:** a `/data` route, fenced by `isTrustedDataRequest` and bounded (500 characters, 20
+  items), answering a fixed line when it fails. Plan 1 builds it (§10).
 
 **Where it lands:**
 - `render/rail.js` `renderList`: the box between `.list-head` and `.rail-rows`. While a query
@@ -414,6 +420,8 @@ describes the dsh index, and it holds if the answer is to keep it.
 - A pure `host/search-view.js` (the merge, the hits' mapping, the highlight runs, the edge state)
   beside an impure `host/search.js` (the quiet timer, the call, the token). Markets' `searchSoon`
   and Discover's local filter are the models.
+- The index and its route: a new face module in `face/src/`, registered with the other `/data`
+  routes.
 - The query lives in the store, as Markets' does, and the box keeps its focus and caret across the
   render.
 
@@ -582,8 +590,10 @@ since its form is unambiguous; a file or bot reference is drawn as its text (D17
   conversations a message, each at least 64 KiB by the row's automatic budget.
 - The rewrite runs at an agent's pre-step, and only over messages whose source is `user`. A room
   bot never gets one: the room engine hands a member the room's new lines as one `room`-kind delta
-  (`face/src/room.ts` `runMemberTurn`, `memberPrompt`), so the markup reaches the bot unexpanded.
-  What a bot should get is §12's question.
+  (`face/src/room.ts` `runMemberTurn`, `memberPrompt`), so the markup would reach the bot
+  unexpanded. This round a draft that holds both a conversation chip and a bot chip is refused
+  before sending, with the line "Conversations go to Gravit, not to a room's bots" (O9), as a draft
+  with files and a bot chip is (D20).
 - A reference that cannot be resolved ends the turn after the prompt was accepted (the row's
   failure behaviour), and the page shows that error as it shows any host error.
 - A referenced conversation can add tens of kilobytes to the turn's context. The page adds no
@@ -614,9 +624,9 @@ since its form is unambiguous; a file or bot reference is drawn as its text (D17
   conversation being written in.
 
 **A mixed message.** A message with a bot chip goes to the room. The bot receives the text in its
-delta: a file path it can read with its read-only tools, and a conversation as §12 decides. A
-message with no bot chip in a channel conversation is tried at `/data/rooms/say` and falls through
-to Gravit when it addresses no bot, as today.
+delta, including a file path it can read with its read-only tools; a conversation chip cannot go
+with it (O9). A message with no bot chip in a channel conversation is tried at `/data/rooms/say`
+and falls through to Gravit when it addresses no bot, as today.
 
 **"In a room"** means a conversation whose channel rosters at least one bot. That is where the
 server's `@bot` rule applies (`/data/rooms/say`), whether or not a bot has answered there yet.
@@ -671,10 +681,40 @@ serializer); a new face module for the listing route (`face/src/`, registered wi
   "<path>". Read that path with your file tools when its contents are needed…". When the tool world
   cannot reach the copy, the line says so instead.
 - Gravit's `read` reads UTF-8 text only (`FS_NOT_TEXT` otherwise), and `read_image` takes PNG,
-  JPEG, WebP or GIF. So a CSV, a Markdown file or a log can be read. **A PDF cannot**, and no PDF
-  tool ships (§9, open item 1).
+  JPEG, WebP or GIF. So a CSV, a Markdown file or a log can be read with `read`. A PDF cannot, and
+  no PDF tool ships; the next part says how Gravit reads one (O8).
 - The builder confirms on a keyed drill that Gravit's tools reach the saved copy at all. The host
   maps the path into the tool world.
+
+**How Gravit reads a PDF** (O8, the operator's proposal): the text first with Poppler, and the
+layout, when it matters, as a rendered page that a role reads.
+- **Poppler** is installed on the operator's Mac through Homebrew (26.04: `pdftotext`, `pdftoppm`,
+  `pdfinfo`). Gravit runs it from its own shell, so the face writes no PDF code and Gravit gains no
+  PDF tool:
+  - `pdfinfo <file>` for the page count;
+  - `pdftotext -layout -f <first> -l <last> <file> -` for a range of pages' text, columns kept;
+  - `pdftoppm -png -r 110 -f <n> -l <n> <file> <$TMPDIR/name>` to render a page when its layout
+    matters: a table, a chart, a multi-column page, a scanned page with no text layer.
+  - Renders go to `$TMPDIR`, which the sandbox grants; never into a strategy directory.
+- **Gravit's model takes no images** (deepseek-v4-pro), so a rendered page goes to a role whose
+  model does. A new role, `roles/pdf-page-reader/` (the name is a draft): `model:
+  deepseek-official/deepseek-flash`, `allow: [read_image]`, and a persona that transcribes and
+  describes. Given page images, it returns their tables, figures and layout in text, quoting what
+  it reads and saying what it cannot read. Like every role, it appears in Gravit's preset as one
+  tool, `role_pdf-page-reader`, and `cd face && npm run render:roles` regenerates the mirror.
+- **`GRAVIT.md` gains one line** saying so: a PDF is read with `pdftotext`, and a page whose layout
+  matters is rendered with `pdftoppm` and given to `role_pdf-page-reader`. It is 4,168 of its 4,500
+  bytes today, and the line must fit (`face/tests/gravit-md.test.ts`).
+- **On the card:** a PDF is an ordinary file card. The page claims nothing about whether Gravit
+  read it (A5); what Gravit read, it says in the thread.
+- **The agent box** of the two-box run (`compose.yml`) installs `poppler-utils`, so the same
+  commands work there.
+- **Measured before the choice** (2026-11-03, one generated Chinese sample): macOS's PDFKit gave
+  the text exactly, and `pdftotext` misplaced one character. The operator chose Poppler: it is
+  installed already, it works in the agent box too, and the rendered page covers what its text gets
+  wrong.
+- The role's `ROLE.md` and `role.yml` keep within the role library's caps and tests (§3.8 of
+  `DEVELOPMENT.md`).
 
 **Images and the model** (§9, open item 2):
 - dsh's catalog marks `deepseek-flash` as taking text and images and `deepseek-v4-pro` as text only
@@ -973,10 +1013,10 @@ bundle at tag `dsh-v0.2.1-rc.5`, and `face/src/overlay.ts` and `policy.ts`.
 
 | Pick | What the page calls | The face today | This design |
 |---|---|---|---|
-| 1 Search | `session/search` | The controller is mounted. dsh-base's `session-query-sqlite` ships `{path: ':memory:', openAt: never}`, so the call answers `gateway/internal`. | A policy entry opens it (D5); `/data/host.json` gains `sessionSearch`. |
+| 1 Search | the face's own search route | dsh-base's `session-query-sqlite` ships `{path: ':memory:', openAt: never}`, so `session/search` answers `gateway/internal`. | The face's own index and route (O7); dsh's row stays closed. |
 | 2 Pin | `workspace/pinSession`, `workspace/unpinSession`, the `workspace/follow` stream | Mounted (`workspace`, `workspace-controller`); unused. | Nothing on the host. |
 | 3 `/` menu | `commands/list` (a live agent), `skills/list` (reads a cold session), `commands/execute` | Mounted (`session-controller` and dsh-base's command rows). | Nothing on the host. |
-| 4 Attachments | `POST /api/session/uploadFileBinary`; image and file blocks in `session/prompt`; `session/attachment`; the `imageLimits` projection | Mounted (`file-upload`, `session-controller`, dsh-base's attachment rows). The client sends text only. | Nothing on the host. |
+| 4 Attachments | `POST /api/session/uploadFileBinary`; image and file blocks in `session/prompt`; `session/attachment`; the `imageLimits` projection | Mounted (`file-upload`, `session-controller`, dsh-base's attachment rows). The client sends text only. | Nothing on the host. For PDFs (O8): Poppler on the machine (installed on the Mac; `poppler-utils` in the agent box), one `GRAVIT.md` line, and the role `pdf-page-reader`. |
 | 5 Conversation references | the rewrite of `@[…](dsh-session:…)` at an agent's pre-step | `@deepseek-ai/dsh-session-reference` is not installed; it is published at 0.2.1-rc.5. | Install it, pinned, and add an overlay row `session-reference`. |
 | 5 File references | a face route | `fileReferences/list` fails: it has no provider. | The face's listing route (D14). `dsh-file-reference-local` stays out. |
 | 6 Masking | — | — | Nothing. |
@@ -990,31 +1030,35 @@ bundle at tag `dsh-v0.2.1-rc.5`, and `face/src/overlay.ts` and `policy.ts`.
   the upgrade's rules (`face/README.md` "Upgrading dsh — three pins, not one"). Their peers are
   installed already or arrive in the same change; the builder checks with `npm ci`.
 - **Why overlay rows.** The page depends on them as it depends on the other controllers, and an
-  operator patch that turned one off would break a screen silently. The search entry is a policy
-  default instead, because whether and where to index is an operator's decision their patch may
-  take back.
+  operator patch that turned one off would break a screen silently.
 - **What each changes for Gravit.** `job-controller`, `session-stats` and `session-turn-outline`
   change nothing: they serve the page. `session-reference` adds the snapshot message, and only when
-  a message names a conversation. The search index changes nothing: it is the host's own query
-  service and adds no tool. No row here adds a sentence to any agent's system prompt (D14).
-- **What leaves the machine.** An attached image and a referenced conversation's snapshot go to the
-  model provider with the prompt, as the operator's words do. Nothing goes to a new destination.
-  The index and the attachment copies are dsh's own storage in the harness home.
+  a message names a conversation. The face's search index changes nothing for Gravit. No row here
+  adds a sentence to any agent's system prompt (D14). The PDF role adds one `role_*` tool, and
+  `GRAVIT.md` one line (O8).
+- **What leaves the machine.** An attached image, a referenced conversation's snapshot and a
+  rendered PDF page go to the model provider with the turn, as the operator's words do. Nothing
+  goes to a new destination. The face's search index lives in its own directory under the harness
+  home; the attachment copies are dsh's own storage there.
 
 ## 7. Tests and documents
 
 **The face suite** (`node --test` via tsx, offline):
-- `tests/policy.test.ts`: the search entry restates the whole row config (`openAt: first-search`,
-  the path under the harness home) and is pinned against the installed dsh-base row.
+- The search index, over a fixture of session logs: a Chinese word of one, two and three or more
+  characters inside a sentence; an English word in any case; a message a compaction folded away; a
+  composed answer's words; a room's lines; a deleted conversation gone; a log that cannot be opened
+  skipped and counted; a new message found after the next search reads it; the snippet's 240
+  characters and the match's place; the route's fence (403 without the trusted header) and bounds.
 - The overlay's tests: the four new rows are composed, each named for its installed package; a
   missing package refuses the boot by name, as the other required rows do.
-- `/data/host.json`: `sessionSearch.content` is `true` with the policy entry and `false` under an
-  operator row that says `never`.
+- `tests/roles.test.ts`: the library's four roles, `pdf-page-reader` allowing `read_image` alone on
+  `deepseek-official/deepseek-flash`, and the rendered mirror in step.
+- `tests/gravit-md.test.ts`: `GRAVIT.md` with its PDF line still within 4,500 bytes.
 - The listing route: the ranking, a folder's entries, the 50,000-entry cap, the skips (`.git`,
   `node_modules`, `dist`, `build`, `.env*`), no link followed, names only, and a 403 without the
   trusted header.
-- Under `FACE_SMOKE=1`, on a real boot: `session/search` finds a seeded session by a word in it;
-  pin and unpin move the `workspace/follow` frames; `commands/list` answers on a live conversation
+- Under `FACE_SMOKE=1`, on a real boot: the search route finds a seeded session by a Chinese word
+  inside a sentence; pin and unpin move the `workspace/follow` frames; `commands/list` answers on a live conversation
   and `skills/list` on a cold one; a `job/list` stream opens; the two projections appear on a
   session with turns; `session/page` with `beforeSeq` pages back; an upload answers a receipt that
   a prompt accepts.
@@ -1052,29 +1096,30 @@ bundle at tag `dsh-v0.2.1-rc.5`, and `face/src/overlay.ts` and `policy.ts`.
 
 **Drills:**
 - The transport drill (`face/README.md`) runs again after the paging change.
-- The room drill gains one step: a message with a bot chip, a file chip and a conversation chip,
-  after which the bot's turn holds the file's path and the conversation as §12 decides.
+- The room drill gains one step: a message with a bot chip and a file chip reaches the bot with the
+  file's path, and one that adds a conversation chip is refused before sending (O9).
 - A new keyed drill, run in the operator's terminal on a scratch face, walks the ten:
   - search a word, pin a conversation and archive it;
   - `/compact` from the menu, then a skill from the menu;
   - `@` a file, which Gravit reads, and `@` a conversation, which brings its snapshot;
   - attach a CSV, which Gravit reads; attach an image, refused on deepseek-v4-pro with the line;
     send the same image in the conversation of a scratch bot whose route takes images
-    (deepseek-flash), which accepts it and draws it in the thread; attach a PDF, handled as §12
-    decides;
+    (deepseek-flash), which accepts it and draws it in the thread; attach a broker report's PDF and
+    ask about its text, which Gravit reads with `pdftotext`, then about a table on one page, which
+    Gravit renders with `pdftoppm` and hands to `role_pdf-page-reader`;
   - ask for a background job, then follow its chip, its output and its Stop;
   - the rail on a long conversation, including loading earlier history;
   - a pasted key drawn masked;
   - 中文, the text size, ⌘/.
 
 **Documents:**
-- `DEVELOPMENT.md`: §4.2 (the listing module), §4.3 (the four overlay rows and the policy entry),
-  §4.4 (the listing route, `/data/host.json`'s field), §4.8 (the policy entry as an operator
-  decision), §5.1–§5.6 (the new client files, wire contracts, host layer, rendering, state and
-  styling), §7.3 (the tests), §7.4 (the drills).
-- `face/README.md`: "The page (client/)", "The policy layer", "Upgrading dsh" (four more pins),
-  and the drills.
-- `CLAUDE.md`: one clause in the `face/` map line.
+- `DEVELOPMENT.md`: §3.3 (`GRAVIT.md`'s PDF line), §3.8 (the fourth role), §4.2 (the search and
+  listing modules), §4.3 (the four overlay rows), §4.4 (the two routes), §4.5 (the search index
+  among the face's state), §5.1–§5.6 (the new client files, wire contracts, host layer, rendering,
+  state and styling), §7.3 (the tests), §7.4 (the drills).
+- `face/README.md`: "The page (client/)", "Roles", "Upgrading dsh" (four more pins), "The two-box
+  drill" (`poppler-utils` in the agent box), and the drills.
+- `CLAUDE.md`: one clause in the `face/` map line, and the `roles/` line names the fourth role.
 - `Gravit-Docs-and-Prompt-Loops.html`: loop 1 gains the image and file blocks and the
   referenced-sessions message; the system prompt's sections do not change.
 - `ROADMAP.md`: the built log.
@@ -1097,8 +1142,10 @@ bundle at tag `dsh-v0.2.1-rc.5`, and `face/src/overlay.ts` and `policy.ts`.
 
 ## 9. Open items
 
-1. **PDFs.** Gravit cannot read a PDF today: the model gets a saved copy, `read` reads UTF-8 text
-   only, and no PDF tool ships. The operator's question (§12).
+1. **The PDF role's model and images.** dsh's catalog says deepseek-flash takes images; DeepSeek's
+   live model list has not been read (it needs a key). The keyed drill confirms that
+   `role_pdf-page-reader` reads a rendered page, and that Gravit's shell reaches Poppler and the
+   saved copy.
 2. **Images on Gravit's model.** On deepseek-v4-pro every image to Gravit is refused. A bot whose
    route takes images (deepseek-flash) takes them in its own conversations. Changing Gravit's model
    is the operator's `agent-default-model` row, not this design: model per conversation was
@@ -1107,8 +1154,8 @@ bundle at tag `dsh-v0.2.1-rc.5`, and `face/src/overlay.ts` and `policy.ts`.
    CSV from its saved copy.
 4. **A skill by its literal `/name`.** The smoke confirms it; otherwise the Skills group is not
    drawn.
-5. **A room bot and a conversation reference.** dsh's row does not expand references for a room's
-   members (§5.5). The operator's question (§12).
+5. **A room bot and a conversation reference.** Refused this round (O9). A later round can have the
+   room engine build the snapshot for the addressed bots.
 6. **The room message's `{kind: 'user', mention}` source** stays a risk at the next dsh bump, and
    now carries references too.
 7. **Masking a job's command line or Gravit's replies.** Not this round (§5.9).
@@ -1117,11 +1164,12 @@ bundle at tag `dsh-v0.2.1-rc.5`, and `face/src/overlay.ts` and `policy.ts`.
 
 Every plan leaves main working and ends with its drill.
 
-1. **The host side** (nothing visible): the four packages and their overlay rows; the policy entry
-   and `/data/host.json`'s field; the listing route; the smokes.
+1. **The host side** (nothing visible): the four packages and their overlay rows; the face's search
+   index and its route; the file listing route; the smokes.
 2. **The list:** search and pin.
 3. **The composer:** the editor and its drafts, the `/` menu, `@` references.
-4. **Attachments.**
+4. **Attachments**, with PDFs: the `GRAVIT.md` line, the `pdf-page-reader` role and its mirror, and
+   `poppler-utils` in the agent box.
 5. **The thread:** masking, the rail and stats with earlier history, background jobs.
 6. **Words into the table** (English only, so nothing visible changes), fonts and sizes, the keys
    and the shortcut sheet.
@@ -1132,11 +1180,13 @@ Plans 6 and 7 meet the Account split's client work by D37: whichever lands secon
 
 ## 11. The charter, and what stays imperfect
 
-- **P1 holds.** No route writes the profile patch. The search setting is code in the policy layer,
-  and the listing route reads names.
-- **The write map gains no writer of the tree.** The host writes its index and the attachment
-  copies in the harness home, as its own storage. The page writes pins through the host and
-  preferences in the browser.
+- **P1 holds.** No route writes the profile patch. The search route reads logs, and the listing
+  route reads names.
+- **The write map gains no writer of the tree.** The face writes its search index in its own
+  directory under the harness home; the host writes the attachment copies there, as its own
+  storage; Gravit's rendered pages go to `$TMPDIR`. The page writes pins through the host and
+  preferences in the browser. `GRAVIT.md` and the new role are files the operator owns, changed by
+  the plan they approve.
 - **Gate 2 and the owner device are untouched.** Nothing here writes at the Account.
 - **Residuals:**
   - Masking is display only (A2): the key stays in the log and in the model's context.
@@ -1148,10 +1198,10 @@ Plans 6 and 7 meet the Account split's client work by D37: whichever lands secon
   - The language, the sizes and the fonts are per browser: another browser keeps its own, and the
     phone's messages are untouched.
 
-## 12. The operator's questions
+## 12. The operator's questions and answers (2026-11-03)
 
-The builder check (2026-11-03) left three questions that only the operator can answer, and each
-answer changes what gets built. My recommendation comes first in each.
+The builder check left three questions that only the operator can answer, and each answer changes
+what gets built. My recommendation came first in each; the operator's answer follows it.
 
 **Q1. Search and Chinese.** dsh's index cannot find a Chinese word inside a sentence, a compacted
 conversation's older messages, or a Lunhui composed answer (§5.1).
@@ -1167,6 +1217,8 @@ conversation's older messages, or a Lunhui composed answer (§5.1).
   Chinese only as whole phrases between punctuation. The first success line and the "Searching
   every conversation…" line change to say what it finds.
 
+**Answer: A**, the face's own index (O7, §5.1).
+
 **Q2. PDFs.** Gravit cannot read a PDF: `read` reads UTF-8 text only, and no PDF tool ships (§5.6).
 - **A (recommended): the face extracts the text.** When a PDF is attached, the face extracts its text
   layer and sends it with the PDF as a text file Gravit can read. It needs one new dependency
@@ -1176,6 +1228,17 @@ conversation's older messages, or a Lunhui composed answer (§5.1).
 - **B: accept PDFs as they are.** The card says that Gravit cannot read it yet.
 - **C: refuse PDFs** at the paperclip, with a line.
 
+**Answer:** the operator asked back whether a good PDF tool exists ("有没有什么好用的读pdf的工具").
+Three were put to them:
+- macOS PDFKit with Vision: exact on a generated Chinese sample;
+- pdf.js: not measured;
+- Poppler: installed; it misplaced one character on the sample.
+
+They proposed their own way: "先用 poppler 提文字，需要看版式的时候再把页面渲染成图片看" (extract the text with
+Poppler first; when the layout needs looking at, render the page to an image). Gravit's model takes
+no images, so the rendered page goes to a role on deepseek-flash, and the operator agreed to that
+(O8, §5.6). The role is one `role_*` tool in Gravit's preset, as every role is.
+
 **Q3. A conversation chip in a message to a room's bots.** dsh expands a conversation reference for
 Gravit only (§5.5).
 - **A (recommended): refuse it this round.** A draft that holds both a conversation chip and a bot
@@ -1184,3 +1247,5 @@ Gravit only (§5.5).
 - **B: the room engine expands it.** The face builds the same snapshot for each addressed bot in
   `face/src/room.ts`. That is host work in plan 1, and every round a bot is named, it costs that
   bot the snapshot's tokens.
+
+**Answer: A**, refused this round (O9, §5.5).
