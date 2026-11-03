@@ -8,6 +8,8 @@
  *   GET  /api/health                  {ok: true, service: "market", sources, china, akshare, ifind} (protocol.ts; no token named)
  *   the source protocol               protocol.ts: the sources, the hub, China and a price, for the account's adapters
  *   Lunhui's reach and AKShare        routes-cn.ts: /api/cn/relay, /api/cn/ifind, /api/akshare/tools, /api/akshare/call
+ *   the public reads                  reads.ts: /api/explore, /api/quotes, /api/candles, /api/book, /api/trades (for the face, plan A2)
+ *   the stream                        follows.ts: GET /api/stream, POST /api/stream/markets (a followed market's quote, book and trades)
  *
  * Only this machine's own programs talk to it: a foreign Origin, a Sec-Fetch-Site of cross-site or same-site, or a Host that is not this
  * machine's (a DNS-rebinding page) is 403 before any route sees it. No answer is stored by the browser (cache-control: no-store).
@@ -20,6 +22,8 @@ import { akshareCommand } from "./live/akshare.ts";
 import { realMarketCore } from "./core.ts";
 import { mountProtocol } from "./protocol.ts";
 import { mountCn } from "./routes-cn.ts";
+import { marketReads, mountReads } from "./reads.ts";
+import { mountStream } from "./follows.ts";
 
 export const MARKET_PORT = 4821;
 
@@ -128,11 +132,22 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const port = Number(at("--port") ?? MARKET_PORT);
   if (!Number.isInteger(port) || port < 0) throw new Error("--port is a port number");
   const core = realMarketCore();
+  let endStream: (() => void) | undefined;
   const mount = (app: express.Express) => {
     mountProtocol(app, core);
     mountCn(app, core);
+    mountReads(app, core, marketReads(core));
+    endStream = mountStream(app, core).close;
   };
-  const srv = await startMarketServer({ port, bind: process.env.MARKET_BIND || undefined, hosts: parseHosts(process.env.MARKET_HOSTS), mount, close: () => core.close() }).catch((e: NodeJS.ErrnoException) => {
+  // the pages' streams end and their holds are let go before the core (its hub) closes
+  const close = async () => {
+    try {
+      endStream?.();
+    } finally {
+      await core.close();
+    }
+  };
+  const srv = await startMarketServer({ port, bind: process.env.MARKET_BIND || undefined, hosts: parseHosts(process.env.MARKET_HOSTS), mount, close }).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "EADDRINUSE") throw e;
     console.error(`port ${port} is already in use: a market is probably running already`);
     process.exit(1);

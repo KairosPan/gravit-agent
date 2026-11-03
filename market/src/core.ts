@@ -38,6 +38,11 @@ export interface MarketCore {
   readonly price: Price;
   readonly cn: MarketCoreOptions["cn"];
   readonly akshare: Akshare | undefined;
+  /** the read cache the sources are kept through: the public reads (reads.ts) keep their own answers (explore, a book, trades) in it too, so a
+   * source held back there is held back for every read of it, as the account's one cache does */
+  readonly cache: ReadCache;
+  /** the real clock the reads are timed by (MarketCoreOptions.clock, else Date.now) */
+  now(): number;
   /** the hub closed, then the AKShare child ended — the child ended even when the hub's close throws */
   close(): Promise<void>;
 }
@@ -58,6 +63,8 @@ function coreOver(cache: ReadCache, o: MarketCoreOptions): MarketCore {
     price: o.price ?? noPrice,
     cn: o.cn,
     akshare: o.akshare,
+    cache,
+    now: o.clock ?? Date.now,
     close() {
       closing ??= (async () => {
         try {
