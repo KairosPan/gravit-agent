@@ -6,8 +6,8 @@ lives in `DEVELOPMENT.md`, `Gravit-Design.md`, `face/README.md`, docstrings, and
 
 ## What this is
 A market-strategy-account research workbench for one operator, one principal agent (Gravit) and
-operator-authored bots, reset 2026-08-29 from the previous product. MARKET + ACCOUNT are the
-Account, the service in `account/` that Gravit reaches through its seat and the face shows on its
+operator-authored bots, reset 2026-08-29 from the previous product. MARKET is the
+market service in `market/` and ACCOUNT the wallet service in `account/` that Gravit reaches through its seat and the face shows on its
 screens, with AKShare (A shares and more) as the market's sidecar; the repo holds no Python since 2026-10-24. STRATEGY is
 `strategies/`, the agent's arena, run on DeepSeek Harness (dsh) inside `face/`, the chat face.
 

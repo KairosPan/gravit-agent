@@ -1062,7 +1062,7 @@ the comment is optional and the operator's to do.
 Mount the operator's rows — the two skill roots and the default model below —
 into `cordis.patch.yml` per `../dsh/README.md` steps 1–5 (step 2 is the rows).
 No server of this repo's exists to mount since 2026-10-24: the face composes
-the Account seat itself (AKShare is the Account's). A harness home that still carries the
+the Account seat itself (AKShare is the market's). A harness home that still carries the
 Alpaca MCP row from before then should drop it — its command names the Python
 package the tree removed, so the server never starts — and should any row
 register `place_order` or `cancel_order`, the face refuses to boot until that

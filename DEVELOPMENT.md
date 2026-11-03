@@ -223,7 +223,7 @@ citations resolve; the history is the design, the plan
 
 `dsh/profile/cordis.yml` is the *content* of the profile in indicative shape: the deepseek LLM row
 and the two skill **group** roots; it names no MCP server (the face composes the
-Account seat itself, below; AKShare is the Account's), and since 2026-10-24 no server of this repo's exists to mount. It is
+Account seat itself, below; AKShare is the market's), and since 2026-10-24 no server of this repo's exists to mount. It is
 not a validated dsh config; a real profile is a list of plugin rows, and an unrecognised key
 merges silently — its `permissions.always_ask` block is inert and stays as the record of what did
 not work. The install path is `dsh/README.md`; the installed state is `$DSH_HOME/profiles/face/`,
@@ -5750,7 +5750,7 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   a server's `instructions` become an unswitchable `mcp:<server>` prompt section that bots see
   too (sections are not masked like tools), and instructions over 32 KiB fail the connection. A
   one-tool FastMCP server on the operator's interpreter (`mcp` 1.28.1) negotiated with the 0.2
-  client; AKShare is the Account's sidecar since 2026-11-01, so its negotiation is the Account's SDK client's, not dsh's.
+  client; AKShare is the market's sidecar (the account relays it) since 2026-11-01, so its negotiation is the market's SDK client's, not dsh's.
 - **R24 — `agentPresets/read` hands any signed-in client a bot's composition**: its persona text
   and the absolute rebased paths (the face's install path). 0.1.1 had no such Remote; `/api` is
   cookie-gated, which R3a qualifies.
