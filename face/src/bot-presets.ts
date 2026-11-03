@@ -43,6 +43,9 @@
  * src/index.ts:80-118) and a row-time declaration would mount `plugins/bot.js`
  * before the host's late tools exist. It re-declares a bot when the face saves
  * its files - 0.1.1 re-read the directory on every mount; 0.2.0 never re-reads.
+ * `declarePreset` is the same declaration for one definition the face builds in
+ * memory - the desk's (src/desk-preset.ts) and each role's (src/roles.ts
+ * `rolePresetDefinition`, D20/B1) - where a refusal refuses the boot.
  * @module
  */
 import { readFileSync } from "node:fs";
@@ -360,4 +363,49 @@ export async function declareBots(ctx: Context, botsRoot: string, options: Decla
     errors,
     ids: () => [...declared.keys()].sort(),
   };
+}
+
+/**
+ * Declare one face-built `definition` into the booted tree's preset registry through its own child
+ * plugin of `ctx` - the pattern {@link declareBots} declares every bot with, which is the registry's own
+ * declaration model: `ctx.plugin({ inject: ["agentPresets"], async *apply(c) { yield await
+ * c.agentPresets.register(definition) } })`. Disposing that fiber unregisters the definition, and it is
+ * a child of `ctx`, so disposing the root does too; if the registry itself restarts, cordis reloads the
+ * fiber, which declares again on the new instance. Unlike a bot's, a refused declaration is not recorded
+ * and survived: the desk's preset (src/desk-preset.ts `declareDeskPreset`) and every role's
+ * (src/roles.ts `rolePresetDefinition`, D20/B1) are declared through it by `bootFace`, and the face has
+ * neither the desk nor the role without its preset.
+ * @param ctx - the booted ROOT context, after `boot()` resolved (src/boot.ts `bootFace`).
+ * @param definition - the definition to declare.
+ * @param kind - how the messages name the preset (default `agent preset`; the desk's says `desk agent preset`).
+ * @returns the disposer that withdraws the declaration; a second call is a no-op.
+ * @throws when the preset registry service is absent (a fiber injecting a missing service stays pending
+ * and awaiting it resolves, which would declare nothing, silently), when the registry refuses the
+ * definition - its reason in the message and as the `cause` - and when the declaration never activated.
+ * A declaration whose rows fail to mount does not throw: the registry lists it `broken`, which the
+ * caller's roster audit reports.
+ */
+export async function declarePreset(ctx: Context, definition: PresetDefinition, kind = "agent preset"): Promise<() => Promise<void>> {
+  if (ctx.get("agentPresets") === undefined) {
+    throw new Error(`${BIN}: agentPresets is missing - the ${kind} "${definition.id}" cannot be declared (the agent-preset-registry overlay row did not mount)`);
+  }
+  /* A handle, never the fiber itself: `ctx.plugin` returns a thenable, and a thenable that reaches an
+   * async function's `return` is silently adopted (declareBots says the same). */
+  const fiber = ctx.plugin({
+    inject: ["agentPresets"],
+    async *apply(declaring: Context) { yield await declaring.agentPresets.register(definition); },
+  });
+  try {
+    await fiber;
+  } catch (error) {
+    /* A refused `register` (a duplicate or blank id) leaves the fiber FAILED but attached (NEW
+     * vendor/cordis/src/fiber.ts:659-664); detach it. */
+    await fiber.dispose();
+    throw new Error(`${BIN}: ${kind} "${definition.id}" could not be declared - the preset registry refused it: ${messageOf(error)}`, { cause: error });
+  }
+  if ((fiber.state as number) !== FIBER_ACTIVE) {
+    await fiber.dispose();
+    throw new Error(`${BIN}: ${kind} "${definition.id}" could not be declared - its declaration never activated (fiber state ${String(fiber.state)}); is the agentPresets service mounted?`);
+  }
+  return () => fiber.dispose();
 }

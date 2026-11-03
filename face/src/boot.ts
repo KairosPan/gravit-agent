@@ -1,9 +1,12 @@
 /** The face's dsh boot: a mirror of the dsh CLI's profile launcher.
  *
- * Source of the mirror, pinned: `@deepseek-ai/dsh` 0.2.0-rc.2, chunk
- * `lib/profile-boot-BZ2ZjNWi.js` — `prepareProfile`, `composeProfile` and
- * `runProfile` (NEW apps/cli/src/profile-boot.ts:167-173, 197-209, 244-326;
- * the chunk is byte-for-byte that logic). The CLI now also publishes them as
+ * Source of the mirror, pinned: `@deepseek-ai/dsh` 0.2.1-rc.5, chunk
+ * `lib/profile-boot-C14i-8IN.js` — `prepareProfile`, `composeProfile` and
+ * `runProfile` (NEW apps/cli/src/profile-boot.ts:167-173, 197-209, 244-326,
+ * the 0.2.0-rc.2 source; the chunk is byte-for-byte that logic). Re-diffed at
+ * 0.2.1-rc.5 (the chunk was `profile-boot-BZ2ZjNWi.js` at 0.2.0-rc.2):
+ * `runProfile`, `composeProfile` and `createAppReady` are unchanged and the
+ * ten divergences below stand. The CLI now also publishes them as
  * `@deepseek-ai/dsh/profile-boot`, a reading aid and NOT a dependency: taking
  * `runProfile` would bring `profileContext`, its own signal and fail-loud
  * handlers, an `appReady` committed before Gate 2 exists, and the whole CLI
@@ -98,7 +101,7 @@
  * the face's own rows.
  * @module
  */
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Context, FiberState } from "@deepseek-ai/cordis";
@@ -115,13 +118,13 @@ import {
   resolveTelemetryPatch,
   type Profile,
 } from "@deepseek-ai/dsh-app-boot";
-import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
+import { resolveAgentsHome, resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from "@deepseek-ai/dsh-launch-environment";
 import { provideCmdline, type AppReady } from "@deepseek-ai/dsh-cmdline";
 import type { Config as SystemPromptConfig } from "@deepseek-ai/dsh-system-prompt";
 import { BOTS_ROOT, DEFAULT_PRESET, LEGACY_PRESET, SYSTEM_PROMPT_ROW_ID, faceOverlay } from "./overlay.ts";
-import { declareBots, definitionFor, type BotPresets } from "./bot-presets.ts";
-import { GRAVIT_PLUGIN_URL, ROLES_ROOT, gravitRows, readRoles } from "./roles.ts";
+import { declareBots, declarePreset, definitionFor, type BotPresets } from "./bot-presets.ts";
+import { GRAVIT_PLUGIN_URL, ROLE_PLUGIN_URL, ROLES_ROOT, gravitRows, readRoles, rolePresetDefinition, roleRosterProblem, type RoleFile } from "./roles.ts";
 import { PERSONA_PATH, readPersona } from "./persona.ts";
 import { CYCLE_PATH, DESK_PATH, readCycle, readDesk } from "./cycle.ts";
 import { declareDeskPreset, deskPresetDefinition, deskRosterProblem } from "./desk-preset.ts";
@@ -286,6 +289,26 @@ function composedRowIds(layers: readonly FacePatchList[]): Set<string> {
   return ids;
 }
 
+/** The user-global instruction files dsh 0.2.1's `agent-instructions` reads beside the project chain:
+ * `<home>/AGENTS.md` and the shared agents root's `AGENTS.md` (`resolveAgentsHome` in
+ * `@deepseek-ai/dsh-home-paths`: `$DSH_AGENTS_HOME`, else `~/.agents`). The row has no switch for
+ * either, and the face must not move `DSH_AGENTS_HOME` (skill-filesystem resolves its default roots
+ * from the same variable), so the contract - `GRAVIT.md` alone - is kept by naming what would breach
+ * it (D25). Pure with respect to its arguments: the environment is passed in.
+ * @param home - the resolved `$DSH_HOME`.
+ * @param env - where `DSH_AGENTS_HOME` is read from.
+ * @returns the paths among the two that exist, the home's first. */
+export function globalInstructionFiles(home: string, env: Record<string, string | undefined> = process.env): string[] {
+  return [join(home, "AGENTS.md"), join(resolveAgentsHome(undefined, env), "AGENTS.md")].filter((path) => existsSync(path));
+}
+
+/** One line per {@link globalInstructionFiles} path, the text `bootFace` writes to stderr. */
+export function globalInstructionAudit(home: string, env: Record<string, string | undefined> = process.env): string[] {
+  return globalInstructionFiles(home, env).map((path) =>
+    `${BIN}: ${path} exists and would enter every agent's instruction chain (dsh 0.2.1 reads it with no row switch);` +
+      " the face's contract is GRAVIT.md alone - remove it or move it");
+}
+
 /**
  * Compose the face's full patch stack over its profile, in application order:
  * bundle layers in `dsh.profile.bundles` order, the face's policy defaults
@@ -301,6 +324,8 @@ function composedRowIds(layers: readonly FacePatchList[]): Set<string> {
  * `dsh/profile/desk.md`, is read beside the cycle and handed back rather than
  * composed: no static row carries it, and {@link bootFace} declares the
  * `gravit-desk` preset from it once the tree has settled (src/desk-preset.ts).
+ * So are the roles: no static row declares a role's own preset, and
+ * {@link bootFace} declares one per role from this same read (D20/B1).
  *
  * Pure with respect to the environment — the home is threaded explicitly into
  * every dsh-app-boot call rather than materialized into `$DSH_HOME` — but NOT
@@ -309,15 +334,16 @@ function composedRowIds(layers: readonly FacePatchList[]): Set<string> {
  * computed in memory by {@link bootFace}.)
  * @param opts - profile name, webserver port, optional harness home.
  * @returns the composed patch stack, the absolute root config path to boot,
- * the loaded profile (the runtime resolution needs it), and the desk's
- * contract, trimmed (the `gravit-desk` preset's `desk`).
+ * the loaded profile (the runtime resolution needs it), the desk's
+ * contract, trimmed (the `gravit-desk` preset's `desk`), and the roles read
+ * (each one's `role-<id>` preset, which {@link bootFace} declares).
  * @throws when the profile does not exist, a bundle was skipped, a
  * patch file cannot load, the roles directory is missing, a role under
  * `roles/` is malformed, or the cycle file, the desk file or a protocol file is
  * missing, empty, oversized or unreadable
  * (the message opens with the absolute path of the directory or file at fault).
  */
-export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; rootConfig: string; profile: Profile; desk: string } {
+export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; rootConfig: string; profile: Profile; desk: string; roles: RoleFile[] } {
   const home = resolveDshHome(opts.dshHome);
   const profile = loadProfile(BIN, opts.profileName, INSTALL_ANCHOR, home, { userLayer: true });
   /* `loadProfile` never prints and no longer throws on a bundle it cannot load:
@@ -435,8 +461,13 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * the role summaries, the research-cycle contract (`readCycle`, read beside
    * the roles and refusing the compose the same way) and the run protocols
    * (`readProtocols`, read and refused the same way), named by an absolute
-   * `file:` URL - then one `@deepseek-ai/dsh-tool-subagent` row per role, each
-   * registering a `role_<id>` tool. None of them masks a host tool, so Gravit's
+   * `file:` URL - then one `plugins/role.mjs` row per role (D20), each
+   * registering a `role_<id>` tool that starts a child on the role's own preset,
+   * `role-<id>` (B1), resolved when the tool is called. Those presets are NOT static rows here: `bootFace`
+   * declares them from the `roles` this function hands back once the tree has
+   * settled, since eager activation would mount their masks before the MCP
+   * rows' tools exist and nothing needs them before the first role call. None
+   * of Gravit's rows masks a host tool, so Gravit's
    * roster is the host's plus the role tools; no persona is shadowed. `bots/gravit`
    * supplies only the display metadata (`definitionFor`'s preset.yml read): its
    * `agent.cordis.yml` is a MIRROR of this render, for readers, held to it by
@@ -458,9 +489,9 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * row never carries it: a preset carries one contract or the other. */
   const desk = readDesk(opts.deskPath ?? DESK_PATH);
   const protocols = readProtocols(opts.protocolsDir);
-  const gravit = definitionFor(opts.botsRoot ?? BOTS_ROOT, DEFAULT_PRESET, gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, cycle, protocols }));
+  const gravit = definitionFor(opts.botsRoot ?? BOTS_ROOT, DEFAULT_PRESET, gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, rolePlugin: ROLE_PLUGIN_URL, cycle, protocols }));
   patches.push(...faceOverlay(opts.port, gravit));
-  return { patches, rootConfig, profile, desk };
+  return { patches, rootConfig, profile, desk, roles };
 }
 
 /** The launcher-owned readiness signal the gateway waits on before it admits
@@ -860,8 +891,8 @@ async function assertOrderGateArmed(gate: OrderGateFibers | undefined): Promise<
  * required service is missing, the `ask_user_question` tool did not register,
  * either half of Gate 2 did not arm, a mounted Account seat has no write the
  * order gate covers, a retired order tool is registered, the preset roster cannot
- * supply its own default, the registry refuses the desk's preset or lists it
- * missing or broken, or a declared bot is
+ * supply its own default, the registry refuses the desk's preset or a role's,
+ * or lists either missing or broken, or a declared bot is
  * not listed; `StartupError`
  * (from `boot`) when a required dsh entry is inactive; and whatever `boot`
  * throws when the plugin tree fails to load.
@@ -870,7 +901,9 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
   if (opts.dshHome !== undefined) process.env.DSH_HOME = resolveDshHome(opts.dshHome);
   const home = resolveDshHome();
   const environment = loadLayeredEnv(BIN);
-  const { patches, rootConfig, profile, desk } = composeFace(opts);
+  /* `roles` is composeFace's own read, handed back rather than read again, so the role rows in the
+   * default preset and the role presets bootFace declares below come from one read of `roles/`. */
+  const { patches, rootConfig, profile, desk, roles } = composeFace(opts);
   /* The package table every bare row name resolves from, computed BEFORE any
    * plugin imports (NEW apps/cli/src/profile-boot.ts:205-206; usage model NEW
    * apps/cli/tests/web-agent-presets.e2e.ts:165-173). Pure: it writes nothing.
@@ -1026,6 +1059,16 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
      * try's catch, and a preset that declares but mounts broken is refused by
      * the roster check below. Disposed with the root, as the bots are. */
     await declareDeskPreset(ctx, deskPresetDefinition({ desk }));
+    /* One preset per role (D20/B1; src/roles.ts `rolePresetDefinition`), declared right after the desk
+     * and for the same reason: each is plugins/bot.js carrying the role's persona and mask, mounted
+     * eagerly at the declaration, so it must find the settled tree - a name the tree lacks is dropped
+     * with one warning and admitted when it registers; a preset with none of its names is listed broken,
+     * which the roster check below refuses. Not survivable either: a refused declaration throws into this
+     * try's catch. The role tools in Gravit's preset (plugins/role.mjs, D20) name `role-<id>` only when
+     * they are called, so a `session/create` racing these declarations creates Gravit as usual; a role
+     * called before its preset is declared fails that call with dsh's agent-preset/not-found. Disposed
+     * with the root, as the bots and the desk are. */
+    for (const role of roles) await declarePreset(ctx, rolePresetDefinition(role), "role preset");
     let roster: { id: string; broken?: string }[];
     try {
       roster = await presets.list();
@@ -1060,6 +1103,10 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
      * operator's first message from the phone. */
     const deskProblem = deskRosterProblem(roster);
     if (deskProblem !== undefined) throw new Error(deskProblem);
+    /* Every role's preset, refused the same way: missing or broken, every call of that role's tool
+     * would fail at the preset, and the boot says so instead of the first delegation. */
+    const roleProblem = roleRosterProblem(roster, roles);
+    if (roleProblem !== undefined) throw new Error(roleProblem);
     /* Every bot this boot declared must be LISTED - the registry is what
      * `session/create`, the rooms and the sidebar read, so a declaration it
      * does not list is a bot that silently vanished. Listed-but-`broken` is
@@ -1077,6 +1124,9 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
         ` (default ${presets.defaultId}; bots under ${opts.botsRoot ?? BOTS_ROOT})` +
         (botPresets.errors.size === 0 ? "" : `; ${botPresets.errors.size} bot(s) not declared, see above`),
     );
+    /* D25: the two user-global AGENTS.md files the instructions row reads with no switch. A warning,
+     * not a refusal: the operator's file is theirs, and the other tools that read it still need it. */
+    for (const line of globalInstructionAudit(home)) process.stderr.write(`${line}\n`);
     /* LAST (divergence 5): only now may the gateway admit a browser stream.
      * The CLI's own condition (NEW apps/cli/src/profile-boot.ts:314-318), made
      * a refusal: a root that stopped would otherwise be committed anyway - a

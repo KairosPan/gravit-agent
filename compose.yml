@@ -69,7 +69,6 @@ services:
       - path: .env.deepseek
         required: false
     environment:
-      FACE_BIND: "0.0.0.0"
       FACE_ACCOUNT_URL: "http://account:4820"
       BUYER_HOME: /seat-home
       DSH_HOME: /dsh-home

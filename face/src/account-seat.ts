@@ -28,7 +28,7 @@
  * - `portfolio_wait` polls at most 55 s, and the Account's AKShare sidecar call
  *   is bounded at 120 s, so the seat waits longer: the 130 s call timeout.
  *
- * dsh 0.2.0-rc.2 spawns a stdio server twice per connect (a probe, then the
+ * dsh 0.2.0-rc.2 (and 0.2.1-rc.5, whose stdio client is unchanged) spawns a stdio server twice per connect (a probe, then the
  * serving process); the probe calls no tool, so the lazily made key is the
  * serving process's. The child's env is the parent's scrubbed of names holding
  * KEY, SECRET, TOKEN or PASSWORD, with this row's `env` spread over it

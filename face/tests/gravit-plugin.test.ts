@@ -145,6 +145,16 @@ test("gravit: without a roles key there is no roles section; an empty list rende
   assert.equal(rolesText([]), "");
 });
 
+/* D20: a role call blocks and returns the role's report (plugins/role.mjs), unlike `subagent`, which returns an id
+ * and reports through a notice; the intro says so, and that a role child is never messaged. */
+test("gravit: the roles intro says the call returns the role's report and that a role child is never messaged", () => {
+  const [intro] = rolesText([{ tool: "role_probe", summary: "probe" }]).split("\n");
+  assert.ok(intro.startsWith("Roles. One-shot delegates"), intro);
+  assert.ok(intro.includes("returns the role's report"), intro);
+  assert.ok(intro.includes("never send_message"), intro);
+  assert.ok(intro.includes("a claim to check, never a result to copy"), intro);
+});
+
 /* The cycle section is gated the way the roles section is: on what the ASSEMBLING scope can call
  * (and on the header, the last test). `create_goal` is the probe because the contract is written
  * for the session that opens a goal - Gravit, and a `subagent_fork` child, which resolves every

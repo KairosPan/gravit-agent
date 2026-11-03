@@ -17,7 +17,8 @@ import { entryListProblem, type PresetDefinition } from "@deepseek-ai/dsh-agent-
 import {
   BOT_PLUGIN_URL, DESK_ALLOW, DESK_PRESET, declareDeskPreset, deskPresetDefinition, deskRosterProblem,
 } from "../src/desk-preset.ts";
-import { GRAVIT_PLUGIN_URL } from "../src/roles.ts";
+import { BOT_PLUGIN_URL as ROLES_BOT_PLUGIN_URL, GRAVIT_PLUGIN_URL } from "../src/roles.ts";
+import { declarePreset } from "../src/bot-presets.ts";
 import { validateBotConfig } from "../plugins/bot.js";
 import { validateGravitConfig } from "../plugins/gravit.js";
 import { PLUGIN_ABS } from "./bots-fixture.ts";
@@ -143,6 +144,29 @@ test("declareDeskPreset throws the registry's reason when the declaration is ref
   assert.deepEqual(registry.events, ["register gravit-desk"], "once the id is free, a declaration registers once");
   await ctx.fiber.dispose();
   assert.deepEqual(registry.events, ["register gravit-desk", "unregister gravit-desk"]);
+});
+
+/* `declarePreset` (src/bot-presets.ts) is the mechanism `declareDeskPreset` delegates to and `bootFace` declares
+ * every role preset with: the same refusals, its messages naming the definition's own id. */
+test("declarePreset refuses a definition whose id is already registered, with the registry's reason, and registers nothing", async () => {
+  const registry = fakeRegistry();
+  const taken = { id: "role-probe", plugins: [] };
+  registry.live.set(taken.id, taken);
+  const ctx = rootWith(registry.service);
+  await assert.rejects(declarePreset(ctx, { id: "role-probe", plugins: [] }), (error: Error) =>
+    error.message === 'gravit-face: agent preset "role-probe" could not be declared - the preset registry refused it: Duplicate agent preset: role-probe'
+      && error.cause instanceof Error && error.cause.message === "Duplicate agent preset: role-probe");
+  assert.equal(registry.live.get("role-probe"), taken, "the earlier declaration stands");
+  assert.deepEqual(registry.events, [], "the refused declaration registered nothing");
+  const dispose = await declarePreset(ctx, { id: "role-other", plugins: [] });
+  assert.deepEqual(registry.events, ["register role-other"]);
+  await dispose();
+  assert.deepEqual(registry.events, ["register role-other", "unregister role-other"]);
+  await assert.rejects(declarePreset(rootWith(), { id: "role-probe", plugins: [] }), /agentPresets is missing - the agent preset "role-probe" cannot be declared/);
+});
+
+test("BOT_PLUGIN_URL lives in src/roles.ts and src/desk-preset.ts re-exports the same value", () => {
+  assert.equal(BOT_PLUGIN_URL, ROLES_BOT_PLUGIN_URL);
 });
 
 /* Measured on cordis 4.0.4 (tests/bot-presets.test.ts): a fiber that injects an absent service stays

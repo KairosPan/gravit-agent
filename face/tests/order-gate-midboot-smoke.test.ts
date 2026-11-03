@@ -52,7 +52,7 @@ import { setupFaceProfile } from "../src/setup.ts";
 import { armOrderGate, bootFace, type BootedFace } from "../src/boot.ts";
 import type { PreToolDecision } from "../src/orders.ts";
 import { makeBotsRoot } from "./bots-fixture.ts";
-import { mountClient, remote, remoteResult, signIn } from "./remote.ts";
+import { boundPort, mountClient, remote, remoteResult, signIn } from "./remote.ts";
 
 const gated = process.env.FACE_SMOKE !== "1";
 
@@ -373,7 +373,7 @@ test("mid-boot: while a slow row holds boot() open, a live order tool is held fo
       drill.root !== undefined && drill.root.get("webServer") !== undefined && drill.root.get("connection") !== undefined
         ? drill.root
         : undefined);
-    const port = root.webServer.port;
+    const port = boundPort(root);
     const base = `http://127.0.0.1:${port}`;
     /* The tab's cookie. `/` is mounted by main.ts only after bootFace; the
      * smoke mounts it now, since the threat is a tab that already HOLDS a

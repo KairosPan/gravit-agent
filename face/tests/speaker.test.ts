@@ -21,7 +21,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 // speaker.js is plain ESM JS (it ships to the browser); tsconfig `allowJs`
 // lets this test import it, the same way botId.test.ts imports botId.js.
-import { DESK_PRESET, HOST_NAME, HOST_PRESETS, isDeskPreset, isHostPreset, speakerFor } from "../client/js/wire/speaker.js";
+import { DESK_PRESET, HOST_NAME, HOST_PRESETS, ROLE_PRESET_PREFIX, isDeskPreset, isHostPreset, speakerFor } from "../client/js/wire/speaker.js";
 
 /** A roster in the shape `/data/bots.json` returns. */
 const bots = [
@@ -117,4 +117,18 @@ test("the desk's sessions speak as Gravit, though the desk is not the host's pre
   assert.equal(speakerFor({ agentPreset: "gravit-desk" }, bots), HOST_NAME);
   assert.equal(speakerFor({ agentPreset: "gravit-desk" }, []), HOST_NAME, "not its id, as an unknown preset's would be");
   assert.equal(speakerFor({ agentPreset: "gravit-desk" }, [{ id: "gravit-desk", name: "Impostor" }]), HOST_NAME, "no roster row renames the desk");
+});
+
+test("a role child speaks as its role: `role-<id>` is `Role · <id>`, never Gravit and never a roster name (B11)", () => {
+  // A role's preset is `role-<id>` (src/roles.ts `rolePresetId`); src/bots.ts refuses the prefix as a bot id.
+  assert.equal(ROLE_PRESET_PREFIX, "role-");
+  assert.equal(speakerFor({ agentPreset: "role-cn-reviewer" }, bots), "Role · cn-reviewer");
+  assert.equal(speakerFor({ agentPreset: "role-cn-reviewer" }, []), "Role · cn-reviewer");
+  assert.equal(speakerFor({ agentPreset: "role-cn-reviewer" }, [{ id: "role-cn-reviewer", name: "Impostor" }]), "Role · cn-reviewer", "no roster row renames a role");
+  // Only the prefix with its dash names a role; the bare prefix names none and falls back to its id.
+  assert.equal(speakerFor({ agentPreset: "roles" }, bots), "roles");
+  assert.equal(speakerFor({ agentPreset: "role-" }, bots), "role-");
+  // The host and the desk are unchanged.
+  assert.equal(speakerFor({ agentPreset: "gravit" }, bots), HOST_NAME);
+  assert.equal(speakerFor({ agentPreset: "gravit-desk" }, bots), HOST_NAME);
 });

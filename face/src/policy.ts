@@ -1,10 +1,17 @@
 /** The face's policy layer: the 0.1.1-rc.2 product defaults that dsh-base
- * 0.2.0-rc.2 changed, restored in ONE reviewable place (PLAN §2, S4).
+ * 0.2.0-rc.2 and 0.2.1-rc.5 changed, restored in ONE reviewable place (PLAN
+ * §2, S4).
  *
  * Everything here changes what Gravit can do or what leaves the machine, so
  * every entry is a DECISION the operator owns (PLAN §6), named by its id. The
  * default is always "keep 0.1.1's behaviour"; following upstream instead is a
  * one-row operator patch, not a code change.
+ *
+ * CITATIONS: `NEW`/`OLD` paths and `base :N` lines are the upstream sources the
+ * 0.2.0-rc.2 entries were decided against (NEW = 0.2.0-rc.2, OLD = 0.1.1) and
+ * are not re-cut at each bump. The two 0.2.1-rc.5 entries - D9's ralph insert
+ * and D19 (spec 2026-11-02: B4, D19) - cite the installed packages by name and
+ * line.
  *
  * WHERE IT COMPOSES (boot.ts `composeFace`): directly ABOVE the bundle layer
  * and BELOW everything the operator writes — the project rows, the profile's
@@ -36,10 +43,11 @@ export interface PolicyIdPatch {
   };
 }
 
-/** One row the face inserts because dsh-base stopped mounting it. */
+/** One row the face inserts because dsh-base stopped mounting it. A `config`
+ * is the row's WHOLE config: an inserted row inherits none from dsh-base. */
 export interface PolicyInsert {
   readonly decision: string;
-  readonly row: { readonly id: string; readonly name: string };
+  readonly row: { readonly id: string; readonly name: string; readonly config?: Readonly<Record<string, unknown>> };
 }
 
 /** The id-targeted restorations, in composition order. Each comment cites the
@@ -83,11 +91,22 @@ export const POLICY_ID_PATCHES: readonly PolicyIdPatch[] = [
    * (server-context.ts:29-31), so disabling it strands nothing. (The
    * `mcp:<server>` instructions section beside it has no switch; it stays.) */
   { decision: "D7 MCP resource tools", patch: { id: "mcp-resources", disabled: true } },
-  /* D9, half one. dsh-base now ships `tool-ralph` DISABLED (base :440-452; its
-   * own comment names this exact overlay row as the way back). It was enabled
-   * at 0.1.1 (OLD base :378-382). `disabled: false` alone: the row keeps its
-   * base config. */
-  { decision: "D9 ralph", patch: { id: "tool-ralph", disabled: false } },
+  /* D19. New in dsh-base at 0.2.1: `tool-working-directory` gives EVERY agent a
+   * `working_directory {cd}` tool (base 0.2.1-rc.5 :169-170; the tool is
+   * @deepseek-ai/dsh-tool-working-directory lib/index.js:10-43) that moves the
+   * calling session's current directory - reads, writes, bash and the
+   * instruction chain follow it, the sandbox root does not (spec 2026-11-02,
+   * D19). A channel IS a directory here and the contracts say "whose cwd is the
+   * directory" (the desk's guard places a relative path against `header.cwd`),
+   * so no agent moves its own: the tool row goes. Only the TOOL goes. The
+   * `working-directory` row (base :166-167) stays: it is the service the tool
+   * injects and the owner of the runtime context that tells the model its
+   * directory on every request (`Current working directory: "<dir>".`,
+   * @deepseek-ai/dsh-working-directory lib/index.js:41-47, 121-123), which is
+   * what replaced the persona's `{{cwd}}` (D21, persona.ts). No other package
+   * names the tool, so disabling it strands nothing. An operator row
+   * `{ id: tool-working-directory, disabled: false }` brings it back. */
+  { decision: "D19 working_directory", patch: { id: "tool-working-directory", disabled: true } },
 ];
 
 /** Rows dsh-base no longer mounts at all, inserted when (and only when) the
@@ -101,6 +120,21 @@ export const POLICY_INSERTS: readonly PolicyInsert[] = [
    * tool-str-replace-editor/src/index.ts:514-515), so the insert is
    * configless. Its injects (`tools`, `fs`) are dsh-base rows. */
   { decision: "D9 str_replace_editor", row: { id: "tool-str-replace-editor", name: "@deepseek-ai/dsh-tool-str-replace-editor" } },
+  /* D9, half one (an id patch until 0.2.1). dsh-base dropped the `tool-ralph` row
+   * at 0.2.1-alpha.3; the package is still published, now standalone
+   * (@deepseek-ai/dsh-tool-ralph, upstream `packages/experimental/tool-ralph`),
+   * and is declared in package.json, so the face mounts it itself - ralph stays,
+   * as the operator decided at 0.2.0 (spec 2026-11-02, B4). Its injects (`tools`,
+   * `workflowEngine`, `subagents`, `systemPrompt`; lib/index.js:11-16) are all
+   * dsh-base rows (`workflowEngine` is `workflow-ptc`'s, base 0.2.1-rc.5 :400).
+   * The config is restated whole: `subagentProvider: spawn` is the package's own
+   * default, but `maxRounds: 64` is the value dsh-base's row carried (the
+   * standalone default is 256; lib/index.js:19-20). An operator row
+   * `{ id: tool-ralph, disabled: true }` still turns it off. */
+  {
+    decision: "D9 ralph",
+    row: { id: "tool-ralph", name: "@deepseek-ai/dsh-tool-ralph", config: { subagentProvider: "spawn", maxRounds: 64 } },
+  },
 ];
 
 /**
@@ -124,7 +158,7 @@ export function facePolicyPatches(
     if (baseRows.has(patch.id)) out.push(structuredClone(patch) as FacePatchList[number]);
     else onMissing(`policy ${decision}: dsh-base composes no "${patch.id}" row, so there is nothing to restore - renamed upstream?`);
   }
-  const inserts = POLICY_INSERTS.filter(({ row }) => !baseRows.has(row.id)).map(({ row }) => ({ ...row }));
+  const inserts = POLICY_INSERTS.filter(({ row }) => !baseRows.has(row.id)).map(({ row }) => structuredClone(row));
   if (inserts.length > 0) out.push({ insert: inserts });
   return out;
 }

@@ -1,7 +1,8 @@
 /** Session housekeeping the host does not fully provide at this pin: delete,
  * and a reversible archive.
  *
- * dsh 0.2.0-rc.2 exposes rename and fork over RPC but still no session DELETE
+ * dsh 0.2.0-rc.2 (and 0.2.1-rc.5, re-checked 2026-11-02: its session-controller
+ * Remotes list no delete) exposes rename and fork over RPC but still no session DELETE
  * (no delete/remove `@Remote` in `packages/api/session-controller/src` or
  * `packages/session/session-persistence/src`), so that lands here. The host
  * DOES own an archive — `workspaceRegistry.archiveSession` and, since 0.2.0,

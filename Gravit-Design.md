@@ -17,7 +17,10 @@ desk merged onto main - its phone (the always-on design's P1) and its clock (P2)
 2026-11-01 for the desk's watch (P3), in both markets on the Market's reads: §1, §3, §4, §5 (D19,
 D20, D23 and D26; D28 added); revised 2026-11-02 for the desk's per-strategy pre-market report
 (P4), on each strategy's market's calendar: §3, §4, §5 (D28 held for a strategy's own firings); revised
-2026-11-02 for the desk's hardening (the annotation lane and the watchdog): §1, §3 ·
+2026-11-02 for the desk's hardening (the annotation lane and the watchdog): §1, §3;
+§7.2 re-read 2026-11-02 for the dsh 0.2.1-rc.5 upgrade (a role is a preset of its own behind
+the face's blocking tool; a native child reports by notice; the upgrade's own decisions are PLAN
+D19–D27, `DEVELOPMENT.md` §4.8, not this charter's D19–D28) ·
 **Owner:** the operator ·
 **Authority:** this charter carries intent and principles; mechanism lives in `DEVELOPMENT.md`,
 `face/README.md` (the current face contracts and drills), and code. On a question of intent, the charter
@@ -342,9 +345,9 @@ room-roster entry or journal. dsh controls inherited sandbox scope and parent ow
 the pinned runtime refuses approval-dependent operations in children. The face grants no
 additional access and delegation adds no independent authority.
 
-The native runtime supports continuable background children and one-shot work. A background
-child can report progress; the runtime separately sends a settlement notice and any final
-answer. Gravit continues independent work or ends its turn to await that notice, then checks
+The native runtime runs every delegated child as a managed, continuable child (since dsh
+0.2.1; one-shot children of earlier versions remain as history). A child can report progress;
+the runtime separately sends a settlement notice and any final answer. Gravit continues independent work or ends its turn to await that notice, then checks
 the result against the brief. A report, an ended turn and an accepted result are different
 facts. In particular, `inactive` describes activity, not success or completion (D14).
 
@@ -356,9 +359,10 @@ preserves unclaimed queued messages and descendants, and does not cancel the who
 later send can resume parked work. dsh owns this lifecycle, including recovery.
 
 The role library is the prebuilt form of a delegated task: a role is an operator-authored
-persona plus an exact tool allow-list (`roles/<id>/`) the dsh backend enforces at the child's
-creation (a role with bash keeps the shell's reach — D12), surfaced to Gravit as a one-shot
-tool. It is never a bot (no roster, no journal, no room) and never a bot's substitute: a role
+persona plus an exact tool allow-list (`roles/<id>/`), composed as the role's own agent preset
+whose mask dsh enforces on the child (a role with bash keeps the shell's reach — D12), surfaced
+to Gravit as a one-shot tool the face owns: the call blocks and returns the role's report, so a
+research run reads a role's work in the turn that asked for it. It is never a bot (no roster, no journal, no room) and never a bot's substitute: a role
 has hands and no voice, a bot a voice and no hands. A role's report is a claim Gravit checks
 (D14). Three ship since 2026-10-26, after the three earlier roles retired with their tools on
 2026-10-24: `cn-market-analyst` and `cn-stock-analyst`, which write the Lunhui market and strategy

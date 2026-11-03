@@ -20,7 +20,7 @@ import { Context } from "@deepseek-ai/cordis";
 import { entryListProblem, type PresetDefinition } from "@deepseek-ai/dsh-agent-preset-registry";
 import { declareBots, definitionFor } from "../src/bot-presets.ts";
 import { BOT_PLUGIN_RELATIVE, DEFAULT_ALLOW, createBot, isBotId, renderComposition, updateSoul } from "../src/bots.ts";
-import { GRAVIT_PLUGIN_URL, ROLES_ROOT, gravitRows, readRoles } from "../src/roles.ts";
+import { GRAVIT_PLUGIN_URL, ROLE_PLUGIN_URL, ROLES_ROOT, gravitRows, readRoles } from "../src/roles.ts";
 import { CYCLE_PATH, readCycle } from "../src/cycle.ts";
 import { readProtocols } from "../src/protocols.ts";
 import { GRAVIT_PLUGIN_ABS, makeBotsRoot, PLUGIN_ABS, REPO } from "./bots-fixture.ts";
@@ -106,7 +106,7 @@ test("every shipped bot's plugin row lands on the real face/plugins/bot.js, and 
   assert.deepEqual(rowsOf(gravit).map((row) => row.id), ["gravit", "role-cn-market-analyst", "role-cn-reviewer", "role-cn-stock-analyst"], "Gravit's preset has its three role rows");
   assert.deepEqual(gravit.plugins[0], { id: "gravit", name: gravitUrl, config: { roles: roles.map((role) => ({ tool: role.tool, summary: role.description })), cycle, protocols } },
     "the mirror's relative plugin path rebases to the real face/plugins/gravit.js");
-  assert.deepEqual(gravit.plugins, gravitRows(roles, { plugin: gravitUrl, cycle, protocols }),
+  assert.deepEqual(gravit.plugins, gravitRows(roles, { plugin: gravitUrl, rolePlugin: ROLE_PLUGIN_URL, cycle, protocols }),
     "the shipped default composes the gravit plugin and the role rows; it masks no host tool, so the host roster is kept");
   assert.equal(typeof gravit.name, "string");
 });

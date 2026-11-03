@@ -22,7 +22,7 @@ function dshRequirements(): Array<[string, string]> {
 }
 
 test("every declared @deepseek-ai/dsh-* requirement is the exact pin", () => {
-  assert.equal(DSH_PIN, "0.2.0-rc.2");
+  assert.equal(DSH_PIN, "0.2.1-rc.5");
   const requirements = dshRequirements();
   // Guard against a filter that silently matches nothing (or stops matching the
   // family prefix): a vacuous pass here is indistinguishable from a green suite.
@@ -48,10 +48,10 @@ test("every installed @deepseek-ai/dsh-* package matches the pin", () => {
 });
 
 // cordis rides its own version track (4.x), not the dsh family — the dsh
-// packages peer-depend on it at ~4.0.4. Pin it separately so an upgrade of
+// packages peer-depend on it at ~4.0.5. Pin it separately so an upgrade of
 // either track is a deliberate edit here.
 test("cordis matches its own pin", () => {
-  assert.equal(CORDIS_PIN, "4.0.4");
+  assert.equal(CORDIS_PIN, "4.0.5");
   const { dependencies = {} } = manifest();
   assert.equal(dependencies["@deepseek-ai/cordis"], CORDIS_PIN, "declared range must be the exact pin");
   const require = createRequire(import.meta.url);
@@ -62,7 +62,7 @@ test("cordis matches its own pin", () => {
 // The include plugin is the one cordis-plugin-* the face imports itself
 // (entryListSchema); the rest are transitive and lockfile-held.
 test("cordis-plugin-include matches its own pin", () => {
-  assert.equal(CORDIS_INCLUDE_PIN, "1.0.9");
+  assert.equal(CORDIS_INCLUDE_PIN, "1.0.10");
   const { dependencies = {} } = manifest();
   assert.equal(dependencies["@deepseek-ai/cordis-plugin-include"], CORDIS_INCLUDE_PIN, "declared range must be the exact pin");
   const require = createRequire(import.meta.url);

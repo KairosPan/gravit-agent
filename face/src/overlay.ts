@@ -7,7 +7,7 @@
  * That set exists because every web-app session mounts a full preset that
  * re-declares the tools; Gravit's `gravit` preset masks no tool (composeFace
  * renders it from `roles/`: the gravit plugin, whose date section and role
- * summaries it carries, and one `dsh-tool-subagent` row per role), so the face
+ * summaries it carries, and one `plugins/role.mjs` row per role), so the face
  * keeps dsh-base's flat host roster and Gravit keeps its tools and gains the
  * `role_*` ones (MAP overlay-rows §5).
  * Static config replaces the webStartup/webRuntime `!!js` expressions: no
@@ -63,7 +63,7 @@ export interface FacePatchEntry {
 export const BOTS_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "bots");
 /** The preset every session that names none joins (spec S3). `composeFace`
  * renders it from `roles/` in memory (src/boot.ts; src/roles.ts `gravitRows`):
- * the face's gravit plugin row, then one `dsh-tool-subagent` row per role. None
+ * the face's gravit plugin row, then one `plugins/role.mjs` row per role. None
  * masks a tool, so Gravit's roster is the host's flat roster plus the `role_*`
  * tools. */
 export const DEFAULT_PRESET = "gravit";
@@ -77,6 +77,9 @@ export const DEFAULT_PRESET = "gravit";
  * default is built in memory and names the plugin by `GRAVIT_PLUGIN_URL`
  * (src/roles.ts), the same URL. */
 export const GRAVIT_PLUGIN_RELATIVE = "../../face/plugins/gravit.js";
+/** The role rows' plugin as the same mirror spells it, rebased the same way; the booted default
+ * names it by `ROLE_PLUGIN_URL` (src/roles.ts). */
+export const ROLE_PLUGIN_RELATIVE = "../../face/plugins/role.mjs";
 /** The agent's preset id before the 2026-10-08 rename. Sessions created before it
  * persist this id, and dsh resolves a session's stored preset through
  * `AgentPresetRegistry.retain` (pkg/dsh-agent-preset-registry/lib/index.js), which
@@ -106,8 +109,11 @@ export const SYSTEM_PROMPT_ROW_ID = "system-prompt";
  * loopback. The ONE way to widen the bind — the overlay's webserver row
  * composes last, so no operator patch row can move it; only the environment
  * the face is started with can. Its one intended use is the agent docker box,
- * whose compose file sets `0.0.0.0` and publishes the port on the host's
- * loopback alone. An empty value is unset.
+ * whose entrypoint (docker-entrypoint.sh) sets the container's own address and
+ * whose compose file publishes the port on the host's loopback alone. The
+ * webserver's schema admits a concrete local address and refuses the
+ * unspecified one (`0.0.0.0`) at load, so the wildcard is not a value this
+ * can carry (tests/bind-smoke.test.ts). An empty value is unset.
  */
 export function faceBind(env: NodeJS.ProcessEnv = process.env): string {
   return env.FACE_BIND || "127.0.0.1";
@@ -141,12 +147,13 @@ export function faceOverlay(port: number, defaultPreset: AgentPresetConfig, host
        * :169-177), and gzip here would also wrap the face's own `/data` JSON
        * routes. */
       /* `host` is FACE_BIND's value or loopback (faceBind). The row's schema
-       * admits only the two literals `127.0.0.1` and `0.0.0.0` (NEW
-       * packages/host/webserver, `WebServer.Config`'s `host` union), so
-       * the cast is checked at boot: any other FACE_BIND fails the row there
-       * rather than binding somewhere unnamed. */
+       * admits any concrete local address and refuses the unspecified one
+       * (`0.0.0.0`, `::`) at load (@deepseek-ai/dsh-host-webserver; rc.5), so
+       * the value is checked at boot: an address that is not this machine's, or
+       * a wildcard, fails the row there - `webserver` is a required startup id
+       * - rather than binding somewhere unnamed. */
       { id: "webserver", name: "@deepseek-ai/dsh-host-webserver",
-        config: { host: host as WebServerConfig["host"], port, compression: "none" } satisfies WebServerConfig },
+        config: { host, port, compression: "none" } satisfies WebServerConfig },
       /* No new required key at 0.2.0. The row's inject changed from
        * `webServer` to `credentials` (NEW packages/client/connection/src/
        * index.ts:89, 92-115), which dsh-base's `credentials` row provides
@@ -244,7 +251,7 @@ export function faceOverlay(port: number, defaultPreset: AgentPresetConfig, host
       /* The default preset, declared STATICALLY so it exists before the first
        * `session/create`. Its plugins are what `composeFace` renders from
        * `roles/` (src/boot.ts): the gravit plugin, whose date section and role
-       * summaries it carries, then one `dsh-tool-subagent` row per role. None
+       * summaries it carries, then one `plugins/role.mjs` row per role. None
        * masks a tool, so the host composition's roster is kept and gains the
        * `role_*` tools; the mirror bots/gravit/agent.cordis.yml shows readers
        * the same list. (An empty list is accepted too:

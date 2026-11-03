@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { composeEntries } from "@deepseek-ai/dsh-app-boot";
 import { setupFaceProfile } from "../src/setup.ts";
-import { composeFace } from "../src/boot.ts";
+import { composeFace, globalInstructionAudit, globalInstructionFiles } from "../src/boot.ts";
 import { ACCOUNT_SEAT_ROW_ID } from "../src/account-seat.ts";
 import { LUNHUI_ROW_IDS } from "../src/lunhui.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
@@ -17,7 +17,7 @@ import { AGENT_INSTRUCTIONS_ROW_ID, INSTRUCTIONS_CONFIG, instructionsPatch } fro
 import { facePolicyPatches } from "../src/policy.ts";
 import { definitionFor } from "../src/bot-presets.ts";
 import { LEGACY_PRESET_DESCRIPTION } from "../src/overlay.ts";
-import { GRAVIT_PLUGIN_URL, gravitRows, readRoles } from "../src/roles.ts";
+import { GRAVIT_PLUGIN_URL, ROLE_PLUGIN_URL, gravitRows, readRoles } from "../src/roles.ts";
 import { makeBotsRoot, makeRolesRoot } from "./bots-fixture.ts";
 
 /** Every row id {@link faceOverlay} owns, as the composed tree should show them. */
@@ -73,7 +73,7 @@ test("composeFace: patch order ends with the face overlay; root is rewritten emp
  * Account seat insert + the Lunhui rows' insert + hmr disable + system-prompt persona +
  * agent-instructions + face overlay. The
  * policy layer is pinned both by size (8 id patches + 1 insert against
- * 0.2.0-rc.2's dsh-base) and by POSITION - directly after the bundle layer,
+ * 0.2.1-rc.5's dsh-base) and by POSITION - directly after the bundle layer,
  * below the operator's. */
 test("composeFace stacks exactly the layers it means to", () => {
   const home = freshHome();
@@ -86,7 +86,7 @@ test("composeFace stacks exactly the layers it means to", () => {
         .flatMap((row) => (typeof row.id === "string" ? [row.id] : [])),
     );
     const policy = facePolicyPatches(baseRows);
-    assert.equal(policy.length, 9, "8 id patches + 1 insert at dsh-base 0.2.0-rc.2");
+    assert.equal(policy.length, 9, "8 id patches + 1 insert at dsh-base 0.2.1-rc.5");
     assert.equal(patches.length, 7 + policy.length, patches.map((p) => p.id ?? "insert").join(","));
     assert.deepEqual(patches.slice(1, 1 + policy.length), policy, "the policy layer sits right above the bundle layer");
     assert.equal((patches[1 + policy.length] as InsertPatch).insert?.[0]?.id, ACCOUNT_SEAT_ROW_ID, "the Account seat row sits right above the policy layer");
@@ -447,7 +447,7 @@ test("composeFace returns the loaded profile the runtime resolution needs", () =
 
 /* The static `preset-gravit` row is RENDERED from `roles/` in memory at compose
  * time (src/boot.ts; src/roles.ts `gravitRows`): the gravit plugin row, named
- * by an absolute `file:` URL, then one `dsh-tool-subagent` row per role. dsh 0.2
+ * by an absolute `file:` URL, then one `plugins/role.mjs` row per role. dsh 0.2
  * reads no bot directory itself, and `bots/gravit` supplies only the display
  * metadata - its `agent.cordis.yml` is a mirror for readers that roles.test.ts
  * holds to the render. A regression back to reading that file, to a hard-coded
@@ -455,14 +455,14 @@ test("composeFace returns the loaded profile the runtime resolution needs", () =
  * carries the very same definition under the id archived sessions persist. The
  * gravit row also carries `dsh/profile/cycle.md` as its `cycle` key (src/cycle.ts),
  * read by `composeFace` beside the roles. */
-test("composeFace builds preset-gravit from roles/ in memory: the gravit row by absolute URL, one spawn row per role", async () => {
+test("composeFace builds preset-gravit from roles/ in memory: the gravit row by absolute URL, one role.mjs row per role", async () => {
   const home = freshHome();
   const bots = await makeBotsRoot();
   const rolesRoot = await makeRolesRoot();
   try {
     const { patches } = composeFace({ profileName: "face", port: 3090, dshHome: home, botsRoot: bots, rolesRoot });
     const row = composeEntries([patches]).find((entry) => entry.id === "preset-gravit");
-    const expected = definitionFor(bots, "gravit", gravitRows(readRoles(rolesRoot), { plugin: GRAVIT_PLUGIN_URL, cycle: readCycle(CYCLE_PATH), protocols: readProtocols() }));
+    const expected = definitionFor(bots, "gravit", gravitRows(readRoles(rolesRoot), { plugin: GRAVIT_PLUGIN_URL, rolePlugin: ROLE_PLUGIN_URL, cycle: readCycle(CYCLE_PATH), protocols: readProtocols() }));
     assert.deepEqual(row?.config, expected);
     const plugins = (row?.config as unknown as { plugins: Array<{ id: string; name: string; config: unknown }> }).plugins;
     assert.deepEqual(plugins.map((p) => p.id), ["gravit", "role-probe"]);
@@ -472,6 +472,24 @@ test("composeFace builds preset-gravit from roles/ in memory: the gravit row by 
 
     const legacy = composeEntries([patches]).find((entry) => entry.id === "preset-kairos");
     assert.deepEqual(legacy?.config, { ...expected, id: "kairos", description: LEGACY_PRESET_DESCRIPTION });
+  } finally { await rm(rolesRoot, { recursive: true, force: true }); }
+});
+
+/* The roles composeFace read are handed back with the patches: bootFace declares one `role-<id>` preset per role
+ * from them once the tree has settled (D20/B1), so the presets and the role rows come from the same read. No
+ * overlay row declares a role preset - eager activation would mount the mask before the MCP rows' tools exist. */
+test("composeFace hands back the roles it read, and no overlay row declares a role preset", async () => {
+  const home = freshHome();
+  const bots = await makeBotsRoot();
+  const rolesRoot = await makeRolesRoot();
+  try {
+    const { patches, roles } = composeFace({ profileName: "face", port: 3090, dshHome: home, botsRoot: bots, rolesRoot });
+    assert.deepEqual(roles, readRoles(rolesRoot));
+    const rows = composeEntries([patches]);
+    assert.equal(rows.some((entry) => entry.id === "preset-role-probe" || (entry.config as { id?: unknown } | undefined)?.id === "role-probe"), false,
+      "the role presets are declared after boot, never as static rows");
+    const gravit = rows.find((entry) => entry.id === "preset-gravit")!.config as unknown as { plugins: Array<{ id: string; config: Record<string, unknown> }> };
+    assert.equal(gravit.plugins.find((p) => p.id === "role-probe")?.config.agentPreset, "role-probe", "the role row selects the preset bootFace declares");
   } finally { await rm(rolesRoot, { recursive: true, force: true }); }
 });
 
@@ -674,5 +692,40 @@ test("composeFace refuses a protocols directory with no lunhui-run.md or no lunh
   } finally {
     await rm(rolesRoot, { recursive: true, force: true });
     await rm(protocolsDir, { recursive: true, force: true });
+  }
+});
+
+/* D25: rc.5's agent-instructions reads a second user-global AGENTS.md from the shared agents root
+ * (@deepseek-ai/dsh-home-paths resolveAgentsHome - $DSH_AGENTS_HOME, else ~/.agents) beside
+ * $DSH_HOME/AGENTS.md, with no row switch. The face cannot close that door, so bootFace names each
+ * file that exists on stderr. The tests hand the environment in; they never read the real ~/.agents. */
+test("globalInstructionFiles: the home's AGENTS.md and the shared agents root's, when they exist", () => {
+  const home = mkdtempSync(join(tmpdir(), "face-ginstr-home-"));
+  const agents = mkdtempSync(join(tmpdir(), "face-ginstr-agents-"));
+  try {
+    assert.deepEqual(globalInstructionFiles(home, { DSH_AGENTS_HOME: agents }), [], "neither file exists");
+    writeFileSync(join(home, "AGENTS.md"), "home\n");
+    assert.deepEqual(globalInstructionFiles(home, { DSH_AGENTS_HOME: agents }), [join(home, "AGENTS.md")]);
+    writeFileSync(join(agents, "AGENTS.md"), "shared\n");
+    assert.deepEqual(globalInstructionFiles(home, { DSH_AGENTS_HOME: agents }), [join(home, "AGENTS.md"), join(agents, "AGENTS.md")]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(agents, { recursive: true, force: true });
+  }
+});
+
+test("globalInstructionAudit: one stderr line per global file, naming the path and the way out", () => {
+  const home = mkdtempSync(join(tmpdir(), "face-ginstr-home-"));
+  const agents = mkdtempSync(join(tmpdir(), "face-ginstr-agents-"));
+  try {
+    writeFileSync(join(agents, "AGENTS.md"), "shared\n");
+    assert.deepEqual(globalInstructionAudit(home, { DSH_AGENTS_HOME: agents }), [
+      `gravit-face: ${join(agents, "AGENTS.md")} exists and would enter every agent's instruction chain (dsh 0.2.1 reads it with no row switch);` +
+        " the face's contract is GRAVIT.md alone - remove it or move it",
+    ]);
+    assert.deepEqual(globalInstructionAudit(home, { DSH_AGENTS_HOME: join(agents, "none") }), [], "a clean home prints nothing");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(agents, { recursive: true, force: true });
   }
 });

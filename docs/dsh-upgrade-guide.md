@@ -2,7 +2,8 @@
 
 **What this is.** The operator's entry point for the next DeepSeek Harness (dsh) upgrade, and
 the record of every upgrade so far, so that a pin bump is a checklist and not a redesign.
-Written 2026-10-15 at the 0.2.0-rc.2 pin · **Owner:** the operator · **Rule:** this file
+Written 2026-10-15 at the 0.2.0-rc.2 pin; updated 2026-11-02 at the 0.2.1-rc.5 pin (§6.4) ·
+**Owner:** the operator · **Rule:** this file
 restates no mechanism. Every row points at code and at the section of `DEVELOPMENT.md` or the
 README that carries the depth; when this file and the code disagree, the code is the fact and
 this file is corrected. The complete seam inventory with the verbatim upstream citations it was
@@ -16,29 +17,30 @@ that adds a dependency on dsh adds its row to §3 in the same commit.
 
 ---
 
-## 1. Where we stand (2026-10-15)
+## 1. Where we stand (2026-11-02)
 
 | Component | Version | Pinned where | Checked by |
 |---|---|---|---|
-| the dsh family, 31 `@deepseek-ai/dsh-*` packages (29 on 2026-10-15; `dsh-agent-instructions` added by plan 1, `dsh-tool-subagent` by plan 2), every one exact | **0.2.0-rc.2** | `face/package.json`; `face/src/version.ts` `DSH_PIN` | `face/tests/version.test.ts` sweeps manifest, installed tree and constant |
-| `@deepseek-ai/cordis` (every dsh package peers it `~4.0.4`) | 4.0.4 | `package.json`; `CORDIS_PIN` | `version.test.ts` |
-| `@deepseek-ai/cordis-plugin-include` (imported directly for `entryListSchema`) | 1.0.9 | `package.json`; `CORDIS_INCLUDE_PIN` | `version.test.ts` |
-| `cordis-plugin-loader` / `-group` / `-timer` | 1.0.5 / 1.0.4 / 1.1.6 | **lockfile only** | nothing: a lockfile-only move of these is an upgrade and gets the whole §2 |
+| the dsh family, 34 `@deepseek-ai/dsh-*` packages (29 on 2026-10-15; `dsh-agent-instructions` added by plan 1, `dsh-tool-subagent` by plan 2, `dsh-tool-ralph` by the 0.2.1-rc.5 upgrade; 36 `@deepseek-ai/*` with the two cordis ones), every one exact | **0.2.1-rc.5** (0.2.0-rc.2 until 2026-11-02) | `face/package.json`; `face/src/version.ts` `DSH_PIN` | `face/tests/version.test.ts` sweeps manifest, installed tree and constant |
+| `@deepseek-ai/cordis` (every dsh package peers it `~4.0.5`) | 4.0.5 | `package.json`; `CORDIS_PIN` | `version.test.ts` |
+| `@deepseek-ai/cordis-plugin-include` (imported directly for `entryListSchema`; `dsh-app-boot` peers `~1.0.10`) | 1.0.10 | `package.json`; `CORDIS_INCLUDE_PIN` | `version.test.ts` |
+| `cordis-plugin-loader` / `-group` / `-timer` | 1.0.6 / 1.0.5 / 1.1.7 (peered `~1.0.6` / `~1.0.5` / `~1.1.7`) | **lockfile only** | nothing: a lockfile-only move of these is an upgrade and gets the whole §2 |
 | packages read by path but **not declared**: `dsh-api-gateway`, `dsh-user-approval`, `dsh-user-questions` | via dsh-base's exact deps | — | only `npm run check:fixture` fails loudly; the sweep is blind to them (A6; §7.4) |
-| the CLI's boot chunk `boot.ts` mirrors | `lib/profile-boot-BZ2ZjNWi.js` (content-hashed, changes every release) | cited in `boot.ts` header, README "Upgrading dsh" step 4, `DEVELOPMENT.md` §4.1 and §6.7 | manual re-diff (A9) |
-| the global CLI `~/.local/bin/dsh` | 0.2.0-rc.2, installed 2026-10-01, **never run** (its first run would import `~/.dsh/settings.yaml` into its own profile) | — | D12 |
-| the operator's home `~/.dsh` | live on 0.2.0 since 2026-10-01; session format **v4**; profile `face`; the `agent-default-model` row present (D2); the link farm deleted (D13) | backup `~/.dsh.bak-pre-0.2.0-20261001`; exports `~/dsh-session-exports-2026-10-01/` | the runbook §7 C checks, run 2026-10-01 |
-| upstream | repo `deepseek-ai/deepseek-harness`, tag `dsh-v0.2.0-rc.2`; npm dist-tags `latest` = `next` = 0.2.0-rc.2 (checked 2026-10-14); alpha line 0.2.1-alpha.1/.2/.3 (2026-10-03/09/14) | — | §7.1 |
+| the CLI's boot chunk `boot.ts` mirrors | `lib/profile-boot-C14i-8IN.js` at 0.2.1-rc.5 (`lib/profile-boot-BZ2ZjNWi.js` at 0.2.0-rc.2; content-hashed, changes every release) | cited in `boot.ts` header, README "Upgrading dsh" step 4, `DEVELOPMENT.md` §4.1 and §6.7 | manual re-diff (A9), last 2026-11-02 |
+| the global CLI `~/.local/bin/dsh` | 0.2.0-rc.2, installed 2026-10-01, **never run** (its first run would import `~/.dsh/settings.yaml` into its own profile); behind the face's pin now | — | D12, to re-take before the home moves (§6.4) |
+| the operator's home `~/.dsh` | live on 0.2.0 since 2026-10-01 and NOT moved to 0.2.1-rc.5 yet; session format **v4** (unchanged at 0.2.1-rc.5); profile `face`; the `agent-default-model` row present (D2); the link farm deleted (D13) | backup `~/.dsh.bak-pre-0.2.0-20261001`; exports `~/dsh-session-exports-2026-10-01/` | the runbook §7 C checks, run 2026-10-01 |
+| upstream | repo `deepseek-ai/deepseek-harness`, tag `dsh-v0.2.1-rc.5`; the meta package `@deepseek-ai/dsh`'s dist-tags (read 2026-11-02; the leaf packages' own `latest` tags are stale, read the meta package's): `latest` = `next` = 0.2.1-rc.5 (published 2026-10-29), `alpha` = 0.2.2-alpha.2 (2026-10-27, older than rc.5 and off its line) | — | §7.1 |
 
-Three homes on disk and what each is for: `DEVELOPMENT.md` §1. The profile's two operator rows
-(the alpaca-kit MCP server, the skill roots) and the D2 model row: `dsh/README.md` "Installed
-state".
+Three homes on disk and what each is for: `DEVELOPMENT.md` §1. The profile's operator rows
+(the skill roots; the alpaca-kit MCP row left with the Python package on 2026-10-24) and the D2
+model row: `dsh/README.md` "Installed state".
 
 ## 2. The procedure
 
 Merged from `face/README.md` "Upgrading dsh — three pins, not one", `DEVELOPMENT.md` §6.7 and
 §10 items 13–14, `dsh/README.md` step 2, and the go-live runbook
-(`docs/superpowers/runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md`). The numbering is the
+(`docs/superpowers/runbooks/2026-09-30-dsh-0.2.0-rc.2-go-live.md`; for the move to 0.2.1-rc.5,
+`docs/superpowers/runbooks/2026-11-02-dsh-0.2.1-rc.5-go-live.md`, same sections). The numbering is the
 inventory's PART 2, so a step can be cited.
 
 **Read first**
@@ -46,7 +48,12 @@ inventory's PART 2, so a step can be cited.
 1. Read the release before touching the tree: the new dist-tag version, the cordis peer range,
    the include peer, any new `dsh-session-format-vN-to-vN+1` package, dsh-base row renames or
    removals (`cordis.patch.yml`), the CLI's `profile-boot` rewrite. Trap: `gh release view`
-   takes the TAG (`dsh-v0.2.1-alpha.3`); the release name alone answers "not found".
+   takes the TAG (`dsh-v0.2.1-alpha.3`); the release name alone answers "not found". Read the
+   dist-tags of the META package `@deepseek-ai/dsh`; a leaf package's own `latest` is stale (it
+   read 0.0.1-rc.x / 0.1.x on 2026-11-02), and an `alpha` tag can be older than `latest`.
+   Diff the two installed trees' dsh-base `cordis.patch.yml` and each package the face imports
+   (a scratch install of the whole set and a `tsc` of a copy of the sources against it found the
+   0.2.1-rc.5 breaks in an hour; spec `docs/superpowers/specs/2026-11-02-dsh-0.2.1-rc.5-upgrade-design.md` §5).
 
 **Freeze the home**
 
@@ -58,18 +65,22 @@ inventory's PART 2, so a step can be cited.
 
 3. Bump the pins together: `package.json` (every `dsh-*`, cordis, include, all exact) **and**
    `src/version.ts` (`DSH_PIN`, `CORDIS_PIN`, `CORDIS_INCLUDE_PIN`).
-4. `npm install` first; the sweep reads the installed tree. Keep the lockfile committed.
+4. A fresh lockfile first: delete `package-lock.json` and `node_modules`, then `npm install`;
+   the sweep reads the installed tree. An in-place `npm install` over the old lockfile failed
+   `ERESOLVE` on the 0.2.1-rc.5 bump (the installed old packages' exact peers conflict). Commit
+   the new lockfile; a fresh resolve also moves the three lockfile-only cordis plugins (A4).
 5. `npm test`: `version.test.ts` fails first on any disagreement; `policy.test.ts` re-pins every
    policy target against the new dsh-base; `boot.test.ts` and `overlay.test.ts` re-pin the layer
    order and the thirteen overlay rows. Green is the precondition, not the evidence.
 6. `npm run typecheck`: `skipLibCheck: false`, the overlay's `satisfies` checks against the
    plugins' own `Config` types, every named import (A11, A13).
 7. Re-diff `src/boot.ts` against the CLI's current `profile-boot-*.js` chunk (`npm pack
-   @deepseek-ai/dsh@<new>`, or the installed global CLI's `lib/`). The ten header divergences
+   @deepseek-ai/dsh@<new>`, or the installed global CLI's `lib/`; at 0.2.1-rc.5
+   `lib/profile-boot-C14i-8IN.js`, which moves the citation in four places, §1). The ten header divergences
    are deliberate; anything else is drift. Same pass: the `prepare` provides, `createAppReady`,
    the required-id set and the warn-only audit, `resolveTelemetryPatch`, the `hmr` and
    `settings` gating on `profileContext` (A9, B8, B10–B12).
-8. Re-check the frame shapes: `client/api.js`, `client/mapper.js`, `tests/fixtures/events.jsonl`
+8. Re-check the frame shapes: `client/js/wire/api.js`, `client/js/wire/mapper.js`, `tests/fixtures/events.jsonl`
    against the installed `.d.ts` of `dsh-api-gateway` (stream-protocol), `dsh-api-remotes`,
    `dsh-api-session-controller`, `dsh-session`, `dsh-llm`, `dsh-user-approval`,
    `dsh-user-questions`. The fixture is corrected by hand; there is no generator (E1–E9).
@@ -78,8 +89,13 @@ inventory's PART 2, so a step can be cited.
 
 **Prove on real boots**
 
-10. `FACE_SMOKE=1 npm test`: the fifteen real boots. A dropped `snapshotEvents()` fails Gate 2
-    and the room engine closed and loudly here (D7); a moved goal tool fails `goal-smoke` (C21).
+10. `FACE_SMOKE=1 npm test`: the thirty-two real boots, **from a checkout outside `/tmp` and
+    `$TMPDIR`** — dsh's `workspace-write` grants both, so a fence smoke there passes for the
+    wrong reason (D24; `face/README.md` "Tests"; the room and bots fixtures refuse such a
+    checkout, the desk, telegram, watch and schedule smokes do not check). A dropped
+    `snapshotEvents()` fails Gate 2 and the room engine closed and loudly here (D7); a moved goal
+    tool fails `goal-smoke` (C21). Leave `FACE_ACCOUNT_URL` unset for the suite: the Lunhui
+    freeze tests reach the Account stand-in through it.
 
 **Prove on a copy of the home** (never the live one)
 
@@ -100,28 +116,36 @@ inventory's PART 2, so a step can be cited.
     (`DSH_HOME=$SCRATCH/dsh-drill FACE_PORT=3091 npm start`) — the README's role drill needs
     those rows too, so it runs here and not in step 14's fresh home — then delete it.
 14. Run the README drills in a FRESH scratch home (`npm run setup`, `npm start` on 3092): Gate 2
-    / approval channel, order approval with Gate 1 armed in the scratch home only, ask-user,
-    bots, room (§5).
+    / approval channel (the approval card drill), ask-user, bots, room (§5).
 
 **Go live**
 
 15. Everything on `~/.dsh` stopped again; the backup re-taken or diffed; D12 settled; `cd face
     && npm start`; open the printed `?token=` URL; check the boot log's presets line and no
-    warning; `grep -c 'client-connection/browser-session' ~/.dsh/.credentials.yaml` = 1;
+    warning (the presets line names the three `role-*` presets; no global `AGENTS.md` line on
+    stderr, D25); `grep -c 'client-connection/browser-session' ~/.dsh/.credentials.yaml` = 1;
     `ls ~/.dsh/storages/session_projcache/sessions | wc -l` non-zero; a cold session opens with
     no `session.v4.jsonl.zstd` written; the agent panel shows the D2 model;
-    `/data/plugins.json` lists both MCP servers. Keep the backup until the live face is trusted.
+    `/data/plugins.json` lists the MCP servers mounted (the Account seat's `account` since
+    2026-10-24), `ralph` registered and `working_directory` absent (D9, D19). Keep the backup until
+    the live face is trusted. Before the first boot of a new pin, compare where the model key
+    lives: since 0.2.1 a `refs` value in `~/.dsh/.credentials.yaml` beats the exported variable
+    (I5).
 16. Rollback = `mv ~/.dsh ~/.dsh.failed-<ver> && cp -a <backup> ~/.dsh`, then the OLD face only
     from an old checkout with its own `node_modules`. Never delete one session's v4 file and
-    lock as a "rollback".
+    lock as a "rollback". From 0.2.1-rc.5 back to 0.2.0 it is lossy (D26): every rc.5 `bash`
+    call writes event types 0.2.0 refuses, so what ran under rc.5 after the backup is lost.
 
 **Document**
 
 17. Update what cites the pin (none moves by itself): `version.ts` comments, the chunk name in
     `boot.ts` and in the three documents, `DEVELOPMENT.md` §4 header / §4.1 / §6.7 / §7.1 counts
     / Appendix A, `face/README.md` "Upgrading dsh" and "Tests", `dsh/README.md` "Installed
-    state", `CLAUDE.md`, `ROADMAP.md`'s built log, the runbook's expected-findings table, and
-    §1 and §6 of this file.
+    state", `CLAUDE.md`, `ROADMAP.md`'s built log, `Gravit-Docs-and-Prompt-Loops.html` (the
+    eyebrow and the loop diagram's box), `Gravit-Design.md`'s header when it is re-read, the
+    runbook's expected-findings table, and §1, §6 and §7 of this file. The 2026-11-02 pass's grep:
+    `grep -rn "<old pin>\|<old cordis>\|<old include>\|<old chunk hash>"` over those files and
+    `face/src`, `face/scripts`, `face/plugins`; a hit is either dated history or moves.
 
 ## 3. What to re-check
 
@@ -146,16 +170,22 @@ These are the upgrade's real work. Everything else in §3.2 fails a test first.
 | G10 | the MCP server is a child of the face process; its writes bypass the sandbox | behaviour | residual R5 if dsh starts sandboxing MCP children |
 | G12 | FastMCP (`mcp` 1.x) negotiates with dsh's `@modelcontextprotocol/client` 2.0 | `alpaca_kit/mcp/server.py`; the akshare-mcp install | both servers silently register zero tools (G4) |
 | H2 | `SKILL.md` frontmatter `name` + `description`, or discovery drops the skill at warn level | `dsh/skills/*/*/SKILL.md` | a new required key empties the catalog with no error |
-| H6 | the `agent-instructions` row's user-global file: hard-coded `$DSH_HOME/AGENTS.md`, outside the candidate lists the face sets | installed `dsh-agent-instructions/lib/index.js` (`USER_GLOBAL_FILE`); the candidates and the budget are the face's own patch, `face/src/instructions.ts` (H10) | 0.2.1 removes the per-row `dshHome` and reads the global file via `DSH_AGENTS_HOME` |
-| I5 | credential precedence: `.credentials.yaml` refs outrank both `.env` layers, the inherited environment wins | `boot.ts` `loadLayeredEnv`; the operator's shell | 0.2.1 changes API-key precedence for headless runs |
+| H6 | the `agent-instructions` row's user-global files, outside the candidate lists the face sets: since 0.2.1 TWO, always read and never switchable by a row — `$DSH_HOME/AGENTS.md`, then `<agents home>/AGENTS.md` (`$DSH_AGENTS_HOME` or `~/.agents`, `resolveAgentsHome`); the per-row `dshHome` is gone | installed `dsh-agent-instructions`; `@deepseek-ai/dsh-home-paths` `resolveAgentsHome`; the candidates and the budget are the face's own patch, `face/src/instructions.ts` (H10); the boot audit `globalInstructionFiles` in `face/src/boot.ts` (D25) | a third root, a row switch (the face could then refuse instead of report), or `skill-filesystem` no longer reading `DSH_AGENTS_HOME` (the face could then pin it) |
+| I5 | credential precedence: since 0.2.1 a `.credentials.yaml` `refs` value wins, then the launch environment, the project `.env`, the home `.env` (0.2.0: the inherited environment first); headless profiles keep the environment first | installed `dsh-credentials-local` README; `boot.ts` `loadLayeredEnv`; the operator's shell | a stored key shadows the one the operator sources: the go-live compares the two before the first boot (§2 step 15) |
 | I12 | state outside `~/.dsh` and the repo is `tmpdir()` scratch only | `agents.ts`, `alpaca_kit/mcp/cache.py` | a new state directory the backup misses |
-| — | the operator's MCP server name, as the roles spell it: every `mcp__alpaca-kit__…` in `roles/*/role.yml` must equal `mcp__<serverName>__…` for the row's `serverName` | `~/.dsh/profiles/face/cordis.patch.yml` (`serverName: alpaca-kit`); `roles/*/role.yml` | a renamed server, or a dsh that mints MCP tool names differently: each delegation that names the tools fails at `tools.restrict()` (never the boot) |
-| — | the MCP live roster: `/data/plugins.json` = `alpaca-kit active 10`, `akshare active 14` | runbook §7 A | the only visible sign of G4 |
+| — | the MCP server name, as a role would spell it: every `mcp__<server>__…` in `roles/*/role.yml` must equal `mcp__<serverName>__…` for the row that mounts it — the face's own `mcp-account` row mounts `account` (a role may not carry its tools: the never-list), an operator row its own `serverName`. No shipped role names an MCP tool today (they name `skill` and the Lunhui tools). Until 2026-10-24 this was the operator's `alpaca-kit` row | `face/src/account-seat.ts` (`ACCOUNT_SEAT_SERVER`); `~/.dsh/profiles/face/cordis.patch.yml` for an operator row; `roles/*/role.yml` | a renamed server, or a dsh that mints MCP tool names differently: each call of a role that names the missing tools is refused by the face's role tool — `role role_<id>: the tree has no tool …; no child was created` (K1) — and a role NONE of whose tools exists lists its `role-<id>` preset broken and refuses the boot (K2). At 0.2.0 the same rename failed each delegation at `tools.restrict()` and never the boot |
+| — | the MCP live roster: `/data/plugins.json` lists `account` with the seat's 36 tools (`face/README.md` "The Account seat"); dated: `alpaca-kit active 10`, `akshare active 14` until those rows left the face (2026-10-24, 2026-11-01) | runbook §7 A | the only visible sign of G4 |
 | J1 (2026-10-26) | the Lunhui rows' tools are `defineTool` objects from `@deepseek-ai/dsh-tools` (declared exactly in `face/package.json`): `parameters` as `{type, description, required?}` per key, `output.schema`, `execute(args, exec)`; a thrown `LunhuiError` reaches the model as `Error: <CODE> …` | `face/plugins/lunhui/runs-row.mjs`, `lib/freeze-tool.mjs`, `lib/module-tool.mjs` | a changed parameter grammar, a required-key spelling or a different error-to-text mapping: `lunhui-rows`, `lunhui-module-tool` and `smoke` (the seventeen tools registered) fail first, but the `Error: ` prefix the role personas and the protocol rely on is pinned only by the module tests' message matches |
 | J2 (2026-10-26) | the backbone `ctx.provide("lunhuiRuns", service)` under `ctx.effect`, and ten rows `inject = ["tools", "lunhuiRuns"]` as a required service: without the backbone a row stays pending and the strict row audit refuses the boot | `face/plugins/lunhui/*-row.mjs`; `boot.ts`'s audit | a cordis that resolves an unprovided required service differently (a silent skip instead of pending) mounts rows with no service; the boot refusal is reasoned from the audit's code and not pinned by a boot (`DEVELOPMENT.md` §4.3) |
-| J3 (2026-10-26) | the caller gate reads `exec.agent.session.header`: `origin === "subagent"` and not `isSeeded` is a delegated child (`NOT_GRAVIT` on a freeze), and the same predicate admits a module submit (`NOT_A_ROLE` otherwise, A23) | `face/plugins/lunhui/lib/errors.mjs` `callerIsChild`, `callerIsRole` | a header that renames or drops `origin` or `isSeeded`, or an `exec` without `agent.session`: every submit refused, or every freeze admitted from a child; `roles-smoke` (a role child's submit lands, Gravit's is `NOT_A_ROLE`) fails first under `FACE_SMOKE=1` only |
+| J3 (2026-10-26) | the caller gate reads `exec.agent.session.header`: `origin === "subagent"` and not `isSeeded` is a delegated child (`NOT_GRAVIT` on a freeze), and the same predicate — since 2026-11-02 with `agentPreset` starting `role-` (K2) — admits a module submit (`NOT_A_ROLE` otherwise, A23) | `face/plugins/lunhui/lib/errors.mjs` `callerIsChild`, `callerIsRole` | a header that renames or drops `origin` or `isSeeded`, or an `exec` without `agent.session`: every submit refused, or every freeze admitted from a child; `roles-smoke` (a role child's submit lands, Gravit's is `NOT_A_ROLE`) fails first under `FACE_SMOKE=1` only |
 | J4 (2026-10-26) | a module context is at most 30 KiB of UTF-8 JSON (A24), under dsh-base's spill cap `maxInlineTokens: 12500` (D18): a role has no file tool to read a spilled result | `face/plugins/lunhui/lib/contract-core.mjs` `MAX_CONTEXT_BYTES`; installed `dsh-base/cordis.patch.yml` `spill-policy` | a lower spill cap, or one counted in another unit, spills a maximal context (the mode's reads 30,233 bytes at every input's maximum) and the role sees a preview; no test boots a maximal context through the spill policy |
 | J5 (2026-10-26) | the Lunhui rows compose as eleven file-plugin rows by absolute `file:` URL in one insert after the seat; `bootFace` structured-clones every patch, so a row's config carries data only (a freeze row's test `now` cannot cross, hence the smokes' `Date` shift) | `face/src/lunhui.ts` `lunhuiPatches`; `tests/boot.test.ts` | a Loader that resolves `file:` names differently, or keeps functions in config, changes what a patch can carry; `boot.test.ts` pins the insert |
+| K1 (2026-11-02) | the role tool over `ctx.subagents.startActivation({provider: "spawn", label, request: {prompt, parent, agentPreset, agentOptions?, maxDepth}, signal, delivery: "caller"})`, awaiting `activation.result` (`stopReason`, `output`, `diagnostic`) and disposing it on every path; `getProvider`, `resolveMaxDepth`, `llm.resolveCallConfig`; `isConcurrencySafe: false` | `face/plugins/role.mjs` (D20); `tests/role-plugin.test.ts` offline over a fake, `roles-smoke` on a real boot | `delivery: "caller"` removed or renamed: D20 is re-taken (the role call would turn into a notice-reporting delegation, `DEVELOPMENT.md` §4.8); a changed result shape or stop-reason set; a service that starts preflighting routes (the face's check then doubles) |
+| K2 (2026-11-02) | the role presets `role-<id>` declared after boot through the preset registry (eager activation; `bot.js` throws at a mount where none of the names exists, listing the preset broken), resolved by the request's `agentPreset` at the call; a role child's header names the preset | `face/src/roles.ts` `rolePresetDefinition`, `roleRosterProblem`; `face/src/bot-presets.ts` `declarePreset`; `plugins/lunhui/lib/errors.mjs` `callerIsRole` (the `role-` prefix) | a header that stops carrying `agentPreset` for a delegated child: every Lunhui submit is `NOT_A_ROLE` (`lunhui-rows.test.ts` pins the predicate; `roles-smoke` the live header) |
+| K3 (2026-11-02) | dsh-base's `remote-access` row (method-level access control for non-owner peers): the cookie-signed browser is the owner and never checked; its HTTP calls and WebSocket share one peer | installed `dsh-api-remote-access`, `dsh-api-gateway` (upstream `rpc-host.ts`); no face row (D23) | a gateway that starts checking the owner, or splits the browser's two transports into two peers: every Remote the client calls would need a grant (`client-mux-smoke` fails first) |
+| K4 (2026-11-02) | `session/projections` answers a kinded `SessionProjectionsValue`: `{kind: "sequenced", asOfSeq, values}`, `{kind: "migration-required", values}` (no `asOfSeq`), or `null`; `SessionSummary.formatStatus?` | `face/client/js/wire/summaries.js` `readProjections`, `summaryOf`; `js/host/live.js`; `js/wire/member-traces.js` | a fourth kind, or `asOfSeq` moving: a cold session fails to open (`summaries.test.ts`, `live.test.js`, `member-traces.test.ts` on the shapes; `client-mux-smoke` on a real host) |
+| K5 (2026-11-02) | the temp-root precondition: dsh's `workspace-write` grants the session cwd, `/tmp` and `os.tmpdir()` by real path (`dsh-sandbox` `writableRoots`), so the fence smokes prove nothing from a checkout under either | `face/tests/fixture-root.ts` `assertOutsideTempRoots` (room and bots fixtures; D24); `face/README.md` "Tests" for the desk, telegram, watch and schedule smokes | `writableRoots` gaining or losing a root; a new fence smoke that does not call the guard |
+| K6 (2026-11-02) | the webserver bind: any concrete address; every wildcard refused at load (`webserver` a required startup id); `port` `number \| undefined` before listen | `face/src/overlay.ts` `faceBind`; `face/docker-entrypoint.sh` (the container's own address); `tests/bind-smoke.test.ts`; `tests/remote.ts` `boundPort` | a webserver that admits the wildcard again (`bind-smoke` fails), or one that refuses the container's address |
 
 ### 3.2 By test: the pinned seams and what fails first
 
@@ -168,7 +198,7 @@ Each row: the seam, the file that pins it. Depth: the inventory's row, `DEVELOPM
 fixture validator's private paths (`check:fixture`); A7–A8 the install anchor, `PluginPackages`
 and its native addon (every `FACE_SMOKE` boot); A10 the profile manifest and patch-file shapes
 `setup` writes (`setup.test.ts`); A11 the `satisfies` contract (tsc); A12 the structural `*Like`
-types hide drift from tsc, so the fifteen real boots are the contract; A14 `FiberState.ACTIVE`
+types hide drift from tsc, so the real boots (thirty-two since 2026-11-02) are the contract; A14 `FiberState.ACTIVE`
 as the literal `2` (`smoke.test.ts`, `panels.test.ts`); A15 Node 22's `zstdDecompress`
 (`sessions.test.ts`).
 
@@ -176,16 +206,18 @@ as the literal `2` (`smoke.test.ts`, `panels.test.ts`); A15 Node 22's `zstdDecom
 B2 `<profile>/cordis.yml` rewritten to `[]` every boot (`boot.test.ts`); B3 a skipped bundle
 refused (`boot.test.ts`); B4 the telemetry switch (`boot.test.ts`, `policy.test.ts`); B5 `hmr`
 disabled (`boot.test.ts`); B6 the persona patch restating every inherited `system-prompt` key
-(`boot.test.ts`, `bot-plugin.test.ts`); B7 the strict `{{model}}`/`{{cwd}}` template
-(`persona.test.ts`); B8 no `profileContext` (`bot-runtime-smoke`, `subagents-smoke`); B10 what
+(`boot.test.ts`, `bot-plugin.test.ts`); B7 the strict template over the variables the loop
+registers — `{{provider}}`/`{{model}}` since 0.2.1, whose loop dropped `{{cwd}}` (D21;
+`persona.test.ts`); B8 no `profileContext` (`bot-runtime-smoke`, `subagents-smoke`); B10 what
 `prepare` provides (every boot); B11 `appReady` last, unary `/api` live mid-boot
 (`smoke.test.ts`, `order-gate-midboot-smoke`); B12 every enabled entry ACTIVE
 (`smoke.test.ts`); B13 the four required service keys (`smoke.test.ts`); B16 `bootFace`
 materializes `$DSH_HOME` once per process (`boot.test.ts`); B17 exactly thirteen overlay rows in
 order, the thirteenth `preset-kairos`, the alias of the default (`overlay.test.ts`); B18 the four
 storage rows composed once, from dsh-base (`boot.test.ts`); B19–B23 each overlay row's config and
-inject (tsc, `overlay.test.ts`, every boot); B24–B30 the policy rows D3–D7 and D9, each pinned
-against the installed dsh-base (`policy.test.ts`, `smoke.test.ts`); B31 the policy guard reports a
+inject (tsc, `overlay.test.ts`, every boot); B24–B30 the policy rows D3–D7, D9 and D19, each pinned
+against the installed dsh-base — eight id patches and one insert of two rows since 0.2.1, `ralph`
+an insert of the standalone package (`policy.test.ts`, `smoke.test.ts`); B31 the policy guard reports a
 missing target on stderr (`policy.test.ts`); B32 the `extraPatches` seam the dry run uses
 (`check-home.test.ts`); B34 every dsh-base row the face addresses by id (`boot.test.ts`,
 `policy.test.ts`).
@@ -208,11 +240,13 @@ snapshot (`bot-runtime-smoke`); C15 `agentPresets/read` and `/select` exist and 
 `channels.test.ts`); C17 the subagent plane the client composes: relays, catalog, interrupt
 (`subagents-smoke`, `subagents.test.ts`, `mapper.test.ts`); C18 the default model route and
 `installModelSelection` (`room-engine`, `room-smoke`, `bot-runtime-smoke`); C19 `tool-ask-user`
-configless = the blocking `legacy` mode (`smoke.test.ts`); C20 per-role `dsh-tool-subagent` rows
-inside the default preset: config keys `provider` / `toolName` / `backgroundMode` / `persona` /
-`toolFilter` (+ `agentOptions`), the row's `persona` as the child's `deployment:persona-prefix`,
-`toolFilter` as `tools.restrict({allow})` of exact names in the child's creation window
-(`roles.test.ts`, `roles-smoke`); C21 the goal loop `cycle.md` rests on: `create_goal` (accepted
+configless = the blocking `legacy` mode (`smoke.test.ts`); C20 the role library — until
+2026-11-02 per-role `dsh-tool-subagent` rows (`provider` / `toolName` / `backgroundMode` /
+`persona` / `toolFilter`, which 0.2.1 refuses at load); since, one `plugins/role.mjs` row per role
+inside the default preset (`{tool, name, summary, agentPreset, allow, model?}`) and one
+`role-<id>` preset per role declared after boot (the `gravit` row with `{}` and `bot.js` with
+the persona and the mask), a missing or broken one refusing the boot (`roles.test.ts`,
+`role-plugin.test.ts`, `roles-smoke`; §3.1 K1, K2); C21 the goal loop `cycle.md` rests on: `create_goal` (accepted
 in a direct human turn; refused, `GOAL_ALREADY_EXISTS`, while a goal that is not complete
 exists) and its `max_goal_rounds`, the `<goal_round>` message the driver queues at idle (source
 `goal`, `Round: n/N`),
@@ -252,8 +286,8 @@ as plain tool pairs (`room-engine.test.ts`).
 `client-mux-smoke`); E4 the `$events` stream, `ready` first (`api.test.ts`,
 `client-mux-smoke`); E5 `session/control` projections (`client-mux-smoke`, `mapper.test.ts`);
 E6 `session/follow` snapshot then gap-free events; a follow activates a cold session
-(`client-mux-smoke`); E7 the two non-activating reads (`client-mux-smoke`, `subagents-smoke`,
-`member-traces.test.ts`); E8 the v4 event shapes the mapper renders (`mapper.test.ts` on
+(`client-mux-smoke`); E7 the two non-activating reads, `session/projections` kinded since 0.2.1 (§3.1 K4;
+`client-mux-smoke`, `subagents-smoke`, `member-traces.test.ts`, `summaries.test.ts`); E8 the v4 event shapes the mapper renders (`mapper.test.ts` on
 `tests/fixtures/events.jsonl`, `check:fixture`); E9 the fixture validator (`check:fixture`);
 E10 the on-disk format grammar, generations, lease, zstd frames (`sessions.test.ts`,
 `check-home.test.ts`); E11 the migration edges and their refusal names (`room-engine`,
@@ -333,9 +367,10 @@ I9–I10 every file under `$DSH_HOME` the face reads and writes (`sessions.test.
 
 ## 4. Decisions to re-take at every pin
 
-The 0.2.0 re-host's D1–D18, one line each with what to re-check (`DEVELOPMENT.md` §4.8 is the
-table with the defaults and the way to choose otherwise; `face/src/policy.ts` names D3–D7 and
-D9 by id).
+The 0.2.0 re-host's D1–D18 and the 0.2.1-rc.5 upgrade's D19–D27 (`DEVELOPMENT.md` writes them
+`PLAN D<n>`; the charter's own D19–D28 are the desk's and another series), one line each with
+what to re-check (`DEVELOPMENT.md` §4.8 is the table with the defaults and the way to choose
+otherwise; `face/src/policy.ts` names D3–D7, D9 and D19 by id).
 
 | # | Decision | Re-check when |
 |---|---|---|
@@ -345,7 +380,7 @@ D9 by id).
 | D6 | `web_fetch` off, both configs written out in full | a new key on `tool-web` or `web` is dropped by the full-config patch (B27) |
 | D7 | MCP resource tools off | mcp-client starts hard-injecting `mcpResources` (B28, G6) |
 | D8 | the browser cookie only on `/` and `/api` | upstream's static posture changes (E17) |
-| D9 | `ralph` re-enabled; `str_replace_editor` inserted | **0.2.1-alpha.3 moves `tool-ralph` out of dsh-base** (§7.1); dsh-base shipping the editor row again skips the insert (B29–B30) |
+| D9 | `ralph` kept — since 0.2.1 an INSERT of the standalone `@deepseek-ai/dsh-tool-ralph` with `{subagentProvider: spawn, maxRounds: 64}` (re-taken 2026-11-02); `str_replace_editor` inserted | dsh-base shipping either row again skips its insert (B29–B30); the standalone package no longer published or its injects (`workflowEngine` among them) leaving dsh-base: retire `ralph` (one commit) |
 | D10 | no proxy policy | an adapter honours proxy variables on its own (B9, I7) |
 | D11, D17 | the fourteen unreadable 0.1.1 sessions stay on disk, reported | a new migration edge, or an upstream fix for the descriptor-v2 refusal (E11) |
 | D12, D13 | no older tool on the written home; the link farm deleted | every pin: the same hazard class between 0.2.0 and 0.2.x tools sharing a home (I11) |
@@ -353,6 +388,15 @@ D9 by id).
 | D15 | telemetry opt-in is one operator row; the env switch still wins | the switch order in `composeFace` (B4) |
 | D16 | a cold session opens page-only | `session/follow` or `session/page` activation semantics (E6–E7) |
 | D18 | the spill budget stays dsh-base's `maxInlineTokens: 12500` | the row's key or default moves (B34) |
+| D19 | `working_directory` off by the policy layer; the `working-directory` service and its context stay | the tool renamed or folded into another row (the policy guard warns on stderr); a contract that wants agents to move their cwd |
+| D20 | one preset per role and the face's own blocking role tool over `startActivation` with `delivery: "caller"` | caller delivery removed or renamed upstream (§3.1 K1): then dsh's own tool with notices, and the run and module protocols gain wait rules |
+| D21 | the persona names no directory; the `working-directory` context does | the loop registering a `cwd` variable again (harmless), or the context leaving dsh-base (then the model loses its directory) |
+| D22 | `web-deepseek-api` mounted, unselected | the `web` row's defaults selecting its providers, or a new key on `tool-web`/`web` that D6's full restatements drop (B27) |
+| D23 | `remote-access` is dsh-base's; the browser is the owner | access control reaching the owner (§3.1 K3) |
+| D24 | the real boots run outside `/tmp` and `$TMPDIR`; the room and bots fixtures refuse otherwise | `writableRoots` changing (§3.1 K5); every new fence smoke calls the guard |
+| D25 | a global `AGENTS.md` reported at boot, never overridden | a row switch for the global roots, or `skill-filesystem` no longer sharing `DSH_AGENTS_HOME` (H6) |
+| D26 | the rollback from rc.5 to 0.2.0 is lossy; the backup is the way back | every pin: which new event types the old version refuses (a new format edge changes the answer) |
+| D27 | dsh's own `subagent` / `subagent_fork` follow upstream (an id at once, a settlement notice, the fork continuable) | a drill showing Gravit relying on a blocking fork, or upstream adding a durable parent mailbox (then a dropped notice stops being a loss) |
 | spec B8 | the cycle caps are `cycle.md`'s, not a dsh config: 24 rounds is the `max_goal_rounds` the contract passes to `create_goal`, 12 role calls a count Gravit keeps in the journal (charter D16, `DEVELOPMENT.md` R29) | dsh adds a per-session child total, or a dsh-side cap that overrides the model's `max_goal_rounds` argument (`dsh-goal`'s `defaultMaxGoalRounds`, 256, applies only when the argument is absent); the first overrun |
 
 Decisions the 2026-10-15 agent redesign adds land here with their plans (§7.3).
@@ -365,8 +409,8 @@ named as still to run on 0.2.0).
 
 | Drill | Runner | State |
 |---|---|---|
-| the upgrade drill (§2 steps 3–10) | tests and two manual re-diffs | last run 2026-09-30 |
-| the home dry run (§2 step 11) | `scripts/check-home.ts` on a copy; `check-home.test.ts` | run 2026-09-30 on a copy; fixture-verified (runbook Appendix A) |
+| the upgrade drill (§2 steps 3–10) | tests and two manual re-diffs | last run 2026-11-02, to 0.2.1-rc.5 (§6.4); before, 2026-09-30 |
+| the home dry run (§2 step 11) | `scripts/check-home.ts` on a copy; `check-home.test.ts` | run 2026-09-30 on a copy; fixture-verified (runbook Appendix A); at 0.2.1-rc.5 **owed**, the operator's (expected: the same fourteen refusals, §6.4) |
 | Gate 2 / the approval channel | automated: `smoke.test.ts`, `client-mux-smoke`, `order-gate-smoke`; manual steps 1–7 | automated passes; deny half ran live 2026-09-30 on a scratch home; the approve half and the three card endings **owed** in a browser |
 | order approval, automated half | `order-gate.test.ts`, `order-gate-smoke`, `order-gate-midboot-smoke` | passes; mutation-proven |
 | order approval, manual half (a person reads the card against armed tools in a scratch home) | README steps 1–6 | **owed on every pin so far**; charter D3; the condition before the flag ever flips in `~/.dsh` |
@@ -377,7 +421,7 @@ named as still to run on 0.2.0).
 | bots, manual (create, home conversation, tool list, `{{` refused, soul edit without restart) | README steps 1–7 | **owed** on 0.2.0 (last passed 2026-09-08 on 0.1.1) |
 | room, automated | `room-smoke`, `room-discussion-smoke` + the offline room suites | passes |
 | room, manual (a NEW round on `strategies/room-drill`) | README steps 1–8 | one round ran live 2026-09-30 on a scratch home; the `@`, an inline member question, a refused write, `left` and re-check, a restart **owed** |
-| roles, automated | `roles-smoke`, `roles.test.ts`, `gravit-plugin.test.ts` | passes (plan 2) |
+| roles, automated | `roles-smoke`, `roles.test.ts`, `role-plugin.test.ts`, `gravit-plugin.test.ts` | passes (plan 2); on the role presets and the face's role tool at 0.2.1-rc.5, 2026-11-02 (`roles-smoke` 5/5) |
 | roles, manual (a NEW round on `strategies/room-drill`, a backtester run past the 60 s bash default, then the alpaca-kit row disabled in a scratch copy) | README "The role drill", steps 1–6 | **not yet run** — the operator's, on a COPY of the real home |
 | the cycle, automated | `cycle.test.ts`, `gravit-plugin.test.ts`, `boot.test.ts`, `roles.test.ts`; `goal-smoke` (the goal loop itself); the cycle assertions of `bots-smoke` and `roles-smoke` | passes (plan 3; `goal-smoke` since `fae4f61`) |
 | the cycle, manual (a channel from `_template`, one thin idea, the batch answered, the rounds to a verdict, a restart and "continue") | README "The cycle drill", steps 1–5 | **not yet run** — the operator's, on the real face with its keys |
@@ -462,36 +506,155 @@ goal smoke). Their seams are H10,
 H11, C20 and C21 in §3.2 and the watch items of §7.3; the roles and cycle drills and the
 first-request measurements are still the operator's to run (§5, `DEVELOPMENT.md` §4.3).
 
+### 6.4 0.2.0-rc.2 → 0.2.1-rc.5 (2026-11-02)
+
+**Target and why.** The meta package `@deepseek-ai/dsh`'s dist-tags, read 2026-11-02: `latest`
+= `next` = 0.2.1-rc.5 (published 2026-10-29); `alpha` = 0.2.2-alpha.2 (2026-10-27, older than rc.5
+and off its line; there is no 0.2.2 release). cordis 4.0.5 and include 1.0.10 follow from the
+peers. Why now: the always-on desk (PR KairosPan/gravit-agent#9), the heaviest user of dsh's agent
+plane, was not merged yet, so the bump lands under it and its seams were verified on the version
+it will run; and the DeepSeek Super-agent prototype peers `^0.2.1-alpha.2`. The design is
+`docs/superpowers/specs/2026-11-02-dsh-0.2.1-rc.5-upgrade-design.md` (the seam ledger is its §9,
+27 rows), the plan beside it in `docs/superpowers/plans/`.
+
+**What the face did** (branch `claude/dsh-upgrade-51c9f0`, cut from `feat/desk-p1-p4` @ `a27355bb`,
+commits `e770c610..8819cad7` and the docs commit on it; not merged, not pushed): the pins on a
+fresh lockfile, `ralph` inserted standalone, `working_directory` off, the persona without
+`{{cwd}}`; one preset per role; the face's own role tool; the native subagents smoke on managed
+delegation; the client's kinded projections read; the host's loose ends (the agents-home audit,
+the instructions smoke's wait, the temp-root guard, the docker box's bind); the docs.
+
+**What broke, and the fix** (the spec's §7 has each in full):
+
+- B1 — the role rows (`persona`, `toolFilter`) fail at load in 0.2.1's `dsh-tool-subagent`, so
+  every boot refused: one `role-<id>` preset per role, declared after boot (D20).
+- B2 — dsh's delegation tool now returns at once and reports by a notice: the face owns the
+  role tool, `plugins/role.mjs`, blocking over caller delivery (D20).
+- B3 — every request failed on `{{cwd}}`, which the loop no longer registers: the persona drops
+  it; the `working-directory` context names the directory (D21).
+- B4 — dsh-base dropped the `tool-ralph` row: the package is declared and inserted (D9).
+- B5 — `webServer.port` is `number | undefined`: the tests read it through `boundPort`.
+- B6 — the instructions smoke raced `whenIdle()`; a second global `AGENTS.md` root: the smoke
+  waits for `turn/end`; the boot audits both roots (D25).
+- B7 — closed: `remote-access` never checks the browser, the owner (D23).
+- B8 — `session/projections` is kinded: the client reads it through `readProjections`.
+- B9 — the bots roster listed the role presets: the readers filter the `role-` prefix.
+- B10 — the native subagents smoke assumed foreground calls: rewritten to managed delegation (D27).
+- B11 — the client's subagent plane: `external` reads as unsupported, a running role child shows
+  Stop, `speakerFor` names `Role · <id>` (a tested helper; the live client draws no role child's
+  page).
+- B12 — five fence smokes passed for the wrong reason under `/tmp`: the precondition is loud (D24).
+- B13 — the pins and counts in the tests followed their code.
+- B14 — an in-place `npm install` failed `ERESOLVE`: delete the lockfile and `node_modules` first.
+- B15 — closed: every seam the desk stands on is SAME at rc.5 (the spec's §9 rows 1–4, 6, 8–16).
+- B16 — compose's `FACE_BIND: "0.0.0.0"` is refused at load: the entrypoint binds the container's
+  own address.
+- B17 — the CLI chunk is `lib/profile-boot-C14i-8IN.js`; `runProfile` unchanged; the citations move.
+
+**Decisions:** D9 re-taken, D19–D27 (§4; `DEVELOPMENT.md` §4.8).
+
+**Counts.** Before, at 0.2.0-rc.2 on `a27355bb`: 2,868 tests in 197 files, 2,838 pass + 30
+skipped, 0 fail, typecheck clean; `FACE_SMOKE=1` 2,869/2,869. After, at 0.2.1-rc.5 on `8819cad7`:
+2,903 tests in 200 files, 2,871 pass + 32 skipped, 0 fail, typecheck clean — the 32 skipped are the
+real boots (`bind-smoke` and a fifth `roles-smoke` boot are new). Under `FACE_SMOKE=1` every smoke
+passed during the build (2,883 of 2,888 at `ceb5df9d`, the four Account smokes skipped there for
+want of `npm ci` in `account/`, the one red `subagents-smoke`, rewritten at `257c3439` and green
+alone); the whole run on the final tree — the upgrade merged with the desk's hardening
+(`feat/desk-p1-p4` @ `dd867f70`), `817ee2bb`: typecheck clean, 2,974 tests in 202 files, 2,942 pass + 32
+skipped offline, 0 fail; `FACE_SMOKE=1` 2,975 / 2,975, 0 fail, the four Account smokes included; with the
+desk's graceful-stop carry merged too (`feat/desk-p1-p4` @ `92994b47`, `ce4fc716`): 2,993 tests in 203 files,
+2,960 pass + 33 skipped, `FACE_SMOKE=1` 2,994 / 2,994 (the new `desk-carry-smoke` is the 33rd boot). `npm run check:fixture` at rc.5: 26 lines, 23 validated, 0 rejected, the 3 with no upstream
+validator named — the 0.2.0 baseline.
+
+**The fourteen sessions.** No format edge was added (the format packages end at
+`dsh-session-format-v3-to-v4`; the writer is still v4), so the fourteen 0.1.1 sessions 0.2.0
+refuses (§6.1) stay refused for the same reasons, no more and no fewer, and nothing written since
+2026-10-01 is a v0 log; `~/dsh-session-exports-2026-10-01/` still holds them. The dry run on a
+copy at rc.5 is how the operator confirms the count; this session did not read `~/.dsh`. The
+0.2.0 role children were one-shot and stay read-only history; rc.5's resume through their
+`role-<id>` preset, so a renamed or removed role leaves its children unresumable.
+
+**The rollback is lossy (D26).** rc.5's event vocabulary has 62 types where 0.2.0's had 59:
+`job/registered` and `job/settled`, written by EVERY agent `bash` call, and
+`working-directory/change`, written by a `cd`. 0.2.0 refuses a log carrying an event type it does
+not know, so practically every session used under rc.5 becomes unreadable by 0.2.0. The way back
+is the backup taken before the first rc.5 boot and a 0.2.0 checkout with its own `node_modules`,
+never one session's files.
+
+**The `/tmp` lesson.** The first probe ran in a worktree under `/private/tmp`, and five smokes
+(desk, schedule, watch, room, telegram) failed on writes the sandbox should have fenced: dsh's
+`workspace-write` grants the session cwd and `/tmp` and `os.tmpdir()` by real path
+(`dsh-sandbox` `writableRoots`, unchanged byte for byte between the versions). The same five fail
+at 0.2.0-rc.2 from a copy under `/private/tmp` and pass at rc.5 outside it. Not an upgrade break;
+it cost a day of reading, so the suite now says so (D24, §2 step 10, §3.1 K5).
+
+**For the operator, before the home moves:** the credentials precedence (a `refs` value in
+`~/.dsh/.credentials.yaml` now beats the exported key, I5); D12 again for the global CLI
+(0.2.0-rc.2, never run: upgrade it to rc.5 or keep it off the home); a global `AGENTS.md` in
+`~/.dsh` or `~/.agents` (D25; the spec's probe found none); the profile patch needs no new row
+(D19 and D22 are the face's; `deepseek-v4-pro` is still in rc.5's catalog). Still owed: the
+operator's go-live on `~/.dsh` (the runbook beside the 0.2.0 one), the live drills on the new pin
+(§5), the merge.
+
 ## 7. Watchlist for the next upgrade
 
-### 7.1 Upstream changes already known (0.2.1-alpha.3, 2026-10-14)
+### 7.1 Upstream changes already known (0.2.2-alpha.2, read 2026-11-02)
 
-- `dsh-tool-ralph` moves out of dsh-base into `dsh-experimental-ralph-bundle`: policy D9's
-  `tool-ralph` patch has no row to patch (the face warns "dsh-base composes no row" and `ralph`
-  leaves the roster). Decide: declare and insert the bundle, or retire `ralph` (the shipped
-  presets gate it behind an explicit human request anyway).
-- Subagent notifications unified: child ids returned at once, a `session/wait` Remote. Re-check
-  C17 (`client/subagents.js`, `client/mapper.js`, `subagents-smoke`) and every prose that
-  describes the settlement notice (the persona, `DEVELOPMENT.md` §3.6).
-- `agent-instructions` drops the per-row `dshHome`; the user-global file is read via
-  `DSH_AGENTS_HOME`. Re-check H6 and the face's own `instructionFileCandidates` patch (H10,
-  landed in plan 1: the patch `8983555`, the smoke `2c494a1`) — whether the global file follows
-  the candidate names.
-- API-key precedence changes for headless runs: re-check I5 against `dsh/README.md` step 4.
-- The chunk name (`lib/profile-boot-BZ2ZjNWi.js`) will be wrong: four places (§1).
+The next upgrade's breaks live here; none is the face's yet (the upgrade spec's §13 is the source):
+
+- **Node ≥ 24.9.** The face runs Node 22 (its `engines`, the LaunchAgent's node, the agent box's
+  image): the runtime moves first, and `zstdDecompress` (A15) and the native addon (A8) with it.
+- **Tools activated per step**: "plugins must migrate `tools.resolve` / `executable`". Every face
+  row that registers a tool — `plugins/role.mjs`, the Lunhui rows (J1), the desk's two tools,
+  `dispatch`, `agent_<bin>` — and every `tools.get` the face makes (`role.mjs`'s allow check,
+  `gravit.js`'s `canCall`) re-checks against it.
+- **Native and PTC execution split into agent-scoped plugins** (`tools.mode`,
+  `DSH_TOOLS_MODE`): Gate 2's `tools/pre-execute` listener and guard (D1–D3 of §3.2), the desk
+  guard and the never-list's `run_code` entry re-check against the split.
+- **`@deepseek-ai/dsh-official-bundles`** replacing app-boot's lists: the boot mirror (A9), the
+  install anchor and the policy layer's row ids move with it.
+- **Retained session-projection handles**: the room projection (E16) and the client's
+  projections read (K4).
+- "End the current turn when only a result remains pending": re-check the role call (K1), which
+  holds a turn on purpose, and the goal driver's wait (C21).
+- Not an upgrade item, a trap before anyone mounts it: `@deepseek-ai/dsh-schedule` delivers with
+  message source kind `schedule`, the kind the desk already declares for its own firings
+  (`face/src/desk-session.ts`, the client's `DESK_KINDS`); rename one of the two first.
+
+Landed at 0.2.1-rc.5 (2026-11-02, §6.4), the items read on 2026-10-14 against 0.2.1-alpha.3:
+`dsh-tool-ralph` left dsh-base — declared and inserted (D9); subagent notifications unified —
+role calls are the face's own blocking tool (D20), dsh's own follow upstream (D27), the client's
+subagent plane re-checked (C17, B11); `agent-instructions` dropped `dshHome` and reads a second
+global root — audited (D25, H6); the API-key precedence moved — the operator compares (I5); the
+chunk name moved — four places (§1).
 
 ### 7.2 Our own risks before the next session-format bump
 
 - The operator's `@` is logged as `{kind:'user', mention:[…]}` (`room.ts` `say`): an extra
   member on a known kind, the pattern the v0→v1 edge refuses. Move `mention` into the face's own
   source kind before any v4→v5 edge exists, or every room log with an `@` in it becomes the next
-  D11. Recorded nowhere else in the repo as of 2026-10-15.
+  D11. Recorded nowhere else in the repo as of 2026-10-15. **Verdict at 0.2.1-rc.5 (2026-11-02):
+  safe at this pin.** There is no v4→v5 edge (format version 4; nothing named `v4-to-v5` in the
+  tree or the source); `dsh-llm`'s message module is byte-identical; no rc.5 validator reads a
+  member set — `Session.append` reads no `source`, restore needs a non-empty string `kind`, the v4
+  codec a non-empty kind that is not `plugin` — and upstream itself added `principal?` to its
+  `user-rpc` source without a version bump (the spec's §9 row 8). The next-bump risk stands as
+  written: the first v4→v5 edge is where it bites.
+- The desk's own source kinds (`telegram`, `schedule`, `alert`, `desk`) ride the same
+  merge-extensible map and are admitted the same way; `schedule` collides with
+  `dsh-schedule`'s kind the day that package is mounted (§7.1).
 - The room sources (`kind:'room'`, forms `answer` / `round-end` / `delta`) are admitted at v4 by
   the "any non-empty kind but `plugin`" rule; a stricter edge reopens D11 for 0.2-born rooms.
 - Landed in plan 1 (`5d8c95d`): `dsh/profile/persona.md` named the `report` tool, deleted at
   0.2.0; the sentence is gone.
+- Watch (2026-11-02, the rc.5 spec's B6): of the smokes that pair a Remote `session/prompt` with
+  `agent.whenIdle()`, only `instructions-smoke` moved to the `turn/end` wait; `bot-runtime-smoke`,
+  `goal-smoke`, the two Lunhui run smokes, `roles-smoke`, `room-discussion-smoke` and
+  `subagents-smoke` still pair them, green in both full runs because each also waits on a request
+  or a notice. A follow-up sweep moves them; until then a lone red in one of them is this race
+  first.
 
-### 7.3 Seams the 2026-10-15 agent redesign adds (spec §8 and §11)
+### 7.3 Seams the 2026-10-15 agent redesign adds (spec §8 and §11), and the 0.2.1-rc.5 upgrade's keys
 
 - the `agent-instructions` row patched by `composeFace`: `instructionFileCandidates` and
   `localInstructionFileCandidates` are the face's, applied last over the config the layers below
@@ -504,11 +667,14 @@ first-request measurements are still the operator's to run (§5, `DEVELOPMENT.md
   capability flags the backend declares, and whether the row's persona shadows the global
   prefix for the child (spec §11 (a)). Landed in plan 2: the reader `2b88cfd`, the rows and the
   `gravit:roles` section `994ef5d`, the real-boot smoke `0ec19ab` (its equality assertions
-  `f0d8b8d`); entered as C20 in §3.2, and §3.1 gains the server-name hand check;
+  `f0d8b8d`); entered as C20 in §3.2, and §3.1 gains the server-name hand check. *Superseded
+  2026-11-02:* 0.2.1 refuses `persona` and `toolFilter` on the row; the role rows are
+  `plugins/role.mjs` and each role its own preset (D20; §3.1 K1, K2);
 - preset-scoped tool rows under eager activation and the roster audit (spec §11 (b)). Landed in
   plan 2: `e2bab8b` renders the static `preset-gravit` row from `roles/` at compose time, so the
   role rows mount under eager activation and a row that fails to mount lists the preset broken
-  (`bootFace` refuses it); `0ec19ab` boots it;
+  (`bootFace` refuses it); `0ec19ab` boots it. Since 2026-11-02 the role presets are declared
+  after boot under the same eager activation, and a broken one refuses the boot too (K2);
 - the child's prompt still carries dsh's generic tool-policy sections (`create_goal`, `workflow`,
   `ralph`, the background-job `job_output` text) for tools `tools.restrict()` removed: those
   sections are global and ignore the restriction (measured in plan 2, `DEVELOPMENT.md` §3.8).
@@ -539,11 +705,25 @@ first-request measurements are still the operator's to run (§5, `DEVELOPMENT.md
   `create_goal`, `gravit:roles` each `role_<id>`: a profile patch that disables dsh-base's
   `tool-goal` row, or a dsh that moves or renames the goal tools (as 0.2.1-alpha.3 moves
   `tool-ralph` out of dsh-base, §7.1), blanks the cycle section from Gravit's prompt with no boot
-  warning; no `spawn` provider does the same to the roles section; and with `goal-round-driver`
+  warning; until 2026-11-02 no `spawn` provider did the same to the roles section (since, the
+  role tool registers regardless and refuses the call instead, K1); and with `goal-round-driver`
   disabled the contract stays and nothing re-prompts a round. A dsh change fails `bots-smoke`
   (Gravit's prompt carries `Step 0 — ask once`) and `goal-smoke` (`FACE_SMOKE=1` only), an
   operator's patch fails nothing. Re-check at every pin that the goal tools still register
   (`DEVELOPMENT.md` §4.3);
+- the seam keys the 0.2.1-rc.5 upgrade added (2026-11-02; the spec's §9 is the ledger, 27 rows,
+  each SAME or CHANGED with its note): `subagents.startActivation` with `delivery: "caller"`,
+  `getProvider`, `resolveMaxDepth`, `maxActiveSubagents` and `llm.resolveCallConfig` (K1); the
+  role presets' declaration and the header's `agentPreset` (K2); `remote-access` (K3); the kinded
+  `SessionProjectionsValue` and `SessionSummary.formatStatus` (K4); `writableRoots` (K5); the
+  webserver's wildcard refusal and optional `port` (K6); `resolveAgentsHome` and the two global
+  instruction roots (H6); the credentials precedence (I5); the `working-directory` runtime context
+  and the loop's registered prompt variables, `provider` and `model` (B7); `dsh-tool-ralph`'s
+  standalone config, `subagentProvider` and `maxRounds` (B29); and the desk's seams the ledger
+  found SAME — `followup`/`steer`/`inject`, the durable inbox, `cancel` with `keepInbox`,
+  `whenIdle`, `freezeMessage` with a caller id, `sessionPersistence.flush()`,
+  `maxConsecutiveWakes`, the goal rules, `deriveTurnTokenUsage` (rows 1–4, 6, 8–16). Re-read
+  each at the next pin;
 - the generated default composition (`bots/<agent>/agent.cordis.yml` as a mirror of `roles/`),
   which `definitionFor` no longer reads from disk. Landed in plan 2: the mirror and its drift test
   `994ef5d`, the in-memory render `e2bab8b`; plan 3 added the cycle text to the same render
@@ -590,9 +770,11 @@ Entered as J1–J5 in §3.1 and in the seams inventory's 2026-10-26 addition. Re
   in the same message;
 - `ctx.provide` / `inject` of the `lunhuiRuns` service and the pending-service audit (J2): ten rows
   depend on one provider; a boot pinning the refusal is still owed;
-- `exec.agent.session.header`'s `origin` and `isSeeded` (J3): the only fence between Gravit and a
-  module submit, and it admits any unseeded child (R44), since dsh's header cannot tell a role
-  child from a plain spawn child;
+- `exec.agent.session.header`'s `origin`, `isSeeded` and, since 2026-11-02, `agentPreset` (J3,
+  K2): the fence between Gravit and a module submit. Until then it admitted any unseeded child
+  (R44), since the header could not tell a role child from a plain spawn child; each role child
+  now composes its own `role-<id>` preset and `callerIsRole` requires the prefix, which closed that
+  half of R44;
 - the spill cap against the 30 KiB contexts (J4): the mode's maximal context is 30,233 bytes and
   the reviewer's 30,703 (the module tests' pins), both under the cap in either unit today;
 - the structured clone of patches (J5), which forced the smokes to shift `globalThis.Date` for a

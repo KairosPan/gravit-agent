@@ -137,6 +137,22 @@ test("an unknown member session (projections null) is refused without paging", a
   assert.deepEqual(calls, ["session/projections"]);
 });
 
+test("rc.5's kinded cuts: a sequenced answer pages through its asOfSeq; migration-required reports the trace unavailable", async () => {
+  const calls: Call[] = [];
+  const kinded = (cut: unknown) => async (endpoint: string, args: Record<string, unknown>) => {
+    calls.push({ endpoint, args });
+    return endpoint === "session/projections" ? cut : { records: [start(0, 2), assistant(1, 2, "thought"), end(2, 2)], hasMore: false };
+  };
+  const rows = await loadMemberTrace(kinded({ kind: "sequenced", asOfSeq: 2, values: {} }), ref);
+  assert.equal(rows.length, 1);
+  assert.deepEqual((calls[1]!.args as { request: { throughSeq: number } }).request.throughSeq, 2);
+  calls.length = 0;
+  // no asOfSeq to page against: the migration has to run first (a Session is opened by the operator, not here)
+  await assert.rejects(loadMemberTrace(kinded({ kind: "migration-required", values: {} }), ref), (error: Error) =>
+    error instanceof Error && /migration/.test(error.message) && !/malformed/.test(error.message));
+  assert.deepEqual(calls.map((c) => c.endpoint), ["session/projections"], "never pages without a cut");
+});
+
 test("rejects absent turn references without calling the host and propagates read failures", async () => {
   let calls = 0;
   const failing = async () => { calls++; throw new Error("session/page: session/not-found - gone"); };

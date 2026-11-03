@@ -78,7 +78,7 @@ function tools(service: any, channel: "market" | "strategy" | "any" = "market", 
 function exec(header: Record<string, unknown> = {}) {
   return { agent: { session: { header } }, signal: new AbortController().signal };
 }
-const ROLE = { origin: "subagent" };
+const ROLE = { origin: "subagent", agentPreset: "role-cn-market-analyst" };
 const FORK = { origin: "subagent", isSeeded: true };
 
 async function rejectsWith(promise: Promise<unknown>, code: string): Promise<LunhuiError> {

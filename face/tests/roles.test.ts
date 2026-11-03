@@ -53,16 +53,16 @@ test("Gravit's preset has three role rows: the shipped library is cn-market-anal
   for (const analyst of [market, stock]) {
     assert.deepEqual(reviewer.allow.filter((name) => analyst.allow.includes(name)), ["skill"], `the reviewer shares only skill with ${analyst.id}`);
   }
-  const rows = gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, cycle: readCycle(CYCLE_PATH) }) as Array<{ id: string; name: string; config: Record<string, unknown> }>;
+  const rows = gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, rolePlugin: ROLE_PLUGIN_URL, cycle: readCycle(CYCLE_PATH) }) as Array<{ id: string; name: string; config: Record<string, unknown> }>;
   assert.deepEqual(rows.map((row) => row.id), [GRAVIT_ROW_ID, roleRowId("cn-market-analyst"), roleRowId("cn-reviewer"), roleRowId("cn-stock-analyst")]);
   assert.deepEqual(rows[0].config.roles, roles.map((role) => ({ tool: role.tool, summary: role.description })));
-  for (const row of rows.slice(1)) assert.deepEqual(row.config.agentOptions, { provider: "deepseek-official", model: "deepseek-flash" });
+  for (const row of rows.slice(1)) assert.equal(row.config.model, "deepseek-official/deepseek-flash");
   const mirror = readFileSync(new URL("../../bots/gravit/agent.cordis.yml", import.meta.url), "utf8");
   assert.equal(mirror.match(/^- id: role-/gm)?.length, 3, "the mirror carries three role rows");
-  assert.match(mirror, /^ {4}toolName: role_cn_market_analyst$/m);
-  assert.match(mirror, /^ {4}toolName: role_cn_reviewer$/m);
-  assert.match(mirror, /^ {4}toolName: role_cn_stock_analyst$/m);
-  assert.equal(mirror.match(/^ {6}model: deepseek-flash$/gm)?.length, 3, "each on its role's route");
+  assert.match(mirror, /^ {4}tool: role_cn_market_analyst$/m);
+  assert.match(mirror, /^ {4}tool: role_cn_reviewer$/m);
+  assert.match(mirror, /^ {4}tool: role_cn_stock_analyst$/m);
+  assert.equal(mirror.match(/^ {4}model: deepseek-official\/deepseek-flash$/gm)?.length, 3, "each on its role's route");
 });
 
 /* The persona is the tree's own Chinese (D14′): the job, the module order, the artifact only in
@@ -143,15 +143,15 @@ test("cn-reviewer's ROLE.md: Chinese, within 2,000 bytes, the brief's ids, one r
 test("over a roles/ holding only _template the preset has no role_* row; the fixture role renders exactly one", async () => {
   const root = await makeRolesRoot();
   try {
-    const toolsOf = (rows: Array<{ config: Record<string, unknown> }>) => rows.map((row) => row.config.toolName).filter((name) => name !== undefined);
+    const toolsOf = (rows: Array<{ config: Record<string, unknown> }>) => rows.map((row) => row.config.tool).filter((name) => name !== undefined);
     await rm(join(root, "probe"), { recursive: true, force: true });
-    const empty = gravitRows(readRoles(root), { plugin: GRAVIT_PLUGIN_URL }) as Array<{ id: string; config: Record<string, unknown> }>;
+    const empty = gravitRows(readRoles(root), { plugin: GRAVIT_PLUGIN_URL, rolePlugin: ROLE_PLUGIN_URL }) as Array<{ id: string; config: Record<string, unknown> }>;
     assert.deepEqual(empty.map((row) => row.id), [GRAVIT_ROW_ID]);
     assert.deepEqual(toolsOf(empty), []);
     await cp(join(ROLES_ROOT, "_template"), join(root, "probe"), { recursive: true });
     await writeFile(join(root, "probe", "ROLE.md"), "You are the probe, a test role.\n");
     await writeFile(join(root, "probe", "role.yml"), "name: Probe\ndescription: a test role\nallow: [read]\n");
-    const one = gravitRows(readRoles(root), { plugin: GRAVIT_PLUGIN_URL }) as Array<{ id: string; config: Record<string, unknown> }>;
+    const one = gravitRows(readRoles(root), { plugin: GRAVIT_PLUGIN_URL, rolePlugin: ROLE_PLUGIN_URL }) as Array<{ id: string; config: Record<string, unknown> }>;
     assert.deepEqual(one.map((row) => row.id), [GRAVIT_ROW_ID, roleRowId("probe")]);
     assert.deepEqual(toolsOf(one), ["role_probe"]);
     assert.deepEqual(one[0].config.roles, [{ tool: "role_probe", summary: "a test role" }]);
@@ -203,41 +203,105 @@ test("readRoles refuses, naming the file: braces, an empty persona, a wildcard, 
 
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { GRAVIT_PLUGIN_URL, GRAVIT_ROW_ID, gravitRows, renderGravitComposition, roleRowId } from "../src/roles.ts";
-import { GRAVIT_PLUGIN_RELATIVE } from "../src/overlay.ts";
+import { BOT_PLUGIN_URL, GRAVIT_PLUGIN_URL, GRAVIT_ROW_ID, ROLE_PLUGIN_URL, gravitRows, renderGravitComposition, roleRosterProblem, rolePresetDefinition, rolePresetId, roleRowId } from "../src/roles.ts";
+import { ROLE_PRESET_PREFIX } from "../src/bots.ts";
+import { entryListProblem } from "@deepseek-ai/dsh-agent-preset-registry";
+import { validateBotConfig } from "../plugins/bot.js";
+import { validateGravitConfig } from "../plugins/gravit.js";
+import { GRAVIT_PLUGIN_RELATIVE, ROLE_PLUGIN_RELATIVE } from "../src/overlay.ts";
+import { validateRoleConfig } from "../plugins/role.mjs";
 import { CYCLE_PATH, readCycle } from "../src/cycle.ts";
 import { readProtocols } from "../src/protocols.ts";
 
-test("gravitRows: the gravit row carries the summaries; one one-shot spawn row per role with persona and an exact allow list", async () => {
+/* D20: the role tool is the face's own (plugins/role.mjs): a role row names that plugin and carries the role's
+ * tool, name, summary, preset and allow list - the names the tool checks at call time - and its route when
+ * role.yml names one. The persona and the mask live in the preset (rolePresetDefinition, below). */
+test("gravitRows: the gravit row carries the summaries; one role.mjs row per role that selects the role's preset and carries its allow list", async () => {
   const root = await makeRolesRoot();
   try {
     const roles = readRoles(root);
     assert.equal(roles.length, 1, "the fixture root holds one role");
-    const rows = gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL }) as Array<{ id: string; name: string; config: Record<string, unknown> }>;
+    const rows = gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, rolePlugin: ROLE_PLUGIN_URL }) as Array<{ id: string; name: string; config: Record<string, unknown> }>;
     assert.equal(rows[0].id, GRAVIT_ROW_ID);
     assert.equal(rows[0].name, GRAVIT_PLUGIN_URL);
     assert.ok(GRAVIT_PLUGIN_URL.startsWith("file:") && GRAVIT_PLUGIN_URL.endsWith("/face/plugins/gravit.js"));
+    assert.ok(ROLE_PLUGIN_URL.startsWith("file:") && ROLE_PLUGIN_URL.endsWith("/face/plugins/role.mjs"));
     assert.deepEqual(rows[0].config, { roles: roles.map((r) => ({ tool: r.tool, summary: r.description })) });
     assert.equal(rows.length, 1 + roles.length);
     for (const role of roles) {
       const row = rows.find((r) => r.id === roleRowId(role.id))!;
-      assert.equal(row.name, "@deepseek-ai/dsh-tool-subagent");
-      assert.deepEqual(Object.keys(row.config).sort(), ["backgroundMode", "persona", "provider", "toolFilter", "toolName"]);
-      assert.deepEqual(row.config, { provider: "spawn", toolName: role.tool, backgroundMode: "one-shot", persona: role.persona, toolFilter: { allow: role.allow } });
+      assert.equal(row.name, ROLE_PLUGIN_URL);
+      assert.deepEqual(row.config, { tool: role.tool, name: role.name, summary: role.description, agentPreset: rolePresetId(role.id), allow: role.allow });
+      assert.notEqual(row.config.allow, role.allow, "the allow list is a copy");
+      assert.equal(validateRoleConfig(row.config), undefined, "plugins/role.mjs accepts the row");
     }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("gravitRows: a role.yml model becomes the row's agentOptions, provider and model split; without one the key is absent", async () => {
+/* A role's preset: the face's gravit row with an empty config (the date section alone - no roles list, no cycle,
+ * no desk) and plugins/bot.js carrying the role's persona and its allow list as the mask. Both rows name the
+ * face's real files by absolute `file:` URL, and the registry's and the two plugins' own validators accept them. */
+test("rolePresetDefinition: id role-<id>, the role's name and description, the date row and a persona-and-mask row on bot.js", async () => {
   const root = await makeRolesRoot();
   try {
-    const rowOf = () => (gravitRows(readRoles(root), { plugin: GRAVIT_PLUGIN_URL }) as Array<{ id: string; config: Record<string, unknown> }>)
+    const [role] = readRoles(root);
+    assert.equal(ROLE_PRESET_PREFIX, "role-");
+    assert.equal(rolePresetId("probe"), "role-probe");
+    const definition = rolePresetDefinition(role);
+    assert.deepEqual(definition, {
+      id: "role-probe",
+      name: "Probe",
+      description: "a test role",
+      plugins: [
+        { id: GRAVIT_ROW_ID, name: GRAVIT_PLUGIN_URL, config: {} },
+        { id: "role-mask", name: BOT_PLUGIN_URL, config: { persona: "You are the probe, a test role.", allow: ["read"] } },
+      ],
+    });
+    assert.ok(BOT_PLUGIN_URL.startsWith("file:") && BOT_PLUGIN_URL.endsWith("/face/plugins/bot.js"));
+    assert.equal(entryListProblem(definition.plugins), undefined, "the registry's own validator accepts the composition");
+    assert.equal(validateGravitConfig(definition.plugins[0].config), undefined, "the gravit row: the date section alone");
+    assert.equal(validateBotConfig(definition.plugins[1].config), undefined, "the mask row: a persona and an allow list");
+    const allow = (definition.plugins[1].config as { allow: string[] }).allow;
+    assert.notEqual(allow, role.allow, "the allow list is a copy");
+    allow.push("bash");
+    assert.deepEqual(role.allow, ["read"], "so no caller can reach the role through the definition");
+    assert.deepEqual(rolePresetDefinition(role), rolePresetDefinition(role), "pure: the same role gives the same definition");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+/* bootFace's role roster audit (src/boot.ts): a role preset the registry does not list, or lists broken, refuses
+ * the boot instead of failing the role's first call. */
+test("roleRosterProblem: the boot's refusal when a role preset is missing or broken, nothing when every one is listed whole", async () => {
+  const root = await makeRolesRoot();
+  try {
+    const roles = readRoles(root);
+    assert.equal(roleRosterProblem([{ id: "gravit" }, { id: "role-probe" }], roles), undefined);
+    assert.equal(roleRosterProblem([{ id: "gravit" }], roles),
+      'gravit-face: role preset "role-probe" is not in the roster - every role_probe call would fail agent-preset/not-found');
+    assert.equal(roleRosterProblem([{ id: "role-probe", broken: "role-mask (file:///x/bot.js): gravit-bot: none of the allowed tools exist" }], roles),
+      'gravit-face: role preset "role-probe" is broken: role-mask (file:///x/bot.js): gravit-bot: none of the allowed tools exist - every role_probe call would fail agent-preset/invalid');
+    assert.equal(roleRosterProblem([], []), undefined, "no roles, nothing to audit");
+    /* Every failing role in one message, in role order: one boot names them all. */
+    await cp(join(root, "probe"), join(root, "second"), { recursive: true });
+    const two = readRoles(root);
+    assert.equal(roleRosterProblem([{ id: "role-probe", broken: "the mask refused" }], two),
+      'gravit-face: role preset "role-probe" is broken: the mask refused - every role_probe call would fail agent-preset/invalid; ' +
+        'role preset "role-second" is not in the roster - every role_second call would fail agent-preset/not-found');
+    assert.equal(roleRosterProblem([{ id: "role-probe" }, { id: "role-second" }], two), undefined);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("gravitRows: a role.yml model rides on the row as its route; without one the key is absent", async () => {
+  const root = await makeRolesRoot();
+  try {
+    const rowOf = () => (gravitRows(readRoles(root), { plugin: GRAVIT_PLUGIN_URL, rolePlugin: ROLE_PLUGIN_URL }) as Array<{ id: string; config: Record<string, unknown> }>)
       .find((r) => r.id === roleRowId("probe"))!;
-    assert.equal("agentOptions" in rowOf().config, false, "a role.yml with no model has no agentOptions");
+    assert.equal("model" in rowOf().config, false, "a role.yml with no model has no route");
     await writeFile(join(root, "probe", "role.yml"), "name: Probe\ndescription: a test role\nallow:\n  - read\nmodel: deepseek-official/deepseek-v4-flash\n");
     const row = rowOf();
-    assert.deepEqual(row.config.agentOptions, { provider: "deepseek-official", model: "deepseek-v4-flash" });
-    assert.deepEqual(Object.keys(row.config).sort(), ["agentOptions", "backgroundMode", "persona", "provider", "toolFilter", "toolName"]);
+    assert.equal(row.config.model, "deepseek-official/deepseek-v4-flash");
+    assert.deepEqual(Object.keys(row.config).sort(), ["agentPreset", "allow", "model", "name", "summary", "tool"]);
+    assert.equal(validateRoleConfig(row.config), undefined, "plugins/role.mjs accepts the routed row");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -249,6 +313,9 @@ test("the committed mirror bots/gravit/agent.cordis.yml is exactly the render of
   assert.ok(mirror.includes("lunhui-run.md"), "and its header names the file it came from");
   assert.ok(mirror.includes("lunhui-module.md"), "and the module protocol's file");
   assert.ok(mirror.includes(`name: ${GRAVIT_PLUGIN_RELATIVE}`), "the mirror names the plugin by the shipped relative path");
+  assert.equal(ROLE_PLUGIN_RELATIVE, "../../face/plugins/role.mjs");
+  assert.equal(mirror.split(`name: ${ROLE_PLUGIN_RELATIVE}\n`).length - 1, 3, "and each role row the role tool's plugin the same way");
+  assert.equal(mirror.includes("dsh-tool-subagent"), false, "no role row is dsh's own subagent tool any more");
   assert.equal(mirror.includes("file:"), false, "and never by a machine-specific URL");
 });
 

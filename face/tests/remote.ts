@@ -27,6 +27,7 @@
  * apps/cli/tests/github-webhook-real.e2e.ts:30-43, 131-153).
  * @module
  */
+import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,6 +46,24 @@ const CLIENT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "client")
  */
 export function mountClient(ctx: { get(name: string): unknown; webServer: RouteRegistrar }): void {
   registerStatic(ctx.webServer, CLIENT_DIR, ctx.get("connection") as IndexAuth);
+}
+
+/**
+ * The port a booted tree's webserver listens on. `ctx.webServer.port` is
+ * `number | undefined` at 0.2.1: `undefined` until `listen` binds, and the
+ * OS-assigned value when the config asked for port 0 (@deepseek-ai/
+ * dsh-host-webserver lib/index.js:292-295). Two smokes read the port off the
+ * tree - `smoke.test.ts` and `order-gate-midboot-smoke.test.ts`, which hand it
+ * to socket helpers and build URLs from it - so the bind is asserted once,
+ * here, rather than forging `http://127.0.0.1:undefined`.
+ * @param ctx - the booted root context, or any object carrying its `webServer`.
+ * @returns the bound port.
+ * @throws an assertion error unless the webserver is bound.
+ */
+export function boundPort(ctx: { webServer: { port: number | undefined } }): number {
+  const { port } = ctx.webServer;
+  assert.ok(typeof port === "number", "the webserver is bound");
+  return port;
 }
 
 /** One Remote call's `result`: the business outcome, as the gateway answered it. */

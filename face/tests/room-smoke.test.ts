@@ -25,7 +25,8 @@ import { createBot, listBots } from "../src/bots.ts";
 import { panelDeps } from "../src/panels.ts";
 import { setBots } from "../src/roster.ts";
 import { installRoom, registerRoomRoutes, type RoomContextLike } from "../src/room.ts";
-import { makeRepoBotsRoot } from "./bots-fixture.ts";
+import { REPO, makeRepoBotsRoot } from "./bots-fixture.ts";
+import { assertOutsideTempRoots } from "./fixture-root.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
 import { StubAdapter, type StubReply } from "./stub-llm.ts";
 
@@ -48,6 +49,9 @@ async function waitFor(what: string, check: () => boolean, ms = 30_000): Promise
 test("room smoke: dispatch → two members → answers in the room log → one wake → synthesis; read-only members; @; the projection and its cache", {
   skip: gated && "set FACE_SMOKE=1",
 }, async () => {
+  /* D24: the write probes below must be refused by the room's fence, not by a checkout that
+   * workspace-write grants wholesale. */
+  assertOutsideTempRoots(REPO);
   const bots = await makeRepoBotsRoot();
   const root = mkdtempSync(join(tmpdir(), "face-room-root-"));
   const home = mkdtempSync(join(tmpdir(), "face-roomsmoke-"));

@@ -10,7 +10,7 @@ import { dump, load } from "js-yaml";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import {
-  BOT_PLUGIN_RELATIVE, DEFAULT_ALLOW, RESERVED_IDS, TEMPLATE_SOUL, createBot, isBotId, listBots,
+  BOT_PLUGIN_RELATIVE, DEFAULT_ALLOW, RESERVED_IDS, ROLE_PRESET_PREFIX, TEMPLATE_SOUL, createBot, isBotId, listBots,
   registerBotRoutes, rejectSoul, renderComposition, renderPresetMeta, updateBotSettings, updateSoul,
   type BotRouteDeps,
 } from "../src/bots.ts";
@@ -27,6 +27,21 @@ test("isBotId is the retired dsh preset-id grammar - now the face's only gate - 
   for (const bad of ["", "Buffett", "_template", "gravit", "kairos", "-lead", "a_b", "a.b", "a b", "巴菲特", "x".repeat(65), 42, null]) {
     assert.equal(isBotId(bad), false, JSON.stringify(bad));
   }
+});
+
+/* A role's preset is `role-<id>` (src/roles.ts `rolePresetId`), declared by the face from roles/ after boot: no bot
+ * may take an id in that namespace, or its declaration and the role's would collide (the registry throws
+ * `Duplicate agent preset`). Only the prefix with its dash is reserved: `roles` is a bot id like any other. */
+test("isBotId refuses the role preset namespace, role-<id>, and createBot names it", async () => {
+  assert.equal(ROLE_PRESET_PREFIX, "role-");
+  for (const id of ["role-x", "role-cn-reviewer", "role-"]) assert.equal(isBotId(id), false, id);
+  for (const id of ["roles", "role", "roleplay", "x-role-y"]) assert.equal(isBotId(id), true, id);
+  const root = await makeBotsRoot();
+  await assert.rejects(createBot(root, { id: "role-x", name: "X" }),
+    (err: HttpError) => err.status === 400 && /nor starting with role-/.test(err.message));
+  await mkdir(join(root, "role-x"));
+  await writeFile(join(root, "role-x", "preset.yml"), "name: Stray\n");
+  assert.equal((await listBots(root, noPresets)).some((row) => row.id === "role-x"), false, "a directory in the namespace is never listed as a bot");
 });
 
 test("createBot refuses both host ids and names them in its error", async () => {

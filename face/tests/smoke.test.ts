@@ -41,7 +41,7 @@ import { isTrustedDataRequest } from "../src/http.ts";
 import { hasApprovalGrant, type ApprovalEventLike } from "../src/orders.ts";
 import { LUNHUI_ROW_IDS, LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
 import { panelDeps, pluginListing } from "../src/panels.ts";
-import { remote, signIn } from "./remote.ts";
+import { boundPort, remote, signIn } from "./remote.ts";
 
 const gated = process.env.FACE_SMOKE !== "1";
 
@@ -213,7 +213,7 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
   try {
     const clientDir = join(dirname(fileURLToPath(import.meta.url)), "..", "client");
     registerStatic(ctx.webServer, clientDir, ctx.get("connection") as IndexAuth);
-    const port = ctx.webServer.port;
+    const port = boundPort(ctx);
     const base = `http://127.0.0.1:${port}`;
 
     /* Gravit's VOICE, drilled. `bootFace` already refuses a tree missing the
@@ -244,8 +244,8 @@ test("boot smoke: sign-in gates /api and the mux, the pages and /data answer, Gr
     for (const kept of ["str_replace_editor", "ralph"]) {
       assert.ok(toolNames.includes(kept), `${kept} must be registered (policy D9); saw ${toolNames.join(", ")}`);
     }
-    for (const withheld of ["web_fetch", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]) {
-      assert.equal(toolNames.includes(withheld), false, `${withheld} must not be registered (policy D6/D7)`);
+    for (const withheld of ["web_fetch", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource", "working_directory"]) {
+      assert.equal(toolNames.includes(withheld), false, `${withheld} must not be registered (policy D6/D7/D19)`);
     }
     /* The Lunhui rows (src/lunhui.ts), live: composed is not registered, so
      * the running registry must carry all eighteen tools, and the listing

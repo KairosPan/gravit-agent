@@ -138,12 +138,16 @@ export function callerIsChild(exec) {
 }
 
 /**
- * Whether the caller may submit a module's artifact: a delegated role child, exactly
- * `callerIsChild`; a root session or a seeded fork is refused `NOT_A_ROLE` (A23).
+ * Whether the caller may submit a module's artifact: a delegated role child - `callerIsChild`, on a
+ * role's own preset, its header's `agentPreset` starting `role-` (src/roles.ts `rolePresetId`). A root
+ * session, a seeded fork and a plain `subagent` child, which joins Gravit's preset, are refused
+ * `NOT_A_ROLE` (A23). The preset check closes R44: since each role composes its own preset (D20/B1),
+ * the header tells a role child from any other delegated child of Gravit's.
  * @param {any} exec the tool's execution context
  */
 export function callerIsRole(exec) {
-  return callerIsChild(exec);
+  const preset = exec?.agent?.session?.header?.agentPreset;
+  return callerIsChild(exec) && typeof preset === "string" && preset.startsWith("role-");
 }
 
 /** The providers a freeze reads, by the name its refusals give them. */

@@ -303,7 +303,7 @@ registerChannelRoutes(booted.ctx.webServer, {
 });
 /* Delete + archive, which the host's own Remote surface still lacks a delete
  * for (no delete Remote in session-controller or workspace-controller at
- * 0.2.0-rc.2). `root` is the same repo-root commitment `registerChannelRoutes`
+ * 0.2.0-rc.2, nor in session-controller at 0.2.1-rc.5). `root` is the same repo-root commitment `registerChannelRoutes`
  * above got, and for the same reason: `deleteSession` refuses any session
  * whose header cwd falls outside it — ids are unique across every project
  * under `$DSH_HOME/sessions/`, not just this repo's. `hostArchive` is the
