@@ -1342,12 +1342,15 @@ the mechanism, `face/README.md` "The desk drill" the three live steps, which are
     I1 had cancelled with `keepInbox`; measured on dsh 0.2.0-rc.2 and 0.2.1-rc.5, that saved nothing,
     since the root tree's dispose clears the inbox durably a few ms later, and it could wake a turn
     inside the dispose that claimed a queued text - lost silently on 0.2.1-rc.5, whose tree dispose
-    closes that turn `aborted`/`disposed`. So the shutdown cancel keeps nothing again, and before it
-    the conversation's dispose writes one `desk-carry`: the phone texts queued on every supervised
-    agent (key, words, time; at most 20, each cut at 4,000 characters) and the phone turn under way.
-    The next boot, past its fence check, posts each text again under its key, marked `(carried over a
-    restart)` in its provenance line, a key already in the session skipped; sends the cut turn the
-    restart line unless the boot's own cut already did; and writes `desk-carried`. `cutPhoneTurn`
+    closes that turn `aborted`/`disposed`. So the shutdown cancel keeps nothing again, and the
+    conversation's dispose writes one `desk-carry`, read in the same tick as its cancels (the task-9
+    review's I2): the phone texts queued on every supervised agent (key, words, time; at most 20,
+    each cut at 4,000 characters) and the phone turn under way. The next boot, past its fence check,
+    answers every carry no `desk-carried` names, oldest first (I1): it posts each text again under
+    its key, without the desk state, marked `(carried over a restart)` in its provenance line, a key
+    already in the session skipped; sends the cut turn the restart line unless this boot or the
+    boot's own cut already did; and writes one `desk-carried` per carry. A refusal leaves that carry
+    and the later ones for a later boot; a malformed carry is skipped with one line. `cutPhoneTurn`
     also takes a turn closed `aborted`/`disposed` for a cut unless a carry names it
     (`DEVELOPMENT.md` §9, R93; `face/tests/desk-carry-smoke.test.ts` on a real tree).
 - **H4** is `npm run service -- status --check` (`checkHealth`) and `face/scripts/watchdog.ts`. The

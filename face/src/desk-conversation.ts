@@ -61,15 +61,17 @@
  * WHAT A GRACEFUL STOP CARRIED (spec §16 H3, R93). dsh's teardown clears the desk session's inbox whatever the desk's
  * own cancel keeps, and on dsh 0.2.1 closes the turn it aborts as `disposed` (measured on a real tree,
  * .superpowers/sdd/2026-11-02-desk-hardening/graceful-stop-measurement.md), so a graceful stop carries the phone's part
- * through the ledger instead: {@link DeskConversation.dispose} writes one `desk-carry` before it cancels anything, and
- * `start` answers the newest one no `desk-carried` follows - whether its ensure resumed the session or created one, and
- * only past the boot's fence check: a violation, or a check that fails, carries nothing and leaves the record for a
- * later boot. Each carried text is posted again as a phone's keyed post is, in order, its provenance line saying
- * `(carried over a restart)` after the time it was written: a key the session already holds is skipped (ONE TEXT, ONE
- * MESSAGE), and a post refused - the pause, the budget - stops the carry, with one line, for a later boot. Then the
- * turn the stop cut gets the restart line, unless the boot's own cut above already answered that session and turn (a
- * `desk-turn` cancelled by `restart`); then a `desk-carried` names the carry and what it posted and skipped. A turn the
- * carry names is no cut to src/desk-session.ts `cutPhoneTurn` when dsh closed it `disposed`, so it gets one line.
+ * through the ledger instead: {@link DeskConversation.dispose} reads one `desk-carry` in the same tick as it cancels, and
+ * `start` answers every one no `desk-carried` names, oldest first - whether its ensure resumed the session or created
+ * one, and only past the boot's fence check: a violation, or a check that fails, carries nothing and leaves the records
+ * for a later boot; a malformed one is skipped with one line. Each carried text is posted again as a phone's keyed post
+ * is, in order and without the desk state, its provenance line saying `(carried over a restart)` after the time it was
+ * written: a key the session already holds is skipped (ONE TEXT, ONE MESSAGE), and a post refused - the pause, the
+ * budget - stops the carrying, with one line, leaving that carry and every later one for a later boot. Then the turn
+ * the stop cut gets the restart line, unless this boot already sent it or the boot's own cut above already answered
+ * that session and turn (a `desk-turn` cancelled by `restart`); then a `desk-carried` names the carry and what it
+ * posted and skipped. A turn a carry names is no cut to src/desk-session.ts `cutPhoneTurn` when dsh closed it
+ * `disposed`, so it gets one line.
  *
  * A CUT CUTS ONE TURN. The phone's `/stop` ({@link DeskConversation.stop}), like the deadline, cancels the turn
  * under way and only it: the messages queued behind it are kept and answered, each in its own turn
@@ -91,8 +93,9 @@
  * SHUTDOWN ({@link DeskConversation.dispose}). First the phone's part, from every supervised agent - the
  * conversation's and any it retired: each phone text waiting on its inbox's two lists, at most {@link CARRY_MAX} of them
  * and each cut at {@link CARRY_TEXT_MAX} characters, and the phone turn under way - is one `desk-carry` in the ledger,
- * when there is any, given two seconds; a failure is one line. Then every turn under way is cancelled as `shutdown`,
- * the inbox with it, and its agent gets two seconds to go idle, so the cut turn is recorded; then every supervision
+ * when there is any - read in the same tick as every turn under way is cancelled as `shutdown`, the inbox with it, so
+ * no turn claims a queued text between the two. The carry's write and the cut agents going idle, so the cut turns are
+ * recorded, share two seconds; a failure is one line. Then every supervision
  * ends, a start, post or renew under way gets five seconds to settle, and the records under way are waited for - so
  * nothing the conversation writes lands after the ledger's `shutdown`, which src/desk.ts appends once this has settled.
  *
@@ -334,6 +337,25 @@ type Carried = {
   cut?: { sessionId: string; turn: number; key?: string; at?: string };
 };
 
+/** A `desk-carry` as the ledger holds one. */
+type Carry = Extract<DeskEvent, { kind: "desk-carry" }>;
+
+/** Whether a ledger line of kind `desk-carry` has the shape a dispose writes: a session id, `queued` an array of
+ * string keys and texts with an optional string `at`, and `cut`, when present, an object with a numeric turn. */
+function isCarry(e: DeskEvent): e is Carry {
+  const x = e as { t?: unknown; sessionId?: unknown; queued?: unknown; cut?: unknown };
+  const optString = (v: unknown): boolean => v === undefined || typeof v === "string";
+  if (typeof x.t !== "string" || typeof x.sessionId !== "string" || !Array.isArray(x.queued)) return false;
+  const textsOk = x.queued.every((q: unknown) => {
+    const y = q as { key?: unknown; text?: unknown; at?: unknown } | null;
+    return typeof y === "object" && y !== null && typeof y.key === "string" && typeof y.text === "string" && optString(y.at);
+  });
+  if (!textsOk) return false;
+  if (x.cut === undefined) return true;
+  const c = x.cut as { turn?: unknown; key?: unknown; at?: unknown } | null;
+  return typeof c === "object" && c !== null && typeof c.turn === "number" && Number.isFinite(c.turn) && optString(c.key) && optString(c.at);
+}
+
 /** dsh-agent's `Agent.whenIdle`, which the structural {@link AgentLike} leaves out: it resolves once the
  * agent's driver has retired - after the turn it was running, every turn its inbox held, and any maintenance
  * with the followup latched behind it. */
@@ -409,6 +431,9 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
   /** When the operator wrote each keyed phone text this conversation sent, by key - the newest {@link AT_KEPT} - for a
    * `desk-carry` to name: the message itself keeps it only in its provenance line. */
   const atOf = new Map<string, number>();
+  /** The cut turns this conversation has sent the restart line for, as `<sessionId> <turn>`: a cut a carry names and the
+   * boot's own cut found get one line between them, even when the ledger record that says so could not be written. */
+  const lined = new Set<string>();
   const rememberAt = (key: string, at: number): void => {
     atOf.delete(key);
     atOf.set(key, at);
@@ -563,8 +588,8 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
 
   /** What the boot found in the desk session `sessionId`, just ensured as `agent` (the module header's AFTER A RESTART
    * and WHAT A GRACEFUL STOP CARRIED): when the ensure resumed it, the phone turn a restart cut, recorded and answered
-   * once; then, past the fence, the texts and alerts still queued, woken, and the newest carry no boot has answered,
-   * posted again. Never rejects. */
+   * once; then, past the fence, the texts and alerts still queued, woken, and every carry no boot has answered, oldest
+   * first, posted again. Never rejects. */
   const afterBoot = async (agent: AgentLike, sessionId: string, resumed: boolean, m: Machinery): Promise<void> => {
     let ledger: DeskEvent[] | undefined;
     try {
@@ -572,11 +597,14 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     } catch (err) {
       log(`${BIN}: desk: the ledger could not be read at boot (${errText(err)}); what a graceful stop carried waits for a later boot`);
     }
-    const carry = ledger === undefined ? undefined : pendingCarry(ledger);
-    if (!resumed && carry === undefined) return;
+    const carries = ledger === undefined ? [] : pendingCarries(ledger);
+    if (!resumed && carries.length === 0) return;
     if (resumed) {
       /* the turns a carry names on this session: their line is the carry's, when dsh closed them `disposed` */
-      const named = new Set((ledger ?? []).flatMap((e) => (e.kind === "desk-carry" && e.sessionId === sessionId && e.cut !== undefined ? [e.cut.turn] : [])));
+      const named = new Set((ledger ?? []).flatMap((e) => {
+        const cut = e.kind === "desk-carry" && e.sessionId === sessionId ? (e.cut as { turn?: unknown } | null | undefined) : undefined;
+        return typeof cut?.turn === "number" ? [cut.turn] : [];
+      }));
       /* the log as the restart left it, read before anything is woken: a turn the requeue opens is no cut */
       let cut: { turn: number; at: string } | undefined;
       try {
@@ -600,23 +628,41 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
       return;
     }
     if (resumed) m.session.requeuePending(agent, log);
-    if (carry !== undefined && !disposed) await carryOver(carry, m);
+    /* oldest first; a carry stopped by a refusal holds back every later one, for a later boot */
+    for (const carry of carries) {
+      if (disposed) return;
+      let done: boolean;
+      try {
+        done = await carryOver(carry, m);
+      } catch (err) {
+        log(`${BIN}: desk: the desk-carry of ${carry.t} could not be answered (${errText(err)}); a later boot tries again`);
+        return;
+      }
+      if (!done) return;
+    }
   };
 
-  /** The newest `desk-carry` in `events` when no `desk-carried` names it after it. */
-  const pendingCarry = (events: readonly DeskEvent[]): Extract<DeskEvent, { kind: "desk-carry" }> | undefined => {
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i];
-      if (e.kind !== "desk-carry") continue;
-      return events.slice(i + 1).some((later) => later.kind === "desk-carried" && later.of === e.t) ? undefined : e;
-    }
-    return undefined;
+  /** Every `desk-carry` in `events` that no `desk-carried` names after it, oldest first - a malformed one skipped, with
+   * one line: the ledger's reader checks only `t` and `kind`, and a hand-edited line must never stop the boot. */
+  const pendingCarries = (events: readonly DeskEvent[]): Carry[] => {
+    const pending: Carry[] = [];
+    events.forEach((e, i) => {
+      if (e.kind !== "desk-carry") return;
+      if (events.slice(i + 1).some((later) => later.kind === "desk-carried" && later.of === e.t)) return;
+      if (!isCarry(e)) {
+        log(`${BIN}: desk: the desk-carry of ${String((e as { t?: unknown }).t)} in the ledger is malformed and is skipped`);
+        return;
+      }
+      pending.push(e);
+    });
+    return pending;
   };
 
   /** A carry, answered (the module header's WHAT A GRACEFUL STOP CARRIED): each text posted again, in order; then the
-   * cut turn's line, unless the boot's cut already sent it; then the `desk-carried`. A post refused stops it, with one
-   * line, and the carry waits for a later boot. Never rejects. */
-  const carryOver = async (carry: Extract<DeskEvent, { kind: "desk-carry" }>, m: Machinery): Promise<void> => {
+   * cut turn's line, unless this boot or the boot's cut already sent it; then the `desk-carried`. `true` once it is
+   * recorded; `false`, with one line, when a post was refused or the ledger could not be read, and the carry waits for
+   * a later boot. */
+  const carryOver = async (carry: Carry, m: Machinery): Promise<boolean> => {
     let posted = 0;
     let skipped = 0;
     for (const text of carry.queued) {
@@ -628,7 +674,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
       });
       if ("refused" in result) {
         log(`${BIN}: desk: the texts a graceful stop carried could not all be posted again (${result.line}); a later boot tries again`);
-        return;
+        return false;
       }
       if (result.duplicate === true) skipped += 1;
       else posted += 1;
@@ -636,20 +682,22 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     const cut = carry.cut;
     if (cut !== undefined) {
       const where = `turn ${cut.turn} on desk session ${carry.sessionId}`;
-      let answered = false;
+      let answered = lined.has(`${carry.sessionId} ${cut.turn}`);
       try {
         const { events } = await m.desk.readEvents(home);
-        answered = events.some((e) => e.kind === "desk-turn" && e.sessionId === carry.sessionId && e.turn === cut.turn && e.cancel === "restart");
+        answered ||= events.some((e) => e.kind === "desk-turn" && e.sessionId === carry.sessionId && e.turn === cut.turn && e.cancel === "restart");
       } catch (err) {
         log(`${BIN}: desk: the ledger could not be read for ${where}, which a graceful stop cut (${errText(err)}); a later boot tries again`);
-        return;
+        return false;
       }
       if (!answered) {
-        const at = cut.at === undefined ? NaN : Date.parse(cut.at);
-        sendLine(m.session.cutPhoneTurnLine(new Date(Number.isFinite(at) ? at : Date.parse(carry.t)), new Date(clock.now())), `${where}, which a graceful stop cut`);
+        lined.add(`${carry.sessionId} ${cut.turn}`);
+        const at = [cut.at, carry.t].map((x) => (x === undefined ? NaN : Date.parse(x))).find(Number.isFinite) ?? clock.now();
+        sendLine(m.session.cutPhoneTurnLine(new Date(at), new Date(clock.now())), `${where}, which a graceful stop cut`);
       }
     }
     await m.desk.appendEvent(home, { t: stamp(), kind: "desk-carried", of: carry.t, posted, skipped }, { log });
+    return true;
   };
 
   /** `line` through {@link sendOut}, after the deliveries already under way; its failure lines name `what`. */
@@ -675,6 +723,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     await m.desk.appendEvent(home, {
       t: stamp(), kind: "desk-turn", sessionId, source: "telegram", turn: cut.turn, outcome: "cancelled", wallMs: 0, cancel: "restart",
     }, { log });
+    lined.add(`${sessionId} ${cut.turn}`);
     sendLine(m.session.cutPhoneTurnLine(new Date(cut.at), new Date(clock.now())), `${where}, which a restart cut`);
   };
 
@@ -831,7 +880,8 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
         return { opened: true, sessionId, duplicate: true };
       }
       if (disposed) return shutDown();
-      const state = input.source.kind === "telegram" ? await deskState() : undefined;
+      /* a carried text goes without the state: the boot posts them one after another, and each wait would hold it */
+      const state = input.source.kind === "telegram" && input.source.carried !== true ? await deskState() : undefined;
       /* the state only on an idle desk: a text queued behind a turn would find it stale, or claimed by that turn */
       const inject = state !== undefined && !(await busy(agent)) ? (agent as AgentLike & Injecting).inject : undefined;
       if (disposed) return shutDown();
@@ -913,23 +963,20 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     return { queued, ...(cut === undefined ? {} : { cut }) };
   };
 
-  /** The `desk-carry` a shutdown writes before it cancels anything (the module header's SHUTDOWN), when there is
-   * anything to carry; given {@link SHUTDOWN_IDLE_MS}. Never rejects: a failure is one line. */
-  const carryAtShutdown = async (all: readonly Watch[]): Promise<void> => {
-    if (all.length === 0) return;
+  /** The `desk-carry` event for what {@link collectCarry} found in `all`, or `undefined` when there is nothing to carry or
+   * it could not be read - that with one line. Synchronous: the shutdown takes it and cancels in the same tick. */
+  const carryEvent = (all: readonly Watch[], m: Machinery | undefined): DeskEvent | undefined => {
+    if (all.length === 0 || m === undefined) return undefined;
     try {
-      const m = await loadMachinery();
       const { queued, cut } = collectCarry(all, m);
-      if (queued.length === 0 && cut === undefined) return;
-      const sessionId = cut?.sessionId ?? all[0].sessionId;
-      const event: DeskEvent = {
-        t: stamp(), kind: "desk-carry", sessionId, queued,
+      if (queued.length === 0 && cut === undefined) return undefined;
+      return {
+        t: stamp(), kind: "desk-carry", sessionId: cut?.sessionId ?? all[0].sessionId, queued,
         ...(cut === undefined ? {} : { cut: { turn: cut.turn, ...(cut.key === undefined ? {} : { key: cut.key }), ...(cut.at === undefined ? {} : { at: cut.at }) } }),
       };
-      const wrote = await within(SHUTDOWN_IDLE_MS, m.desk.appendEvent(home, event, { log }));
-      if (wrote.kind === "late") log(`${BIN}: desk: the carry over the shutdown was not written in ${SHUTDOWN_IDLE_MS / 1000} s; the shutdown goes on`);
     } catch (err) {
       log(`${BIN}: desk: the phone's texts could not be carried over the shutdown: ${errText(err)}`);
+      return undefined;
     }
   };
 
@@ -996,13 +1043,30 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
         const all = watches();
         current = undefined;
         retiring.clear();
-        await carryAtShutdown(all);
-        await Promise.all(all.map(async (w) => {
-          if ((await busy(w.agent)) && cancel(w, { kind: "hook", reason: "shutdown" })) {
-            await within(SHUTDOWN_IDLE_MS, idleWaitOf(w.agent)?.() ?? Promise.resolve());
+        let m: Machinery | undefined;
+        if (all.length > 0) {
+          try {
+            m = await loadMachinery();
+          } catch (err) {
+            log(`${BIN}: desk: the phone's texts could not be carried over the shutdown: ${errText(err)}`);
           }
-          end(w);
-        }));
+        }
+        const working = await Promise.all(all.map((w) => busy(w.agent)));
+        /* one tick: the carry's snapshot, then the cancels - no turn can claim a queued text between the two */
+        const event = carryEvent(all, m);
+        const cut = all.filter((w, i) => working[i] && cancel(w, { kind: "hook", reason: "shutdown" }));
+        /* the carry's write and the cut agents' unwinding share the one bound */
+        let wrote = event === undefined;
+        const writing = event === undefined || m === undefined
+          ? Promise.resolve()
+          : m.desk.appendEvent(home, event, { log }).then(() => { wrote = true; }, (err: unknown) => {
+            wrote = true;
+            log(`${BIN}: desk: the phone's texts could not be carried over the shutdown: ${errText(err)}`);
+          });
+        const quietly = (p: Promise<void>): Promise<void> => p.then(() => undefined, () => undefined);
+        await within(SHUTDOWN_IDLE_MS, Promise.all([writing, ...cut.map((w) => quietly(idleWaitOf(w.agent)?.() ?? Promise.resolve()))]));
+        if (!wrote) log(`${BIN}: desk: the carry over the shutdown was not written in ${SHUTDOWN_IDLE_MS / 1000} s; the shutdown goes on`);
+        for (const w of all) end(w);
         await within(SHUTDOWN_QUEUE_MS, queue);
         await recording;
       })();
