@@ -560,8 +560,9 @@ skipped, 0 fail, typecheck clean; `FACE_SMOKE=1` 2,869/2,869. After, at 0.2.1-rc
 real boots (`bind-smoke` and a fifth `roles-smoke` boot are new). Under `FACE_SMOKE=1` every smoke
 passed during the build (2,883 of 2,888 at `ceb5df9d`, the four Account smokes skipped there for
 want of `npm ci` in `account/`, the one red `subagents-smoke`, rewritten at `257c3439` and green
-alone); the whole run on the final tree is the plan's verification task, which records its count
-here. `npm run check:fixture` at rc.5: 26 lines, 23 validated, 0 rejected, the 3 with no upstream
+alone); the whole run on the final tree — the upgrade merged with the desk's hardening
+(`feat/desk-p1-p4` @ `dd867f70`), `817ee2bb`: typecheck clean, 2,974 tests in 202 files, 2,942 pass + 32
+skipped offline, 0 fail; `FACE_SMOKE=1` 2,975 / 2,975, 0 fail, the four Account smokes included. `npm run check:fixture` at rc.5: 26 lines, 23 validated, 0 rejected, the 3 with no upstream
 validator named — the 0.2.0 baseline.
 
 **The fourteen sessions.** No format edge was added (the format packages end at
