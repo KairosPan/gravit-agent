@@ -5,7 +5,7 @@ import { walletSource } from "../../src/portfolio/live/address.ts";
 import { STABLECOINS, type ChainName, type ChainReader, type Mined, type SentTx } from "../../src/portfolio/live/chain.ts";
 import { LIFI_DIAMOND, LIFI_SWAP_ABI, USDG_ROBINHOOD, dexTrader, diamondOn, type RwaMarket } from "../../src/portfolio/live/dex.ts";
 import { exploreAcross } from "../../src/portfolio/live/explore.ts";
-import type { PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { PublicSource } from "../../../market/src/live/public-markets.ts";
 import { inDollars, type LiveTrader, type Market } from "../../src/portfolio/live/trade.ts";
 import type { Http } from "../../src/portfolio/live/types.ts";
 

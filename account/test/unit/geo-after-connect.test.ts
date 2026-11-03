@@ -10,7 +10,7 @@ import { lostAnswer } from "../../src/portfolio/live/exchange-trade.ts";
 import { register } from "../../src/portfolio/live/index.ts";
 import { heldTo, HYPERLIQUID_RULE, locator, PLACE_MS } from "../../src/portfolio/live/location.ts";
 import type { RunMm } from "../../src/portfolio/live/metamask.ts";
-import type { PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { LiveTrader, Market } from "../../src/portfolio/live/trade.ts";
 import type { Http } from "../../src/portfolio/live/types.ts";
 import type { LiveWriter } from "../../src/portfolio/live/writes.ts";

@@ -9,7 +9,7 @@ import type { ExchangeClient, OpenExchange } from "../../src/portfolio/live/exch
 import { hyperliquidTradeSource, openHyperliquid, type HyperliquidClient, type OpenHyperliquid } from "../../src/portfolio/live/hyperliquid-trade.ts";
 import { AGENT_NAME, heldTo, HYPERLIQUID_RULE, locator, placeOf, SUBDIVISION, TRACE, TRACE_MS, WRITE_MS, type Locator } from "../../src/portfolio/live/location.ts";
 import type { RunMm } from "../../src/portfolio/live/metamask.ts";
-import { holdBackMs } from "../../src/portfolio/live/public-markets.ts";
+import { holdBackMs } from "../../../market/src/live/public-markets.ts";
 import { reachBanUntil, reachKeepMs, reachOf, type ReachDeps } from "../../src/portfolio/live/reach.ts";
 import type { LiveTrader, OrderRequest } from "../../src/portfolio/live/trade.ts";
 import type { Http, HttpReply, LiveBalance, LiveSource } from "../../src/portfolio/live/types.ts";

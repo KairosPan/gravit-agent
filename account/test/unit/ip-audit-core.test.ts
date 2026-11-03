@@ -3,7 +3,7 @@ import { STATUS_CODES } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import { exchangeClock, exchangeSaidNo, exchangeSource, guardClient, type ExchangeClient, type OpenExchange } from "../../src/portfolio/live/exchange.ts";
-import { holdBackMs } from "../../src/portfolio/live/public-markets.ts";
+import { holdBackMs } from "../../../market/src/live/public-markets.ts";
 import { IP_LIST, realHttp, REGION, retryAfterMs, venueSaidNo } from "../../src/portfolio/live/types.ts";
 import { exchangeWriter, mmWriter, walletWriter, type LiveReceipt } from "../../src/portfolio/live/writes.ts";
 import { no, unaddressed } from "../../src/portfolio/refuse.ts";
@@ -278,7 +278,7 @@ describe("this machine's address, wherever a venue's words put it", () => {
 
 describe("a public source's own hold, let go when a forced re-check finds the venue answering", () => {
   it("a place rule from the network the user left is not kept for ten minutes after the venue answers this one", async () => {
-    const { kalshiPublic } = await import("../../src/portfolio/live/public-markets.ts");
+    const { kalshiPublic } = await import("../../../market/src/live/public-markets.ts");
     let blocked = true;
     let sent = 0;
     const http = async (): Promise<import("../../src/portfolio/live/types.ts").HttpReply> => {

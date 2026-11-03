@@ -6,7 +6,7 @@ import { isRefusal } from "../../src/core/errors.ts";
 import { signAgent, signOwner, simKey, type AgentAction, type OwnerAction } from "../../src/portfolio/account/sign.ts";
 import { exchangeClock, exchangeSaidNo, type ExchangeClient, type OpenExchange } from "../../src/portfolio/live/exchange.ts";
 import type { RunMm } from "../../src/portfolio/live/metamask.ts";
-import { holdBackMs } from "../../src/portfolio/live/public-markets.ts";
+import { holdBackMs } from "../../../market/src/live/public-markets.ts";
 import { reachOf, type ReachDeps } from "../../src/portfolio/live/reach.ts";
 import { REGION, venueSaidNo, type Http, type HttpReply } from "../../src/portfolio/live/types.ts";
 import { no, unaddressed } from "../../src/portfolio/refuse.ts";

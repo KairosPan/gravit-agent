@@ -13,7 +13,7 @@ import { networthPath } from "../../src/portfolio/account/networth.ts";
 import { signAgent, signOwner, simKey, type AgentAction, type OwnerAction, type SimKey } from "../../src/portfolio/account/sign.ts";
 import { register } from "../../src/portfolio/live/index.ts";
 import { WalletProofs } from "../../src/portfolio/live/proof.ts";
-import type { PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { Candle, LiveTrader, Market, MarketStats, OrderState, Position } from "../../src/portfolio/live/trade.ts";
 import type { LiveWriter } from "../../src/portfolio/live/writes.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../../src/portfolio/server.ts";

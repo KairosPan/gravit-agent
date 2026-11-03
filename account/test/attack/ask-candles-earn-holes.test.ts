@@ -20,7 +20,7 @@ import { spendFor } from "../../src/portfolio/account/state.ts";
 import type { EarnPosition, LiveEarner } from "../../src/portfolio/live/earn.ts";
 import type { ExchangeClient, OpenExchange } from "../../src/portfolio/live/exchange.ts";
 import { register, type LiveDeps } from "../../src/portfolio/live/index.ts";
-import { exchangeTickers, kalshiPublic, polymarketPublic, PUBLIC_HOSTS } from "../../src/portfolio/live/public-markets.ts";
+import { exchangeTickers, kalshiPublic, polymarketPublic, PUBLIC_HOSTS } from "../../../market/src/live/public-markets.ts";
 import type { LiveTrader, Market, OrderState } from "../../src/portfolio/live/trade.ts";
 import type { Http, LiveBalance } from "../../src/portfolio/live/types.ts";
 import { startPortfolioServer } from "../../src/portfolio/server.ts";

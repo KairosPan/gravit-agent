@@ -143,7 +143,7 @@
  *
  * No answer is stored by the browser (cache-control: no-store).
  */
-import { akshareCommand, createAkshare, type Akshare, type AkshareWord } from "./live/akshare.ts";
+import { akshareCommand, createAkshare, type Akshare, type AkshareWord } from "../../../market/src/live/akshare.ts";
 import express from "express";
 import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
@@ -168,12 +168,12 @@ import { sessionFrom } from "./openness.ts";
 import type { OrderPlan } from "./router.ts";
 import { isPending, loadOpenness, PortfolioService } from "./service.ts";
 import { defaultHome } from "./home.ts";
-import { chinaSource } from "./live/china.ts";
+import { chinaSource } from "../../../market/src/live/china.ts";
 import { pairingCode } from "./account/pairing.ts";
 import type { Side } from "./venues.ts";
-import { type CnHttp, cnHosts, realCnHttp } from "./live/cn-http.ts";
-import { type CnRelay, RELAY_URL_MAX, createCnRelay, relayTarget } from "./live/cn-relay.ts";
-import { type CnIfind, IFIND_HOST, IFIND_QUERY, createIfind } from "./live/cn-ifind.ts";
+import { type CnHttp, cnHosts, realCnHttp } from "../../../market/src/live/cn-http.ts";
+import { type CnRelay, RELAY_URL_MAX, createCnRelay, relayTarget } from "../../../market/src/live/cn-relay.ts";
+import { type CnIfind, IFIND_HOST, IFIND_QUERY, createIfind } from "../../../market/src/live/cn-ifind.ts";
 
 /** what every request outside /api/ is answered (404), with or without the account layer: the Account serves no page */
 export const NO_PAGE = "The Account serves no page: its owner's screens are Gravit's face (Markets, Trade, Account). This address answers its API under /api/.";

@@ -13,13 +13,13 @@ import { dexTrader, issuedHoldings, LIFI_DIAMOND } from "../../src/portfolio/liv
 import type { ExchangeClient, OpenExchange } from "../../src/portfolio/live/exchange.ts";
 import { guardedHttp, privateAddress, type PayRequest, type PayResponse } from "../../src/portfolio/live/guarded-http.ts";
 import { register, type LiveDeps } from "../../src/portfolio/live/index.ts";
-import { publicPrices } from "../../src/portfolio/live/prices.ts";
-import { holdBackMs } from "../../src/portfolio/live/public-markets.ts";
+import { publicPrices } from "../../../market/src/live/prices.ts";
+import { holdBackMs } from "../../../market/src/live/public-markets.ts";
 import type { LiveTrader, Market, OrderState } from "../../src/portfolio/live/trade.ts";
 import type { Http, HttpReply } from "../../src/portfolio/live/types.ts";
 import type { LiveWriter } from "../../src/portfolio/live/writes.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
-import { binance451, json, MIN, network, NOW, refusing } from "./live-public-markets-fixtures.ts";
+import { binance451, json, MIN, network, NOW, refusing } from "../../../market/test/unit/live-public-markets-fixtures.ts";
 
 /** The IP audit's findings in the chains, the agent wallet, the wallet's swaps and bridges, the payee guard, agent payments and the public
  * prices: what this machine's network does to them — an RPC refusing or rate-limiting this address, a broadcast whose answer is lost, LI.FI's

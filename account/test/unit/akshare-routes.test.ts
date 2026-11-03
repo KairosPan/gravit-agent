@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { createAkshare, type Akshare, type AkshareAnswer, type AkshareCall, type AkshareTool, type AkshareWord } from "../../src/portfolio/live/akshare.ts";
+import { createAkshare, type Akshare, type AkshareAnswer, type AkshareCall, type AkshareTool, type AkshareWord } from "../../../market/src/live/akshare.ts";
 import { startPortfolioServer } from "../../src/portfolio/server.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
 
-const FIXTURE = fileURLToPath(new URL("../fixtures/fake-akshare-mcp.mjs", import.meta.url));
+const FIXTURE = fileURLToPath(new URL("../../../market/test/fixtures/fake-akshare-mcp.mjs", import.meta.url));
 const home = mkdtempSync(join(tmpdir(), "akshare-routes-"));
 afterAll(() => rmSync(home, { recursive: true, force: true }));
 

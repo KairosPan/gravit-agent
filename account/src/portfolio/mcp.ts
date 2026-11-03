@@ -56,7 +56,7 @@ import { HOW_TEXT, MAX_NOTES, NOTE_TEXT, TOPIC_WORDS, TOPICS } from "./account/m
 import { mustKey, seatKey as storedSeatKey } from "./account/keystore.ts";
 import { outsideSeatFile } from "./account/desk.ts";
 import { defaultHome } from "./home.ts";
-import { AKSHARE_TOOLS } from "./live/akshare.ts";
+import { AKSHARE_TOOLS } from "../../../market/src/live/akshare.ts";
 import { BRIDGE_CHAINS } from "./live/bridge.ts";
 import { CHAINS, STABLECOINS, type ChainName } from "./live/chain.ts";
 import { STABLES } from "./live/types.ts";

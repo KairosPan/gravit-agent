@@ -27,8 +27,8 @@ import { CONNECTORS, openLive, parseConnector, type LiveDeps } from "./live/inde
 import { realMm } from "./live/metamask.ts";
 import { publicChain } from "./live/chain.ts";
 import { WalletProofs } from "./live/proof.ts";
-import { publicPrices } from "./live/prices.ts";
-import { publicSources, type Listing, type PublicSource } from "./live/public-markets.ts";
+import { publicPrices } from "../../../market/src/live/prices.ts";
+import { publicSources, type Listing, type PublicSource } from "../../../market/src/live/public-markets.ts";
 import { reachOf, type Reach } from "./live/reach.ts";
 import { ROBINHOOD_MCP } from "./live/robinhood.ts";
 import { OAuthSignIn } from "./live/signin.ts";

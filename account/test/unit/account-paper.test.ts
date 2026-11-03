@@ -10,7 +10,7 @@ import { fromEt, usClock } from "../../src/portfolio/account/calendar.ts";
 import { signAgent, signOwner, simKey, type AgentAction, type OwnerAction } from "../../src/portfolio/account/sign.ts";
 import { register, type LiveDeps } from "../../src/portfolio/live/index.ts";
 import { liquidationPriceOf, paperBookPath, paperDir, type PaperBook } from "../../src/portfolio/live/paper.ts";
-import { readLike, type Listing, type PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import { readLike, type Listing, type PublicSource } from "../../../market/src/live/public-markets.ts";
 import { hlPerpSteps } from "../../src/portfolio/live/hl-rules.ts";
 import type { LiveTrader, Market, OrderState, Position } from "../../src/portfolio/live/trade.ts";
 import { no } from "../../src/portfolio/refuse.ts";

@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import { fromEt } from "../../src/portfolio/account/calendar.ts";
 import { HOST_LIMITS } from "../../src/portfolio/live/history.ts";
-import { fixedHosts, PUBLIC_HOSTS } from "../../src/portfolio/live/public-markets.ts";
+import { fixedHosts, PUBLIC_HOSTS } from "../../../market/src/live/public-markets.ts";
 import { realHttp, type Http, type HttpReply } from "../../src/portfolio/live/types.ts";
-import { FRESH_MS, NASDAQ_AT_ONCE, NASDAQ_EVERY_MS, NASDAQ_FROM, NASDAQ_UA, NO_ANSWER_HOLD_AFTER, nasdaqChart, nasdaqNumber, nasdaqQuote, nasdaqSource, nasdaqTimeMs, ROBINHOOD_AFTER_MS, ROBINHOOD_BACKOFF, ROBINHOOD_EVERY_MS, ROBINHOOD_FIRST_MS, ROBINHOOD_FROM, ROBINHOOD_JITTER_MS, ROBINHOOD_PRECISE_MS, ROBINHOOD_NEXT_MS, ROBINHOOD_OVERNIGHT, ROBINHOOD_PRICES, ROBINHOOD_RETRIES, ROBINHOOD_RETRY_MS, ROBINHOOD_SPREAD_MS, ROBINHOOD_STANDS_MS, robinhoodQuotes, RT_WAIT_MS, US_IDLE_MS, usQuote, UsQuoteFeed, withoutStrays, type UsQuote, type UsQuotes } from "../../src/portfolio/live/us-quotes.ts";
+import { FRESH_MS, NASDAQ_AT_ONCE, NASDAQ_EVERY_MS, NASDAQ_FROM, NASDAQ_UA, NO_ANSWER_HOLD_AFTER, nasdaqChart, nasdaqNumber, nasdaqQuote, nasdaqSource, nasdaqTimeMs, ROBINHOOD_AFTER_MS, ROBINHOOD_BACKOFF, ROBINHOOD_EVERY_MS, ROBINHOOD_FIRST_MS, ROBINHOOD_FROM, ROBINHOOD_JITTER_MS, ROBINHOOD_PRECISE_MS, ROBINHOOD_NEXT_MS, ROBINHOOD_OVERNIGHT, ROBINHOOD_PRICES, ROBINHOOD_RETRIES, ROBINHOOD_RETRY_MS, ROBINHOOD_SPREAD_MS, ROBINHOOD_STANDS_MS, robinhoodQuotes, RT_WAIT_MS, US_IDLE_MS, usQuote, UsQuoteFeed, withoutStrays, type UsQuote, type UsQuotes } from "../../../market/src/live/us-quotes.ts";
 import { STOCK_JUDGE_MS } from "../../src/portfolio/live/paper.ts";
-import type { HubTick } from "../../src/portfolio/live/stream-hub.ts";
-import { json, network } from "./live-public-markets-fixtures.ts";
+import type { HubTick } from "../../../market/src/live/stream-hub.ts";
+import { json, network } from "../../../market/test/unit/live-public-markets-fixtures.ts";
 
 /** US STOCK QUOTES IN REAL TIME (live/us-quotes.ts), read through stand-in networks. The answers are the shapes the sources gave:
  *   · Robinhood GET /rhj/prices and Nasdaq GET /api/quote/{SYM}/info and /chart, live on Wed 2026-10-14 between 16:30 and 16:55 UTC (the

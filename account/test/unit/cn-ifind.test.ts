@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { IFIND_DEADLINE_MS, TOKEN_TTL_MS, createIfind } from "../../src/portfolio/live/cn-ifind.js";
-import type { CnHttp, CnReply } from "../../src/portfolio/live/cn-http.js";
+import { IFIND_DEADLINE_MS, TOKEN_TTL_MS, createIfind } from "../../../market/src/live/cn-ifind.js";
+import type { CnHttp, CnReply } from "../../../market/src/live/cn-http.js";
 
 const RT = "synthetic-refresh-token", AT = "synthetic-access-token";
 const Q = "A股 2026年10月30日涨跌幅 成交额 主力资金流向 所属概念";

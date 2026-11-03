@@ -29,7 +29,7 @@ import type { ChainReader } from "../../src/portfolio/live/chain.ts";
 import { exploreAcross, type ExploreVenue } from "../../src/portfolio/live/explore.ts";
 import { register } from "../../src/portfolio/live/index.ts";
 import { polymarketTradeSource } from "../../src/portfolio/live/polymarket-clob.ts";
-import type { PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { Candle, LiveTrader, Market, OrderState } from "../../src/portfolio/live/trade.ts";
 import { STABLES, type Http, type HttpReply } from "../../src/portfolio/live/types.ts";
 import { PortfolioService, type CandlesView } from "../../src/portfolio/service.ts";

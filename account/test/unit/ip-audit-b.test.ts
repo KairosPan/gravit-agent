@@ -9,7 +9,7 @@ import { liveScope, polymarketLiveAccount, scopeOf } from "../../src/portfolio/a
 import type { RunMm } from "../../src/portfolio/live/metamask.ts";
 import { CLOSE_ONLY_WORDS, polymarketLocation, polymarketScope, polymarketTradeSource, readablePlace } from "../../src/portfolio/live/polymarket-clob.ts";
 import { polymarketUsNo, polymarketUsSource, type PolymarketUsTrader } from "../../src/portfolio/live/polymarket-us.ts";
-import { holdBackMs } from "../../src/portfolio/live/public-markets.ts";
+import { holdBackMs } from "../../../market/src/live/public-markets.ts";
 import { reachOf } from "../../src/portfolio/live/reach.ts";
 import type { ChainReader } from "../../src/portfolio/live/chain.ts";
 import type { LiveTrader, OrderRequest } from "../../src/portfolio/live/trade.ts";

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { accountCheck, checkMarkdown } from "../../src/portfolio/account-check.ts";
 import type { ExchangeClient, OpenExchange } from "../../src/portfolio/live/exchange.ts";
 import type { RunMm } from "../../src/portfolio/live/metamask.ts";
-import type { PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { Http, HttpReply } from "../../src/portfolio/live/types.ts";
 import { no } from "../../src/portfolio/refuse.ts";
 

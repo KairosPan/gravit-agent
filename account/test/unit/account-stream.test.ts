@@ -9,14 +9,14 @@ import type { Outcome } from "../../src/portfolio/account/exchange.ts";
 import { signAgent, signOwner, simKey, type AgentAction, type OwnerAction } from "../../src/portfolio/account/sign.ts";
 import { ACCOUNT_EVENTS, AccountStream, COALESCE_MS, STREAM_ID } from "../../src/portfolio/account/stream.ts";
 import { register, type LiveDeps } from "../../src/portfolio/live/index.ts";
-import type { Listing, PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { Listing, PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { LiveTrader, Market, OrderState } from "../../src/portfolio/live/trade.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../../src/portfolio/server.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
-import { HUB_URLS, joinHubs, StreamHub, type MarketHub, type WebSocketLike } from "../../src/portfolio/live/stream-hub.ts";
+import { HUB_URLS, joinHubs, StreamHub, type MarketHub, type WebSocketLike } from "../../../market/src/live/stream-hub.ts";
 import { usClock, usSessionFull } from "../../src/portfolio/account/calendar.ts";
-import { CBOE_DELAY_MS, CBOE_FROM } from "../../src/portfolio/live/public-stocks.ts";
-import { ROBINHOOD_FROM, ROBINHOOD_PRICES, usQuote, UsQuoteFeed } from "../../src/portfolio/live/us-quotes.ts";
+import { CBOE_DELAY_MS, CBOE_FROM } from "../../../market/src/live/public-stocks.ts";
+import { ROBINHOOD_FROM, ROBINHOOD_PRICES, usQuote, UsQuoteFeed } from "../../../market/src/live/us-quotes.ts";
 
 /** THE ACCOUNT'S PUSH CHANNEL (account/stream.ts, GET /api/account/stream; feat/paper-live p1). The bus on its own, over a stand-in for a
  * page's socket: nothing kept before a page listens, a snapshot to start, the account events at once with ids that rise, a resume from the

@@ -9,11 +9,11 @@ import { afterAll, describe, expect, it } from "vitest";
 import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import { simKey } from "../../src/portfolio/account/sign.ts";
 import type { LiveDeps } from "../../src/portfolio/live/index.ts";
-import type { Listing, PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { Listing, PublicSource } from "../../../market/src/live/public-markets.ts";
 import { INTERVAL_MS, type Candle, type CandleInterval, type CandlePage, type CandleWindow } from "../../src/portfolio/live/trade.ts";
 import { no } from "../../src/portfolio/refuse.ts";
 import { historyAsk, PortfolioService, type CandlesView } from "../../src/portfolio/service.ts";
-import type { ChinaHistory } from "../../src/portfolio/live/china.ts";
+import type { ChinaHistory } from "../../../market/src/live/china.ts";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { AKSHARE_TOOLS } from "../src/portfolio/live/akshare.ts";
+import { AKSHARE_TOOLS } from "../../market/src/live/akshare.ts";
 import { cardHash } from "../src/portfolio/account/exchange.ts";
 import { signOwner, simKey, type OwnerAction } from "../src/portfolio/account/sign.ts";
 import { no } from "../src/portfolio/refuse.ts";

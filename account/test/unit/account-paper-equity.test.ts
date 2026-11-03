@@ -8,7 +8,7 @@ import { signOwner, simKey, type OwnerAction } from "../../src/portfolio/account
 import type { LiveDeps } from "../../src/portfolio/live/index.ts";
 import { rebuildEquity } from "../../src/portfolio/live/paper-history.ts";
 import { paperBookPath, type PaperBook } from "../../src/portfolio/live/paper.ts";
-import type { Listing, PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { Listing, PublicSource } from "../../../market/src/live/public-markets.ts";
 import { INTERVAL_MS, type Candle, type CandleInterval } from "../../src/portfolio/live/trade.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
 

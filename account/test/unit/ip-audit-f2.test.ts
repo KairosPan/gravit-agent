@@ -6,11 +6,11 @@ import { venuesHere, type AvailabilityDeps } from "../../src/portfolio/live/avai
 import { compareAcross, type CompareVenue } from "../../src/portfolio/live/compare.ts";
 import { exploreAcross } from "../../src/portfolio/live/explore.ts";
 import { guardClient, type ExchangeClient, type OpenExchange } from "../../src/portfolio/live/exchange.ts";
-import { exchangeNo, exchangeTickers, holdBackMs, kalshiPublic, polymarketPublic, preIpoPublic, stockTokensPublic, type Listing, type PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import { exchangeNo, exchangeTickers, holdBackMs, kalshiPublic, polymarketPublic, preIpoPublic, stockTokensPublic, type Listing, type PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { Reach } from "../../src/portfolio/live/reach.ts";
 import { pick, type LiveTrader, type Market } from "../../src/portfolio/live/trade.ts";
 import type { HttpReply } from "../../src/portfolio/live/types.ts";
-import { json, MIN, network, NOW, venueOf, type Rec } from "./live-public-markets-fixtures.ts";
+import { json, MIN, network, NOW, venueOf, type Rec } from "../../../market/test/unit/live-public-markets-fixtures.ts";
 
 /** The IP audit's findings about the keyless public markets, the comparison, Markets, the list of where this user can connect and the terms
  * table (cluster f2, 2026-10-10): a public read blames no key, reads a ban, an edge, a redirect or a page in the venue's place as what it

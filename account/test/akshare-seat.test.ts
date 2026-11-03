@@ -7,12 +7,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createAkshare } from "../src/portfolio/live/akshare.ts";
+import { createAkshare } from "../../market/src/live/akshare.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../src/portfolio/server.ts";
 import { PortfolioService } from "../src/portfolio/service.ts";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
-const FIXTURE = fileURLToPath(new URL("./fixtures/fake-akshare-mcp.mjs", import.meta.url));
+const FIXTURE = fileURLToPath(new URL("../../market/test/fixtures/fake-akshare-mcp.mjs", import.meta.url));
 
 let home: string;
 let svc: PortfolioService;

@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -24,5 +24,9 @@ describe("the market holds no wallet", () => {
   });
   it("market/src names no wallet home", () => {
     expect(files.filter((f) => /BUYER_HOME|\.buyer-agent-demo/.test(text(f)))).toEqual([]);
+  });
+  it("the market carries the keyless modules", () => {
+    for (const f of ["public-markets","stream-hub","china","akshare","cn-relay","cn-ifind","prices","us-quotes","public-stocks","public-rwa","history-stocks"])
+      expect(existsSync(join(SRC, "live", `${f}.ts`))).toBe(true);
   });
 });

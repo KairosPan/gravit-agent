@@ -6,7 +6,7 @@ import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import { alpacaSource } from "../../src/portfolio/live/alpaca.ts";
 import { kalshiSource } from "../../src/portfolio/live/kalshi.ts";
 import { metamaskSource, MmError, parseMm, type RunMm } from "../../src/portfolio/live/metamask.ts";
-import { holdBackMs } from "../../src/portfolio/live/public-markets.ts";
+import { holdBackMs } from "../../../market/src/live/public-markets.ts";
 import { robinhoodCryptoSource, robinhoodStocksSource, type McpSession, type McpTool, type OpenMcp } from "../../src/portfolio/live/robinhood.ts";
 import { OAuthSignIn } from "../../src/portfolio/live/signin.ts";
 import type { LiveTrader, OrderRequest } from "../../src/portfolio/live/trade.ts";

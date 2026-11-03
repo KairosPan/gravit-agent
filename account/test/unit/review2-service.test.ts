@@ -19,7 +19,7 @@ import { BRIDGE_CHAINS } from "../../src/portfolio/live/bridge.ts";
 import { CHAINS, STABLECOINS, type ChainReader } from "../../src/portfolio/live/chain.ts";
 import type { EarnPosition, LiveEarner } from "../../src/portfolio/live/earn.ts";
 import { register } from "../../src/portfolio/live/index.ts";
-import type { PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { Candle, LiveTrader, Market, MarketStats, OrderState, Position } from "../../src/portfolio/live/trade.ts";
 import { STABLES, type LiveSource } from "../../src/portfolio/live/types.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../../src/portfolio/server.ts";

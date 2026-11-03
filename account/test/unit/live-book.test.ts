@@ -16,7 +16,7 @@ import { exchangeTrader } from "../../src/portfolio/live/exchange-trade.ts";
 import type { ExchangeClient, OpenExchange } from "../../src/portfolio/live/exchange.ts";
 import { register } from "../../src/portfolio/live/index.ts";
 import { paperSource } from "../../src/portfolio/live/paper.ts";
-import { BOOK_MS, exchangeTickers, hyperliquidPreIpoPublic, hyperliquidPublic, kalshiPublic, polymarketPublic, polymarketUsPublic, PUBLIC_HOSTS, type Listing, type PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import { BOOK_MS, exchangeTickers, hyperliquidPreIpoPublic, hyperliquidPublic, kalshiPublic, polymarketPublic, polymarketUsPublic, PUBLIC_HOSTS, type Listing, type PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { LiveTrader, Market, OrderBook, OrderState, PublicTrade } from "../../src/portfolio/live/trade.ts";
 import type { Http, HttpReply, LiveSource } from "../../src/portfolio/live/types.ts";
 import { no } from "../../src/portfolio/refuse.ts";

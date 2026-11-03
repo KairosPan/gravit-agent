@@ -18,7 +18,7 @@ import { applyOwner, emptyState } from "../../src/portfolio/account/state.ts";
 import { exploreAcross } from "../../src/portfolio/live/explore.ts";
 import type { ExchangeClient, OpenExchange } from "../../src/portfolio/live/exchange.ts";
 import { openLive, type LiveDeps } from "../../src/portfolio/live/index.ts";
-import { exchangeTickers, holdBackMs, kalshiPublic, polymarketPublic, PUBLIC_HOSTS, stockTokensPublic, type PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import { exchangeTickers, holdBackMs, kalshiPublic, polymarketPublic, PUBLIC_HOSTS, stockTokensPublic, type PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { Candle, CandlePage, Market } from "../../src/portfolio/live/trade.ts";
 import type { Http, HttpReply } from "../../src/portfolio/live/types.ts";
 import { agentSetupOf } from "../../src/portfolio/server.ts";

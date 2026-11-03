@@ -3,8 +3,8 @@ import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { RELAY_URL_MAX, type CnRelay, type RelayAnswer } from "../../src/portfolio/live/cn-relay.ts";
-import type { CnIfind, IfindAnswer } from "../../src/portfolio/live/cn-ifind.ts";
+import { RELAY_URL_MAX, type CnRelay, type RelayAnswer } from "../../../market/src/live/cn-relay.ts";
+import type { CnIfind, IfindAnswer } from "../../../market/src/live/cn-ifind.ts";
 import { startPortfolioServer } from "../../src/portfolio/server.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
 
