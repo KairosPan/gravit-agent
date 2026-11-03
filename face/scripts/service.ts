@@ -14,6 +14,11 @@
  *   npm run service -- url          the sign-in URL (the one with ?token=) from its log - maybe the previous run's while the face does not answer
  *   npm run service -- uninstall    stop it and take it out of launchd; the ledger and $DSH_HOME/.env stay
  *
+ * Beside the face, `install` puts a second LaunchAgent, the watchdog ({@link WATCHDOG_LABEL}, spec §16
+ * H4): launchd runs scripts/watchdog.ts every five minutes, which checks the desk as `status --check`
+ * does, restarts a face that does not answer - once per outage - and tells the phone. `uninstall`
+ * takes it out first; `status` prints its last state while its plist is installed.
+ *
  * Every command takes `--port N` for a face not on 3090; without it the port is the installed
  * plist's FACE_PORT, else 3090. `install` hands the port to the face as FACE_PORT - the one given,
  * or the installed one, so a reinstall without `--port` does not move the face. The log and the
@@ -51,10 +56,17 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
 import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
-import { deskDir, deskStatusLines, readEvents, runsOf, type DeskRun, type DeskStatus } from "../src/desk.ts";
+import { deskDir, deskStatusLines, deskTime, readEvents, runsOf, type DeskRun, type DeskStatus } from "../src/desk.ts";
+import type { WatchdogState } from "./watchdog.ts";
 
 /** The LaunchAgent's label: the plist is `com.gravit.face.plist`, the job `gui/<uid>/com.gravit.face`. */
 export const LABEL = "com.gravit.face";
+
+/** The watchdog's label: its plist is `com.gravit.face.watchdog.plist`, its job `gui/<uid>/com.gravit.face.watchdog`. */
+export const WATCHDOG_LABEL = "com.gravit.face.watchdog";
+
+/** The watchdog's state file in the desk's directory (scripts/watchdog.ts writes it, `status` reads it). */
+export const WATCHDOG_STATE_FILE = "watchdog.json";
 
 /** The names the service needs from $DSH_HOME/.env - DeepSeek's key for Gravit, Alpaca's pair for
  * the market data and the paper account. `install` names those the home's file lacks: a face
@@ -182,6 +194,74 @@ ${Object.entries(env).map(([k, v]) => `    <key>${xml(k)}</key><string>${xml(v)}
 </plist>
 `;
   return { plist, path: join(opts.launchAgentsDir, `${LABEL}.plist`), log, errLog, args, env };
+}
+
+/**
+ * The watchdog's LaunchAgent (spec §16 H4), rendered as {@link servicePlan} renders the face's. Pure.
+ *
+ * - `ProgramArguments`: the face's node and tsx loader, then face/scripts/watchdog.ts.
+ * - `WorkingDirectory`: face/. `EnvironmentVariables`: PATH through {@link filterPath}, HOME and
+ *   DSH_HOME only - no key and no port: the watchdog reads its Telegram names from $DSH_HOME/.env and
+ *   the port from the face's installed plist.
+ * - `StartInterval 300` and `RunAtLoad false`: one check every five minutes, the first five minutes
+ *   after the job is loaded; no KeepAlive - each run checks once and exits.
+ * - `Umask 63` (077), and its logs watchdog.log / watchdog.err.log beside the face's.
+ * @param opts - as {@link servicePlan}'s, without the port.
+ */
+export function watchdogPlan(opts: { root: string; home: string; homeDir: string; node: string; path: string; launchAgentsDir: string }): ServicePlan {
+  const face = join(opts.root, "face");
+  const logs = join(opts.home, "face", "service");
+  const log = join(logs, "watchdog.log");
+  const errLog = join(logs, "watchdog.err.log");
+  const loader = pathToFileURL(join(face, "node_modules", "tsx", "dist", "loader.mjs")).href;
+  const args = [opts.node, "--import", loader, join(face, "scripts", "watchdog.ts")];
+  const env: Record<string, string> = { PATH: filterPath(opts.path), HOME: opts.homeDir, DSH_HOME: opts.home };
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${xml(WATCHDOG_LABEL)}</string>
+  <key>ProgramArguments</key>
+  <array>
+${args.map((a) => `    <string>${xml(a)}</string>`).join("\n")}
+  </array>
+  <key>WorkingDirectory</key><string>${xml(face)}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+${Object.entries(env).map(([k, v]) => `    <key>${xml(k)}</key><string>${xml(v)}</string>`).join("\n")}
+  </dict>
+  <key>RunAtLoad</key><false/>
+  <key>StartInterval</key><integer>300</integer>
+  <key>Umask</key><integer>63</integer>
+  <key>StandardOutPath</key><string>${xml(log)}</string>
+  <key>StandardErrorPath</key><string>${xml(errLog)}</string>
+  <key>ProcessType</key><string>Standard</string>
+</dict>
+</plist>
+`;
+  return { plist, path: join(opts.launchAgentsDir, `${WATCHDOG_LABEL}.plist`), log, errLog, args, env };
+}
+
+/**
+ * `status`'s watchdog line: `watchdog: <launchd's state>; <last check>; <what the state says>`. The
+ * last check is when watchdog.json was last written - every run writes it - and the state is the
+ * outage (since when, restarted when), the degraded checks, or `clear`.
+ * @param args - `job`, what launchd said of the watchdog's job; `state`, the parsed file, or
+ *   `undefined` when there is none; `error`, why the file could not be read; `checkedAt`, its mtime;
+ *   `now`, the time the line is read at.
+ */
+export function watchdogLine(args: { job: { loaded: boolean; state?: string }; state?: WatchdogState; error?: string; checkedAt?: Date; now: Date }): string {
+  const launchd = args.job.loaded ? (args.job.state ?? "state unknown") : "not loaded";
+  const at = (iso: string): string => deskTime(new Date(iso), args.now);
+  if (args.error !== undefined) return `watchdog: ${launchd}; state unreadable (${args.error})`;
+  if (args.state === undefined || args.checkedAt === undefined) return `watchdog: ${launchd}; no check yet`;
+  const { state } = args;
+  const what = state.outageSince !== undefined
+    ? `down since ${at(state.outageSince)}${state.restartedAt === undefined ? "" : `, restarted ${at(state.restartedAt)}`}`
+    : state.degradedChecks > 0
+      ? `degraded for ${state.degradedChecks} check(s)${state.degradedSince === undefined ? "" : ` since ${at(state.degradedSince)}`}`
+      : "clear";
+  return `watchdog: ${launchd}; last check ${deskTime(args.checkedAt, args.now)}; ${what}`;
 }
 
 /** One `NAME=VALUE` line, indented by spaces or tabs or not, an `export ` before the name allowed -
@@ -584,6 +664,12 @@ export interface ServiceContext {
   job: string;
   /** `--check`: `status` adds the desk's health ({@link checkHealth}) and exits with its code. */
   check?: boolean;
+  /** The watchdog's LaunchAgent as install would write it now, on this shell's home. */
+  watchdog: ServicePlan;
+  /** Whether the watchdog's plist exists. */
+  watchdogInstalled: boolean;
+  /** `gui/<uid>/com.gravit.face.watchdog`. */
+  watchdogJob: string;
 }
 
 /** The context `status` and {@link checkHealth} work from - {@link ServiceContext}'s name in the check's signature. */
@@ -711,14 +797,17 @@ export function contextOf(deps: ServiceDeps, flagPort: number | undefined): Serv
   const home = named !== undefined && isAbsolute(named) ? named : deps.home;
   const served = servicePlan({ ...common, home });
   const domain = `gui/${deps.uid}`;
+  const watchdog = watchdogPlan({ root: deps.root, home: deps.home, homeDir: deps.homeDir, node: deps.nodePath, path: deps.envPath, launchAgentsDir });
   return {
     deps, plan: servicePlan({ ...common, home: deps.home }), installed, home, log: served.log, errLog: served.errLog,
     port: planPort ?? DEFAULT_PORT, domain, job: `${domain}/${LABEL}`,
+    watchdog, watchdogInstalled: existsSync(watchdog.path), watchdogJob: `${domain}/${WATCHDOG_LABEL}`,
   };
 }
 
-function jobInfo(ctx: ServiceContext): JobInfo {
-  const { ok, out } = ctx.deps.launchctl(["print", ctx.job]);
+/** What launchd says of `job` - the face's unless another (the watchdog's) is named. */
+function jobInfo(ctx: ServiceContext, job: string = ctx.job): JobInfo {
+  const { ok, out } = ctx.deps.launchctl(["print", job]);
   return ok && out.trim() !== "" ? { loaded: true, ...parseLaunchctlPrint(out) } : { loaded: false };
 }
 
@@ -732,8 +821,8 @@ function failed(ctx: ServiceContext, args: string[], result: { out: string }): n
 /** Enable the job - which needs no loaded job, and clears a `launchctl disable` that would refuse the
  * bootstrap - then load the plist into launchd, which starts the face (RunAtLoad). A failure is
  * printed and stops it; true when both succeeded. */
-function bootstrapped(ctx: ServiceContext): boolean {
-  for (const args of [["enable", ctx.job], ["bootstrap", ctx.domain, ctx.plan.path]]) {
+function bootstrapped(ctx: ServiceContext, job: string = ctx.job, plist: string = ctx.plan.path): boolean {
+  for (const args of [["enable", job], ["bootstrap", ctx.domain, plist]]) {
     const result = ctx.deps.launchctl(args);
     if (!result.ok) {
       failed(ctx, args, result);
@@ -750,12 +839,12 @@ function bootstrapped(ctx: ServiceContext): boolean {
  * and then every 500 ms, for up to 10 s.
  * @returns `gone`, whether launchd no longer holds the job at the end; `text`, what bootout printed.
  */
-async function bootoutAndWait(ctx: ServiceContext): Promise<{ gone: boolean; text: string }> {
-  const { out } = ctx.deps.launchctl(["bootout", ctx.job]);
-  let gone = !jobInfo(ctx).loaded;
+async function bootoutAndWait(ctx: ServiceContext, job: string = ctx.job): Promise<{ gone: boolean; text: string }> {
+  const { out } = ctx.deps.launchctl(["bootout", job]);
+  let gone = !jobInfo(ctx, job).loaded;
   for (let waited = 0; !gone && waited < WAIT_MS; waited += POLL_MS) {
     await ctx.deps.sleep(POLL_MS);
-    gone = !jobInfo(ctx).loaded;
+    gone = !jobInfo(ctx, job).loaded;
   }
   return { gone, text: out.trim() };
 }
@@ -788,6 +877,29 @@ async function statusBlock(ctx: ServiceContext): Promise<void> {
    * said above is that face's, not the job's. */
   else if (job.loaded && job.pid !== undefined && answer.pid !== job.pid) {
     deps.out(`the face answering on ${port} is pid ${answer.pid}, not launchd's job (pid ${job.pid}): another face holds the port`);
+  }
+}
+
+/** `status`'s watchdog line ({@link watchdogLine}), from launchd and the installed home's watchdog.json. */
+function watchdogStatus(ctx: ServiceContext): string {
+  const job = jobInfo(ctx, ctx.watchdogJob);
+  const path = join(deskDir(ctx.home), WATCHDOG_STATE_FILE);
+  const now = new Date();
+  let text: string;
+  let checkedAt: Date;
+  try {
+    checkedAt = statSync(path).mtime;
+    text = readFileSync(path, "utf8");
+  } catch (err) {
+    const code = (err as { code?: unknown }).code;
+    return watchdogLine(code === "ENOENT" ? { job, now } : { job, error: reasonOf(err), now });
+  }
+  try {
+    const state = JSON.parse(text) as WatchdogState;
+    if (state === null || typeof state !== "object" || typeof state.degradedChecks !== "number") throw new Error("not a watchdog state");
+    return watchdogLine({ job, state, checkedAt, now });
+  } catch (err) {
+    return watchdogLine({ job, error: reasonOf(err), now });
   }
 }
 
@@ -869,18 +981,27 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
     try {
       mkdirSync(dirname(plan.log), { recursive: true, mode: 0o700 });
       mkdirSync(dirname(plan.path), { recursive: true });
-      writeFileSync(plan.path, plan.plist, { mode: 0o644 });
-      chmodSync(plan.path, 0o644);
+      for (const p of [plan, ctx.watchdog]) {
+        writeFileSync(p.path, p.plist, { mode: 0o644 });
+        chmodSync(p.path, 0o644);
+      }
     } catch (err) {
       deps.out(`cannot write ${pathOf(err) ?? plan.path}: ${reasonOf(err)}`);
       return 1;
     }
     if (!bootstrapped(ctx)) return 1;
+    /* Then the watchdog: a loaded one is booted out first, so the bootstrap loads the new plist. */
+    if (jobInfo(ctx, ctx.watchdogJob).loaded) {
+      const { gone, text } = await bootoutAndWait(ctx, ctx.watchdogJob);
+      if (!gone) return failed(ctx, ["bootout", ctx.watchdogJob], { out: text });
+    }
+    if (!bootstrapped(ctx, ctx.watchdogJob, ctx.watchdog.path)) return 1;
     deps.out(`installed: ${plan.path}`);
     deps.out(`runs: ${plan.args.at(-1)}`);
     deps.out(`home: ${deps.home}`);
     deps.out(`node: ${plan.args[0]}`);
     deps.out(`log: ${plan.log}`);
+    deps.out(`watchdog: ${ctx.watchdog.path} checks the desk every 5 minutes (log: ${ctx.watchdog.log})`);
     /* A terminal face reads the checkout under the terminal's grant; under launchd node is its own
      * responsible process, which macOS asks about - or refuses with EPERM - in these folders. */
     const guarded = guardedFolderOf(deps.root, deps.homeDir);
@@ -894,8 +1015,25 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
 
   async uninstall(ctx) {
     const { deps, plan } = ctx;
+    /* The watchdog first, so it never restarts a face this is taking out. Launchd is asked about it
+     * only while its plist exists. */
+    let watchdogLeft = true;
+    if (ctx.watchdogInstalled) {
+      const left = jobInfo(ctx, ctx.watchdogJob).loaded ? await bootoutAndWait(ctx, ctx.watchdogJob) : { gone: true, text: "" };
+      try {
+        rmSync(ctx.watchdog.path, { force: true });
+      } catch (err) {
+        deps.out(`cannot remove ${ctx.watchdog.path}: ${reasonOf(err)}`);
+        return 1;
+      }
+      watchdogLeft = left.gone;
+      deps.out(left.gone
+        ? `watchdog: launchd no longer runs it and ${ctx.watchdog.path} is removed`
+        : `watchdog: launchd still holds the job${left.text === "" ? "" : ` (${left.text})`}; its plist is removed`);
+    }
     const loaded = jobInfo(ctx).loaded;
     if (!ctx.installed && !loaded) {
+      if (ctx.watchdogInstalled) return watchdogLeft ? 0 : 1;
       deps.out(`not installed: no ${plan.path}, and launchd has no job ${ctx.job}`);
       return 0;
     }
@@ -912,7 +1050,7 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
     if (left.gone) {
       const plist = ctx.installed ? `${plan.path} is removed` : `there was no ${plan.path}`;
       deps.out(`uninstalled: launchd no longer runs it and ${plist}; ${untouched}`);
-      return 0;
+      return watchdogLeft ? 0 : 1;
     }
     const plist = ctx.installed ? "the plist is removed" : `there was no ${plan.path}`;
     deps.out(`launchd still holds the job${left.text === "" ? "" : ` (${left.text})`}; ${plist}, so it will not start at the next login; ${untouched}`);
@@ -957,6 +1095,7 @@ const COMMANDS: Record<string, (ctx: ServiceContext) => Promise<number>> = {
     const { deps, port } = ctx;
     if (!ctx.installed) deps.out(formatStatus({ label: LABEL, info: {}, installed: false, status: undefined, url: undefined, port }));
     else await statusBlock(ctx);
+    if (ctx.watchdogInstalled) deps.out(watchdogStatus(ctx));
     if (!ctx.check) return 0;
     const { code, reason } = await checkHealth(ctx);
     deps.out(`health: ${code} ${reason}`);
@@ -1069,8 +1208,9 @@ export async function runService(cmd: string, args: string[], deps: ServiceDeps)
 }
 
 /** The real deps: launchctl run with its output captured (a failure's error text comes back as
- * `out`, never straight to the terminal), and this checkout, this operator, this harness home. */
-function realDeps(): ServiceDeps {
+ * `out`, never straight to the terminal), and this checkout, this operator, this harness home.
+ * scripts/watchdog.ts runs its check and its restart over them, its own log as `out`. */
+export function realDeps(): ServiceDeps {
   const envPath = process.env.PATH ?? "";
   return {
     launchctl(args) {

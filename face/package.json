@@ -15,6 +15,7 @@
     "check:fixture": "node scripts/validate-fixture.mjs",
     "render:roles": "tsx scripts/render-roles.ts",
     "service": "tsx scripts/service.ts",
+    "watchdog": "tsx scripts/watchdog.ts",
     "desk": "tsx scripts/desk.ts"
   },
   "dependencies": {

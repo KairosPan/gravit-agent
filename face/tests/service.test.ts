@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   COPIED_KEYS, EXPECTED_KEYS, LABEL, WATCH_POLL_MS, checkHealth, contextOf, ensureHomeEnv, envLinesOf, fetchStatus, filterPath, formatStatus,
-  installPlan, lastTokenUrl, nodeOnPath, parseLaunchctlPrint, portAnswers, runService, servicePlan, type ServiceDeps,
+  installPlan, lastTokenUrl, nodeOnPath, parseLaunchctlPrint, portAnswers, runService, servicePlan, WATCHDOG_LABEL, watchdogPlan, type ServiceDeps,
 } from "../scripts/service.ts";
 import { WATCH_CN_POLL_MS, WATCH_US_POLL_MS } from "../src/watch.ts";
 import { deskStatusLines, type DeskStatus } from "../src/desk.ts";
@@ -428,15 +428,18 @@ test("install replaces a running job: a bootout still in progress, launchd let g
   const r = await rig(lettingGo());
   await writeFile(join(r.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\n");
   assert.equal(await runService("install", [], r.deps), 0, "bootout's exit code is not the outcome: launchd let go of the job");
-  assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB], ["print", JOB], ["print", JOB], ["enable", JOB], ["bootstrap", "gui/501", r.plist]]);
+  const wdPlist = join(dirname(r.plist), "com.gravit.face.watchdog.plist");
+  assert.deepEqual(r.calls, [["print", JOB], ["bootout", JOB], ["print", JOB], ["print", JOB], ["enable", JOB], ["bootstrap", "gui/501", r.plist],
+    ["print", WD_JOB], ["enable", WD_JOB], ["bootstrap", "gui/501", wdPlist]], "then the watchdog beside it");
   assert.deepEqual(r.sleeps, [500, 500, 500], "one poll until launchd let go of the job, two until its face let go of the port");
   assert.ok(r.urls.every((u) => u === "http://127.0.0.1:3090/data/desk/status"));
   const written = await readFile(r.plist, "utf8");
   assert.equal(written, servicePlan({ root: r.deps.root, home: r.deps.home, homeDir: r.deps.homeDir, node: "/usr/local/bin/node", path: "/usr/local/bin:/usr/bin", launchAgentsDir: dirname(r.plist) }).plist);
   assert.equal((await stat(r.plist)).mode & 0o777, 0o644);
   assert.equal((await stat(join(r.deps.home, "face", "service"))).mode & 0o777, 0o700, "the logs directory is the operator's alone");
-  assert.deepEqual(r.text().split("\n").slice(-6), [`installed: ${r.plist}`, `runs: ${join(r.deps.root, "face", "src", "main.ts")}`,
-    `home: ${r.deps.home}`, "node: /usr/local/bin/node", `log: ${join(r.deps.home, "face", "service", "face.log")}`, "next: npm run service -- url"],
+  assert.deepEqual(r.text().split("\n").slice(-7), [`installed: ${r.plist}`, `runs: ${join(r.deps.root, "face", "src", "main.ts")}`,
+    `home: ${r.deps.home}`, "node: /usr/local/bin/node", `log: ${join(r.deps.home, "face", "service", "face.log")}`,
+    `watchdog: ${wdPlist} checks the desk every 5 minutes (log: ${join(r.deps.home, "face", "service", "watchdog.log")})`, "next: npm run service -- url"],
   "what it runs, on which home, with which node; no privacy line for a checkout outside ~/Desktop, ~/Documents and ~/Downloads");
   assert.ok(!r.text().includes("moving"), "no plist named another home");
 });
@@ -827,7 +830,8 @@ test("status, logs and url read the home the installed plist names, else this sh
   assert.equal(r.text().split("\n")[0], `moving the service's home from ${served} to ${r.deps.home}`, "and says it moves the service there, unescaped");
   r.reset();
   await runService("status", [], r.deps);
-  assert.match(r.text(), /\nledger: last boot 2026-10-19T15:00:00\.000Z \(pid 77\) - no shutdown event$/, "and status follows the plist there");
+  assert.match(r.text(), /\nledger: last boot 2026-10-19T15:00:00\.000Z \(pid 77\) - no shutdown event\nwatchdog: not loaded; no check yet$/,
+    "and status follows the plist there, the watchdog's line last");
 
   for (const plist of [`<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n  <key>Label</key><string>${LABEL}</string>\n</dict>\n</plist>\n`,
     servicePlan({ root: r.deps.root, home: "relative/home", homeDir: r.deps.homeDir, node: r.deps.nodePath, path: r.deps.envPath, launchAgentsDir: dirname(r.plist) }).plist]) {
@@ -1085,4 +1089,72 @@ test("status --check returns the code and prints the health line; plain status s
   await putPlist(stopped);
   assert.equal(await runService("status", ["--check"], stopped.deps), 3);
   assert.equal(stopped.text().split("\n").at(-1), "health: 3 stopped");
+});
+
+/* The watchdog (spec §16 H4): its own LaunchAgent beside the face's, installed and uninstalled with it. */
+
+const WD_JOB = `gui/501/${WATCHDOG_LABEL}`;
+
+test("the watchdog plist carries its label, StartInterval 300, RunAtLoad false and the watchdog script", () => {
+  const p = watchdogPlan({ root: "/repo", home: "/h/.dsh", homeDir: "/h", node: "/usr/local/bin/node", path: "/usr/local/bin:/repo/face/node_modules/.bin", launchAgentsDir: "/h/Library/LaunchAgents" });
+  assert.equal(WATCHDOG_LABEL, "com.gravit.face.watchdog");
+  assert.equal(p.path, "/h/Library/LaunchAgents/com.gravit.face.watchdog.plist");
+  assert.deepEqual(p.args, ["/usr/local/bin/node", "--import", "file:///repo/face/node_modules/tsx/dist/loader.mjs", "/repo/face/scripts/watchdog.ts"]);
+  assert.deepEqual(p.env, { PATH: "/usr/local/bin", HOME: "/h", DSH_HOME: "/h/.dsh" });
+  assert.equal(p.log, "/h/.dsh/face/service/watchdog.log"); assert.equal(p.errLog, "/h/.dsh/face/service/watchdog.err.log");
+  for (const needle of ["<key>Label</key><string>com.gravit.face.watchdog</string>", "<key>StartInterval</key><integer>300</integer>",
+    "<key>RunAtLoad</key><false/>", "<key>Umask</key><integer>63</integer>", "<key>WorkingDirectory</key><string>/repo/face</string>",
+    "    <string>/repo/face/scripts/watchdog.ts</string>\n", `<key>StandardOutPath</key><string>${p.log}</string>`,
+    `<key>StandardErrorPath</key><string>${p.errLog}</string>`]) assert.ok(p.plist.includes(needle), needle);
+  assert.ok(!p.plist.includes("KeepAlive"), "launchd runs it every five minutes, never keeps it alive");
+  assert.doesNotMatch(p.plist, /KEY|TOKEN|SECRET|FACE_PORT/, "no credential and no port in its environment");
+});
+
+test("install and uninstall bootstrap and boot out both jobs", async () => {
+  const r = await rig();
+  await writeFile(join(r.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\n");
+  const wdPlist = join(dirname(r.plist), `${WATCHDOG_LABEL}.plist`);
+  assert.equal(await runService("install", [], r.deps), 0);
+  assert.deepEqual(r.calls, [["print", JOB], ["enable", JOB], ["bootstrap", "gui/501", r.plist], ["print", WD_JOB], ["enable", WD_JOB], ["bootstrap", "gui/501", wdPlist]]);
+  const p = watchdogPlan({ root: r.deps.root, home: r.deps.home, homeDir: r.deps.homeDir, node: r.deps.nodePath, path: r.deps.envPath, launchAgentsDir: dirname(r.plist) });
+  assert.equal(await readFile(wdPlist, "utf8"), p.plist);
+  assert.equal((await stat(wdPlist)).mode & 0o777, 0o644);
+  assert.ok(r.text().includes(`watchdog: ${wdPlist} checks the desk every 5 minutes (log: ${p.log})`));
+  assert.equal(r.text().split("\n").at(-1), "next: npm run service -- url");
+
+  const both = (args: string[], calls: string[][]) =>
+    args[0] === "print" && !calls.some((c) => c[0] === "bootout" && c[1] === args[1]) ? loaded("running", args[1] === JOB ? 42 : 7) : undefined;
+  const again = await rig({ launchctl: both });
+  await putPlist(again);
+  assert.equal(await runService("install", [], again.deps), 0, "a reinstall replaces both jobs");
+  assert.deepEqual(again.calls.filter((c) => c[1] === WD_JOB), [["print", WD_JOB], ["bootout", WD_JOB], ["print", WD_JOB], ["enable", WD_JOB]]);
+
+  const u = await rig({ launchctl: both });
+  await putPlist(u);
+  await mkdir(dirname(u.plist), { recursive: true });
+  const uWd = join(dirname(u.plist), `${WATCHDOG_LABEL}.plist`);
+  await writeFile(uWd, "<plist/>");
+  assert.equal(await runService("uninstall", [], u.deps), 0);
+  assert.deepEqual(u.calls, [["print", WD_JOB], ["bootout", WD_JOB], ["print", WD_JOB], ["print", JOB], ["bootout", JOB], ["print", JOB]],
+    "the watchdog first, so it never restarts a face being uninstalled");
+  await assert.rejects(stat(uWd)); await assert.rejects(stat(u.plist));
+  assert.ok(u.text().includes(`watchdog: launchd no longer runs it and ${uWd} is removed`));
+});
+
+test("status prints the watchdog's last state when it is installed", async () => {
+  const r = await rig({ launchctl: (args) => (args[0] === "print" ? loaded("not running") : undefined) });
+  await putPlist(r);
+  await writeFile(join(dirname(r.plist), `${WATCHDOG_LABEL}.plist`), "<plist/>");
+  await runService("status", [], r.deps);
+  assert.equal(r.text().split("\n").at(-1), "watchdog: not running; no check yet");
+  r.reset();
+  await mkdir(join(r.deps.home, "face", "desk"), { recursive: true });
+  await writeFile(join(r.deps.home, "face", "desk", "watchdog.json"), JSON.stringify({ outageSince: "2026-11-30T15:30:00.000Z", restartedAt: "2026-11-30T15:30:20.000Z", degradedChecks: 0 }));
+  await runService("status", [], r.deps);
+  assert.match(r.text().split("\n").at(-1)!, /^watchdog: not running; last check .+ ET; down since 2026-11-30 10:30 ET, restarted 2026-11-30 10:30 ET$/);
+  const none = await rig();
+  await putPlist(none);
+  await runService("status", [], none.deps);
+  assert.ok(!none.text().includes("watchdog"), "no watchdog plist: no line, and launchd not asked about it");
+  assert.deepEqual(none.calls, [["print", JOB]]);
 });
