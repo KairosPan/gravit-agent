@@ -13,6 +13,8 @@ export const PREVIEW_ROWS = 12;        // how many rows get a one-message page f
 export const FOLLOW_RETRY_MS = 2000;   // a follow the host ended is re-decided after this
 export const CONTROL_RETRY_MS = 10_000;
 export const ACTIVATE_MS = 10_000;     // how long activate waits for a follow's first snapshot
+export const EARLIER_PAGE = 50;        // messages per earlier page (the host's own default window)
+export const EARLIER_MAX_PAGES = 200;  // the most pages one earlier call reads toward its toSeq
 
 // a live session is followed (a follow cannot activate it); a cold one is paged, never followed (PLAN D16)
 export const viewFor = conv => (conv?.live ? 'follow' : 'page');
@@ -32,6 +34,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   let listSeq = 0;
   let view = null;                // {id, token, mode: 'follow' | 'page', handle, stale?, failed?, snapped?, waiters?}
   let listPending = false;
+  let earlierRun = null;          // {id, token, promise}: the earlier read under way; a second call for it answers its promise
   // the last good answer of each /data read the list joins: a failed read keeps it, never an empty set in its place
   let lastIndex = null;
   let lastMeta = null;
@@ -80,20 +83,29 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       if (m.kind === 'receipt') onReceipt(m);
     }
   }
-  // a window is folded with the same reducer the stream uses, so backfill and stream draw identically
+  // a window is folded with the same reducer the stream uses, so backfill and stream draw identically; its start is the
+  // first record's seq (0 with none), its replaced every replace range the fold met
   function windowOf(convId, records) {
     const speaker = speakerOf(convOf(convId));
+    const list = Array.isArray(records) ? records : [];
+    const replaced = [];
     let scratch = { conversations: [{ id: convId, messages: [], thinking: null }] };
-    for (const r of Array.isArray(records) ? records : []) {
+    for (const r of list) {
       const frame = { type: 'session/event', sessionId: convId, event: r?.event };
       rememberCall(calls, frame);
-      for (const m of toMessages(mapFrame(frame), calls, now(), speaker)) scratch = host.hostEvent(scratch, { convId, message: m });
+      for (const m of toMessages(mapFrame(frame), calls, now(), speaker)) {
+        if (m.replace) replaced.push([m.replace.start, m.replace.end]);
+        scratch = host.hostEvent(scratch, { convId, message: m });
+      }
     }
-    return scratch.conversations[0].messages;
+    const first = list[0]?.event?.seq;
+    return { messages: scratch.conversations[0].messages, start: typeof first === 'number' ? first : 0, replaced };
   }
-  function applySnapshot(convId, snapshot) {
+  // through: the follow's cursor or the page's asOfSeq, the cut every earlier page of this window is read against
+  function applySnapshot(convId, snapshot, { through, hasMore }) {
     const created = typeof snapshot?.header?.createdAt === 'number' ? snapshot.header.createdAt : undefined;
-    store.dispatch('hostWindow', { convId, messages: windowOf(convId, snapshot?.records), created });
+    const { messages, start, replaced } = windowOf(convId, snapshot?.records);
+    store.dispatch('hostWindow', { convId, messages, created, window: { start, through, hasMore: hasMore === true, replaced } });
     seedBlock(convId, snapshot?.projections);
     for (const m of pending.values()) { // after the window, wherever the list now says each one belongs
       const g = placeGate(m);
@@ -122,7 +134,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       onItem: item => {
         if (!owns()) return;
         if (item?.type === 'snapshot') {
-          applySnapshot(id, item);
+          applySnapshot(id, item, { through: item.cursor, hasMore: item.hasMore });
           if (owns() && !view.snapped) { view.snapped = true; release(view, true); }   // the store's render may have moved on
         }
         else if (item?.type === 'event') accept(id, { type: 'session/event', sessionId: id, event: item.event });
@@ -156,7 +168,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       if (asOfSeq === null) throw new Error('the host answered without a projections cut');
       const pg = await call('session/page', { request: { address: address(id), throughSeq: asOfSeq } });
       if (view !== v || token !== openSeq) return;
-      applySnapshot(id, { projections: cut, records: pg?.records });
+      applySnapshot(id, { projections: cut, records: pg?.records }, { through: asOfSeq, hasMore: pg?.hasMore });
     } catch (err) {
       if (view !== v || token !== openSeq) return;
       view = { ...v, failed: true };
@@ -196,6 +208,45 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       v.waiters.push(answer);
       deadline = timers.after(ACTIVATE_MS, () => { deadline = null; answer(false); }) ?? null;
     });
+  }
+  // earlier history of the conversation on screen, never activating it (PLAN D16): pages before the window's start against
+  // its through, until toSeq when one is given, folded and landed in one hostEarlier; another conversation opened
+  // meanwhile drops them. True when they landed
+  function earlier(id, { toSeq } = {}) {
+    if (earlierRun && earlierRun.id === id && earlierRun.token === openSeq) return earlierRun.promise;
+    const w = convOf(id)?.window;
+    if (!view || view.id !== id || view.failed || !w || !w.hasMore) return Promise.resolve(false);
+    const token = openSeq;
+    const run = { id, token, promise: null };
+    run.promise = (async () => {
+      store.dispatch('hostEarlierLoading', { convId: id, on: true });
+      const records = [];
+      let start = w.start;
+      let hasMore = true;
+      try {
+        for (let n = 0; n < EARLIER_MAX_PAGES; n++) {
+          if (token !== openSeq) break;
+          const pg = await call('session/page', { request: { address: address(id), throughSeq: w.through, beforeSeq: start, maxMessages: EARLIER_PAGE } });
+          if (token !== openSeq) break;
+          const got = Array.isArray(pg?.records) ? pg.records : [];
+          hasMore = pg?.hasMore === true && got.length > 0;
+          const first = got[0]?.event?.seq;
+          records.unshift(...got);
+          if (typeof first === 'number') start = Math.min(start, first);
+          if (!hasMore || typeof toSeq !== 'number' || start <= toSeq) break;
+        }
+      } catch (err) {
+        store.dispatch('hostEarlierLoading', { convId: id, on: false });
+        if (token === openSeq) say(`earlier: ${codeOf(err)}`, true);
+        return false;
+      }
+      if (token !== openSeq) { store.dispatch('hostEarlierLoading', { convId: id, on: false }); return false; }
+      const folded = windowOf(id, records);
+      store.dispatch('hostEarlier', { convId: id, messages: folded.messages, start, hasMore, replaced: folded.replaced });
+      return true;
+    })().finally(() => { if (earlierRun === run) earlierRun = null; });
+    earlierRun = run;
+    return run.promise;
   }
   function reconcile() {
     if (!view || view.failed) return;
@@ -415,5 +466,5 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   openPins();
 
   // leave: no conversation is on screen any more (the last open one was deleted): stop reading the one that was
-  return { open, promote, activate, refresh, reconcile, retryOrphans, answer, leave: closeView, close: () => { closeView(); mux.close(); }, mux };
+  return { open, promote, activate, earlier, refresh, reconcile, retryOrphans, answer, leave: closeView, close: () => { closeView(); mux.close(); }, mux };
 }

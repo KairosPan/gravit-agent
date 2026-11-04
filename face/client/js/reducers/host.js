@@ -7,6 +7,18 @@ const isGate = m => !!m.data && typeof m.data.eventId === 'string';
 const maxSeq = msgs => msgs.reduce((top, m) => (typeof m.seq === 'number' && m.seq > top ? m.seq : top), 0);
 const roomMembers = room => (room && typeof room === 'object' && room.members && typeof room.members === 'object' ? Object.keys(room.members) : []);
 
+// the history window (plan 5): a seq covered by any replace range the window has folded or the stream delivered is
+// never drawn again, whichever page brings it back
+const covered = (ranges, seq) => ranges.some(([a, b]) => seq >= a && seq <= b);
+const rangesOf = w => (Array.isArray(w?.replaced) ? w.replaced : []);
+const unionRanges = (a, b) => {
+  const out = [...a];
+  for (const r of b) if (!out.some(x => x[0] === r[0] && x[1] === r[1])) out.push(r);
+  return out;
+};
+// messages of an earlier slice that may join the drawn ones: below the start, a numbered non-gate, not drawn, not covered
+const earlierOf = (msgs, start, ranges, drawn) => msgs.filter(m => typeof m.seq === 'number' && m.seq < start && !isGate(m) && !drawn.has(m.id) && !covered(ranges, m.seq));
+
 function insertBySeq(msgs, m) {
   const i = msgs.findIndex(x => typeof x.seq === 'number' && x.seq > m.seq);
   return i < 0 ? [...msgs, m] : [...msgs.slice(0, i), m, ...msgs.slice(i)];
@@ -28,7 +40,7 @@ export const reducers = {
     const next = conversations.map(c => {
       const o = old.get(c.id);
       return o
-        ? { ...c, messages: o.messages, loaded: o.loaded, preview: o.preview, previewAt: o.previewAt, usage: o.usage, thinking: o.thinking, subagentCatalog: o.subagentCatalog, created: o.created ?? c.created, lastSeen: Math.max(o.lastSeen ?? 0, c.lastSeen ?? 0) }
+        ? { ...c, messages: o.messages, loaded: o.loaded, window: o.window, outline: o.outline, stats: o.stats, preview: o.preview, previewAt: o.previewAt, usage: o.usage, thinking: o.thinking, subagentCatalog: o.subagentCatalog, created: o.created ?? c.created, lastSeen: Math.max(o.lastSeen ?? 0, c.lastSeen ?? 0) }
         : c;
     });
     return {
@@ -37,23 +49,57 @@ export const reducers = {
     };
   },
 
-  // a follow snapshot or a page: the window whole, never appended to what was drawn
-  hostWindow(s, { convId, messages, usage, created }) {
-    if (!find(s, convId)) return s;
-    return upd(s, convId, c => ({ ...c, messages: [...messages], loaded: true, usage: usage ?? c.usage, created: created ?? c.created }));
+  // a follow snapshot or a page: the window whole, never appended to what was drawn. With a window, the earlier pages
+  // already drawn below its start stay before it (a reconnect while reading up keeps the place), and the start and its
+  // hasMore are the lower window's
+  hostWindow(s, { convId, messages, usage, created, window }) {
+    const c0 = find(s, convId);
+    if (!c0) return s;
+    if (!window) return upd(s, convId, c => ({ ...c, messages: [...messages], loaded: true, usage: usage ?? c.usage, created: created ?? c.created }));
+    const old = c0.window;
+    const replaced = unionRanges(rangesOf(old), rangesOf(window));
+    const drawn = new Set(messages.map(m => m.id));
+    const kept = old ? earlierOf(c0.messages, window.start, replaced, drawn) : [];
+    const lower = old && kept.length > 0 && old.start < window.start;
+    const next = {
+      start: lower ? old.start : window.start, through: window.through,
+      hasMore: lower ? old.hasMore === true : window.hasMore === true, replaced,
+      ...(old?.loading ? { loading: true } : {}),
+    };
+    return upd(s, convId, c => ({ ...c, messages: [...kept, ...messages], loaded: true, window: next, usage: usage ?? c.usage, created: created ?? c.created }));
+  },
+
+  // earlier pages of the window on screen: prepended below its start, a drawn id or a covered seq dropped; a page's own
+  // ranges join the window's (they lie below the page, so they cover nothing already drawn)
+  hostEarlier(s, { convId, messages, start, hasMore, replaced: more = [] }) {
+    const c0 = find(s, convId);
+    if (!c0?.window) return s;
+    const replaced = unionRanges(rangesOf(c0.window), Array.isArray(more) ? more : []);
+    const add = earlierOf(messages, c0.window.start, replaced, new Set(c0.messages.map(m => m.id)));
+    const { loading: _done, ...w } = c0.window;
+    const win = { ...w, start: Math.min(w.start, typeof start === 'number' ? start : w.start), hasMore: hasMore === true, replaced };
+    return upd(s, convId, c => ({ ...c, messages: [...add, ...c.messages], window: win }));
+  },
+  hostEarlierLoading(s, { convId, on }) {
+    const c0 = find(s, convId);
+    if (!c0?.window) return s;
+    const { loading: _was, ...w } = c0.window;
+    return upd(s, convId, c => ({ ...c, window: on ? { ...w, loading: true } : w }));
   },
 
   hostEvent(s, { convId, message }) {
     const c = find(s, convId);
     if (!c) return s;
     let msgs = c.messages;
+    let window = c.window;
     if (message.replace) {
       const { start, end } = message.replace;
       msgs = msgs.filter(m => isGate(m) || !(typeof m.seq === 'number' && m.seq >= start && m.seq <= end));
+      if (window) window = { ...window, replaced: unionRanges(rangesOf(window), [[start, end]]) };
     }
     const i = msgs.findIndex(m => m.id === message.id);
     if (i >= 0) {
-      if (!message.merge) return msgs === c.messages ? s : upd(s, convId, x => ({ ...x, messages: msgs }));
+      if (!message.merge) return msgs === c.messages && window === c.window ? s : upd(s, convId, x => ({ ...x, messages: msgs, ...(window ? { window } : {}) }));
       const merged = { ...msgs[i], data: { ...msgs[i].data, ...message.data } };
       msgs = msgs.map((m, j) => (j === i ? merged : m));
     } else {
@@ -61,7 +107,7 @@ export const reducers = {
       msgs = insertBySeq(msgs, rest);
     }
     const thinking = message.from === 'you' ? c.thinking : null;
-    return upd(s, convId, x => ({ ...x, messages: msgs, thinking }));
+    return upd(s, convId, x => ({ ...x, messages: msgs, thinking, ...(window ? { window } : {}) }));
   },
 
   // a gate lands on its conversation, or waits in orphanGates until the list knows that conversation

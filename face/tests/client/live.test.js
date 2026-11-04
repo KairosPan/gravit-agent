@@ -29,7 +29,10 @@ function rig({ rows = [], channels = { ok: true, root: '/r', channels: [], ungro
     calls.push([endpoint, args]);
     if (endpoint === 'session/list') return { items: rows };
     if (endpoint === 'session/projections') return projections ? projections(args.request.sessionId) : { asOfSeq: 20, values: { title: 'projected' } };
-    if (endpoint === 'session/page') return { records: pages[args.request.address.sessionId] ?? [] };
+    if (endpoint === 'session/page') {
+      const p = pages[args.request.address.sessionId];
+      return typeof p === 'function' ? p(args.request) : { records: p ?? [] };   // a function answers {records, hasMore} per request
+    }
     return undefined;
   };
   // the /data answers by path; a test swaps one for an Error to fail that read
@@ -554,4 +557,116 @@ test('previews: an attachment-only last message reads as its names', async () =>
   await r.ready();
   await settle();
   assert.equal(r.store.get().conversations.find(c => c.id === 'p1').preview, 'chart.png, q3.csv');
+});
+
+// ---- the history window (plan 5 task 3)
+const um = seq => ({ type: 'event', event: { ...frames[0].event, seq, data: { ...frames[0].event.data, id: 'msg-' + seq } } });
+const ums = (...seqs) => seqs.map(um);
+const ids = (r, id) => r.store.get().conversations.find(c => c.id === id).messages.map(m => m.seq);
+const winOf = (r, id) => r.store.get().conversations.find(c => c.id === id).window;
+const earlierCalls = r => r.calls.filter(c => c[0] === 'session/page' && c[1].request.beforeSeq !== undefined);
+// a cold conversation opened on a 40 cut: its first page is 30-31, earlier pages by beforeSeq from `book`
+const coldRig = (book, extra = {}) => rig({
+  rows: [row('c'), row('d')], projections: () => ({ kind: 'sequenced', asOfSeq: 40, values: {} }),
+  pages: { c: req => (req.beforeSeq === undefined ? { records: ums(30, 31), hasMore: true } : book(req)), d: [um(2)] }, ...extra,
+});
+
+test("a follow's snapshot sets the window from its records, cursor and hasMore; a page from asOfSeq and its hasMore", async () => {
+  const r = rig({ rows: [row('live', { agentAvailable: true }), row('cold')], projections: () => ({ kind: 'sequenced', asOfSeq: 20, values: {} }),
+    pages: { cold: req => ({ records: ums(10, 11), hasMore: req.maxMessages === undefined }) } });
+  await r.ready();
+  r.live.open('live'); await settle();
+  r.last('session/follow').cbs.onItem({ type: 'snapshot', header: {}, cursor: 12, hasMore: true, records: ums(4, 7), projections: { asOfSeq: 12, values: {} } });
+  assert.deepEqual(winOf(r, 'live'), { start: 4, through: 12, hasMore: true, replaced: [] });
+  r.live.open('cold'); await settle();
+  assert.deepEqual(winOf(r, 'cold'), { start: 10, through: 20, hasMore: true, replaced: [] });
+});
+
+test("earlier pages with beforeSeq at the window's start and throughSeq at its through, maxMessages 50", async () => {
+  const r = coldRig(() => ({ records: ums(20, 21), hasMore: true }));
+  await r.ready();
+  r.live.open('c'); await settle();
+  assert.equal(await r.live.earlier('c'), true);
+  assert.deepEqual(earlierCalls(r).map(c => c[1]), [{ request: { address: { kind: 'session', sessionId: 'c' }, throughSeq: 40, beforeSeq: 30, maxMessages: 50 } }]);
+  assert.deepEqual(ids(r, 'c'), [20, 21, 30, 31]);
+  assert.deepEqual(winOf(r, 'c'), { start: 20, through: 40, hasMore: true, replaced: [] });
+});
+
+test('earlier with toSeq pages until the start reaches it, and dispatches once', async () => {
+  const book = { 30: ums(20, 21), 20: ums(10, 11), 10: ums(5) };
+  const r = coldRig(req => ({ records: book[req.beforeSeq], hasMore: true }));
+  await r.ready();
+  r.live.open('c'); await settle();
+  const seen = [];
+  const dispatch = r.store.dispatch;
+  r.store.dispatch = (name, arg) => { seen.push(name); return dispatch(name, arg); };
+  const p1 = r.live.earlier('c', { toSeq: 12 });
+  assert.equal(r.live.earlier('c'), p1, 'a second call while one runs answers the first\'s promise');
+  assert.equal(await p1, true);
+  assert.deepEqual(earlierCalls(r).map(c => c[1].request.beforeSeq), [30, 20]);
+  assert.equal(seen.filter(n => n === 'hostEarlier').length, 1);
+  assert.deepEqual(ids(r, 'c'), [10, 11, 20, 21, 30, 31]);
+  assert.equal(winOf(r, 'c').start, 10); assert.equal(winOf(r, 'c').loading, undefined);
+});
+
+test('earlier on a conversation with no more history, or not on screen, calls nothing', async () => {
+  const r = rig({ rows: [row('c'), row('d')], projections: () => ({ kind: 'sequenced', asOfSeq: 40, values: {} }),
+    pages: { c: () => ({ records: ums(30, 31), hasMore: false }), d: () => ({ records: ums(3), hasMore: true }) } });
+  await r.ready();
+  r.live.open('c'); await settle();
+  const before = r.calls.length;
+  assert.equal(await r.live.earlier('c'), false);
+  assert.equal(await r.live.earlier('d'), false, 'd is not on screen');
+  assert.equal(r.calls.length, before);
+});
+
+test('a conversation opened mid-paging drops the pages and clears loading', async () => {
+  let release;
+  const r = coldRig(() => new Promise(res => { release = () => res({ records: ums(20, 21), hasMore: true }); }));
+  await r.ready();
+  r.live.open('c'); await settle();
+  const p = r.live.earlier('c', { toSeq: 1 });
+  await settle();
+  assert.equal(winOf(r, 'c').loading, true);
+  r.live.open('d'); await settle();
+  release();
+  assert.equal(await p, false);
+  assert.deepEqual(ids(r, 'c'), [30, 31], 'nothing prepended');
+  assert.equal(winOf(r, 'c').loading, undefined);
+  assert.deepEqual(ids(r, 'd'), [2], 'the new conversation starts at its tail');
+  assert.equal(earlierCalls(r).length, 1, 'no further page');
+});
+
+test('a refused page says earlier: code and keeps the window', async () => {
+  const r = coldRig(() => { throw Object.assign(new Error('nope'), { code: 'gateway/bad-request' }); });
+  await r.ready();
+  r.live.open('c'); await settle();
+  assert.equal(await r.live.earlier('c'), false);
+  assert.deepEqual(r.store.get().status, { line: 'earlier: gateway/bad-request', bad: true, connected: true });
+  assert.deepEqual(ids(r, 'c'), [30, 31]);
+  assert.deepEqual(winOf(r, 'c'), { start: 30, through: 40, hasMore: true, replaced: [] });
+});
+
+test('earlier never opens a follow', async () => {
+  const r = rig({ rows: [row('live', { agentAvailable: true })], pages: { live: req => ({ records: ums(20, 21), hasMore: false, req }) } });
+  await r.ready();
+  r.live.open('live'); await settle();
+  r.last('session/follow').cbs.onItem({ type: 'snapshot', header: {}, cursor: 44, hasMore: true, records: ums(30, 31), projections: { asOfSeq: 44, values: {} } });
+  const streams = r.streams.length;
+  assert.equal(await r.live.earlier('live'), true);
+  assert.equal(r.streams.length, streams);
+  assert.equal(earlierCalls(r)[0][1].request.throughSeq, 44, 'a followed one pages against its cursor');
+  assert.deepEqual(ids(r, 'live'), [20, 21, 30, 31]);
+  assert.equal(winOf(r, 'live').hasMore, false);
+});
+
+test("a compaction in the loaded window hides the seqs an earlier page brings back", async () => {
+  const checkpoint = { type: 'event', event: { ...um(31).event, surfaceOp: { op: 'replace', startSeq: 20, endSeq: 29 } } };
+  const r = rig({ rows: [row('c')], projections: () => ({ kind: 'sequenced', asOfSeq: 40, values: {} }),
+    pages: { c: req => (req.beforeSeq === undefined ? { records: [um(30), checkpoint], hasMore: true } : { records: ums(18, 19, 20, 21), hasMore: true }) } });
+  await r.ready();
+  r.live.open('c'); await settle();
+  assert.deepEqual(winOf(r, 'c').replaced, [[20, 29]]);
+  assert.equal(await r.live.earlier('c'), true);
+  assert.deepEqual(ids(r, 'c'), [18, 19, 30, 31]);
 });

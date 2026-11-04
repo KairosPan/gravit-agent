@@ -236,3 +236,70 @@ test('hostThumb keeps a src or a null by attachment id', () => {
   assert.deepEqual(s2.thumbs, { 'att-1': 'data:image/png;base64,AAAA', 'att-2': null });
   assert.deepEqual(s0.thumbs, {}, 'a new state, the old untouched');
 });
+
+// ---- the history window (plan 5 task 3): earlier pages prepended by seq, replace ranges remembered
+const win = (start, over = {}) => ({ start, through: 50, hasMore: true, replaced: [], ...over });
+
+test('a window without a window field replaces the messages whole, as before', () => {
+  let s = R.hostWindow(withConv(conv('a')), { convId: 'a', messages: [msg('e1', 1), msg('e2', 2)], window: win(1) });
+  s = R.hostWindow(s, { convId: 'a', messages: [msg('e9', 9)] });
+  assert.deepEqual(seqs(s, 'a'), [9]);
+});
+
+test('a new snapshot keeps the earlier pages below its start and the lower start', () => {
+  let s = R.hostWindow(withConv(conv('a')), { convId: 'a', messages: [msg('e20', 20), msg('e21', 21)], window: win(20) });
+  s = R.hostEarlier(s, { convId: 'a', messages: [msg('e10', 10), msg('e11', 11)], start: 10, hasMore: true });
+  s = R.hostGate(s, { convId: 'a', message: gate('ev-1') });
+  s = R.hostWindow(s, { convId: 'a', messages: [msg('e21', 21), msg('e22', 22)], window: win(21, { through: 60, hasMore: true }) });
+  assert.deepEqual(seqs(s, 'a'), [10, 11, 20, 21, 22], 'the earlier pages and the old head stay; the gate is the snapshot\'s caller\'s to re-place');
+  assert.deepEqual(get(s, 'a').window, { start: 10, through: 60, hasMore: true, replaced: [] });
+  const fresh = R.hostWindow(withConv(conv('b')), { convId: 'b', messages: [msg('e5', 5)], window: win(5, { hasMore: false }) });
+  assert.deepEqual(get(fresh, 'b').window, { start: 5, through: 50, hasMore: false, replaced: [] });
+});
+
+test('a kept or prepended message a replace range covers is dropped', () => {
+  // the window holds a compaction (seq 10) naming seqs 3-9
+  let s = R.hostWindow(withConv(conv('a')), { convId: 'a', messages: [msg('e10', 10, { from: 'system' }), msg('e11', 11)], window: win(10, { replaced: [[3, 9]] }) });
+  s = R.hostEarlier(s, { convId: 'a', messages: [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => msg('e' + n, n)), start: 1, hasMore: false });
+  assert.deepEqual(seqs(s, 'a'), [1, 2, 10, 11], 'a page bringing 1-9 prepends 1 and 2 only');
+  assert.equal(get(s, 'a').window.start, 1); assert.equal(get(s, 'a').window.hasMore, false);
+  // a reconnect's snapshot whose own window starts at 11 and names 3-9 again: 1 and 2 kept, nothing of 3-9 returns
+  s = R.hostWindow(s, { convId: 'a', messages: [msg('e11', 11), msg('e12', 12)], window: win(11, { replaced: [[3, 9]] }) });
+  assert.deepEqual(seqs(s, 'a'), [1, 2, 10, 11, 12]);
+  // an old window's range applies to a snapshot's kept messages too
+  let t = R.hostWindow(withConv(conv('b')), { convId: 'b', messages: [msg('e30', 30)], window: win(30) });
+  t = R.hostEarlier(t, { convId: 'b', messages: [msg('e5', 5), msg('e6', 6)], start: 5, hasMore: true, replaced: [[6, 6]] });
+  assert.deepEqual(seqs(t, 'b'), [5, 30]);
+  assert.deepEqual(get(t, 'b').window.replaced, [[6, 6]], 'a page\'s own ranges join the window\'s');
+});
+
+test('hostEarlier prepends below the start, drops a duplicate id, and takes the page\'s hasMore', () => {
+  let s = R.hostWindow(withConv(conv('a')), { convId: 'a', messages: [msg('e20', 20), msg('e21', 21)], window: win(20) });
+  s = R.hostEarlierLoading(s, { convId: 'a', on: true });
+  assert.equal(get(s, 'a').window.loading, true);
+  s = R.hostEarlier(s, { convId: 'a', messages: [msg('e12', 12), msg('e20', 20, { text: 'dup' }), msg('e25', 25)], start: 12, hasMore: false });
+  assert.deepEqual(seqs(s, 'a'), [12, 20, 21]);
+  assert.equal(get(s, 'a').messages.find(m => m.id === 'e20').text, 't20');
+  assert.deepEqual(get(s, 'a').window, { start: 12, through: 50, hasMore: false, replaced: [] }, 'loading is cleared');
+  s = R.hostEarlierLoading(s, { convId: 'a', on: true });
+  s = R.hostEarlierLoading(s, { convId: 'a', on: false });
+  assert.equal('loading' in get(s, 'a').window, false);
+  assert.equal(R.hostEarlier(withConv(conv('b')), { convId: 'b', messages: [msg('e1', 1)], start: 1, hasMore: false }).conversations[0].messages.length, 0, 'no window, nothing prepended');
+});
+
+test('a streamed replace op joins the window\'s ranges', () => {
+  let s = R.hostWindow(withConv(conv('a')), { convId: 'a', messages: [msg('e20', 20), msg('e21', 21)], window: win(20, { replaced: [[1, 2]] }) });
+  s = R.hostEvent(s, { convId: 'a', message: msg('e30', 30, { from: 'system', replace: { start: 5, end: 21 } }) });
+  assert.deepEqual(seqs(s, 'a'), [30]);
+  assert.deepEqual(get(s, 'a').window.replaced, [[1, 2], [5, 21]]);
+  s = R.hostEarlier(s, { convId: 'a', messages: [msg('e4', 4), msg('e5', 5)], start: 4, hasMore: true });
+  assert.deepEqual(seqs(s, 'a'), [4, 30]);
+});
+
+test('hostList keeps the window, the outline and the stats', () => {
+  let s = R.hostWindow(withConv(conv('a')), { convId: 'a', messages: [msg('e20', 20)], window: win(20) });
+  s = { ...s, conversations: s.conversations.map(c => ({ ...c, outline: [{ turn: 1, seq: 3 }], stats: { turns: 1 } })) };
+  s = R.hostList(s, { conversations: [conv('a', { title: 'A2' })] });
+  const a = get(s, 'a');
+  assert.deepEqual(a.window, win(20)); assert.deepEqual(a.outline, [{ turn: 1, seq: 3 }]); assert.deepEqual(a.stats, { turns: 1 });
+});
