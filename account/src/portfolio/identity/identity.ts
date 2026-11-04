@@ -615,8 +615,10 @@ export class Identity {
   }
 
   /** Slack's socket and connector, from `cursor` on: the cursor written first — after a connect, the ts of the DM the operator was heard
-   * by, so their first words are not taken into the inbox. A read-only account opens no socket */
+   * by, so their first words are not taken into the inbox. A read-only account opens no socket and writes nothing */
   private startSlack(binding: Binding, secret: SlackSecret, cursor: string | undefined): void {
+    // a read-only account neither listens nor writes the cursor: what a later run with writes on reads is left as it was
+    if (this.deps.readOnly) return;
     if (cursor !== undefined) {
       try {
         writeIdentityFile(this.home, CURSOR_FILE, `${cursor}\n`);
@@ -624,7 +626,6 @@ export class Identity {
         this.log(`identity: Slack's cursor could not be written (${err instanceof Error ? ((err as NodeJS.ErrnoException).code ?? err.name) : "error"}); the socket starts from it all the same`);
       }
     }
-    if (this.deps.readOnly) return;
     const stop = new AbortController();
     const apiBase = this.deps.slackApiBase ?? SLACK_API;
     const api = new SlackApi({ token: secret.botToken, appToken: secret.appToken, apiBase, fetch: this.deps.fetch, signal: stop.signal });

@@ -175,8 +175,11 @@ export interface FakeSlack {
   push(envelope: object): void;
   /** send a text frame as it is (not JSON, say, or a large one) to the newest open socket */
   pushText(text: string): void;
-  /** the DM's messages conversations.history answers from, in the order added (chat.postMessage adds the bot's own) */
+  /** the DM's top-level messages conversations.history answers from, in the order added (chat.postMessage adds the bot's own); a parent
+   * is answered with its thread's reply_count and latest_reply, as Slack answers it */
   history: Array<{ ts: string; user: string; text: string; subtype?: string; bot_id?: string; thread_ts?: string }>;
+  /** the DM's thread replies, kept apart from `history` as Slack keeps them: only conversations.replies answers them */
+  replies: Array<{ ts: string; thread_ts: string; user: string; text: string; subtype?: string; bot_id?: string }>;
   /** every ack's envelope_id, in order */
   acks: string[];
   /** every chat.postMessage, its form fields as sent */
@@ -220,7 +223,7 @@ function wsFrame(opcode: number, payload: Buffer): Buffer {
 
 /**
  * A FAKE SLACK on this machine's loopback, one node:http server: the Web API at `/api/<method>` (auth.test, bots.info, users.info,
- * apps.connections.open, conversations.history, chat.postMessage), each a form POST whose `Authorization: Bearer` must be the fake's app
+ * apps.connections.open, conversations.history, conversations.replies, chat.postMessage), each a form POST whose `Authorization: Bearer` must be the fake's app
  * token (apps.connections.open) or bot token (the rest) — `invalid_auth` otherwise, as Slack answers — and Socket Mode at `/link`, a
  * hand-rolled RFC 6455 server: the Sec-WebSocket-Accept handshake, unmasked text frames out, masked frames in, ping and close. Each socket
  * is sent a hello on open; every frame the client sends with an `envelope_id` is recorded as an ack. No test ever reaches Slack: the tokens
@@ -233,6 +236,7 @@ export async function fakeSlack(o: FakeSlackOptions = {}): Promise<FakeSlack> {
   const bot = o.bot ?? { userId: "U0BOT0001", botId: "B0BOT0001", appId: "A0FAKE001", name: "gravit" };
   const users = o.users ?? new Map<string, FakeSlackUser>([["U0OPER001", { name: "pan", displayName: "Pan", realName: "Pan Zhe" }]]);
   const history: FakeSlack["history"] = [];
+  const replies: FakeSlack["replies"] = [];
   const acks: string[] = [];
   const posted: FakeSlack["posted"] = [];
   const calls: FakeSlack["calls"] = [];
@@ -294,7 +298,23 @@ export async function fakeSlack(o: FakeSlackOptions = {}): Promise<FakeSlack> {
         const start = form.cursor ? Number(Buffer.from(form.cursor, "base64").toString("utf8").replace(/^offset:/, "")) || 0 : 0;
         const page = after.slice(start, start + limit);
         const more = start + limit < after.length;
-        return reply(res, 200, { ok: true, messages: page.map((h) => ({ type: "message", ...h })), has_more: more, response_metadata: { next_cursor: more ? Buffer.from(`offset:${start + limit}`).toString("base64") : "" } });
+        const threadOf = (ts: string) => {
+          const rs = replies.filter((r) => r.thread_ts === ts).sort((a, b) => Number(a.ts) - Number(b.ts));
+          return rs.length === 0 ? {} : { thread_ts: ts, reply_count: rs.length, latest_reply: rs[rs.length - 1]!.ts };
+        };
+        return reply(res, 200, { ok: true, messages: page.map((h) => ({ type: "message", ...h, ...threadOf(h.ts) })), has_more: more, response_metadata: { next_cursor: more ? Buffer.from(`offset:${start + limit}`).toString("base64") : "" } });
+      }
+      case "conversations.replies": {
+        const parent = history.find((h) => h.ts === form.ts);
+        if (!parent) return reply(res, 200, { ok: false, error: "thread_not_found" });
+        const oldest = Number(form.oldest ?? "0") || 0;
+        const limit = Math.max(1, Math.min(1000, Number(form.limit ?? "100") || 100));
+        // the parent first, then its replies after oldest, oldest first — as Slack answers it
+        const all = [{ type: "message", ...parent, thread_ts: parent.ts }, ...replies.filter((r) => r.thread_ts === parent.ts && Number(r.ts) > oldest).sort((a, b) => Number(a.ts) - Number(b.ts)).map((r) => ({ type: "message", ...r }))];
+        const start = form.cursor ? Number(Buffer.from(form.cursor, "base64").toString("utf8").replace(/^offset:/, "")) || 0 : 0;
+        const page = all.slice(start, start + limit);
+        const more = start + limit < all.length;
+        return reply(res, 200, { ok: true, messages: page, has_more: more, response_metadata: { next_cursor: more ? Buffer.from(`offset:${start + limit}`).toString("base64") : "" } });
       }
       case "chat.postMessage": {
         const ts = `${1_730_900_000 + posts}.${String(++posts).padStart(6, "0")}`;
@@ -396,6 +416,7 @@ export async function fakeSlack(o: FakeSlackOptions = {}): Promise<FakeSlack> {
     bot,
     users,
     history,
+    replies,
     acks,
     posted,
     calls,

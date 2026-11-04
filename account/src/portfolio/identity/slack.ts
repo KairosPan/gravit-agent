@@ -420,6 +420,10 @@ export const SLACK_CHAT_OFF = chatOffLine("slack");
 export const BACKFILL_PAGE = 100;
 /** Slack's codes for tokens it no longer takes: the status's pollFailing until a call goes through */
 const AUTH_CODES = new Set(["invalid_auth", "token_revoked", "account_inactive", "not_authed"]);
+/** how far back the backfill looks for threads with a reply after the cursor (conversations.history never carries a reply) */
+export const THREAD_LOOKBACK_MS = 24 * 3_600_000;
+/** the most pages of history read for that look back */
+const THREAD_PAGES_MAX = 5;
 /** how many answered messages are remembered, so a live envelope and the backfill do not answer the same one twice */
 const ANSWERED_MAX = 200;
 
@@ -469,16 +473,18 @@ export interface SlackConnectorDeps {
  * SLACK, ONCE CONNECTED: one Socket Mode link for the app (slack-socket.ts), and what it hears.
  *
  * At every hello — before any live envelope is handled, which waits unacked in the link — the DM's history after the cursor
- * (conversations.history, not inclusive, 100 a page, at most INBOX_MAX messages: the newest, when there are more, with one line), oldest
- * first, each row read as the event it would have been. A backfill that fails throws: the link closes the socket, backs off and opens
+ * (conversations.history, not inclusive, 100 a page) and the replies after the cursor of each thread whose latest reply is after it
+ * (conversations.replies; its parent among those rows, or in the last 24 h of history), at most INBOX_MAX messages (the newest, when
+ * there are more, with one line), oldest first, each row read as the event it would have been. A backfill that fails throws: the link closes the socket, backs off and opens
  * another, whose hello backfills again from the cursor where it stayed.
  *
  * Each message, live or backfilled:
  *   - the bound operator's text (an events_api envelope of this app and this team, a message in the DM `secret.channel`, from the
  *     operator's user id, no bot and no subtype): `!` commands rewritten to `/` (normalizeCommand); with Chat with Gravit not ticking
  *     Slack and no command, answered SLACK_CHAT_OFF and kept nowhere; else appended to the inbox as `slack:<ts>` (with `slack:<thread_ts>`
- *     as replyTo in a thread), and only then acked and the cursor moved past it. A text the inbox cannot store is held: not acked, so Slack
- *     sends it again (retry_attempt > 0), and the inbox keeps a network id once;
+ *     as replyTo in a thread), and only then acked and the cursor moved past it. A text the inbox cannot store is held (not acked) and
+ *     ends its socket, so nothing after it is handled there and the cursor stays before it: the next hello's backfill reads it again.
+ *     A live text at or before the cursor was handled already: acked and skipped;
  *   - the operator's file (subtype file_share): answered "text only, please";
  *   - anyone else's DM: by sheet 3's rule (memberKind) a bot is dropped, and anyone else — another team's member, a guest, a deactivated
  *     account, a full member who is not the operator — is a stranger: counted in Not you unless blocked, never stored, never answered;
@@ -594,34 +600,63 @@ export class SlackConnector implements Connector {
     }
   }
 
-  /** the DM's history after the cursor, oldest first, each row handled and the cursor moved past it; throws when a page cannot be read or
-   * a text cannot be stored, the cursor left before it */
-  private async backfill(): Promise<void> {
-    const channel = this.d.secret.channel;
-    const oldest = this.cursor ?? tsAt(this.d.clock.now());
+  /** pages of `read` until there is no next page, `max` rows or the connector's stop: the rows, and whether there were more */
+  private async pages(read: (next?: string) => Promise<{ messages: unknown[]; next?: string }>, max: number): Promise<{ rows: unknown[]; more: boolean }> {
     const rows: unknown[] = [];
     let next: string | undefined;
     do {
-      let page: Awaited<ReturnType<SlackApi["history"]>>;
+      let page: { messages: unknown[]; next?: string };
       try {
-        page = await this.d.api.history(channel, oldest, BACKFILL_PAGE, next);
+        page = await read(next);
       } catch (err) {
         this.failed(err);
-        throw new Error(`the backfill could not read the DM's history (${reasonOf(err)})`);
+        throw new Error(`the backfill could not read the DM (${reasonOf(err)})`);
       }
       this.authFailing = undefined;
       rows.push(...page.messages);
       next = page.next;
-    } while (next !== undefined && rows.length < INBOX_MAX && !this.disposed);
-    if (rows.length > INBOX_MAX || next !== undefined) this.d.log(`identity: more than ${INBOX_MAX} messages in the Slack DM since the cursor: the newest ${INBOX_MAX} are read, the older ones are not`);
-    const messages = rows
-      .slice(0, INBOX_MAX)
-      .map((row) => imMessageOf(row !== null && typeof row === "object" ? { ...(row as object), channel, channel_type: "im" } : undefined))
-      .filter((m): m is ImMessage => m !== undefined && tsCompare(m.ts, oldest) > 0)
-      .sort((a, b) => tsCompare(a.ts, b.ts));
-    for (const m of messages) {
+    } while (next !== undefined && rows.length < max && !this.disposed);
+    return { rows, more: rows.length > max || next !== undefined };
+  }
+
+  /** The DM after the cursor, oldest first, each message handled and the cursor moved past it: the top-level messages
+   * (conversations.history), and the replies (conversations.replies) of each thread whose latest reply is after the cursor, its parent
+   * found among those or in the history of the last THREAD_LOOKBACK_MS. Throws when a page cannot be read or a text cannot be stored,
+   * the cursor left before it */
+  private async backfill(): Promise<void> {
+    const channel = this.d.secret.channel;
+    const oldest = this.cursor ?? tsAt(this.d.clock.now());
+    const read = (raw: unknown): ImMessage | undefined => imMessageOf(raw !== null && typeof raw === "object" ? { ...(raw as object), channel, channel_type: "im" } : undefined);
+    const after = (m: ImMessage | undefined): m is ImMessage => m !== undefined && tsCompare(m.ts, oldest) > 0;
+    const top = await this.pages((next) => this.d.api.history(channel, oldest, BACKFILL_PAGE, next), INBOX_MAX);
+    let over = top.more;
+    // a parent: a top-level message whose thread's latest reply is after the cursor
+    const parents = new Set<string>();
+    const noteParents = (rows: unknown[]) => {
+      for (const row of rows) {
+        const r = row as { ts?: unknown; latest_reply?: unknown } | null;
+        if (!r || typeof r.ts !== "string" || !TS_SHAPE.test(r.ts) || typeof r.latest_reply !== "string" || !TS_SHAPE.test(r.latest_reply)) continue;
+        if (tsCompare(r.latest_reply, oldest) > 0) parents.add(r.ts);
+      }
+    };
+    noteParents(top.rows);
+    // a parent before the cursor is not in that read: the last day's history is read for it (bounded)
+    const dayAgo = tsAt(Math.max(0, this.d.clock.now() - THREAD_LOOKBACK_MS));
+    if (tsCompare(dayAgo, oldest) < 0) noteParents((await this.pages((next) => this.d.api.history(channel, dayAgo, BACKFILL_PAGE, next), THREAD_PAGES_MAX * BACKFILL_PAGE)).rows);
+    const byTs = new Map<string, ImMessage>();
+    for (const m of top.rows.slice(0, INBOX_MAX).map(read).filter(after)) byTs.set(m.ts, m);
+    for (const parent of parents) {
       if (this.disposed) return;
-      if (!(await this.handle(m, false))) throw new Error("the backfill stopped at a text the inbox could not store");
+      const thread = await this.pages((next) => this.d.api.replies(channel, parent, oldest, BACKFILL_PAGE, next), INBOX_MAX);
+      over ||= thread.more;
+      // Slack answers the parent too: a top-level message, read (or not) as one
+      for (const m of thread.rows.map(read).filter(after)) if (m.ts !== parent && !byTs.has(m.ts)) byTs.set(m.ts, m);
+    }
+    const all = [...byTs.values()].sort((a, b) => tsCompare(a.ts, b.ts));
+    if (over || all.length > INBOX_MAX) this.d.log(`identity: more than ${INBOX_MAX} messages in the Slack DM since the cursor: the newest ${INBOX_MAX} are read, the older ones are not`);
+    for (const m of all.slice(-INBOX_MAX)) {
+      if (this.disposed) return;
+      if ((await this.handle(m, false)) !== "ok") throw new Error("the backfill stopped at a text the inbox could not store");
       this.advance(m.ts);
     }
   }
@@ -630,39 +665,47 @@ export class SlackConnector implements Connector {
     if (this.disposed) return "hold";
     const m = imMessageOf(envelopeEvent(e, this.team, this.d.secret.appId));
     if (!m) return "ack";
-    return (await this.handle(m, true)) ? "ack" : "hold";
+    const done = await this.handle(m, true);
+    if (done === "ok") return "ack";
+    // the operator's text could not be stored: nothing after it is handled on this socket, so the cursor cannot pass it - the next
+    // hello's backfill reads it again from the cursor (and, while the inbox still cannot store, fails and backs off)
+    if (done === "stop") this.d.socket.reopen("a text of the operator's could not be stored");
+    return "hold";
   }
 
-  /** one message handled; false when it must be held — a text the inbox could not store, or a stranger users.info did not answer for */
-  private async handle(m: ImMessage, live: boolean): Promise<boolean> {
-    if (m.bot || m.user === undefined) return true;
+  /** one message handled: "ok"; "hold" for a stranger users.info did not answer for; "stop" for the operator's text the inbox could not
+   * store */
+  private async handle(m: ImMessage, live: boolean): Promise<"ok" | "hold" | "stop"> {
+    if (m.bot || m.user === undefined) return "ok";
     if (m.user !== this.operator) {
       // the operator's DM holds only the operator and the bot: anyone else is heard live, in their own DM with the app
-      if (!live || m.subtype !== undefined) return true;
-      return this.stranger(m.user);
+      if (!live || m.subtype !== undefined) return "ok";
+      return (await this.stranger(m.user)) ? "ok" : "hold";
     }
-    if (m.channel !== this.d.secret.channel) return true;
+    if (m.channel !== this.d.secret.channel) return "ok";
+    // at or before the cursor: handled already (by the backfill, or before a restart)
+    if (live && this.cursor !== undefined && tsCompare(m.ts, this.cursor) <= 0) return "ok";
     if (m.subtype === "file_share") {
       await this.answer(m.ts, TEXT_ONLY);
       this.advance(m.ts);
-      return true;
+      return "ok";
     }
-    if (m.subtype !== undefined) return true;
+    if (m.subtype !== undefined) return "ok";
     const text = normalizeCommand(m.text);
     if (!this.d.chatOn() && !PHONE_COMMAND.test(text.trim())) {
       await this.answer(m.ts, SLACK_CHAT_OFF);
       this.advance(m.ts);
-      return true;
+      return "ok";
     }
     const replyTo = m.threadTs !== undefined && m.threadTs !== m.ts ? `slack:${m.threadTs}` : undefined;
     try {
       this.d.inbox.append({ network: "slack", messageId: `slack:${m.ts}`, ...(replyTo ? { replyTo } : {}), text, at: atOf(m.ts) }, this.d.binding.botId);
     } catch (err) {
-      this.d.log(`identity: the operator's Slack message could not be stored in the inbox (${(err as NodeJS.ErrnoException).code ?? reasonOf(err)}); it is not acked, so Slack sends it again`);
-      return false;
+      this.d.log(`identity: the operator's Slack message could not be stored in the inbox (${(err as NodeJS.ErrnoException).code ?? reasonOf(err)}); it is not acked, and it is read again from the DM`);
+      return "stop";
     }
     this.advance(m.ts);
-    return true;
+    return "ok";
   }
 
   /** someone other than the operator in a DM with the app: dropped when blocked or a bot, else counted; held when users.info does not

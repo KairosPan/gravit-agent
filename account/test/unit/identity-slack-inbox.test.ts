@@ -166,8 +166,8 @@ describe("the connected Slack connector, through the account", () => {
   let srv: PortfolioServerHandle;
   let clock: ReturnType<typeof hybridClock>;
 
-  const boot = async () => {
-    svc = await PortfolioService.create({ home, venues: "frontline", real: true, liveDeps: { http: async () => ({ status: 599, body: undefined, text: "" }), price: async () => undefined }, publicMarkets: [], liveWrites: { capUsd: 100, pairingCode: "K7QX-M2PA" }, account: { owners: [{ id: owner.address, kind: "eoa", label: "owner", addedAt: new Date().toISOString() }] }, desk: { brain: [scriptedBrain(() => null)], tickMs: 0, env: {} }, identity: { apiBase: tg.url, slackApiBase: slack.url, pollTimeoutS: 1, connectedPollTimeoutS: 1, clock } });
+  const boot = async (o: { readOnly?: boolean } = {}) => {
+    svc = await PortfolioService.create({ home, venues: "frontline", real: true, liveDeps: { http: async () => ({ status: 599, body: undefined, text: "" }), price: async () => undefined }, publicMarkets: [], ...(o.readOnly ? { pairingCode: "K7QX-M2PA" } : { liveWrites: { capUsd: 100, pairingCode: "K7QX-M2PA" } }), account: { owners: [{ id: owner.address, kind: "eoa", label: "owner", addedAt: new Date().toISOString() }] }, desk: { brain: [scriptedBrain(() => null)], tickMs: 0, env: {} }, identity: { apiBase: tg.url, slackApiBase: slack.url, pollTimeoutS: 1, connectedPollTimeoutS: 1, clock } });
     await svc.restoring;
     srv = await startPortfolioServer({ port: 0, service: svc, snapshotMs: 0 });
   };
@@ -287,6 +287,96 @@ describe("the connected Slack connector, through the account", () => {
     expect((await inbox(0, 0)).messages).toHaveLength(1);
     expect(cursor()).toBe("1730812601.000100");
     expect(slack.posted).toEqual([]);
+  });
+
+  it("a held text ends its socket: the text after it is not handled there, and the next hello takes both, in order, once", async () => {
+    // Slack holds both in the DM; the inbox cannot store A when it arrives
+    const A = "1730812650.000100";
+    const B = "1730812651.000100";
+    slack.history.push({ ts: A, user: OP, text: "A" }, { ts: B, user: OP, text: "B" });
+    mkdirSync(join(home, "identity"), { recursive: true });
+    const elsewhere = join(home, "elsewhere.json");
+    writeFileSync(elsewhere, "untouched");
+    symlinkSync(elsewhere, join(home, "identity", "inbox.json"));
+    const opened = hellos();
+    const a = push(dm({ text: "A", ts: A }));
+    const b = push(dm({ text: "B", ts: B }));
+    await until(() => said.some((l) => l.includes("could not be stored in the inbox")), 5000, "the line");
+    // A's socket ended: B was never handled on it — not acked, not stored, the cursor not moved past A
+    await until(() => hellos() > opened, 5000, "a fresh socket");
+    await pause(100);
+    expect(slack.acks).not.toContain(a.envelope_id);
+    expect(slack.acks).not.toContain(b.envelope_id);
+    expect(cursor()).toBe(HEARD_TS);
+    expect(readFileSync(elsewhere, "utf8")).toBe("untouched");
+    // the inbox recovers: the next hello's backfill takes A then B
+    unlinkSync(join(home, "identity", "inbox.json"));
+    await until(() => svc.identity!.inboxRing.last() === 2, 10_000, "both taken");
+    expect((await inbox(0, 0)).messages.map((m) => [m.id, m.text])).toEqual([[1, "A"], [2, "B"]]);
+    expect(cursor()).toBe(B);
+    // Slack's retries of both: acked, skipped at the cursor, never stored again
+    const ra = push({ ...a, retry_attempt: 1, retry_reason: "timeout" });
+    const rb = push({ ...b, retry_attempt: 1, retry_reason: "timeout" });
+    await acked(ra);
+    await acked(rb);
+    // a text at or before the cursor that the ring never held is skipped too
+    const old = push(dm({ text: "an old one", ts: "1730812600.000100" }));
+    await acked(old);
+    expect((await inbox(0, 0)).messages.map((m) => m.text)).toEqual(["A", "B"]);
+  });
+
+  it("a threaded reply written while no socket was open is taken once at the next hello, with replyTo slack:<parent ts>", async () => {
+    const now = Math.floor(clock.now() / 1000);
+    // the bot's alert, top level, then the operator's text after it: the cursor is past the alert
+    const P = `${now - 600}.000100`;
+    const L = `${now - 300}.000100`;
+    slack.history.push({ ts: P, user: "U0BOT0001", text: "NVDA crossed 150", bot_id: "B0BOT0001" });
+    push(dm({ text: "noted", ts: L }));
+    await until(() => cursor() === L, 5000, "the cursor at L");
+    slack.history.push({ ts: L, user: OP, text: "noted" });
+    // the socket down while the operator answers the alert in its thread (and an older reply, before the cursor, is there too)
+    slack.answer("apps.connections.open", 200, { ok: false, error: "internal_error" });
+    const opens = slack.calls.filter((c) => c.method === "apps.connections.open").length;
+    slack.drop();
+    await until(() => slack.calls.filter((c) => c.method === "apps.connections.open").length > opens, 5000, "a failed open");
+    const R = `${now - 100}.000100`;
+    slack.replies.push({ ts: `${now - 500}.000100`, thread_ts: P, user: OP, text: "an older reply" });
+    slack.replies.push({ ts: `${now - 50}.000100`, thread_ts: P, user: "U0BOT0001", text: "the bot's reply", bot_id: "B0BOT0001" });
+    slack.replies.push({ ts: R, thread_ts: P, user: OP, text: "why?" });
+    slack.answer("apps.connections.open", 0, {});
+    await until(() => svc.identity!.inboxRing.last() === 2, 8000, "the reply");
+    const a = await inbox(0, 0);
+    expect(a.messages).toEqual([
+      expect.objectContaining({ id: 1, messageId: `slack:${L}`, text: "noted" }),
+      { id: 2, network: "slack", messageId: `slack:${R}`, replyTo: `slack:${P}`, text: "why?", at: new Date(Number(R.split(".")[0]) * 1000).toISOString() },
+    ]);
+    const read = slack.calls.filter((c) => c.method === "conversations.replies").at(-1)!;
+    expect(read.form).toMatchObject({ channel: DM, ts: P, oldest: L, inclusive: "false" });
+    expect(read.authorization).toBe(`Bearer ${slack.tokens.bot}`);
+    await until(() => cursor() === `${now - 50}.000100`, 5000, "the cursor past the thread");
+    // Slack's live envelope for the reply, once a socket is open: acked, not stored again; the next hello takes nothing new
+    await acked(push(dm({ text: "why?", ts: R, thread_ts: P, retry: 1 })));
+    slack.disconnect("refresh_requested");
+    const replies = slack.calls.filter((c) => c.method === "conversations.replies").length;
+    const reads = historyCalls().length;
+    // two reads: after the cursor, and the last day's for parents — whose thread's latest reply is now at the cursor
+    await until(() => historyCalls().length >= reads + 2, 5000, "the next backfill");
+    await pause(50);
+    expect(slack.calls.filter((c) => c.method === "conversations.replies").length).toBe(replies);
+    expect(svc.identity!.inboxRing.last()).toBe(2);
+  });
+
+  it("a read-only account neither writes Slack's cursor nor listens", async () => {
+    await srv.close();
+    // a cursor kept in a spelling a write would change (the connector reads it trimmed, and writes it bare)
+    writeFileSync(cursorFile(), `  ${HEARD_TS}  \n`);
+    const calls = slack.calls.length;
+    await boot({ readOnly: true });
+    await pause(200);
+    expect(slack.calls.length).toBe(calls);
+    expect(slack.sockets()).toBe(0);
+    expect(readFileSync(cursorFile(), "utf8")).toBe(`  ${HEARD_TS}  \n`);
+    expect(svc.identity!.view().networks).toEqual([expect.objectContaining({ network: "slack", state: "connected", polling: false })]);
   });
 
   it("the backfill starts after the cursor and stops at 500, oldest first", async () => {

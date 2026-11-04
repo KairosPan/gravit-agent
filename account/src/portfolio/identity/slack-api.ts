@@ -1,5 +1,5 @@
-/** THE SLACK WEB API, as the account speaks it: six methods (auth.test, bots.info, users.info, apps.connections.open,
- * conversations.history, chat.postMessage) over fetch, each a POST of `application/x-www-form-urlencoded` to `<apiBase>/<method>` with the
+/** THE SLACK WEB API, as the account speaks it: seven methods (auth.test, bots.info, users.info, apps.connections.open,
+ * conversations.history, conversations.replies, chat.postMessage) over fetch, each a POST of `application/x-www-form-urlencoded` to `<apiBase>/<method>` with the
  * token in `Authorization: Bearer` — never in the URL — and each under a 15 s deadline, cut at once when the caller's signal aborts.
  * apps.connections.open is called with the app-level token, everything else with the bot token. An answer that is not `ok` is a
  * SlackApiError: the HTTP status, Slack's `error` code and, for a 429, its Retry-After. No error this module makes carries a token: each
@@ -203,6 +203,15 @@ export class SlackApi {
   async history(channel: string, oldest: string, limit: number, cursor?: string): Promise<{ messages: unknown[]; next?: string }> {
     const r = await this.call("conversations.history", { channel, oldest, inclusive: false, limit, cursor });
     if (!Array.isArray(r.messages)) throw new Error("conversations.history answered something that is not a list");
+    const next = str((r.response_metadata as { next_cursor?: unknown } | undefined)?.next_cursor);
+    return { messages: r.messages as unknown[], ...(next === "" ? {} : { next }) };
+  }
+
+  /** a page of a thread's messages after `oldest` (not including it), oldest first as Slack answers them — the thread's parent among them,
+   * as Slack sends it; `next` is the cursor of the page after, when there is one. conversations.history never carries a thread's replies */
+  async replies(channel: string, ts: string, oldest: string, limit: number, cursor?: string): Promise<{ messages: unknown[]; next?: string }> {
+    const r = await this.call("conversations.replies", { channel, ts, oldest, inclusive: false, limit, cursor });
+    if (!Array.isArray(r.messages)) throw new Error("conversations.replies answered something that is not a list");
     const next = str((r.response_metadata as { next_cursor?: unknown } | undefined)?.next_cursor);
     return { messages: r.messages as unknown[], ...(next === "" ? {} : { next }) };
   }
