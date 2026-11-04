@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { renderMessage, renderThread, setMarkdown, chip, key, ticker, withTickers } from '../../client/js/render/thread.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { MIN } from '../../client/js/time.js';
+import { sessionUri } from '../../client/js/composer/draft.js';
 
 const NOW = new Date(2026, 9, 19, 14, 7).getTime();
 const state = emptyState();
@@ -24,6 +25,21 @@ test('an injected context row (a system message with a source) is a collapsed de
   assert.match(ctx, /^<details class="sysline ctx"><summary>context · plugin:fs-observation<\/summary><pre>AGENTS\.md changed on disk\.\n&lt;system-reminder&gt;…&lt;\/system-reminder&gt;<\/pre><\/details>$/);
   assert.doesNotMatch(ctx, /open/, 'closed until the operator opens it');
   assert.equal(renderMessage(msg({ from: 'system', text: 'round 1 · settled', data: {} }), conv(), state), '<div class="sysline">round 1 · settled</div>');
+});
+
+test("the operator's bubble draws a conversation mention as a chip, and a file or bot reference as its text", () => {
+  const text = `ask @news-scout about @strategies/a.md and @[估值 \\[v2\\] a\\\\b <x>](${sessionUri('s9')}) now`;
+  const h = renderMessage(msg({ from: 'you', text }), conv(), state);
+  assert.match(h, /bubble you">ask @news-scout about @strategies\/a\.md and <span class="ref-chip">/);
+  const chipHtml = h.match(/<span class="ref-chip">([\s\S]*?)<\/span><\/span>/)?.[1];
+  assert.ok(chipHtml, 'a chip');
+  assert.match(chipHtml, /<svg/, 'the chat icon');
+  assert.match(chipHtml, /<span class="ref-chip-label">估值 \[v2\] a\\b &lt;x&gt;$/);
+  assert.doesNotMatch(h, /contenteditable/);
+  assert.doesNotMatch(h, /dsh-session:/, 'the URI is not drawn');
+  assert.match(h, /<\/span><\/span> now<\/div>/);
+  // a malformed mention stays text, escaped
+  assert.match(renderMessage(msg({ from: 'you', text: '@[x](dsh-session:!!) <b>' }), conv(), state), /@\[x\]\(dsh-session:!!\) &lt;b&gt;/);
 });
 
 test("a bot's words in a group carry the sender's name from the message", () => {

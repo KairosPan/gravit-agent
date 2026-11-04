@@ -39,13 +39,30 @@ test('a group head clusters the members and names them from the host\'s bots', (
   assert.match(h, /Gravit · Buffett Type · 2 members/);
 });
 
-test('the composer is the box and Send: no files, no mic', () => {
+test('the composer is the menu slot, the editor and Send: no files, no mic', () => {
   const h = renderComposer();
-  assert.match(h, /<form class="composer" data-action="send">/);
-  assert.match(h, /<input id="say" class="composer-input"[^>]*placeholder="Tell Gravit…"/);
+  assert.match(h, /<form class="composer" data-action="send"><div class="composer-menu" id="composer-menu"><\/div><div class="composer-box">/);
+  assert.match(h, /<span id="say-label" class="sr-only">Tell Gravit<\/span>/);
+  const editor = h.match(/<div id="say"([^>]*)><\/div>/)?.[1];
+  assert.ok(editor, 'the editor is an empty div#say');
+  for (const a of ['class="composer-input"', 'contenteditable="true"', 'role="textbox"', 'aria-multiline="true"', 'aria-labelledby="say-label"', 'aria-controls="composer-menu"', 'aria-expanded="false"', 'data-placeholder="Tell Gravit…"']) assert.ok(editor.includes(a), a);
+  assert.doesNotMatch(h, /<input id="say"/);
+  assert.doesNotMatch(h, /composer-pill/);
   assert.match(h, /class="send-key" aria-label="Send"/);
   for (const gone of ['attachFiles', 'toggleMic', 'pickFile', 'attach-input']) assert.doesNotMatch(h, new RegExp(gone));
-  assert.match(renderComposer({ placeholder: 'Tell Gravit… @ a bot by name' }), /@ a bot by name/);
+  assert.match(renderComposer({ placeholder: 'Tell Gravit… @ a bot by name' }), /data-placeholder="Tell Gravit… @ a bot by name"/);
+});
+
+test("a group's composer keeps its @ placeholder, and a menu handed in is drawn in the slot", () => {
+  const menu = { kind: '@', from: 0, query: '', groups: [{ label: 'Bots in this room', items: [{ kind: 'bot', id: 'buffett', name: 'Buffett Type', description: '' }] }], active: 0 };
+  const group = listed([conv('g', { kind: 'group', members: ['gravit', 'buffett'] })]);
+  const h = renderMessagesScreen(group, NOW, { menu });
+  assert.match(h, /data-placeholder="Tell Gravit… @ a bot by name"/);
+  assert.match(h, /<div class="composer-menu" id="composer-menu"><div class="cmenu" role="listbox" aria-label="References">/);
+  assert.match(renderMessagesScreen(group, NOW), /<div class="composer-menu" id="composer-menu"><\/div>/, 'no menu by default');
+  // the new-message screen and the empty state pass it on too
+  assert.match(renderMessagesScreen(R.startDraft(group, {}), NOW, { menu }), /id="composer-menu"><div class="cmenu"/);
+  assert.match(renderMessagesScreen(listed([]), NOW, { menu }), /id="composer-menu"><div class="cmenu"/);
 });
 
 test('the status line under the composer carries the host\'s word, marked bad when it is', () => {

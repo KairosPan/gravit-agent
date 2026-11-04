@@ -11,6 +11,8 @@ import { senderName } from './rail.js';
 import { composedHtml, composedId } from './lunhui/composed.js';
 import { foldNotes, notesHtml } from './lunhui/notes.js';
 import { viewOf } from '../host/lunhui.js';
+import { sessionRefRuns } from '../composer/draft.js';
+import { chipInner } from '../composer/view.js';
 
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
 
@@ -97,6 +99,9 @@ function trace(m, conv, state) {
     `<div class="trace-body">${inner}</div></details>`;
 }
 
+// the operator's words: a conversation mention is a chip (D17); a file or bot reference stays the text that was sent
+const youText = t => (t ? sessionRefRuns(t).map(r => (r.type === 'ref' ? `<span class="ref-chip">${chipInner(icon('chat', 13), r.label)}</span>` : esc(r.text))).join('') : '');
+
 export function renderMessage(m, conv, state) {
   // a tool call is drawn nowhere (the operator's word, 2026-10-28): its gate, receipt or refusal is a message of its own
   if (m.kind === 'tool') return '';
@@ -108,7 +113,7 @@ export function renderMessage(m, conv, state) {
       ? `<details class="sysline ctx"><summary>context · ${esc(source)}</summary><pre>${esc(m.text)}</pre></details>`
       : `<div class="sysline">${esc(m.text)}</div>`;
   }
-  if (m.from === 'you') return `<div class="msg you"><div class="bubble you">${m.text ? esc(m.text) : ''}</div>${avatar('you', 28)}</div>`;
+  if (m.from === 'you') return `<div class="msg you"><div class="bubble you">${youText(m.text)}</div>${avatar('you', 28)}</div>`;
   const name = conv.kind === 'group' && m.from !== 'gravit' ? `<div class="sender-name">${esc(m.data?.name ?? senderName(m.from, state))}</div>` : '';
   // plain talk keeps a bubble's width; every card and green bubble runs wider (spec §16), a composed answer wider still
   const width = m.kind === 'composed' ? 'composed' : m.kind !== 'text' && 'wide';

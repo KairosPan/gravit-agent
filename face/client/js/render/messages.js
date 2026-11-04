@@ -11,16 +11,19 @@ import { firstOpen } from '../host/sessions.js';
 import { needsAnswer } from '../messages.js';
 import { childrenOf } from '../host/children-view.js';
 import { channelLabel } from '../host/list-view.js';
+import { renderMenu } from '../composer/view.js';
 
 export function currentConversation(state) {
   const id = state.route.screen === 'messages' ? state.route.id : null;
   return state.conversations.find(c => c.id === id) ?? firstOpen(state.conversations);
 }
 
-// the box and Send; the words are prompted to the session (host/actions.js)
-export function renderComposer({ placeholder = 'Tell Gravit…', above = '' } = {}) {
-  return `<form class="composer" data-action="send">${above}<div class="composer-pill">` +
-    `<label for="say" class="sr-only">Tell Gravit</label><input id="say" class="composer-input" type="text" autocomplete="off"${attrs({ placeholder })}>` +
+// the menu's slot above the box, the editor and Send; the words are prompted to the session (host/actions.js). The editor is
+// drawn empty: app.js puts the conversation's draft in it
+export function renderComposer({ placeholder = 'Tell Gravit…', above = '', menu = null } = {}) {
+  const editor = attrs({ id: 'say', class: 'composer-input', contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true', 'aria-labelledby': 'say-label', 'aria-controls': 'composer-menu', 'aria-expanded': 'false', 'data-placeholder': placeholder });
+  return `<form class="composer" data-action="send">${above}<div class="composer-menu" id="composer-menu">${renderMenu(menu)}</div><div class="composer-box">` +
+    `<span id="say-label" class="sr-only">Tell Gravit</span><div${editor}></div>` +
     `<button type="submit" class="send-key" aria-label="Send">${icon('send', 18, 2.4)}</button></div></form>`;
 }
 
@@ -43,7 +46,7 @@ export function renderHead(conv, state) {
 }
 
 // the new-message screen: a title, Where (a channel, the root first), the first words in the composer
-function draftScreen(state) {
+function draftScreen(state, composer) {
   const d = state.draft;
   const channels = [...(state.channels ?? [])].sort((a, b) => (b.isRoot ? 1 : 0) - (a.isRoot ? 1 : 0));
   const options = channels.map(c => `<option value="${esc(c.workspaceId)}"${c.workspaceId === d.where ? ' selected' : ''}>${esc(channelLabel(c))}</option>`).join('') +
@@ -53,13 +56,13 @@ function draftScreen(state) {
   return `<main class="main"><header class="head centered draft"><button type="button" class="btn-sm head-cancel" data-action="cancelDraft">Cancel</button>${avatar('gravit', 44)}` +
     `<label for="nm-title" class="sr-only">Name this</label><input id="nm-title" class="title-input" type="text" autocomplete="off" placeholder="Name this (or your first line is the name)" data-action="draftTitle"${attrs({ value: d.title })}>` +
     `<div class="to-line"><label class="to-label" for="nm-where">Where</label><select id="nm-where" name="where" class="input small" data-action="draftWhere">${options}</select></div>${naming}</header>` +
-    `<div class="thread" id="thread"></div>${renderComposer()}${renderStatus(state.status)}</main>`;
+    `<div class="thread" id="thread"></div>${renderComposer({ menu: composer.menu })}${renderStatus(state.status)}</main>`;
 }
 
-function emptyScreen(state) {
+function emptyScreen(state, composer) {
   const chips = ['Buy a little BTC', 'Follow Pelosi', 'Check an address'].map(t => `<button type="button" class="btn-sm" data-action="suggest"${attrs({ 'data-text': t })}>${esc(t)}</button>`).join('');
   return `<main class="main"><header class="head"><h1 class="head-title">Gravit</h1></header><div class="empty">${avatar('gravit', 56)}` +
-    `<div class="empty-title">Nothing handed to Gravit yet</div><div class="suggest">${chips}</div></div>${renderComposer()}${renderStatus(state.status)}</main>`;
+    `<div class="empty-title">Nothing handed to Gravit yet</div><div class="suggest">${chips}</div></div>${renderComposer({ menu: composer.menu })}${renderStatus(state.status)}</main>`;
 }
 
 const fmtN = n => Math.round(n).toLocaleString('en-US');
@@ -132,10 +135,10 @@ export function renderDetails(conv, state) {
 </aside>`;
 }
 
-export function renderMessagesScreen(state, now) {
-  if (state.draft) return draftScreen(state);
+export function renderMessagesScreen(state, now, composer = { menu: null }) {
+  if (state.draft) return draftScreen(state, composer);
   const conv = currentConversation(state);
-  if (!conv) return emptyScreen(state);
+  if (!conv) return emptyScreen(state, composer);
   const placeholder = conv.kind === 'group' ? 'Tell Gravit… @ a bot by name' : 'Tell Gravit…';
-  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread" id="thread">${renderThread(conv, state, now)}</div>${renderComposer({ placeholder })}${renderStatus(state.status)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
+  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread" id="thread">${renderThread(conv, state, now)}</div>${renderComposer({ placeholder, menu: composer.menu })}${renderStatus(state.status)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
 }

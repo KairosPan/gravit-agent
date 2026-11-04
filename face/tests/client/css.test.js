@@ -27,6 +27,9 @@ import { withMiniDocument } from './helpers/mini-dom.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
 import { stockDrawerHtml } from '../../client/js/render/lunhui/stock.js';
 import { deskStatus } from './helpers/desk-status.js';
+import { editorHtml } from '../../client/js/composer/view.js';
+import { slashItems, atItems } from '../../client/js/composer/menus.js';
+import { sessionUri } from '../../client/js/composer/draft.js';
 
 const NOW = new Date(2026, 9, 19, 14, 7).getTime();
 const css = await readFile(new URL('../../client/css/app.css', import.meta.url), 'utf8');
@@ -268,6 +271,21 @@ function everyState() {
     R.toggleDetails(R.hostList(R.hostProjection(open, { convId: 's1', key: 'subagentCatalog', value: [{ id: 'k1', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'k2', createdAt: 2, mode: 'unknown' }] }), { conversations: open.conversations, childRows: [{ sessionId: 'k1', parentSessionId: 's1', running: true, origin: 'subagent' }] })), ...marketStates(), ...accountStates(), ...channelStates(), ...discoverStates(), ...tradeStates(),
   ];
 }
+// the composer's states (plan 3 of the dsh UI port, Task 3): a / menu with headings and with a query, an @ menu with every kind,
+// a folder walk with its crumb, in a conversation's composer; a draft with each chip kind in the editor; the operator's words
+// with a conversation mention, a chip in the bubble (D17)
+function composerHtml() {
+  const open = R.nav(R.hostList(emptyState(), { conversations: [conv('s1')], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, dir: '/r' }] }), { screen: 'messages', id: 's1' });
+  const menus = [
+    { kind: '/', from: 0, query: '', groups: slashItems({ commands: [{ name: 'compact', description: 'Shrink' }], skills: [{ name: 'rules', description: 'R' }], query: '', atStart: true }), active: 0 },
+    { kind: '/', from: 0, query: 'r', groups: slashItems({ commands: [], skills: [{ name: 'rules' }], query: 'r', atStart: true }), active: 0 },
+    { kind: '@', from: 0, query: '', active: 1, groups: atItems({ bots: [{ id: 'buffett', name: 'Buffett Type' }], files: [{ path: 'a/b.md', kind: 'file' }, { path: 'desk', kind: 'directory' }], conversations: [{ kind: 'conversation', id: 's7', title: 'Is BTC cheap?', age: 'Just now' }], query: '' }) },
+    { kind: '@', from: 0, query: 'strategies/', active: 0, groups: atItems({ files: [{ path: 'strategies/alpha', kind: 'directory' }], query: 'strategies/' }) },
+  ];
+  const chips = [{ kind: 'bot', id: 'buffett', label: 'Buffett Type' }, { kind: 'file', path: 'a/b.md', dir: false, label: 'b.md' }, { kind: 'file', path: 'desk', dir: true, label: 'desk/' }, { kind: 'conversation', id: 's7', label: 'Is BTC cheap?' }];
+  const mention = R.hostList(open, { conversations: [conv('s1', { messages: [m('y1', { from: 'you', text: `see @[Is BTC cheap?](${sessionUri('s7')})` })] })] });
+  return [...menus.map(menu => renderMessagesScreen(open, NOW, { menu })), renderMessagesScreen(mention, NOW)].join('') + editorHtml([{ type: 'text', text: 'ask ' }, ...chips.map(chip => ({ type: 'chip', chip }))]);
+}
 const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
   : st.route.screen === 'trade' ? renderTradeScreen(st, now)
   : st.route.screen === 'channel' ? renderChannelScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
@@ -276,8 +294,8 @@ const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScre
 test('every class the screens emit has a rule in app.css, and app.css names no colour by hex', () => {
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,6}\b/, 'colours come from tokens.css');
   setMarkdown(null);
-  const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSellMany(st) + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('');
-  for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-h3', 'mk-book', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand', 'research', 'pcard-meta', 'pcard-foot', 'pcard-link', 'mod-tags', 'mod-boxes', 'mod-runs-wrap', 'mod-runs', 'mod-legend', 'composed', 'notes', 'notes-body', 'lh-answer', 'lh-summary', 'lh-block', 'lh-skel', 'lh-title', 'lh-error', 'lh-label', 'lh-readout', 'lh-tiles', 'lh-tile', 'lh-tile-chal', 'lh-lines', 'lh-line', 'stress', 'lh-id', 'lh-split', 'lh-split-up', 'lh-split-down', 'lh-stats', 'lh-dist', 'lh-bucket', 'lh-bucket-bar', 'lh-srcs', 'lh-src', 'lh-src-miss', 'lh-foot', 'lh-choices', 'lh-choice', 'lh-open-run', 'lh-ix-rows', 'lh-ix', 'lh-ix-name', 'lh-ix-last', 'lh-ix-pct', 'lh-spark', 'lh-spark-mid', 'lh-spark-line', 'lh-chart', 'lh-band', 'lh-tick', 'lh-grid', 'lh-mid', 'lh-axis', 'lh-bar', 'lh-path', 'lh-mark-dot', 'lh-mark', 'lh-cur', 'lh-dot', 'lh-minute', 'lh-stock', 'stock', 'with-stock', 'lh-stk-head', 'lh-stk-sub', 'lh-stk-pool', 'lh-stk-price', 'lh-stk-tag', 'lh-stk-from', 'lh-stk-note', 'lh-stk-cite', 'lh-limit', 'lh-seal']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `a screen emits ${c}`);
+  const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSellMany(st) + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('') + composerHtml();
+  for (const c of ['composer-menu', 'composer-box', 'cmenu', 'cmenu-group', 'cmenu-crumb', 'cmenu-row', 'active', 'cmenu-icon', 'cmenu-title', 'cmenu-name', 'cmenu-desc', 'cmenu-foot', 'ref-chip', 'ref-chip-label', 'mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-h3', 'mk-book', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand', 'research', 'pcard-meta', 'pcard-foot', 'pcard-link', 'mod-tags', 'mod-boxes', 'mod-runs-wrap', 'mod-runs', 'mod-legend', 'composed', 'notes', 'notes-body', 'lh-answer', 'lh-summary', 'lh-block', 'lh-skel', 'lh-title', 'lh-error', 'lh-label', 'lh-readout', 'lh-tiles', 'lh-tile', 'lh-tile-chal', 'lh-lines', 'lh-line', 'stress', 'lh-id', 'lh-split', 'lh-split-up', 'lh-split-down', 'lh-stats', 'lh-dist', 'lh-bucket', 'lh-bucket-bar', 'lh-srcs', 'lh-src', 'lh-src-miss', 'lh-foot', 'lh-choices', 'lh-choice', 'lh-open-run', 'lh-ix-rows', 'lh-ix', 'lh-ix-name', 'lh-ix-last', 'lh-ix-pct', 'lh-spark', 'lh-spark-mid', 'lh-spark-line', 'lh-chart', 'lh-band', 'lh-tick', 'lh-grid', 'lh-mid', 'lh-axis', 'lh-bar', 'lh-path', 'lh-mark-dot', 'lh-mark', 'lh-cur', 'lh-dot', 'lh-minute', 'lh-stock', 'stock', 'with-stock', 'lh-stk-head', 'lh-stk-sub', 'lh-stk-pool', 'lh-stk-price', 'lh-stk-tag', 'lh-stk-from', 'lh-stk-note', 'lh-stk-cite', 'lh-limit', 'lh-seal']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `a screen emits ${c}`);
   const classes = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const missing = [...classes].filter(c => c && !new RegExp(`\\.${c.replace(/[-]/g, '\\-')}(?![\\w-])`).test(css));
   assert.deepEqual(missing, [], 'classes without a rule');
@@ -319,7 +337,7 @@ test('every class app.css styles is emitted by some screen: no rule outlives the
   setMarkdown(null);
   const sample = '# H1\n\n## H\n\n### H3\n\n#### H4\n\n**b** `c` [l](https://x.test)\n\n- a\n\n> q\n\n---\n\n```\nx\n```\n\n| s | c |\n|---|---|\n| A | +1% |\n| B | -1% |';
   const page = readFileSync(new URL('../../client/index.html', import.meta.url), 'utf8');
-  const html = page + everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSellMany(st) + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('') +
+  const html = page + everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSellMany(st) + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('') + composerHtml() +
     withMiniDocument(() => renderMarkdown(sample).node.outerHTML);
   const emitted = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const styled = new Set([...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/\.([a-zA-Z][\w-]*)/g)].map(m => m[1]));
@@ -396,6 +414,29 @@ test('the equity blue goes by Linqi\'s own name: no --blue, which his tokens use
   assert.doesNotMatch(css, /var\(--blue\)/);
   assert.match(tokens, /--alloc-equity/);
   assert.match(tokens, /--on-equity/);
+});
+
+test("the composer's chip reads the pale blue tokens, declared in each theme block; the box, the editor's growth, the menu above", async () => {
+  const tokens = await readFile(new URL('../../client/css/tokens.css', import.meta.url), 'utf8');
+  const chipRule = css.match(/^\.ref-chip \{([^}]*)\}/m)?.[1] ?? '';
+  for (const d of ['display: inline-flex', 'background: var(--ref-fill)', 'color: var(--ref-text)', 'border-radius: var(--radius-pill)']) assert.ok(chipRule.includes(d), `.ref-chip ${d}`);
+  const blocks = [tokens.match(/:root\[data-theme="cream"\] \{([^}]*)\}/)?.[1], tokens.match(/:root\[data-theme="black"\] \{([^}]*)\}/)?.[1], tokens.match(/:root:not\(\[data-theme\]\) \{([^}]*)\}/)?.[1]];
+  for (const [i, b] of blocks.entries()) {
+    assert.ok(b, `theme block ${i}`);
+    assert.match(b, /--ref-fill: #[0-9a-f]{6}/, `--ref-fill in block ${i}`);
+    assert.match(b, /--ref-text: #[0-9a-f]{6}/, `--ref-text in block ${i}`);
+  }
+  assert.match(blocks[0], /--ref-fill: #eef1fb; --ref-text: #3b5bdb/);
+  for (const b of blocks.slice(1)) assert.match(b, /--ref-fill: #1e2541; --ref-text: #9db0ff/);
+  assert.match(css, /\.composer \{[^}]*position: relative/);
+  assert.match(css, /\.composer-box \{[^}]*align-items: flex-end[^}]*border-radius: var\(--radius-l\)/);
+  assert.match(css, /\.composer-input \{[^}]*max-height: calc\(8 \* 1\.45em\)[^}]*overflow-y: auto[^}]*white-space: pre-wrap[^}]*overflow-wrap: anywhere/);
+  assert.match(css, /\.composer-input:empty::before \{[^}]*content: attr\(data-placeholder\)[^}]*color: var\(--dim\)/);
+  assert.match(css, /\.composer-menu \{[^}]*position: absolute[^}]*width: min\(520px, 100%\)/);
+  assert.match(css, /\.cmenu \{[^}]*max-height: 400px[^}]*overflow-y: auto/);
+  assert.match(css, /\.cmenu-name \{[^}]*font-family: var\(--font-mono\)[^}]*color: var\(--dim\)/);
+  assert.match(css, /\.cmenu-row\.active \{[^}]*background: var\(--surface-2\)/);
+  assert.doesNotMatch(css, /composer-pill/);
 });
 
 test("the pin: the row's wrap, the key in the time's place, the glyph before the time", () => {
