@@ -3741,10 +3741,10 @@ and the next search rebuilds it. Node prints its `node:sqlite` ExperimentalWarni
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 34 isolated real boots; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 30 smoke files (35 real boots), isolated; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 34 real boots listed below; `FACE_SMOKE=1` runs
+Offline, `npm test` skips the 30 smoke files (35 real boots) listed below; `FACE_SMOKE=1` runs
 them too (3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 

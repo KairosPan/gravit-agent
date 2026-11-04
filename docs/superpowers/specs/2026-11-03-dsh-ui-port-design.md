@@ -1273,5 +1273,5 @@ tests, 2,990 pass, 41 skipped, 0 fail; under `FACE_SMOKE=1` 3,032 tests, 3,028 p
 | §5.1 | reconciles that overlap | each waits for the one before and runs once itself; they queue, they do not merge | two searches never append the same events twice |
 | §5.1 | a log rewritten | one rewritten to the same length, or from a backend that gives no `eventCount`, is not seen as changed; dsh compares revisions only inside one service instance and the index outlives restarts | recorded, not fixed; the index lags until the length changes (DEVELOPMENT.md §4.4) |
 | §5.1 | what is indexed | a `lunhui_present` call with no result in the batch is still indexed; a room's round-end lines and a subagent's report relays are not | the controller's ruling: the first is the composed answer, the others are not words anyone said |
-| §5.5, D14 | the file listing | an unreadable folder is listed but not descended; an unreadable root is an empty walk; matching is case-insensitive | one bad folder never fails the picker |
+| §5.5 | the file listing | an unreadable folder is listed but not descended; an unreadable root is an empty walk; matching is case-insensitive | one bad folder never fails the picker |
 | §6 | `tests/overlay.test.ts` untouched | edited: it pins the row list, now seventeen | outside Task 1's brief, forced by the four rows |
