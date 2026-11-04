@@ -169,14 +169,24 @@ export class SlackApi {
     return { appId, name: str(bot.name) };
   }
 
-  /** a workspace member's names, and whether they are a bot */
-  async usersInfo(userId: string): Promise<{ name: string; displayName: string; realName: string; isBot: boolean }> {
+  /** a workspace member: their names (`name` the immutable username, the display and real names theirs to change), their team (the
+   * user's own team, `team_id`; "" when Slack answered none), and whether they are a bot, a guest (restricted or ultra_restricted) or
+   * deactivated (deleted) */
+  async usersInfo(userId: string): Promise<{ name: string; displayName: string; realName: string; isBot: boolean; teamId: string; restricted: boolean; deleted: boolean }> {
     const r = await this.call("users.info", { user: userId });
     const user = (r.user ?? {}) as Record<string, unknown>;
     const profile = (user.profile ?? {}) as Record<string, unknown>;
     const name = str(user.name);
     if (name === "") throw new Error("users.info answered no user");
-    return { name, displayName: str(profile.display_name), realName: str(profile.real_name) || str(user.real_name), isBot: user.is_bot === true };
+    return {
+      name,
+      displayName: str(profile.display_name),
+      realName: str(profile.real_name) || str(user.real_name),
+      isBot: user.is_bot === true,
+      teamId: str(user.team_id),
+      restricted: user.is_restricted === true || user.is_ultra_restricted === true,
+      deleted: user.deleted === true,
+    };
   }
 
   /** a fresh Socket Mode URL, with the app-level token; the caller takes it only if socketUrlOk */

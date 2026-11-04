@@ -220,7 +220,7 @@ describe("connect Slack through the account: the token route and the pending con
     const e = dm({ user: "U0PAN07QK", text: "hi", ts: "1730812345.001200" });
     slack.push(e);
     await until(() => view(id).state === "heard");
-    expect(view(id).sender).toEqual({ id: "T0FAKE001:U0PAN07QK", name: "Pan", handle: "@pan", masked: "…7QK", text: "hi" });
+    expect(view(id).sender).toEqual({ id: "T0FAKE001:U0PAN07QK", userId: "U0PAN07QK", name: "Pan", handle: "@pan", masked: "…7QK", text: "hi" });
     await until(() => slack.acks.includes(e.envelope_id));
     expect(slack.calls.filter((c) => c.method === "users.info").map((c) => c.form.user)).toEqual(["U0PAN07QK"]);
     // heard: the socket is closed, and the pending connection keeps the DM channel and the ts for the connected connector
@@ -260,12 +260,38 @@ describe("connect Slack through the account: the token route and the pending con
     expect(view(id).sender!.text).toBe("it's me");
   });
 
+  it("sheet 3 names the person by their username and full user id: an impostor's display name from another team, a guest, a deactivated account and a bot are never heard", async () => {
+    // each sets the operator's display name, which anyone can; none is a full member of the bot's team, or a person
+    slack.users.set("U0PAN07QK", { name: "pan", displayName: "Pan", realName: "Pan" });
+    slack.users.set("U0IMPOST1", { name: "pan.other", displayName: "Pan", realName: "Pan", teamId: "T0OTHER01" });
+    slack.users.set("U0GUEST01", { name: "guest", displayName: "Pan", realName: "Pan", restricted: true });
+    slack.users.set("U0GUEST02", { name: "guest2", displayName: "Pan", realName: "Pan", ultraRestricted: true });
+    slack.users.set("U0GONE001", { name: "gone", displayName: "Pan", realName: "Pan", deleted: true });
+    slack.users.set("U0ABOT001", { name: "somebot", displayName: "Pan", realName: "Pan", isBot: true });
+    const { pending } = await begin();
+    const id = pending!.id;
+    const unheard = ["U0IMPOST1", "U0GUEST01", "U0GUEST02", "U0GONE001", "U0ABOT001"].map((user) => dm({ user, text: "it's me, Pan" }));
+    for (const e of unheard) slack.push(e);
+    await until(() => unheard.every((e) => slack.acks.includes(e.envelope_id)));
+    expect(view(id).state).toBe("waiting");
+    expect(view(id).sender).toBeUndefined();
+    // the four people are counted in Not you; the bot is dropped
+    expect(svc.identity!.strangers().map((x) => x.sender).sort()).toEqual(["U0IMPOST1", "U0GUEST01", "U0GUEST02", "U0GONE001"].map((u) => senderRef("slack", `T0FAKE001:${u}`)).sort());
+    // the operator is heard, by their username and their full user id
+    slack.push(dm({ user: "U0PAN07QK", text: "hi" }));
+    await until(() => view(id).state === "heard");
+    expect(view(id).sender).toEqual({ id: "T0FAKE001:U0PAN07QK", userId: "U0PAN07QK", name: "Pan", handle: "@pan", masked: "…7QK", text: "hi" });
+    const g = JSON.parse((await send(srv.url, `/api/account/identity/pending?id=${id}`, { method: "GET" })).text);
+    expect(g.pending.sender).toMatchObject({ userId: "U0PAN07QK", handle: "@pan" });
+    expect(svc.identity!.pending.peek(id)!.sender).toEqual({ id: "T0FAKE001:U0PAN07QK", handle: "@pan" });
+  });
+
   it("Not me counts the sender as a Slack stranger and waits again", async () => {
     const { pending } = await begin();
     const id = pending!.id;
     slack.push(dm({ user: "U0SOME456", text: "hello?" }));
     await until(() => view(id).state === "heard");
-    expect(view(id).sender).toMatchObject({ id: "T0FAKE001:U0SOME456", name: "Some One", handle: "@Someone", masked: "…456" });
+    expect(view(id).sender).toMatchObject({ id: "T0FAKE001:U0SOME456", userId: "U0SOME456", name: "Someone", handle: "@someone", masked: "…456" });
     await until(() => slack.sockets() === 0);
     const r = await send(srv.url, "/api/account/identity/pending/not-me", { body: JSON.stringify({ id }) });
     expect(r.status).toBe(200);

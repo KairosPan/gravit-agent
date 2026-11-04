@@ -60,8 +60,12 @@ export interface PendingSender {
   id: string;
   name: string;
   handle: string;
+  /** their id masked to its last three characters (what Not you shows) */
   masked: string;
   text: string;
+  /** on Slack: their full user id (U…, not a secret), which sheet 3 shows beside the name and handle — a display name is anyone's to set,
+   * the id is not */
+  userId?: string;
 }
 
 /** where the source stood after the message heard, for the connected connector to start from */
@@ -74,7 +78,7 @@ export interface PendingSource {
   network: Network;
   secrets: readonly string[];
   check(signal: AbortSignal): Promise<PendingBot | Refusal>;
-  listen(ctx: { signal: AbortSignal; admit(senderId: string): "hear" | "stranger" | "drop"; heard(s: PendingSender): void; conflict(on: boolean): void; log(l: string): void }): Promise<void>;
+  listen(ctx: { signal: AbortSignal; admit(senderId: string): "hear" | "stranger" | "drop"; stranger(senderId: string): void; heard(s: PendingSender): void; conflict(on: boolean): void; log(l: string): void }): Promise<void>;
   resume(): PendingResume;
 }
 
@@ -339,7 +343,7 @@ export class PendingConnections {
       qr: e.qr,
       expiresAt: new Date(e.expiresAt).toISOString(),
       state: e.state,
-      ...(e.state === "heard" && e.sender ? { sender: { id: e.sender.id, name: e.sender.name, handle: e.sender.handle, masked: e.sender.masked, text: e.sender.text } } : {}),
+      ...(e.state === "heard" && e.sender ? { sender: { id: e.sender.id, name: e.sender.name, handle: e.sender.handle, masked: e.sender.masked, text: e.sender.text, ...(e.sender.userId !== undefined ? { userId: e.sender.userId } : {}) } } : {}),
     };
   }
 
@@ -426,9 +430,15 @@ export class PendingConnections {
       .listen({
         signal: e.stop.signal,
         admit: (senderId) => (e.gen === gen ? this.admit(e, senderId) : "drop"),
+        // a sender the source itself will never hear (on Slack: another team, a guest, a deactivated account): counted in Not you unless
+        // blocked, as a "Not me" sender is
+        stranger: (senderId) => {
+          if (e.gen !== gen || !this.live(e) || this.deps.blocked?.().includes(senderRef(e.network, senderId))) return;
+          this.noteStranger(e.network, senderId);
+        },
         heard: (s) => {
           if (!current()) return;
-          e.sender = { id: s.id, name: s.name, handle: s.handle, masked: s.masked, text: s.text };
+          e.sender = { id: s.id, name: s.name, handle: s.handle, masked: s.masked, text: s.text, ...(s.userId !== undefined ? { userId: s.userId } : {}) };
           e.state = "heard";
         },
         conflict: (on) => {

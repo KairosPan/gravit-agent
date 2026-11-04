@@ -77,7 +77,7 @@ describe("the Web API client", () => {
     const api = apiOf(slack);
     expect(await api.authTest()).toEqual({ teamId: "T0FAKE001", team: "Fake Co", userId: "U0BOT0001", user: "gravit", botId: "B0BOT0001" });
     expect(await api.botsInfo("B0BOT0001")).toEqual({ appId: "A0FAKE001", name: "gravit" });
-    expect(await api.usersInfo("U0OPER001")).toEqual({ name: "pan", displayName: "Pan", realName: "Pan Zhe", isBot: false });
+    expect(await api.usersInfo("U0OPER001")).toEqual({ name: "pan", displayName: "Pan", realName: "Pan Zhe", isBot: false, teamId: "T0FAKE001", restricted: false, deleted: false });
     expect((await api.usersInfo("U0BOT0001")).isBot).toBe(true);
     expect(await api.connectionsOpen()).toMatch(/^ws:\/\/127\.0\.0\.1:\d+\/link\//);
     const first = await api.history("D0FAKEDM1", "1730812345.001200", 1);

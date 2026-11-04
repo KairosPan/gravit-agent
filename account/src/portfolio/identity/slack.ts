@@ -10,9 +10,12 @@
  *     for this team and this app. Everything else — a channel, a group or an mpim, a bot, an edit or a deletion, another team or app — is
  *     acked at once and dropped. The person's names are asked of users.info (a user that is a bot is dropped); a sender the shell holds
  *     blocked or counts as a stranger is acked and not heard.
- *   Sheet 3: the person heard — their real name (else display name, else name), their @handle (display name, else name), their
- *     `<team>:<user>` id masked to its last three characters, and what they wrote. The DM's channel and the message's ts are kept as
- *     `resume`, the envelope is acked, and the socket closed; "Not me" listens again on a fresh one.
+ *   Sheet 3: the person heard — their display name (else real name, else username), their @handle (the username, which they cannot
+ *     change), their full user id (U…: a display name anyone can copy, the id no one can), the `<team>:<user>` id masked to its last three
+ *     characters for Not you, and what they wrote. Only a full member of the bot's own team is heard: one whose users.info team is
+ *     another, a guest (restricted or ultra_restricted) or a deactivated account is counted in Not you and the sheet waits on. The DM's
+ *     channel and the message's ts are kept as `resume`, the envelope is acked, and the socket closed; "Not me" listens again on a fresh
+ *     one.
  *
  * A hello that counts more than one socket for the app (another process holds its Socket Mode link, and Slack spreads the events across
  * them) is the shell's conflict until a hello counts one again. Whatever ends the pending connection — dropped, replaced, expired, taken —
@@ -261,8 +264,15 @@ export class SlackPendingSource implements PendingSource {
     }
     if (user.isBot) return "ack";
     if (this.ctx !== ctx || ctx.signal.aborted) return "hold";
+    // only a full member of the bot's own team is ever heard: someone of another team (a shared channel's DM), a guest or a deactivated
+    // account is counted in Not you, and the sheet waits on
+    if (user.teamId !== who.teamId || user.restricted || user.deleted) {
+      ctx.stranger(id);
+      return "ack";
+    }
     this.heardAt = { channel: m.channel, cursor: m.ts };
-    ctx.heard({ id, name: user.realName || user.displayName || user.name, handle: `@${user.displayName || user.name}`, masked: maskId(id), text: m.text });
+    // the handle is the immutable username; a display name is anyone's to set, so it is only ever the name shown beside the full user id
+    ctx.heard({ id, userId: m.user, name: user.displayName || user.realName || user.name, handle: `@${user.name}`, masked: maskId(id), text: m.text });
     // the listening ends after this envelope's ack has gone: the socket's close waits its turn
     const finish = this.finish;
     setImmediate(() => finish?.());

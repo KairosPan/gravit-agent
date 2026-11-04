@@ -143,11 +143,24 @@ export function slackTokens(): { app: string; bot: string; user: string; refresh
 /** an envelope's or a frame's JSON, as the fake sends it */
 type Json = Record<string, unknown>;
 
+/** a member as users.info answers them: their names and, when set, their own team (the fake's team otherwise), a guest
+ * (restricted or ultra_restricted), deactivated (deleted) or a bot */
+export interface FakeSlackUser {
+  name: string;
+  displayName: string;
+  realName: string;
+  teamId?: string;
+  restricted?: boolean;
+  ultraRestricted?: boolean;
+  deleted?: boolean;
+  isBot?: boolean;
+}
+
 export interface FakeSlackOptions {
   team?: { id: string; name: string };
   bot?: { userId: string; botId: string; appId: string; name: string };
   /** the workspace's members, by user id; the bot user is answered by users.info whether or not it is here */
-  users?: Map<string, { name: string; displayName: string; realName: string }>;
+  users?: Map<string, FakeSlackUser>;
   tokens?: { app: string; bot: string };
 }
 
@@ -157,7 +170,7 @@ export interface FakeSlack {
   tokens: { app: string; bot: string };
   team: { id: string; name: string };
   bot: { userId: string; botId: string; appId: string; name: string };
-  users: Map<string, { name: string; displayName: string; realName: string }>;
+  users: Map<string, FakeSlackUser>;
   /** send an envelope (its JSON as given) to the newest open socket; with none open it is lost, as Slack does not hold one */
   push(envelope: object): void;
   /** send a text frame as it is (not JSON, say, or a large one) to the newest open socket */
@@ -218,7 +231,7 @@ export async function fakeSlack(o: FakeSlackOptions = {}): Promise<FakeSlack> {
   const tokens = o.tokens ?? { app: made.app, bot: made.bot };
   const team = o.team ?? { id: "T0FAKE001", name: "Fake Co" };
   const bot = o.bot ?? { userId: "U0BOT0001", botId: "B0BOT0001", appId: "A0FAKE001", name: "gravit" };
-  const users = o.users ?? new Map([["U0OPER001", { name: "pan", displayName: "Pan", realName: "Pan Zhe" }]]);
+  const users = o.users ?? new Map<string, FakeSlackUser>([["U0OPER001", { name: "pan", displayName: "Pan", realName: "Pan Zhe" }]]);
   const history: FakeSlack["history"] = [];
   const acks: string[] = [];
   const posted: FakeSlack["posted"] = [];
@@ -267,7 +280,7 @@ export async function fakeSlack(o: FakeSlackOptions = {}): Promise<FakeSlack> {
         if (form.user === bot.userId) return reply(res, 200, { ok: true, user: { id: bot.userId, team_id: team.id, name: bot.name, real_name: "Gravit", is_bot: true, profile: { display_name: "Gravit", real_name: "Gravit" } } });
         const u = users.get(form.user ?? "");
         if (!u) return reply(res, 200, { ok: false, error: "user_not_found" });
-        return reply(res, 200, { ok: true, user: { id: form.user, team_id: team.id, name: u.name, real_name: u.realName, is_bot: false, profile: { display_name: u.displayName, real_name: u.realName } } });
+        return reply(res, 200, { ok: true, user: { id: form.user, team_id: u.teamId ?? team.id, name: u.name, real_name: u.realName, deleted: u.deleted === true, is_bot: u.isBot === true, is_restricted: u.restricted === true, is_ultra_restricted: u.ultraRestricted === true, profile: { display_name: u.displayName, real_name: u.realName } } });
       }
       case "apps.connections.open": {
         const port = (server.address() as { port: number }).port;

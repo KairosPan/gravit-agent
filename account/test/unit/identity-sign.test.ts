@@ -4,6 +4,7 @@
  * disconnectNetwork, setRouting (with quiet hours) and blockSender are ordinary owner writes. None of them an agent key can sign. Every Bot
  * API call goes to a fake on loopback; every token is made up. */
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -346,7 +347,8 @@ describe("connect Slack, signed at the door", () => {
 
   beforeEach(async () => {
     slack = await fakeSlack();
-    slack.users.set("U0PAN07QK", { name: "pan", displayName: "", realName: "Pan" });
+    // a display name anyone can set: the signed handle is the username
+    slack.users.set("U0PAN07QK", { name: "pan", displayName: "Pan K", realName: "Pan" });
     bot = await fakeBotApi();
     home = mkdtempSync(join(tmpdir(), "identity-sign-slack-"));
     svc = await PortfolioService.create({ home, venues: "frontline", real: true, liveDeps: { http: async () => ({ status: 599, body: undefined, text: "" }), price: async () => undefined }, publicMarkets: [], liveWrites: { capUsd: 100, pairingCode: "K7QX-M2PA" }, account: { owners: [{ id: owner.address, kind: "eoa", label: "owner", addedAt: new Date().toISOString() }] }, desk: { brain: [scriptedBrain(() => null)], tickMs: 0, env: {} }, identity: { apiBase: bot.url, slackApiBase: slack.url, pollTimeoutS: 1 } });
@@ -379,6 +381,7 @@ describe("connect Slack, signed at the door", () => {
 
   it("connect Slack: the door checks the pair against the signed fingerprint, then stores both tokens, the channel and the binding", async () => {
     const p = await heardPending();
+    expect(p.sender).toMatchObject({ id: "T0FAKE001:U0PAN07QK", userId: "U0PAN07QK", name: "Pan K", handle: "@pan" });
     // a fingerprint of another pair, another bot, a token in a field: refused in Slack's own words, nothing written
     const other = newSalt();
     const otherPair = `${slack.tokens.app}\u0000${slackTokens().user}`;
@@ -387,6 +390,8 @@ describe("connect Slack, signed at the door", () => {
       [connectOf(p, { botId: "T0FAKE001:U0BOT0002" }), IDENTITY_WORDS.slackBotMismatch],
       [connectOf(p, { speaksAs: "@another" }), IDENTITY_WORDS.slackBotMismatch],
       [connectOf(p, { operatorId: "T0FAKE001:U0SOME456" }), IDENTITY_WORDS.senderMismatch],
+      [connectOf(p, { operatorId: "U0PAN07QK" }), IDENTITY_WORDS.senderMismatch],
+      [connectOf(p, { talksOnlyWith: "@Pan K" }), IDENTITY_WORDS.senderMismatch],
       [connectOf(p, { talksOnlyWith: slack.tokens.bot }), IDENTITY_WORDS.slackTokenInField],
       [connectOf(p, { network: "telegram", routing: ALL_TELEGRAM }), IDENTITY_WORDS.noPending],
     ];
@@ -439,33 +444,50 @@ describe("connect Slack, signed at the door", () => {
 describe("no Slack token in the tree", () => {
   /** a secret scanner's Slack shapes: a bot, user, refresh or legacy token, and an app-level token */
   const SCANNER: readonly RegExp[] = [/\bxox[abposre]-(?:\d+-)+[0-9A-Za-z]{6,}/, /\bxapp-\d-[A-Z0-9]{8,14}-\d{6,16}-[a-f0-9]{16,}/];
-  const SKIP: ReadonlySet<string> = new Set(["node_modules", ".git", "dist", "coverage", ".vite", ".turbo"]);
-  /** every text file under `dir`, skipping the dependencies and what is built */
+  const SKIP: ReadonlySet<string> = new Set(["node_modules", "dist", "coverage"]);
+  /** the tracked files of account/ and face/ (git ls-files: nothing untracked or ignored, so no .env and no key file is opened); without
+   * git, a walk that skips every dotfile and folder, the dependencies and what is built */
+  function tracked(repo: string): string[] {
+    try {
+      const out = execFileSync("git", ["ls-files", "-z", "--", "account", "face"], { cwd: repo, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+      return out.split("\u0000").filter((f) => f !== "").map((f) => join(repo, f));
+    } catch {
+      return [join(repo, "account"), join(repo, "face")].filter((d) => existsSync(d)).flatMap((d) => tree(d));
+    }
+  }
   function tree(dir: string, out: string[] = []): string[] {
     for (const name of readdirSync(dir)) {
-      if (SKIP.has(name)) continue;
+      if (name.startsWith(".") || SKIP.has(name)) continue;
       const p = join(dir, name);
       const st = statSync(p);
       if (st.isDirectory()) tree(p, out);
-      else if (st.isFile() && st.size < 4_000_000) out.push(p);
+      else if (st.isFile()) out.push(p);
     }
     return out;
   }
 
   it("no file in account/ or face/ holds a literal Slack token of scanner shape", () => {
     const account = fileURLToPath(new URL("../..", import.meta.url));
-    const face = join(account, "..", "face");
     // the scanner itself finds the made-up tokens, as they are built at runtime
     const made = slackTokens();
     for (const t of [made.bot, made.user, made.refresh]) expect(SCANNER[0]!.test(t)).toBe(true);
     expect(SCANNER[1]!.test(made.app)).toBe(true);
+    const repo = join(account, "..");
+    const files = tracked(repo).filter((f) => !/(^|\/)\.env/.test(relative(repo, f)));
+    // this very file and the account's sources are among them
+    expect(files).toContain(fileURLToPath(import.meta.url));
+    expect(files.some((f) => relative(repo, f).startsWith("face/"))).toBe(true);
     const found: string[] = [];
-    for (const root of [account, face]) {
-      if (!existsSync(root)) continue;
-      for (const file of tree(root)) {
-        const text = readFileSync(file).toString("latin1");
-        if (SCANNER.some((re) => re.test(text))) found.push(relative(join(account, ".."), file));
+    for (const file of files) {
+      let st;
+      try {
+        st = statSync(file);
+      } catch {
+        continue;
       }
+      if (!st.isFile() || st.size >= 4_000_000) continue;
+      const text = readFileSync(file).toString("latin1");
+      if (SCANNER.some((re) => re.test(text))) found.push(relative(repo, file));
     }
     expect(found).toEqual([]);
   });
