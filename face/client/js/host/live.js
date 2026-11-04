@@ -105,8 +105,8 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   function applySnapshot(convId, snapshot, { through, hasMore }) {
     const created = typeof snapshot?.header?.createdAt === 'number' ? snapshot.header.createdAt : undefined;
     const { messages, start, replaced } = windowOf(convId, snapshot?.records);
-    store.dispatch('hostWindow', { convId, messages, created, window: { start, through, hasMore: hasMore === true, replaced } });
-    if (earlierRun && earlierRun.id === convId && earlierRun.token === openSeq) store.dispatch('hostEarlierLoading', { convId, on: true });
+    const loading = !!earlierRun && earlierRun.id === convId && earlierRun.token === openSeq;   // a read still under way keeps its key
+    store.dispatch('hostWindow', { convId, messages, created, window: { start, through, hasMore: hasMore === true, replaced, ...(loading ? { loading } : {}) } });
     seedBlock(convId, snapshot?.projections);
     for (const m of pending.values()) { // after the window, wherever the list now says each one belongs
       const g = placeGate(m);
@@ -244,8 +244,10 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
         return false;
       }
       if (token !== openSeq) { done(); return false; }
+      // a snapshot past a gap moved the start while the pages were read: they belong to no window now
+      if (convOf(id)?.window?.start !== w.start) { done(); return false; }
       const folded = windowOf(id, pages.reverse().flat());
-      store.dispatch('hostEarlier', { convId: id, messages: folded.messages, start, hasMore, replaced: folded.replaced });
+      store.dispatch('hostEarlier', { convId: id, messages: folded.messages, start, hasMore, replaced: folded.replaced, before: w.start });
       return true;
     })().finally(() => { if (earlierRun === run) earlierRun = null; });
     earlierRun = run;

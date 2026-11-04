@@ -340,3 +340,18 @@ test('foldMessages folds a window as hostEvent would, message by message', () =>
   for (const m of list) s = R.hostEvent(s, { convId: 'a', message: m });
   assert.deepEqual(foldMessages(list), get(s, 'a').messages);
 });
+
+test('hostEarlier drops pages read from a start the window no longer has, and clears loading', () => {
+  let s = R.hostWindow(withConv(conv('a')), { convId: 'a', messages: [msg('e80', 80)], window: win(80) });
+  s = R.hostEarlierLoading(s, { convId: 'a', on: true });
+  s = R.hostEarlier(s, { convId: 'a', messages: [msg('e10', 10)], start: 10, hasMore: true, before: 20 });
+  assert.deepEqual(seqs(s, 'a'), [80]);
+  assert.deepEqual(get(s, 'a').window, win(80), 'the start stays, loading is cleared');
+  s = R.hostEarlier(s, { convId: 'a', messages: [msg('e70', 70)], start: 70, hasMore: true, before: 80 });
+  assert.deepEqual(seqs(s, 'a'), [70, 80]);
+});
+
+test('a snapshot\'s window may carry the loading of a read still under way', () => {
+  const s = R.hostWindow(withConv(conv('a')), { convId: 'a', messages: [msg('e20', 20)], window: win(20, { loading: true }) });
+  assert.equal(get(s, 'a').window.loading, true);
+});

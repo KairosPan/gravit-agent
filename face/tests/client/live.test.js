@@ -693,3 +693,25 @@ test('a stale earlier run neither clears a newer run\'s loading nor leaves its o
   assert.equal(winOf(r, 'c').loading, undefined);
   assert.deepEqual(ids(r, 'c'), [20, 30, 31]);
 });
+
+test('a re-snapshot past a gap while an earlier read runs drops its pages, with no loading flicker', async () => {
+  let release;
+  const r = rig({ rows: [row('live', { agentAvailable: true })],
+    pages: { live: () => new Promise(res => { release = () => res({ records: ums(10, 11), hasMore: true }); }) } });
+  await r.ready();
+  r.live.open('live'); await settle();
+  const f = r.last('session/follow');
+  f.cbs.onItem({ type: 'snapshot', header: {}, cursor: 69, hasMore: true, records: ums(20, 69), projections: { asOfSeq: 69, values: {} } });
+  const p = r.live.earlier('live');
+  await settle();
+  const seen = [];
+  const dispatch = r.store.dispatch;
+  r.store.dispatch = (name, arg) => { seen.push([name, arg?.window?.loading]); return dispatch(name, arg); };
+  f.cbs.onItem({ type: 'snapshot', header: {}, cursor: 129, hasMore: true, records: ums(80, 129), projections: { asOfSeq: 129, values: {} } });
+  assert.deepEqual(seen.filter(([n]) => n === 'hostWindow' || n === 'hostEarlierLoading'), [['hostWindow', true]], 'one dispatch, loading folded in');
+  assert.equal(winOf(r, 'live').loading, true);
+  release();
+  assert.equal(await p, false);
+  assert.deepEqual(ids(r, 'live'), [80, 129]);
+  assert.equal(winOf(r, 'live').start, 80); assert.equal(winOf(r, 'live').loading, undefined);
+});

@@ -86,8 +86,8 @@ export const reducers = {
   // a follow snapshot or a page: the window whole, never appended to what was drawn. With a window that the old one
   // reaches (its cut or its last streamed message at least the seq before the new start), the earlier pages already
   // drawn below the start stay before it (a reconnect while reading up keeps the place), and the start and its hasMore
-  // are the lower window's; a window past a gap is taken whole, so the gap pages in. An earlier read's loading is the
-  // live layer's to set again
+  // are the lower window's; a window past a gap is taken whole, so the gap pages in. Loading is only what the payload
+  // says: the live layer folds in a read still under way
   hostWindow(s, { convId, messages, usage, created, window }) {
     const c0 = find(s, convId);
     if (!c0) return s;
@@ -101,15 +101,18 @@ export const reducers = {
     const next = {
       start: lower ? old.start : window.start, through: window.through,
       hasMore: lower ? old.hasMore === true : window.hasMore === true, replaced,
+      ...(window.loading ? { loading: true } : {}),
     };
     return upd(s, convId, c => ({ ...c, messages: [...kept, ...messages], loaded: true, window: next, usage: usage ?? c.usage, created: created ?? c.created }));
   },
 
   // earlier pages of the window on screen: prepended below its start, a drawn id or a covered seq dropped; a page's own
-  // ranges join the window's (they lie below the page, so they cover nothing already drawn)
-  hostEarlier(s, { convId, messages, start, hasMore, replaced: more = [] }) {
+  // ranges join the window's (they lie below the page, so they cover nothing already drawn). Pages read before a start
+  // the window no longer has (a snapshot past a gap replaced it) are dropped, and loading cleared
+  hostEarlier(s, { convId, messages, start, hasMore, replaced: more = [], before }) {
     const c0 = find(s, convId);
     if (!c0?.window) return s;
+    if (typeof before === 'number' && before !== c0.window.start) return reducers.hostEarlierLoading(s, { convId, on: false });
     const replaced = unionRanges(rangesOf(c0.window), Array.isArray(more) ? more : []);
     const add = earlierOf(messages, c0.window.start, replaced, new Set(c0.messages.map(m => m.id)));
     const { loading: _done, ...w } = c0.window;
