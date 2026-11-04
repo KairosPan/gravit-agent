@@ -308,8 +308,10 @@ test("the pin key sits beside the row's link, never inside it, and an archived r
   assert.match(h, /<\/a><button type="button" class="pin-key" data-action="pin" data-conv="a" aria-label="Pin">/);
   assert.match(h, /<\/a><button type="button" class="pin-key" data-action="unpin" data-conv="b" aria-label="Unpin">/);
   assert.doesNotMatch(h, /<a[^>]*class="row[^"]*"[^>]*>(?:(?!<\/a>)[\s\S])*pin-key/, 'the key is not inside the link');
-  const old = renderList(listed([conv('a'), conv('z', { archived: 'face' })], 'a'), NOW);
-  assert.doesNotMatch(old, /data-conv="z"/);
+  const old = renderList(listed([conv('a'), conv('z', { archived: 'face' })], 'z', { pinned: ['z'] }), NOW);
+  const z = old.match(/<div class="row-wrap">(?:(?!<div class="row-wrap">)[\s\S])*?data-id="z"[\s\S]*?<\/div>/);
+  assert.ok(z, "the archived row z is drawn (it is the current one, so its collapsed group shows it)");
+  assert.doesNotMatch(z[0], /pin-key/);
 });
 
 test('the key is reachable by Tab: a button with an accessible name', () => {

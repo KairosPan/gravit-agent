@@ -80,6 +80,7 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .roster-edit { display: flex; flex-direction: column; gap: 4px; }
 .row-wrap { position: relative; }
 .pin-key { position: absolute; top: 12px; right: 10px; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 20px; padding: 0; border: 0; border-radius: var(--radius-s); background: var(--surface-2); color: var(--dim); cursor: pointer; opacity: 0; }
+.pin-key:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
 .pin-key:hover { color: var(--text); }
 .row-wrap:hover .pin-key, .row-wrap:focus-within .pin-key { opacity: 1; }
 .row-wrap:hover .row-time, .row-wrap:focus-within .row-time { visibility: hidden; }
