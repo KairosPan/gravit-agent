@@ -11,13 +11,14 @@ export const chipInner = (iconHtml, label) => `${iconHtml}<span class="ref-chip-
 
 /** The editor's markup: text escaped (its newlines kept under pre-wrap), a chip atomic, carrying itself in data-chip. A
  *  newline that ends the draft draws no line of its own under pre-wrap, so a BR follows it: the browser's own trailing
- *  BR, which the DOM adapter reads as nothing, and the caret after the newline sits on the new line. */
+ *  BR, which the DOM adapter reads as nothing, and the caret after the newline sits on the new line. A chip that ends
+ *  it is followed by a zero-width space, so the caret has a text position after it (the adapter counts it as nothing). */
 export function editorHtml(runs) {
   const list = runs ?? [];
   const last = list[list.length - 1];
   return list.map(r => (r.type === 'text' ? esc(r.text)
     : `<span${attrs({ class: 'ref-chip', contenteditable: 'false', 'data-chip': JSON.stringify(r.chip) })}>${chipInner(chipIcon(r.chip), r.chip.label)}</span>`)).join('') +
-    (last?.type === 'text' && last.text.endsWith('\n') ? '<br>' : '');
+    (last?.type === 'text' && last.text.endsWith('\n') ? '<br>' : last?.type === 'chip' ? '\u200B' : '');
 }
 
 /** The editor's menu attributes: expanded while the menu shows rows, its active row (`cm-<i>`) the active descendant. */

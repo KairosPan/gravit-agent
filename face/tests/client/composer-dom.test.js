@@ -156,7 +156,7 @@ test('a draft that ends in a newline draws its empty last line with a BR, reads 
   const runs = [T('a\n')];
   assert.equal(editorHtml(runs), 'a\n<br>', 'pre-wrap draws no line for a trailing newline: the BR does');
   assert.equal(editorHtml([T('a\nb')]), 'a\nb');
-  assert.equal(editorHtml([T('a\n'), C(bot)]).endsWith('</span>'), true, 'only a newline that ends the draft');
+  assert.equal(editorHtml([T('a\n'), C(bot)]).includes('<br>'), false, 'only a newline that ends the draft');
   const t = text('a\n');
   const root = editor([], html => { assert.equal(html, editorHtml(runs)); return [t, el('br')]; });
   ed.write(root, runs, 2);
@@ -166,4 +166,41 @@ test('a draft that ends in a newline draws its empty last line with a BR, reads 
   assert.equal(ed.caret(root), 2);
   doc.select(root, 2);
   assert.equal(ed.caret(root), 2, 'past the BR is still the end');
+});
+
+test('selection gives [start, end] in caret units, ordered for a backward selection; place with an end selects it', () => {
+  const doc = makeDoc(), ed = makeEditor(doc);
+  const t1 = text('abc'), chip = chipEl(bot), t2 = text('de');
+  const root = editor([t1, chip, t2]);
+  doc.select(t1, 1, t2, 1); assert.deepEqual(ed.selection(root), [1, 5], 'forward, over the chip');
+  doc.select(t2, 1, t1, 1); assert.deepEqual(ed.selection(root), [1, 5], 'backward: the same range');
+  assert.equal(ed.caret(root), 5, 'caret is still the anchor');
+  doc.select(t1, 2); assert.deepEqual(ed.selection(root), [2, 2], 'collapsed');
+  doc.select(text('elsewhere'), 0); assert.equal(ed.selection(root), null, 'outside the editor');
+  ed.place(root, 1, 5);
+  assert.deepEqual(doc.sel.extents.at(-1), [t1, 1, t2, 1]);
+  assert.deepEqual(ed.selection(root), [1, 5]);
+  const before = doc.sel.extents.length;
+  ed.place(root, 2, 2);
+  assert.equal(doc.sel.extents.length, before, 'an empty range is a collapse');
+  assert.deepEqual(doc.sel.collapsed.at(-1), [t1, 2]);
+  const r2 = editor([], () => [text('hi there')]);
+  ed.write(r2, [T('hi there')], 3, 8);
+  assert.deepEqual(ed.selection(r2), [3, 8], 'write keeps a range');
+});
+
+test('a chip that ends the draft has a zero-width space after it, where the caret sits; read, caret and place agree', () => {
+  const doc = makeDoc(), ed = makeEditor(doc);
+  const runs = [T('a '), C(bot)];
+  const h = editorHtml(runs);
+  assert.ok(h.endsWith('</span>​'), 'a ZWSP after the trailing chip');
+  assert.ok(!editorHtml([C(bot), T(' x')]).includes('​'), 'none when text follows');
+  const z = text('​');
+  const root = editor([], html => { assert.equal(html, h); return [text('a '), chipEl(bot), z]; });
+  ed.write(root, runs, 3);
+  assert.deepEqual(ed.read(root), runs, 'the ZWSP reads as nothing');
+  assert.deepEqual(doc.sel.collapsed.at(-1), [z, 1], 'after the chip, in the text after it');
+  assert.equal(ed.caret(root), 3);
+  doc.select(z, 0); assert.equal(ed.caret(root), 3);
+  ed.place(root, 2); assert.deepEqual(doc.sel.collapsed.at(-1), [root.childNodes[0], 2], 'before the chip is unchanged');
 });

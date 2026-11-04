@@ -6,9 +6,10 @@ import { plainText } from '../../../client/js/composer/draft.js';
 export const valueEditor = {
   read: el => [...(el.value ? [{ type: 'text', text: el.value }] : []), ...(el.chips ?? []).map(chip => ({ type: 'chip', chip }))],
   caret: el => el.selectionStart,
-  place: (el, at) => el.setSelectionRange(at, at),
-  write(el, runs, at) {
+  selection: el => [el.selectionStart, el.selectionEnd],
+  place: (el, at, end) => el.setSelectionRange(at, end ?? at),
+  write(el, runs, at, end) {
     el.value = plainText(runs);
-    if (at != null) el.setSelectionRange(at, at);
+    if (at != null) el.setSelectionRange(at, end ?? at);
   },
 };

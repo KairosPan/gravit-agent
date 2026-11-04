@@ -39,7 +39,7 @@ import { rulesOf } from './host/rules-view.js';
 import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
 import { makeEditor } from './composer/dom.js';
-import { textDraft, isBlank, lengthOf, replaceRange, serialize, serialContext } from './composer/draft.js';
+import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext } from './composer/draft.js';
 import { flatItems } from './composer/menus.js';
 import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
@@ -471,9 +471,10 @@ export function boot(win, host = {}) {
     const active = doc.activeElement;
     const activeKey = focusKey(active);
     const caret = active && active.id !== 'say' && typeof active.selectionStart === 'number' && (active.id || active.name) ? [active.selectionStart, active.selectionEnd] : null;
-    // the editor's caret while it has focus, and whose draft it showed: the caret comes back only on that same draft
+    // the editor's selection while it has focus, and whose draft it showed: it comes back on that same draft; another
+    // draft put on screen under the focus has its caret at the end
     const say0 = doc.getElementById('say');
-    const sayCaret = say0 && active === say0 ? editor.caret(say0) : null;
+    const saySel = say0 && active === say0 ? editor.selection(say0) : null;
     const key = draftKey(s);
     const sameKey = key === last.key;
     const typed = new Map([...root.querySelectorAll('input[id]:not([type=radio]):not([type=checkbox]):not([type=file]), textarea[id], select[id]')].map(el => [el.id, el.value]));
@@ -519,8 +520,9 @@ export function boot(win, host = {}) {
       if (el) el.open = true;
     }
     const say = doc.getElementById('say');
-    const keepCaret = sameKey && sayCaret !== null ? sayCaret : null;
-    if (say) editor.write(say, currentRuns(), keepCaret);
+    const endOf = saySel === null ? null : lengthOf(currentRuns());
+    const keep = saySel === null ? null : sameKey ? saySel : [endOf, endOf];
+    if (say) editor.write(say, currentRuns(), keep?.[0] ?? null, keep?.[1]);
 
     // scroll: the rows keep their place; the page keeps its place on the same screen; a drawer while it stays the same drawer
     const sameScreen = last.screen === screenOf(s);
@@ -575,7 +577,7 @@ export function boot(win, host = {}) {
       target.focus();
       if (caret && target === find(activeKey) && typeof target.setSelectionRange === 'function') target.setSelectionRange(caret[0], caret[1]);
       // focus can move a contenteditable's caret: the editor's goes back where write put it
-      if (target === say && keepCaret !== null) editor.place(say, keepCaret);
+      if (target === say && keep !== null) editor.place(say, keep[0], keep[1]);
     }
     last = { overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, editor: editorOf(s.edit), confirm: s.confirm, query, key };
     // a composed answer drawn without its run's view asks for it now that the page is whole (its dispatches render again)
@@ -928,7 +930,12 @@ export function boot(win, host = {}) {
     if (isBlank(runs)) return;
     const workspaceId = s.draft ? s.draft.where : currentConversation(s)?.channel?.workspaceId ?? null;
     const text = serialize(runs, serialContext({ channels: s.channels, workspaceId })).trim();
-    const back = () => { setRuns(runs, key); render(); };
+    // words typed under the key while the send was on its way are kept, after the sent ones on a new line (A7)
+    const back = () => {
+      const since = runsOf(key);
+      setRuns(isBlank(since) ? runs : normalize([...runs, { type: 'text', text: '\n' }, ...since]), key);
+      render();
+    };
     setRuns([], key);
     render();
     if (s.draft) {
@@ -943,9 +950,11 @@ export function boot(win, host = {}) {
     if (!sent) { back(); return; }
     render();
   }
-  // words put in the composer for the operator (a suggestion, Hand to Gravit): the draft on screen, the caret after them
+  // words put in the composer for the operator (a suggestion, Hand to Gravit): the draft on screen, after what it holds on
+  // a new line, the caret after them
   function putWords(words) {
-    const runs = textDraft(words).runs;
+    const had = currentRuns();
+    const runs = isBlank(had) ? textDraft(words).runs : normalize([...had, { type: 'text', text: `\n${words}` }]);
     setRuns(runs);
     render();
     const say = doc.getElementById('say');
@@ -1214,7 +1223,7 @@ export function boot(win, host = {}) {
   const typesWords = el => el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type !== 'checkbox' && el.type !== 'radio');
   // typing: the composer keeps its words outside the store; the title, the searches and the fields go through it
   function typed(el) {
-    if (el.id === 'say') setRuns(editor.read(el));
+    if (sayOf(el)) setRuns(editor.read(sayOf(el)));
     else if (el.dataset?.action === 'draftTitle') store.dispatch('setDraftTitle', el.value);
     else if (el.dataset?.action === 'mkQuery') { store.dispatch('setMarketsQuery', el.value); searchSoon(el.value); }
     else if (el.dataset?.action === 'tradeQuery') tradeSoon(el.value);   // trade.query moves the query (the box keeps the words)
@@ -1255,7 +1264,7 @@ export function boot(win, host = {}) {
   doc.addEventListener('pointerup', release);
   doc.addEventListener('pointercancel', release);
   win.addEventListener('blur', release);
-  // a paste in the editor is plain text at the caret (a paste of files is plan 4's); the page is not rendered
+  // a paste in the editor is plain text over the selection (a paste of files is plan 4's); the page is not rendered
   root.addEventListener('paste', ev => {
     const say = sayOf(ev.target);
     if (!say) return;
@@ -1263,10 +1272,10 @@ export function boot(win, host = {}) {
     const words = (ev.clipboardData?.getData('text/plain') ?? '').replace(/\r\n?/g, '\n');
     if (!words) return;
     const now0 = editor.read(say);
-    const at = editor.caret(say) ?? lengthOf(now0);
-    const runs = replaceRange(now0, at, at, words);
+    const [from, to] = editor.selection(say) ?? [lengthOf(now0), lengthOf(now0)];
+    const runs = replaceRange(now0, from, to, words);
     setRuns(runs);
-    editor.write(say, runs, at + words.length);
+    editor.write(say, runs, from + words.length);
   });
   root.addEventListener('compositionstart', () => { composing = true; });
   root.addEventListener('compositionend', ev => {

@@ -3763,3 +3763,87 @@ test('a paste arrives as plain text at the caret', async () => {
   assert.deepEqual(promptsOf(h), [['s1', 'aX\nYb']]);
   store.timers.clear();
 });
+
+// ---- fix round 1 of task 5 ----
+test('a paste over a selection replaces it, the caret after the pasted text', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = await bootComposer(f, h, valueEditor);
+  say.focus();
+  type(f, say, 'abcd');
+  say.setSelectionRange(1, 3);
+  f.fire('root', 'paste', { target: say, clipboardData: { getData: t => (t === 'text/plain' ? 'XY' : '') } });
+  assert.equal(say.value, 'aXYd');
+  assert.deepEqual([say.selectionStart, say.selectionEnd], [3, 3]);
+  store.timers.clear();
+});
+
+test('a send that fails after more was typed loses nothing: the sent words, a new line, then the new ones', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const call = h.call;
+  let fail;
+  h.call = (endpoint, args) => (endpoint === 'session/prompt' ? new Promise((_, reject) => { fail = () => reject(new Error('host down')); }) : call(endpoint, args));
+  const store = await bootComposer(f, h, valueEditor);
+  type(f, say, 'first thought');
+  send(f);
+  await settle();
+  assert.equal(say.value, '', 'cleared while it is on its way');
+  type(f, say, 'second');
+  fail();
+  await settle();
+  assert.equal(say.value, 'first thought\nsecond');
+  store.timers.clear();
+});
+
+test('a render keeps a selection in the editor, and a new draft on screen puts the caret at its end', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1', { updatedAt: 50 }), row('s2', { updatedAt: 9 })] });
+  const { writes, editor } = recording();
+  const store = await bootComposer(f, h, editor);
+  say.focus();
+  type(f, say, 'hello world');
+  say.setSelectionRange(2, 5);
+  store.dispatch('toggleRail');
+  assert.deepEqual([say.selectionStart, say.selectionEnd], [2, 5], 'the selection is kept');
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  await settle();
+  type(f, say, 'abc');
+  say.focus();
+  say.setSelectionRange(0, 0);
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  await settle();
+  assert.equal(say.value, 'hello world');
+  assert.equal(f.doc.activeElement, say);
+  assert.deepEqual([say.selectionStart, say.selectionEnd], [11, 11], 'at the end of the draft now on screen');
+  assert.equal(writes.length > 0, true);
+  store.timers.clear();
+});
+
+test('typing in a node inside the editor is the editor\'s typing', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = await bootComposer(f, h, valueEditor);
+  say.value = 'from a line block';
+  f.fire('root', 'input', { target: { tagName: 'DIV', dataset: {}, closest: sel => (sel === '#say' ? say : null) } });
+  send(f);
+  await settle();
+  assert.deepEqual(promptsOf(h), [['s1', 'from a line block']]);
+  store.timers.clear();
+});
+
+test('a suggestion joins a draft already written, on a new line, rather than replacing it', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1')] });
+  const store = await bootComposer(f, h, valueEditor);
+  type(f, say, 'mine');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'suggest', text: 'Look at BTC' } });
+  assert.equal(say.value, 'mine\nLook at BTC');
+  assert.equal(say.selectionStart, 'mine\nLook at BTC'.length);
+  store.timers.clear();
+});

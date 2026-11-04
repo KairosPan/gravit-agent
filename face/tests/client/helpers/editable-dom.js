@@ -1,6 +1,6 @@
 // face/tests/client/helpers/editable-dom.js — node trees built by hand for the composer's DOM adapter
 // (js/composer/dom.js): text nodes, elements with a dataset and children, an editor root, and a document whose
-// getSelection() answers anchorNode/anchorOffset/rangeCount, collapse, removeAllRanges and addRange, with a
+// getSelection() answers anchorNode/anchorOffset, focusNode/focusOffset, rangeCount, collapse, setBaseAndExtent, removeAllRanges and addRange, with a
 // createRange() that records setStart. It parses no HTML: an editor's innerHTML setter stores the string and takes
 // its children from the `parse` function the test hands it, if any.
 
@@ -55,7 +55,11 @@ export function makeDoc() {
     anchorOffset: 0,
     rangeCount: 0,
     collapsed: [],
-    collapse(node, offset) { this.anchorNode = node; this.anchorOffset = offset; this.rangeCount = 1; this.collapsed.push([node, offset]); },
+    focusNode: null,
+    focusOffset: 0,
+    extents: [],
+    collapse(node, offset) { this.anchorNode = this.focusNode = node; this.anchorOffset = this.focusOffset = offset; this.rangeCount = 1; this.collapsed.push([node, offset]); },
+    setBaseAndExtent(an, ao, fn, fo) { Object.assign(this, { anchorNode: an, anchorOffset: ao, focusNode: fn, focusOffset: fo, rangeCount: 1 }); this.extents.push([an, ao, fn, fo]); },
     removeAllRanges() { this.rangeCount = 0; this.anchorNode = null; this.anchorOffset = 0; },
     addRange(r) { this.rangeCount = 1; this.anchorNode = r.start?.[0] ?? null; this.anchorOffset = r.start?.[1] ?? 0; },
   };
@@ -69,7 +73,9 @@ export function makeDoc() {
       return r;
     },
     /** Put the selection at (node, offset) as a browser would after a click or a keystroke. */
-    select(node, offset) { sel.anchorNode = node; sel.anchorOffset = offset; sel.rangeCount = node ? 1 : 0; },
+    select(node, offset, focusNode = node, focusOffset = offset) {
+      Object.assign(sel, { anchorNode: node, anchorOffset: offset, focusNode, focusOffset, rangeCount: node ? 1 : 0 });
+    },
   };
   return doc;
 }

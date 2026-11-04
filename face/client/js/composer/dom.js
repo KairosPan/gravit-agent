@@ -1,5 +1,5 @@
 // The editor's DOM adapter: the only code that reads or writes the editor's nodes (div#say, contenteditable, chips as
-// atomic spans carrying data-chip). app.js takes it as host.editor ?? makeEditor(doc).
+// atomic spans carrying data-chip). app.js takes it as host.editor ?? makeEditor(doc): read, caret, selection, place, write.
 // The caret counts as lengthOf does: a text's UTF-16 length with zero-width spaces left out, 1 for a chip, 1 for a
 // newline (a BR, a DIV or P block that starts a line, content after a block); the browser's own BRs count nothing.
 import { normalize } from './draft.js';
@@ -90,6 +90,12 @@ function tokens(root, anchor) {
   return { out, length: units, at };
 }
 
+/** The zero-width-space-only text node right after `node`, as a spot at its end; null when there is none. */
+function zwspAfter(node) {
+  const next = node.parentNode?.childNodes[indexIn(node) + 1];
+  return next && isText(next) && next.data.length > 0 && !visible(next) ? [next, next.data.length] : null;
+}
+
 /** The raw offset in a text node after its k-th visible character (past a leading zero-width space for k = 0). */
 function rawOffset(data, k) {
   let seen = 0;
@@ -105,16 +111,31 @@ export function makeEditor(doc) {
   const read = el => normalize(tokens(el, null).out.map(t => (t.type === 'chip' ? { type: 'chip', chip: t.chip }
     : { type: 'text', text: t.type === 'text' ? t.text : '\n' })));
 
-  const caret = el => {
-    const sel = doc.getSelection?.();
-    if (!sel || !sel.rangeCount || !sel.anchorNode || !el.contains(sel.anchorNode)) return null;
-    const { at, length } = tokens(el, { node: sel.anchorNode, offset: sel.anchorOffset });
+  const unitAt = (el, node, offset) => {
+    const { at, length } = tokens(el, { node, offset });
     return at == null ? null : Math.min(Math.max(at, 0), length);
   };
+  const inside = (el, sel) => sel && sel.rangeCount && sel.anchorNode && el.contains(sel.anchorNode);
 
-  const place = (el, at) => {
+  const caret = el => {
     const sel = doc.getSelection?.();
-    if (!sel) return;
+    return inside(el, sel) ? unitAt(el, sel.anchorNode, sel.anchorOffset) : null;
+  };
+
+  /** The selection as [start, end] in caret units, start <= end whichever way it was made; null outside the editor. */
+  const selection = el => {
+    const sel = doc.getSelection?.();
+    if (!inside(el, sel)) return null;
+    const a = unitAt(el, sel.anchorNode, sel.anchorOffset);
+    if (a == null) return null;
+    const f = sel.focusNode && el.contains(sel.focusNode) ? unitAt(el, sel.focusNode, sel.focusOffset) : null;
+    const b = f ?? a;
+    return a <= b ? [a, b] : [b, a];
+  };
+
+  /** The selection spot for caret unit `at`: inside a text where one holds it, else beside a chip, a BR or a newline. A
+   *  chip's after-spot moves into the zero-width space that follows it, so the caret has a text position there. */
+  const spotOf = (el, at) => {
     const { out, length } = tokens(el, null);
     const n = Math.min(Math.max(Number(at) || 0, 0), length);
     let spot = null;
@@ -123,16 +144,25 @@ export function makeEditor(doc) {
     else {
       for (const x of out) {
         if (x.start === n) { spot = x.before; break; }
-        if (x.start + 1 === n) { spot = x.after; break; }
+        if (x.start + 1 === n) { spot = x.type === 'chip' ? zwspAfter(x.node) ?? x.after : x.after; break; }
       }
     }
-    sel.collapse(...(spot ?? [el, 0]));
+    return spot ?? [el, 0];
   };
 
-  const write = (el, runs, at) => {
+  /** The caret at `at`, or the range [at, end] when `end` differs. */
+  const place = (el, at, end) => {
+    const sel = doc.getSelection?.();
+    if (!sel) return;
+    const a = spotOf(el, at);
+    if (end == null || Number(end) === Number(at) || typeof sel.setBaseAndExtent !== 'function') { sel.collapse(...a); return; }
+    sel.setBaseAndExtent(...a, ...spotOf(el, end));
+  };
+
+  const write = (el, runs, at, end) => {
     el.innerHTML = editorHtml(runs);
-    if (at != null) place(el, at);
+    if (at != null) place(el, at, end);
   };
 
-  return { read, caret, place, write };
+  return { read, caret, selection, place, write };
 }
