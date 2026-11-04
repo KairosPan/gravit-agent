@@ -154,6 +154,25 @@ function connectStates(signing) {
     R.identityConnectSet(open, { step: 2, pending }),
     R.identityConnectSet(open, { step: 3, pending: heard, error: 'This connection is gone: it expired or was closed. Start again.' }),
     R.sheetRefused(R.sheetOpen(signing, { kind: 'connectNetwork', seed, fields: [] }), { message: 'This connection is gone: it expired or was closed. Start again.' }),
+    ...slackStates(signing),
+  ];
+}
+
+// Slack (plan B2 Task 7): connected with its Details open, and Install app…'s sheets 1 to 4 (1 with the manifest, 2 in conflict, 4 with
+// its note)
+function slackStates(signing) {
+  const read = { ...signing.identity.data, networks: [...signing.identity.data.networks, { network: 'slack', speaksAs: '@gravit', talksOnlyWith: '@pan', since: '2026-11-04T14:00:00.000Z', fingerprint: 'cd56ef78', state: 'connected', polling: true }], slackManifest: '{\n  "a": 1\n}' };
+  const both = R.identityDetails(R.identityLoaded(signing, read), 'slack');
+  const pending = { id: 'fedcba9876543210fedcba9876543210', network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'Gravit' }, workspace: 'Fake Co', link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'conflict' };
+  const heard = { ...pending, state: 'heard', sender: { id: 'T0FAKE001:U0OPER7QK', name: 'Pan', handle: '@pan', userId: 'U0OPER7QK', masked: '…7QK', text: 'hi' } };
+  const open = R.identityConnectOpen(both, 'slack');
+  const seed = { network: 'slack', pending: pending.id, botId: 'T0FAKE001:U0BOT0001', speaksAs: '@gravit', operatorId: 'T0FAKE001:U0OPER7QK', talksOnlyWith: '@pan', routing: 'chat=slack;alerts=slack;brief=slack;cards=slack;fills=slack', keyHash: 'a'.repeat(64), salt: 'b'.repeat(32) };
+  return [
+    both,
+    R.identityConnectSet(open, { copied: true }),
+    R.identityConnectSet(open, { step: 2, pending }),
+    R.identityConnectSet(open, { step: 3, pending: heard }),
+    R.sheetOpen(both, { kind: 'connectNetwork', seed, fields: [] }),
   ];
 }
 

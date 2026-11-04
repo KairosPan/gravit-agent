@@ -10,7 +10,7 @@ import { standingWords, devicesOf, whatYouSignLines, goodForWords } from '../hos
 import { titleOf, goWord, connectCheckOf, connectOptionOf, isWalletOption, whoOf, signOutLineOf } from '../host/sheet-view.js';
 import { askedOf } from '../host/sheet.js';
 import { moveHintsOf, moveSaysOf, routesWordsOf, earnHintsOf, earnSaysOf } from '../host/sheet-money.js';
-import { IDENTITY_KINDS, identityLinesOf, identityStepsOf } from '../host/sheet-identity.js';
+import { IDENTITY_KINDS, identityLinesOf, identityStepsOf, identityNoteOf } from '../host/sheet-identity.js';
 import { seg } from './controls.js';
 
 const note = text => `<p class="acct-note">${esc(text)}</p>`;
@@ -168,8 +168,10 @@ export function renderSheet(state, now) {
   const identity = IDENTITY_KINDS.includes(s.kind);
   const idLines = identity ? identityLinesOf(s.kind, s.seed) : [];
   const above = idLines.length ? `<div class="sheet-quote">${idLines.map(l => `<div class="dsec-line">${esc(l)}</div>`).join('')}</div>` : '';
-  const idSteps = identity ? identityStepsOf(s.kind) : [];
-  const steps = idSteps.length ? `<ol class="sheet-steps">${idSteps.map(l => `<li>${esc(l)}</li>`).join('')}</ol>` : '';
+  const idSteps = identity ? identityStepsOf(s.kind, s.seed) : [];
+  // Slack's sheet 4 adds one note under its steps: the phone's commands typed with ! there (plan B2 Task 7)
+  const idNote = identity ? identityNoteOf(s.kind, s.seed) : '';
+  const steps = (idSteps.length ? `<ol class="sheet-steps">${idSteps.map(l => `<li>${esc(l)}</li>`).join('')}</ol>` : '') + (idNote ? `<p class="sheet-hint">${esc(idNote)}</p>` : '');
   const startAgain = s.kind === 'connectNetwork' && s.status === 'refused' ? `<div class="btn-row">${key('identityStartAgain', 'Start again')}</div>` : '';
   const keys = `<div class="btn-row">${key('sheetClose', 'Cancel')}<button${attrs({ type: 'button', class: 'btn-primary', 'data-action': 'sheetSubmit', disabled: !live })}>${esc(goWord(s.kind, s.seed, s.fields))}</button></div>`;
   // a granting sheet's line under its title: the ask in the Account's words (plan 4b Task 6)

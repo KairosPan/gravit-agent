@@ -32,6 +32,7 @@ import { mountClient, signIn, remote } from "./remote.ts";
 import { registerAccountProxy } from "../src/account-proxy.ts";
 import { freePort, standinSkip, startStandin, stopStandin, type Standin } from "./helpers/standin.ts";
 import { renderAccountScreen } from "../client/js/render/account.js";
+import { renderConnectDrawer } from "../client/js/render/identity.js";
 
 const gated = process.env.FACE_SMOKE !== "1";
 
@@ -146,6 +147,29 @@ test("gravit client smoke: the page at /, its modules under /client, and the liv
       for (const card of ["Gravit", "What reaches you where", "Not you"]) assert.match(html, new RegExp(`<section class="cardbox" aria-label="${card}">`), card);
       assert.match(html, /Telegram/);
       assert.match(html, /Not connected/, "a fresh stand-in has no connection");
+      assert.match(html, /data-network="slack"/);
+      // Slack (plan B2 Task 7): the account's manifest rides on the read, and the stand-in's read with Slack connected draws Slack's
+      // row Connected and its column enabled on a page that signs, and Install app…'s sheet 1 the manifest as the account gave it
+      assert.equal(typeof identity.slackManifest, "string");
+      assert.match(identity.slackManifest, /socket_mode_enabled/);
+      const slack = { network: "slack", speaksAs: "@gravit", talksOnlyWith: "@pan", since: new Date().toISOString(), fingerprint: "cd56ef78", state: "connected", polling: true };
+      const withSlack = { ...identity, networks: [...(Array.isArray(identity.networks) ? identity.networks : []), slack], routing: { ...identity.routing, chat: ["slack"] } };
+      const signed = createStore({ initial: emptyState(), reducers });
+      signed.dispatch("nav", { screen: "account", tab: "identity" });
+      signed.dispatch("ownerStanding", { role: "signs", kid: "a5048199a8081854" });
+      signed.dispatch("identityLoaded", withSlack);
+      const drawn = renderAccountScreen(signed.get(), Date.now());
+      const row = drawn.match(/<div class="venue" data-network="slack">[\s\S]*?<\/div>/)?.[0] ?? "";
+      assert.match(row, /Connected/);
+      assert.match(row, /Speaks as @gravit/);
+      assert.match(row, /data-kind="disconnectNetwork" data-network="slack"/);
+      assert.match(drawn, /<input type="checkbox" aria-label="Chat with Gravit on Slack" checked data-action="identityTick" data-row="chat" data-network="slack">/);
+      signed.dispatch("identityConnectOpen", "slack");
+      const sheet = renderConnectDrawer(signed.get());
+      assert.match(sheet, /Connect Slack · 1 of 4 · App tokens/);
+      assert.match(sheet, /id="identity-manifest"[^>]*>[\s\S]*socket_mode_enabled/);
+      assert.match(sheet, /id="identity-app-token"/);
+      assert.match(sheet, /id="identity-bot-token"/);
     }
   } finally {
     proxy?.dispose();

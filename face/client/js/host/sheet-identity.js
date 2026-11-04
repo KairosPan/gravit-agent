@@ -1,12 +1,12 @@
-// face/client/js/host/sheet-identity.js — Account › Identity's signed sheets (plan B1b Tasks 2–3): connectNetwork, sheet 4 of Connect
-// Telegram (What you sign: the pending connection the account checked with Telegram and heard Say hi on, its bot, its operator, the
+// face/client/js/host/sheet-identity.js — Account › Identity's signed sheets (plan B1b Tasks 2–3; Slack's words plan B2 Task 7):
+// connectNetwork, sheet 4 of Connect Telegram or Connect Slack (What you sign: the pending connection the account checked with Telegram and heard Say hi on, its bot, its operator, the
 // routing a fresh connection sends and the token's fingerprint, never the token); and Task 3's three: disconnectNetwork (Disconnect
 // Telegram: the binding and its token gone), routing (What reaches you where: the grid's ticks as the account's routing string, and
 // quiet hours as two clocks or Off, which the account stores as null) and block (a stranger in Not you, by its reference).
 // Each sheet is the account's own owner type (account/src/portfolio/account/sign.ts OwnerAction), every field from the seed. The
 // sheet draws its lines above its fields and its numbered steps above its keys (render/owner.js). host/sheet-view.js delegates the
 // kinds here; the sheet engine (host/sheet.js) prepares the draft and What you sign shows it. No clock. No DOM, no store.
-import { ROUTE_ROWS, formatRouting } from './identity-view.js';
+import { ROUTE_ROWS, SPOKEN, formatRouting } from './identity-view.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = v => (typeof v === 'string' ? v : '');
@@ -21,9 +21,11 @@ export const CONNECT_STEPS_4 = [
   'To stop, use Disconnect… in Account › Identity.',
 ];
 
-const NETWORK_NAME = { telegram: 'Telegram' };
-// the networks the account speaks on now (kinds.ts NETWORKS): a disconnect or a block names one of them
-const SPOKEN = ['telegram'];
+/** Sheet 4's note under its steps, Slack's alone (the plan's ruling 5: Slack's composer takes a leading / as its own), fixed copy. */
+export const SLACK_STEPS_4_NOTE = "On Slack, type the phone's commands with ! — !status, !pause 30m, !mute 30m, !new, !stop.";
+
+const NETWORK_NAME = { telegram: 'Telegram', slack: 'Slack' };
+// a disconnect or a block names one of the networks the account speaks on (identity-view.js SPOKEN, kinds.ts NETWORKS)
 const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** The words of Task 3's sheets that refuse or change nothing, fixed copy. */
@@ -48,7 +50,7 @@ export function rowsSentOn(routing, network) {
 export function identityTitleOf(kind, seed) {
   const s = isRecord(seed) ? seed : {};
   switch (kind) {
-    case 'connectNetwork': return 'Connect Telegram · 4 of 4 · What you sign';
+    case 'connectNetwork': return `Connect ${NETWORK_NAME[str(s.network)] ?? 'Telegram'} · 4 of 4 · What you sign`;
     case 'disconnectNetwork': return `Disconnect ${NETWORK_NAME[str(s.network)] ?? 'Telegram'}`;
     case 'routing': return 'What reaches you where';
     case 'block': return `Block ${str(s.masked) || 'this sender'}`;
@@ -103,18 +105,21 @@ export function identityLinesOf(kind, seed) {
         `Speaks as: ${str(s.speaksAs) || '—'}`,
         `Talks only with: ${str(s.talksOnlyWith) || '—'}`,
         `May send: ${sends.length ? sends.join(', ') : 'nothing yet'}`,
-        'Token kept in: Account · :4820',
+        `${network === 'slack' ? 'Tokens' : 'Token'} kept in: Account · :4820`,
         'Signed by: this browser',
         'Until: you disconnect',
       ];
     }
     case 'disconnectNetwork': {
+      const slack = str(s.network) === 'slack';
       const name = NETWORK_NAME[str(s.network)] ?? 'Telegram';
-      return [`Gravit stops reading and sending on ${name}.`, 'The token is deleted from the account.', 'The desk keeps working in the face.'];
+      return [`Gravit stops reading and sending on ${name}.`, slack ? 'Both tokens are deleted from the account.' : 'The token is deleted from the account.', 'The desk keeps working in the face.'];
     }
     case 'routing': {
-      const sends = rowsSentOn(formatRouting(s.routing), 'telegram');
-      return [`On Telegram: ${sends.length ? sends.join(', ') : 'nothing'}`];
+      // a line for each network the seed names connected (none named: Telegram's alone, as before Slack)
+      const nets = Array.isArray(s.networks) ? SPOKEN.filter(n => s.networks.includes(n)) : ['telegram'];
+      const routing = formatRouting(s.routing);
+      return nets.map(n => { const sends = rowsSentOn(routing, n); return `On ${NETWORK_NAME[n]}: ${sends.length ? sends.join(', ') : 'nothing'}`; });
     }
     case 'block': return [`Messages from ${str(s.masked) || 'this sender'} are dropped and no longer counted.`];
     default: return [];
@@ -122,11 +127,16 @@ export function identityLinesOf(kind, seed) {
 }
 
 /** The numbered steps drawn above the sheet's keys. */
-export function identityStepsOf(kind) {
+export function identityStepsOf(kind, _seed) {
   switch (kind) {
     case 'connectNetwork': return CONNECT_STEPS_4;
     default: return [];
   }
+}
+
+/** The note drawn under the steps: Slack's sheet 4 alone; '' for the rest. */
+export function identityNoteOf(kind, seed) {
+  return kind === 'connectNetwork' && isRecord(seed) && seed.network === 'slack' ? SLACK_STEPS_4_NOTE : '';
 }
 
 const HEX64 = /^[0-9a-f]{64}$/;

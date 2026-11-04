@@ -9,7 +9,8 @@ import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { startSheet } from '../../client/js/host/sheet.js';
-import { startIdentity, fingerprintOf, PENDING_POLL_MS, TOKEN_PATH } from '../../client/js/host/identity.js';
+import { startIdentity, fingerprintOf, copyManifest, PENDING_POLL_MS, TOKEN_PATHS } from '../../client/js/host/identity.js';
+const TOKEN_PATH = TOKEN_PATHS.telegram;
 import { renderConnectDrawer } from '../../client/js/render/identity.js';
 import { renderSheet } from '../../client/js/render/owner.js';
 
@@ -49,19 +50,20 @@ function fakeTimers(clock) {
 }
 
 // the door the host posts through ({status, body}, as host/owner.js postVia answers) and the reads it makes
-function rig({ tokenAnswer = { status: 200, body: { ok: true, pending: PENDING } }, reads = [] } = {}) {
+const EMPTY_READ = { ok: true, networks: [], routing: { chat: [], alerts: [], brief: [], cards: [], fills: [] }, quiet: null, strangers: [] };
+function rig({ tokenAnswer = { status: 200, body: { ok: true, pending: PENDING } }, reads = [], read = EMPTY_READ } = {}) {
   const clock = { t: START };
   const timers = fakeTimers(clock);
   const store = createStore({ initial: emptyState(START), reducers });
   store.dispatch('ownerStanding', { role: 'signs', kid: 'a5048199a8081854' });
-  store.dispatch('identityLoaded', { ok: true, networks: [], routing: { chat: [], alerts: [], brief: [], cards: [], fills: [] }, quiet: null, strangers: [] });
+  store.dispatch('identityLoaded', read);
   const posts = [];
   const gets = [];
   const opened = [];
   const answers = { notMe: [] };
   const post = async (path, body) => {
     posts.push({ path, body });
-    if (path === TOKEN_PATH) return tokenAnswer;
+    if (path === TOKEN_PATH || path === TOKEN_PATHS.slack) return tokenAnswer;
     if (path.endsWith('/not-me')) return answers.notMe.shift() ?? { status: 200, body: { ok: true, pending: PENDING } };
     return { status: 200, body: { ok: true } };
   };
@@ -251,7 +253,7 @@ test('This is me opens sheet 4, the owner sheet, seeded from the pending and the
   assert.equal(r.opened.length, 1);
   assert.deepEqual(r.opened[0], {
     kind: 'connectNetwork',
-    seed: { pending: PENDING.id, botId: '777', speaksAs: '@gravit_desk_bot', operatorId: '555000123', talksOnlyWith: '@pan', routing: ALL_TELEGRAM, keyHash: fp.keyHash, salt: fp.salt },
+    seed: { network: 'telegram', pending: PENDING.id, botId: '777', speaksAs: '@gravit_desk_bot', operatorId: '555000123', talksOnlyWith: '@pan', routing: ALL_TELEGRAM, keyHash: fp.keyHash, salt: fp.salt },
   });
   // the drawer closed without dropping: the sheet and the drawer never show at once
   assert.equal(r.store.get().identity.connect, null);
@@ -391,4 +393,146 @@ test('sheet 2: an account that stops answering is said in a plain line, gone onc
   await r.timers.advance(PENDING_POLL_MS);
   assert.equal(r.store.get().identity.connect.silent, false);
   assert.doesNotMatch(renderConnectDrawer(r.store.get()), /not answering/);
+});
+
+// ── plan B2 Task 7: Install app… for Slack, two tokens sent once ──
+
+// made-up tokens of Slack's shapes, joined at run time so that no literal in the tree is scanner-shaped (rules: no token anywhere)
+const APP = ['xa', 'pp-1-A0FAKE0001-1234567-', 'ab'.repeat(32)].join('');
+const BOT = ['xo', 'xb-', '1111111-2222222-', 'FakeBotTokenForTestsOnly00'].join('');
+const sha256pair = (saltHex, app, bot) => createHash('sha256').update(Buffer.from(saltHex, 'hex')).update(Buffer.from(`${app}\u0000${bot}`, 'utf8')).digest('hex');
+const SLACK_PENDING = {
+  id: 'fedcba9876543210fedcba9876543210', network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'Gravit', workspace: 'Fake Co' },
+  workspace: 'Fake Co', link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: 'data:image/svg+xml;base64,PHN2Zy8+',
+  expiresAt: '2026-11-04T15:10:00.000Z', state: 'waiting',
+};
+const SLACK_HEARD = { ...SLACK_PENDING, state: 'heard', sender: { id: 'T0FAKE001:U0OPER7QK', name: 'Pan', handle: '@pan', userId: 'U0OPER7QK', masked: '…7QK', text: 'hi' } };
+const ALL_TELEGRAM_READ = { ...EMPTY_READ, networks: [{ network: 'telegram', state: 'connected', speaksAs: '@gravit_desk_bot', talksOnlyWith: '@pan' }], routing: { chat: ['telegram'], alerts: ['telegram'], brief: ['telegram'], cards: ['telegram'], fills: ['telegram'] } };
+const slackRig = (over = {}) => rig({ tokenAnswer: { status: 200, body: { ok: true, pending: SLACK_PENDING } }, ...over });
+
+test('Install app… opens the drawer for Slack; Connect… for Telegram', () => {
+  const r = slackRig();
+  r.identity.openConnect('slack');
+  assert.equal(r.store.get().identity.connect.network, 'slack');
+  assert.equal(r.store.get().identity.connect.step, 1);
+  r.identity.openConnect();
+  assert.equal(r.store.get().identity.connect.network, 'telegram');
+  r.identity.openConnect('fax');
+  assert.equal(r.store.get().identity.connect.network, 'telegram', 'a network the tab does not know is Telegram');
+});
+
+test('Next hashes the pair in the browser, posts it once, clears both fields, and keeps no token in the store', async () => {
+  const r = slackRig();
+  r.identity.openConnect('slack');
+  const app = field(APP), bot = field(BOT);
+  await r.identity.next(app, bot);
+  const sent = r.posts.filter(p => JSON.stringify(p.body).includes(BOT));
+  assert.equal(sent.length, 1, 'one request carries the tokens');
+  assert.equal(sent[0].path, '/data/account/identity/slack/token');
+  assert.deepEqual(Object.keys(sent[0].body).sort(), ['appToken', 'botToken', 'keyHash', 'salt']);
+  assert.equal(sent[0].body.appToken, APP);
+  assert.equal(sent[0].body.botToken, BOT);
+  assert.match(sent[0].body.salt, /^[0-9a-f]{32}$/);
+  assert.equal(sent[0].body.keyHash, sha256pair(sent[0].body.salt, APP, BOT));
+  assert.equal(app.value, '');
+  assert.equal(bot.value, '');
+  assert.equal(r.posts.filter(p => p.path === TOKEN_PATH).length, 0, 'never Telegram\'s route');
+  const c = r.store.get().identity.connect;
+  assert.equal(c.step, 2);
+  assert.deepEqual(c.fp, { salt: sent[0].body.salt, keyHash: sent[0].body.keyHash });
+  const all = JSON.stringify(r.store.get());
+  assert.ok(!all.includes(APP) && !all.includes(BOT), 'no token in the store');
+  assert.ok(!renderConnectDrawer(r.store.get()).includes(BOT));
+  // a refusal whose words carried either token is never drawn with it
+  for (const leak of [APP, BOT]) {
+    const r2 = slackRig({ tokenAnswer: { status: 400, body: { ok: false, error: `bad ${leak}` } } });
+    r2.identity.openConnect('slack');
+    await r2.identity.next(field(APP), field(BOT));
+    assert.ok(!JSON.stringify(r2.store.get()).includes(leak));
+    assert.equal(r2.store.get().identity.connect.error, 'The account refused the tokens.');
+  }
+});
+
+test('Next with one field empty posts nothing and says which is missing', async () => {
+  const cases = [['', BOT, 'Paste the app-level token (xapp-…) first.'], [APP, ' ', 'Paste the bot token (xoxb-…) first.'], ['', '', 'Paste both tokens first.']];
+  for (const [a, b, words] of cases) {
+    const r = slackRig();
+    r.identity.openConnect('slack');
+    const app = field(a), bot = field(b);
+    await r.identity.next(app, bot);
+    assert.equal(r.posts.length, 0, words);
+    assert.equal(r.store.get().identity.connect.error, words);
+    assert.equal(r.store.get().identity.connect.step, 1);
+    assert.equal(app.value, '');
+    assert.equal(bot.value, '');
+  }
+  // no second field at all: the bot token is missing
+  const r = slackRig();
+  r.identity.openConnect('slack');
+  await r.identity.next(field(APP));
+  assert.equal(r.posts.length, 0);
+  assert.equal(r.store.get().identity.connect.error, 'Paste the bot token (xoxb-…) first.');
+});
+
+test('sheet 2: Say hi with the app_redirect link, its QR, the workspace and the expiry; sheet 3 and Not me as Telegram\'s', async () => {
+  const r = slackRig({ reads: [{ ok: true, pending: SLACK_PENDING }, { ok: true, pending: SLACK_HEARD }] });
+  r.identity.openConnect('slack');
+  await r.identity.next(field(APP), field(BOT));
+  await r.timers.advance(PENDING_POLL_MS);
+  assert.ok(r.gets[0].startsWith(`/data/account/identity/pending?id=${SLACK_PENDING.id}`));
+  const two = renderConnectDrawer(r.store.get());
+  assert.match(two, /<h2>Connect Slack · 2 of 4 · Say hi<\/h2>/);
+  assert.match(two, /<a href="https:\/\/slack\.com\/app_redirect\?app=A0FAKE0001&amp;team=T0FAKE001" target="_blank" rel="noopener noreferrer">Open Gravit in Fake Co<\/a>/);
+  assert.match(two, /<img class="identity-qr" src="data:image\/svg\+xml;base64,PHN2Zy8\+" alt="QR code for Gravit&#39;s app in Fake Co"/);
+  assert.match(two, /Workspace: Fake Co/);
+  assert.match(two, /This connection waits until 10:10 ET; after that, start again\./);
+  // a link that is not Slack's app_redirect is no link and no QR
+  const odd = s => ({ ...r.store.get(), identity: { ...r.store.get().identity, connect: { ...r.store.get().identity.connect, pending: { ...SLACK_PENDING, ...s } } } });
+  for (const link of ['https://evil.test/app_redirect?app=A0FAKE0001&team=T0FAKE001', 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001&x=1', 'https://t.me/gravit_desk_bot']) {
+    assert.doesNotMatch(renderConnectDrawer(odd({ link })), /<a |<img/, link);
+  }
+  // the conflict in Slack's words
+  assert.match(renderConnectDrawer(odd({ state: 'conflict' })), /Another program holds this app&#39;s connection to Slack: stop it, and this sheet goes on\./);
+  await r.timers.advance(PENDING_POLL_MS);
+  const three = renderConnectDrawer(r.store.get());
+  assert.match(three, /<h2>Connect Slack · 3 of 4 · Is this you\?<\/h2>/);
+  for (const line of ['Name: Pan', 'Handle: @pan', 'Slack id: U0OPER7QK', 'Message: hi']) assert.ok(three.includes(line), line);
+  assert.ok(!three.includes('Telegram'), 'no Telegram words on Slack\'s sheet');
+  r.answers.notMe.push({ status: 200, body: { ok: true, pending: SLACK_PENDING } });
+  await r.identity.notMe();
+  assert.deepEqual(r.posts.at(-1), { path: '/data/account/identity/pending/not-me', body: { id: SLACK_PENDING.id } });
+  assert.equal(r.store.get().identity.connect.step, 2);
+  assert.equal(r.store.get().identity.connect.network, 'slack');
+});
+
+test('This is me opens sheet 4 seeded for Slack, with Slack ticked in all five rows on top of the routing now', async () => {
+  const r = slackRig({ read: ALL_TELEGRAM_READ, reads: [{ ok: true, pending: SLACK_HEARD }] });
+  r.identity.openConnect('slack');
+  await r.identity.next(field(APP), field(BOT));
+  await r.timers.advance(PENDING_POLL_MS);
+  const { fp } = r.store.get().identity.connect;
+  r.identity.thisIsMe();
+  assert.deepEqual(r.opened, [{
+    kind: 'connectNetwork',
+    seed: {
+      network: 'slack', pending: SLACK_PENDING.id, botId: 'T0FAKE001:U0BOT0001', speaksAs: '@gravit', operatorId: 'T0FAKE001:U0OPER7QK', talksOnlyWith: '@pan',
+      routing: 'chat=slack,telegram;alerts=slack,telegram;brief=slack,telegram;cards=slack,telegram;fills=slack,telegram', keyHash: fp.keyHash, salt: fp.salt,
+    },
+  }]);
+  assert.equal(r.store.get().identity.connect, null);
+  assert.ok(!JSON.stringify(r.opened).includes(BOT));
+});
+
+test('the manifest\'s Copy writes it to the clipboard, and selects the text when the clipboard is refused', async () => {
+  const written = [];
+  let selected = 0;
+  assert.equal(await copyManifest('{"a":1}', { writeText: async t => { written.push(t); } }, () => { selected += 1; }), true);
+  assert.deepEqual(written, ['{"a":1}']);
+  assert.equal(selected, 0);
+  assert.equal(await copyManifest('{"a":1}', { writeText: async () => { throw new Error('denied'); } }, () => { selected += 1; }), false);
+  assert.equal(selected, 1);
+  assert.equal(await copyManifest('{"a":1}', undefined, () => { selected += 1; }), false);
+  assert.equal(selected, 2);
+  assert.equal(await copyManifest('', { writeText: async t => { written.push(t); } }, () => {}), false, 'no manifest, nothing copied');
+  assert.equal(written.length, 1);
 });

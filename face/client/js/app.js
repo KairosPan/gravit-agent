@@ -859,7 +859,8 @@ export function boot(win, host = {}) {
           if (v.networks[network]?.state === 'connected') void sheet.open('disconnectNetwork', { network });
         } else {
           const draft = store.get().identity.draft;
-          void sheet.open('routing', { routing: draft ?? routingOf(data), quiet: v.quiet, saved: formatRouting(routingOf(data)) });
+          const networks = ['telegram', 'slack'].filter(n => v.networks[n]?.state === 'connected');
+          void sheet.open('routing', { routing: draft ?? routingOf(data), quiet: v.quiet, saved: formatRouting(routingOf(data)), networks });
         }
         break;
       }
@@ -1034,23 +1035,41 @@ export function boot(win, host = {}) {
     },
     // Account › Identity (plan B1b): Retry reads it past the face's cache; Details opens or shuts the connection's line
     refreshIdentity: () => { void account.loadIdentity({ fresh: true }); },
-    identityDetails: () => store.dispatch('identityDetails'),
-    // Connect Telegram (plan B1b Task 2): the drawer's keys; Next hands the host the field itself, never its value
-    identityConnect: () => { if (signs()) identity.openConnect(); },
-    identityNext: () => { void identity.next(root.querySelector('#identity-token')); },
-    identityPaste: () => {
+    identityDetails: el => store.dispatch('identityDetails', el?.dataset?.network),
+    // Connect Telegram (plan B1b Task 2) and Install app… for Slack (plan B2 Task 7): the drawer's keys; Next hands the host the
+    // fields themselves, never their values
+    identityConnect: el => { if (signs()) identity.openConnect(el?.dataset?.network === 'slack' ? 'slack' : 'telegram'); },
+    identityNext: () => {
+      if (store.get().identity?.connect?.network === 'slack') void identity.next(root.querySelector('#identity-app-token'), root.querySelector('#identity-bot-token'));
+      else void identity.next(root.querySelector('#identity-token'));
+    },
+    identityPaste: el => {
       const read = win.navigator?.clipboard?.readText;
       if (typeof read !== 'function') return;
+      const id = ['identity-token', 'identity-app-token', 'identity-bot-token'].includes(el?.dataset?.field) ? el.dataset.field : 'identity-token';
       read.call(win.navigator.clipboard).then(text => {
-        const el = root.querySelector('#identity-token');
-        if (el && typeof text === 'string') el.value = text.trim();
+        const field = root.querySelector(`#${id}`);
+        if (field && typeof text === 'string') field.value = text.trim();
       }, () => { /* the browser said no: nothing pasted */ });
+    },
+    // Slack's manifest: Copy, or, when the browser refuses the clipboard, the text selected to copy by hand
+    identityCopyManifest: () => {
+      void identity.copy(win.navigator?.clipboard, () => {
+        const pre = root.querySelector('#identity-manifest');
+        const sel = win.getSelection?.();
+        if (pre && sel) { sel.removeAllRanges?.(); sel.selectAllChildren(pre); }
+      });
     },
     identityClose: () => identity.close(),
     identityBack: () => identity.back(),
     identityNotMe: () => { void identity.notMe(); },
     identityThisIsMe: () => { if (signs()) void identity.thisIsMe(); },
-    identityStartAgain: () => { if (store.get().sheet?.kind === 'connectNetwork') sheet.close(); identity.startAgain(); },
+    identityStartAgain: () => {
+      const open = store.get().sheet;
+      const network = open?.kind === 'connectNetwork' && open.seed?.network === 'slack' ? 'slack' : undefined;
+      if (open?.kind === 'connectNetwork') sheet.close();
+      identity.startAgain(network);
+    },
     setHistoryRange: el => { void account.loadHistory(el.dataset.value); },
     openVenueDetails: el => store.dispatch('openVenueDetails', el.dataset.id),
     closeVenueDetails: () => store.dispatch('closeVenueDetails'),
@@ -1295,8 +1314,10 @@ export function boot(win, host = {}) {
       return;
     }
     const a = doc.activeElement;
-    // Enter in Connect Telegram's token field is Next: the field has no form (no login for the browser to offer to keep)
-    if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && a?.id === 'identity-token') { ev.preventDefault(); act.identityNext(); return; }
+    // Enter in a connect sheet's token field is Next (Slack's app-level field moves on to the bot token's): the fields have no form
+    // (no login for the browser to offer to keep)
+    if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && a?.id === 'identity-app-token') { ev.preventDefault(); root.querySelector('#identity-bot-token')?.focus?.(); return; }
+    if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && (a?.id === 'identity-token' || a?.id === 'identity-bot-token')) { ev.preventDefault(); act.identityNext(); return; }
     if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && store.get().edit && a?.closest?.('.inline-edit') && a.tagName !== 'BUTTON') { ev.preventDefault(); commitEdit(); }
   });
 

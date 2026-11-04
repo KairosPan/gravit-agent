@@ -3513,6 +3513,61 @@ test('Connect… opens sheet 1 on a page that signs; Next posts the field\'s tok
   store.timers.clear();
 });
 
+test('Install app… opens Slack\'s sheet 1; Next posts both fields once and clears them; Copy falls back to selecting the manifest', async () => {
+  // made-up tokens joined at run time: no scanner-shaped literal in the tree
+  const APP = ['xa', 'pp-1-A0FAKE0001-1234567-', 'ab'.repeat(32)].join('');
+  const BOT = ['xo', 'xb-', '1111111-2222222-', 'FakeBotTokenForTestsOnly00'].join('');
+  const PENDING = { id: 'fedcba9876543210fedcba9876543210', network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'Gravit' }, workspace: 'Fake Co', link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: '', expiresAt: '2099-01-01T00:00:00.000Z', state: 'waiting' };
+  const READ = { ok: true, networks: [], routing: { chat: [], alerts: [], brief: [], cards: [], fills: [] }, quiet: null, strangers: [], slackManifest: '{"display_information":{"name":"Gravit"}}' };
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const app = f.withSelector('#identity-app-token', { tagName: 'INPUT', type: 'password', id: 'identity-app-token' });
+  const bot = f.withSelector('#identity-bot-token', { tagName: 'INPUT', type: 'password', id: 'identity-bot-token' });
+  const pre = f.withSelector('#identity-manifest', { tagName: 'PRE', id: 'identity-manifest' });
+  const selected = [];
+  f.win.getSelection = () => ({ removeAllRanges() {}, selectAllChildren: el => selected.push(el) });
+  f.win.navigator = { clipboard: { writeText: async () => { throw new Error('denied'); } } };
+  const door = ownerDoor();
+  const posted = [];
+  const ownerPost = async (path, body) => {
+    if (path.startsWith('/data/account/identity/')) {
+      posted.push([path, body]);
+      return path.endsWith('/slack/token') ? { status: 200, body: { ok: true, pending: PENDING } } : { status: 200, body: { ok: true } };
+    }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': READ, '/data/account/identity/pending': { ok: true, pending: PENDING } } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /data-action="identityConnect" data-network="slack">Install app…</);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityConnect', network: 'slack' } });
+  assert.match(f.html(), /<aside class="drawer sheet" aria-label="Connect Slack · 1 of 4 · App tokens">/);
+  assert.match(f.html(), /display_information/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityCopyManifest' } });
+  await settle();
+  assert.deepEqual(selected, [pre], 'the clipboard refused: the manifest selected');
+  // Enter in the app-level field moves on, posting nothing
+  app.value = ` ${APP} `;
+  f.fire('doc', 'keydown', { key: 'Enter' });
+  bot.value = BOT;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityNext' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityNext' } });
+  await until(() => store.get().identity.connect?.step === 2, 'sheet 2');
+  const sent = posted.filter(([p]) => p === '/data/account/identity/slack/token');
+  assert.equal(sent.length, 1, 'once');
+  assert.equal(sent[0][1].appToken, APP);
+  assert.equal(sent[0][1].botToken, BOT);
+  assert.equal(app.value, '');
+  assert.equal(bot.value, '');
+  assert.ok(!JSON.stringify(store.get()).includes(BOT) && !JSON.stringify(store.get()).includes(APP), 'no token in the store');
+  assert.ok(!f.html().includes(BOT), 'none on the page');
+  assert.match(f.html(), /Connect Slack · 2 of 4 · Say hi/);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().identity.connect, null);
+  store.timers.clear();
+});
+
 test('a page that does not sign opens no Connect Telegram', async () => {
   const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
   const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account/identity': { ok: true, networks: [], routing: {}, quiet: null, strangers: [] } } });
