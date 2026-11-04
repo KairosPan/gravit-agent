@@ -169,14 +169,15 @@ function jobDetails(job, state, now) {
   const live = isLive(job);
   const empty = !live && (Number(job.output?.total) || 0) === 0;
   const end = live ? '' : [empty ? '(no output)' : '', endLine(job)].filter(Boolean).join(' · ');
-  return `<details${attrs({ id: `job-${job.id}`, class: 'job-details', open: state.jobs?.open === job.id })}>` +
+  return `<details${attrs({ id: `jobd-${job.id}`, class: 'job-details', open: state.jobs?.open === job.id })}>` +
     `<summary${attrs({ 'data-action': 'openJob', 'data-job': job.id })}><span class="${cls('job-dot', live && 'live')}"></span><code class="job-cmd">${esc(job.label)}</code><span class="job-meta">${jobMeta(job, now)}</span></summary>` +
-    `<pre${attrs({ class: 'job-out', id: `job-out-${job.id}` })}></pre><div${attrs({ class: 'job-note', id: `job-note-${job.id}` })}></div>` +
+    `<pre${attrs({ class: 'job-out', id: `jobout-${job.id}` })}></pre><div${attrs({ class: 'job-note', id: `jobnote-${job.id}` })}></div>` +
     (end ? `<div class="job-end">${esc(end)}</div>` : '') +
     `<button${attrs({ type: 'button', class: 'btn-sm job-copy', id: `job-copy-${job.id}`, 'data-action': 'copyText', 'data-text': job.label, 'aria-label': 'Copy command' })}>Copy</button></details>`;
 }
 function jobStop(conv, job, state) {
-  if (job.status === 'stopping') return '<span class="dim">Stopping</span>';
+  // (focusable, so Yes, stop leaves focus here rather than on the page)
+  if (job.status === 'stopping') return `<span${attrs({ class: 'dim', id: `job-stopping-${job.id}`, tabindex: '-1' })}>Stopping</span>`;
   if (state.confirm?.action === 'stopJob' && state.confirm?.id === job.id) return confirmPair('Yes, stop');
   return `<button${attrs({ type: 'button', class: 'btn-sm', id: `job-stop-${job.id}`, 'data-action': 'stopJob', 'data-conv': conv.id, 'data-job': job.id })}>Stop</button>`;
 }
@@ -184,7 +185,7 @@ function jobsSection(conv, state, now) {
   const { running, finished } = jobsView(state.jobs, conv.id);
   if (!running.length && !finished.length) return '';
   const rows = running.map(j => `<div class="job">${jobDetails(j, state, now)}${jobStop(conv, j, state)}</div>`).join('');
-  const fold = !finished.length ? '' : `<details${attrs({ id: `jobs-finished-${conv.id}`, class: 'jobs-finished' })}><summary>${esc(`Finished · ${finished.length}`)}</summary>` +
+  const fold = !finished.length ? '' : `<details${attrs({ id: `jobs-finished-${conv.id}`, class: 'jobs-finished', open: finished.some(j => j.id === state.jobs?.open) })}><summary>${esc(`Finished · ${finished.length}`)}</summary>` +
     finished.map(j => `<div class="job">${jobDetails(j, state, now)}</div>`).join('') +
     `<button${attrs({ type: 'button', class: 'btn-sm', id: `jobs-clear-${conv.id}`, 'data-action': 'clearJobs', 'data-conv': conv.id })}>Clear</button></details>`;
   return `<section class="dsec" id="dsec-jobs"><div class="dsec-label">Background jobs</div>${rows}${fold}</section>`;

@@ -359,15 +359,15 @@ test('Background jobs sits right after This task: a running job\'s command, meta
   const s = withJobs([job('j1', 'running', { progress: 'page 7 of 12' }), job('j2', 'stopping')]);
   const d = details(s);
   assert.match(d, /This task<\/div>[\s\S]*?<\/section>\s*<section class="dsec" id="dsec-jobs"><div class="dsec-label">Background jobs<\/div>/);
-  assert.match(d, /<div class="job"><details id="job-j1" class="job-details"><summary data-action="openJob" data-job="j1"><span class="job-dot live"><\/span><code class="job-cmd">run j1<\/code><span class="job-meta">bash · page 7 of 12 · <span data-job-clock="\d+">3m 04s<\/span><\/span><\/summary>/);
-  assert.match(d, /<pre class="job-out" id="job-out-j1"><\/pre>/, 'the output pre is drawn empty');
+  assert.match(d, /<div class="job"><details id="jobd-j1" class="job-details"><summary data-action="openJob" data-job="j1"><span class="job-dot live"><\/span><code class="job-cmd">run j1<\/code><span class="job-meta">bash · page 7 of 12 · <span data-job-clock="\d+">3m 04s<\/span><\/span><\/summary>/);
+  assert.match(d, /<pre class="job-out" id="jobout-j1"><\/pre>/, 'the output pre is drawn empty');
   assert.match(d, /<button type="button" class="btn-sm job-copy" id="job-copy-j1" data-action="copyText" data-text="run j1" aria-label="Copy command">Copy<\/button>/);
   assert.match(d, /<button type="button" class="btn-sm" id="job-stop-j1" data-action="stopJob" data-conv="a" data-job="j1">Stop<\/button>/);
-  assert.match(d, /id="job-j2"[\s\S]*?<\/details><span class="dim">Stopping<\/span><\/div>/);
+  assert.match(d, /id="jobd-j2"[\s\S]*?<\/details><span class="dim" id="job-stopping-j2" tabindex="-1">Stopping<\/span><\/div>/);
   assert.doesNotMatch(d, /data-job="j2">Stop</);
   assert.doesNotMatch(d, /jobs-finished/, 'no fold without finished jobs');
   // the open job is drawn open
-  assert.match(details(R.openJob(s, 'j1')), /<details id="job-j1" class="job-details" open>/);
+  assert.match(details(R.openJob(s, 'j1')), /<details id="jobd-j1" class="job-details" open>/);
   // no jobs, no section
   assert.doesNotMatch(details(listed([conv('a')])), /dsec-jobs/);
 });
@@ -375,7 +375,7 @@ test('Background jobs sits right after This task: a running job\'s command, meta
 test('Stop asks twice with Yes, stop', () => {
   const s = R.askConfirm(withJobs([job('j1', 'running'), job('j2', 'running')]), { action: 'stopJob', id: 'j1', conv: 'a' });
   const d = details(s);
-  assert.match(d, /id="job-j1"[\s\S]*?<\/details><span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, stop<\/button>/);
+  assert.match(d, /id="jobd-j1"[\s\S]*?<\/details><span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, stop<\/button>/);
   assert.match(d, /data-action="stopJob" data-conv="a" data-job="j2">Stop</, 'the other job keeps its Stop');
 });
 
@@ -410,4 +410,11 @@ test("a job's command is escaped and never masked", () => {
   assert.match(d, /<code class="job-cmd">curl -H &quot;x: sk-proj-aB3dE6fG9hJ2kL5mN8pQ1rS4&quot; &lt;a&gt;&amp;<\/code>/);
   assert.match(d, /data-text="curl -H &quot;x: sk-proj-aB3dE6fG9hJ2kL5mN8pQ1rS4&quot; &lt;a&gt;&amp;"/);
   assert.doesNotMatch(d, /secret/);
+});
+
+test('the Finished fold is drawn open while it holds the open job', () => {
+  const s = withJobs([job('r1', 'running'), job('f1', 'completed', { finishedAt: NOW })]);
+  assert.match(details(s), /<details id="jobs-finished-a" class="jobs-finished"><summary>/);
+  assert.match(details(R.openJob(s, 'f1')), /<details id="jobs-finished-a" class="jobs-finished" open><summary>/);
+  assert.match(details(R.openJob(s, 'r1')), /<details id="jobs-finished-a" class="jobs-finished"><summary>/, 'a running job open leaves it as it is');
 });

@@ -14,6 +14,11 @@ export const reducers = {
   hostJobs: (s, { convId, jobs: rows } = {}) => (convId != null && convId === s.jobs.convId && Array.isArray(rows)
     ? jobs(s, { rows: rows.filter(j => j && typeof j.id === 'string') })
     : s),
+  // the page's own word on a job's status until the next rows frame: Stopping once Yes, stop is pressed, running again
+  // when the host refused it (only from the status it was marked from)
+  markJob: (s, { id, from, to } = {}) => (s.jobs.rows.some(j => j.id === id && j.status === from)
+    ? jobs(s, { rows: s.jobs.rows.map(j => (j.id === id && j.status === from ? { ...j, status: to } : j)) })
+    : s),
   openJob: (s, id) => jobs(s, { open: typeof id === 'string' && id !== '' ? id : null }),
   closeJob: s => (s.jobs.open === null ? s : jobs(s, { open: null })),
   // the finished jobs on screen join the conversation's cleared

@@ -6128,8 +6128,8 @@ test('opening a job follows it and its output fills the pre without a render; a 
   give([ajob('j1', 'running'), ajob('j2', 'running')]);
   store.dispatch('toggleDetails');
   await settle();
-  const pre = f.withId('job-out-j1', { tagName: 'PRE', presentIf: /id="job-out-j1"/ });
-  const note = f.withId('job-note-j1', { presentIf: /id="job-note-j1"/ });
+  const pre = f.withId('jobout-j1', { tagName: 'PRE', presentIf: /id="jobout-j1"/ });
+  const note = f.withId('jobnote-j1', { presentIf: /id="jobnote-j1"/ });
   const details = { tagName: 'DETAILS', open: false };
   const summary = { tagName: 'SUMMARY', dataset: { action: 'openJob', job: 'j1' }, parentElement: details };
   f.click(summary);
@@ -6137,7 +6137,7 @@ test('opening a job follows it and its output fills the pre without a render; a 
   assert.equal(details.open, true);
   assert.equal(store.get().jobs.open, 'j1');
   assert.deepEqual(follows(h).map(s => s.args), [{ request: { sessionId: 's1', jobId: 'j1' } }]);
-  assert.match(f.html(), /<details id="job-j1" class="job-details" open>/);
+  assert.match(f.html(), /<details id="jobd-j1" class="job-details" open>/);
   const fl = follows(h)[0];
   fl.cbs.onItem({ type: 'opened', job: ajob('j1', 'running'), from: 0 });
   const writes = f.writes;
@@ -6258,4 +6258,75 @@ test('Clear hides the finished until the page reloads', async () => {
   await settle();
   assert.match(again.f.html(), /id="jobs-finished-s1"/, 'a reload shows it again');
   again.store.timers.clear();
+});
+
+test('a render fills the open job\'s pre before the drawer keeps its scroll', async () => {
+  const { f, store, h, give } = await jobsRig();
+  give([ajob('j1', 'running')]);
+  store.dispatch('toggleDetails');
+  await settle();
+  const pre = f.withId('jobout-j1', { tagName: 'PRE', presentIf: /id="jobout-j1"/ });
+  const drawer = f.withSelector('.drawer-body', { presentIf: /class="drawer details"/ });
+  const seen = [];
+  let top = 0;
+  Object.defineProperty(drawer, 'scrollTop', { get: () => top, set: v => { top = v; seen.push([v, pre.textContent]); }, configurable: true });
+  f.click({ tagName: 'SUMMARY', dataset: { action: 'openJob', job: 'j1' }, parentElement: { tagName: 'DETAILS', open: false } });
+  await settle();
+  follows(h)[0].cbs.onItem({ type: 'output', chunks: [{ at: 0, text: 'out\n' }], next: 4 });
+  top = 300;
+  pre.textContent = '';   // the fresh node a render draws
+  seen.length = 0;
+  store.dispatch('hostStatus', { line: 'a stream frame' });
+  await settle();
+  const kept = seen.filter(([v]) => v === 300);
+  assert.equal(kept.length, 1, 'the drawer keeps its place');
+  assert.equal(kept[0][1], 'out\n', 'the pre was filled before the keep ran');
+  store.timers.clear();
+});
+
+test('a Stop confirm whose job stopped running goes, so Esc closes Details', async () => {
+  const { f, store, give } = await jobsRig();
+  give([ajob('j1', 'running')]);
+  store.dispatch('toggleDetails');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'stopJob', conv: 's1', job: 'j1' } });
+  await settle();
+  assert.equal(store.get().confirm?.action, 'stopJob');
+  give([ajob('j1', 'completed', { finishedAt: T0 })]);
+  await settle();
+  assert.equal(store.get().confirm, null, 'the confirm on a finished job is dropped');
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  await settle();
+  assert.equal(store.get().detailsOpen, false);
+  store.timers.clear();
+});
+
+test('Yes, stop marks the job stopping at once and puts focus on its Stopping', async () => {
+  const { f, h, store, give } = await jobsRig();
+  const stopping = f.withId('job-stopping-j1', { presentIf: /id="job-stopping-j1"/ });
+  give([ajob('j1', 'running')]);
+  store.dispatch('toggleDetails');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'stopJob', conv: 's1', job: 'j1' } });
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
+  await settle();
+  assert.equal(store.get().jobs.rows[0].status, 'stopping');
+  assert.doesNotMatch(f.html(), /data-action="stopJob"/, 'no second Stop to press');
+  assert.equal(f.doc.activeElement, stopping);
+  assert.equal(h.calls.filter(c => c[0] === 'job/kill').length, 1);
+  store.timers.clear();
+});
+
+test('a refused Stop puts the job back to running', async () => {
+  const { store, give, f } = await jobsRig({ kill: { outcome: 'nope' } });
+  give([ajob('j1', 'running')]);
+  store.dispatch('toggleDetails');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'stopJob', conv: 's1', job: 'j1' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
+  await settle();
+  assert.equal(store.get().jobs.rows[0].status, 'running');
+  assert.match(f.html(), /data-action="stopJob"/);
+  store.timers.clear();
 });

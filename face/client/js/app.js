@@ -575,8 +575,8 @@ export function boot(win, host = {}) {
     if (scrolls.rows != null) rowsAt = scrolls.rows;
     // a disclosure the person opened (its Raw, a trace; tool calls are stored but not drawn) is the page's, not the store's: open again by its id
     // (a job's disclosure is the store's: open while it is the job open, never kept open by the page)
-    const opened = [...root.querySelectorAll('details[id][open]')].map(el => el.id).filter(id => !id.startsWith('job-'));
-    const out0 = s.jobs.open !== null ? doc.getElementById(`job-out-${s.jobs.open}`) : null;
+    const opened = [...root.querySelectorAll('details[id][open]')].map(el => el.id).filter(id => !id.startsWith('jobd-'));
+    const out0 = s.jobs.open !== null ? doc.getElementById(`jobout-${s.jobs.open}`) : null;
     const outAt = out0 ? { top: out0.scrollTop, bottom: out0.scrollHeight - out0.scrollTop - out0.clientHeight < 24 } : null;
     // the note above the box is a live region: the node stays across renders, so a new line in it is announced
     const note0 = doc.getElementById('composer-note');
@@ -607,6 +607,9 @@ export function boot(win, host = {}) {
     root.innerHTML = renderRail(s, now(), { mac }) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen) + overlayHtml + lightHtml;
     const note1 = doc.getElementById('composer-note');
     if (note0 && note1 && note0 !== note1 && typeof note1.replaceWith === 'function') note1.replaceWith(note0);
+    // the open job's output, written into the fresh pre before any scroll keep: drawn empty it is hidden, and the drawer's
+    // keep would be clamped to a body ~320 px shorter
+    writeOutput(outAt);
     const noteEl = doc.getElementById('composer-note');
     if (noteEl && noteEl.textContent !== noteText) noteEl.textContent = noteText;
     // the quotes poll asks for the rows the table drew, by id; a market's page, which draws none, for its own market (spec §6.1:
@@ -746,8 +749,7 @@ export function boot(win, host = {}) {
     }
     if (railStale) drawRail();
     last = { lightbox: lightUp, overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, start: threadStart, anchor: anchorSeq, editor: editorOf(s.edit), confirm: s.confirm, query, key };
-    // the open job's output, written into the fresh pre where it stood; the clocks ticking while a live job is drawn
-    writeOutput(outAt);
+    // the clocks ticking while a live job is drawn
     tickClocks(false);
     // a composed answer drawn without its run's view asks for it now that the page is whole (its dispatches render again)
     if (wantedViews(store.get()).length) void ensureViews(store, getJson);
@@ -764,14 +766,14 @@ export function boot(win, host = {}) {
     const id = s.jobs.open;
     if (id === null) return;
     const out = jobs.outputOf(id);
-    const pre = doc.getElementById(`job-out-${id}`);
+    const pre = doc.getElementById(`jobout-${id}`);
     if (pre) {
       const text = out?.text ?? '';
       const tail = kept ? kept.bottom : pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
       if (pre.textContent !== text) pre.textContent = text;
       if (tail) pre.scrollTop = pre.scrollHeight; else if (kept) pre.scrollTop = kept.top;
     }
-    const note = doc.getElementById(`job-note-${id}`);
+    const note = doc.getElementById(`jobnote-${id}`);
     if (note) {
       const row = s.jobs.rows.find(j => j.id === id);
       const line = out?.error !== undefined ? `output unavailable: ${out.error}` : out?.ended && isLive(row) ? 'output ended' : '';
@@ -1000,14 +1002,22 @@ export function boot(win, host = {}) {
     if (store.dispatch('openDetails') === before) requestRender();
   }
 
+  // Yes, stop: the job reads Stopping at once (no second Stop to send a second kill), focus on that Stopping; running
+  // again if the host refused it
+  async function stopJobNow(convId, id) {
+    store.dispatch('markJob', { id, from: 'running', to: 'stopping' });
+    if (!(await jobs.kill(convId, id))) store.dispatch('markJob', { id, from: 'stopping', to: 'running' });
+  }
+
   function confirmYes() {
     const c = store.get().confirm;
     if (!c) return;
+    // Stop's job marked stopping first: that drops the confirm, and focus goes back to the job's Stopping
+    if (c.action === 'stopJob') { confirmFrom = { id: `job-stopping-${c.id}` }; void stopJobNow(c.conv, c.id); }
     store.dispatch('cancelConfirm');
     if (c.action === 'stopGravit') void actions.stop(c.id);
     if (c.action === 'deleteConv') void deleteNow(c.id);
     if (c.action === 'stopChild') void actions.stopChild(c.parent, c.id, c.label);
-    if (c.action === 'stopJob') void jobs.kill(c.conv, c.id);
     // Revoke… and Disconnect…, asked twice: then their sheet, on a page that signs
     if (c.action === 'revoke' && signs()) void sheet.open('revoke', { name: c.name, address: c.address });
     if (c.action === 'disconnect' && signs()) void sheet.open('disconnect', { venue: c.venue, name: c.name });
@@ -2096,8 +2106,11 @@ export function boot(win, host = {}) {
     if (linked && !connected) attachments.reconnected?.();
     connected = linked;
     // the job open in Details gone from what the page shows (its row left, Clear, Details closed): its follow goes too
-    // (the closeJob dispatch renders the page)
-    if (s.jobs.open !== null && !jobShown(s)) {
+    // a Stop asked on a job that no longer runs (it finished, or left the rows) goes, so Esc closes Details; the dispatches
+    // render the page
+    if (s.confirm?.action === 'stopJob' && !s.jobs.rows.some(j => j.id === s.confirm.id && j.status === 'running')) {
+      store.dispatch('cancelConfirm');
+    } else if (s.jobs.open !== null && !jobShown(s)) {
       jobs.unfollow();
       store.dispatch('closeJob');
     } else requestRender();
