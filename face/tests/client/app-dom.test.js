@@ -4281,3 +4281,26 @@ test('a typed @buffett with no chip still tries the room, as today', async () =>
   assert.deepEqual(promptsOf(h), [['s1', '@buffett leverage?']], 'nobody addressed, so an ordinary prompt');
   store.timers.clear();
 });
+
+test('a typed @buffett after a chip still reads as a mention: text runs are joined across chips as a space', async () => {
+  const { f, say, h, store } = await menuRig();
+  putRuns(f, say, [{ type: 'text', text: 'hi' }, { type: 'chip', chip: { kind: 'file', path: 'strategies/alpha/notes.md', dir: false, label: 'notes.md' } }, { type: 'text', text: '@buffett look' }]);
+  send(f);
+  await settle();
+  assert.equal(saysOf(h).length, 1, 'the typed @buffett tries the room');
+  store.timers.clear();
+});
+
+test('a typed @buffett with a conversation chip in a channel is refused before sending, and the draft stays', async () => {
+  const { f, say, h, store } = await menuRig();
+  const draft = [{ type: 'text', text: '@buffett see ' }, { type: 'chip', chip: { kind: 'conversation', id: 's2', label: 'Beta' } }];
+  putRuns(f, say, draft);
+  send(f);
+  await settle();
+  assert.deepEqual(saysOf(h), []);
+  assert.deepEqual(promptsOf(h), []);
+  assert.equal(store.get().status.line, "Conversations go to Gravit, not to a room's bots");
+  store.dispatch('toggleRail');
+  assert.deepEqual(say.runs, draft);
+  store.timers.clear();
+});

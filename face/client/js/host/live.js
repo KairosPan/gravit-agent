@@ -185,9 +185,15 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     if (v.snapped) return Promise.resolve(true);
     return new Promise(resolve => {
       let done = false;
-      const answer = ok => { if (!done) { done = true; resolve(ok); } };
+      let deadline = null;
+      const answer = ok => {
+        if (done) return;
+        done = true;
+        if (deadline !== null) timers.cancel?.(deadline);   // a fake host's timers may have no cancel
+        resolve(ok);
+      };
       v.waiters.push(answer);
-      timers.after(ACTIVATE_MS, () => answer(false));
+      deadline = timers.after(ACTIVATE_MS, () => { deadline = null; answer(false); }) ?? null;
     });
   }
   function reconcile() {

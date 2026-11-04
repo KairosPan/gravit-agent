@@ -942,11 +942,13 @@ export function boot(win, host = {}) {
     const key = draftKey(s);
     const runs = runsOf(key);
     if (isBlank(runs)) return;
-    // a room's bots cannot read a conversation chip (O9): refused here, the draft kept as it stands
+    // the room is a bot chip's, or an @ the operator typed (a chip reads as a space between words): a file or
+    // conversation chip's @ never sends to it alone
     const toBot = hasChip(runs, 'bot');
-    if (toBot && hasChip(runs, 'conversation')) { store.dispatch('hostStatus', { line: "Conversations go to Gravit, not to a room's bots", bad: true }); return; }
-    // the room is a bot chip's, or an @ the operator typed: a file or conversation chip's @ never sends to it alone
-    const room = toBot || isMentionText(runs.filter(r => r.type === 'text').map(r => r.text).join(''));
+    const room = toBot || isMentionText(runs.map(r => (r.type === 'text' ? r.text : ' ')).join(''));
+    // a room's bots cannot read a conversation chip (O9): a draft bound for the room with one is refused, kept as it stands
+    const toRoom = toBot || (room && !s.draft && !!currentConversation(s)?.channel);
+    if (toRoom && hasChip(runs, 'conversation')) { store.dispatch('hostStatus', { line: "Conversations go to Gravit, not to a room's bots", bad: true }); return; }
     const workspaceId = s.draft ? s.draft.where : currentConversation(s)?.channel?.workspaceId ?? null;
     const text = serialize(runs, serialContext({ channels: s.channels, workspaceId })).trim();
     // words typed under the key while the send was on its way are kept, after the sent ones on a new line (A7)

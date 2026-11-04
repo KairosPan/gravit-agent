@@ -36,11 +36,12 @@ function rig({ rows = [], channels = { ok: true, root: '/r', channels: [], ungro
   const answers = { '/data/channels.json': channels, '/data/bots.json': bots, '/data/sessions-meta.json': meta };
   const getJson = async path => { const a = answers[path]; if (a instanceof Error) throw a; return a ?? {}; };
   const scheduled = [];
-  const timers = { after(ms, fn) { scheduled.push({ ms, fn }); } };
+  const cancelled = [];
+  const timers = { after(ms, fn) { const t = { ms, fn }; scheduled.push(t); return t; }, cancel(t) { cancelled.push(t); } };
   const live = startLive({ store, openMux: o => { opts = o; return mux; }, call, mapFrame, getJson, timers, now: () => NOW, onReceipt });
   const last = name => [...streams].reverse().find(s => s.name === name);
   const follows = () => streams.filter(s => s.name === 'session/follow');
-  return { store, live, streams, calls, scheduled, answers, opts: () => opts, last, follows, ready: async () => { opts.onReady({ home: '/h' }); await settle(); } };
+  return { store, live, streams, calls, scheduled, cancelled, answers, opts: () => opts, last, follows, ready: async () => { opts.onReady({ home: '/h' }); await settle(); } };
 }
 const fixture = i => ({ type: 'event', event: frames[i].event });
 
@@ -523,4 +524,25 @@ test('activate is true at once for a live conversation, false when the follow fa
   r.last('session/follow').cbs.onItem({ type: 'snapshot', header: {}, records: [], projections: { asOfSeq: 1, values: {} } });
   await settle();
   assert.deepEqual(silent, { done: true, value: false }, 'a late snapshot changes nothing');
+});
+
+test('an activate that answers clears its deadline', async () => {
+  const r = rig({ rows: [row('cold'), row('b')] });
+  await r.ready();
+  r.live.open('cold'); await settle();
+  r.scheduled.splice(0);
+  const got = watch(r.live.activate('cold'));
+  const timer = r.scheduled.find(t => t.ms === ACTIVATE_MS);
+  r.last('session/follow').cbs.onItem({ type: 'snapshot', header: {}, records: [], projections: { asOfSeq: 1, values: {} } });
+  await settle();
+  assert.deepEqual(got, { done: true, value: true });
+  assert.deepEqual(r.cancelled, [timer], 'the snapshot cleared the deadline');
+  r.live.open('b'); await settle();
+  r.scheduled.splice(0);
+  const gone = watch(r.live.activate('b'));
+  const t2 = r.scheduled.find(t => t.ms === ACTIVATE_MS);
+  r.last('session/follow').cbs.onError({ code: 'x', message: 'y' });
+  await settle();
+  assert.deepEqual(gone, { done: true, value: false });
+  assert.ok(r.cancelled.includes(t2), 'a failed follow clears it too');
 });
