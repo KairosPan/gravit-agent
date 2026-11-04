@@ -156,3 +156,12 @@ test('an image whose URL is neither an object URL nor an inline image draws as a
   assert.equal(lightboxHtml({ src: undefined, name: 'a.png' }), '');
   assert.match(lightboxHtml({ src: 'data:image/png;base64,AA', name: 'a.png' }), /<img class="lightbox-img" src="data:image\/png;base64,AA"/, "a history image's inline thumb opens");
 });
+
+// the final review's ruling: a title is derived from the first prompt, so the @ menu's conversation rows draw it masked
+test("the @ menu's conversation title is masked", () => {
+  const SK = 'sk-proj-aB3dE6fG9hJ2kL5mN8pQ1rS4';
+  const groups = atItems({ conversations: [{ kind: 'conversation', id: 's1', title: `use ${SK}`, age: 'now' }], query: '' });
+  const h = renderMenu({ kind: '@', from: 0, query: '', groups, active: 0 });
+  assert.ok(h.includes('use sk-proj-' + '*'.repeat(SK.length - 8)));
+  assert.doesNotMatch(h, /aB3dE6fG9h/);
+});

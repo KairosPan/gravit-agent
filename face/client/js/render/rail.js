@@ -46,7 +46,7 @@ function row(conv, state, now) {
   return '<div class="row-wrap">' +
     `<a${attrs({ class: cls('row', current && 'current'), 'aria-current': current ? 'page' : null, href: `#/messages/${conv.id}`, 'data-action': 'open', 'data-id': conv.id })}>` +
     `<span class="${cls('dot', unreadOf(conv) && 'on')}"></span>${rowMark(conv, state)}` +
-    `<span class="row-body"><span class="row-top"><span class="row-title">${esc(conv.title)}</span>${conv.pinned ? `<span class="row-pin">${icon('pin', 11, 2, true)}</span>` : ''}<span class="row-time">${conv.updatedAt ? rowTime(conv.updatedAt, now) : ''}</span></span>` +
+    `<span class="row-body"><span class="row-top"><span class="row-title">${esc(maskExcerpt(conv.title))}</span>${conv.pinned ? `<span class="row-pin">${icon('pin', 11, 2, true)}</span>` : ''}<span class="row-time">${conv.updatedAt ? rowTime(conv.updatedAt, now) : ''}</span></span>` +
     `<span class="row-preview">${esc(maskExcerpt(previewOf(conv, state)))}</span></span></a>${pin}</div>`;
 }
 
@@ -124,7 +124,7 @@ const stateLine = key => `<div class="conv-results-state">${SEARCH_LINE[key]}</d
 function hit(it, now) {
   const runs = highlightRuns(typeof it.snippet === 'string' ? maskExcerpt(it.snippet) : it.snippet, it.match).map(r => (r.mark ? `<mark>${esc(r.text)}</mark>` : esc(r.text))).join('');
   const link = `<a${attrs({ class: cls('conv-hit', it.archived && 'archived'), href: `#/messages/${it.id}`, 'data-action': 'open', 'data-id': it.id })}>` +
-    `<span class="row-top"><span class="row-title">${esc(it.title)}</span>${it.archived ? '<span class="chip grey">Archived</span>' : ''}<span class="row-time">${it.at ? rowTime(it.at, now) : ''}</span></span>` +
+    `<span class="row-top"><span class="row-title">${esc(maskExcerpt(it.title))}</span>${it.archived ? '<span class="chip grey">Archived</span>' : ''}<span class="row-time">${it.at ? rowTime(it.at, now) : ''}</span></span>` +
     `<span class="conv-hit-line"><b class="conv-hit-channel">${esc(it.channelLabel)}</b>${runs ? ` ${runs}` : ''}</span></a>`;
   return link + (it.archived === 'face' ? `<button type="button" class="btn-sm" data-action="unarchive"${attrs({ 'data-conv': it.id })}>Un-archive</button>` : '');
 }

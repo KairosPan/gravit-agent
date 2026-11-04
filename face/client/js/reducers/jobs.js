@@ -12,7 +12,7 @@ export const reducers = {
     return id === s.jobs.convId ? s : jobs(s, { convId: id, rows: [], open: null });
   },
   hostJobs: (s, { convId, jobs: rows } = {}) => (convId != null && convId === s.jobs.convId && Array.isArray(rows)
-    ? jobs(s, { rows: rows.filter(j => j && typeof j.id === 'string') })
+    ? jobs(s, { rows: rows.filter(j => j && typeof j.id === 'string' && typeof j.label === 'string') })
     : s),
   // the page's own word on a job's status until the next rows frame: Stopping once Yes, stop is pressed, running again
   // when the host refused it (only from the status it was marked from)

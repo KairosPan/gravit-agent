@@ -38,3 +38,10 @@ test('rows land for the watched conversation only; watching another empties them
   store.dispatch('hostJobs', { convId: 's3', jobs: 'nope' });
   assert.deepEqual(store.get().jobs.rows.map(j => j.id), ['c']);
 });
+
+test('a row without a string label is dropped, as one without an id is', () => {
+  const store = createStore({ initial: emptyState(), reducers });
+  store.dispatch('watchJobs', 's1');
+  store.dispatch('hostJobs', { convId: 's1', jobs: [job('a', 'running'), { ...job('b', 'running'), label: 7 }, { ...job('c', 'running'), label: undefined }, { ...job('d', 'running'), id: 4 }] });
+  assert.deepEqual(store.get().jobs.rows.map(j => j.id), ['a']);
+});

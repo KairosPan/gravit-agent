@@ -418,3 +418,18 @@ test('the Finished fold is drawn open while it holds the open job', () => {
   assert.match(details(R.openJob(s, 'f1')), /<details id="jobs-finished-a" class="jobs-finished" open><summary>/);
   assert.match(details(R.openJob(s, 'r1')), /<details id="jobs-finished-a" class="jobs-finished"><summary>/, 'a running job open leaves it as it is');
 });
+
+// the final review's ruling: a title is derived from the first prompt, so it is masked wherever drawn
+test('the head and Details\' This task draw the title masked', () => {
+  const SK = 'sk-proj-aB3dE6fG9hJ2kL5mN8pQ1rS4';
+  const MASKED = 'sk-proj-' + '*'.repeat(SK.length - 8);
+  const one = listed([conv('a', { title: `use ${SK}` })]);
+  assert.ok(renderHead(currentConversation(one), one).includes(`head-title">use ${MASKED}<`));
+  assert.ok(renderDetails(currentConversation(one), one).includes(`dsec-title">use ${MASKED}<`));
+  const group = listed([conv('g', { kind: 'group', members: ['gravit', 'buffett'], title: `use ${SK}` })]);
+  assert.ok(renderHead(currentConversation(group), group).includes(`head-task">use ${MASKED}<`));
+  for (const s of [one, group]) {
+    assert.doesNotMatch(renderHead(currentConversation(s), s), /aB3dE6fG9h/);
+    assert.doesNotMatch(renderDetails(currentConversation(s), s), /aB3dE6fG9h/);
+  }
+});

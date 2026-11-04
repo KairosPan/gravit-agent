@@ -15,6 +15,7 @@
 // after its name on its row, and with its plan and file under its price on its page.
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
+import { maskExcerpt } from '../mask.js';
 import { chgHtml } from '../market-fmt.js';
 import { fmtClock, fmtDate, rowTime, sameDay } from '../time.js';
 import { price, number } from '../wire/market-model.js';
@@ -199,7 +200,7 @@ const keysHtml = (id, watched, trade = null, leverage = null) => `<div class="mk
   `<button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}Hand to Gravit</button>` +
   `<button type="button" class="${cls('btn', watched && 'mk-on')}" data-action="toggleWatch" data-id="${esc(id)}" aria-pressed="${watched}">${icon('star', 16, 2)}${watched ? 'Watching' : 'Watch'}</button></div>`;
 const aboutHtml = (conversations, asset, now) => mentionsOf(conversations, asset).map(c => `<a class="mk-line" href="#/messages/${esc(c.id)}" data-action="open" data-id="${esc(c.id)}"><span class="mk-mark">→</span>` +
-  `<div class="mk-line-b"><div class="mk-t1">${esc(c.title)}</div>${c.updatedAt ? `<div class="mk-t2">${esc(rowTime(c.updatedAt, now))}</div>` : ''}</div></a>`);
+  `<div class="mk-line-b"><div class="mk-t1">${esc(maskExcerpt(c.title))}</div>${c.updatedAt ? `<div class="mk-t2">${esc(rowTime(c.updatedAt, now))}</div>` : ''}</div></a>`);
 
 // a part of the page as its read allows (the view's `reads`): Loading… until that read has answered, and once it has failed
 // before any answer the Account's sentence over <unavailable>; after an answer its lines, or <none> — a later failure's sentence

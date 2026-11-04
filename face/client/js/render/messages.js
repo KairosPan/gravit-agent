@@ -2,6 +2,7 @@
 // a conversation (head, thread, composer, the status line), the new-message screen, the empty state, Details.
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
+import { maskExcerpt } from '../mask.js';
 import { fmtDate } from '../time.js';
 import { avatar, cluster } from './avatars.js';
 import { renderThread, railHtml } from './thread.js';
@@ -56,10 +57,10 @@ function headRight(conv, state) {
 }
 
 export function renderHead(conv, state) {
-  if (conv.kind !== 'group') return `<header class="head"><h1 class="head-title">${esc(conv.title)}</h1>${headRight(conv, state)}</header>`;
+  if (conv.kind !== 'group') return `<header class="head"><h1 class="head-title">${esc(maskExcerpt(conv.title))}</h1>${headRight(conv, state)}</header>`;
   const names = conv.members.map(m => senderName(m, state)).join(' · ');
   return `<header class="head centered"><div class="head-right">${headRight(conv, state)}</div>${cluster(conv.members, 44, state)}` +
-    `<div class="head-task">${esc(conv.title)}</div><div class="dim members">${esc(names)} · ${conv.members.length} members</div></header>`;
+    `<div class="head-task">${esc(maskExcerpt(conv.title))}</div><div class="dim members">${esc(names)} · ${conv.members.length} members</div></header>`;
 }
 
 // the new-message screen: a title, Where (a channel, the root first), the first words in the composer
@@ -195,7 +196,7 @@ export function renderDetails(conv, state, now = Date.now()) {
   const e = state.edit;
   const renaming = !!e && e.kind === 'rename' && e.convId === conv.id;
   const asking = state.confirm?.action === 'stopGravit' && state.confirm?.id === conv.id;
-  const title = renaming ? inlineEdit([{ name: 'title', value: conv.title, label: 'Name this' }], e.error) : `<div class="dsec-title">${esc(conv.title)}</div>`;
+  const title = renaming ? inlineEdit([{ name: 'title', value: conv.title, label: 'Name this' }], e.error) : `<div class="dsec-title">${esc(maskExcerpt(conv.title))}</div>`;
   const agent = conv.kind === 'bot' && conv.preset ? senderName(conv.preset, state) : 'Gravit';
   const facts = kv([...(conv.created ? [['Created', esc(fmtDate(conv.created))]] : []), ['Where', esc(whereOf(conv, state))], ['Agent', esc(agent)], ...(conv.archived === 'host' ? [['Archived', 'By the host']] : [])]);
   const members = conv.kind === 'group' ? `<section class="dsec"><div class="dsec-label">Members</div>${conv.members.map(m => `<div class="dsec-line">${esc(senderName(m, state))}</div>`).join('')}</section>` : '';

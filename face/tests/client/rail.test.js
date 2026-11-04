@@ -359,3 +359,16 @@ test('a snippet holding a key is masked and its match still marks the same chara
   const over = renderList(searched(s, 'zz', { items: [{ sessionId: 'a', snippet, match: [2, 2 + SK.length] }], hasMore: false }), NOW);
   assert.ok(over.includes(`x <mark>${SK_MASKED}</mark> the zz end`));
 });
+
+// the final review's ruling: a title is derived from the first prompt, so it is masked wherever drawn
+test("a row's title and a search hit's title are masked", () => {
+  const s = listed([conv('a', { title: `deploy ${SK} <b>` }), conv('b', { title: 'plain' })], 'b');
+  const h = renderList(s, NOW);
+  assert.ok(h.includes(`row-title">deploy ${SK_MASKED} &lt;b&gt;<`));
+  // a title match and a content hit
+  const byTitle = renderList(searched(s, 'deploy'), NOW);
+  assert.ok(byTitle.includes(`row-title">deploy ${SK_MASKED} &lt;b&gt;<`));
+  const byContent = renderList(searched(s, 'zz', { items: [{ sessionId: 'a', snippet: 'the zz', match: [4, 6] }], hasMore: false }), NOW);
+  assert.ok(byContent.includes(`row-title">deploy ${SK_MASKED} &lt;b&gt;<`));
+  for (const x of [h, byTitle, byContent]) assert.doesNotMatch(x, /aB3dE6fG9h/);
+});

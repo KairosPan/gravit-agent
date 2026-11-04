@@ -118,7 +118,7 @@ function youText(t, m, conv, page) {
   if (!t) return '';
   let n = 0;
   return sessionRefRuns(t).map(r => {
-    if (r.type === 'ref') return `<span class="ref-chip">${chipInner(icon('chat', 13), r.label)}</span>`;
+    if (r.type === 'ref') return `<span class="ref-chip">${chipInner(icon('chat', 13), maskExcerpt(r.label))}</span>`;
     return maskSpans(r.text).map(s => {
       if (s.type !== 'secret') return esc(s.text);
       const i = n++;

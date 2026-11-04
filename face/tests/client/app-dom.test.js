@@ -5808,7 +5808,8 @@ function railRig({ pages, rows = [row('s1', { agentAvailable: true })], turns = 
   const marks = {};
   for (const [turn, top] of [[1, 0], [2, 100], [3, 500]]) {
     const el = f.withId(`tmark-s1-${turn}`, { dataset: { turn: String(turn) }, offsetTop: top, presentIf: new RegExp(`id="tmark-s1-${turn}"`), scrolled: [] });
-    el.scrollIntoView = o => el.scrolled.push({ ...o, drawn: f.html().includes(`id="tmark-s1-${turn}"`) });
+    // (an instant scroll lands at once, as the browser's does; a smooth one would still be gliding at the next render)
+    el.scrollIntoView = o => { el.scrolled.push({ ...o, drawn: f.html().includes(`id="tmark-s1-${turn}"`) }); if (o?.behavior !== 'smooth') thread.scrollTop = el.offsetTop; };
     f.alsoAs('.turn-mark', el);
     marks[turn] = el;
   }
@@ -5866,7 +5867,7 @@ test('a loaded tick scrolls its mark into view', async () => {
   await h.ready();
   await snap();
   f.click({ tagName: 'BUTTON', dataset: { action: 'jumpTurn', turn: '3' } });
-  assert.deepEqual(marks[3].scrolled, [{ behavior: 'smooth', block: 'start', drawn: true }]);
+  assert.deepEqual(marks[3].scrolled, [{ block: 'start', drawn: true }]);
   // turn 2 reads unloaded (its turn/start precedes the window) but its mark is drawn: the mark wins, nothing is paged
   f.click({ tagName: 'BUTTON', dataset: { action: 'jumpTurn', turn: '2' } });
   assert.equal(marks[2].scrolled.length, 1);
@@ -5885,13 +5886,67 @@ test('an unloaded tick pulses, pages back to it and scrolls to its mark once dra
   await settle();
   assert.deepEqual(earlierPages(h), [30, 10], 'paged back through turn 1\'s seq');
   assert.match(f.html(), /<div class="turn-mark" id="tmark-s1-1" data-turn="1"><\/div>[\s\S]*said 10/);
-  assert.deepEqual(marks[1].scrolled, [{ behavior: 'smooth', block: 'start', drawn: true }]);
+  assert.deepEqual(marks[1].scrolled, [{ block: 'start', drawn: true }]);
   assert.doesNotMatch(rail.innerHTML, /pulse/);
   h.streams.find(s => s.name === 'session/follow').cbs.onItem({ type: 'event', event: said(41).event });
   await settle();
   assert.match(f.html(), /said 41/);
   assert.doesNotMatch(f.html(), /turn-tick[^"]*pulse/, 'the next render draws no pulse either');
   assert.equal(marks[1].scrolled.length, 1, 'and jumps no more');
+  store.timers.clear();
+});
+
+test('a jump lands at once, and the next stream render keeps the place it jumped to', async () => {
+  const { f, thread, marks, h, snap } = railRig();
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  assert.equal(thread.scrollTop, thread.scrollHeight, 'at the tail');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'jumpTurn', turn: '2' } });
+  assert.equal(thread.scrollTop, 100, "turn 2's mark at the top");
+  h.streams.find(s => s.name === 'session/follow').cbs.onItem({ type: 'event', event: said(41).event });
+  await settle();
+  assert.match(f.html(), /said 41/);
+  assert.equal(thread.scrollTop, 100, 'the render keeps the jumped place, not the tail');
+  assert.equal(marks[2].scrolled.length, 1);
+  store.timers.clear();
+});
+
+test("a tick's focusout from a render removing it keeps the card", async () => {
+  const { f, rail, h, snap } = railRig();
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  f.fire('root', 'focusin', { target: tickEl(1) });
+  assert.match(rail.innerHTML, /Turn 1 · jump/);
+  // Chrome fires focusout on the focused tick a page write took out of the document
+  f.fire('root', 'focusout', { target: { ...tickEl(1), isConnected: false }, relatedTarget: null });
+  assert.match(rail.innerHTML, /Turn 1 · jump/, 'a disconnected target is not the focus leaving');
+  f.fire('root', 'focusout', { target: { ...tickEl(1), isConnected: true }, relatedTarget: null });
+  assert.doesNotMatch(rail.innerHTML, /turn-card/, 'a connected one is');
+  store.timers.clear();
+});
+
+test('a turn starting with the reader at the tail drops the earlier pages; read up, it keeps them', async () => {
+  const { f, thread, h, snap } = railRig();
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  const fl = () => h.streams.find(s => s.name === 'session/follow').cbs;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'earlier', conv: 's1' } });
+  await settle();
+  assert.match(f.html(), /said 10/);
+  thread.scrollTop = 100;   // read up
+  fl().onItem({ type: 'event', event: { type: 'turn/start', seq: 41, time: 1, data: { turn: 4 } } });
+  await settle();
+  assert.match(f.html(), /said 10/, 'kept while reading up');
+  thread.scrollTop = thread.scrollHeight - thread.clientHeight;   // back at the tail
+  fl().onItem({ type: 'event', event: { type: 'turn/start', seq: 42, time: 1, data: { turn: 5 } } });
+  await settle();
+  assert.doesNotMatch(f.html(), /said 10/, 'dropped at the tail');
+  assert.match(f.html(), /said 30/);
+  assert.equal(store.get().conversations.find(c => c.id === 's1').window.hasMore, true);
+  assert.match(f.html(), /Earlier messages/);
   store.timers.clear();
 });
 
@@ -6000,7 +6055,7 @@ test('a jump pressed while Earlier messages reads pages on past that read to its
   await settle();
   while (waits.length) { waits.shift()(); await settle(); }
   assert.deepEqual(earlierPages(h), [30, 10]);
-  assert.deepEqual(marks[1].scrolled, [{ behavior: 'smooth', block: 'start', drawn: true }]);
+  assert.deepEqual(marks[1].scrolled, [{ block: 'start', drawn: true }]);
   assert.doesNotMatch(rail.innerHTML, /pulse/);
   store.timers.clear();
 });
@@ -6018,7 +6073,7 @@ test('a jump whose pages land while a render is held scrolls to its mark once th
   f.fire('doc', 'pointerup', { button: 0 });
   await settle();
   assert.match(f.html(), /said 10/);
-  assert.deepEqual(marks[1].scrolled, [{ behavior: 'smooth', block: 'start', drawn: true }]);
+  assert.deepEqual(marks[1].scrolled, [{ block: 'start', drawn: true }]);
   store.timers.clear();
 });
 
@@ -6147,10 +6202,9 @@ test('opening a job follows it and its output fills the pre without a render; a 
   assert.equal(pre.textContent, 'hello\nworld');
   assert.equal(f.writes, writes, 'an output frame renders nothing');
   assert.equal(note.textContent, '');
-  pre.textContent = '';   // the fresh node a render draws is empty
   store.dispatch('hostStatus', { line: 'a stream frame' });
   await settle();
-  assert.equal(pre.textContent, 'hello\nworld', 'written again after a render');
+  assert.equal(pre.textContent, 'hello\nworld', 'kept across a render');
   // a follow the host refuses reads so, never quiet
   fl.cbs.onError({ code: 'job/not-found' });
   assert.equal(note.textContent, 'output unavailable: job/not-found');
@@ -6260,27 +6314,77 @@ test('Clear hides the finished until the page reloads', async () => {
   again.store.timers.clear();
 });
 
-test('a render fills the open job\'s pre before the drawer keeps its scroll', async () => {
+// #jobout-<id> as the browser has it: each page write makes a fresh, empty node from the markup, and the node it took
+// out of the document loses its scroll; replaceWith puts another in its place. Each node counts its textContent writes
+function freshPres(f, id) {
+  const made = [];
+  let current = null, at = -1;
+  const node = () => {
+    let text = '';
+    const n = { tagName: 'PRE', writes: 0, scrollTop: 0, scrollHeight: 0, clientHeight: 200, replaceWith(other) { current = other; } };
+    Object.defineProperty(n, 'textContent', { get: () => text, set: v => { text = String(v); n.writes++; } });
+    return n;
+  };
+  const byId = f.doc.getElementById.bind(f.doc);
+  f.doc.getElementById = want => {
+    if (want !== `jobout-${id}`) return byId(want);
+    if (at !== f.writes) {
+      at = f.writes;
+      if (current) current.scrollTop = 0;
+      current = new RegExp(`id="jobout-${id}"`).test(f.html()) ? node() : null;
+      if (current) made.push(current);
+    }
+    return current;
+  };
+  return { made };
+}
+
+test("a render keeps the open job's pre: the same node, its output not written again, its scroll where it was", async () => {
   const { f, store, h, give } = await jobsRig();
   give([ajob('j1', 'running')]);
   store.dispatch('toggleDetails');
   await settle();
-  const pre = f.withId('jobout-j1', { tagName: 'PRE', presentIf: /id="jobout-j1"/ });
+  const { made } = freshPres(f, 'j1');
+  f.click({ tagName: 'SUMMARY', dataset: { action: 'openJob', job: 'j1' }, parentElement: { tagName: 'DETAILS', open: false } });
+  await settle();
+  const pre = f.doc.getElementById('jobout-j1');
+  assert.ok(pre);
+  follows(h)[0].cbs.onItem({ type: 'output', chunks: [{ at: 0, text: 'out\n' }], next: 4 });
+  assert.equal(pre.textContent, 'out\n', 'a frame writes it');
+  const writes = pre.writes;
+  pre.scrollTop = 120;
+  const count = made.length;
+  store.dispatch('hostStatus', { line: 'a stream frame' });
+  await settle();
+  assert.ok(made.length > count, 'the page write made a new node');
+  assert.equal(f.doc.getElementById('jobout-j1'), pre, 'the first node is back in place');
+  assert.equal(pre.writes, writes, 'the render writes no output');
+  assert.equal(pre.scrollTop, 120, 'its scroll put back');
+  follows(h)[0].cbs.onItem({ type: 'output', chunks: [{ at: 4, text: 'more' }], next: 8 });
+  assert.equal(pre.textContent, 'out\nmore', 'the next frame writes it');
+  store.timers.clear();
+});
+
+test('a render puts the open job\'s pre back before the drawer keeps its scroll', async () => {
+  const { f, store, h, give } = await jobsRig();
+  give([ajob('j1', 'running')]);
+  store.dispatch('toggleDetails');
+  await settle();
+  freshPres(f, 'j1');
   const drawer = f.withSelector('.drawer-body', { presentIf: /class="drawer details"/ });
   const seen = [];
   let top = 0;
-  Object.defineProperty(drawer, 'scrollTop', { get: () => top, set: v => { top = v; seen.push([v, pre.textContent]); }, configurable: true });
+  Object.defineProperty(drawer, 'scrollTop', { get: () => top, set: v => { top = v; seen.push([v, f.doc.getElementById('jobout-j1')?.textContent]); }, configurable: true });
   f.click({ tagName: 'SUMMARY', dataset: { action: 'openJob', job: 'j1' }, parentElement: { tagName: 'DETAILS', open: false } });
   await settle();
   follows(h)[0].cbs.onItem({ type: 'output', chunks: [{ at: 0, text: 'out\n' }], next: 4 });
   top = 300;
-  pre.textContent = '';   // the fresh node a render draws
   seen.length = 0;
   store.dispatch('hostStatus', { line: 'a stream frame' });
   await settle();
   const kept = seen.filter(([v]) => v === 300);
   assert.equal(kept.length, 1, 'the drawer keeps its place');
-  assert.equal(kept[0][1], 'out\n', 'the pre was filled before the keep ran');
+  assert.equal(kept[0][1], 'out\n', 'the filled pre was in place before the keep ran');
   store.timers.clear();
 });
 

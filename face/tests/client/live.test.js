@@ -7,7 +7,7 @@ import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { mapFrame } from '../../client/js/wire/mapper.js';
-import { startLive, viewFor, LIST_REFRESH_MS, PREVIEW_ROWS, FOLLOW_RETRY_MS, ACTIVATE_MS } from '../../client/js/host/live.js';
+import { startLive, viewFor, LIST_REFRESH_MS, PREVIEW_ROWS, FOLLOW_RETRY_MS, ACTIVATE_MS, EARLIER_MAX_PAGES } from '../../client/js/host/live.js';
 
 const NOW = 1_760_000_000_000;
 const frames = readFileSync(new URL('../fixtures/events.jsonl', import.meta.url), 'utf8').trim().split('\n').map(l => JSON.parse(l));
@@ -16,7 +16,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
 
 // a fake mux: every stream is recorded with its handlers, the options are kept for the test to fire
-function rig({ rows = [], channels = { ok: true, root: '/r', channels: [], ungrouped: [], archived: [], presets: {} }, bots = { bots: [] }, meta = { ok: true, archived: [], deleted: [] }, pages = {}, onReceipt, projections } = {}) {
+function rig({ rows = [], channels = { ok: true, root: '/r', channels: [], ungrouped: [], archived: [], presets: {} }, bots = { bots: [] }, meta = { ok: true, archived: [], deleted: [] }, pages = {}, onReceipt, projections, atTail } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   const streams = [];
   let opts = null;
@@ -41,7 +41,7 @@ function rig({ rows = [], channels = { ok: true, root: '/r', channels: [], ungro
   const scheduled = [];
   const cancelled = [];
   const timers = { after(ms, fn) { const t = { ms, fn }; scheduled.push(t); return t; }, cancel(t) { cancelled.push(t); } };
-  const live = startLive({ store, openMux: o => { opts = o; return mux; }, call, mapFrame, getJson, timers, now: () => NOW, onReceipt });
+  const live = startLive({ store, openMux: o => { opts = o; return mux; }, call, mapFrame, getJson, timers, now: () => NOW, onReceipt, atTail });
   const last = name => [...streams].reverse().find(s => s.name === name);
   const follows = () => streams.filter(s => s.name === 'session/follow');
   return { store, live, streams, calls, scheduled, cancelled, answers, opts: () => opts, last, follows, ready: async () => { opts.onReady({ home: '/h' }); await settle(); } };
@@ -714,4 +714,51 @@ test('a re-snapshot past a gap while an earlier read runs drops its pages, with 
   assert.equal(await p, false);
   assert.deepEqual(ids(r, 'live'), [80, 129]);
   assert.equal(winOf(r, 'live').start, 80); assert.equal(winOf(r, 'live').loading, undefined);
+});
+
+// the final review's ruling: the drawn window is bounded
+test('one earlier call reads at most 40 pages toward its toSeq', async () => {
+  assert.equal(EARLIER_MAX_PAGES, 40);
+  const r = rig({ rows: [row('c')], projections: () => ({ kind: 'sequenced', asOfSeq: 9000, values: {} }),
+    pages: { c: req => (req.beforeSeq === undefined ? { records: ums(5000, 5001), hasMore: true } : { records: ums(req.beforeSeq - 1), hasMore: true }) } });
+  await r.ready();
+  r.live.open('c'); await settle();
+  assert.equal(await r.live.earlier('c', { toSeq: 1 }), true);
+  assert.equal(earlierCalls(r).length, 40);
+  assert.equal(winOf(r, 'c').start, 4960);
+  assert.equal(winOf(r, 'c').hasMore, true);
+});
+
+const turnStart = (seq, turn) => ({ type: 'event', event: { type: 'turn/start', seq, time: NOW, data: { turn } } });
+async function droppingRig(tail) {
+  const r = rig({ rows: [row('live', { agentAvailable: true })], atTail: id => tail.at(id), pages: { live: () => ({ records: ums(20, 21), hasMore: true }) } });
+  await r.ready();
+  r.live.open('live'); await settle();
+  r.last('session/follow').cbs.onItem({ type: 'snapshot', header: {}, cursor: 40, hasMore: true, records: ums(30, 31), projections: { asOfSeq: 40, values: {} } });
+  assert.equal(await r.live.earlier('live'), true);
+  assert.deepEqual(ids(r, 'live'), [20, 21, 30, 31]);
+  return r;
+}
+
+test('a turn starting while the reader is at the tail drops the earlier pages, keeping the follow\'s own window', async () => {
+  const asked = [];
+  const r = await droppingRig({ at: id => { asked.push(id); return true; } });
+  r.last('session/follow').cbs.onItem(turnStart(41, 3));
+  assert.deepEqual(asked, ['live']);
+  assert.deepEqual(ids(r, 'live'), [30, 31]);
+  assert.deepEqual(winOf(r, 'live'), { start: 30, through: 40, hasMore: true, replaced: [] });
+  // Earlier messages pages from the follow's start again
+  assert.equal(await r.live.earlier('live'), true);
+  assert.equal(earlierCalls(r).at(-1)[1].request.beforeSeq, 30);
+});
+
+test('a turn starting while the reader reads up keeps the earlier pages', async () => {
+  const r = await droppingRig({ at: () => false });
+  r.last('session/follow').cbs.onItem(turnStart(41, 3));
+  assert.deepEqual(ids(r, 'live'), [20, 21, 30, 31]);
+  assert.equal(winOf(r, 'live').start, 20);
+  // a turn's end drops nothing either
+  const r2 = await droppingRig({ at: () => true });
+  r2.last('session/follow').cbs.onItem({ type: 'event', event: { type: 'turn/end', seq: 41, time: NOW, data: { turn: 3 } } });
+  assert.deepEqual(ids(r2, 'live'), [20, 21, 30, 31]);
 });

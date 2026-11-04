@@ -4836,21 +4836,24 @@ Account). Open the printed `?token=` URL and hard-reload.
 16. **The rail on a long conversation.** Open a conversation of twenty turns or more. PASS: a tick
     per turn at the thread's right edge, the one you read drawn full in blue and following your
     scroll. Hover a tick: its card, `TURN <n> · JUMP`, the prompt and the start of the reply. Click a
-    tick of a turn on screen: the thread glides to it. Click the first tick while its turn is not
-    loaded: it pulses, the earlier pages land, and the thread lands on that turn.
+    tick of a turn on screen: the thread is on it at once, and stays there while a reply streams.
+    Click the first tick while its turn is not loaded: it pulses, the earlier pages land, and the
+    thread lands on that turn. Back at the bottom, send a prompt: the earlier pages go (`Earlier
+    messages` is back at the top), and the thread follows the reply.
 17. **A pasted key, masked.** Paste a made-up key shaped like one (`sk-proj-` followed by 30
     letters and digits; never a real one) into a message with a line of words and send. PASS: your
     bubble draws `sk-proj-` and `*`s with an eye; the list's preview line of this conversation, a
     search for a word of that line (its snippet) and the rail card of that turn mask it too, at the
-    same length. Press the eye: the key shows (`Hide secret`); press it again: masked; leave the
+    same length; sent as a new conversation's first line, its title masks it in the list, the head
+    and Details. Press the eye: the key shows (`Hide secret`); press it again: masked; leave the
     conversation and come back: masked. Select across the bubble, copy, and paste into a text
     editor: the real key arrives.
 18. **What only a browser shows** (owed by plan 5). Copy a whole bubble that holds a masked key, in
     Safari and in Firefox: the paste holds the real key. Emulate forced colours (Chrome's DevTools,
     Rendering › Emulate CSS media feature forced-colors: active): the mask still hides the key. On a platform whose scrollbars
     take room (System Settings › Appearance › Show scroll bars: Always), the rail sits clear of the
-    thread's scrollbar and its card stays readable. During a tick's smooth jump the active tick
-    follows the scroll. Inside the Finished fold, a click on a job's summary opens and closes it. A
+    thread's scrollbar and its card stays readable. After a tick's jump the active tick is the
+    turn jumped to. Inside the Finished fold, a click on a job's summary opens and closes it. A
     job's output block keeps its scroll while output streams; a large output (`yes | head -c
     300000`) keeps the page responsive while the block is open. At 860 px and under, `Earlier
     messages` keeps your place in the page's scroll.

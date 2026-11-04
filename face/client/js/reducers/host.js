@@ -125,6 +125,14 @@ export const reducers = {
     const win = { ...w, start: Math.min(w.start, typeof start === 'number' ? start : w.start), hasMore: hasMore === true, replaced };
     return upd(s, convId, c => ({ ...c, messages: [...add, ...c.messages], window: win }));
   },
+  // the earlier pages dropped (the reader at the tail as a turn starts): the messages below start go, a gate and a send
+  // with no seq stay; the window starts there again with more before it
+  hostDropEarlier(s, { convId, start }) {
+    const c0 = find(s, convId);
+    if (!c0?.window || typeof start !== 'number' || c0.window.start >= start) return s;
+    const messages = c0.messages.filter(m => isGate(m) || typeof m.seq !== 'number' || m.seq >= start);
+    return upd(s, convId, c => ({ ...c, messages, window: { ...c.window, start, hasMore: true } }));
+  },
   hostEarlierLoading(s, { convId, on }) {
     const c0 = find(s, convId);
     if (!c0?.window) return s;

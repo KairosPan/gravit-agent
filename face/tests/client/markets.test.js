@@ -996,3 +996,11 @@ test('a level, an alert and a file the operator wrote are text, never markup: on
     assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/, `${name}: the text, escaped`);
   }
 });
+
+// the final review's ruling: a title is derived from the first prompt, so a market page's conversations draw it masked
+test("a market page's conversation titles are masked", () => {
+  const SK = 'sk-proj-aB3dE6fG9hJ2kL5mN8pQ1rS4';
+  const { html } = screen({ route: { screen: 'markets', id: 'coin:BTC' }, account: true, conversations: [conv('s1', { title: `BTC with ${SK}` })] });
+  assert.ok(html.includes(`<div class="mk-t1">BTC with sk-proj-${'*'.repeat(SK.length - 8)}</div>`));
+  assert.doesNotMatch(html, /aB3dE6fG9h/);
+});

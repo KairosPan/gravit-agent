@@ -758,7 +758,8 @@ operator's message); `render/thread.js` (the bubble's attachments); `icons.js` (
   the turn in view full width in `--primary`.
 - **Hovering a tick** shows a card at most 300 × 100: "TURN 5 · jump", the prompt on one line, and
   the reply on up to three lines once the turn has finished.
-- **A click** scrolls smoothly to the turn. For a turn not yet loaded, the thread first loads
+- **A click** scrolls to the turn at once (not smoothly: a glide is cut short by the next stream
+  render, §17). For a turn not yet loaded, the thread first loads
   earlier history up to it, and the tick pulses meanwhile.
 - The rail is hidden under two turns and when the page stacks (860 px or narrower). It sits inside
   the thread, so it moves with Details' margin (400 px, or 460 px with the stock drawer).
@@ -856,8 +857,9 @@ eye key. The eye's label is "Show secret", then "Hide secret".
   context, which is P5's reason. dsh leaves both alone.
 
 It does not apply to Gravit's, a bot's or the host's bubbles, to context rows, to the Lunhui
-composed answer, to titles, to a job's command line or output, or to the draft being typed. That is
-dsh's scope and the board's.
+composed answer, to a job's command line or output, or to the draft being typed. That is dsh's
+scope and the board's. A conversation's title, derived from its first prompt, is masked as an
+excerpt wherever it is drawn (the controller's ruling at the final review, §17).
 
 **The shapes** (ported from dsh's `ui-secret-mask` credential formats, and tested against its
 cases):
@@ -1442,19 +1444,27 @@ alone; the final runs had no flake).
 | §5.9, the controller's ruling | a snippet cut on its left | when an excerpt starts with `…` and its first token is 16 or more `[A-Za-z0-9_+/=-]` characters, the whole token is masked, its length kept | a widening of the clip rule: a key's tail without its prefix is still a key |
 | §5.9 | the memo | an LRU `Map` of at most 500 texts (`MEMO_MAX`), none over 16,384 characters kept (`MEMO_TEXT_MAX`), every run frozen | a clear-when-full memo thrashed on big pages and streaming previews |
 | §5.8 | Stop | `Yes, stop` marks the job `stopping` at once (`markJob`, from `running` only) and puts focus on `Stopping`; a refused kill marks it back; a Stop confirm whose job no longer runs is dropped; the open job is unfollowed when it is no longer drawn (its row gone, Clear, Details closed, another conversation) | the review's findings; the follow runs only while the job is open |
-| §5.8 | the open job's output | written into its `pre` by `textContent` on each frame (`onOutput`) and right after each render's `innerHTML` write, before any scroll keep; the page is never rendered by a frame (Review Focus 4) | the first build filled the `pre` after the drawer's keep, and the drawer jumped about 320 px a render |
+| §5.8 | the open job's output | written into its `pre` by `textContent` on each frame (`onOutput`), and once into a `pre` a render drew for the first time; the `pre` node is kept across renders (taken before the `innerHTML` write and put back over the fresh one with its `scrollTop`, before any scroll keep), so a render rewrites none of it; the page is never rendered by a frame (Review Focus 4) | the first build filled the `pre` after the drawer's keep, and the drawer jumped about 320 px a render; the final review found the whole output (up to 256K characters) rewritten and laid out on every render |
+| §5.7, the final review | the rail's jump | instant (`scrollIntoView({block: 'start'})`), never smooth | the next render replaced the thread mid-glide, and its keep could snap back to the tail while a turn streamed |
+| §5.7, the controller's ruling | the drawn window | `EARLIER_MAX_PAGES` 40 (2,000 messages a call); a turn that starts on the conversation followed on screen while the reader is at its tail drops the earlier pages, back to the follow's own window with `hasMore` | the final review found the window unbounded (a 200-page call, kept until a reload) |
+| §5.9, the controller's ruling | titles | masked with `maskExcerpt` wherever drawn: the list row, a search hit, the head, Details' This task, a conversation chip's label in a bubble, the `@` menu's rows, a market page's conversations; the draft and the rename box stay unmasked | a title is derived from the first prompt (extending the operator's ruling on excerpts) |
+| §5.7 | a tick's focusout | a `focusout` whose target is no longer in the document (Chrome fires one when a write removes the focused tick) hides no card | the final review's minor |
+| §5.8 | a job row | `hostJobs` keeps only rows with a string `id` and a string `label` | the final review's minor |
 | §5.8 | `job/kill` twice | at rc.5 a second kill of a settled job answers `already-finished`, not `job/not-found` (the settled job stays in the registry); the page treats both outcomes as done | the smoke recorded it |
 | §5.8, the copy | the chip | `1 job finished` in the singular, as `1 job running` | the constraints give only the plural example |
 
 §9's item 7 stays open: a job's command line and Gravit's replies are not masked this round.
 What stays imperfect is `DEVELOPMENT.md` R97: masking is display only (A2) and a copy takes the
-real key; Gravit's replies are not masked; a URL password holding an unencoded `:` `,` `;` `(` or
+real key; Gravit's replies are not masked, nor Gravit's `dispatch` in a room member's Trace, though it
+often quotes the operator's prompt; a URL password holding an unencoded `:` `,` `;` `(` or
 `)` is not masked; an excerpt's key cut before its prefix is whole is not masked; earlier pages
-live in the page's memory until a reload; an operator image above the reader that loads after a
+live in the page's memory until a reload or a turn that starts with the reader at the tail, and while
+the reader reads up a long window (up to 2,000 messages a call) is drawn whole by every stream
+render; an operator image above the reader that loads after a
 prepend shifts the place, and Safari's momentum scroll can carry past it; a pending send with no
 seq puts its turn mark at the end; a tool message split across an earlier page and the window
-drops the earlier call data; the open job's whole output (up to 262,144 characters) is rewritten
-on every render that changes it; folding the Finished fold while its job is open reopens it next
+drops the earlier call data; the open job's `pre` is moved back into the page by every render, its
+text kept but laid out again; folding the Finished fold while its job is open reopens it next
 render; a re-opened follow re-sends the whole retained output; jobs vanish with a face restart.
 Also deferred from the reviews: the Telegram and Alpaca shapes have no clip prefix, and `hf_` or
 `npm_` identifiers clip as keys.
@@ -1464,6 +1474,6 @@ rail's ticks as one Tab stop with the arrow keys, `aria-describedby` for the car
 on the pulse; a job's end line drawn twice (the meta line and `.job-end`). Owed to the browser
 drill (`face/README.md` "The dsh UI port drill", step 18): a whole bubble with a masked key copied
 in Safari and Firefox, forced colours, the rail at `right: 0` against a non-overlay scrollbar, the
-active tick during a smooth jump, a job summary clicked inside the Finished fold, a job's output
+active tick after a jump, a job summary clicked inside the Finished fold, a job's output
 keeping its scroll while it streams, a large output's cost, and the narrow layout's keep on a
 prepend. The keyed steps 15–17 and the transport drill's step 9 are the operator's.

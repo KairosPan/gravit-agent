@@ -2,6 +2,7 @@
 // the image lightbox. Strings only; app.js puts them in place.
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
+import { maskExcerpt } from '../mask.js';
 import { avatarGlyph } from '../wire/room.js';
 import { flatItems } from './menus.js';
 import { metaText, progressText, limitsLine, isImageSrc } from './files.js';
@@ -37,7 +38,7 @@ function rowParts(it) {
     case 'skill': return [icon('book', 16), it.name, `/${it.name}`, it.description];
     case 'bot': return [esc(avatarGlyph(it.id)), it.name, `@${it.id}`, it.description];
     case 'file': return [icon(it.dir ? 'layers' : 'file', 16), it.name, it.folder, ''];
-    default: return [icon('chat', 16), it.title, '', it.age];
+    default: return [icon('chat', 16), maskExcerpt(it.title), '', it.age];   // a title, from a first prompt: masked (§5.9)
   }
 }
 

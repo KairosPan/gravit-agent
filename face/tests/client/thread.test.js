@@ -484,3 +484,10 @@ test("the rail's markup is the same string for the same inputs", async () => {
   assert.notEqual(railHtml(conv({ outline, window }), { active: 2 }), a);
   assert.notEqual(railHtml(conv({ outline: [...outline], window }), { active: 2, hover: 2 }), a);
 });
+
+// the final review's ruling: a title is derived from the first prompt, so a conversation chip's label is masked too
+test("a conversation chip's label in a bubble is masked", () => {
+  const h = renderMessage(msg({ id: 'e3', from: 'you', text: `see @[use ${SK}](${sessionUri('s9')})` }), conv(), state);
+  assert.ok(h.includes(`<span class="ref-chip-label">use ${MASKED}</span>`));
+  assert.doesNotMatch(h, /aB3dE6fG9h/);
+});

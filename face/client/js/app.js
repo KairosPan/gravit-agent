@@ -423,7 +423,7 @@ export function boot(win, host = {}) {
   const sellMany = startSellMany({ store, getJson, owner, sendOrder: o => sendFromWallet(walletSend.order(o)), afterAction, now });
   // a receipt reloads the Account's read past the cache, and one from the Account seat (every receipt the kind table
   // lifts today) the seat's standing too
-  const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });
+  const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, atTail: id => atTail(id), onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });
   // answers go through the live layer, which settles the gate it delivered once the answer wins; a command opens a cold
   // conversation through it first
   // the open conversation's background jobs (spec §5.8): its job/list on the live layer's mux, re-opened on the app's
@@ -576,8 +576,10 @@ export function boot(win, host = {}) {
     // a disclosure the person opened (its Raw, a trace; tool calls are stored but not drawn) is the page's, not the store's: open again by its id
     // (a job's disclosure is the store's: open while it is the job open, never kept open by the page)
     const opened = [...root.querySelectorAll('details[id][open]')].map(el => el.id).filter(id => !id.startsWith('jobd-'));
+    // the open job's output block: the node stays across renders (its text, up to 256K characters, is never rewritten
+    // and laid out afresh by a render), its scroll put back once it is in place again
     const out0 = s.jobs.open !== null ? doc.getElementById(`jobout-${s.jobs.open}`) : null;
-    const outAt = out0 ? { top: out0.scrollTop, bottom: out0.scrollHeight - out0.scrollTop - out0.clientHeight < 24 } : null;
+    const outTop = out0 ? out0.scrollTop : null;
     // the note above the box is a live region: the node stays across renders, so a new line in it is announced
     const note0 = doc.getElementById('composer-note');
     const noteText = notes.get(key) ?? '';
@@ -607,9 +609,13 @@ export function boot(win, host = {}) {
     root.innerHTML = renderRail(s, now(), { mac }) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen) + overlayHtml + lightHtml;
     const note1 = doc.getElementById('composer-note');
     if (note0 && note1 && note0 !== note1 && typeof note1.replaceWith === 'function') note1.replaceWith(note0);
-    // the open job's output, written into the fresh pre before any scroll keep: drawn empty it is hidden, and the drawer's
-    // keep would be clamped to a body ~320 px shorter
-    writeOutput(outAt);
+    // the open job's output in place before any scroll keep: drawn empty it is hidden, and the drawer's keep would be
+    // clamped to a body ~320 px shorter. The kept node is put back; a pre drawn for the first time is filled
+    const out1 = s.jobs.open !== null ? doc.getElementById(`jobout-${s.jobs.open}`) : null;
+    const outKept = out0 !== null && out1 !== null;
+    if (outKept && out0 !== out1 && typeof out1.replaceWith === 'function') out1.replaceWith(out0);
+    if (outKept) out0.scrollTop = outTop;
+    writeOutput(!outKept);
     const noteEl = doc.getElementById('composer-note');
     if (noteEl && noteEl.textContent !== noteText) noteEl.textContent = noteText;
     // the quotes poll asks for the rows the table drew, by id; a market's page, which draws none, for its own market (spec §6.1:
@@ -734,7 +740,7 @@ export function boot(win, host = {}) {
     if (rail.jump && rail.jump.conv === threadSig) {
       const mark = doc.getElementById(`tmark-${threadSig}-${rail.jump.turn}`);
       if (mark) {
-        mark.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+        toMark(mark);
         rail.jump = null;
         rail.pulse = null;
         railStale = true;
@@ -758,20 +764,21 @@ export function boot(win, host = {}) {
     if (open) for (const t of thumbsNeeded(open, s.thumbs)) void attachments.thumb(t.sessionId, t.attachmentId);
   }
 
-  // the open job's output into its pre by textContent, never through a render (on each frame, and after a render drew the
-  // pre empty), and the line under it once its follow is over while the job runs on or the host refused it. A pre at its
-  // end follows the end; one the reader scrolled up keeps its place (kept: where the render found it)
-  function writeOutput(kept = null) {
+  // the open job's output into its pre by textContent, never through a render: on each frame, and once into a pre a render
+  // drew for the first time (fill: false, a render that put its kept pre back, writes none); and the line under it once its
+  // follow is over while the job runs on or the host refused it. A pre at its end follows the end; one the reader scrolled
+  // up keeps its place
+  function writeOutput(fill = true) {
     const s = store.get();
     const id = s.jobs.open;
     if (id === null) return;
     const out = jobs.outputOf(id);
-    const pre = doc.getElementById(`jobout-${id}`);
+    const pre = fill ? doc.getElementById(`jobout-${id}`) : null;
     if (pre) {
       const text = out?.text ?? '';
-      const tail = kept ? kept.bottom : pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
+      const tail = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
       if (pre.textContent !== text) pre.textContent = text;
-      if (tail) pre.scrollTop = pre.scrollHeight; else if (kept) pre.scrollTop = kept.top;
+      if (tail) pre.scrollTop = pre.scrollHeight;
     }
     const note = doc.getElementById(`jobnote-${id}`);
     if (note) {
@@ -820,6 +827,20 @@ export function boot(win, host = {}) {
     rail.active = on;
     drawRail();
     return true;
+  }
+  // a turn's mark at the top of the view, at once: a smooth scroll is cut short by the next render (its write replaces the
+  // thread mid-glide, and the keep, finding it neither at the tail nor where the glide ends, may snap back to the tail)
+  function toMark(mark) {
+    mark.scrollIntoView?.({ block: 'start' });
+  }
+  // the reader at the tail of the conversation on screen (live.js drops earlier pages as a turn starts there): the thread's
+  // own scroll, or the document's where the thread does not scroll (a narrow window)
+  function atTail(id) {
+    if (railConv()?.id !== id) return false;
+    const thread = doc.getElementById('thread');
+    if (!thread) return false;
+    const el = thread.scrollHeight > thread.clientHeight ? thread : doc.scrollingElement;
+    return !el || el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   }
   function hoverRail(turn) {
     if (railDrawing || turn === rail.hover) return;
@@ -1647,7 +1668,7 @@ export function boot(win, host = {}) {
       const turn = Number(el.dataset.turn);
       const markOf = () => doc.getElementById(`tmark-${conv.id}-${turn}`);
       const mark = markOf();
-      if (mark) { mark.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); return; }
+      if (mark) { toMark(mark); return; }
       const tick = railView(conv).ticks.find(t => t.turn === turn);
       if (!tick || tick.loaded) return;
       const jump = { conv: conv.id, turn };
@@ -1839,7 +1860,7 @@ export function boot(win, host = {}) {
       if (!open || cut < 0) return;
       const k = `${open.id}|${id.slice(0, cut)}|${id.slice(cut + 1)}`;
       if (revealed.has(k)) revealed.delete(k); else revealed.add(k);
-      render();
+      requestRender();
     },
     lightboxClose: () => store.dispatch('closeLightbox'),
     lightboxKeep: () => {},
@@ -1912,7 +1933,8 @@ export function boot(win, host = {}) {
   root.addEventListener('mouseover', ev => { const t = tickOf(ev.target); if (t) hoverRail(Number(t.dataset.turn)); });
   root.addEventListener('mouseout', ev => { if (tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null); });
   root.addEventListener('focusin', ev => { const t = refocusing ? null : tickOf(ev.target); if (t) hoverRail(Number(t.dataset.turn)); });
-  root.addEventListener('focusout', ev => { if (!refocusing && tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null); });
+  // (a focused tick a page write took out of the document fires a focusout too, in Chrome: not the focus leaving)
+  root.addEventListener('focusout', ev => { if (!refocusing && ev.target?.isConnected !== false && tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null); });
   root.addEventListener('change', ev => {
     const el = ev.target;
     if (el.tagName === 'SELECT' && el.dataset?.action === 'draftWhere') {

@@ -14,7 +14,7 @@ export const FOLLOW_RETRY_MS = 2000;   // a follow the host ended is re-decided 
 export const CONTROL_RETRY_MS = 10_000;
 export const ACTIVATE_MS = 10_000;     // how long activate waits for a follow's first snapshot
 export const EARLIER_PAGE = 50;        // messages per earlier page (the host's own default window)
-export const EARLIER_MAX_PAGES = 200;  // the most pages one earlier call reads toward its toSeq
+export const EARLIER_MAX_PAGES = 40;   // the most pages one earlier call reads toward its toSeq (2,000 messages)
 
 // a live session is followed (a follow cannot activate it); a cold one is paged, never followed (PLAN D16)
 export const viewFor = conv => (conv?.live ? 'follow' : 'page');
@@ -23,8 +23,9 @@ const address = id => ({ kind: 'session', sessionId: id });
 const codeOf = err => err?.code ?? (err?.status ? `HTTP ${err.status}` : err?.message ?? 'failed');
 
 // onReceipt: called after a streamed order receipt lands (spec §6: the account is read again right after a fill); a
-// receipt folded into a window is history and calls nothing
-export function startLive({ store, openMux, call, mapFrame, getJson, timers, now = Date.now, onReceipt = () => {} }) {
+// receipt folded into a window is history and calls nothing. atTail(id): whether the reader stands at that conversation's
+// tail (the page's word; this layer touches no DOM)
+export function startLive({ store, openMux, call, mapFrame, getJson, timers, now = Date.now, onReceipt = () => {}, atTail = () => false }) {
   const calls = new Map();        // callId → {name, args}: the arguments the order card joins on
   const rooms = new Map();        // sessionId → the room projection's value
   const pending = new Map();      // eventId → the gate message as delivered and still open: placed afresh at every dispatch
@@ -35,6 +36,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   let view = null;                // {id, token, mode: 'follow' | 'page', handle, stale?, failed?, snapped?, waiters?}
   let listPending = false;
   let earlierRun = null;          // {id, token, promise}: the earlier read under way; a second call for it answers its promise
+  const ownStart = new Map();     // sessionId → the start of its last snapshot's own records, below which lie earlier pages
   // the last good answer of each /data read the list joins: a failed read keeps it, never an empty set in its place
   let lastIndex = null;
   let lastMeta = null;
@@ -73,6 +75,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     if (v.kind === 'pulse') { store.dispatch('hostThinking', { convId, mode: v.mode ?? 'text' }); return; }
     if (v.kind === 'turn') {
       if (v.phase === 'start' || v.phase === 'end') store.dispatch('hostProjection', { convId, key: 'running', value: v.phase === 'start' });
+      if (v.phase === 'start') dropEarlier(convId);
       scheduleRefresh();
       return;
     }
@@ -105,6 +108,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   function applySnapshot(convId, snapshot, { through, hasMore }) {
     const created = typeof snapshot?.header?.createdAt === 'number' ? snapshot.header.createdAt : undefined;
     const { messages, start, replaced } = windowOf(convId, snapshot?.records);
+    ownStart.set(convId, start);
     const loading = !!earlierRun && earlierRun.id === convId && earlierRun.token === openSeq;   // a read still under way keeps its key
     store.dispatch('hostWindow', { convId, messages, created, window: { start, through, hasMore: hasMore === true, replaced, ...(loading ? { loading } : {}) } });
     seedBlock(convId, snapshot?.projections);
@@ -252,6 +256,17 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     })().finally(() => { if (earlierRun === run) earlierRun = null; });
     earlierRun = run;
     return run.promise;
+  }
+  // the drawn window bounded: a turn starting on the conversation followed on screen while the reader stands at its tail
+  // drops the earlier pages, back to its snapshot's own window (hasMore, so Earlier messages reads them again). Never while
+  // an earlier read for it runs (a rail jump waits on it)
+  function dropEarlier(id) {
+    const base = ownStart.get(id);
+    const w = convOf(id)?.window;
+    if (!view || view.id !== id || view.mode !== 'follow' || typeof base !== 'number' || !w || w.start >= base) return;
+    if (earlierRun && earlierRun.id === id && earlierRun.token === openSeq) return;
+    if (!atTail(id)) return;
+    store.dispatch('hostDropEarlier', { convId: id, start: base });
   }
   function reconcile() {
     if (!view || view.failed) return;
