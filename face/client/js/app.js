@@ -445,6 +445,8 @@ export function boot(win, host = {}) {
   let menuTrig = null;     // {kind, from, query, atStart, key}: the token before the caret the menu follows
   let menuFiles = null;    // the files answer for menuTrig's query: {query, items}
   let dismissed = null;    // the trigger Esc closed: it stays closed until the token changes
+  let menuSource = 0;      // moves on when a trigger opens anew (its kind, its place or its draft) and on every close: the
+                           // commands, skills and roster are read once per source, and their answer draws while it stands
   const menuShowsRows = () => !!menu && flatItems(menu).length > 0;
   const composerReads = host.composerReads ?? startComposerReads({ call, getJson, postJson });
   let composing = false;
@@ -1030,6 +1032,7 @@ export function boot(win, host = {}) {
   // the menu forgotten, its reads' answers with it; drawn only by the caller (closeMenu) or the next render
   function forgetMenu() {
     menuSeq++;
+    menuSource++;
     menuTrig = null;
     menuFiles = null;
     menu = null;
@@ -1053,26 +1056,32 @@ export function boot(win, host = {}) {
     if (sameTrig(trig, dismissed)) return;   // Esc closed this very token
     dismissed = null;
     if (sameTrig(trig, menuTrig)) return;
+    // a letter added to the query is the same source: its lists stand and only the files are read again
+    const fresh = !menuTrig || menuTrig.kind !== trig.kind || menuTrig.from !== trig.from || menuTrig.key !== trig.key;
     const seq = ++menuSeq;
-    if (menuFiles?.query !== trig.query || menuTrig?.key !== trig.key) menuFiles = null;
+    const source = fresh ? ++menuSource : menuSource;
+    if (menuFiles?.query !== trig.query || fresh) menuFiles = null;
     menuTrig = trig;
     buildMenu(false);
     drawMenu();
-    const still = () => seq === menuSeq && menuTrig?.query === trig.query;
-    const redraw = () => { if (still()) { buildMenu(true); drawMenu(); } };
+    // a list's answer draws with the query as it reads now, while its source stands; a files answer only for its own query
+    const redrawSource = () => { if (source === menuSource && menuTrig) { buildMenu(true); drawMenu(); } };
     if (trig.kind === '/') {
-      void composerReads.commands(conv).then(redraw);
-      void composerReads.skills(conv.id).then(redraw);
+      if (fresh) {
+        void composerReads.commands(conv).then(redrawSource);
+        void composerReads.skills(conv.id).then(redrawSource);
+      }
       return;
     }
     if (root != null) {
       void composerReads.files(trig.query, cwdRel).then(answer => {
-        if (!answer || !still()) return;
+        if (!answer || seq !== menuSeq || menuTrig?.query !== trig.query) return;
         menuFiles = { query: trig.query, items: answer.items };
-        redraw();
+        buildMenu(true);
+        drawMenu();
       });
     }
-    if (conv?.channel) void composerReads.roster(conv.id).then(redraw);
+    if (fresh && conv?.channel) void composerReads.roster(conv.id).then(redrawSource);
   }
   // a row chosen: a skill or an argument command becomes `/name `, a bot, file or conversation its chip and a space, the
   // caret after them; `walk` (Tab on a folder) makes the token `@<path>/` and the menu follows it in. A command that takes
@@ -1411,6 +1420,16 @@ export function boot(win, host = {}) {
   // a caret moved by a key: the token before it may open, follow or close the menu (a no-op while it stands where it was)
   const CARET_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
   root.addEventListener('keyup', ev => { if (CARET_KEYS.has(ev.key) && sayOf(ev.target) && !composing) menuTick(); });
+  // the editor losing focus (a click in the thread, ⌥⌘K) closes the menu, so Esc is the drawers' again; focus moving into
+  // the menu, or a render that gives the editor its focus back at once, keeps it
+  root.addEventListener('focusout', ev => {
+    if (!menuTrig || !sayOf(ev.target) || ev.relatedTarget?.closest?.('.cmenu')) return;
+    queueMicrotask(() => {
+      const a = doc.activeElement;
+      if (sayOf(a) || a?.closest?.('.cmenu')) return;
+      closeMenu();
+    });
+  });
   root.addEventListener('compositionstart', () => { composing = true; });
   root.addEventListener('compositionend', ev => {
     composing = false;

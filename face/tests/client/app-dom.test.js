@@ -4136,3 +4136,70 @@ test('⌥⌘K with the stock drawer open on a medium window closes it first, the
   assert.equal(f.doc.activeElement, cq);
   store.timers.clear();
 });
+
+// ---- fix round 1 of task 7 ----
+test('a growing query reads commands, skills and the roster once per trigger, and files once per query', async () => {
+  const { f, say, h, store } = await menuRig({ roster: [{ id: 'buffett', name: 'Buffett Type' }] });
+  const count = name => h.calls.filter(c => c[0] === name).length;
+  for (const words of ['/', '/c', '/co', '/com', '/compact']) { typeMenu(f, say, words); await settle(); }
+  assert.equal(count('commands/list'), 1);
+  assert.equal(count('skills/list'), 1);
+  typeMenu(f, say, '/compact @');
+  await settle();
+  const filesAt = h.reads.filter(p => p.startsWith('/data/files?')).length;
+  for (const words of ['/compact @s', '/compact @st', '/compact @str']) { typeMenu(f, say, words); await settle(); }
+  assert.equal(h.posted.filter(p => p[0] === '/data/rooms/state').length, 1, 'the roster once for the @ trigger');
+  assert.equal(h.reads.filter(p => p.startsWith('/data/files?')).length, filesAt + 3, 'files once per query');
+  store.timers.clear();
+});
+
+test('a skills answer that lands after the query grew still draws, filtered by the query now', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const slot = f.withId('composer-menu');
+  const h = menuHost();
+  const call = h.call;
+  let release;
+  h.call = async (endpoint, args) => (endpoint === 'skills/list' ? new Promise(r => { release = () => r({ skills: [...SKILLS, { name: 'luck', description: 'x' }] }); }) : call(endpoint, args));
+  const store = await bootComposer(f, h, runsEditor);
+  say.focus();
+  typeMenu(f, say, '/');
+  await settle();
+  typeMenu(f, say, '/lunh');
+  await settle();
+  assert.doesNotMatch(slot.innerHTML ?? '', /lunhui/);
+  release();
+  await settle();
+  assert.match(slot.innerHTML, /lunhui/);
+  assert.doesNotMatch(slot.innerHTML, /luck/, 'filtered by the query as it reads now');
+  store.timers.clear();
+});
+
+test('the menu closes when the editor loses focus, but not to the menu itself or a render that gives focus back', async () => {
+  const { f, say, slot, store } = await menuRig();
+  typeMenu(f, say, '@');
+  await settle();
+  assert.notEqual(slot.innerHTML, '');
+  // a render gives the editor its focus back: the menu stays
+  f.fire('root', 'focusout', { target: say, relatedTarget: null });
+  say.focus();
+  await settle();
+  assert.notEqual(slot.innerHTML, '', 'focus came back to the editor');
+  // a press moving focus into the menu
+  const inMenu = { closest: sel => (sel === '.cmenu' ? {} : null) };
+  f.fire('root', 'focusout', { target: say, relatedTarget: inMenu });
+  f.doc.activeElement = inMenu;
+  await settle();
+  assert.notEqual(slot.innerHTML, '', 'into the menu');
+  say.focus();
+  // a click into the thread
+  f.fire('root', 'focusout', { target: say, relatedTarget: null });
+  f.doc.activeElement = f.body;
+  await settle();
+  assert.equal(slot.innerHTML, '');
+  assert.equal(say.attributes['aria-expanded'], 'false');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleDetails' } });
+  f.fire('doc', 'keydown', { key: 'Escape', target: f.body });
+  assert.equal(store.get().detailsOpen, false, 'Esc is the drawers\' again');
+  store.timers.clear();
+});
