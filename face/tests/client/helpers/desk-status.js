@@ -18,7 +18,7 @@ export function deskStatus() {
     ],
     turnsToday: { count: 2, usage: { uncachedInputTokens: 1_000_000, outputTokens: 34_567, cacheReadTokens: 200_000, cacheWriteTokens: 0 } },
     budget: { dailyTokens: 2_000_000, used: { uncachedInputTokens: 1_000_000, outputTokens: 34_567, cacheReadTokens: 200_000, cacheWriteTokens: 0, total: 1_234_567 }, spent: false },
-    telegram: { configured: false, polling: false, dropped: 0, queued: 0 },
+    phone: { configured: false, polling: false, networks: [], queued: 0, strangers: 0 },
     standing: {
       file: { path: '/scratch/face/desk/standing.yml', state: 'loaded', loadedAt: '2026-11-02T11:55:01.000Z' },
       calendar: { clock: 'XNYS', state: 'ok' },

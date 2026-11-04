@@ -1,6 +1,6 @@
 // face/tests/fixtures/mcp-standin.js
 /**
- * A stdio MCP server for the desk's real-boot smokes (tests/desk-smoke.test.ts, tests/telegram-smoke.test.ts)
+ * A stdio MCP server for the desk's real-boot smokes (tests/desk-smoke.test.ts, tests/phone-smoke.test.ts)
  * only: the operator's `alpaca-kit` row as the desk meets it, with nothing behind it - no keys, no data, no
  * network. The smokes mount it through `@deepseek-ai/dsh-mcp-client`, the bridge the operator's row uses, so
  * dsh spawns it as a real stdio child: with dsh's scrubbed environment, through the version-negotiation probe,

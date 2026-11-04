@@ -27,12 +27,12 @@ import { registerLunhuiViewRoute, type LunhuiViewService } from "./lunhui-view.t
 import { registerAccountProxy } from "./account-proxy.ts";
 import { registerMarketProxy } from "./market-proxy.ts";
 import { composedMarketRow } from "./market-row.ts";
-import { composedSeatRow, type SeatEntryLike } from "./account-seat.ts";
+import { composedSeatRow, seatUrl, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
 import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
 import type { DeskConversationCtxLike } from "./desk-conversation.ts";
 import { resolveDeskRoute } from "./desk-session.ts";
-import { telegramConfigFromEnv } from "./telegram.ts";
+import { createPhoneClient } from "./phone.ts";
 import { marketQuotes } from "./market-quotes.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { registerSessionRoutes } from "./sessions.ts";
@@ -381,16 +381,19 @@ await registerPanelRoutes(booted.ctx.webServer, deps);
  * resolves one. `installModelSelection` is dsh-agent's, wrapped the way room.ts's
  * own default wraps it.
  *
- * And with the desk on and both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OPERATOR_ID`
- * set - `$DSH_HOME/.env`, which `bootFace` read into this process's environment -
- * the Telegram bridge (telegram.ts) runs on that conversation: the operator's
- * phone. Either name missing, and there is no bridge and the status says
- * `telegram: not configured`.
+ * And with the desk on and the `mcp-account` row not disabled, the phone bridge
+ * (phone-bridge.ts) runs on that conversation: the operator's phone, through the
+ * account at the row's URL - the proxy's - which holds the networks' tokens,
+ * long-polls them and keeps an inbox the bridge reads (phone.ts). The face holds
+ * no network's token. A disabled row, and there is no bridge and the status says
+ * `phone: none (the account's half is off)`.
  *
  * With the desk on, the standing orders' clock (schedule.ts) runs on that
  * conversation too, loaded on first use: `standing.yml` beside the ledger, fired
  * on the XNYS calendar (src/market-clock.ts). */
 const deskEnabled = process.env.FACE_DESK !== "0";
+/* The account's inbox and send for the desk's phone: the same URL the proxy reads, and none when the row is disabled. */
+const phone = seatRow === undefined ? createPhoneClient({ url: seatUrl() }) : seatRow.disabled ? undefined : createPhoneClient({ url: seatRow.url });
 const deskRoute = deskEnabled
   ? await resolveDeskRoute(booted.ctx as unknown as RoomContextLike, process.env.FACE_DESK_MODEL, console.log)
   : undefined;
@@ -403,7 +406,7 @@ desk = installDesk(booted.ctx.webServer, {
   route: deskRoute,
   sessionCtx: booted.ctx as unknown as DeskConversationCtxLike,
   installModelSelection: (agentCtx, ref) => installModelSelection(agentCtx as unknown as Context, ref),
-  telegram: telegramConfigFromEnv(process.env),
+  ...(phone === undefined ? {} : { phone }),
   /* the watch (src/watch.ts) on the production defaults: the wall clock, the face's calendars, and SEC's filings
    * only once ALPHA_EDGAR_USER_AGENT names a contact */
   watchRow: {},

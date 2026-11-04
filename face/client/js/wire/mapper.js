@@ -323,7 +323,9 @@ function bubble(role, message, base, interrupted) {
 }
 
 /** A phone message's fields: the Telegram sender, the chat and the message's
- * id there - integers, as the bridge writes them (src/telegram.ts). */
+ * id there - integers, as the retired Telegram bridge wrote them. A text the
+ * account's inbox brings (src/phone-bridge.ts) carries `network` and a string
+ * `messageId` instead, which the bubble does not show, so none of these is picked. */
 const PHONE_FIELDS = ["from", "chat", "messageId"];
 
 /** A desk line's fields by its kind: a firing's standing order, its key and

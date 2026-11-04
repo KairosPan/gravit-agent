@@ -22,7 +22,7 @@ export function renderDeskTab(view, read = {}) {
   const said = note(read.message);
   if (!view) return `<div class="desk">${said}${empty(read.message ? 'Desk status unavailable' : 'Loading…')}</div>`;
   const pause = '<button type="button" class="btn" data-action="deskPause">Pause</button>';
-  const status = feed([view.head, view.off, view.telegram, view.budget, view.ledgerError].filter(Boolean).map(w => line('·', esc(w))));
+  const status = feed([view.head, view.off, view.phone, view.budget, view.ledgerError].filter(Boolean).map(w => line('·', esc(w))));
   const head = `<div class="desk-head">${status}${pause}</div>`;
 
   const watch = view.watch === null ? empty('The watch is not running.')

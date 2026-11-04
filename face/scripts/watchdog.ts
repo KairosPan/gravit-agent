@@ -101,7 +101,7 @@ export async function readWatchdogState(home: string): Promise<WatchdogState> {
   };
 }
 
-/** Write the state, mode 0600 in a 0700 directory, as src/telegram.ts writes its files. */
+/** Write the state, mode 0600 in a 0700 directory, as src/phone-bridge.ts writes its cursor. */
 async function writeState(home: string, state: WatchdogState): Promise<void> {
   await writeFileAtomic(watchdogStatePath(home), `${JSON.stringify(state)}\n`, { mode: 0o600, dirMode: 0o700 });
 }

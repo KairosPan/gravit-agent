@@ -282,8 +282,12 @@ export function provenanceLine(source: DeskSource, now: Date): string {
 
 /* `type`, not `interface`, for the reason src/room-rules.ts gives: an interface is not assignable to
  * `Record<string, unknown>`, and `MessageLike.source` is one. */
-/** A text from the operator's phone: the Telegram sender, the chat and the message's id there. */
-export type TelegramMessageSource = { kind: "telegram"; from: number; chat: number; messageId: number };
+/** A text from the operator's phone: the network it came through and its id there, `<network>:<id>`, as the account's
+ * inbox hands it over (src/phone-bridge.ts) - or, in a desk session an older face wrote, the Telegram sender, the chat
+ * and the message's number there (the retired src/telegram.ts). */
+export type TelegramMessageSource =
+  | { kind: "telegram"; network: string; messageId: string }
+  | { kind: "telegram"; from: number; chat: number; messageId: number };
 /** A standing order's firing: the order, the firing's key and the trading date it fires for. */
 export type ScheduleMessageSource = { kind: "schedule"; order: string; firing: string; date: string };
 /** An alert the face has already sent: the alert's id - or the pass's, for several - its symbol or symbols, and its pass. */

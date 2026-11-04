@@ -168,34 +168,34 @@ test("formatStatus names a lost last run", () => {
   assert.match(formatStatus({ label: LABEL, info: {}, installed: false, status: undefined, url: undefined, port: 3090 }), /not installed \(npm run service -- install\)/);
 });
 
-test("formatStatus prints the pause and telegram lines", () => {
+test("formatStatus prints the pause and phone lines", () => {
   const base: DeskStatus = { ok: true, pid: 7, version: "v", bootedAt: "2026-10-20T13:00:00.000Z", uptimeMs: 90 * 60_000, desk: { enabled: true, dir: "/d" },
     asleep: [], runs: [], turnsToday: noTurns };
   const lines = (status: DeskStatus, now = Date.parse("2026-10-20T18:30:00Z")): string[] => // 14:30 ET
     formatStatus({ label: LABEL, info: { state: "running", pid: 7 }, installed: true, status, url: undefined, port: 3090, now }).split("\n");
   const head = ["com.gravit.face: running (pid 7)", "answering at http://127.0.0.1:3090 · up 1h 30m since 2026-10-20T13:00:00.000Z · desk on"];
   const tail = "sign in: no URL in the log yet (npm run service -- logs)";
-  const polled = { configured: true, polling: true, lastPollAt: "2026-10-20T18:03:00.000Z", dropped: 2, queued: 1 };
-  assert.deepEqual(lines({ ...base, off: { setAt: "2026-10-20T18:00:00.000Z", by: "telegram", until: "2026-10-20T20:00:00.000Z" }, telegram: polled }), [...head,
+  const polled = { configured: true, polling: true, lastPollAt: "2026-10-20T18:03:00.000Z", networks: [{ network: "telegram", polling: true }], queued: 1, strangers: 2 };
+  assert.deepEqual(lines({ ...base, off: { setAt: "2026-10-20T18:00:00.000Z", by: "telegram", until: "2026-10-20T20:00:00.000Z" }, phone: polled }), [...head,
     "desk: paused since 14:00 ET by telegram until 16:00 ET (npm run desk -- resume)",
-    "telegram: polling, last poll 14:03 ET, 2 dropped, 1 queued",
+    "phone: telegram polling, last poll 14:03 ET, 1 queued, 2 strangers",
     tail]);
   assert.deepEqual(lines({ ...base, off: { setAt: "2026-12-01T19:00:00.000Z", by: "terminal" },
-    telegram: { ...polled, lastPollAt: "2026-12-01T19:03:00.000Z", dropped: 0, queued: 0, conflictAt: "2026-12-01T19:05:00.000Z" } },
+    phone: { ...polled, lastPollAt: "2026-12-01T19:03:00.000Z", queued: 0, networks: [{ network: "telegram", polling: true, conflictAt: "2026-12-01T19:05:00.000Z" }] } },
   Date.parse("2026-12-01T19:30:00Z")), [...head,
     "desk: paused since 14:00 ET by terminal (npm run desk -- resume)",
-    "telegram: polling, last poll 14:03 ET, 0 dropped, 0 queued, conflict at 14:05 ET",
+    "phone: telegram polling, last poll 14:03 ET, 0 queued, 2 strangers, telegram conflict at 14:05 ET",
     tail], "no until, no clause; a conflict, its own; EST renders as ET as EDT does");
   assert.deepEqual(lines({ ...base, off: { setAt: "2026-10-19T18:00:00.000Z", by: "telegram", until: "2026-10-21T18:00:00.000Z" },
-    telegram: { ...polled, conflictAt: "2026-10-20T03:59:00.000Z" } }), [...head,
+    phone: { ...polled, networks: [{ network: "telegram", polling: true, conflictAt: "2026-10-20T03:59:00.000Z" }] } }), [...head,
     "desk: paused since 2026-10-19 14:00 ET by telegram until 2026-10-21 14:00 ET (npm run desk -- resume)",
-    "telegram: polling, last poll 14:03 ET, 2 dropped, 1 queued, conflict at 2026-10-19 23:59 ET",
+    "phone: telegram polling, last poll 14:03 ET, 1 queued, 2 strangers, telegram conflict at 2026-10-19 23:59 ET",
     tail], "a time on another New York date carries it - 03:59 UTC on the 20th is still the 19th in New York");
-  assert.deepEqual(lines({ ...base, telegram: { configured: false, polling: false, dropped: 0, queued: 0 } }), [...head,
-    "telegram: not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)",
+  assert.deepEqual(lines({ ...base, phone: { configured: false, polling: false, networks: [], queued: 0, strangers: 0 } }), [...head,
+    "phone: none (the account's half is off)",
     tail]);
-  assert.equal(lines({ ...base, telegram: { configured: true, polling: false, dropped: 0, queued: 3 } })[2],
-    "telegram: not polling, no poll yet, 0 dropped, 3 queued", "a bridge that has not polled says so");
+  assert.equal(lines({ ...base, phone: { configured: true, polling: false, networks: [{ network: "telegram", polling: false }], queued: 3, strangers: 0 } })[2],
+    "phone: telegram not polling, no poll yet, 3 queued, 0 strangers", "a bridge that has not read the inbox says so");
   assert.deepEqual(lines(base), [...head, tail], "neither line without its field");
   assert.deepEqual(lines({ ...base, off: { setAt: "2026-10-20T18:00:00.000Z", by: "page" }, ledgerError: "EACCES" }), [...head,
     "desk: paused since 14:00 ET by page (npm run desk -- resume)",
@@ -207,14 +207,14 @@ test("formatStatus prints the desk's lines through deskStatusLines: the desk lin
   const now = Date.parse("2026-10-20T18:30:00Z"); // 14:30 ET
   const status: DeskStatus = { ok: true, pid: 7, version: "v", bootedAt: "2026-10-20T13:00:00.000Z", uptimeMs: 90 * 60_000, desk: { enabled: true, dir: "/d" },
     asleep: [], runs: [], turnsToday: noTurns, off: { setAt: "2026-10-20T18:00:00.000Z", by: "terminal" },
-    telegram: { configured: true, polling: true, lastPollAt: "2026-10-19T23:00:00.000Z", dropped: 0, queued: 0 } };
+    phone: { configured: true, polling: true, lastPollAt: "2026-10-19T23:00:00.000Z", networks: [{ network: "telegram", polling: true }], queued: 0, strangers: 0 } };
   const [desk, ...rest] = deskStatusLines(status, new Date(now));
   const lines = formatStatus({ label: LABEL, info: { state: "running", pid: 7 }, installed: true, status, url: undefined, port: 3090, now }).split("\n");
   assert.deepEqual(lines.slice(1, 2 + rest.length), [`answering at http://127.0.0.1:3090 · ${desk}`, ...rest]);
-  assert.equal(lines[3], "telegram: polling, last poll 2026-10-19 19:00 ET, 0 dropped, 0 queued", "a last poll on another New York date carries it");
+  assert.equal(lines[3], "phone: telegram polling, last poll 2026-10-19 19:00 ET, 0 queued, 0 strangers", "a last poll on another New York date carries it");
 });
 
-test("formatStatus prints the standing and budget lines after the telegram line", () => {
+test("formatStatus prints the standing and budget lines after the phone line", () => {
   const now = Date.parse("2026-11-27T16:00:00Z"); // 11:00 ET
   const used = { uncachedInputTokens: 34_567, outputTokens: 200_000, cacheReadTokens: 900_000, cacheWriteTokens: 100_000, total: 1_234_567 };
   const order = {
@@ -224,7 +224,7 @@ test("formatStatus prints the standing and budget lines after the telegram line"
   };
   const status: DeskStatus = {
     ok: true, pid: 7, version: "v", bootedAt: "2026-11-27T14:30:00.000Z", uptimeMs: 90 * 60_000, desk: { enabled: true, dir: "/d" }, asleep: [], runs: [],
-    turnsToday: noTurns, telegram: { configured: true, polling: true, lastPollAt: "2026-11-27T15:59:00.000Z", dropped: 0, queued: 0 },
+    turnsToday: noTurns, phone: { configured: true, polling: true, lastPollAt: "2026-11-27T15:59:00.000Z", networks: [{ network: "telegram", polling: true }], queued: 0, strangers: 0 },
     budget: { dailyTokens: 2_000_000, used, spent: false },
     standing: {
       file: { path: "/d/standing.yml", state: "loaded" }, calendar: { clock: "fake clock", state: "failed", error: "exit 1" },
@@ -236,7 +236,7 @@ test("formatStatus prints the standing and budget lines after the telegram line"
   assert.deepEqual(lines(status), [
     "com.gravit.face: running (pid 7)",
     "answering at http://127.0.0.1:3090 · up 1h 30m since 2026-11-27T14:30:00.000Z · desk on",
-    "telegram: polling, last poll 10:59 ET, 0 dropped, 0 queued",
+    "phone: telegram polling, last poll 10:59 ET, 0 queued, 0 strangers",
     "budget: 1,234,567 of 2,000,000 tokens today",
     "standing orders: no calendar today, fake clock: exit 1",
     "standing preclose: close-30m, next 12:30 ET; last delivered 2026-11-26 15:31 ET",
@@ -931,7 +931,7 @@ const healthStatus = (extra: Partial<DeskStatus> = {}): DeskStatus => ({
     markets: { us: { state: "off", watched: 0, notWatched: [], today: todayOf }, cn: { state: "off", watched: 0, notWatched: [], today: todayOf } },
     files: [], near: [], marks: [], pending: 0, recent: [], filings: { state: "off", symbols: 0, aShares: 0, seeded: 0 },
   },
-  telegram: { configured: true, polling: true, dropped: 0, queued: 0 },
+  phone: { configured: true, polling: true, networks: [{ network: "telegram", polling: true }], queued: 0, strangers: 0 },
   ...extra,
 });
 const answering = (status: DeskStatus) => (): Response => new Response(JSON.stringify(status), { status: 200 });
@@ -998,15 +998,15 @@ test("a face launchd respawned during the retry is launchd's own: launchd is ask
 });
 
 test("another face on the port reads 1 and nothing else", async () => {
-  const sick = healthStatus({ pid: 99, ledgerError: "EACCES", telegram: { configured: true, polling: false, dropped: 0, queued: 0, blocked: true } });
+  const sick = healthStatus({ pid: 99, ledgerError: "EACCES", phone: { configured: true, polling: false, networks: [{ network: "telegram", polling: false, blocked: true }], queued: 0, strangers: 0 } });
   const other = await health({ answer: answering(sick) });
   assert.deepEqual([other.code, other.reason], [1, "another face holds the port"], "the other face's own troubles are not the job's");
   const notRunning = await health({ launchctl: (args) => (args[0] === "print" ? loaded("not running") : undefined), answer: answering(healthStatus()) });
   assert.deepEqual([notRunning.code, notRunning.reason], [1, "another face holds the port"], "a loaded job with no pid runs no face");
 });
 
-test("checkHealth 1: the Telegram bridge's poll failing, blocked, or in conflict within 10 minutes", async () => {
-  const tg = (extra: object) => healthStatus({ telegram: { configured: true, polling: true, dropped: 0, queued: 0, ...extra } });
+test("checkHealth 1: a network's poll failing at the account, the bot blocked, or a conflict within 10 minutes; an account that does not answer is the watchdog's", async () => {
+  const tg = (extra: object) => healthStatus({ phone: { configured: true, polling: true, networks: [{ network: "telegram", polling: true, ...extra }], queued: 0, strangers: 0 } });
   const failing = await health({ answer: answering(tg({ pollFailing: { since: "2026-11-30T15:00:00.000Z", reason: "401 Unauthorized" } })) });
   assert.deepEqual([failing.code, failing.reason], [1, "telegram poll failing since 2026-11-30T15:00:00.000Z: 401 Unauthorized"]);
   const blocked = await health({ answer: answering(tg({ blocked: true })) });
@@ -1017,6 +1017,8 @@ test("checkHealth 1: the Telegram bridge's poll failing, blocked, or in conflict
   assert.equal(edge.code, 1, "10 minutes ago to the ms is within");
   const old = await health({ answer: answering(tg({ conflictAt: "2026-11-30T15:19:59.999Z" })) });
   assert.deepEqual([old.code, old.reason], [0, "healthy"], "an older conflict is over");
+  const away = await health({ answer: answering(healthStatus({ phone: { configured: true, polling: true, accountFailing: { since: "2026-11-30T15:00:00.000Z", reason: "ECONNREFUSED" }, networks: [], queued: 0, strangers: 0 } })) });
+  assert.deepEqual([away.code, away.reason], [0, "healthy"], "the account's own downtime is not the face's degradation");
 });
 
 test("checkHealth 1: the watch's lease failed or held elsewhere", async () => {

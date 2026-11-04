@@ -10,7 +10,7 @@
  * instruction-chain threat the face's fence exists for, and the ledger's `desk-turn` record with its tokens.
  * The desk runs as main.ts runs it: `installDesk` on the booted face, its conversation
  * (src/desk-conversation.ts) the one owner of the desk session, every turn opened through `post`. That the
- * guard denies a desk turn's own write of GRAVIT.md is tests/telegram-smoke.test.ts's canary.
+ * guard denies a desk turn's own write of GRAVIT.md is tests/phone-smoke.test.ts's canary.
  *
  * WHERE IT RUNS. The fixture root is `tests/tmp/desk-smoke-<pid>/`, INSIDE the repository and without a
  * `.git` of its own, so the repository's `.git` is the project root: the repository's GRAVIT.md heads the

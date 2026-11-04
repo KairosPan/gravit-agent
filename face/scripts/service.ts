@@ -399,7 +399,7 @@ function lastRunLine(runs: DeskRun[]): string | undefined {
  * plist launchd has no job for, so a face answering on the port is not credited to a job launchd
  * lacks; then, when the face answered, its address and the desk's lines (src/desk.ts
  * `deskStatusLines`, which the phone's `/status` prints too): uptime, boot time and whether its
- * desk is on on the address's line, then the pause when the desk is paused, the Telegram bridge
+ * desk is on on the address's line, then the pause when the desk is paused, the phone bridge
  * when the face reports one, the day's token budget and, while their clock runs, the standing
  * orders (src/desk.ts `budgetLine` and `standingLines`), their times in New York and dated when not
  * today; then the ledger's
@@ -485,7 +485,7 @@ export const WATCH_POLL_MS = { us: 20_000, cn: 10_000 } as const;
 
 /** How many of a market's poll intervals may pass since its last poll before a `polling` market reads degraded. */
 const STALE_POLLS = 3;
-/** How long a Telegram 409 - another poller holding the token - keeps the bridge degraded. */
+/** How long a network's 409 at the account - another poller holding the token - keeps the face degraded. */
 const CONFLICT_WINDOW_MS = 10 * 60_000;
 /** The wait between {@link checkHealth}'s two tries at a face that does not answer. */
 const HEALTH_RETRY_MS = 10_000;
@@ -495,11 +495,15 @@ export type HealthCode = 0 | 1 | 2 | 3;
 
 /** What makes an answering face - launchd's own - degraded, the first that holds, or `undefined`. */
 function degradedReason(status: DeskStatus, now: number): string | undefined {
-  const { telegram, watch } = status;
-  if (telegram?.pollFailing !== undefined) return `telegram poll failing since ${telegram.pollFailing.since}: ${telegram.pollFailing.reason}`;
-  if (telegram?.blocked === true) return "telegram blocked: the operator's chat refuses the bot (403)";
-  if (telegram?.conflictAt !== undefined && now - Date.parse(telegram.conflictAt) <= CONFLICT_WINDOW_MS) {
-    return `telegram conflict at ${telegram.conflictAt}: another poller holds the token`;
+  const { phone, watch } = status;
+  /* each network as the account polls it (src/phone-bridge.ts carries the account's last word); an account that does not
+   * answer is the watchdog's own check (scripts/watchdog.ts), not the face's degradation */
+  for (const n of phone?.networks ?? []) {
+    if (n.pollFailing !== undefined) return `${n.network} poll failing since ${n.pollFailing.since}: ${n.pollFailing.reason}`;
+    if (n.blocked === true) return `${n.network} blocked: the operator's chat refuses the bot (403)`;
+    if (n.conflictAt !== undefined && now - Date.parse(n.conflictAt) <= CONFLICT_WINDOW_MS) {
+      return `${n.network} conflict at ${n.conflictAt}: another poller holds the token`;
+    }
   }
   if (watch?.state === "lease-failed") return `watch lease failed${watch.leaseError === undefined ? "" : `: ${watch.leaseError}`}`;
   if (watch?.state === "held-elsewhere") return `watch held elsewhere${watch.holder === undefined ? "" : `: pid ${watch.holder.pid} since ${watch.holder.since}`}`;
@@ -531,7 +535,7 @@ export const OTHER_FACE = "another face holds the port";
  *   job as asked again after the wait, not before it.
  * - `1` degraded: the face that answers is not launchd's job - its pid is not the job's, a job with
  *   no pid included - and then nothing else it says is read: its troubles are not the job's; or,
- *   for launchd's own face, its Telegram poll failing, the bot blocked, a 409 conflict within the
+ *   for launchd's own face, a network's poll failing at the account, the bot blocked, a 409 conflict within the
  *   last 10 minutes, the watch's lease failed or held elsewhere, a market `polling` whose last poll
  *   is older than three of its intervals ({@link WATCH_POLL_MS}; a market not yet polled is not
  *   judged), or the desk's or the watch's ledger unreadable.
