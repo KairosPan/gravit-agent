@@ -9,7 +9,7 @@ import { worthOf, cardsOf } from '../host/account-view.js';
 import { money } from '../wire/account-model.js';
 import { avatar, groupMark } from './avatars.js';
 import { groupsOf } from '../host/list-view.js';
-import { titleMatches, mergeResults, highlightRuns, searchPhase, moreThanTwenty } from '../host/search-view.js';
+import { titleMatches, mergeResults, highlightRuns, searchPhase, moreThanTwenty, spoken, spokenLine } from '../host/search-view.js';
 
 const NAME = { you: 'You', gravit: 'Gravit', system: '' };
 // a bot's display name comes with the list (/data/bots.json); an unknown sender keeps its id
@@ -21,14 +21,15 @@ export function senderName(from, state) {
 // page (`preview`, re-read when its session moves), and until that lands from the last line drawn. Only SPOKEN lines
 // count — never a context row (a runtime snapshot, a plugin notice) or a tool row
 export function previewOf(conv, state = null) {
-  const m = conv.messages.findLast(x => x.from !== 'system' && x.kind !== 'tool' && typeof x.text === 'string' && x.text !== '');
+  const m = conv.messages.findLast(spoken);
   const read = typeof conv.preview === 'string' && conv.preview !== '' ? conv.preview : null;
   const onScreen = state?.route?.screen === 'messages' && state.route.id === conv.id;
   if (read && !(onScreen && m)) return read;
   if (!m) return '';
   const who = m.from === 'you' ? '' : senderName(m.from, state);
   const name = m.data?.name ?? who;
-  return conv.kind === 'group' && name ? `${name}: ${m.text}` : m.text;
+  const line = spokenLine(m);
+  return conv.kind === 'group' && name ? `${name}: ${line}` : line;
 }
 
 function rowMark(conv, state) {

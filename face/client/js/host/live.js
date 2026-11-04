@@ -4,6 +4,7 @@
 import { foldMembers } from '../wire/room.js';
 import { summaryOf, readProjections } from '../wire/summaries.js';
 import { rememberCall, toMessages } from './kinds.js';
+import { attachmentsLine } from '../composer/files.js';
 import { listConversations, childRowsOf } from './sessions.js';
 import { reducers as host } from '../reducers/host.js';
 
@@ -320,7 +321,12 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     for (const r of Array.isArray(records) ? records : []) {
       const frame = { type: 'session/event', event: r?.event };
       rememberCall(seen, frame);
-      for (const m of toMessages(mapFrame(frame), seen, 0)) if ((m.kind === 'text' || m.kind === 'composed') && m.from !== 'system' && typeof m.text === 'string' && m.text.trim() !== '') out = m.text;
+      for (const m of toMessages(mapFrame(frame), seen, 0)) {
+        if ((m.kind !== 'text' && m.kind !== 'composed') || m.from === 'system' || typeof m.text !== 'string') continue;
+        // words, or with none the attachments' names (an image sent alone still previews)
+        const line = m.text.trim() !== '' ? m.text : attachmentsLine(Array.isArray(m.data?.attachments) ? m.data.attachments : []);
+        if (line !== '') out = line;
+      }
     }
     return out || null;
   }

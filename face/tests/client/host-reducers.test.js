@@ -227,3 +227,12 @@ test("a module card's run sheet: open closes the other drawers, set replaces it 
   assert.deepEqual(R.moduleRunsLoaded(s, { runs }).moduleRuns, runs);
   assert.deepEqual(R.moduleRunsLoaded(s, { runs: null }).moduleRuns, {});
 });
+
+test('hostThumb keeps a src or a null by attachment id', () => {
+  const s0 = emptyState(NOW);
+  assert.deepEqual(s0.thumbs, {});
+  const s1 = R.hostThumb(s0, { attachmentId: 'att-1', src: 'data:image/png;base64,AAAA' });
+  const s2 = R.hostThumb(s1, { attachmentId: 'att-2', src: null });
+  assert.deepEqual(s2.thumbs, { 'att-1': 'data:image/png;base64,AAAA', 'att-2': null });
+  assert.deepEqual(s0.thumbs, {}, 'a new state, the old untouched');
+});

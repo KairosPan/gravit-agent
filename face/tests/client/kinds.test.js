@@ -362,3 +362,12 @@ test('a refused lunhui_present call lifts nothing; neither does a lunhui_read_ru
   assert.equal(kinds.presentLift('lunhui_read_run', presentArgs, JSON.stringify({ ok: true }), false, 'c33'), null);
   assert.equal(kinds.presentLift('lunhui_present', presentArgs, JSON.stringify({ ok: true }), true, 'c33'), null);
 });
+
+test("the you row carries the bubble's attachments", () => {
+  const img = { attachmentId: 'att-1', mediaType: 'image/png', bytes: 10, width: 4, height: 3, name: 'chart.png' };
+  const frame = { type: 'session/event', sessionId: 's1', event: { type: 'user/message', seq: 60, time: 1, surfaceOp: 'append', data: { id: 'm60', role: 'user', content: [{ type: 'image', attachment: img }, { type: 'file', attachment: { attachmentId: 'att-2', name: 'q3.csv', bytes: 20 } }], source: { kind: 'user' } } } };
+  const [m] = toMessages(mapFrame(frame), new Map(), NOW);
+  assert.equal(m.from, 'you'); assert.equal(m.text, '');
+  assert.deepEqual(m.data.attachments, [{ type: 'image', ...img }, { type: 'file', attachmentId: 'att-2', name: 'q3.csv', bytes: 20 }]);
+  assert.equal(Object.hasOwn(one(0).data, 'attachments'), false, 'a message with none carries none');
+});

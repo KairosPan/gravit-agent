@@ -104,6 +104,7 @@ export function contentParts(text, files, dataOf) {
   return parts;
 }
 
-/** A history message's attachments by name, joined by ', '; an unnamed one reads as its kind. */
+/** A history message's attachments (the mapper's `{type: 'image' | 'file', name?}`) by name, joined by ', '; an unnamed
+ *  one reads as its type. */
 export const attachmentsLine = list =>
-  list.map(a => a.name || (a.type === 'image' || a.kind === 'image' ? 'image' : 'file')).join(', ');
+  list.map(a => a.name || (a.type === 'image' ? 'image' : 'file')).join(', ');

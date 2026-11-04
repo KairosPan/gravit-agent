@@ -102,3 +102,9 @@ test('a title match filters on the title and the label before it builds an item:
   assert.deepEqual(titleMatches([conv('a', { title: 'hit' }), quiet], channels, 'hit').map(x => x.id), ['a']);
   assert.equal(read, 0, 'the non-match was not mapped through its preview line');
 });
+
+test('an attachment-only last message previews as its names', () => {
+  const files = [{ type: 'image', attachmentId: 'a1', mediaType: 'image/png', bytes: 1, width: 1, height: 1, name: 'chart.png' }, { type: 'file', attachmentId: 'a2', name: 'q3.csv', bytes: 2 }];
+  const c = conv('a', { title: 'hit', messages: [{ from: 'gravit', text: 'Send me the files.' }, { from: 'you', text: '', data: { attachments: files } }] });
+  assert.equal(titleMatches([c], channels, 'hit')[0].snippet, 'chart.png, q3.csv');
+});

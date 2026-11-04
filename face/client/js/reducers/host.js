@@ -110,6 +110,9 @@ export const reducers = {
   },
 
   hostThinking: (s, { convId, mode }) => (find(s, convId) ? upd(s, convId, c => ({ ...c, thinking: mode ?? null })) : s),
+  // an operator image's thumbnail by its attachment id: a data: URL, or null for one the host cannot give back
+  hostThumb: (s, { attachmentId, src }) => ({ ...s, thumbs: { ...s.thumbs, [attachmentId]: typeof src === 'string' ? src : null } }),
+
   hostPreview: (s, { convId, preview, at }) => (find(s, convId) ? upd(s, convId, c => ({ ...c, preview: preview ?? null, previewAt: at })) : s),
 
   // the operator looked: unread is what the host moved after this

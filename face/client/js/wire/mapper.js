@@ -90,6 +90,9 @@
  * @property {string} [date] - desk-line `schedule`: the trading date it fired for.
  * @property {string} [alert] - desk-line `alert`: the alert's id.
  * @property {string} [symbol] - desk-line `alert`: the symbol it is about.
+ * @property {Array<Record<string, unknown>>} [attachments] - operator bubbles, present only when the message
+ *   holds one: `{type:'image', attachmentId, mediaType, bytes, width, height, name?, offloaded?: true}` or
+ *   `{type:'file', attachmentId, name, bytes}`, in the message's order.
  * @property {string} [thinking] - gravit bubbles: the message's reasoning blocks, joined.
  *   Thinking is never chat text; a renderer shows it apart from the bubble or not at all.
  * @property {string} [mode] - pulses: which block kind just opened live — `reasoning`, `text`, `tool-call`.
@@ -186,6 +189,40 @@ function blocksText(blocks) {
     .trim();
 }
 
+/** A finite number, for an attachment's size fields. @param {unknown} value @returns {boolean} */
+const isCount = (value) => typeof value === "number" && Number.isFinite(value);
+
+/**
+ * The message's image and file blocks, in order, beside {@link blocksText}: an image
+ * block is `{type:'image', attachment:{attachmentId, mediaType, bytes, width, height,
+ * name?}, offloaded?}`, a file block `{type:'file', attachment:{attachmentId, name,
+ * bytes}}` (dsh-llm's content blocks; `offloaded` marks an image the compaction swapped
+ * for a placeholder, which the host can no longer give back). A block with no
+ * attachmentId is dropped; every other field is kept only in the shape the host
+ * writes it, never guessed.
+ * @param {unknown} blocks - a ContentBlock[], or anything else.
+ * @returns {Array<Record<string, unknown>>} possibly empty.
+ */
+function blocksAttachments(blocks) {
+  if (!Array.isArray(blocks)) return [];
+  const out = [];
+  for (const block of blocks) {
+    if (!isObject(block) || (block.type !== "image" && block.type !== "file") || !isObject(block.attachment)) continue;
+    const a = block.attachment;
+    if (!isId(a.attachmentId)) continue;
+    if (block.type === "image") {
+      out.push({
+        type: "image", attachmentId: a.attachmentId,
+        ...pick(a, ["mediaType"], isId), ...pick(a, ["bytes", "width", "height"], isCount), ...pick(a, ["name"], isId),
+        ...(block.offloaded === true ? { offloaded: true } : {}),
+      });
+    } else {
+      out.push({ type: "file", attachmentId: a.attachmentId, ...pick(a, ["name"], isId), ...pick(a, ["bytes"], isCount) });
+    }
+  }
+  return out;
+}
+
 /** The message's reasoning blocks, joined — the model's thinking, never chat
  * text (NEW packages/llm/llm/src/types.ts:67-71: same `text` field, its own type).
  * @param {unknown} blocks @returns {string} */
@@ -231,10 +268,10 @@ function surfaceOpOf(event) {
  * One message as a bubble, or nothing when it has no text. A textless message
  * is real and normal — an assistant message that exists only to host usage or
  * tool calls (session types.ts:333-353) — and an empty bubble would be a lie
- * about what was said. v1 limitations that share this drop: an image-only
- * message (the face has no attachment path yet), and — only in theory, since
- * every producer of one frames a summary — a textless REPLACE node, whose
- * shadow instruction would be dropped with it.
+ * about what was said. An operator message that holds an image or a file is a
+ * bubble even with no words: its attachments ride on it (`attachments`). One v1
+ * limitation shares the drop — only in theory, since every producer of one frames
+ * a summary — a textless REPLACE node, whose shadow instruction would be dropped with it.
  * @param {"operator"|"gravit"} role - which side of the flow.
  * @param {unknown} message - the LLM Message wrapper.
  * @param {FrameView} base - seq/sessionId/surfaceOp already read off the event.
@@ -272,7 +309,10 @@ function bubble(role, message, base, interrupted) {
       ...(summary === undefined ? {} : { summary }),
     };
   }
-  if (text === "" && thinking === "") return ignore();
+  // only the operator's own words carry their attachments: never Gravit's, a room's, a desk line's or a context row's
+  const attachments = role === "operator" && !isInjectedSource(kind) && kind !== "schedule" && kind !== "alert"
+    ? blocksAttachments(isObject(message) ? message.content : undefined) : [];
+  if (text === "" && thinking === "" && attachments.length === 0) return ignore();
   /* A room-sourced user message is one of three things (plan 2, deviation 1):
    * a member's ANSWER (a bubble in the bot's own voice), the ROUND END (a
    * line), or - in a member's own session - the DELTA it was prompted with
@@ -317,6 +357,7 @@ function bubble(role, message, base, interrupted) {
     source: kind,
     form,
     ...(mention !== undefined && mention.length > 0 ? { mention } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
     ...(role === "operator" && kind === "telegram" ? pick(src, PHONE_FIELDS, Number.isSafeInteger) : {}),
     thinking: thinking === "" ? undefined : thinking,
   };

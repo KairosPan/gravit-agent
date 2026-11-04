@@ -639,3 +639,49 @@ test("every other kind is still an injected context row - the desk's own state i
   // No kind at all is the rule as it stood: the mapper reports none, and the bubble is the operator's.
   for (const kind of [undefined, null, 42, {}]) assert.equal(isInjectedSource(kind), false, JSON.stringify(kind));
 });
+
+// Attachments in history (plan 4 Task 3): an operator message keeps its image and file blocks beside its words.
+const PNG = { attachmentId: "att-1", mediaType: "image/png", bytes: 1258291, width: 800, height: 600, name: "chart.png" };
+const CSV = { attachmentId: "att-2", name: "q3.csv", bytes: 2936012 };
+const userMessage = (seq: number, content: unknown[], source: Record<string, unknown> = { kind: "user" }) =>
+  mapFrame({ type: "session/event", sessionId: "s1", event: { type: "user/message", seq, time: 1, surfaceOp: "append", data: { id: `m-${seq}`, role: "user", content, source } } });
+
+test("an operator message keeps its image and file blocks beside its text", () => {
+  const v = userMessage(50, [{ type: "text", text: "Read these" }, { type: "image", attachment: PNG }, { type: "file", attachment: CSV }]);
+  assert.equal(v.kind, "bubble");
+  assert.equal(v.role, "operator");
+  assert.equal(v.text, "Read these", "blocksText still joins the text alone");
+  assert.deepEqual(v.attachments, [{ type: "image", ...PNG }, { type: "file", ...CSV }]);
+  const plain = userMessage(51, [{ type: "text", text: "no files" }]);
+  assert.equal(Object.hasOwn(plain, "attachments"), false, "present only when the message holds one");
+});
+
+test("an image-only operator message is a bubble with empty text, not dropped", () => {
+  const v = userMessage(52, [{ type: "image", attachment: PNG }]);
+  assert.equal(v.kind, "bubble");
+  assert.equal(v.role, "operator");
+  assert.equal(v.text, "");
+  assert.deepEqual(v.attachments, [{ type: "image", ...PNG }]);
+});
+
+test("an offloaded image keeps offloaded: true", () => {
+  const v = userMessage(53, [{ type: "image", attachment: { ...PNG, name: undefined }, offloaded: true }]);
+  assert.deepEqual(v.attachments, [{ type: "image", attachmentId: "att-1", mediaType: "image/png", bytes: 1258291, width: 800, height: 600, offloaded: true }]);
+});
+
+test("a block with no attachmentId is dropped, not thrown", () => {
+  const v = userMessage(54, [{ type: "text", text: "hi" }, { type: "image", attachment: { mediaType: "image/png" } }, { type: "file" }, { type: "file", attachment: { attachmentId: "", name: "x" } }, null, { type: "file", attachment: CSV }]);
+  assert.deepEqual(v.attachments, [{ type: "file", ...CSV }]);
+  assert.equal(userMessage(55, [{ type: "image", attachment: {} }]).kind, "ignore", "nothing left to draw");
+});
+
+test("Gravit's message never carries attachments", () => {
+  const v = mapFrame({ type: "session/event", sessionId: "s1", event: { type: "assistant/message", seq: 56, time: 1, data: { message: { role: "assistant", content: [{ type: "text", text: "Seen" }, { type: "image", attachment: PNG }] } } } });
+  assert.equal(v.kind, "bubble");
+  assert.equal(v.role, "gravit");
+  assert.equal(Object.hasOwn(v, "attachments"), false);
+  const room = userMessage(57, [{ type: "image", attachment: PNG }], { kind: "room", form: "answer", bot: "buffett" });
+  assert.equal(room.kind, "ignore", "a member's answer carries none, so an image alone is nothing");
+  const ctx = userMessage(58, [{ type: "text", text: "state" }, { type: "image", attachment: PNG }], { kind: "runtime-context" });
+  assert.equal(Object.hasOwn(ctx, "attachments"), false, "only the operator's own bubble carries them");
+});

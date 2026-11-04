@@ -546,3 +546,12 @@ test('an activate that answers clears its deadline', async () => {
   assert.deepEqual(gone, { done: true, value: false });
   assert.ok(r.cancelled.includes(t2), 'a failed follow clears it too');
 });
+
+test('previews: an attachment-only last message reads as its names', async () => {
+  const content = [{ type: 'image', attachment: { attachmentId: 'a1', mediaType: 'image/png', bytes: 1, width: 1, height: 1, name: 'chart.png' } }, { type: 'file', attachment: { attachmentId: 'a2', name: 'q3.csv', bytes: 2 } }];
+  const event = { type: 'user/message', seq: 7, time: 1, surfaceOp: 'append', data: { id: 'm7', role: 'user', content, source: { kind: 'user' } } };
+  const r = rig({ rows: [row('p1', { updatedAt: 5 })], pages: { p1: [{ type: 'event', event }] } });
+  await r.ready();
+  await settle();
+  assert.equal(r.store.get().conversations.find(c => c.id === 'p1').preview, 'chart.png, q3.csv');
+});

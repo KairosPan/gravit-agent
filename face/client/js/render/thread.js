@@ -12,7 +12,8 @@ import { composedHtml, composedId } from './lunhui/composed.js';
 import { foldNotes, notesHtml } from './lunhui/notes.js';
 import { viewOf } from '../host/lunhui.js';
 import { sessionRefRuns } from '../composer/draft.js';
-import { chipInner } from '../composer/view.js';
+import { chipInner, fileCard } from '../composer/view.js';
+import { metaText, sizeText } from '../composer/files.js';
 
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
 
@@ -102,6 +103,49 @@ function trace(m, conv, state) {
 // the operator's words: a conversation mention is a chip (D17); a file or bot reference stays the text that was sent
 const youText = t => (t ? sessionRefRuns(t).map(r => (r.type === 'ref' ? `<span class="ref-chip">${chipInner(icon('chat', 13), r.label)}</span>` : esc(r.text))).join('') : '');
 
+// an image the host cannot give back (no thumb, or offloaded by compaction) is a card: its name or Image, its type and size
+const imageMeta = a => {
+  const type = typeof a.mediaType === 'string' && a.mediaType.includes('/') ? a.mediaType.split('/')[1].toUpperCase() : 'IMAGE';
+  return typeof a.bytes === 'number' ? `${type} · ${sizeText(a.bytes)}` : type;
+};
+const isImage = a => a?.type === 'image';
+
+// the operator's attachments, right-aligned above the bubble: a lone image up to 240 px wide, with others 64 px squares;
+// an image not loaded yet an empty frame; a file its card, which opens nothing (the host gives no file back)
+function youFiles(list, thumbs) {
+  const lone = list.length === 1;
+  return `<div class="you-files">${list.map(a => {
+    if (!isImage(a)) return fileCard({ name: a.name ?? 'File', meta: metaText({ name: a.name, bytes: a.bytes ?? 0 }) });
+    const src = thumbs[a.attachmentId];
+    if (src === null || a.offloaded === true) return fileCard({ name: a.name || 'Image', meta: imageMeta(a) });
+    const name = a.name || 'Image';
+    const inner = src === undefined ? '' : `<img${attrs({ src, alt: name })}>`;
+    return `<button${attrs({ type: 'button', class: cls(lone ? 'you-image' : 'you-thumb', src === undefined && 'loading'), 'data-action': 'openImage', 'data-attachment': a.attachmentId, 'data-name': name, 'aria-label': name })}>${inner}</button>`;
+  }).join('')}</div>`;
+}
+
+function youMessage(m, state) {
+  const list = Array.isArray(m.data?.attachments) ? m.data.attachments : [];
+  if (!list.length) return `<div class="msg you"><div class="bubble you">${youText(m.text)}</div>${avatar('you', 28)}</div>`;
+  const bubble = m.text ? `<div class="bubble you">${youText(m.text)}</div>` : '';
+  return `<div class="msg you"><div class="you-body">${youFiles(list, state?.thumbs ?? {})}${bubble}</div>${avatar('you', 28)}</div>`;
+}
+
+/** The conversation's operator images still to read from the host: not offloaded, with no entry in `thumbs` yet, each once. */
+export function thumbsNeeded(conv, thumbs) {
+  const out = [];
+  const seen = new Set();
+  for (const m of conv.messages ?? []) {
+    if (m.from !== 'you' || !Array.isArray(m.data?.attachments)) continue;
+    for (const a of m.data.attachments) {
+      if (!isImage(a) || a.offloaded === true || thumbs?.[a.attachmentId] !== undefined || seen.has(a.attachmentId)) continue;
+      seen.add(a.attachmentId);
+      out.push({ sessionId: conv.id, attachmentId: a.attachmentId });
+    }
+  }
+  return out;
+}
+
 export function renderMessage(m, conv, state) {
   // a tool call is drawn nowhere (the operator's word, 2026-10-28): its gate, receipt or refusal is a message of its own
   if (m.kind === 'tool') return '';
@@ -113,7 +157,7 @@ export function renderMessage(m, conv, state) {
       ? `<details class="sysline ctx"><summary>context · ${esc(source)}</summary><pre>${esc(m.text)}</pre></details>`
       : `<div class="sysline">${esc(m.text)}</div>`;
   }
-  if (m.from === 'you') return `<div class="msg you"><div class="bubble you">${youText(m.text)}</div>${avatar('you', 28)}</div>`;
+  if (m.from === 'you') return youMessage(m, state);
   const name = conv.kind === 'group' && m.from !== 'gravit' ? `<div class="sender-name">${esc(m.data?.name ?? senderName(m.from, state))}</div>` : '';
   // plain talk keeps a bubble's width; every card and green bubble runs wider (spec §16), a composed answer wider still
   const width = m.kind === 'composed' ? 'composed' : m.kind !== 'text' && 'wide';

@@ -1,7 +1,7 @@
 // The thread draws the kind table (spec 2026-10-19 §6) on host-shaped messages: text, tool, card, approval, question, receipt, refusal.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { renderMessage, renderThread, setMarkdown, chip, key, ticker, withTickers } from '../../client/js/render/thread.js';
+import { renderMessage, renderThread, setMarkdown, chip, key, ticker, withTickers, thumbsNeeded } from '../../client/js/render/thread.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { MIN } from '../../client/js/time.js';
 import { sessionUri } from '../../client/js/composer/draft.js';
@@ -298,4 +298,55 @@ test('a refused lunhui_present call then an ok one in the same turn draws exactl
   const html = renderThread(s.conversations[0], s, NOW);
   assert.equal(html.split('class="msg-body composed"').length - 1, 1);
   assert.doesNotMatch(html, /INVALID_PRESENT/, 'the refused tool row stays hidden');
+});
+
+// attachments in history (plan 4 Task 3): right-aligned above the operator's bubble
+const PNG = (id, over = {}) => ({ type: 'image', attachmentId: id, mediaType: 'image/png', bytes: 1258291, width: 800, height: 600, name: id + '.png', ...over });
+const CSV = { type: 'file', attachmentId: 'f1', name: 'q3.csv', bytes: 2936012 };
+const thumbed = thumbs => ({ ...state, thumbs });
+const you = (attachments, text = 'look') => msg({ from: 'you', text, data: { attachments } });
+
+test('a lone image draws large, several draw as squares, a file as its card, all before the bubble', () => {
+  const lone = renderMessage(you([PNG('i1')]), conv(), thumbed({ i1: 'data:image/png;base64,AA' }));
+  assert.match(lone, /^<div class="msg you"><div class="you-body"><div class="you-files"><button type="button" class="you-image" data-action="openImage" data-attachment="i1" data-name="i1\.png" aria-label="i1\.png"><img src="data:image\/png;base64,AA" alt="i1\.png"><\/button><\/div><div class="bubble you">look<\/div><\/div>/);
+  const many = renderMessage(you([PNG('i1'), PNG('i2'), CSV]), conv(), thumbed({ i1: 'data:a', i2: 'data:b' }));
+  assert.equal((many.match(/class="you-thumb"/g) ?? []).length, 2);
+  assert.doesNotMatch(many, /you-image/);
+  assert.match(many, /data-action="openImage" data-attachment="i2" data-name="i2\.png"/);
+  assert.match(many, /<div class="file-card"><span class="file-icon">[\s\S]*?<\/span><span class="file-name">q3\.csv<\/span><span class="file-meta">CSV · 2\.8 MB<\/span><\/div>/);
+  assert.doesNotMatch(many, /attach-remove|attachRetry/, 'no remove key, no retry');
+  assert.ok(many.indexOf('you-files') < many.indexOf('bubble you'), 'the attachments sit before the bubble');
+  assert.match(renderMessage(msg({ from: 'you', text: 'hi there' }), conv(), state), /^<div class="msg you"><div class="bubble you">hi there<\/div>/, 'a message with none keeps its markup');
+  assert.doesNotMatch(renderMessage(msg({ from: 'you', text: 'hi there' }), conv(), state), /you-body|you-files/);
+});
+
+test('an image-only message draws no empty bubble', () => {
+  const h = renderMessage(you([PNG('i1')], ''), conv(), thumbed({ i1: 'data:a' }));
+  assert.match(h, /you-image/);
+  assert.doesNotMatch(h, /bubble/);
+});
+
+test('an image not loaded draws loading; one the host cannot give back, or offloaded, draws a card named Image', () => {
+  const loading = renderMessage(you([PNG('i1')]), conv(), thumbed({}));
+  assert.match(loading, /<button type="button" class="you-image loading" data-action="openImage" data-attachment="i1" data-name="i1\.png" aria-label="i1\.png"><\/button>/);
+  const square = renderMessage(you([PNG('i1'), PNG('i2')]), conv(), thumbed({ i1: 'data:a' }));
+  assert.match(square, /class="you-thumb loading" data-action="openImage" data-attachment="i2"/);
+  const gone = renderMessage(you([PNG('i1', { name: undefined })]), conv(), thumbed({ i1: null }));
+  assert.match(gone, /<span class="file-name">Image<\/span><span class="file-meta">PNG · 1\.2 MB<\/span>/);
+  assert.doesNotMatch(gone, /openImage|<img/);
+  const off = renderMessage(you([PNG('i1', { offloaded: true })]), conv(), thumbed({ i1: 'data:a' }));
+  assert.match(off, /<span class="file-name">i1\.png<\/span><span class="file-meta">PNG · 1\.2 MB<\/span>/);
+  assert.doesNotMatch(off, /openImage/);
+  const esc = renderMessage(you([PNG('i"1', { name: '<b>.png' })]), conv(), thumbed({}));
+  assert.match(esc, /data-attachment="i&quot;1" data-name="&lt;b&gt;\.png"/);
+});
+
+test("thumbsNeeded lists the conversation's images with no thumb, never an offloaded one", () => {
+  const c = conv({ id: 's9', messages: [
+    you([PNG('i1'), PNG('i2'), CSV]),
+    msg({ id: 'e2', from: 'you', text: 'again', data: { attachments: [PNG('i3', { offloaded: true }), PNG('i4'), PNG('i1')] } }),
+    msg({ id: 'e3', from: 'gravit', text: 'seen', data: { attachments: [PNG('i5')] } }),
+  ] });
+  assert.deepEqual(thumbsNeeded(c, { i2: null }), [{ sessionId: 's9', attachmentId: 'i1' }, { sessionId: 's9', attachmentId: 'i4' }]);
+  assert.deepEqual(thumbsNeeded(conv(), {}), []);
 });

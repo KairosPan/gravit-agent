@@ -289,7 +289,12 @@ function composerHtml() {
   const file = (key, over) => ({ key, kind: 'file', name: key + '.csv', bytes: 2048, mediaType: 'text/csv', status: 'ready', loaded: 0, ...over });
   const files = [{ ...file('i1'), kind: 'image', name: 'i.png', mediaType: 'image/png', url: 'blob:x' }, file('f1'), file('f2', { status: 'uploading', loaded: 1024 }), file('f3', { status: 'failed' }), file('f4', { status: 'up' })];
   const attached = renderMessagesScreen(open, NOW, { menu: null, files, note: 'Up to 20 images a message' }) + dropOverlay(DEFAULT_LIMITS) + lightboxHtml({ src: 'blob:x', name: 'i.png' });
-  return [...menus.map(menu => renderMessagesScreen(open, NOW, { menu })), renderMessagesScreen(mention, NOW), attached].join('') + editorHtml([{ type: 'text', text: 'ask ' }, ...chips.map(chip => ({ type: 'chip', chip }))]);
+  // attachments in history (plan 4, Task 3): a lone image loaded and loading, squares loaded and loading, an image the host
+  // cannot give back, a file
+  const img = (id, over = {}) => ({ type: 'image', attachmentId: id, mediaType: 'image/png', bytes: 2048, width: 4, height: 3, name: id + '.png', ...over });
+  const sent = [[img('h1')], [img('h0')], [img('h1'), img('h0'), img('hx'), { type: 'file', attachmentId: 'hf', name: 'q3.csv', bytes: 2048 }]];
+  const history = { ...R.hostWindow(open, { convId: 's1', messages: sent.map((attachments, i) => m('ya' + i, { from: 'you', text: i ? '' : 'look', data: { attachments } })) }), thumbs: { h1: 'data:image/png;base64,AA', hx: null } };
+  return [...menus.map(menu => renderMessagesScreen(open, NOW, { menu })), renderMessagesScreen(mention, NOW), attached, renderMessagesScreen(history, NOW)].join('') + editorHtml([{ type: 'text', text: 'ask ' }, ...chips.map(chip => ({ type: 'chip', chip }))]);
 }
 const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
   : st.route.screen === 'trade' ? renderTradeScreen(st, now)
@@ -460,6 +465,16 @@ test("the composer's attachments: the note, the rail, the image square, the card
   assert.match(css, /\.drop-overlay \{[^}]*position: fixed[^}]*inset: 0[^}]*background: color-mix\(in srgb, var\(--bg\)/);
   assert.match(css, /\.lightbox \{[^}]*position: fixed[^}]*inset: 0/);
   assert.match(css, /\.lightbox-img \{[^}]*max-width: 92vw[^}]*max-height: 88vh/);
+});
+
+test("the operator's attachments in the thread: the column, the right-aligned row, the lone image, the squares, loading", () => {
+  const html = composerHtml();
+  for (const c of ['you-body', 'you-files', 'you-image', 'you-image loading', 'you-thumb', 'you-thumb loading']) assert.ok(html.includes(`class="${c}"`), c);
+  assert.match(css, /\.you-body \{[^}]*flex-direction: column[^}]*align-items: flex-end[^}]*max-width: 66%/);
+  assert.match(css, /\.you-files \{[^}]*display: flex[^}]*justify-content: flex-end/);
+  assert.match(css, /\.you-image img \{[^}]*max-width: 240px/);
+  assert.match(css, /\.you-thumb \{[^}]*width: 64px[^}]*height: 64px/);
+  assert.match(css, /\.you-thumb img \{[^}]*object-fit: cover/);
 });
 
 test("the pin: the row's wrap, the key in the time's place, the glyph before the time", () => {

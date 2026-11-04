@@ -186,7 +186,10 @@ function bubble(view, speaker) {
   }
   // only the operator's own words are You; every other user-role record (a compaction checkpoint, a plugin notice,
   // runtime context, a member's delta) is a system line, never the operator's blue bubble
-  if (view.source === 'user' || view.source === undefined) return { ...b, from: 'you', kind: 'text', text: view.text ?? '', data: { mention: view.mention } };
+  // their attachments ride on the row as the mapper read them (plan 4 Task 3)
+  if (view.source === 'user' || view.source === undefined) {
+    return { ...b, from: 'you', kind: 'text', text: view.text ?? '', data: { mention: view.mention, ...(Array.isArray(view.attachments) ? { attachments: view.attachments } : {}) } };
+  }
   return { ...b, from: 'system', kind: 'text', text: view.text ?? '', data: { source: view.source } };
 }
 

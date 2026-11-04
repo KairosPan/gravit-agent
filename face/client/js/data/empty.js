@@ -17,6 +17,8 @@ export function emptyState() {
     // a room member's trace by the answer it explains, under its conversation (host/traces.js)
     traces: {},
     channels: [],
+    // the operator's images in the thread by attachment id: a data: URL, or null for one the host cannot give back (plan 4)
+    thumbs: {},
     // the workspace's pinned conversation ids (host/live.js, workspace/follow)
     pinned: [],
     // the channel page's read (host/channels.js)

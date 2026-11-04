@@ -325,3 +325,12 @@ test("the row's pin key carries one stable id through pin and unpin", () => {
   assert.match(h, /data-action="pin" data-conv="a" aria-label="Pin" id="pin-a">/);
   assert.match(h, /data-action="unpin" data-conv="b" aria-label="Unpin" id="pin-b">/);
 });
+
+test('an attachment-only last message previews as its names', () => {
+  const files = [{ type: 'image', attachmentId: 'a1', mediaType: 'image/png', bytes: 1, width: 1, height: 1, name: 'chart.png' }, { type: 'file', attachmentId: 'a2', name: 'q3.csv', bytes: 2 }];
+  const c = conv('c', { messages: [
+    { id: 'e1', seq: 1, at: NOW, from: 'gravit', kind: 'text', text: 'Send me the files.', data: {} },
+    { id: 'e2', seq: 2, at: NOW, from: 'you', kind: 'text', text: '', data: { attachments: files } },
+  ] });
+  assert.equal(previewOf(c), 'chart.png, q3.csv');
+});

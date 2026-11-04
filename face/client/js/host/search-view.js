@@ -6,8 +6,15 @@
 // spoken message's text - previewOf's order without its sender prefix, kept here so a host view imports no render code.
 import { channelLabel } from './list-view.js';
 import { isDeskPreset } from '../wire/speaker.js';
+import { attachmentsLine } from '../composer/files.js';
 
 export const SEARCH_ITEMS = 20;
+
+const attachmentsOf = m => (Array.isArray(m.data?.attachments) ? m.data.attachments : []);
+/** A line someone said: not a context row or a tool row, with words or attachments (an image sent alone counts). */
+export const spoken = m => m.from !== 'system' && m.kind !== 'tool' && typeof m.text === 'string' && (m.text !== '' || attachmentsOf(m).length > 0);
+/** A spoken line's preview: its words, or with none its attachments' names. */
+export const spokenLine = m => (m.text !== '' ? m.text : attachmentsLine(attachmentsOf(m)));
 
 const labelFor = (conv, channels) => {
   if (isDeskPreset(conv.preset)) return 'Desk';
@@ -18,8 +25,8 @@ const labelFor = (conv, channels) => {
 
 const previewLine = conv => {
   if (typeof conv.preview === 'string' && conv.preview !== '') return conv.preview;
-  const m = (conv.messages ?? []).findLast(x => x.from !== 'system' && x.kind !== 'tool' && typeof x.text === 'string' && x.text !== '');
-  return m ? m.text : '';
+  const m = (conv.messages ?? []).findLast(spoken);
+  return m ? spokenLine(m) : '';
 };
 
 const itemOf = (conv, channels, over) => ({
