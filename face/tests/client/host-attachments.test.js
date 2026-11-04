@@ -15,8 +15,9 @@ function rig(answer, upload) {
   const store = createStore({ initial: emptyState(), reducers });
   const calls = [];
   const call = (endpoint, args) => { calls.push([endpoint, args]); return answer(endpoint, args); };
-  const attachments = startAttachments({ call, store, ...(upload ? { upload } : {}) });
-  return { store, calls, attachments };
+  const clock = { t: 1000 };
+  const attachments = startAttachments({ call, store, now: () => clock.t, ...(upload ? { upload } : {}) });
+  return { store, calls, attachments, clock };
 }
 
 const LIMITS = { ...DEFAULT_LIMITS, maxImagesPerMessage: 5 };
@@ -97,12 +98,13 @@ test('a carrier failure leaves a thumb free to read again; a refusal or a bad an
   const carrier = rig(async () => { if (n++ === 0) throw Object.assign(new Error('HTTP 502'), { status: 502 }); return { attachment: { mediaType: 'image/png' }, data: 'AA==' }; });
   await carrier.attachments.thumb('s1', 'a1'); await settle();
   assert.equal(Object.hasOwn(carrier.store.get().thumbs, 'a1'), false, 'nothing cached on a carrier failure');
+  carrier.clock.t += 2000;
   await carrier.attachments.thumb('s1', 'a1'); await settle();
   assert.equal(carrier.store.get().thumbs.a1, 'data:image/png;base64,AA==');
   assert.equal(carrier.calls.length, 2);
 
   const codeless = rig(async () => { throw new Error('socket hang up'); });
-  await codeless.attachments.thumb('s1', 'a1'); await codeless.attachments.thumb('s1', 'a1');
+  await codeless.attachments.thumb('s1', 'a1'); codeless.clock.t += 2000; await codeless.attachments.thumb('s1', 'a1');
   assert.equal(codeless.calls.length, 2, 'an error with no code is a carrier failure too');
 
   const refused = rig(async () => { throw Object.assign(new Error('no'), { code: 'session/attachment-invalid' }); });
@@ -114,6 +116,56 @@ test('a carrier failure leaves a thumb free to read again; a refusal or a bad an
   await malformed.attachments.thumb('s1', 'a1'); await malformed.attachments.thumb('s1', 'a1');
   assert.equal(malformed.store.get().thumbs.a1, null);
   assert.equal(malformed.calls.length, 1);
+});
+
+test('a carrier failure backs off: no read again until the clock passes 2 s, then 4 s, doubling to a minute', async () => {
+  const r = rig(async () => { throw Object.assign(new Error('HTTP 500'), { status: 500 }); });
+  const reads = () => r.calls.length;
+  await r.attachments.thumb('s1', 'a1');
+  for (let i = 0; i < 5; i++) await r.attachments.thumb('s1', 'a1');
+  assert.equal(reads(), 1, 'every render inside the backoff asks nothing');
+  r.clock.t += 1999; await r.attachments.thumb('s1', 'a1');
+  assert.equal(reads(), 1);
+  r.clock.t += 1; await r.attachments.thumb('s1', 'a1');
+  assert.equal(reads(), 2, 'past 2 s it reads again');
+  r.clock.t += 3999; await r.attachments.thumb('s1', 'a1');
+  assert.equal(reads(), 2, 'the second wait is 4 s');
+  r.clock.t += 1; await r.attachments.thumb('s1', 'a1');
+  assert.equal(reads(), 3);
+  for (let i = 0; i < 10; i++) { r.clock.t += 60000; await r.attachments.thumb('s1', 'a1'); }
+  assert.equal(reads(), 13, 'the wait stops growing at a minute');
+  await r.attachments.thumb('s1', 'a2');
+  assert.equal(reads(), 14, 'another image has its own backoff');
+  for (const status of [408, 429]) {
+    const t = rig(async () => { throw Object.assign(new Error('busy'), { status }); });
+    await t.attachments.thumb('s1', 'a1'); await settle();
+    assert.equal(Object.hasOwn(t.store.get().thumbs, 'a1'), false, `${status} is the carrier's, retried later`);
+  }
+});
+
+test('a 4xx other than 401, 403, 408 or 429 is the image\'s answer: null, never read again', async () => {
+  for (const status of [400, 404, 410]) {
+    const r = rig(async () => { throw Object.assign(new Error('gone'), { status }); });
+    await r.attachments.thumb('s1', 'a1'); await settle();
+    assert.equal(r.store.get().thumbs.a1, null, String(status));
+    r.clock.t += 120000; await r.attachments.thumb('s1', 'a1');
+    assert.equal(r.calls.length, 1, String(status));
+  }
+});
+
+test('a 401 or 403 stops every thumb read until the live layer reconnects', async () => {
+  for (const status of [401, 403]) {
+    let n = 0;
+    const r = rig(async () => { if (n++ === 0) throw Object.assign(new Error('fence'), { status }); return { attachment: { mediaType: 'image/png' }, data: 'AA==' }; });
+    await r.attachments.thumb('s1', 'a1');
+    r.clock.t += 120000;
+    await r.attachments.thumb('s1', 'a1'); await r.attachments.thumb('s1', 'a2');
+    assert.equal(r.calls.length, 1, `${status}: nothing is read, this image or another`);
+    assert.equal(Object.hasOwn(r.store.get().thumbs, 'a1'), false, 'and nothing lands');
+    r.attachments.reconnected();
+    await r.attachments.thumb('s1', 'a1'); await settle();
+    assert.equal(r.store.get().thumbs.a1, 'data:image/png;base64,AA==', 'a reconnect reads again at once');
+  }
 });
 
 test('the fake XHR refuses a header before open, as a real one does', async () => {

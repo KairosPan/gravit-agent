@@ -5296,11 +5296,13 @@ function imageHost(answer = () => ({ attachment: { mediaType: 'image/png' }, dat
 }
 const THUMB = 'data:image/png;base64,iVBORw0KGgo=';
 const imageKey = '[data-action="openImage"][data-attachment="att-1"][data-name="chart.png"]';
-const lightboxRig = async (h = imageHost()) => {
+const lightboxRig = async (h = imageHost(), clock = null) => {
   const f = fakeWindow({ hash: '#/messages/s1' });
   const image = f.withSelector(imageKey, { tagName: 'BUTTON', dataset: { action: 'openImage', attachment: 'att-1', name: 'chart.png' }, presentIf: /data-action="openImage"/ });
   const close = f.withSelector('.lightbox-close', { tagName: 'BUTTON', dataset: { action: 'lightboxClose' }, presentIf: /class="lightbox"/ });
-  const store = started(f, h);
+  const store = clock
+    ? boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, now: () => clock.t })
+    : started(f, h);
   await h.ready();
   await settle();
   return { f, h, store, image, close };
@@ -5429,5 +5431,70 @@ test('leaving the conversation closes the lightbox', async () => {
   assert.equal(store.get().route.id, 's2');
   assert.equal(store.get().lightbox, null);
   assert.doesNotMatch(f.html(), /class="lightbox"/);
+  store.timers.clear();
+});
+
+// the review round (plan 4 task 7): a failing thumb read backs off across renders; a fence stops reads until the reconnect
+test('a thumb read failing on the carrier is not asked again on every render, only once the backoff passes', async () => {
+  const clock = { t: Date.now() };
+  const h = imageHost(() => { throw Object.assign(new Error('HTTP 500'), { status: 500 }); });
+  const { store } = await lightboxRig(h, clock);
+  assert.equal(h.thumbReads.length, 1);
+  for (let i = 0; i < 20; i++) store.dispatch('toggleRail');
+  await settle();
+  assert.equal(h.thumbReads.length, 1, 'twenty renders, no read more');
+  clock.t += 2000;
+  store.dispatch('toggleRail');
+  await settle();
+  assert.equal(h.thumbReads.length, 2, 'the render after the backoff reads again');
+  store.timers.clear();
+});
+
+test('a thumb read refused 404 draws the card; one fenced 401 waits for the reconnect', async () => {
+  const { f: f1, h: h1, store: s1 } = await lightboxRig(imageHost(() => { throw Object.assign(new Error('HTTP 404'), { status: 404 }); }));
+  assert.equal(s1.get().thumbs['att-1'], null);
+  assert.match(f1.html(), /file-name">chart.png</);
+  assert.equal(h1.thumbReads.length, 1);
+  s1.timers.clear();
+
+  const clock = { t: Date.now() };
+  let fenced = true;
+  const h = imageHost(() => { if (fenced) throw Object.assign(new Error('HTTP 401'), { status: 401 }); return { attachment: { mediaType: 'image/png' }, data: 'iVBORw0KGgo=' }; });
+  const { f, store } = await lightboxRig(h, clock);
+  assert.equal(h.thumbReads.length, 1);
+  clock.t += 120000;
+  store.dispatch('toggleRail');
+  await settle();
+  assert.equal(h.thumbReads.length, 1, 'no read while fenced, however long');
+  fenced = false;
+  h.opts().onDown('socket closed');
+  await h.ready();
+  await settle();
+  assert.equal(h.thumbReads.length, 2, 'the reconnect reads it again');
+  assert.match(f.html(), /<img src="data:image\/png;base64,iVBORw0KGgo=" alt="chart.png">/);
+  store.timers.clear();
+});
+
+test('⌥⌘K does nothing while the lightbox is open', async () => {
+  const { f, store, image, close } = await lightboxRig();
+  const cq = f.withId('cq', { tagName: 'INPUT' });
+  f.click(image);
+  let prevented = false;
+  f.fire('doc', 'keydown', keyK({ ctrlKey: true }, () => { prevented = true; }));
+  assert.equal(prevented, true, 'the browser does not take the keys either');
+  assert.notEqual(f.doc.activeElement, cq, 'the search box does not take focus');
+  assert.equal(f.doc.activeElement, close);
+  assert.ok(store.get().lightbox, 'the lightbox stays');
+  store.timers.clear();
+});
+
+test('focus returns to the image clicked, though the click did not focus it (Safari)', async () => {
+  const { f, store, image, close } = await lightboxRig();
+  const say = f.withId('say', { tagName: 'INPUT' });
+  say.focus();
+  f.click(image);
+  assert.equal(f.doc.activeElement, close);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(f.doc.activeElement, image, 'back on the image, not the editor that had focus');
   store.timers.clear();
 });

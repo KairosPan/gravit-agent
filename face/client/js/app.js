@@ -465,7 +465,8 @@ export function boot(win, host = {}) {
   const setRuns = (runs, key = draftKey(store.get())) => putDraft(key, runs, filesOf(key));
   const setFiles = (files, key = draftKey(store.get())) => putDraft(key, runsOf(key), files);
   // the attachments' reads: the image limits, a file's upload to its session, a history thumb (a test hands in its own)
-  const attachments = host.attachments ?? startAttachments({ call, store });
+  const attachments = host.attachments ?? startAttachments({ call, store, now });
+  let connected = false;   // the live layer's link as the store last said: a reconnect frees the thumb reads a fence stopped
   let limitsRead = false;   // the image limits, read on opening a conversation until a read succeeds
   let dropTimer = null;     // the drop overlay's watchdog
   // the line above the box by draft key: a refusal of the files added, cleared by the next add or remove under that key
@@ -626,11 +627,13 @@ export function boot(win, host = {}) {
     // closing, focus goes back to the image it opened from. The drawers under it keep their openers untouched
     const lightUp = lightHtml !== '';
     if (lightUp) {
-      if (!last.lightbox) lightFrom = activeKey;
+      if (!last.lightbox && !lightFrom) lightFrom = activeKey;
       target = root.querySelector('.lightbox-close') ?? target;
     } else if (last.lightbox) {
       target = find(lightFrom) ?? (overlay ? root.querySelector(closeKeyOf(overlay)) : say) ?? target;
       lightFrom = null;
+      // a drawer that went with it (nav closes both) leaves no opener behind
+      if (!overlay) { opener = null; under = null; }
     } else if (overlay && overlay !== last.overlay && last.overlay !== 'sheet') {
       if (overlay === 'sheet') under = last.overlay ? opener : null;
       opener = activeKey;
@@ -1586,6 +1589,8 @@ export function boot(win, host = {}) {
     openImage: el => {
       const id = el.dataset.attachment;
       if (!isImageSrc(thumbOf(store.get(), id))) return;
+      // focus returns to the key pressed, which a click need not have focused (Safari focuses no clicked button)
+      lightFrom = focusKey(el);
       store.dispatch('openLightbox', { attachmentId: id, name: el.dataset.name ?? '' });
     },
     lightboxClose: () => store.dispatch('closeLightbox'),
@@ -1764,7 +1769,8 @@ export function boot(win, host = {}) {
     const imeOpen = ev.isComposing || ev.keyCode === 229;
     if (!imeOpen && ev.code === 'KeyK' && ev.altKey && !ev.shiftKey && (mac ? ev.metaKey && !ev.ctrlKey : ev.ctrlKey && !ev.metaKey)) {
       ev.preventDefault();
-      focusSearch();
+      // over the lightbox the keys do nothing: the search box lies under it
+      if (!lightboxOf(store.get())) focusSearch();
       return;
     }
     // while the lightbox stands, Tab and Shift+Tab stay on its one key
@@ -1834,6 +1840,10 @@ export function boot(win, host = {}) {
     if (doc.hidden) stream.close(); else stream.open();
   });
   store.subscribe((s, type) => {
+    // the live layer back (connected again after a drop, or for the first time): thumb reads a fence stopped go again
+    const linked = s.status?.connected === true;
+    if (linked && !connected) attachments.reconnected?.();
+    connected = linked;
     requestRender();
     if (type === 'sheetOpen' || type === 'sheetClose') stopConnectCheck();
     if (type === 'sheetOpen') sheetOpens += 1;
