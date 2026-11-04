@@ -51,7 +51,7 @@ async function boot() {
     const res = await fetch(`${srv.url}${path}`);
     return { status: res.status, body: (await res.json()) as Record<string, any> };
   };
-  return { svc, srv, get };
+  return { svc, srv, get, own };
 }
 
 describe("a connected venue's own reads (GET /api/account/connected/…)", () => {
@@ -70,6 +70,22 @@ describe("a connected venue's own reads (GET /api/account/connected/…)", () =>
       // the old route still answers the public line beside it
       const old = await get("/api/account/explore?q=BTC");
       expect((old.body.items as Array<{ at: Array<{ connected: boolean }> }>).some((i) => i.at.some((a) => !a.connected))).toBe(true);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it("forgets its kept answer when a venue is unplugged or connected", async () => {
+    const { srv, get, own } = await boot();
+    try {
+      const venues = async () => (((await get("/api/account/connected/explore?q=BTC")).body.items ?? []) as Array<{ at: Array<{ venue: string }> }>).flatMap((i) => i.at.map((a) => a.venue));
+      expect(await venues()).toContain("paper-1");
+      const off = await own({ type: "disconnectVenue", venue: "paper-1" });
+      if (isRefusal(off)) throw new Error(off.message);
+      expect(await venues()).not.toContain("paper-1");
+      const on = await own({ type: "connectVenue", venue: "paper-2", connector: "live:paper", label: "", credentialRef: "" });
+      if (isRefusal(on)) throw new Error(on.message);
+      expect(await venues()).toContain("paper-2");
     } finally {
       await srv.close();
     }

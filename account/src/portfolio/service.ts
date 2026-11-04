@@ -178,6 +178,8 @@ export interface ServiceOptions {
 export const CHINA_SEARCH_WAIT_MS = 4_000;
 const CHINA_NOT_READ = "China is not read on this account";
 /** no price for anything: a service made without the market's link (server.ts main hands its remotePrice in) prices nothing it cannot price itself */
+/** the kept reads that list the venues connected: forgotten whenever a venue is connected or unplugged, or an agent's wallet added */
+const VENUE_SET_READS = ["explore", "connected-explore", "compare"] as const;
 /** a Markets question (explore, connectedExplore) */
 type ExploreAsk = { tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined };
 const noPrice: Price = () => Promise.resolve(undefined);
@@ -2731,7 +2733,7 @@ export class PortfolioService {
     this.marketReads.forget(venue, true);
     this.ruleSeen.delete(venue);
     // Markets and the comparison were answered from what the venues listed before this one: they are asked again
-    this.marketReads.forgetAll(["explore", "compare"]);
+    this.marketReads.forgetAll(VENUE_SET_READS);
     const usd = r2((await adapter.read()).reduce((s, h) => s + h.usd, 0));
     // what this connection may do with the money there: nothing unless the server moves real money, and then only what the owner signs
     const writes = this.opts.liveWrites;
@@ -2768,7 +2770,7 @@ export class PortfolioService {
     this.marketReads.forget(venue);
     this.ruleSeen.delete(venue);
     // Markets and the comparison were answered with this venue among the connected ones: they are asked again
-    this.marketReads.forgetAll(["explore", "compare"]);
+    this.marketReads.forgetAll(VENUE_SET_READS);
     // a live connection that stood in for a simulated venue: the simulated one comes back
     const sim = this.shadowed.get(venue);
     if (sim) {
@@ -3028,7 +3030,7 @@ export class PortfolioService {
     this.liveVenues.set(venue, { id: venue, name: adapter.account.name, kind: adapter.account.kind, address: key.address, proven, writer: opened.source.writer!, noTradeBecause: opened.source.noTradeBecause!, via: opened.source.via });
     this.adapters.set(venue, adapter);
     // one more venue on the account: Markets and the comparison are asked again
-    this.marketReads.forgetAll(["explore", "compare"]);
+    this.marketReads.forgetAll(VENUE_SET_READS);
   }
 
   /** the restore's second half: the venues, from the same credential references the owner signed; then what was in flight, followed again */
