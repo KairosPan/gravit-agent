@@ -3,6 +3,9 @@
  * Gravit, never from the phone. */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { announceCard, cardNoticeText, scrubLinks } from "../src/card-notice.ts";
 import { describeOrder } from "../src/orders.ts";
 import type { PhoneKind, PhoneSendResult } from "../src/phone.ts";
@@ -78,22 +81,60 @@ test("announceCard sends kind card and never throws; held, refused and no phone 
   assert.equal(sends.length, 4);
 });
 
-/* Fix round 1: a bare domain is a link too (Telegram makes it tappable). The same cases as the
- * account's notices (account/test/unit/identity-send.test.ts), so both sides agree. */
+/* Fix rounds 1 and 2: every link Telegram would make tappable is <link> - any scheme, scheme-relative,
+ * a bare host whatever its TLD, a dotted quad - and market forms are left alone. The same cases run on
+ * the account's notices (account/test/unit/identity-send.test.ts), and the rule is one text in both. */
 const BARE_LINKS: [string, string][] = [
   ["Pay at evil.com now", "Pay at <link> now"],
   ["evil.example/approve?id=1", "<link>"],
   ["see Pay.Example.COM/x", "see <link>"],
   ["host 203.0.113.5:8080/pay", "host <link>"],
   ["write a@evil.io", "write a@<link>"],
+  ["go evil.museum", "go <link>"],
+  ["go evil.tk and evil.xn--p1ai", "go <link> and <link>"],
+  ["go evil.us/x", "go <link>"],
+  ["go sub.evil.io:8080/x?y=1", "go <link>"],
+  ["go //evil.com/x", "go <link>"],
+  ["go ftp://x and javascript://x", "go <link> and <link>"],
+  ["go x_evil.com", "go x_<link>"],
+  ["go a/evil.com", "go a/<link>"],
+  ["go 183.00/evil.com", "go 183.00/<link>"],
+  ["go xhttp://evil", "go <link>"],
+  ["go EVIL.US/x", "go <link>"],
+  ["go evil.рф", "go <link>"],
 ];
-const NOT_LINKS = ["Buy 10 NVDA · limit 183.00 · Paper · Alpaca", "BTC/USDT", "ETH/USD at 2451.3333", "up 3.5% on v1.2.3", "600519.SH and 0700.HK", "BRK.B", "e.g. Alpaca."];
+const NOT_LINKS = ["Buy 10 NVDA · limit 183.00 · Paper · Alpaca", "BTC/USDT", "ETH/USD at 2451.3333", "up 3.5% on v1.2.3",
+  "600519.SH and 0700.HK and 000001.SZ", "BRK.B", "NVDA.US", "e.g. Alpaca."];
 
-test("a bare domain, with or without a path, is <link>; prices, versions and symbols are not touched", () => {
+test("a link in any form is <link>; prices, versions and market symbols are not touched", () => {
   for (const [text, want] of BARE_LINKS) assert.equal(scrubLinks(text), want, text);
   for (const text of NOT_LINKS) assert.equal(scrubLinks(text), text, text);
+  assert.equal(scrubLinks("see notes.md"), "see <link>", "an ordinary dotted word reads as a link and goes too");
   const bare = { venue: "evil.example/approve", symbol: "NVDA", side: "buy", qty: 1 };
   assert.equal(cardNoticeText("mcp__account__portfolio_live_order", bare), "Your call · Buy 1 NVDA · <link> — waiting in Gravit");
   assert.equal(cardNoticeText("mcp__account__portfolio_transfer", { to: "evil.com", amount: "183.00" }),
     "Your call · portfolio_transfer: amount=183.00 to=<link> — waiting in Gravit");
+});
+
+test("a cut line is scrubbed again: wherever the cut lands near a link, none is left", () => {
+  for (let pad = 520; pad < 600; pad++) {
+    const text = cardNoticeText("mcp__account__portfolio_transfer", { body: "y", note: `${"z".repeat(30)}`,
+      a: "evil.museum/x", ...Object.fromEntries(Array.from({ length: Math.ceil(pad / 40) }, (_, i) => [`k${i}`, "w".repeat(38)])), zz: "sub.evil.io/x" });
+    assert.ok(text.length <= 600, `bounded: ${text.length}`);
+    assert.doesNotMatch(text, /evil/, `pad ${pad}`);
+    const inner = text.slice("Your call · ".length, -" — waiting in Gravit".length);
+    assert.equal(scrubLinks(inner), inner, "the cut line is already clean");
+  }
+});
+
+test("the link scrub is one text: face/src/card-notice.ts and the account's notices.ts carry the same block", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const block = (path: string): string => {
+    const text = readFileSync(path, "utf8");
+    const from = text.indexOf("/* LINK SCRUB BEGIN");
+    const to = text.indexOf("/* LINK SCRUB END */");
+    assert.ok(from >= 0 && to > from, `markers in ${path}`);
+    return text.slice(from, to);
+  };
+  assert.equal(block(join(here, "../../account/src/portfolio/identity/notices.ts")), block(join(here, "../src/card-notice.ts")));
 });

@@ -24,29 +24,54 @@ export const CARD_NOTICE_MAX = 600;
 const SUFFIX = " — waiting in Gravit";
 const PREFIX = "Your call · ";
 
-/** any URL, up to a space or a quote (describeOrder quotes a value with a space in it, and the quote
- * must stay to close it) */
-const LINK = /\b(?:https?|wss?):\/\/[^\s"]*/gi;
+/* LINK SCRUB BEGIN - byte-identical in face/src/card-notice.ts and account/src/portfolio/identity/notices.ts
+ * (face/tests/card-notice.test.ts compares the two). Nothing a notice carries may be tappable on the
+ * phone, and Telegram makes a link of far more than an http URL, so this defangs rather than lists:
+ * - any scheme (`ftp://x`, `javascript://x`) and a scheme-relative `//host…` is `<link>`, to the next space;
+ * - any dotted token in which a label carrying a letter is followed by a label of two or more that
+ *   starts with a letter is `<link>`, whatever its TLD, with its port and path (`evil.museum`,
+ *   `evil.xn--p1ai`, `sub.evil.io:8080/x`; `a@evil.io` and `x_evil.com` keep only what is before
+ *   the host), and so is a dotted-quad address;
+ * - left alone: numbers (`183.00`, `3.5%`, `v1.2.3`), a numeric code with a market suffix (`600519.SH`:
+ *   no letter before the dot), a ticker with a one-letter class (`BRK.B`), a bare upper-case ticker on
+ *   `.US` (`NVDA.US`, with no port or path) and pair symbols (`BTC/USDT`: no dot).
+ * Ordinary dotted words read as links too and are taken out: `notes.md`, `Alpaca.Paper`, `binance.us`. */
+const SCHEME_LINK = /[a-z][a-z0-9+.-]*:\/\/\S*/giu;
+const RELATIVE_LINK = /\/\/\S+/gu;
+const DOTTED_SOURCE = String.raw`[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+`;
+const LINK_TAIL = /^(?::\d{1,5})?(?:[/?#]\S*)?/u;
 
-/* A bare domain is a link too: Telegram makes one tappable without a scheme. Taken out:
- * - a dotted host whose last label is a known-looking TLD and whose label before it carries a letter
- *   (`evil.com`, `Pay.Example.COM/x`), with or without a port and a path;
- * - any dotted host with a letter TLD of two or more when a path follows (`evil.example/approve`);
- * - a dotted-quad address, with or without a port and a path (`203.0.113.5:8080/pay`).
- * Left alone: prices and percentages (`183.00`, `3.5%`), versions (`v1.2.3`), pair symbols
- * (`BTC/USDT`, no dot), market suffixes on a numeric code (`600519.SH`, `0700.HK`, no letter before
- * the dot) and one-letter classes (`BRK.B`). The same rule stands in account/src/portfolio/identity/notices.ts; keep the two alike. */
-const TLDS = "com|net|org|io|ai|app|dev|co|me|xyz|info|biz|site|online|top|shop|store|link|click|live|tech|cloud|pro|gg|ly|to|tv|cc|ws|ru|de|uk|cn|jp|fr|nl|eu|ca|au|in|br|ch|money|finance|exchange|trade|example";
-const BARE_HOST = String.raw`(?<![\w.\-/])(?:[a-z0-9-]+\.)*[a-z0-9-]*[a-z][a-z0-9-]*\.`;
-const BARE_LINK = new RegExp(
-  String.raw`${BARE_HOST}(?:(?:${TLDS})(?![\w-])(?!\.[a-z0-9])(?::\d{1,5})?(?:\/[^\s"]*)?|[a-z]{2,24}(?::\d{1,5})?\/[^\s"]*)` +
-    String.raw`|(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])(?::\d{1,5})?(?:\/[^\s"]*)?`,
-  "gi",
-);
+function isLinkHost(host: string, tail: string): boolean {
+  const labels = host.split(".");
+  if (labels.length === 4 && labels.every((label) => /^\d{1,3}$/u.test(label))) return true;
+  if (tail === "" && /^[A-Z]{1,6}\.US$/u.test(host)) return false;
+  for (let i = 0; i + 1 < labels.length; i++) {
+    if (/\p{L}/u.test(labels[i] ?? "") && /^\p{L}[\p{L}\p{N}-]+$/u.test(labels[i + 1] ?? "")) return true;
+  }
+  return false;
+}
 
-/** Every link in `text` - with a scheme or bare - as `<link>`. */
+function scrubLinkText(text: string): string {
+  const s = text.replace(SCHEME_LINK, "<link>").replace(RELATIVE_LINK, "<link>");
+  const dotted = new RegExp(DOTTED_SOURCE, "gu");
+  let out = "";
+  let at = 0;
+  for (let m = dotted.exec(s); m !== null; m = dotted.exec(s)) {
+    const host = m[0];
+    const end = m.index + host.length;
+    const tail = LINK_TAIL.exec(s.slice(end))?.[0] ?? "";
+    if (!isLinkHost(host, tail)) continue;
+    out += `${s.slice(at, m.index)}<link>`;
+    at = end + tail.length;
+    dotted.lastIndex = at;
+  }
+  return out + s.slice(at);
+}
+/* LINK SCRUB END */
+
+/** Every link in `text` - with any scheme, scheme-relative, or a bare host - as `<link>`. */
 export function scrubLinks(text: string): string {
-  return text.replace(LINK, "<link>").replace(BARE_LINK, "<link>");
+  return scrubLinkText(text);
 }
 
 /** A field the order's short form writes bare: one word of the kind a venue, a symbol or an order
@@ -112,7 +137,8 @@ export function cardNoticeText(name: string, args: unknown): string {
   let line = what.replace(/\s*[\r\n]+\s*/g, " ").trim();
   line = scrubLinks(line);
   const room = CARD_NOTICE_MAX - PREFIX.length - SUFFIX.length;
-  if (line.length > room) line = `${line.slice(0, room - 1)}…`;
+  /* scrubbed again after the cut: a cut must neither leave nor make a link */
+  if (line.length > room) line = scrubLinks(`${line.slice(0, room - 1)}…`);
   return `${PREFIX}${line}${SUFFIX}`;
 }
 

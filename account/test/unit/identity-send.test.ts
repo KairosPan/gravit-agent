@@ -380,22 +380,38 @@ describe("the account's own notices", () => {
     expect(linked).toBe("Your call · Pay 5 USDC to <link> · see <link> — waiting in Gravit");
   });
 
-  /* Fix round 1: a bare domain is a link too (Telegram makes it tappable). The same cases as the face's
-   * card notices (face/tests/card-notice.test.ts), so both sides agree. */
-  it("a bare domain, with or without a path, is <link>; prices, versions and symbols are not touched", () => {
+  /* Fix rounds 1 and 2: every link Telegram would make tappable is <link> - any scheme, scheme-relative, a
+   * bare host whatever its TLD, a dotted quad - and market forms are left alone. The same cases as the face's
+   * card notices (face/tests/card-notice.test.ts, which also checks that the rule is one text in both). */
+  it("a link in any form is <link>; prices, versions and market symbols are not touched", () => {
     const bare: [string, string][] = [
       ["Pay at evil.com now", "Pay at <link> now"],
       ["evil.example/approve?id=1", "<link>"],
       ["see Pay.Example.COM/x", "see <link>"],
       ["host 203.0.113.5:8080/pay", "host <link>"],
       ["write a@evil.io", "write a@<link>"],
+      ["go evil.museum", "go <link>"],
+      ["go evil.tk and evil.xn--p1ai", "go <link> and <link>"],
+      ["go evil.us/x", "go <link>"],
+      ["go sub.evil.io:8080/x?y=1", "go <link>"],
+      ["go //evil.com/x", "go <link>"],
+      ["go ftp://x and javascript://x", "go <link> and <link>"],
+      ["go x_evil.com", "go x_<link>"],
+      ["go a/evil.com", "go a/<link>"],
+      ["go 183.00/evil.com", "go 183.00/<link>"],
+      ["go xhttp://evil", "go <link>"],
+      ["go EVIL.US/x", "go <link>"],
+      ["go evil.рф", "go <link>"],
     ];
     for (const [text, want] of bare) expect(noLinks(text)).toBe(want);
-    for (const text of ["Buy 10 NVDA · limit 183.00 · Paper · Alpaca", "BTC/USDT", "ETH/USD at 2451.3333", "up 3.5% on v1.2.3", "600519.SH and 0700.HK", "BRK.B", "e.g. Alpaca."]) {
+    for (const text of ["Buy 10 NVDA · limit 183.00 · Paper · Alpaca", "BTC/USDT", "ETH/USD at 2451.3333", "up 3.5% on v1.2.3",
+      "600519.SH and 0700.HK and 000001.SZ", "BRK.B", "NVDA.US", "e.g. Alpaca."]) {
       expect(noLinks(text)).toBe(text);
     }
-    expect(cardNotice({ kind: "card", outcome: "pending", reason: "Pay 5 USDC to evil.example/approve" } as LedgerRow)).toBe("Your call · Pay 5 USDC to <link> — waiting in Gravit");
+    expect(noLinks("see notes.md")).toBe("see <link>");
+    expect(cardNotice({ kind: "card", outcome: "pending", reason: "Pay 5 USDC to evil.museum/approve" } as LedgerRow)).toBe("Your call · Pay 5 USDC to <link> — waiting in Gravit");
     expect(fillNotice({ side: "buy", qty: 1, symbol: "BTC/USDT", price: "183.00", venueName: "evil.com" })).toBe("Filled · Buy 1 BTC/USDT at 183.00 · <link>");
+    expect(fillNotice({ side: "buy", qty: 1, symbol: "NVDA.US", price: "183.00", venueName: "Alpaca", paper: true })).toBe("Filled · Buy 1 NVDA.US at 183.00 · Paper · Alpaca");
   });
 
   it("the outbox keeps at most its size, the oldest dropped with one line, and reads back what it wrote", () => {
