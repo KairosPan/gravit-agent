@@ -176,7 +176,11 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .seg-item:disabled { opacity: .5; cursor: default; }
 
 /* ---- the thread ---- */
-.thread { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 18px 28px 22px; overflow-y: auto; }
+/* the thread's box: the thread and, beside it, the turn rail (plan 5); the box takes the thread's old flex place */
+.thread-box { flex: 1 1 auto; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.thread { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 18px 28px 22px; overflow-y: auto; position: relative; }
+/* earlier history: a quiet key at the top of the thread */
+.earlier-key { align-self: center; flex: none; min-height: 30px; color: var(--dim); background: transparent; }
 .divider { text-align: center; font-size: 11px; font-weight: 600; color: var(--dim); padding: 4px 0 8px; }
 .sysline { text-align: center; font-size: 11px; color: var(--dim); padding: 4px 0; }
 /* an injected context row folds away under its source; opened, it reads as the record it is */
@@ -486,8 +490,8 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 }
 /* Details never lies over the conversation: the thread and the composer make room for it */
 @media (min-width: 861px) {
-  .main.with-drawer > .head, .main.with-drawer > .thread, .main.with-drawer > .composer { margin-right: 400px; }
-  .main.with-drawer.with-stock > .head, .main.with-drawer.with-stock > .thread, .main.with-drawer.with-stock > .composer { margin-right: 460px; }
+  .main.with-drawer > .head, .main.with-drawer > .thread-box, .main.with-drawer > .composer { margin-right: 400px; }
+  .main.with-drawer.with-stock > .head, .main.with-drawer.with-stock > .thread-box, .main.with-drawer.with-stock > .composer { margin-right: 460px; }
 }
 /* on a medium window the list folds away while Details is open, so the conversation keeps a usable width */
 @media (min-width: 861px) and (max-width: 1399px) {
@@ -848,6 +852,8 @@ button.tk-at:hover { border-color: var(--dim); }
   .conv-results { max-height: 40vh; }
   .main { flex: none; height: auto; min-height: 100vh; background: var(--bg); }
   .thread { overflow-y: visible; }
+  .thread-box { display: block; }
+  .turn-rail { display: none; }
   .composer { position: sticky; bottom: 0; background: var(--bg); }
   .disc, .acct, .mkts, .trade { overflow-y: visible; }
   .head.centered { padding: 16px 16px 12px; }

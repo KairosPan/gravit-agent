@@ -513,7 +513,7 @@ export function boot(win, host = {}) {
   // the operator's keys shown through their eye, as `<convId>|<msgId>|<n>` (render/thread.js): the page's, not the store's,
   // and forgotten once their conversation leaves the screen (D26)
   const revealed = new Set();
-  let last = { lightbox: false, overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, editor: null, confirm: null, query: '', key: null };
+  let last = { lightbox: false, overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, start: null, editor: null, confirm: null, query: '', key: null };
   let confirmFrom = null;
   let searchFocus = false;  // ⌥⌘K from a screen with no list: the box takes focus once Messages draws it
   let rowsAt = null;        // where the groups last stood: a query hides them, and they come back there when it clears (spec §5.1)
@@ -544,7 +544,7 @@ export function boot(win, host = {}) {
     const typed = new Map([...root.querySelectorAll('input[id]:not([type=radio]):not([type=checkbox]):not([type=file]), textarea[id], select[id]')].map(el => [el.id, el.value]));
     const ticked = [...root.querySelectorAll('input[id]')].filter(el => (el.type === 'radio' || el.type === 'checkbox') && el.checked).map(el => el.id);
     const thread0 = doc.getElementById('thread');
-    const threadAt = thread0 ? { top: thread0.scrollTop, bottom: thread0.scrollHeight - thread0.scrollTop - thread0.clientHeight < 40 } : null;
+    const threadAt = thread0 ? { top: thread0.scrollTop, height: thread0.scrollHeight, bottom: thread0.scrollHeight - thread0.scrollTop - thread0.clientHeight < 40 } : null;
     const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, results: root.querySelector('.conv-results')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop };
     if (scrolls.rows != null) rowsAt = scrolls.rows;
     // a disclosure the person opened (its Raw, a trace; tool calls are stored but not drawn) is the page's, not the store's: open again by its id
@@ -555,6 +555,7 @@ export function boot(win, host = {}) {
     // the conversation on screen: another one (or none) than at the last render masks every key again
     const open = s.route.screen === 'messages' ? currentConversation(s) : null;
     const threadSig = open ? open.id : null;
+    const threadStart = open?.window?.start ?? null;
     if (threadSig !== last.thread) revealed.clear();
 
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
@@ -618,9 +619,12 @@ export function boot(win, host = {}) {
     const drawerBody = root.querySelector('.drawer-body');
     if (drawerBody && last.drawer && last.drawer === drawerOf(s) && scrolls.drawer != null) drawerBody.scrollTop = scrolls.drawer;
     // the thread stays where the person was reading while they read up, however much arrives; at the bottom, or on
-    // another conversation, it follows the tail
+    // another conversation, it follows the tail. Earlier pages landed above (the window's start below the one last drawn)
+    // keep the words under the reader where they were, at the bottom too: the top moves down by what was added
     const thread = doc.getElementById('thread');
-    if (thread) thread.scrollTop = threadAt && !threadAt.bottom && threadSig === last.thread ? threadAt.top : thread.scrollHeight;
+    const sameThread = threadAt && threadSig === last.thread;
+    const prepended = sameThread && threadSig !== null && threadStart !== null && last.start !== null && threadStart < last.start;
+    if (thread) thread.scrollTop = prepended ? threadAt.top + (thread.scrollHeight - threadAt.height) : sameThread && !threadAt.bottom ? threadAt.top : thread.scrollHeight;
 
     // focus: back on the same control; into a drawer (or the sheet) that just opened; back to its opener when it closes — a sheet
     // opened over a drawer keeps that drawer's opener under it, for when the drawer closes in its turn
@@ -668,7 +672,7 @@ export function boot(win, host = {}) {
       // focus can move a contenteditable's caret: the editor's goes back where write put it
       if (target === say && keep !== null) editor.place(say, keep[0], keep[1]);
     }
-    last = { lightbox: lightUp, overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, editor: editorOf(s.edit), confirm: s.confirm, query, key };
+    last = { lightbox: lightUp, overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, start: threadStart, editor: editorOf(s.edit), confirm: s.confirm, query, key };
     // a composed answer drawn without its run's view asks for it now that the page is whole (its dispatches render again)
     if (wantedViews(store.get()).length) void ensureViews(store, getJson);
     // the operator's images the thread drew still to read: each asked once (thumb keeps its own in-flight set), its answer
@@ -1443,6 +1447,8 @@ export function boot(win, host = {}) {
       void actions.answer(m.id, batch);
     },
     toggleDetails: () => store.dispatch('toggleDetails'),
+    // earlier history of the conversation on screen, a page before its window (never activating it, PLAN D16)
+    earlier: el => { void live.earlier(el.dataset.conv); },
     openSettings: () => store.dispatch('openSettings'),
     closeSettings: () => store.dispatch('closeSettings'),
     setTheme: el => { const t = el.dataset.value.toLowerCase(); store.dispatch('setTheme', t); applyTheme(t); },

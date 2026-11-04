@@ -36,7 +36,7 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
     if (endpoint === 'workspace/pinSession') return { pinnedSessionIds: [args.request.sessionId] };
     if (endpoint === 'workspace/unpinSession') return { pinnedSessionIds: [] };
     if (endpoint === 'session/projections') return { asOfSeq: 20, values: {} };
-    if (endpoint === 'session/page') { const pg = pages[args.request.address.sessionId]; return Array.isArray(pg) || pg === undefined ? { records: pg ?? [] } : pg; }
+    if (endpoint === 'session/page') { const pg = pages[args.request.address.sessionId]; return typeof pg === 'function' ? pg(args.request) : Array.isArray(pg) || pg === undefined ? { records: pg ?? [] } : pg; }
     if (endpoint === 'session/create' && args.request.agentPreset) { rows.push(row('s-bot', { updatedAt: 120, agentAvailable: true, projections: { values: { agentPreset: args.request.agentPreset } } })); return { sessionId: 's-bot', agentPreset: args.request.agentPreset }; }
     if (endpoint === 'session/create') { rows.push(row('s-new', { agentAvailable: true })); return { sessionId: 's-new', agentPreset: 'gravit' }; }
     if (endpoint === 'session/fork') { rows.push(row('s-fork', { updatedAt: 99, agentAvailable: true })); return { sessionId: 's-fork' }; }
@@ -267,6 +267,81 @@ test("the thread keeps the reader's place when a message arrives while they read
   follow.cbs.onItem({ type: 'event', event: frames[16].event });
   await settle();
   assert.equal(thread.scrollTop, 2000, 'at the bottom the thread follows the tail');
+  store.timers.clear();
+});
+
+// ---- the earlier key and the thread's place on a prepend (plan 5 task 4)
+// an operator message at seq, its words naming the seq, so a test can tell the pages apart in the markup
+const said = seq => ({ type: 'event', event: { ...frames[0].event, seq, data: { ...frames[0].event.data, id: 'msg-' + seq, content: [{ type: 'text', text: 'said ' + seq }] } } });
+// a followed conversation whose snapshot is 30-31 with more before it; earlier pages by beforeSeq: 10-11 before 30 (more
+// before it), 2-3 before 10 (none). The fake thread is 1000 px tall until a page lands above, then 600 px taller per page
+function earlierRig() {
+  const f = fakeWindow({ hash: '' });
+  const thread = f.withId('thread', { clientHeight: 400 });
+  Object.defineProperty(thread, 'scrollHeight', { get: () => 1000 + (f.html().includes('said 10') ? 600 : 0) + (f.html().includes('said 2') ? 600 : 0) });
+  const book = { 30: { records: [said(10), said(11)], hasMore: true }, 10: { records: [said(2), said(3)], hasMore: false } };
+  const h = host({ rows: [row('s1', { agentAvailable: true })], pages: { s1: req => book[req.beforeSeq] ?? { records: [], hasMore: false } } });
+  return { f, thread, h };
+}
+const earlierPages = h => h.calls.filter(c => c[0] === 'session/page' && c[1].request.beforeSeq !== undefined).map(c => c[1].request.beforeSeq);
+
+test('Earlier messages pages back, and the thread keeps its place as the page lands above it', async () => {
+  const { f, thread, h } = earlierRig();
+  const store = started(f, h);
+  await h.ready();
+  h.streams.find(s => s.name === 'session/follow').cbs.onItem({ type: 'snapshot', header: {}, cursor: 40, hasMore: true, records: [said(30), said(31)], projections: { asOfSeq: 40, values: {} } });
+  await settle();
+  assert.match(f.html(), /<button class="btn-sm earlier-key" type="button" id="earlier-s1" data-action="earlier" data-conv="s1">Earlier messages<\/button>/);
+  thread.scrollTop = 0; // read up to the top, where the key is
+  f.click({ tagName: 'BUTTON', dataset: { action: 'earlier', conv: 's1' } });
+  await settle();
+  assert.deepEqual(earlierPages(h), [30]);
+  assert.match(f.html(), /said 10/);
+  assert.equal(thread.scrollTop, 600, 'the words read before the page landed stay under the reader');
+  assert.match(f.html(), /data-action="earlier"[^>]*>Earlier messages</, 'more stands before it');
+  store.timers.clear();
+});
+
+test("a reconnect's snapshot while reading up keeps the place and the earlier pages", async () => {
+  const { f, thread, h } = earlierRig();
+  const store = started(f, h);
+  await h.ready();
+  const snap = (cursor, seqs) => ({ type: 'snapshot', header: {}, cursor, hasMore: true, records: seqs.map(said), projections: { asOfSeq: cursor, values: {} } });
+  h.streams.find(s => s.name === 'session/follow').cbs.onItem(snap(40, [30, 31]));
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'earlier', conv: 's1' } });
+  await settle();
+  thread.scrollTop = 250; // reading the earlier page
+  // the mux drops and comes back: the conversation is followed again and its new snapshot lands
+  h.opts().onDown('lost');
+  h.opts().onReady({});
+  await settle();
+  const follows = h.streams.filter(s => s.name === 'session/follow' && !s.cancelled);
+  follows[follows.length - 1].cbs.onItem(snap(41, [30, 31, 32]));
+  await settle();
+  assert.match(f.html(), /said 10[\s\S]*said 30[\s\S]*said 32/, 'the earlier page stays above the new window');
+  assert.equal(thread.scrollTop, 250, 'the thread does not jump to the tail');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'earlier', conv: 's1' } });
+  await settle();
+  assert.deepEqual(earlierPages(h), [30, 10], 'Earlier messages pages on from where it was');
+  assert.match(f.html(), /said 2[\s\S]*said 10/);
+  assert.equal(thread.scrollTop, 850, 'the second page lands above the place too');
+  assert.doesNotMatch(f.html(), /earlier-key/, 'nothing more before it');
+  store.timers.clear();
+});
+
+test('at the tail, a streamed message still follows the tail', async () => {
+  const { f, thread, h } = earlierRig();
+  const store = started(f, h);
+  await h.ready();
+  const follow = h.streams.find(s => s.name === 'session/follow');
+  follow.cbs.onItem({ type: 'snapshot', header: {}, cursor: 40, hasMore: true, records: [said(30), said(31)], projections: { asOfSeq: 40, values: {} } });
+  await settle();
+  assert.equal(thread.scrollTop, 1000, 'a conversation opens at its tail');
+  thread.scrollTop = 600; // at the bottom: 1000 - 600 - 400 = 0
+  follow.cbs.onItem({ type: 'event', event: said(41).event });
+  await settle();
+  assert.equal(thread.scrollTop, 1000);
   store.timers.clear();
 });
 

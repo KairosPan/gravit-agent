@@ -143,10 +143,17 @@ export function renderDetails(conv, state) {
 </aside>`;
 }
 
+// first in the thread while the window has more before it (D22): Earlier messages, or Loading… disabled while a read runs
+function earlierKey(conv) {
+  const w = conv.window;
+  if (!w?.hasMore) return '';
+  return `<button${attrs({ class: 'btn-sm earlier-key', type: 'button', id: `earlier-${conv.id}`, 'data-action': 'earlier', 'data-conv': conv.id, disabled: w.loading === true })}>${w.loading ? 'Loading…' : 'Earlier messages'}</button>`;
+}
+
 export function renderMessagesScreen(state, now, composer = {}, page = {}) {
   if (state.draft) return draftScreen(state, composer);
   const conv = currentConversation(state);
   if (!conv) return emptyScreen(state, composer);
   const placeholder = conv.kind === 'group' ? 'Tell Gravit… @ a bot by name' : 'Tell Gravit…';
-  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread" id="thread">${renderThread(conv, state, now, page)}</div>${renderComposer(composerOf(composer, { placeholder }))}${renderStatus(state.status)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
+  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="Turns"></nav></div>${renderComposer(composerOf(composer, { placeholder }))}${renderStatus(state.status)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
 }

@@ -298,7 +298,9 @@ function composerHtml() {
   const sk = 'sk-proj-aB3dE6fG9hJ2kL5mN8pQ1rS4';
   const masked = R.hostWindow(open, { convId: 's1', messages: [m('yk', { from: 'you', text: `${sk} and ${sk}x9` })] });
   const secrets = renderMessagesScreen(masked, NOW, {}, { revealed: new Set(['s1|yk|1']) });
-  return [...menus.map(menu => renderMessagesScreen(open, NOW, { menu })), renderMessagesScreen(mention, NOW), attached, renderMessagesScreen(history, NOW), secrets].join('') + editorHtml([{ type: 'text', text: 'ask ' }, ...chips.map(chip => ({ type: 'chip', chip }))]);
+  // the history window (plan 5, Task 4): the earlier key above a window with more before it
+  const paging = renderMessagesScreen(R.hostWindow(open, { convId: 's1', messages: [m('yw', { seq: 30, from: 'you' })], window: { start: 30, through: 40, hasMore: true, replaced: [] } }), NOW);
+  return [...menus.map(menu => renderMessagesScreen(open, NOW, { menu })), renderMessagesScreen(mention, NOW), attached, renderMessagesScreen(history, NOW), secrets, paging].join('') + editorHtml([{ type: 'text', text: 'ask ' }, ...chips.map(chip => ({ type: 'chip', chip }))]);
 }
 const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
   : st.route.screen === 'trade' ? renderTradeScreen(st, now)
@@ -309,7 +311,7 @@ test('every class the screens emit has a rule in app.css, and app.css names no c
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,6}\b/, 'colours come from tokens.css');
   setMarkdown(null);
   const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSellMany(st) + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('') + composerHtml();
-  for (const c of ['composer-menu', 'composer-box', 'cmenu', 'cmenu-group', 'cmenu-crumb', 'cmenu-row', 'active', 'cmenu-icon', 'cmenu-title', 'cmenu-name', 'cmenu-desc', 'cmenu-foot', 'ref-chip', 'ref-chip-label', 'secret', 'revealed', 'secret-raw', 'secret-mask', 'secret-eye', 'mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-h3', 'mk-book', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand', 'research', 'pcard-meta', 'pcard-foot', 'pcard-link', 'mod-tags', 'mod-boxes', 'mod-runs-wrap', 'mod-runs', 'mod-legend', 'composed', 'notes', 'notes-body', 'lh-answer', 'lh-summary', 'lh-block', 'lh-skel', 'lh-title', 'lh-error', 'lh-label', 'lh-readout', 'lh-tiles', 'lh-tile', 'lh-tile-chal', 'lh-lines', 'lh-line', 'stress', 'lh-id', 'lh-split', 'lh-split-up', 'lh-split-down', 'lh-stats', 'lh-dist', 'lh-bucket', 'lh-bucket-bar', 'lh-srcs', 'lh-src', 'lh-src-miss', 'lh-foot', 'lh-choices', 'lh-choice', 'lh-open-run', 'lh-ix-rows', 'lh-ix', 'lh-ix-name', 'lh-ix-last', 'lh-ix-pct', 'lh-spark', 'lh-spark-mid', 'lh-spark-line', 'lh-chart', 'lh-band', 'lh-tick', 'lh-grid', 'lh-mid', 'lh-axis', 'lh-bar', 'lh-path', 'lh-mark-dot', 'lh-mark', 'lh-cur', 'lh-dot', 'lh-minute', 'lh-stock', 'stock', 'with-stock', 'lh-stk-head', 'lh-stk-sub', 'lh-stk-pool', 'lh-stk-price', 'lh-stk-tag', 'lh-stk-from', 'lh-stk-note', 'lh-stk-cite', 'lh-limit', 'lh-seal']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `a screen emits ${c}`);
+  for (const c of ['composer-menu', 'composer-box', 'cmenu', 'cmenu-group', 'cmenu-crumb', 'cmenu-row', 'active', 'cmenu-icon', 'cmenu-title', 'cmenu-name', 'cmenu-desc', 'cmenu-foot', 'ref-chip', 'ref-chip-label', 'secret', 'revealed', 'secret-raw', 'secret-mask', 'secret-eye', 'thread-box', 'turn-rail', 'earlier-key', 'mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-h3', 'mk-book', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand', 'research', 'pcard-meta', 'pcard-foot', 'pcard-link', 'mod-tags', 'mod-boxes', 'mod-runs-wrap', 'mod-runs', 'mod-legend', 'composed', 'notes', 'notes-body', 'lh-answer', 'lh-summary', 'lh-block', 'lh-skel', 'lh-title', 'lh-error', 'lh-label', 'lh-readout', 'lh-tiles', 'lh-tile', 'lh-tile-chal', 'lh-lines', 'lh-line', 'stress', 'lh-id', 'lh-split', 'lh-split-up', 'lh-split-down', 'lh-stats', 'lh-dist', 'lh-bucket', 'lh-bucket-bar', 'lh-srcs', 'lh-src', 'lh-src-miss', 'lh-foot', 'lh-choices', 'lh-choice', 'lh-open-run', 'lh-ix-rows', 'lh-ix', 'lh-ix-name', 'lh-ix-last', 'lh-ix-pct', 'lh-spark', 'lh-spark-mid', 'lh-spark-line', 'lh-chart', 'lh-band', 'lh-tick', 'lh-grid', 'lh-mid', 'lh-axis', 'lh-bar', 'lh-path', 'lh-mark-dot', 'lh-mark', 'lh-cur', 'lh-dot', 'lh-minute', 'lh-stock', 'stock', 'with-stock', 'lh-stk-head', 'lh-stk-sub', 'lh-stk-pool', 'lh-stk-price', 'lh-stk-tag', 'lh-stk-from', 'lh-stk-note', 'lh-stk-cite', 'lh-limit', 'lh-seal']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `a screen emits ${c}`);
   const classes = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const missing = [...classes].filter(c => c && !new RegExp(`\\.${c.replace(/[-]/g, '\\-')}(?![\\w-])`).test(css));
   assert.deepEqual(missing, [], 'classes without a rule');
@@ -363,6 +365,8 @@ test('the layout: one screen tall, the thread scrolls under a pinned composer, t
   assert.match(rule('.main'), /(?:^|;)\s*height: 100vh/, 'a real height, not a minimum');
   assert.match(rule('.thread'), /overflow-y: auto/);
   assert.match(rule('.thread'), /flex: 1/);
+  assert.match(rule('.thread'), /position: relative/, "the marks' offset parent");
+  assert.match(rule('.thread-box'), /flex: 1 1 auto; min-height: 0; position: relative; display: flex; flex-direction: column/, "the box takes the thread's place");
   assert.match(rule('.drawer'), /position: fixed/);
   assert.match(rule('.status-line'), /text-align: center/);
 });
@@ -374,13 +378,16 @@ test('the narrow layout: the main grows with the page and the composer stays pin
   const rule = sel => narrow.match(new RegExp(`^\\s*${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`, 'm'))?.[1] ?? '';
   assert.match(rule('.main'), /flex: none/, 'no zero basis: the main is as tall as what it holds');
   assert.match(rule('.thread'), /overflow-y: visible/, 'the page scrolls, not the thread');
+  assert.match(rule('.thread-box'), /display: block/, 'the box no longer holds the thread to a screen');
+  assert.match(rule('.turn-rail'), /display: none/, 'no rail on a narrow window');
   assert.match(rule('.composer'), /position: sticky/);
   assert.match(rule('.composer'), /bottom: 0/);
   assert.match(rule('.composer'), /background: var\(--bg\)/, 'the thread does not show through it');
 });
 
 test('Details never covers the conversation: it makes room, folding the list away on a medium window', () => {
-  assert.match(css, /\.main\.with-drawer > \.head, \.main\.with-drawer > \.thread, \.main\.with-drawer > \.composer \{ margin-right: 400px; \}/);
+  assert.match(css, /\.main\.with-drawer > \.head, \.main\.with-drawer > \.thread-box, \.main\.with-drawer > \.composer \{ margin-right: 400px; \}/);
+  assert.match(css, /\.main\.with-drawer\.with-stock > \.head, \.main\.with-drawer\.with-stock > \.thread-box, \.main\.with-drawer\.with-stock > \.composer \{ margin-right: 460px; \}/);
   assert.match(css, /@media \(min-width: 861px\) and \(max-width: 1399px\) \{\s*\.list:has\(~ \.main\.with-drawer\) \{ display: none; \}/);
 });
 

@@ -246,3 +246,25 @@ test("the editor says whether its menu is open, and which row is active, as it i
   assert.match(shut, /aria-expanded="false"/);
   assert.doesNotMatch(shut, /aria-activedescendant/);
 });
+
+// ---- the thread box and the earlier key (plan 5 task 4)
+test("a conversation's thread sits in its box beside an empty rail; New message keeps a bare thread", () => {
+  const s = listed([conv('a')]);
+  const h = renderMessagesScreen(s, NOW);
+  assert.match(h, /<div class="thread-box"><div class="thread" id="thread">[\s\S]*<\/div><nav class="turn-rail" id="turn-rail" aria-label="Turns"><\/nav><\/div>/);
+  const draft = renderMessagesScreen(R.startDraft(s), NOW);
+  assert.match(draft, /<div class="thread" id="thread"><\/div>/);
+  assert.doesNotMatch(draft, /thread-box|turn-rail/);
+  const empty = renderMessagesScreen({ ...s, conversations: [] }, NOW);
+  assert.doesNotMatch(empty, /thread-box|turn-rail/);
+});
+
+test('Earlier messages shows while the window has more, Loading… disabled while it loads, nothing without more', () => {
+  const at = window => renderMessagesScreen(listed([conv('a', { window })]), NOW);
+  const more = at({ start: 30, through: 40, hasMore: true, replaced: [] });
+  assert.match(more, /<div class="thread" id="thread"><button class="btn-sm earlier-key" type="button" id="earlier-a" data-action="earlier" data-conv="a">Earlier messages<\/button>/);
+  const loading = at({ start: 30, through: 40, hasMore: true, replaced: [], loading: true });
+  assert.match(loading, /<button class="btn-sm earlier-key" type="button" id="earlier-a" data-action="earlier" data-conv="a" disabled>Loading…<\/button>/);
+  assert.doesNotMatch(at({ start: 0, through: 40, hasMore: false, replaced: [] }), /earlier-key/);
+  assert.doesNotMatch(at(undefined), /earlier-key/);
+});
