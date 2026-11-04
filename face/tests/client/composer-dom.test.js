@@ -99,3 +99,54 @@ test('a selection outside the editor reads as no caret', () => {
   doc.select(null, 0); assert.equal(ed.caret(root), null);
   assert.equal(makeEditor({ getSelection: () => null }).caret(root), null);
 });
+
+test("a BR that ends a block is the browser's own: an empty block is one blank line", () => {
+  const ed = makeEditor(makeDoc());
+  assert.deepEqual(ed.read(editor([text('a'), el('div', { children: [el('br')] }), el('div', { children: ['b'] })])), [T('a\n\nb')]);
+  assert.deepEqual(ed.read(editor([text('a'), el('div', { children: [el('br')] })])), [T('a\n')]);
+  assert.deepEqual(ed.read(editor([el('div', { children: ['a', el('br')] }), el('div', { children: ['b'] })])), [T('a\nb')]);
+  assert.deepEqual(ed.read(editor([el('div', { children: ['a', el('br'), 'b'] })])), [T('a\nb')], 'a BR inside a block, not at its end, is a newline');
+});
+
+test('pasted shapes read as the browser shows them: a BR before a block, content after a block', () => {
+  const ed = makeEditor(makeDoc());
+  assert.deepEqual(ed.read(editor([text('a'), el('br'), el('div', { children: ['b'] })])), [T('a\nb')]);
+  assert.deepEqual(ed.read(editor([el('div', { children: ['a'] }), text('b')])), [T('a\nb')]);
+  assert.deepEqual(ed.read(editor([el('p', { children: ['a'] }), chipEl(bot)])), [T('a\n'), C(bot)]);
+  assert.deepEqual(ed.read(editor([el('div', { children: ['a'] }), text('​')])), [T('a')], 'nothing visible after a block starts no line');
+});
+
+test('the caret and place agree over blank blocks and content after a block', () => {
+  const doc = makeDoc(), ed = makeEditor(doc);
+  const empty = el('div', { children: [el('br')] }), b = text('b');
+  const root = editor([text('a'), empty, el('div', { children: [b] })]);
+  doc.select(empty, 0); assert.equal(ed.caret(root), 2, 'on the blank line, after its newline');
+  doc.select(b, 0); assert.equal(ed.caret(root), 3);
+  ed.place(root, 2); assert.deepEqual(doc.sel.collapsed.at(-1), [empty, 0]);
+  assert.equal(ed.caret(root), 2);
+  const blk = el('div', { children: ['a'] }), tail = text('b');
+  const after = editor([blk, tail]);
+  doc.select(after, 1); assert.equal(ed.caret(after), 2, 'after a block, on the next line');
+  doc.select(tail, 0); assert.equal(ed.caret(after), 2);
+  ed.place(after, 2); assert.deepEqual(doc.sel.collapsed.at(-1), [tail, 0]);
+  const lone = editor([el('div', { children: ['a'] }), chipEl(bot)]);
+  ed.place(lone, 2); assert.deepEqual(doc.sel.collapsed.at(-1), [lone, 1], 'before the chip, after the newline');
+  assert.equal(ed.caret(lone), 2);
+});
+
+test('read(write(runs)) gives the runs back: leading, trailing and adjacent chips, text with newlines', () => {
+  const doc = makeDoc(), ed = makeEditor(doc);
+  // what a browser builds from editorHtml: text nodes keep their newlines (pre-wrap), a chip is its span
+  const build = runs => runs.map(r => (r.type === 'text' ? text(r.text) : chipEl(r.chip)));
+  const cases = [
+    [C(bot), T(' first')],
+    [T('last '), C(file)],
+    [T('a '), C(bot), C(file), T(' b')],
+    [T('line one\nline two\n'), C(bot), T('\nend')],
+  ];
+  for (const runs of cases) {
+    const root = editor([], html => { assert.equal(html, editorHtml(runs)); return build(runs); });
+    ed.write(root, runs, null);
+    assert.deepEqual(ed.read(root), runs);
+  }
+});
