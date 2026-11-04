@@ -38,6 +38,9 @@ import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk, wri
 import { rulesOf } from './host/rules-view.js';
 import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
+import { makeEditor } from './composer/dom.js';
+import { textDraft, isBlank, lengthOf, replaceRange, serialize, serialContext } from './composer/draft.js';
+import { flatItems } from './composer/menus.js';
 import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
 import { moveSeedOf, earnSeedOf, earnSaidOf, subWalletSeedOf } from './host/sheet-money.js';
@@ -187,6 +190,8 @@ const sheetUp = s => Boolean(s.sheet) && s.sheet.kind !== 'order';
 const overlayOf = s => (sheetUp(s) ? 'sheet' : s.sellMany || s.runSheet || s.lunhui?.stock || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
 const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.sellMany ? 'sellMany' : s.runSheet ? `run:${s.runSheet.module}` : s.lunhui?.stock ? `stock:${s.lunhui.stock.code}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
   : s.account.detailsVenue ? `venue:${s.account.detailsVenue}` : null);
+// the editor an event landed in: #say itself, or a node inside it (a paste's target can be a line's block)
+const sayOf = el => (el?.id === 'say' ? el : el?.closest?.('#say') ?? null);
 const closeKeyOf = overlay => (overlay === 'sheet' ? '.drawer.sheet .close-key' : '.drawer .close-key');
 const editorOf = e => (e ? [e.kind, e.convId, e.id].join('|') : null);
 const screenOf = s => `${s.route.screen}/${s.route.id ?? ''}`;
@@ -198,6 +203,8 @@ export function boot(win, host = {}) {
   const timers = host.timers ?? new Timers();
   const root = doc.getElementById('app');
   const now = host.now ?? (() => Date.now());
+  // the composer's editor (div#say, contenteditable): the only code that reads or writes its nodes
+  const editor = host.editor ?? makeEditor(doc);
   const call = host.call ?? wireCall;
   const getJson = host.getJson ?? getJsonVia(path => win.fetch(path));
   const postJson = host.postJson ?? postJsonVia((path, init) => win.fetch(path, init));
@@ -423,7 +430,15 @@ export function boot(win, host = {}) {
   // the owner's keys act only for a page that signs (the renderers draw them for no other)
   const signs = () => store.get().owner.role === 'signs';
 
-  let composerText = '';
+  // the composer's drafts (D8), in memory: one per conversation by its id, `new` for New message, `empty` with neither
+  const drafts = new Map();
+  const draftKey = s => (s.draft ? 'new' : currentConversation(s)?.id ?? 'empty');
+  const runsOf = key => drafts.get(key)?.runs ?? [];
+  const currentRuns = () => runsOf(draftKey(store.get()));
+  const setRuns = (runs, key = draftKey(store.get())) => { if (runs.length) drafts.set(key, { runs }); else drafts.delete(key); };
+  // the hook for the / and @ menus (Task 7 sets it): the menu drawn under the editor, or null. Its rows make Enter choose
+  let composerMenu = null;
+  const menuShowsRows = () => !!composerMenu && flatItems(composerMenu).length > 0;
   let composing = false;
   let pressed = false;   // a primary press is down: a render now would replace the element the click is aimed at
   let pending = false;
@@ -436,7 +451,7 @@ export function boot(win, host = {}) {
   let sheetOpens = 0;       // the sheets opened so far: a read a sheet waits on opens none over one opened since
   let sheetKind = null;     // the kind of the sheet open as the store last changed: which one a close closed
   let orderFields = null;   // the ticket's order sheet's fields as they last stood, for when another sheet took its place
-  let last = { overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, editor: null, confirm: null, query: '' };
+  let last = { overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, editor: null, confirm: null, query: '', key: null };
   let confirmFrom = null;
   let searchFocus = false;  // ⌥⌘K from a screen with no list: the box takes focus once Messages draws it
   let rowsAt = null;        // where the groups last stood: a query hides them, and they come back there when it clears (spec §5.1)
@@ -455,7 +470,12 @@ export function boot(win, host = {}) {
     // what the person had: focus and caret, typed text, picked radios, and where each scrolling box stood
     const active = doc.activeElement;
     const activeKey = focusKey(active);
-    const caret = active && typeof active.selectionStart === 'number' && (active.id || active.name) ? [active.selectionStart, active.selectionEnd] : null;
+    const caret = active && active.id !== 'say' && typeof active.selectionStart === 'number' && (active.id || active.name) ? [active.selectionStart, active.selectionEnd] : null;
+    // the editor's caret while it has focus, and whose draft it showed: the caret comes back only on that same draft
+    const say0 = doc.getElementById('say');
+    const sayCaret = say0 && active === say0 ? editor.caret(say0) : null;
+    const key = draftKey(s);
+    const sameKey = key === last.key;
     const typed = new Map([...root.querySelectorAll('input[id]:not([type=radio]):not([type=checkbox]):not([type=file]), textarea[id], select[id]')].map(el => [el.id, el.value]));
     const ticked = [...root.querySelectorAll('input[id]')].filter(el => (el.type === 'radio' || el.type === 'checkbox') && el.checked).map(el => el.id);
     const thread0 = doc.getElementById('thread');
@@ -468,7 +488,7 @@ export function boot(win, host = {}) {
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
-      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now());
+      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu: composerMenu });
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
     const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     root.innerHTML = renderRail(s, now(), { mac }) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen);
@@ -499,7 +519,8 @@ export function boot(win, host = {}) {
       if (el) el.open = true;
     }
     const say = doc.getElementById('say');
-    if (say) say.value = composerText;
+    const keepCaret = sameKey && sayCaret !== null ? sayCaret : null;
+    if (say) editor.write(say, currentRuns(), keepCaret);
 
     // scroll: the rows keep their place; the page keeps its place on the same screen; a drawer while it stays the same drawer
     const sameScreen = last.screen === screenOf(s);
@@ -553,8 +574,10 @@ export function boot(win, host = {}) {
     if (target) {
       target.focus();
       if (caret && target === find(activeKey) && typeof target.setSelectionRange === 'function') target.setSelectionRange(caret[0], caret[1]);
+      // focus can move a contenteditable's caret: the editor's goes back where write put it
+      if (target === say && keepCaret !== null) editor.place(say, keepCaret);
     }
-    last = { overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, editor: editorOf(s.edit), confirm: s.confirm, query };
+    last = { overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, editor: editorOf(s.edit), confirm: s.confirm, query, key };
     // a composed answer drawn without its run's view asks for it now that the page is whole (its dispatches render again)
     if (wantedViews(store.get()).length) void ensureViews(store, getJson);
   }
@@ -896,22 +919,37 @@ export function boot(win, host = {}) {
     void findConnectWallets();
   }
 
+  // the draft on screen, serialized against its conversation's channel (or New message's Where), cleared as it goes; a
+  // failure puts the whole draft, chips and all, back under the key it came from
   async function sendNow() {
-    const text = composerText.trim();
-    if (!text) return;
     const s = store.get();
-    composerText = '';
+    const key = draftKey(s);
+    const runs = runsOf(key);
+    if (isBlank(runs)) return;
+    const workspaceId = s.draft ? s.draft.where : currentConversation(s)?.channel?.workspaceId ?? null;
+    const text = serialize(runs, serialContext({ channels: s.channels, workspaceId })).trim();
+    const back = () => { setRuns(runs, key); render(); };
+    setRuns([], key);
+    render();
     if (s.draft) {
       const id = await actions.newConversation({ title: s.draft.title, workspaceId: s.draft.where, text });
-      if (!id) { composerText = text; render(); return; }
+      if (!id) { back(); return; }
       await live.refresh();
       go({ screen: 'messages', id });
       live.promote(id);
       return;
     }
     const sent = await sendText(text);
-    if (!sent) { composerText = text; render(); return; }
+    if (!sent) { back(); return; }
     render();
+  }
+  // words put in the composer for the operator (a suggestion, Hand to Gravit): the draft on screen, the caret after them
+  function putWords(words) {
+    const runs = textDraft(words).runs;
+    setRuns(runs);
+    render();
+    const say = doc.getElementById('say');
+    if (say) { say.focus(); editor.place(say, lengthOf(runs)); }
   }
   // one message to the open conversation by the composer's own path (the composer, the stock drawer's Ask, a follow-up): what
   // actions.send answers, the conversation promoted to a follow when it prompted; the composer's words are never touched
@@ -983,7 +1021,7 @@ export function boot(win, host = {}) {
     },
     confirmYes: () => confirmYes(),
     cancelConfirm: () => store.dispatch('cancelConfirm'),
-    suggest: el => { composerText = el.dataset.text; render(); doc.getElementById('say')?.focus(); },
+    suggest: el => putWords(el.dataset.text),
     // the gates: a card's ✗ / ✓, a question card's Answer
     answer: el => { void actions.answer(el.dataset.msg, el.dataset.value); },
     // the batch is read from the pressed card alone; one with a question left blank is refused before it can settle the gate
@@ -1054,10 +1092,8 @@ export function boot(win, host = {}) {
       const asset = handWordsOf(s.markets, s.account, el.dataset.id, now());
       if (!asset) return;
       store.dispatch('startDraft', { now: now() });
-      composerText = `Look at ${asset.symbol}${asset.name && asset.name !== asset.symbol ? ` (${asset.name})` : ''}`;
       go({ screen: 'messages', id: 'new' });
-      render();
-      doc.getElementById('say')?.focus();
+      putWords(`Look at ${asset.symbol}${asset.name && asset.name !== asset.symbol ? ` (${asset.name})` : ''}`);
     },
     // the owner device: the pair box's code, Sign in, and — on a page that signs — Settings › Devices' Sign out and Let it sign
     pairDevice: () => { void owner.ready(doc.getElementById('pair-code')?.value?.trim() || undefined); },
@@ -1178,7 +1214,7 @@ export function boot(win, host = {}) {
   const typesWords = el => el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type !== 'checkbox' && el.type !== 'radio');
   // typing: the composer keeps its words outside the store; the title, the searches and the fields go through it
   function typed(el) {
-    if (el.id === 'say') composerText = el.value;
+    if (el.id === 'say') setRuns(editor.read(el));
     else if (el.dataset?.action === 'draftTitle') store.dispatch('setDraftTitle', el.value);
     else if (el.dataset?.action === 'mkQuery') { store.dispatch('setMarketsQuery', el.value); searchSoon(el.value); }
     else if (el.dataset?.action === 'tradeQuery') tradeSoon(el.value);   // trade.query moves the query (the box keeps the words)
@@ -1219,6 +1255,19 @@ export function boot(win, host = {}) {
   doc.addEventListener('pointerup', release);
   doc.addEventListener('pointercancel', release);
   win.addEventListener('blur', release);
+  // a paste in the editor is plain text at the caret (a paste of files is plan 4's); the page is not rendered
+  root.addEventListener('paste', ev => {
+    const say = sayOf(ev.target);
+    if (!say) return;
+    ev.preventDefault();
+    const words = (ev.clipboardData?.getData('text/plain') ?? '').replace(/\r\n?/g, '\n');
+    if (!words) return;
+    const now0 = editor.read(say);
+    const at = editor.caret(say) ?? lengthOf(now0);
+    const runs = replaceRange(now0, at, at, words);
+    setRuns(runs);
+    editor.write(say, runs, at + words.length);
+  });
   root.addEventListener('compositionstart', () => { composing = true; });
   root.addEventListener('compositionend', ev => {
     composing = false;
@@ -1273,6 +1322,13 @@ export function boot(win, host = {}) {
       else if (s.account.statementOpen) store.dispatch('closeStatement');
       else if (s.account.detailsVenue) store.dispatch('closeVenueDetails');
       else if (s.route.screen === 'trade' && s.trade.ticket) trade.closeTicket();
+      return;
+    }
+    // Enter in the editor sends; Shift+Enter is the browser's new line, an IME's Enter its composition's, and while a
+    // menu shows rows Enter is the menu's (Task 7)
+    if (ev.key === 'Enter' && sayOf(ev.target) && !ev.shiftKey && !imeOpen && !composing && !menuShowsRows()) {
+      ev.preventDefault();
+      void sendNow();
       return;
     }
     const a = doc.activeElement;

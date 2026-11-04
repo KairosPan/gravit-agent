@@ -11,7 +11,7 @@ import { firstOpen } from '../host/sessions.js';
 import { needsAnswer } from '../messages.js';
 import { childrenOf } from '../host/children-view.js';
 import { channelLabel } from '../host/list-view.js';
-import { renderMenu } from '../composer/view.js';
+import { renderMenu, menuAria } from '../composer/view.js';
 
 export function currentConversation(state) {
   const id = state.route.screen === 'messages' ? state.route.id : null;
@@ -21,7 +21,7 @@ export function currentConversation(state) {
 // the menu's slot above the box, the editor and Send; the words are prompted to the session (host/actions.js). The editor is
 // drawn empty: app.js puts the conversation's draft in it
 export function renderComposer({ placeholder = 'Tell Gravit…', above = '', menu = null } = {}) {
-  const editor = attrs({ id: 'say', class: 'composer-input', contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true', 'aria-labelledby': 'say-label', 'aria-controls': 'composer-menu', 'aria-expanded': 'false', 'data-placeholder': placeholder });
+  const editor = attrs({ id: 'say', class: 'composer-input', contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true', 'aria-labelledby': 'say-label', 'aria-controls': 'composer-menu', ...menuAria(menu), 'data-placeholder': placeholder });
   return `<form class="composer" data-action="send">${above}<div class="composer-menu" id="composer-menu">${renderMenu(menu)}</div><div class="composer-box">` +
     `<span id="say-label" class="sr-only">Tell Gravit</span><div${editor}></div>` +
     `<button type="submit" class="send-key" aria-label="Send">${icon('send', 18, 2.4)}</button></div></form>`;

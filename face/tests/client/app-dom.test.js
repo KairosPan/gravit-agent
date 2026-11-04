@@ -6,6 +6,7 @@ import { boot as bootApp, Timers } from '../../client/js/app.js';
 import { rowsOf, pairsOf } from '../../client/js/host/market-view.js';
 import { kidOf } from '../../client/js/wire/owner-key.js';
 import { fakeWindow } from './helpers/fake-dom.js';
+import { valueEditor } from './helpers/value-editor.js';
 import { modulesListing } from './helpers/inventory.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
 import { fakeProvider, ADDRESS as WALLET_ADDRESS, hashOf } from './helpers/fake-wallet.js';
@@ -67,7 +68,7 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
   };
   return { openMux: o => { opts = o; return mux; }, call, getJson, postJson, markdown: null, calls, posted, answered, streams, rows, reads, inventory, overviews, ready: async () => { opts.onReady({}); await settle(); }, opts: () => opts };
 }
-const started = (f, h) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
+const started = (f, h) => boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
 const send = f => f.fire('root', 'submit', { target: { closest: () => ({ dataset: { action: 'send' } }) } });
 
 test('before the host answers, the empty state shows with a connecting status line; the list then draws rows and opens the first', async () => {
@@ -277,7 +278,7 @@ test('an @ goes through the room route: one that addressed a bot sends nothing m
   const fetched = [];
   f.win.fetch = async (path, init) => { fetched.push([path, JSON.parse(init.body)]); const a = answers.shift(); return { ok: a.ok, status: a.status, json: async () => a.body }; };
   // no postJson handed in: the page's own, on the window's fetch
-  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson, markdown: null });
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson, markdown: null });
   await h.ready();
   for (const words of ['@buffett leverage?', '@buffett and now?']) {
     say.value = words;
@@ -356,7 +357,7 @@ test('the theme comes from the prefs before the host answers, and a change is wr
 // (a test's own fakes, `more`, beside); the browser's storage a memory
 const fakeMarkets = () => ({});
 const memoryStorage = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), m }; };
-const bootMarkets = (f, h, _mk, more = {}) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, ...more });
+const bootMarkets = (f, h, _mk, more = {}) => boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, ...more });
 
 // the Account's search finds the A shares too: a hit is a cn row, starred on the face's cn list
 test("typing in the search box searches; a star watches and writes the face's key; a row opens its page", async () => {
@@ -459,7 +460,7 @@ test('a market page reads no /data/bars, whatever its id; Markets on screen read
   const h = host();
   const reads = [];
   const getJson = async path => { reads.push(path); return h.getJson(path); };
-  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson, postJson: h.postJson, markdown: h.markdown });
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson, postJson: h.postJson, markdown: h.markdown });
   await h.ready();
   assert.match(f.html(), /<main class="main mkts mk-page">/);
   assert.match(f.html(), /A-share · 600519 · SH/, 'the A-share page, cold');
@@ -536,7 +537,7 @@ function accountHost(opts = {}, { answers = {} } = {}) {
   };
   return { ...h, getJson, reads, accountReads: () => reads.filter(isPage).length };
 }
-const bootAccount = (f, h, _mk = fakeMarkets(), more = {}) => boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, ...more });
+const bootAccount = (f, h, _mk = fakeMarkets(), more = {}) => boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, ...more });
 
 // the Account's push channel as the app is handed it: its opens, closes and follows recorded, its status the test's to set; the
 // app's two callbacks kept, so a test delivers an event or a change of status as the stream would
@@ -1057,7 +1058,7 @@ test('a press holds renders until it ends, so a streaming quote cannot swallow t
   storage.setItem('gravit.market.watchlist.v1', JSON.stringify({ version: 1, items: [{ id: 'crypto:BTC/USD', market: 'crypto', symbol: 'BTC/USD', name: 'Bitcoin', exchange: '', currency: 'USD' }] }));
   const f = fakeWindow({ hash: '#/markets', storage });
   const h = host();
-  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, pointerHoldMs: 20 });
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, pointerHoldMs: 20 });
   await h.ready();
   // a quote landing, as the quotes poll lands one: a store change, which renders
   const tick = price => store.dispatch('accountQuotesLoaded', { quotes: [{ venue: 'ex', symbol: 'BTC/USDT', market: { price, quoteAt: '2026-10-20T14:00:00Z' } }] });
@@ -2770,7 +2771,7 @@ test('after Run the card reads Running and links to the conversation; when the s
   const h = host({ rows: [row('s1')] });
   const clock = { at: Date.now() };
   const timers = new HeldTimers(ms => ms === 5000);
-  const store = boot(f.win, { openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers, now: () => clock.at });
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers, now: () => clock.at });
   await h.ready();
   f.win.location.hash = '#/discover';
   await settle();
@@ -2829,7 +2830,7 @@ test('a composed answer reads its view; a 404 draws the summary, the error line 
   const h = host({ rows: [row('s1', { agentAvailable: true })] });
   const views = [];
   let answer = () => { throw Object.assign(new Error('gone: HTTP 404'), { status: 404 }); };
-  const store = boot(f.win, { openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
     getJson: async path => (path.startsWith('/data/lunhui/view?') ? (views.push(path), answer()) : h.getJson(path)) });
   await h.ready();
   const follow = [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1');
@@ -2854,7 +2855,7 @@ test('a composed answer reads its view; a 404 draws the summary, the error line 
 test('a composed answer: a tile opens and closes, By change switches, a bucket is picked by number', async () => {
   const f = fakeWindow({ hash: '#/messages/s1' });
   const h = host({ rows: [row('s1', { agentAvailable: true })] });
-  const store = boot(f.win, { openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
     getJson: async path => (path.startsWith('/data/lunhui/view?') ? { ok: true, view: VIEW_1027 } : h.getJson(path)) });
   await h.ready();
   const follow = [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1');
@@ -2881,7 +2882,7 @@ test('a composed answer: a tile opens and closes, By change switches, a bucket i
 async function stockAnswer(more = {}) {
   const f = fakeWindow({ hash: '#/messages/s1' });
   const h = host({ rows: [row('s1', { agentAvailable: true })] });
-  const store = boot(f.win, { openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
     getJson: async path => (path.startsWith('/data/lunhui/view?') ? { ok: true, view: VIEW_1027 } : h.getJson(path)), ...more });
   await h.ready();
   const follow = [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1');
@@ -3012,7 +3013,7 @@ test('Open in Markets routes to cn:<code>', async () => {
 test('the minute cursor: the slider and the pointer patch the chart in place; a redraw mid-drag keeps the slider\'s minute', async () => {
   const f = fakeWindow({ hash: '#/messages/s1' });
   const h = host({ rows: [row('s1', { agentAvailable: true })] });
-  const store = boot(f.win, { openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
     getJson: async path => (path.startsWith('/data/lunhui/view?') ? { ok: true, view: VIEW_1027 } : h.getJson(path)) });
   await h.ready();
   const follow = [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1');
@@ -3060,7 +3061,7 @@ test('the minute cursor: the slider and the pointer patch the chart in place; a 
 async function choiceAnswer(choices) {
   const f = fakeWindow({ hash: '#/messages/s1' });
   const h = host({ rows: [row('s1', { agentAvailable: true })] });
-  const store = boot(f.win, { openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
     getJson: async path => (path.startsWith('/data/lunhui/view?') ? { ok: true, view: VIEW_1027 }
       : path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w-cn', name: VIEW_1027.strategy, isRoot: false, sessionIds: ['s1'] }], ungrouped: [], archived: [], presets: {} }
       : h.getJson(path)) });
@@ -3587,4 +3588,178 @@ test('⌥⇧⌘K is not the search key', async () => {
   say.focus();
   f.fire('doc', 'keydown', keyK({ metaKey: true, shiftKey: true }));
   assert.equal(f.doc.activeElement, say);
+});
+
+// ---- the composer's drafts in the page (plan 3 task 5): the editor is host.editor; here a recording valueEditor ----
+const bot = { kind: 'bot', id: 'buffett', label: 'Buffett Type' };
+const fileChip = { kind: 'file', path: 'strategies/x.md', dir: false, label: 'x.md' };
+function recording() {
+  const writes = [];
+  return { writes, editor: { ...valueEditor, write(el, runs, at) { writes.push([el, runs, at]); valueEditor.write(el, runs, at); } } };
+}
+const bootComposer = async (f, h, editor) => {
+  const store = boot(f.win, { editor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
+  await h.ready();
+  return store;
+};
+const type = (f, say, words, chips) => { say.value = words; if (chips) say.chips = chips; f.fire('root', 'input', { target: say }); };
+const enter = (f, say, more = {}) => { let prevented = false; f.fire('doc', 'keydown', { key: 'Enter', target: say, preventDefault() { prevented = true; }, ...more }); return prevented; };
+const promptsOf = h => h.calls.filter(c => c[0] === 'session/prompt').map(c => [c[1].request.sessionId, c[1].request.content[0].text]);
+
+test('a stream frame mid-typing keeps the words, the chip and the caret', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1')] });
+  const { writes, editor } = recording();
+  const store = await bootComposer(f, h, editor);
+  const typedAt = f.writes;
+  say.focus();
+  type(f, say, 'look at ETH', [bot]);
+  say.setSelectionRange(7, 7);
+  assert.equal(f.writes, typedAt, 'a keystroke never renders the page');
+  store.dispatch('toggleRail');   // a host event's render
+  assert.equal(f.writes, typedAt + 1);
+  const [el, runs, at] = writes.at(-1);
+  assert.equal(el, say);
+  assert.deepEqual(runs, [{ type: 'text', text: 'look at ETH' }, { type: 'chip', chip: bot }]);
+  assert.equal(at, 7);
+  assert.equal(f.doc.activeElement, say);
+  assert.equal(say.selectionStart, 7);
+  store.timers.clear();
+});
+
+test('nothing renders while an IME composes; compositionend takes the words, then renders', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1')] });
+  const { writes, editor } = recording();
+  const store = await bootComposer(f, h, editor);
+  const before = f.writes;
+  say.focus();
+  f.fire('root', 'compositionstart', { target: say });
+  store.dispatch('toggleRail');
+  say.value = '你好';
+  f.fire('root', 'input', { target: say, isComposing: true });
+  assert.equal(f.writes, before, 'held while composing');
+  f.fire('root', 'compositionend', { target: say });
+  assert.equal(f.writes, before + 1);
+  assert.deepEqual(writes.at(-1)[1], [{ type: 'text', text: '你好' }]);
+  assert.equal(say.value, '你好');
+  store.timers.clear();
+});
+
+test('Enter sends; Shift+Enter does not; Enter during a composition (isComposing, or keyCode 229) does not', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = await bootComposer(f, h, valueEditor);
+  say.focus();
+  type(f, say, 'line one');
+  assert.equal(enter(f, say, { shiftKey: true }), false, 'Shift+Enter is the browser\'s own new line');
+  assert.equal(enter(f, say, { isComposing: true }), false);
+  assert.equal(enter(f, say, { keyCode: 229 }), false);
+  await settle();
+  assert.deepEqual(promptsOf(h), [], 'nothing sent');
+  assert.equal(enter(f, say), true);
+  await settle();
+  assert.deepEqual(promptsOf(h), [['s1', 'line one']]);
+  assert.equal(say.value, '');
+  assert.equal(enter(f, say), true, 'Enter on a blank draft is still the composer\'s');
+  await settle();
+  assert.equal(promptsOf(h).length, 1, 'a blank draft sends nothing');
+  store.timers.clear();
+});
+
+test('each conversation keeps its own draft, and sending in one leaves the other\'s', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1', { updatedAt: 50, agentAvailable: true }), row('s2', { updatedAt: 9, agentAvailable: true })] });
+  const store = await bootComposer(f, h, valueEditor);
+  type(f, say, 'for A');
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  await settle();
+  assert.equal(say.value, '', 'B starts empty');
+  type(f, say, 'for B');
+  send(f);
+  await settle();
+  assert.deepEqual(promptsOf(h), [['s2', 'for B']]);
+  assert.equal(say.value, '');
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  await settle();
+  assert.equal(say.value, 'for A', 'A kept its words');
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  await settle();
+  assert.equal(say.value, '', 'B was sent and cleared');
+  store.timers.clear();
+});
+
+test('a failed send keeps the whole draft, chips included, under its own conversation', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1', { updatedAt: 50, agentAvailable: true }), row('s2', { updatedAt: 9 })] });
+  const call = h.call;
+  h.call = async (endpoint, args) => { if (endpoint === 'session/prompt') { h.calls.push([endpoint, args]); throw new Error('host down'); } return call(endpoint, args); };
+  const { writes, editor } = recording();
+  const store = await bootComposer(f, h, editor);
+  type(f, say, 'ask ', [fileChip]);
+  send(f);
+  await settle();
+  assert.deepEqual(promptsOf(h), [['s1', 'ask @strategies/x.md']], 'the chip serialized');
+  const draft = [{ type: 'text', text: 'ask ' }, { type: 'chip', chip: fileChip }];
+  assert.deepEqual(writes.at(-1)[1], draft, 'back in the editor');
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  await settle();
+  assert.deepEqual(writes.at(-1)[1], [], 'not in another conversation');
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  await settle();
+  assert.deepEqual(writes.at(-1)[1], draft, 'under its own');
+  store.timers.clear();
+});
+
+test('New message keeps its draft under new, and a created conversation clears it', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = await bootComposer(f, h, valueEditor);
+  type(f, say, 'in s1');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
+  await settle();
+  assert.equal(say.value, '', 'New message has its own draft');
+  type(f, say, 'a new thought');
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  await settle();
+  assert.equal(say.value, 'in s1');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
+  await settle();
+  assert.equal(say.value, 'a new thought', 'kept under new');
+  send(f);
+  await settle();
+  assert.equal(store.get().route.id, 's-new');
+  assert.deepEqual(promptsOf(h), [['s-new', 'a new thought']]);
+  assert.equal(say.value, '');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
+  await settle();
+  assert.equal(say.value, '', 'the created conversation took it');
+  store.timers.clear();
+});
+
+test('a paste arrives as plain text at the caret', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = await bootComposer(f, h, valueEditor);
+  say.focus();
+  type(f, say, 'ab');
+  say.setSelectionRange(1, 1);
+  const before = f.writes;
+  let prevented = false;
+  f.fire('root', 'paste', { target: say, preventDefault() { prevented = true; }, clipboardData: { getData: t => (t === 'text/plain' ? 'X\r\nY' : '<b>X</b>') } });
+  assert.equal(prevented, true);
+  assert.equal(f.writes, before, 'the page is not rendered');
+  assert.equal(say.value, 'aX\nYb');
+  assert.equal(say.selectionStart, 4, 'the caret after the pasted text');
+  send(f);
+  await settle();
+  assert.deepEqual(promptsOf(h), [['s1', 'aX\nYb']]);
+  store.timers.clear();
 });

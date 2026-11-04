@@ -205,3 +205,13 @@ test("Details' Pin and Unpin key carries one stable id, so focus finds it after 
   assert.match(mk({}), /data-action="pin" data-conv="a" id="details-pin-a">Pin</);
   assert.match(mk({ pinned: ['a'] }), /data-action="unpin" data-conv="a" id="details-pin-a">Unpin</);
 });
+
+test("the editor says whether its menu is open, and which row is active, as it is drawn", () => {
+  const menu = { kind: '@', from: 0, query: '', groups: [{ label: 'Bots in this room', items: [{ kind: 'bot', id: 'a', name: 'A', description: '' }, { kind: 'bot', id: 'b', name: 'B', description: '' }] }], active: 1 };
+  const open = renderComposer({ menu }).match(/<div id="say"([^>]*)>/)[1];
+  assert.match(open, /aria-expanded="true"/);
+  assert.match(open, /aria-activedescendant="cm-1"/);
+  const shut = renderComposer().match(/<div id="say"([^>]*)>/)[1];
+  assert.match(shut, /aria-expanded="false"/);
+  assert.doesNotMatch(shut, /aria-activedescendant/);
+});

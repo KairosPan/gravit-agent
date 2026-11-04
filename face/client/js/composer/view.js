@@ -9,10 +9,21 @@ const chipIcon = c => icon(c.kind === 'bot' ? 'agent' : c.kind === 'conversation
 /** A chip's inner markup: its icon and its label. The bubble draws a conversation mention with it, no data and editable. */
 export const chipInner = (iconHtml, label) => `${iconHtml}<span class="ref-chip-label">${esc(label)}</span>`;
 
-/** The editor's markup: text escaped (its newlines kept under pre-wrap), a chip atomic, carrying itself in data-chip. */
+/** The editor's markup: text escaped (its newlines kept under pre-wrap), a chip atomic, carrying itself in data-chip. A
+ *  newline that ends the draft draws no line of its own under pre-wrap, so a BR follows it: the browser's own trailing
+ *  BR, which the DOM adapter reads as nothing, and the caret after the newline sits on the new line. */
 export function editorHtml(runs) {
-  return (runs ?? []).map(r => (r.type === 'text' ? esc(r.text)
-    : `<span${attrs({ class: 'ref-chip', contenteditable: 'false', 'data-chip': JSON.stringify(r.chip) })}>${chipInner(chipIcon(r.chip), r.chip.label)}</span>`)).join('');
+  const list = runs ?? [];
+  const last = list[list.length - 1];
+  return list.map(r => (r.type === 'text' ? esc(r.text)
+    : `<span${attrs({ class: 'ref-chip', contenteditable: 'false', 'data-chip': JSON.stringify(r.chip) })}>${chipInner(chipIcon(r.chip), r.chip.label)}</span>`)).join('') +
+    (last?.type === 'text' && last.text.endsWith('\n') ? '<br>' : '');
+}
+
+/** The editor's menu attributes: expanded while the menu shows rows, its active row (`cm-<i>`) the active descendant. */
+export function menuAria(menu) {
+  const open = !!menu && flatItems(menu).length > 0;
+  return { 'aria-expanded': open ? 'true' : 'false', 'aria-activedescendant': open ? `cm-${menu.active ?? 0}` : null };
 }
 
 const LABEL = { '/': 'Commands and skills', '@': 'References' };

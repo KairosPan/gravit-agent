@@ -150,3 +150,20 @@ test('read(write(runs)) gives the runs back: leading, trailing and adjacent chip
     assert.deepEqual(ed.read(root), runs);
   }
 });
+
+test('a draft that ends in a newline draws its empty last line with a BR, reads back the same, and the caret sits on it', () => {
+  const doc = makeDoc(), ed = makeEditor(doc);
+  const runs = [T('a\n')];
+  assert.equal(editorHtml(runs), 'a\n<br>', 'pre-wrap draws no line for a trailing newline: the BR does');
+  assert.equal(editorHtml([T('a\nb')]), 'a\nb');
+  assert.equal(editorHtml([T('a\n'), C(bot)]).endsWith('</span>'), true, 'only a newline that ends the draft');
+  const t = text('a\n');
+  const root = editor([], html => { assert.equal(html, editorHtml(runs)); return [t, el('br')]; });
+  ed.write(root, runs, 2);
+  assert.deepEqual(ed.read(root), runs);
+  assert.deepEqual(doc.sel.collapsed.at(-1), [t, 2], 'after the newline, before the BR: the new line');
+  doc.select(t, 2);
+  assert.equal(ed.caret(root), 2);
+  doc.select(root, 2);
+  assert.equal(ed.caret(root), 2, 'past the BR is still the end');
+});

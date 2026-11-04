@@ -77,3 +77,11 @@ test('no rows draws nothing', () => {
   assert.equal(renderMenu({ kind: '@', from: 0, query: 'zz', groups: [], active: 0 }), '');
   assert.equal(renderMenu({ kind: '/', from: 0, query: 'zz', groups: [{ label: 'Skills', items: [] }], active: 0 }), '');
 });
+
+test("the editor's menu state for assistive tech: expanded with rows, the active row its active descendant", async () => {
+  const { menuAria } = await import('../../client/js/composer/view.js');
+  const menu = { kind: '@', from: 0, query: '', groups: [{ label: 'Bots in this room', items: [{ kind: 'bot', id: 'a', name: 'A', description: '' }, { kind: 'bot', id: 'b', name: 'B', description: '' }] }], active: 1 };
+  assert.deepEqual(menuAria(menu), { 'aria-expanded': 'true', 'aria-activedescendant': 'cm-1' });
+  assert.deepEqual(menuAria(null), { 'aria-expanded': 'false', 'aria-activedescendant': null });
+  assert.deepEqual(menuAria({ ...menu, groups: [] }), { 'aria-expanded': 'false', 'aria-activedescendant': null }, 'a menu with no rows is closed');
+});
