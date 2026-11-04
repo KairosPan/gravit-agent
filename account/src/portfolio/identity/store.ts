@@ -8,7 +8,7 @@
  * Both files are 0600 in a 0700 folder, written whole (a temporary file beside it, flushed, renamed over the old one). A token is never
  * here: it is in `<home>/credentials/networks/<network>.json` (secret-file.ts). */
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync, type Stats } from "node:fs";
 import { join } from "node:path";
 import { emptyRouting, isClock, NETWORKS, ROUTE_ROWS, type Network, type Routing } from "./kinds.ts";
 
@@ -52,13 +52,30 @@ export const identityDir = (home: string): string => join(home, "identity");
 export const statePath = (home: string): string => join(identityDir(home), "state.json");
 export const strangersPath = (home: string): string => join(identityDir(home), "strangers.json");
 
+/** how many blocked senders the state keeps: past it, the one blocked longest ago leaves first */
+export const BLOCKED_MAX = 200;
+
+const lstatOf = (p: string): Stats | undefined => {
+  try {
+    return lstatSync(p);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw err;
+  }
+};
+const linkRefused = (what: string): Error => Object.assign(new Error(`${what} in the home is a link: the identity's files are never written through one`), { code: "ELINK" });
+
 /** Write a file of the identity folder whole: the folder made 0700 (and set so again), a fresh temporary file ("wx", 0600), flushed,
- * renamed over the old one */
+ * renamed over the old one. A link at identity/ or at the file is refused (thrown, code ELINK): nothing is written through one */
 export function writeIdentityFile(home: string, name: string, text: string): void {
   const dir = identityDir(home);
+  const d = lstatOf(dir);
+  if (d?.isSymbolicLink()) throw linkRefused("identity/");
+  if (d && !d.isDirectory()) throw Object.assign(new Error("identity/ in the home is not a folder"), { code: "ENOTDIR" });
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
   const file = join(dir, name);
+  if (lstatOf(file)?.isSymbolicLink()) throw linkRefused(`identity/${name}`);
   const tmp = join(dir, `.${name}.${randomBytes(6).toString("hex")}.tmp`);
   try {
     const fd = openSync(tmp, "wx", 0o600);
@@ -116,7 +133,7 @@ export function loadIdentity(home: string): IdentityState {
     const q = r.quiet as Record<string, unknown>;
     if (str(q.from) && str(q.to) && isClock(q.from) && isClock(q.to) && q.from !== q.to) out.quiet = { from: q.from, to: q.to };
   }
-  if (Array.isArray(r.blocked)) out.blocked = r.blocked.filter(str);
+  if (Array.isArray(r.blocked)) out.blocked = [...new Set(r.blocked.filter(str))].slice(-BLOCKED_MAX);
   return out;
 }
 

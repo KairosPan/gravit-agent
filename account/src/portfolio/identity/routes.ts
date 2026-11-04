@@ -11,13 +11,16 @@
  *   POST /api/account/identity/pending/not-me {id}                     sheet 3's "Not me": the sender counted as a stranger, waiting again
  *   POST /api/account/identity/pending/drop {id}                       the sheet closed: the token forgotten at once
  *   GET  /api/account/identity                                         the Identity tab: networks, routing, quiet hours, Not you
+ *   GET  /api/account/identity/inbox?after=<n>&wait=<s>                the face's desk: the operator's messages numbered above n, waiting
+ *                                                                      up to s seconds (0 to 25) for one; {ok, messages, last, status}.
+ *                                                                      Unsigned, behind the account's fence; reading never changes it
  *
  * Every route answers 404 "the account layer is not mounted" when the service holds no identity. The token is held in memory only
  * (pending.ts); it is in no answer, no log line and no ledger row. */
 import type express from "express";
 import type { Refusal } from "../../core/errors.ts";
 import { isRefusal } from "../../core/errors.ts";
-import type { IdentityView } from "./identity.ts";
+import type { InboxAnswer, IdentityView } from "./identity.ts";
 import type { PendingConnections } from "./pending.ts";
 
 export const IDENTITY_TOKEN_PATH = "/api/account/identity/telegram/token";
@@ -52,6 +55,7 @@ export const IDENTITY_WORDS = {
   blockShape: "A sender is blocked by the reference Not you shows (12 hex characters) and their masked id (… and up to three digits).",
   blockMismatch: "That masked id is not the one Not you shows for this sender.",
   noIdentity: "This account keeps no identity: it is the account layer's.",
+  inboxQuery: "This route takes after=<a whole number, 0 or more> and wait=<whole seconds, 0 to 25>.",
 } as const;
 
 const NOT_MOUNTED = "the account layer is not mounted";
@@ -60,6 +64,7 @@ const NOT_MOUNTED = "the account layer is not mounted";
 export interface IdentityRoutesHost {
   readonly pending: PendingConnections;
   view(): IdentityView;
+  inbox(after: number, waitMs: number, signal?: AbortSignal): Promise<InboxAnswer>;
 }
 
 export interface IdentityRoutesDeps {
@@ -102,6 +107,17 @@ const idOf = (body: unknown): string | undefined => {
   return typeof id === "string" && id !== "" && id.length <= 64 ? id : undefined;
 };
 
+/** the longest an inbox read waits, in seconds */
+const INBOX_WAIT_MAX_S = 25;
+
+/** a query value as a whole number from `min` to `max` (absent: `min`), or undefined for anything else */
+function wholeOf(v: unknown, min: number, max: number): number | undefined {
+  if (v === undefined) return min;
+  if (typeof v !== "string" || !/^\d{1,16}$/.test(v)) return undefined;
+  const n = Number(v);
+  return Number.isSafeInteger(n) && n >= min && n <= max ? n : undefined;
+}
+
 export function registerIdentityRoutes(app: express.Express, deps: IdentityRoutesDeps): void {
   const { identity, wrap, readSmall } = deps;
 
@@ -132,6 +148,19 @@ export function registerIdentityRoutes(app: express.Express, deps: IdentityRoute
     const id = identity();
     if (!id) return void res.status(404).json({ ok: false, error: NOT_MOUNTED });
     res.json(id.view());
+  }));
+
+  // the face's desk: the operator's messages, long-polled — the request gone, the wait ends
+  app.get("/api/account/identity/inbox", wrap(async (req, res) => {
+    const id = identity();
+    if (!id) return void res.status(404).json({ ok: false, error: NOT_MOUNTED });
+    const after = wholeOf(req.query.after, 0, Number.MAX_SAFE_INTEGER);
+    const wait = wholeOf(req.query.wait, 0, INBOX_WAIT_MAX_S);
+    if (after === undefined || wait === undefined) return void res.status(400).json({ ok: false, error: IDENTITY_WORDS.inboxQuery });
+    const gone = new AbortController();
+    res.on("close", () => gone.abort());
+    const answer = await id.inbox(after, wait * 1000, gone.signal);
+    if (!res.writableEnded && !res.destroyed) res.json(answer);
   }));
 
   app.get("/api/account/identity/pending", wrap((req, res) => {

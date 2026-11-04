@@ -163,9 +163,9 @@ export interface ServiceOptions {
    * those brains read before their key files, as the answer to a key typed on the face says it (envWins); the process's own by default */
   desk?: { brain?: Brain | Brain[] | undefined; tickMs?: number | undefined; firstCycleMs?: number | undefined; env?: NodeJS.ProcessEnv | undefined } | undefined;
   /** ACCOUNT › IDENTITY (identity/): the Telegram Bot API's address (default: Telegram's own, or ACCOUNT_TELEGRAM_API's loopback override —
-   * bot-api.ts telegramApiBase), the fetch it is reached with, the pending connection's long poll in seconds (25) and its clock. Tests
+   * bot-api.ts telegramApiBase), the fetch it is reached with, the pending connection's long poll in seconds (25), the connected poller's (50) and its clock. Tests
    * point it at a fake Bot API */
-  identity?: { apiBase?: string | undefined; fetch?: typeof fetch | undefined; pollTimeoutS?: number | undefined; now?: (() => number) | undefined } | undefined;
+  identity?: { apiBase?: string | undefined; fetch?: typeof fetch | undefined; pollTimeoutS?: number | undefined; connectedPollTimeoutS?: number | undefined; now?: (() => number) | undefined } | undefined;
   /** THE VENUES' LIVE STREAMS: the market's hub as the account mirrors it (server.ts main: market/hub.ts RemoteHub), or a test's (a hub
    * over a stand-in WebSocket, or test/standin's stand-in prices); without one nothing is streamed — every price is a REST read, as before */
   streams?: MarketHub | undefined;
@@ -417,7 +417,7 @@ export class PortfolioService {
   /** the identity on this home: its state and the strangers file read, no poll begun until a token is sent */
   private mountIdentity(): Identity {
     const o = this.opts.identity ?? {};
-    return new Identity({ home: this.opts.home, apiBase: o.apiBase ?? telegramApiBase(process.env, (l) => console.error(l)), fetch: o.fetch, pollTimeoutS: o.pollTimeoutS, now: o.now });
+    return new Identity({ home: this.opts.home, apiBase: o.apiBase ?? telegramApiBase(process.env, (l) => console.error(l)), fetch: o.fetch, pollTimeoutS: o.pollTimeoutS, connectedPollTimeoutS: o.connectedPollTimeoutS, now: o.now });
   }
 
   /** A signature outlives the process that first saw it. On start, every signed envelope in this home's ledgers has its nonce marked used again,

@@ -170,7 +170,7 @@ describe("connect, disconnect, routing and block, signed at the door", () => {
     expect(readNetworkSecret(home, "telegram")).toEqual({ token: TOKEN, botId: "777", username: "gravit_desk_bot", operatorId: "555000123", operatorHandle: "@pan" });
     const v = svc.identity!.view();
     expect(v.networks).toHaveLength(1);
-    expect(v.networks[0]).toMatchObject({ network: "telegram", speaksAs: "@gravit_desk_bot", talksOnlyWith: "@pan", fingerprint: keyHash.slice(0, 8), state: "connected", polling: false });
+    expect(v.networks[0]).toMatchObject({ network: "telegram", speaksAs: "@gravit_desk_bot", talksOnlyWith: "@pan", fingerprint: keyHash.slice(0, 8), state: "connected", polling: true });
     expect(v.networks[0]).not.toHaveProperty("botId");
     expect(v.networks[0]).not.toHaveProperty("operatorId");
     expect(v.routing).toEqual({ chat: ["telegram"], alerts: ["telegram"], brief: ["telegram"], cards: ["telegram"], fills: ["telegram"] });
