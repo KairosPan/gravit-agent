@@ -27,7 +27,8 @@ import { withMiniDocument } from './helpers/mini-dom.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
 import { stockDrawerHtml } from '../../client/js/render/lunhui/stock.js';
 import { deskStatus } from './helpers/desk-status.js';
-import { editorHtml } from '../../client/js/composer/view.js';
+import { editorHtml, dropOverlay, lightboxHtml } from '../../client/js/composer/view.js';
+import { DEFAULT_LIMITS } from '../../client/js/composer/files.js';
 import { slashItems, atItems } from '../../client/js/composer/menus.js';
 import { sessionUri } from '../../client/js/composer/draft.js';
 
@@ -284,7 +285,11 @@ function composerHtml() {
   ];
   const chips = [{ kind: 'bot', id: 'buffett', label: 'Buffett Type' }, { kind: 'file', path: 'a/b.md', dir: false, label: 'b.md' }, { kind: 'file', path: 'desk', dir: true, label: 'desk/' }, { kind: 'conversation', id: 's7', label: 'Is BTC cheap?' }];
   const mention = R.hostList(open, { conversations: [conv('s1', { messages: [m('y1', { from: 'you', text: `see @[Is BTC cheap?](${sessionUri('s7')})` })] })] });
-  return [...menus.map(menu => renderMessagesScreen(open, NOW, { menu })), renderMessagesScreen(mention, NOW)].join('') + editorHtml([{ type: 'text', text: 'ask ' }, ...chips.map(chip => ({ type: 'chip', chip }))]);
+  // the attachments (plan 4, Task 2): a rail with an image and a file in each state, a note above the box, the overlay, the lightbox
+  const file = (key, over) => ({ key, kind: 'file', name: key + '.csv', bytes: 2048, mediaType: 'text/csv', status: 'ready', loaded: 0, ...over });
+  const files = [{ ...file('i1'), kind: 'image', name: 'i.png', mediaType: 'image/png', url: 'blob:x' }, file('f1'), file('f2', { status: 'uploading', loaded: 1024 }), file('f3', { status: 'failed' }), file('f4', { status: 'up' })];
+  const attached = renderMessagesScreen(open, NOW, { menu: null, files, note: 'Up to 20 images a message' }) + dropOverlay(DEFAULT_LIMITS) + lightboxHtml({ src: 'blob:x', name: 'i.png' });
+  return [...menus.map(menu => renderMessagesScreen(open, NOW, { menu })), renderMessagesScreen(mention, NOW), attached].join('') + editorHtml([{ type: 'text', text: 'ask ' }, ...chips.map(chip => ({ type: 'chip', chip }))]);
 }
 const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
   : st.route.screen === 'trade' ? renderTradeScreen(st, now)
@@ -437,6 +442,24 @@ test("the composer's chip reads the pale blue tokens, declared in each theme blo
   assert.match(css, /\.cmenu-name \{[^}]*font-family: var\(--font-mono\)[^}]*color: var\(--dim\)/);
   assert.match(css, /\.cmenu-row\.active \{[^}]*background: var\(--surface-2\)/);
   assert.doesNotMatch(css, /composer-pill/);
+});
+
+test("the composer's attachments: the note, the rail, the image square, the card and its failed tone, the remove key on hover, the overlay, the lightbox", () => {
+  const html = composerHtml();
+  for (const c of ['composer-note', 'composer-files', 'attach-key', 'attach-image', 'attach-remove', 'file-card', 'file-card uploading', 'file-card failed', 'file-icon', 'file-name', 'file-meta', 'file-retry', 'drop-overlay', 'drop-card', 'drop-title', 'drop-sub', 'lightbox', 'lightbox-img', 'close-key lightbox-close']) assert.ok(html.includes(`class="${c}"`), c);
+  assert.match(css, /\.composer-note \{[^}]*color: var\(--down\)[^}]*background: var\(--down-fill\)/);
+  assert.match(css, /\.composer-note:empty \{[^}]*display: none/);
+  assert.match(css, /\.composer-files \{[^}]*display: flex[^}]*flex-wrap: wrap[^}]*gap:/);
+  assert.match(css, /\.composer-files:empty \{[^}]*display: none/);
+  assert.match(css, /\.attach-image \{[^}]*width: 64px[^}]*height: 64px[^}]*border-radius: var\(--radius-s\)/);
+  assert.match(css, /\.attach-image img \{[^}]*object-fit: cover/);
+  assert.match(css, /\.file-card \{[^}]*width: 240px[^}]*height: 64px/);
+  assert.match(css, /\.file-card\.failed \{[^}]*background: var\(--down-fill\)[^}]*border-color: var\(--down-edge\)/);
+  assert.match(css, /\.attach-remove \{[^}]*opacity: 0/);
+  assert.match(css, /\.attach-image:hover \.attach-remove, \.attach-image:focus-within \.attach-remove, \.file-card:hover \.attach-remove, \.file-card:focus-within \.attach-remove \{[^}]*opacity: 1/);
+  assert.match(css, /\.drop-overlay \{[^}]*position: fixed[^}]*inset: 0[^}]*background: color-mix\(in srgb, var\(--bg\)/);
+  assert.match(css, /\.lightbox \{[^}]*position: fixed[^}]*inset: 0/);
+  assert.match(css, /\.lightbox-img \{[^}]*max-width: 92vw[^}]*max-height: 88vh/);
 });
 
 test("the pin: the row's wrap, the key in the time's place, the glyph before the time", () => {

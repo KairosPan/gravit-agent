@@ -11,21 +11,29 @@ import { firstOpen } from '../host/sessions.js';
 import { needsAnswer } from '../messages.js';
 import { childrenOf } from '../host/children-view.js';
 import { channelLabel } from '../host/list-view.js';
-import { renderMenu, menuAria } from '../composer/view.js';
+import { renderMenu, menuAria, filesRail } from '../composer/view.js';
 
 export function currentConversation(state) {
   const id = state.route.screen === 'messages' ? state.route.id : null;
   return state.conversations.find(c => c.id === id) ?? firstOpen(state.conversations);
 }
 
-// the menu's slot above the box, the editor and Send; the words are prompted to the session (host/actions.js). The editor is
-// drawn empty: app.js puts the conversation's draft in it
-export function renderComposer({ placeholder = 'Tell Gravit…', above = '', menu = null } = {}) {
+// the menu's slot above the box, the note (a refusal of the draft's files), then the box: the files rail, the paperclip and its
+// hidden input, the editor and Send; the words are prompted to the session (host/actions.js). The editor is drawn empty:
+// app.js puts the conversation's draft in it
+export function renderComposer({ placeholder = 'Tell Gravit…', above = '', menu = null, files = [], note = '' } = {}) {
   const editor = attrs({ id: 'say', class: 'composer-input', contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true', 'aria-labelledby': 'say-label', 'aria-controls': 'composer-menu', ...menuAria(menu), 'data-placeholder': placeholder });
-  return `<form class="composer" data-action="send">${above}<div class="composer-menu" id="composer-menu">${renderMenu(menu)}</div><div class="composer-box">` +
+  return `<form class="composer" data-action="send">${above}<div class="composer-menu" id="composer-menu">${renderMenu(menu)}</div>` +
+    `<div class="composer-note" id="composer-note" role="status">${esc(note)}</div><div class="composer-box">` +
+    `<div class="composer-files" id="composer-files">${filesRail(files)}</div>` +
+    `<button type="button" class="attach-key" data-action="attachFiles" aria-label="Attach files">${icon('paperclip', 18)}</button>` +
+    `<input${attrs({ type: 'file', id: 'attach-input', class: 'sr-only', multiple: true, tabindex: '-1', 'aria-hidden': 'true' })}>` +
     `<span id="say-label" class="sr-only">Tell Gravit</span><div${editor}></div>` +
     `<button type="submit" class="send-key" aria-label="Send">${icon('send', 18, 2.4)}</button></div></form>`;
 }
+
+// the composer's own facts from app.js: the open menu, the draft's files, the note above the box
+const composerOf = (composer, extra = {}) => ({ menu: composer?.menu ?? null, files: composer?.files ?? [], note: composer?.note ?? '', ...extra });
 
 // the one line of host status the page keeps: not signed in, reconnecting, a host error, a command's word (spec §3)
 export function renderStatus(status) {
@@ -56,13 +64,13 @@ function draftScreen(state, composer) {
   return `<main class="main"><header class="head centered draft"><button type="button" class="btn-sm head-cancel" data-action="cancelDraft">Cancel</button>${avatar('gravit', 44)}` +
     `<label for="nm-title" class="sr-only">Name this</label><input id="nm-title" class="title-input" type="text" autocomplete="off" placeholder="Name this (or your first line is the name)" data-action="draftTitle"${attrs({ value: d.title })}>` +
     `<div class="to-line"><label class="to-label" for="nm-where">Where</label><select id="nm-where" name="where" class="input small" data-action="draftWhere">${options}</select></div>${naming}</header>` +
-    `<div class="thread" id="thread"></div>${renderComposer({ menu: composer.menu })}${renderStatus(state.status)}</main>`;
+    `<div class="thread" id="thread"></div>${renderComposer(composerOf(composer))}${renderStatus(state.status)}</main>`;
 }
 
 function emptyScreen(state, composer) {
   const chips = ['Buy a little BTC', 'Follow Pelosi', 'Check an address'].map(t => `<button type="button" class="btn-sm" data-action="suggest"${attrs({ 'data-text': t })}>${esc(t)}</button>`).join('');
   return `<main class="main"><header class="head"><h1 class="head-title">Gravit</h1></header><div class="empty">${avatar('gravit', 56)}` +
-    `<div class="empty-title">Nothing handed to Gravit yet</div><div class="suggest">${chips}</div></div>${renderComposer({ menu: composer.menu })}${renderStatus(state.status)}</main>`;
+    `<div class="empty-title">Nothing handed to Gravit yet</div><div class="suggest">${chips}</div></div>${renderComposer(composerOf(composer))}${renderStatus(state.status)}</main>`;
 }
 
 const fmtN = n => Math.round(n).toLocaleString('en-US');
@@ -135,10 +143,10 @@ export function renderDetails(conv, state) {
 </aside>`;
 }
 
-export function renderMessagesScreen(state, now, composer = { menu: null }) {
+export function renderMessagesScreen(state, now, composer = { menu: null, files: [], note: '' }) {
   if (state.draft) return draftScreen(state, composer);
   const conv = currentConversation(state);
   if (!conv) return emptyScreen(state, composer);
   const placeholder = conv.kind === 'group' ? 'Tell Gravit… @ a bot by name' : 'Tell Gravit…';
-  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread" id="thread">${renderThread(conv, state, now)}</div>${renderComposer({ placeholder, menu: composer.menu })}${renderStatus(state.status)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
+  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread" id="thread">${renderThread(conv, state, now)}</div>${renderComposer(composerOf(composer, { placeholder }))}${renderStatus(state.status)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
 }

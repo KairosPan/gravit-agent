@@ -1,8 +1,10 @@
-// The composer's view: a draft's runs as the editor's markup, and the / and @ menus. Strings only; app.js puts them in place.
+// The composer's view: a draft's runs as the editor's markup, the / and @ menus, the draft's files rail, the drop overlay and
+// the image lightbox. Strings only; app.js puts them in place.
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { avatarGlyph } from '../wire/room.js';
 import { flatItems } from './menus.js';
+import { metaText, progressText, limitsLine } from './files.js';
 
 const chipIcon = c => icon(c.kind === 'bot' ? 'agent' : c.kind === 'conversation' ? 'chat' : c.dir ? 'layers' : 'file', 13);
 
@@ -56,4 +58,42 @@ export function renderMenu(menu) {
     }).join('');
   }).join('');
   return `<div${attrs({ class: 'cmenu', role: 'listbox', 'aria-label': LABEL[menu.kind] ?? LABEL['@'] })}>${body}${FOOT}</div>`;
+}
+
+const removeKey = (key, name) =>
+  `<button${attrs({ type: 'button', class: 'attach-remove', 'data-action': 'attachRemove', 'data-key': key, 'aria-label': `Remove ${name}` })}>${icon('x', 12, 2.4)}</button>`;
+
+/** The shared file card: the file icon, the name, its line; a failed upload's Retry key; the remove key when it has one.
+ *  The thread draws a sent file with it too, with neither key. */
+export function fileCard({ name, meta, failedKey = null, removeKey: key = null, removeName = '', uploading = false }) {
+  const line = failedKey != null
+    ? `Upload failed · <button${attrs({ type: 'button', class: 'file-retry', 'data-action': 'attachRetry', 'data-key': failedKey })}>Retry</button>`
+    : esc(meta);
+  return `<div class="${cls('file-card', uploading && 'uploading', failedKey != null && 'failed')}"><span class="file-icon">${icon('file', 20)}</span>` +
+    `<span class="file-name">${esc(name)}</span><span class="file-meta">${line}</span>${key != null ? removeKey(key, removeName || name) : ''}</div>`;
+}
+
+/** A draft's files in its order: an image a 64 px square, any other file a card. '' for none; a progress tick rewrites
+ *  only this, inside #composer-files. */
+export function filesRail(files) {
+  return (files ?? []).map(f => {
+    if (f.kind === 'image' && f.url) return `<div class="attach-image"><img${attrs({ src: f.url, alt: f.name })}>${removeKey(f.key, f.name)}</div>`;
+    return fileCard({
+      name: f.name, meta: f.status === 'uploading' ? progressText(f.loaded ?? 0, f.bytes) : metaText(f),
+      failedKey: f.status === 'failed' ? f.key : null, removeKey: f.key, removeName: f.name, uploading: f.status === 'uploading',
+    });
+  }).join('');
+}
+
+/** Over the page while files are dragged onto it: the two lines, the second from the session's image limits. */
+export function dropOverlay(limits) {
+  return `<div class="drop-overlay"><div class="drop-card">${icon('upload', 28)}<div class="drop-title">Drop files or images here</div>` +
+    `<div class="drop-sub">${esc(limitsLine(limits))}</div></div></div>`;
+}
+
+/** An image at full size: a click on the backdrop or the close key closes it, a click on the image is kept. */
+export function lightboxHtml({ src, name }) {
+  return `<div${attrs({ class: 'lightbox', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Image', 'data-action': 'lightboxClose' })}>` +
+    `<img${attrs({ class: 'lightbox-img', src, alt: name || 'Image', 'data-action': 'lightboxKeep' })}>` +
+    `<button${attrs({ type: 'button', class: 'close-key lightbox-close', 'data-action': 'lightboxClose', 'aria-label': 'Close' })}>${icon('x', 18)}</button></div>`;
 }

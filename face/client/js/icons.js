@@ -34,6 +34,7 @@ export const ICONS = {
   rewind: '<path d="M19 5l-9 7 9 7zM10 5l-9 7 9 7z"></path>',
   filter: '<path d="M3 5h18l-7 8v6l-4-2v-4z"></path>',
   pairs: '<path d="M4 9h16M4 15h16"></path><circle cx="8" cy="9" r="2" fill="currentColor"></circle><circle cx="16" cy="15" r="2" fill="currentColor"></circle>',
+  paperclip: '<path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"></path>',
   upload: '<path d="M12 16V4M6 10l6-6 6 6"></path><path d="M4 20h16"></path>',
   pencil: '<path d="M4 20l4-1 11-11-3-3L5 16z"></path>',
   bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 21h4"></path>',

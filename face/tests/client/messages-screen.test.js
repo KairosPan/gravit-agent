@@ -39,9 +39,9 @@ test('a group head clusters the members and names them from the host\'s bots', (
   assert.match(h, /Gravit · Buffett Type · 2 members/);
 });
 
-test('the composer is the menu slot, the editor and Send: no files, no mic', () => {
+test('the composer is the menu slot, the note, the box with the rail, the editor and Send', () => {
   const h = renderComposer();
-  assert.match(h, /<form class="composer" data-action="send"><div class="composer-menu" id="composer-menu"><\/div><div class="composer-box">/);
+  assert.match(h, /<form class="composer" data-action="send"><div class="composer-menu" id="composer-menu"><\/div><div class="composer-note" id="composer-note" role="status"><\/div><div class="composer-box"><div class="composer-files" id="composer-files"><\/div>/);
   assert.match(h, /<span id="say-label" class="sr-only">Tell Gravit<\/span>/);
   const editor = h.match(/<div id="say"([^>]*)><\/div>/)?.[1];
   assert.ok(editor, 'the editor is an empty div#say');
@@ -49,8 +49,38 @@ test('the composer is the menu slot, the editor and Send: no files, no mic', () 
   assert.doesNotMatch(h, /<input id="say"/);
   assert.doesNotMatch(h, /composer-pill/);
   assert.match(h, /class="send-key" aria-label="Send"/);
-  for (const gone of ['attachFiles', 'toggleMic', 'pickFile', 'attach-input']) assert.doesNotMatch(h, new RegExp(gone));
   assert.match(renderComposer({ placeholder: 'Tell Gravit… @ a bot by name' }), /data-placeholder="Tell Gravit… @ a bot by name"/);
+});
+
+test('the composer has the paperclip and a hidden file input, no mic', () => {
+  const h = renderComposer();
+  const clip = h.match(/<button([^>]*data-action="attachFiles"[^>]*)>([\s\S]*?)<\/button>/);
+  assert.ok(clip, 'the paperclip key');
+  for (const a of ['type="button"', 'class="attach-key"', 'aria-label="Attach files"']) assert.ok(clip[1].includes(a), a);
+  assert.match(clip[2], /^<svg width="18" height="18"/);
+  const input = h.match(/<input([^>]*id="attach-input"[^>]*)>/)?.[1];
+  assert.ok(input, 'the hidden file input');
+  for (const a of ['type="file"', 'class="sr-only"', ' multiple', 'tabindex="-1"', 'aria-hidden="true"']) assert.ok(input.includes(a), a);
+  const box = h.indexOf('class="composer-box"');
+  assert.ok(box > 0 && h.indexOf('id="composer-files"') > box && h.indexOf('id="composer-files"') < h.indexOf('id="say"'), 'the rail inside the box, before the editor');
+  assert.ok(h.indexOf('id="attach-input"') > box && h.indexOf('data-action="attachFiles"') < h.indexOf('id="say"'), 'the paperclip before the editor');
+  assert.ok(h.indexOf('id="composer-note"') < box, 'the note outside the box');
+  for (const gone of ['toggleMic', 'pickFile']) assert.doesNotMatch(h, new RegExp(gone));
+});
+
+test('a note handed in is drawn above the box, escaped', () => {
+  const h = renderComposer({ note: "Gravit's model takes <no> images." });
+  assert.match(h, /<div class="composer-note" id="composer-note" role="status">Gravit&#39;s model takes &lt;no&gt; images\.<\/div><div class="composer-box">/);
+});
+
+test("the three screens pass the draft's files and note on", () => {
+  const composer = { menu: null, files: [{ key: 'f1', kind: 'file', name: 'a.csv', bytes: 2048, mediaType: 'text/csv', status: 'ready', loaded: 0 }], note: 'Up to 20 images a message' };
+  const s = listed([conv('a')]);
+  for (const h of [renderMessagesScreen(s, NOW, composer), renderMessagesScreen(R.startDraft(s, {}), NOW, composer), renderMessagesScreen(listed([]), NOW, composer)]) {
+    assert.match(h, /id="composer-files"><div class="file-card">/);
+    assert.match(h, /role="status">Up to 20 images a message<\/div>/);
+  }
+  assert.match(renderMessagesScreen(s, NOW, { menu: null }), /id="composer-files"><\/div>/, 'a composer with no files key draws an empty rail');
 });
 
 test("a group's composer keeps its @ placeholder, and a menu handed in is drawn in the slot", () => {

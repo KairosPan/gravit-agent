@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { editorHtml, renderMenu } from '../../client/js/composer/view.js';
 import { slashItems, atItems } from '../../client/js/composer/menus.js';
 import { avatarGlyph } from '../../client/js/wire/room.js';
+import { icon } from '../../client/js/icons.js';
 
 const unesc = s => s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 const rows = h => h.match(/<div class="cmenu-row[^"]*"[^>]*>/g) ?? [];
@@ -84,4 +85,62 @@ test("the editor's menu state for assistive tech: expanded with rows, the active
   assert.deepEqual(menuAria(menu), { 'aria-expanded': 'true', 'aria-activedescendant': 'cm-1' });
   assert.deepEqual(menuAria(null), { 'aria-expanded': 'false', 'aria-activedescendant': null });
   assert.deepEqual(menuAria({ ...menu, groups: [] }), { 'aria-expanded': 'false', 'aria-activedescendant': null }, 'a menu with no rows is closed');
+});
+
+// the composer's attachments (plan 4 of the dsh UI port, Task 2): the rail, the drop overlay, the lightbox
+const MiB = 1048576;
+const att = over => ({ key: 'k1', kind: 'file', name: 'a.csv', bytes: 2.8 * MiB, mediaType: 'text/csv', blob: null, status: 'ready', loaded: 0, ...over });
+
+test("the rail draws an image's square with its remove key and a file's card with its line", async () => {
+  const { filesRail } = await import('../../client/js/composer/view.js');
+  const h = filesRail([att({ key: 'i1', kind: 'image', name: 'chart "q".png', mediaType: 'image/png', url: 'blob:x/1' }), att({ key: 'f1', name: '<b>.csv' })]);
+  const image = h.match(/<div class="attach-image">([\s\S]*?)<\/div>/)?.[1];
+  assert.ok(image, 'an image is an attach-image');
+  assert.match(image, /<img src="blob:x\/1" alt="chart &quot;q&quot;\.png">/);
+  assert.match(image, /<button type="button" class="attach-remove" data-action="attachRemove" data-key="i1" aria-label="Remove chart &quot;q&quot;\.png"><svg/);
+  const card = h.match(/<div class="file-card">([\s\S]*?)<\/div>/)?.[1];
+  assert.ok(card, 'a file is a file-card');
+  assert.match(card, /^<span class="file-icon"><svg/);
+  assert.match(card, /<span class="file-name">&lt;b&gt;\.csv<\/span><span class="file-meta">CSV · 2\.8 MB<\/span>/);
+  assert.match(card, /data-action="attachRemove" data-key="f1" aria-label="Remove &lt;b&gt;\.csv"/);
+  assert.doesNotMatch(h, /<b>/);
+  assert.ok(h.indexOf('attach-image') < h.indexOf('file-card'), "the draft's order");
+});
+
+test('an uploading card reads its progress, a failed one Upload failed and a Retry key with its data-key', async () => {
+  const { filesRail, fileCard } = await import('../../client/js/composer/view.js');
+  const up = filesRail([att({ status: 'uploading', loaded: 1.1 * MiB })]);
+  assert.match(up, /<div class="file-card uploading">/);
+  assert.match(up, /<span class="file-meta">1\.1 \/ 2\.8 MB<\/span>/);
+  const failed = filesRail([att({ key: 'f9', status: 'failed' })]);
+  assert.match(failed, /<div class="file-card failed">/);
+  assert.match(failed, /<span class="file-meta">Upload failed · <button type="button" class="file-retry" data-action="attachRetry" data-key="f9">Retry<\/button><\/span>/);
+  assert.match(failed, /data-action="attachRemove" data-key="f9"/);
+  assert.match(filesRail([att({ status: 'up' })]), /<div class="file-card">[\s\S]*CSV · 2\.8 MB/);
+  // the shared card with no keys: a name and a line only
+  const bare = fileCard({ name: 'Image', meta: 'PNG · 4 KB' });
+  assert.doesNotMatch(bare, /attach-remove|file-retry/);
+  assert.match(bare, /<span class="file-name">Image<\/span><span class="file-meta">PNG · 4 KB<\/span>/);
+});
+
+test('no files draws an empty rail', async () => {
+  const { filesRail } = await import('../../client/js/composer/view.js');
+  assert.equal(filesRail([]), '');
+  assert.equal(filesRail(undefined), '');
+});
+
+test('the overlay reads the two lines from the limits', async () => {
+  const { dropOverlay } = await import('../../client/js/composer/view.js');
+  const h = dropOverlay({ maxImagesPerMessage: 20, maxImageBytes: 20 * MiB });
+  assert.match(h, /^<div class="drop-overlay"><div class="drop-card"><svg[^>]*>[\s\S]*?<\/svg><div class="drop-title">Drop files or images here<\/div><div class="drop-sub">Images: up to 20 a message, 20 MB each<\/div><\/div><\/div>$/);
+  assert.ok(h.includes(icon('upload', 28)), 'the upload icon');
+});
+
+test('the lightbox is a dialog whose image keeps a click and whose backdrop and close key close it', async () => {
+  const { lightboxHtml } = await import('../../client/js/composer/view.js');
+  const h = lightboxHtml({ src: 'blob:x/"1"', name: 'a <b>.png' });
+  assert.match(h, /^<div class="lightbox" role="dialog" aria-modal="true" aria-label="Image" data-action="lightboxClose">/);
+  assert.match(h, /<img class="lightbox-img" src="blob:x\/&quot;1&quot;" alt="a &lt;b&gt;\.png" data-action="lightboxKeep">/);
+  assert.match(h, /<button type="button" class="close-key lightbox-close" data-action="lightboxClose" aria-label="Close"><svg/);
+  assert.match(lightboxHtml({ src: 'blob:y' }), /alt="Image"/);
 });
