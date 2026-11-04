@@ -26,50 +26,32 @@ const PREFIX = "Your call · ";
 
 /* LINK SCRUB BEGIN - byte-identical in face/src/card-notice.ts and account/src/portfolio/identity/notices.ts
  * (face/tests/card-notice.test.ts compares the two). Nothing a notice carries may be tappable on the
- * phone, and Telegram makes a link of far more than an http URL, so this defangs rather than lists:
- * - any scheme (`ftp://x`, `javascript://x`) and a scheme-relative `//host…` is `<link>`, to the next space;
- * - any dotted token in which a label carrying a letter is followed by a label of two or more that
- *   starts with a letter is `<link>`, whatever its TLD, with its port and path (`evil.museum`,
- *   `evil.xn--p1ai`, `sub.evil.io:8080/x`; `a@evil.io` and `x_evil.com` keep only what is before
- *   the host), and so is a dotted-quad address;
- * - left alone: numbers (`183.00`, `3.5%`, `v1.2.3`), a numeric code with a market suffix (`600519.SH`:
- *   no letter before the dot), a ticker with a one-letter class (`BRK.B`), a bare upper-case ticker on
- *   `.US` (`NVDA.US`, with no port or path) and pair symbols (`BTC/USDT`: no dot).
- * Ordinary dotted words read as links too and are taken out: `notes.md`, `Alpaca.Paper`, `binance.us`. */
+ * phone. Rather than guess which tokens are hosts, the text is defanged:
+ * 1. NFKC-normalised, and the dot look-alikes U+3002, U+FF0E, U+FF61 and U+2024 read as '.';
+ * 2. any scheme (`ftp://x`, `javascript://x`) and a scheme-relative `//host…` is `<link>`, to the next
+ *    space, and so is a dotted-quad address with its port and path;
+ * 3. every '.' left that is not between two ASCII digits becomes '·' (U+00B7), so no host survives:
+ *    `163.com` → `163·com`, `NVDA.US` → `NVDA·US`, `notes.md` → `notes·md`; prices and numbers
+ *    (`183.00`, `3.5%`, `1,234.56`) stay as they are.
+ * `@mentions`, `/commands`, `#tags` and `$cashtags` are left alone: none links to the face. */
+const DOT_LOOKALIKES = /[。．｡․]/gu;
 const SCHEME_LINK = /[a-z][a-z0-9+.-]*:\/\/\S*/giu;
 const RELATIVE_LINK = /\/\/\S+/gu;
-const DOTTED_SOURCE = String.raw`[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+`;
-const LINK_TAIL = /^(?::\d{1,5})?(?:[/?#]\S*)?/u;
-
-function isLinkHost(host: string, tail: string): boolean {
-  const labels = host.split(".");
-  if (labels.length === 4 && labels.every((label) => /^\d{1,3}$/u.test(label))) return true;
-  if (tail === "" && /^[A-Z]{1,6}\.US$/u.test(host)) return false;
-  for (let i = 0; i + 1 < labels.length; i++) {
-    if (/\p{L}/u.test(labels[i] ?? "") && /^\p{L}[\p{L}\p{N}-]+$/u.test(labels[i + 1] ?? "")) return true;
-  }
-  return false;
-}
+const DOTTED_QUAD = /(?<![0-9.])[0-9]{1,3}(?:\.[0-9]{1,3}){3}(?![0-9])(?::[0-9]{1,5})?(?:[/?#]\S*)?/gu;
+const LONE_DOT = /(?<![0-9])\.|\.(?![0-9])/gu;
 
 function scrubLinkText(text: string): string {
-  const s = text.replace(SCHEME_LINK, "<link>").replace(RELATIVE_LINK, "<link>");
-  const dotted = new RegExp(DOTTED_SOURCE, "gu");
-  let out = "";
-  let at = 0;
-  for (let m = dotted.exec(s); m !== null; m = dotted.exec(s)) {
-    const host = m[0];
-    const end = m.index + host.length;
-    const tail = LINK_TAIL.exec(s.slice(end))?.[0] ?? "";
-    if (!isLinkHost(host, tail)) continue;
-    out += `${s.slice(at, m.index)}<link>`;
-    at = end + tail.length;
-    dotted.lastIndex = at;
-  }
-  return out + s.slice(at);
+  return text
+    .normalize("NFKC")
+    .replace(DOT_LOOKALIKES, ".")
+    .replace(SCHEME_LINK, "<link>")
+    .replace(RELATIVE_LINK, "<link>")
+    .replace(DOTTED_QUAD, "<link>")
+    .replace(LONE_DOT, "·");
 }
 /* LINK SCRUB END */
 
-/** Every link in `text` - with any scheme, scheme-relative, or a bare host - as `<link>`. */
+/** `text` defanged: every link as `<link>`, every dot that could make a host as `·` (the block above). */
 export function scrubLinks(text: string): string {
   return scrubLinkText(text);
 }
@@ -137,8 +119,10 @@ export function cardNoticeText(name: string, args: unknown): string {
   let line = what.replace(/\s*[\r\n]+\s*/g, " ").trim();
   line = scrubLinks(line);
   const room = CARD_NOTICE_MAX - PREFIX.length - SUFFIX.length;
-  /* scrubbed again after the cut: a cut must neither leave nor make a link */
-  if (line.length > room) line = scrubLinks(`${line.slice(0, room - 1)}…`);
+  /* scrubbed again after the cut, which must neither leave nor make a link; the ellipsis is added after
+   * (NFKC reads '…' as three dots), and a second scrub that lengthened the line is cut once more - a
+   * prefix of a scrubbed line is still clean */
+  if (line.length > room) line = `${scrubLinks(line.slice(0, room - 1)).slice(0, room - 1)}…`;
   return `${PREFIX}${line}${SUFFIX}`;
 }
 
