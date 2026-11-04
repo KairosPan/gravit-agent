@@ -173,12 +173,18 @@ export class PendingConnections {
     if (this.current && this.current.id === id) this.forget();
   }
 
-  /** the connectNetwork door's: the heard connection `id` handed over and forgotten here; undefined unless it is heard and in time */
-  take(id: string): PendingTaken | undefined {
+  /** what the connectNetwork door checks before it takes: the heard connection `id` as take would hand it over, left where it is — so a
+   * signature that does not match it is refused and the owner can still sign the right one; undefined unless it is heard and in time */
+  peek(id: string): PendingTaken | undefined {
     const e = this.entry(id);
     if (!e || e.state !== "heard" || !e.sender || e.offset === undefined) return undefined;
-    const taken: PendingTaken = { token: e.token, keyHash: e.keyHash, salt: e.salt, bot: { ...e.bot }, sender: { id: e.sender.id, handle: e.sender.handle }, offset: e.offset };
-    this.forget();
+    return { token: e.token, keyHash: e.keyHash, salt: e.salt, bot: { ...e.bot }, sender: { id: e.sender.id, handle: e.sender.handle }, offset: e.offset };
+  }
+
+  /** the connectNetwork door's: the heard connection `id` handed over and forgotten here; undefined unless it is heard and in time */
+  take(id: string): PendingTaken | undefined {
+    const taken = this.peek(id);
+    if (taken) this.forget();
     return taken;
   }
 

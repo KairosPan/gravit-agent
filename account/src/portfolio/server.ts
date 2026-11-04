@@ -1009,7 +1009,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
       svc.stream.end();
       svc.closeStreams();
       // a pending Telegram connection's long poll is cut and its token forgotten
-      svc.identity?.dispose();
+      await svc.identity?.dispose();
       // the market's link closed whatever the flush does: its hub stream never holds the server, or a test, open
       try {
         await svc.flushPaper();

@@ -168,7 +168,20 @@ export type OwnerAction =
   | { type: "resetPaper"; venue: string; usd: string; nonce: number }
   /** paper money added to a paper account the account keeps itself: `usd` dollars more in its cash, written in its book as paper money put
    * in (its curve and what it made or lost since it started count it as put in, never as a gain) */
-  | { type: "topUpPaper"; venue: string; usd: string; nonce: number };
+  | { type: "topUpPaper"; venue: string; usd: string; nonce: number }
+  /** ACCOUNT › IDENTITY (identity/identity.ts): a network Gravit speaks on, connected — the pending connection of Connect's sheets 1 to 3
+   * (`pending`, its id), the bot heard from (`botId`, `speaksAs` its handle), the one person it talks to (`operatorId`, `talksOnlyWith`),
+   * the routing it starts with (kinds.ts, the signed string) and the token's fingerprint — never the token. `keyHash` is hex SHA-256(salt ‖
+   * token), made in the owner's browser, `salt` the 16 random bytes it was made with: the token itself travelled once, at sheet 1's Next,
+   * and is held in the account's memory until this door's handler checks it against `keyHash` and writes it to
+   * <home>/credentials/networks/<network>.json. The ledger keeps the fingerprint only (exchange.ts keyless) */
+  | { type: "connectNetwork"; network: string; pending: string; botId: string; speaksAs: string; operatorId: string; talksOnlyWith: string; routing: string; keyHash: string; salt: string; nonce: number }
+  /** a network disconnected: its token file removed, its binding and its routing ticks gone */
+  | { type: "disconnectNetwork"; network: string; nonce: number }
+  /** what reaches the owner where (kinds.ts: the routing string) and quiet hours on New York's clock, "HH:MM" each — both "" is off */
+  | { type: "setRouting"; routing: string; quietFrom: string; quietTo: string; nonce: number }
+  /** a stranger of Not you blocked: `sender` their reference (store.ts senderRef), `masked` their id as the tab shows it */
+  | { type: "blockSender"; network: string; sender: string; masked: string; nonce: number };
 
 export type AgentAction =
   | { type: "agentSendAsset"; destination: string; sourceDex: string; destinationDex: string; token: string; amount: string; fromSubAccount: string; maxFee: string; nonce: number }
@@ -218,7 +231,7 @@ export type AgentAction =
 
 export type Action = OwnerAction | AgentAction;
 
-export const OWNER_TYPES = ["sendAsset", "swap", "approveAgent", "approveBuilderFee", "approveSpend", "createSubAccount", "userSetAbstraction", "convertToMultiSigUser", "setDestination", "approveCard", "setPolicy", "connectVenue", "disconnectVenue", "liveMove", "liveOrder", "liveCancel", "liveAmend", "liveClose", "liveLeverage", "setWatch", "setIntent", "liveEarn", "answerAsk", "setMemory", "forgetMemory", "setMemoryRules", "setDesk", "setBrainKey", "resetPaper", "topUpPaper", "signOut"] as const;
+export const OWNER_TYPES = ["sendAsset", "swap", "approveAgent", "approveBuilderFee", "approveSpend", "createSubAccount", "userSetAbstraction", "convertToMultiSigUser", "setDestination", "approveCard", "setPolicy", "connectVenue", "disconnectVenue", "liveMove", "liveOrder", "liveCancel", "liveAmend", "liveClose", "liveLeverage", "setWatch", "setIntent", "liveEarn", "answerAsk", "setMemory", "forgetMemory", "setMemoryRules", "setDesk", "setBrainKey", "resetPaper", "topUpPaper", "signOut", "connectNetwork", "disconnectNetwork", "setRouting", "blockSender"] as const;
 export const AGENT_TYPES = ["agentSendAsset", "agentSwap", "agentPay", "agentExecute", "agentOrder", "agentLiveMove", "agentLiveOrder", "agentLiveCancel", "agentLiveAmend", "agentLiveClose", "agentLiveLeverage", "agentReport", "agentAsk", "agentLiveEarn", "agentRemember", "agentForget", "agentDeskSay"] as const;
 /** an instruction that moves money — or, like a leverage change, changes what a position risks — is good for minutes after it is signed,
  * not for the two days of the nonce window */
@@ -328,6 +341,11 @@ const OWNER_FIELDS: Record<OwnerAction["type"], { primary: string; fields: Field
   resetPaper: { primary: "AccountPaper:Reset", fields: [{ name: "venue", type: "string" }, { name: "usd", type: "string" }, NONCE] },
   topUpPaper: { primary: "AccountPaper:TopUp", fields: [{ name: "venue", type: "string" }, { name: "usd", type: "string" }, NONCE] },
   signOut: { primary: "AccountDevice:SignOut", fields: [{ name: "device", type: "string" }, NONCE] },
+  // a network's token is never a field: its fingerprint and salt are text, as setBrainKey's
+  connectNetwork: { primary: "AccountIdentity:Connect", fields: [{ name: "network", type: "string" }, { name: "pending", type: "string" }, { name: "botId", type: "string" }, { name: "speaksAs", type: "string" }, { name: "operatorId", type: "string" }, { name: "talksOnlyWith", type: "string" }, { name: "routing", type: "string" }, { name: "keyHash", type: "string" }, { name: "salt", type: "string" }, NONCE] },
+  disconnectNetwork: { primary: "AccountIdentity:Disconnect", fields: [{ name: "network", type: "string" }, NONCE] },
+  setRouting: { primary: "AccountIdentity:Routing", fields: [{ name: "routing", type: "string" }, { name: "quietFrom", type: "string" }, { name: "quietTo", type: "string" }, NONCE] },
+  blockSender: { primary: "AccountIdentity:Block", fields: [{ name: "network", type: "string" }, { name: "sender", type: "string" }, { name: "masked", type: "string" }, NONCE] },
 };
 /** a spending approval that answers an intent names it: one more signed field, before the nonce */
 const INTENT_FIELD: Field = { name: "intent", type: "string" };

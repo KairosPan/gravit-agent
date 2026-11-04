@@ -101,8 +101,7 @@ import { AccountStream } from "./account/stream.ts";
 import { applyBrainKey, BrainKeyStage, envBlocksOf, envWinsOf, type BrainKeyDone } from "./account/brain-keys.ts";
 import { brainProviders, testBrain } from "./account/brains.ts";
 import { telegramApiBase } from "./identity/bot-api.ts";
-import { PendingConnections } from "./identity/pending.ts";
-import { loadIdentity, Strangers, type Stranger } from "./identity/store.ts";
+import { Identity } from "./identity/identity.ts";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 export const FIXTURES = join(ROOT, "fixtures", "home", "portfolio");
@@ -370,9 +369,10 @@ export class PortfolioService {
   /** A brain's key typed on the face (account/brain-keys.ts), held in memory from the moment its route has checked it against the signed
    * fingerprint until that route answers — taken once by the door's handler, which writes the provider's key file. Nothing else reads it */
   readonly brainKeys = new BrainKeyStage();
-  /** ACCOUNT › IDENTITY (identity/), with the account layer only: the pending Telegram connection of Connect's sheets 1 to 3 (its token held
-   * in memory alone) and the strangers who wrote to the bot */
-  readonly identity: { readonly pending: PendingConnections; strangers(): Stranger[]; dispose(): void } | undefined;
+  /** ACCOUNT › IDENTITY (identity/identity.ts), with the account layer only: the pending Telegram connection of Connect's sheets 1 to 3
+   * (its token held in memory alone), the networks connected, the routing and quiet hours, and the strangers who wrote to the bot. The four
+   * owner types land here from the door (ExchangeHost.identity) */
+  readonly identity: Identity | undefined;
   /** the most one order or movement may be worth, in dollars: the server's `--live-cap` to start with, then what the owner last signed
    * (setPolicy cap), which a restart brings back from the ledger */
   private capUsd: number;
@@ -414,13 +414,10 @@ export class PortfolioService {
     if (this.account && !opts.freshLedger) this.rememberNonces(this.account);
   }
 
-  /** the identity's parts on this home: the strangers file read, no poll begun until a token is sent */
-  private mountIdentity(): NonNullable<PortfolioService["identity"]> {
-    const home = this.opts.home;
+  /** the identity on this home: its state and the strangers file read, no poll begun until a token is sent */
+  private mountIdentity(): Identity {
     const o = this.opts.identity ?? {};
-    const strangers = new Strangers(home);
-    const pending = new PendingConnections({ apiBase: o.apiBase ?? telegramApiBase(process.env, (l) => console.error(l)), strangers, bound: () => loadIdentity(home).bindings.some((b) => b.network === "telegram"), fetch: o.fetch, pollTimeoutS: o.pollTimeoutS, now: o.now });
-    return { pending, strangers: () => strangers.list(), dispose: () => pending.dispose() };
+    return new Identity({ home: this.opts.home, apiBase: o.apiBase ?? telegramApiBase(process.env, (l) => console.error(l)), fetch: o.fetch, pollTimeoutS: o.pollTimeoutS, now: o.now });
   }
 
   /** A signature outlives the process that first saw it. On start, every signed envelope in this home's ledgers has its nonce marked used again,
@@ -646,6 +643,9 @@ export class PortfolioService {
       // a paper account the account keeps itself, as its owner runs it (live/paper.ts): started again, or paper money added
       paper: (action) => this.paperControl(action),
       paperWords: (action) => this.paperControlWords(action),
+      // the networks Gravit speaks on (identity/identity.ts): built after the host, so read when an instruction comes
+      identity: (action) => (this.identity ? this.identity.apply(action) : Promise.resolve(no("E_ACCOUNT_BAD_ACTION", { message: "this account keeps no identity: it is the account layer's" }))),
+      identityProblem: (action) => (this.identity ? this.identity.problem(action) : "this account keeps no identity: it is the account layer's"),
       ...(real && this.opts.liveWrites
         ? {
             agentWalletAddress: (name: string) => {

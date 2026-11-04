@@ -10,12 +10,14 @@
  *   GET  /api/account/identity/pending?id=                             sheets 2 and 3: the pending connection as it stands
  *   POST /api/account/identity/pending/not-me {id}                     sheet 3's "Not me": the sender counted as a stranger, waiting again
  *   POST /api/account/identity/pending/drop {id}                       the sheet closed: the token forgotten at once
+ *   GET  /api/account/identity                                         the Identity tab: networks, routing, quiet hours, Not you
  *
  * Every route answers 404 "the account layer is not mounted" when the service holds no identity. The token is held in memory only
  * (pending.ts); it is in no answer, no log line and no ledger row. */
 import type express from "express";
 import type { Refusal } from "../../core/errors.ts";
 import { isRefusal } from "../../core/errors.ts";
+import type { IdentityView } from "./identity.ts";
 import type { PendingConnections } from "./pending.ts";
 
 export const IDENTITY_TOKEN_PATH = "/api/account/identity/telegram/token";
@@ -37,6 +39,19 @@ export const IDENTITY_WORDS = {
   type: "This route takes application/json, sent as it is (no content encoding).",
   large: `This route takes at most ${IDENTITY_TOKEN_BODY_LIMIT} bytes: what was sent is larger, and it was not kept.`,
   needId: "This route takes {id}: the pending connection's id.",
+  // the four owner types' refusals (identity.ts): at prepare and at the door alike
+  network: "Telegram is the one network the account speaks on for now.",
+  botMismatch: "The bot signed is not the bot this connection checked with Telegram: nothing was written. Start again.",
+  senderMismatch: "The person signed is not the one heard on Say hi: nothing was written. Start again.",
+  hashShape: "The signed fingerprint is 64 hex characters and its salt 32 (16 bytes), both lower-case: nothing was written.",
+  tokenInField: "A bot token is never a signed field: only its fingerprint is. Nothing was written.",
+  notConnected: "Telegram is not connected: there is nothing to disconnect.",
+  routedNotConnected: "The routing ticks a network that is not connected: connect it first, or untick it.",
+  quietTime: "Quiet hours are two times of day, HH:MM on New York's clock (23:00 and 07:00), or both empty for off.",
+  quietEqual: "Quiet hours start and end at different times: both empty turns them off.",
+  blockShape: "A sender is blocked by the reference Not you shows (12 hex characters) and their masked id (… and up to three digits).",
+  blockMismatch: "That masked id is not the one Not you shows for this sender.",
+  noIdentity: "This account keeps no identity: it is the account layer's.",
 } as const;
 
 const NOT_MOUNTED = "the account layer is not mounted";
@@ -44,6 +59,7 @@ const NOT_MOUNTED = "the account layer is not mounted";
 /** what the routes need of the service's identity */
 export interface IdentityRoutesHost {
   readonly pending: PendingConnections;
+  view(): IdentityView;
 }
 
 export interface IdentityRoutesDeps {
@@ -109,6 +125,13 @@ export function registerIdentityRoutes(app: express.Express, deps: IdentityRoute
     const r = await id.pending.begin(body.token, body.keyHash, body.salt);
     if (isRefusal(r)) return void res.status(statusOf(r)).json({ ok: false, error: r.message });
     res.json({ ok: true, pending: r });
+  }));
+
+  // the Identity tab: the networks connected (no bot id, no operator id, no token), the routing, quiet hours and Not you
+  app.get("/api/account/identity", wrap((_req, res) => {
+    const id = identity();
+    if (!id) return void res.status(404).json({ ok: false, error: NOT_MOUNTED });
+    res.json(id.view());
   }));
 
   app.get("/api/account/identity/pending", wrap((req, res) => {
