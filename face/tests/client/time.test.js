@@ -34,3 +34,15 @@ test('fmtDate is Mon D', () => {
 test('an hour is sixty minutes', () => {
   assert.equal(HOUR, 60 * MIN);
 });
+
+test('ago reads just now, minutes, hours and days, one of each in the singular', async () => {
+  const { ago } = await import('../../client/js/time.js');
+  assert.equal(ago(NOW - 20_000, NOW), 'Just now');
+  assert.equal(ago(NOW + 5_000, NOW), 'Just now');
+  assert.equal(ago(NOW - MIN, NOW), '1 minute ago');
+  assert.equal(ago(NOW - 5 * MIN, NOW), '5 minutes ago');
+  assert.equal(ago(NOW - HOUR, NOW), '1 hour ago');
+  assert.equal(ago(NOW - 3 * HOUR, NOW), '3 hours ago');
+  assert.equal(ago(NOW - DAY, NOW), '1 day ago');
+  assert.equal(ago(NOW - 4 * DAY, NOW), '4 days ago');
+});

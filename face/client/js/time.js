@@ -42,3 +42,13 @@ export function fmtDuration(ms) {
   const t = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(t / 60)}:${pad(t % 60)}`;
 }
+
+// a conversation's age in words, for the @ menu
+export function ago(ts, now) {
+  const d = Math.max(0, now - ts);
+  const unit = (n, w) => `${n} ${w}${n === 1 ? '' : 's'} ago`;
+  if (d < MIN) return 'Just now';
+  if (d < HOUR) return unit(Math.floor(d / MIN), 'minute');
+  if (d < DAY) return unit(Math.floor(d / HOUR), 'hour');
+  return unit(Math.floor(d / DAY), 'day');
+}
