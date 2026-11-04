@@ -363,7 +363,7 @@ test("typing in the search box searches; a star watches and writes the face's ke
   const mq = f.withId('mq', { tagName: 'INPUT', type: 'search', dataset: { action: 'mkQuery' } });
   const h = host();
   const reads = [];
-  const getJson = async path => { reads.push(path); return path.startsWith('/data/account/explore?q=600&') ? fx('explore-search-china') : h.getJson(path); };
+  const getJson = async path => { reads.push(path); return path.startsWith('/data/market/explore?q=600&') ? fx('explore-search-china') : h.getJson(path); };
   // the search waits for a quiet moment in the box: that wait is held here, and run
   const timers = new HeldTimers(ms => ms === 300);
   const store = bootMarkets(f, { ...h, getJson }, null, { timers });
@@ -375,10 +375,10 @@ test("typing in the search box searches; a star watches and writes the face's ke
   f.fire('root', 'input', { target: mq });
   assert.equal(store.get().markets.q, '600');
   assert.match(f.html(), /Searching…/);
-  assert.equal(reads.some(p => p.startsWith('/data/account/explore?q=')), false, 'nothing searched before the wait');
+  assert.equal(reads.some(p => p.startsWith('/data/market/explore?q=')), false, 'nothing searched before the wait');
   timers.run(300);
   await settle();
-  assert.deepEqual(reads.filter(p => p.startsWith('/data/account/explore?q=')), ['/data/account/explore?q=600&limit=200'], "one read, the Account's");
+  assert.deepEqual(reads.filter(p => p.startsWith('/data/market/explore?q=')), ['/data/market/explore?q=600&limit=200'], "one read, the Account's");
   assert.match(f.html(), /<tr data-id="cn:600519">/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'cn:600519' } });
   // an A share is an Account key: its star is kept in this browser's Account store (the page does not sign), never the cn list
@@ -461,8 +461,8 @@ test('a market page reads no /data/bars, whatever its id; Markets on screen read
   await h.ready();
   assert.match(f.html(), /<main class="main mkts mk-page">/);
   assert.match(f.html(), /A-share · 600519 · SH/, 'the A-share page, cold');
-  assert.ok(reads.includes('/data/account/explore?limit=200'), "Markets on screen reads the Account's explore");
-  assert.ok(reads.includes('/data/account/candles?venue=china&symbol=600519&range=1D'), 'its history at venue china');
+  assert.ok(reads.includes('/data/market/explore?limit=200'), "Markets on screen reads the Account's explore");
+  assert.ok(reads.includes('/data/market/candles?venue=china&symbol=600519&range=1D'), 'its history at venue china');
   assert.equal(reads.some(p => p.startsWith('/data/account/holdings') || p.startsWith('/data/account/statement')), false, 'nothing held or stated read for an A share');
   await settle();
   for (const hash of ['#/markets/crypto:BTC/USD', '#/markets/cn:600519', '#/markets/us:AAPL']) {
@@ -509,15 +509,21 @@ function standinAnswer(path) {
     case '/data/account/history': return { ...fx(paper ? 'history-paper' : 'history'), range: q.get('range') };
     case '/data/account/statement': return fx('statement');
     case '/data/account/agents': return fx('agents');
-    case '/data/account/explore': return fx('explore-all');
-    case '/data/account/candles': return { ...fx('candles'), venue: q.get('venue'), symbol: q.get('symbol'), range: q.get('range') };
+    // the market's explore, and the account's connected one beside it listing nothing: their join is the stand-in's rows
+    case '/data/market/explore': return fx('explore-all');
+    case '/data/account/connected/explore': return { ok: true, asOf: '2026-10-22T08:00:00.000Z', items: [], movers: [], closing: [], mostTraded: [], tabs: [], missing: [], notes: [] };
+    case '/data/market/candles':
+    case '/data/account/connected/candles': return { ...fx('candles'), venue: q.get('venue'), symbol: q.get('symbol'), range: q.get('range') };
     case '/data/account/compare': return { ...fx('compare'), base: q.get('base') };
-    case '/data/account/quotes': return { ok: true, quotes: [] };
+    case '/data/market/quotes':
+    case '/data/account/connected/quotes': return { ok: true, quotes: [] };
     // a market page's four reads (plan 4a Task 4): the asset sheet the stand-in keeps for the key, else an empty one; its book (the
     // best bid and ask alone), its trades (none published), no funding
     case '/data/account/asset': return ASSET_SHEETS[q.get('key')] ? fx(ASSET_SHEETS[q.get('key')]) : { ok: true, key: q.get('key'), positions: [], orders: [], lines: [], cost: [], missing: [] };
-    case '/data/account/book': return { ...fx('book'), venue: q.get('venue'), symbol: q.get('symbol') };
-    case '/data/account/trades': return { ...fx('trades'), venue: q.get('venue'), symbol: q.get('symbol') };
+    case '/data/market/book':
+    case '/data/account/connected/book': return { ...fx('book'), venue: q.get('venue'), symbol: q.get('symbol') };
+    case '/data/market/trades':
+    case '/data/account/connected/trades': return { ...fx('trades'), venue: q.get('venue'), symbol: q.get('symbol') };
     case '/data/account/funding': return { ok: true, lines: [], missing: [] };
     case '/data/seat.json': return SEAT;
     default: return undefined;
@@ -888,8 +894,8 @@ test("a market's page follows its market on the stream and reads what is held of
   await settle();
   assert.deepEqual(store.get().route, { screen: 'markets', id: 'coin:BTC' });
   assert.deepEqual(st.follows.at(-1), ['ex:BTC/USDT'], 'its first connected line');
-  for (const read of ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/account/statement', '/data/account/candles?venue=ex&symbol=BTC%2FUSDT&range=1D', '/data/account/compare?base=BTC&side=buy',
-    '/data/account/asset?key=crypto%3ABTC', '/data/account/book?venue=ex&symbol=BTC%2FUSDT&depth=10', '/data/account/trades?venue=ex&symbol=BTC%2FUSDT&limit=20']) {
+  for (const read of ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/account/statement', '/data/account/connected/candles?venue=ex&symbol=BTC%2FUSDT&range=1D', '/data/account/compare?base=BTC&side=buy',
+    '/data/account/asset?key=crypto%3ABTC', '/data/account/connected/book?venue=ex&symbol=BTC%2FUSDT&depth=10', '/data/account/connected/trades?venue=ex&symbol=BTC%2FUSDT&limit=20']) {
     assert.ok(h.reads.includes(read), read);
   }
   // what is held of it (the asset sheet) and the statement's lines about it, from their own reads; its book and its trades
@@ -902,7 +908,7 @@ test("a market's page follows its market on the stream and reads what is held of
   h.reads.length = 0;
   f.click({ tagName: 'BUTTON', dataset: { action: 'setRange', id: 'coin:BTC', value: '1M' } });
   await settle();
-  assert.deepEqual(h.reads, ['/data/account/candles?venue=ex&symbol=BTC%2FUSDT&range=1M']);
+  assert.deepEqual(h.reads, ['/data/account/connected/candles?venue=ex&symbol=BTC%2FUSDT&range=1M']);
   assert.equal(store.get().markets.candles['coin:BTC'].range, '1M');
   // leaving the page lets its market go
   f.win.location.hash = '#/markets';
@@ -923,12 +929,12 @@ test("an A share's page, reached by a link, reads its 1D history from the face's
   h.reads.length = 0;
   f.win.location.hash = '#/markets/cn:600519';
   await settle();
-  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600519&range=1D'), JSON.stringify(h.reads));
+  assert.ok(h.reads.includes('/data/market/candles?venue=china&symbol=600519&range=1D'), JSON.stringify(h.reads));
   assert.equal(h.reads.some(r => r.startsWith('/data/account/holdings')), false, 'nothing held of an A share is read from the Account');
   h.reads.length = 0;
   f.click({ tagName: 'BUTTON', dataset: { action: 'setRange', id: 'cn:600519', value: '1M' } });
   await settle();
-  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600519&range=1M'), JSON.stringify(h.reads));
+  assert.ok(h.reads.includes('/data/market/candles?venue=china&symbol=600519&range=1M'), JSON.stringify(h.reads));
   store.timers.clear();
 });
 
@@ -940,7 +946,7 @@ test("a non-canonical A-share link still reads its history at the canonical id (
   h.reads.length = 0;
   f.win.location.hash = '#/markets/cn:sh600519';
   await settle();
-  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600519&range=1D'), JSON.stringify(h.reads));
+  assert.ok(h.reads.includes('/data/market/candles?venue=china&symbol=600519&range=1D'), JSON.stringify(h.reads));
   store.timers.clear();
 });
 
@@ -987,7 +993,7 @@ test("the quotes poll asks for the table's rows drawn, and on a market's page fo
   const store = bootAccount(f, h, fakeMarkets(), { timers });
   await h.ready();
   const m = store.get().markets;
-  const quoted = () => h.reads.filter(p => p.startsWith('/data/account/quotes?')).map(p => new URLSearchParams(p.split('?')[1]).get('pairs').split(',').sort());
+  const quoted = () => h.reads.filter(p => p.startsWith('/data/account/connected/quotes?')).map(p => new URLSearchParams(p.split('?')[1]).get('pairs').split(',').sort());
   const drawn = rowsOf(m, Date.now()).filter(r => r.id === 'coin:BTC' || r.id === 'stock:NVDA');
   timers.run(5_000);
   await settle();
@@ -1015,7 +1021,7 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   const timers = new HeldTimers(ms => ms >= 5_000 || ms === 300);
   const store = bootAccount(f, h, null, { timers });
   await h.ready();
-  const searched = () => h.reads.filter(p => p.startsWith('/data/account/explore?q='));
+  const searched = () => h.reads.filter(p => p.startsWith('/data/market/explore?q='));
   mq.value = 'BT';
   f.fire('root', 'input', { target: mq });
   assert.equal(store.get().markets.q, 'BT', 'the query moves at once');
@@ -1029,7 +1035,7 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   assert.notDeepEqual(second, first, 'a keystroke restarts it');
   timers.run(300);
   await settle();
-  assert.deepEqual(searched(), ['/data/account/explore?q=BTC&limit=200'], "the Account's search, once, for what was typed last — the A shares' with it");
+  assert.deepEqual(searched(), ['/data/market/explore?q=BTC&limit=200'], "the Account's search, once, for what was typed last — the A shares' with it");
   // a wait cut short by Clear: the search goes blank at once, and the wait never searches
   mq.value = 'ETH';
   f.fire('root', 'input', { target: mq });
@@ -2192,7 +2198,7 @@ test("#/trade shows Trade and reads its kind's picks; Markets' polls stop; leavi
   assert.equal(store.get().route.screen, 'trade');
   assert.match(f.html(), /<main class="main trade">/);
   assert.equal(timers.delays().includes(5_000), false, "Markets' polls stopped");
-  assert.ok(h.reads.includes('/data/account/explore?tab=crypto&limit=12'), "the kind's picks");
+  assert.ok(h.reads.includes('/data/market/explore?tab=crypto&limit=12'), "the kind's picks");
   const picks = timers.delays().filter(ms => ms === 20_000).length;
   assert.equal(picks, 1, "the picks' poll");
   f.win.location.hash = '#/messages/s1';
@@ -2291,7 +2297,7 @@ test("Trade's search reads after 300 ms of quiet, a blank box at once; one still
   const store = bootAccount(f, h, fakeMarkets(), { timers });
   await h.ready();
   const box = value => f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'search', id: 'tq', value, dataset: { action: 'tradeQuery' } } });
-  const searches = () => h.reads.filter(p => p.startsWith('/data/account/explore?q='));
+  const searches = () => h.reads.filter(p => p.startsWith('/data/market/explore?q='));
   box('so');
   box('sol');
   await settle();
@@ -2299,7 +2305,7 @@ test("Trade's search reads after 300 ms of quiet, a blank box at once; one still
   assert.equal(timers.delays().filter(ms => ms === 300).length, 1, 'a keystroke restarts the wait');
   timers.run(300);
   await settle();
-  assert.deepEqual(searches(), ['/data/account/explore?q=sol&limit=12']);
+  assert.deepEqual(searches(), ['/data/market/explore?q=sol&limit=12']);
   assert.equal(store.get().trade.q, 'sol');
   box('');
   assert.equal(store.get().trade.q, '', 'a blank box at once');
@@ -3000,7 +3006,7 @@ test('Open in Markets routes to cn:<code>', async () => {
   assert.equal(f.win.location.hash, '#/markets/cn:600001');
   assert.deepEqual(store.get().route, { screen: 'markets', id: 'cn:600001' });
   assert.match(f.html(), /<main class="main mkts mk-page">[\s\S]*A-share · 600001 · SH/, 'the A-share page, reached cold');
-  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600001&range=1D'), 'its history at venue china');
+  assert.ok(h.reads.includes('/data/market/candles?venue=china&symbol=600001&range=1D'), 'its history at venue china');
   assert.equal(store.get().lunhui.stock, null, 'leaving the conversation closes the drawer');
   store.timers.clear();
 });

@@ -48,6 +48,7 @@ import { tradeableOf } from './host/trade-view.js';
 import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
 import { firstOpen } from './host/sessions.js';
 import { createAccountStream } from './wire/account-stream.js';
+import { createMarketStream } from './wire/market-stream.js';
 import { discoverWallets, proveWallet } from './wire/wallet.js';
 import { startWalletSend, settleWalletFlight } from './host/wallet-send.js';
 
@@ -227,6 +228,17 @@ export function boot(win, host = {}) {
     streamWasOpen = status === 'open';
     if (accountShown()) { account.poll(false); account.poll(true); }
   });
+  // the market's push channel beside it (wire/market-stream.js), open while the tab is visible: the public line a market's page
+  // follows; a snapshot drops the prices a stream kept, a quote is the price of the market a page follows (a test hands in its own)
+  const marketStream = (host.createMarketStream ?? (onEvent => createMarketStream({
+    createEventSource: url => new win.EventSource(url),
+    fetcher: (path, init) => win.fetch(path, init),
+    schedule, cancelTimer,
+    random: n => win.crypto.getRandomValues(new Uint8Array(n)),
+  }, onEvent)))(ev => {
+    if (ev.type === 'snapshot') store.dispatch('streamSnapshot');
+    if (ev.type === 'quote') store.dispatch('streamQuote', { data: ev.data });
+  });
   // this page as an owner device of the Account (spec 2026-10-22 §6.3): its key in this browser's IndexedDB (in memory where
   // there is none), every call through the face's proxy (a test hands in its own door); the standing read off every page that
   // lands — the first one pairs it once
@@ -387,9 +399,9 @@ export function boot(win, host = {}) {
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });
   // answers go through the live layer, which settles the gate it delivered once the answer wins
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson });
-  // Markets: the Account's reads on the app's timers — the A shares' among them — a market's page followed on the stream; the
-  // stars in this browser's storage
-  const markets = startMarkets({ store, storage, getJson, win, now, stream, schedule, cancelTimer, owner, afterAction });
+  // Markets: the market's reads and the Account's connected ones on the app's timers — the A shares' among them — a market's page
+  // followed on the stream its line is on; the stars in this browser's storage
+  const markets = startMarkets({ store, storage, getJson, win, now, stream, marketStream, schedule, cancelTimer, owner, afterAction });
   // the desk's status beside the markets (plan 2026-11-01-desk-p3-watch Task 11): the Desk tab, and the level marks on the rows
   const desk = startDesk({ store, getJson, postJson, schedule, cancelTimer, now });
   // Trade: the kinds' picks on screen, a ticket's order sheet, its line on the stream, Under way's Cancel
@@ -1228,14 +1240,14 @@ export function boot(win, host = {}) {
     if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && store.get().edit && a?.closest?.('.inline-edit') && a.tagName !== 'BUTTON') { ev.preventDefault(); commitEdit(); }
   });
 
-  // a hidden tab stops everything — the Markets polls and the face's wire, the Account's read, and its stream with the market a
+  // a hidden tab stops everything — the Markets polls and the face's wire, the Account's read, and both streams with the market a
   // page follows — and a visible one starts again what its screen reads
   win.addEventListener('hashchange', follow);
   doc.addEventListener('visibilitychange', () => {
     showMarkets();
     showTrade();
     showAccount();
-    if (doc.hidden) stream.close(); else stream.open();
+    if (doc.hidden) { stream.close(); marketStream.close(); } else { stream.open(); marketStream.open(); }
   });
   store.subscribe((s, type) => {
     requestRender();
@@ -1261,7 +1273,7 @@ export function boot(win, host = {}) {
   modules.trackRuns();
   applyTheme(store.get().theme);
   if (!win.location.hash) win.history.replaceState(null, '', toHash(store.get().route));
-  if (!doc.hidden) stream.open();
+  if (!doc.hidden) { stream.open(); marketStream.open(); }
   follow();
   render();
   return Object.assign(store, { timers, live, actions, markets, channels, discover, owner, sheet, trade, walletSend, sellMany });

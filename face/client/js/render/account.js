@@ -19,7 +19,7 @@ import { money, signedMoney, sign } from '../wire/account-model.js';
 import { price } from '../wire/market-model.js';
 import {
   pageOk, headOf, worthOf, changeOf, assetsOf, positionsOf, openOrdersOf, missingWords, statementLinesOf,
-  venuesOf, agentsOf, cardsOf, asksOf, requestsOf, seatWords, writesOn, walletsOf,
+  venuesOf, agentsOf, cardsOf, asksOf, requestsOf, seatWords, writesOn, walletsOf, marketOldOf,
 } from '../host/account-view.js';
 import { amendSeedOf, closeSeedOf, leverageSeedOf } from '../host/sheet-market.js';
 import { rulesOf } from '../host/rules-view.js';
@@ -153,12 +153,15 @@ function portfolio(state, now) {
   const w = worthOf(a.data, a.holdings.data, a.paper.data);
   const figure = (f, size) => `<div><div class="label">${esc(f.label)}</div><div class="${size}">${esc(money(f.usd))}</div></div>`;
   const figures = `<div class="acct-figures">${figure(w.lead, 'networth')}${w.second ? figure(w.second, 'acct-second') : ''}</div>`;
+  // the market service not answering: the prices under the worth are the last it gave, said once under the figures
+  const old = marketOldOf(a.holdings.data) ?? marketOldOf(a.paper.data);
+  const oldLine = old ? note(`Prices are old · ${old.message} · since ${fmtClock(Date.parse(old.since))}`) : '';
   // the venues a read could not reach, the paper lens's with them, each once
   const gone = [...new Set([...missingWords(a.holdings.data?.missing), ...missingWords(a.paper.data?.missing)])];
   // a page the Account says is stale, or a read that failed after a good one: the last good figures, stamped with the page's time
   const failed = a.status === 'error';
   const stale = failed || a.data.stale === true ? note(`As of ${when(a.data.now, now) || 'earlier'} · stale`) : '';
-  const worth = box(`${figures}${changeLine(a, w.paperLeads)}${seg(RANGES.map(([id, word]) => [word, id]), a.history.range, 'setHistoryRange')}` +
+  const worth = box(`${figures}${oldLine}${changeLine(a, w.paperLeads)}${seg(RANGES.map(([id, word]) => [word, id]), a.history.range, 'setHistoryRange')}` +
     `${curveSvg(a.history.data?.points, { currency: 'USD', label: w.lead.label })}${gone.length ? note(gone.join(' · ')) : ''}${stale}` +
     `<div class="btn-row">${failed ? retry : ''}<button type="button" class="btn-sm" data-action="openStatement">Statement</button></div>`, 'Portfolio');
   const lens = w.paperLeads ? a.paper : a.holdings;

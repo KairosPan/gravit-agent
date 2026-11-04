@@ -24,9 +24,9 @@ const MARKET_PROVIDER = { cn: 'Tencent' };
 const PROVIDER_STATUS = { connecting: 'Connecting', connected: 'Connected', unconfigured: 'Not configured', error: 'Error', limited: 'Limited' };
 const QUOTE_STATUS = { live: 'Live', delayed: 'Delayed', stale: 'Stale' };
 // `polling` is the A shares' quotes read from the Account every 5 s as they always are now: like streaming, nothing to say
-/** China's words when the proxy re-serves the Account's last read (the Account not answering): the China tab's, the Venues line's,
+/** China's words when the proxy re-serves the market's last read (the market not answering): the China tab's, the Venues line's,
  *  Watching's under its A shares. */
-export const NOT_ANSWERING_WORD = 'The Account is not answering · China as last read';
+export const NOT_ANSWERING_WORD = 'The market is not answering · China as last read';
 const CONNECTION = { connecting: 'Connecting…', paused: 'Paused', error: 'Quotes unavailable', stale: NOT_ANSWERING_WORD };
 const WATCH = { read: "Couldn't read the saved watchlist", unsaved: "Couldn't save the watchlist", full: 'The watchlist is full' };
 
@@ -189,14 +189,14 @@ export function chinaWord(session) {
   return '';
 }
 
-/** An A-share page's state line (spec 2026-10-31 §5): the wire down, the Account not answering (the proxy's last read, as of its time), the midday break, closed (the quote's session's close),
+/** An A-share page's state line (spec 2026-10-31 §5): the wire down, the market not answering (the proxy's last read, as of its time), the midday break, closed (the quote's session's close),
  *  live, delayed (the last trade's time), all in Beijing time; nothing before a priced quote. No Halted: no mark was found. */
 export function cnStateWord(quote, connection, providers = []) {
   if (connection === 'error') return 'Quotes unavailable';
-  // the proxy re-serving the Account's last read: the price is as of its own time, never Delayed or Closed
+  // the proxy re-serving the market's last read: the price is as of its own time, never Delayed or Closed
   if (connection === 'stale') {
     const at = beijingOf(quote?.as_of);
-    return at ? `The Account is not answering · as of ${at.date} ${at.time} Beijing` : NOT_ANSWERING_WORD;
+    return at ? `The market is not answering · as of ${at.date} ${at.time} Beijing` : NOT_ANSWERING_WORD;
   }
   // the Account answering but Tencent itself failing (China's state not live): a stale price is no delay, it is an outage
   const tencent = (Array.isArray(providers) ? providers : []).find(p => p?.market === 'cn');

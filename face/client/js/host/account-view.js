@@ -171,6 +171,16 @@ export function orderRowsOf(orders, keys) {
   });
 }
 
+/** The market service not answering, as the account's holdings say it (`marketOld`, plan A2): since when (the account's ISO
+ *  time) and its one sentence — the prices on Portfolio are the last the market gave; null while the market answers, or for a
+ *  body that says it in no shape the face recognises (a since that is no time, no words). */
+export function marketOldOf(holdingsBody) {
+  const old = isRecord(holdingsBody) ? holdingsBody.marketOld : undefined;
+  if (!isRecord(old) || typeof old.since !== 'string' || Number.isNaN(Date.parse(old.since))) return null;
+  const message = str(old.message).trim();
+  return message ? { since: old.since, message } : null;
+}
+
 /** A read's `missing` — the venues it could not reach — one sentence a venue, `Stand-in Exchange did not answer`: a venue
  *  whose stats and positions both failed is named once. */
 export function missingWords(missing) {

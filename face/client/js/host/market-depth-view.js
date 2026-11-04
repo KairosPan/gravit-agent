@@ -1,7 +1,7 @@
 // face/client/js/host/market-depth-view.js — a market's page's four reads beside its price (plan 4a Task 4), pure views over the
 // Account's own answers as the face's proxy passes them: the asset sheet (/data/account/asset?key=, the Account's `asset`:
-// what is held of it, its open orders, its statement lines and what was paid), its order book (/data/account/book), its latest
-// trades (/data/account/trades) and a perpetual's funding (/data/account/funding). Each takes the route's body as the store
+// what is held of it, its open orders, its statement lines and what was paid), its order book (/data/account/connected/book or /data/market/book), its latest
+// trades (the same two routes, …/trades) and a perpetual's funding (/data/account/funding). Each takes the route's body as the store
 // keeps it and answers its empty shape for a body it does not recognise. The asset a market is read as is the Account's own
 // page's rule (its ui/markets.js mkAssetKey). An amount that does not parse is null; a time stays the Account's ISO string. No DOM.
 import { number } from '../wire/account-model.js';

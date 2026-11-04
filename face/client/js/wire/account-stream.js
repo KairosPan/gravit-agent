@@ -18,13 +18,13 @@
 
 export const STALE_MS = 20_000, DEAD_MS = 45_000, RETRY_MS = [1000, 2000, 5000, 10000, 30000], FOLLOW_LIMIT = 16;
 
-const STREAM_PATH = "/data/account/stream";
-/** Bare: the face answers 400 to any query name here, and 415 to a body not declared JSON. */
-const FOLLOW_PATH = "/data/account/stream/markets";
+/** The Account's stream and its follows, the defaults (`paths` names another upstream's: wire/market-stream.js). The follow
+ * path is bare: the face answers 400 to any query name there, and 415 to a body not declared JSON. */
+export const ACCOUNT_PATHS = Object.freeze({ stream: "/data/account/stream", follow: "/data/account/stream/markets" });
 /** How long after a follow POST the face did not take the set is told once more. */
 const RETELL_MS = 1_000;
 /** The Account's frames are all named, and a browser EventSource fires onmessage for unnamed ones only. */
-const EVENT_TYPES = ["snapshot", "order", "fill", "position", "balance", "paper", "statement", "card", "desk", "quote", "trades", "book", "hb"];
+export const ACCOUNT_EVENT_TYPES = Object.freeze(["snapshot", "order", "fill", "position", "balance", "paper", "statement", "card", "desk", "quote", "trades", "book", "hb"]);
 /** EventSource.readyState: CONNECTING while the browser reconnects by itself, CLOSED once it has given up. */
 const CONNECTING = 0, CLOSED = 2;
 
@@ -42,11 +42,13 @@ export function mintClientId(random) {
 /** The Account's push channel for one tab, over the face's proxy. The host owns on and off (`open`, `close`), the
  * follow set (`follow`) and what an event means (`onEvent`); this owns the connection, the resume point and the
  * follow POSTs, and tells `onStatus` each new status. `open()` is a no-op while the stream is on (connecting, open,
- * stale or waiting to reopen). The clocks are the injected timers.
- * @param {{createEventSource: (url: string) => AccountEvents, fetcher: (path: string, init: {method: string, headers: Record<string, string>, body: string}) => Promise<{status: number}>, schedule: (callback: () => void, delay: number) => any, cancelTimer: (timer: any) => void, random: (length: number) => Uint8Array, onStatus?: (status: 'idle'|'connecting'|'open'|'stale'|'closed') => void}} deps
+ * stale or waiting to reopen). The clocks are the injected timers. `paths` and `eventTypes` name another upstream's stream
+ * (the market's: wire/market-stream.js); the defaults are the Account's.
+ * @param {{createEventSource: (url: string) => AccountEvents, fetcher: (path: string, init: {method: string, headers: Record<string, string>, body: string}) => Promise<{status: number}>, schedule: (callback: () => void, delay: number) => any, cancelTimer: (timer: any) => void, random: (length: number) => Uint8Array, onStatus?: (status: 'idle'|'connecting'|'open'|'stale'|'closed') => void, paths?: {stream: string, follow: string}, eventTypes?: readonly string[]}} deps
  * @param {(event: AccountEvent) => void} onEvent
  */
-export function createAccountStream({ createEventSource, fetcher, schedule, cancelTimer, random, onStatus = () => {} }, onEvent) {
+export function createAccountStream({ createEventSource, fetcher, schedule, cancelTimer, random, onStatus = () => {}, paths = ACCOUNT_PATHS, eventTypes = ACCOUNT_EVENT_TYPES }, onEvent) {
+  const STREAM_PATH = paths.stream, FOLLOW_PATH = paths.follow;
   const clientId = mintClientId(random);
   let phase = "idle";      // 'idle' until the first open(), 'on' from open() to close(), 'off' after close()
   /** @type {AccountEvents|null} */
@@ -127,7 +129,7 @@ export function createAccountStream({ createEventSource, fetcher, schedule, canc
       else if (es.readyState === CONNECTING) connected = false;
       notify();
     };
-    for (const type of EVENT_TYPES) es.addEventListener(type, (event) => frame(es, type, event));
+    for (const type of eventTypes) es.addEventListener(type, (event) => frame(es, type, event));
     armClocks();
   }
   /** @param {AccountEvents} es @param {string} type @param {{data?: string, lastEventId?: string}} event */

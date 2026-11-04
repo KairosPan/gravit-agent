@@ -993,11 +993,11 @@ test('Tencent itself down in the session reads Quotes unavailable, not Delayed (
 test('the Account not answering (the proxy re-serving its last read) says so, never Delayed or Closed (plan-1 final review #1)', () => {
   const q = over => ({ price: 1392.05, as_of: '2026-10-30T09:41:00+08:00', quote_status: 'stale', market_status: 'open', ...over });
   const up = [{ id: 'tencent', market: 'cn', status: 'connected' }];
-  assert.equal(cnStateWord(q(), 'stale', up), 'The Account is not answering · as of 10-30 09:41 Beijing');
-  assert.equal(cnStateWord(q({ market_status: 'closed', as_of: '2026-10-30T16:14:55+08:00' }), 'stale', []), 'The Account is not answering · as of 10-30 16:14 Beijing');
-  assert.equal(cnStateWord(q({ as_of: null }), 'stale'), 'The Account is not answering · China as last read');
-  assert.equal(cnStateWord(null, 'stale'), 'The Account is not answering · China as last read');
-  assert.equal(connectionWord('stale'), 'The Account is not answering · China as last read', "the China tab's words");
+  assert.equal(cnStateWord(q(), 'stale', up), 'The market is not answering · as of 10-30 09:41 Beijing');
+  assert.equal(cnStateWord(q({ market_status: 'closed', as_of: '2026-10-30T16:14:55+08:00' }), 'stale', []), 'The market is not answering · as of 10-30 16:14 Beijing');
+  assert.equal(cnStateWord(q({ as_of: null }), 'stale'), 'The market is not answering · China as last read');
+  assert.equal(cnStateWord(null, 'stale'), 'The market is not answering · China as last read');
+  assert.equal(connectionWord('stale'), 'The market is not answering · China as last read', "the China tab's words");
   assert.equal(connectionWord('polling'), '');
 });
 

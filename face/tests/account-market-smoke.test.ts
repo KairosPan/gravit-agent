@@ -27,10 +27,13 @@ import { request } from "node:http";
 import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace } from "../src/boot.ts";
 import { registerAccountProxy } from "../src/account-proxy.ts";
+import { registerMarketProxy } from "../src/market-proxy.ts";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import { freePort, standinSkip, startStandin, stopStandin, type Standin } from "./helpers/standin.ts";
 import { startOwnerNode, type OwnerAnswer, type OwnerNode } from "./helpers/owner-node.ts";
 import { followOf } from "../client/js/host/market-view.js";
+import { joinExplore } from "../client/js/host/explore-join.js";
+import { venuesOf } from "../client/js/host/account-view.js";
 import { assetKeyOf, hereOf } from "../client/js/host/market-depth-view.js";
 import { openOrdersOf, positionsOf, writesOn } from "../client/js/host/account-view.js";
 import { amendSeedOf, closeSeedOf, leverageSeedOf, marketDraftOf } from "../client/js/host/sheet-market.js";
@@ -72,6 +75,7 @@ test("account market smoke: through the face's port, the owner closes, changes a
   const wasUrl = process.env.FACE_ACCOUNT_URL;
   let dispose: (() => Promise<void>) | undefined;
   let disposeProxy: (() => void) | undefined;
+  let disposeMarket: (() => void) | undefined;
   let device: OwnerNode | undefined;
   const output = captureOutput();
   try {
@@ -86,6 +90,8 @@ test("account market smoke: through the face's port, the owner closes, changes a
     dispose = booted.dispose;
     const proxy = registerAccountProxy(booted.ctx.webServer, { url: standin.url });
     disposeProxy = proxy.dispose;
+    /* the market's half beside it, as main.ts registers it: the stand-in's own market */
+    disposeMarket = registerMarketProxy(booted.ctx.webServer, { url: standin.marketUrl }).dispose;
     const base = `http://127.0.0.1:${booted.ctx.webServer.port}`;
     const said = `\nstand-in:\n${standin.log()}`;
     const get = async (path: string, init?: RequestInit): Promise<{ status: number; body: Body }> => {
@@ -109,11 +115,17 @@ test("account market smoke: through the face's port, the owner closes, changes a
     const page0 = await pageNow();
     assert.ok(writesOn(page0), `the stand-in takes writes: ${JSON.stringify(page0.connectLive)}`);
 
-    /* 2. Reads, as a market's page asks them: the ETH perpetual from the perpetuals tab, its asset sheet under the Account's
-     * key, its book and latest trades at the line the page follows, and funding read once with no venue. */
-    const perps = await get("/data/account/explore?tab=perps");
+    /* 2. Reads, as a market's page asks them (plan A2 Task 6): the ETH perpetual from the perpetuals tab — the stand-in's
+     * market's explore joined with the Account's connected explore, as the Markets host joins them — its asset sheet under the
+     * Account's key, its book and latest trades at the line the page follows (a connected line's from the Account's connected
+     * routes, a public one's from the market), and funding read once with no venue. */
+    const perps = await get("/data/market/explore?tab=perps");
     assert.equal(perps.status, 200, JSON.stringify(perps.body).slice(0, 400));
-    const items = (perps.body.items ?? []) as Body[];
+    const connectedPerps = await get("/data/account/connected/explore?tab=perps");
+    assert.equal(connectedPerps.status, 200, JSON.stringify(connectedPerps.body).slice(0, 400));
+    const joined = joinExplore(perps.body, connectedPerps.body, { venues: venuesOf(page0), here: [] }) as Body | null;
+    assert.ok(joined, "the two halves join");
+    const items = (joined.items ?? []) as Body[];
     const ethPerp = items.find((item) => item.kind === "perp" && String(item.base).toUpperCase() === "ETH");
     assert.ok(ethPerp, `the ETH perpetual is listed: ${JSON.stringify(items.map((i) => [i.kind, i.base])).slice(0, 600)}`);
     const key = assetKeyOf(ethPerp);
@@ -125,10 +137,11 @@ test("account market smoke: through the face's port, the owner closes, changes a
     const leg = followOf(ethPerp) as { venue: string; symbol: string } | null;
     assert.ok(leg, `a line the page follows: ${JSON.stringify(ethPerp.at)}`);
     const at = `venue=${encodeURIComponent(leg.venue)}&symbol=${encodeURIComponent(leg.symbol)}`;
-    const book = await get(`/data/account/book?${at}&depth=${BOOK_DEPTH}`);
+    const half = (leg as { connected?: boolean }).connected ? "/data/account/connected" : "/data/market";
+    const book = await get(`${half}/book?${at}&depth=${BOOK_DEPTH}`);
     assert.equal(book.status, 200, JSON.stringify(book.body).slice(0, 400));
     assert.equal(book.body.ok, true, JSON.stringify(book.body).slice(0, 400));
-    const trades = await get(`/data/account/trades?${at}&limit=${TRADES_LIMIT}`);
+    const trades = await get(`${half}/trades?${at}&limit=${TRADES_LIMIT}`);
     assert.equal(trades.status, 200, JSON.stringify(trades.body).slice(0, 400));
     assert.equal(trades.body.ok, true, JSON.stringify(trades.body).slice(0, 400));
     /* Funding is one read with no venue (Task 4's ruling, the Account's own terminal's read); the brief's per-venue read
@@ -271,6 +284,7 @@ test("account market smoke: through the face's port, the owner closes, changes a
     /* The web server first, then the proxy's open pipes (main.ts's order), then the stand-in and the homes. */
     if (dispose) await dispose();
     disposeProxy?.();
+    disposeMarket?.();
     if (wasUrl === undefined) delete process.env.FACE_ACCOUNT_URL; else process.env.FACE_ACCOUNT_URL = wasUrl;
     process.env.FACE_MARKET_URL = DEAD_MARKET_URL;
     await stopStandin(standin);

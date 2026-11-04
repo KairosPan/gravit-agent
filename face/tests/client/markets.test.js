@@ -688,15 +688,15 @@ test('China failing: Loading… before any answer, unavailable after a failure, 
   assert.match(kept, /<p class="mk-note">Couldn’t refresh China<\/p>/);
 });
 
-test('China as last read: the Account not answering is said over the kept rows; a stale read of its own in its words', () => {
-  // the proxy re-served the kept ranking flagged stale: the Account is not answering, and the rows are never drawn bare
+test('China as last read: the market not answering is said over the kept rows; a stale read of its own in its words', () => {
+  // the proxy re-served the kept ranking flagged stale: the market is not answering, and the rows are never drawn bare
   const asLast = chinaScreen(s => R.rankLoaded(s, { sort: 'volume', data: { ...RANK, stale: true, status: { state: 'live', said: '' } }, at: NOW })).html;
   assert.deepEqual(rowIds(asLast), ['cn:300502', 'cn:688825']);
-  assert.match(asLast, /<p class="mk-note">Closed · 10-30 15:00 Beijing<\/p><p class="mk-note">The Account is not answering · China as last read<\/p>/);
+  assert.match(asLast, /<p class="mk-note">Closed · 10-30 15:00 Beijing<\/p><p class="mk-note">The market is not answering · China as last read<\/p>/);
   // the Account answering that Tencent's ranking is stale: its own words, not the face's
   const said = chinaScreen(s => R.rankLoaded(s, { sort: 'volume', data: { ...RANK, stale: true, status: { state: 'stale', said: 'Tencent has not answered since 14:52' } }, at: NOW })).html;
   assert.match(said, /<p class="mk-note">Tencent has not answered since 14:52<\/p>/);
-  assert.doesNotMatch(said, /The Account is not answering/);
+  assert.doesNotMatch(said, /The market is not answering/);
   // a live read says neither
   assert.doesNotMatch(chinaScreen(s => R.rankLoaded(s, { sort: 'volume', data: { ...RANK, stale: false, status: { state: 'live', said: '' } }, at: NOW })).html, /not answering|Couldn’t refresh/);
 });
@@ -893,14 +893,16 @@ test('an Account that answers the book with express’s 404 page, and the trades
     const [route, query = ''] = path.split('?');
     const q = new URLSearchParams(query);
     switch (route) {
-      case '/data/account/explore': return json(fx('explore-all'));
-      case '/data/account/candles': return json({ ...fx('candles'), venue: q.get('venue'), symbol: q.get('symbol'), range: q.get('range') });
+      case '/data/market/explore': return json(fx('explore-all'));
+      case '/data/account/connected/explore': return json({ ok: true, items: [], movers: [], closing: [], mostTraded: [], tabs: [], missing: [], notes: [] });
+      case '/data/account/connected/candles': return json({ ...fx('candles'), venue: q.get('venue'), symbol: q.get('symbol'), range: q.get('range') });
       case '/data/account/compare': return json({ ...fx('compare'), base: q.get('base') });
-      case '/data/account/quotes': return json({ ok: true, quotes: [] });
+      case '/data/market/quotes':
+      case '/data/account/connected/quotes': return json({ ok: true, quotes: [] });
       case '/data/account/asset': return json(fx('asset-btc'));
-      case '/data/account/book': return new Response('<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8"><title>Error</title></head><body><pre>Cannot GET /api/account/book</pre></body></html>\n',
+      case '/data/account/connected/book': return new Response('<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8"><title>Error</title></head><body><pre>Cannot GET /api/account/book</pre></body></html>\n',
         { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } });
-      case '/data/account/trades': return json({ ok: false, unreachable: 'ECONNREFUSED' }, 503);
+      case '/data/account/connected/trades': return json({ ok: false, unreachable: 'ECONNREFUSED' }, 503);
       default: return json({ ok: false, error: 'no such route' }, 404);
     }
   };
@@ -919,9 +921,10 @@ test('an Account that answers the book with express’s 404 page, and the trades
     assert.match(html, /<span class="mk-big">\$62,480\.00<\/span>/);
     assert.match(section(html, 'Price history'), /class="mk-chart"/);
     assert.match(section(html, 'You here'), /0\.124 BTC · \$7,747\.40/);
-    // the book and the trades are unavailable, with no words of the face's error in their place
-    assert.match(section(html, 'Order book'), /<div class="mk-h2">Order book<\/div><p class="mk-empty">Order book unavailable<\/p><\/section>/);
-    assert.match(section(html, 'Latest trades'), /<div class="mk-h2">Latest trades<\/div><p class="mk-empty">Trades unavailable<\/p><\/section>/);
+    // the book and the trades are unavailable: neither answer carries a body the face reads, which is the Account not answering,
+    // and the line has no public twin of its connection to read instead — said in those words, none of the face's error's
+    assert.match(section(html, 'Order book'), /<div class="mk-h2">Order book<\/div><p class="mk-note">The Account is not answering<\/p><p class="mk-empty">Order book unavailable<\/p><\/section>/);
+    assert.match(section(html, 'Latest trades'), /<div class="mk-h2">Latest trades<\/div><p class="mk-note">The Account is not answering<\/p><p class="mk-empty">Trades unavailable<\/p><\/section>/);
     assert.doesNotMatch(html, /Cannot GET|DOCTYPE|ECONNREFUSED|HTTP 404|HTTP 503|SyntaxError/);
     markets.close();
   } finally {

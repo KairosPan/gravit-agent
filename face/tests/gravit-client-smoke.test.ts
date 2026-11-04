@@ -71,7 +71,7 @@ test("gravit client smoke: the page at /, its modules under /client, and the liv
     const body = await page.text();
     assert.match(body, /<title>Gravit<\/title>/);
     assert.match(body, /src="\/client\/js\/app\.js"/);
-    for (const [path, type] of [["/client/js/host/live.js", "text/javascript"], ["/client/js/wire/api.js", "text/javascript"], ["/client/js/host/markets.js", "text/javascript"], ["/client/js/host/modules-view.js", "text/javascript"], ["/client/js/host/modules.js", "text/javascript"], ["/client/js/render/modules.js", "text/javascript"], ["/client/js/host/run-sheet-view.js", "text/javascript"], ["/client/js/host/run-sheet.js", "text/javascript"], ["/client/js/render/run-sheet.js", "text/javascript"], ["/client/css/app.css", "text/css"]] as const) {
+    for (const [path, type] of [["/client/js/host/live.js", "text/javascript"], ["/client/js/wire/api.js", "text/javascript"], ["/client/js/host/markets.js", "text/javascript"], ["/client/js/host/explore-join.js", "text/javascript"], ["/client/js/wire/market-stream.js", "text/javascript"], ["/client/js/host/modules-view.js", "text/javascript"], ["/client/js/host/modules.js", "text/javascript"], ["/client/js/render/modules.js", "text/javascript"], ["/client/js/host/run-sheet-view.js", "text/javascript"], ["/client/js/host/run-sheet.js", "text/javascript"], ["/client/js/render/run-sheet.js", "text/javascript"], ["/client/css/app.css", "text/css"]] as const) {
       const res = await realFetch(base + path);
       assert.equal(res.status, 200, path);
       assert.match(res.headers.get("content-type") ?? "", new RegExp(type), path);

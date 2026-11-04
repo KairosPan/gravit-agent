@@ -980,3 +980,17 @@ test('Sell many\'s drawer: the picks, the review, the run\'s answers where they 
   has(done, 'Sell many: 1 of 2 sales went through');
   has(done, 'data-action="sellManyClose">Done</button>');
 });
+
+// A2 Task 6: the account's holdings carry `marketOld` while the market service is not answering — one muted line under the worth
+test('Portfolio marks prices old while the market is down', () => {
+  const MARKET_DOWN = 'The market service is not answering, so prices here are not current.';
+  const since = '2026-10-22T07:12:00.000Z';
+  const held = fx('holdings');
+  const html = draw(state({ holdings: { ...held, marketOld: { since, message: MARKET_DOWN } } }));
+  has(html, `<p class="acct-note">Prices are old · ${esc(MARKET_DOWN)} · since ${hhmm(since)}</p>`);
+  // the rows keep their last prices: the assets drawn as without the marker
+  const plain = draw(state({ holdings: held }));
+  lacks(plain, 'Prices are old');
+  const assets = h => h.match(/<section class="cardbox" aria-label="Assets">[\s\S]*?<\/section>/)?.[0];
+  assert.equal(assets(html), assets(plain));
+});
