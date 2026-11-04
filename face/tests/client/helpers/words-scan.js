@@ -44,6 +44,13 @@ function exempt(node) {
   if (ts.isCallExpression(parent) && parent.expression.kind === ts.SyntaxKind.ImportKeyword) return true;
   if (isWordsCall(parent) && parent.arguments[0] === node) return true;
   if ((ts.isPropertyAssignment(parent) || ts.isMethodDeclaration(parent) || ts.isPropertyDeclaration(parent)) && parent.name === node) return true;
+  // a class list: the value of an attrs `class`, or a cls() argument
+  const propName = ts.isPropertyAssignment(parent) && parent.initializer === node ? parent.name : null;
+  if (propName && (ts.isIdentifier(propName) || ts.isStringLiteral(propName)) && propName.text === 'class') return true;
+  let arg = node;
+  while (arg.parent && (ts.isBinaryExpression(arg.parent) || ts.isConditionalExpression(arg.parent) || ts.isParenthesizedExpression(arg.parent)) && arg.parent.condition !== arg) arg = arg.parent;
+  const call = arg.parent;
+  if (call && ts.isCallExpression(call) && ts.isIdentifier(call.expression) && call.expression.text === 'cls' && call.arguments.includes(arg)) return true;
   return false;
 }
 

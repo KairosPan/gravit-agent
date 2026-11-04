@@ -15,6 +15,7 @@ const FILES = walk(ROOT).map(f => relative(ROOT, f).split('\\').join('/')).sort(
 const source = file => readFileSync(join(ROOT, file), 'utf8');
 
 const KEPT_FILES = {
+  'i18n/en.js': 'the English table itself',
   'wire/api.js': 'transport errors, read by code',
   'wire/markdown.js': "Gravit's words",
 };
@@ -29,12 +30,12 @@ const PENDING = [
   'host/sheet-identity.js', 'host/sheet-market.js', 'host/sheet-money.js', 'host/sheet-rules.js', 'host/sheet-view.js',
   'host/sheet.js', 'host/traces.js', 'host/trade-view.js', 'host/wallet-send.js', 'reducers/controls.js', 'reducers/lunhui.js',
   'reducers/owner.js', 'reducers/traces.js', 'render/account.js', 'render/avatars.js', 'render/channel.js', 'render/chart.js',
-  'render/controls.js', 'render/desk.js', 'render/discover.js', 'render/identity.js', 'render/lunhui/breadth.js',
+  'render/desk.js', 'render/discover.js', 'render/identity.js', 'render/lunhui/breadth.js',
   'render/lunhui/composed.js', 'render/lunhui/footer.js', 'render/lunhui/indices.js', 'render/lunhui/intraday.js',
   'render/lunhui/ladder.js', 'render/lunhui/notes.js', 'render/lunhui/signals.js', 'render/lunhui/sources.js',
   'render/lunhui/stock.js', 'render/lunhui/verdicts.js', 'render/lunhui/yesterday.js', 'render/markets.js', 'render/messages.js',
   'render/modules.js', 'render/owner.js', 'render/rail.js', 'render/run-sheet.js', 'render/thread.js', 'render/trade.js',
-  'render/wallet-row.js', 'time.js', 'wire/botSettings.js', 'wire/market-model.js', 'wire/member-traces.js', 'wire/room.js',
+  'render/wallet-row.js', 'wire/botSettings.js', 'wire/market-model.js', 'wire/member-traces.js', 'wire/room.js',
   'wire/subagents.js', 'wire/wallet.js',
 ];
 
@@ -53,11 +54,13 @@ test("a template's text and its aria-label are found, its tags and attribute nam
   assert.deepEqual(texts('const a = x => `<button type="button" data-x="${x}" aria-label="Close">×</button>`;'), ['Close']);
 });
 
-test("a words call's key, an import and a property name are not reported", () => {
+test("a words call's key, an import, a property name and a class list are not reported", () => {
   assert.deepEqual(texts("import { t } from 'Some Module';\nconst a = () => t('Close', { n: 1 });"), []);
   assert.deepEqual(texts("const a = { 'Not signed in': 1, 'aria-label': 2 };"), []);
   assert.deepEqual(texts("const a = () => import('Some Module');"), []);
   assert.deepEqual(texts("const a = () => th('Close the drawer');"), []);
+  assert.deepEqual(texts("const a = attrs({ class: 'input small', 'aria-label': 'Not signed in' });"), ['Not signed in'], "an attrs class list is no phrase, its aria-label is");
+  assert.deepEqual(texts("const a = cls('drawer sheet', x && 'with stock');"), []);
 });
 
 test('en-kept on the line or the line before exempts it', () => {

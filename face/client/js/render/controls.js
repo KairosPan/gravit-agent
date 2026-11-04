@@ -1,6 +1,7 @@
 // gravit-ui/js/render/controls.js — the small shared controls: segs, key-value rows, drawer sections, inline editors, two-step confirms
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
+import { th } from '../i18n/words.js';
 
 // each item a label, or a [label, value] pair when the action takes a value other than the words: the item whose value is
 // `pressed` is pressed, and each hands its value as data-value — and every item the same further data when it is given (a
@@ -36,12 +37,12 @@ export function inlineEdit(fields, error = null) {
     return box;
   };
   return `<span class="inline-edit">${fields.map(input).join('')}` +
-    `<button type="button" class="key yes" data-action="commitEdit" aria-label="Save">${icon('check', 14, 2.4)}</button>` +
-    `<button type="button" class="key no" data-action="cancelEdit" aria-label="Cancel">${icon('x', 14, 2.4)}</button>` +
+    `<button type="button" class="key yes" data-action="commitEdit" aria-label="${th('common.save')}">${icon('check', 14, 2.4)}</button>` +
+    `<button type="button" class="key no" data-action="cancelEdit" aria-label="${th('common.cancel')}">${icon('x', 14, 2.4)}</button>` +
     `${error ? `<span class="field-error">${esc(error)}</span>` : ''}</span>`;
 }
 
 // the second step of a confirm, in place of the button that asked
 export function confirmPair(label) {
-  return `<span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">${esc(label)}</button><button type="button" class="btn-sm" data-action="cancelConfirm">No</button></span>`;
+  return `<span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">${esc(label)}</button><button type="button" class="btn-sm" data-action="cancelConfirm">${th('common.no')}</button></span>`;
 }

@@ -433,8 +433,8 @@ function modeSeg(mode, owner) {
 // what each mode does, door by door, as the Account has it; the mode in force marked Now
 function modeTable(r) {
   if (!r.modeRows.length) return note('The account did not say what each mode does.');
-  const th = (label, m) => `<th scope="col">${label}${r.mode === m ? ` ${chip('Now')}` : ''}</th>`;
-  return `<div class="acct-wrap"><table class="acct-t"><thead><tr><th scope="col">An agent, inside its limit</th>${th('Guard', 'guard')}${th('Beast', 'open')}</tr></thead>` +
+  const colHead = (label, m) => `<th scope="col">${label}${r.mode === m ? ` ${chip('Now')}` : ''}</th>`;
+  return `<div class="acct-wrap"><table class="acct-t"><thead><tr><th scope="col">An agent, inside its limit</th>${colHead('Guard', 'guard')}${colHead('Beast', 'open')}</tr></thead>` +
     `<tbody>${r.modeRows.map(row => `<tr><td>${esc(row.door)}</td><td>${esc(row.guard)}</td><td>${esc(row.beast)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
