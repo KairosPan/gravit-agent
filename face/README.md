@@ -126,9 +126,8 @@ outside the whole repo.
 |---|---|---|
 | `FACE_PORT` | `3090` | webserver port. `0` asks the OS for a free one |
 | `FACE_PROFILE` | `face` | profile directory name — honored by BOTH `npm run setup` and `npm start` |
-| `FACE_DESK` | unset | `0` mounts none of the desk's rows — no ledger `boot` or `shutdown`, no sleep watch, no desk conversation, no Telegram bridge — for a second face beside the service, which runs on a scratch home ("Run as a service" below); `/data/desk/status` and the Pause route still answer, `desk.enabled: false`. Any other value, empty included, leaves the desk on |
+| `FACE_DESK` | unset | `0` mounts none of the desk's rows — no ledger `boot` or `shutdown`, no sleep watch, no desk conversation, no phone bridge, no Gate 2 card notice — for a second face beside the service, which runs on a scratch home ("Run as a service" below); `/data/desk/status` and the Pause route still answer, `desk.enabled: false`. Any other value, empty included, leaves the desk on |
 | `FACE_DESK_MODEL` | `deepseek-official/deepseek-flash` | the desk session's model route, `provider/model`; one the tree does not serve falls back to the tree's default selection — Gravit's model — with one line ("The desk" below) |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OPERATOR_ID` | — | the bot's token and the operator's numeric Telegram user id; with both set (and the desk on) the face runs the Telegram bridge, with either missing it runs none ("The desk" below). The token is a key: it lives in `$DSH_HOME/.env` |
 | `FACE_PYTHON` | `python3` | the interpreter a standing order's `.py` script producer runs under, `-I`; none ships, and nothing else in the face needs Python — the desk's market clock is Node (`src/market-clock.ts`) |
 | `DSH_HOME` | `~/.dsh` | the harness home: profiles, sessions, storages, credentials — the browser-session signing secret included |
 | `DEEPSEEK_API_KEY` | — | resolved per request through the credential seam, then the environment |
@@ -174,7 +173,7 @@ run (`runs: …`).
 cd face
 npm run service -- install     # write $DSH_HOME/.env if the home has none; run the face now and at every login
 npm run service -- status      # the default: launchd's state and pid, uptime, the desk, its pause
-                               # and Telegram bridge, how the last run ended, the sign-in URL
+                               # and phone line, how the last run ended, the sign-in URL
 npm run service -- status --check   # the same, then the desk's health, also as the exit code:
                                # 0 healthy, 1 degraded, 2 down, 3 stopped on purpose
 npm run service -- url         # the sign-in URL (?token=) from the face's log
@@ -203,7 +202,22 @@ as `status --check` does, with no dsh and no model. On `2` (no answer on two
 tries 10 s apart) it runs the service's own `restart` once per outage and tells
 the phone; on `1` twice in a row it tells the phone once; back at `0` it says
 the desk answers again; on `3` (not installed, or stopped) it does nothing.
-While the desk's `OFF` pause holds it sends nothing, but still restarts. It
+Since plan B1a it also checks the account (`/api/overview`) and the market
+(`/api/health`) — any HTTP answer is up, only no answer counts — and after two
+checks in a row without one says so once (`the market has not answered since
+<time>: prices, the watch and paper fills wait`, then `the market answers again
+(down since <time>)`), restarting neither. Its lines go through the account's
+send, kind `watchdog`, and count as said only once the account took them. The
+one line it cannot send that way, `the account has not answered since <time>;
+nothing reaches the phone until it does`, it sends to Telegram itself, reading
+the token from the account's home (`credentials/networks/telegram.json`, only
+when the file is the owner's alone) for that line and nothing else, tried at each
+run until the Bot API takes it; `the account answers again (down since <time>)`
+goes through the account. The plist carries `FACE_ACCOUNT_URL`,
+`FACE_MARKET_URL`, `FACE_ACCOUNT_HOME` and `BUYER_HOME` when `install`'s shell
+sets them, so an account or a market on another port or home is watched there;
+otherwise the defaults (`127.0.0.1:4820`, `127.0.0.1:4821`, `~/.buyer-agent-demo`).
+While the desk's `OFF` pause holds it sends nothing, the direct line included, but still restarts. It
 keeps its state in `$DSH_HOME/face/desk/watchdog.json` and logs to
 `watchdog.log` and `watchdog.err.log` beside the face's; `status` prints a
 `watchdog:` line from it, and `npm run watchdog` runs one check by hand.
@@ -253,10 +267,12 @@ whatever a LaunchAgent's environment holds shows in `launchctl print`. The face
 finds its keys in `$DSH_HOME/.env`, which dsh reads at every boot (dsh's
 credential store may hold `DEEPSEEK_API_KEY` too). When the home has no `.env`,
 `install` writes one, mode `0600`, from the repo root's `.env.deepseek`,
-`.env.alpaca`, `.env.ifind` and `.env.telegram`, copying an allow-list only —
+`.env.alpaca` and `.env.ifind`, copying an allow-list only —
 `DEEPSEEK_API_KEY`, `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`,
-`APCA_API_BASE_URL`, `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN`,
-`TELEGRAM_BOT_TOKEN`, `TELEGRAM_OPERATOR_ID` and any `ALPHA_*`; when no key file
+`APCA_API_BASE_URL`, `IFIND_ACCESS_TOKEN`, `IFIND_REFRESH_TOKEN` and any
+`ALPHA_*`; since plan B1a no `TELEGRAM_*` (Telegram's token is the account's,
+"The desk" below), and a home's old `TELEGRAM_*` lines are read by nothing —
+remove them by hand; when no key file
 holds one of those names it writes nothing and says so (`wrote no …`). An
 existing `.env` is never rewritten. Two of its lines to read:
 
@@ -313,9 +329,9 @@ would mark the service's run lost; its clock row waits out a firing the service
 has under way - a `started` younger than its deadline and a minute - before it
 would call it cut off). `FACE_DESK=0` mounts none of the desk's
 rows, and its `/data/desk/status` still answers, `desk.enabled: false`; it
-matters on any home, because the desk's Telegram bridge is the one poller a
-bot token allows — a second one gets Telegram's 409, and both faces' bridges
-record the conflict ("The desk" below) — and the watch the spec's P3 adds will
+matters on any home, because a second desk-enabled face reading the same
+account gets every phone text the service gets and answers it too — reading the
+account's inbox changes nothing ("The desk" below) — and the watch the spec's P3 adds will
 hold whatever stream its US quote source allows.
 
 **Sleep:** on mains, `sudo pmset -c sleep 0`; the display may sleep; on battery
@@ -1646,8 +1662,8 @@ piped stream and the POST rules); the public `/data/account/{explore,quotes,cand
 went to the market's half, and the five connected reads below took their place.
 
 Each route is `exact` — the table is the allow-list, and nothing else of the Account's surface is
-reachable through the face (thirty-eight routes: twenty-three reads, the push channel's two,
-twelve writes, the sign-in's callback):
+reachable through the face (forty-three routes since plan B1a: twenty-five reads, the push
+channel's two, fifteen writes, the sign-in's callback):
 
 | Route | What it reads at the Account | TTL | Abort | Query names |
 |---|---|---|---|---|
@@ -1676,6 +1692,8 @@ twelve writes, the sign-in's callback):
 | `GET /data/account/connected/candles` | a connected line's price history (plan A2) | 30 s | 25 s | `venue`, `symbol`, `interval`, `range`, `before`, `limit` |
 | `GET /data/account/connected/book` | a connected line's order book (plan A2) | 2 s | 7 s | `venue`, `symbol`, `depth` |
 | `GET /data/account/connected/trades` | a connected line's latest trades (plan A2) | 2 s | 7 s | `venue`, `symbol`, `limit` |
+| `GET /data/account/identity` | `GET /api/account/identity`: Account › Identity — the networks connected, the routing, quiet hours and Not you; never a token or a numeric id (plan B1a) | 2 s | 7 s | none |
+| `GET /data/account/identity/pending` | `GET /api/account/identity/pending`: a Connect sheet's pending connection (plan B1a) | 1 s | 7 s | `id` |
 | `POST /data/account/pair` | `POST /api/account/pair`: this page's public key, its label and the code (stage 2) | — | 7 s | none; at most 4,096 bytes |
 | `POST /data/account/prepare` | `POST /api/account/prepare`: a draft prepared, unsigned (stage 2) | — | 30 s | none; at most 16,384 bytes |
 | `POST /data/account/exchange` | `POST /api/exchange`: the signed envelope (stage 2) | — | 30 s | none; at most 65,536 bytes |
@@ -1688,14 +1706,19 @@ twelve writes, the sign-in's callback):
 | `POST /data/account/live/sent` | `POST /api/account/live/sent`: the browser wallet reports a payment sent (the two parts) | — | 30 s | none; at most 512 bytes |
 | `POST /data/account/revoke` | `POST /api/revoke`: Close to agents, unsigned (the two parts) | — | 7 s | none; at most 512 bytes |
 | `POST /data/account/guard` | `POST /api/mode`: Guard, unsigned — the face always sends `{"mode":"guard"}` (the two parts) | — | 7 s | none; at most 256 bytes, then discarded |
+| `POST /data/account/identity/telegram/token` | `POST /api/account/identity/telegram/token`: the bot's token, once, beside the fingerprint the page made — Connect's first sheet (plan B1a) | — | 30 s | none; at most 1,024 bytes |
+| `POST /data/account/identity/pending/not-me` | `POST /api/account/identity/pending/not-me`: the sender heard is not you (plan B1a) | — | 7 s | none; at most 256 bytes |
+| `POST /data/account/identity/pending/drop` | `POST /api/account/identity/pending/drop`: the sheet closed, the token forgotten (plan B1a) | — | 7 s | none; at most 256 bytes |
 | `GET /data/account/signin/callback` | `GET /api/account/signin/callback`: where a venue sends the browser back after its sign-in (the two parts) | — | 30 s | `state`, `code`, `error`, `error_description`, `error_uri`, `iss` |
 
 A venue not connected is the Account's 409 `E_WALLET_NOT_CONNECTED` on each connected read. The
-screens read twenty-one of the twenty-three reads; `market` and `positions` are proxied and
-read by no screen yet. The writes follow `stream/markets`' rules: a body declared `application/json`
+screens read twenty-one of the twenty-five reads; `market` and `positions` are proxied and
+read by no screen yet, nor are `identity` and `identityPending` until plan B1b's Identity tab. The
+account's identity inbox and send are not on this table: only the face's server calls them
+(`src/phone.ts`), and the browser never reaches them. The writes follow `stream/markets`' rules: a body declared `application/json`
 (else 415) on a bare path (any query name is 400), at most the row's bytes (413), forwarded as the
 text it came as with `content-type: application/json` — never parsed, kept, logged or echoed, so
-the pairing code and a signed envelope pass through the face once and leave no trace in it — and
+the pairing code, a signed envelope and a pasted bot token pass through the face once and leave no trace in it — and
 the Account's status and body come back as they are, never kept and never served stale (a fetch
 failure is `503` with its code; a disabled row `disabled` once the body is read). Two writes
 differ: `guard` reads its body under its limit and sends the fixed `{"mode":"guard"}` whatever came,
@@ -1999,12 +2022,12 @@ cookie and does nothing without an admitted key, but it could ask to sign — so
 device you do not recognise. One stream per tab: three tabs are three of the Account's thirty-two.
 
 
-## The desk (src/desk*.ts + src/telegram.ts + src/market-quotes.ts)
+## The desk (src/desk*.ts + src/phone-bridge.ts + src/phone.ts + src/market-quotes.ts)
 
 The desk is Gravit on the operator's phone: one long-lived desk conversation that informs and
 never orders (the desk spec's P1,
 `../docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` §5.3 and §5.6–§5.8). It runs
-in every face with the desk on — `FACE_DESK` unset — whether Telegram is configured or not.
+in every face with the desk on — `FACE_DESK` unset — whether a phone is connected or not.
 
 **The desk session.** One dsh session of the `gravit-desk` preset, its cwd `desk/journal/` and
 its sandbox `workspace-write`, pinned when the face creates it. The face opens it at boot —
@@ -2038,39 +2061,27 @@ A turn from the phone answers to the phone; a turn opened in the browser answers
 only. A cut — the deadline, or `/stop` — cuts one turn: the texts you sent while it ran are
 answered after it, each in its own turn, in the order you sent them.
 
-**Set up the bot**, once:
+**Connect Telegram**, once. Since plan B1a the account holds the phone (`../account/README.md`,
+"Identity"; charter D20): the bot's token, your bound handle, the long poll, the inbox the desk
+reads, the outbox, the routing and quiet hours. The face holds no token and reads no
+`TELEGRAM_*` name; it long-polls the account's inbox (`src/phone.ts`) and sends through the
+account, naming each message's kind, never its recipient.
 
 1. In Telegram, message **@BotFather**, send `/newbot`, and choose a name and a username that
    ends in `bot`. BotFather answers with the bot's token. It is a key: never paste it into a
    chat, a ticket or a commit.
-2. Open the new bot and send it any message (`/start` will do).
-3. Find your numeric user id, one of two ways. Open
-   `https://api.telegram.org/bot<token>/getUpdates` in a private browser window, your token in
-   place of `<token>` — the window keeps the token out of the browser's history — and read
-   `message.from.id`; do it before any face has the token, since a polling bridge takes the
-   updates first (it answers that first message later, as text). Or let the bridge tell
-   you: put the token in with `TELEGRAM_OPERATOR_ID=0` (step 4), restart, message the bot, and
-   read your id in the `drop`
-   record of `$DSH_HOME/face/desk/telegram.jsonl` — every message is dropped while the id is 0 —
-   then set your id and restart again.
-4. Put both in the harness home's `.env` — the service's environment ("Run as a service"):
+2. Connect it in Account › Identity on the face, with the account running (`npm run account`) —
+   the tab and its four sheets are plan B1b's; until it lands nothing on the face connects a
+   network. You paste the token once (it passes through the face unparsed and unlogged, and the
+   account keeps it in `<account home>/credentials/networks/telegram.json`), say hi to the bot from
+   your phone, confirm the account heard you — not a stranger — and sign the connection.
 
-   ```
-   TELEGRAM_BOT_TOKEN=<the token>
-   TELEGRAM_OPERATOR_ID=<the numeric id>
-   ```
-
-   `npm run service -- install` copies the two names from a repo-root `.env.telegram` when the
-   home has no `.env` yet. A home that has one gets the two lines by hand; the file stays
-   `0600`. Then `npm run service -- restart`. A terminal `npm start` reads the home's `.env` at
-   boot too.
-
-Both names, or no bridge: with either one missing, or an id that is not all digits, the face
-runs the desk without a phone, and `status` says `telegram: not configured (…)`. The token
-never reaches the `agent_<bin>` runs or the instruments' producers (the face drops it), nor a
-shell turn or an MCP server (dsh's scrub). A workbench session's shell can still read
-`$DSH_HOME/.env`, as it can every key file (charter D20); the desk has no shell, and its guard
-keeps its reads off them (below).
+An older home's `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OPERATOR_ID` lines in `$DSH_HOME/.env` are read
+by nothing now: remove them. With nothing connected, or the `mcp-account` row disabled, the face
+runs the desk without a phone, and `status` says `phone: nothing connected (Account › Identity)` or
+`phone: none (the account's half is off)`. A workbench session's shell on the host can still read
+the account's token file, as it can every key file (charter D20); the desk has no shell, and its
+guard keeps its reads off them (below).
 
 **What the desk can read, and what reaches the phone.** dsh's sandbox lets every read through,
 so the face's desk guard holds the desk's reads (`DEVELOPMENT.md` §4.2), and refuses before the
@@ -2091,8 +2102,9 @@ tool runs:
 - any call — a search, a market read, a write — whose arguments carry the value of a key in the
   face's environment: `the desk never sends a secret: this call carries one`.
 
-The bridge then replaces every such value with `<secret>`, and the token with `<token>`, in
-everything it sends, queues or keeps. The secret check is a backstop: it finds a value as it is,
+The face's phone client then replaces every such value with `<secret>` in everything it sends,
+and the account takes its own token out as `<token>`, and every link to this machine as
+`<local link>`, before anything reaches Telegram. The secret check is a backstop: it finds a value as it is,
 JSON-escaped or URL-encoded, and misses a lower-case `%3a`, a base64 spelling and a value split
 across arguments, so the read refusals above are what keep a key out. What remains: a key kept
 in a file whose name says nothing and starts with no dot (`credentials.json`, a note), or one an
@@ -2113,15 +2125,17 @@ default selection — Gravit's model, the `agent-default-model` row's — with o
 the desk conversation that start resumes too.
 
 **From the phone.** One operator, one private chat. A message from anyone else, or from a group,
-is dropped unanswered, counted, and its sender id recorded in `telegram.jsonl`; `status` shows
-the count. Text goes to the desk under a first line Gravit reads as its provenance —
-`[telegram · operator · 14:03 ET]`, the time you wrote it; a photo, a file or a voice note gets
-`text only on the desk`. Five commands are the bridge's own, in any letter case, with or without
+is dropped unanswered by the account and counted in Account › Identity's Not you — a count and a
+time, never its text; `status` shows how many. Text goes to the desk under a first line Gravit
+reads as its provenance — `[telegram · operator · 14:03 ET]`, the time you wrote it; a photo, a
+file or a voice note gets `text only, please` from the account; with Chat with Gravit unticked for
+Telegram a text gets `Chat with Gravit is off on Telegram: Account › Identity turns it on.` and
+reaches no one. Five commands are the bridge's own, in any letter case, with or without
 `@<bot>` after them:
 
 | Command | What it does, and the reply |
 |---|---|
-| `/status` | `npm run service -- status`'s desk, pause and Telegram lines — with the budget, standing-order and watch lines after them — then `desk session <id>` and `turns today <n>` |
+| `/status` | `npm run service -- status`'s desk, pause and phone lines — with the budget, standing-order and watch lines after them — then `desk session <id>` and `turns today <n>` |
 | `/pause` | pauses the desk until a terminal resumes it: `paused; a terminal resumes it: npm run desk -- resume` |
 | `/pause 30m` (`Nm`, `Nh`, `Nd`) | pauses it for that long: `paused until 14:33 ET; …`; any other argument pauses nothing and says how to write one |
 | `/mute 30m` (`Nm`, `Nh`, `Nd`) | silences the watch's alerts for that long ("The watch" below): `alerts muted until 14:33 ET; detection and the ledger go on. A terminal lifts it: npm run desk -- unmute`; no or a bad duration mutes nothing and says `mute needs a duration: /mute 30m, /mute 2h or /mute 1d` |
@@ -2139,24 +2153,36 @@ mid-sentence; `timed out after 5 min; a
 card or a long tool was pending` when the deadline cut a turn before it said anything; `the desk
 could not answer: <error>; nothing was done - send it again later` when the model call failed;
 and `the desk is slow to take this; it will answer when it can` when the desk took more than 30 s
-to accept a text. A send that fails
-waits in `outbox.json` (at most 100 messages) and goes out, in order, before the next poll; one
-sent more than 2 minutes after it was written opens with `(written 14:03 ET, sent late)`.
-Telegram's 403 — you blocked the bot, or never started it — drops the message, and `status`
-says `blocked (403)` until a send goes through. Telegram's 409 means another poller holds the
-token — a second face started without `FACE_DESK=0`, a webhook, or someone else with the
-token — and `status` says `conflict at …`; the bridge waits 30 s and polls again. A revoked or
-mistyped token fails every poll, and `status` says `poll failing since <time>: <reason>` until a
-poll answers. Every value of a key in the face's environment goes out as `<secret>`, the token as
-`<token>`, and an outbox an earlier run left is redacted as it is read.
+to accept a text. The account decides what goes and where: a reply to your text always goes;
+alerts, briefs, reports, cards and fills go on the networks their routing row ticks, and quiet
+hours (23:00–07:00 ET by default, off when both ends are empty) hold them back — never a reply, an
+urgent rule's alert or a watchdog line; a held message is not sent later. A send Telegram fails
+waits in the account's outbox (at most 100, each dropped after 12 hours, or when quiet hours would
+hold it at the flush) and goes out, in order, before the account's next poll; one sent more than
+2 minutes after it was written opens with `(written 14:03 ET, sent late)`. Telegram's 403 — you
+blocked the bot, or never started it — drops the message, and `status` says `telegram blocked
+(403)` until a send goes through. Telegram's 409 means another poller holds the token — a webhook,
+or someone else with the token — and `status` says `telegram conflict at …`; the account waits
+30 s and polls again. A revoked or mistyped token fails every poll, and `status` says `telegram
+poll failing since <time>: <reason>` until a poll answers. An account that does not answer the
+face is `the account has not answered since <time>: <reason>` on the phone line, and what the desk
+meant to send meanwhile is `send failed` in the ledger: the face queues nothing. Every value of a
+key in the face's environment goes out as `<secret>`, the token as `<token>`.
 
-**A lost phone.** The bridge admits by your user id, not by the device, so a phone that is still
+**A card waiting.** When Gate 2 raises a card for a seat write (`src/orders.ts`), a face with the
+desk on tells the phone once, kind `card`: `Your call · Buy 10 NVDA · limit 183 · alpaca-paper —
+waiting in Gravit` (`src/card-notice.ts`). You answer the card in the browser; the phone has no
+button. The notice carries no link: every link becomes `<link>` and every `.` not between two digits
+becomes `·` — `evil.com` reads `evil·com`, `NVDA.US` `NVDA·US` — so nothing in it is tappable. The
+account's Guard card for the same write sends a notice of its own, so one seat write is two notices;
+the Cards waiting row and quiet hours decide both, and `/pause` and `/mute` hold neither.
+
+**A lost phone.** The account admits by your user id, not by the device, so a phone that is still
 signed in to your Telegram account keeps chatting with the desk — having it read inside the
 repository, write in its journal and spend tokens — and can pause it. Rotating the token does
 not stop it. End that device's session from another device (Telegram → Settings → Devices), or
-remove `TELEGRAM_OPERATOR_ID` from `$DSH_HOME/.env` and restart the face until you can. Rotate
-the token — @BotFather's `/revoke`, then the new one in `$DSH_HOME/.env` and a restart — only
-when the token itself leaked: whoever holds it can read what you send the bot, through `getUpdates` or a
+Disconnect… Telegram in Account › Identity until you can. Rotate the token — @BotFather's
+`/revoke`, then connect again with the new one — only when the token itself leaked: whoever holds it can read what you send the bot, through `getUpdates` or a
 webhook of their own, which the face sees only as a 409 (`conflict at …`).
 
 **The pause.** The switch is a file, `$DSH_HOME/face/desk/OFF`. While it is there the desk opens
@@ -2621,7 +2647,7 @@ poll SEC refuses for every symbol turns filings off until tomorrow, with one lin
 **One watch per home.** `$DSH_HOME/face/desk/watch.lease` names the face that watches; a second
 face on the same home stays off and says `this face does not watch: another face (pid <n>) holds
 the watch on this home` once a day, and takes over within 2 minutes when the first is gone. A
-second face on another home with the same Telegram token would watch too — start it with
+second face on another home reading the same account would watch too — start it with
 `FACE_DESK=0`.
 
 **The ledgers.** `$DSH_HOME/face/desk/alerts.jsonl` holds every alert with its gate's decision, its
@@ -3805,15 +3831,15 @@ FACE_SMOKE=1 npm test     # + the 33 isolated real boots; local stubs, no extern
 ```
 
 Offline, `npm test` skips the 33 real boots listed below; `FACE_SMOKE=1` runs
-them too (2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
-graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
+them too (3,046 tests in 209 files on 2026-11-04 with plan B1a's phone through the account: 3,013
+pass and 33 skipped offline; 3,047/3,047 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
 the session's directory AND `/tmp` and `os.tmpdir()` (by real path; `/tmp` is `/private/tmp` on
 macOS), so a smoke that proves a write REFUSED passes for the wrong reason from a checkout under
-either. Five smokes fence writes that way — `room-smoke`, `desk-smoke`, `telegram-smoke`,
+either. Five smokes fence writes that way — `room-smoke`, `desk-smoke`, `phone-smoke`,
 `schedule-smoke` and `watch-smoke`. The room and bots fixtures refuse such a checkout before they
-boot (`tests/fixture-root.ts` `assertOutsideTempRoots`, D24); the desk, telegram, watch and
+boot (`tests/fixture-root.ts` `assertOutsideTempRoots`, D24); the desk, phone, watch and
 schedule smokes do not check, so the precondition is yours. A worktree under `~/` or the repo's
 own `.claude/worktrees/` is fine; a scratch clone under `/tmp` is not. The suite also leaves
 `FACE_ACCOUNT_URL` unset: that variable is for a scratch face, and the Lunhui freeze tests reach
@@ -3853,7 +3879,7 @@ and `node --test` gives each file its own:
 | `lunhui-answer-smoke.test.ts` | Gravit's composed answer end to end: the seat off, `lunhui-runs` over a scratch strategies root holding the synthetic sealed 10-27 run; the view read over `GET /data/lunhui/view` (registered as `main.ts` does) with the signed-in cookie; an ok `lunhui_present` lifted through `host/kinds.js` and drawn by the client's own `renderThread` — the seven kinds' labels in the call's order, the follow-ups, the footer with `Open run ›`, a stock link — and `stockDrawerHtml` for 上海九百 drawing its minute chart with the limit-up line; no model called |
 | `goal-smoke.test.ts` | the goal loop `../dsh/profile/cycle.md` rests on, through the face's own wire (prompts, the Stop button's `session/cancel`, a slash line's `commands/execute`): `create_goal` in a human turn returns the id and revision 1, armed; each round arrives at idle as a user message whose source is `goal` (`<goal_round>`, the objective, `Round: n/N`); the model's `blocked` in round 1 is refused (`blocked requires at least 3 consecutive goal rounds; current round is 1`), in round 3 accepted with the code `model-reported` and followed by the `<goal_blocked>` wrap-up; a second `create_goal` is refused while that goal is blocked (`GOAL_ALREADY_EXISTS`); at the cap the driver blocks with `round-limit` and sends the model nothing more; Stop mid-round pauses the goal, the model's resume of it is refused (`GOAL_TOOL_RESUME_PAUSED`: `the model cannot resume a paused goal; the user must resume it`) and `/goal resume` re-arms it; a face stopped mid-round and booted again on the same home leaves the goal active and disarmed with no request until "continue", whose `update_goal` resume bumps the revision and re-arms the rounds |
 | `desk-smoke.test.ts` | the desk on a real tree, as `main.ts` installs it, its fixture root inside the repository so the repository's `GRAVIT.md` heads the chain: the `gravit-desk` session runs in `desk/journal/` under `workspace-write`; its tools are exactly `DESK_ALLOW` expanded on this tree plus `desk_quotes` and `desk_state`, each `mcp__*__<raw>` entry matching one server's tool, and neither desk tool reaches Gravit's session or the global view; the write tools take the path arguments the guard's write check reads, and `str_replace_editor`'s commands are `view`, `create`, `str_replace` and `insert`; the desk's prompt carries Gravit's persona prefix, the date and `# The desk`, and no cycle contract or roles section; a desk turn naming the order stand-in gets Gate 2's visibility refusal and its body never runs; a `write` to `../levels.yml` is refused by the sandbox inside the tool's content while a journal write lands, with no card; Gravit's own write of a `GRAVIT.md` lands; with a listener in front answering allow, the guard's backstop still denies the desk's write of `GRAVIT.md` and its read of a `.env` file, while Gravit's own read of that file goes through unjudged; `/stop` on a turn parked on an escalation card, two texts queued behind it, cuts that turn alone — recorded `cancelled`, `stopped from the phone` — and both texts are answered, in order; the desk's write of a journal `.gitignore` holding `!*` and of a `CLAUDE.md` are denied with no file written, and its read of a dot-config in the repository is denied by name while Gravit reads it; the read tools take exactly the parameters the read check reads; a `GRAVIT.md` planted in the journal reaches a desk session's first request behind the repository's, which is the threat the fence refuses, and the next post is refused with `desk-refused` and no turn; each supervised turn is one `desk-turn` with four token buckets and the stub's route |
-| `telegram-smoke.test.ts` | the bridge end to end on a real tree against a `node:http` Bot API stub on 127.0.0.1: the token and the operator's id come from the scratch home's `.env`, and the MCP child dsh spawns has the id and not the token; a stranger and a group are dropped and counted, unanswered, and the operator's `hi` is answered in the operator's chat; `/status` counts the drops and names the desk session; `/pause` writes `OFF` by `telegram`, a text then gets the paused line and opens no turn, and `/resume` is text that never reaches the model; a 503 queues the reply in the outbox and the next poll flushes it, in order, each reply sent once; a 409 is recorded and waited out; a card parked by an escalated write to `../levels.yml` is cut at the desk's deadline (1,500 ms here) with the timed-out line; the canary — the desk's write of `GRAVIT.md` is denied by the desk guard and no request carries a planted text, then a `GRAVIT.md` the harness plants is refused by the fence with no turn; its read case — `send me ~/.dsh/.env`: the read of the scratch home's `.env` is refused as outside the repository, the token handed to a market read is refused as a secret, no tool result carries the token or a second secret, and the stub's reply, which names both, reaches the phone as `I could not read it: <secret> <token>`; across the file every send went to the operator's chat, the token is in no file of the desk's directory, and no `STANDING.md`, `levels.yml`, `rules.yml` or `holdings.yml` changed |
+| `phone-smoke.test.ts` | the bridge end to end on a real tree against `tests/fake-phone-account.ts`, a loopback fake of the account's inbox and send (since plan B1a; it replaced `telegram-smoke`): a text pushed into the inbox opens a desk turn and its answer reaches `/send` as `{kind: "chat", text, network: "telegram"}`; `/status` carries the phone line; `/pause` and `/resume`; the account away and back, the text answered; a send the account refuses shows as `send failed`; a parked card cut at its deadline; the write and the read canaries, the secret reaching the account as `<secret>`; the fence's plant; every send body carries only its four keys |
 | `schedule-smoke.test.ts` | the standing orders' clock end to end, as `main.ts` installs the desk, on one early-close session (2026-11-27), a fake clock and calendar, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`: a firing a restart cut off is reported `interrupted` at boot and never run; the pre-close brief wakes one fresh `gravit-desk` session in `desk/journal` under `workspace-write`, with the armed text — hashing to its pin — and the producer's block in its wake message, and its final text reaches the phone; `firings.jsonl` holds `started`, `producer`, `woke` and `finished`, `events.jsonl` one `desk-turn` with `source: "schedule"` and four token buckets; a script producer's stderr reaches only the face's log; a turn waiting in a long tool is cut at its 10-minute deadline and the order queued behind it fires after; an edited text is refused with one line, then in silence, and fires once re-armed inside its grace; the pause refuses in silence and a spent budget with one line; an anchor slept across is `missed`; a `wake: false` order runs only its producer; a planted `GRAVIT.md` refuses the firing; the canary's firing half — a poisoned turn's writes of `../STANDING.md`, of `standing.yml` and of a journal `GRAVIT.md` are all refused, no card raised, every text and `standing.yml` unchanged — and a `GRAVIT.md` the harness plants refuses the next order; the clock's dispose cuts a firing in a long tool and settles; every text the desk sent went through the recorder. Then (P4) the strategies' book on 2026-11-30, a fake XSHG calendar beside the XNYS one and one fake quote source, in clock order: an A-share report on its Beijing date naming the screen that ran and its `TENCENT` close print; the canary in a strategy (five calls: it reads and rewrites `STANDING.md` and `levels.yml`, then tries the desk's `STANDING.md`), named by one outside-reports line and holding the next order by each pin in turn; two US reports at one anchor in file order; the fence in a strategy; a producer-only strategy order; the abort last |
 | `watch-smoke.test.ts` | the watch end to end, as `main.ts` installs the desk, on one fake source over a US and an A-share table, fake XNYS and XSHG calendars, a fake SEC, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`, with no route off the host (`FACE_ACCOUNT_URL=http://127.0.0.1:9`, no `ALPHA_EDGAR_USER_AGENT`): nothing polled before the window and the filings seeded silently; a US gap sent with its plan (`NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows`) and its annotation as a reply, run in a session of its own (never the desk conversation's, which reaches the model for none of it) and recorded `annotated`; a restart firing no second gap; the cooldown; the cap and the batch line; an A-share gap (`600519 1390 · TENCENT 09:30:02 Beijing`), nothing at the midday break; an annotation cut at its deadline and one whose model call fails, each its line as a reply; the phone's text preceded by the desk state naming both markets; an 8-K alerted, the A share never asked of SEC, and the pre-close brief on the same home listing the alerts and the filing; the canary's annotation half — a poisoned annotation's writes of `../rules.yml` and of `MUTE` refused, `levels.yml` and `rules.yml` unchanged, no card |
 | `desk-carry-smoke.test.ts` | a graceful stop and a fresh boot, two real boots on one home, each in a child process of its own (the file runs itself as `one`, then `two`): the first face, the desk as `main.ts` installs it on the stub, posts `LONG` (`telegram:1`), whose model call hangs until its abort, and `QUEUED` (`telegram:2`) behind it, then shuts down as `main.ts` does - `desk.dispose(0)`, then the tree's; the ledger holds one `desk-carry` - `QUEUED`'s key, words and time, and `LONG`'s turn 1 as `cut` - before its `shutdown`; the second face's boot posts `QUEUED` again, its provenance line ending `(carried over a restart)`, the model answers it once and `LONG` not at all, the phone gets the restart line and then `echo QUEUED`, and `desk-carried` says `posted: 1, skipped: 0` (spec §16 H3, R93; the guard across dsh upgrades for `.superpowers/sdd/2026-11-02-desk-hardening/graceful-stop-measurement.md`) |
@@ -5151,12 +5177,12 @@ boxes of plan A2 have not run either.
 
 
 
-## The desk drill (run after any change to scripts/service.ts, scripts/watchdog.ts, scripts/desk.ts, src/desk*.ts, src/annotator.ts, src/telegram.ts, src/market-quotes.ts, src/symbols.ts, src/{schedule,firing,standing,producer,market-clock,xshg-clock,brief,report}.ts, src/{watch,watch-eval,alert-text,edgar,filings}.ts or main.ts's exits)
+## The desk drill (run after any change to scripts/service.ts, scripts/watchdog.ts, scripts/desk.ts, src/desk*.ts, src/annotator.ts, src/phone-bridge.ts, src/phone.ts, src/card-notice.ts, src/market-quotes.ts, src/symbols.ts, src/{schedule,firing,standing,producer,market-clock,xshg-clock,brief,report}.ts, src/{watch,watch-eval,alert-text,edgar,filings}.ts or main.ts's exits)
 
 The desk spec's drill (`../docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` §9 and
 §12, §15 and §16), in six parts: P0's, the face as a service; P1's, the phone and Markets ›
 Desk; P2's, the clock and the pre-close brief; P3's, the watch; P4's, a strategy's pre-market
-report; and the hardening's three steps (§16).
+report; the hardening's three steps (§16); and, since plan B1a, the phone through the account.
 **Since the merge onto main (2026-11-01)** the browser's steps read Markets › Desk (`#/markets`,
 the Desk tab, the last), the old client's Desk panel having left with that client: its status,
 Pause, standing orders and firings; it lists no desk conversation and opens no session, so read
@@ -5251,22 +5277,22 @@ conversation, a long answer, a turn cut by its deadline, a `/stop` with a text q
 
 **The automated half, no Telegram.** `npm test` runs the desk's suites — `desk`, `desk-cli`,
 `et`, `desk-preset`, `desk-tools`, `desk-guard`, `desk-session`, `desk-conversation`,
-`telegram`, with the desk's cases in `http`, `orders`, `cycle`,
+`phone-bridge` (until plan B1a `telegram`), with the desk's cases in `http`, `orders`, `cycle`,
 `gravit-plugin`, `bot-plugin`, `boot`, `bots`, `agents`, `service`, `mapper`,
-`grouping` and `speaker`; `FACE_SMOKE=1 npm test` boots `desk-smoke` and `telegram-smoke`, the
+`grouping` and `speaker`; `FACE_SMOKE=1 npm test` boots `desk-smoke` and `phone-smoke`, the
 canary among them ("Tests" above). What only this drill checks: a real model on the desk's
-preset and contract; the real Bot API from this Mac; what the phone shows of plain text and of
+preset and contract; the real Bot API from the account on this Mac; what the phone shows of plain text and of
 an answer in parts; a real turn cut at 5 minutes, and a real `/stop`, each with a text queued
 behind it; Markets › Desk in a real browser over the real ledger.
 
-**The drill**, after "Set up the bot" ("The desk"), with the service running the merged code and
-the browser signed in:
+**The drill**, after "Connect Telegram" ("The desk"), with the service and the account running the
+merged code and the browser signed in:
 
 1. From the phone: `hi`, then `NVDA now?`. PASS: both answered in the bot's chat; the second
    names the price with its feed and time (`ROBINHOOD 15:21:03 ET`, from `desk_quotes`); the
    ledger, `$DSH_HOME/face/desk/events.jsonl`, has a `desk-turn` line for each, with
    `"source":"telegram"`, `"outcome":"ended"` and four token counts.
-2. `/status`. PASS: the desk line, `telegram: polling, last poll …, <n> dropped, <n> queued`,
+2. `/status`. PASS: the desk line, `phone: telegram polling, last poll …, <n> queued, <n> strangers`,
    `desk session <id>` and `turns today <n>`, the last counting step 1's turns.
 3. `/pause 1m`, then a text. PASS: `paused until HH:MM ET; a terminal resumes it: npm run desk
    -- resume`, then `paused since … by telegram until …; …` for the text, and no new `desk-turn`
@@ -5284,7 +5310,7 @@ the browser signed in:
    minutes after the turn began, the phone gets `timed out after 5 min; a card or a long tool was
    pending`, the card closes, the ledger has a `desk-turn` with `"outcome":"timed-out"`, and
    `desk/drill-note.md` does not exist; then the second text is answered, in a turn of its own. A
-   model that does not retry with the escalation leaves this step to `telegram-smoke`; record
+   model that does not retry with the escalation leaves this step to `phone-smoke`; record
    which happened.
 7. `/stop`: ask for something long — the eleven sectors again — then, while it is still
    working, send `and NVDA?`, then `/stop`. PASS: `stopped`; then `and NVDA?` is answered; the
@@ -5293,8 +5319,8 @@ the browser signed in:
    phone)`. A `/stop` that lands after the long answer ended cuts the next turn instead, or finds
    `nothing is running`: try again with a longer ask.
 8. From the browser, Markets › Desk (`#/markets`, then the Desk tab, the last). PASS: it agrees
-   with `npm run service -- status` — the desk on, the Telegram bridge polling with its drops
-   and queue, today's budget; Pause writes `OFF` with no end (the status reads paused by `page`),
+   with `npm run service -- status` — the desk on, the phone line (Telegram polling, the
+   account's queue and strangers), today's budget; Pause writes `OFF` with no end (the status reads paused by `page`),
    a phone text then gets the paused line, and `npm run desk -- resume` in a terminal lifts it
    (`resumed`); the view re-reads every 10 s. The desk conversation opens from the conversation
    list, the phone's texts in it marked ☎.
@@ -5449,7 +5475,7 @@ run, the phone and a real model are the operator's.
 ### After the hardening (spec §16): the busy desk, the restart and the watchdog
 
 **The automated half, no launchd and no network.** `npm test` runs `annotator`, `watchdog` and
-the round's cases in `watch`, `watch-eval`, `alert-text`, `telegram`, `desk-conversation`,
+the round's cases in `watch`, `watch-eval`, `alert-text`, `telegram` (now `phone-bridge`), `desk-conversation`,
 `desk-session`, `desk` and `service`; `FACE_SMOKE=1 npm test` boots `watch-smoke`, whose checks
 now run in sessions of their own, and `desk-carry-smoke`, a graceful stop's queued text answered by
 the next boot. What only this drill checks: a real model's check while a phone
@@ -5495,4 +5521,30 @@ the date, the commit, step 1's two times, step 2's lines and step 3's line and i
 `DEVELOPMENT.md` §7.4's hardening **Desk** row.
 
 **Not yet run.** The automated half passes 2026-11-02; launchd, the phone and a real model are the
+operator's.
+
+### After plan B1a: the phone through the account
+
+**The automated half, no Telegram.** `npm test` runs `phone-bridge`, `card-notice`, `watchdog`
+and the round's cases in `desk`, `desk-conversation`, `watch`, `desk-book`, `firing`, `schedule`,
+`annotator`, `order-gate`, `account-proxy` and `service`; `FACE_SMOKE=1 npm test` boots
+`phone-smoke` and `desk-carry-smoke` over a fake account; the account's own
+`test/unit/identity-*.test.ts` run Telegram's side against a fake Bot API on loopback. No test
+reaches Telegram. What only this drill checks: what Telegram's own app makes of the notices'
+defanged text.
+
+**The drill**, once Telegram is connected in Account › Identity (plan B1b's tab), with the
+service, the account and the market running this code. The rest of the connection's drill is plan
+B1b's operator section.
+
+1. **No tappable host.** Send yourself `evil·com` on Telegram — in Saved Messages, not to the bot,
+   which would hand it to the desk — with the middle dot (U+00B7) as a card or fill notice writes
+   every `.` not between two digits, and look at it on the phone and in the desktop app. PASS: neither shows it as a link — nothing underlined, nothing
+   opens on a tap. A link there is a finding: record the client and its version, since the
+   notices' scrub (`src/card-notice.ts`, `account/src/portfolio/identity/notices.ts`) relies on it.
+
+**PASS is step 1.** Record the date, the commit and the two clients in `DEVELOPMENT.md` §7.4's B1a
+**Desk** row.
+
+**Not yet run.** The automated half passes 2026-11-04; the phone and Telegram's clients are the
 operator's.
