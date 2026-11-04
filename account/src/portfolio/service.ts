@@ -100,6 +100,9 @@ import { Desk, type Brain, type BrainStatus, type BrainTest, type DeskWorld } fr
 import { AccountStream } from "./account/stream.ts";
 import { applyBrainKey, BrainKeyStage, envBlocksOf, envWinsOf, type BrainKeyDone } from "./account/brain-keys.ts";
 import { brainProviders, testBrain } from "./account/brains.ts";
+import { telegramApiBase } from "./identity/bot-api.ts";
+import { PendingConnections } from "./identity/pending.ts";
+import { loadIdentity, Strangers, type Stranger } from "./identity/store.ts";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 export const FIXTURES = join(ROOT, "fixtures", "home", "portfolio");
@@ -160,6 +163,10 @@ export interface ServiceOptions {
    * the Anthropic API and each OpenAI-format preset — each ready when its key is there; a scripted one in tests. `env`: the environment
    * those brains read before their key files, as the answer to a key typed on the face says it (envWins); the process's own by default */
   desk?: { brain?: Brain | Brain[] | undefined; tickMs?: number | undefined; firstCycleMs?: number | undefined; env?: NodeJS.ProcessEnv | undefined } | undefined;
+  /** ACCOUNT › IDENTITY (identity/): the Telegram Bot API's address (default: Telegram's own, or ACCOUNT_TELEGRAM_API's loopback override —
+   * bot-api.ts telegramApiBase), the fetch it is reached with, the pending connection's long poll in seconds (25) and its clock. Tests
+   * point it at a fake Bot API */
+  identity?: { apiBase?: string | undefined; fetch?: typeof fetch | undefined; pollTimeoutS?: number | undefined; now?: (() => number) | undefined } | undefined;
   /** THE VENUES' LIVE STREAMS: the market's hub as the account mirrors it (server.ts main: market/hub.ts RemoteHub), or a test's (a hub
    * over a stand-in WebSocket, or test/standin's stand-in prices); without one nothing is streamed — every price is a REST read, as before */
   streams?: MarketHub | undefined;
@@ -363,6 +370,9 @@ export class PortfolioService {
   /** A brain's key typed on the face (account/brain-keys.ts), held in memory from the moment its route has checked it against the signed
    * fingerprint until that route answers — taken once by the door's handler, which writes the provider's key file. Nothing else reads it */
   readonly brainKeys = new BrainKeyStage();
+  /** ACCOUNT › IDENTITY (identity/), with the account layer only: the pending Telegram connection of Connect's sheets 1 to 3 (its token held
+   * in memory alone) and the strangers who wrote to the bot */
+  readonly identity: { readonly pending: PendingConnections; strangers(): Stranger[]; dispose(): void } | undefined;
   /** the most one order or movement may be worth, in dollars: the server's `--live-cap` to start with, then what the owner last signed
    * (setPolicy cap), which a restart brings back from the ledger */
   private capUsd: number;
@@ -395,12 +405,22 @@ export class PortfolioService {
     this.memory = opts.account !== undefined || opts.venues === "frontline" ? new MemoryStore(join(opts.home, "memory"), () => Date.parse(this.now())) : undefined;
     this.account = opts.account !== undefined || opts.venues === "frontline" ? new AccountEngine(this.host(), opts.account ?? {}) : undefined;
     if (this.account) this.catalog = opts.connectable ?? loadConnectable();
+    this.identity = this.account ? this.mountIdentity() : undefined;
     // the desk lives on a real account only: its seats are keys at the real door, its leads orders at a venue connected live
     this.desk = this.account && opts.real ? new Desk(this.deskWorld(), { brain: opts.desk?.brain ?? brainProviders(opts.home, { env: opts.desk?.env }), tickMs: opts.desk?.tickMs, firstCycleMs: opts.desk?.firstCycleMs, onChange: (c) => this.stream.emit("desk", { ...c, at: this.now() }) }) : undefined;
     // the payees are simulated hosts: a real account has none. A real account pays real ones, from agent wallets (account/pay-real.ts)
     this.payees = this.account && !opts.real ? mountPayees(this.account) : undefined;
     if (this.account && opts.real && opts.liveWrites) this.account.usePayer(new RealPayer(this.account, { http: opts.payHttp ?? guardedHttp, chain: this.liveDeps().chain, wallet: (name) => agentWalletKey(opts.home, name), clock: () => this.liveDeps().clock(), capUsd: () => this.capUsd }));
     if (this.account && !opts.freshLedger) this.rememberNonces(this.account);
+  }
+
+  /** the identity's parts on this home: the strangers file read, no poll begun until a token is sent */
+  private mountIdentity(): NonNullable<PortfolioService["identity"]> {
+    const home = this.opts.home;
+    const o = this.opts.identity ?? {};
+    const strangers = new Strangers(home);
+    const pending = new PendingConnections({ apiBase: o.apiBase ?? telegramApiBase(process.env, (l) => console.error(l)), strangers, bound: () => loadIdentity(home).bindings.some((b) => b.network === "telegram"), fetch: o.fetch, pollTimeoutS: o.pollTimeoutS, now: o.now });
+    return { pending, strangers: () => strangers.list(), dispose: () => pending.dispose() };
   }
 
   /** A signature outlives the process that first saw it. On start, every signed envelope in this home's ledgers has its nonce marked used again,

@@ -156,6 +156,7 @@ import { actionHash, type Envelope } from "./account/sign.ts";
 import { BODY_WORDS, BRAIN_KEY_BODY_LIMIT, checkBeforeDoor, fingerprintOf, isBrainKeyPath, KEY_SHAPED_WORDS, keyTail, parseBrainKeyBody } from "./account/brain-keys.ts";
 import { MODEL_ID } from "./account/desk.ts";
 import { BRAIN_ID, keyShaped } from "./account/brain-key.ts";
+import { isIdentityTokenPath, registerIdentityRoutes } from "./identity/routes.ts";
 import { agentCode, PRICES, type AgentId, type Intent } from "./accounts.ts";
 import { AgentSession, PRESETS } from "./agent.ts";
 import { BRIDGE_CHAINS } from "./live/bridge.ts";
@@ -392,7 +393,8 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   // No body is inflated (inflate: false): the face never compresses one, and a body declared gzip that is not would otherwise end in zlib's
   // error — an HTML page with a stack, logged — instead of the one fixed sentence below
   const json = express.json({ inflate: false });
-  app.use((req, res, next) => (isBrainKeyPath(req.path) ? next() : json(req, res, next)));
+  // Telegram's bot token (identity/routes.ts) is the other: its route reads its own body, for the same reason
+  app.use((req, res, next) => (isBrainKeyPath(req.path) || isIdentityTokenPath(req.path) ? next() : json(req, res, next)));
 
   /** the owner's routes and the agents' routes are closed to an unsigned caller once the account layer is mounted */
   const layer = () => svc.account !== undefined;
@@ -853,6 +855,10 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     }
   }));
 
+  // ACCOUNT › IDENTITY (identity/routes.ts): Connect Telegram's sheets 1 to 3 — the bot's token once, on its own route with its own reader
+  // (the JSON parser above skips it), held in memory only; the pending connection read, "Not me", and drop
+  registerIdentityRoutes(app, { identity: () => svc.identity, wrap, readSmall });
+
   // "Test the key": the brain's own test, one call that bills nothing, to the provider's own base URL (desk.ts Brain.test). Unsigned — it
   // changes nothing and spends nothing — and behind the origin guard above like every route. It also asks for a browser's own headers:
   // Sec-Fetch-Site: same-origin, or (a browser that sends no Fetch Metadata) the Origin a browser puts on every POST, which the guard has
@@ -1002,6 +1008,8 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
       // streams closed, and every paper book's last change written
       svc.stream.end();
       svc.closeStreams();
+      // a pending Telegram connection's long poll is cut and its token forgotten
+      svc.identity?.dispose();
       // the market's link closed whatever the flush does: its hub stream never holds the server, or a test, open
       try {
         await svc.flushPaper();
