@@ -35,7 +35,7 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
   // a command chosen from the composer's menu: its result on the status line, or its failure
   async function runCommand(sessionId, line) {
     try {
-      await command(sessionId, line);
+      if ((await command(sessionId, line)) === null) say(`no command claimed ${line}`);
       return true;
     } catch (err) {
       fail(err, 'command');

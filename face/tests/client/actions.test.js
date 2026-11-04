@@ -257,6 +257,12 @@ test("runCommand says the command's result, or its failure", async () => {
   assert.equal(cold.calls.some(c => c[0] === 'commands/execute'), false);
 });
 
+test('runCommand says so when no command claims the line', async () => {
+  const none = rig({ answers: { 'commands/execute': null } });
+  assert.equal(await none.actions.runCommand('s1', '/compact'), true);
+  assert.equal(none.store.get().status.line, 'no command claimed /compact');
+});
+
 test('room: false sends a line with @ straight to Gravit; true posts it to the room', async () => {
   const inRoom = { convs: [conv('s1', { channel: { workspaceId: 'w1', name: 'alpha' } })], posts: { '/data/rooms/say': { addressed: ['buffett'] } } };
   const direct = rig(inRoom);

@@ -452,6 +452,7 @@ export function boot(win, host = {}) {
   const menuShowsRows = () => !!menu && flatItems(menu).length > 0;
   const composerReads = host.composerReads ?? startComposerReads({ call, getJson, postJson });
   let composing = false;
+  let pressedItem = null;   // the menu row under the last press, as it read then (menuPick)
   let pressed = false;   // a primary press is down: a render now would replace the element the click is aimed at
   let pending = false;
   let openedId = null;   // the conversation the live layer was told to open
@@ -1171,8 +1172,13 @@ export function boot(win, host = {}) {
     },
     lunhuiOpenRun: el => go({ screen: 'channel', id: el.dataset.id }),
     lunhuiStockClose: () => store.dispatch('lunhuiStockClose'),
-    // a pointer on a menu row chooses it (the press kept the editor's focus)
-    menuPick: el => { if (menu) chooseItem(flatItems(menu)[Number(el.dataset.index)]); },
+    // a pointer on a menu row chooses it (the press kept the editor's focus): the row under the press, though an answer
+    // that landed before the click redrew the rows
+    menuPick: el => {
+      const item = pressedItem ?? (menu ? flatItems(menu)[Number(el.dataset.index)] : null);
+      pressedItem = null;
+      if (menu) chooseItem(item);
+    },
     lunhuiAsk: () => { const text = askText(store.get()); if (text) void sendText(text); },
     lunhuiMarkets: () => { const code = stockCode(store.get().lunhui?.stock?.code); if (code) go({ screen: 'markets', id: marketKey(code) }); },
     // a composed answer's picks, by the answer's id: a verdict tile (pressed again, it closes), Counts or By change, a bucket
@@ -1410,8 +1416,11 @@ export function boot(win, host = {}) {
   });
   let pressSeq = 0;   // a press's own timeout ends only that press, never a later one
   root.addEventListener('pointerdown', ev => {
-    // a press in the menu never takes focus from the editor, so its caret and the token it stands on stay
+    // a press in the menu never takes focus from the editor, so its caret and the token it stands on stay; the row pressed
+    // is kept as the item it shows now, for its click
     if (ev.target?.closest?.('.cmenu')) ev.preventDefault?.();
+    const row = ev.target?.closest?.('.cmenu-row');
+    pressedItem = row && menu ? flatItems(menu)[Number(row.dataset.index)] ?? null : null;
     if (ev.button !== undefined && ev.button !== 0) return;
     pressed = true;
     const mine = ++pressSeq;
@@ -1437,6 +1446,8 @@ export function boot(win, host = {}) {
   // a caret moved by a key: the token before it may open, follow or close the menu (a no-op while it stands where it was)
   const CARET_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
   root.addEventListener('keyup', ev => { if (CARET_KEYS.has(ev.key) && sayOf(ev.target) && !composing) menuTick(); });
+  // a caret moved by the pointer, the same
+  root.addEventListener('click', ev => { if (sayOf(ev.target) && !composing) menuTick(); });
   // the editor losing focus (a click in the thread, ⌥⌘K) closes the menu, so Esc is the drawers' again; focus moving into
   // the menu, or a render that gives the editor its focus back at once, keeps it
   root.addEventListener('focusout', ev => {

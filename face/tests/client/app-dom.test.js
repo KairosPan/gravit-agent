@@ -4113,6 +4113,41 @@ test('a click on a row chooses it and the editor keeps focus', async () => {
   store.timers.clear();
 });
 
+test('a pointer pick chooses the row pressed, though a late answer reorders the rows before the click', async () => {
+  const waiting = [];
+  const files = path => new Promise(resolve => waiting.push({ path, resolve }));
+  const rows = [titled('s1', 'Alpha', { updatedAt: 50, agentAvailable: true }), titled('s2', 'Beta', { updatedAt: 9 }), titled('s3', 'Gamma', { updatedAt: 5 })];
+  const { f, say, slot, store } = await menuRig({ files, rows });
+  typeMenu(f, say, '@');
+  await settle();
+  assert.match(slot.innerHTML, /data-index="1"[^]*Gamma/, 'Beta, Gamma before the files answer');
+  const row1 = { dataset: { index: '1' } };
+  f.fire('root', 'pointerdown', { button: 0, target: { closest: sel => (sel === '.cmenu' ? {} : sel === '.cmenu-row' ? row1 : null) } });
+  waiting.at(-1).resolve({ ok: true, items: FILES, truncated: false });
+  await settle();
+  assert.match(slot.innerHTML, /x\.md/, 'the files drew above the conversations');
+  f.click({ tagName: 'DIV', dataset: { action: 'menuPick', index: '1' } });
+  f.fire('doc', 'pointerup');
+  assert.deepEqual(say.runs, [{ type: 'chip', chip: { kind: 'conversation', id: 's3', label: 'Gamma' } }, { type: 'text', text: ' ' }]);
+  store.timers.clear();
+});
+
+test('a click that moves the caret off the token closes the menu, and Enter then sends', async () => {
+  const { f, say, slot, h, store } = await menuRig();
+  typeMenu(f, say, 'see @str');
+  await settle();
+  assert.notEqual(slot.innerHTML, '');
+  say.setSelectionRange(2, 2);
+  f.fire('root', 'click', { target: say });
+  assert.equal(slot.innerHTML, '', 'the caret left the token');
+  assert.equal(say.attributes['aria-expanded'], 'false');
+  assert.equal(press(f, say, 'Enter'), true);
+  await settle();
+  assert.equal(say.runs?.some(r => r.type === 'chip') ?? false, false, 'nothing chosen');
+  assert.ok(promptsOf(h).length + saysOf(h).length > 0, 'the draft was sent');
+  store.timers.clear();
+});
+
 test('⌥⌘K with the stock drawer open on a medium window closes it first, then focuses the box; on a wide one it stays', async () => {
   for (const medium of [true, false]) {
     const { f, store, open } = await stockAnswer();
