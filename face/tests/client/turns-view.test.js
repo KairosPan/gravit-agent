@@ -56,6 +56,8 @@ test('the figures: 38 tok/s, cache 63%, first token the average, no speed withou
   assert.equal(bare.firstTokenMs, null);
   assert.equal(bare.cache, null);
   assert.equal(bare.tokens, 0);
+  assert.equal(bare.modelMs, null);
+  assert.equal(bare.toolMs, null);
   assert.equal(statsView(stats(), null).tokens, null);
 });
 
@@ -72,6 +74,17 @@ test('tokens, durations and clocks read as the constraints write them', () => {
   assert.equal(compactTokens(4210), '4.2k');
   assert.equal(compactTokens(182_400), '182k');
   assert.equal(compactTokens(1_250_000), '1.3M');
+  assert.equal(compactTokens(9_960), '10k');
+  assert.equal(compactTokens(9_999), '10k');
+  assert.equal(compactTokens(10_000), '10k');
+  assert.equal(compactTokens(999_499), '999k');
+  assert.equal(compactTokens(999_500), '1.0M');
+  assert.equal(compactTokens(999_999), '1.0M');
+  assert.equal(compactTokens(1_000_000), '1.0M');
+  assert.equal(durationText(9_940), '9.9 s');
+  assert.equal(durationText(9_950), '10 s');
+  assert.equal(durationText(9_999), '10 s');
+  assert.equal(durationText(10_000), '10 s');
   assert.equal(durationText(1400), '1.4 s');
   assert.equal(durationText(42_000), '42 s');
   assert.equal(durationText(252_000), '4m 12s');

@@ -22,8 +22,10 @@ export function activeTurn(marks, scrollTop) {
 }
 
 const num = v => (Number.isFinite(v) ? v : 0);
+// one decimal is rounded on whole hundreds, not by toFixed, so 9,950 is 10.0 and not 9.9
 
-// null until a step has closed; else the figures, each null when its denominator is 0 (tokens null without a tokenUsage)
+// null until a step has closed; else the figures, each null when its denominator is 0 (tokens null without a tokenUsage);
+// a zero model or tool time is no figure
 export function statsView(stats, tokenUsage) {
   if (!stats || !(stats.steps >= 1)) return null;
   const t = tokenUsage && typeof tokenUsage === 'object' ? tokenUsage : null;
@@ -34,8 +36,8 @@ export function statsView(stats, tokenUsage) {
     speed: stats.decodeMs > 0 ? Math.round(stats.decodeTokens / (stats.decodeMs / 1000)) : null,
     tokens: t ? input + num(t.outputTokens) : null,
     cache: input > 0 ? num(t.cacheReadTokens) / input : null,
-    modelMs: stats.llmMs,
-    toolMs: stats.toolMs,
+    modelMs: stats.llmMs > 0 ? stats.llmMs : null,
+    toolMs: stats.toolMs > 0 ? stats.toolMs : null,
     firstTokenMs: stats.ttftSteps > 0 ? stats.ttftMs / stats.ttftSteps : null,
   };
 }
@@ -52,23 +54,26 @@ export function pillsText(view) {
   return [first.join(' · '), second.join(' · ')];
 }
 
-// 999, 4.2k, 182k, 1.3M
+// 999, 4.2k, 182k, 1.3M; the unit is chosen after rounding, so 9,999 is 10k and 999,999 is 1.0M
 export function compactTokens(n) {
   const v = num(n);
   if (v < 1000) return String(v);
-  if (v < 10_000) return `${(v / 1000).toFixed(1)}k`;
-  if (v < 1_000_000) return `${Math.round(v / 1000)}k`;
+  const tenth = Math.round(v / 100) / 10;
+  if (tenth < 10) return `${tenth.toFixed(1)}k`;
+  const k = Math.round(v / 1000);
+  if (k < 1000) return `${k}k`;
   return `${(v / 1_000_000).toFixed(1)}M`;
 }
 
 const pad = n => String(n).padStart(2, '0');
 const hours = t => `${Math.floor(t / 3600)}h ${pad(Math.floor(t / 60) % 60)}m`;
 
-// Usage's times: 1.4 s, 42 s, 4m 12s, 1h 04m
+// Usage's times: 1.4 s, 42 s, 4m 12s, 1h 04m; the unit is chosen after rounding, so 9,999 ms is 10 s
 export function durationText(ms) {
   const v = Math.max(0, num(ms));
-  if (v < 10_000) return `${(v / 1000).toFixed(1)} s`;
-  const t = Math.floor(v / 1000);
+  const tenth = Math.round(v / 100) / 10;
+  if (tenth < 10) return `${tenth.toFixed(1)} s`;
+  const t = Math.max(10, Math.floor(v / 1000));
   if (t < 60) return `${t} s`;
   if (t < 3600) return `${Math.floor(t / 60)}m ${pad(t % 60)}s`;
   return hours(t);
