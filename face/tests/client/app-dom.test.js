@@ -6,6 +6,7 @@ import { boot as bootApp, Timers, DROP_QUIET_MS } from '../../client/js/app.js';
 import { rowsOf, pairsOf } from '../../client/js/host/market-view.js';
 import { kidOf } from '../../client/js/wire/owner-key.js';
 import { fakeWindow } from './helpers/fake-dom.js';
+import { startComposerReads } from '../../client/js/host/composer.js';
 import { valueEditor } from './helpers/value-editor.js';
 import { modulesListing } from './helpers/inventory.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
@@ -4796,5 +4797,299 @@ test('the note above the box keeps its node across renders, so the live region s
   assert.ok(made.length > 1, 'the page write made a new node');
   assert.equal(f.doc.getElementById('composer-note'), first, 'the first node is back in place');
   assert.equal(first.textContent, 'huge.png is over 20 MB');
+  store.timers.clear();
+});
+
+test('a Finder file copy (its name as text/plain, no text/html) attaches the file and inserts no text', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = await bootFiles(f, h, fakeAttachments());
+  say.focus();
+  type(f, say, 'ab');
+  f.fire('root', 'paste', { target: say, preventDefault() {}, clipboardData: { files: [PNG()], getData: t => (t === 'text/plain' ? 'chart.png' : '') } });
+  assert.equal(say.value, 'ab', 'the name is not inserted');
+  assert.match(f.html(), /alt="chart.png"/);
+  store.timers.clear();
+});
+
+// ---- sending with files (plan 4 task 6) ----
+const PNG_BYTES = [137, 80, 78, 71];
+const pngFile = (name = 'chart.png') => ({ name, size: 300 * 1024, type: 'image/png', arrayBuffer: async () => new Uint8Array(PNG_BYTES).buffer });
+const contentsOf = h => h.calls.filter(c => c[0] === 'session/prompt').map(c => [c[1].request.sessionId, c[1].request.content]);
+// no file part ever leaves with an undefined receipt (Task 1's review)
+const noBareReceipts = h => {
+  for (const [endpoint, args] of h.calls) {
+    const parts = endpoint === 'session/prompt' ? args.request.content : endpoint === 'commands/execute' ? args.submittedAttachments : [];
+    for (const p of parts) if (p.type === 'file') assert.equal(typeof p.receiptId, 'string', `${endpoint} sent a file part with no receipt`);
+  }
+};
+const attachmentInvalid = reason => Object.assign(new Error(`session/prompt: session/attachment-invalid - ${reason}`), { code: 'session/attachment-invalid', details: { reason } });
+// session/prompt answered by `answer(n)` for the n-th prompt (from 1): an Error is thrown
+const prompting = (h, answer) => {
+  const call = h.call;
+  let n = 0;
+  h.call = async (endpoint, args) => {
+    if (endpoint !== 'session/prompt') return call(endpoint, args);
+    h.calls.push([endpoint, args]);
+    const a = answer(++n);
+    if (a instanceof Error) throw a;
+    return a;
+  };
+};
+const MODEL_LINE = /Gravit(&#39;|')s model takes no images. Remove the image, or run Gravit on a model that does./;
+
+test('a draft with a file sends its receipt and its words, and the draft clears', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say, input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  pick(f, input, [CSV()]);
+  att.uploads[0].answer('rcpt-1');
+  await settle();
+  type(f, say, 'read it');
+  send(f);
+  await settle();
+  assert.deepEqual(contentsOf(h), [['s1', [{ type: 'text', text: 'read it' }, { type: 'file', receiptId: 'rcpt-1' }]]]);
+  assert.equal(say.value, '');
+  assert.doesNotMatch(f.html(), /prices.csv/, 'the sent file left the draft');
+  noBareReceipts(h);
+  store.timers.clear();
+});
+
+test('an image goes inline as base64 with its media type and name', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = await bootFiles(f, h, fakeAttachments());
+  pick(f, input, [pngFile()]);
+  send(f);
+  await settle();
+  assert.deepEqual(contentsOf(h), [['s1', [{ type: 'image', mediaType: 'image/png', data: 'iVBORw==', name: 'chart.png' }]]], 'no text part for an image alone');
+  store.timers.clear();
+});
+
+test('files with a bot chip are refused before sending, and a typed @word with files goes to Gravit as a prompt', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say, input } = composerEls(f);
+  const h = menuHost();
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att, runsEditor);
+  pick(f, input, [CSV()]);
+  att.uploads[0].answer('rcpt-1');
+  await settle();
+  const draft = [{ type: 'text', text: 'ask ' }, { type: 'chip', chip: botChip }];
+  putRuns(f, say, draft);
+  send(f);
+  await settle();
+  assert.deepEqual(saysOf(h), []);
+  assert.deepEqual(promptsOf(h), []);
+  assert.equal(store.get().status.line, "Files go to Gravit, not to a room's bots");
+  assert.equal(store.get().status.bad, true);
+  store.dispatch('toggleRail');
+  assert.deepEqual(say.runs, draft, 'the draft stays');
+  assert.match(f.html(), /prices.csv/, 'and its file');
+  typeMenu(f, say, '@buffett look');
+  send(f);
+  await settle();
+  assert.deepEqual(saysOf(h), [], 'never tried at the room');
+  assert.deepEqual(contentsOf(h), [['s1', [{ type: 'text', text: '@buffett look' }, { type: 'file', receiptId: 'rcpt-1' }]]]);
+  store.timers.clear();
+});
+
+test('a send while a file uploads is refused, and one with a failed file says Retry it or remove it', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say, input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  pick(f, input, [CSV()]);
+  type(f, say, 'read it');
+  send(f);
+  await settle();
+  assert.equal(store.get().status.line, 'Files are still uploading');
+  assert.equal(say.value, 'read it');
+  att.uploads[0].fail(new Error('upload prices.csv: the request failed'));
+  await settle();
+  send(f);
+  await settle();
+  assert.equal(store.get().status.line, 'A file did not upload. Retry it or remove it.');
+  assert.equal(store.get().status.bad, true);
+  assert.deepEqual(promptsOf(h), []);
+  assert.equal(say.value, 'read it');
+  store.timers.clear();
+});
+
+test('/compact with a file is refused as taking no files; /goal, whose input takes attachments, sends them', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say, input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const call = h.call;
+  h.call = async (endpoint, args) => {
+    if (endpoint === 'commands/execute') { h.calls.push([endpoint, args]); return { result: { kind: 'ok', text: 'goal set' } }; }
+    return call(endpoint, args);
+  };
+  const reads = startComposerReads({ call: h.call, getJson: h.getJson, postJson: h.postJson });
+  const composerReads = { ...reads, keptCommands: () => [{ name: 'compact' }, { name: 'goal', input: { hint: 'the goal', attachments: true } }] };
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att, valueEditor, { composerReads });
+  pick(f, input, [CSV()]);
+  att.uploads[0].answer('rcpt-1');
+  await settle();
+  type(f, say, '/compact');
+  send(f);
+  await settle();
+  assert.equal(store.get().status.line, '/compact takes no files');
+  assert.deepEqual(h.calls.filter(c => c[0] === 'commands/execute'), []);
+  assert.equal(say.value, '/compact');
+  type(f, say, '/goal read the file');
+  send(f);
+  await settle();
+  assert.deepEqual(h.calls.filter(c => c[0] === 'commands/execute').map(c => c[1]), [{ agentId: 's1', line: '/goal read the file', submittedAttachments: [{ type: 'file', receiptId: 'rcpt-1' }] }]);
+  assert.equal(say.value, '');
+  noBareReceipts(h);
+  store.timers.clear();
+});
+
+test('a refused image keeps the draft, draws the model line, and the next image there shows it at once with no call', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say, input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  prompting(h, () => attachmentInvalid('MODEL_DOES_NOT_SUPPORT_IMAGES'));
+  const store = await bootFiles(f, h, fakeAttachments());
+  pick(f, input, [pngFile()]);
+  type(f, say, 'look');
+  send(f);
+  await settle();
+  assert.equal(promptsOf(h).length, 1);
+  assert.equal(say.value, 'look', 'the words came back');
+  assert.match(f.html(), /alt="chart.png"/, 'and the image');
+  assert.match(f.html(), MODEL_LINE);
+  assert.notEqual(store.get().status.line, 'send: session/attachment-invalid (MODEL_DOES_NOT_SUPPORT_IMAGES)', 'the line above the box, not the status line');
+  assert.deepEqual(f.revoked, [], 'a kept image keeps its URL');
+  const key = f.html().match(/data-action="attachRemove" data-key="(a\d+)"/)[1];
+  f.click({ tagName: 'BUTTON', dataset: { action: 'attachRemove', key } });
+  assert.doesNotMatch(f.html(), MODEL_LINE, 'removing the image takes the line away');
+  pick(f, input, [pngFile('second.png')]);
+  assert.match(f.html(), MODEL_LINE, 'the next image says it at once');
+  send(f);
+  await settle();
+  assert.equal(promptsOf(h).length, 1, 'and is never sent');
+  store.timers.clear();
+});
+
+test("in a bot's conversation the model line names the bot", async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true, projections: { values: { agentPreset: 'buffett' } } })] });
+  prompting(h, () => attachmentInvalid('MODEL_DOES_NOT_SUPPORT_IMAGES'));
+  const store = await bootFiles(f, h, fakeAttachments());
+  assert.equal(store.get().conversations.find(c => c.id === 's1').kind, 'bot');
+  pick(f, input, [pngFile()]);
+  send(f);
+  await settle();
+  assert.match(f.html(), /Buffett Type(&#39;|')s model takes no images. Remove the image, or run Buffett Type on a model that does./);
+  store.timers.clear();
+});
+
+test('a dropped receipt uploads again once and sends; a second drop keeps the draft and says so', async () => {
+  const once = async answer => {
+    const f = fakeWindow({ hash: '#/messages/s1' });
+    const { say, input } = composerEls(f);
+    const h = host({ rows: [row('s1', { agentAvailable: true })] });
+    prompting(h, answer);
+    const att = fakeAttachments();
+    const store = await bootFiles(f, h, att);
+    pick(f, input, [CSV()]);
+    att.uploads[0].answer('rcpt-1');
+    await settle();
+    type(f, say, 'read it');
+    send(f);
+    await settle();
+    assert.equal(att.uploads.length, 2, 'the file uploads again');
+    assert.equal(att.uploads[1].id, 's1');
+    assert.equal(say.value, 'read it', 'the draft is back while it does');
+    att.uploads[1].answer('rcpt-2');
+    await settle();
+    return { f, say, h, att, store };
+  };
+  const good = await once(n => (n === 1 ? attachmentInvalid('FILE_NOT_STAGED') : undefined));
+  assert.deepEqual(contentsOf(good.h).map(c => c[1][1]), [{ type: 'file', receiptId: 'rcpt-1' }, { type: 'file', receiptId: 'rcpt-2' }], 'sent once more with the new receipt');
+  assert.equal(good.say.value, '');
+  assert.doesNotMatch(good.f.html(), /prices.csv/);
+  good.store.timers.clear();
+  const bad = await once(() => attachmentInvalid('FILE_NOT_STAGED'));
+  assert.equal(promptsOf(bad.h).length, 2, 'one more send, no third');
+  assert.equal(bad.att.uploads.length, 2, 'no third upload');
+  assert.equal(bad.say.value, 'read it');
+  assert.match(bad.f.html(), /prices.csv/);
+  assert.equal(bad.store.get().status.line, 'send: session/attachment-invalid (FILE_NOT_STAGED)');
+  assert.equal(bad.store.get().status.bad, true);
+  bad.store.timers.clear();
+});
+
+test('New message with a file creates, uploads to the new conversation, then prompts', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say, input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
+  await settle();
+  pick(f, input, [CSV()]);
+  type(f, say, 'read it');
+  send(f);
+  await settle();
+  assert.equal(att.uploads.length, 1);
+  assert.equal(att.uploads[0].id, 's-new', 'uploaded to the conversation just made');
+  assert.ok(h.calls.some(c => c[0] === 'session/create'));
+  assert.deepEqual(promptsOf(h), [], 'no prompt before the file is up');
+  att.uploads[0].answer('rcpt-9');
+  await settle();
+  assert.deepEqual(contentsOf(h), [['s-new', [{ type: 'text', text: 'read it' }, { type: 'file', receiptId: 'rcpt-9' }]]]);
+  assert.equal(store.get().route.id, 's-new');
+  assert.equal(say.value, '');
+  assert.doesNotMatch(f.html(), /prices.csv/, 'the created conversation took the draft and sent it');
+  noBareReceipts(h);
+  store.timers.clear();
+});
+
+test('New message refused for its image opens the created conversation with the whole draft and the line', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say, input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  prompting(h, () => attachmentInvalid('MODEL_DOES_NOT_SUPPORT_IMAGES'));
+  const store = await bootFiles(f, h, fakeAttachments());
+  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
+  await settle();
+  type(f, say, 'look');
+  pick(f, input, [pngFile()]);
+  send(f);
+  await settle();
+  assert.equal(promptsOf(h).length, 1);
+  assert.equal(store.get().route.id, 's-new', 'the created conversation is open');
+  assert.equal(store.get().draft, null);
+  assert.equal(say.value, 'look', 'its words');
+  assert.match(f.html(), /alt="chart.png"/, 'its image');
+  assert.match(f.html(), MODEL_LINE, 'and the line');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
+  await settle();
+  assert.equal(say.value, '', 'New message is empty again');
+  assert.doesNotMatch(f.html(), /chart.png/);
+  store.timers.clear();
+});
+
+test("a sent draft revokes its images' URLs", async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = await bootFiles(f, h, fakeAttachments());
+  pick(f, input, [pngFile()]);
+  assert.deepEqual(f.revoked, []);
+  send(f);
+  await settle();
+  assert.deepEqual(f.revoked, ['blob:fake']);
+  assert.doesNotMatch(f.html(), /chart.png/);
   store.timers.clear();
 });

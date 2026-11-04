@@ -16,16 +16,27 @@ const clean = text => (typeof text === 'string' ? text.trim() : '');
 export function makeActions({ store, call, answerGate, postJson, requestId = randomUuid, timeZone = zone, activate = async () => true }) {
   const say = (line, bad = false) => store.dispatch('hostStatus', { line, bad });
   const fail = (err, what) => say(err?.status === 401 ? NOT_SIGNED_IN : `${what}: ${err?.code ?? (err?.status ? `HTTP ${err.status}` : err?.message ?? 'failed')}`, true);
-  const prompt = (sessionId, text) => call('session/prompt', {
-    request: { requestId: requestId(), sessionId, mode: 'queue', content: [{ type: 'text', text }], clientTimeZone: timeZone() },
+  // the content: the text part when the words are not blank, then the attachments (already parts: an image inline, a file
+  // by its receipt) in the draft's order
+  const prompt = (sessionId, text, attachments = []) => call('session/prompt', {
+    request: { requestId: requestId(), sessionId, mode: 'queue', content: [...(clean(text) ? [{ type: 'text', text }] : []), ...attachments], clientTimeZone: timeZone() },
   });
+  const ATTACHMENT_INVALID = 'session/attachment-invalid';
+  // a refusal of the attachments (a receipt the host dropped, an image on a text-only model): the caller's to answer, else
+  // said with its reason; any other failure as `what`'s
+  const failSend = (err, what, attachmentRefused) => {
+    if (err?.code !== ATTACHMENT_INVALID) { fail(err, what); return; }
+    const reason = err.details?.reason;
+    if (attachmentRefused) attachmentRefused(reason);
+    else say(`${what}: ${ATTACHMENT_INVALID}${reason ? ` (${reason})` : ''}`, true);
+  };
 
   // a slash line, on a conversation made live first (at dsh 0.2.1-rc.5 commands/execute resumes a cold agent itself; the
   // follow keeps the page in step so the result draws); `undefined` back means no command claimed it and the line is a
   // prompt after all
-  async function command(sessionId, line) {
+  async function command(sessionId, line, attachments = []) {
     if (!(await activate(sessionId))) throw new Error('the conversation did not open');
-    const executed = await call('commands/execute', { agentId: sessionId, line, submittedAttachments: [] });
+    const executed = await call('commands/execute', { agentId: sessionId, line, submittedAttachments: attachments });
     if (executed === undefined || executed === null) return null;
     const result = executed.result;
     say(typeof result?.text === 'string' && result.text !== '' ? result.text : String(result?.kind ?? 'done'), result?.kind === 'error');
@@ -44,43 +55,55 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
   }
 
   // room: whether a channel conversation's words go to its room first (the composer decides by its chips; a bare call by
-  // an @ in the words, as before)
-  async function send(text, { room } = {}) {
+  // an @ in the words, as before). attachments (content parts) go to Gravit: the room, which carries text only, is never
+  // tried with them. attachmentRefused(reason) answers a refusal of the attachments in place of the status line
+  async function send(text, { room, attachments = [], attachmentRefused } = {}) {
     const words = clean(text);
-    if (!words) return null;
+    if (!words && !attachments.length) return null;
     const s = store.get();
     const id = s.route.screen === 'messages' ? s.route.id : null;
     const conv = s.conversations.find(c => c.id === id);
     if (!conv) return null;
     try {
-      if (words.startsWith('/') && (await command(id, words)) !== null) return { sent: 'command', sessionId: id };
-      if (conv.channel && (room ?? isMentionText(words))) {
+      if (words.startsWith('/') && (await command(id, words, attachments)) !== null) return { sent: 'command', sessionId: id };
+      if (!attachments.length && conv.channel && (room ?? isMentionText(words))) {
         const answer = await postJson('/data/rooms/say', { sessionId: id, text: words });
         if (Array.isArray(answer?.addressed) && answer.addressed.length > 0) return { sent: 'say', sessionId: id };
       }
-      await prompt(id, words);
+      await prompt(id, words, attachments);
       return { sent: 'prompt', sessionId: id };
     } catch (err) {
-      fail(err, 'send');
+      failSend(err, 'send', attachmentRefused);
       return null;
     }
   }
 
-  // create (in a channel, or the host's default directory), name it when a title was typed, then the first words
-  async function newConversation({ title, workspaceId, text }) {
+  // create (in a channel, or the host's default directory), name it when a title was typed, tell the caller its id, let
+  // it prepare the files there (their parts, or null when they did not go up), then the first words and the parts. A
+  // failure after the create still answers the id, with sent false, so the caller can open what was made
+  async function newConversationWith({ title, workspaceId, text, onCreated, prepare, attachmentRefused }) {
+    let sessionId = null;
     try {
       const created = await call('session/create', { request: workspaceId ? { workspaceId } : {} });
-      const sessionId = created?.sessionId;
-      if (typeof sessionId !== 'string') throw new Error('session/create returned no sessionId');
+      if (typeof created?.sessionId !== 'string') throw new Error('session/create returned no sessionId');
+      sessionId = created.sessionId;
       const name = clean(title);
       if (name) await call('session/rename', { request: { sessionId, title: name } });
+      onCreated?.(sessionId);
+      const parts = prepare ? await prepare(sessionId) : [];
+      if (parts === null) return { id: sessionId, sent: false };
       const words = clean(text);
-      if (words) await prompt(sessionId, words);
-      return sessionId;
+      if (words || parts.length) await prompt(sessionId, words, parts);
+      return { id: sessionId, sent: true };
     } catch (err) {
-      fail(err, 'new message');
-      return null;
+      failSend(err, 'new message', attachmentRefused);
+      return { id: sessionId, sent: false };
     }
+  }
+  // the words alone (the Run sheet): the id when they went, else null
+  async function newConversation({ title, workspaceId, text }) {
+    const { id, sent } = await newConversationWith({ title, workspaceId, text });
+    return sent ? id : null;
   }
 
   // the mux's answer under the current generation; the card takes this tab's outcome at once. One answer per gate is
@@ -206,5 +229,5 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     }
   }
 
-  return { send, newConversation, answer, stop, rename, command, runCommand, fork, archive, pin, unpin, remove, talkTo, stopChild };
+  return { send, newConversation, newConversationWith, answer, stop, rename, command, runCommand, fork, archive, pin, unpin, remove, talkTo, stopChild };
 }

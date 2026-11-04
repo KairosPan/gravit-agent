@@ -276,3 +276,89 @@ test('room: false sends a line with @ straight to Gravit; true posts it to the r
   await outside.actions.send('plain words', { room: true });
   assert.equal(outside.posted.length, 0, 'no channel, no room');
 });
+
+// ---- attachments (plan 4 task 6) ----
+const imagePart = { type: 'image', mediaType: 'image/png', data: 'iVBORw0KGgo=', name: 'shot.png' };
+const filePart = { type: 'file', receiptId: 'r-1' };
+const refusedFor = reason => err({ code: 'session/attachment-invalid', details: { reason } });
+
+test('a prompt with attachments sends the text part, then the parts in order; an image-only prompt sends no text part', async () => {
+  const r = rig();
+  assert.deepEqual(await r.actions.send(' read these ', { attachments: [filePart, imagePart] }), { sent: 'prompt', sessionId: 's1' });
+  assert.deepEqual(r.calls[0][1].request.content, [{ type: 'text', text: 'read these' }, filePart, imagePart]);
+  const only = rig();
+  assert.deepEqual(await only.actions.send('   ', { attachments: [imagePart] }), { sent: 'prompt', sessionId: 's1' });
+  assert.deepEqual(only.calls[0][1].request.content, [imagePart]);
+  const none = rig();
+  assert.equal(await none.actions.send('  ', { attachments: [] }), null);
+  assert.equal(none.calls.length, 0);
+});
+
+test('a slash line with attachments sends them as submittedAttachments', async () => {
+  const r = rig({ answers: { 'commands/execute': { result: { kind: 'ok', text: 'goal set' } } } });
+  assert.deepEqual(await r.actions.send('/goal read the file', { attachments: [filePart] }), { sent: 'command', sessionId: 's1' });
+  assert.deepEqual(r.calls, [['commands/execute', { agentId: 's1', line: '/goal read the file', submittedAttachments: [filePart] }]]);
+  const unclaimed = rig({ answers: { 'commands/execute': undefined } });
+  await unclaimed.actions.send('/nothing', { attachments: [filePart] });
+  assert.deepEqual(unclaimed.calls[1][1].request.content, [{ type: 'text', text: '/nothing' }, filePart], 'an unclaimed line prompts with its files');
+});
+
+test('with attachments the room is never tried, even for a line with @', async () => {
+  const inRoom = { convs: [conv('s1', { channel: { workspaceId: 'w1', name: 'alpha' } })], posts: { '/data/rooms/say': { addressed: ['buffett'] } } };
+  const r = rig(inRoom);
+  assert.deepEqual(await r.actions.send('@buffett look', { attachments: [filePart] }), { sent: 'prompt', sessionId: 's1' });
+  const forced = rig(inRoom);
+  assert.deepEqual(await forced.actions.send('look', { room: true, attachments: [filePart] }), { sent: 'prompt', sessionId: 's1' });
+  assert.equal(r.posted.length + forced.posted.length, 0);
+});
+
+test('an attachment refusal goes to attachmentRefused with its reason and says nothing else', async () => {
+  const r = rig({ answers: { 'session/prompt': refusedFor('MODEL_DOES_NOT_SUPPORT_IMAGES') } });
+  const reasons = [];
+  assert.equal(await r.actions.send('look', { attachments: [imagePart], attachmentRefused: why => reasons.push(why) }), null);
+  assert.deepEqual(reasons, ['MODEL_DOES_NOT_SUPPORT_IMAGES']);
+  assert.equal(r.store.get().status.line, emptyState().status.line, 'no send: line');
+  const bare = rig({ answers: { 'session/prompt': refusedFor('FILE_NOT_STAGED') } });
+  assert.equal(await bare.actions.send('look', { attachments: [filePart] }), null);
+  assert.equal(bare.store.get().status.line, 'send: session/attachment-invalid (FILE_NOT_STAGED)');
+  assert.equal(bare.store.get().status.bad, true);
+  const other = rig({ answers: { 'session/prompt': err({ code: 'session/busy' }) } });
+  const none = [];
+  await other.actions.send('look', { attachments: [filePart], attachmentRefused: why => none.push(why) });
+  assert.deepEqual(none, [], 'only the attachment code goes to the callback');
+  assert.equal(other.store.get().status.line, 'send: session/busy');
+});
+
+test('newConversationWith creates, reports the id, prepares and prompts; a refused prompt answers the id with sent false', async () => {
+  const r = rig({ answers: { 'session/create': { sessionId: 's-new' } } });
+  const seen = [];
+  const got = await r.actions.newConversationWith({
+    title: 'Look', workspaceId: 'w1', text: 'read it',
+    onCreated: id => seen.push(['created', id, r.calls.length]),
+    prepare: async id => { seen.push(['prepare', id]); return [filePart]; },
+  });
+  assert.deepEqual(got, { id: 's-new', sent: true });
+  assert.deepEqual(seen, [['created', 's-new', 2], ['prepare', 's-new']], 'created after the rename, before the prompt');
+  assert.deepEqual(r.calls.map(c => c[0]), ['session/create', 'session/rename', 'session/prompt']);
+  assert.deepEqual(r.calls[2][1].request.content, [{ type: 'text', text: 'read it' }, filePart]);
+  const notUp = rig({ answers: { 'session/create': { sessionId: 's-2' } } });
+  assert.deepEqual(await notUp.actions.newConversationWith({ text: 'x', prepare: async () => null }), { id: 's-2', sent: false });
+  assert.deepEqual(notUp.calls.map(c => c[0]), ['session/create'], 'files not up: no prompt');
+  const refused = rig({ answers: { 'session/create': { sessionId: 's-3' }, 'session/prompt': refusedFor('MODEL_DOES_NOT_SUPPORT_IMAGES') } });
+  const why = [];
+  assert.deepEqual(await refused.actions.newConversationWith({ text: '', prepare: async () => [imagePart], attachmentRefused: x => why.push(x) }), { id: 's-3', sent: false });
+  assert.deepEqual(why, ['MODEL_DOES_NOT_SUPPORT_IMAGES']);
+  assert.deepEqual(refused.calls[1][1].request.content, [imagePart]);
+  const failed = rig({ answers: { 'session/create': err({ code: 'boom' }) } });
+  assert.deepEqual(await failed.actions.newConversationWith({ text: 'x' }), { id: null, sent: false });
+  assert.equal(failed.store.get().status.line, 'new message: boom');
+});
+
+test('newConversation still answers an id or null', async () => {
+  const r = rig({ answers: { 'session/create': { sessionId: 's-new' } } });
+  assert.equal(await r.actions.newConversation({ title: '', workspaceId: null, text: 'hi' }), 's-new');
+  const refused = rig({ answers: { 'session/create': { sessionId: 's-4' }, 'session/prompt': err({ code: 'session/busy' }) } });
+  assert.equal(await refused.actions.newConversation({ text: 'hi' }), null, 'a failure after the create answers null, as before');
+  const failed = rig({ answers: { 'session/create': err({ code: 'boom' }) } });
+  assert.equal(await failed.actions.newConversation({ text: 'hi' }), null);
+});

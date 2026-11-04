@@ -43,7 +43,8 @@ import { makeEditor } from './composer/dom.js';
 import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt, hasChip } from './composer/draft.js';
 import { flatItems, slashItems, atItems, conversationChoices, moveActive, chipOf } from './composer/menus.js';
 import { renderMenu, menuAria, filesRail, dropOverlay } from './composer/view.js';
-import { admit } from './composer/files.js';
+import { admit, blocking, hasImage, contentParts, encodeBase64, modelRefusalLine } from './composer/files.js';
+import { senderName } from './render/rail.js';
 import { startAttachments } from './host/attachments.js';
 import { startComposerReads } from './host/composer.js';
 import { startOwner, postVia } from './host/owner.js';
@@ -464,6 +465,15 @@ export function boot(win, host = {}) {
   const uploads = new Map();
   const uploadKey = (key, fileKey) => `${key}\n${fileKey}`;
   let fileSeq = 0;
+  // the conversations whose model refused an image (D19), until a reload: an image added there, or sent, draws the model
+  // line at once and calls nothing
+  const refusesImages = new Set();
+  // the model line for a conversation: in a bot's own conversation the bot's name stands for Gravit
+  const modelLineFor = id => {
+    const s = store.get();
+    const conv = s.conversations.find(c => c.id === id);
+    return modelRefusalLine(conv?.kind === 'bot' && conv.preset ? senderName(conv.preset, s) : 'Gravit');
+  };
   // the / and @ menus: the menu drawn under the editor (null when none shows), the trigger it stands on, and a sequence
   // that every tick and every close moves on, so a read's late answer draws only for the trigger it was asked for
   let menu = null;
@@ -971,41 +981,103 @@ export function boot(win, host = {}) {
   }
 
   // the draft on screen, serialized against its conversation's channel (or New message's Where), cleared as it goes; a
-  // failure puts the whole draft, chips and all, back under the key it came from
-  async function sendNow() {
+  // failure puts the whole draft, chips and files and all, back under the key it came from. Each refusal before the call
+  // keeps the draft as it stands. restaged: this send follows the re-upload of a receipt the host dropped (D18)
+  async function sendNow({ restaged = false } = {}) {
     const s = store.get();
     const key = draftKey(s);
     const runs = runsOf(key);
-    if (isBlank(runs)) return;
+    const files = filesOf(key);
+    if (isBlank(runs) && !files.length) return;
+    const refuse = line => store.dispatch('hostStatus', { line, bad: true });
     // the room is a bot chip's, or an @ the operator typed (a chip reads as a space between words): a file or
-    // conversation chip's @ never sends to it alone
+    // conversation chip's @ never sends to it alone. Files go to Gravit alone (D20): a bot chip with them is refused, and
+    // a typed @word beside them is a prompt
     const toBot = hasChip(runs, 'bot');
-    const room = toBot || isMentionText(runs.map(r => (r.type === 'text' ? r.text : ' ')).join(''));
+    if (files.length && toBot) { refuse("Files go to Gravit, not to a room's bots"); return; }
+    const room = !files.length && (toBot || isMentionText(runs.map(r => (r.type === 'text' ? r.text : ' ')).join('')));
     // a room's bots cannot read a conversation chip (O9): a draft bound for the room with one is refused, kept as it stands
     const toRoom = toBot || (room && !s.draft && !!currentConversation(s)?.channel);
-    if (toRoom && hasChip(runs, 'conversation')) { store.dispatch('hostStatus', { line: "Conversations go to Gravit, not to a room's bots", bad: true }); return; }
+    if (toRoom && hasChip(runs, 'conversation')) { refuse("Conversations go to Gravit, not to a room's bots"); return; }
+    // a file not up yet (one New message moved here, a receipt being staged again) uploads now and holds the send too
+    const waiting = isConvKey(key) ? files.filter(f => f.kind === 'file' && f.status === 'ready') : [];
+    for (const f of waiting) startUpload(key, f.key);
+    const held = blocking(filesOf(key));
+    if (held) { refuse(held === 'uploading' ? 'Files are still uploading' : 'A file did not upload. Retry it or remove it.'); if (waiting.length) render(); return; }
+    if (isConvKey(key) && refusesImages.has(key) && hasImage(files)) { notes.set(key, modelLineFor(key)); render(); return; }
     const workspaceId = s.draft ? s.draft.where : currentConversation(s)?.channel?.workspaceId ?? null;
     const text = serialize(runs, serialContext({ channels: s.channels, workspaceId })).trim();
-    // words typed under the key while the send was on its way are kept, after the sent ones on a new line (A7)
+    // a / line with files: a command the kept rows know takes them only when its input says so (D12); a name the rows do
+    // not know is the host's to judge
+    if (!s.draft && files.length && text.startsWith('/')) {
+      const name = text.slice(1).split(/\s/)[0];
+      const row = (composerReads.keptCommands(currentConversation(s)) ?? []).find(r => r.name === name);
+      if (row && row.input?.attachments !== true) { refuse(`/${name} takes no files`); return; }
+    }
+    // the images' bytes, read before the draft is cleared
+    const data = new Map();
+    for (const f of files) {
+      if (f.kind !== 'image') continue;
+      try { data.set(f.key, encodeBase64(new Uint8Array(await f.blob.arrayBuffer()))); } catch { refuse(`send: ${f.name} could not be read`); return; }
+    }
+    const parts = contentParts('', files, k => data.get(k));
+    // words and files added under the key while the send was on its way are kept, after the sent ones (A7)
     const back = () => {
       const since = runsOf(key);
-      setRuns(isBlank(since) ? runs : normalize([...runs, { type: 'text', text: '\n' }, ...since]), key);
+      putDraft(key, isBlank(since) ? runs : normalize([...runs, { type: 'text', text: '\n' }, ...since]), [...files, ...filesOf(key)]);
       render();
     };
-    setRuns([], key);
+    const sentOff = to => { for (const f of files) if (f.url) win.URL.revokeObjectURL(f.url); notes.delete(to); };
+    let reason;
+    const attachmentRefused = r => { reason = r ?? ''; };
+    putDraft(key, [], []);
     forgetMenu();
     render();
     if (s.draft) {
-      const id = await actions.newConversation({ title: s.draft.title, workspaceId: s.draft.where, text });
-      if (!id) { back(); return; }
+      // New message: the draft moves to the conversation as it is made, its files upload there, then the first words
+      const got = await actions.newConversationWith({
+        title: s.draft.title, workspaceId: s.draft.where, text, attachmentRefused,
+        onCreated: id => {
+          putDraft(id, runs, files);
+          if (notes.has(key)) { notes.set(id, notes.get(key)); notes.delete(key); }
+        },
+        prepare: async id => {
+          const ups = await Promise.all(filesOf(id).filter(f => f.kind === 'file').map(f => startUpload(id, f.key)));
+          if (!ups.every(Boolean)) return null;
+          const now = filesOf(id).filter(f => files.some(g => g.key === f.key));
+          return contentParts('', now, k => data.get(k));
+        },
+      });
+      if (!got.id) { back(); return; }
+      if (got.sent) { putDraft(got.id, [], filesOf(got.id).filter(f => !files.some(g => g.key === f.key))); sentOff(got.id); }
+      else refused(got.id, reason);
       await live.refresh();
-      go({ screen: 'messages', id });
-      live.promote(id);
+      go({ screen: 'messages', id: got.id });
+      live.promote(got.id);
       return;
     }
-    const sent = await sendText(text, { room });
-    if (!sent) { back(); return; }
+    const sent = await sendText(text, { room, attachments: parts, attachmentRefused });
+    if (sent) { sentOff(key); render(); return; }
+    back();
+    if (reason === 'FILE_NOT_STAGED' && !restaged) { void restage(key); return; }
+    refused(key, reason);
+  }
+  // a refusal of a draft's attachments, its draft already back: an image on a text-only model marks the conversation and
+  // draws the model line; any other reason is said on the status line
+  function refused(key, reason) {
+    if (reason === undefined) return;
+    if (reason === 'MODEL_DOES_NOT_SUPPORT_IMAGES') { refusesImages.add(key); notes.set(key, modelLineFor(key)); }
+    else store.dispatch('hostStatus', { line: `send: session/attachment-invalid${reason ? ` (${reason})` : ''}`, bad: true });
     render();
+  }
+  // a receipt the host dropped (the face restarted, the agent was disposed): every file up uploads again, once, and the
+  // send runs once more while its draft is still on screen; a failed re-upload keeps the draft and says so
+  async function restage(key) {
+    const ups = filesOf(key).filter(f => f.kind === 'file' && f.status === 'up');
+    const oks = await Promise.all(ups.map(f => startUpload(key, f.key)));
+    render();
+    if (!oks.every(Boolean)) { refused(key, 'FILE_NOT_STAGED'); return; }
+    if (draftKey(store.get()) === key) await sendNow({ restaged: true });
   }
   // words put in the composer for the operator (a suggestion, Hand to Gravit): the draft on screen, after what it holds on
   // a new line, the caret after them
@@ -1040,10 +1112,11 @@ export function boot(win, host = {}) {
     if (slot) slot.innerHTML = filesRail(filesOf(draftKey(store.get())));
   }
   // a file (never an image: it goes inline when sent) uploading to the session its draft belongs to; its ticks and its
-  // landing go to that draft whatever is on screen, the ticks drawn only while it is the draft on screen. The caller renders
+  // landing go to that draft whatever is on screen, the ticks drawn only while it is the draft on screen. The caller
+  // renders. Answers whether the file landed up (false when it failed, or gave way to a removal or a retry)
   function startUpload(key, fileKey) {
     const rec = filesOf(key).find(f => f.key === fileKey);
-    if (!rec || rec.kind !== 'file' || !isConvKey(key)) return;
+    if (!rec || rec.kind !== 'file' || !isConvKey(key)) return Promise.resolve(false);
     patchFile(key, fileKey, { status: 'uploading', loaded: 0 });
     const k = uploadKey(key, fileKey);
     uploads.get(k)?.abort();   // one upload a file: one still in flight gives way
@@ -1055,15 +1128,18 @@ export function boot(win, host = {}) {
     });
     uploads.set(k, handle);
     const land = patch => {
-      if (!mine()) return;
+      if (!mine()) return false;
       uploads.delete(k);
-      if (patchFile(key, fileKey, patch)) render();
+      if (!patchFile(key, fileKey, patch)) return false;
+      render();
+      return patch.status === 'up';
     };
     // a failure keeps its reason (not signed in, the fence's hint), said on the status line
-    handle.done.then(receiptId => land({ status: 'up', loaded: rec.bytes, receiptId, sessionId: key }), err => {
+    return handle.done.then(receiptId => land({ status: 'up', loaded: rec.bytes, receiptId, sessionId: key }), err => {
       const error = String(err?.message || `upload ${rec.name}: the upload failed`);
       if (mine()) store.dispatch('hostStatus', { line: error, bad: true });
       land({ status: 'failed', error });
+      return false;
     });
   }
   // Files (a FileList, or the list a paste or a drop holds) into a draft: each admitted by the session's image limits, an
@@ -1075,7 +1151,9 @@ export function boot(win, host = {}) {
     const { files, refusal } = admit(had, picked, attachments.limits());
     const added = files.slice(had.length).map(f => (f.kind === 'image' ? { ...f, url: win.URL.createObjectURL(f.blob) } : f));
     setFiles([...had, ...added], key);
-    if (refusal) notes.set(key, refusal); else notes.delete(key);
+    // an image added where the model refused one says so at once (D19)
+    const line = refusal ?? (isConvKey(key) && refusesImages.has(key) && hasImage(added) ? modelLineFor(key) : null);
+    if (line) notes.set(key, line); else notes.delete(key);
     for (const f of added) startUpload(key, f.key);
     render();
   }
@@ -1552,16 +1630,16 @@ export function boot(win, host = {}) {
   doc.addEventListener('pointerup', release);
   doc.addEventListener('pointercancel', release);
   win.addEventListener('blur', release);
-  // a paste in the editor is plain text over the selection, the page not rendered. Files join the draft only when the
-  // clipboard holds no text: a rich copy (cells, a document's lines) also carries a picture of itself, which is not an
-  // attachment
+  // a paste in the editor is plain text over the selection, the page not rendered. Files join the draft unless the paste
+  // is a rich copy (text/plain and text/html: cells, a document's lines), which also carries a picture of itself that is
+  // not an attachment; a Finder file copy carries its name as text/plain alone, and attaches
   root.addEventListener('paste', ev => {
     const say = sayOf(ev.target);
     if (!say) return;
     ev.preventDefault();
     const words = (ev.clipboardData?.getData('text/plain') ?? '').replace(/\r\n?/g, '\n');
     const files = Array.from(ev.clipboardData?.files ?? []);
-    if (!words && files.length) { addFiles(files); return; }
+    if (files.length && !(words && ev.clipboardData?.getData('text/html'))) { addFiles(files); return; }
     if (!words) return;
     const [from, to] = editor.selection(say) ?? atEnd(say);
     insertWords(say, words, from, to);
