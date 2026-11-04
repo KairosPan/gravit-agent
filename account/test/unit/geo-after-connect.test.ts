@@ -5,12 +5,12 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import type { AccountPage } from "../../src/portfolio/account/exchange.ts";
 import { signOwner, simKey, type OwnerAction } from "../../src/portfolio/account/sign.ts";
-import { exchangeSaidNo, type ExchangeClient, type OpenExchange } from "../../src/portfolio/live/exchange.ts";
+import { exchangeSaidNo, type OpenExchange } from "../../src/portfolio/live/exchange.ts";
 import { lostAnswer } from "../../src/portfolio/live/exchange-trade.ts";
 import { register } from "../../src/portfolio/live/index.ts";
 import { heldTo, HYPERLIQUID_RULE, locator, PLACE_MS } from "../../src/portfolio/live/location.ts";
 import type { RunMm } from "../../src/portfolio/live/metamask.ts";
-import type { PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { LiveTrader, Market } from "../../src/portfolio/live/trade.ts";
 import type { Http } from "../../src/portfolio/live/types.ts";
 import type { LiveWriter } from "../../src/portfolio/live/writes.ts";
@@ -139,14 +139,14 @@ describe("a connected venue that starts refusing the network", () => {
     const x = await account();
     await x.connect("ex", "Stand-in Exchange");
     await x.connect("ok", "Other Exchange");
-    const before = await x.svc.explore({ limit: 50 });
+    const before = await x.svc.connectedExplore({ limit: 50 });
     if (isRefusal(before)) throw new Error(before.message);
     expect(before.items.find((i) => i.key === "coin:BTC")?.at.map((a) => a.venue).sort()).toEqual(["ex", "ok"]);
     net.ex = "451";
     x.pass(31_000);
     await x.page();
     calls.length = 0;
-    const after = await x.svc.explore({ limit: 49 });
+    const after = await x.svc.connectedExplore({ limit: 49 });
     if (isRefusal(after)) throw new Error(after.message);
     expect(after.items.find((i) => i.key === "coin:BTC")?.at.map((a) => a.venue)).toEqual(["ok"]);
     expect(after.notes).toContain("Stand-in Exchange does not serve this network: its markets are not listed here.");
@@ -157,19 +157,8 @@ describe("a connected venue that starts refusing the network", () => {
     expect(c.rows.map((r) => r.venue)).toEqual(["ok"]);
     expect(calls.filter((k) => k.startsWith("ex "))).toEqual([]);
   });
-
-  it("a public source whose venue the list of where the user can connect judged not served is not asked, and is named once", async () => {
-    let asked = 0;
-    const pub: PublicSource = { id: "binance", name: "Binance", kind: "exchange", connectTo: "binance", connector: "live:exchange:binance", listings: async () => (asked++, [{ ...BTC, types: [] }]) };
-    const openExchange: OpenExchange = async (id) => ({ id, name: id === "binance" ? "Binance" : id, has: {}, fetchTime: async () => { if (id === "binance") throw Object.assign(new Error('binance GET https://api.binance.com/api/v3/time 451 {"code":0,"msg":"Service unavailable from a restricted location"}'), { name: "ExchangeNotAvailable" }); return 1; } }) as unknown as ExchangeClient;
-    const x = await account({ publicMarkets: [pub], openExchange });
-    await x.svc.venuesHere(true);
-    const r = await x.svc.explore({ limit: 30 });
-    if (isRefusal(r)) throw new Error(r.message);
-    expect(asked).toBe(0);
-    expect(r.items).toEqual([]);
-    expect(r.notes).toContain("Binance does not serve this network: its markets are not listed here.");
-  });
+  // a public source whose venue the list of where the user can connect judged not served: its line is the market's, left out by the
+  // face's join over the account's venues read (face/tests/client/explore-join.test.js)
 });
 
 describe("the money door and a venue that does not serve the network", () => {

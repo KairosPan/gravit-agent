@@ -88,6 +88,9 @@ export function emptyState() {
       statementOpen: false,
       detailsVenue: null,
     },
+    // Account › Identity (plan B1b): the account's identity read (host/account.js loadIdentity) with the sentence of its last
+    // failure, the Connect Telegram sheets (Task 2) or null, the grid's unsaved ticks (a routing) or null, Details open
+    identity: { status: 'idle', data: null, message: null, connect: null, draft: null, details: false },
     // the Account seat's standing (host/seat.js): /data/seat.json as read
     seat: { status: 'idle', data: null, at: null },
     // the desk's status (host/desk.js): /data/desk/status as last read, read while Markets shows; the sentence of the last failure

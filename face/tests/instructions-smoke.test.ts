@@ -3,6 +3,7 @@
  * GRAVIT.md and GRAVIT.local.md from the .git root down to the cwd, never
  * AGENTS.md or CLAUDE.md, for Gravit, for a channel session and for a bot.
  * Own file, gated: one boot per process. */
+import "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";

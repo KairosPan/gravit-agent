@@ -4,7 +4,7 @@
  * tests/lunhui-rows.test.ts beside a real `lunhui-runs` service over a temp strategies root holding
  * `cn-market` and `alpha`. A row's `config.fetch` is a temp copy of the Tencent and Eastmoney
  * fixtures, or, where a case must watch or stall the requests, unset - the row's production fetch,
- * the Account's - with `globalThis.fetch` mocked as a fake Account (`fixtures/lunhui/account.ts`)
+ * the market's - with `globalThis.fetch` mocked as a fake market (`fixtures/lunhui/account.ts`)
  * over the same fixtures; nothing reaches the network. `config.now` fixes the clock.
  */
 import test from "node:test";
@@ -20,7 +20,7 @@ import * as limitUpRow from "../plugins/lunhui/freeze-limit-up-row.mjs";
 import * as boardsRow from "../plugins/lunhui/freeze-boards-row.mjs";
 import * as indexRow from "../plugins/lunhui/freeze-index-row.mjs";
 import { createFixtureFetch } from "../plugins/lunhui/lib/fixture-fetch.mjs";
-import { fakeAccount } from "./fixtures/lunhui/account.ts";
+import { fakeMarket } from "./fixtures/lunhui/account.ts";
 import { LunhuiError } from "../plugins/lunhui/lib/runs.mjs";
 import { ladderCodes } from "../plugins/lunhui/lib/derive.mjs";
 import { fetchLimitUpPools } from "../plugins/lunhui/lib/eastmoney.mjs";
@@ -117,14 +117,14 @@ async function fixtureLadder(): Promise<string[]> {
 const isLine = (item: any) => item.kind === "minutes" || item.kind === "minutes_missing";
 
 /**
- * `globalThis.fetch` mocked as a fake Account over `dir` - the production fetch of a row mounted
+ * `globalThis.fetch` mocked as a fake market over `dir` - the production fetch of a row mounted
  * without `config.fetch` - recording each relayed upstream URL as `urls`, every request as `sent`
  * and each 问财 query as `queries`; `stall(url)` true leaves an upstream read hanging until aborted.
  */
-function mockFetch(t: any, dir: string, stall: (url: URL) => boolean = () => false, opts: Parameters<typeof fakeAccount>[1] = {}) {
-  const account = fakeAccount(dir, { stall, ...opts });
-  t.mock.method(globalThis, "fetch", account.fetch);
-  return { urls: account.upstream, sent: account.sent, queries: account.queries, reached: account.reached };
+function mockFetch(t: any, dir: string, stall: (url: URL) => boolean = () => false, opts: Parameters<typeof fakeMarket>[1] = {}) {
+  const market = fakeMarket(dir, { stall, ...opts });
+  t.mock.method(globalThis, "fetch", market.fetch);
+  return { urls: market.upstream, sent: market.sent, queries: market.queries, reached: market.reached };
 }
 
 test("freeze rows: names, inject and one tool each; apply refuses a missing backbone and a bad fetch directory, naming the row", async (t) => {
@@ -419,7 +419,7 @@ test("freeze: each Eastmoney item records the host that served it; a members rep
   const root = await strategiesRoot(t);
   const dir = await fixtures(t);
   const serve = createFixtureFetch(dir);
-  // The Account passes the 302 through, location kept; the Eastmoney client follows it itself.
+  // The market passes the 302 through, location kept; the Eastmoney client follows it itself.
   mockFetch(t, dir, undefined, {
     upstream: (asked, init) => {
       const target = new URL(asked.href);
@@ -446,10 +446,10 @@ test("freeze: each Eastmoney item records the host that served it; a members rep
   assert.equal(stamps.filter(([kind]) => kind === "members").length, 2);
 });
 
-// Through the Account (plan 2 of the Account's two parts): a row mounted without `config.fetch`
-// reaches only the Account, at FACE_ACCOUNT_URL or its default.
+// Through the market (plan A2): a row mounted without `config.fetch` reaches only the market, at
+// FACE_MARKET_URL or its default.
 
-test("freeze: every request the four freezes make goes to the Account, and only there", async (t) => {
+test("freeze: every request the four freezes make goes to the market, and only there", async (t) => {
   const root = await strategiesRoot(t);
   // boards.json removed: the board list answers 404, so the boards freeze takes the 问财 stand-in.
   const { urls, sent, queries } = mockFetch(t, await fixtures(t, (dir) => rm(join(dir, "boards.json"))));
@@ -461,41 +461,41 @@ test("freeze: every request the four freezes make goes to the Account, and only 
   assert.equal(boards.provider, "同花顺问财");
   assert.ok(sent.length > 0);
   for (const url of sent) {
-    assert.equal(url.origin, "http://127.0.0.1:4820", url.href);
+    assert.equal(url.origin, "http://127.0.0.1:4821", url.href);
     assert.ok(["/api/cn/relay", "/api/cn/ifind"].includes(url.pathname), url.href);
   }
   assert.deepEqual(new Set(urls.map((url) => url.host)), new Set(["qt.gtimg.cn", "web.ifzq.gtimg.cn", "push2ex.eastmoney.com", "push2.eastmoney.com"]));
   assert.deepEqual(queries, ["A股 2026年10月23日涨跌幅 成交额 主力资金流向 所属概念"]);
   assert.equal(sent.length, urls.length + queries.length);
   const manifest = await readJson(runDir(root, "cn-market", run), "run.json");
-  assert.deepEqual(manifest.evidence.map((entry: any) => [entry.source, entry.via]), [["quotes", "account"], ["limit-up", "account"], ["index", "account"], ["boards", "account"]]);
+  assert.deepEqual(manifest.evidence.map((entry: any) => [entry.source, entry.via]), [["quotes", "market"], ["limit-up", "market"], ["index", "market"], ["boards", "market"]]);
 });
 
-test("freeze: FACE_ACCOUNT_URL names the Account", async (t) => {
+test("freeze: FACE_MARKET_URL names the market", async (t) => {
   const dir = await fixtures(t);
-  const origin = "http://account:4820";
-  // config.account, the tests' key for the address.
+  const origin = "http://market:4821";
+  // config.market, the tests' key for the address.
   {
     const root = await strategiesRoot(t);
     const { sent } = mockFetch(t, dir, undefined, { origin });
-    const { tools } = mount(root, undefined, { quotes: { account: origin } });
+    const { tools } = mount(root, undefined, { quotes: { market: origin } });
     await tools.quotes.execute({ strategy: "alpha", symbols: ["sh600519"] }, exec());
     assert.ok(sent.length > 0);
     for (const url of sent) assert.equal(url.origin, origin);
     t.mock.restoreAll();
   }
-  // FACE_ACCOUNT_URL, read at mount: a later change does not move a mounted row.
+  // FACE_MARKET_URL, read at mount: a later change does not move a mounted row.
   {
     const root = await strategiesRoot(t);
     const { sent } = mockFetch(t, dir, undefined, { origin });
-    const before = process.env.FACE_ACCOUNT_URL;
-    process.env.FACE_ACCOUNT_URL = `${origin}/`;
+    const before = process.env.FACE_MARKET_URL;
+    process.env.FACE_MARKET_URL = `${origin}/`;
     let tools;
     try {
       ({ tools } = mount(root, undefined));
     } finally {
-      if (before === undefined) delete process.env.FACE_ACCOUNT_URL;
-      else process.env.FACE_ACCOUNT_URL = before;
+      if (before === undefined) delete process.env.FACE_MARKET_URL;
+      else process.env.FACE_MARKET_URL = before;
     }
     await tools.quotes.execute({ strategy: "alpha", symbols: ["sh600519"] }, exec());
     assert.ok(sent.length > 0);
@@ -503,27 +503,27 @@ test("freeze: FACE_ACCOUNT_URL names the Account", async (t) => {
   }
 });
 
-test("freeze: frozen through the Account, the evidence is the fixture's, with via at file level", async (t) => {
+test("freeze: frozen through the market, the evidence is the fixture's, with via at file level", async (t) => {
   const root = await strategiesRoot(t);
   const dir = await fixtures(t);
   const fixture = JSON.parse(await mount(root, dir).tools.index.execute({ strategy: "cn-market" }, exec()));
   mockFetch(t, dir);
-  const account = JSON.parse(await mount(root, undefined).tools.index.execute({ strategy: "cn-market" }, exec()));
-  assert.notEqual(fixture.run, account.run);
-  const [fixtureDir, accountDir] = [fixture.run, account.run].map((run) => runDir(root, "cn-market", run));
-  const [plain, relayed] = await Promise.all([readJson(fixtureDir, "evidence-index.json"), readJson(accountDir, "evidence-index.json")]);
+  const market = JSON.parse(await mount(root, undefined).tools.index.execute({ strategy: "cn-market" }, exec()));
+  assert.notEqual(fixture.run, market.run);
+  const [fixtureDir, marketDir] = [fixture.run, market.run].map((run) => runDir(root, "cn-market", run));
+  const [plain, relayed] = await Promise.all([readJson(fixtureDir, "evidence-index.json"), readJson(marketDir, "evidence-index.json")]);
   assert.deepEqual(relayed.items, plain.items);
-  assert.equal(relayed.via, "account");
+  assert.equal(relayed.via, "market", "the evidence a freeze writes says via: market");
   assert.equal(Object.hasOwn(plain, "via"), false);
   const { via, ...rest } = relayed;
   assert.deepEqual(rest, plain);
-  const [[plainEntry], [relayedEntry]] = await Promise.all([fixtureDir, accountDir].map(async (d) => (await readJson(d, "run.json")).evidence));
-  assert.equal(relayedEntry.via, "account");
+  const [[plainEntry], [relayedEntry]] = await Promise.all([fixtureDir, marketDir].map(async (d) => (await readJson(d, "run.json")).evidence));
+  assert.equal(relayedEntry.via, "market");
   assert.equal(Object.hasOwn(plainEntry, "via"), false);
   assert.equal(Object.hasOwn(fixture, "via"), false);
 });
 
-test("freeze: the Account down is a refusal like an upstream failure, and writes nothing", async (t) => {
+test("freeze: the market down is a refusal like an upstream failure, and writes nothing", async (t) => {
   const root = await strategiesRoot(t);
   t.mock.method(globalThis, "fetch", async () => { throw new TypeError("fetch failed"); });
   t.mock.method(process.stderr, "write", () => true);
@@ -553,28 +553,28 @@ test("freeze: the Account down is a refusal like an upstream failure, and writes
   }
 });
 
-test("freeze rows: a bad account address or fetch with account refuses the mount, naming the row", async (t) => {
+test("freeze rows: a bad market address or fetch with market refuses the mount, naming the row", async (t) => {
   const root = await strategiesRoot(t);
   const dir = await fixtures(t);
   const backbone = fakeScope();
   applyRuns(backbone.ctx, { strategiesRoot: root });
   for (const [source, row] of Object.entries(ROWS) as Array<[Source, any]>) {
-    for (const config of [{ account: "http://h/api" }, { account: "ftp://h" }, { account: 4820 }, { fetch: dir, account: "http://127.0.0.1:4820" }]) {
+    for (const config of [{ market: "http://h/api" }, { market: "ftp://h" }, { market: 4821 }, { fetch: dir, market: "http://127.0.0.1:4821" }]) {
       const scope = fakeScope({ lunhuiRuns: backbone.provided[0][1] });
       assert.throws(() => row.apply(scope.ctx, config), (error: any) => error.message.startsWith(`${row.name}: `), `${source} ${JSON.stringify(config)}`);
       assert.equal(scope.tools.length, 0);
     }
   }
-  assert.throws(() => quotesRow.apply(fakeScope({ lunhuiRuns: {} }).ctx, { account: "http://h/api" }), /lunhui-freeze-quotes:/);
-  assert.throws(() => quotesRow.apply(fakeScope({ lunhuiRuns: {} }).ctx, { fetch: dir, account: "http://127.0.0.1:4820" }), /lunhui-freeze-quotes:/);
-  // A bad FACE_ACCOUNT_URL refuses the mount the same way.
-  const before = process.env.FACE_ACCOUNT_URL;
-  process.env.FACE_ACCOUNT_URL = "http://127.0.0.1:4820/api";
+  assert.throws(() => quotesRow.apply(fakeScope({ lunhuiRuns: {} }).ctx, { market: "http://h/api" }), /lunhui-freeze-quotes:/);
+  assert.throws(() => quotesRow.apply(fakeScope({ lunhuiRuns: {} }).ctx, { fetch: dir, market: "http://127.0.0.1:4821" }), /lunhui-freeze-quotes:/);
+  // A bad FACE_MARKET_URL refuses the mount the same way.
+  const before = process.env.FACE_MARKET_URL;
+  process.env.FACE_MARKET_URL = "http://127.0.0.1:4821/api";
   try {
-    assert.throws(() => quotesRow.apply(fakeScope({ lunhuiRuns: {} }).ctx, {}), /^Error: lunhui-freeze-quotes: .*FACE_ACCOUNT_URL/);
+    assert.throws(() => quotesRow.apply(fakeScope({ lunhuiRuns: {} }).ctx, {}), /^Error: lunhui-freeze-quotes: .*FACE_MARKET_URL/);
   } finally {
-    if (before === undefined) delete process.env.FACE_ACCOUNT_URL;
-    else process.env.FACE_ACCOUNT_URL = before;
+    if (before === undefined) delete process.env.FACE_MARKET_URL;
+    else process.env.FACE_MARKET_URL = before;
   }
 });
 
@@ -667,12 +667,12 @@ for (const [label, missing] of [
 }
 
 /**
- * `globalThis.fetch` as a fake Account over the fixtures, every request to it recorded with its
- * init; with `refuseIfind`, the iFinD route refuses in that word, as the Account words a refused
+ * `globalThis.fetch` as a fake market over the fixtures, every request to it recorded with its
+ * init; with `refuseIfind`, the iFinD route refuses in that word, as the market words a refused
  * exchange (`credential`).
  */
 function recordFetch(t: any, dir: string, refuseIfind?: string) {
-  const account = fakeAccount(dir);
+  const market = fakeMarket(dir);
   const sent: Array<{ url: URL; init: RequestInit }> = [];
   t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit = {}) => {
     const target = new URL(url);
@@ -680,12 +680,12 @@ function recordFetch(t: any, dir: string, refuseIfind?: string) {
     if (refuseIfind && target.pathname === "/api/cn/ifind") {
       return new Response(JSON.stringify({ ok: false, ifind: refuseIfind }), { status: 502, headers: { "content-type": "application/json", "x-cn-ifind": "refused" } });
     }
-    return account.fetch(url, init);
+    return market.fetch(url, init);
   });
   return sent;
 }
 
-test("freeze: with no iFinD token at the Account a refused Eastmoney read refuses naming both and writes nothing", async (t) => {
+test("freeze: with no iFinD token at the market a refused Eastmoney read refuses naming both and writes nothing", async (t) => {
   const root = await strategiesRoot(t);
   const { queries } = mockFetch(t, await withoutEastmoney(t, "boards.json"), undefined, { ifind: "unconfigured" });
   const { tools } = mount(root, undefined);
@@ -738,7 +738,7 @@ test("freeze: boards given as BK codes are ignored by the stand-in, and the repl
   assert.ok(members.every((item: any) => item.board.startsWith("THS:")));
 });
 
-test("freeze: a refused exchange at the Account refuses naming both, 凭据被拒, and writes nothing", async (t) => {
+test("freeze: a refused exchange at the market refuses naming both, 凭据被拒, and writes nothing", async (t) => {
   const root = await strategiesRoot(t);
   recordFetch(t, await withoutEastmoney(t, "boards.json"), "credential");
   const { tools } = mount(root, undefined);
@@ -762,7 +762,7 @@ test("freeze: no token travels: the stand-in's request carries none and no file 
   assert.doesNotMatch(text, TOKEN_WORDS);
   // The one POST is the iFinD route's: the query alone, no token, no other header or field.
   const posts = sent.filter(({ init }) => init.method === "POST");
-  assert.deepEqual(posts.map(({ url }) => url.href), ["http://127.0.0.1:4820/api/cn/ifind"]);
+  assert.deepEqual(posts.map(({ url }) => url.href), ["http://127.0.0.1:4821/api/cn/ifind"]);
   assert.deepEqual([...new Headers(posts[0].init.headers).keys()].sort(), ["content-type"]);
   assert.deepEqual(JSON.parse(String(posts[0].init.body)), { query: "A股 2026年10月23日涨跌幅 成交额 主力资金流向 所属概念" });
   for (const { url, init } of sent) assert.doesNotMatch(`${url.href} ${String(init.body ?? "")}`, TOKEN_WORDS);
@@ -777,13 +777,13 @@ test("freeze: the boards description names the 问财 stand-in", async (t) => {
   assert.match(tools.boards.description, /东方财富板块请求失败时改用同花顺问财（同花顺概念，涨跌幅为成分股等权平均），回复写明来源。/);
 });
 
-test("freeze: a boards row refuses any env, naming the Account", async (t) => {
+test("freeze: a boards row refuses any env, naming the market", async (t) => {
   const root = await strategiesRoot(t);
   const backbone = fakeScope();
   applyRuns(backbone.ctx, { strategiesRoot: root });
   for (const env of [{}, { IFIND_REFRESH_TOKEN: "x" }, "IFIND_REFRESH_TOKEN=x", null]) {
     const scope = fakeScope({ lunhuiRuns: backbone.provided[0][1] });
-    assert.throws(() => boardsRow.apply(scope.ctx, { env } as any), /lunhui-freeze-boards: env is gone - the iFinD token is the Account's \(IFIND_\* in the Account's environment\)/);
+    assert.throws(() => boardsRow.apply(scope.ctx, { env } as any), /lunhui-freeze-boards: env is gone - the iFinD token is the market's \(IFIND_\* in the market's environment\)/);
   }
 });
 

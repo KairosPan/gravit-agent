@@ -1,8 +1,9 @@
 {
   "ok": true,
-  "venue": "ex",
-  "venueName": "Stand-in Exchange",
-  "symbol": "BTC/USDT:USDT",
+  "venue": "standin-stocks-public",
+  "venueName": "Stand-in Delayed Quotes",
+  "symbol": "NVDA",
   "trades": [],
-  "none": "Stand-in Exchange publishes no trades the account can read"
+  "none": "Stand-in Delayed Quotes publishes no trades the market can read",
+  "public": true
 }

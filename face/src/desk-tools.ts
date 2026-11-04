@@ -43,8 +43,8 @@
  * - the secret check ({@link deskSecretDecision}) denies any call, of any tool, whose arguments carry the value of
  *   a key, password, secret or token in the face's environment ({@link deskSecrets}): to DeepSeek's search, to an
  *   MCP server, or to a file.
- * src/desk.ts `installDesk` installs it beside the tools, anchored on its `root`. The Telegram bridge
- * (src/telegram.ts) is the second line on the way out: it redacts the same secrets from everything it sends.
+ * src/desk.ts `installDesk` installs it beside the tools, anchored on its `root`. The phone's client
+ * (src/phone.ts) is the second line on the way out: it redacts the same secrets from everything it sends.
  *
  * MODULE WEIGHT: the preset id, the guard's names and their fold come from src/desk-names.ts, a leaf, not from
  * src/desk-preset.ts or src/desk-session.ts. This module is loaded wherever src/desk.ts is - by `npm run
@@ -172,7 +172,7 @@ const STATE_SCHEMA = {
     off: { type: "object" },
     deskSession: { type: "string" },
     turnsToday: { type: "object" },
-    telegram: { type: "object" },
+    phone: { type: "object" },
     watch: { type: "object" },
     ledgerError: { type: "string" },
   },
@@ -875,8 +875,8 @@ function secretVariables(env: NodeJS.ProcessEnv): (readonly [string, string])[] 
  * The secrets in `env`: the value of every variable whose name matches `/KEY|PASSWORD|SECRET|TOKEN/i` and whose value,
  * trimmed, is at least 8 characters - trimmed, so a blank value is none and a padded one is looked for as it is used
  * - each once, in the order first found. The face takes them once, at install, from `process.env`, which by then
- * holds `$DSH_HOME/.env` (src/desk.ts `installDesk`, which installs the guard, and src/telegram.ts): the model's key,
- * Alpaca's pair, the bot's token.
+ * holds `$DSH_HOME/.env` (src/desk.ts `installDesk`, which installs the guard, and src/phone.ts): the model's key,
+ * Alpaca's pair and any other key the operator keeps there.
  * @param env - the environment.
  */
 export function deskSecrets(env: NodeJS.ProcessEnv): string[] {

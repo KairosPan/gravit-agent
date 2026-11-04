@@ -64,6 +64,7 @@ import { doorOf, plan, type Door, type Leg, type Rail, type Route, type RouteReq
 import { heldUsd, inFlightUsd, launch, newPayment, settleDue, type Advance, type Authority, type Money, type Payment, type PaymentKind } from "./payments.ts";
 import { actionHash, BRAIN_KEY_TTL_MS, PAPER_TTL_MS, PAPER_TYPES, SIGN_OUT_TTL_MS, isAgentAction, isDeviceSig, isJwk, isOwnerAction, kidOf, malformed, MEMORY_TYPES, micro, MONEY_TTL_MS, MONEY_TYPES, NonceBook, ownEnvelope, ownerTypedData, shownFields, signerOf, type Action, type AgentAction, type AnySig, type Envelope, type Hex, type Jwk, type OwnerAction, type SendAsset } from "./sign.ts";
 import { deskBrainKeyProblem, fingerprintOf, setBrainKeyProblem } from "./brain-keys.ts";
+import { identitySignedProblem, isIdentityAction, type IdentityAction } from "../identity/identity.ts";
 import { LiveMoves, type LiveMoney } from "./live-moves.ts";
 import { LiveOrders, type CloseQuote, type LiveOrder, type OrderQuote } from "./live-orders.ts";
 import { LiveEarns, type EarnDesk, type EarnQuote, type LiveEarn } from "./live-earn.ts";
@@ -194,6 +195,13 @@ export interface Host {
   /** what a paper account's reset or top-up would do, in words, for the dialog before it is signed (POST /api/account/prepare): its name, the
    * book it would archive, what it holds now and what it would hold — or why it cannot be done */
   paperWords?(action: Extract<OwnerAction, { type: "resetPaper" | "topUpPaper" }>): Refusal | { words: string; usd: number };
+  /** ACCOUNT › IDENTITY (identity/identity.ts): the owner's connectNetwork, disconnectNetwork, setRouting and blockSender land here once
+   * the door has checked the signature, the owner, the nonce and — for a connect — the ten minutes. A connect's token is not in the action:
+   * the pending connection it names holds it, and the host checks it against the signed fingerprint before it writes anything. `summary`
+   * names the token by its fingerprint only (absent: this account keeps no identity) */
+  identity?(action: IdentityAction): Promise<Outcome>;
+  /** why the host would refuse one of the four now, or null — what /api/account/prepare says before the dialog shows it to be signed */
+  identityProblem?(action: IdentityAction): string | null;
 }
 
 /** one way of connecting a real venue, as the page offers it */
@@ -346,7 +354,7 @@ export const wordless = (e: Envelope): Envelope => (e?.action && MEMORY_TYPES.ha
  * key's fingerprint (the first 8 hex of keyHash) — the full keyHash and its salt are not written. A key's hash with its salt beside it is
  * nothing a person could undo, but it is more than the record needs: the nonce, which a later run remembers from this row, is what keeps
  * the same signature from being taken twice */
-export const keyless = (e: Envelope): Envelope => (e?.action && e.action.type === "setBrainKey" ? { ...e, action: { ...e.action, keyHash: typeof e.action.keyHash === "string" ? fingerprintOf(e.action.keyHash) : "", salt: "" } } : e);
+export const keyless = (e: Envelope): Envelope => (e?.action && (e.action.type === "setBrainKey" || e.action.type === "connectNetwork") ? { ...e, action: { ...e.action, keyHash: typeof e.action.keyHash === "string" ? fingerprintOf(e.action.keyHash) : "", salt: "" } } : e);
 /** An envelope as the ledger's "taken" and refusal rows carry it: its own four fields and nothing that rode in beside them (sign.ts
  * ownEnvelope — the door has reduced every envelope to that already, at its top, so every other row and the account's state hold the same
  * clean copy; done here again so that this stays true of these rows whoever calls it), memory's words and a brain key's hash left out */
@@ -569,7 +577,8 @@ export class AccountEngine {
     // own words (account/brain-keys.ts): refused HERE, before the instruction is taken — the "taken" row below writes the signed fields to
     // the ledger, which is hash-chained and cannot be cleaned afterwards, and the handler that would refuse it runs only after that row.
     // Fixed words, which never repeat the value; nothing is spent
-    const keyed = action.type === "setBrainKey" ? setBrainKeyProblem(action) : action.type === "setDesk" ? deskBrainKeyProblem(action.change, action.value) : null;
+    // and a bot token pasted into any signed field of the four identity types, for the same reason (identity/identity.ts)
+    const keyed = action.type === "setBrainKey" ? setBrainKeyProblem(action) : action.type === "setDesk" ? deskBrainKeyProblem(action.change, action.value) : isIdentityAction(action) ? identitySignedProblem(action) : null;
     if (keyed) return this.refused(no("E_ACCOUNT_BAD_ACTION", { message: keyed }), envelope);
     const now = this.nowMs();
     const signer = await signerOf(action, envelope.signature, deviceKeys(this.state));
@@ -633,6 +642,8 @@ export class AccountEngine {
     if (action.type === "signOut" && Math.abs(now - action.nonce) > SIGN_OUT_TTL_MS) return this.refused(no("E_ACCOUNT_EXPIRED", { message: now > action.nonce ? `signed ${Math.round((now - action.nonce) / 60_000)} min ago: a sign-out is taken within ${SIGN_OUT_TTL_MS / 60_000} minutes of signing it — sign out again` : `dated ${Math.round((action.nonce - now) / 60_000)} min ahead: a sign-out is taken within ${SIGN_OUT_TTL_MS / 60_000} minutes of its date`, detail: { signedAt: new Date(action.nonce).toISOString() } }), envelope, signer);
     // a brain's key is signed and sent at once (account/brain-keys.ts): a signature kept for later is not one the owner is still waiting on
     if (action.type === "setBrainKey" && Math.abs(now - action.nonce) > BRAIN_KEY_TTL_MS) return this.refused(no("E_ACCOUNT_EXPIRED", { message: now > action.nonce ? `signed ${Math.round((now - action.nonce) / 60_000)} min ago: a brain's key is set within ${BRAIN_KEY_TTL_MS / 60_000} minutes of signing it — sign again` : `dated ${Math.round((action.nonce - now) / 60_000)} min ahead: a brain's key is set within ${BRAIN_KEY_TTL_MS / 60_000} minutes of its date`, detail: { signedAt: new Date(action.nonce).toISOString() } }), envelope, signer);
+    // a network connected is signed and sent at once (identity/identity.ts): its pending connection lasts as long
+    if (action.type === "connectNetwork" && Math.abs(now - action.nonce) > BRAIN_KEY_TTL_MS) return this.refused(no("E_ACCOUNT_EXPIRED", { message: now > action.nonce ? `signed ${Math.round((now - action.nonce) / 60_000)} min ago: a network is connected within ${BRAIN_KEY_TTL_MS / 60_000} minutes of signing it — start again` : `dated ${Math.round((action.nonce - now) / 60_000)} min ahead: a network is connected within ${BRAIN_KEY_TTL_MS / 60_000} minutes of its date`, detail: { signedAt: new Date(action.nonce).toISOString() } }), envelope, signer);
     for (const who of signers) this.nonces.use(who, action.nonce);
     // taken, on the record before anything runs: a later run of the account reads this row and does not take the same instruction again,
     // whatever became of it (a money instruction is good for ten minutes, and a restart can come inside them)
@@ -788,6 +799,19 @@ export class AccountEngine {
         // that says it was done carries no envelope — its "taken" row above has the one the ledger keeps (ledgered: the fingerprint only)
         if (!this.host.brainKey) return no("E_ACCOUNT_BAD_ACTION", { message: "this account keeps no desk, so it holds no brain's key" });
         const r = await this.host.brainKey(action, { signer, hash });
+        if (isRefusal(r)) return r;
+        this.host.log({ kind: "action", venue: "*", tool: action.type, signer, outcome: "ok", reason: r.kind === "account" ? r.summary : action.type });
+        return r;
+      }
+      case "connectNetwork":
+      case "disconnectNetwork":
+      case "setRouting":
+      case "blockSender": {
+        // the networks Gravit speaks on (identity/identity.ts). The row that says it was done carries no envelope: its "taken" row above
+        // has the one the ledger keeps (ledgered: a connect's fingerprint only), and none of the four is replayed by a restart — the
+        // identity's state file is the record, as a brain's key file is
+        if (!this.host.identity) return no("E_ACCOUNT_BAD_ACTION", { message: "this account keeps no identity: it is the account layer's" });
+        const r = await this.host.identity(action);
         if (isRefusal(r)) return r;
         this.host.log({ kind: "action", venue: "*", tool: action.type, signer, outcome: "ok", reason: r.kind === "account" ? r.summary : action.type });
         return r;
@@ -1588,6 +1612,13 @@ export class AccountEngine {
       // base URL shaped like a key is refused without being said back (account/brain-keys.ts)
       if (action.type === "setBrainKey") {
         const problem = malformed(action) ?? setBrainKeyProblem(action);
+        if (problem) return no("E_ACCOUNT_BAD_ACTION", { message: problem });
+      }
+      // the four identity types (identity/identity.ts): their shapes, a token pasted into a field, a routing that does not read, quiet hours
+      // that are not two times, a network not connected, a connect whose pending connection, bot, person or fingerprint is not the one
+      // signed — refused here as the door would refuse them, in fixed words, before the dialog shows anything to sign
+      if (isIdentityAction(action)) {
+        const problem = malformed(action) ?? identitySignedProblem(action) ?? (this.host.identityProblem ? this.host.identityProblem(action) : "this account keeps no identity: it is the account layer's");
         if (problem) return no("E_ACCOUNT_BAD_ACTION", { message: problem });
       }
       // the desk's brain named with an API key in it (a key pasted into the hiring form's model field), a brain that is not one object, or a

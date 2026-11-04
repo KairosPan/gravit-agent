@@ -40,9 +40,11 @@ test("GRAVIT.md tells Gravit to answer a Lunhui market run with lunhui_present",
   assert.ok(readFileSync(GRAVIT_MD, "utf8").includes("lunhui_present"));
 });
 
-test("GRAVIT.md reaches AKShare through the seat", () => {
+test("GRAVIT.md reaches AKShare through the market row, not the seat", () => {
   const text = readFileSync(GRAVIT_MD, "utf8");
-  assert.match(text, /mcp__account__portfolio_akshare/);
+  assert.ok(Buffer.byteLength(text, "utf8") <= 4500);
+  assert.match(text, /mcp__market__market_akshare/);
+  assert.equal(text.includes("portfolio_akshare"), false);
   assert.match(text, /akshare_discover/);
   assert.equal(text.includes("mcp__akshare__"), false);
 });

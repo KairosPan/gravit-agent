@@ -1,24 +1,35 @@
-// face/client/js/host/markets.js — the Markets screen's impure half (spec 2026-10-22 §6.1): the Account's markets through the
-// face's proxy into the store — explore for the tab on screen at once and every 20 s (China's: its ranking by the sort in
+// face/client/js/host/markets.js — the Markets screen's impure half (spec 2026-10-22 §6.1): the markets through the face's
+// proxy into the store — explore for the tab on screen at once and every 20 s (China's: its ranking by the sort in
 // effect), the quotes of the rows in view (on a market's page, its own market's) every 5 s (twelve a call) and beside them the
 // A shares' (the cn page's first, then the cn rows in view), a market page's candles for its range (an A share's at venue
-// china) and its base's compare rows, and the page's market followed on the Account's stream; one explore?q read for a search,
+// china) and its base's compare rows, and the page's market followed on its stream; one explore?q read for a search,
 // its A shares the hits; the stars in this browser's two stores (the Account's keys under their own key, the A shares under the
 // face's) and, on a page that signs, an Account market's star as the Account's own signed setWatch (plan 2 Task 12); each old
 // us:/crypto: star asked of the Account once; and beside a market page's candles (an Account key's, never an A share's) its
 // four reads (plan 4a Task 4): the asset sheet once on entering and after every owner action taken, its order book and latest
 // trades at once and every 5 s while the page is on screen, a perpetual's funding once (every venue that lists it, one read).
-// Every market read is the Account's: the face's own quote wire is read by nothing here. The views over what lands are
-// market-view.js's and market-depth-view.js's. Nothing here touches the DOM.
+// Two upstreams (plan A2 Task 6): the market's public reads under /data/market/… and the account's connected reads under
+// /data/account/connected/…. Each explore read (a tab's, a search's, an old star's ask) asks both with the same query and lands
+// their join (host/explore-join.js) over the page's venues and the venues read, asked once when Markets is first shown; China's
+// ranking, its search hits, its quotes and its history are the market's alone. The quotes split by line: a pair at a venue the
+// page names to the account's connected quotes, every other to the market's. A page's candles, book and trades at a connected
+// line are the account's connected reads first — the account not answering, once more at the row's public line of the same
+// connection (never another's), none being "The Account is not answering" — a public line's the market's; a connected line is
+// followed on the account's stream, a public one on the market's (marketStream), the other told to follow nothing. The asset
+// sheet, compare and funding stay the account's. The face's own quote wire is read by nothing here. The views over what lands
+// are market-view.js's and market-depth-view.js's. Nothing here touches the DOM.
 import {
   readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY,
 } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, chinaPairOf, rankOf, cnQuoteOf, cnHitsOf } from '../wire/china.js';
-import { ACCOUNT_TABS, CHINA_TAB, NOT_ANSWERING_WORD, canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, watchedOf, setWatchOf } from './market-view.js';
+import { ACCOUNT_TABS, CHINA_TAB, NOT_ANSWERING_WORD, canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf } from './market-view.js';
 import { refusedAt, refusalOf } from './owner-view.js';
 import { assetKeyOf } from './market-depth-view.js';
+import { venuesOf } from './account-view.js';
+import { joinExplore } from './explore-join.js';
+import { exploreHalves, joinOptsOf, orderOf, MARKET_EXPLORE as EXPLORE, CONNECTED_EXPLORE } from './explore-halves.js';
 
-// China's state while the proxy re-serves the Account's last read: the Account is not answering
+// China's state while the proxy re-serves the market's last read: the market is not answering
 const NOT_ANSWERING = { state: 'unavailable', said: NOT_ANSWERING_WORD };
 
 export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
@@ -30,8 +41,11 @@ export const BOOK_DEPTH = 10, TRADES_LIMIT = 20, FUNDING_LIMIT = 100;
 // the four reads' kinds of flight
 const DEPTH_KINDS = ['asset', 'book', 'trades', 'funding'];
 
-const EXPLORE = '/data/account/explore';
-const QUOTES = '/data/account/quotes';
+const QUOTES = '/data/market/quotes';
+const CONNECTED_QUOTES = '/data/account/connected/quotes';
+const VENUES = '/data/account/venues';
+// a connected line's part, the account not answering and no public line of the same connection to read instead
+export const ACCOUNT_DOWN_WORD = 'The Account is not answering';
 const ROWS = 200;                 // the explore rows a tab's read and a search ask for
 const ASKED_ROWS = 12;            // the rows an old star's ask reads
 const KINDS = new Set(ACCOUNT_TABS.map(([id]) => id).filter(id => id !== 'all'));
@@ -47,15 +61,19 @@ const messageOf = body => words(body?.refusal?.message) ?? words(body?.error);
 const answered = (body, list) => body?.ok === true && Array.isArray(body[list]);
 
 // the explore read the tab on screen takes: All, Watching, and All results with no query read All's; a kind's tab its own; All
-// results while searching is the search's read, not this
+// results while searching is the search's read, not this — its query, asked of both halves
 function exploreOf(m) {
-  if (KINDS.has(m.tab)) return { tab: m.tab, path: `${EXPLORE}?tab=${m.tab}&limit=${ROWS}` };
-  if (m.tab === 'all' || m.tab === 'watching' || (m.tab === 'results' && blank(m.q))) return { tab: 'all', path: `${EXPLORE}?limit=${ROWS}` };
+  if (KINDS.has(m.tab)) return { tab: m.tab, query: `tab=${m.tab}&limit=${ROWS}` };
+  if (m.tab === 'all' || m.tab === 'watching' || (m.tab === 'results' && blank(m.q))) return { tab: 'all', query: `limit=${ROWS}` };
   return null;
 }
+// a rejection the proxy answered for an upstream not answering: its 503 `{unreachable}`, or no body at all — never a refusal
+const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+const unreachable = body => body === undefined || body === null || (isRecord(body) && typeof body.unreachable === 'string');
+const venueOf = pair => pair.slice(0, pair.indexOf('|'));
 
 export function startMarkets({
-  store, getJson, storage, win, stream, schedule, cancelTimer, now = Date.now,
+  store, getJson, storage, win, stream, marketStream = { follow() {} }, schedule, cancelTimer, now = Date.now,
   owner = null, afterAction = () => {},
 }) {
   let closed = false;
@@ -66,7 +84,8 @@ export function startMarkets({
   let readSort = null;       // the sort the China ranking was last asked for while shown
   let inView = null;         // the row ids rowsInView last named; null: every row
   let waiting = null;        // a page asked for whose market no read lists yet: its reads wait for the read that does
-  let followed = false;      // the stream follows a page's market
+  let followed = false;      // a stream follows a page's market
+  let venuesAsked = false;   // the venues read asked, once, when Markets is first shown
   let depthId = null;        // the Account market page whose four reads are read, from entering it to leaving it
   const kinds = new Map();   // a kind of read → { flight, path, seq }
   const signing = new Set(); // the Account keys whose setWatch is in the air
@@ -93,18 +112,48 @@ export function startMarkets({
   // a kind's flight dropped: its answer, when it comes, lands nowhere, and the next ask reads again
   function drop(kind) { const k = kinds.get(kind); if (k) { k.seq += 1; k.flight = null; k.path = null; } }
 
+  // the explore reads' two halves (host/explore-halves.js); a market half answered afresh rechecks China's state
+  const halves = exploreHalves({ store, fly, drop, kinds, now, onMarket: body => { if (body.stale !== true) recheckChina(); } });
   // the explore read for the tab on screen
   function readExplore() {
     const read = exploreOf(store.get().markets);
     if (!read) return;
-    const { tab, path } = read;
-    fly(`explore:${tab}`, path, (body, refused) => {
-      if (!refused && answered(body, 'items')) store.dispatch('exploreLoaded', { tab, data: body, at: now() });
-      else store.dispatch('exploreFailed', { tab, at: now(), message: messageOf(body) });
-    }, ['exploreLoading', { tab }]);
+    const { tab, query } = read;
+    halves.read(`explore:${tab}`, query, {
+      land: data => store.dispatch('exploreLoaded', { tab, data, at: now() }),
+      failed: message => store.dispatch('exploreFailed', { tab, at: now(), message }),
+      loading: ['exploreLoading', { tab }],
+    });
+  }
+  // the tab on screen changed: the explore halves in the air for any other tab land nowhere (what each kept stays, for a
+  // return to that tab to join with)
+  function leaveExplores() {
+    const read = exploreOf(store.get().markets);
+    for (const kind of kinds.keys()) {
+      const m = /^explore:([^:]+):(market|account)$/.exec(kind);
+      if (m && m[1] !== read?.tab) drop(kind);
+    }
+  }
+  // the venues read landed: every explore kept is joined again over its verdicts
+  function rejoin() {
+    for (const [kind, data] of halves.rejoin()) {
+      const m = /^explore:(.+)$/.exec(kind);
+      if (m && data) store.dispatch('exploreLoaded', { tab: m[1], data, at: now() });
+    }
+  }
+  // the venues read — where each connection serves — asked once when Markets is first shown
+  function readVenues() {
+    if (venuesAsked) return;
+    venuesAsked = true;
+    fly('venuesHere', VENUES, (body, refused) => {
+      if (!refused && body?.ok === true && Array.isArray(body.venues)) {
+        store.dispatch('venuesHereLoaded', { data: body, at: now() });
+        rejoin();
+      } else store.dispatch('venuesHereFailed', { at: now(), message: messageOf(body) });
+    });
   }
 
-  // China's ranking for the sort in effect, the Account's china tab: the answer for a sort the screen has left lands nowhere (one
+  // China's ranking for the sort in effect, the market's china tab: the answer for a sort the screen has left lands nowhere (one
   // flight, the newer path's); an answer kept and re-served stale by the proxy lands as the ranking it was, marked stale (rankOf)
   function readRank() {
     const sort = store.get().markets.sort === 'movers' ? 'movers' : 'volume';
@@ -113,11 +162,11 @@ export function startMarkets({
       const data = refused ? null : rankOf(body, sort);
       if (!data) { store.dispatch('rankFailed', { sort, at: now(), message: messageOf(body) }); return; }
       store.dispatch('rankLoaded', { sort, data, at: now() });
-      // a ranking the proxy re-served stale is the Account not answering: its last sentence is no state of now
+      // a ranking the proxy re-served stale is the market not answering: its last sentence is no state of now
       store.dispatch('chinaStatusUpdated', { status: body.stale === true ? NOT_ANSWERING : body.china.status });
     }, ['rankLoading', { sort }]);
   }
-  // China's state last said as the Account not answering, and the Account answering afresh: its state read again, off the China
+  // China's state last said as the market not answering, and the market answering afresh: its state read again, off the China
   // ranking that carries it — else that sentence would stay on Venues and Markets until a reload
   function recheckChina() {
     const said = store.get().markets.providers;
@@ -135,7 +184,6 @@ export function startMarkets({
   // page reached by Back onto another tab, a market un-starred from its own page on Watching), its pair, when it has one, comes
   // from its page's own view — its most traded connected line, the line the page follows
   function readQuotes() {
-    if (inAir('quotes')) return;
     const s = store.get();
     const rows = rowsOf(s.markets, now(), s.account?.data);
     const drawn = pairsOf(rows.filter(r => inView === null || inView.has(r.id)), QUOTE_PAIRS);
@@ -143,16 +191,21 @@ export function startMarkets({
       .filter(id => !isCnKey(id) && isAccountKey(id) && !rows.some(r => r.id === id))
       .flatMap(id => { const view = pageOf(s.markets, s.account, id, now()); return view ? pairsOf([{ legs: view.legs }], 1) : []; });
     const pairs = [...new Set([...drawn, ...pages])].slice(0, QUOTE_PAIRS);
-    if (!pairs.length) return;
-    fly('quotes', `/data/account/quotes?pairs=${encodeURIComponent(pairs.join(','))}`, (body, refused) => {
-      if (!refused && answered(body, 'quotes')) store.dispatch('accountQuotesLoaded', { quotes: body.quotes });
-    });
+    // split by line: a pair at a venue the page names is the account's connected quote, every other the market's
+    const connected = new Set(venuesOf(s.account?.data).map(v => v.id).filter(Boolean));
+    const lands = (body, refused) => { if (!refused && answered(body, 'quotes')) store.dispatch('accountQuotesLoaded', { quotes: body.quotes }); };
+    const ask = (kind, path, list) => {
+      if (!list.length || inAir(kind)) return;
+      fly(kind, `${path}?pairs=${encodeURIComponent(list.join(','))}`, lands);
+    };
+    ask('quotes:account', CONNECTED_QUOTES, pairs.filter(p => connected.has(venueOf(p))));
+    ask('quotes:market', QUOTES, pairs.filter(p => !connected.has(venueOf(p))));
   }
 
-  // the A shares' prices, the Account's (venue china), on the tick and at once for a page reached (its own id first): the cn page's own first, then the cn rows in view — twelve a call, none while
-  // one is out. Each priced row lands over the quotes kept; one the Account refused keeps its kept price, marked stale, with the
-  // Account's sentence as China's state; an answer the proxy re-serves stale (the Account not answering) lands every price stale, the connection
-  // 'stale' and China's state the Account not answering;
+  // the A shares' prices, the market's (venue china), on the tick and at once for a page reached (its own id first): the cn page's own first, then the cn rows in view — twelve a call, none while
+  // one is out. Each priced row lands over the quotes kept; one the market refused keeps its kept price, marked stale, with the
+  // market's sentence as China's state; an answer the proxy re-serves stale (the market not answering) lands every price stale, the connection
+  // 'stale' and China's state the market not answering;
   // a read that fails keeps every price and says the connection failed
   function readCnQuotes(pageId = null) {
     if (inAir('cnQuotes')) return;
@@ -200,6 +253,7 @@ export function startMarkets({
   // the tab on screen changed while shown: its read at once, and its poll over from now
   function retab() {
     readTab = store.get().markets.tab;
+    leaveExplores();
     if (exploreTimer !== null) { cancelTimer(exploreTimer); exploreTimer = null; }
     armExplore();
     readShown();
@@ -211,20 +265,47 @@ export function startMarkets({
     const range = Object.hasOwn(candles, id) ? candles[id]?.range : undefined;
     return named(range) ? range : '1D';
   }
-  // a page's candles at its line for the range — a refusal lands with the Account's sentence; an answer for a range the page has
-  // left since lands nowhere
-  function readCandles(id, leg, range) {
-    const path = `/data/account/candles?venue=${encodeURIComponent(leg.venue)}&symbol=${encodeURIComponent(leg.symbol)}&range=${encodeURIComponent(range)}`;
-    fly(`candles:${id}`, path, (body, refused) => {
+  // Keyed first: read `r` (candles, book, trades) at a page's line. A connected line asks the account's connected route; the
+  // account not answering (the proxy's `{unreachable}`, or no body), the market is asked once at the row's public line of the
+  // same connection — the line's own connector, else its venue's on the page — and with none the part fails in the account's
+  // absence. A refusal is the answer, never a reason to fall back. A public line asks the market. `queryAt(line)` is the
+  // read's query at a line; `land(body, refused)` as fly's.
+  function readKeyed(kind, r, item, leg, queryAt, land, loading) {
+    if (!leg.connected) { fly(kind, `/data/market/${r}?${queryAt(leg)}`, land, loading); return; }
+    fly(kind, `/data/account/connected/${r}?${queryAt(leg)}`, (body, refused) => {
+      if (!refused || !unreachable(body)) { land(body, refused); return; }
+      const connector = leg.connector || venuesOf(store.get().account?.data).find(v => v.id === leg.venue)?.connector || '';
+      const twin = connector ? publicLinesOf(item).find(l => l.public && l.connector === connector && l.venue && l.symbol) : undefined;
+      if (twin) fly(kind, `/data/market/${r}?${queryAt(twin)}`, land);
+      else land({ ok: false, error: ACCOUNT_DOWN_WORD }, true);
+    }, loading);
+  }
+  const at = l => `venue=${encodeURIComponent(l.venue)}&symbol=${encodeURIComponent(l.symbol)}`;
+  // a row's lines, and the lines of the market's own row of that key as the explore halves kept it: the join leaves out a public
+  // line a connected venue speaks for, and that line is the one to read while the account is not answering
+  function publicLinesOf(item) {
+    const own = [];
+    for (const market of halves.markets()) {
+      for (const list of ['items', 'movers', 'closing', 'mostTraded']) {
+        const row = Array.isArray(market[list]) ? market[list].find(r => isRecord(r) && r.key === item.key) : undefined;
+        if (row) own.push(...legsOf(row));
+      }
+    }
+    return [...legsOf(item), ...own];
+  }
+  // a page's candles at its line for the range — a refusal lands with the sentence it carries; an answer for a range the page
+  // has left since lands nowhere
+  function readCandles(id, item, leg, range) {
+    readKeyed(`candles:${id}`, 'candles', item, leg, l => `${at(l)}&range=${encodeURIComponent(range)}`, (body, refused) => {
       if (rangeOf(id) !== range) return;
       if (!refused && answered(body, 'candles')) store.dispatch('candlesLoaded', { id, range, data: body, at: now() });
       else store.dispatch('candlesFailed', { id, range, at: now(), message: messageOf(body) });
     }, ['candlesLoading', { id, range }]);
   }
-  // an A share's history at the range, the Account's at venue china (its 1D and 5D are sessions, the longer ranges candles); an
+  // an A share's history at the range, the market's at venue china (its 1D and 5D are sessions, the longer ranges candles); an
   // answer for a range the page has left lands nowhere
   function readCnCandles(id, range) {
-    const path = `/data/account/candles?venue=${CHINA_VENUE}&symbol=${encodeURIComponent(id.slice(3))}&range=${encodeURIComponent(range)}`;
+    const path = `/data/market/candles?venue=${CHINA_VENUE}&symbol=${encodeURIComponent(id.slice(3))}&range=${encodeURIComponent(range)}`;
     fly(`candles:${id}`, path, (body, refused) => {
       if (rangeOf(id) !== range) return;
       if (!refused && body?.ok === true) store.dispatch('candlesLoaded', { id, range, data: body, at: now() });
@@ -240,10 +321,17 @@ export function startMarkets({
   function unfollow() {
     followed = false;
     stream.follow([]);
+    marketStream.follow([]);
+  }
+  // a line followed: a connected one on the account's stream, a public one on the market's — the other told to follow nothing
+  function followAt(leg) {
+    followed = true;
+    const key = `${leg.venue}:${leg.symbol}`;
+    if (leg.connected) { marketStream.follow([]); stream.follow([key]); } else { stream.follow([]); marketStream.follow([key]); }
   }
   // A market's page: the candles at its line — its first connected line, else its first public listing — for its kept range, the
-  // compare rows for its base (a coin, a perpetual, a stock) and that line followed on the Account's stream. A page whose market
-  // no read lists yet (a deep link before explore answers) waits for the read that lists it; meanwhile it follows nothing.
+  // compare rows for its base (a coin, a perpetual, a stock) and that line followed on its stream. A page whose market no read
+  // lists yet (a deep link before explore answers) waits for the read that lists it; meanwhile it follows nothing.
   function open(id) {
     const s = store.get();
     const view = pageOf(s.markets, s.account, id, now());
@@ -254,9 +342,9 @@ export function startMarkets({
     }
     waiting = null;
     const leg = followOf(view.item);
-    if (leg) readCandles(id, leg, rangeOf(id));
+    if (leg) readCandles(id, view.item, leg, rangeOf(id));
     if (COMPARED.has(view.item.kind) && named(view.item.base)) readCompare(view.item.base);
-    if (leg) { followed = true; stream.follow([`${leg.venue}:${leg.symbol}`]); } else if (followed) unfollow();
+    if (leg) followAt(leg); else if (followed) unfollow();
     if (depthId !== id) {
       leaveDepth();
       depthId = id;
@@ -284,16 +372,16 @@ export function startMarkets({
     fly('asset', `/data/account/asset?key=${encodeURIComponent(key)}${fresh ? '&fresh=1' : ''}`,
       landDepth(id, 'here', b => Array.isArray(b.positions) && Array.isArray(b.orders)), ['depthLoading', { id, part: 'here' }]);
   }
-  // the book and the latest trades at the line the page follows; the trades no more once the source said it publishes none
+  // the book and the latest trades at the line the page follows, keyed first; the trades no more once the source said it
+  // publishes none
   function readMarketDepth(id, item) {
     const leg = followOf(item);
     if (!leg) return;
-    const at = `venue=${encodeURIComponent(leg.venue)}&symbol=${encodeURIComponent(leg.symbol)}`;
-    fly('book', `/data/account/book?${at}&depth=${BOOK_DEPTH}`, landDepth(id, 'book', b => b.book !== null && typeof b.book === 'object'),
+    readKeyed('book', 'book', item, leg, l => `${at(l)}&depth=${BOOK_DEPTH}`, landDepth(id, 'book', b => b.book !== null && typeof b.book === 'object'),
       ['depthLoading', { id, part: 'book' }]);
     const kept = store.get().markets.depth?.[id]?.trades;
     if (kept?.status === 'ready' && typeof kept.data?.none === 'string' && kept.data.none.trim() !== '') return;
-    fly('trades', `/data/account/trades?${at}&limit=${TRADES_LIMIT}`, landDepth(id, 'trades', b => Array.isArray(b.trades)),
+    readKeyed('trades', 'trades', item, leg, l => `${at(l)}&limit=${TRADES_LIMIT}`, landDepth(id, 'trades', b => Array.isArray(b.trades)),
       ['depthLoading', { id, part: 'trades' }]);
   }
   // a perpetual's funding: one read at every venue that lists it, as the retired page reads it (ui/terminal.js ttFunding);
@@ -366,13 +454,12 @@ export function startMarkets({
       if (closed) return;
       const match = matchKey(entry?.id);
       if (!match || Object.hasOwn(store.get().markets.asked, entry.id)) continue;
-      let body;
-      try {
-        body = await getJson(`${EXPLORE}?q=${encodeURIComponent(match.q)}&limit=${ASKED_ROWS}`);
-      } catch {
-        continue;
-      }
+      const query = `q=${encodeURIComponent(match.q)}&limit=${ASKED_ROWS}`;
+      const half = async path => { try { return await getJson(path); } catch { return null; } };
+      const [mb, cb] = await Promise.all([half(`${EXPLORE}?${query}`), half(`${CONNECTED_EXPLORE}?${query}`)]);
       if (closed) return;
+      const body = joinExplore(mb, cb, { ...joinOptsOf(store.get()), ...orderOf(query), now: now() });
+      if (body === null) continue;
       if (!answered(body, 'items') || !store.get().markets.watchlist.some(a => a.id === entry.id)) continue;
       const base = match.q.toUpperCase();
       const hit = body.items.find(i => i?.kind === match.kind && typeof i.base === 'string' && i.base.toUpperCase() === base && isAccountKey(i.key));
@@ -439,6 +526,7 @@ export function startMarkets({
       shown = next;
       if (!shown) { stopPolls(); return; }
       readTab = store.get().markets.tab;
+      readVenues();
       armExplore();
       armQuotes();
       readShown();
@@ -450,15 +538,19 @@ export function startMarkets({
       const q = typeof raw === 'string' ? raw : '';
       store.dispatch('setMarketsQuery', q);
       if (blank(q)) {
-        drop('results');
+        halves.forget('results');
         return;
       }
-      fly('results', `${EXPLORE}?q=${encodeURIComponent(q.trim())}&limit=${ROWS}`, (body, refused) => {
-        if (!refused && answered(body, 'items')) {
-          store.dispatch('resultsLoaded', { data: body, at: now() });
-          store.dispatch('hitQuotesLoaded', { quotes: cnHitsOf(body).quotes });
-        } else store.dispatch('resultsFailed', { at: now(), message: messageOf(body) });
-      }, ['resultsLoading']);
+      // a new query forgets what the last one kept (explore-halves.js)
+      halves.read('results', `q=${encodeURIComponent(q.trim())}&limit=${ROWS}`, {
+        land: (data, kept) => {
+          store.dispatch('resultsLoaded', { data, at: now() });
+          // the A shares the hits, the market's alone
+          if (kept.market) store.dispatch('hitQuotesLoaded', { quotes: cnHitsOf(kept.market).quotes });
+        },
+        failed: message => store.dispatch('resultsFailed', { at: now(), message }),
+        loading: ['resultsLoading'],
+      });
     },
     /** A star: an Account key — an A share's `cn:<code>` (`cn:sh600519` canonicalised) among them — on a page that signs, to the
      *  Account's own list (setWatch at the line setWatchOf names, an A share's `china|<code>`; one starred on either list already
@@ -532,7 +624,7 @@ export function startMarkets({
       const s = store.get();
       const view = pageOf(s.markets, s.account, id, now());
       const leg = view ? followOf(view.item) : null;
-      if (leg) readCandles(id, leg, value);
+      if (leg) readCandles(id, view.item, leg, value);
     },
     /** An owner action taken: the asset sheet of the market page on screen read again, past the face's cache. */
     afterAction() {
@@ -554,7 +646,7 @@ export function startMarkets({
       unsubscribe();
       win?.removeEventListener?.('storage', onStorage);
       unfollow();
-      for (const kind of DEPTH_KINDS) drop(kind);
+      for (const kind of kinds.keys()) drop(kind);
     },
   };
 }

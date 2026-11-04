@@ -24,7 +24,10 @@
  * `http 403`, `unreadable`), never its text, and nothing is served stale — the
  * service's absence is the fact to show; a failure is never kept, so the next
  * read asks again. A seat row the operator disabled answers `disabled` and
- * asks nothing. */
+ * asks nothing. The seat it describes carries 34 real-account tools: the
+ * wallet's reads, waits, words and writes, and a connected venue's own bars
+ * and book; the market's public reads are the `mcp-market` row's
+ * (src/market-row.ts), not the seat's. */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ACCOUNT_TTL_MS, codeOf, createAccountReader, type AccountAnswer, type AccountReader } from "./account-proxy.ts";
 import { ACCOUNT_SEAT_NAME, seatUrl } from "./account-seat.ts";

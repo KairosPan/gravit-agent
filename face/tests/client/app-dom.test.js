@@ -11,6 +11,7 @@ import { valueEditor } from './helpers/value-editor.js';
 import { modulesListing } from './helpers/inventory.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
 import { fakeProvider, ADDRESS as WALLET_ADDRESS, hashOf } from './helpers/fake-wallet.js';
+import { rebuildQuery } from '../../src/account-proxy.ts';
 
 // every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
 const booted = new Set();
@@ -523,7 +524,7 @@ test("typing in the search box searches; a star watches and writes the face's ke
   const mq = f.withId('mq', { tagName: 'INPUT', type: 'search', dataset: { action: 'mkQuery' } });
   const h = host();
   const reads = [];
-  const getJson = async path => { reads.push(path); return path.startsWith('/data/account/explore?q=600&') ? fx('explore-search-china') : h.getJson(path); };
+  const getJson = async path => { reads.push(path); return path.startsWith('/data/market/explore?q=600&') ? fx('explore-search-china') : h.getJson(path); };
   // the search waits for a quiet moment in the box: that wait is held here, and run
   const timers = new HeldTimers(ms => ms === 300);
   const store = bootMarkets(f, { ...h, getJson }, null, { timers });
@@ -535,10 +536,10 @@ test("typing in the search box searches; a star watches and writes the face's ke
   f.fire('root', 'input', { target: mq });
   assert.equal(store.get().markets.q, '600');
   assert.match(f.html(), /Searching…/);
-  assert.equal(reads.some(p => p.startsWith('/data/account/explore?q=')), false, 'nothing searched before the wait');
+  assert.equal(reads.some(p => p.startsWith('/data/market/explore?q=')), false, 'nothing searched before the wait');
   timers.run(300);
   await settle();
-  assert.deepEqual(reads.filter(p => p.startsWith('/data/account/explore?q=')), ['/data/account/explore?q=600&limit=200'], "one read, the Account's");
+  assert.deepEqual(reads.filter(p => p.startsWith('/data/market/explore?q=')), ['/data/market/explore?q=600&limit=200'], "one read, the Account's");
   assert.match(f.html(), /<tr data-id="cn:600519">/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'cn:600519' } });
   // an A share is an Account key: its star is kept in this browser's Account store (the page does not sign), never the cn list
@@ -621,8 +622,8 @@ test('a market page reads no /data/bars, whatever its id; Markets on screen read
   await h.ready();
   assert.match(f.html(), /<main class="main mkts mk-page">/);
   assert.match(f.html(), /A-share · 600519 · SH/, 'the A-share page, cold');
-  assert.ok(reads.includes('/data/account/explore?limit=200'), "Markets on screen reads the Account's explore");
-  assert.ok(reads.includes('/data/account/candles?venue=china&symbol=600519&range=1D'), 'its history at venue china');
+  assert.ok(reads.includes('/data/market/explore?limit=200'), "Markets on screen reads the Account's explore");
+  assert.ok(reads.includes('/data/market/candles?venue=china&symbol=600519&range=1D'), 'its history at venue china');
   assert.equal(reads.some(p => p.startsWith('/data/account/holdings') || p.startsWith('/data/account/statement')), false, 'nothing held or stated read for an A share');
   await settle();
   for (const hash of ['#/markets/crypto:BTC/USD', '#/markets/cn:600519', '#/markets/us:AAPL']) {
@@ -669,15 +670,22 @@ function standinAnswer(path) {
     case '/data/account/history': return { ...fx(paper ? 'history-paper' : 'history'), range: q.get('range') };
     case '/data/account/statement': return fx('statement');
     case '/data/account/agents': return fx('agents');
-    case '/data/account/explore': return fx('explore-all');
-    case '/data/account/candles': return { ...fx('candles'), venue: q.get('venue'), symbol: q.get('symbol'), range: q.get('range') };
+    // the market's explore, and the account's connected one beside it listing nothing: their join is the stand-in's rows
+    case '/data/market/explore': return fx('explore-all');
+    case '/data/account/connected/explore': return { ok: true, asOf: '2026-10-22T08:00:00.000Z', items: [], movers: [], closing: [], mostTraded: [], tabs: [], missing: [], notes: [] };
+    case '/data/market/candles':
+    case '/data/account/connected/candles': return { ...fx('candles'), venue: q.get('venue'), symbol: q.get('symbol'), range: q.get('range') };
     case '/data/account/compare': return { ...fx('compare'), base: q.get('base') };
-    case '/data/account/quotes': return { ok: true, quotes: [] };
+    case '/data/market/quotes':
+    case '/data/account/connected/quotes': return { ok: true, quotes: [] };
     // a market page's four reads (plan 4a Task 4): the asset sheet the stand-in keeps for the key, else an empty one; its book (the
     // best bid and ask alone), its trades (none published), no funding
     case '/data/account/asset': return ASSET_SHEETS[q.get('key')] ? fx(ASSET_SHEETS[q.get('key')]) : { ok: true, key: q.get('key'), positions: [], orders: [], lines: [], cost: [], missing: [] };
-    case '/data/account/book': return { ...fx('book'), venue: q.get('venue'), symbol: q.get('symbol') };
-    case '/data/account/trades': return { ...fx('trades'), venue: q.get('venue'), symbol: q.get('symbol') };
+    case '/data/market/book':
+    case '/data/account/connected/book': return { ...fx('book'), venue: q.get('venue'), symbol: q.get('symbol') };
+    // a public line's trades are the market's answer, a connected line's the Account's (each its own words)
+    case '/data/market/trades': return { ...fx('trades'), venue: q.get('venue'), symbol: q.get('symbol') };
+    case '/data/account/connected/trades': return { ...fx('connected-trades'), venue: q.get('venue'), symbol: q.get('symbol') };
     case '/data/account/funding': return { ok: true, lines: [], missing: [] };
     case '/data/seat.json': return SEAT;
     default: return undefined;
@@ -1048,8 +1056,8 @@ test("a market's page follows its market on the stream and reads what is held of
   await settle();
   assert.deepEqual(store.get().route, { screen: 'markets', id: 'coin:BTC' });
   assert.deepEqual(st.follows.at(-1), ['ex:BTC/USDT'], 'its first connected line');
-  for (const read of ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/account/statement', '/data/account/candles?venue=ex&symbol=BTC%2FUSDT&range=1D', '/data/account/compare?base=BTC&side=buy',
-    '/data/account/asset?key=crypto%3ABTC', '/data/account/book?venue=ex&symbol=BTC%2FUSDT&depth=10', '/data/account/trades?venue=ex&symbol=BTC%2FUSDT&limit=20']) {
+  for (const read of ['/data/account/holdings?cost=1', '/data/account/holdings?cost=1&paper=1', '/data/account/statement', '/data/account/connected/candles?venue=ex&symbol=BTC%2FUSDT&range=1D', '/data/account/compare?base=BTC&side=buy',
+    '/data/account/asset?key=crypto%3ABTC', '/data/account/connected/book?venue=ex&symbol=BTC%2FUSDT&depth=10', '/data/account/connected/trades?venue=ex&symbol=BTC%2FUSDT&limit=20']) {
     assert.ok(h.reads.includes(read), read);
   }
   // what is held of it (the asset sheet) and the statement's lines about it, from their own reads; its book and its trades
@@ -1062,7 +1070,7 @@ test("a market's page follows its market on the stream and reads what is held of
   h.reads.length = 0;
   f.click({ tagName: 'BUTTON', dataset: { action: 'setRange', id: 'coin:BTC', value: '1M' } });
   await settle();
-  assert.deepEqual(h.reads, ['/data/account/candles?venue=ex&symbol=BTC%2FUSDT&range=1M']);
+  assert.deepEqual(h.reads, ['/data/account/connected/candles?venue=ex&symbol=BTC%2FUSDT&range=1M']);
   assert.equal(store.get().markets.candles['coin:BTC'].range, '1M');
   // leaving the page lets its market go
   f.win.location.hash = '#/markets';
@@ -1083,12 +1091,12 @@ test("an A share's page, reached by a link, reads its 1D history from the face's
   h.reads.length = 0;
   f.win.location.hash = '#/markets/cn:600519';
   await settle();
-  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600519&range=1D'), JSON.stringify(h.reads));
+  assert.ok(h.reads.includes('/data/market/candles?venue=china&symbol=600519&range=1D'), JSON.stringify(h.reads));
   assert.equal(h.reads.some(r => r.startsWith('/data/account/holdings')), false, 'nothing held of an A share is read from the Account');
   h.reads.length = 0;
   f.click({ tagName: 'BUTTON', dataset: { action: 'setRange', id: 'cn:600519', value: '1M' } });
   await settle();
-  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600519&range=1M'), JSON.stringify(h.reads));
+  assert.ok(h.reads.includes('/data/market/candles?venue=china&symbol=600519&range=1M'), JSON.stringify(h.reads));
   store.timers.clear();
 });
 
@@ -1100,7 +1108,7 @@ test("a non-canonical A-share link still reads its history at the canonical id (
   h.reads.length = 0;
   f.win.location.hash = '#/markets/cn:sh600519';
   await settle();
-  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600519&range=1D'), JSON.stringify(h.reads));
+  assert.ok(h.reads.includes('/data/market/candles?venue=china&symbol=600519&range=1D'), JSON.stringify(h.reads));
   store.timers.clear();
 });
 
@@ -1147,7 +1155,7 @@ test("the quotes poll asks for the table's rows drawn, and on a market's page fo
   const store = bootAccount(f, h, fakeMarkets(), { timers });
   await h.ready();
   const m = store.get().markets;
-  const quoted = () => h.reads.filter(p => p.startsWith('/data/account/quotes?')).map(p => new URLSearchParams(p.split('?')[1]).get('pairs').split(',').sort());
+  const quoted = () => h.reads.filter(p => p.startsWith('/data/account/connected/quotes?')).map(p => new URLSearchParams(p.split('?')[1]).get('pairs').split(',').sort());
   const drawn = rowsOf(m, Date.now()).filter(r => r.id === 'coin:BTC' || r.id === 'stock:NVDA');
   timers.run(5_000);
   await settle();
@@ -1175,7 +1183,7 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   const timers = new HeldTimers(ms => ms >= 5_000 || ms === 300);
   const store = bootAccount(f, h, null, { timers });
   await h.ready();
-  const searched = () => h.reads.filter(p => p.startsWith('/data/account/explore?q='));
+  const searched = () => h.reads.filter(p => p.startsWith('/data/market/explore?q='));
   mq.value = 'BT';
   f.fire('root', 'input', { target: mq });
   assert.equal(store.get().markets.q, 'BT', 'the query moves at once');
@@ -1189,7 +1197,7 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   assert.notDeepEqual(second, first, 'a keystroke restarts it');
   timers.run(300);
   await settle();
-  assert.deepEqual(searched(), ['/data/account/explore?q=BTC&limit=200'], "the Account's search, once, for what was typed last — the A shares' with it");
+  assert.deepEqual(searched(), ['/data/market/explore?q=BTC&limit=200'], "the Account's search, once, for what was typed last — the A shares' with it");
   // a wait cut short by Clear: the search goes blank at once, and the wait never searches
   mq.value = 'ETH';
   f.fire('root', 'input', { target: mq });
@@ -2352,7 +2360,7 @@ test("#/trade shows Trade and reads its kind's picks; Markets' polls stop; leavi
   assert.equal(store.get().route.screen, 'trade');
   assert.match(f.html(), /<main class="main trade">/);
   assert.equal(timers.delays().includes(5_000), false, "Markets' polls stopped");
-  assert.ok(h.reads.includes('/data/account/explore?tab=crypto&limit=12'), "the kind's picks");
+  assert.ok(h.reads.includes('/data/market/explore?tab=crypto&limit=12'), "the kind's picks");
   const picks = timers.delays().filter(ms => ms === 20_000).length;
   assert.equal(picks, 1, "the picks' poll");
   f.win.location.hash = '#/messages/s1';
@@ -2451,7 +2459,7 @@ test("Trade's search reads after 300 ms of quiet, a blank box at once; one still
   const store = bootAccount(f, h, fakeMarkets(), { timers });
   await h.ready();
   const box = value => f.fire('root', 'input', { target: { tagName: 'INPUT', type: 'search', id: 'tq', value, dataset: { action: 'tradeQuery' } } });
-  const searches = () => h.reads.filter(p => p.startsWith('/data/account/explore?q='));
+  const searches = () => h.reads.filter(p => p.startsWith('/data/market/explore?q='));
   box('so');
   box('sol');
   await settle();
@@ -2459,7 +2467,7 @@ test("Trade's search reads after 300 ms of quiet, a blank box at once; one still
   assert.equal(timers.delays().filter(ms => ms === 300).length, 1, 'a keystroke restarts the wait');
   timers.run(300);
   await settle();
-  assert.deepEqual(searches(), ['/data/account/explore?q=sol&limit=12']);
+  assert.deepEqual(searches(), ['/data/market/explore?q=sol&limit=12']);
   assert.equal(store.get().trade.q, 'sol');
   box('');
   assert.equal(store.get().trade.q, '', 'a blank box at once');
@@ -3160,7 +3168,7 @@ test('Open in Markets routes to cn:<code>', async () => {
   assert.equal(f.win.location.hash, '#/markets/cn:600001');
   assert.deepEqual(store.get().route, { screen: 'markets', id: 'cn:600001' });
   assert.match(f.html(), /<main class="main mkts mk-page">[\s\S]*A-share · 600001 · SH/, 'the A-share page, reached cold');
-  assert.ok(h.reads.includes('/data/account/candles?venue=china&symbol=600001&range=1D'), 'its history at venue china');
+  assert.ok(h.reads.includes('/data/market/candles?venue=china&symbol=600001&range=1D'), 'its history at venue china');
   assert.equal(store.get().lunhui.stock, null, 'leaving the conversation closes the drawer');
   store.timers.clear();
 });
@@ -6432,5 +6440,282 @@ test('a refused Stop puts the job back to running', async () => {
   await settle();
   assert.equal(store.get().jobs.rows[0].status, 'running');
   assert.match(f.html(), /data-action="stopJob"/);
+  store.timers.clear();
+});
+
+// ── Account › Identity (plan B1b Task 1): its own read, on entering the tab, at the page's cadence while it shows, Retry fresh ──
+
+const IDENTITY_READ = {
+  ok: true,
+  networks: [{ network: 'telegram', speaksAs: '@gravit_desk_bot', talksOnlyWith: '@pan', since: '2026-11-03T15:20:00.000Z', fingerprint: 'ab12cd34', state: 'connected', polling: true }],
+  routing: { chat: ['telegram'], alerts: ['telegram'], brief: [], cards: ['telegram'], fills: ['telegram'] }, quiet: { from: '23:00', to: '07:00', zone: 'America/New_York' }, strangers: [],
+};
+const isIdentity = path => path.split('?')[0] === '/data/account/identity';
+
+test('Identity reads the account on entering the tab and with each beat while it shows; Retry and Refresh read it past the cache', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1', storage: memoryStorage() });
+  let down = false;
+  const h = accountHost({ rows: [row('s1')] }, {
+    answers: { '/data/account/identity': () => (down ? Promise.reject(Object.assign(new Error('HTTP 503'), { status: 503, body: { ok: false, error: 'The account did not answer.' } })) : IDENTITY_READ) },
+  });
+  const timers = new HeldTimers();
+  const store = bootAccount(f, h, fakeMarkets(), { timers });
+  await h.ready();
+  assert.deepEqual(h.reads.filter(isIdentity), [], 'not read off the tab');
+  f.win.location.hash = '#/account/identity';
+  await settle();
+  assert.deepEqual(h.reads.filter(isIdentity), ['/data/account/identity']);
+  assert.match(f.html(), /aria-label="Gravit"/);
+  assert.match(f.html(), /@gravit_desk_bot/);
+  // a beat reads the page and Identity, plain
+  h.reads.length = 0;
+  timers.run(20_000);
+  await settle();
+  assert.deepEqual(h.reads.filter(isIdentity), ['/data/account/identity']);
+  // the account down: the tab says so and draws no connection; Retry reads past the cache
+  down = true;
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
+  await settle();
+  assert.deepEqual(h.reads.filter(isIdentity), ['/data/account/identity?fresh=1'], 'Refresh on Identity reads it past the cache');
+  assert.match(f.html(), /The account is not answering\./);
+  assert.doesNotMatch(f.html(), /@gravit_desk_bot/);
+  down = false;
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'refreshIdentity' } });
+  await settle();
+  assert.deepEqual(h.reads.filter(isIdentity), ['/data/account/identity?fresh=1']);
+  assert.match(f.html(), /@gravit_desk_bot/);
+  // every query the client sent passes the face's proxy whitelist (the fake host ignores queries; the proxy does not)
+  const sent = [...new Set(h.reads.filter(isIdentity))];
+  assert.ok(sent.includes('/data/account/identity?fresh=1'));
+  for (const path of sent) assert.notEqual(rebuildQuery('identity', path), null, `${path} passes the proxy`);
+  // Details opens the connection's line
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityDetails' } });
+  assert.match(f.html(), /token ab12cd34 · polling/);
+  // another tab: its beats read no Identity
+  f.win.location.hash = '#/account/rules';
+  await settle();
+  h.reads.length = 0;
+  timers.run(20_000);
+  await settle();
+  assert.deepEqual(h.reads.filter(isIdentity), []);
+  store.timers.clear();
+});
+
+test("Identity's grid ticks change the draft only on a page that signs, and Save… appears while it differs", async () => {
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': IDENTITY_READ } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.doesNotMatch(f.html(), />Save…</);
+  const tick = on => f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', checked: on, dataset: { action: 'identityTick', row: 'brief', network: 'telegram' } } });
+  tick(true);
+  assert.deepEqual(store.get().identity.draft.brief, ['telegram']);
+  assert.match(f.html(), /data-action="openSheet" data-kind="routing"[^>]*>Save…</);
+  tick(false);
+  assert.equal(store.get().identity.draft, null);
+  assert.doesNotMatch(f.html(), />Save…</);
+  store.timers.clear();
+});
+
+test("a venue's Disconnect done reads no Identity: the identity disconnect is its own kind, disconnectNetwork", async () => {
+  const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': IDENTITY_READ } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'askDisconnect', venue: 'ex', name: 'Stand-in Exchange' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
+  assert.equal(store.get().sheet.kind, 'disconnect');
+  await until(() => store.get().sheet?.status === 'ready', 'the preparation');
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().sheet === null, 'the done sheet to close');
+  await settle();
+  assert.ok(h.reads.includes('/data/account?fresh=1'), 'the page read again');
+  assert.deepEqual(h.reads.filter(isIdentity), [], 'no Identity read');
+  store.timers.clear();
+});
+
+// ── Account › Identity's Connect Telegram (plan B1b Task 2): the drawer over the page, the token read from its field once ──
+
+test('Connect… opens sheet 1 on a page that signs; Next posts the field\'s token once and clears it; Escape closes and drops the pending connection', async () => {
+  const TOKEN = '7000000001:AAFakeTokenForTestsOnly_abcdefghijklmn';
+  const PENDING = { id: '0123456789abcdef0123456789abcdef', network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'Gravit' }, link: 'https://t.me/gravit_desk_bot', qr: '', expiresAt: '2099-01-01T00:00:00.000Z', state: 'waiting' };
+  const NOT_CONNECTED = { ok: true, networks: [], routing: { chat: [], alerts: [], brief: [], cards: [], fills: [] }, quiet: null, strangers: [] };
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const field = f.withSelector('#identity-token', { tagName: 'INPUT', type: 'password', id: 'identity-token' });
+  const door = ownerDoor();
+  const posted = [];
+  const ownerPost = async (path, body) => {
+    if (path.startsWith('/data/account/identity/')) {
+      posted.push([path, body]);
+      return path.endsWith('/telegram/token') ? { status: 200, body: { ok: true, pending: PENDING } } : { status: 200, body: { ok: true } };
+    }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': NOT_CONNECTED, '/data/account/identity/pending': { ok: true, pending: PENDING } } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /data-action="identityConnect" data-network="telegram">Connect…</);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityConnect', network: 'telegram' } });
+  assert.match(f.html(), /<aside class="drawer sheet" aria-label="Connect Telegram · 1 of 4 · Bot token">/);
+  assert.match(f.html(), /<input id="identity-token" class="input" type="password" autocomplete="off" spellcheck="false"/);
+  field.value = ` ${TOKEN} `;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityNext' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityNext' } });
+  await until(() => store.get().identity.connect?.step === 2, 'sheet 2');
+  const sent = posted.filter(([p]) => p === '/data/account/identity/telegram/token');
+  assert.equal(sent.length, 1, 'once');
+  assert.equal(sent[0][1].token, TOKEN);
+  assert.equal(field.value, '', 'the field cleared');
+  assert.ok(!JSON.stringify(store.get()).includes(TOKEN), 'no token in the store');
+  assert.ok(!f.html().includes(TOKEN), 'none on the page');
+  assert.match(f.html(), /Connect Telegram · 2 of 4 · Say hi/);
+  // Escape: the drawer closed, its pending connection dropped at once
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().identity.connect, null);
+  await settle();
+  assert.deepEqual(posted.filter(([p]) => p === '/data/account/identity/pending/drop').map(([, b]) => b), [{ id: PENDING.id }]);
+  assert.doesNotMatch(f.html(), /Connect Telegram ·/);
+  store.timers.clear();
+});
+
+test('a page that does not sign opens no Connect Telegram', async () => {
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account/identity': { ok: true, networks: [], routing: {}, quiet: null, strangers: [] } } });
+  const store = bootAccount(f, h);
+  await h.ready();
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityConnect', network: 'telegram' } });
+  assert.equal(store.get().identity.connect, null);
+  assert.doesNotMatch(f.html(), /Connect Telegram ·/);
+  store.timers.clear();
+});
+
+// ── Account › Identity's signed sheets (plan B1b Task 3): Disconnect, What reaches you where, Block ──
+
+test('a done identity sheet reads Identity again past the face\'s cache', async () => {
+  const READ = { ...IDENTITY_READ, strangers: [{ network: 'telegram', sender: '0a1b2c3d4e5f', masked: '…789', count: 3, last: '2026-11-04T14:00:00.000Z' }] };
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': READ } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  async function signed(open, kind) {
+    open();
+    assert.equal(store.get().sheet?.kind, kind);
+    await until(() => store.get().sheet?.status === 'ready', `${kind} prepared`);
+    h.reads.length = 0;
+    f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+    await until(() => store.get().sheet === null, `${kind} done and closed`);
+    await settle();
+    assert.ok(h.reads.includes('/data/account/identity?fresh=1'), `${kind}: Identity read past the cache`);
+    return door.sent('/data/account/exchange').at(-1).action;
+  }
+  // Disconnect…: the identity's own kind, the network the key names
+  assert.match(f.html(), /data-action="openSheet" data-kind="disconnectNetwork" data-network="telegram"[^>]*>Disconnect…</);
+  const off = await signed(() => f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'disconnectNetwork', network: 'telegram' } }), 'disconnectNetwork');
+  assert.equal(off.type, 'disconnectNetwork');
+  assert.equal(off.network, 'telegram');
+  // Block: the stranger the key names
+  const block = await signed(() => f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'block', network: 'telegram', sender: '0a1b2c3d4e5f', masked: '…789' } }), 'block');
+  assert.deepEqual([block.type, block.network, block.sender, block.masked], ['blockSender', 'telegram', '0a1b2c3d4e5f', '…789']);
+  // Save…: the grid's unsaved ticks as the account's string, the quiet hours as they are
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', checked: true, dataset: { action: 'identityTick', row: 'brief', network: 'telegram' } } });
+  const saved = await signed(() => f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'routing' } }), 'routing');
+  assert.deepEqual([saved.type, saved.routing, saved.quietFrom, saved.quietTo], ['setRouting', 'chat=telegram;alerts=telegram;brief=telegram;cards=telegram;fills=telegram', '23:00', '07:00']);
+  store.timers.clear();
+});
+
+test('Change… on quiet hours: Off sends both ends empty; an unchanged sheet says so and signs nothing', async () => {
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': IDENTITY_READ } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'routing' } });
+  assert.equal(store.get().sheet.kind, 'routing');
+  await settle();
+  assert.equal(store.get().sheet.status, 'incomplete');
+  assert.match(f.html(), /That is how it is now/);
+  assert.match(f.html(), /type="time" name="quietFrom" value="23:00"/);
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'quietOff', checked: true, value: 'true', dataset: { action: 'sheetField' } } });
+  await until(() => store.get().sheet?.status === 'ready', 'quiet hours off prepared');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().sheet === null, 'done');
+  const a = door.sent('/data/account/exchange').at(-1).action;
+  assert.deepEqual([a.type, a.routing, a.quietFrom, a.quietTo], ['setRouting', 'chat=telegram;alerts=telegram;brief=;cards=telegram;fills=telegram', '', '']);
+  store.timers.clear();
+});
+
+test('Enter in the bot token field is Next: the token posted once, with no form for the browser to offer to keep', async () => {
+  const TOKEN = '7000000001:AAFakeTokenForTestsOnly_abcdefghijklmn';
+  const PENDING = { id: '0123456789abcdef0123456789abcdef', network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'Gravit' }, link: 'https://t.me/gravit_desk_bot', qr: '', expiresAt: '2099-01-01T00:00:00.000Z', state: 'waiting' };
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const field = f.withSelector('#identity-token', { tagName: 'INPUT', type: 'password', id: 'identity-token' });
+  const door = ownerDoor();
+  const posted = [];
+  const ownerPost = async (path, body) => {
+    if (path.startsWith('/data/account/identity/')) { posted.push([path, body]); return { status: 200, body: { ok: true, pending: PENDING } }; }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': { ...IDENTITY_READ, networks: [] }, '/data/account/identity/pending': { ok: true, pending: PENDING } } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityConnect', network: 'telegram' } });
+  assert.doesNotMatch(f.html(), /<form[^>]*identityNext/);
+  field.value = TOKEN;
+  let prevented = 0;
+  f.doc.activeElement = field;
+  f.fire('doc', 'keydown', { key: 'Enter', preventDefault() { prevented += 1; } });
+  f.doc.activeElement = field;
+  f.fire('doc', 'keydown', { key: 'Enter', preventDefault() { prevented += 1; } });
+  await until(() => store.get().identity.connect?.step === 2, 'sheet 2');
+  assert.equal(posted.filter(([p]) => p.endsWith('/telegram/token')).length, 1);
+  assert.equal(prevented, 2);
+  assert.equal(field.value, '');
+  store.timers.clear();
+});
+
+test('a draft tick for a network a fresh read shows not connected is dropped: after Disconnect, Change… prepares and no Save… is offered', async () => {
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const door = ownerDoor();
+  let gone = false;
+  const AFTER = { ...IDENTITY_READ, networks: [], routing: { chat: [], alerts: [], brief: [], cards: [], fills: [] } };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': () => (gone ? AFTER : IDENTITY_READ) } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', checked: true, dataset: { action: 'identityTick', row: 'brief', network: 'telegram' } } });
+  assert.match(f.html(), />Save…</);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'disconnectNetwork', network: 'telegram' } });
+  await until(() => store.get().sheet?.status === 'ready', 'disconnect prepared');
+  gone = true;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().sheet === null, 'disconnect done');
+  await until(() => store.get().identity.data?.networks?.length === 0, 'the fresh read');
+  assert.equal(store.get().identity.draft, null, 'the stale tick dropped');
+  assert.doesNotMatch(f.html(), />Save…</);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'routing' } });
+  assert.equal(store.get().sheet.seed.routing.brief.length, 0, 'seeded from the account, not the stale tick');
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'quietOff', checked: true, value: 'true', dataset: { action: 'sheetField' } } });
+  await until(() => store.get().sheet?.status === 'ready', 'quiet hours off prepared');
+  assert.equal(door.posts.filter(([p]) => p === '/data/account/prepare').at(-1)[1].draft.routing, 'chat=;alerts=;brief=;cards=;fills=');
   store.timers.clear();
 });

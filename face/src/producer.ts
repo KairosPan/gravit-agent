@@ -7,7 +7,7 @@
  * choose; the desk itself needs none - its market clock is Node, src/market-clock.ts) isolated (`-I`, {@link PYTHON_FLAGS}: no user
  * site, no `PYTHON*` variable, no script directory on `sys.path`), with no shell, the argv as given, cwd
  * the repository root, the {@link ProducerInput} as JSON on stdin, an environment cut to an allow-list
- * ({@link producerEnv}: never `DEEPSEEK_*` or `TELEGRAM_*`) and `SIGKILL` to its whole process group at
+ * ({@link producerEnv}: never `DEEPSEEK_*` or any other key) and `SIGKILL` to its whole process group at
  * the deadline. Its stdout is the text the wake message quotes; its stderr never reaches the model - it
  * becomes one face log line of at most {@link STDERR_LOG_MAX} characters. Every producer's text, a
  * builtin's too, is cut at {@link PRODUCER_TEXT_MAX} by {@link capText}; the cut is the firing's step,
@@ -65,7 +65,7 @@ function allowed(env: NodeJS.ProcessEnv, prefixes: readonly string[]): NodeJS.Pr
 
 /**
  * The environment a face child needs and nothing more: `PATH`, `HOME`, `LANG`, `TZ` and `LC_*`. An
- * allow-list, so the face's keys (`DEEPSEEK_*`, `TELEGRAM_BOT_TOKEN`), the variables that steer an
+ * allow-list, so the face's keys (`DEEPSEEK_*` and the like), the variables that steer an
  * interpreter (`PYTHONPATH`, `NODE_OPTIONS`) and the harness's own (`DSH_HOME`) never pass. Names are
  * matched exactly, case and all.
  * @param env - the environment to cut, usually `process.env`; read, never changed.

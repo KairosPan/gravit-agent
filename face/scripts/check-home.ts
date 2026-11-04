@@ -30,7 +30,7 @@
  * 3. Boots the face's own composition on the copy with `bootFace`, as
  *    `main.ts` boots the live home except for three things: the copy is the
  *    home, `DSH_TELEMETRY_DISABLED=1`, and every MCP client row (the
- *    face's `mcp-account`, any of the operator's) is
+ *    face's `mcp-account` and `mcp-market`, any of the operator's) is
  *    disabled through an IN-MEMORY patch layer
  *    ({@link FaceBootOptions.extraPatches}) - never by writing the copy's
  *    patch files - so no MCP server is spawned and no key leaves the machine.
@@ -61,6 +61,7 @@ import { load } from "js-yaml";
 import { defaultDshHome, resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import type { FaceBootOptions, FacePatchList } from "../src/boot.ts";
 import { ACCOUNT_SEAT_ROW_ID } from "../src/account-seat.ts";
+import { MARKET_ROW_ID } from "../src/market-row.ts";
 import { DSH_PIN } from "../src/version.ts";
 
 /** The file the runbook has the operator create in the COPY, and only there. */
@@ -471,10 +472,10 @@ export function mcpRowsIn(entries: readonly EntryLike[]): Array<{ id?: string; s
 }
 
 /** The MCP row ids the dry run disables: every one the composition names (rows
- * with no id are refused before this), and the face's seat row by id as
- * well as by package, in case a future row spells its package differently. */
+ * with no id are refused before this), and the face's seat and market rows by
+ * id as well as by package, in case a future row spells its package differently. */
 export function mcpRowIdsToDisable(rows: ReadonlyArray<{ id?: string }>): string[] {
-  return [...new Set([...rows.flatMap((row) => (row.id === undefined ? [] : [row.id])), ACCOUNT_SEAT_ROW_ID])];
+  return [...new Set([...rows.flatMap((row) => (row.id === undefined ? [] : [row.id])), ACCOUNT_SEAT_ROW_ID, MARKET_ROW_ID])];
 }
 
 /** The last row a patch list writes for `id` (an id patch, or an inserted

@@ -9,6 +9,7 @@ import { composeEntries } from "@deepseek-ai/dsh-app-boot";
 import { setupFaceProfile } from "../src/setup.ts";
 import { composeFace, globalInstructionAudit, globalInstructionFiles } from "../src/boot.ts";
 import { ACCOUNT_SEAT_ROW_ID } from "../src/account-seat.ts";
+import { MARKET_ROW_ID } from "../src/market-row.ts";
 import { LUNHUI_ROW_IDS } from "../src/lunhui.ts";
 import { PERSONA_PATH, readPersona } from "../src/persona.ts";
 import { CYCLE_PATH, DESK_PATH, readCycle, readDesk } from "../src/cycle.ts";
@@ -88,14 +89,15 @@ test("composeFace stacks exactly the layers it means to", () => {
     );
     const policy = facePolicyPatches(baseRows);
     assert.equal(policy.length, 9, "8 id patches + 1 insert at dsh-base 0.2.1-rc.5");
-    assert.equal(patches.length, 7 + policy.length, patches.map((p) => p.id ?? "insert").join(","));
+    assert.equal(patches.length, 8 + policy.length, patches.map((p) => p.id ?? "insert").join(","));
     assert.deepEqual(patches.slice(1, 1 + policy.length), policy, "the policy layer sits right above the bundle layer");
     assert.equal((patches[1 + policy.length] as InsertPatch).insert?.[0]?.id, ACCOUNT_SEAT_ROW_ID, "the Account seat row sits right above the policy layer");
-    assert.deepEqual((patches[2 + policy.length] as InsertPatch).insert?.map((row) => row.id), [
+    assert.equal((patches[2 + policy.length] as InsertPatch).insert?.[0]?.id, MARKET_ROW_ID, "the market row sits right after the Account seat row");
+    assert.deepEqual((patches[3 + policy.length] as InsertPatch).insert?.map((row) => row.id), [
       "lunhui-runs", "lunhui-freeze-quotes", "lunhui-freeze-limit-up", "lunhui-freeze-boards", "lunhui-freeze-index",
       "lunhui-environment", "lunhui-sentiment", "lunhui-theme", "lunhui-leader", "lunhui-mode", "lunhui-review",
       "lunhui-present",
-    ], "the twelve Lunhui rows sit right after the Account seat row, in one insert: the backbone, the freezes, the modules, then the composed answer");
+    ], "the twelve Lunhui rows sit right after the market row, in one insert: the backbone, the freezes, the modules, then the composed answer");
   } finally {
     if (previous === undefined) delete process.env.DSH_TELEMETRY_DISABLED;
     else process.env.DSH_TELEMETRY_DISABLED = previous;
@@ -123,6 +125,7 @@ test("every face row lands in the composed tree exactly once", () => {
   assert.equal(counts.get("hmr"), 1);
   assert.equal(counts.get("approval"), 1);
   assert.equal(counts.get(ACCOUNT_SEAT_ROW_ID), 1, "the Account seat must be registered exactly once");
+  assert.equal(counts.get(MARKET_ROW_ID), 1, "the market row must be registered exactly once");
   for (const id of LUNHUI_ROW_IDS) assert.equal(counts.get(id), 1, `${id} must be registered exactly once`);
   // dsh-base's own gateway: the face must not have added a second one.
   assert.equal(counts.get("typert-gateway"), 1);
@@ -160,8 +163,8 @@ test("an operator patch now reaches the base-owned storage rows", () => {
   assert.deepEqual(row?.config, { root: "/tmp/x" });
 });
 
-/* AKShare is the Account's (account/README.md): Gravit reaches it through the
- * seat's portfolio_akshare, and the face composes no AKShare row and runs no
+/* AKShare is the market's (market/README.md): Gravit reaches it through the
+ * market row's market_akshare, and the face composes no AKShare row and runs no
  * AKShare process. The retired env switch and an operator's stale patch both
  * stay inert. */
 test("composeFace mounts no AKShare: no mcp-akshare row and no MCP row serving akshare", () => {
@@ -195,6 +198,22 @@ test("a profile or home patch still naming mcp-akshare composes, and mounts noth
   let composed: ReturnType<typeof composeFace> | undefined;
   assert.doesNotThrow(() => { composed = composeFace({ profileName: "face", port: 3090, dshHome: home }); });
   assert.equal(composeEntries([composed!.patches]).some((r) => r.id === "mcp-akshare"), false);
+});
+
+/* The market row (src/market-row.ts): the market's own MCP server, keyless,
+ * composed in the same project layer right after the seat row - so the
+ * operator's patch can replace or disable either alone. */
+test("the market row sits right after the seat row, once", () => {
+  const home = freshHome();
+  const { patches } = composeFace({ profileName: "face", port: 3090, dshHome: home });
+  const firstIds = patches.map((p) => (p as InsertPatch).insert?.[0]?.id);
+  const seat = firstIds.indexOf(ACCOUNT_SEAT_ROW_ID);
+  assert.ok(seat >= 0, "the seat row is inserted");
+  assert.equal(firstIds[seat + 1], MARKET_ROW_ID, "the market row's insert follows the seat's");
+  assert.equal(firstIds.filter((id) => id === MARKET_ROW_ID).length, 1, "one insert of the market row");
+  const rows = composeEntries([patches]).filter((r) => r.id === MARKET_ROW_ID);
+  assert.equal(rows.length, 1);
+  assert.equal((rows[0].config as { serverName?: string }).serverName, "market");
 });
 
 /* The Account seat row (src/account-seat.ts): the seat process of the

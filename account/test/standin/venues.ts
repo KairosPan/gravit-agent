@@ -45,8 +45,8 @@ import { isExcludedCategory, RWA_CATEGORY } from "../../src/portfolio/live/categ
 import type { EarnPosition, EarnProduct, EarnState, LiveEarner } from "../../src/portfolio/live/earn.ts";
 import { CHAINS, type ChainName, type ChainReader, type ChainSender } from "../../src/portfolio/live/chain.ts";
 import { impliedUsd, PRE_IPO_CATEGORY, PRE_IPO_ISSUERS, PRE_IPO_PER_POINT } from "../../src/portfolio/live/preipo.ts";
-import type { Listing, PublicSource } from "../../src/portfolio/live/public-markets.ts";
-import type { HubBook, HubQuote, HubRange, HubTick, MarketHub } from "../../src/portfolio/live/stream-hub.ts";
+import type { Listing, PublicSource } from "../../../market/src/live/public-markets.ts";
+import type { HubBook, HubQuote, HubRange, HubTick, MarketHub } from "../../../market/src/live/stream-hub.ts";
 import type { PublicTrade } from "../../src/portfolio/live/trade.ts";
 import { badOrder, DONE, INTERVAL_MS, notionalOf, onStep, type Candle, type CandleInterval, type CandlePage, type CandleWindow, type LiveTrader, type Market, type MarketKind, type MarketStats, type OrderChange, type OrderRequest, type OrderState, type OrderStatus, type Position, type TimeInForce } from "../../src/portfolio/live/trade.ts";
 import { isStable, type LiveBalance, type LiveSource } from "../../src/portfolio/live/types.ts";

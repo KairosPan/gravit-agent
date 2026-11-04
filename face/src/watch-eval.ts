@@ -123,6 +123,8 @@ export interface PriceKey {
   trigger: KeyTrigger;
   cooldownMs: number;
   annotate: boolean;
+  /** Whether its alerts go `urgent`, through quiet hours: its rule's `urgent`; a level never. */
+  urgent: boolean;
   plan: string | null;
   source: { file: string; index: number };
 }
@@ -146,7 +148,7 @@ export function priceKeys(book: { levels: readonly Level[]; rules: readonly Rule
         type: "level", kind: l.kind, ...(l.price !== undefined && { price: l.price }), ...(l.range !== undefined && { range: l.range }), when: l.when,
         ...(l.source !== undefined && { levelSource: l.source }),
       },
-      cooldownMs: l.cooldownMs, annotate: l.annotate, plan: l.plan, source: { file: l.file, index: l.index },
+      cooldownMs: l.cooldownMs, annotate: l.annotate, urgent: false, plan: l.plan, source: { file: l.file, index: l.index },
     });
   }
   const scope = { holdings: book.holdings.map((h) => h.symbol), levels: book.levels.map((l) => l.symbol) };
@@ -158,7 +160,7 @@ export function priceKeys(book: { levels: readonly Level[]; rules: readonly Rule
       if (market === undefined) continue;
       add({
         key: `rule:${r.id}:${symbol}`, market, symbol, label: r.id, trigger, cooldownMs: r.kind === "gap" ? 0 : r.cooldownMs,
-        annotate: r.annotate, plan: r.plan ?? null, source: { file: r.file, index: r.index },
+        annotate: r.annotate, urgent: r.urgent, plan: r.plan ?? null, source: { file: r.file, index: r.index },
       });
     }
   }
@@ -351,10 +353,13 @@ export type AlertHit = {
   decision: "send" | "suppressed";
   suppressed?: "cooldown" | "cap" | "muted" | "off" | "window";
   annotate: boolean;
+  /** Its rule said `urgent: true`: sent `urgent`, through quiet hours (src/phone.ts). Absent otherwise. */
+  urgent?: true;
 };
 
-/** A sent alert's delivery: `tradeMs` from the quote's `as_of`, `receivedMs` from its `receivedAt`, each to the send
- * resolving; both `null` for a send the outlet queued, and for a replay. `replayed` marks an orphan sent late at the
+/** A sent alert's delivery: its `delivery.sent` ids are `<network>:<id>` - alerts.jsonl keeps an older face's numeric
+ * ids as written, and src/watch.ts reads them as `telegram:<n>` in memory. `tradeMs` from the quote's `as_of`,
+ * `receivedMs` from its `receivedAt`, each to the send resolving; both `null` for a send the outlet queued, and for a replay. `replayed` marks an orphan sent late at the
  * ledger's first read ({@link findOrphans}). */
 export type AlertDelivered = {
   t: string;

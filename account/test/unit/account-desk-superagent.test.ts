@@ -9,12 +9,12 @@ import type { Outcome } from "../../src/portfolio/account/exchange.ts";
 import { MODE_RULES } from "../../src/portfolio/account/mode-rules.ts";
 import { signAgent, signOwner, simKey, type AgentAction, type OwnerAction } from "../../src/portfolio/account/sign.ts";
 import { register, type LiveDeps } from "../../src/portfolio/live/index.ts";
-import type { Listing, PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { Listing, PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { LiveTrader, Market, OrderRequest, OrderState, Position } from "../../src/portfolio/live/trade.ts";
 import { no } from "../../src/portfolio/refuse.ts";
 import { startPortfolioServer } from "../../src/portfolio/server.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
-import type { MarketHub } from "../../src/portfolio/live/stream-hub.ts";
+import type { MarketHub } from "../../../market/src/live/stream-hub.ts";
 
 /** THE SUPERAGENT (account/desk.ts): the desk at a paper account, trading on its own. Guard is the whole account's, so on paper every
  * order of the desk's would be a card; the owner signs one narrower thing — the desk's autonomy on paper — and only the desk's OWN house

@@ -20,10 +20,12 @@ const AGENT = '0x3a087530887bd175ccc38828ee3776e5b6ea1ac6';
 
 test('SHEET_KINDS: every kind with a title and its go word', () => {
   assert.deepEqual(SHEET_KINDS, ['letIn', 'limit', 'endLimit', 'revoke', 'connect', 'paper', 'topUp', 'resetPaper', 'disconnect',
-    'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', 'reopen', 'close', 'amend', 'leverage', 'beast', 'cap', 'session', 'leverageCap', 'move', 'earn', 'subWallet']);
+    'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', 'reopen', 'close', 'amend', 'leverage', 'beast', 'cap', 'session', 'leverageCap', 'move', 'earn', 'subWallet',
+    'connectNetwork', 'disconnectNetwork', 'routing', 'block']);
   assert.deepEqual(SHEET_KINDS.map(k => goWord(k)), ['Let it in', 'Give the limit', 'End the limit', 'Revoke', 'Connect', 'Open the account',
     'Top up', 'Start over', 'Disconnect', 'Approve', 'Decline', 'Let it sign', 'Sign out', 'Sign and place', 'Sign and reopen', 'Sign and close', 'Sign and change', 'Sign leverage',
-    'Sign Beast', 'Sign the cap', 'Renew for 30 days', 'Sign leverage', 'Sign and move', 'Sign and put in', 'Make it']);
+    'Sign Beast', 'Sign the cap', 'Renew for 30 days', 'Sign leverage', 'Sign and move', 'Sign and put in', 'Make it',
+    "Sign with this browser's key", 'Sign disconnect', 'Sign', 'Sign block']);
   assert.equal(goWord('approveCard', { decision: 'reject' }), 'Reject');
   assert.equal(goWord('approveCard', { decision: 'approve' }), 'Approve');
   for (const k of SHEET_KINDS) assert.ok(titleOf(k, {}).length > 0, k);

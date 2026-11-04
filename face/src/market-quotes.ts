@@ -3,31 +3,31 @@
  * `desk_quotes` (src/desk-tools.ts) and the watch ask for. The desk keeps its own shapes, named for the Market part
  * (operator ruling M11): a quote's `source` is `market`, and its `feed` the Market's word for where the price came from.
  *
- * THE SOURCE IS THE MARKET'S READS (the operator's decisions of 2026-11-01): {@link marketQuotes} asks the Account's
- * Market part in-process, through the face's proxy (src/account-proxy.ts: each route's cache and flights,
- * `FACE_ACCOUNT_URL`), no new route and no new host. A snapshot splits what it is asked by market:
- * - a US share: `GET /api/account/explore?q=<SYM>&key=stock:<SYM>&limit=1`, once per symbol, kept 20 s by the proxy.
+ * THE SOURCE IS THE MARKET'S READS (the operator's decisions of 2026-11-01; plan A2): {@link marketQuotes} asks the
+ * market service in-process, through the face's market proxy (src/market-proxy.ts: each read's cache and flights,
+ * the `mcp-market` row's URL, `FACE_MARKET_URL`), never the account. A snapshot splits what it is asked by market:
+ * - a US share: `GET /api/explore?q=<SYM>&key=stock:<SYM>&limit=1` at the market, once per symbol, kept 20 s by the proxy.
  *   The Market answers it keyless (the Market's live US quotes: Robinhood's or Nasdaq's real-time quote, else Cboe's delayed
  *   one). The row keyed `stock:<SYM>` with a `price` and its `quoteAt` becomes the quote's `price` and `as_of`,
  *   `change24h` its `change` and `price - change24h` its `prev_close`;
- * - an A share: `GET /api/account/quotes?pairs=china|<code>,…`, at most {@link CN_QUOTES_BATCH} codes a read (the
- *   Account's cap), the codes sorted, kept 3 s by the proxy. The China row's `price`, `quoteAt`, `change24h`,
+ * - an A share: `GET /api/quotes?pairs=china|<code>,…` at the market, at most {@link CN_QUOTES_BATCH} codes a read (the
+ *   market's cap), the codes sorted, kept 3 s by the proxy. The China row's `price`, `quoteAt`, `change24h`,
  *   `changePct24h` and `cn` (Tencent's previous close, volume, quote status and the session's phase) become the quote.
  * Every read runs in the same {@link QUOTES_CONCURRENCY} lanes, and the quotes come back in the order asked. `feedOf`
  * names the feed from the row's `quoteFrom`; a US quote is `delayed` when that word says so. Nothing is invented: no
  * row, no `quoteAt`, a refusal - no price.
  *
  * Honest degradation, in the readers' words (`quotes unavailable: <reason>`, `unavailable: <reason>`):
- * - the Account not running, timed out, or the seat row disabled: the snapshot rejects with why, when no read of any
- *   market got an answer at all; when one did, the others' quotes say why, unpriced;
- * - the Account busy (429): an `HttpError` 429, which the readers say as `busy`;
+ * - the market not running, timed out, or the `mcp-market` row disabled: the snapshot rejects with why, when no read
+ *   of any market got an answer at all; when one did, the others' quotes say why, unpriced;
+ * - the market busy (429): an `HttpError` 429, which the readers say as `busy`;
  * - a symbol the Market lists no share for, a row without a timed price, a refused pair or read, a body that is no
  *   JSON: that quote `unavailable`, with why (`the Market read …`);
  * - a body marked `stale: true` - which the in-process read never returns - marks that read's quotes `stale`.
  * {@link unwiredMarketQuotes} stays for a face with no Market read wired (the tests, a host without the proxy).
  * @module
  */
-import type { AccountAnswer, AccountRouteRead } from "./account-proxy.ts";
+import type { UpstreamAnswer, UpstreamRouteRead } from "./upstream-proxy.ts";
 import { HttpError } from "./http.ts";
 import type { Market } from "./symbols.ts";
 
@@ -35,7 +35,7 @@ import type { Market } from "./symbols.ts";
  * `{ id: "cn:600519", market: "cn", symbol: "600519" }`. */
 export interface MarketQuoteIdentity { id: string; market: Market; symbol: string }
 
-/** One market's state in a payload: `connected` when a quote of it is priced, `error` when the Account could not be
+/** One market's state in a payload: `connected` when a quote of it is priced, `error` when the market could not be
  * asked for it, else `limited`. */
 export interface MarketProviderState {
   id: string;
@@ -100,7 +100,7 @@ export function unwiredMarketQuotes(): MarketQuoteSource {
 /** How many of the Market's reads one snapshot keeps in flight at once: a brief asks up to 200 symbols. */
 export const QUOTES_CONCURRENCY = 6;
 
-/** The most A shares one `quotes` read asks for: the Account's cap on one read. */
+/** The most A shares one `quotes` read asks for: the market's cap on one read. */
 export const CN_QUOTES_BATCH = 12;
 
 /** The source's name in a quote and in its provider state. */
@@ -128,11 +128,11 @@ export function feedOf(quoteFrom: string): string {
   return FEEDS.get(words) ?? words.slice(0, 40).trim();
 }
 
-/** An `unreachable` code from the proxy, as the readers say it: the Account is the process. */
+/** An `unreachable` code from the proxy, as the readers say it: the market is the process. */
 function unreachableWords(code: string): string {
-  if (code === "disabled") return "the Account seat row is disabled";
-  if (code === "timeout") return "the Account did not answer in time";
-  return code === "unreachable" ? "the Account is not reachable" : `the Account is not reachable (${code})`;
+  if (code === "disabled") return "the mcp-market row is disabled";
+  if (code === "timeout") return "the market did not answer in time";
+  return code === "unreachable" ? "the market is not reachable" : `the market is not reachable (${code})`;
 }
 
 const isPrice = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value > 0;
@@ -141,7 +141,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => value !==
 /** A row's `quoteAt`, when `Date` can read it. */
 const timeOf = (value: unknown): string | null => typeof value === "string" && !Number.isNaN(Date.parse(value)) ? value : null;
 
-/** One asset's answer: a quote, or why the Account could not be asked (`fatal`) - every other failure is a quote with
+/** One asset's answer: a quote, or why the market could not be asked (`fatal`) - every other failure is a quote with
  * no price. */
 type SymbolAnswer = { quote: MarketQuote } | { fatal: Error };
 
@@ -154,15 +154,15 @@ function unpriced(asset: MarketQuoteIdentity, message: string, receivedAt: strin
 }
 
 /** A read's answer, judged as a whole: a body to read the rows of, or what every asset of the read gets - `fatal` when
- * the Account could not be asked, else a reason its quotes are unpriced. */
+ * the market could not be asked, else a reason its quotes are unpriced. */
 type ReadVerdict =
   | { body: Record<string, unknown>; stale: boolean }
   | { fatal: Error }
   | { refused: string };
 
-function readVerdict(answer: AccountAnswer): ReadVerdict {
+function readVerdict(answer: UpstreamAnswer): ReadVerdict {
   if ("unreachable" in answer) return { fatal: new Error(unreachableWords(answer.unreachable)) };
-  if (answer.status === 429) return { fatal: new HttpError(429, "the Account is busy") };
+  if (answer.status === 429) return { fatal: new HttpError(429, "the market is busy") };
   let parsed: unknown = null;
   try { parsed = JSON.parse(answer.body); } catch { /* below */ }
   if (!isRecord(parsed)) return { refused: `the Market read answered ${answer.status} with no JSON` };
@@ -181,7 +181,7 @@ function failed(asset: MarketQuoteIdentity, verdict: { fatal: Error } | { refuse
 
 /** One explore answer for a US `asset` as a quote: the row keyed `stock:<SYM>` with a price and its time, or no price
  * and why. */
-function usQuoteOf(asset: MarketQuoteIdentity, answer: AccountAnswer, receivedAt: string): SymbolAnswer {
+function usQuoteOf(asset: MarketQuoteIdentity, answer: UpstreamAnswer, receivedAt: string): SymbolAnswer {
   const verdict = readVerdict(answer);
   if (!("body" in verdict)) return failed(asset, verdict, receivedAt);
   const items = Array.isArray(verdict.body.items) ? verdict.body.items : [];
@@ -236,7 +236,7 @@ function cnQuoteOf(asset: MarketQuoteIdentity, row: Record<string, unknown> | un
 
 /** One `quotes` answer, read once: each A share of it as its answer - its China row's quote, or what the whole read
  * gives every asset of it. */
-function cnAnswersOf(answer: AccountAnswer, receivedAt: string): (asset: MarketQuoteIdentity) => SymbolAnswer {
+function cnAnswersOf(answer: UpstreamAnswer, receivedAt: string): (asset: MarketQuoteIdentity) => SymbolAnswer {
   const verdict = readVerdict(answer);
   if (!("body" in verdict)) return (asset) => failed(asset, verdict, receivedAt);
   const rows = Array.isArray(verdict.body.quotes) ? verdict.body.quotes.filter(isRecord) : [];
@@ -245,10 +245,10 @@ function cnAnswersOf(answer: AccountAnswer, receivedAt: string): (asset: MarketQ
 }
 
 export interface MarketQuotesDeps {
-  /** The proxy's `explore` read (src/account-proxy.ts registerAccountProxy): a US share's. */
-  explore: AccountRouteRead;
-  /** The proxy's `quotes` read: an A share's. */
-  quotes: AccountRouteRead;
+  /** The market proxy's `explore` read (src/market-proxy.ts registerMarketProxy): a US share's. */
+  explore: UpstreamRouteRead;
+  /** The market proxy's `quotes` read: an A share's. */
+  quotes: UpstreamRouteRead;
   now?: () => number;
   concurrency?: number;
 }

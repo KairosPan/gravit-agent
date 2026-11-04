@@ -1,5 +1,5 @@
 // face/tests/unwind.ts
-/** The real-boot smokes' cleanup (tests/desk-smoke.test.ts, tests/telegram-smoke.test.ts): every step runs,
+/** The real-boot smokes' cleanup (tests/desk-smoke.test.ts, tests/phone-smoke.test.ts): every step runs,
  * whatever the steps before it did, so a dispose that rejects can skip neither the face's dispose nor the
  * fixture's removal - and a step that never settles (a dispose waiting on a test clock held still) is given
  * {@link UNWIND_STEP_MS} of real time, then counted failed, so the test's own error is reported instead of lost

@@ -26,12 +26,15 @@ import { BOTS_ROOT, faceBind } from "./overlay.ts";
 import { isTrustedDataRequest } from "./http.ts";
 import { registerLunhuiViewRoute, type LunhuiViewService } from "./lunhui-view.ts";
 import { registerAccountProxy } from "./account-proxy.ts";
-import { composedSeatRow, type SeatEntryLike } from "./account-seat.ts";
+import { registerMarketProxy } from "./market-proxy.ts";
+import { composedMarketRow } from "./market-row.ts";
+import { composedSeatRow, seatUrl, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
 import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
 import type { DeskConversationCtxLike } from "./desk-conversation.ts";
 import { resolveDeskRoute } from "./desk-session.ts";
-import { telegramConfigFromEnv } from "./telegram.ts";
+import { createPhoneClient, type PhoneClient } from "./phone.ts";
+import { announceCard } from "./card-notice.ts";
 import { marketQuotes } from "./market-quotes.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { readMeta, registerSessionRoutes } from "./sessions.ts";
@@ -112,6 +115,8 @@ let desk: DeskHandle | undefined;
 let disposeProxy: (() => void) | undefined;
 /** The face's search index (src/search.ts), once it is open: closed with the data routes, before the tree. */
 let searchIndex: SearchIndex | undefined;
+/** The market proxy's own unwind (src/market-proxy.ts), run beside the account's, for the same reason. */
+let disposeMarketProxy: (() => void) | undefined;
 
 /** Tear the tree down, then leave with `code`. A dispose that rejects still
  * exits, and says why: a signal the process has already acknowledged must not
@@ -126,6 +131,7 @@ async function shutdown(code: number): Promise<void> {
     searchIndex?.close();
     await dispose?.();
     disposeProxy?.();
+    disposeMarketProxy?.();
   } catch (err) {
     console.error(`${BIN}: dispose failed during shutdown:`, err);
     code ||= 1;
@@ -157,6 +163,7 @@ installFailLoud(BIN, process, async () => {
   searchIndex?.close();
   await dispose?.();
   disposeProxy?.();
+  disposeMarketProxy?.();
 });
 
 /* A `StartupError` is dsh's own grouped diagnostic for a required entry that
@@ -166,6 +173,12 @@ installFailLoud(BIN, process, async () => {
  * has already disposed the tree. Anything else rethrows into `installFailLoud`
  * above, which prints it in full. */
 let booted: BootedFace;
+/* The desk's switch (read here, before the boot, because Gate 2's card notice is armed inside it), and the
+ * account's send the notice goes through - set once the phone client is built below; a card raised before
+ * that is one line. Only a face with the desk on phones a card (plan B1a ruling 10): a second face on a
+ * scratch home (FACE_DESK=0) never does. The notice is words only (src/card-notice.ts): no button, no link. */
+const deskEnabled = process.env.FACE_DESK !== "0";
+let cardPhone: PhoneClient | undefined;
 try {
   /* `deferReady`: the gateway admits no `/api/remote.mux` stream until this
    * entry calls `booted.commitReady()` - LAST, after every route below is
@@ -173,7 +186,12 @@ try {
    * gateway admits it, and its first `onReady` reads `/data/*`; committing
    * inside `bootFace` would let it find those routes missing (boot.ts
    * divergence 5; critique-boot-and-composition observation 3). */
-  booted = await bootFace({ profileName, port, deferReady: true });
+  booted = await bootFace({
+    profileName,
+    port,
+    deferReady: true,
+    ...(deskEnabled ? { onCardAsked: (name: string, args: unknown) => announceCard(cardPhone, name, args) } : {}),
+  });
 } catch (err) {
   if (err instanceof StartupError) {
     console.error(err.message);
@@ -223,6 +241,12 @@ registerSeatRoute(
     ? { reader: proxy.reader }
     : seatRow.disabled ? { disabled: true } : { url: seatRow.url, seatName: seatRow.seatName, reader: proxy.reader },
 );
+/* The market's public reads and stream for the screens and the desk's quotes (src/market-proxy.ts): loopback reads of
+ * the market at the URL of the `mcp-market` row AS COMPOSED, as the account's half follows the seat row. A disabled
+ * market row disables the market half alone (503 `disabled`); the account's routes keep answering. */
+const marketRow = seatLoader === undefined ? undefined : composedMarketRow(seatLoader.entries());
+const marketProxy = registerMarketProxy(booted.ctx.webServer, marketRow === undefined ? {} : marketRow.disabled ? { disabled: true } : { url: marketRow.url });
+disposeMarketProxy = marketProxy.dispose;
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it
  * there. `dshHome` is resolved the same way every other route family here
@@ -401,16 +425,19 @@ await registerPanelRoutes(booted.ctx.webServer, deps);
  * resolves one. `installModelSelection` is dsh-agent's, wrapped the way room.ts's
  * own default wraps it.
  *
- * And with the desk on and both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OPERATOR_ID`
- * set - `$DSH_HOME/.env`, which `bootFace` read into this process's environment -
- * the Telegram bridge (telegram.ts) runs on that conversation: the operator's
- * phone. Either name missing, and there is no bridge and the status says
- * `telegram: not configured`.
+ * And with the desk on and the `mcp-account` row not disabled, the phone bridge
+ * (phone-bridge.ts) runs on that conversation: the operator's phone, through the
+ * account at the row's URL - the proxy's - which holds the networks' tokens,
+ * long-polls them and keeps an inbox the bridge reads (phone.ts). The face holds
+ * no network's token. A disabled row, and there is no bridge and the status says
+ * `phone: none (the account's half is off)`.
  *
  * With the desk on, the standing orders' clock (schedule.ts) runs on that
  * conversation too, loaded on first use: `standing.yml` beside the ledger, fired
  * on the XNYS calendar (src/market-clock.ts). */
-const deskEnabled = process.env.FACE_DESK !== "0";
+/* The account's inbox and send for the desk's phone: the same URL the proxy reads, and none when the row is disabled. */
+const phone = seatRow === undefined ? createPhoneClient({ url: seatUrl() }) : seatRow.disabled ? undefined : createPhoneClient({ url: seatRow.url });
+cardPhone = phone;
 const deskRoute = deskEnabled
   ? await resolveDeskRoute(booted.ctx as unknown as RoomContextLike, process.env.FACE_DESK_MODEL, console.log)
   : undefined;
@@ -418,12 +445,12 @@ desk = installDesk(booted.ctx.webServer, {
   home: dshHome,
   enabled: deskEnabled,
   ctx: booted.ctx,
-  quotes: marketQuotes({ explore: proxy.explore, quotes: proxy.quotes }),
+  quotes: marketQuotes({ explore: marketProxy.explore, quotes: marketProxy.quotes }),
   root: process.cwd(),
   route: deskRoute,
   sessionCtx: booted.ctx as unknown as DeskConversationCtxLike,
   installModelSelection: (agentCtx, ref) => installModelSelection(agentCtx as unknown as Context, ref),
-  telegram: telegramConfigFromEnv(process.env),
+  ...(phone === undefined ? {} : { phone }),
   /* the watch (src/watch.ts) on the production defaults: the wall clock, the face's calendars, and SEC's filings
    * only once ALPHA_EDGAR_USER_AGENT names a contact */
   watchRow: {},

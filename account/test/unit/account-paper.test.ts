@@ -10,7 +10,7 @@ import { fromEt, usClock } from "../../src/portfolio/account/calendar.ts";
 import { signAgent, signOwner, simKey, type AgentAction, type OwnerAction } from "../../src/portfolio/account/sign.ts";
 import { register, type LiveDeps } from "../../src/portfolio/live/index.ts";
 import { liquidationPriceOf, paperBookPath, paperDir, type PaperBook } from "../../src/portfolio/live/paper.ts";
-import { readLike, type Listing, type PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import { readLike, type Listing, type PublicSource } from "../../../market/src/live/public-markets.ts";
 import { hlPerpSteps } from "../../src/portfolio/live/hl-rules.ts";
 import type { LiveTrader, Market, OrderState, Position } from "../../src/portfolio/live/trade.ts";
 import { no } from "../../src/portfolio/refuse.ts";
@@ -263,7 +263,7 @@ describe("a paper account beside a real one", () => {
 
   it("Markets: the paper line comes after the real venue's and sets no price; a thing only the paper account lists is a row that says paper; the comparison leaves the paper account out", async () => {
     const { svc } = await boot();
-    const eth = await svc.explore({ q: "ETH" });
+    const eth = await svc.connectedExplore({ q: "ETH" });
     if (isRefusal(eth)) throw new Error(eth.message);
     const row = eth.items.find((i) => i.key === "perp:ETH")!;
     expect(row.paper).toBeUndefined();
@@ -271,7 +271,7 @@ describe("a paper account beside a real one", () => {
     expect(row.changeFrom?.venue).toBe("real");
     expect(row.volumeUsd24h).toBe(1_000_000_000);
     expect(row.at.map((a) => [a.venue, a.connected, a.paper ?? false, a.price])).toEqual([["real", true, false, 3000], ["paper", true, true, 3100]]);
-    const xyz = await svc.explore({ q: "XYZ" });
+    const xyz = await svc.connectedExplore({ q: "XYZ" });
     if (isRefusal(xyz)) throw new Error(xyz.message);
     const only = xyz.items.find((i) => i.key === "perp:XYZ")!;
     expect(only).toMatchObject({ paper: true, price: 42 });
@@ -307,12 +307,13 @@ describe("a paper account beside a real one", () => {
     expect(svc.statement().find((l) => l.id === placed.order.id)).toMatchObject({ paper: true, account: "paper-alpha" });
     const book = JSON.parse(readFileSync(paperBookPath(first.home, "paper-alpha"), "utf8")) as PaperBook;
     expect(book.cashUsd).toBeCloseTo(25000 - 0.049011 * 60010 * 1.001, 3);
-    // Markets: the public line prices the row, each paper account is a line after it
-    const x = await svc.explore({ q: "BTC" });
+    // Markets, the connected half: each paper account is a line, priced at its public source (the public line itself is the market's,
+    // joined beside these by the face)
+    const x = await svc.connectedExplore({ q: "BTC" });
     if (isRefusal(x)) throw new Error(x.message);
     const row = x.items.find((i) => i.key === "coin:BTC")!;
-    expect(row.price).toBe(60000);
-    expect(row.at.map((a) => [a.venue, a.connected, a.paper ?? false])).toEqual([["kraken", false, false], ["paper-alpha", true, true], ["paper-2", true, true]]);
+    expect(row).toMatchObject({ paper: true, price: 60000, quoteFrom: "Kraken" });
+    expect(row.at.map((a) => [a.venue, a.connected, a.paper ?? false])).toEqual([["paper-alpha", true, true], ["paper-2", true, true]]);
     // a restart: the books are continued, the sum in the connection's reference does not start them again
     const again = await boot({ home: first.home, sources: [kraken], connect: false, nonceFrom: 50, at: 3_600_000 });
     // the venues come back after the report is written: waited for, as a page would wait for the restore to say done
@@ -392,7 +393,7 @@ describe("a paper account beside a real one", () => {
     expect((realHold.cost ?? []).some((c) => c.key === "crypto:BTC")).toBe(false);
     expect((paperHold.cost ?? []).find((c) => c.key === "crypto:BTC")).toMatchObject({ coveredQty: 0.1 });
     // the asset read says the same apart: no real row, and the paper lens's row and cost of it
-    const asset = await svc.asset("crypto:BTC", "1h");
+    const asset = await svc.asset("crypto:BTC");
     if (isRefusal(asset)) throw new Error(asset.message);
     expect(asset.row).toBeUndefined();
     expect(asset.cost.some((c) => c.key === "crypto:BTC")).toBe(false);
@@ -667,7 +668,7 @@ describe("a paper account beside a real one", () => {
     expect(line.description).not.toContain("of 0.02 filled");
   });
 
-  it("a US stock in a paper account: priced at the public stocks line, filled at its real-time quote through the same door; the Stocks tab's row carries the public line's session and the paper leg", async () => {
+  it("a US stock in a paper account: priced at the public stocks line, filled at its real-time quote through the same door; the Stocks tab's connected row carries the paper leg and its session", async () => {
     const session = { open: true, closesAt: "2026-10-07T20:00:00.000Z" };
     // Wednesday 7 October 2026, 11:00 New York: the regular session, a real-time quote stamped then
     const { cboe } = realTimeLine(() => fromEt(2026, 10, 7, 11, 0), { session, change24h: 0.84, changePct24h: 0.25 });
@@ -678,12 +679,12 @@ describe("a paper account beside a real one", () => {
     expect(placed.order).toMatchObject({ paper: true, status: "filled", avgPrice: 340.06 });
     expect(placed.order.qty).toBeGreaterThan(2.8);
     expect((JSON.parse(readFileSync(paperBookPath(home, "paper-stocks"), "utf8")) as PaperBook).holdings["AAPL"]).toMatchObject({ qty: placed.order.qty });
-    const x = await svc.explore({ tab: "stocks" });
+    const x = await svc.connectedExplore({ tab: "stocks" });
     if (isRefusal(x)) throw new Error(x.message);
     const row = x.items.find((i) => i.key === "stock:AAPL")!;
-    expect(row).toMatchObject({ kind: "stock", name: "Apple Inc", price: 340 });
-    expect(row.at.map((a) => [a.venue, a.connected, a.paper ?? false, a.connectTo])).toEqual([["cboe", false, false, "alpaca"], ["paper-stocks", true, true, undefined]]);
-    expect(row.at[0]).toMatchObject({ session, note: expect.stringContaining("15 minutes behind") });
+    expect(row).toMatchObject({ kind: "stock", name: "Apple Inc", price: 340, paper: true });
+    expect(row.at.map((a) => [a.venue, a.connected, a.paper ?? false, a.connectTo])).toEqual([["paper-stocks", true, true, undefined]]);
+    expect(row.at[0]).toMatchObject({ session });
     expect(x.tabs.find((t) => t.id === "stocks")!.count).toBe(1);
   });
 

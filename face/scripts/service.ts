@@ -35,7 +35,7 @@
  * environment is PATH, HOME, DSH_HOME and, only when asked, FACE_PORT, never a key: whatever a
  * LaunchAgent's environment holds sits in its plist and shows in `launchctl print`. The keys live
  * in $DSH_HOME/.env (mode 0600), which dsh reads at boot; `install` writes that file from
- * .env.deepseek, .env.alpaca, .env.ifind and .env.telegram at the repo root when the home has
+ * .env.deepseek, .env.alpaca and .env.ifind at the repo root when the home has
  * none, and never rewrites it. It copies an allow-list of names only ({@link COPIED_KEYS}, and any
  * `ALPHA_*`) and names the rest: dsh refuses a bootstrap-only name (PATH, NODE_OPTIONS, any DSH_*)
  * in the home's .env at boot, which would fail every start, and Gate 1's ALPACA_KIT_ENABLE_ORDERS
@@ -74,13 +74,14 @@ export const WATCHDOG_STATE_FILE = "watchdog.json";
 export const EXPECTED_KEYS = ["DEEPSEEK_API_KEY", "APCA_API_KEY_ID", "APCA_API_SECRET_KEY"] as const;
 
 /** The names {@link ensureHomeEnv} copies into the home's .env: the expected keys, Alpaca's
- * endpoint, iFinD's tokens and the desk's Telegram bot and operator (src/telegram.ts) - and, by
- * {@link COPIED_PREFIXES}, the workbench's own `ALPHA_*` settings. It is an allow-list because a
+ * endpoint and iFinD's tokens - and, by {@link COPIED_PREFIXES}, the workbench's own `ALPHA_*`
+ * settings. No network's token: the account holds Telegram's (Account › Identity), and the face's
+ * desk reaches the phone only through it (src/phone.ts), so no TELEGRAM_* name is copied. It is an allow-list because a
  * copied line can break or arm the service: dsh refuses a bootstrap-only name (PATH, NODE_OPTIONS,
  * any DSH_* ...) in the home's .env and the boot fails, and Gate 1's ALPACA_KIT_ENABLE_ORDERS must
  * never reach the real harness home. */
 export const COPIED_KEYS = [
-  ...EXPECTED_KEYS, "APCA_API_BASE_URL", "IFIND_ACCESS_TOKEN", "IFIND_REFRESH_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_OPERATOR_ID",
+  ...EXPECTED_KEYS, "APCA_API_BASE_URL", "IFIND_ACCESS_TOKEN", "IFIND_REFRESH_TOKEN",
 ] as const;
 
 /** The name prefixes {@link ensureHomeEnv} copies besides {@link COPIED_KEYS}. */
@@ -196,19 +197,25 @@ ${Object.entries(env).map(([k, v]) => `    <key>${xml(k)}</key><string>${xml(v)}
   return { plist, path: join(opts.launchAgentsDir, `${LABEL}.plist`), log, errLog, args, env };
 }
 
+/** The names the watchdog's plist carries from install's shell when set (scripts/watchdog.ts reads them): where the
+ * account and the market answer, and the account's home, whose Telegram file the account-down notice reads. */
+export const WATCHDOG_PASSED_KEYS = ["FACE_ACCOUNT_URL", "FACE_MARKET_URL", "FACE_ACCOUNT_HOME", "BUYER_HOME"] as const;
+
 /**
  * The watchdog's LaunchAgent (spec §16 H4), rendered as {@link servicePlan} renders the face's. Pure.
  *
  * - `ProgramArguments`: the face's node and tsx loader, then face/scripts/watchdog.ts.
  * - `WorkingDirectory`: face/. `EnvironmentVariables`: PATH through {@link filterPath}, HOME and
- *   DSH_HOME only - no key and no port: the watchdog reads its Telegram names from $DSH_HOME/.env and
- *   the port from the face's installed plist.
+ *   DSH_HOME, and {@link WATCHDOG_PASSED_KEYS} when `env` sets them - no key and no port: the watchdog
+ *   phones through the account (scripts/watchdog.ts) and reads the port from the face's installed
+ *   plist; the account's and the market's URLs and the account's home are install's shell's, or their
+ *   defaults (as the account's own plist keeps PORTFOLIO_MARKET_URL).
  * - `StartInterval 300` and `RunAtLoad false`: one check every five minutes, the first five minutes
  *   after the job is loaded; no KeepAlive - each run checks once and exits.
  * - `Umask 63` (077), and its logs watchdog.log / watchdog.err.log beside the face's.
- * @param opts - as {@link servicePlan}'s, without the port.
+ * @param opts - as {@link servicePlan}'s, without the port; `env`, the shell's names the watchdog's are taken from.
  */
-export function watchdogPlan(opts: { root: string; home: string; homeDir: string; node: string; path: string; launchAgentsDir: string }): ServicePlan {
+export function watchdogPlan(opts: { root: string; home: string; homeDir: string; node: string; path: string; launchAgentsDir: string; env?: Record<string, string | undefined> }): ServicePlan {
   const face = join(opts.root, "face");
   const logs = join(opts.home, "face", "service");
   const log = join(logs, "watchdog.log");
@@ -216,6 +223,10 @@ export function watchdogPlan(opts: { root: string; home: string; homeDir: string
   const loader = pathToFileURL(join(face, "node_modules", "tsx", "dist", "loader.mjs")).href;
   const args = [opts.node, "--import", loader, join(face, "scripts", "watchdog.ts")];
   const env: Record<string, string> = { PATH: filterPath(opts.path), HOME: opts.homeDir, DSH_HOME: opts.home };
+  for (const name of WATCHDOG_PASSED_KEYS) {
+    const value = opts.env?.[name]?.trim();
+    if (value !== undefined && value !== "") env[name] = value;
+  }
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -318,7 +329,7 @@ function namesOf(text: string): string[] {
  * ({@link namesOf}), not what the lines look like: a key with an empty value is missing.
  * @param home - the harness home (DSH_HOME).
  * @param sources - the key files to copy from, in order (the repo root's .env.deepseek,
- *   .env.alpaca, .env.ifind, .env.telegram).
+ *   .env.alpaca, .env.ifind).
  * @returns `path`, the home's .env; `created`, whether this call wrote it; `names`, the names dsh
  *   reads from the file with a value - none when nothing was written; `missing`, the
  *   {@link EXPECTED_KEYS} not among them; `missingSources`, the sources that do not exist;
@@ -399,7 +410,7 @@ function lastRunLine(runs: DeskRun[]): string | undefined {
  * plist launchd has no job for, so a face answering on the port is not credited to a job launchd
  * lacks; then, when the face answered, its address and the desk's lines (src/desk.ts
  * `deskStatusLines`, which the phone's `/status` prints too): uptime, boot time and whether its
- * desk is on on the address's line, then the pause when the desk is paused, the Telegram bridge
+ * desk is on on the address's line, then the pause when the desk is paused, the phone bridge
  * when the face reports one, the day's token budget and, while their clock runs, the standing
  * orders (src/desk.ts `budgetLine` and `standingLines`), their times in New York and dated when not
  * today; then the ledger's
@@ -485,7 +496,7 @@ export const WATCH_POLL_MS = { us: 20_000, cn: 10_000 } as const;
 
 /** How many of a market's poll intervals may pass since its last poll before a `polling` market reads degraded. */
 const STALE_POLLS = 3;
-/** How long a Telegram 409 - another poller holding the token - keeps the bridge degraded. */
+/** How long a network's 409 at the account - another poller holding the token - keeps the face degraded. */
 const CONFLICT_WINDOW_MS = 10 * 60_000;
 /** The wait between {@link checkHealth}'s two tries at a face that does not answer. */
 const HEALTH_RETRY_MS = 10_000;
@@ -495,11 +506,15 @@ export type HealthCode = 0 | 1 | 2 | 3;
 
 /** What makes an answering face - launchd's own - degraded, the first that holds, or `undefined`. */
 function degradedReason(status: DeskStatus, now: number): string | undefined {
-  const { telegram, watch } = status;
-  if (telegram?.pollFailing !== undefined) return `telegram poll failing since ${telegram.pollFailing.since}: ${telegram.pollFailing.reason}`;
-  if (telegram?.blocked === true) return "telegram blocked: the operator's chat refuses the bot (403)";
-  if (telegram?.conflictAt !== undefined && now - Date.parse(telegram.conflictAt) <= CONFLICT_WINDOW_MS) {
-    return `telegram conflict at ${telegram.conflictAt}: another poller holds the token`;
+  const { phone, watch } = status;
+  /* each network as the account polls it (src/phone-bridge.ts carries the account's last word); an account that does not
+   * answer is the watchdog's own check (scripts/watchdog.ts), not the face's degradation */
+  for (const n of phone?.networks ?? []) {
+    if (n.pollFailing !== undefined) return `${n.network} poll failing since ${n.pollFailing.since}: ${n.pollFailing.reason}`;
+    if (n.blocked === true) return `${n.network} blocked: the operator's chat refuses the bot (403)`;
+    if (n.conflictAt !== undefined && now - Date.parse(n.conflictAt) <= CONFLICT_WINDOW_MS) {
+      return `${n.network} conflict at ${n.conflictAt}: another poller holds the token`;
+    }
   }
   if (watch?.state === "lease-failed") return `watch lease failed${watch.leaseError === undefined ? "" : `: ${watch.leaseError}`}`;
   if (watch?.state === "held-elsewhere") return `watch held elsewhere${watch.holder === undefined ? "" : `: pid ${watch.holder.pid} since ${watch.holder.since}`}`;
@@ -531,7 +546,7 @@ export const OTHER_FACE = "another face holds the port";
  *   job as asked again after the wait, not before it.
  * - `1` degraded: the face that answers is not launchd's job - its pid is not the job's, a job with
  *   no pid included - and then nothing else it says is read: its troubles are not the job's; or,
- *   for launchd's own face, its Telegram poll failing, the bot blocked, a 409 conflict within the
+ *   for launchd's own face, a network's poll failing at the account, the bot blocked, a 409 conflict within the
  *   last 10 minutes, the watch's lease failed or held elsewhere, a market `polling` whose last poll
  *   is older than three of its intervals ({@link WATCH_POLL_MS}; a market not yet polled is not
  *   judged), or the desk's or the watch's ledger unreadable.
@@ -620,6 +635,8 @@ export interface ServiceDeps {
   nodePath: string;
   /** The PATH the plist's PATH is filtered from. */
   envPath: string;
+  /** The shell's names, whose {@link WATCHDOG_PASSED_KEYS} the watchdog's plist carries; none when absent. */
+  env?: Record<string, string | undefined>;
   /** Prints a line - or several, joined by newlines. */
   out(line: string): void;
   /** Waits between two asks: for launchd to let go of a job booted out, for the port to fall silent. */
@@ -635,7 +652,7 @@ const WAIT_MS = 10_000;
 const POLL_MS = 500;
 
 /** The key files at the repo root that install writes the home's .env from, in order. */
-const KEY_FILES = [".env.deepseek", ".env.alpaca", ".env.ifind", ".env.telegram"] as const;
+const KEY_FILES = [".env.deepseek", ".env.alpaca", ".env.ifind"] as const;
 
 /** The profile the service runs: the plist passes no FACE_PROFILE, so main.ts boots `face`. */
 const PROFILE = "face";
@@ -801,7 +818,7 @@ export function contextOf(deps: ServiceDeps, flagPort: number | undefined): Serv
   const home = named !== undefined && isAbsolute(named) ? named : deps.home;
   const served = servicePlan({ ...common, home });
   const domain = `gui/${deps.uid}`;
-  const watchdog = watchdogPlan({ root: deps.root, home: deps.home, homeDir: deps.homeDir, node: deps.nodePath, path: deps.envPath, launchAgentsDir });
+  const watchdog = watchdogPlan({ root: deps.root, home: deps.home, homeDir: deps.homeDir, node: deps.nodePath, path: deps.envPath, launchAgentsDir, env: deps.env });
   return {
     deps, plan: servicePlan({ ...common, home: deps.home }), installed, home, log: served.log, errLog: served.errLog,
     port: planPort ?? DEFAULT_PORT, domain, job: `${domain}/${LABEL}`,
@@ -1233,6 +1250,7 @@ export function realDeps(): ServiceDeps {
     platform: process.platform,
     nodePath: nodeOnPath(envPath) ?? process.execPath,
     envPath,
+    env: process.env,
     out: (line) => console.log(line),
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
   };

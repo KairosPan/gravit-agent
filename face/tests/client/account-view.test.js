@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import {
   seatWords,
   pageOk, headOf, worthOf, changeOf, assetsOf, positionsOf, openOrdersOf, orderRowsOf, missingWords, statementLinesOf, statementCsvOf,
-  venuesOf, agentsOf, cardsOf, asksOf, requestsOf, connectOptionsOf, paperBooksOf, keyfileWords, writesOn, walletsOf,
+  venuesOf, agentsOf, cardsOf, asksOf, requestsOf, connectOptionsOf, paperBooksOf, keyfileWords, writesOn, walletsOf, marketOldOf,
 } from '../../client/js/host/account-view.js';
 import { grantOf, fieldsOf, draftOf, keyfileAskOf, reachAskOf, connectCheckOf } from '../../client/js/host/sheet-view.js';
 
@@ -570,4 +570,15 @@ test("the connect sheet's check: what to ask, and the words from the key file's 
   // another sheet, or none: nothing
   assert.equal(connectCheckOf({ kind: 'paper', seed: {}, fields: [] }, read(body, ask), none), '');
   assert.equal(connectCheckOf(null, none, none), '');
+});
+
+// A2 Task 6: the account's holdings carry `marketOld` while the market service is not answering
+const MARKET_DOWN = 'The market service is not answering, so prices here are not current.';
+test('Portfolio marks prices old while the market is down', () => {
+  const since = '2026-11-03T07:12:00.000Z';
+  assert.deepEqual(marketOldOf({ ...fx('holdings'), marketOld: { since, message: MARKET_DOWN } }), { since, message: MARKET_DOWN });
+  assert.equal(marketOldOf(fx('holdings')), null, 'the market answering: nothing to mark');
+  assert.equal(marketOldOf(null), null);
+  assert.equal(marketOldOf({ ...fx('holdings'), marketOld: { since: 'not a time', message: MARKET_DOWN } }), null, 'a since that is no time is no marker');
+  assert.equal(marketOldOf({ ...fx('holdings'), marketOld: { since, message: '' } }), null, 'nor one with no words');
 });

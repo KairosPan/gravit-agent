@@ -683,6 +683,9 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .sheet-left { margin: 0; color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums; }
 .sheet-hint { margin: 0; color: var(--dim); font-size: 13px; overflow-wrap: anywhere; }
 .sheet-check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+/* an Identity sheet's numbered steps above its keys, and Say hi's QR code (plan B1b Task 2) */
+.sheet-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.45; }
+.identity-qr { align-self: center; width: 180px; height: 180px; border-radius: var(--radius-s); image-rendering: pixelated; }
 /* Sell many's drawer (plan 4b Task 3): the picks, each with how much to sell, and the legs with their answers */
 .sm-list, .sm-legs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .sm-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

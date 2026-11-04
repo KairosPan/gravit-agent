@@ -239,17 +239,17 @@ test("errors: upstreamError maps stage 0's provider codes to UPSTREAM_TIMEOUT, U
     }
   }
   assert.equal(stderr.length, 2);
-  // The Account's own failure names the Account, not the provider's fault; its detail goes to stderr.
+  // The market's own failure names the market, not the provider's fault; its detail goes to stderr.
   for (const provider of ["腾讯行情", "东方财富", "同花顺问财"] as const) {
-    const down = Object.assign(new Error("the Account at http://127.0.0.1:4820 did not answer"), { code: "ACCOUNT_UNAVAILABLE" });
+    const down = Object.assign(new Error("the market at http://127.0.0.1:4821 did not answer"), { code: "MARKET_UNAVAILABLE" });
     const refusal = upstreamError(down, provider)!;
     assert.equal(refusal.code, "UPSTREAM_INVALID");
-    assert.match(refusal.message, new RegExp(`^UPSTREAM_INVALID: ${provider}请求未完成：转发它的 Account 未应答或拒绝转发`));
+    assert.match(refusal.message, new RegExp(`^UPSTREAM_INVALID: ${provider}请求未完成：转发它的行情服务（market）未应答或拒绝转发`));
     assert.match(refusal.message, new RegExp(`不是${provider}的故障`));
     assert.doesNotMatch(refusal.message, /127\.0\.0\.1|\//);
   }
   assert.equal(stderr.length, 5);
-  assert.match(stderr[4], /the Account did not relay a 同花顺问财 request: the Account at http:\/\/127\.0\.0\.1:4820 did not answer/);
+  assert.match(stderr[4], /the market did not relay a 同花顺问财 request: the market at http:\/\/127\.0\.0\.1:4821 did not answer/);
   // Another coded error is the host's own fault: null, which the caller rethrows as INTERNAL.
   assert.equal(upstreamError(coded("INVALID_NOW"), "腾讯行情"), null);
   // A refusal already made passes through; an unknown provider is host code's bug.

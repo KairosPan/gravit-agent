@@ -7,7 +7,7 @@
  * unexpected error says goes to the face's stderr, the operator's log, and never into a result.
  */
 import { LunhuiError, badRunId } from "./runs.mjs";
-import { ACCOUNT_UNAVAILABLE } from "./account-fetch.mjs";
+import { MARKET_UNAVAILABLE } from "./market-fetch.mjs";
 
 /** The freeze calls a run takes (spec A7). */
 export const FREEZE_BUDGET = 8;
@@ -174,8 +174,8 @@ const INVALID_REPLY_CODES = new Set([
  * failing outright, which Node's `fetch` reports without a code: no
  * connection, a refused redirect, a dropped body. That one is `UPSTREAM_INVALID` to the model, a
  * fixed sentence; what failed - the message and its cause - goes to stderr. A failure that is the
- * Account's own (`ACCOUNT_UNAVAILABLE`: it did not answer, answered without its route, or refused)
- * is `UPSTREAM_INVALID` too, its sentence naming the Account so the model does not blame the
+ * market's own (`MARKET_UNAVAILABLE`: it did not answer, answered without its route, or refused)
+ * is `UPSTREAM_INVALID` too, its sentence naming the market so the model does not blame the
  * provider; its detail goes to stderr the same way.
  * @param {any} error
  * @param {"腾讯行情" | "东方财富" | "同花顺问财"} provider the provider the texts name
@@ -189,11 +189,11 @@ export function upstreamError(error, provider) {
   if (code === "RESPONSE_TOO_LARGE") return new LunhuiError("UPSTREAM_TOO_LARGE", `${provider}响应超过 512 KiB 上限；本次未写入任何文件。`);
   if (INVALID_REPLY_CODES.has(code)) return new LunhuiError("UPSTREAM_INVALID", `${provider}响应无效（${code}）；本次未写入任何文件。`);
   if (code === "INVALID_CONTEXT") return new LunhuiError("UPSTREAM_INVALID", `${provider}的响应无法组装为研究证据；本次未写入任何文件。`);
-  if (code === ACCOUNT_UNAVAILABLE) {
-    process.stderr.write(`lunhui: the Account did not relay a ${provider} request: ${failureOf(error)}\n`);
+  if (code === MARKET_UNAVAILABLE) {
+    process.stderr.write(`lunhui: the market did not relay a ${provider} request: ${failureOf(error)}\n`);
     return new LunhuiError(
       "UPSTREAM_INVALID",
-      `${provider}请求未完成：转发它的 Account 未应答或拒绝转发（不是${provider}的故障）；本次未写入任何文件，请告知操作者检查 Account 是否在运行。`,
+      `${provider}请求未完成：转发它的行情服务（market）未应答或拒绝转发（不是${provider}的故障）；本次未写入任何文件，请告知操作者检查行情服务（market）是否在运行。`,
     );
   }
   if (code !== undefined) return null;

@@ -22,6 +22,7 @@
  * days but the distribution, whose `qdate` is rolled to Monday before Monday's prompt, as the live endpoint
  * answers its latest session (spec §16). The fixture copy is the leader tests': 600519 sealed in the 涨停池, 600519 and 000333 members of BK0715,
  * so a candidate can stand. Own file, gated. */
+import "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";

@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/* China is the Account's (account/src/portfolio/live/cn-*.ts): the face reads
+/* China is the market's (market/src/live/cn-*.ts), reached through the Account: the face reads
  * it through the proxy and reaches no market host of its own, with no
  * direct-to-upstream fallback. Scoped to face/src and face/client on purpose:
  * face/plugins/ is Lunhui's, whose fetching moves in plan 2. */

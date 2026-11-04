@@ -1,14 +1,14 @@
 /**
  * The 问财 client, `plugins/lunhui/lib/wencai.mjs`: one all-market query through the QuantAPI
- * fixtures, with no token - the Account holds it and does the exchange - and every refusal naming
- * 同花顺问财. The Account's two iFinD answers Lunhui words itself (no token there, a refused
+ * fixtures, with no token - the market holds it and does the exchange - and every refusal naming
+ * 同花顺问财. The market's two iFinD answers Lunhui words itself (no token there, a refused
  * exchange there) arrive as the adapter's IFIND_* codes. Nothing reaches the network.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { createFixtureFetch } from "../plugins/lunhui/lib/fixture-fetch.mjs";
-import { IFIND_CREDENTIAL, IFIND_UNCONFIGURED } from "../plugins/lunhui/lib/account-fetch.mjs";
+import { IFIND_CREDENTIAL, IFIND_UNCONFIGURED } from "../plugins/lunhui/lib/market-fetch.mjs";
 import * as wencai from "../plugins/lunhui/lib/wencai.mjs";
 import { fetchWencaiUniverse, WENCAI_NOT_CONFIGURED, WENCAI_PROVIDER } from "../plugins/lunhui/lib/wencai.mjs";
 import { LunhuiError } from "../plugins/lunhui/lib/runs.mjs";
@@ -34,7 +34,7 @@ const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { sta
 const universe = (r: ReturnType<typeof recorder>, opts: Record<string, unknown> = {}) =>
   fetchWencaiUniverse({ session: "2026-10-30", fetchImpl: r.fetchImpl, ...opts });
 /** A fetch whose query is answered by the adapter's rejection coded `code`. */
-const rejecting = (code: string) => recorder(() => Promise.reject(Object.assign(new Error(`the Account at http://127.0.0.1:4820 refused through its iFinD route: ${code}`), { code })));
+const rejecting = (code: string) => recorder(() => Promise.reject(Object.assign(new Error(`the market at http://127.0.0.1:4821 refused through its iFinD route: ${code}`), { code })));
 
 async function refusal(p: Promise<unknown>, code: string, reason: RegExp): Promise<void> {
   await assert.rejects(p, (error: unknown) => {
@@ -77,12 +77,12 @@ test("rows carry six-digit codes and split concepts", async () => {
   assert.equal(rows.filter((x) => x.concepts.includes("人形机器人")).length, 12);
 });
 
-test("the Account without a token is NOT_CONFIGURED", async () => {
+test("the market without a token is NOT_CONFIGURED", async () => {
   await refusal(universe(rejecting(IFIND_UNCONFIGURED)), WENCAI_NOT_CONFIGURED, /未配置（账户没有 iFinD 凭据）；本次未写入任何文件。$/);
   assert.equal(WENCAI_NOT_CONFIGURED, "NOT_CONFIGURED");
 });
 
-test("a refused exchange at the Account is 凭据被拒", async () => {
+test("a refused exchange at the market is 凭据被拒", async () => {
   await refusal(universe(rejecting(IFIND_CREDENTIAL)), "UPSTREAM_INVALID", /同花顺问财凭据被拒（令牌换取未通过）/);
 });
 
@@ -97,7 +97,7 @@ test("a 401 is 凭据被拒（访问令牌无效）", async () => {
   assert.equal(code.calls.length, 1);
 });
 
-test("an errorcode, missing columns, no rows, oversize, timeout and an unreachable Account refuse naming 同花顺问财", async () => {
+test("an errorcode, missing columns, no rows, oversize, timeout and an unreachable market refuse naming 同花顺问财", async () => {
   const run = (over: (path: string, n: number) => any, opts: any = {}) => universe(recorder(over), opts);
   await refusal(run(() => json({ errorcode: -4001, errmsg: "no data" })), "UPSTREAM_INVALID", /errorcode -4001/);
   const body = JSON.parse(await (await serve("https://quantapi.51ifind.com/api/v1/smart_stock_picking")).text());
@@ -112,7 +112,7 @@ test("an errorcode, missing columns, no rows, oversize, timeout and an unreachab
   const slow = async (_url: string | URL, init?: RequestInit) =>
     new Promise<Response>((_, rej) => init?.signal?.addEventListener("abort", () => rej(init.signal!.reason)));
   await refusal(fetchWencaiUniverse({ session: "2026-10-30", fetchImpl: slow, timeoutMs: 30 }), "UPSTREAM_TIMEOUT", /超时/);
-  const unreachable = recorder(() => Promise.reject(new Error("the Account at http://127.0.0.1:4820 did not answer")));
+  const unreachable = recorder(() => Promise.reject(new Error("the market at http://127.0.0.1:4821 did not answer")));
   const stderr = process.stderr.write;
   process.stderr.write = (() => true) as any;
   try {

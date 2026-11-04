@@ -59,7 +59,7 @@
 import { isRefusal, type Refusal } from "../../core/errors.ts";
 import { no } from "../refuse.ts";
 import { barStart, foldBars, historyKeep, hlWeight, INTERVAL_WORDS, limitOf, utcDay, type HistoryKeep, type Pace } from "./history.ts";
-import { publicNo } from "./public-markets.ts";
+import { publicNo } from "../market/shapes.ts";
 import { HISTORY_MOST, INTERVAL_MS, type Candle, type CandleInterval, type CandlePage, type CandleWindow } from "./trade.ts";
 import { unreachable, type Http, type HttpReply } from "./types.ts";
 

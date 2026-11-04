@@ -6,7 +6,7 @@ import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import { liveOptions, openLive, type LiveDeps } from "../../src/portfolio/live/index.ts";
 import { PAPER_DEFAULT_CASH, paperBookPath, paperBooksOnDisk, paperSource, parsePaperCash, resetBookOnDisk, type PaperBook, type PaperChange } from "../../src/portfolio/live/paper.ts";
 import { rebuildEquity, replayPaperBook } from "../../src/portfolio/live/paper-history.ts";
-import type { Listing, PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { Listing, PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { LiveTrader, Market, OrderRequest, OrderState } from "../../src/portfolio/live/trade.ts";
 import type { LiveBalance, LiveSource } from "../../src/portfolio/live/types.ts";
 
@@ -297,7 +297,7 @@ describe("the book", () => {
 
 import { fromEt } from "../../src/portfolio/account/calendar.ts";
 import { liquidationPriceOf, STOCK_JUDGE_MS } from "../../src/portfolio/live/paper.ts";
-import { usSession } from "../../src/portfolio/live/public-stocks.ts";
+import { usSession } from "../../../market/src/live/public-stocks.ts";
 import { usClock, usSessionFull } from "../../src/portfolio/account/calendar.ts";
 import type { MarketSession, SessionClock } from "../../src/portfolio/live/trade.ts";
 

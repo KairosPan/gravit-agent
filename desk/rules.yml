@@ -1,6 +1,7 @@
 # The operator's urgent-event rules: what the watch (face/src/watch.ts) sends besides price levels.
 # Tracked - it holds no position and no price. Kinds: move_pct, gap, filing; a halt rule is refused.
 # A symbol is a US ticker or six digits for an A share; filings are US only.
+# urgent: true lets a rule's alerts through quiet hours (Account › Identity); no rule is urgent unless it says so.
 - id: holding-move
   kind: move_pct           # the move from the previous close reaches move_pct, either way
   symbols: holdings

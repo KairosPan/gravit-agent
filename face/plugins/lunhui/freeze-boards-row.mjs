@@ -18,8 +18,8 @@
  * `pct_basis: "equal_weight"`; the meta adds `fallback_from: { provider: "东方财富", code }`, the
  * query and the reply's hash, and the reply's summary the provider, the taxonomy, the refusal and,
  * when `boards` was given, `boards_ignored` - BK codes the stand-in cannot honour. The row holds
- * no iFinD credential and reads no environment: the token is the Account's, and the query goes
- * through the row's fetch, for the Account to ask with it. An Account with no token
+ * no iFinD credential and reads no environment: the token is the market's, and the query goes
+ * through the row's fetch, for the market to ask with it. A market with no token
  * (`NOT_CONFIGURED` from the client) refuses with Eastmoney's code and the 备用未配置 sentence;
  * any other stand-in refusal does too, naming both reasons. Never the token: it is in no request
  * of this row, file, reply or refusal.
@@ -176,11 +176,11 @@ async function freezeEastmoney(fetchImpl, args, now) {
 
 /**
  * @param {any} ctx the row's context, injecting `tools` and `lunhuiRuns`
- * @param {{ fetch?: string, account?: string, now?: () => Date }} config test-only keys; an `env` is refused
+ * @param {{ fetch?: string, market?: string, now?: () => Date }} config test-only keys; an `env` is refused
  */
 export function apply(ctx, config) {
   if (config !== null && typeof config === "object" && Object.hasOwn(config, "env")) {
-    throw new Error(`${name}: env is gone - the iFinD token is the Account's (IFIND_* in the Account's environment)`);
+    throw new Error(`${name}: env is gone - the iFinD token is the market's (IFIND_* in the market's environment)`);
   }
   const deps = freezeDeps(name, ctx, config);
   ctx.effect(() => ctx.tools.register(defineFreeze({

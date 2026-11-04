@@ -237,7 +237,7 @@ function recordingOutlet(mode: "ok" | "fail" | "throws" | "never" = "ok"): DeskO
       if (mode === "throws") throw new Error("the bridge fell over");
       if (mode === "fail") return Promise.reject(new Error("telegram is down"));
       if (mode === "never") return new Promise(() => {});
-      return Promise.resolve({ sent: [sent.length] });
+      return Promise.resolve({ sent: [`telegram:${sent.length}`] });
     },
   };
 }
@@ -646,6 +646,30 @@ test("telegram, alert and wake turns are delivered; a user turn is not; no outle
     turn: n, outcome: "ended", wallMs: 0, usage: RECORDED,
   })));
   assert.deepEqual(h.lines, []);
+});
+
+test("a phone turn's answer goes as chat to the network it came from; an alert turn's as alert; a wake's as report", async () => {
+  const h = await harness();
+  const asked: unknown[] = [];
+  h.desk.setOutlet({ send: (text, opts) => { asked.push([text, opts]); return Promise.resolve({ sent: [`telegram:${asked.length}`] }); } });
+  const { sessionId } = (await post(h, "hi")) as { sessionId: string };
+  turn(h, sessionId, 1, PHONE, "phone answer");
+  turn(h, sessionId, 2, ALERT, "alert answer");
+  turn(h, sessionId, 3, JOB, "wake answer");
+  await waitFor("three deliveries", () => asked.length === 3);
+  assert.deepEqual(asked, [
+    ["phone answer", { kind: "chat", network: "telegram" }],
+    ["alert answer", { kind: "alert" }],
+    ["wake answer", { kind: "report" }],
+  ]);
+});
+
+test("a held send is recorded undelivered with the account's reason", async () => {
+  const h = await harness();
+  assert.deepEqual(await h.desk.deliver("nobody to hear it", { kind: "alert" }), { undelivered: "no phone" });
+  h.desk.setOutlet({ send: () => Promise.resolve({ held: "quiet hours" }) });
+  assert.deepEqual(await h.desk.deliver("an alert at 23:30", { kind: "alert" }), { undelivered: "quiet hours" });
+  assert.deepEqual(h.lines, [], "a hold is the account's answer, not a failure");
 });
 
 test("a turn the supervisor refuses records desk-refused and delivers the refusal line", async () => {
@@ -1908,38 +1932,38 @@ test("dispose waits five seconds at most for a start, post or renew under way", 
 
 test("deliver goes to the outlet, or says why not", async () => {
   const h = await harness();
-  assert.deepEqual(await h.desk.deliver("nobody to hear it"), { undelivered: "telegram not configured" });
+  assert.deepEqual(await h.desk.deliver("nobody to hear it", { kind: "report" }), { undelivered: "no phone" });
   await writeOff(h.home, { by: "page" }, () => AT);
-  assert.deepEqual(await h.desk.deliver("nobody to hear it"), { undelivered: "paused" }, "the pause is read first: it outranks a missing outlet");
+  assert.deepEqual(await h.desk.deliver("nobody to hear it", { kind: "report" }), { undelivered: "paused" }, "the pause is read first: it outranks a missing outlet");
   await clearOff(h.home, "terminal");
 
   const asked: unknown[][] = [];
-  let answer = (): Promise<{ sent: number[]; queued?: true } | { queued: true }> => Promise.resolve({ sent: [11] });
+  let answer = (): Promise<{ sent: string[]; queued?: true } | { queued: true }> => Promise.resolve({ sent: ["telegram:11"] });
   h.desk.setOutlet({ send: (...args) => { asked.push(args); return answer(); } });
-  assert.deepEqual(await h.desk.deliver("the pre-close brief"), { sent: [11] });
-  assert.deepEqual(await h.desk.deliver("an annotation", { replyTo: 77 }), { sent: [11] });
+  assert.deepEqual(await h.desk.deliver("the pre-close brief", { kind: "brief" }), { sent: ["telegram:11"] });
+  assert.deepEqual(await h.desk.deliver("an annotation", { kind: "alert", replyTo: "telegram:77" }), { sent: ["telegram:11"] });
   answer = () => Promise.resolve({ queued: true });
-  assert.deepEqual(await h.desk.deliver("Telegram is unreachable"), { queued: true }, "the outlet's answer, whatever it is");
-  assert.deepEqual(asked, [["the pre-close brief"], ["an annotation", { replyTo: 77 }], ["Telegram is unreachable"]]);
+  assert.deepEqual(await h.desk.deliver("Telegram is unreachable", { kind: "report" }), { queued: true }, "the outlet's answer, whatever it is");
+  assert.deepEqual(asked, [["the pre-close brief", { kind: "brief" }], ["an annotation", { kind: "alert", replyTo: "telegram:77" }], ["Telegram is unreachable", { kind: "report" }]]);
 
   /* OFF holds a text back and the outlet is never asked; deliver reads the switch and lifts nothing, and a pause past its
    * until is not in force. */
   await writeOff(h.home, { by: "telegram", until: AT + 3_600_000 }, () => AT - 60_000);
-  assert.deepEqual(await h.desk.deliver("held back"), { undelivered: "paused" });
+  assert.deepEqual(await h.desk.deliver("held back", { kind: "report" }), { undelivered: "paused" });
   assert.equal(asked.length, 3, "the outlet was not called");
   await writeOff(h.home, { by: "terminal", until: AT - 1 }, () => AT - 3_600_000);
-  answer = () => Promise.resolve({ sent: [12] });
-  assert.deepEqual(await h.desk.deliver("after the pause"), { sent: [12] });
+  answer = () => Promise.resolve({ sent: ["telegram:12"] });
+  assert.deepEqual(await h.desk.deliver("after the pause", { kind: "report" }), { sent: ["telegram:12"] });
   assert.deepEqual(await kinds(h), ["off-set", "off-cleared", "off-set", "off-set"], "deliver wrote nothing: no off-cleared for the expired pause");
   await clearOff(h.home, "terminal");
 
   /* A send that rejects or throws is one line and send failed; one that keeps the outlet past a minute is one line too. */
   answer = () => Promise.reject(new Error("boom"));
-  assert.deepEqual(await h.desk.deliver("lost"), { undelivered: "send failed: boom" });
+  assert.deepEqual(await h.desk.deliver("lost", { kind: "report" }), { undelivered: "send failed: boom" });
   answer = () => { throw new Error("the bridge fell over"); };
-  assert.deepEqual(await h.desk.deliver("also lost"), { undelivered: "send failed: the bridge fell over" });
+  assert.deepEqual(await h.desk.deliver("also lost", { kind: "report" }), { undelivered: "send failed: the bridge fell over" });
   answer = () => new Promise(() => {});
-  const stuck = h.desk.deliver("into the void");
+  const stuck = h.desk.deliver("into the void", { kind: "report" });
   await waitFor("the stuck send", () => asked.length === 7);
   await h.time.fake.advance(59_999);
   let settled = false;
@@ -1960,7 +1984,7 @@ test("deliver holds a text back when the switch cannot be read: it never reads a
   const h = await harness({}, { home: unreadable });
   const outlet = recordingOutlet();
   h.desk.setOutlet(outlet);
-  const result = await h.desk.deliver("hi");
+  const result = await h.desk.deliver("hi", { kind: "report" });
   assert.match((result as { undelivered: string }).undelivered, /^the pause could not be read: ENAMETOOLONG: /);
   assert.deepEqual(outlet.sent, [], "the outlet was not called");
   assert.equal(h.lines.length, 1);

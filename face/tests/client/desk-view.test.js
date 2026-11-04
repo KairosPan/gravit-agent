@@ -2,7 +2,7 @@
 // the server's status phrases re-spelt here, in New York's time — and a level's mark on its market row and page.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DESK_TAB, DESK_POLL_MS, deskViewOf, markOf } from '../../client/js/host/desk-view.js';
+import { DESK_TAB, DESK_POLL_MS, deskViewOf, markOf, phoneLine } from '../../client/js/host/desk-view.js';
 import { deskStatus, DESK_NOW } from './helpers/desk-status.js';
 
 const STATUS = deskStatus();
@@ -18,7 +18,7 @@ test('deskViewOf renders the head, both markets with their own today, the alerts
   assert.equal(v.head, 'up 3h 5m since 2026-11-02T11:55:00.000Z · desk on');
   assert.equal(v.watch, 'watch: watching');
   assert.equal(v.off, undefined);
-  assert.equal(v.telegram, 'telegram: not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)');
+  assert.equal(v.phone, "phone: none (the account's half is off)");
   assert.equal(v.budget, 'budget: 1,234,567 of 2,000,000 tokens today');
   assert.deepEqual(v.markets, [
     { name: 'US', line: 'watch US: polling the 2026-11-02 session, 2 symbols, last poll 09:59 ET', today: 'alerts today (US): 1 sent, 1 suppressed (cap 1)' },
@@ -83,11 +83,32 @@ test('deskViewOf: a pause, a watch held elsewhere, a market off, held alerts, a 
   ]);
   assert.equal(v.runs.length, 10);
   assert.equal(v.runs[0].pid, 111, 'the newest first');
-  // no watch, no standing, no budget, no Telegram: their parts are empty, never invented
+  // no watch, no standing, no budget, no phone: their parts are empty, never invented
   const bare = deskViewOf({ ok: true, pid: 1, bootedAt: '2026-11-02T14:00:00.000Z', uptimeMs: 60_000, desk: { enabled: true, dir: 'd' }, asleep: [], runs: [], turnsToday: { count: 0, usage: {} } }, NOW_ISO);
-  assert.deepEqual([bare.watch, bare.telegram, bare.budget, bare.filings, bare.markets, bare.alerts, bare.levels, bare.standing, bare.firings], [null, null, null, null, [], [], [], [], []]);
+  assert.deepEqual([bare.watch, bare.phone, bare.budget, bare.filings, bare.markets, bare.alerts, bare.levels, bare.standing, bare.firings], [null, null, null, null, [], [], [], [], []]);
   assert.equal(deskViewOf({ ok: false }, NOW_ISO), null);
   assert.equal(deskViewOf(null, NOW_ISO), null);
+});
+
+test('phoneLine mirrors the server: none, nothing connected, each network, an account that does not answer', () => {
+  const NOW = Date.parse('2026-10-20T18:30:00Z');
+  const AT = '2026-10-20T18:03:00.000Z'; // 14:03 ET
+  assert.equal(phoneLine({ configured: true, polling: true, lastPollAt: AT, networks: [{ network: 'telegram', polling: true }], queued: 0, strangers: 2 }, NOW),
+    'phone: telegram polling, last poll 14:03 ET, 0 queued, 2 strangers');
+  assert.equal(phoneLine({ configured: true, polling: true, networks: [], queued: 0, strangers: 0 }, NOW), 'phone: nothing connected (Account › Identity)');
+  assert.equal(phoneLine({ configured: false, polling: false, networks: [], queued: 0, strangers: 0 }, NOW), "phone: none (the account's half is off)");
+  const failing = { since: AT, reason: 'ECONNREFUSED' };
+  assert.equal(phoneLine({ configured: true, polling: true, accountFailing: failing, networks: [], queued: 0, strangers: 0 }, NOW),
+    'phone: nothing connected (Account › Identity), the account has not answered since 14:03 ET: ECONNREFUSED');
+  assert.equal(phoneLine({ configured: true, polling: true, lastPollAt: AT, accountFailing: failing, networks: [{ network: 'telegram', polling: true }], queued: 3, strangers: 1 }, NOW),
+    'phone: telegram polling, last poll 14:03 ET, 3 queued, 1 stranger, the account has not answered since 14:03 ET: ECONNREFUSED');
+  assert.equal(phoneLine({ configured: true, polling: true, networks: [{ network: 'telegram', polling: false, blocked: true }], queued: 0, strangers: 0 }, NOW),
+    'phone: telegram blocked (403), not polling, no poll yet, 0 queued, 0 strangers');
+  assert.equal(phoneLine({ configured: true, polling: true, lastPollAt: AT, networks: [{
+    network: 'telegram', polling: true, conflictAt: '2026-10-20T18:10:00.000Z', pollFailing: { since: '2026-10-20T18:11:00.000Z', reason: 'HTTP 401 Unauthorized' },
+  }], queued: 0, strangers: 0 }, NOW), 'phone: telegram polling, last poll 14:03 ET, 0 queued, 0 strangers, telegram conflict at 14:10 ET, telegram poll failing since 14:11 ET: HTTP 401 Unauthorized');
+  const v = deskViewOf({ ...STATUS, phone: { configured: true, polling: true, lastPollAt: '2026-11-02T14:59:00.000Z', networks: [{ network: 'telegram', polling: true }], queued: 0, strangers: 0 } }, NOW_ISO);
+  assert.equal(v.phone, 'phone: telegram polling, last poll 09:59 ET, 0 queued, 0 strangers', 'deskViewOf carries it as view.phone');
 });
 
 test('markOf matches stock:NVDA and cn:600519 to their marks and nothing else', () => {

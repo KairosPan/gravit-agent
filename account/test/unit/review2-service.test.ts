@@ -19,7 +19,7 @@ import { BRIDGE_CHAINS } from "../../src/portfolio/live/bridge.ts";
 import { CHAINS, STABLECOINS, type ChainReader } from "../../src/portfolio/live/chain.ts";
 import type { EarnPosition, LiveEarner } from "../../src/portfolio/live/earn.ts";
 import { register } from "../../src/portfolio/live/index.ts";
-import type { PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { Candle, LiveTrader, Market, MarketStats, OrderState, Position } from "../../src/portfolio/live/trade.ts";
 import { STABLES, type LiveSource } from "../../src/portfolio/live/types.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../../src/portfolio/server.ts";
@@ -187,30 +187,14 @@ describe("the twenty-second hold-back (service.ts ReadCache: a venue that cannot
     expect(first.rows.find((r) => r.key === "crypto:ETH")).toMatchObject({ changePct24h: 1, changeFrom: { venue: "tickers" } });
   });
 
-  it("reaches Markets: the two explores one page makes (limit 200 for Markets, 24 for Trade's picker) ask a venue that answered 451 once, not twice — and a venue that refused this location to any read is not asked for its listings either", async () => {
-    const before = geo2.listings;
-    const beforeGeo = geo.listings;
-    const x = answer(await svc.explore({ limit: 200 }));
-    answer(await svc.explore({ limit: 24 }));
-    expect(geo2.listings - before).toBe(1);
-    // Geo Exchange said 451 to the Portfolio's ticker read: a rule for this location holds for ten minutes, for every read of it
-    expect(geo.listings - beforeGeo).toBe(0);
-    // and Markets still says so, in the venue's own words
-    expect(x.missing).toEqual(expect.arrayContaining([expect.objectContaining({ venue: "geo", code: "E_VENUE_GEOBLOCKED" }), expect.objectContaining({ venue: "geo2", code: "E_VENUE_GEOBLOCKED" })]));
-  });
-
-  it("holds a public source's price history back too: a geoblocked venue's candles are its refusal, with no request", async () => {
-    const before = geo.listings + geo.stats;
-    const r = await svc.candles("geo", "BTC/USD", "1h");
-    expect(isRefusal(r) && r.code).toBe("E_VENUE_GEOBLOCKED");
-    expect(geo.listings + geo.stats - before).toBe(0);
-  });
+  // Markets' and a chart's public reads held back the same way are the market's: market/test/unit/reads.test.ts "the hold-back reaches the
+  // market's reads" (account split plan A2 task 7)
 });
 
 describe("the quotes route", () => {
   it("refuses in one shape: too many markets and none at all are the same mistake, answered as the service's refusal", async () => {
-    const none = await get("/api/account/quotes");
-    const many = await get(`/api/account/quotes?pairs=${Array.from({ length: 13 }, () => "ex|BTC/USDT").join(",")}`);
+    const none = await get("/api/account/connected/quotes");
+    const many = await get(`/api/account/connected/quotes?pairs=${Array.from({ length: 13 }, () => "ex|BTC/USDT").join(",")}`);
     expect([none.status, none.body.refusal?.code]).toEqual([409, "E_ACCOUNT_BAD_ACTION"]);
     expect([many.status, many.body.refusal?.code]).toEqual([409, "E_ACCOUNT_BAD_ACTION"]);
   });
@@ -218,12 +202,12 @@ describe("the quotes route", () => {
 
 describe("the routes' query parameters", () => {
   it("a limit is digits: a hexadecimal or an exponent is malformed, and so is a parameter given twice", async () => {
-    expect((await get("/api/account/explore?limit=0x10")).status).toBe(400);
-    expect((await get("/api/account/explore?limit=1e2")).status).toBe(400);
-    expect((await get("/api/account/explore?limit=24&limit=30")).status).toBe(400);
-    expect((await get("/api/account/explore?tab=crypto&tab=now")).body.error).toMatch(/given more than once/);
-    expect((await get("/api/account/candles?venue=pubex&venue=geo&symbol=BTC/USD")).status).toBe(400);
-    expect((await get("/api/account/explore?limit=24")).status).toBe(200);
+    expect((await get("/api/account/connected/explore?limit=0x10")).status).toBe(400);
+    expect((await get("/api/account/connected/explore?limit=1e2")).status).toBe(400);
+    expect((await get("/api/account/connected/explore?limit=24&limit=30")).status).toBe(400);
+    expect((await get("/api/account/connected/explore?tab=crypto&tab=now")).body.error).toMatch(/given more than once/);
+    expect((await get("/api/account/connected/candles?venue=ex&venue=geo&symbol=BTC/USD")).status).toBe(400);
+    expect((await get("/api/account/connected/explore?limit=24")).status).toBe(200);
   });
 });
 
@@ -236,7 +220,7 @@ describe("a trader that throws", () => {
     connector("standin-review2-throws", "Thrower", thrower, [{ asset: "X", amount: 5, usd: 100 }]);
     ok(await own({ type: "connectVenue", venue: "thr", connector: "live:standin-review2-throws", label: "Thrower", credentialRef: "" }));
     const one = await get("/api/account/market?venue=thr&symbol=X/USDT");
-    const quotes = await get(`/api/account/quotes?pairs=${encodeURIComponent("thr|X/USDT,ex|BTC/USDT")}`);
+    const quotes = await get(`/api/account/connected/quotes?pairs=${encodeURIComponent("thr|X/USDT,ex|BTC/USDT")}`);
     const sellable = await get("/api/account/sellable");
     const seen = [one, quotes, sellable].map((r) => [r.status, JSON.stringify(r.body).includes("signature=deadbeef") ? "leaks the exception" : "clean"]);
     // every read answers 200 (a per-market refusal) or 409 (a refusal), and nothing of the exception's text is on the wire
@@ -298,14 +282,15 @@ describe("a venue that is slow to say no", () => {
 
 describe("Markets is kept thirty seconds", () => {
   const line = async () => {
-    const x = answer(await svc.explore({ q: "BTC" }));
+    const x = answer(await svc.connectedExplore({ q: "BTC" }));
     return x.items.find((i) => i.key === "coin:BTC")?.at.find((a) => a.venue === "pubex");
   };
 
-  it("says a venue the owner just connected is connected, not Connect to trade for thirty more seconds", async () => {
+  it("says a venue the owner just connected is connected, not left out for thirty more seconds", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
-      expect(await line()).toMatchObject({ connected: false, public: true, connectTo: "pubex" });
+      // not connected: its line is the market's public one, not the account's to list
+      expect(await line()).toBeUndefined();
       connector("standin-review2-pubex", "Pub Exchange", stub([BTC]), [{ asset: "BTC", amount: 0.1, usd: 6_000 }]);
       ok(await own({ type: "connectVenue", venue: "pubex", connector: "live:standin-review2-pubex", label: "Pub Exchange", credentialRef: "" }));
       // the owner connected it: Markets says so now (the public listing of the same exchange is the connected venue's to speak for)
@@ -315,13 +300,13 @@ describe("Markets is kept thirty seconds", () => {
     }
   });
 
-  it("says a venue the owner just disconnected is not connected, not connected for thirty more seconds", async () => {
+  it("says a venue the owner just disconnected is gone, not connected for thirty more seconds", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(Date.now() + 31_000);
       expect(await line()).toMatchObject({ connected: true, public: false });
       ok(await own({ type: "disconnectVenue", venue: "pubex" }));
-      expect(await line()).toMatchObject({ connected: false, public: true });
+      expect(await line()).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
@@ -350,7 +335,7 @@ describe("a real account's overview, markets and quote (the statement page's rea
   it("answers no simulated catalogue or router: /api/markets and /api/quote are the service's refusal pointing at the wallet's reads", async () => {
     const markets = await get("/api/markets");
     expect([markets.status, markets.body.refusal?.code]).toEqual([409, "E_ACCOUNT_BAD_ACTION"]);
-    expect(markets.body.refusal.message).toContain("/api/account/explore");
+    expect(markets.body.refusal.message).toContain("/api/account/connected/explore");
     const quote = await get("/api/quote?base=ETH&side=sell&qty=1");
     expect([quote.status, quote.body.refusal?.code]).toEqual([409, "E_ACCOUNT_BAD_ACTION"]);
     expect(svc.markets()).toEqual([]);
@@ -470,17 +455,8 @@ describe("a write at a venue and the reads kept of it", () => {
   });
 });
 
-describe("the Asset sheet's price history", () => {
-  it("a coin no connected venue keeps a history of is charted from the exchanges' keyless public bars", async () => {
-    const a = answer(await svc.asset("crypto:BTC", "1h"));
-    expect(a.candles).toMatchObject({ venue: "pubex", symbol: "BTC/USD", public: true });
-    expect(a.candles?.bars.length).toBe(24);
-    // one no public exchange lists either has none, in a source's own words (the first that refused: here the venue that refuses this location)
-    const x = answer(await svc.asset("crypto:ETH", "1h"));
-    expect(x.candles).toBeUndefined();
-    expect(x.missing).toEqual(expect.arrayContaining([expect.objectContaining({ part: "candles", code: expect.stringMatching(/^E_VENUE_/) })]));
-  });
-});
+// the Asset sheet's price history is the chart's own read since account split plan A2 task 7: a public source's bars are the market's
+// (market/test/unit/reads.test.ts), a connected venue's the account's connected candles
 
 describe("an agent wallet on the account", () => {
   /** a stand-in chain: every address holds 40 USDC on every chain, and a little of each chain's coin */

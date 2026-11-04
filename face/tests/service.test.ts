@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   COPIED_KEYS, EXPECTED_KEYS, LABEL, WATCH_POLL_MS, checkHealth, contextOf, ensureHomeEnv, envLinesOf, fetchStatus, filterPath, formatStatus,
-  installPlan, lastTokenUrl, nodeOnPath, parseLaunchctlPrint, portAnswers, runService, servicePlan, WATCHDOG_LABEL, watchdogPlan, type ServiceDeps,
+  installPlan, isCopiedKey, lastTokenUrl, nodeOnPath, parseLaunchctlPrint, portAnswers, runService, servicePlan, WATCHDOG_LABEL, watchdogPlan, type ServiceDeps,
 } from "../scripts/service.ts";
 import { WATCH_CN_POLL_MS, WATCH_US_POLL_MS } from "../src/watch.ts";
 import { deskStatusLines, type DeskStatus } from "../src/desk.ts";
@@ -96,8 +96,7 @@ test("ensureHomeEnv copies only the allow-list, in source order, and names every
   assert.deepEqual(r.skipped, ["PATH", "NODE_OPTIONS", "ALPACA_KIT_ENABLE_ORDERS"]);
   assert.deepEqual(r.names, ["ALPHA_DATA_FEED", "DEEPSEEK_API_KEY"]); assert.deepEqual(r.missing, ["APCA_API_KEY_ID", "APCA_API_SECRET_KEY"]);
   assert.deepEqual(ensureHomeEnv(h, [join(src, ".env.alpaca")]).skipped, [], "an existing .env: the sources are not read");
-  assert.deepEqual(COPIED_KEYS, ["DEEPSEEK_API_KEY", "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "APCA_API_BASE_URL", "IFIND_ACCESS_TOKEN", "IFIND_REFRESH_TOKEN",
-    "TELEGRAM_BOT_TOKEN", "TELEGRAM_OPERATOR_ID"]);
+  assert.deepEqual(COPIED_KEYS, ["DEEPSEEK_API_KEY", "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "APCA_API_BASE_URL", "IFIND_ACCESS_TOKEN", "IFIND_REFRESH_TOKEN"]);
 });
 
 test("ensureHomeEnv writes nothing when no name is on the allow-list, and names them all once", async () => {
@@ -168,34 +167,34 @@ test("formatStatus names a lost last run", () => {
   assert.match(formatStatus({ label: LABEL, info: {}, installed: false, status: undefined, url: undefined, port: 3090 }), /not installed \(npm run service -- install\)/);
 });
 
-test("formatStatus prints the pause and telegram lines", () => {
+test("formatStatus prints the pause and phone lines", () => {
   const base: DeskStatus = { ok: true, pid: 7, version: "v", bootedAt: "2026-10-20T13:00:00.000Z", uptimeMs: 90 * 60_000, desk: { enabled: true, dir: "/d" },
     asleep: [], runs: [], turnsToday: noTurns };
   const lines = (status: DeskStatus, now = Date.parse("2026-10-20T18:30:00Z")): string[] => // 14:30 ET
     formatStatus({ label: LABEL, info: { state: "running", pid: 7 }, installed: true, status, url: undefined, port: 3090, now }).split("\n");
   const head = ["com.gravit.face: running (pid 7)", "answering at http://127.0.0.1:3090 · up 1h 30m since 2026-10-20T13:00:00.000Z · desk on"];
   const tail = "sign in: no URL in the log yet (npm run service -- logs)";
-  const polled = { configured: true, polling: true, lastPollAt: "2026-10-20T18:03:00.000Z", dropped: 2, queued: 1 };
-  assert.deepEqual(lines({ ...base, off: { setAt: "2026-10-20T18:00:00.000Z", by: "telegram", until: "2026-10-20T20:00:00.000Z" }, telegram: polled }), [...head,
+  const polled = { configured: true, polling: true, lastPollAt: "2026-10-20T18:03:00.000Z", networks: [{ network: "telegram", polling: true }], queued: 1, strangers: 2 };
+  assert.deepEqual(lines({ ...base, off: { setAt: "2026-10-20T18:00:00.000Z", by: "telegram", until: "2026-10-20T20:00:00.000Z" }, phone: polled }), [...head,
     "desk: paused since 14:00 ET by telegram until 16:00 ET (npm run desk -- resume)",
-    "telegram: polling, last poll 14:03 ET, 2 dropped, 1 queued",
+    "phone: telegram polling, last poll 14:03 ET, 1 queued, 2 strangers",
     tail]);
   assert.deepEqual(lines({ ...base, off: { setAt: "2026-12-01T19:00:00.000Z", by: "terminal" },
-    telegram: { ...polled, lastPollAt: "2026-12-01T19:03:00.000Z", dropped: 0, queued: 0, conflictAt: "2026-12-01T19:05:00.000Z" } },
+    phone: { ...polled, lastPollAt: "2026-12-01T19:03:00.000Z", queued: 0, networks: [{ network: "telegram", polling: true, conflictAt: "2026-12-01T19:05:00.000Z" }] } },
   Date.parse("2026-12-01T19:30:00Z")), [...head,
     "desk: paused since 14:00 ET by terminal (npm run desk -- resume)",
-    "telegram: polling, last poll 14:03 ET, 0 dropped, 0 queued, conflict at 14:05 ET",
+    "phone: telegram polling, last poll 14:03 ET, 0 queued, 2 strangers, telegram conflict at 14:05 ET",
     tail], "no until, no clause; a conflict, its own; EST renders as ET as EDT does");
   assert.deepEqual(lines({ ...base, off: { setAt: "2026-10-19T18:00:00.000Z", by: "telegram", until: "2026-10-21T18:00:00.000Z" },
-    telegram: { ...polled, conflictAt: "2026-10-20T03:59:00.000Z" } }), [...head,
+    phone: { ...polled, networks: [{ network: "telegram", polling: true, conflictAt: "2026-10-20T03:59:00.000Z" }] } }), [...head,
     "desk: paused since 2026-10-19 14:00 ET by telegram until 2026-10-21 14:00 ET (npm run desk -- resume)",
-    "telegram: polling, last poll 14:03 ET, 2 dropped, 1 queued, conflict at 2026-10-19 23:59 ET",
+    "phone: telegram polling, last poll 14:03 ET, 1 queued, 2 strangers, telegram conflict at 2026-10-19 23:59 ET",
     tail], "a time on another New York date carries it - 03:59 UTC on the 20th is still the 19th in New York");
-  assert.deepEqual(lines({ ...base, telegram: { configured: false, polling: false, dropped: 0, queued: 0 } }), [...head,
-    "telegram: not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)",
+  assert.deepEqual(lines({ ...base, phone: { configured: false, polling: false, networks: [], queued: 0, strangers: 0 } }), [...head,
+    "phone: none (the account's half is off)",
     tail]);
-  assert.equal(lines({ ...base, telegram: { configured: true, polling: false, dropped: 0, queued: 3 } })[2],
-    "telegram: not polling, no poll yet, 0 dropped, 3 queued", "a bridge that has not polled says so");
+  assert.equal(lines({ ...base, phone: { configured: true, polling: false, networks: [{ network: "telegram", polling: false }], queued: 3, strangers: 0 } })[2],
+    "phone: telegram not polling, no poll yet, 3 queued, 0 strangers", "a bridge that has not read the inbox says so");
   assert.deepEqual(lines(base), [...head, tail], "neither line without its field");
   assert.deepEqual(lines({ ...base, off: { setAt: "2026-10-20T18:00:00.000Z", by: "page" }, ledgerError: "EACCES" }), [...head,
     "desk: paused since 14:00 ET by page (npm run desk -- resume)",
@@ -207,14 +206,14 @@ test("formatStatus prints the desk's lines through deskStatusLines: the desk lin
   const now = Date.parse("2026-10-20T18:30:00Z"); // 14:30 ET
   const status: DeskStatus = { ok: true, pid: 7, version: "v", bootedAt: "2026-10-20T13:00:00.000Z", uptimeMs: 90 * 60_000, desk: { enabled: true, dir: "/d" },
     asleep: [], runs: [], turnsToday: noTurns, off: { setAt: "2026-10-20T18:00:00.000Z", by: "terminal" },
-    telegram: { configured: true, polling: true, lastPollAt: "2026-10-19T23:00:00.000Z", dropped: 0, queued: 0 } };
+    phone: { configured: true, polling: true, lastPollAt: "2026-10-19T23:00:00.000Z", networks: [{ network: "telegram", polling: true }], queued: 0, strangers: 0 } };
   const [desk, ...rest] = deskStatusLines(status, new Date(now));
   const lines = formatStatus({ label: LABEL, info: { state: "running", pid: 7 }, installed: true, status, url: undefined, port: 3090, now }).split("\n");
   assert.deepEqual(lines.slice(1, 2 + rest.length), [`answering at http://127.0.0.1:3090 · ${desk}`, ...rest]);
-  assert.equal(lines[3], "telegram: polling, last poll 2026-10-19 19:00 ET, 0 dropped, 0 queued", "a last poll on another New York date carries it");
+  assert.equal(lines[3], "phone: telegram polling, last poll 2026-10-19 19:00 ET, 0 queued, 0 strangers", "a last poll on another New York date carries it");
 });
 
-test("formatStatus prints the standing and budget lines after the telegram line", () => {
+test("formatStatus prints the standing and budget lines after the phone line", () => {
   const now = Date.parse("2026-11-27T16:00:00Z"); // 11:00 ET
   const used = { uncachedInputTokens: 34_567, outputTokens: 200_000, cacheReadTokens: 900_000, cacheWriteTokens: 100_000, total: 1_234_567 };
   const order = {
@@ -224,7 +223,7 @@ test("formatStatus prints the standing and budget lines after the telegram line"
   };
   const status: DeskStatus = {
     ok: true, pid: 7, version: "v", bootedAt: "2026-11-27T14:30:00.000Z", uptimeMs: 90 * 60_000, desk: { enabled: true, dir: "/d" }, asleep: [], runs: [],
-    turnsToday: noTurns, telegram: { configured: true, polling: true, lastPollAt: "2026-11-27T15:59:00.000Z", dropped: 0, queued: 0 },
+    turnsToday: noTurns, phone: { configured: true, polling: true, lastPollAt: "2026-11-27T15:59:00.000Z", networks: [{ network: "telegram", polling: true }], queued: 0, strangers: 0 },
     budget: { dailyTokens: 2_000_000, used, spent: false },
     standing: {
       file: { path: "/d/standing.yml", state: "loaded" }, calendar: { clock: "fake clock", state: "failed", error: "exit 1" },
@@ -236,7 +235,7 @@ test("formatStatus prints the standing and budget lines after the telegram line"
   assert.deepEqual(lines(status), [
     "com.gravit.face: running (pid 7)",
     "answering at http://127.0.0.1:3090 · up 1h 30m since 2026-11-27T14:30:00.000Z · desk on",
-    "telegram: polling, last poll 10:59 ET, 0 dropped, 0 queued",
+    "phone: telegram polling, last poll 10:59 ET, 0 queued, 0 strangers",
     "budget: 1,234,567 of 2,000,000 tokens today",
     "standing orders: no calendar today, fake clock: exit 1",
     "standing preclose: close-30m, next 12:30 ET; last delivered 2026-11-26 15:31 ET",
@@ -526,7 +525,7 @@ test("install names the keys the home .env lacks, the names it did not copy and 
   for (const line of [`wrote ${env} with: APCA_API_KEY_ID, APCA_API_SECRET_KEY`,
     `not in ${env}: DEEPSEEK_API_KEY (the face also reads DEEPSEEK_API_KEY from dsh's credential store)`,
     `not copied (not on the service's allow-list; add them to ${env} by hand if the service needs them): PATH`,
-    `no source: ${join(r.deps.root, ".env.deepseek")}, ${join(r.deps.root, ".env.ifind")}, ${join(r.deps.root, ".env.telegram")}`]) assert.ok(lines.includes(line), line);
+    `no source: ${join(r.deps.root, ".env.deepseek")}, ${join(r.deps.root, ".env.ifind")}`]) assert.ok(lines.includes(line), line);
   assert.equal(await readFile(env, "utf8"), "APCA_API_KEY_ID=k\nAPCA_API_SECRET_KEY=s\n");
   const again = await rig();
   Object.assign(again.deps, { home: r.deps.home, root: r.deps.root });
@@ -535,17 +534,25 @@ test("install names the keys the home .env lacks, the names it did not copy and 
   assert.ok(!again.text().includes("not copied"), "an existing .env: the sources are not read");
 });
 
-test("install copies the Telegram bridge's two names from .env.telegram, after the other key files; the plist carries neither", async () => {
+test("the service no longer copies TELEGRAM_* or .env.telegram", async () => {
+  /* the face holds no network's token since the bridge moved onto the account (plan B1a Task 8): the
+   * account keeps Telegram's token in its own home, so install neither reads .env.telegram nor copies a
+   * TELEGRAM_* name from any key file, and the plist carries none */
+  assert.ok(!COPIED_KEYS.some((name) => name.startsWith("TELEGRAM_")));
+  assert.equal(isCopiedKey("TELEGRAM_BOT_TOKEN"), false);
+  assert.equal(isCopiedKey("TELEGRAM_OPERATOR_ID"), false);
   const r = await rig();
-  await writeFile(join(r.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\n");
-  await writeFile(join(r.deps.root, ".env.telegram"), "TELEGRAM_BOT_TOKEN=424242:fake\nTELEGRAM_OPERATOR_ID=42\nTELEGRAM_OTHER=x\n");
+  await writeFile(join(r.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\nTELEGRAM_BOT_TOKEN=424242:fake\n");
+  await writeFile(join(r.deps.root, ".env.telegram"), "TELEGRAM_BOT_TOKEN=424242:fake\nTELEGRAM_OPERATOR_ID=42\n");
   assert.equal(await runService("install", [], r.deps), 0);
   const env = join(r.deps.home, ".env");
-  assert.equal(await readFile(env, "utf8"), "DEEPSEEK_API_KEY=d\nTELEGRAM_BOT_TOKEN=424242:fake\nTELEGRAM_OPERATOR_ID=42\n");
-  const lines = r.text().split("\n");
-  assert.ok(lines.includes(`wrote ${env} with: DEEPSEEK_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_OPERATOR_ID`));
-  assert.ok(lines.includes(`not copied (not on the service's allow-list; add them to ${env} by hand if the service needs them): TELEGRAM_OTHER`));
-  assert.doesNotMatch(await readFile(r.plist, "utf8"), /TELEGRAM/, "no key reaches the plist");
+  assert.equal(await readFile(env, "utf8"), "DEEPSEEK_API_KEY=d\n");
+  const text = r.text();
+  assert.ok(text.split("\n").includes(`wrote ${env} with: DEEPSEEK_API_KEY`));
+  assert.ok(text.split("\n").includes(`not copied (not on the service's allow-list; add them to ${env} by hand if the service needs them): TELEGRAM_BOT_TOKEN`),
+    "a Telegram name in another key file is named as not copied");
+  assert.doesNotMatch(text, /\.env\.telegram|TELEGRAM_OPERATOR_ID/, ".env.telegram is not a source: not read, not named");
+  assert.doesNotMatch(await readFile(r.plist, "utf8"), /TELEGRAM|424242/, "no key reaches the plist");
 });
 
 test("install with nothing to copy writes no .env and says so; a .env it cannot write stops it before launchd", async () => {
@@ -931,7 +938,7 @@ const healthStatus = (extra: Partial<DeskStatus> = {}): DeskStatus => ({
     markets: { us: { state: "off", watched: 0, notWatched: [], today: todayOf }, cn: { state: "off", watched: 0, notWatched: [], today: todayOf } },
     files: [], near: [], marks: [], pending: 0, recent: [], filings: { state: "off", symbols: 0, aShares: 0, seeded: 0 },
   },
-  telegram: { configured: true, polling: true, dropped: 0, queued: 0 },
+  phone: { configured: true, polling: true, networks: [{ network: "telegram", polling: true }], queued: 0, strangers: 0 },
   ...extra,
 });
 const answering = (status: DeskStatus) => (): Response => new Response(JSON.stringify(status), { status: 200 });
@@ -998,15 +1005,15 @@ test("a face launchd respawned during the retry is launchd's own: launchd is ask
 });
 
 test("another face on the port reads 1 and nothing else", async () => {
-  const sick = healthStatus({ pid: 99, ledgerError: "EACCES", telegram: { configured: true, polling: false, dropped: 0, queued: 0, blocked: true } });
+  const sick = healthStatus({ pid: 99, ledgerError: "EACCES", phone: { configured: true, polling: false, networks: [{ network: "telegram", polling: false, blocked: true }], queued: 0, strangers: 0 } });
   const other = await health({ answer: answering(sick) });
   assert.deepEqual([other.code, other.reason], [1, "another face holds the port"], "the other face's own troubles are not the job's");
   const notRunning = await health({ launchctl: (args) => (args[0] === "print" ? loaded("not running") : undefined), answer: answering(healthStatus()) });
   assert.deepEqual([notRunning.code, notRunning.reason], [1, "another face holds the port"], "a loaded job with no pid runs no face");
 });
 
-test("checkHealth 1: the Telegram bridge's poll failing, blocked, or in conflict within 10 minutes", async () => {
-  const tg = (extra: object) => healthStatus({ telegram: { configured: true, polling: true, dropped: 0, queued: 0, ...extra } });
+test("checkHealth 1: a network's poll failing at the account, the bot blocked, or a conflict within 10 minutes; an account that does not answer is the watchdog's", async () => {
+  const tg = (extra: object) => healthStatus({ phone: { configured: true, polling: true, networks: [{ network: "telegram", polling: true, ...extra }], queued: 0, strangers: 0 } });
   const failing = await health({ answer: answering(tg({ pollFailing: { since: "2026-11-30T15:00:00.000Z", reason: "401 Unauthorized" } })) });
   assert.deepEqual([failing.code, failing.reason], [1, "telegram poll failing since 2026-11-30T15:00:00.000Z: 401 Unauthorized"]);
   const blocked = await health({ answer: answering(tg({ blocked: true })) });
@@ -1017,6 +1024,8 @@ test("checkHealth 1: the Telegram bridge's poll failing, blocked, or in conflict
   assert.equal(edge.code, 1, "10 minutes ago to the ms is within");
   const old = await health({ answer: answering(tg({ conflictAt: "2026-11-30T15:19:59.999Z" })) });
   assert.deepEqual([old.code, old.reason], [0, "healthy"], "an older conflict is over");
+  const away = await health({ answer: answering(healthStatus({ phone: { configured: true, polling: true, accountFailing: { since: "2026-11-30T15:00:00.000Z", reason: "ECONNREFUSED" }, networks: [], queued: 0, strangers: 0 } })) });
+  assert.deepEqual([away.code, away.reason], [0, "healthy"], "the account's own downtime is not the face's degradation");
 });
 
 test("checkHealth 1: the watch's lease failed or held elsewhere", async () => {
@@ -1108,6 +1117,16 @@ test("the watchdog plist carries its label, StartInterval 300, RunAtLoad false a
     `<key>StandardErrorPath</key><string>${p.errLog}</string>`]) assert.ok(p.plist.includes(needle), needle);
   assert.ok(!p.plist.includes("KeepAlive"), "launchd runs it every five minutes, never keeps it alive");
   assert.doesNotMatch(p.plist, /KEY|TOKEN|SECRET|FACE_PORT/, "no credential and no port in its environment");
+});
+
+test("the watchdog plist carries the account's and the market's URLs and the account's home when the shell sets them", () => {
+  const base = { root: "/repo", home: "/h/.dsh", homeDir: "/h", node: "/n", path: "/usr/bin", launchAgentsDir: "/h/Library/LaunchAgents" };
+  const p = watchdogPlan({ ...base, env: { FACE_ACCOUNT_URL: "http://127.0.0.1:4830", FACE_MARKET_URL: " http://127.0.0.1:4831 ", BUYER_HOME: "/h/acct", FACE_ACCOUNT_HOME: "", DEEPSEEK_API_KEY: "sk-x", TELEGRAM_BOT_TOKEN: "1:x" } });
+  assert.deepEqual(p.env, { PATH: "/usr/bin", HOME: "/h", DSH_HOME: "/h/.dsh", FACE_ACCOUNT_URL: "http://127.0.0.1:4830", FACE_MARKET_URL: "http://127.0.0.1:4831", BUYER_HOME: "/h/acct" });
+  for (const needle of ["<key>FACE_ACCOUNT_URL</key><string>http://127.0.0.1:4830</string>", "<key>FACE_MARKET_URL</key><string>http://127.0.0.1:4831</string>", "<key>BUYER_HOME</key><string>/h/acct</string>"]) assert.ok(p.plist.includes(needle), needle);
+  assert.doesNotMatch(p.plist, /DEEPSEEK|TELEGRAM|sk-x|FACE_ACCOUNT_HOME/, "only the four names, and only when set");
+  assert.deepEqual(watchdogPlan({ ...base, env: { FACE_ACCOUNT_HOME: "/h/a2" } }).env.FACE_ACCOUNT_HOME, "/h/a2");
+  assert.deepEqual(watchdogPlan(base).env, { PATH: "/usr/bin", HOME: "/h", DSH_HOME: "/h/.dsh" });
 });
 
 test("install and uninstall bootstrap and boot out both jobs", async () => {

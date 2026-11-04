@@ -6,7 +6,7 @@
  *   F2  the real-only service's overview invents a liquidity reason and a ladder route for a live venue (rails.ts / portfolio.ts tables)
  *   F3  Polymarket connected with its key hides the deposit wallet the connector knows (no Receive) — closed: its writer receives (pUSD on
  *       Polygon to the wallet, Polymarket's bridge from the other chains), and the test now pins that
- *   F4  the Asset drawer's price history ignores the keyless public OHLCV that /api/account/candles already serves
+ *   F4  (gone: the Asset drawer's price history is the chart's own read since account split plan A2 task 7)
  *   F5  Hyperliquid by address asserts "does not serve this location" without asking anything — closed: the words name the key, not a place
  *   F6  a Stock Token row that trades at a connected wallet still carries a public line offering "Connect to trade"
  *   F7  the Alpaca connector never asks Alpaca about its crypto wallets (GET /v2/wallets) before declaring it moves nothing — closed: asked
@@ -29,10 +29,10 @@ import type { ChainReader } from "../../src/portfolio/live/chain.ts";
 import { exploreAcross, type ExploreVenue } from "../../src/portfolio/live/explore.ts";
 import { register } from "../../src/portfolio/live/index.ts";
 import { polymarketTradeSource } from "../../src/portfolio/live/polymarket-clob.ts";
-import type { PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { Candle, LiveTrader, Market, OrderState } from "../../src/portfolio/live/trade.ts";
 import { STABLES, type Http, type HttpReply } from "../../src/portfolio/live/types.ts";
-import { PortfolioService, type CandlesView } from "../../src/portfolio/service.ts";
+import { PortfolioService } from "../../src/portfolio/service.ts";
 
 type NoNonce<T> = T extends unknown ? Omit<T, "nonce"> : never;
 const ROOT = join(import.meta.dirname, "..", "..");
@@ -170,19 +170,8 @@ describe("F3 · Polymarket by key: the connector knows the wallet pUSD lands in 
   });
 });
 
-// ---- F4: the Asset drawer's price history -----------------------------------------------------------------------------------------------
-describe("F4 · the Asset drawer (service.asset → candlesFor) falls back to the keyless public OHLCV that /api/account/candles already serves", () => {
-  it("GET /api/account/candles answers for the public source (the interface exists)", async () => {
-    const c = answer(await svc.candles("pubex", "BTC/USD", "1h")) as CandlesView;
-    expect(c.candles.length).toBe(24);
-    expect(c.public).toBe(true);
-  });
-  it("service.asset('crypto:BTC') carries that history instead of 'No venue connected here keeps a price history for it' (asset.js:122)", async () => {
-    const a = answer(await svc.asset("crypto:BTC", "1h"));
-    expect(a.row?.asset).toBe("BTC");
-    expect(a.candles?.bars.length ?? 0).toBeGreaterThan(0);
-  });
-});
+// ---- F4: the Asset drawer's price history is the chart's own read since account split plan A2 task 7 (a public source's bars are the
+// market's /api/candles: market/test/unit/reads.test.ts; a connected venue's the account's /api/account/connected/candles) ----------------
 
 // ---- F5: Hyperliquid by address --------------------------------------------------------------------------------------------------------
 describe("F5 · Hyperliquid by address (address.ts:104) states the venue's rule honestly: no key to sign with, not a location it never checked", () => {

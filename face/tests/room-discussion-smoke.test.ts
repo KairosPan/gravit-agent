@@ -10,6 +10,7 @@
  * sections}` (NEW packages/core/agent-loop/src/runtime-context.ts:14-19, 161);
  * and durable reads use a persistence READ handle (NEW
  * packages/session/session-persistence/src/handle.ts:14-23, 59-83). */
+import "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";

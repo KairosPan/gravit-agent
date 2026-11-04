@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { AKSHARE_TOOLS } from "../src/portfolio/live/akshare.ts";
+import { createServer, type Server } from "node:http";
 import { cardHash } from "../src/portfolio/account/exchange.ts";
 import { signOwner, simKey, type OwnerAction } from "../src/portfolio/account/sign.ts";
 import { no } from "../src/portfolio/refuse.ts";
@@ -116,7 +116,7 @@ afterAll(async () => {
 describe("an agent harness on the real account, through the MCP seat", () => {
   it("has a key of its own, kept in the home — not one anyone could derive from its name", async () => {
     const names = (await client.listTools()).tools.map((x) => x.name);
-    expect(names).toEqual(expect.arrayContaining(["portfolio_live_order", "portfolio_live_amend", "portfolio_live_positions", "portfolio_live_close", "portfolio_live_leverage", "portfolio_wait", "portfolio_statement", "portfolio_pay", "portfolio_akshare"]));
+    expect(names).toEqual(expect.arrayContaining(["portfolio_live_order", "portfolio_live_amend", "portfolio_live_positions", "portfolio_live_close", "portfolio_live_leverage", "portfolio_wait", "portfolio_statement", "portfolio_pay"]));
     const a = await tool("portfolio_account");
     const path = join(home, "seats", "deepseek-harness.json");
     expect([existsSync(path), statSync(path).mode & 0o777]).toEqual([true, 0o600]);
@@ -165,31 +165,43 @@ async function seat(name: string): Promise<(tool: string, args?: Record<string, 
 }
 
 describe("the wallet through the MCP seat: what the page reads, steering, a preview, a batch", () => {
-  it("the seat's explore takes the china tab, and answers the Account's own words where China is not read", async () => {
-    const explore = (await client.listTools()).tools.find((x) => x.name === "portfolio_explore")!;
-    expect((explore.inputSchema.properties as Record<string, { enum?: string[] }>).tab!.enum).toEqual(["all", "crypto", "stocks", "rwas", "perps", "preipo", "predictions", "china"]);
-    expect(explore.description).toContain("`china` is the A shares Tencent ranks");
-    // this account mounts no China source: the Account's refusal comes back, not a schema error
-    const china = await tool("portfolio_explore", { tab: "china" });
-    expect(china.body).toMatchObject({ code: "E_ACCOUNT_BAD_ACTION", message: "China is not read on this account" });
+  it("lists portfolio_live_candles and portfolio_live_book and none of the four that left", async () => {
+    const tools = (await client.listTools()).tools;
+    const names = tools.map((x) => x.name);
+    expect(names).toEqual(expect.arrayContaining(["portfolio_live_candles", "portfolio_live_book"]));
+    for (const gone of ["portfolio_explore", "portfolio_candles", "portfolio_book", "portfolio_akshare"]) expect(names).not.toContain(gone);
+    for (const name of ["portfolio_live_candles", "portfolio_live_book"]) {
+      const t = tools.find((x) => x.name === name)!;
+      expect(t.annotations?.readOnlyHint).toBe(true);
+      expect(t.description).toMatch(/a public market's are market_candles \/ market_book, under mcp__market__\.?$/);
+      expect(t.description).not.toMatch(/NOT connected|without a key/);
+    }
   });
 
-  it("the seat passes AKShare through, and says so where the Account runs none", async () => {
-    const t = (await client.listTools()).tools.find((x) => x.name === "portfolio_akshare")!;
-    expect(t.annotations?.readOnlyHint).toBe(true);
-    for (const name of [...AKSHARE_TOOLS, "akshare_discover", "500 rows", "120 s"]) expect(t.description).toContain(name);
-    const r = await tool("portfolio_akshare", { tool: "akshare_discover" });
-    expect(r.error).toBe(true);
-    expect(r.body).toMatchObject({ ok: false, akshare: "off" });
-  });
+  it("portfolio_live_candles on an Account without the connected routes says to restart it", async () => {
+    // an Account from before the connected routes: every path is a 404
+    const old: Server = createServer((_req, res) => { res.writeHead(404, { "content-type": "application/json" }); res.end("{}"); });
+    await new Promise<void>((done) => old.listen(0, "127.0.0.1", done));
+    const url = `http://127.0.0.1:${(old.address() as { port: number }).port}`;
+    const stale = new Client({ name: "vitest-stale", version: "0" });
+    try {
+      await stale.connect(new StdioClientTransport({ command: join(ROOT, "node_modules", ".bin", "tsx"), args: [join(ROOT, "src", "portfolio", "mcp.ts")], env: { ...(process.env as Record<string, string>), PORTFOLIO_URL: url, PORTFOLIO_AGENT: "Stale", PORTFOLIO_SEAT_KEYS: "sim", BUYER_HOME: home }, stderr: "ignore" }));
+      const sentence = "this Account has no connected-venue reads (/api/account/connected): restart it from this tree";
+      for (const [name, args] of [["portfolio_live_candles", { venue: "ex", symbol: PERP.symbol }], ["portfolio_live_book", { venue: "ex", symbol: PERP.symbol }]] as const) {
+        const r = await stale.callTool({ name, arguments: args });
+        expect(r.isError, name).toBe(true);
+        expect(JSON.parse((r.content as Array<{ text: string }>)[0]!.text), name).toEqual({ ok: false, error: sentence });
+      }
+    } finally {
+      await stale.close();
+      await new Promise<void>((done) => old.close(() => done()));
+    }
+  }, 30_000);
 
   it("reads what the page reads — markets, holdings, the curve, one asset, where to receive — with the same answers as over HTTP", async () => {
     const names = (await client.listTools()).tools.map((x) => x.name);
-    expect(names).toEqual(expect.arrayContaining(["portfolio_explore", "portfolio_holdings", "portfolio_history", "portfolio_asset", "portfolio_receive", "portfolio_watchlist", "portfolio_report", "portfolio_ask", "portfolio_live_preview", "portfolio_live_batch"]));
+    expect(names).toEqual(expect.arrayContaining(["portfolio_holdings", "portfolio_history", "portfolio_asset", "portfolio_receive", "portfolio_watchlist", "portfolio_report", "portfolio_ask", "portfolio_live_preview", "portfolio_live_batch"]));
     const http = async (path: string) => (await fetch(`${server.url}${path}`)).json() as Promise<Record<string, any>>;
-    const explored = await tool("portfolio_explore", {});
-    expect(explored.body.items).toEqual((await http("/api/account/explore?limit=30")).items);
-    expect(explored.body.items.map((i: { key: string }) => i.key)).toContain("perp:ETH");
     const held = await tool("portfolio_holdings", {});
     const page = await http("/api/account/holdings");
     expect([held.body.rows, held.body.money]).toEqual([page.rows, page.money]);
@@ -341,12 +353,32 @@ describe("declined asks and price history through the MCP seat", () => {
     }
   }, 30_000);
 
-  it("one market's price history, the same as over HTTP; a market the venue does not list is its refusal", async () => {
-    expect((await client.listTools()).tools.map((x) => x.name)).toContain("portfolio_candles");
-    const c = await tool("portfolio_candles", { venue: "ex", symbol: PERP.symbol, interval: "1h" });
-    const http = (await (await fetch(`${server.url}/api/account/candles?venue=ex&symbol=${encodeURIComponent(PERP.symbol)}&interval=1h`)).json()) as Record<string, unknown>;
+  it("a connected venue's price history, the same as over HTTP; a market the venue does not list is its refusal; a public source is refused by name", async () => {
+    const c = await tool("portfolio_live_candles", { venue: "ex", symbol: PERP.symbol, interval: "1h" });
+    const http = (await (await fetch(`${server.url}/api/account/connected/candles?venue=ex&symbol=${encodeURIComponent(PERP.symbol)}&interval=1h`)).json()) as Record<string, unknown>;
     expect(c.body).toEqual(http);
     expect(c.body).toMatchObject({ ok: true, venue: "ex", interval: "1h", candles: [{ o: 2990, c: 3000 }] });
-    expect((await tool("portfolio_candles", { venue: "ex", symbol: "NOPE" })).body).toMatchObject({ ok: false, code: "E_VENUE_REJECTED" });
+    expect((await tool("portfolio_live_candles", { venue: "ex", symbol: "NOPE" })).body).toMatchObject({ ok: false, code: "E_VENUE_REJECTED" });
+    const pub = await tool("portfolio_live_candles", { venue: "binance", symbol: "BTC/USDT" });
+    expect(pub.error).toBe(true);
+    expect(pub.body).toMatchObject({ ok: false, code: "E_WALLET_NOT_CONNECTED" });
+  }, 30_000);
+
+  it("a connected venue's book and trades, in the shape the market's book answers, from the connected routes", async () => {
+    const q = `venue=ex&symbol=${encodeURIComponent(PERP.symbol)}`;
+    const b = await tool("portfolio_live_book", { venue: "ex", symbol: PERP.symbol });
+    const book = (await (await fetch(`${server.url}/api/account/connected/book?${q}&depth=20`)).json()) as Record<string, any>;
+    const trades = (await (await fetch(`${server.url}/api/account/connected/trades?${q}&limit=30`)).json()) as Record<string, any>;
+    if (book.refusal) expect(b.body).toMatchObject({ ok: false, code: book.refusal.code });
+    else {
+      // `at` is when the top was read, a few ms apart between the two reads
+      const { at: _at, ...same } = book.book as Record<string, unknown>;
+      expect(b.body).toMatchObject({ ok: true, venue: "ex", book: same });
+      expect(b.body.public).toBeUndefined();
+    }
+    if (!trades.refusal && !book.refusal) expect(b.body.trades).toEqual(trades.trades);
+    const pub = await tool("portfolio_live_book", { venue: "binance", symbol: "BTC/USDT" });
+    expect(pub.error).toBe(true);
+    expect(pub.body).toMatchObject({ ok: false, code: "E_WALLET_NOT_CONNECTED" });
   }, 30_000);
 });

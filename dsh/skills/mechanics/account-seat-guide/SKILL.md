@@ -19,7 +19,7 @@ operator's venues; the seat trades inside limits the operator signs on the face 
   (Guard mode, thirty minutes). The answer to a carded order is `{pending: true, card: {id}}`:
   tell the operator the card id, then `portfolio_wait {card}` (55 s at most; ask again until
   `done`) or `portfolio_approval {id}`. Do not place the order again while a card waits.
-- **The loop.** `portfolio_account` → `portfolio_venues` / `portfolio_explore` →
+- **The loop.** `portfolio_account` → `portfolio_venues` / `mcp__market__market_explore` →
   `portfolio_live_preview` → `portfolio_live_order` → the two cards → `portfolio_wait` →
   `portfolio_report` (`taking`, `done`, `cannot`). `portfolio_live_cancel` never cards on
   the Account's side; a cancel still passes the face's card.
@@ -32,9 +32,11 @@ operator's venues; the seat trades inside limits the operator signs on the face 
   window, expiry), `E_WALLET_LIVE_WRITES_OFF` (the service runs read-only; paper orders
   are refused too), `E_ACCOUNT_CARD_EXPIRED` (nobody answered in thirty minutes). They
   are facts about the limits, not errors to retry.
-- **The quotes are public and unguarded.** `portfolio_candles`, `portfolio_book`,
-  `portfolio_explore` and `portfolio_live_markets` read public sources seconds to minutes
-  old, with no point-in-time guard: interactive research only, never backtest evidence.
+- **The quotes are public and unguarded.** `market_candles`, `market_book`,
+  `market_explore` (the market's, under `mcp__market__`, keyless, no card) and
+  `portfolio_live_markets` read public sources seconds to minutes old, with no
+  point-in-time guard: interactive research only, never backtest evidence. A connected
+  venue's own bars and book are `portfolio_live_candles` and `portfolio_live_book`.
   Paper orders and positions carry `paper: true`; a paper fill is a rehearsal, not money.
 - **Never** write a key, a secret, an address of the operator's or an IP into
   `portfolio_remember`; the Account refuses them, and a memory grants nothing.

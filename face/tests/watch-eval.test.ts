@@ -41,10 +41,10 @@ function level(symbol: string, kind: LevelKind, at: number | [number, number], w
   };
 }
 function moveRule(id: string, symbols: string[], movePct: number, cooldownMs = 1_800_000): Rule {
-  return { file: "desk/rules.yml", index: 0, id, symbols: { holdings: false, levels: false, symbols }, annotate: false, kind: "move_pct", movePct, cooldownMs };
+  return { file: "desk/rules.yml", index: 0, id, symbols: { holdings: false, levels: false, symbols }, annotate: false, urgent: false, kind: "move_pct", movePct, cooldownMs };
 }
 function gapRule(id: string, symbols: string[], gapPct: number): Rule {
-  return { file: "desk/rules.yml", index: 1, id, symbols: { holdings: false, levels: false, symbols }, annotate: false, kind: "gap", gapPct };
+  return { file: "desk/rules.yml", index: 1, id, symbols: { holdings: false, levels: false, symbols }, annotate: false, urgent: false, kind: "gap", gapPct };
 }
 const keysOf = (book: { levels?: Level[]; rules?: Rule[] }): PriceKey[] => priceKeys({ levels: book.levels ?? [], rules: book.rules ?? [], holdings: [] });
 

@@ -9,9 +9,9 @@
  * ledger, the sleep watch and `GET /data/desk/status`, and P1 adds the `OFF` switch and the Desk
  * panel's `POST /data/desk/pause` (the panel itself is client/desk-panel.js, in the chat page rather
  * than a `/desk` page), mounts the two desk tools and the desk's guard, which src/desk-tools.ts
- * defines, and runs the Telegram bridge, src/telegram.ts.
+ * defines, and runs the phone bridge, src/phone-bridge.ts, over the account's inbox and send (src/phone.ts).
  * Of the ledger's files (§5.7) this module keeps `events.jsonl`, `OFF` and P3's `MUTE`;
- * {@link appendRecord} is the append path for the others, the bridge's `telegram.jsonl`, P2's firing
+ * {@link appendRecord} is the append path for the others, P2's firing
  * ledger, {@link FIRINGS_FILE}, and P3's {@link ALERTS_FILE} and {@link FILINGS_FILE} among them,
  * {@link appendChain} one writer's ordered queue onto it, {@link appendRecordOnce} the path for a
  * record that must land once, and {@link readRecords} reads any of them back. `events.jsonl` has
@@ -65,7 +65,7 @@
  * {@link installDesk} mounts it all on a booted face. The status route ({@link deskStatus}:
  * pid, version, uptime, this run's gaps, the ledger's runs, the pause in force, the desk
  * conversation, today's desk turns and their tokens, the day's budget, the standing orders when
- * their clock runs, and the Telegram bridge) and the pause route
+ * their clock runs, and the phone bridge) and the pause route
  * are mounted always, and so are the desk tools and the guard, so a face with the desk off -
  * a second face beside the service, §5.2 - still answers, with `desk.enabled: false`, and an old
  * desk conversation it opens keeps its tools and its guard; the `boot` event, the watch, the desk
@@ -89,7 +89,8 @@ import type { MarketQuoteSource } from "./market-quotes.ts";
 import type { FiringRouteCtx, ScheduleDeps, ScheduleHandle } from "./schedule.ts";
 import type { StandingStatus } from "./standing.ts";
 import type { RouteRegistrar } from "./static.ts";
-import type { BridgeHandle, TelegramConfig } from "./telegram.ts";
+import type { PhoneBridgeHandle } from "./phone-bridge.ts";
+import type { AccountPhoneStatus, PhoneClient } from "./phone.ts";
 import { DSH_PIN } from "./version.ts";
 import type { DeskCalendars } from "./market-clock.ts";
 import type { EdgarFetch } from "./edgar.ts";
@@ -1074,25 +1075,20 @@ export function budgetReplyLine(state: BudgetState): string {
     + "It opens again at midnight ET, or raise budget.dailyTokens in standing.yml";
 }
 
-/** The Telegram bridge as the status reports it: `configured`, whether its token and the
- * operator's id are both set; `polling`, whether its loop runs; `lastPollAt`, its last poll;
- * `dropped`, the updates it refused as not the operator's private chat, and `lastDroppedFrom`,
- * the last one's sender; `queued`, the messages waiting in its outbox; `conflictAt`, the last time
- * Telegram said another poller holds the token; `blocked`, present while Telegram's last answer to
- * a send was 403 - the operator blocked the bot, or never started it - and no send has gone
- * through since; `pollFailing`, present while the polls fail - a revoked token's 401, a mistyped
- * one's 404, a 409, the network - `since` the first that failed after the last that answered, and
- * `reason`, why the last one failed, redacted as every line of the bridge's is. */
-export interface TelegramStatus {
+/** The phone bridge as the status reports it (src/phone-bridge.ts): `configured`, whether the face has the account's
+ * half to reach - the `mcp-account` row not disabled; `polling`, whether its loop runs; `lastPollAt`, the last read of
+ * the account's inbox that answered; `accountFailing`, present while the reads fail - `since` the first that failed after
+ * the last that answered, and `reason`, why the last one failed; and, as the account's last answer gave them, `networks`,
+ * the networks connected and how each polls; `queued`, the messages waiting in the account's outbox; `strangers`, how
+ * many senders Account › Identity's Not you lists. */
+export interface PhoneStatus {
   configured: boolean;
   polling: boolean;
   lastPollAt?: string;
-  dropped: number;
-  lastDroppedFrom?: number;
+  accountFailing?: { since: string; reason: string };
+  networks: AccountPhoneStatus["networks"];
   queued: number;
-  conflictAt?: string;
-  blocked?: boolean;
-  pollFailing?: { since: string; reason: string };
+  strangers: number;
 }
 
 /** What `GET /data/desk/status` answers. `pid`, `version` (the dsh version this face runs),
@@ -1104,7 +1100,7 @@ export interface TelegramStatus {
  * day's cap ({@link BudgetState}) - optional in the type, so a status built by hand may leave it out,
  * and always set by {@link deskStatus}; `standing`, the standing orders as their clock reports them
  * (src/standing.ts `StandingStatus`), present only while a provider has one; `watch`, the watch's status
- * (src/watch.ts `WatchStatus`), present only while the watch runs; `telegram`, the bridge's
+ * (src/watch.ts `WatchStatus`), present only while the watch runs; `phone`, the bridge's
  * state, present only when a provider is passed - {@link installDesk} always passes one, so the route
  * and `desk_state` always carry it. `ledgerError` is present only when the ledger could not be
  * read - its code, or its message when it has none - and `asleep` and `runs` are then empty,
@@ -1124,7 +1120,7 @@ export interface DeskStatus {
   turnsToday: { count: number; usage: Omit<TurnUsage, "routes"> };
   budget?: BudgetState;
   standing?: StandingStatus;
-  telegram?: TelegramStatus;
+  phone?: PhoneStatus;
   watch?: WatchStatus;
   ledgerError?: string;
 }
@@ -1146,7 +1142,7 @@ export interface DeskStatus {
  * being the ledger's too.
  * @param deps - `home`, the harness home; `bootedAt`, when this run began, in ms since the epoch;
  *   `enabled`, whether the desk's rows are mounted; `now`, `pid` and `version`, defaulting to
- *   `Date.now`, `process.pid` and {@link DSH_PIN}; `telegram`, the bridge's status, `dailyTokens`,
+ *   `Date.now`, `process.pid` and {@link DSH_PIN}; `phone`, the bridge's status, `dailyTokens`,
  *   the day's cap (the standing orders' last good load), `standing`, the standing orders'
  *   status, and `watch`, the watch's (src/watch.ts) - each read once per call when given,
  *   `dailyTokens`, `standing` and `watch` answering `undefined` while there is none.
@@ -1158,7 +1154,7 @@ export async function deskStatus(deps: {
   now?: () => number;
   pid?: number;
   version?: string;
-  telegram?: () => TelegramStatus;
+  phone?: () => PhoneStatus;
   dailyTokens?: () => number | undefined;
   standing?: () => StandingStatus | undefined;
   watch?: () => WatchStatus | undefined;
@@ -1202,7 +1198,7 @@ export async function deskStatus(deps: {
     turnsToday,
     budget,
     ...(standing === undefined ? {} : { standing }),
-    ...(deps.telegram === undefined ? {} : { telegram: deps.telegram() }),
+    ...(deps.phone === undefined ? {} : { phone: deps.phone() }),
     ...(watch === undefined ? {} : { watch }),
     ...(ledgerError === undefined ? {} : { ledgerError }),
   };
@@ -1215,24 +1211,29 @@ function offLine(off: OffState, now: Date): string {
   return `desk: paused since ${deskTime(new Date(off.setAt), now)} by ${off.by}${until} (npm run desk -- resume)`;
 }
 
-/** The Telegram line: where its keys go while it has none; else, first, that the operator blocked the bot
- * when Telegram says so, then whether it polls, its last poll, what it dropped and holds queued, its
- * last conflict when it had one, and - last, its reason being Telegram's own words - `poll failing since
- * <time>: <reason>` while the polls fail. */
-function telegramLine(telegram: TelegramStatus, now: Date): string {
-  if (!telegram.configured) return "telegram: not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)";
+/** The phone line: that the face has no account's half to reach; that the account has no network connected, and where
+ * one is; else each network and whether it polls - `blocked (403)` first when the operator blocked the bot - the last
+ * read of the inbox, what the account's outbox holds and how many strangers Not you lists, then a network's last
+ * conflict and its failing poll; and last, while the account does not answer, since when and why.
+ * @param phone - the bridge's status.
+ * @param now - when the line is read.
+ */
+export function phoneLine(phone: PhoneStatus, now: Date): string {
+  if (!phone.configured) return "phone: none (the account's half is off)";
+  const failing = phone.accountFailing === undefined ? ""
+    : `, the account has not answered since ${deskTime(new Date(phone.accountFailing.since), now)}: ${phone.accountFailing.reason}`;
+  if (phone.networks.length === 0) return `phone: nothing connected (Account › Identity)${failing}`;
   const parts = [
-    ...(telegram.blocked === true ? ["blocked (403)"] : []),
-    telegram.polling ? "polling" : "not polling",
-    telegram.lastPollAt === undefined ? "no poll yet" : `last poll ${deskTime(new Date(telegram.lastPollAt), now)}`,
-    `${telegram.dropped} dropped`,
-    `${telegram.queued} queued`,
+    phone.networks.map((n) => `${n.network} ${n.blocked === true ? "blocked (403), " : ""}${n.polling ? "polling" : "not polling"}`).join(", "),
+    phone.lastPollAt === undefined ? "no poll yet" : `last poll ${deskTime(new Date(phone.lastPollAt), now)}`,
+    `${phone.queued} queued`,
+    `${phone.strangers} stranger${phone.strangers === 1 ? "" : "s"}`,
   ];
-  if (telegram.conflictAt !== undefined) parts.push(`conflict at ${deskTime(new Date(telegram.conflictAt), now)}`);
-  if (telegram.pollFailing !== undefined) {
-    parts.push(`poll failing since ${deskTime(new Date(telegram.pollFailing.since), now)}: ${telegram.pollFailing.reason}`);
+  for (const n of phone.networks) {
+    if (n.conflictAt !== undefined) parts.push(`${n.network} conflict at ${deskTime(new Date(n.conflictAt), now)}`);
+    if (n.pollFailing !== undefined) parts.push(`${n.network} poll failing since ${deskTime(new Date(n.pollFailing.since), now)}: ${n.pollFailing.reason}`);
   }
-  return `telegram: ${parts.join(", ")}`;
+  return `phone: ${parts.join(", ")}${failing}`;
 }
 
 /**
@@ -1329,9 +1330,9 @@ export function standingLines(s: StandingStatus, now: Date): string[] {
 
 /**
  * The desk's lines as the operator reads them, in `npm run service -- status` (scripts/service.ts
- * `formatStatus`) and in the phone's `/status` (src/telegram.ts): the desk line - how long the face has
+ * `formatStatus`) and in the phone's `/status` (src/phone-bridge.ts): the desk line - how long the face has
  * been up and since when, and whether the desk is on - then, while a pause is in force, the pause line;
- * when the status carries the bridge, the Telegram line; when it carries the day's budget, the budget
+ * when the status carries the bridge, the phone line ({@link phoneLine}); when it carries the day's budget, the budget
  * line ({@link budgetLine}); when it carries the standing orders - while their clock runs - their
  * lines ({@link standingLines}); and when it carries the watch - while it runs - its lines
  * ({@link watchLines}). Each time is New York's, as {@link deskTime} shows it - dated when it
@@ -1345,7 +1346,7 @@ export function deskStatusLines(status: DeskStatus, now: Date): string[] {
   const minutes = Math.floor(status.uptimeMs / 60_000) % 60;
   const lines = [`up ${hours}h ${minutes}m since ${status.bootedAt} · desk ${status.desk.enabled ? "on" : "off (FACE_DESK=0)"}`];
   if (status.off !== undefined) lines.push(offLine(status.off, now));
-  if (status.telegram !== undefined) lines.push(telegramLine(status.telegram, now));
+  if (status.phone !== undefined) lines.push(phoneLine(status.phone, now));
   if (status.budget !== undefined) lines.push(budgetLine(status.budget));
   if (status.standing !== undefined) lines.push(...standingLines(status.standing, now));
   if (status.watch !== undefined) lines.push(...watchLines(status.watch, now));
@@ -1602,11 +1603,11 @@ const watchClock = (now: () => number): DeskClock => ({
  * started without being awaited - its `start` never rejects. It starts once the bridge, if any, has set the
  * outlet, so a line about a phone turn a restart cut finds it. The desk session is so ensured and
  * supervised before any phone message, and a turn the operator opens from the browser is timed,
- * fenced and recorded like a phone turn. Given `telegram` as well, the Telegram bridge
- * (src/telegram.ts) runs on that conversation: its module loads on first use and the bridge starts
+ * fenced and recorded like a phone turn. Given `phone` as well, the phone bridge
+ * (src/phone-bridge.ts) runs on that conversation over the account's inbox and send: its module loads on first use and the bridge starts
  * without being awaited, on the same `now`. The status route and `desk_state` report the bridge's
- * own status ({@link TelegramStatus}); a face that runs no bridge reports `configured` - whether
- * `telegram` was given - and nothing polling, dropped or queued. With the conversation, the standing
+ * own status ({@link PhoneStatus}); a face that runs no bridge reports `configured` - whether
+ * `phone` was given - and nothing polling, connected, queued or strange. With the conversation, the standing
  * orders' clock (src/schedule.ts) runs too: its module loads on first use, once the bridge has set the
  * outlet, and `schedule` settles to it; its firings deliver through the conversation, the status route
  * and `desk_state` read its orders and its cap, and the conversation's budget is the day's tokens
@@ -1621,7 +1622,7 @@ const watchClock = (now: () => number): DeskClock => ({
  * its lease released - then the annotation lane - a check under way cancelled as `shutdown`, its agent let go,
  * waited for 12 s at most -
  * then the bridge - no phone text is posted from then on,
- * and its outbox stays for the next boot -
+ * and its read of the account's inbox is cut, its cursor kept for the next boot -
  * then the conversation, which cancels the desk turns under way as `shutdown`, gives each cut agent
  * two seconds to go idle so the cut turn is recorded, and gives a start, post or renew under way
  * five seconds to settle, so nothing the conversation writes lands after the `shutdown` - then
@@ -1642,10 +1643,10 @@ const watchClock = (now: () => number): DeskClock => ({
  *   (src/desk-session.ts `resolveDeskRoute`), `sessionCtx`, the booted ROOT context as the
  *   conversation reads it - and its default model and model calls, which a standing order's route
  *   is resolved on - and
- *   `installModelSelection`, dsh-agent's - the four the conversation needs; `telegram`, the
- *   bridge's token and operator id (src/telegram.ts `telegramConfigFromEnv`), absent when either
- *   is unset; `deskDeadlineMs`, every desk turn's deadline, handed to the conversation as its
- *   `deadlineMs` (its own five minutes when absent) - a test seam, which tests/telegram-smoke.test.ts
+ *   `installModelSelection`, dsh-agent's - the four the conversation needs; `phone`, the
+ *   account's inbox and send (src/phone.ts `createPhoneClient`), absent when the `mcp-account` row
+ *   is disabled; `deskDeadlineMs`, every desk turn's deadline, handed to the conversation as its
+ *   `deadlineMs` (its own five minutes when absent) - a test seam, which tests/phone-smoke.test.ts
  *   sets to 1,500 so a parked card is cut in a second and a half; main.ts never passes it;
  *   `python`, the interpreter a `.py` script producer runs under - `FACE_PYTHON || python3` when absent
  *   (no calendar needs it: the market clock is builtin); `schedule`, the clock's seams for tests - its
@@ -1673,7 +1674,7 @@ export function installDesk(
     route?: { provider: string; model: string };
     sessionCtx?: DeskConversationCtxLike & Partial<FiringRouteCtx>;
     installModelSelection?: NonNullable<DeskSessionDeps["installModelSelection"]>;
-    telegram?: TelegramConfig;
+    phone?: PhoneClient;
     deskDeadlineMs?: number;
     python?: string;
     schedule?: { clock?: DeskClock; calendars?: Partial<DeskCalendars> } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;
@@ -1695,15 +1696,15 @@ export function installDesk(
   const bootedAt = now();
   /* The bridge once it runs; until then, and in a face that runs none, the status says only whether its
    * two names are set. */
-  let bridge: BridgeHandle | undefined;
-  const telegram = (): TelegramStatus => bridge?.status() ?? { configured: deps.telegram !== undefined, polling: false, dropped: 0, queued: 0 };
+  let bridge: PhoneBridgeHandle | undefined;
+  const phone = (): PhoneStatus => bridge?.status() ?? { configured: deps.phone !== undefined, polling: false, networks: [], queued: 0, strangers: 0 };
   /* The standing orders' clock once it runs: the status's orders and the day's cap are its; until then, and in a
    * face that runs none, there are no orders and no cap. */
   let schedule: ScheduleHandle | undefined;
   /* The watch once it runs (P3): the status's `watch` is its; until then, and in a face that runs none, there is none. */
   let watch: WatchHandle | undefined;
   const status = {
-    home, bootedAt, enabled, now, version, telegram,
+    home, bootedAt, enabled, now, version, phone,
     dailyTokens: () => schedule?.dailyTokens(),
     standing: () => schedule?.status(),
     watch: () => watch?.status(),
@@ -1756,12 +1757,13 @@ export function installDesk(
    * MODULE WEIGHT): the pause switch and scripts/service.ts import this module and never run a bridge. Not
    * awaited, and it never rejects - a module that cannot load, or a bridge that throws as it installs, is one line; a
    * module that arrives once dispose has begun installs nothing. */
-  const config = deps.telegram;
-  const bridging = config === undefined || conversation === undefined ? Promise.resolve() : import("./telegram.ts").then(
-    (telegramModule) => {
+  const client = deps.phone;
+  const bridging = client === undefined || conversation === undefined ? Promise.resolve() : import("./phone-bridge.ts").then(
+    (bridgeModule) => {
       if (disposing !== undefined) return;
-      bridge = telegramModule.installTelegramBridge({
-        config: { ...config, clock: config.clock ?? clock },
+      bridge = bridgeModule.installPhoneBridge({
+        phone: client,
+        clock,
         home,
         conversation,
         status: () => deskStatus(status),
@@ -1773,7 +1775,7 @@ export function installDesk(
     },
   ).catch((err: unknown) => {
     /* the module's load and the bridge's install alike: one line, and the desk goes on without a bridge */
-    log(`${BIN}: desk: the Telegram bridge could not be started: ${reasonOf(err)}`);
+    log(`${BIN}: desk: the phone bridge could not be started: ${reasonOf(err)}`);
   });
   /* The conversation starts once the bridge has set the outlet (or there is no bridge): a start that resumed the desk
    * session may answer a phone turn the restart cut at once (src/desk-conversation.ts AFTER A RESTART), and that line
@@ -1804,7 +1806,7 @@ export function installDesk(
         session: wiring.session,
         sessionCtx: wiring.sessionCtx,
         on: wiring.on,
-        deliver: (text) => conversation.deliver(text),
+        deliver: (text, opts) => conversation.deliver(text, opts),
         log,
         /* the schedule's clock reads the same now as the conversation's, unless a test hands it a clock of its own */
         ...(deps.now === undefined ? {} : { now: deps.now }),

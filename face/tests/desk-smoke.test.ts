@@ -10,7 +10,7 @@
  * instruction-chain threat the face's fence exists for, and the ledger's `desk-turn` record with its tokens.
  * The desk runs as main.ts runs it: `installDesk` on the booted face, its conversation
  * (src/desk-conversation.ts) the one owner of the desk session, every turn opened through `post`. That the
- * guard denies a desk turn's own write of GRAVIT.md is tests/telegram-smoke.test.ts's canary.
+ * guard denies a desk turn's own write of GRAVIT.md is tests/phone-smoke.test.ts's canary.
  *
  * WHERE IT RUNS. The fixture root is `tests/tmp/desk-smoke-<pid>/`, INSIDE the repository and without a
  * `.git` of its own, so the repository's `.git` is the project root: the repository's GRAVIT.md heads the
@@ -32,6 +32,7 @@
  * Own file, gated: one boot per process (smoke.test.ts).
  * @module
  */
+import "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -503,7 +504,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
      * cancel, so each is answered, in order, and reaches the outlet. The stopped turn is recorded as cancelled, with
      * the phone's reason; it said nothing, so the phone hears only the bridge's own "stopped"; levels.yml is unchanged. */
     const sent: string[] = [];
-    conversation.setOutlet({ send: async (text) => { sent.push(text); return { sent: [sent.length] }; } });
+    conversation.setOutlet({ send: async (text) => { sent.push(text); return { sent: [`telegram:${sent.length}`] }; } });
     const turnsBeforeStop = (await deskTurns()).length;
     const asked = (): number => (deskAgent.session.snapshotEvents() as unknown as Ev[]).filter((e) => e.type === "approval/asked").length;
     const post = (text: string) => conversation.post({

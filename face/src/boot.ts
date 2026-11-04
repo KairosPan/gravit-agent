@@ -131,6 +131,7 @@ import { declareDeskPreset, deskPresetDefinition, deskRosterProblem } from "./de
 import { readProtocols } from "./protocols.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, instructionsPatch } from "./instructions.ts";
 import { accountSeatPatches } from "./account-seat.ts";
+import { marketRowPatches } from "./market-row.ts";
 import { lunhuiPatches } from "./lunhui.ts";
 import { facePolicyPatches } from "./policy.ts";
 import {
@@ -258,6 +259,12 @@ export interface FaceBootOptions {
    * way instead of appending rows to the copy's patch file. `main.ts` never
    * sets it; unset, the stack is exactly what it was without the option. */
   extraPatches?: FacePatchList;
+  /** Told once for each call Gate 2 ASKS about - a card raised - with the tool's name and its
+   * arguments, never for a call it denies or a tool it is not about ({@link armOrderGate}). Called
+   * and never awaited: the card is asked whatever it does, and a throw is one line. `main.ts` sets
+   * it only with the desk on (plan B1a ruling 10), to send the phone a card notice in words only
+   * (src/card-notice.ts); unset, nothing is told. */
+  onCardAsked?: (name: string, args: unknown) => void;
 }
 
 /** What {@link bootFace} hands back. */
@@ -382,8 +389,11 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
   /* The Account seat (src/account-seat.ts): the project layer, right after
    * the policy defaults, below everything the operator writes. */
   const seatPatches = accountSeatPatches();
+  /* The market row (src/market-row.ts): the market's own keyless reads, the
+   * same project layer, right after the seat, so a patch disables either alone. */
+  const marketPatches = marketRowPatches();
   /* The Lunhui rows (src/lunhui.ts, modules spec §5.12): the same project
-   * layer, right after the seat, below everything the operator writes. */
+   * layer, right after the market row, below everything the operator writes. */
   const lunhuiRows = lunhuiPatches();
   const homePatches = loadOptionalPatches(BIN, join(home, PROFILE_PATCH_FILENAME)) ?? [];
   /* Cloned: the include's patch algorithm pushes inserted rows by reference
@@ -391,7 +401,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * could rewrite them under the caller. */
   const extraPatches: FacePatchList = structuredClone(opts.extraPatches ?? []);
   const patches: FacePatchList = [
-    ...bundlePatches, ...policyPatches, ...seatPatches, ...lunhuiRows, ...profile.patches, ...homePatches, ...extraPatches,
+    ...bundlePatches, ...policyPatches, ...seatPatches, ...marketPatches, ...lunhuiRows, ...profile.patches, ...homePatches, ...extraPatches,
   ];
   /* Both switches below are guarded on the row actually being in the composed
    * tree. A patch that matches nothing is inert and — measured, not assumed —
@@ -402,7 +412,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * never mounted the row. (With the policy layer disabling
    * `session-telemetry-otel` by default the env switch is redundant until an
    * operator re-enables the row - and then it still wins, composing after.) */
-  const below = composeEntries([bundlePatches, policyPatches, seatPatches, lunhuiRows, profile.patches, homePatches, extraPatches]);
+  const below = composeEntries([bundlePatches, policyPatches, seatPatches, marketPatches, lunhuiRows, profile.patches, homePatches, extraPatches]);
   const rows = new Set(below.flatMap((row) => (typeof row.id === "string" ? [row.id] : [])));
   /* app-boot exports the CLI's own resolver now (NEW packages/boot/app-boot/
    * src/profile-context.ts:52-55): ANY non-empty value disables, and a
@@ -771,10 +781,14 @@ interface GateEventsLike {
  * context at call time; `tools` is not in its inject list, so its arming and
  * re-arming above are unchanged, and while no registry is live it decides as
  * before.
+ * CARD NOTICE. When the decision is `ask` - a card is about to be raised - the listener tells
+ * `onCardAsked` the name and arguments, without awaiting it, before it hands the decision back; a
+ * throw is one line and the card is asked the same. Nothing else - a denial, a read, `next()` - is told.
  * @param hostCtx - the root context `boot()` hands `prepare`.
+ * @param onCardAsked - {@link FaceBootOptions.onCardAsked}, if any.
  * @returns the two fibers, for {@link assertOrderGateArmed} once `boot()` settles.
  */
-export function armOrderGate(hostCtx: Context): OrderGateFibers {
+export function armOrderGate(hostCtx: Context, onCardAsked?: (name: string, args: unknown) => void): OrderGateFibers {
   const listener = hostCtx.inject(["approval"], function orderGateAskListener(gateCtx) {
     const approval = gateCtx.get("approval") as GateApprovalLike | undefined;
     /* The inject guarantees it (a fiber runs only for the epoch its services
@@ -804,6 +818,13 @@ export function armOrderGate(hostCtx: Context): OrderGateFibers {
         exec.arguments,
         visible,
       );
+      if (decision?.kind === "ask" && onCardAsked !== undefined) {
+        try {
+          onCardAsked(exec.name, exec.arguments);
+        } catch (err) {
+          console.error(`${BIN}: a card notice failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
       return decision ?? next();
     }, { prepend: true });
   });
@@ -950,7 +971,7 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
        * each will the moment its service does, instead of once boot() has
        * settled, by which time a slow row may have let unary `/api` drive a
        * turn into a live order tool with nothing listening. */
-      gate = armOrderGate(hostCtx);
+      gate = armOrderGate(hostCtx, opts.onCardAsked);
     });
     app.current = ctx;
     await assertEntriesActive(ctx);

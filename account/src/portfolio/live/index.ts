@@ -38,13 +38,13 @@ import { KALSHI_KEY, kalshiSource } from "./kalshi.ts";
 import { locator } from "./location.ts";
 import { metamaskSource, type RunMm } from "./metamask.ts";
 import { PAPER_DEFAULT_CASH, paperSource, parsePaperCash } from "./paper.ts";
-import type { PublicSource } from "./public-markets.ts";
-import type { MarketHub } from "./stream-hub.ts";
+import type { PublicSource } from "../market/shapes.ts";
+import type { MarketHub } from "../market/shapes.ts";
 import { POLYMARKET_TRADE_KEY, polymarketTradeSource } from "./polymarket-clob.ts";
 import { POLYMARKET_US_KEY, polymarketUsSource } from "./polymarket-us.ts";
 import { ROBINHOOD_CRYPTO_KEY, realMcp, robinhoodCryptoSource, robinhoodStocksSource, type OpenMcp } from "./robinhood.ts";
 import type { OAuthSignIn } from "./signin.ts";
-import type { Price } from "./prices.ts";
+import type { Price } from "../market/shapes.ts";
 import type { WalletProofs } from "./proof.ts";
 import type { Http, LiveBalance, LiveSource } from "./types.ts";
 

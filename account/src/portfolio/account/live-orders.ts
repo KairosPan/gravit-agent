@@ -29,7 +29,7 @@ import { canonical } from "../../core/hash.ts";
 import { no, unaddressed } from "../refuse.ts";
 import type { Intent } from "../accounts.ts";
 import { isExpired } from "../openness.ts";
-import { holdBackMs } from "../live/public-markets.ts";
+import { holdBackMs } from "../market/shapes.ts";
 import { ceilTo, DONE, floorTo, inDollars, notionalOf, onStep, ORDER_TYPES, plain, TIFS, type LiveTrader, type Market, type MarketKind, type OrderChange, type OrderRequest, type OrderState, type OrderStatus, type OrderType, type Position, type Side, type TimeInForce } from "../live/trade.ts";
 import type { CardLike, Outcome } from "./exchange.ts";
 import type { LiveEngine, LiveMoney, LiveVenue } from "./live-moves.ts";

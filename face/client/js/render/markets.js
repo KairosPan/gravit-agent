@@ -127,8 +127,8 @@ function cnSearchWord(m, searching) {
   return searching && missed ? 'Search is unavailable' : '';
 }
 
-// China's muted lines: the session's (Closed, the midday break); then the Account's own words when it says China's read is stale,
-// else, for a ranking the proxy re-served as last read (the Account not answering), that; else a refresh that failed over the
+// China's muted lines: the session's (Closed, the midday break); then the market's own words when it says China's read is stale,
+// else, for a ranking the proxy re-served as last read (the market not answering), that; else a refresh that failed over the
 // rows kept
 function chinaLines(read, data, session) {
   const why = data?.status?.state === 'stale' ? String(data.status.said ?? '').trim()

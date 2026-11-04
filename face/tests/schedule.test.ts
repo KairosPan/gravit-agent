@@ -126,7 +126,7 @@ function recordingRun(calls: RunCall[], hold?: (call: RunCall, deps: FiringDeps)
     const record: FinishedRecord = {
       t: new Date(deps.clock.now()).toISOString(), kind: "finished", key: item.key, order: item.order.id, date: item.date, wallMs: 4_000,
       turn: { sessionId: "session-run", outcome: "ended", deadlineMs: item.order.turnDeadlineMs, wallMs: 3_000 },
-      files: [], delivery: { sent: [1] }, chars: 5,
+      files: [], delivery: { sent: ["telegram:1"] }, chars: 5,
     };
     await appendRecord(deps.home, FIRINGS_FILE, record);
     return record;
@@ -172,7 +172,7 @@ function rig(fx: Fixture, start: string, opts: {
     createAgent: (o) => agents.createAgent(o),
     resolveRoute: async () => ({ provider: "stub", model: "echo" }),
     on: fakeBus().on,
-    deliver: (text) => out.deliver(text),
+    deliver: (text, o) => out.deliver(text, o),
     budget: () => readBudget(fx.home, clock.now(), handle?.dailyTokens()),
     log: (line) => { lines.push(line); },
     tickMs: DAY_MS,
@@ -1092,7 +1092,7 @@ test("lines held back while paused are not counted as phoned: each event lands o
   const fx = await fixture();
   await arm(fx.home, [ENTRY, { ...ENTRY, id: "old", expires: "2026-11-30" }]);
   let paused = true;
-  const answer = (): DeliverResult => (paused ? { undelivered: "paused" } : { sent: [1] });
+  const answer = (): DeliverResult => (paused ? { undelivered: "paused" } : { sent: ["telegram:1"] });
   /* 2026-12-02 is a date the calendar cannot answer, and the day after "old" expired */
   const r = rig(fx, "2026-12-02T15:00:00Z", { answer });
   await writeOff(fx.home, { by: "terminal" }, () => r.clock.now());
@@ -1123,7 +1123,7 @@ test("lines held back while paused are not counted as phoned: each event lands o
 test("a standing.yml refused while paused is phoned once the pause lifts, while it still stands; its event lands once", async () => {
   const fx = await fixture();
   let paused = true;
-  const r = rig(fx, "2026-11-27T15:00:00Z", { answer: () => (paused ? { undelivered: "paused" } : { sent: [1] }) });
+  const r = rig(fx, "2026-11-27T15:00:00Z", { answer: () => (paused ? { undelivered: "paused" } : { sent: ["telegram:1"] }) });
   await writeStanding(fx.home, "orders: [\n");
   await r.clock.advance(0);
   await at(r, "2026-11-27T15:00:00Z");
@@ -1146,7 +1146,7 @@ test("a refusal whose line the pause held is recorded reported: false, and the l
   const fx = await fixture();
   await arm(fx.home, [ENTRY]);
   let paused = true;
-  const r = rig(fx, "2026-11-27T17:30:00Z", { answer: () => (paused ? { undelivered: "paused" } : { sent: [1] }) });
+  const r = rig(fx, "2026-11-27T17:30:00Z", { answer: () => (paused ? { undelivered: "paused" } : { sent: ["telegram:1"] }) });
   await writeFile(join(fx.root, "desk", "STANDING.md"), "# changed\n");
   await r.clock.advance(0);
   await at(r, "2026-11-27T17:30:00Z");
@@ -1304,6 +1304,34 @@ const cnCalendar = (days: Record<string, MarketSession | "closed"> = CN_DAYS): M
 const CN_ENTRY: ArmEntry = { ...REPORT_ENTRY, id: "lunhui-report", market: "cn" };
 
 const standingText = async (home: string): Promise<string> => readFile(join(deskDir(home), STANDING_FILE), "utf8");
+
+test("a missed builtin:brief line goes as brief; a missed builtin:report line as report; the file's own line as report", async () => {
+  const brief = await fixture();
+  await arm(brief.home, [ENTRY]);
+  const b = rig(brief, "2026-11-27T17:40:00Z");
+  await at(b, "2026-11-27T17:40:00Z");
+  assert.equal(b.out.texts.length, 1);
+  assert.match(b.out.texts[0], /^preclose · 2026-11-27 missed its 12:30 ET anchor/);
+  assert.deepEqual(b.out.opts, [{ kind: "brief" }], "an operator who routes the brief hears it was missed");
+  await b.schedule.dispose();
+
+  const report = await strategyFixture();
+  await arm(report.home, [REPORT_ENTRY]);
+  const r = rig(report, "2026-11-30T13:10:00Z");
+  await at(r, "2026-11-30T13:10:00Z");
+  assert.equal(r.out.texts.length, 1);
+  assert.match(r.out.texts[0], /^demo-report · 2026-11-30 missed its 08:00 ET anchor/);
+  assert.deepEqual(r.out.opts, [{ kind: "report" }]);
+  await r.schedule.dispose();
+
+  const refused = await fixture();
+  await writeStanding(refused.home, "not: [a list\n");
+  const f = rig(refused, "2026-11-27T17:00:00Z");
+  await at(f, "2026-11-27T17:00:00Z");
+  assert.equal(f.out.texts.length, 1, `the file's refusal; saw ${JSON.stringify(f.out.texts)}`);
+  assert.deepEqual(f.out.opts, [{ kind: "report" }], "a line about the file as a whole names no order");
+  await f.schedule.dispose();
+});
 
 test("a changed levels.yml is refused once per change, and a rearm inside the grace fires", async () => {
   const fx = await strategyFixture();
@@ -1630,7 +1658,7 @@ test("a line held by the pause is sent after a restart, once", async () => { // 
   const answer = (text: string): DeliverResult => {
     if (paused) return { undelivered: "paused" };
     reached.push(text);
-    return { sent: [reached.length] };
+    return { sent: [`telegram:${reached.length}`] };
   };
   const r1 = rig(fx, "2026-11-30T20:00:00Z", { answer });
   await writeOff(fx.home, { by: "terminal" }, () => r1.clock.now());
@@ -1670,7 +1698,7 @@ test("a fence line held by the pause reaches the phone after a restart once; a h
     const answer = (text: string): DeliverResult => {
       if (paused) return { undelivered: "paused" };
       reached.push(text);
-      return { sent: [reached.length] };
+      return { sent: [`telegram:${reached.length}`] };
     };
     const r1 = rig(fx, "2026-11-30T13:00:00Z", { answer });
     await at(r1, "2026-11-30T13:00:10Z");
@@ -1722,7 +1750,7 @@ test("a phoned refusal never masks another held refusal of the same key: a resta
   const answer = (text: string): DeliverResult => {
     if (mode === "all" || (mode === "fence" && text === fence)) return { undelivered: "paused" };
     reached.push(text);
-    return { sent: [reached.length] };
+    return { sent: [`telegram:${reached.length}`] };
   };
   const r1 = rig(fx, "2026-11-30T13:00:00Z", { answer });
   await writeFile(join(fx.dir, "STANDING.md"), "# changed\n");
@@ -1760,7 +1788,7 @@ test("a held refusal of a boot whose standing.yml is refused reaches the phone o
   const answer = (text: string): DeliverResult => {
     if (paused) return { undelivered: "paused" };
     reached.push(text);
-    return { sent: [reached.length] };
+    return { sent: [`telegram:${reached.length}`] };
   };
   const r1 = rig(fx, "2026-11-30T13:00:00Z", { answer });
   await at(r1, "2026-11-30T13:00:10Z");

@@ -22,8 +22,8 @@ const refused = (status, body) => Object.assign(new Error(`HTTP ${status}`), { s
 const NOW = Date.parse('2026-10-22T08:00:00.000Z');
 const picksOf = (all, kind) => ({ ...all, items: all.items.filter(i => i.tabs.includes(kind)) });
 
-const CRYPTO = '/data/account/explore?tab=crypto&limit=12';
-const PREDICTIONS = '/data/account/explore?tab=predictions&limit=12';
+const CRYPTO = '/data/market/explore?tab=crypto&limit=12';
+const PREDICTIONS = '/data/market/explore?tab=predictions&limit=12';
 // the plain form the host opens the order sheet with
 const FORM = { amount: '', unit: 'usd', orderType: 'market', limit: '', extendedHours: false };
 
@@ -32,10 +32,16 @@ function rig({ answer = () => undefined, act = () => ({ status: 200, body: { ok:
   // the Account's page and All's explore read, as the Account and Markets hosts land them
   store.dispatch('accountLoaded', { data: fx('account'), at: NOW });
   store.dispatch('exploreLoaded', { tab: 'all', data: fx('explore-all'), at: NOW });
+  // `reads` are the reads but each explore's connected twin (`allReads` has it); the connected explore a test does not answer
+  // lists nothing, so the join is the market's rows
   const reads = [];
+  const allReads = [];
   const getJson = path => {
-    reads.push(path);
-    const a = answer(path);
+    allReads.push(path);
+    const twin = path.startsWith('/data/account/connected/explore?');
+    if (!twin) reads.push(path);
+    let a = answer(path);
+    if (a === undefined && twin) a = { ok: true, items: [], movers: [], closing: [], mostTraded: [], tabs: [], missing: [], notes: [] };
     return a instanceof Error ? Promise.reject(a) : Promise.resolve(a);
   };
   const timers = [];
@@ -61,7 +67,7 @@ function rig({ answer = () => undefined, act = () => ({ status: 200, body: { ok:
   let clock = NOW;
   const trade = startTrade({ store, getJson, owner, sheet, stream, schedule, cancelTimer, now: () => clock, afterAction });
   return {
-    store, trade, reads, timers, due, fire, follows, calls, acts, after,
+    store, trade, reads, allReads, timers, due, fire, follows, calls, acts, after,
     t: () => store.get().trade,
     setClock(ms) { clock = ms; },
     holdPrepare(fn) { prepare = fn; },
@@ -76,6 +82,8 @@ test('show reads the kind\'s picks now and every 20 s; a kind change reads its o
     answer: path => {
       if (path === CRYPTO) return held ? held.promise : picksOf(all, 'crypto');
       if (path === PREDICTIONS) return refused(409, { ok: false, refusal: { code: 'E_ACCOUNT_BAD_ACTION', message: 'Predictions are resting' } });
+      // the connected half fails beside the market's refusal: both failed is the failed read, in the market's sentence
+      if (path === '/data/account/connected/explore?tab=predictions&limit=12') return refused(503, { ok: false, unreachable: 'ECONNREFUSED' });
       return undefined;
     },
   });
@@ -133,10 +141,10 @@ test('show reads the kind\'s picks now and every 20 s; a kind change reads its o
 test('query reads the trade search into its own results; a blank query reads nothing and drops the one in the air', async () => {
   const all = fx('explore-all');
   let held = null;
-  const r = rig({ answer: path => (path.startsWith('/data/account/explore?q=') ? (held ? held.promise : { ...all, items: all.items.slice(0, 2) }) : undefined) });
+  const r = rig({ answer: path => (path.startsWith('/data/market/explore?q=') ? (held ? held.promise : { ...all, items: all.items.slice(0, 2) }) : undefined) });
   r.trade.query('  eth usd ');
   assert.equal(r.t().q, '  eth usd ');
-  assert.deepEqual(r.reads, ['/data/account/explore?q=eth%20usd&limit=12']);
+  assert.deepEqual(r.reads, ['/data/market/explore?q=eth%20usd&limit=12']);
   assert.equal(r.t().results.status, 'loading');
   assert.equal(r.store.get().markets.results.status, 'idle', 'never the Markets search\'s');
   await settle();
@@ -153,7 +161,7 @@ test('query reads the trade search into its own results; a blank query reads not
   await settle();
   assert.equal(r.t().results.data.items.length, 2, 'the dropped read lands nowhere');
 
-  const failing = rig({ answer: () => refused(409, { ok: false, refusal: { message: 'Search is resting' } }) });
+  const failing = rig({ answer: path => (path.startsWith('/data/account/connected/') ? refused(503, { ok: false, unreachable: 'ECONNREFUSED' }) : refused(409, { ok: false, refusal: { message: 'Search is resting' } })) });
   failing.trade.query('x');
   await settle();
   assert.equal(failing.t().results.status, 'error');
@@ -522,4 +530,27 @@ test('close stops the poll, releases the follow, and nothing lands after', async
   assert.deepEqual(r.store.get().trade, before.trade, 'the slice as it was');
   r.trade.close();
   assert.equal(r.follows.length, follows, 'closed twice: nothing more');
+});
+
+test("the picks are the joined explore, and the ticket follows its able line on the Account's stream", async () => {
+  const pub = { venue: 'kraken', venueName: 'Kraken', symbol: 'AVAX/USD', connected: false, public: true, canTrade: false, connector: 'live:exchange:kraken', price: 30, open: true };
+  const con = { venue: 'ex', venueName: 'Stand-in Exchange', symbol: 'AVAX/USDT', connected: true, public: false, canTrade: true, price: 30.1, ask: 30.2, open: true };
+  const row = at => ({ key: 'coin:AVAX', kind: 'coin', name: 'Avalanche', base: 'AVAX', price: 30, volumeUsd24h: 1_000, tabs: ['all', 'crypto'], at });
+  const body = items => ({ ok: true, asOf: '2026-10-22T08:00:00.000Z', items, movers: [], closing: [], mostTraded: [], tabs: [], missing: [], notes: [] });
+  const r = rig({
+    answer: path => (path === CRYPTO ? body([row([pub])])
+      : path === '/data/account/connected/explore?tab=crypto&limit=12' ? body([row([con])]) : undefined),
+  });
+  r.trade.show(true);
+  assert.deepEqual(r.allReads, [CRYPTO, '/data/account/connected/explore?tab=crypto&limit=12'], 'both halves, the same query');
+  await settle();
+  const picked = r.t().picks.crypto.data.items.find(i => i.key === 'coin:AVAX');
+  assert.deepEqual(picked.at.map(l => l.venue), ['ex', 'kraken'], 'the connected line first, then the public');
+  r.trade.pick('coin:AVAX');
+  assert.equal(r.calls.at(-1)[3].venue, 'ex', 'the able line is the connected one');
+  assert.deepEqual(r.follows.at(-1), ['ex:AVAX/USDT'], "followed on the Account's stream");
+  // the search is the join too
+  r.trade.query('avax');
+  assert.ok(r.allReads.includes('/data/account/connected/explore?q=avax&limit=12'));
+  r.trade.close();
 });

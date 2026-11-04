@@ -5,11 +5,11 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import { CATCH_UP_BAR, catchUpBar, FILL_SAVE_MS, OWED_MOST_MS, PAPER_DEFAULT_CASH, PRUNE_AFTER_MS, paperBookPath, paperOrder, paperSource, TRAIL_SAVE_MS, type PaperBook, type PaperChange } from "../../src/portfolio/live/paper.ts";
 import type { ExchangeClient } from "../../src/portfolio/live/exchange.ts";
-import { exchangeTickers, readLike, type Listing, type PublicSource } from "../../src/portfolio/live/public-markets.ts";
-import { HUB_URLS, IDLE_MS, joinHubs, StreamHub, type WebSocketLike } from "../../src/portfolio/live/stream-hub.ts";
+import { exchangeTickers, readLike, type Listing, type PublicSource } from "../../../market/src/live/public-markets.ts";
+import { HUB_URLS, IDLE_MS, joinHubs, StreamHub, type WebSocketLike } from "../../../market/src/live/stream-hub.ts";
 import { usClock, usSessionFull } from "../../src/portfolio/account/calendar.ts";
-import { CBOE_DELAY_MS, CBOE_FROM } from "../../src/portfolio/live/public-stocks.ts";
-import { ROBINHOOD_FROM, ROBINHOOD_PRICES, usQuote, UsQuoteFeed } from "../../src/portfolio/live/us-quotes.ts";
+import { CBOE_DELAY_MS, CBOE_FROM } from "../../../market/src/live/public-stocks.ts";
+import { ROBINHOOD_FROM, ROBINHOOD_PRICES, usQuote, UsQuoteFeed } from "../../../market/src/live/us-quotes.ts";
 import type { Candle, CandlePage, LiveTrader, Market, OrderBook, OrderRequest } from "../../src/portfolio/live/trade.ts";
 import type { LiveSource } from "../../src/portfolio/live/types.ts";
 import { makeWorld, publicSources, standinHub, tick } from "../standin/venues.ts";

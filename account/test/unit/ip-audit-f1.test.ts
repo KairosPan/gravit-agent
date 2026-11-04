@@ -9,7 +9,7 @@ import { liveAccount } from "../../src/portfolio/adapters/live.ts";
 import type { ExchangeClient, OpenExchange } from "../../src/portfolio/live/exchange.ts";
 import { register, type LiveDeps } from "../../src/portfolio/live/index.ts";
 import type { RunMm } from "../../src/portfolio/live/metamask.ts";
-import type { Listing, PublicSource } from "../../src/portfolio/live/public-markets.ts";
+import type { Listing, PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { LiveTrader, Market } from "../../src/portfolio/live/trade.ts";
 import { bannedNo, type LiveSource } from "../../src/portfolio/live/types.ts";
 import { no } from "../../src/portfolio/refuse.ts";

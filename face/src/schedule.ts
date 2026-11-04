@@ -54,11 +54,11 @@ import {
   appendEvent, appendRecord, appendRecordOnce, ASLEEP_THRESHOLD_MS, deskDir, FIRINGS_FILE, noteBudgetSpent, readBudget, readEvents, readOffState, readRecords,
   type BudgetState,
 } from "./desk.ts";
-import type { DeliverResult } from "./desk-conversation.ts";
 import { createDeskAgent, type DeskClock, type DeskSessionDeps, type SessionEventsOn } from "./desk-session.ts";
+import type { DeliverOpts } from "./desk-conversation.ts";
 import { dateOf } from "./et.ts";
 import {
-  checkFiring, cutoffOf, FIRING_SLACK_MS, firingKey, isFiringRecord, LINES, outcomeOf, repoRelative, resolveFiringRoute, runFiring,
+  checkFiring, cutoffOf, FIRING_SLACK_MS, firingKey, isFiringRecord, kindOf, LINES, outcomeOf, repoRelative, resolveFiringRoute, runFiring,
   type ExpiredRecord, type FiringDeps, type FiringItem, type FiringRecord, type InterruptedRecord, type MissedRecord, type PhonedRecord,
   type Refusal, type RefusedRecord, type StartedRecord, type Verified,
 } from "./firing.ts";
@@ -77,6 +77,8 @@ const MARKETS: readonly Market[] = ["us", "cn"];
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; desk lines add `desk:`. */
 const BIN = "gravit-face";
+/** How a line about the clock row, or about an order no longer loaded, goes (src/phone.ts). */
+const REPORT: DeliverOpts = { kind: "report" };
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const codeOf = (err: unknown): unknown => (err as { code?: unknown } | null | undefined)?.code;
 /** A failure as a line names it: its code when it has one (`EISDIR`), else its message. */
@@ -259,10 +261,12 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
 
   /** Send a line through `deliver`, which never rejects; one that does is one face line. Whether the line got past
    * the pause: `false` only when `deliver` answered `{ undelivered: "paused" }` - the line held back, so whatever
-   * dedupes it must not count it as phoned (P2 fix wave, I4); any other answer is final. */
-  const send = async (text: string): Promise<boolean> => {
+   * dedupes it must not count it as phoned (P2 fix wave, I4); any other answer is final. A line about one order goes
+   * as that order's kind (src/firing.ts `kindOf`: the brief's as `brief`, so an operator who routes the brief hears it
+   * was missed); a line about the clock row or the file as a whole as `report` (src/phone.ts). */
+  const send = async (text: string, opts: DeliverOpts = REPORT): Promise<boolean> => {
     try {
-      const answer = await deps.deliver(text);
+      const answer = await deps.deliver(text, opts);
       return !("undelivered" in answer && answer.undelivered === "paused");
     } catch (err) {
       log(`${BIN}: desk: a standing order's line could not be sent: ${errText(err)}`);
@@ -284,7 +288,12 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   /** The one-shot lines the pause held back - a missed anchor, a cut-off firing, an expiry, a firing's refusal - in
    * the order they came, each sent again at every tick until an answer is not `paused`; those a record says were held
    * carry the `phoned` record that follows them to the phone (P4 ruling 7). */
-  const held: { text: string; phoned?: PhonedMark }[] = [];
+  const held: { text: string; phoned?: PhonedMark; opts?: DeliverOpts }[] = [];
+  /** The kind a line about the order `id` goes as: its kind while it is loaded, else `report`. */
+  const kindOfId = (id: string): DeliverOpts => {
+    const order = orders.find((o) => o.id === id);
+    return order === undefined ? REPORT : kindOf(order);
+  };
   /** A held line's `phoned` record, appended once the line's send resolved final. */
   const notePhoned = async (mark: PhonedMark): Promise<void> => {
     const record: PhonedRecord = {
@@ -297,19 +306,19 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
    * record is appended, so the record says `held` (P4 ruling 7). */
   const holding = async (): Promise<boolean> => held.length > 0 || !(await deliverable());
   /** A one-shot line as `entry`, the very object held: sent, or held while the pause holds. Whether it got through. */
-  const sendEntry = async (entry: { text: string; phoned?: PhonedMark }): Promise<boolean> => {
+  const sendEntry = async (entry: { text: string; phoned?: PhonedMark; opts?: DeliverOpts }): Promise<boolean> => {
     if (held.length > 0) {
       held.push(entry); // behind the ones held before it, so the phone hears them in order
       return false;
     }
-    const reached = await send(entry.text);
+    const reached = await send(entry.text, entry.opts);
     if (!reached) held.push(entry);
     return reached;
   };
   /** A one-shot line: sent, or held while the pause holds; `phoned`, its `phoned` record once its send resolves final,
    * at once or from {@link flushHeld}. */
-  const sendOnce = async (text: string, phoned?: PhonedMark): Promise<boolean> => {
-    const reached = await sendEntry(phoned === undefined ? { text } : { text, phoned });
+  const sendOnce = async (text: string, phoned: PhonedMark | undefined, opts: DeliverOpts): Promise<boolean> => {
+    const reached = await sendEntry(phoned === undefined ? { text, opts } : { text, phoned, opts });
     if (reached && phoned !== undefined) await notePhoned(phoned);
     return reached;
   };
@@ -317,7 +326,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
   const flushHeld = async (): Promise<void> => {
     while (held.length > 0) {
       const [first] = held;
-      if (!(await send(first.text))) return;
+      if (!(await send(first.text, first.opts))) return;
       held.shift();
       if (first.phoned !== undefined) await notePhoned(first.phoned);
     }
@@ -548,7 +557,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     };
     const outcome = await appendRecordOnce(home, FIRINGS_FILE, record, recordOf("interrupted", r.key), ledgerOpts);
     note(record);
-    if (outcome !== "duplicate") await sendOnce(LINES.interrupted(r.order, r.date), isHeld ? { key: r.key, of: "interrupted" } : undefined);
+    if (outcome !== "duplicate") await sendOnce(LINES.interrupted(r.order, r.date), isHeld ? { key: r.key, of: "interrupted" } : undefined, kindOfId(r.order));
   };
 
   /**
@@ -593,8 +602,9 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
         text = undefined;
       }
       if (text === undefined) continue;
-      if (r.kind === "refused") held.push({ text, phoned: { key: r.key, of: "refused", reason: r.reason, detail: detailOf(r) } });
-      else if (r.kind === "missed" || r.kind === "interrupted" || r.kind === "expired") held.push({ text, phoned: { key: r.key, of: r.kind } });
+      const opts = kindOfId(r.order);
+      if (r.kind === "refused") held.push({ text, phoned: { key: r.key, of: "refused", reason: r.reason, detail: detailOf(r) }, opts });
+      else if (r.kind === "missed" || r.kind === "interrupted" || r.kind === "expired") held.push({ text, phoned: { key: r.key, of: r.kind }, opts });
     }
   };
 
@@ -707,7 +717,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     };
     const outcome = await appendRecordOnce(home, FIRINGS_FILE, record, recordOf("expired", key), ledgerOpts);
     note(record);
-    if (outcome !== "duplicate") await sendOnce(LINES.expired(order.id, order.expires), isHeld ? { key, of: "expired" } : undefined);
+    if (outcome !== "duplicate") await sendOnce(LINES.expired(order.id, order.expires), isHeld ? { key, of: "expired" } : undefined, kindOf(order));
   };
 
   /** An anchor found past its grace: why, recorded and phoned once. */
@@ -721,7 +731,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     };
     const outcome = await appendRecordOnce(home, FIRINGS_FILE, record, recordOf("missed", key), ledgerOpts);
     note(record);
-    if (outcome !== "duplicate") await sendOnce(LINES.missed(record), isHeld ? { key, of: "missed" } : undefined);
+    if (outcome !== "duplicate") await sendOnce(LINES.missed(record), isHeld ? { key, of: "missed" } : undefined, kindOf(order));
   };
 
   /** A firing still queued at its market moment (src/firing.ts `cutoffOf`): missed as `cutoff`, never checked or
@@ -740,7 +750,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
       return;
     }
     note(record);
-    await sendOnce(LINES.missed(record), isHeld ? { key: item.key, of: "missed" } : undefined);
+    await sendOnce(LINES.missed(record), isHeld ? { key: item.key, of: "missed" } : undefined, kindOf(item.order));
   };
 
   /** One order on one session: queued when due, recorded when missed. */
@@ -977,7 +987,7 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
     /* its line held back by the pause is no report: `reported: false`, and the line goes out once the pause lifts.
      * Sent at once, its `reported` says so; held, its `phoned` mark is attached only once the refusal is appended, so
      * no `phoned` can precede the refusal it marks */
-    const entry: { text: string; phoned?: PhonedMark } | undefined = line === undefined ? undefined : { text: line };
+    const entry: { text: string; phoned?: PhonedMark; opts?: DeliverOpts } | undefined = line === undefined ? undefined : { text: line, opts: kindOf(item.order) };
     const reported = entry !== undefined && (await sendEntry(entry));
     const record: RefusedRecord = {
       t: iso(now), kind: "refused", key: item.key, order: item.order.id, date: item.date, reason: refusal.reason,
@@ -1244,7 +1254,7 @@ export function createDeskSchedule(opts: {
   session: DeskSessionDeps;
   sessionCtx: Partial<FiringRouteCtx>;
   on: SessionEventsOn;
-  deliver: (text: string) => Promise<DeliverResult>;
+  deliver: FiringDeps["deliver"];
   log?: (line: string) => void;
   now?: () => number;
   seams?: { clock?: DeskClock; calendars?: Partial<DeskCalendars> } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;

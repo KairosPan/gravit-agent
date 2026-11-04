@@ -20,6 +20,11 @@ const get = async (path: string): Promise<{ status: number; body: any }> => {
   const r = await fetch(`${s.url}${path}`);
   return { status: r.status, body: await r.json() };
 };
+/** the stand-in's own market (its public sources, read without a key): Markets' public half is the market's, not the account's */
+const market = async (path: string): Promise<{ status: number; body: any }> => {
+  const r = await fetch(`${s.marketUrl}${path}`);
+  return { status: r.status, body: await r.json() };
+};
 const post = async (path: string, body: unknown): Promise<{ status: number; body: any }> => {
   const r = await fetch(`${s.url}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   return { status: r.status, body: await r.json() };
@@ -48,6 +53,25 @@ afterAll(async () => {
 describe("the stand-in account", () => {
   it("never starts on the real account's port", async () => {
     await expect(startStandin({ port: 4820 })).rejects.toThrow(/4820 is the real account's/);
+  });
+  it("never starts on the market's port", async () => {
+    await expect(startStandin({ port: 4821 })).rejects.toThrow(/4821 is the market's/);
+  });
+  it("the stand-in serves its markets from a market of its own", async () => {
+    expect(s.marketUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(s.marketUrl).not.toBe(s.url);
+    expect(s.marketUrl).not.toMatch(/:482[01]$/);
+    const health = await (await fetch(`${s.marketUrl}/api/health`)).json();
+    expect(health.service).toBe("market");
+    const r = await fetch(`${s.marketUrl}/api/explore?q=BTC`);
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(body.ok).toBe(true);
+    const items = body.items as Array<{ base?: string; at?: Array<{ venue?: string }> }>;
+    const btc = items.filter((i) => String(i.base).toUpperCase() === "BTC");
+    expect(btc.length).toBeGreaterThan(0);
+    // the stand-in's own public venues, the same world the account's own explore reads
+    expect(btc.flatMap((i) => (i.at ?? []).map((a) => a.venue))).toEqual(expect.arrayContaining([expect.stringMatching(/^standin-/)]));
   });
 
   it("the account page: the venues with what they trade, the agent's card, intents, asks, the watchlist, orders of every kind, trading on", async () => {
@@ -97,60 +121,67 @@ describe("the stand-in account", () => {
     else expect([s.seeded.orders.aaplBuy, s.seeded.orders.nvdaBuy]).toEqual([undefined, undefined]);
   });
 
-  it("Markets: the connected venues' rows and the public ones marked Connect to trade, events with their outcomes, every tab, a venue's own geoblock words", async () => {
-    const { status, body: e } = await get("/api/account/explore");
+  it("Markets: the connected venues' rows (the account's) and the public ones marked Connect to trade (the stand-in's market), events with their outcomes, every tab, a venue's own geoblock words", async () => {
+    const { status, body: e } = await get("/api/account/connected/explore");
     expect(status).toBe(200);
+    const { status: marketStatus, body: m } = await market("/api/explore");
+    expect(marketStatus).toBe(200);
     const row = (key: string) => e.items.find((i: { key: string }) => i.key === key);
-    // the public line prices the row; the account's own paper account lists it too, after it, to rehearse on
-    expect(row("coin:DOGE").at).toEqual([expect.objectContaining({ venue: "standin-pubex-public", connected: false, public: true, canTrade: false, connectTo: "standin-pubex", connector: "live:standin-pubex" }), expect.objectContaining({ venue: "paper-momentum", connected: true, paper: true, canTrade: true })]);
-    expect(row("coin:DOGE").price).toBe(row("coin:DOGE").at[0].price);
-    expect(row("coin:BTC").at.map((x: { venue: string }) => x.venue)).toEqual(expect.arrayContaining(["ex", "wallet", "standin-pubex-public"]));
+    const pub = (key: string) => m.items.find((i: { key: string }) => i.key === key);
+    // the public line is the market's; the account's own paper account lists the coin too, to rehearse on
+    expect(pub("coin:DOGE").at).toEqual([expect.objectContaining({ venue: "standin-pubex-public", connected: false, public: true, canTrade: false, connectTo: "standin-pubex", connector: "live:standin-pubex" })]);
+    expect(row("coin:DOGE").at).toEqual([expect.objectContaining({ venue: "paper-momentum", connected: true, paper: true, canTrade: true })]);
+    expect(row("coin:BTC").at.map((x: { venue: string }) => x.venue)).toEqual(expect.arrayContaining(["ex", "wallet"]));
+    expect(pub("coin:BTC").at.map((x: { venue: string }) => x.venue)).toContain("standin-pubex-public");
+    expect(e.items.every((i: { at: Array<{ public?: boolean }> }) => i.at.every((a) => a.public !== true))).toBe(true);
     expect(row("perp:ETH").fundingRate).toBe(0.00008);
     expect(row("event:predict:SI-FEDCUT-DEC")).toMatchObject({ kind: "event", category: "Economics", outcomes: [expect.objectContaining({ label: "Yes" }), expect.objectContaining({ label: "No" })] });
-    expect(row("rwa:NVDA").at[0]).toMatchObject({ public: true, canTrade: false, note: expect.stringMatching(/only read/) });
+    expect(pub("rwa:NVDA").at[0]).toMatchObject({ public: true, canTrade: false, note: expect.stringMatching(/only read/) });
     // the wallet's tokenised fund is an RWA row too, traded at the wallet, with its issuer's words
     expect(row("rwa:USDY")).toMatchObject({ kind: "rwa", issuer: expect.any(String), at: [expect.objectContaining({ venue: "wallet", connected: true, canTrade: true })] });
     // the tabs are the Markets lens's own (live/categories.ts): these seven are on every stand-in run, whatever else that lens adds; All is first
     expect(e.tabs.map((t: { id: string }) => t.id)).toEqual(expect.arrayContaining(["all", "crypto", "stocks", "rwas", "perps", "preipo", "predictions"]));
     expect(e.tabs[0].id).toBe("all");
-    // Stocks: the broker's three, each traded at the Stand-in Broker; NVDA and SPY also carry the public delayed-quote line (a price and the
-    // session, nothing to connect: the row trades at the broker already). NVDA and SPY are stock tokens too (RWAs), priced off the same
-    // curves, so the line between a share and its token compares like with like
+    // Stocks: the broker's three, each traded at the Stand-in Broker; NVDA and SPY also carry the market's public delayed-quote line (a
+    // price and the session, nothing to connect: the row trades at the broker already). NVDA and SPY are stock tokens too (RWAs), priced off
+    // the same curves, so the line between a share and its token compares like with like
     for (const t of ["AAPL", "NVDA", "SPY"]) expect(row(`stock:${t}`)).toMatchObject({ kind: "stock", base: t, tabs: ["all", "stocks"], at: expect.arrayContaining([expect.objectContaining({ venue: "broker", venueName: "Stand-in Broker", symbol: t, connected: true, canTrade: true, open: true })]) });
     for (const t of ["NVDA", "SPY"]) {
-      const line = row(`stock:${t}`).at.find((a: { venue: string }) => a.venue === "standin-stocks-public");
+      const line = pub(`stock:${t}`).at.find((a: { venue: string }) => a.venue === "standin-stocks-public");
       expect(line).toMatchObject({ public: true, connected: false, canTrade: false, venueName: "Stand-in · 15 min delayed", note: expect.stringMatching(/15 minutes behind/), session: expect.objectContaining({ open: expect.any(Boolean) }) });
-      expect(line.connectTo).toBeUndefined();
     }
-    for (const t of ["NVDA", "SPY"]) expect(Math.abs(row(`stock:${t}`).price / row(`rwa:${t}`).price - 1)).toBeLessThan(0.002);
-    // and Tesla, which only the public delayed-quote line lists: its price from that line, the broker to connect, and the paper account's leg
-    const stocks = (await get("/api/account/explore?tab=stocks")).body;
+    for (const t of ["NVDA", "SPY"]) expect(Math.abs(row(`stock:${t}`).price / pub(`rwa:${t}`).price - 1)).toBeLessThan(0.002);
+    // and Tesla, which only the public delayed-quote line lists: the market's line with the broker to connect, and the paper account's leg
+    const stocks = (await get("/api/account/connected/explore?tab=stocks")).body;
     expect(stocks.items.map((i: { key: string; kind: string }) => [i.key, i.kind]).sort()).toEqual([["stock:AAPL", "stock"], ["stock:NVDA", "stock"], ["stock:SPY", "stock"], ["stock:TSLA", "stock"]]);
     expect(stocks.tabs.find((t: { id: string }) => t.id === "stocks")).toMatchObject({ label: "Stocks", count: 4 });
     const tsla = stocks.items.find((i: { key: string }) => i.key === "stock:TSLA");
-    expect(tsla.at.map((a: { venue: string; connected: boolean; paper?: boolean; connectTo?: string }) => [a.venue, a.connected, a.paper ?? false, a.connectTo])).toEqual([["standin-stocks-public", false, false, "standin-broker"], ["paper-momentum", true, true, undefined]]);
-    // the pre-IPO perpetual: one Anthropic row, Trade at the connected exchange and Connect to trade at the public perp exchange, each line
-    // with its own contract price and implied valuation, the row's the median; it is Pre-IPO, not Perps
+    expect(tsla.at.map((a: { venue: string; connected: boolean; paper?: boolean; connectTo?: string }) => [a.venue, a.connected, a.paper ?? false, a.connectTo])).toEqual([["paper-momentum", true, true, undefined]]);
+    const publicTsla = (await market("/api/explore?tab=stocks")).body.items.find((i: { key: string }) => i.key === "stock:TSLA");
+    expect(publicTsla.at.map((a: { venue: string; connected: boolean; connectTo?: string }) => [a.venue, a.connected, a.connectTo])).toEqual([["standin-stocks-public", false, "standin-broker"]]);
+    // the pre-IPO perpetual: one Anthropic row, Trade at the connected exchange (and the paper accounts, to rehearse on) and Connect to
+    // trade at the market's public perp exchange, each line with its own contract price and implied valuation, the row's the median; it
+    // is Pre-IPO, not Perps
     const anthropic = row("preipo:anthropic");
     expect(anthropic).toMatchObject({ kind: "perp", name: "Anthropic", category: "Pre-IPO", group: { id: "preipo:anthropic", title: "Anthropic" }, tabs: ["all", "preipo"], issuer: "Anthropic" });
-    // the paper account's line (the same book as the public perp exchange's) is there to rehearse on, after the real venue's
     expect(anthropic.at.map((a: { venue: string; connected: boolean; canTrade: unknown; connectTo?: string }) => [a.venue, a.connected, a.canTrade, a.connectTo]).sort()).toEqual([
       ["ex", true, true, undefined],
       ["paper", true, true, undefined],
       ["paper-momentum", true, true, undefined],
-      ["standin-pubperps-public", false, false, "standin-pubperps"],
     ]);
+    expect(pub("preipo:anthropic").at.map((a: { venue: string; connected: boolean; canTrade: unknown; connectTo?: string }) => [a.venue, a.connected, a.canTrade, a.connectTo])).toEqual([["standin-pubperps-public", false, false, "standin-pubperps"]]);
     expect(anthropic.at.find((a: { venue: string }) => a.venue === "paper").paper).toBe(true);
     expect(anthropic.implied.usd).toBeGreaterThan(1.9e12);
     expect(anthropic.implied.usd).toBeLessThan(2.3e12);
     expect(anthropic.at.every((a: { implied?: { usd: number; unit: string } }) => a.implied && a.implied.usd > 1.9e12 && typeof a.implied.unit === "string")).toBe(true);
     expect(row("perp:ANTHROPIC")).toBeUndefined();
+    expect(pub("perp:ANTHROPIC")).toBeUndefined();
     // the IPO question is Predictions, under the venue's own word, and stays beside the busiest few
     expect(row("event:predict:SI-IPO-ANTHROPIC")).toMatchObject({ kind: "event", category: "IPO", tabs: ["all", "predictions"] });
-    expect(e.notes).toContain("Pre-IPO perpetuals are contracts on a venue's estimate of a private company's valuation, not shares; each venue says who may trade them once a key connects.");
-    expect(e.movers.map((m: { key: string }) => m.key)).toContain("coin:DOGE");
-    expect(e.closing.length).toBeGreaterThan(0);
-    expect(e.missing).toEqual([expect.objectContaining({ venue: "standin-geo", code: "E_VENUE_GEOBLOCKED", said: "Service unavailable from a restricted location (stand-in)." })]);
+    expect([...e.notes, ...m.notes]).toContain("Pre-IPO perpetuals are contracts on a venue's estimate of a private company's valuation, not shares; each venue says who may trade them once a key connects.");
+    expect(m.movers.map((x: { key: string }) => x.key)).toContain("coin:DOGE");
+    // the account answers no public read
+    expect((await fetch(`${s.url}/api/account/explore`)).status).toBe(404);
   });
 
   it("Portfolio by asset once the venues are read again: coins at two venues, the RWA, the event contract, the dollars", async () => {
@@ -248,7 +279,7 @@ describe("the stand-in account", () => {
     const v = (await get("/api/account")).body.venues.find((x: { id: string }) => x.id === "standin-pubex");
     expect(v.trade.kinds).toEqual(["spot"]);
     // a question not asked before: Markets is asked again rather than answered from what it kept
-    const doge = (await get("/api/account/explore?q=DOGE")).body.items.find((i: { key: string }) => i.key === "coin:DOGE");
+    const doge = (await get("/api/account/connected/explore?q=DOGE")).body.items.find((i: { key: string }) => i.key === "coin:DOGE");
     expect(doge.at).toEqual([expect.objectContaining({ venue: "standin-pubex", connected: true, canTrade: true }), expect.objectContaining({ venue: "paper-momentum", connected: true, paper: true })]);
   });
 
@@ -338,7 +369,7 @@ describe("the Stand-in Broker keeps New York's market hours: a stand-in started 
     // out of its session, and when it opens: on the market, and on its Markets row and line, where the broker's words say why
     const closed = { open: false, opensAt: new Date(session.opensAt).toISOString() };
     expect((await get("/api/account/market?venue=broker&symbol=AAPL")).body.market.session).toEqual(closed);
-    const row = (await get("/api/account/explore?tab=stocks")).body.items.find((i: { key: string }) => i.key === "stock:AAPL");
+    const row = (await get("/api/account/connected/explore?tab=stocks")).body.items.find((i: { key: string }) => i.key === "stock:AAPL");
     expect(row).toMatchObject({ session: closed, at: [{ venue: "broker", open: true, session: closed, note: closedWords(session.opensAt) }] });
     // the door asks the broker itself: no market order now
     const market = await own({ type: "liveOrder", venue: "broker", symbol: "AAPL", side: "buy", orderType: "market", qty: "0.1" });
@@ -373,7 +404,7 @@ describe("the Stand-in Broker keeps New York's market hours: a stand-in started 
     // in session, until 16:00 New York: on the market and on its Markets row, where the line carries no closed words
     const open = { open: true, closesAt: new Date(session.closesAt).toISOString() };
     expect((await get("/api/account/market?venue=broker&symbol=AAPL")).body.market.session).toEqual(open);
-    const row = (await get("/api/account/explore?tab=stocks")).body.items.find((i: { key: string }) => i.key === "stock:AAPL");
+    const row = (await get("/api/account/connected/explore?tab=stocks")).body.items.find((i: { key: string }) => i.key === "stock:AAPL");
     expect(row).toMatchObject({ session: open, at: [{ venue: "broker", open: true, session: open }] });
     expect(row.at[0].note).toBeUndefined();
     for (const [k, qty] of [["aaplBuy", 0.5], ["nvdaBuy", 1]] as const) expect(await orderOf(s.seeded.orders[k]!)).toMatchObject({ venue: "broker", type: "market", status: "filled", filledQty: qty });

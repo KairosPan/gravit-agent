@@ -1,6 +1,6 @@
 /**
- * A fake Account for the Lunhui freeze tests: a `fetch` that answers the two routes the Account
- * adapter (`plugins/lunhui/lib/account-fetch.mjs`) speaks, over the one fixture mapping
+ * A fake market for the Lunhui freeze tests: a `fetch` that answers the two routes the market
+ * adapter (`plugins/lunhui/lib/market-fetch.mjs`) speaks, over the one fixture mapping
  * (`createFixtureFetch`) of `dir`, never the network.
  *
  * - `GET <origin>/api/cn/relay?url=<URL>`: the fixture mapper's (or `opts.upstream`'s) answer for
@@ -12,20 +12,20 @@
  *   The body's `query` is recorded either way.
  * - Anything else: a 404 with no mark.
  */
-import { DEFAULT_ACCOUNT_URL, WENCAI_QUERY_URL } from "../../../plugins/lunhui/lib/account-fetch.mjs";
+import { DEFAULT_MARKET_URL, WENCAI_QUERY_URL } from "../../../plugins/lunhui/lib/market-fetch.mjs";
 import { createFixtureFetch } from "../../../plugins/lunhui/lib/fixture-fetch.mjs";
 
 type Upstream = (target: URL, init?: RequestInit) => Promise<Response> | undefined;
 
 const NULL_BODY = new Set([101, 204, 205, 304]);
 
-export function fakeAccount(dir: string, opts: {
+export function fakeMarket(dir: string, opts: {
   origin?: string;
   ifind?: "configured" | "unconfigured";
   stall?: (upstream: URL) => boolean;
   upstream?: Upstream;
 } = {}) {
-  const origin = new URL(opts.origin ?? DEFAULT_ACCOUNT_URL).origin;
+  const origin = new URL(opts.origin ?? DEFAULT_MARKET_URL).origin;
   const serve = createFixtureFetch(dir);
   const sent: URL[] = [];
   const upstream: URL[] = [];
@@ -39,7 +39,7 @@ export function fakeAccount(dir: string, opts: {
     return new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)));
   }
 
-  /** The upstream's answer re-sent as the Account sends it: status, bytes, two headers, the mark. */
+  /** The upstream's answer re-sent as the market sends it: status, bytes, two headers, the mark. */
   async function relayed(answer: Response, mark: string): Promise<Response> {
     const headers = new Headers({ [mark]: "upstream" });
     for (const name of ["content-type", "location"]) {

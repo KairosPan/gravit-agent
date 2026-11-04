@@ -53,6 +53,9 @@ import { startAttachments } from './host/attachments.js';
 import { startComposerReads } from './host/composer.js';
 import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
+import { startIdentity } from './host/identity.js';
+import { identityOf, routingOf, formatRouting } from './host/identity-view.js';
+import { renderConnectDrawer } from './render/identity.js';
 import { moveSeedOf, earnSeedOf, earnSaidOf, subWalletSeedOf } from './host/sheet-money.js';
 import { startSellMany } from './host/sell-many.js';
 import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf, signOutSeedOf, connectOptionOf, isWalletOption } from './host/sheet-view.js';
@@ -62,6 +65,7 @@ import { tradeableOf } from './host/trade-view.js';
 import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
 import { firstOpen } from './host/sessions.js';
 import { createAccountStream } from './wire/account-stream.js';
+import { createMarketStream } from './wire/market-stream.js';
 import { discoverWallets, proveWallet } from './wire/wallet.js';
 import { startWalletSend, settleWalletFlight } from './host/wallet-send.js';
 
@@ -215,8 +219,8 @@ const lightboxOf = s => {
   return isImageSrc(src) ? { src, name: s.lightbox.name } : null;
 };
 // a module card's Run sheet is a drawer of any screen too, drawn after the owner sheet
-const overlayOf = s => (sheetUp(s) ? 'sheet' : s.sellMany || s.runSheet || s.lunhui?.stock || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
-const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.sellMany ? 'sellMany' : s.runSheet ? `run:${s.runSheet.module}` : s.lunhui?.stock ? `stock:${s.lunhui.stock.code}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
+const overlayOf = s => (sheetUp(s) ? 'sheet' : s.identity?.connect || s.sellMany || s.runSheet || s.lunhui?.stock || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
+const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.identity?.connect ? `identity:${s.identity.connect.step}` : s.sellMany ? 'sellMany' : s.runSheet ? `run:${s.runSheet.module}` : s.lunhui?.stock ? `stock:${s.lunhui.stock.code}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
   : s.account.detailsVenue ? `venue:${s.account.detailsVenue}` : null);
 // the editor an event landed in: #say itself, or a node inside it (a paste's target can be a line's block)
 const sayOf = el => (el?.id === 'say' ? el : el?.closest?.('#say') ?? null);
@@ -266,6 +270,17 @@ export function boot(win, host = {}) {
     streamWasOpen = status === 'open';
     if (accountShown()) { account.poll(false); account.poll(true); }
   });
+  // the market's push channel beside it (wire/market-stream.js), open while the tab is visible: the public line a market's page
+  // follows; a snapshot drops the prices a stream kept, a quote is the price of the market a page follows (a test hands in its own)
+  const marketStream = (host.createMarketStream ?? (onEvent => createMarketStream({
+    createEventSource: url => new win.EventSource(url),
+    fetcher: (path, init) => win.fetch(path, init),
+    schedule, cancelTimer,
+    random: n => win.crypto.getRandomValues(new Uint8Array(n)),
+  }, onEvent)))(ev => {
+    if (ev.type === 'snapshot') store.dispatch('streamSnapshot');
+    if (ev.type === 'quote') store.dispatch('streamQuote', { data: ev.data });
+  });
   // this page as an owner device of the Account (spec 2026-10-22 §6.3): its key in this browser's IndexedDB (in memory where
   // there is none), every call through the face's proxy (a test hands in its own door); the standing read off every page that
   // lands — the first one pairs it once
@@ -293,6 +308,8 @@ export function boot(win, host = {}) {
   // past the face's cache, a market page's asset sheet (plan 4a Task 4), and the seat's standing after one about an agent's key
   // or limit; a done sheet then closes itself (the order sheet's words stay on the ticket)
   const SEAT_KINDS = new Set(['letIn', 'limit', 'endLimit', 'revoke']);
+  // Account › Identity's signed sheets (plan B1b Tasks 2 and 3); its disconnect is disconnectNetwork, never the Venues' disconnect
+  const IDENTITY_SHEET_KINDS = new Set(['connectNetwork', 'disconnectNetwork', 'routing', 'block']);
   function afterAction(kind, body) {
     // what the Account built for the operator's own wallet (a move out of a wallet, a DEX order) goes to that wallet at once:
     // it shows the transaction and sends it, and its hash is reported (the retired page's money.js done, trade.js placeOrder)
@@ -311,6 +328,8 @@ export function boot(win, host = {}) {
     if (kind === 'beast') store.dispatch('guardClear');
     // a venue reopened to agents: its Close to agents line goes with the state it spoke of
     if (kind === 'reopen') { const v = store.get().sheet?.seed?.venue; if (typeof v === 'string') store.dispatch('closingClear', v); }
+    // an identity sheet done (plan B1b): Identity read again past the face's cache, which a write does not clear
+    if (IDENTITY_SHEET_KINDS.has(kind)) void account.loadIdentity({ fresh: true });
     const s = store.get().sheet;
     if (kind !== 'order' && s?.kind === kind && s.status === 'done') sheet.close();
   }
@@ -420,6 +439,13 @@ export function boot(win, host = {}) {
   // Sell many (plan 4b Task 3): up to ten holdings at market, each prepared and signed in turn over the owner device; a DEX
   // sale's send handed to sendFromWallet, which reads the Account again once the wallet answers; the Account read again once a
   // run ends
+  // Account › Identity's Connect Telegram (plan B1b Task 2): sheets 1 to 3 its own drawer, sheet 4 the owner sheet's connectNetwork;
+  // the token read from sheet 1's field at Next and posted once through the owner door, never kept
+  const identity = startIdentity({
+    store, getJson, post: ownerPost, subtle: win.crypto?.subtle ?? null, schedule, cancelTimer, now,
+    openSheet: (kind, seed) => sheet.open(kind, seed), loadIdentity: o => account.loadIdentity(o),
+    random: n => win.crypto.getRandomValues(new Uint8Array(n)),
+  });
   const sellMany = startSellMany({ store, getJson, owner, sendOrder: o => sendFromWallet(walletSend.order(o)), afterAction, now });
   // a receipt reloads the Account's read past the cache, and one from the Account seat (every receipt the kind table
   // lifts today) the seat's standing too
@@ -430,9 +456,9 @@ export function boot(win, host = {}) {
   // timers after a host end or refusal; the open job's output stays there and is written into its pre on each frame
   const jobs = host.jobs ?? startJobs({ store, mux: live.mux, call, timers, onOutput: () => writeOutput() });
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson, activate: id => live.activate(id) });
-  // Markets: the Account's reads on the app's timers — the A shares' among them — a market's page followed on the stream; the
-  // stars in this browser's storage
-  const markets = startMarkets({ store, storage, getJson, win, now, stream, schedule, cancelTimer, owner, afterAction });
+  // Markets: the market's reads and the Account's connected ones on the app's timers — the A shares' among them — a market's page
+  // followed on the stream its line is on; the stars in this browser's storage
+  const markets = startMarkets({ store, storage, getJson, win, now, stream, marketStream, schedule, cancelTimer, owner, afterAction });
   // the desk's status beside the markets (plan 2026-11-01-desk-p3-watch Task 11): the Desk tab, and the level marks on the rows
   const desk = startDesk({ store, getJson, postJson, schedule, cancelTimer, now });
   // Trade: the kinds' picks on screen, a ticket's order sheet, its line on the stream, Under way's Cancel
@@ -600,7 +626,7 @@ export function boot(win, host = {}) {
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
       : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail });
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
-    const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
+    const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (!sheetUp(s) && s.identity?.connect ? renderConnectDrawer(s) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     // files dragged over a screen with a composer: the drop overlay over the page
     const overlayHtml = s.dropping && composerOn(s) ? dropOverlay(attachments.limits()) : '';
     // an operator image at full size, over everything (D34: Esc closes it after a menu)
@@ -889,6 +915,8 @@ export function boot(win, host = {}) {
     if (entered('venues') || entered('agents')) void seat.load();
     if (entered('agents')) void account.loadAgents();
     if (entered('money')) void account.loadEarn();
+    // Identity (plan B1b): the account's identity read; then at the page's cadence while it is on screen
+    if (entered('identity')) void account.loadIdentity();
     // Trade left: its ticket closes and lets its line go — before a market's page follows its own
     const inTrade = route => route?.screen === 'trade';
     if (!inTrade(r) && inTrade(was)) { stopTradeSearch(); trade.closeTicket(); }
@@ -1147,6 +1175,23 @@ export function boot(win, host = {}) {
         else if (d.kind === 'leverageCap' && r.leverage) void sheet.open('leverageCap', { max: r.leverage.max });
         break;
       }
+      // Account › Identity's (plan B1b Task 3), each seeded from the identity read as it stands: Disconnect… a network connected;
+      // What reaches you where (Save… and Change…) the grid's unsaved ticks or the account's routing, the account's own string beside
+      // them, and its quiet hours; Block a stranger by the reference and masked id its key carries
+      case 'disconnectNetwork': case 'routing': {
+        const data = store.get().identity?.data;
+        const v = identityOf(data);
+        if (!v.ok) break;
+        if (d.kind === 'disconnectNetwork') {
+          const network = d.network || 'telegram';
+          if (v.networks[network]?.state === 'connected') void sheet.open('disconnectNetwork', { network });
+        } else {
+          const draft = store.get().identity.draft;
+          void sheet.open('routing', { routing: draft ?? routingOf(data), quiet: v.quiet, saved: formatRouting(routingOf(data)) });
+        }
+        break;
+      }
+      case 'block': void sheet.open('block', { network: d.network ?? '', sender: d.sender ?? '', masked: d.masked ?? '' }); break;
       default: break;
     }
   }
@@ -1703,7 +1748,27 @@ export function boot(win, host = {}) {
       void account.load({ fresh: true });
       void account.loadHoldings();
       void seat.load({ fresh: true });
+      if (store.get().route.tab === 'identity') void account.loadIdentity({ fresh: true });
     },
+    // Account › Identity (plan B1b): Retry reads it past the face's cache; Details opens or shuts the connection's line
+    refreshIdentity: () => { void account.loadIdentity({ fresh: true }); },
+    identityDetails: () => store.dispatch('identityDetails'),
+    // Connect Telegram (plan B1b Task 2): the drawer's keys; Next hands the host the field itself, never its value
+    identityConnect: () => { if (signs()) identity.openConnect(); },
+    identityNext: () => { void identity.next(root.querySelector('#identity-token')); },
+    identityPaste: () => {
+      const read = win.navigator?.clipboard?.readText;
+      if (typeof read !== 'function') return;
+      read.call(win.navigator.clipboard).then(text => {
+        const el = root.querySelector('#identity-token');
+        if (el && typeof text === 'string') el.value = text.trim();
+      }, () => { /* the browser said no: nothing pasted */ });
+    },
+    identityClose: () => identity.close(),
+    identityBack: () => identity.back(),
+    identityNotMe: () => { void identity.notMe(); },
+    identityThisIsMe: () => { if (signs()) void identity.thisIsMe(); },
+    identityStartAgain: () => { if (store.get().sheet?.kind === 'connectNetwork') sheet.close(); identity.startAgain(); },
     setHistoryRange: el => { void account.loadHistory(el.dataset.value); },
     openVenueDetails: el => store.dispatch('openVenueDetails', el.dataset.id),
     closeVenueDetails: () => store.dispatch('closeVenueDetails'),
@@ -1946,6 +2011,10 @@ export function boot(win, host = {}) {
     if (el.type === 'checkbox' && el.dataset?.action === 'sellManyPick') sellMany.toggle(el.value);
     // the files picked, then the input emptied, so the same file can be picked again
     if (el.id === 'attach-input') { const files = Array.from(el.files ?? []); el.value = ''; addFiles(files); }
+    // a tick on Identity's grid: the draft routing, on a page that signs (the reducer checks again)
+    if (el.type === 'checkbox' && el.dataset?.action === 'identityTick' && signs()) {
+      store.dispatch('identityTick', { row: el.dataset.row, network: el.dataset.network, on: el.checked === true });
+    }
   });
   let pressSeq = 0;   // a press's own timeout ends only that press, never a later one
   root.addEventListener('pointerdown', ev => {
@@ -2093,6 +2162,7 @@ export function boot(win, host = {}) {
       // a module card's Run sheet first, then the owner sheet over any drawer, then the stock drawer; Trade's ticket after every drawer
       if (s.runSheet) runSheet.close();
       else if (sheetUp(s)) sheet.close();
+      else if (s.identity?.connect) identity.close();
       else if (s.sellMany) sellMany.close();
       else if (s.lunhui?.stock) store.dispatch('lunhuiStockClose');
       else if (s.detailsOpen) store.dispatch('toggleDetails');
@@ -2110,17 +2180,19 @@ export function boot(win, host = {}) {
       return;
     }
     const a = doc.activeElement;
+    // Enter in Connect Telegram's token field is Next: the field has no form (no login for the browser to offer to keep)
+    if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && a?.id === 'identity-token') { ev.preventDefault(); act.identityNext(); return; }
     if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && store.get().edit && a?.closest?.('.inline-edit') && a.tagName !== 'BUTTON') { ev.preventDefault(); commitEdit(); }
   });
 
-  // a hidden tab stops everything — the Markets polls and the face's wire, the Account's read, and its stream with the market a
+  // a hidden tab stops everything — the Markets polls and the face's wire, the Account's read, and both streams with the market a
   // page follows — and a visible one starts again what its screen reads
   win.addEventListener('hashchange', follow);
   doc.addEventListener('visibilitychange', () => {
     showMarkets();
     showTrade();
     showAccount();
-    if (doc.hidden) stream.close(); else stream.open();
+    if (doc.hidden) { stream.close(); marketStream.close(); } else { stream.open(); marketStream.open(); }
   });
   store.subscribe((s, type) => {
     // the live layer back (connected again after a drop, or for the first time): thumb reads a fence stopped go again
@@ -2158,10 +2230,10 @@ export function boot(win, host = {}) {
   modules.trackRuns();
   applyTheme(store.get().theme);
   if (!win.location.hash) win.history.replaceState(null, '', toHash(store.get().route));
-  if (!doc.hidden) stream.open();
+  if (!doc.hidden) { stream.open(); marketStream.open(); }
   follow();
   render();
-  return Object.assign(store, { timers, live, actions, markets, channels, discover, owner, sheet, trade, walletSend, sellMany });
+  return Object.assign(store, { timers, live, actions, markets, channels, discover, owner, sheet, trade, walletSend, sellMany, identity });
 }
 
 if (typeof window !== 'undefined' && window.document) boot(window);

@@ -19,6 +19,7 @@
  * the stub's route) against the real Lunhui rows, the third the shipped
  * cn-stock-analyst the same way over a sealed market run, the fourth the shipped
  * cn-reviewer on a sealed cn-market run. Own file, gated. */
+import "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";

@@ -18,6 +18,7 @@
  * ONE BOOT PER PROCESS (smoke.test.ts header): `bootFace` sets `process.env.DSH_HOME`, so this is its own file. The
  * scratch home is a `mkdtemp` directory, never `~/.dsh`, and the seat is disabled. This is the canary for the
  * Account's reads moving under the face, beside `account-seat-smoke`'s for its seat. */
+import { DEAD_MARKET_URL } from "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -147,6 +148,8 @@ test("account graft smoke: the Account's page and markets, a refused query, its 
     const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
     writeFileSync(patchPath, `${readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "")}\n- id: mcp-account\n  disabled: true\n`);
     process.env.FACE_ACCOUNT_URL = standin.url;
+    /* The mcp-market row, spawned at the boot, points at the stand-in's own market, never a live one on 4821. */
+    process.env.FACE_MARKET_URL = standin.marketUrl;
     const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot() });
     dispose = booted.dispose;
     const proxy = registerAccountProxy(booted.ctx.webServer, { url: standin.url });
@@ -162,14 +165,16 @@ test("account graft smoke: the Account's page and markets, a refused query, its 
     assert.equal(pageBody.ok, true);
     assert.ok(Array.isArray(pageBody.venues) && pageBody.venues.length > 0, `the page names its venues: ${JSON.stringify(pageBody.venues)}`);
 
-    /* 3. Its markets. */
-    const explore = await fetch(`${base}/data/account/explore`);
+    /* 3. Its markets: the connected venues' own (the public half is the market's, /data/market/explore; the face answers
+     * no /data/account/explore since plan A2's Task 7). */
+    const explore = await fetch(`${base}/data/account/connected/explore`);
     const exploreBody = await explore.json() as { ok?: unknown; items?: unknown };
     assert.equal(explore.status, 200, JSON.stringify(exploreBody).slice(0, 400));
-    assert.ok(Array.isArray(exploreBody.items) && exploreBody.items.length > 0, "explore lists the Account's markets");
+    assert.ok(Array.isArray(exploreBody.items) && exploreBody.items.length > 0, "the connected explore lists the Account's markets");
+    assert.equal((await fetch(`${base}/data/account/explore`)).status, 404, "the public read is not the Account's");
 
     /* 4. A query name the whitelist does not carry: refused by the face, never asked of the Account. */
-    const forced = await fetch(`${base}/data/account/explore?force=1`);
+    const forced = await fetch(`${base}/data/account/connected/explore?force=1`);
     assert.equal(forced.status, 400);
     assert.deepEqual(await forced.json(), { ok: false, error: "invalid account request" });
 
@@ -210,7 +215,7 @@ test("account graft smoke: the Account's page and markets, a refused query, its 
     const watchOf = async (): Promise<WatchRow[]> => ((await (await fetch(`${base}/data/account?fresh=1`)).json()) as { watch?: WatchRow[] }).watch ?? [];
     const watching = (rows: WatchRow[], symbol: string): boolean => rows.some((w) => w.venue === "ex" && w.symbol === symbol);
     const beforeWatch = await watchOf();
-    const coins = await (await fetch(`${base}/data/account/explore?tab=crypto`)).json() as { items?: { at?: { venue?: string; symbol?: string }[] }[] };
+    const coins = await (await fetch(`${base}/data/account/connected/explore?tab=crypto`)).json() as { items?: { at?: { venue?: string; symbol?: string }[] }[] };
     const unwatched = coins.items?.flatMap((item) => item.at ?? []).find((at) => at.venue === "ex" && typeof at.symbol === "string" && !watching(beforeWatch, at.symbol))?.symbol;
     assert.ok(unwatched, `an ex market the page does not watch: watch ${JSON.stringify(beforeWatch)}; explore ${JSON.stringify(coins.items?.map((i) => i.at)).slice(0, 600)}`);
     const watched = await owner.act({ type: "setWatch", venue: "ex", symbol: unwatched, on: "true" });
@@ -307,6 +312,7 @@ test("account graft smoke: the Account's page and markets, a refused query, its 
     if (dispose) await dispose();
     disposeProxy?.();
     if (wasUrl === undefined) delete process.env.FACE_ACCOUNT_URL; else process.env.FACE_ACCOUNT_URL = wasUrl;
+    process.env.FACE_MARKET_URL = DEAD_MARKET_URL;
     await stopStandin(standin);
     await rm(home, { recursive: true, force: true });
   }

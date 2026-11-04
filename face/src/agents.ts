@@ -113,7 +113,8 @@ const SCRUBBED_ENV = [
   // may still carry those Alpaca keys; the IFIND_* pair is the Account's now (the face reads
   // neither), scrubbed for the same reason
   "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "DEEPSEEK_API_KEY", "IFIND_REFRESH_TOKEN", "IFIND_ACCESS_TOKEN",
-  // the desk's Telegram bot token: the face's own bridge (telegram.ts) is its one user
+  // a Telegram bot token an older $DSH_HOME/.env may still carry: the account holds the bot's token now (its
+  // credentials/networks/telegram.json), and no child of the face's has any business with an old one
   "TELEGRAM_BOT_TOKEN",
 ] as const;
 

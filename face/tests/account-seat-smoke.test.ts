@@ -11,6 +11,7 @@
  * lands in the operator's `~/.buyer-agent-demo`. This is the canary for the
  * Account moving under the face: a renamed write tool falls out of the gate's
  * list here, not offline. */
+import { DEAD_MARKET_URL } from "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -21,6 +22,7 @@ import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace, type FacePatchList } from "../src/boot.ts";
 import { ACCOUNT_SEAT_ROW_ID, ACCOUNT_SEAT_SERVER, SEAT_TOOL_PREFIX, composedSeatRow, type SeatEntryLike } from "../src/account-seat.ts";
 import { auditOrderTools, SEAT_WRITE_RAW_NAMES } from "../src/orders.ts";
+import { MARKET_TOOL_PREFIX } from "../src/market-row.ts";
 import { registerSeatRoute, type SeatView } from "../src/seat.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
 import { makeBotsRoot } from "./bots-fixture.ts";
@@ -61,6 +63,8 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
         toolCallTimeoutMs: 90_000, failOnStartupError: false,
       },
     } as unknown as FacePatchList[number]];
+    /* The mcp-market row, spawned at the boot, points at the stand-in's own market, never a live one on 4821. */
+    process.env.FACE_MARKET_URL = standin.marketUrl;
     const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot(), extraPatches });
     dispose = booted.dispose;
     const { ctx } = booted;
@@ -69,7 +73,7 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
       execute(exec: { callId: string; name: string; arguments: unknown; agent: object; signal: AbortSignal }): Promise<{ isError: boolean; content?: { type?: string; text?: string }[] }>;
     };
 
-    /* 2. The seat mounts: its 36 real-account tools, the nine writes gated, no
+    /* 2. The seat mounts: its 34 real-account tools, the nine writes gated, no
      * read gated, the seat covered. */
     const deadline = Date.now() + 120_000;
     let names: string[] = [];
@@ -79,12 +83,23 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
       await sleep(500);
     }
     const seatNames = names.filter((name) => name.startsWith(SEAT_TOOL_PREFIX)).sort();
-    assert.equal(seatNames.length, 36, `the seat's 36 real-account tools; saw ${seatNames.length}: ${seatNames.join(", ")}\nstand-in:\n${standin.log()}`);
+    assert.equal(seatNames.length, 34, `the seat's 34 real-account tools; saw ${seatNames.length}: ${seatNames.join(", ")}\nstand-in:\n${standin.log()}`);
     const audit = auditOrderTools(tools.schemas());
     const gatedSeat = audit.gated.filter((name) => name.startsWith(SEAT_TOOL_PREFIX)).sort();
     assert.deepEqual(gatedSeat, REAL_WRITES.map((raw) => `${SEAT_TOOL_PREFIX}${raw}`).sort(), "exactly the seat's real-account writes are gated");
     assert.deepEqual(audit.uncovered, [], "the seat is covered");
-    for (const read of ["portfolio_account", "portfolio_holdings", "portfolio_wait", "portfolio_live_preview", "portfolio_akshare"]) assert.ok(seatNames.includes(`${SEAT_TOOL_PREFIX}${read}`), read);
+    for (const read of ["portfolio_account", "portfolio_holdings", "portfolio_wait", "portfolio_live_preview", "portfolio_live_candles", "portfolio_live_book"]) assert.ok(seatNames.includes(`${SEAT_TOOL_PREFIX}${read}`), read);
+    for (const moved of ["portfolio_explore", "portfolio_candles", "portfolio_book", "portfolio_akshare"]) assert.equal(seatNames.includes(`${SEAT_TOOL_PREFIX}${moved}`), false, `${moved} left the seat`);
+    /* The market row (src/market-row.ts) mounts beside the seat from the repo's market/: its five keyless reads, none carded,
+     * pointed at the stand-in's own market (step 4b reads it). */
+    let marketNames: string[] = [];
+    while (Date.now() < deadline) {
+      marketNames = tools.schemas().map((schema) => schema.name).filter((name) => name.startsWith(MARKET_TOOL_PREFIX)).sort();
+      if (marketNames.length >= 5) break;
+      await sleep(500);
+    }
+    assert.deepEqual(marketNames, ["akshare", "book", "candles", "explore", "quotes"].map((raw) => `${MARKET_TOOL_PREFIX}market_${raw}`), "the market row's five tools");
+    assert.deepEqual(auditOrderTools(tools.schemas()).gated.filter((name) => name.startsWith(MARKET_TOOL_PREFIX)), [], "no market read is carded");
 
     /* 3. A real session with an open turn, and the outermost answerer, as the
      * order-gate smoke does. */
@@ -111,6 +126,13 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
     assert.equal(standing.seat?.authorised, true, JSON.stringify(standing.seat));
     assert.ok(standing.paperVenues?.includes("paper-momentum"), JSON.stringify(standing.paperVenues));
     assert.equal(seen.length, 0, "no card for a read");
+
+    /* 4b. The market row reads the stand-in's own market (FACE_MARKET_URL above), never a live one: its BTC, no card. */
+    const explored = await run("market-explore", `${MARKET_TOOL_PREFIX}market_explore`, { q: "BTC", limit: 5 });
+    assert.equal(explored.isError, false, textOf(explored).slice(0, 400));
+    const rows = (JSON.parse(textOf(explored)) as { items?: { base?: string }[] }).items ?? [];
+    assert.ok(rows.some((row) => String(row.base).toUpperCase() === "BTC"), `the stand-in market's BTC: ${textOf(explored).slice(0, 400)}`);
+    assert.equal(seen.length, 0, "no card for a market read");
 
     /* 5. A market at the stand-in's exchange, where the seeded agent holds a
      * trade limit. */
@@ -166,6 +188,7 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
     assert.ok((view.cards?.length ?? 0) >= 1, `the card the seat raised waits for the owner under Account › Cards: ${JSON.stringify(view.cards)}`);
     assert.ok(view.cards?.some((c) => c.id === answered.card?.id), "and it is that card");
   } finally {
+    process.env.FACE_MARKET_URL = DEAD_MARKET_URL;
     for (const off of cleanups) off();
     if (dispose) await dispose();
     await stopStandin(standin);

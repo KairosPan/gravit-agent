@@ -52,18 +52,25 @@ function offLine(off, now) {
   const until = off.until === undefined ? '' : ` until ${deskTime(off.until, now)}`;
   return `desk: paused since ${deskTime(off.setAt, now)} by ${str(off.by)}${until} (npm run desk -- resume)`;
 }
-function telegramLine(t, now) {
-  if (t.configured !== true) return 'telegram: not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_OPERATOR_ID in $DSH_HOME/.env)';
+/** The phone line (src/desk.ts phoneLine): none, nothing connected, or each network as the account polls it; `now` in ms. */
+export function phoneLine(p, now) {
+  if (p.configured !== true) return "phone: none (the account's half is off)";
+  const f = isRecord(p.accountFailing) ? p.accountFailing : null;
+  const failing = f ? `, the account has not answered since ${deskTime(f.since, now)}: ${str(f.reason)}` : '';
+  const networks = records(p.networks);
+  if (networks.length === 0) return `phone: nothing connected (Account › Identity)${failing}`;
+  const strangers = count(p.strangers);
   const parts = [
-    ...(t.blocked === true ? ['blocked (403)'] : []),
-    t.polling === true ? 'polling' : 'not polling',
-    t.lastPollAt === undefined ? 'no poll yet' : `last poll ${deskTime(t.lastPollAt, now)}`,
-    `${count(t.dropped)} dropped`,
-    `${count(t.queued)} queued`,
+    networks.map(n => `${str(n.network)} ${n.blocked === true ? 'blocked (403), ' : ''}${n.polling === true ? 'polling' : 'not polling'}`).join(', '),
+    p.lastPollAt === undefined ? 'no poll yet' : `last poll ${deskTime(p.lastPollAt, now)}`,
+    `${count(p.queued)} queued`,
+    `${strangers} stranger${strangers === 1 ? '' : 's'}`,
   ];
-  if (t.conflictAt !== undefined) parts.push(`conflict at ${deskTime(t.conflictAt, now)}`);
-  if (isRecord(t.pollFailing)) parts.push(`poll failing since ${deskTime(t.pollFailing.since, now)}: ${str(t.pollFailing.reason)}`);
-  return `telegram: ${parts.join(', ')}`;
+  for (const n of networks) {
+    if (n.conflictAt !== undefined) parts.push(`${str(n.network)} conflict at ${deskTime(n.conflictAt, now)}`);
+    if (isRecord(n.pollFailing)) parts.push(`${str(n.network)} poll failing since ${deskTime(n.pollFailing.since, now)}: ${str(n.pollFailing.reason)}`);
+  }
+  return `phone: ${parts.join(', ')}${failing}`;
 }
 function budgetLine(b) {
   const used = count(b.used?.total).toLocaleString('en-US');
@@ -227,7 +234,7 @@ function gapWord(ms) {
 }
 
 /** The Desk tab's view of a DeskStatus read at `nowIso` (ruling 15), or null for anything that is not one. Each line is the
- *  server's phrase: `head` the desk line, `off` the pause line while one is in force, `telegram` and `budget` theirs (null
+ *  server's phrase: `head` the desk line, `off` the pause line while one is in force, `phone` and `budget` theirs (null
  *  without), `watch` the watch's head (null while it does not run); `markets` each market's line (null while it is off) and
  *  its own session date's counts (`today`, null with none) — a market with neither is left out; `pending`, `muted` and
  *  `ledger` the alert lines (null when they do not hold), `filings` the filings' line; `alerts` the watch's recent ones,
@@ -252,7 +259,7 @@ export function deskViewOf(status, nowIso) {
   return {
     head: headLine(status),
     ...(isRecord(status.off) ? { off: offLine(status.off, now) } : {}),
-    telegram: isRecord(status.telegram) ? telegramLine(status.telegram, now) : null,
+    phone: isRecord(status.phone) ? phoneLine(status.phone, now) : null,
     budget: isRecord(status.budget) ? budgetLine(status.budget) : null,
     watch: w ? watchHead(w) : null,
     markets,

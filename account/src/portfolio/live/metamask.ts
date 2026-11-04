@@ -48,7 +48,7 @@ import { CHAIN_BY_ID, CHAINS, STABLECOINS, type ChainName } from "./chain.ts";
 import { known as knownFigure, once, type EarnPosition, type EarnProduct, type EarnSource, type EarnState, type LiveEarner } from "./earn.ts";
 import { HL_TERMS, HYPERLIQUID_RULE, placeOf, type Locator } from "./location.ts";
 import { CLOSE_ONLY_WORDS, polymarketScope, readablePlace } from "./polymarket-clob.ts";
-import type { Price } from "./prices.ts";
+import type { Price } from "../market/shapes.ts";
 import { badOrder, ceilTo, DONE, floorTo, inDollars, onStep, pick, plain, type LiveTrader, type Market, type MarketKind, type OrderRequest, type OrderState, type OrderStatus, type Position, type TimeInForce } from "./trade.ts";
 import { asRefusal, edgeWords, isStable, num, redact, REGION, type LiveBalance, type LiveSource } from "./types.ts";
 import { mmWriter } from "./writes.ts";

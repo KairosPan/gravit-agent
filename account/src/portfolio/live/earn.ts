@@ -64,7 +64,7 @@ import type { KeyFile } from "./credentials.ts";
 import { exchangeSaidNo, isOkx, type ExchangeClient } from "./exchange.ts";
 import { lostAnswer } from "./exchange-trade.ts";
 import { plain } from "./trade.ts";
-import type { Price } from "./prices.ts";
+import type { Price } from "../market/shapes.ts";
 import { isStable, num } from "./types.ts";
 
 /** a read just before a money request that the venue answered with its own rule for this network (not one product's), or a ban or a wait it

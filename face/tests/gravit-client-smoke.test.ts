@@ -1,13 +1,17 @@
 /** The new client on a real boot: the page gravit-face serves at `/`, its
  * modules under `/client`, and the host layer (js/host/live.js over the page's
  * own api.js + mapper.js) listing, opening and reading a session over the
- * real wire — the stage-1 wiring of spec 2026-10-19 end to end.
+ * real wire — the stage-1 wiring of spec 2026-10-19 end to end. And, over the
+ * Account's own stand-in when its install is there (`npm ci` in account/), the
+ * page's Account › Identity (plan B1b): the identity read through the face's
+ * proxy, drawn as its three cards, and Connect Telegram's modules served.
  *
  * ONE BOOT PER PROCESS (smoke.test.ts header): `bootFace` sets
  * `process.env.DSH_HOME`, so this is its own file. The scratch home is a
  * `mkdtemp` directory, never `~/.dsh`, and the seat is disabled.
  * @module
  */
+import "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -25,6 +29,9 @@ import { startLive } from "../client/js/host/live.js";
 import { listConversations } from "../client/js/host/sessions.js";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import { mountClient, signIn, remote } from "./remote.ts";
+import { registerAccountProxy } from "../src/account-proxy.ts";
+import { freePort, standinSkip, startStandin, stopStandin, type Standin } from "./helpers/standin.ts";
+import { renderAccountScreen } from "../client/js/render/account.js";
 
 const gated = process.env.FACE_SMOKE !== "1";
 
@@ -51,7 +58,10 @@ test("gravit client smoke: the page at /, its modules under /client, and the liv
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
   // This smoke owns a scratch profile and must not start the operator's data server.
   writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n`);
+  // the Account's stand-in (no network, its own temporary home), when its install is there: the Identity tab reads it through the proxy
+  const standin: Standin | null = standinSkip() === false ? await startStandin(await freePort()) : null;
   const { ctx, dispose } = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot() });
+  const proxy = standin ? registerAccountProxy(ctx.webServer, { url: standin.url }) : null;
 
   const scope = globalThis as Record<string, unknown>;
   const realFetch = globalThis.fetch;
@@ -70,7 +80,7 @@ test("gravit client smoke: the page at /, its modules under /client, and the liv
     const body = await page.text();
     assert.match(body, /<title>Gravit<\/title>/);
     assert.match(body, /src="\/client\/js\/app\.js"/);
-    for (const [path, type] of [["/client/js/host/live.js", "text/javascript"], ["/client/js/wire/api.js", "text/javascript"], ["/client/js/host/markets.js", "text/javascript"], ["/client/js/host/modules-view.js", "text/javascript"], ["/client/js/host/modules.js", "text/javascript"], ["/client/js/render/modules.js", "text/javascript"], ["/client/js/host/run-sheet-view.js", "text/javascript"], ["/client/js/host/run-sheet.js", "text/javascript"], ["/client/js/render/run-sheet.js", "text/javascript"], ["/client/css/app.css", "text/css"]] as const) {
+    for (const [path, type] of [["/client/js/host/live.js", "text/javascript"], ["/client/js/wire/api.js", "text/javascript"], ["/client/js/host/markets.js", "text/javascript"], ["/client/js/host/explore-join.js", "text/javascript"], ["/client/js/wire/market-stream.js", "text/javascript"], ["/client/js/host/modules-view.js", "text/javascript"], ["/client/js/host/modules.js", "text/javascript"], ["/client/js/render/modules.js", "text/javascript"], ["/client/js/host/run-sheet-view.js", "text/javascript"], ["/client/js/host/run-sheet.js", "text/javascript"], ["/client/js/render/run-sheet.js", "text/javascript"], ["/client/js/host/identity.js", "text/javascript"], ["/client/js/host/sheet-identity.js", "text/javascript"], ["/client/js/render/identity.js", "text/javascript"], ["/client/css/app.css", "text/css"]] as const) {
       const res = await realFetch(base + path);
       assert.equal(res.status, 200, path);
       assert.match(res.headers.get("content-type") ?? "", new RegExp(type), path);
@@ -122,7 +132,24 @@ test("gravit client smoke: the page at /, its modules under /client, and the liv
     const opened = await waitFor("the window", () => { const c = state().conversations.find((x) => x.id === created.sessionId); return c?.loaded ? c : undefined; });
     assert.ok(Array.isArray(opened.messages));
     assert.equal(state().status.line, "", "no complaint on the status line");
+
+    // 6. Account › Identity over the stand-in: the identity read through the face's proxy (past its cache too), drawn as the three cards
+    if (standin) {
+      const read = await realFetch(`${base}/data/account/identity?fresh=1`, { headers: { cookie } });
+      assert.equal(read.status, 200);
+      const identity = await read.json();
+      assert.equal(identity.ok, true);
+      const shown = createStore({ initial: emptyState(), reducers });
+      shown.dispatch("nav", { screen: "account", tab: "identity" });
+      shown.dispatch("identityLoaded", identity);
+      const html = renderAccountScreen(shown.get(), Date.now());
+      for (const card of ["Gravit", "What reaches you where", "Not you"]) assert.match(html, new RegExp(`<section class="cardbox" aria-label="${card}">`), card);
+      assert.match(html, /Telegram/);
+      assert.match(html, /Not connected/, "a fresh stand-in has no connection");
+    }
   } finally {
+    proxy?.dispose();
+    if (standin) await stopStandin(standin);
     live?.close();
     globalThis.fetch = realFetch;
     globalThis.WebSocket = realSocket;

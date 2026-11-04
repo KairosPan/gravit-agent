@@ -9,7 +9,7 @@ import { exploreAcross, type ExploreVenue } from "../../src/portfolio/live/explo
 import { KEY_SHAPES, keyFileStatus, liveOptions, openLive, type LiveDeps } from "../../src/portfolio/live/index.ts";
 import type { RunMm } from "../../src/portfolio/live/metamask.ts";
 import { pmusDayEnd, polymarketUsKey, polymarketUsSign, polymarketUsSource, type PolymarketUsTrader } from "../../src/portfolio/live/polymarket-us.ts";
-import { holdBackMs, polymarketUsPublic, PUBLIC_HOSTS, type Listing } from "../../src/portfolio/live/public-markets.ts";
+import { holdBackMs, polymarketUsPublic, PUBLIC_HOSTS, type Listing } from "../../../market/src/live/public-markets.ts";
 import { reachOf } from "../../src/portfolio/live/reach.ts";
 import type { Candle, CandlePage, LiveTrader, Market, OrderRequest, OrderState, Position } from "../../src/portfolio/live/trade.ts";
 import type { Http, HttpReply, LiveBalance, LiveSource } from "../../src/portfolio/live/types.ts";

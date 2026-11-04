@@ -43,7 +43,7 @@ import { exchangeClock, type OpenExchange } from "./exchange.ts";
 import { HYPERLIQUID_RULE, locator, PLACE_MS, unknownWords, type Locator } from "./location.ts";
 import type { RunMm } from "./metamask.ts";
 import { CLOSE_ONLY_WORDS, POLYMARKET_GEOBLOCK, polymarketLocation } from "./polymarket-clob.ts";
-import { holdBackMs } from "./public-markets.ts";
+import { holdBackMs } from "../market/shapes.ts";
 import type { OAuthSignIn } from "./signin.ts";
 import { unaddressed } from "../refuse.ts";
 import { bannedUntil, edgeRefused, edgeWords, notTheApiWords, REGION, venueSaidNo, type Http, type HttpReply } from "./types.ts";

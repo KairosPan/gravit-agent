@@ -19,14 +19,18 @@
  *   here; the seat's name is what the Account shows on the face's Account ›
  *   Agents, so the operator lets it in as Gravit and signs its limit under that
  *   name;
- * - it registers its 36 real-account tools even when the service is not
+ * - it registers its 34 real-account tools even when the service is not
  *   reachable (its startup GET of `/api/account` fails closed to "real"), so a
  *   face booted before the service still carries the tools, and a call then
  *   fails in the seat's own words;
- * - it sets no `instructions`, so no prompt section; its 36 schemas enter the
+ * - it sets no `instructions`, so no prompt section; its 34 schemas enter the
  *   tool block of every request (DEVELOPMENT.md §4.3 prices them);
- * - `portfolio_wait` polls at most 55 s, and the Account's AKShare sidecar call
- *   is bounded at 120 s, so the seat waits longer: the 130 s call timeout.
+ * - the market's public reads (explore, quotes, candles, book, AKShare) are
+ *   not the seat's since plan A2: they are the `mcp-market` row's
+ *   (src/market-row.ts); the seat keeps a connected venue's own bars and book,
+ *   `portfolio_live_candles` and `portfolio_live_book`;
+ * - `portfolio_wait` polls at most 55 s, so the 130 s call timeout (kept from
+ *   when the seat relayed the market's 120 s AKShare call) is ample.
  *
  * dsh 0.2.0-rc.2 (and 0.2.1-rc.5, whose stdio client is unchanged) spawns a stdio server twice per connect (a probe, then the
  * serving process); the probe calls no tool, so the lazily made key is the
@@ -116,7 +120,7 @@ export function accountSeatPatches(dir = seatDir(), url = seatUrl()): FacePatchL
         args: [join(dir, "node_modules", "tsx", "dist", "cli.mjs"), "src/portfolio/mcp.ts"],
         cwd: dir,
         env: { PORTFOLIO_URL: url, PORTFOLIO_AGENT: ACCOUNT_SEAT_NAME },
-        toolCallTimeoutMs: 130_000, /* the Account's 120 s AKShare deadline plus margin; portfolio_wait's 55 s fits */
+        toolCallTimeoutMs: 130_000, /* portfolio_wait's 55 s fits with room */
         failOnStartupError: false,
       } satisfies StdioConfig,
     }],

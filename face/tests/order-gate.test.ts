@@ -38,6 +38,7 @@
  * process, and `node --test` gives each file its own.
  * @module
  */
+import "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -187,6 +188,61 @@ test("ask listener: a hidden order tool is denied before any card; the registry 
     assert.equal(hooks()[0], armed, "the same listener record throughout: tools is not in its inject list");
   } finally {
     await root.fiber.dispose();
+  }
+});
+
+/* Task 9's card notice, offline: the listener calls `onCardAsked` once for each call it ASKS about -
+ * never for one it denies (hidden, policy never, no session) and never for a read or a tool it is
+ * not about - and the gate's decision is the same whether the hook returns, throws or is absent. */
+test("a carded seat write calls onCardAsked once; a denied one and a read never", async () => {
+  const asked: [string, unknown][] = [];
+  const lines: string[] = [];
+  const origError = console.error;
+  console.error = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
+  const root = new Context();
+  let throwing = false;
+  const gate = armOrderGate(root, (name, args) => {
+    asked.push([name, args]);
+    if (throwing) throw new Error("the phone fell over");
+  });
+  const order = { venue: "alpaca-paper", symbol: "NVDA", side: "buy", qty: 10, orderType: "limit", limitPrice: 183 };
+  try {
+    await root.plugin(FakeApproval, { policy: "ask" });
+    await gate.listener.await();
+    await root.plugin(ListedTools, { visible: ["mcp__account__portfolio_live_order", "mcp__account__portfolio_read"] });
+
+    assert.equal((await firePreExecute(root, pending("mcp__account__portfolio_live_order", order))).kind, "ask");
+    assert.deepEqual(asked, [["mcp__account__portfolio_live_order", order]], "one notice for one card");
+
+    /* a read of the seat, a tool the gate is not about, a hidden write and an agentless one: no card, no notice */
+    assert.equal((await firePreExecute(root, pending("mcp__account__portfolio_read", {}))).kind, "allow");
+    assert.equal((await firePreExecute(root, pending("bash"))).kind, "allow");
+    assert.equal((await firePreExecute(root, pending("mcp__account__portfolio_live_cancel", { order: "o1" }))).kind, "deny");
+    assert.equal((await firePreExecute(root, agentless("mcp__account__portfolio_live_order"))).kind, "deny");
+    assert.equal(asked.length, 1);
+
+    /* a hook that throws is one line, and the card is still asked */
+    throwing = true;
+    assert.equal((await firePreExecute(root, pending("mcp__account__portfolio_live_order", order))).kind, "ask");
+    assert.equal(asked.length, 2);
+    assert.equal(lines.filter((l) => /card notice/.test(l)).length, 1);
+    assert.match(lines.find((l) => /card notice/.test(l)) ?? "", /the phone fell over/);
+  } finally {
+    console.error = origError;
+    await root.fiber.dispose();
+  }
+
+  /* policy never: denied in the gate's words, nobody asked, so no notice */
+  const never = new Context();
+  const neverAsked: string[] = [];
+  const neverGate = armOrderGate(never, (name) => { neverAsked.push(name); });
+  try {
+    await never.plugin(FakeApproval, { policy: "never" });
+    await neverGate.listener.await();
+    assert.equal((await firePreExecute(never, pending("mcp__account__portfolio_live_order", order))).kind, "deny");
+    assert.deepEqual(neverAsked, []);
+  } finally {
+    await never.fiber.dispose();
   }
 });
 

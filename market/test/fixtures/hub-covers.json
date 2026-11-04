@@ -1,0 +1,17 @@
+[
+  { "source": "coinbase", "symbol": "BTC/USD", "covers": true, "pricesOnly": false },
+  { "source": "kraken", "symbol": "ETH/USD", "covers": true, "pricesOnly": false },
+  { "source": "okx", "symbol": "BTC/USDT", "covers": true, "pricesOnly": false },
+  { "source": "okx", "symbol": "BTC", "covers": false, "pricesOnly": false },
+  { "source": "okx", "symbol": "BTC/USDT:USDT", "covers": false, "pricesOnly": false },
+  { "source": "hyperliquid", "symbol": "BTC-PERP", "covers": true, "pricesOnly": false },
+  { "source": "hyperliquid", "symbol": "BTC/USDC:USDC", "covers": false, "pricesOnly": false },
+  { "source": "hyperliquid-preipo", "symbol": "io:ANTH-PERP", "covers": true, "pricesOnly": false },
+  { "source": "cboe", "symbol": "AAPL", "covers": true, "pricesOnly": true },
+  { "source": "cboe", "symbol": "aapl", "covers": false, "pricesOnly": false },
+  { "source": "us-stocks", "symbol": "AAPL", "covers": false, "pricesOnly": false },
+  { "source": "kalshi", "symbol": "KXFED-25DEC-T4.00:YES", "covers": false, "pricesOnly": false },
+  { "source": "polymarket", "symbol": "will-it-rain:Yes", "covers": false, "pricesOnly": false },
+  { "source": "china", "symbol": "sh600519", "covers": false, "pricesOnly": false },
+  { "source": "coinbase", "symbol": "", "covers": false, "pricesOnly": false }
+]

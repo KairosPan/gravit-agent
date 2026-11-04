@@ -1,8 +1,9 @@
 /** A STAND-IN ACCOUNT: the real Account server and doors, over stand-in venues — the face smokes' stand-in, and the one to drive Gravit's
- * face against (FACE_ACCOUNT_URL=http://127.0.0.1:4821) with NO network and NO real money. The Account serves no page of its own: its owner's
- * screens are the face's.
+ * face against (FACE_ACCOUNT_URL=the account url it prints) with NO network and NO real money. The Account serves no page of its own: its
+ * owner's screens are the face's. Beside it runs a market of its own (plan A2): the market's real server (market/src) over the stand-in's
+ * public sources and hub, on a second ephemeral port, printed as its market url (FACE_MARKET_URL=that url).
  *
- *   npx tsx test/standin/ui-standin.ts --port 4821      (never 4820: that port is the real account's)
+ *   npx tsx test/standin/ui-standin.ts --port 0         (an ephemeral port; never 4820, the real account's, nor 4821, the market's)
  *     --cap 250        the most one order or movement may be worth (the server's --live-cap)
  *     --tick 3000      how often prices move, in milliseconds
  *     --no-desk        no desk hired: the owner's own setup, with the real brains behind it — every preset the account knows (brains.ts:
@@ -93,10 +94,18 @@ import { pairingCode, startPortfolioServer, type PortfolioServerHandle } from ".
 import { loadOpenness, PortfolioService } from "../../src/portfolio/service.ts";
 import { DAY, toStep } from "./model.ts";
 import { makeWorld, publicSources, registerStandins, standinChain, standinHub, standinPrice, standinSender, stockSession, tick, type World } from "./venues.ts";
+import { createMarketCore } from "../../../market/src/core.ts";
+import { mountProtocol } from "../../../market/src/protocol.ts";
+import { marketReads, mountReads } from "../../../market/src/reads.ts";
+import { mountStream } from "../../../market/src/follows.ts";
+import { startMarketServer, type MarketServerHandle } from "../../../market/src/server.ts";
 
 type NoNonce<T> = T extends unknown ? Omit<T, "nonce"> : never;
 const HOUR = 3_600_000;
 export const REAL_PORT = 4820;
+const MARKET_PORT = 4821;
+/** the stand-in never takes the market's port: the account's market link points there */
+const NOT_MARKET = `port ${MARKET_PORT} is the market's: the stand-in never starts there (use --port 0, an ephemeral port)`;
 export const AGENT_NAME = "Claude Code";
 
 export interface StandinOptions {
@@ -145,6 +154,9 @@ export interface Seeded {
 
 export interface Standin {
   url: string;
+  /** the stand-in's own market (market/src's server over the stand-in's public sources and hub, on an ephemeral port): what the face's
+   * market half and its mcp-market row are pointed at (FACE_MARKET_URL) */
+  marketUrl: string;
   code: string;
   home: string;
   svc: PortfolioService;
@@ -173,7 +185,8 @@ const orderOf = (what: string, o: Outcome): string => {
 };
 
 export async function startStandin(o: StandinOptions): Promise<Standin> {
-  if (o.port === REAL_PORT) throw new Error(`port ${REAL_PORT} is the real account's: the stand-in never starts there (use 4821)`);
+  if (o.port === REAL_PORT) throw new Error(`port ${REAL_PORT} is the real account's: the stand-in never starts there (use --port 0, an ephemeral port)`);
+  if (o.port === MARKET_PORT) throw new Error(NOT_MARKET);
   registerStandins();
   const clock = o.clock ?? Date.now;
   const world = makeWorld({ clock });
@@ -353,6 +366,9 @@ export async function startStandin(o: StandinOptions): Promise<Standin> {
   const curvePoints = await drawThePast(svc, world, home, walletVenue, walletAt);
 
   const server: PortfolioServerHandle = await startPortfolioServer({ port: o.port, service: svc, snapshotMs: o.snapshotMs ?? 60_000 });
+  // ---- the stand-in's own market: the market's real server, routes and stream (market/src) over the stand-in's world — its public sources
+  // and its hub — on an ephemeral port, never 4821: the face's market half reads it as it reads the real one, and nothing leaves the process
+  const market = await standinMarket(hub);
 
   // ---- the browser pairs with the code: the seed key makes it an owner beside it ----
   const pairDevice = engine.pairDevice.bind(engine);
@@ -436,6 +452,7 @@ export async function startStandin(o: StandinOptions): Promise<Standin> {
   const seeded: Seeded = { venues: ["ex", "predict", "wallet", "broker", ...(o.paper !== false ? ["paper", "paper-momentum"] : []), walletVenue], agent: { name: AGENT_NAME, address: agent.address, wallet: walletVenue }, orders, card, intents, asks: 2, watch: 3, curvePoints };
   return {
     url: server.url,
+    marketUrl: market.url,
     code,
     home,
     svc,
@@ -448,11 +465,31 @@ export async function startStandin(o: StandinOptions): Promise<Standin> {
       stopDesk?.();
       for (const t of timers) clearInterval(t);
       hub?.close();
+      await market.close();
       await server.close();
       // a home made for a test goes with it; the one the command line made is kept (its ledger, and the agent wallet's key)
       if (madeHome && !isMain && process.env.UI_STANDIN_KEEP !== "1") rmSync(home, { recursive: true, force: true });
     },
   };
+}
+
+/** The stand-in's market: market/src's server over a core of the stand-in's own public sources and hub (absent when prices only move when
+ * asked), mounted as the market's main mounts it (the source protocol, the public reads and the stream), on an ephemeral port. Its close
+ * ends the stream's follows; the hub is the stand-in's, closed by the stand-in's own close */
+async function standinMarket(hub: ReturnType<typeof standinHub> | undefined): Promise<MarketServerHandle> {
+  const core = createMarketCore({ sources: publicSources(), ...(hub ? { hub } : {}) });
+  let streamed: { close(): void } | undefined;
+  return startMarketServer({
+    port: 0,
+    mount: (app) => {
+      mountProtocol(app, core);
+      mountReads(app, core, marketReads(core));
+      streamed = mountStream(app, core);
+    },
+    close: async () => {
+      streamed?.close();
+    },
+  });
 }
 
 /** Points on the net worth curve for the last seven days (every four hours, then every half hour over the last day): each venue's holdings
@@ -612,10 +649,14 @@ if (isMain) {
     const i = args.indexOf(flag);
     return i >= 0 ? args[i + 1] : undefined;
   };
-  const port = Number(at("--port") ?? 4821);
+  const port = Number(at("--port") ?? 0);
   if (!Number.isInteger(port) || port < 0) throw new Error("--port is a port number");
   if (port === REAL_PORT) {
-    console.error(`port ${REAL_PORT} is the real account's: the stand-in never starts there. Use --port 4821`);
+    console.error(`port ${REAL_PORT} is the real account's: the stand-in never starts there. Use --port 0, an ephemeral port`);
+    process.exit(1);
+  }
+  if (port === MARKET_PORT) {
+    console.error(NOT_MARKET);
     process.exit(1);
   }
   const capUsd = Number(at("--cap") ?? 250);
@@ -635,6 +676,7 @@ if (isMain) {
     [
       "STAND-IN ACCOUNT · no network, no real money: every venue, price and fill on it is made up (test/standin)",
       `  account       ${s.url}  — no page: start the face with FACE_ACCOUNT_URL=${s.url}`,
+      `  market        ${s.marketUrl}  — start the face with FACE_MARKET_URL=${s.marketUrl}`,
       `  pairing code  ${s.code}  — type it on Gravit's face (Account): your browser becomes an owner beside the stand-in's seed key`,
       `  home          ${s.home}  (fresh, kept after you stop; its ledger is ${s.svc.ledgerPath()})`,
       `  trading       on, at most $${capUsd} an order or a movement`,

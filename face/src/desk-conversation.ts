@@ -45,7 +45,9 @@
  * turn's answer, and in P2 and P3 a firing's text, an alert and an annotation's reply. It holds a text back while
  * the pause is in force - read, never lifted, so a delivery writes nothing - and holds it back too when the switch
  * cannot be read; with no outlet it says so; else it is the outlet's answer, a send that fails or keeps the outlet
- * past a minute being one line and an `undelivered` reason.
+ * past a minute being one line and an `undelivered` reason, a send the account held back an `undelivered` reason and
+ * no line. Every send names its kind (src/phone.ts): a phone turn's answer and a cut phone turn's line go as `chat` to
+ * the network the text came from, an alert turn's as `alert`, a wake's as `report`; other callers name their own.
  *
  * AFTER A RESTART (spec §16 H3). When `start`'s ensure resumed a cold desk session - the face came back up - two things
  * the restart left are dealt with, and only then. A phone turn it cut - the log's last turn, never ended or closed
@@ -112,6 +114,7 @@ import type { BudgetState, DeskEvent, OffState } from "./desk.ts";
 import type {
   DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSource, DeskStateMessageSource, DeskSupervision, DeskTurnRecord, SessionEventsOn,
 } from "./desk-session.ts";
+import type { PhoneKind } from "./phone.ts";
 import type { AgentLike } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
 
@@ -144,24 +147,36 @@ const CARRY_TEXT_MAX = 4_000;
 /** How many phone texts' `at` the conversation remembers by key, newest kept, for a `desk-carry` to name. */
 const AT_KEPT = 200;
 
-/** The sources whose answers go to the outlet: the phone, an alert (one a resumed session still held), a wake. A
- * `user` turn is the operator at the browser, answered in its own transcript. */
-const DELIVERED: ReadonlySet<string> = new Set(["telegram", "alert", "wake"]);
+/** The sources whose answers go to the outlet, each with the kind it is sent as (src/phone.ts): the phone's as `chat`, back
+ * to the network it came from; an alert's (one a resumed session still held) as `alert`; a wake's as `report`. A `user`
+ * turn is the operator at the browser, answered in its own transcript. */
+const DELIVERED: ReadonlyMap<string, DeliverOpts> = new Map<string, DeliverOpts>([
+  ["telegram", { kind: "chat", network: "telegram" }],
+  ["alert", { kind: "alert" }],
+  ["wake", { kind: "report" }],
+]);
+/** How a line answering a phone text the desk cut goes: a reply to the operator's own text. */
+const PHONE_LINE: DeliverOpts = { kind: "chat", network: "telegram" };
 
 /** The journal, repo-relative: what a refused turn names when its record carries no violation (the supervisor
  * always gives one; this is the fail-closed reading of a record that did not). */
 const JOURNAL = "desk/journal";
 
-/** Where a turn's answer goes when it should leave the face: the Telegram bridge is one, and P3 adds no other.
- * `send` resolves the ids of the messages it sent, or `{ queued: true }` when it kept the text to send later. */
+/** How a desk text is sent: its `kind` (src/phone.ts - the account routes by it, so each caller names its own), the
+ * message it replies to (`<network>:<id>`), and for a `chat` reply the network the operator's text came from. */
+export type DeliverOpts = { kind: PhoneKind; replyTo?: string; network?: string };
+
+/** Where a turn's answer goes when it should leave the face: the phone bridge. `send` resolves the ids of the messages
+ * it sent, each `<network>:<id>` - with `queued: true` when some of it waits to go - `{ queued: true }` when all of it
+ * does, or `{ held: <reason> }` when the account kept it back (`quiet hours`, `not routed`, `nothing connected`). */
 export interface DeskOutlet {
-  send(text: string, opts?: { replyTo?: number }): Promise<{ sent: number[]; queued?: true } | { queued: true }>;
+  send(text: string, opts: DeliverOpts): Promise<{ sent: string[]; queued?: true } | { queued: true } | { held: string }>;
 }
 
-/** What {@link DeskConversation.deliver} answers: the outlet's own answer, or why the text did not reach it -
- * `paused`, `telegram not configured`, `send failed: <reason>`, `the outlet did not answer in 60 s`,
- * `the pause could not be read: <reason>`, or `the desk could not load: <reason>`. */
-export type DeliverResult = Awaited<ReturnType<DeskOutlet["send"]>> | { undelivered: string };
+/** What {@link DeskConversation.deliver} answers: the outlet's answer, or why the text did not reach it - `paused`,
+ * `no phone`, the account's hold (`quiet hours`, `not routed`, `nothing connected`), `send failed: <reason>`,
+ * `the outlet did not answer in 60 s`, `the pause could not be read: <reason>`, or `the desk could not load: <reason>`. */
+export type DeliverResult = { sent: string[]; queued?: true } | { queued: true } | { undelivered: string };
 
 /** What {@link DeskConversation.post} answers: the turn opened on `sessionId` - `duplicate` when its key was already
  * there, and nothing was sent - or why not, with the line the phone gets. */
@@ -217,7 +232,7 @@ export interface DeskConversation {
    * (spec §16 H1b, src/watch.ts `contextFor`) - the message is three text parts: the provenance line, the context
    * headed `the message this replies to:`, then `text`. Never rejects. */
   post(input: {
-    text: string; source: DeskSource; message: { kind: string } & Record<string, unknown>; replyTo?: number; key?: string; context?: string;
+    text: string; source: DeskSource; message: { kind: string } & Record<string, unknown>; replyTo?: string; key?: string; context?: string;
   }): Promise<PostResult>;
   /** Open another desk conversation (the phone's `/new`), recorded as `new`, and supervise it; resolves its id.
    * Rejects when the ensure does, and when the conversation is disposed before or while it runs. */
@@ -226,13 +241,14 @@ export interface DeskConversation {
    * reason }`, and only it: the messages queued behind it are kept and answered, each in its own turn
    * (src/desk-session.ts `cancelKeepingQueue`); `true` when there was some, `false` when nothing was under way. */
   stop(reason: string): Promise<boolean>;
-  /** Send `text` to the outlet - the first part as a reply to `replyTo` when given - and answer what the outlet
-   * answered, or why the text did not reach it ({@link DeliverResult}): `paused` while the pause is in force (a
-   * pause past its `until` is not; the switch is read, never lifted, and a switch that cannot be read holds the
-   * text back too, with one line), `telegram not configured` with no outlet, `send failed: <reason>` with one line
+  /** Send `text` to the outlet as `opts.kind` - the first part as a reply to `opts.replyTo` when given - and answer
+   * what the outlet answered, or why the text did not reach it ({@link DeliverResult}): `paused` while the pause is in
+   * force (a pause past its `until` is not; the switch is read, never lifted, and a switch that cannot be read holds
+   * the text back too, with one line), `no phone` with no outlet, the account's reason, with no line, for a send it
+   * held back (`{ held }` becomes `{ undelivered: <reason> }`), `send failed: <reason>` with one line
    * when the send throws or rejects, and, with one line, an outlet that has not answered in a minute. The way
    * every desk text leaves the face - each turn's answer, a firing's, an alert, an annotation's. Never rejects. */
-  deliver(text: string, opts?: { replyTo?: number }): Promise<DeliverResult>;
+  deliver(text: string, opts: DeliverOpts): Promise<DeliverResult>;
   /** Where answers go from now on: read at each delivery, so `undefined` stops them while records go on. */
   setOutlet(outlet: DeskOutlet | undefined): void;
   /** The desk state from now on: what a phone's post asks for, waited for {@link STATE_WAIT_MS} at most - a
@@ -495,7 +511,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
 
   /** {@link DeskConversation.deliver}, its failure lines opening with `unsent` - the turn's reply, or a message -
    * and a late one ending with `lateTail`. Never rejects. */
-  const sendOut = async (text: string, opts: { replyTo?: number } | undefined, unsent: string, lateTail: string): Promise<DeliverResult> => {
+  const sendOut = async (text: string, opts: DeliverOpts, unsent: string, lateTail: string): Promise<DeliverResult> => {
     const heldBack = (reason: string): DeliverResult => {
       log(`${unsent}: ${reason}`);
       return { undelivered: reason };
@@ -516,16 +532,16 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     }
     if (paused) return { undelivered: "paused" };
     const to = outlet;
-    if (to === undefined) return { undelivered: "telegram not configured" };
+    if (to === undefined) return { undelivered: "no phone" };
     let sending: Promise<OutletResult>;
     try {
-      sending = Promise.resolve(opts?.replyTo === undefined ? to.send(text) : to.send(text, { replyTo: opts.replyTo }));
+      sending = Promise.resolve(to.send(text, opts));
     } catch (err) {
       log(`${unsent}: ${errText(err)}`);
       return { undelivered: `send failed: ${errText(err)}` };
     }
     const sent = await within(DELIVERY_MS, sending);
-    if (sent.kind === "ok") return sent.value;
+    if (sent.kind === "ok") return "held" in sent.value ? { undelivered: sent.value.held } : sent.value;
     if (sent.kind === "failed") {
       log(`${unsent}: ${errText(sent.error)}`);
       return { undelivered: `send failed: ${errText(sent.error)}` };
@@ -538,10 +554,11 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
   /** A turn's end, delivered: its reply ({@link replyOf}) through {@link sendOut}, for a source the outlet
    * answers. */
   const deliverTurn = async (r: DeskTurnRecord, m: Machinery): Promise<void> => {
-    if (!DELIVERED.has(r.source)) return;
+    const opts = DELIVERED.get(r.source);
+    if (opts === undefined) return;
     const text = replyOf(r, m);
     if (text === "") return; // it ended on a tool: there is nothing to say
-    await sendOut(text, undefined,
+    await sendOut(text, opts,
       `${BIN}: desk: the reply to turn ${r.turn} on desk session ${r.sessionId} could not be sent`, "; the next reply goes ahead");
   };
 
@@ -730,7 +747,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
   /** `line` through {@link sendOut}, after the deliveries already under way; its failure lines name `what`. */
   const sendLine = (line: string, what: string): void => {
     delivering = delivering.then(async () => {
-      await sendOut(line, undefined, `${BIN}: desk: the line for ${what} could not be sent`, "; the next reply goes ahead");
+      await sendOut(line, PHONE_LINE, `${BIN}: desk: the line for ${what} could not be sent`, "; the next reply goes ahead");
     }).catch((err: unknown) => {
       log(`${BIN}: desk: the line for ${what} could not be delivered: ${errText(err)}`);
     });

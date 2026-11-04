@@ -12,6 +12,7 @@
  * synthetic sealed 10-27 run (`syntheticSealedRun`), written as the run's own files. A bare
  * `bootFace` mounts no `/data` route, so the view route is registered here as `src/main.ts`
  * registers it, and the page is mounted for the sign-in (`mountClient`). No model is called. Gated by FACE_SMOKE=1. */
+import "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";

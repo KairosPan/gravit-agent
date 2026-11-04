@@ -4,8 +4,8 @@
 // books, a key file's check, a venue's reach), each kind one flight at a time; the page at the Account's own cadence (every
 // 20 s on screen, 80 s while the stream is open); and the stream's account events as the reads they name, past the face's
 // cache; and Guard (plan 4a Task 5) and Close to agents (plan 4b Task 4), the Account's unsigned switches, posted through the
-// face's proxy; and a venue's own sign-in for the connect sheet, its tab and its status poll. The views over what lands are
-// account-view.js's.
+// face's proxy; and a venue's own sign-in for the connect sheet, its tab and its status poll; and Account › Identity's read (plan
+// B1b), at the page's cadence while that tab is on screen. The views over what lands are account-view.js's and identity-view.js's.
 import { pageOk, worthOf, venuesOf } from './account-view.js';
 import { refusedAt } from './owner-view.js';
 
@@ -142,6 +142,21 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
     fly('statement', '/data/account/statement', { fresh, loading: 'statementLoading', land: landing('statementLoaded', 'statementFailed') });
   const loadAgents = () => fly('agents', '/data/account/agents', { loading: 'agentsLoading', land: landing('agentsLoaded', 'agentsFailed') });
 
+  /** Account › Identity (plan B1b Task 1): the account's identity read (`/data/account/identity`) into `state.identity` — on
+   *  entering the tab, at the page's cadence while it is on screen, and past the face's cache (`fresh`) after an identity sheet is
+   *  done, the proxy's short cache not being cleared by a write. Any 2xx answer that is not a refusal lands (one the face does not
+   *  recognise too, so the tab says it is unreadable); anything else is the account not answering, in its words when it gave some,
+   *  and keeps no connection drawn. */
+  const loadIdentity = ({ fresh = false } = {}) => fly('identity', '/data/account/identity', {
+    fresh,
+    loading: 'identityLoading',
+    land: (body, refused) => {
+      if (!refused && body && body.ok !== false) store.dispatch('identityLoaded', body);
+      else store.dispatch('identityFailed', messageOf(body));
+    },
+  });
+  const identityShown = () => { const r = store.get().route; return r?.screen === 'account' && r.tab === 'identity'; };
+
   // ── the connect sheet's reads (plan 2 Task 8); none goes past the face's cache, as the proxy lists no fresh for them ──
 
   /** Where this account can connect (`/data/account/venues`): every venue it knows with its verdict, judged from the network
@@ -189,6 +204,7 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
     timer = null;
     if (closed) return;
     void load();
+    if (identityShown()) void loadIdentity();
     arm();
   }
   function poll(on) {
@@ -367,5 +383,5 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
     stopSignIn();
   }
 
-  return { load, guard, revoke, signIn, receive, bridgeRoutes, loadEarn, loadHoldings, loadHistory, loadStatement, loadAgents, loadAll, loadVenuesHere, loadPaperBooks, checkKeyfile, reach, poll, onStreamEvent, close };
+  return { load, loadIdentity, guard, revoke, signIn, receive, bridgeRoutes, loadEarn, loadHoldings, loadHistory, loadStatement, loadAgents, loadAll, loadVenuesHere, loadPaperBooks, checkKeyfile, reach, poll, onStreamEvent, close };
 }
