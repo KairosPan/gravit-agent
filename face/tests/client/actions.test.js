@@ -9,7 +9,7 @@ import { makeActions, NOT_SIGNED_IN } from '../../client/js/host/actions.js';
 const conv = (id, over = {}) => ({ id, title: 'T', kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: true, updatedAt: 5, created: null, messages: [], loaded: true, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
 
 // a store on screen at conversation `id`, a recording host whose answers are canned per endpoint
-function rig({ answers = {}, posts = {}, convs = [conv('s1')], open = 's1' } = {}) {
+function rig({ answers = {}, posts = {}, convs = [conv('s1')], open = 's1', activate } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   store.dispatch('hostList', { conversations: convs });
   store.dispatch('nav', { screen: 'messages', id: open });
@@ -24,7 +24,8 @@ function rig({ answers = {}, posts = {}, convs = [conv('s1')], open = 's1' } = {
   const postJson = async (path, body) => { posted.push([path, body]); const a = posts[path]; if (a instanceof Error) throw a; return a ?? {}; };
   const answered = [];
   const answerGate = async (eventId, value) => { answered.push([eventId, value]); if (answers.$answer instanceof Error) throw answers.$answer; };
-  const actions = makeActions({ store, call, answerGate, postJson, requestId: () => 'req-1', timeZone: () => 'Asia/Shanghai' });
+  const opened = activate ? async id => { calls.push(['activate', id]); return activate(id); } : undefined;
+  const actions = makeActions({ store, call, answerGate, postJson, requestId: () => 'req-1', timeZone: () => 'Asia/Shanghai', activate: opened });
   return { store, actions, calls, posted, answered };
 }
 const err = (over) => Object.assign(new Error('boom'), over);
@@ -223,4 +224,49 @@ test('archiving a pinned conversation unpins it after the archive succeeds; a fa
   un.store.dispatch('hostPins', ['s1']);
   await un.actions.archive('s1', false);
   assert.deepEqual(un.calls, []);
+});
+
+// ---- plan 3 task 8: a command on a cold conversation, runCommand, and send's room option
+test('a slash line on a cold conversation opens it before commands/execute', async () => {
+  const r = rig({ convs: [conv('s1', { live: false })], activate: () => true, answers: { 'commands/execute': { result: { kind: 'ok', text: 'compacted' } } } });
+  assert.deepEqual(await r.actions.send('/compact'), { sent: 'command', sessionId: 's1' });
+  assert.deepEqual(r.calls.map(c => c[0]), ['activate', 'commands/execute']);
+  assert.equal(r.calls[0][1], 's1');
+});
+
+test('a conversation that does not open sends nothing and says so', async () => {
+  const r = rig({ convs: [conv('s1', { live: false })], activate: () => false });
+  assert.equal(await r.actions.send('/compact'), null);
+  assert.deepEqual(r.calls.map(c => c[0]), ['activate'], 'neither the command nor a prompt');
+  assert.deepEqual(r.store.get().status.line, 'send: the conversation did not open');
+  assert.equal(r.store.get().status.bad, true);
+});
+
+test("runCommand says the command's result, or its failure", async () => {
+  const ok = rig({ answers: { 'commands/execute': { result: { kind: 'ok', text: 'compacted' } } } });
+  assert.equal(await ok.actions.runCommand('s1', '/compact'), true);
+  assert.deepEqual(ok.calls, [['commands/execute', { agentId: 's1', line: '/compact', submittedAttachments: [] }]]);
+  assert.equal(ok.store.get().status.line, 'compacted');
+  const refused = rig({ answers: { 'commands/execute': err({ code: 'gateway/lookup-not-found' }) } });
+  assert.equal(await refused.actions.runCommand('s1', '/compact'), false);
+  assert.equal(refused.store.get().status.line, 'command: gateway/lookup-not-found');
+  assert.equal(refused.store.get().status.bad, true);
+  const cold = rig({ activate: () => false });
+  assert.equal(await cold.actions.runCommand('s1', '/compact'), false);
+  assert.equal(cold.store.get().status.line, 'command: the conversation did not open');
+  assert.equal(cold.calls.some(c => c[0] === 'commands/execute'), false);
+});
+
+test('room: false sends a line with @ straight to Gravit; true posts it to the room', async () => {
+  const inRoom = { convs: [conv('s1', { channel: { workspaceId: 'w1', name: 'alpha' } })], posts: { '/data/rooms/say': { addressed: ['buffett'] } } };
+  const direct = rig(inRoom);
+  assert.deepEqual(await direct.actions.send('read @strategies/x.md', { room: false }), { sent: 'prompt', sessionId: 's1' });
+  assert.equal(direct.posted.length, 0);
+  assert.equal(direct.calls[0][1].request.content[0].text, 'read @strategies/x.md');
+  const room = rig(inRoom);
+  assert.deepEqual(await room.actions.send('plain words', { room: true }), { sent: 'say', sessionId: 's1' });
+  assert.deepEqual(room.posted, [['/data/rooms/say', { sessionId: 's1', text: 'plain words' }]]);
+  const outside = rig({ posts: inRoom.posts });
+  await outside.actions.send('plain words', { room: true });
+  assert.equal(outside.posted.length, 0, 'no channel, no room');
 });

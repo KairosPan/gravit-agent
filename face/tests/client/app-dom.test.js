@@ -3892,6 +3892,7 @@ const menuRig = async (opts = {}) => {
   const say = f.withId('say', { tagName: 'INPUT' });
   const slot = f.withId('composer-menu');
   const h = menuHost(opts);
+  opts.wrap?.(h);   // a test's own answers, in place before the boot takes the host's functions
   const store = await bootComposer(f, h, runsEditor);
   say.focus();
   return { f, say, slot, h, store };
@@ -4201,5 +4202,82 @@ test('the menu closes when the editor loses focus, but not to the menu itself or
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleDetails' } });
   f.fire('doc', 'keydown', { key: 'Escape', target: f.body });
   assert.equal(store.get().detailsOpen, false, 'Esc is the drawers\' again');
+  store.timers.clear();
+});
+
+// ---- plan 3 task 8: a command chosen from the menu runs; what reaches the room and what reaches Gravit ----
+const putRuns = (f, say, runs) => { say.runs = runs; say.value = runs.map(r => (r.type === 'text' ? r.text : r.chip.label)).join(''); say.setSelectionRange(say.value.length, say.value.length); f.fire('root', 'input', { target: say }); };
+const saysOf = h => h.posted.filter(p => p[0] === '/data/rooms/say');
+const botChip = { kind: 'bot', id: 'buffett', label: 'Buffett Type' };
+
+test('Compact from the menu runs /compact at once, and the draft keeps its other words', async () => {
+  const { f, say, slot, h, store } = await menuRig({ wrap: h => {
+    const call = h.call;
+    h.call = async (endpoint, args) => {
+      if (endpoint === 'commands/execute') { h.calls.push([endpoint, args]); return { result: { kind: 'ok', text: 'compacted' } }; }
+      return call(endpoint, args);
+    };
+  } });
+  typeMenu(f, say, 'tidy up /comp');
+  await settle();
+  assert.match(slot.innerHTML, /Compact/);
+  assert.equal(press(f, say, 'Enter'), true);
+  await settle();
+  assert.deepEqual(h.calls.filter(c => c[0] === 'commands/execute'), [['commands/execute', { agentId: 's1', line: '/compact', submittedAttachments: [] }]]);
+  assert.equal(say.value, 'tidy up ', 'the token is gone, the rest stays');
+  assert.equal(say.selectionStart, 8);
+  assert.equal(slot.innerHTML, '');
+  assert.deepEqual(promptsOf(h), [], 'nothing was prompted');
+  assert.equal(store.get().status.line, 'compacted');
+  store.dispatch('toggleRail');
+  assert.equal(say.value, 'tidy up ', 'the draft kept its words through a render');
+  store.timers.clear();
+});
+
+test('a bot chip with a conversation chip is refused before sending, and the draft stays', async () => {
+  const { f, say, h, store } = await menuRig();
+  const draft = [{ type: 'text', text: 'ask ' }, { type: 'chip', chip: botChip }, { type: 'text', text: ' about ' }, { type: 'chip', chip: { kind: 'conversation', id: 's2', label: 'Beta' } }];
+  putRuns(f, say, draft);
+  send(f);
+  await settle();
+  assert.deepEqual(saysOf(h), []);
+  assert.deepEqual(promptsOf(h), []);
+  assert.equal(store.get().status.line, "Conversations go to Gravit, not to a room's bots");
+  assert.equal(store.get().status.bad, true);
+  store.dispatch('toggleRail');
+  assert.deepEqual(say.runs, draft, 'the draft stays');
+  store.timers.clear();
+});
+
+test("a bot chip with a file chip goes to the room with the bot's @id and the file's path", async () => {
+  const { f, say, h, store } = await menuRig({ wrap: h => {
+    const postJson = h.postJson;
+    h.postJson = async (path, body) => (path === '/data/rooms/say' ? (h.posted.push([path, body]), { ok: true, addressed: ['buffett'] }) : postJson(path, body));
+  } });
+  putRuns(f, say, [{ type: 'text', text: 'ask ' }, { type: 'chip', chip: botChip }, { type: 'text', text: ' about ' }, { type: 'chip', chip: { kind: 'file', path: 'strategies/alpha/notes.md', dir: false, label: 'notes.md' } }]);
+  send(f);
+  await settle();
+  assert.deepEqual(saysOf(h), [['/data/rooms/say', { sessionId: 's1', text: 'ask @buffett about @notes.md' }]]);
+  assert.deepEqual(promptsOf(h), []);
+  store.timers.clear();
+});
+
+test('a file chip that reads like a bot, with no bot chip, is prompted to Gravit and never posted to the room', async () => {
+  const { f, say, h, store } = await menuRig();
+  putRuns(f, say, [{ type: 'text', text: 'read ' }, { type: 'chip', chip: { kind: 'file', path: 'strategies/alpha/news-scout.md', dir: false, label: 'news-scout.md' } }]);
+  send(f);
+  await settle();
+  assert.deepEqual(saysOf(h), [], 'never posted to the room on its own account');
+  assert.deepEqual(promptsOf(h), [['s1', 'read @news-scout.md']]);
+  store.timers.clear();
+});
+
+test('a typed @buffett with no chip still tries the room, as today', async () => {
+  const { f, say, h, store } = await menuRig();
+  putRuns(f, say, [{ type: 'text', text: '@buffett leverage?' }]);
+  send(f);
+  await settle();
+  assert.deepEqual(saysOf(h), [['/data/rooms/say', { sessionId: 's1', text: '@buffett leverage?' }]]);
+  assert.deepEqual(promptsOf(h), [['s1', '@buffett leverage?']], 'nobody addressed, so an ordinary prompt');
   store.timers.clear();
 });

@@ -12,15 +12,18 @@ const zone = () => {
 };
 const clean = text => (typeof text === 'string' ? text.trim() : '');
 
-export function makeActions({ store, call, answerGate, postJson, requestId = randomUuid, timeZone = zone }) {
+// activate(sessionId) → Promise<boolean>: the conversation made live before a command runs on it (live.activate)
+export function makeActions({ store, call, answerGate, postJson, requestId = randomUuid, timeZone = zone, activate = async () => true }) {
   const say = (line, bad = false) => store.dispatch('hostStatus', { line, bad });
   const fail = (err, what) => say(err?.status === 401 ? NOT_SIGNED_IN : `${what}: ${err?.code ?? (err?.status ? `HTTP ${err.status}` : err?.message ?? 'failed')}`, true);
   const prompt = (sessionId, text) => call('session/prompt', {
     request: { requestId: requestId(), sessionId, mode: 'queue', content: [{ type: 'text', text }], clientTimeZone: timeZone() },
   });
 
-  // a slash line; `undefined` back means no command claimed it and the line is a prompt after all
+  // a slash line, on a conversation made live first (a cold agent answers lookup-not-found); `undefined` back means no
+  // command claimed it and the line is a prompt after all
   async function command(sessionId, line) {
+    if (!(await activate(sessionId))) throw new Error('the conversation did not open');
     const executed = await call('commands/execute', { agentId: sessionId, line, submittedAttachments: [] });
     if (executed === undefined || executed === null) return null;
     const result = executed.result;
@@ -28,7 +31,20 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     return executed;
   }
 
-  async function send(text) {
+  // a command chosen from the composer's menu: its result on the status line, or its failure
+  async function runCommand(sessionId, line) {
+    try {
+      await command(sessionId, line);
+      return true;
+    } catch (err) {
+      fail(err, 'command');
+      return false;
+    }
+  }
+
+  // room: whether a channel conversation's words go to its room first (the composer decides by its chips; a bare call by
+  // an @ in the words, as before)
+  async function send(text, { room } = {}) {
     const words = clean(text);
     if (!words) return null;
     const s = store.get();
@@ -37,7 +53,7 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     if (!conv) return null;
     try {
       if (words.startsWith('/') && (await command(id, words)) !== null) return { sent: 'command', sessionId: id };
-      if (conv.channel && isMentionText(words)) {
+      if (conv.channel && (room ?? isMentionText(words))) {
         const answer = await postJson('/data/rooms/say', { sessionId: id, text: words });
         if (Array.isArray(answer?.addressed) && answer.addressed.length > 0) return { sent: 'say', sessionId: id };
       }
@@ -189,5 +205,5 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     }
   }
 
-  return { send, newConversation, answer, stop, rename, command, fork, archive, pin, unpin, remove, talkTo, stopChild };
+  return { send, newConversation, answer, stop, rename, command, runCommand, fork, archive, pin, unpin, remove, talkTo, stopChild };
 }

@@ -11,6 +11,7 @@ export const LIST_REFRESH_MS = 1200;   // the list is re-read this long after a 
 export const PREVIEW_ROWS = 12;        // how many rows get a one-message page for their preview
 export const FOLLOW_RETRY_MS = 2000;   // a follow the host ended is re-decided after this
 export const CONTROL_RETRY_MS = 10_000;
+export const ACTIVATE_MS = 10_000;     // how long activate waits for a follow's first snapshot
 
 // a live session is followed (a follow cannot activate it); a cold one is paged, never followed (PLAN D16)
 export const viewFor = conv => (conv?.live ? 'follow' : 'page');
@@ -28,7 +29,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   let memberBot = new Map();      // a room member's session → its bot id
   let openSeq = 0;
   let listSeq = 0;
-  let view = null;                // {id, token, mode: 'follow' | 'page', handle, stale?, failed?}
+  let view = null;                // {id, token, mode: 'follow' | 'page', handle, stale?, failed?, snapped?, waiters?}
   let listPending = false;
   // the last good answer of each /data read the list joins: a failed read keeps it, never an empty set in its place
   let lastIndex = null;
@@ -100,9 +101,16 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   }
 
   // ---- the read of the conversation on screen
+  // a follow's activate waiters, answered once: true on its first snapshot, false when the follow goes without one
+  function release(v, ok) {
+    const waiters = v?.waiters ?? [];
+    if (v) v.waiters = [];
+    for (const w of waiters) w(ok);
+  }
   function closeView() {
     const v = view;
     view = null;
+    release(v, false);
     v?.handle?.cancel();
   }
   function follow(id, token) {
@@ -112,22 +120,27 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     handle = mux.stream('session/follow', { request: { address: address(id), assistantStream: true } }, {
       onItem: item => {
         if (!owns()) return;
-        if (item?.type === 'snapshot') applySnapshot(id, item);
+        if (item?.type === 'snapshot') {
+          applySnapshot(id, item);
+          if (owns() && !view.snapped) { view.snapped = true; release(view, true); }   // the store's render may have moved on
+        }
         else if (item?.type === 'event') accept(id, { type: 'session/event', sessionId: id, event: item.event });
         else if (item?.type === 'assistant-stream') accept(id, { type: 'assistant-stream', sessionId: id, frame: item.frame });
       },
       onEnd: () => { // the host ended it: re-decided by liveness, never blindly re-followed
         if (!owns()) return;
+        release(view, false);
         view = { id, token, mode: 'page', handle: null, stale: true };
         timers.after(FOLLOW_RETRY_MS, reconcile);
       },
       onError: error => { // a refusal is terminal for this open
         if (!owns()) return;
+        release(view, false);
         view = { id, token, mode: 'page', handle: null, failed: true };
         say(`${error?.code ?? 'error'} — ${error?.message ?? 'the follow failed'}`, true);
       },
     });
-    view = { id, token, mode: 'follow', handle };
+    view = { id, token, mode: 'follow', handle, snapped: false, waiters: [] };
   }
   async function page(id, token) {
     closeView();
@@ -161,6 +174,22 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   function promote(id) {
     if (view && view.id === id && view.mode === 'page' && !view.failed) follow(id, view.token);
   }
+  // the conversation made live before a command runs on it (commands/execute needs a live agent): a live one at once; the
+  // one paged on screen followed, as promote does, and true once the follow's first snapshot lands; false when that
+  // follow ends or fails first, after ACTIVATE_MS, or when the screen shows another conversation
+  function activate(id) {
+    if (convOf(id)?.live) return Promise.resolve(true);
+    if (!view || view.id !== id) return Promise.resolve(false);
+    if (view.mode === 'page') follow(id, view.token);
+    const v = view;
+    if (v.snapped) return Promise.resolve(true);
+    return new Promise(resolve => {
+      let done = false;
+      const answer = ok => { if (!done) { done = true; resolve(ok); } };
+      v.waiters.push(answer);
+      timers.after(ACTIVATE_MS, () => answer(false));
+    });
+  }
   function reconcile() {
     if (!view || view.failed) return;
     const conv = convOf(view.id);
@@ -170,14 +199,16 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   }
   function suspend() {
     if (view && view.mode === 'follow') {
+      release(view, false);
       view.handle?.cancel();
-      view = { ...view, mode: 'page', handle: null, stale: true };
+      view = { ...view, mode: 'page', handle: null, stale: true, snapped: false };
     }
   }
   function stopFollowing(id) {
     if (view && view.id === id && view.mode === 'follow') {
+      release(view, false);
       view.handle?.cancel();
-      view = { ...view, mode: 'page', handle: null };
+      view = { ...view, mode: 'page', handle: null, snapped: false };
     }
   }
 
@@ -372,5 +403,5 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   openPins();
 
   // leave: no conversation is on screen any more (the last open one was deleted): stop reading the one that was
-  return { open, promote, refresh, reconcile, retryOrphans, answer, leave: closeView, close: () => { closeView(); mux.close(); }, mux };
+  return { open, promote, activate, refresh, reconcile, retryOrphans, answer, leave: closeView, close: () => { closeView(); mux.close(); }, mux };
 }

@@ -16,6 +16,7 @@ import { call as wireCall, openMux as wireOpenMux } from './wire/api.js';
 import { mapFrame } from './wire/mapper.js';
 import { startLive } from './host/live.js';
 import { makeActions } from './host/actions.js';
+import { isMentionText } from './wire/room.js';
 import { startMarkets } from './host/markets.js';
 import { startDesk } from './host/desk.js';
 import { startAccount } from './host/account.js';
@@ -39,7 +40,7 @@ import { rulesOf } from './host/rules-view.js';
 import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
 import { makeEditor } from './composer/dom.js';
-import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt } from './composer/draft.js';
+import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt, hasChip } from './composer/draft.js';
 import { flatItems, slashItems, atItems, conversationChoices, moveActive, chipOf } from './composer/menus.js';
 import { renderMenu, menuAria } from './composer/view.js';
 import { startComposerReads } from './host/composer.js';
@@ -398,8 +399,9 @@ export function boot(win, host = {}) {
   // a receipt reloads the Account's read past the cache, and one from the Account seat (every receipt the kind table
   // lifts today) the seat's standing too
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });
-  // answers go through the live layer, which settles the gate it delivered once the answer wins
-  const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson });
+  // answers go through the live layer, which settles the gate it delivered once the answer wins; a command opens a cold
+  // conversation through it first
+  const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson, activate: id => live.activate(id) });
   // Markets: the Account's reads on the app's timers — the A shares' among them — a market's page followed on the stream; the
   // stars in this browser's storage
   const markets = startMarkets({ store, storage, getJson, win, now, stream, schedule, cancelTimer, owner, afterAction });
@@ -940,6 +942,11 @@ export function boot(win, host = {}) {
     const key = draftKey(s);
     const runs = runsOf(key);
     if (isBlank(runs)) return;
+    // a room's bots cannot read a conversation chip (O9): refused here, the draft kept as it stands
+    const toBot = hasChip(runs, 'bot');
+    if (toBot && hasChip(runs, 'conversation')) { store.dispatch('hostStatus', { line: "Conversations go to Gravit, not to a room's bots", bad: true }); return; }
+    // the room is a bot chip's, or an @ the operator typed: a file or conversation chip's @ never sends to it alone
+    const room = toBot || isMentionText(runs.filter(r => r.type === 'text').map(r => r.text).join(''));
     const workspaceId = s.draft ? s.draft.where : currentConversation(s)?.channel?.workspaceId ?? null;
     const text = serialize(runs, serialContext({ channels: s.channels, workspaceId })).trim();
     // words typed under the key while the send was on its way are kept, after the sent ones on a new line (A7)
@@ -959,7 +966,7 @@ export function boot(win, host = {}) {
       live.promote(id);
       return;
     }
-    const sent = await sendText(text);
+    const sent = await sendText(text, { room });
     if (!sent) { back(); return; }
     render();
   }
@@ -976,8 +983,8 @@ export function boot(win, host = {}) {
   }
   // one message to the open conversation by the composer's own path (the composer, the stock drawer's Ask, a follow-up): what
   // actions.send answers, the conversation promoted to a follow when it prompted; the composer's words are never touched
-  async function sendText(text) {
-    const sent = await actions.send(text);
+  async function sendText(text, opts) {
+    const sent = await actions.send(text, opts);
     if (sent && (sent.sent === 'prompt' || sent.sent === 'say')) live.promote(sent.sessionId);
     return sent;
   }
@@ -1085,13 +1092,21 @@ export function boot(win, host = {}) {
   }
   // a row chosen: a skill or an argument command becomes `/name `, a bot, file or conversation its chip and a space, the
   // caret after them; `walk` (Tab on a folder) makes the token `@<path>/` and the menu follows it in. A command that takes
-  // no arguments runs at once, which is plan 3 task 8's
+  // no arguments runs at once: its token leaves the draft, the rest stays
   function chooseItem(item, walk = false) {
     const say = doc.getElementById('say');
     const trig = menuTrig;
     if (!say || !trig || !item) return;
-    if (item.kind === 'command' && !item.takesArgs) return;
     const to = trig.from + 1 + trig.query.length;
+    if (item.kind === 'command' && !item.takesArgs) {
+      const id = menuContext(store.get()).conv?.id;
+      const runs = replaceRange(currentRuns(), trig.from, to, []);
+      setRuns(runs);
+      editor.write(say, runs, trig.from);
+      closeMenu();
+      if (id) void actions.runCommand(id, `/${item.name}`);
+      return;
+    }
     let insert, caret;
     if (walk) { insert = `@${String(item.path).replace(/\/+$/, '')}/`; caret = trig.from + insert.length; }
     else if (item.kind === 'command' || item.kind === 'skill') { insert = `/${item.name} `; caret = trig.from + insert.length; }

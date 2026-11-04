@@ -7,7 +7,7 @@ import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { mapFrame } from '../../client/js/wire/mapper.js';
-import { startLive, viewFor, LIST_REFRESH_MS, PREVIEW_ROWS, FOLLOW_RETRY_MS } from '../../client/js/host/live.js';
+import { startLive, viewFor, LIST_REFRESH_MS, PREVIEW_ROWS, FOLLOW_RETRY_MS, ACTIVATE_MS } from '../../client/js/host/live.js';
 
 const NOW = 1_760_000_000_000;
 const frames = readFileSync(new URL('../fixtures/events.jsonl', import.meta.url), 'utf8').trim().split('\n').map(l => JSON.parse(l));
@@ -459,4 +459,68 @@ test('the follow opens again after the mux reconnects, and the new baseline wins
   again[1].cbs.onEnd();
   for (const t of r.scheduled.splice(0)) t.fn();
   assert.equal(r.streams.filter(s => s.name === 'workspace/follow').length, 3);
+});
+
+// ---- activate (plan 3 task 8): a cold conversation opened before a command runs on it
+const watch = p => { const out = { done: false, value: undefined }; void p.then(v => { out.done = true; out.value = v; }); return out; };
+
+test('activate follows a paged conversation and answers once its snapshot lands', async () => {
+  const r = rig({ rows: [row('cold')] });
+  await r.ready();
+  r.live.open('cold'); await settle();
+  assert.equal(r.follows().length, 0);
+  const got = watch(r.live.activate('cold'));
+  assert.equal(r.follows().length, 1, 'followed, as promote does');
+  const f = r.last('session/follow');
+  assert.deepEqual(f.args, { request: { address: { kind: 'session', sessionId: 'cold' }, assistantStream: true } });
+  f.cbs.onItem({ type: 'event', event: frames[0].event });
+  await settle();
+  assert.equal(got.done, false, 'an event is not the snapshot');
+  f.cbs.onItem({ type: 'snapshot', header: {}, records: [fixture(0)], projections: { asOfSeq: 1, values: {} } });
+  await settle();
+  assert.deepEqual(got, { done: true, value: true });
+  const again = watch(r.live.activate('cold'));
+  await settle();
+  assert.deepEqual(again, { done: true, value: true }, 'a follow that has its snapshot answers at once');
+  assert.equal(r.follows().length, 1, 'and is not followed twice');
+});
+
+test('activate is true at once for a live conversation, false when the follow fails or never answers', async () => {
+  const r = rig({ rows: [row('live', { agentAvailable: true }), row('a'), row('b')] });
+  await r.ready();
+  const live = watch(r.live.activate('live'));
+  await settle();
+  assert.deepEqual(live, { done: true, value: true });
+  assert.equal(r.follows().length, 0, 'a live one needs no follow to answer');
+
+  r.live.open('a'); await settle();
+  const other = watch(r.live.activate('b'));
+  await settle();
+  assert.deepEqual(other, { done: true, value: false }, 'the view is on another conversation');
+
+  const failed = watch(r.live.activate('a'));
+  r.last('session/follow').cbs.onError({ code: 'gateway/lookup-not-found', message: 'gone' });
+  await settle();
+  assert.deepEqual(failed, { done: true, value: false });
+
+  r.live.open('a'); await settle();
+  const ended = watch(r.live.activate('a'));
+  r.last('session/follow').cbs.onEnd();
+  await settle();
+  assert.deepEqual(ended, { done: true, value: false });
+
+  r.live.open('a'); await settle();
+  r.scheduled.splice(0);
+  const silent = watch(r.live.activate('a'));
+  await settle();
+  assert.equal(silent.done, false);
+  const timer = r.scheduled.find(t => t.ms === ACTIVATE_MS);
+  assert.ok(timer, 'a deadline of ACTIVATE_MS');
+  assert.equal(ACTIVATE_MS, 10_000);
+  timer.fn();
+  await settle();
+  assert.deepEqual(silent, { done: true, value: false });
+  r.last('session/follow').cbs.onItem({ type: 'snapshot', header: {}, records: [], projections: { asOfSeq: 1, values: {} } });
+  await settle();
+  assert.deepEqual(silent, { done: true, value: false }, 'a late snapshot changes nothing');
 });
