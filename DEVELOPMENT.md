@@ -5015,8 +5015,9 @@ each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn
   the `mcp-account` row disabled — no seat process, nothing written under `~/.buyer-agent-demo`
   — and `FACE_ACCOUNT_URL` at the stand-in; the proxy and the seat route registered on the booted web
   server as `main.ts` registers them (a bare `bootFace` mounts no `/data` route), and then, over the
-  face's own port: `/data/account` 200 with `ok` and its venues, `/data/account/explore` listing
-  items, `explore?force=1` refused 400 `invalid account request` and never asked of the Account,
+  face's own port: `/data/account` 200 with `ok` and its venues, `/data/account/connected/explore` listing
+  items and `/data/account/explore` a 404 (the public read is the market's since plan A2),
+  `connected/explore?force=1` refused 400 `invalid account request` and never asked of the Account,
   `/data/account/stream` answering `text/event-stream` with a named frame carrying JSON within 5 s,
   and `/data/seat.json` reading the Account reachable through the proxy's reader. Then the owner's
   half (stage 2): the client's own `host/owner.js` run under Node by `tests/helpers/owner-node.ts`
@@ -5885,7 +5886,7 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   a server's `instructions` become an unswitchable `mcp:<server>` prompt section that bots see
   too (sections are not masked like tools), and instructions over 32 KiB fail the connection. A
   one-tool FastMCP server on the operator's interpreter (`mcp` 1.28.1) negotiated with the 0.2
-  client; AKShare is the market's sidecar (the account relays it) since 2026-11-01, so its negotiation is the market's SDK client's, not dsh's.
+  client; AKShare is the market's sidecar since 2026-11-03 (the Account's from 2026-11-01), reached through the `mcp-market` row's `market_akshare` and relayed by nobody, so its negotiation is the market's SDK client's, not dsh's.
 - **R24 — `agentPresets/read` hands any signed-in client a bot's composition**: its persona text
   and the absolute rebased paths (the face's install path). 0.1.1 had no such Remote; `/api` is
   cookie-gated, which R3a qualifies.
@@ -6003,7 +6004,7 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   names from a CLI agent's environment). A keyed source comes back, if wanted, as a wallet — an account the owner connects
   to the Account, Alpaca's key file as a venue — and later as an MCP server of its own for Gravit,
   as the seat is. An unmerged branch that reads `/data/quotes` for US ids (`feat/desk`) meets a
-  route that no longer exists — it answered A shares alone from the graft on and is deleted since 2026-11-01 — that branch's landing question (the design's §11); on merge it must read the Account's `quotes` through `/data/account/quotes` or drop the read.
+  route that no longer exists — it answered A shares alone from the graft on and is deleted since 2026-11-01 — that branch's landing question (the design's §11); on merge it must read the market's `quotes` through `/data/market/quotes` (A shares; a US share's price is the market's `explore` row, as `src/market-quotes.ts` reads it) or drop the read.
 - **R37 — The face's page is an owner device of the Account (charter D18).** Since the graft's stage
   2 the browser profile that holds the face's key can sign anything an owner can — hand orders up to
   the Account's live cap on every venue connected there, seats' limits, cards, venue connections,

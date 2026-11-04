@@ -109,6 +109,7 @@ test('bookOf keeps best first and a null size', () => {
 
 test('tradesOf carries the none sentence', () => {
   assert.deepEqual(tradesOf(fx('trades')), { trades: [], none: 'Stand-in Delayed Quotes publishes no trades the market can read', public: true });
+  assert.deepEqual(tradesOf(fx('connected-trades')), { trades: [], none: 'Stand-in Exchange publishes no trades the account can read', public: false });
   const t = tradesOf({
     ok: true, venue: 'ex', symbol: 'BTC/USDT', public: true,
     trades: [

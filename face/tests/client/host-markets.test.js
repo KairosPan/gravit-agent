@@ -1422,7 +1422,7 @@ test("a stock's page reads no funding", async () => {
   await settle();
   assert.equal(r.m().depth['stock:NVDA'].funding, undefined);
   // a source that publishes no trades: said once, and asked no more while the page is on
-  const none = rig({ answer: path => (path === ALL ? fx('explore-all') : path.startsWith('/data/account/connected/trades?') ? fx('trades') : depthAnswer(path)) });
+  const none = rig({ answer: path => (path === ALL ? fx('explore-all') : path.startsWith('/data/account/connected/trades?') ? fx('connected-trades') : depthAnswer(path)) });
   none.markets.show(true);
   await settle();
   none.markets.page('stock:NVDA');

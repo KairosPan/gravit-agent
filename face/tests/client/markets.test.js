@@ -846,7 +846,7 @@ test('the four reads: You here with what agents do here, the order book, the lat
   assert.equal(lines.length, 20);
   assert.equal(lines[0], `·$62,524.00 · 0.01${fmtClock(NOW - 6_000)}`, 'the newest first, no side said');
   assert.equal(lines[1], `·$62,523.00 · 0.01Sell · ${fmtClock(NOW - 7_000)}`);
-  assert.match(section(draw(depthOf(base, 'coin:BTC', 'trades', fx('trades'))), 'Latest trades'), /<p class="mk-empty">Stand-in Delayed Quotes publishes no trades the market can read<\/p>/);
+  assert.match(section(draw(depthOf(base, 'coin:BTC', 'trades', fx('connected-trades'))), 'Latest trades'), /<p class="mk-empty">Stand-in Exchange publishes no trades the account can read<\/p>/);
 
   // each before its read answers: Loading…; failed before an answer: unavailable, in the Account's sentence where it gave one
   for (const [part, label] of [['book', 'Order book'], ['trades', 'Latest trades']]) assert.match(section(draw(base), label), /<p class="mk-empty">Loading…<\/p>/, label);

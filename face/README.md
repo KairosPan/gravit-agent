@@ -1774,8 +1774,9 @@ stream; a visible one opens it again from the last id and tells the follow set a
 **The fixtures** — `tests/fixtures/account/` holds the Account's answers at buyer-agent-demo
 @ 133b9a7 (and, since plan A2, the market's explore All and Predictions, which
 `scripts/capture-account-fixtures.ts` reads from the stand-in's own market at `/api/explore`;
-`trades.json` is written by hand as the market's answer for a source that publishes none — the
-capture since plan A2 has not been run), captured from its own stand-in (the real Account over simulated venues: no network, no
+`trades.json` is written by hand as the market's answer for a public source that publishes none,
+`connected-trades.json` as the Account's for a connected venue that publishes none — the capture
+since plan A2 has not been run), captured from its own stand-in (the real Account over simulated venues: no network, no
 money, a fresh temporary home) by `scripts/capture-account-fixtures.ts`: thirteen reads —
 `account`; `explore`, All and Predictions; `holdings` and its paper lens; `positions`;
 `statement`; `history` and its paper curve; `agents`; `compare` for ETH; `candles` and `market` at
@@ -3387,8 +3388,8 @@ tool; `run_code`, the reserved PTC transport, which `tools.restrict()` refuses t
 or order tool under any server name (anything under `mcp__account__`, the seat's twelve writes,
 and `account`, `positions`, `orders`, `place_order`, `cancel_order`, bare or as
 `mcp__<server>__<raw>`, matched by raw suffix as Gate 2 matches — the seat is Gravit's); any
-`mcp__akshare__` tool (an operator's own row) or `portfolio_akshare` under any server
-name. The message gives the reason (the `NEVER` table).
+`mcp__akshare__` tool (an operator's own row), or `market_akshare` (the market row's) or the
+retired `portfolio_akshare` under any server name; the market row's four other reads are allowed. The message gives the reason (the `NEVER` table).
 
 **The job tools are a `bash` role's own.** A child's `bash` command runs under bash-sandbox's
 60,000 ms default deadline; a call may pass `timeoutMs`, capped at 600,000. A command still

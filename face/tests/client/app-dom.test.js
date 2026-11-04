@@ -522,8 +522,9 @@ function standinAnswer(path) {
     case '/data/account/asset': return ASSET_SHEETS[q.get('key')] ? fx(ASSET_SHEETS[q.get('key')]) : { ok: true, key: q.get('key'), positions: [], orders: [], lines: [], cost: [], missing: [] };
     case '/data/market/book':
     case '/data/account/connected/book': return { ...fx('book'), venue: q.get('venue'), symbol: q.get('symbol') };
-    case '/data/market/trades':
-    case '/data/account/connected/trades': return { ...fx('trades'), venue: q.get('venue'), symbol: q.get('symbol') };
+    // a public line's trades are the market's answer, a connected line's the Account's (each its own words)
+    case '/data/market/trades': return { ...fx('trades'), venue: q.get('venue'), symbol: q.get('symbol') };
+    case '/data/account/connected/trades': return { ...fx('connected-trades'), venue: q.get('venue'), symbol: q.get('symbol') };
     case '/data/account/funding': return { ok: true, lines: [], missing: [] };
     case '/data/seat.json': return SEAT;
     default: return undefined;
@@ -901,7 +902,7 @@ test("a market's page follows its market on the stream and reads what is held of
   // what is held of it (the asset sheet) and the statement's lines about it, from their own reads; its book and its trades
   assert.match(f.html(), /0\.124 BTC · \$7,747\.40/);
   assert.match(f.html(), /Stand-in Exchange · Top of book only/);
-  assert.match(f.html(), /Stand-in Delayed Quotes publishes no trades the market can read/);
+  assert.match(f.html(), /Stand-in Exchange publishes no trades the account can read/);
   assert.equal(h.reads.filter(p => p.startsWith('/data/account/funding')).length, 0, 'a coin has no funding');
   assert.doesNotMatch(f.html(), /Loading…/);
   // a range: its candles
