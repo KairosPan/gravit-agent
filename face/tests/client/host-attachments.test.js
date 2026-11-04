@@ -24,10 +24,10 @@ const LIMITS = { ...DEFAULT_LIMITS, maxImagesPerMessage: 5 };
 test('the limits are dsh\'s defaults until read, then the projection\'s', async () => {
   const r = rig(async () => ({ kind: 'sequenced', values: { imageLimits: LIMITS } }));
   assert.deepEqual(r.attachments.limits(), DEFAULT_LIMITS);
-  await r.attachments.readLimits('s1');
+  assert.equal(await r.attachments.readLimits('s1'), true, 'read');
   assert.deepEqual(r.calls, [['session/projections', { request: { sessionId: 's1' } }]]);
   assert.equal(r.attachments.limits().maxImagesPerMessage, 5);
-  await r.attachments.readLimits('s2');
+  assert.equal(await r.attachments.readLimits('s2'), true, 'read already');
   assert.equal(r.calls.length, 1, 'the limits are read once');
 });
 
@@ -40,7 +40,7 @@ test('a failed or malformed limits read keeps what was', async () => {
     async () => ({ values: { imageLimits: { ...LIMITS, mediaTypes: 'image/png' } } }),
   ]) {
     const r = rig(answer);
-    await r.attachments.readLimits('s1');
+    assert.equal(await r.attachments.readLimits('s1'), false, 'not read');
     assert.deepEqual(r.attachments.limits(), DEFAULT_LIMITS);
   }
   // a failure after a good read keeps the good one, and a failed read may be tried again

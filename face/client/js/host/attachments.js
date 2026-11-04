@@ -22,12 +22,14 @@ export function startAttachments({ call, upload = uploadFile, store }) {
   return {
     limits() { return limits; },
 
+    // true once the session's limits are read (now or before), false when this read failed and a later one may try again
     async readLimits(sessionId) {
-      if (read) return;
+      if (read) return true;
       try {
         const got = limitsOf((await call('session/projections', { request: { sessionId } }))?.values?.imageLimits);
         if (got) { limits = got; read = true; }
       } catch { /* keep what was; a later read may try again */ }
+      return read;
     },
 
     upload(sessionId, file, onProgress = () => {}) {

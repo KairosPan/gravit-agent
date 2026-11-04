@@ -65,6 +65,9 @@ export const PREFS_KEY = 'gravit-ui.prefs';
 export const POINTER_HOLD_MS = 1000;
 // how long the Markets search box must be quiet before its reads go: one read for a word typed, not one a keystroke
 export const SEARCH_QUIET_MS = 300;
+// how long after the last dragover the drop overlay goes: dragover fires all the while files are over the page, so its
+// silence is the leave (a dragleave flickers between the page's own elements, and may never come)
+export const DROP_QUIET_MS = 300;
 
 // Gravit's words as the thread draws them: DOM-built markdown (wire/markdown.js returns {node, doc}), serialized for
 // the string renderers
@@ -452,7 +455,8 @@ export function boot(win, host = {}) {
   const setFiles = (files, key = draftKey(store.get())) => putDraft(key, runsOf(key), files);
   // the attachments' reads: the image limits, a file's upload to its session, a history thumb (a test hands in its own)
   const attachments = host.attachments ?? startAttachments({ call, store });
-  let limitsAsked = false;   // the image limits are read once, when the first conversation opens
+  let limitsRead = false;   // the image limits, read on opening a conversation until a read succeeds
+  let dropTimer = null;     // the drop overlay's watchdog
   // the line above the box by draft key: a refusal of the files added, cleared by the next add or remove under that key
   const notes = new Map();
   // the uploads in flight by draft key and file key, each its handle: a landing whose handle is gone (removed, retried)
@@ -701,7 +705,7 @@ export function boot(win, host = {}) {
     if (r.screen === 'messages' && r.id && r.id !== 'new' && r.id !== openedId) {
       openedId = r.id;
       live.open(r.id);
-      if (!limitsAsked) { limitsAsked = true; void attachments.readLimits(r.id); }
+      if (!limitsRead) void attachments.readLimits(r.id).then(ok => { if (ok === true) limitsRead = true; });
     } else if (r.screen === 'messages' && !r.id && openedId && !store.get().conversations.some(c => c.id === openedId)) {
       // the last open conversation went (deleted) and nothing took its place: stop reading it
       openedId = null;
@@ -1055,7 +1059,12 @@ export function boot(win, host = {}) {
       uploads.delete(k);
       if (patchFile(key, fileKey, patch)) render();
     };
-    handle.done.then(receiptId => land({ status: 'up', loaded: rec.bytes, receiptId, sessionId: key }), () => land({ status: 'failed' }));
+    // a failure keeps its reason (not signed in, the fence's hint), said on the status line
+    handle.done.then(receiptId => land({ status: 'up', loaded: rec.bytes, receiptId, sessionId: key }), err => {
+      const error = String(err?.message || `upload ${rec.name}: the upload failed`);
+      if (mine()) store.dispatch('hostStatus', { line: error, bad: true });
+      land({ status: 'failed', error });
+    });
   }
   // Files (a FileList, or the list a paste or a drop holds) into a draft: each admitted by the session's image limits, an
   // image with its object URL; a refusal is the key's note. On a conversation each file uploads at once
@@ -1093,6 +1102,12 @@ export function boot(win, host = {}) {
   }
   const atEnd = say => { const n = lengthOf(editor.read(say)); return [n, n]; };
   const hasFiles = dt => Array.from(dt?.types ?? []).includes('Files');
+  // an image dragged out of the thread carries its src as text: a data: or blob: URL is never words for the draft
+  const isDataUrl = words => /^\s*(data|blob):/i.test(words);
+  function stopDropping() {
+    if (dropTimer !== null) { timers.cancel(dropTimer); dropTimer = null; }
+    store.dispatch('setDropping', false);
+  }
 
   // ---- the / and @ menus: opened, filtered and moved in #composer-menu alone, never by a page render ----
   const sameTrig = (a, b) => !!a && !!b && a.kind === b.kind && a.from === b.from && a.query === b.query && a.key === b.key;
@@ -1537,41 +1552,45 @@ export function boot(win, host = {}) {
   doc.addEventListener('pointerup', release);
   doc.addEventListener('pointercancel', release);
   win.addEventListener('blur', release);
-  // a paste in the editor: files join the draft (and no text goes in); else plain text over the selection, the page not
-  // rendered
+  // a paste in the editor is plain text over the selection, the page not rendered. Files join the draft only when the
+  // clipboard holds no text: a rich copy (cells, a document's lines) also carries a picture of itself, which is not an
+  // attachment
   root.addEventListener('paste', ev => {
     const say = sayOf(ev.target);
     if (!say) return;
     ev.preventDefault();
-    const files = Array.from(ev.clipboardData?.files ?? []);
-    if (files.length) { addFiles(files); return; }
     const words = (ev.clipboardData?.getData('text/plain') ?? '').replace(/\r\n?/g, '\n');
+    const files = Array.from(ev.clipboardData?.files ?? []);
+    if (!words && files.length) { addFiles(files); return; }
     if (!words) return;
     const [from, to] = editor.selection(say) ?? atEnd(say);
     insertWords(say, words, from, to);
   });
   // drag and drop, on the document: no drag starts from the editor (a chip is never moved or copied by the browser); files
-  // dragged over a screen with a composer show the overlay, and dropped join the draft on screen; text dropped on the editor
-  // is its text/plain at the point (text/html is never read: no chip enters from outside)
+  // dragged over a screen with a composer show the overlay until the dragovers stop (DROP_QUIET_MS), and dropped join the
+  // draft on screen; text dropped on the editor is its text/plain at the point (text/html is never read: no chip enters
+  // from outside); any other drop (text into a search box, a sheet's field) is the browser's
   doc.addEventListener('dragstart', ev => { if (sayOf(ev.target)) ev.preventDefault(); });
   doc.addEventListener('dragover', ev => {
     if (hasFiles(ev.dataTransfer)) {
       ev.preventDefault();
-      if (composerOn(store.get())) store.dispatch('setDropping', true);
+      if (!composerOn(store.get())) return;
+      store.dispatch('setDropping', true);
+      if (dropTimer !== null) timers.cancel(dropTimer);
+      dropTimer = timers.after(DROP_QUIET_MS, () => { dropTimer = null; store.dispatch('setDropping', false); });
     } else if (sayOf(ev.target)) ev.preventDefault();
   });
-  doc.addEventListener('dragleave', ev => { if (!ev.relatedTarget) store.dispatch('setDropping', false); });
-  doc.addEventListener('dragend', () => store.dispatch('setDropping', false));
+  doc.addEventListener('dragend', stopDropping);
   doc.addEventListener('drop', ev => {
-    ev.preventDefault();
-    store.dispatch('setDropping', false);
     const dt = ev.dataTransfer;
     const files = Array.from(dt?.files ?? []);
-    if (files.length) { if (composerOn(store.get())) addFiles(files); return; }
     const say = sayOf(ev.target);
+    if (files.length || hasFiles(dt) || say) ev.preventDefault();
+    stopDropping();
+    if (files.length) { if (composerOn(store.get())) addFiles(files); return; }
     if (!say) return;
     const words = (dt?.getData?.('text/plain') ?? '').replace(/\r\n?/g, '\n');
-    if (!words) return;
+    if (!words || isDataUrl(words)) return;
     const at = editor.pointAt?.(say, ev.clientX, ev.clientY) ?? null;
     const [from, to] = at != null ? [at, at] : editor.selection(say) ?? atEnd(say);
     insertWords(say, words, from, to);

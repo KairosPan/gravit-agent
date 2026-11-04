@@ -2,7 +2,7 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { boot as bootApp, Timers } from '../../client/js/app.js';
+import { boot as bootApp, Timers, DROP_QUIET_MS } from '../../client/js/app.js';
 import { rowsOf, pairsOf } from '../../client/js/host/market-view.js';
 import { kidOf } from '../../client/js/wire/owner-key.js';
 import { fakeWindow } from './helpers/fake-dom.js';
@@ -4353,7 +4353,7 @@ function fakeAttachments(limits = LIMITS) {
   return {
     uploads, limitReads,
     limits: () => limits,
-    readLimits: async id => { limitReads.push(id); },
+    readLimits: async id => { limitReads.push(id); return true; },
     upload(id, file, onProgress) {
       const u = { id, file, onProgress, aborted: false };
       u.done = new Promise((resolve, reject) => { u.answer = resolve; u.fail = reject; });
@@ -4375,8 +4375,8 @@ function composerEls(f) {
   const note = f.withId('composer-note');
   return { say, input, rail, note };
 }
-const bootFiles = async (f, h, attachments, editor = valueEditor) => {
-  const store = boot(f.win, { editor, attachments, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
+const bootFiles = async (f, h, attachments, editor = valueEditor, more = {}) => {
+  const store = boot(f.win, { ...more, editor, attachments, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
   await h.ready();
   return store;
 };
@@ -4523,7 +4523,7 @@ test('a paste of files adds them and inserts no text', async () => {
   type(f, say, 'ab');
   say.setSelectionRange(2, 2);
   let prevented = false;
-  f.fire('root', 'paste', { target: say, preventDefault() { prevented = true; }, clipboardData: { files: [PNG()], getData: () => 'chart.png' } });
+  f.fire('root', 'paste', { target: say, preventDefault() { prevented = true; }, clipboardData: { files: [PNG()], getData: () => '' } });
   assert.equal(prevented, true);
   assert.equal(say.value, 'ab', 'no text inserted');
   assert.match(f.html(), /alt="chart.png"/);
@@ -4532,12 +4532,29 @@ test('a paste of files adds them and inserts no text', async () => {
   store.timers.clear();
 });
 
-test('a drop of files on the page adds them to the draft on screen; the overlay shows while files are dragged over and goes on leave', async () => {
+test('a rich copy (text/plain and text/html, with a picture of it in files) pastes its text and attaches nothing', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  say.focus();
+  const data = { 'text/plain': 'A1\tB1', 'text/html': '<table><tr><td>A1</td><td>B1</td></tr></table>' };
+  const writes = f.writes;
+  f.fire('root', 'paste', { target: say, clipboardData: { files: [aFile('image.png', 2048, 'image/png')], getData: t => data[t] ?? '' } });
+  assert.equal(say.value, 'A1\tB1');
+  assert.equal(f.writes, writes, 'nothing added, nothing rendered');
+  assert.doesNotMatch(f.html(), /image.png/);
+  store.timers.clear();
+});
+
+test('a drop of files on the page adds them to the draft on screen; the overlay shows while files are dragged over and goes once they stop', async () => {
   const f = fakeWindow({ hash: '#/messages/s1' });
   composerEls(f);
   const h = host({ rows: [row('s1', { agentAvailable: true })] });
   const att = fakeAttachments();
-  const store = await bootFiles(f, h, att);
+  const timers = new HeldTimers(ms => ms === DROP_QUIET_MS);
+  const store = await bootFiles(f, h, att, valueEditor, { timers });
   let prevented = false;
   f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] }, preventDefault() { prevented = true; } });
   assert.equal(prevented, true, 'the page takes the drop');
@@ -4546,14 +4563,15 @@ test('a drop of files on the page adds them to the draft on screen; the overlay 
   const writes = f.writes;
   f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] } });
   assert.equal(f.writes, writes, 'a second dragover renders nothing');
-  f.fire('doc', 'dragleave', { relatedTarget: { tagName: 'DIV' } });
-  assert.equal(store.get().dropping, true, 'moving between the page\'s own elements is no leave');
   f.fire('doc', 'dragleave', { relatedTarget: null });
+  assert.equal(store.get().dropping, true, 'a leave alone clears nothing: the watchdog does');
+  timers.run(DROP_QUIET_MS);
   assert.equal(store.get().dropping, false);
   assert.doesNotMatch(f.html(), /drop-overlay/);
   f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] } });
   f.fire('doc', 'dragend', {});
   assert.equal(store.get().dropping, false, 'dragend clears it');
+  assert.deepEqual(timers.delays(), [], 'and its watchdog');
   f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] } });
   prevented = false;
   f.fire('doc', 'drop', { target: f.body, dataTransfer: { types: ['Files'], files: [CSV()], getData: () => '' }, preventDefault() { prevented = true; } });
@@ -4665,7 +4683,118 @@ test('a draft with files and no words stays when its conversation is left and op
   f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
   await settle();
   assert.match(f.html(), /alt="chart.png"/);
-  assert.equal(att.limitReads.length, 1, 'the image limits read once, on the first conversation opened');
+  assert.equal(att.limitReads.length, 1, 'the image limits read once a read succeeds, on the first conversation opened');
   assert.equal(att.limitReads[0], 's1');
+  store.timers.clear();
+});
+
+test('the overlay stays while dragovers keep coming, and goes DROP_QUIET_MS after the last', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const timers = new HeldTimers(ms => ms === DROP_QUIET_MS);
+  const store = await bootFiles(f, h, fakeAttachments(), valueEditor, { timers });
+  f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] } });
+  const first = timers.ids();
+  assert.equal(first.length, 1);
+  f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] } });
+  assert.equal(timers.ids().length, 1, 'one watchdog');
+  assert.notEqual(timers.ids()[0], first[0], 'each dragover restarts it');
+  assert.equal(store.get().dropping, true);
+  timers.run(DROP_QUIET_MS);
+  assert.equal(store.get().dropping, false, 'a leave the page never heard of still ends it');
+  store.timers.clear();
+});
+
+test('a drop that carries no files and lands outside the editor is the browser\'s (a search box, a sheet\'s field)', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = await bootFiles(f, h, fakeAttachments());
+  let prevented = false;
+  const box = { tagName: 'INPUT', id: 'cq', closest: () => null };
+  f.fire('doc', 'drop', { target: box, dataTransfer: { types: ['text/plain'], files: [], getData: () => 'BTC' }, preventDefault() { prevented = true; } });
+  assert.equal(prevented, false);
+  f.fire('doc', 'drop', { target: box, dataTransfer: { types: ['Files'], files: [CSV()], getData: () => '' }, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true, 'files are always the page\'s');
+  store.timers.clear();
+});
+
+test('a data: or blob: URL dropped on the editor (an image dragged out of the thread) inserts nothing', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = await bootFiles(f, h, fakeAttachments());
+  type(f, say, 'ab');
+  for (const url of ['data:image/png;base64,iVBORw0KGgo=', 'blob:http://127.0.0.1:3091/5f2c', ' DATA:text/html,x']) {
+    let prevented = false;
+    f.fire('doc', 'drop', { target: say, dataTransfer: { types: ['text/plain', 'text/uri-list'], files: [], getData: t => (t === 'text/plain' ? url : '') }, preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(say.value, 'ab', url);
+  }
+  store.timers.clear();
+});
+
+test("a failed upload says why on the status line, the host's hint and all", async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  pick(f, input, [CSV()]);
+  const why = 'upload prices.csv: not signed in - open the URL gravit-face printed when it started (…/?token=…)';
+  att.uploads[0].fail(Object.assign(new Error(why), { status: 401 }));
+  await settle();
+  assert.deepEqual([store.get().status.line, store.get().status.bad], [why, true]);
+  assert.match(f.html(), /Upload failed · /);
+  store.timers.clear();
+});
+
+test('a failed image-limits read is tried again on the next conversation opened; a good one is never read again', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  composerEls(f);
+  const h = host({ rows: [row('s1', { updatedAt: 50, agentAvailable: true }), row('s2', { updatedAt: 9 }), row('s3', { updatedAt: 8 })] });
+  const att = fakeAttachments();
+  const answers = [false, true];
+  att.readLimits = async id => { att.limitReads.push(id); return answers.shift() ?? true; };
+  const store = await bootFiles(f, h, att);
+  await settle();
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  await settle();
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's3' } });
+  await settle();
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  await settle();
+  assert.deepEqual(att.limitReads, ['s1', 's2']);
+  store.timers.clear();
+});
+
+test('the note above the box keeps its node across renders, so the live region speaks the new line', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { input } = composerEls(f);
+  // #composer-note as the browser has it: each page write makes a fresh node from the markup; replaceWith puts another in its place
+  const made = [];
+  let current = null, at = -1;
+  const byId = f.doc.getElementById.bind(f.doc);
+  f.doc.getElementById = id => {
+    if (id !== 'composer-note') return byId(id);
+    if (at !== f.writes) {
+      at = f.writes;
+      const words = f.html().match(/id="composer-note" role="status">([^<]*)</)?.[1] ?? null;
+      if (words === null) { current = null; return null; }
+      const node = { textContent: words, replaceWith(other) { current = other; } };
+      made.push(node);
+      current = node;
+    }
+    return current;
+  };
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = await bootFiles(f, h, fakeAttachments());
+  const first = f.doc.getElementById('composer-note');
+  assert.ok(first);
+  pick(f, input, [aFile('huge.png', 21 * MiB, 'image/png')]);
+  assert.ok(made.length > 1, 'the page write made a new node');
+  assert.equal(f.doc.getElementById('composer-note'), first, 'the first node is back in place');
+  assert.equal(first.textContent, 'huge.png is over 20 MB');
   store.timers.clear();
 });
