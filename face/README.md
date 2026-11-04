@@ -3733,8 +3733,9 @@ page:
   for 30 seconds. dsh's `file-reference-local` row stays out of the profile: it would tell every agent that `@`
   means a path.
 
-The index is `$DSH_HOME/face/search-index.sqlite`, a copy of the conversations' text and nothing else; delete it
-and the next search rebuilds it. Node prints its `node:sqlite` ExperimentalWarning once per face start.
+The index is `$DSH_HOME/face/search-index.sqlite` (0600), a copy of the conversations' text and nothing else; delete it
+and the next search rebuilds it. A file that will not open, or from another schema, is replaced at boot; when even a
+fresh one will not open the face runs without search. Node prints its `node:sqlite` ExperimentalWarning once per face start.
 
 ## Tests
 
