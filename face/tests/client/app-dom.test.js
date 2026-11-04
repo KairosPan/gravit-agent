@@ -5793,27 +5793,29 @@ test('each pill keeps its own focus: pill 2 stays focused across a render, and E
 // 30, drawn though its turn/start lies before the window), turn 3 at 31. Each mark is registered by its id and as a
 // .turn-mark, found while its id is drawn, with a fixed offsetTop and its scrollIntoView calls recorded
 const outline = [{ turn: 1, seq: 9, prompt: 'first ask', response: 'first reply' }, { turn: 2, seq: 29, prompt: 'second ask', response: '' }, { turn: 3, seq: 31, prompt: 'third ask', response: 'third reply' }];
-function railRig({ pages, rows = [row('s1', { agentAvailable: true })] } = {}) {
+function railRig({ pages, rows = [row('s1', { agentAvailable: true })], turns = outline } = {}) {
   const f = fakeWindow({ hash: '' });
   const thread = f.withId('thread', { clientHeight: 400 });
   // #turn-rail as the browser has it: what the page last drew in it, until the rail alone is written after that render
   const rail = f.withId('turn-rail');
+  // (a write replaces its nodes, so focus falls to <body>, as the page's own render does)
   let own = null;
+  rail.writes = 0;
   Object.defineProperty(rail, 'innerHTML', {
     get: () => (own && own.at === f.writes ? own.html : f.html().match(/<nav class="turn-rail" id="turn-rail" aria-label="Turns">([\s\S]*?)<\/nav>/)?.[1] ?? ''),
-    set: html => { own = { at: f.writes, html }; },
+    set: html => { own = { at: f.writes, html }; rail.writes++; f.doc.activeElement = f.body; },
   });
   const marks = {};
   for (const [turn, top] of [[1, 0], [2, 100], [3, 500]]) {
-    const el = f.withId(`turn-s1-${turn}`, { dataset: { turn: String(turn) }, offsetTop: top, presentIf: new RegExp(`id="turn-s1-${turn}"`), scrolled: [] });
-    el.scrollIntoView = o => el.scrolled.push({ ...o, drawn: f.html().includes(`id="turn-s1-${turn}"`) });
+    const el = f.withId(`tmark-s1-${turn}`, { dataset: { turn: String(turn) }, offsetTop: top, presentIf: new RegExp(`id="tmark-s1-${turn}"`), scrolled: [] });
+    el.scrollIntoView = o => el.scrolled.push({ ...o, drawn: f.html().includes(`id="tmark-s1-${turn}"`) });
     f.alsoAs('.turn-mark', el);
     marks[turn] = el;
   }
   const book = { 30: { records: [said(10), said(11)], hasMore: true }, 10: { records: [said(2), said(3)], hasMore: false } };
   const h = host({ rows, pages: { s1: pages ?? (req => book[req.beforeSeq] ?? { records: [], hasMore: false }) } });
   const snap = async () => {
-    h.streams.find(s => s.name === 'session/follow' && s.args.request.address.sessionId === 's1').cbs.onItem({ type: 'snapshot', header: {}, cursor: 40, hasMore: true, records: [said(30), said(32)], projections: { asOfSeq: 40, values: { turnOutline: outline } } });
+    h.streams.find(s => s.name === 'session/follow' && s.args.request.address.sessionId === 's1').cbs.onItem({ type: 'snapshot', header: {}, cursor: 40, hasMore: true, records: [said(30), said(32)], projections: { asOfSeq: 40, values: { turnOutline: turns } } });
     await settle();
   };
   return { f, thread, rail, marks, h, book, snap };
@@ -5826,7 +5828,7 @@ test('a scroll redraws the rail alone with the active turn, and the page is not 
   const store = started(f, h);
   await h.ready();
   await snap();
-  assert.match(f.html(), /<div class="turn-mark" id="turn-s1-2" data-turn="2"><\/div>/);
+  assert.match(f.html(), /<div class="turn-mark" id="tmark-s1-2" data-turn="2"><\/div>/);
   assert.match(rail.innerHTML, /class="turn-tick loaded active" id="turn-tick-3"/, 'at the tail, the last turn');
   const writes = f.writes;
   thread.scrollTop = 150;
@@ -5882,7 +5884,7 @@ test('an unloaded tick pulses, pages back to it and scrolls to its mark once dra
   assert.match(rail.innerHTML, /class="turn-tick pulse" id="turn-tick-1"/);
   await settle();
   assert.deepEqual(earlierPages(h), [30, 10], 'paged back through turn 1\'s seq');
-  assert.match(f.html(), /<div class="turn-mark" id="turn-s1-1" data-turn="1"><\/div>[\s\S]*said 10/);
+  assert.match(f.html(), /<div class="turn-mark" id="tmark-s1-1" data-turn="1"><\/div>[\s\S]*said 10/);
   assert.deepEqual(marks[1].scrolled, [{ behavior: 'smooth', block: 'start', drawn: true }]);
   assert.doesNotMatch(rail.innerHTML, /pulse/);
   h.streams.find(s => s.name === 'session/follow').cbs.onItem({ type: 'event', event: said(41).event });
@@ -5934,5 +5936,118 @@ test('a conversation opened while the pages load clears the pulse and the jump',
   f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
   await settle();
   assert.doesNotMatch(f.html(), /pulse/);
+  store.timers.clear();
+});
+
+// fix round 1 of Task 7
+// a tick the page can focus: found while drawn, its focus firing focusin as the browser's does
+function focusableTick(f, turn) {
+  const el = f.withId(`turn-tick-${turn}`, { tagName: 'BUTTON', dataset: { action: 'jumpTurn', turn: String(turn) }, presentIf: new RegExp(`id="turn-tick-${turn}"`) });
+  el.closestMap = { '.turn-tick': el };
+  el.focus = o => { f.doc.activeElement = el; el.focusedWith = o; f.fire('root', 'focusin', { target: el }); };
+  return el;
+}
+
+test("a render's own focus restore on a tick shows no card: the card stays hidden after the pointer left", async () => {
+  const { f, rail, h, snap } = railRig();
+  const tick = focusableTick(f, 1);
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  tick.focus();
+  assert.match(rail.innerHTML, /Turn 1 · jump/);
+  f.fire('root', 'mouseout', { target: tick, relatedTarget: { closest: () => null } });
+  assert.doesNotMatch(rail.innerHTML, /turn-card/);
+  const writes = rail.writes;
+  h.streams.find(s => s.name === 'session/follow').cbs.onItem({ type: 'event', event: said(41).event });
+  await settle();
+  assert.match(f.html(), /said 41/);
+  assert.equal(f.doc.activeElement, tick, 'the tick keeps focus across the render');
+  assert.doesNotMatch(rail.innerHTML, /turn-card/, 'no card brought back');
+  assert.equal(rail.writes, writes, 'the rail is not written again');
+  store.timers.clear();
+});
+
+test('a focused tick keeps focus across the rail\'s own redraw', async () => {
+  const { f, thread, rail, h, snap } = railRig();
+  const tick = focusableTick(f, 2);
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  tick.focus();
+  const writes = rail.writes;
+  thread.scrollTop = 150;
+  f.fire('root', 'scroll', { target: thread });
+  await wait(100);
+  assert.ok(rail.writes > writes, 'redrawn');
+  assert.equal(f.doc.activeElement, tick);
+  assert.equal(tick.focusedWith?.preventScroll, true);
+  store.timers.clear();
+});
+
+test('a jump pressed while Earlier messages reads pages on past that read to its turn', async () => {
+  // turn 1 starts at 1; the read the key started brings 10-11, all turn 2's; the jump reads on to 2-3
+  const turns = [{ turn: 1, seq: 1, prompt: 'a', response: '' }, { turn: 2, seq: 9, prompt: 'b', response: '' }, { turn: 3, seq: 29, prompt: 'c', response: '' }];
+  const waits = [];
+  const book = { 30: { records: [said(10), said(11)], hasMore: true }, 10: { records: [said(2), said(3)], hasMore: false } };
+  const { f, rail, marks, h, snap } = railRig({ turns, pages: req => new Promise(r => waits.push(() => r(book[req.beforeSeq] ?? { records: [], hasMore: false }))) });
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'earlier', conv: 's1' } });
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'jumpTurn', turn: '1' } });
+  await settle();
+  while (waits.length) { waits.shift()(); await settle(); }
+  assert.deepEqual(earlierPages(h), [30, 10]);
+  assert.deepEqual(marks[1].scrolled, [{ behavior: 'smooth', block: 'start', drawn: true }]);
+  assert.doesNotMatch(rail.innerHTML, /pulse/);
+  store.timers.clear();
+});
+
+test('a jump whose pages land while a render is held scrolls to its mark once the render runs', async () => {
+  const { f, marks, h, snap } = railRig();
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'jumpTurn', turn: '1' } });
+  f.fire('root', 'pointerdown', { button: 0 });
+  await settle();
+  assert.deepEqual(earlierPages(h), [30, 10]);
+  assert.doesNotMatch(f.html(), /said 10/, 'held while the press is down');
+  f.fire('doc', 'pointerup', { button: 0 });
+  await settle();
+  assert.match(f.html(), /said 10/);
+  assert.deepEqual(marks[1].scrolled, [{ behavior: 'smooth', block: 'start', drawn: true }]);
+  store.timers.clear();
+});
+
+test('the rail is not redrawn while a press is down, and is once it lets go', async () => {
+  const { f, rail, h, snap } = railRig();
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  const writes = rail.writes;
+  f.fire('root', 'pointerdown', { button: 0 });
+  f.fire('root', 'mouseover', { target: tickEl(1) });
+  assert.equal(rail.writes, writes, 'held');
+  f.fire('doc', 'pointerup', { button: 0 });
+  await settle();
+  assert.match(rail.innerHTML, /Turn 1 · jump/);
+  store.timers.clear();
+});
+
+test('the turn the view is on is measured once the draft screen gives the conversation back', async () => {
+  const { f, rail, h, snap } = railRig();
+  const store = started(f, h);
+  await h.ready();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
+  await settle();
+  assert.ok(store.get().draft);
+  await snap();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'cancelDraft' } });
+  await settle();
+  assert.equal(store.get().draft, null);
+  assert.match(rail.innerHTML, /class="turn-tick loaded active" id="turn-tick-3"/);
   store.timers.clear();
 });

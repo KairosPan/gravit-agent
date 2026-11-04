@@ -191,8 +191,18 @@ export function renderMessage(m, conv, state, page = {}) {
 // the three-dot row while the host streams a turn
 const thinkingRow = conv => `<div class="msg left"><div class="msg-row">${avatar(conv.kind === 'bot' ? conv.preset : 'gravit', 28)}<div class="msg-body"><div class="bubble grey thinking" role="status" aria-label="thinking"><span></span><span></span><span></span></div></div></div></div>`;
 
-// a turn's mark in the thread: no height, the thread's gap cancelled; the rail reads its offsetTop and jumps to it (app.js)
-const turnMark = (conv, t) => `<div class="turn-mark"${attrs({ id: `turn-${conv.id}-${t.turn}`, 'data-turn': t.turn })}></div>`;
+// a turn's mark in the thread: no height, the thread's gap cancelled; the rail reads its offsetTop and jumps to it (app.js).
+// Its id (tmark-) is apart from the ticks' (turn-tick-)
+const turnMark = (conv, t) => `<div class="turn-mark"${attrs({ id: `tmark-${conv.id}-${t.turn}`, 'data-turn': t.turn })}></div>`;
+
+// railView once per change of its inputs, for the thread's marks and the rail alike (renders run 10–20 a second)
+let viewMemo = null;
+function railOf(conv) {
+  const w = conv?.window;
+  const key = [conv?.id, conv?.outline, conv?.loaded, w?.start, w?.hasMore];
+  if (!viewMemo || !viewMemo.key.every((v, i) => Object.is(v, key[i]))) viewMemo = { key, view: railView(conv) };
+  return viewMemo.view;
+}
 
 // a tool call leaves nothing in the thread, not even the time it held: a divider reads the gap between the rows drawn;
 // the words a composed answer folds are drawn inside its Working notes, just above it, and nowhere else. Before the first
@@ -204,7 +214,7 @@ export function renderThread(conv, state, now, page = {}) {
   const notes = foldNotes(conv.messages);
   const folded = new Set([...notes.values()].flat());
   const byId = new Map(conv.messages.map(m => [m.id, m]));
-  const ticks = Array.isArray(conv.outline) ? railView(conv).ticks : [];
+  const ticks = Array.isArray(conv.outline) ? railOf(conv).ticks : [];
   let next = 0;
   const marksBefore = seq => {
     for (; next < ticks.length && ticks[next].seq < seq; next++) {
@@ -245,7 +255,7 @@ export function railHtml(conv, { active = null, hover = null, pulse = null } = {
   const w = conv?.window;
   const key = [conv?.id, conv?.outline, conv?.loaded, w?.start, w?.hasMore, active, hover, pulse];
   if (railMemo && railMemo.key.every((v, i) => Object.is(v, key[i]))) return railMemo.html;
-  const { show, ticks } = railView(conv);
+  const { show, ticks } = railOf(conv);
   const html = !show ? '' : ticks.map(t => {
     const tick = `<button${attrs({ type: 'button', class: cls('turn-tick', t.loaded && 'loaded', t.turn === active && 'active', t.turn === pulse && 'pulse'), id: `turn-tick-${t.turn}`, 'data-action': 'jumpTurn', 'data-turn': t.turn, 'aria-label': `Turn ${t.turn}` })}></button>`;
     const card = t.turn !== hover ? '' : `<div class="turn-card" role="tooltip"><div class="turn-card-head">${esc(`Turn ${t.turn} · jump`)}</div>` +

@@ -426,14 +426,14 @@ test('a mark precedes each loaded turn\'s first message, an unloaded turn has no
     messages: [said(13), said(14, 'gravit'), said(21), said(22, 'gravit')],
   });
   const h = renderThread(c, state, NOW);
-  assert.doesNotMatch(h, /id="turn-s1-1"/, 'nothing of turn 1 is drawn');
-  assert.match(h, /<div class="turn-mark" id="turn-s1-2" data-turn="2"><\/div>(<div class="divider">[^<]*<\/div>)?<div class="msg you"><div class="bubble you">said 13/);
-  assert.match(h, /said 14[\s\S]*<div class="turn-mark" id="turn-s1-3" data-turn="3"><\/div>[\s\S]*said 21/);
-  assert.ok(h.endsWith('<div class="turn-mark" id="turn-s1-4" data-turn="4"></div>'), 'a loaded turn with nothing drawn goes at the end');
+  assert.doesNotMatch(h, /id="tmark-s1-1"/, 'nothing of turn 1 is drawn');
+  assert.match(h, /<div class="turn-mark" id="tmark-s1-2" data-turn="2"><\/div>(<div class="divider">[^<]*<\/div>)?<div class="msg you"><div class="bubble you">said 13/);
+  assert.match(h, /said 14[\s\S]*<div class="turn-mark" id="tmark-s1-3" data-turn="3"><\/div>[\s\S]*said 21/);
+  assert.ok(h.endsWith('<div class="turn-mark" id="tmark-s1-4" data-turn="4"></div>'), 'a loaded turn with nothing drawn goes at the end');
   assert.equal(h.match(/turn-mark/g).length, 3);
   // the whole log loaded: turn 1 has a mark too, before its first message
   const whole = renderThread(conv({ outline: [entry(1, 0), entry(2, 5)], messages: [said(1), said(6)] }), state, NOW);
-  assert.match(whole, /^<div class="turn-mark" id="turn-s1-1" data-turn="1"><\/div>/);
+  assert.match(whole, /^<div class="turn-mark" id="tmark-s1-1" data-turn="1"><\/div>/);
 });
 
 test("the scroll keep's anchor is a data attribute: a folded notes block keeps its own id", () => {

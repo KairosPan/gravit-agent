@@ -524,6 +524,8 @@ export function boot(win, host = {}) {
   let railSeen = null;      // the rail's inputs as last measured: the conversation, its outline, its window's start and more
   let railTimer = null;     // a scroll's measure, coalesced
   let railDrawing = false;  // the rail's own redraw takes its focused tick away and gives it back: no hover change meanwhile
+  let refocusing = false;   // render() putting focus back where it was: not a person's focus, no card for it
+  let railHeld = false;     // a rail redraw asked for while a press is down: drawn when it lets go
   let searchFocus = false;  // ⌥⌘K from a screen with no list: the box takes focus once Messages draws it
   let rowsAt = null;        // where the groups last stood: a query hides them, and they come back there when it clears (spec §5.1)
 
@@ -697,16 +699,22 @@ export function boot(win, host = {}) {
       // the same control focused again, or the composer after the earlier key went: never scrolled into view (the thread's
       // keep above stands)
       const still = target === find(activeKey) || (target === say && activeKey?.id?.startsWith('earlier-'));
-      if (still) target.focus({ preventScroll: true }); else target.focus();
+      refocusing = true;
+      try {
+        if (still) target.focus({ preventScroll: true }); else target.focus();
+      } finally {
+        refocusing = false;
+      }
       if (caret && target === find(activeKey) && typeof target.setSelectionRange === 'function') target.setSelectionRange(caret[0], caret[1]);
       // focus can move a contenteditable's caret: the editor's goes back where write put it
       if (target === say && keep !== null) editor.place(say, keep[0], keep[1]);
     }
     // the rail: a jump waiting for its mark scrolls to it once drawn; inputs changed (another conversation, its outline, its
     // window) measure the turn the view is on once
+    railHeld = false;   // the page just drew the rail as it stands
     let railStale = false;
     if (rail.jump && rail.jump.conv === threadSig) {
-      const mark = doc.getElementById(`turn-${threadSig}-${rail.jump.turn}`);
+      const mark = doc.getElementById(`tmark-${threadSig}-${rail.jump.turn}`);
       if (mark) {
         mark.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
         rail.jump = null;
@@ -715,9 +723,11 @@ export function boot(win, host = {}) {
       }
     }
     const inputs = open ? [open.id, open.outline, open.window?.start, open.window?.hasMore] : null;
+    // (inputs that could not be measured, as under the draft screen, are not taken as seen: measured once they can be)
     if (inputs ? !railSeen || inputs.some((v, i) => !Object.is(v, railSeen[i])) : railSeen !== null) {
-      railSeen = inputs;
-      if (measureRail()) railStale = false;
+      const moved = measureRail();
+      if (moved !== null || !inputs) railSeen = inputs;
+      if (moved) railStale = false;
     }
     if (railStale) drawRail();
     last = { lightbox: lightUp, overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, start: threadStart, anchor: anchorSeq, editor: editorOf(s.edit), confirm: s.confirm, query, key };
@@ -731,6 +741,7 @@ export function boot(win, host = {}) {
   // the turn rail alone, never the page (a scroll, a hover, a pulse): its focused tick keeps focus by its id
   const railConv = () => { const s = store.get(); return s.route.screen === 'messages' && !s.draft ? currentConversation(s) ?? null : null; };
   function drawRail() {
+    if (pressed) { railHeld = true; return; }   // as a render is held: the press's click must find its element
     const el = doc.getElementById('turn-rail');
     if (!el) return;
     const focused = doc.activeElement?.id?.startsWith?.('turn-tick-') ? doc.activeElement.id : null;
@@ -743,10 +754,11 @@ export function boot(win, host = {}) {
       railDrawing = false;
     }
   }
-  // the turn the view is on, from the marks' places in the thread; the rail redrawn when it moved (true then)
+  // the turn the view is on, from the marks' places in the thread; the rail redrawn when it moved (true then; null when
+  // nothing could be measured: no thread, or no conversation on screen)
   function measureRail() {
     const thread = doc.getElementById('thread');
-    if (!thread || !railConv()) return false;
+    if (!thread || !railConv()) return null;
     const marks = [...root.querySelectorAll('.turn-mark')].map(el => ({ turn: Number(el.dataset.turn), top: el.offsetTop }));
     const on = activeTurn(marks, thread.scrollTop);
     if (on === rail.active) return false;
@@ -771,6 +783,7 @@ export function boot(win, host = {}) {
     if (!pressed) return;
     pressed = false;
     if (pending) timers.after(0, () => { if (!pending || composing || pressed) return; pending = false; render(); });
+    else if (railHeld) timers.after(0, () => { if (railHeld && !pressed) { railHeld = false; drawRail(); } });
   }
 
   function go(route) {
@@ -1542,7 +1555,8 @@ export function boot(win, host = {}) {
       const conv = railConv();
       if (!conv) return;
       const turn = Number(el.dataset.turn);
-      const mark = doc.getElementById(`turn-${conv.id}-${turn}`);
+      const markOf = () => doc.getElementById(`tmark-${conv.id}-${turn}`);
+      const mark = markOf();
       if (mark) { mark.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); return; }
       const tick = railView(conv).ticks.find(t => t.turn === turn);
       if (!tick || tick.loaded) return;
@@ -1550,8 +1564,14 @@ export function boot(win, host = {}) {
       rail.pulse = turn;
       rail.jump = jump;
       drawRail();
-      void live.earlier(conv.id, { toSeq: tick.seq }).then(() => {
+      // a read already under way (Earlier messages) answers without reaching the turn: read on from it once more. The
+      // jump ends here only when the read failed or nothing more lies before; else the render that draws the mark ends it
+      // (a render held by a press runs later, and still finds the jump)
+      const ask = () => live.earlier(conv.id, { toSeq: tick.seq });
+      const reached = () => (store.get().conversations.find(c => c.id === conv.id)?.window?.start ?? -Infinity) <= tick.seq;
+      void ask().then(ok => (ok && rail.jump === jump && !markOf() && !reached() ? ask() : ok)).then(ok => {
         if (rail.jump !== jump) return;
+        if (ok && (markOf() || pending || composing || pressed)) return;
         rail.jump = null;
         rail.pulse = null;
         drawRail();
@@ -1800,8 +1820,8 @@ export function boot(win, host = {}) {
   const inRail = el => Boolean(el?.closest?.('#turn-rail'));
   root.addEventListener('mouseover', ev => { const t = tickOf(ev.target); if (t) hoverRail(Number(t.dataset.turn)); });
   root.addEventListener('mouseout', ev => { if (tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null); });
-  root.addEventListener('focusin', ev => { const t = tickOf(ev.target); if (t) hoverRail(Number(t.dataset.turn)); });
-  root.addEventListener('focusout', ev => { if (tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null); });
+  root.addEventListener('focusin', ev => { const t = refocusing ? null : tickOf(ev.target); if (t) hoverRail(Number(t.dataset.turn)); });
+  root.addEventListener('focusout', ev => { if (!refocusing && tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null); });
   root.addEventListener('change', ev => {
     const el = ev.target;
     if (el.tagName === 'SELECT' && el.dataset?.action === 'draftWhere') {
