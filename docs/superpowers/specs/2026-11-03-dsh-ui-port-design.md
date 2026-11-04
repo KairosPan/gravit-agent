@@ -1289,9 +1289,7 @@ the `pinned` slice, `pin` and `unpin`, pinned rows leading each group), `f69209c
 (the pin key and glyph on a row, Pin and Unpin in Details, and the fix that the archived-row test
 draws the row), and this note's commit (DEVELOPMENT.md, face/README.md). Measured at `f28b108c`:
 the face suite 3,079 tests in 210 files, 3,038 pass, 41 skipped, 0 fail; under `FACE_SMOKE=1`
-3,080 tests, 3,074 pass, 4 skipped, 2 fail on the full run — `order-gate-midboot-smoke`'s mid-boot
-test (a 10 s wait for a stand-in row) and `producer.test.ts`'s aborted-run test, both timing
-tests, which pass alone (28/28).
+3,080 tests, 3,076 pass, 4 skipped, 0 fail (a first smoke run had two timing failures, `order-gate-midboot-smoke`'s mid-boot test and `producer.test.ts`'s aborted-run test, that did not reproduce).
 
 | Clause | The text | What the tree does | Why |
 |---|---|---|---|
