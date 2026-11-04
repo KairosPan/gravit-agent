@@ -162,11 +162,11 @@ export function startMarkets({
       const data = refused ? null : rankOf(body, sort);
       if (!data) { store.dispatch('rankFailed', { sort, at: now(), message: messageOf(body) }); return; }
       store.dispatch('rankLoaded', { sort, data, at: now() });
-      // a ranking the proxy re-served stale is the Account not answering: its last sentence is no state of now
+      // a ranking the proxy re-served stale is the market not answering: its last sentence is no state of now
       store.dispatch('chinaStatusUpdated', { status: body.stale === true ? NOT_ANSWERING : body.china.status });
     }, ['rankLoading', { sort }]);
   }
-  // China's state last said as the Account not answering, and the Account answering afresh: its state read again, off the China
+  // China's state last said as the market not answering, and the market answering afresh: its state read again, off the China
   // ranking that carries it — else that sentence would stay on Venues and Markets until a reload
   function recheckChina() {
     const said = store.get().markets.providers;

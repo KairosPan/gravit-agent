@@ -901,7 +901,7 @@ test("a market's page follows its market on the stream and reads what is held of
   // what is held of it (the asset sheet) and the statement's lines about it, from their own reads; its book and its trades
   assert.match(f.html(), /0\.124 BTC · \$7,747\.40/);
   assert.match(f.html(), /Stand-in Exchange · Top of book only/);
-  assert.match(f.html(), /Stand-in Exchange publishes no trades the account can read/);
+  assert.match(f.html(), /Stand-in Delayed Quotes publishes no trades the market can read/);
   assert.equal(h.reads.filter(p => p.startsWith('/data/account/funding')).length, 0, 'a coin has no funding');
   assert.doesNotMatch(f.html(), /Loading…/);
   // a range: its candles

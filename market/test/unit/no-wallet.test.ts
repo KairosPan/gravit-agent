@@ -40,6 +40,6 @@ describe("the market holds no wallet", () => {
   });
   it("the README names the port, the scripts and the AKShare command", () => {
     const r = readFileSync(join(ROOT, "README.md"), "utf8");
-    for (const s of ["127.0.0.1:4821", "npm run market", "npm run market:service", "MARKET_AKSHARE_BIN", "MARKET_BIND", "MARKET_HOSTS", "NOTICE"]) expect(r).toContain(s);
+    for (const s of ["127.0.0.1:4821", "npm run market", "npm run market:service", "MARKET_AKSHARE_BIN", "MARKET_BIND", "MARKET_HOSTS", "NOTICE", "npm run market:mcp", "FACE_MARKET_URL"]) expect(r).toContain(s);
   });
 });

@@ -49,12 +49,12 @@ does not mean only one execution context.
 - **MARKET** — the Account provides every market — crypto, US stocks, RWAs, perpetuals,
   predictions and A shares (China, view-only, in CNY) — read keyless and server-side by the
   Account, and Gravit reads them through its seat; AKShare is the Account's sidecar, reached
-  through the seat's `portfolio_akshare`. No beds, no replay and no lookahead firewall since
+  through the market row's `market_akshare`. No beds, no replay and no lookahead firewall since
   2026-10-24, by the operator's decision: the Account's history is read as it is, and a
   strategy's evidence is forward paper trading on the Account's paper venue. The Lunhui rows
   freeze hashed Tencent and Eastmoney samples into a strategy directory for read-only research
   (since 2026-10-25), fetched through the Account's relay (the boards stand-in through its iFinD
-  route), the evidence saying `via: "account"`; like the AKShare reads they carry no lookahead
+  route), the evidence saying `via: "market"`; like the AKShare reads they carry no lookahead
   guard and are never evidence of a trade. The face's routes, the Lunhui rows and Gravit's tools
   reach no market host, and the agent box keeps only the DeepSeek key and the seat's own — but
   its network is not internal, so a shell turn there still reaches any host.
@@ -465,7 +465,7 @@ Remaining directions below are not completed capabilities. Further design remain
   into the Account box, then the Account's own page retired — the face holds no market wire of
   its own, the Lunhui rows and AKShare reach the market through the Account, and both halves
   live on the face (`docs/superpowers/specs/2026-11-01-account-two-parts-design.md`); the live
-  drills are owed (`face/README.md` "The two-parts drills").
+  drills are owed (`face/README.md` "The three-parts drills").
 - **Evaluate real research and make acceptance explicit** (D14, D16). Compare representative
   research tasks for evidence accuracy, useful disagreement, revision of conclusions, operator
   effort, elapsed time and usage. Develop traceability from claims to source material and from

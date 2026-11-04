@@ -47,6 +47,8 @@ test("compose.yml runs the face, the account and the market as three boxes, the 
   assert.equal(c.services.agent.environment.FACE_BIND, undefined);
   assert.match(readFileSync(new URL("../docker-entrypoint.sh", import.meta.url), "utf8"), /FACE_BIND:=\$\(hostname -i/);
   assert.equal(c.services.agent.environment.FACE_ACCOUNT_URL, "http://account:4820");
+  assert.equal(c.services.agent.environment.FACE_MARKET_URL, "http://market:4821");
+  assert.equal(c.services.agent.depends_on.market.condition, "service_healthy");
   assert.equal(c.services.agent.environment.BUYER_HOME, "/seat-home");
   assert.equal(c.services.agent.environment.DSH_HOME, "/dsh-home");
   assert.equal(c.services.agent.environment.FACE_AKSHARE_MCP_COMMAND, undefined);
@@ -60,7 +62,7 @@ test("compose.yml runs the face, the account and the market as three boxes, the 
   for (const name of ["face", "strategies", "bots", "roles"]) {
     assert.ok(agentMounts.includes(`./${name}:\${PWD}/${name}`), `${name} read-write`);
   }
-  for (const name of ["account", "dsh", "docs", "GRAVIT.md", "CLAUDE.md", "AGENTS.md", "Gravit-Design.md", "DEVELOPMENT.md", "ROADMAP.md"]) {
+  for (const name of ["account", "market", "dsh", "docs", "GRAVIT.md", "CLAUDE.md", "AGENTS.md", "Gravit-Design.md", "DEVELOPMENT.md", "ROADMAP.md"]) {
     assert.ok(agentMounts.includes(`./${name}:\${PWD}/${name}:ro`), `${name} read-only`);
   }
   const accountBind = agentMounts.filter(v => v.startsWith("./account:"));
@@ -69,9 +71,13 @@ test("compose.yml runs the face, the account and the market as three boxes, the 
   assert.equal(c.services.agent.working_dir, "${PWD}/face");
   assert.ok(agentMounts.includes("face-modules:${PWD}/face/node_modules"));
   assert.ok(agentMounts.includes("account-modules:${PWD}/account/node_modules"));
+  assert.ok(agentMounts.includes("./market:${PWD}/market:ro"));
+  assert.ok(agentMounts.includes("market-modules:${PWD}/market/node_modules"));
+  assert.ok("market-modules" in c.volumes);
+  assert.match(readFileSync(new URL("../docker-entrypoint.sh", import.meta.url), "utf8"), /for dir in \.\.\/face \.\.\/account \.\.\/market/);
   assert.ok(agentMounts.every(v => !v.includes("docker.sock") && !v.includes("account-home")));
   assert.ok(agentMounts.some(v => v.startsWith("face-modules:")) && agentMounts.some(v => v.startsWith("account-modules:")));
-  assert.deepEqual(Object.keys(c.volumes).sort(), ["account-home", "account-modules", "dsh-home", "face-modules", "seat-home"]);
+  assert.deepEqual(Object.keys(c.volumes).sort(), ["account-home", "account-modules", "dsh-home", "face-modules", "market-modules", "seat-home"]);
 });
 
 test("the agent image and the account image carry no AKShare, the market image carries it at the pin", async () => {

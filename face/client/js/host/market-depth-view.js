@@ -94,7 +94,7 @@ export function bookOf(body) {
 }
 
 /** The latest trades, newest first, each `{ price, size, side, at }` (`side` only where the source says which side took, else
- *  ''); `none`, the Account's sentence when the source publishes no trades at all (else ''); whether a public source's. */
+ *  ''); `none`, the answering half's sentence (the market's, or the Account's at a connected venue) when the source publishes no trades at all (else ''); whether a public source's. */
 export function tradesOf(body) {
   if (body?.ok !== true || !Array.isArray(body.trades)) return { trades: [], none: '', public: false };
   const trades = records(body.trades).map(t => ({ price: number(t.price), size: number(t.size), side: t.side === 'buy' || t.side === 'sell' ? t.side : '', at: str(t.at) }))

@@ -1556,7 +1556,7 @@
     {
       "venue": "standin-geo",
       "venueName": "Stand-in Geo Exchange",
-      "why": "Stand-in Geo Exchange does not serve this location: that is its own rule, and the account does not look for a way around it",
+      "why": "Stand-in Geo Exchange does not serve this location: that is its own rule, and the market does not look for a way around it",
       "connected": false,
       "code": "E_VENUE_GEOBLOCKED",
       "said": "Service unavailable from a restricted location (stand-in)."
