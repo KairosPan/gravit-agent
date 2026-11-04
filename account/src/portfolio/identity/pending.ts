@@ -11,7 +11,7 @@
  *     is the signed connectNetwork, whose door handler takes the pending connection (take) and checks it against what was signed.
  *
  * One pending connection at a time: a second token replaces the first, whose poll is cut and whose token is forgotten. A pending connection
- * lasts PENDING_MS (ten minutes, a signed instruction's life): past it the token is dropped and the view says "expired" until the page
+ * lasts PENDING_MS (ten minutes, a signed instruction's life): past it the token and the client that holds it are dropped and the view says "expired" until the page
  * starts again or drops it. drop forgets it at once. A 409 from getUpdates (another poller holds the token, or a webhook is set) shows as
  * "conflict" until a poll answers again.
  *
@@ -82,7 +82,8 @@ interface Entry {
   offset: number | undefined;
   /** who said "Not me" during this connection: counted as strangers if they write again, never heard */
   notMe: Set<string>;
-  api: BotApi;
+  /** the client, which holds the token: dropped with it (cut), so an expired tombstone holds neither */
+  api: BotApi | undefined;
   stop: AbortController;
   looping: boolean;
   timer: NodeJS.Timeout | undefined;
@@ -158,7 +159,7 @@ export class PendingConnections {
     const e = this.entry(id);
     if (!e) return undefined;
     if (e.state === "heard" && e.sender) {
-      this.deps.strangers.note("telegram", e.sender.id, this.now());
+      this.noteStranger(e.sender.id);
       e.notMe.add(e.sender.id);
       delete e.sender;
       e.state = "waiting";
@@ -225,6 +226,7 @@ export class PendingConnections {
     e.stop.abort();
     if (e.timer) clearTimeout(e.timer);
     e.timer = undefined;
+    e.api = undefined;
     e.token = "";
     e.keyHash = "";
     e.salt = "";
@@ -233,7 +235,16 @@ export class PendingConnections {
   }
 
   private live(e: Entry): boolean {
-    return this.current === e && !e.stop.signal.aborted && (e.state === "waiting" || e.state === "conflict");
+    return this.current === e && e.api !== undefined && !e.stop.signal.aborted && (e.state === "waiting" || e.state === "conflict");
+  }
+
+  /** a stranger counted; a store that cannot write is said in one line (no id, no token) and the connection goes on */
+  private noteStranger(id: string): void {
+    try {
+      this.deps.strangers.note("telegram", id, this.now());
+    } catch (err) {
+      this.log(`identity: a stranger could not be counted (${err instanceof Error ? (err as NodeJS.ErrnoException).code ?? err.name : "error"}); the connection goes on`);
+    }
   }
 
   private sleep(e: Entry, ms: number): Promise<void> {
@@ -254,6 +265,9 @@ export class PendingConnections {
   private loop(e: Entry): void {
     if (e.looping) return;
     e.looping = true;
+    // the token's spellings, taken now: every line this loop says is redacted with them, even after cut() has blanked the entry's token
+    const redact = redactorOf([e.token]);
+    const reason = (err: unknown) => redact(err instanceof Error ? err.message : String(err));
     void (async () => {
       let backoff = 0;
       try {
@@ -261,7 +275,7 @@ export class PendingConnections {
           if (this.now() >= e.expiresAt) return this.expire(e);
           let updates: unknown[];
           try {
-            updates = await e.api.getUpdates(e.offset, this.pollTimeoutS);
+            updates = await e.api!.getUpdates(e.offset, this.pollTimeoutS);
           } catch (err) {
             if (!this.live(e)) return;
             if (err instanceof BotApiError && err.status === 409) {
@@ -270,7 +284,7 @@ export class PendingConnections {
               continue;
             }
             backoff = backoff === 0 ? BACKOFF_FIRST_MS : Math.min(backoff * 2, BACKOFF_MAX_MS);
-            this.log(`identity: the pending Telegram connection's poll failed (${err instanceof Error ? err.message : String(err)}); polling again in ${backoff / 1000} s`);
+            this.log(`identity: the pending Telegram connection's poll failed (${reason(err)}); polling again in ${backoff / 1000} s`);
             await this.sleep(e, backoff);
             continue;
           }
@@ -284,7 +298,7 @@ export class PendingConnections {
             const s = senderOf(u);
             if (!s) continue;
             if (e.notMe.has(s.id)) {
-              this.deps.strangers.note("telegram", s.id, this.now());
+              this.noteStranger(s.id);
               continue;
             }
             e.sender = s;
@@ -295,9 +309,11 @@ export class PendingConnections {
       } finally {
         e.looping = false;
       }
-    })().catch((err: unknown) => {
-      // a fault in the loop itself, said without the token; the connection stays as it was and the page can start again
-      this.log(`identity: the pending Telegram connection stopped (${redactorOf([e.token])(err instanceof Error ? err.message : String(err))})`);
+    })().catch(async (err: unknown) => {
+      // a fault in the loop itself, said without the token; a connection still waiting polls again after the first backoff
+      this.log(`identity: the pending Telegram connection's poll stopped (${reason(err)}); polling again in ${BACKOFF_FIRST_MS / 1000} s`);
+      await this.sleep(e, BACKOFF_FIRST_MS);
+      if (this.live(e)) this.loop(e);
     });
   }
 }

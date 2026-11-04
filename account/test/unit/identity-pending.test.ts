@@ -285,6 +285,114 @@ describe("the pending connection on its own clock", () => {
   });
 });
 
+describe("the pending connection holds no token it does not need, and says none", () => {
+  let bot: FakeBotApi;
+  let home: string;
+  beforeEach(async () => {
+    bot = await fakeBotApi();
+    home = mkdtempSync(join(tmpdir(), "identity-pending-safe-"));
+  });
+  afterEach(async () => {
+    await bot.close();
+    rmSync(home, { recursive: true, force: true });
+  });
+  /** the test seam: the entry the connections hold now (private) */
+  const held = (p: PendingConnections) => (p as unknown as { current?: { token: string; keyHash: string; salt: string; api?: unknown; sender?: unknown } }).current;
+
+  it("an expired connection keeps no token and no Bot API client, and take answers nothing", async () => {
+    let t = Date.now();
+    const pending = new PendingConnections({ apiBase: bot.url, strangers: new Strangers(home), bound: () => false, now: () => t, pollTimeoutS: 1 });
+    try {
+      const { salt, keyHash } = fp(TOKEN);
+      const v = await pending.begin(TOKEN, keyHash, salt);
+      if (isRefusal(v)) throw new Error(v.message);
+      expect(held(pending)!.api).toBeDefined();
+      t += PENDING_MS;
+      expect(pending.view(v.id)!.state).toBe("expired");
+      const e = held(pending)!;
+      expect(e).toMatchObject({ token: "", keyHash: "", salt: "" });
+      expect(e.api).toBeUndefined();
+      expect(e.sender).toBeUndefined();
+      expect(JSON.stringify(e)).not.toContain(TOKEN);
+      expect(pending.take(v.id)).toBeUndefined();
+      pending.drop(v.id);
+      expect(held(pending)).toBeUndefined();
+    } finally {
+      pending.dispose();
+    }
+  });
+
+  it("a poll failure whose error carries the token logs no token, before expiry and after", async () => {
+    const lines: string[] = [];
+    let t = Date.now();
+    let mode: "fail" | "hang" = "fail";
+    let release: (() => void) | undefined;
+    const leaky: typeof fetch = async (url, init) => {
+      if (String(url).endsWith("/getUpdates")) {
+        if (mode === "fail") throw new Error(`connect refused for ${String(url)} with ${TOKEN}`);
+        // held until the test lets it go, then failing with the token whatever the signal says
+        await new Promise<void>((r) => (release = r));
+        throw new Error(`late failure for ${String(url)}`);
+      }
+      return fetch(url, init);
+    };
+    const pending = new PendingConnections({ apiBase: bot.url, strangers: new Strangers(home), bound: () => false, now: () => t, pollTimeoutS: 1, fetch: leaky, log: (l) => void lines.push(l) });
+    try {
+      const { salt, keyHash } = fp(TOKEN);
+      const v = await pending.begin(TOKEN, keyHash, salt);
+      if (isRefusal(v)) throw new Error(v.message);
+      await until(() => lines.length > 0);
+      expect(lines[0]).toContain("poll failed");
+      expect(lines.join("\n")).not.toContain(TOKEN);
+      // a second connection whose poll is under way when it expires
+      mode = "hang";
+      const w = await pending.begin(TOKEN, keyHash, salt);
+      if (isRefusal(w)) throw new Error(w.message);
+      await until(() => release !== undefined);
+      t += PENDING_MS;
+      expect(pending.view(w.id)!.state).toBe("expired");
+      release!();
+      await new Promise((r) => setTimeout(r, 50));
+      expect(lines.join("\n")).not.toContain(TOKEN);
+      expect(lines.join("\n")).not.toContain(encodeURIComponent(TOKEN));
+    } finally {
+      pending.dispose();
+    }
+  });
+
+  it("a strangers store that throws once does not stop the poll: the next private message is heard", async () => {
+    const lines: string[] = [];
+    let notes = 0;
+    class Flaky extends Strangers {
+      override note(network: "telegram", id: string, at: number): void {
+        notes += 1;
+        if (notes === 2) throw Object.assign(new Error(`EACCES writing for ${TOKEN}`), { code: "EACCES" });
+        super.note(network, id, at);
+      }
+    }
+    const pending = new PendingConnections({ apiBase: bot.url, strangers: new Flaky(home), bound: () => false, pollTimeoutS: 1, log: (l) => void lines.push(l) });
+    try {
+      const { salt, keyHash } = fp(TOKEN);
+      const v = await pending.begin(TOKEN, keyHash, salt);
+      if (isRefusal(v)) throw new Error(v.message);
+      const someone = { id: 999000456, first_name: "Someone", username: "someone" };
+      bot.push(privateText(40, "/start", someone));
+      await until(() => pending.view(v.id)!.state === "heard");
+      expect(pending.notMe(v.id)!.state).toBe("waiting");
+      // the same stranger again: the store throws inside the poll loop
+      bot.push(privateText(41, "again", someone));
+      await until(() => lines.some((l) => l.includes("stranger could not be counted")));
+      expect(pending.view(v.id)!.state).toBe("waiting");
+      bot.push(privateText(42, "/start"));
+      await until(() => pending.view(v.id)!.state === "heard");
+      expect(pending.view(v.id)!.sender!.handle).toBe("@pan");
+      expect(lines.join("\n")).not.toContain(TOKEN);
+    } finally {
+      pending.dispose();
+    }
+  });
+});
+
 describe("the Bot API client", () => {
   it("answers getMe, sends with a reply, and says a refusal by status and description, never the token", async () => {
     const bot = await fakeBotApi();
