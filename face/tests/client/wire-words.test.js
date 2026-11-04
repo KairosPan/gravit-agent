@@ -1,5 +1,5 @@
-// The wire modules moved from the old client (stage 3): no Chinese anywhere in their source — the product speaks
-// English (spec 2026-10-19 §3), and these modules' words reach the screens.
+// The wire modules moved from the old client (stage 3): no Chinese anywhere in their source — the face's words live in
+// the tables (client/js/i18n/, spec 2026-11-03 §5.10), and these modules' words reach the screens.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';

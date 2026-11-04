@@ -28,7 +28,7 @@
  */
 
 /** The host agent's display name — the label for every session no bot owns. */
-export const HOST_NAME = "Gravit";
+export const HOST_NAME = "Gravit"; // en-kept: the agent's name
 
 /** The preset ids that ARE the host: `gravit`, and `kairos` — the same agent's
  *  id before the 2026-10-08 rename, which archived sessions still carry and the

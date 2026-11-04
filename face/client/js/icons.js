@@ -60,6 +60,6 @@ export const ICONS = {
 
 export function icon(name, size = 22, sw = 2, filled = false) {
   const path = ICONS[name];
-  if (!path) throw new Error('unknown icon ' + name);
+  if (!path) throw new Error('unknown icon ' + name); // en-kept: a programmer's error, never on screen
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${filled ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
 }

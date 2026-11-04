@@ -49,7 +49,7 @@ export function cnQuoteOf(row, now = Date.now()) {
     id: `cn:${symbol}`, market: "cn", symbol, name: str(m.name) || symbol,
     price: numOrNull(m.price), prev_close: numOrNull(cn.prevClose), change: numOrNull(m.change24h), change_pct: numOrNull(m.changePct24h),
     volume: numOrNull(cn.volume), as_of: asOf, received_at: new Date(now).toISOString(), volume_as_of: asOf,
-    source: "Tencent", feed: "", basis: "previous_close",
+    source: "Tencent", feed: "", basis: "previous_close", // en-kept: the provider's name
     quote_status: cn.quoteStatus === "delayed" ? "delayed" : "live", market_status: PHASE[cn.phase] ?? "unknown", message: "",
     last_session: str(cn.lastSession) || null,
     open: numOrNull(cn.open), high: numOrNull(cn.high), low: numOrNull(cn.low), turnover: numOrNull(cn.turnover),

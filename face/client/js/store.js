@@ -31,7 +31,7 @@ export function createStore({ initial, reducers, storage = null, key = 'gravit-u
     get: () => state,
     dispatch(type, payload) {
       const reducer = reducers[type];
-      if (!reducer) throw new Error('unknown action ' + type);
+      if (!reducer) throw new Error('unknown action ' + type); // en-kept: a programmer's error, never on screen
       const next = reducer(state, payload);
       if (next && next !== state) {
         state = next;
