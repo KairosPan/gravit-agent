@@ -16,14 +16,15 @@ import { readProtocols } from "../src/protocols.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, INSTRUCTIONS_CONFIG, instructionsPatch } from "../src/instructions.ts";
 import { facePolicyPatches } from "../src/policy.ts";
 import { definitionFor } from "../src/bot-presets.ts";
-import { LEGACY_PRESET_DESCRIPTION } from "../src/overlay.ts";
+import { LEGACY_PRESET_DESCRIPTION, faceOverlay } from "../src/overlay.ts";
 import { GRAVIT_PLUGIN_URL, ROLE_PLUGIN_URL, gravitRows, readRoles } from "../src/roles.ts";
 import { makeBotsRoot, makeRolesRoot } from "./bots-fixture.ts";
 
 /** Every row id {@link faceOverlay} owns, as the composed tree should show them. */
 const OVERLAY_ROW_IDS = [
-  "agent-preset-registry", "api-remotes", "connection", "directory-picker", "file-upload", "preset-gravit",
-  "session-controller", "settings-controller", "tool-ask-user", "webserver", "workspace", "workspace-controller",
+  "agent-preset-registry", "api-remotes", "connection", "directory-picker", "file-upload", "job-controller", "preset-gravit",
+  "session-controller", "session-reference", "session-stats", "session-turn-outline", "settings-controller", "tool-ask-user",
+  "webserver", "workspace", "workspace-controller",
 ] as const;
 
 /** The rows the face inserted at 0.1.1 and dsh-base mounts itself at 0.2.0
@@ -728,4 +729,20 @@ test("globalInstructionAudit: one stderr line per global file, naming the path a
     rmSync(home, { recursive: true, force: true });
     rmSync(agents, { recursive: true, force: true });
   }
+});
+
+test("the dsh UI port's four host rows: configless, from their own packages", () => {
+  const rows = faceOverlay(0, { id: "gravit", plugins: [] } as never)[0]!.insert!;
+  const want = {
+    "job-controller": "@deepseek-ai/dsh-api-job-controller",
+    "session-stats": "@deepseek-ai/dsh-session-stats",
+    "session-turn-outline": "@deepseek-ai/dsh-session-turn-outline",
+    "session-reference": "@deepseek-ai/dsh-session-reference",
+  };
+  for (const [id, name] of Object.entries(want)) {
+    const row = rows.find((r) => r.id === id);
+    assert.equal(row?.name, name, id);
+    assert.equal("config" in (row ?? {}), false, `${id} is configless`);
+  }
+  assert.equal(rows.some((r) => r.id === "file-reference-local"), false, "spec D14");
 });

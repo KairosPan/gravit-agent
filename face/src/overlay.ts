@@ -194,6 +194,18 @@ export function faceOverlay(port: number, defaultPreset: AgentPresetConfig, host
        * directory-picker.ts:42-65). Configless: its two keys only feed
        * `initializeDefault`. */
       { id: "workspace-controller", name: "@deepseek-ai/dsh-api-workspace-controller" },
+      /* The dsh UI port's four host rows, all configless as the web-app bundle
+       * mounts them (packages/bundle/web-app/cordis.patch.yml at tag
+       * dsh-v0.2.1-rc.5). `job-controller` serves `job/list`, `job/follow` (mux
+       * streams) and `job/kill`; `session-stats` and `session-turn-outline`
+       * serve the `sessionStats` and `turnOutline` projections;
+       * `session-reference` rewrites `@[label](dsh-session:<id>)` in the
+       * pre-step. `file-reference-local` stays out: its `@`-is-a-path sentence
+       * would reach every agent's system prompt (spec D14). */
+      { id: "job-controller", name: "@deepseek-ai/dsh-api-job-controller" },
+      { id: "session-stats", name: "@deepseek-ai/dsh-session-stats" },
+      { id: "session-turn-outline", name: "@deepseek-ai/dsh-session-turn-outline" },
+      { id: "session-reference", name: "@deepseek-ai/dsh-session-reference" },
       /* `credentials/describe` lives here (NEW packages/api/settings-controller/
        * src/credentials.ts:45-51, 82-97). `settings/describe` on the same row
        * throws "settings service is absent" (index.ts:216-222) because the

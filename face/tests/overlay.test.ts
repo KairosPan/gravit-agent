@@ -13,7 +13,7 @@ const GRAVIT: AgentPresetConfig = {
   plugins: [],
 };
 
-/** The thirteen host rows, in the order the overlay inserts them, with the
+/** The seventeen host rows, in the order the overlay inserts them, with the
  * package each must name (PLAN S2's table). The order is not load semantics -
  * activation is service-driven - but it is the reviewable contract, and a
  * silently re-ordered or re-named row is exactly the drift this pins. */
@@ -25,6 +25,10 @@ const ROWS: ReadonlyArray<readonly [id: string, pkg: string]> = [
   ["workspace", "@deepseek-ai/dsh-workspace"],
   ["session-controller", "@deepseek-ai/dsh-api-session-controller"],
   ["workspace-controller", "@deepseek-ai/dsh-api-workspace-controller"],
+  ["job-controller", "@deepseek-ai/dsh-api-job-controller"],
+  ["session-stats", "@deepseek-ai/dsh-session-stats"],
+  ["session-turn-outline", "@deepseek-ai/dsh-session-turn-outline"],
+  ["session-reference", "@deepseek-ai/dsh-session-reference"],
   ["settings-controller", "@deepseek-ai/dsh-api-settings-controller"],
   ["directory-picker", "@deepseek-ai/dsh-host-directory-picker-auto"],
   ["tool-ask-user", "@deepseek-ai/dsh-tool-ask-user"],
@@ -39,7 +43,7 @@ function rowsById() {
   return new Map(patches[0]!.insert!.map((r) => [r.id, r]));
 }
 
-test("overlay inserts exactly the thirteen host rows, in order, each naming its package", () => {
+test("overlay inserts exactly the seventeen host rows, in order, each naming its package", () => {
   const rows = faceOverlay(3090, GRAVIT)[0]!.insert!;
   assert.deepEqual(rows.map((r) => [r.id, r.name]), ROWS.map(([id, pkg]) => [id, pkg]));
 });
