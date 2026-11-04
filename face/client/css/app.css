@@ -83,7 +83,7 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .pin-key:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
 .pin-key:hover { color: var(--text); }
 .row-wrap:hover .pin-key, .row-wrap:focus-within .pin-key { opacity: 1; }
-.row-wrap:hover .row-time, .row-wrap:focus-within .row-time { visibility: hidden; }
+.row-wrap:has(> .pin-key):hover .row-time, .row-wrap:has(> .pin-key):focus-within .row-time { visibility: hidden; }
 .row-pin { flex: 0 0 auto; display: inline-flex; align-items: center; color: var(--dim); }
 .row { display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 8px 10px; border-radius: var(--radius-s); color: var(--text); }
 .row:hover { background: var(--hover); }
@@ -773,6 +773,7 @@ button.tk-at:hover { border-color: var(--dim); }
   .line-key { min-height: 40px; padding: 0 10px; }
   .list { position: static; height: auto; width: auto; flex: none; border-right: 0; border-bottom: 1px solid var(--border); }
   .rail-rows { max-height: 40vh; }
+  .conv-results { max-height: 40vh; }
   .main { flex: none; height: auto; min-height: 100vh; background: var(--bg); }
   .thread { overflow-y: visible; }
   .composer { position: sticky; bottom: 0; background: var(--bg); }

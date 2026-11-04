@@ -84,14 +84,14 @@ const whereOf = (conv, state) => {
 // the row actions under This task: Fork once there is something to fork; Archive while nothing runs or waits, Un-archive for the face's own archive
 // (the host's cannot be undone here); Delete while nothing runs or waits, asked twice
 function rowKeys(conv, state) {
-  const key = (action, label, cls = 'btn-sm') => `<button type="button" class="${cls}" data-action="${action}" data-conv="${esc(conv.id)}">${label}</button>`;
+  const key = (action, label, cls = 'btn-sm', id = null) => `<button type="button" class="${cls}" data-action="${action}" data-conv="${esc(conv.id)}"${id ? ` id="${esc(id)}"` : ''}>${label}</button>`;
   const idle = !conv.running && !conv.messages.some(needsAnswer);
   const deleting = state.confirm?.action === 'deleteConv' && state.confirm?.id === conv.id;
   return [
     key('changeWords', 'Change words'),
     // dsh forks from a completed turn: a conversation with nothing in it yet has none
     conv.messages.length ? key('fork', 'Fork') : '',
-    conv.archived ? '' : state.pinned?.includes(conv.id) ? key('unpin', 'Unpin') : key('pin', 'Pin'),
+    conv.archived ? '' : state.pinned?.includes(conv.id) ? key('unpin', 'Unpin', 'btn-sm', `details-pin-${conv.id}`) : key('pin', 'Pin', 'btn-sm', `details-pin-${conv.id}`),
     conv.archived === 'face' ? key('unarchive', 'Un-archive') : !conv.archived && idle ? key('archive', 'Archive') : '',
     !idle ? '' : deleting ? confirmPair('Yes, delete') : key('deleteConv', 'Delete', 'btn-danger'),
   ].join('');

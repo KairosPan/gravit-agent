@@ -94,3 +94,11 @@ test('a channel the registry does not hold reads by the conversation\'s own chan
   const c = inCh('a', 'w9', 'orphan', { title: 'zz' });
   assert.equal(titleMatches([c], channels, 'zz')[0].channelLabel, 'orphan');
 });
+
+test('a title match filters on the title and the label before it builds an item: a non-match is never read for its line', () => {
+  let read = 0;
+  const quiet = conv('q', { title: 'nothing' });
+  Object.defineProperty(quiet, 'messages', { get() { read++; return []; } });
+  assert.deepEqual(titleMatches([conv('a', { title: 'hit' }), quiet], channels, 'hit').map(x => x.id), ['a']);
+  assert.equal(read, 0, 'the non-match was not mapped through its preview line');
+});

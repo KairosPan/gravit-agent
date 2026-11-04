@@ -32,8 +32,8 @@ export function titleMatches(conversations, channels, q) {
   const needle = typeof q === 'string' ? q.trim().toLowerCase() : '';
   if (needle === '') return [];
   return (conversations ?? [])
+    .filter(c => `${c.title ?? ''}`.toLowerCase().includes(needle) || labelFor(c, channels).toLowerCase().includes(needle))
     .map(c => itemOf(c, channels, {}))
-    .filter(it => `${it.title ?? ''}`.toLowerCase().includes(needle) || it.channelLabel.toLowerCase().includes(needle))
     .sort((a, b) => b.at - a.at);
 }
 

@@ -436,9 +436,10 @@ export function boot(win, host = {}) {
   let sheetOpens = 0;       // the sheets opened so far: a read a sheet waits on opens none over one opened since
   let sheetKind = null;     // the kind of the sheet open as the store last changed: which one a close closed
   let orderFields = null;   // the ticket's order sheet's fields as they last stood, for when another sheet took its place
-  let last = { overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, editor: null, confirm: null };
+  let last = { overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, editor: null, confirm: null, query: '' };
   let confirmFrom = null;
   let searchFocus = false;  // ⌥⌘K from a screen with no list: the box takes focus once Messages draws it
+  let rowsAt = null;        // where the groups last stood: a query hides them, and they come back there when it clears (spec §5.1)
 
   function applyTheme(theme) {
     if (theme === 'cream' || theme === 'black') doc.documentElement.dataset.theme = theme; else delete doc.documentElement.dataset.theme;
@@ -459,7 +460,8 @@ export function boot(win, host = {}) {
     const ticked = [...root.querySelectorAll('input[id]')].filter(el => (el.type === 'radio' || el.type === 'checkbox') && el.checked).map(el => el.id);
     const thread0 = doc.getElementById('thread');
     const threadAt = thread0 ? { top: thread0.scrollTop, bottom: thread0.scrollHeight - thread0.scrollTop - thread0.clientHeight < 40 } : null;
-    const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop };
+    const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, results: root.querySelector('.conv-results')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop };
+    if (scrolls.rows != null) rowsAt = scrolls.rows;
     // a disclosure the person opened (its Raw, a trace; tool calls are stored but not drawn) is the page's, not the store's: open again by its id
     const opened = [...root.querySelectorAll('details[id][open]')].map(el => el.id);
 
@@ -502,7 +504,12 @@ export function boot(win, host = {}) {
     // scroll: the rows keep their place; the page keeps its place on the same screen; a drawer while it stays the same drawer
     const sameScreen = last.screen === screenOf(s);
     const rows = root.querySelector('.rail-rows');
-    if (rows && scrolls.rows != null) rows.scrollTop = scrolls.rows;
+    const rowsTop = scrolls.rows ?? rowsAt;
+    if (rows && rowsTop != null) rows.scrollTop = rowsTop;
+    // the results while the same query stands (a stream frame, a pin, a list refresh, the content answer); a new query starts at the top
+    const hits = root.querySelector('.conv-results');
+    const query = s.search?.query ?? '';
+    if (hits && scrolls.results != null && query === last.query) hits.scrollTop = scrolls.results;
     const main = root.querySelector('main');
     if (main && sameScreen && scrolls.main != null) main.scrollTop = scrolls.main;
     const drawerBody = root.querySelector('.drawer-body');
@@ -547,7 +554,7 @@ export function boot(win, host = {}) {
       target.focus();
       if (caret && target === find(activeKey) && typeof target.setSelectionRange === 'function') target.setSelectionRange(caret[0], caret[1]);
     }
-    last = { overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, editor: editorOf(s.edit), confirm: s.confirm };
+    last = { overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, editor: editorOf(s.edit), confirm: s.confirm, query };
     // a composed answer drawn without its run's view asks for it now that the page is whole (its dispatches render again)
     if (wantedViews(store.get()).length) void ensureViews(store, getJson);
   }
@@ -1224,9 +1231,15 @@ export function boot(win, host = {}) {
   // ⌥⌘K (Ctrl+Alt+K off a Mac) focuses the list's search box from anywhere: matched on the key's place, since ⌥ changes the
   // character a Mac reports; off a screen with the list it goes to Messages first
   function focusSearch() {
+    const s = store.get();
+    // on a medium window Details folds the list away (app.css): close it first, and the box takes focus once the list is drawn
+    if (s.detailsOpen && win.matchMedia?.('(min-width: 861px) and (max-width: 1399px)')?.matches) {
+      searchFocus = true;
+      store.dispatch('toggleDetails');
+      return;
+    }
     const box = doc.getElementById('cq');
     if (box) { box.focus(); return; }
-    const s = store.get();
     const lastOpen = s.lastConv && s.conversations.some(c => c.id === s.lastConv && !c.archived) ? s.lastConv : null;
     searchFocus = true;
     go({ screen: 'messages', id: lastOpen ?? firstOpen(s.conversations)?.id ?? null });
@@ -1234,7 +1247,7 @@ export function boot(win, host = {}) {
   doc.addEventListener('keydown', ev => {
     // while an IME composes (pinyin), its keys are the composition's: Esc dismisses the candidate, never the query
     const imeOpen = ev.isComposing || ev.keyCode === 229;
-    if (!imeOpen && ev.code === 'KeyK' && ev.altKey && (mac ? ev.metaKey && !ev.ctrlKey : ev.ctrlKey && !ev.metaKey)) {
+    if (!imeOpen && ev.code === 'KeyK' && ev.altKey && !ev.shiftKey && (mac ? ev.metaKey && !ev.ctrlKey : ev.ctrlKey && !ev.metaKey)) {
       ev.preventDefault();
       focusSearch();
       return;

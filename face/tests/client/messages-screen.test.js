@@ -181,3 +181,10 @@ test('Details offers Pin between Fork and Archive, Unpin once pinned, nothing wh
   const old = mk({ archived: 'face' }, { pinned: ['a'] });
   assert.doesNotMatch(old, /data-action="(un)?pin"/);
 });
+
+test("Details' Pin and Unpin key carries one stable id, so focus finds it after the press flips it", () => {
+  const said = { id: 'e1', seq: 1, at: NOW, from: 'you', kind: 'text', text: 'hi', data: {} };
+  const mk = extra => { const s = { ...listed([conv('a', { archived: false, loaded: true, messages: [said] })]), ...extra }; return renderDetails(currentConversation(s), s); };
+  assert.match(mk({}), /data-action="pin" data-conv="a" id="details-pin-a">Pin</);
+  assert.match(mk({ pinned: ['a'] }), /data-action="unpin" data-conv="a" id="details-pin-a">Unpin</);
+});

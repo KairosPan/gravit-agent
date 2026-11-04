@@ -39,7 +39,7 @@ function rowMark(conv, state) {
 
 function row(conv, state, now) {
   const current = state.route.screen === 'messages' && state.route.id === conv.id;
-  const pin = conv.archived ? '' : `<button type="button" class="pin-key" data-action="${conv.pinned ? 'unpin' : 'pin'}" data-conv="${esc(conv.id)}" aria-label="${conv.pinned ? 'Unpin' : 'Pin'}">${icon('pin', 14, 2)}</button>`;
+  const pin = conv.archived ? '' : `<button type="button" class="pin-key" data-action="${conv.pinned ? 'unpin' : 'pin'}" data-conv="${esc(conv.id)}" aria-label="${conv.pinned ? 'Unpin' : 'Pin'}" id="pin-${esc(conv.id)}">${icon('pin', 14, 2)}</button>`;
   return '<div class="row-wrap">' +
     `<a${attrs({ class: cls('row', current && 'current'), 'aria-current': current ? 'page' : null, href: `#/messages/${conv.id}`, 'data-action': 'open', 'data-id': conv.id })}>` +
     `<span class="${cls('dot', unreadOf(conv) && 'on')}"></span>${rowMark(conv, state)}` +
@@ -130,7 +130,7 @@ function results(state, now) {
   const { query, contentPhase, content, hasMore } = state.search;
   const titles = titleMatches(state.conversations, state.channels, query);
   const merged = mergeResults({ titles, content, conversations: state.conversations, channels: state.channels });
-  const phase = searchPhase({ query, titles, contentPhase, merged });
+  const phase = searchPhase({ query, contentPhase, merged });
   let inner;
   if (phase === 'searching') inner = stateLine('searching') + '<div class="sk"></div>'.repeat(3);
   else if (phase === 'empty' || phase === 'failed') inner = stateLine(phase);

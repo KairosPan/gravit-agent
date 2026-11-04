@@ -406,3 +406,10 @@ test("the pin: the row's wrap, the key in the time's place, the glyph before the
   assert.match(css, /\.row-wrap:focus-within \.pin-key/);
   assert.match(css, /\.row-pin\s*\{[^}]*color: var\(--dim\)/);
 });
+
+test('the time hides under the pin key only on a row that has one; the results cap like the rows on a narrow window', () => {
+  assert.match(css, /\.row-wrap:has\(> \.pin-key\):hover \.row-time/);
+  assert.doesNotMatch(css, /\.row-wrap:hover \.row-time/, 'an archived row, with no key, keeps its time on hover');
+  const narrow = css.match(/@media \(max-width: 860px\) \{\n([\s\S]*?)\n\}/)?.[1] ?? '';
+  assert.match(narrow, /\.conv-results \{ max-height: 40vh; \}/);
+});

@@ -32,6 +32,7 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
     calls.push([endpoint, args]);
     if (endpoint === 'session/list') return { items: rows };
     if (endpoint === 'workspace/pinSession') return { pinnedSessionIds: [args.request.sessionId] };
+    if (endpoint === 'workspace/unpinSession') return { pinnedSessionIds: [] };
     if (endpoint === 'session/projections') return { asOfSeq: 20, values: {} };
     if (endpoint === 'session/page') { const pg = pages[args.request.address.sessionId]; return Array.isArray(pg) || pg === undefined ? { records: pg ?? [] } : pg; }
     if (endpoint === 'session/create' && args.request.agentPreset) { rows.push(row('s-bot', { updatedAt: 120, agentAvailable: true, projections: { values: { agentPreset: args.request.agentPreset } } })); return { sessionId: 's-bot', agentPreset: args.request.agentPreset }; }
@@ -3495,4 +3496,95 @@ test('pressing the pin key pins and does not open the conversation', async () =>
   assert.deepEqual(store.get().route, before, 'the route did not move');
   assert.deepEqual(store.get().pinned, ['s2']);
   store.timers.clear();
+});
+
+// the final review's fixes (plan 2 of the dsh UI port): the scroll boxes a query hides or redraws, the pin key's focus, ⌥⌘K's edges
+test('the rows keep their scroll for when a query clears; the results keep theirs across a render while the query stands', async () => {
+  const f = fakeWindow({ hash: '' });
+  const cq = searchBox(f);
+  const rows = f.withSelector('.rail-rows', { presentIf: /class="rail-rows"/ });
+  const hits = f.withSelector('.conv-results', { presentIf: /class="conv-results"/ });
+  const h = host({ rows: [titled('s1', 'Moutai'), titled('s2', 'Moutai two', { updatedAt: 3 })] });
+  const store = started(f, h);
+  await h.ready();
+  rows.scrollTop = 120;
+  cq.focus();
+  cq.value = 'mou';
+  f.fire('root', 'input', { target: cq });
+  assert.doesNotMatch(f.html(), /class="rail-rows"/);
+  hits.scrollTop = 80;
+  await store.live.refresh();
+  await settle();
+  assert.match(f.html(), /class="conv-results"/);
+  assert.equal(hits.scrollTop, 80, 'a render while the results are up leaves them where they were');
+  cq.value = 'mout';
+  f.fire('root', 'input', { target: cq });
+  assert.equal(hits.scrollTop, 0, 'a new query starts its results at the top');
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().search.query, '');
+  assert.match(f.html(), /class="rail-rows"/);
+  assert.equal(rows.scrollTop, 120, 'the groups come back where they stood');
+  store.timers.clear();
+});
+
+test('focus stays on the row\'s pin key and on Details\' Pin key through pin and unpin', async () => {
+  const f = fakeWindow({ hash: '' });
+  const say = f.withId('say', { tagName: 'TEXTAREA' });
+  const key = f.withId('pin-s2', { tagName: 'BUTTON', dataset: { action: 'pin', conv: 's2' }, presentIf: /id="pin-s2"/ });
+  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })] });
+  const store = started(f, h);
+  await h.ready();
+  key.focus();
+  f.click(key);
+  await settle();
+  assert.deepEqual(store.get().pinned, ['s2']);
+  assert.match(f.html(), /data-action="unpin" data-conv="s2"[^>]*id="pin-s2"/);
+  assert.equal(f.doc.activeElement, key, 'the row key keeps focus as it turns to Unpin');
+  key.dataset = { action: 'unpin', conv: 's2' };
+  f.click(key);
+  await settle();
+  assert.deepEqual(store.get().pinned, []);
+  assert.equal(f.doc.activeElement, key, 'and back to Pin');
+  assert.notEqual(f.doc.activeElement, say);
+
+  const dkey = f.withId('details-pin-s1', { tagName: 'BUTTON', dataset: { action: 'pin', conv: 's1' }, presentIf: /id="details-pin-s1"/ });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleDetails' } });
+  dkey.focus();
+  f.click(dkey);
+  await settle();
+  assert.deepEqual(store.get().pinned, ['s1']);
+  assert.match(f.html(), /data-action="unpin" data-conv="s1" id="details-pin-s1"/);
+  assert.equal(f.doc.activeElement, dkey, "Details' key keeps focus as it turns to Unpin");
+  store.timers.clear();
+});
+
+test('⌥⌘K with Details open on a medium window closes Details first, then focuses the box; on a wide one Details stays', async () => {
+  for (const medium of [true, false]) {
+    const f = fakeWindow({ hash: '' });
+    f.win.navigator = { platform: 'MacIntel' };
+    f.win.matchMedia = q => ({ matches: medium && q === '(min-width: 861px) and (max-width: 1399px)' });
+    const cq = searchBox(f);
+    const h = host({ rows: [row('s1')] });
+    const store = started(f, h);
+    await h.ready();
+    f.click({ tagName: 'BUTTON', dataset: { action: 'toggleDetails' } });
+    assert.equal(store.get().detailsOpen, true);
+    f.fire('doc', 'keydown', keyK({ metaKey: true }));
+    assert.equal(store.get().detailsOpen, !medium, medium ? 'Details closed so the list shows' : 'Details stays open beside the list');
+    assert.equal(f.doc.activeElement, cq);
+    store.timers.clear();
+  }
+});
+
+test('⌥⇧⌘K is not the search key', async () => {
+  const f = fakeWindow({ hash: '' });
+  f.win.navigator = { platform: 'MacIntel' };
+  searchBox(f);
+  const say = f.withId('say', { tagName: 'TEXTAREA' });
+  const h = host({ rows: [row('s1')] });
+  started(f, h);
+  await h.ready();
+  say.focus();
+  f.fire('doc', 'keydown', keyK({ metaKey: true, shiftKey: true }));
+  assert.equal(f.doc.activeElement, say);
 });
