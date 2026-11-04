@@ -2,8 +2,8 @@
 
 **Date:** 2026-11-03.
 
-**Status:** draft for the operator's approval. The builder check's three questions are answered
-(§12). Nothing is built.
+**Status:** approved by the operator, 2026-11-03 ("批准设计"), with the builder check's three
+questions answered (§12). Nothing is built; the plans come next (§10).
 
 **Canvas:** https://claude.ai/artifact/1TvrCZKjovYnwTQprMmqwh (private, the operator's). Six boards:
 *Where the ten picks land* (Main), *Search and pin in the list* (List), *The composer: / menu, @
