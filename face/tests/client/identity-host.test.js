@@ -346,3 +346,49 @@ test("an expired pending at Sign shows the account's words and Start again", asy
   assert.equal(r.store.get().identity.connect.step, 1);
   assert.ok(drops(r.posts).some(p => p.body.id === PENDING.id));
 });
+
+// ── carried into Task 3: sheet 2 cannot poll forever, and a silent account is said ──
+
+test('sheet 2: an expiresAt that cannot be read counts as expired once the ten minutes are up, and the poll stops', async () => {
+  const odd = { ok: true, pending: { ...PENDING, expiresAt: 'soon' } };
+  const r = rig({ reads: Array.from({ length: 600 }, () => odd) });
+  r.identity.openConnect();
+  await r.identity.next(field());
+  await r.timers.advance(9 * 60_000);
+  assert.equal(r.store.get().identity.connect.error, null, 'still waiting inside the ten minutes');
+  assert.equal(r.timers.pending.size, 1);
+  await r.timers.advance(60_000 + PENDING_POLL_MS);
+  assert.match(r.store.get().identity.connect.error, /expired/);
+  assert.equal(r.timers.pending.size, 0, 'no poll after the window');
+  const gets = r.gets.length;
+  await r.timers.advance(10 * PENDING_POLL_MS);
+  assert.equal(r.gets.length, gets);
+  assert.match(renderConnectDrawer(r.store.get()), /data-action="identityStartAgain">Start again</);
+  // the same with an account that never answers at all
+  const down = new Error('fetch failed');
+  const r2 = rig({ reads: Array.from({ length: 600 }, () => down) });
+  r2.identity.openConnect();
+  await r2.identity.next({ value: TOKEN });
+  r2.store.dispatch('identityConnectSet', { pending: { ...r2.store.get().identity.connect.pending, expiresAt: '' } });
+  await r2.timers.advance(10 * 60_000 + PENDING_POLL_MS);
+  assert.match(r2.store.get().identity.connect.error, /expired/);
+  assert.equal(r2.timers.pending.size, 0);
+});
+
+test('sheet 2: an account that stops answering is said in a plain line, gone once it answers again', async () => {
+  const down = Object.assign(new Error('HTTP 503'), { status: 503, body: { ok: false, error: 'The account did not answer.' } });
+  const r = rig({ reads: [down, new Error('fetch failed'), { ok: true, pending: PENDING }] });
+  r.identity.openConnect();
+  await r.identity.next(field());
+  assert.doesNotMatch(renderConnectDrawer(r.store.get()), /not answering/);
+  await r.timers.advance(PENDING_POLL_MS);
+  assert.equal(r.store.get().identity.connect.silent, true);
+  assert.match(renderConnectDrawer(r.store.get()), /The account is not answering: this sheet keeps asking\./);
+  assert.equal(r.store.get().identity.connect.error, null, 'not an error: it keeps waiting');
+  assert.equal(r.timers.pending.size, 1);
+  await r.timers.advance(PENDING_POLL_MS);
+  assert.match(renderConnectDrawer(r.store.get()), /not answering/);
+  await r.timers.advance(PENDING_POLL_MS);
+  assert.equal(r.store.get().identity.connect.silent, false);
+  assert.doesNotMatch(renderConnectDrawer(r.store.get()), /not answering/);
+});

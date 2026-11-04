@@ -41,6 +41,7 @@ import { isCnKey } from './wire/china.js';
 import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
 import { startIdentity } from './host/identity.js';
+import { identityOf, routingOf, formatRouting } from './host/identity-view.js';
 import { renderConnectDrawer } from './render/identity.js';
 import { moveSeedOf, earnSeedOf, earnSaidOf, subWalletSeedOf } from './host/sheet-money.js';
 import { startSellMany } from './host/sell-many.js';
@@ -846,6 +847,23 @@ export function boot(win, host = {}) {
         else if (d.kind === 'leverageCap' && r.leverage) void sheet.open('leverageCap', { max: r.leverage.max });
         break;
       }
+      // Account › Identity's (plan B1b Task 3), each seeded from the identity read as it stands: Disconnect… a network connected;
+      // What reaches you where (Save… and Change…) the grid's unsaved ticks or the account's routing, the account's own string beside
+      // them, and its quiet hours; Block a stranger by the reference and masked id its key carries
+      case 'disconnectNetwork': case 'routing': {
+        const data = store.get().identity?.data;
+        const v = identityOf(data);
+        if (!v.ok) break;
+        if (d.kind === 'disconnectNetwork') {
+          const network = d.network || 'telegram';
+          if (v.networks[network]?.state === 'connected') void sheet.open('disconnectNetwork', { network });
+        } else {
+          const draft = store.get().identity.draft;
+          void sheet.open('routing', { routing: draft ?? routingOf(data), quiet: v.quiet, saved: formatRouting(routingOf(data)) });
+        }
+        break;
+      }
+      case 'block': void sheet.open('block', { network: d.network ?? '', sender: d.sender ?? '', masked: d.masked ?? '' }); break;
       default: break;
     }
   }
@@ -1196,7 +1214,6 @@ export function boot(win, host = {}) {
     else if (form.dataset.action === 'saveBot') void saveBotNow(form.dataset.id);
     else if (form.dataset.action === 'createBot') void createBotNow();
     else if (form.dataset.action === 'placeOrder') void sheet.submit();
-    else if (form.dataset.action === 'identityNext') act.identityNext();
     // Enter in the pair box: the same as Pair, and held as Pair is while a pairing is in the air
     else if (form.dataset.action === 'pairDevice') { if (store.get().owner?.busy !== true) act.pairDevice(); }
   });
@@ -1278,6 +1295,8 @@ export function boot(win, host = {}) {
       return;
     }
     const a = doc.activeElement;
+    // Enter in Connect Telegram's token field is Next: the field has no form (no login for the browser to offer to keep)
+    if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && a?.id === 'identity-token') { ev.preventDefault(); act.identityNext(); return; }
     if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && store.get().edit && a?.closest?.('.inline-edit') && a.tagName !== 'BUTTON') { ev.preventDefault(); commitEdit(); }
   });
 

@@ -135,6 +135,7 @@ const CONNECT_TITLES = { 1: 'Connect Telegram · 1 of 4 · Bot token', 2: 'Conne
 const QR_PREFIX = 'data:image/svg+xml;base64,';
 const T_ME = /^https:\/\/t\.me\/([A-Za-z0-9_]{1,64})$/;
 const CONFLICT_WORDS = "Another program reads this bot's messages: stop it, and this sheet goes on.";
+const SILENT_WORDS = 'The account is not answering: this sheet keeps asking.';
 
 /** A time as New York's clock reads it, h:mm (24-hour). */
 export function etClock(at) {
@@ -149,10 +150,15 @@ const stepsList = steps => `<ol class="sheet-steps">${steps.map(s => `<li>${esc(
 const lineBox = rows => `<div class="sheet-quote">${rows.map(r => `<div class="dsec-line">${esc(r)}</div>`).join('')}</div>`;
 const primary = (word, data) => `<button${attrs({ type: 'button', class: 'btn-primary', ...data })}>${esc(word)}</button>`;
 
+// sheet 1: no <form> round the token's field, so a browser sees no login to offer to keep (its password managers are told the same);
+// Enter in the field is Next all the same (app.js's keydown)
 function sheetOne(c) {
-  const field = `<form class="field" data-action="identityNext" autocomplete="off"><label class="field-label" for="identity-token">Bot token</label>` +
-    `<input${attrs({ id: 'identity-token', class: 'input', type: 'password', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Bot token', disabled: c.busy === true })}>` +
-    `<span class="btn-row">${button('Paste', { 'data-action': 'identityPaste', disabled: c.busy === true })}</span></form>`;
+  const field = `<div class="field"><label class="field-label" for="identity-token">Bot token</label>` +
+    `<input${attrs({
+      id: 'identity-token', class: 'input', type: 'password', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Bot token',
+      'data-lpignore': 'true', 'data-1p-ignore': 'true', 'data-form-type': 'other', disabled: c.busy === true,
+    })}>` +
+    `<span class="btn-row">${button('Paste', { 'data-action': 'identityPaste', disabled: c.busy === true })}</span></div>`;
   return { body: `${field}${lineBox(['Kept in: Account · :4820', "Never in: Gravit's box · ~/.dsh"])}`, keys: [button('Cancel', { 'data-action': 'identityClose' }), primary(c.busy ? 'Checking…' : 'Next', { 'data-action': 'identityNext', disabled: c.busy === true })] };
 }
 
@@ -166,6 +172,7 @@ function sheetTwo(c) {
   const lines = [
     until ? `<p class="sheet-hint">${esc(`This connection waits until ${until} ET; after that, start again.`)}</p>` : '',
     p.state === 'conflict' ? note(CONFLICT_WORDS) : '',
+    c.silent === true ? note(SILENT_WORDS) : '',
   ].join('');
   return { body: `${link}${qr}${lines}`, keys: [button('Back', { 'data-action': 'identityBack' }), button('Cancel', { 'data-action': 'identityClose' })] };
 }

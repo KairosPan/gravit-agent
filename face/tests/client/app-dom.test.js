@@ -3524,3 +3524,94 @@ test('a page that does not sign opens no Connect Telegram', async () => {
   assert.doesNotMatch(f.html(), /Connect Telegram ·/);
   store.timers.clear();
 });
+
+// ── Account › Identity's signed sheets (plan B1b Task 3): Disconnect, What reaches you where, Block ──
+
+test('a done identity sheet reads Identity again past the face\'s cache', async () => {
+  const READ = { ...IDENTITY_READ, strangers: [{ network: 'telegram', sender: '0a1b2c3d4e5f', masked: '…789', count: 3, last: '2026-11-04T14:00:00.000Z' }] };
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': READ } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  async function signed(open, kind) {
+    open();
+    assert.equal(store.get().sheet?.kind, kind);
+    await until(() => store.get().sheet?.status === 'ready', `${kind} prepared`);
+    h.reads.length = 0;
+    f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+    await until(() => store.get().sheet === null, `${kind} done and closed`);
+    await settle();
+    assert.ok(h.reads.includes('/data/account/identity?fresh=1'), `${kind}: Identity read past the cache`);
+    return door.sent('/data/account/exchange').at(-1).action;
+  }
+  // Disconnect…: the identity's own kind, the network the key names
+  assert.match(f.html(), /data-action="openSheet" data-kind="disconnectNetwork" data-network="telegram"[^>]*>Disconnect…</);
+  const off = await signed(() => f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'disconnectNetwork', network: 'telegram' } }), 'disconnectNetwork');
+  assert.equal(off.type, 'disconnectNetwork');
+  assert.equal(off.network, 'telegram');
+  // Block: the stranger the key names
+  const block = await signed(() => f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'block', network: 'telegram', sender: '0a1b2c3d4e5f', masked: '…789' } }), 'block');
+  assert.deepEqual([block.type, block.network, block.sender, block.masked], ['blockSender', 'telegram', '0a1b2c3d4e5f', '…789']);
+  // Save…: the grid's unsaved ticks as the account's string, the quiet hours as they are
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', checked: true, dataset: { action: 'identityTick', row: 'brief', network: 'telegram' } } });
+  const saved = await signed(() => f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'routing' } }), 'routing');
+  assert.deepEqual([saved.type, saved.routing, saved.quietFrom, saved.quietTo], ['setRouting', 'chat=telegram;alerts=telegram;brief=telegram;cards=telegram;fills=telegram', '23:00', '07:00']);
+  store.timers.clear();
+});
+
+test('Change… on quiet hours: Off sends both ends empty; an unchanged sheet says so and signs nothing', async () => {
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': IDENTITY_READ } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'routing' } });
+  assert.equal(store.get().sheet.kind, 'routing');
+  await settle();
+  assert.equal(store.get().sheet.status, 'incomplete');
+  assert.match(f.html(), /That is how it is now/);
+  assert.match(f.html(), /type="time" name="quietFrom" value="23:00"/);
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'quietOff', checked: true, value: 'true', dataset: { action: 'sheetField' } } });
+  await until(() => store.get().sheet?.status === 'ready', 'quiet hours off prepared');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().sheet === null, 'done');
+  const a = door.sent('/data/account/exchange').at(-1).action;
+  assert.deepEqual([a.type, a.routing, a.quietFrom, a.quietTo], ['setRouting', 'chat=telegram;alerts=telegram;brief=;cards=telegram;fills=telegram', '', '']);
+  store.timers.clear();
+});
+
+test('Enter in the bot token field is Next: the token posted once, with no form for the browser to offer to keep', async () => {
+  const TOKEN = '7000000001:AAFakeTokenForTestsOnly_abcdefghijklmn';
+  const PENDING = { id: '0123456789abcdef0123456789abcdef', network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'Gravit' }, link: 'https://t.me/gravit_desk_bot', qr: '', expiresAt: '2099-01-01T00:00:00.000Z', state: 'waiting' };
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const field = f.withSelector('#identity-token', { tagName: 'INPUT', type: 'password', id: 'identity-token' });
+  const door = ownerDoor();
+  const posted = [];
+  const ownerPost = async (path, body) => {
+    if (path.startsWith('/data/account/identity/')) { posted.push([path, body]); return { status: 200, body: { ok: true, pending: PENDING } }; }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': { ...IDENTITY_READ, networks: [] }, '/data/account/identity/pending': { ok: true, pending: PENDING } } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityConnect', network: 'telegram' } });
+  assert.doesNotMatch(f.html(), /<form[^>]*identityNext/);
+  field.value = TOKEN;
+  let prevented = 0;
+  f.doc.activeElement = field;
+  f.fire('doc', 'keydown', { key: 'Enter', preventDefault() { prevented += 1; } });
+  f.doc.activeElement = field;
+  f.fire('doc', 'keydown', { key: 'Enter', preventDefault() { prevented += 1; } });
+  await until(() => store.get().identity.connect?.step === 2, 'sheet 2');
+  assert.equal(posted.filter(([p]) => p.endsWith('/telegram/token')).length, 1);
+  assert.equal(prevented, 2);
+  assert.equal(field.value, '');
+  store.timers.clear();
+});

@@ -70,6 +70,11 @@ function field(f) {
     // a value the sheet holds for the draft, never typed (a sign-in's state): nothing drawn
     case 'hidden':
       return '';
+    // a clock of the day, HH:MM (Identity's quiet hours)
+    case 'time':
+      return `<label class="field"><span class="field-label">${label}</span><input${attrs({
+        class: 'input', type: 'time', name: f.name, value: typeof f.value === 'string' ? f.value : '', 'data-action': 'sheetField',
+      })}></label>`;
     case 'check':
       return `<label class="sheet-check"><input${attrs({ type: 'checkbox', name: f.name, value: 'true', checked: f.value === true || f.value === 'true', 'data-action': 'sheetField' })}>${label}</label>`;
     case 'select': {

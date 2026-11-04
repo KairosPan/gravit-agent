@@ -1,10 +1,12 @@
 // face/client/js/host/sheet-identity.js — Account › Identity's signed sheets (plan B1b Tasks 2–3): connectNetwork, sheet 4 of Connect
 // Telegram (What you sign: the pending connection the account checked with Telegram and heard Say hi on, its bot, its operator, the
-// routing a fresh connection sends and the token's fingerprint, never the token); disconnectNetwork, routing and block are Task 3's.
+// routing a fresh connection sends and the token's fingerprint, never the token); and Task 3's three: disconnectNetwork (Disconnect
+// Telegram: the binding and its token gone), routing (What reaches you where: the grid's ticks as the account's routing string, and
+// quiet hours as two clocks or Off, which the account stores as null) and block (a stranger in Not you, by its reference).
 // Each sheet is the account's own owner type (account/src/portfolio/account/sign.ts OwnerAction), every field from the seed. The
 // sheet draws its lines above its fields and its numbered steps above its keys (render/owner.js). host/sheet-view.js delegates the
 // kinds here; the sheet engine (host/sheet.js) prepares the draft and What you sign shows it. No clock. No DOM, no store.
-import { ROUTE_ROWS } from './identity-view.js';
+import { ROUTE_ROWS, formatRouting } from './identity-view.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = v => (typeof v === 'string' ? v : '');
@@ -20,6 +22,18 @@ export const CONNECT_STEPS_4 = [
 ];
 
 const NETWORK_NAME = { telegram: 'Telegram' };
+// the networks the account speaks on now (kinds.ts NETWORKS): a disconnect or a block names one of them
+const SPOKEN = ['telegram'];
+const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** The words of Task 3's sheets that refuse or change nothing, fixed copy. */
+export const IDENTITY_WORDS = {
+  quietEqual: 'Quiet hours start and end at different times',
+  quietTimes: 'Pick when quiet hours start and end, or tick Off',
+  unchanged: 'That is how it is now',
+  noNetwork: 'Nothing connected to disconnect here',
+  noSender: 'No sender to block here',
+};
 
 /** The rows a routing string (`chat=telegram;alerts=;…`) sends on `network`, as their words, in the routing's order. */
 export function rowsSentOn(routing, network) {
@@ -35,7 +49,6 @@ export function identityTitleOf(kind, seed) {
   const s = isRecord(seed) ? seed : {};
   switch (kind) {
     case 'connectNetwork': return 'Connect Telegram · 4 of 4 · What you sign';
-    // Task 3's sheets (their titles the plan's)
     case 'disconnectNetwork': return `Disconnect ${NETWORK_NAME[str(s.network)] ?? 'Telegram'}`;
     case 'routing': return 'What reaches you where';
     case 'block': return `Block ${str(s.masked) || 'this sender'}`;
@@ -54,10 +67,29 @@ export function identityGoOf(kind) {
   }
 }
 
-/** The sheet's fields: connectNetwork's are all its seed's, so none is typed. */
-export function identityFieldsOf() {
-  return [];
+// the seed's quiet hours: two clocks, or null for off
+const quietOf = s => (isRecord(s.quiet) && CLOCK.test(str(s.quiet.from)) && CLOCK.test(str(s.quiet.to)) ? { from: s.quiet.from, to: s.quiet.to } : null);
+
+/** The sheet's fields: the routing sheet's quiet hours, two clocks and Off, from the seed's quiet hours; the other kinds' are all
+ *  their seed's, so none is typed. */
+export function identityFieldsOf(kind, seed) {
+  const s = isRecord(seed) ? seed : {};
+  if (kind !== 'routing') return [];
+  const q = quietOf(s);
+  return [
+    { name: 'quietFrom', label: 'Quiet from (New York)', type: 'time', value: q ? q.from : '' },
+    { name: 'quietTo', label: 'Quiet until (New York)', type: 'time', value: q ? q.to : '' },
+    { name: 'quietOff', label: 'Off: no quiet hours', type: 'check', value: q === null },
+  ];
 }
+
+// a field's value from the form: the sheet's fields, or a plain { name: value }
+function valueOf(fields, name) {
+  if (Array.isArray(fields)) return fields.find(f => isRecord(f) && f.name === name)?.value;
+  return isRecord(fields) ? fields[name] : undefined;
+}
+const clockOf = (fields, name) => { const v = valueOf(fields, name); return typeof v === 'string' ? v.trim() : ''; };
+const ticked = (fields, name) => { const v = valueOf(fields, name); return v === true || v === 'true'; };
 
 /** The lines drawn above the sheet's fields: what the account will hold to. */
 export function identityLinesOf(kind, seed) {
@@ -76,6 +108,15 @@ export function identityLinesOf(kind, seed) {
         'Until: you disconnect',
       ];
     }
+    case 'disconnectNetwork': {
+      const name = NETWORK_NAME[str(s.network)] ?? 'Telegram';
+      return [`Gravit stops reading and sending on ${name}.`, 'The token is deleted from the account.', 'The desk keeps working in the face.'];
+    }
+    case 'routing': {
+      const sends = rowsSentOn(formatRouting(s.routing), 'telegram');
+      return [`On Telegram: ${sends.length ? sends.join(', ') : 'nothing'}`];
+    }
+    case 'block': return [`Messages from ${str(s.masked) || 'this sender'} are dropped and no longer counted.`];
     default: return [];
   }
 }
@@ -103,6 +144,31 @@ export function identityDraftOf(kind, fields, seed) {
         type: 'connectNetwork', network: str(s.network) || 'telegram', pending: s.pending, botId: s.botId, speaksAs: s.speaksAs,
         operatorId: s.operatorId, talksOnlyWith: s.talksOnlyWith, routing: s.routing, keyHash: s.keyHash, salt: s.salt,
       };
+    }
+    case 'disconnectNetwork': {
+      const network = str(s.network);
+      if (!SPOKEN.includes(network)) return IDENTITY_WORDS.noNetwork;
+      return { type: 'disconnectNetwork', network };
+    }
+    case 'routing': {
+      const routing = formatRouting(s.routing);
+      const off = ticked(fields, 'quietOff');
+      const from = off ? '' : clockOf(fields, 'quietFrom');
+      const to = off ? '' : clockOf(fields, 'quietTo');
+      if (!off && (!CLOCK.test(from) || !CLOCK.test(to))) return IDENTITY_WORDS.quietTimes;
+      if (!off && from === to) return IDENTITY_WORDS.quietEqual;
+      // the account's routing as it is (`saved`, its string; none given, the seed's routing is the account's) and its quiet hours
+      const saved = typeof s.saved === 'string' && s.saved ? s.saved : routing;
+      const q = quietOf(s);
+      const sameQuiet = off ? q === null : q !== null && q.from === from && q.to === to;
+      if (routing === saved && sameQuiet) return IDENTITY_WORDS.unchanged;
+      // quiet hours off are both ends empty, which the account stores as null
+      return { type: 'setRouting', routing, quietFrom: from, quietTo: to };
+    }
+    case 'block': {
+      const network = str(s.network), sender = str(s.sender), masked = str(s.masked);
+      if (!SPOKEN.includes(network) || !sender || !masked) return IDENTITY_WORDS.noSender;
+      return { type: 'blockSender', network, sender, masked };
     }
     default: return 'Nothing to sign here';
   }

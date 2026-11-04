@@ -5,7 +5,9 @@
 //   Sheet 1, Bot token: Next reads the token from its password field, clears the field, makes the fingerprint in the browser
 //     (keyHash = hex sha256(salt ‖ token), 16 random bytes of salt) and posts the token ONCE, beside it, to the token route. The token
 //     lives in this module's one call and nowhere else: never the store, a reducer, storage, a log or an error's words.
-//   Sheet 2, Say hi: the pending connection read every PENDING_POLL_MS until the bot hears a private message.
+//   Sheet 2, Say hi: the pending connection read every PENDING_POLL_MS until the bot hears a private message, never past the
+//     connection's time (its expiresAt; one that cannot be read, PENDING_WAIT_MS from when sheet 2 began); a read with no answer says
+//     the account is not answering and reads again.
 //   Sheet 3, Is this you?: Not me counts that sender a stranger and waits again; This is me closes the drawer (keeping the pending
 //     connection) and opens sheet 4, seeded from the pending connection, the fingerprint and the routing a fresh connection sends.
 //
@@ -16,6 +18,8 @@ import { refusedAt, whyOf } from './owner-view.js';
 
 /** Sheet 2 reads the pending connection this often (the plan's ruling 5). */
 export const PENDING_POLL_MS = 1_500;
+/** The account's own wait for a pending connection (ten minutes): the end of sheet 2 when its expiresAt cannot be read. */
+export const PENDING_WAIT_MS = 10 * 60_000;
 export const TOKEN_PATH = '/data/account/identity/telegram/token';
 const PENDING_PATH = '/data/account/identity/pending';
 const NOT_ME_PATH = '/data/account/identity/pending/not-me';
@@ -76,13 +80,19 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
   let gen = 0;           // the drawer's generation: an answer for a drawer since closed, or moved on, lands nowhere
   let pollTimer = null;
   let sending = false;   // a token on its way: a second Next does nothing
+  let waitFrom = 0;      // when sheet 2 began waiting for this connection (the account's ten minutes run from about then)
 
   const connect = () => store.get().identity?.connect ?? null;
   const set = patch => store.dispatch('identityConnectSet', patch);
   const stopPoll = () => { if (pollTimer !== null) { cancelTimer(pollTimer); pollTimer = null; } };
   const armPoll = () => { stopPoll(); pollTimer = schedule(poll, PENDING_POLL_MS); };
   const drop = id => (typeof id === 'string' && id !== '' ? post(DROP_PATH, { id }).catch(() => null) : Promise.resolve(null));
-  const expired = p => p?.state === 'expired' || (Date.parse(str(p?.expiresAt)) <= now());
+  // the connection's time is up: the account says so, its expiresAt has passed, or — one that cannot be read — ten minutes went by
+  const expired = p => {
+    if (p?.state === 'expired') return true;
+    const t = Date.parse(str(p?.expiresAt));
+    return Number.isFinite(t) ? t <= now() : now() - waitFrom >= PENDING_WAIT_MS;
+  };
 
   // sheet 4's Cancel (any close of the owner sheet before it signs) drops the pending connection it was opened for
   let lastSheet = store.get().sheet ?? null;
@@ -120,14 +130,15 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     if (gone) { set({ error: gone }); return; }
     const p = pendingOf(body);
     if (!p) {
-      // the account did not answer: read again, unless the connection's time is up
-      if (expired(d.pending)) { set({ error: CONNECT_WORDS.expired }); return; }
+      // the account did not answer: said, and read again, unless the connection's time is up
+      if (expired(d.pending)) { set({ error: CONNECT_WORDS.expired, silent: false }); return; }
+      set({ silent: true });
       armPoll();
       return;
     }
-    if (p.state === 'heard' && p.sender) { set({ step: 3, pending: p, error: null }); return; }
-    if (p.state === 'expired') { set({ pending: p, error: CONNECT_WORDS.expired }); return; }
-    set({ pending: p, error: null });
+    if (p.state === 'heard' && p.sender) { set({ step: 3, pending: p, error: null, silent: false }); return; }
+    if (expired(p)) { set({ pending: p, error: CONNECT_WORDS.expired, silent: false }); return; }
+    set({ pending: p, error: null, silent: false });
     armPoll();
   }
 
@@ -167,7 +178,8 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     const p = r && !refusedAt(r) ? pendingOf(r.body) : null;
     if (mine !== gen || !connect()) { if (p) void drop(p.id); return; }
     if (!p) { set({ busy: false, error: words || CONNECT_WORDS.refused }); return; }
-    set({ step: 2, pending: p, fp, busy: false, error: null });
+    waitFrom = now();
+    set({ step: 2, pending: p, fp, busy: false, error: null, silent: false });
     armPoll();
   }
 
@@ -181,7 +193,7 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     if (mine !== gen || !connect()) return;
     const p = !refusedAt(r) ? pendingOf(r.body) : null;
     if (!p) { set({ busy: false, error: whyOf(r) || CONNECT_WORDS.expired }); return; }
-    set({ step: 2, pending: p, busy: false, error: null });
+    set({ step: 2, pending: p, busy: false, error: null, silent: false });
     armPoll();
   }
 
@@ -212,7 +224,7 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
       void drop(c.pending?.id);
       set({ step: 1, pending: null, fp: null, error: null });
     } else if (c.step === 3) {
-      set({ step: 2, error: null });
+      set({ step: 2, error: null, silent: false });
       armPoll();
     }
   }

@@ -155,3 +155,103 @@ test("sheet 4: the seven lines above What you sign, its steps, and Sign with thi
   const other = renderSheet(R.sheetOpen(emptyState(NOW), { kind: 'beast', seed: {}, fields: [] }), NOW);
   assert.doesNotMatch(other, /sheet-steps|Network: Telegram/);
 });
+
+// ── Task 3: Disconnect, What reaches you where with quiet hours, and Block ──
+
+test('disconnect drafts disconnectNetwork with its three lines', () => {
+  const seed = { network: 'telegram' };
+  assert.deepEqual(identityDraftOf('disconnectNetwork', [], seed), { type: 'disconnectNetwork', network: 'telegram' });
+  assert.deepEqual(draftOf('disconnectNetwork', [], seed, NOW), { type: 'disconnectNetwork', network: 'telegram' });
+  assert.equal(titleOf('disconnectNetwork', seed), 'Disconnect Telegram');
+  assert.equal(goWord('disconnectNetwork', seed), 'Sign disconnect');
+  assert.deepEqual(fieldsOf('disconnectNetwork', seed), []);
+  assert.deepEqual(identityLinesOf('disconnectNetwork', seed), [
+    'Gravit stops reading and sending on Telegram.',
+    'The token is deleted from the account.',
+    'The desk keeps working in the face.',
+  ]);
+  assert.equal(typeof identityDraftOf('disconnectNetwork', [], { network: 'slack' }), 'string', 'only a network the account speaks on');
+  assert.equal(typeof identityDraftOf('disconnectNetwork', [], {}), 'string');
+  // drawn: the three lines above the keys, Sign disconnect, no Start again
+  const s = R.sheetOpen(R.ownerStanding(emptyState(NOW), { role: 'signs', kid: 'a5048199a8081854' }), { kind: 'disconnectNetwork', seed, fields: [] });
+  const html = renderSheet(s, NOW);
+  assert.match(html, /<h2>Disconnect Telegram<\/h2>/);
+  assert.ok(html.indexOf('Gravit stops reading and sending on Telegram.') < html.lastIndexOf('<div class="btn-row">'));
+  assert.match(html, /data-action="sheetSubmit"[^>]*>Sign disconnect</);
+  assert.doesNotMatch(html, /Start again/);
+});
+
+const SEED_ROUTING = { chat: ['telegram'], alerts: ['telegram'], brief: [], cards: ['telegram'], fills: ['telegram'] };
+const SEED_STRING = 'chat=telegram;alerts=telegram;brief=;cards=telegram;fills=telegram';
+const RSEED = { routing: SEED_ROUTING, quiet: { from: '23:00', to: '07:00' }, saved: SEED_STRING };
+const rfields = (over = {}, seed = RSEED) => identityFieldsOf('routing', seed).map(f => (f.name in over ? { ...f, value: over[f.name] } : f));
+
+test('routing drafts the grid as the account\'s string and the quiet hours, refuses equal times and an unchanged draft', () => {
+  const SEED = RSEED;
+  const fields = rfields;
+  assert.deepEqual(identityDraftOf('routing', fields({ quietFrom: '22:00', quietTo: '06:30' }), SEED), { type: 'setRouting', routing: SEED_STRING, quietFrom: '22:00', quietTo: '06:30' });
+  assert.equal(identityDraftOf('routing', fields({ quietFrom: '22:00', quietTo: '22:00' }), SEED), 'Quiet hours start and end at different times');
+  assert.equal(identityDraftOf('routing', fields({ quietOff: true }), SEED).quietFrom, '');
+  // off is both ends empty, which the account stores as null
+  assert.deepEqual(identityDraftOf('routing', fields({ quietOff: true }), SEED), { type: 'setRouting', routing: SEED_STRING, quietFrom: '', quietTo: '' });
+  // the fields: two clocks and Off, from the seed's quiet hours
+  assert.deepEqual(identityFieldsOf('routing', SEED).map(f => [f.name, f.type, f.value]), [['quietFrom', 'time', '23:00'], ['quietTo', 'time', '07:00'], ['quietOff', 'check', false]]);
+  assert.deepEqual(identityFieldsOf('routing', { ...SEED, quiet: null }).map(f => [f.name, f.value]), [['quietFrom', ''], ['quietTo', ''], ['quietOff', true]]);
+  // unchanged: the account's routing and its quiet hours as they are
+  assert.equal(identityDraftOf('routing', fields(), SEED), 'That is how it is now');
+  assert.equal(identityDraftOf('routing', fields({}, { ...SEED, quiet: null }), { ...SEED, quiet: null }), 'That is how it is now');
+  // a draft routing (the grid's unsaved ticks) is a change with the quiet hours as they are
+  const ticked = { ...SEED, routing: { ...SEED_ROUTING, brief: ['telegram'] } };
+  assert.deepEqual(identityDraftOf('routing', rfields({}, ticked), ticked), { type: 'setRouting', routing: 'chat=telegram;alerts=telegram;brief=telegram;cards=telegram;fills=telegram', quietFrom: '23:00', quietTo: '07:00' });
+  // quiet hours on with an end missing or not a clock
+  assert.equal(typeof identityDraftOf('routing', fields({ quietFrom: '' }), SEED), 'string');
+  assert.equal(typeof identityDraftOf('routing', fields({ quietTo: '7am' }), SEED), 'string');
+  // turning them on from off needs both times
+  const off = { ...SEED, quiet: null };
+  assert.equal(typeof identityDraftOf('routing', rfields({ quietOff: false }, off), off), 'string');
+  assert.deepEqual(identityDraftOf('routing', rfields({ quietOff: false, quietFrom: '21:00', quietTo: '06:00' }, off), off), { type: 'setRouting', routing: SEED_STRING, quietFrom: '21:00', quietTo: '06:00' });
+  // the sheet view delegates; the title and go word are the plan's
+  assert.deepEqual(draftOf('routing', fields({ quietOff: true }), SEED, NOW), identityDraftOf('routing', fields({ quietOff: true }), SEED));
+  assert.equal(titleOf('routing', SEED), 'What reaches you where');
+  assert.equal(goWord('routing', SEED), 'Sign');
+  assert.deepEqual(identityLinesOf('routing', SEED), ['On Telegram: Chat with Gravit, Watch alerts, Cards waiting, Fills and reports']);
+  assert.deepEqual(identityLinesOf('routing', { ...SEED, routing: {} }), ['On Telegram: nothing']);
+});
+
+test('the routing sheet draws its quiet hours as two clocks and an Off box', () => {
+  const s = R.sheetOpen(R.ownerStanding(emptyState(NOW), { role: 'signs', kid: 'a5048199a8081854' }), { kind: 'routing', seed: RSEED, fields: identityFieldsOf('routing', RSEED) });
+  const html = renderSheet(s, NOW);
+  assert.match(html, /<h2>What reaches you where<\/h2>/);
+  assert.match(html, /<input class="input" type="time" name="quietFrom" value="23:00"[^>]*data-action="sheetField"/);
+  assert.match(html, /<input class="input" type="time" name="quietTo" value="07:00"[^>]*data-action="sheetField"/);
+  assert.match(html, /<input type="checkbox" name="quietOff" value="true" data-action="sheetField">/);
+  assert.match(html, /On Telegram: Chat with Gravit/);
+  assert.match(html, /data-action="sheetSubmit"[^>]*>Sign</);
+});
+
+test('block drafts blockSender for the stranger\'s ref, shown by its masked id', () => {
+  const seed = { network: 'telegram', sender: '0a1b2c3d4e5f', masked: '…789' };
+  assert.deepEqual(identityDraftOf('block', [], seed), { type: 'blockSender', network: 'telegram', sender: '0a1b2c3d4e5f', masked: '…789' });
+  assert.deepEqual(draftOf('block', [], seed, NOW), identityDraftOf('block', [], seed));
+  assert.equal(titleOf('block', seed), 'Block …789');
+  assert.equal(goWord('block', seed), 'Sign block');
+  assert.deepEqual(fieldsOf('block', seed), []);
+  assert.deepEqual(identityLinesOf('block', seed), ['Messages from …789 are dropped and no longer counted.']);
+  assert.equal(typeof identityDraftOf('block', [], { ...seed, sender: '' }), 'string');
+  assert.equal(typeof identityDraftOf('block', [], { ...seed, masked: '' }), 'string');
+  assert.equal(typeof identityDraftOf('block', [], { ...seed, network: 'slack' }), 'string');
+  // an account-supplied masked id is escaped where drawn
+  const odd = { ...seed, masked: '<b>…7</b>' };
+  const html = renderSheet(R.sheetOpen(emptyState(NOW), { kind: 'block', seed: odd, fields: [] }), NOW);
+  assert.ok(!html.includes('<b>…7</b>'));
+  assert.ok(html.includes('&lt;b&gt;…7&lt;/b&gt;'));
+});
+
+test('sheet 1 is no form, so the browser is not invited to keep the bot token as a password', () => {
+  const html = renderConnectDrawer(at(1));
+  assert.doesNotMatch(html, /<form/);
+  const input = html.match(/<input[^>]*id="identity-token"[^>]*>/)?.[0] ?? '';
+  assert.match(input, /type="password"/);
+  assert.match(input, /data-lpignore="true"/);
+  assert.match(input, /data-1p-ignore="true"/);
+});
