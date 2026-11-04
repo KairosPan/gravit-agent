@@ -1,8 +1,9 @@
 // face/client/js/host/attachments.js — the attachments' reads: the image limits (session/projections' imageLimits, read
 // once, dsh's defaults until then), a file's upload to its session (resolving its receipt id), and a history thumb
-// (session/attachment, once per attachment id) landed in the store's thumbs as a data URL. A thumb read the carrier failed
-// waits out a backoff before the next render may ask again; one fenced (401, 403) waits for the live layer's reconnect.
-// Impure; nothing here draws.
+// (session/attachment, once per attachment id: the whole stored image, its base64 decoded once into a Blob) landed in the
+// store's thumbs as a blob: URL, so a render re-escapes and re-parses a short URL, never the image's bytes. A thumb read the
+// carrier failed waits out a backoff before the next render may ask again; one fenced (401, 403) waits for the live
+// layer's reconnect. Impure; nothing here draws.
 import { uploadFile } from '../wire/api.js';
 import { DEFAULT_LIMITS } from '../composer/files.js';
 
@@ -23,7 +24,17 @@ function limitsOf(v) {
   return { ...Object.fromEntries(LIMIT_NUMBERS.map(k => [k, v[k]])), mediaTypes: [...v.mediaTypes] };
 }
 
-export function startAttachments({ call, upload = uploadFile, store, now = Date.now }) {
+/** The base64 as bytes, or null when it does not decode. */
+function bytesOf(base64) {
+  try {
+    const bin = atob(base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  } catch { return null; }
+}
+
+export function startAttachments({ call, upload = uploadFile, store, win = globalThis, now = Date.now }) {
   let limits = DEFAULT_LIMITS;
   let read = false;
   const thumbs = new Set();
@@ -61,7 +72,8 @@ export function startAttachments({ call, upload = uploadFile, store, now = Date.
       try {
         const v = await call('session/attachment', { request: { sessionId, attachmentId } });
         const mediaType = v?.attachment?.mediaType;
-        if (typeof mediaType === 'string' && typeof v?.data === 'string') src = `data:${mediaType};base64,${v.data}`;
+        const bytes = typeof mediaType === 'string' && typeof v?.data === 'string' ? bytesOf(v.data) : null;
+        if (bytes) src = win.URL.createObjectURL(new win.Blob([bytes], { type: mediaType }));
       } catch (e) {
         // a host refusal (a code, no status) or a 4xx of the image's own (a 404) is the image's answer, null, and the thread
         // draws a card; a fence stops every read until the reconnect; any other carrier failure (a 5xx, a 408 or 429, no

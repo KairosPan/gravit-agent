@@ -196,14 +196,14 @@ function focusKey(el) {
 }
 // the owner sheet is a drawer of any screen, over the one open (the order sheet is Trade's ticket, not a drawer)
 const sheetUp = s => Boolean(s.sheet) && s.sheet.kind !== 'order';
-// a history image's thumb as landed (a data: URL, null for one the host could not give), undefined while it reads — by the
+// a history image's thumb as landed (a blob: URL, null for one the host could not give), undefined while it reads — by the
 // store's own key alone, so an id like `constructor` reads nothing of Object.prototype
 const thumbOf = (s, id) => (typeof id === 'string' && s.thumbs && Object.hasOwn(s.thumbs, id) ? s.thumbs[id] : undefined);
-// the lightbox over the page: open on Messages on a thumb that is a data: URL (the one kind the host's thumbs are)
+// the lightbox over the page: open on Messages on a thumb that is an image's URL (isImageSrc; the host's thumbs are blob: URLs)
 const lightboxOf = s => {
   if (!s.lightbox || s.route.screen !== 'messages') return null;
   const src = thumbOf(s, s.lightbox.attachmentId);
-  return typeof src === 'string' && src.startsWith('data:') ? { src, name: s.lightbox.name } : null;
+  return isImageSrc(src) ? { src, name: s.lightbox.name } : null;
 };
 // a module card's Run sheet is a drawer of any screen too, drawn after the owner sheet
 const overlayOf = s => (sheetUp(s) ? 'sheet' : s.sellMany || s.runSheet || s.lunhui?.stock || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
@@ -465,7 +465,7 @@ export function boot(win, host = {}) {
   const setRuns = (runs, key = draftKey(store.get())) => putDraft(key, runs, filesOf(key));
   const setFiles = (files, key = draftKey(store.get())) => putDraft(key, runsOf(key), files);
   // the attachments' reads: the image limits, a file's upload to its session, a history thumb (a test hands in its own)
-  const attachments = host.attachments ?? startAttachments({ call, store, now });
+  const attachments = host.attachments ?? startAttachments({ call, store, win, now });
   let connected = false;   // the live layer's link as the store last said: a reconnect frees the thumb reads a fence stopped
   let limitsRead = false;   // the image limits, read on opening a conversation until a read succeeds
   let dropTimer = null;     // the drop overlay's watchdog
@@ -1019,6 +1019,8 @@ export function boot(win, host = {}) {
     const files = filesOf(key);
     if (isBlank(runs) && !files.length) return;
     const refuse = line => store.dispatch('hostStatus', { line, bad: true });
+    // the empty state (no conversation, no New message) has nowhere to send: said, the draft kept as it stands
+    if (key === 'empty') { refuse('Open a conversation first'); return; }
     // the room is a bot chip's, or an @ the operator typed (a chip reads as a space between words): a file or
     // conversation chip's @ never sends to it alone. Files go to Gravit alone (D20): a bot chip with them is refused, and
     // a typed @word beside them is a prompt
@@ -1076,8 +1078,8 @@ export function boot(win, host = {}) {
         prepare: async id => {
           const ups = await Promise.all(filesOf(id).filter(f => f.kind === 'file').map(f => startUpload(id, f.key)));
           if (!ups.every(Boolean)) return null;
-          const now = filesOf(id).filter(f => files.some(g => g.key === f.key));
-          return contentParts('', now, k => data.get(k));
+          const staged = filesOf(id).filter(f => files.some(g => g.key === f.key));
+          return contentParts('', staged, k => data.get(k));
         },
       });
       if (!got.id) { back(); return; }

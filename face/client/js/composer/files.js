@@ -41,8 +41,8 @@ export function admit(files, picked, limits = DEFAULT_LIMITS) {
   return { files: out, refusal };
 }
 
-/** Whether a URL may be an img's src: the page's own object URL, or an inline image of the four kinds the host takes (a
- *  history thumb). Any other scheme (http(s), an SVG or HTML data URL, javascript:) is never drawn; its image is a card. */
+/** Whether a URL may be an img's src: the page's own object URL (a draft's image, a history thumb), or an inline image of
+ *  the four kinds the host takes (no thumb is one today; a raster data URL fetches nothing). Any other scheme (http(s), an SVG or HTML data URL, javascript:) is never drawn; its image is a card. */
 export const isImageSrc = src => typeof src === 'string' && (src.startsWith('blob:') || /^data:image\/(png|jpeg|webp|gif);base64,/.test(src));
 
 export const hasImage = files => files.some(f => f.kind === 'image');

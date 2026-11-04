@@ -143,7 +143,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <tbody>
 <tr><td><code>CLAUDE.md</code></td><td class="num">9,403</td><td>Claude Code（Codex 经 AGENTS.md 转读）</td><td class="no">否</td><td>描述性、现在时、全仓库唯一一份；2026-09-30 最后通审</td></tr>
 <tr><td><code>AGENTS.md</code></td><td class="num">1,056</td><td>编码代理</td><td class="no">否（例外：dsh 硬编码的 <code>$DSH_HOME/AGENTS.md</code> 若存在会被读；操作员家目录里没有，2026-10-18 核过）</td><td>五条要点，指向 CLAUDE.md</td></tr>
-<tr><td><code>GRAVIT.md</code></td><td class="num">4,462 / 4,500</td><td><strong>每个 dsh 代理</strong></td><td class="yes">是：首个请求的一条 user 消息（<code>&lt;system-reminder&gt;</code> 框）</td><td>只写事实与规则，不写身份；<code>face/tests/gravit-md.test.ts</code></td></tr>
+<tr><td><code>GRAVIT.md</code></td><td class="num">4,489 / 4,500</td><td><strong>每个 dsh 代理</strong></td><td class="yes">是：首个请求的一条 user 消息（<code>&lt;system-reminder&gt;</code> 框）</td><td>只写事实与规则，不写身份；<code>face/tests/gravit-md.test.ts</code></td></tr>
 <tr><td><code>GRAVIT.local.md</code></td><td class="num">—</td><td>同上</td><td class="yes">是（同目录，接在基础文件后）</td><td>gitignored 的机器本地覆盖层</td></tr>
 <tr><td><code>strategies/&lt;name&gt;/GRAVIT.md</code></td><td class="num">—</td><td>频道会话</td><td class="yes">是（链从 <code>.git</code> 根走到会话 cwd）</td><td>按策略目录可选</td></tr>
 <tr><td><code>dsh/profile/persona.md</code></td><td class="num">3,005</td><td>Gravit（bot 与角色子代理各自遮蔽它）</td><td class="yes">是：系统提示 order 0</td><td><code>face/src/persona.ts</code> 校验 <code>{{provider}}</code>/<code>{{model}}</code>（0.2.1 起没有 <code>{{cwd}}</code>），坏模板拒绝启动</td></tr>
@@ -193,7 +193,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 
 <!-- ===================================================== -->
 <h2 id="gravitmd">3. GRAVIT.md：每个 dsh 代理在首个请求里读到的工作区文件</h2>
-<h3>内容（4,462 B，预算 4,500）</h3>
+<h3>内容（4,489 B，预算 4,500）</h3>
 <ul>
 <li><strong>抬头</strong>：Gravit、它的角色子代理和 bots 都读它，作为工作区指令——只有树的事实与规则，不是任何人的身份或 persona；文件与树不一致时，树对，文件错。三层：MARKET 与 ACCOUNT 是操作员的 Account，经 Gravit 的席位（<code>mcp__account__*</code>，只限纸面场所）到达，AKShare 也在它的读取里（<code>mcp__account__portfolio_akshare</code>，2026-11-01 起；此前是 <code>mcp__akshare__*</code>）；STRATEGY 是 <code>strategies/</code>。</li>
 <li><strong>Where things are</strong>：<code>strategies/&lt;name&gt;/</code> 的文件集（<code>THESIS.md</code>、<code>journal.md</code>、<code>status.yaml</code>，<code>_template</code> 是复制源）、<code>roles/</code> 与 <code>bots/</code>（都是操作员的）。</li>
@@ -201,7 +201,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
 <li><strong>A strategy directory</strong>：<code>status.yaml</code> 生命周期 <code>idea | researching | validated | paper | retired</code>（<code>paper</code>：账户上正在跑一笔前向纸面交易），三个可选标题键 <code>one_line / next / numbers</code>，命名规则（≤ 41 码点、无空格无点，因为 <code>cd x y</code> 是 zsh 的双参数形式），“周期之间自己提交；一个周期随结论提交一次，或留给操作员”。</li>
 <li><strong>Rooms</strong>：花名册有 bots 的频道是房间，Gravit 用 <code>dispatch</code> 组织；每条操作员消息的上限 3 轮、10 条 bot 消息、每轮 2 次同伴接力；<code>@&lt;bot&gt;</code> 直达某个声音，<code>@</code> 了不在册的名字就是给 Gravit 的普通提示。</li>
 <li><strong>The Account seat</strong>：<code>mcp__account__*</code> 是 Gravit 在操作员 Account 的席位，只限纸面场所；一次写操作先在这里停一张卡、再在账户停一张（在 face 的 Account › Cards 里答）；答完 <code>card</code> 后用 <code>portfolio_wait</code>；见 <code>account-seat-guide</code>。操作员也从 face 的 Trade 屏幕亲手交易同一个账户（所有者设备，不过本树任何门，只受账户的上限），所以 Gravit 没开的仓位可能是所有者的，流水会写明是谁。</li>
-<li><strong>PDFs</strong>（2026-11-04 起）：PDF 的文本用 <code>pdftotext -layout -f A -l B &lt;file&gt; -</code>（页数用 <code>pdfinfo</code>）；版式要紧的一页（表格、图、扫描页）用 <code>pdftoppm -png -r 110 -f N -l N &lt;file&gt; "${TMPDIR:-/tmp}/&lt;name&gt;"</code> 渲染，绝不渲染进树里，再把 PNG 交给 <code>role_pdf_page_reader</code>。Poppler 在 Mac 上是 Homebrew 的，在 agent 盒子里是 <code>poppler-utils</code>；face 不写 PDF 代码，Gravit 也没有 PDF 工具。</li>
+<li><strong>PDFs</strong>（2026-11-04 起）：PDF 的文本用 <code>pdftotext -layout -f A -l B &lt;file&gt; -</code>（页数用 <code>pdfinfo</code>）；版式要紧的一页（表格、图、扫描页）用 <code>pdftoppm -png -r 110 -f N -l N &lt;file&gt; "${TMPDIR:-/tmp}/&lt;name&gt;"</code> 渲染（它写出 <code>&lt;name&gt;-N.png</code>），绝不渲染进树里，再把 PNG 交给 <code>role_pdf_page_reader</code>。Poppler 在 Mac 上是 Homebrew 的，在 agent 盒子里是 <code>poppler-utils</code>；face 不写 PDF 代码，Gravit 也没有 PDF 工具。</li>
 <li><strong>Tests</strong>：<code>cd face &amp;&amp; npm test</code>，离线无密钥。</li>
 <li><strong>Never edit</strong>：<code>dsh/profile/</code> 与家目录里的安装副本、<code>bots/</code>（bot 可写自己的 <code>journal/</code>）与 <code>roles/</code>（在对话里提议，操作员来写）、<code>docs/research/</code>。</li>
 </ul>

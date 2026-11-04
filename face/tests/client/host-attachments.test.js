@@ -16,8 +16,14 @@ function rig(answer, upload) {
   const calls = [];
   const call = (endpoint, args) => { calls.push([endpoint, args]); return answer(endpoint, args); };
   const clock = { t: 1000 };
-  const attachments = startAttachments({ call, store, now: () => clock.t, ...(upload ? { upload } : {}) });
-  return { store, calls, attachments, clock };
+  // the page's Blob and URL: each object URL made is counted, and names the blob it was made from
+  const blobs = [];
+  const win = {
+    Blob: class { constructor(parts, opts) { this.parts = parts; this.type = opts?.type; } },
+    URL: { createObjectURL: b => { blobs.push(b); return `blob:t/${blobs.length}`; } },
+  };
+  const attachments = startAttachments({ call, store, win, now: () => clock.t, ...(upload ? { upload } : {}) });
+  return { store, calls, attachments, clock, blobs };
 }
 
 const LIMITS = { ...DEFAULT_LIMITS, maxImagesPerMessage: 5 };
@@ -74,7 +80,7 @@ test('an upload resolves its receipt id', async () => {
   assert.equal(aborted, true);
 });
 
-test('a thumb is read once per attachment and lands as a data URL, or null on a throw', async () => {
+test('a thumb is read once per attachment and lands as a blob: URL, or null on a throw', async () => {
   const d = deferred();
   const r = rig(async (endpoint, args) => {
     if (args.request.attachmentId === 'bad') throw Object.assign(new Error('gone'), { code: 'session/attachment-invalid' });
@@ -85,7 +91,10 @@ test('a thumb is read once per attachment and lands as a data URL, or null on a 
   assert.deepEqual(r.calls, [['session/attachment', { request: { sessionId: 's1', attachmentId: 'a1' } }]]);
   d.resolve({ attachment: { attachmentId: 'a1', mediaType: 'image/png' }, data: 'iVBORw==' });
   await Promise.all([first, second]); await settle();
-  assert.equal(r.store.get().thumbs.a1, 'data:image/png;base64,iVBORw==');
+  assert.equal(r.store.get().thumbs.a1, 'blob:t/1', 'a blob: URL, not the bytes as a data: URL');
+  assert.equal(r.blobs.length, 1);
+  assert.equal(r.blobs[0].type, 'image/png');
+  assert.deepEqual([...r.blobs[0].parts[0]], [0x89, 0x50, 0x4e, 0x47], 'the base64 decoded once into the blob\'s bytes');
   await r.attachments.thumb('s1', 'a1');
   assert.equal(r.calls.length, 1, 'an answered thumb is not read again');
   await r.attachments.thumb('s1', 'bad'); await settle();
@@ -100,7 +109,7 @@ test('a carrier failure leaves a thumb free to read again; a refusal or a bad an
   assert.equal(Object.hasOwn(carrier.store.get().thumbs, 'a1'), false, 'nothing cached on a carrier failure');
   carrier.clock.t += 2000;
   await carrier.attachments.thumb('s1', 'a1'); await settle();
-  assert.equal(carrier.store.get().thumbs.a1, 'data:image/png;base64,AA==');
+  assert.equal(carrier.store.get().thumbs.a1, 'blob:t/1');
   assert.equal(carrier.calls.length, 2);
 
   const codeless = rig(async () => { throw new Error('socket hang up'); });
@@ -116,6 +125,12 @@ test('a carrier failure leaves a thumb free to read again; a refusal or a bad an
   await malformed.attachments.thumb('s1', 'a1'); await malformed.attachments.thumb('s1', 'a1');
   assert.equal(malformed.store.get().thumbs.a1, null);
   assert.equal(malformed.calls.length, 1);
+
+  const undecodable = rig(async () => ({ attachment: { mediaType: 'image/png' }, data: '%%not base64%%' }));
+  await undecodable.attachments.thumb('s1', 'a1'); await undecodable.attachments.thumb('s1', 'a1');
+  assert.equal(undecodable.store.get().thumbs.a1, null, 'data that does not decode lands as null');
+  assert.equal(undecodable.blobs.length, 0);
+  assert.equal(undecodable.calls.length, 1);
 });
 
 test('a carrier failure backs off: no read again until the clock passes 2 s, then 4 s, doubling to a minute', async () => {
@@ -164,7 +179,7 @@ test('a 401 or 403 stops every thumb read until the live layer reconnects', asyn
     assert.equal(Object.hasOwn(r.store.get().thumbs, 'a1'), false, 'and nothing lands');
     r.attachments.reconnected();
     await r.attachments.thumb('s1', 'a1'); await settle();
-    assert.equal(r.store.get().thumbs.a1, 'data:image/png;base64,AA==', 'a reconnect reads again at once');
+    assert.equal(r.store.get().thumbs.a1, 'blob:t/1', 'a reconnect reads again at once');
   }
 });
 

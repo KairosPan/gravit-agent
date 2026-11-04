@@ -5294,7 +5294,7 @@ function imageHost(answer = () => ({ attachment: { mediaType: 'image/png' }, dat
   };
   return h;
 }
-const THUMB = 'data:image/png;base64,iVBORw0KGgo=';
+const THUMB = 'blob:fake';   // the fake window's every object URL
 const imageKey = '[data-action="openImage"][data-attachment="att-1"][data-name="chart.png"]';
 const lightboxRig = async (h = imageHost(), clock = null) => {
   const f = fakeWindow({ hash: '#/messages/s1' });
@@ -5340,7 +5340,7 @@ test('an attachment id named like a prototype key is read and drawn as its own',
   const h = imageHost(undefined, [{ type: 'image', attachment: { ...IMG, attachmentId: 'constructor' } }]);
   const { f, store } = await lightboxRig(h);
   assert.deepEqual(h.thumbReads, [{ sessionId: 's1', attachmentId: 'constructor' }], 'Object.prototype.constructor is not a thumb');
-  assert.match(f.html(), /<img src="data:image\/png;base64,/);
+  assert.match(f.html(), /<img src="blob:fake"/);
   store.timers.clear();
 });
 
@@ -5350,7 +5350,7 @@ test('a click on a thumb opens the lightbox; a click on the image keeps it; the 
   f.click(image);
   assert.deepEqual(store.get().lightbox, { attachmentId: 'att-1', name: 'chart.png' });
   assert.match(f.html(), /class="lightbox" role="dialog" aria-modal="true" aria-label="Image"/);
-  assert.match(f.html(), /class="lightbox-img" src="data:image\/png;base64,iVBORw0KGgo=" alt="chart.png"/);
+  assert.match(f.html(), /class="lightbox-img" src="blob:fake" alt="chart.png"/);
   assert.equal(f.doc.activeElement, close, 'focus moves to its close key');
   // focus stays inside: Tab and Shift+Tab land on the close key, and a render keeps it there
   let prevented = false;
@@ -5471,7 +5471,7 @@ test('a thumb read refused 404 draws the card; one fenced 401 waits for the reco
   await h.ready();
   await settle();
   assert.equal(h.thumbReads.length, 2, 'the reconnect reads it again');
-  assert.match(f.html(), /<img src="data:image\/png;base64,iVBORw0KGgo=" alt="chart.png">/);
+  assert.match(f.html(), /<img src="blob:fake" alt="chart.png">/);
   store.timers.clear();
 });
 
@@ -5496,5 +5496,28 @@ test('focus returns to the image clicked, though the click did not focus it (Saf
   assert.equal(f.doc.activeElement, close);
   f.fire('doc', 'keydown', { key: 'Escape' });
   assert.equal(f.doc.activeElement, image, 'back on the image, not the editor that had focus');
+  store.timers.clear();
+});
+
+test('a send from the empty state (no conversation, no New message) says to open one first and keeps the draft', async () => {
+  const f = fakeWindow({ hash: '#/messages' });
+  const { say, input } = composerEls(f);
+  const h = host({ rows: [] });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  assert.equal(store.get().route.id ?? null, null, 'the empty state');
+  type(f, say, 'hello');
+  send(f);
+  await settle();
+  assert.match(f.html(), /status-line bad" role="status">Open a conversation first</);
+  assert.equal(say.value, 'hello', 'the words are kept');
+  pick(f, input, [CSV()]);
+  type(f, say, '');
+  send(f);
+  await settle();
+  assert.match(f.html(), /status-line bad" role="status">Open a conversation first</, 'files alone too');
+  assert.match(f.html(), /file-name">prices.csv</, 'the file is kept');
+  assert.deepEqual(promptsOf(h), []);
+  assert.equal(att.uploads.length, 0, 'nothing uploads from the empty state');
   store.timers.clear();
 });

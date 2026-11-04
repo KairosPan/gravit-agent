@@ -65,7 +65,8 @@ turns are refused while `GRAVIT.md`, `GRAVIT.local.md`, `.git`, `.dsh` or `.agen
 
 A PDF: `pdftotext -layout -f A -l B <file> -` for its text (`pdfinfo` for its pages); render a
 page whose layout matters (a table, a chart, a scan) with `pdftoppm -png -r 110 -f N -l N <file>
-"${TMPDIR:-/tmp}/<name>"`, never into the tree, and hand the PNG to `role_pdf_page_reader`.
+"${TMPDIR:-/tmp}/<name>"` (it writes `<name>-N.png`), never into the tree, and hand the PNG to
+`role_pdf_page_reader`.
 
 ## Tests
 
