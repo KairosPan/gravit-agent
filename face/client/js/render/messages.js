@@ -91,6 +91,7 @@ function rowKeys(conv, state) {
     key('changeWords', 'Change words'),
     // dsh forks from a completed turn: a conversation with nothing in it yet has none
     conv.messages.length ? key('fork', 'Fork') : '',
+    conv.archived ? '' : state.pinned?.includes(conv.id) ? key('unpin', 'Unpin') : key('pin', 'Pin'),
     conv.archived === 'face' ? key('unarchive', 'Un-archive') : !conv.archived && idle ? key('archive', 'Archive') : '',
     !idle ? '' : deleting ? confirmPair('Yes, delete') : key('deleteConv', 'Delete', 'btn-danger'),
   ].join('');

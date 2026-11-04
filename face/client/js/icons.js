@@ -51,11 +51,12 @@ export const ICONS = {
   coin: '<path d="M7 4v16M7 4 4 7M7 4l3 3M17 20V4M17 20l-3-3M17 20l3-3"></path>',
   stock: '<path d="M4 20h16"></path><path d="M6 17v-4M11 17V9M16 17v-6"></path><path d="m5 8 5-4 4 3 5-4"></path>',
   rwa: '<path d="M9 11V4.5A1.5 1.5 0 0 1 10.5 3H19a1.5 1.5 0 0 1 1.5 1.5v10A1.5 1.5 0 0 1 19 16h-5"></path><path d="M13 7h4M13 10h4"></path><circle cx="8" cy="16" r="5"></circle><path d="M8 13.5v5M6.5 15h3"></path>',
+  pin: '<path d="M9 4h6l-1 6 3 3v2H7v-2l3-3z"></path><path d="M12 15v6"></path>',
   prediction: '<circle cx="12" cy="12" r="9"></circle><path d="M12 12 16 8"></path><path d="M12 7v1M7 12h1M16.5 12h.5"></path>',
 };
 
-export function icon(name, size = 22, sw = 2) {
+export function icon(name, size = 22, sw = 2, filled = false) {
   const path = ICONS[name];
   if (!path) throw new Error('unknown icon ' + name);
-  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${filled ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
 }

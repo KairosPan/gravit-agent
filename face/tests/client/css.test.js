@@ -263,7 +263,7 @@ function everyState() {
     R.startEdit(R.toggleDetails(open), { kind: 'rename', convId: 's1', error: 'Cannot be empty' }), R.openSettings(open), R.startDraft(open, { now: NOW }),
     R.startEdit(R.startDraft(open, { now: NOW }), { kind: 'newChannel', error: 'Letters, digits, - or _' }),
     R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open),
-    ...searchStates(R.hostList(open, { conversations: [...open.conversations, conv('old', { title: 'T old', archived: 'face' })] })),
+    ...searchStates(R.hostList(open, { conversations: [...open.conversations, conv('old', { title: 'T old', archived: 'face' })] })), R.hostPins(open, ['s1']),
     R.traceLoaded(R.nav(base, { screen: 'messages', id: 'g' }), { convId: 'g', msgId: 'g1', messages: [m('tg1', { kind: 'tool', text: 'account', data: { callId: 'g1c', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }) } }), m('tg2', { from: 'system', text: 'context' })] }),
     R.toggleDetails(R.hostList(R.hostProjection(open, { convId: 's1', key: 'subagentCatalog', value: [{ id: 'k1', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'k2', createdAt: 2, mode: 'unknown' }] }), { conversations: open.conversations, childRows: [{ sessionId: 'k1', parentSessionId: 's1', running: true, origin: 'subagent' }] })), ...marketStates(), ...accountStates(), ...channelStates(), ...discoverStates(), ...tradeStates(),
   ];
@@ -396,4 +396,13 @@ test('the equity blue goes by Linqi\'s own name: no --blue, which his tokens use
   assert.doesNotMatch(css, /var\(--blue\)/);
   assert.match(tokens, /--alloc-equity/);
   assert.match(tokens, /--on-equity/);
+});
+
+test("the pin: the row's wrap, the key in the time's place, the glyph before the time", () => {
+  const html = renderRail(R.hostPins(R.nav(R.hostList(emptyState(), { conversations: [conv('s1'), conv('s2')] }), { screen: 'messages', id: 's1' }), ['s1']), NOW);
+  for (const c of ['row-wrap', 'pin-key', 'row-pin']) assert.ok(html.includes(`class="${c}"`), c);
+  assert.match(css, /\.row-wrap\s*\{[^}]*position: relative/);
+  assert.match(css, /\.row-wrap:hover \.pin-key[^{]*\{[^}]*opacity: 1/);
+  assert.match(css, /\.row-wrap:focus-within \.pin-key/);
+  assert.match(css, /\.row-pin\s*\{[^}]*color: var\(--dim\)/);
 });

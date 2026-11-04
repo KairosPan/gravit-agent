@@ -168,3 +168,16 @@ test('a channel goes by its display title in Where and in Details, as the list n
   assert.match(draft, /<option value="w0" selected>evolving-alpha-us<\/option><option value="w1">Alpha momentum<\/option>/);
   assert.match(renderDetails(currentConversation(base), base), />Where<[\s\S]*?>Alpha momentum</);
 });
+
+test('Details offers Pin between Fork and Archive, Unpin once pinned, nothing when archived', () => {
+  const said = { id: 'e1', seq: 1, at: NOW, from: 'you', kind: 'text', text: 'hi', data: {} };
+  const mk = (over, extra = {}) => { const s = { ...listed([conv('a', { archived: false, loaded: true, messages: [said], ...over })]), ...extra }; return renderDetails(currentConversation(s), s); };
+  const h = mk({});
+  assert.match(h, /data-action="fork"[\s\S]*data-action="pin"[^>]*data-conv="a"[^>]*>Pin<[\s\S]*data-action="archive"/);
+  assert.doesNotMatch(h, /data-action="unpin"/);
+  const p = mk({}, { pinned: ['a'] });
+  assert.match(p, /data-action="fork"[\s\S]*data-action="unpin"[^>]*data-conv="a"[^>]*>Unpin<[\s\S]*data-action="archive"/);
+  assert.doesNotMatch(p, /data-action="pin"/);
+  const old = mk({ archived: 'face' }, { pinned: ['a'] });
+  assert.doesNotMatch(old, /data-action="(un)?pin"/);
+});

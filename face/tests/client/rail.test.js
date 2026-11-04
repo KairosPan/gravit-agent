@@ -293,3 +293,27 @@ test("each state's line, word for word", () => {
   assert.match(renderList(searched(s, 'alpha', { items: [], hasMore: true }), NOW), /<div class="conv-results-state">Showing the first 20\. Narrow your search\.<\/div><\/div><\/aside>$/);
   assert.doesNotMatch(renderList(searched(s, 'alpha', { items: [], hasMore: false }), NOW), /conv-results-state/, 'results alone say nothing more');
 });
+
+test('a pinned row carries the pin glyph before its time', () => {
+  const s = listed([conv('a'), conv('b')], 'a', { pinned: ['b'] });
+  const h = renderList(s, NOW);
+  assert.equal(count(h, /class="row-pin"/g), 1);
+  assert.match(h, /href="#\/messages\/b"[\s\S]*?<span class="row-pin"><svg[^>]*fill="currentColor"[\s\S]*?<\/span><span class="row-time">/);
+});
+
+test("the pin key sits beside the row's link, never inside it, and an archived row has none", () => {
+  const s = listed([conv('a'), conv('b')], 'a', { pinned: ['b'] });
+  const h = renderList(s, NOW);
+  assert.equal(count(h, /<div class="row-wrap">/g), 2);
+  assert.match(h, /<\/a><button type="button" class="pin-key" data-action="pin" data-conv="a" aria-label="Pin">/);
+  assert.match(h, /<\/a><button type="button" class="pin-key" data-action="unpin" data-conv="b" aria-label="Unpin">/);
+  assert.doesNotMatch(h, /<a[^>]*class="row[^"]*"[^>]*>(?:(?!<\/a>)[\s\S])*pin-key/, 'the key is not inside the link');
+  const old = renderList(listed([conv('a'), conv('z', { archived: 'face' })], 'a'), NOW);
+  assert.doesNotMatch(old, /data-conv="z"/);
+});
+
+test('the key is reachable by Tab: a button with an accessible name', () => {
+  const h = renderList(listed([conv('a')]), NOW);
+  assert.match(h, /<button type="button" class="pin-key"[^>]*aria-label="Pin"/);
+  assert.doesNotMatch(h, /pin-key[^>]*tabindex="-1"/);
+});

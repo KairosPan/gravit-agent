@@ -945,6 +945,8 @@ export function boot(win, host = {}) {
     stopGravit: el => store.dispatch('askConfirm', { action: 'stopGravit', id: el.dataset.conv }),
     // the row actions: Fork opens the new conversation; Archive and Delete leave the screen when it was this one
     fork: el => { void forkNow(el.dataset.conv); },
+    pin: el => { void actions.pin(el.dataset.conv); },
+    unpin: el => { void actions.unpin(el.dataset.conv); },
     archive: el => { void archiveNow(el.dataset.conv, true); },
     unarchive: el => { void archiveNow(el.dataset.conv, false); },
     deleteConv: el => store.dispatch('askConfirm', { action: 'deleteConv', id: el.dataset.conv }),

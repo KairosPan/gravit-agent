@@ -31,6 +31,7 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
   const call = async (endpoint, args) => {
     calls.push([endpoint, args]);
     if (endpoint === 'session/list') return { items: rows };
+    if (endpoint === 'workspace/pinSession') return { pinnedSessionIds: [args.request.sessionId] };
     if (endpoint === 'session/projections') return { asOfSeq: 20, values: {} };
     if (endpoint === 'session/page') { const pg = pages[args.request.address.sessionId]; return Array.isArray(pg) || pg === undefined ? { records: pg ?? [] } : pg; }
     if (endpoint === 'session/create' && args.request.agentPreset) { rows.push(row('s-bot', { updatedAt: 120, agentAvailable: true, projections: { values: { agentPreset: args.request.agentPreset } } })); return { sessionId: 's-bot', agentPreset: args.request.agentPreset }; }
@@ -3479,4 +3480,19 @@ test('Esc while an IME composes in the box dismisses the candidate: the query an
   say.focus();
   f.fire('doc', 'keydown', keyK({ metaKey: true, isComposing: true }));
   assert.equal(f.doc.activeElement, say);
+});
+
+test('pressing the pin key pins and does not open the conversation', async () => {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })] });
+  const store = started(f, h);
+  await h.ready();
+  const before = store.get().route;
+  h.calls.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'pin', conv: 's2' } });
+  await settle();
+  assert.ok(h.calls.some(([e, a]) => e === 'workspace/pinSession' && a.request.sessionId === 's2'));
+  assert.deepEqual(store.get().route, before, 'the route did not move');
+  assert.deepEqual(store.get().pinned, ['s2']);
+  store.timers.clear();
 });

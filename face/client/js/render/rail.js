@@ -39,10 +39,12 @@ function rowMark(conv, state) {
 
 function row(conv, state, now) {
   const current = state.route.screen === 'messages' && state.route.id === conv.id;
-  return `<a${attrs({ class: cls('row', current && 'current'), 'aria-current': current ? 'page' : null, href: `#/messages/${conv.id}`, 'data-action': 'open', 'data-id': conv.id })}>` +
+  const pin = conv.archived ? '' : `<button type="button" class="pin-key" data-action="${conv.pinned ? 'unpin' : 'pin'}" data-conv="${esc(conv.id)}" aria-label="${conv.pinned ? 'Unpin' : 'Pin'}">${icon('pin', 14, 2)}</button>`;
+  return '<div class="row-wrap">' +
+    `<a${attrs({ class: cls('row', current && 'current'), 'aria-current': current ? 'page' : null, href: `#/messages/${conv.id}`, 'data-action': 'open', 'data-id': conv.id })}>` +
     `<span class="${cls('dot', unreadOf(conv) && 'on')}"></span>${rowMark(conv, state)}` +
-    `<span class="row-body"><span class="row-top"><span class="row-title">${esc(conv.title)}</span><span class="row-time">${conv.updatedAt ? rowTime(conv.updatedAt, now) : ''}</span></span>` +
-    `<span class="row-preview">${esc(previewOf(conv, state))}</span></span></a>`;
+    `<span class="row-body"><span class="row-top"><span class="row-title">${esc(conv.title)}</span>${conv.pinned ? `<span class="row-pin">${icon('pin', 11, 2, true)}</span>` : ''}<span class="row-time">${conv.updatedAt ? rowTime(conv.updatedAt, now) : ''}</span></span>` +
+    `<span class="row-preview">${esc(previewOf(conv, state))}</span></span></a>${pin}</div>`;
 }
 
 function draftRow() {
