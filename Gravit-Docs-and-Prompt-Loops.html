@@ -114,6 +114,7 @@ footer{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--line);color:v
   <p class="small">2026-11-01 按 feat/two-parts-5 @ 722f3891（账户两部分，计划 1–5）更新：A 股与轮回的上游读取都经账户；AKShare 成为账户的旁车（<code>akshare-mcp</code> 是账户的 stdio 子进程），face 不再挂 <code>mcp-akshare</code>，Gravit 只经席位的 <code>portfolio_akshare</code>（一次读，无卡）问它，所以 MCP 子进程只剩席位、没有 <code>mcp:akshare</code> 段；账户的卡在 face 的 Account › Cards 里答；账户不再提供页面（<code>/</code> 答 404 <code>NO_PAGE</code>），face 是它唯一的页面。只改了环路移动过的地方；2026-10-19 与 10-26 的实测数字（schema 大小等）按其当日原样保留，标注为当日数据。</p>
   <p class="small">2026-11-03 按 feat/account-split-a2（账户拆分，计划 A1 与 A2）更新：行情服务从 <code>account/</code> 拆出为 <code>market/</code>（127.0.0.1:4821，无密钥、无钱包）；AKShare、A 股与轮回的上游读取都改由行情服务提供，账户不再转发任何一条（<code>/api/cn/*</code>、<code>/api/akshare/*</code> 与账户的公开读取都已删除）。face 多了第二个项目 MCP 行 <code>mcp-market</code>（<code>src/market-row.ts</code>，从本仓库 <code>market/</code> 以 stdio 起 <code>npm run market:mcp</code>），Gravit 的工具多了五个只读、不出卡的 <code>mcp__market__market_explore</code> / <code>_quotes</code> / <code>_candles</code> / <code>_book</code> / <code>_akshare</code>；席位降为 34 个工具，<code>portfolio_explore</code> / <code>_candles</code> / <code>_book</code> / <code>_akshare</code> 已移走，新增 <code>portfolio_live_candles</code> 与 <code>portfolio_live_book</code>（只读已连接场所，走账户的 <code>/api/account/connected/*</code>）。face 有两个上游：Markets 屏经 <code>/data/market</code> 读行情服务、经 <code>/data/account/connected/*</code> 读已连接场所并在客户端合并；轮回冻结行按 <code>FACE_MARKET_URL</code> 找行情服务，证据写 <code>via: "market"</code>。</p>
   <p class="small">2026-11-02 依据 feat/desk-p1-p4 @ 55713973（台面 P0–P4：服务、手机、时钟与收盘前简报、盯盘、每个策略的盘前报告）补入第 13 节“台面的三条环路”：手机、按市场的时钟（<code>builtin:brief</code> 与 <code>builtin:report</code>）、提醒。只写台面新增的站点；台面回合本身仍走第 10、11 节的两条环路，只是预设换成 <code>gravit-desk</code>。同日依据 feat/desk-p1-p4 @ 6f0877a4 复读 13.2 第 6 站：<code>finished</code> 之后才发“留下了违规”与“写到 <code>reports/</code> 之外”两行。</p>
+  <p class="small">2026-11-04 按 feat/identity-b1（Identity，计划 B1a 与 B1b）复读 13.1 第 1、4 站与 13.3 第 2 站：Telegram 的 token 与绑定都归账户（Account › Identity 里四张表单、一次签名接上），账户长轮询 Telegram，face 的 <code>phone-bridge.ts</code> 长轮询账户的收件箱，所有发出都经账户的 send，由账户按路由与静默时段决定发给谁；<code>face/src/telegram.ts</code>、<code>TELEGRAM_OPERATOR_ID</code>、<code>telegram.jsonl</code> 与 face 的 <code>outbox.json</code> 都已不用。</p>
   <p class="lede">这棵树上给代理看的文档（<code>AGENTS.md</code>、<code>CLAUDE.md</code>、<code>GRAVIT.md</code>、preset、profile）、产品宪章稿、前后端开发稿各自是什么，dsh 原装的 persona 是什么；以及两条环路：操作员的一句话怎样变成一次 Model API 请求，模型的输出又怎样经过工具、审批卡、日志回到操作员眼前。每一站都标出它读到或注入的文档与提示词。</p>
   <div class="meta"><span>依据：仓库文件 + face/node_modules 里安装的 dsh 包源码</span><span>机制以代码为准</span><span>字节数为 wc -c 当日实测</span></div>
   <nav class="toc" aria-label="目录">
@@ -510,12 +511,12 @@ no cache_control（10-10 追踪）· 流空闲超时 300 s · 被策略层关掉
   <span class="chip wire">线上字段 / 路由</span>
 </div>
 
-<h3>13.1 手机：Telegram → 桥 → 台面会话 → 回合 → 交付</h3>
+<h3>13.1 手机：Telegram → 账户 → 桥 → 台面会话 → 回合 → 交付（经账户）</h3>
 <ol class="flow flow-down">
-<li class="station"><span class="st-no">1</span><span class="st-where">Telegram Bot API · face/src/telegram.ts</span>
-<h4>桥长轮询 getUpdates，只收操作员私聊里的一种消息</h4>
-<p>只认 <code>TELEGRAM_OPERATOR_ID</code> 在操作员私聊里发来的消息；陌生人、群、编辑过的消息、频道帖都被丢弃、计数、记入 <code>telegram.jsonl</code>，从不回复。每个更新之后 offset 前移并存盘，跨重启只取一次。五个命令是桥自己的：<code>/status</code>、<code>/pause [时长]</code>、<code>/mute &lt;时长&gt;</code>、<code>/new</code>、<code>/stop</code>；没有 <code>/resume</code>、没有 <code>/unmute</code>——手机只能让台面更安静。其余文本连同 Telegram 自己的 <code>date</code>（操作员写下它的时间）交给台面会话。</p>
-<div class="chips"><span class="chip wire">GET /bot&lt;token&gt;/getUpdates（65 s）</span><span class="chip doc">$DSH_HOME/face/desk/telegram.jsonl</span><span class="chip doc">telegram.offset</span></div>
+<li class="station"><span class="st-no">1</span><span class="st-where">账户 · account/src/portfolio/identity/ → face/src/phone-bridge.ts（经 phone.ts）</span>
+<h4>账户长轮询 Telegram，桥长轮询账户的收件箱，只收操作员私聊里的一种消息</h4>
+<p>自 2026-11-04（计划 B1a、B1b）起，机器人的 token 与绑定的那一个操作员都在账户里（<code>&lt;account home&gt;/credentials/networks/telegram.json</code>），由操作员在 Account › Identity 用四张表单、一次签名接上（宪章 D20）；face 不持 token，不读任何 <code>TELEGRAM_*</code>，也不碰 <code>api.telegram.org</code>。账户自己长轮询 <code>getUpdates</code>，只认绑定的那个人在私聊里发来的文本；陌生人与群被丢弃、不回复，只在 Not you 里留一个计数与时间（不留原文、名字或用户名）；照片、文件、语音回 <code>text only, please</code>；Chat with Gravit 没勾 Telegram 时回一句关闭的话，谁也收不到。收下的文本进账户的收件箱（最多 500 条，读取不改动它）。face 这边的桥（<code>installPhoneBridge</code>）经 <code>phone.inbox(cursor, 25)</code> 长轮询收件箱，游标存在 <code>inbox.cursor</code>，只在消息的 post 落定或命令已答之后前移，跨重启只取一次；每条以 <code>&lt;messageId&gt;#&lt;inbox id&gt;@&lt;at&gt;</code> 为键交给台面会话，连同收件箱的 <code>at</code>（操作员写下它的时间）。五个命令是桥自己的：<code>/status</code>、<code>/pause [时长]</code>、<code>/mute &lt;时长&gt;</code>、<code>/new</code>、<code>/stop</code>；没有 <code>/resume</code>、没有 <code>/unmute</code>——手机只能让台面更安静。账户不答时桥退避（5 s 起倍增到 60 s），不排队。</p>
+<div class="chips"><span class="chip wire">账户 → GET /bot&lt;token&gt;/getUpdates</span><span class="chip wire">GET /api/account/identity/inbox?after=&lt;n&gt;&amp;wait=25</span><span class="chip doc">&lt;account home&gt;/identity/inbox.json</span><span class="chip doc">$DSH_HOME/face/desk/inbox.cursor</span></div>
 </li>
 <li class="station"><span class="st-no">2</span><span class="st-where">face/src/desk-conversation.ts · post</span>
 <h4>台面会话的唯一主人按序检查，再把消息放进会话</h4>
@@ -527,10 +528,10 @@ no cache_control（10-10 追踪）· 流空闲超时 300 s · 被策略层关掉
 <p>回合从 <code>turn/start</code> 起有固定的 5 分钟截止，不因卡片而延长；每次 <code>turn/start</code> 再查一次围栏。模型可以用 <code>desk_quotes</code> 问现价（来自 Market 的读：美股 <code>explore</code>、A 股 <code>quotes</code>，每个价格带它的 feed 与交易所时间，如 <code>ROBINHOOD 10:21:03 ET</code>、<code>TENCENT 14:03:12 Beijing</code>），用 <code>desk_state</code> 读台面状态；写只能落在日志目录与临时区，守卫拒绝写指令文件与点文件、拒绝读仓库外与密钥文件、拒绝携带密钥值的调用。手机的 <code>/stop</code> 与截止一样只切当前这一回合，排在后面的消息各自得到回答。</p>
 <div class="chips"><span class="chip doc">dsh/profile/desk.md → gravit:desk</span><span class="chip doc">dsh/profile/persona.md</span><span class="chip doc">GRAVIT.md（链：根 → desk/journal）</span><span class="chip wire">desk_quotes · desk_state</span></div>
 </li>
-<li class="station"><span class="st-no">4</span><span class="st-where">desk-conversation.ts deliver → telegram.ts sendMessage</span>
-<h4>回合结束：一条账本事件，然后一次交付</h4>
-<p><code>turn/end</code> 时写一条 <code>desk-turn</code>（来源、结局、四个 token 桶）。然后交付：最终文本（被切断的加 <code>(cut off: …)</code>），或超时、失败、围栏拒绝的那一行。暂停生效时扣住不发。桥发纯文本，按 4,000 个 UTF-16 单位切分，发出前把 token 与 face 环境里的每个密钥值替换成 <code>&lt;token&gt;</code> / <code>&lt;secret&gt;</code>；发不出去的进 <code>outbox.json</code>，在下一次轮询或发送之前按序重发。</p>
-<div class="chips"><span class="chip event">events.jsonl · desk-turn</span><span class="chip wire">POST /bot&lt;token&gt;/sendMessage</span><span class="chip doc">$DSH_HOME/face/desk/outbox.json</span></div>
+<li class="station"><span class="st-no">4</span><span class="st-where">desk-conversation.ts deliver → phone.ts send → 账户的 send</span>
+<h4>回合结束：一条账本事件，然后经账户一次交付</h4>
+<p><code>turn/end</code> 时写一条 <code>desk-turn</code>（来源、结局、四个 token 桶）。然后交付：最终文本（被切断的加 <code>(cut off: …)</code>），或超时、失败、围栏拒绝的那一行。暂停生效时扣住不发。face 只说消息的种类（<code>chat</code>、<code>alert</code>、<code>urgent</code>、<code>brief</code>、<code>report</code>、<code>card</code>、<code>fill</code>），从不说收件人：发出前把 face 环境里的每个密钥值替换成 <code>&lt;secret&gt;</code>，再 POST 给账户的 send；收件人、哪个网络、要不要发，都由账户按 Identity 的路由与静默时段决定（回复、紧急提醒与 watchdog 永远发；其余在静默时段内扣下，记作 <code>undelivered: quiet hours</code>，没勾的记作 <code>not routed</code>）。账户自己再把 token 换成 <code>&lt;token&gt;</code>、把指向本机的链接换掉，按 4,000 个 UTF-16 单位切分，有 <code>replyTo</code> 的作为对那条消息的回复发出；发不出去的进账户的 outbox（最多 100 条、12 小时），在下一次轮询或发送之前按序重发。face 不排队。</p>
+<div class="chips"><span class="chip event">events.jsonl · desk-turn</span><span class="chip wire">POST /api/account/identity/send {kind, text, replyTo?}</span><span class="chip wire">账户 → POST /bot&lt;token&gt;/sendMessage</span><span class="chip doc">&lt;account home&gt;/identity/outbox.json</span></div>
 </li>
 </ol>
 
@@ -582,7 +583,7 @@ no cache_control（10-10 追踪）· 流空闲超时 300 s · 被策略层关掉
 <li class="station"><span class="st-no">2</span><span class="st-where">face/src/watch-eval.ts · alert-text.ts → desk-conversation.ts deliver</span>
 <h4>判定后由 face 自己发送提醒，计划原文照抄</h4>
 <p>每个价在它自己市场的交易时段内判定（A 股只在相位 <code>trading</code>、09:30–11:30 与 13:00–15:00 北京时间内，加上 15:00:00–15:00:30 的收盘价）；<code>stale</code> 与 <code>unavailable</code> 从不判。命中先过闸：<code>OFF</code>、<code>MUTE</code>、冷却、每小时六条上限、其余并成一批。提醒文本由 face 写（不经模型）：品种、最新价与 feed 和交易所时间、价位、计划原文、是否有批注跟进；经台面会话的 <code>deliver</code> 发出——发送在批注之前。</p>
-<div class="chips"><span class="chip prompt">NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows</span><span class="chip event">alerts.jsonl · alert · delivered（latencyMs）</span><span class="chip wire">POST /bot&lt;token&gt;/sendMessage</span></div>
+<div class="chips"><span class="chip prompt">NVDA 168.5 · ROBINHOOD 09:30:01 ET … annotation follows</span><span class="chip event">alerts.jsonl · alert · delivered（latencyMs）</span><span class="chip wire">POST /api/account/identity/send {kind: alert | urgent}</span></div>
 </li>
 <li class="station"><span class="st-no">3</span><span class="st-where">annotator.ts · 每轮一个新的 gravit-desk 会话（2026-11-02 起，spec §16 H1）</span>
 <h4>批注：每一轮一次回合，回复在提醒那条消息下</h4>

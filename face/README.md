@@ -1541,8 +1541,8 @@ the seat's too (those two `?fresh=1`, past the proxy's 15 seconds), and on the s
 head: `Account`, the Account's mode and writes as chips (`Guard` or `Beast`; `Trading on · $250 a
 move` or `Read-only`) — changed under Rules, the writes only by how the Account was started — then
 Refresh and Settings; under it the device line (whether this page signs for the Account, "The
-Account in the face" below); the Account's refusal sentence, when it gave one, as a muted line. Six
-tabs — **Portfolio · Money · Venues · Agents · Cards · Rules** (`Cards · N` while cards wait) — and
+Account in the face" below); the Account's refusal sentence, when it gave one, as a muted line. Seven
+tabs — **Portfolio · Money · Venues · Agents · Cards · Rules · Identity** (`Cards · N` while cards wait) — and
 two drawers. The keys marked *(signs)* below are drawn only while this page signs (absent, not
 disabled: the device line says why); the Market half's and Money's keys also only for an Account
 that takes writes:
@@ -1623,6 +1623,50 @@ that takes writes:
   30 days** or **Start a new one**) and, where a venue sets leverage from here, **Their leverage**
   (`Up to <n>x on a perpetual, …`, **Change…**, `Sign leverage`) *(signs)*; on a read-only Account
   each of the three says `Read-only: the Account was started without trading, so there is no …`.
+- **Identity** (since plan B1b, 2026-11-04; the account's half is `../account/README.md`
+  "Identity"): the account's `GET /data/account/identity`, read on entering the tab, at the page's
+  beat while `#/account/identity` is on screen, on Refresh and Retry and right after an Identity
+  sheet is done (those `?fresh=1`, since a write does not clear the proxy's cache); it does not wait
+  for the Account's own read. Three cards. **Gravit** — Telegram `Not connected` with **Connect…**
+  *(signs)*, or `Connected`, `Speaks as @<bot>`, `Talks only with @<you>`, the one problem line
+  when there is one (blocked, a conflict, polls failing), **Details** (since when, the token's
+  fingerprint, polling or not) and **Disconnect…** *(signs)*; iMessage its name and a `Later` chip,
+  no key; Slack `Not connected` with a `Soon` chip and a disabled Connect…. **What reaches you
+  where** — five rows (Chat with Gravit, Watch alerts, Pre-close brief, Cards waiting, Fills and
+  reports) by Face · Telegram · iMessage · Slack: Face ticked and disabled in every row, Telegram's
+  ticks live only once it is connected and only on a page that signs, iMessage and Slack disabled;
+  ticks that differ from the account's routing say `Not saved yet` with **Save…** *(signs)*, and a
+  fresh read drops any tick for a network it does not show connected; **Quiet hours** `23:00–07:00
+  ET` or `Off` with **Change…** *(signs)* — inside them alerts, the brief, reports, cards and fills
+  are not sent, and not sent later; replies, urgent alerts and the watchdog always go. **Not you ·
+  n** — each stranger who wrote to the bot, `Telegram · …789 · 3 messages · last <time>`, with
+  **Block** *(signs)*, or `Nobody else has written to Gravit.` On a page that does not sign the
+  cards are read, the ticks disabled, with `Only a browser that signs changes these.`; an account
+  that does not answer draws `The account is not answering.` and Retry, never a stale Connected
+  row.
+
+  **Connect…** is four sheets and one signature. Sheets 1–3 are a drawer of their own
+  (`client/js/host/identity.js`), each ending with its numbered steps: **1 · Bot token** — a
+  password field with no form around it and the password managers' ignore marks, so the browser
+  should not offer to save it, Paste, and Next (or Enter): the page reads the field, clears it,
+  makes the fingerprint (`keyHash`, the SHA-256 of 16 random bytes of salt then the token) and
+  posts the token once beside it — a second Next while it is in the air does nothing, and the
+  token never enters the store, storage or a log; **2 · Say hi** — the bot's `https://t.me/<bot>`
+  link and its QR (the account's SVG as an `<img>`), read every 1.5 s until the bot hears you,
+  until the connection's ten minutes are up (`expired`, Start again), saying so when another
+  program reads the bot (a 409) or the account does not answer; **3 · Is this you?** — the name,
+  the handle, the id masked and the message heard, **Not me** (that sender goes to Not you, and
+  sheet 2 waits again) and **This is me**. **4 · What you sign** is the ordinary owner sheet,
+  kind `connectNetwork`: the pending connection, the bot, your id, Telegram ticked in all five
+  rows on top of the routing now (untick later with Save…) and the token's fingerprint — never
+  the token — signed with this browser's key (`Sign with this browser's key`). Cancel, ×, Escape,
+  Back from sheet 2 and Start again drop the pending connection at the account at once; a reload
+  starts at sheet 1 and the account's ten minutes cover a tab that died; a sheet 4 signed after
+  the ten minutes is refused in the account's words, with Start again. **Disconnect…**
+  (`disconnectNetwork`, `Sign disconnect`: Gravit stops reading and sending on Telegram, the token
+  is deleted from the account, the desk keeps working in the face), **Save…** and **Change…** (one
+  sheet, `routing`, the account's `setRouting`: the ticks as the routing and quiet hours as two
+  New York clocks or Off) and **Block** (`blockSender`, `Sign block`) are one signature each.
 - **The Statement** (a drawer, its lines read on opening it): the Account's lines newest first,
   each with who it was by, its status in the Account's word and its fee; **Export CSV** — a
   `statement.csv` built in the browser (`date,type,kind,description,amount,fee,status,by`; a text
@@ -1692,8 +1736,8 @@ channel's two, fifteen writes, the sign-in's callback):
 | `GET /data/account/connected/candles` | a connected line's price history (plan A2) | 30 s | 25 s | `venue`, `symbol`, `interval`, `range`, `before`, `limit` |
 | `GET /data/account/connected/book` | a connected line's order book (plan A2) | 2 s | 7 s | `venue`, `symbol`, `depth` |
 | `GET /data/account/connected/trades` | a connected line's latest trades (plan A2) | 2 s | 7 s | `venue`, `symbol`, `limit` |
-| `GET /data/account/identity` | `GET /api/account/identity`: Account › Identity — the networks connected, the routing, quiet hours and Not you; never a token or a numeric id (plan B1a) | 2 s | 7 s | none |
-| `GET /data/account/identity/pending` | `GET /api/account/identity/pending`: a Connect sheet's pending connection (plan B1a) | 1 s | 7 s | `id` |
+| `GET /data/account/identity` | `GET /api/account/identity`: Account › Identity — the networks connected, the routing, quiet hours and Not you; never a token or a numeric id (plan B1a); the Identity tab's read (plan B1b) | 2 s | 7 s | `fresh` |
+| `GET /data/account/identity/pending` | `GET /api/account/identity/pending`: a Connect sheet's pending connection (plan B1a): sheet 2 reads it every 1.5 s, always `fresh=1`; once heard it carries the sender's numeric `id`, which sheet 4 signs (plan B1b) | 1 s | 7 s | `id`, `fresh` |
 | `POST /data/account/pair` | `POST /api/account/pair`: this page's public key, its label and the code (stage 2) | — | 7 s | none; at most 4,096 bytes |
 | `POST /data/account/prepare` | `POST /api/account/prepare`: a draft prepared, unsigned (stage 2) | — | 30 s | none; at most 16,384 bytes |
 | `POST /data/account/exchange` | `POST /api/exchange`: the signed envelope (stage 2) | — | 30 s | none; at most 65,536 bytes |
@@ -1712,8 +1756,8 @@ channel's two, fifteen writes, the sign-in's callback):
 | `GET /data/account/signin/callback` | `GET /api/account/signin/callback`: where a venue sends the browser back after its sign-in (the two parts) | — | 30 s | `state`, `code`, `error`, `error_description`, `error_uri`, `iss` |
 
 A venue not connected is the Account's 409 `E_WALLET_NOT_CONNECTED` on each connected read. The
-screens read twenty-one of the twenty-five reads; `market` and `positions` are proxied and
-read by no screen yet, nor are `identity` and `identityPending` until plan B1b's Identity tab. The
+screens read twenty-three of the twenty-five reads; `market` and `positions` are proxied and
+read by no screen yet (`identity` and `identityPending` are Account › Identity's, since plan B1b). The
 account's identity inbox and send are not on this table: only the face's server calls them
 (`src/phone.ts`), and the browser never reaches them. The writes follow `stream/markets`' rules: a body declared `application/json`
 (else 415) on a bare path (any query name is 400), at most the row's bytes (413), forwarded as the
@@ -2070,11 +2114,12 @@ account, naming each message's kind, never its recipient.
 1. In Telegram, message **@BotFather**, send `/newbot`, and choose a name and a username that
    ends in `bot`. BotFather answers with the bot's token. It is a key: never paste it into a
    chat, a ticket or a commit.
-2. Connect it in Account › Identity on the face, with the account running (`npm run account`) —
-   the tab and its four sheets are plan B1b's; until it lands nothing on the face connects a
-   network. You paste the token once (it passes through the face unparsed and unlogged, and the
-   account keeps it in `<account home>/credentials/networks/telegram.json`), say hi to the bot from
-   your phone, confirm the account heard you — not a stranger — and sign the connection.
+2. Connect it in Account › Identity › Telegram › **Connect…** on the face, on a page that signs,
+   with the account running (`npm run account`) — four sheets ("Markets and Account" › "Account"
+   above): you paste the token once (it passes through the face unparsed and unlogged, and the
+   account keeps it in `<account home>/credentials/networks/telegram.json`), press Start on the
+   bot from your phone, confirm the account heard you — not a stranger — and read What you sign
+   and sign. The whole round, from the merge to Disconnect…, is "The phone drill" below.
 
 An older home's `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OPERATOR_ID` lines in `$DSH_HOME/.env` are read
 by nothing now: remove them. With nothing connected, or the `mcp-account` row disabled, the face
@@ -3831,8 +3876,8 @@ FACE_SMOKE=1 npm test     # + the 33 isolated real boots; local stubs, no extern
 ```
 
 Offline, `npm test` skips the 33 real boots listed below; `FACE_SMOKE=1` runs
-them too (3,046 tests in 209 files on 2026-11-04 with plan B1a's phone through the account: 3,013
-pass and 33 skipped offline; 3,047/3,047 under `FACE_SMOKE=1`).
+them too (3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity: 3,062 pass
+and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
 the session's directory AND `/tmp` and `os.tmpdir()` (by real path; `/tmp` is `/private/tmp` on
@@ -3863,7 +3908,7 @@ and `node --test` gives each file its own:
 | `order-gate-midboot-smoke.test.ts` | Gate 2 armed while `boot()` is still pending: a slow fixture row holds the boot open while a seat-write stand-in registers, and with `bootFace` unresolved and unary `/api` already serving, the order call is HELD with `approval/asked` logged and its body not run, an agentless call is denied by the listener, the same order with its ask swallowed by an outer listener is denied by the guard alone; once the boot is released the held card reaches the first tab and `allowed-once` dispatches exactly once; a restart of the real `approval` row re-arms the listener once |
 | `account-seat-smoke.test.ts` | the Account seat against the Account's own stand-in (run from the repo's `account/`, or `FACE_ACCOUNT_SEAT_DIR` when set; skipped without its `npm ci`): the seat's 34 tools and exactly its nine real-account writes gated, a read as the admitted seat, a seat order rejected at the face's card never reaching the seat, the same order allowed once answered by the stand-in with a card, a batch answered leg by leg with cards, and `/data/seat.json` reading that standing with the Account's ISO expiry as milliseconds |
 | `account-graft-smoke.test.ts` | the Account's reads through the face's proxy against the Account's own stand-in (run from the repo's `account/`, or `FACE_ACCOUNT_SEAT_DIR` when set; skipped without its `npm ci`; "The Account in the face"): `/data/account` 200 with `ok` and its venues, `/data/account/explore` listing items, `explore?force=1` refused 400 without asking the Account, `/data/account/stream` an event stream whose first named frame carries JSON within 5 s, and `/data/seat.json` reading the Account reachable through the proxy's reader; then the owner's half through the face's port — the client's own `host/owner.js` under Node paired with the stand-in's code, a watch signed on and off, a $25 ETH market buy whose `fill` the stream tells and whose ETH the holdings count, a SOL limit resting and cancelled by its id, the seeded card approved and its `card` frame `approved`, a foreign origin's exchange refused 403, and neither the code nor any signature sent in the face's output |
-| `gravit-client-smoke.test.ts` | the new page on a real boot: `/` with its title and script, the modules under `/client` with their types (Markets' `js/wire/china.js` and `js/host/markets.js` among them), the old `chat.js` gone and `/market` and `/account` answering 404; the host layer (`client/js/host/live.js` over the page's own wire) listing a session just created and opening it (live, so a follow) into a loaded window with a clean status line; a bare `bootFace` mounts no `/data` route, which the list tolerates |
+| `gravit-client-smoke.test.ts` | the new page on a real boot: `/` with its title and script, the modules under `/client` with their types (Markets' `js/wire/china.js` and `js/host/markets.js` among them), the old `chat.js` gone and `/market` and `/account` answering 404; the host layer (`client/js/host/live.js` over the page's own wire) listing a session just created and opening it (live, so a follow) into a loaded window with a clean status line; a bare `bootFace` mounts no `/data` route, which the list tolerates; since plan B1b, with the Account's stand-in installed, the Account proxy registered on the boot and `/data/account/identity?fresh=1` read through the face, the Identity tab drawn from that read by the shipped modules (its three cards, `Not connected`) and the three Identity modules served |
 | `client-mux-smoke.test.ts` | the page's own `client/js/wire/api.js` and `client/js/wire/mapper.js`, unmodified, against the host: ready, calls, emits, the control baseline, a follow's snapshot and tail, an approval answered and one rejected, a second tab's `cancel` and its refused late answer, Stop withdrawing a gate, a question answered, a gate replayed to a late tab, the non-activating page and projections reads |
 | `askuser-noclient-smoke.test.ts` | with no browser connected, an agent's question BLOCKS (parked for the next client); an agentless one is refused `NO_PROVIDER` |
 | `bots-smoke.test.ts` | the roster (a broken fixture listed with its reason, never `_template`); the shipped relative plugin path rebased onto the real `plugins/bot.js`; a bot sees allow ∩ tree, never a `role_<id>` tool, while Gravit sees the host's whole roster plus `role_cn_market_analyst`, `role_cn_reviewer` and `role_cn_stock_analyst`; a tool registered after the declaration is admitted; the bot's persona shadows Gravit's; Gravit's prompt carries the `deployment:today` line, the cycle contract (`Step 0 — ask once`) and the `lunhui:run` protocol and a bot's carries none of them — the probe bot can call `create_goal`, so its missing contract is the preset's scoping, not the `create_goal` gate; a session naming a broken preset is refused with dsh's `agent-preset/*` code; Gate 2 holds for a bot |
@@ -5533,18 +5578,99 @@ and the round's cases in `desk`, `desk-conversation`, `watch`, `desk-book`, `fir
 reaches Telegram. What only this drill checks: what Telegram's own app makes of the notices'
 defanged text.
 
-**The drill**, once Telegram is connected in Account › Identity (plan B1b's tab), with the
-service, the account and the market running this code. The rest of the connection's drill is plan
-B1b's operator section.
+**The drill** is "The phone drill" below, since plan B1b: this round's one check, that a
+defanged host is not tappable, is its step 3, and its PASS goes in `DEVELOPMENT.md` §7.4's
+manual B1a row as well as the phone drill's. The automated half passes 2026-11-04.
 
-1. **No tappable host.** Send yourself `evil·com` on Telegram — in Saved Messages, not to the bot,
+## The phone drill (run after plans B1a and B1b land, and after any change to `../account/src/portfolio/identity/`, src/phone.ts, src/phone-bridge.ts, src/card-notice.ts, scripts/watchdog.ts, client/js/host/identity.js, identity-view.js, sheet-identity.js, client/js/render/identity.js or client/js/reducers/identity.js)
+
+Telegram end to end through the account (`DEVELOPMENT.md` §3.9 "Identity" and §5; charter D20):
+Account › Identity connects it in four sheets and one signature, the desk talks to the phone
+through the account's inbox and send, and Disconnect… ends it. Every step is the operator's: it
+drives your launchd, your `~/.dsh` and your Telegram, and an agent never runs it.
+
+**The automated half, no Telegram.** `npm test` here runs the client's `identity-view`,
+`identity-host`, `sheet-identity` and the Identity cases of `account`, `app-dom`, `css` and
+`sheet-view`, beside B1a's (`phone-bridge`, `card-notice`, `watchdog`, `account-proxy`, …);
+`FACE_SMOKE=1 npm test` has `gravit-client-smoke` read `/data/account/identity?fresh=1` through
+the face from the Account's stand-in and draw the tab from it; the account's
+`test/unit/identity-*.test.ts` run Telegram's side against a fake Bot API on loopback. No test
+reaches Telegram, a real browser's password manager, or Telegram's apps.
+
+**Before the drill, once, after the merge:**
+
+1. **Install the new dependency:** `cd ../account && npm ci` (`qrcode`, pinned).
+2. **Take the token out of Gravit's box.** Delete the `TELEGRAM_BOT_TOKEN` and
+   `TELEGRAM_OPERATOR_ID` lines from `$DSH_HOME/.env`, and the repo-root `.env.telegram` if you
+   have one — by hand, in your editor; the face no longer reads them, and this makes sure no copy
+   stays where the agent's box can see it. Never ask an agent to do it: no agent opens `~/.dsh`
+   or an `.env`.
+3. **Restart** the account (`npm run account` in `../account/`, or `npm run account:service --
+   restart` under its LaunchAgent), the market if it is not running (`npm run market` in
+   `../market/`), then the face (`npm run service -- restart`, or `npm start`). Hard-reload the
+   page.
+4. **The bot.** Reuse the desk's bot — the token you had in `.env` — or make one: @BotFather,
+   `/newbot`, a name, a username ending in `bot`. If the old token was ever shown where it should
+   not be, send BotFather `/revoke` and use the new token.
+5. **Keep it running** (optional, recommended): `npm run account:service -- install` in
+   `../account/`, `npm run market:service -- install` in `../market/`, then `npm run service --
+   install` here again so the watchdog checks all three.
+
+**The drill**, on a page that signs, with the service, the account and the market running this
+code:
+
+1. **Connect, four sheets.** Account › Identity › Telegram › **Connect…**. Sheet 1: paste the
+   token and press Next. PASS: the field is empty at once, and **the browser offers to save
+   nothing** — no save-password prompt, no key in the address bar, and afterwards no entry for the
+   face's host in the browser's saved passwords (check each browser you sign from; a prompt is a
+   finding: record the browser and its version, since the field has no form around it and carries
+   the password managers' ignore marks). Sheet 2: the bot's link and its QR; press **Start** on
+   the phone. PASS: within a few seconds sheet 3 shows your name, your handle, your id masked and
+   `/start`. **This is me**, then sheet 4: What you sign names the bot, you, Telegram in all five
+   rows and the token's fingerprint, never the token. Sign.
+2. **The tab.** PASS: Telegram `Connected`, `Speaks as @<your bot>`, `Talks only with @<you>`;
+   Details shows since when, the fingerprint and `polling`; Slack `Not connected · Soon` with its
+   Connect… disabled; iMessage `Later`; the grid has Telegram ticked in every row; Not you is
+   empty.
+3. **No tappable host.** Send yourself `evil·com` on Telegram — in Saved Messages, not to the bot,
    which would hand it to the desk — with the middle dot (U+00B7) as a card or fill notice writes
-   every `.` not between two digits, and look at it on the phone and in the desktop app. PASS: neither shows it as a link — nothing underlined, nothing
-   opens on a tap. A link there is a finding: record the client and its version, since the
-   notices' scrub (`src/card-notice.ts`, `account/src/portfolio/identity/notices.ts`) relies on it.
+   every `.` not between two digits, and look at it on the phone and in the desktop app. PASS:
+   neither shows it as a link — nothing underlined, nothing opens on a tap. A link there is a
+   finding: record the client and its version, since the notices' scrub (`src/card-notice.ts`,
+   `../account/src/portfolio/identity/notices.ts`) relies on it.
+4. **Status and chat.** On the phone send `/status`. PASS: the answer has a `phone: telegram
+   polling …` line. Ask Gravit something. PASS: the answer comes back as a reply in the same chat.
+5. **A stranger.** From another Telegram account, message the bot. PASS: nothing answers; Not you
+   shows `Telegram · …<the last three digits> · 1 message`. **Block** it and sign. PASS: it leaves
+   the list, and a second message from it is not counted.
+6. **Routing.** Untick Telegram for Watch alerts; `Not saved yet` and **Save…** appear; sign.
+   PASS: `/status` still answers; the next watch alert does not reach the phone, and
+   `$DSH_HOME/face/desk/alerts.jsonl` has its `delivered` record with `"delivery":{"undelivered":"not
+   routed"}`. Tick it again and Save….
+7. **Quiet hours hold an alert.** Quiet hours › **Change…**, a window covering the next few
+   minutes, sign. PASS: a (non-urgent) watch alert is held — its record says `"undelivered":"quiet
+   hours"` and nothing arrives later — while a text you send is still answered. Change… back
+   (or tick Off) and sign.
+8. **A card notice with no link.** Let Gravit place a paper order. PASS: the phone shows `Your call
+   · … — waiting in Gravit` as plain text — no button, no link, any host in it defanged as in step
+   3 — and nothing on the phone answers the card; approve it in the browser; the fill notice
+   `Filled · …` arrives.
+9. **The account down.** Stop the account for ten minutes or more (Ctrl-C in its terminal; under
+   its LaunchAgent `npm run account:service -- uninstall`, and `install` again afterwards). PASS:
+   one `the account has not answered since …; nothing reaches the phone until it does` arrives;
+   start it again: `the account answers again (down since …)`. (The watchdog's check is every five
+   minutes and needs two misses; without the face's LaunchAgent there is no watchdog and this step
+   is skipped.)
+10. **Pause and mute.** `/pause 30m` and `/mute 30m` from the phone answer as before; resume from a
+    terminal (`npm run desk -- resume`, `npm run desk -- unmute`).
+11. **Disconnect.** Account › Identity › Telegram › **Disconnect…**, sign. PASS: the tab reads `Not
+    connected`, with no unsaved ticks and no Save…; the bot stops answering; `/status` in a
+    terminal (`npm run service -- status`) says `phone: nothing connected (Account › Identity)`;
+    and `credentials/networks/telegram.json` is gone from the account's home (`ls`, never `cat`).
+    Connect again (step 1) if you keep the phone.
 
-**PASS is step 1.** Record the date, the commit and the two clients in `DEVELOPMENT.md` §7.4's B1a
-**Desk** row.
+**PASS is steps 1–11.** Record the date, the commit, the browsers of step 1 and the Telegram
+clients of step 3 in `DEVELOPMENT.md` §7.4's manual B1b row.
 
-**Not yet run.** The automated half passes 2026-11-04; the phone and Telegram's clients are the
-operator's.
+**Not yet run.** The automated half passes 2026-11-04; the browser, the phone and Telegram's
+clients are the operator's.
