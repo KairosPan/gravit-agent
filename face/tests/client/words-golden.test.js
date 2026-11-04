@@ -1,24 +1,27 @@
 // The zero-change harness: every screen state css.test.js draws renders the bytes pinned in fixtures/screens-en.json, so a
 // words move (the English table, plan 6) shows as no change at all. The zone is set before the corpus is read, so a clock in
-// any state prints the same on any machine.
+// any state prints the same on any machine. The fixture is append-only (golden-write.js): a new state is added after the
+// pinned ones, and a state redrawn on purpose is re-pinned by name.
 process.env.TZ = 'America/New_York';
 const { test } = await import('node:test');
 const assert = (await import('node:assert/strict')).default;
 const { readFileSync } = await import('node:fs');
 const { createHash } = await import('node:crypto');
-const { corpus } = await import('./helpers/screens.js');
+const { goldenEntries } = await import('./helpers/screens.js');
 
 const pinned = JSON.parse(readFileSync(new URL('./fixtures/screens-en.json', import.meta.url), 'utf8'));
-const entries = corpus();
+const entries = await goldenEntries();
 const sha = html => createHash('sha256').update(html).digest('hex');
 
 test('every screen state renders the bytes pinned in fixtures/screens-en.json', () => {
-  assert.deepEqual(entries.map(([name]) => name), Object.keys(pinned), 'the corpus names its states as the fixture does, in order');
+  assert.deepEqual(entries.map(([name]) => name), Object.keys(pinned), 'the corpus names its states as the fixture does, in order (a new state goes at the end: golden-write.js --pin)');
   const differ = entries.filter(([name, html]) => sha(html) !== pinned[name]).map(([name]) => name);
-  assert.deepEqual(differ, [], `these states render other bytes: run npx tsx tests/client/golden-write.js --dump <dir> before and after the change and diff the two dirs`);
+  assert.deepEqual(differ, [], `these states render other bytes: run npx tsx tests/client/golden-write.js --dump <dir> before and after the change and diff the two dirs; a change meant to redraw them is re-pinned with --pin --repin <names>`);
 });
 
-test('the corpus covers the screens', () => {
+test('the corpus covers the screens', async () => {
+  const { everyState } = await import('./helpers/screens.js');
+  const sheetKinds = new Set(everyState().map(st => st.sheet?.kind).filter(Boolean));
   const all = entries.map(([, html]) => html);
   const holds = (what, needle) => assert.ok(all.some(html => html.includes(needle)), `the corpus holds ${what} (${needle})`);
   holds('a Messages state', 'class="thread');
@@ -35,4 +38,16 @@ test('the corpus covers the screens', () => {
   holds('the stock drawer', 'class="drawer stock');
   holds("Connect Telegram's drawer", 'data-action="identityClose"');
   holds('a list off a Mac', 'Ctrl+Alt+K');
+  holds("Account's Money", 'Send only the asset on the network the row names');
+  holds("Account's Rules", 'Only a browser that signs switches to Beast.');
+  holds('a prepared move', 'Can&#39;t be undone.');
+  holds("a market's order book", '>Order book<');
+  holds("a perpetual's funding", '>Funding<');
+  holds("the watchlist's refusal", 'Couldn&#39;t save the watchlist');
+  holds("a Run the host could not send", 'Couldn&#39;t send');
+  holds("app.js's line for an unanswered question", 'Answer every question first');
+  for (const kind of ['close', 'amend', 'leverage', 'beast', 'cap', 'session', 'leverageCap', 'move', 'earn', 'subWallet', 'disconnectNetwork', 'routing', 'block',
+    'revoke', 'endLimit', 'paper', 'topUp', 'resetPaper', 'disconnect', 'declineAsk', 'letDevice', 'signOut', 'reopen', 'letIn', 'limit', 'approveCard', 'connect', 'order', 'connectNetwork']) {
+    assert.ok(sheetKinds.has(kind), `the corpus opens a ${kind} sheet`);
+  }
 });

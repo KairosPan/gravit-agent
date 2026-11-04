@@ -28,6 +28,17 @@ import { editorHtml, dropOverlay, lightboxHtml } from '../../../client/js/compos
 import { DEFAULT_LIMITS } from '../../../client/js/composer/files.js';
 import { slashItems, atItems } from '../../../client/js/composer/menus.js';
 import { sessionUri } from '../../../client/js/composer/draft.js';
+import { SHEET_KINDS, letDeviceSeedOf, paperSeedOf, signOutSeedOf } from '../../../client/js/host/sheet-view.js';
+import { closeSeedOf, amendSeedOf, leverageSeedOf } from '../../../client/js/host/sheet-market.js';
+import { moveSeedOf, earnSeedOf, subWalletSeedOf } from '../../../client/js/host/sheet-money.js';
+import { positionsOf, openOrdersOf } from '../../../client/js/host/account-view.js';
+import { receiveRowsOf } from '../../../client/js/host/money-view.js';
+import { earnPage, earnBody } from './earn-fixture.js';
+import { createStore } from '../../../client/js/store.js';
+import { startRunSheet } from '../../../client/js/host/run-sheet.js';
+import { boot } from '../../../client/js/app.js';
+import { fakeWindow } from './fake-dom.js';
+import { valueEditor } from './value-editor.js';
 
 // the corpus' clock: a local time, so a state's clock prints the same only under one zone (the golden sets America/New_York)
 export const NOW = new Date(2026, 9, 19, 14, 7).getTime();
@@ -300,7 +311,74 @@ export function everyState() {
     ...searchStates(R.hostList(open, { conversations: [...open.conversations, conv('old', { title: 'T old', archived: 'face' })] })), R.hostPins(open, ['s1']),
     R.traceLoaded(R.nav(base, { screen: 'messages', id: 'g' }), { convId: 'g', msgId: 'g1', messages: [m('tg1', { kind: 'tool', text: 'account', data: { callId: 'g1c', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }) } }), m('tg2', { from: 'system', text: 'context' })] }),
     R.toggleDetails(R.hostList(R.hostProjection(open, { convId: 's1', key: 'subagentCatalog', value: [{ id: 'k1', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'k2', createdAt: 2, mode: 'unknown' }] }), { conversations: open.conversations, childRows: [{ sessionId: 'k1', parentSessionId: 's1', running: true, origin: 'subagent' }] })), ...marketStates(), ...accountStates(), ...channelStates(), ...discoverStates(), ...tradeStates(),
+    // the golden is append-only (golden-write.js): a state added later goes after these, so every pinned name keeps its state
+    ...laterStates(),
   ];
+}
+
+// added in plan 6's first fix round: Account's Money and Rules tabs; a sheet of every kind the owner signs; a move prepared,
+// with its Can't be undone.; a market's order book, latest trades and a perpetual's funding; the watchlist's refusals by
+// their codes, as the markets host writes them
+function laterStates() {
+  const fx = name => JSON.parse(readFileSync(new URL(`../../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
+  const loaded = (page = fx('account')) => {
+    let s = R.accountLoaded(R.nav(emptyState(), { screen: 'account', tab: 'portfolio' }), { data: page, at: NOW });
+    for (const [done, name] of [['holdingsLoaded', 'holdings'], ['paperLoaded', 'holdings-paper'], ['statementLoaded', 'statement'], ['agentsLoaded', 'agents']]) s = R[done](s, { data: fx(name), at: NOW });
+    return s;
+  };
+  const read = loaded();
+  const signing = s => R.ownerStanding(s, { role: 'signs', kid: 'a5048199a8081854' });
+  const tab = (s, name) => R.nav(s, { screen: 'account', tab: name });
+  const page = read.account.data;
+  const row = receiveRowsOf(page)[0];
+  const key = row ? `${row.venue}|${row.asset}|${row.network}` : 'none';
+  const money = [
+    tab(read, 'money'), tab(signing(read), 'money'),
+    R.receiveLoaded(tab(signing(read), 'money'), { key, data: { address: '0x00000000000000000000000000000000000000cd', tag: '123', whose: 'yours', note: 'checked' }, at: NOW }),
+    R.receiveFailed(tab(read, 'money'), { key, at: NOW, message: 'The venue did not answer' }), R.receiveLoading(tab(read, 'money'), key),
+    R.earnLoaded(tab(signing(loaded(earnPage())), 'money'), { data: earnBody(), at: NOW }), R.earnFailed(tab(loaded(earnPage()), 'money'), { at: NOW, message: 'Kraken did not answer' }),
+  ];
+  const rules = [
+    tab(read, 'rules'), tab(signing(read), 'rules'), R.guardSaid(tab(signing(read), 'rules'), 'Guard is on'), R.guardRefused(tab(signing(read), 'rules'), 'refused'),
+  ];
+  // every kind's sheet, opened on a seed the screens would hand it, on a page that signs
+  const signs = signing(read);
+  const position = positionsOf(fx('holdings'))[0] ?? {};
+  const order = openOrdersOf(page).map(o => amendSeedOf(o, page)).find(Boolean) ?? {};
+  const owner = signs.owner;
+  const ADDRESS = '0x00000000000000000000000000000000000000ab';
+  const seeds = {
+    endLimit: { address: ADDRESS, name: 'Claude Code', allow: ['paper-1'], scope: 'trade' }, revoke: { address: ADDRESS, name: 'Claude Code' },
+    paper: paperSeedOf(page, null), topUp: { venue: 'paper-momentum', name: 'Momentum' }, resetPaper: { venue: 'paper-momentum', name: 'Momentum' },
+    disconnect: { venue: 'ex', name: 'Stand-in Exchange' }, declineAsk: { ask: 'ask-1' }, letDevice: letDeviceSeedOf(page, owner, '0123456789abcdef'),
+    signOut: signOutSeedOf(page, owner), reopen: { venue: 'ex', name: 'Stand-in Exchange' },
+    close: closeSeedOf(position) ?? {}, amend: order, leverage: leverageSeedOf(position, page) ?? {},
+    beast: {}, cap: { capUsd: 250 }, session: {}, leverageCap: {},
+    move: moveSeedOf(page, { from: 'ex' }), earn: earnSeedOf(earnBody(), earnPage()), subWallet: subWalletSeedOf(page),
+    disconnectNetwork: { network: 'telegram' }, block: { network: 'telegram', sender: '0a1b2c3d4e5f', masked: '…789' },
+    routing: { routing: { chat: ['telegram'], alerts: [], brief: [], cards: [], fills: [] }, quiet: { from: '23:00', to: '07:00' }, saved: 'chat=telegram;alerts=;brief=;cards=;fills=' },
+  };
+  const kinds = [...SHEET_KINDS.filter(k => Object.hasOwn(seeds, k)), ...Object.keys(seeds).filter(k => !SHEET_KINDS.includes(k))];
+  const sheets = kinds.map(kind => R.sheetOpen(signs, { kind, seed: seeds[kind], fields: fieldsOf(kind, seeds[kind]) }));
+  // a move prepared, its lines under the quote
+  const move = sheets[kinds.indexOf('move')];
+  const prepared = R.sheetPrepared(move, { prepared: { ok: true, action: { type: 'liveMove', kind: 'transfer', from: 'ex', to: 'agent-claude-code', toAddress: '0xcd' }, shown: [{ name: 'Move', value: '10 USDC' }] }, at: NOW, asked: askedOf(move.sheet), deadline: NOW + 125_000 });
+  // a market page's book, latest trades and funding: read, failed; a perpetual's funding with what it could not read
+  const on = R.nav(R.statementLoaded(R.holdingsLoaded(R.accountLoaded(R.exploreLoaded(R.nav(emptyState(), { screen: 'markets', id: null }), { tab: 'all', data: fx('explore-all'), at: NOW }), { data: page, at: NOW }), { data: fx('holdings'), at: NOW }), { data: fx('statement'), at: NOW }), { screen: 'markets', id: 'coin:BTC' });
+  const depth = (s, id, part, data) => R.depthLoaded(s, { id, part, data, at: NOW });
+  const book = depth(depth(on, 'coin:BTC', 'book', fx('book')), 'coin:BTC', 'trades', fx('trades'));
+  const perp = R.nav(on, { screen: 'markets', id: 'perp:BTC' });
+  const funding = {
+    ok: true, lines: [{ at: '2026-10-19T10:00:00.000Z', symbol: 'BTC/USDT:USDT', side: 'long', qty: 0.01, rate: 0.0001, usd: 0.06, venue: 'ex', venueName: 'Stand-in Exchange' }],
+    missing: [{ venue: 'ex', venueName: 'Stand-in Exchange', why: 'no answer in time.', part: 'funding' }],
+  };
+  const markets = [
+    book, R.depthFailed(R.depthFailed(on, { id: 'coin:BTC', part: 'book', at: NOW, message: 'the account layer is not mounted' }), { id: 'coin:BTC', part: 'trades', at: NOW }),
+    depth(perp, 'perp:BTC', 'funding', funding), depth(perp, 'perp:BTC', 'funding', { ok: true, lines: [], missing: [] }), R.depthFailed(perp, { id: 'perp:BTC', part: 'funding', at: NOW }),
+  ];
+  const marketsOn = R.exploreLoaded(R.nav(emptyState(), { screen: 'markets', id: null }), { tab: 'all', data: fx('explore-all'), at: NOW });
+  const watch = ['read', 'unsaved'].map(error => R.watchlistLoaded(marketsOn, { items: [], error }));
+  return [...money, ...rules, ...sheets, prepared, ...markets, ...watch];
 }
 // the composer's states (plan 3 of the dsh UI port, Task 3): a / menu with headings and with a query, an @ menu with every kind,
 // a folder walk with its crumb, in a conversation's composer; a draft with each chip kind in the editor; the operator's words
@@ -353,12 +431,56 @@ export function composerPieces() {
 export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
   : st.route.screen === 'trade' ? renderTradeScreen(st, now)
   : st.route.screen === 'channel' ? renderChannelScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
-  : st.route.screen === 'plugin' ? renderPlugin(st, now) : st.route.screen === 'module' ? renderModule(st) : renderMessagesScreen(st, now));
+  : st.route.screen === 'plugin' ? renderPlugin(st, now) : st.route.screen === 'module' ? renderModule(st, now) : renderMessagesScreen(st, now));
 
 // a state's page as css.test.js draws it: the rail, the screen, then every drawer and sheet that may stand over it
 export function pageHtml(st, { mac = true } = {}) {
   return renderRail(st, NOW, { mac }) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSellMany(st) +
     renderSheet(st, NOW) + renderConnectDrawer(st) + renderRunSheet(st, NOW);
+}
+
+const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0)); };
+
+// lines a host writes into the store from its own source, drawn as the page would: a module card's Run that could not send
+// (host/run-sheet.js); an Answer pressed with a question unanswered (app.js). The states come from running the host, so a
+// word moved there shows here
+export async function hostCorpus() {
+  const entries = [];
+  {
+    const store = createStore({ initial: R.nav(emptyState(), { screen: 'discover', id: null }), reducers: R });
+    const sheet = startRunSheet({ store, actions: { newConversation: async () => null }, readListing: async () => modulesListing(), go: () => {}, now: () => NOW });
+    await sheet.open('theme');
+    await sheet.run();
+    entries.push(['host-run-sheet-failed', renderRunSheet(store.get(), NOW)]);
+  }
+  {
+    const f = fakeWindow({ hash: '' });
+    let opts = null;
+    const mux = { stream: () => ({ cancel() {} }), answer: async () => {}, close() {} };
+    const rows = [{ sessionId: 's1', updatedAt: 5, agentAvailable: false, running: false, blank: false }];
+    const call = async endpoint => (endpoint === 'session/list' ? { items: rows } : endpoint === 'session/projections' ? { asOfSeq: 20, values: {} } : endpoint === 'session/page' ? { records: [] } : undefined);
+    const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, sessionIds: [] }], ungrouped: [], archived: [], presets: {} }
+      : path === '/data/sessions-meta.json' ? { ok: true, archived: [], deleted: [] } : { ok: true, bots: [] });
+    const store = boot(f.win, { editor: valueEditor, openMux: o => { opts = o; return mux; }, call, getJson, postJson: async () => ({ ok: true }), markdown: null, now: () => NOW });
+    try {
+      await settle();
+      opts.onReady({});
+      await settle();
+      opts.onGate({ type: 'waterfall', event: 'user-questions/request', eventId: 'ev-2', agentId: 's1', request: { questions: [{ id: 'q1', question: 'Pin the paper account?', header: 'Gate 2', options: [{ label: 'Yes' }] }] } });
+      await settle();
+      f.click({ tagName: 'BUTTON', dataset: { action: 'answerQuestion', conv: 's1', msg: 'ev-2' } });
+      await settle();
+      entries.push(['host-app-answer-first', pageHtml(store.get())]);
+    } finally {
+      store.timers.clear();
+    }
+  }
+  return entries;
+}
+
+// every entry the golden pins: the corpus, then the host-written lines
+export async function goldenEntries() {
+  return [...corpus(), ...await hostCorpus()];
 }
 
 // the corpus, named and in order: every state, again off a Mac when it draws the list (whose search key names the chord), then
