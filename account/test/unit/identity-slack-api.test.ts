@@ -120,7 +120,7 @@ describe("the Web API client", () => {
     expect(second.next).toBeUndefined();
     const ts = await api.postMessage("D0FAKEDM1", "hello &amp; there");
     expect(ts).toMatch(/^\d{9,12}\.\d{6}$/);
-    expect(slack.posted).toEqual([{ channel: "D0FAKEDM1", text: "hello &amp; there", mrkdwn: "false", unfurl_links: "false", unfurl_media: "false" }]);
+    expect(slack.posted).toEqual([{ ts: expect.any(String), channel: "D0FAKEDM1", text: "hello &amp; there", mrkdwn: "false", unfurl_links: "false", unfurl_media: "false" }]);
 
     expect(slack.calls.map((c) => c.method)).toEqual(["auth.test", "bots.info", "users.info", "users.info", "apps.connections.open", "conversations.history", "conversations.history", "chat.postMessage"]);
     for (const c of slack.calls) {

@@ -27,13 +27,13 @@ import { join } from "node:path";
 import type { Refusal } from "../../core/errors.ts";
 import { no } from "../refuse.ts";
 import { redactorOf } from "./bot-api.ts";
-import type { Connector } from "./identity.ts";
+import type { Connector, Transport } from "./identity.ts";
 import { INBOX_MAX, type InboxRing } from "./inbox.ts";
 import { chatOffLine, SLACK_TOKEN_ANYWHERE } from "./kinds.ts";
 import type { PendingBot, PendingResume, PendingSource } from "./pending.ts";
 import { IDENTITY_WORDS } from "./routes.ts";
 import type { SlackSecret } from "./secret-file.ts";
-import { SlackApi, SlackApiError, slackAppLink, socketUrlOk } from "./slack-api.ts";
+import { escapeSlack, SlackApi, SlackApiError, slackAppLink, socketUrlOk } from "./slack-api.ts";
 import { SlackSocket, type Envelope, type OpenSocket } from "./slack-socket.ts";
 import { identityDir, maskId, senderRef, writeIdentityFile, type Binding, type Strangers } from "./store.ts";
 import { PHONE_COMMAND, RECORD_EVERY_MS, TEXT_ONLY, type IdentityClock, type NetworkStatus } from "./telegram.ts";
@@ -695,7 +695,8 @@ export class SlackConnector implements Connector {
       return "ok";
     }
     if (m.subtype !== undefined) return "ok";
-    const text = normalizeCommand(m.text);
+    // a token pasted into the DM never reaches the desk: both of the app's tokens, in every spelling, and every Slack token's shape
+    const text = this.d.api.redact(normalizeCommand(m.text));
     if (!this.d.chatOn() && !PHONE_COMMAND.test(text.trim())) {
       await this.answer(m.ts, SLACK_CHAT_OFF);
       this.advance(m.ts);
@@ -752,5 +753,63 @@ export class SlackConnector implements Connector {
       this.failed(err);
       this.d.log(`identity: a line to the operator on Slack did not go (${reasonOf(err)})`);
     }
+  }
+}
+
+// ---- the transport ------------------------------------------------------------------------------------------------------------------
+
+/** the longest part a message is sent in, before escaping: 4,000 UTF-16 code units, well under chat.postMessage's 40,000 even escaped */
+export const SLACK_PART_MAX = 4_000;
+/** Slack's codes for a call that may go later (ruling 10); an HTTP 429 is one too, whatever its code */
+const SLACK_RETRY = new Set(["ratelimited", "service_unavailable", "request_timeout", "fatal_error"]);
+/** Slack's codes for tokens it no longer takes: the status reads pollFailing, the message is dropped */
+const SLACK_AUTH = new Set(["invalid_auth", "token_revoked", "account_inactive", "not_authed"]);
+
+export interface SlackTransportOptions {
+  /** the bot token's client, shared with the connector */
+  api: SlackApi;
+  /** the DM the operator was heard in: the one channel anything is ever posted to */
+  channel: string;
+  /** the app's two tokens, taken out of every text */
+  secrets: readonly string[];
+  /** the signal the client was made with: aborted at dispose, which cuts the connector's calls with it */
+  stop?: AbortController | undefined;
+}
+
+/**
+ * Sending on Slack: one part at a time to the bound DM with chat.postMessage, escaped (escapeSlack) and plain — mrkdwn off, no unfurls,
+ * top level: never with thread_ts, so `replyTo` is taken and not sent (ruling 3). Each part's wire id is `slack:<ts>`. A failure reads by
+ * ruling 10: a 429, a 5xx, a retryable code or anything that is not a Slack answer (a network failure, the deadline) `retry`; a token Slack no
+ * longer takes `auth`; every other code `refused`. Slack has no `blocked`.
+ */
+export class SlackTransport implements Transport {
+  readonly network = "slack" as const;
+  readonly secrets: readonly string[];
+  readonly partMax = SLACK_PART_MAX;
+  readonly api: SlackApi;
+  private readonly channel: string;
+  private readonly stop: AbortController | undefined;
+
+  constructor(o: SlackTransportOptions) {
+    this.api = o.api;
+    this.channel = o.channel;
+    this.secrets = [...o.secrets];
+    this.stop = o.stop;
+  }
+
+  async send(part: string, _replyTo?: string): Promise<string> {
+    return `slack:${await this.api.postMessage(this.channel, escapeSlack(part))}`;
+  }
+
+  classify(err: unknown): "retry" | "refused" | "blocked" | "auth" {
+    if (!(err instanceof SlackApiError)) return "retry";
+    // a 5xx with no code of Slack's (http_503) is Slack not answering, as service_unavailable says it
+    if (err.status === 429 || err.status >= 500 || SLACK_RETRY.has(err.code)) return "retry";
+    if (SLACK_AUTH.has(err.code)) return "auth";
+    return "refused";
+  }
+
+  dispose(): void {
+    this.stop?.abort();
   }
 }

@@ -21,7 +21,7 @@ import { senderRef } from "../../src/portfolio/identity/store.ts";
 import type { IdentityClock } from "../../src/portfolio/identity/telegram.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../../src/portfolio/server.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
-import { fakeBotApi, fakeSlack, FAKE_BOT_TOKEN, type FakeBotApi, type FakeSlack } from "../identity-fakes.ts";
+import { fakeBotApi, fakeSlack, FAKE_BOT_TOKEN, slackTokens, type FakeBotApi, type FakeSlack } from "../identity-fakes.ts";
 
 type NoNonce<T> = T extends unknown ? Omit<T, "nonce"> : never;
 const owner = simKey("owner");
@@ -500,7 +500,7 @@ describe("the connected Slack connector, through the account", () => {
     const file = push(dm({ subtype: "file_share", text: "", ts: "1730812900.000100" }));
     await acked(file);
     await until(() => slack.posted.length === 1);
-    expect(slack.posted).toEqual([{ channel: DM, text: "text only, please", mrkdwn: "false", unfurl_links: "false", unfurl_media: "false" }]);
+    expect(slack.posted).toEqual([{ ts: expect.any(String), channel: DM, text: "text only, please", mrkdwn: "false", unfurl_links: "false", unfurl_media: "false" }]);
     expect((await inbox(0, 0)).messages).toEqual([]);
     // the stranger, counted once, then blocked: never counted again
     await acked(push(dm({ user: "U0OTHER01", channel: "D0OTHERDM" })));
@@ -535,6 +535,20 @@ describe("the connected Slack connector, through the account", () => {
     expect((await inbox(0, 0)).messages.map((m) => m.text)).not.toContain("hello");
     // the chat-off text moved the cursor past it: a restart's backfill does not answer it again
     expect(cursor()).toBe("1730813103.000100");
+  });
+
+  it("a token pasted into the operator's text reaches the inbox as <token>, live and backfilled", async () => {
+    const more = slackTokens();
+    push(dm({ text: `bot ${slack.tokens.bot} app ${slack.tokens.app} user ${more.user}`, ts: "1730813200.000100" }));
+    const a = await inbox(0, 5);
+    expect(a.messages.map((m) => m.text)).toEqual(["bot <token> app <token> user <token>"]);
+    // a backfilled text the same: the socket cut, the text only in the DM's history
+    slack.history.push({ ts: "1730813201.000100", user: OP, text: `refresh ${more.refresh} and ${slack.tokens.bot}` });
+    slack.drop();
+    const b = await inbox(1, 8);
+    expect(b.messages.map((m) => m.text)).toEqual(["refresh <token> and <token>"]);
+    const stored = readFileSync(join(home, "identity", "inbox.json"), "utf8");
+    for (const t of [slack.tokens.bot, slack.tokens.app, more.user, more.refresh]) expect(stored).not.toContain(t);
   });
 
   it("a reconnect's own old socket is not a conflict; a second holder is", async () => {

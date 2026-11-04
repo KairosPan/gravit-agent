@@ -182,8 +182,8 @@ export interface FakeSlack {
   replies: Array<{ ts: string; thread_ts: string; user: string; text: string; subtype?: string; bot_id?: string }>;
   /** every ack's envelope_id, in order */
   acks: string[];
-  /** every chat.postMessage, its form fields as sent */
-  posted: Array<{ channel: string; text: string; mrkdwn: string; unfurl_links: string; unfurl_media: string; thread_ts?: string }>;
+  /** every chat.postMessage, its form fields as sent and the ts it was answered */
+  posted: Array<{ ts: string; channel: string; text: string; mrkdwn: string; unfurl_links: string; unfurl_media: string; thread_ts?: string }>;
   /** every Web API call, in order: the method, the request's URL and headers as sent, and its form */
   calls: Array<{ method: string; url: string; contentType: string; authorization: string; form: Record<string, string> }>;
   /** what happened to the sockets, in order: `open <n>` (n the count open after it) and `close <n>` */
@@ -318,7 +318,7 @@ export async function fakeSlack(o: FakeSlackOptions = {}): Promise<FakeSlack> {
       }
       case "chat.postMessage": {
         const ts = `${1_730_900_000 + posts}.${String(++posts).padStart(6, "0")}`;
-        posted.push({ channel: form.channel ?? "", text: form.text ?? "", mrkdwn: form.mrkdwn ?? "", unfurl_links: form.unfurl_links ?? "", unfurl_media: form.unfurl_media ?? "", ...(form.thread_ts !== undefined ? { thread_ts: form.thread_ts } : {}) });
+        posted.push({ ts, channel: form.channel ?? "", text: form.text ?? "", mrkdwn: form.mrkdwn ?? "", unfurl_links: form.unfurl_links ?? "", unfurl_media: form.unfurl_media ?? "", ...(form.thread_ts !== undefined ? { thread_ts: form.thread_ts } : {}) });
         history.push({ ts, user: bot.userId, text: form.text ?? "", bot_id: bot.botId });
         return reply(res, 200, { ok: true, channel: form.channel, ts, message: { type: "message", ts, text: form.text, bot_id: bot.botId } });
       }

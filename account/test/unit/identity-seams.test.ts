@@ -210,8 +210,8 @@ describe("the pending shell over a source", () => {
   });
 });
 
-describe("a Slack binding before Slack's transport is built", () => {
-  it("listens (here on a loopback port where nothing answers), sends nothing, and Telegram's words are untouched", async () => {
+describe("a Slack binding on a loopback port where nothing answers", () => {
+  it("listens, queues what it cannot send, and Telegram's words are untouched", async () => {
     const home = newHome();
     writeNetworkSecret(home, "slack", SLACK_SECRET);
     const s = loadIdentity(home);
@@ -226,7 +226,10 @@ describe("a Slack binding before Slack's transport is built", () => {
       expect(lines.some((l) => l.includes("apps.connections.open failed"))).toBe(true);
       expect(id.phoneStatus().networks[0]!.pollFailing).toEqual({ since: expect.any(String), reason: expect.any(String) });
       for (const t of [SLACK_SECRET.botToken, SLACK_SECRET.appToken]) expect(lines.join("\n")).not.toContain(t);
-      expect(await id.send({ kind: "chat", text: "hi", network: "slack" })).toEqual({ ok: true, held: "nothing connected" });
+      // Slack's transport is built with its connector: a network failure waits in the outbox, said without a token
+      expect(await id.send({ kind: "chat", text: "hi", network: "slack" })).toEqual({ ok: true, queued: true });
+      expect(id.phoneStatus().queued).toBe(1);
+      for (const t of [SLACK_SECRET.botToken, SLACK_SECRET.appToken]) expect(lines.join("\n")).not.toContain(t);
       expect(id.problem({ type: "disconnectNetwork", network: "telegram", nonce: 1 } as IdentityAction)).toBe(IDENTITY_WORDS.notConnectedOn("telegram"));
       expect(id.problem({ type: "disconnectNetwork", network: "slack", nonce: 1 } as IdentityAction)).toBeNull();
     } finally {

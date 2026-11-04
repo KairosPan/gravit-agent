@@ -19,7 +19,7 @@ import { Outbox } from "../../src/portfolio/identity/outbox.ts";
 import type { PendingView } from "../../src/portfolio/identity/pending.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../../src/portfolio/server.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
-import { fakeBotApi, FAKE_BOT_TOKEN, type FakeBotApi } from "../identity-fakes.ts";
+import { fakeBotApi, FAKE_BOT_TOKEN, slackTokens, type FakeBotApi } from "../identity-fakes.ts";
 
 type NoNonce<T> = T extends unknown ? Omit<T, "nonce"> : never;
 const TOKEN = FAKE_BOT_TOKEN;
@@ -217,6 +217,21 @@ describe("the send route, through the account", () => {
     expect(lower).not.toBe(encodeURIComponent(TOKEN));
     await send({ kind: "chat", text: `as ${lower} too` });
     expect(bot.sent.at(-1)!.text).toBe("as <token> too");
+  });
+
+  it("every Slack token shape is taken out of what Telegram is sent, and out of every line the identity logs", async () => {
+    const t = slackTokens();
+    await send({ kind: "chat", text: `a ${t.bot} b ${t.app} c ${t.user} d ${t.refresh}` });
+    expect(bot.sent.at(-1)!.text).toBe("a <token> b <token> c <token> d <token>");
+    // Telegram's refusal says a Slack token back: the line logged and the answer carry none
+    bot.answer("sendMessage", 400, { ok: false, error_code: 400, description: `Bad Request: ${t.user} ${t.bot}` });
+    const r = await send({ kind: "chat", text: "x" });
+    expect(r.ok).toBe(false);
+    expect(said.some((l) => l.includes("Telegram refused a message"))).toBe(true);
+    for (const tok of Object.values(t)) {
+      expect(said.join("\n")).not.toContain(tok);
+      expect(JSON.stringify(r)).not.toContain(tok);
+    }
   });
 
   it("a send Telegram cannot take waits in the outbox and goes first, late after 2 minutes", async () => {
