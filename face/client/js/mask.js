@@ -83,18 +83,31 @@ export const memoSize = () => memo.size;
 export function maskSpans(text) {
   const key = String(text ?? '');
   let runs = memo.get(key);
-  if (runs) return runs;
+  // least recently used first: a hit moves to the back, and a full memo drops its front entry, one at a time, so a
+  // render's working set above the cap (operator runs, row previews, snippets, a streaming preview) never thrashes it
+  if (runs) { memo.delete(key); memo.set(key, runs); return runs; }
   runs = Object.freeze(scan(key).map(run => Object.freeze(run)));
   if (key.length > MEMO_TEXT_MAX) return runs;
-  if (memo.size >= MEMO_MAX) memo.clear();
+  while (memo.size >= MEMO_MAX) memo.delete(memo.keys().next().value);
   memo.set(key, runs);
   return runs;
+}
+
+// the left clip: an excerpt cut on its left whose first token is a long run of key characters (16 or more) is masked
+// whole, its length kept — no shape can be told from a key's tail, so any long opaque token is taken for one
+const LEFT_TOKEN = /^[A-Za-z0-9_+/=-]{16,}$/;
+function leftClip(out) {
+  if (!out.startsWith('…')) return out;
+  let end = 1;
+  while (end < out.length && !/\s/.test(out[end])) end += 1;
+  if (end === out.length && end > 1 && out.endsWith('…')) end -= 1;
+  return LEFT_TOKEN.test(out.slice(1, end)) ? '…' + '*'.repeat(end - 1) + out.slice(end) : out;
 }
 
 export function maskExcerpt(text) {
   const source = String(text ?? '');
   const runs = maskSpans(source);
-  const out = runs.map(run => (run.type === 'secret' ? run.masked : run.text)).join('');
+  const out = leftClip(runs.map(run => (run.type === 'secret' ? run.masked : run.text)).join(''));
   if (!out.endsWith('…')) return out;
   // the clip rule: within the token before the ellipsis (back to whitespace), the earliest position at the token's
   // start or after a non-word character where a prefix begins — so KEY=sk-…, "key":"sk-… and token:ghp_… clip too

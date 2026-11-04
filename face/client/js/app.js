@@ -1601,6 +1601,7 @@ export function boot(win, host = {}) {
       store.dispatch('openLightbox', { attachmentId: id, name: el.dataset.name ?? '' });
     },
     // a key's eye in the operator's bubble shows or hides it (display only); its id keeps the focus on it as its label flips
+    // (a reveal is lost when an optimistic bubble is re-keyed to its seq id: D26 accepts it)
     toggleSecret: el => {
       const open = currentConversation(store.get());
       const id = el.dataset.secret ?? '';

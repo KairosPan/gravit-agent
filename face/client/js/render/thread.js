@@ -104,8 +104,10 @@ function trace(m, conv, state) {
 // a key in the operator's words (spec §5.9, D25): its original in the raw run, under its mask until the eye reveals it;
 // the eye names the message's nth secret, and a reveal is `<convId>|<msgId>|<n>` in the page's set (app.js)
 function secret(run, id, shown) {
-  const mask = shown ? '' : `<span class="secret-mask" aria-hidden="true">${esc(run.masked)}</span>`;
-  return `<span${attrs({ class: cls('secret', shown && 'revealed'), 'data-secret': id })}><span class="secret-raw">${esc(run.text)}</span>${mask}</span>` +
+  // until revealed a screen reader hears neither the original nor the asterisks, only that a secret is hidden (the label,
+  // not a text node, which a copy would take)
+  const mask = shown ? '' : `<span class="secret-mask" role="img" aria-label="secret, hidden">${esc(run.masked)}</span>`;
+  return `<span${attrs({ class: cls('secret', shown && 'revealed'), 'data-secret': id })}><span${attrs({ class: 'secret-raw', 'aria-hidden': shown ? null : 'true' })}>${esc(run.text)}</span>${mask}</span>` +
     `<button${attrs({ type: 'button', class: 'secret-eye', id: `secret-${id}`, 'data-action': 'toggleSecret', 'data-secret': id, 'aria-label': shown ? 'Hide secret' : 'Show secret' })}>${icon(shown ? 'eyeOff' : 'eye', 14)}</button>`;
 }
 

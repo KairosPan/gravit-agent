@@ -367,7 +367,7 @@ const SK2 = 'ghp_' + 'aB3dE6fG9h'.repeat(4);
 
 test("the operator's key is drawn masked with its eye, the original in the raw run", () => {
   const h = renderMessage(msg({ id: 'e1', from: 'you', text: `use ${SK} now` }), conv(), state);
-  assert.match(h, new RegExp(`bubble you">use <span class="secret" data-secret="e1-0"><span class="secret-raw">${SK}</span><span class="secret-mask" aria-hidden="true">sk-proj-\\*{${SK.length - 8}}</span></span>` +
+  assert.match(h, new RegExp(`bubble you">use <span class="secret" data-secret="e1-0"><span class="secret-raw" aria-hidden="true">${SK}</span><span class="secret-mask" role="img" aria-label="secret, hidden">sk-proj-\\*{${SK.length - 8}}</span></span>` +
     '<button type="button" class="secret-eye" id="secret-e1-0" data-action="toggleSecret" data-secret="e1-0" aria-label="Show secret"><svg width="14" height="14"'));
   assert.match(h, /<\/button> now<\/div>/);
   assert.ok(h.includes(MASKED));
@@ -376,10 +376,11 @@ test("the operator's key is drawn masked with its eye, the original in the raw r
 test('two keys in one message are secrets 0 and 1; a revealed one draws Hide secret and no mask', () => {
   const m = msg({ id: 'ev-9', from: 'you', text: `${SK} and ${SK2}` });
   const h = renderThread(conv({ messages: [m] }), state, NOW, { revealed: new Set(['s1|ev-9|1']) });
-  assert.match(h, /<span class="secret" data-secret="ev-9-0"><span class="secret-raw">/);
+  assert.match(h, /<span class="secret" data-secret="ev-9-0"><span class="secret-raw" aria-hidden="true">sk-proj-[^<]*<\/span><span class="secret-mask" role="img" aria-label="secret, hidden">/);
   assert.match(h, /id="secret-ev-9-0" data-action="toggleSecret" data-secret="ev-9-0" aria-label="Show secret"/);
   assert.match(h, new RegExp(`<span class="secret revealed" data-secret="ev-9-1"><span class="secret-raw">${SK2}</span></span><button type="button" class="secret-eye" id="secret-ev-9-1" data-action="toggleSecret" data-secret="ev-9-1" aria-label="Hide secret">`));
   assert.equal((h.match(/secret-mask/g) ?? []).length, 1, 'the revealed one has no mask');
+  assert.equal((h.match(/aria-hidden="true">sk-proj-|aria-hidden="true">ghp_/g) ?? []).length, 1, 'only the masked one hides its raw run from a screen reader');
   // a reveal names its conversation: the same message id elsewhere stays masked
   const other = renderThread(conv({ id: 's2', messages: [m] }), state, NOW, { revealed: new Set(['s1|ev-9|1']) });
   assert.equal((other.match(/secret-mask/g) ?? []).length, 2);
@@ -406,8 +407,8 @@ test("a conversation chip beside a key keeps its chip, and a secret's text is es
   const text = `@[Old](${sessionUri('s9')}) ${SK} https://me:p<b>w@host/x`;
   const h = renderMessage(msg({ id: 'e2', from: 'you', text }), conv(), state);
   assert.match(h, /<span class="ref-chip">/);
-  assert.match(h, /data-secret="e2-0"><span class="secret-raw">sk-proj-/);
-  assert.match(h, /data-secret="e2-1"><span class="secret-raw">p&lt;b&gt;w<\/span><span class="secret-mask" aria-hidden="true">\*{5}<\/span>/);
+  assert.match(h, /data-secret="e2-0"><span class="secret-raw" aria-hidden="true">sk-proj-/);
+  assert.match(h, /data-secret="e2-1"><span class="secret-raw" aria-hidden="true">p&lt;b&gt;w<\/span><span class="secret-mask" role="img" aria-label="secret, hidden">\*{5}<\/span>/);
   assert.doesNotMatch(h, /<b>/);
   assert.match(h, /https:\/\/me:<span class="secret"/);
 });

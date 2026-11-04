@@ -151,16 +151,15 @@ test('the same text twice returns the same runs (memoized)', () => {
   assert.equal(maskSpans(text), runs);
   assert.ok(Object.isFrozen(runs) && runs.every(run => Object.isFrozen(run)), 'cached runs are frozen');
   assert.equal(MEMO_MAX, 500);
-  let cleared = false;
   for (let i = 0; i < MEMO_MAX + 100; i += 1) {
     const size = memoSize();
     maskSpans(`filler ${i}`);
     assert.ok(memoSize() <= MEMO_MAX);
-    if (memoSize() < size) cleared = true;
+    assert.ok(memoSize() >= size, 'never cleared whole: the oldest entry goes, one at a time');
   }
-  assert.ok(cleared, 'cleared when full');
+  assert.equal(memoSize(), MEMO_MAX);
   const again = maskSpans(text);
-  assert.notEqual(again, runs, 'the clear dropped the old entry');
+  assert.notEqual(again, runs, 'the least recently used entry was evicted');
   assert.deepEqual(again, runs);
   assert.equal(maskSpans(text), again);
 });
@@ -195,4 +194,29 @@ test('a URL password stops at a comma, a colon or a bracket', () => {
   assert.deepEqual(secrets('see (http://localhost:3000) then me@x.com'), []);
   assert.equal(maskExcerpt('redis://:s3cret@cache:6379'), 'redis://:******@cache:6379', 'an empty user too');
   assert.equal(maskExcerpt('amqp://guest:gu3st!@mq'), 'amqp://guest:******@mq');
+});
+
+test('the memo is an LRU: a working set of 600 texts scanned twice keeps the last 500 as hits, with no full clear', () => {
+  const texts = Array.from({ length: 600 }, (_, i) => `lru ${i} ${SAMPLES.hf}`);
+  const first = texts.map(t => maskSpans(t));
+  assert.equal(memoSize(), MEMO_MAX);
+  // the last 500 are held: each is the same frozen runs again
+  for (let i = 100; i < 600; i += 1) assert.equal(maskSpans(texts[i]), first[i], `hit ${i}`);
+  // a hit is used again: touching text 100 keeps it while a new text evicts the oldest (101)
+  maskSpans(texts[100]);
+  maskSpans('lru new');
+  assert.equal(maskSpans(texts[100]), first[100], 'a recently used entry survives');
+  assert.notEqual(maskSpans(texts[101]), first[101], 'the least recently used went');
+  assert.equal(memoSize(), MEMO_MAX);
+});
+
+test('an excerpt cut on its left masks a leading token of 16 or more key characters, its length kept (a widening of the clip rule)', () => {
+  const body = 'aB3dE6fG9hJ2kL5mN8pQ1rS4';
+  const out = maskExcerpt(`…${body} the zz end`);
+  assert.equal(out, `…${'*'.repeat(body.length)} the zz end`);
+  assert.equal(out.length, body.length + 12);
+  assert.equal(maskExcerpt('…ing the end'), '…ing the end', 'a short leading word stays');
+  assert.equal(maskExcerpt('…abcdefghijklmno x'), '…abcdefghijklmno x', '15 characters stay');
+  assert.equal(maskExcerpt('…a+/=-_0123456789AB x'), `…${'*'.repeat(18)} x`);
+  assert.equal(maskExcerpt('no ellipsis aB3dE6fG9hJ2kL5mN8pQ1rS4'), 'no ellipsis aB3dE6fG9hJ2kL5mN8pQ1rS4', 'only a cut excerpt');
 });

@@ -510,6 +510,8 @@ test('a masked value: a mono box whose raw run lies transparent over its mask, t
   assert.match(css, /\.secret\s*\{[^}]*background: var\(--surface-2\)[^}]*border-radius: var\(--radius-s\)/);
   assert.match(css, /\.secret-raw\s*\{[^}]*position: absolute[^}]*color: transparent/);
   assert.match(css, /\.secret-mask\s*\{[^}]*user-select: none/);
+  assert.match(css, /\.secret-raw\s*\{[^}]*forced-color-adjust: none/);
+  assert.match(css, /\.secret:not\(\.revealed\) \.secret-raw::selection\s*\{[^}]*color: transparent/);
   assert.match(css, /\.secret\.revealed \.secret-raw\s*\{[^}]*position: static[^}]*color: var\(--text\)/);
   assert.match(css, /\.secret-eye\s*\{[^}]*width: 20px[^}]*height: 20px/);
 });
