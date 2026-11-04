@@ -43,7 +43,11 @@ export function startAttachments({ call, upload = uploadFile, store }) {
         const v = await call('session/attachment', { request: { sessionId, attachmentId } });
         const mediaType = v?.attachment?.mediaType;
         if (typeof mediaType === 'string' && typeof v?.data === 'string') src = `data:${mediaType};base64,${v.data}`;
-      } catch { /* null: the thread draws a card */ }
+      } catch (e) {
+        // a carrier failure (an HTTP status, or no host code) says nothing of the image: unmark it, a later read retries;
+        // a host refusal is the image's answer, null, and the thread draws a card
+        if (e?.status !== undefined || typeof e?.code !== 'string') { thumbs.delete(attachmentId); return; }
+      }
       store.dispatch('hostThumb', { attachmentId, src });
     },
   };

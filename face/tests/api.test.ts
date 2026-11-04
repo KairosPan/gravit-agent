@@ -1152,11 +1152,11 @@ test("an ok answer resolves the receipt; ok: false rejects with its code and det
   a.xhr.answer(200, JSON.stringify({ ok: true, value: receipt }));
   assert.deepEqual(await a.handle.done, receipt);
   const b = upload();
-  b.xhr.answer(200, JSON.stringify({ ok: false, error: { code: "file-upload/too-large", message: "too big", details: { limit: 1 } } }));
+  b.xhr.answer(200, JSON.stringify({ ok: false, error: { code: "session/attachment-invalid", message: "file too large", details: { reason: "FILE_TOO_LARGE" } } }));
   await assert.rejects(b.handle.done, (e: any) => {
-    assert.equal(e.code, "file-upload/too-large");
-    assert.deepEqual(e.details, { limit: 1 });
-    assert.match(e.message, /too big/);
+    assert.equal(e.code, "session/attachment-invalid");
+    assert.deepEqual(e.details, { reason: "FILE_TOO_LARGE" });
+    assert.match(e.message, /file too large/);
     return true;
   });
 });
@@ -1168,6 +1168,9 @@ test("a 401 rejects as not signed in, a 415 with its status, a body that is not 
   const b = upload();
   b.xhr.answer(415, "unsupported media type");
   await assert.rejects(b.handle.done, (e: any) => e.status === 415 && e.code === undefined);
+  const f = upload();
+  f.xhr.answer(403, "forbidden");
+  await assert.rejects(f.handle.done, (e: any) => e.status === 403 && /Host\/Origin fence/.test(e.message));
   const c = upload();
   c.xhr.answer(200, "<html>");
   await assert.rejects(c.handle.done, (e: any) => e.code === "bad-response");
@@ -1181,4 +1184,32 @@ test("abort rejects with aborted and aborts the request", async () => {
   handle.abort();
   assert.equal(xhr.aborted, true);
   await assert.rejects(handle.done, (e: any) => e.code === "aborted");
+});
+
+test("a transport failure rejects with neither status nor code", async () => {
+  const { xhr, handle } = upload();
+  xhr.fail();
+  await assert.rejects(handle.done, (e: any) => e.status === undefined && e.code === undefined && /request failed/.test(e.message));
+});
+
+test("progress after the upload settles is dropped; a late answer after abort does not resolve", async () => {
+  const seen: number[] = [];
+  const a = upload({ onProgress: (n: number) => seen.push(n) });
+  a.xhr.answer(200, JSON.stringify({ ok: true, value: receipt }));
+  a.xhr.progress(3, 3);
+  await a.handle.done;
+  assert.deepEqual(seen, []);
+  const b = upload();
+  b.handle.abort();
+  b.xhr.answer(200, JSON.stringify({ ok: true, value: receipt }));
+  await assert.rejects(b.handle.done, (e: any) => e.code === "aborted");
+});
+
+test("a browser-side abort or timeout rejects as aborted", async () => {
+  for (const event of ["onabort", "ontimeout"] as const) {
+    const { xhr, handle } = upload();
+    (xhr as any)[event]?.();
+    const result = await Promise.race([handle.done.then(() => "resolved", (e: any) => e.code), new Promise((r) => setTimeout(() => r("pending"), 20))]);
+    assert.equal(result, "aborted", event);
+  }
 });

@@ -295,6 +295,11 @@ async function binaryEnvelope(res, endpoint) {
   return { ...envelope, result: { ok: true, value: root.value } };
 }
 
+/** The words a 403 carries: the host's Host/Origin fence refused this page's name. @param {number} status */
+function fenceHint(status) {
+  return status === 403 ? " (the host's Host/Origin fence refused this page: open it at the printed 127.0.0.1 URL)" : "";
+}
+
 /**
  * Call one unary host method.
  *
@@ -334,8 +339,7 @@ export async function call(endpoint, args = {}) {
   }
   if (!res.ok) {
     const detail = (await res.text().catch(() => "")).slice(0, 200);
-    const hint = res.status === 403 ? " (the host's Host/Origin fence refused this page: open it at the printed 127.0.0.1 URL)" : "";
-    throw callError(`${endpoint}: HTTP ${res.status} ${detail}${hint}`.trim(), { status: res.status });
+    throw callError(`${endpoint}: HTTP ${res.status} ${detail}${fenceHint(res.status)}`.trim(), { status: res.status });
   }
   const mediaType = res.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   /** @type {any} */ let body;
@@ -393,7 +397,8 @@ export function uploadFile({ sessionId, name, blob, onProgress = () => {}, makeX
       return;
     }
     if (xhr.status !== 200) {
-      reject(callError(`${what}: HTTP ${xhr.status} ${String(xhr.responseText ?? "").slice(0, 200)}`.trim(), { status: xhr.status }));
+      const detail = String(xhr.responseText ?? "").slice(0, 200);
+      reject(callError(`${what}: HTTP ${xhr.status} ${detail}${fenceHint(xhr.status)}`.trim(), { status: xhr.status }));
       return;
     }
     /** @type {any} */ let body;
@@ -411,12 +416,16 @@ export function uploadFile({ sessionId, name, blob, onProgress = () => {}, makeX
       reject(callError(`${what}: bad-response - not an upload answer`, { code: "bad-response" }));
     }
   });
+  const aborted = () => settle(() => reject(callError(`${what}: aborted`, { code: "aborted" })));
   xhr.onerror = () => settle(() => reject(callError(`${what}: the request failed`)));
+  // the browser may end the request itself (a navigation, a timeout): `done` never stays pending
+  xhr.onabort = aborted;
+  xhr.ontimeout = aborted;
   xhr.send(blob);
   return {
     done,
     abort() {
-      settle(() => reject(callError(`${what}: aborted`, { code: "aborted" })));
+      aborted();
       xhr.abort();
     },
   };

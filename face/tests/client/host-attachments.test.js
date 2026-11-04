@@ -76,7 +76,7 @@ test('an upload resolves its receipt id', async () => {
 test('a thumb is read once per attachment and lands as a data URL, or null on a throw', async () => {
   const d = deferred();
   const r = rig(async (endpoint, args) => {
-    if (args.request.attachmentId === 'bad') throw new Error('gone');
+    if (args.request.attachmentId === 'bad') throw Object.assign(new Error('gone'), { code: 'session/attachment-invalid' });
     return d.promise;
   });
   const first = r.attachments.thumb('s1', 'a1');
@@ -90,4 +90,33 @@ test('a thumb is read once per attachment and lands as a data URL, or null on a 
   await r.attachments.thumb('s1', 'bad'); await settle();
   assert.equal(r.store.get().thumbs.bad, null);
   assert.ok(Object.hasOwn(r.store.get().thumbs, 'bad'));
+});
+
+test('a carrier failure leaves a thumb free to read again; a refusal or a bad answer lands as null for good', async () => {
+  let n = 0;
+  const carrier = rig(async () => { if (n++ === 0) throw Object.assign(new Error('HTTP 502'), { status: 502 }); return { attachment: { mediaType: 'image/png' }, data: 'AA==' }; });
+  await carrier.attachments.thumb('s1', 'a1'); await settle();
+  assert.equal(Object.hasOwn(carrier.store.get().thumbs, 'a1'), false, 'nothing cached on a carrier failure');
+  await carrier.attachments.thumb('s1', 'a1'); await settle();
+  assert.equal(carrier.store.get().thumbs.a1, 'data:image/png;base64,AA==');
+  assert.equal(carrier.calls.length, 2);
+
+  const codeless = rig(async () => { throw new Error('socket hang up'); });
+  await codeless.attachments.thumb('s1', 'a1'); await codeless.attachments.thumb('s1', 'a1');
+  assert.equal(codeless.calls.length, 2, 'an error with no code is a carrier failure too');
+
+  const refused = rig(async () => { throw Object.assign(new Error('no'), { code: 'session/attachment-invalid' }); });
+  await refused.attachments.thumb('s1', 'a1'); await refused.attachments.thumb('s1', 'a1');
+  assert.equal(refused.store.get().thumbs.a1, null);
+  assert.equal(refused.calls.length, 1);
+
+  const malformed = rig(async () => ({ attachment: {}, data: 7 }));
+  await malformed.attachments.thumb('s1', 'a1'); await malformed.attachments.thumb('s1', 'a1');
+  assert.equal(malformed.store.get().thumbs.a1, null);
+  assert.equal(malformed.calls.length, 1);
+});
+
+test('the fake XHR refuses a header before open, as a real one does', async () => {
+  const { fakeXhr } = await import('./helpers/fake-xhr.js');
+  assert.throws(() => fakeXhr().setRequestHeader('content-type', 'x'));
 });
