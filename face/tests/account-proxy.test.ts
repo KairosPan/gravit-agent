@@ -72,6 +72,15 @@ const NEW_READS: ReadonlyArray<readonly [face: string, account: string, route: "
   ["/data/account/sellable", "/api/account/sellable", "sellable", ""],
   ["/data/account/signin/status", "/api/account/signin/status", "signinStatus", "state=s1"],
 ];
+/** The five connected reads (plan A2), in the order they are registered after the eight: the Account path, the route
+ * each mirrors, and a query of its names. */
+const CONNECTED: ReadonlyArray<readonly [face: string, account: string, mirrors: "explore" | "quotes" | "candles" | "book" | "trades", query: string]> = [
+  ["/data/account/connected/explore", "/api/account/connected/explore", "explore", "tab=crypto&q=BTC&key=crypto%3ABTC&sort=volume&limit=20"],
+  ["/data/account/connected/quotes", "/api/account/connected/quotes", "quotes", "pairs=paper-1%7CBTC%2FUSDT"],
+  ["/data/account/connected/candles", "/api/account/connected/candles", "candles", "venue=paper-1&symbol=BTC%2FUSDT&interval=1h&range=1d&before=1&limit=100"],
+  ["/data/account/connected/book", "/api/account/connected/book", "book", "venue=paper-1&symbol=BTC%2FUSDT&depth=20"],
+  ["/data/account/connected/trades", "/api/account/connected/trades", "trades", "venue=paper-1&symbol=BTC%2FUSDT&limit=50"],
+];
 const STREAM = "/data/account/stream";
 const CALLBACK = "/data/account/signin/callback";
 /** A venue's page sending the browser back: a top-level GET document navigation, cross-site, no Origin. */
@@ -196,13 +205,13 @@ test("rebuildQuery: the whitelist, once each, 240 characters, fresh stripped", (
   assert.deepEqual(rebuildQuery("account", "/data/account"), { query: "", fresh: false });
 });
 
-test("the routes: thirty-eight exact paths, the callback last; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
+test("the routes: forty-three exact paths, the callback last; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
   const { routes, fetched } = proxyWith(answering(OK_BODY));
   const paths = [
-    ...ROUTES.map(([face]) => face), ...NEW_READS.map(([face]) => face), STREAM, FOLLOW,
+    ...ROUTES.map(([face]) => face), ...NEW_READS.map(([face]) => face), ...CONNECTED.map(([face]) => face), STREAM, FOLLOW,
     ...WRITES.map(([face]) => face), ...NEW_WRITES.map(([face]) => face), CALLBACK,
   ];
-  assert.equal(paths.length, 38);
+  assert.equal(paths.length, 43, "forty-three until Task 7 drops the five public reads");
   assert.ok(routes.every((r) => r.kind === "exact"), "no prefix route");
   assert.deepEqual(routes.map((r) => `${r.kind} ${r.path}`), paths.map((face) => `exact ${face}`));
   for (const face of paths) {
@@ -297,6 +306,11 @@ test("a repeated or unknown name, an over-long value: 400 invalid account reques
     earn: ["venue", "asset", "fresh"],
     sellable: ["fresh"],
     signinStatus: ["state"],
+    connectedExplore: ["tab", "q", "key", "sort", "limit"],
+    connectedQuotes: ["pairs"],
+    connectedCandles: ["venue", "symbol", "interval", "range", "before", "limit"],
+    connectedBook: ["venue", "symbol", "depth"],
+    connectedTrades: ["venue", "symbol", "limit"],
   });
   assert.equal((await call(routes, `/data/account/explore?q=${"x".repeat(240)}`)).status, 200, "240 characters pass");
   assert.deepEqual(fetched, [`${URL_}/api/account/explore?q=${"x".repeat(240)}`]);
@@ -367,6 +381,7 @@ test("two reads within the TTL fetch once; ?fresh=1 fetches again and never join
     holdings: 8_000, positions: 10_000, statement: 10_000, history: 60_000, agents: 15_000,
     venues: 60_000, reach: 5_000, keyfile: 5_000, books: 5_000,
     asset: 5_000, book: 2_000, trades: 2_000, funding: 60_000, receive: 60_000, earn: 15_000, sellable: 5_000, signinStatus: 1_000,
+    connectedExplore: 20_000, connectedQuotes: 3_000, connectedCandles: 30_000, connectedBook: 2_000, connectedTrades: 2_000,
   });
   let clock = NOW;
   const { routes, fetched, proxy } = proxyWith(answering(OK_BODY), () => clock);
@@ -453,6 +468,7 @@ test("an unreachable, hanging, refusing or unreadable Account: 503 with the code
     holdings: 12_000, positions: 7_000, statement: 7_000, history: 12_000, agents: 7_000,
     venues: 30_000, reach: 30_000, keyfile: 30_000, books: 30_000,
     asset: 25_000, book: 7_000, trades: 7_000, funding: 12_000, receive: 30_000, earn: 30_000, sellable: 30_000, signinStatus: 7_000,
+    connectedExplore: 10_000, connectedQuotes: 7_000, connectedCandles: 25_000, connectedBook: 7_000, connectedTrades: 7_000,
   });
   const refused = proxyWith(async () => { throw Object.assign(new TypeError("fetch failed secret-host-name"), { cause: { code: "ECONNREFUSED" } }); });
   const a = await call(refused.routes, "/data/account/holdings?cost=1");
@@ -1205,4 +1221,38 @@ test("the quotes reader reads through the quotes route's cache", async () => {
 
   const off = registerAccountProxy({ register() {} }, { disabled: true });
   assert.deepEqual(await off.quotes(query), { unreachable: "disabled" });
+});
+
+test("the connected reads go to /api/account/connected/*", async () => {
+  const route = { explore: "connectedExplore", quotes: "connectedQuotes", candles: "connectedCandles", book: "connectedBook", trades: "connectedTrades" } as const;
+  for (const [face, account, mirrors, query] of CONNECTED) {
+    const own = route[mirrors];
+    assert.deepEqual(ACCOUNT_QUERY[own], ACCOUNT_QUERY[mirrors], `${own}'s names are ${mirrors}'s`);
+    assert.equal(ACCOUNT_TTL_MS[own], ACCOUNT_TTL_MS[mirrors], `${own}'s TTL is ${mirrors}'s`);
+    assert.equal(ACCOUNT_ABORT_MS[own], ACCOUNT_ABORT_MS[mirrors], `${own}'s abort is ${mirrors}'s`);
+    let clock = NOW;
+    const { routes, fetched } = proxyWith(answering(OK_BODY), () => clock);
+    const unknown = await call(routes, `${face}?${query}&force=1`);
+    assert.equal(unknown.status, 400, `${face}: an unknown name`); assert.equal(unknown.body, INVALID);
+    assert.equal(fetched.length, 0, `${face}: nothing fetched for an unknown name`);
+    const a = await call(routes, `${face}?${query}`);
+    assert.equal(a.status, 200, face); assert.equal(a.body, OK_BODY);
+    assert.equal(fetched[0], `${URL_}${account}?${query}`, `${face}: the account's connected path, the query rebuilt in order`);
+    await call(routes, `${face}?${query}`);
+    assert.equal(fetched.length, 1, `${face}: a second read inside the TTL fetches once`);
+    clock += ACCOUNT_TTL_MS[own];
+    await call(routes, `${face}?${query}`);
+    assert.equal(fetched.length, 2, `${face}: the TTL expires`);
+  }
+  const pairs = Array.from({ length: 12 }, (_, i) => `paper-1|${"X".repeat(150)}${i}`).join(",");
+  const { routes, fetched } = proxyWith(answering(OK_BODY));
+  const long = await call(routes, `/data/account/connected/quotes?pairs=${encodeURIComponent(pairs)}`);
+  assert.equal(long.status, 200, "pairs keeps its own 2 000 on the connected quotes too");
+  assert.equal(fetched.length, 1);
+  const disabled = proxyWith(answering(OK_BODY), () => NOW, { disabled: true });
+  for (const [face, , , query] of CONNECTED) {
+    const d = await call(disabled.routes, `${face}?${query}`);
+    assert.equal(d.status, 503, face); assert.equal(d.body, DISABLED);
+  }
+  assert.equal(disabled.fetched.length, 0, "a disabled seat row asks nothing");
 });

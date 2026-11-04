@@ -11,6 +11,7 @@
  * lands in the operator's `~/.buyer-agent-demo`. This is the canary for the
  * Account moving under the face: a renamed write tool falls out of the gate's
  * list here, not offline. */
+import { DEAD_MARKET_URL } from "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
@@ -62,6 +63,8 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
         toolCallTimeoutMs: 90_000, failOnStartupError: false,
       },
     } as unknown as FacePatchList[number]];
+    /* The mcp-market row, spawned at the boot, points at the stand-in's own market, never a live one on 4821. */
+    process.env.FACE_MARKET_URL = standin.marketUrl;
     const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot(), extraPatches });
     dispose = booted.dispose;
     const { ctx } = booted;
@@ -87,8 +90,8 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
     assert.deepEqual(audit.uncovered, [], "the seat is covered");
     for (const read of ["portfolio_account", "portfolio_holdings", "portfolio_wait", "portfolio_live_preview", "portfolio_live_candles", "portfolio_live_book"]) assert.ok(seatNames.includes(`${SEAT_TOOL_PREFIX}${read}`), read);
     for (const moved of ["portfolio_explore", "portfolio_candles", "portfolio_book", "portfolio_akshare"]) assert.equal(seatNames.includes(`${SEAT_TOOL_PREFIX}${moved}`), false, `${moved} left the seat`);
-    /* The market row (src/market-row.ts) mounts beside the seat from the repo's market/: its five keyless reads, none carded. No
-     * market tool is called here, so no market service is asked. */
+    /* The market row (src/market-row.ts) mounts beside the seat from the repo's market/: its five keyless reads, none carded,
+     * pointed at the stand-in's own market (step 4b reads it). */
     let marketNames: string[] = [];
     while (Date.now() < deadline) {
       marketNames = tools.schemas().map((schema) => schema.name).filter((name) => name.startsWith(MARKET_TOOL_PREFIX)).sort();
@@ -123,6 +126,13 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
     assert.equal(standing.seat?.authorised, true, JSON.stringify(standing.seat));
     assert.ok(standing.paperVenues?.includes("paper-momentum"), JSON.stringify(standing.paperVenues));
     assert.equal(seen.length, 0, "no card for a read");
+
+    /* 4b. The market row reads the stand-in's own market (FACE_MARKET_URL above), never a live one: its BTC, no card. */
+    const explored = await run("market-explore", `${MARKET_TOOL_PREFIX}market_explore`, { q: "BTC", limit: 5 });
+    assert.equal(explored.isError, false, textOf(explored).slice(0, 400));
+    const rows = (JSON.parse(textOf(explored)) as { items?: { base?: string }[] }).items ?? [];
+    assert.ok(rows.some((row) => String(row.base).toUpperCase() === "BTC"), `the stand-in market's BTC: ${textOf(explored).slice(0, 400)}`);
+    assert.equal(seen.length, 0, "no card for a market read");
 
     /* 5. A market at the stand-in's exchange, where the seeded agent holds a
      * trade limit. */
@@ -178,6 +188,7 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
     assert.ok((view.cards?.length ?? 0) >= 1, `the card the seat raised waits for the owner under Account › Cards: ${JSON.stringify(view.cards)}`);
     assert.ok(view.cards?.some((c) => c.id === answered.card?.id), "and it is that card");
   } finally {
+    process.env.FACE_MARKET_URL = DEAD_MARKET_URL;
     for (const off of cleanups) off();
     if (dispose) await dispose();
     await stopStandin(standin);

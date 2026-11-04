@@ -1,12 +1,13 @@
 /** The desk's quotes from the Market's reads (src/market-quotes.ts marketQuotes): a US share by one explore read per
  * symbol through the proxy's `explore` route, an A share by the proxy's `quotes` route twelve pairs at a time, a row's
- * timed price as the quote, and every failure honest - no price invented. The Account is a local stub server; nothing
+ * timed price as the quote, and every failure honest - no price invented. The market is a local stub server; nothing
  * leaves 127.0.0.1. */
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { registerAccountProxy, type AccountAnswer } from "../src/account-proxy.ts";
+import type { UpstreamAnswer } from "../src/upstream-proxy.ts";
+import { registerMarketProxy } from "../src/market-proxy.ts";
 import { HttpError } from "../src/http.ts";
 import { CN_QUOTES_BATCH, feedOf, marketQuotes, type MarketQuoteIdentity } from "../src/market-quotes.ts";
 import { buildBrief } from "../src/brief.ts";
@@ -18,11 +19,11 @@ const us = (symbol: string): MarketQuoteIdentity => ({ id: `us:${symbol}`, marke
 const cn = (symbol: string): MarketQuoteIdentity => ({ id: `cn:${symbol}`, market: "cn", symbol });
 const noRoutes: RouteRegistrar = { register() {} } as unknown as RouteRegistrar;
 /** A read that is never asked: the test's other market's. */
-const unasked = async (): Promise<AccountAnswer> => { throw new Error("not asked in this test"); };
+const unasked = async (): Promise<UpstreamAnswer> => { throw new Error("not asked in this test"); };
 
-/** A stub Account answering `GET /api/account/explore` (and `GET /api/account/quotes`, when `quotes` is given),
+/** A stub market answering `GET /api/explore` (and `GET /api/quotes`, when `quotes` is given),
  * recording each query. */
-async function stubAccount(
+async function stubMarket(
   answer: (q: URLSearchParams) => { status: number; body: unknown },
   quotes?: (q: URLSearchParams) => { status: number; body: unknown },
 ): Promise<{ url: string; asked: URLSearchParams[]; quoted: URLSearchParams[]; server: Server }> {
@@ -30,13 +31,13 @@ async function stubAccount(
   const quoted: URLSearchParams[] = [];
   const server = createServer((req, res) => {
     const u = new URL(req.url ?? "/", "http://x");
-    if (u.pathname === "/api/account/quotes" && quotes !== undefined) {
+    if (u.pathname === "/api/quotes" && quotes !== undefined) {
       quoted.push(u.searchParams);
       const a = quotes(u.searchParams);
       res.writeHead(a.status, { "content-type": "application/json" }).end(JSON.stringify(a.body));
       return;
     }
-    if (u.pathname !== "/api/account/explore") { res.writeHead(404).end(); return; }
+    if (u.pathname !== "/api/explore") { res.writeHead(404).end(); return; }
     asked.push(u.searchParams);
     const a = answer(u.searchParams);
     res.writeHead(a.status, { "content-type": "application/json" }).end(JSON.stringify(a.body));
@@ -55,7 +56,7 @@ const explore = (q: URLSearchParams) => {
   return { status: 200, body: { ok: true, asOf: "x", tabs: [], items: row ? [row, { key: "rwa:NVDA", price: 999, quoteAt: "2026-11-02T20:21:03Z" }] : [], movers: [], closing: [], mostTraded: [], missing: [], notes: [] } };
 };
 
-/** The Account's China row for `symbol`, as its `quotes` route answers one. */
+/** The market's China row for `symbol`, as its `quotes` route answers one. */
 const chinaRow = (symbol: string, price = 1452.3) => ({
   venue: "china", symbol,
   market: {
@@ -66,14 +67,14 @@ const chinaRow = (symbol: string, price = 1452.3) => ({
 /** The pairs one `quotes` query asks for, as `[venue, symbol]`. */
 const pairsOf = (query: string): string[] => (new URLSearchParams(query).get("pairs") ?? "").split(",");
 /** A `quotes` answer pricing every pair asked. */
-const quotesAnswer = (query: string): AccountAnswer => ({
+const quotesAnswer = (query: string): UpstreamAnswer => ({
   status: 200, body: JSON.stringify({ ok: true, quotes: pairsOf(query).map((pair) => chinaRow(pair.slice(pair.indexOf("|") + 1))) }),
 });
 
 test("the Market's explore row becomes a timed quote; unknown and untimed symbols have no price", async (t) => {
-  const stub = await stubAccount(explore);
+  const stub = await stubMarket(explore);
   t.after(() => stub.server.close());
-  const proxy = registerAccountProxy(noRoutes, { url: stub.url });
+  const proxy = registerMarketProxy(noRoutes, { url: stub.url });
   t.after(() => proxy.dispose());
   const source = marketQuotes({ explore: proxy.explore, quotes: proxy.quotes, now: () => NOW });
   assert.equal(source.unavailable, undefined);
@@ -107,14 +108,14 @@ test("the Market's explore row becomes a timed quote; unknown and untimed symbol
   assert.equal(stub.asked.filter((q) => q.get("q") === "NVDA").length, 1);
 });
 
-test("an Account not running, a disabled row, a refusal and a busy Account are said, never priced", async (t) => {
-  const downProxy = registerAccountProxy(noRoutes, { url: "http://127.0.0.1:9" });
+test("a market not running, a disabled row, a refusal and a busy market are said, never priced", async (t) => {
+  const downProxy = registerMarketProxy(noRoutes, { url: "http://127.0.0.1:9" });
   const down = marketQuotes({ explore: downProxy.explore, quotes: downProxy.quotes });
-  await assert.rejects(down.snapshot([us("NVDA")]), /the Account is not reachable/);
-  const offProxy = registerAccountProxy(noRoutes, { disabled: true });
+  await assert.rejects(down.snapshot([us("NVDA")]), /the market is not reachable/);
+  const offProxy = registerMarketProxy(noRoutes, { disabled: true });
   const off = marketQuotes({ explore: offProxy.explore, quotes: offProxy.quotes });
-  await assert.rejects(off.snapshot([us("NVDA")]), /the Account seat row is disabled/);
-  await assert.rejects(off.snapshot([cn("600519")]), /the Account seat row is disabled/);
+  await assert.rejects(off.snapshot([us("NVDA")]), /the mcp-market row is disabled/);
+  await assert.rejects(off.snapshot([cn("600519")]), /the mcp-market row is disabled/);
   const slow = marketQuotes({ explore: async () => ({ unreachable: "timeout" }), quotes: unasked });
   await assert.rejects(slow.snapshot([us("NVDA")]), /did not answer in time/);
   const busy = marketQuotes({ explore: async () => ({ status: 429, body: "{}" }), quotes: unasked });
@@ -122,9 +123,9 @@ test("an Account not running, a disabled row, a refusal and a busy Account are s
   const busyCn = marketQuotes({ explore: unasked, quotes: async () => ({ status: 429, body: "{}" }) });
   await assert.rejects(busyCn.snapshot([cn("600519")]), (e: unknown) => e instanceof HttpError && e.status === 429);
 
-  const refusing = await stubAccount(() => ({ status: 409, body: { ok: false, refusal: { message: "the account layer is not mounted" } } }));
+  const refusing = await stubMarket(() => ({ status: 409, body: { ok: false, refusal: { message: "the account layer is not mounted" } } }));
   t.after(() => refusing.server.close());
-  const refusingProxy = registerAccountProxy(noRoutes, { url: refusing.url });
+  const refusingProxy = registerMarketProxy(noRoutes, { url: refusing.url });
   const refused = await marketQuotes({ explore: refusingProxy.explore, quotes: refusingProxy.quotes }).snapshot([us("NVDA")]);
   assert.equal(refused.quotes[0]?.price, null);
   assert.equal(refused.quotes[0]?.message, "the Market read refused: the account layer is not mounted");
@@ -150,7 +151,24 @@ test("a snapshot keeps at most its concurrency in flight and answers in the orde
   assert.deepEqual(payload.quotes.map((q) => q.symbol), symbols);
 });
 
-test("feedOf names each of the Account's feeds in the Market's words", () => {
+test("the US explore read and the A-share quotes read reach the market stub's /api/explore and /api/quotes", async (t) => {
+  const paths: string[] = [];
+  const server = createServer((req, res) => {
+    const u = new URL(req.url ?? "/", "http://x");
+    paths.push(u.pathname);
+    const body = u.pathname === "/api/quotes" ? JSON.parse((quotesAnswer(u.search.slice(1)) as { body: string }).body) : u.pathname === "/api/explore" ? explore(u.searchParams).body : { ok: false };
+    res.writeHead(u.pathname === "/api/quotes" || u.pathname === "/api/explore" ? 200 : 404, { "content-type": "application/json" }).end(JSON.stringify(body));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const proxy = registerMarketProxy(noRoutes, { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` });
+  t.after(() => proxy.dispose());
+  const payload = await marketQuotes({ explore: proxy.explore, quotes: proxy.quotes, now: () => NOW }).snapshot([us("NVDA"), cn("600519")]);
+  assert.deepEqual(payload.quotes.map((q) => [q.id, q.price]), [["us:NVDA", 182.31], ["cn:600519", 1452.3]]);
+  assert.deepEqual([...new Set(paths)].sort(), ["/api/explore", "/api/quotes"], "the market's own paths, nothing under /api/account");
+});
+
+test("feedOf names each of the market's feeds in the Market's words", () => {
   assert.equal(feedOf("Robinhood · real time"), "robinhood");
   assert.equal(feedOf("Nasdaq · real time"), "nasdaq");
   assert.equal(feedOf("Cboe · 15 min delayed"), "cboe delayed");
@@ -240,7 +258,7 @@ test("a refused pair, a missing code, an untimed row, a refused read and a body 
 });
 
 test("one snapshot over both markets keeps the order asked and rejects only when no read answered", async () => {
-  const exploreRead = async (query: string): Promise<AccountAnswer> => ({ status: 200, body: JSON.stringify(explore(new URLSearchParams(query)).body) });
+  const exploreRead = async (query: string): Promise<UpstreamAnswer> => ({ status: 200, body: JSON.stringify(explore(new URLSearchParams(query)).body) });
   const both = marketQuotes({ explore: exploreRead, quotes: async (query) => quotesAnswer(query) });
   const payload = await both.snapshot([cn("600519"), us("NVDA")]);
   assert.equal(payload.quotes[0]?.symbol, "600519");
@@ -249,20 +267,20 @@ test("one snapshot over both markets keeps the order asked and rejects only when
   assert.equal(payload.quotes[1]?.market, "us");
   assert.deepEqual(payload.providers.map((p) => [p.market, p.status]), [["us", "connected"], ["cn", "connected"]]);
 
-  const gone = async (): Promise<AccountAnswer> => ({ unreachable: "unreachable" });
-  await assert.rejects(marketQuotes({ explore: gone, quotes: gone }).snapshot([cn("600519"), us("NVDA")]), /the Account is not reachable/);
+  const gone = async (): Promise<UpstreamAnswer> => ({ unreachable: "unreachable" });
+  await assert.rejects(marketQuotes({ explore: gone, quotes: gone }).snapshot([cn("600519"), us("NVDA")]), /the market is not reachable/);
 
   const usOnly = await marketQuotes({ explore: exploreRead, quotes: gone }).snapshot([cn("600519"), us("NVDA")]);
-  assert.deepEqual(usOnly.quotes.map((q) => [q.symbol, q.price, q.message]), [["600519", null, "the Account is not reachable"], ["NVDA", 182.31, ""]]);
+  assert.deepEqual(usOnly.quotes.map((q) => [q.symbol, q.price, q.message]), [["600519", null, "the market is not reachable"], ["NVDA", 182.31, ""]]);
   assert.deepEqual(usOnly.providers.map((p) => [p.market, p.status]), [["us", "connected"], ["cn", "error"]]);
   const cnOnly = await marketQuotes({ explore: gone, quotes: async (query) => quotesAnswer(query) }).snapshot([cn("600519"), us("NVDA")]);
-  assert.deepEqual(cnOnly.quotes.map((q) => [q.symbol, q.price, q.message]), [["600519", 1452.3, ""], ["NVDA", null, "the Account is not reachable"]]);
+  assert.deepEqual(cnOnly.quotes.map((q) => [q.symbol, q.price, q.message]), [["600519", 1452.3, ""], ["NVDA", null, "the market is not reachable"]]);
 });
 
-test("the brief and desk_quotes over the Market: prices with their feed and time, an Account down said", async (t) => {
-  const stub = await stubAccount(explore);
+test("the brief and desk_quotes over the Market: prices with their feed and time, a market down said", async (t) => {
+  const stub = await stubMarket(explore);
   t.after(() => stub.server.close());
-  const proxy = registerAccountProxy(noRoutes, { url: stub.url });
+  const proxy = registerMarketProxy(noRoutes, { url: stub.url });
   const source = marketQuotes({ explore: proxy.explore, quotes: proxy.quotes, now: () => NOW });
   const quotes = deskToolDefinitions({ quotes: source, readState: async () => ({}) as never, now: () => NOW }).find((d) => d.name === "desk_quotes")!;
   const exec = { signal: new AbortController().signal } as never;
@@ -271,12 +289,12 @@ test("the brief and desk_quotes over the Market: prices with their feed and time
   const text = quotes.output.render({ symbols: ["NVDA"] }, answer) as Array<{ text: string }>;
   assert.match(text[0]?.text ?? "", /^NVDA 182\.31, \+1\.20% vs prev close 180\.15 \| NASDAQ 15:21:03 ET \| poll \| live$/);
 
-  const downProxy = registerAccountProxy(noRoutes, { url: "http://127.0.0.1:9" });
+  const downProxy = registerMarketProxy(noRoutes, { url: "http://127.0.0.1:9" });
   const down = marketQuotes({ explore: downProxy.explore, quotes: downProxy.quotes });
   const downTool = deskToolDefinitions({ quotes: down, readState: async () => ({}) as never }).find((d) => d.name === "desk_quotes")!;
-  assert.match((await downTool.execute({ symbols: ["NVDA"] }, exec) as { error: string }).error, /^unavailable: the Account is not reachable/);
+  assert.match((await downTool.execute({ symbols: ["NVDA"] }, exec) as { error: string }).error, /^unavailable: the market is not reachable/);
   const root = `${import.meta.dirname}/tmp/market-quotes-none`; // no desk/ files there: the loaders say missing, nothing is written
   const brief = await buildBrief({ quotes: down, root, now: () => NOW }, { date: "2026-11-02", session: { open: "09:30", close: "16:00", early: false } } as never);
   assert.equal(brief.ok, false);
-  assert.match((brief as { error: string }).error, /^quotes unavailable: the Account is not reachable/);
+  assert.match((brief as { error: string }).error, /^quotes unavailable: the market is not reachable/);
 });

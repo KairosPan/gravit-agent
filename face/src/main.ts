@@ -25,6 +25,8 @@ import { BOTS_ROOT, faceBind } from "./overlay.ts";
 import { isTrustedDataRequest } from "./http.ts";
 import { registerLunhuiViewRoute, type LunhuiViewService } from "./lunhui-view.ts";
 import { registerAccountProxy } from "./account-proxy.ts";
+import { registerMarketProxy } from "./market-proxy.ts";
+import { composedMarketRow } from "./market-row.ts";
 import { composedSeatRow, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
 import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
@@ -105,6 +107,8 @@ let desk: DeskHandle | undefined;
 /** The Account proxy's own unwind (src/account-proxy.ts): its kept answers and every open stream's upstream. Run AFTER the
  * tree's dispose, once the web server has stopped and no browser can open another stream through it; idempotent. */
 let disposeProxy: (() => void) | undefined;
+/** The market proxy's own unwind (src/market-proxy.ts), run beside the account's, for the same reason. */
+let disposeMarketProxy: (() => void) | undefined;
 
 /** Tear the tree down, then leave with `code`. A dispose that rejects still
  * exits, and says why: a signal the process has already acknowledged must not
@@ -118,6 +122,7 @@ async function shutdown(code: number): Promise<void> {
     disposeData?.();
     await dispose?.();
     disposeProxy?.();
+    disposeMarketProxy?.();
   } catch (err) {
     console.error(`${BIN}: dispose failed during shutdown:`, err);
     code ||= 1;
@@ -148,6 +153,7 @@ installFailLoud(BIN, process, async () => {
   disposeData?.();
   await dispose?.();
   disposeProxy?.();
+  disposeMarketProxy?.();
 });
 
 /* A `StartupError` is dsh's own grouped diagnostic for a required entry that
@@ -214,6 +220,12 @@ registerSeatRoute(
     ? { reader: proxy.reader }
     : seatRow.disabled ? { disabled: true } : { url: seatRow.url, seatName: seatRow.seatName, reader: proxy.reader },
 );
+/* The market's public reads and stream for the screens and the desk's quotes (src/market-proxy.ts): loopback reads of
+ * the market at the URL of the `mcp-market` row AS COMPOSED, as the account's half follows the seat row. A disabled
+ * market row disables the market half alone (503 `disabled`); the account's routes keep answering. */
+const marketRow = seatLoader === undefined ? undefined : composedMarketRow(seatLoader.entries());
+const marketProxy = registerMarketProxy(booted.ctx.webServer, marketRow === undefined ? {} : marketRow.disabled ? { disabled: true } : { url: marketRow.url });
+disposeMarketProxy = marketProxy.dispose;
 /* The channel picker's data (sidebar + landing page) and the new-channel copy
  * action. `process.cwd()` is the workbench repo root — the chdir above put it
  * there. `dshHome` is resolved the same way every other route family here
@@ -386,7 +398,7 @@ desk = installDesk(booted.ctx.webServer, {
   home: dshHome,
   enabled: deskEnabled,
   ctx: booted.ctx,
-  quotes: marketQuotes({ explore: proxy.explore, quotes: proxy.quotes }),
+  quotes: marketQuotes({ explore: marketProxy.explore, quotes: marketProxy.quotes }),
   root: process.cwd(),
   route: deskRoute,
   sessionCtx: booted.ctx as unknown as DeskConversationCtxLike,

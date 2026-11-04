@@ -18,6 +18,7 @@
  * ONE BOOT PER PROCESS (smoke.test.ts header): `bootFace` sets `process.env.DSH_HOME`, so this is its own file. The
  * scratch home is a `mkdtemp` directory, never `~/.dsh`, and the seat is disabled. This is the canary for the
  * Account's reads moving under the face, beside `account-seat-smoke`'s for its seat. */
+import { DEAD_MARKET_URL } from "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -147,6 +148,8 @@ test("account graft smoke: the Account's page and markets, a refused query, its 
     const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
     writeFileSync(patchPath, `${readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "")}\n- id: mcp-account\n  disabled: true\n`);
     process.env.FACE_ACCOUNT_URL = standin.url;
+    /* The mcp-market row, spawned at the boot, points at the stand-in's own market, never a live one on 4821. */
+    process.env.FACE_MARKET_URL = standin.marketUrl;
     const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot() });
     dispose = booted.dispose;
     const proxy = registerAccountProxy(booted.ctx.webServer, { url: standin.url });
@@ -307,6 +310,7 @@ test("account graft smoke: the Account's page and markets, a refused query, its 
     if (dispose) await dispose();
     disposeProxy?.();
     if (wasUrl === undefined) delete process.env.FACE_ACCOUNT_URL; else process.env.FACE_ACCOUNT_URL = wasUrl;
+    process.env.FACE_MARKET_URL = DEAD_MARKET_URL;
     await stopStandin(standin);
     await rm(home, { recursive: true, force: true });
   }

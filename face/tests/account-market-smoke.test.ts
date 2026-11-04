@@ -16,6 +16,7 @@
  * Skipped unless `FACE_SMOKE=1` and the repo's `account/` is installed. ONE BOOT PER PROCESS (smoke.test.ts header):
  * `bootFace` sets `process.env.DSH_HOME`, so this is its own file; the scratch home is a `mkdtemp` directory, never `~/.dsh`;
  * the stand-in takes a free port, never 4820, and nothing is written under `~/.buyer-agent-demo`. */
+import { DEAD_MARKET_URL } from "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -79,6 +80,8 @@ test("account market smoke: through the face's port, the owner closes, changes a
     const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
     writeFileSync(patchPath, `${readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "")}\n- id: mcp-account\n  disabled: true\n`);
     process.env.FACE_ACCOUNT_URL = standin.url;
+    /* The mcp-market row, spawned at the boot, points at the stand-in's own market, never a live one on 4821. */
+    process.env.FACE_MARKET_URL = standin.marketUrl;
     const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot() });
     dispose = booted.dispose;
     const proxy = registerAccountProxy(booted.ctx.webServer, { url: standin.url });
@@ -269,6 +272,7 @@ test("account market smoke: through the face's port, the owner closes, changes a
     if (dispose) await dispose();
     disposeProxy?.();
     if (wasUrl === undefined) delete process.env.FACE_ACCOUNT_URL; else process.env.FACE_ACCOUNT_URL = wasUrl;
+    process.env.FACE_MARKET_URL = DEAD_MARKET_URL;
     await stopStandin(standin);
     await rm(home, { recursive: true, force: true });
   }

@@ -18,6 +18,7 @@
  * system clock instead, which this file shifts - `Date` replaced for the boot's lifetime by one whose
  * "now" starts at Friday 2026-10-23 15:00 China time, the session the Eastmoney fixtures carry, and
  * advances in real time. Own file, gated. */
+import "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";

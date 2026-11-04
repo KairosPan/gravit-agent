@@ -38,6 +38,7 @@
  * process, and `node --test` gives each file its own.
  * @module
  */
+import "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";

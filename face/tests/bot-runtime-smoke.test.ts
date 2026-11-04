@@ -16,6 +16,7 @@
  *   the bot's preset on save (src/bot-presets.ts `redeclare`, wired through
  *   `registerBotRoutes`' `onBotChanged`): dsh never re-reads `bots/<id>/`.
  */
+import "./helpers/no-market.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";

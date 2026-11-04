@@ -52,6 +52,22 @@ describe("the stand-in account", () => {
   it("never starts on the market's port", async () => {
     await expect(startStandin({ port: 4821 })).rejects.toThrow(/4821 is the market's/);
   });
+  it("the stand-in serves its markets from a market of its own", async () => {
+    expect(s.marketUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(s.marketUrl).not.toBe(s.url);
+    expect(s.marketUrl).not.toMatch(/:482[01]$/);
+    const health = await (await fetch(`${s.marketUrl}/api/health`)).json();
+    expect(health.service).toBe("market");
+    const r = await fetch(`${s.marketUrl}/api/explore?q=BTC`);
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(body.ok).toBe(true);
+    const items = body.items as Array<{ base?: string; at?: Array<{ venue?: string }> }>;
+    const btc = items.filter((i) => String(i.base).toUpperCase() === "BTC");
+    expect(btc.length).toBeGreaterThan(0);
+    // the stand-in's own public venues, the same world the account's own explore reads
+    expect(btc.flatMap((i) => (i.at ?? []).map((a) => a.venue))).toEqual(expect.arrayContaining([expect.stringMatching(/^standin-/)]));
+  });
 
   it("the account page: the venues with what they trade, the agent's card, intents, asks, the watchlist, orders of every kind, trading on", async () => {
     const { status, body: a } = await get("/api/account");

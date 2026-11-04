@@ -562,8 +562,9 @@ export async function openRun(strategyDir, kind, now = new Date()) {
  * present and malformed, each absent from the file when absent: `provider`, a non-empty string,
  * and `fallback_from`, `{ provider: "东方财富", code }` with a non-empty code, both also written into
  * the run.json entry; `query`, a string, and `reply_sha256`, 64 lowercase hex, the file's alone;
- * `via`, exactly `"account"` - the evidence came through the Account - on both the file and its
- * run.json entry, a file-level field: the items' shapes and ids do not change with it. A
+ * `via`, exactly `"market"` - the evidence came through the market (plan A2) - on both the file and
+ * its run.json entry, a file-level field: the items' shapes and ids do not change with it. A sealed
+ * run written before A2 says `"account"`; it is read as it is, and nothing reads `via` back. A
  * `run.json` write that fails removes the evidence file it followed. Not serialized here: two
  * calls on one run at once are the caller's to order (the service's run mutex).
  * @param {string} dir a run directory `openRun` or `resolveRun` returned
@@ -618,10 +619,10 @@ export async function addEvidence(dir, source, items, meta) {
 
 /**
  * The meta `addEvidence` takes: the reply's stamps, the optional source fields only the boards
- * freeze sets (boards stand-in spec S6), and `via`, which every freeze fetching through the Account sets.
+ * freeze sets (boards stand-in spec S6), and `via`, which every freeze fetching through the market sets.
  * @typedef {{ received_at: string, session: string, host: string, delayed: boolean, truncated: boolean,
  *   provider?: string, fallback_from?: { provider: "东方财富", code: string }, query?: string, reply_sha256?: string,
- *   via?: "account" }} EvidenceMeta
+ *   via?: "market" }} EvidenceMeta
  */
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
@@ -655,7 +656,7 @@ function optionalMeta(meta) {
     stamped.reply_sha256 = reply_sha256;
   }
   if (via !== undefined) {
-    if (via !== "account") throw new TypeError(`lunhui: via is "account", not ${JSON.stringify(via)}`);
+    if (via !== "market") throw new TypeError(`lunhui: via is "market", not ${JSON.stringify(via)}`);
     stamped.via = listed.via = via;
   }
   return { stamped, listed };

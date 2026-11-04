@@ -1,19 +1,19 @@
 // One-shot live check of the Lunhui boards stand-in against the real iFinD QuantAPI, through the
-// Account: `fetchWencaiUniverse` for the latest session over the Account adapter (the Account at
-// FACE_ACCOUNT_URL, default http://127.0.0.1:4820, holds the token and asks iFinD), then
+// market: `fetchWencaiUniverse` for the latest session over the market adapter (the market at
+// FACE_MARKET_URL, default http://127.0.0.1:4821, holds the token and asks iFinD), then
 // `deriveStandInBoards`; prints counts and the top five boards. One 问财 call. This script reads no
 // IFIND_* variable and never sees a token.
 //
-//   cd face && node scripts/lunhui-standin-check.mjs        (the Account running)
+//   cd face && node scripts/lunhui-standin-check.mjs        (the market running)
 //
 // Exit 0 on success, 1 on a refusal (its code and message, which carry no token), 2 when the
-// Account holds no iFinD token.
-import { DEFAULT_ACCOUNT_URL, accountFetch, accountOrigin } from "../plugins/lunhui/lib/account-fetch.mjs";
+// market holds no iFinD token.
+import { DEFAULT_MARKET_URL, marketFetch, marketOrigin } from "../plugins/lunhui/lib/market-fetch.mjs";
 import { sessionOf } from "../plugins/lunhui/lib/freeze-tool.mjs";
 import { WENCAI_NOT_CONFIGURED, fetchWencaiUniverse } from "../plugins/lunhui/lib/wencai.mjs";
 import { deriveStandInBoards } from "../plugins/lunhui/lib/wencai-boards.mjs";
 
-const fetchImpl = accountFetch(accountOrigin(process.env.FACE_ACCOUNT_URL || DEFAULT_ACCOUNT_URL));
+const fetchImpl = marketFetch(marketOrigin(process.env.FACE_MARKET_URL || DEFAULT_MARKET_URL));
 const session = sessionOf(new Date());
 try {
   const universe = await fetchWencaiUniverse({ session, fetchImpl });
@@ -32,7 +32,7 @@ try {
   }
 } catch (error) {
   if (error?.code === WENCAI_NOT_CONFIGURED) {
-    console.error("the Account holds no iFinD token: start it with .env.ifind sourced");
+    console.error("the market holds no iFinD token: start it with .env.ifind sourced");
     process.exit(2);
   }
   console.error(`refused: ${error?.code ?? "ERROR"} ${error?.message ?? error}`);
