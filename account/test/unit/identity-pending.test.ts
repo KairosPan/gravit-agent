@@ -14,7 +14,7 @@ import { simKey } from "../../src/portfolio/account/sign.ts";
 import { BotApi, BotApiError, redactorOf, splitMessage, telegramApiBase } from "../../src/portfolio/identity/bot-api.ts";
 import { PENDING_MS, PendingConnections, type PendingView } from "../../src/portfolio/identity/pending.ts";
 import { IDENTITY_WORDS, isIdentityTokenPath } from "../../src/portfolio/identity/routes.ts";
-import { saveIdentity, loadIdentity, Strangers } from "../../src/portfolio/identity/store.ts";
+import { saveIdentity, loadIdentity, senderRef, Strangers } from "../../src/portfolio/identity/store.ts";
 import { isRefusal } from "../../src/core/errors.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../../src/portfolio/server.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
@@ -355,6 +355,23 @@ describe("the pending connection holds no token it does not need, and says none"
       await new Promise((r) => setTimeout(r, 50));
       expect(lines.join("\n")).not.toContain(TOKEN);
       expect(lines.join("\n")).not.toContain(encodeURIComponent(TOKEN));
+    } finally {
+      pending.dispose();
+    }
+  });
+
+  it("a blocked sender is neither heard nor counted while pending: the operator after them is heard", async () => {
+    const strangers = new Strangers(home);
+    const pending = new PendingConnections({ apiBase: bot.url, strangers, bound: () => false, blocked: () => [senderRef("telegram", "999000456")], pollTimeoutS: 1 });
+    try {
+      const { salt, keyHash } = fp(TOKEN);
+      const v = await pending.begin(TOKEN, keyHash, salt);
+      if (isRefusal(v)) throw new Error(v.message);
+      bot.push(privateText(40, "/start", { id: 999000456, first_name: "Someone", username: "someone" }));
+      bot.push(privateText(41, "/start"));
+      await until(() => pending.view(v.id)!.state === "heard");
+      expect(pending.view(v.id)!.sender!.handle).toBe("@pan");
+      expect(strangers.list()).toEqual([]);
     } finally {
       pending.dispose();
     }

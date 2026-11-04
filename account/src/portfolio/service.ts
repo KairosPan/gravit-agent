@@ -417,7 +417,7 @@ export class PortfolioService {
   /** the identity on this home: its state and the strangers file read, no poll begun until a token is sent */
   private mountIdentity(): Identity {
     const o = this.opts.identity ?? {};
-    return new Identity({ home: this.opts.home, apiBase: o.apiBase ?? telegramApiBase(process.env, (l) => console.error(l)), fetch: o.fetch, pollTimeoutS: o.pollTimeoutS, connectedPollTimeoutS: o.connectedPollTimeoutS, now: o.now });
+    return new Identity({ home: this.opts.home, apiBase: o.apiBase ?? telegramApiBase(process.env, (l) => console.error(l)), fetch: o.fetch, pollTimeoutS: o.pollTimeoutS, connectedPollTimeoutS: o.connectedPollTimeoutS, now: o.now, readOnly: this.opts.liveWrites === undefined });
   }
 
   /** A signature outlives the process that first saw it. On start, every signed envelope in this home's ledgers has its nonce marked used again,

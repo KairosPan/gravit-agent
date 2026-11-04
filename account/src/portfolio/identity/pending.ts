@@ -22,7 +22,7 @@ import { keyMatches } from "../account/brain-keys.ts";
 import { no } from "../refuse.ts";
 import { BotApi, BotApiError, redactorOf } from "./bot-api.ts";
 import { IDENTITY_WORDS } from "./routes.ts";
-import { maskId, type Strangers } from "./store.ts";
+import { maskId, senderRef, type Strangers } from "./store.ts";
 
 /** how long a pending connection lasts: ten minutes, the life of the connectNetwork that ends it (sign.ts BRAIN_KEY_TTL_MS) */
 export const PENDING_MS = 600_000;
@@ -64,6 +64,8 @@ export interface PendingDeps {
   strangers: Strangers;
   /** whether Telegram is connected already: a connection is refused while it is */
   bound: () => boolean;
+  /** the senders' references the owner blocked: neither heard nor counted, as the connected poller drops them */
+  blocked?: (() => string[]) | undefined;
   fetch?: typeof fetch | undefined;
   pollTimeoutS?: number | undefined;
   now?: (() => number) | undefined;
@@ -303,6 +305,7 @@ export class PendingConnections {
             e.offset = uid + 1;
             const s = senderOf(u);
             if (!s) continue;
+            if (this.deps.blocked?.().includes(senderRef("telegram", s.id))) continue;
             if (e.notMe.has(s.id)) {
               this.noteStranger(s.id);
               continue;

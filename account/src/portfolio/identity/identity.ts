@@ -46,6 +46,8 @@ export interface IdentityDeps {
   pollTimeoutS?: number | undefined;
   now?: (() => number) | undefined;
   log?: ((l: string) => void) | undefined;
+  /** a read-only account (started --read-only): it keeps the identity but polls no network, so nothing it hears moves an offset */
+  readOnly?: boolean | undefined;
   /** the connected poller's clock (real timers on `now` by default) and its long poll in seconds (50) */
   clock?: IdentityClock | undefined;
   connectedPollTimeoutS?: number | undefined;
@@ -111,7 +113,7 @@ export class Identity {
     this.clock = deps.clock ?? realClock(this.now);
     this.store = new Strangers(deps.home);
     this.inboxRing = new InboxRing(deps.home);
-    this.pending = new PendingConnections({ apiBase: deps.apiBase, strangers: this.store, bound: () => this.bound("telegram") !== undefined, fetch: deps.fetch, pollTimeoutS: deps.pollTimeoutS, now: deps.now, log: deps.log });
+    this.pending = new PendingConnections({ apiBase: deps.apiBase, strangers: this.store, bound: () => this.bound("telegram") !== undefined, blocked: () => this.state.blocked, fetch: deps.fetch, pollTimeoutS: deps.pollTimeoutS, now: deps.now, log: deps.log });
     this.resume();
   }
 
@@ -310,6 +312,7 @@ export class Identity {
    * by, so their /start is not taken into the inbox */
   private startConnector(binding: Binding, token: string, offset: number | undefined): void {
     if (this.connectors.has(binding.network)) return;
+
     if (offset !== undefined) {
       try {
         writeIdentityFile(this.home, OFFSET_FILE, `${offset}\n`);
@@ -317,6 +320,8 @@ export class Identity {
         this.log(`identity: Telegram's offset could not be written (${err instanceof Error ? ((err as NodeJS.ErrnoException).code ?? err.name) : "error"}); the poll starts from it all the same`);
       }
     }
+    // a read-only account polls nothing: the offset is kept for a later run with writes on
+    if (this.deps.readOnly) return;
     const redact = redactorOf([token]);
     const log = (l: string) => this.log(redact(l));
     const stop = new AbortController();

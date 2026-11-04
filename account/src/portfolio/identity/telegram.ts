@@ -12,7 +12,9 @@
  *   - everything else (a group, a channel post, an edited message, a bot) is dropped.
  * Only then does the offset move past it — written to `<home>/identity/telegram.offset`, and confirmed to Telegram by the next poll. A text
  * the inbox could not store stops the batch where it is: the offset stays before it, and the poll backs off and reads it again. An update
- * numbered below the offset (Telegram numbered its updates afresh) is taken all the same, with one line.
+ * numbered below the offset (Telegram numbered its updates afresh) is taken all the same, with one line. An update with no update_id is
+ * dropped unhandled (a line at most once a minute): it has no number to confirm, so handling it would answer or count it again at every
+ * poll that hands it over; the offset moves past the numbered ones around it.
  *
  * A 409 (another poller holds the token, or a webhook is set) is `conflictAt` and a 30 s wait; any other failure backs off 5 s doubling to
  * 60 s, which a poll that answers resets, and is `pollFailing` until one does. Each is said in a line at most once a minute. The loop never
@@ -108,6 +110,7 @@ export class TelegramConnector {
   private disposed = false;
   private loop: Promise<void> | undefined;
   private wake: (() => void) | undefined;
+  private unnumberedSaidAt = Number.NEGATIVE_INFINITY;
   private readonly operatorId: number;
 
   constructor(private readonly deps: TelegramConnectorDeps) {
@@ -230,11 +233,19 @@ export class TelegramConnector {
     const update = (raw !== null && typeof raw === "object" ? raw : {}) as { update_id?: unknown; message?: TgMessage };
     const id = update.update_id;
     const numbered = whole(id) && id >= 0;
-    if (numbered && this.offset !== undefined && id < this.offset) {
+    if (!numbered) {
+      // no number to move the offset past: never handled — so it cannot be answered or stored again at every poll that hands it over —
+      // and the offset moves past the numbered updates around it
+      if (this.deps.clock.now() - this.unnumberedSaidAt >= RECORD_EVERY_MS) {
+        this.unnumberedSaidAt = this.deps.clock.now();
+        this.deps.log("identity: Telegram handed over an update without an update_id: it is dropped");
+      }
+      return true;
+    }
+    if (this.offset !== undefined && id < this.offset) {
       this.deps.log(`identity: Telegram update ${id} is below the stored offset ${this.offset}: Telegram has numbered its updates afresh, so it is taken and the poll goes on from ${id + 1}`);
     }
     if (!(await this.handle(update.message))) return false;
-    if (!numbered) return true;
     this.offset = id + 1;
     try {
       writeIdentityFile(this.deps.home, OFFSET_FILE, `${this.offset}\n`);
@@ -268,7 +279,7 @@ export class TelegramConnector {
     const replied = m.reply_to_message?.message_id;
     const at = whole(m.date) && m.date > 0 ? new Date(m.date * 1000).toISOString() : this.stamp();
     try {
-      this.deps.inbox.append({ network: "telegram", messageId: `telegram:${m.message_id}`, ...(whole(replied) ? { replyTo: `telegram:${replied}` } : {}), text: m.text, at });
+      this.deps.inbox.append({ network: "telegram", messageId: `telegram:${m.message_id}`, ...(whole(replied) ? { replyTo: `telegram:${replied}` } : {}), text: m.text, at }, this.deps.binding.botId);
     } catch (err) {
       this.deps.log(`identity: the operator's Telegram message could not be stored in the inbox (${(err as NodeJS.ErrnoException).code ?? reasonOf(err)}); it is read again from Telegram`);
       return false;

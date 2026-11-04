@@ -18,7 +18,7 @@ import { senderRef, Strangers, type Binding } from "../../src/portfolio/identity
 import { CHAT_OFF, TelegramConnector, TEXT_ONLY, type IdentityClock } from "../../src/portfolio/identity/telegram.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../../src/portfolio/server.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
-import { fakeBotApi, FAKE_BOT_TOKEN, type FakeBotApi } from "../identity-fakes.ts";
+import { fakeBotApi, FAKE_BOT_TOKEN, OTHER_BOT_TOKEN, type FakeBotApi } from "../identity-fakes.ts";
 
 type NoNonce<T> = T extends unknown ? Omit<T, "nonce"> : never;
 const TOKEN = FAKE_BOT_TOKEN;
@@ -85,8 +85,8 @@ describe("the connected poller and the inbox, through the account", () => {
   let svc: PortfolioService;
   let srv: PortfolioServerHandle;
 
-  const boot = async () => {
-    svc = await PortfolioService.create({ home, venues: "frontline", real: true, liveDeps: { http: async () => ({ status: 599, body: undefined, text: "" }), price: async () => undefined }, publicMarkets: [], liveWrites: { capUsd: 100, pairingCode: "K7QX-M2PA" }, account: { owners: [{ id: owner.address, kind: "eoa", label: "owner", addedAt: new Date().toISOString() }] }, desk: { brain: [scriptedBrain(() => null)], tickMs: 0, env: {} }, identity: { apiBase: bot.url, pollTimeoutS: 1, connectedPollTimeoutS: 1 } });
+  const boot = async (o: { readOnly?: boolean } = {}) => {
+    svc = await PortfolioService.create({ home, venues: "frontline", real: true, liveDeps: { http: async () => ({ status: 599, body: undefined, text: "" }), price: async () => undefined }, publicMarkets: [], ...(o.readOnly ? { pairingCode: "K7QX-M2PA" } : { liveWrites: { capUsd: 100, pairingCode: "K7QX-M2PA" } }), account: { owners: [{ id: owner.address, kind: "eoa", label: "owner", addedAt: new Date().toISOString() }] }, desk: { brain: [scriptedBrain(() => null)], tickMs: 0, env: {} }, identity: { apiBase: bot.url, pollTimeoutS: 1, connectedPollTimeoutS: 1 } });
     await svc.restoring;
     srv = await startPortfolioServer({ port: 0, service: svc, snapshotMs: 0 });
   };
@@ -99,15 +99,15 @@ describe("the connected poller and the inbox, through the account", () => {
   const offset = () => (existsSync(offsetFile()) ? readFileSync(offsetFile(), "utf8").trim() : "");
 
   /** Task 3's flow: the token sent with its fingerprint, the operator's /start heard as update 10, connectNetwork signed */
-  const connect = async () => {
+  const connect = async (token = TOKEN) => {
     const salt = newSalt();
-    const keyHash = keyHashOf(salt, TOKEN);
-    const r = await call(srv.url, "/api/account/identity/telegram/token", { body: JSON.stringify({ token: TOKEN, keyHash, salt }) });
+    const keyHash = keyHashOf(salt, token);
+    const r = await call(srv.url, "/api/account/identity/telegram/token", { body: JSON.stringify({ token, keyHash, salt }) });
     expect(r.status).toBe(200);
     const p = JSON.parse(r.text).pending as PendingView;
     bot.push(update(10, { text: "/start" }));
     await until(() => svc.identity!.pending.view(p.id)?.state === "heard");
-    const c = await own({ type: "connectNetwork", network: "telegram", pending: p.id, botId: "777", speaksAs: "@gravit_desk_bot", operatorId: String(OPERATOR.id), talksOnlyWith: "@pan", routing: ALL_TELEGRAM, keyHash, salt } as NoNonce<OwnerAction>);
+    const c = await own({ type: "connectNetwork", network: "telegram", pending: p.id, botId: String(bot.me.id), speaksAs: `@${bot.me.username}`, operatorId: String(OPERATOR.id), talksOnlyWith: "@pan", routing: ALL_TELEGRAM, keyHash, salt } as NoNonce<OwnerAction>);
     expect(isRefusal(c)).toBe(false);
     // the start hook saved the offset after the operator's /start, and the poller is running
     expect(offset()).toBe("11");
@@ -154,6 +154,68 @@ describe("the connected poller and the inbox, through the account", () => {
     const a = await get(`/api/account/identity/inbox?after=0&wait=0`);
     expect(a.messages.map((m: { text: string }) => m.text)).toEqual(["hold this"]);
   }, 15_000);
+
+  it("a second bot whose message ids repeat the first's: its texts are stored, none taken for one stored before", async () => {
+    bot.push(update(20, { message_id: 41, text: "to the first bot" }));
+    bot.push(update(21, { message_id: 42, text: "again to the first" }));
+    await until(() => offset() === "22");
+    expect(isRefusal(await own({ type: "disconnectNetwork", network: "telegram" } as NoNonce<OwnerAction>))).toBe(false);
+    await srv.close();
+    await bot.close();
+    bot = await fakeBotApi({ token: OTHER_BOT_TOKEN, me: { id: 778, username: "gravit_second_bot", first_name: "Gravit" } });
+    await boot();
+    await connect(OTHER_BOT_TOKEN);
+    // the second bot's private chat is numbered afresh: 41 and 42 again
+    bot.push(update(20, { message_id: 41, text: "to the second bot" }));
+    bot.push(update(21, { message_id: 42, text: "again to the second" }));
+    await until(() => offset() === "22");
+    const a = await get(`/api/account/identity/inbox?after=0&wait=0`);
+    expect(a.messages.map((m: { id: number; text: string }) => [m.id, m.text])).toEqual([[1, "to the first bot"], [2, "again to the first"], [3, "to the second bot"], [4, "again to the second"]]);
+    // the bot is the ring's own: the public shape is InboxMessage's
+    for (const m of a.messages) expect(Object.keys(m).sort()).toEqual(["at", "id", "messageId", "network", "text"]);
+  });
+
+  it("an update read twice across a restart (stopped after storing it, before the offset was written) is one inbox row", async () => {
+    bot.push(update(20, { message_id: 41, text: "only once" }));
+    await until(() => offset() === "21");
+    await srv.close();
+    // as if the account stopped before telegram.offset was written: the old offset, and Telegram hands the update over again
+    writeFileSync(offsetFile(), "11\n");
+    bot.push(update(20, { message_id: 41, text: "only once" }));
+    await boot();
+    await until(() => offset() === "21");
+    bot.push(update(21, { message_id: 42, text: "next" }));
+    await until(() => offset() === "22");
+    const a = await get(`/api/account/identity/inbox?after=0&wait=0`);
+    expect(a.messages.map((m: { id: number; text: string }) => [m.id, m.text])).toEqual([[1, "only once"], [2, "next"]]);
+  });
+
+  it("an update without an update_id is never handled, at any poll, and the poll goes on", async () => {
+    const before = bot.calls.filter((c) => c.method === "getUpdates").length;
+    // Telegram hands over the same unnumbered update at every poll
+    bot.answer("getUpdates", 200, { ok: true, result: [{ message: { message_id: 60, from: OPERATOR, chat: { id: OPERATOR.id, type: "private" }, date: 1, text: "no number" } }, { message: { message_id: 61, from: OPERATOR, chat: { id: OPERATOR.id, type: "private" }, date: 1, photo: [] } }] });
+    await until(() => bot.calls.filter((c) => c.method === "getUpdates").length >= before + 4);
+    bot.answer("getUpdates", 0, {});
+    expect(bot.sent).toEqual([]);
+    expect((await get(`/api/account/identity/inbox?after=0&wait=0`)).messages).toEqual([]);
+    expect(said.filter((l) => l.includes("without an update_id")).length).toBe(1);
+    bot.push(update(20, { text: "numbered" }));
+    await until(() => offset() === "21");
+    expect((await get(`/api/account/identity/inbox?after=0&wait=0`)).messages.map((m: { text: string }) => m.text)).toEqual(["numbered"]);
+  });
+
+  it("a read-only account polls no network: the binding is kept, nothing moves the offset", async () => {
+    await srv.close();
+    await boot({ readOnly: true });
+    await new Promise((res) => setTimeout(res, 200));
+    const polls = bot.calls.filter((c) => c.method === "getUpdates").length;
+    bot.push(update(20, { text: "while read-only" }));
+    await new Promise((res) => setTimeout(res, 1500));
+    expect(bot.calls.filter((c) => c.method === "getUpdates").length).toBe(polls);
+    expect(offset()).toBe("11");
+    expect(svc.identity!.view().networks).toEqual([expect.objectContaining({ network: "telegram", polling: false })]);
+    expect((await get(`/api/account/identity/inbox?after=0&wait=0`)).messages).toEqual([]);
+  });
 
   it("reading the inbox changes nothing: the same after answers the same messages", async () => {
     bot.push(update(20, { text: "one" }));

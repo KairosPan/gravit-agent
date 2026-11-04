@@ -8,7 +8,9 @@
  * The file is written whole at every append (store.ts writeIdentityFile: 0600 in a 0700 folder, a temporary file flushed and renamed, no
  * link on the way) — and only at an append: reading the inbox (`after`, `last`, `wait`) never changes it. The poller appends a message
  * before it moves Telegram's offset past it, so an account that stops in between reads it again from Telegram rather than lose it; a
- * message whose network id is in the ring already is not appended twice. */
+ * message whose network id is in the ring already, from the same bot, is not appended twice. Each row also keeps, in the file only, the
+ * bot that heard it (`bot`, its numeric id): a bot connected after another numbers its private chat afresh, so `telegram:<id>` alone
+ * would take a new text for one stored long ago. `bot` is never in what the ring answers: the message's public shape is InboxMessage. */
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NETWORKS, type Network } from "./kinds.ts";
@@ -33,16 +35,20 @@ export interface InboxMessage {
 
 const isNetwork = (v: unknown): v is Network => typeof v === "string" && (NETWORKS as readonly string[]).includes(v);
 
-function messageOf(v: unknown): InboxMessage | undefined {
+function messageOf(v: unknown): (InboxMessage & { bot?: string }) | undefined {
   if (!v || typeof v !== "object") return undefined;
   const m = v as Record<string, unknown>;
   if (typeof m.id !== "number" || !Number.isSafeInteger(m.id) || m.id < 1) return undefined;
   if (!isNetwork(m.network) || typeof m.messageId !== "string" || typeof m.text !== "string" || typeof m.at !== "string") return undefined;
   if (m.replyTo !== undefined && typeof m.replyTo !== "string") return undefined;
-  return { id: m.id, network: m.network, messageId: m.messageId, ...(typeof m.replyTo === "string" ? { replyTo: m.replyTo } : {}), text: m.text, at: m.at };
+  if (m.bot !== undefined && typeof m.bot !== "string") return undefined;
+  return { id: m.id, network: m.network, messageId: m.messageId, ...(typeof m.replyTo === "string" ? { replyTo: m.replyTo } : {}), text: m.text, at: m.at, ...(typeof m.bot === "string" ? { bot: m.bot } : {}) };
 }
 
-const copy = (m: InboxMessage): InboxMessage => ({ ...m });
+/** a row as the file keeps it: the message, and the bot that heard it */
+type Row = InboxMessage & { bot?: string };
+
+const copy = ({ bot: _bot, ...m }: Row): InboxMessage => ({ ...m });
 
 /** whether `path` is a link (or cannot be looked at): the inbox is never read through one */
 function isLink(path: string): boolean {
@@ -56,7 +62,7 @@ function isLink(path: string): boolean {
 /** The last `max` messages, numbered across restarts, written whole at each append and never at a read */
 export class InboxRing {
   private next = 1;
-  private messages: InboxMessage[] = [];
+  private messages: Row[] = [];
   private readonly waiters = new Set<() => void>();
 
   constructor(
@@ -66,12 +72,13 @@ export class InboxRing {
     this.load();
   }
 
-  /** a message taken: numbered, kept (the oldest let go past `max`), the file written — or, when its network id is in the ring already,
-   * the one kept before. Throws when the file cannot be written; then nothing changed */
-  append(m: Omit<InboxMessage, "id">): InboxMessage {
-    const known = this.messages.find((x) => x.messageId === m.messageId);
+  /** a message taken from the bot `bot` (its numeric id): numbered, kept (the oldest let go past `max`), the file written — or, when the
+   * same bot's message of that network id is in the ring already, the one kept before. Throws when the file cannot be written; then
+   * nothing changed */
+  append(m: Omit<InboxMessage, "id">, bot?: string): InboxMessage {
+    const known = this.messages.find((x) => x.messageId === m.messageId && x.bot === bot);
     if (known) return copy(known);
-    const message: InboxMessage = { id: this.next, network: m.network, messageId: m.messageId, ...(m.replyTo !== undefined ? { replyTo: m.replyTo } : {}), text: m.text, at: m.at };
+    const message: Row = { id: this.next, network: m.network, messageId: m.messageId, ...(m.replyTo !== undefined ? { replyTo: m.replyTo } : {}), text: m.text, at: m.at, ...(bot !== undefined ? { bot } : {}) };
     const messages = [...this.messages, message].slice(-this.max);
     writeIdentityFile(this.home, FILE, `${JSON.stringify({ next: this.next + 1, messages })}\n`);
     this.next += 1;
@@ -123,7 +130,7 @@ export class InboxRing {
     }
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
     const r = raw as { next?: unknown; messages?: unknown };
-    const messages = Array.isArray(r.messages) ? r.messages.map(messageOf).filter((m): m is InboxMessage => m !== undefined) : [];
+    const messages = Array.isArray(r.messages) ? r.messages.map(messageOf).filter((m): m is Row => m !== undefined) : [];
     messages.sort((a, b) => a.id - b.id);
     this.messages = messages.slice(-this.max);
     const top = messages.length > 0 ? messages[messages.length - 1]!.id + 1 : 1;
