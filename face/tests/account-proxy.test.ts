@@ -76,6 +76,20 @@ const CONNECTED: ReadonlyArray<readonly [face: string, account: string, route: "
   ["/data/account/connected/book", "/api/account/connected/book", "connectedBook", "venue=paper-1&symbol=BTC%2FUSDT&depth=20"],
   ["/data/account/connected/trades", "/api/account/connected/trades", "connectedTrades", "venue=paper-1&symbol=BTC%2FUSDT&limit=50"],
 ];
+/** The Identity tab's two reads (plan B1a), registered after the five connected ones: the Account path, the route,
+ * and a query of its names. */
+const IDENTITY_READS: ReadonlyArray<readonly [face: string, account: string, route: "identity" | "identityPending", query: string]> = [
+  ["/data/account/identity", "/api/account/identity", "identity", ""],
+  ["/data/account/identity/pending", "/api/account/identity/pending", "identityPending", "id=p0123456789abcdef"],
+];
+/** The Identity tab's three writes (plan B1a), registered after `guard`. */
+const IDENTITY_WRITES: ReadonlyArray<readonly [face: string, account: string, route: "identityToken" | "identityNotMe" | "identityDrop"]> = [
+  ["/data/account/identity/telegram/token", "/api/account/identity/telegram/token", "identityToken"],
+  ["/data/account/identity/pending/not-me", "/api/account/identity/pending/not-me", "identityNotMe"],
+  ["/data/account/identity/pending/drop", "/api/account/identity/pending/drop", "identityDrop"],
+];
+/** A Telegram bot token's shape, made up: never a real one. */
+const TOKEN = "7012345678:AAFakeTokenShape_0123456789-abcdefghi";
 const STREAM = "/data/account/stream";
 const CALLBACK = "/data/account/signin/callback";
 /** A venue's page sending the browser back: a top-level GET document navigation, cross-site, no Origin. */
@@ -199,13 +213,14 @@ test("rebuildQuery: the whitelist, once each, 240 characters, fresh stripped", (
   assert.deepEqual(rebuildQuery("account", "/data/account"), { query: "", fresh: false });
 });
 
-test("the routes: thirty-eight exact paths, the callback last; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
+test("the routes: forty-three exact paths, the callback last; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
   const { routes, fetched } = proxyWith(answering(OK_BODY));
   const paths = [
-    ...ROUTES.map(([face]) => face), ...NEW_READS.map(([face]) => face), ...CONNECTED.map(([face]) => face), STREAM, FOLLOW,
-    ...WRITES.map(([face]) => face), ...NEW_WRITES.map(([face]) => face), CALLBACK,
+    ...ROUTES.map(([face]) => face), ...NEW_READS.map(([face]) => face), ...CONNECTED.map(([face]) => face),
+    ...IDENTITY_READS.map(([face]) => face), STREAM, FOLLOW,
+    ...WRITES.map(([face]) => face), ...NEW_WRITES.map(([face]) => face), ...IDENTITY_WRITES.map(([face]) => face), CALLBACK,
   ];
-  assert.equal(paths.length, 38, "thirty-eight: the five public reads are the market's (src/market-proxy.ts)");
+  assert.equal(paths.length, 43, "forty-three: the five public reads are the market's (src/market-proxy.ts)");
   assert.ok(routes.every((r) => r.kind === "exact"), "no prefix route");
   assert.deepEqual(routes.map((r) => `${r.kind} ${r.path}`), paths.map((face) => `exact ${face}`));
   for (const face of paths) {
@@ -304,6 +319,7 @@ test("a repeated or unknown name, an over-long value: 400 invalid account reques
     connectedCandles: ["venue", "symbol", "interval", "range", "before", "limit"],
     connectedBook: ["venue", "symbol", "depth"],
     connectedTrades: ["venue", "symbol", "limit"],
+    identity: [], identityPending: ["id"],
   });
   assert.equal((await call(routes, `/data/account/connected/explore?q=${"x".repeat(240)}`)).status, 200, "240 characters pass");
   assert.deepEqual(fetched, [`${URL_}/api/account/connected/explore?q=${"x".repeat(240)}`]);
@@ -375,6 +391,7 @@ test("two reads within the TTL fetch once; ?fresh=1 fetches again and never join
     venues: 60_000, reach: 5_000, keyfile: 5_000, books: 5_000,
     asset: 5_000, funding: 60_000, receive: 60_000, earn: 15_000, sellable: 5_000, signinStatus: 1_000,
     connectedExplore: 20_000, connectedQuotes: 3_000, connectedCandles: 30_000, connectedBook: 2_000, connectedTrades: 2_000,
+   identity: 2_000, identityPending: 1_000,
   });
   let clock = NOW;
   const { routes, fetched, proxy } = proxyWith(answering(OK_BODY), () => clock);
@@ -462,6 +479,7 @@ test("an unreachable, hanging, refusing or unreadable Account: 503 with the code
     venues: 30_000, reach: 30_000, keyfile: 30_000, books: 30_000,
     asset: 25_000, funding: 12_000, receive: 30_000, earn: 30_000, sellable: 30_000, signinStatus: 7_000,
     connectedExplore: 10_000, connectedQuotes: 7_000, connectedCandles: 25_000, connectedBook: 7_000, connectedTrades: 7_000,
+   identity: 7_000, identityPending: 7_000,
   });
   const refused = proxyWith(async () => { throw Object.assign(new TypeError("fetch failed secret-host-name"), { cause: { code: "ECONNREFUSED" } }); });
   const a = await call(refused.routes, "/data/account/holdings?cost=1");
@@ -877,6 +895,7 @@ test("a write past its limit is 413, a non-JSON one 415, a query on it 400", asy
   assert.deepEqual(WRITE_BODY_LIMIT, {
     pair: 4_096, prepare: 16_384, exchange: 65_536,
     challenge: 1_024, prove: 2_048, signinStart: 512, bridgeRoutes: 4_096, orderSent: 512, orderRequote: 512, sent: 512, revoke: 512, guard: 256,
+    identityToken: 1_024, identityNotMe: 256, identityDrop: 256,
   });
   const { routes, fetched } = proxyWith(answering(OK_BODY));
   for (const [face, , route] of WRITES) {
@@ -947,9 +966,10 @@ test("a write's abort is the row's", async (t) => {
     pair: 7_000, prepare: 30_000, exchange: 30_000,
     challenge: 7_000, prove: 12_000, signinStart: 30_000, bridgeRoutes: 30_000, orderSent: 30_000, orderRequote: 30_000, sent: 30_000,
     revoke: 7_000, guard: 7_000,
+    identityToken: 30_000, identityNotMe: 7_000, identityDrop: 7_000,
   });
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  for (const [face, , route] of [...WRITES, ...NEW_WRITES]) {
+  for (const [face, , route] of [...WRITES, ...NEW_WRITES, ...IDENTITY_WRITES]) {
     const hanging = proxyWith((_url, init) => new Promise<FakeAnswer>((_resolve, reject) => init.signal.addEventListener("abort", () => reject(aborted()))));
     const one = start(hanging.routes, face, JSON_POST, "POST", "{}");
     for (let i = 0; i < 50 && hanging.inits.length === 0; i += 1) await new Promise<void>((r) => setImmediate(r));
@@ -1226,4 +1246,116 @@ test("the connected reads go to /api/account/connected/*", async () => {
     assert.equal(d.status, 503, face); assert.equal(d.body, DISABLED);
   }
   assert.equal(disabled.fetched.length, 0, "a disabled seat row asks nothing");
+});
+
+test("the identity reads and writes reach the account at their paths", async () => {
+  assert.deepEqual(
+    IDENTITY_READS.map(([, , route]) => [ACCOUNT_TTL_MS[route], ACCOUNT_ABORT_MS[route], ACCOUNT_QUERY[route]]),
+    [[2_000, 7_000, []], [1_000, 7_000, ["id"]]],
+  );
+  const answers = new Map<string, FakeAnswer>([
+    ["/api/account/identity", ok('{"ok":true,  "networks":[]}')],
+    ["/api/account/identity/pending", ok('{"ok":false,"error":"no pending connection"}', 404)],
+    ["/api/account/identity/telegram/token", ok('{"ok":false,"error":"that token does not match"}', 409)],
+    ["/api/account/identity/pending/not-me", ok('{"ok":true,"pending":{"state":"waiting"}}')],
+    ["/api/account/identity/pending/drop", ok('{"ok":true}', 200)],
+  ]);
+  const { routes, fetched, inits } = proxyWith(async (url) => answers.get(new URL(url).pathname)!);
+  for (const [face, account, , query] of IDENTITY_READS) {
+    const a = await call(routes, query === "" ? face : `${face}?${query}`);
+    const want = answers.get(account)!;
+    assert.equal(fetched.at(-1), `${URL_}${account}${query === "" ? "" : `?${query}`}`, `${face} asks ${account}`);
+    assert.equal(a.status, want.status, face); assert.equal(a.body, await want.text(), `${face}: the account's bytes`);
+    assert.equal(a.headers["content-type"], JSON_TYPE); assert.equal(a.headers["cache-control"], "no-store");
+    const unknown = await call(routes, `${face}?${query}${query === "" ? "" : "&"}force=1`);
+    assert.equal(unknown.status, 400, `${face}: an unknown name`); assert.equal(unknown.body, INVALID);
+  }
+  const body = '{"id":"p0123456789abcdef"}';
+  for (const [face, account] of IDENTITY_WRITES) {
+    const a = await call(routes, face, JSON_POST, "POST", body);
+    const want = answers.get(account)!;
+    assert.equal(fetched.at(-1), `${URL_}${account}`, `${face} asks ${account}`);
+    assert.equal(inits.at(-1)!.method, "POST"); assert.equal(inits.at(-1)!.body, body);
+    assert.deepEqual(inits.at(-1)!.headers, { "content-type": "application/json" }, `${face}: content-type alone`);
+    assert.equal(a.status, want.status, face); assert.equal(a.body, await want.text(), `${face}: the account's bytes`);
+  }
+  assert.equal(fetched.length, 5, "the unknown names never reached the account");
+  for (const [face, , route] of IDENTITY_WRITES) {
+    assert.equal((await call(routes, face, JSON_POST, "POST", "x".repeat(WRITE_BODY_LIMIT[route] + 1))).status, 413, face);
+    assert.equal((await call(routes, face, { host: "127.0.0.1:3090", "content-type": "text/plain" }, "POST", "{}")).status, 415, face);
+    assert.equal((await call(routes, `${face}?id=1`, JSON_POST, "POST", "{}")).status, 400, face);
+  }
+  assert.equal(fetched.length, 5, "no refused write reaches the account");
+});
+
+test("the token route forwards the body as it came and keeps nothing", async (t) => {
+  const seen: string[] = [];
+  const keep = (...args: unknown[]): void => { seen.push(args.map((a) => (a instanceof Error ? `${a.message} ${a.stack}` : String(a))).join(" ")); };
+  for (const method of ["log", "error", "warn", "info", "debug", "trace"] as const) t.mock.method(console, method, keep);
+  const TOKEN_PATH = "/data/account/identity/telegram/token";
+  const body = `{"token": "${TOKEN}",  "keyHash":"sha256:00ff","salt":"c2FsdA=="}`;
+  let n = 0;
+  const { routes, fetched, inits } = proxyWith(async (url) => {
+    n += 1;
+    return new URL(url).pathname === "/api/account/identity"
+      ? ok(`{"ok":true,"networks":[],"n":${n}}`)
+      : ok('{"ok":true,"pending":{"id":"p1","state":"waiting"}}');
+  });
+  const a = await call(routes, TOKEN_PATH, JSON_POST, "POST", body);
+  assert.equal(a.status, 200);
+  assert.equal(inits.at(-1)!.body, body, "the identical bytes, never parsed or re-written");
+  assert.equal(a.body.includes(TOKEN), false, "the answer never echoes it");
+  /* the read afterwards is the account's, not a kept answer of the POST */
+  const after = await call(routes, "/data/account/identity");
+  assert.equal(fetched.at(-1), `${URL_}/api/account/identity`);
+  assert.equal(after.body, '{"ok":true,"networks":[],"n":2}');
+  assert.equal(after.body.includes(TOKEN), false);
+  /* twice the same POST: the account asked twice, nothing kept */
+  await call(routes, TOKEN_PATH, JSON_POST, "POST", body);
+  assert.equal(fetched.filter((u) => u.endsWith("/telegram/token")).length, 2, "never kept, never served again");
+  /* every refusal and every failure: the token in no answer and no line */
+  const answers: string[] = [a.body, after.body];
+  answers.push((await call(routes, TOKEN_PATH, JSON_POST, "POST", body + " ".repeat(1_024))).body);
+  answers.push((await call(routes, TOKEN_PATH, { host: "127.0.0.1:3090", "content-type": "text/plain" }, "POST", body)).body);
+  answers.push((await call(routes, `${TOKEN_PATH}?token=${TOKEN}`, JSON_POST, "POST", body)).body);
+  answers.push((await call(routes, TOKEN_PATH, { ...JSON_POST, origin: "https://evil.example" }, "POST", body)).body);
+  answers.push((await call(routes, TOKEN_PATH, JSON_POST, "GET")).body);
+  const failing: FakeFetch[] = [
+    async () => { throw Object.assign(new TypeError(`fetch failed ${TOKEN}`), { cause: { code: "ECONNREFUSED", message: TOKEN } }); },
+    async () => { throw new Error(TOKEN); },
+    async () => ({ ok: true, status: 200, text: async () => { throw new TypeError(`terminated ${TOKEN}`); } }),
+  ];
+  for (const doFetch of failing) {
+    const failed = await call(proxyWith(doFetch).routes, TOKEN_PATH, JSON_POST, "POST", body);
+    assert.equal(failed.status, 503); answers.push(failed.body);
+  }
+  const disabled = proxyWith(answering(OK_BODY), () => NOW, { disabled: true });
+  answers.push((await call(disabled.routes, TOKEN_PATH, JSON_POST, "POST", body)).body);
+  for (const text of answers) assert.equal(text.includes(TOKEN), false, `no answer carries it: ${text.slice(0, 60)}`);
+  for (const text of answers) assert.equal(text.includes("AAFakeTokenShape"), false);
+  assert.equal(seen.some((line) => line.includes(TOKEN) || line.includes("AAFakeTokenShape")), false, "no log line carries it");
+});
+
+test("the inbox and send routes are not on the face", async () => {
+  const { routes, fetched } = proxyWith(answering(OK_BODY));
+  for (const gone of ["/data/account/identity/inbox", "/data/account/identity/send"]) {
+    assert.ok(!routes.some((r) => r.path === gone), `${gone} is not registered: the host's 404 answers it`);
+    assert.ok(!routes.some((r) => r.kind !== "exact" && gone.startsWith(r.path)), `no prefix route takes ${gone}`);
+  }
+  assert.ok(!routes.some((r) => r.path.includes("inbox") || r.path.endsWith("/send")), "nothing reaches the inbox or the send");
+  assert.equal(fetched.length, 0, "the account was asked nothing");
+});
+
+test("a disabled mcp-account row answers the identity routes 503 disabled", async () => {
+  const { routes, fetched } = proxyWith(answering(OK_BODY), () => NOW, { disabled: true });
+  for (const [face, , , query] of IDENTITY_READS) {
+    const d = await call(routes, query === "" ? face : `${face}?${query}`);
+    assert.equal(d.status, 503, face); assert.equal(d.body, DISABLED);
+    assert.equal(d.headers["content-type"], JSON_TYPE); assert.equal(d.headers["cache-control"], "no-store");
+  }
+  for (const [face] of IDENTITY_WRITES) {
+    const d = await call(routes, face, JSON_POST, "POST", `{"token":"${TOKEN}","keyHash":"k","salt":"s"}`);
+    assert.equal(d.status, 503, face); assert.equal(d.body, DISABLED);
+  }
+  assert.equal(fetched.length, 0, "a disabled seat row asks nothing");
 });

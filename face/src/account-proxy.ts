@@ -5,20 +5,25 @@
  * origin — so the face's page never asks it: the page asks the face, and the
  * face asks the Account with a plain loopback fetch (no Origin, no
  * Sec-Fetch-Site, no cookie, the URL's own Host, `redirect: "error"`).
- * Thirty-eight routes: twenty-three reads ({@link ReadRoute} — the Account,
+ * Forty-three routes: twenty-five reads ({@link ReadRoute} — the Account,
  * a connected venue's market and comparison, holdings and venues, the wallet
  * half's `asset`, `funding`, `receive`, `earn`, `sellable` and
  * `signin/status`, and, since plan A2, a connected venue's own
- * `connected/{explore,quotes,candles,book,trades}`; the public reads
+ * `connected/{explore,quotes,candles,book,trades}`, and, since plan B1a, the
+ * Identity tab's `identity` and `identity/pending`; the public reads
  * `explore`, `quotes`, `candles`, `book` and `trades` are the market's,
  * src/market-proxy.ts, since plan A2's Task 7), the Account's push channel — `stream`, and
- * `stream/markets`, the markets it follows — and twelve writes
+ * `stream/markets`, the markets it follows — and fifteen writes
  * ({@link WriteRoute}: `pair`, `prepare`, `exchange`, `wallet/challenge`,
  * `wallet/prove`, `signin/start`, `bridge-routes`, `live/order-sent`,
- * `live/order-requote`, `live/sent`, `revoke` and `guard`) — and the OAuth
+ * `live/order-requote`, `live/sent`, `revoke`, `guard`, and Identity's
+ * `identity/telegram/token`, `identity/pending/not-me` and
+ * `identity/pending/drop`) — and the OAuth
  * sign-in's callback, `signin/callback`, the one route a venue's page navigates
  * the browser to; each an `exact` route, never a prefix: the route table is the allow-list, and nothing else
- * of the Account's surface is reachable through the face.
+ * of the Account's surface is reachable through the face — the identity
+ * `inbox` and `send` among it: no page reaches the operator's texts or a
+ * message to the phone.
  * {@link registerAccountProxy} returns the `account` route's reader, which
  * `main.ts` hands to `seat.ts`: `/data/seat.json` and `/data/account` share
  * one upstream read. {@link createAccountReader} is that read without a
@@ -64,7 +69,7 @@
  *   falls 256 KiB behind (the response then destroyed, as `quotes.ts` does)
  *   and on `dispose`. Any other answer is the Account's status and body — its
  *   refusal past 32 streams among them.
- * - The thirteen POST routes — `stream/markets` and the twelve writes, each at
+ * - The sixteen POST routes — `stream/markets` and the fifteen writes, each at
  *   its Account path ({@link WRITE_PATHS}: `exchange` is `/api/exchange`,
  *   `revoke` `/api/revoke`, `guard` `/api/mode`, the rest
  *   `/api/account/<path>`) — take a body declared `application/json` (else 415, as
@@ -111,7 +116,8 @@ export type ReadRoute =
   | "account" | "market" | "compare" | "holdings" | "positions" | "statement" | "history" | "agents"
   | "venues" | "reach" | "keyfile" | "books"
   | "asset" | "funding" | "receive" | "earn" | "sellable" | "signinStatus"
-  | "connectedExplore" | "connectedQuotes" | "connectedCandles" | "connectedBook" | "connectedTrades";
+  | "connectedExplore" | "connectedQuotes" | "connectedCandles" | "connectedBook" | "connectedTrades"
+  | "identity" | "identityPending";
 
 /** How long one answer is served without asking again, per route: the retired page's cadence (spec §5.1). */
 export const ACCOUNT_TTL_MS: Readonly<Record<ReadRoute, number>> = {
@@ -120,6 +126,7 @@ export const ACCOUNT_TTL_MS: Readonly<Record<ReadRoute, number>> = {
   venues: 60_000, reach: 5_000, keyfile: 5_000, books: 5_000,
   asset: 5_000, funding: 60_000, receive: 60_000, earn: 15_000, sellable: 5_000, signinStatus: 1_000,
   connectedExplore: 20_000, connectedQuotes: 3_000, connectedCandles: 30_000, connectedBook: 2_000, connectedTrades: 2_000,
+  identity: 2_000, identityPending: 1_000,
 };
 
 /** How long the Account may take, headers and body, per route: the reads that settle venue polls take
@@ -130,20 +137,25 @@ export const ACCOUNT_ABORT_MS: Readonly<Record<ReadRoute, number>> = {
   venues: 30_000, reach: 30_000, keyfile: 30_000, books: 30_000,
   asset: 25_000, funding: 12_000, receive: 30_000, earn: 30_000, sellable: 30_000, signinStatus: 7_000,
   connectedExplore: 10_000, connectedQuotes: 7_000, connectedCandles: 25_000, connectedBook: 7_000, connectedTrades: 7_000,
+  identity: 7_000, identityPending: 7_000,
 };
 
 /** The writes the face proxies, each a POST, at the face's and the Account's paths in {@link WRITE_PATHS}: the
  * owner's `pair`, `prepare` and `exchange`; the wallet's `challenge` and `prove`; the sign-in's `signinStart`;
- * `bridgeRoutes`; the live order's `orderSent`, `orderRequote` and `sent`; and the two unsigned writes the
- * Account itself defines as the safer direction, `revoke` (Close to agents) and `guard`. */
+ * `bridgeRoutes`; the live order's `orderSent`, `orderRequote` and `sent`; the two unsigned writes the
+ * Account itself defines as the safer direction, `revoke` (Close to agents) and `guard`; and, since plan B1a, the
+ * Identity tab's three: `identityToken` (the bot's token, its body forwarded unparsed and unlogged, never kept),
+ * `identityNotMe` and `identityDrop`. */
 export type WriteRoute =
   | "pair" | "prepare" | "exchange"
-  | "challenge" | "prove" | "signinStart" | "bridgeRoutes" | "orderSent" | "orderRequote" | "sent" | "revoke" | "guard";
+  | "challenge" | "prove" | "signinStart" | "bridgeRoutes" | "orderSent" | "orderRequote" | "sent" | "revoke" | "guard"
+  | "identityToken" | "identityNotMe" | "identityDrop";
 
 /** Most bytes a write's body may carry, per route; `guard`'s is read under its limit and discarded. */
 export const WRITE_BODY_LIMIT: Readonly<Record<WriteRoute, number>> = {
   pair: 4_096, prepare: 16_384, exchange: 65_536,
   challenge: 1_024, prove: 2_048, signinStart: 512, bridgeRoutes: 4_096, orderSent: 512, orderRequote: 512, sent: 512, revoke: 512, guard: 256,
+  identityToken: 1_024, identityNotMe: 256, identityDrop: 256,
 };
 
 /** How long the Account may take on a write, headers and body, per route: a prepare asks the venue for a quote. */
@@ -151,6 +163,7 @@ export const WRITE_ABORT_MS: Readonly<Record<WriteRoute, number>> = {
   pair: 7_000, prepare: 30_000, exchange: 30_000,
   challenge: 7_000, prove: 12_000, signinStart: 30_000, bridgeRoutes: 30_000, orderSent: 30_000, orderRequote: 30_000, sent: 30_000,
   revoke: 7_000, guard: 7_000,
+  identityToken: 30_000, identityNotMe: 7_000, identityDrop: 7_000,
 };
 
 /** The header that tells the Account the browser's own origin on the face, set on `challenge` and `signinStart`
@@ -221,6 +234,8 @@ export const ACCOUNT_QUERY: Readonly<Record<ReadRoute, readonly string[]>> = {
   connectedCandles: ["venue", "symbol", "interval", "range", "before", "limit"],
   connectedBook: ["venue", "symbol", "depth"],
   connectedTrades: ["venue", "symbol", "limit"],
+  identity: [],
+  identityPending: ["id"],
 };
 
 export { STREAM_BODY_LIMIT, STREAM_CLIENT, codeOf } from "./upstream-proxy.ts";
@@ -256,6 +271,7 @@ const READ_PATHS: Readonly<Partial<Record<ReadRoute, string>>> = {
   account: "", reach: "/connect/reach", books: "/paper/books", signinStatus: "/signin/status",
   connectedExplore: "/connected/explore", connectedQuotes: "/connected/quotes", connectedCandles: "/connected/candles",
   connectedBook: "/connected/book", connectedTrades: "/connected/trades",
+  identity: "/identity", identityPending: "/identity/pending",
 };
 const subPath = (route: ReadRoute): string => READ_PATHS[route] ?? `/${route}`;
 /** Each write's sub-path under the face's `/data/account/`, and the Account's path. */
@@ -272,6 +288,9 @@ const WRITE_PATHS: Readonly<Record<WriteRoute, { face: string; account: string }
   sent: { face: "live/sent", account: "/api/account/live/sent" },
   revoke: { face: "revoke", account: "/api/revoke" },
   guard: { face: "guard", account: "/api/mode" },
+  identityToken: { face: "identity/telegram/token", account: "/api/account/identity/telegram/token" },
+  identityNotMe: { face: "identity/pending/not-me", account: "/api/account/identity/pending/not-me" },
+  identityDrop: { face: "identity/pending/drop", account: "/api/account/identity/pending/drop" },
 };
 const WRITE_ROUTES = Object.keys(WRITE_PATHS) as WriteRoute[];
 /** The writes whose upstream carries {@link FACE_ORIGIN_HEADER}. */
@@ -352,8 +371,8 @@ const originHeader = (req: IncomingMessage): Record<string, string> => {
   return origin === null ? {} : { [FACE_ORIGIN_HEADER]: origin };
 };
 
-/** Mount the twenty-three read routes, the two stream routes, the twelve write routes and the OAuth sign-in's
- * callback (`signin/callback`, behind `isTrustedNavigation`) — thirty-eight in all — on the host webserver, over the
+/** Mount the twenty-five read routes, the two stream routes, the fifteen write routes and the OAuth sign-in's
+ * callback (`signin/callback`, behind `isTrustedNavigation`) — forty-three in all — on the host webserver, over the
  * proxy core (src/upstream-proxy.ts). The reader returned is the `account` route's own: it and `/data/account` read
  * through one cache, so the seat route `main.ts` hands it to shares that route's upstream read. `dispose` forgets
  * every kept answer and aborts every open stream's upstream. */
