@@ -13,7 +13,7 @@ import { foldNotes, notesHtml } from './lunhui/notes.js';
 import { viewOf } from '../host/lunhui.js';
 import { sessionRefRuns } from '../composer/draft.js';
 import { chipInner, fileCard } from '../composer/view.js';
-import { metaText, sizeText } from '../composer/files.js';
+import { metaText, sizeText, isImageSrc } from '../composer/files.js';
 
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
 
@@ -111,13 +111,13 @@ const imageMeta = a => {
 const isImage = a => a?.type === 'image';
 
 // the operator's attachments, right-aligned above the bubble: a lone image up to 240 px wide, with others 64 px squares;
-// an image not loaded yet an empty frame; a file its card, which opens nothing (the host gives no file back)
+// an image not loaded yet an empty frame, one whose thumb is not an image's URL (isImageSrc) a card; a file its card, which opens nothing (the host gives no file back)
 function youFiles(list, thumbs) {
   const lone = list.length === 1;
   return `<div class="you-files">${list.map(a => {
     if (!isImage(a)) return fileCard({ name: a.name ?? 'File', meta: metaText({ name: a.name, bytes: a.bytes ?? 0 }) });
     const src = thumbs[a.attachmentId];
-    if (src === null || a.offloaded === true) return fileCard({ name: a.name || 'Image', meta: imageMeta(a) });
+    if (src === null || a.offloaded === true || (src !== undefined && !isImageSrc(src))) return fileCard({ name: a.name || 'Image', meta: imageMeta(a) });
     const name = a.name || 'Image';
     const inner = src === undefined ? '' : `<img${attrs({ src, alt: name })}>`;
     return `<button${attrs({ type: 'button', class: cls(lone ? 'you-image' : 'you-thumb', src === undefined && 'loading'), 'data-action': 'openImage', 'data-attachment': a.attachmentId, 'data-name': name, 'aria-label': name })}>${inner}</button>`;

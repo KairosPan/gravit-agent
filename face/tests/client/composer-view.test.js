@@ -144,3 +144,15 @@ test('the lightbox is a dialog whose image keeps a click and whose backdrop and 
   assert.match(h, /<button type="button" class="close-key lightbox-close" data-action="lightboxClose" aria-label="Close"><svg/);
   assert.match(lightboxHtml({ src: 'blob:y' }), /alt="Image"/);
 });
+
+test('an image whose URL is neither an object URL nor an inline image draws as a file card in the rail, and the lightbox opens nothing', async () => {
+  const { filesRail, lightboxHtml } = await import('../../client/js/composer/view.js');
+  for (const url of ['https://x.test/a.png', 'data:text/html;base64,AA', 'javascript:alert(1)']) {
+    const h = filesRail([att({ key: 'i1', kind: 'image', name: 'a.png', mediaType: 'image/png', bytes: 4096, url })]);
+    assert.doesNotMatch(h, /<img|attach-image/, url);
+    assert.match(h, /<div class="file-card"><span class="file-icon">[\s\S]*<span class="file-name">a\.png<\/span><span class="file-meta">PNG · 4 KB<\/span>[\s\S]*data-key="i1"/, url);
+    assert.equal(lightboxHtml({ src: url, name: 'a.png' }), '', url);
+  }
+  assert.equal(lightboxHtml({ src: undefined, name: 'a.png' }), '');
+  assert.match(lightboxHtml({ src: 'data:image/png;base64,AA', name: 'a.png' }), /<img class="lightbox-img" src="data:image\/png;base64,AA"/, "a history image's inline thumb opens");
+});

@@ -309,7 +309,7 @@ const you = (attachments, text = 'look') => msg({ from: 'you', text, data: { att
 test('a lone image draws large, several draw as squares, a file as its card, all before the bubble', () => {
   const lone = renderMessage(you([PNG('i1')]), conv(), thumbed({ i1: 'data:image/png;base64,AA' }));
   assert.match(lone, /^<div class="msg you"><div class="you-body"><div class="you-files"><button type="button" class="you-image" data-action="openImage" data-attachment="i1" data-name="i1\.png" aria-label="i1\.png"><img src="data:image\/png;base64,AA" alt="i1\.png"><\/button><\/div><div class="bubble you">look<\/div><\/div>/);
-  const many = renderMessage(you([PNG('i1'), PNG('i2'), CSV]), conv(), thumbed({ i1: 'data:a', i2: 'data:b' }));
+  const many = renderMessage(you([PNG('i1'), PNG('i2'), CSV]), conv(), thumbed({ i1: 'data:image/png;base64,AA', i2: 'data:image/png;base64,BB' }));
   assert.equal((many.match(/class="you-thumb"/g) ?? []).length, 2);
   assert.doesNotMatch(many, /you-image/);
   assert.match(many, /data-action="openImage" data-attachment="i2" data-name="i2\.png"/);
@@ -321,7 +321,7 @@ test('a lone image draws large, several draw as squares, a file as its card, all
 });
 
 test('an image-only message draws no empty bubble', () => {
-  const h = renderMessage(you([PNG('i1')], ''), conv(), thumbed({ i1: 'data:a' }));
+  const h = renderMessage(you([PNG('i1')], ''), conv(), thumbed({ i1: 'data:image/png;base64,AA' }));
   assert.match(h, /you-image/);
   assert.doesNotMatch(h, /bubble/);
 });
@@ -329,16 +329,25 @@ test('an image-only message draws no empty bubble', () => {
 test('an image not loaded draws loading; one the host cannot give back, or offloaded, draws a card named Image', () => {
   const loading = renderMessage(you([PNG('i1')]), conv(), thumbed({}));
   assert.match(loading, /<button type="button" class="you-image loading" data-action="openImage" data-attachment="i1" data-name="i1\.png" aria-label="i1\.png"><\/button>/);
-  const square = renderMessage(you([PNG('i1'), PNG('i2')]), conv(), thumbed({ i1: 'data:a' }));
+  const square = renderMessage(you([PNG('i1'), PNG('i2')]), conv(), thumbed({ i1: 'data:image/png;base64,AA' }));
   assert.match(square, /class="you-thumb loading" data-action="openImage" data-attachment="i2"/);
   const gone = renderMessage(you([PNG('i1', { name: undefined })]), conv(), thumbed({ i1: null }));
   assert.match(gone, /<span class="file-name">Image<\/span><span class="file-meta">PNG · 1\.2 MB<\/span>/);
   assert.doesNotMatch(gone, /openImage|<img/);
-  const off = renderMessage(you([PNG('i1', { offloaded: true })]), conv(), thumbed({ i1: 'data:a' }));
+  const off = renderMessage(you([PNG('i1', { offloaded: true })]), conv(), thumbed({ i1: 'data:image/png;base64,AA' }));
   assert.match(off, /<span class="file-name">i1\.png<\/span><span class="file-meta">PNG · 1\.2 MB<\/span>/);
   assert.doesNotMatch(off, /openImage/);
   const esc = renderMessage(you([PNG('i"1', { name: '<b>.png' })]), conv(), thumbed({}));
   assert.match(esc, /data-attachment="i&quot;1" data-name="&lt;b&gt;\.png"/);
+});
+
+test('a thumb whose URL is not an inline image or an object URL draws the image as its card, never an img', () => {
+  for (const src of ['https://x.test/a.png', 'data:text/html;base64,AA', 'data:image/svg+xml;base64,AA', 'javascript:alert(1)']) {
+    const h = renderMessage(you([PNG('i1')]), conv(), thumbed({ i1: src }));
+    assert.doesNotMatch(h, /<img|openImage/, src);
+    assert.match(h, /<span class="file-name">i1\.png<\/span><span class="file-meta">PNG · 1\.2 MB<\/span>/, src);
+  }
+  assert.match(renderMessage(you([PNG('i1')]), conv(), thumbed({ i1: 'blob:http://127.0.0.1/1' })), /<img src="blob:http:\/\/127\.0\.0\.1\/1"/);
 });
 
 test("thumbsNeeded lists the conversation's images with no thumb, never an offloaded one", () => {

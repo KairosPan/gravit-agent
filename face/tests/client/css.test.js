@@ -439,7 +439,12 @@ test("the composer's chip reads the pale blue tokens, declared in each theme blo
   assert.match(blocks[0], /--ref-fill: #eef1fb; --ref-text: #3b5bdb/);
   for (const b of blocks.slice(1)) assert.match(b, /--ref-fill: #1e2541; --ref-text: #9db0ff/);
   assert.match(css, /\.composer \{[^}]*position: relative/);
-  assert.match(css, /\.composer-box \{[^}]*align-items: flex-end[^}]*border-radius: var\(--radius-l\)/);
+  assert.match(css, /\.composer-box \{[^}]*flex-direction: column[^}]*border-radius: var\(--radius-l\)/);
+  // the input row never wraps: a long line grows the editor, it never drops it below the paperclip or Send below it
+  const row = css.match(/^\.composer-row \{([^}]*)\}/m)?.[1] ?? '';
+  for (const d of ['display: flex', 'flex-wrap: nowrap', 'align-items: flex-end']) assert.ok(row.includes(d), `.composer-row ${d}`);
+  assert.doesNotMatch(css.match(/^\.composer-box \{([^}]*)\}/m)?.[1] ?? '', /flex-wrap: wrap/);
+  assert.match(css, /\.composer-input \{[^}]*flex: 1 1 0[;][^}]*min-width: 0/);
   assert.match(css, /\.composer-input \{[^}]*max-height: calc\(8 \* 1\.45em\)[^}]*overflow-y: auto[^}]*white-space: pre-wrap[^}]*overflow-wrap: anywhere/);
   assert.match(css, /\.composer-input:empty::before \{[^}]*content: attr\(data-placeholder\)[^}]*color: var\(--dim\)/);
   assert.match(css, /\.composer-menu \{[^}]*position: absolute[^}]*width: min\(520px, 100%\)/);
@@ -461,6 +466,8 @@ test("the composer's attachments: the note, the rail, the image square, the card
   assert.match(css, /\.file-card \{[^}]*width: 240px[^}]*height: 64px/);
   assert.match(css, /\.file-card\.failed \{[^}]*background: var\(--down-fill\)[^}]*border-color: var\(--down-edge\)/);
   assert.match(css, /\.attach-remove \{[^}]*opacity: 0/);
+  assert.match(css, /\.file-card \{[^}]*padding: 0 28px 0 12px/, 'the remove key never covers the name');
+  assert.match(css, /@media \(hover: none\) \{\s*\.attach-remove \{ opacity: 1; \}\s*\}/, 'a touch screen shows the remove key');
   assert.match(css, /\.attach-image:hover \.attach-remove, \.attach-image:focus-within \.attach-remove, \.file-card:hover \.attach-remove, \.file-card:focus-within \.attach-remove \{[^}]*opacity: 1/);
   assert.match(css, /\.drop-overlay \{[^}]*position: fixed[^}]*inset: 0[^}]*background: color-mix\(in srgb, var\(--bg\)/);
   assert.match(css, /\.lightbox \{[^}]*position: fixed[^}]*inset: 0/);

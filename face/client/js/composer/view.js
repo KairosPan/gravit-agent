@@ -4,7 +4,7 @@ import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { avatarGlyph } from '../wire/room.js';
 import { flatItems } from './menus.js';
-import { metaText, progressText, limitsLine } from './files.js';
+import { metaText, progressText, limitsLine, isImageSrc } from './files.js';
 
 const chipIcon = c => icon(c.kind === 'bot' ? 'agent' : c.kind === 'conversation' ? 'chat' : c.dir ? 'layers' : 'file', 13);
 
@@ -73,11 +73,11 @@ export function fileCard({ name, meta, failedKey = null, removeKey: key = null, 
     `<span class="file-name">${esc(name)}</span><span class="file-meta">${line}</span>${key != null ? removeKey(key, removeName || name) : ''}</div>`;
 }
 
-/** A draft's files in its order: an image a 64 px square, any other file a card. '' for none; a progress tick rewrites
+/** A draft's files in its order: an image a 64 px square (a card when its URL is not an image's), any other file a card. '' for none; a progress tick rewrites
  *  only this, inside #composer-files. */
 export function filesRail(files) {
   return (files ?? []).map(f => {
-    if (f.kind === 'image' && f.url) return `<div class="attach-image"><img${attrs({ src: f.url, alt: f.name })}>${removeKey(f.key, f.name)}</div>`;
+    if (f.kind === 'image' && isImageSrc(f.url)) return `<div class="attach-image"><img${attrs({ src: f.url, alt: f.name })}>${removeKey(f.key, f.name)}</div>`;
     return fileCard({
       name: f.name, meta: f.status === 'uploading' ? progressText(f.loaded ?? 0, f.bytes) : metaText(f),
       failedKey: f.status === 'failed' ? f.key : null, removeKey: f.key, removeName: f.name, uploading: f.status === 'uploading',
@@ -91,8 +91,10 @@ export function dropOverlay(limits) {
     `<div class="drop-sub">${esc(limitsLine(limits))}</div></div></div>`;
 }
 
-/** An image at full size: a click on the backdrop or the close key closes it, a click on the image is kept. */
+/** An image at full size: a click on the backdrop or the close key closes it, a click on the image is kept. '' for a src
+ *  that is not an image's (isImageSrc): the lightbox opens nothing. */
 export function lightboxHtml({ src, name }) {
+  if (!isImageSrc(src)) return '';
   return `<div${attrs({ class: 'lightbox', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Image', 'data-action': 'lightboxClose' })}>` +
     `<img${attrs({ class: 'lightbox-img', src, alt: name || 'Image', 'data-action': 'lightboxKeep' })}>` +
     `<button${attrs({ type: 'button', class: 'close-key lightbox-close', 'data-action': 'lightboxClose', 'aria-label': 'Close' })}>${icon('x', 18)}</button></div>`;

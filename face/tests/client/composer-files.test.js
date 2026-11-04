@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_LIMITS, kindOf, admit, hasImage, blocking, sizeText, progressText, extOf, metaText, limitsLine,
-  modelRefusalLine, encodeBase64, contentParts, attachmentsLine,
+  modelRefusalLine, encodeBase64, contentParts, attachmentsLine, isImageSrc,
 } from '../../client/js/composer/files.js';
 
 const MiB = 1048576;
@@ -112,4 +112,9 @@ test('content: text first when not blank, then images and receipts in the draft\
 test('history\'s names: an unnamed image reads image', () => {
   assert.equal(attachmentsLine([{ type: 'image', name: 'chart.png' }, { type: 'image' }, { type: 'file', name: 'q3.csv' }]), 'chart.png, image, q3.csv');
   assert.equal(attachmentsLine([]), '');
+});
+
+test('an img src is drawn only for an object URL or an inline image of the four kinds; any other scheme is not', () => {
+  for (const ok of ['blob:http://127.0.0.1:3090/1f2e', 'data:image/png;base64,AA', 'data:image/jpeg;base64,AA', 'data:image/webp;base64,AA', 'data:image/gif;base64,AA']) assert.equal(isImageSrc(ok), true, ok);
+  for (const no of ['https://x.test/a.png', 'http://x.test/a.png', 'data:image/svg+xml;base64,AA', 'data:text/html;base64,AA', 'data:image/png,AA', 'javascript:alert(1)', ' blob:x', '', null, undefined, 7]) assert.equal(isImageSrc(no), false, String(no));
 });

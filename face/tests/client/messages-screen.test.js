@@ -41,7 +41,8 @@ test('a group head clusters the members and names them from the host\'s bots', (
 
 test('the composer is the menu slot, the note, the box with the rail, the editor and Send', () => {
   const h = renderComposer();
-  assert.match(h, /<form class="composer" data-action="send"><div class="composer-menu" id="composer-menu"><\/div><div class="composer-note" id="composer-note" role="status"><\/div><div class="composer-box"><div class="composer-files" id="composer-files"><\/div>/);
+  assert.match(h, /<form class="composer" data-action="send"><div class="composer-menu" id="composer-menu"><\/div><div class="composer-note" id="composer-note" role="status"><\/div><div class="composer-box"><div class="composer-files" id="composer-files"><\/div><div class="composer-row"><button type="button" class="attach-key"/);
+  assert.match(h, /<button type="submit" class="send-key" aria-label="Send"><svg[\s\S]*?<\/svg><\/button><\/div><\/div><\/form>$/, 'Send ends the row, the row ends the box');
   assert.match(h, /<span id="say-label" class="sr-only">Tell Gravit<\/span>/);
   const editor = h.match(/<div id="say"([^>]*)><\/div>/)?.[1];
   assert.ok(editor, 'the editor is an empty div#say');

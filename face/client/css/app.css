@@ -408,17 +408,19 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 
 /* ---- the composer ---- */
 .composer { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 12px 28px 18px; border-top: 1px solid var(--border); margin: 0; }
-.composer-box { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; padding: 4px 4px 4px 6px; border: 1px solid var(--border); border-radius: var(--radius-l); background: var(--surface); }
-/* a refusal of the draft's files, above the box; the files rail on its own row at the top of the box */
+.composer-box { display: flex; flex-direction: column; padding: 4px 4px 4px 6px; border: 1px solid var(--border); border-radius: var(--radius-l); background: var(--surface); }
+/* the input row never wraps: a long line grows the editor, never drops it under the paperclip */
+.composer-row { display: flex; flex-wrap: nowrap; align-items: flex-end; gap: 8px; }
+/* a refusal of the draft's files, above the box; the files rail at the top of the box, over the input row */
 .composer-note { padding: 6px 12px; border-radius: var(--radius-s); color: var(--down); background: var(--down-fill); font-size: 13px; }
 .composer-note:empty { display: none; }
-.composer-files { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 0 100%; padding: 8px 4px 2px 8px; }
+.composer-files { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 4px 6px 8px; }
 .composer-files:empty { display: none; }
 .attach-key { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 36px; height: 36px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--dim); }
 .attach-key:hover { background: var(--hover); color: var(--text); }
 .attach-image { position: relative; flex: none; width: 64px; height: 64px; border-radius: var(--radius-s); overflow: hidden; border: 1px solid var(--border); }
 .attach-image img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.file-card { position: relative; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 10px; align-content: center; flex: none; width: 240px; height: 64px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-2); }
+.file-card { position: relative; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 10px; align-content: center; flex: none; width: 240px; height: 64px; padding: 0 28px 0 12px; border: 1px solid var(--border); border-radius: var(--radius-s); background: var(--surface-2); }
 .file-card.uploading .file-meta { font-variant-numeric: tabular-nums; }
 .file-card.failed { background: var(--down-fill); border-color: var(--down-edge); }
 .file-card.failed .file-meta { color: var(--down); }
@@ -428,6 +430,9 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .file-retry { padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
 .attach-remove { position: absolute; top: 4px; right: 4px; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--radius-pill); background: var(--text); color: var(--bg); opacity: 0; }
 .attach-image:hover .attach-remove, .attach-image:focus-within .attach-remove, .file-card:hover .attach-remove, .file-card:focus-within .attach-remove { opacity: 1; }
+@media (hover: none) {
+  .attach-remove { opacity: 1; }
+}
 /* files dragged over the page: the overlay over everything, the session's limits under its title */
 .drop-overlay { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--bg) 82%, transparent); pointer-events: none; }
 .drop-card { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 40px; border: 2px dashed var(--border); border-radius: var(--radius-l); background: var(--surface); color: var(--dim); }
@@ -438,7 +443,7 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .lightbox-img { display: block; max-width: 92vw; max-height: 88vh; border-radius: var(--radius-s); box-shadow: var(--shadow-lift); }
 .lightbox-close { position: absolute; top: 16px; right: 16px; }
 /* the editor grows from one line to eight, then scrolls; a chip in it is one atom */
-.composer-input { flex: 1 1 auto; min-width: 0; min-height: 1.45em; max-height: calc(8 * 1.45em); overflow-y: auto; padding: 8px 0; font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; outline: none; cursor: text; }
+.composer-input { flex: 1 1 0; min-width: 0; min-height: 1.45em; max-height: calc(8 * 1.45em); overflow-y: auto; padding: 8px 0; font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; outline: none; cursor: text; }
 .composer-input:empty::before { content: attr(data-placeholder); color: var(--dim); pointer-events: none; }
 .ref-chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; margin: 0 1px; border-radius: var(--radius-pill); background: var(--ref-fill); color: var(--ref-text); font-size: 13px; line-height: 1.45; vertical-align: baseline; white-space: nowrap; }
 .ref-chip-label { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
@@ -456,7 +461,7 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .cmenu-desc { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--dim); }
 .cmenu-foot { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; border-top: 1px solid var(--border); margin-top: 4px; font-size: 12px; color: var(--dim); }
 .cmenu-foot kbd { font-family: var(--font-mono); font-size: 11px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-2); }
-.send-key { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 0; border-radius: var(--radius-pill); background: var(--alloc-equity); color: var(--on-equity); }
+.send-key { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 36px; height: 36px; border: 0; border-radius: var(--radius-pill); background: var(--alloc-equity); color: var(--on-equity); }
 .empty { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 40px 28px; text-align: center; }
 .empty-title { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
 .suggest { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }

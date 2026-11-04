@@ -18,18 +18,18 @@ export function currentConversation(state) {
   return state.conversations.find(c => c.id === id) ?? firstOpen(state.conversations);
 }
 
-// the menu's slot above the box, the note (a refusal of the draft's files), then the box: the files rail, the paperclip and its
-// hidden input, the editor and Send; the words are prompted to the session (host/actions.js). The editor is drawn empty:
+// the menu's slot above the box, the note (a refusal of the draft's files), then the box: the files rail, then the input row
+// (never wrapping) of the paperclip and its hidden input, the editor and Send; the words are prompted to the session (host/actions.js). The editor is drawn empty:
 // app.js puts the conversation's draft in it
 export function renderComposer({ placeholder = 'Tell Gravit…', above = '', menu = null, files = [], note = '' } = {}) {
   const editor = attrs({ id: 'say', class: 'composer-input', contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true', 'aria-labelledby': 'say-label', 'aria-controls': 'composer-menu', ...menuAria(menu), 'data-placeholder': placeholder });
   return `<form class="composer" data-action="send">${above}<div class="composer-menu" id="composer-menu">${renderMenu(menu)}</div>` +
     `<div class="composer-note" id="composer-note" role="status">${esc(note)}</div><div class="composer-box">` +
-    `<div class="composer-files" id="composer-files">${filesRail(files)}</div>` +
+    `<div class="composer-files" id="composer-files">${filesRail(files)}</div><div class="composer-row">` +
     `<button type="button" class="attach-key" data-action="attachFiles" aria-label="Attach files">${icon('paperclip', 18)}</button>` +
     `<input${attrs({ type: 'file', id: 'attach-input', class: 'sr-only', multiple: true, tabindex: '-1', 'aria-hidden': 'true' })}>` +
     `<span id="say-label" class="sr-only">Tell Gravit</span><div${editor}></div>` +
-    `<button type="submit" class="send-key" aria-label="Send">${icon('send', 18, 2.4)}</button></div></form>`;
+    `<button type="submit" class="send-key" aria-label="Send">${icon('send', 18, 2.4)}</button></div></div></form>`;
 }
 
 // the composer's own facts from app.js: the open menu, the draft's files, the note above the box
@@ -143,7 +143,7 @@ export function renderDetails(conv, state) {
 </aside>`;
 }
 
-export function renderMessagesScreen(state, now, composer = { menu: null, files: [], note: '' }) {
+export function renderMessagesScreen(state, now, composer = {}) {
   if (state.draft) return draftScreen(state, composer);
   const conv = currentConversation(state);
   if (!conv) return emptyScreen(state, composer);
