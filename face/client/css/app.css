@@ -42,6 +42,22 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .rail-group { display: flex; flex-direction: column; gap: 4px; }
 /* the conversation rows scroll on their own; the list's head stays put */
 .rail-rows { flex: 1 1 auto; display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
+.conv-search { display: flex; align-items: center; gap: 8px; height: 36px; flex: none; padding: 0 12px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--surface); color: var(--dim); }
+.conv-search:focus-within { border-color: var(--text); }
+.conv-search input { flex: 1 1 auto; min-width: 0; width: 0; border: 0; background: transparent; font-size: 13px; outline: none; color: var(--text); }
+.conv-search-key { flex: none; font-family: var(--font-sans); font-size: 11px; color: var(--dim); white-space: nowrap; }
+.conv-results { flex: 1 1 auto; display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
+.conv-results-count { padding: 0 10px; font-size: 12px; font-weight: 700; color: var(--dim); }
+.conv-hit { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--radius-s); color: var(--text); }
+.conv-hit:hover { background: var(--hover); }
+.conv-hit.archived { opacity: .6; }
+.conv-hit .chip { padding: 0 8px; font-size: 11px; }
+.conv-hit + .btn-sm { align-self: flex-end; min-height: 28px; margin: -4px 10px 4px; }
+.conv-hit-line { font-size: 12px; color: var(--dim); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.conv-hit-channel { color: var(--text); font-weight: 700; }
+.conv-hit-line mark { background: var(--warn-fill); color: var(--warn-text); border-radius: 3px; }
+.conv-results-state { padding: 8px 10px; font-size: 12px; color: var(--dim); }
+.sk { height: 44px; margin: 0 10px; border-radius: var(--radius-s); background: var(--surface-2); }
 /* a list group's head: the fold key and the channel's name (a link to its page) */
 .grp-head { display: flex; align-items: center; gap: 4px; min-height: 28px; margin-top: 8px; padding: 0 6px; }
 .grp-head:first-child { margin-top: 0; }

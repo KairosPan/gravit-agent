@@ -244,6 +244,16 @@ function runSheetStates(all) {
   ];
 }
 
+// the list's search (plan 2 of the dsh UI port): searching, nothing found, failed, results with a marked snippet, an archived
+// hit with Un-archive and the more-than-twenty line
+function searchStates(s) {
+  const q = (q, then) => { const t = R.setSearchQuery(s, q); return then ? then(t, q) : t; };
+  return [
+    q('zz'), q('zz', (t, query) => R.searchContent(t, { query, items: [], hasMore: false })), q('zz', (t, query) => R.searchFailed(t, { query })),
+    q('T', (t, query) => R.searchContent(t, { query, items: [{ sessionId: 's1', snippet: 'a T b', match: [2, 3] }], hasMore: true })),
+  ];
+}
+
 // the states stage 1 can show: empty, a conversation with every kind, a group thinking, Details, Settings, a draft, a bad status, the rail folded
 function everyState() {
   const base = R.hostList(emptyState(), { conversations: [conv('s1', { messages: KINDS, running: true, usage: { tokenUsage: { outputTokens: 1 }, contextPressure: 0.5 }, created: NOW }), conv('g', { kind: 'group', members: ['gravit', 'buffett'], thinking: 'text', messages: [m('g1', { from: 'buffett', text: 'hold', data: { name: 'Buffett Type', markdown: true, memberSessionId: 'm1', memberTurn: 2 } })] })], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }, { workspaceId: 'w-cn', name: 'cn-market', isRoot: false }], bots: [{ id: 'buffett', name: 'Buffett Type' }] });
@@ -253,6 +263,7 @@ function everyState() {
     R.startEdit(R.toggleDetails(open), { kind: 'rename', convId: 's1', error: 'Cannot be empty' }), R.openSettings(open), R.startDraft(open, { now: NOW }),
     R.startEdit(R.startDraft(open, { now: NOW }), { kind: 'newChannel', error: 'Letters, digits, - or _' }),
     R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open),
+    ...searchStates(R.hostList(open, { conversations: [...open.conversations, conv('old', { title: 'T old', archived: 'face' })] })),
     R.traceLoaded(R.nav(base, { screen: 'messages', id: 'g' }), { convId: 'g', msgId: 'g1', messages: [m('tg1', { kind: 'tool', text: 'account', data: { callId: 'g1c', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }) } }), m('tg2', { from: 'system', text: 'context' })] }),
     R.toggleDetails(R.hostList(R.hostProjection(open, { convId: 's1', key: 'subagentCatalog', value: [{ id: 'k1', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'k2', createdAt: 2, mode: 'unknown' }] }), { conversations: open.conversations, childRows: [{ sessionId: 'k1', parentSessionId: 's1', running: true, origin: 'subagent' }] })), ...marketStates(), ...accountStates(), ...channelStates(), ...discoverStates(), ...tradeStates(),
   ];
@@ -273,6 +284,15 @@ test('every class the screens emit has a rule in app.css, and app.css names no c
   assert.match(css, /--rail/);
   assert.match(css, /\.key\.yes[^{]*\{[^}]*color: var\(--up\)/);
   assert.match(css, /\.key\.no[^{]*\{[^}]*color: var\(--down\)/);
+});
+
+test("the list's search: the box a pill, the results' lines, the match in the warn colours", () => {
+  const html = searchStates(R.nav(R.hostList(emptyState(), { conversations: [conv('s1'), conv('old', { title: 'T old', archived: 'face' })] }), { screen: 'messages', id: 's1' })).map(st => renderRail(st, NOW)).join('');
+  for (const c of ['conv-search', 'conv-search-key', 'conv-results', 'conv-results-count', 'conv-hit', 'conv-hit archived', 'conv-hit-line', 'conv-hit-channel', 'conv-results-state', 'sk']) assert.ok(html.includes(`class="${c}"`), c);
+  assert.match(html, /<mark>T<\/mark>/);
+  assert.match(css, /\.conv-search\s*\{[^}]*height: 36px[^}]*border-radius: var\(--radius-pill\)/);
+  assert.match(css, /\.conv-hit-line mark\s*\{[^}]*background: var\(--warn-fill\)[^}]*color: var\(--warn-text\)/);
+  assert.match(css, /\.conv-hit\.archived\s*\{[^}]*opacity/);
 });
 
 test("the Research shelf's cards: a column, the meta and the foot, the chip tones, a dim card", () => {

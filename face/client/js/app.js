@@ -44,6 +44,7 @@ import { moveSeedOf, earnSeedOf, earnSaidOf, subWalletSeedOf } from './host/shee
 import { startSellMany } from './host/sell-many.js';
 import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf, signOutSeedOf, connectOptionOf, isWalletOption } from './host/sheet-view.js';
 import { startTrade } from './host/trade.js';
+import { startSearch } from './host/search.js';
 import { tradeableOf } from './host/trade-view.js';
 import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
 import { firstOpen } from './host/sessions.js';
@@ -60,6 +61,9 @@ export const SEARCH_QUIET_MS = 300;
 // Gravit's words as the thread draws them: DOM-built markdown (wire/markdown.js returns {node, doc}), serialized for
 // the string renderers
 export const gravitMarkdown = text => renderMarkdown(text).node.outerHTML;
+
+// a Mac names its keys ⌥⌘ (the list's search is ⌥⌘K there, Ctrl+Alt+K elsewhere): the platform the browser reports
+export const isMac = win => /mac/i.test(String(win?.navigator?.userAgentData?.platform ?? win?.navigator?.platform ?? ''));
 
 // a /data read: an answer is its JSON; any other status rejects with the status and, when it parses, the body the face sent —
 // the Account's refusal rides on it (`error.body`), for the hosts to read its sentence from
@@ -408,6 +412,9 @@ export function boot(win, host = {}) {
     store, actions, readListing, now,
     go: async route => { await live.refresh(); go(route); live.promote(route.id); },
   });
+  // the list's search: the box's words in the store at once, the face's index read once the box is quiet
+  const convSearch = startSearch({ store, getJson, timers });
+  const mac = isMac(win);
   // a room member's trace, read without activating the member's session
   const traces = startTraces({ store, call, loadMemberTrace, now });
   // the quotes, and the desk's status, run only while Markets is on screen in a visible tab; Trade's picks only while Trade is
@@ -431,6 +438,7 @@ export function boot(win, host = {}) {
   let orderFields = null;   // the ticket's order sheet's fields as they last stood, for when another sheet took its place
   let last = { overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, editor: null, confirm: null };
   let confirmFrom = null;
+  let searchFocus = false;  // ⌥⌘K from a screen with no list: the box takes focus once Messages draws it
 
   function applyTheme(theme) {
     if (theme === 'cream' || theme === 'black') doc.documentElement.dataset.theme = theme; else delete doc.documentElement.dataset.theme;
@@ -461,7 +469,7 @@ export function boot(win, host = {}) {
       : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now());
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
     const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
-    root.innerHTML = renderRail(s, now()) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen);
+    root.innerHTML = renderRail(s, now(), { mac }) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen);
     // the quotes poll asks for the rows the table drew, by id; a market's page, which draws none, for its own market (spec §6.1:
     // the page follows it on the stream and polls quotes for what the stream does not carry)
     if (s.route.screen === 'markets') {
@@ -534,6 +542,7 @@ export function boot(win, host = {}) {
       // the pressed control went away (an answered card's keys): stay inside the drawer if one is up, else the composer
       target = overlay ? root.querySelector(closeKeyOf(overlay)) : say;
     }
+    if (searchFocus && doc.getElementById('cq')) { target = doc.getElementById('cq'); searchFocus = false; }
     if (target) {
       target.focus();
       if (caret && target === find(activeKey) && typeof target.setSelectionRange === 'function') target.setSelectionRange(caret[0], caret[1]);
@@ -1163,6 +1172,7 @@ export function boot(win, host = {}) {
     else if (el.dataset?.action === 'mkQuery') { store.dispatch('setMarketsQuery', el.value); searchSoon(el.value); }
     else if (el.dataset?.action === 'tradeQuery') tradeSoon(el.value);   // trade.query moves the query (the box keeps the words)
     else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
+    else if (el.dataset?.action === 'convQuery') convSearch.type(el.value);
     else if (isField(el) && typesWords(el)) changeField(el.name, el.value);
     else if (el.dataset?.action === 'runSheetField' && typesWords(el)) act.runSheetField(el);
     else if (el.dataset?.action === 'sellManyQty') sellMany.setQty(el.dataset.index, el.value);
@@ -1207,9 +1217,30 @@ export function boot(win, host = {}) {
     pending = false;
   });
 
+  // ⌥⌘K (Ctrl+Alt+K off a Mac) focuses the list's search box from anywhere: matched on the key's place, since ⌥ changes the
+  // character a Mac reports; off a screen with the list it goes to Messages first
+  function focusSearch() {
+    const box = doc.getElementById('cq');
+    if (box) { box.focus(); return; }
+    const s = store.get();
+    const last = s.lastConv && s.conversations.some(c => c.id === s.lastConv && !c.archived) ? s.lastConv : null;
+    searchFocus = true;
+    go({ screen: 'messages', id: last ?? firstOpen(s.conversations)?.id ?? null });
+  }
   doc.addEventListener('keydown', ev => {
+    if (ev.code === 'KeyK' && ev.altKey && (mac ? ev.metaKey && !ev.ctrlKey : ev.ctrlKey && !ev.metaKey)) {
+      ev.preventDefault();
+      focusSearch();
+      return;
+    }
     if (ev.key === 'Escape') {
       const s = store.get();
+      // the search box while it has focus, before today's chain (spec D34): the first Esc clears the query, the next leaves the box
+      const box = doc.activeElement;
+      if (box && box.id === 'cq') {
+        if (s.search.query !== '' || box.value !== '') { box.value = ''; convSearch.clear(); } else box.blur?.();
+        return;
+      }
       if (s.edit) { store.dispatch('cancelEdit'); return; }
       if (s.confirm) { store.dispatch('cancelConfirm'); return; }
       // a module card's Run sheet first, then the owner sheet over any drawer, then the stock drawer; Trade's ticket after every drawer

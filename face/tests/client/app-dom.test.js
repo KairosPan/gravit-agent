@@ -3358,3 +3358,101 @@ test("Sell many's DEX leg reads the Account again after the wallet answers", asy
   await until(() => h.reads.slice(readsAtReport).includes('/data/account?fresh=1'), 'the Account read again after the wallet answered');
   store.timers.clear();
 });
+
+// the list's search box (plan 2 of the dsh UI port, Task 3): its key, its Escape, and a list refresh while it is in use
+const searchBox = f => {
+  const cq = f.withId('cq', { tagName: 'INPUT', type: 'search', dataset: { action: 'convQuery' }, presentIf: /id="cq"/ });
+  cq.blur = () => { if (f.doc.activeElement === cq) f.doc.activeElement = f.body; };
+  return cq;
+};
+const titled = (id, title, over = {}) => row(id, { projections: { values: { title } }, ...over });
+const keyK = (mods, onPrevent = () => {}) => ({ key: 'k', code: 'KeyK', altKey: true, metaKey: false, ctrlKey: false, ...mods, preventDefault: onPrevent });
+
+test('⌥⌘K focuses the box from the composer', async () => {
+  const f = fakeWindow({ hash: '' });
+  f.win.navigator = { platform: 'MacIntel' };
+  const cq = searchBox(f);
+  const say = f.withId('say', { tagName: 'TEXTAREA' });
+  const h = host({ rows: [row('s1')] });
+  started(f, h);
+  await h.ready();
+  assert.match(f.html(), /<kbd class="conv-search-key">⌥⌘K<\/kbd>/, 'the hint names the Mac key');
+  say.focus();
+  f.fire('doc', 'keydown', keyK({ ctrlKey: true }));
+  assert.equal(f.doc.activeElement, say, 'Ctrl+Alt+K is not the key on a Mac');
+  f.fire('doc', 'keydown', { ...keyK({ metaKey: true }), code: 'KeyJ' });
+  assert.equal(f.doc.activeElement, say, 'matched on the code, K only');
+  let prevented = false;
+  // ⌥ turns the key into another character on a Mac: the code is what is matched, never the key
+  f.fire('doc', 'keydown', { ...keyK({ metaKey: true }, () => { prevented = true; }), key: '˚' });
+  assert.equal(f.doc.activeElement, cq);
+  assert.ok(prevented, "the browser's own ⌥⌘K is not run");
+
+  // off a Mac: Ctrl+Alt+K, and from a screen with no list it goes to Messages and focuses the box there
+  const g = fakeWindow({ hash: '#/discover' });
+  const cq2 = searchBox(g);
+  const h2 = host({ rows: [row('s1')] });
+  const store = started(g, h2);
+  await h2.ready();
+  g.fire('doc', 'keydown', keyK({ metaKey: true }));
+  await settle();
+  assert.equal(store.get().route.screen, 'discover', '⌥⌘K is not the key off a Mac');
+  g.fire('doc', 'keydown', keyK({ ctrlKey: true }));
+  await settle();
+  assert.equal(store.get().route.screen, 'messages');
+  assert.match(g.html(), /<kbd class="conv-search-key">Ctrl\+Alt\+K<\/kbd>/);
+  assert.equal(g.doc.activeElement, cq2);
+});
+
+test('Esc clears the query, then a second Esc leaves the box, before any drawer closes', async () => {
+  const f = fakeWindow({ hash: '' });
+  const cq = searchBox(f);
+  const h = host({ rows: [titled('s1', 'Moutai'), titled('s2', 'Other', { updatedAt: 3 })] });
+  const store = started(f, h);
+  await h.ready();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSettings' } });
+  assert.equal(store.get().settingsOpen, true);
+  cq.focus();
+  cq.value = 'mou';
+  f.fire('root', 'input', { target: cq });
+  assert.equal(store.get().search.query, 'mou');
+  assert.match(f.html(), /class="conv-results"[\s\S]*data-id="s1"/);
+  assert.doesNotMatch(f.html(), /data-id="s2"/);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().search.query, '', 'the first Esc clears the query');
+  assert.equal(cq.value, '', 'and the box');
+  assert.match(f.html(), /class="rail-rows"[\s\S]*data-id="s2"/, 'the groups are back');
+  assert.equal(f.doc.activeElement, cq, 'the box keeps focus');
+  assert.equal(store.get().settingsOpen, true, 'Settings is still open');
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.notEqual(f.doc.activeElement, cq, 'the second Esc leaves the box');
+  assert.equal(store.get().settingsOpen, true, 'Settings is still open');
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().settingsOpen, false, "then today's chain");
+});
+
+test('a list refresh mid-search keeps the query, the results, the focus and the caret', async () => {
+  const f = fakeWindow({ hash: '' });
+  const cq = searchBox(f);
+  const h = host({ rows: [titled('s1', '贵州茅台'), titled('s2', 'Other', { updatedAt: 3 })] });
+  const store = started(f, h);
+  await h.ready();
+  cq.focus();
+  cq.value = '茅台';
+  cq.setSelectionRange(1, 1);
+  f.fire('root', 'input', { target: cq });
+  assert.match(f.html(), /conv-results-count">1 conversation</);
+  const lists = () => h.calls.filter(c => c[0] === 'session/list').length;
+  const before = lists();
+  const writes = f.writes;
+  h.rows.push(titled('s3', '茅台 again', { updatedAt: 50 }));
+  await store.live.refresh();
+  await settle();
+  assert.ok(lists() > before && f.writes > writes, 'the list was read again and drawn');
+  assert.equal(store.get().search.query, '茅台');
+  assert.equal(cq.value, '茅台');
+  assert.equal(f.doc.activeElement, cq);
+  assert.deepEqual([cq.selectionStart, cq.selectionEnd], [1, 1]);
+  assert.match(f.html(), /conv-results-count">2 conversations</, 'the results follow the new list');
+  assert.doesNotMatch(f.html(), /class="rail-rows"/);
+});

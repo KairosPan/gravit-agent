@@ -219,3 +219,77 @@ test('Discover is in the first level, current on Discover, on a plugin page and 
   }
   assert.equal(renderList(R.nav(base, { screen: 'discover', id: null }), NOW), '', 'no conversation list beside Discover');
 });
+
+// the list's search (plan 2 of the dsh UI port, Task 3): the box under the head, the results in place of the groups
+const searched = (s, q, answer) => {
+  let t = R.setSearchQuery(s, q);
+  if (answer === 'failed') t = R.searchFailed(t, { query: q });
+  else if (answer) t = R.searchContent(t, { query: q, ...answer });
+  return t;
+};
+
+test('the box sits under the list head with its placeholder and key hint', () => {
+  const s = listed([conv('a')]);
+  const h = renderList(s, NOW);
+  assert.match(h, /<\/div><div class="conv-search"><svg[^>]*>[\s\S]*?<\/svg><input id="cq" type="search" autocomplete="off" placeholder="Search conversations" aria-label="Search conversations" data-action="convQuery" value=""><kbd class="conv-search-key">⌥⌘K<\/kbd><\/div><div class="rail-rows">/);
+  assert.ok(h.indexOf('class="list-head"') < h.indexOf('class="conv-search"'));
+  assert.match(renderList(s, NOW, { mac: false }), /<kbd class="conv-search-key">Ctrl\+Alt\+K<\/kbd>/, 'off a Mac');
+  assert.match(renderList(searched(s, 'T "a'), NOW), /data-action="convQuery" value="T &quot;a"/, "the box's value is the store's");
+  assert.match(renderList(R.nav(listed([]), { screen: 'messages', id: null }), NOW), /class="conv-search"/, 'there with no conversation');
+});
+
+test('a query replaces the groups with the results and their count', () => {
+  const s = R.startDraft(listed([conv('a', { title: 'Moutai notes', channel: { workspaceId: 'w0', name: 'workbench' } }), conv('b', { title: 'Other' }), conv('c', { title: 'moutai again', updatedAt: NOW - 1 * MIN })], 'a'), { now: NOW });
+  const h = renderList(searched(s, 'moutai'), NOW);
+  assert.doesNotMatch(h, /class="rail-rows"|class="grp-head"|draft/, 'no groups and no draft row while a query stands');
+  assert.match(h, /<div class="conv-results"><div class="conv-results-count">2 conversations<\/div>/);
+  const ids = [...h.matchAll(/class="conv-hit[^"]*" href="#\/messages\/(\w+)" data-action="open" data-id="(\w+)"/g)].map(m => m[1] + m[2]);
+  assert.deepEqual(ids, ['cc', 'aa'], 'newest first, each a link that opens it');
+  assert.match(h, /<span class="row-top"><span class="row-title">moutai again<\/span><span class="row-time">[^<]+<\/span><\/span><span class="conv-hit-line"><b class="conv-hit-channel">No channel<\/b>/);
+  assert.match(h, /<b class="conv-hit-channel">workbench<\/b>/);
+  assert.match(renderList(searched(s, 'other'), NOW), /conv-results-count">1 conversation</);
+  assert.equal(s.collapsed, R.setSearchQuery(s, 'x').collapsed, "the groups' collapse preferences are untouched");
+  // a blank query is no query: the groups as they were
+  assert.equal(renderList(searched(s, '   '), NOW), renderList(s, NOW).replace('value=""', 'value="   "'));
+});
+
+test("the snippet's match is marked, and every host word is escaped", () => {
+  const s = listed([conv('a', { title: '<b>x</b>', channel: { workspaceId: 'w1', name: '<i>c</i>' } }), conv('b', { title: 'plain' })]);
+  const withCh = R.hostList(s, { conversations: s.conversations, channels: [{ workspaceId: 'w1', name: '<i>c</i>', isRoot: false }] });
+  const h = renderList(searched(withCh, 'zz', { items: [{ sessionId: 'b', snippet: 'say <zz> & go', match: [4, 8] }], hasMore: false }), NOW);
+  assert.match(h, /<span class="conv-hit-line"><b class="conv-hit-channel">No channel<\/b> say <mark>&lt;zz&gt;<\/mark> &amp; go<\/span>/);
+  const t = renderList(searched(withCh, 'x'), NOW);
+  assert.doesNotMatch(t, /<b>x<\/b>|<i>c<\/i>/);
+  assert.match(t, /row-title">&lt;b&gt;x&lt;\/b&gt;</);
+  assert.match(t, /conv-hit-channel">&lt;i&gt;c&lt;\/i&gt;</);
+});
+
+test('an archived hit is dim with its chip, and a face-archived one carries Un-archive beside the link', () => {
+  const s = listed([conv('f', { title: 'Old face', archived: 'face' }), conv('h', { title: 'Old host', archived: 'host', updatedAt: NOW - 9 * MIN }), conv('n', { title: 'Old new', updatedAt: NOW - 20 * MIN })]);
+  const h = renderList(searched(s, 'old'), NOW);
+  assert.match(h, /<a class="conv-hit archived" href="#\/messages\/f" data-action="open" data-id="f"><span class="row-top"><span class="row-title">Old face<\/span><span class="chip grey">Archived<\/span>/);
+  assert.match(h, /<a class="conv-hit archived" href="#\/messages\/h"[\s\S]*?<span class="chip grey">Archived<\/span>/);
+  assert.match(h, /<a class="conv-hit" href="#\/messages\/n"/);
+  assert.equal(count(h, /Archived</g), 2);
+  assert.match(h, /data-id="f">[\s\S]*?<\/a><button type="button" class="btn-sm" data-action="unarchive" data-conv="f">Un-archive<\/button>/, 'a sibling after the link');
+  assert.equal(count(h, /data-action="unarchive"/g), 1, "the host's archive cannot be undone here");
+  for (const a of h.match(/<a [\s\S]*?<\/a>/g)) assert.doesNotMatch(a, /<button/, 'never inside the link');
+});
+
+test("each state's line, word for word", () => {
+  const s = listed([conv('a', { title: 'Alpha' }), ...Array.from({ length: 21 }, (_, i) => conv(`k${i}`, { title: `Kilo ${i}` }))]);
+  const searching = renderList(searched(s, 'zz'), NOW);
+  assert.match(searching, /<div class="conv-results"><div class="conv-results-state">Searching every conversation…<\/div><div class="sk"><\/div><div class="sk"><\/div><div class="sk"><\/div><\/div>/);
+  assert.doesNotMatch(searching, /conv-results-count/);
+  assert.match(renderList(searched(s, 'zz', { items: [], hasMore: false }), NOW), /<div class="conv-results"><div class="conv-results-state">No matching conversations<\/div><\/div>/);
+  assert.match(renderList(searched(s, 'zz', 'failed'), NOW), /<div class="conv-results"><div class="conv-results-state">Could not search inside conversations<\/div><\/div>/);
+  // a failed content search keeps the title matches, the muted line after them
+  const kept = renderList(searched(s, 'alpha', 'failed'), NOW);
+  assert.match(kept, /conv-results-count">1 conversation<[\s\S]*data-id="a"[\s\S]*<div class="conv-results-state">Could not search inside conversations<\/div><\/div><\/aside>$/);
+  // more than twenty: by the merge's cut, and by the wire's hasMore
+  const cut = renderList(searched(s, 'kilo'), NOW);
+  assert.equal(count(cut, /class="conv-hit[ "]/g), 20);
+  assert.match(cut, /conv-results-count">20 conversations<[\s\S]*<div class="conv-results-state">Showing the first 20\. Narrow your search\.<\/div><\/div><\/aside>$/);
+  assert.match(renderList(searched(s, 'alpha', { items: [], hasMore: true }), NOW), /<div class="conv-results-state">Showing the first 20\. Narrow your search\.<\/div><\/div><\/aside>$/);
+  assert.doesNotMatch(renderList(searched(s, 'alpha', { items: [], hasMore: false }), NOW), /conv-results-state/, 'results alone say nothing more');
+});

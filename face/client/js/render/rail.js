@@ -9,6 +9,7 @@ import { worthOf, cardsOf } from '../host/account-view.js';
 import { money } from '../wire/account-model.js';
 import { avatar, groupMark } from './avatars.js';
 import { groupsOf } from '../host/list-view.js';
+import { titleMatches, mergeResults, highlightRuns, searchPhase, moreThanTwenty } from '../host/search-view.js';
 
 const NAME = { you: 'You', gravit: 'Gravit', system: '' };
 // a bot's display name comes with the list (/data/bots.json); an unknown sender keeps its id
@@ -100,16 +101,57 @@ function groupHead(g, state) {
     `${icon(g.collapsed ? 'chevRight' : 'chevDown', 14, 2.2)}</button>${name}</div>`;
 }
 
-// the second level, open on Messages: the new-message key on top, then the groups (host/list-view.js), each its head
-// and its rows, newest first
-export function renderList(state, now) {
-  if (state.route.screen !== 'messages' && state.route.screen !== 'channel') return '';
-  const rows = (state.draft ? draftRow() : '') + groupsOf(state).map(g => groupHead(g, state) + g.shown.map(c => row(c, state, now)).join('')).join('');
-  return `<aside class="list" aria-label="Messages"><div class="list-head"><h2 class="list-title">Messages</h2>` +
-    `<button type="button" class="new-key" data-action="startDraft" aria-label="New message">${icon('plus', 18, 2.2)}</button></div>` +
-    `${rows ? `<div class="rail-rows">${rows}</div>` : ''}</aside>`;
+// the search box under the list head (spec 2026-11-03 §5.1, P1): its words are the store's; the hint names the platform's key
+function searchBox(query, mac) {
+  return `<div class="conv-search">${icon('search', 16, 2)}<input${attrs({ id: 'cq', type: 'search', autocomplete: 'off', placeholder: 'Search conversations', 'aria-label': 'Search conversations', 'data-action': 'convQuery', value: query })}>` +
+    `<kbd class="conv-search-key">${mac ? '⌥⌘K' : 'Ctrl+Alt+K'}</kbd></div>`;
 }
 
-export function renderRail(state, now) {
-  return renderNav(state) + renderList(state, now);
+const SEARCH_LINE = {
+  searching: 'Searching every conversation…', empty: 'No matching conversations', failed: 'Could not search inside conversations',
+  more: 'Showing the first 20. Narrow your search.',
+};
+const stateLine = key => `<div class="conv-results-state">${SEARCH_LINE[key]}</div>`;
+
+// a result: its title and time, then its channel in bold and the snippet with the match marked; an archived one dim with its
+// chip, and the face's own archive undone by the key after the link (the host's cannot be undone here)
+function hit(it, now) {
+  const runs = highlightRuns(it.snippet, it.match).map(r => (r.mark ? `<mark>${esc(r.text)}</mark>` : esc(r.text))).join('');
+  const link = `<a${attrs({ class: cls('conv-hit', it.archived && 'archived'), href: `#/messages/${it.id}`, 'data-action': 'open', 'data-id': it.id })}>` +
+    `<span class="row-top"><span class="row-title">${esc(it.title)}</span>${it.archived ? '<span class="chip grey">Archived</span>' : ''}<span class="row-time">${it.at ? rowTime(it.at, now) : ''}</span></span>` +
+    `<span class="conv-hit-line"><b class="conv-hit-channel">${esc(it.channelLabel)}</b>${runs ? ` ${runs}` : ''}</span></a>`;
+  return link + (it.archived === 'face' ? `<button type="button" class="btn-sm" data-action="unarchive"${attrs({ 'data-conv': it.id })}>Un-archive</button>` : '');
+}
+
+// the results in place of the groups: the title matches at once, the content ones as they land, at most twenty
+function results(state, now) {
+  const { query, contentPhase, content, hasMore } = state.search;
+  const titles = titleMatches(state.conversations, state.channels, query);
+  const merged = mergeResults({ titles, content, conversations: state.conversations, channels: state.channels });
+  const phase = searchPhase({ query, titles, contentPhase, merged });
+  let inner;
+  if (phase === 'searching') inner = stateLine('searching') + '<div class="sk"></div>'.repeat(3);
+  else if (phase === 'empty' || phase === 'failed') inner = stateLine(phase);
+  else {
+    inner = `<div class="conv-results-count">${merged.length === 1 ? '1 conversation' : `${merged.length} conversations`}</div>` +
+      merged.map(it => hit(it, now)).join('') +
+      (moreThanTwenty(merged, hasMore) ? stateLine('more') : '') + (contentPhase === 'failed' ? stateLine('failed') : '');
+  }
+  return `<div class="conv-results">${inner}</div>`;
+}
+
+// the second level, open on Messages: the new-message key on top, the search box, then the groups (host/list-view.js), each
+// its head and its rows, newest first — or, while a query stands, its results in their place
+export function renderList(state, now, { mac = true } = {}) {
+  if (state.route.screen !== 'messages' && state.route.screen !== 'channel') return '';
+  const query = state.search?.query ?? '';
+  const head = `<aside class="list" aria-label="Messages"><div class="list-head"><h2 class="list-title">Messages</h2>` +
+    `<button type="button" class="new-key" data-action="startDraft" aria-label="New message">${icon('plus', 18, 2.2)}</button></div>` + searchBox(query, mac);
+  if (query.trim() !== '') return `${head}${results(state, now)}</aside>`;
+  const rows = (state.draft ? draftRow() : '') + groupsOf(state).map(g => groupHead(g, state) + g.shown.map(c => row(c, state, now)).join('')).join('');
+  return `${head}${rows ? `<div class="rail-rows">${rows}</div>` : ''}</aside>`;
+}
+
+export function renderRail(state, now, opts = {}) {
+  return renderNav(state) + renderList(state, now, opts);
 }
