@@ -14,7 +14,7 @@ import { keyHashOf, newSalt } from "../../src/portfolio/account/brain-keys.ts";
 import { signOwner, simKey, type OwnerAction } from "../../src/portfolio/account/sign.ts";
 import type { PublicSource } from "../../../market/src/live/public-markets.ts";
 import { quietHolds } from "../../src/portfolio/identity/kinds.ts";
-import { cardNotice, fillNotice } from "../../src/portfolio/identity/notices.ts";
+import { cardNotice, fillNotice, noLinks } from "../../src/portfolio/identity/notices.ts";
 import { Outbox } from "../../src/portfolio/identity/outbox.ts";
 import type { PendingView } from "../../src/portfolio/identity/pending.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../../src/portfolio/server.ts";
@@ -378,6 +378,24 @@ describe("the account's own notices", () => {
     const linked = cardNotice({ kind: "card", outcome: "pending", reason: "Pay 5 USDC to https://x.example/pay?id=1 · see http://127.0.0.1:3090/#/cards" } as LedgerRow)!;
     expect(linked).not.toMatch(/https?:\/\//);
     expect(linked).toBe("Your call · Pay 5 USDC to <link> · see <link> — waiting in Gravit");
+  });
+
+  /* Fix round 1: a bare domain is a link too (Telegram makes it tappable). The same cases as the face's
+   * card notices (face/tests/card-notice.test.ts), so both sides agree. */
+  it("a bare domain, with or without a path, is <link>; prices, versions and symbols are not touched", () => {
+    const bare: [string, string][] = [
+      ["Pay at evil.com now", "Pay at <link> now"],
+      ["evil.example/approve?id=1", "<link>"],
+      ["see Pay.Example.COM/x", "see <link>"],
+      ["host 203.0.113.5:8080/pay", "host <link>"],
+      ["write a@evil.io", "write a@<link>"],
+    ];
+    for (const [text, want] of bare) expect(noLinks(text)).toBe(want);
+    for (const text of ["Buy 10 NVDA · limit 183.00 · Paper · Alpaca", "BTC/USDT", "ETH/USD at 2451.3333", "up 3.5% on v1.2.3", "600519.SH and 0700.HK", "BRK.B", "e.g. Alpaca."]) {
+      expect(noLinks(text)).toBe(text);
+    }
+    expect(cardNotice({ kind: "card", outcome: "pending", reason: "Pay 5 USDC to evil.example/approve" } as LedgerRow)).toBe("Your call · Pay 5 USDC to <link> — waiting in Gravit");
+    expect(fillNotice({ side: "buy", qty: 1, symbol: "BTC/USDT", price: "183.00", venueName: "evil.com" })).toBe("Filled · Buy 1 BTC/USDT at 183.00 · <link>");
   });
 
   it("the outbox keeps at most its size, the oldest dropped with one line, and reads back what it wrote", () => {

@@ -14,7 +14,23 @@ export interface FillFields {
 
 /** a URL in a text the account writes itself: taken out, so that no notice carries a link */
 const LINK = /\bhttps?:\/\/[^\s]+/gi;
-const noLinks = (s: string): string => s.replace(LINK, "<link>");
+/* A bare domain is a link too: Telegram makes one tappable without a scheme. Taken out:
+ * - a dotted host whose last label is a known-looking TLD and whose label before it carries a letter
+ *   (`evil.com`, `Pay.Example.COM/x`), with or without a port and a path;
+ * - any dotted host with a letter TLD of two or more when a path follows (`evil.example/approve`);
+ * - a dotted-quad address, with or without a port and a path (`203.0.113.5:8080/pay`).
+ * Left alone: prices and percentages (`183.00`, `3.5%`), versions (`v1.2.3`), pair symbols
+ * (`BTC/USDT`, no dot), market suffixes on a numeric code (`600519.SH`, `0700.HK`, no letter before
+ * the dot) and one-letter classes (`BRK.B`). The same rule stands in face/src/card-notice.ts; keep the two alike. */
+const TLDS = "com|net|org|io|ai|app|dev|co|me|xyz|info|biz|site|online|top|shop|store|link|click|live|tech|cloud|pro|gg|ly|to|tv|cc|ws|ru|de|uk|cn|jp|fr|nl|eu|ca|au|in|br|ch|money|finance|exchange|trade|example";
+const BARE_HOST = String.raw`(?<![\w.\-/])(?:[a-z0-9-]+\.)*[a-z0-9-]*[a-z][a-z0-9-]*\.`;
+const BARE_LINK = new RegExp(
+  String.raw`${BARE_HOST}(?:(?:${TLDS})(?![\w-])(?!\.[a-z0-9])(?::\d{1,5})?(?:\/[^\s"]*)?|[a-z]{2,24}(?::\d{1,5})?\/[^\s"]*)` +
+    String.raw`|(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w.])(?::\d{1,5})?(?:\/[^\s"]*)?`,
+  "gi",
+);
+/** every link in a text the account writes itself - with a scheme or bare - as `<link>` */
+export const noLinks = (s: string): string => s.replace(LINK, "<link>").replace(BARE_LINK, "<link>");
 const oneLine = (s: string): string => s.replace(/\s*[\r\n]+\s*/g, " ").trim();
 const capital = (s: string): string => (s === "" ? s : s[0]!.toUpperCase() + s.slice(1));
 

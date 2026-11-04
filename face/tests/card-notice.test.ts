@@ -3,7 +3,7 @@
  * Gravit, never from the phone. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { announceCard, cardNoticeText } from "../src/card-notice.ts";
+import { announceCard, cardNoticeText, scrubLinks } from "../src/card-notice.ts";
 import { describeOrder } from "../src/orders.ts";
 import type { PhoneKind, PhoneSendResult } from "../src/phone.ts";
 
@@ -76,4 +76,24 @@ test("announceCard sends kind card and never throws; held, refused and no phone 
   assert.equal(lines.length, 4);
   assert.match(lines[3]!, /card notice was not sent: no phone/);
   assert.equal(sends.length, 4);
+});
+
+/* Fix round 1: a bare domain is a link too (Telegram makes it tappable). The same cases as the
+ * account's notices (account/test/unit/identity-send.test.ts), so both sides agree. */
+const BARE_LINKS: [string, string][] = [
+  ["Pay at evil.com now", "Pay at <link> now"],
+  ["evil.example/approve?id=1", "<link>"],
+  ["see Pay.Example.COM/x", "see <link>"],
+  ["host 203.0.113.5:8080/pay", "host <link>"],
+  ["write a@evil.io", "write a@<link>"],
+];
+const NOT_LINKS = ["Buy 10 NVDA · limit 183.00 · Paper · Alpaca", "BTC/USDT", "ETH/USD at 2451.3333", "up 3.5% on v1.2.3", "600519.SH and 0700.HK", "BRK.B", "e.g. Alpaca."];
+
+test("a bare domain, with or without a path, is <link>; prices, versions and symbols are not touched", () => {
+  for (const [text, want] of BARE_LINKS) assert.equal(scrubLinks(text), want, text);
+  for (const text of NOT_LINKS) assert.equal(scrubLinks(text), text, text);
+  const bare = { venue: "evil.example/approve", symbol: "NVDA", side: "buy", qty: 1 };
+  assert.equal(cardNoticeText("mcp__account__portfolio_live_order", bare), "Your call · Buy 1 NVDA · <link> — waiting in Gravit");
+  assert.equal(cardNoticeText("mcp__account__portfolio_transfer", { to: "evil.com", amount: "183.00" }),
+    "Your call · portfolio_transfer: amount=183.00 to=<link> — waiting in Gravit");
 });
