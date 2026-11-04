@@ -24,6 +24,40 @@ function insertBySeq(msgs, m) {
   return i < 0 ? [...msgs, m] : [...msgs.slice(0, i), m, ...msgs.slice(i)];
 }
 
+// a window's messages folded in one pass, by hostEvent's rules (a replace drops its range but gates, a seen id is
+// skipped or merged, the rest by seq) but in place: a message past the end is pushed, so a long backfill is linear
+export function foldMessages(list) {
+  let msgs = [];
+  let at = new Map();               // id → index in msgs
+  let top = -Infinity;              // the highest numbered seq in msgs: a message at or past it is pushed
+  const reindex = () => {
+    at = new Map(msgs.map((m, i) => [m.id, i]));
+    top = msgs.reduce((t, m) => (typeof m.seq === 'number' && m.seq > t ? m.seq : t), -Infinity);
+  };
+  for (const message of list) {
+    if (message.replace) {
+      const { start, end } = message.replace;
+      msgs = msgs.filter(m => isGate(m) || !(typeof m.seq === 'number' && m.seq >= start && m.seq <= end));
+      reindex();
+    }
+    const i = at.get(message.id);
+    if (i !== undefined) {
+      if (message.merge) msgs[i] = { ...msgs[i], data: { ...msgs[i].data, ...message.data } };
+      continue;
+    }
+    const { merge: _merge, ...rest } = message;
+    if (typeof rest.seq !== 'number' || rest.seq >= top) {
+      at.set(rest.id, msgs.length);
+      msgs.push(rest);
+      if (typeof rest.seq === 'number') top = rest.seq;
+    } else {
+      msgs = insertBySeq(msgs, rest);
+      reindex();
+    }
+  }
+  return msgs;
+}
+
 export const reducers = {
   hostStatus(s, { line, bad = false, connected }) {
     return { ...s, status: { line: line ?? s.status?.line ?? '', bad, connected: connected ?? s.status?.connected ?? false } };
@@ -49,9 +83,11 @@ export const reducers = {
     };
   },
 
-  // a follow snapshot or a page: the window whole, never appended to what was drawn. With a window, the earlier pages
-  // already drawn below its start stay before it (a reconnect while reading up keeps the place), and the start and its
-  // hasMore are the lower window's
+  // a follow snapshot or a page: the window whole, never appended to what was drawn. With a window that the old one
+  // reaches (its cut or its last streamed message at least the seq before the new start), the earlier pages already
+  // drawn below the start stay before it (a reconnect while reading up keeps the place), and the start and its hasMore
+  // are the lower window's; a window past a gap is taken whole, so the gap pages in. An earlier read's loading is the
+  // live layer's to set again
   hostWindow(s, { convId, messages, usage, created, window }) {
     const c0 = find(s, convId);
     if (!c0) return s;
@@ -59,12 +95,12 @@ export const reducers = {
     const old = c0.window;
     const replaced = unionRanges(rangesOf(old), rangesOf(window));
     const drawn = new Set(messages.map(m => m.id));
-    const kept = old ? earlierOf(c0.messages, window.start, replaced, drawn) : [];
-    const lower = old && kept.length > 0 && old.start < window.start;
+    const reach = old ? Math.max(typeof old.through === 'number' ? old.through : 0, maxSeq(c0.messages.filter(m => !isGate(m)))) : -Infinity;
+    const kept = old && reach >= window.start - 1 ? earlierOf(c0.messages, window.start, replaced, drawn) : [];
+    const lower = kept.length > 0 && old.start < window.start;
     const next = {
       start: lower ? old.start : window.start, through: window.through,
       hasMore: lower ? old.hasMore === true : window.hasMore === true, replaced,
-      ...(old?.loading ? { loading: true } : {}),
     };
     return upd(s, convId, c => ({ ...c, messages: [...kept, ...messages], loaded: true, window: next, usage: usage ?? c.usage, created: created ?? c.created }));
   },

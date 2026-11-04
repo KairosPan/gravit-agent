@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { needsAnswer } from '../../client/js/messages.js';
+import { foldMessages } from '../../client/js/reducers/host.js';
 
 const NOW = 1_760_000_000_000;
 const conv = (id, over = {}) => ({ id, title: 'T', kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: false, updatedAt: 5, created: null, messages: [], loaded: false, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
@@ -302,4 +303,40 @@ test('hostList keeps the window, the outline and the stats', () => {
   s = R.hostList(s, { conversations: [conv('a', { title: 'A2' })] });
   const a = get(s, 'a');
   assert.deepEqual(a.window, win(20)); assert.deepEqual(a.outline, [{ turn: 1, seq: 3 }]); assert.deepEqual(a.stats, { turns: 1 });
+});
+
+test('a new snapshot that does not reach the old window takes the new window whole', () => {
+  // window 20..69 read, the conversation grows while away, the re-opened window is 80..129
+  let s = R.hostWindow(withConv(conv('a')), { convId: 'a', messages: [msg('e20', 20), msg('e69', 69)], window: win(20, { through: 69, hasMore: false }) });
+  s = R.hostWindow(s, { convId: 'a', messages: [msg('e80', 80), msg('e129', 129)], window: win(80, { through: 129, hasMore: true }) });
+  assert.deepEqual(seqs(s, 'a'), [80, 129], 'nothing kept across the 70..79 gap');
+  assert.deepEqual(get(s, 'a').window, { start: 80, through: 129, hasMore: true, replaced: [] }, 'the new start and its hasMore, so 70..79 page in');
+  // adjacent: the old window reached 69 by its cut, the new one starts at 70 - kept
+  let t = R.hostWindow(withConv(conv('b')), { convId: 'b', messages: [msg('e20', 20), msg('e60', 60)], window: win(20, { through: 69, hasMore: false }) });
+  t = R.hostWindow(t, { convId: 'b', messages: [msg('e70', 70)], window: win(70, { through: 90 }) });
+  assert.deepEqual(seqs(t, 'b'), [20, 60, 70]);
+  assert.deepEqual(get(t, 'b').window, { start: 20, through: 90, hasMore: false, replaced: [] });
+  // reached by a streamed message past the cut
+  let u = R.hostWindow(withConv(conv('c')), { convId: 'c', messages: [msg('e20', 20)], window: win(20, { through: 30, hasMore: false }) });
+  u = R.hostEvent(u, { convId: 'c', message: msg('e39', 39) });
+  u = R.hostWindow(u, { convId: 'c', messages: [msg('e40', 40)], window: win(40, { through: 50 }) });
+  assert.deepEqual(seqs(u, 'c'), [20, 39, 40]);
+});
+
+test('a snapshot does not carry an earlier read\'s loading', () => {
+  let s = R.hostWindow(withConv(conv('a')), { convId: 'a', messages: [msg('e20', 20)], window: win(20) });
+  s = R.hostEarlierLoading(s, { convId: 'a', on: true });
+  s = R.hostWindow(s, { convId: 'a', messages: [msg('e20', 20)], window: win(20) });
+  assert.equal('loading' in get(s, 'a').window, false);
+});
+
+test('foldMessages folds a window as hostEvent would, message by message', () => {
+  const list = [
+    msg('e4', 4), msg('e7', 7), msg('e5', 5), msg('e7', 7, { text: 'again' }),
+    msg('tc1', 8, { kind: 'tool', data: { callId: 'c1' } }), msg('tc1', 9, { kind: 'tool', merge: true, text: '', data: { result: 'ok' } }),
+    msg('e10', 10), msg('e12', 12, { from: 'system', replace: { start: 5, end: 8 } }), msg('e13', 13), msg('e11', 11),
+  ];
+  let s = withConv(conv('a'));
+  for (const m of list) s = R.hostEvent(s, { convId: 'a', message: m });
+  assert.deepEqual(foldMessages(list), get(s, 'a').messages);
 });

@@ -670,3 +670,26 @@ test("a compaction in the loaded window hides the seqs an earlier page brings ba
   assert.equal(await r.live.earlier('c'), true);
   assert.deepEqual(ids(r, 'c'), [18, 19, 30, 31]);
 });
+
+test('a stale earlier run neither clears a newer run\'s loading nor leaves its own behind', async () => {
+  const held = [];
+  const r = coldRig(req => new Promise(res => { held.push(() => res({ records: ums(req.beforeSeq - 10), hasMore: true })); }));
+  await r.ready();
+  r.live.open('c'); await settle();
+  const stale = r.live.earlier('c');
+  await settle();
+  r.live.open('d'); await settle();
+  r.live.open('c'); await settle();
+  assert.equal(winOf(r, 'c').loading, undefined, 'the re-opened window starts with no loading');
+  const fresh = r.live.earlier('c');
+  assert.notEqual(fresh, stale);
+  await settle();
+  assert.equal(winOf(r, 'c').loading, true);
+  held[0]();
+  assert.equal(await stale, false);
+  assert.equal(winOf(r, 'c').loading, true, 'the stale run leaves the newer one\'s loading');
+  held[1]();
+  assert.equal(await fresh, true);
+  assert.equal(winOf(r, 'c').loading, undefined);
+  assert.deepEqual(ids(r, 'c'), [20, 30, 31]);
+});

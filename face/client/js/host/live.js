@@ -6,7 +6,7 @@ import { summaryOf, readProjections } from '../wire/summaries.js';
 import { rememberCall, toMessages } from './kinds.js';
 import { attachmentsLine } from '../composer/files.js';
 import { listConversations, childRowsOf } from './sessions.js';
-import { reducers as host } from '../reducers/host.js';
+import { foldMessages } from '../reducers/host.js';
 
 export const LIST_REFRESH_MS = 1200;   // the list is re-read this long after a burst of host facts
 export const PREVIEW_ROWS = 12;        // how many rows get a one-message page for their preview
@@ -89,23 +89,24 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     const speaker = speakerOf(convOf(convId));
     const list = Array.isArray(records) ? records : [];
     const replaced = [];
-    let scratch = { conversations: [{ id: convId, messages: [], thinking: null }] };
+    const out = [];
     for (const r of list) {
       const frame = { type: 'session/event', sessionId: convId, event: r?.event };
       rememberCall(calls, frame);
       for (const m of toMessages(mapFrame(frame), calls, now(), speaker)) {
         if (m.replace) replaced.push([m.replace.start, m.replace.end]);
-        scratch = host.hostEvent(scratch, { convId, message: m });
+        out.push(m);
       }
     }
     const first = list[0]?.event?.seq;
-    return { messages: scratch.conversations[0].messages, start: typeof first === 'number' ? first : 0, replaced };
+    return { messages: foldMessages(out), start: typeof first === 'number' ? first : 0, replaced };
   }
   // through: the follow's cursor or the page's asOfSeq, the cut every earlier page of this window is read against
   function applySnapshot(convId, snapshot, { through, hasMore }) {
     const created = typeof snapshot?.header?.createdAt === 'number' ? snapshot.header.createdAt : undefined;
     const { messages, start, replaced } = windowOf(convId, snapshot?.records);
     store.dispatch('hostWindow', { convId, messages, created, window: { start, through, hasMore: hasMore === true, replaced } });
+    if (earlierRun && earlierRun.id === convId && earlierRun.token === openSeq) store.dispatch('hostEarlierLoading', { convId, on: true });
     seedBlock(convId, snapshot?.projections);
     for (const m of pending.values()) { // after the window, wherever the list now says each one belongs
       const g = placeGate(m);
@@ -218,9 +219,11 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     if (!view || view.id !== id || view.failed || !w || !w.hasMore) return Promise.resolve(false);
     const token = openSeq;
     const run = { id, token, promise: null };
+    // a run's loading is cleared by it only while no newer run reads the same conversation
+    const done = () => { if (!earlierRun || earlierRun === run || earlierRun.id !== id) store.dispatch('hostEarlierLoading', { convId: id, on: false }); };
     run.promise = (async () => {
       store.dispatch('hostEarlierLoading', { convId: id, on: true });
-      const records = [];
+      const pages = [];               // newest first, joined once at the end
       let start = w.start;
       let hasMore = true;
       try {
@@ -231,17 +234,17 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
           const got = Array.isArray(pg?.records) ? pg.records : [];
           hasMore = pg?.hasMore === true && got.length > 0;
           const first = got[0]?.event?.seq;
-          records.unshift(...got);
+          pages.push(got);
           if (typeof first === 'number') start = Math.min(start, first);
           if (!hasMore || typeof toSeq !== 'number' || start <= toSeq) break;
         }
       } catch (err) {
-        store.dispatch('hostEarlierLoading', { convId: id, on: false });
+        done();
         if (token === openSeq) say(`earlier: ${codeOf(err)}`, true);
         return false;
       }
-      if (token !== openSeq) { store.dispatch('hostEarlierLoading', { convId: id, on: false }); return false; }
-      const folded = windowOf(id, records);
+      if (token !== openSeq) { done(); return false; }
+      const folded = windowOf(id, pages.reverse().flat());
       store.dispatch('hostEarlier', { convId: id, messages: folded.messages, start, hasMore, replaced: folded.replaced });
       return true;
     })().finally(() => { if (earlierRun === run) earlierRun = null; });
