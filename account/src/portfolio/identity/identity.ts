@@ -41,7 +41,7 @@ import type { LedgerRow } from "../../agent/ledger.ts";
 import { formatRouting, isClock, NETWORKS, parseRouting, PHONE_KINDS, quietHolds, rowOf, type Network, type PhoneKind, type Routing } from "./kinds.ts";
 import { BotApi, BotApiError, redactorOf, splitMessage } from "./bot-api.ts";
 import { cardNotice, fillNotice, type FillFields } from "./notices.ts";
-import { lateLine, Outbox, OUTBOX_MAX } from "./outbox.ts";
+import { lateLine, Outbox, OUTBOX_MAX, OUTBOX_MAX_AGE_MS } from "./outbox.ts";
 import { InboxRing, type InboxMessage } from "./inbox.ts";
 import { PendingConnections } from "./pending.ts";
 import { IDENTITY_WORDS } from "./routes.ts";
@@ -116,9 +116,12 @@ const isKind = (s: unknown): s is PhoneKind => typeof s === "string" && (PHONE_K
 /** a reply-to on the wire: `<network>:<the network's own id>` */
 export const REPLY_TO = /^[a-z]{1,16}:\d{1,16}$/;
 /** a link to this machine — the face's own address (its chat URL carries its token), or any other service on loopback: never sent */
+// a path runs to the next space, less the punctuation that ends a sentence (as a chat app's link does)
 const LOCAL_LINKS: readonly RegExp[] = [
-  /\b(?:https?|wss?):\/\/(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|[a-z0-9.-]+\.localhost)(?::\d{1,5})?(?:[/?#][^\s]*)?/gi,
-  /\b(?:localhost|127(?:\.\d{1,3}){3}):\d{1,5}(?:[/?#][^\s]*)?/gi,
+  /\b(?:https?|wss?):\/\/(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|[a-z0-9.-]+\.localhost)(?::\d{1,5})?(?:[/?#](?:[^\s]*[^\s,.;:!?)\]'"])?)?/gi,
+  // bare: [::1], 0.0.0.0 and 127.x with or without a port or a path; localhost with a port or a path
+  /(?:\[::1\]|\b0\.0\.0\.0\b|\b127(?:\.\d{1,3}){3}\b)(?::\d{1,5})?(?:[/?#](?:[^\s]*[^\s,.;:!?)\]'"])?)?/gi,
+  /\blocalhost(?::\d{1,5}(?:[/?#](?:[^\s]*[^\s,.;:!?)\]'"])?)?|[/?#](?:[^\s]*[^\s,.;:!?)\]'"])?)/gi,
 ];
 const withoutLocalLinks = (text: string): string => LOCAL_LINKS.reduce((out, re) => out.replace(re, "<local link>"), text);
 const codeOf = (err: unknown): string => (err instanceof Error ? ((err as NodeJS.ErrnoException).code ?? err.name) : "error");
@@ -216,7 +219,7 @@ export class Identity {
         if (!link) continue;
         const replyTo = m.replyTo !== undefined && m.replyTo.startsWith(`${network}:`) ? m.replyTo : undefined;
         if (this.disposed || this.outbox.length > 0) {
-          this.outbox.push({ t, network, text: body, ...(replyTo ? { replyTo } : {}) });
+          this.outbox.push({ t, network, kind: m.kind, text: body, ...(replyTo ? { replyTo } : {}) });
           queued = true;
           continue;
         }
@@ -231,7 +234,7 @@ export class Identity {
             continue;
           }
           this.log(`identity: a message could not be sent on ${NETWORK_NAME[network]} (${f.message}); it waits in the outbox`);
-          this.outbox.push({ t, network, text: f.rest, ...(f.parts === 0 && replyTo ? { replyTo } : {}) });
+          this.outbox.push({ t, network, kind: m.kind, text: f.rest, ...(f.parts === 0 && replyTo ? { replyTo } : {}) });
           queued = true;
         }
       }
@@ -240,7 +243,7 @@ export class Identity {
       return { ok: true, sent, ...(queued ? { queued: true as const } : {}) };
     }).catch((err: unknown): SendAnswer => {
       this.log(`identity: a send failed (${codeOf(err)})`);
-      return { ok: false, error: "The account could not send this: it was recorded." };
+      return { ok: false, error: "The account could not send this: it was not sent, and it is not kept." };
     });
   }
 
@@ -418,6 +421,15 @@ export class Identity {
     return ids;
   }
 
+  /** quiet hours as the state says them now (off when it cannot be read: a queued message is then dropped only by its age) */
+  private quietNow(): IdentityState["quiet"] {
+    try {
+      return this.state.quiet;
+    } catch {
+      return null;
+    }
+  }
+
   private setBlocked(network: Network, blocked: boolean): void {
     this.connectors.get(network)?.setBlocked(blocked);
     if (blocked) this.sendBlocked.set(network, true);
@@ -433,6 +445,17 @@ export class Identity {
       if (!link) {
         this.outbox.shift();
         this.log(`identity: a queued message for ${NETWORK_NAME[head.network]} is dropped: it is not connected`);
+        continue;
+      }
+      // quiet hours are asked again now: a message held now is never sent later, whenever it was queued
+      if (quietHolds(head.kind ?? "chat", this.now(), this.quietNow())) {
+        this.outbox.shift();
+        this.log(`identity: a queued ${head.kind ?? "chat"} message for ${NETWORK_NAME[head.network]} is dropped: quiet hours hold it now`);
+        continue;
+      }
+      if (this.now() - Date.parse(head.t) > OUTBOX_MAX_AGE_MS) {
+        this.outbox.shift();
+        this.log(`identity: a queued message for ${NETWORK_NAME[head.network]} is dropped: it waited more than ${OUTBOX_MAX_AGE_MS / 3_600_000} hours`);
         continue;
       }
       // the late line rides in the first part, so what does not go is always the head's own text

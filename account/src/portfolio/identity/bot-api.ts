@@ -65,7 +65,9 @@ export function splitMessage(text: string, max = PART_MAX): string[] {
 function spellings(value: string): string[] {
   let encoded: string[] = [];
   try {
-    encoded = [encodeURIComponent(value)];
+    const upper = encodeURIComponent(value);
+    // a URL's percent-escapes may be written in either case (%3A, %3a)
+    encoded = [upper, upper.replace(/%[0-9A-F]{2}/g, (e) => e.toLowerCase())];
   } catch {
     /* a lone surrogate, which no URL can carry */
   }

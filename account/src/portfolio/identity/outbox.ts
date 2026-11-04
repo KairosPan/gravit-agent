@@ -1,8 +1,10 @@
 /** THE OUTBOX — what the account was asked to send and a network could not take yet (the face's old bridge's outbox, face/src/telegram.ts,
  * moved to the account with the transport).
  *
- * `<home>/identity/outbox.json` is a list of `{t, network, text, replyTo?}`: when the message was written, the network it is for, its text
- * (the account's tokens already taken out) and the message it answers, as `<network>:<id>`. At most `max` (100) are kept; one more drops the
+ * `<home>/identity/outbox.json` is a list of `{t, network, kind, text, replyTo?}`: when the message was written, the network it is for, its
+ * kind (an entry without one reads as `chat`), its text (the account's tokens already taken out) and the message it answers, as
+ * `<network>:<id>`. At flush, an entry quiet hours would hold now is dropped (a held message is never sent later, whenever it was queued),
+ * and so is one older than OUTBOX_MAX_AGE_MS (12 hours: past that an alert, a brief or a reply is stale), each with one line. At most `max` (100) are kept; one more drops the
  * oldest, with one line. Identity (identity.ts) flushes it, in order, before each poll and before each send, so what waits there always
  * goes first; a message it sends more than two minutes after it was written opens with `(written <time>, sent late)`. A message a network
  * refuses outright (Telegram's 400, or 403 for a bot the operator blocked) is dropped with one line, so it cannot hold up the rest.
@@ -12,18 +14,22 @@
  * file that is not a list, is read as an empty outbox (one line) and replaced at the next write. */
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { NETWORKS, type Network } from "./kinds.ts";
+import { NETWORKS, PHONE_KINDS, type Network, type PhoneKind } from "./kinds.ts";
 import { identityDir, writeIdentityFile } from "./store.ts";
 
 export const OUTBOX_MAX = 100;
 /** a message flushed later than this after it was written says so */
 export const LATE_MS = 120_000;
+/** an entry older than this is dropped at flush, never sent: 12 hours */
+export const OUTBOX_MAX_AGE_MS = 12 * 3_600_000;
 const FILE = "outbox.json";
 
 export interface OutboxEntry {
   /** when it was written, ISO */
   t: string;
   network: Network;
+  /** what it is (identity.ts send): quiet hours are asked again at flush. Absent in an older file: read as `chat` */
+  kind?: PhoneKind;
   text: string;
   /** the message it answers, `<network>:<id>` */
   replyTo?: string;
@@ -37,7 +43,8 @@ function entryOf(v: unknown): OutboxEntry | undefined {
   const e = v as Record<string, unknown>;
   if (typeof e.t !== "string" || Number.isNaN(Date.parse(e.t)) || !isNetwork(e.network) || typeof e.text !== "string") return undefined;
   if (e.replyTo !== undefined && typeof e.replyTo !== "string") return undefined;
-  return { t: e.t, network: e.network, text: e.text, ...(typeof e.replyTo === "string" ? { replyTo: e.replyTo } : {}) };
+  const kind = typeof e.kind === "string" && (PHONE_KINDS as readonly string[]).includes(e.kind) ? (e.kind as PhoneKind) : undefined;
+  return { t: e.t, network: e.network, ...(kind ? { kind } : {}), text: e.text, ...(typeof e.replyTo === "string" ? { replyTo: e.replyTo } : {}) };
 }
 
 const NEW_YORK = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
@@ -102,7 +109,7 @@ export class Outbox {
   cutHead(rest: string): void {
     const h = this.list[0];
     if (!h) return;
-    this.list[0] = { t: h.t, network: h.network, text: rest };
+    this.list[0] = { t: h.t, network: h.network, ...(h.kind ? { kind: h.kind } : {}), text: rest };
     this.persist();
   }
 

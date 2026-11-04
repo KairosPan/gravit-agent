@@ -13,6 +13,7 @@ import { isRefusal } from "../../src/core/errors.ts";
 import { keyHashOf, newSalt } from "../../src/portfolio/account/brain-keys.ts";
 import { signOwner, simKey, type OwnerAction } from "../../src/portfolio/account/sign.ts";
 import type { PublicSource } from "../../../market/src/live/public-markets.ts";
+import { quietHolds } from "../../src/portfolio/identity/kinds.ts";
 import { cardNotice, fillNotice } from "../../src/portfolio/identity/notices.ts";
 import { Outbox } from "../../src/portfolio/identity/outbox.ts";
 import type { PendingView } from "../../src/portfolio/identity/pending.ts";
@@ -208,6 +209,14 @@ describe("the send route, through the account", () => {
     // a link to the face (its chat URL carries its own token) never goes either
     await send({ kind: "chat", text: "open http://127.0.0.1:3090/?token=abc123 or http://localhost:3090/#/trade" });
     expect(bot.sent.at(-1)!.text).toBe("open <local link> or <local link>");
+    // bare addresses too: [::1] and 0.0.0.0 with a port, 127.0.0.1 with a path and no port, localhost with a port
+    await send({ kind: "chat", text: "try [::1]:3090/x, 0.0.0.0:3090, 127.0.0.1/cards and localhost:3090?token=q" });
+    expect(bot.sent.at(-1)!.text).toBe("try <local link>, <local link>, <local link> and <local link>");
+    // the token URL-encoded with a lower-case escape
+    const lower = encodeURIComponent(TOKEN).replace(/%3A/g, "%3a");
+    expect(lower).not.toBe(encodeURIComponent(TOKEN));
+    await send({ kind: "chat", text: `as ${lower} too` });
+    expect(bot.sent.at(-1)!.text).toBe("as <token> too");
   });
 
   it("a send Telegram cannot take waits in the outbox and goes first, late after 2 minutes", async () => {
@@ -217,7 +226,7 @@ describe("the send route, through the account", () => {
     const file = join(home, "identity", "outbox.json");
     expect(existsSync(file)).toBe(true);
     const kept = JSON.parse(readFileSync(file, "utf8")) as Array<Record<string, unknown>>;
-    expect(kept).toEqual([{ t: new Date(NOON_ET).toISOString(), network: "telegram", text: "first", replyTo: "telegram:41" }]);
+    expect(kept).toEqual([{ t: new Date(NOON_ET).toISOString(), network: "telegram", kind: "chat", text: "first", replyTo: "telegram:41" }]);
     expect(readFileSync(file, "utf8")).not.toContain(TOKEN);
     // while the outbox holds one, a later send waits behind it
     expect(await send({ kind: "alert", text: "second" })).toEqual({ ok: true, queued: true });
@@ -231,6 +240,38 @@ describe("the send route, through the account", () => {
     expect(bot.sent[0]!.reply_parameters).toEqual({ message_id: 41, allow_sending_without_reply: true });
     expect(status().queued).toBe(0);
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual([]);
+  });
+
+  it("a queued alert quiet hours would hold now is dropped at flush, a queued reply still goes, an aged message is dropped", async () => {
+    // 22:58 in New York: Telegram fails, an alert and a reply wait in the outbox
+    clock = Date.parse("2026-11-05T03:58:00Z");
+    bot.answer("sendMessage", 500, { ok: false, error_code: 500, description: "Internal" });
+    expect(await send({ kind: "alert", text: "NVDA crossed 190" })).toEqual({ ok: true, queued: true });
+    expect(await send({ kind: "chat", text: "a reply" })).toEqual({ ok: true, queued: true });
+    // 23:20: quiet hours; Telegram is back — the alert is dropped with one line, the reply goes, late
+    clock = Date.parse("2026-11-05T04:20:00Z");
+    bot.answer("sendMessage", 0, {});
+    await until(() => status().queued === 0, 5000);
+    expect(bot.sent.map((s) => s.text)).toEqual(["(written 22:58 ET, sent late)\na reply"]);
+    expect(said.filter((l) => l.includes("quiet hours hold it now"))).toHaveLength(1);
+    // a reply that waited more than 12 hours is dropped, never sent
+    clock = NOON_ET + 86_400_000;
+    bot.answer("sendMessage", 500, { ok: false, error_code: 500, description: "Internal" });
+    expect(await send({ kind: "chat", text: "stale" })).toEqual({ ok: true, queued: true });
+    clock += 13 * 3_600_000;
+    bot.answer("sendMessage", 0, {});
+    await until(() => status().queued === 0, 5000);
+    expect(bot.sent.map((s) => s.text)).not.toContain("stale");
+    expect(said.filter((l) => l.includes("waited more than 12 hours"))).toHaveLength(1);
+  });
+
+  it("quiet hours read New York's summer clock (EDT)", async () => {
+    // 23:30 EDT is 03:30 UTC; 22:30 EDT is 02:30 UTC
+    clock = Date.parse("2026-07-15T03:30:00Z");
+    expect(await send({ kind: "alert", text: "summer night" })).toEqual({ ok: true, held: "quiet hours" });
+    clock = Date.parse("2026-07-15T02:30:00Z");
+    expect((await send({ kind: "alert", text: "summer evening" })).sent).toHaveLength(1);
+    expect(bot.sent.map((s) => s.text)).toEqual(["summer evening"]);
   });
 
   it("what waits in the outbox is flushed before each poll", async () => {
@@ -302,6 +343,23 @@ describe("the send route, through the account", () => {
     // never throws, whatever it is handed
     expect(() => svc.identity!.onLedgerRow(null as unknown as LedgerRow)).not.toThrow();
     expect(() => svc.identity!.onFill(undefined as never)).not.toThrow();
+  });
+});
+
+describe("quiet hours across New York's clock changes", () => {
+  const q = { from: "23:00", to: "07:00" };
+  it("on the day the clocks fall back (2026-11-01, 02:00 EDT → 01:00 EST)", () => {
+    expect(quietHolds("alert", Date.parse("2026-11-01T05:30:00Z"), q)).toBe(true); // 01:30 EDT
+    expect(quietHolds("alert", Date.parse("2026-11-01T06:30:00Z"), q)).toBe(true); // 01:30 EST, the hour again
+    expect(quietHolds("alert", Date.parse("2026-11-01T11:30:00Z"), q)).toBe(true); // 06:30 EST (07:30 in EDT's offset)
+    expect(quietHolds("alert", Date.parse("2026-11-01T12:00:00Z"), q)).toBe(false); // 07:00 EST
+  });
+  it("on the day the clocks spring forward (2026-03-08, 02:00 EST → 03:00 EDT)", () => {
+    expect(quietHolds("alert", Date.parse("2026-03-08T07:30:00Z"), q)).toBe(true); // 03:30 EDT
+    expect(quietHolds("alert", Date.parse("2026-03-08T10:59:00Z"), q)).toBe(true); // 06:59 EDT
+    expect(quietHolds("alert", Date.parse("2026-03-08T11:00:00Z"), q)).toBe(false); // 07:00 EDT (06:00 in EST's offset)
+    expect(quietHolds("alert", Date.parse("2026-03-09T03:00:00Z"), q)).toBe(true); // 23:00 EDT that evening
+    expect(quietHolds("alert", Date.parse("2026-03-09T02:59:00Z"), q)).toBe(false); // 22:59 EDT
   });
 });
 
