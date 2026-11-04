@@ -513,7 +513,7 @@ export function boot(win, host = {}) {
   // the operator's keys shown through their eye, as `<convId>|<msgId>|<n>` (render/thread.js): the page's, not the store's,
   // and forgotten once their conversation leaves the screen (D26)
   const revealed = new Set();
-  let last = { lightbox: false, overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, start: null, editor: null, confirm: null, query: '', key: null };
+  let last = { lightbox: false, overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, start: null, anchor: null, editor: null, confirm: null, query: '', key: null };
   let confirmFrom = null;
   let searchFocus = false;  // ⌥⌘K from a screen with no list: the box takes focus once Messages draws it
   let rowsAt = null;        // where the groups last stood: a query hides them, and they come back there when it clears (spec §5.1)
@@ -545,6 +545,10 @@ export function boot(win, host = {}) {
     const ticked = [...root.querySelectorAll('input[id]')].filter(el => (el.type === 'radio' || el.type === 'checkbox') && el.checked).map(el => el.id);
     const thread0 = doc.getElementById('thread');
     const threadAt = thread0 ? { top: thread0.scrollTop, height: thread0.scrollHeight, bottom: thread0.scrollHeight - thread0.scrollTop - thread0.clientHeight < 40 } : null;
+    // the scroll keep's anchor: the message drawn first at the anchor seq last time, where it stood, and the document's
+    // scroll (a narrow window scrolls the page, not the thread)
+    const anchorAt = doc.getElementById('thread-anchor')?.offsetTop ?? null;
+    const docAt = doc.scrollingElement?.scrollTop ?? null;
     const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, results: root.querySelector('.conv-results')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop };
     if (scrolls.rows != null) rowsAt = scrolls.rows;
     // a disclosure the person opened (its Raw, a trace; tool calls are stored but not drawn) is the page's, not the store's: open again by its id
@@ -556,12 +560,15 @@ export function boot(win, host = {}) {
     const open = s.route.screen === 'messages' ? currentConversation(s) : null;
     const threadSig = open ? open.id : null;
     const threadStart = open?.window?.start ?? null;
+    // the anchor seq stays on the message it marked while earlier pages land above it (the start falls or holds); a new
+    // conversation, or a start that rose (a window taken whole), anchors on the window's first message again
+    const anchorSeq = threadStart === null ? null : threadSig === last.thread && last.anchor !== null && last.start !== null && threadStart <= last.start ? last.anchor : threadStart;
     if (threadSig !== last.thread) revealed.clear();
 
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
-      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed });
+      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq });
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
     const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     // files dragged over a screen with a composer: the drop overlay over the page
@@ -620,11 +627,16 @@ export function boot(win, host = {}) {
     if (drawerBody && last.drawer && last.drawer === drawerOf(s) && scrolls.drawer != null) drawerBody.scrollTop = scrolls.drawer;
     // the thread stays where the person was reading while they read up, however much arrives; at the bottom, or on
     // another conversation, it follows the tail. Earlier pages landed above (the window's start below the one last drawn)
-    // keep the words under the reader where they were, at the bottom too: the top moves down by what was added
+    // keep the words under the reader where they were, at the bottom too: the top moves down by how far the anchored
+    // message moved (by what was added when no anchor was drawn), so a frame coalesced below with the page moves nothing
     const thread = doc.getElementById('thread');
     const sameThread = threadAt && threadSig === last.thread;
     const prepended = sameThread && threadSig !== null && threadStart !== null && last.start !== null && threadStart < last.start;
-    if (thread) thread.scrollTop = prepended ? threadAt.top + (thread.scrollHeight - threadAt.height) : sameThread && !threadAt.bottom ? threadAt.top : thread.scrollHeight;
+    const anchorNow = doc.getElementById('thread-anchor')?.offsetTop ?? null;
+    const added = !prepended ? 0 : anchorAt !== null && anchorNow !== null ? anchorNow - anchorAt : thread ? thread.scrollHeight - threadAt.height : 0;
+    if (thread) thread.scrollTop = prepended ? threadAt.top + added : sameThread && !threadAt.bottom ? threadAt.top : thread.scrollHeight;
+    // a thread that does not scroll (as tall as what it holds): the document carries the keep
+    if (prepended && thread && docAt !== null && thread.scrollHeight <= thread.clientHeight) doc.scrollingElement.scrollTop = docAt + added;
 
     // focus: back on the same control; into a drawer (or the sheet) that just opened; back to its opener when it closes — a sheet
     // opened over a drawer keeps that drawer's opener under it, for when the drawer closes in its turn
@@ -667,12 +679,15 @@ export function boot(win, host = {}) {
     }
     if (searchFocus && doc.getElementById('cq')) { target = doc.getElementById('cq'); searchFocus = false; }
     if (target) {
-      target.focus();
+      // the same control focused again, or the composer after the earlier key went: never scrolled into view (the thread's
+      // keep above stands)
+      const still = target === find(activeKey) || (target === say && activeKey?.id?.startsWith('earlier-'));
+      if (still) target.focus({ preventScroll: true }); else target.focus();
       if (caret && target === find(activeKey) && typeof target.setSelectionRange === 'function') target.setSelectionRange(caret[0], caret[1]);
       // focus can move a contenteditable's caret: the editor's goes back where write put it
       if (target === say && keep !== null) editor.place(say, keep[0], keep[1]);
     }
-    last = { lightbox: lightUp, overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, start: threadStart, editor: editorOf(s.edit), confirm: s.confirm, query, key };
+    last = { lightbox: lightUp, overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, start: threadStart, anchor: anchorSeq, editor: editorOf(s.edit), confirm: s.confirm, query, key };
     // a composed answer drawn without its run's view asks for it now that the page is whole (its dispatches render again)
     if (wantedViews(store.get()).length) void ensureViews(store, getJson);
     // the operator's images the thread drew still to read: each asked once (thumb keeps its own in-flight set), its answer
@@ -1448,7 +1463,11 @@ export function boot(win, host = {}) {
     },
     toggleDetails: () => store.dispatch('toggleDetails'),
     // earlier history of the conversation on screen, a page before its window (never activating it, PLAN D16)
-    earlier: el => { void live.earlier(el.dataset.conv); },
+    earlier: el => {
+      const w = store.get().conversations.find(c => c.id === el.dataset.conv)?.window;
+      if (w?.loading) return;   // Loading…: aria-disabled, still focusable
+      void live.earlier(el.dataset.conv);
+    },
     openSettings: () => store.dispatch('openSettings'),
     closeSettings: () => store.dispatch('closeSettings'),
     setTheme: el => { const t = el.dataset.value.toLowerCase(); store.dispatch('setTheme', t); applyTheme(t); },

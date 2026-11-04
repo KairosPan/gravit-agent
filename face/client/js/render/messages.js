@@ -143,11 +143,12 @@ export function renderDetails(conv, state) {
 </aside>`;
 }
 
-// first in the thread while the window has more before it (D22): Earlier messages, or Loading… disabled while a read runs
+// first in the thread while the window has more before it (D22): Earlier messages, or Loading… while a read runs —
+// aria-disabled, not disabled, so the key keeps focus across the read (the earlier action ignores it meanwhile)
 function earlierKey(conv) {
   const w = conv.window;
   if (!w?.hasMore) return '';
-  return `<button${attrs({ class: 'btn-sm earlier-key', type: 'button', id: `earlier-${conv.id}`, 'data-action': 'earlier', 'data-conv': conv.id, disabled: w.loading === true })}>${w.loading ? 'Loading…' : 'Earlier messages'}</button>`;
+  return `<button${attrs({ class: 'btn-sm earlier-key', type: 'button', id: `earlier-${conv.id}`, 'data-action': 'earlier', 'data-conv': conv.id, 'aria-disabled': w.loading ? 'true' : null })}>${w.loading ? 'Loading…' : 'Earlier messages'}</button>`;
 }
 
 export function renderMessagesScreen(state, now, composer = {}, page = {}) {

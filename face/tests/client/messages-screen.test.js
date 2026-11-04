@@ -259,12 +259,22 @@ test("a conversation's thread sits in its box beside an empty rail; New message 
   assert.doesNotMatch(empty, /thread-box|turn-rail/);
 });
 
-test('Earlier messages shows while the window has more, Loading… disabled while it loads, nothing without more', () => {
+test('Earlier messages shows while the window has more, Loading… aria-disabled while it loads, nothing without more', () => {
   const at = window => renderMessagesScreen(listed([conv('a', { window })]), NOW);
   const more = at({ start: 30, through: 40, hasMore: true, replaced: [] });
   assert.match(more, /<div class="thread" id="thread"><button class="btn-sm earlier-key" type="button" id="earlier-a" data-action="earlier" data-conv="a">Earlier messages<\/button>/);
   const loading = at({ start: 30, through: 40, hasMore: true, replaced: [], loading: true });
-  assert.match(loading, /<button class="btn-sm earlier-key" type="button" id="earlier-a" data-action="earlier" data-conv="a" disabled>Loading…<\/button>/);
+  assert.match(loading, /<button class="btn-sm earlier-key" type="button" id="earlier-a" data-action="earlier" data-conv="a" aria-disabled="true">Loading…<\/button>/, 'still focusable while it reads');
+  assert.doesNotMatch(loading, /earlier-key[^>]*\sdisabled/);
   assert.doesNotMatch(at({ start: 0, through: 40, hasMore: false, replaced: [] }), /earlier-key/);
   assert.doesNotMatch(at(undefined), /earlier-key/);
+});
+
+test("the thread's anchor: the first message drawn at or past the seq the page names carries id thread-anchor, once", () => {
+  const msg = (id, seq) => ({ id, seq, at: NOW, from: 'you', kind: 'text', text: 'w' + seq, data: {} });
+  const s = listed([conv('a', { messages: [msg('m10', 10), msg('m30', 30), msg('m31', 31)] })]);
+  const h = renderMessagesScreen(s, NOW, {}, { anchor: 20 });
+  assert.equal(count(h, /id="thread-anchor"/g), 1);
+  assert.match(h, /<div id="thread-anchor" class="msg you"><div class="bubble you">w30</);
+  assert.doesNotMatch(renderMessagesScreen(s, NOW), /thread-anchor/, 'no anchor named, none drawn');
 });

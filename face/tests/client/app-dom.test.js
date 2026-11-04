@@ -330,6 +330,87 @@ test("a reconnect's snapshot while reading up keeps the place and the earlier pa
   store.timers.clear();
 });
 
+test('the earlier key keeps focus while it reads and after the page, without scrolling; #say takes it after the last page', async () => {
+  const f = fakeWindow({ hash: '' });
+  const thread = f.withId('thread', { clientHeight: 400 });
+  Object.defineProperty(thread, 'scrollHeight', { get: () => 1000 + (f.html().includes('said 10') ? 600 : 0) + (f.html().includes('said 2') ? 600 : 0) });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const key = f.withId('earlier-s1', { tagName: 'BUTTON', presentIf: /id="earlier-s1"/ });
+  // a plain focus() brings the key at the top into view, as the browser does
+  key.focus = o => { f.doc.activeElement = key; key.focusedWith = o; if (!o?.preventScroll) thread.scrollTop = 0; };
+  const waits = [];
+  const book = { 30: { records: [said(10), said(11)], hasMore: true }, 10: { records: [said(2), said(3)], hasMore: false } };
+  const h = host({ rows: [row('s1', { agentAvailable: true })], pages: { s1: req => new Promise(r => waits.push(() => r(book[req.beforeSeq]))) } });
+  const store = started(f, h);
+  await h.ready();
+  h.streams.find(s => s.name === 'session/follow').cbs.onItem({ type: 'snapshot', header: {}, cursor: 40, hasMore: true, records: [said(30), said(31)], projections: { asOfSeq: 40, values: {} } });
+  await settle();
+  thread.scrollTop = 0;
+  key.focus();
+  f.click({ ...key, dataset: { action: 'earlier', conv: 's1' } });
+  await settle();
+  assert.match(f.html(), /id="earlier-s1"[^>]*aria-disabled="true">Loading…</);
+  assert.equal(f.doc.activeElement, key, 'the key keeps focus while it reads');
+  assert.equal(key.focusedWith?.preventScroll, true);
+  f.click({ ...key, dataset: { action: 'earlier', conv: 's1' } }); // pressed again while it reads: nothing more asked
+  await settle();
+  assert.equal(earlierPages(h).length, 1);
+  waits.shift()();
+  await settle();
+  assert.equal(f.doc.activeElement, key, 'and after the page lands');
+  assert.equal(thread.scrollTop, 600, 'the focus does not scroll the key into view');
+  f.click({ ...key, dataset: { action: 'earlier', conv: 's1' } });
+  await settle();
+  waits.shift()();
+  await settle();
+  assert.doesNotMatch(f.html(), /earlier-key/);
+  assert.equal(f.doc.activeElement, say, 'the last page: the key goes, the composer takes focus');
+  assert.equal(thread.scrollTop, 1200);
+  store.timers.clear();
+});
+
+test('a stream frame held with the page (a press down) does not shift the reader: the keep anchors on the old first message', async () => {
+  const { f, thread, h } = earlierRig();
+  // the old first message (seq 30) sits 20 px down until the page lands above it; the streamed message adds 100 px below
+  Object.defineProperty(thread, 'scrollHeight', { get: () => 1000 + (f.html().includes('said 10') ? 600 : 0) + (f.html().includes('said 41') ? 100 : 0) });
+  const mark = f.withId('thread-anchor', { presentIf: /id="thread-anchor"/ });
+  Object.defineProperty(mark, 'offsetTop', { get: () => 20 + (f.html().includes('said 10') ? 600 : 0) });
+  const store = started(f, h);
+  await h.ready();
+  const follow = h.streams.find(s => s.name === 'session/follow');
+  follow.cbs.onItem({ type: 'snapshot', header: {}, cursor: 40, hasMore: true, records: [said(30), said(31)], projections: { asOfSeq: 40, values: {} } });
+  await settle();
+  assert.match(f.html(), /<div id="thread-anchor" class="msg you"><div class="bubble you">said 30</);
+  thread.scrollTop = 0;
+  f.fire('root', 'pointerdown', { button: 0 });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'earlier', conv: 's1' } });
+  await settle();
+  follow.cbs.onItem({ type: 'event', event: said(41).event });
+  await settle();
+  assert.doesNotMatch(f.html(), /said 10/, 'held while the press is down');
+  f.fire('doc', 'pointerup', { button: 0 });
+  await settle();
+  assert.match(f.html(), /said 10[\s\S]*said 41/);
+  assert.equal(thread.scrollTop, 600, 'the page above, not the frame below, moves the reader');
+  store.timers.clear();
+});
+
+test('on a narrow window the document scrolls, not the thread: the keep moves the document', async () => {
+  const { f, thread, h } = earlierRig();
+  Object.defineProperty(thread, 'clientHeight', { get: () => thread.scrollHeight }); // the thread as tall as what it holds
+  f.doc.scrollingElement = { scrollTop: 0 };
+  const store = started(f, h);
+  await h.ready();
+  h.streams.find(s => s.name === 'session/follow').cbs.onItem({ type: 'snapshot', header: {}, cursor: 40, hasMore: true, records: [said(30), said(31)], projections: { asOfSeq: 40, values: {} } });
+  await settle();
+  f.doc.scrollingElement.scrollTop = 300;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'earlier', conv: 's1' } });
+  await settle();
+  assert.match(f.html(), /said 10/);
+  assert.equal(f.doc.scrollingElement.scrollTop, 900);
+  store.timers.clear();
+});
+
 test('at the tail, a streamed message still follows the tail', async () => {
   const { f, thread, h } = earlierRig();
   const store = started(f, h);

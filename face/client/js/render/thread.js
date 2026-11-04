@@ -198,13 +198,23 @@ export function renderThread(conv, state, now, page = {}) {
   const notes = foldNotes(conv.messages);
   const folded = new Set([...notes.values()].flat());
   const byId = new Map(conv.messages.map(m => [m.id, m]));
+  // the scroll keep's anchor (app.js render): the first message drawn at or past page.anchor carries id thread-anchor
+  // (its folded notes first, when it has them: they are drawn above it)
+  let anchor = typeof page.anchor === 'number' ? page.anchor : null;
+  const anchored = html => {
+    if (anchor === null) return html;
+    anchor = null;
+    return html.replace(/^<(div|details)/, '<$1 id="thread-anchor"');
+  };
   for (const m of conv.messages) {
     if (m.kind === 'tool' || folded.has(m.id)) continue;
     const d = divider(m.at, prev, now);
     if (d) out.push(`<div class="divider">${esc(d)}</div>`);
+    const at = anchor !== null && typeof m.seq === 'number' && m.seq >= anchor;
     const ids = m.kind === 'composed' ? notes.get(m.id) ?? [] : [];
-    if (ids.length) out.push(notesHtml(conv, m, ids.length, ids.map(id => renderMessage(byId.get(id), conv, state, page)).join('')));
-    out.push(renderMessage(m, conv, state, page));
+    const keep = at ? anchored : html => html;
+    if (ids.length) out.push(keep(notesHtml(conv, m, ids.length, ids.map(id => renderMessage(byId.get(id), conv, state, page)).join(''))));
+    out.push(keep(renderMessage(m, conv, state, page)));
     prev = m.at;
   }
   if (conv.thinking) out.push(thinkingRow(conv));
