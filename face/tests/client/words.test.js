@@ -89,6 +89,13 @@ test('setTable moves wordsEpoch only when the table changes, and reads the new t
   assert.equal(t('common.save'), 'Save');
 });
 
+test('setTable refuses a table that is not an object, and keeps the one it had', () => {
+  const start = wordsEpoch();
+  for (const bad of [null, undefined, 'zh', 1, true]) assert.throws(() => setTable(bad), TypeError, String(bad));
+  assert.equal(wordsEpoch(), start);
+  assert.equal(t('common.save'), 'Save');
+});
+
 test('a null or missing param value reads as nothing in t and th alike; a count is read as a number', () => {
   withTable(PROBE, () => {
     assert.equal(t('probe.why', { why: null }), "Can't run · ");

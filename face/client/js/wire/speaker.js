@@ -26,6 +26,7 @@
  * `buffett-type` over a bubble is not. Fail-away-from-the-host.
  * @module
  */
+import { t } from "../i18n/words.js";
 
 /** The host agent's display name — the label for every session no bot owns. */
 export const HOST_NAME = "Gravit"; // en-kept: the agent's name
@@ -74,7 +75,7 @@ export const ROLE_PRESET_PREFIX = "role-";
 export function speakerFor(summary, bots) {
   const id = summary?.agentPreset;
   if (typeof id !== "string" || id.trim() === "" || isHostPreset(id) || isDeskPreset(id)) return HOST_NAME;
-  if (id.startsWith(ROLE_PRESET_PREFIX) && id.length > ROLE_PRESET_PREFIX.length) return `Role · ${id.slice(ROLE_PRESET_PREFIX.length)}`;
+  if (id.startsWith(ROLE_PRESET_PREFIX) && id.length > ROLE_PRESET_PREFIX.length) return t("list.role", { name: id.slice(ROLE_PRESET_PREFIX.length) });
   const bot = (Array.isArray(bots) ? bots : []).find((b) => b?.id === id);
   const name = typeof bot?.name === "string" ? bot.name.trim() : "";
   return name === "" ? id : name;

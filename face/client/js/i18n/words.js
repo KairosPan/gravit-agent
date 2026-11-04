@@ -46,8 +46,9 @@ export function rawHtml(markup) {
 }
 
 // the table the words read from (its missing keys from EN): plan 7's switch. The epoch moves only when the table does, so a
-// memo keyed on it survives a choice of the language already shown
+// memo keyed on it survives a choice of the language already shown. A table is an object of keys; anything else is refused
 export function setTable(table) {
+  if (table === null || typeof table !== 'object') throw new TypeError('setTable(object)');
   if (table === active) return;
   active = table;
   epoch += 1;

@@ -25,17 +25,23 @@ const lineAt = (sf, pos) => sf.getLineAndCharacterOfPosition(pos).line + 1;
 const isWordsCall = node => ts.isCallExpression(node) && ts.isIdentifier(node.expression) && WORDS_CALLS.includes(node.expression.text);
 
 const strict = p => PHRASE.test(p) || (WORD.test(p) && !KEY_NAMES.has(p.replace(/[.…!?:]+$/, '')));
-const lax = p => [...p.matchAll(LAX)].some(m => !UNITS.has(m[0]));
+// a word touching a hole with no space between (`sz${code}`) is part of a name the hole completes, not a word
+const lax = piece => [...piece.text.matchAll(LAX)].some(m => !UNITS.has(m[0])
+  && !(piece.holeBefore && m.index === 0) && !(piece.holeAfter && m.index + m[0].length === piece.text.length));
 
-// a text's readable pieces, each { text, at, inText }: the runs between tags, and the read attributes' values in the tags
-// (a tag cut at the text's start or end, as a template's part may be, counts as a tag); each split at the holes
+// a text's readable pieces, each { text, at, inText, holeBefore, holeAfter }: the runs between tags, and the read attributes'
+// values in the tags (a tag cut at the text's start or end, as a template's part may be, counts as a tag); each split at the
+// holes, and marked where its text touches one with no space between
 function pieces(text) {
   const out = [];
   const push = (run, at, inText) => {
     let from = 0;
-    for (const part of run.split(HOLE)) {
+    const parts = run.split(HOLE);
+    for (const [i, part] of parts.entries()) {
       const lead = part.length - part.trimStart().length;
-      if (part.trim()) out.push({ text: part.trim(), at: at + from + lead, inText });
+      const holeBefore = i > 0 && lead === 0;
+      const holeAfter = i < parts.length - 1 && part.trimEnd().length === part.length;
+      if (part.trim()) out.push({ text: part.trim(), at: at + from + lead, inText, holeBefore, holeAfter });
       from += part.length + 1;
     }
   };
@@ -86,7 +92,7 @@ export function englishLiterals(source, file = 'source.js') {
     for (const [i, p] of parts.entries()) { starts.push({ at: joined.length, node: p }); joined += p.text + (i < parts.length - 1 ? HOLE : ''); }
     const hits = new Map();
     for (const piece of pieces(joined)) {
-      if (!(strict(piece.text) || (template && piece.inText && lax(piece.text)))) continue;
+      if (!(strict(piece.text) || (template && piece.inText && lax(piece)))) continue;
       const owner = starts.filter(s => s.at <= piece.at).at(-1);
       const line = lineAt(sf, owner.node.getStart(sf)) + (joined.slice(owner.at, piece.at).match(/\n/g) ?? []).length;
       if (kept(line)) continue;

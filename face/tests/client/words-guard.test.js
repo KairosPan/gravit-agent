@@ -25,24 +25,23 @@ const PENDING = [
   'app.js', 'composer/files.js', 'composer/menus.js', 'composer/view.js', 'host/account-view.js', 'host/account.js',
   'host/actions.js', 'host/channels.js', 'host/children-view.js', 'host/desk-view.js', 'host/desk.js', 'host/discover-view.js',
   'host/discover.js', 'host/explore-join.js', 'host/identity-view.js', 'host/identity.js', 'host/jobs-view.js', 'host/jobs.js',
-  'host/kinds.js', 'host/list-view.js', 'host/live.js', 'host/lunhui.js', 'host/market-depth-view.js', 'host/market-view.js',
-  'host/markets.js', 'host/modules-view.js', 'host/money-view.js', 'host/owner-view.js', 'host/owner.js',
-  'host/run-sheet-view.js', 'host/run-sheet.js', 'host/runs-view.js', 'host/search-view.js', 'host/search.js',
-  'host/sell-many.js', 'host/sessions.js', 'host/sheet-identity.js', 'host/sheet-market.js', 'host/sheet-money.js',
-  'host/sheet-rules.js', 'host/sheet-view.js', 'host/sheet.js', 'host/traces.js', 'host/trade-view.js', 'host/turns-view.js',
-  'host/wallet-send.js', 'reducers/controls.js', 'reducers/lunhui.js', 'reducers/owner.js', 'reducers/traces.js',
-  'render/account.js', 'render/avatars.js', 'render/channel.js', 'render/chart.js', 'render/desk.js', 'render/discover.js',
+  'host/kinds.js', 'host/live.js', 'host/lunhui.js', 'host/market-depth-view.js', 'host/market-view.js', 'host/markets.js',
+  'host/modules-view.js', 'host/money-view.js', 'host/owner-view.js', 'host/owner.js', 'host/run-sheet-view.js',
+  'host/run-sheet.js', 'host/runs-view.js', 'host/sell-many.js', 'host/sheet-identity.js', 'host/sheet-market.js',
+  'host/sheet-money.js', 'host/sheet-rules.js', 'host/sheet-view.js', 'host/sheet.js', 'host/traces.js', 'host/trade-view.js',
+  'host/turns-view.js', 'host/wallet-send.js', 'reducers/controls.js', 'reducers/lunhui.js', 'reducers/owner.js',
+  'reducers/traces.js', 'render/account.js', 'render/channel.js', 'render/chart.js', 'render/desk.js', 'render/discover.js',
   'render/identity.js', 'render/lunhui/breadth.js', 'render/lunhui/composed.js', 'render/lunhui/footer.js',
   'render/lunhui/indices.js', 'render/lunhui/intraday.js', 'render/lunhui/ladder.js', 'render/lunhui/notes.js',
   'render/lunhui/signals.js', 'render/lunhui/sources.js', 'render/lunhui/stock.js', 'render/lunhui/verdicts.js',
   'render/lunhui/yesterday.js', 'render/markets.js', 'render/messages.js', 'render/modules.js', 'render/owner.js',
-  'render/rail.js', 'render/run-sheet.js', 'render/thread.js', 'render/trade.js', 'render/wallet-row.js', 'wire/botSettings.js',
-  'wire/market-model.js', 'wire/member-traces.js', 'wire/room.js', 'wire/speaker.js', 'wire/subagents.js', 'wire/wallet.js',
+  'render/run-sheet.js', 'render/thread.js', 'render/trade.js', 'render/wallet-row.js', 'wire/botSettings.js',
+  'wire/market-model.js', 'wire/member-traces.js', 'wire/room.js', 'wire/subagents.js', 'wire/wallet.js',
 ];
 
 // the most files PENDING may hold, and the en-kept markers under client/js: each words task lowers the first and states the
 // second
-const PENDING_MAX = 85;
+const PENDING_MAX = 78;
 const EN_KEPT = 4;
 
 const texts = src => englishLiterals(src, 'snippet.js').map(l => l.text);
@@ -90,6 +89,11 @@ test("a template's lone word or count and word outside a tag is found; a URL, a 
     'const a = f => `edit-${f.name}`;', 'const a = (x, y) => `<div class="${x} wide">${y}</div>`;', 'const a = w => `width:${w}%`;', 'const a = s => `HTTP ${s}`;', 'const a = n => `running`;']) {
     assert.deepEqual(texts(src), [], src);
   }
+});
+
+test("a lax word touching an interpolation with no space between is part of a name, not a word", () => {
+  for (const src of ['const a = c => `<p>sz${c}</p>`;', 'const a = c => `<p>${c}sz</p>`;', 'const a = (a, b) => `<p>${a}ab${b}</p>`;']) assert.deepEqual(texts(src), [], src);
+  for (const src of ['const a = c => `<p>sz ${c}</p>`;', 'const a = c => `<p>${c} sz</p>`;', 'const a = c => `<p>left sz${c}</p>`;']) assert.equal(texts(src).length, 1, src);
 });
 
 test('a read attribute cut by an interpolation, aria-description, value and a single-quoted attribute are read', () => {

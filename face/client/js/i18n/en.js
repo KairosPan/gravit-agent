@@ -26,4 +26,40 @@ export const EN = Object.freeze({
   'time.ago.minutes': { one: '{n} minute ago', other: '{n} minutes ago' },
   'time.ago.hours': { one: '{n} hour ago', other: '{n} hours ago' },
   'time.ago.days': { one: '{n} day ago', other: '{n} days ago' },
+
+  // the first level (render/rail.js renderNav)
+  'nav.expand': 'Expand navigation',
+  'nav.collapse': 'Collapse navigation',
+  'nav.messages': 'Messages',
+  'nav.markets': 'Markets',
+  'nav.trade': 'Trade',
+  'nav.discover': 'Discover',
+  'nav.settings': 'Settings',
+  'nav.account': 'Account',
+  'nav.worthPaper': '{worth} · Paper',
+
+  // the conversation list (render/rail.js renderList, host/list-view.js, host/sessions.js) and who speaks in it
+  'list.title': 'Messages',
+  'list.newMessage': 'New message',
+  'list.draft.now': 'now',
+  'list.draft.notSent': 'Not sent yet',
+  'list.pin': 'Pin',
+  'list.unpin': 'Unpin',
+  'list.group.expand': 'Expand {name}',
+  'list.group.collapse': 'Collapse {name}',
+  'list.archived': 'Archived',
+  'list.unarchive': 'Un-archive',
+  'list.desk': 'Desk',
+  'list.noChannel': 'No channel',
+  'list.untitled': 'Untitled',
+  'list.you': 'You',
+  'list.role': 'Role · {name}',
+
+  // the list's search (render/rail.js, host/search-view.js)
+  'search.box': 'Search conversations',
+  'search.searching': 'Searching every conversation…',
+  'search.empty': 'No matching conversations',
+  'search.failed': 'Could not search inside conversations',
+  'search.more': 'Showing the first 20. Narrow your search.',
+  'search.count': { one: '{n} conversation', other: '{n} conversations' },
 });

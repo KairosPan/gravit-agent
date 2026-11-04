@@ -7,6 +7,7 @@
 import { channelLabel } from './list-view.js';
 import { isDeskPreset } from '../wire/speaker.js';
 import { attachmentsLine } from '../composer/files.js';
+import { t } from '../i18n/words.js';
 
 export const SEARCH_ITEMS = 20;
 
@@ -17,8 +18,8 @@ export const spoken = m => m.from !== 'system' && m.kind !== 'tool' && typeof m.
 export const spokenLine = m => (m.text !== '' ? m.text : attachmentsLine(attachmentsOf(m)));
 
 const labelFor = (conv, channels) => {
-  if (isDeskPreset(conv.preset)) return 'Desk';
-  if (!conv.channel) return 'No channel';
+  if (isDeskPreset(conv.preset)) return t('list.desk');
+  if (!conv.channel) return t('list.noChannel');
   const known = (channels ?? []).find(ch => ch.workspaceId === conv.channel.workspaceId);
   return known ? channelLabel(known) : conv.channel.name;
 };
@@ -52,11 +53,11 @@ export function mergeResults({ titles, content, conversations, channels }) {
   for (const h of content ?? []) if (!hits.has(h.sessionId)) hits.set(h.sessionId, h);
   const out = [];
   const seen = new Set();
-  for (const t of titles ?? []) {
-    if (seen.has(t.id)) continue;
-    seen.add(t.id);
-    const h = hits.get(t.id);
-    out.push(h ? { ...t, snippet: h.snippet, match: h.match ?? null } : { ...t, match: null });
+  for (const title of titles ?? []) {
+    if (seen.has(title.id)) continue;
+    seen.add(title.id);
+    const h = hits.get(title.id);
+    out.push(h ? { ...title, snippet: h.snippet, match: h.match ?? null } : { ...title, match: null });
   }
   for (const h of content ?? []) {
     const conv = byId.get(h.sessionId);

@@ -10,7 +10,7 @@ export function startSearch({ store, getJson, timers }) {
   async function read(query) {
     try {
       const data = await getJson(`/data/search?q=${encodeURIComponent(query)}`);
-      if (data?.ok !== true) throw new Error('search refused');
+      if (data?.ok !== true) throw new Error('refused'); // a refusal fails like a dead wire
       store.dispatch('searchContent', { query, items: data.items, hasMore: data.hasMore === true });
     } catch {
       store.dispatch('searchFailed', { query });

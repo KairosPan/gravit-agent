@@ -5,6 +5,7 @@
 // last.
 import { bucketFor, ARCHIVED_KEY, DESK_KEY, UNGROUPED_KEY, BOT_KEY_PREFIX } from '../wire/grouping.js';
 import { isDeskPreset } from '../wire/speaker.js';
+import { t } from '../i18n/words.js';
 
 // a channel goes by one name everywhere: its display title (the registry's, the operator's to change), else its name
 export const channelLabel = ch => (typeof ch.title === 'string' && ch.title !== '' ? ch.title : ch.name);
@@ -31,7 +32,7 @@ export function groupsOf(state) {
     const b = bucketFor(channel, !!c.archived, bot, false, isDeskPreset(c.preset));
     const kind = b.key === ARCHIVED_KEY ? 'archived' : b.key === DESK_KEY ? 'desk' : b.key === UNGROUPED_KEY ? 'none'
       : bot && b.key === BOT_KEY_PREFIX + bot.id ? 'bot' : 'channel';
-    const label = kind === 'archived' ? 'Archived' : kind === 'desk' ? 'Desk' : kind === 'none' ? 'No channel' : b.label;
+    const label = kind === 'archived' ? t('list.archived') : kind === 'desk' ? t('list.desk') : kind === 'none' ? t('list.noChannel') : b.label;
     add(b.key, { label, kind, workspaceId: kind === 'channel' ? b.key : null }).conversations.push(c);
   }
   // pinned lead their group, newest first, then the rest newest first; an archived row is never pinned, and a pinned id

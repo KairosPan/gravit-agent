@@ -5,6 +5,7 @@ import { summaryOf } from '../wire/summaries.js';
 import { foldMembers } from '../wire/room.js';
 import { isHostPreset } from '../wire/speaker.js';
 import { isSubagentRow } from '../wire/subagents.js';
+import { t } from '../i18n/words.js';
 
 const str = v => (typeof v === 'string' && v !== '' ? v : undefined);
 // the restored field first (summaryOf), the row's own projection when a raw row is handed in
@@ -27,7 +28,7 @@ export function conversationOf(summary, ctx, fold = { ids: [], sessions: [] }) {
   const members = kind === 'bot' ? [preset] : kind === 'group' ? ['gravit', ...new Set([...roomMembers(room), ...fold.ids])] : ['gravit'];
   return {
     id,
-    title: str(summary.projections?.values?.title) ?? 'Untitled',
+    title: str(summary.projections?.values?.title) ?? t('list.untitled'),
     kind, members, memberSessions: fold.sessions,
     channel: ctx.channelOf?.(id) ?? null,
     // archived by the host (channels.json) or by the face (sessions-meta.json); only the face's can be undone
