@@ -3,16 +3,9 @@
 // A job's end is bash's `detail`: `exit code: N` or `signal: X` / `killed before exit`, sandbox notes and a human kill's
 // reason after `; ` (dsh-tool-bash, JobController.kill at rc.5).
 
-export const isLive = job => job?.status === 'running' || job?.status === 'stopping';
+import { clockText } from './turns-view.js';
 
-const pad = n => String(n).padStart(2, '0');
-// a job's running time: 42s, 3m 04s, 1h 04m (turns-view.js's clockText, which plan 5 Task 5 adds, reads the same)
-function clockText(ms) {
-  const t = Math.max(0, Math.floor((Number.isFinite(ms) ? ms : 0) / 1000));
-  if (t < 60) return `${t}s`;
-  if (t < 3600) return `${Math.floor(t / 60)}m ${pad(t % 60)}s`;
-  return `${Math.floor(t / 3600)}h ${pad(Math.floor(t / 60) % 60)}m`;
-}
+export const isLive = job => job?.status === 'running' || job?.status === 'stopping';
 
 const count = (n, word) => `${n} job${n === 1 ? '' : 's'} ${word}`;
 export function chipText(running, finished) {

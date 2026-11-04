@@ -355,3 +355,21 @@ test('a snapshot\'s window may carry the loading of a read still under way', () 
   const s = R.hostWindow(withConv(conv('a')), { convId: 'a', messages: [msg('e20', 20)], window: win(20, { loading: true }) });
   assert.equal(get(s, 'a').window.loading, true);
 });
+
+test('the outline and the stats land on the conversation; a malformed value keeps what was', () => {
+  const outline = [{ turn: 1, seq: 3, prompt: 'hi', response: 'hello' }, { turn: 2, seq: 9, prompt: 'more', response: '' }];
+  const stats = { turns: 2, steps: 5, llmMs: 900, toolMs: 300, ttftMs: 400, ttftSteps: 4, decodeMs: 500, decodeTokens: 19 };
+  let s = withConv(conv('a'));
+  s = R.hostProjection(s, { convId: 'a', key: 'turnOutline', value: outline });
+  s = R.hostProjection(s, { convId: 'a', key: 'sessionStats', value: stats });
+  assert.deepEqual(get(s, 'a').outline, outline);
+  assert.deepEqual(get(s, 'a').stats, stats);
+  for (const bad of [null, 'x', [{ turn: 1.5, seq: 3, prompt: '', response: '' }], [{ turn: 1, seq: 3, prompt: null, response: '' }], [{ turn: 1, seq: '3', prompt: '', response: '' }], [null]]) {
+    assert.deepEqual(get(R.hostProjection(s, { convId: 'a', key: 'turnOutline', value: bad }), 'a').outline, outline);
+  }
+  for (const bad of [null, [], { ...stats, steps: NaN }, { ...stats, decodeTokens: undefined }, { ...stats, toolMs: '3' }, { ...stats, llmMs: Infinity }]) {
+    assert.deepEqual(get(R.hostProjection(s, { convId: 'a', key: 'sessionStats', value: bad }), 'a').stats, stats);
+  }
+  assert.deepEqual(get(R.hostProjection(s, { convId: 'a', key: 'turnOutline', value: [] }), 'a').outline, []);
+  assert.equal(R.hostProjection(s, { convId: 'nope', key: 'sessionStats', value: stats }), s);
+});

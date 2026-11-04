@@ -58,6 +58,12 @@ export function foldMessages(list) {
   return msgs;
 }
 
+// a projection kept only whole: every outline entry's turn and seq integers, its previews strings; every figure finite
+const isOutline = v => Array.isArray(v) && v.every(e => e && Number.isInteger(e.turn) && Number.isInteger(e.seq)
+  && typeof e.prompt === 'string' && typeof e.response === 'string');
+const STAT_FIELDS = ['turns', 'steps', 'llmMs', 'toolMs', 'ttftMs', 'ttftSteps', 'decodeMs', 'decodeTokens'];
+const isStats = v => !!v && typeof v === 'object' && STAT_FIELDS.every(k => Number.isFinite(v[k]));
+
 export const reducers = {
   hostStatus(s, { line, bad = false, connected }) {
     return { ...s, status: { line: line ?? s.status?.line ?? '', bad, connected: connected ?? s.status?.connected ?? false } };
@@ -186,6 +192,11 @@ export const reducers = {
       }
       case 'running':
         return typeof value === 'boolean' ? upd(s, convId, c => ({ ...c, running: value })) : s;
+      // the whole log's turns (dsh-session-turn-outline) and figures (dsh-session-stats), independent of the window
+      case 'turnOutline':
+        return isOutline(value) ? upd(s, convId, c => ({ ...c, outline: value })) : s;
+      case 'sessionStats':
+        return isStats(value) ? upd(s, convId, c => ({ ...c, stats: value })) : s;
       // the parent's record of its children, kept as the host sent it; the Children section validates it
       case 'subagentCatalog':
         return upd(s, convId, c => ({ ...c, subagentCatalog: value }));
