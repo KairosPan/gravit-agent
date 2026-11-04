@@ -22,6 +22,9 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     request: { requestId: requestId(), sessionId, mode: 'queue', content: [...(clean(text) ? [{ type: 'text', text }] : []), ...attachments], clientTimeZone: timeZone() },
   });
   const ATTACHMENT_INVALID = 'session/attachment-invalid';
+  // at rc.5 commands/execute settles an admission failure as an error result, never a throw; a receipt the host dropped
+  // reads as AttachmentError ATTACHMENT_NOT_FOUND's message (dsh-commands), the reason code itself not carried
+  const RECEIPT_UNKNOWN = 'File upload receipt is unknown for this session.';
   // a refusal of the attachments (a receipt the host dropped, an image on a text-only model): the caller's to answer, else
   // said with its reason; any other failure as `what`'s
   const failSend = (err, what, attachmentRefused) => {
@@ -65,7 +68,16 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     const conv = s.conversations.find(c => c.id === id);
     if (!conv) return null;
     try {
-      if (words.startsWith('/') && (await command(id, words, attachments)) !== null) return { sent: 'command', sessionId: id };
+      if (words.startsWith('/')) {
+        const executed = await command(id, words, attachments);
+        // with files an error result is a refusal of them, its text already said: the draft is kept; a dropped receipt
+        // is the caller's to stage again
+        if (executed !== null && attachments.length && executed.result?.kind === 'error') {
+          if (executed.result.text === RECEIPT_UNKNOWN) attachmentRefused?.('ATTACHMENT_NOT_FOUND');
+          return null;
+        }
+        if (executed !== null) return { sent: 'command', sessionId: id };
+      }
       if (!attachments.length && conv.channel && (room ?? isMentionText(words))) {
         const answer = await postJson('/data/rooms/say', { sessionId: id, text: words });
         if (Array.isArray(answer?.addressed) && answer.addressed.length > 0) return { sent: 'say', sessionId: id };
@@ -87,9 +99,9 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
       const created = await call('session/create', { request: workspaceId ? { workspaceId } : {} });
       if (typeof created?.sessionId !== 'string') throw new Error('session/create returned no sessionId');
       sessionId = created.sessionId;
+      onCreated?.(sessionId);   // before the rename: a failure from here on still leaves the draft with the conversation
       const name = clean(title);
       if (name) await call('session/rename', { request: { sessionId, title: name } });
-      onCreated?.(sessionId);
       const parts = prepare ? await prepare(sessionId) : [];
       if (parts === null) return { id: sessionId, sent: false };
       const words = clean(text);

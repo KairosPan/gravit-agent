@@ -5093,3 +5093,189 @@ test("a sent draft revokes its images' URLs", async () => {
   assert.doesNotMatch(f.html(), /chart.png/);
   store.timers.clear();
 });
+
+// ---- sending with files, fix round 1 ----
+const executing = (h, answer) => {
+  const call = h.call;
+  let n = 0;
+  h.call = async (endpoint, args) => {
+    if (endpoint !== 'commands/execute') return call(endpoint, args);
+    h.calls.push([endpoint, args]);
+    return answer(++n);
+  };
+};
+const execsOf = h => h.calls.filter(c => c[0] === 'commands/execute').map(c => c[1]);
+
+test('a failed rename on New message opens the conversation with the whole draft, and its waiting file uploads on send', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say, input } = composerEls(f);
+  const title = f.withId('nm-title', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const call = h.call;
+  h.call = async (endpoint, args) => { if (endpoint === 'session/rename') { h.calls.push([endpoint, args]); throw Object.assign(new Error('no'), { code: 'rename/failed' }); } return call(endpoint, args); };
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
+  await settle();
+  title.value = 'Prices';
+  f.fire('root', 'input', { target: { ...title, dataset: { action: 'draftTitle' } } });
+  pick(f, input, [CSV()]);
+  type(f, say, 'read it');
+  send(f);
+  await settle();
+  assert.equal(store.get().route.id, 's-new');
+  assert.equal(say.value, 'read it');
+  assert.match(f.html(), /prices.csv/);
+  assert.equal(att.uploads.length, 0, 'nothing uploaded yet');
+  send(f);
+  await settle();
+  assert.equal(store.get().status.line, 'Files are still uploading', 'a waiting file holds the send');
+  assert.equal(att.uploads.length, 1, 'and starts its upload');
+  assert.equal(att.uploads[0].id, 's-new');
+  att.uploads[0].answer('rcpt-1');
+  await settle();
+  send(f);
+  await settle();
+  assert.deepEqual(contentsOf(h), [['s-new', [{ type: 'text', text: 'read it' }, { type: 'file', receiptId: 'rcpt-1' }]]]);
+  noBareReceipts(h);
+  store.timers.clear();
+});
+
+test('a command refusing the files on a cold conversation (no kept rows) keeps the whole draft and shows its text', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say, input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  executing(h, () => ({ result: { kind: 'error', text: '/compact does not accept attachments' } }));
+  const reads = startComposerReads({ call: h.call, getJson: h.getJson, postJson: h.postJson });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att, valueEditor, { composerReads: { ...reads, keptCommands: () => null } });
+  pick(f, input, [CSV()]);
+  att.uploads[0].answer('rcpt-1');
+  await settle();
+  type(f, say, '/compact');
+  send(f);
+  await settle();
+  assert.equal(execsOf(h).length, 1, 'the host judged it');
+  assert.equal(store.get().status.line, '/compact does not accept attachments');
+  assert.equal(say.value, '/compact');
+  assert.match(f.html(), /prices.csv/);
+  store.timers.clear();
+});
+
+test('a command that finds its receipt gone uploads again once and runs once more', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say, input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  executing(h, n => (n === 1 ? { result: { kind: 'error', text: 'File upload receipt is unknown for this session.' } } : { result: { kind: 'ok', text: 'goal set' } }));
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  pick(f, input, [CSV()]);
+  att.uploads[0].answer('rcpt-1');
+  await settle();
+  type(f, say, '/goal read it');
+  send(f);
+  await settle();
+  assert.equal(att.uploads.length, 2);
+  att.uploads[1].answer('rcpt-2');
+  await settle();
+  assert.deepEqual(execsOf(h).map(e => e.submittedAttachments), [[{ type: 'file', receiptId: 'rcpt-1' }], [{ type: 'file', receiptId: 'rcpt-2' }]]);
+  assert.equal(say.value, '');
+  assert.equal(store.get().status.line, 'goal set');
+  store.timers.clear();
+});
+
+test('a second Enter during a slow image read sends nothing more; a failed read keeps the draft', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say, input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = await bootFiles(f, h, fakeAttachments());
+  let release;
+  const read = new Promise(r => { release = () => r(new Uint8Array(PNG_BYTES).buffer); });
+  const slow = { ...pngFile(), arrayBuffer: () => read };
+  pick(f, input, [slow]);
+  type(f, say, 'look');
+  send(f);
+  send(f);
+  await settle();
+  release();
+  await settle();
+  assert.equal(promptsOf(h).length, 1, 'one send');
+  const broken = { ...pngFile('broken.png'), arrayBuffer: async () => { throw new Error('gone'); } };
+  pick(f, input, [broken]);
+  type(f, say, 'again');
+  send(f);
+  await settle();
+  assert.equal(promptsOf(h).length, 1);
+  assert.equal(store.get().status.line, 'send: broken.png could not be read');
+  assert.equal(say.value, 'again');
+  assert.match(f.html(), /broken.png/);
+  store.timers.clear();
+});
+
+test('removing one of two refused images keeps the model line', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  prompting(h, () => attachmentInvalid('MODEL_DOES_NOT_SUPPORT_IMAGES'));
+  const store = await bootFiles(f, h, fakeAttachments());
+  pick(f, input, [pngFile(), pngFile('second.png')]);
+  send(f);
+  await settle();
+  assert.match(f.html(), MODEL_LINE);
+  const key = f.html().match(/data-action="attachRemove" data-key="(a\d+)"/)[1];
+  f.click({ tagName: 'BUTTON', dataset: { action: 'attachRemove', key } });
+  assert.match(f.html(), MODEL_LINE, 'an image remains');
+  store.timers.clear();
+});
+
+test('a restage that ends off screen says the files are up and the message was not sent', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say, input } = composerEls(f);
+  const h = twoRows();
+  prompting(h, n => (n === 1 ? attachmentInvalid('FILE_NOT_STAGED') : undefined));
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  pick(f, input, [CSV()]);
+  att.uploads[0].answer('rcpt-1');
+  await settle();
+  type(f, say, 'read it');
+  send(f);
+  await settle();
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  await settle();
+  att.uploads[1].answer('rcpt-2');
+  await settle();
+  assert.equal(promptsOf(h).length, 1, 'not sent again off screen');
+  assert.equal(store.get().status.line, 'Files uploaded again; the message was not sent');
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  await settle();
+  assert.equal(say.value, 'read it');
+  assert.match(f.html(), /prices.csv/);
+  store.timers.clear();
+});
+
+test('New message refused for its image keeps a chip and a file beside it', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say, input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  prompting(h, () => attachmentInvalid('MODEL_DOES_NOT_SUPPORT_IMAGES'));
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att, runsEditor);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
+  await settle();
+  const draft = [{ type: 'text', text: 'compare ' }, { type: 'chip', chip: fileChip }];
+  putRuns(f, say, draft);
+  pick(f, input, [CSV(), pngFile()]);
+  send(f);
+  await settle();
+  att.uploads[0].answer('rcpt-1');
+  await settle();
+  assert.equal(promptsOf(h).length, 1);
+  assert.equal(store.get().route.id, 's-new');
+  store.dispatch('toggleRail');
+  assert.deepEqual(say.runs, draft, 'the words and the chip');
+  assert.match(f.html(), /prices.csv/, 'the file');
+  assert.match(f.html(), /alt="chart.png"/, 'the image');
+  assert.match(f.html(), MODEL_LINE);
+  store.timers.clear();
+});

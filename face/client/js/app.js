@@ -1014,13 +1014,6 @@ export function boot(win, host = {}) {
       const row = (composerReads.keptCommands(currentConversation(s)) ?? []).find(r => r.name === name);
       if (row && row.input?.attachments !== true) { refuse(`/${name} takes no files`); return; }
     }
-    // the images' bytes, read before the draft is cleared
-    const data = new Map();
-    for (const f of files) {
-      if (f.kind !== 'image') continue;
-      try { data.set(f.key, encodeBase64(new Uint8Array(await f.blob.arrayBuffer()))); } catch { refuse(`send: ${f.name} could not be read`); return; }
-    }
-    const parts = contentParts('', files, k => data.get(k));
     // words and files added under the key while the send was on its way are kept, after the sent ones (A7)
     const back = () => {
       const since = runsOf(key);
@@ -1030,9 +1023,19 @@ export function boot(win, host = {}) {
     const sentOff = to => { for (const f of files) if (f.url) win.URL.revokeObjectURL(f.url); notes.delete(to); };
     let reason;
     const attachmentRefused = r => { reason = r ?? ''; };
+    // the draft clears before anything is awaited: a second Enter meanwhile finds it blank and sends nothing
     putDraft(key, [], []);
     forgetMenu();
     render();
+    // the images' bytes; a failed read puts the draft back
+    const data = new Map();
+    for (const f of files) {
+      if (f.kind !== 'image') continue;
+      try { data.set(f.key, encodeBase64(new Uint8Array(await f.blob.arrayBuffer()))); } catch { back(); refuse(`send: ${f.name} could not be read`); return; }
+    }
+    // the draft left the screen during the read: it goes back under its key, unsent (the send goes to the screen's)
+    if (data.size && draftKey(store.get()) !== key) { back(); return; }
+    const parts = contentParts('', files, k => data.get(k));
     if (s.draft) {
       // New message: the draft moves to the conversation as it is made, its files upload there, then the first words
       const got = await actions.newConversationWith({
@@ -1059,9 +1062,11 @@ export function boot(win, host = {}) {
     const sent = await sendText(text, { room, attachments: parts, attachmentRefused });
     if (sent) { sentOff(key); render(); return; }
     back();
-    if (reason === 'FILE_NOT_STAGED' && !restaged) { void restage(key); return; }
+    if (RESTAGED.has(reason) && !restaged) { void restage(key, reason); return; }
     refused(key, reason);
   }
+  // the refusals that mean the host dropped a receipt: the prompt's, and a command's
+  const RESTAGED = new Set(['FILE_NOT_STAGED', 'ATTACHMENT_NOT_FOUND']);
   // a refusal of a draft's attachments, its draft already back: an image on a text-only model marks the conversation and
   // draws the model line; any other reason is said on the status line
   function refused(key, reason) {
@@ -1072,12 +1077,14 @@ export function boot(win, host = {}) {
   }
   // a receipt the host dropped (the face restarted, the agent was disposed): every file up uploads again, once, and the
   // send runs once more while its draft is still on screen; a failed re-upload keeps the draft and says so
-  async function restage(key) {
+  // (a command says the second as ATTACHMENT_NOT_FOUND); off screen, the files are up and the send waits for the operator
+  async function restage(key, reason) {
     const ups = filesOf(key).filter(f => f.kind === 'file' && f.status === 'up');
     const oks = await Promise.all(ups.map(f => startUpload(key, f.key)));
     render();
-    if (!oks.every(Boolean)) { refused(key, 'FILE_NOT_STAGED'); return; }
+    if (!oks.every(Boolean)) { refused(key, reason); return; }
     if (draftKey(store.get()) === key) await sendNow({ restaged: true });
+    else store.dispatch('hostStatus', { line: 'Files uploaded again; the message was not sent', bad: true });
   }
   // words put in the composer for the operator (a suggestion, Hand to Gravit): the draft on screen, after what it holds on
   // a new line, the caret after them
@@ -1167,8 +1174,10 @@ export function boot(win, host = {}) {
     uploads.delete(k);
     handle?.abort();
     if (rec.url) win.URL.revokeObjectURL(rec.url);
-    setFiles(filesOf(key).filter(f => f.key !== fileKey), key);
-    notes.delete(key);
+    const left = filesOf(key).filter(f => f.key !== fileKey);
+    setFiles(left, key);
+    // the model line stays while an image it speaks of remains
+    if (refusesImages.has(key) && hasImage(left)) notes.set(key, modelLineFor(key)); else notes.delete(key);
     render();
   }
   // words into the editor as a paste or a drop puts them: plain text over [from, to], the caret after them; no render

@@ -338,7 +338,7 @@ test('newConversationWith creates, reports the id, prepares and prompts; a refus
     prepare: async id => { seen.push(['prepare', id]); return [filePart]; },
   });
   assert.deepEqual(got, { id: 's-new', sent: true });
-  assert.deepEqual(seen, [['created', 's-new', 2], ['prepare', 's-new']], 'created after the rename, before the prompt');
+  assert.deepEqual(seen, [['created', 's-new', 1], ['prepare', 's-new']], 'created right after the create, before the rename and the prompt');
   assert.deepEqual(r.calls.map(c => c[0]), ['session/create', 'session/rename', 'session/prompt']);
   assert.deepEqual(r.calls[2][1].request.content, [{ type: 'text', text: 'read it' }, filePart]);
   const notUp = rig({ answers: { 'session/create': { sessionId: 's-2' } } });
@@ -361,4 +361,27 @@ test('newConversation still answers an id or null', async () => {
   assert.equal(await refused.actions.newConversation({ text: 'hi' }), null, 'a failure after the create answers null, as before');
   const failed = rig({ answers: { 'session/create': err({ code: 'boom' }) } });
   assert.equal(await failed.actions.newConversation({ text: 'hi' }), null);
+});
+
+test('newConversationWith reports the id before the rename, so a failed rename keeps the draft with the conversation', async () => {
+  const r = rig({ answers: { 'session/create': { sessionId: 's-new' }, 'session/rename': err({ code: 'rename/failed' }) } });
+  const seen = [];
+  const got = await r.actions.newConversationWith({ title: 'Look', text: 'x', onCreated: id => seen.push([id, r.calls.length]), prepare: async () => [] });
+  assert.deepEqual(got, { id: 's-new', sent: false });
+  assert.deepEqual(seen, [['s-new', 1]], 'told right after the create');
+  assert.equal(r.store.get().status.line, 'new message: rename/failed');
+});
+
+test('a command that settles as an error with attachments is a refusal; a dropped receipt goes to attachmentRefused', async () => {
+  const noFiles = rig({ answers: { 'commands/execute': { result: { kind: 'error', text: '/compact does not accept attachments' } } } });
+  const why = [];
+  assert.equal(await noFiles.actions.send('/compact', { attachments: [filePart], attachmentRefused: x => why.push(x) }), null);
+  assert.equal(noFiles.store.get().status.line, '/compact does not accept attachments');
+  assert.equal(noFiles.store.get().status.bad, true);
+  assert.deepEqual(why, []);
+  const dropped = rig({ answers: { 'commands/execute': { result: { kind: 'error', text: 'File upload receipt is unknown for this session.' } } } });
+  assert.equal(await dropped.actions.send('/goal x', { attachments: [filePart], attachmentRefused: x => why.push(x) }), null);
+  assert.deepEqual(why, ['ATTACHMENT_NOT_FOUND']);
+  const plain = rig({ answers: { 'commands/execute': { result: { kind: 'error', text: 'no goal' } } } });
+  assert.deepEqual(await plain.actions.send('/goal resume'), { sent: 'command', sessionId: 's1' }, 'with no files an error result is still the command\'s answer');
 });
