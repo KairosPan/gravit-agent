@@ -44,7 +44,9 @@ import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, seria
 import { flatItems, slashItems, atItems, conversationChoices, moveActive, chipOf } from './composer/menus.js';
 import { renderMenu, menuAria, filesRail, dropOverlay, lightboxHtml } from './composer/view.js';
 import { thumbsNeeded, railHtml } from './render/thread.js';
-import { railView, activeTurn } from './host/turns-view.js';
+import { railView, activeTurn, clockText } from './host/turns-view.js';
+import { startJobs } from './host/jobs.js';
+import { jobsView, isLive } from './host/jobs-view.js';
 import { admit, blocking, hasImage, contentParts, encodeBase64, modelRefusalLine, isImageSrc } from './composer/files.js';
 import { senderName } from './render/rail.js';
 import { startAttachments } from './host/attachments.js';
@@ -195,6 +197,12 @@ function focusKey(el) {
   const sel = `[data-action=${quoted(data.action)}]` + named + Object.entries(data).filter(([k]) => k !== 'action').map(([k, v]) => `[data-${k.replace(/[A-Z]/g, c => '-' + c.toLowerCase())}=${quoted(v)}]`).join('');
   return { sel };
 }
+// the job open in Details still drawn: Details open, its row among the running or the finished not cleared
+const jobShown = s => {
+  if (!s.detailsOpen) return false;
+  const v = jobsView(s.jobs, s.jobs.convId);
+  return [...v.running, ...v.finished].some(j => j.id === s.jobs.open);
+};
 // the owner sheet is a drawer of any screen, over the one open (the order sheet is Trade's ticket, not a drawer)
 const sheetUp = s => Boolean(s.sheet) && s.sheet.kind !== 'order';
 // a history image's thumb as landed (a blob: URL, null for one the host could not give), undefined while it reads — by the
@@ -418,6 +426,9 @@ export function boot(win, host = {}) {
   const live = startLive({ store, openMux: host.openMux ?? wireOpenMux, call, mapFrame, getJson, timers, now, onReceipt: m => { if (m?.data?.seat) void seat.load({ fresh: true }); void account.load({ fresh: true }); } });
   // answers go through the live layer, which settles the gate it delivered once the answer wins; a command opens a cold
   // conversation through it first
+  // the open conversation's background jobs (spec §5.8): its job/list on the live layer's mux, re-opened on the app's
+  // timers after a host end or refusal; the open job's output stays there and is written into its pre on each frame
+  const jobs = host.jobs ?? startJobs({ store, mux: live.mux, call, timers, onOutput: () => writeOutput() });
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson, activate: id => live.activate(id) });
   // Markets: the Account's reads on the app's timers — the A shares' among them — a market's page followed on the stream; the
   // stars in this browser's storage
@@ -525,6 +536,7 @@ export function boot(win, host = {}) {
   let railTimer = null;     // a scroll's measure, coalesced
   let railDrawing = false;  // the rail's own redraw takes its focused tick away and gives it back: no hover change meanwhile
   let refocusing = false;   // render() putting focus back where it was: not a person's focus, no card for it
+  let clockTimer = null;    // the jobs' ticking clocks in Details, written each second without a render while one is drawn
   let railHeld = false;     // a rail redraw asked for while a press is down: drawn when it lets go
   let searchFocus = false;  // ⌥⌘K from a screen with no list: the box takes focus once Messages draws it
   let rowsAt = null;        // where the groups last stood: a query hides them, and they come back there when it clears (spec §5.1)
@@ -562,7 +574,10 @@ export function boot(win, host = {}) {
     const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, results: root.querySelector('.conv-results')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop };
     if (scrolls.rows != null) rowsAt = scrolls.rows;
     // a disclosure the person opened (its Raw, a trace; tool calls are stored but not drawn) is the page's, not the store's: open again by its id
-    const opened = [...root.querySelectorAll('details[id][open]')].map(el => el.id);
+    // (a job's disclosure is the store's: open while it is the job open, never kept open by the page)
+    const opened = [...root.querySelectorAll('details[id][open]')].map(el => el.id).filter(id => !id.startsWith('job-'));
+    const out0 = s.jobs.open !== null ? doc.getElementById(`job-out-${s.jobs.open}`) : null;
+    const outAt = out0 ? { top: out0.scrollTop, bottom: out0.scrollHeight - out0.scrollTop - out0.clientHeight < 24 } : null;
     // the note above the box is a live region: the node stays across renders, so a new line in it is announced
     const note0 = doc.getElementById('composer-note');
     const noteText = notes.get(key) ?? '';
@@ -731,11 +746,49 @@ export function boot(win, host = {}) {
     }
     if (railStale) drawRail();
     last = { lightbox: lightUp, overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, start: threadStart, anchor: anchorSeq, editor: editorOf(s.edit), confirm: s.confirm, query, key };
+    // the open job's output, written into the fresh pre where it stood; the clocks ticking while a live job is drawn
+    writeOutput(outAt);
+    tickClocks(false);
     // a composed answer drawn without its run's view asks for it now that the page is whole (its dispatches render again)
     if (wantedViews(store.get()).length) void ensureViews(store, getJson);
     // the operator's images the thread drew still to read: each asked once (thumb keeps its own in-flight set), its answer
     // landing through the store (hostThumb), which draws it
     if (open) for (const t of thumbsNeeded(open, s.thumbs)) void attachments.thumb(t.sessionId, t.attachmentId);
+  }
+
+  // the open job's output into its pre by textContent, never through a render (on each frame, and after a render drew the
+  // pre empty), and the line under it once its follow is over while the job runs on or the host refused it. A pre at its
+  // end follows the end; one the reader scrolled up keeps its place (kept: where the render found it)
+  function writeOutput(kept = null) {
+    const s = store.get();
+    const id = s.jobs.open;
+    if (id === null) return;
+    const out = jobs.outputOf(id);
+    const pre = doc.getElementById(`job-out-${id}`);
+    if (pre) {
+      const text = out?.text ?? '';
+      const tail = kept ? kept.bottom : pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
+      if (pre.textContent !== text) pre.textContent = text;
+      if (tail) pre.scrollTop = pre.scrollHeight; else if (kept) pre.scrollTop = kept.top;
+    }
+    const note = doc.getElementById(`job-note-${id}`);
+    if (note) {
+      const row = s.jobs.rows.find(j => j.id === id);
+      const line = out?.error !== undefined ? `output unavailable: ${out.error}` : out?.ended && isLive(row) ? 'output ended' : '';
+      if (note.textContent !== line) note.textContent = line;
+    }
+  }
+  // the clocks: each [data-job-clock] span's time to now, every second, never a render; the loop ends once none is drawn.
+  // A render starts it (not ticking) when it drew one and none runs
+  function tickClocks(tick = true) {
+    if (!tick && clockTimer !== null) return;
+    const spans = [...root.querySelectorAll('[data-job-clock]')];
+    if (!spans.length) { clockTimer = null; return; }
+    if (tick) for (const el of spans) {
+      const text = clockText(now() - Number(el.dataset.jobClock));
+      if (el.textContent !== text) el.textContent = text;
+    }
+    clockTimer = timers.after(1000, () => tickClocks(true));
   }
 
   // the turn rail alone, never the page (a scroll, a hover, a pulse): its focused tick keeps focus by its id
@@ -843,6 +896,8 @@ export function boot(win, host = {}) {
     was = r;
     // a deep link the list does not carry yet waits for it
     if (asked.screen === 'messages' && asked.id && asked.id !== 'new' && !store.get().conversations.some(c => c.id === asked.id)) wanted = asked.id;
+    // the jobs of the conversation on Messages; no screen else watches any
+    jobs.watch(r.screen === 'messages' && r.id && r.id !== 'new' ? r.id : null);
     if (r.screen === 'messages' && r.id && r.id !== 'new' && r.id !== openedId) {
       openedId = r.id;
       live.open(r.id);
@@ -937,6 +992,14 @@ export function boot(win, host = {}) {
   }
 
   // the second press of a two-step confirm
+  // Details open (never closed by this) at a section: the next render scrolls it into view; Details open already changes
+  // no state, so a render is asked for to carry the scroll
+  function openDetailsAt(section) {
+    detailsAt = section;
+    const before = store.get();
+    if (store.dispatch('openDetails') === before) requestRender();
+  }
+
   function confirmYes() {
     const c = store.get().confirm;
     if (!c) return;
@@ -944,6 +1007,7 @@ export function boot(win, host = {}) {
     if (c.action === 'stopGravit') void actions.stop(c.id);
     if (c.action === 'deleteConv') void deleteNow(c.id);
     if (c.action === 'stopChild') void actions.stopChild(c.parent, c.id, c.label);
+    if (c.action === 'stopJob') void jobs.kill(c.conv, c.id);
     // Revoke… and Disconnect…, asked twice: then their sheet, on a page that signs
     if (c.action === 'revoke' && signs()) void sheet.open('revoke', { name: c.name, address: c.address });
     if (c.action === 'disconnect' && signs()) void sheet.open('disconnect', { venue: c.venue, name: c.name });
@@ -1542,11 +1606,27 @@ export function boot(win, host = {}) {
     toggleDetails: () => store.dispatch('toggleDetails'),
     // a figures pill: Details open (never closed by it) at Usage; Details open already changes no state, so a render is asked
     // for to carry the scroll
-    openUsage: () => {
-      detailsAt = 'dsec-usage';
-      const before = store.get();
-      if (store.dispatch('openDetails') === before) requestRender();
+    openUsage: () => openDetailsAt('dsec-usage'),
+    // the jobs chip: Details open at Background jobs, the same way
+    openJobs: () => openDetailsAt('dsec-jobs'),
+    // a job's summary: opening it follows its output, closing it lets the follow go (the page toggled the disclosure
+    // first, so its state says which; a summary outside one toggles the store's)
+    openJob: el => {
+      const s = store.get();
+      const id = el.dataset.job;
+      const want = el.parentElement?.tagName === 'DETAILS' ? el.parentElement.open : s.jobs.open !== id;
+      if (!want) {
+        if (s.jobs.open === id) { jobs.unfollow(); store.dispatch('closeJob'); }
+        return;
+      }
+      const job = s.jobs.rows.find(j => j.id === id);
+      if (!job) return;
+      jobs.follow(s.jobs.convId, job);
+      store.dispatch('openJob', id);
     },
+    // Stop on a running job, asked twice (D23); Clear the finished ones on screen, the page's own until it reloads
+    stopJob: el => store.dispatch('askConfirm', { action: 'stopJob', id: el.dataset.job, conv: el.dataset.conv }),
+    clearJobs: el => store.dispatch('clearJobs', el.dataset.conv),
     // a rail tick: its mark drawn, scrolled into view (a drawn mark wins over the tick's loaded flag: a page cuts at a
     // message group, so the window's oldest turn can read unloaded with its prompt drawn); else the pages back to its
     // turn/start, the tick pulsing until render() draws its mark and scrolls to it. An answer that leaves the jump
@@ -1767,7 +1847,8 @@ export function boot(win, host = {}) {
     if (el.tagName === 'SUMMARY' && el.parentElement?.tagName === 'DETAILS') {
       ev.preventDefault();
       el.parentElement.open = !el.parentElement.open;
-      if (!el.parentElement.open) return;
+      // (a job's summary runs on closing too: it lets the follow go)
+      if (!el.parentElement.open && el.dataset.action !== 'openJob') return;
     }
     fn(el);
   });
@@ -2014,7 +2095,12 @@ export function boot(win, host = {}) {
     const linked = s.status?.connected === true;
     if (linked && !connected) attachments.reconnected?.();
     connected = linked;
-    requestRender();
+    // the job open in Details gone from what the page shows (its row left, Clear, Details closed): its follow goes too
+    // (the closeJob dispatch renders the page)
+    if (s.jobs.open !== null && !jobShown(s)) {
+      jobs.unfollow();
+      store.dispatch('closeJob');
+    } else requestRender();
     if (type === 'sheetOpen' || type === 'sheetClose') stopConnectCheck();
     if (type === 'sheetOpen') sheetOpens += 1;
     // the order sheet's fields as they stand, kept while another sheet takes its place; a ticket opened or closed forgets them

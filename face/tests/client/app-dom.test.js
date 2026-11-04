@@ -6051,3 +6051,211 @@ test('the turn the view is on is measured once the draft screen gives the conver
   assert.match(rail.innerHTML, /class="turn-tick loaded active" id="turn-tick-3"/);
   store.timers.clear();
 });
+
+// ---- background jobs on screen (plan 5, Task 9): the open conversation's job/list, a job's follow, Stop, the clock
+const T0 = 1_800_000_000_000;
+const ajob = (id, status, more = {}) => ({ id, kind: 'bash', label: `run ${id}`, owner: 's1', status, startedAt: T0 - 64_000, output: { total: 6, earliest: 0 }, ...more });
+const jobLists = h => h.streams.filter(s => s.name === 'job/list');
+const liveList = h => jobLists(h).filter(s => !s.cancelled);
+const follows = h => h.streams.filter(s => s.name === 'job/follow');
+async function jobsRig({ holds = ms => ms === 1000 || ms === 2000 || ms === 10_000, rows = [row('s1', { agentAvailable: true }), row('s2', { agentAvailable: true })], kill = { outcome: 'requested' } } = {}) {
+  const f = fakeWindow({ hash: '' });
+  const h = host({ rows });
+  const call0 = h.call;
+  const call = async (endpoint, args) => (endpoint === 'job/kill' ? (h.calls.push([endpoint, args]), kill) : call0(endpoint, args));
+  const timers = new HeldTimers(holds);
+  const clock = { t: T0 };
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers, now: () => clock.t });
+  await h.ready();
+  const give = jobs => { liveList(h).at(-1).cbs.onItem({ type: 'rows', jobs }); };
+  return { f, h, store, timers, clock, give };
+}
+const goTo = async (f, hash) => { f.win.location.hash = hash; await settle(); };
+
+test('opening a conversation watches its jobs, another conversation moves the watch, Markets stops it', async () => {
+  const { f, h, store } = await jobsRig();
+  assert.equal(store.get().route.id, 's1');
+  assert.deepEqual(liveList(h).map(s => s.args), [{ request: { sessionId: 's1' } }]);
+  await goTo(f, '#/messages/s2');
+  assert.deepEqual(liveList(h).map(s => s.args), [{ request: { sessionId: 's2' } }], "s1's list cancelled, s2's open");
+  assert.equal(jobLists(h).length, 2);
+  await goTo(f, '#/messages/s2');
+  assert.equal(jobLists(h).length, 2, 'the same conversation keeps its stream');
+  await goTo(f, '#/markets');
+  assert.deepEqual(liveList(h), [], 'off Messages nothing is watched');
+  assert.equal(store.get().jobs.convId, null);
+  store.timers.clear();
+});
+
+test('a host end of job/list in the page opens it again after the backoff, an error after the longer one', async () => {
+  const { h, store, timers, give } = await jobsRig();
+  give([ajob('j1', 'running')]);
+  await settle();
+  liveList(h)[0].cbs.onEnd();
+  assert.ok(timers.delays().includes(2000), 'a re-open waits on the end backoff');
+  assert.equal(store.get().jobs.rows.length, 1, 'the rows stay meanwhile');
+  timers.run(2000);
+  assert.equal(jobLists(h).length, 2);
+  assert.deepEqual(jobLists(h)[1].args, { request: { sessionId: 's1' } });
+  jobLists(h)[1].cbs.onError({ code: 'x' });
+  assert.ok(timers.delays().includes(10_000));
+  timers.run(10_000);
+  assert.equal(jobLists(h).length, 3, 'opened again after an error too');
+  store.timers.clear();
+});
+
+test('the chip opens Details at Background jobs', async () => {
+  const { f, store, give } = await jobsRig();
+  const scrolled = [];
+  f.withId('dsec-jobs', { presentIf: /id="dsec-jobs"/, scrollIntoView(o) { scrolled.push(o); } });
+  assert.doesNotMatch(f.html(), /jobs-chip/);
+  give([ajob('j1', 'running')]);
+  await settle();
+  assert.match(f.html(), /class="btn-sm jobs-chip" data-action="openJobs"><span class="jobs-dot live"><\/span>1 job running/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openJobs' } });
+  await settle();
+  assert.equal(store.get().detailsOpen, true);
+  assert.deepEqual(scrolled, [{ block: 'start' }]);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openJobs' } });
+  await settle();
+  assert.equal(store.get().detailsOpen, true, 'never closed by the chip');
+  assert.equal(scrolled.length, 2, 'scrolled again with Details already open');
+  store.timers.clear();
+});
+
+test('opening a job follows it and its output fills the pre without a render; a render writes it again', async () => {
+  const { f, h, store, give } = await jobsRig();
+  give([ajob('j1', 'running'), ajob('j2', 'running')]);
+  store.dispatch('toggleDetails');
+  await settle();
+  const pre = f.withId('job-out-j1', { tagName: 'PRE', presentIf: /id="job-out-j1"/ });
+  const note = f.withId('job-note-j1', { presentIf: /id="job-note-j1"/ });
+  const details = { tagName: 'DETAILS', open: false };
+  const summary = { tagName: 'SUMMARY', dataset: { action: 'openJob', job: 'j1' }, parentElement: details };
+  f.click(summary);
+  await settle();
+  assert.equal(details.open, true);
+  assert.equal(store.get().jobs.open, 'j1');
+  assert.deepEqual(follows(h).map(s => s.args), [{ request: { sessionId: 's1', jobId: 'j1' } }]);
+  assert.match(f.html(), /<details id="job-j1" class="job-details" open>/);
+  const fl = follows(h)[0];
+  fl.cbs.onItem({ type: 'opened', job: ajob('j1', 'running'), from: 0 });
+  const writes = f.writes;
+  fl.cbs.onItem({ type: 'output', chunks: [{ at: 0, text: 'hello\n' }], next: 6 });
+  assert.equal(pre.textContent, 'hello\n');
+  fl.cbs.onItem({ type: 'output', chunks: [{ at: 6, text: 'world' }], next: 11 });
+  assert.equal(pre.textContent, 'hello\nworld');
+  assert.equal(f.writes, writes, 'an output frame renders nothing');
+  assert.equal(note.textContent, '');
+  pre.textContent = '';   // the fresh node a render draws is empty
+  store.dispatch('hostStatus', { line: 'a stream frame' });
+  await settle();
+  assert.equal(pre.textContent, 'hello\nworld', 'written again after a render');
+  // a follow the host refuses reads so, never quiet
+  fl.cbs.onError({ code: 'job/not-found' });
+  assert.equal(note.textContent, 'output unavailable: job/not-found');
+  // closing it lets the follow go
+  f.click(summary);
+  await settle();
+  assert.equal(details.open, false);
+  assert.equal(store.get().jobs.open, null);
+  assert.equal(fl.cancelled, true);
+  // opened again, then gone from the rows: unfollowed
+  details.open = false;
+  f.click(summary);
+  await settle();
+  assert.equal(follows(h).length, 2);
+  give([ajob('j2', 'running')]);
+  await settle();
+  assert.equal(follows(h)[1].cancelled, true, 'a job leaving the rows is unfollowed');
+  assert.equal(store.get().jobs.open, null);
+  store.timers.clear();
+});
+
+test('a job open while another conversation opens, or Details closes, is unfollowed', async () => {
+  const { f, h, store, give } = await jobsRig();
+  give([ajob('j1', 'running')]);
+  store.dispatch('toggleDetails');
+  await settle();
+  f.click({ tagName: 'SUMMARY', dataset: { action: 'openJob', job: 'j1' }, parentElement: { tagName: 'DETAILS', open: false } });
+  await settle();
+  store.dispatch('toggleDetails');
+  await settle();
+  assert.equal(follows(h)[0].cancelled, true, 'Details closed');
+  assert.equal(store.get().jobs.open, null);
+  store.dispatch('toggleDetails');
+  f.click({ tagName: 'SUMMARY', dataset: { action: 'openJob', job: 'j1' }, parentElement: { tagName: 'DETAILS', open: false } });
+  await settle();
+  await goTo(f, '#/messages/s2');
+  assert.equal(follows(h)[1].cancelled, true, 'another conversation');
+  store.timers.clear();
+});
+
+test('Yes, stop kills the job; No asks nothing', async () => {
+  const { f, h, store, give } = await jobsRig();
+  give([ajob('j1', 'running')]);
+  store.dispatch('toggleDetails');
+  await settle();
+  const stop = { tagName: 'BUTTON', dataset: { action: 'stopJob', conv: 's1', job: 'j1' } };
+  f.click(stop);
+  await settle();
+  assert.deepEqual(store.get().confirm, { action: 'stopJob', id: 'j1', conv: 's1' });
+  assert.match(f.html(), /data-action="confirmYes">Yes, stop</);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'cancelConfirm' } });
+  await settle();
+  assert.equal(h.calls.filter(c => c[0] === 'job/kill').length, 0);
+  f.click(stop);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
+  await settle();
+  assert.deepEqual(h.calls.filter(c => c[0] === 'job/kill').map(c => c[1]), [{ request: { sessionId: 's1', jobId: 'j1' } }]);
+  assert.equal(store.get().confirm, null);
+  store.timers.clear();
+});
+
+test('the clock ticks without a render while a live job is drawn, and stops with none', async () => {
+  const { f, store, timers, clock, give } = await jobsRig();
+  const span = f.withSelector('[data-job-clock]', { dataset: { jobClock: String(T0 - 64_000) }, presentIf: /data-job-clock=/ });
+  give([ajob('j1', 'running')]);
+  await settle();
+  timers.held.clear();   // the Account stream's 1 s re-open (no EventSource here): the 1 s timers held from now are the clock's
+  assert.ok(!timers.delays().includes(1000), 'no clock while Details is shut');
+  store.dispatch('toggleDetails');
+  await settle();
+  assert.match(f.html(), /<span data-job-clock="\d+">1m 04s<\/span>/);
+  store.dispatch('hostStatus', { line: 'another render' });
+  await settle();
+  assert.equal(timers.delays().filter(ms => ms === 1000).length, 1, 'one clock, however many renders');
+  clock.t += 2000;
+  const writes = f.writes;
+  timers.run(1000);
+  assert.equal(span.textContent, '1m 06s');
+  assert.equal(f.writes, writes, 'the tick renders nothing');
+  assert.equal(timers.delays().filter(ms => ms === 1000).length, 1, 'and goes on');
+  give([ajob('j1', 'completed', { finishedAt: T0 })]);
+  await settle();
+  timers.run(1000);
+  assert.ok(!timers.delays().includes(1000), 'no live job drawn: the clock stops');
+  store.timers.clear();
+});
+
+test('Clear hides the finished until the page reloads', async () => {
+  const { f, store, give } = await jobsRig();
+  give([ajob('f1', 'completed', { finishedAt: T0 })]);
+  store.dispatch('toggleDetails');
+  await settle();
+  assert.match(f.html(), /id="jobs-finished-s1"/);
+  assert.match(f.html(), /jobs-chip/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'clearJobs', conv: 's1' } });
+  await settle();
+  assert.doesNotMatch(f.html(), /jobs-finished|dsec-jobs|jobs-chip/);
+  give([ajob('f1', 'completed', { finishedAt: T0 })]);
+  await settle();
+  assert.doesNotMatch(f.html(), /jobs-finished/, 'the next rows frame keeps it cleared');
+  store.timers.clear();
+  const again = await jobsRig();
+  again.give([ajob('f1', 'completed', { finishedAt: T0 })]);
+  again.store.dispatch('toggleDetails');
+  await settle();
+  assert.match(again.f.html(), /id="jobs-finished-s1"/, 'a reload shows it again');
+  again.store.timers.clear();
+});

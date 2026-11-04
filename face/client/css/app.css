@@ -400,6 +400,22 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .trace-body { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .child-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 0; font-size: 13px; }
 .child-name { font-weight: 700; }
+/* background jobs (spec §5.8): the head's chip, Details' rows — a disclosure per job beside its Stop — and the output block */
+.jobs-chip { gap: 8px; }
+.jobs-dot, .job-dot { flex: none; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--dim); }
+.jobs-dot.live, .job-dot.live { background: var(--up); }
+.job { display: flex; align-items: flex-start; gap: 8px; }
+.job-details { flex: 1; min-width: 0; }
+.job-details > summary { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 8px; row-gap: 2px; cursor: pointer; list-style: none; }
+.job-details > summary::-webkit-details-marker { display: none; }
+.job-cmd { font-family: var(--font-mono); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.job-meta { grid-column: 2; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.job-out { margin: 8px 0 0; padding: 8px 10px; border-radius: var(--radius-s); background: var(--surface-2); color: var(--text); font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+.job-out:empty, .job-note:empty { display: none; }
+.job-note, .job-end { margin-top: 6px; font-size: 12px; color: var(--dim); }
+.job-copy { margin-top: 6px; min-height: 28px; }
+.jobs-finished > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--dim); }
+.jobs-finished > .job, .jobs-finished > .btn-sm { margin-top: 8px; }
 .card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 18px 18px 18px 4px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-card); }
 .card.orange { border-color: var(--warn-edge); }
 .card.red { border-color: var(--down-edge); }

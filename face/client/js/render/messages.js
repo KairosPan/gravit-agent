@@ -12,7 +12,8 @@ import { needsAnswer } from '../messages.js';
 import { childrenOf } from '../host/children-view.js';
 import { channelLabel } from '../host/list-view.js';
 import { renderMenu, menuAria, filesRail } from '../composer/view.js';
-import { statsView, pillsText, durationText } from '../host/turns-view.js';
+import { statsView, pillsText, durationText, clockText } from '../host/turns-view.js';
+import { jobsView, metaLine, endLine, isLive } from '../host/jobs-view.js';
 
 export function currentConversation(state) {
   const id = state.route.screen === 'messages' ? state.route.id : null;
@@ -42,9 +43,16 @@ export function renderStatus(status) {
   return `<div class="${cls('status-line', status.bad && 'bad')}" role="status">${esc(status.line)}</div>`;
 }
 
+// the jobs chip (spec §5.8), before Working while the conversation has a job: it opens Details at Background jobs
+function jobsChip(conv, state) {
+  const v = jobsView(state.jobs, conv.id);
+  if (!v.chip) return '';
+  return `<button type="button" class="btn-sm jobs-chip" data-action="openJobs"><span class="${cls('jobs-dot', v.running.length > 0 && 'live')}"></span>${esc(v.chip)}${icon('chevDown', 14, 2.2)}</button>`;
+}
+
 function headRight(conv, state) {
   const working = conv.running ? '<span class="status up"><span class="status-dot"></span>Working</span>' : '';
-  return working + `<button type="button"${attrs({ class: cls('btn-sm', state.detailsOpen && 'pressed'), 'data-action': 'toggleDetails', 'aria-expanded': state.detailsOpen ? 'true' : 'false' })}>Details${icon('chevRight', 14, 2.2)}</button>`;
+  return jobsChip(conv, state) + working + `<button type="button"${attrs({ class: cls('btn-sm', state.detailsOpen && 'pressed'), 'data-action': 'toggleDetails', 'aria-expanded': state.detailsOpen ? 'true' : 'false' })}>Details${icon('chevRight', 14, 2.2)}</button>`;
 }
 
 export function renderHead(conv, state) {
@@ -147,7 +155,42 @@ function childrenSection(conv, state) {
   return `<section class="dsec"><div class="dsec-label">Children</div>${unavailable ? '<div class="dsec-line dim">Children unavailable</div>' : rows}</section>`;
 }
 
-export function renderDetails(conv, state) {
+// Details › Background jobs (spec §5.8, P4): each running job a disclosure (open while it is the job open, its output
+// written into the empty pre by app.js, never by a render) beside its Stop (asked twice), Stopping while it stops; the
+// finished folded under Finished · n with Clear. A job's command and output are never masked (A2). The live clock is a
+// span app.js ticks without rendering the page
+function jobMeta(job, now) {
+  if (!isLive(job) || !Number.isFinite(job.startedAt)) return esc(metaLine(job, now));
+  const head = metaLine({ ...job, startedAt: null }, now);
+  const clock = `<span${attrs({ 'data-job-clock': job.startedAt })}>${esc(clockText(now - job.startedAt))}</span>`;
+  return head ? `${esc(head)} · ${clock}` : clock;
+}
+function jobDetails(job, state, now) {
+  const live = isLive(job);
+  const empty = !live && (Number(job.output?.total) || 0) === 0;
+  const end = live ? '' : [empty ? '(no output)' : '', endLine(job)].filter(Boolean).join(' · ');
+  return `<details${attrs({ id: `job-${job.id}`, class: 'job-details', open: state.jobs?.open === job.id })}>` +
+    `<summary${attrs({ 'data-action': 'openJob', 'data-job': job.id })}><span class="${cls('job-dot', live && 'live')}"></span><code class="job-cmd">${esc(job.label)}</code><span class="job-meta">${jobMeta(job, now)}</span></summary>` +
+    `<pre${attrs({ class: 'job-out', id: `job-out-${job.id}` })}></pre><div${attrs({ class: 'job-note', id: `job-note-${job.id}` })}></div>` +
+    (end ? `<div class="job-end">${esc(end)}</div>` : '') +
+    `<button${attrs({ type: 'button', class: 'btn-sm job-copy', id: `job-copy-${job.id}`, 'data-action': 'copyText', 'data-text': job.label, 'aria-label': 'Copy command' })}>Copy</button></details>`;
+}
+function jobStop(conv, job, state) {
+  if (job.status === 'stopping') return '<span class="dim">Stopping</span>';
+  if (state.confirm?.action === 'stopJob' && state.confirm?.id === job.id) return confirmPair('Yes, stop');
+  return `<button${attrs({ type: 'button', class: 'btn-sm', id: `job-stop-${job.id}`, 'data-action': 'stopJob', 'data-conv': conv.id, 'data-job': job.id })}>Stop</button>`;
+}
+function jobsSection(conv, state, now) {
+  const { running, finished } = jobsView(state.jobs, conv.id);
+  if (!running.length && !finished.length) return '';
+  const rows = running.map(j => `<div class="job">${jobDetails(j, state, now)}${jobStop(conv, j, state)}</div>`).join('');
+  const fold = !finished.length ? '' : `<details${attrs({ id: `jobs-finished-${conv.id}`, class: 'jobs-finished' })}><summary>${esc(`Finished · ${finished.length}`)}</summary>` +
+    finished.map(j => `<div class="job">${jobDetails(j, state, now)}</div>`).join('') +
+    `<button${attrs({ type: 'button', class: 'btn-sm', id: `jobs-clear-${conv.id}`, 'data-action': 'clearJobs', 'data-conv': conv.id })}>Clear</button></details>`;
+  return `<section class="dsec" id="dsec-jobs"><div class="dsec-label">Background jobs</div>${rows}${fold}</section>`;
+}
+
+export function renderDetails(conv, state, now = Date.now()) {
   const e = state.edit;
   const renaming = !!e && e.kind === 'rename' && e.convId === conv.id;
   const asking = state.confirm?.action === 'stopGravit' && state.confirm?.id === conv.id;
@@ -162,7 +205,7 @@ export function renderDetails(conv, state) {
   <div class="drawer-head"><h2>Details</h2><button type="button" class="close-key" data-action="toggleDetails" aria-label="Close">×</button></div>
   <div class="drawer-body">
     <section class="dsec"><div class="dsec-label">This task</div>${title}${facts}${renaming ? '' : `<div class="btn-row">${rowKeys(conv, state)}</div>`}</section>
-    ${members}${childrenSection(conv, state)}${usageRows(conv)}${stop}
+    ${jobsSection(conv, state, now)}${members}${childrenSection(conv, state)}${usageRows(conv)}${stop}
   </div>
 </aside>`;
 }
@@ -180,5 +223,5 @@ export function renderMessagesScreen(state, now, composer = {}, page = {}) {
   const conv = currentConversation(state);
   if (!conv) return emptyScreen(state, composer);
   const placeholder = conv.kind === 'group' ? 'Tell Gravit… @ a bot by name' : 'Tell Gravit…';
-  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="Turns">${railHtml(conv, page.rail)}</nav></div>${renderComposer(composerOf(composer, { placeholder }))}${threadFoot(conv, state)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
+  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="Turns">${railHtml(conv, page.rail)}</nav></div>${renderComposer(composerOf(composer, { placeholder }))}${threadFoot(conv, state)}${state.detailsOpen ? renderDetails(conv, state, now) : ''}</main>`;
 }

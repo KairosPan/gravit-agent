@@ -332,3 +332,82 @@ test('no stats, no pills: the foot is the status line alone, or nothing', () => 
   const empty = renderMessagesScreen(R.hostStatus({ ...quiet, conversations: [] }, { line: 'Reconnecting…' }), NOW);
   assert.doesNotMatch(empty, /thread-foot/);
 });
+
+// ---- background jobs (plan 5, Task 9): the chip in the head, Details › Background jobs
+const job = (id, status, more = {}) => ({ id, kind: 'bash', label: `run ${id}`, owner: 'a', status, startedAt: NOW - 184_000, output: { total: 10, earliest: 0 }, ...more });
+const withJobs = (rows, s = listed([conv('a')])) => R.hostJobs(R.watchJobs(s, 'a'), { convId: 'a', jobs: rows });
+const details = s => renderDetails(currentConversation(s), s, NOW);
+
+test('the chip shows while the conversation has a job, with its words, and none without', () => {
+  const head = s => renderHead(currentConversation(s), s);
+  assert.doesNotMatch(head(listed([conv('a')])), /jobs-chip/);
+  assert.doesNotMatch(head(withJobs([])), /jobs-chip/);
+  const one = head(withJobs([job('j1', 'running')]));
+  assert.match(one, /<button type="button" class="btn-sm jobs-chip" data-action="openJobs"><span class="jobs-dot live"><\/span>1 job running<svg/);
+  assert.match(head(withJobs([job('j1', 'running'), job('j2', 'stopping'), job('j3', 'completed')])), />2 jobs running</);
+  const done = head(withJobs([job('j1', 'completed'), job('j2', 'failed')]));
+  assert.match(done, /<span class="jobs-dot"><\/span>2 jobs finished/);
+  // before Working
+  const busy = head(withJobs([job('j1', 'running')], listed([conv('a', { running: true })])));
+  assert.ok(busy.indexOf('jobs-chip') < busy.indexOf('Working'), 'the chip before Working');
+  // another conversation's rows are not this one's
+  const other = R.hostJobs(R.watchJobs(listed([conv('a'), conv('b')], 'b'), 'a'), { convId: 'a', jobs: [job('j1', 'running')] });
+  assert.doesNotMatch(head(other), /jobs-chip/);
+});
+
+test('Background jobs sits right after This task: a running job\'s command, meta and Stop; a stopping one Stopping', () => {
+  const s = withJobs([job('j1', 'running', { progress: 'page 7 of 12' }), job('j2', 'stopping')]);
+  const d = details(s);
+  assert.match(d, /This task<\/div>[\s\S]*?<\/section>\s*<section class="dsec" id="dsec-jobs"><div class="dsec-label">Background jobs<\/div>/);
+  assert.match(d, /<div class="job"><details id="job-j1" class="job-details"><summary data-action="openJob" data-job="j1"><span class="job-dot live"><\/span><code class="job-cmd">run j1<\/code><span class="job-meta">bash · page 7 of 12 · <span data-job-clock="\d+">3m 04s<\/span><\/span><\/summary>/);
+  assert.match(d, /<pre class="job-out" id="job-out-j1"><\/pre>/, 'the output pre is drawn empty');
+  assert.match(d, /<button type="button" class="btn-sm job-copy" id="job-copy-j1" data-action="copyText" data-text="run j1" aria-label="Copy command">Copy<\/button>/);
+  assert.match(d, /<button type="button" class="btn-sm" id="job-stop-j1" data-action="stopJob" data-conv="a" data-job="j1">Stop<\/button>/);
+  assert.match(d, /id="job-j2"[\s\S]*?<\/details><span class="dim">Stopping<\/span><\/div>/);
+  assert.doesNotMatch(d, /data-job="j2">Stop</);
+  assert.doesNotMatch(d, /jobs-finished/, 'no fold without finished jobs');
+  // the open job is drawn open
+  assert.match(details(R.openJob(s, 'j1')), /<details id="job-j1" class="job-details" open>/);
+  // no jobs, no section
+  assert.doesNotMatch(details(listed([conv('a')])), /dsec-jobs/);
+});
+
+test('Stop asks twice with Yes, stop', () => {
+  const s = R.askConfirm(withJobs([job('j1', 'running'), job('j2', 'running')]), { action: 'stopJob', id: 'j1', conv: 'a' });
+  const d = details(s);
+  assert.match(d, /id="job-j1"[\s\S]*?<\/details><span class="confirm"><button type="button" class="btn-danger" data-action="confirmYes">Yes, stop<\/button>/);
+  assert.match(d, /data-action="stopJob" data-conv="a" data-job="j2">Stop</, 'the other job keeps its Stop');
+});
+
+test('finished jobs fold under Finished · n with Clear, their end lines and (no output) for an empty one', () => {
+  const s = withJobs([
+    job('r1', 'running'),
+    job('f1', 'completed', { detail: 'exit code: 3', finishedAt: NOW - 120_000 }),
+    job('f2', 'killed', { detail: 'signal: SIGTERM', finishedAt: NOW - 1000 }),
+    job('f3', 'failed', { output: { total: 0, earliest: 0 }, finishedAt: NOW }),
+  ]);
+  const d = details(s);
+  assert.match(d, /<details id="jobs-finished-a" class="jobs-finished"><summary>Finished · 3<\/summary>/);
+  const fold = d.slice(d.indexOf('jobs-finished-a'));
+  assert.match(fold, /<span class="job-dot"><\/span><code class="job-cmd">run f1<\/code><span class="job-meta">bash · exit 3 · 1m 04s<\/span>/);
+  assert.match(fold, /<div class="job-end">exit 3<\/div>/);
+  assert.match(fold, /<div class="job-end">signal SIGTERM<\/div>/);
+  assert.match(fold, /<div class="job-end">\(no output\) · failed<\/div>/);
+  assert.doesNotMatch(fold, /data-action="stopJob"/, 'no Stop on a finished job');
+  assert.doesNotMatch(fold, /data-job-clock/, 'a finished job has no ticking clock');
+  assert.match(fold, /<button type="button" class="btn-sm" id="jobs-clear-a" data-action="clearJobs" data-conv="a">Clear<\/button><\/details>/);
+  assert.equal(count(d.slice(0, d.indexOf('jobs-finished-a')), /class="job"/g), 1, 'one running row above the fold');
+  // cleared: the fold goes; with no running job either the section goes
+  const cleared = R.clearJobs(s, 'a');
+  assert.doesNotMatch(details(cleared), /jobs-finished/);
+  assert.match(details(cleared), /dsec-jobs/);
+  assert.doesNotMatch(details(R.clearJobs(withJobs([job('f1', 'completed')]), 'a')), /dsec-jobs/);
+});
+
+test("a job's command is escaped and never masked", () => {
+  const key = 'sk-proj-aB3dE6fG9hJ2kL5mN8pQ1rS4';
+  const d = details(withJobs([job('j1', 'running', { label: `curl -H "x: ${key}" <a>&` })]));
+  assert.match(d, /<code class="job-cmd">curl -H &quot;x: sk-proj-aB3dE6fG9hJ2kL5mN8pQ1rS4&quot; &lt;a&gt;&amp;<\/code>/);
+  assert.match(d, /data-text="curl -H &quot;x: sk-proj-aB3dE6fG9hJ2kL5mN8pQ1rS4&quot; &lt;a&gt;&amp;"/);
+  assert.doesNotMatch(d, /secret/);
+});
