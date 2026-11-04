@@ -252,7 +252,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       sessionIds: Array.isArray(ch.sessionIds) ? ch.sessionIds : [],
     }));
     const channelOf = id => { const ch = channels.find(c => c.sessionIds.includes(id)); return ch ? { workspaceId: ch.workspaceId, name: ch.name } : null; };
-    const bots = new Map((Array.isArray(botsBody?.bots) ? botsBody.bots : []).map(b => [b.id, { name: b.name }]));
+    const bots = new Map((Array.isArray(botsBody?.bots) ? botsBody.bots : []).map(b => [b.id, { name: b.name, description: typeof b.description === 'string' ? b.description : '' }]));
     const rows = list.items.map(r => summaryOf(r, index?.presets));
     memberBot = new Map();
     for (const members of foldMembers(rows).rooms.values()) for (const m of members) memberBot.set(String(m.sessionId), String(m.agentPreset));
@@ -263,7 +263,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     store.dispatch('hostList', {
       conversations,
       channels,
-      bots: [...bots].map(([id, b]) => ({ id, name: b.name })), // the screens name a bot by these
+      bots: [...bots].map(([id, b]) => ({ id, name: b.name, description: b.description })), // the screens name a bot by these; the @ menu shows the line
       childRows: childRowsOf(list.items),
     });
     for (const r of list.items) if (typeof r?.sessionId === 'string') seedBlock(r.sessionId, r.projections);

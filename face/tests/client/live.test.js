@@ -224,7 +224,13 @@ test("a room member's gate replayed before the list lands survives the room's wi
 test("the bots' display names from /data/bots.json reach the store, so the screens name a bot rather than its id", async () => {
   const r = rig({ rows: [row('s1')], bots: { bots: [{ id: 'buffett', name: 'Buffett Type' }, { id: 'drill-bear', name: '看空派' }] } });
   await r.ready();
-  assert.deepEqual(r.store.get().bots, [{ id: 'buffett', name: 'Buffett Type' }, { id: 'drill-bear', name: '看空派' }]);
+  assert.deepEqual(r.store.get().bots, [{ id: 'buffett', name: 'Buffett Type', description: '' }, { id: 'drill-bear', name: '看空派', description: '' }]);
+});
+
+test("the list keeps each bot's description", async () => {
+  const r = rig({ rows: [row('s1')], bots: { bots: [{ id: 'news-scout', name: 'News Scout', description: 'Reads the wires' }, { id: 'drill-bull', name: 'Bull' }] } });
+  await r.ready();
+  assert.deepEqual(r.store.get().bots, [{ id: 'news-scout', name: 'News Scout', description: 'Reads the wires' }, { id: 'drill-bull', name: 'Bull', description: '' }]);
 });
 
 test('previews: a row is re-read when its session moves, and only then (a row read and found silent waits for activity)', async () => {
@@ -391,7 +397,7 @@ test('refresh reads sessions-meta; a failed channels, sessions-meta or bots read
   assert.equal(get('s3').archived, 'host');
   assert.deepEqual(r.store.get().channels, [alpha], 'a failed channels read keeps the groups');
   assert.deepEqual(get('s1').channel, { workspaceId: 'w1', name: 'alpha' });
-  assert.deepEqual(r.store.get().bots, [{ id: 'buffett', name: 'Buffett' }], 'a failed bots read keeps the names');
+  assert.deepEqual(r.store.get().bots, [{ id: 'buffett', name: 'Buffett', description: '' }], 'a failed bots read keeps the names');
 });
 
 test('the subagentCatalog projection reaches the conversation, and the list carries the child rows', async () => {
