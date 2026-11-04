@@ -390,9 +390,10 @@ export function createAnnotator(deps: AnnotatorDeps): Annotator {
         outcome = "timed-out";
         reply = ending.started ? m.conversation.timedOutLine(deadlineMs, m.session.formatDuration) : NO_CHECK;
       }
-      let sent: number[] = [];
+      let sent: string[] = [];
       try {
-        const result = await deps.deliver(reply, input.replyTo === undefined ? undefined : { replyTo: input.replyTo });
+        /* an annotation goes as `alert` (src/phone.ts), threaded under the alert's message */
+        const result = await deps.deliver(reply, input.replyTo === undefined ? { kind: "alert" } : { kind: "alert", replyTo: input.replyTo });
         if ("sent" in result) sent = result.sent;
       } catch (err) {
         log(`${BIN}: desk: the reply of ${where} could not be delivered: ${errText(err)}`);

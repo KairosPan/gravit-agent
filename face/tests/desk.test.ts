@@ -773,7 +773,7 @@ test("installDesk's deskDeadlineMs is every desk turn's deadline; without it a t
       await until(`the ${label} conversation's start`, () => fake.listeners.size === 1);
       const agent = fake.agents[0];
       const sent: string[] = [];
-      desk.conversation?.setOutlet({ send: async (text) => { sent.push(text); return { sent: [1] }; } });
+      desk.conversation?.setOutlet({ send: async (text) => { sent.push(text); return { sent: ["telegram:1"] }; } });
       /** One event of the desk session on the root bus, as the supervisor hears it. */
       const emit = (type: string, data: Record<string, unknown>): void => {
         for (const listener of fake.listeners) (listener as (session: { id: string }, event: EventLike) => void)({ id: agent.id }, { type, seq: 0, data });
@@ -1599,8 +1599,8 @@ test("installDesk starts the watch with a source, shares the US calendar with th
   await until("the conversation's start", () => fake.listeners.size === 1);
   const deskAgent = fake.agents[0];
   assert.ok(desk.annotator !== undefined, "the annotator comes with the conversation");
-  const phone: [string, number | undefined][] = [];
-  desk.conversation?.setOutlet({ send: async (text, opts) => { phone.push([text, opts?.replyTo]); return { sent: [phone.length] }; } });
+  const phone: [string, string | undefined][] = [];
+  desk.conversation?.setOutlet({ send: async (text, opts) => { phone.push([text, opts.replyTo]); return { sent: [`telegram:${phone.length}`] }; } });
   price = 1390; // 600519 under its watch level at its session's first judged print
   await watchClock.advance(10_000);
   await until("the annotation's own agent", () => fake.agents.length === 2);
@@ -1617,7 +1617,7 @@ test("installDesk starts the watch with a source, shares the US calendar with th
   await until("the 40 ms alert deadline's cancel", () => annotation.cancels.length === 1);
   emit("turn/end", { turn: 1, reason: { kind: "aborted" } });
   await until("the cut line under the alert", () => phone.length === 2);
-  assert.deepEqual(phone[1], ["timed out after 0.04 s; a card or a long tool was pending", 1]);
+  assert.deepEqual(phone[1], ["timed out after 0.04 s; a card or a long tool was pending", "telegram:1"]);
   await until("the annotated note in alerts.jsonl", () => readFileSync(join(deskDir(h), "alerts.jsonl"), "utf8").includes('"kind":"annotated"'));
 
   await desk.dispose(0);

@@ -126,7 +126,7 @@ function level(symbol: string): Level {
   return { file: "desk/levels.yml", index: 0, symbol, market: "us", kind: "watch", price: 1, when: "cross_up", plan: "p", expires: "2026-12-31", annotate: false, cooldownMs: 0 };
 }
 function rule(kind: Rule["kind"], symbols: Partial<Rule["symbols"]>): Rule {
-  const base = { file: "desk/rules.yml", index: 0, id: kind, symbols: { holdings: false, levels: false, symbols: [], ...symbols }, annotate: false };
+  const base = { file: "desk/rules.yml", index: 0, id: kind, symbols: { holdings: false, levels: false, symbols: [], ...symbols }, annotate: false, urgent: false };
   if (kind === "filing") return { ...base, kind, forms: ["8-K"], cooldownMs: 0 };
   if (kind === "gap") return { ...base, kind, gapPct: 3 };
   return { ...base, kind, movePct: 5, cooldownMs: 0 };

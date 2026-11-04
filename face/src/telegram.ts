@@ -122,6 +122,15 @@ const OUTBOX_FILE = "outbox.json";
 
 /** The phone's lines. */
 const TEXT_ONLY = "text only on the desk";
+/** The network this bridge is: a message id it answers is `telegram:<message_id>`. */
+const NETWORK = "telegram";
+/** `telegram:<n>` read back to `n`; `undefined` for an id of another network, or none. */
+function numberOf(id: string | undefined): number | undefined {
+  const m = id === undefined ? null : /^telegram:(\d{1,16})$/.exec(id);
+  if (m === null) return undefined;
+  const n = Number(m[1]);
+  return Number.isSafeInteger(n) ? n : undefined;
+}
 const RESUMES = "a terminal resumes it: npm run desk -- resume";
 const PAUSE_USAGE = "/pause takes Nm, Nh or Nd - 30m, 2h, 1d - or nothing; nothing was paused";
 const RENEWED = "a new desk conversation";
@@ -238,7 +247,7 @@ export interface BridgeDeps {
   status: () => Promise<DeskStatus>;
   log?: (line: string) => void;
   secrets?: readonly string[];
-  contextFor?: (messageId: number) => string | undefined;
+  contextFor?: (messageId: string) => string | undefined;
 }
 
 /** The running bridge. `status` is what the desk's status reports of it; `send` sends `text` to the
@@ -688,7 +697,7 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     const replied = message.reply_to_message?.message_id;
     if (deps.contextFor === undefined || typeof replied !== "number" || !Number.isSafeInteger(replied)) return undefined;
     try {
-      return deps.contextFor(replied);
+      return deps.contextFor(`${NETWORK}:${replied}`);
     } catch (err) {
       log(`${BIN}: telegram: the message update ${String(update)} replies to could not be read: ${reasonOf(err)}`);
       return undefined;
@@ -844,7 +853,16 @@ export function installTelegramBridge(deps: BridgeDeps): BridgeHandle {
     .catch((err: unknown) => { log(`${BIN}: telegram: the bridge stopped: ${reasonOf(err)}`); })
     .finally(() => { polling = false; });
 
-  const outlet: DeskOutlet = { send: (text, opts) => send(text, opts) };
+  /* The desk's outlet (Task 8 moves it onto the account): the kind and the network are the account's to route by, and
+   * this bridge, Telegram's alone, ignores them; its ids go out as `telegram:<n>`, and a `replyTo` is read back to its
+   * number - one naming another network, or no number, threads under nothing. */
+  const outlet: DeskOutlet = {
+    send: async (text, opts) => {
+      const replyTo = numberOf(opts.replyTo);
+      const result = await send(text, replyTo === undefined ? {} : { replyTo });
+      return "sent" in result ? { ...result, sent: result.sent.map((id) => `${NETWORK}:${id}`) } : result;
+    },
+  };
   conversation.setOutlet(outlet);
 
   return {

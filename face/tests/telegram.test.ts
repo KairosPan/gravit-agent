@@ -235,7 +235,7 @@ interface Rig {
 async function rig(
   label: string,
   o: Partial<Omit<Rig, "bridge" | "lines">> & {
-    status?: () => Promise<DeskStatus>; pollTimeoutS?: number; secrets?: readonly string[]; contextFor?: (messageId: number) => string | undefined;
+    status?: () => Promise<DeskStatus>; pollTimeoutS?: number; secrets?: readonly string[]; contextFor?: (messageId: string) => string | undefined;
   } = {},
 ): Promise<Rig> {
   const home = o.home ?? await freshHome(label);
@@ -342,12 +342,12 @@ test("operator text is posted to the conversation with the telegram source", asy
 });
 
 test("the bridge resolves reply_to_message.message_id through contextFor and posts it as context", async () => {
-  const asked: number[] = [];
+  const asked: string[] = [];
   const r = await rig("reply-context", {
     contextFor: (id) => {
       asked.push(id);
-      if (id === 555) return "NVDA 169.82 · ROBINHOOD 10:21:03 ET";
-      if (id === 13) throw new Error("the watch broke");
+      if (id === "telegram:555") return "NVDA 169.82 · ROBINHOOD 10:21:03 ET";
+      if (id === "telegram:13") throw new Error("the watch broke");
       return undefined;
     },
   });
@@ -368,7 +368,7 @@ test("the bridge resolves reply_to_message.message_id through contextFor and pos
     assert.deepEqual(r.conversation.posts.slice(1).map((p) => [p.text, p.context]), [["and this?", undefined], ["plain", undefined], ["odd", undefined], ["broken", undefined]],
       "an unknown message, no reply, a malformed id and a failing lookup carry nothing");
     assert.ok(r.conversation.posts.slice(1).every((p) => !("context" in p)));
-    assert.deepEqual(asked, [555, 999, 13], "asked only for a numeric id");
+    assert.deepEqual(asked, ["telegram:555", "telegram:999", "telegram:13"], "asked only for a numeric id, named by its network");
     assert.equal(r.lines.length, 1);
     assert.match(r.lines[0], /the message update 9 replies to could not be read: the watch broke/);
   } finally {
@@ -1220,10 +1220,26 @@ test("the bridge is the conversation's outlet until dispose", async () => {
   assert.equal(r.conversation.outlets.length, 1);
   const outlet = r.conversation.outlets[0];
   assert.notEqual(outlet, undefined);
-  assert.deepEqual(await outlet?.send("a desk answer"), { sent: [501] });
+  assert.deepEqual(await outlet?.send("a desk answer", { kind: "chat", network: "telegram" }), { sent: ["telegram:501"] });
   assert.deepEqual(r.api.sent.map((m) => [m.chat_id, m.text]), [[OPERATOR, "a desk answer"]]);
   await r.bridge.dispose();
   assert.deepEqual(r.conversation.outlets, [outlet, undefined]);
+});
+
+test("the bridge answers ids with their network and reads a string replyTo", async () => {
+  const r = await rig("outlet-ids");
+  try {
+    const outlet = r.conversation.outlets[0];
+    assert.notEqual(outlet, undefined);
+    assert.deepEqual(await outlet?.send("a".repeat(5_000), { kind: "urgent" }), { sent: ["telegram:501", "telegram:502"] }, "every part, named by its network");
+    assert.deepEqual(await outlet?.send("an annotation", { kind: "alert", replyTo: "telegram:77" }), { sent: ["telegram:503"] });
+    assert.deepEqual(r.api.sent.at(-1)?.reply_parameters, { message_id: 77, allow_sending_without_reply: true }, "the string read back to its number");
+    assert.deepEqual(await outlet?.send("elsewhere", { kind: "alert", replyTo: "slack:77" }), { sent: ["telegram:504"] });
+    assert.equal(r.api.sent.at(-1)?.reply_parameters, undefined, "a reply to another network's message threads under nothing");
+    assert.deepEqual(r.api.sent.map((m) => m.parse_mode), [undefined, undefined, undefined, undefined], "the kind changes nothing on the wire");
+  } finally {
+    await r.bridge.dispose();
+  }
 });
 
 test("dispose aborts the poll", async () => {

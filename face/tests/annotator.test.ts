@@ -47,7 +47,8 @@ interface Harness {
   agents: FakeAgents;
   bus: FakeBus;
   clock: WallClock;
-  sent: [string, number | undefined][];
+  sent: [string, string | undefined][];
+  kinds: string[];
   noted: AnnotatedRecord[];
   lines: string[];
   annotator: Annotator;
@@ -60,6 +61,7 @@ async function harness(over: Partial<AnnotatorDeps> = {}, deliver?: (text: strin
   const bus = fakeBus();
   const clock = new WallClock(AT);
   const sent: Harness["sent"] = [];
+  const kinds: string[] = [];
   const noted: AnnotatedRecord[] = [];
   const lines: string[] = [];
   const annotator = createAnnotator({
@@ -68,8 +70,9 @@ async function harness(over: Partial<AnnotatorDeps> = {}, deliver?: (text: strin
     root,
     on: bus.on,
     deliver: async (text, opts) => {
-      sent.push([text, opts?.replyTo]);
-      return deliver === undefined ? { sent: [100 + sent.length] } : deliver(text, sent.length);
+      sent.push([text, opts.replyTo]);
+      kinds.push(opts.kind);
+      return deliver === undefined ? { sent: [`telegram:${100 + sent.length}`] } : deliver(text, sent.length);
     },
     onAnnotated: (r) => { noted.push(r); },
     clock,
@@ -77,14 +80,14 @@ async function harness(over: Partial<AnnotatorDeps> = {}, deliver?: (text: strin
     createAgent: (opts) => agents.createAgent(opts),
     ...over,
   });
-  return { root, home, agents, bus, clock, sent, noted, lines, annotator };
+  return { root, home, agents, bus, clock, sent, kinds, noted, lines, annotator };
 }
 
 const alertOf = (alert: string, symbol = "NVDA", pass = "p-000000000001") => ({ kind: "alert", alert, symbol, pass });
 type PostInput = Parameters<DeskConversation["post"]>[0];
-/** Post an alert's annotation, replying to the alert's message `replyTo`. */
+/** Post an alert's annotation, replying to the alert's Telegram message `replyTo` (`telegram:<replyTo>`). */
 const annotate = (h: Harness, alert: string, replyTo: number | undefined, source: PostInput["source"] = { kind: "alert", symbol: "NVDA", rule: "stop" }) =>
-  h.annotator.post({ text: "NVDA 171.20 crossed the stop at 172", source, message: alertOf(alert), ...(replyTo === undefined ? {} : { replyTo }) });
+  h.annotator.post({ text: "NVDA 171.20 crossed the stop at 172", source, message: alertOf(alert), ...(replyTo === undefined ? {} : { replyTo: `telegram:${replyTo}` }) });
 const sessionOf = (r: PostResult): string => {
   assert.ok("opened" in r, `opened; saw ${JSON.stringify(r)}`);
   return r.sessionId;
@@ -113,6 +116,18 @@ const turnsOf = async (h: Harness) => (await events(h)).flatMap((e) => (e.kind =
 
 /* ---------- the lane ---------- */
 
+test("an annotation's reply goes as alert, threaded under the alert's message, and is noted with the ids it went out as", async () => {
+  const h = await harness();
+  const sessionId = sessionOf(await annotate(h, "a-000000000001", 41));
+  startTurn(h, sessionId, 1, alertOf("a-000000000001"));
+  answer(h, sessionId, 1, "Stop met.");
+  endTurn(h, sessionId, 1);
+  await waitFor("the note", () => h.noted.length === 1);
+  assert.deepEqual([h.sent, h.kinds], [[["Stop met.", "telegram:41"]], ["alert"]]);
+  assert.deepEqual(h.noted[0].sent, ["telegram:101"]);
+  await h.annotator.dispose();
+});
+
 test("an annotation opens at once in its own session while the desk conversation's turn is under way", async () => {
   const h = await harness();
   /* the desk conversation's session, a phone turn open on it and nothing ending it */
@@ -138,7 +153,7 @@ test("its 90 s deadline runs from its own turn's start, and the cut is answered 
   assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "desk deadline" }, { keepInbox: true }]]);
   endTurn(h, sessionId, 1, ABORTED("desk deadline"));
   await waitFor("the cut's line", () => h.sent.length === 1);
-  assert.deepEqual(h.sent, [["timed out after 90 s; a card or a long tool was pending", 11]]);
+  assert.deepEqual(h.sent, [["timed out after 90 s; a card or a long tool was pending", "telegram:11"]]);
   await waitFor("the note", () => h.noted.length === 1);
   assert.equal(h.noted[0].outcome, "timed-out");
   assert.deepEqual((await turnsOf(h)).map((e) => [e.sessionId, e.source, e.outcome, e.wallMs]), [[sessionId, "alert", "timed-out", 90_000]]);
@@ -152,14 +167,14 @@ test("its text is delivered as a reply, recorded as a desk-turn with source aler
   answer(h, sessionId, 1, "Stop met: 171.20 < 172 (ROBINHOOD 10:21:03 ET).");
   endTurn(h, sessionId, 1);
   await waitFor("the reply", () => h.sent.length === 1);
-  assert.deepEqual(h.sent, [["Stop met: 171.20 < 172 (ROBINHOOD 10:21:03 ET).", 11]]);
+  assert.deepEqual(h.sent, [["Stop met: 171.20 < 172 (ROBINHOOD 10:21:03 ET).", "telegram:11"]]);
   assert.deepEqual(await turnsOf(h), [{
     t: AT, kind: "desk-turn", sessionId, source: "alert", turn: 1, outcome: "ended", wallMs: 0,
     usage: { uncachedInputTokens: 1200, outputTokens: 34, cacheReadTokens: 1000, cacheWriteTokens: 0, routes: ["stub/echo"] },
   }], "the record comes before the delivery, so the day's budget counts it");
   await waitFor("the note", () => h.noted.length === 1);
   assert.deepEqual(h.noted, [{
-    t: AT, kind: "annotated", pass: "p-000000000001", sessionId, outcome: "ended", sent: [101], text: "Stop met: 171.20 < 172 (ROBINHOOD 10:21:03 ET).",
+    t: AT, kind: "annotated", pass: "p-000000000001", sessionId, outcome: "ended", sent: ["telegram:101"], text: "Stop met: 171.20 < 172 (ROBINHOOD 10:21:03 ET).",
   }]);
   await waitFor("the agent let go", () => agent.disposed === 1);
   await waitFor("the supervision ended", () => h.bus.listeners.size === 0);
@@ -199,7 +214,7 @@ test("every other end answers as a reply with its own line", async () => {
     startTurn(h, sessionId, 1, alertOf(`a-00000000000${n}`));
     await end(sessionId);
     await waitFor(`the ${what} line`, () => h.sent.length === n);
-    assert.deepEqual(h.sent[n - 1], [line, 10 + n], what);
+    assert.deepEqual(h.sent[n - 1], [line, `telegram:${10 + n}`], what);
   }
   await waitFor("four notes", () => h.noted.length === 4);
   assert.deepEqual(h.noted.map((r) => r.outcome), ["failed", "ended", "cancelled", "refused"]);
@@ -209,14 +224,14 @@ test("every other end answers as a reply with its own line", async () => {
 test("a batch post renders the alerts form, and an alert's 0 is a message id", async () => {
   const h = await harness();
   const sessionId = sessionOf(await h.annotator.post({
-    text: "NVDA 171.20 crossed the stop at 172", source: { kind: "alerts", count: 3 }, message: { kind: "alert", alert: "p-00000000000a", symbol: "NVDA,AMD", pass: "p-00000000000a" }, replyTo: 0,
+    text: "NVDA 171.20 crossed the stop at 172", source: { kind: "alerts", count: 3 }, message: { kind: "alert", alert: "p-00000000000a", symbol: "NVDA,AMD", pass: "p-00000000000a" }, replyTo: "telegram:0",
   }));
   assert.equal(h.agents.agents[0].text(0), "[alerts · 3 · 14:03 ET]\nNVDA 171.20 crossed the stop at 172");
   startTurn(h, sessionId, 1, alertOf("p-00000000000a"));
   answer(h, sessionId, 1, "Three plans checked.");
   endTurn(h, sessionId, 1);
   await waitFor("the reply", () => h.sent.length === 1);
-  assert.deepEqual(h.sent, [["Three plans checked.", 0]]);
+  assert.deepEqual(h.sent, [["Three plans checked.", "telegram:0"]]);
   await waitFor("the note", () => h.noted.length === 1);
   assert.equal(h.noted[0].pass, "p-00000000000a");
 });
@@ -267,7 +282,7 @@ test("a second pass posted 15 s later waits only for the first run's delivery", 
   endTurn(h, first, 1);
   await posting;
   assert.deepEqual(second, { opened: true, sessionId: "session-fake-2" }, "it opens once the first is delivered, its dispose still hanging");
-  assert.deepEqual(h.sent, [["first checked", 11]], "the first was delivered before the second opened");
+  assert.deepEqual(h.sent, [["first checked", "telegram:11"]], "the first was delivered before the second opened");
   assert.equal(h.agents.agents[0].disposed, 1, "the first agent's dispose began");
   assert.ok(h.clock.now() - Date.parse(AT) < 90_000, "well inside the first's deadline");
 });
@@ -281,9 +296,9 @@ test("a turn that never starts is cut by the watchdog at the deadline plus the s
   await h.clock.advance(1);
   assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "desk deadline" }]], "the watchdog's cancel at 90 s + 60 s");
   await waitFor("the line", () => h.sent.length === 1);
-  assert.deepEqual(h.sent, [["the desk's check of this alert ended with no text", 11]]);
+  assert.deepEqual(h.sent, [["the desk's check of this alert ended with no text", "telegram:11"]]);
   await waitFor("the note", () => h.noted.length === 1);
-  assert.deepEqual([h.noted[0].sessionId, h.noted[0].outcome, h.noted[0].sent], [sessionId, "timed-out", [101]]);
+  assert.deepEqual([h.noted[0].sessionId, h.noted[0].outcome, h.noted[0].sent], [sessionId, "timed-out", ["telegram:101"]]);
   assert.ok(h.lines.some((l) => l.includes("saw no turn start")), `one line names it; saw ${JSON.stringify(h.lines)}`);
   await waitFor("the agent let go", () => agent.disposed === 1);
   assert.deepEqual(await turnsOf(h), [], "no turn, no desk-turn");

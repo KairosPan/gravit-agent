@@ -63,7 +63,8 @@
  * {@link RULE_PCT_MAX}, each only on its own kind; `forms`, only on a filing rule, a list of 8-K, 8-K/A and 4, all
  * three by default; `cooldown`, the level's grammar, 30m by default, on any kind but gap - a kind's own key left
  * empty on another kind counts as absent, as any empty optional key does; `annotate`, false by default, and true
- * only with a `plan`, one line of at most 300 characters. An id is defined once: a second rule with it is refused
+ * only with a `plan`, one line of at most 300 characters; `urgent`, false by default - true sends the rule's alerts
+ * `urgent`, through the account's quiet hours (src/phone.ts); a level is never urgent. An id is defined once: a second rule with it is refused
  * `<id> is defined twice; the first stands`, or `...; neither entry loads` when the first was refused, as a held
  * symbol is. A filing rule lists no A share -
  * filings are SEC's - but `holdings` or `levels` may hold one, and filings.ts skips it. At most {@link RULES_MAX}.
@@ -192,7 +193,7 @@ export interface SymbolSet {
 }
 
 /** One urgent-event rule, with the file and the place it came from. */
-export type Rule = { file: string; index: number; id: string; symbols: SymbolSet; annotate: boolean; plan?: string } & (
+export type Rule = { file: string; index: number; id: string; symbols: SymbolSet; annotate: boolean; urgent: boolean; plan?: string } & (
   | { kind: "move_pct"; movePct: number; cooldownMs: number }
   | { kind: "gap"; gapPct: number }
   | { kind: "filing"; forms: FilingForm[]; cooldownMs: number }
@@ -205,7 +206,7 @@ const LEVEL_KEYS: ReadonlySet<string> = new Set(["symbol", "kind", "price", "ran
 const LEVEL_KINDS: ReadonlySet<string> = new Set<LevelKind>(["buy_zone", "stop", "target", "watch"]);
 
 /** A rule's keys. */
-const RULE_KEYS: ReadonlySet<string> = new Set(["id", "kind", "symbols", "move_pct", "gap_pct", "forms", "cooldown", "annotate", "plan"]);
+const RULE_KEYS: ReadonlySet<string> = new Set(["id", "kind", "symbols", "move_pct", "gap_pct", "forms", "cooldown", "annotate", "urgent", "plan"]);
 /** The keys only some kinds take, and the keys each kind takes of them. */
 const KIND_ONLY_KEYS = ["move_pct", "gap_pct", "forms", "cooldown"] as const;
 const KIND_KEYS: Readonly<Record<RuleKind, ReadonlySet<string>>> = {
@@ -463,7 +464,7 @@ function judgeRule(raw: unknown, index: number, file: string, seen: Map<string, 
 /** One rule's verdict. `first` is whether the first rule with its id loaded; `undefined` when it is that first
  * rule. */
 function ruleVerdict(raw: unknown, index: number, file: string, first: boolean | undefined): Verdict<Rule> {
-  if (!isRecord(raw)) return { reason: "a rule must be a mapping: id, kind, symbols, move_pct, gap_pct, forms, cooldown, annotate, plan" };
+  if (!isRecord(raw)) return { reason: "a rule must be a mapping: id, kind, symbols, move_pct, gap_pct, forms, cooldown, annotate, urgent, plan" };
   if ("on" in raw) return { reason: 'unknown key "on": a rule names its symbols under symbols:' };
   const unknown = unknownKey(raw, RULE_KEYS);
   if (unknown !== undefined) return { reason: unknown };
@@ -512,6 +513,9 @@ function ruleVerdict(raw: unknown, index: number, file: string, first: boolean |
   const annotate = raw.annotate === undefined || raw.annotate === null ? false : raw.annotate;
   if (typeof annotate !== "boolean") return annotateFault(raw.annotate);
 
+  const urgent = raw.urgent === undefined || raw.urgent === null ? false : raw.urgent;
+  if (typeof urgent !== "boolean") return { reason: `urgent must be true or false (got ${shown(raw.urgent)})` };
+
   let plan = "";
   if (!isBlank(raw.plan)) {
     const line = oneLine("plan", raw.plan, PLAN_MAX_CHARS);
@@ -527,6 +531,7 @@ function ruleVerdict(raw: unknown, index: number, file: string, first: boolean |
       id,
       symbols,
       annotate,
+      urgent,
       ...(plan === "" ? {} : { plan }),
       ...body,
       ...(cooldown === undefined ? {} : { cooldownMs: cooldown }),

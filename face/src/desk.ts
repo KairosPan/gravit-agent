@@ -1804,7 +1804,7 @@ export function installDesk(
         session: wiring.session,
         sessionCtx: wiring.sessionCtx,
         on: wiring.on,
-        deliver: (text) => conversation.deliver(text),
+        deliver: (text, opts) => conversation.deliver(text, opts),
         log,
         /* the schedule's clock reads the same now as the conversation's, unless a test hands it a clock of its own */
         ...(deps.now === undefined ? {} : { now: deps.now }),

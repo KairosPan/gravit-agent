@@ -504,7 +504,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
      * cancel, so each is answered, in order, and reaches the outlet. The stopped turn is recorded as cancelled, with
      * the phone's reason; it said nothing, so the phone hears only the bridge's own "stopped"; levels.yml is unchanged. */
     const sent: string[] = [];
-    conversation.setOutlet({ send: async (text) => { sent.push(text); return { sent: [sent.length] }; } });
+    conversation.setOutlet({ send: async (text) => { sent.push(text); return { sent: [`telegram:${sent.length}`] }; } });
     const turnsBeforeStop = (await deskTurns()).length;
     const asked = (): number => (deskAgent.session.snapshotEvents() as unknown as Ev[]).filter((e) => e.type === "approval/asked").length;
     const post = (text: string) => conversation.post({

@@ -142,7 +142,7 @@ async function phaseOne(base: string): Promise<void> {
 /** The second face: what its boot did with the carry, reported once QUEUED's answer has left. */
 async function phaseTwo(base: string): Promise<void> {
   const sent: string[] = [];
-  const outlet: DeskOutlet = { send: async (text) => { sent.push(text); return { sent: [sent.length] }; } };
+  const outlet: DeskOutlet = { send: async (text) => { sent.push(text); return { sent: [`telegram:${sent.length}`] }; } };
   const d = await bootDesk(base, new Set(), outlet);
   await waitFor("QUEUED's answer", () => sent.includes("echo QUEUED"));
   await new Promise((done) => setTimeout(done, 1_000)); // anything sent twice would land by now

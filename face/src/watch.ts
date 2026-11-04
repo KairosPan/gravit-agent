@@ -61,7 +61,7 @@ import {
 import {
   levelDistancePct, loadHoldings, loadLevels, loadRules, resolveSymbols, type Holding, type Level, type LevelKind, type LoadRefusal, type LoadResult, type Rule,
 } from "./desk-book.ts";
-import type { DeliverResult, DeskConversation, PostResult } from "./desk-conversation.ts";
+import type { DeliverOpts, DeliverResult, DeskConversation, PostResult } from "./desk-conversation.ts";
 import type { DeskClock, DeskTurnRecord } from "./desk-session.ts";
 import { createEdgar, type Edgar, type EdgarFetch, type EdgarResult } from "./edgar.ts";
 import { bjDate, etDate } from "./et.ts";
@@ -129,7 +129,7 @@ export interface WatchDeps {
   quotes?: MarketQuoteSource;
   calendars: DeskCalendars;
   clock: DeskClock;
-  deliver: (text: string, opts?: { replyTo?: number }) => Promise<DeliverResult>;
+  deliver: DeskConversation["deliver"];
   post: DeskConversation["post"];
   budget: () => Promise<BudgetState>;
   edgar?: { fetch: EdgarFetch; userAgent: string };
@@ -210,24 +210,53 @@ export interface WatchStatus {
 }
 
 /** One annotation run's end, as the annotation lane (src/annotator.ts) reports it and `alerts.jsonl` keeps it (spec §16
- * H1): the pass it checked, its session, its turn's outcome, the ids of the messages its reply went out as - none when
- * the reply was held back or queued - and the reply, at most 2,000 characters. */
+ * H1): the pass it checked, its session, its turn's outcome, the ids of the messages its reply went out as
+ * (`<network>:<id>`; an older record's numbers read as `telegram:<n>`) - none when the reply was held back or queued -
+ * and the reply, at most 2,000 characters. */
 export type AnnotatedRecord = {
   t: string;
   kind: "annotated";
   pass: string;
   sessionId: string;
   outcome: DeskTurnRecord["outcome"];
-  sent: number[];
+  sent: string[];
   text: string;
 };
+
+/** A message id as the watch keeps it, `<network>:<the network's own id>`. */
+const MESSAGE_ID_RE = /^[a-z]{1,16}:\S{1,64}$/;
+
+/** `x` as a message id: a `<network>:<id>` string as it is, a number an older record holds as Telegram's -
+ * `telegram:<n>` (spec §8) - and `undefined` for anything else. */
+export function messageIdOf(x: unknown): string | undefined {
+  if (typeof x === "number") return Number.isSafeInteger(x) && x >= 0 ? `telegram:${x}` : undefined;
+  return typeof x === "string" && MESSAGE_ID_RE.test(x) ? x : undefined;
+}
+
+/** A record's `sent` as message ids ({@link messageIdOf}); `undefined` when it is not a list of them. */
+function idsOf(sent: unknown): string[] | undefined {
+  if (!Array.isArray(sent)) return undefined;
+  const ids = sent.map(messageIdOf);
+  return ids.every((id): id is string => id !== undefined) ? ids : undefined;
+}
+
+/** `r` with the message ids it holds as strings: an older record's numbers become `telegram:<n>`. A `sent` that is not
+ * a list of ids is left as it is - {@link WatchHandle.contextFor} reads no id from it. */
+function withStringIds<R extends WatchRecord>(r: R): R {
+  if (r.kind === "annotated") return { ...r, sent: idsOf(r.sent) ?? [] };
+  if (r.kind !== "delivered" && r.kind !== "batch") return r;
+  const delivery = (r as { delivery?: unknown }).delivery;
+  if (typeof delivery !== "object" || delivery === null || !("sent" in delivery)) return r;
+  const ids = idsOf((delivery as { sent: unknown }).sent);
+  return ids === undefined ? r : { ...r, delivery: { ...delivery, sent: ids } };
+}
 
 /** Whether `x` is an {@link AnnotatedRecord}, by the fields the watch reads back. */
 export function isAnnotatedRecord(x: unknown): x is AnnotatedRecord {
   if (typeof x !== "object" || x === null) return false;
   const r = x as Record<string, unknown>;
   return r.kind === "annotated" && typeof r.t === "string" && typeof r.pass === "string" && typeof r.sessionId === "string"
-    && typeof r.outcome === "string" && Array.isArray(r.sent) && r.sent.every((n) => typeof n === "number") && typeof r.text === "string";
+    && typeof r.outcome === "string" && idsOf(r.sent) !== undefined && typeof r.text === "string";
 }
 
 /** A line of `alerts.jsonl` as the watch keeps it: src/watch-eval.ts's four kinds and the lane's `annotated`. */
@@ -246,12 +275,17 @@ export interface WatchHandle {
   status(): WatchStatus;
   stateText(): Promise<string | undefined>;
   noteAnnotated(r: AnnotatedRecord): void;
-  contextFor(messageId: number): string | undefined;
+  contextFor(messageId: string): string | undefined;
   dispose(): Promise<void>;
 }
 
 /** The most a reply's context ({@link WatchHandle.contextFor}) carries, in UTF-16 code units: one Telegram message. */
 const CONTEXT_MAX = 4_000;
+
+/** How the watch's sends go (src/phone.ts): an alert, its batch, a late or lost line and the watch's own lines as
+ * `alert`; an alert of a rule marked `urgent: true` as `urgent`, which quiet hours do not hold. */
+const ALERT: DeliverOpts = { kind: "alert" };
+const URGENT: DeliverOpts = { kind: "urgent" };
 
 /** `text` cut to at most `max` UTF-16 code units, never between the two halves of a surrogate pair. */
 export function cutAt(text: string, max: number): string {
@@ -442,14 +476,14 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     sendChain = sendChain.then(job).catch((err: unknown) => { fail("send", err); });
   };
   /** Send `text` once for `key`: `ever` for a memory that never lapses. */
-  const sayOnce = (key: string, text: string, opts: { ever?: boolean; at: number; replyTo?: number }): void => {
+  const sayOnce = (key: string, text: string, opts: { ever?: boolean; at: number; replyTo?: string }): void => {
     if (opts.ever === true ? saidEver.has(key) : saidOn.has(key)) return;
     if (opts.ever === true) saidEver.add(key);
     else saidOn.set(key, opts.at);
     const replyTo = opts.replyTo;
     onSendChain(async () => {
       if (stopped) return;
-      await deps.deliver(text, replyTo === undefined ? undefined : { replyTo });
+      await deps.deliver(text, replyTo === undefined ? ALERT : { ...ALERT, replyTo });
     });
   };
   const track = (work: Promise<void>): void => {
@@ -816,6 +850,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       t: iso(at), kind: "alert", pass, date: h.date, key: h.key.key, market: h.key.market, symbol: h.key.symbol, label: h.key.label,
       trigger: h.key.trigger, gap: h.gap, quote: snapOf(h.quote), holding: holdingOf(h.key.symbol), plan: h.key.plan, source: h.key.source,
       annotate: h.key.annotate,
+      ...(h.key.urgent ? { urgent: true as const } : {}),
     };
   }
 
@@ -872,7 +907,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         if (stopped) result = { undelivered: "the face shut down" };
         else {
           try {
-            result = await deps.deliver(alertText(rec, clock.now(), note));
+            result = await deps.deliver(alertText(rec, clock.now(), note), rec.urgent === true ? URGENT : ALERT);
           } catch (err) {
             result = { undelivered: `send failed: ${errText(err)}` };
           }
@@ -901,7 +936,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   }
 
   /** The pass's annotation post, on the post chain: its record, and a refused post's line as a reply once per ET date. */
-  function queuePost(pass: string, hits: AlertHit[], replyTo: number | undefined): void {
+  function queuePost(pass: string, hits: AlertHit[], replyTo: string | undefined): void {
     postChain = postChain.then(async () => {
       if (stopped) return;
       const at = clock.now();
@@ -938,7 +973,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         const held = ids.flatMap((id) => { const r = byId.get(id); return r === undefined ? [] : [r]; });
         let delivery: DeliverResult;
         try {
-          delivery = held.length === 0 ? { undelivered: "the held alerts are not in memory" } : await deps.deliver(batchText(held, at));
+          delivery = held.length === 0 ? { undelivered: "the held alerts are not in memory" } : await deps.deliver(batchText(held, at), ALERT);
         } catch (err) {
           delivery = { undelivered: `send failed: ${errText(err)}` };
         }
@@ -1054,6 +1089,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
             t: iso(at), kind: "alert", pass: "", date, key, market: "us", symbol: f.symbol, label: f.form,
             trigger: { type: "filing", rule: rule.id, form: f.form, accession: f.accession, accepted: f.accepted, filingDate: f.filingDate, items: f.items, url: f.url },
             gap: false, quote: null, holding: holdingOf(f.symbol), plan: rule.plan ?? null, source: { file: rule.file, index: rule.index }, annotate: rule.annotate,
+            ...(rule.urgent ? { urgent: true as const } : {}),
           },
         });
       }
@@ -1102,7 +1138,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         if (stopped) result = { undelivered: "the face shut down" };
         else {
           try {
-            result = await deps.deliver(lateAlertText(hit, clock.now()));
+            result = await deps.deliver(lateAlertText(hit, clock.now()), ALERT);
           } catch (err) {
             result = { undelivered: `send failed: ${errText(err)}` };
           }
@@ -1112,7 +1148,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       if (lost.length === 0) return;
       if (!stopped) {
         try {
-          await deps.deliver(lostAlertsLine(lost, clock.now()));
+          await deps.deliver(lostAlertsLine(lost, clock.now()), ALERT);
         } catch (err) {
           fail("lost alerts line", err);
         }
@@ -1125,7 +1161,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     if (!alertsRead) {
       try {
         const { records: read } = await readRecords(home, ALERTS_FILE, isWatchRecord);
-        const merged = [...read.filter((r) => at - Date.parse(r.t) <= MEMORY_MS), ...records];
+        const merged = [...read.filter((r) => at - Date.parse(r.t) <= MEMORY_MS).map(withStringIds), ...records];
         const orphans = findOrphans(merged, at);
         day = rebuildDay(merged, at, new Set(orphans.lost.map((r) => r.id)));
         filingCooldowns(day, merged);
@@ -1418,9 +1454,9 @@ export function installWatch(deps: WatchDeps): WatchHandle {
 
   /* ---------- a reply's context (spec §16 H1b) ---------- */
 
-  /** What a phone reply to `messageId` answers: see {@link WatchHandle.contextFor}. Newest record first, so a
-   * message id Telegram numbered afresh finds the latest send. */
-  function contextFor(messageId: number): string | undefined {
+  /** What a phone reply to `messageId` (`<network>:<id>`) answers: see {@link WatchHandle.contextFor}. Newest record
+   * first, so a message id Telegram numbered afresh finds the latest send. */
+  function contextFor(messageId: string): string | undefined {
     try {
       return contextOf(messageId);
     } catch (err) {
@@ -1431,10 +1467,10 @@ export function installWatch(deps: WatchDeps): WatchHandle {
 
   /** {@link contextFor}'s work. A record the ledger kept in a shape `alertText` cannot read - the rebuild checks only
    * the fields it reads - is skipped, as if the watch had not sent it; the next record that sent the message is tried. */
-  function contextOf(messageId: number): string | undefined {
+  function contextOf(messageId: string): string | undefined {
     const at = clock.now();
     const live = records.filter((r) => at - Date.parse(r.t) <= MEMORY_MS).reverse();
-    const sentIt = (sent: unknown): boolean => Array.isArray(sent) && sent.includes(messageId);
+    const sentIt = (sent: unknown): boolean => Array.isArray(sent) && sent.some((id) => messageIdOf(id) === messageId);
     const hitOf = (id: string): AlertHit | undefined => live.find((r): r is AlertHit => r.kind === "alert" && r.id === id);
     const annotatedOf = (pass: string): AnnotatedRecord | undefined => live.find((r): r is AnnotatedRecord => r.kind === "annotated" && r.pass === pass);
     const noteOf = (a: AnnotatedRecord | undefined): string[] => (a === undefined || a.text === "" ? [] : [`annotation:\n${a.text}`]);

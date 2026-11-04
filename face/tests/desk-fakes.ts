@@ -10,7 +10,7 @@
  * - {@link recordingDeliver}, a `deliver` that records each text;
  * - {@link fakeCalendar}, a market calendar over fixed days.
  * Nothing here touches the disk, the network or a real timer. */
-import type { DeliverResult } from "../src/desk-conversation.ts";
+import type { DeliverOpts, DeliverResult } from "../src/desk-conversation.ts";
 import type { DeskClock, SessionEventsOn, superviseDeskTurns, SuperviseDeskTurnsDeps } from "../src/desk-session.ts";
 import { etDate } from "../src/et.ts";
 import type { DayAnswer, MarketCalendar, MarketSession, MarketWindow } from "../src/market-clock.ts";
@@ -254,18 +254,22 @@ export function fakeSupervise(): FakeSupervise {
 
 /* ---------- delivery ---------- */
 
-/** A `deliver` that records each text and answers `result` - or what `result` makes of the text and its number,
- * counted from 1 - else `{ sent: [<that number>] }`, as an outlet that sent it does. */
+/** A `deliver` that records each text and the opts it went with, and answers `result` - or what `result` makes of the
+ * text and its number, counted from 1 - else `{ sent: ["telegram:<that number>"] }`, as an outlet that sent it does. */
 export function recordingDeliver(result?: DeliverResult | ((text: string, n: number) => DeliverResult)): {
-  deliver(text: string): Promise<DeliverResult>;
+  deliver(text: string, opts?: DeliverOpts): Promise<DeliverResult>;
   readonly texts: string[];
+  readonly opts: (DeliverOpts | undefined)[];
 } {
   const texts: string[] = [];
+  const opts: (DeliverOpts | undefined)[] = [];
   return {
     texts,
-    deliver: async (text) => {
+    opts,
+    deliver: async (text, o) => {
       texts.push(text);
-      if (result === undefined) return { sent: [texts.length] };
+      opts.push(o);
+      if (result === undefined) return { sent: [`telegram:${texts.length}`] };
       return typeof result === "function" ? result(text, texts.length) : result;
     },
   };

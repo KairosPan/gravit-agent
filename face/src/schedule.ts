@@ -54,7 +54,6 @@ import {
   appendEvent, appendRecord, appendRecordOnce, ASLEEP_THRESHOLD_MS, deskDir, FIRINGS_FILE, noteBudgetSpent, readBudget, readEvents, readOffState, readRecords,
   type BudgetState,
 } from "./desk.ts";
-import type { DeliverResult } from "./desk-conversation.ts";
 import { createDeskAgent, type DeskClock, type DeskSessionDeps, type SessionEventsOn } from "./desk-session.ts";
 import { dateOf } from "./et.ts";
 import {
@@ -259,10 +258,11 @@ export function installSchedule(deps: ScheduleDeps): ScheduleHandle {
 
   /** Send a line through `deliver`, which never rejects; one that does is one face line. Whether the line got past
    * the pause: `false` only when `deliver` answered `{ undelivered: "paused" }` - the line held back, so whatever
-   * dedupes it must not count it as phoned (P2 fix wave, I4); any other answer is final. */
+   * dedupes it must not count it as phoned (P2 fix wave, I4); any other answer is final. The standing orders' own
+   * lines go as `report` (src/phone.ts), the row their reports go in. */
   const send = async (text: string): Promise<boolean> => {
     try {
-      const answer = await deps.deliver(text);
+      const answer = await deps.deliver(text, { kind: "report" });
       return !("undelivered" in answer && answer.undelivered === "paused");
     } catch (err) {
       log(`${BIN}: desk: a standing order's line could not be sent: ${errText(err)}`);
@@ -1244,7 +1244,7 @@ export function createDeskSchedule(opts: {
   session: DeskSessionDeps;
   sessionCtx: Partial<FiringRouteCtx>;
   on: SessionEventsOn;
-  deliver: (text: string) => Promise<DeliverResult>;
+  deliver: FiringDeps["deliver"];
   log?: (line: string) => void;
   now?: () => number;
   seams?: { clock?: DeskClock; calendars?: Partial<DeskCalendars> } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;

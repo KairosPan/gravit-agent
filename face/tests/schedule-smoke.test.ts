@@ -571,7 +571,7 @@ test("schedule smoke: a real firing end to end, its deadline, refusals, missed a
     assert.ok(conversation !== undefined, "an enabled desk with a root, a route and the root context has a conversation");
     /** The phone: every text the desk delivered, numbered from 1 as the outlet answers it. */
     const sent: string[] = [];
-    conversation.setOutlet({ send: async (text) => { sent.push(text); return { sent: [sent.length] }; } });
+    conversation.setOutlet({ send: async (text) => { sent.push(text); return { sent: [`telegram:${sent.length}`] }; } });
     const schedule = await desk.schedule;
     assert.ok(schedule !== undefined, "with the conversation, the clock row runs");
     await waitFor("the desk conversation's session, which installDesk does not await", () => conversation.current().sessionId !== undefined);
@@ -669,7 +669,7 @@ test("schedule smoke: a real firing end to end, its deadline, refusals, missed a
     assert.ok(briefAt > end, "the producer's output follows the text");
     assert.match(precloseWake.text.slice(0, briefAt).split("\n").at(-1) ?? "", /^--- producer builtin:brief: ok, /, "under the producer's own marker");
     heard(at.sent, [done("preclose")], "the final text reached the phone");
-    assert.deepEqual(preclose.delivery, { sent: [at.sent + 1] }, "and the finished record keeps what the outlet answered");
+    assert.deepEqual(preclose.delivery, { sent: [`telegram:${at.sent + 1}`] }, "and the finished record keeps what the outlet answered");
     assert.deepEqual([preclose.turn?.sessionId, preclose.turn?.outcome], [precloseId, "ended"], "finished: the woken session's turn ended");
     const precloseTurns = await deskTurns(precloseId);
     assert.equal(precloseTurns.length, 1, "events.jsonl holds the firing's one turn");
@@ -1107,7 +1107,7 @@ test("schedule smoke: a real firing end to end, its deadline, refusals, missed a
     for (const r of delivered) {
       const delivery = r.delivery;
       assert.ok(delivery !== undefined && "sent" in delivery && delivery.sent.length === 1, `${r.key}: the outlet took its text; saw ${JSON.stringify(delivery)}`);
-      assert.equal(sent[delivery.sent[0] - 1], said[r.order], `${r.key}: the recorder's entry ${delivery.sent[0]} is its text`);
+      assert.equal(sent[Number(delivery.sent[0].slice("telegram:".length)) - 1], said[r.order], `${r.key}: the recorder's entry ${delivery.sent[0]} is its text`);
     }
     assert.deepEqual(sent, expected, "every text the desk sent went through the recorder, in order, and nothing else did");
 

@@ -2,7 +2,7 @@
 /** The watch row (src/watch.ts) over fakes: one MarketQuoteSource over two tables, one per market, recording each
  * snapshot's ids and answering from the table the test edits; a WallClock; a fake XNYS calendar (2026-11-30 14:30Z-
  * 21:00Z) and a fake XSHG one (2026-11-30 and 2026-12-01, 01:30Z-07:00Z, by the Beijing date); a deliver recording
- * { text, opts } and resolving { sent: [100 + n] }; a post resolving { opened: true, sessionId: "s" }; fixtures under
+ * { text, opts } and resolving { sent: ["telegram:<100 + n>"] }; a post resolving { opened: true, sessionId: "s" }; fixtures under
  * face/tests/tmp/watch-<pid>/. Offline: the EDGAR fetch is a fake, and no test reaches the Account or SEC. */
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
@@ -83,7 +83,7 @@ interface Harness {
   wall: WallClock;
   watch: WatchHandle;
   source: FakeSource;
-  sent: { text: string; opts?: { replyTo?: number } }[];
+  sent: { text: string; opts: { kind: string; replyTo?: string } }[];
   posts: Parameters<NonNullable<HarnessOpts["post"]>>[0][];
   logs: string[];
   home: string;
@@ -101,7 +101,7 @@ interface HarnessOpts {
   source?: FakeSource;
   wall?: WallClock;
   deliver?: (text: string, n: number) => DeliverResult | Promise<DeliverResult>;
-  post?: (input: { text: string; source: unknown; message: unknown; replyTo?: number }) => PostResult | Promise<PostResult>;
+  post?: (input: { text: string; source: unknown; message: unknown; replyTo?: string }) => PostResult | Promise<PostResult>;
   budget?: BudgetState;
   edgar?: { fetch: EdgarFetch; userAgent: string };
   calendars?: Partial<DeskCalendars>;
@@ -132,9 +132,9 @@ async function harness(o: HarnessOpts): Promise<Harness> {
   const watch = installWatch({
     home, root, quotes: source, calendars, clock: wall,
     deliver: async (text, opts) => {
-      sent.push(opts === undefined ? { text } : { text, opts });
+      sent.push({ text, opts });
       const k = n++;
-      return o.deliver === undefined ? { sent: [100 + k] } : o.deliver(text, k);
+      return o.deliver === undefined ? { sent: [`telegram:${100 + k}`] } : o.deliver(text, k);
     },
     post: async (input) => {
       posts.push(input);
@@ -200,7 +200,7 @@ test("a US crossing is recorded, sent with its feed's stamp and the plan, and on
   assert.ok(text.endsWith("annotation follows"), text);
   await until("the post", () => h.posts.length === 1);
   assert.deepEqual(h.posts[0].source, { kind: "alert", symbol: "NVDA", rule: "stop" });
-  assert.equal(h.posts[0].replyTo, 100);
+  assert.equal(h.posts[0].replyTo, "telegram:100");
   await until("the records", async () => (await h.alertRecords()).some((r) => r.kind === "annotation"));
   const records = await h.alertRecords();
   const alert = records.find((r) => r.kind === "alert");
@@ -424,7 +424,7 @@ test("a 09:30 burst records twelve, sends six, posts one annotation and batches 
   assert.deepEqual(h.sent.map((s) => s.text.split(" ")[0]), names.slice(0, 6), "the six sent in order");
   await until("the post", () => h.posts.length === 1);
   assert.deepEqual(h.posts[0].source, { kind: "alerts", count: 6 });
-  assert.equal(h.posts[0].replyTo, 100);
+  assert.equal(h.posts[0].replyTo, "telegram:100");
   assert.equal(h.watch.status().pending, 6);
   h.wall.set("2026-11-30T14:59:58Z");
   await h.wall.advance(5_000);
@@ -524,7 +524,7 @@ test("an orphan younger than ten minutes is delivered once at the first read, re
   assert.ok(rest[0].startsWith("NVDA 169.5 · ROBINHOOD"), rest[0]);
   assert.ok(!h.sent[0].text.includes("annotation follows"));
   const [d] = await deliveredOf(h, "a-young");
-  assert.deepEqual([d.delivery, d.latency, d.replayed], [{ sent: [100] }, { tradeMs: null, receivedMs: null }, true]);
+  assert.deepEqual([d.delivery, d.latency, d.replayed], [{ sent: ["telegram:100"] }, { tradeMs: null, receivedMs: null }, true]);
   await h.wall.advance(20_000);
   await until("the second poll", () => h.source.calls.length === 2);
   await h.wall.advance(0);
@@ -537,7 +537,7 @@ test("an orphan younger than ten minutes is delivered once at the first read, re
 test("noteAnnotated appends the lane's annotated record to alerts.jsonl, and a later read takes it back with the rest", async () => {
   const note = {
     t: "2026-11-30T15:20:50.000Z", kind: "annotated" as const, pass: "p-000000000001", sessionId: "session-annotation-1",
-    outcome: "ended" as const, sent: [101], text: "Stop met: 169.50 < 170 (ROBINHOOD 10:16:45 ET).",
+    outcome: "ended" as const, sent: ["telegram:101"], text: "Stop met: 169.50 < 170 (ROBINHOOD 10:16:45 ET).",
   };
   const h = await overLedger([orphan("a-old", "2026-11-30T14:50:45.000Z")]);
   await h.wall.advance(0);
@@ -548,7 +548,8 @@ test("noteAnnotated appends the lane's annotated record to alerts.jsonl, and a l
   assert.deepEqual(h.watch.status().recent.map((r) => r.id), ["a-old"], "the alerts the status lists are unchanged");
   await h.watch.dispose();
   assert.equal(isAnnotatedRecord(note), true);
-  assert.equal(isAnnotatedRecord({ ...note, sent: ["101"] }), false, "a message id is a number");
+  assert.equal(isAnnotatedRecord({ ...note, sent: [101] }), true, "an older record's number");
+  assert.equal(isAnnotatedRecord({ ...note, sent: ["101"] }), false, "a message id names its network");
 
   /* the next face reads the ledger with the annotated line in it: no ledger error, and nothing replayed again */
   const again = await harness({ start: "2026-11-30T15:21:00Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") }, home: h.home });
@@ -589,10 +590,10 @@ test("a reply to an alert's message carries that alert's text", async () => {
   ]);
   await read(h);
   const now = h.wall.now();
-  assert.equal(h.watch.contextFor(555), `${alertText(hit as unknown as AlertHit, now, "none")}\n\nannotation:\nStop met: 169.50 < 170.`,
+  assert.equal(h.watch.contextFor("telegram:555"), `${alertText(hit as unknown as AlertHit, now, "none")}\n\nannotation:\nStop met: 169.50 < 170.`,
     "the alert, as sent with no note, and its pass's annotation");
   const unannotated = alertText({ ...plain, pass: "p-000000000002" } as unknown as AlertHit, now, "none");
-  assert.equal(h.watch.contextFor(557), unannotated, "any part of the send, and no annotation when none names its pass");
+  assert.equal(h.watch.contextFor("telegram:557"), unannotated, "any part of the send, and no annotation when none names its pass");
   assert.ok(!unannotated.includes("annotation follows"));
   await h.watch.dispose();
 });
@@ -609,10 +610,10 @@ test("a reply to an annotation's message carries its alerts and the annotation",
   await read(h);
   const now = h.wall.now();
   const expected = [one, two].map((a) => alertText(a as unknown as AlertHit, now, "none")).join("\n\n") + "\n\nannotation:\nBoth met.";
-  assert.equal(h.watch.contextFor(560), expected);
-  assert.equal(h.watch.contextFor(561), expected, "any part of the reply");
-  h.watch.noteAnnotated({ t: "2026-11-30T15:20:46.000Z", kind: "annotated", pass: PASS, sessionId: "s2", outcome: "ended", sent: [600], text: "x".repeat(5_000) });
-  const long = h.watch.contextFor(600);
+  assert.equal(h.watch.contextFor("telegram:560"), expected);
+  assert.equal(h.watch.contextFor("telegram:561"), expected, "any part of the reply");
+  h.watch.noteAnnotated({ t: "2026-11-30T15:20:46.000Z", kind: "annotated", pass: PASS, sessionId: "s2", outcome: "ended", sent: ["telegram:600"], text: "x".repeat(5_000) });
+  const long = h.watch.contextFor("telegram:600");
   assert.equal(long?.length, 4_000, "cut at 4,000 characters");
   assert.ok(long?.startsWith(expected.slice(0, expected.indexOf("annotation:"))), long?.slice(0, 80));
   await h.watch.dispose();
@@ -625,9 +626,9 @@ test("a reply to a message the watch does not know carries nothing", async () =>
     orphan("a-1", "2026-11-30T15:16:45.000Z"), deliveredLine("a-1", "2026-11-30T15:16:46.000Z", [555]),
   ]);
   await read(h);
-  assert.equal(h.watch.contextFor(999), undefined, "no record sent it");
-  assert.equal(h.watch.contextFor(400), undefined, "past the 48 hours the watch keeps");
-  assert.ok(h.watch.contextFor(555) !== undefined);
+  assert.equal(h.watch.contextFor("telegram:999"), undefined, "no record sent it");
+  assert.equal(h.watch.contextFor("telegram:400"), undefined, "past the 48 hours the watch keeps");
+  assert.ok(h.watch.contextFor("telegram:555") !== undefined);
   await h.watch.dispose();
 });
 
@@ -647,9 +648,51 @@ test("a malformed ledger line costs only its own context: the reply resolves fro
   await read(h);
   const now = h.wall.now();
   const goodText = alertText(good as unknown as AlertHit, now, "none");
-  assert.equal(h.watch.contextFor(555), `${goodText}\n\nannotation:\nOne met.`, "the good alert's send");
-  assert.equal(h.watch.contextFor(556), undefined, "the bad alert's own send carries nothing, and does not throw");
-  assert.equal(h.watch.contextFor(560), `${goodText}\n\nannotation:\nOne met.`, "the annotation names the good alert alone");
+  assert.equal(h.watch.contextFor("telegram:555"), `${goodText}\n\nannotation:\nOne met.`, "the good alert's send");
+  assert.equal(h.watch.contextFor("telegram:556"), undefined, "the bad alert's own send carries nothing, and does not throw");
+  assert.equal(h.watch.contextFor("telegram:560"), `${goodText}\n\nannotation:\nOne met.`, "the annotation names the good alert alone");
+  await h.watch.dispose();
+});
+
+test("contextFor reads a string id, and an older record's number as telegram:<n>", async () => {
+  const older = orphan("a-1", "2026-11-30T15:16:45.000Z");
+  const newer = { ...orphan("a-2", "2026-11-30T15:17:45.000Z"), pass: "p-000000000002", symbol: "AMD" };
+  const h = await overLedger([
+    older, deliveredLine("a-1", "2026-11-30T15:16:46.000Z", [41]),
+    newer, { t: "2026-11-30T15:17:46.000Z", kind: "delivered", id: "a-2", delivery: { sent: ["telegram:42"] }, latency: { tradeMs: 2_000, receivedMs: 1_000 } },
+  ]);
+  await read(h);
+  const now = h.wall.now();
+  assert.equal(h.watch.contextFor("telegram:41"), alertText(older as unknown as AlertHit, now, "none"), "an older record's number");
+  assert.equal(h.watch.contextFor("telegram:42"), alertText(newer as unknown as AlertHit, now, "none"), "a string id");
+  assert.equal(h.watch.contextFor("slack:41"), undefined, "an id names its network");
+  assert.equal(h.watch.contextFor("41"), undefined, "a bare number is no id");
+  await h.watch.dispose();
+});
+
+test("a rule marked urgent sends urgent; a level and an unmarked rule send alert", async () => {
+  const h = await harness({
+    start: "2026-11-30T15:20:45Z",
+    files: {
+      "desk/levels.yml": level("NVDA", "stop", 170, "cross_down"),
+      "desk/rules.yml": "- id: amd-move\n  kind: move_pct\n  symbols: [AMD]\n  move_pct: 4\n  urgent: true\n- id: intc-move\n  kind: move_pct\n  symbols: [INTC]\n  move_pct: 4\n",
+    },
+  });
+  h.source.tables.us.set("NVDA", us(171, "2026-11-30T15:20:44Z", 172));
+  h.source.tables.us.set("AMD", us(100, "2026-11-30T15:20:44Z", 100));
+  h.source.tables.us.set("INTC", us(20, "2026-11-30T15:20:44Z", 20));
+  await h.wall.advance(0);
+  await until("the first poll", () => h.source.calls.length === 1);
+  h.source.tables.us.set("NVDA", us(169, "2026-11-30T15:21:03Z", 172));
+  h.source.tables.us.set("AMD", us(90, "2026-11-30T15:21:03Z", 100));
+  h.source.tables.us.set("INTC", us(18, "2026-11-30T15:21:03Z", 20));
+  await h.wall.advance(20_000);
+  await until("three alerts", () => h.sent.length === 3);
+  const kindOf = (symbol: string): string | undefined => h.sent.find((x) => x.text.startsWith(`${symbol} `))?.opts.kind;
+  assert.deepEqual([kindOf("NVDA"), kindOf("AMD"), kindOf("INTC")], ["alert", "urgent", "alert"]);
+  await until("three alert records", async () => (await h.alertRecords()).filter((r) => r.kind === "alert").length === 3);
+  const alerts = (await h.alertRecords()).filter((r) => r.kind === "alert");
+  assert.deepEqual(alerts.map((r) => [r.symbol, r.urgent]).sort(), [["AMD", true], ["INTC", undefined], ["NVDA", undefined]]);
   await h.watch.dispose();
 });
 
@@ -887,7 +930,7 @@ test("a refused annotation post sends its line once a day as a reply", async () 
   h.source.tables.us.set("NVDA", us(169, "2026-11-30T15:21:00Z"));
   await h.wall.advance(20_000);
   await until("the line", () => h.sent.length === 2);
-  assert.deepEqual(h.sent[1], { text: line, opts: { replyTo: 100 } });
+  assert.deepEqual(h.sent[1], { text: line, opts: { kind: "alert", replyTo: "telegram:100" } });
   h.source.tables.us.set("AMD", us(99, "2026-11-30T15:21:20Z"));
   await h.wall.advance(20_000);
   await until("the second post", () => h.posts.length === 2);
@@ -1143,13 +1186,13 @@ test("no deliver goes out once dispose has begun", async () => {
   const names = ["D0", "D1"];
   const h = await harness({
     start: "2026-11-30T15:00:00Z", files: { "desk/levels.yml": names.map((x) => level(x, "stop", 100, "cross_down")).join("") },
-    deliver: (_text, n) => (n === 0 ? new Promise<DeliverResult>((done) => { release = done; }) : { sent: [100 + n] }),
+    deliver: (_text, n) => (n === 0 ? new Promise<DeliverResult>((done) => { release = done; }) : { sent: [`telegram:${100 + n}`] }),
   });
   for (const x of names) h.source.tables.us.set(x, us(90, "2026-11-30T14:59:59Z"));
   await h.wall.advance(0);
   await until("the first send", () => h.sent.length === 1);
   const disposed = h.watch.dispose();
-  release({ sent: [100] });
+  release({ sent: ["telegram:100"] });
   await disposed;
   await new Promise((done) => setTimeout(done, 50));
   assert.equal(h.sent.length, 1, "the second alert is not delivered after dispose began");
@@ -1158,7 +1201,7 @@ test("no deliver goes out once dispose has begun", async () => {
   const records = await h.alertRecords();
   const ids = Object.fromEntries(records.filter((r) => r.kind === "alert").map((r) => [r.symbol, r.id]));
   const deliveredOf = (id: unknown): unknown => records.find((r) => r.kind === "delivered" && r.id === id)?.delivery;
-  assert.deepEqual(deliveredOf(ids.D0), { sent: [100] });
+  assert.deepEqual(deliveredOf(ids.D0), { sent: ["telegram:100"] });
   assert.deepEqual(deliveredOf(ids.D1), { undelivered: "the face shut down" });
   assert.deepEqual(h.watch.status().recent.map((r) => [r.symbol, r.outcome]).sort(), [["D0", "sent"], ["D1", "undelivered"]]);
 });

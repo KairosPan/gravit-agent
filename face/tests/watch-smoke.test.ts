@@ -248,7 +248,7 @@ interface Row { price: number; prevClose: number; asOf: string; phase?: "trading
 interface Ev { type: string; data?: Record<string, unknown> }
 type DeskTurnEvent = Extract<DeskEvent, { kind: "desk-turn" }>;
 /** One phone text: what the outlet was sent, and the message it replies to. */
-interface PhoneText { text: string; replyTo?: number }
+interface PhoneText { text: string; replyTo?: string }
 
 test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a cut and a failed annotation, the phone's state, a filing, the canary's annotation half", {
   skip: gated && "set FACE_SMOKE=1", timeout: 240_000,
@@ -427,8 +427,8 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     const phone: PhoneText[] = [];
     conversation.setOutlet({
       send: async (text, opts) => {
-        phone.push({ text, ...(opts?.replyTo === undefined ? {} : { replyTo: opts.replyTo }) });
-        return { sent: [phone.length] };
+        phone.push({ text, ...(opts.replyTo === undefined ? {} : { replyTo: opts.replyTo }) });
+        return { sent: [`telegram:${phone.length}`] };
       },
     });
     const schedule = await desk.schedule;
@@ -516,7 +516,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     assert.deepEqual([nvda.symbol, nvda.label, nvda.gap, nvda.decision, nvda.market], ["NVDA", "stop", true, "send", "us"],
       "one alert: NVDA's stop, already crossed at the session's first judged print - a gap - sent");
     const nvdaDelivered = (await alerts()).filter((r): r is AlertDelivered => r.kind === "delivered");
-    assert.deepEqual(nvdaDelivered.map((d) => [d.id, d.delivery]), [[nvda.id, { sent: [1] }]], "and one delivered record, the outlet's answer");
+    assert.deepEqual(nvdaDelivered.map((d) => [d.id, d.delivery]), [[nvda.id, { sent: ["telegram:1"] }]], "and one delivered record, the outlet's answer");
     assert.equal(nvdaDelivered[0].latency.tradeMs, 4_000, "its latency from the trade: 09:30:01 to the send at 09:30:05");
     await phoneAt(2);
     const nvdaText = phone[0].text;
@@ -524,7 +524,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     assert.ok(nvdaText.split("\n").includes(`plan: ${NVDA_PLAN}`), "it quotes the plan verbatim");
     assert.ok(nvdaText.split("\n").includes("held 100 @ 120.50 · day P&L -650.00"), `the holding with the day's P&L; saw ${JSON.stringify(nvdaText)}`);
     assert.ok(nvdaText.endsWith("\nannotation follows"), "and ends saying the annotation follows");
-    heard([{ text: nvdaText }, { text: "NVDA: annotated", replyTo: 1 }], "the alert, then its annotation as a reply under it");
+    heard([{ text: nvdaText }, { text: "NVDA: annotated", replyTo: "telegram:1" }], "the alert, then its annotation as a reply under it");
     assert.ok(answered.includes("[alert · NVDA · stop]"), `the stub answered the post's provenance line; saw ${JSON.stringify(answered)}`);
     let turns = await deskTurns();
     await waitFor("the annotation's desk-turn", async () => { turns = await deskTurns(); return turns.length >= 1; });
@@ -536,7 +536,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
       [[nvda.id], "opened"], "the annotation record: the alert it covers, opened");
     await waitFor("the annotated record", async () => (await annotated()).length === 1);
     const [noted] = await annotated();
-    assert.deepEqual([noted.pass, noted.sessionId, noted.outcome, noted.sent, noted.text], [nvda.pass, nvdaSession, "ended", [2], "NVDA: annotated"],
+    assert.deepEqual([noted.pass, noted.sessionId, noted.outcome, noted.sent, noted.text], [nvda.pass, nvdaSession, "ended", ["telegram:2"], "NVDA: annotated"],
       "the lane's annotated record: the pass, its session, the outcome, the message its reply went out as, the reply");
     assert.equal(requests.get(deskId)?.length ?? 0, 0, "the desk conversation's session reached the model for none of it");
 
@@ -595,7 +595,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     heard([{ text: "1 more alert suppressed: B6 watch 09:40 ET" }], "the next ET hour's tick sends the batch line");
     await waitFor("the batch record", async () => (await alerts()).some((r) => r.kind === "batch"));
     const batch = (await alerts()).find((r) => r.kind === "batch");
-    assert.deepEqual(batch?.kind === "batch" ? [batch.alerts, batch.delivery] : undefined, [[capped[5].id], { sent: [expected.length] }],
+    assert.deepEqual(batch?.kind === "batch" ? [batch.alerts, batch.delivery] : undefined, [[capped[5].id], { sent: [`telegram:${expected.length}`] }],
       "the batch record lists the held alert and the outlet's answer");
     assert.equal(rewatch.status().pending, 0, "and nothing is held");
 
@@ -612,7 +612,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     assert.deepEqual([moutai.symbol, moutai.market, moutai.label, moutai.gap, moutai.decision, moutai.date], ["600519", "cn", "stop", true, "send", "2026-12-01"],
       "600519 under its stop at its session's first judged print: a gap alert, sent, on the Beijing date");
     await phoneAt(expected.length + 2);
-    const moutaiAt = expected.length + 1;
+    const moutaiAt = `telegram:${expected.length + 1}`;
     const moutaiText = phone[expected.length].text;
     assert.ok(moutaiText.startsWith("600519 1390 · TENCENT 09:30:02 Beijing\n"), `stamped with its feed and Beijing's clock; saw ${JSON.stringify(moutaiText)}`);
     assert.ok(moutaiText.split("\n").includes(`plan: ${MOUTAI_PLAN}`), "it quotes the plan");
@@ -634,7 +634,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     await tickAt("2026-12-01T05:00:05Z");
     const slow = (await hitsSettled(9))[8];
     assert.deepEqual([slow.symbol, slow.label, slow.decision], [SLOW, "watch", "send"], "the first A share's watch level fires");
-    const slowAt = expected.length + 1;
+    const slowAt = `telegram:${expected.length + 1}`;
     await waitFor("the slow annotation to wait in the long tool", () => bars.length > barsAt);
     await phoneAt(expected.length + 2);
     assert.ok(phone[expected.length].text.startsWith(`${SLOW} 10.5 · TENCENT 13:00:02 Beijing\n`), `its alert; saw ${JSON.stringify(phone[expected.length].text)}`);
@@ -647,7 +647,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     await tickAt("2026-12-01T05:00:20Z");
     const crsh = (await hitsSettled(10))[9];
     assert.deepEqual([crsh.symbol, crsh.decision], [CRSH, "send"], "the second A share's watch level fires");
-    const crshAt = expected.length + 1;
+    const crshAt = `telegram:${expected.length + 1}`;
     await phoneAt(expected.length + 2);
     assert.ok(phone[expected.length].text.startsWith(`${CRSH} 10.5 · TENCENT 13:00:15 Beijing\n`), "its alert text comes first");
     const failedReply = phone[expected.length + 1];
@@ -747,7 +747,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     await tickAt("2026-12-01T14:30:05Z");
     const cnry = (await hitsSettled(12))[11];
     assert.deepEqual([cnry.symbol, cnry.decision, cnry.date], ["CNRY", "send", "2026-12-01"], "CNRY's watch level fires at the next session's open");
-    const cnryAt = expected.length + 1;
+    const cnryAt = `telegram:${expected.length + 1}`;
     await phoneAt(expected.length + 2);
     assert.ok(phone[expected.length].text.startsWith("CNRY 51 · ROBINHOOD 09:30:02 ET\n"), "its alert");
     heard([phone[expected.length], { text: CANARY_DONE, replyTo: cnryAt }], "CANARY-DONE came as a reply under CNRY's alert");
@@ -773,7 +773,7 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     const byId = new Map(all.filter((r): r is AlertHit => r.kind === "alert").map((r) => [r.id, r]));
     for (const d of all.filter((r): r is AlertDelivered => r.kind === "delivered")) {
       assert.ok("sent" in d.delivery && d.delivery.sent.length === 1, `${d.id}: the outlet took it`);
-      const sent = "sent" in d.delivery ? d.delivery.sent[0] : 0;
+      const sent = "sent" in d.delivery ? Number(d.delivery.sent[0].slice("telegram:".length)) : 0;
       assert.ok(phone[sent - 1]?.text.startsWith(`${byId.get(d.id)?.symbol} `), `${d.id}: the recorder's entry ${sent} is its alert`);
     }
     assert.deepEqual(faceLog.filter((line) => / desk: watch /.test(line)), [], `no watch step failed; saw ${JSON.stringify(faceLog)}`);

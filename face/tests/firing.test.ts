@@ -349,7 +349,7 @@ test("checkFiring fails closed on a pause it cannot read and open on a budget it
 
 test("a firing runs its builtin, wakes a fresh desk agent in its cwd, supervises it with its own deadline, and delivers the final text", async () => {
   const fx = await fixture();
-  const r = rig(fx, { deliver: { sent: [11] } });
+  const r = rig(fx, { deliver: { sent: ["telegram:11"] } });
   const running = runFiring(r.deps, ITEM, verifiedFor(fx), signal());
   await waitFor("the wake", woken(r));
 
@@ -390,7 +390,7 @@ test("a firing runs its builtin, wakes a fresh desk agent in its cwd, supervises
     producer: { spec: "builtin:brief", ok: true },
     turn: { sessionId: "session-fake-1", outcome: "ended", deadlineMs: 600_000, wallMs: 355_000, usage: RECORDED },
     files: [{ path: "briefs/2026-11-27-preclose.md", change: "added" }],
-    delivery: { sent: [11] },
+    delivery: { sent: ["telegram:11"] },
     chars: 10,
   };
   assert.deepEqual(finished, expected);
@@ -411,6 +411,28 @@ test("a firing runs its builtin, wakes a fresh desk agent in its cwd, supervises
   assert.deepEqual(r.lines, []);
 });
 
+test("the pre-close brief is sent as brief, a strategy's report as report", async () => {
+  const kinds: [string, unknown][] = [];
+  const ran = async (item: FiringItem): Promise<void> => {
+    const fx = await fixture();
+    const r = rig(fx, {
+      over: {
+        builtins: { brief: async () => ({ ok: true, text: "BRIEF" }), report: async () => ({ ok: true, text: "REPORT" }) },
+        deliver: async (text, opts) => { kinds.push([text, opts]); return { sent: ["telegram:1"] }; },
+      },
+    });
+    const running = runFiring(r.deps, item, verifiedFor(fx), signal());
+    await waitFor("the wake", woken(r));
+    r.clock.set("2026-11-27T17:36:00Z");
+    r.sup.calls[0].onTurnEnd(turnEnd({ outcome: "ended", finalText: `${item.order.id} text` }));
+    await running;
+  };
+  await ran(ITEM);
+  await ran(itemWith({ id: "nvda", producer: { kind: "builtin", name: "report" } }));
+  await ran(itemWith({ id: "plain", producer: undefined }));
+  assert.deepEqual(kinds, [["preclose text", { kind: "brief" }], ["nvda text", { kind: "report" }], ["plain text", { kind: "report" }]]);
+});
+
 test("a firing that finishes after its market moment is held back with one line", async () => { // Review Focus 1
   /* close-30m on the 2026-11-27 early close: woken at 17:30:04Z, the Mac sleeps 40 minutes, the turn ends at 18:10:04Z */
   {
@@ -424,7 +446,7 @@ test("a firing that finishes after its market moment is held back with one line"
     assert.deepEqual(r.out.texts, ["preclose finished after the close; not sent - it describes a market that has moved"]);
     assert.equal(finished?.withheld, "after the close");
     assert.equal(finished?.chars, 10);
-    assert.deepEqual(finished?.delivery, { sent: [1] }, "the line's delivery");
+    assert.deepEqual(finished?.delivery, { sent: ["telegram:1"] }, "the line's delivery");
     assert.equal(outcomeOf(finished as FinishedRecord), "withheld (after the close)");
     assert.equal(r.clock.pending(), 0, "the watchdog the sleep left overdue is cleared, never fired");
     assert.deepEqual(r.agents.agents[0].cancels, []);
@@ -604,7 +626,7 @@ test("wake: false runs only the producer: no session, nothing sent on success, o
     assert.deepEqual(r.agents.created, []);
     assert.deepEqual(r.out.texts, ["nightly · 2026-11-27 producer builtin:brief failed (quotes unavailable: busy); nothing was woken"]);
     assert.deepEqual(finished?.producer, { spec: "builtin:brief", ok: false, error: "quotes unavailable: busy" });
-    assert.deepEqual(finished?.delivery, { sent: [1] });
+    assert.deepEqual(finished?.delivery, { sent: ["telegram:1"] });
     assert.equal(finished?.turn, undefined);
     assert.equal(outcomeOf(finished as FinishedRecord), "producer failed");
     assert.deepEqual(await deskEvents(fx.home), [], "no turn, no desk-turn");
@@ -801,8 +823,8 @@ test("OFF set during the turn holds the text back and records why", async () => 
     clock: r0.clock,
     log: (line) => { r0.lines.push(line); },
   });
-  conversation.setOutlet({ send: async (text) => { sent.push(text); return { sent: [1] }; } });
-  const r = { ...r0, deps: { ...r0.deps, deliver: (text: string) => conversation.deliver(text) } };
+  conversation.setOutlet({ send: async (text) => { sent.push(text); return { sent: ["telegram:1"] }; } });
+  const r = { ...r0, deps: { ...r0.deps, deliver: (text: string) => conversation.deliver(text, { kind: "brief" }) } };
   const running = runFiring(r.deps, ITEM, verifiedFor(fx), signal());
   await waitFor("the wake", woken(r));
   await writeOff(fx.home, { by: "telegram" }, () => r.clock.now());
@@ -972,7 +994,7 @@ test("an aborted firing stops recording and delivering", async () => {
         deliver: (text) => {
           texts.push(text);
           return new Promise<DeliverResult>((done) => {
-            unblock = () => { done({ sent: [1] }); };
+            unblock = () => { done({ sent: ["telegram:1"] }); };
           });
         },
       },
@@ -1002,7 +1024,7 @@ test("an aborted firing stops recording and delivering", async () => {
         deliver: async (text) => {
           texts.push(text);
           setImmediate(() => { controller.abort(); }); // after this delivery's answer, while finished goes to the ledger
-          return { sent: [texts.length] };
+          return { sent: [`telegram:${texts.length}`] };
         },
       },
     });
@@ -1025,8 +1047,8 @@ test("an aborted firing stops recording and delivering", async () => {
       over: {
         deliver: (text) => {
           texts.push(text);
-          if (texts.length === 1) return Promise.resolve({ sent: [1] });
-          return new Promise<DeliverResult>((done) => { unblock = () => { done({ sent: [2] }); }; });
+          if (texts.length === 1) return Promise.resolve({ sent: ["telegram:1"] });
+          return new Promise<DeliverResult>((done) => { unblock = () => { done({ sent: ["telegram:2"] }); }; });
         },
       },
     });
@@ -1110,7 +1132,7 @@ test("a firing counts every turn it outlives - after the watchdog, an abort or i
           texts.push(text);
           r.sup.calls[0].onTurnEnd(turnEnd({ turn: 2, source: "user", finalText: "a browser answer", wallMs: 2_000 }));
           r.sup.calls[0].onTurnEnd(turnEnd({ turn: 3, source: "user", outcome: "refused", violation: "desk/journal/.git" }));
-          return { sent: [1] };
+          return { sent: ["telegram:1"] };
         },
       },
     });
@@ -1281,13 +1303,13 @@ test("firingKey, isFiringRecord and outcomeOf", () => {
     [turn("failed"), "failed"],
     [turn("error"), "failed"],
     [turn("cancelled"), "cancelled"],
-    [{ ...turn("ended"), withheld: "after the open", delivery: { sent: [3] } }, "withheld (after the open)"],
-    [{ ...turn("ended"), delivery: { sent: [3] } }, "delivered"],
-    [{ ...turn("ended"), delivery: { sent: [3], queued: true } }, "queued"],
+    [{ ...turn("ended"), withheld: "after the open", delivery: { sent: ["telegram:3"] } }, "withheld (after the open)"],
+    [{ ...turn("ended"), delivery: { sent: ["telegram:3"] } }, "delivered"],
+    [{ ...turn("ended"), delivery: { sent: ["telegram:3"], queued: true } }, "queued"],
     [{ ...turn("ended"), delivery: { queued: true } }, "queued"],
     [{ ...turn("ended"), delivery: { undelivered: "telegram not configured" } }, "undelivered (telegram not configured)"],
     [{ ...base, producer: { spec: "builtin:brief", ok: true } }, "producer ran"],
-    [{ ...base, producer: { spec: "builtin:brief", ok: false, error: "x" }, delivery: { sent: [1] } }, "producer failed"],
+    [{ ...base, producer: { spec: "builtin:brief", ok: false, error: "x" }, delivery: { sent: ["telegram:1"] } }, "producer failed"],
     [{ t, kind: "refused", key: KEY, order: "preclose", date: "2026-11-27", reason: "hash", detail: "missing", reported: true }, "refused (hash)"],
     [{ t, kind: "missed", key: KEY, order: "preclose", date: "2026-11-27", anchor: "2026-11-27T17:30:00.000Z", why: "down", foundAt: t }, "missed"],
     [{ t, kind: "interrupted", key: KEY, order: "preclose", date: "2026-11-27", startedAt: t }, "interrupted"],
