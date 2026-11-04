@@ -337,11 +337,21 @@ All three of its stages are built:
   transcript (a live session followed with its pulses, a cold one paged and never activated),
   the composer (a prompt; a `/` line to `commands/execute`; an `@` in a channel through the
   room engine), New message (a title, Where — a channel, or `New channel…` — and the first
-  words), Details (the title with Change words, Fork, Archive or Un-archive, Delete; Created,
+  words), Details (the title with Change words, Fork, Pin or Unpin, Archive or Un-archive, Delete; Created,
   Where, Agent, Members, Children with Stop, Usage, Stop Gravit), the three gate
   cards (the order card, an approval, a question) answered through the mux, the one status
   line under the composer (not signed in, reconnecting, a host error, a command's word), and
   Settings (Cream · Black · System);
+- **the list's search and pins** (the dsh UI port's plan 2): a box under the list's head, `Search
+  conversations`, focused by Option-Command-K (Ctrl+Alt+K off a Mac; from another screen it goes to
+  Messages first). Titles and channel names match at once; the words inside conversations come from
+  the face's index (`GET /data/search`, "Search and files" below) a quarter-second after the typing stops. The
+  results replace the groups: title, time, the channel and a snippet with the match marked, at most
+  twenty (`Showing the first 20. Narrow your search.`), an archived one dim with its chip. Escape in
+  the box clears it, and again leaves it; both wait out an IME composition. A pin key on each row
+  (and Pin or Unpin in Details) puts the conversation first in its group; the pinned set is the
+  host's, so every tab and window of the face shows the same one at once. An archived conversation
+  is never pinned (archiving unpins it);
 - **host-fed since stage 2**: Markets (`#/markets`) — the Account's markets by its tabs, the
   stars, a search, and a market's page with its candles and venues — and Account
   (`#/account/portfolio`, `venues`, `agents`, `cards`) — the Account's Portfolio, Venues, Agents
@@ -4426,6 +4436,15 @@ headers. With the face live:
    provider, model and effort, the host facts of `/data/host.json` and the three keys. The old
    page's other steps — the subagent dock's **续派** and **父会话消息** (Details' Children keeps
    only Stop), the folder picker, a channel rename — are not on the gravit-ui client.
+8. **Search and pin** (needs two browser windows on the same host:port, a Chinese word in some
+   conversation's text, and the face's search index warm — one search, then retry). In window A, type
+   that word in the list's box. PASS, part eight: after about a quarter-second a result appears with
+   the word marked in its snippet, its channel in bold, and title matches showed at once, before
+   any snippet; Escape pressed while a pinyin composition is open dismisses its candidates and
+   leaves the query. Outside a composition, Escape once clears the box, twice leaves it; Option-Command-K (Ctrl+Alt+K) from Markets returns to
+   Messages with the box focused. Hover a row and press its pin key: PASS, part nine: the row jumps
+   to the top of its group with a filled pin by its title, and window B shows the same row first
+   without a reload; Unpin in B (Details › Unpin) and A follows; archiving a pinned row unpins it.
 
 The approval endings — `Approved`, `Declined`, a second tab's `Closed`, a lost race's
 `Settled elsewhere` (or, caught in flight, `answer: gate-gone` on the status line) — belong

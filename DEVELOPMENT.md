@@ -2415,9 +2415,10 @@ sentence drawn as its words, the Account's and a channel's stale stamps, a tool 
 | `js/data/empty.js` | `emptyState()`: the state the page boots into — no conversations, `status.line = "connecting…"`, every slice at its empty shape (§5.5), the `seat` slice among them (`{status, data, at}`), `runSheet: null` and `moduleRuns: {}`, and no demo slice: no `plugins`, `memory`, `mail`, `banner`, `call` or `compose` |
 | `js/host/kinds.js` | the kind table (spec §6, §5.3): a mapper view → zero, one or two messages; `SEAT_TOOLS` (the seat's twelve writes), `isSeatWriteTool`, `parseArgs`, `seatLine` (a seat write in words), `seatLift` (a seat write's answer as a receipt, a refusal or nothing), `PRESENT_TOOL` and `presentLift` (an ok `lunhui_present` as a `composed` message, §5.2), `rememberCall`, `toMessages`, `reasonArgs` |
 | `js/host/sessions.js` | `session/list` rows → conversation records: `kindOf`, `conversationOf`, `listConversations`, `unreadOf`; `childRowsOf` (the subagent rows the list leaves out, kept for their parent's Children) and `firstOpen` (the conversation every default opens, never an archived one) |
-| `js/host/live.js` | the impure half: the mux, the follow-or-page policy, the list and its previews, gates, projections, host facts — all into the store, nothing into the DOM |
-| `js/host/actions.js` | a `data-action` → the Remote or face route the old client sent: `send`, `newConversation`, `answer`, `stop`, `rename`, `command`; the row actions `fork`, `archive`, `remove`; `talkTo` (a bot's home conversation), `stopChild` |
-| `js/host/list-view.js`, `discover-view.js`, `children-view.js` | stage 3's pure views (§5.3): `groupsOf` (the list's groups; since P4 a `desk` group, `Desk`, of every `gravit-desk` conversation wherever it ran, right after the root channel); `SHELVES`, `SOURCE`, `itemsOf`, `searchItems`, `itemById` (Discover's items under namespaced ids); `childrenOf` (a conversation's subagent children and their states) |
+| `js/host/live.js` | the impure half: the mux, the follow-or-page policy, the list and its previews, gates, projections, host facts, and the pin set (`workspace/follow`) — all into the store, nothing into the DOM |
+| `js/host/actions.js` | a `data-action` → the Remote or face route the old client sent: `send`, `newConversation`, `answer`, `stop`, `rename`, `command`; the row actions `fork`, `archive`, `pin`, `unpin`, `remove`; `talkTo` (a bot's home conversation), `stopChild` |
+| `js/host/search.js`, `search-view.js` | the conversation list's search (§5.3): `startSearch` (`SEARCH_CONTENT_MS`, 250) the debounced `GET /data/search` read; `titleMatches`, `mergeResults`, `highlightRuns`, `searchPhase`, `moreThanTwenty`, `SEARCH_ITEMS` the pure view over the titles the list holds and the words inside the conversations. `js/reducers/search.js` is its slice (§5.5) |
+| `js/host/list-view.js`, `discover-view.js`, `children-view.js` | stage 3's pure views (§5.3): `groupsOf` (the list's groups, pinned rows leading each; since P4 a `desk` group, `Desk`, of every `gravit-desk` conversation wherever it ran, right after the root channel); `SHELVES`, `SOURCE`, `itemsOf`, `searchItems`, `itemById` (Discover's items under namespaced ids); `childrenOf` (a conversation's subagent children and their states) |
 | `js/host/modules-view.js` | the six Lunhui modules' pure view (module cards spec §5.1, §5.3, Appendix A): `MODULES` — the one client table the cards share with the server (name, title, 副题, role and role id, route, channels and their words, file, headline fields, the two tools, `freezes` and `artifacts` as the page's Reads box words them, glyph, legend), kept in step with `face/src/channels.ts` `MODULE_HEADLINES`, `face/plugins/lunhui/lib/modules.mjs` and the roles by `tests/lunhui-modules-table.test.ts` —, `MODULE_NAMES`, `moduleOf`, `latestOf` (the newest run among the module's channels), `headlineWords`, `FRESH_MS` (60,000), `activeRuns` (the Runs this page sent that read Running: the conversation `running`, or the record under a minute old), `chipOf` (a running Run's `Running · <title>` chip, tone `live`, linking `#/messages/<id>`), `researchItems` (the shelf's six, each `running` or not), `runsOf` (the page's rows, at most 24) and `pageOf` (the page: the chip, `running`, the latest run, the rows, the Reads / Writes / Runs on boxes) over `/data/modules.json` |
 | `js/host/run-sheet-view.js` | a module card's Run sheet, pure (module cards spec §5.4, §5.5, Appendix B): `newSheet(listing, module, channel?)` (the slice's first value — `{module, where, on, run, cites, stocks, note, said}`, `run` the chosen channel's newest run at the time On was picked), `sheetOf(listing, sheet, now)` (the render model: Where, On with each option open or greyed with its reason, Cites, Stocks, Theme's source line, the Note, Runs via, Writes, `canRun` and its `blocker`), `stocksOf` (main-board codes by shape, at most four), `titleOf` (`<Title> · MM-DD`) and `messageOf` (Appendix B's Chinese line, the slots filled, the Note on a last line) |
 | `js/host/runs-view.js` | the Lunhui runs card's pure view (§5.2; modules spec §5.11): `runsView` (the overview's `runs`, `runsOmitted` and `latestRun` → the latest run's line, a chip per module — the mode's its mode word alone — the expectation card's rows, the previous card's review line (`review: <grade> of <previous_run>`, null without both), each artifact's compact JSON for its collapsed details, a dim row per run, the omitted count), `valueWord` (a headline value as a word), `countWord` (a count with its noun, singular for one) |
@@ -2440,7 +2441,7 @@ sentence drawn as its words, the Account's and a channel's stale stamps, a tool 
 | `js/wire/summaries.js`, `room.js`, `speaker.js`, `markdown.js` | moved with them: `summaryOf` (restores `agentPreset` on a list row — the projection first, `/data/channels.json`'s `presets` second, never a guess — and carries 0.2.1's `formatStatus` when the host reports a known one) and `readProjections` (the one reader of `session/projections`, §5.2), the pure room rules (`foldMembers`, `isMentionText`, `roundEndLine`, …), `isHostPreset`/`speakerFor` (`Role · <id>` for a `role-<id>` preset, a tested helper: the live client draws no role child's page, `listConversations` dropping `origin: subagent` rows), the DOM-built markdown |
 | `js/wire/grouping.js`, `channelName.js`, `botId.js`, `botSettings.js`, `subagents.js`, `member-traces.js` | the old chat page's other pure modules, moved in stage 3 with their words in English (`tests/client/wire-words.test.js` greps the six for Chinese): `bucketFor` and its sentinel keys (`ARCHIVED_KEY`, `UNGROUPED_KEY`, `BOT_KEY_PREFIX`); `foldChannelName`; `proposeBotId`; `normalizeBotModel`, `botModelChoices`, `botSettingsPayload`; `isSubagentRow`, `composeSubagentCatalog`, `normalizeSubagentCatalog` and `subagentControls`, which returns a state enum (`unavailable`, `waiting`, `running`, `inactive`, `unknown`) with a diagnostic's `reason` and no sentence; `loadMemberTrace`. `draftBotSoul`, `botToolLabel`, `isBotKey`, `subagentAddress` and `subagentResult` moved too, and no page calls them |
 | `js/wire/market-model.js`, `china.js`, `account-model.js` | `market-model.js` and `account-model.js` moved from the old instrument pages in stage 2 (`market-quotes.js` and `market-search.js`, the face's own A-share wire, were deleted 2026-11-01; `china.js` took their place): `normalizeAsset`, `readWatchlist`/`saveWatchlist` (the face's key, the kairos key read until the first save), `readAccountWatch`/`saveAccountWatch` (the Account's keys under `ACCOUNT_WATCH_KEY`, `gravit.account.watch.v1`, a hundred at most), `price`, `number`; `money`, `signedMoney`, `pct`, `sign`, `orderMatches`. Their Chinese labels and notes stay in the wire and never reach a screen |
-| `js/render/rail.js`, `messages.js`, `thread.js`, `avatars.js`, `controls.js` | the two-level rail (Discover in the first level) and the list's groups; the Messages screen (head, Details with the row actions and Children, composer, status line, new message with New channel…, empty state); the thread's kinds (no tool call drawn), a member's Trace; avatars and clusters (a bot's letter from the host's bot names); the segs, the key-value rows, the inline editor and confirm pair |
+| `js/render/rail.js`, `messages.js`, `thread.js`, `avatars.js`, `controls.js` | the two-level rail (Discover in the first level), the list's search box and results, and the list's groups, each row with its pin key; the Messages screen (head, Details with the row actions and Children, composer, status line, new message with New channel…, empty state); the thread's kinds (no tool call drawn), a member's Trace; avatars and clusters (a bot's letter from the host's bot names); the segs, the key-value rows, the inline editor and confirm pair |
 | `js/render/markets.js`, `chart.js`, `account.js`, `js/market-fmt.js` | stage 2's screens (§5.4), on the Account's reads since the graft's stage 1: Markets — the Account's rows by tab beside the A shares — and a market's page (`renderMarketsScreen`, `marketPage`, `mkAv`, the face's own letter tile); the charts, one drawing in one box — `candlesSvg` (a market's closes from the Account's candles, the page's chart), `curveSvg` (the Portfolio's curve from its history); Account (`renderAccountScreen` — Portfolio, Money, Venues with a venue's Details drawer and the Account seat box, Agents, Cards, Rules — the Statement drawer `renderStatement`, Sell many's drawer `renderSellMany`, `orderWords`, `cardFactsOf`, and the Market half's keys `marketKeysOn`, `marketKey`, `changeKey`, `positionKeys`) and the Settings drawer (`renderSettings`); `render/wallet-row.js` (`walletRow`: a row waiting for the operator's own wallet, Trade's and Money's); `chgHtml`, a change with its arrow (the A-share page's) Since 2026-10-31 China's table (Today and Turnover, turnover in `yuan()`), its session line, and the A-share page (the state line, twelve facts, Price history by `intradaySvg` for 1D, `sessionsSvg` for 5D and `candlesSvg` with `unit: 'cny'` and `zone: 'Asia/Shanghai'` beyond). |
 | `js/render/run-sheet.js` | a module card's Run sheet as a drawer of any screen (`renderRunSheet`, §5.4) |
 | `js/render/markdown.js` | `setMarkdown`, `markdownHtml`: Gravit's markdown renderer, set once at boot (escaped when none is set); `thread.js` re-exports both, and the thread, a channel's thesis and a composed answer's summary draw through it |
@@ -2503,13 +2504,13 @@ its groups as a bot's model routes); `credentials/describe` on the Gravit item, 
 `{refs: ["DEEPSEEK_API_KEY"]}` (per ref `{configured,
 source?, writable}`, never a value); and `subagents/interruptByParent`
 (`{childSessionId, parentSessionId, mode:"continuable"}`, bare, as the old client sent it) for a
-child's Stop. Not called: `subagents/prompt`, `workspace/rename`, `directoryPicker/pick`. The
+child's Stop. The list's pins add `workspace/pinSession` and `workspace/unpinSession` (`{request:{sessionId}}` → `{pinnedSessionIds}`, the whole set) and the stream `workspace/follow` (below); the face's `GET /data/search` is a `/data` read, not a Remote. Not called: `subagents/prompt`, `workspace/rename`, `directoryPicker/pick`. The
 surface stays closed by design: `session/selectModel`, `agentPresets/*` and `settings/describe`
 are not called.
 
 **Streams** — one WebSocket, `/api/remote.mux`, carries any number of logical streams keyed by a
 client-chosen `streamId`: client frames `open` / `cancel`, host frames `item` / `end` / `error`,
-exact keys. Three kinds ride it:
+exact keys. Four kinds ride it:
 - `$events`, internal to `api.js`, one per socket generation and opened with exactly `{args:{}}`:
   `ready` first (the `clientId` every answer is bound to, and the host's `home`), then `emit`
   (host facts: `api-session/added|removed|status|activity|error`, `agent-preset/selected`),
@@ -2526,6 +2527,7 @@ exact keys. Three kinds ride it:
   records, projections), then gap-free `event` records and, opened with `assistantStream: true`,
   `assistant-stream` frames whose `block-start` chunks are the pulses (0.2.0 logs no
   `assistant/chunk`). A follow item names no session; the live layer re-addresses it.
+- `workspace/follow`, opened with `{}`: a `baseline` item whose `value.pinnedSessionIds` is the workspace's pinned set, then a `pinned` item carrying `pinnedSessionIds` per change. The set is host state, shared by every tab and window of the host.
 
 **Reconnect** — there is no resume cursor. A socket close, a frame outside the stream grammar,
 and an `$events` end, error or non-`ready` opening all lose the generation the same way: `onDown`
@@ -2733,6 +2735,7 @@ conversation that was on screen when the last open one was deleted and nothing t
   the kind table: never a context row; a composed answer's summary counts) becomes the row's preview — a row read and found silent
   waits for activity, and the conversation on screen previews from its own window (`previewOf`
   in `render/rail.js`);
+- **the pin set** — `workspace/follow` opens when the mux is ready (and again after each reconnect, the old stream cancelled when it goes down), its baseline (`{type: "baseline", value: {pinnedSessionIds}}`) and each `pinned` frame (`{type: "pinned", pinnedSessionIds}`) landing whole in `hostPins`, so a pin made in another tab or window reaches this one; the stream reopens after its end (`FOLLOW_RETRY_MS`) and after an error (`CONTROL_RETRY_MS`), one at a time;
 - **follow or page** — `open(id)` marks the conversation seen and reads it by `viewFor`: a LIVE
   one (`agentAvailable`) is FOLLOWED with the assistant stream, a COLD one is PAGED (upgrade
   decision D16: a follow activates a cold session, and a resume write-opens its log —
@@ -2771,7 +2774,7 @@ for an error; `undefined` means no command claimed it and the line continues as 
 was typed, prompts the first words, and returns the id. `answer(eventId, value)` answers
 through the mux and writes this tab's outcome on the card at once. `stop(sessionId)` is
 `session/cancel` and the line `Stopped. A paused goal resumes with /goal resume`;
-`rename(sessionId, title)` is `session/rename`. The row actions: `fork(sessionId)` is
+`rename(sessionId, title)` is `session/rename`. The row actions: `pin(sessionId)` and `unpin(sessionId)` are `workspace/pinSession` and `workspace/unpinSession`, whose answer is the whole set (`pinnedSessionIds`, into `hostPins`; a throw leaves the set as it was and says `Pin failed. Try again later.`), and `archive` unpins a pinned row after the archive succeeds (an archived row is never pinned); `fork(sessionId)` is
 `session/fork`, one in flight per source, and resolves the child's id (`app.js` refreshes and
 opens it); `archive(sessionId, archived)` posts the explicit boolean and refuses, without a call,
 to archive while the conversation runs (`Stop Gravit first`) or a card waits on it (`Answer the
@@ -3238,6 +3241,23 @@ cut, then the history paged back until the turn is found, never a follow — and
 through `toMessages` and `hostEvent` on a scratch conversation, as a window is, into
 `traceLoaded {convId, msgId, messages}`; a loader error lands as its English words (`traceFailed`).
 
+**The list's search** (`js/host/search.js` over `search-view.js`; the dsh UI port's plan 2). A query matches in two
+places: the titles and channel labels the list already holds, at once and with no wire (`titleMatches`,
+case-insensitive substring on the trimmed query, newest first), and the words inside the conversations
+(`GET /data/search?q=`, §4.4). `startSearch({store, getJson, timers})` returns `{type, clear}`: `type(q)` puts the
+box's text in the store at once (`setSearchQuery`, which empties the content and sets its phase) and, for a query
+that is not blank, reads the index after `SEARCH_CONTENT_MS` (250) of quiet; the answer lands as `searchContent`
+under the query it was asked for (`items`, `hasMore`), a failure or a refused body (`ok` not true) as `searchFailed`,
+and an answer for a query no longer in the box changes nothing. Queries are compared as typed, untrimmed. `mergeResults`
+makes one list of at most `SEARCH_ITEMS` (20): the title matches first (one with a content hit takes that hit's
+snippet and match, else its preview line), then the content hits whose session the list holds and that are not
+already shown (an item for a session the list does not hold is dropped). The array is the items; a non-enumerable
+`overflow` says whether more than twenty were cut, so exactly twenty is not more (`moreThanTwenty` joins it with the
+wire's `hasMore`). A title match's preview line is `search-view.js`'s own (`conv.preview`, else the last spoken
+message's text, with no sender prefix), kept there so a host view imports no render code. `highlightRuns(snippet,
+match)` splits a snippet into `{text, mark}` runs, one unmarked run for a missing or out-of-range match;
+`searchPhase` is `idle`, `searching`, `results`, `empty` or `failed`, and a failed content read keeps the title matches.
+
 **Stage 3's views** (pure). `groupsOf(state)` (`js/host/list-view.js`) orders grouping.js's
 buckets: every channel a group, an empty one too (a new channel's page is reachable from the
 list), the root first, then — since P4 — `Desk`, every `gravit-desk` conversation wherever it
@@ -3247,7 +3267,7 @@ the rest under `No channel`; `Archived` last. Each
 group is `{key, label, kind, workspaceId, isRoot, conversations, collapsed, shown}`: a channel goes
 by `channelLabel` (its display title, else its name — the label New message's Where and Details
 use too), `collapsed` is the viewer's `collapsed[key]`, else true for Archived alone, and a
-collapsed group shows only the conversation on screen. `itemsOf(discover)` (`discover-view.js`)
+collapsed group shows only the conversation on screen. Within a group the rows the host's pin set names (`state.pinned`) lead, newest first, then the rest, also explicitly newest first; the records handed back are copies carrying `pinned`, an archived row is never pinned, and a pinned id the list does not hold matches nothing. `itemsOf(discover)` (`discover-view.js`)
 turns the listings into cards under namespaced ids — `mcp:<server>` with its tool count on Data,
 `bot:<id>` on Bots (never the default composition), `agent:gravit` first then the connected and
 the found CLI agents (`agent:<bin>`, `Connected`, `Not found`, `Found · <version>`) on Agents,
@@ -3343,7 +3363,7 @@ boxes as the values ticked), and the ticket's venue or outcome re-seeds it at th
 in `#tq` (`tradeQuery`) searches Trade after the same quiet; the composer's `submit` is `send`, a
 bot editor's `saveBot`, the Create page's `createBot`, the ticket's `placeOrder` the sheet's
 submit; a Run sheet's box as typed (Stocks, the Note) and its pick as changed (Where, On, Cites)
-are `runSheetField`; Escape cancels an editor, a confirm, or closes a module card's Run sheet
+are `runSheetField`; typing in `#cq` (`convQuery`) is `startSearch`'s `type` (§5.3); the row actions `pin` and `unpin` are the pin key's and Details'; ⌥⌘K (Ctrl+Alt+K off a Mac, matched on the key's place `KeyK`, not its character) focuses the list's box, going to Messages first from a screen with no list; Escape in the box clears the query, and again leaves the box, before the chain below, and both keys wait out an IME composition; Escape cancels an editor, a confirm, or closes a module card's Run sheet
 first, then the owner sheet, then a drawer (Details, Settings, the Statement, a venue's Details),
 then Trade's ticket; Enter commits an inline editor.
 
@@ -3383,12 +3403,12 @@ current on Markets and a market's page), Trade (`#/trade`), Discover (`#/discove
 page), Settings at the foot, Account (`#/account/portfolio`, current on Account, with the
 Account's leading figure under it once its page has answered — `· Paper` when Paper leads — and a
 badge counting the cards waiting there); it collapses to a strip of icons. The second level, on
-Messages and beside a channel's page: the new-message key, then the groups (`groupsOf`, §5.3) —
+Messages and beside a channel's page: the new-message key, the search box `#cq` (`Search conversations`, the key's hint `⌥⌘K` or `Ctrl+Alt+K` by the platform the browser reports), then the groups (`groupsOf`, §5.3) —
 each a head (its fold key, `Collapse <label>` / `Expand <label>`; a channel's name a link to its
-page, marked while that page is open) and its rows, newest first — the unread dot (`unreadOf`),
+page, marked while that page is open) and its rows, pinned first and newest first within each part, a pinned row carrying a filled pin glyph (`.row-pin`) and every non-archived row a pin key (`.pin-key`, a sibling button in a `.row-wrap`, hidden until the row is hovered or a key inside it has focus, so Tab reaches it; a touch screen has no reveal — Details has Pin) — the unread dot (`unreadOf`),
 the avatar by kind (a bot's letter, a cluster for a group), the title, `rowTime`, the preview (the
 host's one-message page; until it lands, the last message drawn). A folded group shows only the
-conversation on screen; Archived is last and folded until opened.
+conversation on screen; Archived is last and folded until opened. While the box holds a query (anything but blanks) the groups give way to `.conv-results`: `N conversations`, then a `.conv-hit` per result — title, `rowTime`, a grey `Archived` chip when archived, the channel in bold and the snippet with its match in `<mark>` — and, after an archived-by-the-face hit, an `Un-archive` key; the states are `Searching every conversation…` with three skeleton bars, `No matching conversations`, `Could not search inside conversations` (under title matches when there are any), and `Showing the first 20. Narrow your search.` when the answer was cut or the wire said `hasMore`.
 
 **The screen** (`render/messages.js`) — the head (the title; a centred cluster, the member
 names and count for a group; `Working` while `running`; the Details key), the thread, the
@@ -3397,7 +3417,7 @@ composer (`Tell Gravit…`, `… @ a bot by name` in a group) and the status lin
 `session/rename`; Created from the snapshot header; Where — the channel by its title, or `Default
 directory`; Agent — Gravit or the bot; `Archived · By the host` for the host's own archive) and
 its row keys — `Change words`; `Fork` once there is something to fork (dsh forks from a completed
-turn); `Archive`, or `Un-archive` for the face's own archive; `Delete`, asked twice (`Yes,
+turn); `Pin` or `Unpin` (absent on an archived row); `Archive`, or `Un-archive` for the face's own archive; `Delete`, asked twice (`Yes,
 delete`) — Archive and Delete absent while Gravit runs or a card waits; Members for a group;
 **Children** when the conversation's catalog names any (`childrenOf`: the label, `One-shot` or
 `Continuable`, `Running` / `Not running` / `Unknown` / `Unavailable`, and `Stop` — asked twice,
@@ -3849,7 +3869,7 @@ left with the `.tool` rules.
 The store holds the host's facts (§5.3) and the page's own: `route`, `draft`, `detailsOpen`,
 `settingsOpen`, `edit`, `confirm`, `railCollapsed`, `collapsed` (the list groups the viewer
 folded), `theme`, `lastConv`, `lastSeen`, `status`, `orphanGates`, `channels`, `bots`,
-`conversations`, `childRows`, `traces` (a member's trace by the answer it explains, `traces[convId][msgId]`); `channel`
+`conversations`, `childRows`, `pinned` (the host's pinned session ids, whole, as `workspace/follow` last said them), `search` (the list's search: `query` as typed, `contentPhase` `idle | loading | done | failed`, `content` the index's items, `hasMore`; reducers in `js/reducers/search.js`, never persisted), `traces` (a member's trace by the answer it explains, `traces[convId][msgId]`); `channel`
 (`id`, `status`, `data`, `at` — the page's overview); `discover` (`query`, `shelves` — `plugins`,
 `modules` (`/data/modules.json` as read), `bots`, `agents`, `memory`, each `{status, data, at}` —,
 `gravit`, `skills`, `models`, `status`, `artifacts` — a module page's latest artifact by module,
@@ -4176,7 +4196,7 @@ own on 2026-10-27 (§7.1, §7.3).
 
 ### 7.3 The face suite
 
-3,031 tests in 208 files (2,990 pass, 41 skipped without `FACE_SMOKE=1`; 3,032 tests, 3,028 pass and 4 skipped under it, 2026-11-03, the dsh UI port's host side at `512140e8`); 2,993 tests in 203 files (2,960 pass, 33 skipped without `FACE_SMOKE=1`, 2026-11-02, the dsh 0.2.1-rc.5 upgrade merged with the desk's hardening and its graceful-stop carry at `ce4fc716`; 2,994/2,994 under `FACE_SMOKE=1`); 2,974 tests in 202 files (2,942 pass, 32 skipped without `FACE_SMOKE=1`, 2026-11-02, the merge at `817ee2bb`; 2,975/2,975 under `FACE_SMOKE=1`); 2,903 tests in 200 files (2,871 pass, 32 skipped without `FACE_SMOKE=1`, 2026-11-02, the dsh 0.2.1-rc.5 upgrade at `8819cad7`: the new `role-plugin`, `bind-smoke` and `fixture-root` files, the roles smoke's fifth boot); 2,936 tests in 199 files (2,906 pass, 30 skipped without `FACE_SMOKE=1`, 2026-11-02, the desk's hardening at `527d868f`; 2,937/2,937 under `FACE_SMOKE=1`); 2,868 tests in 197 files (2,838 pass, 30 skipped without `FACE_SMOKE=1`, 2026-11-02, the desk's P4 after its final review's fix wave; 2,869/2,869 under `FACE_SMOKE=1`); 2,866 tests in 197 files (2,836 pass, 30 skipped without `FACE_SMOKE=1`, 2026-11-02, the desk's P4 at `55713973`; 2,867/2,867 under `FACE_SMOKE=1`, the thirty real boots unchanged); 2,795 tests in 196 files (2,765 pass, 30 skipped, 2026-11-01, the desk's P3 after its final review's fix wave; 2,796/2,796 under `FACE_SMOKE=1`); 2169 tests in 163 files (2143 pass, 26 skipped without `FACE_SMOKE=1`, 2026-11-01 at `3ec52aa3`; 1910 tests in 151 files, 1886 pass, 24 skipped, 2026-10-30; 1725 in 144 files, 2026-10-28; 1654/1654
+3,079 tests in 210 files (3,038 pass, 41 skipped without `FACE_SMOKE=1`; 3,080 tests, 3,074 pass, 4 skipped and 2 failed under it on the full run, 2026-11-04, the dsh UI port's list search and pins at `f28b108c` - the two, `order-gate-midboot-smoke`'s mid-boot test and `producer.test.ts`'s aborted-run test, are timing tests that failed under the load of the 33 real boots and passed alone, 28/28); 3,031 tests in 208 files (2,990 pass, 41 skipped without `FACE_SMOKE=1`; 3,032 tests, 3,028 pass and 4 skipped under it, 2026-11-03, the dsh UI port's host side at `512140e8`); 2,993 tests in 203 files (2,960 pass, 33 skipped without `FACE_SMOKE=1`, 2026-11-02, the dsh 0.2.1-rc.5 upgrade merged with the desk's hardening and its graceful-stop carry at `ce4fc716`; 2,994/2,994 under `FACE_SMOKE=1`); 2,974 tests in 202 files (2,942 pass, 32 skipped without `FACE_SMOKE=1`, 2026-11-02, the merge at `817ee2bb`; 2,975/2,975 under `FACE_SMOKE=1`); 2,903 tests in 200 files (2,871 pass, 32 skipped without `FACE_SMOKE=1`, 2026-11-02, the dsh 0.2.1-rc.5 upgrade at `8819cad7`: the new `role-plugin`, `bind-smoke` and `fixture-root` files, the roles smoke's fifth boot); 2,936 tests in 199 files (2,906 pass, 30 skipped without `FACE_SMOKE=1`, 2026-11-02, the desk's hardening at `527d868f`; 2,937/2,937 under `FACE_SMOKE=1`); 2,868 tests in 197 files (2,838 pass, 30 skipped without `FACE_SMOKE=1`, 2026-11-02, the desk's P4 after its final review's fix wave; 2,869/2,869 under `FACE_SMOKE=1`); 2,866 tests in 197 files (2,836 pass, 30 skipped without `FACE_SMOKE=1`, 2026-11-02, the desk's P4 at `55713973`; 2,867/2,867 under `FACE_SMOKE=1`, the thirty real boots unchanged); 2,795 tests in 196 files (2,765 pass, 30 skipped, 2026-11-01, the desk's P3 after its final review's fix wave; 2,796/2,796 under `FACE_SMOKE=1`); 2169 tests in 163 files (2143 pass, 26 skipped without `FACE_SMOKE=1`, 2026-11-01 at `3ec52aa3`; 1910 tests in 151 files, 1886 pass, 24 skipped, 2026-10-30; 1725 in 144 files, 2026-10-28; 1654/1654
 under `FACE_SMOKE=1` at 138 files, 2026-10-27), run by `node --test` through `tsx`. The Account's own suite is
 `account/`'s (vitest; §7.1 has its counts): the origin's tests at 133b9a7 less the six that reach
 what the copy left out (§3.9), plus the fence's (`test/unit/server-guard.test.ts`: the default
@@ -4309,12 +4329,12 @@ refused, `parseHosts`). The face's:
   orphans, the catalog kept across a list, a module page's latest artifact loading, ready and failed
   and the `lastDiscover` it keeps, the Run sheet's and `moduleRuns`' reducers, `closeOverlays`
   closing an open sheet), `actions` (the Remotes and routes each data-action
-  sends: the row actions and their refusals, Talk to, a child's Stop), `live` (follow or page,
+  sends: the row actions and their refusals, pin and unpin and an archive that unpins, Talk to, a child's Stop), `live` (the pin set's baseline, frames, reopening and replacement; follow or page,
   promote, suspend and re-decide, gates by `eventId`, previews, host facts, the last good
   channels, sessions-meta and bots), `thread` (no tool call drawn, in the thread or a Trace, a divider over the gap it leaves, a member's
-  Trace), `rail` (the groups and their heads, Discover in the first level and lit on a plugin or module page, the Account's leading
+  Trace), `rail` (the search box and its results in every phase, the pin key and glyph on a row, the groups and their heads, Discover in the first level and lit on a plugin or module page, the Account's leading
   figure with `Paper` when Paper leads, the cards-waiting badge), `list-view` (the
-  groups' order and folds), `messages-screen` (Details' row keys, Children, Where's channels by
+  groups' order and folds, pinned rows first), `search-view` (title matches, the merge and its overflow flag, highlight runs, the phase) and `host-search` (the debounced read, a stale answer dropped, a failure, a clear), and in `app-dom` ⌥⌘K and Esc in the box with the IME holds, `messages-screen` (Details' row keys, Children, Where's channels by
   their titles and New channel…), `channel` and `host-channels` (a channel's page in every state —
   markup in every field stays text — its editors, the overview's latest-wins read, New channel,
   the roster writes), `discover-view`, `host-discover` and `discover` (Discover's items under

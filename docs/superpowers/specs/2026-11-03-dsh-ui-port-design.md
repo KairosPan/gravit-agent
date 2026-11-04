@@ -1277,3 +1277,32 @@ tests, 2,990 pass, 41 skipped, 0 fail; under `FACE_SMOKE=1` 3,032 tests, 3,028 p
 | §5.1 | what is indexed | a `lunhui_present` call with no result in the batch is still indexed; a room's round-end lines and a subagent's report relays are not | the controller's ruling: the first is the composed answer, the others are not words anyone said |
 | §5.5 | the file listing | an unreadable folder is listed but not descended; an unreadable root is an empty walk; matching is case-insensitive | one bad folder never fails the picker |
 | §6 | `tests/overlay.test.ts` untouched | edited: it pins the row list, now seventeen | outside Task 1's brief, forced by the four rows |
+
+## 14. Build notes, plan 2 (2026-11-04)
+
+Plan 2 (the conversation list: search and pin) built on `claude/cranky-bun-9f78c8` over
+`3ee407c5`: `7dbe683a` and `585b5e6f` (`host/search-view.js`, and the fix that the merge records its
+overflow before the cut), `89f49ee6` (`host/search.js`, `reducers/search.js` and the `search`
+slice), `765c7c89` and `b5f58502` (the box, the results and the keys in `render/rail.js` and
+`app.js`, and the fix that the keys wait for an IME composition), `49552182` (`workspace/follow`,
+the `pinned` slice, `pin` and `unpin`, pinned rows leading each group), `f69209cd` and `f28b108c`
+(the pin key and glyph on a row, Pin and Unpin in Details, and the fix that the archived-row test
+draws the row), and this note's commit (DEVELOPMENT.md, face/README.md). Measured at `f28b108c`:
+the face suite 3,079 tests in 210 files, 3,038 pass, 41 skipped, 0 fail; under `FACE_SMOKE=1`
+3,080 tests, 3,074 pass, 4 skipped, 2 fail on the full run — `order-gate-midboot-smoke`'s mid-boot
+test (a 10 s wait for a stand-in row) and `producer.test.ts`'s aborted-run test, both timing
+tests, which pass alone (28/28).
+
+| Clause | The text | What the tree does | Why |
+|---|---|---|---|
+| §5.1 | "More than 20" shows when the route says `hasMore` or the merge overflows | `mergeResults` returns the items array with a non-enumerable `overflow`, set before the cut to twenty; `moreThanTwenty(merged, hasMore)` reads it, so exactly twenty is not more | a count taken after the cut cannot tell exactly twenty from more; the review found it and the flag moved before the cut |
+| §5.1, D2 | a title match with no content hit shows the conversation's preview line | `search-view.js` has its own `previewLine`: `conv.preview` (the host's one-message page), else the last spoken message's text, with no sender prefix and no import of render code | a host view imports no render code; the on-screen conversation's `previewOf` in `rail.js` differs by the group sender's prefix |
+| §5.1 | ⌥⌘K focuses the box "from anywhere" | from a screen with no list it goes to Messages (the last open conversation, else the first open one) and the box takes focus once it is drawn; a route that is neither Messages nor a channel page forgets the pending focus; matched on `ev.code` `KeyK`, not the character, since ⌥ changes what a Mac reports; Ctrl+Alt+K off a Mac | the controller's ruling: the box exists only beside the list, and "anywhere" is read as reaching it from anywhere |
+| §5.1, D34 | Esc in the box clears the query, a second leaves it | both Esc and ⌥⌘K do nothing while an IME composes (`isComposing` or keyCode 229) | in a pinyin composition Esc dismisses the candidate window; clearing the query under it would eat the operator's text |
+| §5.1 | the query is trimmed | the store and the stale-answer check keep the query as typed, untrimmed; a blank one (`trim() === ''`) is idle, reads nothing, and the route is asked with the typed text | one string identifies the read and the box, so an answer is kept only for exactly what is in it |
+| §5.1 | title matches newest first | `titleMatches` trims and lower-cases for its own test, and sorts newest first | the same ordering the list uses |
+| §5.2 | pinned rows lead their group | `groupsOf` sorts both parts explicitly newest first (pinned, then the rest); the non-pinned order is the one the list had; the records are copies carrying `pinned`, false for every archived row | the order no longer depends on the input's order |
+| §5.2, D7 | archiving a pinned conversation unpins it | `archive` posts the archive and, when it succeeded for a pinned id, calls `unpin`; a failed unpin leaves the id until the next `pinned` frame | the host drops a pin only for its own archive |
+| §5.2 | the pin set is the host's | `workspace/follow` opens when the mux is ready and after each reconnect (the old stream cancelled on down), one at a time; its baseline and each `pinned` frame replace the set whole; a failed `pinSession` or `unpinSession` says `Pin failed. Try again later.` and changes nothing | every tab shows one set; a throw leaves what was drawn |
+| §5.2 | the pin glyph | `icon(name, size, stroke, filled)` takes a fourth argument; the pinned row's glyph is the `pin` icon filled | one icon set serves the outline on the key and the fill on the row |
+| §5.2 | a pin key on each row | the key is a button beside the row's link in a `.row-wrap`, not inside it, opacity 0 until the row is hovered or a key inside it has focus (Tab reaches it; `:focus-visible` outlines it); no reveal on a touch screen, where Details has Pin; absent on an archived row | a button inside an anchor is invalid, and the row stays one link |
