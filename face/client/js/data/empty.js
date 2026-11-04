@@ -94,6 +94,9 @@ export function emptyState() {
     desk: { status: 'idle', data: null, at: null, message: null },
     // the list's search (host/search.js): the box, the content read's phase, its items
     search: { query: '', contentPhase: 'idle', content: [], hasMore: false },
+    // the open conversation's background jobs (host/jobs.js): the one watched, its rows, the job open in Details, the finished
+    // ids cleared by conversation; a job's output stays in host/jobs.js
+    jobs: { convId: null, rows: [], open: null, cleared: {} },
     // the owner device (host/owner.js): whether this page signs for the Account, its key's id there, the Account's last
     // refusal to it, a pairing or sign-out in the air
     owner: { role: 'unknown', kid: '', refusal: null, busy: false },
