@@ -8,8 +8,9 @@
  * recipient: it long-polls the account's inbox (src/phone.ts `inbox`) - only the operator's own texts are ever in it -
  * and sends through the account's send route (src/phone.ts `send`), naming each send's kind.
  *
- * WHAT A MESSAGE DOES. A text goes to the desk conversation (src/desk-conversation.ts) with the telegram source and the
- * time the operator wrote it (the inbox's `at`). A text that replies to one of the desk's messages carries that
+ * WHAT A MESSAGE DOES. A text goes to the desk conversation (src/desk-conversation.ts) with the telegram source - the
+ * kind keeps its name for every network, and `network` says which (`telegram`, `slack`) - and the time the operator
+ * wrote it (the inbox's `at`). A text that replies to one of the desk's messages carries that
  * message's alert, and its annotation when there is one, as the post's context (spec §16 H1b, src/watch.ts
  * `contextFor`, asked the reply's `<network>:<id>`). A post the conversation refuses is answered with its line, and an
  * opened turn's answer comes back through the outlet - the bridge is the conversation's outlet from install to dispose.
@@ -93,11 +94,18 @@ const defaultClock: DeskClock = {
  * inbox hands it over - `<message id>#<inbox number>@<written at>`, e.g. `telegram:41#7@2026-11-04T19:03:00.000Z`. */
 export const deliveryKey = (m: Pick<InboxMessage, "id" | "messageId" | "at">): string => `${m.messageId}#${m.id}@${m.at}`;
 
+/** Who a phone command's pause or mute is by: the network it came through (src/desk.ts `OffState`, `MuteState`). */
+type PhoneSetter = "telegram" | "slack";
+/** `network` as a setter: `slack` for Slack, `telegram` for anything else - the inbox admits only the two
+ * (src/phone.ts `WIRE_ID`). */
+const setterOf = (network: string): PhoneSetter => (network === "slack" ? "slack" : "telegram");
+
 /** A command the bridge answers itself, and what followed it. */
 export type Command = { cmd: "status" | "pause" | "mute" | "new" | "stop"; arg?: string };
 
 /** The five commands, as Telegram sends them: the word in any case, then the bot's name when the operator
- * picked the command from the menu, then anything after a space. */
+ * picked the command from the menu, then anything after a space. Slack's `!status` arrives here as `/status`: the
+ * account's connector rewrites the `!` before it stores the text (Slack's composer keeps a leading `/` for itself). */
 const COMMAND = /^\/(status|pause|mute|new|stop)(?:@[A-Za-z0-9_]+)?(?:\s+([\s\S]*))?$/i;
 
 /**
@@ -154,8 +162,8 @@ type Bounded<T> = { settled: true; value: T } | { settled: true; error: unknown 
  *
  * Each message is taken in turn (see the module header): a command is answered by the bridge - `/status` with the
  * desk's lines (src/desk.ts `deskStatusLines`) and `desk session <id>` and `turns today <n>` after them, `/pause [d]`
- * with the pause in force once it is written (src/desk.ts `writeOff`, set by `telegram`), `/mute <d>` with the mute in
- * force once it is written (src/desk.ts `writeMute`, `muteReplyLine`; no or a bad duration is `MUTE_USAGE`), `/new` and
+ * with the pause in force once it is written (src/desk.ts `writeOff`, set by the network the command came through,
+ * `telegram` or `slack`), `/mute <d>` with the mute in force once it is written, by that network too (src/desk.ts `writeMute`, `muteReplyLine`; no or a bad duration is `MUTE_USAGE`), `/new` and
  * `/stop` with what the conversation did; and a text is posted to the conversation, a refusal answered with its line.
  * A post or a `/new` still under way after 30 s on the clock is answered `the desk is slow to take this; it will answer
  * when it can`, and what it comes to is answered when it settles. Then the cursor is set past the message.
@@ -247,12 +255,12 @@ export function installPhoneBridge(deps: PhoneBridgeDeps): PhoneBridgeHandle {
     }
   };
 
-  const pauseReply = async (arg: string | undefined): Promise<string> => {
+  const pauseReply = async (arg: string | undefined, by: PhoneSetter): Promise<string> => {
     const ms = arg === undefined ? undefined : parseDuration(arg);
     if (arg !== undefined && ms === undefined) return PAUSE_USAGE;
     const at = clock.now();
     try {
-      const state = await writeOff(home, { by: "telegram", ...(ms === undefined ? {} : { until: at + ms }) }, () => at);
+      const state = await writeOff(home, { by, ...(ms === undefined ? {} : { until: at + ms }) }, () => at);
       const until = state.until === undefined ? "" : ` until ${deskTime(new Date(state.until), new Date(at))}`;
       return `paused${until}; ${RESUMES}`;
     } catch (err) {
@@ -260,12 +268,12 @@ export function installPhoneBridge(deps: PhoneBridgeDeps): PhoneBridgeHandle {
     }
   };
 
-  const muteReply = async (arg: string | undefined): Promise<string> => {
+  const muteReply = async (arg: string | undefined, by: PhoneSetter): Promise<string> => {
     const ms = arg === undefined ? undefined : parseDuration(arg);
     if (ms === undefined) return MUTE_USAGE;
     const at = clock.now();
     try {
-      return muteReplyLine(await writeMute(home, { by: "telegram", until: at + ms }, () => at), new Date(at));
+      return muteReplyLine(await writeMute(home, { by, until: at + ms }, () => at), new Date(at));
     } catch (err) {
       return `the mute could not be written: ${reasonOf(err)}`;
     }
@@ -315,8 +323,8 @@ export function installPhoneBridge(deps: PhoneBridgeDeps): PhoneBridgeHandle {
     }
     if (command !== undefined) {
       await reply(command.cmd === "status" ? await statusReply()
-        : command.cmd === "pause" ? await pauseReply(command.arg)
-        : command.cmd === "mute" ? await muteReply(command.arg)
+        : command.cmd === "pause" ? await pauseReply(command.arg, setterOf(m.network))
+        : command.cmd === "mute" ? await muteReply(command.arg, setterOf(m.network))
         : await stopReply(), m.network);
       return;
     }
@@ -324,7 +332,7 @@ export function installPhoneBridge(deps: PhoneBridgeDeps): PhoneBridgeHandle {
     const context = replyContext(m);
     const posted = conversation.post({
       text: m.text,
-      source: { kind: "telegram", ...(Number.isFinite(at) && at > 0 ? { at } : {}) },
+      source: { kind: "telegram", network: m.network, ...(Number.isFinite(at) && at > 0 ? { at } : {}) },
       message: { kind: "telegram", network: m.network, messageId: m.messageId },
       key: deliveryKey(m),
       ...(context === undefined ? {} : { context }),

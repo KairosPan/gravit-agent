@@ -46,8 +46,8 @@
  * the pause is in force - read, never lifted, so a delivery writes nothing - and holds it back too when the switch
  * cannot be read; with no outlet it says so; else it is the outlet's answer, a send that fails or keeps the outlet
  * past a minute being one line and an `undelivered` reason, a send the account held back an `undelivered` reason and
- * no line. Every send names its kind (src/phone.ts): a phone turn's answer and a cut phone turn's line go as `chat` to
- * the network the text came from, an alert turn's as `alert`, a wake's as `report`; other callers name their own.
+ * no line. Every send names its kind (src/phone.ts): a phone turn's answer goes as `chat` to the network the text came
+ * from (the turn's message's `network`), a cut phone turn's line as `chat` with no network, an alert turn's as `alert`, a wake's as `report`; other callers name their own.
  *
  * AFTER A RESTART (spec §16 H3). When `start`'s ensure resumed a cold desk session - the face came back up - two things
  * the restart left are dealt with, and only then. A phone turn it cut - the log's last turn, never ended or closed
@@ -148,15 +148,29 @@ const CARRY_TEXT_MAX = 4_000;
 const AT_KEPT = 200;
 
 /** The sources whose answers go to the outlet, each with the kind it is sent as (src/phone.ts): the phone's as `chat`, back
- * to the network it came from; an alert's (one a resumed session still held) as `alert`; a wake's as `report`. A `user`
- * turn is the operator at the browser, answered in its own transcript. */
+ * to the network the message that named the turn came through ({@link deliverOptsOf}); an alert's (one a resumed session
+ * still held) as `alert`; a wake's as `report`. A `user` turn is the operator at the browser, answered in its own
+ * transcript. */
 const DELIVERED: ReadonlyMap<string, DeliverOpts> = new Map<string, DeliverOpts>([
-  ["telegram", { kind: "chat", network: "telegram" }],
+  ["telegram", { kind: "chat" }],
   ["alert", { kind: "alert" }],
   ["wake", { kind: "report" }],
 ]);
-/** How a line answering a phone text the desk cut goes: a reply to the operator's own text. */
-const PHONE_LINE: DeliverOpts = { kind: "chat", network: "telegram" };
+/** The networks a phone text comes through (src/phone.ts `PHONE_NETWORKS`; this module imports types alone). */
+const PHONE_NETWORKS: ReadonlySet<string> = new Set(["telegram", "slack"]);
+/** How a line answering a phone text the desk cut goes: `chat` with no network - no message names it here - which the
+ * account sends to every network the Chat row ticks (plan B2, ruling 12). */
+const PHONE_LINE: DeliverOpts = { kind: "chat" };
+
+/** How turn `r`'s answer goes: its source's {@link DELIVERED} kind, and for a phone turn the network of the message that
+ * named it (`r.message.network`) when it is one of {@link PHONE_NETWORKS} - else none, as a cut turn's line goes; an
+ * older face's record names no network. `undefined` for a source the outlet does not answer. */
+function deliverOptsOf(r: Pick<DeskTurnRecord, "source" | "message">): DeliverOpts | undefined {
+  const opts = DELIVERED.get(r.source);
+  if (opts === undefined || r.source !== "telegram") return opts;
+  const network = r.message?.network;
+  return typeof network === "string" && PHONE_NETWORKS.has(network) ? { ...opts, network } : opts;
+}
 
 /** The journal, repo-relative: what a refused turn names when its record carries no violation (the supervisor
  * always gives one; this is the fail-closed reading of a record that did not). */
@@ -554,7 +568,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
   /** A turn's end, delivered: its reply ({@link replyOf}) through {@link sendOut}, for a source the outlet
    * answers. */
   const deliverTurn = async (r: DeskTurnRecord, m: Machinery): Promise<void> => {
-    const opts = DELIVERED.get(r.source);
+    const opts = deliverOptsOf(r);
     if (opts === undefined) return;
     const text = replyOf(r, m);
     if (text === "") return; // it ended on a tool: there is nothing to say
@@ -711,10 +725,13 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     let skipped = 0;
     for (const text of carry.queued) {
       const at = text.at === undefined ? NaN : Date.parse(text.at);
+      /* the key opens with the text's wire id (src/phone-bridge.ts `deliveryKey`): its network, when it is one */
+      const prefix = text.key.slice(0, Math.max(0, text.key.indexOf(":")));
+      const network = PHONE_NETWORKS.has(prefix) ? { network: prefix } : {};
       const result = await postNow({
         text: text.text, key: text.key,
-        source: { kind: "telegram", ...(Number.isFinite(at) ? { at } : {}), carried: true },
-        message: { kind: "telegram", carried: true },
+        source: { kind: "telegram", ...network, ...(Number.isFinite(at) ? { at } : {}), carried: true },
+        message: { kind: "telegram", ...network, carried: true },
       });
       if ("refused" in result) {
         log(`${BIN}: desk: the texts a graceful stop carried could not all be posted again (${result.line}); a later boot tries again`);

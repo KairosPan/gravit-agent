@@ -412,6 +412,14 @@ test("provenanceLine marks a phone text carried over a restart", () => {
   assert.equal(provenanceLine({ kind: "telegram", carried: true }, at), "[telegram · operator · 14:03 ET (carried over a restart)]");
 });
 
+test("the provenance line names the network; no network reads telegram", () => {
+  const at = new Date("2026-10-20T18:03:00Z");
+  assert.equal(provenanceLine({ kind: "telegram", network: "slack", at: Date.parse("2026-10-20T18:03:00Z") }, at), "[slack · operator · 14:03 ET]");
+  assert.equal(provenanceLine({ kind: "telegram", network: "telegram" }, at), "[telegram · operator · 14:03 ET]");
+  assert.equal(provenanceLine({ kind: "telegram" }, at), "[telegram · operator · 14:03 ET]", "no network: telegram, as before");
+  assert.equal(provenanceLine({ kind: "telegram", network: "slack", carried: true }, at), "[slack · operator · 14:03 ET (carried over a restart)]");
+});
+
 test("provenanceLine renders the alerts and the state forms", () => {
   assert.equal(provenanceLine({ kind: "alerts", count: 3 }, new Date("2026-11-30T14:30:04Z")), "[alerts · 3 · 09:30 ET]");
   assert.equal(provenanceLine({ kind: "state" }, new Date("2026-10-20T18:03:00Z")), "[desk · state · 14:03 ET]");
@@ -423,6 +431,7 @@ test("the desk contract names every fence name and the provenance forms the code
   const lines = contract.split("\n").filter((line) => line.includes(names));
   assert.deepEqual(lines, [`- Never a ${names} under your directory: the face refuses every desk turn while one exists.`], "one line lists the fence names, all of them, in order");
   assert.ok(contract.includes(provenanceLine({ kind: "telegram" }, new Date("2026-10-20T18:03:00Z"))), "the telegram line");
+  assert.ok(contract.includes(provenanceLine({ kind: "telegram", network: "slack" }, new Date("2026-10-20T18:03:00Z"))), "the slack line");
   assert.ok(contract.includes("[schedule · "), "the schedule prefix");
   assert.ok(contract.includes("[alert · "), "the alert prefix");
   assert.ok(contract.includes("[alerts · "), "the batch's prefix");

@@ -6,7 +6,7 @@
  *   open for `wait` seconds, until a message is pushed, until {@link FakePhoneAccount.endPoll} or until the client lets go,
  *   as the account's long poll does. Reading never changes the ring.
  * - `POST /api/account/identity/send` records the body as it came and answers `{ok: true, sent: ["<network>:<n>"]}` -
- *   or what {@link FakePhoneAccount.sendAnswer} says.
+ *   Slack's as its `ts`, `slack:1730812345.000<n>` - or what {@link FakePhoneAccount.sendAnswer} says.
  * `inboxAnswer`, when set, answers a read in its place: an HTTP status and a body (a 503, a body that is no inbox), or
  * `"drop"` - the socket closed with no answer, as a dead account's would be. */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -118,7 +118,8 @@ export class FakePhoneAccount {
       }
       if (instead !== undefined) return answer(res, instead.status, instead.body);
       const network = typeof body.network === "string" ? body.network : "telegram";
-      return answer(res, 200, { ok: true, sent: [`${network}:${this.nextSent++}`] });
+      const n = this.nextSent++;
+      return answer(res, 200, { ok: true, sent: [network === "slack" ? `slack:1730812345.000${n}` : `${network}:${n}`] });
     }
     return answer(res, 404, { ok: false, error: "no such route" });
   }

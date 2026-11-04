@@ -342,6 +342,19 @@ test("writeOff, readOffState and clearOff round-trip with ledger events", async 
   assert.deepEqual((await readEvents(h)).events.map((e) => e.kind), ["off-set", "off-cleared"]);
 });
 
+test("a pause and a mute set from Slack are by slack, read back as written", async () => {
+  const h = await home(); const now = () => Date.parse("2026-10-20T18:00:00Z");
+  const off = await writeOff(h, { by: "slack", until: now() + 7_200_000 }, now);
+  assert.deepEqual(off, { setAt: "2026-10-20T18:00:00.000Z", by: "slack", until: "2026-10-20T20:00:00.000Z" });
+  assert.deepEqual(await readOffState(h, now), { state: off, expired: false }, "slack is one of OFF's setters");
+  const mute = await writeMute(h, { by: "slack", until: now() + 3_600_000 }, now);
+  assert.deepEqual(await readMuteState(h, now), { state: mute, expired: false }, "and one of MUTE's");
+  assert.deepEqual((await readEvents(h)).events.map((e) => [e.kind, (e as { by?: unknown }).by]), [["off-set", "slack"], ["mute-set", "slack"]]);
+  /* a setter neither switch knows is still no state: the file is read as a terminal's */
+  await writeFile(join(deskDir(h), OFF_FILE), JSON.stringify({ setAt: "2026-10-20T18:00:00.000Z", by: "matrix" }));
+  assert.equal((await readOffState(h, now)).state?.by, "terminal");
+});
+
 test("OFF holds the state as JSON and the events carry it; a pause without until never expires; at until it has", async () => {
   const h = await home(); const now = () => Date.parse("2026-10-20T18:00:00Z");
   assert.deepEqual(await readOffState(h, now), { expired: false }, "no switch: not paused");
