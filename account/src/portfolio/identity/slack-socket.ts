@@ -1,7 +1,9 @@
 /** ONE SOCKET MODE LINK — the account's one WebSocket to Slack for a connected (or pending) Slack app, over Node's own global WebSocket:
  * no dependency. It asks apps.connections.open (the app-level token, slack-api.ts) for a URL, takes it only if socketUrlOk, opens it, and
  * hands what arrives to its owner (`run`'s handlers):
- *   - `hello`: handed over first — no envelope is handled before its handler finishes (the connector's backfill runs there);
+ *   - `hello`: handed over first — no envelope is handled before its handler finishes (the connector's backfill runs there). A handler
+ *     that throws closes the socket, and the link backs off as on a close: the next socket's hello is handed over again. A socket that
+ *     sends no hello within HELLO_DEADLINE_MS of its open is closed the same way;
  *   - an envelope (anything with an `envelope_id`): handed over one at a time, in order, across sockets; its handler answers "ack" (the
  *     link sends `{"envelope_id": …}`) or "hold" (nothing is sent, so Slack sends it again). A handler that throws holds;
  *   - `disconnect`: `refresh_requested` reopens at once; `warning` is nothing to do; `link_disabled` stops the link for good, and the
@@ -13,7 +15,8 @@
  *
  * The link always closes its own socket — and waits for it to close, up to CLOSE_WAIT_MS — before it asks for the next (on
  * refresh_requested, on silence, and after every close), so its own sockets are never two at once and a hello's num_connections above 1
- * means another holder (the plan's ruling 8). `down` is told each time a socket ends. Neither token nor socket URL is in any line: the URL holds a
+ * means another holder (the plan's ruling 8); `reopen` does the same at the owner's asking (its recheck of that count). `down` is told
+ * each time a socket ends, once it has closed. Neither token nor socket URL is in any line: the URL holds a
  * ticket, and the client redacts its errors. */
 import { socketUrlOk, type SlackApi } from "./slack-api.ts";
 import { RECORD_EVERY_MS, type IdentityClock } from "./telegram.ts";
@@ -29,6 +32,8 @@ export const SOCKET_BACKOFF_MAX_MS = 60_000;
 export const LINK_DISABLED = "Socket Mode is off for this app";
 /** how long the link waits for its own socket to close before it goes on (a real timer: it waits on the socket, not on the clock) */
 export const CLOSE_WAIT_MS = 5_000;
+/** how long a socket may stay open without its hello before the link closes it and backs off */
+export const HELLO_DEADLINE_MS = 30_000;
 /** how long dispose waits for the frame in hand */
 const DISPOSE_MS = 2_000;
 /** WebSocket.OPEN */
@@ -68,7 +73,7 @@ export interface SlackSocketOptions {
 }
 
 /** how a socket's life ended */
-type End = { why: "closed" | "refresh" | "silent" | "disabled" | "disposed"; reason: string };
+type End = { why: "closed" | "failed" | "refresh" | "silent" | "disabled" | "disposed"; reason: string };
 
 interface Live {
   ws: SocketLike;
@@ -80,6 +85,8 @@ interface Live {
   ended: boolean;
   closedP: Promise<void>;
   end: (e: End) => void;
+  /** the hello deadline's timer, cleared at the hello and at the end */
+  helloTimer: unknown;
 }
 
 const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -115,6 +122,13 @@ export class SlackSocket {
       ...(this.lastFrameAt === undefined ? {} : { lastFrameAt: this.lastFrameAt }),
       ...(this.failing === undefined ? {} : { failing: { ...this.failing } }),
     };
+  }
+
+  /** the socket open now closed and a fresh one asked for at once, with `reason` told to `down` (a recheck of how many sockets Slack
+   * holds for the app); nothing when no socket is open */
+  reopen(reason: string): void {
+    const c = this.current;
+    if (c && !c.ended && !this.disposed) c.end({ why: "refresh", reason });
   }
 
   /** the link stopped: the wait under way ended, the socket closed, the frame in hand finished (up to 2 s) */
@@ -224,10 +238,15 @@ export class SlackSocket {
         end: (e) => {
           if (live.ended) return;
           live.ended = true;
+          this.o.clock.clearTimeout(live.helloTimer);
           this.wake = undefined;
           resolve(e);
         },
+        helloTimer: undefined,
       };
+      live.helloTimer = this.o.clock.setTimeout(() => {
+        if (!live.helloed) live.end({ why: "failed", reason: `the socket sent no hello in ${HELLO_DEADLINE_MS / 1000} s` });
+      }, HELLO_DEADLINE_MS);
       this.current = live;
       ws.addEventListener("message", (ev: MessageEvent) => this.frame(live, ev.data, on));
       ws.addEventListener("close", (ev: CloseEvent) => {
@@ -301,15 +320,20 @@ export class SlackSocket {
       const info = (j.connection_info ?? {}) as { app_id?: unknown };
       const h = { appId: typeof info.app_id === "string" ? info.app_id : "", connections: typeof j.num_connections === "number" ? j.num_connections : 1 };
       live.helloed = true;
-      this.backoff = 0;
-      this.failing = undefined;
+      this.o.clock.clearTimeout(live.helloTimer);
       this.then(async () => {
         if (live.ended) return;
         try {
           await on.hello(h);
         } catch (err) {
-          this.o.log(`identity: the Slack hello's handler failed (${reasonOf(err)})`);
+          // the socket is closed and opened again after the backoff, and the next hello handed over afresh; this socket's envelopes are
+          // not acked, so Slack sends them again
+          live.end({ why: "failed", reason: `the socket closed after its hello could not be handled (${reasonOf(err)})` });
+          return;
         }
+        if (live.ended) return;
+        this.backoff = 0;
+        this.failing = undefined;
       });
       return;
     }

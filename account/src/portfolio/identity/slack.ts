@@ -1,5 +1,6 @@
 /** SLACK'S SIDE OF CONNECT'S SHEETS 1 TO 3 — the pending connection's source for a Slack app (pending.ts PendingSource), holding the app's
- * two tokens in memory for its ten minutes and nowhere else.
+ * two tokens in memory for its ten minutes and nowhere else — and, once connectNetwork is signed, SlackConnector (below): the operator's
+ * DM into the inbox. Both read a DM's messages, a sender's kind (memberKind) and each hello's count (ConflictWatch) the same way.
  *
  *   Sheet 1's Next (check), in the plan's ruling 7's order: auth.test with the bot token (who the bot is, and its workspace), bots.info for
  *     the bot's app, apps.connections.open with the app-level token, the socket that URL opens — taken only if socketUrlOk — and its hello,
@@ -18,18 +19,24 @@
  *     one.
  *
  * A hello that counts more than one socket for the app (another process holds its Socket Mode link, and Slack spreads the events across
- * them) is the shell's conflict until a hello counts one again. Whatever ends the pending connection — dropped, replaced, expired, taken —
+ * them) is the shell's conflict until a hello counts one again — read by ruling 8 (ConflictWatch): such a reading within 30 s of this
+ * source's own close (after a Not me, say) waits for the next hello, or a recheck on a fresh socket 30 s later. Whatever ends the pending connection — dropped, replaced, expired, taken —
  * aborts its signal, which closes the socket and cuts every call under way. */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Refusal } from "../../core/errors.ts";
 import { no } from "../refuse.ts";
 import { redactorOf } from "./bot-api.ts";
-import { SLACK_TOKEN_ANYWHERE } from "./kinds.ts";
+import type { Connector } from "./identity.ts";
+import { INBOX_MAX, type InboxRing } from "./inbox.ts";
+import { chatOffLine, SLACK_TOKEN_ANYWHERE } from "./kinds.ts";
 import type { PendingBot, PendingResume, PendingSource } from "./pending.ts";
 import { IDENTITY_WORDS } from "./routes.ts";
+import type { SlackSecret } from "./secret-file.ts";
 import { SlackApi, SlackApiError, slackAppLink, socketUrlOk } from "./slack-api.ts";
 import { SlackSocket, type Envelope, type OpenSocket } from "./slack-socket.ts";
-import { maskId } from "./store.ts";
-import type { IdentityClock } from "./telegram.ts";
+import { identityDir, maskId, senderRef, writeIdentityFile, type Binding, type Strangers } from "./store.ts";
+import { PHONE_COMMAND, RECORD_EVERY_MS, TEXT_ONLY, type IdentityClock, type NetworkStatus } from "./telegram.ts";
 
 /** an app-level token (Socket Mode): xapp-, a digit, the app id, a number and hex */
 export const SLACK_APP_TOKEN_SHAPE = /^xapp-[0-9]-[A-Z0-9]{8,14}-[0-9]{6,16}-[a-f0-9]{32,80}$/;
@@ -100,10 +107,13 @@ export class SlackPendingSource implements PendingSource {
   /** sheet 1's wait for the first hello */
   private helloWait: ((h: { appId: string; connections: number } | undefined) => void) | undefined;
   private heardAt: { channel: string; cursor: string } | undefined;
+  /** ruling 8's reading of each hello's count while listening */
+  private readonly watch: ConflictWatch;
 
   constructor(private readonly o: SlackPendingSourceOptions) {
     this.secrets = [o.appToken, o.botToken];
     this.redactOwn = redactorOf(this.secrets, "<token>");
+    this.watch = new ConflictWatch({ clock: o.clock, recheck: () => void this.recheck(), verdict: (on) => this.ctx?.conflict(on) });
   }
 
   async check(signal: AbortSignal): Promise<PendingBot | Refusal> {
@@ -160,9 +170,10 @@ export class SlackPendingSource implements PendingSource {
       ctx.signal.addEventListener("abort", end, { once: true });
       // the check's socket listens on; after a Not me (the last one closed once its sender was heard) a fresh one is opened
       if (!this.socket) this.startSocket();
-      else if (this.connections > 0) ctx.conflict(this.connections > 1);
+      else if (this.connections > 0) this.watch.hello(this.connections);
     });
     if (this.ctx === ctx) this.ctx = undefined;
+    this.watch.cancel();
     // heard, or the connection ended: the socket is closed either way
     await this.closeSocket();
   }
@@ -227,11 +238,13 @@ export class SlackPendingSource implements PendingSource {
         if (this.socket !== socket) return;
         this.connections = h.connections;
         if (this.helloWait) this.helloWait(h);
-        else this.ctx?.conflict(h.connections > 1);
+        else if (this.ctx) this.watch.hello(h.connections);
       },
       envelope: (e) => (this.socket === socket ? this.envelope(e) : Promise.resolve("hold" as const)),
       down: () => {
-        if (this.socket === socket) this.connections = 0;
+        if (this.socket !== socket) return;
+        this.connections = 0;
+        this.watch.closed();
       },
     });
   }
@@ -240,7 +253,17 @@ export class SlackPendingSource implements PendingSource {
     const socket = this.socket;
     this.socket = undefined;
     this.connections = 0;
-    if (socket) await socket.dispose();
+    if (!socket) return;
+    await socket.dispose();
+    this.watch.closed();
+  }
+
+  /** ruling 8's recheck while listening: the socket closed and a fresh one opened, whose hello says how many Slack holds now */
+  private async recheck(): Promise<void> {
+    const ctx = this.ctx;
+    if (!ctx || ctx.signal.aborted || !this.socket) return;
+    await this.closeSocket();
+    if (this.ctx === ctx && !ctx.signal.aborted) this.startSocket();
   }
 
   /** one envelope while pending: the first DM from a person heard (and acked, then the socket closed); everything else acked and dropped;
@@ -262,11 +285,12 @@ export class SlackPendingSource implements PendingSource {
       ctx.log(`identity: Slack's users.info did not answer (${this.redact(reasonOf(err))}); the message is not acked, so Slack sends it again`);
       return "hold";
     }
-    if (user.isBot) return "ack";
+    const kind = memberKind(user, who.teamId);
+    if (kind === "bot") return "ack";
     if (this.ctx !== ctx || ctx.signal.aborted) return "hold";
     // only a full member of the bot's own team is ever heard: someone of another team (a shared channel's DM), a guest or a deactivated
     // account is counted in Not you, and the sheet waits on
-    if (user.teamId !== who.teamId || user.restricted || user.deleted) {
+    if (kind === "stranger") {
       ctx.stranger(id);
       return "ack";
     }
@@ -283,15 +307,399 @@ export class SlackPendingSource implements PendingSource {
 /** an envelope's DM from a person to this app in this team, or undefined for anything else: a channel, a group or an mpim, a bot's
  * message, an edit or a deletion (any subtype), another team or app, or ids not of Slack's shapes */
 function dmOf(e: Envelope, who: Who): Dm | undefined {
+  const m = imMessageOf(envelopeEvent(e, who.teamId, who.appId));
+  if (!m || m.bot || m.subtype !== undefined || m.user === undefined) return undefined;
+  return { user: m.user, channel: m.channel, ts: m.ts, text: m.text };
+}
+
+// ---- what the pending source and the connector both read ---------------------------------------------------------------------------
+
+/** a Slack message ts: seconds, a dot, six digits */
+const TS_SHAPE = /^\d{9,12}\.\d{6}$/;
+const USER_SHAPE = /^[UW][A-Z0-9]{2,20}$/;
+const DM_SHAPE = /^D[A-Z0-9]{2,20}$/;
+
+/** a message event in a DM (channel_type im), as both Socket Mode and conversations.history carry it: who wrote (absent for some bots'),
+ * where, its ts, its text, its subtype, whether a bot wrote it, and the thread it was written in */
+interface ImMessage {
+  user?: string;
+  channel: string;
+  ts: string;
+  text: string;
+  subtype?: string;
+  bot: boolean;
+  threadTs?: string;
+}
+
+/** the event of an `events_api` envelope sent for this team and this app, or undefined */
+function envelopeEvent(e: Envelope, teamId: string, appId: string): unknown {
   if (e.type !== "events_api") return undefined;
   const p = e.payload as Record<string, unknown> | null | undefined;
-  if (!p || typeof p !== "object" || p.team_id !== who.teamId || p.api_app_id !== who.appId) return undefined;
-  const ev = p.event as Record<string, unknown> | null | undefined;
+  if (!p || typeof p !== "object" || p.team_id !== teamId || p.api_app_id !== appId) return undefined;
+  return p.event;
+}
+
+/** a DM's message event read, or undefined for anything that is not one: another type, a channel, a group or an mpim, ids not of Slack's
+ * shapes. A user id of another shape reads as no user (and the message is never anyone's) */
+function imMessageOf(raw: unknown): ImMessage | undefined {
+  const ev = raw as Record<string, unknown> | null | undefined;
   if (!ev || typeof ev !== "object" || ev.type !== "message" || ev.channel_type !== "im") return undefined;
-  if (ev.subtype !== undefined || ev.bot_id !== undefined || ev.bot_profile !== undefined) return undefined;
-  const { user, channel, ts, text } = ev;
-  if (typeof user !== "string" || !/^[UW][A-Z0-9]{2,20}$/.test(user)) return undefined;
-  if (typeof channel !== "string" || !/^D[A-Z0-9]{2,20}$/.test(channel)) return undefined;
-  if (typeof ts !== "string" || !/^\d{9,12}\.\d{6}$/.test(ts)) return undefined;
-  return { user, channel, ts, text: typeof text === "string" ? text : "" };
+  const { user, channel, ts, text, subtype, thread_ts } = ev;
+  if (typeof channel !== "string" || !DM_SHAPE.test(channel)) return undefined;
+  if (typeof ts !== "string" || !TS_SHAPE.test(ts)) return undefined;
+  return {
+    ...(typeof user === "string" && USER_SHAPE.test(user) ? { user } : {}),
+    channel,
+    ts,
+    text: typeof text === "string" ? text : "",
+    ...(subtype !== undefined ? { subtype: typeof subtype === "string" ? subtype : "?" } : {}),
+    bot: ev.bot_id !== undefined || ev.bot_profile !== undefined || subtype === "bot_message",
+    ...(typeof thread_ts === "string" && TS_SHAPE.test(thread_ts) ? { threadTs: thread_ts } : {}),
+  };
+}
+
+/** what users.info says a DM's sender is, by sheet 3's one rule: a bot (dropped); someone sheet 3 never hears — a member of another team,
+ * a guest (restricted or ultra_restricted), a deactivated account — (a stranger); or a full member of the bot's own team */
+export function memberKind(user: Awaited<ReturnType<SlackApi["usersInfo"]>>, teamId: string): "bot" | "stranger" | "member" {
+  if (user.isBot) return "bot";
+  if (user.teamId !== teamId || user.restricted || user.deleted) return "stranger";
+  return "member";
+}
+
+/** how long after the link's own close a reading of more than one socket is not taken at once (Slack can count the closed one for a few
+ * seconds), and how long after it the count is read again */
+export const CONFLICT_RECHECK_MS = 30_000;
+
+/** The plan's ruling 8, for the pending source and the connector alike: what each hello's num_connections says. One: no conflict. More
+ * than one, read more than CONFLICT_RECHECK_MS after the owner's own last close (`closed`), or read twice running: a conflict — another
+ * process holds a socket for the app. More than one read within that window of the owner's own close, for the first time: nothing yet —
+ * the next hello, or `recheck` (a fresh socket) CONFLICT_RECHECK_MS later, decides */
+export class ConflictWatch {
+  private closedAt = Number.NEGATIVE_INFINITY;
+  private suspect = false;
+  private timer: unknown;
+
+  constructor(private readonly o: { clock: IdentityClock; recheck: () => void; verdict: (conflict: boolean, connections: number) => void }) {}
+
+  /** the owner's own socket closed (or the owner has just started, after a socket of an earlier holder of its own) */
+  closed(): void {
+    this.closedAt = this.o.clock.now();
+  }
+
+  hello(connections: number): void {
+    this.cancel();
+    if (connections <= 1) {
+      this.suspect = false;
+      return this.o.verdict(false, connections);
+    }
+    if (!this.suspect && this.o.clock.now() - this.closedAt < CONFLICT_RECHECK_MS) {
+      this.suspect = true;
+      this.timer = this.o.clock.setTimeout(() => {
+        this.timer = undefined;
+        this.o.recheck();
+      }, CONFLICT_RECHECK_MS);
+      return;
+    }
+    this.suspect = false;
+    this.o.verdict(true, connections);
+  }
+
+  cancel(): void {
+    if (this.timer !== undefined) this.o.clock.clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+}
+
+// ---- the connected connector -------------------------------------------------------------------------------------------------------
+
+/** where the connector keeps the ts of the last DM message it handled: `<home>/identity/slack.cursor`, the analogue of telegram.offset */
+export const CURSOR_FILE = "slack.cursor";
+/** what the operator is answered when Chat with Gravit does not tick Slack */
+export const SLACK_CHAT_OFF = chatOffLine("slack");
+/** the backfill's page: conversations.history's limit */
+export const BACKFILL_PAGE = 100;
+/** Slack's codes for tokens it no longer takes: the status's pollFailing until a call goes through */
+const AUTH_CODES = new Set(["invalid_auth", "token_revoked", "account_inactive", "not_authed"]);
+/** how many answered messages are remembered, so a live envelope and the backfill do not answer the same one twice */
+const ANSWERED_MAX = 200;
+
+/** the phone's five commands as the operator types them on Slack, whose composer takes a leading `/` as its own (ruling 5) */
+const BANG_COMMAND = /^(\s*)!(status|pause|mute|new|stop)(?=\s|$)/i;
+
+/** `!status`, `!pause …`, `!mute …`, `!new` and `!stop` (any case, after any leading space) as the same text with `/` — what the face's
+ * parseCommand and the Chat-off pass-through read; every other text as it is */
+export const normalizeCommand = (text: string): string => text.replace(BANG_COMMAND, "$1/$2");
+
+/** a ts's place in time: its seconds and its microseconds, compared as numbers (a ts has more digits than a double keeps) */
+const tsCompare = (a: string, b: string): number => {
+  const [as, au] = a.split(".");
+  const [bs, bu] = b.split(".");
+  return Number(as) - Number(bs) || Number(au) - Number(bu);
+};
+/** `ts` as an ISO time: its seconds and milliseconds */
+const atOf = (ts: string): string => {
+  const [sec, micro] = ts.split(".");
+  return new Date(Number(sec) * 1000 + Math.floor(Number(micro) / 1000)).toISOString();
+};
+/** a time as a ts */
+const tsAt = (ms: number): string => `${Math.floor(ms / 1000)}.${String((ms % 1000) * 1000).padStart(6, "0")}`;
+
+export interface SlackConnectorDeps {
+  home: string;
+  /** the bot token's client (and the app-level token's, which the socket opens with) */
+  api: SlackApi;
+  socket: SlackSocket;
+  binding: Binding;
+  secret: SlackSecret;
+  inbox: InboxRing;
+  strangers: Strangers;
+  /** the senders' references the owner blocked */
+  blocked: () => string[];
+  /** whether the Chat with Gravit row ticks Slack */
+  chatOn: () => boolean;
+  /** a line to the operator, in the DM */
+  reply: (text: string) => Promise<void>;
+  /** the ts of the last DM message handled; undefined: the connector's start (nothing earlier is read) */
+  cursor: string | undefined;
+  clock: IdentityClock;
+  log: (l: string) => void;
+}
+
+/**
+ * SLACK, ONCE CONNECTED: one Socket Mode link for the app (slack-socket.ts), and what it hears.
+ *
+ * At every hello — before any live envelope is handled, which waits unacked in the link — the DM's history after the cursor
+ * (conversations.history, not inclusive, 100 a page, at most INBOX_MAX messages: the newest, when there are more, with one line), oldest
+ * first, each row read as the event it would have been. A backfill that fails throws: the link closes the socket, backs off and opens
+ * another, whose hello backfills again from the cursor where it stayed.
+ *
+ * Each message, live or backfilled:
+ *   - the bound operator's text (an events_api envelope of this app and this team, a message in the DM `secret.channel`, from the
+ *     operator's user id, no bot and no subtype): `!` commands rewritten to `/` (normalizeCommand); with Chat with Gravit not ticking
+ *     Slack and no command, answered SLACK_CHAT_OFF and kept nowhere; else appended to the inbox as `slack:<ts>` (with `slack:<thread_ts>`
+ *     as replyTo in a thread), and only then acked and the cursor moved past it. A text the inbox cannot store is held: not acked, so Slack
+ *     sends it again (retry_attempt > 0), and the inbox keeps a network id once;
+ *   - the operator's file (subtype file_share): answered "text only, please";
+ *   - anyone else's DM: by sheet 3's rule (memberKind) a bot is dropped, and anyone else — another team's member, a guest, a deactivated
+ *     account, a full member who is not the operator — is a stranger: counted in Not you unless blocked, never stored, never answered;
+ *   - everything else (a channel, a group or an mpim, a bot, an edit or a deletion, another team or app, a slash command): dropped.
+ * Everything but a held text is acked at once. Each hello's num_connections is read by ruling 8 (ConflictWatch): a conflict is the
+ * status's conflictAt and a line at most once a minute.
+ */
+export class SlackConnector implements Connector {
+  /** where a connector of this home starts after a restart: the ts kept in `<home>/identity/slack.cursor`, or undefined */
+  static resumeFrom(home: string): string | undefined {
+    try {
+      const ts = readFileSync(join(identityDir(home), CURSOR_FILE), "utf8").trim();
+      return TS_SHAPE.test(ts) ? ts : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private cursor: string | undefined;
+  private started = false;
+  private disposed = false;
+  private conflictAt: string | undefined;
+  private conflictSaidAt = Number.NEGATIVE_INFINITY;
+  private authFailing: { since: string; reason: string } | undefined;
+  private blockedBySender = false;
+  private readonly answered = new Set<string>();
+  private readonly team: string;
+  private readonly operator: string;
+  private readonly watch: ConflictWatch;
+
+  constructor(private readonly d: SlackConnectorDeps) {
+    this.cursor = d.cursor !== undefined && TS_SHAPE.test(d.cursor) ? d.cursor : undefined;
+    const at = d.binding.operatorId.indexOf(":");
+    this.team = d.binding.operatorId.slice(0, at);
+    this.operator = d.binding.operatorId.slice(at + 1);
+    this.watch = new ConflictWatch({ clock: d.clock, recheck: () => d.socket.reopen("a recheck of how many sockets Slack holds for the app"), verdict: (on, n) => this.verdict(on, n) });
+  }
+
+  start(): void {
+    if (this.started || this.disposed) return;
+    this.started = true;
+    // nothing before the start is read when no cursor was kept
+    this.cursor ??= tsAt(this.d.clock.now());
+    // an earlier socket of this app's own (the pending connection's, or a run before a restart) may still be counted for a few seconds
+    this.watch.closed();
+    this.d.socket.run({
+      hello: async (h) => {
+        if (this.disposed) return;
+        this.watch.hello(h.connections);
+        await this.backfill();
+      },
+      envelope: (e) => this.envelope(e),
+      down: () => this.watch.closed(),
+    });
+  }
+
+  status(): NetworkStatus {
+    const s = this.d.socket.status();
+    const failing = s.failing ?? this.authFailing;
+    return {
+      network: "slack",
+      polling: !this.disposed && s.open,
+      ...(s.lastFrameAt === undefined ? {} : { lastPollAt: s.lastFrameAt }),
+      ...(this.conflictAt === undefined ? {} : { conflictAt: this.conflictAt }),
+      ...(this.blockedBySender ? { blocked: true as const } : {}),
+      ...(failing === undefined ? {} : { pollFailing: { ...failing } }),
+    };
+  }
+
+  setBlocked(blocked: boolean): void {
+    this.blockedBySender = blocked;
+  }
+
+  /** the link stopped and its socket closed; the caller aborts the client's signal, which cuts a call under way */
+  async dispose(): Promise<void> {
+    this.disposed = true;
+    this.watch.cancel();
+    await this.d.socket.dispose();
+  }
+
+  // ---- inside ----
+
+  private stamp(): string {
+    return new Date(this.d.clock.now()).toISOString();
+  }
+
+  private verdict(on: boolean, connections: number): void {
+    if (!on) {
+      this.conflictAt = undefined;
+      return;
+    }
+    this.conflictAt = this.stamp();
+    const at = this.d.clock.now();
+    if (at - this.conflictSaidAt < RECORD_EVERY_MS) return;
+    this.conflictSaidAt = at;
+    this.d.log(`identity: Slack counts ${connections} sockets for this app: another process holds its Socket Mode link, and Slack spreads the DM's messages across them`);
+  }
+
+  /** a Web API call that failed: Slack's codes for tokens it no longer takes are the status's pollFailing */
+  private failed(err: unknown): void {
+    if (err instanceof SlackApiError && AUTH_CODES.has(err.code)) this.authFailing = { since: this.authFailing?.since ?? this.stamp(), reason: err.code };
+  }
+
+  /** the cursor moved to `ts` (never back), and written; a file that cannot be written is one line — the next hello reads from the last
+   * one written, and the inbox keeps a network id once */
+  private advance(ts: string): void {
+    if (this.cursor !== undefined && tsCompare(ts, this.cursor) <= 0) return;
+    this.cursor = ts;
+    try {
+      writeIdentityFile(this.d.home, CURSOR_FILE, `${ts}\n`);
+    } catch (err) {
+      this.d.log(`identity: Slack's cursor could not be written (${(err as NodeJS.ErrnoException).code ?? reasonOf(err)})`);
+    }
+  }
+
+  /** the DM's history after the cursor, oldest first, each row handled and the cursor moved past it; throws when a page cannot be read or
+   * a text cannot be stored, the cursor left before it */
+  private async backfill(): Promise<void> {
+    const channel = this.d.secret.channel;
+    const oldest = this.cursor ?? tsAt(this.d.clock.now());
+    const rows: unknown[] = [];
+    let next: string | undefined;
+    do {
+      let page: Awaited<ReturnType<SlackApi["history"]>>;
+      try {
+        page = await this.d.api.history(channel, oldest, BACKFILL_PAGE, next);
+      } catch (err) {
+        this.failed(err);
+        throw new Error(`the backfill could not read the DM's history (${reasonOf(err)})`);
+      }
+      this.authFailing = undefined;
+      rows.push(...page.messages);
+      next = page.next;
+    } while (next !== undefined && rows.length < INBOX_MAX && !this.disposed);
+    if (rows.length > INBOX_MAX || next !== undefined) this.d.log(`identity: more than ${INBOX_MAX} messages in the Slack DM since the cursor: the newest ${INBOX_MAX} are read, the older ones are not`);
+    const messages = rows
+      .slice(0, INBOX_MAX)
+      .map((row) => imMessageOf(row !== null && typeof row === "object" ? { ...(row as object), channel, channel_type: "im" } : undefined))
+      .filter((m): m is ImMessage => m !== undefined && tsCompare(m.ts, oldest) > 0)
+      .sort((a, b) => tsCompare(a.ts, b.ts));
+    for (const m of messages) {
+      if (this.disposed) return;
+      if (!(await this.handle(m, false))) throw new Error("the backfill stopped at a text the inbox could not store");
+      this.advance(m.ts);
+    }
+  }
+
+  private async envelope(e: Envelope): Promise<"ack" | "hold"> {
+    if (this.disposed) return "hold";
+    const m = imMessageOf(envelopeEvent(e, this.team, this.d.secret.appId));
+    if (!m) return "ack";
+    return (await this.handle(m, true)) ? "ack" : "hold";
+  }
+
+  /** one message handled; false when it must be held — a text the inbox could not store, or a stranger users.info did not answer for */
+  private async handle(m: ImMessage, live: boolean): Promise<boolean> {
+    if (m.bot || m.user === undefined) return true;
+    if (m.user !== this.operator) {
+      // the operator's DM holds only the operator and the bot: anyone else is heard live, in their own DM with the app
+      if (!live || m.subtype !== undefined) return true;
+      return this.stranger(m.user);
+    }
+    if (m.channel !== this.d.secret.channel) return true;
+    if (m.subtype === "file_share") {
+      await this.answer(m.ts, TEXT_ONLY);
+      this.advance(m.ts);
+      return true;
+    }
+    if (m.subtype !== undefined) return true;
+    const text = normalizeCommand(m.text);
+    if (!this.d.chatOn() && !PHONE_COMMAND.test(text.trim())) {
+      await this.answer(m.ts, SLACK_CHAT_OFF);
+      this.advance(m.ts);
+      return true;
+    }
+    const replyTo = m.threadTs !== undefined && m.threadTs !== m.ts ? `slack:${m.threadTs}` : undefined;
+    try {
+      this.d.inbox.append({ network: "slack", messageId: `slack:${m.ts}`, ...(replyTo ? { replyTo } : {}), text, at: atOf(m.ts) }, this.d.binding.botId);
+    } catch (err) {
+      this.d.log(`identity: the operator's Slack message could not be stored in the inbox (${(err as NodeJS.ErrnoException).code ?? reasonOf(err)}); it is not acked, so Slack sends it again`);
+      return false;
+    }
+    this.advance(m.ts);
+    return true;
+  }
+
+  /** someone other than the operator in a DM with the app: dropped when blocked or a bot, else counted; held when users.info does not
+   * answer, so Slack sends it again */
+  private async stranger(user: string): Promise<boolean> {
+    const id = `${this.team}:${user}`;
+    if (this.d.blocked().includes(senderRef("slack", id))) return true;
+    let info: Awaited<ReturnType<SlackApi["usersInfo"]>>;
+    try {
+      info = await this.d.api.usersInfo(user);
+    } catch (err) {
+      this.failed(err);
+      this.d.log(`identity: Slack's users.info did not answer (${reasonOf(err)}); the message is not acked, so Slack sends it again`);
+      return false;
+    }
+    this.authFailing = undefined;
+    if (memberKind(info, this.team) === "bot") return true;
+    try {
+      this.d.strangers.note("slack", id, this.d.clock.now());
+    } catch (err) {
+      this.d.log(`identity: a stranger could not be counted (${(err as NodeJS.ErrnoException).code ?? reasonOf(err)}); the socket goes on`);
+    }
+    return true;
+  }
+
+  /** a line to the operator about the message `ts`, once for that message however often it is read */
+  private async answer(ts: string, text: string): Promise<void> {
+    if (this.answered.has(ts)) return;
+    this.answered.add(ts);
+    if (this.answered.size > ANSWERED_MAX) this.answered.delete(this.answered.values().next().value as string);
+    try {
+      await this.d.reply(text);
+      this.authFailing = undefined;
+      this.blockedBySender = false;
+    } catch (err) {
+      this.failed(err);
+      this.d.log(`identity: a line to the operator on Slack did not go (${reasonOf(err)})`);
+    }
+  }
 }

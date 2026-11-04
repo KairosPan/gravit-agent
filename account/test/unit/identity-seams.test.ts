@@ -210,18 +210,22 @@ describe("the pending shell over a source", () => {
   });
 });
 
-describe("a Slack binding before Slack is built", () => {
-  it("starts nothing, says so in one line, and Telegram's words are untouched", async () => {
+describe("a Slack binding before Slack's transport is built", () => {
+  it("listens (here on a loopback port where nothing answers), sends nothing, and Telegram's words are untouched", async () => {
     const home = newHome();
     writeNetworkSecret(home, "slack", SLACK_SECRET);
     const s = loadIdentity(home);
     saveIdentity(home, { ...s, bindings: [{ network: "slack", speaksAs: "@gravit", botId: SLACK_SECRET.botId, talksOnlyWith: "@pan", operatorId: SLACK_SECRET.operatorId, since: new Date().toISOString(), fingerprint: "ab12cd34" }] });
     const lines: string[] = [];
-    const id = new Identity({ home, apiBase: "http://127.0.0.1:9", log: (l) => void lines.push(l) });
+    const id = new Identity({ home, apiBase: "http://127.0.0.1:9", slackApiBase: "http://127.0.0.1:9/api", log: (l) => void lines.push(l) });
     try {
-      expect(lines.filter((l) => l.includes("Slack is not spoken on"))).toHaveLength(1);
-      expect(lines.join("\n")).not.toContain(SLACK_SECRET.botToken);
-      expect(id.phoneStatus().networks).toEqual([{ network: "slack", polling: false }]);
+      expect(lines.filter((l) => l.includes("not spoken on") || l.includes("do not agree"))).toEqual([]);
+      expect(id.phoneStatus().networks).toEqual([expect.objectContaining({ network: "slack", polling: false })]);
+      // the link's open failed, said without a token
+      for (let i = 0; i < 200 && !lines.some((l) => l.includes("apps.connections.open failed")); i++) await new Promise((r) => setTimeout(r, 10));
+      expect(lines.some((l) => l.includes("apps.connections.open failed"))).toBe(true);
+      expect(id.phoneStatus().networks[0]!.pollFailing).toEqual({ since: expect.any(String), reason: expect.any(String) });
+      for (const t of [SLACK_SECRET.botToken, SLACK_SECRET.appToken]) expect(lines.join("\n")).not.toContain(t);
       expect(await id.send({ kind: "chat", text: "hi", network: "slack" })).toEqual({ ok: true, held: "nothing connected" });
       expect(id.problem({ type: "disconnectNetwork", network: "telegram", nonce: 1 } as IdentityAction)).toBe(IDENTITY_WORDS.notConnectedOn("telegram"));
       expect(id.problem({ type: "disconnectNetwork", network: "slack", nonce: 1 } as IdentityAction)).toBeNull();

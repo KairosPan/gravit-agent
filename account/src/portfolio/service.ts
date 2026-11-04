@@ -104,6 +104,7 @@ import { telegramApiBase } from "./identity/bot-api.ts";
 import { Identity } from "./identity/identity.ts";
 import { slackApiBase } from "./identity/slack-api.ts";
 import type { OpenSocket } from "./identity/slack-socket.ts";
+import type { IdentityClock } from "./identity/telegram.ts";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 export const FIXTURES = join(ROOT, "fixtures", "home", "portfolio");
@@ -168,7 +169,7 @@ export interface ServiceOptions {
    * bot-api.ts telegramApiBase), Slack's Web API (Slack's own, or ACCOUNT_SLACK_API's loopback override — slack-api.ts slackApiBase) and
    * how its sockets are opened (Node's WebSocket), the fetch it is reached with, the pending connection's long poll in seconds (25), the connected poller's (50) and its clock. Tests
    * point it at a fake Bot API */
-  identity?: { apiBase?: string | undefined; slackApiBase?: string | undefined; openSocket?: OpenSocket | undefined; fetch?: typeof fetch | undefined; pollTimeoutS?: number | undefined; connectedPollTimeoutS?: number | undefined; now?: (() => number) | undefined } | undefined;
+  identity?: { apiBase?: string | undefined; slackApiBase?: string | undefined; openSocket?: OpenSocket | undefined; fetch?: typeof fetch | undefined; pollTimeoutS?: number | undefined; connectedPollTimeoutS?: number | undefined; now?: (() => number) | undefined; clock?: IdentityClock | undefined } | undefined;
   /** THE VENUES' LIVE STREAMS: the market's hub as the account mirrors it (server.ts main: market/hub.ts RemoteHub), or a test's (a hub
    * over a stand-in WebSocket, or test/standin's stand-in prices); without one nothing is streamed — every price is a REST read, as before */
   streams?: MarketHub | undefined;
@@ -420,7 +421,7 @@ export class PortfolioService {
   /** the identity on this home: its state and the strangers file read, no poll begun until a token is sent */
   private mountIdentity(): Identity {
     const o = this.opts.identity ?? {};
-    return new Identity({ home: this.opts.home, apiBase: o.apiBase ?? telegramApiBase(process.env, (l) => console.error(l)), slackApiBase: o.slackApiBase ?? slackApiBase(process.env, (l) => console.error(l)), openSocket: o.openSocket, fetch: o.fetch, pollTimeoutS: o.pollTimeoutS, connectedPollTimeoutS: o.connectedPollTimeoutS, now: o.now, readOnly: this.opts.liveWrites === undefined });
+    return new Identity({ home: this.opts.home, apiBase: o.apiBase ?? telegramApiBase(process.env, (l) => console.error(l)), slackApiBase: o.slackApiBase ?? slackApiBase(process.env, (l) => console.error(l)), openSocket: o.openSocket, fetch: o.fetch, pollTimeoutS: o.pollTimeoutS, connectedPollTimeoutS: o.connectedPollTimeoutS, now: o.now, clock: o.clock, readOnly: this.opts.liveWrites === undefined });
   }
 
   /** A signature outlives the process that first saw it. On start, every signed envelope in this home's ledgers has its nonce marked used again,

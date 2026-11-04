@@ -1,9 +1,10 @@
 /** ACCOUNT › IDENTITY — the service the rest of the account talks to about the networks Gravit speaks on.
  *
  * It holds the pending connection of Connect's sheets 1 to 3 (pending.ts), the strangers (store.ts Strangers), the identity state
- * (store.ts: bindings, routing, quiet hours, blocked), each connected network's connector (`Connector`: telegram.ts TelegramConnector)
- * and transport (`Transport`: telegram.ts TelegramTransport), and the inbox the connectors fill (inbox.ts InboxRing), which the face's
- * desk long-polls (`inbox`). Slack's connector and transport are later tasks': until then a Slack binding starts nothing, with one line. The poller starts when the service is created on a home that holds a
+ * (store.ts: bindings, routing, quiet hours, blocked), each connected network's connector (`Connector`: telegram.ts TelegramConnector,
+ * slack.ts SlackConnector) and transport (`Transport`: telegram.ts TelegramTransport), and the inbox the connectors fill (inbox.ts
+ * InboxRing), which the face's desk long-polls (`inbox`). Slack's transport is a later task's: until then the account hears on Slack
+ * (and answers its own fixed lines there) but sends nothing else on it. The poller starts when the service is created on a home that holds a
  * binding and its token file, and at a connect; a disconnect stops it. The four owner types land here once the
  * door (account/exchange.ts) has checked the signature, the owner, the nonce and, for a connect, the ten minutes:
  *
@@ -46,8 +47,9 @@ import { InboxRing, type InboxMessage } from "./inbox.ts";
 import { operatorHandleOf, PendingConnections, type PendingResume } from "./pending.ts";
 import { IDENTITY_WORDS } from "./routes.ts";
 import { readNetworkSecret, removeNetworkSecret, secretsOf, writeNetworkSecret, type SlackSecret, type TelegramSecret } from "./secret-file.ts";
-import { SLACK_MANIFEST } from "./slack-api.ts";
-import type { OpenSocket } from "./slack-socket.ts";
+import { CURSOR_FILE, SlackConnector } from "./slack.ts";
+import { escapeSlack, SLACK_API, SLACK_MANIFEST, SlackApi } from "./slack-api.ts";
+import { SlackSocket, type OpenSocket } from "./slack-socket.ts";
 import { BLOCKED_MAX, loadIdentity, MASKED, saveIdentity, Strangers, writeIdentityFile, type Binding, type IdentityState, type Stranger } from "./store.ts";
 import { OFFSET_FILE, realClock, TelegramConnector, TelegramTransport, type IdentityClock, type NetworkStatus } from "./telegram.ts";
 
@@ -193,6 +195,8 @@ export class Identity {
   private readonly clock: IdentityClock;
   private readonly connectors = new Map<Network, Connector>();
   private readonly transports = new Map<Network, Transport>();
+  /** each Slack client's signal, aborted when its connector stops (until Slack has a transport that holds it) */
+  private readonly cuts = new Map<Network, AbortController>();
   /** a 403 on a send, for a network with no poller running (a read-only account) */
   private readonly sendBlocked = new Map<Network, boolean>();
   /** a send the network refused for its tokens (`auth`): the status reads pollFailing until a part goes */
@@ -402,7 +406,7 @@ export class Identity {
   async dispose(): Promise<void> {
     this.disposed = true;
     this.pending.dispose();
-    await Promise.all([...new Set([...this.transports.keys(), ...this.connectors.keys()])].map((n) => this.stopConnector(n)));
+    await Promise.all([...new Set([...this.transports.keys(), ...this.connectors.keys(), ...this.cuts.keys()])].map((n) => this.stopConnector(n)));
   }
 
   // ---- inside ----
@@ -596,14 +600,57 @@ export class Identity {
   }
 
   /** the network's transport and connector, by network: from `resume` after a connect (where the pending connection stood after the
-   * message heard), else from where the connector's own file says it stopped. Slack's are later tasks': a Slack binding starts nothing */
+   * message heard), else from where the connector's own file says it stopped */
   private startConnector(binding: Binding, secret: TelegramSecret | SlackSecret, resume?: PendingResume): void {
-    if (this.transports.has(binding.network)) return;
+    if (this.transports.has(binding.network) || this.connectors.has(binding.network) || this.cuts.has(binding.network)) return;
     if (binding.network === "telegram" && "token" in secret) {
       const offset = resume?.network === "telegram" ? resume.offset : TelegramConnector.resumeFrom(this.home);
       return this.startTelegram(binding, secret, offset);
     }
-    this.log(`identity: ${NETWORK_NAME[binding.network]} is not spoken on by this build of the account: its binding is kept, and nothing is heard or sent on it`);
+    if (binding.network === "slack" && "appToken" in secret) {
+      const cursor = resume?.network === "slack" && resume.cursor !== "" ? resume.cursor : SlackConnector.resumeFrom(this.home);
+      return this.startSlack(binding, secret, cursor);
+    }
+    this.log(`identity: ${NETWORK_NAME[binding.network]}'s binding and its token file do not agree: nothing is heard or sent on it`);
+  }
+
+  /** Slack's socket and connector, from `cursor` on: the cursor written first — after a connect, the ts of the DM the operator was heard
+   * by, so their first words are not taken into the inbox. A read-only account opens no socket */
+  private startSlack(binding: Binding, secret: SlackSecret, cursor: string | undefined): void {
+    if (cursor !== undefined) {
+      try {
+        writeIdentityFile(this.home, CURSOR_FILE, `${cursor}\n`);
+      } catch (err) {
+        this.log(`identity: Slack's cursor could not be written (${err instanceof Error ? ((err as NodeJS.ErrnoException).code ?? err.name) : "error"}); the socket starts from it all the same`);
+      }
+    }
+    if (this.deps.readOnly) return;
+    const stop = new AbortController();
+    const apiBase = this.deps.slackApiBase ?? SLACK_API;
+    const api = new SlackApi({ token: secret.botToken, appToken: secret.appToken, apiBase, fetch: this.deps.fetch, signal: stop.signal });
+    // both tokens' exact spellings, and every Slack token's shape, out of every line
+    const log = (l: string) => this.log(api.redact(l));
+    const socket = new SlackSocket({ api, apiBase, open: this.deps.openSocket, clock: this.clock, log });
+    const connector = new SlackConnector({
+      home: this.home,
+      api,
+      socket,
+      binding,
+      secret,
+      inbox: this.inboxRing,
+      strangers: this.store,
+      blocked: () => this.state.blocked,
+      chatOn: () => this.state.routing.chat.includes(binding.network),
+      reply: async (text) => {
+        await api.postMessage(secret.channel, escapeSlack(text));
+      },
+      cursor,
+      clock: this.clock,
+      log,
+    });
+    this.cuts.set(binding.network, stop);
+    this.connectors.set(binding.network, connector);
+    connector.start();
   }
 
   /** Telegram's poller, from `offset` on: the offset written first — after a connect, the one after the message the operator was heard by,
@@ -648,11 +695,14 @@ export class Identity {
   private async stopConnector(network: Network): Promise<void> {
     const transport = this.transports.get(network);
     const connector = this.connectors.get(network);
+    const cut = this.cuts.get(network);
     this.transports.delete(network);
     this.connectors.delete(network);
+    this.cuts.delete(network);
     this.sendBlocked.delete(network);
     this.sendAuthFailing.delete(network);
     transport?.dispose();
+    cut?.abort();
     await connector?.dispose();
   }
 

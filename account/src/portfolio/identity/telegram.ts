@@ -50,7 +50,7 @@ export const TEXT_ONLY = "text only, please";
 export const CHAT_OFF = chatOffLine("telegram");
 /** the phone's five commands, as the face's bridge parses them (face/src/phone-bridge.ts `COMMAND`): stored for the desk
  * whatever the Chat row says, so the phone may always pause or mute (D19) */
-const PHONE_COMMAND = /^\/(status|pause|mute|new|stop)(?:@[A-Za-z0-9_]+)?(?:\s+[\s\S]*)?$/i;
+export const PHONE_COMMAND = /^\/(status|pause|mute|new|stop)(?:@[A-Za-z0-9_]+)?(?:\s+[\s\S]*)?$/i;
 
 export interface IdentityClock {
   now(): number;

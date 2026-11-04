@@ -5,7 +5,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { escapeSlack, SLACK_MANIFEST, SlackApi, SlackApiError, slackApiBase, socketUrlOk } from "../../src/portfolio/identity/slack-api.ts";
-import { LINK_DISABLED, SOCKET_REFRESH_MS, SlackSocket, type Envelope } from "../../src/portfolio/identity/slack-socket.ts";
+import { HELLO_DEADLINE_MS, LINK_DISABLED, SOCKET_REFRESH_MS, SlackSocket, type Envelope, type SocketLike } from "../../src/portfolio/identity/slack-socket.ts";
 import type { IdentityClock } from "../../src/portfolio/identity/telegram.ts";
 import { fakeSlack, slackTokens, type FakeSlack } from "../identity-fakes.ts";
 
@@ -21,18 +21,25 @@ async function until(cond: () => boolean, ms = 5_000, what = "the condition"): P
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** a clock whose waits fire at once (moving `now` by what they waited, read off `waits`), but whose 30-minute silence timer fires only
- * when the test says so (`silence()`) */
-function testClock(): IdentityClock & { waits: number[]; silence(): void } {
+ * when the test says so (`silence()`), and whose 30 s hello deadline only at `noHello()` */
+function testClock(): IdentityClock & { waits: number[]; silence(): void; noHello(): number } {
   let now = Date.parse("2026-11-04T15:00:00Z");
   const waits: number[] = [];
-  const held = new Map<object, () => void>();
+  const held = new Map<object, { ms: number; fn: () => void }>();
+  const fire = (ms: number) => {
+    now += ms;
+    const due = [...held.entries()].filter(([, v]) => v.ms === ms);
+    for (const [h] of due) held.delete(h);
+    for (const [, v] of due) v.fn();
+    return due.length;
+  };
   return {
     waits,
     now: () => now,
     setTimeout: (fn, ms) => {
-      if (ms === SOCKET_REFRESH_MS) {
+      if (ms === SOCKET_REFRESH_MS || ms === HELLO_DEADLINE_MS) {
         const h = {};
-        held.set(h, fn);
+        held.set(h, { ms, fn });
         return h;
       }
       waits.push(ms);
@@ -46,12 +53,37 @@ function testClock(): IdentityClock & { waits: number[]; silence(): void } {
       else clearTimeout(h as NodeJS.Timeout);
     },
     silence() {
-      now += SOCKET_REFRESH_MS;
-      const fns = [...held.values()];
-      held.clear();
-      for (const fn of fns) fn();
+      fire(SOCKET_REFRESH_MS);
     },
+    noHello: () => fire(HELLO_DEADLINE_MS),
   };
+}
+
+/** sockets that open and never say a word: no hello, no frame; close() closes them (a close event, code 1000) */
+function mute(): { open: (url: string) => SocketLike; opened: string[]; closed: number } {
+  const out = { opened: [] as string[], closed: 0, open: (url: string): SocketLike => {
+    out.opened.push(url);
+    const listeners = new Map<string, Array<(ev: unknown) => void>>();
+    let state = 1;
+    return {
+      get readyState() {
+        return state;
+      },
+      send: () => undefined,
+      close: () => {
+        if (state === 3) return;
+        state = 3;
+        out.closed += 1;
+        setTimeout(() => {
+          for (const fn of listeners.get("close") ?? []) fn({ code: 1000, reason: "" });
+        }, 1);
+      },
+      addEventListener: ((type: string, fn: (ev: unknown) => void) => {
+        listeners.set(type, [...(listeners.get(type) ?? []), fn]);
+      }) as SocketLike["addEventListener"],
+    } as SocketLike;
+  } };
+  return out;
 }
 
 const realClock = (): IdentityClock => ({
@@ -340,6 +372,74 @@ describe("the Socket Mode link", () => {
     slack.socketUrl("");
     await until(() => s.status().open, 5_000, "the hello once the URL is the fake's own");
     expect(slack.sockets()).toBe(1);
+  });
+
+  it("a socket with no hello in 30 s is closed and opened again after the backoff", async () => {
+    slack = await fakeSlack();
+    const clock = testClock();
+    const lines: string[] = [];
+    const quiet = mute();
+    const downs: string[] = [];
+    const s = new SlackSocket({ api: apiOf(slack), apiBase: slack.url, open: quiet.open, clock, log: (l) => lines.push(l) });
+    sockets.push(s);
+    s.run({ hello: async () => {}, envelope: async () => "ack", down: (r) => void downs.push(r) });
+    await until(() => quiet.opened.length === 1, 5_000, "the first socket");
+    await pause(30);
+    // nothing before the deadline: the socket waits, and the status is not open
+    expect(quiet.closed).toBe(0);
+    expect(s.status().open).toBe(false);
+    expect(clock.noHello()).toBe(1);
+    await until(() => quiet.opened.length === 2, 5_000, "the second socket");
+    expect(quiet.closed).toBe(1);
+    expect(clock.waits).toEqual([5_000]);
+    expect(downs).toEqual(["the socket sent no hello in 30 s"]);
+    expect(s.status().failing?.reason).toBe("the socket sent no hello in 30 s");
+    expect(lines.filter((l) => l.includes("sent no hello in 30 s"))).toHaveLength(1);
+    // again: the backoff doubles
+    expect(clock.noHello()).toBe(1);
+    await until(() => quiet.opened.length === 3, 5_000, "the third socket");
+    expect(clock.waits).toEqual([5_000, 10_000]);
+  });
+
+  it("a hello whose handler throws closes the socket and backs off, and the next hello is handed over again", async () => {
+    slack = await fakeSlack();
+    const clock = testClock();
+    const lines: string[] = [];
+    const seen: string[] = [];
+    let fails = 2;
+    const s = start(slack, clock, lines);
+    s.run({
+      hello: async () => {
+        seen.push("hello");
+        if (fails-- > 0) throw new Error("the backfill failed (HTTP 200 internal_error)");
+      },
+      envelope: async (e) => (seen.push(e.envelopeId), "ack"),
+      down: () => undefined,
+    });
+    await until(() => seen.filter((x) => x === "hello").length === 3, 5_000, "three hellos");
+    // each failed hello closed its socket and backed off, doubling; the hello that went resets the status
+    expect(clock.waits).toEqual([5_000, 10_000]);
+    expect(slack.events).toEqual(["open 1", "close 0", "open 1", "close 0", "open 1"]);
+    await until(() => s.status().open && s.status().failing === undefined, 5_000, "open again");
+    expect(lines.some((l) => l.includes("its hello could not be handled (the backfill failed (HTTP 200 internal_error))"))).toBe(true);
+    slack.push({ envelope_id: "after", type: "events_api", payload: {} });
+    await until(() => slack!.acks.includes("after"), 5_000, "the ack");
+    expect(seen.at(-1)).toBe("after");
+  });
+
+  it("reopen closes the socket and opens a fresh one at once", async () => {
+    slack = await fakeSlack();
+    const clock = testClock();
+    const hellos: number[] = [];
+    const downs: string[] = [];
+    const s = start(slack, clock);
+    s.run({ hello: async (h) => void hellos.push(h.connections), envelope: async () => "ack", down: (r) => void downs.push(r) });
+    await until(() => hellos.length === 1, 5_000, "the first hello");
+    s.reopen("a recheck");
+    await until(() => hellos.length === 2, 5_000, "the second hello");
+    expect(slack.events).toEqual(["open 1", "close 0", "open 1"]);
+    expect(downs).toEqual(["a recheck"]);
+    expect(clock.waits).toEqual([]);
   });
 
   it("dispose closes the socket and stops", async () => {

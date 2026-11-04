@@ -14,10 +14,12 @@ import { keyHashOf, newSalt } from "../../src/portfolio/account/brain-keys.ts";
 import { scriptedBrain } from "../../src/portfolio/account/desk.ts";
 import { simKey } from "../../src/portfolio/account/sign.ts";
 import { PENDING_MS, PendingConnections, type PendingView } from "../../src/portfolio/identity/pending.ts";
+import { HELLO_WAIT_MS } from "../../src/portfolio/identity/slack.ts";
+import { HELLO_DEADLINE_MS } from "../../src/portfolio/identity/slack-socket.ts";
 import { IDENTITY_WORDS, isIdentityTokenPath, parseSlackTokenBody, SLACK_TOKEN_PATH } from "../../src/portfolio/identity/routes.ts";
 import { writeNetworkSecret } from "../../src/portfolio/identity/secret-file.ts";
 import { loadIdentity, saveIdentity, senderRef, Strangers } from "../../src/portfolio/identity/store.ts";
-import { realClock } from "../../src/portfolio/identity/telegram.ts";
+import { realClock, type IdentityClock } from "../../src/portfolio/identity/telegram.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../../src/portfolio/server.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
 import { fakeBotApi, fakeSlack, FAKE_BOT_TOKEN, slackTokens, type FakeBotApi, type FakeSlack } from "../identity-fakes.ts";
@@ -384,6 +386,76 @@ describe("the Slack pending connection on its own clock", () => {
       expect(JSON.stringify(e)).not.toContain(app);
       expect(JSON.stringify(e)).not.toContain(bot);
       expect(lines.join("\n")).not.toContain(app);
+    } finally {
+      pending.dispose();
+    }
+  });
+
+  /** real timers, but the long waits (sheet 1's hello wait, the 30 s hello deadline and recheck) only when the test fires them */
+  function heldClock(): IdentityClock & { fire(ms: number): number; held(ms: number): number } {
+    const held = new Map<object, { ms: number; fn: () => void }>();
+    let offset = 0;
+    return {
+      now: () => Date.now() + offset,
+      setTimeout: (fn, ms) => {
+        if (ms === HELLO_WAIT_MS || ms === HELLO_DEADLINE_MS) {
+          const h = {};
+          held.set(h, { ms, fn });
+          return h;
+        }
+        const t = setTimeout(fn, ms);
+        t.unref();
+        return t;
+      },
+      clearTimeout: (h) => {
+        if (h !== null && typeof h === "object" && held.has(h)) held.delete(h);
+        else clearTimeout(h as NodeJS.Timeout);
+      },
+      fire(ms) {
+        offset += ms;
+        const due = [...held.entries()].filter(([, v]) => v.ms === ms);
+        for (const [h] of due) held.delete(h);
+        for (const [, v] of due) v.fn();
+        return due.length;
+      },
+      held: (ms) => [...held.values()].filter((v) => v.ms === ms).length,
+    };
+  }
+
+  it("after Not me, a reading of two within 30 s of its own close is no conflict until a recheck still reads two", async () => {
+    slack.users.set("U0SOME456", { name: "someone", displayName: "Someone", realName: "Some One" });
+    const clock = heldClock();
+    const pending = new PendingConnections({ apiBase: "http://127.0.0.1:9", slackApiBase: slack.url, clock, strangers: new Strangers(home), bound: () => false });
+    try {
+      const { app, bot } = slack.tokens;
+      const { salt, keyHash } = fp(pairOf(app, bot));
+      const v = await pending.beginSlack(app, bot, keyHash, salt);
+      if (isRefusal(v)) throw new Error(v.message);
+      const opened = () => slack.events.filter((e) => e.startsWith("open")).length;
+      slack.push(dm({ user: "U0SOME456", text: "hello?" }));
+      await until(() => pending.view(v.id)!.state === "heard");
+      await until(() => slack.sockets() === 0);
+      // Slack still counts the socket just closed: the fresh socket's hello reads two, and the connection waits on, not in conflict
+      slack.helloConnections(2);
+      pending.notMe(v.id);
+      await until(() => opened() === 2 && clock.held(HELLO_DEADLINE_MS) === 1 && slack.sockets() === 1);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(pending.view(v.id)!.state).toBe("waiting");
+      // the recheck, 30 s later: a fresh socket, and Slack counts one — no conflict
+      slack.helloConnections(0);
+      expect(clock.fire(HELLO_DEADLINE_MS)).toBe(1);
+      await until(() => opened() === 3);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(pending.view(v.id)!.state).toBe("waiting");
+      // a second holder: the hello after a reopen reads two, and the recheck still reads two
+      slack.helloConnections(2);
+      slack.disconnect("refresh_requested");
+      await until(() => opened() === 4 && clock.held(HELLO_DEADLINE_MS) === 1);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(pending.view(v.id)!.state).toBe("waiting");
+      clock.fire(HELLO_DEADLINE_MS);
+      await until(() => pending.view(v.id)!.state === "conflict");
+      expect(slack.events.every((e) => e === "open 1" || e === "close 0")).toBe(true);
     } finally {
       pending.dispose();
     }
