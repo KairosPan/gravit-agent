@@ -5279,3 +5279,155 @@ test('New message refused for its image keeps a chip and a file beside it', asyn
   assert.match(f.html(), MODEL_LINE);
   store.timers.clear();
 });
+
+// ---- thumbnails and the lightbox in the page (plan 4 task 7) ----
+const IMG = { attachmentId: 'att-1', mediaType: 'image/png', bytes: 1258291, width: 800, height: 600, name: 'chart.png' };
+const imagePage = (attachments = [{ type: 'image', attachment: IMG }]) => [{ type: 'event', event: { type: 'user/message', seq: 7, time: 1, surfaceOp: 'append', data: { id: 'm7', role: 'user', content: [{ type: 'text', text: 'see this' }, ...attachments], source: { kind: 'user' } } } }];
+// a host whose s1 holds an operator image; session/attachment answers as `answer` says, each read counted
+function imageHost(answer = () => ({ attachment: { mediaType: 'image/png' }, data: 'iVBORw0KGgo=' }), attachments) {
+  const h = host({ rows: [row('s1'), row('s2', { updatedAt: 1 })], pages: { s1: imagePage(attachments) } });
+  const call = h.call;
+  h.thumbReads = [];
+  h.call = async (endpoint, args) => {
+    if (endpoint === 'session/attachment') { h.calls.push([endpoint, args]); h.thumbReads.push(args.request); return answer(args.request); }
+    return call(endpoint, args);
+  };
+  return h;
+}
+const THUMB = 'data:image/png;base64,iVBORw0KGgo=';
+const imageKey = '[data-action="openImage"][data-attachment="att-1"][data-name="chart.png"]';
+const lightboxRig = async (h = imageHost()) => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const image = f.withSelector(imageKey, { tagName: 'BUTTON', dataset: { action: 'openImage', attachment: 'att-1', name: 'chart.png' }, presentIf: /data-action="openImage"/ });
+  const close = f.withSelector('.lightbox-close', { tagName: 'BUTTON', dataset: { action: 'lightboxClose' }, presentIf: /class="lightbox"/ });
+  const store = started(f, h);
+  await h.ready();
+  await settle();
+  return { f, h, store, image, close };
+};
+
+test('a conversation with an image reads its thumb once and draws it when it lands', async () => {
+  let landing;
+  const h = imageHost(() => new Promise(r => { landing = r; }));
+  const { f, store } = await lightboxRig(h);
+  assert.deepEqual(h.thumbReads, [{ sessionId: 's1', attachmentId: 'att-1' }]);
+  assert.match(f.html(), /class="you-image loading"/, 'a frame while it reads');
+  store.dispatch('toggleRail'); store.dispatch('toggleRail');   // renders while the read is in the air ask nothing more
+  assert.equal(h.thumbReads.length, 1);
+  landing({ attachment: { mediaType: 'image/png' }, data: 'iVBORw0KGgo=' });
+  await settle();
+  assert.match(f.html(), new RegExp(`<img src="${THUMB.replace(/[+/]/g, '\\$&')}" alt="chart.png">`));
+  assert.equal(store.get().thumbs['att-1'], THUMB);
+  store.dispatch('toggleRail');
+  assert.equal(h.thumbReads.length, 1, 'a landed thumb is not asked again');
+  store.timers.clear();
+});
+
+test('an image that cannot be read draws its card, and is not asked again', async () => {
+  const h = imageHost(() => { throw Object.assign(new Error('gone'), { code: 'session/attachment-not-found' }); });
+  const { f, store } = await lightboxRig(h);
+  assert.equal(store.get().thumbs['att-1'], null);
+  assert.match(f.html(), /file-name">chart.png</);
+  assert.doesNotMatch(f.html(), /data-action="openImage"/);
+  store.dispatch('toggleRail'); store.dispatch('toggleRail');
+  assert.equal(h.thumbReads.length, 1);
+  store.timers.clear();
+});
+
+test('an attachment id named like a prototype key is read and drawn as its own', async () => {
+  const h = imageHost(undefined, [{ type: 'image', attachment: { ...IMG, attachmentId: 'constructor' } }]);
+  const { f, store } = await lightboxRig(h);
+  assert.deepEqual(h.thumbReads, [{ sessionId: 's1', attachmentId: 'constructor' }], 'Object.prototype.constructor is not a thumb');
+  assert.match(f.html(), /<img src="data:image\/png;base64,/);
+  store.timers.clear();
+});
+
+test('a click on a thumb opens the lightbox; a click on the image keeps it; the backdrop and × close it', async () => {
+  const { f, store, image, close } = await lightboxRig();
+  image.focus();
+  f.click(image);
+  assert.deepEqual(store.get().lightbox, { attachmentId: 'att-1', name: 'chart.png' });
+  assert.match(f.html(), /class="lightbox" role="dialog" aria-modal="true" aria-label="Image"/);
+  assert.match(f.html(), /class="lightbox-img" src="data:image\/png;base64,iVBORw0KGgo=" alt="chart.png"/);
+  assert.equal(f.doc.activeElement, close, 'focus moves to its close key');
+  // focus stays inside: Tab and Shift+Tab land on the close key, and a render keeps it there
+  let prevented = false;
+  f.body.focus();
+  f.fire('doc', 'keydown', { key: 'Tab', target: f.body, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(f.doc.activeElement, close);
+  store.dispatch('toggleRail');
+  assert.equal(f.doc.activeElement, close, 'a render keeps focus in the lightbox');
+  f.click({ tagName: 'IMG', dataset: { action: 'lightboxKeep' } });
+  assert.ok(store.get().lightbox, 'a click on the image keeps it');
+  f.click({ tagName: 'DIV', dataset: { action: 'lightboxClose' } });
+  assert.equal(store.get().lightbox, null, 'the backdrop closes it');
+  assert.doesNotMatch(f.html(), /class="lightbox"/);
+  assert.equal(f.doc.activeElement, image, 'focus returns to the image');
+  f.click(image);
+  f.click(close);
+  assert.equal(store.get().lightbox, null, '× closes it');
+  store.timers.clear();
+});
+
+test('a thumb still loading, or one the host could not give, opens nothing', async () => {
+  const h = imageHost(() => new Promise(() => {}));
+  const { f, store } = await lightboxRig(h);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openImage', attachment: 'att-1', name: 'chart.png' } });
+  assert.equal(store.get().lightbox, null, 'a loading frame opens nothing');
+  store.dispatch('hostThumb', { attachmentId: 'att-1', src: 'https://example.com/x.png' });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openImage', attachment: 'att-1', name: 'chart.png' } });
+  assert.equal(store.get().lightbox, null, 'nor a src that is not an image\'s');
+  store.timers.clear();
+});
+
+test('Esc closes the lightbox before Details, and a menu before the lightbox', async () => {
+  const { f, store, image } = await lightboxRig();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleDetails' } });
+  f.click(image);
+  assert.ok(store.get().lightbox);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().lightbox, null, 'the lightbox first');
+  assert.equal(store.get().detailsOpen, true, 'Details stays');
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().detailsOpen, false);
+  store.timers.clear();
+
+  // a menu showing rows in the editor closes before the lightbox
+  const { f: g, say, slot, store: st } = await menuRig();
+  st.dispatch('hostThumb', { attachmentId: 'att-9', src: THUMB });
+  typeMenu(g, say, '@');
+  await settle();
+  assert.notEqual(slot.innerHTML, '');
+  st.dispatch('openLightbox', { attachmentId: 'att-9', name: 'x.png' });
+  press(g, say, 'Escape');
+  assert.equal(slot.innerHTML, '', 'the menu closes');
+  assert.ok(st.get().lightbox, 'the lightbox stays');
+  press(g, say, 'Escape');
+  assert.equal(st.get().lightbox, null);
+  st.timers.clear();
+});
+
+test('Esc closes the lightbox before the search box', async () => {
+  const { f, store, image } = await lightboxRig();
+  const cq = f.withId('cq', { tagName: 'INPUT' });
+  f.click(image);
+  cq.focus();
+  cq.value = 'eth';
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().lightbox, null);
+  assert.equal(cq.value, 'eth', 'the search box keeps its words');
+  store.timers.clear();
+});
+
+test('leaving the conversation closes the lightbox', async () => {
+  const { f, store, image } = await lightboxRig();
+  f.click(image);
+  assert.ok(store.get().lightbox);
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  await settle();
+  assert.equal(store.get().route.id, 's2');
+  assert.equal(store.get().lightbox, null);
+  assert.doesNotMatch(f.html(), /class="lightbox"/);
+  store.timers.clear();
+});

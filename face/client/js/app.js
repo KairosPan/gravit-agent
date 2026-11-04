@@ -42,8 +42,9 @@ import { isCnKey } from './wire/china.js';
 import { makeEditor } from './composer/dom.js';
 import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt, hasChip } from './composer/draft.js';
 import { flatItems, slashItems, atItems, conversationChoices, moveActive, chipOf } from './composer/menus.js';
-import { renderMenu, menuAria, filesRail, dropOverlay } from './composer/view.js';
-import { admit, blocking, hasImage, contentParts, encodeBase64, modelRefusalLine } from './composer/files.js';
+import { renderMenu, menuAria, filesRail, dropOverlay, lightboxHtml } from './composer/view.js';
+import { thumbsNeeded } from './render/thread.js';
+import { admit, blocking, hasImage, contentParts, encodeBase64, modelRefusalLine, isImageSrc } from './composer/files.js';
 import { senderName } from './render/rail.js';
 import { startAttachments } from './host/attachments.js';
 import { startComposerReads } from './host/composer.js';
@@ -195,6 +196,15 @@ function focusKey(el) {
 }
 // the owner sheet is a drawer of any screen, over the one open (the order sheet is Trade's ticket, not a drawer)
 const sheetUp = s => Boolean(s.sheet) && s.sheet.kind !== 'order';
+// a history image's thumb as landed (a data: URL, null for one the host could not give), undefined while it reads — by the
+// store's own key alone, so an id like `constructor` reads nothing of Object.prototype
+const thumbOf = (s, id) => (typeof id === 'string' && s.thumbs && Object.hasOwn(s.thumbs, id) ? s.thumbs[id] : undefined);
+// the lightbox over the page: open on Messages on a thumb that is a data: URL (the one kind the host's thumbs are)
+const lightboxOf = s => {
+  if (!s.lightbox || s.route.screen !== 'messages') return null;
+  const src = thumbOf(s, s.lightbox.attachmentId);
+  return typeof src === 'string' && src.startsWith('data:') ? { src, name: s.lightbox.name } : null;
+};
 // a module card's Run sheet is a drawer of any screen too, drawn after the owner sheet
 const overlayOf = s => (sheetUp(s) ? 'sheet' : s.sellMany || s.runSheet || s.lunhui?.stock || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
 const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.sellMany ? 'sellMany' : s.runSheet ? `run:${s.runSheet.module}` : s.lunhui?.stock ? `stock:${s.lunhui.stock.code}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
@@ -498,7 +508,8 @@ export function boot(win, host = {}) {
   let sheetOpens = 0;       // the sheets opened so far: a read a sheet waits on opens none over one opened since
   let sheetKind = null;     // the kind of the sheet open as the store last changed: which one a close closed
   let orderFields = null;   // the ticket's order sheet's fields as they last stood, for when another sheet took its place
-  let last = { overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, editor: null, confirm: null, query: '', key: null };
+  let lightFrom = null;     // the image key the lightbox opened from: focus goes back to it on closing
+  let last = { lightbox: false, overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, editor: null, confirm: null, query: '', key: null };
   let confirmFrom = null;
   let searchFocus = false;  // ⌥⌘K from a screen with no list: the box takes focus once Messages draws it
   let rowsAt = null;        // where the groups last stood: a query hides them, and they come back there when it clears (spec §5.1)
@@ -546,7 +557,10 @@ export function boot(win, host = {}) {
     const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     // files dragged over a screen with a composer: the drop overlay over the page
     const overlayHtml = s.dropping && composerOn(s) ? dropOverlay(attachments.limits()) : '';
-    root.innerHTML = renderRail(s, now(), { mac }) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen) + overlayHtml;
+    // an operator image at full size, over everything (D34: Esc closes it after a menu)
+    const lit = lightboxOf(s);
+    const lightHtml = lit ? lightboxHtml(lit) : '';
+    root.innerHTML = renderRail(s, now(), { mac }) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen) + overlayHtml + lightHtml;
     const note1 = doc.getElementById('composer-note');
     if (note0 && note1 && note0 !== note1 && typeof note1.replaceWith === 'function') note1.replaceWith(note0);
     const noteEl = doc.getElementById('composer-note');
@@ -608,7 +622,16 @@ export function boot(win, host = {}) {
     let opener = last.opener;
     let under = last.under;
     let target = find(activeKey);
-    if (overlay && overlay !== last.overlay && last.overlay !== 'sheet') {
+    // the lightbox first: its close key takes focus on opening and keeps it while it stands (it is the one key inside); on
+    // closing, focus goes back to the image it opened from. The drawers under it keep their openers untouched
+    const lightUp = lightHtml !== '';
+    if (lightUp) {
+      if (!last.lightbox) lightFrom = activeKey;
+      target = root.querySelector('.lightbox-close') ?? target;
+    } else if (last.lightbox) {
+      target = find(lightFrom) ?? (overlay ? root.querySelector(closeKeyOf(overlay)) : say) ?? target;
+      lightFrom = null;
+    } else if (overlay && overlay !== last.overlay && last.overlay !== 'sheet') {
       if (overlay === 'sheet') under = last.overlay ? opener : null;
       opener = activeKey;
       target = root.querySelector(closeKeyOf(overlay));
@@ -637,9 +660,12 @@ export function boot(win, host = {}) {
       // focus can move a contenteditable's caret: the editor's goes back where write put it
       if (target === say && keep !== null) editor.place(say, keep[0], keep[1]);
     }
-    last = { overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, editor: editorOf(s.edit), confirm: s.confirm, query, key };
+    last = { lightbox: lightUp, overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, editor: editorOf(s.edit), confirm: s.confirm, query, key };
     // a composed answer drawn without its run's view asks for it now that the page is whole (its dispatches render again)
     if (wantedViews(store.get()).length) void ensureViews(store, getJson);
+    // the operator's images the thread drew still to read: each asked once (thumb keeps its own in-flight set), its answer
+    // landing through the store (hostThumb), which draws it
+    if (open) for (const t of thumbsNeeded(open, s.thumbs)) void attachments.thumb(t.sessionId, t.attachmentId);
   }
 
   // while an IME composes (pinyin), a render would replace the input and lose the composition: hold it until
@@ -1555,6 +1581,15 @@ export function boot(win, host = {}) {
     attachFiles: () => { doc.getElementById('attach-input')?.click(); },
     attachRemove: el => removeFile(el.dataset.key),
     attachRetry: el => { const key = draftKey(store.get()); startUpload(key, el.dataset.key); render(); },
+    // a history image opens at full size once its thumb landed (a loading frame, or one drawn as a card, opens nothing); the
+    // backdrop and × close it, a click on the image itself is kept
+    openImage: el => {
+      const id = el.dataset.attachment;
+      if (!isImageSrc(thumbOf(store.get(), id))) return;
+      store.dispatch('openLightbox', { attachmentId: id, name: el.dataset.name ?? '' });
+    },
+    lightboxClose: () => store.dispatch('closeLightbox'),
+    lightboxKeep: () => {},
   };
 
   root.addEventListener('click', ev => {
@@ -1732,7 +1767,13 @@ export function boot(win, host = {}) {
       focusSearch();
       return;
     }
-    // while a menu shows rows its keys are its own, before the search box and today's Escape chain (D34): ↑ ↓ move, Enter
+    // while the lightbox stands, Tab and Shift+Tab stay on its one key
+    if (ev.key === 'Tab' && lightboxOf(store.get())) {
+      ev.preventDefault();
+      root.querySelector('.lightbox-close')?.focus();
+      return;
+    }
+    // while a menu shows rows its keys are its own, before the lightbox, the search box and today's Escape chain (D34): ↑ ↓ move, Enter
     // and Tab choose (Tab on a folder walks into it), Esc and Shift+Tab close it and keep the draft
     if (menuShowsRows() && sayOf(ev.target) && !imeOpen && !composing) {
       const k = ev.key;
@@ -1750,6 +1791,8 @@ export function boot(win, host = {}) {
       // a trigger standing with no rows drawn yet: Esc runs the chain below, and rows that land later open nothing
       if (menuTrig && sayOf(ev.target)) { dismissed = menuTrig; forgetMenu(); }
       const s = store.get();
+      // the lightbox after a menu, before the search box (D34)
+      if (s.lightbox) { store.dispatch('closeLightbox'); return; }
       // the search box while it has focus, before today's chain (spec D34): the first Esc clears the query, the next leaves the box
       const box = doc.activeElement;
       if (box && box.id === 'cq') {

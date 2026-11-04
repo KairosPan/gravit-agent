@@ -38,6 +38,12 @@ export const reducers = {
   // files dragged over the page, or no longer: the drop overlay (app.js draws it while a composer is on screen)
   setDropping: (s, on) => (s.dropping === (on === true) ? s : { ...s, dropping: on === true }),
 
+  // an operator image at full size: opened on its thumb (app.js opens it only on one that landed), closed by its backdrop, its
+  // close key or Esc; leaving the conversation closes it (nav)
+  openLightbox: (s, { attachmentId, name } = {}) => (typeof attachmentId === 'string' && attachmentId !== ''
+    ? { ...s, lightbox: { attachmentId, name: typeof name === 'string' ? name : '' } } : s),
+  closeLightbox: s => (s.lightbox ? { ...s, lightbox: null } : s),
+
   askConfirm: (s, spec) => ({ ...s, confirm: spec, edit: null }),
   cancelConfirm: s => (s.confirm ? { ...s, confirm: null } : s),
 };

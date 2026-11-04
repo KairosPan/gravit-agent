@@ -21,6 +21,8 @@ export function emptyState() {
     channels: [],
     // the operator's images in the thread by attachment id: a data: URL, or null for one the host cannot give back (plan 4)
     thumbs: {},
+    // the image open at full size over the page, { attachmentId, name } (its src is its thumb), or null (plan 4)
+    lightbox: null,
     // the workspace's pinned conversation ids (host/live.js, workspace/follow)
     pinned: [],
     // the channel page's read (host/channels.js)

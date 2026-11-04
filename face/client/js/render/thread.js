@@ -116,7 +116,7 @@ function youFiles(list, thumbs) {
   const lone = list.length === 1;
   return `<div class="you-files">${list.map(a => {
     if (!isImage(a)) return fileCard({ name: a.name ?? 'File', meta: metaText({ name: a.name, bytes: a.bytes ?? 0 }) });
-    const src = thumbs[a.attachmentId];
+    const src = Object.hasOwn(thumbs, a.attachmentId) ? thumbs[a.attachmentId] : undefined;
     if (src === null || a.offloaded === true || (src !== undefined && !isImageSrc(src))) return fileCard({ name: a.name || 'Image', meta: imageMeta(a) });
     const name = a.name || 'Image';
     const inner = src === undefined ? '' : `<img${attrs({ src, alt: name })}>`;
@@ -138,7 +138,7 @@ export function thumbsNeeded(conv, thumbs) {
   for (const m of conv.messages ?? []) {
     if (m.from !== 'you' || !Array.isArray(m.data?.attachments)) continue;
     for (const a of m.data.attachments) {
-      if (!isImage(a) || a.offloaded === true || thumbs?.[a.attachmentId] !== undefined || seen.has(a.attachmentId)) continue;
+      if (!isImage(a) || a.offloaded === true || (thumbs && Object.hasOwn(thumbs, a.attachmentId)) || seen.has(a.attachmentId)) continue;
       seen.add(a.attachmentId);
       out.push({ sessionId: conv.id, attachmentId: a.attachmentId });
     }

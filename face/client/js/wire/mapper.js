@@ -196,8 +196,9 @@ const isCount = (value) => typeof value === "number" && Number.isFinite(value);
  * The message's image and file blocks, in order, beside {@link blocksText}: an image
  * block is `{type:'image', attachment:{attachmentId, mediaType, bytes, width, height,
  * name?}, offloaded?}`, a file block `{type:'file', attachment:{attachmentId, name,
- * bytes}}` (dsh-llm's content blocks; `offloaded` marks an image the compaction swapped
- * for a placeholder, which the host can no longer give back). A block with no
+ * bytes}}` (dsh-llm's content blocks). `offloaded: true` is kept when a block carries it,
+ * but a replayed user/message rarely does: dsh keeps the image's bytes, and an offload is
+ * a separate image/offload event that leaves the message events as they were. A block with no
  * attachmentId is dropped; every other field is kept only in the shape the host
  * writes it, never guessed.
  * @param {unknown} blocks - a ContentBlock[], or anything else.

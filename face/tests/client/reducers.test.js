@@ -255,3 +255,18 @@ test('an A share page keeps its range and its history like an Account market', (
   assert.equal(s.markets.candles['cn:600519'].status, 'ready');
   assert.equal(R.setRange(emptyState(), { id: 'cn:12345', range: '5D' }).markets.candles['cn:12345'], undefined);
 });
+
+test('the lightbox opens on an attachment and closes', () => {
+  const s = { ...emptyState(), conversations: [hostConv('a'), hostConv('b')] };
+  assert.equal(s.lightbox, null, 'none open at boot');
+  const open = R.openLightbox(s, { attachmentId: 'att-1', name: 'chart.png' });
+  assert.deepEqual(open.lightbox, { attachmentId: 'att-1', name: 'chart.png' });
+  assert.deepEqual(R.openLightbox(s, { attachmentId: 'att-1' }).lightbox, { attachmentId: 'att-1', name: '' }, 'a nameless image');
+  for (const bad of [{}, { attachmentId: '' }, { attachmentId: 7 }, undefined]) assert.equal(R.openLightbox(s, bad), s, JSON.stringify(bad));
+  assert.equal(R.closeLightbox(open).lightbox, null);
+  assert.equal(R.closeLightbox(s), s, 'closing none is no change');
+  // leaving the conversation closes it: another conversation, another screen, New message
+  assert.equal(R.nav(open, { screen: 'messages', id: 'b' }).lightbox, null);
+  assert.equal(R.nav(open, { screen: 'discover', id: null }).lightbox, null);
+  assert.equal(R.startDraft(open, {}).lightbox, null);
+});

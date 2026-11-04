@@ -480,6 +480,7 @@ test("the operator's attachments in the thread: the column, the right-aligned ro
   assert.match(css, /\.you-body \{[^}]*flex-direction: column[^}]*align-items: flex-end[^}]*max-width: 66%/);
   assert.match(css, /\.you-files \{[^}]*display: flex[^}]*justify-content: flex-end/);
   assert.match(css, /\.you-image img \{[^}]*max-width: 240px/);
+  assert.match(css, /\.you-image img \{[^}]*max-height: 320px[^}]*object-fit: contain/, 'a tall screenshot draws no taller than 320px');
   assert.match(css, /\.you-thumb \{[^}]*width: 64px[^}]*height: 64px/);
   assert.match(css, /\.you-thumb img \{[^}]*object-fit: cover/);
 });

@@ -8,7 +8,7 @@ import { ARCHIVED_KEY } from '../wire/grouping.js';
 // the stock drawer closed, on a state that has the composed answers' slice
 const stockClosed = s => (s.lunhui?.stock ? { lunhui: { ...s.lunhui, stock: null } } : {});
 export const closeOverlays = s => ({
-  ...s, detailsOpen: false, settingsOpen: false, edit: null, confirm: null, runSheet: null,
+  ...s, detailsOpen: false, settingsOpen: false, edit: null, confirm: null, runSheet: null, lightbox: null,
   account: { ...s.account, statementOpen: false, detailsVenue: null },
   ...stockClosed(s),
 });
@@ -26,7 +26,8 @@ export const reducers = {
     // a market id is the Account's key as it is (coin:BTC, event:predict:…), or an A share's or an old face id (cn:600519 from
     // cn:sh600519, us:AAPL, crypto:BTC/USD) canonicalised; one that is neither opens Markets
     if (route.screen === 'markets' && route.id) route = { screen: 'markets', id: !String(route.id).startsWith('cn:') && isAccountKey(route.id) ? route.id : canonicalId(route.id) };
-    let s = { ...state, route, detailsOpen: false, settingsOpen: false, edit: null, confirm: null, ...stockClosed(state) };
+    // (and the lightbox: an image belongs to the conversation it was opened in)
+    let s = { ...state, route, detailsOpen: false, settingsOpen: false, edit: null, confirm: null, lightbox: null, ...stockClosed(state) };
     // the first level's Messages key returns to the conversation you last had open
     if (route.screen === 'messages' && route.id && route.id !== 'new') s.lastConv = route.id;
     // the Statement and a venue's Details belong to Account
