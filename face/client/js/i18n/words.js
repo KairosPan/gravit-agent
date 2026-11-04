@@ -1,7 +1,9 @@
 // gravit-ui/js/i18n/words.js — the face's own words, read from the active table (spec §5.10): t for plain text, th for HTML
 // text (the value verbatim, each param escaped unless rawHtml), tn and thn a plural's form by its count. A key the active
-// table lacks reads from EN, and one EN lacks reads as itself. Renders run many times a second while a turn streams: a value
-// with no {param} is returned as it is, and one with params costs one replace.
+// table lacks reads from EN, and one EN lacks reads as itself. A {name} with no such param stays as written; a param whose
+// value is null or undefined reads as nothing, in t as in th. tn and thn read the count as a number (the string '1' is
+// one), and {n} is String(n) unless params.n is given. Renders run many times a second while a turn streams: a value with
+// no {param} is returned as it is, and one with params costs one replace.
 import { esc } from '../html.js';
 import { EN } from './en.js';
 
@@ -11,8 +13,8 @@ let active = EN;
 let epoch = 0;
 
 const valueOf = key => (Object.hasOwn(active, key) ? active[key] : Object.hasOwn(EN, key) ? EN[key] : key);
-const formOf = (v, n) => (typeof v === 'string' ? v : n === 1 ? v.one : v.other);
-const plainParam = v => String(v);
+const formOf = (v, n) => (typeof v === 'string' ? v : Number(n) === 1 ? v.one : v.other);
+const plainParam = v => (v == null ? '' : String(v));
 const htmlParam = v => (RAW.has(v) ? v.html : esc(v));
 
 function fill(value, params, put) {
@@ -43,16 +45,23 @@ export function rawHtml(markup) {
   return raw;
 }
 
-// fn() read under another table (its missing keys from EN), then the table before; for tests, and for plan 7's switch
-export function withTable(table, fn) {
-  const before = active;
+// the table the words read from (its missing keys from EN): plan 7's switch. The epoch moves only when the table does, so a
+// memo keyed on it survives a choice of the language already shown
+export function setTable(table) {
+  if (table === active) return;
   active = table;
   epoch += 1;
+}
+
+// fn() read under another table, then the table before — synchronous only: a fn that returns a Promise has its awaited part
+// read under whatever table stands by then. For tests
+export function withTable(table, fn) {
+  const before = active;
+  setTable(table);
   try {
     return fn();
   } finally {
-    active = before;
-    epoch += 1;
+    setTable(before);
   }
 }
 

@@ -32,9 +32,9 @@ export const MARKET_KINDS = ['close', 'amend', 'leverage'];
 const sells = seed => seed.kind === 'stock' || seed.kind === 'event';
 // a price of an event's order in the cents its owner types (the Account's own `was`), else as it is
 const shownPrice = (v, event) => {
-  const t = figure(v);
-  if (!event || t === '' || !Number.isFinite(Number(t))) return t;
-  return String(Number((Number(t) * 100).toFixed(2)));
+  const fig = figure(v);
+  if (!event || fig === '' || !Number.isFinite(Number(fig))) return fig;
+  return String(Number((Number(fig) * 100).toFixed(2)));
 };
 
 /** The sheet's title, naming what the seed names. */

@@ -3,7 +3,7 @@
 // a while, a key it lacks falling back to EN.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { t, th, tn, thn, rawHtml, withTable, wordsEpoch } from '../../client/js/i18n/words.js';
+import { t, th, tn, thn, rawHtml, withTable, setTable, wordsEpoch } from '../../client/js/i18n/words.js';
 import { EN } from '../../client/js/i18n/en.js';
 
 const PROBE = Object.freeze({
@@ -67,4 +67,34 @@ test('withTable reads another table, falls back to EN for a missing key, restore
   assert.equal(t('common.save'), EN['common.save']);
   assert.throws(() => withTable({}, () => { throw new Error('boom'); }), /boom/);
   assert.equal(t('common.save'), 'Save', 'restored after a throw');
+});
+
+test('setTable moves wordsEpoch only when the table changes, and reads the new table until it is set back', () => {
+  const zh = { 'common.save': '保存' };
+  const start = wordsEpoch();
+  setTable(EN);
+  assert.equal(wordsEpoch(), start, 'the same table: no new epoch, so no memo is thrown away');
+  try {
+    setTable(zh);
+    const on = wordsEpoch();
+    assert.notEqual(on, start);
+    assert.equal(t('common.save'), '保存');
+    assert.equal(t('common.cancel'), 'Cancel', 'a key the table lacks reads from EN');
+    setTable(zh);
+    assert.equal(wordsEpoch(), on);
+    assert.equal(withTable(zh, () => wordsEpoch()), on, 'withTable under the table already active moves nothing');
+  } finally {
+    setTable(EN);
+  }
+  assert.equal(t('common.save'), 'Save');
+});
+
+test('a null or missing param value reads as nothing in t and th alike; a count is read as a number', () => {
+  withTable(PROBE, () => {
+    assert.equal(t('probe.why', { why: null }), "Can't run · ");
+    assert.equal(th('probe.why', { why: undefined }), "Can't run · ");
+    assert.equal(t('probe.why', { why: 0 }), "Can't run · 0");
+    assert.equal(tn('probe.jobs', '1'), '1 job running', "the string '1' is one");
+    assert.equal(tn('probe.jobs', '2'), '2 jobs running');
+  });
 });

@@ -28,14 +28,14 @@ const num = v => (Number.isFinite(v) ? v : 0);
 // a zero model, tool or first-token time is no figure
 export function statsView(stats, tokenUsage) {
   if (!stats || !(stats.steps >= 1)) return null;
-  const t = tokenUsage && typeof tokenUsage === 'object' ? tokenUsage : null;
-  const input = t ? num(t.uncachedInputTokens) + num(t.cacheReadTokens) : 0;
+  const usage = tokenUsage && typeof tokenUsage === 'object' ? tokenUsage : null;
+  const input = usage ? num(usage.uncachedInputTokens) + num(usage.cacheReadTokens) : 0;
   return {
     turns: stats.turns,
     steps: stats.steps,
     speed: stats.decodeMs > 0 ? Math.round(stats.decodeTokens / (stats.decodeMs / 1000)) : null,
-    tokens: t ? input + num(t.outputTokens) : null,
-    cache: input > 0 ? num(t.cacheReadTokens) / input : null,
+    tokens: usage ? input + num(usage.outputTokens) : null,
+    cache: input > 0 ? num(usage.cacheReadTokens) / input : null,
     modelMs: stats.llmMs > 0 ? stats.llmMs : null,
     toolMs: stats.toolMs > 0 ? stats.toolMs : null,
     firstTokenMs: stats.ttftSteps > 0 && stats.ttftMs > 0 ? stats.ttftMs / stats.ttftSteps : null,
@@ -66,23 +66,23 @@ export function compactTokens(n) {
 }
 
 const pad = n => String(n).padStart(2, '0');
-const hours = t => `${Math.floor(t / 3600)}h ${pad(Math.floor(t / 60) % 60)}m`;
+const hours = secs => `${Math.floor(secs / 3600)}h ${pad(Math.floor(secs / 60) % 60)}m`;
 
 // Usage's times: 1.4 s, 42 s, 4m 12s, 1h 04m; the unit is chosen after rounding, so 9,999 ms is 10 s
 export function durationText(ms) {
   const v = Math.max(0, num(ms));
   const tenth = Math.round(v / 100) / 10;
   if (tenth < 10) return `${tenth.toFixed(1)} s`;
-  const t = Math.max(10, Math.floor(v / 1000));
-  if (t < 60) return `${t} s`;
-  if (t < 3600) return `${Math.floor(t / 60)}m ${pad(t % 60)}s`;
-  return hours(t);
+  const secs = Math.max(10, Math.floor(v / 1000));
+  if (secs < 60) return `${secs} s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ${pad(secs % 60)}s`;
+  return hours(secs);
 }
 
 // a job's running time: 42s, 3m 04s, 1h 04m
 export function clockText(ms) {
-  const t = Math.max(0, Math.floor(num(ms) / 1000));
-  if (t < 60) return `${t}s`;
-  if (t < 3600) return `${Math.floor(t / 60)}m ${pad(t % 60)}s`;
-  return hours(t);
+  const secs = Math.max(0, Math.floor(num(ms) / 1000));
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ${pad(secs % 60)}s`;
+  return hours(secs);
 }

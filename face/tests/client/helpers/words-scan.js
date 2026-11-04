@@ -1,41 +1,61 @@
 // The words scanner (plan 6): a client source parsed as JavaScript (typescript's createSourceFile), its English literals —
-// the face's words still written in place rather than read from the table — and its words calls. words-guard.test.js runs it
-// over face/client/js.
+// the face's words still written in place rather than read from the table — its words calls, and the names it binds beside
+// the words it imports. words-guard.test.js runs it over face/client/js.
 import ts from 'typescript';
 
 export const WORDS_CALLS = ['t', 'th', 'tn', 'thn'];
 export const KEY_NAMES = new Set(['Enter', 'Escape', 'Esc', 'Tab', 'Backspace', 'Delete', 'Home', 'End', 'Shift', 'Meta', 'Control', 'Alt', 'Space']);
 
-// two letter words apart by whitespace, a word being a whole whitespace-separated run (so `seg-item pressed` is no phrase);
-// or one capitalized word alone, with its end punctuation
-const PHRASE = /(?<![\w-])[A-Za-z][a-z]+\s+[A-Za-z][a-z]*(?![\w-])/;
-const WORD = /^[A-Z][a-z]+[.…!?:]*$/;
-// the attributes whose values a reader meets, kept when a tag is removed
-const READ_ATTRS = /\b(?:aria-label|title|placeholder|alt)="([^"]*)"/g;
+// a word is a whole run, never part of `seg-item` or `#/markets/`; it may hold an apostrophe (Can't), and a phrase may lead
+// with an acronym (MCP server)
+const PHRASE = /(?<![\w'’-])(?:[A-Za-z][a-z]+(?:['’][a-z]+)?|[A-Z]{2,})\s+[A-Za-z][a-z]*(?:['’][a-z]+)?(?![\w'’-])/;
+// one capitalized word alone, with its end punctuation; OK is the one acronym that stands alone as a word
+const WORD = /^(?:[A-Z][a-z]+(?:['’][a-z]+)?|OK)[.…!?:]*$/;
+// in a template's text outside a tag: any word of two letters or more (`${n} running`, `cache ${p}%`), but not a piece of a
+// path, a key, a call or a CSS unit
+const LAX = /(?<![\w'’\-/.#=:&?%$@+\\])[A-Za-z][a-z]+(?:['’][a-z]+)?(?![\w'’\-/.(=:+])/g;
+const UNITS = new Set(['px', 'em', 'rem', 'vh', 'vw', 'ms', 'deg', 'fr']);
+// the attributes whose values a reader meets (or a screen reader speaks), kept when a tag is removed
+const READ_ATTRS = /\b(?:aria-label|aria-description|title|placeholder|alt|value)=(?:"([^"]*)"|'([^']*)')/g;
 const KEPT = /\/\/\s*en-kept:/;
+const HOLE = '\u0000'; // where a template's ${…} stood
 
 const parse = (source, file) => ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-const lineOf = (sf, node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+const lineAt = (sf, pos) => sf.getLineAndCharacterOfPosition(pos).line + 1;
 const isWordsCall = node => ts.isCallExpression(node) && ts.isIdentifier(node.expression) && WORDS_CALLS.includes(node.expression.text);
 
-// a literal's readable pieces: the runs of text between tags and the read attributes' values; a piece of a tag cut by an
-// interpolation (a template's middle that starts inside one, a head that ends inside one) counts as a tag
+const strict = p => PHRASE.test(p) || (WORD.test(p) && !KEY_NAMES.has(p.replace(/[.…!?:]+$/, '')));
+const lax = p => [...p.matchAll(LAX)].some(m => !UNITS.has(m[0]));
+
+// a text's readable pieces, each { text, at, inText }: the runs between tags, and the read attributes' values in the tags
+// (a tag cut at the text's start or end, as a template's part may be, counts as a tag); each split at the holes
 function pieces(text) {
   const out = [];
-  const keepAttrs = tag => { for (const m of tag.matchAll(READ_ATTRS)) out.push(m[1]); };
-  let rest = text;
-  const lead = rest.match(/^[^<>]*>/);
-  if (lead) { keepAttrs(lead[0]); rest = rest.slice(lead[0].length); }
-  const tail = rest.match(/<[^>]*$/);
-  if (tail) { keepAttrs(tail[0]); rest = rest.slice(0, tail.index); }
-  for (const run of rest.split(/(<[^>]*>)/)) {
-    if (run.startsWith('<')) keepAttrs(run);
-    else out.push(run);
+  const push = (run, at, inText) => {
+    let from = 0;
+    for (const part of run.split(HOLE)) {
+      const lead = part.length - part.trimStart().length;
+      if (part.trim()) out.push({ text: part.trim(), at: at + from + lead, inText });
+      from += part.length + 1;
+    }
+  };
+  const tag = (chunk, at) => { for (const m of chunk.matchAll(READ_ATTRS)) { const v = m[1] ?? m[2]; push(v, at + m.index + m[0].indexOf(v, m[0].indexOf('=')), false); } };
+  let start = 0, end = text.length;
+  const lead = text.match(/^[^<>]*>/);
+  if (lead) { tag(lead[0], 0); start = lead[0].length; }
+  const tail = text.slice(start).match(/<[^>]*$/);
+  if (tail) { end = start + tail.index; tag(tail[0], end); }
+  const re = /<[^>]*>/g;
+  const body = text.slice(start, end);
+  let last = 0, m;
+  while ((m = re.exec(body))) {
+    push(body.slice(last, m.index), start + last, true);
+    tag(m[0], start + m.index);
+    last = m.index + m[0].length;
   }
-  return out.map(p => p.trim()).filter(Boolean);
+  push(body.slice(last), start + last, true);
+  return out;
 }
-
-const english = p => PHRASE.test(p) || (WORD.test(p) && !KEY_NAMES.has(p.replace(/[.…!?:]+$/, '')));
 
 function exempt(node) {
   const parent = node.parent;
@@ -57,25 +77,41 @@ function exempt(node) {
 export function englishLiterals(source, file = 'source.js') {
   const sf = parse(source, file);
   const lines = source.split('\n');
-  // a marker on the literal's line, or alone on the line before it
-  const kept = line => KEPT.test(lines[line - 1] ?? '') || /^\s*\/\/\s*en-kept:/.test(lines[line - 2] ?? '');
+  const kept = line => KEPT.test(lines[line - 1] ?? '');
   const found = [];
-  const visit = node => {
-    let text = null;
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) text = exempt(node) ? null : node.text;
-    else if (ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) text = node.text;
-    if (text !== null) {
-      const line = lineOf(sf, node);
-      const hits = pieces(text).filter(english);
-      if (hits.length && !kept(line)) found.push({ line, text: hits.join(' | ') });
+  // a literal's parts (one, or a template's head and spans' literals), joined with a hole where each ${…} stood
+  const scan = (parts, template) => {
+    let joined = '';
+    const starts = [];
+    for (const [i, p] of parts.entries()) { starts.push({ at: joined.length, node: p }); joined += p.text + (i < parts.length - 1 ? HOLE : ''); }
+    const hits = new Map();
+    for (const piece of pieces(joined)) {
+      if (!(strict(piece.text) || (template && piece.inText && lax(piece.text)))) continue;
+      const owner = starts.filter(s => s.at <= piece.at).at(-1);
+      const line = lineAt(sf, owner.node.getStart(sf)) + (joined.slice(owner.at, piece.at).match(/\n/g) ?? []).length;
+      if (kept(line)) continue;
+      hits.set(line, [...(hits.get(line) ?? []), piece.text]);
     }
+    for (const [line, texts] of hits) found.push({ line, text: texts.join(' | ') });
+  };
+  const visit = node => {
+    if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && !exempt(node)) scan([node], false);
+    else if (ts.isTemplateExpression(node) && !exempt(node)) scan([node.head, ...node.templateSpans.map(s => s.literal)], true);
     ts.forEachChild(node, visit);
   };
   visit(sf);
-  return found;
+  return found.sort((a, b) => a.line - b.line);
 }
 
-// every words call: its key when it is a literal, and whether it runs when the module loads (no function around it)
+// a function called where it is written — `(() => …)()` — runs when its module loads
+function invokedAtOnce(node) {
+  let up = node;
+  while (up.parent && ts.isParenthesizedExpression(up.parent)) up = up.parent;
+  return !!up.parent && ts.isCallExpression(up.parent) && up.parent.expression === up;
+}
+
+// every words call: its key when it is a literal, and whether it runs when the module loads (no function around it that waits
+// to be called)
 export function wordsCalls(source, file = 'source.js') {
   const sf = parse(source, file);
   const calls = [];
@@ -83,11 +119,50 @@ export function wordsCalls(source, file = 'source.js') {
     if (isWordsCall(node)) {
       const arg = node.arguments[0];
       const key = arg && (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) ? arg.text : null;
-      calls.push({ line: lineOf(sf, node), fn: node.expression.text, key, topLevel: !inFunction });
+      calls.push({ line: lineAt(sf, node.getStart(sf)), fn: node.expression.text, key, topLevel: !inFunction });
     }
-    const inner = inFunction || ts.isFunctionLike(node) || ts.isClassStaticBlockDeclaration(node);
+    const inner = inFunction || ((ts.isFunctionLike(node) || ts.isClassStaticBlockDeclaration(node)) && !invokedAtOnce(node));
     ts.forEachChild(node, child => visit(child, inner));
   };
   visit(sf, false);
   return calls;
+}
+
+const isWordsModule = spec => /(^|\/)i18n\/words\.js$|^\.\/words\.js$/.test(spec);
+const DECLARES = [ts.isVariableDeclaration, ts.isParameter, ts.isFunctionDeclaration, ts.isFunctionExpression, ts.isBindingElement, ts.isClassDeclaration, ts.isClassExpression];
+
+// in a file that imports the words: an import of them other than by their own names, and every name of theirs it binds
+// again (a local, a parameter, a function, a destructured name, an import from elsewhere) — each would make a call to it
+// something other than a words call. [] for a file that imports no words
+export function wordsBindings(source, file = 'source.js') {
+  const sf = parse(source, file);
+  const out = [];
+  const at = node => lineAt(sf, node.getStart(sf));
+  let imports = false;
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier)) continue;
+    const words = isWordsModule(st.moduleSpecifier.text);
+    const clause = st.importClause;
+    if (!clause) continue;
+    if (words) {
+      imports = true;
+      if (clause.name) out.push({ line: at(st), name: clause.name.text, why: 'default import' });
+      const b = clause.namedBindings;
+      if (b && ts.isNamespaceImport(b)) out.push({ line: at(st), name: b.name.text, why: 'namespace import' });
+      if (b && ts.isNamedImports(b)) for (const el of b.elements) if (el.propertyName && el.propertyName.text !== el.name.text) out.push({ line: at(st), name: el.name.text, why: 'aliased import' });
+    } else {
+      const b = clause.namedBindings;
+      const names = [clause.name, ...(b && ts.isNamedImports(b) ? b.elements.map(el => el.name) : []), b && ts.isNamespaceImport(b) ? b.name : null].filter(Boolean);
+      for (const n of names) if (WORDS_CALLS.includes(n.text)) out.push({ line: at(st), name: n.text, why: 'local binding' });
+    }
+  }
+  if (!imports) return [];
+  const visit = node => {
+    if (ts.isIdentifier(node) && WORDS_CALLS.includes(node.text) && node.parent && DECLARES.some(is => is(node.parent)) && node.parent.name === node) {
+      out.push({ line: at(node), name: node.text, why: 'local binding' });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out.sort((a, b) => a.line - b.line);
 }

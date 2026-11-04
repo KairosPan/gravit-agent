@@ -43,8 +43,8 @@ export function fmtDate(ts) {
 
 // a call's length as m:ss
 export function fmtDuration(ms) {
-  const t = Math.max(0, Math.floor(ms / 1000));
-  return `${Math.floor(t / 60)}:${pad(t % 60)}`;
+  const secs = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(secs / 60)}:${pad(secs % 60)}`;
 }
 
 // a conversation's age in words, for the @ menu

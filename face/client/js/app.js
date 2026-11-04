@@ -362,8 +362,8 @@ export function boot(win, host = {}) {
   let connectWallets = [];
   let walletsFor = null;   // the connect sheet's seed they were found for
   const sameConnect = (seed, connector) => {
-    const t = store.get().sheet;
-    return t?.kind === 'connect' && t.seed === seed && (connector === undefined || connectOptionOf(t)?.connector === connector);
+    const open = store.get().sheet;
+    return open?.kind === 'connect' && open.seed === seed && (connector === undefined || connectOptionOf(open)?.connector === connector);
   };
   // the connector changed: a wallet's proof (or its refusal) was for the option before, and is forgotten; the wallets found stay.
   // A proof still asking stays asking — the wallet's prompt is open, so no second one is asked until it settles (its answer
@@ -787,7 +787,7 @@ export function boot(win, host = {}) {
     if (wantedViews(store.get()).length) void ensureViews(store, getJson);
     // the operator's images the thread drew still to read: each asked once (thumb keeps its own in-flight set), its answer
     // landing through the store (hostThumb), which draws it
-    if (open) for (const t of thumbsNeeded(open, s.thumbs)) void attachments.thumb(t.sessionId, t.attachmentId);
+    if (open) for (const thumb of thumbsNeeded(open, s.thumbs)) void attachments.thumb(thumb.sessionId, thumb.attachmentId);
   }
 
   // the open job's output into its pre by textContent, never through a render: on each frame, and once into a pre a render
@@ -1105,8 +1105,8 @@ export function boot(win, host = {}) {
     const s = store.get();
     if (!signs() || s.route.screen !== 'trade' || !s.trade.ticket || s.sheet) return;
     if (orderFields) { void trade.resume(orderFields); return; }
-    const t = s.trade.ticket;
-    void trade.pick(t.id, { side: t.side, venue: t.venue, outcome: t.outcome });
+    const ticket = s.trade.ticket;
+    void trade.pick(ticket.id, { side: ticket.side, venue: ticket.venue, outcome: ticket.outcome });
   }
   // a picker row's hand-on: its side, venue and outcome where it gives them
   const pickOf = d => ({
@@ -1536,9 +1536,9 @@ export function boot(win, host = {}) {
     const s = store.get();
     const say = doc.getElementById('say');
     const caret = say ? editor.caret(say) : null;
-    const t = caret == null ? null : triggerAt(currentRuns(), caret);
+    const at = caret == null ? null : triggerAt(currentRuns(), caret);
     const { conv, root, cwdRel } = menuContext(s);
-    const trig = t && (t.kind === '@' || conv) ? { ...t, key: draftKey(s) } : null;
+    const trig = at && (at.kind === '@' || conv) ? { ...at, key: draftKey(s) } : null;
     if (!trig) { dismissed = null; closeMenu(); return; }
     if (sameTrig(trig, dismissed)) return;   // Esc closed this very token
     dismissed = null;
@@ -1714,7 +1714,7 @@ export function boot(win, host = {}) {
       const markOf = () => doc.getElementById(`tmark-${conv.id}-${turn}`);
       const mark = markOf();
       if (mark) { toMark(mark); return; }
-      const tick = railView(conv).ticks.find(t => t.turn === turn);
+      const tick = railView(conv).ticks.find(k => k.turn === turn);
       if (!tick || tick.loaded) return;
       const jump = { conv: conv.id, turn };
       rail.pulse = turn;
@@ -1741,7 +1741,7 @@ export function boot(win, host = {}) {
     },
     openSettings: () => store.dispatch('openSettings'),
     closeSettings: () => store.dispatch('closeSettings'),
-    setTheme: el => { const t = el.dataset.value.toLowerCase(); store.dispatch('setTheme', t); applyTheme(t); },
+    setTheme: el => { const theme = el.dataset.value.toLowerCase(); store.dispatch('setTheme', theme); applyTheme(theme); },
     // Account: Refresh (and Retry) — the page and the seat past the face's cache, the holdings —, the curve's range, a venue's
     // Details, the Statement (its lines read on opening it), its CSV
     refreshAccount: () => {
@@ -1877,8 +1877,8 @@ export function boot(win, host = {}) {
       const side = el.dataset.side === 'sell' ? 'sell' : 'buy';
       ticketAsked = { id, side };
       try { go({ screen: 'trade', id }); } finally { ticketAsked = null; }
-      const t = store.get().trade.ticket;
-      if (t?.id !== id || t.side !== side) pickTicket(id, { side });
+      const ticket = store.get().trade.ticket;
+      if (ticket?.id !== id || ticket.side !== side) pickTicket(id, { side });
     },
     ticketVenue: el => changeField('venue', el.dataset.venue),
     ticketSide: el => changeField('side', el.dataset.value),
@@ -1995,9 +1995,9 @@ export function boot(win, host = {}) {
   }, true);
   const tickOf = el => el?.closest?.('.turn-tick') ?? null;
   const inRail = el => Boolean(el?.closest?.('#turn-rail'));
-  root.addEventListener('mouseover', ev => { const t = tickOf(ev.target); if (t) hoverRail(Number(t.dataset.turn)); });
+  root.addEventListener('mouseover', ev => { const tick = tickOf(ev.target); if (tick) hoverRail(Number(tick.dataset.turn)); });
   root.addEventListener('mouseout', ev => { if (tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null); });
-  root.addEventListener('focusin', ev => { const t = refocusing ? null : tickOf(ev.target); if (t) hoverRail(Number(t.dataset.turn)); });
+  root.addEventListener('focusin', ev => { const tick = refocusing ? null : tickOf(ev.target); if (tick) hoverRail(Number(tick.dataset.turn)); });
   // (a focused tick a page write took out of the document fires a focusout too, in Chrome: not the focus leaving)
   root.addEventListener('focusout', ev => { if (!refocusing && ev.target?.isConnected !== false && tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null); });
   root.addEventListener('change', ev => {
