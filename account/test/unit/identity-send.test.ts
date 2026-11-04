@@ -400,6 +400,10 @@ describe("the account's own notices", () => {
       ["go //evil.com/x", "go <link>"],
       ["go ftp://x and javascript://x and xhttp://evil", "go <link> and <link> and <link>"],
       ["host 203.0.113.5:8080/pay", "host <link>"],
+    ["a.1.2.3.4 and .1.2.3.4", "a·<link> and ·<link>"],
+    ["evil.1.2.3.4/p", "evil·<link>"],
+    ["…1.2.3.4", "···<link>"],
+    ["。250.10．25。25", "·<link>"],
       ["see https://x.example/pay?id=1", "see <link>"],
     ];
     const linkless = (text: string): boolean =>
@@ -408,7 +412,7 @@ describe("the account's own notices", () => {
       expect(noLinks(text)).toBe(want);
       expect(linkless(noLinks(text))).toBe(true);
     }
-    for (const text of ["Buy 10 NVDA · limit 183.00 · Paper · Alpaca", "183.00", "3.5%", "1,234.56", "BTC/USDT", "ETH/USD at 2451.3333",
+    for (const text of ["Buy 10 NVDA · limit 183.00 · Paper · Alpaca", "183.00", "3.5%", "1,234.56", "1.2.3.45678", "BTC/USDT", "ETH/USD at 2451.3333",
   "@gravit /status #nvda $NVDA"]) {
       expect(noLinks(text)).toBe(text);
     }

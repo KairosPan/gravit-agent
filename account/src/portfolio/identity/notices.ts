@@ -25,7 +25,7 @@ export interface FillFields {
 const DOT_LOOKALIKES = /[。．｡․]/gu;
 const SCHEME_LINK = /[a-z][a-z0-9+.-]*:\/\/\S*/giu;
 const RELATIVE_LINK = /\/\/\S+/gu;
-const DOTTED_QUAD = /(?<![0-9.])[0-9]{1,3}(?:\.[0-9]{1,3}){3}(?![0-9])(?::[0-9]{1,5})?(?:[/?#]\S*)?/gu;
+const DOTTED_QUAD = /(?<![0-9])[0-9]{1,3}(?:\.[0-9]{1,3}){3}(?![0-9])(?::[0-9]{1,5})?(?:[/?#]\S*)?/gu;
 const LONE_DOT = /(?<![0-9])\.|\.(?![0-9])/gu;
 
 function scrubLinkText(text: string): string {
