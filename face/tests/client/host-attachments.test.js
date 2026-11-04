@@ -131,6 +131,11 @@ test('a carrier failure leaves a thumb free to read again; a refusal or a bad an
   assert.equal(undecodable.store.get().thumbs.a1, null, 'data that does not decode lands as null');
   assert.equal(undecodable.blobs.length, 0);
   assert.equal(undecodable.calls.length, 1);
+
+  const svg = rig(async () => ({ attachment: { mediaType: 'image/svg+xml' }, data: 'PHN2Zy8+' }));
+  await svg.attachments.thumb('s1', 'a1');
+  assert.equal(svg.store.get().thumbs.a1, null, 'a media type outside the raster four lands as null');
+  assert.equal(svg.blobs.length, 0);
 });
 
 test('a carrier failure backs off: no read again until the clock passes 2 s, then 4 s, doubling to a minute', async () => {

@@ -72,7 +72,9 @@ export function startAttachments({ call, upload = uploadFile, store, win = globa
       try {
         const v = await call('session/attachment', { request: { sessionId, attachmentId } });
         const mediaType = v?.attachment?.mediaType;
-        const bytes = typeof mediaType === 'string' && typeof v?.data === 'string' ? bytesOf(v.data) : null;
+        // only the four raster types become a blob (as isImageSrc admits only their data URLs): anything else is a card
+        const raster = DEFAULT_LIMITS.mediaTypes.includes(mediaType);
+        const bytes = raster && typeof v?.data === 'string' ? bytesOf(v.data) : null;
         if (bytes) src = win.URL.createObjectURL(new win.Blob([bytes], { type: mediaType }));
       } catch (e) {
         // a host refusal (a code, no status) or a 4xx of the image's own (a 404) is the image's answer, null, and the thread
