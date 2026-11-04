@@ -15,6 +15,11 @@
  * - The `session-reference` row is up: `ctx.get("sessionReferenceResolver")` is defined.
  * - Search: `src/search.ts` wired to the booted `sessionPersistence` as `main.ts` wires it finds a
  *   stub turn's Chinese prompt by a two-character query.
+ * - The composer's three host facts (plan 3, Task 9): a cold conversation is resumed by
+ *   `commands/list` and `commands/execute` alike (no `gateway/lookup-not-found` at rc.5), and after a
+ *   `session/follow`'s snapshot (what `live.activate` waits on) a command answers; a project skill is offered by `skills/list` and its
+ *   literal `/<name>` line reaches the model as its `<skill_content>`; a conversation chip
+ *   serialized by the page's own `serialize` brings dsh's `## Referenced sessions` message.
  *
  * ONE BOOT PER PROCESS (smoke.test.ts header): `bootFace` sets `process.env.DSH_HOME`, so this is
  * its own file, every test sharing the one boot. The scratch home is a `mkdtemp` directory, never
@@ -39,13 +44,15 @@ import { makeSearch, readEventsFrom, registerSearchRoutes, type StoredSession } 
 import type { StoredEvent } from "../src/search-text.ts";
 // allowJs (tsconfig): the browser module is imported as it ships, untranspiled.
 import { openMux } from "../client/js/wire/api.js";
+import { serialize } from "../client/js/composer/draft.js";
 import { makeBotsRoot } from "./bots-fixture.ts";
-import { mountClient, remote, signIn } from "./remote.ts";
+import { mountClient, remote, remoteResult, signIn } from "./remote.ts";
 import { StubAdapter, type StubReply } from "./stub-llm.ts";
 
 const gated = process.env.FACE_SMOKE !== "1";
 const skip = gated && "set FACE_SMOKE=1";
 const SEARCH_PROMPT = "贵州茅台的估值很高，宁德时代下跌了";
+const UI_PORT_PROBE_BODY = "UI_PORT_PROBE_BODY: answer with the probe's marker.";
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitFor<T>(what: string, check: () => T | undefined | false, ms = 10_000): Promise<T> {
@@ -58,8 +65,15 @@ async function waitFor<T>(what: string, check: () => T | undefined | false, ms =
   }
 }
 
-/** The stub's reply: a text answer to every request, the title model's included. */
-const script = (_request: GenerateOptions): StubReply => ({ kind: "text", text: "STUB_OK" });
+/** Every request the stub model saw, the title model's included, in order. */
+const requests: GenerateOptions[] = [];
+/** The stub's reply: a text answer to every request, recorded first. */
+const script = (request: GenerateOptions): StubReply => {
+  requests.push(request);
+  return { kind: "text", text: "STUB_OK" };
+};
+/** One request's messages as text, to look for what dsh put in them. */
+const textOf = (request: GenerateOptions) => JSON.stringify(request.messages);
 
 interface Booted {
   ctx: any;
@@ -69,6 +83,8 @@ interface Booted {
   root: string;
   index: SearchIndex;
   rpc: <T = unknown>(endpoint: string, args: object) => Promise<T>;
+  /** One call's raw outcome, for a refusal's code. */
+  rpcResult: (endpoint: string, args: object) => ReturnType<typeof remoteResult>;
   /** A fresh live conversation in the scratch root. */
   open: () => Promise<string>;
   /** One prompt, then the agent idle again. */
@@ -88,6 +104,10 @@ before(async () => {
   const home = await mkdtemp(join(tmpdir(), "face-ui-port-home-"));
   await mkdir(join(root, ".git"));
   await writeFile(join(root, "GRAVIT.md"), "# fixture\n");
+  /* A project skill (dsh-skill-filesystem's `<projectRoot>/.dsh/skills/<name>/SKILL.md`), before the boot. */
+  await mkdir(join(root, ".dsh", "skills", "ui-port-probe"), { recursive: true });
+  await writeFile(join(root, ".dsh", "skills", "ui-port-probe", "SKILL.md"),
+    `---\nname: ui-port-probe\ndescription: The UI port smoke's probe skill.\n---\n\n${UI_PORT_PROBE_BODY}\n`);
   setupFaceProfile(home);
   const patchPath = join(home, "profiles", "face", "cordis.patch.yml");
   const patch = readFileSync(patchPath, "utf8").replace(/^\[\][ \t]*$/m, "");
@@ -114,6 +134,7 @@ before(async () => {
   const base = `http://127.0.0.1:${ctx.webServer.port}`;
   const cookie = await signIn(ctx, base);
   const rpc = <T = unknown>(endpoint: string, args: object) => remote<T>(base, cookie, endpoint, args);
+  const rpcResult = (endpoint: string, args: object) => remoteResult(base, cookie, endpoint, args);
   const agentOf = (id: string) => ctx.agents.get(SessionId(id)) as Agent | undefined;
   const open = async () => (await rpc<{ sessionId: string }>("session/create", { request: { cwd: root } })).sessionId;
   const turn = async (sessionId: string, content: object[]) => {
@@ -126,7 +147,7 @@ before(async () => {
     await agent.whenIdle();
     await persistence.flush();
   };
-  face = { ctx, dispose, base, cookie, root, index, rpc, open, turn, agentOf };
+  face = { ctx, dispose, base, cookie, root, index, rpc, rpcResult, open, turn, agentOf };
 
   /* The page's mux, as client-mux-smoke installs it: same-origin fetch and a WebSocket with the cookie. */
   scope.location = { protocol: "http:", host: `127.0.0.1:${ctx.webServer.port}` };
@@ -296,4 +317,81 @@ test("search: after a stub turn, /data/search?q=茅台 lists that session", {
   const { body, hit } = await search("茅台");
   assert.ok(hit, JSON.stringify(body).slice(0, 500));
   assert.ok(hit.snippet.includes("茅台"), hit.snippet);
+});
+
+/** A cold session as the skills test makes one: created on the registry and disposed, its log on disk, no agent live. */
+async function coldSession(f: Booted): Promise<string> {
+  const coldId = `session-${randomUUID()}`;
+  const handle = await f.ctx.agents.create({ sessionId: coldId, meta: { cwd: f.root }, agentOptions: { provider: "stub", model: "echo" } });
+  await handle.dispose();
+  await f.ctx.get("sessionPersistence").flush();
+  assert.equal(f.agentOf(coldId), undefined, "the session is cold");
+  return coldId;
+}
+
+/* Observed at dsh 0.2.1-rc.5 (plan 3, Task 9): the spec's D13 premise does not hold. The face mounts
+ * dsh-api-session-controller, which configures the gateway's `agent` lookup to resolve OR RESUME a
+ * session, so `commands/list` and `commands/execute` on a cold conversation answer and leave it live;
+ * neither fails with `gateway/lookup-not-found`. Hence composer.js reads commands only on a live
+ * conversation (reading never activates, PLAN D16), and live.activate before a command is redundant
+ * but harmless: after a follow's snapshot the command answers too. */
+test("a cold conversation: commands/list and commands/execute resume it (no gateway/lookup-not-found), and after a session/follow's snapshot commands/execute answers", { skip, timeout: 60_000 }, async () => {
+  const f = face!;
+  const execute = (sessionId: string) => f.rpcResult("commands/execute", { agentId: sessionId, line: "/goal", submittedAttachments: [] });
+
+  /* Reading the commands of a cold conversation activates it: the menu must not do it. */
+  const listed = await coldSession(f);
+  const list = await f.rpcResult("commands/list", { agentId: listed });
+  assert.equal(list.ok, true, JSON.stringify(list).slice(0, 300));
+  assert.ok(f.agentOf(listed), "commands/list resumed the cold session");
+
+  /* A command on a cold conversation answers, and resumes it. */
+  const direct = await coldSession(f);
+  const cold = await execute(direct);
+  assert.equal(cold.ok, true, JSON.stringify(cold).slice(0, 300));
+  assert.ok(f.agentOf(direct), "commands/execute resumed the cold session");
+
+  /* What live.activate does: a follow, until its first snapshot; the command then answers. */
+  const followed = await coldSession(f);
+  const mux = await openReadyMux();
+  const frames: Record<string, any>[] = [];
+  mux.stream("session/follow", { request: { address: { kind: "session", sessionId: followed }, assistantStream: true } }, {
+    onItem: (value: unknown) => { frames.push(value as Record<string, any>); },
+    onError: (error: unknown) => { frames.push({ type: "ERROR", error }); },
+  });
+  const snapshot = await waitFor("the follow's snapshot", () => frames.find((item) => item.type === "snapshot" || item.type === "ERROR"));
+  assert.equal(snapshot.type, "snapshot", JSON.stringify(snapshot).slice(0, 300));
+  assert.ok(f.agentOf(followed), "the follow activated the session");
+  const warm = await execute(followed);
+  assert.equal(warm.ok, true, JSON.stringify(warm).slice(0, 300));
+  const value = (warm as { value?: { result?: { kind?: string } } }).value;
+  assert.equal(value?.result?.kind, "success", JSON.stringify(warm).slice(0, 300));
+});
+
+test("a skill by its literal name: skills/list names ui-port-probe, and a prompt \"/ui-port-probe hello\" reaches the model with its skill_content", { skip, timeout: 60_000 }, async () => {
+  const f = face!;
+  const sessionId = await f.open();
+  const listed = await f.rpc<{ skills: { name: string }[] }>("skills/list", { request: { sessionId } });
+  assert.ok(listed.skills.some((skill) => skill.name === "ui-port-probe"), JSON.stringify(listed).slice(0, 500));
+
+  const from = requests.length;
+  await f.turn(sessionId, [{ type: "text", text: "/ui-port-probe hello" }]);
+  /* The model's request for the turn (the title model's request, if any, holds no skill). */
+  const seen = requests.slice(from).map(textOf);
+  const tag = JSON.stringify('<skill_content name="ui-port-probe">').slice(1, -1);
+  const hit = seen.find((body) => body.includes(tag));
+  assert.ok(hit, `${seen.length} requests after the prompt: ${seen.map((body) => body.slice(0, 600)).join(" | ")}`);
+  assert.ok(hit.includes("UI_PORT_PROBE_BODY"), hit.slice(0, 1500));
+});
+
+test("a conversation chip: the page's serialized mention brings a Referenced sessions message", { skip, timeout: 60_000 }, async () => {
+  const f = face!;
+  const a = await f.open();
+  await f.turn(a, [{ type: "text", text: "the referenced turn" }]);
+  const b = await f.open();
+  const text = serialize([{ type: "chip", chip: { kind: "conversation", id: a, label: "A" } }], {});
+  const from = requests.length;
+  await f.turn(b, [{ type: "text", text }]);
+  const seen = requests.slice(from).map(textOf);
+  assert.ok(seen.some((body) => body.includes("## Referenced sessions")), `${text}: ${seen.map((body) => body.slice(0, 400)).join(" | ")}`);
 });
