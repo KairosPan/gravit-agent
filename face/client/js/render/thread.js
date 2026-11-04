@@ -14,6 +14,7 @@ import { viewOf } from '../host/lunhui.js';
 import { sessionRefRuns } from '../composer/draft.js';
 import { chipInner, fileCard } from '../composer/view.js';
 import { metaText, sizeText, isImageSrc } from '../composer/files.js';
+import { maskSpans } from '../mask.js';
 
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
 
@@ -100,8 +101,28 @@ function trace(m, conv, state) {
     `<div class="trace-body">${inner}</div></details>`;
 }
 
-// the operator's words: a conversation mention is a chip (D17); a file or bot reference stays the text that was sent
-const youText = t => (t ? sessionRefRuns(t).map(r => (r.type === 'ref' ? `<span class="ref-chip">${chipInner(icon('chat', 13), r.label)}</span>` : esc(r.text))).join('') : '');
+// a key in the operator's words (spec §5.9, D25): its original in the raw run, under its mask until the eye reveals it;
+// the eye names the message's nth secret, and a reveal is `<convId>|<msgId>|<n>` in the page's set (app.js)
+function secret(run, id, shown) {
+  const mask = shown ? '' : `<span class="secret-mask" aria-hidden="true">${esc(run.masked)}</span>`;
+  return `<span${attrs({ class: cls('secret', shown && 'revealed'), 'data-secret': id })}><span class="secret-raw">${esc(run.text)}</span>${mask}</span>` +
+    `<button${attrs({ type: 'button', class: 'secret-eye', id: `secret-${id}`, 'data-action': 'toggleSecret', 'data-secret': id, 'aria-label': shown ? 'Hide secret' : 'Show secret' })}>${icon(shown ? 'eyeOff' : 'eye', 14)}</button>`;
+}
+
+// the operator's words: a conversation mention is a chip (D17); a file or bot reference stays the text that was sent; a
+// key is masked (display only: what was sent and what a copy takes stay the original)
+function youText(t, m, conv, page) {
+  if (!t) return '';
+  let n = 0;
+  return sessionRefRuns(t).map(r => {
+    if (r.type === 'ref') return `<span class="ref-chip">${chipInner(icon('chat', 13), r.label)}</span>`;
+    return maskSpans(r.text).map(s => {
+      if (s.type !== 'secret') return esc(s.text);
+      const i = n++;
+      return secret(s, `${m.id}-${i}`, page.revealed?.has(`${conv.id}|${m.id}|${i}`) === true);
+    }).join('');
+  }).join('');
+}
 
 // an image the host cannot give back (no thumb, or offloaded by compaction) is a card: its name or Image, its type and size
 const imageMeta = a => {
@@ -124,10 +145,10 @@ function youFiles(list, thumbs) {
   }).join('')}</div>`;
 }
 
-function youMessage(m, state) {
+function youMessage(m, conv, state, page) {
   const list = Array.isArray(m.data?.attachments) ? m.data.attachments : [];
-  if (!list.length) return `<div class="msg you"><div class="bubble you">${youText(m.text)}</div>${avatar('you', 28)}</div>`;
-  const bubble = m.text ? `<div class="bubble you">${youText(m.text)}</div>` : '';
+  if (!list.length) return `<div class="msg you"><div class="bubble you">${youText(m.text, m, conv, page)}</div>${avatar('you', 28)}</div>`;
+  const bubble = m.text ? `<div class="bubble you">${youText(m.text, m, conv, page)}</div>` : '';
   return `<div class="msg you"><div class="you-body">${youFiles(list, state?.thumbs ?? {})}${bubble}</div>${avatar('you', 28)}</div>`;
 }
 
@@ -146,7 +167,7 @@ export function thumbsNeeded(conv, thumbs) {
   return out;
 }
 
-export function renderMessage(m, conv, state) {
+export function renderMessage(m, conv, state, page = {}) {
   // a tool call is drawn nowhere (the operator's word, 2026-10-28): its gate, receipt or refusal is a message of its own
   if (m.kind === 'tool') return '';
   // a producer-sourced user record (a runtime snapshot, a plugin notice, a member's delta) is context, folded away under its source;
@@ -157,7 +178,7 @@ export function renderMessage(m, conv, state) {
       ? `<details class="sysline ctx"><summary>context · ${esc(source)}</summary><pre>${esc(m.text)}</pre></details>`
       : `<div class="sysline">${esc(m.text)}</div>`;
   }
-  if (m.from === 'you') return youMessage(m, state);
+  if (m.from === 'you') return youMessage(m, conv, state, page);
   const name = conv.kind === 'group' && m.from !== 'gravit' ? `<div class="sender-name">${esc(m.data?.name ?? senderName(m.from, state))}</div>` : '';
   // plain talk keeps a bubble's width; every card and green bubble runs wider (spec §16), a composed answer wider still
   const width = m.kind === 'composed' ? 'composed' : m.kind !== 'text' && 'wide';
@@ -169,7 +190,7 @@ const thinkingRow = conv => `<div class="msg left"><div class="msg-row">${avatar
 
 // a tool call leaves nothing in the thread, not even the time it held: a divider reads the gap between the rows drawn;
 // the words a composed answer folds are drawn inside its Working notes, just above it, and nowhere else
-export function renderThread(conv, state, now) {
+export function renderThread(conv, state, now, page = {}) {
   let prev = null;
   const out = [];
   const notes = foldNotes(conv.messages);
@@ -180,8 +201,8 @@ export function renderThread(conv, state, now) {
     const d = divider(m.at, prev, now);
     if (d) out.push(`<div class="divider">${esc(d)}</div>`);
     const ids = m.kind === 'composed' ? notes.get(m.id) ?? [] : [];
-    if (ids.length) out.push(notesHtml(conv, m, ids.length, ids.map(id => renderMessage(byId.get(id), conv, state)).join('')));
-    out.push(renderMessage(m, conv, state));
+    if (ids.length) out.push(notesHtml(conv, m, ids.length, ids.map(id => renderMessage(byId.get(id), conv, state, page)).join('')));
+    out.push(renderMessage(m, conv, state, page));
     prev = m.at;
   }
   if (conv.thinking) out.push(thinkingRow(conv));

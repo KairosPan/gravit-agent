@@ -447,6 +447,15 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .composer-input:empty::before { content: attr(data-placeholder); color: var(--dim); pointer-events: none; }
 .ref-chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; margin: 0 1px; border-radius: var(--radius-pill); background: var(--ref-fill); color: var(--ref-text); font-size: 13px; line-height: 1.45; vertical-align: baseline; white-space: nowrap; }
 .ref-chip-label { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+/* a key in the operator's words (spec §5.9): its original lies transparent over its mask, so a selection or a copy takes the
+   original; revealed, the original stands in the box and the mask is gone */
+.secret { display: inline-block; max-width: 100%; position: relative; padding: 0 4px; font-family: var(--font-mono); font-size: 0.875em; word-break: break-all; white-space: pre-wrap; vertical-align: baseline; background: var(--surface-2); border-radius: var(--radius-s); color: var(--text); }
+.secret-raw { position: absolute; inset: 0; padding: 0 4px; overflow: hidden; color: transparent; }
+.secret-mask { user-select: none; -webkit-user-select: none; }
+.secret.revealed .secret-raw { position: static; padding: 0; color: var(--text); }
+.secret-eye { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin: 0 2px; padding: 0; border: 0; border-radius: var(--radius-s); background: transparent; color: inherit; vertical-align: middle; cursor: pointer; }
+.secret-eye:hover { background: var(--surface-2); color: var(--text); }
+.secret-eye:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
 /* the / and @ menus, above the box; the active row is the one Enter chooses */
 .composer-menu { position: absolute; left: 28px; bottom: calc(100% - 8px); width: min(520px, 100%); z-index: 20; }
 .cmenu { max-height: 400px; overflow-y: auto; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--surface); box-shadow: var(--shadow-lift); }

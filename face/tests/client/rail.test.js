@@ -334,3 +334,28 @@ test('an attachment-only last message previews as its names', () => {
   ] });
   assert.equal(previewOf(c), 'chart.png, q3.csv');
 });
+
+// masking on screen (plan 5 Task 2): every excerpt is masked whoever spoke (the operator's ruling), with no eye
+const SK = 'sk-proj-aB3dE6fG9hJ2kL5mN8pQ1rS4';
+const SK_MASKED = 'sk-proj-' + '*'.repeat(SK.length - 8);
+
+test('the preview line is masked, with no eye', () => {
+  const said = conv('a', { messages: [{ id: 'e1', seq: 1, at: NOW, from: 'gravit', kind: 'text', text: `saved ${SK}`, data: {} }] });
+  const read = conv('b', { preview: `mine ${SK} <b>` });
+  const h = renderList(listed([said, read], 'a'), NOW);
+  assert.ok(h.includes(`row-preview">saved ${SK_MASKED}<`));
+  assert.ok(h.includes(`row-preview">mine ${SK_MASKED} &lt;b&gt;<`));
+  assert.doesNotMatch(h, /aB3dE6fG9h|secret-eye|class="secret/);
+});
+
+test('a snippet holding a key is masked and its match still marks the same characters', () => {
+  const s = listed([conv('a', { title: 'plain' })]);
+  const snippet = `x ${SK} the zz end`;
+  const at = snippet.indexOf('zz');
+  const h = renderList(searched(s, 'zz', { items: [{ sessionId: 'a', snippet, match: [at, at + 2] }], hasMore: false }), NOW);
+  assert.ok(h.includes(`<b class="conv-hit-channel">No channel</b> x ${SK_MASKED} the <mark>zz</mark> end</span>`));
+  assert.doesNotMatch(h, /aB3dE6fG9h/);
+  // a match over the key marks its masked characters
+  const over = renderList(searched(s, 'zz', { items: [{ sessionId: 'a', snippet, match: [2, 2 + SK.length] }], hasMore: false }), NOW);
+  assert.ok(over.includes(`x <mark>${SK_MASKED}</mark> the zz end`));
+});

@@ -9,6 +9,7 @@ import { worthOf, cardsOf } from '../host/account-view.js';
 import { money } from '../wire/account-model.js';
 import { avatar, groupMark } from './avatars.js';
 import { groupsOf } from '../host/list-view.js';
+import { maskExcerpt } from '../mask.js';
 import { titleMatches, mergeResults, highlightRuns, searchPhase, moreThanTwenty, spoken, spokenLine } from '../host/search-view.js';
 
 const NAME = { you: 'You', gravit: 'Gravit', system: '' };
@@ -17,7 +18,7 @@ export function senderName(from, state) {
   return NAME[from] ?? state?.bots?.find(b => b.id === from)?.name ?? from;
 }
 
-// a row's line: the conversation on screen previews from its own window; any other row from the host's one-message
+// a row's line (drawn masked, as every excerpt is, with no eye: spec §5.9): the conversation on screen previews from its own window; any other row from the host's one-message
 // page (`preview`, re-read when its session moves), and until that lands from the last line drawn. Only SPOKEN lines
 // count — never a context row (a runtime snapshot, a plugin notice) or a tool row
 export function previewOf(conv, state = null) {
@@ -45,7 +46,7 @@ function row(conv, state, now) {
     `<a${attrs({ class: cls('row', current && 'current'), 'aria-current': current ? 'page' : null, href: `#/messages/${conv.id}`, 'data-action': 'open', 'data-id': conv.id })}>` +
     `<span class="${cls('dot', unreadOf(conv) && 'on')}"></span>${rowMark(conv, state)}` +
     `<span class="row-body"><span class="row-top"><span class="row-title">${esc(conv.title)}</span>${conv.pinned ? `<span class="row-pin">${icon('pin', 11, 2, true)}</span>` : ''}<span class="row-time">${conv.updatedAt ? rowTime(conv.updatedAt, now) : ''}</span></span>` +
-    `<span class="row-preview">${esc(previewOf(conv, state))}</span></span></a>${pin}</div>`;
+    `<span class="row-preview">${esc(maskExcerpt(previewOf(conv, state)))}</span></span></a>${pin}</div>`;
 }
 
 function draftRow() {
@@ -117,9 +118,10 @@ const SEARCH_LINE = {
 const stateLine = key => `<div class="conv-results-state">${SEARCH_LINE[key]}</div>`;
 
 // a result: its title and time, then its channel in bold and the snippet with the match marked; an archived one dim with its
-// chip, and the face's own archive undone by the key after the link (the host's cannot be undone here)
+// chip, and the face's own archive undone by the key after the link (the host's cannot be undone here). The snippet is masked
+// first (an excerpt, whoever spoke: spec §5.9), which keeps its length, so the match's offsets stand
 function hit(it, now) {
-  const runs = highlightRuns(it.snippet, it.match).map(r => (r.mark ? `<mark>${esc(r.text)}</mark>` : esc(r.text))).join('');
+  const runs = highlightRuns(typeof it.snippet === 'string' ? maskExcerpt(it.snippet) : it.snippet, it.match).map(r => (r.mark ? `<mark>${esc(r.text)}</mark>` : esc(r.text))).join('');
   const link = `<a${attrs({ class: cls('conv-hit', it.archived && 'archived'), href: `#/messages/${it.id}`, 'data-action': 'open', 'data-id': it.id })}>` +
     `<span class="row-top"><span class="row-title">${esc(it.title)}</span>${it.archived ? '<span class="chip grey">Archived</span>' : ''}<span class="row-time">${it.at ? rowTime(it.at, now) : ''}</span></span>` +
     `<span class="conv-hit-line"><b class="conv-hit-channel">${esc(it.channelLabel)}</b>${runs ? ` ${runs}` : ''}</span></a>`;

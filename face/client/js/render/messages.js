@@ -143,10 +143,10 @@ export function renderDetails(conv, state) {
 </aside>`;
 }
 
-export function renderMessagesScreen(state, now, composer = {}) {
+export function renderMessagesScreen(state, now, composer = {}, page = {}) {
   if (state.draft) return draftScreen(state, composer);
   const conv = currentConversation(state);
   if (!conv) return emptyScreen(state, composer);
   const placeholder = conv.kind === 'group' ? 'Tell Gravit… @ a bot by name' : 'Tell Gravit…';
-  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread" id="thread">${renderThread(conv, state, now)}</div>${renderComposer(composerOf(composer, { placeholder }))}${renderStatus(state.status)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
+  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread" id="thread">${renderThread(conv, state, now, page)}</div>${renderComposer(composerOf(composer, { placeholder }))}${renderStatus(state.status)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
 }

@@ -52,6 +52,8 @@ export const ICONS = {
   coin: '<path d="M7 4v16M7 4 4 7M7 4l3 3M17 20V4M17 20l-3-3M17 20l3-3"></path>',
   stock: '<path d="M4 20h16"></path><path d="M6 17v-4M11 17V9M16 17v-6"></path><path d="m5 8 5-4 4 3 5-4"></path>',
   rwa: '<path d="M9 11V4.5A1.5 1.5 0 0 1 10.5 3H19a1.5 1.5 0 0 1 1.5 1.5v10A1.5 1.5 0 0 1 19 16h-5"></path><path d="M13 7h4M13 10h4"></path><circle cx="8" cy="16" r="5"></circle><path d="M8 13.5v5M6.5 15h3"></path>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle>',
+  eyeOff: '<path d="M2 12s3.5-7 10-7c2 0 3.7.7 5.1 1.6M22 12s-3.5 7-10 7c-2 0-3.7-.7-5.1-1.6"></path><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"></path><path d="M3 3l18 18"></path>',
   pin: '<path d="M9 4h6l-1 6 3 3v2H7v-2l3-3z"></path><path d="M12 15v6"></path>',
   prediction: '<circle cx="12" cy="12" r="9"></circle><path d="M12 12 16 8"></path><path d="M12 7v1M7 12h1M16.5 12h.5"></path>',
 };

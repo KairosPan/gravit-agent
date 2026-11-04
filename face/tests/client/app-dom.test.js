@@ -5521,3 +5521,58 @@ test('a send from the empty state (no conversation, no New message) says to open
   assert.equal(att.uploads.length, 0, 'nothing uploads from the empty state');
   store.timers.clear();
 });
+
+// ---- masking on screen (plan 5 task 2): the eye in the operator's bubble ----
+const SK = 'sk-proj-aB3dE6fG9hJ2kL5mN8pQ1rS4';
+const keyPage = [{ type: 'event', event: { type: 'user/message', seq: 7, time: 1, surfaceOp: 'append', data: { id: 'm7', role: 'user', content: [{ type: 'text', text: `my key ${SK}` }], source: { kind: 'user' } } } }];
+const secretRig = async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const eye = f.withId('secret-e7-0', { tagName: 'BUTTON', dataset: { action: 'toggleSecret', secret: 'e7-0' }, presentIf: /id="secret-e7-0"/ });
+  const h = host({ rows: [row('s1'), row('s2', { updatedAt: 1 })], pages: { s1: keyPage, s2: [] } });
+  const store = started(f, h);
+  await h.ready();
+  await settle();
+  return { f, h, store, eye };
+};
+
+test('Show secret reveals the value, a render keeps it, and opening another conversation masks it again', async () => {
+  const { f, store, eye } = await secretRig();
+  assert.match(f.html(), /<span class="secret" data-secret="e7-0">/);
+  assert.match(f.html(), /aria-label="Show secret"/);
+  f.click(eye);
+  await settle();
+  assert.match(f.html(), /<span class="secret revealed" data-secret="e7-0"><span class="secret-raw">sk-proj-/);
+  assert.match(f.html(), /aria-label="Hide secret"/);
+  assert.doesNotMatch(f.html(), /secret-mask/);
+  store.dispatch('toggleRail');
+  assert.match(f.html(), /secret revealed/, 'a render keeps it');
+  f.click(eye);
+  await settle();
+  assert.match(f.html(), /<span class="secret" data-secret="e7-0">/, 'the eye hides it again');
+  f.click(eye);
+  await settle();
+  assert.match(f.html(), /secret revealed/);
+  f.win.location.hash = '#/messages/s2';
+  f.fire('win', 'hashchange');
+  await settle();
+  f.win.location.hash = '#/messages/s1';
+  f.fire('win', 'hashchange');
+  await settle();
+  assert.match(f.html(), /<span class="secret" data-secret="e7-0">/, 'back on s1 it is masked again');
+  assert.doesNotMatch(f.html(), /secret revealed/);
+  store.timers.clear();
+});
+
+test('the eye keeps focus as its label flips', async () => {
+  const { f, store, eye } = await secretRig();
+  eye.focus();
+  f.click(eye);
+  await settle();
+  assert.match(f.html(), /aria-label="Hide secret"/);
+  assert.equal(f.doc.activeElement, eye);
+  f.click(eye);
+  await settle();
+  assert.match(f.html(), /aria-label="Show secret"/);
+  assert.equal(f.doc.activeElement, eye);
+  store.timers.clear();
+});

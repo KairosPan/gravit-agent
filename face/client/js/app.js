@@ -510,6 +510,9 @@ export function boot(win, host = {}) {
   let sheetKind = null;     // the kind of the sheet open as the store last changed: which one a close closed
   let orderFields = null;   // the ticket's order sheet's fields as they last stood, for when another sheet took its place
   let lightFrom = null;     // the image key the lightbox opened from: focus goes back to it on closing
+  // the operator's keys shown through their eye, as `<convId>|<msgId>|<n>` (render/thread.js): the page's, not the store's,
+  // and forgotten once their conversation leaves the screen (D26)
+  const revealed = new Set();
   let last = { lightbox: false, overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, editor: null, confirm: null, query: '', key: null };
   let confirmFrom = null;
   let searchFocus = false;  // ⌥⌘K from a screen with no list: the box takes focus once Messages draws it
@@ -549,11 +552,15 @@ export function boot(win, host = {}) {
     // the note above the box is a live region: the node stays across renders, so a new line in it is announced
     const note0 = doc.getElementById('composer-note');
     const noteText = notes.get(key) ?? '';
+    // the conversation on screen: another one (or none) than at the last render masks every key again
+    const open = s.route.screen === 'messages' ? currentConversation(s) : null;
+    const threadSig = open ? open.id : null;
+    if (threadSig !== last.thread) revealed.clear();
 
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
-      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText });
+      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed });
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
     const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     // files dragged over a screen with a composer: the drop overlay over the page
@@ -612,8 +619,6 @@ export function boot(win, host = {}) {
     if (drawerBody && last.drawer && last.drawer === drawerOf(s) && scrolls.drawer != null) drawerBody.scrollTop = scrolls.drawer;
     // the thread stays where the person was reading while they read up, however much arrives; at the bottom, or on
     // another conversation, it follows the tail
-    const open = s.route.screen === 'messages' ? currentConversation(s) : null;
-    const threadSig = open ? open.id : null;
     const thread = doc.getElementById('thread');
     if (thread) thread.scrollTop = threadAt && !threadAt.bottom && threadSig === last.thread ? threadAt.top : thread.scrollHeight;
 
@@ -1594,6 +1599,16 @@ export function boot(win, host = {}) {
       // focus returns to the key pressed, which a click need not have focused (Safari focuses no clicked button)
       lightFrom = focusKey(el);
       store.dispatch('openLightbox', { attachmentId: id, name: el.dataset.name ?? '' });
+    },
+    // a key's eye in the operator's bubble shows or hides it (display only); its id keeps the focus on it as its label flips
+    toggleSecret: el => {
+      const open = currentConversation(store.get());
+      const id = el.dataset.secret ?? '';
+      const cut = id.lastIndexOf('-');
+      if (!open || cut < 0) return;
+      const k = `${open.id}|${id.slice(0, cut)}|${id.slice(cut + 1)}`;
+      if (revealed.has(k)) revealed.delete(k); else revealed.add(k);
+      render();
     },
     lightboxClose: () => store.dispatch('closeLightbox'),
     lightboxKeep: () => {},
