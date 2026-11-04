@@ -362,6 +362,67 @@ export async function call(endpoint, args = {}) {
 }
 
 /**
+ * Upload one file's bytes to a session's staging store: the one write the page
+ * makes outside `call()`, because `fetch` reports no upload progress. Over
+ * XMLHttpRequest, as dsh's own browser uploader (`dsh-client-file-upload`
+ * `fileUploadWorker`), same origin, so the owner's cookie rides along. The
+ * route answers 200 with `{ok: true, value: {receiptId, file}}` or
+ * `{ok: false, error: {code, message, details}}`, and 415 to any media type
+ * but `application/octet-stream`.
+ * @param {{sessionId: string, name: string, blob: Blob, onProgress?: (loaded: number) => void,
+ *   makeXhr?: () => XMLHttpRequest}} options
+ * @returns {{done: Promise<{receiptId: string, file: unknown}>, abort: () => void}}
+ *   `done` rejects with a CallError: `status` on a carrier failure (401 = not
+ *   signed in), the host's `code` and `details`, `bad-response`, or `aborted`.
+ */
+export function uploadFile({ sessionId, name, blob, onProgress = () => {}, makeXhr = () => new XMLHttpRequest() }) {
+  const what = `upload ${name}`;
+  const xhr = makeXhr();
+  /** @type {(value: {receiptId: string, file: unknown}) => void} */ let resolve = () => {};
+  /** @type {(error: CallError) => void} */ let reject = () => {};
+  /** @type {Promise<{receiptId: string, file: unknown}>} */
+  const done = new Promise((yes, no) => { resolve = yes; reject = no; });
+  let settled = false;
+  const settle = (/** @type {() => void} */ fn) => { if (!settled) { settled = true; fn(); } };
+  xhr.open("POST", `/api/session/uploadFileBinary?sessionId=${encodeURIComponent(sessionId)}&name=${encodeURIComponent(name)}`);
+  xhr.setRequestHeader("content-type", "application/octet-stream");
+  xhr.upload.onprogress = (event) => { if (!settled) onProgress(event.loaded); };
+  xhr.onload = () => settle(() => {
+    if (xhr.status === 401) {
+      reject(callError(`${what}: not signed in - open the URL gravit-face printed when it started (…/?token=…)`, { status: 401 }));
+      return;
+    }
+    if (xhr.status !== 200) {
+      reject(callError(`${what}: HTTP ${xhr.status} ${String(xhr.responseText ?? "").slice(0, 200)}`.trim(), { status: xhr.status }));
+      return;
+    }
+    /** @type {any} */ let body;
+    try {
+      body = JSON.parse(xhr.responseText);
+    } catch {
+      body = undefined;
+    }
+    if (isRecord(body) && body.ok === true && isRecord(body.value) && nonEmpty(body.value.receiptId)) {
+      resolve(/** @type {any} */ (body.value));
+    } else if (isRecord(body) && body.ok === false && isRecord(body.error) && typeof body.error.code === "string") {
+      const message = typeof body.error.message === "string" ? body.error.message : "the upload was refused";
+      reject(callError(`${what}: ${body.error.code} - ${message}`, { code: body.error.code, details: body.error.details }));
+    } else {
+      reject(callError(`${what}: bad-response - not an upload answer`, { code: "bad-response" }));
+    }
+  });
+  xhr.onerror = () => settle(() => reject(callError(`${what}: the request failed`)));
+  xhr.send(blob);
+  return {
+    done,
+    abort() {
+      settle(() => reject(callError(`${what}: aborted`, { code: "aborted" })));
+      xhr.abort();
+    },
+  };
+}
+
+/**
  * Validate one host frame against the host's own grammar, exact keys included
  * (stream-protocol.ts:293-315; the upstream client fails its whole generation
  * on a frame that does not parse, client/stream-client.ts:306-322).

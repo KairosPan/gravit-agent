@@ -20,7 +20,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { call, openMux, randomUuid } from "../client/js/wire/api.js";
+import { call, openMux, randomUuid, uploadFile } from "../client/js/wire/api.js";
+import { fakeXhr } from "./client/helpers/fake-xhr.js";
 import { mapFrame } from "../client/js/wire/mapper.js";
 
 interface Sent {
@@ -1111,4 +1112,73 @@ test("the fixture's gate lines are exactly what the mux accepts and hands the pa
     assert.equal(socket().closedWith, null, "no fixture frame broke the grammar");
     assert.equal(posts.length, 0);
   });
+});
+
+// ---- the upload: the one write outside call(), over XHR for its progress ----
+
+function upload(extra: Record<string, unknown> = {}) {
+  const xhr = fakeXhr();
+  const blob = new Blob(["abc"]);
+  const handle = uploadFile({ sessionId: "s 1", name: "估值 v2.pdf", blob, makeXhr: () => xhr as any, ...extra });
+  return { xhr, blob, handle };
+}
+const receipt = { receiptId: "r1", file: { attachmentId: "a1", name: "估值 v2.pdf", bytes: 3 } };
+
+test("an upload posts the bytes as octet-stream to the session's route, names encoded", async () => {
+  const { xhr, blob, handle } = upload();
+  assert.deepEqual(xhr.opened, {
+    method: "POST",
+    url: "/api/session/uploadFileBinary?sessionId=s%201&name=%E4%BC%B0%E5%80%BC%20v2.pdf",
+  });
+  assert.equal(xhr.headers["content-type"], "application/octet-stream");
+  assert.equal(xhr.sent, true);
+  assert.equal(xhr.body, blob);
+  xhr.answer(200, JSON.stringify({ ok: true, value: receipt }));
+  await handle.done;
+});
+
+test("progress reports the loaded bytes", async () => {
+  const seen: number[] = [];
+  const { xhr, handle } = upload({ onProgress: (n: number) => seen.push(n) });
+  xhr.progress(1, 3);
+  xhr.progress(3, 3);
+  assert.deepEqual(seen, [1, 3]);
+  xhr.answer(200, JSON.stringify({ ok: true, value: receipt }));
+  await handle.done;
+});
+
+test("an ok answer resolves the receipt; ok: false rejects with its code and details", async () => {
+  const a = upload();
+  a.xhr.answer(200, JSON.stringify({ ok: true, value: receipt }));
+  assert.deepEqual(await a.handle.done, receipt);
+  const b = upload();
+  b.xhr.answer(200, JSON.stringify({ ok: false, error: { code: "file-upload/too-large", message: "too big", details: { limit: 1 } } }));
+  await assert.rejects(b.handle.done, (e: any) => {
+    assert.equal(e.code, "file-upload/too-large");
+    assert.deepEqual(e.details, { limit: 1 });
+    assert.match(e.message, /too big/);
+    return true;
+  });
+});
+
+test("a 401 rejects as not signed in, a 415 with its status, a body that is not JSON as bad-response", async () => {
+  const a = upload();
+  a.xhr.answer(401, "no");
+  await assert.rejects(a.handle.done, (e: any) => e.status === 401 && /not signed in/.test(e.message));
+  const b = upload();
+  b.xhr.answer(415, "unsupported media type");
+  await assert.rejects(b.handle.done, (e: any) => e.status === 415 && e.code === undefined);
+  const c = upload();
+  c.xhr.answer(200, "<html>");
+  await assert.rejects(c.handle.done, (e: any) => e.code === "bad-response");
+  const d = upload();
+  d.xhr.answer(200, JSON.stringify({ ok: true, value: { file: {} } }));
+  await assert.rejects(d.handle.done, (e: any) => e.code === "bad-response");
+});
+
+test("abort rejects with aborted and aborts the request", async () => {
+  const { xhr, handle } = upload();
+  handle.abort();
+  assert.equal(xhr.aborted, true);
+  await assert.rejects(handle.done, (e: any) => e.code === "aborted");
 });
