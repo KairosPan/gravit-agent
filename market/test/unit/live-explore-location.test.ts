@@ -114,7 +114,7 @@ describe("a venue that does not serve this location", () => {
     const out = await exploreAcross({ public: sources }, { clock: () => now });
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(out.items.map((i) => i.key)).toEqual(["coin:BTC"]);
-    const where = "does not serve this location: that is its own rule, and the account does not look for a way around it";
+    const where = "does not serve this location: that is its own rule, and the market does not look for a way around it";
     // each venue once: its spot tickers and its pre-IPO perpetuals refused with the same words, and one line says so
     expect(out.missing).toEqual([
       { venue: "binance", venueName: "Binance", why: `Binance ${where}`, code: "E_VENUE_GEOBLOCKED", said: BINANCE_SAID, connected: false },

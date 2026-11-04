@@ -1,6 +1,6 @@
-/** THE ACCOUNT'S ONE LINK TO THE MARKET (plan A1 task 4): the transport (client.ts) and the four adapters over it — the market's public
- * sources (sources.ts), its hub mirrored (hub.ts), China (china.ts) and a coin's price (price.ts) — the four things service.ts takes as
- * options (publicMarkets, streams, china, liveDeps.price). Only server.ts's main and account-check.ts build one; a service made anywhere
+/** THE ACCOUNT'S ONE LINK TO THE MARKET (plan A1 task 4): the transport (client.ts) and the three adapters over it — the market's public
+ * sources (sources.ts), its hub mirrored (hub.ts) and a coin's price (price.ts) — the three things service.ts takes as options
+ * (publicMarkets, streams, liveDeps.price). China is not the account's: the face reads it from the market (account split plan A2 task 7). Only server.ts's main and account-check.ts build one; a service made anywhere
  * else reaches no market unless a link is handed in.
  *
  * THE SOURCE LIST is GET /api/sources: none until the market first answers, asked again every SOURCES_WAIT_MS while it has not (an account
@@ -11,10 +11,9 @@
 import { randomBytes } from "node:crypto";
 import { isRefusal } from "../../core/errors.ts";
 import { MARKET_DOWN, marketClient, type MarketClient } from "./client.ts";
-import { remoteChina } from "./china.ts";
 import { RemoteHub } from "./hub.ts";
 import { remotePrice } from "./price.ts";
-import type { ChinaSource, MarketHub, Price, PublicSource } from "./shapes.ts";
+import type { MarketHub, Price, PublicSource } from "./shapes.ts";
 import { remoteSource, type SourceRow } from "./sources.ts";
 
 /** the source list asked again this often once the market has answered it, and this often until it has */
@@ -26,7 +25,6 @@ export interface MarketLink {
   /** the latest list: [] until /api/sources answers; refetched every 60 s, and every 5 s while it has not answered */
   sources(): PublicSource[];
   readonly hub: MarketHub;
-  readonly china: ChinaSource;
   readonly price: Price;
   /** since when the market has not answered — a request it left unanswered, or its hub stream down with nothing answered since — in the
    * account's one sentence for it; undefined while it answers */
@@ -45,7 +43,6 @@ const isRow = (v: unknown): v is SourceRow => !!v && typeof v === "object" && ty
 export function connectMarket(o: { url: string; fetch?: typeof fetch; clock?: () => number; clientId?: string }): MarketLink {
   const client = marketClient({ url: o.url, ...(o.fetch ? { fetch: o.fetch } : {}), ...(o.clock ? { clock: o.clock } : {}) });
   const hub = new RemoteHub(client, { clientId: o.clientId ?? randomBytes(8).toString("hex"), ...(o.fetch ? { fetch: o.fetch } : {}), ...(o.clock ? { clock: o.clock } : {}) });
-  const china = remoteChina(client);
   const price = remotePrice(client);
   let list: PublicSource[] = [];
   let shape: string | undefined;
@@ -115,7 +112,6 @@ export function connectMarket(o: { url: string; fetch?: typeof fetch; clock?: ()
     client,
     sources: () => list,
     hub,
-    china,
     price,
     marketOld() {
       const since = old();

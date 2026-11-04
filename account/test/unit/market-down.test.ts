@@ -1,9 +1,8 @@
 /** THE MARKET IS DOWN (plan A1 task 5): an account on the market's link whose market stops answering. Its paper holdings are still shown,
  * at their last price, and marked old in the account's one sentence for it (MARKET_DOWN); a prepare that needs a price refuses in those
  * words; a resting paper order the mirror's last quote crosses does not fill, since nobody confirms that price now; no net-worth point is
- * taken at an old price. Once the market answers again the mark goes, and the order fills on the live quote. (The market's sources listed
- * again within seconds once it is back was the account's public explore's rule: Markets' public half is the market's own now, account split
- * plan A2 task 7, and the face marks a stale market half itself.) */
+ * taken at an old price. Once the market answers again the mark goes, the order fills on the live quote, and a paper account's price
+ * answers again within seconds — not after the account's twenty-second hold of a venue that did not answer. */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -196,4 +195,37 @@ describe("the market is down", () => {
     expect(done?.status).toBe("filled");
     expect(done?.avgPrice).toBeLessThanOrEqual(95);
   }, 20_000);
+});
+
+describe("the market comes back", () => {
+  it("a paper account's price answers again within seconds of the market's answering, not after a twenty-second hold", async () => {
+    // the read cache's short keep of a market-down refusal (service.ts ReadCache: marketWasDown → MARKET_DOWN_HOLD_MS), over a paper venue
+    const port = await freePort();
+    let m: MarketServerHandle | undefined = (await marketOn(port)).m;
+    const link = connectMarket({ url: m.url });
+    link.start();
+    expect(await link.ready(3_000)).toBe(true);
+    const { svc, srv } = await accountOn(link, { ms: 0 });
+    const priced = async () => {
+      const q = await svc.connectedQuotes([{ venue: "paper-1", symbol: SYM }]);
+      if (isRefusal(q)) throw new Error(q.message);
+      return q[0]!.market !== undefined;
+    };
+    try {
+      expect(await priced()).toBe(true);
+      await m.close();
+      m = undefined;
+      // asked while the market is down: the paper account's price is refused in the market-down sentence, and the account holds the
+      // source back — for MARKET_DOWN_HOLD_MS only (service.ts ReadCache: marketWasDown), not a venue's twenty seconds
+      await until(async () => !(await priced()), 15_000);
+      m = (await marketOn(port)).m;
+      const t0 = Date.now();
+      await until(() => priced(), 15_000);
+      expect(Date.now() - t0).toBeLessThan(3_500);
+    } finally {
+      await srv.close().catch(() => undefined);
+      link.close();
+      await m?.close();
+    }
+  }, 60_000);
 });

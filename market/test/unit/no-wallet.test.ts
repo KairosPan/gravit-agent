@@ -33,7 +33,10 @@ describe("the market holds no wallet", () => {
       expect(existsSync(join(SRC, "live", `${f}.ts`))).toBe(true);
   });
   it("the market's reads say nothing of an account", () => {
-    for (const f of ["reads.ts", "follows.ts", "routes-cn.ts", "protocol.ts"]) expect(text(join(SRC, f)), f).not.toMatch(/this account|connected live|the account (reads|can read)|E_WALLET_ACCOUNT_UNKNOWN/);
+    // its answers' words and codes: no account's sentence, no account's or wallet's refusal code raised by the market's own checks
+    for (const f of ["reads.ts", "follows.ts", "routes-cn.ts", "protocol.ts"]) expect(text(join(SRC, f)), f).not.toMatch(/this account|connected live|the account (reads|can read)|E_WALLET_ACCOUNT_UNKNOWN|E_ACCOUNT_|this Account/i);
+    // anywhere in market/src: no sentence that says the account refuses for the market, and no route of the account's named as its own
+    for (const f of files) expect(text(f), f).not.toMatch(/the account does not look for a way around it|this Account runs no|\/api\/account\/(explore|quotes|candles|book|trades|stream)\b/);
   });
   it("the README names the port, the scripts and the AKShare command", () => {
     const r = readFileSync(join(ROOT, "README.md"), "utf8");

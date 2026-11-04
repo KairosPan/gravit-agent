@@ -48,7 +48,7 @@ describe("the market's public reads", () => {
     // a tab it does not have, a limit past 200
     const tab = await get("/api/explore?tab=nope");
     expect(tab.status).toBe(409);
-    expect(tab.body.refusal.code).toBe("E_ACCOUNT_BAD_ACTION");
+    expect(tab.body.refusal.code).toBe("E_MARKET_BAD_REQUEST");
     expect((await get("/api/explore?limit=x")).body).toEqual({ ok: false, error: "limit is a count of markets, 1 to 200, in digits" });
   });
 
@@ -60,7 +60,7 @@ describe("the market's public reads", () => {
     // a public pair's price is explore's: the market quotes A shares only
     expect(pub).toMatchObject({ venue: "fake", symbol: "BTC/USDT", refusal: { code: "E_VENUE_RAIL_CLOSED" } });
     expect(share).toMatchObject({ venue: "china", symbol: "600519", market: { symbol: "600519", currency: "CNY" } });
-    expect(letters).toMatchObject({ venue: "china", symbol: "sh600519", refusal: { code: "E_ACCOUNT_BAD_ACTION", message: "an A share is its six digits" } });
+    expect(letters).toMatchObject({ venue: "china", symbol: "sh600519", refusal: { code: "E_MARKET_BAD_REQUEST", message: "an A share is its six digits" } });
     expect((await get("/api/quotes?pairs=nobar")).body).toEqual({ ok: false, error: "each market is venue|symbol, e.g. okx|BTC/USDT" });
   });
 
@@ -107,12 +107,12 @@ describe("the market's refusals say nothing of an account", () => {
     expect(pub!.refusal).toMatchObject({ code: "E_VENUE_RAIL_CLOSED", venue: "fake", message: '"fake" is priced in explore: the market quotes A shares only (venue "china")' });
   });
 
-  it("China not read: its sentence unchanged", async () => {
+  it("China not read: its sentence unchanged, its code the market's", async () => {
     const { get } = await market({ china: false });
     const [cn] = (await get("/api/quotes?pairs=china|600519")).body.quotes as Array<Record<string, any>>;
-    expect(cn!.refusal).toMatchObject({ code: "E_ACCOUNT_BAD_ACTION", message: "China is not read by this market" });
-    expect((await get("/api/explore?tab=china")).body.refusal).toMatchObject({ code: "E_ACCOUNT_BAD_ACTION", message: "China is not read by this market" });
-    expect((await get("/api/candles?venue=china&symbol=600519&range=1M")).body.refusal).toMatchObject({ code: "E_ACCOUNT_BAD_ACTION", message: "China is not read by this market" });
+    expect(cn!.refusal).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "China is not read by this market" });
+    expect((await get("/api/explore?tab=china")).body.refusal).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "China is not read by this market" });
+    expect((await get("/api/candles?venue=china&symbol=600519&range=1M")).body.refusal).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "China is not read by this market" });
   });
 
   it("a book the market does not read, with no best bid or ask: its sentence unchanged", async () => {
@@ -164,9 +164,9 @@ describe("candles: the venue and the symbol never reach a host they name", () =>
   it("a venue is a source's id; a symbol is plain text — anything else is refused before anything is asked", async () => {
     const { reads: r } = reads();
     asked.length = 0;
-    for (const venue of ["http://169.254.169.254/latest", "../etc/passwd", "EX", "ex/../kalshi", "", "kraken@evil.com", "a".repeat(61)]) expect(refusal(await r.candles(venue, "BTC/USD", "1h", {})).code, venue).toBe("E_ACCOUNT_BAD_ACTION");
-    for (const symbol of ["BTC/USD\nHost: evil.com", "BTC\u0000", "BTC\u202e", "x".repeat(161), ""]) expect(refusal(await r.candles("kraken", symbol, "1h", {})).code, JSON.stringify(symbol)).toBe("E_ACCOUNT_BAD_ACTION");
-    expect(refusal(await r.candles("kraken", "BTC/USD", "1h&x=1", {})).code).toBe("E_ACCOUNT_BAD_ACTION");
+    for (const venue of ["http://169.254.169.254/latest", "../etc/passwd", "EX", "ex/../kalshi", "", "kraken@evil.com", "a".repeat(61)]) expect(refusal(await r.candles(venue, "BTC/USD", "1h", {})).code, venue).toBe("E_MARKET_BAD_REQUEST");
+    for (const symbol of ["BTC/USD\nHost: evil.com", "BTC\u0000", "BTC\u202e", "x".repeat(161), ""]) expect(refusal(await r.candles("kraken", symbol, "1h", {})).code, JSON.stringify(symbol)).toBe("E_MARKET_BAD_REQUEST");
+    expect(refusal(await r.candles("kraken", "BTC/USD", "1h&x=1", {})).code).toBe("E_MARKET_BAD_REQUEST");
     expect(asked).toEqual([]);
   });
 
@@ -174,7 +174,7 @@ describe("candles: the venue and the symbol never reach a host they name", () =>
     const { reads: r } = reads();
     asked.length = 0;
     handed.length = 0;
-    // Kalshi's ticker and Polymarket's slug are read by pattern: these are refused, nothing asked
+    // Kalshi's ticker and Polymarket's slug are read by pattern, by the sources themselves (their own code): refused, nothing asked
     for (const symbol of ["A@evil.com/x:YES", "KX/../..:YES", "https://evil.com:YES"]) expect(refusal(await r.candles("kalshi", symbol, "1h", {})).code).toBe("E_ACCOUNT_BAD_ACTION");
     for (const symbol of ["x/../../evil:Yes", "UPPER:Yes", "@evil.com:Yes"]) expect(refusal(await r.candles("polymarket", symbol, "1h", {})).code).toBe("E_ACCOUNT_BAD_ACTION");
     expect(asked).toEqual([]);
@@ -205,7 +205,7 @@ describe("candles: the venue and the symbol never reach a host they name", () =>
     asked.length = 0;
     const res = await fetch(`${srv.url}/api/candles?venue=${encodeURIComponent("http://169.254.169.254")}&symbol=${encodeURIComponent("BTC/USD")}&interval=1h`);
     expect(res.status).toBe(409);
-    expect(((await res.json()) as { refusal: Refusal }).refusal.code).toBe("E_ACCOUNT_BAD_ACTION");
+    expect(((await res.json()) as { refusal: Refusal }).refusal.code).toBe("E_MARKET_BAD_REQUEST");
     expect(asked).toEqual([]);
   });
 });
@@ -344,7 +344,7 @@ describe("a public market's price history: windows and memory", () => {
       expect(refusal(await svc.candles("pubx", "BTC/USD", "", { range: "1M" })).message).toBe("Pubx refused the request (HTTP 400)");
       expect(refusal(await svc.candles("pubx", "BTC/USD", "", { range: "1M" })).message).toBe("Pubx refused the request (HTTP 400)");
       expect(src.asked).toHaveLength(2);
-      answer = no("E_VENUE_GEOBLOCKED", { venue: "pubx", message: "Pubx does not serve this location: that is its own rule, and the account does not look for a way around it" });
+      answer = no("E_VENUE_GEOBLOCKED", { venue: "pubx", message: "Pubx does not serve this location: that is its own rule, and the market does not look for a way around it" });
       expect(refusal(await svc.candles("pubx", "BTC/USD", "", { range: "5D" })).code).toBe("E_VENUE_GEOBLOCKED");
       expect(refusal(await svc.candles("pubx", "BTC/USD", "", { range: "1Y" })).code).toBe("E_VENUE_GEOBLOCKED");
       expect(src.asked).toHaveLength(3);
@@ -441,7 +441,7 @@ describe("China in the market's reads", () => {
       const down = no("E_VENUE_UNREACHABLE", { venue: "china", message: "Tencent is not answering: A shares cannot be read now" });
       const s = stub({ rank: async () => down });
       const svc = await account({ china: s.source });
-      expect(refused(await svc.explore({ tab: "china", sort: "closing" }))).toMatchObject({ code: "E_ACCOUNT_BAD_ACTION", message: "China is sorted by volume or movers" });
+      expect(refused(await svc.explore({ tab: "china", sort: "closing" }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "China is sorted by volume or movers" });
       expect(s.calls.rank).toEqual([]);
       expect(refused(await svc.explore({ tab: "china" }))).toEqual(down);
       const found = answered(await svc.explore({ tab: "china", q: "茅台" }));
@@ -561,7 +561,7 @@ describe("China in the market's reads", () => {
       const r = answered(await (await account({ china: refusing.source })).quotes([{ venue: "china", symbol: "600519" }]));
       expect(r[0]!.refusal).toMatchObject({ code: "E_VENUE_UNREACHABLE", message: "Tencent is not answering: A shares cannot be read now" });
       // the twelve-pair limit stands
-      expect(refused(await svc.quotes(Array.from({ length: 13 }, (_, i) => ({ venue: "china", symbol: String(600000 + i) })))).code).toBe("E_ACCOUNT_BAD_ACTION");
+      expect(refused(await svc.quotes(Array.from({ length: 13 }, (_, i) => ({ venue: "china", symbol: String(600000 + i) })))).code).toBe("E_MARKET_BAD_REQUEST");
     });
 
     it("candles venue china: by range, never by before; Tencent's last session on a Beijing Saturday", async () => {
@@ -570,9 +570,9 @@ describe("China in the market's reads", () => {
       const svc = await account({ china: s.source, clock: () => NY_FRIDAY_EVENING });
       expect(answered(await svc.candles("china", "600519", "5m", { range: "1D" }))).toEqual(history);
       expect(s.calls.history).toEqual([["600519", "1D"]]);
-      expect(refused(await svc.candles("china", "600519", "1h", { before: String(NY_FRIDAY_EVENING) }))).toMatchObject({ code: "E_ACCOUNT_BAD_ACTION", message: "an A share's history is read by range" });
-      expect(refused(await svc.candles("china", "600519", "1h", {}))).toMatchObject({ code: "E_ACCOUNT_BAD_ACTION", message: "a range is one of 1D, 5D, 1M, 3M, 6M, YTD, 1Y, 5Y, MAX" });
-      expect(refused(await svc.candles("china", "600519", "", { range: "10Y" })).code).toBe("E_ACCOUNT_BAD_ACTION");
+      expect(refused(await svc.candles("china", "600519", "1h", { before: String(NY_FRIDAY_EVENING) }))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "an A share's history is read by range" });
+      expect(refused(await svc.candles("china", "600519", "1h", {}))).toMatchObject({ code: "E_MARKET_BAD_REQUEST", message: "a range is one of 1D, 5D, 1M, 3M, 6M, YTD, 1Y, 5Y, MAX" });
+      expect(refused(await svc.candles("china", "600519", "", { range: "10Y" })).code).toBe("E_MARKET_BAD_REQUEST");
       expect(s.calls.history).toHaveLength(1);
     });
 
@@ -592,7 +592,7 @@ describe("China in the market's reads", () => {
 
     it("without a China source, China refuses in its own words and nothing asks Tencent", async () => {
       const svc = await account();
-      const said = { code: "E_ACCOUNT_BAD_ACTION", message: "China is not read by this market" };
+      const said = { code: "E_MARKET_BAD_REQUEST", message: "China is not read by this market" };
       expect(refused(await svc.explore({ tab: "china" }))).toMatchObject(said);
       expect(refused(await svc.candles("china", "600519", "", { range: "1D" }))).toMatchObject(said);
       expect(answered(await svc.quotes([{ venue: "china", symbol: "600519" }]))[0]!.refusal).toMatchObject(said);
@@ -662,7 +662,7 @@ describe("a public source with no book: its best bid and ask", () => {
  * (limit 200 for Markets, 24 for Trade's picker) ask a venue that answered 451 once, not twice. Nothing leaves the process. */
 describe("the hold-back reaches the market's reads", () => {
   const GEO_SAID = '{"code":0,"msg":"Service unavailable from a restricted location according to \'b. Eligibility\' in https://www.binance.com/en/terms."}';
-  const geoNo = (venue: string, name: string): Refusal => no("E_VENUE_GEOBLOCKED", { venue, message: `${name} does not serve this location: that is its own rule, and the account does not look for a way around it`, native: { status: 451, said: GEO_SAID } });
+  const geoNo = (venue: string, name: string): Refusal => no("E_VENUE_GEOBLOCKED", { venue, message: `${name} does not serve this location: that is its own rule, and the market does not look for a way around it`, native: { status: 451, said: GEO_SAID } });
 
   it("a venue that answered 451 is asked once by two explores, a venue that refused any read not at all, and its candles are its refusal with no request", async () => {
     const geo = { stats: 0, listings: 0 };

@@ -206,7 +206,7 @@ describe("US stocks, keyless: Cboe's delayed quotes where no real-time source an
     const src = usStocksPublic({ pace: async () => undefined, http: blocked.http, clock: () => NOW });
     const r = (await src.listings({ limit: 2 })) as Refusal;
     expect(r.code).toBe("E_VENUE_GEOBLOCKED");
-    expect(r.message).toBe("Cboe does not serve this location: that is its own rule, and the account does not look for a way around it");
+    expect(r.message).toBe("Cboe does not serve this location: that is its own rule, and the market does not look for a way around it");
     // held ten minutes (the book's refusal and each quote's): the next listing asks Cboe nothing
     const asked = blocked.sent.length;
     await src.listings({ limit: 2 });

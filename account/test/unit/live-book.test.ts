@@ -174,7 +174,7 @@ describe("the exchanges, keyless, through the library's fetchOrderBook and fetch
     const binance = exchangeTickers("binance", { open: lib.open, clock: () => now });
     const r = refused(await binance.book!("BTC/USD", 10));
     expect(r.code).toBe("E_VENUE_GEOBLOCKED");
-    expect(r.message).toBe("Binance does not serve this location: that is its own rule, and the account does not look for a way around it");
+    expect(r.message).toBe("Binance does not serve this location: that is its own rule, and the market does not look for a way around it");
     now += 60_000;
     expect(refused(await binance.trades!("BTC/USD", 10)).code).toBe("E_VENUE_GEOBLOCKED");
     expect(lib.calls).toEqual(["book:BTC/USD:20"]);

@@ -106,7 +106,7 @@ describe("exchanges, keyless, through the unified library", () => {
     const bn = library({}, {}, { fail: Object.assign(new Error(said451), { name: "ExchangeNotAvailable" }) });
     const binance = exchangeTickers("binance", { open: bn.open });
     const r = await binance.listings({ limit: 5 });
-    expect(isRefusal(r) && r).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "binance", message: "Binance does not serve this location: that is its own rule, and the account does not look for a way around it", native: { error: "ExchangeNotAvailable", said: expect.stringContaining("Please contact customer service if you believe you received this message in error.") } });
+    expect(isRefusal(r) && r).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "binance", message: "Binance does not serve this location: that is its own rule, and the market does not look for a way around it", native: { error: "ExchangeNotAvailable", said: expect.stringContaining("Please contact customer service if you believe you received this message in error.") } });
     // a geoblock is held ten minutes: the exchange is not asked again on the next poll
     await binance.listings({ limit: 5 });
     expect(bn.calls).toEqual(["loadMarkets"]);
@@ -653,7 +653,7 @@ describe("Hyperliquid, keyless", () => {
       return { status: 403, body: undefined, text: "This service is not available in your region" };
     };
     const hl = hyperliquidPublic({ http, clock: () => now });
-    expect(await hl.listings({ limit: 5 })).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "hyperliquid", message: "Hyperliquid does not serve this location: that is its own rule, and the account does not look for a way around it" });
+    expect(await hl.listings({ limit: 5 })).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "hyperliquid", message: "Hyperliquid does not serve this location: that is its own rule, and the market does not look for a way around it" });
     now += 9 * 60_000;
     await hl.listings({ limit: 5 });
     expect(sent).toHaveLength(1);
@@ -847,7 +847,7 @@ describe("Pre-IPO perpetuals, keyless, at six venues", () => {
     let now = NOW;
     const blocked = network([["futures.kraken.com", { status: 451, body: undefined, text: "unavailable" }]]);
     const kf = preIpoPublic(venueOf("krakenfutures"), { http: blocked.http, clock: () => now });
-    expect(await kf.listings({ limit: 5 })).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "krakenfutures-preipo", message: "Kraken Futures does not serve this location: that is its own rule, and the account does not look for a way around it" });
+    expect(await kf.listings({ limit: 5 })).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "krakenfutures-preipo", message: "Kraken Futures does not serve this location: that is its own rule, and the market does not look for a way around it" });
     now += 9 * 60_000;
     await kf.listings({ limit: 5 });
     expect(blocked.sent).toHaveLength(1);

@@ -75,7 +75,7 @@ export function mountCn(app: express.Express, core: MarketCore, o: { cnQueueMs?:
     return c.signal;
   };
   app.get("/api/akshare/tools", wrap(async (_req, res) => {
-    if (!core.akshare) return akshareRefuse(res, "off", "this Account runs no AKShare sidecar");
+    if (!core.akshare) return akshareRefuse(res, "off", "this market runs no AKShare sidecar");
     const a = await core.akshare.tools(callerGone(res));
     if (a.kind === "refused") return akshareRefuse(res, a.word, a.message);
     res.json({ ok: true, tools: a.value });
@@ -83,7 +83,7 @@ export function mountCn(app: express.Express, core: MarketCore, o: { cnQueueMs?:
   app.post("/api/akshare/call", wrap(async (req, res) => {
     const body = req.body as { tool?: unknown; arguments?: unknown } | undefined;
     if (typeof body?.tool !== "string") return akshareRefuse(res, "bad-arguments", "the body is {tool: string, arguments?: object}");
-    if (!core.akshare) return akshareRefuse(res, "off", "this Account runs no AKShare sidecar");
+    if (!core.akshare) return akshareRefuse(res, "off", "this market runs no AKShare sidecar");
     const a = await core.akshare.call(body.tool, body.arguments, callerGone(res));
     if (a.kind === "refused") return akshareRefuse(res, a.word, a.message);
     res.json({ ok: true, tool: body.tool, isError: a.value.isError, content: a.value.content });

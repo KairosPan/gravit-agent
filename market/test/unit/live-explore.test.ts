@@ -811,7 +811,7 @@ describe("what did not answer", () => {
       {
         venue: "binance",
         venueName: "Binance",
-        why: "Binance does not serve this location: that is its own rule, and the account does not look for a way around it",
+        why: "Binance does not serve this location: that is its own rule, and the market does not look for a way around it",
         code: "E_VENUE_GEOBLOCKED",
         said: expect.stringContaining("Service unavailable from a restricted location according to 'b. Eligibility'"),
         connected: false,

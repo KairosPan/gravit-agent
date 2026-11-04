@@ -1,5 +1,5 @@
 /** THE ACCOUNT'S LINK TO THE MARKET (src/portfolio/market/*): a real market in this process (market/src, over fakes), and the account's
- * link reading it over HTTP — its sources, a source's refusal, the market down and back, the source list filling in, China, a price, the
+ * link reading it over HTTP — its sources, a source's refusal, the market down and back, the source list filling in, a price, the
  * hub's mirror and its reconnect, and the hub's covers agreed with the market's own fixture. */
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,10 +10,11 @@ import { MARKET_DOWN } from "../../src/portfolio/market/client.ts";
 import { connectMarket, type MarketLink } from "../../src/portfolio/market/link.ts";
 import { hubCovers, readAtOf, type Listing } from "../../src/portfolio/market/shapes.ts";
 import { usClock } from "../../src/portfolio/account/calendar.ts";
+import { signOwner, simKey } from "../../src/portfolio/account/sign.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
 import { usClock as marketUsClock } from "../../../market/src/calendar.ts";
 import type { MarketServerHandle } from "../../../market/src/server.ts";
-import { createMarketCore, fakeChina, fakeHub, fakeSource, freePort, READ_AT, startMarket } from "../market-fakes.ts";
+import { createMarketCore, fakeHub, fakeSource, freePort, READ_AT, startMarket } from "../market-fakes.ts";
 
 const ROWS = JSON.parse(readFileSync(new URL("../../../market/test/fixtures/hub-covers.json", import.meta.url), "utf8")) as Array<{ source: string; symbol: string; covers: boolean; pricesOnly: boolean }>;
 
@@ -28,20 +29,20 @@ afterAll(() => {
   for (const h of homes) rmSync(h, { recursive: true, force: true });
 });
 
+const owner = simKey("owner");
 const price = async (asset: string) => (asset === "BTC" ? 62_000 : undefined);
 /** a market over fakes, and a link to it, started */
 async function boot(o: { port?: number } = {}) {
   const source = fakeSource();
   const hub = fakeHub();
-  const china = fakeChina();
-  const core = createMarketCore({ sources: [source], hub: hub.hub, china, price });
+  const core = createMarketCore({ sources: [source], hub: hub.hub, price });
   const market = await startMarket(core, o.port ?? 0);
   markets.push(market);
   const link = connectMarket({ url: market.url });
   links.push(link);
   link.start();
   expect(await link.ready(3_000)).toBe(true);
-  return { source, hub, china, core, market, link, port: Number(new URL(market.url).port) };
+  return { source, hub, core, market, link, port: Number(new URL(market.url).port) };
 }
 const until = async (ok: () => boolean | Promise<boolean>, ms = 6_000): Promise<void> => {
   const t0 = Date.now();
@@ -104,7 +105,7 @@ describe("the account's link to the market", () => {
     expect(link.marketOld()).toBeUndefined();
   });
 
-  it("sources fill in once the market answers", async () => {
+  it("sources fill in once the market answers, and a paper account started before it is priced without a restart", async () => {
     // what the account reads of them (a paper account's prices, a coin's day) is wrapped again when the list changes (service.ts
     // publicMarkets); the public Markets list itself is the market's own explore
     const port = await freePort();
@@ -112,6 +113,18 @@ describe("the account's link to the market", () => {
     links.push(link);
     link.start();
     expect(link.sources()).toEqual([]);
+    // the account starts first, a paper account on it: nothing prices it yet
+    const home = mkdtempSync(join(tmpdir(), "market-link-"));
+    homes.push(home);
+    const svc = await PortfolioService.create({ home, venues: "frontline", real: true, publicMarkets: () => link.sources(), streams: link.hub, liveDeps: { http: async () => ({ status: 599, body: undefined, text: "" }), price: link.price }, liveWrites: { capUsd: 100, pairingCode: "K7QX-M2PA" }, account: { owners: [{ id: owner.address, kind: "eoa", label: "owner", addedAt: new Date().toISOString() }] } });
+    const connected = await svc.exchange(await signOwner(owner, { type: "connectVenue", venue: "paper-1", connector: "live:paper", label: "", credentialRef: "", nonce: Date.now() }));
+    if (isRefusal(connected)) throw new Error(connected.message);
+    const priced = async () => {
+      const q = await svc.connectedQuotes([{ venue: "paper-1", symbol: "BTC/USD" }]);
+      if (isRefusal(q)) throw new Error(q.message);
+      return q[0]!.market?.price;
+    };
+    expect(await priced()).toBeUndefined();
     expect(await link.ready(200)).toBe(false);
     markets.push(await startMarket(createMarketCore({ sources: [fakeSource()], hub: fakeHub().hub, price }), port));
     await until(() => link.sources().some((s) => s.id === "fake"), 6_000);
@@ -119,21 +132,9 @@ describe("the account's link to the market", () => {
     const listed = await link.sources().find((s) => s.id === "fake")!.listings({ q: "BTC", limit: 20 });
     if (isRefusal(listed)) throw new Error(listed.message);
     expect(listed.some((m) => m.symbol === "BTC/USD")).toBe(true);
+    // the service wraps the link's new list again (service.ts publicMarkets): the paper account is priced with no restart
+    await until(async () => (await priced()) === 62_000, 8_000);
   }, 20_000);
-
-  it("reads China and its status", async () => {
-    const { link, market } = await boot();
-    const q = await link.china.quotes(["sh600519", "sz000001"]);
-    if (isRefusal(q)) throw new Error(q.message);
-    expect(q).toBeInstanceOf(Map);
-    expect([...q.keys()]).toEqual(["sh600519"]);
-    expect(q.get("sh600519")).toMatchObject({ symbol: "sh600519", currency: "CNY", price: 1500 });
-    expect(link.china.status().state).toBe("live");
-    await market.close();
-    markets.splice(markets.indexOf(market), 1);
-    expect(isRefusal(await link.china.quotes(["sh600519", "sh600000"]))).toBe(true);
-    expect(link.china.status()).toEqual({ state: "unavailable", said: MARKET_DOWN });
-  });
 
   it("prices an asset, and keeps its last price while the market is down", async () => {
     const { link, market } = await boot();

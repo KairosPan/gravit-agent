@@ -126,7 +126,7 @@ describe("a venue's no inside its own envelope (R1-39, R3-7)", () => {
     ] as const) {
       const body = { code, msg, data: [] };
       const r = (await preIpoPublic(venueOf("okx"), { http: network([["www.okx.com", { status, body, text: JSON.stringify(body) }]]).http, clock: () => NOW }).listings({ limit: 5 })) as Refusal;
-      expect(r).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "okx-preipo", message: "OKX does not serve this location: that is its own rule, and the account does not look for a way around it" });
+      expect(r).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "okx-preipo", message: "OKX does not serve this location: that is its own rule, and the market does not look for a way around it" });
       expect(holdBackMs(r)).toBe(600_000);
       expect(JSON.stringify([r.message, r.native])).not.toMatch(/203\.0\.113/);
     }
@@ -155,7 +155,7 @@ describe("a venue's no inside its own envelope (R1-39, R3-7)", () => {
       const net = network([["www.deribit.com", { status, body: banned, text: JSON.stringify(banned) }]]);
       const d = preIpoPublic(venueOf("deribit"), { http: net.http, clock: () => now });
       const r = (await d.listings({ limit: 5 })) as Refusal;
-      expect(r).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "deribit-preipo", message: "Deribit does not serve this location: that is its own rule, and the account does not look for a way around it" });
+      expect(r).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "deribit-preipo", message: "Deribit does not serve this location: that is its own rule, and the market does not look for a way around it" });
       expect(holdBackMs(r)).toBe(600_000);
       now += 5 * MIN;
       await d.listings({ limit: 5 });

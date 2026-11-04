@@ -482,7 +482,7 @@ export function publicNo(venue: string, name: string, r: HttpReply): Refusal {
   const native = { status: r.status, said: saidOf(r.text) };
   const yes = r.status >= 200 && r.status < 300;
   // a page that is not JSON keeps the sentence that names the place, not its markup
-  if (r.status === 451 || (!yes && REGION.test(r.text))) return no("E_VENUE_GEOBLOCKED", { venue, message: `${name} does not serve this location: that is its own rule, and the account does not look for a way around it`, native: { status: r.status, said: r.body === undefined && !/^\s*[{[]/.test(r.text) ? regionSaid(r.text) : native.said } });
+  if (r.status === 451 || (!yes && REGION.test(r.text))) return no("E_VENUE_GEOBLOCKED", { venue, message: `${name} does not serve this location: that is its own rule, and the market does not look for a way around it`, native: { status: r.status, said: r.body === undefined && !/^\s*[{[]/.test(r.text) ? regionSaid(r.text) : native.said } });
   const until = bannedUntil(r.text);
   if (r.status === 418 || until !== undefined || BANNED.test(r.text)) return bannedNo(venue, name, until ?? (r.retryAfterMs ? Date.now() + r.retryAfterMs : undefined), native);
   // the server in front of the venue refusing this network with a page of its own: held back as long as a place rule, not asked every 20 s
@@ -787,7 +787,7 @@ export function exchangeNo(id: string, name: string, err: unknown): Refusal {
   const r = exchangeSaidNo(id, name, err, {});
   const n = (r.native ?? {}) as { error?: unknown; said?: unknown };
   const whole = String((err as { message?: unknown } | undefined)?.message ?? err ?? "").replace(/\s+/g, " ").trim();
-  if (r.code !== "E_VENUE_GEOBLOCKED" && REGION.test(whole)) return no("E_VENUE_GEOBLOCKED", { venue: id, message: `${name} does not serve this location: that is its own rule, and the account does not look for a way around it`, native: { error: n.error, said: regionSaid(whole.replace(LIBRARY_LINE, "")) } });
+  if (r.code !== "E_VENUE_GEOBLOCKED" && REGION.test(whole)) return no("E_VENUE_GEOBLOCKED", { venue: id, message: `${name} does not serve this location: that is its own rule, and the market does not look for a way around it`, native: { error: n.error, said: regionSaid(whole.replace(LIBRARY_LINE, "")) } });
   const own = typeof n.said === "string" ? n.said.replace(LIBRARY_LINE, "").trim() : "";
   if (r.code === "E_VENUE_UNAUTHORIZED" || r.code === "E_VENUE_PERMISSION") return no("E_VENUE_REJECTED", { venue: id, message: `${name} refused the request`, native: { error: n.error, said: own || n.said } });
   return own && own !== n.said ? { ...r, native: { ...n, said: own } } : r;
@@ -2196,7 +2196,7 @@ const bodyOf = (body: unknown): Rec[] | Refusal => (isRefusal(body) ? body : lis
 /** a venue that answered its list without the rows this file reads */
 const noList = (venue: string, name: string): Refusal => no("E_VENUE_REJECTED", { venue, message: `${name} answered without its contracts` });
 /** the account's sentence for a venue's place rule */
-const notServed = (name: string): string => `${name} does not serve this location: that is its own rule, and the account does not look for a way around it`;
+const notServed = (name: string): string => `${name} does not serve this location: that is its own rule, and the market does not look for a way around it`;
 
 /** OKX's codes for a no it answers inside its envelope, often under HTTP 200 (its docs-v5 error table, as exchange.ts reads them for a
  * key): 50121 "You can't access our services through the IP address" and 50051 "Due to compliance restrictions in your country or region"

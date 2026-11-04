@@ -65,7 +65,7 @@ describe("Bybit's 403, which the library labels RateLimitExceeded", () => {
     // exchange.ts reads the whole answer too: the sentence past its first 240 characters decides there as well, not the label
     expect(exchangeSaidNo("bybit", "Bybit", err(), {})).toMatchObject({ code: "E_VENUE_GEOBLOCKED", native: { said: expect.stringContaining("configured to block access from your country") } });
     const r = exchangeNo("bybit", "Bybit", err());
-    expect(r).toMatchObject({ code: "E_VENUE_GEOBLOCKED", message: "Bybit does not serve this location: that is its own rule, and the account does not look for a way around it", native: { error: "RateLimitExceeded", said: expect.stringContaining("The Amazon CloudFront distribution is configured to block access from your country") } });
+    expect(r).toMatchObject({ code: "E_VENUE_GEOBLOCKED", message: "Bybit does not serve this location: that is its own rule, and the market does not look for a way around it", native: { error: "RateLimitExceeded", said: expect.stringContaining("The Amazon CloudFront distribution is configured to block access from your country") } });
     expect(String((r.native as { said: string }).said)).not.toMatch(/<|https?:\/\//);
     expect(holdBackMs(r)).toBe(600_000);
   });
@@ -75,7 +75,7 @@ describe("Bybit's 403, which the library labels RateLimitExceeded", () => {
     const by = refusing(bybit403);
     const bybit = exchangeTickers("bybit", { open: by.open, clock: () => now });
     const first = (await bybit.listings({ limit: 5 })) as Refusal;
-    expect(first).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "bybit", message: "Bybit does not serve this location: that is its own rule, and the account does not look for a way around it", native: { error: "RateLimitExceeded", said: BYBIT_SAID } });
+    expect(first).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "bybit", message: "Bybit does not serve this location: that is its own rule, and the market does not look for a way around it", native: { error: "RateLimitExceeded", said: BYBIT_SAID } });
     now += 9 * MIN;
     expect(await bybit.listings({ q: "eth", limit: 5 })).toBe(first);
     expect(await bybit.stats!(["BTC/USDT", "ETH/USDT"])).toBe(first);
@@ -155,8 +155,8 @@ describe("pre-IPO perpetuals at Binance and Bybit, from their documented shapes"
     const bn = preIpoPublic(venueOf("binance"), { http: bnNet.http, clock: () => now });
     const by = preIpoPublic(venueOf("bybit"), { http: byNet.http, clock: () => now });
     const [a, b] = await Promise.all([bn.listings({ limit: 5 }), by.listings({ limit: 5 })]);
-    expect(a).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "binance-preipo", message: "Binance does not serve this location: that is its own rule, and the account does not look for a way around it", native: { status: 451, said: `{ "code": 0, "msg": "${BINANCE_SAID}" }` } });
-    expect(b).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "bybit-preipo", message: "Bybit does not serve this location: that is its own rule, and the account does not look for a way around it", native: { status: 403, said: BYBIT_SAID } });
+    expect(a).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "binance-preipo", message: "Binance does not serve this location: that is its own rule, and the market does not look for a way around it", native: { status: 451, said: `{ "code": 0, "msg": "${BINANCE_SAID}" }` } });
+    expect(b).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "bybit-preipo", message: "Bybit does not serve this location: that is its own rule, and the market does not look for a way around it", native: { status: 403, said: BYBIT_SAID } });
     expect(isRefusal(a) && holdBackMs(a)).toBe(600_000);
     // one request each, then nothing for ten minutes — a search included — then asked again
     now += 9 * MIN;
@@ -240,7 +240,7 @@ describe("Hyperliquid's HIP-3 pre-IPO perpetuals, keyless", () => {
     let now = NOW;
     const net = hip3Net({ perpDexs: { status: 403, body: undefined, text: "This service is not available in your country" } });
     const hl = hyperliquidPreIpoPublic({ http: net.http, clock: () => now });
-    expect(await hl.listings({ limit: 5 })).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "hyperliquid-preipo", message: "Hyperliquid does not serve this location: that is its own rule, and the account does not look for a way around it", native: { status: 403, said: "This service is not available in your country" } });
+    expect(await hl.listings({ limit: 5 })).toMatchObject({ code: "E_VENUE_GEOBLOCKED", venue: "hyperliquid-preipo", message: "Hyperliquid does not serve this location: that is its own rule, and the market does not look for a way around it", native: { status: 403, said: "This service is not available in your country" } });
     now += 9 * MIN;
     await hl.listings({ q: "anthropic", limit: 5 });
     expect(net.asked("perpDexs")).toHaveLength(1);

@@ -6,8 +6,7 @@
  *   public-markets.ts   Listing, ListingsQuery, EventsQuery, Settlement, PublicSource, KEEP_MS, publicNo, holdBackMs, readAtOf, readLike
  *   stream-hub.ts       BOOK_TOP, HubQuote, HubBook, HubTick, HubRange, SinceCut, MarketHub, HubRing, joinHubs (and streamOf, for hubCovers)
  *   prices.ts           Price
- *   china.ts            CHINA_ID, CHINA_NAME, CHINA_NOTE, ChinaStatus, ChinaRead, ChinaFacts, ChinaMarket, ChinaHistory, ChinaSource
- *   cn-history.ts       ChinaRange (and CnMinutes, CnBar)        cn-rank.ts    ChinaSort, RANK_ROWS        cn-session.ts   (CnPhase, CnSession)
+ *   china.ts            CHINA_ID
  *   public-stocks.ts    CBOE_DELAY_MS, US_STOCKS_ID, cboeQuoteInSession, usSession, usLineAt (and usSessionWords, usClosedWords)
  *   us-quotes.ts        FRESH_MS, US_TICKER, UsQuote (and ROBINHOOD_FROM, NASDAQ_FROM, ROBINHOOD_OVERNIGHT)
  *
@@ -390,42 +389,10 @@ function streamOf(source: string, symbol: string): { venue: HubVenue; sym: strin
 
 export type Price = (asset: string) => Promise<number | undefined>;
 
-// ---- china.ts and the cn-*.ts it names --------------------------------------------------------------------------------------------------
+// ---- china.ts ---------------------------------------------------------------------------------------------------------------------------
 
-type CnPhase = "trading" | "midday" | "closed";
-interface CnSession { phase: CnPhase; lastSession: string | null }
-export type ChinaRange = "1D" | "5D" | "1M" | "3M" | "6M" | "YTD" | "1Y" | "5Y" | "MAX";
-/** One session's minutes on the 242-point grid, up to the last minute traded; `date` is `YYYY-MM-DD`. */
-interface CnMinutes { date: string; prec: number; price: number[]; amount: number[] }
-/** One bar; `t` is its date at 15:00 Beijing, in ms. */
-interface CnBar { t: number; o: number; h: number; l: number; c: number }
-export type ChinaSort = "volume" | "movers";
-export const RANK_ROWS = 20;
+/** China's venue id: the account refuses it by name (its explore, quotes and history are the market's) */
 export const CHINA_ID = "china";
-/** a line's venueName and every quoteFrom */
-export const CHINA_NAME = "Tencent";
-export const CHINA_NOTE = "China: A shares as Tencent ranks them, view-only and priced in CNY; no venue here trades them.";
-export interface ChinaStatus { state: "live" | "stale" | "unavailable"; said: string; at?: string | undefined }
-export interface ChinaRead { sort: ChinaSort; total: number; asOf: string; session: CnSession; status: ChinaStatus }
-interface ChinaFacts {
-  prevClose: number | null; open: number | null; high: number | null; low: number | null; turnover: number | null;
-  turnoverRate: number | null; marketCap: number | null; peTtm: number | null; limitUp: number | null; limitDown: number | null;
-  volume: number | null; amplitude: number | null; lastSession: string | null; phase: CnPhase; quoteStatus: "live" | "delayed";
-}
-export type ChinaMarket = Market & { currency: "CNY"; cn: ChinaFacts };
-export type ChinaHistory =
-  | { venue: "china"; venueName: "Tencent"; symbol: string; range: "1D" | "5D"; sessions: CnMinutes[]; source: string }
-  | { venue: "china"; venueName: "Tencent"; symbol: string; range: Exclude<ChinaRange, "1D" | "5D">; candles: CnBar[]; source: string; adjustment: string };
-
-export interface ChinaSource {
-  rank(sort: ChinaSort): Promise<{ items: ExploreItem[]; read: ChinaRead } | Refusal>;
-  search(q: string): Promise<ExploreItem[] | Refusal>;
-  /** at most SEARCH_RESULTS (30) symbols */
-  quotes(symbols: readonly string[]): Promise<Map<string, ChinaMarket> | Refusal>;
-  history(symbol: string, range: ChinaRange): Promise<ChinaHistory | Refusal>;
-  /** the last ranking's or quote read's outcome; a quote read made only to price a search's hits is not one */
-  status(): ChinaStatus;
-}
 
 // ---- us-quotes.ts and public-stocks.ts -------------------------------------------------------------------------------------------------
 

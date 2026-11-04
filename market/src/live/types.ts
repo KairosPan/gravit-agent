@@ -116,7 +116,7 @@ export const edgeTitle = (text: string): string => (/<title[^>]*>([^<]{1,80})<\/
 /** the account's sentence for it */
 export const edgeWords = (name: string, status: number, text: string): string => {
   const t = edgeTitle(text);
-  return `${name} refuses this network: the server in front of it answered HTTP ${status}${t ? ` (“${t}”)` : ""} and gave no reason — by place, or by this address's standing, it does not say. That is its own answer, and the account does not look for a way around it`;
+  return `${name} refuses this network: the server in front of it answered HTTP ${status}${t ? ` (“${t}”)` : ""} and gave no reason — by place, or by this address's standing, it does not say. That is its own answer, and the market does not look for a way around it`;
 };
 
 /** a venue that has banned the address this machine reaches it from for too many requests, until when it says (Binance's HTTP 418: "IP
@@ -133,7 +133,7 @@ export function venueSaidNo(venue: string, name: string, status: number, text: s
   const said = redact(text, secrets).replace(/\s+/g, " ").trim().slice(0, 220);
   const native = { status, said };
   const waited = reply.retryAfterMs ? { until: Date.now() + reply.retryAfterMs } : {};
-  if (status === 451 || REGION.test(text)) return no("E_VENUE_GEOBLOCKED", { venue, message: `${name} does not serve this location: that is its own rule, and the account does not look for a way around it`, native });
+  if (status === 451 || REGION.test(text)) return no("E_VENUE_GEOBLOCKED", { venue, message: `${name} does not serve this location: that is its own rule, and the market does not look for a way around it`, native });
   if (edgeRefused(status, text)) return no("E_VENUE_GEOBLOCKED", { venue, message: edgeWords(name, status, text), native: { status, edge: true } });
   if (IP_LIST.test(text)) return no("E_VENUE_PERMISSION", { venue, message: ipListWords(name), native, detail: { ipList: true } });
   if (status === 418 || bannedUntil(text) !== undefined) return bannedNo(venue, name, bannedUntil(text) ?? (reply.retryAfterMs ? Date.now() + reply.retryAfterMs : undefined), native);

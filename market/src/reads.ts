@@ -125,18 +125,18 @@ function barsFrom(page: CandlePage, named: string, kind: PublicSource["kind"] | 
  * never both — and the most bars, held to what can be asked; or why not, in words (service.ts historyAsk) */
 export function historyAsk(interval: string, ask: { range?: string | undefined; before?: string | number | undefined; limit?: string | number | undefined }): { iv: CandleInterval; range?: CandleRange | undefined; before?: number | undefined; limit: number } | Refusal {
   const r = String(ask.range ?? "").trim().toUpperCase();
-  if (r && !(CANDLE_RANGES as readonly string[]).includes(r)) return no("E_ACCOUNT_BAD_ACTION", { message: `a range is one of ${CANDLE_RANGES.join(", ")}` });
+  if (r && !(CANDLE_RANGES as readonly string[]).includes(r)) return no("E_MARKET_BAD_REQUEST", { message: `a range is one of ${CANDLE_RANGES.join(", ")}` });
   const b = String(ask.before ?? "").trim();
-  if (b && !/^\d{1,15}$/.test(b)) return no("E_ACCOUNT_BAD_ACTION", { message: "a page of price history is asked before a bar's start, in milliseconds" });
-  if (r && b) return no("E_ACCOUNT_BAD_ACTION", { message: "price history is asked for a range or for the page before a bar, not both" });
+  if (b && !/^\d{1,15}$/.test(b)) return no("E_MARKET_BAD_REQUEST", { message: "a page of price history is asked before a bar's start, in milliseconds" });
+  if (r && b) return no("E_MARKET_BAD_REQUEST", { message: "price history is asked for a range or for the page before a bar, not both" });
   const range = r ? (r as CandleRange) : undefined;
   const iv = (interval || (range ? RANGE_BAR[range] : "1h")).trim();
-  if (!(CANDLE_INTERVALS as readonly string[]).includes(iv)) return no("E_ACCOUNT_BAD_ACTION", { message: `price history is by ${CANDLE_INTERVALS.join(", ")}` });
+  if (!(CANDLE_INTERVALS as readonly string[]).includes(iv)) return no("E_MARKET_BAD_REQUEST", { message: `price history is by ${CANDLE_INTERVALS.join(", ")}` });
   const most = b ? PAGE_MOST : HISTORY_MOST;
   const l = String(ask.limit ?? "").trim();
-  if (l && !(/^\d{1,6}$/.test(l) && Number(l) >= 1 && Number(l) <= most)) return no("E_ACCOUNT_BAD_ACTION", { message: `a ${b ? "page" : "view"} of price history holds 1 to ${most.toLocaleString("en-US")} bars` });
+  if (l && !(/^\d{1,6}$/.test(l) && Number(l) >= 1 && Number(l) <= most)) return no("E_MARKET_BAD_REQUEST", { message: `a ${b ? "page" : "view"} of price history holds 1 to ${most.toLocaleString("en-US")} bars` });
   const before = b ? Number(b) : undefined;
-  if (before !== undefined && !(before > 0)) return no("E_ACCOUNT_BAD_ACTION", { message: "a page of price history is asked before a bar's start, in milliseconds" });
+  if (before !== undefined && !(before > 0)) return no("E_MARKET_BAD_REQUEST", { message: "a page of price history is asked before a bar's start, in milliseconds" });
   return { iv: iv as CandleInterval, range: before !== undefined ? undefined : (range ?? INTERVAL_RANGE[iv as CandleInterval]), ...(before !== undefined ? { before } : {}), limit: l ? Number(l) : b ? 300 : HISTORY_MOST };
 }
 
@@ -178,8 +178,8 @@ export function marketReads(core: MarketCore): MarketReads {
    * read — or, with `q`, China's hits alone. A refusal of the source is the answer */
   async function exploreChina(q: string, sort: string | undefined, limit: number): Promise<Exploration | Refusal> {
     const china = core.china;
-    if (!china) return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ });
-    if (sort === "closing") return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "China is sorted by volume or movers" });
+    if (!china) return no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: CHINA_NOT_READ });
+    if (sort === "closing") return no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: "China is sorted by volume or movers" });
     const body = { movers: [], closing: [], mostTraded: [], missing: [], notes: [CHINA_NOTE] };
     if (q) {
       const hits = await china.search(q);
@@ -195,8 +195,8 @@ export function marketReads(core: MarketCore): MarketReads {
   function oneMarket(venue: string, symbol: string): { id: string; sym: string } | Refusal {
     const id = venue.trim();
     const sym = symbol.trim();
-    if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(id)) return no("E_ACCOUNT_BAD_ACTION", { message: "a venue is named by its id: lower-case letters, digits and dashes" });
-    if (!sym || sym.length > 160 || !isPlain(sym)) return no("E_ACCOUNT_BAD_ACTION", { message: "a market is named by its symbol at that venue: 1 to 160 characters of plain text" });
+    if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(id)) return no("E_MARKET_BAD_REQUEST", { message: "a venue is named by its id: lower-case letters, digits and dashes" });
+    if (!sym || sym.length > 160 || !isPlain(sym)) return no("E_MARKET_BAD_REQUEST", { message: "a market is named by its symbol at that venue: 1 to 160 characters of plain text" });
     return { id, sym };
   }
 
@@ -214,15 +214,15 @@ export function marketReads(core: MarketCore): MarketReads {
      * for thirty seconds. `key`, a row's own exactly as `items` names it, keeps only that row */
     async explore(o = {}) {
       const tab = o.tab?.trim() || undefined;
-      if (tab !== undefined && !TABS.some((t) => t.id === tab)) return no("E_ACCOUNT_BAD_ACTION", { message: `a tab is one of ${TABS.map((t) => t.id).join(", ")}` });
+      if (tab !== undefined && !TABS.some((t) => t.id === tab)) return no("E_MARKET_BAD_REQUEST", { message: `a tab is one of ${TABS.map((t) => t.id).join(", ")}` });
       const sort = o.sort?.trim() || undefined;
-      if (sort !== undefined && !EXPLORE_SORTS.includes(sort as ExploreSort)) return no("E_ACCOUNT_BAD_ACTION", { message: `markets are sorted by ${EXPLORE_SORTS.join(", ")}` });
+      if (sort !== undefined && !EXPLORE_SORTS.includes(sort as ExploreSort)) return no("E_MARKET_BAD_REQUEST", { message: `markets are sorted by ${EXPLORE_SORTS.join(", ")}` });
       const q = (o.q ?? "").trim();
-      if (q.length > 60) return no("E_ACCOUNT_BAD_ACTION", { message: "a search is at most 60 characters" });
+      if (q.length > 60) return no("E_MARKET_BAD_REQUEST", { message: "a search is at most 60 characters" });
       const key = (o.key ?? "").trim();
-      if (key.length > 200) return no("E_ACCOUNT_BAD_ACTION", { message: "a row's key is at most 200 characters" });
+      if (key.length > 200) return no("E_MARKET_BAD_REQUEST", { message: "a row's key is at most 200 characters" });
       const limit = o.limit === undefined ? 60 : Math.floor(o.limit);
-      if (!(limit >= 1 && limit <= 200)) return no("E_ACCOUNT_BAD_ACTION", { message: "a limit is 1 to 200 markets" });
+      if (!(limit >= 1 && limit <= 200)) return no("E_MARKET_BAD_REQUEST", { message: "a limit is 1 to 200 markets" });
       // CHINA is its own tab, asked of its own source (which keeps its reads): never kept here, never in All
       if (tab === "china") return exploreChina(q, sort, limit);
       // a search on All asks China too, beside the other sources and within their budget; no other tab ever asks it
@@ -245,20 +245,20 @@ export function marketReads(core: MarketCore): MarketReads {
     /** a fresh price for each of a few A shares, from China's source in ONE read. Any other pair is refused by name: a public market's
      * price is in explore's rows, and a connected venue's quote is the account's (/api/account/connected/quotes) */
     async quotes(pairs) {
-      if (!pairs.length || pairs.length > 12) return no("E_ACCOUNT_BAD_ACTION", { message: "quotes are asked for 1 to 12 markets at once, each venue|symbol" });
+      if (!pairs.length || pairs.length > 12) return no("E_MARKET_BAD_REQUEST", { message: "quotes are asked for 1 to 12 markets at once, each venue|symbol" });
       const six = (p: { symbol: string }) => /^\d{6}$/.test(p.symbol);
       const asked = pairs.filter((p) => p.venue === CHINA_ID && six(p)).map((p) => p.symbol);
       const china = core.china;
       const cn: Promise<Map<string, ChinaMarket> | Refusal> = !asked.length ? Promise.resolve(new Map())
-        : china ? china.quotes(asked) : Promise.resolve(no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ }));
+        : china ? china.quotes(asked) : Promise.resolve(no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: CHINA_NOT_READ }));
       return Promise.all(pairs.map(async (p) => {
         if (p.venue === CHINA_ID) {
-          if (!china) return { ...p, refusal: no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ }) };
-          if (!six(p)) return { ...p, refusal: no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "an A share is its six digits" }) };
+          if (!china) return { ...p, refusal: no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: CHINA_NOT_READ }) };
+          if (!six(p)) return { ...p, refusal: no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: "an A share is its six digits" }) };
           const got = await cn;
           if (isRefusal(got)) return { ...p, refusal: got };
           const m = got.get(p.symbol);
-          return m ? { ...p, market: m } : { ...p, refusal: no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: `no A-share quote for ${p.symbol}` }) };
+          return m ? { ...p, market: m } : { ...p, refusal: no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: `no A-share quote for ${p.symbol}` }) };
         }
         return { ...p, refusal: no("E_VENUE_RAIL_CLOSED", { venue: p.venue, message: `"${p.venue}" is priced in explore: the market quotes A shares only (venue "china")` }) };
       }));
@@ -270,15 +270,15 @@ export function marketReads(core: MarketCore): MarketReads {
     async candles(venue, symbol, interval, ask = {}) {
       const id = venue.trim();
       const sym = symbol.trim();
-      if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(id)) return no("E_ACCOUNT_BAD_ACTION", { message: "a venue is named by its id: lower-case letters, digits and dashes" });
-      if (!sym || sym.length > 160 || !isPlain(sym)) return no("E_ACCOUNT_BAD_ACTION", { message: "a market is named by its symbol at that venue: 1 to 160 characters of plain text" });
+      if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(id)) return no("E_MARKET_BAD_REQUEST", { message: "a venue is named by its id: lower-case letters, digits and dashes" });
+      if (!sym || sym.length > 160 || !isPlain(sym)) return no("E_MARKET_BAD_REQUEST", { message: "a market is named by its symbol at that venue: 1 to 160 characters of plain text" });
       // an A share's history is Tencent's, by range, in Shanghai's sessions (china.ts history): decided before any bar size or New York window
       if (id === CHINA_ID) {
         const china = core.china;
-        if (!china) return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ });
-        if (ask.before !== undefined && String(ask.before).trim() !== "") return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "an A share's history is read by range" });
+        if (!china) return no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: CHINA_NOT_READ });
+        if (ask.before !== undefined && String(ask.before).trim() !== "") return no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: "an A share's history is read by range" });
         const range = (ask.range ?? "").trim();
-        if (!(CANDLE_RANGES as readonly string[]).includes(range)) return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: `a range is one of ${CANDLE_RANGES.join(", ")}` });
+        if (!(CANDLE_RANGES as readonly string[]).includes(range)) return no("E_MARKET_BAD_REQUEST", { venue: CHINA_ID, message: `a range is one of ${CANDLE_RANGES.join(", ")}` });
         return china.history(sym, range as ChinaRange);
       }
       const asked = historyAsk(interval, ask);
@@ -324,7 +324,7 @@ export function marketReads(core: MarketCore): MarketReads {
       const asked = oneMarket(venue, symbol);
       if (isRefusal(asked)) return asked;
       const { id, sym } = asked;
-      if (!(Number.isInteger(depth) && depth >= 1 && depth <= 50)) return no("E_ACCOUNT_BAD_ACTION", { message: "a book is read 1 to 50 levels a side" });
+      if (!(Number.isInteger(depth) && depth >= 1 && depth <= 50)) return no("E_MARKET_BAD_REQUEST", { message: "a book is read 1 to 50 levels a side" });
       const t = now();
       const src = core.source(id);
       if (!src) return notPublic(id);
@@ -350,7 +350,7 @@ export function marketReads(core: MarketCore): MarketReads {
       const asked = oneMarket(venue, symbol);
       if (isRefusal(asked)) return asked;
       const { id, sym } = asked;
-      if (!(Number.isInteger(limit) && limit >= 1 && limit <= 100)) return no("E_ACCOUNT_BAD_ACTION", { message: "the latest trades are read 1 to 100 at a time" });
+      if (!(Number.isInteger(limit) && limit >= 1 && limit <= 100)) return no("E_MARKET_BAD_REQUEST", { message: "the latest trades are read 1 to 100 at a time" });
       const src = core.source(id);
       if (!src) return notPublic(id);
       if (!src.trades) return { venue: id, venueName: src.name, symbol: sym, trades: [], none: `${src.name} publishes no trades the market can read`, public: true };

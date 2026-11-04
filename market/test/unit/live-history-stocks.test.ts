@@ -296,7 +296,7 @@ describe("daily and weekly: Robinhood's year or five, Nasdaq's by dates for all 
 
   it("where Robinhood and Nasdaq both refuse, Cboe's days — their short volume from 2021-10-15 to 2022-06-17 left unsaid where Nasdaq gives none", async () => {
     const cboe: Candle[] = [fromEt(2021, 10, 14, 9, 30), fromEt(2021, 10, 15, 9, 30), fromEt(2022, 6, 17, 9, 30), fromEt(2022, 6, 21, 9, 30), fromEt(2026, 10, 12, 9, 30)].map((t) => ({ t, o: 10, h: 11, l: 9, c: 10.5, v: 777 }));
-    const refuse = no("E_VENUE_GEOBLOCKED", { venue: "nasdaq", message: "Nasdaq does not serve this location: that is its own rule, and the account does not look for a way around it" });
+    const refuse = no("E_VENUE_GEOBLOCKED", { venue: "nasdaq", message: "Nasdaq does not serve this location: that is its own rule, and the market does not look for a way around it" });
     const down: Http = async () => json({ detail: "unavailable" }, 503);
     const s = history({ http: down, nq: nasdaq({ refuse }), cboe: async () => cboe });
     const p = page(await s.h("AAPL", "1d", { since: fromEt(2021, 10, 1), limit: 5_000 }));

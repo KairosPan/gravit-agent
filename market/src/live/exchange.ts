@@ -198,18 +198,18 @@ export function exchangeSaidNo(venue: string, name: string, err: unknown, key: K
   const code = transportCode(err);
   if (!http && (code || CUT.has(kind))) return code ? unreachable(venue, name, err, Object.values(key)) : no("E_VENUE_UNREACHABLE", { venue, message: `${name} could not be reached: the answer was cut off`, native: { error: kind } });
   // a place rule about one pair or product: that, and not "does not serve this location"
-  if (kind === "RestrictedLocation" || PRODUCT_RULE.test(said)) return no("E_VENUE_GEOBLOCKED", { venue, message: `${name} does not offer this pair or product to this location: that is its own rule, for this alone, and the account does not look for a way around it`, native, detail: { scope: "product" } });
-  if (LEVERAGE_RULE.test(said)) return no("E_VENUE_GEOBLOCKED", { venue, message: `${name} caps leverage for this location: that is its own rule, and the account does not look for a way around it`, native, detail: { scope: "leverage" } });
+  if (kind === "RestrictedLocation" || PRODUCT_RULE.test(said)) return no("E_VENUE_GEOBLOCKED", { venue, message: `${name} does not offer this pair or product to this location: that is its own rule, for this alone, and the market does not look for a way around it`, native, detail: { scope: "product" } });
+  if (LEVERAGE_RULE.test(said)) return no("E_VENUE_GEOBLOCKED", { venue, message: `${name} caps leverage for this location: that is its own rule, and the market does not look for a way around it`, native, detail: { scope: "leverage" } });
   // judged by what the exchange said, not by the class the library picked: Bybit's country block arrives as a "rate limit", OKX's as HTTP 200.
   // Read whole: an edge's HTML page says it further in than the sentence kept, and then the sentence around it is what is kept
   // HTTP 451 is the place rule by its status alone (RFC 7725), whatever words come with it — or none: the library files it as "not
   // available", and its reason phrase arrives empty
   const region = http?.status === 451 || REGION.test(said) || OKX_REGION.test(said) || DERIBIT_REGION.test(said);
-  if (region) return no("E_VENUE_GEOBLOCKED", { venue, message: `${name} does not serve this location: that is its own rule, and the account does not look for a way around it`, native });
+  if (region) return no("E_VENUE_GEOBLOCKED", { venue, message: `${name} does not serve this location: that is its own rule, and the market does not look for a way around it`, native });
   if (REGION.test(folded)) {
     const plain = (http ? http.body : folded).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
     const at = Math.max(0, plain.search(REGION));
-    return no("E_VENUE_GEOBLOCKED", { venue, message: `${name} does not serve this location: that is its own rule, and the account does not look for a way around it`, native: { error: kind, said: plain.slice(Math.max(0, at - 120), at + 120).trim() } });
+    return no("E_VENUE_GEOBLOCKED", { venue, message: `${name} does not serve this location: that is its own rule, and the market does not look for a way around it`, native: { error: kind, said: plain.slice(Math.max(0, at - 120), at + 120).trim() } });
   }
   // the server in front of the exchange refusing this network with a page of its own (the library calls it "not available"): not a wait
   if (http && edgeRefused(http.status, http.body)) return no("E_VENUE_GEOBLOCKED", { venue, message: edgeWords(name, http.status, http.body), native: { error: kind, status: http.status, edge: true } });

@@ -38,7 +38,7 @@ const DAY = 86_400_000;
 
 /** the bar each range starts in (PAPERLIVE.md "Ranges and default bar sizes") */
 export const RANGE_BAR: Readonly<Record<CandleRange, CandleInterval>> = { "1D": "1m", "5D": "5m", "1M": "1h", "3M": "4h", "6M": "4h", YTD: "1d", "1Y": "1d", "5Y": "1w", MAX: "1w" };
-/** the range a chart asked only for a bar size is drawn over (GET /api/account/candles with no range and no `before`): about the few hundred
+/** the range a chart asked only for a bar size is drawn over (GET /api/candles with no range and no `before`): about the few hundred
  * bars the chart drew before ranges existed — a day of five-minute bars, a month of hourly ones, a year of daily ones — and the range that
  * starts in each new size */
 export const INTERVAL_RANGE: Readonly<Record<CandleInterval, CandleRange>> = { "1m": "1D", "5m": "1D", "15m": "5D", "1h": "1M", "4h": "3M", "1d": "1Y", "1w": "5Y" };

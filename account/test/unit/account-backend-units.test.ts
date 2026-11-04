@@ -158,7 +158,7 @@ describe("public price history, keyless", () => {
     const kraken = exchangeTickers("kraken", deps);
     const coinbase = exchangeTickers("coinbase", { ...deps, open: async () => ({ id: "coinbase", markets: { "BTC/USD": { id: "BTC-USD", symbol: "BTC/USD", base: "BTC", quote: "USD", spot: true } }, async loadMarkets() { return {}; }, async fetchBalance() { throw new Error("never"); } }) as ExchangeClient });
     const first = page(await kraken.candles!("BTC/USD", "1h", { since: NOW - 2 * HOUR }));
-    expect([first.source, first.ends]).toEqual(["Kraken · BTC/USD", "Kraken keeps only the latest 720 bars at this size, and Coinbase Exchange did not say whether it trades BTC-USD: Coinbase Exchange does not serve this location: that is its own rule, and the account does not look for a way around it"]);
+    expect([first.source, first.ends]).toEqual(["Kraken · BTC/USD", "Kraken keeps only the latest 720 bars at this size, and Coinbase Exchange did not say whether it trades BTC-USD: Coinbase Exchange does not serve this location: that is its own rule, and the market does not look for a way around it"]);
     expect(net.sent).toHaveLength(1);
     // Kraken itself still answers: its listings were never held back
     expect(Array.isArray(await kraken.listings({ limit: 5 }))).toBe(true);

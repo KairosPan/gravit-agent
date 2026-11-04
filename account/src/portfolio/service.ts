@@ -3802,8 +3802,6 @@ export interface CandlesView {
   gaps?: Array<{ from: number; to: number; why: string }> | undefined;
   /** the last bar built from intraday bars, and its words ("Today so far") */
   today?: { t: number; words: string } | undefined;
-  /** read from the venue's public market data, without a key: the venue is not connected */
-  public?: true | undefined;
   /** whose bars these are, where not the venue's own: a paper account's market's public source */
   from?: string | undefined;
 }
@@ -3814,8 +3812,6 @@ export interface BookView {
   venueName: string;
   symbol: string;
   book: OrderBook;
-  /** read from the venue's public market data, without a key: the venue is not connected */
-  public?: true | undefined;
 }
 /** one market's latest trades at a connected venue, newest first, as GET /api/account/connected/trades answers it */
 export interface TradesView {
@@ -3826,7 +3822,6 @@ export interface TradesView {
   /** the source publishes no trades at all, in a sentence ("US stocks publishes no trades the account can read"); `trades` is then empty and
    * asking again would say the same, so the face stops asking until the market changes */
   none?: string | undefined;
-  public?: true | undefined;
 }
 
 /** A paper account's trades read for a market whose public source publishes none says so as a refusal of its own (live/paper.ts trades:

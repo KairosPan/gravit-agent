@@ -87,7 +87,6 @@ import { normalBase, scopeOf, type CompareMissing, type PlaceRule } from "./comp
 import { iconOf } from "./icons.ts";
 import { impliedUsd, PER_SHARE, PRE_IPO_CATEGORY, PRE_IPO_GROUP, PRE_IPO_PER_POINT } from "./preipo.ts";
 import type { EventsQuery, Listing, PublicSource } from "../market/shapes.ts";
-import type { ChinaRead } from "../market/shapes.ts";
 import { inDollars, type LiveTrader, type Market, type MarketSession, type MarketStats } from "./trade.ts";
 import { isStable } from "./types.ts";
 
@@ -293,8 +292,6 @@ export interface Exploration {
   /** coins, stocks, perpetuals and tokens by their 24-hour dollar volume */
   mostTraded: ExploreItem[];
   missing: ExploreMissing[];
-  /** the China tab's read (china.ts): its sort, its count, the session and whether Tencent answered */
-  china?: ChinaRead | undefined;
   /** plain sentences for under the list, each under 160 characters: what the lists are made of (the sources' own words, and this file's
    * about Predictions) */
   notes: string[];

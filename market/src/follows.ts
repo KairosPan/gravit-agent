@@ -167,9 +167,9 @@ export function marketFollows(core: MarketCore, stream: MarketStream): MarketFol
   };
 }
 
-/** THE STREAM'S ROUTES, over a bus and its follows made here: the account's GET /api/account/stream and POST /api/account/stream/markets
- * (account/src/portfolio/server.ts), their checks and answers with the word "account" taken out. `close` ends every stream and lets go of
- * every hold (the server closing) */
+/** THE STREAM'S ROUTES, over a bus and its follows made here: GET /api/stream and POST /api/stream/markets, the face's market stream
+ * (/data/market/stream), with their checks and answers in the market's words. `close` ends every stream and lets go of every hold (the
+ * server closing) */
 export function mountStream(app: express.Express, core: MarketCore, o: Omit<MarketStreamOptions, "onFollow" | "onAgain"> = {}): { stream: MarketStream; follows: MarketFollows; close(): void } {
   let follows: MarketFollows | undefined;
   const stream = new MarketStream({ ...o, onFollow: (client, keys) => follows?.follow(client, keys), onAgain: (client, keys) => follows?.again(client, keys) });

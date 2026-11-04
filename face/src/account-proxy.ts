@@ -100,7 +100,7 @@ import { FORBIDDEN, isLoopbackHost, isTrustedNavigation } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
 import {
   UPSTREAM_CACHE_KEYS, askUpstream, mountReads, mountStream, postHandler, rebuildQueryOf, searchOf, send, upstreamReads,
-  type PostOptions, type UpstreamAnswer, type UpstreamRead, type UpstreamReads, type UpstreamRouteRead, type UpstreamSettings,
+  type PostOptions, type UpstreamAnswer, type UpstreamRead, type UpstreamReads, type UpstreamSettings,
 } from "./upstream-proxy.ts";
 
 /** The Account's reads the face proxies: `account` is its `GET /api/account`, `reach` its
@@ -351,11 +351,6 @@ const originHeader = (req: IncomingMessage): Record<string, string> => {
   const origin = faceOriginOf(req);
   return origin === null ? {} : { [FACE_ORIGIN_HEADER]: origin };
 };
-
-/** One read route's reads in-process, through the same cache and flights its `/data/account/<route>` is served from:
- * `query` is one {@link rebuildQuery} would pass on. A disabled row answers `{ unreachable: "disabled" }` and asks nothing.
- * No stale answer is re-served here: a failure is the failure. */
-export type AccountRouteRead = UpstreamRouteRead;
 
 /** Mount the twenty-three read routes, the two stream routes, the twelve write routes and the OAuth sign-in's
  * callback (`signin/callback`, behind `isTrustedNavigation`) — thirty-eight in all — on the host webserver, over the

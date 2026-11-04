@@ -1,12 +1,11 @@
 /** A MARKET IN THE TEST'S OWN PROCESS, for the account's link tests (unit/market-*.test.ts): the market's real server and protocol
- * (market/src) over a core of fakes — a public source, a hub the test makes speak, China and a price — so that what crosses is the real
+ * (market/src) over a core of fakes — a public source, a hub the test makes speak and a price — so that what crosses is the real
  * wire, and what the account does with it is the account's own code. */
 import { createServer } from "node:net";
 import { createMarketCore, type MarketCore, type MarketCoreOptions } from "../../market/src/core.ts";
 import { mountProtocol, type ProtocolOptions } from "../../market/src/protocol.ts";
 import { mountCn } from "../../market/src/routes-cn.ts";
 import { startMarketServer, type MarketServerHandle } from "../../market/src/server.ts";
-import type { ChinaMarket, ChinaSource, ChinaStatus } from "../../market/src/live/china.ts";
 import { readLike, type Listing, type PublicSource } from "../../market/src/live/public-markets.ts";
 import { streamOf, type HubBook, type HubQuote, type HubRange, type HubTick, type MarketHub, type SinceCut } from "../../market/src/live/stream-hub.ts";
 import { no } from "../../market/src/refuse.ts";
@@ -136,20 +135,6 @@ export function fakeHub() {
     tell(s, y, "trades");
   };
   return { hub, seen, quote, book, trade };
-}
-
-/** China as the fake answers it: one share, its status as the test sets it */
-export function fakeChina(): ChinaSource & { state: ChinaStatus } {
-  const state: ChinaStatus = { state: "live", said: "Tencent · answering" };
-  const share = { symbol: "sh600519", name: "贵州茅台", kind: "stock", base: "sh600519", quote: "CNY", currency: "CNY", open: false, types: [], price: 1500, quoteFrom: "Tencent", cn: {} } as unknown as ChinaMarket;
-  return {
-    state,
-    rank: async () => no("E_VENUE_UNREACHABLE", { venue: "china", message: "not in this test" }),
-    search: async () => [],
-    quotes: async (symbols) => new Map(symbols.filter((s) => s === "sh600519").map((s) => [s, share])),
-    history: async () => no("E_VENUE_UNREACHABLE", { venue: "china", message: "not in this test" }),
-    status: () => ({ ...state }),
-  };
 }
 
 /** a market on `port` (0: any) over `core`, its protocol and its Lunhui and AKShare routes mounted; its close does not close the core, so a
