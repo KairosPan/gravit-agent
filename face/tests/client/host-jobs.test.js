@@ -7,6 +7,7 @@ import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { startJobs, JOB_OUTPUT_KEEP } from '../../client/js/host/jobs.js';
 import { NOT_SIGNED_IN } from '../../client/js/host/actions.js';
+import { FOLLOW_RETRY_MS, CONTROL_RETRY_MS } from '../../client/js/host/live.js';
 
 const DROPPED = '… earlier output dropped …';
 const job = (id, status = 'running', more = {}) => ({ id, kind: 'bash', label: id, owner: 's1', status, startedAt: 1, output: { total: 0, earliest: 0 }, ...more });
@@ -16,7 +17,15 @@ function fakeMux() {
   return {
     streams,
     stream(endpoint, args, handlers = {}) {
-      const s = { endpoint, args, handlers, cancelled: false, cancel() { s.cancelled = true; } };
+      // an end or an error finishes the stream, as the real mux's does
+      const s = {
+        endpoint, args, cancelled: false, cancel() { s.cancelled = true; },
+        handlers: {
+          onItem: v => handlers.onItem?.(v),
+          onEnd: () => { s.cancelled = true; handlers.onEnd?.(); },
+          onError: e => { s.cancelled = true; handlers.onError?.(e); },
+        },
+      };
       streams.push(s);
       return { cancel: () => s.cancel() };
     },
@@ -24,16 +33,26 @@ function fakeMux() {
   };
 }
 
+function fakeTimers() {
+  return {
+    list: [], n: 0,
+    after(ms, fn) { const id = ++this.n; this.list.push({ id, ms, fn }); return id; },
+    cancel(id) { this.list = this.list.filter(t => t.id !== id); },
+    fire() { const t = this.list.shift(); t?.fn(); },
+  };
+}
+
 function rig(call = async () => ({ outcome: 'requested' })) {
   const store = createStore({ initial: emptyState(), reducers });
   const mux = fakeMux();
+  const timers = fakeTimers();
   const outputs = [];
   const calls = [];
   const dispatched = [];
   const dispatch = store.dispatch.bind(store);
   store.dispatch = (name, payload) => { dispatched.push(name); return dispatch(name, payload); };
-  const jobs = startJobs({ store, mux, call: (m, a) => { calls.push([m, a]); return call(m, a); }, onOutput: id => outputs.push(id) });
-  return { store, mux, outputs, calls, dispatched, jobs };
+  const jobs = startJobs({ store, mux, timers, call: (m, a) => { calls.push([m, a]); return call(m, a); }, onOutput: id => outputs.push(id) });
+  return { store, mux, timers, outputs, calls, dispatched, jobs };
 }
 
 test('watch opens job/list with {request: {sessionId}}, replaces it on another conversation, and opens none for null', () => {
@@ -157,4 +176,136 @@ test('kill calls job/kill with {request: {sessionId, jobId}}; a throw says stop:
   const out = rig(async () => { throw Object.assign(new Error('401'), { status: 401 }); });
   assert.equal(await out.jobs.kill('s1', 'a'), false);
   assert.equal(out.store.get().status.line, NOT_SIGNED_IN);
+});
+
+test('watching another conversation, or none, cancels the follow too', () => {
+  const r = rig();
+  r.jobs.watch('s1');
+  r.jobs.follow('s1', job('a'));
+  r.jobs.watch('s2');
+  assert.equal(r.mux.live('job/follow').length, 0);
+  assert.equal(r.jobs.outputOf('a'), null);
+  r.jobs.follow('s2', job('b'));
+  r.jobs.watch('s2');
+  assert.equal(r.mux.live('job/follow').length, 1, 'the same conversation keeps its follow');
+  r.jobs.watch(null);
+  assert.equal(r.mux.live('job/follow').length, 0);
+});
+
+test('a job/list the host ends is opened again after FOLLOW_RETRY_MS, the rows kept until its first frame', () => {
+  const r = rig();
+  r.jobs.watch('s1');
+  const first = r.mux.streams[0];
+  first.handlers.onItem({ type: 'rows', jobs: [job('a')] });
+  first.handlers.onEnd();
+  assert.deepEqual(r.timers.list.map(t => t.ms), [FOLLOW_RETRY_MS]);
+  r.timers.fire();
+  const lists = r.mux.streams.filter(s => s.endpoint === 'job/list');
+  assert.equal(lists.length, 2);
+  assert.deepEqual(lists[1].args, { request: { sessionId: 's1' } });
+  assert.deepEqual(r.store.get().jobs.rows.map(j => j.id), ['a']);
+  first.handlers.onItem({ type: 'rows', jobs: [job('x')] });   // the ended stream's late frame lands nowhere
+  assert.deepEqual(r.store.get().jobs.rows.map(j => j.id), ['a']);
+  lists[1].handlers.onItem({ type: 'rows', jobs: [] });
+  assert.deepEqual(r.store.get().jobs.rows, []);
+});
+
+test('a refused job/list is opened again after the longer CONTROL_RETRY_MS', () => {
+  const r = rig();
+  r.jobs.watch('s1');
+  r.mux.streams[0].handlers.onError({ code: 'x' });
+  assert.deepEqual(r.timers.list.map(t => t.ms), [CONTROL_RETRY_MS]);
+  assert.ok(CONTROL_RETRY_MS > FOLLOW_RETRY_MS);
+  r.timers.fire();
+  assert.equal(r.mux.live('job/list').length, 1);
+});
+
+test('watching another conversation in the backoff opens nothing for the old one; the same one opens at once, once', () => {
+  const r = rig();
+  r.jobs.watch('s1');
+  r.mux.streams[0].handlers.onEnd();
+  const fire = r.timers.list[0].fn;
+  r.jobs.watch('s2');
+  assert.equal(r.timers.list.length, 0, 'the backoff is cancelled');
+  fire();   // a timer whose cancel did not land
+  assert.deepEqual(r.mux.live('job/list').map(s => s.args.request.sessionId), ['s2']);
+
+  const q = rig();
+  q.jobs.watch('s1');
+  q.mux.streams[0].handlers.onItem({ type: 'rows', jobs: [job('a')] });
+  q.mux.streams[0].handlers.onEnd();
+  const late = q.timers.list[0].fn;
+  q.jobs.watch('s1');
+  assert.equal(q.timers.list.length, 0);
+  assert.deepEqual(q.mux.live('job/list').map(s => s.args.request.sessionId), ['s1']);
+  late();
+  assert.equal(q.mux.streams.filter(s => s.endpoint === 'job/list' && !s.cancelled).length, 1, 'no second stream');
+  assert.deepEqual(q.store.get().jobs.rows.map(j => j.id), ['a']);
+
+  const n = rig();
+  n.jobs.watch('s1');
+  n.mux.streams[0].handlers.onEnd();
+  n.jobs.watch(null);
+  assert.equal(n.timers.list.length, 0);
+});
+
+test('the dropped line never appears twice in a row', () => {
+  const r = rig();
+  r.jobs.follow('s1', job('a'));
+  const f = r.mux.streams[0].handlers;
+  f.onItem({ type: 'opened', job: job('a', 'running', { output: { total: 500, earliest: 200 } }), from: 200 });
+  f.onItem({ type: 'output', chunks: [{ at: 200, text: 'one', gapBefore: true }], next: 203, lossy: true });
+  assert.equal(r.jobs.outputOf('a').text, `${DROPPED}\none`);
+});
+
+test('a re-opened follow past what was held marks the bytes it lost', () => {
+  const r = rig();
+  r.jobs.follow('s1', job('a'));
+  const f = r.mux.streams[0].handlers;
+  f.onItem({ type: 'opened', job: job('a'), from: 0 });
+  f.onItem({ type: 'output', chunks: [{ at: 0, text: 'old\n' }], next: 4 });
+  f.onItem({ type: 'opened', job: job('a', 'running', { output: { total: 900, earliest: 800 } }), from: 800 });
+  f.onItem({ type: 'output', chunks: [{ at: 800, text: 'new' }], next: 803 });
+  assert.equal(r.jobs.outputOf('a').text, `old\n${DROPPED}\nnew`);
+});
+
+test('the cap never keeps half a surrogate pair', () => {
+  const r = rig();
+  r.jobs.follow('s1', job('a'));
+  const f = r.mux.streams[0].handlers;
+  f.onItem({ type: 'opened', job: job('a'), from: 0 });
+  const head = `${DROPPED}\n`;
+  // a 100-unit prefix, ten pairs, then a fill: the text is past the cap and the cut lands on index 101, the first pair's
+  // low half
+  const pairs = '😀'.repeat(10);
+  const fill = 'a'.repeat(JOB_OUTPUT_KEEP - head.length - 19);
+  const big = `${'x'.repeat(100)}${pairs}${fill}`;
+  assert.ok(big.length > JOB_OUTPUT_KEEP);
+  assert.equal(big.length - (JOB_OUTPUT_KEEP - head.length), 101);
+  f.onItem({ type: 'output', chunks: [{ at: 0, text: big }], next: 1 });
+  const text = r.jobs.outputOf('a').text;
+  assert.ok(text.startsWith(head));
+  const c = text.charCodeAt(head.length);
+  assert.ok(!(c >= 0xdc00 && c <= 0xdfff), 'no lone low surrogate after the dropped line');
+  assert.ok(text.length <= JOB_OUTPUT_KEEP);
+});
+
+test('a follow the host ends without a status, or refuses, reads as ended and calls onOutput', () => {
+  const r = rig();
+  r.jobs.follow('s1', job('a'));
+  r.mux.streams[0].handlers.onItem({ type: 'opened', job: job('a'), from: 0 });
+  r.mux.streams[0].handlers.onEnd();
+  assert.deepEqual(r.jobs.outputOf('a'), { text: '', ended: true });
+  assert.deepEqual(r.outputs, ['a', 'a']);
+  r.jobs.follow('s1', job('b'));
+  r.mux.streams[1].handlers.onError({ code: 'job/not-found' });
+  assert.deepEqual(r.jobs.outputOf('b'), { text: '', ended: true, error: 'job/not-found' });
+  assert.deepEqual(r.outputs, ['a', 'a', 'b']);
+  assert.equal(r.mux.streams.length, 2, 'nothing reopens it');
+});
+
+test('a kill answered with no known outcome says stop: failed and answers false', async () => {
+  const r = rig(async () => ({ outcome: 'maybe' }));
+  assert.equal(await r.jobs.kill('s1', 'a'), false);
+  assert.equal(r.store.get().status.line, 'stop: failed');
 });
