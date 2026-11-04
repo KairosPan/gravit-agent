@@ -1,7 +1,8 @@
 // face/client/js/host/composer.js — the composer menus' reads: the / menu's commands (commands/list on a live
 // conversation, kept by agent preset so a cold one shows the last rows read for its preset, D13 — reading never
 // activates) and skills (skills/list, which reads a cold session as it is); the @ menu's files (GET /data/files, only the
-// latest call answers) and a room's roster (POST /data/rooms/state). Impure; nothing here draws or dispatches.
+// latest call answers) and a room's roster (POST /data/rooms/state, kept per session so the menu draws its bots at
+// once). Impure; nothing here draws or dispatches.
 export const presetKey = conv => conv?.preset ?? 'gravit';
 
 export function startComposerReads({ call, getJson, postJson }) {
@@ -45,6 +46,9 @@ export function startComposerReads({ call, getJson, postJson }) {
       if (token !== filesSeq) return null;
       if (answer?.ok !== true || !Array.isArray(answer.items)) return null;
       return { items: answer.items, truncated: answer.truncated === true };
+    },
+    keptRoster(sessionId) {
+      return rosterBySession.get(sessionId) ?? null;
     },
     async roster(sessionId) {
       let rows = [];

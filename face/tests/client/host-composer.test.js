@@ -97,3 +97,11 @@ test('the roster is the room state\'s, and none on a throw', async () => {
   answer = () => { throw new Error('not a room'); };
   assert.deepEqual(await r.reads.roster('s1'), []);
 });
+
+test('keptRoster is the last roster read for a session, null before any', async () => {
+  const r = rig({ postJson: () => ({ ok: true, roster: [{ id: 'news-scout', name: 'News Scout' }], members: [], caps: {} }) });
+  assert.equal(r.reads.keptRoster('s1'), null);
+  await r.reads.roster('s1');
+  assert.deepEqual(r.reads.keptRoster('s1'), [{ id: 'news-scout', name: 'News Scout' }]);
+  assert.equal(r.reads.keptRoster('s2'), null, 'kept per session');
+});

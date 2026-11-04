@@ -39,8 +39,10 @@ import { rulesOf } from './host/rules-view.js';
 import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
 import { makeEditor } from './composer/dom.js';
-import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext } from './composer/draft.js';
-import { flatItems } from './composer/menus.js';
+import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt } from './composer/draft.js';
+import { flatItems, slashItems, atItems, conversationChoices, moveActive, chipOf } from './composer/menus.js';
+import { renderMenu, menuAria } from './composer/view.js';
+import { startComposerReads } from './host/composer.js';
 import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
 import { moveSeedOf, earnSeedOf, earnSaidOf, subWalletSeedOf } from './host/sheet-money.js';
@@ -436,9 +438,15 @@ export function boot(win, host = {}) {
   const runsOf = key => drafts.get(key)?.runs ?? [];
   const currentRuns = () => runsOf(draftKey(store.get()));
   const setRuns = (runs, key = draftKey(store.get())) => { if (runs.length) drafts.set(key, { runs }); else drafts.delete(key); };
-  // the hook for the / and @ menus (Task 7 sets it): the menu drawn under the editor, or null. Its rows make Enter choose
-  let composerMenu = null;
-  const menuShowsRows = () => !!composerMenu && flatItems(composerMenu).length > 0;
+  // the / and @ menus: the menu drawn under the editor (null when none shows), the trigger it stands on, and a sequence
+  // that every tick and every close moves on, so a read's late answer draws only for the trigger it was asked for
+  let menu = null;
+  let menuSeq = 0;
+  let menuTrig = null;     // {kind, from, query, atStart, key}: the token before the caret the menu follows
+  let menuFiles = null;    // the files answer for menuTrig's query: {query, items}
+  let dismissed = null;    // the trigger Esc closed: it stays closed until the token changes
+  const menuShowsRows = () => !!menu && flatItems(menu).length > 0;
+  const composerReads = host.composerReads ?? startComposerReads({ call, getJson, postJson });
   let composing = false;
   let pressed = false;   // a primary press is down: a render now would replace the element the click is aimed at
   let pending = false;
@@ -467,6 +475,8 @@ export function boot(win, host = {}) {
 
   function render() {
     const s = store.get();
+    // a menu stands on its own draft's trigger: another draft on screen (another conversation, New message) closes it
+    if (menuTrig && menuTrig.key !== draftKey(s)) { forgetMenu(); dismissed = null; }
     // what the person had: focus and caret, typed text, picked radios, and where each scrolling box stood
     const active = doc.activeElement;
     const activeKey = focusKey(active);
@@ -489,7 +499,7 @@ export function boot(win, host = {}) {
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
-      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu: composerMenu });
+      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu });
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
     const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     root.innerHTML = renderRail(s, now(), { mac }) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen);
@@ -937,6 +947,7 @@ export function boot(win, host = {}) {
       render();
     };
     setRuns([], key);
+    forgetMenu();
     render();
     if (s.draft) {
       const id = await actions.newConversation({ title: s.draft.title, workspaceId: s.draft.where, text });
@@ -956,6 +967,7 @@ export function boot(win, host = {}) {
     const had = currentRuns();
     const runs = isBlank(had) ? textDraft(words).runs : normalize([...had, { type: 'text', text: `\n${words}` }]);
     setRuns(runs);
+    forgetMenu();
     render();
     const say = doc.getElementById('say');
     if (say) { say.focus(); editor.place(say, lengthOf(runs)); }
@@ -966,6 +978,120 @@ export function boot(win, host = {}) {
     const sent = await actions.send(text);
     if (sent && (sent.sent === 'prompt' || sent.sent === 'say')) live.promote(sent.sessionId);
     return sent;
+  }
+
+  // ---- the / and @ menus: opened, filtered and moved in #composer-menu alone, never by a page render ----
+  const sameTrig = (a, b) => !!a && !!b && a.kind === b.kind && a.from === b.from && a.query === b.query && a.key === b.key;
+  // the conversation the composer writes to (none on New message), its channel, and that channel's folder relative to the
+  // root (undefined with no root, or a conversation in no channel)
+  function menuContext(s) {
+    const conv = s.draft ? null : currentConversation(s);
+    const workspaceId = s.draft ? s.draft.where : conv?.channel?.workspaceId ?? null;
+    const { repoRoot, cwd } = serialContext({ channels: s.channels, workspaceId });
+    const root = repoRoot == null ? null : repoRoot.replace(/\/+$/, '');
+    const dir = cwd == null ? null : cwd.replace(/\/+$/, '');
+    const cwdRel = root == null || dir == null ? undefined : dir === root ? '' : dir.startsWith(`${root}/`) ? dir.slice(root.length + 1) : undefined;
+    return { conv, workspaceId, root, cwdRel };
+  }
+  // a room's bots as last read: its roster, each with the bots list's line
+  const botsOf = (s, conv) => (conv?.channel ? composerReads.keptRoster(conv.id) ?? [] : [])
+    .map(r => ({ id: r.id, name: r.name ?? r.id, description: (s.bots ?? []).find(b => b.id === r.id)?.description ?? '' }));
+  // the menu for the standing trigger from what is kept now; null when its rows come to nothing. An answer's rebuild keeps
+  // the active row where it stood
+  function buildMenu(keepActive) {
+    const trig = menuTrig;
+    if (!trig) { menu = null; return; }
+    const s = store.get();
+    const { conv, workspaceId, root } = menuContext(s);
+    const groups = trig.kind === '/'
+      ? slashItems({ commands: composerReads.keptCommands(conv), skills: composerReads.keptSkills(conv?.id), query: trig.query, atStart: trig.atStart })
+      : atItems({
+        bots: botsOf(s, conv),
+        files: root != null && menuFiles?.query === trig.query ? menuFiles.items : null,
+        conversations: conversationChoices(s.conversations.map(c => ({ ...c, workspaceId: c.channel?.workspaceId ?? null })), { exceptId: conv?.id ?? null, workspaceId, now: now() }),
+        query: trig.query,
+      });
+    const next = { kind: trig.kind, from: trig.from, query: trig.query, groups, active: 0 };
+    const n = flatItems(next).length;
+    if (!n) { menu = null; return; }
+    if (keepActive && menu) next.active = Math.min(menu.active, n - 1);
+    menu = next;
+  }
+  // the menu into its slot, and the editor's attributes in step with it; never a page render
+  function drawMenu() {
+    const slot = doc.getElementById('composer-menu');
+    if (slot) slot.innerHTML = renderMenu(menu);
+    const say = doc.getElementById('say');
+    if (!say) return;
+    for (const [name, value] of Object.entries(menuAria(menu))) {
+      if (value == null) say.removeAttribute?.(name); else say.setAttribute(name, value);
+    }
+  }
+  // the menu forgotten, its reads' answers with it; drawn only by the caller (closeMenu) or the next render
+  function forgetMenu() {
+    menuSeq++;
+    menuTrig = null;
+    menuFiles = null;
+    menu = null;
+  }
+  function closeMenu() {
+    const had = menu;
+    forgetMenu();
+    if (had) drawMenu();
+  }
+  // after every keystroke in the editor and a caret move: the token before the caret opens, filters or closes the menu. `/`
+  // opens on a conversation only (D10); `@` anywhere. The kept rows draw at once, and each read's answer redraws only while
+  // the trigger it was asked for still stands (Review Focus 3)
+  function menuTick() {
+    const s = store.get();
+    const say = doc.getElementById('say');
+    const caret = say ? editor.caret(say) : null;
+    const t = caret == null ? null : triggerAt(currentRuns(), caret);
+    const { conv, root, cwdRel } = menuContext(s);
+    const trig = t && (t.kind === '@' || conv) ? { ...t, key: draftKey(s) } : null;
+    if (!trig) { dismissed = null; closeMenu(); return; }
+    if (sameTrig(trig, dismissed)) return;   // Esc closed this very token
+    dismissed = null;
+    if (sameTrig(trig, menuTrig)) return;
+    const seq = ++menuSeq;
+    if (menuFiles?.query !== trig.query || menuTrig?.key !== trig.key) menuFiles = null;
+    menuTrig = trig;
+    buildMenu(false);
+    drawMenu();
+    const still = () => seq === menuSeq && menuTrig?.query === trig.query;
+    const redraw = () => { if (still()) { buildMenu(true); drawMenu(); } };
+    if (trig.kind === '/') {
+      void composerReads.commands(conv).then(redraw);
+      void composerReads.skills(conv.id).then(redraw);
+      return;
+    }
+    if (root != null) {
+      void composerReads.files(trig.query, cwdRel).then(answer => {
+        if (!answer || !still()) return;
+        menuFiles = { query: trig.query, items: answer.items };
+        redraw();
+      });
+    }
+    if (conv?.channel) void composerReads.roster(conv.id).then(redraw);
+  }
+  // a row chosen: a skill or an argument command becomes `/name `, a bot, file or conversation its chip and a space, the
+  // caret after them; `walk` (Tab on a folder) makes the token `@<path>/` and the menu follows it in. A command that takes
+  // no arguments runs at once, which is plan 3 task 8's
+  function chooseItem(item, walk = false) {
+    const say = doc.getElementById('say');
+    const trig = menuTrig;
+    if (!say || !trig || !item) return;
+    if (item.kind === 'command' && !item.takesArgs) return;
+    const to = trig.from + 1 + trig.query.length;
+    let insert, caret;
+    if (walk) { insert = `@${String(item.path).replace(/\/+$/, '')}/`; caret = trig.from + insert.length; }
+    else if (item.kind === 'command' || item.kind === 'skill') { insert = `/${item.name} `; caret = trig.from + insert.length; }
+    else { insert = [{ type: 'chip', chip: chipOf(item) }, { type: 'text', text: ' ' }]; caret = trig.from + 2; }
+    const runs = replaceRange(currentRuns(), trig.from, to, insert);
+    setRuns(runs);
+    editor.write(say, runs, caret);
+    closeMenu();
+    if (walk) menuTick();
   }
 
   const act = {
@@ -1019,6 +1145,8 @@ export function boot(win, host = {}) {
     },
     lunhuiOpenRun: el => go({ screen: 'channel', id: el.dataset.id }),
     lunhuiStockClose: () => store.dispatch('lunhuiStockClose'),
+    // a pointer on a menu row chooses it (the press kept the editor's focus)
+    menuPick: el => { if (menu) chooseItem(flatItems(menu)[Number(el.dataset.index)]); },
     lunhuiAsk: () => { const text = askText(store.get()); if (text) void sendText(text); },
     lunhuiMarkets: () => { const code = stockCode(store.get().lunhui?.stock?.code); if (code) go({ screen: 'markets', id: marketKey(code) }); },
     // a composed answer's picks, by the answer's id: a verdict tile (pressed again, it closes), Counts or By change, a bucket
@@ -1223,7 +1351,7 @@ export function boot(win, host = {}) {
   const typesWords = el => el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type !== 'checkbox' && el.type !== 'radio');
   // typing: the composer keeps its words outside the store; the title, the searches and the fields go through it
   function typed(el) {
-    if (sayOf(el)) setRuns(editor.read(sayOf(el)));
+    if (sayOf(el)) { setRuns(editor.read(sayOf(el))); menuTick(); }
     else if (el.dataset?.action === 'draftTitle') store.dispatch('setDraftTitle', el.value);
     else if (el.dataset?.action === 'mkQuery') { store.dispatch('setMarketsQuery', el.value); searchSoon(el.value); }
     else if (el.dataset?.action === 'tradeQuery') tradeSoon(el.value);   // trade.query moves the query (the box keeps the words)
@@ -1256,6 +1384,8 @@ export function boot(win, host = {}) {
   });
   let pressSeq = 0;   // a press's own timeout ends only that press, never a later one
   root.addEventListener('pointerdown', ev => {
+    // a press in the menu never takes focus from the editor, so its caret and the token it stands on stay
+    if (ev.target?.closest?.('.cmenu')) ev.preventDefault?.();
     if (ev.button !== undefined && ev.button !== 0) return;
     pressed = true;
     const mine = ++pressSeq;
@@ -1276,7 +1406,11 @@ export function boot(win, host = {}) {
     const runs = replaceRange(now0, from, to, words);
     setRuns(runs);
     editor.write(say, runs, from + words.length);
+    menuTick();
   });
+  // a caret moved by a key: the token before it may open, follow or close the menu (a no-op while it stands where it was)
+  const CARET_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
+  root.addEventListener('keyup', ev => { if (CARET_KEYS.has(ev.key) && sayOf(ev.target) && !composing) menuTick(); });
   root.addEventListener('compositionstart', () => { composing = true; });
   root.addEventListener('compositionend', ev => {
     composing = false;
@@ -1290,10 +1424,12 @@ export function boot(win, host = {}) {
   // character a Mac reports; off a screen with the list it goes to Messages first
   function focusSearch() {
     const s = store.get();
-    // on a medium window Details folds the list away (app.css): close it first, and the box takes focus once the list is drawn
-    if (s.detailsOpen && win.matchMedia?.('(min-width: 861px) and (max-width: 1399px)')?.matches) {
+    // on a medium window Details or the stock drawer folds the list away (app.css): close each that is open first, and the
+    // box takes focus once the list is drawn
+    if ((s.detailsOpen || s.lunhui?.stock) && win.matchMedia?.('(min-width: 861px) and (max-width: 1399px)')?.matches) {
       searchFocus = true;
-      store.dispatch('toggleDetails');
+      if (s.lunhui?.stock) store.dispatch('lunhuiStockClose');
+      if (store.get().detailsOpen) store.dispatch('toggleDetails');
       return;
     }
     const box = doc.getElementById('cq');
@@ -1310,8 +1446,23 @@ export function boot(win, host = {}) {
       focusSearch();
       return;
     }
+    // while a menu shows rows its keys are its own, before the search box and today's Escape chain (D34): ↑ ↓ move, Enter
+    // and Tab choose (Tab on a folder walks into it), Esc and Shift+Tab close it and keep the draft
+    if (menuShowsRows() && sayOf(ev.target) && !imeOpen && !composing) {
+      const k = ev.key;
+      if (k === 'ArrowDown' || k === 'ArrowUp') { ev.preventDefault(); menu = moveActive(menu, k === 'ArrowDown' ? 1 : -1); drawMenu(); return; }
+      if (k === 'Enter' || (k === 'Tab' && !ev.shiftKey)) {
+        ev.preventDefault();
+        const item = flatItems(menu)[menu.active];
+        chooseItem(item, k === 'Tab' && item?.kind === 'file' && item.dir === true);
+        return;
+      }
+      if (k === 'Escape' || k === 'Tab') { ev.preventDefault(); dismissed = menuTrig; closeMenu(); return; }
+    }
     if (ev.key === 'Escape') {
       if (imeOpen) return;
+      // a trigger standing with no rows drawn yet: Esc runs the chain below, and rows that land later open nothing
+      if (menuTrig && sayOf(ev.target)) { dismissed = menuTrig; forgetMenu(); }
       const s = store.get();
       // the search box while it has focus, before today's chain (spec D34): the first Esc clears the query, the next leaves the box
       const box = doc.activeElement;
@@ -1334,7 +1485,7 @@ export function boot(win, host = {}) {
       return;
     }
     // Enter in the editor sends; Shift+Enter is the browser's new line, an IME's Enter its composition's, and while a
-    // menu shows rows Enter is the menu's (Task 7)
+    // menu shows rows Enter is the menu's (above)
     if (ev.key === 'Enter' && sayOf(ev.target) && !ev.shiftKey && !imeOpen && !composing && !menuShowsRows()) {
       ev.preventDefault();
       void sendNow();

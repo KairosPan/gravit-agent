@@ -3847,3 +3847,292 @@ test('a suggestion joins a draft already written, on a new line, rather than rep
   assert.equal(say.selectionStart, 'mine\nLook at BTC'.length);
   store.timers.clear();
 });
+
+// ---- the composer's menus in the page (plan 3 task 7): open, filter, move, choose, close ----
+// an editor over a fake element that keeps the runs written to it (chips and all); typing sets its words afresh
+const runsEditor = {
+  read: el => el.runs ?? (el.value ? [{ type: 'text', text: el.value }] : []),
+  caret: el => el.selectionStart,
+  selection: el => [el.selectionStart, el.selectionEnd],
+  place: (el, at, end) => el.setSelectionRange(at, end ?? at),
+  write(el, runs, at, end) {
+    el.runs = runs;
+    el.value = runs.map(r => (r.type === 'text' ? r.text : r.chip.label)).join('');
+    if (at != null) el.setSelectionRange(at, end ?? at);
+  },
+};
+const typeMenu = (f, say, words) => { say.runs = null; say.value = words; say.setSelectionRange(words.length, words.length); f.fire('root', 'input', { target: say }); };
+const press = (f, say, key, more = {}) => { let prevented = false; f.fire('doc', 'keydown', { key, target: say, preventDefault() { prevented = true; }, ...more }); return prevented; };
+const CMDS = [{ name: 'compact', description: 'Compact the conversation' }, { name: 'review', description: 'Review a change', input: { hint: 'what to review' } }];
+const SKILLS = [{ name: 'lunhui', description: 'An A-share run', modelInvocable: true }];
+const FILES = [{ path: 'strategies/x.md', kind: 'file' }, { path: 'strategies', kind: 'directory' }];
+// the test host with a root at /r, s1 in the channel alpha (/r/strategies/alpha), and the menus' reads answered
+function menuHost({ rows, files, roster = [] } = {}) {
+  const h = host({ rows: rows ?? [titled('s1', 'Alpha', { updatedAt: 50, agentAvailable: true }), titled('s2', 'Beta', { updatedAt: 9 })] });
+  h.inventory['/data/bots.json'].bots[0].description = 'A value investor';
+  const call = h.call, getJson = h.getJson, postJson = h.postJson;
+  h.call = async (endpoint, args) => {
+    if (endpoint === 'commands/list') { h.calls.push([endpoint, args]); return CMDS; }
+    if (endpoint === 'skills/list') { h.calls.push([endpoint, args]); return { skills: SKILLS }; }
+    return call(endpoint, args);
+  };
+  h.getJson = async path => {
+    if (path === '/data/channels.json') {
+      const body = await getJson(path);
+      return { ...body, channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, dir: '/r', sessionIds: [] }, { workspaceId: 'w1', name: 'alpha', isRoot: false, dir: '/r/strategies/alpha', sessionIds: ['s1'] }] };
+    }
+    if (path.startsWith('/data/files?')) { h.reads.push(path); return files ? files(path) : { ok: true, items: FILES, truncated: false }; }
+    return getJson(path);
+  };
+  h.postJson = async (path, body) => (path === '/data/rooms/state' ? (h.posted.push([path, body]), { roster, members: [], caps: {} }) : postJson(path, body));
+  return h;
+}
+const menuRig = async (opts = {}) => {
+  const f = fakeWindow({ hash: opts.hash ?? '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const slot = f.withId('composer-menu');
+  const h = menuHost(opts);
+  const store = await bootComposer(f, h, runsEditor);
+  say.focus();
+  return { f, say, slot, h, store };
+};
+const activeOf = slot => /class="cmenu-row active"[^>]*id="(cm-\d+)"/.exec(slot.innerHTML)?.[1] ?? null;
+
+test('typing / on a live conversation opens the menu with no page render, and each letter redraws only the menu', async () => {
+  const { f, say, slot, h, store } = await menuRig();
+  const before = f.writes;
+  typeMenu(f, say, '/');
+  await settle();
+  assert.equal(f.writes, before, 'no page render');
+  assert.match(slot.innerHTML, /Compact/);
+  assert.match(slot.innerHTML, /cmenu-group">Commands</);
+  assert.match(slot.innerHTML, /cmenu-group">Skills</);
+  assert.equal(say.attributes['aria-expanded'], 'true');
+  assert.equal(say.attributes['aria-activedescendant'], 'cm-0');
+  assert.ok(h.calls.some(c => c[0] === 'commands/list' && c[1].agentId === 's1'));
+  assert.ok(h.calls.some(c => c[0] === 'skills/list' && c[1].request.sessionId === 's1'));
+  typeMenu(f, say, '/lu');
+  assert.equal(f.writes, before);
+  assert.match(slot.innerHTML, /lunhui/, 'drawn at once from the rows kept');
+  assert.doesNotMatch(slot.innerHTML, /Compact/);
+  store.dispatch('toggleRail');   // a full render draws the menu in the page's own markup
+  assert.match(f.html(), /id="composer-menu"><div class="cmenu"[^]*lunhui/);
+  store.timers.clear();
+});
+
+test('/ on New message opens nothing; @ there lists files and conversations', async () => {
+  const { f, say, slot, h, store } = await menuRig();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
+  await settle();
+  say.focus();
+  typeMenu(f, say, '/');
+  await settle();
+  assert.equal(slot.innerHTML ?? '', '');
+  assert.equal(h.calls.some(c => c[0] === 'commands/list' || c[0] === 'skills/list'), false, 'nothing read');
+  typeMenu(f, say, '@');
+  await settle();
+  assert.match(slot.innerHTML, /cmenu-group">Files and folders</);
+  assert.match(slot.innerHTML, /cmenu-group">Conversations</);
+  assert.doesNotMatch(slot.innerHTML, /Bots in this room/);
+  assert.ok(h.reads.includes('/data/files?q='), 'New message in the root channel reads the root');
+  store.timers.clear();
+});
+
+test('↑ ↓ move and wrap, Enter chooses, Tab chooses, Esc closes and keeps the draft, Shift+Tab closes', async () => {
+  const { f, say, slot, h, store } = await menuRig();
+  typeMenu(f, say, '@');
+  await settle();
+  // x.md, strategies/, Beta
+  assert.equal(activeOf(slot), 'cm-0');
+  assert.equal(press(f, say, 'ArrowDown'), true);
+  assert.equal(activeOf(slot), 'cm-1');
+  press(f, say, 'ArrowUp'); press(f, say, 'ArrowUp');
+  assert.equal(activeOf(slot), 'cm-2', 'wraps');
+  assert.equal(say.attributes['aria-activedescendant'], 'cm-2');
+  assert.equal(press(f, say, 'Enter'), true);
+  await settle();
+  assert.deepEqual(say.runs, [{ type: 'chip', chip: { kind: 'conversation', id: 's2', label: 'Beta' } }, { type: 'text', text: ' ' }]);
+  assert.equal(slot.innerHTML, '');
+  assert.equal(say.attributes['aria-expanded'], 'false');
+  assert.deepEqual(promptsOf(h), [], 'Enter chose, it did not send');
+
+  typeMenu(f, say, '@');
+  await settle();
+  assert.equal(press(f, say, 'Tab'), true);
+  assert.deepEqual(say.runs, [{ type: 'chip', chip: { kind: 'file', path: 'strategies/x.md', dir: false, label: 'x.md' } }, { type: 'text', text: ' ' }]);
+
+  typeMenu(f, say, 'hm @');
+  await settle();
+  assert.equal(press(f, say, 'Escape'), true);
+  assert.equal(slot.innerHTML, '');
+  assert.equal(say.value, 'hm @', 'the draft is kept');
+  typeMenu(f, say, 'hm @');
+  await settle();
+  assert.equal(slot.innerHTML, '', 'the same trigger stays dismissed');
+  typeMenu(f, say, 'hm @s');
+  await settle();
+  assert.notEqual(slot.innerHTML, '', 'a new letter opens it again');
+  assert.equal(press(f, say, 'Tab', { shiftKey: true }), true);
+  assert.equal(slot.innerHTML, '');
+  assert.equal(say.value, 'hm @s');
+  store.timers.clear();
+});
+
+test('Esc with a menu open closes the menu, not Details', async () => {
+  const { f, say, slot, store } = await menuRig();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleDetails' } });
+  assert.equal(store.get().detailsOpen, true);
+  say.focus();
+  typeMenu(f, say, '@');
+  await settle();
+  assert.notEqual(slot.innerHTML, '');
+  press(f, say, 'Escape');
+  assert.equal(slot.innerHTML, '');
+  assert.equal(store.get().detailsOpen, true, 'Details stays open');
+  press(f, say, 'Escape');
+  assert.equal(store.get().detailsOpen, false, 'the next Esc is today\'s chain');
+  store.timers.clear();
+});
+
+test('Enter with a trigger whose menu has no rows sends the draft', async () => {
+  const { f, say, slot, h, store } = await menuRig();
+  typeMenu(f, say, 'look /zzz');
+  await settle();
+  assert.equal(slot.innerHTML ?? '', '');
+  assert.equal(press(f, say, 'Enter'), true);
+  await settle();
+  assert.deepEqual(promptsOf(h), [['s1', 'look /zzz']]);
+  store.timers.clear();
+});
+
+test('choosing a skill or an argument command puts /name and a space in the draft', async () => {
+  const { f, say, slot, store } = await menuRig();
+  typeMenu(f, say, '/');
+  await settle();
+  // Compact, Review, lunhui
+  press(f, say, 'ArrowDown');
+  press(f, say, 'Enter');
+  assert.equal(say.value, '/review ');
+  assert.equal(say.selectionStart, 8);
+  assert.equal(slot.innerHTML, '');
+  typeMenu(f, say, '/lun');
+  await settle();
+  press(f, say, 'Tab');
+  assert.equal(say.value, '/lunhui ');
+  assert.equal(say.selectionStart, 8);
+  store.timers.clear();
+});
+
+test('choosing a file, a folder, a bot or a conversation puts its chip and a space, the caret after them', async () => {
+  const { f, say, slot, h, store } = await menuRig({ roster: [{ id: 'buffett', name: 'Buffett Type' }] });
+  const chips = [
+    { kind: 'bot', id: 'buffett', label: 'Buffett Type' },
+    { kind: 'file', path: 'strategies/x.md', dir: false, label: 'x.md' },
+    { kind: 'file', path: 'strategies', dir: true, label: 'strategies/' },
+    { kind: 'conversation', id: 's2', label: 'Beta' },
+  ];
+  for (const [i, chip] of chips.entries()) {
+    typeMenu(f, say, 'see @');
+    await settle();
+    if (i === 0) {
+      assert.match(slot.innerHTML, /cmenu-group">Bots in this room</);
+      assert.match(slot.innerHTML, /A value investor/, 'the bot\'s line from the bots list');
+      assert.ok(h.posted.some(p => p[0] === '/data/rooms/state' && p[1].sessionId === 's1'));
+      assert.ok(h.reads.includes('/data/files?q=&dir=strategies%2Falpha'), 'files read from the channel\'s folder');
+    }
+    for (let k = 0; k < i; k++) press(f, say, 'ArrowDown');
+    press(f, say, 'Enter');
+    assert.deepEqual(say.runs, [{ type: 'text', text: 'see ' }, { type: 'chip', chip }, { type: 'text', text: ' ' }]);
+    assert.equal(say.selectionStart, 6);
+    assert.equal(slot.innerHTML, '');
+  }
+  store.timers.clear();
+});
+
+test('Tab on a folder walks into it and shows its crumb', async () => {
+  const { f, say, slot, h, store } = await menuRig();
+  typeMenu(f, say, '@');
+  await settle();
+  press(f, say, 'ArrowDown');
+  assert.equal(press(f, say, 'Tab'), true);
+  assert.equal(say.value, '@strategies/');
+  assert.equal(say.selectionStart, 12);
+  await settle();
+  assert.ok(h.reads.includes('/data/files?q=strategies%2F&dir=strategies%2Falpha'));
+  assert.match(slot.innerHTML, /cmenu-crumb">strategies\/</);
+  store.timers.clear();
+});
+
+test('a files answer for an older query, or after Esc, draws nothing', async () => {
+  const waiting = [];
+  const files = path => new Promise(resolve => waiting.push({ path, resolve }));
+  const { f, say, slot, store } = await menuRig({ files, rows: [titled('s1', 'Alpha', { updatedAt: 50, agentAvailable: true }), titled('s2', 'Stocks', { updatedAt: 9 })] });
+  typeMenu(f, say, '@stra');
+  typeMenu(f, say, '@strategies/');
+  await settle();
+  const [older, newer] = waiting;
+  newer.resolve({ ok: true, items: [{ path: 'strategies/new.md', kind: 'file' }], truncated: false });
+  await settle();
+  older.resolve({ ok: true, items: [{ path: 'stale.md', kind: 'file' }], truncated: false });
+  await settle();
+  assert.match(slot.innerHTML, /new\.md/);
+  assert.doesNotMatch(slot.innerHTML, /stale\.md/);
+
+  typeMenu(f, say, '@st');
+  await settle();
+  assert.match(slot.innerHTML, /Stocks/, 'the conversations draw before the files answer');
+  press(f, say, 'Escape');
+  waiting.at(-1).resolve({ ok: true, items: [{ path: 'late.md', kind: 'file' }], truncated: false });
+  await settle();
+  assert.equal(slot.innerHTML, '', 'closed by Esc stays closed');
+
+  // Esc while the trigger stands with no rows yet: the chain runs, and the rows that land later open nothing
+  typeMenu(f, say, '@zz');
+  await settle();
+  assert.equal(slot.innerHTML, '');
+  press(f, say, 'Escape');
+  waiting.at(-1).resolve({ ok: true, items: [{ path: 'zz.md', kind: 'file' }], truncated: false });
+  await settle();
+  assert.equal(slot.innerHTML, '');
+  store.timers.clear();
+});
+
+test('a click on a row chooses it and the editor keeps focus', async () => {
+  const { f, say, slot, store } = await menuRig();
+  typeMenu(f, say, '@');
+  await settle();
+  let prevented = false;
+  f.fire('root', 'pointerdown', { button: 0, target: { closest: sel => (sel === '.cmenu' ? {} : null) }, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true, 'a press in the menu keeps the editor\'s focus and caret');
+  f.click({ tagName: 'DIV', dataset: { action: 'menuPick', index: '1' } });
+  f.fire('doc', 'pointerup');
+  assert.deepEqual(say.runs, [{ type: 'chip', chip: { kind: 'file', path: 'strategies', dir: true, label: 'strategies/' } }, { type: 'text', text: ' ' }]);
+  assert.equal(f.doc.activeElement, say);
+  assert.equal(slot.innerHTML, '');
+  store.timers.clear();
+});
+
+test('⌥⌘K with the stock drawer open on a medium window closes it first, then focuses the box; on a wide one it stays', async () => {
+  for (const medium of [true, false]) {
+    const { f, store, open } = await stockAnswer();
+    f.win.matchMedia = q => ({ matches: medium && q === '(min-width: 861px) and (max-width: 1399px)' });
+    const cq = searchBox(f);
+    open();
+    assert.ok(store.get().lunhui.stock);
+    f.fire('doc', 'keydown', keyK({ ctrlKey: true }));   // off a Mac (the page was booted with no navigator)
+    assert.equal(store.get().lunhui.stock == null, medium, medium ? 'the stock drawer closed so the list shows' : 'the drawer stays beside the list');
+    assert.equal(f.doc.activeElement, cq);
+    store.timers.clear();
+  }
+  // both open at once (a state the reducers never make, the rule closes each)
+  const { f, store, key } = await stockAnswer();
+  f.win.matchMedia = q => ({ matches: q === '(min-width: 861px) and (max-width: 1399px)' });
+  const cq = searchBox(f);
+  const s = store.get();
+  store.reset({ ...s, detailsOpen: true, lunhui: { ...s.lunhui, stock: { key, code: '600001' } } });
+  f.fire('doc', 'keydown', keyK({ ctrlKey: true }));
+  assert.equal(store.get().lunhui.stock, null);
+  assert.equal(store.get().detailsOpen, false);
+  assert.equal(f.doc.activeElement, cq);
+  store.timers.clear();
+});
