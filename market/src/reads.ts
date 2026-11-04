@@ -1,22 +1,17 @@
-/** THE MARKET'S PUBLIC READS: what there is to trade (explore), a fresh price for a few markets (quotes), one market's price history
- * (candles), its order book (book) and its latest trades (trades) — under names without "account", for the face's Markets once plan A2
- * points it here. Each is the PUBLIC HALF of the account's read of the same name (account/src/portfolio/service.ts explore, quotes,
- * candles, marketBook and marketTrades at 9dcb6a2d, account split plan A1 task 6): copied with its checks and words, its connected-venue
- * branch deleted, so it answers as the account answers with no venue connected — account/test/unit/market-parity.test.ts holds the two
- * alike. The account keeps its own copies until plan A2 deletes them.
+/** THE MARKET'S PUBLIC READS, the face's Markets reads: what there is to trade (explore), a fresh price for a few A shares (quotes), one
+ * market's price history (candles), its order book (book) and its latest trades (trades) — under names without "account", proxied by the
+ * face under /data/market (face/src/market-proxy.ts) and read by Gravit through market:mcp. Each answers from the keyless public sources
+ * and China alone: the market keeps no venue connected (a connected venue's own reads are the account's, /api/account/connected/…), no
+ * list of where the user can connect, and no market-down hold (the market never sees itself down).
  *
- * What the account's copy decides from its own state and the market has none of is left out: the venues connected (none here), the list
- * of where the user can connect (its place verdicts, which leave a public source out of Markets), and the market-down hold (the market
- * never sees itself down).
- *
- *   GET  /api/explore   ?tab= &q= &key= &sort= &limit=            Exploration (the account's /api/account/explore)
- *   GET  /api/quotes    ?pairs=<venue>|<symbol>,… (or ?pair= each)  {quotes: [{venue, symbol, market? | refusal?}]}
+ *   GET  /api/explore   ?tab= &q= &key= &sort= &limit=            Exploration
+ *   GET  /api/quotes    ?pairs=<venue>|<symbol>,… (or ?pair= each)  {quotes: [{venue, symbol, market? | refusal?}]}: A shares only
  *   GET  /api/candles   ?venue= &symbol= &interval= &range= &before= &limit=   CandlesView, or an A share's ChinaHistory
  *   GET  /api/book      ?venue= &symbol= &depth=                  BookView
  *   GET  /api/trades    ?venue= &symbol= &limit=                  TradesView
  *
- * Each answers 200 with `{ok: true, …}`, a refusal 409 `{ok: false, refusal}`, a malformed question 400 `{ok: false, error}` — as the
- * account's routes do. Nothing is ordered or signed. */
+ * Each answers 200 with `{ok: true, …}`, a refusal 409 `{ok: false, refusal}`, a malformed question 400 `{ok: false, error}`. Nothing is
+ * ordered or signed. */
 import type express from "express";
 import { isRefusal, type Refusal } from "./core/errors.ts";
 import { no } from "./refuse.ts";
@@ -90,7 +85,7 @@ export interface TradesView {
   venueName: string;
   symbol: string;
   trades: PublicTrade[];
-  /** the source publishes no trades at all, in a sentence ("US stocks publishes no trades the account can read"); `trades` is then empty and
+  /** the source publishes no trades at all, in a sentence ("US stocks publishes no trades the market can read"); `trades` is then empty and
    * asking again would say the same, so the face stops asking until the market changes */
   none?: string | undefined;
   public?: true | undefined;
@@ -98,8 +93,8 @@ export interface TradesView {
 
 /** how long a search waits for China's hits beside the other sources (exploreAcross's per-source budget): late, they are `missing` */
 export const CHINA_SEARCH_WAIT_MS = 4_000;
-/** the account's words where it reads no China, kept as they are so that the two answer alike */
-const CHINA_NOT_READ = "China is not read on this account";
+/** the market's words where it reads no China */
+const CHINA_NOT_READ = "China is not read by this market";
 const EXPLORE_SORTS: readonly ExploreSort[] = ["volume", "movers", "closing"];
 /** how long a chart's first view may take (Nasdaq's whole history of a share is about ten seconds), and one page scrolled left */
 export const HISTORY_WAIT_MS = 20_000;
@@ -172,8 +167,8 @@ function within<T>(ms: number, p: Promise<T | Refusal>, venue: string, name: str
   return Promise.race([said, late]).finally(() => clearTimeout(timer));
 }
 
-/** a venue named that is no public source: the account's words for it */
-const notPublic = (id: string): Refusal => no("E_WALLET_ACCOUNT_UNKNOWN", { venue: id, message: `"${id.slice(0, 40)}" is neither a venue connected live nor a public market source: Markets names both` });
+/** a venue named that is no public source: Markets names each source by its id */
+const notPublic = (id: string): Refusal => no("E_MARKET_UNKNOWN_SOURCE", { venue: id, message: `"${id.slice(0, 40)}" is not a public market source: Markets names each source by its id` });
 
 export function marketReads(core: MarketCore): MarketReads {
   const cache = core.cache;
@@ -247,8 +242,8 @@ export function marketReads(core: MarketCore): MarketReads {
       });
     },
 
-    /** a fresh price for each of a few markets: the A shares from China's source in ONE read. Any other pair's quote is a connected venue's
-     * (the account's liveMarket), and no venue is connected here: it is answered as the account answers it with none connected */
+    /** a fresh price for each of a few A shares, from China's source in ONE read. Any other pair is refused by name: a public market's
+     * price is in explore's rows, and a connected venue's quote is the account's (/api/account/connected/quotes) */
     async quotes(pairs) {
       if (!pairs.length || pairs.length > 12) return no("E_ACCOUNT_BAD_ACTION", { message: "quotes are asked for 1 to 12 markets at once, each venue|symbol" });
       const six = (p: { symbol: string }) => /^\d{6}$/.test(p.symbol);
@@ -265,7 +260,7 @@ export function marketReads(core: MarketCore): MarketReads {
           const m = got.get(p.symbol);
           return m ? { ...p, market: m } : { ...p, refusal: no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: `no A-share quote for ${p.symbol}` }) };
         }
-        return { ...p, refusal: no("E_WALLET_ACCOUNT_UNKNOWN", { venue: p.venue, message: `"${p.venue}" is not a venue connected live` }) };
+        return { ...p, refusal: no("E_VENUE_RAIL_CLOSED", { venue: p.venue, message: `"${p.venue}" is priced in explore: the market quotes A shares only (venue "china")` }) };
       }));
     },
 
@@ -345,7 +340,7 @@ export function marketReads(core: MarketCore): MarketReads {
       const m = listed.find((x) => x.symbol === sym);
       if (!m) return no("E_VENUE_REJECTED", { venue: id, message: `${src.name} lists no market ${sym.slice(0, 60)} just now` });
       const top = topBook(m, src.name, t, topOnly, LISTED_QUOTE_UP_TO_MS);
-      return top ? { venue: id, venueName: src.name, symbol: sym, book: top, public: true } : no("E_VENUE_RAIL_CLOSED", { venue: id, message: `${topOnly === "none" ? `${src.name} publishes no order book` : `The account reads no order book from ${src.name}`}, and it gives no best bid or ask for ${sym.slice(0, 60)} just now` });
+      return top ? { venue: id, venueName: src.name, symbol: sym, book: top, public: true } : no("E_VENUE_RAIL_CLOSED", { venue: id, message: `${topOnly === "none" ? `${src.name} publishes no order book` : `The market reads no order book from ${src.name}`}, and it gives no best bid or ask for ${sym.slice(0, 60)} just now` });
     },
 
     /** ONE MARKET'S LATEST TRADES from its public source, newest first, `limit` of them at most (1 to 100). Kept three seconds
@@ -358,15 +353,14 @@ export function marketReads(core: MarketCore): MarketReads {
       if (!(Number.isInteger(limit) && limit >= 1 && limit <= 100)) return no("E_ACCOUNT_BAD_ACTION", { message: "the latest trades are read 1 to 100 at a time" });
       const src = core.source(id);
       if (!src) return notPublic(id);
-      if (!src.trades) return { venue: id, venueName: src.name, symbol: sym, trades: [], none: `${src.name} publishes no trades the account can read`, public: true };
+      if (!src.trades) return { venue: id, venueName: src.name, symbol: sym, trades: [], none: `${src.name} publishes no trades the market can read`, public: true };
       const got = await publicRead(src, "trades", sym, limit);
       return isRefusal(got) ? got : { venue: id, venueName: src.name, symbol: sym, trades: got as PublicTrade[], public: true };
     },
   };
 }
 
-/** THE ROUTES, with the query parsing and status codes of the account's routes they mirror (account/src/portfolio/server.ts
- * /api/account/explore, /quotes, /candles, /book and /trades) */
+/** THE ROUTES: each read's query parsed and answered with its status code (200, 409 a refusal, 400 a malformed question) */
 export function mountReads(app: express.Express, _core: MarketCore, reads: MarketReads): void {
   const bad = (res: express.Response, error: string) => res.status(400).json({ ok: false, error });
   /** a route's query parameters as strings, each cut to its length; one given twice is a malformed request — neither copy is picked */

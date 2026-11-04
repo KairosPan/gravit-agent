@@ -7,7 +7,7 @@
  * `native` and lands on the ledger row unchanged.
  */
 // Copy of account/src/core/errors.ts at 20ead850 (account split, plan A1): the market's own from here.
-export type Layer = "MOUNT" | "MANDATE" | "CARD" | "GATE" | "SIGNER" | "WALLET" | "VENUE" | "ACCOUNT" | "PAYEE";
+export type Layer = "MOUNT" | "MANDATE" | "CARD" | "GATE" | "SIGNER" | "WALLET" | "VENUE" | "ACCOUNT" | "PAYEE" | "MARKET";
 
 export const CODES = {
   // mount audit — the plugin contract
@@ -76,6 +76,8 @@ export const CODES = {
   E_VENUE_RAIL_CLOSED: { layer: "VENUE", zh: "这条跑道关着" },
   E_VENUE_CURRENCY: { layer: "VENUE", zh: "这个场所不收这种币，要先换" },
   E_VENUE_UNREACHABLE: { layer: "VENUE", zh: "场所没有应答" },
+  // the market — the keyless public sources' service (account split plan A2): a source it does not have
+  E_MARKET_UNKNOWN_SOURCE: { layer: "VENUE", zh: "市场没有这个公开行情源" },
   // the account — the airport itself: who signed, with which key, and whether that key may ask for this
   E_ACCOUNT_BAD_SIGNATURE: { layer: "ACCOUNT", zh: "签名和指令对不上" },
   E_ACCOUNT_UNKNOWN_SIGNER: { layer: "ACCOUNT", zh: "账户不认识这把钥匙" },

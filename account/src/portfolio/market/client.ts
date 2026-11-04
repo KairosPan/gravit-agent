@@ -1,12 +1,12 @@
 /** THE ACCOUNT'S TRANSPORT TO THE MARKET (plan A1 task 4): plain HTTP to the market service (127.0.0.1:4821, PORTFOLIO_MARKET_URL), and
- * nothing else of the market's — the account never reads a public venue, China, AKShare or iFinD itself. Three ways to ask:
+ * nothing else of the market's — the account never reads a public venue, China, AKShare or iFinD itself, and relays none of the market's
+ * routes (plan A2 task 7: the face asks the market itself). Two ways to ask:
  *
  *   get     a protocol answer (the market's protocol.ts: `{ok: true, value, readAt?}` or `{ok: false, refusal}`): the value, stamped as read
  *           when the market says it was (shapes.ts readLike — a paper account prices by that moment, never by when it was handed on), with the
  *           envelope's other fields beside it (`notes`, China's `status`); or the refusal it carried; or, where the market did not answer,
  *           marketDown(). Kept `ttlMs` and shared while on its way; a refusal is kept two seconds at most
  *   post    a protocol write (a hub hold or want, a source's reset): its value, or a refusal
- *   raw     a relay (Lunhui's and AKShare's routes): the market's Response as it came, never parsed, or marketDown()
  *
  * A network error, a timeout, a body that is not JSON or a 5xx is the market not answering: marketDown(), and `staleSince` says since when.
  * Any request it answers clears it. No `Origin` header is sent (the market's fence refuses a foreign one). */
@@ -28,8 +28,6 @@ export interface MarketClient {
   /** a protocol answer: value (restamped with readLike from readAt), the refusal it carried, or marketDown() — kept ttlMs, shared in flight */
   get<T>(path: string, ttlMs: number): Promise<{ value: T; extra: Record<string, unknown> } | Refusal>;
   post<T>(path: string, body: unknown): Promise<T | Refusal>;
-  /** a relay: the market's Response as it came, or marketDown() — never parsed */
-  raw(path: string, init: { method: "GET" | "POST"; headers?: Record<string, string>; body?: string | Uint8Array; signal?: AbortSignal; timeoutMs: number }): Promise<Response | Refusal>;
   /** the first failure since the last answer, ms; undefined while it answers */
   staleSince(): number | undefined;
   /** when the market last answered anything, ms; undefined before it has */
@@ -125,12 +123,6 @@ export function marketClient(o: { url: string; fetch?: typeof fetch; clock?: () 
     async post<T>(path: string, body: unknown): Promise<T | Refusal> {
       const r = await read<T>(await send(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}), timeoutMs }));
       return isRefusal(r) ? r : r.value;
-    },
-    async raw(path, init) {
-      const r = await send(path, { method: init.method, ...(init.headers ? { headers: init.headers } : {}), ...(init.body !== undefined ? { body: init.body as BodyInit } : {}), ...(init.signal ? { signal: init.signal } : {}), timeoutMs: init.timeoutMs });
-      if (r === "down") return marketDown();
-      answered();
-      return r;
     },
     staleSince: () => stale,
     answeredAt: () => lastAnswer,

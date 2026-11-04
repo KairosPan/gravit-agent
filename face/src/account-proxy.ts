@@ -5,13 +5,13 @@
  * origin — so the face's page never asks it: the page asks the face, and the
  * face asks the Account with a plain loopback fetch (no Origin, no
  * Sec-Fetch-Site, no cookie, the URL's own Host, `redirect: "error"`).
- * Forty-three routes: twenty-eight reads ({@link ReadRoute} — the Account,
- * its markets, holdings and venues, for the Market half and the wallet
- * half `asset`, `book`, `trades`, `funding`, `receive`, `earn`, `sellable`
- * and `signin/status`, and, since plan A2, a connected venue's own
- * `connected/{explore,quotes,candles,book,trades}`; the five public reads
- * `explore`, `quotes`, `candles`, `book` and `trades` stay until plan A2's
- * Task 7, the market's own being src/market-proxy.ts), the Account's push channel — `stream`, and
+ * Thirty-eight routes: twenty-three reads ({@link ReadRoute} — the Account,
+ * a connected venue's market and comparison, holdings and venues, the wallet
+ * half's `asset`, `funding`, `receive`, `earn`, `sellable` and
+ * `signin/status`, and, since plan A2, a connected venue's own
+ * `connected/{explore,quotes,candles,book,trades}`; the public reads
+ * `explore`, `quotes`, `candles`, `book` and `trades` are the market's,
+ * src/market-proxy.ts, since plan A2's Task 7), the Account's push channel — `stream`, and
  * `stream/markets`, the markets it follows — and twelve writes
  * ({@link WriteRoute}: `pair`, `prepare`, `exchange`, `wallet/challenge`,
  * `wallet/prove`, `signin/start`, `bridge-routes`, `live/order-sent`,
@@ -108,27 +108,27 @@ import {
  * `GET /api/account/connected/<x>` (a connected venue's own data, plan A2), the rest `GET /api/account/<route>`;
  * the face's path is the same under `/data/account`. */
 export type ReadRoute =
-  | "account" | "explore" | "market" | "quotes" | "compare" | "candles" | "holdings" | "positions" | "statement" | "history" | "agents"
+  | "account" | "market" | "compare" | "holdings" | "positions" | "statement" | "history" | "agents"
   | "venues" | "reach" | "keyfile" | "books"
-  | "asset" | "book" | "trades" | "funding" | "receive" | "earn" | "sellable" | "signinStatus"
+  | "asset" | "funding" | "receive" | "earn" | "sellable" | "signinStatus"
   | "connectedExplore" | "connectedQuotes" | "connectedCandles" | "connectedBook" | "connectedTrades";
 
 /** How long one answer is served without asking again, per route: the retired page's cadence (spec §5.1). */
 export const ACCOUNT_TTL_MS: Readonly<Record<ReadRoute, number>> = {
-  account: 15_000, explore: 20_000, market: 3_000, quotes: 3_000, compare: 15_000, candles: 30_000,
+  account: 15_000, market: 3_000, compare: 15_000,
   holdings: 8_000, positions: 10_000, statement: 10_000, history: 60_000, agents: 15_000,
   venues: 60_000, reach: 5_000, keyfile: 5_000, books: 5_000,
-  asset: 5_000, book: 2_000, trades: 2_000, funding: 60_000, receive: 60_000, earn: 15_000, sellable: 5_000, signinStatus: 1_000,
+  asset: 5_000, funding: 60_000, receive: 60_000, earn: 15_000, sellable: 5_000, signinStatus: 1_000,
   connectedExplore: 20_000, connectedQuotes: 3_000, connectedCandles: 30_000, connectedBook: 2_000, connectedTrades: 2_000,
 };
 
 /** How long the Account may take, headers and body, per route: the reads that settle venue polls take
  * seconds, a first candles view waits for a source, and a cold venues or reach read probes every venue. */
 export const ACCOUNT_ABORT_MS: Readonly<Record<ReadRoute, number>> = {
-  account: 7_000, explore: 10_000, market: 7_000, quotes: 7_000, compare: 7_000, candles: 25_000,
+  account: 7_000, market: 7_000, compare: 7_000,
   holdings: 12_000, positions: 7_000, statement: 7_000, history: 12_000, agents: 7_000,
   venues: 30_000, reach: 30_000, keyfile: 30_000, books: 30_000,
-  asset: 25_000, book: 7_000, trades: 7_000, funding: 12_000, receive: 30_000, earn: 30_000, sellable: 30_000, signinStatus: 7_000,
+  asset: 25_000, funding: 12_000, receive: 30_000, earn: 30_000, sellable: 30_000, signinStatus: 7_000,
   connectedExplore: 10_000, connectedQuotes: 7_000, connectedCandles: 25_000, connectedBook: 7_000, connectedTrades: 7_000,
 };
 
@@ -195,15 +195,12 @@ export const CALLBACK_UNREACHABLE = "The Account did not answer. Go back to Grav
 /** Most queries kept per route; the least recently used leaves first. */
 export const ACCOUNT_CACHE_KEYS = UPSTREAM_CACHE_KEYS;
 
-/** The whitelist: route → allowed query names (`explore`'s `sort` is China's ranking's, `volume` or `movers`, beside its
- * `tab=china`); a value is at most 240 characters (`quotes`' `pairs` 2 000), each name at most once. */
+/** The whitelist: route → allowed query names; a value is at most 240 characters (`connectedQuotes`' `pairs` 2 000),
+ * each name at most once. */
 export const ACCOUNT_QUERY: Readonly<Record<ReadRoute, readonly string[]>> = {
   account: ["fresh"],
-  explore: ["tab", "q", "key", "sort", "limit"],
   market: ["venue", "symbol"],
-  quotes: ["pairs"],
   compare: ["base", "side", "usd", "asset"],
-  candles: ["venue", "symbol", "interval", "range", "before", "limit"],
   holdings: ["cost", "paper", "fresh"],
   positions: ["venue"],
   statement: ["fresh"],
@@ -214,8 +211,6 @@ export const ACCOUNT_QUERY: Readonly<Record<ReadRoute, readonly string[]>> = {
   keyfile: ["kind", "venue", "ref", "exchange"],
   books: [],
   asset: ["key", "interval", "range", "fresh"],
-  book: ["venue", "symbol", "depth"],
-  trades: ["venue", "symbol", "limit"],
   funding: ["venue", "limit"],
   receive: ["venue", "asset", "network"],
   earn: ["venue", "asset", "fresh"],
@@ -252,7 +247,7 @@ const READ_ROUTES = Object.keys(ACCOUNT_QUERY) as ReadRoute[];
  * market's symbol alone (a Polymarket slug) can run past a hundred characters — so its bound is its own, as the
  * stream's `markets` is. */
 const LONG_VALUES: Readonly<Partial<Record<ReadRoute, ReadonlyMap<string, number>>>> = {
-  quotes: new Map([["pairs", 2_000]]), connectedQuotes: new Map([["pairs", 2_000]]),
+  connectedQuotes: new Map([["pairs", 2_000]]),
 };
 const INVALID = '{"ok":false,"error":"invalid account request"}';
 
@@ -362,16 +357,15 @@ const originHeader = (req: IncomingMessage): Record<string, string> => {
  * No stale answer is re-served here: a failure is the failure. */
 export type AccountRouteRead = UpstreamRouteRead;
 
-/** Mount the twenty-eight read routes, the two stream routes, the twelve write routes and the OAuth sign-in's
- * callback (`signin/callback`, behind `isTrustedNavigation`) — forty-three in all — on the host webserver, over the
+/** Mount the twenty-three read routes, the two stream routes, the twelve write routes and the OAuth sign-in's
+ * callback (`signin/callback`, behind `isTrustedNavigation`) — thirty-eight in all — on the host webserver, over the
  * proxy core (src/upstream-proxy.ts). The reader returned is the `account` route's own: it and `/data/account` read
- * through one cache, so the seat route `main.ts` hands it to shares that route's upstream read. `explore` and
- * `quotes` are those two routes' {@link AccountRouteRead}s. `dispose` forgets every kept answer and aborts every
- * open stream's upstream. */
+ * through one cache, so the seat route `main.ts` hands it to shares that route's upstream read. `dispose` forgets
+ * every kept answer and aborts every open stream's upstream. */
 export function registerAccountProxy(
   webServer: RouteRegistrar,
   deps: AccountProxyDeps = {},
-): { reader: AccountReader; explore: AccountRouteRead; quotes: AccountRouteRead; dispose(): void } {
+): { reader: AccountReader; dispose(): void } {
   const s = settingsOf(deps);
   const reads = READ_ROUTES.map((route) => readOf(route, s.abortMs));
   const accountRead = reads[READ_ROUTES.indexOf("account")]!;
@@ -389,12 +383,8 @@ export function registerAccountProxy(
     webServer.register({ kind: "exact", path: `/data/account/${face}`, handler: postHandler(s, account, WRITE_BODY_LIMIT[route], WRITE_ABORT_MS[route], options) });
   }
   webServer.register({ kind: "exact", path: "/data/account/signin/callback", handler: callbackHandler(s) });
-  const explore = mounted.read.get(readOf("explore", s.abortMs).face)!;
-  const quotes = mounted.read.get(readOf("quotes", s.abortMs).face)!;
   return {
     reader: readerOf(accountReads),
-    explore,
-    quotes,
     dispose: () => {
       mounted.clear();
       stream.abortAll();

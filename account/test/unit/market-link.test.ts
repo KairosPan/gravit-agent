@@ -105,23 +105,20 @@ describe("the account's link to the market", () => {
   });
 
   it("sources fill in once the market answers", async () => {
+    // what the account reads of them (a paper account's prices, a coin's day) is wrapped again when the list changes (service.ts
+    // publicMarkets); the public Markets list itself is the market's own explore
     const port = await freePort();
     const link = connectMarket({ url: `http://127.0.0.1:${port}` });
     links.push(link);
     link.start();
     expect(link.sources()).toEqual([]);
-    const home = mkdtempSync(join(tmpdir(), "market-link-"));
-    homes.push(home);
-    const svc = await PortfolioService.create({ home, venues: "frontline", real: true, publicMarkets: () => link.sources(), streams: link.hub, china: link.china, liveDeps: { http: async () => ({ status: 599, body: undefined, text: "" }), price: link.price } });
-    const before = await svc.explore({ q: "BTC" });
-    expect(isRefusal(before) ? [] : before.items.filter((i) => i.at.some((a) => a.venue === "fake"))).toEqual([]);
     expect(await link.ready(200)).toBe(false);
     markets.push(await startMarket(createMarketCore({ sources: [fakeSource()], hub: fakeHub().hub, price }), port));
     await until(() => link.sources().some((s) => s.id === "fake"), 6_000);
     expect(await link.ready(100)).toBe(true);
-    const after = await svc.explore({ q: "BTC" });
-    if (isRefusal(after)) throw new Error(after.message);
-    expect(after.items.some((i) => i.at.some((a) => a.venue === "fake" && a.symbol === "BTC/USD"))).toBe(true);
+    const listed = await link.sources().find((s) => s.id === "fake")!.listings({ q: "BTC", limit: 20 });
+    if (isRefusal(listed)) throw new Error(listed.message);
+    expect(listed.some((m) => m.symbol === "BTC/USD")).toBe(true);
   }, 20_000);
 
   it("reads China and its status", async () => {

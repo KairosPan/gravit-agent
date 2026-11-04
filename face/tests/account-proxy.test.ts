@@ -42,14 +42,11 @@ const DISABLED = '{"ok":false,"unreachable":"disabled"}';
 const OK_BODY = '{"ok":true}';
 const JSON_TYPE = "application/json; charset=utf-8";
 
-/** The fifteen read paths, in the order they are registered, and the Account path each one asks. */
+/** The twelve read paths, in the order they are registered, and the Account path each one asks. */
 const ROUTES: ReadonlyArray<readonly [face: string, account: string]> = [
   ["/data/account", "/api/account"],
-  ["/data/account/explore", "/api/account/explore"],
   ["/data/account/market", "/api/account/market"],
-  ["/data/account/quotes", "/api/account/quotes"],
   ["/data/account/compare", "/api/account/compare"],
-  ["/data/account/candles", "/api/account/candles"],
   ["/data/account/holdings", "/api/account/holdings"],
   ["/data/account/positions", "/api/account/positions"],
   ["/data/account/statement", "/api/account/statement"],
@@ -60,26 +57,24 @@ const ROUTES: ReadonlyArray<readonly [face: string, account: string]> = [
   ["/data/account/keyfile", "/api/account/keyfile"],
   ["/data/account/paper/books", "/api/account/paper/books"],
 ];
-/** The Market half's and the wallet half's eight reads, in the order they are registered after the fifteen: the
- * Account path, the route's row, and a query of its names. */
-const NEW_READS: ReadonlyArray<readonly [face: string, account: string, route: "asset" | "book" | "trades" | "funding" | "receive" | "earn" | "sellable" | "signinStatus", query: string]> = [
+/** The wallet half's six reads, in the order they are registered after the twelve: the Account path, the route's
+ * row, and a query of its names. */
+const NEW_READS: ReadonlyArray<readonly [face: string, account: string, route: "asset" | "funding" | "receive" | "earn" | "sellable" | "signinStatus", query: string]> = [
   ["/data/account/asset", "/api/account/asset", "asset", "key=crypto%3ABTC&interval=1h&range=1d"],
-  ["/data/account/book", "/api/account/book", "book", "venue=paper&symbol=BTC%2FUSDT&depth=20"],
-  ["/data/account/trades", "/api/account/trades", "trades", "venue=paper&symbol=BTC%2FUSDT&limit=50"],
   ["/data/account/funding", "/api/account/funding", "funding", "venue=paper&limit=10"],
   ["/data/account/receive", "/api/account/receive", "receive", "venue=paper&asset=USDC&network=base"],
   ["/data/account/earn", "/api/account/earn", "earn", "venue=paper&asset=USDC"],
   ["/data/account/sellable", "/api/account/sellable", "sellable", ""],
   ["/data/account/signin/status", "/api/account/signin/status", "signinStatus", "state=s1"],
 ];
-/** The five connected reads (plan A2), in the order they are registered after the eight: the Account path, the route
- * each mirrors, and a query of its names. */
-const CONNECTED: ReadonlyArray<readonly [face: string, account: string, mirrors: "explore" | "quotes" | "candles" | "book" | "trades", query: string]> = [
-  ["/data/account/connected/explore", "/api/account/connected/explore", "explore", "tab=crypto&q=BTC&key=crypto%3ABTC&sort=volume&limit=20"],
-  ["/data/account/connected/quotes", "/api/account/connected/quotes", "quotes", "pairs=paper-1%7CBTC%2FUSDT"],
-  ["/data/account/connected/candles", "/api/account/connected/candles", "candles", "venue=paper-1&symbol=BTC%2FUSDT&interval=1h&range=1d&before=1&limit=100"],
-  ["/data/account/connected/book", "/api/account/connected/book", "book", "venue=paper-1&symbol=BTC%2FUSDT&depth=20"],
-  ["/data/account/connected/trades", "/api/account/connected/trades", "trades", "venue=paper-1&symbol=BTC%2FUSDT&limit=50"],
+/** The five connected reads (plan A2), in the order they are registered after the six: the Account path, the route,
+ * and a query of its names. */
+const CONNECTED: ReadonlyArray<readonly [face: string, account: string, route: "connectedExplore" | "connectedQuotes" | "connectedCandles" | "connectedBook" | "connectedTrades", query: string]> = [
+  ["/data/account/connected/explore", "/api/account/connected/explore", "connectedExplore", "tab=crypto&q=BTC&key=crypto%3ABTC&sort=volume&limit=20"],
+  ["/data/account/connected/quotes", "/api/account/connected/quotes", "connectedQuotes", "pairs=paper-1%7CBTC%2FUSDT"],
+  ["/data/account/connected/candles", "/api/account/connected/candles", "connectedCandles", "venue=paper-1&symbol=BTC%2FUSDT&interval=1h&range=1d&before=1&limit=100"],
+  ["/data/account/connected/book", "/api/account/connected/book", "connectedBook", "venue=paper-1&symbol=BTC%2FUSDT&depth=20"],
+  ["/data/account/connected/trades", "/api/account/connected/trades", "connectedTrades", "venue=paper-1&symbol=BTC%2FUSDT&limit=50"],
 ];
 const STREAM = "/data/account/stream";
 const CALLBACK = "/data/account/signin/callback";
@@ -196,22 +191,21 @@ async function call(routes: WebRoute[], url: string, headers?: Record<string, st
 }
 
 test("rebuildQuery: the whitelist, once each, 240 characters, fresh stripped", () => {
-  assert.deepEqual(rebuildQuery("explore", "/data/account/explore?tab=crypto&q=btc&limit=60"), { query: "tab=crypto&q=btc&limit=60", fresh: false });
-  assert.deepEqual(rebuildQuery("explore", "/data/account/explore?tab=china&sort=movers&limit=20"), { query: "tab=china&sort=movers&limit=20", fresh: false }, "China's ranking by its sort");
+  assert.deepEqual(rebuildQuery("connectedExplore", "/data/account/connected/explore?tab=crypto&q=btc&limit=60"), { query: "tab=crypto&q=btc&limit=60", fresh: false });
   assert.deepEqual(rebuildQuery("holdings", "/data/account/holdings?cost=1&fresh=1"), { query: "cost=1", fresh: true });
-  assert.equal(rebuildQuery("explore", "/data/account/explore?tab=a&tab=b"), null, "a repeated name");
-  assert.equal(rebuildQuery("explore", "/data/account/explore?force=1"), null, "an unknown name");
-  assert.equal(rebuildQuery("explore", `/data/account/explore?q=${"x".repeat(241)}`), null, "an over-long value");
+  assert.equal(rebuildQuery("connectedExplore", "/data/account/connected/explore?tab=a&tab=b"), null, "a repeated name");
+  assert.equal(rebuildQuery("connectedExplore", "/data/account/connected/explore?force=1"), null, "an unknown name");
+  assert.equal(rebuildQuery("connectedExplore", `/data/account/connected/explore?q=${"x".repeat(241)}`), null, "an over-long value");
   assert.deepEqual(rebuildQuery("account", "/data/account"), { query: "", fresh: false });
 });
 
-test("the routes: forty-three exact paths, the callback last; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
+test("the routes: thirty-eight exact paths, the callback last; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
   const { routes, fetched } = proxyWith(answering(OK_BODY));
   const paths = [
     ...ROUTES.map(([face]) => face), ...NEW_READS.map(([face]) => face), ...CONNECTED.map(([face]) => face), STREAM, FOLLOW,
     ...WRITES.map(([face]) => face), ...NEW_WRITES.map(([face]) => face), CALLBACK,
   ];
-  assert.equal(paths.length, 43, "forty-three until Task 7 drops the five public reads");
+  assert.equal(paths.length, 38, "thirty-eight: the five public reads are the market's (src/market-proxy.ts)");
   assert.ok(routes.every((r) => r.kind === "exact"), "no prefix route");
   assert.deepEqual(routes.map((r) => `${r.kind} ${r.path}`), paths.map((face) => `exact ${face}`));
   for (const face of paths) {
@@ -229,7 +223,11 @@ test("the routes: forty-three exact paths, the callback last; the fence refuses 
       assert.equal(nav.status, 403, `${method} ${face} refuses a navigation`); assert.equal(nav.body, FORBIDDEN);
     }
   }
-  const refusedFirst = await call(routes, "/data/account/explore?force=1", { host: "127.0.0.1:3090", origin: "https://evil.example" });
+  /* the public reads are the market's: nothing under /data/account answers them, the host's 404 does */
+  for (const gone of ["explore", "quotes", "candles", "book", "trades"]) {
+    assert.ok(!routes.some((r) => r.path === `/data/account/${gone}`), `/data/account/${gone} is not registered`);
+  }
+  const refusedFirst = await call(routes, "/data/account/connected/explore?force=1", { host: "127.0.0.1:3090", origin: "https://evil.example" });
   assert.equal(refusedFirst.status, 403, "the fence comes before the query");
   assert.equal(fetched.length, 0, "a refused request never reaches the Account");
 });
@@ -250,31 +248,31 @@ test("a GET passes the Account's status and body through, with application/json 
   let clock = NOW;
   let answer = ok('{"ok":true,"items":[]}');
   const flaky = proxyWith(async () => answer, () => clock);
-  await call(flaky.routes, "/data/account/explore?tab=crypto");
-  clock += ACCOUNT_TTL_MS.explore + 1;
+  await call(flaky.routes, "/data/account/connected/explore?tab=crypto");
+  clock += ACCOUNT_TTL_MS.connectedExplore + 1;
   answer = ok(refusal, 409);
-  const b = await call(flaky.routes, "/data/account/explore?tab=crypto");
+  const b = await call(flaky.routes, "/data/account/connected/explore?tab=crypto");
   assert.equal(b.status, 409); assert.equal(b.body, refusal, "the Account's words, not the kept rows");
   assert.equal(b.headers["content-type"], JSON_TYPE); assert.equal(b.headers["cache-control"], "no-store");
-  await call(flaky.routes, "/data/account/explore?tab=crypto");
+  await call(flaky.routes, "/data/account/connected/explore?tab=crypto");
   assert.equal(flaky.fetched.length, 3, "a refusal is never kept: the next read asks again");
 });
 
 test("a repeated or unknown name, an over-long value: 400 invalid account request, nothing forwarded", async () => {
   const { routes, fetched } = proxyWith(answering(OK_BODY));
   const wide = "%E4%B8%80".repeat(240);
-  assert.notEqual(rebuildQuery("explore", `/data/account/explore?q=${wide}`), null, "240 characters, nine bytes each on the wire, is one fair value");
+  assert.notEqual(rebuildQuery("connectedExplore", `/data/account/connected/explore?q=${wide}`), null, "240 characters, nine bytes each on the wire, is one fair value");
   const refused = [
-    "/data/account/explore?tab=a&tab=b",
-    "/data/account/explore?force=1",
-    `/data/account/explore?q=${"x".repeat(241)}`,
-    "/data/account/explore?fresh=1",
+    "/data/account/connected/explore?tab=a&tab=b",
+    "/data/account/connected/explore?force=1",
+    `/data/account/connected/explore?q=${"x".repeat(241)}`,
+    "/data/account/connected/explore?fresh=1",
     "/data/account?fresh=1&fresh=1",
     "/data/account?venue=paper-1",
-    "/data/account/quotes?pairs=okx|BTC/USDT&pair=broker|NVDA",
+    "/data/account/connected/quotes?pairs=okx|BTC/USDT&pair=broker|NVDA",
     "/data/account/holdings?cost=1&paper=1&cost=1",
     "/data/account/positions?venue[x]=okx",
-    `/data/account/explore?tab=${wide}&q=${wide}&key=${wide}&limit=${wide}`,
+    `/data/account/connected/explore?tab=${wide}&q=${wide}&key=${wide}&limit=${wide}`,
   ];
   for (const url of refused) {
     const a = await call(routes, url);
@@ -284,11 +282,8 @@ test("a repeated or unknown name, an over-long value: 400 invalid account reques
   assert.equal(fetched.length, 0, "a refused query never reaches the Account");
   assert.deepEqual(ACCOUNT_QUERY, {
     account: ["fresh"],
-    explore: ["tab", "q", "key", "sort", "limit"],
     market: ["venue", "symbol"],
-    quotes: ["pairs"],
     compare: ["base", "side", "usd", "asset"],
-    candles: ["venue", "symbol", "interval", "range", "before", "limit"],
     holdings: ["cost", "paper", "fresh"],
     positions: ["venue"],
     statement: ["fresh"],
@@ -299,8 +294,6 @@ test("a repeated or unknown name, an over-long value: 400 invalid account reques
     keyfile: ["kind", "venue", "ref", "exchange"],
     books: [],
     asset: ["key", "interval", "range", "fresh"],
-    book: ["venue", "symbol", "depth"],
-    trades: ["venue", "symbol", "limit"],
     funding: ["venue", "limit"],
     receive: ["venue", "asset", "network"],
     earn: ["venue", "asset", "fresh"],
@@ -312,8 +305,8 @@ test("a repeated or unknown name, an over-long value: 400 invalid account reques
     connectedBook: ["venue", "symbol", "depth"],
     connectedTrades: ["venue", "symbol", "limit"],
   });
-  assert.equal((await call(routes, `/data/account/explore?q=${"x".repeat(240)}`)).status, 200, "240 characters pass");
-  assert.deepEqual(fetched, [`${URL_}/api/account/explore?q=${"x".repeat(240)}`]);
+  assert.equal((await call(routes, `/data/account/connected/explore?q=${"x".repeat(240)}`)).status, 200, "240 characters pass");
+  assert.deepEqual(fetched, [`${URL_}/api/account/connected/explore?q=${"x".repeat(240)}`]);
 });
 
 /** Twelve markets as the Markets screen asks them, `venue|symbol` each: perpetuals, Kalshi contracts, Polymarket slugs. */
@@ -331,16 +324,16 @@ test("quotes: twelve markets in one pairs value pass through whole; pairs has it
   assert.equal(TWELVE_PAIRS.length, 12);
   assert.ok(value.length > 800 && value.length < 1_000, `about 900 characters, past the 240 of any other name: ${value.length}`);
   const { routes, fetched } = proxyWith(answering(OK_BODY));
-  const twelve = await call(routes, `/data/account/quotes?pairs=${encodeURIComponent(value)}`);
+  const twelve = await call(routes, `/data/account/connected/quotes?pairs=${encodeURIComponent(value)}`);
   assert.equal(twelve.status, 200);
-  assert.deepEqual(fetched, [`${URL_}/api/account/quotes?${new URLSearchParams({ pairs: value })}`], "the whole value, re-encoded");
-  assert.equal((await call(routes, `/data/account/quotes?pairs=${"x".repeat(2_000)}`)).status, 200, "2 000 characters pass");
-  const over = await call(routes, `/data/account/quotes?pairs=${"x".repeat(2_001)}`);
+  assert.deepEqual(fetched, [`${URL_}/api/account/connected/quotes?${new URLSearchParams({ pairs: value })}`], "the whole value, re-encoded");
+  assert.equal((await call(routes, `/data/account/connected/quotes?pairs=${"x".repeat(2_000)}`)).status, 200, "2 000 characters pass");
+  const over = await call(routes, `/data/account/connected/quotes?pairs=${"x".repeat(2_001)}`);
   assert.equal(over.status, 400); assert.equal(over.body, INVALID);
   assert.equal(rebuildQuery("market", `/data/account/market?symbol=${"x".repeat(241)}`), null, "another name keeps 240");
-  assert.equal(rebuildQuery("candles", `/data/account/candles?symbol=${"x".repeat(241)}`), null);
+  assert.equal(rebuildQuery("connectedCandles", `/data/account/connected/candles?symbol=${"x".repeat(241)}`), null);
   // 1 000 characters decoded, nine bytes each on the wire: a request target past 8 192 is refused whatever it decodes to
-  assert.equal(rebuildQuery("quotes", `/data/account/quotes?pairs=${"%E4%B8%80".repeat(1_000)}`), null);
+  assert.equal(rebuildQuery("connectedQuotes", `/data/account/connected/quotes?pairs=${"%E4%B8%80".repeat(1_000)}`), null);
   assert.equal(fetched.length, 2, "a refused value never reaches the Account");
 });
 
@@ -360,10 +353,10 @@ test("the upstream request carries no Origin, no Sec-Fetch-Site, no cookie, redi
   assert.equal(inits[0].redirect, "error");
   assert.equal(inits[0].method, undefined, "a plain GET");
   assert.ok(inits[0].signal instanceof AbortSignal);
-  await call(routes, "/data/account/explore?q=btc%26force%3D1&tab=crypto");
-  assert.equal(fetched[1], `${URL_}/api/account/explore?q=btc%26force%3D1&tab=crypto`, "an & inside a value stays inside it; the order is the browser's");
-  await call(routes, "/data/account/quotes?pairs=okx|BTC/USDT,broker|NVDA");
-  assert.equal(fetched[2], `${URL_}/api/account/quotes?pairs=okx%7CBTC%2FUSDT%2Cbroker%7CNVDA`, "re-encoded, the same value");
+  await call(routes, "/data/account/connected/explore?q=btc%26force%3D1&tab=crypto");
+  assert.equal(fetched[1], `${URL_}/api/account/connected/explore?q=btc%26force%3D1&tab=crypto`, "an & inside a value stays inside it; the order is the browser's");
+  await call(routes, "/data/account/connected/quotes?pairs=okx|BTC/USDT,broker|NVDA");
+  assert.equal(fetched[2], `${URL_}/api/account/connected/quotes?pairs=okx%7CBTC%2FUSDT%2Cbroker%7CNVDA`, "re-encoded, the same value");
   const slash = proxyWith(answering(OK_BODY), () => NOW, { url: `${URL_}/` });
   await call(slash.routes, "/data/account");
   assert.deepEqual(slash.fetched, [`${URL_}/api/account`], "a trailing slash on the URL is not doubled");
@@ -377,10 +370,10 @@ test("the upstream request carries no Origin, no Sec-Fetch-Site, no cookie, redi
 
 test("two reads within the TTL fetch once; ?fresh=1 fetches again and never joins a plain flight; the TTL expires per route", async () => {
   assert.deepEqual(ACCOUNT_TTL_MS, {
-    account: 15_000, explore: 20_000, market: 3_000, quotes: 3_000, compare: 15_000, candles: 30_000,
+    account: 15_000, market: 3_000, compare: 15_000,
     holdings: 8_000, positions: 10_000, statement: 10_000, history: 60_000, agents: 15_000,
     venues: 60_000, reach: 5_000, keyfile: 5_000, books: 5_000,
-    asset: 5_000, book: 2_000, trades: 2_000, funding: 60_000, receive: 60_000, earn: 15_000, sellable: 5_000, signinStatus: 1_000,
+    asset: 5_000, funding: 60_000, receive: 60_000, earn: 15_000, sellable: 5_000, signinStatus: 1_000,
     connectedExplore: 20_000, connectedQuotes: 3_000, connectedCandles: 30_000, connectedBook: 2_000, connectedTrades: 2_000,
   });
   let clock = NOW;
@@ -434,11 +427,11 @@ test("two reads within the TTL fetch once; ?fresh=1 fetches again and never join
 test("concurrent reads of one key share a fetch; two keys are two fetches; the 65th key evicts the least recently used", async () => {
   const gates: Array<(a: FakeAnswer) => void> = [];
   const gated = proxyWith(() => new Promise<FakeAnswer>((r) => { gates.push(r); }));
-  const a = start(gated.routes, "/data/account/explore?tab=crypto");
-  const b = start(gated.routes, "/data/account/explore?tab=crypto");
-  const c = start(gated.routes, "/data/account/explore?tab=stocks");
+  const a = start(gated.routes, "/data/account/connected/explore?tab=crypto");
+  const b = start(gated.routes, "/data/account/connected/explore?tab=crypto");
+  const c = start(gated.routes, "/data/account/connected/explore?tab=stocks");
   await tick();
-  assert.deepEqual(gated.fetched, [`${URL_}/api/account/explore?tab=crypto`, `${URL_}/api/account/explore?tab=stocks`]);
+  assert.deepEqual(gated.fetched, [`${URL_}/api/account/connected/explore?tab=crypto`, `${URL_}/api/account/connected/explore?tab=stocks`]);
   gates[0](ok('{"ok":true,"tab":"crypto"}'));
   gates[1](ok('{"ok":true,"tab":"stocks"}'));
   await Promise.all([a.done, b.done, c.done]);
@@ -447,27 +440,27 @@ test("concurrent reads of one key share a fetch; two keys are two fetches; the 6
 
   assert.equal(ACCOUNT_CACHE_KEYS, 64);
   const { routes, fetched } = proxyWith(answering(OK_BODY));
-  for (let i = 1; i <= ACCOUNT_CACHE_KEYS; i += 1) await call(routes, `/data/account/explore?q=k${i}`);
+  for (let i = 1; i <= ACCOUNT_CACHE_KEYS; i += 1) await call(routes, `/data/account/connected/explore?q=k${i}`);
   assert.equal(fetched.length, 64);
-  await call(routes, "/data/account/explore?q=k1");
+  await call(routes, "/data/account/connected/explore?q=k1");
   assert.equal(fetched.length, 64, "k1 is kept, and is now the most recently used");
-  await call(routes, "/data/account/explore?q=k65");
+  await call(routes, "/data/account/connected/explore?q=k65");
   assert.equal(fetched.length, 65);
-  await call(routes, "/data/account/explore?q=k1");
+  await call(routes, "/data/account/connected/explore?q=k1");
   assert.equal(fetched.length, 65, "k1 outlived the 65th key");
-  await call(routes, "/data/account/explore?q=k2");
+  await call(routes, "/data/account/connected/explore?q=k2");
   assert.equal(fetched.length, 66, "k2, the least recently used, was evicted");
   await call(routes, "/data/account/market?venue=okx&symbol=BTC");
-  await call(routes, "/data/account/explore?q=k65");
+  await call(routes, "/data/account/connected/explore?q=k65");
   assert.equal(fetched.length, 67, "another route's keys are its own");
 });
 
 test("an unreachable, hanging, refusing or unreadable Account: 503 with the code and never the text; a cached read is re-served stale:true", async () => {
   assert.deepEqual(ACCOUNT_ABORT_MS, {
-    account: 7_000, explore: 10_000, market: 7_000, quotes: 7_000, compare: 7_000, candles: 25_000,
+    account: 7_000, market: 7_000, compare: 7_000,
     holdings: 12_000, positions: 7_000, statement: 7_000, history: 12_000, agents: 7_000,
     venues: 30_000, reach: 30_000, keyfile: 30_000, books: 30_000,
-    asset: 25_000, book: 7_000, trades: 7_000, funding: 12_000, receive: 30_000, earn: 30_000, sellable: 30_000, signinStatus: 7_000,
+    asset: 25_000, funding: 12_000, receive: 30_000, earn: 30_000, sellable: 30_000, signinStatus: 7_000,
     connectedExplore: 10_000, connectedQuotes: 7_000, connectedCandles: 25_000, connectedBook: 7_000, connectedTrades: 7_000,
   });
   const refused = proxyWith(async () => { throw Object.assign(new TypeError("fetch failed secret-host-name"), { cause: { code: "ECONNREFUSED" } }); });
@@ -483,8 +476,8 @@ test("an unreachable, hanging, refusing or unreadable Account: 503 with the code
 
   const abort = (signal: AbortSignal, reject: (err: Error) => void): void =>
     signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
-  const hanging = proxyWith((_url, init) => new Promise<FakeAnswer>((_resolve, reject) => abort(init.signal, reject)), () => NOW, { abortMs: { candles: 20 } });
-  const h = await call(hanging.routes, "/data/account/candles?venue=broker&symbol=NVDA&range=1D");
+  const hanging = proxyWith((_url, init) => new Promise<FakeAnswer>((_resolve, reject) => abort(init.signal, reject)), () => NOW, { abortMs: { connectedCandles: 20 } });
+  const h = await call(hanging.routes, "/data/account/connected/candles?venue=broker&symbol=NVDA&range=1D");
   assert.equal(h.status, 503); assert.equal(h.body, '{"ok":false,"unreachable":"timeout"}', "the headers past the abort");
   const stalling = proxyWith(async (_url, init) => ({ ok: true, status: 200, text: () => new Promise<string>((_resolve, reject) => abort(init.signal, reject)) }), () => NOW, { abortMs: { history: 20 } });
   assert.equal((await call(stalling.routes, "/data/account/history?range=1w")).body, '{"ok":false,"unreachable":"timeout"}', "the body past the abort");
@@ -546,7 +539,7 @@ test("POST on a GET route is 405", async () => {
     assert.equal(a.status, 405, face); assert.equal(a.body, '{"ok":false,"error":"method not allowed"}');
     assert.equal(a.headers["content-type"], JSON_TYPE);
   }
-  assert.equal((await call(routes, "/data/account/explore", undefined, "DELETE")).status, 405);
+  assert.equal((await call(routes, "/data/account/connected/explore", undefined, "DELETE")).status, 405);
   assert.equal((await call(routes, "/data/account", { host: "127.0.0.1:3090", origin: "https://evil.example" }, "POST")).status, 403, "the fence comes before the method");
   assert.equal(fetched.length, 0);
 });
@@ -971,10 +964,10 @@ test("a write's abort is the row's", async (t) => {
 });
 
 test("the new reads keep their whitelists and TTLs", async () => {
-  const ttl = { asset: 5_000, book: 2_000, trades: 2_000, funding: 60_000, receive: 60_000, earn: 15_000, sellable: 5_000, signinStatus: 1_000 };
-  const abort = { asset: 25_000, book: 7_000, trades: 7_000, funding: 12_000, receive: 30_000, earn: 30_000, sellable: 30_000, signinStatus: 7_000 };
+  const ttl = { asset: 5_000, funding: 60_000, receive: 60_000, earn: 15_000, sellable: 5_000, signinStatus: 1_000 };
+  const abort = { asset: 25_000, funding: 12_000, receive: 30_000, earn: 30_000, sellable: 30_000, signinStatus: 7_000 };
   const names = {
-    asset: ["key", "interval", "range", "fresh"], book: ["venue", "symbol", "depth"], trades: ["venue", "symbol", "limit"], funding: ["venue", "limit"],
+    asset: ["key", "interval", "range", "fresh"], funding: ["venue", "limit"],
     receive: ["venue", "asset", "network"], earn: ["venue", "asset", "fresh"], sellable: ["fresh"], signinStatus: ["state"],
   };
   for (const [face, account, route, query] of NEW_READS) {
@@ -1202,34 +1195,12 @@ test("funding is read with no venue, as the Account's own page reads it: every v
   assert.equal(fetched[1], `${URL_}/api/account/funding`);
 });
 
-test("the quotes reader reads through the quotes route's cache", async () => {
-  let clock = NOW;
-  const { routes, fetched, proxy } = proxyWith(answering('{"ok":true,"quotes":[]}'), () => clock);
-  const query = "pairs=china%7C000001%2Cchina%7C600519";
-  const first = await proxy.quotes(query);
-  const second = await proxy.quotes(query);
-  assert.deepEqual(first, { status: 200, body: '{"ok":true,"quotes":[]}' });
-  assert.deepEqual(second, first);
-  assert.deepEqual(fetched, [`${URL_}/api/account/quotes?${query}`], "two reads of one query inside 3 s ask upstream once");
-  /* the browser's /data/account/quotes is served from the same cache */
-  const page = await call(routes, `/data/account/quotes?${query}`);
-  assert.equal(page.status, 200);
-  assert.equal(fetched.length, 1, "the page's read is the cached answer");
-  clock += ACCOUNT_TTL_MS.quotes + 1;
-  await proxy.quotes(query);
-  assert.equal(fetched.length, 2, "past 3 s the reader asks again");
-
-  const off = registerAccountProxy({ register() {} }, { disabled: true });
-  assert.deepEqual(await off.quotes(query), { unreachable: "disabled" });
-});
-
 test("the connected reads go to /api/account/connected/*", async () => {
-  const route = { explore: "connectedExplore", quotes: "connectedQuotes", candles: "connectedCandles", book: "connectedBook", trades: "connectedTrades" } as const;
-  for (const [face, account, mirrors, query] of CONNECTED) {
-    const own = route[mirrors];
-    assert.deepEqual(ACCOUNT_QUERY[own], ACCOUNT_QUERY[mirrors], `${own}'s names are ${mirrors}'s`);
-    assert.equal(ACCOUNT_TTL_MS[own], ACCOUNT_TTL_MS[mirrors], `${own}'s TTL is ${mirrors}'s`);
-    assert.equal(ACCOUNT_ABORT_MS[own], ACCOUNT_ABORT_MS[mirrors], `${own}'s abort is ${mirrors}'s`);
+  /* the connected reads keep the names, TTLs and aborts the account's public reads had (now the market's own, src/market-proxy.ts) */
+  assert.deepEqual([ACCOUNT_QUERY.connectedExplore, ACCOUNT_QUERY.connectedQuotes, ACCOUNT_QUERY.connectedCandles, ACCOUNT_QUERY.connectedBook, ACCOUNT_QUERY.connectedTrades], [
+    ["tab", "q", "key", "sort", "limit"], ["pairs"], ["venue", "symbol", "interval", "range", "before", "limit"], ["venue", "symbol", "depth"], ["venue", "symbol", "limit"],
+  ]);
+  for (const [face, account, own, query] of CONNECTED) {
     let clock = NOW;
     const { routes, fetched } = proxyWith(answering(OK_BODY), () => clock);
     const unknown = await call(routes, `${face}?${query}&force=1`);

@@ -615,44 +615,44 @@ describe("the service picks a connected venue's trader before a public source, a
     expect(refused(await svc.marketBook("perps", "HYPE/USDC", 20)).message).toBe("Perps did not answer in 5 seconds");
   });
 
+  // a public source's own book and trades (US stocks' top of book, a pre-IPO listing's) are the market's: market/test/unit/reads.test.ts
   it("a market whose source has no book is its best bid and ask only, depth top, with no size, named by its quote's source", async () => {
-    const pub = ok(await svc.marketBook("us-stocks", "AAPL", 20));
-    expect(pub).toEqual({ venue: "us-stocks", venueName: "US stocks", symbol: "AAPL", public: true, book: { bids: [[189.98, null]], asks: [[190.02, null]], at: new Date(NOW - 5_000).toISOString(), from: "Nasdaq · real time", depth: "top", topOnly: "none" } });
-    expect(ok(await svc.marketTrades("us-stocks", "AAPL", 30))).toEqual({ venue: "us-stocks", venueName: "US stocks", symbol: "AAPL", trades: [], none: "US stocks publishes no trades the account can read", public: true });
     // a paper account on a stock: the source's fact too, said in the source's name — never the paper account's prefix
     expect(ok(await svc.marketTrades("paper-1", "AAPL", 30))).toMatchObject({ venue: "paper-1", symbol: "AAPL", trades: [], none: "US stocks publishes no trades the account can read" });
     // a market no source lists is still refused: only "publishes no trades" is the quiet answer
     expect(isRefusal(await svc.marketTrades("paper-1", "NOTHING/USD", 30))).toBe(true);
     // a source with a book the account does not read is never said to have none; a quote with no time of its own says how old it may be:
-    // its source keeps it ninety seconds, and the service keeps the listing twenty more
-    expect(ok(await svc.marketBook("preipo-pub", "OPENAI-PERP", 20)).book).toMatchObject({ bids: [[899.5, null]], asks: [[900.5, null]], from: "Pre-IPO Ex", depth: "top", topOnly: "unread", upToMs: 110_000 });
-    // a paper account's market of it is kept three seconds more
+    // a paper account's market of a pre-IPO listing (its source keeps it ninety seconds, the listing kept twenty more) three seconds more
     expect(ok(await svc.marketBook("paper-1", "OPENAI-PERP", 20)).book).toMatchObject({ bids: [[899.5, null]], asks: [[900.5, null]], depth: "top", upToMs: 113_000 });
-    expect(ok(await svc.marketBook("us-stocks", "AAPL", 20)).book.upToMs).toBeUndefined();
     // a broker connected live with no book: the market it reads
     expect(ok(await svc.marketBook("broker", "AAPL", 20)).book).toEqual({ bids: [[189.9, null]], asks: [[190.1, null]], at: new Date(NOW - 1_000).toISOString(), from: "Broker", depth: "top", topOnly: "unread" });
     // a paper account on a stock: its source has no book, so the market's own best bid and ask
     const paper = ok(await svc.marketBook("paper-1", "AAPL", 20)).book;
     expect([paper.depth, paper.bids, paper.asks, paper.from, paper.topOnly]).toEqual(["top", [[189.98, null]], [[190.02, null]], "Nasdaq · real time", "none"]);
-    expect(refused(await svc.marketBook("nowhere", "AAPL", 20)).code).toBe("E_WALLET_ACCOUNT_UNKNOWN");
+    // a venue not connected — a public source's id among them — is refused by name: its book is the market's
+    expect(refused(await svc.marketBook("nowhere", "AAPL", 20)).code).toBe("E_WALLET_NOT_CONNECTED");
+    expect(refused(await svc.marketBook("us-stocks", "AAPL", 20)).code).toBe("E_WALLET_NOT_CONNECTED");
+    expect(refused(await svc.marketTrades("us-stocks", "AAPL", 30)).code).toBe("E_WALLET_NOT_CONNECTED");
   });
 
-  it("answers GET /api/account/book and /api/account/trades in the page's shapes, and turns away what is not a count", async () => {
-    const b = await get("/api/account/book?venue=pubex&symbol=BTC/USDT&depth=5");
+  it("answers GET /api/account/connected/book and /connected/trades in the page's shapes, and turns away what is not a count", async () => {
+    const b = await get("/api/account/connected/book?venue=pubex&symbol=BTC/USDT&depth=5");
     expect(b).toEqual({ status: 200, body: { ok: true, venue: "pubex", venueName: "Pub Ex", symbol: "BTC/USDT", book: CONNECTED_BOOK } });
-    const t = await get(`/api/account/trades?${new URLSearchParams({ venue: "paper-1", symbol: "BTC/USD", limit: "30" })}`);
+    const t = await get(`/api/account/connected/trades?${new URLSearchParams({ venue: "paper-1", symbol: "BTC/USD", limit: "30" })}`);
     expect(t.body).toMatchObject({ ok: true, venue: "paper-1", symbol: "BTC/USD", trades: TRADES_PUB });
-    expect((await get("/api/account/book?venue=pubex&symbol=BTC/USDT&depth=lots")).status).toBe(400);
-    expect((await get("/api/account/book?venue=pubex&symbol=BTC/USDT&depth=500")).status).toBe(400);
-    expect((await get("/api/account/trades?venue=pubex&symbol=BTC/USDT&limit=1000")).status).toBe(400);
-    expect((await get("/api/account/book?venue=pubex&venue=geo&symbol=BTC/USDT")).status).toBe(400);
-    const no51 = await get("/api/account/book?venue=pubex&symbol=BTC/USDT&depth=51");
+    expect((await get("/api/account/connected/book?venue=pubex&symbol=BTC/USDT&depth=lots")).status).toBe(400);
+    expect((await get("/api/account/connected/book?venue=pubex&symbol=BTC/USDT&depth=500")).status).toBe(400);
+    expect((await get("/api/account/connected/trades?venue=pubex&symbol=BTC/USDT&limit=1000")).status).toBe(400);
+    expect((await get("/api/account/connected/book?venue=pubex&venue=geo&symbol=BTC/USDT")).status).toBe(400);
+    const no51 = await get("/api/account/connected/book?venue=pubex&symbol=BTC/USDT&depth=51");
     expect([no51.status, no51.body.refusal.code]).toEqual([409, "E_ACCOUNT_BAD_ACTION"]);
     // a source that publishes no trades is answered 200 with an empty list and why, so the page's Trades tab is quiet and stops asking
-    const none = await get("/api/account/trades?venue=us-stocks&symbol=AAPL");
-    expect([none.status, none.body]).toEqual([200, { ok: true, venue: "us-stocks", venueName: "US stocks", symbol: "AAPL", trades: [], none: "US stocks publishes no trades the account can read", public: true }]);
+    const none = await get("/api/account/connected/trades?venue=paper-1&symbol=AAPL");
+    expect([none.status, none.body]).toEqual([200, { ok: true, venue: "paper-1", venueName: "Paper account", symbol: "AAPL", trades: [], none: "US stocks publishes no trades the account can read" }]);
     // every other refusal stays 409
-    const unknown = await get("/api/account/trades?venue=nowhere&symbol=AAPL");
-    expect([unknown.status, unknown.body.refusal.code]).toEqual([409, "E_WALLET_ACCOUNT_UNKNOWN"]);
+    const unknown = await get("/api/account/connected/trades?venue=nowhere&symbol=AAPL");
+    expect([unknown.status, unknown.body.refusal.code]).toEqual([409, "E_WALLET_NOT_CONNECTED"]);
+    // the public routes are gone: the market answers them
+    for (const part of ["book", "trades"]) expect((await fetch(`${server.url}/api/account/${part}?venue=us-stocks&symbol=AAPL`)).status).toBe(404);
   });
 });

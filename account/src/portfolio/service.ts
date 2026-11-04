@@ -62,8 +62,7 @@ import type { AutonomyHook, LiveOrder } from "./account/live-orders.ts";
 import type { LiveEarn } from "./account/live-earn.ts";
 import type { Payment } from "./account/payments.ts";
 import { exploreAcross, type Exploration, type ExploreSort, type ExploreVenue } from "./live/explore.ts";
-import { BOOK_TOP, CHINA_ID, CHINA_NAME, CHINA_NOTE, holdBackMs, KEEP_MS as LISTING_KEEP_MS, MARKET_DOWN_HOLD_MS, RANK_ROWS, type ChinaHistory, type ChinaMarket, type ChinaRange, type ChinaSource, type HubTick, type MarketHub, type Price, type PublicSource } from "./market/shapes.ts";
-import { MARKET_DOWN } from "./market/client.ts";
+import { BOOK_TOP, CHINA_ID, holdBackMs, KEEP_MS as LISTING_KEEP_MS, type HubTick, type MarketHub, type Price, type PublicSource } from "./market/shapes.ts";
 import { TABS, type TabId } from "./live/categories.ts";
 import { CHAIN_BY_ID, CHAINS, type ChainName } from "./live/chain.ts";
 import { mountPayees, type PayeeWorld } from "./account/payees.ts";
@@ -164,22 +163,15 @@ export interface ServiceOptions {
   /** THE VENUES' LIVE STREAMS: the market's hub as the account mirrors it (server.ts main: market/hub.ts RemoteHub), or a test's (a hub
    * over a stand-in WebSocket, or test/standin's stand-in prices); without one nothing is streamed — every price is a REST read, as before */
   streams?: MarketHub | undefined;
-  /** CHINA: the A shares Tencent ranks, quotes, charts and finds (live/china.ts) — the China tab, China's hits in a search, an A share's
-   * quote and history. The real server mounts its own (server.ts), as it does `streams`; without one China is not read at all, and nothing
-   * here ever asks Tencent */
-  china?: ChinaSource | undefined;
   /** THE MARKET NOT ANSWERING: since when, in the account's one sentence for it (server.ts main: market/link.ts marketOld()), or undefined
    * while it answers. While it is said, the holdings carry it (their prices are the last the market gave) and no net-worth point is taken.
    * Absent: the market is never said to be down */
   marketOld?: (() => { since: string; message: string } | undefined) | undefined;
 }
 
-/** how long a search waits for China's hits beside the other sources (exploreAcross's per-source budget): late, they are `missing` */
-export const CHINA_SEARCH_WAIT_MS = 4_000;
-const CHINA_NOT_READ = "China is not read on this account";
 /** no price for anything: a service made without the market's link (server.ts main hands its remotePrice in) prices nothing it cannot price itself */
 /** the kept reads that list the venues connected: forgotten whenever a venue is connected or unplugged, or an agent's wallet added */
-const VENUE_SET_READS = ["explore", "connected-explore", "compare"] as const;
+const VENUE_SET_READS = ["connected-explore", "compare"] as const;
 /** a Markets question (explore, connectedExplore) */
 type ExploreAsk = { tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined };
 const noPrice: Price = () => Promise.resolve(undefined);
@@ -905,8 +897,6 @@ export class PortfolioService {
   private publicMade: PublicSource[] | undefined;
   /** the list publicMade was wrapped from: a new list (the market's, once it answers or changes) is wrapped again */
   private publicGot: PublicSource[] | undefined;
-  /** how many lists have been wrapped: what a kept answer made from the list (explore) is kept under */
-  private publicGen = 0;
   /** the keyless public sources as they are handed in (the market's link's latest list, or a test's), each read through the account's own
    * cache (`keptPublic`) — wrapped again whenever the list handed in is another one, so a list that was empty while the market was down
    * fills in once it answers, with no restart */
@@ -915,52 +905,14 @@ export class PortfolioService {
     const got = typeof o === "function" ? o() : (o ?? []);
     if (!this.publicMade || got !== this.publicGot) {
       this.publicGot = got;
-      this.publicGen++;
       this.publicRaw.clear();
       this.publicMade = got.map((s) => this.keptPublic(s));
     }
     return this.publicMade;
   }
 
-  /** MARKETS: everything there is to trade — what the connected venues list, and what the venues not connected publish without a key
-   * (marked "Connect to trade") — as one list, with its tabs, its movers, what closes soon and what trades most (live/explore.ts). A public
-   * source is left out when its venue is connected: the connected venue speaks for itself. Robinhood's Stock Tokens, which no connection
-   * trades, are always read. The same question is answered from what was found for thirty seconds; each venue's reads are kept as `kept`
-   * keeps them. `key`, a row's own exactly as `items` names it, keeps only that row (live/explore.ts ExploreOptions.key). Nothing is ordered
-   * or signed */
-  async explore(o: ExploreAsk = {}): Promise<Exploration | Refusal> {
-    const ask = this.exploreAsk(o);
-    if (isRefusal(ask)) return ask;
-    const { tab, sort, q, key, limit } = ask;
-    // CHINA is its own tab, asked of its own source (which keeps its reads): never kept here, never in All
-    if (tab === "china") return this.exploreChina(q, sort, limit);
-    // a search on All asks China too, beside the other sources and within their budget; no other tab ever asks it
-    const china = q && !key && (tab === undefined || tab === "all") ? this.opts.china : undefined;
-    // each connected venue with the connection it was made with: exploreAcross leaves out the public source that connection speaks for
-    // and its own place rule for this network, where it has one that bars an order from here (placed)
-    const connected = this.exploreVenues();
-    // the key exactly as asked (a row's key is not a search: kalshi:KXFED and kalshi:kxfed are not one row), written so that no `|` in it
-    // reads as the next part of the question
-    // kept under the public list it was made from (publicGen): a list that fills in or changes (the market answering again) is not hidden
-    // behind an answer made without it
-    const pub = this.publicMarkets();
-    return this.marketReads.get(`explore|${this.publicGen}|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}`, 30_000, async (): Promise<Exploration | Refusal> => {
-      const { placed, serves } = await this.placedServing(connected);
-      const [explored, hits] = await Promise.all([
-        exploreAcross({ connected: placed, public: pub }, { q, ...(key ? { key } : {}), limit, clock: () => this.realNow(), serves, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) }),
-        china ? within(CHINA_SEARCH_WAIT_MS, china.search(q), CHINA_ID, CHINA_NAME) : undefined,
-      ]);
-      if (hits === undefined) return explored;
-      // China's hits after the dollar rows; a late or refused China half is said in `missing`, the rest answered without it
-      if (isRefusal(hits)) return { ...explored, missing: [...explored.missing, { venue: CHINA_ID, venueName: CHINA_NAME, connected: false, why: hits.message, code: hits.code }] };
-      return { ...explored, items: [...explored.items, ...hits].slice(0, limit) };
-      // an answer a source was missing from because the market service did not answer is kept only as long as that holds the source back:
-      // a market that is back is listed again within seconds, not after thirty
-    }, undefined, false, (v) => (!isRefusal(v) && v.missing.some((m) => m.why === MARKET_DOWN) ? MARKET_DOWN_HOLD_MS : undefined));
-  }
-
-  /** a Markets question's checks, the same for the account's whole list and for its connected half alone: the tab, the sort, the search,
-   * the row's key and the limit, each in the account's words */
+  /** a Markets question's checks (connectedExplore's): the tab, the sort, the search, the row's key and the limit, each in the account's
+   * words */
   private exploreAsk(o: ExploreAsk): { tab: string | undefined; sort: string | undefined; q: string; key: string; limit: number } | Refusal {
     if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted" });
     const tab = o.tab?.trim() || undefined;
@@ -1006,8 +958,11 @@ export class PortfolioService {
     return no("E_WALLET_NOT_CONNECTED", { venue: id, message: `"${id.slice(0, 40)}" is not a venue connected to this account: its public data is the market's` });
   }
 
-  /** MARKETS, THE CONNECTED HALF: what the venues the owner connected list, with the same checks, the same rule of what serves this network
-   * and the same thirty seconds as explore — and no public line and no China, which are the market's to answer */
+  /** MARKETS, THE CONNECTED HALF: what the venues the owner connected list (live/explore.ts), as one list with its tabs, its movers, what
+   * closes soon and what trades most — what does not serve the network the account runs on left out (placedServing). The same question is
+   * answered from what was found for thirty seconds; each venue's reads are kept as `kept` keeps them. `key`, a row's own exactly as
+   * `items` names it, keeps only that row (live/explore.ts ExploreOptions.key). No public line and no China: those are the market's to
+   * answer. Nothing is ordered or signed */
   async connectedExplore(o: ExploreAsk = {}): Promise<Exploration | Refusal> {
     const ask = this.exploreAsk(o);
     if (isRefusal(ask)) return ask;
@@ -1031,24 +986,6 @@ export class PortfolioService {
       const r = await this.liveMarket(p.venue, p.symbol);
       return isRefusal(r) ? { ...p, refusal: r } : { ...p, market: r };
     }));
-  }
-
-  /** THE CHINA TAB: Tencent's ranking by turnover (`volume`, the default) or by the day's move (`movers`), at most RANK_ROWS rows, with its
-   * read — the sort, how many A shares there are, the session and whether Tencent answered — or, with `q`, China's hits alone. A refusal of
-   * the source is the answer */
-  private async exploreChina(q: string, sort: string | undefined, limit: number): Promise<Exploration | Refusal> {
-    const china = this.opts.china;
-    if (!china) return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ });
-    if (sort === "closing") return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "China is sorted by volume or movers" });
-    const body = { movers: [], closing: [], mostTraded: [], missing: [], notes: [CHINA_NOTE] };
-    if (q) {
-      const hits = await china.search(q);
-      if (isRefusal(hits)) return hits;
-      return { asOf: new Date(this.realNow()).toISOString(), tabs: [{ id: "china", label: "China", count: hits.length }], items: hits.slice(0, limit), ...body };
-    }
-    const got = await china.rank(sort === "movers" ? "movers" : "volume");
-    if (isRefusal(got)) return got;
-    return { asOf: got.read.asOf, tabs: [{ id: "china", label: "China", count: got.read.total }], items: got.items.slice(0, Math.min(limit, RANK_ROWS)), ...body, china: got.read };
   }
 
   /** PORTFOLIO: what the account holds, by asset across every venue (account/holdings.ts), the dollars that are ready and where they can go,
@@ -1386,16 +1323,12 @@ export class PortfolioService {
   private readonly paperBarsKept = historyKeep<Candle[] | CandlePage>({ entries: PAPER_BARS_KEPT, most: HISTORY_KEPT_BARS, weigh: pageWeight });
 
   /** One asset, as the Asset sheet shows it: its holdings row (when it is held), the same thing at every connected venue (live/compare.ts),
-   * its price history at the first of them that keeps one, its positions, the account's open orders in it, its statement lines and what was
-   * paid for it. `key` is a holdings key (`crypto:BTC`, `equity:AAPL`, `stable:USDC`, `event:<symbol>`); `coin:` and `stock:` are taken for
-   * `crypto:` and `equity:`. The price history is in bars of `interval` over `range` (1D … MAX, as the candles read takes it: the Market
-   * sheet asks the range its button says), else over the range that bar size alone is drawn over (INTERVAL_RANGE). A read */
-  async asset(key: string, interval = "1h", range?: string): Promise<AssetDetail | Refusal> {
+   * its positions, the account's open orders in it, its statement lines and what was paid for it. `key` is a holdings key (`crypto:BTC`,
+   * `equity:AAPL`, `stable:USDC`, `event:<symbol>`); `coin:` and `stock:` are taken for `crypto:` and `equity:`. Its price history is not
+   * here: the chart reads the market's candles, or a connected venue's own (connected/candles). A read */
+  async asset(key: string): Promise<AssetDetail | Refusal> {
     const k = assetKeyOf(key);
     if (!k) return no("E_ACCOUNT_BAD_ACTION", { message: "an asset is named by its key: crypto:BTC, equity:AAPL, stable:USDC, rwa:USDY, event:<symbol>" });
-    if (!(CANDLE_INTERVALS as readonly string[]).includes(interval)) return no("E_ACCOUNT_BAD_ACTION", { message: `price history is by ${CANDLE_INTERVALS.join(", ")}` });
-    const r = range === undefined ? "" : range.trim().toUpperCase();
-    if (r && !(CANDLE_RANGES as readonly string[]).includes(r)) return no("E_ACCOUNT_BAD_ACTION", { message: `a range is one of ${CANDLE_RANGES.join(", ")}` });
     const h = await this.held({ cost: true });
     if (isRefusal(h)) return h;
     const row = h.view.rows.find((r) => r.key === k.key);
@@ -1408,8 +1341,6 @@ export class PortfolioService {
       if (isRefusal(c)) missing.push({ venue: "*", venueName: "every venue", why: c.message, code: c.code, part: "compare" });
       else compare = c;
     }
-    const candles = await this.candlesFor(k, interval as CandleInterval, r ? (r as CandleRange) : INTERVAL_RANGE[interval as CandleInterval], compare, positions, row);
-    if (candles.missing) missing.push(candles.missing);
     // the statement's lines about it: its orders, and for a dollar the movements of that dollar
     const keys = new Set<string>();
     const { before, now } = this.statementRows();
@@ -1435,14 +1366,13 @@ export class PortfolioService {
         paper = { ...(prow ? { row: prow } : {}), positions: ppos, cost: costOf(p.view, ppos) };
       }
     }
-    return { key: k.key, ...(row ? { row } : {}), ...(compare ? { compare } : {}), ...(candles.got ? { candles: candles.got } : {}), positions, orders, lines, cost, ...(paper ? { paper } : {}), missing };
+    return { key: k.key, ...(row ? { row } : {}), ...(compare ? { compare } : {}), positions, orders, lines, cost, ...(paper ? { paper } : {}), missing };
   }
 
-  /** ONE MARKET'S PRICE HISTORY, as the Market sheet, the Trade page's chart and the Asset sheet draw it: at a venue connected live, its
-   * trader's own (live/trade.ts candles; a paper account's is its market's public source's); at a venue not connected, its public source's,
-   * without a key (live/public-markets.ts: Coinbase Exchange's and OKX's deep histories, Hyperliquid's latest 5,000 bars, the US stocks
-   * line's Robinhood, Nasdaq and Cboe bars, Kalshi's public candlesticks, Polymarket's prices-history). `venue` is a venue's id on the
-   * account or a public source's id as Markets lists it; `symbol` the market as that venue names it. Bars of 1m, 5m, 15m, 1h, 4h, 1d or 1w.
+  /** ONE MARKET'S PRICE HISTORY AT A VENUE CONNECTED LIVE, as the Market sheet and the Trade page's chart draw it: its trader's own
+   * (live/trade.ts candles; a paper account's is its market's public source's). `venue` is a venue's id on the account — any other is
+   * refused by name (connectedOnly: a public market's history is the market's) — and `symbol` the market as that venue names it. Bars of
+   * 1m, 5m, 15m, 1h, 4h, 1d or 1w.
    * Asked one of two ways:
    *   a range     `range` (1D, 5D, 1M, 3M, 6M, YTD, 1Y, 5Y, MAX), in its own bar size unless one is named (live/history.ts RANGE_BAR) — the
    *               chart's first view: what the range needs, the latest HISTORY_MOST bars at most; neither a range nor `before`: the range of
@@ -1454,21 +1384,10 @@ export class PortfolioService {
    * (`gaps`) and a daily bar built from intraday ones (`today`). Each answer kept seconds to minutes in a bounded memory (historyRead). The
    * symbol is only ever handed to the venue's own client or put in a fixed host's query string, encoded: nothing here is asked of a host the
    * symbol names */
-  async candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; limit?: string | number | undefined } = {}): Promise<CandlesView | ChinaHistory | Refusal> {
-    if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted" });
-    const id = venue.trim();
-    const sym = symbol.trim();
-    if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(id)) return no("E_ACCOUNT_BAD_ACTION", { message: "a venue is named by its id: lower-case letters, digits and dashes" });
-    if (!sym || sym.length > 160 || !isPlain(sym)) return no("E_ACCOUNT_BAD_ACTION", { message: "a market is named by its symbol at that venue: 1 to 160 characters of plain text" });
-    // an A share's history is Tencent's, by range, in Shanghai's sessions (china.ts history): decided before any bar size or New York window
-    if (id === CHINA_ID) {
-      const china = this.opts.china;
-      if (!china) return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ });
-      if (ask.before !== undefined && String(ask.before).trim() !== "") return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "an A share's history is read by range" });
-      const range = (ask.range ?? "").trim();
-      if (!(CANDLE_RANGES as readonly string[]).includes(range)) return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: `a range is one of ${CANDLE_RANGES.join(", ")}` });
-      return china.history(sym, range as ChinaRange);
-    }
+  async candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; limit?: string | number | undefined } = {}): Promise<CandlesView | Refusal> {
+    const one = this.connectedMarket(venue, symbol);
+    if (isRefusal(one)) return one;
+    const { id, sym, live } = one;
     const asked = historyAsk(interval, ask);
     if (isRefusal(asked)) return asked;
     const { iv, range, before, limit } = asked;
@@ -1477,7 +1396,7 @@ export class PortfolioService {
     // the window the answer is held to: a US stock's 1D and 5D are its latest sessions (the source counts them so), which may start earlier
     const held: CandleWindow = w.range !== undefined && w.since !== undefined ? { ...w, since: Math.min(w.since, sessionsSince(w.range, now)) } : w;
     const wait = before !== undefined ? PAGE_WAIT_MS : HISTORY_WAIT_MS;
-    const said = (page: CandlePage, base: { venue: string; venueName: string; public?: true; from?: string }): CandlesView => ({
+    const said = (page: CandlePage, base: { venue: string; venueName: string; from?: string }): CandlesView => ({
       ...base,
       symbol: sym,
       interval: page.interval ?? iv,
@@ -1494,92 +1413,62 @@ export class PortfolioService {
       ...(page.gaps?.length ? { gaps: page.gaps } : {}),
       ...(page.today ? { today: page.today } : {}),
     });
-    const live = this.adapters.get(id)?.account.watchOnly ? this.liveVenues.get(id) : undefined;
-    if (live) {
-      if (!live.trader) return no("E_VENUE_RAIL_CLOSED", { venue: id, message: `${live.name}: ${live.noTradeBecause ?? "no markets are read here from the account"}` });
-      if (!live.trader.candles) return no("E_VENUE_RAIL_CLOSED", { venue: id, message: `${live.name} keeps no price history the account can read` });
-      const got = await within(wait, this.kept(live).candles!(sym, iv, w), id, live.name);
-      if (isRefusal(got)) return got;
-      // a paper account's bars are its market's public source's: named, so the chart never calls them the paper account's own — and named
-      // as the face names them where they are another exchange's (a Kraken pair's drawn from Coinbase Exchange: barsFrom)
-      const named = live.trader.pricesFrom ? await live.trader.pricesFrom(sym).catch(() => undefined) : undefined;
-      const page = pageOf(got, iv, held);
-      const from = named !== undefined ? barsFrom(page, named, this.publicMarkets().find((x) => x.name === named)?.kind) : undefined;
-      return said(page, { venue: id, venueName: live.name, ...(from ? { from } : {}) });
-    }
-    const src = this.publicMarkets().find((x) => x.id === id);
-    if (!src) return no("E_WALLET_ACCOUNT_UNKNOWN", { venue: id, message: `"${id.slice(0, 40)}" is neither a venue connected live nor a public market source: Markets names both` });
-    if (!src.candles) return no("E_VENUE_RAIL_CLOSED", { venue: id, message: `${src.name} publishes no price history` });
-    // kept under the source's id (`keptPublic`): a source that refused this location is not asked again for ten minutes
-    const got = await within(wait, src.candles(sym, iv, w), id, src.name);
+    if (!live.trader) return no("E_VENUE_RAIL_CLOSED", { venue: id, message: `${live.name}: ${live.noTradeBecause ?? "no markets are read here from the account"}` });
+    if (!live.trader.candles) return no("E_VENUE_RAIL_CLOSED", { venue: id, message: `${live.name} keeps no price history the account can read` });
+    const got = await within(wait, this.kept(live).candles!(sym, iv, w), id, live.name);
     if (isRefusal(got)) return got;
+    // a paper account's bars are its market's public source's: named, so the chart never calls them the paper account's own — and named
+    // as the face names them where they are another exchange's (a Kraken pair's drawn from Coinbase Exchange: barsFrom)
+    const named = live.trader.pricesFrom ? await live.trader.pricesFrom(sym).catch(() => undefined) : undefined;
     const page = pageOf(got, iv, held);
-    const from = barsFrom(page, src.name, src.kind);
-    return said(page, { venue: id, venueName: src.name, public: true, ...(from !== src.name ? { from } : {}) });
+    const from = named !== undefined ? barsFrom(page, named, this.publicMarkets().find((x) => x.name === named)?.kind) : undefined;
+    return said(page, { venue: id, venueName: live.name, ...(from ? { from } : {}) });
   }
 
-  /** ONE MARKET'S ORDER BOOK, as the Trade page's middle panel draws it: at a venue connected live, its trader's own (an exchange's client;
+  /** ONE MARKET'S ORDER BOOK AT A VENUE CONNECTED LIVE, as the Trade page's middle panel draws it: its trader's own (an exchange's client;
    * a paper account's market's public source, through the paper trader) — and where the trader reads none (Kalshi's, Polymarket's,
    * Hyperliquid's connections), the venue's own public book, read without a key from the public source that names the same connection
-   * (`connector`: never another venue's, never Hyperliquid's mainnet for its testnet), asked by the name it knows the market by (twinNames);
-   * at a venue not connected, its public source's (live/public-markets.ts). `venue` and `symbol` as `candles` takes them; `depth` levels a
-   * side, 1 to 50, best first. A public source made for the connection that knows the market but cannot give its book now — no answer in
-   * time, a place rule, a market it holds no book for — says so in its own words: its refusal is the answer, never a lesser book in its place.
-   * Only where no book is read here at all (no such source, or none that knows this market: Hyperliquid's spot, its testnet; a broker; a
-   * source with no book) is the market shown as what it carries: its best bid and best ask (`depth: "top"`, no size, since none is given),
-   * named by the source its quote came from, stamped with the quote's own time, and with why that is all (`topOnly`: "none" where the source
-   * publishes no depth at all — US stocks' public quotes — else "unread": it has a book the account does not read); one with neither says
-   * so. Each answer kept a second and a half (BOOK_KEEP_MS), so the face's poll every two seconds asks the venue once. A read */
+   * (`connector`: never another venue's, never Hyperliquid's mainnet for its testnet), asked by the name it knows the market by (twinNames).
+   * `venue` and `symbol` as `candles` takes them (any venue not connected refused by name: a public market's book is the market's); `depth`
+   * levels a side, 1 to 50, best first. A public source made for the connection that knows the market but cannot give its book now — no
+   * answer in time, a place rule, a market it holds no book for — says so in its own words: its refusal is the answer, never a lesser book in
+   * its place. Only where no book is read here at all (no such source, or none that knows this market: Hyperliquid's spot, its testnet; a
+   * broker) is the market shown as what it carries: its best bid and best ask (`depth: "top"`, no size, since none is given), named by the
+   * source its quote came from, stamped with the quote's own time, and with why that is all (`topOnly`: "none" where the source publishes no
+   * depth at all — US stocks' public quotes — else "unread": it has a book the account does not read); one with neither says so. Each answer
+   * kept a second and a half (BOOK_KEEP_MS), so the face's poll every two seconds asks the venue once. A read */
   async marketBook(venue: string, symbol: string, depth = 20): Promise<BookView | Refusal> {
-    const asked = this.oneMarket(venue, symbol);
+    const asked = this.connectedMarket(venue, symbol);
     if (isRefusal(asked)) return asked;
-    const { id, sym } = asked;
+    const { id, sym, live } = asked;
     if (!(Number.isInteger(depth) && depth >= 1 && depth <= 50)) return no("E_ACCOUNT_BAD_ACTION", { message: "a book is read 1 to 50 levels a side" });
     const now = this.realNow();
-    const live = this.adapters.get(id)?.account.watchOnly ? this.liveVenues.get(id) : undefined;
-    if (live) {
-      const t = live.trader;
-      if (!t) return no("E_VENUE_RAIL_CLOSED", { venue: id, message: `${live.name}: ${live.noTradeBecause ?? "no markets are read here from the account"}` });
-      // a paper account whose market's source has no book says whether that source has none at all (live/paper.ts book)
-      let topOnly: TopOnly = "unread";
-      if (t.book) {
-        const got = await within(BOOK_WAIT_MS, this.marketReads.get(`book|${id}|${sym}|${depth}`, BOOK_KEEP_MS, () => t.book!(sym, depth).catch((err: unknown) => thrownBy(id, live.name, err)), id, true), id, live.name);
-        if (!noBookAt(got)) return isRefusal(got) ? got : { venue: id, venueName: live.name, symbol: sym, book: got };
-        if ((got.detail as { topOnly?: unknown } | undefined)?.topOnly === "none") topOnly = "none";
-      } else {
-        // the venue's own public book, where a public source speaks for this very connection and knows the market
-        const got = await this.twinRead(live, id, sym, "book", depth);
-        if (got !== undefined) return isRefusal(got) ? got : { venue: id, venueName: live.name, symbol: sym, book: got as OrderBook };
-      }
-      // no book read here: the best bid and ask the market itself carries, as that. A paper account's comes from its source's listing, kept up
-      // to LISTED_QUOTE_UP_TO_MS by then, and its market kept MARKET_KEEP_MS more here: where the quote carries no time of its own, the face
-      // is told how old it may be
-      const m = await within(BOOK_WAIT_MS, this.kept(live).market(sym), id, live.name);
-      if (isRefusal(m)) return m;
-      const top = topBook(m, live.name, now, topOnly, this.adapters.get(id)?.account.connector === "live:paper" ? LISTED_QUOTE_UP_TO_MS + MARKET_KEEP_MS : undefined);
-      return top ? { venue: id, venueName: live.name, symbol: sym, book: top } : no("E_VENUE_RAIL_CLOSED", { venue: id, message: `${live.name}: ${topOnly === "none" ? "its source publishes no order book" : "the account reads no order book there"}, and gives no best bid or ask for ${sym.slice(0, 60)} just now` });
+    const t = live.trader;
+    if (!t) return no("E_VENUE_RAIL_CLOSED", { venue: id, message: `${live.name}: ${live.noTradeBecause ?? "no markets are read here from the account"}` });
+    // a paper account whose market's source has no book says whether that source has none at all (live/paper.ts book)
+    let topOnly: TopOnly = "unread";
+    if (t.book) {
+      const got = await within(BOOK_WAIT_MS, this.marketReads.get(`book|${id}|${sym}|${depth}`, BOOK_KEEP_MS, () => t.book!(sym, depth).catch((err: unknown) => thrownBy(id, live.name, err)), id, true), id, live.name);
+      if (!noBookAt(got)) return isRefusal(got) ? got : { venue: id, venueName: live.name, symbol: sym, book: got };
+      if ((got.detail as { topOnly?: unknown } | undefined)?.topOnly === "none") topOnly = "none";
+    } else {
+      // the venue's own public book, where a public source speaks for this very connection and knows the market
+      const got = await this.twinRead(live, id, sym, "book", depth);
+      if (got !== undefined) return isRefusal(got) ? got : { venue: id, venueName: live.name, symbol: sym, book: got as OrderBook };
     }
-    const src = this.publicMarkets().find((x) => x.id === id);
-    if (!src) return no("E_WALLET_ACCOUNT_UNKNOWN", { venue: id, message: `"${id.slice(0, 40)}" is neither a venue connected live nor a public market source: Markets names both` });
-    if (src.book) {
-      const got = await this.publicRead(src, "book", sym, depth);
-      return isRefusal(got) ? got : { venue: id, venueName: src.name, symbol: sym, book: got as OrderBook, public: true };
-    }
-    // a source with no book: its listing's best bid and ask (the listings are kept as Markets keeps them). US stocks' public quotes have no
-    // depth at all; the others (Stock Tokens, xStocks at Gate, the exchanges' pre-IPO contracts) have a book the account does not read
-    const topOnly: TopOnly = src.kind === "stocks" ? "none" : "unread";
-    const listed = await within(BOOK_WAIT_MS, src.listings({ q: sym, limit: 20 }), id, src.name);
-    if (isRefusal(listed)) return listed;
-    const m = listed.find((x) => x.symbol === sym);
-    if (!m) return no("E_VENUE_REJECTED", { venue: id, message: `${src.name} lists no market ${sym.slice(0, 60)} just now` });
-    const top = topBook(m, src.name, now, topOnly, LISTED_QUOTE_UP_TO_MS);
-    return top ? { venue: id, venueName: src.name, symbol: sym, book: top, public: true } : no("E_VENUE_RAIL_CLOSED", { venue: id, message: `${topOnly === "none" ? `${src.name} publishes no order book` : `The account reads no order book from ${src.name}`}, and it gives no best bid or ask for ${sym.slice(0, 60)} just now` });
+    // no book read here: the best bid and ask the market itself carries, as that. A paper account's comes from its source's listing, kept up
+    // to LISTED_QUOTE_UP_TO_MS by then, and its market kept MARKET_KEEP_MS more here: where the quote carries no time of its own, the face
+    // is told how old it may be
+    const m = await within(BOOK_WAIT_MS, this.kept(live).market(sym), id, live.name);
+    if (isRefusal(m)) return m;
+    const top = topBook(m, live.name, now, topOnly, this.adapters.get(id)?.account.connector === "live:paper" ? LISTED_QUOTE_UP_TO_MS + MARKET_KEEP_MS : undefined);
+    return top ? { venue: id, venueName: live.name, symbol: sym, book: top } : no("E_VENUE_RAIL_CLOSED", { venue: id, message: `${live.name}: ${topOnly === "none" ? "its source publishes no order book" : "the account reads no order book there"}, and gives no best bid or ask for ${sym.slice(0, 60)} just now` });
   }
 
-  /** ONE MARKET'S LATEST TRADES, newest first, `limit` of them at most (1 to 100), from where `marketBook` reads its book: a connected venue's
-   * trader, else the public source that names the same connection (its refusal, where it knows the market, is the answer), else — a venue
-   * not connected — its public source. A trade's side only where the source says which side took. Kept three seconds (TRADES_KEEP_MS). A
-   * read.
+  /** ONE MARKET'S LATEST TRADES AT A VENUE CONNECTED LIVE, newest first, `limit` of them at most (1 to 100), from where `marketBook` reads
+   * its book: the connected venue's trader, else the public source that names the same connection (its refusal, where it knows the market,
+   * is the answer); any venue not connected refused by name. A trade's side only where the source says which side took. Kept three seconds
+   * (TRADES_KEEP_MS). A read.
    *
    * A venue or source that publishes no trades at all (a US stock's public quote; a paper account's market priced from one; a connection
    * with neither a trades read nor a public twin) is not refused: that is the source's fact, as a book that is only its best bid and ask is
@@ -1587,31 +1476,23 @@ export class PortfolioService {
    * read"), and the face's Trades tab shows the sentence and stops asking until the market changes. Every other refusal — no answer in
    * time, a place rule, a market the source does not list — stays the refusal it is */
   async marketTrades(venue: string, symbol: string, limit = 30): Promise<TradesView | Refusal> {
-    const asked = this.oneMarket(venue, symbol);
+    const asked = this.connectedMarket(venue, symbol);
     if (isRefusal(asked)) return asked;
-    const { id, sym } = asked;
+    const { id, sym, live } = asked;
     if (!(Number.isInteger(limit) && limit >= 1 && limit <= 100)) return no("E_ACCOUNT_BAD_ACTION", { message: "the latest trades are read 1 to 100 at a time" });
-    const live = this.adapters.get(id)?.account.watchOnly ? this.liveVenues.get(id) : undefined;
-    if (live) {
-      const t = live.trader;
-      if (!t) return no("E_VENUE_RAIL_CLOSED", { venue: id, message: `${live.name}: ${live.noTradeBecause ?? "no markets are read here from the account"}` });
-      if (t.trades) {
-        const got = await within(BOOK_WAIT_MS, this.marketReads.get(`trades|${id}|${sym}|${limit}`, TRADES_KEEP_MS, () => t.trades!(sym, limit).catch((err: unknown) => thrownBy(id, live.name, err)), id, true), id, live.name);
-        // a paper account's market priced from a source with no trades (live/paper.ts trades: "Paper: US stocks publishes no trades") is
-        // that source's fact, said as one; the paper account's own name is dropped, since the sentence is about the source
-        const none = isRefusal(got) ? noTradesSaid(got, live.name) : undefined;
-        if (none !== undefined) return { venue: id, venueName: live.name, symbol: sym, trades: [], none };
-        return isRefusal(got) ? got : { venue: id, venueName: live.name, symbol: sym, trades: got };
-      }
-      const got = await this.twinRead(live, id, sym, "trades", limit);
-      if (got !== undefined) return isRefusal(got) ? got : { venue: id, venueName: live.name, symbol: sym, trades: got as PublicTrade[] };
-      return { venue: id, venueName: live.name, symbol: sym, trades: [], none: `${live.name} publishes no trades the account can read` };
+    const t = live.trader;
+    if (!t) return no("E_VENUE_RAIL_CLOSED", { venue: id, message: `${live.name}: ${live.noTradeBecause ?? "no markets are read here from the account"}` });
+    if (t.trades) {
+      const got = await within(BOOK_WAIT_MS, this.marketReads.get(`trades|${id}|${sym}|${limit}`, TRADES_KEEP_MS, () => t.trades!(sym, limit).catch((err: unknown) => thrownBy(id, live.name, err)), id, true), id, live.name);
+      // a paper account's market priced from a source with no trades (live/paper.ts trades: "Paper: US stocks publishes no trades") is
+      // that source's fact, said as one; the paper account's own name is dropped, since the sentence is about the source
+      const none = isRefusal(got) ? noTradesSaid(got, live.name) : undefined;
+      if (none !== undefined) return { venue: id, venueName: live.name, symbol: sym, trades: [], none };
+      return isRefusal(got) ? got : { venue: id, venueName: live.name, symbol: sym, trades: got };
     }
-    const src = this.publicMarkets().find((x) => x.id === id);
-    if (!src) return no("E_WALLET_ACCOUNT_UNKNOWN", { venue: id, message: `"${id.slice(0, 40)}" is neither a venue connected live nor a public market source: Markets names both` });
-    if (!src.trades) return { venue: id, venueName: src.name, symbol: sym, trades: [], none: `${src.name} publishes no trades the account can read`, public: true };
-    const got = await this.publicRead(src, "trades", sym, limit);
-    return isRefusal(got) ? got : { venue: id, venueName: src.name, symbol: sym, trades: got as PublicTrade[], public: true };
+    const got = await this.twinRead(live, id, sym, "trades", limit);
+    if (got !== undefined) return isRefusal(got) ? got : { venue: id, venueName: live.name, symbol: sym, trades: got as PublicTrade[] };
+    return { venue: id, venueName: live.name, symbol: sym, trades: [], none: `${live.name} publishes no trades the account can read` };
   }
 
   /** the public sources that speak for the connection venue `id` was made with (the same `connector`: Kalshi's for live:kalshi, Hyperliquid's
@@ -1669,69 +1550,17 @@ export class PortfolioService {
     return within(BOOK_WAIT_MS, this.marketReads.get(`public-${what}|${src.id}|${sym}|${n}`, what === "book" ? BOOK_KEEP_MS : TRADES_KEEP_MS, load, at), src.id, src.name);
   }
 
-  /** a venue and a market as the book and the trades take them (as `candles` does): a venue's id, and the market as plain text */
-  private oneMarket(venue: string, symbol: string): { id: string; sym: string } | Refusal {
+  /** a venue and a market as the candles, the book and the trades take them: a venue connected to this account (connectedOnly, first: any
+   * other is the market's), and the market as plain text */
+  private connectedMarket(venue: string, symbol: string): { id: string; sym: string; live: LiveVenue } | Refusal {
     if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted" });
+    const not = this.connectedOnly(venue);
+    if (not) return not;
     const id = venue.trim();
     const sym = symbol.trim();
     if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(id)) return no("E_ACCOUNT_BAD_ACTION", { message: "a venue is named by its id: lower-case letters, digits and dashes" });
     if (!sym || sym.length > 160 || !isPlain(sym)) return no("E_ACCOUNT_BAD_ACTION", { message: "a market is named by its symbol at that venue: 1 to 160 characters of plain text" });
-    return { id, sym };
-  }
-
-  /** price history for the Asset sheet: at the first venue in the comparison whose trader keeps it (its spot or stock market before a
-   * perpetual), or — an event contract — at a venue that holds it; at most two venues are asked, each within its time. A coin no connected
-   * venue keeps a history of (a wallet's, a by-address venue's) is then asked of the exchanges' keyless public bars, as the Market sheet
-   * reads them — its dollar pair at the first two sources that publish one. Only when every source refused is there none, in their words.
-   * Over `range`: the one the sheet asked, or the range of the bar size alone (live/history.ts INTERVAL_RANGE) */
-  private async candlesFor(k: AssetKey, interval: CandleInterval, range: CandleRange, compare: Comparison | undefined, positions: VenuePosition[], row: HeldRow | undefined): Promise<{ got?: CandleSeries; missing?: ReadMissing }> {
-    const tries: Array<{ v: LiveVenue; symbol: string }> = [];
-    const add = (venue: string, symbol: string) => {
-      const v = this.liveVenues.get(venue);
-      if (v?.trader?.candles && this.adapters.get(venue)?.account.watchOnly && !tries.some((t) => t.v.id === venue && t.symbol === symbol)) tries.push({ v, symbol });
-    };
-    for (const r of compare?.rows ?? []) if (r.kind !== "perp") add(r.venue, r.symbol);
-    for (const r of compare?.rows ?? []) if (r.kind === "perp") add(r.venue, r.symbol);
-    if (k.cls === "event") {
-      for (const p of positions) add(p.venue, p.symbol);
-      for (const l of row?.venues ?? []) add(l.venue, row!.asset);
-    }
-    const w: CandleWindow = { since: rangeSince(range, this.realNow()), limit: HISTORY_MOST, range };
-    const barsOf = (got: Candle[] | CandlePage): CandlePage => pageOf(got, interval, { ...w, since: Math.min(w.since!, sessionsSince(range, this.realNow())) });
-    let missing: ReadMissing | undefined;
-    for (const t of tries.slice(0, 2)) {
-      const got = await within(CANDLE_MS, this.kept(t.v).candles!(t.symbol, interval, w), t.v.id, t.v.name);
-      if (isRefusal(got)) missing ??= { venue: t.v.id, venueName: t.v.name, why: got.message, code: got.code, part: "candles" };
-      else {
-        const page = barsOf(got);
-        if (page.bars.length) return { got: { venue: t.v.id, venueName: t.v.name, symbol: t.symbol, interval: page.interval ?? interval, bars: page.bars, ...(page.source ? { source: page.source } : {}) } };
-      }
-    }
-    if (k.cls === "crypto") {
-      // the public exchanges that serve this network, in turn, until two have answered: a source held back (its place rule, a ban) is not
-      // asked, one that refuses is passed over, and a place rule is never what is said in place of a chart
-      let answered = 0;
-      for (const s of this.publicMarkets().filter((x) => x.kind === "exchange" && x.candles && !this.marketReads.heldOf(`public:${x.id}`))) {
-        if (answered >= 2) break;
-        let refused = false;
-        for (const quote of ["USD", "USDT", "USDC"]) {
-          const symbol = `${k.name}/${quote}`;
-          const got = await within(CANDLE_MS, s.candles!(symbol, interval, w), s.id, s.name);
-          if (isRefusal(got)) {
-            if (got.code !== "E_VENUE_GEOBLOCKED") missing ??= { venue: s.id, venueName: s.name, why: got.message, code: got.code, part: "candles" };
-            if (holdBackMs(got) > 0) {
-              refused = true;
-              break;
-            }
-          } else {
-            const page = barsOf(got);
-            if (page.bars.length) return { got: { venue: s.id, venueName: s.name, symbol, interval: page.interval ?? interval, bars: page.bars, public: true, ...(page.source ? { source: page.source } : {}) } };
-          }
-        }
-        if (!refused) answered++;
-      }
-    }
-    return missing ? { missing } : {};
+    return { id, sym, live: this.liveVenues.get(id)! };
   }
 
   /** TRADE · Sell many: everything held that is not a dollar, venue by venue, with what selling all of it there would sign — a sell order in
@@ -1795,31 +1624,6 @@ export class PortfolioService {
     const usd = price !== undefined ? r2(qty * price * (m.contractSize ?? 1)) : undefined;
     const why = !writes ? "this server was started read-only" : v.trader!.can === false ? (v.trader!.whyNot ?? "this key may not trade") : !m.open ? (m.note ?? "the market is closed now") : !(qty > 0) ? "less than one step of size" : m.minQty !== undefined && qty < m.minQty ? `below the smallest order there (${m.minQty} ${m.base})` : m.minNotional !== undefined && usd !== undefined && usd < m.minNotional ? `below the smallest order there ($${m.minNotional})` : undefined;
     return { ...base, symbol: m.symbol, kind: m.kind, sellQty: qty, ...(price !== undefined ? { price } : {}), ...(usd !== undefined ? { usd } : {}), ready: why === undefined, ...(why ? { why } : {}) };
-  }
-
-  /** a fresh price for each of a few markets at venues connected live (each kept three seconds, as the order ticket's): what the face polls
-   * for the cards it shows */
-  async quotes(pairs: Array<{ venue: string; symbol: string }>): Promise<Array<{ venue: string; symbol: string; market?: Market; refusal?: Refusal }> | Refusal> {
-    if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted" });
-    if (!pairs.length || pairs.length > 12) return no("E_ACCOUNT_BAD_ACTION", { message: "quotes are asked for 1 to 12 markets at once, each venue|symbol" });
-    // the A shares go to China's source in ONE read; every other pair as before
-    const six = (p: { symbol: string }) => /^\d{6}$/.test(p.symbol);
-    const asked = pairs.filter((p) => p.venue === CHINA_ID && six(p)).map((p) => p.symbol);
-    const china = this.opts.china;
-    const cn: Promise<Map<string, ChinaMarket> | Refusal> = !asked.length ? Promise.resolve(new Map())
-      : china ? china.quotes(asked) : Promise.resolve(no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ }));
-    return Promise.all(pairs.map(async (p) => {
-      if (p.venue === CHINA_ID) {
-        if (!china) return { ...p, refusal: no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: CHINA_NOT_READ }) };
-        if (!six(p)) return { ...p, refusal: no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "an A share is its six digits" }) };
-        const got = await cn;
-        if (isRefusal(got)) return { ...p, refusal: got };
-        const m = got.get(p.symbol);
-        return m ? { ...p, market: m } : { ...p, refusal: no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: `no A-share quote for ${p.symbol}` }) };
-      }
-      const r = await this.liveMarket(p.venue, p.symbol);
-      return isRefusal(r) ? { ...p, refusal: r } : { ...p, market: r };
-    }));
   }
 
   /** THE AGENTS, one by one — what the Agent module reads: each key's standing and expiry, each limit the owner signed for it with what is
@@ -2128,7 +1932,7 @@ export class PortfolioService {
       realNow: () => this.liveDeps().clock(),
       mode: () => (this.openness.mode === "open" ? "open" : "guard"),
       page: () => this.accountView(),
-      explore: (o) => this.explore(o),
+      explore: (o) => this.connectedExplore(o),
       market: (venue, symbol) => this.liveMarket(venue, symbol),
       mark: (venue, symbol) => this.liveMark(venue, symbol),
       positions: (venue) => this.livePositions(venue),
@@ -2355,16 +2159,18 @@ export class PortfolioService {
     else keys.delete(key);
     if (!keys.size) this.followers.delete(k);
   }
-  /** the stream a page's market stands for: a paper account's market its listing source's (priceSource; the market read first where the
-   * account has not listed it yet), a venue that is one of the streamed sources itself (Coinbase connected with a key trades Coinbase's
-   * pairs) its own; nothing for the rest */
+  /** the stream a page's market stands for, at a venue connected to this account alone: a paper account's market its listing source's
+   * (priceSource; the market read first where the account has not listed it yet), a venue that is one of the streamed sources itself
+   * (Coinbase connected with a key trades Coinbase's pairs) its own; nothing for the rest — a public market's stream is the market's own
+   * (its /api/stream, the face's /data/market/stream) */
   private async streamAt(key: string): Promise<{ source: string; symbol: string } | undefined> {
     const i = key.indexOf(":");
     if (i <= 0) return undefined;
-    const venue = key.slice(0, i).replace(/^public:/, "");
+    const venue = key.slice(0, i);
     const symbol = key.slice(i + 1);
-    // a venue's id and a market as plain text, as every read of one takes them (oneMarket): nothing else is read for it, or held
+    // a venue's id and a market as plain text, as every read of one takes them (connectedMarket): nothing else is read for it, or held
     if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(venue) || !symbol || symbol.length > 160 || !isPlain(symbol)) return undefined;
+    if (!this.liveVenues.has(venue)) return undefined;
     const priced = this.priceSources.get(venue);
     if (priced) {
       let source = priced(symbol);
@@ -3967,7 +3773,7 @@ export interface ReceiveAddress {
   note?: string | undefined;
 }
 
-/** one market's price history, as GET /api/account/candles answers it (service.ts candles; live/trade.ts CandlePage for the words) */
+/** one market's price history at a connected venue, as GET /api/account/connected/candles answers it (service.ts candles; live/trade.ts CandlePage for the words) */
 export interface CandlesView {
   venue: string;
   venueName: string;
@@ -4002,7 +3808,7 @@ export interface CandlesView {
   from?: string | undefined;
 }
 
-/** one market's order book, as GET /api/account/book answers it */
+/** one market's order book at a connected venue, as GET /api/account/connected/book answers it */
 export interface BookView {
   venue: string;
   venueName: string;
@@ -4011,7 +3817,7 @@ export interface BookView {
   /** read from the venue's public market data, without a key: the venue is not connected */
   public?: true | undefined;
 }
-/** one market's latest trades, newest first, as GET /api/account/trades answers it */
+/** one market's latest trades at a connected venue, newest first, as GET /api/account/connected/trades answers it */
 export interface TradesView {
   venue: string;
   venueName: string;
@@ -4034,26 +3840,12 @@ function noTradesSaid(r: Refusal, venueName: string): string | undefined {
   return `${m[2]} publishes no trades the account can read`;
 }
 
-export interface CandleSeries {
-  venue: string;
-  venueName: string;
-  symbol: string;
-  interval: CandleInterval;
-  /** oldest first */
-  bars: Candle[];
-  /** read from an exchange's keyless public bars: the venue is not connected */
-  public?: true | undefined;
-  /** whose bars these are, where the source names them (live/trade.ts CandlePage.source) */
-  source?: string | undefined;
-}
-
 export interface AssetDetail {
   key: string;
   /** its holdings row, when the account holds it */
   row?: HeldRow | undefined;
   /** the same thing at every connected venue, priced for a buy */
   compare?: Comparison | undefined;
-  candles?: CandleSeries | undefined;
   positions: VenuePosition[];
   /** the account's open orders in it */
   orders: LiveOrder[];
@@ -4160,9 +3952,8 @@ export interface AgentsView {
 }
 
 const EXPLORE_SORTS: readonly ExploreSort[] = ["volume", "movers", "closing"];
-/** how long a venue has for its 24 hours, and for its price history */
+/** how long a venue has for its 24 hours */
 const STATS_MS = 4_000;
-const CANDLE_MS = 6_000;
 /** how long a chart's first view may take (Nasdaq's whole history of a share is about ten seconds), and one page scrolled left — the face
  * waits longer than either (the retired page's HISTORY_TIMEOUT_MS and API_TIMEOUT_MS, ui/core.js at 9614314c, which its deleted test/unit/ui-chart.test.ts held apart) */
 export const HISTORY_WAIT_MS = 20_000;
@@ -4181,7 +3972,7 @@ const HISTORY_KEPT = 64;
 const HISTORY_KEPT_BARS = 250_000;
 const PAPER_BARS_KEPT = 200;
 
-/** A PRICE HISTORY AS ASKED (GET /api/account/candles; GET /api/account/connected/candles, portfolio_live_candles): the bar size (empty: the range's own, else 1h), a range or the
+/** A PRICE HISTORY AS ASKED (GET /api/account/connected/candles, portfolio_live_candles): the bar size (empty: the range's own, else 1h), a range or the
  * bar a page is asked before — never both — and the most bars, held to what can be asked; or why not, in words */
 export function historyAsk(interval: string, ask: { range?: string | undefined; before?: string | number | undefined; limit?: string | number | undefined }): { iv: CandleInterval; range?: CandleRange | undefined; before?: number | undefined; limit: number } | Refusal {
   const r = String(ask.range ?? "").trim().toUpperCase();

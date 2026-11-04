@@ -4,7 +4,8 @@
  * money, a fresh temporary home — through the smokes' own helper (`tests/helpers/standin.ts`, which
  * removes that home after the stop only when it is a `ui-standin-` directory directly under the
  * tmpdir), reads each route with a bare loopback `fetch` (the Account's fence answers a request
- * that carries no Origin), posts three owner prepares as the page posts them (`{ draft }`, unsigned,
+ * that carries no Origin) — the public bodies (Markets' explore) from the stand-in's own market, at
+ * the market's paths (`Standin.marketUrl`, `/api/explore`), the rest from the Account — posts three owner prepares as the page posts them (`{ draft }`, unsigned,
  * so no pairing: a live order, a watch, and an answer to the page's first card), drops every
  * `native` and `icon` key, cuts every array of a read to its first 12 entries (`venues`' arrays and
  * a prepared action's stay whole: every connector judged, every field signed), writes each answer
@@ -43,11 +44,12 @@ const STREAM_FRAMES = 10;
 const STREAM_MS = 20_000;
 const READ_MS = 60_000;
 
-/** The fixtures, by file name, and the read each one is; `candles` and `market` follow from `explore-all`. */
-const READS: readonly (readonly [name: string, path: string])[] = [
+/** The fixtures, by file name, the read each one is, and whose it is: the market's public reads (`market`) or the
+ * Account's (the default); `candles` and `market` follow from the Account's connected explore. */
+const READS: readonly (readonly [name: string, path: string, from?: "market"])[] = [
   ["account", "/api/account"],
-  ["explore-all", "/api/account/explore"],
-  ["explore-predictions", "/api/account/explore?tab=predictions"],
+  ["explore-all", "/api/explore", "market"],
+  ["explore-predictions", "/api/explore?tab=predictions", "market"],
   ["holdings", "/api/account/holdings?cost=1"],
   ["holdings-paper", "/api/account/holdings?cost=1&paper=1"],
   ["positions", "/api/account/positions"],
@@ -105,11 +107,12 @@ function firstCard(account: unknown): { id: string; hash: string } {
   return { id: card.id, hash: card.hash };
 }
 
-/** The first Markets row with a venue connected live: that venue's line, which the candles and market reads ask for. */
+/** The first row of the Account's connected explore with a venue connected live: that venue's line, which the candles
+ * and market reads ask for. */
 function connectedLeg(explore: unknown): ExploreLeg {
   const items = (explore as { items: { at: ExploreLeg[] }[] }).items;
   const leg = items.flatMap((item) => item.at).find((at) => at.connected === true);
-  if (leg === undefined) throw new Error("no row of /api/account/explore is at a venue connected live");
+  if (leg === undefined) throw new Error("no row of /api/account/connected/explore is at a venue connected live");
   return leg;
 }
 
@@ -165,13 +168,14 @@ async function streamFrames(url: string): Promise<string> {
   return frames;
 }
 
-/** Every read, the prepares, then the stream: the answers and the prepared actions by fixture name, and the frames. */
-async function capture(base: string): Promise<{ answers: Map<string, unknown>; prepared: Map<string, unknown>; frames: string }> {
+/** Every read, the prepares, then the stream: the answers and the prepared actions by fixture name, and the frames.
+ * `base` is the Account's, `marketBase` the stand-in's market. */
+async function capture(base: string, marketBase: string): Promise<{ answers: Map<string, unknown>; prepared: Map<string, unknown>; frames: string }> {
   const answers = new Map<string, unknown>();
-  for (const [name, path] of READS) answers.set(name, await read(base, path));
-  const { venue, symbol } = connectedLeg(answers.get("explore-all"));
+  for (const [name, path, from] of READS) answers.set(name, await read(from === "market" ? marketBase : base, path));
+  const { venue, symbol } = connectedLeg(await read(base, "/api/account/connected/explore"));
   const market = new URLSearchParams({ venue, symbol }).toString();
-  answers.set("candles", await read(base, `/api/account/candles?${market}&range=1D`));
+  answers.set("candles", await read(base, `/api/account/connected/candles?${market}&range=1D`));
   answers.set("market", await read(base, `/api/account/market?${market}`));
   const card = firstCard(answers.get("account"));
   const prepared = new Map<string, unknown>();
@@ -183,7 +187,7 @@ for (const [path, fix] of [[CLI, "run npm ci in account/"], [STANDIN, "not the A
   if (!existsSync(path)) throw new Error(`${path} is missing: ${fix} (or set FACE_ACCOUNT_SEAT_DIR to another copy)`);
 }
 const standin = await startStandin(await freePort(), DIR);
-const { answers, prepared, frames } = await capture(standin.url).finally(() => stopStandin(standin));
+const { answers, prepared, frames } = await capture(standin.url, standin.marketUrl).finally(() => stopStandin(standin));
 mkdirSync(OUT, { recursive: true });
 for (const [name, body] of [...answers, ...prepared]) {
   const file = join(OUT, `${name}.json`);

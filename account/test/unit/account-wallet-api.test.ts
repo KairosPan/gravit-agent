@@ -196,39 +196,39 @@ afterAll(async () => {
 });
 
 describe("Markets: what there is to trade", () => {
-  it("merges the connected venue and a public one into one row, marks the public one Connect to trade, and does not ask the connected venue's own public side", async () => {
-    const r = await get("/api/account/explore");
+  // the public lines (Connect to trade, the tokens only read) are the market's explore, joined beside these by the face: the market's
+  // live-explore tests hold how a public line is marked and that a connected venue's public side is not asked
+  it("lists the connected venues' rows alone: no public line, and no public source asked", async () => {
+    const r = await get("/api/account/connected/explore");
     expect(r.status).toBe(200);
     const btc = r.body.items.find((i: { key: string }) => i.key === "coin:BTC");
-    expect(btc.at.map((a: { venue: string; connected: boolean; public: boolean; canTrade: unknown }) => [a.venue, a.connected, a.public, a.canTrade])).toEqual(expect.arrayContaining([["ex", true, false, true], ["pubex", false, true, false]]));
-    expect(btc.at.find((a: { venue: string }) => a.venue === "pubex").connectTo).toBe("pubex");
-    expect(btc.volumeUsd24h).toBe(6e9);
+    expect(btc.at.map((a: { venue: string; connected: boolean; public: boolean; canTrade: unknown }) => [a.venue, a.connected, a.public, a.canTrade])).toEqual([["ex", true, false, true]]);
     expect(r.body.items.some((i: { key: string }) => i.key === "perp:BTC")).toBe(true);
-    // the tokens no connection trades are read even though their connector is the connected exchange's
-    expect(r.body.items.find((i: { kind: string }) => i.kind === "rwa")?.at[0]).toMatchObject({ venue: "toks", public: true, canTrade: false });
-    expect(pub.shadow).toBe(0);
+    expect(r.body.items.some((i: { kind: string }) => i.kind === "rwa")).toBe(false);
+    expect([pub.pubex, pub.shadow]).toEqual([0, 0]);
     expect(r.body.movers.map((m: { key: string }) => m.key)).toContain("coin:BTC");
+    expect((await fetch(`${server.url}/api/account/explore`)).status).toBe(404);
   });
 
   it("answers the same question from what it found for a while, and refuses a tab or a sort it does not have", async () => {
-    const before = pub.pubex;
-    await get("/api/account/explore");
-    expect(pub.pubex).toBe(before);
-    expect((await get("/api/account/explore?tab=crypto")).body.items.every((i: { tabs: string[] }) => i.tabs.includes("crypto"))).toBe(true);
-    const badTab = await get("/api/account/explore?tab=nft");
+    const before = calls.markets;
+    await get("/api/account/connected/explore");
+    expect(calls.markets).toBe(before);
+    expect((await get("/api/account/connected/explore?tab=crypto")).body.items.every((i: { tabs: string[] }) => i.tabs.includes("crypto"))).toBe(true);
+    const badTab = await get("/api/account/connected/explore?tab=nft");
     expect([badTab.status, badTab.body.refusal.code]).toEqual([409, "E_ACCOUNT_BAD_ACTION"]);
-    expect((await get("/api/account/explore?sort=random")).status).toBe(409);
+    expect((await get("/api/account/connected/explore?sort=random")).status).toBe(409);
   });
 
   it("reads one row by its own key — kept apart from the plain read it may follow in the cache — and refuses a key too long or asked twice", async () => {
     // the plain read first: its answer stands in the cache for a while
-    expect((await get("/api/account/explore")).body.items.length).toBeGreaterThan(1);
-    const one = await get("/api/account/explore?key=coin:BTC");
+    expect((await get("/api/account/connected/explore")).body.items.length).toBeGreaterThan(1);
+    const one = await get("/api/account/connected/explore?key=coin:BTC");
     expect(one.status).toBe(200);
     expect(one.body.items.map((i: { key: string }) => i.key)).toEqual(["coin:BTC"]);
-    const long = await get(`/api/account/explore?key=${"x".repeat(201)}`);
+    const long = await get(`/api/account/connected/explore?key=${"x".repeat(201)}`);
     expect([long.status, long.body.refusal.code]).toEqual([409, "E_ACCOUNT_BAD_ACTION"]);
-    expect((await get("/api/account/explore?key=a&key=b")).status).toBe(400);
+    expect((await get("/api/account/connected/explore?key=a&key=b")).status).toBe(400);
   });
 });
 
@@ -261,18 +261,19 @@ describe("Portfolio: what is held", () => {
     expect((await get("/api/account/positions?venue=ex")).body.positions).toHaveLength(1);
   });
 
-  it("one asset: its row, every venue's price, its price history, its position, and what was paid", async () => {
-    const r = await get("/api/account/asset?key=crypto:BTC&interval=1h");
+  it("one asset: its row, every venue's price, its position, and what was paid — its price history is the chart's own read", async () => {
+    const r = await get("/api/account/asset?key=crypto:BTC");
     expect(r.status).toBe(200);
     expect(r.body.row.key).toBe("crypto:BTC");
     expect(r.body.compare.rows[0]).toMatchObject({ venue: "ex", symbol: "BTC/USDT" });
-    expect(r.body.candles).toMatchObject({ venue: "ex", symbol: "BTC/USDT", interval: "1h", bars: BARS });
+    expect(r.body.candles).toBeUndefined();
+    // the connected venue's own bars are read apart
+    expect((await get("/api/account/connected/candles?venue=ex&symbol=BTC/USDT&interval=1h&range=1M")).body).toMatchObject({ ok: true, venue: "ex", symbol: "BTC/USDT", candles: BARS });
     expect(r.body.positions.map((p: { symbol: string }) => p.symbol)).toEqual([PERP.symbol]);
     expect(r.body.cost.map((c: { key: string }) => c.key)).toEqual(expect.arrayContaining(["crypto:BTC", `position:ex:${PERP.symbol}`]));
-    // Markets' name for a coin is taken too; a key that is not one, or an interval there is none of, is refused
+    // Markets' name for a coin is taken too; a key that is not one is refused
     expect((await get("/api/account/asset?key=coin:BTC")).body.key).toBe("crypto:BTC");
     expect((await get("/api/account/asset?key=BTC")).status).toBe(409);
-    expect((await get("/api/account/asset?key=crypto:BTC&interval=2h")).status).toBe(409);
   });
 });
 
@@ -290,12 +291,12 @@ describe("Receive, quotes, Sell many", () => {
   });
 
   it("fresh prices for a few markets, each answered on its own; more than twelve is the service's refusal, a market without its venue a malformed request", async () => {
-    const r = await get(`/api/account/quotes?pairs=${encodeURIComponent("ex|BTC/USDT,ex|NOPE/USDT")}&pair=${encodeURIComponent("brk|AAPL")}`);
+    const r = await get(`/api/account/connected/quotes?pairs=${encodeURIComponent("ex|BTC/USDT,ex|NOPE/USDT,pubex|BTC/USD")}&pair=${encodeURIComponent("brk|AAPL")}`);
     expect(r.status).toBe(200);
-    expect(r.body.quotes.map((q: { symbol: string; market?: { price: number }; refusal?: { code: string } }) => [q.symbol, q.market?.price ?? q.refusal?.code])).toEqual([["BTC/USDT", 60_000], ["NOPE/USDT", "E_VENUE_REJECTED"], ["AAPL", 230]]);
-    const many = await get(`/api/account/quotes?pairs=${Array.from({ length: 13 }, () => "ex|BTC/USDT").join(",")}`);
+    expect(r.body.quotes.map((q: { symbol: string; market?: { price: number }; refusal?: { code: string } }) => [q.symbol, q.market?.price ?? q.refusal?.code])).toEqual([["BTC/USDT", 60_000], ["NOPE/USDT", "E_VENUE_REJECTED"], ["BTC/USD", "E_WALLET_NOT_CONNECTED"], ["AAPL", 230]]);
+    const many = await get(`/api/account/connected/quotes?pairs=${Array.from({ length: 13 }, () => "ex|BTC/USDT").join(",")}`);
     expect([many.status, many.body.refusal?.code]).toEqual([409, "E_ACCOUNT_BAD_ACTION"]);
-    expect((await get("/api/account/quotes?pairs=BTC/USDT")).status).toBe(400);
+    expect((await get("/api/account/connected/quotes?pairs=BTC/USDT")).status).toBe(400);
   });
 
   it("everything held that is not a dollar, with what selling it would sign: a sell down to the step, a close for a perpetual", async () => {

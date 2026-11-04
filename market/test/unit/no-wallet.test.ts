@@ -32,6 +32,9 @@ describe("the market holds no wallet", () => {
     for (const f of ["public-markets","stream-hub","china","akshare","cn-relay","cn-ifind","prices","us-quotes","public-stocks","public-rwa","history-stocks"])
       expect(existsSync(join(SRC, "live", `${f}.ts`))).toBe(true);
   });
+  it("the market's reads say nothing of an account", () => {
+    for (const f of ["reads.ts", "follows.ts", "routes-cn.ts", "protocol.ts"]) expect(text(join(SRC, f)), f).not.toMatch(/this account|connected live|the account (reads|can read)|E_WALLET_ACCOUNT_UNKNOWN/);
+  });
   it("the README names the port, the scripts and the AKShare command", () => {
     const r = readFileSync(join(ROOT, "README.md"), "utf8");
     for (const s of ["127.0.0.1:4821", "npm run market", "npm run market:service", "MARKET_AKSHARE_BIN", "MARKET_BIND", "MARKET_HOSTS", "NOTICE"]) expect(r).toContain(s);

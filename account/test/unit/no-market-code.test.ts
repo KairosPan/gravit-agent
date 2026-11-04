@@ -6,6 +6,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PortfolioService } from "../../src/portfolio/service.ts";
+import { fakeSource } from "../../../market/test/fakes.ts";
 
 const SRC = fileURLToPath(new URL("../../src/", import.meta.url));
 const MARKET_ONLY_HOST = /gtimg\.cn|finance\.qq\.com|eastmoney\.com|51ifind\.com|api\.nasdaq\.com|cdn-api\.cboe\.com|api-futures\.kucoin\.com|api\.bybit\.com|contract\.mexc\.com|fapi\.binance\.com|www\.deribit\.com|api\.gateio\.ws|ws\.kraken\.com|ws\.okx\.com|advanced-trade-ws\.coinbase\.com/;
@@ -42,9 +43,34 @@ describe("account/src runs no market code", () => {
     const asked: string[] = [];
     try {
       const svc = await PortfolioService.create({ home, real: true, venues: "frontline", liveDeps: { http: async (url) => (asked.push(url), { status: 599, body: undefined, text: "" }) } });
-      await svc.explore({ q: "BTC" });
-      await svc.quotes([{ venue: "coinbase", symbol: "BTC/USD" }]);
+      await svc.connectedExplore({ q: "BTC" });
+      await svc.connectedQuotes([{ venue: "coinbase", symbol: "BTC/USD" }]);
       expect(asked).toEqual([]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  // ACCOUNT SPLIT PLAN A2 TASK 7: the account answers no Market read — its public explore, quotes, candles, book and trades, and the four
+  // relays (Lunhui's and AKShare's), are the market's own routes; the face asks the market itself
+  it("account/src serves no market route and no relay", () => {
+    const server = readFileSync(join(SRC, "portfolio", "server.ts"), "utf8");
+    for (const route of ["/api/cn/", "/api/akshare/", '"/api/account/explore"', '"/api/account/quotes"', '"/api/account/candles"', '"/api/account/book"', '"/api/account/trades"']) expect(server, route).not.toContain(route);
+  });
+
+  it("MarketClient has no raw", () => {
+    // the relay's transport went with the relays (its 5xx cleared the market's staleness: a market that only errored read as answering)
+    expect(readFileSync(join(SRC, "portfolio", "market", "client.ts"), "utf8")).not.toMatch(/\braw\s*\(/);
+  });
+
+  it("the asset answer carries no candles", async () => {
+    // a chart's history is the market's (market_candles; the face's /data/market/candles) or a connected venue's own (connected/candles)
+    const home = mkdtempSync(join(tmpdir(), "no-market-code-"));
+    try {
+      const svc = await PortfolioService.create({ home, real: true, venues: "frontline", publicMarkets: [fakeSource()], liveDeps: { http: async () => ({ status: 599, body: undefined, text: "" }) } });
+      const a = await svc.asset("crypto:BTC");
+      expect(a).not.toHaveProperty("code");
+      expect(a).not.toHaveProperty("candles");
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

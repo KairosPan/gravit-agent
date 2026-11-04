@@ -62,19 +62,13 @@
  *                                                        at one venue, or at every venue that lists it (a paper account's book;
  *                                                        Hyperliquid's userFunding for the account's address), `limit` lines (1 to 500)
  *                                                        at most, and the venues that could not be read (a read)
- *   GET  /api/account/explore?tab=&q=&key=&sort=&limit=  Markets: what the connected venues list and what the venues not connected
- *                                                        publish without a key ("Connect to trade"), as one list with tabs, movers,
- *                                                        what closes soon and what trades most; `key`, a row's own exactly as `items`
- *                                                        names it (coin:BTC, kalshi:<market ticker>), keeps only that row, before the
- *                                                        cut to `limit` (at most 200 characters; `q` still narrows what is read)
  *   GET  /api/account/holdings?cost=1                    Portfolio: what is held by asset across every venue, the dollars that are ready,
  *                                                        the last 24 hours; `cost=1` adds what was paid; `paper=1` the paper accounts'
  *                                                        instead (the Paper lens), summed as paper money
  *   GET  /api/account/history?range=1d|1w|1m|all         the net worth curve
  *   GET  /api/account/receive?venue=&asset=&network=     where to send an asset so that it lands at a venue
- *   GET  /api/account/asset?key=crypto:BTC&interval=1h   one asset: its row, every venue's price, price history (over `range` where
- *                                                        named: 1D … MAX), positions, orders, lines
- *   GET  /api/account/quotes?pairs=okx|BTC/USDT,…        fresh prices for up to twelve markets
+ *   GET  /api/account/asset?key=crypto:BTC              one asset: its row, every connected venue's price, positions, orders, lines (its
+ *                                                        price history is the market's candles, or a connected venue's own below)
  *   GET  /api/account/sellable                           everything held that is not a dollar, and what selling it would sign
  *   GET  /api/account/agents                             the agents one by one: keys, limits, cards, orders, payments, wallets, intents
  *   GET  /api/account/desk                               THE DESK (account/desk.ts): the account's own agents, as the face draws them — the
@@ -116,19 +110,23 @@
  *                                                        reads it: its notes (the waiting ones too), the switches, what its limits say
  *   GET  /api/account/memory/agent?address=&q=           one agent's memory as that agent reads it (portfolio_memory): its notes kept,
  *                                                        the ones waiting for the owner, its limits in words, and what other agents share
- *   GET  /api/account/candles?venue=&symbol=&interval=&range=   one market's price history (1m · 5m · 15m · 1h · 4h · 1d · 1w), a chart's
- *                                                        first view of a range (1D 5D 1M 3M 6M YTD 1Y 5Y MAX, in its own bar size unless
- *                                                        one is named) — or &before=<bar start ms>&limit= instead, one page scrolled left —
- *                                                        with `more` (older bars exist) and, where the history ends, why: a connected
- *                                                        venue's own, or a venue not connected from its public data, without a key; kept
- *                                                        seconds to minutes in a bounded memory, nothing written
- *   GET  /api/account/book?venue=&symbol=&depth=20        one market's order book, best first (a market whose source has no book: its best
+ *   GET  /api/account/connected/explore?tab=&q=&key=&sort=&limit=   Markets, the connected half: what the venues connected to this
+ *                                                        account list, as one list with tabs, movers, what closes soon and what trades
+ *                                                        most; `key`, a row's own exactly as `items` names it, keeps only that row (at
+ *                                                        most 200 characters). No public line and no China: those are the market's
+ *   GET  /api/account/connected/quotes?pairs=okx|BTC/USDT,…   fresh prices for up to twelve markets at the connected venues
+ *   GET  /api/account/connected/candles?venue=&symbol=&interval=&range=   one connected venue's own price history (1m · 5m · 15m · 1h ·
+ *                                                        4h · 1d · 1w), a chart's first view of a range (1D 5D 1M 3M 6M YTD 1Y 5Y MAX) — or
+ *                                                        &before=<bar start ms>&limit= instead, one page scrolled left — with `more` and,
+ *                                                        where the history ends, why; kept seconds to minutes in a bounded memory
+ *   GET  /api/account/connected/book?venue=&symbol=&depth=20    one connected venue's order book, best first (none read there: its best
  *                                                        bid and ask only, depth "top"); kept a second and a half
- *   GET  /api/account/trades?venue=&symbol=&limit=30      one market's latest trades, newest first; kept three seconds (a source that
- *                                                        publishes no trades at all: an empty list and `none`, the sentence saying so, 200)
- *   GET  /api/account/connected/{explore,quotes,candles,book,trades}   the same reads, the same queries, for the venues connected to this
- *                                                        account alone: no public line and no China (explore), and a public source named
- *                                                        refused by name (409 E_WALLET_NOT_CONNECTED) — its public data is the market's
+ *   GET  /api/account/connected/trades?venue=&symbol=&limit=30  one connected venue's latest trades, newest first; kept three seconds
+ *                                                        (none published: an empty list and `none`, the sentence saying so, 200)
+ *                                                        Each of the five refuses a venue not connected to this account by name (409
+ *                                                        E_WALLET_NOT_CONNECTED): a public market's data is the market service's
+ *                                                        (127.0.0.1:4821: /api/explore, /api/quotes, /api/candles, /api/book, /api/trades,
+ *                                                        and Lunhui's and AKShare's routes), which the face asks itself
  *   GET  /api/account/earn?venue=&asset=                 Earn: the products the connected venues offer (the MetaMask Agent Wallet's
  *                                                        vaults through mm, OKX Simple Earn, Kraken Earn), what is in them, and the venues
  *                                                        that could not be read (money in or out is a signed liveEarn / agentLiveEarn)
@@ -172,7 +170,7 @@ import { isPending, loadOpenness, PortfolioService } from "./service.ts";
 import { defaultHome } from "./home.ts";
 import { pairingCode } from "./account/pairing.ts";
 import type { Side } from "./venues.ts";
-import { MARKET_DOWN, MARKET_URL_DEFAULT } from "./market/client.ts";
+import { MARKET_URL_DEFAULT } from "./market/client.ts";
 import { connectMarket, type MarketLink } from "./market/link.ts";
 
 /** what every request outside /api/ is answered (404), with or without the account layer: the Account serves no page */
@@ -218,26 +216,10 @@ export interface PortfolioServerOptions {
   /** how often the net worth curve gets a point (account/networth.ts), in milliseconds, on the real clock: 300000 (five minutes) unless
    * said; 0 takes none, nor the points a connection or a disconnection adds. Only with the account layer mounted */
   snapshotMs?: number | undefined;
-  /** THE MARKET (market/link.ts): Lunhui's reach (/api/cn/relay, /api/cn/ifind) and the AKShare sidecar (/api/akshare/*) are the market's,
-   * relayed to it byte for byte; absent, the four routes answer `off` and never the network. The server's close closes the link */
+  /** THE MARKET'S LINK (market/link.ts), which the service reads its public sources, hub and prices over: the server's close closes it.
+   * The account answers none of the market's routes — Lunhui's and AKShare's are the market's own, asked by the face itself */
   market?: MarketLink | undefined;
 }
-
-/** the refusals the four routes answer themselves: with no market (`off`), a request the market would refuse before reading anything, or
- * the market not answering (`unreachable`, AKShare's `unavailable`) — the market's own refusals come back as it said them */
-const RELAY_STATUS = { "not-listed": 403, unreachable: 502, off: 503 } as const;
-const IFIND_STATUS = { unreachable: 502, "not-the-query": 400, off: 503 } as const;
-const AKSHARE_STATUS = { off: 503, "bad-arguments": 400, unavailable: 503 } as const;
-/** a relay URL's longest (the market's cn-relay.ts RELAY_URL_MAX), and the one query iFinD is asked (its cn-ifind.ts IFIND_QUERY): what the
- * routes check before they answer `off`, as they did when the account ran them */
-const RELAY_URL_MAX = 2_048;
-const IFIND_QUERY = /^A股 \d{4}年\d{2}月\d{2}日涨跌幅 成交额 主力资金流向 所属概念$/;
-/** how long the account waits for the market's answer to a relay: Lunhui's (the relay's own longest, and its queue's), and AKShare's (its
- * 120 s call, and the child's start) */
-const CN_RELAY_MS = 20_000;
-const AKSHARE_RELAY_MS = 125_000;
-/** the market's headers a relay answers with, where it sent them */
-const RELAYED_HEADERS = ["content-type", "location", "x-cn-relay", "x-cn-ifind", "x-content-type-options"] as const;
 
 export interface PortfolioServerHandle {
   url: string;
@@ -418,73 +400,7 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   // on the real account the door an agent uses is the live one: the older write path is refused there, so it is not the one to point at
   const signedOnly = (res: express.Response, what: string, as: string) => void res.status(401).json({ ok: false, refusal: no("E_ACCOUNT_BAD_SIGNATURE", { tool: what, message: `${what} takes no unsigned caller: an authorised agent key signs ${svc.real ? "`agentLiveOrder` / `agentLiveMove`" : `\`${as}\``} at POST /api/exchange` }) });
   // the fixture's event contracts and the simulated router are the simulated statement's: a real account answers from its venues
-  const simulatedOnly = (res: express.Response) => void res.status(409).json({ ok: false, refusal: no("E_ACCOUNT_BAD_ACTION", { message: "this account holds real accounts only: Markets is GET /api/account/explore, a price is GET /api/account/market" }) });
-
-  // Lunhui's reach and the AKShare sidecar: four reads (they work on a --read-only account), behind the fence above, each the market's —
-  // relayed to it unchanged, and its status, body and headers (RELAYED_HEADERS) answered unchanged, never decoded. A caller that goes away
-  // aborts the market's request (callerGone), so a closed tab does not hold the sidecar. A refusal of the account's own is its word and status
-  /** aborted when the caller goes away before the answer is sent */
-  const callerGone = (res: express.Response) => {
-    const c = new AbortController();
-    res.on("close", () => { if (!res.writableFinished) c.abort(); });
-    return c.signal;
-  };
-  /** the market's answer to `path`, relayed; `down` when it did not answer */
-  const relay = async (res: express.Response, path: string, init: { method: "GET" | "POST"; headers?: Record<string, string>; body?: string; timeoutMs: number }, down: () => void) => {
-    const signal = callerGone(res);
-    const r = await opts.market!.client.raw(path, { ...init, signal });
-    if (isRefusal(r)) return signal.aborted ? undefined : down();
-    let bytes: Buffer;
-    try {
-      bytes = Buffer.from(await r.arrayBuffer());
-    } catch {
-      return signal.aborted || res.headersSent ? undefined : down();
-    }
-    if (signal.aborted) return;
-    res.status(r.status);
-    for (const h of RELAYED_HEADERS) {
-      const v = r.headers.get(h);
-      if (v !== null) res.setHeader(h, v);
-    }
-    res.end(bytes);
-  };
-  const forwarded = (req: express.Request): Record<string, string> => {
-    const headers: Record<string, string> = {};
-    for (const k of ["accept", "referer", "user-agent"]) { const v = req.headers[k]; if (typeof v === "string") headers[k] = v; }
-    return headers;
-  };
-  app.get("/api/cn/relay", wrap(async (req, res) => {
-    const refuse = (word: keyof typeof RELAY_STATUS) => void res.status(RELAY_STATUS[word]).set("x-cn-relay", "refused").json({ ok: false, relay: word });
-    if (!opts.market) {
-      const raw = req.query.url;
-      if (typeof raw !== "string" || raw.length > RELAY_URL_MAX) return refuse("not-listed");
-      return refuse("off");
-    }
-    const at = req.originalUrl.indexOf("?");
-    await relay(res, `/api/cn/relay${at >= 0 ? req.originalUrl.slice(at) : ""}`, { method: "GET", headers: forwarded(req), timeoutMs: CN_RELAY_MS }, () => refuse("unreachable"));
-  }));
-  app.post("/api/cn/ifind", wrap(async (req, res) => {
-    const refuse = (word: keyof typeof IFIND_STATUS) => void res.status(IFIND_STATUS[word]).set("x-cn-ifind", "refused").json({ ok: false, ifind: word });
-    if (!opts.market) {
-      const q = (req.body as { query?: unknown } | undefined)?.query;
-      if (typeof q !== "string" || !IFIND_QUERY.test(q)) return refuse("not-the-query");
-      return refuse("off");
-    }
-    await relay(res, "/api/cn/ifind", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(req.body ?? {}), timeoutMs: CN_RELAY_MS }, () => refuse("unreachable"));
-  }));
-  const akshareRefuse = (res: express.Response, word: keyof typeof AKSHARE_STATUS, message: string) => void res.status(AKSHARE_STATUS[word]).json({ ok: false, akshare: word, message });
-  app.get("/api/akshare/tools", wrap(async (_req, res) => {
-    if (!opts.market) return akshareRefuse(res, "off", "this Account runs no AKShare sidecar");
-    await relay(res, "/api/akshare/tools", { method: "GET", timeoutMs: AKSHARE_RELAY_MS }, () => akshareRefuse(res, "unavailable", MARKET_DOWN));
-  }));
-  app.post("/api/akshare/call", wrap(async (req, res) => {
-    if (!opts.market) {
-      const body = req.body as { tool?: unknown; arguments?: unknown } | undefined;
-      if (typeof body?.tool !== "string") return akshareRefuse(res, "bad-arguments", "the body is {tool: string, arguments?: object}");
-      return akshareRefuse(res, "off", "this Account runs no AKShare sidecar");
-    }
-    await relay(res, "/api/akshare/call", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(req.body ?? {}), timeoutMs: AKSHARE_RELAY_MS }, () => akshareRefuse(res, "unavailable", MARKET_DOWN));
-  }));
+  const simulatedOnly = (res: express.Response) => void res.status(409).json({ ok: false, refusal: no("E_ACCOUNT_BAD_ACTION", { message: "this account holds real accounts only: Markets is the market service's explore and the connected venues' GET /api/account/connected/explore, a price is GET /api/account/market" }) });
 
   app.get("/api/overview", wrap(async (_req, res) => {
     await svc.account?.settle();
@@ -705,17 +621,6 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     answerOf(res, await svc.allFunding({ ...(q.venue ? { venue: q.venue } : {}), ...(q.limit ? { limit: Number(q.limit) } : {}) }));
   }));
 
-  // MARKETS: what there is to trade, at the connected venues and (keyless, "Connect to trade") at the venues not connected. A limit is a
-  // plain count of markets (digits), nothing a number parser would also take. A key is one row's own, given once: read past the 200
-  // characters the service takes, so that a longer one is refused there rather than cut into another
-  app.get("/api/account/explore", wrap(async (req, res) => {
-    if (!mounted(res)) return;
-    const q = strings(req, res, { tab: 20, q: 80, key: 240, sort: 20, limit: 6 });
-    if (!q) return;
-    if (q.limit && !/^\d{1,3}$/.test(q.limit)) return void bad(res, "limit is a count of markets, 1 to 200, in digits");
-    answerOf(res, await svc.explore({ tab: q.tab, q: q.q, key: q.key, sort: q.sort, ...(q.limit ? { limit: Number(q.limit) } : {}) }));
-  }));
-
   // PORTFOLIO: what is held, by asset across every venue, the dollars that are ready, the last 24 hours; `cost=1` adds what was paid
   app.get("/api/account/holdings", wrap(async (req, res) => {
     if (!mounted(res)) return;
@@ -743,24 +648,13 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     answerOf(res, await svc.receive(q.venue, q.asset, q.network));
   }));
 
-  // one asset: its row, every venue's price, its price history (over `range` where one is named, else the range of its bar size),
-  // positions, open orders, statement lines and cost
+  // one asset: its row, every connected venue's price, positions, open orders, statement lines and cost (its price history is the market's
+  // candles, or a connected venue's own: /api/account/connected/candles)
   app.get("/api/account/asset", wrap(async (req, res) => {
     if (!mounted(res)) return;
-    const q = strings(req, res, { key: 140, interval: 4, range: 4 });
+    const q = strings(req, res, { key: 140 });
     if (!q) return;
-    answerOf(res, await svc.asset(q.key, q.interval || "1h", q.range || undefined));
-  }));
-
-  // a fresh price for each of up to twelve markets: ?pairs=okx|BTC/USDT,kalshi|KXFED-25DEC-T4.00:YES (or one ?pair= each). How many is
-  // the service's rule, answered as its refusal; the shape of each is this route's
-  app.get("/api/account/quotes", wrap(async (req, res) => {
-    if (!mounted(res)) return;
-    const list = (v: unknown): string[] => (Array.isArray(v) ? v : v === undefined ? [] : [v]).filter((x): x is string => typeof x === "string");
-    const pairs = [...list(req.query.pairs).flatMap((x) => x.split(",")), ...list(req.query.pair)].map((x) => x.trim()).filter(Boolean);
-    const parsed = pairs.map((x) => ({ venue: x.slice(0, Math.max(0, x.indexOf("|"))), symbol: x.slice(x.indexOf("|") + 1).slice(0, 160) }));
-    if (parsed.some((p) => !p.venue || !p.symbol)) return void bad(res, "each market is venue|symbol, e.g. okx|BTC/USDT");
-    answerOf(res, await svc.quotes(parsed), "quotes");
+    answerOf(res, await svc.asset(q.key));
   }));
 
   // TRADE · Sell many: everything held that is not a dollar, with what selling it at its venue would sign
@@ -819,35 +713,11 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     answerOf(res, svc.memoryFor(q.address, { q: q.q || undefined }));
   }));
 
-  // one market's price history: a connected venue's own, or a public source's without a key. The venue is an id the account knows and the
-  // symbol plain text: neither ever names a host (service.ts candles)
-  app.get("/api/account/candles", wrap(async (req, res) => {
-    if (!mounted(res)) return;
-    const q = strings(req, res, { venue: 60, symbol: 200, interval: 4, range: 4, before: 16, limit: 6 });
-    if (!q) return;
-    answerOf(res, await svc.candles(q.venue, q.symbol, q.interval, { range: q.range, before: q.before, limit: q.limit }));
-  }));
-
-  // one market's order book (best first, `depth` levels a side, 1 to 50) and its latest trades (newest first, `limit`, 1 to 100): a connected
-  // venue's own, or a public source's without a key; a market whose source has no book, its best bid and ask only (service.ts marketBook)
-  app.get("/api/account/book", wrap(async (req, res) => {
-    if (!mounted(res)) return;
-    const q = strings(req, res, { venue: 60, symbol: 200, depth: 4 });
-    if (!q) return;
-    if (q.depth && !/^\d{1,2}$/.test(q.depth)) return void bad(res, "depth is a count of levels a side, 1 to 50, in digits");
-    answerOf(res, await svc.marketBook(q.venue, q.symbol, q.depth ? Number(q.depth) : 20));
-  }));
-  app.get("/api/account/trades", wrap(async (req, res) => {
-    if (!mounted(res)) return;
-    const q = strings(req, res, { venue: 60, symbol: 200, limit: 5 });
-    if (!q) return;
-    if (q.limit && !/^\d{1,3}$/.test(q.limit)) return void bad(res, "limit is a count of trades, 1 to 100, in digits");
-    answerOf(res, await svc.marketTrades(q.venue, q.symbol, q.limit ? Number(q.limit) : 30));
-  }));
-
-  // A CONNECTED VENUE'S OWN READS (service.ts connectedOnly, connectedExplore, connectedQuotes): what the venues connected to this account
-  // list and price, and one market's history, book and trades at one of them, with the query checks and status codes of the routes above.
-  // A public source named here is refused by name (409 E_WALLET_NOT_CONNECTED): its public data is the market's
+  // A CONNECTED VENUE'S OWN READS (service.ts connectedExplore, connectedQuotes, candles, marketBook, marketTrades, each starting with
+  // connectedOnly): what the venues connected to this account list and price, and one market's history, book and trades at one of them. A
+  // limit is a plain count (digits), nothing a number parser would also take; a key is one row's own, given once, read past the 200
+  // characters the service takes so that a longer one is refused there rather than cut into another. A public source named here is refused
+  // by name (409 E_WALLET_NOT_CONNECTED): its public data is the market's
   app.get("/api/account/connected/explore", wrap(async (req, res) => {
     if (!mounted(res)) return;
     const q = strings(req, res, { tab: 20, q: 80, key: 240, sort: 20, limit: 6 });
@@ -867,21 +737,21 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
     if (!mounted(res)) return;
     const q = strings(req, res, { venue: 60, symbol: 200, interval: 4, range: 4, before: 16, limit: 6 });
     if (!q) return;
-    answerOf(res, svc.connectedOnly(q.venue) ?? await svc.candles(q.venue, q.symbol, q.interval, { range: q.range, before: q.before, limit: q.limit }));
+    answerOf(res, await svc.candles(q.venue, q.symbol, q.interval, { range: q.range, before: q.before, limit: q.limit }));
   }));
   app.get("/api/account/connected/book", wrap(async (req, res) => {
     if (!mounted(res)) return;
     const q = strings(req, res, { venue: 60, symbol: 200, depth: 4 });
     if (!q) return;
     if (q.depth && !/^\d{1,2}$/.test(q.depth)) return void bad(res, "depth is a count of levels a side, 1 to 50, in digits");
-    answerOf(res, svc.connectedOnly(q.venue) ?? await svc.marketBook(q.venue, q.symbol, q.depth ? Number(q.depth) : 20));
+    answerOf(res, await svc.marketBook(q.venue, q.symbol, q.depth ? Number(q.depth) : 20));
   }));
   app.get("/api/account/connected/trades", wrap(async (req, res) => {
     if (!mounted(res)) return;
     const q = strings(req, res, { venue: 60, symbol: 200, limit: 5 });
     if (!q) return;
     if (q.limit && !/^\d{1,3}$/.test(q.limit)) return void bad(res, "limit is a count of trades, 1 to 100, in digits");
-    answerOf(res, svc.connectedOnly(q.venue) ?? await svc.marketTrades(q.venue, q.symbol, q.limit ? Number(q.limit) : 30));
+    answerOf(res, await svc.marketTrades(q.venue, q.symbol, q.limit ? Number(q.limit) : 30));
   }));
 
   // EARN: the products the venues connected live offer, in one asset when asked, and what is in them (each venue not read is in `missing`)
@@ -1182,7 +1052,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const marketUrl = process.env.PORTFOLIO_MARKET_URL || MARKET_URL_DEFAULT;
   const market = connectMarket({ url: marketUrl });
   market.start();
-  const service = await PortfolioService.create({ home: at("--home") ?? defaultHome(), live, fresh, publicMarkets: () => market.sources(), streams: market.hub, china: market.china, marketOld: () => market.marketOld(), liveDeps: { price: market.price }, ...(liveWrites ? { liveWrites } : {}), ...(code ? { pairingCode: code } : {}), ...(classic ? {} : { venues: "frontline" as const, real: true, openness }) });
+  const service = await PortfolioService.create({ home: at("--home") ?? defaultHome(), live, fresh, publicMarkets: () => market.sources(), streams: market.hub, marketOld: () => market.marketOld(), liveDeps: { price: market.price }, ...(liveWrites ? { liveWrites } : {}), ...(code ? { pairingCode: code } : {}), ...(classic ? {} : { venues: "frontline" as const, real: true, openness }) });
   const srv = await startPortfolioServer({ port, service, bind: process.env.PORTFOLIO_BIND || undefined, hosts: parseHosts(process.env.PORTFOLIO_HOSTS), market }).catch((e: NodeJS.ErrnoException) => {
     if (e.code !== "EADDRINUSE") throw e;
     // the usual reason: this server is already running in another terminal

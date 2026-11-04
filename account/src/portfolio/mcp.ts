@@ -869,15 +869,13 @@ server.registerTool(
 server.registerTool(
   "portfolio_asset",
   {
-    description: "One asset, all of it: its holdings row (`key` from portfolio_holdings: crypto:BTC, equity:AAPL, stable:USDC, rwa:…, event:…; coin:/stock: from the market's market_explore are taken too), its price at every connected venue (`compare`), its price history at the first venue that keeps one (`candles`, bars of 1m · 5m · 15m · 1h · 4h · 1d · 1w over `range` where one is named, else over that size's range: a day of 5m, a month of 1h, a year of 1d), the positions in it, the account's open orders in it, its statement lines, and what was paid for it (`cost`). A read.",
+    description: "One asset, all of it: its holdings row (`key` from portfolio_holdings: crypto:BTC, equity:AAPL, stable:USDC, rwa:…, event:…; coin:/stock: from the market's market_explore are taken too), its price at every connected venue (`compare`), the positions in it, the account's open orders in it, its statement lines, and what was paid for it (`cost`); its price history is market_candles' (or portfolio_live_candles' at a venue connected). A read.",
     inputSchema: {
       key: z.string().max(140),
-      interval: z.enum(["1m", "5m", "15m", "1h", "4h", "1d", "1w"]).optional().describe("the bars of its price history (default 1h)"),
-      range: z.enum(["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "MAX"]).optional().describe("how far back its price history reaches from now (default: the range of its bar size)"),
     },
     annotations: { readOnlyHint: true },
   },
-  async ({ key, interval, range }) => read(`/api/account/asset?${new URLSearchParams({ key, interval: interval ?? "1h", ...(range ? { range } : {}) })}`),
+  async ({ key }) => read(`/api/account/asset?${new URLSearchParams({ key })}`),
 );
 
 /** what a seat newer than the running account meets on a connected read: the account from before /api/account/connected */

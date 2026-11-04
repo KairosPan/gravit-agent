@@ -23,6 +23,11 @@ const get = async (path: string): Promise<{ status: number; body: any }> => {
   const r = await fetch(`${s.url}${path}`);
   return { status: r.status, body: await r.json() };
 };
+/** the stand-in's own market (its public sources, read without a key): the public reads are the market's, not the account's */
+const market = async (path: string): Promise<{ status: number; body: any }> => {
+  const r = await fetch(`${s.marketUrl}${path}`);
+  return { status: r.status, body: await r.json() };
+};
 const post = async (path: string, body: unknown): Promise<{ status: number; body: any }> => {
   const r = await fetch(`${s.url}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   return { status: r.status, body: await r.json() };
@@ -150,43 +155,46 @@ describe("money in an earn product, in holdings and the totals", () => {
 });
 
 describe("one market's price history", () => {
-  it("at a connected venue, from its trader; from a public source, without a key", async () => {
-    const c = await get("/api/account/candles?venue=ex&symbol=BTC/USDT&interval=1h");
+  it("at a connected venue, from its trader (the account's); from a public source, without a key (the market's)", async () => {
+    const c = await get("/api/account/connected/candles?venue=ex&symbol=BTC/USDT&interval=1h");
     expect(c.status).toBe(200);
     expect(c.body).toMatchObject({ ok: true, venue: "ex", venueName: "Stand-in Exchange", symbol: "BTC/USDT", interval: "1h" });
     expect(c.body.candles.length).toBeGreaterThan(100);
     expect(c.body.candles[0]).toEqual({ t: expect.any(Number), o: expect.any(Number), h: expect.any(Number), l: expect.any(Number), c: expect.any(Number), v: expect.any(Number) });
     expect(c.body.public).toBeUndefined();
-    const pub = await get(`/api/account/candles?venue=standin-pubex-public&symbol=${encodeURIComponent("DOGE/USD")}&interval=5m`);
+    const pub = await market(`/api/candles?venue=standin-pubex-public&symbol=${encodeURIComponent("DOGE/USD")}&interval=5m`);
     expect(pub.body).toMatchObject({ ok: true, venue: "standin-pubex-public", symbol: "DOGE/USD", interval: "5m", public: true });
     expect(pub.body.candles.length).toBeGreaterThan(10);
-    const ev = await get(`/api/account/candles?venue=standin-pubevents-public&symbol=${encodeURIComponent("SX-JOBS-NEXT:YES")}&interval=1d`);
+    const ev = await market(`/api/candles?venue=standin-pubevents-public&symbol=${encodeURIComponent("SX-JOBS-NEXT:YES")}&interval=1d`);
     expect(ev.body.candles.every((b: { c: number }) => b.c > 0 && b.c < 1)).toBe(true);
+    // the account answers no public read
+    expect((await fetch(`${s.url}/api/account/candles?venue=standin-pubex-public&symbol=DOGE%2FUSD&interval=5m`)).status).toBe(404);
+    expect((await get(`/api/account/connected/candles?venue=standin-pubex-public&symbol=${encodeURIComponent("DOGE/USD")}&interval=5m`)).body.refusal.code).toBe("E_WALLET_NOT_CONNECTED");
   });
 
   it("a range in its own bar size, and the page before a bar a chart has: each says whether older bars exist", async () => {
-    const r = await get("/api/account/candles?venue=ex&symbol=BTC/USDT&range=5D");
+    const r = await get("/api/account/connected/candles?venue=ex&symbol=BTC/USDT&range=5D");
     expect(r.body).toMatchObject({ ok: true, venue: "ex", interval: "5m", range: "5D", more: expect.any(Boolean) });
     expect(r.body.candles.length).toBeGreaterThan(100);
     const first = r.body.candles[0].t as number;
-    const page = await get(`/api/account/candles?venue=ex&symbol=BTC/USDT&interval=5m&before=${first}&limit=50`);
+    const page = await get(`/api/account/connected/candles?venue=ex&symbol=BTC/USDT&interval=5m&before=${first}&limit=50`);
     expect(page.body).toMatchObject({ ok: true, interval: "5m", before: first, more: true });
     expect(page.body.range).toBeUndefined();
     expect(page.body.candles).toHaveLength(50);
     expect(page.body.candles.every((b: { t: number }) => b.t < first)).toBe(true);
     // neither a range nor a page: the bar size's own range (an hour's is a month)
-    expect((await get("/api/account/candles?venue=ex&symbol=BTC/USDT&interval=1h")).body).toMatchObject({ ok: true, interval: "1h", range: "1M" });
+    expect((await get("/api/account/connected/candles?venue=ex&symbol=BTC/USDT&interval=1h")).body).toMatchObject({ ok: true, interval: "1h", range: "1M" });
   });
 
   it("refuses what it cannot answer, in words", async () => {
-    const no = async (q: string) => (await get(`/api/account/candles?${q}`)).body.refusal;
+    const no = async (q: string) => (await get(`/api/account/connected/candles?${q}`)).body.refusal;
     expect((await no("venue=ex&symbol=BTC/USDT&interval=2h")).message).toBe("price history is by 1m, 5m, 15m, 1h, 4h, 1d, 1w");
     expect((await no("venue=ex&symbol=BTC/USDT&range=2Y")).message).toBe("a range is one of 1D, 5D, 1M, 3M, 6M, YTD, 1Y, 5Y, MAX");
     expect((await no("venue=ex&symbol=BTC/USDT&range=1D&before=1700000000000")).message).toBe("price history is asked for a range or for the page before a bar, not both");
     expect((await no("venue=ex&symbol=BTC/USDT&before=yesterday")).message).toBe("a page of price history is asked before a bar's start, in milliseconds");
     expect((await no("venue=ex&symbol=BTC/USDT&before=1700000000000&limit=5000")).message).toBe("a page of price history holds 1 to 1,000 bars");
-    expect((await no("venue=nowhere&symbol=BTC/USDT&interval=1h")).code).toBe("E_WALLET_ACCOUNT_UNKNOWN");
-    expect((await no("venue=standin-stock-tokens&symbol=NVDA&interval=1h")).message).toMatch(/publishes no price history/);
+    expect((await no("venue=nowhere&symbol=BTC/USDT&interval=1h")).code).toBe("E_WALLET_NOT_CONNECTED");
+    expect((await market("/api/candles?venue=standin-stock-tokens&symbol=NVDA&interval=1h")).body.refusal.message).toMatch(/publishes no price history/);
     expect((await no("venue=ex&symbol=NOPE/USDT&interval=1h")).code).toBe("E_VENUE_REJECTED");
   });
 });
@@ -200,7 +208,7 @@ describe("what the page reads of each venue", () => {
     expect([venue("ex").trade.kinds, venue("predict").trade.kinds, venue("wallet").trade.kinds]).toEqual([["spot", "perp"], ["event"], ["token"]]);
     expect(a.agentSetup.url).toBe(s.url);
     expect(a.agentSetup.command).toMatch(new RegExp(`^claude mcp add portfolio -e PORTFOLIO_URL=${s.url.replace(/[.]/g, "\\.")} -- npx tsx /.+/src/portfolio/mcp\\.ts$`));
-    const e = (await get("/api/account/explore?tab=rwas")).body;
+    const e = (await get("/api/account/connected/explore?tab=rwas")).body;
     const usdy = e.items.find((i: { key: string }) => i.key === "rwa:USDY");
     expect(usdy).toMatchObject({ kind: "rwa", issuer: "Stand-in Issuer (not a real issuer)", eligibility: expect.stringMatching(/not for US persons/) });
     expect(usdy.at).toEqual([expect.objectContaining({ venue: "wallet", connected: true, canTrade: true, symbol: "USDY/USDC@Ethereum", issuer: "Stand-in Issuer (not a real issuer)" })]);

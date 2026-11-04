@@ -1,6 +1,6 @@
-/** THE ACCOUNT ON THE MARKET'S LINK, built as the server's main builds it (publicMarkets, streams, china and the price from one link): its
- * Markets answer is the in-process source's, a paper fill is at the market's price, a page's followed public market streams from the
- * market's hub, and its valuation prices with the market's price. */
+/** THE ACCOUNT ON THE MARKET'S LINK, built as the server's main builds it (publicMarkets, streams and the price from one link): its
+ * connected Markets answer (a paper account priced at the market's sources) is the in-process source's, a paper fill is at the market's
+ * price, a page's followed paper market streams from the market's hub, and its valuation prices with the market's price. */
 import { request } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,7 +37,7 @@ const price = async (asset: string) => (asset === "BTC" ? 62_000 : undefined);
 const liveDeps = (o: Partial<LiveDeps> = {}): Partial<LiveDeps> => ({ clock: () => Date.now(), http: async () => ({ status: 599, body: undefined, text: "" }), ...o });
 
 /** a service over `publicMarkets` and the rest as given, with an owner and a paper account, served */
-async function account(o: { publicMarkets: PublicSource[] | (() => PublicSource[]); link?: MarketLink; china?: boolean }) {
+async function account(o: { publicMarkets: PublicSource[] | (() => PublicSource[]); link?: MarketLink }) {
   const home = mkdtempSync(join(tmpdir(), "market-account-"));
   homes.push(home);
   const svc = await PortfolioService.create({
@@ -46,7 +46,7 @@ async function account(o: { publicMarkets: PublicSource[] | (() => PublicSource[
     venues: "frontline",
     real: true,
     publicMarkets: o.publicMarkets,
-    ...(o.link ? { streams: o.link.hub, ...(o.china ? { china: o.link.china } : {}) } : {}),
+    ...(o.link ? { streams: o.link.hub } : {}),
     liveDeps: liveDeps(o.link ? { price: o.link.price } : { price: async () => undefined }),
     liveWrites: { capUsd: 100, pairingCode: "K7QX-M2PA" },
     account: { owners: [{ id: owner.address, kind: "eoa", label: "owner", addedAt: new Date(START).toISOString() }] },
@@ -88,12 +88,12 @@ const until = async (ok: () => boolean, ms = 6_000): Promise<void> => {
 };
 
 describe("the account on the market's link", () => {
-  it("answers explore with the same body as the in-process source", async () => {
+  it("answers its connected explore — a paper account priced at the market's sources — with the same body as over the in-process source", async () => {
     const { link } = await market([fakeSource()]);
     const over = await account({ publicMarkets: () => link.sources(), link });
     const local = await account({ publicMarkets: [fakeSource()] });
     // the same body, but for the moment it was put together
-    const get = async (url: string): Promise<Record<string, unknown>> => ({ ...((await (await fetch(`${url}/api/account/explore?q=BTC`)).json()) as Record<string, unknown>), asOf: "" });
+    const get = async (url: string): Promise<Record<string, unknown>> => ({ ...((await (await fetch(`${url}/api/account/connected/explore?q=BTC`)).json()) as Record<string, unknown>), asOf: "" });
     const a = await get(over.srv.url);
     const b = await get(local.srv.url);
     expect((a.items as unknown[]).length).toBeGreaterThan(0);
@@ -107,10 +107,10 @@ describe("the account on the market's link", () => {
     expect(bought).toMatchObject({ status: "filled", filledQty: 0.01, avgPrice: 100 });
   });
 
-  it("pushes a followed public market's quote on the account stream", async () => {
+  it("pushes a followed paper market's quote on the account stream, from the market's hub", async () => {
     const { link, hub } = await market([fakeSource({ id: "coinbase" })]);
     const { srv } = await account({ publicMarkets: () => link.sources(), link });
-    const key = "coinbase:BTC/USD";
+    const key = "paper-1:BTC/USD";
     expect(link.hub.covers("coinbase", "BTC/USD")).toBe(true);
     let text = "";
     const req = request(`${srv.url}/api/account/stream?client=page-test-0009&markets=${encodeURIComponent(key)}`, { headers: { accept: "text/event-stream" } }, (res) => {

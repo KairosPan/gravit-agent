@@ -1,6 +1,5 @@
-/** THE FAKES THE MARKET'S PUBLIC READS ARE TESTED OVER (unit/reads.test.ts, unit/market-stream.test.ts; the account's
- * unit/market-parity.test.ts builds the same ones): a public source with listings, a book, trades and bars; China with one A share; and a hub
- * the test makes speak. Nothing leaves the process. */
+/** THE FAKES THE MARKET'S PUBLIC READS ARE TESTED OVER (unit/reads.test.ts, unit/market-stream.test.ts): a public source with listings, a
+ * book, trades and bars; China with one A share; and a hub the test makes speak. Nothing leaves the process. */
 import type { ExploreItem } from "../src/live/explore.ts";
 import type { ChinaHistory, ChinaMarket, ChinaSource } from "../src/live/china.ts";
 import { readLike, type Listing, type PublicSource } from "../src/live/public-markets.ts";

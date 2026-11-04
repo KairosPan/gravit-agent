@@ -67,9 +67,8 @@ describe("a connected venue's own reads (GET /api/account/connected/…)", () =>
         expect(at.public).not.toBe(true);
       }
       expect(items.flatMap((i) => i.at.map((a) => a.venue))).not.toContain("fake");
-      // the old route still answers the public line beside it
-      const old = await get("/api/account/explore?q=BTC");
-      expect((old.body.items as Array<{ at: Array<{ connected: boolean }> }>).some((i) => i.at.some((a) => !a.connected))).toBe(true);
+      // the public route is gone: the public line is the market's explore
+      expect((await fetch(`${srv.url}/api/account/explore?q=BTC`)).status).toBe(404);
     } finally {
       await srv.close();
     }
@@ -106,16 +105,15 @@ describe("a connected venue's own reads (GET /api/account/connected/…)", () =>
     }
   });
 
-  it("reads a connected venue's candles, book and trades as the old routes do", async () => {
+  it("reads a connected venue's candles, book and trades; the public routes are gone", async () => {
     const { srv, get } = await boot();
     try {
       for (const [part, query] of [["candles", "venue=paper-1&symbol=BTC/USDT&range=1D"], ["book", "venue=paper-1&symbol=BTC/USDT"], ["trades", "venue=paper-1&symbol=BTC/USDT"]] as const) {
         const now = await get(`/api/account/connected/${part}?${query}`);
-        const old = await get(`/api/account/${part}?${query}`);
-        expect(now.status).toBe(old.status);
-        expect(now.body).toEqual(old.body);
+        expect(now.status, part).toBe(200);
+        expect(now.body).toMatchObject({ ok: true, venue: "paper-1", symbol: "BTC/USDT" });
+        expect((await fetch(`${srv.url}/api/account/${part}?${query}`)).status, part).toBe(404);
       }
-      expect((await get("/api/account/connected/candles?venue=paper-1&symbol=BTC/USDT&range=1D")).status).toBe(200);
       // the old routes' query checks hold
       expect((await get("/api/account/connected/book?venue=paper-1&symbol=BTC/USDT&depth=x")).status).toBe(400);
       expect((await get("/api/account/connected/trades?venue=paper-1&symbol=BTC/USDT&limit=x")).status).toBe(400);

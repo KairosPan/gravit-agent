@@ -11,8 +11,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
-import { ACCOUNT_ABORT_MS, ACCOUNT_QUERY, ACCOUNT_TTL_MS, registerAccountProxy } from "../src/account-proxy.ts";
-import { MARKET_READS, registerMarketProxy } from "../src/market-proxy.ts";
+import { registerAccountProxy } from "../src/account-proxy.ts";
+import { MARKET_ABORT_MS, MARKET_QUERY, MARKET_READS, MARKET_TTL_MS, registerMarketProxy } from "../src/market-proxy.ts";
 
 const DISABLED = '{"ok":false,"unreachable":"disabled"}';
 const CLIENT = "face-0123456789abcdef01234567";
@@ -73,10 +73,17 @@ test("mounts seven routes under /data/market and nothing else", () => {
   assert.deepEqual(MARKET_READS.map((r) => [r.face, r.upstream]), names.map((n) => [`/data/market/${n}`, `/api/${n}`]));
   for (const [i, n] of names.entries()) {
     const r = MARKET_READS[i]!;
-    assert.deepEqual(r.query, ACCOUNT_QUERY[n], `${n}'s names are the account route's`);
-    assert.equal(r.ttlMs, ACCOUNT_TTL_MS[n], `${n}'s TTL`);
-    assert.equal(r.abortMs, ACCOUNT_ABORT_MS[n], `${n}'s abort`);
+    assert.deepEqual(r.query, MARKET_QUERY[n], `${n}'s names are the market's own`);
+    assert.equal(r.ttlMs, MARKET_TTL_MS[n], `${n}'s TTL`);
+    assert.equal(r.abortMs, MARKET_ABORT_MS[n], `${n}'s abort`);
   }
+  /* the market's own tables, the values the account's public reads had before plan A2's Task 7 removed them */
+  assert.deepEqual(MARKET_QUERY, {
+    explore: ["tab", "q", "key", "sort", "limit"], quotes: ["pairs"], candles: ["venue", "symbol", "interval", "range", "before", "limit"],
+    book: ["venue", "symbol", "depth"], trades: ["venue", "symbol", "limit"],
+  });
+  assert.deepEqual(MARKET_TTL_MS, { explore: 20_000, quotes: 3_000, candles: 30_000, book: 2_000, trades: 2_000 });
+  assert.deepEqual(MARKET_ABORT_MS, { explore: 10_000, quotes: 7_000, candles: 25_000, book: 7_000, trades: 7_000 });
   assert.equal(MARKET_READS[1]!.long?.get("pairs"), 2_000, "pairs keeps its own 2 000");
   assert.ok(!routes.some((r) => /account/.test(r.path)), "nothing under the market says account");
   proxy.dispose();
@@ -123,7 +130,7 @@ test("the market not answering is 503 unreachable, a kept answer re-served stale
     registerMarketProxy(registrar, { url: market.url, now: () => clock });
     assert.equal((await call(routes, "/data/market/explore?q=ETH")).status, 200);
     up = false;
-    clock += ACCOUNT_TTL_MS.explore;
+    clock += MARKET_TTL_MS.explore;
     const stale = await call(routes, "/data/market/explore?q=ETH");
     assert.equal(stale.status, 200);
     assert.equal(JSON.parse(stale.body).stale, true, "the kept answer, flagged stale");

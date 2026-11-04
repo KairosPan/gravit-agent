@@ -3,8 +3,8 @@
  *   answerAsk       only the owner declines an ask: an agent key, a stranger, a device not let in are refused; a decline grants nothing,
  *                   is taken once (a replay is the first answer, and after a restart it is refused), and lapses from the agent's view
  *                   after a day
- *   candles         the venue and the symbol of a price history never reach a host they name: a venue is an id the account knows, a
- *                   symbol plain text that a public source only puts, encoded, in a fixed host's path or query — or refuses
+ *   candles         the venue and the symbol of a price history never reach a host they name: a venue is one connected to this account
+ *                   (a public source's history is the market's), a symbol plain text
  *   earn counted    money in an earn product counts once: not again as Kraken's `<ASSET>.B` line or a vault's shares in a wallet, not
  *                   zero when the venue's earn blinks, and the ready money beside it is never taken for it
  *
@@ -20,7 +20,7 @@ import { spendFor } from "../../src/portfolio/account/state.ts";
 import type { EarnPosition, LiveEarner } from "../../src/portfolio/live/earn.ts";
 import type { ExchangeClient, OpenExchange } from "../../src/portfolio/live/exchange.ts";
 import { register, type LiveDeps } from "../../src/portfolio/live/index.ts";
-import { exchangeTickers, kalshiPublic, polymarketPublic, PUBLIC_HOSTS } from "../../../market/src/live/public-markets.ts";
+import { exchangeTickers, kalshiPublic, polymarketPublic } from "../../../market/src/live/public-markets.ts";
 import type { LiveTrader, Market, OrderState } from "../../src/portfolio/live/trade.ts";
 import type { Http, LiveBalance } from "../../src/portfolio/live/types.ts";
 import { startPortfolioServer } from "../../src/portfolio/server.ts";
@@ -157,41 +157,19 @@ describe("answerAsk: the owner's, and only the owner's", () => {
 });
 
 describe("candles: the venue and the symbol never reach a host they name", () => {
-  it("a venue is an id the account knows; a symbol is plain text — anything else is refused before anything is asked", async () => {
+  // a public source's history is the market's (market/test/unit/reads.test.ts holds its attack cases): the account's is a connected venue's
+  it("a venue not connected to this account is refused by name; a connected one's symbol is plain text — anything else is refused before anything is asked", async () => {
     const r = await run(fresh());
+    world.ex = { balances: [], earn: [] };
+    const ok = await r.own({ type: "connectVenue", venue: "ex", connector: "live:holes-earn", label: "Ex", credentialRef: "" });
+    if (isRefusal(ok)) throw new Error(ok.message);
     asked.length = 0;
-    for (const venue of ["http://169.254.169.254/latest", "../etc/passwd", "EX", "ex/../kalshi", "", "kraken@evil.com", "a".repeat(61)]) expect(refusal(await r.svc.candles(venue, "BTC/USD", "1h")).code, venue).toBe("E_ACCOUNT_BAD_ACTION");
-    for (const symbol of ["BTC/USD\nHost: evil.com", "BTC\u0000", "BTC‮", "x".repeat(161), ""]) expect(refusal(await r.svc.candles("kraken", symbol, "1h")).code, JSON.stringify(symbol)).toBe("E_ACCOUNT_BAD_ACTION");
-    expect(refusal(await r.svc.candles("kraken", "BTC/USD", "1h&x=1")).code).toBe("E_ACCOUNT_BAD_ACTION");
+    for (const venue of ["http://169.254.169.254/latest", "../etc/passwd", "EX", "ex/../kalshi", "", "kraken@evil.com", "a".repeat(61), "kraken"]) expect(refusal(await r.svc.candles(venue, "BTC/USD", "1h")).code, venue).toBe("E_WALLET_NOT_CONNECTED");
+    for (const symbol of ["BTC/USD\nHost: evil.com", "BTC\u0000", "BTC\u202e", "x".repeat(161), ""]) expect(refusal(await r.svc.candles("ex", symbol, "1h")).code, JSON.stringify(symbol)).toBe("E_ACCOUNT_BAD_ACTION");
+    expect(refusal(await r.svc.candles("ex", "BTC/USD", "1h&x=1")).code).toBe("E_ACCOUNT_BAD_ACTION");
     expect(asked).toEqual([]);
-  });
-
-  it("a public source puts a symbol only in its fixed host's path or query, encoded — or refuses it without asking", async () => {
-    const r = await run(fresh());
-    asked.length = 0;
-    handed.length = 0;
-    // Kalshi's ticker and Polymarket's slug are read by pattern: these are refused, nothing asked
-    for (const symbol of ["A@evil.com/x:YES", "KX/../..:YES", "https://evil.com:YES"]) expect(refusal(await r.svc.candles("kalshi", symbol, "1h")).code).toBe("E_ACCOUNT_BAD_ACTION");
-    for (const symbol of ["x/../../evil:Yes", "UPPER:Yes", "@evil.com:Yes"]) expect(refusal(await r.svc.candles("polymarket", symbol, "1h")).code).toBe("E_ACCOUNT_BAD_ACTION");
-    expect(asked).toEqual([]);
-    // what is asked goes to the source's own host, the symbol in it encoded
-    await r.svc.candles("polymarket", "http:Yes?x=1&y=#frag", "1h");
-    await r.svc.candles("kalshi", "KX-ONE.T4:NO", "5m");
-    expect(asked.length).toBe(2);
-    for (const u of asked) {
-      const url = new URL(u);
-      expect([url.protocol, PUBLIC_HOSTS.includes(url.hostname), url.port, url.username]).toEqual(["https:", true, "", ""]);
-    }
-    expect(asked[0]).toBe("https://gamma-api.polymarket.com/markets/slug/http");
-    // the exchange library is handed only a pair the exchange lists; the venue with deep history a Kraken pair is charted from (Coinbase
-    // Exchange, for a dollar pair) is asked at its fixed host, the product in its path — first whether it trades that product now; where it
-    // lists none, Kraken's own latest bars, and its candles are never asked
-    asked.length = 0;
-    expect(refusal(await r.svc.candles("kraken", "BTC/USD@evil.com", "1h")).code).toBe("E_VENUE_REJECTED");
-    expect(asked).toEqual([]);
-    expect((await r.svc.candles("kraken", "BTC/USD", "1h")) as { candles: unknown[] }).toMatchObject({ venue: "kraken", public: true, source: "Kraken · BTC/USD" });
-    expect(asked.map((u) => new URL(u)).map((u) => [u.protocol, u.host, u.pathname])).toEqual([["https:", "api.exchange.coinbase.com", "/products/BTC-USD"]]);
-    expect(handed).toEqual(["BTC/USD"]);
+    // the connected venue's own bars, from its trader
+    expect(await r.svc.candles("ex", "BTC/USD", "1h", { range: "1D" })).toMatchObject({ venue: "ex", symbol: "BTC/USD" });
   });
 
   it("over HTTP too: a venue naming a host is a 409, and nothing is asked", async () => {
@@ -199,9 +177,11 @@ describe("candles: the venue and the symbol never reach a host they name", () =>
     const server = await startPortfolioServer({ port: 0, service: r.svc, snapshotMs: 0 });
     try {
       asked.length = 0;
-      const res = await fetch(`${server.url}/api/account/candles?venue=${encodeURIComponent("http://169.254.169.254")}&symbol=${encodeURIComponent("BTC/USD")}&interval=1h`);
+      const res = await fetch(`${server.url}/api/account/connected/candles?venue=${encodeURIComponent("http://169.254.169.254")}&symbol=${encodeURIComponent("BTC/USD")}&interval=1h`);
       expect(res.status).toBe(409);
-      expect(((await res.json()) as { refusal: Refusal }).refusal.code).toBe("E_ACCOUNT_BAD_ACTION");
+      expect(((await res.json()) as { refusal: Refusal }).refusal.code).toBe("E_WALLET_NOT_CONNECTED");
+      // the public route is gone: the account answers no market read
+      expect((await fetch(`${server.url}/api/account/candles?venue=kraken&symbol=${encodeURIComponent("BTC/USD")}&interval=1h`)).status).toBe(404);
       expect(asked).toEqual([]);
     } finally {
       await server.close();

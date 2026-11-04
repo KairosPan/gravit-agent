@@ -1,7 +1,7 @@
 /** LUNHUI'S REACH AND THE AKSHARE SIDECAR on the market: the four route bodies of account/src/portfolio/server.ts at cb4930c4 —
  * `/api/cn/relay`, `/api/cn/ifind`, `/api/akshare/tools` and `/api/akshare/call` — with their status tables, moved verbatim (account split,
  * plan A1). Where they read `opts.cn` and `opts.akshare` they read the core's. Each answers the upstream's status, content type and bytes
- * unchanged, marked by a header; a refusal is its own word and status. The account keeps its own copies until plan A1 task 4.
+ * unchanged, marked by a header; a refusal is its own word and status. The account's relays to these are gone (plan A2 task 7): Lunhui asks the market itself.
  *
  *   GET  /api/cn/relay?url=        the relay (live/cn-relay.ts): Tencent's and Eastmoney's listed hosts, bytes unchanged · x-cn-relay
  *   POST /api/cn/ifind {query}     iFinD's one query (live/cn-ifind.ts) · x-cn-ifind

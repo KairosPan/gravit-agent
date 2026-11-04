@@ -33,6 +33,7 @@ const EN: Partial<Record<Code, string>> = {
   E_VENUE_RAIL_CLOSED: "this runway is closed",
   E_VENUE_CURRENCY: "the venue does not take this currency: swap first",
   E_VENUE_UNREACHABLE: "the venue did not answer",
+  E_MARKET_UNKNOWN_SOURCE: "the market has no public source by that name",
   E_ACCOUNT_BAD_SIGNATURE: "the signature does not match the instruction",
   E_ACCOUNT_UNKNOWN_SIGNER: "this key is not authorised on the account",
   E_ACCOUNT_AGENT_EXPIRED: "the agent key has expired",

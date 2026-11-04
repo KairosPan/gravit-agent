@@ -1,14 +1,12 @@
-/** THE MARKETS A PAGE FOLLOWS, AND THE ROUTES OF ITS STREAM: each key a page follows on the market's stream (stream.ts) held from the hub
- * while it follows it, and the market's quote, book and trades told to it under that key as the hub moves. The port of the account's page
- * follows (account/src/portfolio/service.ts pageFollows, followKey, pageAgain, unfollowKey, streamAt, marketTold and tellMarket at
- * 9dcb6a2d, account split plan A1 task 6) with the public branch of streamAt alone — a key `<source id or public:id>:<symbol>` the hub
- * covers; the market has no paper account whose market is another source's — so the events a page is sent are the account's, byte for
- * byte (account/test/unit/market-parity.test.ts).
+/** THE MARKETS A PAGE FOLLOWS, AND THE ROUTES OF ITS STREAM, the face's market stream (face/src/market-proxy.ts, /data/market/stream):
+ * each key a page follows on the market's stream (stream.ts) held from the hub while it follows it, and the market's quote, book and trades
+ * told to it under that key as the hub moves. A key is `<source id or public:id>:<symbol>` the hub covers; the market keeps no venue
+ * connected and no paper account, so every key is a public source's own (a connected venue's market is followed on the account's stream).
  *
- *   GET  /api/stream?client=&markets=&since=      the stream (text/event-stream), the account's GET /api/account/stream
- *   POST /api/stream/markets {client, markets, n}  what a page shows now, the account's POST /api/account/stream/markets
+ *   GET  /api/stream?client=&markets=&since=      the stream (text/event-stream)
+ *   POST /api/stream/markets {client, markets, n}  what a page shows now: the markets it follows instead
  *
- * with the account's checks and answers, the word "account" taken out of them. */
+ * Each with its checks and answers in the market's words. */
 import type express from "express";
 import type { MarketCore } from "./core.ts";
 import type { HubTick, MarketHub } from "./live/stream-hub.ts";

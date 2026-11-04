@@ -87,7 +87,7 @@ describe("market:mcp", () => {
     // a venue that is not public: the refusal's code, not an HTTP number
     const no = await client.callTool({ name: "market_book", arguments: { venue: "my-okx", symbol: "BTC/USDT" } });
     expect(no.isError).toBe(true);
-    expect(body(no)).toMatchObject({ ok: false, code: "E_WALLET_ACCOUNT_UNKNOWN" });
+    expect(body(no)).toMatchObject({ ok: false, code: "E_MARKET_UNKNOWN_SOURCE" });
   });
 
   it("market_quotes quotes an A share and passes a refusal on", async () => {

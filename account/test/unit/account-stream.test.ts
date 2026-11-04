@@ -17,6 +17,7 @@ import { HUB_URLS, joinHubs, StreamHub, type MarketHub, type WebSocketLike } fro
 import { usClock, usSessionFull } from "../../src/portfolio/account/calendar.ts";
 import { CBOE_DELAY_MS, CBOE_FROM } from "../../../market/src/live/public-stocks.ts";
 import { ROBINHOOD_FROM, ROBINHOOD_PRICES, usQuote, UsQuoteFeed } from "../../../market/src/live/us-quotes.ts";
+import { fakeHub, fakeSource } from "../../../market/test/fakes.ts";
 
 /** THE ACCOUNT'S PUSH CHANNEL (account/stream.ts, GET /api/account/stream; feat/paper-live p1). The bus on its own, over a stand-in for a
  * page's socket: nothing kept before a page listens, a snapshot to start, the account events at once with ids that rise, a resume from the
@@ -698,6 +699,26 @@ const until = async (ok: () => boolean, ms = 4_000): Promise<void> => {
 };
 
 describe("the markets a page shows, on its stream (feat/paper-live p2a)", () => {
+  it("a public market is not followed on the account's stream; a paper venue's market is", async () => {
+    // the public market's follows are the market's own stream (market/src/follows.ts, the face's /data/market/stream): the account
+    // streams a market only where a venue connected to it trades it — here the paper account, priced from the public source
+    const fake = fakeHub();
+    const { srv } = await boot({ streams: fake.hub, sources: [fakeSource()] });
+    const pub = await listen(srv.url, { path: `/api/account/stream?client=page-public-0001&markets=${encodeURIComponent("fake:BTC/USDT")}` });
+    const paper = await listen(srv.url, { path: `/api/account/stream?client=page-paper-00001&markets=${encodeURIComponent("paper-1:BTC/USDT")}` });
+    await until(() => fake.seen.holds.length > 0);
+    await new Promise((go) => setTimeout(go, 100));
+    fake.quote("fake", "BTC/USDT");
+    const got = await paper.until((f) => named(f, "quote").some((q) => (q.data as { key?: string }).key === "paper-1:BTC/USDT"));
+    expect(named(got, "quote").at(-1)!.data).toMatchObject({ key: "paper-1:BTC/USDT", venue: "paper-1", symbol: "BTC/USDT", source: "fake" });
+    await new Promise((go) => setTimeout(go, 150));
+    expect(named(pub.frames(), "quote")).toEqual([]);
+    expect(fake.seen.holds.every((h) => h.startsWith("fake|BTC/USDT"))).toBe(true);
+    expect(fake.seen.holds).toHaveLength(1);
+    pub.close();
+    paper.close();
+  });
+
   it("a page that names itself and follows a paper account's market gets its quote, book and trades as the venue's own stream moves — the market streamed from its own listing source while a page shows it; a page that follows nothing, or stopped following it, hears none", async () => {
     VenueWs.all = [];
     const hub = new StreamHub({ WebSocket: VenueWs });
