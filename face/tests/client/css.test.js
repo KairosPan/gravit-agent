@@ -120,6 +120,23 @@ function accountStates() {
     R.askConfirm(R.openVenueDetails(R.ownerStanding(at('venues'), { role: 'signs', kid: 'a5048199a8081854' }), 'paper-momentum'), { action: 'disconnect', venue: 'ex', name: 'Stand-in Exchange' }),
     // Sell many's drawer (plan 4b Task 3): the picks, then the legs with their answers
     ...sellManyStates(R.ownerStanding(read, { role: 'signs', kid: 'a5048199a8081854' })),
+    // Identity (plan B1b Task 1): connected with Details open, a stranger and a draft, on a page that signs; nothing connected on one
+    // that does not; the account not answering
+    ...identityStates(at('identity')),
+  ];
+}
+
+function identityStates(base) {
+  const read = {
+    ok: true, networks: [{ network: 'telegram', speaksAs: '@gravit_desk_bot', talksOnlyWith: '@pan', since: '2026-11-03T15:20:00.000Z', fingerprint: 'ab12cd34', state: 'connected', polling: false, pollFailing: { since: '2026-11-04T14:00:00.000Z', reason: 'ENOTFOUND' } }],
+    routing: { chat: ['telegram'], alerts: [], brief: [], cards: [], fills: [] }, quiet: { from: '23:00', to: '07:00', zone: 'America/New_York' },
+    strangers: [{ network: 'telegram', sender: '0123456789ab', masked: '…789', count: 3, last: '2026-11-04T13:02:00.000Z' }],
+  };
+  const signing = R.ownerStanding(R.identityLoaded(base, read), { role: 'signs', kid: 'a5048199a8081854' });
+  return [
+    R.identityTick(R.identityDetails(signing), { row: 'brief', network: 'telegram', on: true }),
+    R.identityLoaded(base, { ok: true, networks: [], routing: {}, quiet: null, strangers: [] }),
+    R.identityFailed(base, 'The account did not answer.'),
   ];
 }
 

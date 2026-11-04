@@ -3365,3 +3365,78 @@ test("Sell many's DEX leg reads the Account again after the wallet answers", asy
   await until(() => h.reads.slice(readsAtReport).includes('/data/account?fresh=1'), 'the Account read again after the wallet answered');
   store.timers.clear();
 });
+
+// ── Account › Identity (plan B1b Task 1): its own read, on entering the tab, at the page's cadence while it shows, Retry fresh ──
+
+const IDENTITY_READ = {
+  ok: true,
+  networks: [{ network: 'telegram', speaksAs: '@gravit_desk_bot', talksOnlyWith: '@pan', since: '2026-11-03T15:20:00.000Z', fingerprint: 'ab12cd34', state: 'connected', polling: true }],
+  routing: { chat: ['telegram'], alerts: ['telegram'], brief: [], cards: ['telegram'], fills: ['telegram'] }, quiet: { from: '23:00', to: '07:00', zone: 'America/New_York' }, strangers: [],
+};
+const isIdentity = path => path.split('?')[0] === '/data/account/identity';
+
+test('Identity reads the account on entering the tab and with each beat while it shows; Retry and Refresh read it past the cache', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1', storage: memoryStorage() });
+  let down = false;
+  const h = accountHost({ rows: [row('s1')] }, {
+    answers: { '/data/account/identity': () => (down ? Promise.reject(Object.assign(new Error('HTTP 503'), { status: 503, body: { ok: false, error: 'The account did not answer.' } })) : IDENTITY_READ) },
+  });
+  const timers = new HeldTimers();
+  const store = bootAccount(f, h, fakeMarkets(), { timers });
+  await h.ready();
+  assert.deepEqual(h.reads.filter(isIdentity), [], 'not read off the tab');
+  f.win.location.hash = '#/account/identity';
+  await settle();
+  assert.deepEqual(h.reads.filter(isIdentity), ['/data/account/identity']);
+  assert.match(f.html(), /aria-label="Gravit"/);
+  assert.match(f.html(), /@gravit_desk_bot/);
+  // a beat reads the page and Identity, plain
+  h.reads.length = 0;
+  timers.run(20_000);
+  await settle();
+  assert.deepEqual(h.reads.filter(isIdentity), ['/data/account/identity']);
+  // the account down: the tab says so and draws no connection; Retry reads past the cache
+  down = true;
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
+  await settle();
+  assert.deepEqual(h.reads.filter(isIdentity), ['/data/account/identity?fresh=1'], 'Refresh on Identity reads it past the cache');
+  assert.match(f.html(), /The account is not answering\./);
+  assert.doesNotMatch(f.html(), /@gravit_desk_bot/);
+  down = false;
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'refreshIdentity' } });
+  await settle();
+  assert.deepEqual(h.reads.filter(isIdentity), ['/data/account/identity?fresh=1']);
+  assert.match(f.html(), /@gravit_desk_bot/);
+  // Details opens the connection's line
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityDetails' } });
+  assert.match(f.html(), /token ab12cd34 · polling/);
+  // another tab: its beats read no Identity
+  f.win.location.hash = '#/account/rules';
+  await settle();
+  h.reads.length = 0;
+  timers.run(20_000);
+  await settle();
+  assert.deepEqual(h.reads.filter(isIdentity), []);
+  store.timers.clear();
+});
+
+test("Identity's grid ticks change the draft only on a page that signs, and Save… appears while it differs", async () => {
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': IDENTITY_READ } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.doesNotMatch(f.html(), />Save…</);
+  const tick = on => f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', checked: on, dataset: { action: 'identityTick', row: 'brief', network: 'telegram' } } });
+  tick(true);
+  assert.deepEqual(store.get().identity.draft.brief, ['telegram']);
+  assert.match(f.html(), /data-action="openSheet" data-kind="routing"[^>]*>Save…</);
+  tick(false);
+  assert.equal(store.get().identity.draft, null);
+  assert.doesNotMatch(f.html(), />Save…</);
+  store.timers.clear();
+});

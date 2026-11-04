@@ -12,5 +12,6 @@ import { reducers as trade } from './trade.js';
 import { reducers as runSheet } from './run-sheet.js';
 import { reducers as lunhui } from './lunhui.js';
 import { reducers as desk } from './desk.js';
+import { reducers as identity } from './identity.js';
 
-export const reducers = { ...messages, ...discover, ...account, ...controls, ...markets, ...host, ...channels, ...traces, ...owner, ...trade, ...runSheet, ...lunhui, ...desk };
+export const reducers = { ...messages, ...discover, ...account, ...controls, ...markets, ...host, ...channels, ...traces, ...owner, ...trade, ...runSheet, ...lunhui, ...desk, ...identity };

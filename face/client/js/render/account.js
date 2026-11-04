@@ -1,5 +1,5 @@
 // face/client/js/render/account.js — Account on the face (spec 2026-10-22 §6.2): the Account's reads through
-// the face's proxy, in six tabs — Portfolio (the two figures, the change for the range and its curve, Assets, Positions,
+// the face's proxy, in seven tabs — Portfolio (the two figures, the change for the range and its curve, Assets, Positions,
 // Open orders), Money (plan 4b Task 2: Receive, an address per account and network on a press; Move, the move sheet from each
 // account money moves from, on a page that signs for an Account that takes writes; the payments waiting for the operator's
 // wallet), Venues (each venue with its health and what it does, its Details drawer; the A-share quotes line; the seat
@@ -7,7 +7,8 @@
 // knocks its Let in… — then the Account's agents and the keys knocking; plan 4b Task 5: the Agent wallets, each with Top up… and
 // Take back… through the move sheet, and Open an agent wallet…), Cards (what waits for the owner, and
 // the agents' asks), Rules (plan 4a Task 5: the mode with its door-by-door rules, the cap on each move, the agents' session and
-// their leverage; Guard one unsigned click, the rest signed, their keys only on a page that signs) — the Statement drawer, the Settings drawer with Devices; the owner device's line under
+// their leverage; Guard one unsigned click, the rest signed, their keys only on a page that signs), Identity (plan B1b: the account's
+// identity read, drawn by render/identity.js) — the Statement drawer, the Settings drawer with Devices; the owner device's line under
 // the head (render/owner.js), and for a page that signs the keys that open the owner's sheets on Venues, Agents and Cards
 // (Connect an account, Open a paper account, Disconnect, Top up, Start over; Let in, Give a limit of every kind, End limit, Revoke,
 // Approve, Reject, Grant, Decline) — and, for an Account that takes writes, each position's Close… (Sell…) and a perpetual's
@@ -34,8 +35,9 @@ import { seg, segLinks, sec, confirmPair } from './controls.js';
 import { grantsAsk } from '../host/sheet-view.js';
 import { curveSvg } from './chart.js';
 import { renderDeviceLine, renderDevices } from './owner.js';
+import { renderIdentityTab } from './identity.js';
 
-const TABS = [['portfolio', 'Portfolio'], ['money', 'Money'], ['venues', 'Venues'], ['agents', 'Agents'], ['cards', 'Cards'], ['rules', 'Rules']];
+const TABS = [['portfolio', 'Portfolio'], ['money', 'Money'], ['venues', 'Venues'], ['agents', 'Agents'], ['cards', 'Cards'], ['rules', 'Rules'], ['identity', 'Identity']];
 // the curve's ranges, the Account's own names and their words
 const RANGES = [['1d', '1D'], ['1w', '1W'], ['1m', '1M'], ['all', 'All']];
 // a venue's Details facts, each under its label
@@ -650,7 +652,7 @@ export function renderAccountScreen(state, now) {
   const statement = a.statementOpen && !state.settingsOpen;
   const venue = statement || state.settingsOpen || !a.detailsVenue ? null : venuesOf(a.data).find(v => v.id === a.detailsVenue) ?? null;
   const body = tab === 'money' ? moneyTab(state) : tab === 'venues' ? venues(state, now) : tab === 'agents' ? agentsTab(state, now) : tab === 'cards' ? cardsTab(state, now)
-    : tab === 'rules' ? rulesTab(state, now) : portfolio(state, now);
+    : tab === 'rules' ? rulesTab(state, now) : tab === 'identity' ? renderIdentityTab(state, now) : portfolio(state, now);
   return `<main class="${cls('main', 'acct', (state.settingsOpen || statement || venue) && 'with-drawer')}">${head(state)}${a.message ? note(a.message) : ''}${tabs(state, tab)}${body}` +
     `${statement ? renderStatement(state, now) : ''}${venue ? venueDetails(venue, state) : ''}</main>`;
 }

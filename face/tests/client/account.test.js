@@ -46,13 +46,13 @@ function state({ tab = 'portfolio', page = fx('account'), holdings = fx('holding
 const draw = s => renderAccountScreen(s, NOW);
 const SEAT_BOX = /<section class="cardbox" aria-label="Account seat">[\s\S]*?<\/section>/;
 
-test('the head: Guard and Trading on chips; Refresh and Settings; six tabs with the cards count', () => {
+test('the head: Guard and Trading on chips; Refresh and Settings; seven tabs with the cards count', () => {
   const html = draw(state());
   assert.match(html, /^<main class="main acct">/);
   has(html, '<div class="acct-head"><h1 class="head-title">Account</h1><span class="chip grey">Guard</span><span class="chip grey">Trading on · $250 a move</span><span class="spacer"></span>' +
     '<button type="button" class="pill" data-action="refreshAccount">Refresh</button><button type="button" class="pill" data-action="openSettings">Settings</button></div>');
   has(html, '<div class="seg"><a class="seg-item pressed" aria-current="page" href="#/account/portfolio">Portfolio</a><a class="seg-item" href="#/account/money">Money</a><a class="seg-item" href="#/account/venues">Venues</a>' +
-    '<a class="seg-item" href="#/account/agents">Agents</a><a class="seg-item" href="#/account/cards">Cards · 1</a><a class="seg-item" href="#/account/rules">Rules</a></div>', 'the six tabs, the Cards tab counting its one card');
+    '<a class="seg-item" href="#/account/agents">Agents</a><a class="seg-item" href="#/account/cards">Cards · 1</a><a class="seg-item" href="#/account/rules">Rules</a><a class="seg-item" href="#/account/identity">Identity</a></div>', 'the seven tabs, the Cards tab counting its one card');
   const page = fx('account');
   assert.match(draw(state({ page: { ...page, cards: [] } })), /href="#\/account\/cards">Cards<\/a>/, 'no count with nothing waiting');
   const two = draw(state({ page: { ...page, cards: [page.cards[0], { ...page.cards[0], id: 'card-0002', agent: '0xb0b', agentName: 'Scout' }] } }));
@@ -655,8 +655,8 @@ test("the Venues' keys: Connect an account, Open a paper account, Disconnect, To
   for (const p of [null, { ok: true }]) lacks(draw(signing(state({ tab: 'venues', page: p }))), 'data-action="openSheet"');
 });
 
-test('router: account tabs agents, cards and rules parse; an unknown tab is portfolio', () => {
-  for (const tab of ['portfolio', 'venues', 'agents', 'cards', 'rules']) {
+test('router: account tabs agents, cards, rules and identity parse; an unknown tab is portfolio', () => {
+  for (const tab of ['portfolio', 'venues', 'agents', 'cards', 'rules', 'identity']) {
     assert.deepEqual(parseHash(`#/account/${tab}`), { screen: 'account', tab });
     assert.equal(toHash({ screen: 'account', tab }), `#/account/${tab}`);
   }
@@ -665,6 +665,32 @@ test('router: account tabs agents, cards and rules parse; an unknown tab is port
   // the screen draws the tab its route names, one it does not know as Portfolio
   assert.match(draw(R.nav(emptyState(), parseHash('#/account/cards'))), /<a class="seg-item pressed" aria-current="page" href="#\/account\/cards">/);
   assert.match(draw(R.nav(emptyState(), { screen: 'account', tab: 'memory' })), /<a class="seg-item pressed" aria-current="page" href="#\/account\/portfolio">/);
+});
+
+// ── Identity (plan B1b Task 1): the seventh tab, after Rules ──
+
+const tabLabels = html => [...(html.match(/<div class="seg">[\s\S]*?<\/div>/)?.[0] ?? '').matchAll(/<a [^>]*>([^<]*)<\/a>/g)].map(m => m[1].replace(/ · \d+$/, ''));
+const IDENTITY = {
+  ok: true,
+  networks: [{ network: 'telegram', speaksAs: '@gravit_desk_bot', talksOnlyWith: '@pan', since: '2026-11-03T15:20:00.000Z', fingerprint: 'ab12cd34', state: 'connected', polling: true }],
+  routing: { chat: ['telegram'], alerts: ['telegram'], brief: [], cards: ['telegram'], fills: ['telegram'] }, quiet: { from: '23:00', to: '07:00', zone: 'America/New_York' }, strangers: [],
+};
+
+test('the tabs are Portfolio · Money · Venues · Agents · Cards · Rules · Identity', () => {
+  assert.deepEqual(tabLabels(draw(state({ tab: 'identity' }))), ['Portfolio', 'Money', 'Venues', 'Agents', 'Cards', 'Rules', 'Identity']);
+  assert.equal(parseHash('#/account/identity').tab, 'identity');
+  const html = draw(R.identityLoaded(state({ tab: 'identity' }), IDENTITY));
+  has(html, '<a class="seg-item pressed" aria-current="page" href="#/account/identity">Identity</a>');
+  // the three cards, in order
+  const at = label => html.indexOf(`<section class="cardbox" aria-label="${label}">`);
+  assert.ok(at('Gravit') > 0 && at('Gravit') < at('What reaches you where') && at('What reaches you where') < at('Not you'), 'Gravit, What reaches you where, Not you');
+  has(html, '@gravit_desk_bot');
+  // not the Portfolio's body
+  lacks(html, 'aria-label="Portfolio"');
+  // the Identity tab draws whether or not the Account's page was read: it is its own read
+  const bare = draw(R.identityLoaded(state({ tab: 'identity', page: null }), IDENTITY));
+  has(bare, '@gravit_desk_bot');
+  assert.doesNotMatch(draw(R.identityLoaded(state({ tab: 'identity' }), IDENTITY)), CJK);
 });
 
 // ── Rules (plan 4a Task 5): Guard one unsigned click; Beast, the cap, the session and their leverage signed ──

@@ -266,6 +266,8 @@ export function boot(win, host = {}) {
   // past the face's cache, a market page's asset sheet (plan 4a Task 4), and the seat's standing after one about an agent's key
   // or limit; a done sheet then closes itself (the order sheet's words stay on the ticket)
   const SEAT_KINDS = new Set(['letIn', 'limit', 'endLimit', 'revoke']);
+  // Account › Identity's signed sheets (plan B1b Tasks 2 and 3)
+  const IDENTITY_SHEET_KINDS = new Set(['connectNetwork', 'disconnect', 'routing', 'block']);
   function afterAction(kind, body) {
     // what the Account built for the operator's own wallet (a move out of a wallet, a DEX order) goes to that wallet at once:
     // it shows the transaction and sends it, and its hash is reported (the retired page's money.js done, trade.js placeOrder)
@@ -284,6 +286,8 @@ export function boot(win, host = {}) {
     if (kind === 'beast') store.dispatch('guardClear');
     // a venue reopened to agents: its Close to agents line goes with the state it spoke of
     if (kind === 'reopen') { const v = store.get().sheet?.seed?.venue; if (typeof v === 'string') store.dispatch('closingClear', v); }
+    // an identity sheet done (plan B1b): Identity read again past the face's cache, which a write does not clear
+    if (IDENTITY_SHEET_KINDS.has(kind)) void account.loadIdentity({ fresh: true });
     const s = store.get().sheet;
     if (kind !== 'order' && s?.kind === kind && s.status === 'done') sheet.close();
   }
@@ -593,6 +597,8 @@ export function boot(win, host = {}) {
     if (entered('venues') || entered('agents')) void seat.load();
     if (entered('agents')) void account.loadAgents();
     if (entered('money')) void account.loadEarn();
+    // Identity (plan B1b): the account's identity read; then at the page's cadence while it is on screen
+    if (entered('identity')) void account.loadIdentity();
     // Trade left: its ticket closes and lets its line go — before a market's page follows its own
     const inTrade = route => route?.screen === 'trade';
     if (!inTrade(r) && inTrade(was)) { stopTradeSearch(); trade.closeTicket(); }
@@ -997,7 +1003,11 @@ export function boot(win, host = {}) {
       void account.load({ fresh: true });
       void account.loadHoldings();
       void seat.load({ fresh: true });
+      if (store.get().route.tab === 'identity') void account.loadIdentity({ fresh: true });
     },
+    // Account › Identity (plan B1b): Retry reads it past the face's cache; Details opens or shuts the connection's line
+    refreshIdentity: () => { void account.loadIdentity({ fresh: true }); },
+    identityDetails: () => store.dispatch('identityDetails'),
     setHistoryRange: el => { void account.loadHistory(el.dataset.value); },
     openVenueDetails: el => store.dispatch('openVenueDetails', el.dataset.id),
     closeVenueDetails: () => store.dispatch('closeVenueDetails'),
@@ -1199,6 +1209,10 @@ export function boot(win, host = {}) {
     if (isField(el) && !typesWords(el)) changeField(el.name, fieldValueOf(el));
     if (el.dataset?.action === 'runSheetField' && !typesWords(el)) act.runSheetField(el);
     if (el.type === 'checkbox' && el.dataset?.action === 'sellManyPick') sellMany.toggle(el.value);
+    // a tick on Identity's grid: the draft routing, on a page that signs (the reducer checks again)
+    if (el.type === 'checkbox' && el.dataset?.action === 'identityTick' && signs()) {
+      store.dispatch('identityTick', { row: el.dataset.row, network: el.dataset.network, on: el.checked === true });
+    }
   });
   let pressSeq = 0;   // a press's own timeout ends only that press, never a later one
   root.addEventListener('pointerdown', ev => {
