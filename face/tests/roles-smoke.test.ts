@@ -589,9 +589,12 @@ test("roles smoke: cn-reviewer reads the counterevidence context of a sealed cn-
     const reviewer = roles.find((r) => r.id === "cn-reviewer")!;
     assert.equal(reviewer.model, "stub/flash-standin", "the fixture's reviewer is routed to the stub");
     assert.deepEqual(roles.map((r) => [r.id, r.allow]), readRoles(ROLES_ROOT).map((r) => [r.id, r.allow]), "and the fixture holds every shipped role, its tools unchanged");
-    for (const analyst of roles.filter((r) => r.id !== "cn-reviewer")) {
+    for (const analyst of roles.filter((r) => r.id.endsWith("-analyst"))) {
       assert.deepEqual(reviewer.allow.filter((name) => analyst.allow.includes(name)), ["skill"], `the reviewer shares only skill with ${analyst.id}`);
     }
+    /* The PDF page reader (plan 4) holds read_image alone: it shares no tool with the reviewer. */
+    const pdf = roles.find((r) => r.id === "pdf-page-reader")!;
+    assert.deepEqual(reviewer.allow.filter((name) => pdf.allow.includes(name)), [], "the reviewer shares no tool with pdf-page-reader");
     await mkdir(join(strategies, "cn-market"));
     await writeFile(join(strategies, "cn-market", "THESIS.md"), "# cn-market fixture\n");
     await mkdir(join(root, ".git"));

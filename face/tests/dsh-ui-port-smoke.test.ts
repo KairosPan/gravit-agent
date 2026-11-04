@@ -20,6 +20,13 @@
  *   `session/follow`'s snapshot (what `live.activate` waits on) a command answers; a project skill is offered by `skills/list` and its
  *   literal `/<name>` line reaches the model as its `<skill_content>`; a conversation chip
  *   serialized by the page's own `serialize` brings dsh's `## Referenced sessions` message.
+ * - Attachments (plan 4, Task 9): a cold session's `session/projections` carries `imageLimits`; an
+ *   image to the text-only stub is refused `MODEL_DOES_NOT_SUPPORT_IMAGES` and an unknown receipt
+ *   `FILE_NOT_STAGED`; on `stub-see` (the stub declaring image input, picked by
+ *   `session/selectModel`) the page's own `contentParts` prompt is logged as an image block and
+ *   `session/attachment` gives its PNG back; `role-pdf-page-reader` is listed whole beside
+ *   `read_image`; and `commands/execute` with an unknown receipt settles the text
+ *   `host/actions.js`'s RECEIPT_UNKNOWN matches.
  *
  * ONE BOOT PER PROCESS (smoke.test.ts header): `bootFace` sets `process.env.DSH_HOME`, so this is
  * its own file, every test sharing the one boot. The scratch home is a `mkdtemp` directory, never
@@ -45,14 +52,29 @@ import type { StoredEvent } from "../src/search-text.ts";
 // allowJs (tsconfig): the browser module is imported as it ships, untranspiled.
 import { openMux } from "../client/js/wire/api.js";
 import { serialize } from "../client/js/composer/draft.js";
+import { contentParts } from "../client/js/composer/files.js";
 import { makeBotsRoot } from "./bots-fixture.ts";
 import { mountClient, remote, remoteResult, signIn } from "./remote.ts";
 import { StubAdapter, type StubReply } from "./stub-llm.ts";
+import type { LlmModelInfo, LlmResolvedModelInfo } from "@deepseek-ai/dsh-llm";
 
 const gated = process.env.FACE_SMOKE !== "1";
 const skip = gated && "set FACE_SMOKE=1";
 const SEARCH_PROMPT = "贵州茅台的估值很高，宁德时代下跌了";
 const UI_PORT_PROBE_BODY = "UI_PORT_PROBE_BODY: answer with the probe's marker.";
+
+/** A valid 1 x 1 PNG, base64. */
+const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+/** The stub with eyes: the same scripted route, its model declaring text and image input (provider `stub-see`). */
+class SeeingStubAdapter extends StubAdapter {
+  override listModels(provider: string): Promise<readonly LlmModelInfo[]> {
+    return Promise.resolve([{ provider, id: "echo", name: "echo", inputModalities: ["text", "image"] }]);
+  }
+  override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+    return Promise.resolve({ provider, id: model, name: model, inputModalities: ["text", "image"], context: { contextWindow: 128_000 } });
+  }
+}
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitFor<T>(what: string, check: () => T | undefined | false, ms = 10_000): Promise<T> {
@@ -115,6 +137,7 @@ before(async () => {
   writeFileSync(patchPath, `${patch}\n- id: mcp-account\n  disabled: true\n- id: agent-default-model\n  config:\n    provider: stub\n    model: echo\n`);
   const { ctx, dispose } = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: await makeBotsRoot() });
   ctx.llm.registerAdapter(["stub"], new StubAdapter(script));
+  ctx.llm.registerAdapter(["stub-see"], new SeeingStubAdapter(script));
   mountClient(ctx);
   /* Search as main.ts wires it, against the booted persistence; the index in the scratch home. */
   const persistence = ctx.get("sessionPersistence") as {
@@ -395,4 +418,79 @@ test("a conversation chip: the page's serialized mention brings a Referenced ses
   await f.turn(b, [{ type: "text", text }]);
   const seen = requests.slice(from).map(textOf);
   assert.ok(seen.some((body) => body.includes("## Referenced sessions")), `${text}: ${seen.map((body) => body.slice(0, 400)).join(" | ")}`);
+});
+
+/* Attachments (plan 4, Task 9): the limits, the two refusals, an image on an image route, and the PDF role. */
+test("the image limits: session/projections on a cold session carries imageLimits", { skip, timeout: 60_000 }, async () => {
+  const f = face!;
+  const coldId = await coldSession(f);
+  const projections = await f.rpc<{ values: Record<string, any> }>("session/projections", { request: { sessionId: coldId } });
+  const limits = projections.values.imageLimits;
+  assert.ok(limits, `imageLimits in ${Object.keys(projections.values).join(", ")}`);
+  assert.equal(limits.maxImagesPerMessage, 20, JSON.stringify(limits));
+  assert.equal(limits.maxImageBytes, 20_971_520, JSON.stringify(limits));
+  assert.deepEqual([...limits.mediaTypes].sort(), ["image/gif", "image/jpeg", "image/png", "image/webp"], JSON.stringify(limits));
+});
+
+test("an image to a text-only model is refused before admission: session/attachment-invalid, reason MODEL_DOES_NOT_SUPPORT_IMAGES", { skip, timeout: 60_000 }, async () => {
+  const f = face!;
+  const sessionId = await f.open();
+  const refused = await f.rpcResult("session/prompt", {
+    request: { requestId: `ui-port-${randomUUID()}`, sessionId, mode: "queue", content: [{ type: "text", text: "look" }, { type: "image", mediaType: "image/png", data: PNG_1PX, name: "dot.png" }] },
+  }) as { ok: boolean; error?: { code?: string; details?: { reason?: string } } };
+  assert.equal(refused.ok, false, JSON.stringify(refused).slice(0, 300));
+  assert.equal(refused.error?.code, "session/attachment-invalid", JSON.stringify(refused).slice(0, 300));
+  assert.equal(refused.error?.details?.reason, "MODEL_DOES_NOT_SUPPORT_IMAGES", JSON.stringify(refused).slice(0, 300));
+  assert.equal(f.agentOf(sessionId)!.session.snapshotEvents().some((e: { type: string }) => e.type === "user/message"), false, "nothing admitted");
+});
+
+test("a receipt the session never staged is refused with FILE_NOT_STAGED", { skip, timeout: 60_000 }, async () => {
+  const f = face!;
+  const sessionId = await f.open();
+  const refused = await f.rpcResult("session/prompt", {
+    request: { requestId: `ui-port-${randomUUID()}`, sessionId, mode: "queue", content: [{ type: "text", text: "read it" }, { type: "file", receiptId: `receipt-${randomUUID()}` }] },
+  }) as { ok: boolean; error?: { code?: string; details?: { reason?: string } } };
+  assert.equal(refused.ok, false, JSON.stringify(refused).slice(0, 300));
+  assert.equal(refused.error?.details?.reason, "FILE_NOT_STAGED", JSON.stringify(refused).slice(0, 300));
+});
+
+test("an image on an image route: accepted, logged as an image block, and session/attachment gives its bytes back", { skip, timeout: 60_000 }, async () => {
+  const f = face!;
+  const sessionId = await f.open();
+  const selected = await f.rpc<{ selected: { provider: string; model: string } }>("session/selectModel", { request: { sessionId, provider: "stub-see", model: "echo" } });
+  assert.deepEqual({ provider: selected.selected.provider, model: selected.selected.model }, { provider: "stub-see", model: "echo" });
+  const image = { key: "k1", kind: "image", mediaType: "image/png", name: "dot.png" };
+  await f.turn(sessionId, contentParts("look", [image], () => PNG_1PX));
+  const message = f.agentOf(sessionId)!.session.snapshotEvents().find((e: { type: string }) => e.type === "user/message") as { data: { content: { type: string; attachment?: { attachmentId?: string; mediaType?: string } }[] } } | undefined;
+  assert.ok(message, "the prompt is logged");
+  /* Observed at dsh 0.2.1-rc.5: the logged block nests its ref, `{type:'image', attachment:{attachmentId, mediaType, width,
+   * height, bytes, name}}` - the shape wire/mapper.js reads. */
+  const block = message.data.content.find((part) => part.type === "image");
+  assert.ok(block, JSON.stringify(message.data).slice(0, 500));
+  const attachmentId = block.attachment?.attachmentId;
+  assert.equal(typeof attachmentId, "string", JSON.stringify(block));
+  assert.equal(block.attachment?.mediaType, "image/png", JSON.stringify(block));
+  const read = await f.rpc<{ attachment: unknown; data: string }>("session/attachment", { request: { sessionId, attachmentId } });
+  const bytes = Buffer.from(read.data, "base64");
+  assert.deepEqual([...bytes.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], "the bytes are a PNG");
+});
+
+test("the PDF role is up: role-pdf-page-reader is listed whole, and read_image is among the host's tools", { skip, timeout: 60_000 }, async () => {
+  const f = face!;
+  const presets = f.ctx.get("agentPresets") as { list(): Promise<{ id: string; broken?: string }[]> };
+  const row = (await presets.list()).find((p) => p.id === "role-pdf-page-reader");
+  assert.ok(row, "role-pdf-page-reader is listed");
+  assert.equal(row.broken, undefined, `listed whole: ${row.broken}`);
+  const tools = f.ctx.get("tools") as { schemas(scope?: object): { name: string }[] };
+  assert.ok(tools.schemas().some((t) => t.name === "read_image"), "read_image is registered");
+});
+
+/* Carried from Task 6: the text host/actions.js's RECEIPT_UNKNOWN matches on (dsh-commands admitCommandAttachments, rc.5). */
+test("a dropped receipt on a command: commands/execute /goal with an unknown receipt settles the error text RECEIPT_UNKNOWN matches", { skip, timeout: 60_000 }, async () => {
+  const f = face!;
+  const sessionId = await f.open();
+  const executed = await f.rpc<{ result: { kind: string; text?: string } }>("commands/execute", {
+    agentId: sessionId, line: "/goal read it", submittedAttachments: [{ type: "file", receiptId: `receipt-${randomUUID()}` }],
+  });
+  assert.deepEqual({ kind: executed.result.kind, text: executed.result.text }, { kind: "error", text: "File upload receipt is unknown for this session." });
 });
