@@ -35,7 +35,7 @@
  * environment is PATH, HOME, DSH_HOME and, only when asked, FACE_PORT, never a key: whatever a
  * LaunchAgent's environment holds sits in its plist and shows in `launchctl print`. The keys live
  * in $DSH_HOME/.env (mode 0600), which dsh reads at boot; `install` writes that file from
- * .env.deepseek, .env.alpaca, .env.ifind and .env.telegram at the repo root when the home has
+ * .env.deepseek, .env.alpaca and .env.ifind at the repo root when the home has
  * none, and never rewrites it. It copies an allow-list of names only ({@link COPIED_KEYS}, and any
  * `ALPHA_*`) and names the rest: dsh refuses a bootstrap-only name (PATH, NODE_OPTIONS, any DSH_*)
  * in the home's .env at boot, which would fail every start, and Gate 1's ALPACA_KIT_ENABLE_ORDERS
@@ -74,13 +74,14 @@ export const WATCHDOG_STATE_FILE = "watchdog.json";
 export const EXPECTED_KEYS = ["DEEPSEEK_API_KEY", "APCA_API_KEY_ID", "APCA_API_SECRET_KEY"] as const;
 
 /** The names {@link ensureHomeEnv} copies into the home's .env: the expected keys, Alpaca's
- * endpoint, iFinD's tokens and the desk's Telegram bot and operator (src/telegram.ts) - and, by
- * {@link COPIED_PREFIXES}, the workbench's own `ALPHA_*` settings. It is an allow-list because a
+ * endpoint and iFinD's tokens - and, by {@link COPIED_PREFIXES}, the workbench's own `ALPHA_*`
+ * settings. No network's token: the account holds Telegram's (Account › Identity), and the face's
+ * desk reaches the phone only through it (src/phone.ts), so no TELEGRAM_* name is copied. It is an allow-list because a
  * copied line can break or arm the service: dsh refuses a bootstrap-only name (PATH, NODE_OPTIONS,
  * any DSH_* ...) in the home's .env and the boot fails, and Gate 1's ALPACA_KIT_ENABLE_ORDERS must
  * never reach the real harness home. */
 export const COPIED_KEYS = [
-  ...EXPECTED_KEYS, "APCA_API_BASE_URL", "IFIND_ACCESS_TOKEN", "IFIND_REFRESH_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_OPERATOR_ID",
+  ...EXPECTED_KEYS, "APCA_API_BASE_URL", "IFIND_ACCESS_TOKEN", "IFIND_REFRESH_TOKEN",
 ] as const;
 
 /** The name prefixes {@link ensureHomeEnv} copies besides {@link COPIED_KEYS}. */
@@ -318,7 +319,7 @@ function namesOf(text: string): string[] {
  * ({@link namesOf}), not what the lines look like: a key with an empty value is missing.
  * @param home - the harness home (DSH_HOME).
  * @param sources - the key files to copy from, in order (the repo root's .env.deepseek,
- *   .env.alpaca, .env.ifind, .env.telegram).
+ *   .env.alpaca, .env.ifind).
  * @returns `path`, the home's .env; `created`, whether this call wrote it; `names`, the names dsh
  *   reads from the file with a value - none when nothing was written; `missing`, the
  *   {@link EXPECTED_KEYS} not among them; `missingSources`, the sources that do not exist;
@@ -639,7 +640,7 @@ const WAIT_MS = 10_000;
 const POLL_MS = 500;
 
 /** The key files at the repo root that install writes the home's .env from, in order. */
-const KEY_FILES = [".env.deepseek", ".env.alpaca", ".env.ifind", ".env.telegram"] as const;
+const KEY_FILES = [".env.deepseek", ".env.alpaca", ".env.ifind"] as const;
 
 /** The profile the service runs: the plist passes no FACE_PROFILE, so main.ts boots `face`. */
 const PROFILE = "face";

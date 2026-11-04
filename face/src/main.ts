@@ -32,7 +32,8 @@ import { registerSeatRoute } from "./seat.ts";
 import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
 import type { DeskConversationCtxLike } from "./desk-conversation.ts";
 import { resolveDeskRoute } from "./desk-session.ts";
-import { createPhoneClient } from "./phone.ts";
+import { createPhoneClient, type PhoneClient } from "./phone.ts";
+import { announceCard } from "./card-notice.ts";
 import { marketQuotes } from "./market-quotes.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { registerSessionRoutes } from "./sessions.ts";
@@ -163,6 +164,12 @@ installFailLoud(BIN, process, async () => {
  * has already disposed the tree. Anything else rethrows into `installFailLoud`
  * above, which prints it in full. */
 let booted: BootedFace;
+/* The desk's switch (read here, before the boot, because Gate 2's card notice is armed inside it), and the
+ * account's send the notice goes through - set once the phone client is built below; a card raised before
+ * that is one line. Only a face with the desk on phones a card (plan B1a ruling 10): a second face on a
+ * scratch home (FACE_DESK=0) never does. The notice is words only (src/card-notice.ts): no button, no link. */
+const deskEnabled = process.env.FACE_DESK !== "0";
+let cardPhone: PhoneClient | undefined;
 try {
   /* `deferReady`: the gateway admits no `/api/remote.mux` stream until this
    * entry calls `booted.commitReady()` - LAST, after every route below is
@@ -170,7 +177,12 @@ try {
    * gateway admits it, and its first `onReady` reads `/data/*`; committing
    * inside `bootFace` would let it find those routes missing (boot.ts
    * divergence 5; critique-boot-and-composition observation 3). */
-  booted = await bootFace({ profileName, port, deferReady: true });
+  booted = await bootFace({
+    profileName,
+    port,
+    deferReady: true,
+    ...(deskEnabled ? { onCardAsked: (name: string, args: unknown) => announceCard(cardPhone, name, args) } : {}),
+  });
 } catch (err) {
   if (err instanceof StartupError) {
     console.error(err.message);
@@ -391,9 +403,9 @@ await registerPanelRoutes(booted.ctx.webServer, deps);
  * With the desk on, the standing orders' clock (schedule.ts) runs on that
  * conversation too, loaded on first use: `standing.yml` beside the ledger, fired
  * on the XNYS calendar (src/market-clock.ts). */
-const deskEnabled = process.env.FACE_DESK !== "0";
 /* The account's inbox and send for the desk's phone: the same URL the proxy reads, and none when the row is disabled. */
 const phone = seatRow === undefined ? createPhoneClient({ url: seatUrl() }) : seatRow.disabled ? undefined : createPhoneClient({ url: seatRow.url });
+cardPhone = phone;
 const deskRoute = deskEnabled
   ? await resolveDeskRoute(booted.ctx as unknown as RoomContextLike, process.env.FACE_DESK_MODEL, console.log)
   : undefined;

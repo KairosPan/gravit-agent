@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   COPIED_KEYS, EXPECTED_KEYS, LABEL, WATCH_POLL_MS, checkHealth, contextOf, ensureHomeEnv, envLinesOf, fetchStatus, filterPath, formatStatus,
-  installPlan, lastTokenUrl, nodeOnPath, parseLaunchctlPrint, portAnswers, runService, servicePlan, WATCHDOG_LABEL, watchdogPlan, type ServiceDeps,
+  installPlan, isCopiedKey, lastTokenUrl, nodeOnPath, parseLaunchctlPrint, portAnswers, runService, servicePlan, WATCHDOG_LABEL, watchdogPlan, type ServiceDeps,
 } from "../scripts/service.ts";
 import { WATCH_CN_POLL_MS, WATCH_US_POLL_MS } from "../src/watch.ts";
 import { deskStatusLines, type DeskStatus } from "../src/desk.ts";
@@ -96,8 +96,7 @@ test("ensureHomeEnv copies only the allow-list, in source order, and names every
   assert.deepEqual(r.skipped, ["PATH", "NODE_OPTIONS", "ALPACA_KIT_ENABLE_ORDERS"]);
   assert.deepEqual(r.names, ["ALPHA_DATA_FEED", "DEEPSEEK_API_KEY"]); assert.deepEqual(r.missing, ["APCA_API_KEY_ID", "APCA_API_SECRET_KEY"]);
   assert.deepEqual(ensureHomeEnv(h, [join(src, ".env.alpaca")]).skipped, [], "an existing .env: the sources are not read");
-  assert.deepEqual(COPIED_KEYS, ["DEEPSEEK_API_KEY", "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "APCA_API_BASE_URL", "IFIND_ACCESS_TOKEN", "IFIND_REFRESH_TOKEN",
-    "TELEGRAM_BOT_TOKEN", "TELEGRAM_OPERATOR_ID"]);
+  assert.deepEqual(COPIED_KEYS, ["DEEPSEEK_API_KEY", "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "APCA_API_BASE_URL", "IFIND_ACCESS_TOKEN", "IFIND_REFRESH_TOKEN"]);
 });
 
 test("ensureHomeEnv writes nothing when no name is on the allow-list, and names them all once", async () => {
@@ -526,7 +525,7 @@ test("install names the keys the home .env lacks, the names it did not copy and 
   for (const line of [`wrote ${env} with: APCA_API_KEY_ID, APCA_API_SECRET_KEY`,
     `not in ${env}: DEEPSEEK_API_KEY (the face also reads DEEPSEEK_API_KEY from dsh's credential store)`,
     `not copied (not on the service's allow-list; add them to ${env} by hand if the service needs them): PATH`,
-    `no source: ${join(r.deps.root, ".env.deepseek")}, ${join(r.deps.root, ".env.ifind")}, ${join(r.deps.root, ".env.telegram")}`]) assert.ok(lines.includes(line), line);
+    `no source: ${join(r.deps.root, ".env.deepseek")}, ${join(r.deps.root, ".env.ifind")}`]) assert.ok(lines.includes(line), line);
   assert.equal(await readFile(env, "utf8"), "APCA_API_KEY_ID=k\nAPCA_API_SECRET_KEY=s\n");
   const again = await rig();
   Object.assign(again.deps, { home: r.deps.home, root: r.deps.root });
@@ -535,17 +534,25 @@ test("install names the keys the home .env lacks, the names it did not copy and 
   assert.ok(!again.text().includes("not copied"), "an existing .env: the sources are not read");
 });
 
-test("install copies the Telegram bridge's two names from .env.telegram, after the other key files; the plist carries neither", async () => {
+test("the service no longer copies TELEGRAM_* or .env.telegram", async () => {
+  /* the face holds no network's token since the bridge moved onto the account (plan B1a Task 8): the
+   * account keeps Telegram's token in its own home, so install neither reads .env.telegram nor copies a
+   * TELEGRAM_* name from any key file, and the plist carries none */
+  assert.ok(!COPIED_KEYS.some((name) => name.startsWith("TELEGRAM_")));
+  assert.equal(isCopiedKey("TELEGRAM_BOT_TOKEN"), false);
+  assert.equal(isCopiedKey("TELEGRAM_OPERATOR_ID"), false);
   const r = await rig();
-  await writeFile(join(r.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\n");
-  await writeFile(join(r.deps.root, ".env.telegram"), "TELEGRAM_BOT_TOKEN=424242:fake\nTELEGRAM_OPERATOR_ID=42\nTELEGRAM_OTHER=x\n");
+  await writeFile(join(r.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\nTELEGRAM_BOT_TOKEN=424242:fake\n");
+  await writeFile(join(r.deps.root, ".env.telegram"), "TELEGRAM_BOT_TOKEN=424242:fake\nTELEGRAM_OPERATOR_ID=42\n");
   assert.equal(await runService("install", [], r.deps), 0);
   const env = join(r.deps.home, ".env");
-  assert.equal(await readFile(env, "utf8"), "DEEPSEEK_API_KEY=d\nTELEGRAM_BOT_TOKEN=424242:fake\nTELEGRAM_OPERATOR_ID=42\n");
-  const lines = r.text().split("\n");
-  assert.ok(lines.includes(`wrote ${env} with: DEEPSEEK_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_OPERATOR_ID`));
-  assert.ok(lines.includes(`not copied (not on the service's allow-list; add them to ${env} by hand if the service needs them): TELEGRAM_OTHER`));
-  assert.doesNotMatch(await readFile(r.plist, "utf8"), /TELEGRAM/, "no key reaches the plist");
+  assert.equal(await readFile(env, "utf8"), "DEEPSEEK_API_KEY=d\n");
+  const text = r.text();
+  assert.ok(text.split("\n").includes(`wrote ${env} with: DEEPSEEK_API_KEY`));
+  assert.ok(text.split("\n").includes(`not copied (not on the service's allow-list; add them to ${env} by hand if the service needs them): TELEGRAM_BOT_TOKEN`),
+    "a Telegram name in another key file is named as not copied");
+  assert.doesNotMatch(text, /\.env\.telegram|TELEGRAM_OPERATOR_ID/, ".env.telegram is not a source: not read, not named");
+  assert.doesNotMatch(await readFile(r.plist, "utf8"), /TELEGRAM|424242/, "no key reaches the plist");
 });
 
 test("install with nothing to copy writes no .env and says so; a .env it cannot write stops it before launchd", async () => {
