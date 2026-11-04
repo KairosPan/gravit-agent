@@ -81,9 +81,18 @@ test("effectiveApprovalPolicy: a runtime switch to danger-full-access disarms th
 
 /* --- the registry cross-check --------------------------------------------- */
 
-test("the seat's AKShare passthrough is a read: no card, covered", () => {
-  assert.equal(isOrderTool("mcp__account__portfolio_akshare"), false);
-  const audit = auditOrderTools([{ name: "mcp__account__portfolio_akshare" }, { name: "mcp__account__portfolio_live_order" }]);
+test("a market read raises no card, and the seat's two connected reads are reads", () => {
+  for (const name of ["mcp__market__market_book", "mcp__market__market_explore", "mcp__market__market_candles", "mcp__market__market_quotes", "mcp__market__market_akshare"]) {
+    assert.equal(isOrderTool(name), false, name);
+    assert.equal(orderApprovalDecision(name, "ask"), null, name);
+  }
+  for (const name of ["mcp__account__portfolio_live_book", "mcp__account__portfolio_live_candles"]) {
+    assert.equal(isOrderTool(name), false, `${name} is classified a read`);
+    assert.equal(orderApprovalDecision(name, "ask"), null, name);
+  }
+  /* the four that left the seat are no longer classified: one an older seat still registers is carded */
+  for (const raw of ["portfolio_explore", "portfolio_candles", "portfolio_book", "portfolio_akshare"]) assert.equal(isOrderTool(`mcp__account__${raw}`), true, raw);
+  const audit = auditOrderTools([{ name: "mcp__market__market_book" }, { name: "mcp__account__portfolio_live_book" }, { name: "mcp__account__portfolio_live_order" }]);
   assert.deepEqual(audit.gated, ["mcp__account__portfolio_live_order"]);
   assert.deepEqual(audit.uncovered, []);
 });

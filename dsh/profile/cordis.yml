@@ -14,9 +14,10 @@
 # The MCP servers are NOT here: the face composes its own rows on every boot, and the
 # operator's patch file overrides them by id. They are the host overlay (webserver,
 # connection, the Remote controllers, the preset registry and Gravit's preset - rendered from
-# roles/ and dsh/profile/cycle.md), the policy rows (face/src/policy.ts), and the Account
+# roles/ and dsh/profile/cycle.md), the policy rows (face/src/policy.ts), the Account
 # seat row `mcp-account` (face/src/account-seat.ts), the agent's only path to the operator's
-# Account, paper venues only (AKShare is the market's, relayed by the Account: the seat's portfolio_akshare).
+# Account, paper venues only, and the market row `mcp-market` (face/src/market-row.ts), the
+# market's keyless reads (AKShare among them: market_akshare).
 # The face's plugin panel (/data/plugins.json) shows what booted.
 #
 # <ABSOLUTE PATH TO THIS REPO> stays a placeholder here on purpose - it is filled in only in

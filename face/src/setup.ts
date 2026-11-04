@@ -41,9 +41,9 @@ const PATCH_HEADER = `# face profile patch layer. The face's own host rows (webs
 # programmatically by gravit-face at boot - do NOT add them here. This file is
 # the operator's: their own rows go here (the default model, skill roots, an
 # MCP server of their own) per dsh/README.md. The face composes its Account
-# seat row (mcp-account) itself, below this file - AKShare is the market's
-# (market/README.md): a patch here reaches the seat row, and disables it by
-# its id. The twelve Lunhui rows (lunhui-runs, lunhui-freeze-quotes,
+# seat row (mcp-account) and the market row (mcp-market, the market's keyless
+# reads, AKShare among them) itself, below this file: a patch here reaches
+# either row, and disables it by its id. The twelve Lunhui rows (lunhui-runs, lunhui-freeze-quotes,
 # lunhui-freeze-limit-up, lunhui-freeze-boards, lunhui-freeze-index,
 # lunhui-environment, lunhui-sentiment, lunhui-theme, lunhui-leader,
 # lunhui-mode, lunhui-review, lunhui-present)

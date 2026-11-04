@@ -131,6 +131,7 @@ import { declareDeskPreset, deskPresetDefinition, deskRosterProblem } from "./de
 import { readProtocols } from "./protocols.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, instructionsPatch } from "./instructions.ts";
 import { accountSeatPatches } from "./account-seat.ts";
+import { marketRowPatches } from "./market-row.ts";
 import { lunhuiPatches } from "./lunhui.ts";
 import { facePolicyPatches } from "./policy.ts";
 import {
@@ -382,8 +383,11 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
   /* The Account seat (src/account-seat.ts): the project layer, right after
    * the policy defaults, below everything the operator writes. */
   const seatPatches = accountSeatPatches();
+  /* The market row (src/market-row.ts): the market's own keyless reads, the
+   * same project layer, right after the seat, so a patch disables either alone. */
+  const marketPatches = marketRowPatches();
   /* The Lunhui rows (src/lunhui.ts, modules spec §5.12): the same project
-   * layer, right after the seat, below everything the operator writes. */
+   * layer, right after the market row, below everything the operator writes. */
   const lunhuiRows = lunhuiPatches();
   const homePatches = loadOptionalPatches(BIN, join(home, PROFILE_PATCH_FILENAME)) ?? [];
   /* Cloned: the include's patch algorithm pushes inserted rows by reference
@@ -391,7 +395,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * could rewrite them under the caller. */
   const extraPatches: FacePatchList = structuredClone(opts.extraPatches ?? []);
   const patches: FacePatchList = [
-    ...bundlePatches, ...policyPatches, ...seatPatches, ...lunhuiRows, ...profile.patches, ...homePatches, ...extraPatches,
+    ...bundlePatches, ...policyPatches, ...seatPatches, ...marketPatches, ...lunhuiRows, ...profile.patches, ...homePatches, ...extraPatches,
   ];
   /* Both switches below are guarded on the row actually being in the composed
    * tree. A patch that matches nothing is inert and — measured, not assumed —
@@ -402,7 +406,7 @@ export function composeFace(opts: FaceBootOptions): { patches: FacePatchList; ro
    * never mounted the row. (With the policy layer disabling
    * `session-telemetry-otel` by default the env switch is redundant until an
    * operator re-enables the row - and then it still wins, composing after.) */
-  const below = composeEntries([bundlePatches, policyPatches, seatPatches, lunhuiRows, profile.patches, homePatches, extraPatches]);
+  const below = composeEntries([bundlePatches, policyPatches, seatPatches, marketPatches, lunhuiRows, profile.patches, homePatches, extraPatches]);
   const rows = new Set(below.flatMap((row) => (typeof row.id === "string" ? [row.id] : [])));
   /* app-boot exports the CLI's own resolver now (NEW packages/boot/app-boot/
    * src/profile-context.ts:52-55): ANY non-empty value disables, and a

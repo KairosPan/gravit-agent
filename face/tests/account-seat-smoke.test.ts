@@ -21,6 +21,7 @@ import { setupFaceProfile } from "../src/setup.ts";
 import { bootFace, type FacePatchList } from "../src/boot.ts";
 import { ACCOUNT_SEAT_ROW_ID, ACCOUNT_SEAT_SERVER, SEAT_TOOL_PREFIX, composedSeatRow, type SeatEntryLike } from "../src/account-seat.ts";
 import { auditOrderTools, SEAT_WRITE_RAW_NAMES } from "../src/orders.ts";
+import { MARKET_TOOL_PREFIX } from "../src/market-row.ts";
 import { registerSeatRoute, type SeatView } from "../src/seat.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
 import { makeBotsRoot } from "./bots-fixture.ts";
@@ -69,7 +70,7 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
       execute(exec: { callId: string; name: string; arguments: unknown; agent: object; signal: AbortSignal }): Promise<{ isError: boolean; content?: { type?: string; text?: string }[] }>;
     };
 
-    /* 2. The seat mounts: its 36 real-account tools, the nine writes gated, no
+    /* 2. The seat mounts: its 34 real-account tools, the nine writes gated, no
      * read gated, the seat covered. */
     const deadline = Date.now() + 120_000;
     let names: string[] = [];
@@ -79,12 +80,23 @@ test("account seat smoke: the seat mounts, its writes are gated, a read answers,
       await sleep(500);
     }
     const seatNames = names.filter((name) => name.startsWith(SEAT_TOOL_PREFIX)).sort();
-    assert.equal(seatNames.length, 36, `the seat's 36 real-account tools; saw ${seatNames.length}: ${seatNames.join(", ")}\nstand-in:\n${standin.log()}`);
+    assert.equal(seatNames.length, 34, `the seat's 34 real-account tools; saw ${seatNames.length}: ${seatNames.join(", ")}\nstand-in:\n${standin.log()}`);
     const audit = auditOrderTools(tools.schemas());
     const gatedSeat = audit.gated.filter((name) => name.startsWith(SEAT_TOOL_PREFIX)).sort();
     assert.deepEqual(gatedSeat, REAL_WRITES.map((raw) => `${SEAT_TOOL_PREFIX}${raw}`).sort(), "exactly the seat's real-account writes are gated");
     assert.deepEqual(audit.uncovered, [], "the seat is covered");
-    for (const read of ["portfolio_account", "portfolio_holdings", "portfolio_wait", "portfolio_live_preview", "portfolio_akshare"]) assert.ok(seatNames.includes(`${SEAT_TOOL_PREFIX}${read}`), read);
+    for (const read of ["portfolio_account", "portfolio_holdings", "portfolio_wait", "portfolio_live_preview", "portfolio_live_candles", "portfolio_live_book"]) assert.ok(seatNames.includes(`${SEAT_TOOL_PREFIX}${read}`), read);
+    for (const moved of ["portfolio_explore", "portfolio_candles", "portfolio_book", "portfolio_akshare"]) assert.equal(seatNames.includes(`${SEAT_TOOL_PREFIX}${moved}`), false, `${moved} left the seat`);
+    /* The market row (src/market-row.ts) mounts beside the seat from the repo's market/: its five keyless reads, none carded. No
+     * market tool is called here, so no market service is asked. */
+    let marketNames: string[] = [];
+    while (Date.now() < deadline) {
+      marketNames = tools.schemas().map((schema) => schema.name).filter((name) => name.startsWith(MARKET_TOOL_PREFIX)).sort();
+      if (marketNames.length >= 5) break;
+      await sleep(500);
+    }
+    assert.deepEqual(marketNames, ["akshare", "book", "candles", "explore", "quotes"].map((raw) => `${MARKET_TOOL_PREFIX}market_${raw}`), "the market row's five tools");
+    assert.deepEqual(auditOrderTools(tools.schemas()).gated.filter((name) => name.startsWith(MARKET_TOOL_PREFIX)), [], "no market read is carded");
 
     /* 3. A real session with an open turn, and the outermost answerer, as the
      * order-gate smoke does. */

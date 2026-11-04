@@ -19,8 +19,8 @@ deferring. Every style-gravit SKILL.md carries that scope header at the top.
 ## Install
 
 There is no Python side and no server of this repo's to mount: the face composes its own MCP
-row (the Account seat; AKShare is the market's, relayed by the Account and reached through the seat's `portfolio_akshare`)
-on every boot, and the operator adds two rows of their own.
+rows (the Account seat `mcp-account`, and the market's `mcp-market`, whose `market_akshare` is
+AKShare) on every boot, and the operator adds two rows of their own.
 
 1. **Create the harness home and the face profile.** `cd face && npm install && npm run setup`
    creates `$DSH_HOME/profiles/face/` (`$DSH_HOME` defaults to `~/.dsh`): a `package.json`

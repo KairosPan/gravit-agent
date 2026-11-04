@@ -10,7 +10,6 @@
  *   cn-history.ts       ChinaRange (and CnMinutes, CnBar)        cn-rank.ts    ChinaSort, RANK_ROWS        cn-session.ts   (CnPhase, CnSession)
  *   public-stocks.ts    CBOE_DELAY_MS, US_STOCKS_ID, cboeQuoteInSession, usSession, usLineAt (and usSessionWords, usClosedWords)
  *   us-quotes.ts        FRESH_MS, US_TICKER, UsQuote (and ROBINHOOD_FROM, NASDAQ_FROM, ROBINHOOD_OVERNIGHT)
- *   akshare.ts          AKSHARE_TOOLS
  *
  * One addition of the account's own: hubCovers, whether the market's hub streams a market (streamOf, and the US stocks line's ticker). */
 import type { Refusal } from "../../core/errors.ts";
@@ -556,25 +555,6 @@ export function usLineAt(m: Listing, rt: UsQuote, now: number): Listing {
     ...(changePct !== undefined ? { changePct24h: changePct } : {}),
   };
 }
-
-// ---- akshare.ts ---------------------------------------------------------------------------------------------------------------------------
-
-export const AKSHARE_TOOLS: readonly string[] = [
-  "akshare_discover",
-  "akshare_stock_a",
-  "akshare_stock_fundamental",
-  "akshare_stock_hk_us",
-  "akshare_stock_board_flow",
-  "akshare_stock_margin_other",
-  "akshare_macro",
-  "akshare_futures",
-  "akshare_fund",
-  "akshare_bond",
-  "akshare_index",
-  "akshare_option",
-  "akshare_fx_commodity",
-  "akshare_other",
-];
 
 // ---- the account's own ---------------------------------------------------------------------------------------------------------------------
 

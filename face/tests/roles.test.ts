@@ -164,7 +164,7 @@ test("every shipped role: exact names only, nothing forbidden, jobs only beside 
     assert.ok(role.description.length <= 300 && role.description.length > 0, role.id);
     for (const name of role.allow) {
       assert.equal(name.includes("*"), false, `${role.id}: ${name} is exact`);
-      assert.equal(FORBIDDEN.has(name) || ACCOUNT_OR_ORDER.test(name) || name.startsWith("role_") || name.startsWith("mcp__akshare__") || name.endsWith("__portfolio_akshare") || name.startsWith("mcp__account__") || name.startsWith("agent_"), false, `${role.id}: ${name} is never a role's`);
+      assert.equal(FORBIDDEN.has(name) || ACCOUNT_OR_ORDER.test(name) || name.startsWith("role_") || name.startsWith("mcp__akshare__") || name.endsWith("__portfolio_akshare") || name.endsWith("__market_akshare") || name.startsWith("mcp__account__") || name.startsWith("agent_"), false, `${role.id}: ${name} is never a role's`);
     }
     /* A bash command past the executor's default moves to a background job the child owns; the job tools
      * are how it reads and stops one, and they mean nothing to a role that cannot start a command. */
@@ -388,6 +388,16 @@ test("readRoles refuses every tool a role never carries, naming role.yml and why
       assert.throws(() => readRoles(root), (e: Error) =>
         e.message.startsWith(`${join(root, "probe", "role.yml")}: allow entry ${JSON.stringify(entry)}: a role never carries `), entry);
       if (entry.endsWith("portfolio_akshare")) assert.throws(() => readRoles(root), /a role never carries an AKShare tool/, entry);
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a role naming market_akshare is refused as an AKShare tool", async () => {
+  const root = await makeRolesRoot();
+  try {
+    for (const entry of ["mcp__market__market_akshare", "mcp__quotes__market_akshare", "market_akshare"]) {
+      await writeFile(join(root, "probe", "role.yml"), `name: Probe\ndescription: x\nallow:\n  - read\n  - ${entry}\n`);
+      assert.throws(() => readRoles(root), /a role never carries an AKShare tool/, entry);
     }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

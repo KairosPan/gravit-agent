@@ -6,8 +6,9 @@
  * order, moves money, pays or sets leverage — and any tool under the face's
  * own seat prefix the face has not classified stop for a human here first,
  * and then again on the Account's own Guard card. Nothing else is gated: the
- * seat's reads and words (AKShare's passthrough, `portfolio_akshare`, among them),
- * the host's tools pass untouched.
+ * seat's reads and words, the market row's keyless reads (`mcp__market__*`,
+ * src/market-row.ts; AKShare's passthrough among them, not under the seat's
+ * prefix) and the host's tools pass untouched.
  *
  * The approval CHANNEL's only producer used to be a sandbox escalation, and an
  * MCP call never takes that path — so without this module an order tool would
@@ -58,14 +59,17 @@ export const SEAT_WRITE_RAW_NAMES = [
  * is the safe default, and it never refuses the boot (the Account moves fast;
  * a boot refusal for a new read would brick the operator's face). Only the
  * face's own server name gets this fallback; a renamed seat server keeps the
- * twelve by raw suffix and nothing more. */
+ * twelve by raw suffix and nothing more. The market's public reads left the
+ * seat for the market row (`mcp__market__market_*`, src/market-row.ts), which
+ * is not under this prefix and so is never carded; the seat keeps a connected
+ * venue's own bars and book (`portfolio_live_candles`, `portfolio_live_book`). */
 export const SEAT_READ_RAW_NAMES = [
   "portfolio_overview", "portfolio_read", "portfolio_markets", "portfolio_quote", "portfolio_account", "portfolio_approval",
-  "portfolio_wait", "portfolio_statement", "portfolio_explore", "portfolio_holdings", "portfolio_history", "portfolio_asset",
-  "portfolio_candles", "portfolio_book", "portfolio_receive", "portfolio_venues", "portfolio_earn", "portfolio_watchlist",
+  "portfolio_wait", "portfolio_statement", "portfolio_holdings", "portfolio_history", "portfolio_asset",
+  "portfolio_live_candles", "portfolio_live_book", "portfolio_receive", "portfolio_venues", "portfolio_earn", "portfolio_watchlist",
   "portfolio_report", "portfolio_ask", "portfolio_memory", "portfolio_remember", "portfolio_forget", "portfolio_desk",
   "portfolio_desk_say", "portfolio_live_preview", "portfolio_live_markets", "portfolio_live_compare", "portfolio_live_positions",
-  "portfolio_openness", "portfolio_akshare",
+  "portfolio_openness",
 ] as const;
 
 /** The retired order tools: alpaca-kit's pair, which left the tree in stage 3

@@ -8,9 +8,11 @@
  *
  * Tools on the user's REAL accounts (the service's default) — reads: portfolio_account · portfolio_venues (where the user can connect,
  * judged from the network the Account runs on) · portfolio_overview · portfolio_live_markets ·
- * portfolio_live_compare · portfolio_live_positions · portfolio_explore · portfolio_holdings · portfolio_history · portfolio_asset ·
- * portfolio_candles · portfolio_book · portfolio_receive · portfolio_earn · portfolio_statement · portfolio_watchlist · portfolio_live_preview ·
- * portfolio_approval · portfolio_wait. Writes, signed with this seat's key and inside the limits the owner signed for it (Guard asks
+ * portfolio_live_compare · portfolio_live_positions · portfolio_holdings · portfolio_history · portfolio_asset ·
+ * portfolio_live_candles · portfolio_live_book (a CONNECTED venue's own bars and book, from /api/account/connected) · portfolio_receive ·
+ * portfolio_earn · portfolio_statement · portfolio_watchlist · portfolio_live_preview · portfolio_approval · portfolio_wait. The market's
+ * public reads — its explore, quotes, candles, book and the AKShare passthrough — are not the seat's: they are the market's own keyless MCP
+ * server (the market package's `npm run market:mcp`: market_explore · market_quotes · market_candles · market_book · market_akshare). Writes, signed with this seat's key and inside the limits the owner signed for it (Guard asks
  * the owner on a card, Beast places at once): portfolio_live_order · portfolio_live_batch · portfolio_live_amend · portfolio_live_cancel ·
  * portfolio_live_close · portfolio_live_leverage · portfolio_live_move · portfolio_live_earn · portfolio_pay. Words to the owner, granting
  * nothing: portfolio_report · portfolio_ask. A venue portfolio_account marks `paper: true` is a PAPER account — the account's own paper
@@ -56,7 +58,6 @@ import { HOW_TEXT, MAX_NOTES, NOTE_TEXT, TOPIC_WORDS, TOPICS } from "./account/m
 import { mustKey, seatKey as storedSeatKey } from "./account/keystore.ts";
 import { outsideSeatFile } from "./account/desk.ts";
 import { defaultHome } from "./home.ts";
-import { AKSHARE_TOOLS } from "./market/shapes.ts";
 import { BRIDGE_CHAINS } from "./live/bridge.ts";
 import { CHAINS, STABLECOINS, type ChainName } from "./live/chain.ts";
 import { STABLES } from "./live/types.ts";
@@ -812,7 +813,11 @@ server.registerTool(
 
 /** one of the account's reads, as an agent reads it: the answer, or the refusal (not to be retried as is) */
 async function read(path: string, pick?: (b: Record<string, unknown>) => unknown): Promise<CallToolResult> {
-  const r = await call("GET", path);
+  return answered(await call("GET", path), pick);
+}
+
+/** an answer of the account's, as an agent reads it (read's, for a call already made) */
+function answered(r: { status: number; body: unknown }, pick?: (b: Record<string, unknown>) => unknown): CallToolResult {
   const b = r.body as Record<string, unknown> & { refusal?: { code: string; message: string; detail?: unknown }; error?: string };
   if (r.status === 404) return text({ ok: false, error: "this service runs without the account layer (--classic)" }, true);
   if (b.refusal) return text({ ok: false, code: b.refusal.code, message: b.refusal.message, ...(b.refusal.detail !== undefined ? { detail: b.refusal.detail } : {}) }, true);
@@ -835,17 +840,6 @@ function served<T>(b: T): T {
   for (const m of geo) if (m.venueName && !names.has(m.venueName)) names.set(m.venueName, { venue: m.venue ?? "", venueName: m.venueName, ...(m.connected !== undefined ? { connected: m.connected } : {}) });
   return { ...(b as object), missing: list.filter((m) => !whole(m)), notServedHere: [...names.values()] } as T;
 }
-
-server.registerTool(
-  "portfolio_explore",
-  {
-    description:
-      "MARKETS — what there is to trade: what the venues the owner connected list, AND the public market data of venues NOT connected (their rows' `at` entries say `public: true`, `canTrade: false` and `connectTo`: the owner connects that venue first, on the owner's Gravit face (Account › Venues); portfolio_ask can ask), as one list. One row per thing — a coin, a stock, a perpetual, a token that stands for a share (RWA), an event's question with its outcomes — with its price, 24-hour change (`changeFrom`: whose) and dollar volume where a venue reports them, close time, funding for a perpetual, and every venue it is listed at with THAT venue's own symbol (send it to portfolio_live_order there). Nothing is estimated: a venue that gives no 24-hour change shows none, Kalshi counts contracts (`contracts24h`), not dollars, and Polymarket US publishes no volume in its lists. Also `movers` (24-hour change, $1M volume at least), `closing` (events closing within a day), `mostTraded`, the tabs with counts, and `missing` (venues that did not answer, or refuse this location, in their own words — nothing here looks for a way around a venue's rule). Predictions is a curated few: at most 12 rows when nothing is searched (Kalshi by a short list of busy series, Polymarket by 24-hour volume, Polymarket US — its own CFTC-regulated exchange, not polymarket.com — by the most traded markets of a few of its categories, without sports, weather and entertainment), each venue's busiest in turn; a search reaches every market the sources read. `notes` are the sentences under the list (what was read, what a search reaches); an `at` entry carries the venue's `bid`/`ask` where it gives them, `open` (false on a Kalshi leg past its close), a stock's `session` (as portfolio_live_markets says; the row carries its first connected venue's) and `pastEnd` (an event past its listed end that still trades, as Polymarket's often do); an `at` entry from a line that names its quote's source — the public US stocks line, a US stock in a paper account — carries `quoteFrom`, which source priced it and how far behind the market that source is, in the source's words (\"Robinhood · real time\", \"Nasdaq · real time\", \"Cboe · 15 min delayed\"), and, where the source stamps one, `quoteAt`, the price's own time as that source stamps it, not when it was read (\"real time\" is the source, not the price's age: a real-time source's last trade can be yesterday's in pre-market, for a share not traded since); the row carries the two where such a line prices it, and other lines carry neither; the tabs are all · crypto · stocks · rwas · perps · preipo · predictions · china. `china` is the A shares Tencent ranks — view-only, priced in CNY (`currency`), sorted by `volume` (turnover, `turnoverCny`) or `movers`, never in `all`, and no venue trades them. Pre-IPO (`preipo`) is the pre-IPO perpetuals the venues list — contracts on a venue's estimate of a private company's valuation, not shares — one row per company (`group.id` is `preipo:<slug>`) with an `at` entry per venue; each `at` and the row carry `implied: { usd, unit }` — the valuation the price implies in dollars (`usd`; the row's is the median of its venues') and the venue's rule in words (`unit`: $1 of price stands for $1,000,000,000 at every venue except OKX's ANTHROPIC and OPENAI swaps, $10,000,000,000 since its 10:1 rebase); the row's `price` is that median in the $1-per-$1,000,000,000 convention, and a venue's own market (portfolio_live_markets) carries `implied: { perPoint, unit, usd }` with `perPoint` the dollars $1 of its price stands for. The prediction markets on IPOs are ordinary `predictions` rows (category IPO). Answers are kept thirty seconds. A read: nothing is ordered.",
-    inputSchema: { tab: z.enum(["all", "crypto", "stocks", "rwas", "perps", "preipo", "predictions", "china"]).optional().describe("one tab's rows; absent: every row"), q: z.string().max(60).optional().describe("a few letters of a symbol or a name"), sort: z.enum(["volume", "movers", "closing"]).optional(), limit: z.number().int().min(1).max(200).optional().describe("rows in `items` (default 30)") },
-    annotations: { readOnlyHint: true },
-  },
-  async ({ tab, q, sort, limit }) => read(`/api/account/explore?${new URLSearchParams({ ...(tab ? { tab } : {}), ...(q ? { q } : {}), ...(sort ? { sort } : {}), limit: String(limit ?? 30) })}`),
-);
 
 server.registerTool(
   "portfolio_holdings",
@@ -875,7 +869,7 @@ server.registerTool(
 server.registerTool(
   "portfolio_asset",
   {
-    description: "One asset, all of it: its holdings row (`key` from portfolio_holdings: crypto:BTC, equity:AAPL, stable:USDC, rwa:…, event:…; coin:/stock: from portfolio_explore are taken too), its price at every connected venue (`compare`), its price history at the first venue that keeps one (`candles`, bars of 1m · 5m · 15m · 1h · 4h · 1d · 1w over `range` where one is named, else over that size's range: a day of 5m, a month of 1h, a year of 1d), the positions in it, the account's open orders in it, its statement lines, and what was paid for it (`cost`). A read.",
+    description: "One asset, all of it: its holdings row (`key` from portfolio_holdings: crypto:BTC, equity:AAPL, stable:USDC, rwa:…, event:…; coin:/stock: from the market's market_explore are taken too), its price at every connected venue (`compare`), its price history at the first venue that keeps one (`candles`, bars of 1m · 5m · 15m · 1h · 4h · 1d · 1w over `range` where one is named, else over that size's range: a day of 5m, a month of 1h, a year of 1d), the positions in it, the account's open orders in it, its statement lines, and what was paid for it (`cost`). A read.",
     inputSchema: {
       key: z.string().max(140),
       interval: z.enum(["1m", "5m", "15m", "1h", "4h", "1d", "1w"]).optional().describe("the bars of its price history (default 1h)"),
@@ -886,12 +880,15 @@ server.registerTool(
   async ({ key, interval, range }) => read(`/api/account/asset?${new URLSearchParams({ key, interval: interval ?? "1h", ...(range ? { range } : {}) })}`),
 );
 
+/** what a seat newer than the running account meets on a connected read: the account from before /api/account/connected */
+const NO_CONNECTED = "this Account has no connected-venue reads (/api/account/connected): restart it from this tree";
+
 server.registerTool(
-  "portfolio_candles",
+  "portfolio_live_candles",
   {
-    description: "One market's price history, oldest first: {t (ms), o, h, l, c, v? in base units}, in bars of 1m, 5m, 15m, 1h, 4h, 1d or 1w. Ask a `range` (1D, 5D, 1M, 3M, 6M, YTD, 1Y, 5Y, MAX — in its own bar size unless `interval` is named: 1D 1m, 5D 5m, 1M 1h, 3M/6M 4h, YTD/1Y 1d, 5Y/MAX 1w; the latest 5,000 bars at most), or the page before a bar (`before`: its start in ms, `limit` bars) to go further back. The answer says `more` (older bars exist: ask `before` the first bar's t; with `partial`, the source refused or did not answer part of what was asked — ask again later, it is not where the history ends) and, where the history ends, why (`ends`: \"Hyperliquid keeps only the latest 5,000 bars at this size\", \"Intraday history starts …\"); `source` names whose bars they are, `adjustment` (US stocks: split-adjusted, not dividend-adjusted), `session` which hours, `folded` a size built from finer bars, `gaps` the stretches with no bars (\"No overnight data\"), `today` a daily bar built from intraday ones (\"Today so far\"); `interval` may come back coarser than asked, with `note` saying why. `venue` and `symbol` exactly as portfolio_explore lists them in a row's `at` — a venue the owner connected answers from its own data (a paper account from its market's public source); a venue NOT connected (`public: true` there) answers from its public market data, read without a key. An event contract's prices are its probability in dollars (0.62 = 62¢). Kept seconds to minutes. A read.",
+    description: "A CONNECTED venue's own price history for one market, oldest first: {t (ms), o, h, l, c, v? in base units}, in bars of 1m, 5m, 15m, 1h, 4h, 1d or 1w. Ask a `range` (1D, 5D, 1M, 3M, 6M, YTD, 1Y, 5Y, MAX — in its own bar size unless `interval` is named: 1D 1m, 5D 5m, 1M 1h, 3M/6M 4h, YTD/1Y 1d, 5Y/MAX 1w; the latest 5,000 bars at most), or the page before a bar (`before`: its start in ms, `limit` bars) to go further back. The answer says `more` (older bars exist: ask `before` the first bar's t; with `partial`, the source refused or did not answer part of what was asked — ask again later, it is not where the history ends) and, where the history ends, why (`ends`: \"Hyperliquid keeps only the latest 5,000 bars at this size\", \"Intraday history starts …\"); `source` names whose bars they are, `adjustment` (US stocks: split-adjusted, not dividend-adjusted), `session` which hours, `folded` a size built from finer bars, `gaps` the stretches with no bars (\"No overnight data\"), `today` a daily bar built from intraday ones (\"Today so far\"); `interval` may come back coarser than asked, with `note` saying why. `venue` is a venue the owner connected, as portfolio_account names it (`paper` names the owner's one paper account), and `symbol` that venue's own; it answers from the venue's own data (a paper account from its market's public source), and any other venue is refused (E_WALLET_NOT_CONNECTED). An event contract's prices are its probability in dollars (0.62 = 62¢). Kept seconds to minutes. A read: a public market's are market_candles / market_book, under mcp__market__.",
     inputSchema: {
-      venue: z.string().max(60).describe("the venue's id, as an `at` entry of portfolio_explore names it"),
+      venue: z.string().max(60).describe("the connected venue's id, as portfolio_account names it; `paper` names the owner's one paper account"),
       symbol: z.string().max(160).describe("the market there: BTC/USDT, KXFED-25DEC-T4.00:YES, <slug>:<outcome>"),
       interval: z.enum(["1m", "5m", "15m", "1h", "4h", "1d", "1w"]).optional().describe("the bars (default: the range's own size; with neither, 1h over a month)"),
       range: z.enum(["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "MAX"]).optional().describe("how far back from now (not with `before`)"),
@@ -909,40 +906,25 @@ server.registerTool(
     if (range) q.set("range", range);
     if (before !== undefined) q.set("before", String(before));
     if (limit !== undefined) q.set("limit", String(limit));
-    return read(`/api/account/candles?${q}`);
+    const r = await call("GET", `/api/account/connected/candles?${q}`);
+    if (r.status === 404) return text({ ok: false, error: NO_CONNECTED }, true);
+    return answered(r);
   },
 );
 
 server.registerTool(
-  "portfolio_akshare",
+  "portfolio_live_book",
   {
-    description: `AKSHARE — public Chinese market data through the AKShare sidecar the market runs, which the Account relays: A shares, Hong Kong and US listings, boards and fund flows, margin, fundamentals, macro, futures, funds, bonds, indices, options, FX and commodities. \`tool\` is one of the sidecar's tools — ${AKSHARE_TOOLS.join(", ")} — and \`arguments\` are that tool's own. Find a function first with akshare_discover (\`{query: "spot"}\`; an empty query lists every tool and its functions), then call its tool with \`{method: "<function>", params_json?: "<its parameters as JSON>", symbol?, start_date?, end_date?, period?, adjust?, date?}\`: \`{tool: "akshare_stock_a", arguments: {method: "stock_zh_a_spot_tx"}}\` is Tencent's whole A-share snapshot. At most 500 rows come back — check \`truncated\` and \`row_count\`; each call is bounded at 120 s. Live and unguarded, never evidence of a trade: check each result's errors and timestamps; retrieval time is not exchange time. A read: nothing is ordered.`,
-    inputSchema: { tool: z.string().max(64), arguments: z.record(z.string(), z.unknown()).optional() },
-    annotations: { readOnlyHint: true },
-  },
-  async ({ tool, arguments: args }) => {
-    const r = await call("POST", "/api/akshare/call", { tool, ...(args !== undefined ? { arguments: args } : {}) });
-    const b = r.body as { ok?: boolean; isError?: boolean; content?: CallToolResult["content"]; akshare?: string; message?: string };
-    if (r.status === 404) return text({ ok: false, error: "this Account has no AKShare sidecar (/api/akshare): restart it from this tree" }, true);
-    if (b.ok === true) return { isError: b.isError === true, content: b.content ?? [] };
-    if (typeof b.akshare === "string") return text({ ok: false, akshare: b.akshare, message: b.message }, true);
-    return text({ ok: false, error: `HTTP ${r.status}` }, true);
-  },
-);
-
-server.registerTool(
-  "portfolio_book",
-  {
-    description: "One market's ORDER BOOK and its LATEST TRADES, as the Trade page shows them. `book`: {bids, asks: [[price, size]], best first — the highest bid, the lowest ask —, at, from, depth}; prices in the market's quote (an event contract's in dollars: 0.62 = 62¢), sizes in the units an order is sized in there (coins, shares, contracts). `depth: \"full\"` is the venue's own levels, and `more: {bids, asks}` says which side may go on past its last level (the source sent as many as asked or as it ever sends) — a sum of the far end of such a side is only part of that range. `depth: \"top\"` is only the best bid and best ask, with no size (null), stamped `at` the quote's own time (where it carries no time of its own, `at` is when it was read; one from a list kept a while — a public listing's, a paper account's — carries `upToMs`, how old it may be at most: about two minutes): `topOnly: \"none\"` where the source publishes no depth at all (a US stock's public quote), `\"unread\"` where it has a book the account does not read. `trades`: the latest, newest first, {price, size, side?, at} — `side` (buy: a buyer took an offer; sell: a seller took a bid) only where the source says which side took. `venue` and `symbol` as for portfolio_candles: a venue the owner connected answers from its own client (a paper account from its market's public source); a venue NOT connected answers from its public data, without a key. A source that publishes no trades at all (a US stock's public quote, a paper account's market priced from one) says so in `tradesNone`, a sentence, with `trades` empty; any other trades refusal is in `tradesRefused`. Kept a second or three. A read.",
-    inputSchema: { venue: z.string().max(60).describe("the venue's id, as an `at` entry of portfolio_explore names it; `paper` names the owner's one paper account"), symbol: z.string().max(160).describe("the market there: BTC/USDT, BTC-PERP, KXFED-25DEC-T4.00:YES, <slug>:<outcome>, AAPL"), depth: z.number().int().min(1).max(50).optional().describe("levels a side (default 20)") },
+    description: "A CONNECTED venue's ORDER BOOK and LATEST TRADES for one market, as the Trade page shows them. `book`: {bids, asks: [[price, size]], best first — the highest bid, the lowest ask —, at, from, depth}; prices in the market's quote (an event contract's in dollars: 0.62 = 62¢), sizes in the units an order is sized in there (coins, shares, contracts). `depth: \"full\"` is the venue's own levels, and `more: {bids, asks}` says which side may go on past its last level (the source sent as many as asked or as it ever sends) — a sum of the far end of such a side is only part of that range. `depth: \"top\"` is only the best bid and best ask, with no size (null), stamped `at` the quote's own time (where it carries no time of its own, `at` is when it was read; one from a list kept a while — a public listing's, a paper account's — carries `upToMs`, how old it may be at most: about two minutes): `topOnly: \"none\"` where the source publishes no depth at all (a US stock's public quote), `\"unread\"` where it has a book the account does not read. `trades`: the latest, newest first, {price, size, side?, at} — `side` (buy: a buyer took an offer; sell: a seller took a bid) only where the source says which side took. `venue` and `symbol` as for portfolio_live_candles: a venue the owner connected answers from its own client (a paper account from its market's public source), and any other venue is refused (E_WALLET_NOT_CONNECTED). A source that publishes no trades at all (a US stock's public quote, a paper account's market priced from one) says so in `tradesNone`, a sentence, with `trades` empty; any other trades refusal is in `tradesRefused`. Kept a second or three. A read: a public market's are market_candles / market_book, under mcp__market__.",
+    inputSchema: { venue: z.string().max(60).describe("the connected venue's id, as portfolio_account names it; `paper` names the owner's one paper account"), symbol: z.string().max(160).describe("the market there: BTC/USDT, BTC-PERP, KXFED-25DEC-T4.00:YES, <slug>:<outcome>, AAPL"), depth: z.number().int().min(1).max(50).optional().describe("levels a side (default 20)") },
     annotations: { readOnlyHint: true },
   },
   async ({ venue: venueAsked, symbol, depth }) => {
     const venue = await venueOf(venueAsked);
     if (typeof venue !== "string") return noVenue(venue);
     const q = new URLSearchParams({ venue, symbol });
-    const [b, t] = await Promise.all([call("GET", `/api/account/book?${q}&depth=${depth ?? 20}`), call("GET", `/api/account/trades?${q}&limit=30`)]);
-    if (b.status === 404) return text({ ok: false, error: "this service runs without the account layer (--classic)" }, true);
+    const [b, t] = await Promise.all([call("GET", `/api/account/connected/book?${q}&depth=${depth ?? 20}`), call("GET", `/api/account/connected/trades?${q}&limit=30`)]);
+    if (b.status === 404) return text({ ok: false, error: NO_CONNECTED }, true);
     type Answer = { ok?: boolean; venue?: string; venueName?: string; symbol?: string; book?: unknown; trades?: unknown; none?: string; public?: boolean; refusal?: { code: string; message: string; detail?: unknown }; error?: string };
     const bb = b.body as Answer;
     const tb = t.body as Answer;

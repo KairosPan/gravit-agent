@@ -4181,7 +4181,7 @@ const HISTORY_KEPT = 64;
 const HISTORY_KEPT_BARS = 250_000;
 const PAPER_BARS_KEPT = 200;
 
-/** A PRICE HISTORY AS ASKED (GET /api/account/candles, portfolio_candles): the bar size (empty: the range's own, else 1h), a range or the
+/** A PRICE HISTORY AS ASKED (GET /api/account/candles; GET /api/account/connected/candles, portfolio_live_candles): the bar size (empty: the range's own, else 1h), a range or the
  * bar a page is asked before — never both — and the most bars, held to what can be asked; or why not, in words */
 export function historyAsk(interval: string, ask: { range?: string | undefined; before?: string | number | undefined; limit?: string | number | undefined }): { iv: CandleInterval; range?: CandleRange | undefined; before?: number | undefined; limit: number } | Refusal {
   const r = String(ask.range ?? "").trim().toUpperCase();
