@@ -12,6 +12,7 @@
  * @module
  */
 import { fileURLToPath } from "node:url";
+import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import { installModelSelection } from "@deepseek-ai/dsh-agent";
@@ -33,7 +34,10 @@ import { resolveDeskRoute } from "./desk-session.ts";
 import { telegramConfigFromEnv } from "./telegram.ts";
 import { marketQuotes } from "./market-quotes.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
-import { registerSessionRoutes } from "./sessions.ts";
+import { readMeta, registerSessionRoutes } from "./sessions.ts";
+import { openSearchIndex, type SearchIndex } from "./search-index.ts";
+import { makeSearch, readEventsFrom, registerSearchRoutes, type StoredSession } from "./search.ts";
+import type { StoredEvent } from "./search-text.ts";
 import { listSessionHeads, registerChannelRoutes, type RegistryLike } from "./channels.ts";
 import { hasExec, lunhuiMounted, panelDeps, readAgentsMeta, registerPanelRoutes } from "./panels.ts";
 import { installRoom, registerRoomRoutes, type RoomContextLike } from "./room.ts";
@@ -105,6 +109,8 @@ let desk: DeskHandle | undefined;
 /** The Account proxy's own unwind (src/account-proxy.ts): its kept answers and every open stream's upstream. Run AFTER the
  * tree's dispose, once the web server has stopped and no browser can open another stream through it; idempotent. */
 let disposeProxy: (() => void) | undefined;
+/** The face's search index (src/search.ts), once it is open: closed with the data routes, before the tree. */
+let searchIndex: SearchIndex | undefined;
 
 /** Tear the tree down, then leave with `code`. A dispose that rejects still
  * exits, and says why: a signal the process has already acknowledged must not
@@ -116,6 +122,7 @@ async function shutdown(code: number): Promise<void> {
     await desk?.dispose(code);
     disposeRoom?.();
     disposeData?.();
+    searchIndex?.close();
     await dispose?.();
     disposeProxy?.();
   } catch (err) {
@@ -146,6 +153,7 @@ installFailLoud(BIN, process, async () => {
   await desk?.dispose(1);
   disposeRoom?.();
   disposeData?.();
+  searchIndex?.close();
   await dispose?.();
   disposeProxy?.();
 });
@@ -263,7 +271,11 @@ const sessions = booted.ctx.get("sessions") as {
  * from these heads). A header's preset is the one it was CREATED with; a live
  * re-selection shows in the projection, which the client prefers. */
 const sessionPersistence = booted.ctx.get("sessionPersistence") as {
-  list(): Promise<readonly { header: { id: unknown; cwd?: string; agentPreset?: string } }[]>;
+  list(): Promise<readonly StoredSession[]>;
+  open(id: string, access: "read"): Promise<{
+    read(offset?: number, length?: number): Promise<{ events: readonly StoredEvent[] }>;
+    [Symbol.asyncDispose](): Promise<void>;
+  }>;
 };
 /* Bots: the preset roster's view comes from the live service the overlay
  * mounted (boot.ts asserts it is there); the directories are read from disk.
@@ -311,6 +323,20 @@ registerChannelRoutes(booted.ctx.webServer, {
  * its `archivedSessionIds` is what tells `setArchived` an un-archive click is
  * one the face leaves to the host (PLAN D14). */
 registerSessionRoutes(booted.ctx.webServer, { root: process.cwd(), home: dshHome, hostArchive: workspaceRegistry });
+/* Search (src/search.ts): the face's own SQLite index under `$DSH_HOME/face/`,
+ * beside `archived.json`, brought up to date from the durable listing at each
+ * search. `root` and the deleted set are the same commitments the session
+ * routes above hold: another project's session, or one the operator deleted,
+ * is never indexed. */
+await mkdir(join(dshHome, "face"), { recursive: true });
+searchIndex = openSearchIndex(join(dshHome, "face", "search-index.sqlite"));
+registerSearchRoutes(booted.ctx.webServer, makeSearch({
+  root: process.cwd(),
+  index: searchIndex,
+  list: () => sessionPersistence.list(),
+  read: (id, from) => readEventsFrom(sessionPersistence, id, from),
+  deleted: async () => new Set((await readMeta(dshHome)).deleted),
+}));
 registerBotRoutes(booted.ctx.webServer, {
   botsRoot: BOTS_ROOT,
   listPresets: () => agentPresets.list(),
