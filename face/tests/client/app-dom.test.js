@@ -9,6 +9,7 @@ import { fakeWindow } from './helpers/fake-dom.js';
 import { modulesListing } from './helpers/inventory.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
 import { fakeProvider, ADDRESS as WALLET_ADDRESS, hashOf } from './helpers/fake-wallet.js';
+import { rebuildQuery } from '../../src/account-proxy.ts';
 
 // every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
 const booted = new Set();
@@ -3409,6 +3410,10 @@ test('Identity reads the account on entering the tab and with each beat while it
   await settle();
   assert.deepEqual(h.reads.filter(isIdentity), ['/data/account/identity?fresh=1']);
   assert.match(f.html(), /@gravit_desk_bot/);
+  // every query the client sent passes the face's proxy whitelist (the fake host ignores queries; the proxy does not)
+  const sent = [...new Set(h.reads.filter(isIdentity))];
+  assert.ok(sent.includes('/data/account/identity?fresh=1'));
+  for (const path of sent) assert.notEqual(rebuildQuery('identity', path), null, `${path} passes the proxy`);
   // Details opens the connection's line
   f.click({ tagName: 'BUTTON', dataset: { action: 'identityDetails' } });
   assert.match(f.html(), /token ab12cd34 · polling/);
@@ -3438,5 +3443,26 @@ test("Identity's grid ticks change the draft only on a page that signs, and Save
   tick(false);
   assert.equal(store.get().identity.draft, null);
   assert.doesNotMatch(f.html(), />Save…</);
+  store.timers.clear();
+});
+
+test("a venue's Disconnect done reads no Identity: the identity disconnect is its own kind, disconnectNetwork", async () => {
+  const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
+  const door = ownerDoor();
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': IDENTITY_READ } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'askDisconnect', venue: 'ex', name: 'Stand-in Exchange' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
+  assert.equal(store.get().sheet.kind, 'disconnect');
+  await until(() => store.get().sheet?.status === 'ready', 'the preparation');
+  h.reads.length = 0;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().sheet === null, 'the done sheet to close');
+  await settle();
+  assert.ok(h.reads.includes('/data/account?fresh=1'), 'the page read again');
+  assert.deepEqual(h.reads.filter(isIdentity), [], 'no Identity read');
   store.timers.clear();
 });

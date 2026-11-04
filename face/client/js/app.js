@@ -266,8 +266,8 @@ export function boot(win, host = {}) {
   // past the face's cache, a market page's asset sheet (plan 4a Task 4), and the seat's standing after one about an agent's key
   // or limit; a done sheet then closes itself (the order sheet's words stay on the ticket)
   const SEAT_KINDS = new Set(['letIn', 'limit', 'endLimit', 'revoke']);
-  // Account › Identity's signed sheets (plan B1b Tasks 2 and 3)
-  const IDENTITY_SHEET_KINDS = new Set(['connectNetwork', 'disconnect', 'routing', 'block']);
+  // Account › Identity's signed sheets (plan B1b Tasks 2 and 3); its disconnect is disconnectNetwork, never the Venues' disconnect
+  const IDENTITY_SHEET_KINDS = new Set(['connectNetwork', 'disconnectNetwork', 'routing', 'block']);
   function afterAction(kind, body) {
     // what the Account built for the operator's own wallet (a move out of a wallet, a DEX order) goes to that wallet at once:
     // it shows the transaction and sends it, and its hash is reported (the retired page's money.js done, trade.js placeOrder)

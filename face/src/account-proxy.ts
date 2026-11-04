@@ -234,8 +234,8 @@ export const ACCOUNT_QUERY: Readonly<Record<ReadRoute, readonly string[]>> = {
   connectedCandles: ["venue", "symbol", "interval", "range", "before", "limit"],
   connectedBook: ["venue", "symbol", "depth"],
   connectedTrades: ["venue", "symbol", "limit"],
-  identity: [],
-  identityPending: ["id"],
+  identity: ["fresh"],
+  identityPending: ["id", "fresh"],
 };
 
 export { STREAM_BODY_LIMIT, STREAM_CLIENT, codeOf } from "./upstream-proxy.ts";

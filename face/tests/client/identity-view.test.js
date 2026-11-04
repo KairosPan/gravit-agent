@@ -92,7 +92,7 @@ test('routingOf and tickRouting: every row, only networks the account speaks on;
 test('a connected Telegram row: Connected, Speaks as, Talks only with, Details and Disconnect…', () => {
   const html = renderIdentityTab(signing(CONNECTED), NOW);
   for (const w of ['Telegram', 'Connected', 'Speaks as', '@gravit_desk_bot', 'Talks only with', '@pan', 'Details', 'Disconnect…']) assert.match(html, re(w));
-  assert.match(html, /<button[^>]*data-action="openSheet" data-kind="disconnect" data-network="telegram"[^>]*>Disconnect…<\/button>/);
+  assert.match(html, /<button[^>]*data-action="openSheet" data-kind="disconnectNetwork" data-network="telegram"[^>]*>Disconnect…<\/button>/);
   assert.match(html, /<button[^>]*data-action="identityDetails"[^>]*>Details<\/button>/);
   // Details shut: no since line; open: Since <date> · token <fingerprint> · polling
   assert.doesNotMatch(html, /token ab12cd34/);
@@ -211,6 +211,9 @@ test('a page that does not sign draws no owner button on Identity', () => {
   // a draft from before the page stopped signing draws no Save…
   const s = R.ownerStanding(R.identityTick(signing(CONNECTED), { row: 'brief', network: 'telegram', on: true }), { role: 'needs-code', kid: '' });
   assert.ok(!/>Save…</.test(renderIdentityTab(s, NOW)));
+  // and its ticks are the account's, not the unsaved draft's
+  const briefTick = boxOf(renderIdentityTab(s, NOW), 'What reaches you where').match(/<tr><td>Pre-close brief[\s\S]*?<\/tr>/)[0].match(/<input[^>]*>/g)[1];
+  assert.doesNotMatch(briefTick, /checked/);
   // a tick on a page that does not sign changes no draft
   assert.equal(R.identityTick(readOnly(CONNECTED), { row: 'brief', network: 'telegram', on: true }).identity.draft, null);
   // a page that signs has no such line

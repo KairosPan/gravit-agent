@@ -40,7 +40,7 @@ function telegramRow(t, state, owner) {
   const since = [dateWord(t.since) ? `Since ${dateWord(t.since)}` : '', t.fingerprint ? `token ${t.fingerprint}` : '', status].filter(Boolean).join(' · ');
   const dims = [`Speaks as ${t.speaksAs || '—'}`, `Talks only with ${t.talksOnlyWith || '—'}`, t.problem ?? '', open ? since : ''];
   return `<div class="venue" data-network="telegram"><span>${lines(GLYPH.telegram, 'Telegram', dims, 'Connected')}</span>` +
-    `${keys(button('Details', { 'data-action': 'identityDetails', 'aria-expanded': open ? 'true' : 'false' }), owner ? sheetKey('disconnect', named, 'Disconnect…', 'btn-danger') : '')}</div>`;
+    `${keys(button('Details', { 'data-action': 'identityDetails', 'aria-expanded': open ? 'true' : 'false' }), owner ? sheetKey('disconnectNetwork', named, 'Disconnect…', 'btn-danger') : '')}</div>`;
 }
 
 function gravitCard(v, state, owner) {
@@ -100,8 +100,9 @@ export function renderIdentityTab(state, now) {
     if (r.status === 'error' || (r.message ?? null) !== null) return `${note('The account is not answering.')}${r.message ? note(r.message) : ''}${retry}`;
     return note('Loading…');
   }
-  const v = identityOf(r.data, r.draft ?? null, clockWord);
-  if (!v.ok) return `${note('Identity unreadable')}${retry}`;
   const owner = signs(state);
+  // the unsaved ticks only while the page signs: one that no longer does shows the account's routing
+  const v = identityOf(r.data, owner ? r.draft ?? null : null, clockWord);
+  if (!v.ok) return `${note('Identity unreadable')}${retry}`;
   return `<div class="cards">${gravitCard(v, state, owner)}${gridCard(v, state, owner)}${notYouCard(v, owner, now)}</div>`;
 }

@@ -319,7 +319,7 @@ test("a repeated or unknown name, an over-long value: 400 invalid account reques
     connectedCandles: ["venue", "symbol", "interval", "range", "before", "limit"],
     connectedBook: ["venue", "symbol", "depth"],
     connectedTrades: ["venue", "symbol", "limit"],
-    identity: [], identityPending: ["id"],
+    identity: ["fresh"], identityPending: ["id", "fresh"],
   });
   assert.equal((await call(routes, `/data/account/connected/explore?q=${"x".repeat(240)}`)).status, 200, "240 characters pass");
   assert.deepEqual(fetched, [`${URL_}/api/account/connected/explore?q=${"x".repeat(240)}`]);
@@ -1251,7 +1251,7 @@ test("the connected reads go to /api/account/connected/*", async () => {
 test("the identity reads and writes reach the account at their paths", async () => {
   assert.deepEqual(
     IDENTITY_READS.map(([, , route]) => [ACCOUNT_TTL_MS[route], ACCOUNT_ABORT_MS[route], ACCOUNT_QUERY[route]]),
-    [[2_000, 7_000, []], [1_000, 7_000, ["id"]]],
+    [[2_000, 7_000, ["fresh"]], [1_000, 7_000, ["id", "fresh"]]],
   );
   const answers = new Map<string, FakeAnswer>([
     ["/api/account/identity", ok('{"ok":true,  "networks":[]}')],
@@ -1286,6 +1286,22 @@ test("the identity reads and writes reach the account at their paths", async () 
     assert.equal((await call(routes, `${face}?id=1`, JSON_POST, "POST", "{}")).status, 400, face);
   }
   assert.equal(fetched.length, 5, "no refused write reaches the account");
+});
+
+test("the identity reads take ?fresh=1: past the cache, never forwarded", async () => {
+  assert.deepEqual(rebuildQuery("identity", "/data/account/identity?fresh=1"), { query: "", fresh: true });
+  assert.deepEqual(rebuildQuery("identityPending", "/data/account/identity/pending?id=p0123456789abcdef&fresh=1"), { query: "id=p0123456789abcdef", fresh: true });
+  const { routes, fetched } = proxyWith(async () => ok('{"ok":true,"networks":[]}'));
+  for (const [face, account, , query] of IDENTITY_READS) {
+    const plain = query === "" ? face : `${face}?${query}`;
+    const want = `${URL_}${account}${query === "" ? "" : `?${query}`}`;
+    assert.equal((await call(routes, plain)).status, 200, plain);
+    const before = fetched.length;
+    const again = await call(routes, `${plain}${query === "" ? "?" : "&"}fresh=1`);
+    assert.equal(again.status, 200, `${face}: fresh passes`);
+    assert.equal(fetched.length, before + 1, `${face}: fresh skips the cache`);
+    assert.equal(fetched.at(-1), want, `${face}: fresh is never forwarded`);
+  }
 });
 
 test("the token route forwards the body as it came and keeps nothing", async (t) => {
