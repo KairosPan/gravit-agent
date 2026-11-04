@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import { openSearchIndex } from "../src/search-index.ts";
 import type { StoredEvent } from "../src/search-text.ts";
-import { indexedIds, makeSearch, readEventsFrom, registerSearchRoutes, type StoredSession } from "../src/search.ts";
+import { indexedIds, makeSearch, readEventsFrom, registerSearchRoutes, unavailableSearch, type StoredSession } from "../src/search.ts";
 
 const ROOT = "/repo/workbench";
 
@@ -105,6 +105,75 @@ test("a log that shrank is read again from the start", async () => {
   assert.equal(index.query("alpha").items.length, 0);
   assert.equal(index.query("beta").items.length, 1);
   assert.deepEqual(index.marks().get("a"), { revision: "r2", readCount: 1 });
+});
+
+const readsOf = (f: { reads: { id: string; from: number }[] }) => f.reads.filter((r) => !r.id.endsWith(":done"));
+
+test("a log whose size dropped is read again from the start (jsonl gives sizeBytes, no eventCount)", async () => {
+  const f = fakeStore({ a: { s: session("a", {}, { sizeBytes: 900 }), log: [said(1, "alpha one"), said(2, "alpha two"), said(3, "alpha three")] } });
+  const index = openSearchIndex(":memory:");
+  const search = makeSearch(f.deps(index));
+  await search.reconcile();
+  assert.deepEqual(index.marks().get("a"), { revision: "r1", readCount: 3, size: 900 });
+  const a = f.store.get("a")!;
+  a.log = [said(1, "beta one"), said(2, "beta two"), said(3, "beta three"), said(4, "beta four")];
+  a.s.revision = "r2";
+  a.s.sizeBytes = 800;   // shorter in bytes, though more events
+  await search.reconcile();
+  assert.deepEqual(readsOf(f), [{ id: "a", from: 0 }, { id: "a", from: 0 }]);
+  assert.equal(index.query("alpha").items.length, 0);
+  assert.equal(index.query("beta four").items.length, 1);
+  assert.deepEqual(index.marks().get("a"), { revision: "r2", readCount: 4, size: 800 });
+});
+
+test("a log whose size grew is read on from readCount", async () => {
+  const f = fakeStore({ a: { s: session("a", {}, { sizeBytes: 300 }), log: [said(1, "alpha one")] } });
+  const index = openSearchIndex(":memory:");
+  const search = makeSearch(f.deps(index));
+  await search.reconcile();
+  const a = f.store.get("a")!;
+  a.log.push(said(2, "alpha two"));
+  a.s.revision = "r2";
+  a.s.sizeBytes = 600;
+  await search.reconcile();
+  assert.deepEqual(readsOf(f), [{ id: "a", from: 0 }, { id: "a", from: 1 }]);
+  assert.deepEqual(index.marks().get("a"), { revision: "r2", readCount: 2, size: 600 });
+});
+
+test("a moved revision with nothing new and no growth is a rewrite: read again from the start", async () => {
+  const f = fakeStore({ a: { s: session("a", {}, { sizeBytes: 500 }), log: [said(1, "alpha one"), said(2, "alpha two")] } });
+  const index = openSearchIndex(":memory:");
+  const search = makeSearch(f.deps(index));
+  await search.reconcile();
+  const a = f.store.get("a")!;
+  a.log = [said(1, "gamma one"), said(2, "gamma two")];   // the same length, rewritten
+  a.s.revision = "r2";
+  await search.reconcile();
+  assert.deepEqual(readsOf(f), [{ id: "a", from: 0 }, { id: "a", from: 2 }, { id: "a", from: 0 }]);
+  assert.equal(index.query("alpha").items.length, 0);
+  assert.equal(index.query("gamma").items.length, 1);
+  assert.deepEqual(index.marks().get("a"), { revision: "r2", readCount: 2, size: 500 });
+
+  // grown in bytes but no whole event yet (a line still being written): kept, nothing re-read
+  a.s.revision = "r3";
+  a.s.sizeBytes = 520;
+  await search.reconcile();
+  assert.deepEqual(readsOf(f).slice(3), [{ id: "a", from: 2 }]);
+  assert.equal(index.query("gamma").items.length, 1);
+  assert.deepEqual(index.marks().get("a"), { revision: "r3", readCount: 2, size: 520 });
+});
+
+test("the search when the index would not open answers the route's fixed 500", async () => {
+  const routes: WebRoute[] = [];
+  registerSearchRoutes({ register: (route) => routes.push(route) }, unavailableSearch());
+  const s = await serve(routes);
+  try {
+    const r = await fetch(`${s.url}/data/search?q=abc`);
+    assert.equal(r.status, 500);
+    assert.equal(await r.text(), '{"ok":false,"error":"search failed"}');
+  } finally {
+    await s.close();
+  }
 });
 
 test("a log that throws is skipped and counted; the others are indexed", async () => {

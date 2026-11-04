@@ -132,7 +132,7 @@ export function registerFileRoutes(webServer: RouteRegistrar, deps: { root: stri
       const params = new URL(req.url ?? "", "http://localhost").searchParams;
       const q = params.get("q") ?? "";
       const dir = params.get("dir")?.replace(/\/+$/, "");
-      if (q.length > 500 || q.includes("\0") || (dir !== undefined && !validDir(dir))) return send(res, 400, BAD_QUERY);
+      if (q.length > 500 || q.includes("\0") || (dir !== undefined && (dir.length > 500 || !validDir(dir)))) return send(res, 400, BAD_QUERY);
       try {
         const { entries, truncated } = await walked();
         const slash = q.lastIndexOf("/");

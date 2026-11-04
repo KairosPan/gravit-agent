@@ -124,7 +124,7 @@ test("GET /data/files: the fence, bad queries, a hit, the folder forms, and the 
     assert.equal(forged.status, 403);
     assert.equal(await forged.text(), '{"ok":false,"error":"forbidden"}');
 
-    for (const qs of ["?dir=/etc", "?dir=../x", "?dir=a/../b", `?q=${"x".repeat(501)}`, "?q=a%00b"]) {
+    for (const qs of ["?dir=/etc", "?dir=../x", "?dir=a/../b", `?dir=${"x".repeat(501)}`, `?q=${"x".repeat(501)}`, "?q=a%00b"]) {
       const bad = await get(qs);
       assert.equal(bad.status, 400, qs);
       assert.deepEqual(bad.body, { ok: false, error: "bad query" });

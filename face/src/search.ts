@@ -5,7 +5,11 @@
  * top-level conversations ({@link indexedIds}) and reads each one's log only
  * from where the index last stopped: the mark's `readCount`, unless the
  * revision is unchanged (nothing to read) or the log is now shorter than what
- * was read (it was rewritten: `reset`, then read from 0). What a log said is
+ * was read (it was rewritten: `reset`, then read from 0). Shorter is the
+ * listing's `eventCount` below the mark's `readCount`, or its `sizeBytes`
+ * below the mark's size (the jsonl backend gives only the size), or — the
+ * revision moved, yet a read from `readCount > 0` found nothing new and the
+ * size did not grow — a rewrite the counts cannot see. What a log said is
  * `search-text.ts` `linesOf`. A log that cannot be read is skipped and
  * counted, its mark kept, so one bad log never fails a search; a conversation
  * no longer kept (deleted, or gone from the listing) leaves the index.
@@ -20,7 +24,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { isHostPreset } from "./overlay.ts";
 import { FORBIDDEN, isTrustedDataRequest, send } from "./http.ts";
 import type { RouteRegistrar } from "./static.ts";
-import { SEARCH_ITEMS_MAX, validQuery, type SearchIndex, type SearchResult } from "./search-index.ts";
+import { SEARCH_ITEMS_MAX, validQuery, type SearchIndex, type SearchResult, type SessionMark } from "./search-index.ts";
 import { linesOf, type StoredEvent } from "./search-text.ts";
 
 /** One snapshot of `sessionPersistence.list()`, narrowed to what the reconcile reads. */
@@ -29,6 +33,8 @@ export interface StoredSession {
   formatStatus?: "current" | "migration-required";
   revision: unknown;
   eventCount?: number;
+  /** The log's size in bytes (the jsonl backend's only measure of length). */
+  sizeBytes?: number;
 }
 
 export interface SearchDeps {
@@ -104,22 +110,34 @@ export function makeSearch(deps: SearchDeps): {
       const s = byId.get(id)!;
       const revision = String(s.revision);
       const mark = marks.get(id);
+      const size = typeof s.sizeBytes === "number" ? s.sizeBytes : undefined;
       let from = 0;
       let reset = false;
       if (mark !== undefined) {
         if (mark.revision === revision) continue;
-        if (s.eventCount !== undefined && s.eventCount < mark.readCount) reset = true;
+        const fewer = s.eventCount !== undefined && s.eventCount < mark.readCount;
+        const smaller = size !== undefined && mark.size !== undefined && size < mark.size;
+        if (fewer || smaller) reset = true;
         else from = mark.readCount;
       }
       let events: readonly StoredEvent[];
       try {
         events = await deps.read(id, from);
+        const grew = size !== undefined && mark?.size !== undefined && size > mark.size;
+        if (from > 0 && events.length === 0 && !grew) {
+          /* the revision moved, nothing past readCount, and no bigger: rewritten to the same length or shorter */
+          reset = true;
+          from = 0;
+          events = await deps.read(id, 0);
+        }
       } catch {
         skipped += 1;
         continue;
       }
       if (reset) index.reset(id);
-      index.append(id, { revision, readCount: from + events.length }, linesOf(events));
+      const next: SessionMark = { revision, readCount: from + events.length };
+      if (size !== undefined) next.size = size;
+      index.append(id, next, linesOf(events));
     }
     for (const id of marks.keys()) if (!keptSet.has(id)) index.reset(id);
     return { sessions: kept.length - skipped, skipped };
@@ -139,6 +157,13 @@ export function makeSearch(deps: SearchDeps): {
       return { ...index.query(q, SEARCH_ITEMS_MAX), indexed };
     },
   };
+}
+
+/** The search when the index would not open (`search-index.ts` `openSearchIndexOrFresh` gave none): every search
+ * rejects, so the route answers its fixed 500 `search failed` line and the rest of the face runs. */
+export function unavailableSearch(): ReturnType<typeof makeSearch> {
+  const off = (): Promise<never> => Promise.reject(new Error("search index unavailable"));
+  return { reconcile: off, search: off };
 }
 
 /**

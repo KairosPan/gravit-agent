@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openSearchIndex, snippetAround, validQuery } from "../src/search-index.ts";
+import { openSearchIndex, openSearchIndexOrFresh, SEARCH_INDEX_VERSION, snippetAround, validQuery, type SearchIndex } from "../src/search-index.ts";
 
 const MARK = { revision: "r1", readCount: 1 };
 const ids = (r: { items: { sessionId: string }[] }) => r.items.map((i) => i.sessionId);
@@ -122,3 +123,86 @@ test("reset drops a conversation; marks round-trip; a file index survives a reop
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/** A fresh temp dir for one test, removed after it. */
+function withDir(fn: (dir: string) => void): void {
+  const dir = mkdtempSync(join(tmpdir(), "search-index-"));
+  try { fn(dir); } finally { chmodSync(dir, 0o700); rmSync(dir, { recursive: true, force: true }); }
+}
+
+test("a mark keeps the log's size; an unsized mark has none", () => {
+  const idx = openSearchIndex(":memory:");
+  idx.append("a", { revision: "r", readCount: 2, size: 4096 }, []);
+  idx.append("b", { revision: "r", readCount: 2 }, []);
+  assert.deepEqual(idx.marks().get("a"), { revision: "r", readCount: 2, size: 4096 });
+  assert.deepEqual(idx.marks().get("b"), { revision: "r", readCount: 2 });
+  idx.close();
+});
+
+test("a second close does nothing", () => {
+  const idx = openSearchIndex(":memory:");
+  idx.close();
+  assert.doesNotThrow(() => idx.close());
+});
+
+test("a file index is stamped with the schema version and is 0600", () => withDir((dir) => {
+  const path = join(dir, "search.sqlite");
+  openSearchIndex(path).close();
+  assert.equal(statSync(path).mode & 0o777, 0o600);
+  const db = new DatabaseSync(path);
+  assert.equal((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version, SEARCH_INDEX_VERSION);
+  db.close();
+}));
+
+test("a garbage file opens as a fresh empty index, with one line said", () => withDir((dir) => {
+  const path = join(dir, "search.sqlite");
+  writeFileSync(path, "this is not a database ".repeat(200));
+  writeFileSync(path + "-wal", "junk");
+  assert.throws(() => openSearchIndex(path));
+  const lines: string[] = [];
+  const idx = openSearchIndexOrFresh(path, (l) => lines.push(l))!;
+  assert.ok(idx);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0]!, /rebuilding it$/);
+  assert.equal(idx.marks().size, 0);
+  idx.append("a", MARK, [{ seq: 1, at: 1, text: "fresh words" }]);
+  assert.deepEqual(ids(idx.query("fresh")), ["a"]);
+  idx.close();
+}));
+
+test("a file with another schema version is replaced; an unstamped one too", () => withDir((dir) => {
+  for (const stamp of [SEARCH_INDEX_VERSION + 1, 0]) {
+    const path = join(dir, `v${stamp}.sqlite`);
+    const db = new DatabaseSync(path);
+    db.exec("CREATE TABLE marks (session_id TEXT PRIMARY KEY, revision TEXT NOT NULL, read_count INTEGER NOT NULL);" +
+      "INSERT INTO marks VALUES ('old', 'r', 9);" + `PRAGMA user_version = ${stamp};`);
+    db.close();
+    assert.throws(() => openSearchIndex(path), /schema/);
+    const lines: string[] = [];
+    const idx = openSearchIndexOrFresh(path, (l) => lines.push(l))!;
+    assert.equal(lines.length, 1, String(stamp));
+    assert.equal(idx.marks().size, 0, "the old marks are gone");
+    idx.append("a", { revision: "r", readCount: 1, size: 10 }, []);
+    assert.deepEqual(idx.marks().get("a"), { revision: "r", readCount: 1, size: 10 });
+    idx.close();
+  }
+}));
+
+test("when even a fresh index will not open, the answer is undefined and two lines are said", () => withDir((dir) => {
+  const lines: string[] = [];
+  let calls = 0;
+  const failing = (_p: string): SearchIndex => { calls += 1; throw new Error("disk says no"); };
+  assert.equal(openSearchIndexOrFresh(join(dir, "x.sqlite"), (l) => lines.push(l), failing), undefined);
+  assert.equal(calls, 2);
+  assert.equal(lines.length, 2);
+  assert.match(lines[1]!, /search is off until a restart$/);
+
+  // the real opener, over a folder it may not write
+  const locked = join(dir, "locked");
+  mkdirSync(locked, 0o500);
+  const real: string[] = [];
+  assert.equal(openSearchIndexOrFresh(join(locked, "search.sqlite"), (l) => real.push(l)), undefined);
+  assert.equal(existsSync(join(locked, "search.sqlite")), false);
+  assert.equal(real.length, 2);
+  chmodSync(locked, 0o700);
+}));

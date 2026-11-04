@@ -8,25 +8,39 @@
  * points or more is one quoted phrase (so `"`, `*`, `-`, `NEAR(` and the rest
  * of FTS5's syntax are literal text), and a shorter one — a single Chinese
  * character, a two-character word — goes through `LIKE`, which a trigram
- * index cannot serve. Latin letters match regardless of case either way.
+ * index cannot serve. ASCII letters match regardless of case either way
+ * (SQLite's `LIKE` folds ASCII only, so a short non-ASCII query is
+ * case-sensitive).
  *
- * `marks` records, per conversation, the revision and the count of log
- * entries already read, so the feeder appends only what is new and `reset`
+ * `marks` records, per conversation, the revision, the count of log entries
+ * already read and the log's size in bytes when the listing gave one, so the
+ * feeder appends only what is new, sees a log that shrank, and `reset`
  * rebuilds one conversation from nothing.
+ *
+ * The file is a cache, never a reason to keep the face down: its schema is
+ * stamped with `PRAGMA user_version` ({@link SEARCH_INDEX_VERSION}), and
+ * {@link openSearchIndexOrFresh} replaces a file it cannot open or whose stamp
+ * differs (the next reconcile reads every log again). The file holds a copy of
+ * every indexed conversation, so it is chmod 0600 once open.
  *
  * `node:sqlite` is imported statically: this module is loaded only by the
  * search route's file, which `main.ts` imports, so Node's ExperimentalWarning
  * for it prints once per face start. Lengths here are code points, never
  * UTF-16 units. */
 
+import { chmodSync, rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+
+/** The schema's `user_version`: 2 adds `marks.size` (an unstamped file, 0, predates both). */
+export const SEARCH_INDEX_VERSION = 2;
 
 export const SEARCH_QUERY_MAX = 500;   // code points
 export const SEARCH_ITEMS_MAX = 20;
 export const SNIPPET_MAX = 240;        // code points
 
 export interface IndexedLine { seq: number; at: number; text: string }
-export interface SessionMark { revision: string; readCount: number }
+/** `size` is the log's size in bytes at `readCount`, absent when the listing gave none. */
+export interface SessionMark { revision: string; readCount: number; size?: number }
 export interface SearchHit { sessionId: string; snippet: string; match: [number, number]; at: number }
 export interface SearchResult { items: SearchHit[]; hasMore: boolean }
 export interface SearchIndex {
@@ -37,6 +51,7 @@ export interface SearchIndex {
   reset(sessionId: string): void;
   /** Throws RangeError on an invalid query. */
   query(q: string, limit?: number): SearchResult;
+  /** Idempotent: a second close does nothing. */
   close(): void;
 }
 
@@ -85,20 +100,39 @@ export function snippetAround(
 
 interface LineRow { session_id: string; at: number; body: string }
 
+/**
+ * Open (or create) the index at `path`, or `":memory:"`.
+ * @throws when the file is not a SQLite database, or its `user_version` is not {@link SEARCH_INDEX_VERSION} (an
+ * unstamped empty database is stamped instead).
+ */
 export function openSearchIndex(path: string): SearchIndex {
   const db = new DatabaseSync(path);
-  db.exec(
-    "CREATE VIRTUAL TABLE IF NOT EXISTS lines USING fts5(body, session_id UNINDEXED, seq UNINDEXED, at UNINDEXED, tokenize = 'trigram');" +
-    "CREATE TABLE IF NOT EXISTS marks (session_id TEXT PRIMARY KEY, revision TEXT NOT NULL, read_count INTEGER NOT NULL);",
-  );
+  try {
+    const version = Number((db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version);
+    if (version === 0) {
+      const tables = Number((db.prepare("SELECT count(*) AS n FROM sqlite_master").get() as { n: number }).n);
+      if (tables !== 0) throw new Error(`search index schema is unstamped (want ${SEARCH_INDEX_VERSION})`);
+    } else if (version !== SEARCH_INDEX_VERSION) {
+      throw new Error(`search index schema is version ${version} (want ${SEARCH_INDEX_VERSION})`);
+    }
+    db.exec(
+      "CREATE VIRTUAL TABLE IF NOT EXISTS lines USING fts5(body, session_id UNINDEXED, seq UNINDEXED, at UNINDEXED, tokenize = 'trigram');" +
+      "CREATE TABLE IF NOT EXISTS marks (session_id TEXT PRIMARY KEY, revision TEXT NOT NULL, read_count INTEGER NOT NULL, size INTEGER);" +
+      `PRAGMA user_version = ${SEARCH_INDEX_VERSION};`,
+    );
+    if (path !== ":memory:" && path !== "") chmodSync(path, 0o600);
+  } catch (e) {
+    db.close();
+    throw e;
+  }
   const insertLine = db.prepare("INSERT INTO lines (body, session_id, seq, at) VALUES (?, ?, ?, ?)");
   const setMark = db.prepare(
-    "INSERT INTO marks (session_id, revision, read_count) VALUES (?, ?, ?) " +
-    "ON CONFLICT(session_id) DO UPDATE SET revision = excluded.revision, read_count = excluded.read_count",
+    "INSERT INTO marks (session_id, revision, read_count, size) VALUES (?, ?, ?, ?) " +
+    "ON CONFLICT(session_id) DO UPDATE SET revision = excluded.revision, read_count = excluded.read_count, size = excluded.size",
   );
   const delLines = db.prepare("DELETE FROM lines WHERE session_id = ?");
   const delMark = db.prepare("DELETE FROM marks WHERE session_id = ?");
-  const allMarks = db.prepare("SELECT session_id, revision, read_count FROM marks");
+  const allMarks = db.prepare("SELECT session_id, revision, read_count, size FROM marks");
   const byPhrase = db.prepare(
     "SELECT session_id, at, body FROM lines WHERE lines MATCH ? ORDER BY at DESC, seq DESC",
   );
@@ -106,6 +140,7 @@ export function openSearchIndex(path: string): SearchIndex {
     "SELECT session_id, at, body FROM lines WHERE body LIKE ? ESCAPE '\\' ORDER BY at DESC, seq DESC",
   );
 
+  let closed = false;
   const tx = (fn: () => void): void => {
     db.exec("BEGIN");
     try { fn(); db.exec("COMMIT"); } catch (e) { db.exec("ROLLBACK"); throw e; }
@@ -114,15 +149,17 @@ export function openSearchIndex(path: string): SearchIndex {
   return {
     marks() {
       const out = new Map<string, SessionMark>();
-      for (const r of allMarks.all() as unknown as { session_id: string; revision: string; read_count: number }[]) {
-        out.set(r.session_id, { revision: r.revision, readCount: r.read_count });
+      for (const r of allMarks.all() as unknown as { session_id: string; revision: string; read_count: number; size: number | null }[]) {
+        const mark: SessionMark = { revision: r.revision, readCount: Number(r.read_count) };
+        if (r.size !== null) mark.size = Number(r.size);
+        out.set(r.session_id, mark);
       }
       return out;
     },
     append(sessionId, mark, lines) {
       tx(() => {
         for (const l of lines) insertLine.run(l.text, sessionId, l.seq, l.at);
-        setMark.run(sessionId, mark.revision, mark.readCount);
+        setMark.run(sessionId, mark.revision, mark.readCount, mark.size ?? null);
       });
     },
     reset(sessionId) {
@@ -148,6 +185,35 @@ export function openSearchIndex(path: string): SearchIndex {
       }
       return { items, hasMore };
     },
-    close() { db.close(); },
+    close() {
+      if (closed) return;
+      closed = true;
+      db.close();
+    },
   };
+}
+
+/**
+ * {@link openSearchIndex}, but a cache that will not open never keeps the face down: on a failure (a corrupt file, a
+ * stamp from another schema) `log` gets one line, the file and its `-wal`/`-shm` are removed and a fresh index is
+ * opened; when that fails too, `log` gets a second line and the answer is undefined (the face boots without search).
+ * @param open - the opener, {@link openSearchIndex} unless a test injects one.
+ */
+export function openSearchIndexOrFresh(
+  path: string,
+  log: (line: string) => void,
+  open: (path: string) => SearchIndex = openSearchIndex,
+): SearchIndex | undefined {
+  try {
+    return open(path);
+  } catch (e) {
+    log(`search index at ${path} could not be opened (${e instanceof Error ? e.message : String(e)}); rebuilding it`);
+  }
+  try {
+    for (const suffix of ["", "-wal", "-shm"]) rmSync(path + suffix, { force: true });
+    return open(path);
+  } catch (e) {
+    log(`search index at ${path} could not be rebuilt (${e instanceof Error ? e.message : String(e)}); search is off until a restart`);
+    return undefined;
+  }
 }

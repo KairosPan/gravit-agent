@@ -35,9 +35,9 @@ import { telegramConfigFromEnv } from "./telegram.ts";
 import { marketQuotes } from "./market-quotes.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { readMeta, registerSessionRoutes } from "./sessions.ts";
-import { openSearchIndex, type SearchIndex } from "./search-index.ts";
+import { openSearchIndexOrFresh, type SearchIndex } from "./search-index.ts";
 import { registerFileRoutes } from "./files.ts";
-import { makeSearch, readEventsFrom, registerSearchRoutes, type StoredSession } from "./search.ts";
+import { makeSearch, readEventsFrom, registerSearchRoutes, unavailableSearch, type StoredSession } from "./search.ts";
 import type { StoredEvent } from "./search-text.ts";
 import { listSessionHeads, registerChannelRoutes, type RegistryLike } from "./channels.ts";
 import { hasExec, lunhuiMounted, panelDeps, readAgentsMeta, registerPanelRoutes } from "./panels.ts";
@@ -328,10 +328,13 @@ registerSessionRoutes(booted.ctx.webServer, { root: process.cwd(), home: dshHome
  * beside `archived.json`, brought up to date from the durable listing at each
  * search. `root` and the deleted set are the same commitments the session
  * routes above hold: another project's session, or one the operator deleted,
- * is never indexed. */
-await mkdir(join(dshHome, "face"), { recursive: true });
-searchIndex = openSearchIndex(join(dshHome, "face", "search-index.sqlite"));
-registerSearchRoutes(booted.ctx.webServer, makeSearch({
+ * is never indexed. A cache never keeps the console down: a corrupt or
+ * other-schema file is replaced, and when even a fresh one will not open (a
+ * failed mkdir included) the face boots without search, the route answering
+ * its fixed 500 line. */
+await mkdir(join(dshHome, "face"), { recursive: true }).catch(() => undefined);
+searchIndex = openSearchIndexOrFresh(join(dshHome, "face", "search-index.sqlite"), (line) => console.error(`${BIN}: ${line}`));
+registerSearchRoutes(booted.ctx.webServer, searchIndex === undefined ? unavailableSearch() : makeSearch({
   root: process.cwd(),
   index: searchIndex,
   list: () => sessionPersistence.list(),
