@@ -20,8 +20,9 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     request: { requestId: requestId(), sessionId, mode: 'queue', content: [{ type: 'text', text }], clientTimeZone: timeZone() },
   });
 
-  // a slash line, on a conversation made live first (a cold agent answers lookup-not-found); `undefined` back means no
-  // command claimed it and the line is a prompt after all
+  // a slash line, on a conversation made live first (at dsh 0.2.1-rc.5 commands/execute resumes a cold agent itself; the
+  // follow keeps the page in step so the result draws); `undefined` back means no command claimed it and the line is a
+  // prompt after all
   async function command(sessionId, line) {
     if (!(await activate(sessionId))) throw new Error('the conversation did not open');
     const executed = await call('commands/execute', { agentId: sessionId, line, submittedAttachments: [] });

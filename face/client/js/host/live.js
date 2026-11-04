@@ -174,7 +174,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   function promote(id) {
     if (view && view.id === id && view.mode === 'page' && !view.failed) follow(id, view.token);
   }
-  // the conversation made live before a command runs on it (commands/execute needs a live agent): a live one at once; the
+  // the conversation made live before a command runs on it (so the page follows it and the result draws): a live one at once; the
   // one paged on screen followed, as promote does, and true once the follow's first snapshot lands; false when that
   // follow ends or fails first, after ACTIVATE_MS, or when the screen shows another conversation
   function activate(id) {

@@ -17,6 +17,7 @@ export function startComposerReads({ call, getJson, postJson }) {
     },
     async commands(conv) {
       const key = presetKey(conv);
+      // PLAN D16 (opening a menu never activates) rests on this guard alone: at dsh 0.2.1-rc.5 commands/list on a cold session resumes it.
       if (conv?.live === true && typeof conv.id === 'string') {
         try {
           const rows = await call('commands/list', { agentId: conv.id });

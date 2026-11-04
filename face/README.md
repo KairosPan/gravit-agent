@@ -336,7 +336,7 @@ All three of its stages are built:
   out, archived ones under a folded `Archived`), a conversation's real
   transcript (a live session followed with its pulses, a cold one paged and never activated),
   the composer (a prompt; a `/` line to `commands/execute`; an `@` in a channel through the
-  room engine), New message (a title, Where — a channel, or `New channel…` — and the first
+  room engine — since the dsh UI port's plan 3 an editor with `/` and `@` menus, below), New message (a title, Where — a channel, or `New channel…` — and the first
   words), Details (the title with Change words, Fork, Pin or Unpin, Archive or Un-archive, Delete; Created,
   Where, Agent, Members, Children with Stop, Usage, Stop Gravit), the three gate
   cards (the order card, an approval, a question) answered through the mux, the one status
@@ -352,6 +352,26 @@ All three of its stages are built:
   (and Pin or Unpin in Details) puts the conversation first in its group; the pinned set is the
   host's, so every tab and window of the face shows the same one at once. An archived conversation
   is never pinned (archiving unpins it);
+- **the composer's editor, `/` and `@`** (the dsh UI port's plan 3): the box is an editor that
+  holds words and chips. Enter sends; Shift+Enter is a new line; an Enter that ends a pinyin
+  composition only ends it; a paste arrives as plain text. Each conversation keeps its own draft
+  while the page is open (New message has one too), and a stream frame, a pin or a list refresh
+  never takes the words, the chips or the caret. `/` at the start of a word, in a conversation,
+  opens **Commands** (`commands/list`, read only on a live conversation; a cold one shows the
+  commands last read for the same agent, or none) and **Skills** (`skills/list`); `/plan`,
+  `/permission` and `/feedback` are not listed. Choosing a command that takes no arguments runs it
+  at once (a cold conversation is opened first; its answer reaches the status line); a skill or a
+  command that takes arguments becomes `/name ` in the draft. `@` anywhere opens **Bots in this
+  room** (a channel conversation's roster), **Files and folders** (`GET /data/files`; Tab on a
+  folder walks into it) and **Conversations** (eight, this channel's first, with their age). ↑ ↓
+  move, Enter or Tab chooses, Esc closes and keeps the draft; letters typed filter in order,
+  prefixes first. A choice is a chip: a bot sends as `@<id>`, a file as its path (relative to the
+  conversation's channel folder when under it, else absolute, quoted when it holds a space), a
+  conversation as dsh's own mention, which hands Gravit that conversation's snapshot and draws as
+  a pale-blue chip in your bubble. A draft with a bot chip, or a typed `@word`, goes to the room
+  first; one that also holds a conversation chip is refused before sending (`Conversations go to
+  Gravit, not to a room's bots`), because a room's bots cannot read one. No attachments yet
+  (plan 4);
 - **host-fed since stage 2**: Markets (`#/markets`) — the Account's markets by its tabs, the
   stars, a search, and a market's page with its candles and venues — and Account
   (`#/account/portfolio`, `venues`, `agents`, `cards`) — the Account's Portfolio, Venues, Agents
@@ -3756,7 +3776,7 @@ FACE_SMOKE=1 npm test     # + the 30 smoke files (35 real boots), isolated; loca
 ```
 
 Offline, `npm test` skips the 30 smoke files (35 real boots) listed below; `FACE_SMOKE=1` runs
-them too (3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
+them too (3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
@@ -3803,7 +3823,7 @@ and `node --test` gives each file its own:
 | `lunhui-strategy-run-smoke.test.ts` | an `S01` registered on Friday and graded on Monday ("Lunhui analysis"): the market smoke's boot with copies of `cn-market` and `lunhui-s01-repair` and the three roles on the stub; each day Gravit does the reviewed market run, finds it with the listing read, freezes two stocks' quotes on the strategy and calls `role_cn_stock_analyst` for the leader, `role_cn_reviewer` with both run ids and `role_cn_stock_analyst` for the mode, each child building its artifact from its context; Friday's mode `S01` with a card of at most 2,048 bytes, every review item answered, Monday's grading it; every artifact of the four runs valid again against digests rebuilt from the sealed runs, the runs card's latest run Monday's with its review line, the protocol's strategy channel in Gravit's prompt. `Date` is replaced, Friday 2026-10-23 15:00 China time, then Monday 2026-10-26 15:00 |
 | `lunhui-answer-smoke.test.ts` | Gravit's composed answer end to end: the seat off, `lunhui-runs` over a scratch strategies root holding the synthetic sealed 10-27 run; the view read over `GET /data/lunhui/view` (registered as `main.ts` does) with the signed-in cookie; an ok `lunhui_present` lifted through `host/kinds.js` and drawn by the client's own `renderThread` — the seven kinds' labels in the call's order, the follow-ups, the footer with `Open run ›`, a stock link — and `stockDrawerHtml` for 上海九百 drawing its minute chart with the limit-up line; no model called |
 | `goal-smoke.test.ts` | the goal loop `../dsh/profile/cycle.md` rests on, through the face's own wire (prompts, the Stop button's `session/cancel`, a slash line's `commands/execute`): `create_goal` in a human turn returns the id and revision 1, armed; each round arrives at idle as a user message whose source is `goal` (`<goal_round>`, the objective, `Round: n/N`); the model's `blocked` in round 1 is refused (`blocked requires at least 3 consecutive goal rounds; current round is 1`), in round 3 accepted with the code `model-reported` and followed by the `<goal_blocked>` wrap-up; a second `create_goal` is refused while that goal is blocked (`GOAL_ALREADY_EXISTS`); at the cap the driver blocks with `round-limit` and sends the model nothing more; Stop mid-round pauses the goal, the model's resume of it is refused (`GOAL_TOOL_RESUME_PAUSED`: `the model cannot resume a paused goal; the user must resume it`) and `/goal resume` re-arms it; a face stopped mid-round and booted again on the same home leaves the goal active and disarmed with no request until "continue", whose `update_goal` resume bumps the revision and re-arms the rounds |
-| `dsh-ui-port-smoke.test.ts` | the host side of the dsh UI port on one stub boot: pins and their `pinned` frame, `commands/list`, `skills/list` on a cold session, the `turnOutline` and `sessionStats` projections, a `job/list` stream, `session/page` earlier history, an upload sent as a `file` part, the `sessionReferenceResolver` service, and `GET /data/search` over the stored logs |
+| `dsh-ui-port-smoke.test.ts` | the host side of the dsh UI port on one stub boot: pins and their `pinned` frame, `commands/list`, `skills/list` on a cold session, the `turnOutline` and `sessionStats` projections, a `job/list` stream, `session/page` earlier history, an upload sent as a `file` part, the `sessionReferenceResolver` service, and `GET /data/search` over the stored logs; since plan 3 a cold conversation's `commands/list` and `commands/execute` (each resumes it at rc.5; after a follow's snapshot the command answers), a skill by its literal `/name` reaching the model with its content, and a conversation chip's mention bringing a `Referenced sessions` message |
 | `desk-smoke.test.ts` | the desk on a real tree, as `main.ts` installs it, its fixture root inside the repository so the repository's `GRAVIT.md` heads the chain: the `gravit-desk` session runs in `desk/journal/` under `workspace-write`; its tools are exactly `DESK_ALLOW` expanded on this tree plus `desk_quotes` and `desk_state`, each `mcp__*__<raw>` entry matching one server's tool, and neither desk tool reaches Gravit's session or the global view; the write tools take the path arguments the guard's write check reads, and `str_replace_editor`'s commands are `view`, `create`, `str_replace` and `insert`; the desk's prompt carries Gravit's persona prefix, the date and `# The desk`, and no cycle contract or roles section; a desk turn naming the order stand-in gets Gate 2's visibility refusal and its body never runs; a `write` to `../levels.yml` is refused by the sandbox inside the tool's content while a journal write lands, with no card; Gravit's own write of a `GRAVIT.md` lands; with a listener in front answering allow, the guard's backstop still denies the desk's write of `GRAVIT.md` and its read of a `.env` file, while Gravit's own read of that file goes through unjudged; `/stop` on a turn parked on an escalation card, two texts queued behind it, cuts that turn alone — recorded `cancelled`, `stopped from the phone` — and both texts are answered, in order; the desk's write of a journal `.gitignore` holding `!*` and of a `CLAUDE.md` are denied with no file written, and its read of a dot-config in the repository is denied by name while Gravit reads it; the read tools take exactly the parameters the read check reads; a `GRAVIT.md` planted in the journal reaches a desk session's first request behind the repository's, which is the threat the fence refuses, and the next post is refused with `desk-refused` and no turn; each supervised turn is one `desk-turn` with four token buckets and the stub's route |
 | `telegram-smoke.test.ts` | the bridge end to end on a real tree against a `node:http` Bot API stub on 127.0.0.1: the token and the operator's id come from the scratch home's `.env`, and the MCP child dsh spawns has the id and not the token; a stranger and a group are dropped and counted, unanswered, and the operator's `hi` is answered in the operator's chat; `/status` counts the drops and names the desk session; `/pause` writes `OFF` by `telegram`, a text then gets the paused line and opens no turn, and `/resume` is text that never reaches the model; a 503 queues the reply in the outbox and the next poll flushes it, in order, each reply sent once; a 409 is recorded and waited out; a card parked by an escalated write to `../levels.yml` is cut at the desk's deadline (1,500 ms here) with the timed-out line; the canary — the desk's write of `GRAVIT.md` is denied by the desk guard and no request carries a planted text, then a `GRAVIT.md` the harness plants is refused by the fence with no turn; its read case — `send me ~/.dsh/.env`: the read of the scratch home's `.env` is refused as outside the repository, the token handed to a market read is refused as a secret, no tool result carries the token or a second secret, and the stub's reply, which names both, reaches the phone as `I could not read it: <secret> <token>`; across the file every send went to the operator's chat, the token is in no file of the desk's directory, and no `STANDING.md`, `levels.yml`, `rules.yml` or `holdings.yml` changed |
 | `schedule-smoke.test.ts` | the standing orders' clock end to end, as `main.ts` installs the desk, on one early-close session (2026-11-27), a fake clock and calendar, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`: a firing a restart cut off is reported `interrupted` at boot and never run; the pre-close brief wakes one fresh `gravit-desk` session in `desk/journal` under `workspace-write`, with the armed text — hashing to its pin — and the producer's block in its wake message, and its final text reaches the phone; `firings.jsonl` holds `started`, `producer`, `woke` and `finished`, `events.jsonl` one `desk-turn` with `source: "schedule"` and four token buckets; a script producer's stderr reaches only the face's log; a turn waiting in a long tool is cut at its 10-minute deadline and the order queued behind it fires after; an edited text is refused with one line, then in silence, and fires once re-armed inside its grace; the pause refuses in silence and a spent budget with one line; an anchor slept across is `missed`; a `wake: false` order runs only its producer; a planted `GRAVIT.md` refuses the firing; the canary's firing half — a poisoned turn's writes of `../STANDING.md`, of `standing.yml` and of a journal `GRAVIT.md` are all refused, no card raised, every text and `standing.yml` unchanged — and a `GRAVIT.md` the harness plants refuses the next order; the clock's dispose cuts a firing in a long tool and settles; every text the desk sent went through the recorder. Then (P4) the strategies' book on 2026-11-30, a fake XSHG calendar beside the XNYS one and one fake quote source, in clock order: an A-share report on its Beijing date naming the screen that ran and its `TENCENT` close print; the canary in a strategy (five calls: it reads and rewrites `STANDING.md` and `levels.yml`, then tries the desk's `STANDING.md`), named by one outside-reports line and holding the next order by each pin in turn; two US reports at one anchor in file order; the fence in a strategy; a producer-only strategy order; the abort last |
@@ -4581,6 +4601,16 @@ them ("Sessions written before 0.2.0") — they fail to open, and an `@` into on
    (the projection cache, read by `session/projections` without activating the room); each
    answer's trace still loads its recorded member turn; no member chip moves until the room
    runs again — cold members are not followed.
+9. Chips (the dsh UI port's plan 3). In the room's conversation type `@`, choose a bot from
+   **Bots in this room**, type a few words, then `@` and choose a file from **Files and folders**
+   (`strategies/room-drill/` holds one), and send. PASS, part nine, first half: the bot answers
+   and its answer, or its trace, shows it was handed the file's path (relative to the channel
+   folder); Gravit does not speak. Then build the same draft and add a conversation from
+   **Conversations**, and press Enter. PASS, second half: nothing is sent, the status line reads
+   `Conversations go to Gravit, not to a room's bots` in red, and the draft stays as it was.
+   **Watch:** the server's `MENTION_RE` (`src/room-rules.ts`) ends a bot name at a `.`, so a file
+   chip such as `@news-scout.md` beside a bot chip also addresses a bot `news-scout` when the room
+   has one; choose a file whose name is no bot's, and record it if a second bot answers.
 
 **PASS criteria are observations.** Record the run below with the date and the commit.
 
@@ -4618,6 +4648,53 @@ such an `@` named nobody (the sentence landed the same day in its Rooms paragrap
 (by design), so that path stands on the engine tests, not on this drill. That run was on the 0.1.1
 face; **on 0.2.0-rc.2 step 0 passes at `8f0dedb`, and the live run is still owed** (go-live
 runbook).
+
+## The dsh UI port drill (keyed; run after any change under client/js/composer/, client/js/host/composer.js or the composer's part of app.js)
+
+**Owed, the operator's.** The fake DOM proves the draft model, the menus and the routing; it cannot
+type into a real `contenteditable`, compose pinyin or move a real caret, and a stub model does not
+read files. Search and pin are the transport drill's step 8; the composer's steps are these, and
+the other picks join as their plans land. Keyed, on a second face from your own terminal:
+`source ../.env.deepseek`, then `npm run setup` and `npm start` with
+`DSH_HOME=<scratch> FACE_DESK=0 FACE_PORT=3091 FACE_ACCOUNT_URL=http://127.0.0.1:9` ("A second
+face uses a scratch home"; the dead Account URL keeps this page from pairing with the real
+Account). Open the printed `?token=` URL and hard-reload.
+
+1. **`/compact` from the menu.** In a conversation with a few turns, type `/co`. PASS: the menu
+   opens above the box with **Compact** under the filter, the footer `↑↓ Move · Enter Choose · Esc
+   Close`; Enter runs it at once: `/co` leaves the draft, the status line shows the command's
+   result, and no model turn starts. Do it again on a conversation that has not run since the
+   restart (cold) with the same agent: the Commands read in the first one show (a cold one is never
+   read, so it does not wake by opening the menu), choosing runs it, the conversation is followed
+   first, and the result still lands.
+2. **A skill from the menu.** Type `/`, move to a skill under **Skills** with ↓, press Enter.
+   PASS: the draft reads `/<skill> `, the caret after it; add a line and send: Gravit's answer
+   shows it worked from that skill.
+3. **`@` a file that Gravit reads.** Type `@GRAV`, choose `GRAVIT.md` under **Files and folders**
+   (or Tab into `strategies/` and choose a file there), ask what its first heading says, and send.
+   PASS: the chip draws pale blue with its file icon; Gravit reads the file and quotes the heading.
+4. **`@` a conversation that brings its snapshot.** Type `@` and a word of another conversation's
+   title, choose it under **Conversations** (its age beside it), ask what it concluded, and send.
+   PASS: your bubble draws the conversation as a pale-blue chip, not as `@[…](dsh-session:…)`;
+   Gravit answers from that conversation's content without opening it with a tool.
+5. **The caret steps over a chip.** With a chip between two words, press ← and → across it. PASS:
+   the caret never lands inside the chip; one press crosses it whole.
+6. **Backspace after a chip removes it whole.** Put the caret right after a chip (also when the
+   chip ends the draft) and press Backspace. PASS: the whole chip goes in one press, and the words
+   around it stay.
+7. **A pinyin composition across a stream frame.** While Gravit streams an answer in this
+   conversation, start typing with a Chinese input method and leave the candidate window open for a
+   few seconds; then pick a candidate and press Enter to end a second composition. PASS: the
+   composition is never cut and nothing is sent by the composition's own Enter; the words, the
+   chip and the caret are where you left them when the page draws again.
+8. **What else only a browser shows.** End a draft with Shift+Enter: the caret sits on the new
+   line; end it with a chip: the caret sits after it. Pick a menu row with the pointer: it is
+   chosen and the focus stays in the box. Move the caret with a menu open (with the browser's
+   accessibility inspector, or VoiceOver): `#say`'s `aria-expanded` and `aria-activedescendant`
+   follow the active row. With a menu open, let a stream frame draw the page: the menu stays open
+   (Chrome's `focusout` on a replaced editor is covered by the page's check, which this confirms).
+
+**PASS criteria are observations.** Record the run below with the date and the commit.
 
 ## The role drill (run after any face or dsh change)
 

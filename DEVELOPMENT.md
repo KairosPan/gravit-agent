@@ -2415,8 +2415,10 @@ sentence drawn as its words, the Account's and a channel's stale stamps, a tool 
 | `js/data/empty.js` | `emptyState()`: the state the page boots into — no conversations, `status.line = "connecting…"`, every slice at its empty shape (§5.5), the `seat` slice among them (`{status, data, at}`), `runSheet: null` and `moduleRuns: {}`, and no demo slice: no `plugins`, `memory`, `mail`, `banner`, `call` or `compose` |
 | `js/host/kinds.js` | the kind table (spec §6, §5.3): a mapper view → zero, one or two messages; `SEAT_TOOLS` (the seat's twelve writes), `isSeatWriteTool`, `parseArgs`, `seatLine` (a seat write in words), `seatLift` (a seat write's answer as a receipt, a refusal or nothing), `PRESENT_TOOL` and `presentLift` (an ok `lunhui_present` as a `composed` message, §5.2), `rememberCall`, `toMessages`, `reasonArgs` |
 | `js/host/sessions.js` | `session/list` rows → conversation records: `kindOf`, `conversationOf`, `listConversations`, `unreadOf`; `childRowsOf` (the subagent rows the list leaves out, kept for their parent's Children) and `firstOpen` (the conversation every default opens, never an archived one) |
-| `js/host/live.js` | the impure half: the mux, the follow-or-page policy, the list and its previews, gates, projections, host facts, and the pin set (`workspace/follow`) — all into the store, nothing into the DOM |
-| `js/host/actions.js` | a `data-action` → the Remote or face route the old client sent: `send`, `newConversation`, `answer`, `stop`, `rename`, `command`; the row actions `fork`, `archive`, `pin`, `unpin`, `remove`; `talkTo` (a bot's home conversation), `stopChild` |
+| `js/host/live.js` | the impure half: the mux, the follow-or-page policy, the list and its previews, gates, projections, host facts, and the pin set (`workspace/follow`) — all into the store, nothing into the DOM; `activate(id)` (`ACTIVATE_MS`, 10,000), the conversation on screen followed before a command runs on it (§5.3) |
+| `js/host/actions.js` | a `data-action` → the Remote or face route the old client sent: `send` (with `{room}`, the composer's own room decision), `newConversation`, `answer`, `stop`, `rename`, `command`, `runCommand` (a command chosen from the `/` menu); the row actions `fork`, `archive`, `pin`, `unpin`, `remove`; `talkTo` (a bot's home conversation), `stopChild` |
+| `js/composer/draft.js`, `menus.js`, `view.js`, `dom.js` | the composer (the dsh UI port's plan 3, §5.4): `draft.js` the draft model, pure — a draft is `{runs}`, each run a text or an atomic chip (`bot`, `file`, `conversation`), the caret counted in units (a text's UTF-16 length, 1 for a chip): `emptyDraft`, `textDraft`, `normalize`, `lengthOf`, `isBlank`, `plainText`, `hasChip`, `replaceRange`, `triggerAt` (the `/` or `@` token before the caret), `sessionUri`, `filePathFor` (D15), `serialize`, `serialContext`, `sessionRefRuns` (a sent mention back as a bubble's chip, D17); `menus.js` the menus' items, pure — `HIDDEN_COMMANDS` (`plan`, `permission`, `feedback`; D11), `CONVERSATION_ITEMS` (8), `rankByLetters`, `slashItems`, `atItems`, `conversationChoices`, `flatItems`, `moveActive`, `chipOf`; `view.js` strings — `editorHtml`, `menuAria`, `renderMenu`, `chipInner` (the bubble's chip shares it); `dom.js` the editor's DOM adapter, the only code that reads or writes the editor's nodes — `makeEditor(doc)` → `{read, caret, selection, place, write}` |
+| `js/host/composer.js` | the menus' reads (§5.3): `presetKey`, `startComposerReads({call, getJson, postJson})` → `keptCommands`, `commands`, `keptSkills`, `skills`, `files`, `keptRoster`, `roster` |
 | `js/host/search.js`, `search-view.js` | the conversation list's search (§5.3): `startSearch` (`SEARCH_CONTENT_MS`, 250) the debounced `GET /data/search` read; `titleMatches`, `mergeResults`, `highlightRuns`, `searchPhase`, `moreThanTwenty`, `SEARCH_ITEMS` the pure view over the titles the list holds and the words inside the conversations. `js/reducers/search.js` is its slice (§5.5) |
 | `js/host/list-view.js`, `discover-view.js`, `children-view.js` | stage 3's pure views (§5.3): `groupsOf` (the list's groups, pinned rows leading each; since P4 a `desk` group, `Desk`, of every `gravit-desk` conversation wherever it ran, right after the root channel); `SHELVES`, `SOURCE`, `itemsOf`, `searchItems`, `itemById` (Discover's items under namespaced ids); `childrenOf` (a conversation's subagent children and their states) |
 | `js/host/modules-view.js` | the six Lunhui modules' pure view (module cards spec §5.1, §5.3, Appendix A): `MODULES` — the one client table the cards share with the server (name, title, 副题, role and role id, route, channels and their words, file, headline fields, the two tools, `freezes` and `artifacts` as the page's Reads box words them, glyph, legend), kept in step with `face/src/channels.ts` `MODULE_HEADLINES`, `face/plugins/lunhui/lib/modules.mjs` and the roles by `tests/lunhui-modules-table.test.ts` —, `MODULE_NAMES`, `moduleOf`, `latestOf` (the newest run among the module's channels), `headlineWords`, `FRESH_MS` (60,000), `activeRuns` (the Runs this page sent that read Running: the conversation `running`, or the record under a minute old), `chipOf` (a running Run's `Running · <title>` chip, tone `live`, linking `#/messages/<id>`), `researchItems` (the shelf's six, each `running` or not), `runsOf` (the page's rows, at most 24) and `pageOf` (the page: the chip, `running`, the latest run, the rows, the Reads / Writes / Runs on boxes) over `/data/modules.json` |
@@ -2441,14 +2443,14 @@ sentence drawn as its words, the Account's and a channel's stale stamps, a tool 
 | `js/wire/summaries.js`, `room.js`, `speaker.js`, `markdown.js` | moved with them: `summaryOf` (restores `agentPreset` on a list row — the projection first, `/data/channels.json`'s `presets` second, never a guess — and carries 0.2.1's `formatStatus` when the host reports a known one) and `readProjections` (the one reader of `session/projections`, §5.2), the pure room rules (`foldMembers`, `isMentionText`, `roundEndLine`, …), `isHostPreset`/`speakerFor` (`Role · <id>` for a `role-<id>` preset, a tested helper: the live client draws no role child's page, `listConversations` dropping `origin: subagent` rows), the DOM-built markdown |
 | `js/wire/grouping.js`, `channelName.js`, `botId.js`, `botSettings.js`, `subagents.js`, `member-traces.js` | the old chat page's other pure modules, moved in stage 3 with their words in English (`tests/client/wire-words.test.js` greps the six for Chinese): `bucketFor` and its sentinel keys (`ARCHIVED_KEY`, `UNGROUPED_KEY`, `BOT_KEY_PREFIX`); `foldChannelName`; `proposeBotId`; `normalizeBotModel`, `botModelChoices`, `botSettingsPayload`; `isSubagentRow`, `composeSubagentCatalog`, `normalizeSubagentCatalog` and `subagentControls`, which returns a state enum (`unavailable`, `waiting`, `running`, `inactive`, `unknown`) with a diagnostic's `reason` and no sentence; `loadMemberTrace`. `draftBotSoul`, `botToolLabel`, `isBotKey`, `subagentAddress` and `subagentResult` moved too, and no page calls them |
 | `js/wire/market-model.js`, `china.js`, `account-model.js` | `market-model.js` and `account-model.js` moved from the old instrument pages in stage 2 (`market-quotes.js` and `market-search.js`, the face's own A-share wire, were deleted 2026-11-01; `china.js` took their place): `normalizeAsset`, `readWatchlist`/`saveWatchlist` (the face's key, the kairos key read until the first save), `readAccountWatch`/`saveAccountWatch` (the Account's keys under `ACCOUNT_WATCH_KEY`, `gravit.account.watch.v1`, a hundred at most), `price`, `number`; `money`, `signedMoney`, `pct`, `sign`, `orderMatches`. Their Chinese labels and notes stay in the wire and never reach a screen |
-| `js/render/rail.js`, `messages.js`, `thread.js`, `avatars.js`, `controls.js` | the two-level rail (Discover in the first level), the list's search box and results, and the list's groups, each row with its pin key; the Messages screen (head, Details with the row actions and Children, composer, status line, new message with New channel…, empty state); the thread's kinds (no tool call drawn), a member's Trace; avatars and clusters (a bot's letter from the host's bot names); the segs, the key-value rows, the inline editor and confirm pair |
+| `js/render/rail.js`, `messages.js`, `thread.js`, `avatars.js`, `controls.js` | the two-level rail (Discover in the first level), the list's search box and results, and the list's groups, each row with its pin key; the Messages screen (head, Details with the row actions and Children, the composer — its menu slot `#composer-menu`, the editor `#say` and Send —, status line, new message with New channel…, empty state); the thread's kinds (no tool call drawn; the operator's bubble draws a conversation mention as a chip), a member's Trace; avatars and clusters (a bot's letter from the host's bot names); the segs, the key-value rows, the inline editor and confirm pair |
 | `js/render/markets.js`, `chart.js`, `account.js`, `js/market-fmt.js` | stage 2's screens (§5.4), on the Account's reads since the graft's stage 1: Markets — the Account's rows by tab beside the A shares — and a market's page (`renderMarketsScreen`, `marketPage`, `mkAv`, the face's own letter tile); the charts, one drawing in one box — `candlesSvg` (a market's closes from the Account's candles, the page's chart), `curveSvg` (the Portfolio's curve from its history); Account (`renderAccountScreen` — Portfolio, Money, Venues with a venue's Details drawer and the Account seat box, Agents, Cards, Rules — the Statement drawer `renderStatement`, Sell many's drawer `renderSellMany`, `orderWords`, `cardFactsOf`, and the Market half's keys `marketKeysOn`, `marketKey`, `changeKey`, `positionKeys`) and the Settings drawer (`renderSettings`); `render/wallet-row.js` (`walletRow`: a row waiting for the operator's own wallet, Trade's and Money's); `chgHtml`, a change with its arrow (the A-share page's) Since 2026-10-31 China's table (Today and Turnover, turnover in `yuan()`), its session line, and the A-share page (the state line, twelve facts, Price history by `intradaySvg` for 1D, `sessionsSvg` for 5D and `candlesSvg` with `unit: 'cny'` and `zone: 'Asia/Shanghai'` beyond). |
 | `js/render/run-sheet.js` | a module card's Run sheet as a drawer of any screen (`renderRunSheet`, §5.4) |
 | `js/render/markdown.js` | `setMarkdown`, `markdownHtml`: Gravit's markdown renderer, set once at boot (escaped when none is set); `thread.js` re-exports both, and the thread, a channel's thesis and a composed answer's summary draw through it |
 | `js/render/lunhui/` | the composed answer (§5.4): `composed.js` (`composedHtml`, `composedId`, the `DRAWERS` table by kind), `notes.js` (`foldNotes`, `notesHtml`), the blocks `verdicts.js`, `breadth.js`, `indices.js` (over `intraday.js`: `minuteLabel`, `minuteIndex`, `chartGeometry`, `intradaySvg` — with the stock drawer's `limits`, `seals` and volume `bars` options —, `sparklineSvg`, `cursorPatch`, `sealIndex`, `atLimitUp`, `atLimitDown`), `ladder.js`, `yesterday.js`, `signals.js`, `sources.js`, the `footer.js`, the stock drawer `stock.js` (`stockDrawerHtml`, `askText`, `stockHeadline`, `stockNote`, `poolTag`), `time.js` (`chinaStamp`) and `block.js` (the shared `label`, `headline`, `readout`, `pill`, `count`, the digest grammar's `yuan`, `signedPct`, `fix2`, and the stock links' `stockLink` and `linkNames`) |
 | `js/render/owner.js`, `trade.js` | stage 2 of the graft (§5.4): the device line under the Account head (`renderDeviceLine`), Settings › Devices (`renderDevices`), the owner sheet's drawer (`renderSheet`); the Trade screen (`renderTradeScreen`: the kinds, the picker, Under way, the ticket) |
 | `js/render/channel.js`, `discover.js`, `modules.js` | stage 3's screens (§5.4): a channel's page (`renderChannelScreen`, `bytesWord`; its Research runs section from `runsView`); Discover, a shelf's grid — the Research shelf's module cards among them —, the Create page and an item's page (`renderDiscover`, `renderPlugin`); a Lunhui module's page (`renderModule`, with `moduleChip` and `runKey`, the card's and the page's chip and Run) |
-| `js/html.js`, `icons.js`, `time.js`, `router.js`, `messages.js` | `esc`/`attrs`/`cls`; the inline SVG icon set; `rowTime`/`divider`/`fmtDate`/`fmtClock`; `parseHash`/`toHash` (`#/module/<name>` among the routes); `LEVELS` — the host's kinds alone: text and tool grey, card, approval and question orange, refusal red, receipt green — `levelOf`/`needsAnswer` |
+| `js/html.js`, `icons.js`, `time.js`, `router.js`, `messages.js` | `esc`/`attrs`/`cls`; the inline SVG icon set; `rowTime`/`divider`/`fmtDate`/`fmtClock`/`ago` (a conversation's age in the `@` menu, `Just now` to `<n> days ago`); `parseHash`/`toHash` (`#/module/<name>` among the routes); `LEVELS` — the host's kinds alone: text and tool grey, card, approval and question orange, refusal red, receipt green — `levelOf`/`needsAnswer` |
 | `css/tokens.css`, `css/app.css` | the tokens (Linqi's Cream and Black values, demo @ 0ef5131) and the one sheet |
 
 The old `/market` and `/account` pages are gone too (stage 2): their documents, scripts
@@ -2504,7 +2506,7 @@ its groups as a bot's model routes); `credentials/describe` on the Gravit item, 
 `{refs: ["DEEPSEEK_API_KEY"]}` (per ref `{configured,
 source?, writable}`, never a value); and `subagents/interruptByParent`
 (`{childSessionId, parentSessionId, mode:"continuable"}`, bare, as the old client sent it) for a
-child's Stop. The list's pins add `workspace/pinSession` and `workspace/unpinSession` (`{request:{sessionId}}` → `{pinnedSessionIds}`, the whole set) and the stream `workspace/follow` (below); the face's `GET /data/search` is a `/data` read, not a Remote. Not called: `subagents/prompt`, `workspace/rename`, `directoryPicker/pick`. The
+child's Stop. The list's pins add `workspace/pinSession` and `workspace/unpinSession` (`{request:{sessionId}}` → `{pinnedSessionIds}`, the whole set) and the stream `workspace/follow` (below); the face's `GET /data/search` is a `/data` read, not a Remote. The composer's menus (the dsh UI port's plan 3) add `commands/list` and `skills/list` (below). Not called: `subagents/prompt`, `workspace/rename`, `directoryPicker/pick`. The
 surface stays closed by design: `session/selectModel`, `agentPresets/*` and `settings/describe`
 are not called.
 
@@ -2555,11 +2557,39 @@ answered ids per generation are remembered); the live layer turns that report in
 `ready` was settled while the page was away: `api.js` retires it through `onGateGone`, and the
 live layer owns no grace timer of its own.
 
-**Room routes** — `/data/rooms/say` is called **before** `session/prompt` whenever the composer's
-text carries `(^|\s)@` and the conversation is in a channel; an answer of `addressed: []` means
-the text named nobody on the roster and it goes out as an ordinary prompt instead.
-`/data/rooms/state` is not called: a room's members come from the `room` projection and the
-list fold (§5.3), and a member's gate is attributed through that fold.
+**Room routes** — `/data/rooms/say` is called **before** `session/prompt` when the conversation
+is in a channel and the composer's draft is bound for the room: it holds a bot chip, or its text,
+each chip read as a space, carries `(^|\s)@` (`isMentionText`); a file or conversation chip's own
+`@` never sends it there alone (`actions.send(text, {room})`; a bare call with no `room` reads
+the text, as before). An answer of `addressed: []` means the text named nobody on the roster and
+it goes out as an ordinary prompt instead. The server's `MENTION_RE` (`src/room-rules.ts`) ends a
+name at a `.`, so a file chip `@news-scout.md` sent beside a bot chip also addresses a bot
+`news-scout` on the roster (a residual, §7.4). `POST /data/rooms/state {sessionId}` (`{roster:
+[{id, name, model?, broken?}], members, caps}`) is read by the `@` menu alone, for its roster; a
+room's members on screen still come from the `room` projection and the list fold (§5.3), and a
+member's gate is attributed through that fold.
+
+**The composer's reads** (`js/host/composer.js`, the dsh UI port's plan 3) — `commands/list
+{agentId: <sessionId>}` answers an array of `{definitionId?, name, description, input?: {hint,
+attachments?}}`, `name` without the slash; it is called only for a conversation the store marks
+`live`, because at dsh 0.2.1-rc.5 it resumes a cold one (the mounted `dsh-api-session-controller`
+sets the gateway's agent lookup to find-or-resume; the spec's D13 expected `gateway/lookup-not-found`
+there, and Task 9's smoke measured otherwise). `skills/list {request: {sessionId}}` answers
+`{skills: [{path?, name, description, whenToUse?, modelInvocable}]}` and reads a cold session
+without activating it. `GET /data/files?q=<encoded>&dir=<repo-relative>` (§4.4) answers `{ok,
+items: [{path, kind: 'file' | 'directory'}], truncated}`; `dir` is the conversation's channel
+folder relative to the root channel's, sent only when that folder is not the root. A command
+chosen from the menu, or a sent `/` line, is `commands/execute {agentId, line,
+submittedAttachments: []}` as before. **What a chip sends**: a bot chip `@<id>`; a file chip
+`@<path>` (D15: relative to the conversation's channel folder when under it, `.` for the folder
+itself, absolute otherwise or in no channel, `@"<path>"` when it holds whitespace), the root
+channel's `dir` standing for the repository root (the same `process.cwd()` `src/main.ts` gives
+`/data/files`); a conversation chip `@[<label>](dsh-session:<payload>)`, byte for byte
+`formatSessionReferenceMention({sessionId, label: title})` of `@deepseek-ai/dsh-session-reference`
+— the payload `base64url(UTF-8 JSON.stringify(sessionId))` without padding, the label's `\` and
+`]` escaped with a backslash — which the host's `session-reference` row turns into a
+`Referenced sessions` message for the model (spec §5.5 wrote a bare id, which fails the row's
+canonical check).
 
 **`/data` routes** — fence only, no cookie. Every list refresh reads `/data/channels.json` (the
 channel index, `presets`, the host's `archived`), `/data/bots.json` (the bots' display names) and
@@ -2721,7 +2751,7 @@ records what the operator looked at.
 
 **The live layer** (`js/host/live.js`). `startLive({store, openMux, call, mapFrame, getJson,
 timers, now, onReceipt})` opens the mux and the control stream and returns `{open, promote,
-refresh, reconcile, retryOrphans, answer, leave, close, mux}` (`leave` stops reading the
+activate, refresh, reconcile, retryOrphans, answer, leave, close, mux}` (`leave` stops reading the
 conversation that was on screen when the last open one was deleted and nothing took its place):
 - **the list** — `refresh()` reads `session/list`, `/data/channels.json`, `/data/bots.json` and
   `/data/sessions-meta.json` together (each of the three `/data` reads keeping its last good
@@ -2747,7 +2777,15 @@ conversation that was on screen when the last open one was deleted and nothing t
   `api-session/added` or a list refresh showing it live does the same through `reconcile`;
   `api-session/removed` stops a follow and keeps the window; `onDown` suspends a follow (a
   re-open could activate); a follow the host ends is re-decided 2 s later; one it refuses is
-  reported once (`<code> — <message>`, red) and not retried;
+  reported once (`<code> — <message>`, red) and not retried; `activate(id)` (the dsh UI port's
+  plan 3) makes the conversation live before a command runs on it: a live one answers `true` at
+  once; the one paged on screen is followed, as `promote` does, and answers `true` on the follow's
+  first snapshot (a follow already open with no snapshot yet is waited on, not opened twice); it
+  answers `false` when that follow ends or fails first, when `ACTIVATE_MS` (10 s) passes (the
+  deadline is cancelled once it answers), or when the screen shows another conversation. At dsh
+  0.2.1-rc.5 `commands/execute` resumes a cold agent itself, so the activation is not what lets
+  the command run; it stays so the page follows the conversation and the command's result draws,
+  and so it holds if a later dsh stops resuming;
 - **frames** — a pulse sets `thinking`; a `turn` frame sets `running` and schedules a refresh;
   a projection goes to `hostProjection`; everything else goes through `rememberCall` and
   `toMessages` to `hostEvent`, and a streamed `receipt` then calls `onReceipt()` — `app.js`
@@ -2766,11 +2804,15 @@ conversation that was on screen when the last open one was deleted and nothing t
   clears `running` and stops the follow; `status` sets `running`; `error` reaches the status
   line when it names the conversation on screen.
 
-**Actions** (`js/host/actions.js`). `send(text)` on the conversation on screen: a line starting
-with `/` goes to `commands/execute` first (its result's text, or kind, on the status line — red
-for an error; `undefined` means no command claimed it and the line continues as a prompt); an
-`@` inside a channel goes to `/data/rooms/say` first (`addressed` non-empty means sent); else
-`session/prompt`. `newConversation({title, workspaceId, text})` creates, renames when a title
+**Actions** (`js/host/actions.js`). `send(text, {room})` on the conversation on screen: a line starting
+with `/` goes to `commands/execute` first, after `activate` (its result's text, or kind, on the status line — red
+for an error; `undefined` means no command claimed it and the line continues as a prompt; an
+activation that answers `false` says `send: the conversation did not open`); inside a channel,
+a draft bound for the room (`room`, the composer's decision; without it an `@` in the words) goes
+to `/data/rooms/say` first (`addressed` non-empty means sent); else
+`session/prompt`. `runCommand(sessionId, line)` is a command chosen from the `/` menu: the same
+`command`, its failure `command: <why>` (`command: the conversation did not open`), answering
+`true` or `false`. `newConversation({title, workspaceId, text})` creates, renames when a title
 was typed, prompts the first words, and returns the id. `answer(eventId, value)` answers
 through the mux and writes this tab's outcome on the card at once. `stop(sessionId)` is
 `session/cancel` and the line `Stopped. A paused goal resumes with /goal resume`;
@@ -2786,6 +2828,19 @@ answers `{id}` — the bot's newest home conversation that is not archived, else
 Discover's own line. `stopChild(parent, child, label)` sends `subagents/interruptByParent` in
 continuable mode and says `Stopping <label>`. Every failure is one status line: `<what>: <code |
 HTTP status | message>`, or `Not signed in — open the URL gravit-face printed` on a 401.
+
+**The composer's reads** (`js/host/composer.js`, the dsh UI port's plan 3). `startComposerReads({call,
+getJson, postJson})` holds what the menus draw from, none of it in the store: `commands(conv)`
+calls `commands/list` only when `conv.live === true` — PLAN D16 (opening a menu never activates)
+rests on that guard alone, since `commands/list` resumes a cold session at rc.5 (§5.2) — and
+keeps an array answer by `presetKey(conv)` (the conversation's agent preset, `gravit` by
+default), so a cold conversation shows the rows last read for its preset (`keptCommands`), or
+no Commands group when none were read (D13); a throw keeps the old rows. `skills(sessionId)`
+reads `skills/list` (`[]` on a throw) and keeps it per session (`keptSkills`). `files(q, dir)`
+answers `{items, truncated}`, or `null` for a failure or a call a later one superseded.
+`roster(sessionId)` reads `/data/rooms/state`'s roster (`[]` on a throw) and keeps it per session
+(`keptRoster`), so a room's bots draw at once. Each bot's line is `/data/bots.json`'s
+`description`, which `refresh` now keeps in the store's `bots` (`{id, name, description}`).
 
 **Markets** (`js/host/markets.js`). `startMarkets({store, getJson, storage,
 win, stream, schedule, cancelTimer, now, owner, afterAction})` returns `{show, search,
@@ -3323,8 +3378,10 @@ module card's Run sheet is) — written to
 (an editor's box only while the same editor stays open; New message's Where select never — its
 channel is the store's), the ticked radios and checkboxes with an id (a question card's picks, the
 person's own until they press Answer), every `<details>` with an id the person had open (a
-Trace, What you sign — open again by id), the composer's words (kept in a closure,
-`composerText`, never in the store), the scroll of the rows, the main pane on the same screen, a
+Trace, What you sign — open again by id), the composer's draft (its words, chips and caret or
+selection, §5.5: written back into the editor by `editor.write` after the page's write, the caret
+where it stood while the same draft stays on screen, at the end when another draft takes its
+place), the scroll of the rows, the main pane on the same screen, a
 drawer body while it is the same drawer, and the thread's position while the person reads up,
 however much arrives (at the bottom, or on another conversation, the thread follows the tail).
 After a Markets render the ids of the rows drawn go to `markets.rowsInView` — on a market's page,
@@ -3335,7 +3392,7 @@ each, about twice a second while a coin streams) cannot replace the element a cl
 and the held render lands after the click. Clicks are delegated by `data-action` (`open`, `startDraft`,
 `cancelDraft`, `toggleRail`, `toggleGroup`, `changeWords`/`commitEdit`/`cancelEdit`,
 `stopGravit`/`confirmYes`/`cancelConfirm`, `suggest`, `answer`, `answerQuestion`,
-`toggleDetails`, `openSettings`/`closeSettings`, `setTheme`; the row actions `fork`, `archive`,
+`toggleDetails`, `openSettings`/`closeSettings`, `setTheme`, the composer menu's `menuPick`; the row actions `fork`, `archive`,
 `unarchive`, `deleteConv`; the research surfaces' `stopChild` and `openTrace`; a channel page's
 `newRound`, `channelRetry`, `editRoster`; Discover's `shelfRetry`, `connectAgent`,
 `disconnectAgent`, `rescanAgents`, `talkTo`, `editBot`; Markets' `mkTab`, `mkSort`, `mkClear`,
@@ -3363,7 +3420,7 @@ boxes as the values ticked), and the ticket's venue or outcome re-seeds it at th
 in `#tq` (`tradeQuery`) searches Trade after the same quiet; the composer's `submit` is `send`, a
 bot editor's `saveBot`, the Create page's `createBot`, the ticket's `placeOrder` the sheet's
 submit; a Run sheet's box as typed (Stocks, the Note) and its pick as changed (Where, On, Cites)
-are `runSheetField`; typing in `#cq` (`convQuery`) is `startSearch`'s `type` (§5.3); the row actions `pin` and `unpin` are the pin key's and Details'; ⌥⌘K (Ctrl+Alt+K off a Mac, matched on the key's place `KeyK`, not its character) focuses the list's box, going to Messages first from a screen with no list; Escape in the box clears the query, and again leaves the box, before the chain below, and both keys wait out an IME composition; Escape cancels an editor, a confirm, or closes a module card's Run sheet
+are `runSheetField`; typing in `#cq` (`convQuery`) is `startSearch`'s `type` (§5.3); the row actions `pin` and `unpin` are the pin key's and Details'; ⌥⌘K (Ctrl+Alt+K off a Mac, matched on the key's place `KeyK`, not its character) focuses the list's box, going to Messages first from a screen with no list; Escape in the box clears the query, and again leaves the box, before the chain below, and both keys wait out an IME composition; an open composer menu takes Escape before the search box and the chain (D34); Escape cancels an editor, a confirm, or closes a module card's Run sheet
 first, then the owner sheet, then a drawer (Details, Settings, the Statement, a venue's Details),
 then Trade's ticket; Enter commits an inline editor.
 
@@ -3431,7 +3488,52 @@ percentage) and `Stop Gravit` while running, a two-step confirm. **New message**
 the root first, then `New channel…`, which opens a name box under it (a refusal stays in the box;
 the new channel is selected once it exists) — and the composer; the first words create, name and
 prompt, then the new conversation is opened and promoted to a follow. The **empty
-state** (no conversations) offers three suggestion chips that fill the composer. **Settings** is
+state** (no conversations) offers three suggestion chips that fill the composer (`putWords`:
+after what the draft holds, on a new line, the caret at the end; Hand to Gravit the same).
+
+**The composer** (the dsh UI port's plan 3; `js/composer/`, `renderComposer` in
+`render/messages.js`) is `form.composer`: `div#composer-menu.composer-menu` (the menu's slot),
+then `.composer-box` with `#say`, a `contenteditable` `div.composer-input` (`role="textbox"`,
+`aria-multiline`, labelled by the hidden `Tell Gravit`, `aria-controls="composer-menu"`,
+`aria-expanded` and `aria-activedescendant` from `menuAria`, the placeholder `Tell Gravit…` or
+`Tell Gravit… @ a bot by name` as `data-placeholder`, drawn by `:empty::before`), and Send. Its
+markup is `editorHtml(runs)`: text escaped (newlines kept under `pre-wrap`; a draft ending in a
+newline gains the browser's trailing `<br>`), a chip a `span.ref-chip` with `contenteditable=false`
+and its JSON in `data-chip` (through `attrs`), a chip that ends the draft followed by a zero-width
+space so the caret has a place after it. `makeEditor` reads it back: one walk over the nodes,
+zero-width spaces dropped, a chip whose `data-chip` does not parse to one of the three kinds
+dropped, a `BR` a newline, a `DIV` or `P` a new line as the browser shows it (a `BR` that ends a
+block, or the editor, counts nothing), and `caret`, `selection` and `place` count the same units.
+**Keys**: Enter sends (`sendNow`), except while a menu shows rows (it chooses), while an IME
+composes (`isComposing`, `keyCode` 229 or the page's own composition flag) and with Shift held (the
+browser's newline); a paste is `text/plain` alone, CR and CRLF made LF, put over the selection
+(`replaceRange`), without a render. **The menus** (`app.js`: `menuTick`, `buildMenu`, `drawMenu`,
+`chooseItem`) follow the token before the caret after every input and every caret key: `/` at a
+word's start (after punctuation too) on a conversation only (D10), `@` anywhere; a chip ends a
+token as a space does. Opening, filtering and moving write `#composer-menu` alone and set
+`#say`'s two aria attributes; nothing renders the page. The `/` menu is `Commands` (each its name
+capitalized, `/name` and its line; `plan`, `permission` and `feedback` hidden; a command that
+takes arguments only at the draft's start) and `Skills`; the `@` menu is `Bots in this room` (a
+channel conversation's roster, each with its glyph, `@id` and line), `Files and folders` (only
+while the root channel is known; a query holding `/` walks that folder, its path as a crumb) and
+`Conversations` (the open ones but this, its channel's first, newest first, eight at most, with
+their age); a query filters by letters in order, prefixes first (the `/` menu then draws no group heads). The
+footer reads `↑↓ Move · Enter Choose · Esc Close`. ↑ and ↓ move, wrapping; Enter or Tab chooses;
+Tab on a folder opens it in place (`@<path>/`); Esc or Shift+Tab closes and keeps the draft, and
+the token Esc closed stays closed until it changes; a pointer press in the menu keeps the focus in
+the editor, and the editor losing focus anywhere else closes it. Commands, skills and the roster
+are read once per trigger (its kind, place and draft), files once per query; an answer draws only
+while its trigger stands (`menuSeq`, `menuSource`), so a late answer after the query moved on or
+after Esc draws nothing. **A choice**: a skill or an argument command becomes `/name ` in the
+draft; a command with no arguments leaves the draft and runs at once (`actions.runCommand`); a
+bot, file or conversation becomes its chip and a space. **Sending**: a draft with a bot chip, or
+whose text (each chip a space) carries an `@`, is bound for the room in a channel conversation;
+one of those that also holds a conversation chip is refused before sending, `Conversations go to
+Gravit, not to a room's bots`, and kept (O9). Otherwise it is serialized (§5.2), trimmed and
+cleared, and a failed send puts it back under its own conversation, words typed meanwhile kept
+after it on a new line. **The bubble**: the operator's sent text runs through `sessionRefRuns`, so
+a well-formed conversation mention draws as a `.ref-chip` (the `chat` icon and the label, not
+editable); a file or bot reference stays as typed. **Settings** is
 the theme (Cream · Black · System).
 
 **The thread** (`render/thread.js`) — the operator's words right in the primary bubble, Gravit's
@@ -3911,7 +4013,15 @@ air) — and never key material; `sheet`, `null` while none is open, else its `k
 id, `crypto` at boot), `q`, `picks` by kind and the trade search's `results` (each `{status, data,
 at, message}`), `ticket` (`{id, side, venue, outcome}` or `null`; the order sheet keeps the
 fields) and `said` (a cancel's answer or a fill, as words). The editors keep their own state in `edit`: a rename, New channel…, a roster
-(`which`, `workspaceId`, `choices`, `ticked`), a bot (`id`). It never loads a saved state
+(`which`, `workspaceId`, `choices`, `ticked`), a bot (`id`). The composer's drafts are not in
+the store (D8): `app.js` keeps them in a `Map` in memory, one `{runs}` per conversation by its
+id, `new` for New message and `empty` with neither (`draftKey`), an empty draft deleted; they
+live as long as the page, and a reload loses them. Its menu state is beside them, never in the
+store or persisted: `menu` (the drawn `{kind, from, query, groups, active}`, or null), `menuTrig`
+(the token it follows, with its draft key), `menuFiles` (the files answer for that query),
+`dismissed` (the token Esc closed), `menuSeq` and `menuSource` (the counters a late answer is
+checked against) and `composing`; `host/composer.js` keeps the commands by preset and the skills
+and rosters by session. It never loads a saved state
 (`accept: () => false` — the host is the state) and persists one key,
 `localStorage["gravit-ui.prefs"]`: `{theme, railCollapsed, lastConv, lastSeen, collapsed}` — the per-viewer
 conveniences, every access in try/catch, written only when it changed (a quote tick rewrites
@@ -3934,13 +4044,18 @@ browser.
 
 `css/tokens.css` declares Cream (`:root`, `[data-theme="cream"]`), Black (`[data-theme="black"]`)
 and, with no `data-theme` set, the system's choice through `prefers-color-scheme`; `index.html`'s
-head script applies the saved theme before first paint, `setTheme` at runtime. Two type stacks,
+head script applies the saved theme before first paint, `setTheme` at runtime. The composer's
+chip (`.ref-chip`, in the editor and in the bubble) is pale blue from two tokens, `--ref-fill` and
+`--ref-text`, in all three theme blocks (Cream `#eef1fb` / `#3b5bdb`; Black and the dark media
+block `#1e2541` / `#9db0ff`); `app.css` names no hex for it. Two type stacks,
 `--font-sans` (Manrope, Noto Sans SC) and `--font-mono` (IBM Plex Mono); radii `--radius-s/m/l/pill`;
 the rail `--rail: 248px`. `css/app.css` is the one sheet: the rail and its mini strip, the list,
 the thread's bubbles and cards, the drawers, the responsive breaks (the list hides beside an open
 drawer between 861 and 1399 px; at 860 px and under the page scrolls instead of the thread, the main
 as tall as what it holds — `flex: none`, not the desktop's zero basis — and the composer sticky at
-the bottom), Markets' table narrowing (Volume and Source leave at 620 px,
+the bottom), the composer (`.composer-box`, the editor `.composer-input` growing to eight lines
+and then scrolling, `.composer-menu` above the box at `min(520px, 100%)`, its `.cmenu` rows),
+Markets' table narrowing (Volume and Source leave at 620 px,
 the 24 hours at 440 px), the Account's tables and two figures, the list's group heads, a channel's page, Discover's shelves,
 cards and item pages (a tool description clamped to two lines), a tool result's tables, tiles
 and stamp (`.viz-*`), `prefers-reduced-motion`. The sheet and the screens are checked both ways
@@ -4196,7 +4311,7 @@ own on 2026-10-27 (§7.1, §7.3).
 
 ### 7.3 The face suite
 
-3,079 tests in 210 files (3,038 pass, 41 skipped without `FACE_SMOKE=1`; 3,080 tests, 3,076 pass and 4 skipped under it, 2026-11-04, the dsh UI port's list search and pins at `f28b108c`; a first smoke run had two timing failures, `order-gate-midboot-smoke`'s mid-boot test and `producer.test.ts`'s aborted-run test, that did not reproduce); 3,031 tests in 208 files (2,990 pass, 41 skipped without `FACE_SMOKE=1`; 3,032 tests, 3,028 pass and 4 skipped under it, 2026-11-03, the dsh UI port's host side at `512140e8`); 2,993 tests in 203 files (2,960 pass, 33 skipped without `FACE_SMOKE=1`, 2026-11-02, the dsh 0.2.1-rc.5 upgrade merged with the desk's hardening and its graceful-stop carry at `ce4fc716`; 2,994/2,994 under `FACE_SMOKE=1`); 2,974 tests in 202 files (2,942 pass, 32 skipped without `FACE_SMOKE=1`, 2026-11-02, the merge at `817ee2bb`; 2,975/2,975 under `FACE_SMOKE=1`); 2,903 tests in 200 files (2,871 pass, 32 skipped without `FACE_SMOKE=1`, 2026-11-02, the dsh 0.2.1-rc.5 upgrade at `8819cad7`: the new `role-plugin`, `bind-smoke` and `fixture-root` files, the roles smoke's fifth boot); 2,936 tests in 199 files (2,906 pass, 30 skipped without `FACE_SMOKE=1`, 2026-11-02, the desk's hardening at `527d868f`; 2,937/2,937 under `FACE_SMOKE=1`); 2,868 tests in 197 files (2,838 pass, 30 skipped without `FACE_SMOKE=1`, 2026-11-02, the desk's P4 after its final review's fix wave; 2,869/2,869 under `FACE_SMOKE=1`); 2,866 tests in 197 files (2,836 pass, 30 skipped without `FACE_SMOKE=1`, 2026-11-02, the desk's P4 at `55713973`; 2,867/2,867 under `FACE_SMOKE=1`, the thirty real boots unchanged); 2,795 tests in 196 files (2,765 pass, 30 skipped, 2026-11-01, the desk's P3 after its final review's fix wave; 2,796/2,796 under `FACE_SMOKE=1`); 2169 tests in 163 files (2143 pass, 26 skipped without `FACE_SMOKE=1`, 2026-11-01 at `3ec52aa3`; 1910 tests in 151 files, 1886 pass, 24 skipped, 2026-10-30; 1725 in 144 files, 2026-10-28; 1654/1654
+3,181 tests in 215 files (3,137 pass, 44 skipped without `FACE_SMOKE=1`; 3,182 tests, 3,178 pass and 4 skipped under it, 2026-11-04, the dsh UI port's composer at `59f71f94`; a first smoke run failed the cold-conversation smoke on every run, its assertion taken a few milliseconds before the follow registered the agent, fixed in that commit by waiting for it); 3,079 tests in 210 files (3,038 pass, 41 skipped without `FACE_SMOKE=1`; 3,080 tests, 3,076 pass and 4 skipped under it, 2026-11-04, the dsh UI port's list search and pins at `f28b108c`; a first smoke run had two timing failures, `order-gate-midboot-smoke`'s mid-boot test and `producer.test.ts`'s aborted-run test, that did not reproduce); 3,031 tests in 208 files (2,990 pass, 41 skipped without `FACE_SMOKE=1`; 3,032 tests, 3,028 pass and 4 skipped under it, 2026-11-03, the dsh UI port's host side at `512140e8`); 2,993 tests in 203 files (2,960 pass, 33 skipped without `FACE_SMOKE=1`, 2026-11-02, the dsh 0.2.1-rc.5 upgrade merged with the desk's hardening and its graceful-stop carry at `ce4fc716`; 2,994/2,994 under `FACE_SMOKE=1`); 2,974 tests in 202 files (2,942 pass, 32 skipped without `FACE_SMOKE=1`, 2026-11-02, the merge at `817ee2bb`; 2,975/2,975 under `FACE_SMOKE=1`); 2,903 tests in 200 files (2,871 pass, 32 skipped without `FACE_SMOKE=1`, 2026-11-02, the dsh 0.2.1-rc.5 upgrade at `8819cad7`: the new `role-plugin`, `bind-smoke` and `fixture-root` files, the roles smoke's fifth boot); 2,936 tests in 199 files (2,906 pass, 30 skipped without `FACE_SMOKE=1`, 2026-11-02, the desk's hardening at `527d868f`; 2,937/2,937 under `FACE_SMOKE=1`); 2,868 tests in 197 files (2,838 pass, 30 skipped without `FACE_SMOKE=1`, 2026-11-02, the desk's P4 after its final review's fix wave; 2,869/2,869 under `FACE_SMOKE=1`); 2,866 tests in 197 files (2,836 pass, 30 skipped without `FACE_SMOKE=1`, 2026-11-02, the desk's P4 at `55713973`; 2,867/2,867 under `FACE_SMOKE=1`, the thirty real boots unchanged); 2,795 tests in 196 files (2,765 pass, 30 skipped, 2026-11-01, the desk's P3 after its final review's fix wave; 2,796/2,796 under `FACE_SMOKE=1`); 2169 tests in 163 files (2143 pass, 26 skipped without `FACE_SMOKE=1`, 2026-11-01 at `3ec52aa3`; 1910 tests in 151 files, 1886 pass, 24 skipped, 2026-10-30; 1725 in 144 files, 2026-10-28; 1654/1654
 under `FACE_SMOKE=1` at 138 files, 2026-10-27), run by `node --test` through `tsx`. The Account's own suite is
 `account/`'s (vitest; §7.1 has its counts): the origin's tests at 133b9a7 less the six that reach
 what the copy left out (§3.9), plus the fence's (`test/unit/server-guard.test.ts`: the default
@@ -4334,7 +4449,7 @@ refused, `parseHosts`). The face's:
   channels, sessions-meta and bots), `thread` (no tool call drawn, in the thread or a Trace, a divider over the gap it leaves, a member's
   Trace), `rail` (the search box and its results in every phase, the pin key and glyph on a row, the groups and their heads, Discover in the first level and lit on a plugin or module page, the Account's leading
   figure with `Paper` when Paper leads, the cards-waiting badge), `list-view` (the
-  groups' order and folds, pinned rows first), `search-view` (title matches, the merge and its overflow flag, highlight runs, the phase) and `host-search` (the debounced read, a stale answer dropped, a failure, a clear), and in `app-dom` ⌥⌘K and Esc in the box with the IME holds, `messages-screen` (Details' row keys, Children, Where's channels by
+  groups' order and folds, pinned rows first), `search-view` (title matches, the merge and its overflow flag, highlight runs, the phase) and `host-search` (the debounced read, a stale answer dropped, a failure, a clear), and in `app-dom` ⌥⌘K and Esc in the box with the IME holds; the composer (the dsh UI port's plan 3): `composer-draft` (the runs, `replaceRange` over chips, the trigger rule, the serializer per chip kind — relative, `.`, absolute and quoted paths — and a conversation chip equal to dsh's `formatSessionReferenceMention` for titles holding `]`, `\` and Chinese, parsed back to the same id and label), `composer-menus` (letters in order with prefixes first, the hidden commands, an argument command only at the start, the `@` groups, a folder walk, the conversations' order and cap, the chip a pick becomes) and `time` (`ago`), `composer-view` (the editor's markup, the trailing `<br>` and zero-width space, the menu's rows, ids and footer, `menuAria`), `composer-dom` (read, caret, selection and place over text, chips, `BR`s and blocks as a browser makes them, round trips, the caret after a trailing chip, on `tests/client/helpers/editable-dom.js`), `host-composer` (commands only on a live conversation and kept by preset, skills, a superseded or failed files read answering null, the roster kept), `live` (`activate`: at once on a live one, on the first snapshot, false on an end, a failure, the deadline or another screen, the deadline cleared), `actions` (`runCommand`, a command activating first, `send`'s `room`), `messages-screen` (the composer's slot, editor and aria, the placeholders), `thread` (a mention drawn as a chip in the bubble), `css` (the composer's classes both ways, the chip's two tokens in each theme block), and in `app-dom` (over `tests/client/helpers/value-editor.js`, the editor as a plain input) a stream frame mid-typing keeping the words, the chip and the caret, no render while an IME composes, Enter's rules, two drafts, a failed send that keeps the draft, a paste, the menus opening, filtering, moving, choosing and closing without a page render, a late answer drawing nothing, focusout, a command run from the menu, a file chip that reads like a bot going to Gravit, and the O9 refusal, `messages-screen` (Details' row keys, Children, Where's channels by
   their titles and New channel…), `channel` and `host-channels` (a channel's page in every state —
   markup in every field stays text — its editors, the overview's latest-wins read, New channel,
   the roster writes), `discover-view`, `host-discover` and `discover` (Discover's items under
@@ -4713,7 +4828,7 @@ precedence, the glyph, the mention anchor, the round-end line, the gate speaker,
 The 30 smoke files (35 real boots) each hold one boot but for `roles-smoke.test.ts`'s five and `subagents-smoke.test.ts`'s two, because `bootFace` sets `process.env.DSH_HOME` for good, and
 each speaks the browser's wire through `tests/remote.ts` (`mountClient`, `signIn`, `remote`):
 
-- `dsh-ui-port-smoke.test.ts` — the host side of the dsh UI port on one stub boot, eight tests: the pins (`workspace/follow` carries `pinnedSessionIds`, `pinSession` and `unpinSession` answer a set and push a `pinned` frame), `commands/list` and `skills/list` (a cold session's skills answer without loading the agent), the `turnOutline` and `sessionStats` projections after one turn, `job/list` opening a stream with `{type: "rows", jobs: []}`, `session/page` giving earlier history, an upload by `POST /api/session/uploadFileBinary` sent in a prompt as a `file` part, the `sessionReferenceResolver` service, and `GET /data/search` finding the stub's answer and the operator's Chinese prompt.
+- `dsh-ui-port-smoke.test.ts` — the host side of the dsh UI port on one stub boot, eleven tests (eight from plan 1, three from plan 3 below): the pins (`workspace/follow` carries `pinnedSessionIds`, `pinSession` and `unpinSession` answer a set and push a `pinned` frame), `commands/list` and `skills/list` (a cold session's skills answer without loading the agent), the `turnOutline` and `sessionStats` projections after one turn, `job/list` opening a stream with `{type: "rows", jobs: []}`, `session/page` giving earlier history, an upload by `POST /api/session/uploadFileBinary` sent in a prompt as a `file` part, the `sessionReferenceResolver` service, and `GET /data/search` finding the stub's answer and the operator's Chinese prompt. Plan 3's three: a cold conversation — `commands/list` and `commands/execute` each answer on a cold session and resume it (no `gateway/lookup-not-found` at rc.5), and after a `session/follow`'s snapshot (the agent registered a few milliseconds later) `commands/execute` answers `success` — a skill by its literal name (a probe skill under the root's `.dsh/skills`, listed by `skills/list`, whose `/ui-port-probe hello` reaches the model with its `skill_content`), and a conversation chip (the page's own `serialize` output brings a `Referenced sessions` message).
 - `smoke.test.ts` — the sign-in (`/` 401 without the cookie, the token's 303 and `dsh-auth-*`
   cookie, the page with it), `session/list` over the Remote wire, `/api` 401 without the cookie,
   a forged `Host` 403 even WITH a valid cookie (the fence runs first; sent through `node:http`,
@@ -5403,6 +5518,7 @@ the re-host added (§10, item 14).
 | **Bots** — manual (`face/README.md`) | create → home → persona → tools named and not named → `{{` refused; the sidebar buckets the home session under the bot; a restart's boot line lists the id; the transcript names the speaker on all four surfaces (second run) | no automated test pins the four naming surfaces or the reconnect path; per-message attribution in a room is the Room rows below | passed 2026-09-07; re-run 2026-09-08 on `main` with the R12 fix in, passed; owed on 0.2.0 |
 | **Room** — automated (`room-smoke`, `room-discussion-smoke`) | a real round on a stub model: dispatch → three members (answered / passed / failed) → answers on the log before one wake → synthesis in one turn; members parented, preset-joined, `read-only` first, `GRAVIT.md` chain, no `dispatch`; the projection on the row and in the cache; the `@` route with a member's write refused in content; a home refused on `../SOUL.md`; the structured brief and views; the journal | that a human can read the strip; a real model's behaviour on the four standing rules | passes 2026-09-30 |
 | **Room** — manual (`face/README.md`, eight parts) | check-in → dispatch line → attributed bubbles and the strip → the fold → `@` → an inline member question with the needs-you mark → a member's write refused → `left` and re-check → a restart keeps states and titles | per-message attribution across a reconnect; convergence of four voices on one model (spec §12, R3); the peer-`@` continuation, which the operator's next `@` superseded before it ran (by design) — that path stands on the engine tests | **Drilled and PASSED 2026-09-09** on the operator's own face (`feat/rooms` @ `31b2e68`, two fresh template bots, DeepSeek as the model); one client finding (F1, the strip missing on a session's first round) fixed the same day and re-verified; owed on 0.2.0, whose 0.1.1 room sessions no longer open (§9, R20) |
+| **dsh UI port, the composer** — manual (`face/README.md` "The dsh UI port drill", the room drill's step 9) | on the operator's face with keys: `/compact` from the `/` menu, a skill from it, `@` a file that Gravit reads, `@` a conversation that brings its snapshot; in a room a bot chip with a file chip reaching the bot with the path, and a conversation chip added to it refused before sending (O9); what the fake DOM cannot prove, in the operator's browser — the caret stepping over a chip, Backspace after a chip removing it whole, a pinyin composition left open across a stream frame, Enter in a real pinyin composition, a trailing `<br>` and the caret after a trailing chip, a menu row picked with the pointer, the aria attributes as the caret moves, and focusout when a render replaces the editor | whether Gravit uses what it is pointed at well; a file chip `@news-scout.md` beside a bot chip also addresses a bot `news-scout` (the server's `MENTION_RE` ends a name at `.`) — a residual the room step watches, not a change | owed: the operator's keyed run; the host facts under it pass on a stub boot (`dsh-ui-port-smoke`, 2026-11-04) |
 | **Ask-user** — `ask_user_question` offered, called, answered, cancelled | the seam | that it is a gate (the answer is model-visible); the instruction half (README step 6 — on a thin brief that does not name the tool, Gravit asks before it builds, per Step 0 of `dsh/profile/cycle.md`), left to the operator and not run | passed 2026-09-03 with a real model, 26 tools offered; re-run 2026-09-08 on `main`, passed (34 tools offered; answered, then Stop → `closed · cancelled`); owed on 0.2.0 |
 | **Role** — automated (`roles-smoke`; `roles`, `role-plugin`, `gravit-plugin`, `boot`, `bot-presets`) | on a real tree over two fixture roles made from `_template`, `role_auditor` and `role_worker` each start a one-shot child on the role's own `role-<id>` preset with exactly the role's tools (compared as sets, not as a subset); the auditor's child carries the role's persona shadowing Gravit's, the date, no roles section, no cycle contract (`Step 0 — ask once`) and the root `GRAVIT.md` in its baseline, its report coming back as the tool result; a cancelled call `aborted` with its child released; a `subagent_fork` child gets Gravit's system text — the cycle contract included — and tools unchanged, a plain `subagent` child neither section though it can call every role tool; a role naming a tool the tree lacks failing at the call, naming it, with no child; a role with none of its tools refusing the boot; the gate on the roles section, visibility and header; the reader's refusals, the render and the mirror's drift; and, on a second boot, the shipped `cn-market-analyst` routed to the stub — exactly its allow list, its persona, its submit landing, Gravit's own submit `NOT_A_ROLE`, a freeze out of its reach; on a third, `cn-stock-analyst` — exactly its allow list, its persona, its leader read citing a sealed `cn-market` run and its submit landing with that `market_run`, Gravit's own leader submit `NOT_A_ROLE`; on a fourth, `cn-reviewer` — exactly its allow list, its persona, its read of a sealed `cn-market` run with no `market_run` and its submit landing, Gravit's own submit `NOT_A_ROLE` | that a real model chooses and calls a role sensibly; what the child's log shows on a live home; a `bash` run long enough to be moved to a job; the generic tool paragraphs the child's prompt still carries | passes 2026-10-19; on the fixture roles since 2026-10-24; with `cn-market-analyst` since 2026-10-26, `cn-stock-analyst` since plan 3 and `cn-reviewer` since plan 4, the same day; on the role presets and the face's role tool at dsh 0.2.1-rc.5 since 2026-11-02 (5/5) |
 | **Role** — manual (`face/README.md`, five steps and a clean-up) | on a scratch copy of the operator's home, with the shipped `cn-market-analyst` (no role carries `bash`, so the job step waits for one that does): Gravit calls it; the child's log shows exactly the role's tools and its persona, not Gravit's; a `bash` role's run past bash-sandbox's 60 s default either passes `timeoutMs` or reads its moved job before reporting; a role naming an unmounted server's tool fails the delegation with `tools.restrict()` naming it and creates no child; Gravit's own log shows the role tool and the roles paragraph | a real model's judgement over several delegations | **not yet run** — runnable since 2026-10-26 with `cn-market-analyst`, `cn-reviewer` and `cn-stock-analyst`; the live market and strategy runs (below) cover its first two steps for each |
