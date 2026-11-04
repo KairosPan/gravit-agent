@@ -57,7 +57,10 @@ export function mergeResults({ titles, content, conversations, channels }) {
     seen.add(conv.id);
     out.push(itemOf(conv, channels, { snippet: h.snippet, match: h.match ?? null }));
   }
-  return out.slice(0, SEARCH_ITEMS);
+  // the array is the items; a non-enumerable `overflow` says whether more than twenty were cut
+  const items = out.slice(0, SEARCH_ITEMS);
+  Object.defineProperty(items, 'overflow', { value: out.length > SEARCH_ITEMS });
+  return items;
 }
 
 // [{text, mark}] for a snippet and a [start, end] match; a missing or out-of-range match is one unmarked run
@@ -80,5 +83,5 @@ export function searchPhase({ query, contentPhase, merged }) {
   return 'searching';
 }
 
-// true when the wire said hasMore or the merge filled the page
-export const moreThanTwenty = (merged, hasMore) => hasMore === true || (merged ?? []).length >= SEARCH_ITEMS;
+// true when the wire said hasMore or the merge cut items past twenty (exactly twenty is not more)
+export const moreThanTwenty = (merged, hasMore) => hasMore === true || merged?.overflow === true;

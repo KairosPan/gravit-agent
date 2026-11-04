@@ -79,3 +79,18 @@ test('the phase: idle with no query, searching while content loads with no title
   assert.equal(searchPhase({ query: 'q', titles: [], contentPhase: 'failed', merged: [] }), 'failed');
   assert.equal(searchPhase({ query: 'q', titles: one, contentPhase: 'failed', merged: one }), 'results');
 });
+
+test('exactly twenty is not more; twenty-one is', () => {
+  const mk = n => Array.from({ length: n }, (_, i) => conv(`c${i}`, { title: 'q', updatedAt: i }));
+  for (const [n, more] of [[20, false], [21, true]]) {
+    const conversations = mk(n);
+    const merged = mergeResults({ titles: titleMatches(conversations, channels, 'q'), content: [], conversations, channels });
+    assert.equal(merged.length, 20);
+    assert.equal(moreThanTwenty(merged, false), more);
+  }
+});
+
+test('a channel the registry does not hold reads by the conversation\'s own channel name', () => {
+  const c = inCh('a', 'w9', 'orphan', { title: 'zz' });
+  assert.equal(titleMatches([c], channels, 'zz')[0].channelLabel, 'orphan');
+});
