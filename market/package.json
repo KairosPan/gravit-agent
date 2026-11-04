@@ -9,6 +9,7 @@
   "scripts": {
     "market": "tsx --env-file-if-exists=../.env.ifind src/server.ts",
     "market:service": "tsx src/market-service.ts",
+    "market:mcp": "tsx src/mcp.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -16,7 +17,8 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "ccxt": "4.5.85",
     "express": "^4.22.0",
-    "viem": "^2.57.3"
+    "viem": "^2.57.3",
+    "zod": "^4.5.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

@@ -22,6 +22,8 @@ describe("the market holds no wallet", () => {
   it("market/src imports no signing library and writes no file", () => {
     expect(files.filter((f) => /from "viem\/accounts"/.test(text(f)))).toEqual([]);
     expect(files.filter((f) => basename(f) !== "market-service.ts" && WRITES.test(text(f)))).toEqual([]);
+    // market:mcp, Gravit's reads, writes nothing to disk either: no seat key, no home
+    expect(WRITES.test(text(join(SRC, "mcp.ts")))).toBe(false);
   });
   it("market/src names no wallet home", () => {
     expect(files.filter((f) => /BUYER_HOME|\.buyer-agent-demo/.test(text(f)))).toEqual([]);
