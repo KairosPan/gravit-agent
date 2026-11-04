@@ -42,6 +42,9 @@ export const OFFSET_FILE = "telegram.offset";
 /** what the operator is answered */
 export const TEXT_ONLY = "text only, please";
 export const CHAT_OFF = "Chat with Gravit is off on Telegram: Account › Identity turns it on.";
+/** the phone's five commands, as the face's bridge parses them (face/src/phone-bridge.ts `COMMAND`): stored for the desk
+ * whatever the Chat row says, so the phone may always pause or mute (D19) */
+const PHONE_COMMAND = /^\/(status|pause|mute|new|stop)(?:@[A-Za-z0-9_]+)?(?:\s+[\s\S]*)?$/i;
 
 export interface IdentityClock {
   now(): number;
@@ -285,7 +288,7 @@ export class TelegramConnector {
       await this.say(TEXT_ONLY);
       return true;
     }
-    if (!this.deps.chatOn()) {
+    if (!this.deps.chatOn() && !PHONE_COMMAND.test(m.text.trim())) {
       await this.say(CHAT_OFF);
       return true;
     }

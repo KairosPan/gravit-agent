@@ -2175,7 +2175,8 @@ time, never its text; `status` shows how many. Text goes to the desk under a fir
 reads as its provenance — `[telegram · operator · 14:03 ET]`, the time you wrote it; a photo, a
 file or a voice note gets `text only, please` from the account; with Chat with Gravit unticked for
 Telegram a text gets `Chat with Gravit is off on Telegram: Account › Identity turns it on.` and
-reaches no one. Five commands are the bridge's own, in any letter case, with or without
+reaches no one — but the five commands below still reach the bridge, so the phone can always
+pause or mute. Five commands are the bridge's own, in any letter case, with or without
 `@<bot>` after them:
 
 | Command | What it does, and the reply |
@@ -5664,8 +5665,9 @@ code:
 10. **Pause and mute.** `/pause 30m` and `/mute 30m` from the phone answer as before; resume from a
     terminal (`npm run desk -- resume`, `npm run desk -- unmute`).
 11. **Disconnect.** Account › Identity › Telegram › **Disconnect…**, sign. PASS: the tab reads `Not
-    connected`, with no unsaved ticks and no Save…; the bot stops answering; `/status` in a
-    terminal (`npm run service -- status`) says `phone: nothing connected (Account › Identity)`;
+    connected`, with no unsaved ticks and no Save…; the bot stops answering; in a
+    terminal, `npm run service -- status` (not the phone's `/status`, which has no bot to reach now)
+    says `phone: nothing connected (Account › Identity)`;
     and `credentials/networks/telegram.json` is gone from the account's home (`ls`, never `cat`).
     Connect again (step 1) if you keep the phone.
 

@@ -302,6 +302,30 @@ describe("the connected poller and the inbox, through the account", () => {
     expect(existsSync(join(home, "identity", "inbox.json")) ? readFileSync(join(home, "identity", "inbox.json"), "utf8") : "").not.toContain("are you there");
   });
 
+  it("Chat with Gravit off for Telegram: the phone's five commands are still stored for the desk (D19), any other text is not", async () => {
+    const r = await own({ type: "setRouting", routing: "chat=;alerts=telegram;brief=telegram;cards=telegram;fills=telegram", quietFrom: "", quietTo: "" } as NoNonce<OwnerAction>);
+    expect(isRefusal(r)).toBe(false);
+    bot.push(update(20, { text: "/pause 30m" }));
+    bot.push(update(21, { text: "  /MUTE@gravit_desk_bot  " }));
+    bot.push(update(22, { text: "/status" }));
+    bot.push(update(23, { text: "hello there" }));
+    bot.push(update(24, { text: "/resume" }));
+    bot.push(update(25, { text: "/pausenow" }));
+    await until(() => offset() === "26");
+    const texts = (await get(`/api/account/identity/inbox?after=0&wait=0`)).messages.map((m: { text: string }) => m.text);
+    expect(texts).toEqual(["/pause 30m", "  /MUTE@gravit_desk_bot  ", "/status"]);
+    expect(bot.sent.filter((s) => s.text === CHAT_OFF)).toHaveLength(3);
+  });
+
+  it("Chat with Gravit on: a command and a text are both stored, as before", async () => {
+    bot.push(update(20, { text: "/pause" }));
+    bot.push(update(21, { text: "hello there" }));
+    await until(() => offset() === "22");
+    const texts = (await get(`/api/account/identity/inbox?after=0&wait=0`)).messages.map((m: { text: string }) => m.text);
+    expect(texts).toEqual(["/pause", "hello there"]);
+    expect(bot.sent.filter((s) => s.text === CHAT_OFF)).toEqual([]);
+  });
+
   it("the inbox long poll answers as soon as a message lands, and at its wait with none", async () => {
     const t0 = Date.now();
     const empty = await get(`/api/account/identity/inbox?after=0&wait=1`);
