@@ -19,8 +19,8 @@
  *     summaries, the research-cycle contract, the run protocol) and one
  *     `plugins/role.mjs` row per role, none of which masks a tool. Gravit's
  *     sessions join it: their tool set is the host's global view plus the
- *     `role_*` tools (here `role_cn_market_analyst`, `role_cn_reviewer` and
- *     `role_cn_stock_analyst`, the three roles `roles/` ships), their prompt carries the date, the cycle contract and the run
+ *     `role_*` tools (here `role_cn_market_analyst`, `role_cn_reviewer`,
+ *     `role_cn_stock_analyst` and `role_pdf_page_reader`, the four roles `roles/` ships), their prompt carries the date, the cycle contract and the run
  *     protocol, and a bot's carries none of them (nor does it see a role tool).
  * Also: the roster lists a broken fixture with its reason and never `_template`;
  * a session created through the session controller with `agentPreset` carries
@@ -114,9 +114,9 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
       const presets = ctx.get("agentPresets") as { defaultId: string; list(): Promise<{ id: string; broken?: string }[]> };
       const roster = await presets.list();
       assert.deepEqual(roster.map((p) => p.id).sort(), ["cracked", "gravit", "gravit-desk", "kairos", "probe",
-        "role-cn-market-analyst", "role-cn-reviewer", "role-cn-stock-analyst", "shipped", "trader"],
+        "role-cn-market-analyst", "role-cn-reviewer", "role-cn-stock-analyst", "role-pdf-page-reader", "shipped", "trader"],
         "listed - and never _template; gravit-desk is the desk's preset and role-<id> each shipped role's, which bootFace declares and none of which is a bot (botPresets.ids() above)");
-      for (const id of ["role-cn-market-analyst", "role-cn-reviewer", "role-cn-stock-analyst"]) assert.equal(roster.find((p) => p.id === id)?.broken, undefined, `${id} is listed whole`);
+      for (const id of ["role-cn-market-analyst", "role-cn-reviewer", "role-cn-stock-analyst", "role-pdf-page-reader"]) assert.equal(roster.find((p) => p.id === id)?.broken, undefined, `${id} is listed whole`);
       assert.equal(roster.find((p) => p.id === "gravit-desk")?.broken, undefined, "the desk's preset is listed whole");
       assert.equal(presets.defaultId, "gravit");
       assert.match(roster.find((p) => p.id === "cracked")!.broken ?? "", /list/, "a broken preset carries dsh's reason (Rule 5)");
@@ -145,18 +145,18 @@ test("bots smoke: roster, mask, persona, a default that masks nothing, the shipp
       const names = (schemas: { name: string }[]) => schemas.map((s) => s.name).sort();
 
       /* S3 - Gravit: a session naming no preset joins `gravit` and keeps the host's tools, plus the role library's.
-       * This boot reads the repository's own roles/, which ships the two analysts and the reviewer since the three
-       * alpaca-kit roles retired, so the library adds their three role tools and nothing else: no retired
+       * This boot reads the repository's own roles/, which ships the two analysts, the reviewer and the PDF page reader since the
+       * three alpaca-kit roles retired, so the library adds their four role tools and nothing else: no retired
        * `role_*` tool (role_screener above all) comes back. The role tools' own path is roles-smoke's. */
       const k = await create({ cwd: home });
       assert.equal(k.agentPreset, "gravit");
       const gravit = agentOf(k.sessionId);
       assert.equal(gravit.session.header.agentPreset, "gravit");
-      assert.deepEqual(readRoles(ROLES_ROOT).map((role) => role.tool), ["role_cn_market_analyst", "role_cn_reviewer", "role_cn_stock_analyst"], "the repository ships three roles");
+      assert.deepEqual(readRoles(ROLES_ROOT).map((role) => role.tool), ["role_cn_market_analyst", "role_cn_reviewer", "role_cn_stock_analyst", "role_pdf_page_reader"], "the repository ships four roles");
       assert.deepEqual(names(tools.schemas(gravit)), [...names(tools.schemas()), ...readRoles(ROLES_ROOT).map((role) => role.tool)].sort(),
         "Gravit's tools are the host's plus the role library (spec §5.1)");
       assert.ok(names(tools.schemas(gravit)).includes("bash") && names(tools.schemas(gravit)).includes("read"), "Gravit keeps the host's tools");
-      assert.deepEqual(names(tools.schemas(gravit)).filter((name) => name.startsWith("role_")), ["role_cn_market_analyst", "role_cn_reviewer", "role_cn_stock_analyst"], "and its three role tools: no role_screener");
+      assert.deepEqual(names(tools.schemas(gravit)).filter((name) => name.startsWith("role_")), ["role_cn_market_analyst", "role_cn_reviewer", "role_cn_stock_analyst", "role_pdf_page_reader"], "and its four role tools: no role_screener");
       /* Compared up to the persona's first `{{` - the whole text since the persona
        * stopped naming the cwd (D21) - so a template variable added back later is
        * still cut where renderPrompt would substitute it. The prefix is read from

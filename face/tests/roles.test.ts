@@ -20,21 +20,22 @@ test("toolNameFor: role_ plus the id with dashes as underscores", () => {
   assert.equal(toolNameFor("data-check"), "role_data_check");
 });
 
-/* The repository ships three roles (modules spec A8, §5.9): `cn-market-analyst`, the three market module
- * pairs plus `skill`; `cn-reviewer`, the counterevidence pair plus `skill`; and `cn-stock-analyst`, the
- * leader and mode pairs plus `skill` - all on deepseek-flash, and no freeze, file or AKShare tool. The
- * reviewer shares only `skill` with each analyst (A23: the reviewer is not the writer). Gravit's preset is
- * the gravit row, whose summary list names all three, then one one-shot row each - and the committed
- * mirror says so. */
+/* The repository ships four roles. Three are Lunhui's (modules spec A8, §5.9): `cn-market-analyst`, the
+ * three market module pairs plus `skill`; `cn-reviewer`, the counterevidence pair plus `skill`; and
+ * `cn-stock-analyst`, the leader and mode pairs plus `skill` - no freeze, file or AKShare tool. The
+ * reviewer shares only `skill` with each analyst (A23: the reviewer is not the writer). The fourth is
+ * `pdf-page-reader` (dsh UI port spec §5.6, O8), `read_image` alone. All four are on deepseek-flash.
+ * Gravit's preset is the gravit row, whose summary list names all four, then one one-shot row each - and
+ * the committed mirror says so. */
 const MARKET_ANALYST_ALLOW = ["skill", "lunhui_read_environment_context", "lunhui_submit_environment",
   "lunhui_read_sentiment_context", "lunhui_submit_sentiment", "lunhui_read_theme_context", "lunhui_submit_theme"];
 const STOCK_ANALYST_ALLOW = ["skill", "lunhui_read_leader_context", "lunhui_submit_leader", "lunhui_read_mode_context", "lunhui_submit_mode"];
 const REVIEWER_ALLOW = ["skill", "lunhui_read_counterevidence_context", "lunhui_submit_counterevidence"];
 
-test("Gravit's preset has three role rows: the shipped library is cn-market-analyst, cn-reviewer and cn-stock-analyst", () => {
+test("Gravit's preset has four role rows: the shipped library is cn-market-analyst, cn-reviewer, cn-stock-analyst and pdf-page-reader", () => {
   const roles = readRoles(ROLES_ROOT);
-  assert.deepEqual(roles.map((role) => role.id), ["cn-market-analyst", "cn-reviewer", "cn-stock-analyst"], "roles/ holds _template, the two analysts and the reviewer");
-  const [market, reviewer, stock] = roles;
+  assert.deepEqual(roles.map((role) => role.id), ["cn-market-analyst", "cn-reviewer", "cn-stock-analyst", "pdf-page-reader"], "roles/ holds _template, the two analysts, the reviewer and the PDF page reader");
+  const [market, reviewer, stock, pdf] = roles;
   assert.equal(market.tool, "role_cn_market_analyst");
   assert.equal(market.name, "CN market analyst");
   assert.deepEqual(market.allow, MARKET_ANALYST_ALLOW, "skill and the environment, sentiment and theme pairs, in module order");
@@ -44,8 +45,11 @@ test("Gravit's preset has three role rows: the shipped library is cn-market-anal
   assert.equal(stock.tool, "role_cn_stock_analyst");
   assert.equal(stock.name, "CN stock analyst");
   assert.deepEqual(stock.allow, STOCK_ANALYST_ALLOW, "skill and the leader and mode pairs, in module order");
-  for (const role of roles) {
-    assert.equal(role.model, "deepseek-official/deepseek-flash", role.id);
+  assert.equal(pdf.tool, "role_pdf_page_reader");
+  assert.equal(pdf.name, "PDF page reader");
+  assert.deepEqual(pdf.allow, ["read_image"], "page images in, their text out");
+  for (const role of roles) assert.equal(role.model, "deepseek-official/deepseek-flash", role.id);
+  for (const role of [market, reviewer, stock]) {
     assert.ok(!role.allow.some((name) => name.startsWith("lunhui_freeze_")), `${role.id} carries no freeze`);
     assert.ok(!role.allow.includes("lunhui_present"), `${role.id} cannot present: the composed answer is Gravit's`);
   }
@@ -54,15 +58,32 @@ test("Gravit's preset has three role rows: the shipped library is cn-market-anal
     assert.deepEqual(reviewer.allow.filter((name) => analyst.allow.includes(name)), ["skill"], `the reviewer shares only skill with ${analyst.id}`);
   }
   const rows = gravitRows(roles, { plugin: GRAVIT_PLUGIN_URL, rolePlugin: ROLE_PLUGIN_URL, cycle: readCycle(CYCLE_PATH) }) as Array<{ id: string; name: string; config: Record<string, unknown> }>;
-  assert.deepEqual(rows.map((row) => row.id), [GRAVIT_ROW_ID, roleRowId("cn-market-analyst"), roleRowId("cn-reviewer"), roleRowId("cn-stock-analyst")]);
+  assert.deepEqual(rows.map((row) => row.id), [GRAVIT_ROW_ID, roleRowId("cn-market-analyst"), roleRowId("cn-reviewer"), roleRowId("cn-stock-analyst"), roleRowId("pdf-page-reader")]);
   assert.deepEqual(rows[0].config.roles, roles.map((role) => ({ tool: role.tool, summary: role.description })));
   for (const row of rows.slice(1)) assert.equal(row.config.model, "deepseek-official/deepseek-flash");
   const mirror = readFileSync(new URL("../../bots/gravit/agent.cordis.yml", import.meta.url), "utf8");
-  assert.equal(mirror.match(/^- id: role-/gm)?.length, 3, "the mirror carries three role rows");
+  assert.equal(mirror.match(/^- id: role-/gm)?.length, 4, "the mirror carries four role rows");
   assert.match(mirror, /^ {4}tool: role_cn_market_analyst$/m);
   assert.match(mirror, /^ {4}tool: role_cn_reviewer$/m);
   assert.match(mirror, /^ {4}tool: role_cn_stock_analyst$/m);
-  assert.equal(mirror.match(/^ {4}model: deepseek-official\/deepseek-flash$/gm)?.length, 3, "each on its role's route");
+  assert.match(mirror, /^ {4}tool: role_pdf_page_reader$/m);
+  assert.equal(mirror.match(/^ {4}model: deepseek-official\/deepseek-flash$/gm)?.length, 4, "each on its role's route");
+});
+
+/* The PDF page reader's persona is English (it is not a Lunhui module): it reads each image once with
+ * read_image, transcribes only what the images print, writes [unreadable] for a cell it cannot read, and
+ * reports under the four headings. */
+test("pdf-page-reader's ROLE.md: English, within 2,000 bytes, read_image once, [unreadable] for what it cannot read, the four headings", () => {
+  const file = new URL("../../roles/pdf-page-reader/ROLE.md", import.meta.url);
+  assert.ok(readFileSync(file).length <= 2000, "ROLE.md is at most 2,000 bytes");
+  const persona = readRoles(ROLES_ROOT).find((role) => role.id === "pdf-page-reader")!.persona;
+  assert.ok(persona.startsWith("You are the PDF page reader"), "the role's name, in English");
+  assert.equal(/[\u4e00-\u9fff]/.test(persona), false, "no Chinese in the persona");
+  assert.ok(!persona.includes("{{"), "no template braces");
+  assert.ok(persona.includes("Read each image once with `read_image`"), "read_image once");
+  assert.ok(persona.includes("`[unreadable]`"), "[unreadable] for what it cannot read");
+  assert.ok(persona.includes("Never estimate"), "no estimated values");
+  for (const heading of ["**status**", "**pages**", "**transcription**", "**limits**"]) assert.ok(persona.includes(heading), heading);
 });
 
 /* The persona is the tree's own Chinese (D14′): the job, the module order, the artifact only in
@@ -158,7 +179,7 @@ test("over a roles/ holding only _template the preset has no role_* row; the fix
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-/* The rules every role the repository ships obeys (the two analysts and the reviewer today); a role the operator adds is held to them. */
+/* The rules every role the repository ships obeys (the two analysts, the reviewer and the PDF page reader today); a role the operator adds is held to them. */
 test("every shipped role: exact names only, nothing forbidden, jobs only beside bash", () => {
   for (const role of readRoles(ROLES_ROOT)) {
     assert.ok(role.description.length <= 300 && role.description.length > 0, role.id);
@@ -314,7 +335,7 @@ test("the committed mirror bots/gravit/agent.cordis.yml is exactly the render of
   assert.ok(mirror.includes("lunhui-module.md"), "and the module protocol's file");
   assert.ok(mirror.includes(`name: ${GRAVIT_PLUGIN_RELATIVE}`), "the mirror names the plugin by the shipped relative path");
   assert.equal(ROLE_PLUGIN_RELATIVE, "../../face/plugins/role.mjs");
-  assert.equal(mirror.split(`name: ${ROLE_PLUGIN_RELATIVE}\n`).length - 1, 3, "and each role row the role tool's plugin the same way");
+  assert.equal(mirror.split(`name: ${ROLE_PLUGIN_RELATIVE}\n`).length - 1, 4, "and each role row the role tool's plugin the same way");
   assert.equal(mirror.includes("dsh-tool-subagent"), false, "no role row is dsh's own subagent tool any more");
   assert.equal(mirror.includes("file:"), false, "and never by a machine-specific URL");
 });

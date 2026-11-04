@@ -61,6 +61,12 @@ orders, asks, opens a goal or commits. `desk_quotes` is the price now, never evi
 turns are refused while `GRAVIT.md`, `GRAVIT.local.md`, `.git`, `.dsh` or `.agents` is under
 `desk/journal/`.
 
+## PDFs
+
+A PDF: `pdftotext -layout -f A -l B <file> -` for its text (`pdfinfo` for its pages); render a
+page whose layout matters (a table, a chart, a scan) with `pdftoppm -png -r 110 -f N -l N <file>
+"${TMPDIR:-/tmp}/<name>"`, never into the tree, and hand the PNG to `role_pdf_page_reader`.
+
 ## Tests
 
 `cd face && npm test`: offline, no keys.

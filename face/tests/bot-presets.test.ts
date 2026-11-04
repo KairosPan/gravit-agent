@@ -102,8 +102,8 @@ test("every shipped bot's plugin row lands on the real face/plugins/bot.js, and 
   const cycle = readCycle(CYCLE_PATH);
   const protocols = readProtocols();
   const gravitUrl = pathToFileURL(GRAVIT_PLUGIN_ABS).href;
-  assert.deepEqual(roles.map((role) => role.id), ["cn-market-analyst", "cn-reviewer", "cn-stock-analyst"], "the repository ships three roles: the two analysts and the reviewer");
-  assert.deepEqual(rowsOf(gravit).map((row) => row.id), ["gravit", "role-cn-market-analyst", "role-cn-reviewer", "role-cn-stock-analyst"], "Gravit's preset has its three role rows");
+  assert.deepEqual(roles.map((role) => role.id), ["cn-market-analyst", "cn-reviewer", "cn-stock-analyst", "pdf-page-reader"], "the repository ships four roles: the two analysts, the reviewer and the PDF page reader");
+  assert.deepEqual(rowsOf(gravit).map((row) => row.id), ["gravit", "role-cn-market-analyst", "role-cn-reviewer", "role-cn-stock-analyst", "role-pdf-page-reader"], "Gravit's preset has its four role rows");
   assert.deepEqual(gravit.plugins[0], { id: "gravit", name: gravitUrl, config: { roles: roles.map((role) => ({ tool: role.tool, summary: role.description })), cycle, protocols } },
     "the mirror's relative plugin path rebases to the real face/plugins/gravit.js");
   assert.deepEqual(gravit.plugins, gravitRows(roles, { plugin: gravitUrl, rolePlugin: ROLE_PLUGIN_URL, cycle, protocols }),

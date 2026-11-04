@@ -11,6 +11,8 @@
         summary: Reads one run's counterevidence context, a cn-market run or a strategy run citing a sealed cn-market run, and submits the counterevidence artifact through its submit tool - items against the accepted artifacts the context shows, each citing evidence; an empty list is a result.
       - tool: role_cn_stock_analyst
         summary: Reads one strategy run's leader or mode context, citing a sealed cn-market run, and submits that module's validated artifact through its submit tool; a mode is a daily registration, WAIT when its preconditions lack a source.
+      - tool: role_pdf_page_reader
+        summary: Reads page images Gravit rendered from a PDF with pdftoppm and returns their tables, figures and layout as text, quoting what it reads and naming what it cannot read; the brief gives the PNG paths and the question.
     cycle: |-
       # The research cycle
 
@@ -146,4 +148,14 @@
       - lunhui_submit_leader
       - lunhui_read_mode_context
       - lunhui_submit_mode
+    model: deepseek-official/deepseek-flash
+- id: role-pdf-page-reader
+  name: ../../face/plugins/role.mjs
+  config:
+    tool: role_pdf_page_reader
+    name: PDF page reader
+    summary: Reads page images Gravit rendered from a PDF with pdftoppm and returns their tables, figures and layout as text, quoting what it reads and naming what it cannot read; the brief gives the PNG paths and the question.
+    agentPreset: role-pdf-page-reader
+    allow:
+      - read_image
     model: deepseek-official/deepseek-flash

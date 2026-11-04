@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { ROLES_ROOT, readRoles } from "../src/roles.ts";
 
 const GRAVIT_MD = fileURLToPath(new URL("../../GRAVIT.md", import.meta.url));
 /** Spec §4.2: the budget of the one file every dsh agent in the tree reads on its first request. */
@@ -44,4 +45,15 @@ test("GRAVIT.md reaches AKShare through the seat", () => {
   assert.match(text, /mcp__account__portfolio_akshare/);
   assert.match(text, /akshare_discover/);
   assert.equal(text.includes("mcp__akshare__"), false);
+});
+
+/* dsh UI port spec §5.6, O8: Gravit's shell reads a PDF's text with pdftotext, renders a page whose layout
+ * matters with pdftoppm into the temp directory (never the tree), and hands the PNG to a shipped role. */
+test("GRAVIT.md reads a PDF with Poppler and hands a layout page to a shipped role", () => {
+  const text = readFileSync(GRAVIT_MD, "utf8");
+  for (const needle of ["pdftotext -layout", "pdftoppm -png", "${TMPDIR:-/tmp}"]) assert.ok(text.includes(needle), needle);
+  const named = [...new Set(text.match(/\brole_[a-z0-9_]+/g) ?? [])];
+  assert.ok(named.includes("role_pdf_page_reader"), "it names the PDF page reader");
+  const shipped = readRoles(ROLES_ROOT).map((role) => role.tool);
+  for (const tool of named) assert.ok(shipped.includes(tool), `${tool} is a shipped role's tool`);
 });

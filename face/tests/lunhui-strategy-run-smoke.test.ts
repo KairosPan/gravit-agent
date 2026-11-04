@@ -14,7 +14,7 @@
  *
  * The boot is the market smoke's: a temp DSH_HOME, port 0, the seat off, the stub the default model,
  * `lunhui-runs` over a temp strategies root holding copies of the shipped cn-market and lunhui-s01-repair, the
- * freeze rows' `fetch` one directory holding both fixture sets, and a fixture roles root whose three roles are
+ * freeze rows' `fetch` one directory holding both fixture sets, and a fixture roles root whose three Lunhui roles are
  * routed to the stub. The clock: a patch cannot carry `config.now` into a booted row, so `Date` is replaced - its
  * "now" Friday 2026-10-23 15:00 China time for Friday's prompt, then Monday 2026-10-26 15:00, the next trading day,
  * for Monday's - each advancing in real time; the freezes stamp each day's session from it, so Monday's market run

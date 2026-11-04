@@ -73,3 +73,16 @@ test("the agent image carries no AKShare, the account image carries it at the pi
   assert.ok(accountFile.includes("PORTFOLIO_AKSHARE_BIN=/usr/local/bin/akshare-mcp"));
   assert.ok(accountFile.indexOf("uv tool install") < accountFile.indexOf("COPY package.json"), "the install layer comes before the source copy");
 });
+
+/* Gravit reads a PDF with Poppler's command-line tools (dsh UI port spec §5.6): the agent box installs
+ * them from Debian, right after FROM, in one layer that drops the apt lists it fetched. */
+test("the agent image installs poppler-utils from the distribution, in one layer that cleans its lists", async () => {
+  const faceFile = await readFile(fileURLToPath(new URL("../Dockerfile", import.meta.url)), "utf8");
+  const layer = "RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils && rm -rf /var/lib/apt/lists/*";
+  const lines = faceFile.split("\n");
+  const from = lines.findIndex((line) => line.startsWith("FROM "));
+  assert.ok(from >= 0, "the image has a FROM");
+  assert.equal(lines.filter((line) => line.startsWith("RUN ") && line.includes("poppler-utils")).length, 1, "one layer installs Poppler");
+  assert.equal(lines.slice(from + 1).find((line) => line.startsWith("RUN ")), layer, "the first RUN after FROM is the Poppler layer");
+  assert.match(lines.slice(0, from).join("\n"), /Poppler/, "the header comment names Poppler as Gravit's PDF tool");
+});

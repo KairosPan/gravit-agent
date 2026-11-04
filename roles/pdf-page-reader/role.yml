@@ -1,0 +1,6 @@
+# roles/pdf-page-reader/role.yml - the PDF page reader (dsh UI port spec §5.6, O8): page images in, their text out.
+name: PDF page reader
+description: Reads page images Gravit rendered from a PDF with pdftoppm and returns their tables, figures and layout as text, quoting what it reads and naming what it cannot read; the brief gives the PNG paths and the question.
+allow:
+  - read_image
+model: deepseek-official/deepseek-flash
