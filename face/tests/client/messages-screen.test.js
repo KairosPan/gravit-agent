@@ -302,6 +302,8 @@ test('Usage keeps its three rows and gains cache hit, turns and steps, model and
   assert.match(e, /id="dsec-usage"/, 'the figures alone draw the section');
   for (const gone of ['Tool time', 'Speed', 'Cache hit', 'Tokens in']) assert.doesNotMatch(e, new RegExp(`>${gone}<`), gone);
   assert.match(e, />Model time<[\s\S]*?>4m 12s</);
+  const unmeasured = listed([conv('a', { stats: { ...STATS, ttftMs: 0 } })]);
+  assert.doesNotMatch(renderDetails(currentConversation(unmeasured), unmeasured), />First token</, 'no 0.0 s first token');
   // before the first step: no figures, and no section without usage
   const none = listed([conv('a', { stats: { ...STATS, steps: 0 } })]);
   assert.doesNotMatch(renderDetails(currentConversation(none), none), /Usage/);
@@ -310,10 +312,10 @@ test('Usage keeps its three rows and gains cache hit, turns and steps, model and
 test('the pills show after the first step, right of the status line, and open Usage', () => {
   const s = R.hostStatus(listed([conv('a', { usage: { tokenUsage: TOKENS }, stats: STATS })]), { line: 'Reconnecting…' });
   const h = renderMessagesScreen(s, NOW);
-  assert.match(h, /<\/form><div class="thread-foot"><div class="status-line" role="status">Reconnecting…<\/div><button type="button" class="stats-pill" data-action="openUsage">7 turns · 41 steps · 38 tok\/s<\/button><button type="button" class="stats-pill" data-action="openUsage">182k tokens · cache 63%<\/button><\/div>/);
+  assert.match(h, /<\/form><div class="thread-foot"><div class="status-line" role="status">Reconnecting…<\/div><button type="button" class="stats-pill" id="pill-figures-a" data-action="openUsage">7 turns · 41 steps · 38 tok\/s<\/button><button type="button" class="stats-pill" id="pill-tokens-a" data-action="openUsage">182k tokens · cache 63%<\/button><\/div>/);
   // no usage yet: the second pill would be empty, so it is not drawn
   const bare = renderMessagesScreen(R.hostStatus(listed([conv('a', { stats: { ...STATS, turns: 1, steps: 1, decodeMs: 0 } })]), { line: '' }), NOW);
-  assert.match(bare, /<div class="thread-foot"><button type="button" class="stats-pill" data-action="openUsage">1 turn · 1 step<\/button><\/div>/);
+  assert.match(bare, /<div class="thread-foot"><button type="button" class="stats-pill" id="pill-figures-a" data-action="openUsage">1 turn · 1 step<\/button><\/div>/);
   assert.equal(count(bare, /stats-pill/g), 1);
 });
 

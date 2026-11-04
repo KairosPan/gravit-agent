@@ -25,7 +25,7 @@ const num = v => (Number.isFinite(v) ? v : 0);
 // one decimal is rounded on whole hundreds, not by toFixed, so 9,950 is 10.0 and not 9.9
 
 // null until a step has closed; else the figures, each null when its denominator is 0 (tokens null without a tokenUsage);
-// a zero model or tool time is no figure
+// a zero model, tool or first-token time is no figure
 export function statsView(stats, tokenUsage) {
   if (!stats || !(stats.steps >= 1)) return null;
   const t = tokenUsage && typeof tokenUsage === 'object' ? tokenUsage : null;
@@ -38,7 +38,7 @@ export function statsView(stats, tokenUsage) {
     cache: input > 0 ? num(t.cacheReadTokens) / input : null,
     modelMs: stats.llmMs > 0 ? stats.llmMs : null,
     toolMs: stats.toolMs > 0 ? stats.toolMs : null,
-    firstTokenMs: stats.ttftSteps > 0 ? stats.ttftMs / stats.ttftSteps : null,
+    firstTokenMs: stats.ttftSteps > 0 && stats.ttftMs > 0 ? stats.ttftMs / stats.ttftSteps : null,
   };
 }
 

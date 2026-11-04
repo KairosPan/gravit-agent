@@ -58,6 +58,8 @@ test('the figures: 38 tok/s, cache 63%, first token the average, no speed withou
   assert.equal(bare.tokens, 0);
   assert.equal(bare.modelMs, null);
   assert.equal(bare.toolMs, null);
+  // steps timed but no first token measured (ttftMs 0): no 0.0 s figure
+  assert.equal(statsView(stats({ ttftMs: 0, ttftSteps: 3 }), {}).firstTokenMs, null);
   assert.equal(statsView(stats(), null).tokens, null);
 });
 

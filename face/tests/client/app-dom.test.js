@@ -5743,7 +5743,7 @@ test('a pill opens Details scrolled to Usage', async () => {
   await h.ready();
   h.streams[0].cbs.onItem({ type: 'projection', sessionId: 's1', key: 'sessionStats', value: { turns: 2, steps: 5, llmMs: 9000, toolMs: 0, ttftMs: 2000, ttftSteps: 5, decodeMs: 0, decodeTokens: 0 }, seq: 4 });
   await settle();
-  assert.match(f.html(), /<button type="button" class="stats-pill" data-action="openUsage">2 turns · 5 steps<\/button>/);
+  assert.match(f.html(), /<button type="button" class="stats-pill" id="pill-figures-s1" data-action="openUsage">2 turns · 5 steps<\/button>/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'openUsage' } });
   await settle();
   assert.equal(store.get().detailsOpen, true);
@@ -5752,9 +5752,38 @@ test('a pill opens Details scrolled to Usage', async () => {
   store.dispatch('hostStatus', { line: 'x' });
   await settle();
   assert.equal(scrolled.length, 1, 'the scroll is for the press, not every render');
+  drawer.scrollTop = 300;   // the reader scrolled the drawer: its own keep runs first, then the scroll to Usage
   f.click({ tagName: 'BUTTON', dataset: { action: 'openUsage' } });
   await settle();
   assert.equal(store.get().detailsOpen, true, 'never closed by a pill');
   assert.equal(scrolled.length, 2);
+  assert.equal(scrolled[1].drawerTop, 300, "the drawer's keep ran before scrollIntoView");
+  store.timers.clear();
+});
+
+test('each pill keeps its own focus: pill 2 stays focused across a render, and Esc from Details returns to it', async () => {
+  const f = fakeWindow({ hash: '' });
+  const pill1 = f.withId('pill-figures-s1', { tagName: 'BUTTON', dataset: { action: 'openUsage' }, presentIf: /id="pill-figures-s1"/ });
+  const pill2 = f.withId('pill-tokens-s1', { tagName: 'BUTTON', dataset: { action: 'openUsage' }, presentIf: /id="pill-tokens-s1"/ });
+  const close = f.withSelector('.drawer .close-key', { tagName: 'BUTTON', presentIf: /class="drawer details"/ });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = started(f, h);
+  await h.ready();
+  h.streams[0].cbs.onItem({ type: 'projection', sessionId: 's1', key: 'sessionStats', value: { turns: 2, steps: 5, llmMs: 9000, toolMs: 0, ttftMs: 2000, ttftSteps: 5, decodeMs: 0, decodeTokens: 0 }, seq: 4 });
+  h.streams[0].cbs.onItem({ type: 'projection', sessionId: 's1', key: 'tokenUsage', value: { uncachedInputTokens: 900, cacheReadTokens: 100, outputTokens: 50 }, seq: 5 });
+  await settle();
+  assert.match(f.html(), /id="pill-tokens-s1" data-action="openUsage">1.1k tokens · cache 10%</);
+  pill2.focus();
+  store.dispatch('hostStatus', { line: 'a stream frame' });
+  await settle();
+  assert.equal(f.doc.activeElement, pill2, 'a render keeps focus on pill 2, not pill 1');
+  f.click(pill2);
+  await settle();
+  assert.equal(f.doc.activeElement, close);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  await settle();
+  assert.equal(store.get().detailsOpen, false);
+  assert.equal(f.doc.activeElement, pill2, 'focus back on the pill that opened Details');
+  assert.notEqual(f.doc.activeElement, pill1);
   store.timers.clear();
 });

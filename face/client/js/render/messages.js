@@ -98,10 +98,12 @@ function usageRows(conv) {
 }
 
 // under a conversation's composer: the status line, then the figures' two pills once a step has closed (each opens
-// Details at Usage; an empty one is not drawn); nothing when both are empty
+// Details at Usage; an empty one is not drawn); nothing when both are empty. Each pill has its own id, so focus stays on
+// the one it was on across a render and comes back to it when Details closes
+const PILLS = ['figures', 'tokens'];
 export function statsPills(conv) {
-  return pillsText(statsView(conv.stats, conv.usage?.tokenUsage)).filter(Boolean)
-    .map(text => `<button type="button" class="stats-pill" data-action="openUsage">${esc(text)}</button>`).join('');
+  return pillsText(statsView(conv.stats, conv.usage?.tokenUsage))
+    .map((text, i) => (text ? `<button${attrs({ type: 'button', class: 'stats-pill', id: `pill-${PILLS[i]}-${conv.id}`, 'data-action': 'openUsage' })}>${esc(text)}</button>` : '')).join('');
 }
 function threadFoot(conv, state) {
   const inner = renderStatus(state.status) + statsPills(conv);
