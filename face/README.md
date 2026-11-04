@@ -1130,9 +1130,10 @@ Two things about that directory are NOT yours:
   which `docker-entrypoint.sh` sets, the box's port published on the host's
   loopback; dsh 0.2.1 refuses a wildcard such as `0.0.0.0` at load) — never a
   patch row. A
-  patch of yours aimed at one of the thirteen overlay rows — `webserver`,
+  patch of yours aimed at one of the seventeen overlay rows — `webserver`,
   `connection`, `api-remotes`, `file-upload`, `workspace`,
-  `session-controller`, `workspace-controller`, `settings-controller`,
+  `session-controller`, `workspace-controller`, `job-controller`, `session-stats`,
+  `session-turn-outline`, `session-reference`, `settings-controller`,
   `directory-picker`, `tool-ask-user`, `agent-preset-registry`,
   `preset-gravit`, `preset-kairos` — or at the `hmr` switch, at
   `system-prompt`'s `personaPrefix`, at the `agent-instructions` row's two
@@ -3711,16 +3712,40 @@ characters of ASCII, where 0.1.1 counted 50 000 bytes — so CJK-heavy AKShare r
 inline about three times longer in bytes. The face keeps dsh-base's default (upgrade decision
 D18); a `spill-policy` row in the profile patch changes it.
 
+## Search and files (src/search*.ts, src/files.ts)
+
+Two read routes behind the `/data` fence (loopback `Host`, no cross-site fetch; no cookie), for the dsh UI port's
+page:
+
+- **`GET /data/search?q=`** answers `{ok, items, hasMore, indexed}`: one hit per conversation, newest match first,
+  at most 20, each `{sessionId, snippet, match, at}` (the snippet is at most 240 characters around the first match,
+  `match` its `[start, end)` in the snippet). A query is 1 to 500 characters; anything else is a 400. dsh's own
+  session search matches by word, which fits neither Chinese nor numbers, so the face keeps its own index of what
+  the operator and Gravit said (`search-text.ts`: messages and answers, a `lunhui_present` summary; no reasoning,
+  tool calls, desk firings or subagent children), a SQLite trigram index for three characters or more and `LIKE`
+  below. The index is brought up to date at each search: every conversation of this repository's face is read from
+  where the index stopped, and one whose log cannot be read is skipped and counted in `indexed.skipped`.
+  A log rewritten to the same length is not seen as changed.
+- **`GET /data/files?q=&dir=`** answers `{ok, items, truncated}` for the `@` picker: at most 20 repo-relative
+  files and folders. An empty `q` lists `dir`'s children, `q` with a `/` lists that folder by prefix, any other
+  `q` ranks file names (prefix, then contains, then in the path), without regard to case. The walk skips `.git`,
+  `node_modules`, `dist`, `build`, every `.env*` key file and `.claude/worktrees`, follows no link, and is cached
+  for 30 seconds. dsh's `file-reference-local` row stays out of the profile: it would tell every agent that `@`
+  means a path.
+
+The index is `$DSH_HOME/face/search-index.sqlite`, a copy of the conversations' text and nothing else; delete it
+and the next search rebuilds it. Node prints its `node:sqlite` ExperimentalWarning once per face start.
+
 ## Tests
 
 ```bash
 npm test                  # offline unit tests - no keys, no network, no port
 npm run typecheck         # strict tsc against the pinned .d.ts (skipLibCheck: false) - the contract test
-FACE_SMOKE=1 npm test     # + the 33 isolated real boots; local stubs, no external model calls
+FACE_SMOKE=1 npm test     # + the 34 isolated real boots; local stubs, no external model calls
 ```
 
-Offline, `npm test` skips the 33 real boots listed below; `FACE_SMOKE=1` runs
-them too (2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
+Offline, `npm test` skips the 34 real boots listed below; `FACE_SMOKE=1` runs
+them too (3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
@@ -3767,6 +3792,7 @@ and `node --test` gives each file its own:
 | `lunhui-strategy-run-smoke.test.ts` | an `S01` registered on Friday and graded on Monday ("Lunhui analysis"): the market smoke's boot with copies of `cn-market` and `lunhui-s01-repair` and the three roles on the stub; each day Gravit does the reviewed market run, finds it with the listing read, freezes two stocks' quotes on the strategy and calls `role_cn_stock_analyst` for the leader, `role_cn_reviewer` with both run ids and `role_cn_stock_analyst` for the mode, each child building its artifact from its context; Friday's mode `S01` with a card of at most 2,048 bytes, every review item answered, Monday's grading it; every artifact of the four runs valid again against digests rebuilt from the sealed runs, the runs card's latest run Monday's with its review line, the protocol's strategy channel in Gravit's prompt. `Date` is replaced, Friday 2026-10-23 15:00 China time, then Monday 2026-10-26 15:00 |
 | `lunhui-answer-smoke.test.ts` | Gravit's composed answer end to end: the seat off, `lunhui-runs` over a scratch strategies root holding the synthetic sealed 10-27 run; the view read over `GET /data/lunhui/view` (registered as `main.ts` does) with the signed-in cookie; an ok `lunhui_present` lifted through `host/kinds.js` and drawn by the client's own `renderThread` — the seven kinds' labels in the call's order, the follow-ups, the footer with `Open run ›`, a stock link — and `stockDrawerHtml` for 上海九百 drawing its minute chart with the limit-up line; no model called |
 | `goal-smoke.test.ts` | the goal loop `../dsh/profile/cycle.md` rests on, through the face's own wire (prompts, the Stop button's `session/cancel`, a slash line's `commands/execute`): `create_goal` in a human turn returns the id and revision 1, armed; each round arrives at idle as a user message whose source is `goal` (`<goal_round>`, the objective, `Round: n/N`); the model's `blocked` in round 1 is refused (`blocked requires at least 3 consecutive goal rounds; current round is 1`), in round 3 accepted with the code `model-reported` and followed by the `<goal_blocked>` wrap-up; a second `create_goal` is refused while that goal is blocked (`GOAL_ALREADY_EXISTS`); at the cap the driver blocks with `round-limit` and sends the model nothing more; Stop mid-round pauses the goal, the model's resume of it is refused (`GOAL_TOOL_RESUME_PAUSED`: `the model cannot resume a paused goal; the user must resume it`) and `/goal resume` re-arms it; a face stopped mid-round and booted again on the same home leaves the goal active and disarmed with no request until "continue", whose `update_goal` resume bumps the revision and re-arms the rounds |
+| `dsh-ui-port-smoke.test.ts` | the host side of the dsh UI port on one stub boot: pins and their `pinned` frame, `commands/list`, `skills/list` on a cold session, the `turnOutline` and `sessionStats` projections, a `job/list` stream, `session/page` earlier history, an upload sent as a `file` part, the `sessionReferenceResolver` service, and `GET /data/search` over the stored logs |
 | `desk-smoke.test.ts` | the desk on a real tree, as `main.ts` installs it, its fixture root inside the repository so the repository's `GRAVIT.md` heads the chain: the `gravit-desk` session runs in `desk/journal/` under `workspace-write`; its tools are exactly `DESK_ALLOW` expanded on this tree plus `desk_quotes` and `desk_state`, each `mcp__*__<raw>` entry matching one server's tool, and neither desk tool reaches Gravit's session or the global view; the write tools take the path arguments the guard's write check reads, and `str_replace_editor`'s commands are `view`, `create`, `str_replace` and `insert`; the desk's prompt carries Gravit's persona prefix, the date and `# The desk`, and no cycle contract or roles section; a desk turn naming the order stand-in gets Gate 2's visibility refusal and its body never runs; a `write` to `../levels.yml` is refused by the sandbox inside the tool's content while a journal write lands, with no card; Gravit's own write of a `GRAVIT.md` lands; with a listener in front answering allow, the guard's backstop still denies the desk's write of `GRAVIT.md` and its read of a `.env` file, while Gravit's own read of that file goes through unjudged; `/stop` on a turn parked on an escalation card, two texts queued behind it, cuts that turn alone — recorded `cancelled`, `stopped from the phone` — and both texts are answered, in order; the desk's write of a journal `.gitignore` holding `!*` and of a `CLAUDE.md` are denied with no file written, and its read of a dot-config in the repository is denied by name while Gravit reads it; the read tools take exactly the parameters the read check reads; a `GRAVIT.md` planted in the journal reaches a desk session's first request behind the repository's, which is the threat the fence refuses, and the next post is refused with `desk-refused` and no turn; each supervised turn is one `desk-turn` with four token buckets and the stub's route |
 | `telegram-smoke.test.ts` | the bridge end to end on a real tree against a `node:http` Bot API stub on 127.0.0.1: the token and the operator's id come from the scratch home's `.env`, and the MCP child dsh spawns has the id and not the token; a stranger and a group are dropped and counted, unanswered, and the operator's `hi` is answered in the operator's chat; `/status` counts the drops and names the desk session; `/pause` writes `OFF` by `telegram`, a text then gets the paused line and opens no turn, and `/resume` is text that never reaches the model; a 503 queues the reply in the outbox and the next poll flushes it, in order, each reply sent once; a 409 is recorded and waited out; a card parked by an escalated write to `../levels.yml` is cut at the desk's deadline (1,500 ms here) with the timed-out line; the canary — the desk's write of `GRAVIT.md` is denied by the desk guard and no request carries a planted text, then a `GRAVIT.md` the harness plants is refused by the fence with no turn; its read case — `send me ~/.dsh/.env`: the read of the scratch home's `.env` is refused as outside the repository, the token handed to a market read is refused as a secret, no tool result carries the token or a second secret, and the stub's reply, which names both, reaches the phone as `I could not read it: <secret> <token>`; across the file every send went to the operator's chat, the token is in no file of the desk's directory, and no `STANDING.md`, `levels.yml`, `rules.yml` or `holdings.yml` changed |
 | `schedule-smoke.test.ts` | the standing orders' clock end to end, as `main.ts` installs the desk, on one early-close session (2026-11-27), a fake clock and calendar, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`: a firing a restart cut off is reported `interrupted` at boot and never run; the pre-close brief wakes one fresh `gravit-desk` session in `desk/journal` under `workspace-write`, with the armed text — hashing to its pin — and the producer's block in its wake message, and its final text reaches the phone; `firings.jsonl` holds `started`, `producer`, `woke` and `finished`, `events.jsonl` one `desk-turn` with `source: "schedule"` and four token buckets; a script producer's stderr reaches only the face's log; a turn waiting in a long tool is cut at its 10-minute deadline and the order queued behind it fires after; an edited text is refused with one line, then in silence, and fires once re-armed inside its grace; the pause refuses in silence and a spent budget with one line; an anchor slept across is `missed`; a `wake: false` order runs only its producer; a planted `GRAVIT.md` refuses the firing; the canary's firing half — a poisoned turn's writes of `../STANDING.md`, of `standing.yml` and of a journal `GRAVIT.md` are all refused, no card raised, every text and `standing.yml` unchanged — and a `GRAVIT.md` the harness plants refuses the next order; the clock's dispose cuts a firing in a long tool and settles; every text the desk sent went through the recorder. Then (P4) the strategies' book on 2026-11-30, a fake XSHG calendar beside the XNYS one and one fake quote source, in clock order: an A-share report on its Beijing date naming the screen that ran and its `TENCENT` close print; the canary in a strategy (five calls: it reads and rewrites `STANDING.md` and `levels.yml`, then tries the desk's `STANDING.md`), named by one outside-reports line and holding the next order by each pin in turn; two US reports at one anchor in file order; the fence in a strategy; a producer-only strategy order; the abort last |
@@ -3781,14 +3807,14 @@ Offline, `role-plugin.test.ts` holds the role tool to its contract without a boo
 grammar, one tool that is never concurrent and has no timeout, the child started on the role's
 preset with caller delivery and its text returned as the report, a stop reason as an error,
 every refusal before a child starts, and an abort disposing the child at once;
-`fixture-root.test.ts` pins `assertOutsideTempRoots`.
+`fixture-root.test.ts` pins `assertOutsideTempRoots`. Also offline, `search-index`, `search-text`, `search` and `files` (`tests/*.test.ts`) hold the search and file-listing routes of the next section to their contracts without a boot.
 
 ## Upgrading dsh — three pins, not one
 
 `src/version.ts` holds them, and they move independently:
 
 - **`DSH_PIN` = `0.2.1-rc.5`** (since 2026-11-02; `0.2.0-rc.2` before) — the entire
-  `@deepseek-ai/dsh-*` family, 34 packages, pinned EXACT. `@deepseek-ai/dsh-tool-ralph` is one of
+  `@deepseek-ai/dsh-*` family, 38 packages, pinned EXACT (the dsh UI port's four host rows took it from 34). `@deepseek-ai/dsh-tool-ralph` is one of
   them since dsh-base 0.2.1 stopped mounting `ralph` and the policy layer inserts it (D9). Lockstep only: these packages are tested only against each other at one
   version, and a mixed set breaks the Remote wire and the session format between
   them. `tests/version.test.ts` sweeps every `@deepseek-ai/dsh-*` entry across

@@ -1249,3 +1249,29 @@ Gravit only (§5.5).
   bot the snapshot's tokens.
 
 **Answer: A**, refused this round (O9, §5.5).
+
+## 13. Build notes, plan 1 (2026-11-03)
+
+Plan 1 (the host side) built on `claude/cranky-bun-9f78c8` over `2321a8b0`: `5b1b380b` (the four
+overlay rows: `job-controller`, `session-stats`, `session-turn-outline`, `session-reference`),
+`4c8d8886` (`search-index.ts`), `0cab6723` and `512140e8` (`search-text.ts`, and the fix that a
+stored `user/message`'s data is the message itself), `458e9162` (`search.ts`, `GET /data/search`,
+the index at `$DSH_HOME/face/search-index.sqlite`), `bfc8848d` (`files.ts`, `GET /data/files`),
+`ca3287fa` (`tests/dsh-ui-port-smoke.test.ts`, eight tests on one stub boot), and this note's
+commit (DEVELOPMENT.md, face/README.md, CLAUDE.md). Measured at `512140e8`: the face suite 3,031
+tests, 2,990 pass, 41 skipped, 0 fail; under `FACE_SMOKE=1` 3,032 tests, 3,028 pass, 4 skipped,
+0 fail; the smoke file 8/8; typecheck clean.
+
+| Clause | The text | What the tree does | Why |
+|---|---|---|---|
+| §5.8, §6 | `job/list` called with a `sessionId` | it takes `{request: {sessionId}}` | the Remote's wire arguments, found on the real boot |
+| §6 | a stored `user/message` read like the other messages | its `data` is the message itself; `assistant/message` and `tool/result` wrap it as `data.message` | the first reading indexed Gravit's answers and none of the operator's words; the real boot showed it, and the fixtures were corrected with the code |
+| §5.1 | a snippet of 240 characters | the two ellipses count inside the 240; when the case fold finds no match the snippet is the first 240 code points with `match` `[0, 0]` | one bound the page can rely on, and a fold mismatch never drops a hit |
+| §5.1 | `limit` | clamped to 1..20 | the route's cap is the index's |
+| §5.1 | the reply's `indexed` | `indexed.sessions` is the kept conversations less the skipped, `skipped` the logs that would not read | the plan did not say whether an unchanged conversation counted |
+| §5.1 | a shrunk log is reset and read again | the reset runs after the re-read succeeds | a failing re-read keeps the old lines and mark |
+| §5.1 | reconciles that overlap | each waits for the one before and runs once itself; they queue, they do not merge | two searches never append the same events twice |
+| §5.1 | a log rewritten | one rewritten to the same length, or from a backend that gives no `eventCount`, is not seen as changed; dsh compares revisions only inside one service instance and the index outlives restarts | recorded, not fixed; the index lags until the length changes (DEVELOPMENT.md §4.4) |
+| §5.1 | what is indexed | a `lunhui_present` call with no result in the batch is still indexed; a room's round-end lines and a subagent's report relays are not | the controller's ruling: the first is the composed answer, the others are not words anyone said |
+| §5.5, D14 | the file listing | an unreadable folder is listed but not descended; an unreadable root is an empty walk; matching is case-insensitive | one bad folder never fails the picker |
+| §6 | `tests/overlay.test.ts` untouched | edited: it pins the row list, now seventeen | outside Task 1's brief, forced by the four rows |
