@@ -7,6 +7,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } 
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isRefusal } from "../../src/core/errors.ts";
 import { keyHashOf, newSalt } from "../../src/portfolio/account/brain-keys.ts";
@@ -19,7 +20,7 @@ import { readNetworkSecret } from "../../src/portfolio/identity/secret-file.ts";
 import { loadIdentity, senderRef, maskId } from "../../src/portfolio/identity/store.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../../src/portfolio/server.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
-import { fakeBotApi, FAKE_BOT_TOKEN, OTHER_BOT_TOKEN, type FakeBotApi } from "../identity-fakes.ts";
+import { fakeBotApi, fakeSlack, FAKE_BOT_TOKEN, OTHER_BOT_TOKEN, slackTokens, type FakeBotApi, type FakeSlack } from "../identity-fakes.ts";
 
 type NoNonce<T> = T extends unknown ? Omit<T, "nonce"> : never;
 const TOKEN = FAKE_BOT_TOKEN;
@@ -332,5 +333,140 @@ describe("connect, disconnect, routing and block, signed at the door", () => {
     expect(!isRefusal(okOff) && okOff.primaryType).toBe("AccountIdentity:Disconnect");
     const okBlock = await svc.account!.prepare({ type: "blockSender", network: "telegram", sender: "0123456789ab", masked: "…123" });
     expect(!isRefusal(okBlock) && okBlock.primaryType).toBe("AccountIdentity:Block");
+  });
+});
+
+describe("connect Slack, signed at the door", () => {
+  let slack: FakeSlack;
+  let bot: FakeBotApi;
+  let home: string;
+  let svc: PortfolioService;
+  let srv: PortfolioServerHandle;
+  const ALL_SLACK = "chat=slack;alerts=slack;brief=slack;cards=slack;fills=slack";
+
+  beforeEach(async () => {
+    slack = await fakeSlack();
+    slack.users.set("U0PAN07QK", { name: "pan", displayName: "", realName: "Pan" });
+    bot = await fakeBotApi();
+    home = mkdtempSync(join(tmpdir(), "identity-sign-slack-"));
+    svc = await PortfolioService.create({ home, venues: "frontline", real: true, liveDeps: { http: async () => ({ status: 599, body: undefined, text: "" }), price: async () => undefined }, publicMarkets: [], liveWrites: { capUsd: 100, pairingCode: "K7QX-M2PA" }, account: { owners: [{ id: owner.address, kind: "eoa", label: "owner", addedAt: new Date().toISOString() }] }, desk: { brain: [scriptedBrain(() => null)], tickMs: 0, env: {} }, identity: { apiBase: bot.url, slackApiBase: slack.url, pollTimeoutS: 1 } });
+    await svc.restoring;
+    srv = await startPortfolioServer({ port: 0, service: svc, snapshotMs: 0 });
+  });
+  afterEach(async () => {
+    await srv.close();
+    await slack.close();
+    await bot.close();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  const own = async (a: NoNonce<OwnerAction>, at = nonce()) => svc.exchange(await signOwner(owner, { ...a, nonce: at } as OwnerAction));
+  let salt = "";
+  let keyHash = "";
+  /** sheets 1 to 3 through the routes: the two tokens sent with their one fingerprint, the operator's first DM heard */
+  const heardPending = async (): Promise<PendingView> => {
+    salt = newSalt();
+    keyHash = keyHashOf(salt, `${slack.tokens.app}\u0000${slack.tokens.bot}`);
+    const r = await send(srv.url, "/api/account/identity/slack/token", { body: JSON.stringify({ appToken: slack.tokens.app, botToken: slack.tokens.bot, keyHash, salt }) });
+    expect(r.status).toBe(200);
+    const p = JSON.parse(r.text).pending as PendingView;
+    slack.push({ envelope_id: "env-hi", type: "events_api", retry_attempt: 0, payload: { team_id: "T0FAKE001", api_app_id: "A0FAKE001", type: "event_callback", event: { type: "message", channel: "D0FAKEDM1", channel_type: "im", user: "U0PAN07QK", text: "hi", ts: "1730812345.001200" } } });
+    await until(() => svc.identity!.pending.view(p.id)?.state === "heard");
+    return svc.identity!.pending.view(p.id)!;
+  };
+  const connectOf = (p: PendingView, over: Partial<Record<string, string>> = {}): NoNonce<OwnerAction> => ({ type: "connectNetwork", network: "slack", pending: p.id, botId: "T0FAKE001:U0BOT0001", speaksAs: "@gravit", operatorId: "T0FAKE001:U0PAN07QK", talksOnlyWith: "@pan", routing: ALL_SLACK, keyHash, salt, ...over }) as NoNonce<OwnerAction>;
+  const tokens = () => [slack.tokens.app, slack.tokens.bot];
+
+  it("connect Slack: the door checks the pair against the signed fingerprint, then stores both tokens, the channel and the binding", async () => {
+    const p = await heardPending();
+    // a fingerprint of another pair, another bot, a token in a field: refused in Slack's own words, nothing written
+    const other = newSalt();
+    const otherPair = `${slack.tokens.app}\u0000${slackTokens().user}`;
+    const tries: Array<[NoNonce<OwnerAction>, string]> = [
+      [connectOf(p, { keyHash: keyHashOf(other, otherPair), salt: other }), IDENTITY_WORDS.slackMismatch],
+      [connectOf(p, { botId: "T0FAKE001:U0BOT0002" }), IDENTITY_WORDS.slackBotMismatch],
+      [connectOf(p, { speaksAs: "@another" }), IDENTITY_WORDS.slackBotMismatch],
+      [connectOf(p, { operatorId: "T0FAKE001:U0SOME456" }), IDENTITY_WORDS.senderMismatch],
+      [connectOf(p, { talksOnlyWith: slack.tokens.bot }), IDENTITY_WORDS.slackTokenInField],
+      [connectOf(p, { network: "telegram", routing: ALL_TELEGRAM }), IDENTITY_WORDS.noPending],
+    ];
+    for (const [a, words] of tries) {
+      const r = await own(a);
+      expect(isRefusal(r) && r.message).toBe(words);
+      expect(existsSync(join(home, "credentials", "networks"))).toBe(false);
+    }
+    const r = await own(connectOf(p));
+    expect(isRefusal(r)).toBe(false);
+    expect(r).toMatchObject({ ok: true, kind: "account", summary: `Slack connected: Gravit speaks as @gravit and talks only with @pan · tokens ${keyHash.slice(0, 8)}` });
+    expect(readNetworkSecret(home, "slack")).toEqual({ appToken: slack.tokens.app, botToken: slack.tokens.bot, appId: "A0FAKE001", channel: "D0FAKEDM1", botId: "T0FAKE001:U0BOT0001", username: "gravit", operatorId: "T0FAKE001:U0PAN07QK", operatorHandle: "@pan" });
+    const v = svc.identity!.view();
+    expect(v.networks).toHaveLength(1);
+    expect(v.networks[0]).toMatchObject({ network: "slack", speaksAs: "@gravit", talksOnlyWith: "@pan", fingerprint: keyHash.slice(0, 8), state: "connected" });
+    expect(v.routing).toEqual({ chat: ["slack"], alerts: ["slack"], brief: ["slack"], cards: ["slack"], fills: ["slack"] });
+    expect(svc.identity!.pending.view(p.id)).toBeUndefined();
+    // Telegram's words are its own still
+    expect(IDENTITY_WORDS.mismatch).toBe("The token does not match its fingerprint: nothing was kept. Paste the token again.");
+    expect(IDENTITY_WORDS.botMismatch).toBe("The bot signed is not the bot this connection checked with Telegram: nothing was written. Start again.");
+  });
+
+  it("the two tokens are in credentials/networks/slack.json and nowhere else", async () => {
+    const r = await own(connectOf(await heardPending()));
+    expect(isRefusal(r)).toBe(false);
+    for (const t of tokens()) expect(JSON.stringify(r)).not.toContain(t);
+    const holding = walk(home).filter((f) => tokens().some((t) => f.text.includes(t))).map((f) => f.path);
+    expect(holding).toEqual([join("credentials", "networks", "slack.json")]);
+    const ledger = ledgerText(home);
+    expect(ledger).toContain(`Slack connected: Gravit speaks as @gravit and talks only with @pan · tokens ${keyHash.slice(0, 8)}`);
+    expect(ledger).not.toContain(keyHash);
+    expect(ledger).not.toContain(salt);
+    for (const t of tokens()) expect(ledger).not.toContain(t);
+    for (const t of tokens()) expect(said.join("\n")).not.toContain(t);
+    const g = await send(srv.url, "/api/account/identity", { method: "GET" });
+    for (const t of tokens()) expect(g.text).not.toContain(t);
+    expect(g.text).not.toContain("U0PAN07QK");
+    expect(loadIdentity(home).bindings).toMatchObject([{ network: "slack", botId: "T0FAKE001:U0BOT0001", operatorId: "T0FAKE001:U0PAN07QK", fingerprint: keyHash.slice(0, 8) }]);
+  });
+
+  it("the identity view carries the Slack manifest", async () => {
+    const g = await send(srv.url, "/api/account/identity", { method: "GET" });
+    expect(g.status).toBe(200);
+    const manifest = JSON.parse(JSON.parse(g.text).slackManifest) as { settings: { socket_mode_enabled: boolean }; oauth_config: { scopes: { bot: string[] } } };
+    expect(manifest.settings.socket_mode_enabled).toBe(true);
+    expect(manifest.oauth_config.scopes.bot).toEqual(["chat:write", "im:history", "users:read"]);
+  });
+});
+
+describe("no Slack token in the tree", () => {
+  /** a secret scanner's Slack shapes: a bot, user, refresh or legacy token, and an app-level token */
+  const SCANNER: readonly RegExp[] = [/\bxox[abposre]-(?:\d+-)+[0-9A-Za-z]{6,}/, /\bxapp-\d-[A-Z0-9]{8,14}-\d{6,16}-[a-f0-9]{16,}/];
+  const SKIP: ReadonlySet<string> = new Set(["node_modules", ".git", "dist", "coverage", ".vite", ".turbo"]);
+  /** every text file under `dir`, skipping the dependencies and what is built */
+  function tree(dir: string, out: string[] = []): string[] {
+    for (const name of readdirSync(dir)) {
+      if (SKIP.has(name)) continue;
+      const p = join(dir, name);
+      const st = statSync(p);
+      if (st.isDirectory()) tree(p, out);
+      else if (st.isFile() && st.size < 4_000_000) out.push(p);
+    }
+    return out;
+  }
+
+  it("no file in account/ or face/ holds a literal Slack token of scanner shape", () => {
+    const account = fileURLToPath(new URL("../..", import.meta.url));
+    const face = join(account, "..", "face");
+    // the scanner itself finds the made-up tokens, as they are built at runtime
+    const made = slackTokens();
+    for (const t of [made.bot, made.user, made.refresh]) expect(SCANNER[0]!.test(t)).toBe(true);
+    expect(SCANNER[1]!.test(made.app)).toBe(true);
+    const found: string[] = [];
+    for (const root of [account, face]) {
+      if (!existsSync(root)) continue;
+      for (const file of tree(root)) {
+        const text = readFileSync(file).toString("latin1");
+        if (SCANNER.some((re) => re.test(text))) found.push(relative(join(account, ".."), file));
+      }
+    }
+    expect(found).toEqual([]);
   });
 });

@@ -18,7 +18,7 @@ import { redactorOf } from "./bot-api.ts";
 import { SLACK_TOKEN_ANYWHERE } from "./kinds.ts";
 
 /** Slack's own Web API address: the only one a token is sent to outside a test */
-const SLACK_API = "https://slack.com/api";
+export const SLACK_API = "https://slack.com/api";
 /** the one override taken: plain http to this machine's 127.0.0.1, a port, and at most `/api` */
 const LOOPBACK_BASE = /^http:\/\/127\.0\.0\.1:([1-9]\d{0,4})(?:\/api)?$/;
 /** a host of Slack's own: one or more labels, then slack.com */
@@ -58,6 +58,10 @@ export function socketUrlOk(url: string, apiBase: string): boolean {
   if (!LOOPBACK_BASE.test(apiBase.replace(/\/+$/, ""))) return false;
   return u.protocol === "ws:" && u.hostname === "127.0.0.1" && base.hostname === "127.0.0.1" && u.port !== "" && u.port === base.port;
 }
+
+/** The link that opens the app's DM in the workspace it was installed in — what sheet 2 shows and its QR code draws: Slack's
+ * app_redirect, which names the app and the team (each an id of capitals and digits, encoded all the same) */
+export const slackAppLink = (appId: string, teamId: string): string => `https://slack.com/app_redirect?app=${encodeURIComponent(appId)}&team=${encodeURIComponent(teamId)}`;
 
 /** `text` as Slack shows it literally: `&` as `&amp;`, `<` as `&lt;`, `>` as `&gt;`, and nothing else changed */
 export const escapeSlack = (text: string): string => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

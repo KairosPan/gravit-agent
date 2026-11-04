@@ -71,9 +71,9 @@ describe("the seams for a second network", () => {
   });
 
   it("a Slack token in any signed field is refused before the door writes", () => {
-    expect(identitySignedProblem({ type: "setRouting", routing: slackTokens().bot, quietFrom: "", quietTo: "", nonce: 1 } as IdentityAction)).toBe(IDENTITY_WORDS.tokenInField);
+    expect(identitySignedProblem({ type: "setRouting", routing: slackTokens().bot, quietFrom: "", quietTo: "", nonce: 1 } as IdentityAction)).toBe(IDENTITY_WORDS.slackTokenInField);
     for (const t of Object.values(slackTokens())) {
-      expect(identitySignedProblem({ type: "setRouting", routing: `chat=;alerts=;brief=;cards=;fills= ${t}`, quietFrom: "", quietTo: "", nonce: 1 } as IdentityAction)).toBe(IDENTITY_WORDS.tokenInField);
+      expect(identitySignedProblem({ type: "setRouting", routing: `chat=;alerts=;brief=;cards=;fills= ${t}`, quietFrom: "", quietTo: "", nonce: 1 } as IdentityAction)).toBe(IDENTITY_WORDS.slackTokenInField);
       // the global pattern holds no state between two tests
       expect(`a ${t} b`.replace(SLACK_TOKEN_ANYWHERE, "<token>")).toBe("a <token> b");
     }
@@ -202,7 +202,7 @@ describe("the pending shell over a source", () => {
       const source = { ...s.source, check: async (signal: AbortSignal) => ((asked = true), s.source.check(signal)) };
       const salt = newSalt();
       const r = await pending.begin("slack", source, "a\u0000b", keyHashOf(salt, "a\u0000c"), salt);
-      expect(isRefusal(r) && r.message).toBe(IDENTITY_WORDS.mismatch);
+      expect(isRefusal(r) && r.message).toBe(IDENTITY_WORDS.slackMismatch);
       expect(asked).toBe(false);
     } finally {
       pending.dispose();

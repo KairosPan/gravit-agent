@@ -7,7 +7,8 @@
  * binding and its token file, and at a connect; a disconnect stops it. The four owner types land here once the
  * door (account/exchange.ts) has checked the signature, the owner, the nonce and, for a connect, the ten minutes:
  *
- *   connectNetwork     the pending connection named is checked — the token held since sheet 1 against the fingerprint signed (keyMatches),
+ *   connectNetwork     the pending connection named is checked — the token held since sheet 1 (Slack's two, joined by a NUL) against the
+ *                      fingerprint signed (keyMatches),
  *                      the bot against the bot signed, the person heard against the person signed — and only then taken: the token
  *                      written to <home>/credentials/networks/<network>.json (secret-file.ts), then the binding and the routing signed to
  *                      the state, then the connector started at the offset after the message heard. A refusal leaves the pending
@@ -45,6 +46,8 @@ import { InboxRing, type InboxMessage } from "./inbox.ts";
 import { operatorHandleOf, PendingConnections, type PendingResume } from "./pending.ts";
 import { IDENTITY_WORDS } from "./routes.ts";
 import { readNetworkSecret, removeNetworkSecret, secretsOf, writeNetworkSecret, type SlackSecret, type TelegramSecret } from "./secret-file.ts";
+import { SLACK_MANIFEST } from "./slack-api.ts";
+import type { OpenSocket } from "./slack-socket.ts";
 import { BLOCKED_MAX, loadIdentity, MASKED, saveIdentity, Strangers, writeIdentityFile, type Binding, type IdentityState, type Stranger } from "./store.ts";
 import { OFFSET_FILE, realClock, TelegramConnector, TelegramTransport, type IdentityClock, type NetworkStatus } from "./telegram.ts";
 
@@ -54,7 +57,11 @@ export const isIdentityAction = (a: { type: string }): a is IdentityAction => ID
 
 export interface IdentityDeps {
   home: string;
+  /** Telegram's Bot API */
   apiBase: string;
+  /** Slack's Web API (slack-api.ts slackApiBase: Slack's own unless set) and how its sockets are opened (Node's WebSocket unless set) */
+  slackApiBase?: string | undefined;
+  openSocket?: OpenSocket | undefined;
   fetch?: typeof fetch | undefined;
   pollTimeoutS?: number | undefined;
   now?: (() => number) | undefined;
@@ -101,6 +108,8 @@ export type IdentityView = {
   routing: Routing;
   quiet: { from: string; to: string; zone: "America/New_York" } | null;
   strangers: Stranger[];
+  /** the Slack app manifest the owner pastes into Slack's "From a manifest" (slack-api.ts SLACK_MANIFEST): JSON, as text */
+  slackManifest: string;
 };
 
 const HASH = /^[0-9a-f]{64}$/;
@@ -162,8 +171,12 @@ export interface Connector {
 /** A bot token pasted into any field of the four types: refused before the door writes its "taken" row, which carries the signed fields to
  * the ledger (hash-chained, never cleaned) — and before /prepare says the fields back. Fixed words; the value is never repeated */
 export function identitySignedProblem(a: IdentityAction): string | null {
-  // search, not test: the Slack pattern is global, and search neither reads nor moves its lastIndex
-  for (const [k, v] of Object.entries(a)) if (k !== "type" && typeof v === "string" && (TOKEN_ANYWHERE.test(v) || v.search(SLACK_TOKEN_ANYWHERE) >= 0)) return IDENTITY_WORDS.tokenInField;
+  // search, not test: the Slack pattern is global, and search neither reads nor moves its lastIndex. Each network's token in its own words
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "type" || typeof v !== "string") continue;
+    if (v.search(SLACK_TOKEN_ANYWHERE) >= 0) return IDENTITY_WORDS.slackTokenInField;
+    if (TOKEN_ANYWHERE.test(v)) return IDENTITY_WORDS.tokenInField;
+  }
   return null;
 }
 
@@ -196,7 +209,7 @@ export class Identity {
     this.store = new Strangers(deps.home);
     this.inboxRing = new InboxRing(deps.home);
     this.outbox = new Outbox(deps.home, OUTBOX_MAX, this.log);
-    this.pending = new PendingConnections({ apiBase: deps.apiBase, strangers: this.store, bound: (network) => this.bound(network) !== undefined, blocked: () => this.state.blocked, fetch: deps.fetch, pollTimeoutS: deps.pollTimeoutS, now: deps.now, log: deps.log });
+    this.pending = new PendingConnections({ apiBase: deps.apiBase, slackApiBase: deps.slackApiBase, openSocket: deps.openSocket, clock: this.clock, strangers: this.store, bound: (network) => this.bound(network) !== undefined, blocked: () => this.state.blocked, fetch: deps.fetch, pollTimeoutS: deps.pollTimeoutS, now: deps.now, log: deps.log });
     this.resume();
     // an earlier run may have queued what this one takes out
     this.outbox.rewrite((t) => this.clean(t));
@@ -306,6 +319,7 @@ export class Identity {
       routing: s.routing,
       quiet: s.quiet ? { ...s.quiet, zone: "America/New_York" } : null,
       strangers: this.store.list(),
+      slackManifest: SLACK_MANIFEST,
     };
   }
 
@@ -328,8 +342,8 @@ export class Identity {
         const p = this.pending.peek(a.pending);
         // a pending connection to another network is not the one signed for
         if (!p || p.network !== a.network) return IDENTITY_WORDS.noPending;
-        if (!keyMatches(a.salt, p.keyInput, a.keyHash)) return IDENTITY_WORDS.mismatch;
-        if (a.botId !== p.bot.id || a.speaksAs !== `@${p.bot.username}`) return IDENTITY_WORDS.botMismatch;
+        if (!keyMatches(a.salt, p.keyInput, a.keyHash)) return IDENTITY_WORDS.mismatchOn(p.network);
+        if (a.botId !== p.bot.id || a.speaksAs !== `@${p.bot.username}`) return IDENTITY_WORDS.botMismatchOn(p.network);
         if (a.operatorId !== p.sender.id || a.talksOnlyWith !== operatorHandleOf(p.sender)) return IDENTITY_WORDS.senderMismatch;
         return null;
       }
@@ -521,7 +535,7 @@ export class Identity {
     const taken = this.pending.take(a.pending);
     // problem() peeked this very connection a moment ago, in the door's one line: checked again on what was taken, whatever happened between
     if (!taken || taken.network !== network) return refusal(IDENTITY_WORDS.noPending);
-    if (!keyMatches(a.salt, taken.keyInput, a.keyHash)) return refusal(IDENTITY_WORDS.mismatch);
+    if (!keyMatches(a.salt, taken.keyInput, a.keyHash)) return refusal(IDENTITY_WORDS.mismatchOn(network));
     // the operator's handle as signed: problem() checked it is the one sheet 3 showed
     const written = writeNetworkSecret(this.home, network, { ...taken.secret, operatorHandle: a.talksOnlyWith });
     if (isRefusal(written)) return written;
@@ -537,7 +551,8 @@ export class Identity {
     // nothing queued before this binding ever goes to it
     this.dropQueued(network);
     this.startConnector(binding, { ...taken.secret, operatorHandle: a.talksOnlyWith }, taken.resume);
-    return { ok: true, kind: "account", summary: `${NETWORK_NAME[network]} connected: Gravit speaks as ${a.speaksAs} and talks only with ${a.talksOnlyWith} · token ${fingerprint}` };
+    // Slack's fingerprint is of its two tokens together
+    return { ok: true, kind: "account", summary: `${NETWORK_NAME[network]} connected: Gravit speaks as ${a.speaksAs} and talks only with ${a.talksOnlyWith} · ${network === "slack" ? "tokens" : "token"} ${fingerprint}` };
   }
 
   private async disconnect(a: Extract<IdentityAction, { type: "disconnectNetwork" }>): Promise<Outcome> {

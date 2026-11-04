@@ -7,10 +7,15 @@
  *                                                                      (isIdentityTokenPath), so a body it could not read never becomes an
  *                                                                      error line carrying the token. Answers {ok: true, pending} or one of
  *                                                                      IDENTITY_WORDS' fixed sentences, none of which repeats what was sent
+ *   POST /api/account/identity/slack/token {appToken, botToken,        the same for Slack: the app-level token and the bot token together,
+ *                                     keyHash, salt}                   beside their one fingerprint (keyHash = hex sha256(salt ‖ appToken ‖
+ *                                                                      NUL ‖ botToken)), under the same reader, limit and fence, answered
+ *                                                                      in Slack's own fixed sentences
  *   GET  /api/account/identity/pending?id=                             sheets 2 and 3: the pending connection as it stands
  *   POST /api/account/identity/pending/not-me {id}                     sheet 3's "Not me": the sender counted as a stranger, waiting again
  *   POST /api/account/identity/pending/drop {id}                       the sheet closed: the token forgotten at once
- *   GET  /api/account/identity                                         the Identity tab: networks, routing, quiet hours, Not you
+ *   GET  /api/account/identity                                         the Identity tab: networks, routing, quiet hours, Not you, and the
+ *                                                                      Slack app manifest the owner pastes into Slack (slack-api.ts)
  *   GET  /api/account/identity/inbox?after=<n>&wait=<s>                the face's desk: the operator's messages numbered above n, waiting
  *                                                                      up to s seconds (0 to 25) for one; {ok, messages, last, status}.
  *                                                                      Unsigned, behind the account's fence; reading never changes it
@@ -27,13 +32,16 @@ import type { Refusal } from "../../core/errors.ts";
 import { isRefusal } from "../../core/errors.ts";
 import type { InboxAnswer, IdentityView, SendAnswer, SendMessage } from "./identity.ts";
 import { NETWORK_NAME, NETWORKS, PHONE_KINDS, WIRE_ID, type Network, type PhoneKind } from "./kinds.ts";
-import type { PendingConnections } from "./pending.ts";
+import type { PendingConnections, PendingView } from "./pending.ts";
 
 export const IDENTITY_TOKEN_PATH = "/api/account/identity/telegram/token";
-/** whether a request's path is the token route as express would match it: case and a trailing slash do not matter to express, so they do
- * not matter here either (as brain-keys.ts isBrainKeyPath) */
-export const isIdentityTokenPath = (path: string): boolean => path.toLowerCase().replace(/\/+$/, "") === IDENTITY_TOKEN_PATH;
-/** the most the token route reads of a body: a token, a 64-hex fingerprint and a 32-hex salt fit in a fraction of it */
+/** Slack's token route: the app-level token and the bot token, together, beside their one fingerprint */
+export const SLACK_TOKEN_PATH = "/api/account/identity/slack/token";
+const TOKEN_PATHS: ReadonlySet<string> = new Set([IDENTITY_TOKEN_PATH, SLACK_TOKEN_PATH]);
+/** whether a request's path is one of the two token routes as express would match it: case and a trailing slash do not matter to
+ * express, so they do not matter here either (as brain-keys.ts isBrainKeyPath) */
+export const isIdentityTokenPath = (path: string): boolean => TOKEN_PATHS.has(path.toLowerCase().replace(/\/+$/, ""));
+/** the most a token route reads of a body: two tokens, a 64-hex fingerprint and a 32-hex salt fit in a fraction of it */
 export const IDENTITY_TOKEN_BODY_LIMIT = 1024;
 
 /** a network connected already: a second connection to it is refused */
@@ -41,23 +49,31 @@ const connectedOn = (network: Network): string => `${NETWORK_NAME[network]} is c
 /** a network not connected: there is nothing to disconnect */
 const notConnectedOn = (network: Network): string => `${NETWORK_NAME[network]} is not connected: there is nothing to disconnect.`;
 
-/** the identity routes' fixed sentences: none repeats anything that was sent (`connectedOn` and `notConnectedOn` name only the network) */
+const TELEGRAM_UNREACHABLE = "Telegram did not answer: nothing was kept. Try again in a minute.";
+const SLACK_UNREACHABLE = "Slack did not answer: nothing was kept. Try again in a minute.";
+const TELEGRAM_MISMATCH = "The token does not match its fingerprint: nothing was kept. Paste the token again.";
+const SLACK_MISMATCH = "The two tokens do not match their fingerprint: nothing was kept. Paste both tokens again.";
+const TELEGRAM_BOT_MISMATCH = "The bot signed is not the bot this connection checked with Telegram: nothing was written. Start again.";
+const SLACK_BOT_MISMATCH = "The bot signed is not the bot this connection checked with Slack: nothing was written. Start again.";
+
+/** the identity routes' fixed sentences: none repeats anything that was sent (`connectedOn` and `notConnectedOn` name only the network;
+ * the `…On(network)` ones pick the network's own sentence — Telegram's as B1 wrote them, Slack's beside them) */
 export const IDENTITY_WORDS = {
   malformed: "This route takes one JSON object, {token, keyHash, salt}: what was sent is not that, and it was not kept.",
   tokenShape: "That is not a bot token: BotFather's token is digits, a colon, then letters. Nothing was kept.",
-  mismatch: "The token does not match its fingerprint: nothing was kept. Paste the token again.",
+  mismatch: TELEGRAM_MISMATCH,
   refusedByTelegram: "Telegram does not know this token: nothing was kept. Copy it from BotFather again.",
   connectedOn,
   /** Telegram's connectedOn, by B1's name */
   connected: connectedOn("telegram"),
   noPending: "This connection is gone: it expired or was closed. Start again.",
-  unreachable: "Telegram did not answer: nothing was kept. Try again in a minute.",
+  unreachable: TELEGRAM_UNREACHABLE,
   type: "This route takes application/json, sent as it is (no content encoding).",
   large: `This route takes at most ${IDENTITY_TOKEN_BODY_LIMIT} bytes: what was sent is larger, and it was not kept.`,
   needId: "This route takes {id}: the pending connection's id.",
   // the four owner types' refusals (identity.ts): at prepare and at the door alike
   networkUnknown: `That is not a network the account speaks on (${NETWORKS.join(", ")}).`,
-  botMismatch: "The bot signed is not the bot this connection checked with Telegram: nothing was written. Start again.",
+  botMismatch: TELEGRAM_BOT_MISMATCH,
   senderMismatch: "The person signed is not the one heard on Say hi: nothing was written. Start again.",
   hashShape: "The signed fingerprint is 64 hex characters and its salt 32 (16 bytes), both lower-case: nothing was written.",
   tokenInField: "A bot token is never a signed field: only its fingerprint is. Nothing was written.",
@@ -73,6 +89,19 @@ export const IDENTITY_WORDS = {
   inboxQuery: "This route takes after=<a whole number, 0 or more> and wait=<whole seconds, 0 to 25>.",
   send: `This route takes {kind, text, replyTo?, network?}: kind one of chat, alert, urgent, brief, report, card, fill, watchdog; replyTo <network>:<id>; network ${NETWORKS.join(" or ")}. The account picks who receives it.`,
   sendLarge: `This route takes at most ${65_536} bytes.`,
+  // Slack's: its token route, its check (auth.test, bots.info, a socket's hello) and its signed fields
+  slackMalformed: "This route takes one JSON object, {appToken, botToken, keyHash, salt}: what was sent is not that, and it was not kept.",
+  slackTokenShape: "Those are not a Slack app's tokens: the first starts xapp-, the second xoxb-. Nothing was kept.",
+  refusedBySlack: "Slack does not know this bot token: nothing was kept. Copy it from Install App again.",
+  slackNoSocket: "Slack would not open a socket for the app-level token: give it the connections:write scope and turn Socket Mode on. Nothing was kept.",
+  slackPairMismatch: "The two tokens belong to two different Slack apps: nothing was kept. Copy both from the same app.",
+  slackUnreachable: SLACK_UNREACHABLE,
+  slackMismatch: SLACK_MISMATCH,
+  slackBotMismatch: SLACK_BOT_MISMATCH,
+  slackTokenInField: "A Slack token is never a signed field: only the two tokens' fingerprint is. Nothing was written.",
+  unreachableOn: (network: Network): string => (network === "slack" ? SLACK_UNREACHABLE : TELEGRAM_UNREACHABLE),
+  mismatchOn: (network: Network): string => (network === "slack" ? SLACK_MISMATCH : TELEGRAM_MISMATCH),
+  botMismatchOn: (network: Network): string => (network === "slack" ? SLACK_BOT_MISMATCH : TELEGRAM_BOT_MISMATCH),
 } as const;
 
 const NOT_MOUNTED = "the account layer is not mounted";
@@ -111,11 +140,31 @@ export function parseTokenBody(raw: Buffer): TokenBody {
   return { ok: true, token: b.token, keyHash: b.keyHash, salt: b.salt };
 }
 
-/** the status a begin's refusal is answered with: a token of the wrong shape is the request's own fault (400), Telegram not answering is a
- * gateway's (502), everything else a conflict with what the account holds (409) */
+type SlackTokenBody = { ok: true; appToken: string; botToken: string; keyHash: string; salt: string } | { ok: false };
+
+/** Slack's token route's body: exactly {appToken, botToken, keyHash, salt}, four strings — the buffer zeroed whatever it held */
+export function parseSlackTokenBody(raw: Buffer): SlackTokenBody {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.toString("utf8"));
+  } catch {
+    return { ok: false };
+  } finally {
+    raw.fill(0);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { ok: false };
+  const b = parsed as Record<string, unknown>;
+  const keys = Object.keys(b);
+  if (keys.length !== 4 || !keys.every((k) => k === "appToken" || k === "botToken" || k === "keyHash" || k === "salt")) return { ok: false };
+  if (typeof b.appToken !== "string" || typeof b.botToken !== "string" || typeof b.keyHash !== "string" || typeof b.salt !== "string") return { ok: false };
+  return { ok: true, appToken: b.appToken, botToken: b.botToken, keyHash: b.keyHash, salt: b.salt };
+}
+
+/** the status a begin's refusal is answered with: a token of the wrong shape is the request's own fault (400), the network not answering
+ * is a gateway's (502), everything else a conflict with what the account holds (409) */
 function statusOf(r: Refusal): number {
-  if (r.message === IDENTITY_WORDS.tokenShape) return 400;
-  if (r.message === IDENTITY_WORDS.unreachable) return 502;
+  if (r.message === IDENTITY_WORDS.tokenShape || r.message === IDENTITY_WORDS.slackTokenShape) return 400;
+  if (r.message === IDENTITY_WORDS.unreachable || r.message === IDENTITY_WORDS.slackUnreachable) return 502;
   if (r.message === IDENTITY_WORDS.noPending) return 404;
   return 409;
 }
@@ -154,27 +203,33 @@ function wholeOf(v: unknown, min: number, max: number): number | undefined {
 export function registerIdentityRoutes(app: express.Express, deps: IdentityRoutesDeps): void {
   const { identity, wrap, readSmall } = deps;
 
-  app.post(IDENTITY_TOKEN_PATH, wrap(async (req, res) => {
-    const id = identity();
-    if (!id) {
-      req.resume();
-      return void res.status(404).json({ ok: false, error: NOT_MOUNTED });
-    }
-    const type = String(req.headers["content-type"] ?? "").toLowerCase();
-    const encoding = String(req.headers["content-encoding"] ?? "identity").toLowerCase();
-    if (!/^application\/json\s*(;\s*charset="?utf-8"?\s*)?$/.test(type) || encoding !== "identity") {
-      req.resume();
-      return void res.status(415).json({ ok: false, error: IDENTITY_WORDS.type });
-    }
-    const raw = await readSmall(req, IDENTITY_TOKEN_BODY_LIMIT);
-    if (raw === "large") return void res.status(413).json({ ok: false, error: IDENTITY_WORDS.large });
-    if (raw === "broken") return void res.status(400).json({ ok: false, error: IDENTITY_WORDS.malformed });
-    const body = parseTokenBody(raw);
-    if (!body.ok) return void res.status(400).json({ ok: false, error: IDENTITY_WORDS.malformed });
-    const r = await id.pending.begin(body.token, body.keyHash, body.salt);
-    if (isRefusal(r)) return void res.status(statusOf(r)).json({ ok: false, error: r.message });
-    res.json({ ok: true, pending: r });
-  }));
+  /** a token route: the type and encoding, its own reader of at most 1,024 bytes, its body's parser, then the network's begin (which
+   * checks the shapes, then the fingerprint, then asks the network) */
+  const tokenRoute = <B extends { ok: true }>(path: string, malformed: string, parse: (raw: Buffer) => B | { ok: false }, begin: (host: IdentityRoutesHost, body: B) => Promise<PendingView | Refusal>) =>
+    app.post(path, wrap(async (req, res) => {
+      const id = identity();
+      if (!id) {
+        req.resume();
+        return void res.status(404).json({ ok: false, error: NOT_MOUNTED });
+      }
+      const type = String(req.headers["content-type"] ?? "").toLowerCase();
+      const encoding = String(req.headers["content-encoding"] ?? "identity").toLowerCase();
+      if (!/^application\/json\s*(;\s*charset="?utf-8"?\s*)?$/.test(type) || encoding !== "identity") {
+        req.resume();
+        return void res.status(415).json({ ok: false, error: IDENTITY_WORDS.type });
+      }
+      const raw = await readSmall(req, IDENTITY_TOKEN_BODY_LIMIT);
+      if (raw === "large") return void res.status(413).json({ ok: false, error: IDENTITY_WORDS.large });
+      if (raw === "broken") return void res.status(400).json({ ok: false, error: malformed });
+      const body = parse(raw);
+      if (!body.ok) return void res.status(400).json({ ok: false, error: malformed });
+      const r = await begin(id, body as B);
+      if (isRefusal(r)) return void res.status(statusOf(r)).json({ ok: false, error: r.message });
+      res.json({ ok: true, pending: r });
+    }));
+
+  tokenRoute(IDENTITY_TOKEN_PATH, IDENTITY_WORDS.malformed, parseTokenBody, (id, b) => id.pending.begin(b.token, b.keyHash, b.salt));
+  tokenRoute(SLACK_TOKEN_PATH, IDENTITY_WORDS.slackMalformed, parseSlackTokenBody, (id, b) => id.pending.beginSlack(b.appToken, b.botToken, b.keyHash, b.salt));
 
   // the Identity tab: the networks connected (no bot id, no operator id, no token), the routing, quiet hours and Not you
   app.get("/api/account/identity", wrap((_req, res) => {

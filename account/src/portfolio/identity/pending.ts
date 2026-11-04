@@ -3,8 +3,10 @@
  *   Sheet 1, Next: the page sends the network's token(s) once, beside the fingerprint it made (keyHash = hex sha256(salt ‖ keyInput), the
  *     brain-key recipe; keyInput is Telegram's token, or Slack's app-level token, a NUL and its bot token). begin() checks the key against
  *     the fingerprint (keyMatches, constant time), refuses while that network is connected already, and asks the network's PendingSource
- *     to check who the bot is (Telegram's getMe). A key the network does not know is refused; nothing is kept of a refused one. Telegram's
- *     route calls the short form, begin(token, keyHash, salt), which checks the token's shape first (TOKEN_SHAPE).
+ *     to check who the bot is (Telegram's getMe; Slack's auth.test, bots.info and a socket's hello). A key the network does not know is
+ *     refused; nothing is kept of a refused one. Telegram's route calls the short form, begin(token, keyHash, salt), which checks the
+ *     token's shape first (TOKEN_SHAPE); Slack's calls beginSlack(appToken, botToken, keyHash, salt), which checks both tokens' shapes
+ *     (slack.ts) and joins them with a NUL. Every refusal is in the network's own fixed words (IDENTITY_WORDS).
  *   Sheet 2, Say hi: the key is held in this process's memory — never a file, a log line, an answer or a ledger row — and the source
  *     listens for the first private message to the bot (Telegram: getUpdates, messages only; a group's message is skipped).
  *   Sheet 3, Is this you?: the sender heard — their name, @handle, their id masked to its last three characters, and what they wrote. "Not
@@ -19,7 +21,7 @@
  * Where the source stood after the message heard (`resume`: Telegram's offset after the update) is handed over with the rest, so that the
  * connected connector starts after the message the operator was heard by.
  *
- * What is network-shaped lives behind PendingSource (telegram.ts TelegramPendingSource; Slack's is a later task's): this file keeps the
+ * What is network-shaped lives behind PendingSource (telegram.ts TelegramPendingSource, slack.ts SlackPendingSource): this file keeps the
  * shell — the one entry, its expiry, view, notMe, drop, peek and take. */
 import { randomBytes } from "node:crypto";
 import QRCode from "qrcode";
@@ -31,8 +33,11 @@ import { redactorOf } from "./bot-api.ts";
 import { NETWORK_NAME, type Network } from "./kinds.ts";
 import { IDENTITY_WORDS } from "./routes.ts";
 import type { SlackSecret, TelegramSecret } from "./secret-file.ts";
+import { SLACK_APP_TOKEN_SHAPE, SLACK_BOT_TOKEN_SHAPE, SlackPendingSource } from "./slack.ts";
+import { SLACK_API } from "./slack-api.ts";
+import type { OpenSocket } from "./slack-socket.ts";
 import { maskId, senderRef, type Strangers } from "./store.ts";
-import { TelegramPendingSource } from "./telegram.ts";
+import { realClock, TelegramPendingSource, type IdentityClock } from "./telegram.ts";
 
 /** how long a pending connection lasts: ten minutes, the life of the connectNetwork that ends it (sign.ts BRAIN_KEY_TTL_MS) */
 export const PENDING_MS = 600_000;
@@ -77,7 +82,9 @@ export interface PendingView {
   id: string;
   network: Network;
   bot: { id: string; username: string; name: string; workspace?: string };
-  /** the bot's page at the network: https://t.me/<username> on Telegram */
+  /** on Slack: the workspace the app is installed in */
+  workspace?: string;
+  /** the bot's page at the network: https://t.me/<username> on Telegram, Slack's app_redirect to the app's DM on Slack */
   link: string;
   /** the link as a QR code: `data:image/svg+xml;base64,` and the SVG qrcode draws, which the page shows as an <img> */
   qr: string;
@@ -110,6 +117,11 @@ export interface PendingTaken {
 export interface PendingDeps {
   /** Telegram's Bot API, for the short form of begin */
   apiBase: string;
+  /** Slack's Web API (slack-api.ts slackApiBase), for beginSlack: Slack's own unless set */
+  slackApiBase?: string | undefined;
+  /** how a Slack socket is opened (Node's WebSocket unless set) and the clock its waits run on (real timers unless set) */
+  openSocket?: OpenSocket | undefined;
+  clock?: IdentityClock | undefined;
   strangers: Strangers;
   /** whether `network` is connected already: a connection is refused while it is */
   bound: (network: Network) => boolean;
@@ -152,12 +164,21 @@ const refusal = (message: string): Refusal => no("E_ACCOUNT_BAD_ACTION", { messa
 /** the operator's handle as sheet 3 showed it: their @handle, or their masked id when they have none */
 export const operatorHandleOf = (sender: { id: string; handle: string }): string => (sender.handle !== "" ? sender.handle : maskId(sender.id));
 
-/** the token file a connect writes, from what the pending connection holds */
-function secretOf(network: Network, keyInput: string, bot: PendingBot, sender: { id: string; handle: string }, resume: PendingResume): TelegramSecret | SlackSecret {
+/** Slack's key, its two halves: the app-level token and the bot token either side of the one NUL — or undefined when it is not two
+ * non-empty halves (a key without its NUL, with a second, or with a half empty is never split) */
+export function slackPairOf(keyInput: string): { appToken: string; botToken: string } | undefined {
+  const halves = keyInput.split("\u0000");
+  if (halves.length !== 2 || halves[0] === "" || halves[1] === "") return undefined;
+  return { appToken: halves[0] as string, botToken: halves[1] as string };
+}
+
+/** the token file a connect writes, from what the pending connection holds; undefined when the key and the network do not agree */
+function secretOf(network: Network, keyInput: string, bot: PendingBot, sender: { id: string; handle: string }, resume: PendingResume): TelegramSecret | SlackSecret | undefined {
   const operatorHandle = operatorHandleOf(sender);
-  if (network === "slack" && resume.network === "slack") {
-    const cut = keyInput.indexOf("\u0000");
-    return { appToken: keyInput.slice(0, cut), botToken: keyInput.slice(cut + 1), appId: resume.appId, channel: resume.channel, botId: bot.id, username: bot.username, operatorId: sender.id, operatorHandle };
+  if (network === "slack") {
+    const pair = slackPairOf(keyInput);
+    if (!pair || resume.network !== "slack" || resume.channel === "") return undefined;
+    return { appToken: pair.appToken, botToken: pair.botToken, appId: resume.appId, channel: resume.channel, botId: bot.id, username: bot.username, operatorId: sender.id, operatorHandle };
   }
   return { token: keyInput, botId: bot.id, username: bot.username, operatorId: sender.id, operatorHandle };
 }
@@ -186,6 +207,15 @@ export class PendingConnections {
       return this.beginWith("telegram", source, token, keyHash, salt);
     }
     return this.beginWith(...args);
+  }
+
+  /** Slack's Sheet 1 Next: both tokens' shapes checked (an app-level token, then a bot token), then joined with a NUL and held by a
+   * SlackPendingSource — the fingerprint checked against that join before Slack is asked */
+  async beginSlack(appToken: string, botToken: string, keyHash: string, salt: string): Promise<PendingView | Refusal> {
+    if (this.disposed) return refusal(IDENTITY_WORDS.noPending);
+    if (!SLACK_APP_TOKEN_SHAPE.test(appToken) || !SLACK_BOT_TOKEN_SHAPE.test(botToken)) return refusal(IDENTITY_WORDS.slackTokenShape);
+    const source = new SlackPendingSource({ appToken, botToken, apiBase: this.deps.slackApiBase ?? SLACK_API, fetch: this.deps.fetch, open: this.deps.openSocket, clock: this.deps.clock ?? realClock(), log: this.log });
+    return this.beginWith("slack", source, `${appToken}\u0000${botToken}`, keyHash, salt);
   }
 
   /** the pending connection `id` as sheets 2 and 3 show it, or undefined when there is none by that id */
@@ -222,6 +252,8 @@ export class PendingConnections {
     if (resume.network !== e.network) return undefined;
     const bot = { ...e.bot };
     const sender = { id: e.sender.id, handle: e.sender.handle };
+    const secret = secretOf(e.network, e.token, bot, sender, resume);
+    if (!secret) return undefined;
     return {
       network: e.network,
       keyInput: e.token,
@@ -230,7 +262,7 @@ export class PendingConnections {
       bot,
       sender,
       resume,
-      secret: secretOf(e.network, e.token, bot, sender, resume),
+      secret,
       ...(resume.network === "telegram" ? { token: e.token, offset: resume.offset } : {}),
     };
   }
@@ -252,7 +284,9 @@ export class PendingConnections {
   private async beginWith(network: Network, source: PendingSource, keyInput: string, keyHash: string, salt: string): Promise<PendingView | Refusal> {
     if (this.disposed) return refusal(IDENTITY_WORDS.noPending);
     if (source.network !== network) return refusal(IDENTITY_WORDS.networkUnknown);
-    if (!keyMatches(salt, keyInput, keyHash)) return refusal(IDENTITY_WORDS.mismatch);
+    // Slack's key is two tokens either side of one NUL: anything else is not split, and not taken
+    if (network === "slack" && !slackPairOf(keyInput)) return refusal(IDENTITY_WORDS.slackTokenShape);
+    if (!keyMatches(salt, keyInput, keyHash)) return refusal(IDENTITY_WORDS.mismatchOn(network));
     if (this.deps.bound(network)) return refusal(IDENTITY_WORDS.connectedOn(network));
     const stop = new AbortController();
     let bot: PendingBot | Refusal;
@@ -260,7 +294,7 @@ export class PendingConnections {
       bot = await source.check(stop.signal);
     } catch (err) {
       // a source answers its refusals; anything it throws is said without its key, as the network not answering
-      bot = refusal(IDENTITY_WORDS.unreachable);
+      bot = refusal(IDENTITY_WORDS.unreachableOn(network));
       this.log(`identity: ${NETWORK_NAME[network]}'s check did not answer (${redactorOf(source.secrets)(err instanceof Error ? err.message : String(err))})`);
     }
     if (isRefusal(bot)) {
@@ -300,6 +334,7 @@ export class PendingConnections {
       id: e.id,
       network: e.network,
       bot: { id: e.bot.id, username: e.bot.username, name: e.bot.name, ...(e.bot.workspace !== undefined ? { workspace: e.bot.workspace } : {}) },
+      ...(e.bot.workspace !== undefined ? { workspace: e.bot.workspace } : {}),
       link: e.bot.link,
       qr: e.qr,
       expiresAt: new Date(e.expiresAt).toISOString(),
