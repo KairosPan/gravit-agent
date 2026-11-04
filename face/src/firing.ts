@@ -900,9 +900,9 @@ async function produce(run: Run, spec: ProducerSpec): Promise<Produced> {
   };
 }
 
-/** The kind a firing's texts go as (src/phone.ts): `brief` for the order whose producer is `builtin:brief` - the
- * pre-close brief - and `report` for every other. */
-function kindOf(order: StandingOrder): DeliverOpts {
+/** The kind a firing's texts go as (src/phone.ts), and the clock row's lines about its order (src/schedule.ts): `brief`
+ * for the order whose producer is `builtin:brief` - the pre-close brief - and `report` for every other. */
+export function kindOf(order: Pick<StandingOrder, "producer">): DeliverOpts {
   return order.producer?.kind === "builtin" && order.producer.name === "brief" ? { kind: "brief" } : { kind: "report" };
 }
 

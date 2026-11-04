@@ -282,10 +282,14 @@ export interface WatchHandle {
 /** The most a reply's context ({@link WatchHandle.contextFor}) carries, in UTF-16 code units: one Telegram message. */
 const CONTEXT_MAX = 4_000;
 
-/** How the watch's sends go (src/phone.ts): an alert, its batch, a late or lost line and the watch's own lines as
- * `alert`; an alert of a rule marked `urgent: true` as `urgent`, which quiet hours do not hold. */
+/** How the watch's sends go (src/phone.ts): an alert of a rule marked `urgent: true` as `urgent`, which quiet hours do
+ * not hold, and so a batch or a late replay that carries one; every other alert, batch and late replay, the lost line
+ * and the watch's own lines as `alert`. */
 const ALERT: DeliverOpts = { kind: "alert" };
 const URGENT: DeliverOpts = { kind: "urgent" };
+/** How a send carrying `hits` goes - a batch, a late replay: `urgent` when any of them is an urgent rule's, else
+ * `alert`. */
+const kindOfHits = (hits: readonly AlertHit[]): DeliverOpts => (hits.some((h) => h.urgent === true) ? URGENT : ALERT);
 
 /** `text` cut to at most `max` UTF-16 code units, never between the two halves of a surrogate pair. */
 export function cutAt(text: string, max: number): string {
@@ -973,7 +977,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         const held = ids.flatMap((id) => { const r = byId.get(id); return r === undefined ? [] : [r]; });
         let delivery: DeliverResult;
         try {
-          delivery = held.length === 0 ? { undelivered: "the held alerts are not in memory" } : await deps.deliver(batchText(held, at), ALERT);
+          delivery = held.length === 0 ? { undelivered: "the held alerts are not in memory" } : await deps.deliver(batchText(held, at), kindOfHits(held));
         } catch (err) {
           delivery = { undelivered: `send failed: ${errText(err)}` };
         }
@@ -1138,7 +1142,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         if (stopped) result = { undelivered: "the face shut down" };
         else {
           try {
-            result = await deps.deliver(lateAlertText(hit, clock.now()), ALERT);
+            result = await deps.deliver(lateAlertText(hit, clock.now()), kindOfHits([hit]));
           } catch (err) {
             result = { undelivered: `send failed: ${errText(err)}` };
           }

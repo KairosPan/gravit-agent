@@ -357,8 +357,9 @@ export type AlertHit = {
   urgent?: true;
 };
 
-/** A sent alert's delivery: `tradeMs` from the quote's `as_of`, `receivedMs` from its `receivedAt`, each to the send
- * resolving; both `null` for a send the outlet queued, and for a replay. `replayed` marks an orphan sent late at the
+/** A sent alert's delivery: its `delivery.sent` ids are `<network>:<id>` - alerts.jsonl keeps an older face's numeric
+ * ids as written, and src/watch.ts reads them as `telegram:<n>` in memory. `tradeMs` from the quote's `as_of`,
+ * `receivedMs` from its `receivedAt`, each to the send resolving; both `null` for a send the outlet queued, and for a replay. `replayed` marks an orphan sent late at the
  * ledger's first read ({@link findOrphans}). */
 export type AlertDelivered = {
   t: string;

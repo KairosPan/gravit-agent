@@ -430,6 +430,7 @@ test("a 09:30 burst records twelve, sends six, posts one annotation and batches 
   await h.wall.advance(5_000);
   await until("the batch", () => h.sent.length === 7);
   assert.equal(h.sent[6].text, "6 more alerts suppressed: B6 stop 09:30 ET, B7 stop 09:30 ET, B8 stop 09:30 ET, B9 stop 09:30 ET, B10 stop 09:30 ET, B11 stop 09:30 ET");
+  assert.deepEqual(h.sent[6].opts, { kind: "alert" }, "a batch of levels goes as alert");
   assert.equal(h.watch.status().pending, 0);
   await until("the batch record", async () => (await h.alertRecords()).some((r) => r.kind === "batch"));
   await h.watch.dispose();
@@ -523,6 +524,7 @@ test("an orphan younger than ten minutes is delivered once at the first read, re
   assert.equal(first, "late: the face restarted before this alert was sent (raised 10:16 ET)");
   assert.ok(rest[0].startsWith("NVDA 169.5 · ROBINHOOD"), rest[0]);
   assert.ok(!h.sent[0].text.includes("annotation follows"));
+  assert.deepEqual(h.sent[0].opts, { kind: "alert" }, "a late level goes as alert");
   const [d] = await deliveredOf(h, "a-young");
   assert.deepEqual([d.delivery, d.latency, d.replayed], [{ sent: ["telegram:100"] }, { tradeMs: null, receivedMs: null }, true]);
   await h.wall.advance(20_000);
@@ -668,6 +670,40 @@ test("contextFor reads a string id, and an older record's number as telegram:<n>
   assert.equal(h.watch.contextFor("slack:41"), undefined, "an id names its network");
   assert.equal(h.watch.contextFor("41"), undefined, "a bare number is no id");
   await h.watch.dispose();
+});
+
+test("a batch that carries an urgent rule's hit goes as urgent, and so does a late replay of one", async () => {
+  const names = Array.from({ length: 7 }, (_, i) => `R${i}`);
+  /* L0 and R0-R4 are plain levels, six sends that fill the hour's cap; R5 and R6 the urgent rule's, held for the batch */
+  const h = await harness({
+    start: "2026-11-30T14:30:05Z",
+    files: {
+      "desk/levels.yml": ["L0", ...names.slice(0, 5)].map((x) => level(x, "stop", 100, "cross_down")).join(""),
+      "desk/rules.yml": `- id: loud\n  kind: move_pct\n  symbols: [${names.slice(5).join(", ")}]\n  move_pct: 4\n  urgent: true\n`,
+    },
+  });
+  for (const x of ["L0", ...names.slice(0, 5)]) h.source.tables.us.set(x, us(90, "2026-11-30T14:30:01Z"));
+  for (const x of names.slice(5)) h.source.tables.us.set(x, us(90, "2026-11-30T14:30:01Z", 100));
+  await h.wall.advance(0);
+  await until("eight records", async () => (await h.alertRecords()).filter((r) => r.kind === "alert").length === 8);
+  const alerts = (await h.alertRecords()).filter((r) => r.kind === "alert");
+  const capped = alerts.filter((r) => r.suppressed === "cap");
+  assert.ok(capped.some((r) => r.urgent === true), `an urgent hit is held for the batch; saw ${JSON.stringify(alerts.map((r) => [r.symbol, r.decision, r.urgent]))}`);
+  const before = h.sent.length;
+  h.wall.set("2026-11-30T14:59:58Z");
+  await h.wall.advance(5_000);
+  await until("the batch", () => h.sent.length === before + 1);
+  assert.match(h.sent[before].text, /more alerts? suppressed/);
+  assert.deepEqual(h.sent[before].opts, { kind: "urgent" }, "the batch carries an urgent hit");
+  await h.watch.dispose();
+
+  const late = await overLedger([{ ...orphan("a-loud", "2026-11-30T15:16:45.000Z"), urgent: true }]);
+  await late.wall.advance(0);
+  await until("the replay's record", async () => (await deliveredOf(late, "a-loud")).length === 1);
+  assert.equal(late.sent.length, 1);
+  assert.match(late.sent[0].text, /^late: /);
+  assert.deepEqual(late.sent[0].opts, { kind: "urgent" }, "a late replay of an urgent hit goes as urgent");
+  await late.watch.dispose();
 });
 
 test("a rule marked urgent sends urgent; a level and an unmarked rule send alert", async () => {

@@ -172,7 +172,7 @@ function rig(fx: Fixture, start: string, opts: {
     createAgent: (o) => agents.createAgent(o),
     resolveRoute: async () => ({ provider: "stub", model: "echo" }),
     on: fakeBus().on,
-    deliver: (text) => out.deliver(text),
+    deliver: (text, o) => out.deliver(text, o),
     budget: () => readBudget(fx.home, clock.now(), handle?.dailyTokens()),
     log: (line) => { lines.push(line); },
     tickMs: DAY_MS,
@@ -1304,6 +1304,34 @@ const cnCalendar = (days: Record<string, MarketSession | "closed"> = CN_DAYS): M
 const CN_ENTRY: ArmEntry = { ...REPORT_ENTRY, id: "lunhui-report", market: "cn" };
 
 const standingText = async (home: string): Promise<string> => readFile(join(deskDir(home), STANDING_FILE), "utf8");
+
+test("a missed builtin:brief line goes as brief; a missed builtin:report line as report; the file's own line as report", async () => {
+  const brief = await fixture();
+  await arm(brief.home, [ENTRY]);
+  const b = rig(brief, "2026-11-27T17:40:00Z");
+  await at(b, "2026-11-27T17:40:00Z");
+  assert.equal(b.out.texts.length, 1);
+  assert.match(b.out.texts[0], /^preclose · 2026-11-27 missed its 12:30 ET anchor/);
+  assert.deepEqual(b.out.opts, [{ kind: "brief" }], "an operator who routes the brief hears it was missed");
+  await b.schedule.dispose();
+
+  const report = await strategyFixture();
+  await arm(report.home, [REPORT_ENTRY]);
+  const r = rig(report, "2026-11-30T13:10:00Z");
+  await at(r, "2026-11-30T13:10:00Z");
+  assert.equal(r.out.texts.length, 1);
+  assert.match(r.out.texts[0], /^demo-report · 2026-11-30 missed its 08:00 ET anchor/);
+  assert.deepEqual(r.out.opts, [{ kind: "report" }]);
+  await r.schedule.dispose();
+
+  const refused = await fixture();
+  await writeStanding(refused.home, "not: [a list\n");
+  const f = rig(refused, "2026-11-27T17:00:00Z");
+  await at(f, "2026-11-27T17:00:00Z");
+  assert.equal(f.out.texts.length, 1, `the file's refusal; saw ${JSON.stringify(f.out.texts)}`);
+  assert.deepEqual(f.out.opts, [{ kind: "report" }], "a line about the file as a whole names no order");
+  await f.schedule.dispose();
+});
 
 test("a changed levels.yml is refused once per change, and a rearm inside the grace fires", async () => {
   const fx = await strategyFixture();
