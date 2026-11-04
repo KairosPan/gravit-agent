@@ -484,7 +484,7 @@ export interface SlackConnectorDeps {
  *     Slack and no command, answered SLACK_CHAT_OFF and kept nowhere; else appended to the inbox as `slack:<ts>` (with `slack:<thread_ts>`
  *     as replyTo in a thread), and only then acked and the cursor moved past it. A text the inbox cannot store is held (not acked) and
  *     ends its socket, so nothing after it is handled there and the cursor stays before it: the next hello's backfill reads it again.
- *     A live text at or before the cursor was handled already: acked and skipped;
+ *     A live text the inbox holds already, or Slack's retry of one at or before the cursor, is acked and skipped;
  *   - the operator's file (subtype file_share): answered "text only, please";
  *   - anyone else's DM: by sheet 3's rule (memberKind) a bot is dropped, and anyone else — another team's member, a guest, a deactivated
  *     account, a full member who is not the operator — is a stranger: counted in Not you unless blocked, never stored, never answered;
@@ -642,7 +642,11 @@ export class SlackConnector implements Connector {
     noteParents(top.rows);
     // a parent before the cursor is not in that read: the last day's history is read for it (bounded)
     const dayAgo = tsAt(Math.max(0, this.d.clock.now() - THREAD_LOOKBACK_MS));
-    if (tsCompare(dayAgo, oldest) < 0) noteParents((await this.pages((next) => this.d.api.history(channel, dayAgo, BACKFILL_PAGE, next), THREAD_PAGES_MAX * BACKFILL_PAGE)).rows);
+    if (tsCompare(dayAgo, oldest) < 0) {
+      const day = await this.pages((next) => this.d.api.history(channel, dayAgo, BACKFILL_PAGE, next), THREAD_PAGES_MAX * BACKFILL_PAGE);
+      noteParents(day.rows);
+      if (day.more) this.d.log(`identity: the Slack DM has more than ${THREAD_PAGES_MAX * BACKFILL_PAGE} messages in the last day: the threads of the older ones were not searched for replies`);
+    }
     const byTs = new Map<string, ImMessage>();
     for (const m of top.rows.slice(0, INBOX_MAX).map(read).filter(after)) byTs.set(m.ts, m);
     for (const parent of parents) {
@@ -656,7 +660,7 @@ export class SlackConnector implements Connector {
     if (over || all.length > INBOX_MAX) this.d.log(`identity: more than ${INBOX_MAX} messages in the Slack DM since the cursor: the newest ${INBOX_MAX} are read, the older ones are not`);
     for (const m of all.slice(-INBOX_MAX)) {
       if (this.disposed) return;
-      if ((await this.handle(m, false)) !== "ok") throw new Error("the backfill stopped at a text the inbox could not store");
+      if ((await this.handle(m, undefined)) !== "ok") throw new Error("the backfill stopped at a text the inbox could not store");
       this.advance(m.ts);
     }
   }
@@ -665,7 +669,7 @@ export class SlackConnector implements Connector {
     if (this.disposed) return "hold";
     const m = imMessageOf(envelopeEvent(e, this.team, this.d.secret.appId));
     if (!m) return "ack";
-    const done = await this.handle(m, true);
+    const done = await this.handle(m, e.retryAttempt);
     if (done === "ok") return "ack";
     // the operator's text could not be stored: nothing after it is handled on this socket, so the cursor cannot pass it - the next
     // hello's backfill reads it again from the cursor (and, while the inbox still cannot store, fails and backs off)
@@ -675,7 +679,9 @@ export class SlackConnector implements Connector {
 
   /** one message handled: "ok"; "hold" for a stranger users.info did not answer for; "stop" for the operator's text the inbox could not
    * store */
-  private async handle(m: ImMessage, live: boolean): Promise<"ok" | "hold" | "stop"> {
+  private async handle(m: ImMessage, retryAttempt: number | undefined): Promise<"ok" | "hold" | "stop"> {
+    // live: an envelope's (with how many times Slack sent it before); undefined: a backfilled row
+    const live = retryAttempt !== undefined;
     if (m.bot || m.user === undefined) return "ok";
     if (m.user !== this.operator) {
       // the operator's DM holds only the operator and the bot: anyone else is heard live, in their own DM with the app
@@ -683,8 +689,6 @@ export class SlackConnector implements Connector {
       return (await this.stranger(m.user)) ? "ok" : "hold";
     }
     if (m.channel !== this.d.secret.channel) return "ok";
-    // at or before the cursor: handled already (by the backfill, or before a restart)
-    if (live && this.cursor !== undefined && tsCompare(m.ts, this.cursor) <= 0) return "ok";
     if (m.subtype === "file_share") {
       await this.answer(m.ts, TEXT_ONLY);
       this.advance(m.ts);
@@ -698,8 +702,12 @@ export class SlackConnector implements Connector {
       return "ok";
     }
     const replyTo = m.threadTs !== undefined && m.threadTs !== m.ts ? `slack:${m.threadTs}` : undefined;
+    const messageId = `slack:${m.ts}`;
+    // taken already: the ring holds it — or, past the ring's last 500, Slack's retry of a text at or before the cursor. A first delivery at
+    // or before the cursor is a text Slack sent out of order, and is stored
+    if (live && (this.d.inbox.has(messageId, this.d.binding.botId) || (retryAttempt > 0 && this.cursor !== undefined && tsCompare(m.ts, this.cursor) <= 0))) return "ok";
     try {
-      this.d.inbox.append({ network: "slack", messageId: `slack:${m.ts}`, ...(replyTo ? { replyTo } : {}), text, at: atOf(m.ts) }, this.d.binding.botId);
+      this.d.inbox.append({ network: "slack", messageId, ...(replyTo ? { replyTo } : {}), text, at: atOf(m.ts) }, this.d.binding.botId);
     } catch (err) {
       this.d.log(`identity: the operator's Slack message could not be stored in the inbox (${(err as NodeJS.ErrnoException).code ?? reasonOf(err)}); it is not acked, and it is read again from the DM`);
       return "stop";

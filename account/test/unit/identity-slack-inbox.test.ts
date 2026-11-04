@@ -319,10 +319,50 @@ describe("the connected Slack connector, through the account", () => {
     const rb = push({ ...b, retry_attempt: 1, retry_reason: "timeout" });
     await acked(ra);
     await acked(rb);
-    // a text at or before the cursor that the ring never held is skipped too
-    const old = push(dm({ text: "an old one", ts: "1730812600.000100" }));
-    await acked(old);
+    // a retry at or before the cursor that the ring does not hold is skipped (taken already, its row since let go) ...
+    const retried = push(dm({ text: "a retried old one", ts: "1730812600.000100", retry: 1 }));
+    await acked(retried);
     expect((await inbox(0, 0)).messages.map((m) => m.text)).toEqual(["A", "B"]);
+    // ... but a first delivery at or before the cursor is a text Slack sent out of order: stored
+    const old = push(dm({ text: "an old one", ts: "1730812600.000200" }));
+    await acked(old);
+    expect((await inbox(0, 0)).messages.map((m) => m.text)).toEqual(["A", "B", "an old one"]);
+    expect(cursor()).toBe(B);
+  });
+
+  it("a last day of more than 500 messages is searched for threads only in its newest 500, with one line", async () => {
+    const now = Math.floor(clock.now() / 1000);
+    // the cursor at now: the last day's 600 messages are all before it
+    for (let i = 1; i <= 600; i++) slack.history.push({ ts: `${now - 1000 - i}.000100`, user: OP, text: `d${i}` });
+    push(dm({ text: "now", ts: `${now}.000100` }));
+    await until(() => cursor() === `${now}.000100`, 5000, "the cursor at now");
+    const reads = historyCalls().length;
+    slack.disconnect("refresh_requested");
+    await until(() => historyCalls().length >= reads + 6, 5000, "the backfill and the last day's five pages");
+    await pause(50);
+    expect(historyCalls().slice(reads)).toHaveLength(6);
+    expect(said.filter((l) => l.includes("threads of the older ones were not searched"))).toHaveLength(1);
+    expect(svc.identity!.inboxRing.last()).toBe(1);
+  });
+
+  it("B then A out of order on one live socket: both stored once, A not skipped", async () => {
+    const A = "1730812660.000100";
+    const B = "1730812661.000100";
+    const b = push(dm({ text: "B", ts: B }));
+    const a = push(dm({ text: "A", ts: A }));
+    await acked(b);
+    await acked(a);
+    expect((await inbox(0, 0)).messages.map((m) => [m.id, m.text])).toEqual([[1, "B"], [2, "A"]]);
+    expect(cursor()).toBe(B);
+    // Slack's retries of both, and the next hello's backfill over the same DM: no row twice
+    slack.history.push({ ts: A, user: OP, text: "A" }, { ts: B, user: OP, text: "B" });
+    await acked(push({ ...a, retry_attempt: 1, retry_reason: "timeout" }));
+    await acked(push({ ...b, retry_attempt: 1, retry_reason: "timeout" }));
+    const reads = historyCalls().length;
+    slack.disconnect("refresh_requested");
+    await until(() => historyCalls().length > reads, 5000, "the next backfill");
+    await pause(50);
+    expect(svc.identity!.inboxRing.last()).toBe(2);
   });
 
   it("a threaded reply written while no socket was open is taken once at the next hello, with replyTo slack:<parent ts>", async () => {

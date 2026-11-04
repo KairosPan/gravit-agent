@@ -87,6 +87,11 @@ export class InboxRing {
     return copy(message);
   }
 
+  /** whether the ring holds the bot `bot`'s message of that network id (only the last `max` are held) */
+  has(messageId: string, bot?: string): boolean {
+    return this.messages.some((x) => x.messageId === messageId && x.bot === bot);
+  }
+
   /** the messages numbered above `id`, oldest first */
   after(id: number): InboxMessage[] {
     return this.messages.filter((m) => m.id > id).map(copy);
