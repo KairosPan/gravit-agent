@@ -70,6 +70,19 @@ page: its owner's screens are Gravit's face (Markets, Trade, Account). …`). Th
 are this face's; the entry's `url` is stale, and its `--read-only` refuses paper orders too. Both
 are the operator's to change — the tree documents the file and never edits it.
 
+**Poppler, for PDFs.** Gravit reads a PDF from its own shell (`GRAVIT.md` `## PDFs`): `pdftotext`
+for its text, `pdfinfo` for its pages, `pdftoppm` to render a page for `role_pdf_page_reader`
+("Roles" below). The face holds no PDF code; on the Mac Poppler is Homebrew's, installed once:
+
+```bash
+brew install poppler     # pdftotext, pdftoppm, pdfinfo under /opt/homebrew/bin
+```
+
+The agent box installs `poppler-utils` itself ("The two-box drill"). The service ("Run as a
+service") runs with the `PATH` it was installed with, so `/opt/homebrew/bin` must have been on that
+shell's `PATH` when `npm run service -- install` ran; installed without it, Gravit's `pdftotext` is
+`command not found` until a reinstall from a shell that has it.
+
 No Alpaca key file is sourced any more: since 2026-10-24 nothing in the face reads one (the
 Python package, its producers and the keyed quote providers left with stage 3 of the graft). An
 operator's own `.claude/launch.json` (untracked) may still source `../.env.alpaca` in its start
@@ -89,8 +102,9 @@ preceded by `gravit-face: order gate armed for …` when the Account seat's writ
 registered ("The Account seat" below). A bot the face could not declare
 is reported on stderr (`gravit-face: bot "<id>" is not declared - <reason>`),
 and the `agent presets` line then ends `; N bot(s) not declared, see above`.
-The sample's presets line is abridged: a real one also lists `kairos`, `gravit-desk` and the three
-role presets (`role-cn-market-analyst`, `role-cn-reviewer`, `role-cn-stock-analyst`). A global
+The sample's presets line is abridged: a real one also lists `kairos`, `gravit-desk` and the four
+role presets (`role-cn-market-analyst`, `role-cn-reviewer`, `role-cn-stock-analyst`,
+`role-pdf-page-reader`). A global
 `AGENTS.md` (`$DSH_HOME/AGENTS.md`, or `AGENTS.md` under `DSH_AGENTS_HOME` or `~/.agents`) adds
 one stderr line each, saying it would enter every agent's instruction chain (D25).
 
@@ -230,7 +244,8 @@ and runs the first `node` on it, which it prints with the home (`home: …`,
 `node: …`). That `PATH` must find the same `node`; the desk needs no
 Python (its market clock is Node), and a `python3` on it serves only a standing order's `.py`
 script producer, should one ever be armed (none ships) — unless `FACE_PYTHON` in the home's
-`.env` names another. The service runs profile
+`.env` names another. Gravit's shell inherits that `PATH` too, so Poppler's
+`/opt/homebrew/bin` must be on it for a PDF ("Poppler, for PDFs" above). The service runs profile
 `face` on the shell's `DSH_HOME`, so `install` refuses a home with no
 `profiles/face` — `no profile at …: run "cd face && npm run setup" with
 DSH_HOME=… first` — rather than install a face that would exit 1 every 30 s.
@@ -370,8 +385,30 @@ All three of its stages are built:
   conversation as dsh's own mention, which hands Gravit that conversation's snapshot and draws as
   a pale-blue chip in your bubble. A draft with a bot chip, or a typed `@word`, goes to the room
   first; one that also holds a conversation chip is refused before sending (`Conversations go to
-  Gravit, not to a room's bots`), because a room's bots cannot read one. No attachments yet
-  (plan 4);
+  Gravit, not to a room's bots`), because a room's bots cannot read one;
+- **attachments** (the dsh UI port's plan 4): the paperclip (`Attach files`) picks files; a file or
+  an image pasted (a screenshot, a Finder copy) or dropped anywhere on Messages — a full-page
+  overlay, `Drop files or images here` with the image limits under it — joins the draft too. A copy
+  from Numbers, Excel or a web page pastes its text and attaches nothing. Each sits in a rail inside
+  the box: an image as a 64 px square, any other file as a card, `CSV · 2.8 MB`, with its remove
+  key on hover. An image is PNG, JPEG, WebP or GIF and goes inline in the prompt, at most 20 a
+  message and 20 MB each (the session's `imageLimits`); any other file — an SVG, a HEIC, a PDF, a
+  CSV — uploads at once to the conversation (`1.1 / 2.8 MB` while it goes; `Upload failed · Retry`
+  in the down colours), and the prompt carries its receipt. The host saves a read-only copy of a
+  file under the harness home and tells Gravit its path, so Gravit reads a CSV or a log with its
+  own tools and a PDF with Poppler ("Run"), a page whose layout matters through
+  `role_pdf_page_reader` ("Roles"); the card claims nothing about what Gravit read. In the
+  thread your attachments sit above your bubble — a lone image up to 240 px, with others 64 px
+  squares, read lazily from the host, a click opens the lightbox (Esc, a click outside or × closes
+  it), a file as its card, which opens nothing. The lines above the box: `Gravit's model takes no
+  images. Remove the image, or run Gravit on a model that does.` (Gravit's deepseek-v4-pro takes
+  text only, so every image to Gravit is refused and the draft kept; a bot whose route takes images,
+  deepseek-flash, takes them in its own conversation), and the pre-checks (`Up to 20 images a
+  message`, `<name> is over 20 MB`). On the status line: `Files go to Gravit, not to a room's
+  bots` (a bot chip with files), `/<name> takes no files`, `Files are still uploading`, `A file did
+  not upload. Retry it or remove it.` A receipt the host dropped (the face restarted) is uploaded
+  again once and the message sent once more. The files live in the page's memory: a reload loses
+  them;
 - **host-fed since stage 2**: Markets (`#/markets`) — the Account's markets by its tabs, the
   stars, a search, and a market's page with its candles and venues — and Account
   (`#/account/portfolio`, `venues`, `agents`, `cards`) — the Account's Portfolio, Venues, Agents
@@ -725,7 +762,7 @@ run is `MISSING_EVIDENCE` at the read. Each item is against a module whose artif
 shows — never the mode — and cites at least one `ev_` evidence id of its own (`REFERENCE`
 otherwise); an empty `items` is a review that found nothing, a result.
 
-**The roles and the protocol.** Three roles ship. `../roles/cn-market-analyst/`: its tools are
+**The roles and the protocol.** Three Lunhui roles ship (the fourth role, `pdf-page-reader`, is not Lunhui's: "Roles" below). `../roles/cn-market-analyst/`: its tools are
 `skill` and the six market module tools, its model `deepseek-official/deepseek-flash`, its Chinese
 persona the three modules in order — environment, sentiment, theme — each read once and submitted
 once, the artifact only in `analysis`, a stop after a failed read, a module's third rejection
@@ -3234,14 +3271,21 @@ A role is a prebuilt delegated task. Gravit calls it by tool name, `role_<id>`; 
 child runs the brief on the role's own preset — its persona and exactly its tools — and the call
 blocks until the child's report comes back as the tool's result. It is not a bot — no journal, no home session, no seat in a
 room, never listed among `bots/` — and not a bare `subagent` call, where the model picks the
-persona and the tools on every call: here both are fixed on disk. Three ship: `cn-market-analyst`,
+persona and the tools on every call: here both are fixed on disk. Four ship: `cn-market-analyst`,
 the Lunhui market modules' analyst, which writes the one module a brief names and all three when
-none is named (spec 2026-10-28 F6), `cn-reviewer`, the counterevidence reviewer, and
-`cn-stock-analyst`, the leader and mode modules' analyst ("Lunhui analysis"). The three that shipped before (a screener, a backtester and a reviewer, whose
+none is named (spec 2026-10-28 F6), `cn-reviewer`, the counterevidence reviewer,
+`cn-stock-analyst`, the leader and mode modules' analyst ("Lunhui analysis"), and, since the dsh UI
+port's plan 4, `pdf-page-reader`, the PDF page reader: `read_image` alone on
+`deepseek-official/deepseek-flash` (dsh's catalog declares it text and images; Gravit's own
+deepseek-v4-pro takes text only), an English persona that reads each page image Gravit rendered
+with `pdftoppm` once and returns its tables, figures and layout as text — a table as a Markdown
+table, figures quoted as printed, `[unreadable]` for what it cannot read — under **status**,
+**pages**, **transcription** and **limits**. Gravit calls it as `GRAVIT.md`'s `## PDFs` says, with
+the PNG paths under `${TMPDIR:-/tmp}` and the question. The three that shipped before (a screener, a backtester and a reviewer, whose
 allow lists were the removed Python package's tools) retired with their tools on 2026-10-24, and
 new roles are the operator's to design; `roles/_template` is the copy source and never a role, so
-Gravit's preset today is the `gravit` row, `role-cn-market-analyst`, `role-cn-reviewer` and
-`role-cn-stock-analyst`.
+Gravit's preset today is the `gravit` row, `role-cn-market-analyst`, `role-cn-reviewer`,
+`role-cn-stock-analyst` and `role-pdf-page-reader`.
 
 One directory per role under `roles/<id>/`:
 
@@ -3376,7 +3420,8 @@ The `lunhui:run` and `lunhui:module` protocols ("Lunhui analysis") are gated the
 `roles-smoke.test.ts` pins the child's side on a real boot over two fixture roles made from
 `_template`, on a second boot a role none of whose tools exists refusing the boot, and on a third,
 fourth and fifth the shipped `cn-market-analyst`, `cn-stock-analyst` and `cn-reviewer` ("Tests"
-below); `role-plugin.test.ts` pins the role tool offline; "The role drill" at the end of this file is
+below), and `dsh-ui-port-smoke` lists `role-pdf-page-reader` whole with `read_image` among the
+host's tools; `role-plugin.test.ts` pins the role tool offline; "The role drill" at the end of this file is
 the live check, and the live market and strategy runs ("Lunhui analysis") the first that each
 role meets.
 
@@ -3776,7 +3821,7 @@ FACE_SMOKE=1 npm test     # + the 30 smoke files (35 real boots), isolated; loca
 ```
 
 Offline, `npm test` skips the 30 smoke files (35 real boots) listed below; `FACE_SMOKE=1` runs
-them too (3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
+them too (3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
@@ -3823,7 +3868,7 @@ and `node --test` gives each file its own:
 | `lunhui-strategy-run-smoke.test.ts` | an `S01` registered on Friday and graded on Monday ("Lunhui analysis"): the market smoke's boot with copies of `cn-market` and `lunhui-s01-repair` and the three roles on the stub; each day Gravit does the reviewed market run, finds it with the listing read, freezes two stocks' quotes on the strategy and calls `role_cn_stock_analyst` for the leader, `role_cn_reviewer` with both run ids and `role_cn_stock_analyst` for the mode, each child building its artifact from its context; Friday's mode `S01` with a card of at most 2,048 bytes, every review item answered, Monday's grading it; every artifact of the four runs valid again against digests rebuilt from the sealed runs, the runs card's latest run Monday's with its review line, the protocol's strategy channel in Gravit's prompt. `Date` is replaced, Friday 2026-10-23 15:00 China time, then Monday 2026-10-26 15:00 |
 | `lunhui-answer-smoke.test.ts` | Gravit's composed answer end to end: the seat off, `lunhui-runs` over a scratch strategies root holding the synthetic sealed 10-27 run; the view read over `GET /data/lunhui/view` (registered as `main.ts` does) with the signed-in cookie; an ok `lunhui_present` lifted through `host/kinds.js` and drawn by the client's own `renderThread` — the seven kinds' labels in the call's order, the follow-ups, the footer with `Open run ›`, a stock link — and `stockDrawerHtml` for 上海九百 drawing its minute chart with the limit-up line; no model called |
 | `goal-smoke.test.ts` | the goal loop `../dsh/profile/cycle.md` rests on, through the face's own wire (prompts, the Stop button's `session/cancel`, a slash line's `commands/execute`): `create_goal` in a human turn returns the id and revision 1, armed; each round arrives at idle as a user message whose source is `goal` (`<goal_round>`, the objective, `Round: n/N`); the model's `blocked` in round 1 is refused (`blocked requires at least 3 consecutive goal rounds; current round is 1`), in round 3 accepted with the code `model-reported` and followed by the `<goal_blocked>` wrap-up; a second `create_goal` is refused while that goal is blocked (`GOAL_ALREADY_EXISTS`); at the cap the driver blocks with `round-limit` and sends the model nothing more; Stop mid-round pauses the goal, the model's resume of it is refused (`GOAL_TOOL_RESUME_PAUSED`: `the model cannot resume a paused goal; the user must resume it`) and `/goal resume` re-arms it; a face stopped mid-round and booted again on the same home leaves the goal active and disarmed with no request until "continue", whose `update_goal` resume bumps the revision and re-arms the rounds |
-| `dsh-ui-port-smoke.test.ts` | the host side of the dsh UI port on one stub boot: pins and their `pinned` frame, `commands/list`, `skills/list` on a cold session, the `turnOutline` and `sessionStats` projections, a `job/list` stream, `session/page` earlier history, an upload sent as a `file` part, the `sessionReferenceResolver` service, and `GET /data/search` over the stored logs; since plan 3 a cold conversation's `commands/list` and `commands/execute` (each resumes it at rc.5; after a follow's snapshot the command answers), a skill by its literal `/name` reaching the model with its content, and a conversation chip's mention bringing a `Referenced sessions` message |
+| `dsh-ui-port-smoke.test.ts` | the host side of the dsh UI port on one stub boot: pins and their `pinned` frame, `commands/list`, `skills/list` on a cold session, the `turnOutline` and `sessionStats` projections, a `job/list` stream, `session/page` earlier history, an upload sent as a `file` part, the `sessionReferenceResolver` service, and `GET /data/search` over the stored logs; since plan 3 a cold conversation's `commands/list` and `commands/execute` (each resumes it at rc.5; after a follow's snapshot the command answers), a skill by its literal `/name` reaching the model with its content, and a conversation chip's mention bringing a `Referenced sessions` message; since plan 4 `imageLimits` on a cold session, an image refused on the stub's text-only route (`MODEL_DOES_NOT_SUPPORT_IMAGES`) and accepted on a second stub route that takes images (`stub-see`), logged as an image block and given back by `session/attachment`, a receipt never staged refused (`FILE_NOT_STAGED`), `role-pdf-page-reader` listed whole with `read_image`, and a command's dropped receipt settling the error text the page matches |
 | `desk-smoke.test.ts` | the desk on a real tree, as `main.ts` installs it, its fixture root inside the repository so the repository's `GRAVIT.md` heads the chain: the `gravit-desk` session runs in `desk/journal/` under `workspace-write`; its tools are exactly `DESK_ALLOW` expanded on this tree plus `desk_quotes` and `desk_state`, each `mcp__*__<raw>` entry matching one server's tool, and neither desk tool reaches Gravit's session or the global view; the write tools take the path arguments the guard's write check reads, and `str_replace_editor`'s commands are `view`, `create`, `str_replace` and `insert`; the desk's prompt carries Gravit's persona prefix, the date and `# The desk`, and no cycle contract or roles section; a desk turn naming the order stand-in gets Gate 2's visibility refusal and its body never runs; a `write` to `../levels.yml` is refused by the sandbox inside the tool's content while a journal write lands, with no card; Gravit's own write of a `GRAVIT.md` lands; with a listener in front answering allow, the guard's backstop still denies the desk's write of `GRAVIT.md` and its read of a `.env` file, while Gravit's own read of that file goes through unjudged; `/stop` on a turn parked on an escalation card, two texts queued behind it, cuts that turn alone — recorded `cancelled`, `stopped from the phone` — and both texts are answered, in order; the desk's write of a journal `.gitignore` holding `!*` and of a `CLAUDE.md` are denied with no file written, and its read of a dot-config in the repository is denied by name while Gravit reads it; the read tools take exactly the parameters the read check reads; a `GRAVIT.md` planted in the journal reaches a desk session's first request behind the repository's, which is the threat the fence refuses, and the next post is refused with `desk-refused` and no turn; each supervised turn is one `desk-turn` with four token buckets and the stub's route |
 | `telegram-smoke.test.ts` | the bridge end to end on a real tree against a `node:http` Bot API stub on 127.0.0.1: the token and the operator's id come from the scratch home's `.env`, and the MCP child dsh spawns has the id and not the token; a stranger and a group are dropped and counted, unanswered, and the operator's `hi` is answered in the operator's chat; `/status` counts the drops and names the desk session; `/pause` writes `OFF` by `telegram`, a text then gets the paused line and opens no turn, and `/resume` is text that never reaches the model; a 503 queues the reply in the outbox and the next poll flushes it, in order, each reply sent once; a 409 is recorded and waited out; a card parked by an escalated write to `../levels.yml` is cut at the desk's deadline (1,500 ms here) with the timed-out line; the canary — the desk's write of `GRAVIT.md` is denied by the desk guard and no request carries a planted text, then a `GRAVIT.md` the harness plants is refused by the fence with no turn; its read case — `send me ~/.dsh/.env`: the read of the scratch home's `.env` is refused as outside the repository, the token handed to a market read is refused as a secret, no tool result carries the token or a second secret, and the stub's reply, which names both, reaches the phone as `I could not read it: <secret> <token>`; across the file every send went to the operator's chat, the token is in no file of the desk's directory, and no `STANDING.md`, `levels.yml`, `rules.yml` or `holdings.yml` changed |
 | `schedule-smoke.test.ts` | the standing orders' clock end to end, as `main.ts` installs the desk, on one early-close session (2026-11-27), a fake clock and calendar, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`: a firing a restart cut off is reported `interrupted` at boot and never run; the pre-close brief wakes one fresh `gravit-desk` session in `desk/journal` under `workspace-write`, with the armed text — hashing to its pin — and the producer's block in its wake message, and its final text reaches the phone; `firings.jsonl` holds `started`, `producer`, `woke` and `finished`, `events.jsonl` one `desk-turn` with `source: "schedule"` and four token buckets; a script producer's stderr reaches only the face's log; a turn waiting in a long tool is cut at its 10-minute deadline and the order queued behind it fires after; an edited text is refused with one line, then in silence, and fires once re-armed inside its grace; the pause refuses in silence and a spent budget with one line; an anchor slept across is `missed`; a `wake: false` order runs only its producer; a planted `GRAVIT.md` refuses the firing; the canary's firing half — a poisoned turn's writes of `../STANDING.md`, of `standing.yml` and of a journal `GRAVIT.md` are all refused, no card raised, every text and `standing.yml` unchanged — and a `GRAVIT.md` the harness plants refuses the next order; the clock's dispose cuts a firing in a long tool and settles; every text the desk sent went through the recorder. Then (P4) the strategies' book on 2026-11-30, a fake XSHG calendar beside the XNYS one and one fake quote source, in clock order: an A-share report on its Beijing date naming the screen that ran and its `TENCENT` close print; the canary in a strategy (five calls: it reads and rewrites `STANDING.md` and `levels.yml`, then tries the desk's `STANDING.md`), named by one outside-reports line and holding the next order by each pin in turn; two US reports at one anchor in file order; the fence in a strategy; a producer-only strategy order; the abort last |
@@ -3948,7 +3993,16 @@ together — every pin whose track moved — then:
    `undefined` and denied every approved order, failing closed with nothing
    looking wrong. `snapshotEvents()`, which the guard and the room engine read
    now, is deprecated upstream for new callers — a later pin that drops it
-   fails them closed, loudly, and this step says so.
+   fails them closed, loudly, and this step says so. `dsh-ui-port-smoke` pins
+   the host facts the page's composer and attachments rest on: `commands/list`
+   and `commands/execute` each resume a cold session (the upload route's
+   find-or-resume resolver is read in `dsh-api-session-controller`, not
+   booted); the two refusal reasons `FILE_NOT_STAGED` and
+   `MODEL_DOES_NOT_SUPPORT_IMAGES`; the stored image block's shape; and the
+   exact text `File upload receipt is unknown for this session.`, which
+   `client/js/host/actions.js` `RECEIPT_UNKNOWN` matches to restage a
+   command's files — a reworded text fails that smoke, and the constant moves
+   with it (`../docs/dsh-upgrade-guide.md` §3.1 L1).
 8. Run the drills below — Gate 2, ask-user, transport, bots, room, and roles
    once one ships — on a face booted against a SCRATCH `DSH_HOME` first (the role
    drill on a COPY of the home with the operator's MCP rows, as it says).
@@ -4649,12 +4703,14 @@ such an `@` named nobody (the sentence landed the same day in its Rooms paragrap
 face; **on 0.2.0-rc.2 step 0 passes at `8f0dedb`, and the live run is still owed** (go-live
 runbook).
 
-## The dsh UI port drill (keyed; run after any change under client/js/composer/, client/js/host/composer.js or the composer's part of app.js)
+## The dsh UI port drill (keyed; run after any change under client/js/composer/, client/js/host/composer.js, client/js/host/attachments.js, roles/pdf-page-reader/ or the composer's part of app.js)
 
 **Owed, the operator's.** The fake DOM proves the draft model, the menus and the routing; it cannot
 type into a real `contenteditable`, compose pinyin or move a real caret, and a stub model does not
-read files. Search and pin are the transport drill's step 8; the composer's steps are these, and
-the other picks join as their plans land. Keyed, on a second face from your own terminal:
+read files. Search and pin are the transport drill's step 8; the composer's steps are 1–8, the
+attachments' 9–14, and the other picks join as their plans land. The attachment steps need Poppler
+on this shell's `PATH` (`brew install poppler`, "Run"), a CSV, a PNG screenshot and a broker
+report's PDF with a table on one of its pages. Keyed, on a second face from your own terminal:
 `source ../.env.deepseek`, then `npm run setup` and `npm start` with
 `DSH_HOME=<scratch> FACE_DESK=0 FACE_PORT=3091 FACE_ACCOUNT_URL=http://127.0.0.1:9` ("A second
 face uses a scratch home"; the dead Account URL keeps this page from pairing with the real
@@ -4693,16 +4749,60 @@ Account). Open the printed `?token=` URL and hard-reload.
    accessibility inspector, or VoiceOver): `#say`'s `aria-expanded` and `aria-activedescendant`
    follow the active row. With a menu open, let a stream frame draw the page: the menu stays open
    (Chrome's `focusout` on a replaced editor is covered by the page's check, which this confirms).
+9. **A CSV Gravit reads from its saved copy.** In a Gravit conversation press the paperclip and
+   pick the CSV. PASS: its card shows `CSV · <size>`, the progress while it uploads, then the size
+   alone; ask for its column names and its row count, and send. Gravit's answer names them, read
+   with its own tools from the read-only copy the host saved under `$DSH_HOME/attachments/v1/files/`
+   (the host's line names the copy's path) — the spec's §9 item 3, and the first half of
+   the operator's sandbox check (below).
+10. **An image refused on deepseek-v4-pro.** In the same conversation paste the screenshot (⌘⇧⌃4,
+    then ⌘V in the box). PASS: it joins the rail as a 64 px square; send: the line `Gravit's model
+    takes no images. Remove the image, or run Gravit on a model that does.` sits above the box in
+    the down colour and the whole draft stays; paste the image again and the line shows at once,
+    nothing sent. Remove the image: the line goes.
+11. **The same image on deepseek-flash.** Create a scratch bot whose model is
+    `deepseek-official/deepseek-flash` (Discover › Create), Talk to it, and paste the same image
+    with a line asking what it shows. PASS: the message is accepted and the image drawn above your
+    bubble (up to 240 px wide), the bot describes it; click it: the lightbox opens, its close key
+    holds focus; Esc closes it and focus returns to the image. Refused here with the model line
+    instead, the operator's route does not declare image input for deepseek-flash (the third
+    operator's check, below): record it, and step 12's role cannot read a page either.
+12. **A broker report's PDF.** In a Gravit conversation attach the PDF and ask what its first page
+    says. PASS: Gravit runs `pdftotext` (`pdfinfo` first, as it may) and answers from the text.
+    Then ask about the table on one named page. PASS: Gravit runs `pdftoppm -png -r 110 -f N -l N`
+    into `$TMPDIR`, never into the tree (`git status` clean), calls `role_pdf_page_reader` with the
+    PNG's path, and relays its four headings, the table as a Markdown table quoting the page's
+    figures; in the role child's log (the role drill's step 2 recipe) the tools are `read_image`
+    alone and the first `read_image` call names the PNG. The spec's §9 item 1, and the second half
+    of the operator's sandbox check.
+13. **What only a browser shows.** Drag a file from Finder onto the editor: the overlay `Drop files
+    or images here` with the limits under it covers the page and stays up while the pointer
+    crosses the thread, the list and the box (its children), and the file joins the rail when
+    dropped. Drag a chip inside the editor: nothing moves, nothing is copied. Copy a few cells from
+    Numbers or Excel and paste: their text arrives and no image joins. Paste a screenshot: it
+    joins as an image. Copy a file in Finder (⌘C) and paste: the file joins, and its name is not
+    typed. Open an image's lightbox in Safari and press Tab: focus stays on its close key; Esc
+    returns it to the image. With VoiceOver on, add an image over the limit (or refused, step 10):
+    VoiceOver reads the line above the box once.
+14. **The operator's three checks.** The LaunchAgent's `PATH` holds `/opt/homebrew/bin`:
+    `plutil -extract EnvironmentVariables.PATH raw ~/Library/LaunchAgents/com.gravit.face.plist`
+    prints it (else reinstall the service from a shell that has it, "Run as a service"); Gravit's
+    macOS sandbox reads the saved copy and runs Poppler: steps 9 and 12 passed on the service's
+    face, not only on this scratch one; deepseek-flash on your route declares image input: step 11
+    passed.
 
 **PASS criteria are observations.** Record the run below with the date and the commit.
 
 ## The role drill (run after any face or dsh change)
 
-A role that was never delegated to is presumed decorative. **Three roles ship**,
+A role that was never delegated to is presumed decorative. **Four roles ship**,
 `cn-market-analyst`, `cn-reviewer` and `cn-stock-analyst` (all since 2026-10-26; the three before
-them retired with the Python package's tools on 2026-10-24). The first works only on a `cn-market`
-run, the last only on a strategy run citing one, and the reviewer on either: their live halves are
-the live market and strategy runs ("Lunhui analysis"), with the steps below read for each.
+them retired with the Python package's tools on 2026-10-24) and `pdf-page-reader` (since
+2026-11-04). The first works only on a `cn-market` run, the third only on a strategy run citing
+one, and the reviewer on either: their live halves are the live market and strategy runs ("Lunhui
+analysis"), with the steps below read for each. `pdf-page-reader`'s bounded task is the dsh UI port
+drill's step 12 (a page rendered from a PDF), read with steps 1, 2 and 5 below; it names no MCP
+tool and has no `bash`, so steps 3 and 4 skip it.
 
 **Step 0, no model, no key.** `FACE_SMOKE=1 npm test` boots `roles-smoke.test.ts` over two
 fixture roles copied from `roles/_template` under the test's own roles root: `role_auditor` and
@@ -4761,7 +4861,7 @@ FACE_PORT=3091 npm start`, real keys) — never the operator's own home:
 5. In Gravit's own log (step 2's recipe on the parent session) the first `request/header` lists
    `role_<id>` beside the host's tools, and the first `system/message` carries the `Roles.`
    paragraph with each role's one-line summary; the boot line `agent presets: …` shows `gravit`
-   and the three `role-*` presets without a `(broken)` mark (a role row that fails to mount lists
+   and the four `role-*` presets without a `(broken)` mark (a role row that fails to mount lists
    the default broken, a role preset missing or broken refuses the boot). PASS, part five.
 6. Clean up whatever the role wrote under `strategies/room-drill/` (for `cn-market-analyst` and
    `cn-reviewer`, the run under `strategies/cn-market/analysis/`, for `cn-stock-analyst` the one
@@ -5132,10 +5232,13 @@ peer that forges `Host`. The same holds for the Account's `PORTFOLIO_BIND` (`../
    drill" above).
 6. **AKShare in the box.** Ask Gravit one AKShare question; `portfolio_akshare` answers with no
    card.
-7. **The negative.** `docker compose exec agent ls /data` fails (no such file or directory: the
+7. **Poppler in the box.** `docker compose run --rm agent pdftotext -v` prints Poppler's version
+   (`poppler-utils` from the agent image's one layer, `Dockerfile`), so `GRAVIT.md`'s `## PDFs`
+   commands run in Gravit's shell there; `${TMPDIR:-/tmp}` is `/tmp` in the box.
+8. **The negative.** `docker compose exec agent ls /data` fails (no such file or directory: the
    Account's home is not mounted there), and `docker compose exec agent ls /var/run/docker.sock`
    fails too.
-8. **Down.** `docker compose down` (the volumes stay; `down -v` drops them, the box's Account
+9. **Down.** `docker compose down` (the volumes stay; `down -v` drops them, the box's Account
    home with them).
 
 After a pull that changes `face/package-lock.json` or `account/package-lock.json`: `docker compose
