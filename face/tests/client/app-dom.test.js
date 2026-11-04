@@ -4339,3 +4339,333 @@ test('a typed @buffett with a conversation chip in a channel is refused before s
   assert.deepEqual(say.runs, draft);
   store.timers.clear();
 });
+
+// ---- files in the draft (plan 4 task 5): pick, paste, drop, upload, remove, retry ----
+const MiB = 1048576;
+const LIMITS = { maxImageBytes: 20 * MiB, maxImagesPerMessage: 20, maxMessageImageBytes: 200 * MiB, maxImagePixels: 64e6, maxImageDimension: 8192, mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] };
+const aFile = (name, size, type) => ({ name, size, type, arrayBuffer: async () => new ArrayBuffer(0) });
+const CSV = () => aFile('prices.csv', Math.round(2.8 * MiB), 'text/csv');
+const PNG = () => aFile('chart.png', 300 * 1024, 'image/png');
+// host.attachments: the limits as given, each upload recorded with its progress callback and its answer or failure
+function fakeAttachments(limits = LIMITS) {
+  const uploads = [];
+  const limitReads = [];
+  return {
+    uploads, limitReads,
+    limits: () => limits,
+    readLimits: async id => { limitReads.push(id); },
+    upload(id, file, onProgress) {
+      const u = { id, file, onProgress, aborted: false };
+      u.done = new Promise((resolve, reject) => { u.answer = resolve; u.fail = reject; });
+      u.abort = () => { u.aborted = true; u.fail(Object.assign(new Error('aborted'), { code: 'aborted' })); };
+      uploads.push(u);
+      return { done: u.done, abort: u.abort };
+    },
+    thumb: async () => {},
+  };
+}
+// the composer's own elements: the editor, the hidden input, the rail (its writes counted) and the note
+function composerEls(f) {
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const input = f.withId('attach-input', { tagName: 'INPUT', type: 'file' });
+  const rail = f.withId('composer-files');
+  rail.railWrites = 0;
+  let railHtml = '';
+  Object.defineProperty(rail, 'innerHTML', { get: () => railHtml, set: v => { railHtml = v; rail.railWrites++; } });
+  const note = f.withId('composer-note');
+  return { say, input, rail, note };
+}
+const bootFiles = async (f, h, attachments, editor = valueEditor) => {
+  const store = boot(f.win, { editor, attachments, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
+  await h.ready();
+  return store;
+};
+const pick = (f, input, files) => { input.files = files; input.value = 'C:\\fakepath\\x'; f.fire('root', 'change', { target: input }); };
+const twoRows = () => host({ rows: [row('s1', { updatedAt: 50, agentAvailable: true }), row('s2', { updatedAt: 9, agentAvailable: true })] });
+
+test('the paperclip clicks the hidden input, and its files join the draft with one render, an image with its object URL', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { input } = composerEls(f);
+  const made = [];
+  f.win.URL.createObjectURL = blob => { made.push(blob); return 'blob:chart'; };
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  assert.match(f.html(), /data-action="attachFiles" aria-label="Attach files"/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'attachFiles' } });
+  assert.equal(input.clicks, 1);
+  const before = f.writes;
+  const png = PNG(), csv = CSV();
+  pick(f, input, [png, csv]);
+  assert.equal(f.writes, before + 1, 'one render');
+  assert.equal(input.value, '', 'the input is cleared, so the same file can be picked again');
+  assert.deepEqual(made, [png], 'an object URL for the image only');
+  assert.match(f.html(), /<div class="attach-image"><img src="blob:chart" alt="chart.png">/);
+  assert.match(f.html(), /file-name">prices.csv</);
+  store.timers.clear();
+});
+
+test('a file added to a conversation uploads at once; a progress tick writes only the rail; the receipt marks it up', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { input, rail } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  const csv = CSV();
+  pick(f, input, [csv, PNG()]);
+  assert.equal(att.uploads.length, 1, 'the file uploads; the image goes inline when sent');
+  assert.equal(att.uploads[0].id, 's1');
+  assert.equal(att.uploads[0].file, csv, 'the File itself is the body');
+  assert.match(f.html(), /file-card uploading/);
+  assert.match(f.html(), /file-meta">0.0 \/ 2.8 MB</);
+  const writes = f.writes;
+  att.uploads[0].onProgress(Math.round(1.1 * MiB));
+  assert.equal(f.writes, writes, 'a progress tick never renders the page');
+  assert.equal(rail.railWrites, 1);
+  assert.match(rail.innerHTML, /1.1 \/ 2.8 MB/);
+  att.uploads[0].answer('rcpt-1');
+  await settle();
+  assert.equal(f.writes, writes + 1, 'the receipt renders');
+  assert.doesNotMatch(f.html(), /file-card uploading/);
+  assert.match(f.html(), /file-meta">CSV · 2.8 MB</);
+  store.timers.clear();
+});
+
+test('a failed upload draws Retry, and Retry uploads again', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  pick(f, input, [CSV()]);
+  att.uploads[0].fail(new Error('upload prices.csv: the request failed'));
+  await settle();
+  assert.match(f.html(), /file-card failed/);
+  assert.match(f.html(), /Upload failed · <button type="button" class="file-retry" data-action="attachRetry" data-key="(a\d+)">Retry<\/button>/);
+  const key = f.html().match(/data-action="attachRetry" data-key="(a\d+)"/)[1];
+  f.click({ tagName: 'BUTTON', dataset: { action: 'attachRetry', key } });
+  assert.equal(att.uploads.length, 2, 'uploaded again');
+  assert.equal(att.uploads[1].id, 's1');
+  assert.match(f.html(), /file-card uploading/);
+  att.uploads[1].answer('rcpt-2');
+  await settle();
+  assert.doesNotMatch(f.html(), /Upload failed/);
+  store.timers.clear();
+});
+
+test('removing a file mid-upload aborts it, and removing an image revokes its URL', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { input, rail } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  pick(f, input, [CSV(), PNG()]);
+  const keys = [...f.html().matchAll(/data-action="attachRemove" data-key="(a\d+)"/g)].map(m => m[1]);
+  assert.equal(keys.length, 2);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'attachRemove', key: keys[0] } });
+  assert.equal(att.uploads[0].aborted, true);
+  assert.doesNotMatch(f.html(), /prices.csv/);
+  const writes = f.writes;
+  att.uploads[0].onProgress(100);
+  await settle();
+  assert.equal(rail.railWrites, 0, 'a late tick of the removed file writes nothing');
+  assert.equal(f.writes, writes, 'nor does its abort land');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'attachRemove', key: keys[1] } });
+  assert.deepEqual(f.revoked, ['blob:fake']);
+  assert.doesNotMatch(f.html(), /chart.png/);
+  store.timers.clear();
+});
+
+test('an image over the limit is refused above the box by name, and the rest are added', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { input, note } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  pick(f, input, [aFile('huge.png', 21 * MiB, 'image/png'), PNG(), CSV()]);
+  assert.match(f.html(), /id="composer-note" role="status">huge.png is over 20 MB</);
+  assert.equal(note.textContent, 'huge.png is over 20 MB', 'the live region is written');
+  assert.doesNotMatch(f.html(), /alt="huge.png"/);
+  assert.match(f.html(), /alt="chart.png"/);
+  assert.match(f.html(), /prices.csv/);
+  const key = f.html().match(/data-action="attachRemove" data-key="(a\d+)"/)[1];
+  f.click({ tagName: 'BUTTON', dataset: { action: 'attachRemove', key } });
+  assert.match(f.html(), /id="composer-note" role="status"><\/div>/, 'a remove clears the note');
+  assert.equal(note.textContent, '');
+  store.timers.clear();
+});
+
+test('on New message files wait as ready and nothing uploads', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { input } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
+  await settle();
+  pick(f, input, [CSV()]);
+  assert.equal(att.uploads.length, 0);
+  assert.match(f.html(), /<div class="file-card"><span class="file-icon">/);
+  assert.match(f.html(), /file-meta">CSV · 2.8 MB</);
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  await settle();
+  assert.doesNotMatch(f.html(), /prices.csv/, 'the file is New message\'s');
+  store.timers.clear();
+});
+
+test('a paste of files adds them and inserts no text', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  say.focus();
+  type(f, say, 'ab');
+  say.setSelectionRange(2, 2);
+  let prevented = false;
+  f.fire('root', 'paste', { target: say, preventDefault() { prevented = true; }, clipboardData: { files: [PNG()], getData: () => 'chart.png' } });
+  assert.equal(prevented, true);
+  assert.equal(say.value, 'ab', 'no text inserted');
+  assert.match(f.html(), /alt="chart.png"/);
+  f.fire('root', 'paste', { target: say, clipboardData: { files: [], getData: t => (t === 'text/plain' ? 'X' : '') } });
+  assert.equal(say.value, 'abX', 'a paste with no files is still plain text');
+  store.timers.clear();
+});
+
+test('a drop of files on the page adds them to the draft on screen; the overlay shows while files are dragged over and goes on leave', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  let prevented = false;
+  f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] }, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true, 'the page takes the drop');
+  assert.equal(store.get().dropping, true);
+  assert.match(f.html(), /Drop files or images here<\/div><div class="drop-sub">Images: up to 20 a message, 20 MB each</);
+  const writes = f.writes;
+  f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] } });
+  assert.equal(f.writes, writes, 'a second dragover renders nothing');
+  f.fire('doc', 'dragleave', { relatedTarget: { tagName: 'DIV' } });
+  assert.equal(store.get().dropping, true, 'moving between the page\'s own elements is no leave');
+  f.fire('doc', 'dragleave', { relatedTarget: null });
+  assert.equal(store.get().dropping, false);
+  assert.doesNotMatch(f.html(), /drop-overlay/);
+  f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] } });
+  f.fire('doc', 'dragend', {});
+  assert.equal(store.get().dropping, false, 'dragend clears it');
+  f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] } });
+  prevented = false;
+  f.fire('doc', 'drop', { target: f.body, dataTransfer: { types: ['Files'], files: [CSV()], getData: () => '' }, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(store.get().dropping, false);
+  assert.doesNotMatch(f.html(), /drop-overlay/);
+  assert.match(f.html(), /prices.csv/);
+  assert.equal(att.uploads.length, 1);
+  // a screen with no composer: no overlay, and a drop adds nothing
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openMarket', id: 'crypto:BTC' } });
+  await settle();
+  assert.equal(store.get().route.screen, 'markets');
+  f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] } });
+  assert.equal(store.get().dropping, false);
+  f.fire('doc', 'drop', { target: f.body, dataTransfer: { types: ['Files'], files: [PNG()], getData: () => '' } });
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  await settle();
+  assert.doesNotMatch(f.html(), /chart.png/);
+  store.timers.clear();
+});
+
+test('a drop of HTML on the editor inserts its plain text only, never a chip', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const { writes, editor } = recording();
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att, editor);
+  const asked = [];
+  const data = { 'text/html': '<span data-chip=\'{"kind":"bot","id":"x","label":"x"}\'>x</span>', 'text/plain': 'x' };
+  let prevented = false;
+  let overSay = false;
+  f.fire('doc', 'dragover', { target: say, dataTransfer: { types: ['text/html', 'text/plain'] }, preventDefault() { overSay = true; } });
+  assert.equal(overSay, true, 'text may be dropped on the editor');
+  f.fire('doc', 'drop', {
+    target: say, clientX: 5, clientY: 6, preventDefault() { prevented = true; },
+    dataTransfer: { types: ['text/html', 'text/plain'], files: [], getData: t => { asked.push(t); return data[t] ?? ''; } },
+  });
+  assert.equal(prevented, true, 'the browser never drops the markup itself');
+  assert.deepEqual(asked, ['text/plain'], 'text/html is never read');
+  assert.deepEqual(writes.at(-1)[1], [{ type: 'text', text: 'x' }]);
+  assert.equal(say.value, 'x');
+  store.timers.clear();
+});
+
+test('a drop on the editor goes in at the point under the pointer', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const points = [];
+  const editor = { ...valueEditor, pointAt: (el, x, y) => { points.push([el, x, y]); return 1; } };
+  const store = await bootFiles(f, h, fakeAttachments(), editor);
+  type(f, say, 'ab');
+  say.setSelectionRange(2, 2);
+  f.fire('doc', 'drop', { target: say, clientX: 5, clientY: 6, dataTransfer: { types: ['text/plain'], files: [], getData: t => (t === 'text/plain' ? 'X' : '') } });
+  assert.deepEqual(points, [[say, 5, 6]]);
+  assert.equal(say.value, 'aXb');
+  assert.equal(say.selectionStart, 2, 'the caret after the dropped text');
+  store.timers.clear();
+});
+
+test('a drag that starts in the editor is cancelled', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { say } = composerEls(f);
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = await bootFiles(f, h, fakeAttachments());
+  let prevented = false;
+  f.fire('doc', 'dragstart', { target: { tagName: 'SPAN', closest: sel => (sel === '#say' ? say : null) }, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  prevented = false;
+  f.fire('doc', 'dragstart', { target: { tagName: 'IMG', closest: () => null }, preventDefault() { prevented = true; } });
+  assert.equal(prevented, false, 'a drag elsewhere on the page is the browser\'s');
+  store.timers.clear();
+});
+
+test('switching conversations mid-upload: the progress and the receipt land in the first draft, the second\'s rail is never written', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { input, rail } = composerEls(f);
+  const h = twoRows();
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  pick(f, input, [CSV()]);
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  await settle();
+  assert.doesNotMatch(f.html(), /prices.csv/, 'B has no files');
+  att.uploads[0].onProgress(Math.round(1.1 * MiB));
+  assert.equal(rail.railWrites, 0, "B's rail is never written by A's tick");
+  att.uploads[0].answer('rcpt-1');
+  await settle();
+  assert.doesNotMatch(f.html(), /prices.csv/, "A's receipt lands in A, not on screen");
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  await settle();
+  assert.match(f.html(), /file-meta">CSV · 2.8 MB</, 'A shows the file up on return');
+  assert.doesNotMatch(f.html(), /file-card uploading/);
+  store.timers.clear();
+});
+
+test('a draft with files and no words stays when its conversation is left and opened again', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const { input, say } = composerEls(f);
+  const h = twoRows();
+  const att = fakeAttachments();
+  const store = await bootFiles(f, h, att);
+  pick(f, input, [PNG()]);
+  type(f, say, 'x');
+  type(f, say, '');
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  await settle();
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  await settle();
+  assert.match(f.html(), /alt="chart.png"/);
+  assert.equal(att.limitReads.length, 1, 'the image limits read once, on the first conversation opened');
+  assert.equal(att.limitReads[0], 's1');
+  store.timers.clear();
+});

@@ -42,7 +42,9 @@ import { isCnKey } from './wire/china.js';
 import { makeEditor } from './composer/dom.js';
 import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt, hasChip } from './composer/draft.js';
 import { flatItems, slashItems, atItems, conversationChoices, moveActive, chipOf } from './composer/menus.js';
-import { renderMenu, menuAria } from './composer/view.js';
+import { renderMenu, menuAria, filesRail, dropOverlay } from './composer/view.js';
+import { admit } from './composer/files.js';
+import { startAttachments } from './host/attachments.js';
 import { startComposerReads } from './host/composer.js';
 import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
@@ -434,12 +436,30 @@ export function boot(win, host = {}) {
   // the owner's keys act only for a page that signs (the renderers draw them for no other)
   const signs = () => store.get().owner.role === 'signs';
 
-  // the composer's drafts (D8), in memory: one per conversation by its id, `new` for New message, `empty` with neither
+  // the composer's drafts (D8), in memory: one per conversation by its id, `new` for New message, `empty` with neither;
+  // each its runs and its files (composer/files.js), the entry gone only when both are empty
   const drafts = new Map();
   const draftKey = s => (s.draft ? 'new' : currentConversation(s)?.id ?? 'empty');
+  // Messages is the one screen with a composer (a conversation, New message, the empty state)
+  const composerOn = s => s.route.screen === 'messages';
+  // a conversation's draft, whose files upload to it as they are added; New message's (and the empty state's) wait (D10)
+  const isConvKey = key => key !== 'new' && key !== 'empty';
   const runsOf = key => drafts.get(key)?.runs ?? [];
+  const filesOf = key => drafts.get(key)?.files ?? [];
   const currentRuns = () => runsOf(draftKey(store.get()));
-  const setRuns = (runs, key = draftKey(store.get())) => { if (runs.length) drafts.set(key, { runs }); else drafts.delete(key); };
+  const putDraft = (key, runs, files) => { if (runs.length || files.length) drafts.set(key, { runs, files }); else drafts.delete(key); };
+  const setRuns = (runs, key = draftKey(store.get())) => putDraft(key, runs, filesOf(key));
+  const setFiles = (files, key = draftKey(store.get())) => putDraft(key, runsOf(key), files);
+  // the attachments' reads: the image limits, a file's upload to its session, a history thumb (a test hands in its own)
+  const attachments = host.attachments ?? startAttachments({ call, store });
+  let limitsAsked = false;   // the image limits are read once, when the first conversation opens
+  // the line above the box by draft key: a refusal of the files added, cleared by the next add or remove under that key
+  const notes = new Map();
+  // the uploads in flight by draft key and file key, each its handle: a landing whose handle is gone (removed, retried)
+  // takes nothing
+  const uploads = new Map();
+  const uploadKey = (key, fileKey) => `${key}\n${fileKey}`;
+  let fileSeq = 0;
   // the / and @ menus: the menu drawn under the editor (null when none shows), the trigger it stands on, and a sequence
   // that every tick and every close moves on, so a read's late answer draws only for the trigger it was asked for
   let menu = null;
@@ -500,14 +520,23 @@ export function boot(win, host = {}) {
     if (scrolls.rows != null) rowsAt = scrolls.rows;
     // a disclosure the person opened (its Raw, a trace; tool calls are stored but not drawn) is the page's, not the store's: open again by its id
     const opened = [...root.querySelectorAll('details[id][open]')].map(el => el.id);
+    // the note above the box is a live region: the node stays across renders, so a new line in it is announced
+    const note0 = doc.getElementById('composer-note');
+    const noteText = notes.get(key) ?? '';
 
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
-      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu });
+      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText });
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
     const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
-    root.innerHTML = renderRail(s, now(), { mac }) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen);
+    // files dragged over a screen with a composer: the drop overlay over the page
+    const overlayHtml = s.dropping && composerOn(s) ? dropOverlay(attachments.limits()) : '';
+    root.innerHTML = renderRail(s, now(), { mac }) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen) + overlayHtml;
+    const note1 = doc.getElementById('composer-note');
+    if (note0 && note1 && note0 !== note1 && typeof note1.replaceWith === 'function') note1.replaceWith(note0);
+    const noteEl = doc.getElementById('composer-note');
+    if (noteEl && noteEl.textContent !== noteText) noteEl.textContent = noteText;
     // the quotes poll asks for the rows the table drew, by id; a market's page, which draws none, for its own market (spec §6.1:
     // the page follows it on the stream and polls quotes for what the stream does not carry)
     if (s.route.screen === 'markets') {
@@ -672,6 +701,7 @@ export function boot(win, host = {}) {
     if (r.screen === 'messages' && r.id && r.id !== 'new' && r.id !== openedId) {
       openedId = r.id;
       live.open(r.id);
+      if (!limitsAsked) { limitsAsked = true; void attachments.readLimits(r.id); }
     } else if (r.screen === 'messages' && !r.id && openedId && !store.get().conversations.some(c => c.id === openedId)) {
       // the last open conversation went (deleted) and nothing took its place: stop reading it
       openedId = null;
@@ -991,6 +1021,78 @@ export function boot(win, host = {}) {
     if (sent && (sent.sent === 'prompt' || sent.sent === 'say')) live.promote(sent.sessionId);
     return sent;
   }
+
+  // ---- the draft's files: added (picked, pasted, dropped), uploaded on a conversation, removed, retried ----
+  // the record under its own key by its file key, patched; false when it is gone (removed meanwhile), and nothing changes
+  function patchFile(key, fileKey, patch) {
+    const files = filesOf(key);
+    if (!files.some(f => f.key === fileKey)) return false;
+    setFiles(files.map(f => (f.key === fileKey ? { ...f, ...patch } : f)), key);
+    return true;
+  }
+  // the rail of the draft on screen into #composer-files alone: a progress tick's write, never a page render
+  function drawFiles() {
+    const slot = doc.getElementById('composer-files');
+    if (slot) slot.innerHTML = filesRail(filesOf(draftKey(store.get())));
+  }
+  // a file (never an image: it goes inline when sent) uploading to the session its draft belongs to; its ticks and its
+  // landing go to that draft whatever is on screen, the ticks drawn only while it is the draft on screen. The caller renders
+  function startUpload(key, fileKey) {
+    const rec = filesOf(key).find(f => f.key === fileKey);
+    if (!rec || rec.kind !== 'file' || !isConvKey(key)) return;
+    patchFile(key, fileKey, { status: 'uploading', loaded: 0 });
+    const k = uploadKey(key, fileKey);
+    uploads.get(k)?.abort();   // one upload a file: one still in flight gives way
+    let handle = null;
+    const mine = () => handle !== null && uploads.get(k) === handle;
+    handle = attachments.upload(key, rec.blob, loaded => {
+      if (!mine() || !patchFile(key, fileKey, { loaded })) return;
+      if (key === draftKey(store.get())) drawFiles();
+    });
+    uploads.set(k, handle);
+    const land = patch => {
+      if (!mine()) return;
+      uploads.delete(k);
+      if (patchFile(key, fileKey, patch)) render();
+    };
+    handle.done.then(receiptId => land({ status: 'up', loaded: rec.bytes, receiptId, sessionId: key }), () => land({ status: 'failed' }));
+  }
+  // Files (a FileList, or the list a paste or a drop holds) into a draft: each admitted by the session's image limits, an
+  // image with its object URL; a refusal is the key's note. On a conversation each file uploads at once
+  function addFiles(list, key = draftKey(store.get())) {
+    const picked = Array.from(list ?? []).map(f => ({ key: `a${++fileSeq}`, name: f.name, bytes: f.size, mediaType: f.type, blob: f }));
+    if (!picked.length) return;
+    const had = filesOf(key);
+    const { files, refusal } = admit(had, picked, attachments.limits());
+    const added = files.slice(had.length).map(f => (f.kind === 'image' ? { ...f, url: win.URL.createObjectURL(f.blob) } : f));
+    setFiles([...had, ...added], key);
+    if (refusal) notes.set(key, refusal); else notes.delete(key);
+    for (const f of added) startUpload(key, f.key);
+    render();
+  }
+  // a file taken out of the draft on screen: its upload aborted, its image's URL revoked
+  function removeFile(fileKey) {
+    const key = draftKey(store.get());
+    const rec = filesOf(key).find(f => f.key === fileKey);
+    if (!rec) return;
+    const k = uploadKey(key, fileKey);
+    const handle = uploads.get(k);
+    uploads.delete(k);
+    handle?.abort();
+    if (rec.url) win.URL.revokeObjectURL(rec.url);
+    setFiles(filesOf(key).filter(f => f.key !== fileKey), key);
+    notes.delete(key);
+    render();
+  }
+  // words into the editor as a paste or a drop puts them: plain text over [from, to], the caret after them; no render
+  function insertWords(say, words, from, to) {
+    const runs = replaceRange(editor.read(say), from, to, words);
+    setRuns(runs);
+    editor.write(say, runs, from + words.length);
+    menuTick();
+  }
+  const atEnd = say => { const n = lengthOf(editor.read(say)); return [n, n]; };
+  const hasFiles = dt => Array.from(dt?.types ?? []).includes('Files');
 
   // ---- the / and @ menus: opened, filtered and moved in #composer-menu alone, never by a page render ----
   const sameTrig = (a, b) => !!a && !!b && a.kind === b.kind && a.from === b.from && a.query === b.query && a.key === b.key;
@@ -1347,6 +1449,10 @@ export function boot(win, host = {}) {
       }
     },
     reportAgain: el => { if (signs() && el.dataset.key) sendFromWallet(walletSend.reportAgain(el.dataset.key)); },
+    // the composer's files: the paperclip opens the hidden input (its change adds them), a card's ✕ and a failed one's Retry
+    attachFiles: () => { doc.getElementById('attach-input')?.click(); },
+    attachRemove: el => removeFile(el.dataset.key),
+    attachRetry: el => { const key = draftKey(store.get()); startUpload(key, el.dataset.key); render(); },
   };
 
   root.addEventListener('click', ev => {
@@ -1413,6 +1519,8 @@ export function boot(win, host = {}) {
     if (isField(el) && !typesWords(el)) changeField(el.name, fieldValueOf(el));
     if (el.dataset?.action === 'runSheetField' && !typesWords(el)) act.runSheetField(el);
     if (el.type === 'checkbox' && el.dataset?.action === 'sellManyPick') sellMany.toggle(el.value);
+    // the files picked, then the input emptied, so the same file can be picked again
+    if (el.id === 'attach-input') { const files = Array.from(el.files ?? []); el.value = ''; addFiles(files); }
   });
   let pressSeq = 0;   // a press's own timeout ends only that press, never a later one
   root.addEventListener('pointerdown', ev => {
@@ -1429,19 +1537,44 @@ export function boot(win, host = {}) {
   doc.addEventListener('pointerup', release);
   doc.addEventListener('pointercancel', release);
   win.addEventListener('blur', release);
-  // a paste in the editor is plain text over the selection (a paste of files is plan 4's); the page is not rendered
+  // a paste in the editor: files join the draft (and no text goes in); else plain text over the selection, the page not
+  // rendered
   root.addEventListener('paste', ev => {
     const say = sayOf(ev.target);
     if (!say) return;
     ev.preventDefault();
+    const files = Array.from(ev.clipboardData?.files ?? []);
+    if (files.length) { addFiles(files); return; }
     const words = (ev.clipboardData?.getData('text/plain') ?? '').replace(/\r\n?/g, '\n');
     if (!words) return;
-    const now0 = editor.read(say);
-    const [from, to] = editor.selection(say) ?? [lengthOf(now0), lengthOf(now0)];
-    const runs = replaceRange(now0, from, to, words);
-    setRuns(runs);
-    editor.write(say, runs, from + words.length);
-    menuTick();
+    const [from, to] = editor.selection(say) ?? atEnd(say);
+    insertWords(say, words, from, to);
+  });
+  // drag and drop, on the document: no drag starts from the editor (a chip is never moved or copied by the browser); files
+  // dragged over a screen with a composer show the overlay, and dropped join the draft on screen; text dropped on the editor
+  // is its text/plain at the point (text/html is never read: no chip enters from outside)
+  doc.addEventListener('dragstart', ev => { if (sayOf(ev.target)) ev.preventDefault(); });
+  doc.addEventListener('dragover', ev => {
+    if (hasFiles(ev.dataTransfer)) {
+      ev.preventDefault();
+      if (composerOn(store.get())) store.dispatch('setDropping', true);
+    } else if (sayOf(ev.target)) ev.preventDefault();
+  });
+  doc.addEventListener('dragleave', ev => { if (!ev.relatedTarget) store.dispatch('setDropping', false); });
+  doc.addEventListener('dragend', () => store.dispatch('setDropping', false));
+  doc.addEventListener('drop', ev => {
+    ev.preventDefault();
+    store.dispatch('setDropping', false);
+    const dt = ev.dataTransfer;
+    const files = Array.from(dt?.files ?? []);
+    if (files.length) { if (composerOn(store.get())) addFiles(files); return; }
+    const say = sayOf(ev.target);
+    if (!say) return;
+    const words = (dt?.getData?.('text/plain') ?? '').replace(/\r\n?/g, '\n');
+    if (!words) return;
+    const at = editor.pointAt?.(say, ev.clientX, ev.clientY) ?? null;
+    const [from, to] = at != null ? [at, at] : editor.selection(say) ?? atEnd(say);
+    insertWords(say, words, from, to);
   });
   // a caret moved by a key: the token before it may open, follow or close the menu (a no-op while it stands where it was)
   const CARET_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);

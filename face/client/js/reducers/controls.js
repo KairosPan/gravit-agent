@@ -35,6 +35,9 @@ export const reducers = {
     return ticked === e.ticked ? s : { ...s, edit: { ...e, ticked } };
   },
 
+  // files dragged over the page, or no longer: the drop overlay (app.js draws it while a composer is on screen)
+  setDropping: (s, on) => (s.dropping === (on === true) ? s : { ...s, dropping: on === true }),
+
   askConfirm: (s, spec) => ({ ...s, confirm: spec, edit: null }),
   cancelConfirm: s => (s.confirm ? { ...s, confirm: null } : s),
 };

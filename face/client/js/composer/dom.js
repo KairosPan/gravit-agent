@@ -164,5 +164,19 @@ export function makeEditor(doc) {
     if (at != null) place(el, at, end);
   };
 
-  return { read, caret, selection, place, write };
+  /** The caret units at a viewport point (a drop's), from caretPositionFromPoint or WebKit's caretRangeFromPoint; null
+   *  when the document has neither, or the point is outside the editor. */
+  const pointAt = (el, x, y) => {
+    let node = null, offset = 0;
+    if (typeof doc.caretPositionFromPoint === 'function') {
+      const p = doc.caretPositionFromPoint(x, y);
+      if (p) { node = p.offsetNode; offset = p.offset; }
+    } else if (typeof doc.caretRangeFromPoint === 'function') {
+      const r = doc.caretRangeFromPoint(x, y);
+      if (r) { node = r.startContainer; offset = r.startOffset; }
+    }
+    return node && el.contains(node) ? unitAt(el, node, offset) : null;
+  };
+
+  return { read, caret, selection, place, write, pointAt };
 }

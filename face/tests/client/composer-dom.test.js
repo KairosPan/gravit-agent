@@ -204,3 +204,24 @@ test('a chip that ends the draft has a zero-width space after it, where the care
   doc.select(z, 0); assert.equal(ed.caret(root), 3);
   ed.place(root, 2); assert.deepEqual(doc.sel.collapsed.at(-1), [root.childNodes[0], 2], 'before the chip is unchanged');
 });
+
+test('pointAt maps a caret position from the point into caret units, and null without one', () => {
+  const t1 = text('ab'), chip = chipEl(bot), t2 = text('​cd');
+  const root = editor([t1, chip, t2]);
+  const doc = makeDoc();
+  const ed = makeEditor(doc);
+  assert.equal(ed.pointAt(root, 10, 20), null, 'neither caretPositionFromPoint nor caretRangeFromPoint');
+  const asked = [];
+  doc.caretPositionFromPoint = (x, y) => { asked.push([x, y]); return { offsetNode: t2, offset: 2 }; };
+  assert.equal(ed.pointAt(root, 10, 20), 4, 'after the chip and one letter');
+  assert.deepEqual(asked, [[10, 20]]);
+  doc.caretPositionFromPoint = () => ({ offsetNode: text('elsewhere'), offset: 0 });
+  assert.equal(ed.pointAt(root, 1, 1), null, 'a point outside the editor');
+  doc.caretPositionFromPoint = () => null;
+  assert.equal(ed.pointAt(root, 1, 1), null, 'no position at the point');
+  delete doc.caretPositionFromPoint;
+  doc.caretRangeFromPoint = () => ({ startContainer: t1, startOffset: 1 });
+  assert.equal(ed.pointAt(root, 1, 1), 1, 'the WebKit range');
+  doc.caretRangeFromPoint = () => ({ startContainer: root, startOffset: 2 });
+  assert.equal(ed.pointAt(root, 1, 1), 3, 'on the editor itself, after the chip');
+});

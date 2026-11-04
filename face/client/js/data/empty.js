@@ -10,6 +10,8 @@ export function emptyState() {
     railCollapsed: false,
     collapsed: {},
     draft: null,
+    // files are being dragged over the page: the drop overlay shows over a screen with a composer (plan 4)
+    dropping: false,
     detailsOpen: false,
     settingsOpen: false,
     conversations: [],
