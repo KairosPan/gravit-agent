@@ -36,6 +36,7 @@ import { marketQuotes } from "./market-quotes.ts";
 import { registerStatic, type IndexAuth } from "./static.ts";
 import { readMeta, registerSessionRoutes } from "./sessions.ts";
 import { openSearchIndex, type SearchIndex } from "./search-index.ts";
+import { registerFileRoutes } from "./files.ts";
 import { makeSearch, readEventsFrom, registerSearchRoutes, type StoredSession } from "./search.ts";
 import type { StoredEvent } from "./search-text.ts";
 import { listSessionHeads, registerChannelRoutes, type RegistryLike } from "./channels.ts";
@@ -337,6 +338,8 @@ registerSearchRoutes(booted.ctx.webServer, makeSearch({
   read: (id, from) => readEventsFrom(sessionPersistence, id, from),
   deleted: async () => new Set((await readMeta(dshHome)).deleted),
 }));
+/* The `@` picker's listing (src/files.ts): the repository's files and folders, the key files and other worktrees skipped. */
+registerFileRoutes(booted.ctx.webServer, { root: process.cwd() });
 registerBotRoutes(booted.ctx.webServer, {
   botsRoot: BOTS_ROOT,
   listPresets: () => agentPresets.list(),
