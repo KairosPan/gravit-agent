@@ -4,7 +4,7 @@ import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
 import { fmtDate } from '../time.js';
 import { avatar, cluster } from './avatars.js';
-import { renderThread } from './thread.js';
+import { renderThread, railHtml } from './thread.js';
 import { senderName } from './rail.js';
 import { kv, inlineEdit, confirmPair } from './controls.js';
 import { firstOpen } from '../host/sessions.js';
@@ -180,5 +180,5 @@ export function renderMessagesScreen(state, now, composer = {}, page = {}) {
   const conv = currentConversation(state);
   if (!conv) return emptyScreen(state, composer);
   const placeholder = conv.kind === 'group' ? 'Tell Gravit… @ a bot by name' : 'Tell Gravit…';
-  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="Turns"></nav></div>${renderComposer(composerOf(composer, { placeholder }))}${threadFoot(conv, state)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
+  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="Turns">${railHtml(conv, page.rail)}</nav></div>${renderComposer(composerOf(composer, { placeholder }))}${threadFoot(conv, state)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
 }

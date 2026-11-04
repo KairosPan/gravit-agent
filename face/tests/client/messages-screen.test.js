@@ -270,13 +270,13 @@ test('Earlier messages shows while the window has more, Loading… aria-disabled
   assert.doesNotMatch(at(undefined), /earlier-key/);
 });
 
-test("the thread's anchor: the first message drawn at or past the seq the page names carries id thread-anchor, once", () => {
+test("the thread's anchor: the first message drawn at or past the seq the page names carries data-anchor, once", () => {
   const msg = (id, seq) => ({ id, seq, at: NOW, from: 'you', kind: 'text', text: 'w' + seq, data: {} });
   const s = listed([conv('a', { messages: [msg('m10', 10), msg('m30', 30), msg('m31', 31)] })]);
   const h = renderMessagesScreen(s, NOW, {}, { anchor: 20 });
-  assert.equal(count(h, /id="thread-anchor"/g), 1);
-  assert.match(h, /<div id="thread-anchor" class="msg you"><div class="bubble you">w30</);
-  assert.doesNotMatch(renderMessagesScreen(s, NOW), /thread-anchor/, 'no anchor named, none drawn');
+  assert.equal(count(h, /data-anchor/g), 1);
+  assert.match(h, /<div data-anchor class="msg you"><div class="bubble you">w30</);
+  assert.doesNotMatch(renderMessagesScreen(s, NOW), /data-anchor/, 'no anchor named, none drawn');
 });
 
 // plan 5, Task 6: the session's figures (D21) in Usage and as two pills under the composer

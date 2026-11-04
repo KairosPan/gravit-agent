@@ -14,7 +14,8 @@ import { viewOf } from '../host/lunhui.js';
 import { sessionRefRuns } from '../composer/draft.js';
 import { chipInner, fileCard } from '../composer/view.js';
 import { metaText, sizeText, isImageSrc } from '../composer/files.js';
-import { maskSpans } from '../mask.js';
+import { maskSpans, maskExcerpt } from '../mask.js';
+import { railView } from '../host/turns-view.js';
 
 export const chip = (text, tone = 'grey') => `<span class="${cls('chip', tone)}">${esc(text)}</span>`;
 
@@ -190,24 +191,38 @@ export function renderMessage(m, conv, state, page = {}) {
 // the three-dot row while the host streams a turn
 const thinkingRow = conv => `<div class="msg left"><div class="msg-row">${avatar(conv.kind === 'bot' ? conv.preset : 'gravit', 28)}<div class="msg-body"><div class="bubble grey thinking" role="status" aria-label="thinking"><span></span><span></span><span></span></div></div></div></div>`;
 
+// a turn's mark in the thread: no height, the thread's gap cancelled; the rail reads its offsetTop and jumps to it (app.js)
+const turnMark = (conv, t) => `<div class="turn-mark"${attrs({ id: `turn-${conv.id}-${t.turn}`, 'data-turn': t.turn })}></div>`;
+
 // a tool call leaves nothing in the thread, not even the time it held: a divider reads the gap between the rows drawn;
-// the words a composed answer folds are drawn inside its Working notes, just above it, and nowhere else
+// the words a composed answer folds are drawn inside its Working notes, just above it, and nowhere else. Before the first
+// message drawn past a turn's start, that turn's mark: a loaded turn's, or one whose turn/start lies before the window
+// while this message is of its turn (a page cuts at a message group, not at turn/start); the loaded turns left at the end
 export function renderThread(conv, state, now, page = {}) {
   let prev = null;
   const out = [];
   const notes = foldNotes(conv.messages);
   const folded = new Set([...notes.values()].flat());
   const byId = new Map(conv.messages.map(m => [m.id, m]));
-  // the scroll keep's anchor (app.js render): the first message drawn at or past page.anchor carries id thread-anchor
-  // (its folded notes first, when it has them: they are drawn above it)
+  const ticks = Array.isArray(conv.outline) ? railView(conv).ticks : [];
+  let next = 0;
+  const marksBefore = seq => {
+    for (; next < ticks.length && ticks[next].seq < seq; next++) {
+      const t = ticks[next];
+      if (t.loaded || seq < (ticks[next + 1]?.seq ?? Infinity)) out.push(turnMark(conv, t));
+    }
+  };
+  // the scroll keep's anchor (app.js render): the first message drawn at or past page.anchor carries data-anchor (its
+  // folded notes first, when it has them: they are drawn above it) — an attribute of its own, never in place of an id
   let anchor = typeof page.anchor === 'number' ? page.anchor : null;
   const anchored = html => {
     if (anchor === null) return html;
     anchor = null;
-    return html.replace(/^<(div|details)/, '<$1 id="thread-anchor"');
+    return html.replace(/^<(div|details)/, '<$1 data-anchor');
   };
   for (const m of conv.messages) {
     if (m.kind === 'tool' || folded.has(m.id)) continue;
+    if (typeof m.seq === 'number') marksBefore(m.seq);
     const d = divider(m.at, prev, now);
     if (d) out.push(`<div class="divider">${esc(d)}</div>`);
     const at = anchor !== null && typeof m.seq === 'number' && m.seq >= anchor;
@@ -217,6 +232,26 @@ export function renderThread(conv, state, now, page = {}) {
     out.push(keep(renderMessage(m, conv, state, page)));
     prev = m.at;
   }
+  for (; next < ticks.length; next++) if (ticks[next].loaded) out.push(turnMark(conv, ticks[next]));
   if (conv.thinking) out.push(thinkingRow(conv));
   return out.join('');
+}
+
+// the turn rail (D22), the inside of #turn-rail: a tick per turn, the hovered one's card beside it (its prompt and reply
+// masked whoever spoke, as every excerpt is); '' when the rail does not show. Memoized on its inputs, not on railView's
+// output (new objects every call): the page renders 10–20 times a second while a turn streams
+let railMemo = null;
+export function railHtml(conv, { active = null, hover = null, pulse = null } = {}) {
+  const w = conv?.window;
+  const key = [conv?.id, conv?.outline, conv?.loaded, w?.start, w?.hasMore, active, hover, pulse];
+  if (railMemo && railMemo.key.every((v, i) => Object.is(v, key[i]))) return railMemo.html;
+  const { show, ticks } = railView(conv);
+  const html = !show ? '' : ticks.map(t => {
+    const tick = `<button${attrs({ type: 'button', class: cls('turn-tick', t.loaded && 'loaded', t.turn === active && 'active', t.turn === pulse && 'pulse'), id: `turn-tick-${t.turn}`, 'data-action': 'jumpTurn', 'data-turn': t.turn, 'aria-label': `Turn ${t.turn}` })}></button>`;
+    const card = t.turn !== hover ? '' : `<div class="turn-card" role="tooltip"><div class="turn-card-head">${esc(`Turn ${t.turn} · jump`)}</div>` +
+      `<div class="turn-card-prompt">${esc(maskExcerpt(t.prompt))}</div>${t.response ? `<div class="turn-card-reply">${esc(maskExcerpt(t.response))}</div>` : ''}</div>`;
+    return `<div class="turn-row">${tick}${card}</div>`;
+  }).join('');
+  railMemo = { key, html };
+  return html;
 }

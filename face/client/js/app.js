@@ -43,7 +43,8 @@ import { makeEditor } from './composer/dom.js';
 import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt, hasChip } from './composer/draft.js';
 import { flatItems, slashItems, atItems, conversationChoices, moveActive, chipOf } from './composer/menus.js';
 import { renderMenu, menuAria, filesRail, dropOverlay, lightboxHtml } from './composer/view.js';
-import { thumbsNeeded } from './render/thread.js';
+import { thumbsNeeded, railHtml } from './render/thread.js';
+import { railView, activeTurn } from './host/turns-view.js';
 import { admit, blocking, hasImage, contentParts, encodeBase64, modelRefusalLine, isImageSrc } from './composer/files.js';
 import { senderName } from './render/rail.js';
 import { startAttachments } from './host/attachments.js';
@@ -516,6 +517,13 @@ export function boot(win, host = {}) {
   const revealed = new Set();
   let last = { lightbox: false, overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, start: null, anchor: null, editor: null, confirm: null, query: '', key: null };
   let confirmFrom = null;
+  // the turn rail's page state (D22): the turn the view is on, the hovered or focused tick, the tick pulsing while its
+  // pages load and the jump waiting for its mark; forgotten once the conversation leaves the screen
+  const freshRail = () => ({ active: null, hover: null, pulse: null, jump: null });
+  let rail = freshRail();
+  let railSeen = null;      // the rail's inputs as last measured: the conversation, its outline, its window's start and more
+  let railTimer = null;     // a scroll's measure, coalesced
+  let railDrawing = false;  // the rail's own redraw takes its focused tick away and gives it back: no hover change meanwhile
   let searchFocus = false;  // ⌥⌘K from a screen with no list: the box takes focus once Messages draws it
   let rowsAt = null;        // where the groups last stood: a query hides them, and they come back there when it clears (spec §5.1)
 
@@ -548,7 +556,6 @@ export function boot(win, host = {}) {
     const threadAt = thread0 ? { top: thread0.scrollTop, height: thread0.scrollHeight, bottom: thread0.scrollHeight - thread0.scrollTop - thread0.clientHeight < 40 } : null;
     // the scroll keep's anchor: the message drawn first at the anchor seq last time, where it stood, and the document's
     // scroll (a narrow window scrolls the page, not the thread)
-    const anchorAt = doc.getElementById('thread-anchor')?.offsetTop ?? null;
     const docAt = doc.scrollingElement?.scrollTop ?? null;
     const scrolls = { main: root.querySelector('main')?.scrollTop, rows: root.querySelector('.rail-rows')?.scrollTop, results: root.querySelector('.conv-results')?.scrollTop, drawer: root.querySelector('.drawer-body')?.scrollTop };
     if (scrolls.rows != null) rowsAt = scrolls.rows;
@@ -564,12 +571,15 @@ export function boot(win, host = {}) {
     // the anchor seq stays on the message it marked while earlier pages land above it (the start falls or holds); a new
     // conversation, or a start that rose (a window taken whole), anchors on the window's first message again
     const anchorSeq = threadStart === null ? null : threadSig === last.thread && last.anchor !== null && last.start !== null && threadStart <= last.start ? last.anchor : threadStart;
-    if (threadSig !== last.thread) revealed.clear();
+    // the anchor's place is read (a layout) only when earlier pages can have landed: the same conversation, its start fallen
+    const prepended = threadAt !== null && threadSig !== null && threadSig === last.thread && threadStart !== null && last.start !== null && threadStart < last.start;
+    const anchorAt = prepended ? root.querySelector('[data-anchor]')?.offsetTop ?? null : null;
+    if (threadSig !== last.thread) { revealed.clear(); rail = freshRail(); }
 
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
-      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq });
+      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail });
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
     const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     // files dragged over a screen with a composer: the drop overlay over the page
@@ -637,8 +647,7 @@ export function boot(win, host = {}) {
     // message moved (by what was added when no anchor was drawn), so a frame coalesced below with the page moves nothing
     const thread = doc.getElementById('thread');
     const sameThread = threadAt && threadSig === last.thread;
-    const prepended = sameThread && threadSig !== null && threadStart !== null && last.start !== null && threadStart < last.start;
-    const anchorNow = doc.getElementById('thread-anchor')?.offsetTop ?? null;
+    const anchorNow = prepended ? root.querySelector('[data-anchor]')?.offsetTop ?? null : null;
     const added = !prepended ? 0 : anchorAt !== null && anchorNow !== null ? anchorNow - anchorAt : thread ? thread.scrollHeight - threadAt.height : 0;
     if (thread) thread.scrollTop = prepended ? threadAt.top + added : sameThread && !threadAt.bottom ? threadAt.top : thread.scrollHeight;
     // a thread that does not scroll (as tall as what it holds): the document carries the keep
@@ -693,12 +702,62 @@ export function boot(win, host = {}) {
       // focus can move a contenteditable's caret: the editor's goes back where write put it
       if (target === say && keep !== null) editor.place(say, keep[0], keep[1]);
     }
+    // the rail: a jump waiting for its mark scrolls to it once drawn; inputs changed (another conversation, its outline, its
+    // window) measure the turn the view is on once
+    let railStale = false;
+    if (rail.jump && rail.jump.conv === threadSig) {
+      const mark = doc.getElementById(`turn-${threadSig}-${rail.jump.turn}`);
+      if (mark) {
+        mark.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+        rail.jump = null;
+        rail.pulse = null;
+        railStale = true;
+      }
+    }
+    const inputs = open ? [open.id, open.outline, open.window?.start, open.window?.hasMore] : null;
+    if (inputs ? !railSeen || inputs.some((v, i) => !Object.is(v, railSeen[i])) : railSeen !== null) {
+      railSeen = inputs;
+      if (measureRail()) railStale = false;
+    }
+    if (railStale) drawRail();
     last = { lightbox: lightUp, overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, start: threadStart, anchor: anchorSeq, editor: editorOf(s.edit), confirm: s.confirm, query, key };
     // a composed answer drawn without its run's view asks for it now that the page is whole (its dispatches render again)
     if (wantedViews(store.get()).length) void ensureViews(store, getJson);
     // the operator's images the thread drew still to read: each asked once (thumb keeps its own in-flight set), its answer
     // landing through the store (hostThumb), which draws it
     if (open) for (const t of thumbsNeeded(open, s.thumbs)) void attachments.thumb(t.sessionId, t.attachmentId);
+  }
+
+  // the turn rail alone, never the page (a scroll, a hover, a pulse): its focused tick keeps focus by its id
+  const railConv = () => { const s = store.get(); return s.route.screen === 'messages' && !s.draft ? currentConversation(s) ?? null : null; };
+  function drawRail() {
+    const el = doc.getElementById('turn-rail');
+    if (!el) return;
+    const focused = doc.activeElement?.id?.startsWith?.('turn-tick-') ? doc.activeElement.id : null;
+    const conv = railConv();
+    railDrawing = true;
+    try {
+      el.innerHTML = conv ? railHtml(conv, rail) : '';
+      if (focused) doc.getElementById(focused)?.focus({ preventScroll: true });
+    } finally {
+      railDrawing = false;
+    }
+  }
+  // the turn the view is on, from the marks' places in the thread; the rail redrawn when it moved (true then)
+  function measureRail() {
+    const thread = doc.getElementById('thread');
+    if (!thread || !railConv()) return false;
+    const marks = [...root.querySelectorAll('.turn-mark')].map(el => ({ turn: Number(el.dataset.turn), top: el.offsetTop }));
+    const on = activeTurn(marks, thread.scrollTop);
+    if (on === rail.active) return false;
+    rail.active = on;
+    drawRail();
+    return true;
+  }
+  function hoverRail(turn) {
+    if (railDrawing || turn === rail.hover) return;
+    rail.hover = turn;
+    drawRail();
   }
 
   // while an IME composes (pinyin), a render would replace the input and lose the composition: hold it until
@@ -1475,6 +1534,29 @@ export function boot(win, host = {}) {
       const before = store.get();
       if (store.dispatch('openDetails') === before) requestRender();
     },
+    // a rail tick: its mark drawn, scrolled into view (a drawn mark wins over the tick's loaded flag: a page cuts at a
+    // message group, so the window's oldest turn can read unloaded with its prompt drawn); else the pages back to its
+    // turn/start, the tick pulsing until render() draws its mark and scrolls to it. An answer that leaves the jump
+    // waiting (none drawn, or the read refused) ends it; another conversation opened meanwhile dropped it already
+    jumpTurn: el => {
+      const conv = railConv();
+      if (!conv) return;
+      const turn = Number(el.dataset.turn);
+      const mark = doc.getElementById(`turn-${conv.id}-${turn}`);
+      if (mark) { mark.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); return; }
+      const tick = railView(conv).ticks.find(t => t.turn === turn);
+      if (!tick || tick.loaded) return;
+      const jump = { conv: conv.id, turn };
+      rail.pulse = turn;
+      rail.jump = jump;
+      drawRail();
+      void live.earlier(conv.id, { toSeq: tick.seq }).then(() => {
+        if (rail.jump !== jump) return;
+        rail.jump = null;
+        rail.pulse = null;
+        drawRail();
+      });
+    },
     // earlier history of the conversation on screen, a page before its window (never activating it, PLAN D16)
     earlier: el => {
       const w = store.get().conversations.find(c => c.id === el.dataset.conv)?.window;
@@ -1708,6 +1790,18 @@ export function boot(win, host = {}) {
     moveCursor(el, minuteAt(ev.clientX, el.getBoundingClientRect(), Number(el.dataset.last)));
   }, { passive: true });
   root.addEventListener('input', ev => { if (!ev.isComposing && !composing) typed(ev.target); });
+  // the turn rail: the thread's scroll (it does not bubble: caught on the way down) measures the turn the view is on, one
+  // measure per 80 ms; a pointer or focus on a tick shows its card, leaving the rail hides it
+  root.addEventListener('scroll', ev => {
+    if (ev.target?.id !== 'thread' || railTimer !== null) return;
+    railTimer = timers.after(80, () => { railTimer = null; measureRail(); });
+  }, true);
+  const tickOf = el => el?.closest?.('.turn-tick') ?? null;
+  const inRail = el => Boolean(el?.closest?.('#turn-rail'));
+  root.addEventListener('mouseover', ev => { const t = tickOf(ev.target); if (t) hoverRail(Number(t.dataset.turn)); });
+  root.addEventListener('mouseout', ev => { if (tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null); });
+  root.addEventListener('focusin', ev => { const t = tickOf(ev.target); if (t) hoverRail(Number(t.dataset.turn)); });
+  root.addEventListener('focusout', ev => { if (tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null); });
   root.addEventListener('change', ev => {
     const el = ev.target;
     if (el.tagName === 'SELECT' && el.dataset?.action === 'draftWhere') {

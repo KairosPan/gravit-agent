@@ -412,3 +412,75 @@ test("a conversation chip beside a key keeps its chip, and a secret's text is es
   assert.doesNotMatch(h, /<b>/);
   assert.match(h, /https:\/\/me:<span class="secret"/);
 });
+
+// ---- the turn rail (plan 5, Task 7): the marks in the thread, the ticks, the card
+const entry = (turn, seq, prompt = `prompt ${turn}`, response = `reply ${turn}`) => ({ turn, seq, prompt, response });
+const said = (seq, from = 'you') => msg({ id: 'm' + seq, seq, from, text: 'said ' + seq });
+
+test('a mark precedes each loaded turn\'s first message, an unloaded turn has none', () => {
+  // turn 1 lies wholly before the window; turn 2's turn/start (12) is before the window's start (13) but its prompt is
+  // drawn; turn 3 is inside; turn 4 has started with nothing drawn yet
+  const c = conv({
+    outline: [entry(1, 2), entry(2, 12), entry(3, 20), entry(4, 30)],
+    window: { start: 13, through: 30, hasMore: true, replaced: [] },
+    messages: [said(13), said(14, 'gravit'), said(21), said(22, 'gravit')],
+  });
+  const h = renderThread(c, state, NOW);
+  assert.doesNotMatch(h, /id="turn-s1-1"/, 'nothing of turn 1 is drawn');
+  assert.match(h, /<div class="turn-mark" id="turn-s1-2" data-turn="2"><\/div>(<div class="divider">[^<]*<\/div>)?<div class="msg you"><div class="bubble you">said 13/);
+  assert.match(h, /said 14[\s\S]*<div class="turn-mark" id="turn-s1-3" data-turn="3"><\/div>[\s\S]*said 21/);
+  assert.ok(h.endsWith('<div class="turn-mark" id="turn-s1-4" data-turn="4"></div>'), 'a loaded turn with nothing drawn goes at the end');
+  assert.equal(h.match(/turn-mark/g).length, 3);
+  // the whole log loaded: turn 1 has a mark too, before its first message
+  const whole = renderThread(conv({ outline: [entry(1, 0), entry(2, 5)], messages: [said(1), said(6)] }), state, NOW);
+  assert.match(whole, /^<div class="turn-mark" id="turn-s1-1" data-turn="1"><\/div>/);
+});
+
+test("the scroll keep's anchor is a data attribute: a folded notes block keeps its own id", () => {
+  setMarkdown(null);
+  const h = renderThread(conv({ id: 'c1', messages: turn() }), withView(null), NOW, { anchor: 6 });
+  assert.match(h, /<details data-anchor id="notes-c1-p7" class="notes">/);
+  assert.equal(h.match(/data-anchor/g).length, 1);
+  assert.doesNotMatch(h, /thread-anchor/);
+});
+
+test('the rail draws a tick per turn, loaded and active as told, nothing under two turns', async () => {
+  const { railHtml } = await import('../../client/js/render/thread.js');
+  const c = conv({ outline: [entry(1, 2), entry(2, 14), entry(3, 20)], window: { start: 13, through: 30, hasMore: true, replaced: [] } });
+  const h = railHtml(c, { active: 3 });
+  assert.equal(h.match(/<div class="turn-row">/g).length, 3);
+  assert.match(h, /<div class="turn-row"><button type="button" class="turn-tick" id="turn-tick-1" data-action="jumpTurn" data-turn="1" aria-label="Turn 1"><\/button><\/div>/);
+  assert.match(h, /class="turn-tick loaded" id="turn-tick-2"/);
+  assert.match(h, /class="turn-tick loaded active" id="turn-tick-3"/);
+  assert.match(railHtml(c, { pulse: 1 }), /class="turn-tick pulse" id="turn-tick-1"/);
+  assert.doesNotMatch(h, /turn-card/, 'no card without a hover');
+  assert.equal(railHtml(conv({ outline: [entry(1, 2)] }), {}), '');
+  assert.equal(railHtml(conv({ loaded: false, outline: [entry(1, 2), entry(2, 8)] }), {}), '');
+  assert.equal(railHtml(conv(), {}), '');
+});
+
+test("the hovered tick's card reads its turn, its masked prompt and, once finished, its reply", async () => {
+  const { railHtml } = await import('../../client/js/render/thread.js');
+  const c = conv({ outline: [entry(1, 2, `use ${SK} <b>`, 'done <i>'), entry(2, 12, 'and now?', '')] });
+  const h = railHtml(c, { hover: 1 });
+  const card = h.match(/<div class="turn-card" role="tooltip">[\s\S]*?<\/div><\/div><\/div>/)?.[0] ?? '';
+  assert.match(card, /<div class="turn-card-head">Turn 1 · jump<\/div>/);
+  assert.match(card, /<div class="turn-card-prompt">use sk-proj-\*+ &lt;b&gt;<\/div>/, 'the prompt masked and escaped');
+  assert.ok(!card.includes(SK));
+  assert.match(card, /<div class="turn-card-reply">done &lt;i&gt;<\/div>/);
+  assert.match(h, /id="turn-tick-1"[^>]*><\/button><div class="turn-card"/, 'the card in the hovered tick\'s row');
+  const running = railHtml(c, { hover: 2 });
+  assert.match(running, /Turn 2 · jump/);
+  assert.doesNotMatch(running, /turn-card-reply/, 'no reply line while the turn has none');
+});
+
+test("the rail's markup is the same string for the same inputs", async () => {
+  const { railHtml } = await import('../../client/js/render/thread.js');
+  const outline = [entry(1, 2), entry(2, 12)];
+  const window = { start: 0, through: 30, hasMore: false, replaced: [] };
+  const a = railHtml(conv({ outline, window }), { active: 1 });
+  const b = railHtml(conv({ outline, window: { ...window } }), { active: 1 });
+  assert.ok(Object.is(a, b));
+  assert.notEqual(railHtml(conv({ outline, window }), { active: 2 }), a);
+  assert.notEqual(railHtml(conv({ outline: [...outline], window }), { active: 2, hover: 2 }), a);
+});

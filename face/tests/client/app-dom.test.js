@@ -373,14 +373,14 @@ test('a stream frame held with the page (a press down) does not shift the reader
   const { f, thread, h } = earlierRig();
   // the old first message (seq 30) sits 20 px down until the page lands above it; the streamed message adds 100 px below
   Object.defineProperty(thread, 'scrollHeight', { get: () => 1000 + (f.html().includes('said 10') ? 600 : 0) + (f.html().includes('said 41') ? 100 : 0) });
-  const mark = f.withId('thread-anchor', { presentIf: /id="thread-anchor"/ });
+  const mark = f.withSelector('[data-anchor]', { presentIf: /data-anchor/ });
   Object.defineProperty(mark, 'offsetTop', { get: () => 20 + (f.html().includes('said 10') ? 600 : 0) });
   const store = started(f, h);
   await h.ready();
   const follow = h.streams.find(s => s.name === 'session/follow');
   follow.cbs.onItem({ type: 'snapshot', header: {}, cursor: 40, hasMore: true, records: [said(30), said(31)], projections: { asOfSeq: 40, values: {} } });
   await settle();
-  assert.match(f.html(), /<div id="thread-anchor" class="msg you"><div class="bubble you">said 30</);
+  assert.match(f.html(), /<div data-anchor class="msg you"><div class="bubble you">said 30</);
   thread.scrollTop = 0;
   f.fire('root', 'pointerdown', { button: 0 });
   f.click({ tagName: 'BUTTON', dataset: { action: 'earlier', conv: 's1' } });
@@ -5785,5 +5785,154 @@ test('each pill keeps its own focus: pill 2 stays focused across a render, and E
   assert.equal(store.get().detailsOpen, false);
   assert.equal(f.doc.activeElement, pill2, 'focus back on the pill that opened Details');
   assert.notEqual(f.doc.activeElement, pill1);
+  store.timers.clear();
+});
+
+// ---- the turn rail (plan 5, Task 7)
+// s1's snapshot holds 30 and 32 with more before it; turn 1 starts at 9 (paged in two pages back), turn 2 at 29 (its prompt,
+// 30, drawn though its turn/start lies before the window), turn 3 at 31. Each mark is registered by its id and as a
+// .turn-mark, found while its id is drawn, with a fixed offsetTop and its scrollIntoView calls recorded
+const outline = [{ turn: 1, seq: 9, prompt: 'first ask', response: 'first reply' }, { turn: 2, seq: 29, prompt: 'second ask', response: '' }, { turn: 3, seq: 31, prompt: 'third ask', response: 'third reply' }];
+function railRig({ pages, rows = [row('s1', { agentAvailable: true })] } = {}) {
+  const f = fakeWindow({ hash: '' });
+  const thread = f.withId('thread', { clientHeight: 400 });
+  // #turn-rail as the browser has it: what the page last drew in it, until the rail alone is written after that render
+  const rail = f.withId('turn-rail');
+  let own = null;
+  Object.defineProperty(rail, 'innerHTML', {
+    get: () => (own && own.at === f.writes ? own.html : f.html().match(/<nav class="turn-rail" id="turn-rail" aria-label="Turns">([\s\S]*?)<\/nav>/)?.[1] ?? ''),
+    set: html => { own = { at: f.writes, html }; },
+  });
+  const marks = {};
+  for (const [turn, top] of [[1, 0], [2, 100], [3, 500]]) {
+    const el = f.withId(`turn-s1-${turn}`, { dataset: { turn: String(turn) }, offsetTop: top, presentIf: new RegExp(`id="turn-s1-${turn}"`), scrolled: [] });
+    el.scrollIntoView = o => el.scrolled.push({ ...o, drawn: f.html().includes(`id="turn-s1-${turn}"`) });
+    f.alsoAs('.turn-mark', el);
+    marks[turn] = el;
+  }
+  const book = { 30: { records: [said(10), said(11)], hasMore: true }, 10: { records: [said(2), said(3)], hasMore: false } };
+  const h = host({ rows, pages: { s1: pages ?? (req => book[req.beforeSeq] ?? { records: [], hasMore: false }) } });
+  const snap = async () => {
+    h.streams.find(s => s.name === 'session/follow' && s.args.request.address.sessionId === 's1').cbs.onItem({ type: 'snapshot', header: {}, cursor: 40, hasMore: true, records: [said(30), said(32)], projections: { asOfSeq: 40, values: { turnOutline: outline } } });
+    await settle();
+  };
+  return { f, thread, rail, marks, h, book, snap };
+}
+const tickEl = turn => ({ id: `turn-tick-${turn}`, dataset: { action: 'jumpTurn', turn: String(turn) }, closest: sel => (sel === '.turn-tick' ? tickEl(turn) : null) });
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+test('a scroll redraws the rail alone with the active turn, and the page is not rendered', async () => {
+  const { f, thread, rail, h, snap } = railRig();
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  assert.match(f.html(), /<div class="turn-mark" id="turn-s1-2" data-turn="2"><\/div>/);
+  assert.match(rail.innerHTML, /class="turn-tick loaded active" id="turn-tick-3"/, 'at the tail, the last turn');
+  const writes = f.writes;
+  thread.scrollTop = 150;
+  f.fire('root', 'scroll', { target: thread });
+  f.fire('root', 'scroll', { target: thread });
+  await wait(100);
+  assert.equal(f.writes, writes, 'the page is not rendered');
+  assert.match(rail.innerHTML, /class="turn-tick active" id="turn-tick-2"/);
+  assert.doesNotMatch(rail.innerHTML, /active" id="turn-tick-3"/);
+  store.timers.clear();
+});
+
+test('hovering a tick draws its card in the rail alone', async () => {
+  const { f, rail, h, snap } = railRig();
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  const writes = f.writes;
+  f.fire('root', 'mouseover', { target: tickEl(1) });
+  assert.match(rail.innerHTML, /id="turn-tick-1"[^>]*><\/button><div class="turn-card" role="tooltip"><div class="turn-card-head">Turn 1 · jump<\/div><div class="turn-card-prompt">first ask<\/div><div class="turn-card-reply">first reply<\/div><\/div>/);
+  f.fire('root', 'mouseover', { target: tickEl(2) });
+  assert.match(rail.innerHTML, /Turn 2 · jump/);
+  assert.doesNotMatch(rail.innerHTML, /Turn 1 · jump/);
+  f.fire('root', 'mouseout', { target: tickEl(2), relatedTarget: { closest: () => null } });
+  assert.doesNotMatch(rail.innerHTML, /turn-card/, 'leaving the rail clears the card');
+  f.fire('root', 'focusin', { target: tickEl(3) });
+  assert.match(rail.innerHTML, /Turn 3 · jump/, 'a focused tick shows its card');
+  assert.equal(f.writes, writes, 'the page is not rendered');
+  store.timers.clear();
+});
+
+test('a loaded tick scrolls its mark into view', async () => {
+  const { f, marks, h, snap } = railRig();
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'jumpTurn', turn: '3' } });
+  assert.deepEqual(marks[3].scrolled, [{ behavior: 'smooth', block: 'start', drawn: true }]);
+  // turn 2 reads unloaded (its turn/start precedes the window) but its mark is drawn: the mark wins, nothing is paged
+  f.click({ tagName: 'BUTTON', dataset: { action: 'jumpTurn', turn: '2' } });
+  assert.equal(marks[2].scrolled.length, 1);
+  await settle();
+  assert.deepEqual(earlierPages(h), []);
+  store.timers.clear();
+});
+
+test('an unloaded tick pulses, pages back to it and scrolls to its mark once drawn', async () => {
+  const { f, rail, marks, h, snap } = railRig();
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'jumpTurn', turn: '1' } });
+  assert.match(rail.innerHTML, /class="turn-tick pulse" id="turn-tick-1"/);
+  await settle();
+  assert.deepEqual(earlierPages(h), [30, 10], 'paged back through turn 1\'s seq');
+  assert.match(f.html(), /<div class="turn-mark" id="turn-s1-1" data-turn="1"><\/div>[\s\S]*said 10/);
+  assert.deepEqual(marks[1].scrolled, [{ behavior: 'smooth', block: 'start', drawn: true }]);
+  assert.doesNotMatch(rail.innerHTML, /pulse/);
+  h.streams.find(s => s.name === 'session/follow').cbs.onItem({ type: 'event', event: said(41).event });
+  await settle();
+  assert.match(f.html(), /said 41/);
+  assert.doesNotMatch(f.html(), /turn-tick[^"]*pulse/, 'the next render draws no pulse either');
+  assert.equal(marks[1].scrolled.length, 1, 'and jumps no more');
+  store.timers.clear();
+});
+
+test('an unloaded tick whose read fails stops pulsing', async () => {
+  const { f, rail, h, snap } = railRig({ pages: async () => { throw Object.assign(new Error('x'), { code: 'BOOM' }); } });
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'jumpTurn', turn: '1' } });
+  assert.match(rail.innerHTML, /pulse/);
+  await settle();
+  assert.doesNotMatch(rail.innerHTML, /pulse/);
+  assert.match(f.html(), /status-line bad" role="status">earlier: BOOM</);
+  h.streams.find(s => s.name === 'session/follow').cbs.onItem({ type: 'event', event: said(41).event });
+  await settle();
+  assert.doesNotMatch(f.html(), /turn-tick[^"]*pulse/);
+  store.timers.clear();
+});
+
+test('a conversation opened while the pages load clears the pulse and the jump', async () => {
+  const waits = [];
+  const { f, thread, rail, marks, h, book, snap } = railRig({ rows: [row('s1', { agentAvailable: true }), row('s2', { agentAvailable: true, updatedAt: 4 })], pages: req => new Promise(r => waits.push(() => r(book[req.beforeSeq]))) });
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'jumpTurn', turn: '1' } });
+  await settle();
+  assert.match(rail.innerHTML, /pulse/);
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  await settle();
+  h.streams.filter(s => s.name === 'session/follow' && s.args.request.address.sessionId === 's2').at(-1).cbs.onItem({ type: 'snapshot', header: {}, cursor: 9, hasMore: false, records: [said(5)], projections: { asOfSeq: 9, values: {} } });
+  await settle();
+  while (waits.length) { waits.shift()(); await settle(); }
+  assert.equal(store.get().route.id, 's2');
+  assert.doesNotMatch(f.html(), /pulse/);
+  assert.doesNotMatch(rail.innerHTML, /pulse/);
+  assert.equal(marks[1].scrolled.length, 0, 'no jump on the other conversation');
+  assert.equal(store.get().conversations.find(c => c.id === 's1').messages.some(m => m.seq === 10), false, 'nothing prepended to s1');
+  assert.equal(store.get().conversations.find(c => c.id === 's2').messages.some(m => m.seq === 10), false, 'nor to s2');
+  assert.equal(thread.scrollTop, thread.scrollHeight, "s2's thread at its tail");
+  // back on s1: the rail starts afresh, no pulse
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  await settle();
+  assert.doesNotMatch(f.html(), /pulse/);
   store.timers.clear();
 });

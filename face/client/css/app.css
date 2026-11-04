@@ -181,6 +181,25 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .thread { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 18px 28px 22px; overflow-y: auto; position: relative; }
 /* earlier history: a quiet key at the top of the thread */
 .earlier-key { align-self: center; flex: none; min-height: 30px; color: var(--dim); background: transparent; }
+.earlier-key[aria-disabled="true"] { cursor: default; }
+/* a turn's mark: no height, and the thread's gap it would add taken back */
+.turn-mark { flex: none; height: 0; margin-bottom: -6px; }
+/* the turn rail on the box's right edge: a column of ticks, centred; the hovered tick's card to its left */
+.turn-rail { position: absolute; top: 0; bottom: 0; right: 0; width: 28px; display: flex; flex-direction: column; justify-content: center; padding: 12px 0; z-index: 2; }
+.turn-rail:empty { display: none; }
+.turn-row { position: relative; flex: 0 1 10px; min-height: 3px; display: flex; }
+.turn-tick { flex: 1; width: 100%; padding: 0 4px; border: 0; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: flex-end; }
+.turn-tick::before { content: ''; height: 2px; width: 40%; border-radius: 1px; background: var(--dim); opacity: .35; }
+.turn-tick.loaded::before { width: 60%; opacity: .6; }
+.turn-tick.active::before { width: 100%; background: var(--primary); opacity: 1; }
+.turn-tick:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.turn-tick.pulse::before { animation: turn-pulse 1s infinite ease-in-out; }
+@keyframes turn-pulse { 0%, 100% { opacity: .6; } 50% { opacity: .1; } }
+@media (prefers-reduced-motion: reduce) { .turn-tick.pulse::before { animation: none; opacity: 1; } }
+.turn-card { position: absolute; right: 100%; top: 50%; transform: translateY(-50%); margin-right: 6px; width: max-content; max-width: 300px; max-height: 100px; overflow: hidden; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-s); box-shadow: var(--shadow-card); pointer-events: none; display: flex; flex-direction: column; gap: 2px; }
+.turn-card-head { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+.turn-card-prompt { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.turn-card-reply { font-size: 12px; color: var(--dim); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .divider { text-align: center; font-size: 11px; font-weight: 600; color: var(--dim); padding: 4px 0 8px; }
 .sysline { text-align: center; font-size: 11px; color: var(--dim); padding: 4px 0; }
 /* an injected context row folds away under its source; opened, it reads as the record it is */
