@@ -577,6 +577,8 @@ export function boot(win, host = {}) {
     const fixed = settle(store, win.location.hash);
     if (fixed) win.history.replaceState(null, '', fixed);
     const r = store.get().route;
+    // ⌥⌘K's focus waits only for the list it was asked on: a route without one forgets it
+    if (r.screen !== 'messages' && r.screen !== 'channel') searchFocus = false;
     showMarkets();
     showAccount();
     // Account: its page on entering it — past the face's cache when it opens on Cards, whose cards are the page's — and each tab
@@ -1223,17 +1225,20 @@ export function boot(win, host = {}) {
     const box = doc.getElementById('cq');
     if (box) { box.focus(); return; }
     const s = store.get();
-    const last = s.lastConv && s.conversations.some(c => c.id === s.lastConv && !c.archived) ? s.lastConv : null;
+    const lastOpen = s.lastConv && s.conversations.some(c => c.id === s.lastConv && !c.archived) ? s.lastConv : null;
     searchFocus = true;
-    go({ screen: 'messages', id: last ?? firstOpen(s.conversations)?.id ?? null });
+    go({ screen: 'messages', id: lastOpen ?? firstOpen(s.conversations)?.id ?? null });
   }
   doc.addEventListener('keydown', ev => {
-    if (ev.code === 'KeyK' && ev.altKey && (mac ? ev.metaKey && !ev.ctrlKey : ev.ctrlKey && !ev.metaKey)) {
+    // while an IME composes (pinyin), its keys are the composition's: Esc dismisses the candidate, never the query
+    const imeOpen = ev.isComposing || ev.keyCode === 229;
+    if (!imeOpen && ev.code === 'KeyK' && ev.altKey && (mac ? ev.metaKey && !ev.ctrlKey : ev.ctrlKey && !ev.metaKey)) {
       ev.preventDefault();
       focusSearch();
       return;
     }
     if (ev.key === 'Escape') {
+      if (imeOpen) return;
       const s = store.get();
       // the search box while it has focus, before today's chain (spec D34): the first Esc clears the query, the next leaves the box
       const box = doc.activeElement;

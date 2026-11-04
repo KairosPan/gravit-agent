@@ -3456,3 +3456,27 @@ test('a list refresh mid-search keeps the query, the results, the focus and the 
   assert.match(f.html(), /conv-results-count">2 conversations</, 'the results follow the new list');
   assert.doesNotMatch(f.html(), /class="rail-rows"/);
 });
+
+test('Esc while an IME composes in the box dismisses the candidate: the query and the store stay as they were', async () => {
+  const f = fakeWindow({ hash: '' });
+  f.win.navigator = { platform: 'MacIntel' };
+  const cq = searchBox(f);
+  const h = host({ rows: [titled('s1', '贵州茅台')] });
+  const store = started(f, h);
+  await h.ready();
+  cq.focus();
+  cq.value = '茅';
+  f.fire('root', 'input', { target: cq });
+  const before = store.get();
+  for (const ev of [{ key: 'Escape', isComposing: true }, { key: 'Escape', keyCode: 229 }]) {
+    f.fire('doc', 'keydown', ev);
+    assert.equal(store.get(), before, 'the store is untouched');
+    assert.equal(cq.value, '茅', 'the box keeps its words');
+    assert.equal(f.doc.activeElement, cq, 'and its focus');
+  }
+  // ⌥⌘K inside a composition is the composition's too
+  const say = f.withId('say', { tagName: 'TEXTAREA' });
+  say.focus();
+  f.fire('doc', 'keydown', keyK({ metaKey: true, isComposing: true }));
+  assert.equal(f.doc.activeElement, say);
+});
