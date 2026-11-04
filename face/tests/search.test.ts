@@ -13,7 +13,7 @@ const session = (id: string, extra: Partial<StoredSession["header"]> = {}, top: 
   ({ header: { id, cwd: ROOT, ...extra }, revision: "r1", ...top });
 
 const said = (seq: number, t: string): StoredEvent =>
-  ({ type: "user/message", seq, time: seq * 1000, data: { message: { role: "user", content: [{ type: "text", text: t }] } } });
+  ({ type: "user/message", seq, time: seq * 1000, data: { role: "user", content: [{ type: "text", text: t }] } });
 
 /** A fake store: sessions by id with their logs; `read` records every call. */
 function fakeStore(initial: Record<string, { s: StoredSession; log: StoredEvent[] }>) {

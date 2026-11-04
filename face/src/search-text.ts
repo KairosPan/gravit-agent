@@ -83,7 +83,8 @@ export function linesOf(events: readonly StoredEvent[]): IndexedLine[] {
   for (const event of events) {
     let text = "";
     if (event.type === "user/message") {
-      const message = messageOf(event);
+      // the event's data IS the message here (mapper.js: SessionEventMap['user/message'] = UserMessage)
+      const message = isObject(event.data) ? event.data : {};
       if (isWords(message)) text = blocksText(message.content);
     } else if (event.type === "assistant/message") {
       text = blocksText(messageOf(event).content);

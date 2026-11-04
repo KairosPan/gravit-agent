@@ -4,7 +4,7 @@ import { linesOf, WORD_SOURCES, type StoredEvent } from "../src/search-text.ts";
 
 const text = (t: string) => ({ type: "text", text: t });
 const user = (seq: number, t: string, source?: unknown, time?: number): StoredEvent =>
-  ({ type: "user/message", seq, time, data: { message: { role: "user", content: [text(t)], ...(source ? { source } : {}) } } });
+  ({ type: "user/message", seq, time, data: { role: "user", content: [text(t)], ...(source ? { source } : {}) } });
 const assistant = (seq: number, content: unknown[], time?: number): StoredEvent =>
   ({ type: "assistant/message", seq, time, data: { message: { role: "assistant", content } } });
 const call = (seq: number, callId: string, name: string, args: unknown): StoredEvent =>

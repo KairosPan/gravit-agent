@@ -273,15 +273,9 @@ test("the session reference row is up: sessionReferenceResolver is defined", { s
   assert.notEqual(face!.ctx.get("sessionReferenceResolver"), undefined);
 });
 
-/* Search. KNOWN FAILURE, marked `todo` so the suite stays green while it is visible: on the real
- * host a stored `user/message` event's `data` IS the message (`{role, content, source, id}`, as
- * client/js/wire/mapper.js says), while `src/search-text.ts` `messageOf` reads `data.message` for
- * it as for `assistant/message` and `tool/result` (which do wrap it). So the operator's prompts
- * never reach the index, and `?q=茅台` finds nothing; Gravit's answers do (the `STUB_OK` step
- * below passes). Remove the `todo` when search-text.ts reads a user/message's data as the message. */
+/* Search: a stored `user/message` event's data IS the message, an `assistant/message`'s wraps it. */
 test("search: after a stub turn, /data/search?q=茅台 lists that session", {
   skip, timeout: 60_000,
-  todo: "src/search-text.ts reads a user/message's text from data.message; the host stores it as data itself",
 }, async () => {
   const f = face!;
   const sessionId = await f.open();
