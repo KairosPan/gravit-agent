@@ -84,6 +84,8 @@ export function emptyState() {
     seat: { status: 'idle', data: null, at: null },
     // the desk's status (host/desk.js): /data/desk/status as last read, read while Markets shows; the sentence of the last failure
     desk: { status: 'idle', data: null, at: null, message: null },
+    // the list's search (host/search.js): the box, the content read's phase, its items
+    search: { query: '', contentPhase: 'idle', content: [], hasMore: false },
     // the owner device (host/owner.js): whether this page signs for the Account, its key's id there, the Account's last
     // refusal to it, a pairing or sign-out in the air
     owner: { role: 'unknown', kid: '', refusal: null, busy: false },
