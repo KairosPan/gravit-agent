@@ -202,8 +202,9 @@ ${Object.entries(env).map(([k, v]) => `    <key>${xml(k)}</key><string>${xml(v)}
  *
  * - `ProgramArguments`: the face's node and tsx loader, then face/scripts/watchdog.ts.
  * - `WorkingDirectory`: face/. `EnvironmentVariables`: PATH through {@link filterPath}, HOME and
- *   DSH_HOME only - no key and no port: the watchdog reads its Telegram names from $DSH_HOME/.env and
- *   the port from the face's installed plist.
+ *   DSH_HOME only - no key and no port: the watchdog phones through the account (scripts/watchdog.ts),
+ *   reads the port from the face's installed plist, and the account's and the market's URLs and the
+ *   account's home from its own environment or their defaults.
  * - `StartInterval 300` and `RunAtLoad false`: one check every five minutes, the first five minutes
  *   after the job is loaded; no KeepAlive - each run checks once and exits.
  * - `Umask 63` (077), and its logs watchdog.log / watchdog.err.log beside the face's.
