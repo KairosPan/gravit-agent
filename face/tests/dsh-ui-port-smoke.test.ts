@@ -27,6 +27,13 @@
  *   `session/attachment` gives its PNG back; `role-pdf-page-reader` is listed whole beside
  *   `read_image`; and `commands/execute` with an unknown receipt settles the text
  *   `host/actions.js`'s RECEIPT_UNKNOWN matches.
+ * - The thread (plan 5, Task 10): a `session/follow` with `maxMessages` opens on a snapshot whose
+ *   `cursor` and `hasMore` the page reads, and a `session/page` before its first record holds the
+ *   turn `turnOutline` names; `session/control` carries `turnOutline` and `sessionStats` frames
+ *   live, the stats counting a step; `job/list` on a cold session answers rows and leaves it cold;
+ *   a job started on `ctx.jobs` is listed running, followed to its output line, stopped by
+ *   `job/kill` (`requested`, then a `killed` status whose detail says `cancelled by the user`), and
+ *   a second kill's answer is logged.
  *
  * ONE BOOT PER PROCESS (smoke.test.ts header): `bootFace` sets `process.env.DSH_HOME`, so this is
  * its own file, every test sharing the one boot. The scratch home is a `mkdtemp` directory, never
@@ -493,4 +500,128 @@ test("a dropped receipt on a command: commands/execute /goal with an unknown rec
     agentId: sessionId, line: "/goal read it", submittedAttachments: [{ type: "file", receiptId: `receipt-${randomUUID()}` }],
   });
   assert.deepEqual({ kind: executed.result.kind, text: executed.result.text }, { kind: "error", text: "File upload receipt is unknown for this session." });
+});
+
+/* The thread (plan 5, Task 10): the follow's window, the projections live, and background jobs. */
+type Frame = Record<string, any>;
+/** One stream over a ready mux, every item (and an error, as `{type: 'ERROR'}`) collected in order. */
+async function collect(endpoint: string, args: Record<string, unknown>): Promise<{ frames: Frame[]; handle: { cancel(): void } }> {
+  const mux = await openReadyMux();
+  const frames: Frame[] = [];
+  const handle = mux.stream(endpoint, args, {
+    onItem: (value: unknown) => { frames.push(value as Frame); },
+    onError: (error: unknown) => { frames.push({ type: "ERROR", error }); },
+  });
+  return { frames, handle };
+}
+const seqOf = (record: { event: { seq: number } }) => record.event.seq;
+
+test("a follow's snapshot carries its cursor and hasMore, and a page before its first record holds the turn the outline names", { skip, timeout: 90_000 }, async () => {
+  const f = face!;
+  const sessionId = await f.open();
+  for (const text of ["page one", "page two", "page three"]) await f.turn(sessionId, [{ type: "text", text }]);
+  const firstStart = (f.agentOf(sessionId)!.session.snapshotEvents() as unknown as { type: string; seq: number }[]).find((e) => e.type === "turn/start");
+  assert.ok(firstStart, "the first turn's turn/start is logged");
+
+  const { frames, handle } = await collect("session/follow", { request: { address: { kind: "session", sessionId }, maxMessages: 2 } });
+  const snapshot = await waitFor("the follow's snapshot", () => frames.find((item) => item.type === "snapshot" || item.type === "ERROR"));
+  handle.cancel();
+  assert.equal(snapshot.type, "snapshot", JSON.stringify(snapshot).slice(0, 300));
+  assert.equal(typeof snapshot.cursor, "number", JSON.stringify(snapshot).slice(0, 300));
+  assert.equal(snapshot.hasMore, true, "three turns hold more than two messages");
+  const records = snapshot.records as { type: string; event: { seq: number; type: string } }[];
+  assert.ok(records.length > 0, JSON.stringify(snapshot).slice(0, 300));
+  const firstSeq = seqOf(records[0]!);
+  assert.ok(firstSeq > firstStart.seq, `the window starts after the first turn's start (${firstStart.seq}): ${firstSeq}`);
+  const outline = snapshot.projections.values.turnOutline as { turn: number; seq: number; prompt: string }[];
+  assert.ok(Array.isArray(outline) && outline.length === 3, JSON.stringify(outline));
+  assert.ok(outline[0]!.seq < firstSeq, `the outline names a turn before the window: ${outline[0]!.seq} < ${firstSeq}`);
+
+  const page = await f.rpc<{ records: { type: string; event: { seq: number; type: string; data: unknown } }[]; hasMore: boolean }>("session/page", {
+    request: { address: { kind: "session", sessionId }, throughSeq: snapshot.cursor, beforeSeq: firstSeq, maxMessages: 50 },
+  });
+  assert.ok(page.records.length > 0, JSON.stringify(page).slice(0, 300));
+  assert.equal(seqOf(page.records.at(-1)!), firstSeq - 1, "the page ends just before the window");
+  const prompt = page.records.find((record) => record.event.type === "user/message" && JSON.stringify(record.event.data).includes("page one"));
+  assert.ok(prompt, `the first prompt in ${JSON.stringify(page.records.map((r) => r.event.type))}`);
+  assert.ok(seqOf(prompt) >= outline[0]!.seq, `the prompt (${seqOf(prompt)}) belongs to the outline's first turn (${outline[0]!.seq})`);
+});
+
+test("the stats count steps after a turn, and the projections reach session/control live", { skip, timeout: 60_000 }, async () => {
+  const f = face!;
+  const sessionId = await f.open();
+  const { frames, handle } = await collect("session/control", {});
+  const baseline = await waitFor("the control baseline", () => frames.find((item) => item.type === "baseline" || item.type === "ERROR"));
+  assert.equal(baseline.type, "baseline", JSON.stringify(baseline).slice(0, 300));
+  const from = frames.length;
+  await f.turn(sessionId, [{ type: "text", text: "a counted turn" }]);
+  const last = (key: string) => frames.slice(from).filter((item) => item.type === "projection" && item.sessionId === sessionId && item.key === key).at(-1);
+  const outline = await waitFor("a turnOutline frame", () => last("turnOutline"));
+  assert.ok(Array.isArray(outline.value) && outline.value.length >= 1, JSON.stringify(outline).slice(0, 300));
+  assert.equal(typeof outline.seq, "number");
+  /* Wait for a stats frame that counts the step, not for the first one to land. */
+  const stats = await waitFor("a sessionStats frame counting a step", () => { const frame = last("sessionStats"); return frame && frame.value?.steps >= 1 ? frame : undefined; });
+  handle.cancel();
+  assert.ok(stats.value.steps >= 1, JSON.stringify(stats.value));
+  assert.ok(typeof stats.value.llmMs === "number" && stats.value.llmMs >= 0, JSON.stringify(stats.value));
+});
+
+test("job/list on a cold session answers rows and does not make it live", { skip, timeout: 60_000 }, async () => {
+  const f = face!;
+  const coldId = await coldSession(f);
+  const { frames, handle } = await collect("job/list", { request: { sessionId: coldId } });
+  const first = await waitFor("the first job/list frame", () => frames[0]);
+  assert.equal(first.type, "rows", JSON.stringify(first).slice(0, 300));
+  assert.ok(Array.isArray(first.jobs));
+  /* A follow registers its agent ~11 ms after its snapshot: give a late activation that time many times over. */
+  await settle(250);
+  handle.cancel();
+  assert.equal(f.agentOf(coldId), undefined, "job/list did not activate the session");
+});
+
+const JOB_LINE = "UI_PORT_JOB_LINE\n";
+test("a job: listed, followed to its output and its end, and stopped by job/kill", { skip, timeout: 60_000 }, async () => {
+  const f = face!;
+  const sessionId = await f.open();
+  /* A producer that appends one line and runs until its cancel, owned by a live stub session. */
+  let cancels = 0;
+  const jobId = f.ctx.jobs.start({
+    kind: "bash",
+    label: "ui-port job",
+    owner: SessionId(sessionId),
+    run: (job: { append(text: string): void }) => {
+      job.append(JOB_LINE);
+      let end!: (outcome: { status: "killed" }) => void;
+      const done = new Promise<{ status: "killed" }>((resolve) => { end = resolve; });
+      return { cancel: () => { cancels += 1; end({ status: "killed" }); }, done };
+    },
+  }) as string;
+  assert.equal(typeof jobId, "string");
+
+  const list = await collect("job/list", { request: { sessionId } });
+  const rowOf = (status: string) => () => list.frames.filter((item) => item.type === "rows").at(-1)?.jobs?.find((job: Frame) => job.id === jobId && job.status === status);
+  const row = await waitFor("the job running in job/list", rowOf("running"));
+  assert.equal(row.label, "ui-port job");
+
+  const follow = await collect("job/follow", { request: { sessionId, jobId } });
+  const opened = await waitFor("the follow's opened frame", () => follow.frames.find((item) => item.type === "opened" || item.type === "ERROR"));
+  assert.equal(opened.type, "opened", JSON.stringify(opened).slice(0, 300));
+  const output = await waitFor("an output frame with the line", () => follow.frames.find((item) => item.type === "output" && item.chunks.some((chunk: Frame) => String(chunk.text).includes("UI_PORT_JOB_LINE"))));
+  assert.equal(typeof output.next, "number");
+
+  const killed = await f.rpc<{ outcome: string }>("job/kill", { request: { sessionId, jobId } });
+  assert.deepEqual(killed, { outcome: "requested" });
+  const status = await waitFor("the follow's status frame", () => follow.frames.find((item) => item.type === "status"));
+  assert.equal(status.job.status, "killed", JSON.stringify(status));
+  assert.ok(String(status.job.detail).includes("cancelled by the user"), JSON.stringify(status));
+  assert.equal(cancels, 1);
+  await waitFor("the job killed in job/list", rowOf("killed"));
+  list.handle.cancel();
+  follow.handle.cancel();
+
+  /* A second kill: either answer is the documented one; the log records which this build gives. */
+  const again = await f.rpcResult("job/kill", { request: { sessionId, jobId } }) as { ok: boolean; value?: { outcome?: string }; error?: { code?: string } };
+  const seen = again.ok ? again.value?.outcome : again.error?.code;
+  console.log(`[ui-port smoke] a second job/kill answers: ${seen}`);
+  assert.ok(seen === "already-finished" || seen === "job/not-found", JSON.stringify(again).slice(0, 300));
 });
