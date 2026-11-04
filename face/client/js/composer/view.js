@@ -1,6 +1,7 @@
 // The composer's view: a draft's runs as the editor's markup, the / and @ menus, the draft's files rail, the drop overlay and
 // the image lightbox. Strings only; app.js puts them in place.
 import { esc, attrs, cls } from '../html.js';
+import { t, th } from '../i18n/words.js';
 import { icon } from '../icons.js';
 import { maskExcerpt } from '../mask.js';
 import { avatarGlyph } from '../wire/room.js';
@@ -30,7 +31,7 @@ export function menuAria(menu) {
   return { 'aria-expanded': open ? 'true' : 'false', 'aria-activedescendant': open ? `cm-${menu.active ?? 0}` : null };
 }
 
-const LABEL = { '/': 'Commands and skills', '@': 'References' };
+const LABEL = { '/': () => t('composer.menu.slash'), '@': () => t('composer.menu.at') };
 
 function rowParts(it) {
   switch (it.kind) {
@@ -42,7 +43,7 @@ function rowParts(it) {
   }
 }
 
-const FOOT = '<div class="cmenu-foot"><kbd>↑↓</kbd> Move · <kbd>Enter</kbd> Choose · <kbd>Esc</kbd> Close</div>';
+const foot = () => `<div class="cmenu-foot"><kbd>↑↓</kbd> ${th('composer.menu.move')} · <kbd>Enter</kbd> ${th('composer.menu.choose')} · <kbd>Esc</kbd> ${th('common.close')}</div>`; // en-kept: key names
 
 /** The menu: '' for none or for one with no rows. */
 export function renderMenu(menu) {
@@ -58,17 +59,17 @@ export function renderMenu(menu) {
         `<span class="cmenu-icon">${ic}</span><span class="cmenu-title">${esc(title)}</span><span class="cmenu-name">${esc(name)}</span><span class="cmenu-desc">${esc(desc)}</span></div>`;
     }).join('');
   }).join('');
-  return `<div${attrs({ class: 'cmenu', role: 'listbox', 'aria-label': LABEL[menu.kind] ?? LABEL['@'] })}>${body}${FOOT}</div>`;
+  return `<div${attrs({ class: 'cmenu', role: 'listbox', 'aria-label': (LABEL[menu.kind] ?? LABEL['@'])() })}>${body}${foot()}</div>`;
 }
 
 const removeKey = (key, name) =>
-  `<button${attrs({ type: 'button', class: 'attach-remove', 'data-action': 'attachRemove', 'data-key': key, 'aria-label': `Remove ${name}` })}>${icon('x', 12, 2.4)}</button>`;
+  `<button${attrs({ type: 'button', class: 'attach-remove', 'data-action': 'attachRemove', 'data-key': key, 'aria-label': t('composer.remove', { name }) })}>${icon('x', 12, 2.4)}</button>`;
 
 /** The shared file card: the file icon, the name, its line; a failed upload's Retry key; the remove key when it has one.
  *  The thread draws a sent file with it too, with neither key. */
 export function fileCard({ name, meta, failedKey = null, removeKey: key = null, removeName = '', uploading = false }) {
   const line = failedKey != null
-    ? `Upload failed · <button${attrs({ type: 'button', class: 'file-retry', 'data-action': 'attachRetry', 'data-key': failedKey })}>Retry</button>`
+    ? `${th('composer.uploadFailed')} · <button${attrs({ type: 'button', class: 'file-retry', 'data-action': 'attachRetry', 'data-key': failedKey })}>${th('composer.retry')}</button>`
     : esc(meta);
   return `<div class="${cls('file-card', uploading && 'uploading', failedKey != null && 'failed')}"><span class="file-icon">${icon('file', 20)}</span>` +
     `<span class="file-name">${esc(name)}</span><span class="file-meta">${line}</span>${key != null ? removeKey(key, removeName || name) : ''}</div>`;
@@ -88,7 +89,7 @@ export function filesRail(files) {
 
 /** Over the page while files are dragged onto it: the two lines, the second from the session's image limits. */
 export function dropOverlay(limits) {
-  return `<div class="drop-overlay"><div class="drop-card">${icon('upload', 28)}<div class="drop-title">Drop files or images here</div>` +
+  return `<div class="drop-overlay"><div class="drop-card">${icon('upload', 28)}<div class="drop-title">${th('composer.drop')}</div>` +
     `<div class="drop-sub">${esc(limitsLine(limits))}</div></div></div>`;
 }
 
@@ -96,7 +97,7 @@ export function dropOverlay(limits) {
  *  that is not an image's (isImageSrc): the lightbox opens nothing. */
 export function lightboxHtml({ src, name }) {
   if (!isImageSrc(src)) return '';
-  return `<div${attrs({ class: 'lightbox', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Image', 'data-action': 'lightboxClose' })}>` +
-    `<img${attrs({ class: 'lightbox-img', src, alt: name || 'Image', 'data-action': 'lightboxKeep' })}>` +
-    `<button${attrs({ type: 'button', class: 'close-key lightbox-close', 'data-action': 'lightboxClose', 'aria-label': 'Close' })}>${icon('x', 18)}</button></div>`;
+  return `<div${attrs({ class: 'lightbox', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('composer.image'), 'data-action': 'lightboxClose' })}>` +
+    `<img${attrs({ class: 'lightbox-img', src, alt: name || t('composer.image'), 'data-action': 'lightboxKeep' })}>` +
+    `<button${attrs({ type: 'button', class: 'close-key lightbox-close', 'data-action': 'lightboxClose', 'aria-label': t('common.close') })}>${icon('x', 18)}</button></div>`;
 }

@@ -4,8 +4,13 @@
 import { randomUuid } from '../wire/api.js';
 import { isMentionText } from '../wire/room.js';
 import { needsAnswer } from '../messages.js';
+import { t } from '../i18n/words.js';
 
-export const NOT_SIGNED_IN = 'Not signed in — open the URL gravit-face printed';
+// the status line's words for a 401, read when said
+export const notSignedIn = () => t('status.notSignedIn');
+// a failure's line: `<what>: <the code, the HTTP status or the message>`, a 401 as notSignedIn
+export const failLine = (err, what) => (err?.status === 401 ? notSignedIn()
+  : t('status.fail', { what, reason: err?.code ?? (err?.status ? `HTTP ${err.status}` : err?.message ?? t('status.failed')) }));
 
 const zone = () => {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return undefined; }
@@ -15,7 +20,7 @@ const clean = text => (typeof text === 'string' ? text.trim() : '');
 // activate(sessionId) → Promise<boolean>: the conversation made live before a command runs on it (live.activate)
 export function makeActions({ store, call, answerGate, postJson, requestId = randomUuid, timeZone = zone, activate = async () => true }) {
   const say = (line, bad = false) => store.dispatch('hostStatus', { line, bad });
-  const fail = (err, what) => say(err?.status === 401 ? NOT_SIGNED_IN : `${what}: ${err?.code ?? (err?.status ? `HTTP ${err.status}` : err?.message ?? 'failed')}`, true);
+  const fail = (err, what) => say(failLine(err, what), true);
   // the content: the text part when the words are not blank, then the attachments (already parts: an image inline, a file
   // by its receipt) in the draft's order
   const prompt = (sessionId, text, attachments = []) => call('session/prompt', {
@@ -24,35 +29,35 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
   const ATTACHMENT_INVALID = 'session/attachment-invalid';
   // at rc.5 commands/execute settles an admission failure as an error result, never a throw; a receipt the host dropped
   // reads as AttachmentError ATTACHMENT_NOT_FOUND's message (dsh-commands), the reason code itself not carried
-  const RECEIPT_UNKNOWN = 'File upload receipt is unknown for this session.';
+  const RECEIPT_UNKNOWN = 'File upload receipt is unknown for this session.'; // en-kept: dsh's words, matched
   // a refusal of the attachments (a receipt the host dropped, an image on a text-only model): the caller's to answer, else
   // said with its reason; any other failure as `what`'s
   const failSend = (err, what, attachmentRefused) => {
     if (err?.code !== ATTACHMENT_INVALID) { fail(err, what); return; }
     const reason = err.details?.reason;
     if (attachmentRefused) attachmentRefused(reason);
-    else say(`${what}: ${ATTACHMENT_INVALID}${reason ? ` (${reason})` : ''}`, true);
+    else say(t('status.fail', { what, reason: `${ATTACHMENT_INVALID}${reason ? ` (${reason})` : ''}` }), true);
   };
 
   // a slash line, on a conversation made live first (at dsh 0.2.1-rc.5 commands/execute resumes a cold agent itself; the
   // follow keeps the page in step so the result draws); `undefined` back means no command claimed it and the line is a
   // prompt after all
   async function command(sessionId, line, attachments = []) {
-    if (!(await activate(sessionId))) throw new Error('the conversation did not open');
+    if (!(await activate(sessionId))) throw new Error(t('status.notOpened'));
     const executed = await call('commands/execute', { agentId: sessionId, line, submittedAttachments: attachments });
     if (executed === undefined || executed === null) return null;
     const result = executed.result;
-    say(typeof result?.text === 'string' && result.text !== '' ? result.text : String(result?.kind ?? 'done'), result?.kind === 'error');
+    say(typeof result?.text === 'string' && result.text !== '' ? result.text : String(result?.kind ?? t('status.done')), result?.kind === 'error');
     return executed;
   }
 
   // a command chosen from the composer's menu: its result on the status line, or its failure
   async function runCommand(sessionId, line) {
     try {
-      if ((await command(sessionId, line)) === null) say(`no command claimed ${line}`);
+      if ((await command(sessionId, line)) === null) say(t('status.noCommand', { line }));
       return true;
     } catch (err) {
-      fail(err, 'command');
+      fail(err, t('status.verb.command'));
       return false;
     }
   }
@@ -85,7 +90,7 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
       await prompt(id, words, attachments);
       return { sent: 'prompt', sessionId: id };
     } catch (err) {
-      failSend(err, 'send', attachmentRefused);
+      failSend(err, t('status.verb.send'), attachmentRefused);
       return null;
     }
   }
@@ -97,7 +102,7 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     let sessionId = null;
     try {
       const created = await call('session/create', { request: workspaceId ? { workspaceId } : {} });
-      if (typeof created?.sessionId !== 'string') throw new Error('session/create returned no sessionId');
+      if (typeof created?.sessionId !== 'string') throw new Error(t('status.noSessionId', { remote: 'session/create' }));
       sessionId = created.sessionId;
       onCreated?.(sessionId);   // before the rename: a failure from here on still leaves the draft with the conversation
       const name = clean(title);
@@ -108,7 +113,7 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
       if (words || parts.length) await prompt(sessionId, words, parts);
       return { id: sessionId, sent: true };
     } catch (err) {
-      failSend(err, 'new message', attachmentRefused);
+      failSend(err, t('status.verb.newMessage'), attachmentRefused);
       return { id: sessionId, sent: false };
     }
   }
@@ -130,7 +135,7 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
       store.dispatch('hostGateGone', { eventId, outcome: value === 'allowed-once' ? 'approved' : value === 'rejected' ? 'rejected' : 'answered' });
       return true;
     } catch (err) {
-      say(`answer: ${err?.code ?? err?.message ?? 'failed'}`, true);
+      say(t('status.fail', { what: t('status.verb.answer'), reason: err?.code ?? err?.message ?? t('status.failed') }), true);
       return false;
     } finally {
       answering.delete(eventId);
@@ -140,9 +145,9 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
   async function stop(sessionId) {
     try {
       await call('session/cancel', { request: { sessionId } });
-      say('Stopped. A paused goal resumes with /goal resume');
+      say(t('status.stopped'));
     } catch (err) {
-      fail(err, 'stop');
+      fail(err, t('status.verb.stop'));
     }
   }
 
@@ -152,7 +157,7 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     try {
       await call('session/rename', { request: { sessionId, title: name } });
     } catch (err) {
-      fail(err, 'rename');
+      fail(err, t('status.verb.rename'));
     }
   }
 
@@ -165,10 +170,10 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     forking.add(sessionId);
     try {
       const forked = await call('session/fork', { request: { sessionId } });
-      if (typeof forked?.sessionId !== 'string') throw new Error('session/fork returned no sessionId');
+      if (typeof forked?.sessionId !== 'string') throw new Error(t('status.noSessionId', { remote: 'session/fork' }));
       return forked.sessionId;
     } catch (err) {
-      fail(err, 'fork');
+      fail(err, t('status.verb.fork'));
       return null;
     } finally {
       forking.delete(sessionId);
@@ -179,11 +184,11 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
   async function setPin(remote, sessionId) {
     try {
       const answer = await call(remote, { request: { sessionId } });
-      if (!Array.isArray(answer?.pinnedSessionIds)) throw new Error(`${remote} returned no pinnedSessionIds`);
+      if (!Array.isArray(answer?.pinnedSessionIds)) throw new TypeError(remote);   // said as Pin failed below
       store.dispatch('hostPins', answer.pinnedSessionIds);
       return true;
     } catch {
-      say('Pin failed. Try again later.', true);
+      say(t('status.pinFailed'), true);
       return false;
     }
   }
@@ -192,25 +197,25 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
 
   async function archive(sessionId, archived) {
     const c = convOf(sessionId);
-    if (archived && c?.running) { say('Stop Gravit first', true); return false; }
-    if (archived && c?.messages.some(needsAnswer)) { say('Answer the waiting card first', true); return false; }
+    if (archived && c?.running) { say(t('status.stopFirst'), true); return false; }
+    if (archived && c?.messages.some(needsAnswer)) { say(t('status.answerCardFirst'), true); return false; }
     try {
       await postJson('/data/sessions/archive', { sessionId, archived: archived === true });
       if (archived === true && store.get().pinned?.includes(sessionId)) await unpin(sessionId); // an archived row is never pinned (D7)
       return true;
     } catch (err) {
-      fail(err, archived ? 'archive' : 'un-archive');
+      fail(err, archived ? t('status.verb.archive') : t('status.verb.unarchive'));
       return false;
     }
   }
 
   async function remove(sessionId) {
-    if (convOf(sessionId)?.running) { say('Stop Gravit first', true); return false; }
+    if (convOf(sessionId)?.running) { say(t('status.stopFirst'), true); return false; }
     try {
       await postJson('/data/sessions/delete', { sessionId });
       return true;
     } catch (err) {
-      fail(err, 'delete');
+      fail(err, t('status.verb.delete'));
       return false;
     }
   }
@@ -221,10 +226,10 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     if (home) return { id: home.id };
     try {
       const created = await call('session/create', { request: { cwd: bot.homeCwd, agentPreset: bot.id } });
-      if (typeof created?.sessionId !== 'string') throw new Error('session/create returned no sessionId');
+      if (typeof created?.sessionId !== 'string') throw new Error(t('status.noSessionId', { remote: 'session/create' }));
       return { id: created.sessionId };
     } catch (err) {
-      return { error: `talk to: ${err?.code ?? err?.message ?? 'failed'}` };
+      return { error: t('status.fail', { what: t('status.verb.talkTo'), reason: err?.code ?? err?.message ?? t('status.failed') }) };
     }
   }
 
@@ -232,11 +237,11 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
   async function stopChild(parentSessionId, childSessionId, label) {
     try {
       const r = await call('subagents/interruptByParent', { childSessionId, parentSessionId, mode: 'continuable' });
-      if (r?.accepted === false) throw new Error('refused');
-      say(`Stopping ${label || 'the child'}`);
+      if (r?.accepted === false) throw new Error(t('status.refused'));
+      say(t('status.stopping', { label: label || t('status.theChild') }));
       return true;
     } catch (err) {
-      fail(err, 'stop');
+      fail(err, t('status.verb.stop'));
       return false;
     }
   }

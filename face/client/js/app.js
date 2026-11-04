@@ -49,6 +49,8 @@ import { startJobs } from './host/jobs.js';
 import { jobsView, isLive } from './host/jobs-view.js';
 import { admit, blocking, hasImage, contentParts, encodeBase64, modelRefusalLine, isImageSrc } from './composer/files.js';
 import { senderName } from './render/rail.js';
+import { t } from './i18n/words.js';
+import { HOST_NAME } from './wire/speaker.js';
 import { startAttachments } from './host/attachments.js';
 import { startComposerReads } from './host/composer.js';
 import { startOwner, postVia } from './host/owner.js';
@@ -521,7 +523,7 @@ export function boot(win, host = {}) {
   const modelLineFor = id => {
     const s = store.get();
     const conv = s.conversations.find(c => c.id === id);
-    return modelRefusalLine(conv?.kind === 'bot' && conv.preset ? senderName(conv.preset, s) : 'Gravit');
+    return modelRefusalLine(conv?.kind === 'bot' && conv.preset ? senderName(conv.preset, s) : HOST_NAME);
   };
   // the / and @ menus: the menu drawn under the editor (null when none shows), the trigger it stands on, and a sequence
   // that every tick and every close moves on, so a read's late answer draws only for the trigger it was asked for
@@ -809,7 +811,7 @@ export function boot(win, host = {}) {
     const note = doc.getElementById(`jobnote-${id}`);
     if (note) {
       const row = s.jobs.rows.find(j => j.id === id);
-      const line = out?.error !== undefined ? `output unavailable: ${out.error}` : out?.ended && isLive(row) ? 'output ended' : '';
+      const line = out?.error !== undefined ? t('jobs.outputUnavailable', { error: out.error }) : out?.ended && isLive(row) ? t('jobs.outputEnded') : '';
       if (note.textContent !== line) note.textContent = line;
     }
   }
@@ -1262,21 +1264,21 @@ export function boot(win, host = {}) {
     if (isBlank(runs) && !files.length) return;
     const refuse = line => store.dispatch('hostStatus', { line, bad: true });
     // the empty state (no conversation, no New message) has nowhere to send: said, the draft kept as it stands
-    if (key === 'empty') { refuse('Open a conversation first'); return; }
+    if (key === 'empty') { refuse(t('status.openFirst')); return; }
     // the room is a bot chip's, or an @ the operator typed (a chip reads as a space between words): a file or
     // conversation chip's @ never sends to it alone. Files go to Gravit alone (D20): a bot chip with them is refused, and
     // a typed @word beside them is a prompt
     const toBot = hasChip(runs, 'bot');
-    if (files.length && toBot) { refuse("Files go to Gravit, not to a room's bots"); return; }
+    if (files.length && toBot) { refuse(t('status.filesToGravit')); return; }
     const room = !files.length && (toBot || isMentionText(runs.map(r => (r.type === 'text' ? r.text : ' ')).join('')));
     // a room's bots cannot read a conversation chip (O9): a draft bound for the room with one is refused, kept as it stands
     const toRoom = toBot || (room && !s.draft && !!currentConversation(s)?.channel);
-    if (toRoom && hasChip(runs, 'conversation')) { refuse("Conversations go to Gravit, not to a room's bots"); return; }
+    if (toRoom && hasChip(runs, 'conversation')) { refuse(t('status.convsToGravit')); return; }
     // a file not up yet (one New message moved here, a receipt being staged again) uploads now and holds the send too
     const waiting = isConvKey(key) ? files.filter(f => f.kind === 'file' && f.status === 'ready') : [];
     for (const f of waiting) startUpload(key, f.key);
     const held = blocking(filesOf(key));
-    if (held) { refuse(held === 'uploading' ? 'Files are still uploading' : 'A file did not upload. Retry it or remove it.'); if (waiting.length) render(); return; }
+    if (held) { refuse(held === 'uploading' ? t('status.uploading') : t('status.notUploaded')); if (waiting.length) render(); return; }
     if (isConvKey(key) && refusesImages.has(key) && hasImage(files)) { notes.set(key, modelLineFor(key)); render(); return; }
     const workspaceId = s.draft ? s.draft.where : currentConversation(s)?.channel?.workspaceId ?? null;
     const text = serialize(runs, serialContext({ channels: s.channels, workspaceId })).trim();
@@ -1285,7 +1287,7 @@ export function boot(win, host = {}) {
     if (!s.draft && files.length && text.startsWith('/')) {
       const name = text.slice(1).split(/\s/)[0];
       const row = (composerReads.keptCommands(currentConversation(s)) ?? []).find(r => r.name === name);
-      if (row && row.input?.attachments !== true) { refuse(`/${name} takes no files`); return; }
+      if (row && row.input?.attachments !== true) { refuse(t('status.takesNoFiles', { name })); return; }
     }
     // words and files added under the key while the send was on its way are kept, after the sent ones (A7)
     const back = () => {
@@ -1304,7 +1306,7 @@ export function boot(win, host = {}) {
     const data = new Map();
     for (const f of files) {
       if (f.kind !== 'image') continue;
-      try { data.set(f.key, encodeBase64(new Uint8Array(await f.blob.arrayBuffer()))); } catch { back(); refuse(`send: ${f.name} could not be read`); return; }
+      try { data.set(f.key, encodeBase64(new Uint8Array(await f.blob.arrayBuffer()))); } catch { back(); refuse(t('status.fail', { what: t('status.verb.send'), reason: t('status.unreadable', { name: f.name }) })); return; }
     }
     // the draft left the screen during the read: it goes back under its key, unsent (the send goes to the screen's)
     if (data.size && draftKey(store.get()) !== key) { back(); return; }
@@ -1345,7 +1347,7 @@ export function boot(win, host = {}) {
   function refused(key, reason) {
     if (reason === undefined) return;
     if (reason === 'MODEL_DOES_NOT_SUPPORT_IMAGES') { refusesImages.add(key); notes.set(key, modelLineFor(key)); }
-    else store.dispatch('hostStatus', { line: `send: session/attachment-invalid${reason ? ` (${reason})` : ''}`, bad: true });
+    else store.dispatch('hostStatus', { line: t('status.fail', { what: t('status.verb.send'), reason: `session/attachment-invalid${reason ? ` (${reason})` : ''}` }), bad: true });
     render();
   }
   // a receipt the host dropped (the face restarted, the agent was disposed): every file up uploads again, once, and the
@@ -1357,7 +1359,7 @@ export function boot(win, host = {}) {
     render();
     if (!oks.every(Boolean)) { refused(key, reason); return; }
     if (draftKey(store.get()) === key) await sendNow({ restaged: true });
-    else store.dispatch('hostStatus', { line: 'Files uploaded again; the message was not sent', bad: true });
+    else store.dispatch('hostStatus', { line: t('status.reuploaded'), bad: true });
   }
   // words put in the composer for the operator (a suggestion, Hand to Gravit): the draft on screen, after what it holds on
   // a new line, the caret after them
@@ -1416,7 +1418,7 @@ export function boot(win, host = {}) {
     };
     // a failure keeps its reason (not signed in, the fence's hint), said on the status line
     return handle.done.then(receiptId => land({ status: 'up', loaded: rec.bytes, receiptId, sessionId: key }), err => {
-      const error = String(err?.message || `upload ${rec.name}: the upload failed`);
+      const error = String(err?.message || t('status.uploadFailed', { name: rec.name }));
       if (mine()) store.dispatch('hostStatus', { line: error, bad: true });
       land({ status: 'failed', error });
       return false;
@@ -1676,7 +1678,7 @@ export function boot(win, host = {}) {
       const m = conv?.messages.find(x => x.id === el.dataset.msg);
       if (!m) return;
       const batch = answersFrom(el.closest?.('[data-gate]') ?? root, m.data?.questions, m.id);
-      if (!complete(batch)) { store.dispatch('hostStatus', { line: 'Answer every question first', bad: true }); return; }
+      if (!complete(batch)) { store.dispatch('hostStatus', { line: t('status.answerAll'), bad: true }); return; }
       void actions.answer(m.id, batch);
     },
     toggleDetails: () => store.dispatch('toggleDetails'),

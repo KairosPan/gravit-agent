@@ -3,6 +3,7 @@
 // child rows the old client's way (wire/subagents.js): a malformed catalog is unavailable, never an empty list; an
 // unknown-mode entry is shown and never controllable.
 import { composeSubagentCatalog, normalizeSubagentCatalog, subagentControls } from '../wire/subagents.js';
+import { t } from '../i18n/words.js';
 
 // {children: [{id, label, mode, state: 'running'|'inactive'|'unknown'|'unavailable', canStop}], unavailable}
 export function childrenOf(conv, childRows = []) {
@@ -20,7 +21,7 @@ export function childrenOf(conv, childRows = []) {
     children: catalog.entries.map(e => {
       const c = subagentControls(e, catalog.parentAvailable);
       const child = e.kind === 'child';
-      return { id: e.id, label: child ? e.label : 'Subagent', mode: child ? e.mode : null, state: c.state, canStop: c.canInterrupt };
+      return { id: e.id, label: child ? e.label : t('details.subagent'), mode: child ? e.mode : null, state: c.state, canStop: c.canInterrupt };
     }),
   };
 }

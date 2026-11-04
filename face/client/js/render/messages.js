@@ -1,12 +1,14 @@
 // face/client/js/render/messages.js — the Messages screen on the host's facts (spec 2026-10-19 §7 "Stage 1"):
 // a conversation (head, thread, composer, the status line), the new-message screen, the empty state, Details.
 import { esc, attrs, cls } from '../html.js';
+import { t, th, thn } from '../i18n/words.js';
 import { icon } from '../icons.js';
 import { maskExcerpt } from '../mask.js';
 import { fmtDate } from '../time.js';
 import { avatar, cluster } from './avatars.js';
 import { renderThread, railHtml } from './thread.js';
 import { senderName } from './rail.js';
+import { HOST_NAME } from '../wire/speaker.js';
 import { kv, inlineEdit, confirmPair } from './controls.js';
 import { firstOpen } from '../host/sessions.js';
 import { needsAnswer } from '../messages.js';
@@ -24,15 +26,15 @@ export function currentConversation(state) {
 // the menu's slot above the box, the note (a refusal of the draft's files), then the box: the files rail, then the input row
 // (never wrapping) of the paperclip and its hidden input, the editor and Send; the words are prompted to the session (host/actions.js). The editor is drawn empty:
 // app.js puts the conversation's draft in it
-export function renderComposer({ placeholder = 'Tell Gravit…', above = '', menu = null, files = [], note = '' } = {}) {
+export function renderComposer({ placeholder = t('composer.placeholder'), above = '', menu = null, files = [], note = '' } = {}) {
   const editor = attrs({ id: 'say', class: 'composer-input', contenteditable: 'true', role: 'textbox', 'aria-multiline': 'true', 'aria-labelledby': 'say-label', 'aria-controls': 'composer-menu', ...menuAria(menu), 'data-placeholder': placeholder });
   return `<form class="composer" data-action="send">${above}<div class="composer-menu" id="composer-menu">${renderMenu(menu)}</div>` +
     `<div class="composer-note" id="composer-note" role="status">${esc(note)}</div><div class="composer-box">` +
     `<div class="composer-files" id="composer-files">${filesRail(files)}</div><div class="composer-row">` +
-    `<button type="button" class="attach-key" data-action="attachFiles" aria-label="Attach files">${icon('paperclip', 18)}</button>` +
+    `<button type="button" class="attach-key" data-action="attachFiles" aria-label="${th('composer.attach')}">${icon('paperclip', 18)}</button>` +
     `<input${attrs({ type: 'file', id: 'attach-input', class: 'sr-only', multiple: true, tabindex: '-1', 'aria-hidden': 'true' })}>` +
-    `<span id="say-label" class="sr-only">Tell Gravit</span><div${editor}></div>` +
-    `<button type="submit" class="send-key" aria-label="Send">${icon('send', 18, 2.4)}</button></div></div></form>`;
+    `<span id="say-label" class="sr-only">${th('composer.label')}</span><div${editor}></div>` +
+    `<button type="submit" class="send-key" aria-label="${th('composer.send')}">${icon('send', 18, 2.4)}</button></div></div></form>`;
 }
 
 // the composer's own facts from app.js: the open menu, the draft's files, the note above the box
@@ -52,15 +54,15 @@ function jobsChip(conv, state) {
 }
 
 function headRight(conv, state) {
-  const working = conv.running ? '<span class="status up"><span class="status-dot"></span>Working</span>' : '';
-  return jobsChip(conv, state) + working + `<button type="button"${attrs({ class: cls('btn-sm', state.detailsOpen && 'pressed'), 'data-action': 'toggleDetails', 'aria-expanded': state.detailsOpen ? 'true' : 'false' })}>Details${icon('chevRight', 14, 2.2)}</button>`;
+  const working = conv.running ? `<span class="status up"><span class="status-dot"></span>${th('thread.working')}</span>` : '';
+  return jobsChip(conv, state) + working + `<button type="button"${attrs({ class: cls('btn-sm', state.detailsOpen && 'pressed'), 'data-action': 'toggleDetails', 'aria-expanded': state.detailsOpen ? 'true' : 'false' })}>${th('details.title')}${icon('chevRight', 14, 2.2)}</button>`;
 }
 
 export function renderHead(conv, state) {
   if (conv.kind !== 'group') return `<header class="head"><h1 class="head-title">${esc(maskExcerpt(conv.title))}</h1>${headRight(conv, state)}</header>`;
   const names = conv.members.map(m => senderName(m, state)).join(' · ');
   return `<header class="head centered"><div class="head-right">${headRight(conv, state)}</div>${cluster(conv.members, 44, state)}` +
-    `<div class="head-task">${esc(maskExcerpt(conv.title))}</div><div class="dim members">${esc(names)} · ${conv.members.length} members</div></header>`;
+    `<div class="head-task">${esc(maskExcerpt(conv.title))}</div><div class="dim members">${thn('thread.members', conv.members.length, { names })}</div></header>`;
 }
 
 // the new-message screen: a title, Where (a channel, the root first), the first words in the composer
@@ -68,19 +70,19 @@ function draftScreen(state, composer) {
   const d = state.draft;
   const channels = [...(state.channels ?? [])].sort((a, b) => (b.isRoot ? 1 : 0) - (a.isRoot ? 1 : 0));
   const options = channels.map(c => `<option value="${esc(c.workspaceId)}"${c.workspaceId === d.where ? ' selected' : ''}>${esc(channelLabel(c))}</option>`).join('') +
-    '<option value="__new">New channel…</option>';
+    `<option value="__new">${th('thread.draft.newChannel')}</option>`;
   // New channel… opens a name box under Where; Where keeps its channel until the new one exists
-  const naming = state.edit?.kind === 'newChannel' ? `<div class="to-line">${inlineEdit([{ name: 'channel', value: '', label: 'Name the channel' }], state.edit.error)}</div>` : '';
-  return `<main class="main"><header class="head centered draft"><button type="button" class="btn-sm head-cancel" data-action="cancelDraft">Cancel</button>${avatar('gravit', 44)}` +
-    `<label for="nm-title" class="sr-only">Name this</label><input id="nm-title" class="title-input" type="text" autocomplete="off" placeholder="Name this (or your first line is the name)" data-action="draftTitle"${attrs({ value: d.title })}>` +
-    `<div class="to-line"><label class="to-label" for="nm-where">Where</label><select id="nm-where" name="where" class="input small" data-action="draftWhere">${options}</select></div>${naming}</header>` +
+  const naming = state.edit?.kind === 'newChannel' ? `<div class="to-line">${inlineEdit([{ name: 'channel', value: '', label: t('thread.draft.nameChannel') }], state.edit.error)}</div>` : '';
+  return `<main class="main"><header class="head centered draft"><button type="button" class="btn-sm head-cancel" data-action="cancelDraft">${th('common.cancel')}</button>${avatar('gravit', 44)}` +
+    `<label for="nm-title" class="sr-only">${th('thread.draft.title')}</label><input id="nm-title" class="title-input" type="text" autocomplete="off" placeholder="${th('thread.draft.titleHint')}" data-action="draftTitle"${attrs({ value: d.title })}>` +
+    `<div class="to-line"><label class="to-label" for="nm-where">${th('thread.draft.where')}</label><select id="nm-where" name="where" class="input small" data-action="draftWhere">${options}</select></div>${naming}</header>` +
     `<div class="thread" id="thread"></div>${renderComposer(composerOf(composer))}${renderStatus(state.status)}</main>`;
 }
 
 function emptyScreen(state, composer) {
-  const chips = ['Buy a little BTC', 'Follow Pelosi', 'Check an address'].map(t => `<button type="button" class="btn-sm" data-action="suggest"${attrs({ 'data-text': t })}>${esc(t)}</button>`).join('');
-  return `<main class="main"><header class="head"><h1 class="head-title">Gravit</h1></header><div class="empty">${avatar('gravit', 56)}` +
-    `<div class="empty-title">Nothing handed to Gravit yet</div><div class="suggest">${chips}</div></div>${renderComposer(composerOf(composer))}${renderStatus(state.status)}</main>`;
+  const chips = [t('thread.suggest.buy'), t('thread.suggest.follow'), t('thread.suggest.check')].map(words => `<button type="button" class="btn-sm" data-action="suggest"${attrs({ 'data-text': words })}>${esc(words)}</button>`).join('');
+  return `<main class="main"><header class="head"><h1 class="head-title">${esc(HOST_NAME)}</h1></header><div class="empty">${avatar('gravit', 56)}` +
+    `<div class="empty-title">${th('thread.empty.title')}</div><div class="suggest">${chips}</div></div>${renderComposer(composerOf(composer))}${renderStatus(state.status)}</main>`;
 }
 
 const fmtN = n => Math.round(n).toLocaleString('en-US');
@@ -89,21 +91,21 @@ const fmtN = n => Math.round(n).toLocaleString('en-US');
 function usageRows(conv) {
   const usage = conv.usage && typeof conv.usage === 'object' ? conv.usage : null;
   const rows = [];
-  const t = usage?.tokenUsage;
-  if (t && typeof t === 'object') rows.push(['Tokens in', fmtN((t.uncachedInputTokens ?? 0) + (t.cacheReadTokens ?? 0))], ['Tokens out', fmtN(t.outputTokens ?? 0)]);
+  const tu = usage?.tokenUsage;
+  if (tu && typeof tu === 'object') rows.push([t('details.tokensIn'), fmtN((tu.uncachedInputTokens ?? 0) + (tu.cacheReadTokens ?? 0))], [t('details.tokensOut'), fmtN(tu.outputTokens ?? 0)]);
   const p = usage?.contextPressure;
   const ratio = typeof p === 'number' ? p : p && typeof p === 'object' && typeof p.ratio === 'number' ? p.ratio : null;
-  if (ratio !== null) rows.push(['Context', `${Math.round(ratio * 100)}%`]);
-  const v = statsView(conv.stats, t);
+  if (ratio !== null) rows.push([t('details.context'), `${Math.round(ratio * 100)}%`]);
+  const v = statsView(conv.stats, tu);
   if (v) {
-    if (v.cache !== null) rows.push(['Cache hit', `${Math.round(v.cache * 100)}%`]);
-    rows.push(['Turns · steps', esc(`${v.turns} · ${v.steps}`)]);
-    if (v.modelMs !== null) rows.push(['Model time', esc(durationText(v.modelMs))]);
-    if (v.toolMs !== null) rows.push(['Tool time', esc(durationText(v.toolMs))]);
-    if (v.firstTokenMs !== null) rows.push(['First token', esc(durationText(v.firstTokenMs))]);
-    if (v.speed !== null) rows.push(['Speed', esc(`${v.speed} tok/s`)]);
+    if (v.cache !== null) rows.push([t('details.cacheHit'), `${Math.round(v.cache * 100)}%`]);
+    rows.push([t('details.turnsSteps'), esc(`${v.turns} · ${v.steps}`)]);
+    if (v.modelMs !== null) rows.push([t('details.modelTime'), esc(durationText(v.modelMs))]);
+    if (v.toolMs !== null) rows.push([t('details.toolTime'), esc(durationText(v.toolMs))]);
+    if (v.firstTokenMs !== null) rows.push([t('details.firstToken'), esc(durationText(v.firstTokenMs))]);
+    if (v.speed !== null) rows.push([t('details.speed'), esc(`${v.speed} tok/s`)]);
   }
-  return rows.length ? `<section class="dsec" id="dsec-usage"><div class="dsec-label">Usage</div>${kv(rows)}</section>` : '';
+  return rows.length ? `<section class="dsec" id="dsec-usage"><div class="dsec-label">${th('details.usage')}</div>${kv(rows)}</section>` : '';
 }
 
 // under a conversation's composer: the status line, then the figures' two pills once a step has closed (each opens
@@ -122,7 +124,7 @@ function threadFoot(conv, state) {
 // where the conversation lives, named as the list names its channel
 const whereOf = (conv, state) => {
   const ch = (state.channels ?? []).find(c => c.workspaceId === conv.channel?.workspaceId);
-  return ch ? channelLabel(ch) : conv.channel?.name ?? 'Default directory';
+  return ch ? channelLabel(ch) : conv.channel?.name ?? t('details.defaultDir');
 };
 
 // the row actions under This task: Fork once there is something to fork; Archive while nothing runs or waits, Un-archive for the face's own archive
@@ -132,28 +134,29 @@ function rowKeys(conv, state) {
   const idle = !conv.running && !conv.messages.some(needsAnswer);
   const deleting = state.confirm?.action === 'deleteConv' && state.confirm?.id === conv.id;
   return [
-    key('changeWords', 'Change words'),
+    key('changeWords', th('details.changeWords')),
     // dsh forks from a completed turn: a conversation with nothing in it yet has none
-    conv.messages.length ? key('fork', 'Fork') : '',
-    conv.archived ? '' : state.pinned?.includes(conv.id) ? key('unpin', 'Unpin', 'btn-sm', `details-pin-${conv.id}`) : key('pin', 'Pin', 'btn-sm', `details-pin-${conv.id}`),
-    conv.archived === 'face' ? key('unarchive', 'Un-archive') : !conv.archived && idle ? key('archive', 'Archive') : '',
-    !idle ? '' : deleting ? confirmPair('Yes, delete') : key('deleteConv', 'Delete', 'btn-danger'),
+    conv.messages.length ? key('fork', th('details.fork')) : '',
+    conv.archived ? '' : state.pinned?.includes(conv.id) ? key('unpin', th('list.unpin'), 'btn-sm', `details-pin-${conv.id}`) : key('pin', th('list.pin'), 'btn-sm', `details-pin-${conv.id}`),
+    conv.archived === 'face' ? key('unarchive', th('list.unarchive')) : !conv.archived && idle ? key('archive', th('details.archive')) : '',
+    !idle ? '' : deleting ? confirmPair(t('details.yesDelete')) : key('deleteConv', th('details.delete'), 'btn-danger'),
   ].join('');
 }
 
 // the conversation's subagent children: who, how they run, Stop (asked twice) on a running continuable one
-const MODE = { 'one-shot': 'One-shot', continuable: 'Continuable' };
-const STATE = { running: 'Running', inactive: 'Not running', unknown: 'Unknown', unavailable: 'Unavailable' };
+const MODE = { 'one-shot': () => th('details.oneShot'), continuable: () => th('details.continuable') };
+const STATE = { running: () => th('details.running'), inactive: () => th('details.notRunning'), unknown: () => th('details.unknown'), unavailable: () => th('details.unavailable') };
+const wordOf = (table, k) => (typeof k === 'string' && Object.hasOwn(table, k) ? table[k]() : '');
 function childrenSection(conv, state) {
   const { children, unavailable } = childrenOf(conv, state.childRows);
   if (!children.length && !unavailable) return '';
   const rows = children.map(c => {
     const asking = state.confirm?.action === 'stopChild' && state.confirm?.id === c.id;
-    const stop = !c.canStop ? '' : asking ? confirmPair('Yes, stop')
-      : `<button type="button" class="btn-sm" data-action="stopChild" data-parent="${esc(conv.id)}" data-child="${esc(c.id)}" data-label="${esc(c.label)}">Stop</button>`;
-    return `<div class="child-row"><span class="child-name">${esc(c.label)}</span><span class="dim">${[MODE[c.mode], STATE[c.state]].filter(Boolean).join(' · ')}</span>${stop}</div>`;
+    const stop = !c.canStop ? '' : asking ? confirmPair(t('details.yesStop'))
+      : `<button type="button" class="btn-sm" data-action="stopChild" data-parent="${esc(conv.id)}" data-child="${esc(c.id)}" data-label="${esc(c.label)}">${th('details.stop')}</button>`;
+    return `<div class="child-row"><span class="child-name">${esc(c.label)}</span><span class="dim">${[wordOf(MODE, c.mode), wordOf(STATE, c.state)].filter(Boolean).join(' · ')}</span>${stop}</div>`;
   }).join('');
-  return `<section class="dsec"><div class="dsec-label">Children</div>${unavailable ? '<div class="dsec-line dim">Children unavailable</div>' : rows}</section>`;
+  return `<section class="dsec"><div class="dsec-label">${th('details.children')}</div>${unavailable ? `<div class="dsec-line dim">${th('details.childrenUnavailable')}</div>` : rows}</section>`;
 }
 
 // Details › Background jobs (spec §5.8, P4): each running job a disclosure (open while it is the job open, its output
@@ -169,44 +172,44 @@ function jobMeta(job, now) {
 function jobDetails(job, state, now) {
   const live = isLive(job);
   const empty = !live && (Number(job.output?.total) || 0) === 0;
-  const end = live ? '' : [empty ? '(no output)' : '', endLine(job)].filter(Boolean).join(' · ');
+  const end = live ? '' : [empty ? t('jobs.noOutput') : '', endLine(job)].filter(Boolean).join(' · ');
   return `<details${attrs({ id: `jobd-${job.id}`, class: 'job-details', open: state.jobs?.open === job.id })}>` +
     `<summary${attrs({ 'data-action': 'openJob', 'data-job': job.id })}><span class="${cls('job-dot', live && 'live')}"></span><code class="job-cmd">${esc(job.label)}</code><span class="job-meta">${jobMeta(job, now)}</span></summary>` +
     `<pre${attrs({ class: 'job-out', id: `jobout-${job.id}` })}></pre><div${attrs({ class: 'job-note', id: `jobnote-${job.id}` })}></div>` +
     (end ? `<div class="job-end">${esc(end)}</div>` : '') +
-    `<button${attrs({ type: 'button', class: 'btn-sm job-copy', id: `job-copy-${job.id}`, 'data-action': 'copyText', 'data-text': job.label, 'aria-label': 'Copy command' })}>Copy</button></details>`;
+    `<button${attrs({ type: 'button', class: 'btn-sm job-copy', id: `job-copy-${job.id}`, 'data-action': 'copyText', 'data-text': job.label, 'aria-label': t('jobs.copyCommand') })}>${th('jobs.copy')}</button></details>`;
 }
 function jobStop(conv, job, state) {
   // (focusable, so Yes, stop leaves focus here rather than on the page)
-  if (job.status === 'stopping') return `<span${attrs({ class: 'dim', id: `job-stopping-${job.id}`, tabindex: '-1' })}>Stopping</span>`;
-  if (state.confirm?.action === 'stopJob' && state.confirm?.id === job.id) return confirmPair('Yes, stop');
-  return `<button${attrs({ type: 'button', class: 'btn-sm', id: `job-stop-${job.id}`, 'data-action': 'stopJob', 'data-conv': conv.id, 'data-job': job.id })}>Stop</button>`;
+  if (job.status === 'stopping') return `<span${attrs({ class: 'dim', id: `job-stopping-${job.id}`, tabindex: '-1' })}>${th('jobs.stopping')}</span>`;
+  if (state.confirm?.action === 'stopJob' && state.confirm?.id === job.id) return confirmPair(t('details.yesStop'));
+  return `<button${attrs({ type: 'button', class: 'btn-sm', id: `job-stop-${job.id}`, 'data-action': 'stopJob', 'data-conv': conv.id, 'data-job': job.id })}>${th('details.stop')}</button>`;
 }
 function jobsSection(conv, state, now) {
   const { running, finished } = jobsView(state.jobs, conv.id);
   if (!running.length && !finished.length) return '';
   const rows = running.map(j => `<div class="job">${jobDetails(j, state, now)}${jobStop(conv, j, state)}</div>`).join('');
-  const fold = !finished.length ? '' : `<details${attrs({ id: `jobs-finished-${conv.id}`, class: 'jobs-finished', open: finished.some(j => j.id === state.jobs?.open) })}><summary>${esc(`Finished · ${finished.length}`)}</summary>` +
+  const fold = !finished.length ? '' : `<details${attrs({ id: `jobs-finished-${conv.id}`, class: 'jobs-finished', open: finished.some(j => j.id === state.jobs?.open) })}><summary>${esc(t('jobs.finished', { n: finished.length }))}</summary>` +
     finished.map(j => `<div class="job">${jobDetails(j, state, now)}</div>`).join('') +
-    `<button${attrs({ type: 'button', class: 'btn-sm', id: `jobs-clear-${conv.id}`, 'data-action': 'clearJobs', 'data-conv': conv.id })}>Clear</button></details>`;
-  return `<section class="dsec" id="dsec-jobs"><div class="dsec-label">Background jobs</div>${rows}${fold}</section>`;
+    `<button${attrs({ type: 'button', class: 'btn-sm', id: `jobs-clear-${conv.id}`, 'data-action': 'clearJobs', 'data-conv': conv.id })}>${th('jobs.clear')}</button></details>`;
+  return `<section class="dsec" id="dsec-jobs"><div class="dsec-label">${th('jobs.title')}</div>${rows}${fold}</section>`;
 }
 
 export function renderDetails(conv, state, now = Date.now()) {
   const e = state.edit;
   const renaming = !!e && e.kind === 'rename' && e.convId === conv.id;
   const asking = state.confirm?.action === 'stopGravit' && state.confirm?.id === conv.id;
-  const title = renaming ? inlineEdit([{ name: 'title', value: conv.title, label: 'Name this' }], e.error) : `<div class="dsec-title">${esc(maskExcerpt(conv.title))}</div>`;
-  const agent = conv.kind === 'bot' && conv.preset ? senderName(conv.preset, state) : 'Gravit';
-  const facts = kv([...(conv.created ? [['Created', esc(fmtDate(conv.created))]] : []), ['Where', esc(whereOf(conv, state))], ['Agent', esc(agent)], ...(conv.archived === 'host' ? [['Archived', 'By the host']] : [])]);
-  const members = conv.kind === 'group' ? `<section class="dsec"><div class="dsec-label">Members</div>${conv.members.map(m => `<div class="dsec-line">${esc(senderName(m, state))}</div>`).join('')}</section>` : '';
+  const title = renaming ? inlineEdit([{ name: 'title', value: conv.title, label: t('details.nameThis') }], e.error) : `<div class="dsec-title">${esc(maskExcerpt(conv.title))}</div>`;
+  const agent = conv.kind === 'bot' && conv.preset ? senderName(conv.preset, state) : HOST_NAME;
+  const facts = kv([...(conv.created ? [[t('details.created'), esc(fmtDate(conv.created))]] : []), [t('details.where'), esc(whereOf(conv, state))], [t('details.agent'), esc(agent)], ...(conv.archived === 'host' ? [[t('details.archived'), th('details.byHost')]] : [])]);
+  const members = conv.kind === 'group' ? `<section class="dsec"><div class="dsec-label">${th('details.members')}</div>${conv.members.map(m => `<div class="dsec-line">${esc(senderName(m, state))}</div>`).join('')}</section>` : '';
   const stop = conv.running
-    ? `<section class="dsec">${asking ? confirmPair('Yes, stop Gravit') : `<button type="button" class="btn-danger" data-action="stopGravit" data-conv="${esc(conv.id)}">Stop Gravit</button>`}</section>`
+    ? `<section class="dsec">${asking ? confirmPair(t('details.yesStopGravit')) : `<button type="button" class="btn-danger" data-action="stopGravit" data-conv="${esc(conv.id)}">${th('details.stopGravit')}</button>`}</section>`
     : '';
-  return `<aside class="drawer details" aria-label="Details">
-  <div class="drawer-head"><h2>Details</h2><button type="button" class="close-key" data-action="toggleDetails" aria-label="Close">×</button></div>
+  return `<aside class="drawer details" aria-label="${th('details.title')}">
+  <div class="drawer-head"><h2>${th('details.title')}</h2><button type="button" class="close-key" data-action="toggleDetails" aria-label="${th('common.close')}">×</button></div>
   <div class="drawer-body">
-    <section class="dsec"><div class="dsec-label">This task</div>${title}${facts}${renaming ? '' : `<div class="btn-row">${rowKeys(conv, state)}</div>`}</section>
+    <section class="dsec"><div class="dsec-label">${th('details.thisTask')}</div>${title}${facts}${renaming ? '' : `<div class="btn-row">${rowKeys(conv, state)}</div>`}</section>
     ${jobsSection(conv, state, now)}${members}${childrenSection(conv, state)}${usageRows(conv)}${stop}
   </div>
 </aside>`;
@@ -217,13 +220,13 @@ export function renderDetails(conv, state, now = Date.now()) {
 function earlierKey(conv) {
   const w = conv.window;
   if (!w?.hasMore) return '';
-  return `<button${attrs({ class: 'btn-sm earlier-key', type: 'button', id: `earlier-${conv.id}`, 'data-action': 'earlier', 'data-conv': conv.id, 'aria-disabled': w.loading ? 'true' : null })}>${w.loading ? 'Loading…' : 'Earlier messages'}</button>`;
+  return `<button${attrs({ class: 'btn-sm earlier-key', type: 'button', id: `earlier-${conv.id}`, 'data-action': 'earlier', 'data-conv': conv.id, 'aria-disabled': w.loading ? 'true' : null })}>${w.loading ? th('common.loading') : th('thread.earlier')}</button>`;
 }
 
 export function renderMessagesScreen(state, now, composer = {}, page = {}) {
   if (state.draft) return draftScreen(state, composer);
   const conv = currentConversation(state);
   if (!conv) return emptyScreen(state, composer);
-  const placeholder = conv.kind === 'group' ? 'Tell Gravit… @ a bot by name' : 'Tell Gravit…';
-  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="Turns">${railHtml(conv, page.rail)}</nav></div>${renderComposer(composerOf(composer, { placeholder }))}${threadFoot(conv, state)}${state.detailsOpen ? renderDetails(conv, state, now) : ''}</main>`;
+  const placeholder = conv.kind === 'group' ? t('composer.placeholderRoom') : t('composer.placeholder');
+  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="${th('thread.turns')}">${railHtml(conv, page.rail)}</nav></div>${renderComposer(composerOf(composer, { placeholder }))}${threadFoot(conv, state)}${state.detailsOpen ? renderDetails(conv, state, now) : ''}</main>`;
 }

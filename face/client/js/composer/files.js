@@ -5,6 +5,9 @@
 //   Picked     = {key, name, bytes, mediaType, blob}   (one File, as app.js reads it)
 // An image goes inline in the prompt as base64; any other file, an SVG or a HEIC included, uploads and goes as a receipt.
 
+import { t } from '../i18n/words.js';
+import { HOST_NAME } from '../wire/speaker.js';
+
 const MiB = 1048576;
 const KiB = 1024;
 
@@ -30,9 +33,9 @@ export function admit(files, picked, limits = DEFAULT_LIMITS) {
     const kind = kindOf(p.mediaType, limits);
     if (kind === 'image') {
       let line = null;
-      if (p.bytes > limits.maxImageBytes) line = `${p.name} is over ${mb(limits.maxImageBytes)} MB`;
-      else if (count + 1 > limits.maxImagesPerMessage) line = `Up to ${limits.maxImagesPerMessage} images a message`;
-      else if (total + p.bytes > limits.maxMessageImageBytes) line = `Images in one message: up to ${mb(limits.maxMessageImageBytes)} MB`;
+      if (p.bytes > limits.maxImageBytes) line = t('composer.limit.size', { name: p.name, mb: mb(limits.maxImageBytes) });
+      else if (count + 1 > limits.maxImagesPerMessage) line = t('composer.limit.count', { n: limits.maxImagesPerMessage });
+      else if (total + p.bytes > limits.maxMessageImageBytes) line = t('composer.limit.total', { mb: mb(limits.maxMessageImageBytes) });
       if (line) { refusal ??= line; continue; }
       count++; total += p.bytes;
     }
@@ -77,16 +80,15 @@ export function progressText(loaded, total) {
 export function extOf(name) {
   const dot = String(name ?? '').lastIndexOf('.');
   const ext = dot > 0 ? name.slice(dot + 1) : '';
-  return ext ? ext.toUpperCase() : 'FILE';
+  return ext ? ext.toUpperCase() : t('composer.noExt');
 }
 
 export const metaText = file => `${extOf(file.name)} · ${sizeText(file.bytes)}`;
 
-export const limitsLine = limits => `Images: up to ${limits.maxImagesPerMessage} a message, ${mb(limits.maxImageBytes)} MB each`;
+export const limitsLine = limits => t('composer.limit.line', { n: limits.maxImagesPerMessage, mb: mb(limits.maxImageBytes) });
 
 /** Above the box when the conversation's model takes no images; a bot's name stands for Gravit in its own conversation. */
-export const modelRefusalLine = (name = 'Gravit') =>
-  `${name}'s model takes no images. Remove the image, or run ${name} on a model that does.`;
+export const modelRefusalLine = (name = HOST_NAME) => t('composer.noImages', { name });
 
 const CHUNK = 0x8000;
 
@@ -111,4 +113,4 @@ export function contentParts(text, files, dataOf) {
 /** A history message's attachments (the mapper's `{type: 'image' | 'file', name?}`) by name, joined by ', '; an unnamed
  *  one reads as its type. */
 export const attachmentsLine = list =>
-  list.map(a => a.name || (a.type === 'image' ? 'image' : 'file')).join(', ');
+  list.map(a => a.name || (a.type === 'image' ? t('composer.anImage') : t('composer.aFile'))).join(', ');

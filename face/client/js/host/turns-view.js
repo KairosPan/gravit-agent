@@ -1,6 +1,7 @@
 // face/client/js/host/turns-view.js — the turn rail and the conversation's figures as the page draws them (plan 5): the
 // rail's ticks from the `turnOutline` projection, the turn the view is on, the figures from `sessionStats` with the
 // window's `tokenUsage`, the head's two pills, and the token, duration and clock formats Usage and a job read. Pure.
+import { t, tn } from '../i18n/words.js';
 
 // {show, ticks: [{turn, seq, loaded, prompt, response}]}: a tick is loaded when nothing is earlier than the window or its
 // turn starts inside it (paging back through its seq brings the whole turn)
@@ -42,15 +43,14 @@ export function statsView(stats, tokenUsage) {
   };
 }
 
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 // [`7 turns · 41 steps · 38 tok/s`, `182k tokens · cache 63%`], a part with no figure left out
 export function pillsText(view) {
   if (!view) return ['', ''];
-  const first = [plural(view.turns, 'turn'), plural(view.steps, 'step')];
+  const first = [tn('details.pill.turns', view.turns), tn('details.pill.steps', view.steps)];
   if (view.speed !== null) first.push(`${view.speed} tok/s`);
   const second = [];
-  if (view.tokens !== null) second.push(`${compactTokens(view.tokens)} tokens`);
-  if (view.cache !== null) second.push(`cache ${Math.round(view.cache * 100)}%`);
+  if (view.tokens !== null) second.push(t('details.pill.tokens', { count: compactTokens(view.tokens) }));
+  if (view.cache !== null) second.push(t('details.pill.cache', { pct: Math.round(view.cache * 100) }));
   return [first.join(' · '), second.join(' · ')];
 }
 

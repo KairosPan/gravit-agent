@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { makeActions, NOT_SIGNED_IN } from '../../client/js/host/actions.js';
+import { makeActions } from '../../client/js/host/actions.js';
 
 const conv = (id, over = {}) => ({ id, title: 'T', kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: true, updatedAt: 5, created: null, messages: [], loaded: true, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
 
@@ -112,7 +112,7 @@ test('a second press while the first answer is in flight sends nothing: one answ
 test('a 401 says to open the printed URL; a business failure names the host\'s code', async () => {
   const out = rig({ answers: { 'session/prompt': err({ status: 401 }) } });
   assert.equal(await out.actions.send('hi'), null);
-  assert.equal(out.store.get().status.line, NOT_SIGNED_IN);
+  assert.equal(out.store.get().status.line, 'Not signed in — open the URL gravit-face printed');
   assert.equal(out.store.get().status.bad, true);
   const gone = rig({ answers: { 'session/prompt': err({ code: 'session/not-found' }) } });
   await gone.actions.send('hi');

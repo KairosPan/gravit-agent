@@ -2,6 +2,7 @@
 // Pure: no DOM, no network. Markdown is the renderer's (the flag rides on the message), the live layer's `calls` map
 // carries every tool call's arguments because the mapper's card keeps only a title.
 import { roundEndLine } from '../wire/room.js';
+import { t, tn } from '../i18n/words.js';
 
 // the Account seat's twelve write tools (spec 2026-10-20 §6.1): what the host's Gate 2 cards under any server name
 export const SEAT_TOOLS = Object.freeze(['portfolio_live_order', 'portfolio_live_batch', 'portfolio_live_amend', 'portfolio_live_cancel',
@@ -34,19 +35,22 @@ const money = n => `$${Number(n).toLocaleString('en-US', { maximumFractionDigits
 const at = (line, venue) => (typeof venue === 'string' && venue !== '' ? `${line} · ${venue}` : line);
 // a seat order's type in words: "market", "limit 187.4", "stop 150 limit 148", "trailing 2%"
 function typeWord(a) {
-  const t = a.orderType ?? 'market';
-  if (t === 'limit') return has(a.limitPrice) ? `limit ${a.limitPrice}` : 'limit';
-  if (t === 'stop') return has(a.stopPrice) ? `stop ${a.stopPrice}` : 'stop';
-  if (t === 'stop_limit') return `stop ${has(a.stopPrice) ? a.stopPrice : '?'} limit ${has(a.limitPrice) ? a.limitPrice : '?'}`;
-  if (t === 'trailing_stop') return has(a.trailPercent) ? `trailing ${a.trailPercent}%` : has(a.trailPrice) ? `trailing ${a.trailPrice}` : 'trailing';
-  return String(t);
+  const type = a.orderType ?? 'market';
+  if (type === 'market') return t('thread.seat.market');
+  if (type === 'limit') return has(a.limitPrice) ? t('thread.seat.limitAt', { price: a.limitPrice }) : t('thread.seat.limit');
+  if (type === 'stop') return has(a.stopPrice) ? t('thread.seat.stopAt', { price: a.stopPrice }) : t('thread.seat.stop');
+  if (type === 'stop_limit') return t('thread.seat.stopLimit', { stop: has(a.stopPrice) ? a.stopPrice : '?', limit: has(a.limitPrice) ? a.limitPrice : '?' });
+  if (type === 'trailing_stop') {
+    return has(a.trailPercent) ? t('thread.seat.trailingPct', { pct: a.trailPercent }) : has(a.trailPrice) ? t('thread.seat.trailingAt', { price: a.trailPrice }) : t('thread.seat.trailing');
+  }
+  return String(type);
 }
 // a seat write in words (spec 2026-10-20 §6.1): "buy $100 of AAPL · market · paper-1", "cancel ord-0001 · paper-1",
 // "move 50 USDC · withdraw from okx", "pay up to $2 · api.example.com"; a tool the face never classified is its raw name
 // one order in words, without its venue: "buy $100 of AAPL · market", "sell 10 AAPL · limit 187.4"
 function orderWords(a) {
-  const size = has(a.usd) ? `${money(a.usd)} of ${has(a.symbol) ? a.symbol : '?'}` : words(a.qty, a.symbol);
-  return `${has(a.side) ? a.side : 'order'} ${size} · ${typeWord(a)}`;
+  const size = has(a.usd) ? t('thread.seat.usdOf', { usd: money(a.usd), symbol: has(a.symbol) ? a.symbol : '?' }) : words(a.qty, a.symbol);
+  return `${has(a.side) ? a.side : t('thread.seat.order')} ${size} · ${typeWord(a)}`;
 }
 export function seatLine(name, a = {}) {
   const raw = rawOf(name);
@@ -55,23 +59,26 @@ export function seatLine(name, a = {}) {
     // a batch is several orders: every leg in words (the host's card carries each leg's venue in its own line)
     case 'portfolio_live_batch': {
       const legs = Array.isArray(a.legs) ? a.legs.filter(l => l && typeof l === 'object') : [];
-      const head = `batch · ${legs.length} leg${legs.length === 1 ? '' : 's'}`;
+      const head = tn('thread.seat.batch', legs.length);
       return legs.length ? `${head}: ${legs.map(orderWords).join('; ')}` : head;
     }
-    case 'portfolio_live_amend': return at(`amend ${has(a.order) ? a.order : '?'}`, a.venue);
-    case 'portfolio_live_cancel': return at(`cancel ${has(a.order) ? a.order : '?'}`, a.venue);
-    case 'portfolio_live_close': return at(`close ${words(a.qty, a.symbol) || '?'}`, a.venue);
-    case 'portfolio_live_leverage': return at(`leverage ${has(a.symbol) ? a.symbol : '?'} ${has(a.leverage) ? a.leverage : '?'}x`, a.venue);
-    case 'portfolio_live_move': return `move ${words(a.amount, a.asset) || '?'} · ${has(a.kind) ? a.kind : 'move'} from ${has(a.from) ? a.from : '?'}${has(a.to) ? ` to ${a.to}` : ''}`;
-    case 'portfolio_live_earn': return at(`earn ${words(a.kind, a.amount, a.asset) || '?'}`, a.venue);
+    case 'portfolio_live_amend': return at(t('thread.seat.amend', { order: has(a.order) ? a.order : '?' }), a.venue);
+    case 'portfolio_live_cancel': return at(t('thread.seat.cancel', { order: has(a.order) ? a.order : '?' }), a.venue);
+    case 'portfolio_live_close': return at(t('thread.seat.close', { what: words(a.qty, a.symbol) || '?' }), a.venue);
+    case 'portfolio_live_leverage': return at(t('thread.seat.leverage', { symbol: has(a.symbol) ? a.symbol : '?', x: has(a.leverage) ? a.leverage : '?' }), a.venue);
+    case 'portfolio_live_move': {
+      const move = { what: words(a.amount, a.asset) || '?', kind: has(a.kind) ? a.kind : t('thread.seat.moveKind'), from: has(a.from) ? a.from : '?' };
+      return has(a.to) ? t('thread.seat.moveTo', { ...move, to: a.to }) : t('thread.seat.move', move);
+    }
+    case 'portfolio_live_earn': return at(t('thread.seat.earn', { what: words(a.kind, a.amount, a.asset) || '?' }), a.venue);
     case 'portfolio_pay': {
       let host = '';
       try { host = new URL(String(a.url)).host; } catch { host = typeof a.url === 'string' ? a.url : ''; }
-      return `pay up to ${money(has(a.maxAmount) ? a.maxAmount : 0)}${host ? ` · ${host}` : ''}`;
+      return `${t('thread.seat.pay', { amount: money(has(a.maxAmount) ? a.maxAmount : 0) })}${host ? ` · ${host}` : ''}`;
     }
-    case 'portfolio_order': return `${has(a.side) ? a.side : 'order'} ${words(a.qty, a.base) || '?'}`;
-    case 'portfolio_execute': return `execute at ${has(a.account) ? a.account : '?'}`;
-    case 'portfolio_transfer': return `transfer ${words(a.amount, has(a.token) ? a.token : 'USD')} · ${has(a.from) ? a.from : '?'} to ${has(a.to) ? a.to : '?'}`;
+    case 'portfolio_order': return `${has(a.side) ? a.side : t('thread.seat.order')} ${words(a.qty, a.base) || '?'}`;
+    case 'portfolio_execute': return t('thread.seat.execute', { account: has(a.account) ? a.account : '?' });
+    case 'portfolio_transfer': return t('thread.seat.transfer', { what: words(a.amount, has(a.token) ? a.token : 'USD'), from: has(a.from) ? a.from : '?', to: has(a.to) ? a.to : '?' });
     default: return at(raw, a.venue);
   }
 }
@@ -88,15 +95,16 @@ export function seatLift(name, args, text, isError, callId) {
   if (isError || v.ok === false) {
     // a batch whose every leg was refused: the count, and the first refusal in the Account's words
     const first = legs?.find(l => l.ok === false);
-    const line = legs && first ? `Batch · ${legs.filter(l => l.ok === false).length} of ${legs.length} legs refused · ${refusalWords(first, text)}` : refusalWords(v, text);
+    const line = legs && first ? t('thread.seat.batchRefused', { refused: legs.filter(l => l.ok === false).length, total: legs.length, reason: refusalWords(first, text) }) : refusalWords(v, text);
     return { kind: 'refusal', text: line, data: { seat: true, toolName: name, callId } };
   }
   if (v.pending === true && typeof v.card?.id === 'string') {
-    return { kind: 'receipt', text: `Card raised · ${v.card.id} · answer it under Account › Cards`, data: { seat: true, cardId: v.card.id, callId } };
+    return { kind: 'receipt', text: t('thread.seat.cardRaised', { id: v.card.id }), data: { seat: true, cardId: v.card.id, callId } };
   }
   if (typeof v.order?.id === 'string') {
-    const word = v.order.status === 'canceled' ? 'Order canceled' : 'Order placed';
-    return { kind: 'receipt', text: `${word} · ${seatLine(name, args)} · ${v.order.id}${v.order.paper === true ? ' · paper' : ''}`, data: { seat: true, orderId: v.order.id, callId } };
+    const said = { line: seatLine(name, args), id: v.order.id };
+    const word = v.order.status === 'canceled' ? t('thread.seat.canceled', said) : t('thread.seat.placed', said);
+    return { kind: 'receipt', text: `${word}${v.order.paper === true ? ` · ${t('thread.seat.paper')}` : ''}`, data: { seat: true, orderId: v.order.id, callId } };
   }
   if (legs) {
     // in Guard the Account answers a leg with a card of its own and places nothing: a card is not a fill
@@ -104,10 +112,10 @@ export function seatLift(name, args, text, isError, callId) {
     const cards = legs.filter(l => l.pending === true && typeof l.card?.id === 'string').length;
     const refused = legs.filter(l => l.ok === false).length;
     const parts = [];
-    if (placed > 0 || (cards === 0 && refused === 0)) parts.push(`${placed} of ${legs.length} legs placed`);
-    if (cards > 0) parts.push(`${cards} card${cards === 1 ? '' : 's'} raised · answer under Account › Cards`);
-    if (refused > 0) parts.push(`${refused} refused`);
-    return { kind: 'receipt', text: `Batch · ${parts.join(' · ')}`, data: { seat: true, callId } };
+    if (placed > 0 || (cards === 0 && refused === 0)) parts.push(t('thread.seat.legsPlaced', { placed, total: legs.length }));
+    if (cards > 0) parts.push(tn('thread.seat.cardsRaised', cards));
+    if (refused > 0) parts.push(t('thread.seat.legsRefused', { n: refused }));
+    return { kind: 'receipt', text: t('thread.seat.batchReceipt', { parts: parts.join(' · ') }), data: { seat: true, callId } };
   }
   return null;
 }
@@ -218,10 +226,10 @@ function gate(view, now) {
   const read = reasonArgs(view.reason ?? view.displayReason);
   const args = read.tool === view.toolName && Object.keys(read.args).length > 0 ? read.args : null;
   // a seat card: the seat line, and the line's venue as the chip — a batch's venues, or the seat itself when the tool names none
-  const venue = args && typeof args.venue === 'string' && args.venue !== '' ? args.venue : (venuesOf(args?.legs) || 'Account seat');
+  const venue = args && typeof args.venue === 'string' && args.venue !== '' ? args.venue : (venuesOf(args?.legs) || t('thread.seat.venue'));
   return {
     id: view.id, at: now, from: 'gravit', kind: 'card',
-    text: `Your call: ${args ? seatLine(view.toolName, args) : view.toolName}`,
+    text: t('thread.seat.yourCall', { line: args ? seatLine(view.toolName, args) : view.toolName }),
     data: { ...data, venue, line, args: args ?? {} },
   };
 }
@@ -231,7 +239,7 @@ export function toMessages(view, calls, now, speaker = 'gravit') {
   switch (view?.kind) {
     case 'bubble': { const m = bubble(view, speaker); return m ? [m] : []; }
     case 'room-line': return [sys(view, roundEndLine(view))];
-    case 'subagent-message': return [sys(view, `Report from ${view.childSessionId ?? 'a child'}: ${view.text ?? ''}`)];
+    case 'subagent-message': return [sys(view, t('thread.report', { child: view.childSessionId ?? t('thread.aChild'), text: view.text ?? '' }))];
     case 'card': return toolMessages(view, calls);
     case 'approval': return [gate(view, now)];
     case 'question': return [{ id: view.id, at: now, from: 'gravit', kind: 'question', text: '', data: { eventId: view.id, sessionId: view.sessionId, questions: Array.isArray(view.questions) ? view.questions : [] } }];

@@ -4,13 +4,13 @@
 // reason after `; ` (dsh-tool-bash, JobController.kill at rc.5).
 
 import { clockText } from './turns-view.js';
+import { t, tn } from '../i18n/words.js';
 
 export const isLive = job => job?.status === 'running' || job?.status === 'stopping';
 
-const count = (n, word) => `${n} job${n === 1 ? '' : 's'} ${word}`;
 export function chipText(running, finished) {
-  if (running.length > 0) return count(running.length, 'running');
-  if (finished.length > 0) return count(finished.length, 'finished');
+  if (running.length > 0) return tn('jobs.chip.running', running.length);
+  if (finished.length > 0) return tn('jobs.chip.finished', finished.length);
   return null;
 }
 
@@ -27,13 +27,13 @@ const detailOf = job => (typeof job?.detail === 'string' ? job.detail : '');
 export function endLine(job) {
   if (job?.status === 'completed') {
     const m = /(?:^|;\s*)exit code:\s*([^;\s]+)/.exec(detailOf(job));
-    return m ? `exit ${m[1]}` : 'exit';
+    return m ? t('jobs.end.exitCode', { code: m[1] }) : t('jobs.end.exit');
   }
   if (job?.status === 'killed') {
     const m = /(?:^|;\s*)signal:\s*([^;\s]+)/.exec(detailOf(job));
-    return m ? `signal ${m[1]}` : 'killed';
+    return m ? t('jobs.end.signal', { name: m[1] }) : t('jobs.end.killed');
   }
-  if (job?.status === 'failed') return 'failed';
+  if (job?.status === 'failed') return t('jobs.end.failed');
   return '';
 }
 

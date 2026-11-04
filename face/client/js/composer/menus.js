@@ -1,6 +1,7 @@
 // The composer's menus' items, pure: what the / and @ menus list for a query, in drawn order, and the chip a pick becomes.
 //   Menu = {kind: '/' | '@', from, query, groups: [{label?, crumb?, items}], active}
 import { ago } from '../time.js';
+import { t } from '../i18n/words.js';
 
 export const HIDDEN_COMMANDS = ['plan', 'permission', 'feedback'];   // D11
 export const CONVERSATION_ITEMS = 8;
@@ -32,10 +33,10 @@ export function slashItems({ commands, skills, query, atStart }) {
         kind: 'command', name: c.name, title: capitalize(c.name), description: c.description ?? '',
         takesArgs: !!c.input, hint: c.input?.hint ?? '',
       }));
-    groups.push({ label: 'Commands', items: rankByLetters(items, query, i => i.name) });
+    groups.push({ label: t('composer.menu.commands'), items: rankByLetters(items, query, i => i.name) });
   }
   const sk = (skills ?? []).map(s => ({ kind: 'skill', name: s.name, description: s.description ?? '' }));
-  groups.push({ label: 'Skills', items: rankByLetters(sk, query, i => i.name) });
+  groups.push({ label: t('composer.menu.skills'), items: rankByLetters(sk, query, i => i.name) });
   return groups
     .filter(g => g.items.length)
     .map(g => (query ? { items: g.items } : g));
@@ -49,7 +50,7 @@ const fileItem = f => {
 
 export function atItems({ bots, files, conversations, query }) {
   const q = query ?? '';
-  const fileGroup = () => ({ label: 'Files and folders', items: (files ?? []).map(fileItem) });
+  const fileGroup = () => ({ label: t('composer.menu.files'), items: (files ?? []).map(fileItem) });
   if (q.includes('/')) {
     const g = fileGroup();
     return g.items.length ? [{ ...g, crumb: q.slice(0, q.lastIndexOf('/') + 1) }] : [];
@@ -57,11 +58,11 @@ export function atItems({ bots, files, conversations, query }) {
   const groups = [];
   if (bots?.length) {
     const items = bots.map(b => ({ kind: 'bot', id: b.id, name: b.name, description: b.description ?? '' }));
-    groups.push({ label: 'Bots in this room', items: rankByLetters(items, q, b => `${b.name} ${b.id}`) });
+    groups.push({ label: t('composer.menu.bots'), items: rankByLetters(items, q, b => `${b.name} ${b.id}`) });
   }
   groups.push(fileGroup());
   groups.push({
-    label: 'Conversations',
+    label: t('composer.menu.conversations'),
     items: rankByLetters(conversations ?? [], q, c => c.title).slice(0, CONVERSATION_ITEMS),
   });
   return groups.filter(g => g.items.length);

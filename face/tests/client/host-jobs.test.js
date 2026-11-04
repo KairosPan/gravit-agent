@@ -6,7 +6,6 @@ import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { startJobs, JOB_OUTPUT_KEEP } from '../../client/js/host/jobs.js';
-import { NOT_SIGNED_IN } from '../../client/js/host/actions.js';
 import { FOLLOW_RETRY_MS, CONTROL_RETRY_MS } from '../../client/js/host/live.js';
 
 const DROPPED = '… earlier output dropped …';
@@ -175,7 +174,7 @@ test('kill calls job/kill with {request: {sessionId, jobId}}; a throw says stop:
   assert.equal(gone.store.get().status.bad, true);
   const out = rig(async () => { throw Object.assign(new Error('401'), { status: 401 }); });
   assert.equal(await out.jobs.kill('s1', 'a'), false);
-  assert.equal(out.store.get().status.line, NOT_SIGNED_IN);
+  assert.equal(out.store.get().status.line, 'Not signed in — open the URL gravit-face printed');
 });
 
 test('watching another conversation, or none, cancels the follow too', () => {

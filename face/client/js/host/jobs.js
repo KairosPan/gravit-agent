@@ -6,12 +6,13 @@
 // job/follow starts again from the oldest retained byte, so a chunk whose `at` is below the `next` already held is skipped.
 // That re-open re-sends the whole retained ring on every reconnect (a known cost: the mux keeps the first args, so no
 // `from` rides it). A job/list the host ends or refuses is opened again after live.js's backoffs.
-import { NOT_SIGNED_IN } from './actions.js';
+import { failLine } from './actions.js';
+import { t } from '../i18n/words.js';
 import { FOLLOW_RETRY_MS, CONTROL_RETRY_MS } from './live.js';
 
 // characters of output kept in memory per open job, the head dropped first
 export const JOB_OUTPUT_KEEP = 262144;
-const DROPPED = '… earlier output dropped …';
+const dropped = () => t('jobs.dropped');
 
 export function startJobs({ store, mux, call, timers, onOutput = () => {} }) {
   let list = null;       // { convId, handle, timer }: handle null while a re-open waits on its timer
@@ -43,14 +44,14 @@ export function startJobs({ store, mux, call, timers, onOutput = () => {} }) {
     });
   }
 
-  const DROPPED_LINE = `${DROPPED}\n`;
   // the dropped line on its own line, at the end of what is held, never twice in a row
-  const mark = text => (text.endsWith(DROPPED_LINE)
-    ? text
-    : `${text}${text !== '' && !text.endsWith('\n') ? '\n' : ''}${DROPPED_LINE}`);
+  const mark = text => {
+    const line = `${dropped()}\n`;
+    return text.endsWith(line) ? text : `${text}${text !== '' && !text.endsWith('\n') ? '\n' : ''}${line}`;
+  };
   function cap(f) {
     if (f.text.length <= JOB_OUTPUT_KEEP) return;
-    const head = `${DROPPED}\n`;
+    const head = `${dropped()}\n`;
     let cut = f.text.length - (JOB_OUTPUT_KEEP - head.length);
     const unit = f.text.charCodeAt(cut);
     if (unit >= 0xdc00 && unit <= 0xdfff) cut += 1;   // never half a surrogate pair
@@ -63,7 +64,7 @@ export function startJobs({ store, mux, call, timers, onOutput = () => {} }) {
       const from = Number(frame.from) || 0;
       if (!f.opened) {
         f.opened = true;
-        f.text = earliest > 0 ? `${DROPPED}\n` : '';
+        f.text = earliest > 0 ? `${dropped()}\n` : '';
         f.next = Math.max(earliest, from);
       } else if (Math.max(earliest, from) > f.next) {
         // a re-opened follow whose oldest retained byte is past what was held: the bytes between are gone
@@ -136,10 +137,10 @@ export function startJobs({ store, mux, call, timers, onOutput = () => {} }) {
       try {
         const value = await call('job/kill', { request: { sessionId: convId, jobId } });
         if (value?.outcome === 'requested' || value?.outcome === 'already-finished') return true;
-        say('stop: failed');
+        say(t('status.fail', { what: t('status.verb.stop'), reason: t('status.failed') }));
         return false;
       } catch (err) {
-        say(err?.status === 401 ? NOT_SIGNED_IN : `stop: ${err?.code ?? (err?.status ? `HTTP ${err.status}` : err?.message ?? 'failed')}`);
+        say(failLine(err, t('status.verb.stop')));
         return false;
       }
     },
