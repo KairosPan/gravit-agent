@@ -270,3 +270,11 @@ test('the lightbox opens on an attachment and closes', () => {
   assert.equal(R.nav(open, { screen: 'discover', id: null }).lightbox, null);
   assert.equal(R.startDraft(open, {}).lightbox, null);
 });
+
+test('openDetails opens Details and leaves it open', () => {
+  const s = R.nav({ ...emptyState(), conversations: [hostConv('a')] }, { screen: 'messages', id: 'a' });
+  const opened = R.openDetails(R.openSettings(s));
+  assert.equal(opened.detailsOpen, true);
+  assert.equal(opened.settingsOpen, false, 'one overlay at a time');
+  assert.equal(R.openDetails(opened), opened, 'open already: unchanged, never closed');
+});

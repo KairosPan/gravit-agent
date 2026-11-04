@@ -12,6 +12,7 @@ import { needsAnswer } from '../messages.js';
 import { childrenOf } from '../host/children-view.js';
 import { channelLabel } from '../host/list-view.js';
 import { renderMenu, menuAria, filesRail } from '../composer/view.js';
+import { statsView, pillsText, durationText } from '../host/turns-view.js';
 
 export function currentConversation(state) {
   const id = state.route.screen === 'messages' ? state.route.id : null;
@@ -74,16 +75,37 @@ function emptyScreen(state, composer) {
 }
 
 const fmtN = n => Math.round(n).toLocaleString('en-US');
-// the host's usage projections, as rows: tokens in (the cache reads counted), tokens out, the context pressure
-function usageRows(usage) {
-  if (!usage || typeof usage !== 'object') return '';
+// the host's usage projections, as rows: tokens in (the cache reads counted), tokens out, the context pressure; then the
+// session's figures (D21), each row only when its figure exists
+function usageRows(conv) {
+  const usage = conv.usage && typeof conv.usage === 'object' ? conv.usage : null;
   const rows = [];
-  const t = usage.tokenUsage;
+  const t = usage?.tokenUsage;
   if (t && typeof t === 'object') rows.push(['Tokens in', fmtN((t.uncachedInputTokens ?? 0) + (t.cacheReadTokens ?? 0))], ['Tokens out', fmtN(t.outputTokens ?? 0)]);
-  const p = usage.contextPressure;
+  const p = usage?.contextPressure;
   const ratio = typeof p === 'number' ? p : p && typeof p === 'object' && typeof p.ratio === 'number' ? p.ratio : null;
   if (ratio !== null) rows.push(['Context', `${Math.round(ratio * 100)}%`]);
-  return rows.length ? `<section class="dsec"><div class="dsec-label">Usage</div>${kv(rows)}</section>` : '';
+  const v = statsView(conv.stats, t);
+  if (v) {
+    if (v.cache !== null) rows.push(['Cache hit', `${Math.round(v.cache * 100)}%`]);
+    rows.push(['Turns · steps', esc(`${v.turns} · ${v.steps}`)]);
+    if (v.modelMs !== null) rows.push(['Model time', esc(durationText(v.modelMs))]);
+    if (v.toolMs !== null) rows.push(['Tool time', esc(durationText(v.toolMs))]);
+    if (v.firstTokenMs !== null) rows.push(['First token', esc(durationText(v.firstTokenMs))]);
+    if (v.speed !== null) rows.push(['Speed', esc(`${v.speed} tok/s`)]);
+  }
+  return rows.length ? `<section class="dsec" id="dsec-usage"><div class="dsec-label">Usage</div>${kv(rows)}</section>` : '';
+}
+
+// under a conversation's composer: the status line, then the figures' two pills once a step has closed (each opens
+// Details at Usage; an empty one is not drawn); nothing when both are empty
+export function statsPills(conv) {
+  return pillsText(statsView(conv.stats, conv.usage?.tokenUsage)).filter(Boolean)
+    .map(text => `<button type="button" class="stats-pill" data-action="openUsage">${esc(text)}</button>`).join('');
+}
+function threadFoot(conv, state) {
+  const inner = renderStatus(state.status) + statsPills(conv);
+  return inner ? `<div class="thread-foot">${inner}</div>` : '';
 }
 
 // where the conversation lives, named as the list names its channel
@@ -138,7 +160,7 @@ export function renderDetails(conv, state) {
   <div class="drawer-head"><h2>Details</h2><button type="button" class="close-key" data-action="toggleDetails" aria-label="Close">×</button></div>
   <div class="drawer-body">
     <section class="dsec"><div class="dsec-label">This task</div>${title}${facts}${renaming ? '' : `<div class="btn-row">${rowKeys(conv, state)}</div>`}</section>
-    ${members}${childrenSection(conv, state)}${usageRows(conv.usage)}${stop}
+    ${members}${childrenSection(conv, state)}${usageRows(conv)}${stop}
   </div>
 </aside>`;
 }
@@ -156,5 +178,5 @@ export function renderMessagesScreen(state, now, composer = {}, page = {}) {
   const conv = currentConversation(state);
   if (!conv) return emptyScreen(state, composer);
   const placeholder = conv.kind === 'group' ? 'Tell Gravit… @ a bot by name' : 'Tell Gravit…';
-  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="Turns"></nav></div>${renderComposer(composerOf(composer, { placeholder }))}${renderStatus(state.status)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
+  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="Turns"></nav></div>${renderComposer(composerOf(composer, { placeholder }))}${threadFoot(conv, state)}${state.detailsOpen ? renderDetails(conv, state) : ''}</main>`;
 }

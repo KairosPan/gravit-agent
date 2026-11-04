@@ -278,3 +278,55 @@ test("the thread's anchor: the first message drawn at or past the seq the page n
   assert.match(h, /<div id="thread-anchor" class="msg you"><div class="bubble you">w30</);
   assert.doesNotMatch(renderMessagesScreen(s, NOW), /thread-anchor/, 'no anchor named, none drawn');
 });
+
+// plan 5, Task 6: the session's figures (D21) in Usage and as two pills under the composer
+const STATS = { turns: 7, steps: 41, llmMs: 252_000, toolMs: 42_400, ttftMs: 57_400, ttftSteps: 41, decodeMs: 60_000, decodeTokens: 2280 };
+const TOKENS = { uncachedInputTokens: 67_000, cacheReadTokens: 113_000, outputTokens: 2_000 };
+
+test('Usage keeps its three rows and gains cache hit, turns and steps, model and tool time, first token and speed', () => {
+  const s = listed([conv('a', { usage: { tokenUsage: TOKENS, contextPressure: 0.42 }, stats: STATS })]);
+  const d = renderDetails(currentConversation(s), s);
+  assert.match(d, /<section class="dsec" id="dsec-usage"><div class="dsec-label">Usage<\/div>/);
+  const labels = [...d.slice(d.indexOf('dsec-usage')).matchAll(/kv-k">([^<]*)</g)].map(x => x[1]);
+  assert.deepEqual(labels.slice(0, 9), ['Tokens in', 'Tokens out', 'Context', 'Cache hit', 'Turns · steps', 'Model time', 'Tool time', 'First token', 'Speed']);
+  assert.match(d, />Tokens in<[\s\S]*?>180,000</);
+  assert.match(d, />Cache hit<[\s\S]*?>63%</);
+  assert.match(d, />Turns · steps<[\s\S]*?>7 · 41</);
+  assert.match(d, />Model time<[\s\S]*?>4m 12s</);
+  assert.match(d, />Tool time<[\s\S]*?>42 s</);
+  assert.match(d, />First token<[\s\S]*?>1.4 s</);
+  assert.match(d, />Speed<[\s\S]*?>38 tok\/s</);
+  // a row with no figure is not drawn: no tool time yet, no decode yet, no usage yet (no cache hit)
+  const early = listed([conv('a', { stats: { ...STATS, toolMs: 0, decodeMs: 0, decodeTokens: 0 } })]);
+  const e = renderDetails(currentConversation(early), early);
+  assert.match(e, /id="dsec-usage"/, 'the figures alone draw the section');
+  for (const gone of ['Tool time', 'Speed', 'Cache hit', 'Tokens in']) assert.doesNotMatch(e, new RegExp(`>${gone}<`), gone);
+  assert.match(e, />Model time<[\s\S]*?>4m 12s</);
+  // before the first step: no figures, and no section without usage
+  const none = listed([conv('a', { stats: { ...STATS, steps: 0 } })]);
+  assert.doesNotMatch(renderDetails(currentConversation(none), none), /Usage/);
+});
+
+test('the pills show after the first step, right of the status line, and open Usage', () => {
+  const s = R.hostStatus(listed([conv('a', { usage: { tokenUsage: TOKENS }, stats: STATS })]), { line: 'Reconnecting…' });
+  const h = renderMessagesScreen(s, NOW);
+  assert.match(h, /<\/form><div class="thread-foot"><div class="status-line" role="status">Reconnecting…<\/div><button type="button" class="stats-pill" data-action="openUsage">7 turns · 41 steps · 38 tok\/s<\/button><button type="button" class="stats-pill" data-action="openUsage">182k tokens · cache 63%<\/button><\/div>/);
+  // no usage yet: the second pill would be empty, so it is not drawn
+  const bare = renderMessagesScreen(R.hostStatus(listed([conv('a', { stats: { ...STATS, turns: 1, steps: 1, decodeMs: 0 } })]), { line: '' }), NOW);
+  assert.match(bare, /<div class="thread-foot"><button type="button" class="stats-pill" data-action="openUsage">1 turn · 1 step<\/button><\/div>/);
+  assert.equal(count(bare, /stats-pill/g), 1);
+});
+
+test('no stats, no pills: the foot is the status line alone, or nothing', () => {
+  const quiet = R.hostStatus(listed([conv('a', { stats: { ...STATS, steps: 0 } })]), { line: '' });
+  assert.doesNotMatch(renderMessagesScreen(quiet, NOW), /thread-foot|stats-pill/);
+  const said = renderMessagesScreen(R.hostStatus(quiet, { line: 'Reconnecting…', bad: true }), NOW);
+  assert.match(said, /<\/form><div class="thread-foot"><div class="status-line bad" role="status">Reconnecting…<\/div><\/div>/);
+  assert.doesNotMatch(said, /stats-pill/);
+  // New message and the empty state keep the status line alone
+  const draft = renderMessagesScreen(R.hostStatus(R.startDraft(quiet), { line: 'Reconnecting…' }), NOW);
+  assert.match(draft, /<\/form><div class="status-line" role="status">Reconnecting…<\/div><\/main>/);
+  assert.doesNotMatch(draft, /thread-foot/);
+  const empty = renderMessagesScreen(R.hostStatus({ ...quiet, conversations: [] }, { line: 'Reconnecting…' }), NOW);
+  assert.doesNotMatch(empty, /thread-foot/);
+});

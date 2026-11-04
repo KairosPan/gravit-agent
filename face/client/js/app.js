@@ -501,6 +501,7 @@ export function boot(win, host = {}) {
   let pressed = false;   // a primary press is down: a render now would replace the element the click is aimed at
   let pending = false;
   let openedId = null;   // the conversation the live layer was told to open
+  let detailsAt = null;  // the Details section the next render scrolls into view (a pill names Usage), then cleared
   let was = null;        // the route follow() last settled: entering a screen, a tab or a market's page reads what it draws
   let wanted = null;     // a deep link the list has not answered yet
   let searchTimer = null;   // the Markets search waiting for the box to be quiet
@@ -625,6 +626,11 @@ export function boot(win, host = {}) {
     if (main && sameScreen && scrolls.main != null) main.scrollTop = scrolls.main;
     const drawerBody = root.querySelector('.drawer-body');
     if (drawerBody && last.drawer && last.drawer === drawerOf(s) && scrolls.drawer != null) drawerBody.scrollTop = scrolls.drawer;
+    // a section asked for (a pill's Usage): scrolled to after the drawer's own keep, once
+    if (detailsAt !== null) {
+      doc.getElementById(detailsAt)?.scrollIntoView?.({ block: 'start' });
+      detailsAt = null;
+    }
     // the thread stays where the person was reading while they read up, however much arrives; at the bottom, or on
     // another conversation, it follows the tail. Earlier pages landed above (the window's start below the one last drawn)
     // keep the words under the reader where they were, at the bottom too: the top moves down by how far the anchored
@@ -1462,6 +1468,13 @@ export function boot(win, host = {}) {
       void actions.answer(m.id, batch);
     },
     toggleDetails: () => store.dispatch('toggleDetails'),
+    // a figures pill: Details open (never closed by it) at Usage; Details open already changes no state, so a render is asked
+    // for to carry the scroll
+    openUsage: () => {
+      detailsAt = 'dsec-usage';
+      const before = store.get();
+      if (store.dispatch('openDetails') === before) requestRender();
+    },
     // earlier history of the conversation on screen, a page before its window (never activating it, PLAN D16)
     earlier: el => {
       const w = store.get().conversations.find(c => c.id === el.dataset.conv)?.window;

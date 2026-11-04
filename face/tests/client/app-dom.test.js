@@ -5732,3 +5732,29 @@ test('the eye keeps focus as its label flips', async () => {
   assert.equal(f.doc.activeElement, eye);
   store.timers.clear();
 });
+
+test('a pill opens Details scrolled to Usage', async () => {
+  const f = fakeWindow({ hash: '' });
+  const scrolled = [];
+  const drawer = f.withSelector('.drawer-body', { presentIf: /class="drawer details"/ });
+  f.withId('dsec-usage', { presentIf: /id="dsec-usage"/, scrollIntoView(o) { scrolled.push({ o, drawerTop: drawer.scrollTop }); } });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const store = started(f, h);
+  await h.ready();
+  h.streams[0].cbs.onItem({ type: 'projection', sessionId: 's1', key: 'sessionStats', value: { turns: 2, steps: 5, llmMs: 9000, toolMs: 0, ttftMs: 2000, ttftSteps: 5, decodeMs: 0, decodeTokens: 0 }, seq: 4 });
+  await settle();
+  assert.match(f.html(), /<button type="button" class="stats-pill" data-action="openUsage">2 turns · 5 steps<\/button>/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openUsage' } });
+  await settle();
+  assert.equal(store.get().detailsOpen, true);
+  assert.deepEqual(scrolled.map(x => x.o), [{ block: 'start' }], 'Usage scrolled into view once');
+  // a second press leaves Details open and scrolls to Usage again; a render in between scrolls nothing
+  store.dispatch('hostStatus', { line: 'x' });
+  await settle();
+  assert.equal(scrolled.length, 1, 'the scroll is for the press, not every render');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openUsage' } });
+  await settle();
+  assert.equal(store.get().detailsOpen, true, 'never closed by a pill');
+  assert.equal(scrolled.length, 2);
+  store.timers.clear();
+});

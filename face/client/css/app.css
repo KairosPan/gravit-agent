@@ -391,6 +391,11 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 /* the one line of host status under the composer: not signed in, reconnecting, a host error (spec 2026-10-19 §3) */
 .status-line { font-size: 12px; color: var(--dim); text-align: center; padding: 2px 24px 8px; overflow-wrap: anywhere; }
 .status-line.bad { color: var(--down); }
+/* under a conversation's composer: the status line, then the session's figures as two pills that open Details at Usage */
+.thread-foot { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; padding: 0 24px 8px; }
+.thread-foot .status-line { padding: 2px 0; }
+.stats-pill { display: inline-flex; align-items: center; min-height: 24px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: transparent; color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer; }
+.stats-pill:hover { background: var(--hover); color: var(--text); }
 /* tool calls are stored in the thread but not drawn (no tool rows); the rules below style the remaining process blocks */
 /* a question batch: one block per question, inputs named by its id, one Answer key */
 .question .q { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
@@ -492,6 +497,8 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 @media (min-width: 861px) {
   .main.with-drawer > .head, .main.with-drawer > .thread-box, .main.with-drawer > .composer { margin-right: 400px; }
   .main.with-drawer.with-stock > .head, .main.with-drawer.with-stock > .thread-box, .main.with-drawer.with-stock > .composer { margin-right: 460px; }
+  .main.with-drawer > .thread-foot { margin-right: 400px; }
+  .main.with-drawer.with-stock > .thread-foot { margin-right: 460px; }
 }
 /* on a medium window the list folds away while Details is open, so the conversation keeps a usable width */
 @media (min-width: 861px) and (max-width: 1399px) {

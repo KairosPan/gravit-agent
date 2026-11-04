@@ -1,6 +1,6 @@
 // face/client/js/reducers/controls.js — the in-page controls: inline editors and two-step confirms (they replaced prompt
 // and confirm)
-import { reducers as messages } from './messages.js';
+import { reducers as messages, closeOverlays } from './messages.js';
 
 const fail = (s, error) => ({ ...s, edit: { ...s.edit, error } });
 const done = s => ({ ...s, edit: null });
@@ -43,6 +43,9 @@ export const reducers = {
   openLightbox: (s, { attachmentId, name } = {}) => (typeof attachmentId === 'string' && attachmentId !== ''
     ? { ...s, lightbox: { attachmentId, name: typeof name === 'string' ? name : '' } } : s),
   closeLightbox: s => (s.lightbox ? { ...s, lightbox: null } : s),
+
+  // Details opened from elsewhere (a pill): opens it, never closes it
+  openDetails: s => (s.detailsOpen ? s : { ...closeOverlays(s), detailsOpen: true }),
 
   askConfirm: (s, spec) => ({ ...s, confirm: spec, edit: null }),
   cancelConfirm: s => (s.confirm ? { ...s, confirm: null } : s),
