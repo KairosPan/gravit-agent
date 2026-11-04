@@ -86,6 +86,8 @@ export interface TelegramConnectorDeps {
   log: (l: string) => void;
   /** the long poll's timeout in seconds (CONNECTED_POLL_TIMEOUT_S); tests shorten it */
   pollTimeoutS?: number | undefined;
+  /** before each poll: what waits in the outbox sent (identity.ts flush); never rejects */
+  beforePoll?: (() => Promise<void>) | undefined;
 }
 
 interface TgMessage {
@@ -139,6 +141,11 @@ export class TelegramConnector {
     };
   }
 
+  /** a send of the account's own (identity.ts send) went through (false) or met a 403 (true): the status says so until the next line goes */
+  setBlocked(blocked: boolean): void {
+    this.blockedBySender = blocked;
+  }
+
   /** the loop stopped: the wait under way ended, the update in hand finished (up to 2 s). The caller aborts the Bot API client's signal,
    * which cuts the poll under way */
   async dispose(): Promise<void> {
@@ -181,6 +188,12 @@ export class TelegramConnector {
     let failureSaidAt = Number.NEGATIVE_INFINITY;
     const timeoutS = this.deps.pollTimeoutS ?? CONNECTED_POLL_TIMEOUT_S;
     while (!this.disposed) {
+      try {
+        await this.deps.beforePoll?.();
+      } catch {
+        // the outbox says its own failures; the poll goes on
+      }
+      if (this.disposed) break;
       let updates: unknown[];
       try {
         updates = await this.deps.api.getUpdates(this.offset, timeoutS);

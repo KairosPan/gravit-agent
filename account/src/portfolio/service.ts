@@ -2285,7 +2285,10 @@ export class PortfolioService {
     }
     for (const f of c.fills) {
       const own = ownOrder(f.clientId);
-      this.stream.emit("fill", { ...f, venue, venueName, paper: true, ...(own ? { order: own.id, by: own.authority } : {}) });
+      const fill = { ...f, venue, venueName, paper: true, ...(own ? { order: own.id, by: own.authority } : {}) };
+      this.stream.emit("fill", fill);
+      // the operator's phone hears of it from the account itself, with no desk turn (identity/identity.ts onFill: never throws)
+      this.identity?.onFill(fill);
     }
     for (const p of c.positions) this.stream.emit("position", { venue, venueName, paper: true, symbol: p.symbol, position: p.position ? { ...p.position, venue, venueName, paper: true } : null });
     if (c.cashUsd !== undefined) this.stream.emit("balance", { venue, venueName, paper: true, cashUsd: c.cashUsd, at });
@@ -2300,6 +2303,8 @@ export class PortfolioService {
    * page shows in its counts and reads only with the account: an agent knocking to be let in (a new one, or one that gave a new name), an
    * agent's ask or a note it keeps for the owner to answer, a device asking to sign. Nothing else of the ledger goes out */
   private toldRow(row: LedgerRow): void {
+    // a Guard card raised reaches the operator's phone as a notice (identity/identity.ts onLedgerRow: never throws)
+    this.identity?.onLedgerRow(row);
     const waits = this.waitsOf(row);
     if (waits) return void this.stream.emit("card", { waits, venue: row.venue, at: row.ts });
     if (row.kind === "statement") {
@@ -2365,7 +2370,9 @@ export class PortfolioService {
     const good = own !== undefined && Number.isFinite(own) && own > 0;
     const price = good ? Number(own.toPrecision(8)) : o.avgPrice;
     const avg = !good && price !== undefined;
-    this.stream.emit("fill", { venue: o.venue, venueName: o.venueName, ...(o.paper ? { paper: true } : {}), ref: o.ref, clientId: o.clientId, filledQty: filled, symbol: o.symbol, name: o.name, kind: o.kind, side: o.side, qty: add, ...(price !== undefined ? { price } : {}), ...(avg ? { avg: true } : {}), at: o.updatedAt, order: o.id, by: o.authority });
+    const fill = { venue: o.venue, venueName: o.venueName, ...(o.paper ? { paper: true } : {}), ref: o.ref, clientId: o.clientId, filledQty: filled, symbol: o.symbol, name: o.name, kind: o.kind, side: o.side, qty: add, ...(price !== undefined ? { price } : {}), ...(avg ? { avg: true } : {}), at: o.updatedAt, order: o.id, by: o.authority };
+    this.stream.emit("fill", fill);
+    this.identity?.onFill(fill);
   }
 
   /** what a page that cannot resume is told the account is now (account/stream.ts snapshot): the orders still on a book or on their way, as

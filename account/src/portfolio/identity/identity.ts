@@ -17,6 +17,17 @@
  *                      (the store reads an empty pair as the 23:00–07:00 default, so an empty pair would turn them on after a restart).
  *   blockSender        a stranger out of Not you, their reference kept blocked.
  *
+ * SENDING (`send`, POST /api/account/identity/send): the caller gives a kind, a text, and — for a reply — the message it answers and its
+ * network; the account picks who receives it. Only the bound operator's private chat on a connected network ever does: a `chat` that names
+ * its network goes back there; a `watchdog` notice to every connected network; every other kind to the networks its routing row ticks.
+ * Quiet hours (kinds.ts quietHolds) hold back the proactive kinds — a held message is answered `{held}` and never sent later; a reply, an
+ * urgent alert and the watchdog always go. Each text has the account's own tokens taken out, in every spelling (`<token>`), and every link
+ * to this machine (the face's own address among them) made `<local link>`, before it is cut into parts. What a network cannot take waits
+ * in the outbox (outbox.ts), flushed in order before each poll and each send; what it refuses outright is dropped with one line — a 403
+ * makes the status read `blocked` until a line goes. A network disconnected takes its queued messages with it: whoever connects next never
+ * receives them. The account's own notices (notices.ts) go the same way: `onFill` for each fill the pages are told of, `onLedgerRow` for
+ * each Guard card raised.
+ *
  * `problem` is what the door and /api/account/prepare both refuse, in IDENTITY_WORDS' fixed words, never repeating what was sent. The token
  * is in no answer, no summary, no log line and no ledger row: the summary of a connect names the token by its fingerprint only. */
 import { isRefusal, type Refusal } from "../../core/errors.ts";
@@ -26,8 +37,11 @@ import { fingerprintOf, keyMatches } from "../account/brain-keys.ts";
 import type { Outcome } from "../account/exchange.ts";
 import type { OwnerAction } from "../account/sign.ts";
 import { no } from "../refuse.ts";
-import { formatRouting, isClock, NETWORKS, parseRouting, type Network, type Routing } from "./kinds.ts";
-import { BotApi, redactorOf } from "./bot-api.ts";
+import type { LedgerRow } from "../../agent/ledger.ts";
+import { formatRouting, isClock, NETWORKS, parseRouting, PHONE_KINDS, quietHolds, rowOf, type Network, type PhoneKind, type Routing } from "./kinds.ts";
+import { BotApi, BotApiError, redactorOf, splitMessage } from "./bot-api.ts";
+import { cardNotice, fillNotice, type FillFields } from "./notices.ts";
+import { lateLine, Outbox, OUTBOX_MAX } from "./outbox.ts";
 import { InboxRing, type InboxMessage } from "./inbox.ts";
 import { PendingConnections } from "./pending.ts";
 import { IDENTITY_WORDS } from "./routes.ts";
@@ -56,7 +70,7 @@ export interface IdentityDeps {
 /** what the face's desk reads: how the phone stands beside the messages */
 export interface PhoneStatusWire {
   networks: NetworkStatus[];
-  /** messages waiting to be sent (the outbox, Task 5): none yet */
+  /** messages waiting in the outbox to be sent */
   queued: number;
   /** how many strangers Not you lists */
   strangers: number;
@@ -68,6 +82,19 @@ export interface InboxAnswer {
   last: number;
   status: PhoneStatusWire;
 }
+
+/** what a caller may ask the account to send: a kind, a text, and for a reply the message it answers and its network — never a recipient */
+export interface SendMessage {
+  kind: PhoneKind;
+  text: string;
+  replyTo?: string | undefined;
+  network?: Network | undefined;
+}
+
+export type HeldReason = "quiet hours" | "not routed" | "nothing connected";
+/** what a send came to: the ids of the parts sent (`<network>:<id>`), with `queued` when the rest waits in the outbox — or all of it
+ * queued; or held, and never sent later; or refused outright by every network it was for (`ok: false`, nothing kept) */
+export type SendAnswer = { ok: true; sent: string[]; queued?: true } | { ok: true; queued: true } | { ok: true; held: HeldReason } | { ok: false; error: string };
 
 export type IdentityView = {
   ok: true;
@@ -85,6 +112,38 @@ const MASKED = /^…\d{1,3}$/;
 const TOKEN_ANYWHERE = /\d{5,16}:[A-Za-z0-9_-]{30,}/;
 
 const isNetwork = (s: string): s is Network => (NETWORKS as readonly string[]).includes(s);
+const isKind = (s: unknown): s is PhoneKind => typeof s === "string" && (PHONE_KINDS as readonly string[]).includes(s);
+/** a reply-to on the wire: `<network>:<the network's own id>` */
+export const REPLY_TO = /^[a-z]{1,16}:\d{1,16}$/;
+/** a link to this machine — the face's own address (its chat URL carries its token), or any other service on loopback: never sent */
+const LOCAL_LINKS: readonly RegExp[] = [
+  /\b(?:https?|wss?):\/\/(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\]|[a-z0-9.-]+\.localhost)(?::\d{1,5})?(?:[/?#][^\s]*)?/gi,
+  /\b(?:localhost|127(?:\.\d{1,3}){3}):\d{1,5}(?:[/?#][^\s]*)?/gi,
+];
+const withoutLocalLinks = (text: string): string => LOCAL_LINKS.reduce((out, re) => out.replace(re, "<local link>"), text);
+const codeOf = (err: unknown): string => (err instanceof Error ? ((err as NodeJS.ErrnoException).code ?? err.name) : "error");
+
+/** a send that stopped at a part: the ids of the parts that went before it, how many, the text that did not go, and why */
+class SendFailure extends Error {
+  constructor(
+    readonly ids: string[],
+    readonly parts: number,
+    readonly rest: string,
+    readonly error: unknown,
+  ) {
+    super(error instanceof Error ? error.message : String(error));
+  }
+}
+/** a network refused the message outright (Telegram's 400, or 403 for a bot the operator blocked): sending it again cannot help */
+const isRefused = (err: unknown): boolean => err instanceof BotApiError && (err.status === 400 || err.status === 403);
+
+/** one network the account can send on: its Bot API client (cut at a disconnect), the operator's chat, and its token, to take out of texts */
+interface Link {
+  api: BotApi;
+  stop: AbortController;
+  chatId: number;
+  token: string;
+}
 const NETWORK_NAME: Record<Network, string> = { telegram: "Telegram" };
 
 /** A bot token pasted into any field of the four types: refused before the door writes its "taken" row, which carries the signed fields to
@@ -99,12 +158,19 @@ const refusal = (message: string): Refusal => no("E_ACCOUNT_BAD_ACTION", { messa
 export class Identity {
   readonly pending: PendingConnections;
   readonly inboxRing: InboxRing;
+  readonly outbox: Outbox;
   private readonly home: string;
   private readonly now: () => number;
   private readonly store: Strangers;
   private readonly log: (l: string) => void;
   private readonly clock: IdentityClock;
-  private readonly connectors = new Map<Network, { connector: TelegramConnector; stop: AbortController }>();
+  private readonly connectors = new Map<Network, TelegramConnector>();
+  private readonly links = new Map<Network, Link>();
+  /** a 403 on a send, for a network with no poller running (a read-only account) */
+  private readonly sendBlocked = new Map<Network, boolean>();
+  private disposed = false;
+  /** every send and every flush, one at a time */
+  private chain: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly deps: IdentityDeps) {
     this.home = deps.home;
@@ -113,8 +179,92 @@ export class Identity {
     this.clock = deps.clock ?? realClock(this.now);
     this.store = new Strangers(deps.home);
     this.inboxRing = new InboxRing(deps.home);
+    this.outbox = new Outbox(deps.home, OUTBOX_MAX, this.log);
     this.pending = new PendingConnections({ apiBase: deps.apiBase, strangers: this.store, bound: () => this.bound("telegram") !== undefined, blocked: () => this.state.blocked, fetch: deps.fetch, pollTimeoutS: deps.pollTimeoutS, now: deps.now, log: deps.log });
     this.resume();
+    // an earlier run may have queued what this one takes out
+    this.outbox.rewrite((t) => this.clean(t));
+  }
+
+  /** Send `m` as the account decides (see the top of this file). Never throws */
+  async send(m: SendMessage): Promise<SendAnswer> {
+    if (!m || typeof m !== "object" || !isKind(m.kind) || typeof m.text !== "string") return { ok: false, error: IDENTITY_WORDS.send };
+    if (m.network !== undefined && !isNetwork(m.network)) return { ok: false, error: IDENTITY_WORDS.send };
+    if (m.replyTo !== undefined && (typeof m.replyTo !== "string" || !REPLY_TO.test(m.replyTo))) return { ok: false, error: IDENTITY_WORDS.send };
+    let s: IdentityState;
+    try {
+      s = this.state;
+    } catch {
+      return { ok: true, held: "nothing connected" };
+    }
+    const connected = s.bindings.map((b) => b.network).filter((n) => this.links.has(n));
+    if (connected.length === 0) return { ok: true, held: "nothing connected" };
+    const row = rowOf(m.kind);
+    const networks = m.kind === "chat" && m.network !== undefined ? connected.filter((n) => n === m.network) : row === "always" ? connected : s.routing[row].filter((n) => connected.includes(n));
+    if (networks.length === 0) return { ok: true, held: "not routed" };
+    if (quietHolds(m.kind, this.now(), s.quiet)) return { ok: true, held: "quiet hours" };
+    const body = this.clean(m.text);
+    if (body.trim() === "") return { ok: true, sent: [] };
+    return this.outbound(async (): Promise<SendAnswer> => {
+      const t = new Date(this.now()).toISOString();
+      if (this.outbox.length > 0) await this.flush();
+      const sent: string[] = [];
+      let queued = false;
+      let refused: string | undefined;
+      for (const network of networks) {
+        const link = this.links.get(network);
+        if (!link) continue;
+        const replyTo = m.replyTo !== undefined && m.replyTo.startsWith(`${network}:`) ? m.replyTo : undefined;
+        if (this.disposed || this.outbox.length > 0) {
+          this.outbox.push({ t, network, text: body, ...(replyTo ? { replyTo } : {}) });
+          queued = true;
+          continue;
+        }
+        try {
+          sent.push(...(await this.deliver(network, link, body, replyTo)));
+        } catch (err) {
+          const f = err as SendFailure;
+          sent.push(...f.ids);
+          if (isRefused(f.error)) {
+            refused = f.message;
+            this.log(`identity: ${NETWORK_NAME[network]} refused a message (${f.message}); it is dropped`);
+            continue;
+          }
+          this.log(`identity: a message could not be sent on ${NETWORK_NAME[network]} (${f.message}); it waits in the outbox`);
+          this.outbox.push({ t, network, text: f.rest, ...(f.parts === 0 && replyTo ? { replyTo } : {}) });
+          queued = true;
+        }
+      }
+      if (sent.length === 0 && queued) return { ok: true, queued: true };
+      if (sent.length === 0 && refused !== undefined) return { ok: false, error: `Telegram refused the message (${refused}): it was not sent, and it is not kept.` };
+      return { ok: true, sent, ...(queued ? { queued: true as const } : {}) };
+    }).catch((err: unknown): SendAnswer => {
+      this.log(`identity: a send failed (${codeOf(err)})`);
+      return { ok: false, error: "The account could not send this: it was recorded." };
+    });
+  }
+
+  /** a fill the pages are told of (service.ts paperSaid, toldFill): the fill notice sent as `fill`. Never throws */
+  onFill(f: Partial<FillFields> | undefined): void {
+    try {
+      if (!f || typeof f !== "object" || typeof f.side !== "string" || typeof f.symbol !== "string" || !(typeof f.qty === "number" || typeof f.qty === "string")) return;
+      const venueName = typeof f.venueName === "string" && f.venueName !== "" ? f.venueName : "a venue";
+      const price = typeof f.price === "number" || typeof f.price === "string" ? f.price : undefined;
+      const text = fillNotice({ side: f.side, qty: f.qty, symbol: f.symbol, price, venueName, paper: f.paper === true });
+      this.notify("fill", text);
+    } catch (err) {
+      this.log(`identity: a fill notice could not be made (${codeOf(err)})`);
+    }
+  }
+
+  /** every row the ledger takes (service.ts toldRow): a Guard card raised is sent as `card`. Never throws */
+  onLedgerRow(row: LedgerRow): void {
+    try {
+      const text = cardNotice(row);
+      if (text !== undefined) this.notify("card", text);
+    } catch (err) {
+      this.log(`identity: a card notice could not be made (${codeOf(err)})`);
+    }
   }
 
   /** The face's desk: the operator's messages numbered above `after`, waiting up to `waitMs` for one when there is none past it — at once
@@ -125,7 +275,7 @@ export class Identity {
   }
 
   phoneStatus(): PhoneStatusWire {
-    return { networks: this.state.bindings.map((b) => this.statusOf(b.network)), queued: 0, strangers: this.store.list().length };
+    return { networks: this.state.bindings.map((b) => this.statusOf(b.network)), queued: this.outbox.length, strangers: this.store.list().length };
   }
 
   /** the Identity tab: the bindings without their numeric ids, the routing, quiet hours on New York's clock, Not you */
@@ -219,11 +369,88 @@ export class Identity {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
     this.pending.dispose();
-    await Promise.all([...this.connectors.keys()].map((n) => this.stopConnector(n)));
+    await Promise.all([...new Set([...this.links.keys(), ...this.connectors.keys()])].map((n) => this.stopConnector(n)));
   }
 
   // ---- inside ----
+
+  /** a notice of the account's own, sent; what it came to is a line only when it did not go or wait */
+  private notify(kind: PhoneKind, text: string): void {
+    void this.send({ kind, text }).then((a) => {
+      if (!a.ok) this.log(`identity: a ${kind} notice was not sent: ${a.error}`);
+    });
+  }
+
+  /** the account's tokens out of `text` in every spelling, then every link to this machine */
+  private clean(text: string): string {
+    const tokens = [...this.links.values()].map((l) => l.token);
+    return withoutLocalLinks(tokens.length > 0 ? redactorOf(tokens, "<token>")(text) : text);
+  }
+
+  private outbound<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.chain.then(task);
+    this.chain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  /** `text` to the operator's chat in parts, the first as a reply to `replyTo` when given; the ids of the parts sent, or a SendFailure at
+   * the first that did not go. A part that goes ends a 403's `blocked`; a 403 sets it */
+  private async deliver(network: Network, link: Link, text: string, replyTo: string | undefined): Promise<string[]> {
+    const parts = splitMessage(text).filter((p) => p.trim() !== "");
+    const reply = replyTo !== undefined ? Number(replyTo.slice(network.length + 1)) : undefined;
+    const ids: string[] = [];
+    for (const [i, part] of parts.entries()) {
+      let id: number;
+      try {
+        id = await link.api.sendMessage(link.chatId, part, i === 0 && reply !== undefined && Number.isSafeInteger(reply) ? reply : undefined);
+      } catch (err) {
+        if (err instanceof BotApiError && err.status === 403) this.setBlocked(network, true);
+        throw new SendFailure(ids, i, parts.slice(i).join(""), err);
+      }
+      this.setBlocked(network, false);
+      ids.push(`${network}:${id}`);
+    }
+    return ids;
+  }
+
+  private setBlocked(network: Network, blocked: boolean): void {
+    this.connectors.get(network)?.setBlocked(blocked);
+    if (blocked) this.sendBlocked.set(network, true);
+    else this.sendBlocked.delete(network);
+  }
+
+  /** what waits in the outbox sent, in order, until it is empty or a message does not go — that one stays at the head, cut to what did not
+   * go — or one is refused outright, which is dropped with one line */
+  private async flush(): Promise<void> {
+    while (this.outbox.length > 0 && !this.disposed) {
+      const head = this.outbox.head()!;
+      const link = this.links.get(head.network);
+      if (!link) {
+        this.outbox.shift();
+        this.log(`identity: a queued message for ${NETWORK_NAME[head.network]} is dropped: it is not connected`);
+        continue;
+      }
+      // the late line rides in the first part, so what does not go is always the head's own text
+      try {
+        await this.deliver(head.network, link, `${lateLine(head.t, this.now())}${head.text}`, head.replyTo);
+        this.outbox.shift();
+      } catch (err) {
+        const f = err as SendFailure;
+        if (isRefused(f.error)) {
+          this.outbox.shift();
+          this.log(`identity: ${NETWORK_NAME[head.network]} refused a queued message (${f.message}); it is dropped from the outbox`);
+          continue;
+        }
+        if (f.parts > 0) this.outbox.cutHead(f.rest);
+        return;
+      }
+    }
+  }
 
   /** the state as its file says it now: read each time, so the file is the one record (cheap — a few hundred bytes) */
   private get state(): IdentityState {
@@ -261,6 +488,8 @@ export class Identity {
       const left = this.removeSecret(network);
       return left ? refusal(`${saved.message}; and ${left}`) : saved;
     }
+    // nothing queued before this binding ever goes to it
+    this.dropQueued(network);
     this.startConnector(binding, taken.token, taken.offset);
     return { ok: true, kind: "account", summary: `${NETWORK_NAME[network]} connected: Gravit speaks as ${a.speaksAs} and talks only with ${a.talksOnlyWith} · token ${fingerprint}` };
   }
@@ -274,9 +503,16 @@ export class Identity {
     const saved = this.save({ ...s, bindings: s.bindings.filter((b) => b.network !== network), routing });
     if (saved) return saved;
     await this.stopConnector(network);
+    this.dropQueued(network);
     const left = this.removeSecret(network);
     if (left) return refusal(`${NETWORK_NAME[network]} is disconnected and its poller stopped, but ${left}`);
     return { ok: true, kind: "account", summary: `${NETWORK_NAME[network]} disconnected: its token removed from the account` };
+  }
+
+  /** the network's queued messages dropped, with one line when there were any */
+  private dropQueued(network: Network): void {
+    const dropped = this.outbox.dropNetwork(network);
+    if (dropped > 0) this.log(`identity: ${dropped} queued message(s) for ${NETWORK_NAME[network]} are dropped: it was disconnected`);
   }
 
   /** the token file taken away; what went wrong in words (no token, no path outside the home), or undefined when it is gone */
@@ -311,7 +547,7 @@ export class Identity {
   /** the connected poller, from `offset` on: the offset written first — after a connect, the one after the message the operator was heard
    * by, so their /start is not taken into the inbox */
   private startConnector(binding: Binding, token: string, offset: number | undefined): void {
-    if (this.connectors.has(binding.network)) return;
+    if (this.links.has(binding.network)) return;
 
     if (offset !== undefined) {
       try {
@@ -320,13 +556,15 @@ export class Identity {
         this.log(`identity: Telegram's offset could not be written (${err instanceof Error ? ((err as NodeJS.ErrnoException).code ?? err.name) : "error"}); the poll starts from it all the same`);
       }
     }
+    const stop = new AbortController();
+    const api = new BotApi({ token, apiBase: this.deps.apiBase, fetch: this.deps.fetch, signal: stop.signal });
+    const chatId = Number(binding.operatorId);
+    // the account sends on it either way: only the operator's chat, the one it is bound to
+    this.links.set(binding.network, { api, stop, chatId, token });
     // a read-only account polls nothing: the offset is kept for a later run with writes on
     if (this.deps.readOnly) return;
     const redact = redactorOf([token]);
     const log = (l: string) => this.log(redact(l));
-    const stop = new AbortController();
-    const api = new BotApi({ token, apiBase: this.deps.apiBase, fetch: this.deps.fetch, signal: stop.signal });
-    const chatId = Number(binding.operatorId);
     const connector = new TelegramConnector({
       home: this.home,
       api,
@@ -342,21 +580,24 @@ export class Identity {
       clock: this.clock,
       log,
       pollTimeoutS: this.deps.connectedPollTimeoutS,
+      beforePoll: () => (this.outbox.length > 0 ? this.outbound(() => this.flush()) : Promise.resolve()),
     });
-    this.connectors.set(binding.network, { connector, stop });
+    this.connectors.set(binding.network, connector);
     connector.start();
   }
 
   private async stopConnector(network: Network): Promise<void> {
-    const c = this.connectors.get(network);
-    if (!c) return;
+    const link = this.links.get(network);
+    const connector = this.connectors.get(network);
+    this.links.delete(network);
     this.connectors.delete(network);
-    c.stop.abort();
-    await c.connector.dispose();
+    this.sendBlocked.delete(network);
+    link?.stop.abort();
+    await connector?.dispose();
   }
 
   private statusOf(network: Network): NetworkStatus {
-    return this.connectors.get(network)?.connector.status() ?? { network, polling: false };
+    return this.connectors.get(network)?.status() ?? { network, polling: false, ...(this.sendBlocked.get(network) ? { blocked: true as const } : {}) };
   }
 }
 

@@ -72,13 +72,13 @@ function spellings(value: string): string[] {
   return [...new Set([value, JSON.stringify(value).slice(1, -1), ...encoded])].filter((s) => s !== "");
 }
 
-/** Every spelling of each of `secrets` a line could carry, made `<secret>`; the longest spelling goes first, so a secret that holds
- * another is taken out whole */
-export function redactorOf(secrets: readonly string[]): (text: string) => string {
+/** Every spelling of each of `secrets` a line could carry, made `label` (`<secret>`; what the account sends says `<token>`); the longest
+ * spelling goes first, so a secret that holds another is taken out whole */
+export function redactorOf(secrets: readonly string[], label = "<secret>"): (text: string) => string {
   const all = new Set<string>();
   for (const secret of secrets) for (const s of spellings(secret)) all.add(s);
   const order = [...all].sort((a, b) => b.length - a.length);
-  return (text) => order.reduce((out, s) => out.split(s).join("<secret>"), text);
+  return (text) => order.reduce((out, s) => out.split(s).join(label), text);
 }
 
 // ---- the client -------------------------------------------------------------------------------------------------------------------
