@@ -4,12 +4,15 @@
 // (the five routing rows by network, the face always on; quiet hours on New York's clock; Save… while the ticks differ from the
 // account's) and Not you · n (the strangers who wrote to the bot, each with Block). The owner's keys are drawn only while the page
 // signs; a page that does not reads the same cards with one line saying so. The account not answering draws no connection.
+// And Connect Telegram's sheets 1 to 3 as a drawer of their own (Task 2): Bot token (a password field), Say hi (the bot's link and its
+// QR as an <img> of the account's SVG data URL, never markup), Is this you? — each ending with its numbered steps above its keys.
 import { esc, attrs } from '../html.js';
 import { icon } from '../icons.js';
 import { fmtClock, fmtDate, sameDay } from '../time.js';
 import { chip } from './thread.js';
 import { identityOf, NETWORKS, routingOf, sameRouting } from '../host/identity-view.js';
 
+const str = v => (typeof v === 'string' ? v : '');
 const box = (inner, label) => `<section class="cardbox" aria-label="${esc(label)}">${inner}</section>`;
 const note = text => `<p class="acct-note">${esc(text)}</p>`;
 const title = text => `<div class="cardbox-title">${esc(text)}</div>`;
@@ -105,4 +108,87 @@ export function renderIdentityTab(state, now) {
   const v = identityOf(r.data, owner ? r.draft ?? null : null, clockWord);
   if (!v.ok) return `${note('Identity unreadable')}${retry}`;
   return `<div class="cards">${gravitCard(v, state, owner)}${gridCard(v, state, owner)}${notYouCard(v, owner, now)}</div>`;
+}
+
+// ── Connect Telegram: sheets 1 to 3, the Identity drawer (plan B1b Task 2, spec §5.2; sheet 4 is the owner sheet) ──
+
+/** Sheets 1 to 3's numbered steps, fixed copy: each sheet ends with them above its keys. */
+export const CONNECT_STEPS = {
+  1: [
+    'In Telegram, open @BotFather and send /newbot.',
+    'Pick a name for Gravit, then a username that ends in "bot".',
+    'BotFather answers with a token. Copy it.',
+    'Paste it only here, never in a chat, not even with Gravit.',
+  ],
+  2: [
+    "On your phone, open the link or scan the code: Telegram opens Gravit's bot.",
+    'Tap Start.',
+    'Wait here: this sheet moves on when the bot hears you.',
+  ],
+  3: [
+    'Check the name, the handle and the message: they should be yours, sent a moment ago.',
+    'This is me: Gravit talks only with this Telegram account.',
+    'Not me: that sender is listed under Not you and never reaches Gravit. Say hi again from your own Telegram.',
+  ],
+};
+const CONNECT_TITLES = { 1: 'Connect Telegram · 1 of 4 · Bot token', 2: 'Connect Telegram · 2 of 4 · Say hi', 3: 'Connect Telegram · 3 of 4 · Is this you?' };
+const QR_PREFIX = 'data:image/svg+xml;base64,';
+const T_ME = /^https:\/\/t\.me\/([A-Za-z0-9_]{1,64})$/;
+const CONFLICT_WORDS = "Another program reads this bot's messages: stop it, and this sheet goes on.";
+
+/** A time as New York's clock reads it, h:mm (24-hour). */
+export function etClock(at) {
+  const t = Date.parse(at);
+  if (Number.isNaN(t)) return '';
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hourCycle: 'h23' })
+    .formatToParts(new Date(t)).map(p => [p.type, p.value]));
+  return `${Number(parts.hour) % 24}:${parts.minute}`;
+}
+
+const stepsList = steps => `<ol class="sheet-steps">${steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>`;
+const lineBox = rows => `<div class="sheet-quote">${rows.map(r => `<div class="dsec-line">${esc(r)}</div>`).join('')}</div>`;
+const primary = (word, data) => `<button${attrs({ type: 'button', class: 'btn-primary', ...data })}>${esc(word)}</button>`;
+
+function sheetOne(c) {
+  const field = `<form class="field" data-action="identityNext" autocomplete="off"><label class="field-label" for="identity-token">Bot token</label>` +
+    `<input${attrs({ id: 'identity-token', class: 'input', type: 'password', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Bot token', disabled: c.busy === true })}>` +
+    `<span class="btn-row">${button('Paste', { 'data-action': 'identityPaste', disabled: c.busy === true })}</span></form>`;
+  return { body: `${field}${lineBox(['Kept in: Account · :4820', "Never in: Gravit's box · ~/.dsh"])}`, keys: [button('Cancel', { 'data-action': 'identityClose' }), primary(c.busy ? 'Checking…' : 'Next', { 'data-action': 'identityNext', disabled: c.busy === true })] };
+}
+
+function sheetTwo(c) {
+  const p = c.pending ?? {};
+  const m = T_ME.exec(str(p.link));
+  const shown = m ? `t.me/${m[1]}` : '';
+  const link = m ? `<p><a${attrs({ href: p.link, target: '_blank', rel: 'noopener noreferrer' })}>${esc(shown)}</a></p>` : '';
+  const qr = m && typeof p.qr === 'string' && p.qr.startsWith(QR_PREFIX) ? `<img${attrs({ class: 'identity-qr', src: p.qr, alt: `QR code for ${shown}`, width: '180', height: '180' })}>` : '';
+  const until = etClock(p.expiresAt);
+  const lines = [
+    until ? `<p class="sheet-hint">${esc(`This connection waits until ${until} ET; after that, start again.`)}</p>` : '',
+    p.state === 'conflict' ? note(CONFLICT_WORDS) : '',
+  ].join('');
+  return { body: `${link}${qr}${lines}`, keys: [button('Back', { 'data-action': 'identityBack' }), button('Cancel', { 'data-action': 'identityClose' })] };
+}
+
+function sheetThree(c) {
+  const s = c.pending?.sender ?? {};
+  const rows = [`Name: ${str(s.name) || '—'}`, `Handle: ${str(s.handle) || 'none'}`, `Telegram id: ${str(s.masked) || '…'}`, `Message: ${str(s.text) || '—'}`];
+  return {
+    body: lineBox(rows),
+    keys: [button('Back', { 'data-action': 'identityBack', disabled: c.busy === true }), button('Cancel', { 'data-action': 'identityClose' }),
+      button('Not me', { 'data-action': 'identityNotMe', disabled: c.busy === true }), primary('This is me', { 'data-action': 'identityThisIsMe', disabled: c.busy === true })],
+  };
+}
+
+/** The Connect Telegram drawer (sheets 1 to 3) while one is open: its title, its body, the account's words when it refused or the
+ *  connection is gone (with Start again from sheet 2 on), its numbered steps, then its keys. None open: nothing. */
+export function renderConnectDrawer(state) {
+  const c = state.identity?.connect;
+  if (!c || !CONNECT_TITLES[c.step]) return '';
+  const title = CONNECT_TITLES[c.step];
+  const sheet = c.step === 1 ? sheetOne(c) : c.step === 2 ? sheetTwo(c) : sheetThree(c);
+  const error = typeof c.error === 'string' && c.error ? note(c.error) : '';
+  const again = error && c.step > 1 ? `<div class="btn-row">${button('Start again', { 'data-action': 'identityStartAgain' })}</div>` : '';
+  return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="identityClose" aria-label="Close">×</button></div>` +
+    `<div class="drawer-body">${sheet.body}${error}${again}${stepsList(CONNECT_STEPS[c.step])}<div class="btn-row">${sheet.keys.join('')}</div></div></aside>`;
 }

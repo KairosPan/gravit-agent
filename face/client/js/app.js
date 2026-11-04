@@ -40,6 +40,8 @@ import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
 import { startOwner, postVia } from './host/owner.js';
 import { startSheet, PREPARE_QUIET_MS } from './host/sheet.js';
+import { startIdentity } from './host/identity.js';
+import { renderConnectDrawer } from './render/identity.js';
 import { moveSeedOf, earnSeedOf, earnSaidOf, subWalletSeedOf } from './host/sheet-money.js';
 import { startSellMany } from './host/sell-many.js';
 import { limitSeedOf, grantOf, keyfileAskOf, reachAskOf, letDeviceSeedOf, paperSeedOf, signOutSeedOf, connectOptionOf, isWalletOption } from './host/sheet-view.js';
@@ -181,8 +183,8 @@ function focusKey(el) {
 // the owner sheet is a drawer of any screen, over the one open (the order sheet is Trade's ticket, not a drawer)
 const sheetUp = s => Boolean(s.sheet) && s.sheet.kind !== 'order';
 // a module card's Run sheet is a drawer of any screen too, drawn after the owner sheet
-const overlayOf = s => (sheetUp(s) ? 'sheet' : s.sellMany || s.runSheet || s.lunhui?.stock || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
-const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.sellMany ? 'sellMany' : s.runSheet ? `run:${s.runSheet.module}` : s.lunhui?.stock ? `stock:${s.lunhui.stock.code}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
+const overlayOf = s => (sheetUp(s) ? 'sheet' : s.identity?.connect || s.sellMany || s.runSheet || s.lunhui?.stock || s.detailsOpen || s.settingsOpen || s.account.statementOpen || s.account.detailsVenue ? 'drawer' : null);
+const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.identity?.connect ? `identity:${s.identity.connect.step}` : s.sellMany ? 'sellMany' : s.runSheet ? `run:${s.runSheet.module}` : s.lunhui?.stock ? `stock:${s.lunhui.stock.code}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
   : s.account.detailsVenue ? `venue:${s.account.detailsVenue}` : null);
 const closeKeyOf = overlay => (overlay === 'sheet' ? '.drawer.sheet .close-key' : '.drawer .close-key');
 const editorOf = e => (e ? [e.kind, e.convId, e.id].join('|') : null);
@@ -397,6 +399,13 @@ export function boot(win, host = {}) {
   // Sell many (plan 4b Task 3): up to ten holdings at market, each prepared and signed in turn over the owner device; a DEX
   // sale's send handed to sendFromWallet, which reads the Account again once the wallet answers; the Account read again once a
   // run ends
+  // Account › Identity's Connect Telegram (plan B1b Task 2): sheets 1 to 3 its own drawer, sheet 4 the owner sheet's connectNetwork;
+  // the token read from sheet 1's field at Next and posted once through the owner door, never kept
+  const identity = startIdentity({
+    store, getJson, post: ownerPost, subtle: win.crypto?.subtle ?? null, schedule, cancelTimer, now,
+    openSheet: (kind, seed) => sheet.open(kind, seed), loadIdentity: o => account.loadIdentity(o),
+    random: n => win.crypto.getRandomValues(new Uint8Array(n)),
+  });
   const sellMany = startSellMany({ store, getJson, owner, sendOrder: o => sendFromWallet(walletSend.order(o)), afterAction, now });
   // a receipt reloads the Account's read past the cache, and one from the Account seat (every receipt the kind table
   // lifts today) the seat's standing too
@@ -476,7 +485,7 @@ export function boot(win, host = {}) {
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
       : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now());
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
-    const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
+    const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (!sheetUp(s) && s.identity?.connect ? renderConnectDrawer(s) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     root.innerHTML = renderRail(s, now()) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen);
     // the quotes poll asks for the rows the table drew, by id; a market's page, which draws none, for its own market (spec §6.1:
     // the page follows it on the stream and polls quotes for what the stream does not carry)
@@ -1008,6 +1017,22 @@ export function boot(win, host = {}) {
     // Account › Identity (plan B1b): Retry reads it past the face's cache; Details opens or shuts the connection's line
     refreshIdentity: () => { void account.loadIdentity({ fresh: true }); },
     identityDetails: () => store.dispatch('identityDetails'),
+    // Connect Telegram (plan B1b Task 2): the drawer's keys; Next hands the host the field itself, never its value
+    identityConnect: () => { if (signs()) identity.openConnect(); },
+    identityNext: () => { void identity.next(root.querySelector('#identity-token')); },
+    identityPaste: () => {
+      const read = win.navigator?.clipboard?.readText;
+      if (typeof read !== 'function') return;
+      read.call(win.navigator.clipboard).then(text => {
+        const el = root.querySelector('#identity-token');
+        if (el && typeof text === 'string') el.value = text.trim();
+      }, () => { /* the browser said no: nothing pasted */ });
+    },
+    identityClose: () => identity.close(),
+    identityBack: () => identity.back(),
+    identityNotMe: () => { void identity.notMe(); },
+    identityThisIsMe: () => { if (signs()) void identity.thisIsMe(); },
+    identityStartAgain: () => { if (store.get().sheet?.kind === 'connectNetwork') sheet.close(); identity.startAgain(); },
     setHistoryRange: el => { void account.loadHistory(el.dataset.value); },
     openVenueDetails: el => store.dispatch('openVenueDetails', el.dataset.id),
     closeVenueDetails: () => store.dispatch('closeVenueDetails'),
@@ -1171,6 +1196,7 @@ export function boot(win, host = {}) {
     else if (form.dataset.action === 'saveBot') void saveBotNow(form.dataset.id);
     else if (form.dataset.action === 'createBot') void createBotNow();
     else if (form.dataset.action === 'placeOrder') void sheet.submit();
+    else if (form.dataset.action === 'identityNext') act.identityNext();
     // Enter in the pair box: the same as Pair, and held as Pair is while a pairing is in the air
     else if (form.dataset.action === 'pairDevice') { if (store.get().owner?.busy !== true) act.pairDevice(); }
   });
@@ -1241,6 +1267,7 @@ export function boot(win, host = {}) {
       // a module card's Run sheet first, then the owner sheet over any drawer, then the stock drawer; Trade's ticket after every drawer
       if (s.runSheet) runSheet.close();
       else if (sheetUp(s)) sheet.close();
+      else if (s.identity?.connect) identity.close();
       else if (s.sellMany) sellMany.close();
       else if (s.lunhui?.stock) store.dispatch('lunhuiStockClose');
       else if (s.detailsOpen) store.dispatch('toggleDetails');
@@ -1290,7 +1317,7 @@ export function boot(win, host = {}) {
   if (!doc.hidden) { stream.open(); marketStream.open(); }
   follow();
   render();
-  return Object.assign(store, { timers, live, actions, markets, channels, discover, owner, sheet, trade, walletSend, sellMany });
+  return Object.assign(store, { timers, live, actions, markets, channels, discover, owner, sheet, trade, walletSend, sellMany, identity });
 }
 
 if (typeof window !== 'undefined' && window.document) boot(window);

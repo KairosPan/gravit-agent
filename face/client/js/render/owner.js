@@ -10,6 +10,7 @@ import { standingWords, devicesOf, whatYouSignLines, goodForWords } from '../hos
 import { titleOf, goWord, connectCheckOf, connectOptionOf, isWalletOption, whoOf, signOutLineOf } from '../host/sheet-view.js';
 import { askedOf } from '../host/sheet.js';
 import { moveHintsOf, moveSaysOf, routesWordsOf, earnHintsOf, earnSaysOf } from '../host/sheet-money.js';
+import { IDENTITY_KINDS, identityLinesOf, identityStepsOf } from '../host/sheet-identity.js';
 import { seg } from './controls.js';
 
 const note = text => `<p class="acct-note">${esc(text)}</p>`;
@@ -157,9 +158,17 @@ export function renderSheet(state, now) {
   // and an earn's (what it is worth, its yield and lock, where it lands taken out: plan 4b Task 3)
   const says = s.status === 'ready' || s.status === 'signing' ? [...moveSaysOf(s), ...earnSaysOf(s)].map(l => `<p class="sheet-hint">${esc(l)}</p>`).join('') : '';
   const routes = r ? `<p class="sheet-hint sheet-routes">${r.lead.startsWith('Via ') ? `<b>${esc(r.lead)}</b>` : esc(r.lead)}${r.others ? `<br>${esc(r.others)}` : ''}</p>` : '';
+  // an Identity sheet's lines above its fields (what the account will hold to) and its numbered steps above its keys (plan B1b
+  // Task 2); Connect Telegram's sheet 4, refused (its pending connection expired or gone), offers Start again, which reopens sheet 1
+  const identity = IDENTITY_KINDS.includes(s.kind);
+  const idLines = identity ? identityLinesOf(s.kind, s.seed) : [];
+  const above = idLines.length ? `<div class="sheet-quote">${idLines.map(l => `<div class="dsec-line">${esc(l)}</div>`).join('')}</div>` : '';
+  const idSteps = identity ? identityStepsOf(s.kind) : [];
+  const steps = idSteps.length ? `<ol class="sheet-steps">${idSteps.map(l => `<li>${esc(l)}</li>`).join('')}</ol>` : '';
+  const startAgain = s.kind === 'connectNetwork' && s.status === 'refused' ? `<div class="btn-row">${key('identityStartAgain', 'Start again')}</div>` : '';
   const keys = `<div class="btn-row">${key('sheetClose', 'Cancel')}<button${attrs({ type: 'button', class: 'btn-primary', 'data-action': 'sheetSubmit', disabled: !live })}>${esc(goWord(s.kind, s.seed, s.fields))}</button></div>`;
   // a granting sheet's line under its title: the ask in the Account's words (plan 4b Task 6)
   const asked = typeof s.seed?.askedWords === 'string' && s.seed.askedWords ? `<p class="sheet-hint">${esc(s.seed.askedWords)}</p>` : '';
   return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="sheetClose" aria-label="Close">×</button></div>` +
-    `<div class="drawer-body">${asked}${fields}${check}${hints}${quoteBox(s)}${routes}${says}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${said}${keys}</div></aside>`;
+    `<div class="drawer-body">${asked}${above}${fields}${check}${hints}${quoteBox(s)}${routes}${says}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${said}${startAgain}${steps}${keys}</div></aside>`;
 }

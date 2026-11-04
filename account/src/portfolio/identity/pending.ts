@@ -17,6 +17,7 @@
  *
  * The offset after the update heard is kept, so that the connected poller (Task 4) starts after the message the operator was heard by. */
 import { randomBytes } from "node:crypto";
+import QRCode from "qrcode";
 import type { Refusal } from "../../core/errors.ts";
 import { keyMatches } from "../account/brain-keys.ts";
 import { no } from "../refuse.ts";
@@ -42,12 +43,17 @@ export interface PendingView {
   bot: { id: string; username: string; name: string };
   /** the bot's page at Telegram: https://t.me/<username> */
   link: string;
-  /** the link as a QR code (B1b); "" until then */
+  /** the link as a QR code: `data:image/svg+xml;base64,` and the SVG qrcode draws, which the page shows as an <img> */
   qr: string;
   expiresAt: string;
   state: "waiting" | "heard" | "conflict" | "expired";
-  sender?: { name: string; handle: string; masked: string; text: string };
+  /** the sender heard: `id` their numeric Telegram id, which the page signs as connectNetwork's operatorId and draws only masked */
+  sender?: { id: string; name: string; handle: string; masked: string; text: string };
 }
+
+/** the QR code of a bot's link, as the pending view carries it */
+export const qrOf = async (link: string): Promise<string> =>
+  `data:image/svg+xml;base64,${Buffer.from(await QRCode.toString(link, { type: "svg", margin: 1 }), "utf8").toString("base64")}`;
 
 export interface PendingTaken {
   token: string;
@@ -78,6 +84,7 @@ interface Entry {
   keyHash: string;
   salt: string;
   bot: PendingView["bot"];
+  qr: string;
   expiresAt: number;
   state: PendingView["state"];
   sender?: { id: string; name: string; handle: string; masked: string; text: string };
@@ -135,13 +142,15 @@ export class PendingConnections {
       this.log(`identity: Telegram's getMe did not answer (${redactorOf([token])(err instanceof Error ? err.message : String(err))})`);
       return refusal(IDENTITY_WORDS.unreachable);
     }
+    // the link's QR code (a link qrcode cannot draw is drawn as none: the link itself is on the sheet)
+    const qr = await qrOf(`https://t.me/${me.username}`).catch(() => "");
     if (this.disposed) {
       stop.abort();
       return refusal(IDENTITY_WORDS.noPending);
     }
     // one pending connection at a time: the one before is cut and forgotten
     this.forget();
-    const e: Entry = { id: randomBytes(16).toString("hex"), token, keyHash, salt, bot: { id: String(me.id), username: me.username, name: me.first_name }, expiresAt: this.now() + PENDING_MS, state: "waiting", offset: undefined, notMe: new Set(), api, stop, looping: false, timer: undefined };
+    const e: Entry = { id: randomBytes(16).toString("hex"), token, keyHash, salt, bot: { id: String(me.id), username: me.username, name: me.first_name }, qr, expiresAt: this.now() + PENDING_MS, state: "waiting", offset: undefined, notMe: new Set(), api, stop, looping: false, timer: undefined };
     // the token is dropped at its time even if nobody looks again
     e.timer = setTimeout(() => this.expire(e), PENDING_MS);
     e.timer.unref();
@@ -210,10 +219,10 @@ export class PendingConnections {
       network: "telegram",
       bot: { ...e.bot },
       link: `https://t.me/${e.bot.username}`,
-      qr: "",
+      qr: e.qr,
       expiresAt: new Date(e.expiresAt).toISOString(),
       state: e.state,
-      ...(e.state === "heard" && e.sender ? { sender: { name: e.sender.name, handle: e.sender.handle, masked: e.sender.masked, text: e.sender.text } } : {}),
+      ...(e.state === "heard" && e.sender ? { sender: { id: e.sender.id, name: e.sender.name, handle: e.sender.handle, masked: e.sender.masked, text: e.sender.text } } : {}),
     };
   }
 

@@ -3466,3 +3466,61 @@ test("a venue's Disconnect done reads no Identity: the identity disconnect is it
   assert.deepEqual(h.reads.filter(isIdentity), [], 'no Identity read');
   store.timers.clear();
 });
+
+// ── Account › Identity's Connect Telegram (plan B1b Task 2): the drawer over the page, the token read from its field once ──
+
+test('Connect… opens sheet 1 on a page that signs; Next posts the field\'s token once and clears it; Escape closes and drops the pending connection', async () => {
+  const TOKEN = '7000000001:AAFakeTokenForTestsOnly_abcdefghijklmn';
+  const PENDING = { id: '0123456789abcdef0123456789abcdef', network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'Gravit' }, link: 'https://t.me/gravit_desk_bot', qr: '', expiresAt: '2099-01-01T00:00:00.000Z', state: 'waiting' };
+  const NOT_CONNECTED = { ok: true, networks: [], routing: { chat: [], alerts: [], brief: [], cards: [], fills: [] }, quiet: null, strangers: [] };
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const field = f.withSelector('#identity-token', { tagName: 'INPUT', type: 'password', id: 'identity-token' });
+  const door = ownerDoor();
+  const posted = [];
+  const ownerPost = async (path, body) => {
+    if (path.startsWith('/data/account/identity/')) {
+      posted.push([path, body]);
+      return path.endsWith('/telegram/token') ? { status: 200, body: { ok: true, pending: PENDING } } : { status: 200, body: { ok: true } };
+    }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': NOT_CONNECTED, '/data/account/identity/pending': { ok: true, pending: PENDING } } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /data-action="identityConnect" data-network="telegram">Connect…</);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityConnect', network: 'telegram' } });
+  assert.match(f.html(), /<aside class="drawer sheet" aria-label="Connect Telegram · 1 of 4 · Bot token">/);
+  assert.match(f.html(), /<input id="identity-token" class="input" type="password" autocomplete="off" spellcheck="false"/);
+  field.value = ` ${TOKEN} `;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityNext' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityNext' } });
+  await until(() => store.get().identity.connect?.step === 2, 'sheet 2');
+  const sent = posted.filter(([p]) => p === '/data/account/identity/telegram/token');
+  assert.equal(sent.length, 1, 'once');
+  assert.equal(sent[0][1].token, TOKEN);
+  assert.equal(field.value, '', 'the field cleared');
+  assert.ok(!JSON.stringify(store.get()).includes(TOKEN), 'no token in the store');
+  assert.ok(!f.html().includes(TOKEN), 'none on the page');
+  assert.match(f.html(), /Connect Telegram · 2 of 4 · Say hi/);
+  // Escape: the drawer closed, its pending connection dropped at once
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().identity.connect, null);
+  await settle();
+  assert.deepEqual(posted.filter(([p]) => p === '/data/account/identity/pending/drop').map(([, b]) => b), [{ id: PENDING.id }]);
+  assert.doesNotMatch(f.html(), /Connect Telegram ·/);
+  store.timers.clear();
+});
+
+test('a page that does not sign opens no Connect Telegram', async () => {
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account/identity': { ok: true, networks: [], routing: {}, quiet: null, strangers: [] } } });
+  const store = bootAccount(f, h);
+  await h.ready();
+  await settle();
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityConnect', network: 'telegram' } });
+  assert.equal(store.get().identity.connect, null);
+  assert.doesNotMatch(f.html(), /Connect Telegram ·/);
+  store.timers.clear();
+});

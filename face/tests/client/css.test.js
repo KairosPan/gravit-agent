@@ -8,6 +8,7 @@ import { renderMessagesScreen } from '../../client/js/render/messages.js';
 import { renderMarketsScreen } from '../../client/js/render/markets.js';
 import { renderSettings, renderAccountScreen, renderSellMany } from '../../client/js/render/account.js';
 import { renderSheet } from '../../client/js/render/owner.js';
+import { renderConnectDrawer } from '../../client/js/render/identity.js';
 import { renderTradeScreen } from '../../client/js/render/trade.js';
 import { ticketOf } from '../../client/js/host/trade-view.js';
 import { fieldsOf } from '../../client/js/host/sheet-view.js';
@@ -137,6 +138,22 @@ function identityStates(base) {
     R.identityTick(R.identityDetails(signing), { row: 'brief', network: 'telegram', on: true }),
     R.identityLoaded(base, { ok: true, networks: [], routing: {}, quiet: null, strangers: [] }),
     R.identityFailed(base, 'The account did not answer.'),
+    // Connect Telegram (Task 2): sheets 1 to 3 in the drawer (2 with its QR and a conflict, 3 refused with Start again), and sheet 4
+    // the owner sheet, refused
+    ...connectStates(signing),
+  ];
+}
+
+function connectStates(signing) {
+  const pending = { id: '0123456789abcdef0123456789abcdef', network: 'telegram', bot: { id: '777', username: 'gravit_desk_bot', name: 'Gravit' }, link: 'https://t.me/gravit_desk_bot', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'conflict' };
+  const heard = { ...pending, state: 'heard', sender: { id: '555000123', name: 'Pan', handle: '@pan', masked: '…123', text: '/start' } };
+  const open = R.identityConnectOpen(signing);
+  const seed = { pending: pending.id, botId: '777', speaksAs: '@gravit_desk_bot', operatorId: '555000123', talksOnlyWith: '@pan', routing: 'chat=telegram;alerts=telegram;brief=telegram;cards=telegram;fills=telegram', keyHash: 'a'.repeat(64), salt: 'b'.repeat(32) };
+  return [
+    R.identityConnectSet(open, { busy: true, error: 'Paste the token from BotFather first.' }),
+    R.identityConnectSet(open, { step: 2, pending }),
+    R.identityConnectSet(open, { step: 3, pending: heard, error: 'This connection is gone: it expired or was closed. Start again.' }),
+    R.sheetRefused(R.sheetOpen(signing, { kind: 'connectNetwork', seed, fields: [] }), { message: 'This connection is gone: it expired or was closed. Start again.' }),
   ];
 }
 
@@ -282,7 +299,7 @@ const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScre
 test('every class the screens emit has a rule in app.css, and app.css names no colour by hex', () => {
   assert.doesNotMatch(css, /#[0-9a-fA-F]{3,6}\b/, 'colours come from tokens.css');
   setMarkdown(null);
-  const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSellMany(st) + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('');
+  const html = everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSellMany(st) + renderSheet(st, NOW) + renderConnectDrawer(st) + renderRunSheet(st, NOW)).join('');
   for (const c of ['mkts', 'mk-tab', 'mk-star', 'mk-name', 'mk-tag', 'mk-q', 'mk-clear', 'mk-note', 'mk-empty', 'mk-st', 'page-back', 'mk-chart', 'mk-axis', 'mk-facts', 'mk-big', 'mk-basis', 'mk-asof', 'mk-d-acts', 'mk-line', 'mk-h3', 'mk-book', 'mk-on', 'mk-outs', 'mk-out', 'acct', 'networth', 'acct-figures', 'acct-second', 'acct-t', 'acct-shown', 'order-row', 'acct-note', 'activity-row', 'venue', 'account-line', 'pair-box', 'sheet', 'sheet-quote', 'sheet-left', 'sheet-check', 'stale', 'trade', 'tp-head', 'tk-seg', 'tk-pick', 'tk-row', 'tk-open', 'tk-said', 'tk-panel', 'tk-picked', 'tk-out', 'mk-yes', 'mk-no', 'tk-at', 'tk-side', 'tk-quote', 'tk-left', 'tk-msg', 'tk-go', 'tk-hand', 'research', 'pcard-meta', 'pcard-foot', 'pcard-link', 'mod-tags', 'mod-boxes', 'mod-runs-wrap', 'mod-runs', 'mod-legend', 'composed', 'notes', 'notes-body', 'lh-answer', 'lh-summary', 'lh-block', 'lh-skel', 'lh-title', 'lh-error', 'lh-label', 'lh-readout', 'lh-tiles', 'lh-tile', 'lh-tile-chal', 'lh-lines', 'lh-line', 'stress', 'lh-id', 'lh-split', 'lh-split-up', 'lh-split-down', 'lh-stats', 'lh-dist', 'lh-bucket', 'lh-bucket-bar', 'lh-srcs', 'lh-src', 'lh-src-miss', 'lh-foot', 'lh-choices', 'lh-choice', 'lh-open-run', 'lh-ix-rows', 'lh-ix', 'lh-ix-name', 'lh-ix-last', 'lh-ix-pct', 'lh-spark', 'lh-spark-mid', 'lh-spark-line', 'lh-chart', 'lh-band', 'lh-tick', 'lh-grid', 'lh-mid', 'lh-axis', 'lh-bar', 'lh-path', 'lh-mark-dot', 'lh-mark', 'lh-cur', 'lh-dot', 'lh-minute', 'lh-stock', 'stock', 'with-stock', 'lh-stk-head', 'lh-stk-sub', 'lh-stk-pool', 'lh-stk-price', 'lh-stk-tag', 'lh-stk-from', 'lh-stk-note', 'lh-stk-cite', 'lh-limit', 'lh-seal']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), `a screen emits ${c}`);
   const classes = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const missing = [...classes].filter(c => c && !new RegExp(`\\.${c.replace(/[-]/g, '\\-')}(?![\\w-])`).test(css));
@@ -316,7 +333,7 @@ test('every class app.css styles is emitted by some screen: no rule outlives the
   setMarkdown(null);
   const sample = '# H1\n\n## H\n\n### H3\n\n#### H4\n\n**b** `c` [l](https://x.test)\n\n- a\n\n> q\n\n---\n\n```\nx\n```\n\n| s | c |\n|---|---|\n| A | +1% |\n| B | -1% |';
   const page = readFileSync(new URL('../../client/index.html', import.meta.url), 'utf8');
-  const html = page + everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSellMany(st) + renderSheet(st, NOW) + renderRunSheet(st, NOW)).join('') +
+  const html = page + everyState().map(st => renderRail(st, NOW) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSellMany(st) + renderSheet(st, NOW) + renderConnectDrawer(st) + renderRunSheet(st, NOW)).join('') +
     withMiniDocument(() => renderMarkdown(sample).node.outerHTML);
   const emitted = new Set(html.match(/class="([^"]+)"/g).flatMap(x => x.slice(7, -1).split(/\s+/)));
   const styled = new Set([...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/\.([a-zA-Z][\w-]*)/g)].map(m => m[1]));

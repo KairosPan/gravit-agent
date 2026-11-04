@@ -100,7 +100,7 @@ describe("connect Telegram through the account: the token route and the pending 
     const r = await send(srv.url, "/api/account/identity/telegram/token", { body: JSON.stringify({ token: TOKEN, keyHash, salt }) });
     expect(r.status).toBe(200);
     const p = JSON.parse(r.text).pending;
-    expect(p).toMatchObject({ network: "telegram", bot: { id: "777", username: "gravit_desk_bot", name: "Gravit" }, link: "https://t.me/gravit_desk_bot", qr: "", state: "waiting" });
+    expect(p).toMatchObject({ network: "telegram", bot: { id: "777", username: "gravit_desk_bot", name: "Gravit" }, link: "https://t.me/gravit_desk_bot", state: "waiting" });
     expect(Date.parse(p.expiresAt)).toBeGreaterThan(Date.now() + PENDING_MS - 5000);
     expect(r.text).not.toContain(TOKEN);
     const g = await getView(p.id);
@@ -108,6 +108,17 @@ describe("connect Telegram through the account: the token route and the pending 
     expect(g.body.pending).toMatchObject({ id: p.id, state: "waiting" });
     expect(JSON.stringify(g.body)).not.toContain(TOKEN);
     expect(said.join("\n")).not.toContain(TOKEN);
+  });
+
+  it("the pending answer carries the bot link's QR as an SVG data URL", async () => {
+    const { pending } = await begin();
+    const PREFIX = "data:image/svg+xml;base64,";
+    expect(pending!.qr.startsWith(PREFIX)).toBe(true);
+    const svg = Buffer.from(pending!.qr.slice(PREFIX.length), "base64").toString("utf8");
+    expect(svg).toContain("<svg");
+    expect(svg).not.toContain("<script");
+    // the same QR on every read of the pending connection
+    expect((await getView(pending!.id)).body.pending!.qr).toBe(pending!.qr);
   });
 
   it("a token Telegram refuses, a token of the wrong shape and a fingerprint that does not match are refused in fixed words, nothing kept", async () => {
@@ -164,10 +175,10 @@ describe("connect Telegram through the account: the token route and the pending 
     let view: PendingView = pending!;
     bot.push(privateText(10, "/start"));
     await until(() => (view = svc.identity!.pending.view(id)!).state === "heard");
-    expect(view.sender).toEqual({ name: "Pan", handle: "@pan", masked: "…123", text: "/start" });
+    // the sender's id rides on the view for the page to sign as connectNetwork's operatorId (B1b Task 2): the sheet draws it masked
+    expect(view.sender).toEqual({ id: "555000123", name: "Pan", handle: "@pan", masked: "…123", text: "/start" });
     const g = await getView(id);
-    expect(g.body.pending!.sender).toEqual({ name: "Pan", handle: "@pan", masked: "…123", text: "/start" });
-    expect(JSON.stringify(g.body)).not.toContain("555000123");
+    expect(g.body.pending!.sender).toEqual({ id: "555000123", name: "Pan", handle: "@pan", masked: "…123", text: "/start" });
     // it keeps the offset after the update it heard
     const taken = svc.identity!.pending.take(id)!;
     expect(taken).toMatchObject({ token: TOKEN, bot: { id: "777", username: "gravit_desk_bot" }, sender: { id: "555000123", handle: "@pan" }, offset: 11 });

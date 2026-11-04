@@ -8,6 +8,7 @@ import { pageOk, venuesOf, keyfileWords, paperBooksOf, writesOn, walletsOf, conn
 import { tradeFieldsOf, tradeDraftOf } from './trade-view.js';
 import { MARKET_KINDS, marketTitleOf, marketGoOf, marketFieldsOf, marketDraftOf } from './sheet-market.js';
 import { RULES_KINDS, rulesTitleOf, rulesGoOf, rulesFieldsOf, rulesDraftOf } from './sheet-rules.js';
+import { IDENTITY_KINDS, identityTitleOf, identityGoOf, identityFieldsOf, identityDraftOf } from './sheet-identity.js';
 import { MONEY_KINDS, moneyTitleOf, moneyGoOf, moneyFieldsOf, moneyRefieldsOf, moneyDraftOf, moveSeedOf, subWalletSeedOf } from './sheet-money.js';
 import { canMove, servedHere, moveSourcesOf } from './money-view.js';
 
@@ -24,12 +25,14 @@ const str = v => (typeof v === 'string' ? v : '');
 
 /** Every sheet kind. `order` is the Trade ticket's: its fields and draft are the trade view's, from `seed.ticket`. `close`,
  *  `amend` and `leverage` are the Market half's: everything about them is host/sheet-market.js's. `beast`, `cap`, `session` and
- *  `leverageCap` are the Rules tab's: host/sheet-rules.js's. `move` and `earn` are the Money tab's: host/sheet-money.js's (plan 4b Tasks 2-3). */
+ *  `leverageCap` are the Rules tab's: host/sheet-rules.js's. `move` and `earn` are the Money tab's: host/sheet-money.js's (plan 4b Tasks 2-3). `connectNetwork`, `disconnectNetwork`, `routing` and
+ *  `block` are Account › Identity's: host/sheet-identity.js's (plan B1b Tasks 2-3). */
 export const SHEET_KINDS = ['letIn', 'limit', 'endLimit', 'revoke', 'connect', 'paper', 'topUp', 'resetPaper', 'disconnect',
-  'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', 'reopen', ...MARKET_KINDS, ...RULES_KINDS, ...MONEY_KINDS];
+  'approveCard', 'declineAsk', 'letDevice', 'signOut', 'order', 'reopen', ...MARKET_KINDS, ...RULES_KINDS, ...MONEY_KINDS, ...IDENTITY_KINDS];
 const isMarket = kind => MARKET_KINDS.includes(kind);
 const isRules = kind => RULES_KINDS.includes(kind);
 const isMoney = kind => MONEY_KINDS.includes(kind);
+const isIdentity = kind => IDENTITY_KINDS.includes(kind);
 
 const GO = new Map([
   ['letIn', 'Let it in'], ['limit', 'Give the limit'], ['endLimit', 'End the limit'], ['revoke', 'Revoke'], ['connect', 'Connect'],
@@ -44,6 +47,7 @@ export function goWord(kind, seed, fields) {
   if (isMarket(kind)) return marketGoOf(kind, seed);
   if (isRules(kind)) return rulesGoOf(kind, seed);
   if (isMoney(kind)) return moneyGoOf(kind, seed, fields);
+  if (isIdentity(kind)) return identityGoOf(kind, seed);
   return GO.get(kind) ?? '';
 }
 
@@ -52,6 +56,7 @@ export function titleOf(kind, seed, fields) {
   if (isMarket(kind)) return marketTitleOf(kind, seed);
   if (isRules(kind)) return rulesTitleOf(kind, seed);
   if (isMoney(kind)) return moneyTitleOf(kind, seed, fields);
+  if (isIdentity(kind)) return identityTitleOf(kind, seed);
   const s = isRecord(seed) ? seed : {};
   const place = str(s.name) || str(s.venue);
   switch (kind) {
@@ -231,6 +236,7 @@ export function fieldsOf(kind, seed) {
   if (isMarket(kind)) return marketFieldsOf(kind, seed);
   if (isRules(kind)) return rulesFieldsOf(kind, seed);
   if (isMoney(kind)) return moneyFieldsOf(kind, seed);
+  if (isIdentity(kind)) return identityFieldsOf(kind, seed);
   const s = isRecord(seed) ? seed : {};
   switch (kind) {
     case 'letIn': return [
@@ -323,6 +329,7 @@ export function draftOf(kind, fields, seed, now) {
   if (isMarket(kind)) return marketDraftOf(kind, fields, seed);
   if (isRules(kind)) return rulesDraftOf(kind, fields, seed);
   if (isMoney(kind)) return moneyDraftOf(kind, fields, seed);
+  if (isIdentity(kind)) return identityDraftOf(kind, fields, seed);
   const s = isRecord(seed) ? seed : {};
   switch (kind) {
     case 'letIn': {
