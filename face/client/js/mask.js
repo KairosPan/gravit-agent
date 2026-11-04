@@ -3,29 +3,35 @@
 // stored or copied passes through here.
 export const KEEP = 8;
 
-// a shape stands alone: no [A-Za-z0-9_] on either side
+// a shape stands alone: no [A-Za-z0-9_] before it, and after it neither those nor a character of its own body's class
+// (so xoxb-1234567890 is not the front of xoxb-1234567890-abcdefghij_more)
 const B = '(?<![A-Za-z0-9_])';
-const E = '(?![A-Za-z0-9_])';
+const WORD_END = '(?![A-Za-z0-9_])';
+const DASH_END = '(?![A-Za-z0-9_-])';
 const KEYS = [
-  'sk-[A-Za-z0-9_-]{20,}', 'AIza[0-9A-Za-z_-]{35}', 'gh[pousr]_[A-Za-z0-9]{36,}', 'github_pat_[A-Za-z0-9_]{22,}',
-  'glpat-[A-Za-z0-9_-]{20,}', 'npm_[A-Za-z0-9]{36}', 'hf_[A-Za-z0-9]{30,}', '(?:AKIA|ASIA)[A-Z0-9]{16}',
-  'LTAI[A-Za-z0-9]{12,}', 'AKID[A-Za-z0-9]{13,}', 'xox[abprs]-[A-Za-z0-9-]{10,}', '(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}',
-  'whsec_[A-Za-z0-9+/=]{20,}', 'eyJ[A-Za-z0-9_-]{8,}\\.eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}',
-  '\\d{8,10}:[A-Za-z0-9_-]{35}', '(?:PK|AK)[A-Z0-9]{18}',
+  ['sk-[A-Za-z0-9_-]{20,}', DASH_END], ['AIza[0-9A-Za-z_-]{35}', DASH_END], ['gh[pousr]_[A-Za-z0-9]{36,}', WORD_END],
+  ['github_pat_[A-Za-z0-9_]{22,}', WORD_END], ['glpat-[A-Za-z0-9_-]{20,}', DASH_END], ['npm_[A-Za-z0-9]{36}', WORD_END],
+  ['hf_[A-Za-z0-9]{30,}', WORD_END], ['(?:AKIA|ASIA)[A-Z0-9]{16}', WORD_END], ['LTAI[A-Za-z0-9]{12,}', WORD_END],
+  ['AKID[A-Za-z0-9]{13,}', WORD_END], ['xox[abprs]-[A-Za-z0-9-]{10,}', DASH_END],
+  ['(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}', WORD_END], ['whsec_[A-Za-z0-9+/=]{20,}', '(?![A-Za-z0-9_+/=])'],
+  ['eyJ[A-Za-z0-9_-]{8,}\\.eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}', DASH_END],
+  ['\\d{8,10}:[A-Za-z0-9_-]{35}', DASH_END], ['(?:PK|AK)[A-Z0-9]{18}', WORD_END],
 ];
-// one expression per shape, so a match one shape refuses never hides another shape's
-const KEY = KEYS.map(shape => new RegExp(`${B}(?:${shape})${E}`, 'g'));
-const BLOCK = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g;
-const URL_PASSWORD = /[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s/:@]+:([^\s/@]+)@/g;
-// the clip rule's prefixes: a token cut by the excerpt's ellipsis that starts with one is masked past them
-const PREFIX = /^(?:sk-|AIza|gh[pousr]_|github_pat_|glpat-|npm_|hf_|AKIA|ASIA|LTAI|AKID|xox[abprs]-|[sr]k_(?:live|test)_|whsec_|eyJ)/;
+// one expression per shape, so a match one shape refuses never hides another shape's; each is anchored on its left,
+// so a long run of word characters is scanned once, not once per position
+const KEY = KEYS.map(([shape, end]) => new RegExp(`${B}(?:${shape})${end}`, 'g'));
+const BEGIN = /-----BEGIN [A-Z ]*PRIVATE KEY-----/g;
+const END = /-----END [A-Z ]*PRIVATE KEY-----/g;
+// <scheme>://<user>:<password>@ — the scheme anchored on its left; user and password stop at a delimiter
+const URL_PASSWORD = /(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s/?#@:,;()[\]{}]*:([^\s/?#@:,;()[\]{}]+)@/g;
+// the clip rule's prefixes, tried at a position (sticky)
+const PREFIX = /sk-|AIza|gh[pousr]_|github_pat_|glpat-|npm_|hf_|AKIA|ASIA|LTAI|AKID|xox[abprs]-|[sr]k_(?:live|test)_|whsec_|eyJ/y;
+const WORD = /[A-Za-z0-9_]/;
 
 const kept = text => text.slice(0, KEEP) + '*'.repeat(Math.max(0, text.length - KEEP));
 // a private-key block keeps its BEGIN and END lines and every line break
-const armoured = text => {
-  const head = text.indexOf('-----', 5) + 5, foot = text.lastIndexOf('-----END');
-  return text.slice(0, head) + text.slice(head, foot).replace(/[^\r\n]/g, '*') + text.slice(foot);
-};
+const armoured = (text, head, foot) =>
+  text.slice(0, head) + text.slice(head, text.length - foot).replace(/[^\r\n]/g, '*') + text.slice(text.length - foot);
 
 // every candidate as {start, end, masked}
 function candidates(text) {
@@ -36,7 +42,16 @@ function candidates(text) {
       found.push({ start: m.index, end: m.index + m[0].length, masked: kept(m[0]) });
     }
   }
-  for (const m of text.matchAll(BLOCK)) found.push({ start: m.index, end: m.index + m[0].length, masked: armoured(m[0]) });
+  // a block runs from a BEGIN to the first END after it; with no END left, no later BEGIN has one either
+  BEGIN.lastIndex = 0;
+  for (let begin; (begin = BEGIN.exec(text));) {
+    END.lastIndex = BEGIN.lastIndex;
+    const end = END.exec(text);
+    if (!end) break;
+    const stop = end.index + end[0].length;
+    found.push({ start: begin.index, end: stop, masked: armoured(text.slice(begin.index, stop), begin[0].length, end[0].length) });
+    BEGIN.lastIndex = stop;
+  }
   for (const m of text.matchAll(URL_PASSWORD)) {
     const end = m.index + m[0].length - 1;
     found.push({ start: end - m[1].length, end, masked: '*'.repeat(m[1].length) });
@@ -59,32 +74,41 @@ function scan(text) {
   return runs;
 }
 
-const MEMO_MAX = 500;
+export const MEMO_MAX = 500;
+// a longer text is masked afresh each time rather than held
+export const MEMO_TEXT_MAX = 16_384;
 const memo = new Map();
+export const memoSize = () => memo.size;
 
 export function maskSpans(text) {
   const key = String(text ?? '');
   let runs = memo.get(key);
   if (runs) return runs;
-  runs = scan(key);
+  runs = Object.freeze(scan(key).map(run => Object.freeze(run)));
+  if (key.length > MEMO_TEXT_MAX) return runs;
   if (memo.size >= MEMO_MAX) memo.clear();
   memo.set(key, runs);
   return runs;
 }
 
 export function maskExcerpt(text) {
-  const runs = maskSpans(text);
-  let out = runs.map(run => (run.type === 'secret' ? run.masked : run.text)).join('');
+  const source = String(text ?? '');
+  const runs = maskSpans(source);
+  const out = runs.map(run => (run.type === 'secret' ? run.masked : run.text)).join('');
   if (!out.endsWith('…')) return out;
-  // the clip rule: the token before the ellipsis, back to whitespace and past any leading punctuation
+  // the clip rule: within the token before the ellipsis (back to whitespace), the earliest position at the token's
+  // start or after a non-word character where a prefix begins — so KEY=sk-…, "key":"sk-… and token:ghp_… clip too
   const cut = out.length - 1;
-  let start = cut;
-  while (start > 0 && !/\s/.test(out[start - 1])) start -= 1;
-  while (start < cut && !/[A-Za-z0-9_]/.test(out[start])) start += 1;
-  const token = String(text).slice(start, cut);
-  const prefix = PREFIX.exec(token);
-  if (!prefix) return out;
-  const keep = token.length > KEEP ? KEEP : prefix[0].length;
-  out = out.slice(0, start + keep) + '*'.repeat(token.length - keep) + out.slice(cut);
+  let first = cut;
+  while (first > 0 && !/\s/.test(source[first - 1])) first -= 1;
+  for (let at = first; at < cut; at += 1) {
+    if (at > first && WORD.test(source[at - 1])) continue;
+    PREFIX.lastIndex = at;
+    const prefix = PREFIX.exec(source);
+    if (!prefix || at + prefix[0].length > cut) continue;
+    const length = cut - at;
+    const keep = length > KEEP ? KEEP : prefix[0].length;
+    return out.slice(0, at + keep) + '*'.repeat(length - keep) + out.slice(cut);
+  }
   return out;
 }

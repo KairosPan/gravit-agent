@@ -3,7 +3,7 @@
 // ellipsis; display only, so the originals ride the runs untouched.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KEEP, maskSpans, maskExcerpt } from '../../client/js/mask.js';
+import { KEEP, MEMO_MAX, MEMO_TEXT_MAX, maskSpans, maskExcerpt, memoSize } from '../../client/js/mask.js';
 
 const fill = (pattern, n) => pattern.repeat(Math.ceil(n / pattern.length)).slice(0, n);
 const secrets = text => maskSpans(text).filter(run => run.type === 'secret');
@@ -134,6 +134,11 @@ test("the clip rule masks a key cut by the trailing ellipsis below its shape's m
   assert.equal(maskExcerpt('tok eyJhbGciOiJIUzI1…'), 'tok eyJhbGci********…');
   assert.equal(maskExcerpt('ask the desk…'), 'ask the desk…');
   assert.equal(maskExcerpt('xsk-proj-12ab…'), 'xsk-proj-12ab…', 'inside a longer word, no clip');
+  // a cut key glued to a non-space: the clip starts at the earliest prefix after a non-word character
+  assert.equal(maskExcerpt('OPENAI_API_KEY=sk-proj-12ab…'), 'OPENAI_API_KEY=sk-proj-****…');
+  assert.equal(maskExcerpt('"api_key":"sk-proj-12ab…'), '"api_key":"sk-proj-****…');
+  assert.equal(maskExcerpt('token:ghp_aB3dE6xyzz…'), 'token:ghp_aB3d******…');
+  assert.equal(maskExcerpt('a-b-c-d-e…'), 'a-b-c-d-e…');
   const snippet = '… pasted ' + SAMPLES.sk.slice(0, 15) + '…';
   assert.equal(maskExcerpt(snippet).length, snippet.length);
   // maskSpans is the bubble's form and never clips
@@ -142,9 +147,52 @@ test("the clip rule masks a key cut by the trailing ellipsis below its shape's m
 
 test('the same text twice returns the same runs (memoized)', () => {
   const text = `memo ${SAMPLES.hf}`;
-  assert.equal(maskSpans(text), maskSpans(text));
-  for (let i = 0; i < 600; i += 1) maskSpans(`filler ${i}`);
+  const runs = maskSpans(text);
+  assert.equal(maskSpans(text), runs);
+  assert.ok(Object.isFrozen(runs) && runs.every(run => Object.isFrozen(run)), 'cached runs are frozen');
+  assert.equal(MEMO_MAX, 500);
+  let cleared = false;
+  for (let i = 0; i < MEMO_MAX + 100; i += 1) {
+    const size = memoSize();
+    maskSpans(`filler ${i}`);
+    assert.ok(memoSize() <= MEMO_MAX);
+    if (memoSize() < size) cleared = true;
+  }
+  assert.ok(cleared, 'cleared when full');
   const again = maskSpans(text);
-  assert.deepEqual(again, maskSpans(text));
-  assert.equal(again[1].text, SAMPLES.hf);
+  assert.notEqual(again, runs, 'the clear dropped the old entry');
+  assert.deepEqual(again, runs);
+  assert.equal(maskSpans(text), again);
+});
+
+test('a text above the memo cap is masked but not memoized', () => {
+  const big = `${SAMPLES.npm} ` + 'z'.repeat(MEMO_TEXT_MAX);
+  const before = memoSize();
+  const runs = maskSpans(big);
+  assert.equal(memoSize(), before);
+  assert.notEqual(maskSpans(big), runs);
+  assert.equal(runs[0].text, SAMPLES.npm);
+});
+
+test('a long run of word characters is masked in linear time', () => {
+  for (const text of ['a'.repeat(200_000), 'sk-' + 'b'.repeat(200_000), '1'.repeat(200_000),
+    'x://'.repeat(50_000), '-----BEGIN RSA PRIVATE KEY-----\n'.repeat(6_000), 'a-'.repeat(100_000) + '…']) {
+    const started = performance.now();
+    maskSpans(text);
+    maskExcerpt(text);
+    assert.ok(performance.now() - started < 200, `${text.slice(0, 12)}… took ${performance.now() - started} ms`);
+  }
+});
+
+test('a dash shape is not the front of a longer word', () => {
+  assert.deepEqual(secrets('xoxb-1234567890-abcdefghij_more'), []);
+  assert.deepEqual(secrets(SAMPLES.aiza + '-more'), [], 'a fixed-length dash shape followed by a dash');
+  assert.equal(secrets('xoxb-1234567890-abcdefghij.').length, 1);
+});
+
+test('a URL password stops at a comma, a colon or a bracket', () => {
+  assert.deepEqual(secrets('http://localhost:3000,mail:bob@x.com'), []);
+  assert.deepEqual(secrets('see (http://localhost:3000) then me@x.com'), []);
+  assert.equal(maskExcerpt('redis://:s3cret@cache:6379'), 'redis://:******@cache:6379', 'an empty user too');
+  assert.equal(maskExcerpt('amqp://guest:gu3st!@mq'), 'amqp://guest:******@mq');
 });
