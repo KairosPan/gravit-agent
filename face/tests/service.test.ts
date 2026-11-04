@@ -1119,6 +1119,16 @@ test("the watchdog plist carries its label, StartInterval 300, RunAtLoad false a
   assert.doesNotMatch(p.plist, /KEY|TOKEN|SECRET|FACE_PORT/, "no credential and no port in its environment");
 });
 
+test("the watchdog plist carries the account's and the market's URLs and the account's home when the shell sets them", () => {
+  const base = { root: "/repo", home: "/h/.dsh", homeDir: "/h", node: "/n", path: "/usr/bin", launchAgentsDir: "/h/Library/LaunchAgents" };
+  const p = watchdogPlan({ ...base, env: { FACE_ACCOUNT_URL: "http://127.0.0.1:4830", FACE_MARKET_URL: " http://127.0.0.1:4831 ", BUYER_HOME: "/h/acct", FACE_ACCOUNT_HOME: "", DEEPSEEK_API_KEY: "sk-x", TELEGRAM_BOT_TOKEN: "1:x" } });
+  assert.deepEqual(p.env, { PATH: "/usr/bin", HOME: "/h", DSH_HOME: "/h/.dsh", FACE_ACCOUNT_URL: "http://127.0.0.1:4830", FACE_MARKET_URL: "http://127.0.0.1:4831", BUYER_HOME: "/h/acct" });
+  for (const needle of ["<key>FACE_ACCOUNT_URL</key><string>http://127.0.0.1:4830</string>", "<key>FACE_MARKET_URL</key><string>http://127.0.0.1:4831</string>", "<key>BUYER_HOME</key><string>/h/acct</string>"]) assert.ok(p.plist.includes(needle), needle);
+  assert.doesNotMatch(p.plist, /DEEPSEEK|TELEGRAM|sk-x|FACE_ACCOUNT_HOME/, "only the four names, and only when set");
+  assert.deepEqual(watchdogPlan({ ...base, env: { FACE_ACCOUNT_HOME: "/h/a2" } }).env.FACE_ACCOUNT_HOME, "/h/a2");
+  assert.deepEqual(watchdogPlan(base).env, { PATH: "/usr/bin", HOME: "/h", DSH_HOME: "/h/.dsh" });
+});
+
 test("install and uninstall bootstrap and boot out both jobs", async () => {
   const r = await rig();
   await writeFile(join(r.deps.root, ".env.deepseek"), "DEEPSEEK_API_KEY=d\n");

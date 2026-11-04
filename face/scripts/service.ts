@@ -197,20 +197,25 @@ ${Object.entries(env).map(([k, v]) => `    <key>${xml(k)}</key><string>${xml(v)}
   return { plist, path: join(opts.launchAgentsDir, `${LABEL}.plist`), log, errLog, args, env };
 }
 
+/** The names the watchdog's plist carries from install's shell when set (scripts/watchdog.ts reads them): where the
+ * account and the market answer, and the account's home, whose Telegram file the account-down notice reads. */
+export const WATCHDOG_PASSED_KEYS = ["FACE_ACCOUNT_URL", "FACE_MARKET_URL", "FACE_ACCOUNT_HOME", "BUYER_HOME"] as const;
+
 /**
  * The watchdog's LaunchAgent (spec §16 H4), rendered as {@link servicePlan} renders the face's. Pure.
  *
  * - `ProgramArguments`: the face's node and tsx loader, then face/scripts/watchdog.ts.
  * - `WorkingDirectory`: face/. `EnvironmentVariables`: PATH through {@link filterPath}, HOME and
- *   DSH_HOME only - no key and no port: the watchdog phones through the account (scripts/watchdog.ts),
- *   reads the port from the face's installed plist, and the account's and the market's URLs and the
- *   account's home from its own environment or their defaults.
+ *   DSH_HOME, and {@link WATCHDOG_PASSED_KEYS} when `env` sets them - no key and no port: the watchdog
+ *   phones through the account (scripts/watchdog.ts) and reads the port from the face's installed
+ *   plist; the account's and the market's URLs and the account's home are install's shell's, or their
+ *   defaults (as the account's own plist keeps PORTFOLIO_MARKET_URL).
  * - `StartInterval 300` and `RunAtLoad false`: one check every five minutes, the first five minutes
  *   after the job is loaded; no KeepAlive - each run checks once and exits.
  * - `Umask 63` (077), and its logs watchdog.log / watchdog.err.log beside the face's.
- * @param opts - as {@link servicePlan}'s, without the port.
+ * @param opts - as {@link servicePlan}'s, without the port; `env`, the shell's names the watchdog's are taken from.
  */
-export function watchdogPlan(opts: { root: string; home: string; homeDir: string; node: string; path: string; launchAgentsDir: string }): ServicePlan {
+export function watchdogPlan(opts: { root: string; home: string; homeDir: string; node: string; path: string; launchAgentsDir: string; env?: Record<string, string | undefined> }): ServicePlan {
   const face = join(opts.root, "face");
   const logs = join(opts.home, "face", "service");
   const log = join(logs, "watchdog.log");
@@ -218,6 +223,10 @@ export function watchdogPlan(opts: { root: string; home: string; homeDir: string
   const loader = pathToFileURL(join(face, "node_modules", "tsx", "dist", "loader.mjs")).href;
   const args = [opts.node, "--import", loader, join(face, "scripts", "watchdog.ts")];
   const env: Record<string, string> = { PATH: filterPath(opts.path), HOME: opts.homeDir, DSH_HOME: opts.home };
+  for (const name of WATCHDOG_PASSED_KEYS) {
+    const value = opts.env?.[name]?.trim();
+    if (value !== undefined && value !== "") env[name] = value;
+  }
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -626,6 +635,8 @@ export interface ServiceDeps {
   nodePath: string;
   /** The PATH the plist's PATH is filtered from. */
   envPath: string;
+  /** The shell's names, whose {@link WATCHDOG_PASSED_KEYS} the watchdog's plist carries; none when absent. */
+  env?: Record<string, string | undefined>;
   /** Prints a line - or several, joined by newlines. */
   out(line: string): void;
   /** Waits between two asks: for launchd to let go of a job booted out, for the port to fall silent. */
@@ -807,7 +818,7 @@ export function contextOf(deps: ServiceDeps, flagPort: number | undefined): Serv
   const home = named !== undefined && isAbsolute(named) ? named : deps.home;
   const served = servicePlan({ ...common, home });
   const domain = `gui/${deps.uid}`;
-  const watchdog = watchdogPlan({ root: deps.root, home: deps.home, homeDir: deps.homeDir, node: deps.nodePath, path: deps.envPath, launchAgentsDir });
+  const watchdog = watchdogPlan({ root: deps.root, home: deps.home, homeDir: deps.homeDir, node: deps.nodePath, path: deps.envPath, launchAgentsDir, env: deps.env });
   return {
     deps, plan: servicePlan({ ...common, home: deps.home }), installed, home, log: served.log, errLog: served.errLog,
     port: planPort ?? DEFAULT_PORT, domain, job: `${domain}/${LABEL}`,
@@ -1239,6 +1250,7 @@ export function realDeps(): ServiceDeps {
     platform: process.platform,
     nodePath: nodeOnPath(envPath) ?? process.execPath,
     envPath,
+    env: process.env,
     out: (line) => console.log(line),
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
   };

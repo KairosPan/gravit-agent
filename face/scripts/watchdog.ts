@@ -21,7 +21,8 @@
  * - `3` stopped on purpose (no plist, or launchd has no job): the state is cleared, nothing is said.
  *
  * Each run also asks the account (`GET <FACE_ACCOUNT_URL>/api/overview`) and the market
- * (`GET <FACE_MARKET_URL>/api/health`), 5 s each; an answer that is not a 2xx is down. Each is its
+ * (`GET <FACE_MARKET_URL>/api/health`), 5 s each; any HTTP answer, whatever its status, is up (a 500
+ * from the account's overview is an account that answers) - only no answer in 5 s is down. Each is its
  * own episode, counted like a degraded desk (the plan's ruling 11): down at two checks in a row,
  * once per episode -
  * - the market: `the market has not answered since …: prices, the watch and paper fills wait`;
@@ -41,7 +42,9 @@
  * no link on the way, readable by the operator alone, the account's own rules - and sends that one
  * line itself, with the Bot API's sendMessage to the operator the account bound ({@link
  * phoneDirectOf}). The token is used for nothing else, read only then, and taken out of every line
- * sent and logged, as `<token>`. It sends nothing more until the account has come back. It reads no
+ * sent and logged, as `<token>`. Until the Bot API takes it (a 2xx), the line is tried again at each
+ * run - no token file, a file that fails the rules, a refusal, no answer; once taken it sends
+ * nothing more until the account has come back. It reads no
  * TELEGRAM_* name and no `$DSH_HOME/.env`. Under compose the watchdog does not run.
  * While the desk's `OFF` pause is in force no line is sent - the direct one included - the log says
  * what was not, and the state and the restart go on.
@@ -92,9 +95,9 @@ export interface WatchdogDeps {
   home: string;
   /** The desk's health (scripts/service.ts `checkHealth`). */
   check(): Promise<{ code: HealthCode; reason: string }>;
-  /** Whether the account answers `GET /api/overview` (5 s); never throws. */
+  /** Whether the account answers `GET /api/overview` at all in 5 s - any HTTP status is an answer; never throws. */
   checkAccount(): Promise<boolean>;
-  /** Whether the market answers `GET /api/health` (5 s); never throws. */
+  /** Whether the market answers `GET /api/health` at all in 5 s - any HTTP status is an answer; never throws. */
   checkMarket(): Promise<boolean>;
   /** The service's restart; its exit code. */
   restart(): Promise<number>;
@@ -102,8 +105,8 @@ export interface WatchdogDeps {
    * held - its own words are logged), false when it did not or refused; never throws. */
   send(text: string): Promise<boolean>;
   /** The account-down line alone, straight to the Bot API with the token from the account's home
-   * ({@link phoneDirectOf}); never throws. */
-  sendDirect(text: string): Promise<void>;
+   * ({@link phoneDirectOf}): true only when the Bot API answered 2xx; never throws. */
+  sendDirect(text: string): Promise<boolean>;
   /** Whether the desk's `OFF` pause is in force. */
   offInForce(): Promise<boolean>;
   now(): number;
@@ -162,23 +165,23 @@ const messageOf = (err: unknown): string => (err instanceof Error ? err.message 
 /**
  * One check of each of the three, and what follows from it (the module's header). Every line sent is
  * also logged; while `OFF` is in force, or the account is down, it is logged as not sent.
- * @returns 0 once the state is written; 1 when the desk's check threw (the state is left as it was)
- *   or the state could not be written.
+ * @returns 0 once the state is written; 1 when the desk's check threw (the desk's part is left as it was; the
+ *   account's and the market's still move) or the state could not be written.
  */
 export async function runWatchdog(deps: WatchdogDeps): Promise<number> {
   const prev = await readWatchdogState(deps.home);
-  let health: { code: HealthCode; reason: string };
+  /* The desk's check failing leaves the desk's part as it was - but the account and the market are still checked,
+   * so an account-down notice is not lost to it, and the run exits 1. */
+  let health: { code: HealthCode; reason: string } | undefined;
   try {
     health = await deps.check();
   } catch (err) {
     deps.log(`${new Date(deps.now()).toISOString()} check failed: ${messageOf(err)}`);
-    return 1;
   }
   const [accountUp, marketUp] = await Promise.all([deps.checkAccount().catch(() => false), deps.checkMarket().catch(() => false)]);
-  const { code, reason } = health;
   const now = deps.now();
   const iso = new Date(now).toISOString();
-  deps.log(`${iso} health ${code} ${reason}; account ${accountUp ? "answers" : "down"}; market ${marketUp ? "answers" : "down"}`);
+  deps.log(`${iso} health ${health === undefined ? "unknown" : `${health.code} ${health.reason}`}; account ${accountUp ? "answers" : "down"}; market ${marketUp ? "answers" : "down"}`);
   const at = (time: string): string => deskTime(new Date(time), new Date(now));
   let off: boolean;
   try {
@@ -230,14 +233,16 @@ export async function runWatchdog(deps: WatchdogDeps): Promise<number> {
       const line = `the account has not answered since ${at(upstream.accountSince)}; nothing reaches the phone until it does`;
       if (off) deps.log(`OFF in force, not sent: ${line}`);
       else {
-        deps.log(`sent directly: ${line}`);
-        await deps.sendDirect(line);
-        upstream.accountSaid = true;
+        deps.log(`sending directly: ${line}`);
+        if (await deps.sendDirect(line)) upstream.accountSaid = true;
+        else deps.log(`not sent directly, tried again at the next run: ${line}`);
       }
     }
   }
 
-  const desk = await deskStep(prev, code, reason, iso, at, say, async (part) => save({ ...part, ...prevUpstream }), deps);
+  const desk = health === undefined
+    ? { state: deskPartOf(prev), ok: false }
+    : await deskStep(prev, health.code, health.reason, iso, at, say, async (part) => save({ ...part, ...prevUpstream }), deps);
   if (desk === undefined) return 1;
 
   if (marketUp) {
@@ -250,6 +255,17 @@ export async function runWatchdog(deps: WatchdogDeps): Promise<number> {
   }
   const written = await save({ ...desk.state, ...upstream });
   return written && desk.ok ? 0 : 1;
+}
+
+/** The desk's part of `state`. */
+function deskPartOf(state: WatchdogState): DeskPart {
+  return {
+    ...(state.outageSince === undefined ? {} : { outageSince: state.outageSince }),
+    degradedChecks: state.degradedChecks,
+    ...(state.degradedSaid === true ? { degradedSaid: true } : {}),
+    ...(state.restartedAt === undefined ? {} : { restartedAt: state.restartedAt }),
+    ...(state.degradedSince === undefined ? {} : { degradedSince: state.degradedSince }),
+  };
 }
 
 /**
@@ -279,13 +295,7 @@ async function deskStep(
     await say(`the desk has not answered since ${at(iso)} (${reason}); ${failure === undefined ? "the watchdog restarted it" : `the restart failed: ${failure}`}`);
     return { state: restarted, ok: written };
   }
-  const prevDesk: DeskPart = {
-    ...(prev.outageSince === undefined ? {} : { outageSince: prev.outageSince }),
-    degradedChecks: prev.degradedChecks,
-    ...(prev.degradedSaid === true ? { degradedSaid: true } : {}),
-    ...(prev.restartedAt === undefined ? {} : { restartedAt: prev.restartedAt }),
-    ...(prev.degradedSince === undefined ? {} : { degradedSince: prev.degradedSince }),
-  };
+  const prevDesk = deskPartOf(prev);
   /* Another face on the port - the operator's own, started to look - is not launchd's answering: in an outage the
    * outage stays open, nothing is said, and the degraded count is left alone (Ruling 10's narrowing). */
   if (code === 1 && reason === OTHER_FACE && prev.outageSince !== undefined) return { state: prevDesk, ok: true };
@@ -352,12 +362,13 @@ function readTelegramFile(accountHome: string): { token: string; operatorId: str
  * The watchdog's direct phone, for the account-down line alone: the Bot API's `sendMessage` to the operator the
  * account bound, with the token from `<accountHome>/credentials/networks/telegram.json` - read at each send, only if
  * the file passes the account's own rules (no link on the way, inside the home, a plain file, mode 0600) - plain
- * text, a 15 s timeout; a file that does not pass, a refusal or a failure is logged, never thrown. Every token read is
+ * text, a 15 s timeout; true only on the Bot API's 2xx. A file that does not pass, a refusal or a failure is
+ * logged, never thrown, and answers false. Every token read is
  * taken out of the text sent and of every line logged; `redact` does the same for the caller's own log.
  * @param accountHome - the account's home ({@link accountHomeOf}).
  * @param io - `fetch`, and `log`, where a line goes.
  */
-export function phoneDirectOf(accountHome: string, io: { fetch: typeof fetch; log(line: string): void }): { send(text: string): Promise<void>; redact(text: string): string } {
+export function phoneDirectOf(accountHome: string, io: { fetch: typeof fetch; log(line: string): void }): { send(text: string): Promise<boolean>; redact(text: string): string } {
   const tokens = new Set<string>();
   const redact = (text: string): string => [...tokens].reduce((out, token) => redactorOf(token)(out), text);
   const log = (line: string): void => io.log(redact(line));
@@ -367,7 +378,7 @@ export function phoneDirectOf(accountHome: string, io: { fetch: typeof fetch; lo
       const file = readTelegramFile(accountHome);
       if ("why" in file) {
         log(`${file.why}; not sent: ${text}`);
-        return;
+        return false;
       }
       tokens.add(file.token);
       const chatId = Number.isSafeInteger(Number(file.operatorId)) ? Number(file.operatorId) : file.operatorId;
@@ -380,23 +391,26 @@ export function phoneDirectOf(accountHome: string, io: { fetch: typeof fetch; lo
         });
         if (res.ok) {
           await res.body?.cancel().catch(() => undefined);
-          return;
+          return true;
         }
         const body = await res.text().catch(() => "");
         log(`telegram refused the line: ${res.status} ${body}`);
       } catch (err) {
         log(`telegram send failed: ${messageOf(err)}`);
       }
+      return false;
     },
   };
 }
 
-/** Whether `url` answers a GET with a 2xx in 5 s; never throws. */
-async function answers(url: string): Promise<boolean> {
+/** Whether `url` answers a GET at all in 5 s - any HTTP status, a 500 included, is an answer; only no answer
+ * (refused, reset, timed out) is not. Never throws.
+ * @param fetchImpl - the global fetch by default. */
+export async function answers(url: string, fetchImpl: typeof fetch = fetch): Promise<boolean> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    const res = await fetchImpl(url, { signal: AbortSignal.timeout(5_000) });
     await res.body?.cancel().catch(() => undefined);
-    return res.ok;
+    return true;
   } catch {
     return false;
   }

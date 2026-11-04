@@ -5,7 +5,7 @@ import { chmod, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkHealth, contextOf, LABEL, OTHER_FACE, servicePlan, type HealthCode, type ServiceDeps } from "../scripts/service.ts";
-import { accountHomeOf, accountSendOf, phoneDirectOf, readWatchdogState, runWatchdog, watchdogStatePath, type WatchdogDeps } from "../scripts/watchdog.ts";
+import { accountHomeOf, accountSendOf, answers, phoneDirectOf, readWatchdogState, runWatchdog, watchdogStatePath, type WatchdogDeps } from "../scripts/watchdog.ts";
 import { deskTime } from "../src/desk.ts";
 
 const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-watchdog-"));
@@ -39,7 +39,7 @@ async function watch(o: { off?: boolean; restartCode?: number } = {}): Promise<R
       checkMarket: async () => marketUp,
       restart: async () => { run.restarts++; return o.restartCode ?? 0; },
       send: async (text) => { sent.push(text); return true; },
-      sendDirect: async (text) => { direct.push(text); },
+      sendDirect: async (text) => { direct.push(text); return true; },
       offInForce: async () => o.off ?? false,
       now: () => now,
       log: (line) => { logs.push(line); },
@@ -406,4 +406,91 @@ test("a line through the account is kind watchdog; true when the account answere
   answer = () => { throw new TypeError("fetch failed"); };
   assert.equal(await send("x"), false);
   assert.ok(logs.at(-1)!.includes("could not be asked"));
+});
+
+/* Fix round 1. */
+
+test("the direct notice is tried at each run until the Bot API takes it: no file, a file others can read, a refusal, no answer - then once", async () => {
+  const TOKEN = "123456:AAH-secret/tok+en";
+  const accountHome = await mkdtemp(join(tmpdir(), "face-watchdog-retry-"));
+  const dir = join(accountHome, "credentials", "networks");
+  const file = join(dir, "telegram.json");
+  let mode: "refuse" | "fail" | "take" = "refuse";
+  let taken = 0; let asked = 0;
+  const fakeBotApi = (async () => {
+    asked++;
+    if (mode === "fail") throw new TypeError(`fetch failed ${TOKEN}`);
+    if (mode === "refuse") return new Response(JSON.stringify({ ok: false, description: `Forbidden ${TOKEN}` }), { status: 403 });
+    taken++;
+    return Response.json({ ok: true, result: { message_id: 1 } });
+  }) as typeof fetch;
+  const w = await watch();
+  const phone = phoneDirectOf(accountHome, { fetch: fakeBotApi, log: (l) => { w.logs.push(l); } });
+  w.deps.sendDirect = phone.send;
+  w.at(T1); w.account(false);
+  await runWatchdog(w.deps);
+  w.at(T1 + FIVE_MIN);
+  await runWatchdog(w.deps); /* no token file */
+  assert.equal(asked, 0);
+  assert.equal((await readWatchdogState(w.deps.home)).accountSaid, undefined, "no file: not said");
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await writeFile(file, JSON.stringify({ token: TOKEN, botId: "123456", username: "gravit_bot", operatorId: "777", operatorHandle: "op" }), { mode: 0o644 });
+  await chmod(file, 0o644);
+  await runWatchdog(w.deps); /* a file others can read */
+  assert.equal(asked, 0);
+  assert.equal((await readWatchdogState(w.deps.home)).accountSaid, undefined);
+  await chmod(file, 0o600);
+  await runWatchdog(w.deps); /* refused */
+  mode = "fail";
+  await runWatchdog(w.deps); /* no answer */
+  assert.equal(asked, 2);
+  assert.equal((await readWatchdogState(w.deps.home)).accountSaid, undefined, "a refusal and a failure: not said");
+  mode = "take";
+  await runWatchdog(w.deps);
+  await runWatchdog(w.deps);
+  await runWatchdog(w.deps);
+  assert.equal(taken, 1, "sent exactly once");
+  assert.equal(asked, 3);
+  assert.equal((await readWatchdogState(w.deps.home)).accountSaid, true);
+  assert.ok(w.logs.some((l) => l.startsWith("not sent directly, tried again at the next run")));
+  for (const l of w.logs) assert.ok(!l.includes(TOKEN) && !l.includes(encodeURIComponent(TOKEN)), l);
+});
+
+test("an account that answers 500 is up: no direct notice; only no answer counts", async () => {
+  let status = 500; let silent = false;
+  const fakeAccount = (async () => {
+    if (silent) throw new TypeError("fetch failed (ECONNREFUSED)");
+    return new Response("settle failed", { status });
+  }) as typeof fetch;
+  assert.equal(await answers("http://127.0.0.1:4820/api/overview", fakeAccount), true);
+  status = 404;
+  assert.equal(await answers("http://127.0.0.1:4820/api/overview", fakeAccount), true);
+  status = 500;
+  const w = await watch();
+  w.deps.checkAccount = () => answers("http://127.0.0.1:4820/api/overview", fakeAccount);
+  for (let i = 0; i < 3; i++) await runWatchdog(w.deps);
+  assert.deepEqual(w.direct, []);
+  assert.equal((await readWatchdogState(w.deps.home)).accountDownChecks, 0);
+  silent = true;
+  assert.equal(await answers("http://127.0.0.1:4820/api/overview", fakeAccount), false);
+  await runWatchdog(w.deps); await runWatchdog(w.deps);
+  assert.equal(w.direct.length, 1, "no answer twice: the notice");
+});
+
+test("a desk check that throws still checks the account and the market, and the run exits 1", async () => {
+  const w = await watch();
+  w.health(1, "ledger unreadable (EIO)");
+  await runWatchdog(w.deps);
+  const before = await readWatchdogState(w.deps.home);
+  w.deps.check = async () => { throw new Error("launchctl vanished"); };
+  w.at(T1); w.account(false); w.market(false);
+  assert.equal(await runWatchdog(w.deps), 1);
+  w.at(T1 + FIVE_MIN);
+  assert.equal(await runWatchdog(w.deps), 1);
+  assert.deepEqual(w.direct, [ACCOUNT_DOWN], "the account-down notice still fires");
+  const s = await readWatchdogState(w.deps.home);
+  assert.deepEqual([s.degradedChecks, s.degradedSince, s.degradedSaid], [before.degradedChecks, before.degradedSince, before.degradedSaid], "the desk's part as it was");
+  assert.deepEqual([s.accountDownChecks, s.marketDownChecks], [2, 2]);
+  assert.equal(w.restarts, 0);
+  assert.ok(w.logs.some((l) => l.includes("check failed: launchctl vanished")));
 });
