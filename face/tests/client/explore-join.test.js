@@ -64,29 +64,38 @@ test('a paper row lends no price where the market lists the thing', () => {
   assert.deepEqual(linesOf(joined, 'coin:DOGE'), ['kraken|DOGE/USD', 'paper-1|DOGE/USD']);
 });
 
-test("a row only the Account lists comes after the market's rows", () => {
-  const market = body([row('coin:BTC', [pub('kraken', 'BTC/USD', 'live:exchange:kraken')]), row('coin:ETH', [pub('kraken', 'ETH/USD', 'live:exchange:kraken')])],
-    { movers: [row('coin:ETH', [pub('kraken', 'ETH/USD', 'live:exchange:kraken')])] });
-  const nvda = row('stock:NVDA', [con('broker', 'NVDA')], { tabs: ['all', 'stocks'] });
+test("a row only the Account lists competes on the sort with the market's rows", () => {
+  // all rows at 1,000 of volume unless named: the market's first on a tie
+  const market = body([row('coin:BTC', [pub('kraken', 'BTC/USD', 'live:exchange:kraken')], { volumeUsd24h: 5_000 }), row('coin:ETH', [pub('kraken', 'ETH/USD', 'live:exchange:kraken')])],
+    { movers: [row('coin:ETH', [pub('kraken', 'ETH/USD', 'live:exchange:kraken')], { changePct24h: 2 })] });
+  const nvda = row('stock:NVDA', [con('broker', 'NVDA')], { tabs: ['all', 'stocks'], volumeUsd24h: 3_000, changePct24h: -9 });
   const connected = body([nvda, row('coin:BTC', [con('my-okx', 'BTC/USDT')])], { movers: [nvda], missing: [{ venue: 'x', venueName: 'X', why: 'x is down' }], notes: ['n1'] });
-  const joined = joinExplore({ ...market, notes: ['n1', 'n0'], china: { status: { state: 'open' } } }, connected, {});
-  assert.deepEqual(keys(joined), ['coin:BTC', 'coin:ETH'], 'cut to the longer source: two rows each');
-  // a market listing fewer rows than the account: the account's own rows are not cut away
-  const short = joinExplore({ ...market, items: [market.items[0]] }, connected, {});
-  assert.deepEqual(keys(short), ['coin:BTC', 'stock:NVDA']);
-  // a market row whose one line does not serve here leaves room: the connected-only row comes after the market's
-  const sol = row('coin:SOL', [pub('geo', 'SOL/USD', 'live:geo')]);
-  const after = joinExplore({ ...market, items: [...market.items, sol] }, connected, { here: [{ connector: 'live:geo', verdict: 'not-served' }] });
-  assert.deepEqual(keys(after), ['coin:BTC', 'coin:ETH', 'stock:NVDA']);
+  const joined = joinExplore({ ...market, notes: ['n1', 'n0'], china: { status: { state: 'open' } } }, connected, { limit: 200 });
+  assert.deepEqual(keys(joined), ['coin:BTC', 'stock:NVDA', 'coin:ETH'], 'one list sorted by volume, the account-only row among them');
+  assert.deepEqual(keys(joinExplore(market, connected, { limit: 2 })), ['coin:BTC', 'stock:NVDA'], 'then cut once at the limit');
+  assert.deepEqual(keys(joinExplore(market, connected, { sort: 'movers', limit: 200 })), ['stock:NVDA', 'coin:BTC', 'coin:ETH'], 'the sort asked for: the biggest move first');
+  assert.deepEqual(keys(joinExplore(market, connected, { q: 'eth', limit: 200 })), ['coin:ETH', 'coin:BTC', 'stock:NVDA'], 'a search: the row that is what was typed first');
   assert.deepEqual(joined.tabs.map(t => [t.id, t.label, t.count]), [['all', 'All', 3], ['crypto', 'Crypto', 2], ['stocks', 'Stocks', 1]], "the market's tabs, the connected-only rows counted in");
-  assert.deepEqual(joined.movers.map(i => i.key), ['coin:ETH'], 'each list cut to its longer source');
-  const moved = joinExplore({ ...market, movers: [] }, connected, {});
-  assert.deepEqual(moved.movers.map(i => i.key), ['stock:NVDA'], "the connected-only movers after the market's");
+  assert.deepEqual(joined.movers.map(i => i.key), ['stock:NVDA', 'coin:ETH'], 'movers merged and sorted by the move');
   assert.deepEqual(joined.missing, [{ venue: 'x', venueName: 'X', why: 'x is down' }]);
   assert.deepEqual(joined.notes, ['n1', 'n0']);
   assert.equal(joined.asOf, market.asOf);
   assert.deepEqual(joined.china, { status: { state: 'open' } });
   assert.equal(joined.ok, true);
+});
+
+test('the market half full at the limit: an account-only row that sorts high enough makes the cut, one that does not is cut', () => {
+  const LIMIT = 3;
+  const market = body([5_000, 4_000, 3_000].map((v, n) => row(`coin:M${n}`, [pub('kraken', `M${n}/USD`, 'live:exchange:kraken')], { volumeUsd24h: v })));
+  const high = row('stock:HIGH', [con('broker', 'HIGH')], { tabs: ['all', 'stocks'], volumeUsd24h: 4_500 });
+  const low = row('stock:LOW', [con('broker', 'LOW')], { tabs: ['all', 'stocks'], volumeUsd24h: 10 });
+  const joined = joinExplore(market, body([high, low]), { limit: LIMIT });
+  assert.deepEqual(keys(joined), ['coin:M0', 'stock:HIGH', 'coin:M1'], 'HIGH makes the cut, pushing the quietest market row out');
+  assert.equal(keys(joined).includes('stock:LOW'), false, 'LOW sorts below every market row: cut');
+  // the curated Predictions list keeps the market's order, the account's own rows after it
+  const ev = (key, v) => row(key, [pub('kalshi', key, 'live:kalshi')], { kind: 'event', tabs: ['all', 'predictions'], volumeUsd24h: v });
+  const curated = joinExplore(body([ev('event:A', 1), ev('event:B', 9)]), body([ev('event:C', 99)]), { tab: 'predictions', limit: 200 });
+  assert.deepEqual(keys(curated), ['event:A', 'event:B', 'event:C']);
 });
 
 test('a stale connected half is dropped, and missing says the Account is not answering', () => {

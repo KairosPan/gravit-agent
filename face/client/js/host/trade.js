@@ -10,22 +10,15 @@
 // market's explore and the account's connected explore with the same query and lands their join (host/explore-join.js), as
 // Markets does; the ticket's line, always a connected one, is followed on the Account's stream.
 import { ticketOf, fillWords } from './trade-view.js';
-import { venuesOf } from './account-view.js';
-import { joinExplore } from './explore-join.js';
+import { exploreHalves } from './explore-halves.js';
 import { refusedAt, refusalOf, saidOf } from './owner-view.js';
 import { FRESH_MS, askedOf } from './sheet.js';
 
 export { FRESH_MS };
 export const PICKS_MS = 20_000, PICK_LIMIT = 12;
 
-const EXPLORE = '/data/market/explore';
-const CONNECTED_EXPLORE = '/data/account/connected/explore';
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const blank = q => typeof q !== 'string' || !q.trim();
-// the Account's sentence when it refuses (`refusal.message`), else its error words — only when they are text
-const words = v => (typeof v === 'string' && v.trim() !== '' ? v : null);
-const messageOf = body => words(body?.refusal?.message) ?? words(body?.error);
-const answered = body => body?.ok === true && Array.isArray(body.items);
 // an outcome field's index, as tradeDraftOf reads it: blank is the first
 const indexOf = v => { const n = Number(v ?? 0); return Number.isInteger(n) && n >= 0 ? n : 0; };
 // the stream's key for a ticket's line at a venue: the able line there, `<venue>:<symbol>` — a prediction's at the picked
@@ -57,7 +50,6 @@ export function startTrade({ store, getJson, owner, sheet, stream, schedule, can
   let topFor = null;         // the preparation preparedTop belongs to (its body, by identity)
   const cancelling = new Set();   // the cancels in the air, `<venue>|<order>`
   const kinds = new Map();   // a kind of read → { flight, path, seq }
-  const halves = new Map();  // an explore read's kind → each half's latest body (null failed, undefined not yet) and the ask's state
 
   // One flight per kind of read (markets.js's rule): an ask for the path in the air joins it; another path starts a read whose
   // answer alone lands; nothing lands after close().
@@ -78,38 +70,13 @@ export function startTrade({ store, getJson, owner, sheet, stream, schedule, can
   }
   function drop(kind) { const k = kinds.get(kind); if (k) { k.seq += 1; k.flight = null; k.path = null; } }
 
-  // One explore question of both halves, markets.js's rule: a half that answers lands the join at once beside the other's
-  // latest; a half that failed waits for the other's answer, so both failing keeps the last rows (`failed`, the market's sentence)
-  function readBoth(kind, query, { land, failed, loading }) {
-    const kept = halves.get(kind) ?? { market: undefined, connected: undefined, said: null, landed: { market: true, connected: true } };
-    halves.set(kind, kept);
-    const ask = (half, flight, path) => {
-      const k = kinds.get(flight);
-      if (!(k && k.flight !== null && k.path === path)) kept.landed[half] = false;
-      return path;
-    };
-    const landHalf = half => (body, refused) => {
-      if (halves.get(kind) !== kept) return;
-      const ok = !refused && answered(body);
-      kept[half] = ok ? body : null;
-      kept.landed[half] = true;
-      if (half === 'market') kept.said = ok ? null : messageOf(body);
-      if (!ok && !kept.landed[half === 'market' ? 'connected' : 'market']) return;
-      const a = store.get().account;
-      const here = a?.venuesHere?.data;
-      const data = joinExplore(kept.market, kept.connected, { venues: venuesOf(a?.data), here: isRecord(here) && Array.isArray(here.venues) ? here.venues.filter(isRecord) : [] });
-      if (data) land(data);
-      else if (kept.market === null && kept.connected === null) failed(kept.said);
-    };
-    fly(`${kind}:market`, ask('market', `${kind}:market`, `${EXPLORE}?${query}`), landHalf('market'), loading);
-    fly(`${kind}:account`, ask('connected', `${kind}:account`, `${CONNECTED_EXPLORE}?${query}`), landHalf('connected'));
-  }
-  function dropBoth(kind) { drop(`${kind}:market`); drop(`${kind}:account`); halves.delete(kind); }
+  // the picks' and the search's two halves (host/explore-halves.js), as Markets reads them
+  const halves = exploreHalves({ store, fly, drop, kinds, now });
 
   // the picks of the kind Trade is on
   function readPicks() {
     const kind = store.get().trade.kind;
-    readBoth(`picks:${kind}`, `tab=${encodeURIComponent(kind)}&limit=${PICK_LIMIT}`, {
+    halves.read(`picks:${kind}`, `tab=${encodeURIComponent(kind)}&limit=${PICK_LIMIT}`, {
       land: data => store.dispatch('picksLoaded', { kind, data, at: now() }),
       failed: message => store.dispatch('picksFailed', { kind, at: now(), message }),
       loading: ['picksLoading', { kind }],
@@ -192,15 +159,12 @@ export function startTrade({ store, getJson, owner, sheet, stream, schedule, can
       if (closed) return;
       const q = typeof raw === 'string' ? raw : '';
       store.dispatch('tradeQuery', q);
-      if (blank(q)) { dropBoth('results'); return; }
-      const query = `q=${encodeURIComponent(q.trim())}&limit=${PICK_LIMIT}`;
-      if (halves.get('results')?.query !== query) dropBoth('results');
-      readBoth('results', query, {
+      if (blank(q)) { halves.forget('results'); return; }
+      halves.read('results', `q=${encodeURIComponent(q.trim())}&limit=${PICK_LIMIT}`, {
         land: data => store.dispatch('tradeResultsLoaded', { data, at: now() }),
         failed: message => store.dispatch('tradeResultsFailed', { at: now(), message }),
         loading: ['tradeResultsLoading'],
       });
-      halves.get('results').query = query;
     },
     /** A market picked: the ticket open on it and the order sheet seeded — at the venue given where it takes the order, else
      *  the best able line — with nothing typed; that line followed. Resolves as the sheet's open does. Nothing while the sheet

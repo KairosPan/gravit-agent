@@ -1,7 +1,8 @@
-/** THE EXPLORE JOIN SAYS WHAT THE ACCOUNT'S EXPLORE SAID (plan A2 Task 6, deleted again in Task 7 with the account's explore): the face's
+/** THE EXPLORE JOIN SAYS WHAT THE ACCOUNT'S EXPLORE SAID, IN ITS ORDER AND AT ITS CUT (plan A2 Task 6, deleted again in Task 7 with the account's explore): the face's
  * client joins the market's explore (market/src/reads.ts) and the account's connected explore (service.ts connectedExplore) in its host
  * (face/client/js/host/explore-join.js). Over a public source and a paper venue, that join lists the same rows as the account's own
- * explore of both, each with the same lines — the moments and the order aside. Nothing leaves the process. */
+ * explore of both, in the same order, cut at the same limit — the account sorted every row together and cut once, and so does the
+ * join — each row with the same lines. Nothing leaves the process. */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,7 +18,7 @@ type NoNonce<T> = T extends unknown ? Omit<T, "nonce"> : never;
 type Line = { venue: string; symbol: string; connected: boolean };
 type Row = { key: string; at?: Line[]; outcomes?: Array<{ at?: Line[] }> };
 type Body = { items: Row[] };
-type Join = (market: unknown, connected: unknown, o: { venues: Array<{ id: string; connector: string; paper: boolean }>; here: unknown[] }) => Body | null;
+type Join = (market: unknown, connected: unknown, o: { venues: Array<{ id: string; connector: string; paper: boolean }>; here: unknown[]; q?: string; limit?: number }) => Body | null;
 
 const START = Date.parse("2026-10-14T15:00:00Z");
 const owner = simKey("owner");
@@ -59,22 +60,27 @@ describe("the explore join (face/client/js/host/explore-join.js) beside the acco
     const core = createMarketCore({ sources: [fakeSource()] });
     const joinExplore = await loadJoin();
 
-    const old = await svc.explore({ q: "BTC" });
-    const market = await marketReads(core).explore({ q: "BTC" });
-    const connected = await svc.connectedExplore({ q: "BTC" });
-    if (isRefusal(old) || isRefusal(market) || isRefusal(connected)) throw new Error("a read refused");
-    // each half as its route answers it (answerOf: `ok: true` beside the exploration)
-    const joined = joinExplore({ ok: true, ...market }, { ok: true, ...connected }, { venues: [{ id: "paper-1", connector: "live:paper", paper: true }], here: [] });
-    expect(joined).not.toBeNull();
-
-    const was = linesByKey(old as unknown as Body);
-    const now = linesByKey(joined as Body);
-    expect(was.size).toBeGreaterThan(0);
-    expect([...now.keys()].sort()).toEqual([...was.keys()].sort());
-    for (const [key, lines] of was) expect(now.get(key), key).toEqual(lines);
-    // both a public line and the paper venue's: the join is of two halves, not one
-    const all = [...now.values()].flat();
-    expect(all.some((l) => l.endsWith("|true"))).toBe(true);
-    expect(all.some((l) => l.endsWith("|false"))).toBe(true);
+    const venues = [{ id: "paper-1", connector: "live:paper", paper: true }];
+    for (const [q, limit] of [["", 200], ["", 1], ["BTC", 200], ["T", 1]] as const) {
+      const ask = { ...(q ? { q } : {}), limit };
+      const old = await svc.explore(ask);
+      const market = await marketReads(core).explore(ask);
+      const connected = await svc.connectedExplore(ask);
+      if (isRefusal(old) || isRefusal(market) || isRefusal(connected)) throw new Error("a read refused");
+      // each half as its route answers it (answerOf: `ok: true` beside the exploration)
+      const joined = joinExplore({ ok: true, ...market }, { ok: true, ...connected }, { venues, here: [], q, limit });
+      expect(joined, `${q}|${limit}`).not.toBeNull();
+      const was = linesByKey(old as unknown as Body);
+      const now = linesByKey(joined as Body);
+      expect(was.size).toBeGreaterThan(0);
+      expect([...now.keys()], `${q}|${limit}: the same rows in the same order`).toEqual([...was.keys()]);
+      for (const [key, lines] of was) expect(now.get(key), key).toEqual(lines);
+      if (limit === 200) {
+        // both a public line and the paper venue's: the join is of two halves, not one
+        const all = [...now.values()].flat();
+        expect(all.some((l) => l.endsWith("|true"))).toBe(true);
+        expect(all.some((l) => l.endsWith("|false"))).toBe(true);
+      }
+    }
   });
 });

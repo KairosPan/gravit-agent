@@ -27,6 +27,7 @@ import { refusedAt, refusalOf } from './owner-view.js';
 import { assetKeyOf } from './market-depth-view.js';
 import { venuesOf } from './account-view.js';
 import { joinExplore } from './explore-join.js';
+import { exploreHalves, joinOptsOf, orderOf, MARKET_EXPLORE as EXPLORE, CONNECTED_EXPLORE } from './explore-halves.js';
 
 // China's state while the proxy re-serves the market's last read: the market is not answering
 const NOT_ANSWERING = { state: 'unavailable', said: NOT_ANSWERING_WORD };
@@ -40,8 +41,6 @@ export const BOOK_DEPTH = 10, TRADES_LIMIT = 20, FUNDING_LIMIT = 100;
 // the four reads' kinds of flight
 const DEPTH_KINDS = ['asset', 'book', 'trades', 'funding'];
 
-const EXPLORE = '/data/market/explore';
-const CONNECTED_EXPLORE = '/data/account/connected/explore';
 const QUOTES = '/data/market/quotes';
 const CONNECTED_QUOTES = '/data/account/connected/quotes';
 const VENUES = '/data/account/venues';
@@ -90,7 +89,6 @@ export function startMarkets({
   let depthId = null;        // the Account market page whose four reads are read, from entering it to leaving it
   const kinds = new Map();   // a kind of read → { flight, path, seq }
   const signing = new Set(); // the Account keys whose setWatch is in the air
-  const halves = new Map();  // an explore read's kind → { market, connected }: each half's latest body, null failed, undefined not yet
 
   // One flight per kind of read: an ask for the path in the air joins it; another path starts a read whose answer alone lands —
   // the one it overtook is dropped — and nothing lands after close(). `land(body, refused)` takes the answer, or for a rejection
@@ -114,53 +112,14 @@ export function startMarkets({
   // a kind's flight dropped: its answer, when it comes, lands nowhere, and the next ask reads again
   function drop(kind) { const k = kinds.get(kind); if (k) { k.seq += 1; k.flight = null; k.path = null; } }
 
-  // what the join reads beside the two halves: the page's venues and the venues read's verdicts
-  function joinOpts() {
-    const a = store.get().account;
-    const here = a?.venuesHere?.data;
-    return { venues: venuesOf(a?.data), here: isRecord(here) && Array.isArray(here.venues) ? here.venues.filter(isRecord) : [] };
-  }
-  // One explore question asked of both halves (`kind:market`, `kind:account`), each its own flight, each half's latest body kept
-  // for the kind (null for a half that failed or answered no explore). A half that answers lands their join at once, beside the
-  // other's latest body; a half that failed waits for the other's answer to this ask, so a round where both fail keeps the last
-  // rows — `failed` with the market's sentence — and one where the other answers lands it alone. `land` is handed the join and
-  // the kept halves.
-  function readBoth(kind, query, { land, failed, loading = null }) {
-    const kept = halves.get(kind) ?? { market: undefined, connected: undefined, said: null, landed: { market: true, connected: true } };
-    halves.set(kind, kept);
-    const ask = (half, flight, path) => {
-      const k = kinds.get(flight);
-      if (!(k && k.flight !== null && k.path === path)) kept.landed[half] = false;
-      return path;
-    };
-    const landHalf = half => (body, refused) => {
-      if (halves.get(kind) !== kept) return;
-      const ok = !refused && answered(body, 'items');
-      kept[half] = ok ? body : null;
-      kept.landed[half] = true;
-      if (half === 'market') kept.said = ok ? null : messageOf(body);
-      if (half === 'market' && ok && body.stale !== true) recheckChina();
-      const other = half === 'market' ? 'connected' : 'market';
-      if (!ok && !kept.landed[other]) return;
-      const data = joinExplore(kept.market, kept.connected, joinOpts());
-      if (data) land(data, kept);
-      else if (kept.market === null && kept.connected === null) failed(kept.said);
-    };
-    fly(`${kind}:market`, ask('market', `${kind}:market`, `${EXPLORE}?${query}`), landHalf('market'), loading);
-    fly(`${kind}:account`, ask('connected', `${kind}:account`, `${CONNECTED_EXPLORE}?${query}`), landHalf('connected'));
-  }
-  // a kind's two halves dropped: what is in the air lands nowhere, and what was kept goes
-  function dropBoth(kind) {
-    drop(`${kind}:market`);
-    drop(`${kind}:account`);
-    halves.delete(kind);
-  }
+  // the explore reads' two halves (host/explore-halves.js); a market half answered afresh rechecks China's state
+  const halves = exploreHalves({ store, fly, drop, kinds, now, onMarket: body => { if (body.stale !== true) recheckChina(); } });
   // the explore read for the tab on screen
   function readExplore() {
     const read = exploreOf(store.get().markets);
     if (!read) return;
     const { tab, query } = read;
-    readBoth(`explore:${tab}`, query, {
+    halves.read(`explore:${tab}`, query, {
       land: data => store.dispatch('exploreLoaded', { tab, data, at: now() }),
       failed: message => store.dispatch('exploreFailed', { tab, at: now(), message }),
       loading: ['exploreLoading', { tab }],
@@ -177,11 +136,9 @@ export function startMarkets({
   }
   // the venues read landed: every explore kept is joined again over its verdicts
   function rejoin() {
-    for (const [kind, kept] of halves) {
+    for (const [kind, data] of halves.rejoin()) {
       const m = /^explore:(.+)$/.exec(kind);
-      if (!m) continue;
-      const data = joinExplore(kept.market, kept.connected, joinOpts());
-      if (data) store.dispatch('exploreLoaded', { tab: m[1], data, at: now() });
+      if (m && data) store.dispatch('exploreLoaded', { tab: m[1], data, at: now() });
     }
   }
   // the venues read — where each connection serves — asked once when Markets is first shown
@@ -328,9 +285,9 @@ export function startMarkets({
   // line a connected venue speaks for, and that line is the one to read while the account is not answering
   function publicLinesOf(item) {
     const own = [];
-    for (const kept of halves.values()) {
+    for (const market of halves.markets()) {
       for (const list of ['items', 'movers', 'closing', 'mostTraded']) {
-        const row = Array.isArray(kept.market?.[list]) ? kept.market[list].find(r => isRecord(r) && r.key === item.key) : undefined;
+        const row = Array.isArray(market[list]) ? market[list].find(r => isRecord(r) && r.key === item.key) : undefined;
         if (row) own.push(...legsOf(row));
       }
     }
@@ -501,7 +458,7 @@ export function startMarkets({
       const half = async path => { try { return await getJson(path); } catch { return null; } };
       const [mb, cb] = await Promise.all([half(`${EXPLORE}?${query}`), half(`${CONNECTED_EXPLORE}?${query}`)]);
       if (closed) return;
-      const body = joinExplore(mb, cb, joinOpts());
+      const body = joinExplore(mb, cb, { ...joinOptsOf(store.get()), ...orderOf(query), now: now() });
       if (body === null) continue;
       if (!answered(body, 'items') || !store.get().markets.watchlist.some(a => a.id === entry.id)) continue;
       const base = match.q.toUpperCase();
@@ -581,14 +538,11 @@ export function startMarkets({
       const q = typeof raw === 'string' ? raw : '';
       store.dispatch('setMarketsQuery', q);
       if (blank(q)) {
-        dropBoth('results');
+        halves.forget('results');
         return;
       }
-      // a new query: what the last one kept is no half of this one's
-      const query = `q=${encodeURIComponent(q.trim())}&limit=${ROWS}`;
-      const was = halves.get('results');
-      if (was && was.query !== query) dropBoth('results');
-      readBoth('results', query, {
+      // a new query forgets what the last one kept (explore-halves.js)
+      halves.read('results', `q=${encodeURIComponent(q.trim())}&limit=${ROWS}`, {
         land: (data, kept) => {
           store.dispatch('resultsLoaded', { data, at: now() });
           // the A shares the hits, the market's alone
@@ -597,7 +551,6 @@ export function startMarkets({
         failed: message => store.dispatch('resultsFailed', { at: now(), message }),
         loading: ['resultsLoading'],
       });
-      halves.get('results').query = query;
     },
     /** A star: an Account key — an A share's `cn:<code>` (`cn:sh600519` canonicalised) among them — on a page that signs, to the
      *  Account's own list (setWatch at the line setWatchOf names, an A share's `china|<code>`; one starred on either list already
