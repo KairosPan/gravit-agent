@@ -361,7 +361,8 @@ test("a cold conversation: commands/list and commands/execute resume it (no gate
   });
   const snapshot = await waitFor("the follow's snapshot", () => frames.find((item) => item.type === "snapshot" || item.type === "ERROR"));
   assert.equal(snapshot.type, "snapshot", JSON.stringify(snapshot).slice(0, 300));
-  assert.ok(f.agentOf(followed), "the follow activated the session");
+  /* The agent is registered a few milliseconds after the snapshot frame (measured ~11 ms), not with it. */
+  await waitFor("the follow to activate the session", () => f.agentOf(followed));
   const warm = await execute(followed);
   assert.equal(warm.ok, true, JSON.stringify(warm).slice(0, 300));
   const value = (warm as { value?: { result?: { kind?: string } } }).value;
