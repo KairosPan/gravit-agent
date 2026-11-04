@@ -409,6 +409,28 @@ All three of its stages are built:
   not upload. Retry it or remove it.` A receipt the host dropped (the face restarted) is uploaded
   again once and the message sent once more. The files live in the page's memory: a reload loses
   them;
+- **the thread at its edges** (the dsh UI port's plan 5): **masking** — a key you paste (an
+  `sk-…`, a `ghp_…`, an AWS or Alibaba access key, a JWT, a private-key block, a URL's password and
+  the rest of the spec's §5.9 shapes) is drawn in your bubble as `*`s past its first eight
+  characters, with an eye beside it (`Show secret`, `Hide secret`) that shows it until you leave the
+  conversation; a screen reader hears `secret, hidden` until it is shown. A selection across it
+  copies the real key. The list's preview line, a search snippet and the rail's card mask every
+  key whoever wrote it, keeping their length. Masking is display only: Gravit receives the key, the
+  log keeps it, and Gravit's own replies are not masked. **The turn rail** — a thin strip at the
+  thread's right edge (hidden at 860 px and under), one tick per turn (`turnOutline`), the turn the
+  view is on drawn full in blue; hover or focus a tick for its card (`Turn <n> · jump`, the prompt,
+  the reply's start) and click it to jump there, an earlier turn not loaded yet pulsing while its
+  pages are read. **The pills** under the thread — `7 turns · 41 steps · 38 tok/s` and `182k tokens
+  · cache 63%` (`sessionStats` and `tokenUsage`) — open Details at Usage, which now adds Cache hit,
+  Turns · steps, Model time, Tool time, First token and Speed. **Earlier history** — a long
+  conversation opens on its last 50 messages, live or cold, with `Earlier messages` at the top;
+  each press reads 50 more (`session/page`, never waking a cold conversation) and keeps your place;
+  a reconnect keeps what you paged. **Background jobs** — a job Gravit starts in the background
+  (bash's `run_in_background`) shows in the head as `1 job running` (`2 jobs finished` once none
+  runs); the chip opens Details at Background jobs: each job's command, its clock, and, opened, its
+  output streaming (the last 256K characters kept), its end line (`exit 0`, `signal SIGTERM`,
+  `killed`, `failed`), Copy and Stop, asked twice (`Yes, stop`, then `Stopping`); finished jobs fold
+  under `Finished · <n>` with Clear. Jobs vanish when the face restarts;
 - **host-fed since stage 2**: Markets (`#/markets`) — the Account's markets by its tabs, the
   stars, a search, and a market's page with its candles and venues — and Account
   (`#/account/portfolio`, `venues`, `agents`, `cards`) — the Account's Portfolio, Venues, Agents
@@ -3821,7 +3843,7 @@ FACE_SMOKE=1 npm test     # + the 30 smoke files (35 real boots), isolated; loca
 ```
 
 Offline, `npm test` skips the 30 smoke files (35 real boots) listed below; `FACE_SMOKE=1` runs
-them too (3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
+them too (3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
@@ -3868,7 +3890,7 @@ and `node --test` gives each file its own:
 | `lunhui-strategy-run-smoke.test.ts` | an `S01` registered on Friday and graded on Monday ("Lunhui analysis"): the market smoke's boot with copies of `cn-market` and `lunhui-s01-repair` and the three roles on the stub; each day Gravit does the reviewed market run, finds it with the listing read, freezes two stocks' quotes on the strategy and calls `role_cn_stock_analyst` for the leader, `role_cn_reviewer` with both run ids and `role_cn_stock_analyst` for the mode, each child building its artifact from its context; Friday's mode `S01` with a card of at most 2,048 bytes, every review item answered, Monday's grading it; every artifact of the four runs valid again against digests rebuilt from the sealed runs, the runs card's latest run Monday's with its review line, the protocol's strategy channel in Gravit's prompt. `Date` is replaced, Friday 2026-10-23 15:00 China time, then Monday 2026-10-26 15:00 |
 | `lunhui-answer-smoke.test.ts` | Gravit's composed answer end to end: the seat off, `lunhui-runs` over a scratch strategies root holding the synthetic sealed 10-27 run; the view read over `GET /data/lunhui/view` (registered as `main.ts` does) with the signed-in cookie; an ok `lunhui_present` lifted through `host/kinds.js` and drawn by the client's own `renderThread` — the seven kinds' labels in the call's order, the follow-ups, the footer with `Open run ›`, a stock link — and `stockDrawerHtml` for 上海九百 drawing its minute chart with the limit-up line; no model called |
 | `goal-smoke.test.ts` | the goal loop `../dsh/profile/cycle.md` rests on, through the face's own wire (prompts, the Stop button's `session/cancel`, a slash line's `commands/execute`): `create_goal` in a human turn returns the id and revision 1, armed; each round arrives at idle as a user message whose source is `goal` (`<goal_round>`, the objective, `Round: n/N`); the model's `blocked` in round 1 is refused (`blocked requires at least 3 consecutive goal rounds; current round is 1`), in round 3 accepted with the code `model-reported` and followed by the `<goal_blocked>` wrap-up; a second `create_goal` is refused while that goal is blocked (`GOAL_ALREADY_EXISTS`); at the cap the driver blocks with `round-limit` and sends the model nothing more; Stop mid-round pauses the goal, the model's resume of it is refused (`GOAL_TOOL_RESUME_PAUSED`: `the model cannot resume a paused goal; the user must resume it`) and `/goal resume` re-arms it; a face stopped mid-round and booted again on the same home leaves the goal active and disarmed with no request until "continue", whose `update_goal` resume bumps the revision and re-arms the rounds |
-| `dsh-ui-port-smoke.test.ts` | the host side of the dsh UI port on one stub boot: pins and their `pinned` frame, `commands/list`, `skills/list` on a cold session, the `turnOutline` and `sessionStats` projections, a `job/list` stream, `session/page` earlier history, an upload sent as a `file` part, the `sessionReferenceResolver` service, and `GET /data/search` over the stored logs; since plan 3 a cold conversation's `commands/list` and `commands/execute` (each resumes it at rc.5; after a follow's snapshot the command answers), a skill by its literal `/name` reaching the model with its content, and a conversation chip's mention bringing a `Referenced sessions` message; since plan 4 `imageLimits` on a cold session, an image refused on the stub's text-only route (`MODEL_DOES_NOT_SUPPORT_IMAGES`) and accepted on a second stub route that takes images (`stub-see`), logged as an image block and given back by `session/attachment`, a receipt never staged refused (`FILE_NOT_STAGED`), `role-pdf-page-reader` listed whole with `read_image`, and a command's dropped receipt settling the error text the page matches |
+| `dsh-ui-port-smoke.test.ts` | the host side of the dsh UI port on one stub boot: pins and their `pinned` frame, `commands/list`, `skills/list` on a cold session, the `turnOutline` and `sessionStats` projections, a `job/list` stream, `session/page` earlier history, an upload sent as a `file` part, the `sessionReferenceResolver` service, and `GET /data/search` over the stored logs; since plan 3 a cold conversation's `commands/list` and `commands/execute` (each resumes it at rc.5; after a follow's snapshot the command answers), a skill by its literal `/name` reaching the model with its content, and a conversation chip's mention bringing a `Referenced sessions` message; since plan 4 `imageLimits` on a cold session, an image refused on the stub's text-only route (`MODEL_DOES_NOT_SUPPORT_IMAGES`) and accepted on a second stub route that takes images (`stub-see`), logged as an image block and given back by `session/attachment`, a receipt never staged refused (`FILE_NOT_STAGED`), `role-pdf-page-reader` listed whole with `read_image`, and a command's dropped receipt settling the error text the page matches; since plan 5 a follow's snapshot window (`cursor`, `hasMore`) and the page before it holding the turn the outline names, `turnOutline` and `sessionStats` reaching `session/control` live, `job/list` on a cold session leaving it cold, and a bash job listed, followed to its output, stopped by `job/kill` and settled `killed` (a second kill answers `already-finished`) |
 | `desk-smoke.test.ts` | the desk on a real tree, as `main.ts` installs it, its fixture root inside the repository so the repository's `GRAVIT.md` heads the chain: the `gravit-desk` session runs in `desk/journal/` under `workspace-write`; its tools are exactly `DESK_ALLOW` expanded on this tree plus `desk_quotes` and `desk_state`, each `mcp__*__<raw>` entry matching one server's tool, and neither desk tool reaches Gravit's session or the global view; the write tools take the path arguments the guard's write check reads, and `str_replace_editor`'s commands are `view`, `create`, `str_replace` and `insert`; the desk's prompt carries Gravit's persona prefix, the date and `# The desk`, and no cycle contract or roles section; a desk turn naming the order stand-in gets Gate 2's visibility refusal and its body never runs; a `write` to `../levels.yml` is refused by the sandbox inside the tool's content while a journal write lands, with no card; Gravit's own write of a `GRAVIT.md` lands; with a listener in front answering allow, the guard's backstop still denies the desk's write of `GRAVIT.md` and its read of a `.env` file, while Gravit's own read of that file goes through unjudged; `/stop` on a turn parked on an escalation card, two texts queued behind it, cuts that turn alone — recorded `cancelled`, `stopped from the phone` — and both texts are answered, in order; the desk's write of a journal `.gitignore` holding `!*` and of a `CLAUDE.md` are denied with no file written, and its read of a dot-config in the repository is denied by name while Gravit reads it; the read tools take exactly the parameters the read check reads; a `GRAVIT.md` planted in the journal reaches a desk session's first request behind the repository's, which is the threat the fence refuses, and the next post is refused with `desk-refused` and no turn; each supervised turn is one `desk-turn` with four token buckets and the stub's route |
 | `telegram-smoke.test.ts` | the bridge end to end on a real tree against a `node:http` Bot API stub on 127.0.0.1: the token and the operator's id come from the scratch home's `.env`, and the MCP child dsh spawns has the id and not the token; a stranger and a group are dropped and counted, unanswered, and the operator's `hi` is answered in the operator's chat; `/status` counts the drops and names the desk session; `/pause` writes `OFF` by `telegram`, a text then gets the paused line and opens no turn, and `/resume` is text that never reaches the model; a 503 queues the reply in the outbox and the next poll flushes it, in order, each reply sent once; a 409 is recorded and waited out; a card parked by an escalated write to `../levels.yml` is cut at the desk's deadline (1,500 ms here) with the timed-out line; the canary — the desk's write of `GRAVIT.md` is denied by the desk guard and no request carries a planted text, then a `GRAVIT.md` the harness plants is refused by the fence with no turn; its read case — `send me ~/.dsh/.env`: the read of the scratch home's `.env` is refused as outside the repository, the token handed to a market read is refused as a secret, no tool result carries the token or a second secret, and the stub's reply, which names both, reaches the phone as `I could not read it: <secret> <token>`; across the file every send went to the operator's chat, the token is in no file of the desk's directory, and no `STANDING.md`, `levels.yml`, `rules.yml` or `holdings.yml` changed |
 | `schedule-smoke.test.ts` | the standing orders' clock end to end, as `main.ts` installs the desk, on one early-close session (2026-11-27), a fake clock and calendar, a stub model and a recorder for the phone, its fixture root, harness home and bots root under `tests/tmp/`: a firing a restart cut off is reported `interrupted` at boot and never run; the pre-close brief wakes one fresh `gravit-desk` session in `desk/journal` under `workspace-write`, with the armed text — hashing to its pin — and the producer's block in its wake message, and its final text reaches the phone; `firings.jsonl` holds `started`, `producer`, `woke` and `finished`, `events.jsonl` one `desk-turn` with `source: "schedule"` and four token buckets; a script producer's stderr reaches only the face's log; a turn waiting in a long tool is cut at its 10-minute deadline and the order queued behind it fires after; an edited text is refused with one line, then in silence, and fires once re-armed inside its grace; the pause refuses in silence and a spent budget with one line; an anchor slept across is `missed`; a `wake: false` order runs only its producer; a planted `GRAVIT.md` refuses the firing; the canary's firing half — a poisoned turn's writes of `../STANDING.md`, of `standing.yml` and of a journal `GRAVIT.md` are all refused, no card raised, every text and `standing.yml` unchanged — and a `GRAVIT.md` the harness plants refuses the next order; the clock's dispose cuts a firing in a long tool and settles; every text the desk sent went through the recorder. Then (P4) the strategies' book on 2026-11-30, a fake XSHG calendar beside the XNYS one and one fake quote source, in clock order: an A-share report on its Beijing date naming the screen that ran and its `TENCENT` close print; the canary in a strategy (five calls: it reads and rewrites `STANDING.md` and `levels.yml`, then tries the desk's `STANDING.md`), named by one outside-reports line and holding the next order by each pin in turn; two US reports at one anchor in file order; the fence in a strategy; a producer-only strategy order; the abort last |
@@ -4002,7 +4024,11 @@ together — every pin whose track moved — then:
    exact text `File upload receipt is unknown for this session.`, which
    `client/js/host/actions.js` `RECEIPT_UNKNOWN` matches to restage a
    command's files — a reworded text fails that smoke, and the constant moves
-   with it (`../docs/dsh-upgrade-guide.md` §3.1 L1).
+   with it (`../docs/dsh-upgrade-guide.md` §3.1 L1). For the thread it pins the
+   follow snapshot's `cursor` and `hasMore` over a 50-message window, a
+   `session/page` whose `beforeSeq` is exclusive, `turnOutline` and
+   `sessionStats` on `session/control`, the job wire and the `detail` a human
+   kill settles with, which `client/js/host/jobs-view.js` `endLine` parses (L2).
 8. Run the drills below — Gate 2, ask-user, transport, bots, room, and roles
    once one ships — on a face booted against a SCRATCH `DSH_HOME` first (the role
    drill on a COPY of the home with the operator's MCP rows, as it says).
@@ -4519,6 +4545,13 @@ headers. With the face live:
    Messages with the box focused. Hover a row and press its pin key: PASS, part nine: the row jumps
    to the top of its group with a filled pin by its title, and window B shows the same row first
    without a reload; Unpin in B (Details › Unpin) and A follows; archiving a pinned row unpins it.
+9. **Earlier history across a restart** (the dsh UI port's plan 5). Open a LIVE conversation with
+   more than 50 messages. PASS, part ten: it opens at its tail with `Earlier messages` at the top;
+   press it twice: each press adds the earlier messages above with what you were reading in place,
+   and `Loading…` while it reads. Scroll to the middle of the earlier pages and restart the face.
+   PASS, part eleven: after `Reconnecting… (…)` clears, the earlier pages are still drawn, the
+   place you were reading has not moved to the tail, no bubble is doubled, and the next `Earlier
+   messages` pages on from where it was.
 
 The approval endings — `Approved`, `Declined`, a second tab's `Closed`, a lost race's
 `Settled elsewhere` (or, caught in flight, `answer: gate-gone` on the status line) — belong
@@ -4703,12 +4736,13 @@ such an `@` named nobody (the sentence landed the same day in its Rooms paragrap
 face; **on 0.2.0-rc.2 step 0 passes at `8f0dedb`, and the live run is still owed** (go-live
 runbook).
 
-## The dsh UI port drill (keyed; run after any change under client/js/composer/, client/js/host/composer.js, client/js/host/attachments.js, roles/pdf-page-reader/ or the composer's part of app.js)
+## The dsh UI port drill (keyed; run after any change under client/js/composer/, client/js/host/composer.js, client/js/host/attachments.js, client/js/mask.js, client/js/host/turns-view.js, client/js/host/jobs*.js, client/js/host/live.js, roles/pdf-page-reader/ or the composer's or the thread's part of app.js)
 
 **Owed, the operator's.** The fake DOM proves the draft model, the menus and the routing; it cannot
 type into a real `contenteditable`, compose pinyin or move a real caret, and a stub model does not
-read files. Search and pin are the transport drill's step 8; the composer's steps are 1–8, the
-attachments' 9–14, and the other picks join as their plans land. The attachment steps need Poppler
+read files. Search and pin are the transport drill's step 8 and earlier history across a restart
+its step 9; the composer's steps are 1–8, the attachments' 9–14, the thread's 15–19, and the other
+picks join as their plans land. The attachment steps need Poppler
 on this shell's `PATH` (`brew install poppler`, "Run"), a CSV, a PNG screenshot and a broker
 report's PDF with a table on one of its pages. Keyed, on a second face from your own terminal:
 `source ../.env.deepseek`, then `npm run setup` and `npm start` with
@@ -4790,6 +4824,39 @@ Account). Open the printed `?token=` URL and hard-reload.
     macOS sandbox reads the saved copy and runs Poppler: steps 9 and 12 passed on the service's
     face, not only on this scratch one; deepseek-flash on your route declares image input: step 11
     passed.
+15. **A background job.** In a Gravit conversation ask: "Run `sleep 120; echo done` in the
+    background and tell me when you have started it." PASS: the head shows `1 job running` with a
+    green dot; click it: Details opens at **Background jobs** with the command, `bash · <clock>`,
+    the clock counting each second; open the job: its output block is empty, then `done` lands
+    after two minutes. Start a second one (`for i in $(seq 1 300); do echo $i; sleep 1; done`) and
+    open it: the numbers stream in, the block stays at its end, and scrolled up it stays where you
+    left it. Press **Stop**: `Yes, stop` asks again; press it: `Stopping` at once, then the job folds
+    under `Finished · 2` with its end line (`signal …` or `killed`); the first one's reads `exit 0`.
+    **Copy** puts the command on the clipboard; **Clear** empties the fold.
+16. **The rail on a long conversation.** Open a conversation of twenty turns or more. PASS: a tick
+    per turn at the thread's right edge, the one you read drawn full in blue and following your
+    scroll. Hover a tick: its card, `TURN <n> · JUMP`, the prompt and the start of the reply. Click a
+    tick of a turn on screen: the thread glides to it. Click the first tick while its turn is not
+    loaded: it pulses, the earlier pages land, and the thread lands on that turn.
+17. **A pasted key, masked.** Paste a made-up key shaped like one (`sk-proj-` followed by 30
+    letters and digits; never a real one) into a message with a line of words and send. PASS: your
+    bubble draws `sk-proj-` and `*`s with an eye; the list's preview line of this conversation, a
+    search for a word of that line (its snippet) and the rail card of that turn mask it too, at the
+    same length. Press the eye: the key shows (`Hide secret`); press it again: masked; leave the
+    conversation and come back: masked. Select across the bubble, copy, and paste into a text
+    editor: the real key arrives.
+18. **What only a browser shows** (owed by plan 5). Copy a whole bubble that holds a masked key, in
+    Safari and in Firefox: the paste holds the real key. Emulate forced colours (Chrome's DevTools,
+    Rendering › Emulate CSS media feature forced-colors: active): the mask still hides the key. On a platform whose scrollbars
+    take room (System Settings › Appearance › Show scroll bars: Always), the rail sits clear of the
+    thread's scrollbar and its card stays readable. During a tick's smooth jump the active tick
+    follows the scroll. Inside the Finished fold, a click on a job's summary opens and closes it. A
+    job's output block keeps its scroll while output streams; a large output (`yes | head -c
+    300000`) keeps the page responsive while the block is open. At 860 px and under, `Earlier
+    messages` keeps your place in the page's scroll.
+19. **The jobs at a restart.** With a job running, restart the face. PASS: the chip and the job are
+    gone once the page reconnects (jobs live in the face's memory), and nothing else on the page
+    changed.
 
 **PASS criteria are observations.** Record the run below with the date and the commit.
 

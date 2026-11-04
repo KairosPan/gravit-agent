@@ -1389,3 +1389,81 @@ from that copy. The smokes measured the host's half on a stub boot: an image on 
 none is refused with `MODEL_DOES_NOT_SUPPORT_IMAGES`, one on a route declaring `["text", "image"]`
 is accepted, logged and given back by `session/attachment`, and `role-pdf-page-reader` is listed
 whole with `read_image` among the host's tools.
+
+## 17. Build notes, plan 5 (2026-11-04)
+
+Plan 5 (the thread: masking, the rail and stats with earlier history, background jobs) built on
+`claude/cranky-bun-9f78c8` over `a5f0c995`: `70c5fbe2` and `9f06a117` (`js/mask.js`, a key's runs
+and an excerpt's masked form of the same length, and the fix for linear scans, the glued clip, dash
+tails, a narrower URL password and a bounded memo), `34808db9` and `784bcc4f` (masking on screen:
+the operator's keys behind an eye, the preview line and the search snippet masked, and the fix that
+a hidden key is silent to a screen reader, the memo is an LRU and a snippet's left edge clips),
+`8bacd8d8`, `93173d62` and `10e76e0a` (the history window in `host/live.js`: earlier pages
+prepended by seq, replace ranges remembered, and the fixes that a window past a gap is taken whole,
+a stale run's loading clears, the fold is linear, and pages read from a start the window lost are
+dropped), `36f8fb69` and `49927efd` (the thread box, the earlier key and the place kept on a
+prepend, and the fix that keeps focus without a scroll, anchors the keep and moves the narrow
+document), `585b1b46` and `17b1ec63` (the outline and the stats in the store and `host/turns-view.js`,
+and the fix that a unit is chosen after rounding and a zero time is no figure), `df81f833` and
+`264bffaa` (the pills, Usage's rows and Details opened at a section, and the fix of a focus key
+per pill), `56b0d9c1` and `a004ee64` (the turn rail: the marks, the ticks, the masked card, the
+jump, and the fix that a render's refocus shows no card and a jump outlives a read or a held
+render), `f2761eb3` and `3dc9715f` (`host/jobs-view.js`, `host/jobs.js` and the `jobs` slice, and
+the fix that a follow goes with its conversation and `job/list` reopens after `live.js`'s
+backoffs), `0df10bdb` and `f669a1fb` (jobs on screen: the chip, Details' section, the output,
+Stop, and the fix that the `pre` fills before the scroll keeps, a stale Stop confirm goes and
+Stopping shows at once), `0047b08f` (four smokes), and this note's commit (DEVELOPMENT.md,
+face/README.md, CLAUDE.md, the prompt-loops page, ROADMAP.md, `docs/dsh-upgrade-guide.md`).
+Measured at `f669a1fb`: the face suite 3,439 tests in 222 files, 3,385 pass, 54 skipped, 0 fail;
+under `FACE_SMOKE=1` 3,440 tests, 3,436 pass, 4 skipped, 0 fail; the smoke file 21/21; typecheck
+clean (`producer.test.ts`'s aborted-run test failed once under load during the build and passed
+alone; the final runs had no flake).
+
+| Clause | The text | What the tree does | Why |
+|---|---|---|---|
+| §5.8, §6 | the job Remotes called with a `sessionId` | each takes `{request}`: `job/list {request: {sessionId}}`, `job/follow {request: {sessionId?, jobId, from?}}`, `job/kill {request: {sessionId, jobId}}`; the first two are streams on the page's mux, the third a plain `call` | §13 found it for `job/list`; the other two are the same Remote (`dsh-api-job-controller` at rc.5) |
+| §5.8 | a session's jobs owner-fenced | `job/list` streams the session's own jobs and every unowned one (`streamJobRows`); the page draws what it gives, and a job with no `owner` is followed with `sessionId` omitted (`JobFollowRequest`); nothing in the face starts an unowned job | read in the installed controller |
+| §5.8 | the end lines | derived from the job's `detail`: `dsh-tool-bash` settles `completed` with `exit code: N`, or `killed` with `signal: X` or `killed before exit`, sandbox notes after `; `, and a human kill adds `cancelled by the user`; `endLine` gives `exit <n>` (`exit` with no code), `signal <x>`, `killed`, `failed` | the wire carries no exit field |
+| §5.8 | a reconnect | the mux re-opens every stream with its first args: `job/list`'s first frame is the whole set again, so jobs gone with a face restart vanish by themselves; a re-opened `job/follow` starts again from the oldest retained byte, the page skipping every chunk whose `at` is below the `next` it holds and adding `… earlier output dropped …` only when that oldest byte is past it; `next` moves only by a frame's own `next` (byte offsets, the text UTF-16) | `openMux` keeps the first args, so no `from` rides a re-open; the whole retained ring is re-sent (R97) |
+| §5.8, the controller's ruling | `job/list` | a list the host ends is opened again after `FOLLOW_RETRY_MS` (2 s), one it refuses after `CONTROL_RETRY_MS` (10 s), the way `live.js` reopens `session/control`, the rows kept until the new stream's first frame; `app.js` passes its own timers to `startJobs` | the first build dropped the list for good on its first end |
+| §5.7 | earlier history for a cold conversation | a follow's snapshot is a window too: `{header, cursor, records, hasMore, projections}`, cut like a page at 50 messages (`DEFAULT_MAX_MESSAGES`), so a live conversation pages back as a cold one does; it is paged with `throughSeq` = the snapshot's `cursor`, a paged one with the cut's `asOfSeq` | read in `dsh-api-session-controller`; the smoke pins it |
+| §5.7 | pages deduplicated by seq | a page is a contiguous slice: `paginate` returns `events.slice(cut, end)` with `end = min(throughSeq + 1, beforeSeq)`, cut at a message group's earliest source, so a page asked with `beforeSeq` = the window's first seq ends just before it; deduplication stays a guard. The window keeps every replace range it has seen, and a prepended page drops the messages they cover (Review Focus 1) | a compaction in the loaded window can name seqs a later page brings back |
+| §5.7, Review Focus 2 | a reconnect while reading earlier history | `hostWindow` keeps the prepended pages below a new snapshot's start only when the old window reaches it (`max(old.through, its highest message seq) >= start - 1`), with the old window's lower start and hasMore; a snapshot past a gap is taken whole, so the gap pages in; pages read before a start the window no longer has are dropped, and `loading` rides the snapshot's payload alone | the first review found a non-adjacent snapshot left a permanent gap, and a race reopened it |
+| §5.7 | the turn count | counted two ways: `sessionStats.turns` counts turns with a closed step, `turnOutline` lists every started turn; the pills read `sessionStats`, the rail `turnOutline` | the two packages at rc.5 |
+| §5.7 | the tokens pill | `tokenUsage` is four totals; the pill is Tokens in (uncached + cache reads) plus Tokens out, as Usage counts them; cache writes count in neither; `cache <p>%` is cache reads over Tokens in, drawn only when that is not 0 | `usageRows`' own arithmetic |
+| §5.7, the controller's ruling | Usage's new rows | a zero model, tool or first-token time is not a figure (no `0.0 s` row), nor a speed with no `decodeMs`; `compactTokens` and `durationText` round to the tenth first and choose the unit after (999,999 reads `1.0M`, 9,999 ms reads `10 s`) | dsh's stats are 0 until their first event; the review found `1000k` |
+| §5.7 | the oldest turn | `paginate` cuts at a group's start, so the window's oldest turn can read unloaded while its prompt is drawn: a tick gets a mark when it is loaded or its first message falls before the next tick's seq, and a jump prefers a drawn mark | Task 5's finding, carried to the rail |
+| §5.7 | the earlier key while it reads | `Loading…` is `aria-disabled="true"`, not `disabled`, so the pressed key keeps focus across the read and a second press asks nothing; focus put back uses `preventScroll` | a disabled key dropped focus to the body on every page |
+| §5.9 | the shapes | dsh's `ui-secret-mask` is not installed (no dsh client-ui package is), so its own cases cannot be run here; the shapes are §5.9's list with the bodies `mask.js` fixes, one expression each, left-anchored, those whose body takes `-` refusing a `-` after them; `sk-` needs a digit in its body; a URL password stops at `/ ? # @ : , ; ( ) [ ] { }` and whitespace (an empty user allowed) | the review found a quadratic scan (22 s on 200 KB, now under 10 ms) and a password running into the next URL |
+| §5.9, the operator's ruling | where excerpts are masked | every excerpt is masked whoever spoke — the list's preview, a search snippet, the rail card — and bubbles only the operator's own words | §5.9 names the excerpts without a speaker; a preview or a snippet is often Gravit's words (operator question 1) |
+| §5.9 | a copy carries the original | by markup, not by a handler: the original is drawn transparent and selectable over its mask (the same mono font and length), the mask unselectable, so a selection across it copies the original with no `copy` listener; `forced-color-adjust: none` and a transparent `::selection` keep it hidden | the browser drill confirms it in Safari and Firefox |
+| §5.9, the controller's ruling | a screen reader | a masked key is hidden from assistive technology too until revealed: the raw run `aria-hidden`, the mask `role="img"` `aria-label="secret, hidden"`; revealed, the raw run is plain text | a key spoken aloud is shown |
+| §5.9 | an excerpt cut by its `…` | the clip rule starts at the earliest position in the last whitespace-delimited token that begins it or follows a non-word character and where a prefix begins, so `OPENAI_API_KEY=sk-proj-12ab…` and `"api_key":"sk-…` are clipped; a token of `KEEP` (8) characters or fewer keeps only its prefix | the review found keys glued to `=`, `:` or `"` left whole |
+| §5.9, the controller's ruling | a snippet cut on its left | when an excerpt starts with `…` and its first token is 16 or more `[A-Za-z0-9_+/=-]` characters, the whole token is masked, its length kept | a widening of the clip rule: a key's tail without its prefix is still a key |
+| §5.9 | the memo | an LRU `Map` of at most 500 texts (`MEMO_MAX`), none over 16,384 characters kept (`MEMO_TEXT_MAX`), every run frozen | a clear-when-full memo thrashed on big pages and streaming previews |
+| §5.8 | Stop | `Yes, stop` marks the job `stopping` at once (`markJob`, from `running` only) and puts focus on `Stopping`; a refused kill marks it back; a Stop confirm whose job no longer runs is dropped; the open job is unfollowed when it is no longer drawn (its row gone, Clear, Details closed, another conversation) | the review's findings; the follow runs only while the job is open |
+| §5.8 | the open job's output | written into its `pre` by `textContent` on each frame (`onOutput`) and right after each render's `innerHTML` write, before any scroll keep; the page is never rendered by a frame (Review Focus 4) | the first build filled the `pre` after the drawer's keep, and the drawer jumped about 320 px a render |
+| §5.8 | `job/kill` twice | at rc.5 a second kill of a settled job answers `already-finished`, not `job/not-found` (the settled job stays in the registry); the page treats both outcomes as done | the smoke recorded it |
+| §5.8, the copy | the chip | `1 job finished` in the singular, as `1 job running` | the constraints give only the plural example |
+
+§9's item 7 stays open: a job's command line and Gravit's replies are not masked this round.
+What stays imperfect is `DEVELOPMENT.md` R97: masking is display only (A2) and a copy takes the
+real key; Gravit's replies are not masked; a URL password holding an unencoded `:` `,` `;` `(` or
+`)` is not masked; an excerpt's key cut before its prefix is whole is not masked; earlier pages
+live in the page's memory until a reload; an operator image above the reader that loads after a
+prepend shifts the place, and Safari's momentum scroll can carry past it; a pending send with no
+seq puts its turn mark at the end; a tool message split across an earlier page and the window
+drops the earlier call data; the open job's whole output (up to 262,144 characters) is rewritten
+on every render that changes it; folding the Finished fold while its job is open reopens it next
+render; a re-opened follow re-sends the whole retained output; jobs vanish with a face restart.
+Also deferred from the reviews: the Telegram and Alpaca shapes have no clip prefix, and `hf_` or
+`npm_` identifiers clip as keys.
+
+Owed to plan 6 (the words, a11y): the pills name no action for a screen reader (`Open Usage`); the
+rail's ticks as one Tab stop with the arrow keys, `aria-describedby` for the card and `aria-busy`
+on the pulse; a job's end line drawn twice (the meta line and `.job-end`). Owed to the browser
+drill (`face/README.md` "The dsh UI port drill", step 18): a whole bubble with a masked key copied
+in Safari and Firefox, forced colours, the rail at `right: 0` against a non-overlay scrollbar, the
+active tick during a smooth jump, a job summary clicked inside the Finished fold, a job's output
+keeping its scroll while it streams, a large output's cost, and the narrow layout's keep on a
+prepend. The keyed steps 15–17 and the transport drill's step 9 are the operator's.
