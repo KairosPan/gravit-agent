@@ -62,3 +62,22 @@ test('every desk conversation is in the Desk group, never in a channel\'s', () =
   assert.deepEqual(desk.conversations.map(c => c.id), ['d', 'j']);
   assert.deepEqual(gs[2].conversations.map(c => c.id), ['r'], "the strategy's own group lists none of the desk's");
 });
+
+test('pinned rows lead their group, newest first among themselves', () => {
+  const inW1 = (id, updatedAt) => conv(id, { channel: { workspaceId: 'w1', name: 'alpha' }, updatedAt });
+  const gs = groupsOf(state([inW1('a', 9), inW1('b', 8), inW1('c', 5), inW1('d', 2)], { pinned: ['c', 'd'] }));
+  const g = gs.find(x => x.key === 'w1');
+  assert.deepEqual(g.conversations.map(c => c.id), ['c', 'd', 'a', 'b']);
+  assert.deepEqual(g.conversations.map(c => c.pinned), [true, true, false, false]);
+});
+
+test('a pinned id the list does not hold is ignored', () => {
+  const gs = groupsOf(state([conv('a', { channel: { workspaceId: 'w1', name: 'alpha' } })], { pinned: ['ghost', 'a'] }));
+  assert.deepEqual(gs.find(x => x.key === 'w1').conversations.map(c => [c.id, c.pinned]), [['a', true]]);
+});
+
+test('an archived conversation is not sorted as pinned', () => {
+  const gs = groupsOf(state([conv('x', { archived: 'face', updatedAt: 1 }), conv('y', { archived: 'face', updatedAt: 9 })], { pinned: ['x'] }));
+  const g = gs.find(x => x.key === '__archived');
+  assert.deepEqual(g.conversations.map(c => [c.id, c.pinned]), [['y', false], ['x', false]]);
+});

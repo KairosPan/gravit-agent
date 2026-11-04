@@ -123,12 +123,28 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     }
   }
 
+  // pin / unpin: the answer is the whole set; a throw leaves the set as it was
+  async function setPin(remote, sessionId) {
+    try {
+      const answer = await call(remote, { request: { sessionId } });
+      if (!Array.isArray(answer?.pinnedSessionIds)) throw new Error(`${remote} returned no pinnedSessionIds`);
+      store.dispatch('hostPins', answer.pinnedSessionIds);
+      return true;
+    } catch {
+      say('Pin failed. Try again later.', true);
+      return false;
+    }
+  }
+  const pin = sessionId => setPin('workspace/pinSession', sessionId);
+  const unpin = sessionId => setPin('workspace/unpinSession', sessionId);
+
   async function archive(sessionId, archived) {
     const c = convOf(sessionId);
     if (archived && c?.running) { say('Stop Gravit first', true); return false; }
     if (archived && c?.messages.some(needsAnswer)) { say('Answer the waiting card first', true); return false; }
     try {
       await postJson('/data/sessions/archive', { sessionId, archived: archived === true });
+      if (archived === true && store.get().pinned?.includes(sessionId)) await unpin(sessionId); // an archived row is never pinned (D7)
       return true;
     } catch (err) {
       fail(err, archived ? 'archive' : 'un-archive');
@@ -173,5 +189,5 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     }
   }
 
-  return { send, newConversation, answer, stop, rename, command, fork, archive, remove, talkTo, stopChild };
+  return { send, newConversation, answer, stop, rename, command, fork, archive, pin, unpin, remove, talkTo, stopChild };
 }

@@ -34,6 +34,14 @@ export function groupsOf(state) {
     const label = kind === 'archived' ? 'Archived' : kind === 'desk' ? 'Desk' : kind === 'none' ? 'No channel' : b.label;
     add(b.key, { label, kind, workspaceId: kind === 'channel' ? b.key : null }).conversations.push(c);
   }
+  // pinned lead their group, newest first, then the rest newest first; an archived row is never pinned, and a pinned id
+  // the list does not hold matches nothing. The records handed back are copies carrying `pinned`
+  const pins = new Set(Array.isArray(state.pinned) ? state.pinned : []);
+  const byNew = (a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
+  for (const g of groups.values()) {
+    const marked = g.conversations.map(c => ({ ...c, pinned: g.kind !== 'archived' && !c.archived && pins.has(c.id) }));
+    g.conversations = [...marked.filter(c => c.pinned).sort(byNew), ...marked.filter(c => !c.pinned).sort(byNew)];
+  }
   const all = [...groups.values()];
   const live = all.filter(g => g.kind !== 'archived' && g.kind !== 'desk');
   const order = [
