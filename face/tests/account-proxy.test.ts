@@ -60,7 +60,7 @@ const ROUTES: ReadonlyArray<readonly [face: string, account: string]> = [
 /** The wallet half's six reads, in the order they are registered after the twelve: the Account path, the route's
  * row, and a query of its names. */
 const NEW_READS: ReadonlyArray<readonly [face: string, account: string, route: "asset" | "funding" | "receive" | "earn" | "sellable" | "signinStatus", query: string]> = [
-  ["/data/account/asset", "/api/account/asset", "asset", "key=crypto%3ABTC&interval=1h&range=1d"],
+  ["/data/account/asset", "/api/account/asset", "asset", "key=crypto%3ABTC"],
   ["/data/account/funding", "/api/account/funding", "funding", "venue=paper&limit=10"],
   ["/data/account/receive", "/api/account/receive", "receive", "venue=paper&asset=USDC&network=base"],
   ["/data/account/earn", "/api/account/earn", "earn", "venue=paper&asset=USDC"],
@@ -293,7 +293,7 @@ test("a repeated or unknown name, an over-long value: 400 invalid account reques
     reach: ["connector"],
     keyfile: ["kind", "venue", "ref", "exchange"],
     books: [],
-    asset: ["key", "interval", "range", "fresh"],
+    asset: ["key", "fresh"],
     funding: ["venue", "limit"],
     receive: ["venue", "asset", "network"],
     earn: ["venue", "asset", "fresh"],
@@ -967,7 +967,7 @@ test("the new reads keep their whitelists and TTLs", async () => {
   const ttl = { asset: 5_000, funding: 60_000, receive: 60_000, earn: 15_000, sellable: 5_000, signinStatus: 1_000 };
   const abort = { asset: 25_000, funding: 12_000, receive: 30_000, earn: 30_000, sellable: 30_000, signinStatus: 7_000 };
   const names = {
-    asset: ["key", "interval", "range", "fresh"], funding: ["venue", "limit"],
+    asset: ["key", "fresh"], funding: ["venue", "limit"],
     receive: ["venue", "asset", "network"], earn: ["venue", "asset", "fresh"], sellable: ["fresh"], signinStatus: ["state"],
   };
   for (const [face, account, route, query] of NEW_READS) {

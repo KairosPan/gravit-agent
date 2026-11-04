@@ -210,7 +210,7 @@ export const ACCOUNT_QUERY: Readonly<Record<ReadRoute, readonly string[]>> = {
   reach: ["connector"],
   keyfile: ["kind", "venue", "ref", "exchange"],
   books: [],
-  asset: ["key", "interval", "range", "fresh"],
+  asset: ["key", "fresh"],
   funding: ["venue", "limit"],
   receive: ["venue", "asset", "network"],
   earn: ["venue", "asset", "fresh"],

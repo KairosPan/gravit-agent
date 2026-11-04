@@ -118,7 +118,9 @@ export function joinExplore(market, connected, { venues = [], here = [], tab = '
   const m = halfOf(market, false);
   const c = halfOf(connected, true);
   if (!m && !c) return null;
-  const speaks = new Set(records(venues).filter(v => v.paper !== true && str(v.connector)).map(v => v.connector));
+  // a connected venue speaks for its public line only while the connected half answers (or has not landed yet): with the
+  // Account down or stale the screens fall back to the public data
+  const speaks = c === null ? new Set() : new Set(records(venues).filter(v => v.paper !== true && str(v.connector)).map(v => v.connector));
   const away = new Set(records(here).filter(v => AWAY.has(str(v.verdict)) && str(v.connector)).map(v => v.connector));
   const keep = l => !(l.public === true && (speaks.has(str(l.connector)) || away.has(str(l.connector))));
   const mRows = byKey(m), cRows = byKey(c);

@@ -113,6 +113,23 @@ test('a stale connected half is dropped, and missing says the Account is not ans
   assert.equal(joinExplore(null, null, {}), null, 'both halves down: nothing to draw');
 });
 
+test('with the connected half down or stale, a connected venue no longer speaks for its public line', () => {
+  const market = body([
+    row('coin:BTC', [pub('okx', 'BTC/USDT', 'live:exchange:okx')]),
+    row('coin:ETH', [pub('okx', 'ETH/USDT', 'live:exchange:okx'), pub('kraken', 'ETH/USD', 'live:exchange:kraken')]),
+  ]);
+  const venues = [{ id: 'my-okx', connector: 'live:exchange:okx', paper: false }];
+  const stale = body([row('coin:BTC', [con('my-okx', 'BTC/USDT')])], { stale: true });
+  for (const connected of [null, stale]) {
+    const joined = joinExplore(market, connected, { venues });
+    assert.deepEqual(keys(joined), ['coin:BTC', 'coin:ETH'], 'the row whose only line is the public okx one stays');
+    assert.deepEqual(linesOf(joined, 'coin:BTC'), ['okx|BTC/USDT'], 'the screens fall back to the public data');
+    assert.deepEqual(linesOf(joined, 'coin:ETH'), ['okx|ETH/USDT', 'kraken|ETH/USD']);
+  }
+  // not landed yet is not down: the connected okx still speaks for its line
+  assert.equal(joinExplore(market, undefined, { venues }).items.some(i => i.key === 'coin:BTC'), false);
+});
+
 test('the market down: the connected rows alone, and missing says the market is not answering', () => {
   const connected = body([row('coin:BTC', [con('my-okx', 'BTC/USDT')]), row('stock:NVDA', [con('broker', 'NVDA')], { tabs: ['all', 'stocks'] })],
     { tabs: [{ id: 'all', label: 'All', count: 2 }, { id: 'stocks', label: 'Stocks', count: 1 }] });
