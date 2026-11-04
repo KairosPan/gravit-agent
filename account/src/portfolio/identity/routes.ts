@@ -26,7 +26,7 @@ import type express from "express";
 import type { Refusal } from "../../core/errors.ts";
 import { isRefusal } from "../../core/errors.ts";
 import type { InboxAnswer, IdentityView, SendAnswer, SendMessage } from "./identity.ts";
-import { NETWORKS, PHONE_KINDS, type Network, type PhoneKind } from "./kinds.ts";
+import { NETWORK_NAME, NETWORKS, PHONE_KINDS, WIRE_ID, type Network, type PhoneKind } from "./kinds.ts";
 import type { PendingConnections } from "./pending.ts";
 
 export const IDENTITY_TOKEN_PATH = "/api/account/identity/telegram/token";
@@ -36,33 +36,42 @@ export const isIdentityTokenPath = (path: string): boolean => path.toLowerCase()
 /** the most the token route reads of a body: a token, a 64-hex fingerprint and a 32-hex salt fit in a fraction of it */
 export const IDENTITY_TOKEN_BODY_LIMIT = 1024;
 
-/** the identity routes' fixed sentences: none repeats anything that was sent */
+/** a network connected already: a second connection to it is refused */
+const connectedOn = (network: Network): string => `${NETWORK_NAME[network]} is connected already: Disconnect… it in Account › Identity first.`;
+/** a network not connected: there is nothing to disconnect */
+const notConnectedOn = (network: Network): string => `${NETWORK_NAME[network]} is not connected: there is nothing to disconnect.`;
+
+/** the identity routes' fixed sentences: none repeats anything that was sent (`connectedOn` and `notConnectedOn` name only the network) */
 export const IDENTITY_WORDS = {
   malformed: "This route takes one JSON object, {token, keyHash, salt}: what was sent is not that, and it was not kept.",
   tokenShape: "That is not a bot token: BotFather's token is digits, a colon, then letters. Nothing was kept.",
   mismatch: "The token does not match its fingerprint: nothing was kept. Paste the token again.",
   refusedByTelegram: "Telegram does not know this token: nothing was kept. Copy it from BotFather again.",
-  connected: "Telegram is connected already: Disconnect… it in Account › Identity first.",
+  connectedOn,
+  /** Telegram's connectedOn, by B1's name */
+  connected: connectedOn("telegram"),
   noPending: "This connection is gone: it expired or was closed. Start again.",
   unreachable: "Telegram did not answer: nothing was kept. Try again in a minute.",
   type: "This route takes application/json, sent as it is (no content encoding).",
   large: `This route takes at most ${IDENTITY_TOKEN_BODY_LIMIT} bytes: what was sent is larger, and it was not kept.`,
   needId: "This route takes {id}: the pending connection's id.",
   // the four owner types' refusals (identity.ts): at prepare and at the door alike
-  network: "Telegram is the one network the account speaks on for now.",
+  networkUnknown: `That is not a network the account speaks on (${NETWORKS.join(", ")}).`,
   botMismatch: "The bot signed is not the bot this connection checked with Telegram: nothing was written. Start again.",
   senderMismatch: "The person signed is not the one heard on Say hi: nothing was written. Start again.",
   hashShape: "The signed fingerprint is 64 hex characters and its salt 32 (16 bytes), both lower-case: nothing was written.",
   tokenInField: "A bot token is never a signed field: only its fingerprint is. Nothing was written.",
-  notConnected: "Telegram is not connected: there is nothing to disconnect.",
+  notConnectedOn,
+  /** Telegram's notConnectedOn, by B1's name */
+  notConnected: notConnectedOn("telegram"),
   routedNotConnected: "The routing ticks a network that is not connected: connect it first, or untick it.",
   quietTime: "Quiet hours are two times of day, HH:MM on New York's clock (23:00 and 07:00), or both empty for off.",
   quietEqual: "Quiet hours start and end at different times: both empty turns them off.",
-  blockShape: "A sender is blocked by the reference Not you shows (12 hex characters) and their masked id (… and up to three digits).",
+  blockShape: "A sender is blocked by the reference Not you shows (12 hex characters) and their masked id (… and up to three digits or capitals).",
   blockMismatch: "That masked id is not the one Not you shows for this sender.",
   noIdentity: "This account keeps no identity: it is the account layer's.",
   inboxQuery: "This route takes after=<a whole number, 0 or more> and wait=<whole seconds, 0 to 25>.",
-  send: "This route takes {kind, text, replyTo?, network?}: kind one of chat, alert, urgent, brief, report, card, fill, watchdog; replyTo <network>:<id>; network telegram. The account picks who receives it.",
+  send: `This route takes {kind, text, replyTo?, network?}: kind one of chat, alert, urgent, brief, report, card, fill, watchdog; replyTo <network>:<id>; network ${NETWORKS.join(" or ")}. The account picks who receives it.`,
   sendLarge: `This route takes at most ${65_536} bytes.`,
 } as const;
 
@@ -126,7 +135,7 @@ function sendOf(body: unknown): SendMessage | undefined {
   const b = body as Record<string, unknown>;
   if (!Object.keys(b).every((k) => SEND_KEYS.has(k))) return undefined;
   if (typeof b.kind !== "string" || !(PHONE_KINDS as readonly string[]).includes(b.kind) || typeof b.text !== "string") return undefined;
-  if (b.replyTo !== undefined && (typeof b.replyTo !== "string" || !/^[a-z]{1,16}:\d{1,16}$/.test(b.replyTo))) return undefined;
+  if (b.replyTo !== undefined && (typeof b.replyTo !== "string" || !WIRE_ID.test(b.replyTo))) return undefined;
   if (b.network !== undefined && !(NETWORKS as readonly unknown[]).includes(b.network)) return undefined;
   return { kind: b.kind as PhoneKind, text: b.text, ...(b.replyTo !== undefined ? { replyTo: b.replyTo as string } : {}), ...(b.network !== undefined ? { network: b.network as Network } : {}) };
 }

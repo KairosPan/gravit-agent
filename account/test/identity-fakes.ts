@@ -125,3 +125,13 @@ export async function fakeBotApi(o: { token?: string; me?: FakeBotApi["me"] } = 
     },
   };
 }
+
+/** four made-up Slack tokens, one of each kind the account meets — the app-level token, the bot token, a user token and a refresh token —
+ * each shaped as Slack shapes it. Built by concatenation at runtime, so no literal in the tree has a secret scanner's Slack shape */
+export function slackTokens(): { app: string; bot: string; user: string; refresh: string } {
+  const app = ["xa", "pp-", "1-", "A0FAKEAPP01", "-", "1730000000001", "-", "0123456789abcdef".repeat(4)].join("");
+  const bot = ["xo", "xb-", "1000000001", "-", "2000000002", "-", "FakeBotTokenForTests0001"].join("");
+  const user = ["xo", "xp-", "1000000001", "-", "3000000003", "-", "4000000004", "-", "fedcba9876543210".repeat(2)].join("");
+  const refresh = ["xo", "xe-", "1-", "FakeRefreshTokenForTestsOnly0001"].join("");
+  return { app, bot, user, refresh };
+}

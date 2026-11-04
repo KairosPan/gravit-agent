@@ -143,7 +143,7 @@ describe("the send route, through the account", () => {
 
   it("the account picks the recipient: only the bound operator, only ticked networks", async () => {
     // the caller can give a kind, a text, a reply-to and a network — nothing that names a chat
-    for (const body of [{ kind: "chat", text: "hi", chat_id: 42 }, { kind: "chat", text: "hi", to: "@someone" }, { kind: "bogus", text: "hi" }, { kind: "chat", text: 5 }, { kind: "chat", text: "hi", network: "slack" }, { kind: "chat", text: "hi", replyTo: "41" }, [1, 2]]) {
+    for (const body of [{ kind: "chat", text: "hi", chat_id: 42 }, { kind: "chat", text: "hi", to: "@someone" }, { kind: "bogus", text: "hi" }, { kind: "chat", text: 5 }, { kind: "chat", text: "hi", network: "imessage" }, { kind: "chat", text: "hi", replyTo: "41" }, [1, 2]]) {
       const r = await post("/api/account/identity/send", body);
       expect(r.status, JSON.stringify(body)).toBe(400);
       expect(r.ok).toBe(false);

@@ -27,7 +27,7 @@ describe("the routing string", () => {
     const s = "chat=telegram;alerts=telegram;brief=;cards=telegram;fills=telegram";
     expect(formatRouting(parseRouting(s) as Routing)).toBe(s);
     expect(parseRouting("alerts=telegram;chat=telegram;brief=;cards=;fills=")).toMatch(/order/);
-    expect(parseRouting("chat=slack;alerts=;brief=;cards=;fills=")).toMatch(/slack/);
+    expect(parseRouting("chat=imessage;alerts=;brief=;cards=;fills=")).toMatch(/imessage/);
   });
   it("refuses a missing row, an extra row, a repeated network and a row without '='", () => {
     expect(typeof parseRouting("chat=;alerts=;brief=;cards=")).toBe("string");
