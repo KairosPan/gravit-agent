@@ -25,12 +25,19 @@ function connectPatch(p) {
   if (p.error === null || typeof p.error === 'string') out.error = p.error;
   return out;
 }
+// a draft's ticks only for networks the read shows connected (a Disconnect, or a change made elsewhere, takes the rest away)
+function connectedOnly(draft, data) {
+  if (draft === null) return null;
+  const v = identityOf(data);
+  const on = n => v.networks[n]?.state === 'connected';
+  return Object.fromEntries(Object.entries(draft).map(([row, nets]) => [row, Array.isArray(nets) ? nets.filter(on) : nets]));
+}
 // a draft that says what the account says already is no draft
 const settled = (draft, data) => (draft !== null && sameRouting(draft, routingOf(data)) ? null : draft);
 
 export const reducers = {
   identityLoading: s => id(s, { status: 'loading' }),
-  identityLoaded: (s, body) => id(s, { status: 'ready', data: body ?? null, message: null, draft: settled(s.identity.draft ?? null, body) }),
+  identityLoaded: (s, body) => id(s, { status: 'ready', data: body ?? null, message: null, draft: settled(connectedOnly(s.identity.draft ?? null, body), body) }),
   // a failed read keeps no connection: the tab says the account is not answering rather than drawing a stale Connected row as live;
   // `message` the account's or the proxy's words when they were text
   identityFailed: (s, message) => id(s, { status: 'error', data: null, message: typeof message === 'string' && message.trim() !== '' ? message : null }),

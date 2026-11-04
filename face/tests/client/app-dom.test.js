@@ -3615,3 +3615,31 @@ test('Enter in the bot token field is Next: the token posted once, with no form 
   assert.equal(field.value, '');
   store.timers.clear();
 });
+
+test('a draft tick for a network a fresh read shows not connected is dropped: after Disconnect, Change… prepares and no Save… is offered', async () => {
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const door = ownerDoor();
+  let gone = false;
+  const AFTER = { ...IDENTITY_READ, networks: [], routing: { chat: [], alerts: [], brief: [], cards: [], fills: [] } };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': () => (gone ? AFTER : IDENTITY_READ) } });
+  const store = bootOwner(f, h, door);
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', checked: true, dataset: { action: 'identityTick', row: 'brief', network: 'telegram' } } });
+  assert.match(f.html(), />Save…</);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'disconnectNetwork', network: 'telegram' } });
+  await until(() => store.get().sheet?.status === 'ready', 'disconnect prepared');
+  gone = true;
+  f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
+  await until(() => store.get().sheet === null, 'disconnect done');
+  await until(() => store.get().identity.data?.networks?.length === 0, 'the fresh read');
+  assert.equal(store.get().identity.draft, null, 'the stale tick dropped');
+  assert.doesNotMatch(f.html(), />Save…</);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'openSheet', kind: 'routing' } });
+  assert.equal(store.get().sheet.seed.routing.brief.length, 0, 'seeded from the account, not the stale tick');
+  f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'quietOff', checked: true, value: 'true', dataset: { action: 'sheetField' } } });
+  await until(() => store.get().sheet?.status === 'ready', 'quiet hours off prepared');
+  assert.equal(door.posts.filter(([p]) => p === '/data/account/prepare').at(-1)[1].draft.routing, 'chat=;alerts=;brief=;cards=;fills=');
+  store.timers.clear();
+});
