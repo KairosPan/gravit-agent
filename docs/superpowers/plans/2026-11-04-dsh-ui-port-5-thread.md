@@ -703,7 +703,7 @@ export function startJobs({ store, mux, call, onOutput = () => {} }) {
     (`live.earlier`, the window, `startJobs`), §5.4 (the masked bubble and excerpts, the thread box,
     the earlier key, the rail and its card, the pills and Usage, the chip and Background jobs), §5.5
     (`window`, `outline`, `stats`, the `jobs` slice; `revealed`, `rail` and a job's output outside
-    the store), §5.6, §7.3 (the tests), §7.4 (the drills), and a residual R97 — the thread at its
+    the store), §5.6, §7.3 (the tests), §7.4 (the drills), and a residual R100 (R97 when this plan ran) — the thread at its
     edges: masking is display only (the key in the log and the model's context), Gravit's replies are
     not masked, a key cut short of its prefix in an excerpt is not masked, jobs vanish on a face
     restart, earlier pages live in the page's memory until a reload;
