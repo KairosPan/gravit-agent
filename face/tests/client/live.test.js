@@ -763,3 +763,63 @@ test('a turn starting while the reader reads up keeps the earlier pages', async 
   r2.last('session/follow').cbs.onItem({ type: 'event', event: { type: 'turn/end', seq: 41, time: NOW, data: { turn: 3 } } });
   assert.deepEqual(ids(r2, 'live'), [20, 21, 30, 31]);
 });
+
+// plan 7 task 3, fix round 1: a fresh window (the conversation on screen re-opened) is owed until one lands, whatever
+// replaces the read in flight; an earlier read under way when it is asked lands nothing
+const rec = (seq, text) => ({ event: { type: 'user/message', seq, time: 1756512000000, surfaceOp: 'append', data: { id: `m-${seq}`, role: 'user', content: [{ type: 'text', text }], source: { kind: 'user' } } } });
+const texts = r => r.store.get().conversations.find(c => c.id === 's1').messages.map(m => m.text);
+function freshRig(over = {}) {
+  let hold = null;
+  const r = rig({ rows: [row('s1', over)], pages: { s1: req => {
+    if (req.beforeSeq !== undefined) return hold ? new Promise(res => { hold.push(() => res({ records: [rec(3, 'earlier')], hasMore: false })); }) : { records: [rec(3, 'earlier')], hasMore: false };
+    return { records: [rec(10, 'own')], hasMore: true };
+  } } });
+  return Object.assign(r, { holdEarlier: () => { hold = []; return hold; } });
+}
+
+test('a fresh follow that the host ends before its snapshot owes the fresh window to the follow after it', async () => {
+  const r = freshRig({ agentAvailable: true });
+  await r.ready();
+  r.live.open('s1'); await settle();
+  r.last('session/follow').cbs.onItem({ type: 'snapshot', cursor: 20, hasMore: true, records: [rec(10, 'own')] });
+  assert.equal(await r.live.earlier('s1'), true);
+  assert.deepEqual(texts(r), ['earlier', 'own']);
+  r.live.open('s1'); await settle();
+  r.last('session/follow').cbs.onEnd();
+  r.scheduled.filter(t => t.ms === FOLLOW_RETRY_MS).at(-1).fn();
+  await settle();
+  assert.equal(r.follows().length, 3, 'the reconcile follows it again');
+  r.last('session/follow').cbs.onItem({ type: 'snapshot', cursor: 20, hasMore: true, records: [rec(10, 'own')] });
+  assert.deepEqual(texts(r), ['own'], 'the fresh window landed');
+});
+
+test('a fresh page promoted to a follow while in flight owes the fresh window to the follow', async () => {
+  const r = freshRig();
+  await r.ready();
+  r.live.open('s1'); await settle();
+  assert.equal(await r.live.earlier('s1'), true);
+  assert.deepEqual(texts(r), ['earlier', 'own']);
+  r.live.open('s1');
+  r.live.promote('s1');
+  await settle();
+  assert.deepEqual(texts(r), ['earlier', 'own'], "the page in flight was dropped: the follow's snapshot is owed it");
+  r.last('session/follow').cbs.onItem({ type: 'snapshot', cursor: 20, hasMore: true, records: [rec(10, 'own')] });
+  assert.deepEqual(texts(r), ['own']);
+});
+
+test('an earlier read in flight when the conversation is re-opened fresh lands nothing and clears its loading', async () => {
+  const r = freshRig();
+  await r.ready();
+  r.live.open('s1'); await settle();
+  const held = r.holdEarlier();
+  const run = r.live.earlier('s1');
+  await settle();
+  assert.equal(r.store.get().conversations[0].window.loading, true);
+  r.live.open('s1'); await settle();
+  assert.deepEqual(texts(r), ['own']);
+  held.shift()();
+  assert.equal(await run, false, 'the late page does not land');
+  await settle();
+  assert.deepEqual(texts(r), ['own']);
+  assert.equal(r.store.get().conversations[0].window.loading, undefined, 'loading cleared');
+});

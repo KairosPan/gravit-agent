@@ -7378,3 +7378,64 @@ test('a failed run view is read again after reword, once; a loaded one is not', 
   assert.equal(views.length, 3, 'nothing failed, nothing read');
   store.timers.clear();
 });
+
+// plan 7 task 3, fix round 1: reword with the host down waits for ready, then the conversation is read fresh, once
+test('reword while the host is down: on reconnect the conversation, now live, is followed and its fresh window lands once', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const earlierRec = { event: { type: 'user/message', seq: 3, time: 1756511000000, surfaceOp: 'append', data: { id: 'm-3', role: 'user', content: [{ type: 'text', text: 'an earlier word' }], source: { kind: 'user' } } } };
+  const own = { event: { type: 'user/message', seq: 10, time: 1756512000000, surfaceOp: 'append', data: { id: 'm-10', role: 'user', content: [{ type: 'text', text: 'the own word' }], source: { kind: 'user' } } } };
+  const h = host({ rows: [row('s1')], pages: { s1: req => (req.beforeSeq !== undefined ? { records: [earlierRec], hasMore: false } : { records: [own], hasMore: true }) } });
+  let down = false;
+  const call = async (endpoint, args) => { if (down) throw new Error('offline'); return h.call(endpoint, args); };
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call, getJson: h.getJson, postJson: h.postJson, markdown: null });
+  await h.ready();
+  assert.equal(await store.live.earlier('s1'), true);
+  await settle();
+  assert.match(f.html(), /an earlier word/);
+  down = true;
+  h.opts().onDown('gone');
+  await settle();
+  const before = h.calls.length;
+  store.reword();
+  await settle();
+  assert.equal(h.calls.length, before, 'nothing sent while down');
+  down = false;
+  h.rows[0].agentAvailable = true;
+  h.opts().onReady({});
+  await settle();
+  const follows = h.streams.filter(s => s.name === 'session/follow' && s.args.request.address.sessionId === 's1');
+  assert.equal(follows.length, 1, 'the reconcile follows it');
+  assert.equal(h.calls.slice(before).filter(c => c[0] === 'session/page' && c[1].request.maxMessages === undefined && c[1].request.address.sessionId === 's1').length, 0, 'not paged as well');
+  follows[0].cbs.onItem({ type: 'snapshot', cursor: 20, hasMore: true, records: [own] });
+  await settle();
+  assert.doesNotMatch(f.html(), /an earlier word/, 'the fresh window landed');
+  assert.match(f.html(), /the own word/);
+  assert.equal(await store.live.earlier('s1'), true);
+  await settle();
+  follows[0].cbs.onItem({ type: 'snapshot', cursor: 20, hasMore: true, records: [own] });
+  await settle();
+  assert.match(f.html(), /an earlier word/, 'once: a later snapshot keeps the pages read again');
+  store.timers.clear();
+});
+
+test('a fresh window whose start rose under a reader who has read up starts the thread at its first message', async () => {
+  const { f, thread, h } = earlierRig();
+  const mark = f.withSelector('[data-anchor]', { presentIf: /data-anchor/ });
+  const scrolled = [];
+  mark.scrollIntoView = o => { scrolled.push({ ...o, first: /data-anchor[^>]*>[\s\S]{0,60}said 45/.test(f.html()) }); };
+  const store = started(f, h);
+  await h.ready();
+  h.streams.find(s => s.name === 'session/follow').cbs.onItem({ type: 'snapshot', header: {}, cursor: 40, hasMore: true, records: [said(30), said(31)], projections: { asOfSeq: 40, values: {} } });
+  await settle();
+  thread.scrollTop = 0;   // read up, off the bottom
+  store.dispatch('hostStatus', { line: 'a render' });
+  await settle();
+  assert.equal(scrolled.length, 0, 'the same window keeps the reader where they are');
+  store.reword();
+  await settle();
+  const fresh = [...h.streams].reverse().find(s => s.name === 'session/follow');
+  fresh.cbs.onItem({ type: 'snapshot', header: {}, cursor: 50, hasMore: true, records: [said(45), said(46)], projections: { asOfSeq: 50, values: {} } });
+  await settle();
+  assert.deepEqual(scrolled, [{ block: 'start', first: true }], "the window's first message, once");
+  store.timers.clear();
+});

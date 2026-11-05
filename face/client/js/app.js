@@ -715,7 +715,12 @@ export function boot(win, host = {}) {
     const sameThread = threadAt && threadSig === last.thread;
     const anchorNow = prepended ? root.querySelector('[data-anchor]')?.offsetTop ?? null : null;
     const added = !prepended ? 0 : anchorAt !== null && anchorNow !== null ? anchorNow - anchorAt : thread ? thread.scrollHeight - threadAt.height : 0;
-    if (thread) thread.scrollTop = prepended ? threadAt.top + added : sameThread && !threadAt.bottom ? threadAt.top : thread.scrollHeight;
+    // a window taken whole whose start rose (a fresh one after reword, or one past a gap) under a reader who is not at the
+    // bottom: the place read no longer exists, so the thread starts at the window's first message, a defined place
+    const rose = sameThread && !threadAt.bottom && threadStart !== null && last.start !== null && threadStart > last.start;
+    const firstAt = rose ? root.querySelector('[data-anchor]') : null;
+    if (thread) thread.scrollTop = prepended ? threadAt.top + added : rose ? 0 : sameThread && !threadAt.bottom ? threadAt.top : thread.scrollHeight;
+    if (firstAt) firstAt.scrollIntoView?.({ block: 'start' });
     // a thread that does not scroll (as tall as what it holds): the document carries the keep
     if (prepended && thread && docAt !== null && thread.scrollHeight <= thread.clientHeight) doc.scrollingElement.scrollTop = docAt + added;
 
@@ -2374,6 +2379,7 @@ export function boot(win, host = {}) {
   if (!doc.hidden) { stream.open(); marketStream.open(); }
   follow();
   render();
+  // reword is the Language switch's (plan 7 Task 9 calls act.reword after setTable); on the store for the tests that drive it
   return Object.assign(store, { timers, live, reword: act.reword, actions, markets, channels, discover, owner, sheet, trade, walletSend, sellMany, identity });
 }
 

@@ -134,7 +134,10 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     release(v, false);
     v?.handle?.cancel();
   }
-  function follow(id, token, fresh = false) {
+  // a fresh window still owed to the conversation on screen (plan 7's reword): carried on the view until a window lands, so a
+  // follow, page, promote, activate, a follow's end or a reconnect that replaces the read in flight owes it in its turn
+  const carried = id => view !== null && view.id === id && view.fresh === true;
+  function follow(id, token, fresh = carried(id)) {
     closeView();
     let handle = null;
     const owns = () => view !== null && view.handle === handle && token === openSeq && view.id === id;
@@ -142,8 +145,8 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       onItem: item => {
         if (!owns()) return;
         if (item?.type === 'snapshot') {
-          applySnapshot(id, item, { through: item.cursor, hasMore: item.hasMore, fresh });
-          fresh = false;   // only the first: a later snapshot (past a gap) keeps what the reader read
+          applySnapshot(id, item, { through: item.cursor, hasMore: item.hasMore, fresh: view.fresh === true });
+          if (owns()) view.fresh = false;   // only the first: a later snapshot (past a gap) keeps what the reader read
           if (owns() && !view.snapped) { view.snapped = true; release(view, true); }   // the store's render may have moved on
         }
         else if (item?.type === 'event') accept(id, { type: 'session/event', sessionId: id, event: item.event });
@@ -152,21 +155,21 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       onEnd: () => { // the host ended it: re-decided by liveness, never blindly re-followed
         if (!owns()) return;
         release(view, false);
-        view = { id, token, mode: 'page', handle: null, stale: true };
+        view = { id, token, mode: 'page', handle: null, stale: true, fresh: view.fresh === true };
         timers.after(FOLLOW_RETRY_MS, reconcile);
       },
       onError: error => { // a refusal is terminal for this open
         if (!owns()) return;
         release(view, false);
-        view = { id, token, mode: 'page', handle: null, failed: true };
+        view = { id, token, mode: 'page', handle: null, failed: true, fresh: view.fresh === true };
         say(said('status.followRefused', { code: error?.code ?? said('status.error'), message: error?.message ?? said('status.followFailed') }), true);
       },
     });
-    view = { id, token, mode: 'follow', handle, snapped: false, waiters: [] };
+    view = { id, token, mode: 'follow', handle, snapped: false, waiters: [], fresh };
   }
-  async function page(id, token, fresh = false) {
+  async function page(id, token, fresh = carried(id)) {
     closeView();
-    const v = { id, token, mode: 'page', handle: null };
+    const v = { id, token, mode: 'page', handle: null, fresh };
     view = v;
     try {
       const cut = await call('session/projections', { request: { sessionId: id } });
@@ -177,7 +180,8 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       if (asOfSeq === null) throw saidError('status.noProjections');
       const pg = await call('session/page', { request: { address: address(id), throughSeq: asOfSeq } });
       if (view !== v || token !== openSeq) return;
-      applySnapshot(id, { projections: cut, records: pg?.records }, { through: asOfSeq, hasMore: pg?.hasMore, fresh });
+      applySnapshot(id, { projections: cut, records: pg?.records }, { through: asOfSeq, hasMore: pg?.hasMore, fresh: v.fresh });
+      v.fresh = false;
     } catch (err) {
       if (view !== v || token !== openSeq) return;
       view = { ...v, failed: true };
@@ -186,13 +190,19 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   }
   // a conversation opened afresh; the one already on screen too (plan 7's reword): its window then replaces everything folded
   // before it, earlier pages included, as a turn at the tail drops them, so every line is folded again under the table that
-  // stands; Earlier messages reads the pages again
+  // stands; Earlier messages reads the pages again. With the host down it waits: the view is stale with the fresh window owed,
+  // and the reconcile after ready reads it (a read sent now would fail and leave the view failed, which nothing re-opens)
   function open(id) {
     const token = ++openSeq;
     const conv = convOf(id);
     if (!conv) return;
     const fresh = view !== null && view.id === id;
     store.dispatch('markSeen', { convId: id, seq: conv.updatedAt });
+    if (fresh && state().status?.connected !== true) {
+      closeView();
+      view = { id, token, mode: 'page', handle: null, stale: true, fresh: true };
+      return;
+    }
     if (viewFor(conv) === 'follow') follow(id, token, fresh);
     else void page(id, token, fresh);
   }
