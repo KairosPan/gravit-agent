@@ -6,6 +6,7 @@ import {
   MODULES, MODULE_NAMES, moduleOf, latestOf, headlineWords, chipOf, researchItems, runsOf, pageOf, activeRuns,
 } from '../../client/js/host/modules-view.js';
 import { modulesListing, MARKET_RUN, S01_RUN } from './helpers/inventory.js';
+import { withTable } from '../../client/js/i18n/words.js';
 
 const channelOf = (l, name) => l.channels.find(c => c.channel === name);
 const ok = (headline, marketRun = null) => ({ status: 'OK', missingSources: [], headline, marketRun });
@@ -231,4 +232,19 @@ test('the theme card and page end with the boards source only when the newest ru
   // not the other modules, and not a not-evaluable theme's words
   const l = withProvider('同花顺问财');
   assert.equal(chipOf(l, 'environment').text, 'WEAK · STABLE');
+});
+
+test('a quiet chip is known by what the headline holds, never by its words: no candidate, WAIT and no item grey under any table', () => {
+  const table = { 'modules.chip.noCandidate': 'aucun candidat', 'channel.count.items': { one: '{n} élément', other: '{n} éléments' } };
+  withTable(table, () => {
+    const l = modulesListing();
+    channelOf(l, 'lunhui-s01-repair').runs[0].artifacts.counterevidence = ok({ items: [] }, MARKET_RUN);
+    assert.deepEqual(chipOf(l, 'leader'), { text: 'lunhui-s01-repair · aucun candidat', tone: 'grey' });
+    assert.deepEqual(chipOf(l, 'mode'), { text: 'lunhui-s01-repair · WAIT', tone: 'grey' });
+    assert.deepEqual(chipOf(l, 'counterevidence'), { text: 'lunhui-s01-repair · 0 éléments', tone: 'grey' });
+    channelOf(l, 'lunhui-s01-repair').runs[0].artifacts.counterevidence = ok({ items: [{}] }, MARKET_RUN);
+    assert.deepEqual(chipOf(l, 'counterevidence'), { text: 'lunhui-s01-repair · 1 élément', tone: 'ok' });
+  });
+  assert.equal(moduleOf('theme').title, 'Theme', 'a title is read when asked, so the table it was drawn under is gone');
+  assert.equal(withTable({ 'modules.theme.title': 'Thème' }, () => moduleOf('theme').title), 'Thème');
 });

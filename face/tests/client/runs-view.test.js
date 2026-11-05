@@ -2,7 +2,8 @@
 // row per listed run, the omitted count, and the two empty words — shaped from the overview, pure.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runsView, valueWord, countWord } from '../../client/js/host/runs-view.js';
+import { runsView, valueWord, itemsWord } from '../../client/js/host/runs-view.js';
+import { tn } from '../../client/js/i18n/words.js';
 
 const R1 = '2026-10-24-0930-ab12';
 const R2 = '2026-10-23-0930-cd34';
@@ -67,8 +68,8 @@ test('runsView: shapes the latest run, its chips and the rows; omitted carries t
   ]);
 });
 
-test('countWord: singular for one, plural otherwise; one counterevidence item reads 1 item', () => {
-  assert.equal(countWord(0, 'item'), '0 items'); assert.equal(countWord(1, 'item'), '1 item'); assert.equal(countWord(2, 'artifact'), '2 artifacts');
+test('itemsWord: singular for one, plural otherwise; one counterevidence item reads 1 item', () => {
+  assert.equal(itemsWord(0), '0 items'); assert.equal(itemsWord(1), '1 item'); assert.equal(tn('channel.count.artifacts', 2), '2 artifacts');
   const b = runsBody(); b.latestRun.artifacts.counterevidence.headline.items = [{ a: 1 }];
   assert.equal(runsView(b).latest.chips[3].text, 'counterevidence: 1 item');
 });

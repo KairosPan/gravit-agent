@@ -22,19 +22,13 @@ const KEPT_FILES = {
 };
 
 const PENDING = [
-  'app.js', 'host/channels.js', 'host/discover-view.js', 'host/discover.js', 'host/lunhui.js', 'host/modules-view.js',
-  'host/run-sheet-view.js', 'host/run-sheet.js', 'host/runs-view.js', 'render/channel.js', 'render/discover.js',
-  'render/lunhui/breadth.js', 'render/lunhui/composed.js', 'render/lunhui/footer.js', 'render/lunhui/indices.js',
-  'render/lunhui/intraday.js', 'render/lunhui/ladder.js', 'render/lunhui/notes.js', 'render/lunhui/signals.js',
-  'render/lunhui/sources.js', 'render/lunhui/stock.js', 'render/lunhui/verdicts.js', 'render/lunhui/yesterday.js',
-  'render/modules.js', 'render/run-sheet.js', 'wire/botSettings.js', 'wire/market-model.js', 'wire/member-traces.js',
-  'wire/room.js', 'wire/subagents.js',
+  'app.js', 'wire/botSettings.js', 'wire/market-model.js', 'wire/member-traces.js', 'wire/room.js', 'wire/subagents.js',
 ];
 
 // the most files PENDING may hold, and the en-kept markers under client/js: each words task lowers the first and states the
 // second
-const PENDING_MAX = 30;
-const EN_KEPT = 22;
+const PENDING_MAX = 6;
+const EN_KEPT = 30;
 
 const texts = src => englishLiterals(src, 'snippet.js').map(l => l.text);
 

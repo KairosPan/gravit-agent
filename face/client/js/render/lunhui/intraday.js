@@ -7,6 +7,7 @@
 // plugin), never from a Date in the browser's zone: 09:30–11:30 are points 0–120, 13:00–15:00 are 121–241, China time.
 import { esc } from '../../html.js';
 import { yuan, signedPct, fix2 } from './block.js';
+import { t, th } from '../../i18n/words.js';
 
 const LAST = 241;
 const W = 760, H = 236, LEFT = 56, PLOT = 652, MID = 118, HALF = 108;
@@ -16,18 +17,18 @@ const BARS = 36;   // the tallest minute's amount bar, from the bottom edge up
 /** A grid index to its "HH:MM" label (China time). */
 export function minuteLabel(index) {
   if (!Number.isSafeInteger(index) || index < 0 || index > LAST) return '—';
-  const t = index <= 120 ? 570 + index : 780 + index - 121;
+  const mins = index <= 120 ? 570 + index : 780 + index - 121;
   const pad = n => String(n).padStart(2, '0');
-  return `${pad(Math.floor(t / 60))}:${pad(t % 60)}`;
+  return `${pad(Math.floor(mins / 60))}:${pad(mins % 60)}`;
 }
 
 /** "HH:MM" (China time) to its grid index, or null off the grid. */
 export function minuteIndex(hhmm) {
   const m = typeof hhmm === 'string' ? /^(\d{2}):(\d{2})$/.exec(hhmm) : null;
   if (!m) return null;
-  const t = Number(m[1]) * 60 + Number(m[2]);
-  if (t >= 570 && t <= 690) return t - 570;
-  if (t >= 780 && t <= 900) return t - 780 + 121;
+  const mins = Number(m[1]) * 60 + Number(m[2]);
+  if (mins >= 570 && mins <= 690) return mins - 570;
+  if (mins >= 780 && mins <= 900) return mins - 780 + 121;
   return null;
 }
 
@@ -106,7 +107,7 @@ function extreme(price, g, which) {
 const GRID = [[0], [60], [120, 121], [181], [241]];
 
 // a seal's grid minute: one before the open (the call auction, 09:25) sits on the open's point
-export const sealIndex = t => minuteIndex(t) ?? (typeof t === 'string' && /^\d{2}:\d{2}$/.test(t) && t < '09:30' ? 0 : null);
+export const sealIndex = hhmm => minuteIndex(hhmm) ?? (typeof hhmm === 'string' && /^\d{2}:\d{2}$/.test(hhmm) && hhmm < '09:30' ? 0 : null);
 
 // a stock's limit lines, each only inside the drawn domain, under the price line
 function limitLines(g, limits) {
@@ -146,7 +147,7 @@ export function intradaySvg(minutes, { focus = null, minute = null, id = '', lim
       `<text class="lh-grid" x="${x}" y="${H - 1}" text-anchor="${anchor}">${ix.map(minuteLabel).join('/')}</text>`;
   }).join('');
   const cx = n1(g.X(at)), cy = n1(g.Y(price[at]));
-  return `<svg class="lh-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="The day minute by minute">` +
+  return `<svg class="lh-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${th('lunhui.dayChart')}">` +
     band + grid +
     `<line class="lh-mid" x1="${LEFT}" y1="${n1(g.mid)}" x2="${LEFT + PLOT}" y2="${n1(g.mid)}" stroke-dasharray="4 4"/>` +
     `<text class="lh-axis" x="${LEFT - 4}" y="${n1(g.mid + 4)}" text-anchor="end">${fix2(prec)}</text>` +
@@ -186,7 +187,7 @@ function stockPatch(stock, symbol, minute) {
   const g = chartGeometry(stock.minutes, limitsOf(stock), { includeUp: includesUp(stock) });
   const p = price[at];
   const pct = prec > 0 && fin(p) ? signedPct((p - prec) / prec * 100) : '—';
-  const where = atLimitUp(p, stock) ? ' · at the limit-up' : atLimitDown(p, stock) ? ' · at the limit-down' : '';
+  const where = atLimitUp(p, stock) ? ` · ${t('lunhui.atLimitUp')}` : atLimitDown(p, stock) ? ` · ${t('lunhui.atLimitDown')}` : '';
   return {
     x: n1(g.X(at)), y: n1(g.Y(p)),
     readout: `${stock.name ?? stock.code ?? symbol} · ${minuteLabel(at)} · ${fin(p) ? fix2(p) : '—'} · ${pct}${where}`,
@@ -211,7 +212,7 @@ export function cursorPatch(view, symbol, minute) {
   const pct = prec > 0 ? signedPct((price[at] - prec) / prec * 100) : '—';
   return {
     x: n1(g.X(at)), y: n1(g.Y(price[at])),
-    readout: `${row.name ?? symbol} · ${minuteLabel(at)} · ${fix2(price[at])} · ${pct} · ${yuan(amount)} this minute`,
+    readout: `${row.name ?? symbol} · ${minuteLabel(at)} · ${fix2(price[at])} · ${pct} · ${t('lunhui.thisMinute', { amount: yuan(amount) })}`,
   };
 }
 

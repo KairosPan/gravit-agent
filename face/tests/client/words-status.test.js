@@ -36,6 +36,11 @@ import { accountDown, marketDown } from '../../client/js/host/explore-join.js';
 import { accountDownWord } from '../../client/js/host/markets.js';
 import { notAnsweringWord } from '../../client/js/host/market-view.js';
 import { tradeDraftOf, fillWords } from '../../client/js/host/trade-view.js';
+import { startChannels } from '../../client/js/host/channels.js';
+import { startDiscover } from '../../client/js/host/discover.js';
+import { startRunSheet } from '../../client/js/host/run-sheet.js';
+import { ensureViews } from '../../client/js/host/lunhui.js';
+import { modulesListing } from './helpers/inventory.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
@@ -366,4 +371,53 @@ test("Markets', Trade's and the desk's host lines as the store holds them: the d
   assert.equal(fillWords({ type: 'fill', data: { side: 'buy', qty: 2, kind: 'event', name: "<Fed & co's>", price: 0.62, avg: true, venueName: 'V<1>', paper: true } }),
     "Bought 2 contracts · <Fed & co's> @ 62¢ avg · V<1> · Paper account");
   assert.equal(fillWords({ data: { side: 'sell', kind: 'event', symbol: 'X' } }), 'Sold contracts · X');
+});
+
+test("a channel's, Discover's, the Run sheet's and the run view's host lines as the store or the editor holds them", async () => {
+  const odd = Object.assign(new Error("<no> & won't"), {});
+  // a channel's writes (host/channels.js): the name rule, a channel made but not listed, six bots, a refusal in its words
+  // or in none
+  const cs = createStore({ initial: emptyState(), reducers });
+  const channels = startChannels({ store: cs, postJson: async path => { if (path === '/data/channels') return { dir: 'nowhere' }; throw path === '/data/channels/agents' ? odd : {}; }, getJson: async () => ({}), refresh: async () => {} });
+  assert.deepEqual(await channels.create('_template'), { error: 'Letters, digits, - or _' });
+  assert.deepEqual(await channels.create('alpha'), { error: 'Created, not listed yet' });
+  assert.deepEqual(await channels.setBots('w', ['a', 'b', 'c', 'd', 'e', 'f', 'g']), { error: 'At most six bots' });
+  assert.deepEqual(await channels.setAgents('w', ['codex']), { error: "<no> & won't" });
+  assert.deepEqual(await channels.setBots('w', ['a']), { error: 'failed' });
+  // Discover's line (host/discover.js): an agent write refused, in its words or none; a save refused; a new bot's refusals
+  const ds = createStore({ initial: emptyState(), reducers });
+  const discover = startDiscover({ store: ds, getJson: async () => ({ ok: true, bots: [], local: [] }), call: async () => ({}), postJson: async path => {
+    if (path === '/data/agents/connect') throw odd;
+    if (path === '/data/bots') return { ok: true };
+    throw {};
+  } });
+  await discover.connect('codex');
+  assert.deepEqual(ds.get().discover.status, { line: "connect: <no> & won't", bad: true });
+  await discover.rescan();
+  assert.deepEqual(ds.get().discover.status, { line: 'rescan: failed', bad: true });
+  await discover.disconnect('codex');
+  assert.deepEqual(ds.get().discover.status, { line: 'disconnect: failed', bad: true });
+  await discover.saveBot({ id: 'b', revision: 'r' }, { name: 'B', description: '', model: '', soul: '' });
+  assert.deepEqual(ds.get().discover.status, { line: 'save: failed', bad: true });
+  assert.deepEqual(await discover.createBot({ name: ' ', id: '' }), { error: 'Give it a name' });
+  assert.deepEqual(await discover.createBot({ name: 'Bot', id: '' }), { error: 'Created, not listed yet' });
+  // the Run sheet's lines (host/run-sheet.js): no such module, the listing unread
+  const rs = createStore({ initial: emptyState(), reducers });
+  const unread = startRunSheet({ store: rs, actions: { newConversation: async () => null }, readListing: async () => null, go: () => {}, now: () => 0 });
+  await unread.open('nope');
+  assert.deepEqual(rs.get().discover.status, { line: 'Not a module', bad: true });
+  await unread.open('theme');
+  assert.equal(rs.get().runSheet.said, 'the modules listing could not be read');
+  const listed = startRunSheet({ store: rs, actions: { newConversation: async () => null }, readListing: async () => modulesListing(), go: () => {}, now: () => 0 });
+  await listed.open('theme');
+  await listed.run();
+  assert.equal(rs.get().runSheet.said, "Couldn't send — the conversation may exist untitled in the channel");
+  // the run view's failure words (host/lunhui.js), as the slice holds them: an answer with no view, a read failed in no words
+  const RUN = '20261027T201627Z-6937d208';
+  const msg = id => ({ id, seq: 1, at: 1, from: 'gravit', kind: 'composed', text: 's', data: { strategy: 'cn-market', run: RUN, blocks: [], choices: [], modules: [id] } });
+  const conv = { id: 'c1', title: 'c1', kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: true, updatedAt: 5, created: null, messages: [msg('a'), msg('b'), msg('c')], loaded: true, preview: null, usage: null, thinking: null, lastSeen: 0 };
+  const ls = createStore({ initial: { ...emptyState(), route: { screen: 'messages', id: 'c1' }, conversations: [conv] }, reducers });
+  await ensureViews(ls, async path => { if (path.endsWith('=a')) return { ok: true }; if (path.endsWith('=b')) throw undefined; throw odd; });
+  const errors = Object.values(ls.get().lunhui.views).map(v => v.error);
+  assert.deepEqual(errors, ['the answer held no view', 'the view could not be read', "<no> & won't"]);
 });

@@ -7,6 +7,7 @@ import { renderModule } from '../../client/js/render/modules.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { listings, buffett, modulesListing, MARKET_RUN } from './helpers/inventory.js';
+import { withTable } from '../../client/js/i18n/words.js';
 
 const loadedFrom = (lists, route = { screen: 'discover', id: null }) => {
   let s = emptyState();
@@ -212,4 +213,18 @@ test("a module page's latest artifact: shown for the latest run alone, never ano
   assert.doesNotMatch(other, /<summary>/);
   assert.doesNotMatch(other, /OLDER_RUN|20261027T020000Z/);
   assert.match(other, /open the channel page to read older runs/);
+});
+
+test("an item's line is known by its shelf and a module's unread head by its code, never by a table word", () => {
+  const table = { 'discover.kind.mcp': 'Serveur', 'discover.kindLine.mcp': 'Serveur MCP', 'discover.unread': 'Illisible', 'common.loading': 'Chargement…' };
+  withTable(table, () => {
+    const h = page('mcp:alpaca-kit');
+    assert.match(h, /<div class="dim">Serveur MCP<\/div>/);
+    const s = R.nav(emptyState(), { screen: 'module', id: 'sentiment' });
+    const failed = renderModule(R.shelfFailed(s, { shelf: 'modules', at: 1 }));
+    assert.match(failed, /class="chip grey">—</, 'a listing that failed draws — in the head');
+    assert.match(failed, /Illisible/);
+    assert.match(renderModule(s), /class="chip grey">…</, 'one first read draws …');
+    assert.match(renderModule(s), /Chargement…/);
+  });
 });

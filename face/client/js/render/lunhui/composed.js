@@ -20,19 +20,29 @@ import { yesterdayHtml } from './yesterday.js';
 import { signalsHtml } from './signals.js';
 import { sourcesHtml } from './sources.js';
 import { footerHtml } from './footer.js';
+import { t, th } from '../../i18n/words.js';
 
 // kind → drawer
 const DRAWERS = { verdicts: verdictsHtml, breadth: breadthHtml, indices: indicesHtml, ladder: ladderHtml, yesterday: yesterdayHtml, signals: signalsHtml, sources: sourcesHtml };
 
-const SKELETON = {
-  verdicts: 'Drawing the verdicts…', breadth: 'Drawing breadth…', indices: 'Drawing the indices…',
-  ladder: 'Drawing the ladder…', yesterday: 'Drawing yesterday…', signals: 'Drawing the signals…', sources: 'Drawing the sources…',
-};
+// a block's line while the view is on its way
+function skeletonWord(kind) {
+  switch (kind) {
+    case 'verdicts': return t('lunhui.skel.verdicts');
+    case 'breadth': return t('lunhui.skel.breadth');
+    case 'indices': return t('lunhui.skel.indices');
+    case 'ladder': return t('lunhui.skel.ladder');
+    case 'yesterday': return t('lunhui.skel.yesterday');
+    case 'signals': return t('lunhui.skel.signals');
+    case 'sources': return t('lunhui.skel.sources');
+    default: return t('lunhui.skel.any');
+  }
+}
 
 // the answer's id on the page: a message id is its log's own, so the conversation names it too
 export const composedId = (m, conv) => `${conv?.id ?? ''}-${m.id}`;
 
-const skeleton = block => `<div class="lh-skel" role="status">${esc(SKELETON[block.kind] ?? 'Drawing…')}</div>`;
+const skeleton = block => `<div class="lh-skel" role="status">${esc(skeletonWord(block.kind))}</div>`;
 const titleOnly = block => (typeof block.title === 'string' && block.title !== '' ? `<div class="lh-title">${esc(block.title)}</div>` : '');
 
 // a drawer's headlines with their pool names linked; the rest of its HTML as it drew it
@@ -43,7 +53,7 @@ function drawn(block, view, ui, id, key) {
   const draw = Object.hasOwn(DRAWERS, block.kind) ? DRAWERS[block.kind] : null;
   if (!draw) return linkTitles(titleOnly(block), view, key);
   // a view that does not hold what a drawer reads costs that block, not the answer
-  try { return linkTitles(draw(view, block, ui ?? {}, id, key), view, key); } catch { return `<div class="lh-error">This block could not be drawn.</div>`; }
+  try { return linkTitles(draw(view, block, ui ?? {}, id, key), view, key); } catch { return `<div class="lh-error">${th('lunhui.blockFailed')}</div>`; }
 }
 
 // the footer after the blocks, once the view is here; one it cannot read costs only itself
@@ -68,8 +78,8 @@ export function composedHtml(m, entry, ui, conv, channels) {
   const text = markdownHtml(m.text ?? d.summary ?? '');
   const summary = `<div class="lh-summary">${loaded ? linkNames(text, entry.view, key) : text}</div>`;
   if (entry?.status === 'failed') {
-    return `<div class="lh-answer">${summary}<div class="lh-error" role="status">The run view could not be loaded: ${esc(entry.error ?? '')} ` +
-      `<button type="button" class="btn-sm" data-action="lunhuiRetry" data-key="${esc(key)}">Retry</button></div>${choicesHtml(d, key)}</div>`;
+    return `<div class="lh-answer">${summary}<div class="lh-error" role="status">${th('lunhui.viewFailed', { error: entry.error ?? '' })} ` +
+      `<button type="button" class="btn-sm" data-action="lunhuiRetry" data-key="${esc(key)}">${th('lunhui.retry')}</button></div>${choicesHtml(d, key)}</div>`;
   }
   const id = composedId(m, conv);
   const body = blocks.map(b => `<section class="lh-block">${loaded ? drawn(b, entry.view, ui, id, key) : skeleton(b)}</section>`).join('');

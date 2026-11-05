@@ -4,6 +4,7 @@
 // which the answer draws under its summary with a Retry. Pure but for the read it is handed.
 import { firstOpen } from './sessions.js';
 import { cursorPatch } from '../render/lunhui/intraday.js';
+import { t } from '../i18n/words.js';
 
 const str = v => (typeof v === 'string' ? v : '');
 const modulesOf = d => (Array.isArray(d?.modules) ? d.modules.filter(m => typeof m === 'string') : []);
@@ -43,7 +44,7 @@ export function wantedViews(state) {
 
 // a failed read in words: the status when the face answered one, else the error's own message
 const wordsOf = error => (typeof error?.status === 'number' ? `HTTP ${error.status}`
-  : typeof error?.message === 'string' && error.message !== '' ? error.message : 'the view could not be read');
+  : typeof error?.message === 'string' && error.message !== '' ? error.message : t('lunhui.view.failed'));
 
 // read every wanted view: loading at once, then loaded or failed. The app calls this after every render and a dispatch
 // renders, so a key another call marked in between (a render between two loads) is left to that call: nothing is asked twice
@@ -55,7 +56,7 @@ export async function ensureViews(store, getJson) {
       const body = await getJson(viewPath({ strategy, run, modules }));
       const view = body?.view;
       if (view && typeof view === 'object') store.dispatch('lunhuiViewLoaded', { key, view });
-      else store.dispatch('lunhuiViewFailed', { key, error: 'the answer held no view' });
+      else store.dispatch('lunhuiViewFailed', { key, error: t('lunhui.view.noView') });
     } catch (error) {
       store.dispatch('lunhuiViewFailed', { key, error: wordsOf(error) });
     }
@@ -123,10 +124,10 @@ export const marketKey = code => `cn:${code}`;
 export function boardOf(code) {
   const c = stockCode(code);
   if (!c) return null;
-  if (/^60/.test(c)) return 'SH main board';
-  if (/^68[89]/.test(c)) return 'STAR';
-  if (/^00[0-3]/.test(c)) return 'SZ main board';
-  if (/^30[01]/.test(c)) return 'ChiNext';
-  if (/^(?:4|8|92)/.test(c)) return 'BSE';
+  if (/^60/.test(c)) return t('lunhui.board.sh');
+  if (/^68[89]/.test(c)) return t('lunhui.board.star');
+  if (/^00[0-3]/.test(c)) return t('lunhui.board.sz');
+  if (/^30[01]/.test(c)) return t('lunhui.board.chinext');
+  if (/^(?:4|8|92)/.test(c)) return t('lunhui.board.bse');
   return null;
 }

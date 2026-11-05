@@ -3,6 +3,7 @@
 // claims as the artifact wrote them, then the reviewer's items against it in the stress colour.
 import { esc, attrs, cls } from '../../html.js';
 import { label, headline, pill } from './block.js';
+import { th, tn } from '../../i18n/words.js';
 
 const line = (l, stress = false) => `<div class="${cls('lh-line', stress && 'stress')}"><span class="lh-id">${esc(l?.id ?? '—')}</span>${esc(l?.text ?? '')}</div>`;
 
@@ -16,11 +17,11 @@ export function verdictsHtml(view, block, ui, id) {
     const n = challenged(v);
     return `<button${attrs({ type: 'button', class: cls('lh-tile', v === open && 'open'), 'data-action': 'lunhuiUi', 'data-id': id, 'data-field': 'tile', 'data-value': v.module, 'aria-expanded': v === open ? 'true' : 'false' })}>` +
       `<span class="lh-tile-name">${esc(v.module)}</span>${pill(v.state)}<span class="lh-tile-detail">${esc(v.detail ?? '')}</span>` +
-      (n > 0 ? `<span class="lh-tile-chal">${n} challenged</span>` : '') + '</button>';
+      (n > 0 ? `<span class="lh-tile-chal">${th('lunhui.verdicts.challenged', { n })}</span>` : '') + '</button>';
   }).join('');
   const lines = open
     ? `<div class="lh-lines">${(Array.isArray(open.lines) ? open.lines : []).map(l => line(l)).join('')}${against(open.module).map(x => line(x, true)).join('')}</div>`
     : '';
   const n = verdicts.length;
-  return `${label(`This run · ${n} module${n === 1 ? '' : 's'}`)}${headline(block)}<div class="lh-tiles">${tiles}</div>${lines}`;
+  return `${label(tn('lunhui.verdicts.modules', n))}${headline(block)}<div class="lh-tiles">${tiles}</div>${lines}`;
 }

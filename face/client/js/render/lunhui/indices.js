@@ -5,6 +5,7 @@
 import { esc, attrs, cls } from '../../html.js';
 import { label, headline, signedPct, fix2 } from './block.js';
 import { intradaySvg, sparklineSvg, cursorPatch } from './intraday.js';
+import { t, th } from '../../i18n/words.js';
 
 const hasLine = row => Array.isArray(row?.minutes?.price) && row.minutes.price.length > 0;
 const num = v => (v != null && Number.isFinite(Number(v)) ? Number(v) : null);
@@ -21,12 +22,12 @@ function rowHtml(row, on, id) {
 }
 
 function chart(view, block, row, id) {
-  if (!hasLine(row)) return `<div class="lh-none">No minute line frozen for ${esc(row.name ?? row.symbol)}</div>`;
+  if (!hasLine(row)) return `<div class="lh-none">${th('lunhui.indices.noLine', { name: row.name ?? row.symbol })}</div>`;
   const last = row.minutes.price.length - 1;
   const where = { 'data-id': id, 'data-strategy': view.strategy ?? '', 'data-run': view.run ?? '', 'data-symbol': row.symbol };
   const svg = intradaySvg(row.minutes, { focus: block.focus, minute: last, id })
     .replace(/^<svg class="lh-chart"/, `<svg class="lh-chart"${attrs({ 'data-action': 'lunhuiHover', 'data-last': String(last), ...where })}`);
-  const slider = `<input${attrs({ type: 'range', id: `minute-${id}`, class: 'lh-minute', 'data-action': 'lunhuiMinute', ...where, min: '0', max: String(last), value: String(last), step: '1', 'aria-label': `Minute on ${row.name ?? row.symbol}` })}>`;
+  const slider = `<input${attrs({ type: 'range', id: `minute-${id}`, class: 'lh-minute', 'data-action': 'lunhuiMinute', ...where, min: '0', max: String(last), value: String(last), step: '1', 'aria-label': t('lunhui.minuteOn', { name: row.name ?? row.symbol }) })}>`;
   const words = cursorPatch(view, row.symbol, last)?.readout ?? '';
   return `${svg}${slider}<div class="lh-readout" id="read-${esc(id)}" role="status" aria-live="polite">${esc(words)}</div>`;
 }
@@ -35,11 +36,11 @@ export function indicesHtml(view, block, ui, id) {
   const ix = view.indices;
   const rows = Array.isArray(ix?.rows) ? ix.rows.filter(r => r && typeof r.symbol === 'string') : [];
   if (!ix || ix.unavailable || rows.length === 0) {
-    return `${label('Indices')}${headline(block)}<div class="lh-none">Indices were not frozen for this run.</div>`;
+    return `${label(t('lunhui.indices.title'))}${headline(block)}<div class="lh-none">${th('lunhui.indices.none')}</div>`;
   }
   const picked = rows.find(r => r.symbol === ui.index) ?? rows[0];
-  const through = typeof view.through === 'string' && view.through !== '' ? ` · through ${view.through}` : '';
-  return `${label(`Indices${through}`)}${headline(block)}` +
+  const through = typeof view.through === 'string' && view.through !== '' ? ` · ${t('lunhui.indices.through', { at: view.through })}` : '';
+  return `${label(`${t('lunhui.indices.title')}${through}`)}${headline(block)}` +
     `<div class="lh-ix-rows">${rows.map(r => rowHtml(r, r === picked, id)).join('')}</div>` +
     chart(view, block, picked, id);
 }

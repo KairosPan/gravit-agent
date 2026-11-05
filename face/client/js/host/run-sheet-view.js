@@ -3,6 +3,7 @@
 // Stocks check, the conversation's title and the Chinese message to Gravit — from /data/modules.json. Pure. Every wire
 // string passes through as data for the view to escape.
 import { moduleOf, latestOf, headlineWords } from './modules-view.js';
+import { t, tn } from '../i18n/words.js';
 
 const plain = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const channelsOf = listing => (Array.isArray(listing?.channels) ? listing.channels.filter(plain) : []);
@@ -19,9 +20,6 @@ const MARKET_MODULES = ['environment', 'sentiment', 'theme'];
 const MAX_CODES = 4;
 const CODE = /^(sh60|sz00)\d{4}$/;
 const CITES_SHOWN = 2;
-const STOCKS_HINT = "optional · 1–4 main-board codes, sh60… or sz00…; empty: Gravit picks from the cited run's mainline members and pool; a code outside them is REFERENCE at the contract";
-const STALE = 'run no longer the latest';
-const UNREAD = 'the modules listing could not be read';
 
 // Appendix B, one constant per line; the slots in braces
 const T_MARKET_LATEST = '请只跑 Lunhui 的 {module} 模块：频道 cn-market，运行 {run}（已有运行，不要再冻结）。';
@@ -46,26 +44,26 @@ function whereOptions(listing, m) {
   return list.map(c => ({ value: c.channel, label: c.channel }));
 }
 
-const latestLabel = run => `Latest run · ${run.run} · session ${dateOf(run) ?? 'unknown'}`;
-const frozenWords = run => `frozen: ${frozenOf(run).join(' · ') || 'nothing yet'}`;
+const latestLabel = run => t('runSheet.on.latestRun', { run: run.run, date: dateOf(run) ?? t('runSheet.unknown') });
+const frozenWords = run => t('runSheet.frozen', { what: frozenOf(run).join(' · ') || t('runSheet.nothingYet') });
 // a stale option (G15, the controller's stamp) keeps `enabled` as the artifact rules say, so it can be picked again to
 // re-stamp the run; its reason is the stale one while the newest run would be selectable, else the artifact rule's own
-const option = (id, label, detail, reason, stale = false) => ({ id, label, detail, enabled: reason === null, reason: stale && reason === null ? STALE : reason, stale });
+const option = (id, label, detail, reason, stale = false) => ({ id, label, detail, enabled: reason === null, reason: stale && reason === null ? t('runSheet.stale') : reason, stale });
 
 // two titles as one phrase: `Theme`, `Sentiment and Theme`
-const titlesWords = names => names.map(n => moduleOf(n).title).join(' and ');
+const titlesWords = names => names.map(n => moduleOf(n).title).reduce((a, b) => t('runSheet.both', { a, b }));
 
 // the Latest run option's reason, null when it is open to run: the module's prerequisites on the run (G1, G15)
 function latestReason(m, channel, run) {
-  if (MARKET_MODULES.includes(m.name)) return has(run, m.name) ? `${m.name} already there` : null;
-  if (m.name === 'leader') return has(run, 'leader') ? 'leader already there' : null;
+  if (MARKET_MODULES.includes(m.name)) return has(run, m.name) ? t('runSheet.reason.there', { module: m.name }) : null;
+  if (m.name === 'leader') return has(run, 'leader') ? t('runSheet.reason.there', { module: 'leader' }) : null;
   if (m.name === 'mode') {
-    if (has(run, 'mode')) return 'mode already registered on this run';
-    return has(run, 'leader') && has(run, 'counterevidence') ? null : 'needs Leader, then Counterevidence, on this run';
+    if (has(run, 'mode')) return t('runSheet.reason.modeThere');
+    return has(run, 'leader') && has(run, 'counterevidence') ? null : t('runSheet.reason.needsBoth');
   }
-  if (has(run, 'counterevidence')) return 'review already there';
-  if (channel?.kind === 'market') return MARKET_MODULES.some(n => has(run, n)) ? null : 'no market artifact yet on this run';
-  return has(run, 'leader') ? null : 'needs Leader on this run';
+  if (has(run, 'counterevidence')) return t('runSheet.reason.reviewThere');
+  if (channel?.kind === 'market') return MARKET_MODULES.some(n => has(run, n)) ? null : t('runSheet.reason.noMarket');
+  return has(run, 'leader') ? null : t('runSheet.reason.needsLeader');
 }
 
 // the Latest run option's detail: what the run froze, or what the review would cover (G15)
@@ -75,12 +73,12 @@ function latestDetail(m, channel, run) {
     const present = MARKET_MODULES.filter(n => has(run, n));
     if (present.length === 0) return null;
     const missing = MARKET_MODULES.filter(n => !has(run, n));
-    return `reviews: ${present.join(' · ')}${missing.length ? ` — ${titlesWords(missing)} not run on this run` : ''}`;
+    return `${t('runSheet.reviews', { modules: present.join(' · ') })}${missing.length ? ` — ${t('runSheet.notRunHere', { titles: titlesWords(missing) })}` : ''}`;
   }
   const present = ['leader', 'mode'].filter(n => has(run, n));
-  const line = present.length ? `reviews: ${present.join(' · ')}` : null;
+  const line = present.length ? t('runSheet.reviews', { modules: present.join(' · ') }) : null;
   if (!has(run, 'mode')) return line;
-  return [line, 'warning: mode already registered on this run — this review would go unanswered'].filter(Boolean).join(' — ');
+  return [line, t('runSheet.unanswered')].filter(Boolean).join(' — ');
 }
 
 // On (G1, G14, G15): Latest run from the channel's newest run, New run on the three market cards and Leader
@@ -92,12 +90,12 @@ function onOptions(listing, m, sheet) {
     const stale = sheet.on === 'latest' && sheet.run !== run.run;
     options.push(option('latest', latestLabel(run), latestDetail(m, channel, run), latestReason(m, channel, run), stale));
   } else if (m.name === 'mode' || m.name === 'counterevidence') {
-    options.push(option('latest', 'Latest run', null, 'no run yet'));
+    options.push(option('latest', t('runSheet.on.latest'), null, t('modules.chip.noRun')));
   }
   if (MARKET_MODULES.includes(m.name)) {
-    options.push(option('new', 'New run', `Gravit freezes index · limit-up · boards, then the CN market analyst writes ${m.title} alone; the other two market modules stay not run on that run until run from their cards`, null));
+    options.push(option('new', t('runSheet.on.new'), t('runSheet.on.newMarket', { title: m.title }), null));
   } else if (m.name === 'leader') {
-    options.push(option('new', 'New run', 'Gravit freezes quotes for the stocks, which opens the run', null));
+    options.push(option('new', t('runSheet.on.new'), t('runSheet.on.newLeader'), null));
   }
   return options;
 }
@@ -107,9 +105,9 @@ const sealedMarketRuns = listing => runsIn(channelNamed(listing, MARKET)).filter
   .sort((a, b) => (a.run > b.run ? -1 : a.run < b.run ? 1 : 0)).slice(0, CITES_SHOWN);
 
 function themeWords(run) {
-  if (!has(run, 'theme')) return 'not run';
+  if (!has(run, 'theme')) return t('modules.chip.notRun');
   const a = run.artifacts.theme;
-  return a.status === 'OK' ? headlineWords('theme', a.headline) : 'not evaluable';
+  return a.status === 'OK' ? headlineWords('theme', a.headline) : t('modules.notEvaluable'); // en-kept: the artifact's status, matched
 }
 
 // Cites: Leader picks among the sealed market runs; Mode and a strategy's review read the run's leader's market run
@@ -119,21 +117,21 @@ function citesOf(listing, m, sheet) {
     const runs = sealedMarketRuns(listing);
     const options = runs.map(r => ({
       value: r.run,
-      label: `${r.run} · session ${dateOf(r) ?? 'unknown'} · ${frozenWords(r)} · theme ${themeWords(r)}`,
-      warning: has(r, 'sentiment') && has(r, 'theme') ? null : 'Mode and Counterevidence on this cite would be not evaluable',
+      label: t('runSheet.cite', { run: r.run, date: dateOf(r) ?? t('runSheet.unknown'), frozen: frozenWords(r), theme: themeWords(r) }),
+      warning: has(r, 'sentiment') && has(r, 'theme') ? null : t('runSheet.citeWarning'),
     }));
     const chosen = runs.find(r => r.run === sheet.cites) ?? null;
     const notEvaluable = chosen && has(chosen, 'theme') && chosen.artifacts.theme.status === 'NOT_EVALUABLE';
     return {
       readOnly: false, options, value: chosen ? chosen.run : null,
-      line: notEvaluable ? 'theme not evaluable: the pick comes from the limit-up pool alone' : null,
+      line: notEvaluable ? t('runSheet.themeNotEvaluable') : null,
     };
   }
   if (m.name === 'mode' || (m.name === 'counterevidence' && channel?.kind === 'strategy')) {
     const run = runsIn(channel)[0] ?? null;
     const cited = has(run, 'leader') && typeof run.artifacts.leader.marketRun === 'string' ? run.artifacts.leader.marketRun : null;
     return {
-      readOnly: true, options: cited ? [{ value: cited, label: `${cited} · the run's leader cites it`, warning: null }] : [],
+      readOnly: true, options: cited ? [{ value: cited, label: t('runSheet.citedByLeader', { run: cited }), warning: null }] : [],
       value: cited, line: null,
     };
   }
@@ -146,17 +144,17 @@ function sourceOf(listing, m) {
   const runs = runsIn(channelNamed(listing, MARKET)).filter(r => typeof r.sealedAt === 'string');
   const missing = runs.filter(r => !frozenOf(r).includes('boards')).length;
   if (runs.length === 0 || missing === 0) return null;
-  if (missing < runs.length) return `boards missing in ${missing} of the last ${runs.length} runs`;
-  return runs.length === 1 ? 'boards missing in the last run' : `boards missing in the last ${runs.length} runs`;
+  if (missing < runs.length) return t('runSheet.source.some', { missing, n: runs.length });
+  return tn('runSheet.source.all', runs.length);
 }
 
 /** The Stocks field (G11): main-board codes by shape alone, lower-cased, duplicates folded, at most four. */
 export function stocksOf(text) {
-  const tokens = String(text ?? '').split(/[\s,，、]+/).filter(t => t !== '').map(t => t.toLowerCase());
-  const bad = tokens.find(t => !CODE.test(t));
-  if (bad !== undefined) return { codes: [], error: `not a main-board code: ${bad}` };
+  const tokens = String(text ?? '').split(/[\s,，、]+/).filter(tok => tok !== '').map(tok => tok.toLowerCase());
+  const bad = tokens.find(tok => !CODE.test(tok));
+  if (bad !== undefined) return { codes: [], error: t('runSheet.stocks.notCode', { code: bad }) };
   const codes = [...new Set(tokens)];
-  if (codes.length > MAX_CODES) return { codes: [], error: `at most ${MAX_CODES} codes` };
+  if (codes.length > MAX_CODES) return { codes: [], error: t('runSheet.stocks.atMost', { n: MAX_CODES }) };
   return { codes, error: null };
 }
 
@@ -198,24 +196,24 @@ export function sheetOf(listing, sheet, now = Date.now()) {
   const chosen = onOpts.find(o => o.id === sheet.on) ?? null;
   const cites = where ? citesOf(listing, m, sheet) : null;
   // Stocks on a Leader's New run alone: a Latest run's message has no codes slot; the slice keeps the text meanwhile
-  const stocks = m.name === 'leader' && sheet.on !== 'latest' ? { value: sheet.stocks ?? '', error: stocksOf(sheet.stocks).error, hint: STOCKS_HINT } : null;
+  const stocks = m.name === 'leader' && sheet.on !== 'latest' ? { value: sheet.stocks ?? '', error: stocksOf(sheet.stocks).error, hint: t('runSheet.stocks.hint') } : null;
 
   let blocker = null;
-  if (!plain(listing)) blocker = UNREAD;
-  else if (!where) blocker = 'choose where to run';
-  else if (!chosen) blocker = 'choose a run';
+  if (!plain(listing)) blocker = t('runSheet.unread');
+  else if (!where) blocker = t('runSheet.chooseWhere');
+  else if (!chosen) blocker = t('runSheet.chooseRun');
   else if (chosen.stale || !chosen.enabled) blocker = chosen.reason;
-  else if (cites && !cites.readOnly && !cites.value) blocker = 'choose a market run to cite';
-  else if (cites && cites.readOnly && !cites.value) blocker = "the run's leader names no market run";
+  else if (cites && !cites.readOnly && !cites.value) blocker = t('runSheet.chooseCite');
+  else if (cites && cites.readOnly && !cites.value) blocker = t('runSheet.noCite');
   else if (stocks?.error) blocker = stocks.error;
 
   return {
-    title: `Run ${m.title}`,
+    title: t('runSheet.title', { title: m.title }),
     where: { options: whereOpts, value: where, fixed: m.channels === 'market' },
     on: { options: onOpts, value: chosen ? chosen.id : null },
     cites, stocks, source: sourceOf(listing, m), note: { value: sheet.note ?? '' },
-    via: `Gravit in ${where ?? '…'} → ${m.role}, ${m.name} alone`,
-    writes: `${m.file} · a conversation "${titleOf(listing, sheet, now)}"`,
+    via: t('runSheet.via', { where: where ?? '…', role: m.role, module: m.name }),
+    writes: `${m.file} · ${t('runSheet.aConversation')} "${titleOf(listing, sheet, now)}"`,
     canRun: blocker === null, blocker,
   };
 }

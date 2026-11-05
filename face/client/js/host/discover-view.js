@@ -3,14 +3,18 @@
 // Research (module cards spec §5.1), the bots on Bots (never the default composition, which is Gravit), Gravit and the
 // local CLI agents on Agents, the skills on Skills.
 import { researchItems } from './modules-view.js';
+import { t, tn } from '../i18n/words.js';
+import { HOST_NAME } from '../wire/speaker.js';
 
-export const SHELVES = Object.freeze([
-  { id: 'data', title: 'Data', empty: 'No MCP servers' },
-  { id: 'research', title: 'Research', empty: 'No research modules' },
-  { id: 'bots', title: 'Bots', empty: 'No bots yet' },
-  { id: 'agents', title: 'Agents', empty: 'No agents' },
-  { id: 'skills', title: 'Skills', empty: 'No skills' },
-]);
+export const SHELF_IDS = Object.freeze(['data', 'research', 'bots', 'agents', 'skills']);
+// the shelves in order, each with its title and its empty words, read when drawn
+export const shelves = () => [
+  { id: 'data', title: t('discover.shelf.data'), empty: t('discover.empty.data') },
+  { id: 'research', title: t('discover.shelf.research'), empty: t('discover.empty.research') },
+  { id: 'bots', title: t('discover.shelf.bots'), empty: t('discover.empty.bots') },
+  { id: 'agents', title: t('discover.shelf.agents'), empty: t('discover.empty.agents') },
+  { id: 'skills', title: t('discover.shelf.skills'), empty: t('discover.empty.skills') },
+];
 // the listing each shelf is drawn from (host/discover.js reads them)
 export const SOURCE = Object.freeze({ data: 'plugins', research: 'modules', bots: 'bots', agents: 'agents', skills: 'memory' });
 
@@ -21,27 +25,27 @@ const letter = name => ({ type: 'letter', text: String(name).slice(0, 1).toUpper
 function dataItems(plugins) {
   return list(plugins?.mcp).filter(m => word(m.server)).map(m => {
     const n = list(m.tools).length;
-    return { id: `mcp:${m.server}`, shelf: 'data', kind: 'MCP', name: m.server, line: `${n} tool${n === 1 ? '' : 's'}`, mark: { type: 'glyph', icon: 'plug' }, source: m };
+    return { id: `mcp:${m.server}`, shelf: 'data', kind: t('discover.kind.mcp'), name: m.server, line: tn('discover.tools', n), mark: { type: 'glyph', icon: 'plug' }, source: m };
   });
 }
 
 function botItems(bots) {
   return list(bots?.bots).filter(b => word(b.id) && b.isDefault !== true).map(b => {
     const name = word(b.name) ? b.name : b.id;
-    return { id: `bot:${b.id}`, shelf: 'bots', kind: 'Bot', name, line: word(b.description) ? b.description : '', mark: letter(name), source: b };
+    return { id: `bot:${b.id}`, shelf: 'bots', kind: t('discover.kind.bot'), name, line: word(b.description) ? b.description : '', mark: letter(name), source: b };
   });
 }
 
 // Gravit first (the main agent is always there), then the connected agents, then the ones found but not connected
 function agentItems(agents) {
   const main = agents?.main && typeof agents.main === 'object' ? agents.main : {};
-  const gravit = { id: 'agent:gravit', shelf: 'agents', kind: 'Agent', name: word(main.name) ? main.name : 'Gravit', line: word(main.runtime) ? main.runtime : '', mark: { type: 'gravit' }, source: main };
+  const gravit = { id: 'agent:gravit', shelf: 'agents', kind: t('discover.kind.agent'), name: word(main.name) ? main.name : HOST_NAME, line: word(main.runtime) ? main.runtime : '', mark: { type: 'gravit' }, source: main };
   const local = list(agents?.local).filter(a => word(a.bin)).map(a => ({
-    id: `agent:${a.bin}`, shelf: 'agents', kind: 'Agent', name: word(a.label) ? a.label : a.bin, line: a.found === true ? 'Connected' : 'Not found',
+    id: `agent:${a.bin}`, shelf: 'agents', kind: t('discover.kind.agent'), name: word(a.label) ? a.label : a.bin, line: a.found === true ? t('discover.agent.connected') : t('discover.notFound'),
     mark: { type: 'glyph', icon: 'agent' }, source: { ...a, connected: true },
   }));
   const found = list(agents?.candidates).filter(a => word(a.bin)).map(a => ({
-    id: `agent:${a.bin}`, shelf: 'agents', kind: 'Agent', name: word(a.label) ? a.label : a.bin, line: word(a.version) ? `Found · ${a.version}` : 'Found',
+    id: `agent:${a.bin}`, shelf: 'agents', kind: t('discover.kind.agent'), name: word(a.label) ? a.label : a.bin, line: word(a.version) ? t('discover.agent.foundVersion', { version: a.version }) : t('discover.agent.found'),
     mark: { type: 'glyph', icon: 'agent' }, source: { ...a, connected: false },
   }));
   return [gravit, ...local, ...found];
@@ -49,7 +53,7 @@ function agentItems(agents) {
 
 function skillItems(memory) {
   return list(memory?.groups).flatMap(g => list(g.skills).filter(k => word(k.name)).map(k => ({
-    id: `skill:${k.name}`, shelf: 'skills', kind: 'Skill', name: k.name, line: word(k.description) ? k.description : '', group: word(g.name) ? g.name : '',
+    id: `skill:${k.name}`, shelf: 'skills', kind: t('discover.kind.skill'), name: k.name, line: word(k.description) ? k.description : '', group: word(g.name) ? g.name : '',
     mark: { type: 'glyph', icon: 'book' }, source: k,
   })));
 }

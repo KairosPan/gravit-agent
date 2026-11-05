@@ -3,12 +3,13 @@
 import { esc } from '../../html.js';
 import { asked } from './sources.js';
 import { chinaStamp } from './time.js';
+import { t, th } from '../../i18n/words.js';
 
 // channels: state.channels; the run's channel (its name is the strategy) gets Open run, any other run nothing
 export function footerHtml(view, channels) {
   const sources = Array.isArray(view?.sources) ? view.sources.filter(asked) : [];
-  const words = ['Evidence', ...sources.map(s => `${s.source} ${s.frozen ? '✓' : '✗'}`), `frozen ${chinaStamp(view?.frozenAt)}`, `run ${view?.run ?? '—'}`];
+  const words = [t('lunhui.foot.evidence'), ...sources.map(s => `${s.source} ${s.frozen ? '✓' : '✗'}`), t('lunhui.foot.frozen', { at: chinaStamp(view?.frozenAt) }), t('lunhui.foot.run', { run: view?.run ?? '—' })];
   const own = Array.isArray(channels) && typeof view?.strategy === 'string' ? channels.find(c => c?.name === view.strategy && c.workspaceId) : null;
-  const open = own ? ` <button type="button" class="lh-open-run" data-action="lunhuiOpenRun" data-id="${esc(own.workspaceId)}">Open run ›</button>` : '';
+  const open = own ? ` <button type="button" class="lh-open-run" data-action="lunhuiOpenRun" data-id="${esc(own.workspaceId)}">${th('lunhui.foot.openRun')}</button>` : '';
   return `<div class="lh-foot">${esc(words.join(' · '))}${open}</div>`;
 }

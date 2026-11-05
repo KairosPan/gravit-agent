@@ -4,6 +4,7 @@
 import { esc, cls } from '../../html.js';
 import { seg } from '../controls.js';
 import { label, headline, readout, count, fix2, signedPct, stockLink } from './block.js';
+import { t, th } from '../../i18n/words.js';
 
 const tone = v => { const r = Number(Number(v).toFixed(2)); return r > 0 ? 'up' : r < 0 ? 'down' : 'flat'; };
 const fin = v => v != null && v !== '' && Number.isFinite(Number(v));
@@ -19,7 +20,7 @@ function nameHtml(r, view, key) {
 export function yesterdayHtml(view, block, ui, id, key) {
   const y = view.yesterday;
   if (!y || typeof y !== 'object' || y.unavailable) {
-    return `${label("Yesterday's limit-ups")}${headline(block)}<div class="lh-none">Yesterday's limit-ups were not frozen for this run.</div>`;
+    return `${label(t('lunhui.yesterday.title'))}${headline(block)}<div class="lh-none">${th('lunhui.yesterday.none')}</div>`;
   }
   const rows = (Array.isArray(y.rows) ? y.rows : []).filter(r => r && typeof r === 'object');
   const mode = ui?.ysort === 'boards' ? 'boards' : 'pct';
@@ -27,7 +28,7 @@ export function yesterdayHtml(view, block, ui, id, key) {
   const max = Math.max(0, ...rows.map(r => Math.abs(pctOf(r) ?? 0)));
   const below = fin(y.belowMinus5Share) ? `${fix2(Number(y.belowMinus5Share) * 100)}%` : '—';
   const tile = (k, v) => `<div class="lh-stat"><span class="lh-stat-k">${esc(k)}</span><span class="lh-stat-v">${esc(v)}</span></div>`;
-  const control = seg([['By change', 'pct'], ['By boards', 'boards']], mode, 'lunhuiUi', { 'data-id': id, 'data-field': 'ysort' });
+  const control = seg([[t('lunhui.byChange'), 'pct'], [t('lunhui.yesterday.byBoards'), 'boards']], mode, 'lunhuiUi', { 'data-id': id, 'data-field': 'ysort' });
   const list = sorted.length
     ? `<div class="lh-yrows">${sorted.map(r => {
       const p = pctOf(r);
@@ -36,8 +37,8 @@ export function yesterdayHtml(view, block, ui, id, key) {
         `<span class="${cls('lh-ypct', p == null ? 'flat' : tone(p))}">${esc(pctText(p))}</span>` +
         `<span class="lh-ybar" aria-hidden="true">${p == null ? '' : `<span class="${cls('lh-ybar-fill', tone(p))}" style="width:${w.toFixed(1)}%"></span>`}</span></div>`;
     }).join('')}</div>`
-    : '<div class="lh-none">No name at two boards or more yesterday.</div>';
-  return `${label(`Yesterday's limit-ups · ${num(y.count)}`)}${headline(block)}${control}` +
-    `<div class="lh-stats">${tile('Median', pctText(y.median))}${tile('Below −5%', below)}</div>${list}` +
-    readout(`${num(y.count)} limit-ups yesterday · median ${pctText(y.median)} · ${below} below −5%`);
+    : `<div class="lh-none">${th('lunhui.yesterday.noName')}</div>`;
+  return `${label(t('lunhui.yesterday.label', { n: num(y.count) }))}${headline(block)}${control}` +
+    `<div class="lh-stats">${tile(t('lunhui.yesterday.median'), pctText(y.median))}${tile(t('lunhui.yesterday.below'), below)}</div>${list}` +
+    readout(t('lunhui.yesterday.readout', { n: num(y.count), median: pctText(y.median), below }));
 }

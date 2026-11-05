@@ -2,7 +2,7 @@
 // Data, bots on Bots, Gravit and the CLI agents on Agents, skills on Skills; ids namespaced.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { itemsOf, searchItems, itemById, SHELVES } from '../../client/js/host/discover-view.js';
+import { itemsOf, searchItems, itemById, SHELF_IDS, shelves } from '../../client/js/host/discover-view.js';
 import { listings, modulesListing } from './helpers/inventory.js';
 
 const shelf = data => ({ status: 'ready', data, at: 1 });
@@ -10,8 +10,9 @@ const shelf = data => ({ status: 'ready', data, at: 1 });
 const discover = (over = {}) => ({ query: '', shelves: { ...listings(), ...over } });
 
 test('the five shelves, in order', () => {
-  assert.deepEqual(SHELVES.map(s => s.id), ['data', 'research', 'bots', 'agents', 'skills']);
-  assert.deepEqual(SHELVES.map(s => s.title), ['Data', 'Research', 'Bots', 'Agents', 'Skills']);
+  assert.deepEqual(SHELF_IDS, ['data', 'research', 'bots', 'agents', 'skills']);
+  assert.deepEqual(shelves().map(s => s.id), SHELF_IDS);
+  assert.deepEqual(shelves().map(s => s.title), ['Data', 'Research', 'Bots', 'Agents', 'Skills']);
 });
 
 test('Research: six module items from the modules listing, with chips; six still when the listing never came', () => {
