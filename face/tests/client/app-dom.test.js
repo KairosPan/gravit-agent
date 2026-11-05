@@ -5822,7 +5822,7 @@ test('a pill opens Details scrolled to Usage', async () => {
   await h.ready();
   h.streams[0].cbs.onItem({ type: 'projection', sessionId: 's1', key: 'sessionStats', value: { turns: 2, steps: 5, llmMs: 9000, toolMs: 0, ttftMs: 2000, ttftSteps: 5, decodeMs: 0, decodeTokens: 0 }, seq: 4 });
   await settle();
-  assert.match(f.html(), /<button type="button" class="stats-pill" id="pill-figures-s1" data-action="openUsage">2 turns · 5 steps<\/button>/);
+  assert.match(f.html(), /<button type="button" class="stats-pill" id="pill-figures-s1" data-action="openUsage" aria-label="2 turns · 5 steps, open Usage">2 turns · 5 steps<\/button>/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'openUsage' } });
   await settle();
   assert.equal(store.get().detailsOpen, true);
@@ -5851,7 +5851,7 @@ test('each pill keeps its own focus: pill 2 stays focused across a render, and E
   h.streams[0].cbs.onItem({ type: 'projection', sessionId: 's1', key: 'sessionStats', value: { turns: 2, steps: 5, llmMs: 9000, toolMs: 0, ttftMs: 2000, ttftSteps: 5, decodeMs: 0, decodeTokens: 0 }, seq: 4 });
   h.streams[0].cbs.onItem({ type: 'projection', sessionId: 's1', key: 'tokenUsage', value: { uncachedInputTokens: 900, cacheReadTokens: 100, outputTokens: 50 }, seq: 5 });
   await settle();
-  assert.match(f.html(), /id="pill-tokens-s1" data-action="openUsage">1.1k tokens · cache 10%</);
+  assert.match(f.html(), /id="pill-tokens-s1" data-action="openUsage" aria-label="1.1k tokens · cache 10%, open Usage">1.1k tokens · cache 10%</);
   pill2.focus();
   store.dispatch('hostStatus', { line: 'a stream frame' });
   await settle();
@@ -5881,8 +5881,9 @@ function railRig({ pages, rows = [row('s1', { agentAvailable: true })], turns = 
   let own = null;
   rail.writes = 0;
   Object.defineProperty(rail, 'innerHTML', {
-    get: () => (own && own.at === f.writes ? own.html : f.html().match(/<nav class="turn-rail" id="turn-rail" aria-label="Turns">([\s\S]*?)<\/nav>/)?.[1] ?? ''),
-    set: html => { own = { at: f.writes, html }; rail.writes++; f.doc.activeElement = f.body; },
+    get: () => (own && own.at === f.writes ? own.html : f.html().match(/<nav class="turn-rail" id="turn-rail" aria-label="Turns" role="toolbar" aria-orientation="vertical">([\s\S]*?)<\/nav>/)?.[1] ?? ''),
+    // (afterWrite, when a test sets it, sees the element that had focus before the write)
+    set: html => { const was = f.doc.activeElement; own = { at: f.writes, html }; rail.writes++; f.doc.activeElement = f.body; rail.afterWrite?.(was); },
   });
   const marks = {};
   for (const [turn, top] of [[1, 0], [2, 100], [3, 500]]) {
@@ -5928,7 +5929,7 @@ test('hovering a tick draws its card in the rail alone', async () => {
   await snap();
   const writes = f.writes;
   f.fire('root', 'mouseover', { target: tickEl(1) });
-  assert.match(rail.innerHTML, /id="turn-tick-1"[^>]*><\/button><div class="turn-card" role="tooltip"><div class="turn-card-head">Turn 1 · jump<\/div><div class="turn-card-prompt">first ask<\/div><div class="turn-card-reply">first reply<\/div><\/div>/);
+  assert.match(rail.innerHTML, /id="turn-tick-1"[^>]*><\/button><div class="turn-card" id="turn-card-1" role="tooltip"><div class="turn-card-head">Turn 1 · jump<\/div><div class="turn-card-prompt">first ask<\/div><div class="turn-card-reply">first reply<\/div><\/div>/);
   f.fire('root', 'mouseover', { target: tickEl(2) });
   assert.match(rail.innerHTML, /Turn 2 · jump/);
   assert.doesNotMatch(rail.innerHTML, /Turn 1 · jump/);
@@ -6116,6 +6117,85 @@ test('a focused tick keeps focus across the rail\'s own redraw', async () => {
   assert.ok(rail.writes > writes, 'redrawn');
   assert.equal(f.doc.activeElement, tick);
   assert.equal(tick.focusedWith?.preventScroll, true);
+  store.timers.clear();
+});
+
+// plan 6, Task 11: the rail one Tab stop, its ticks walked with the arrows, Home and End
+const keyOn = (f, target, key) => {
+  let prevented = false;
+  f.fire('doc', 'keydown', { key, code: key, target, preventDefault() { prevented = true; } });
+  return prevented;
+};
+
+test('↓ on a tick focuses the next one and shows its card; Home and End go to the ends', async () => {
+  const { f, rail, h, snap } = railRig();
+  const ticks = { 1: focusableTick(f, 1), 2: focusableTick(f, 2), 3: focusableTick(f, 3) };
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  ticks[1].focus();
+  assert.match(rail.innerHTML, /Turn 1 · jump/);
+  const writes = f.writes;
+  let drawn = rail.writes;
+  assert.equal(keyOn(f, ticks[1], 'ArrowDown'), true, 'the arrow is the rail\'s');
+  assert.equal(f.doc.activeElement, ticks[2]);
+  assert.equal(rail.writes, drawn + 1, 'the rail redrawn once');
+  assert.match(rail.innerHTML, /id="turn-tick-2"[^>]*tabindex="0"[^>]*aria-describedby="turn-card-2"[^>]*><\/button><div class="turn-card" id="turn-card-2" role="tooltip"><div class="turn-card-head">Turn 2 · jump/);
+  assert.match(rail.innerHTML, /id="turn-tick-1"[^>]*tabindex="-1"/);
+  assert.doesNotMatch(rail.innerHTML, /Turn 1 · jump/);
+  keyOn(f, ticks[2], 'ArrowUp');
+  assert.equal(f.doc.activeElement, ticks[1]);
+  assert.match(rail.innerHTML, /Turn 1 · jump/);
+  drawn = rail.writes;
+  keyOn(f, ticks[1], 'ArrowUp');
+  assert.equal(f.doc.activeElement, ticks[1], '↑ on the first stays');
+  assert.equal(rail.writes, drawn, 'and draws nothing');
+  keyOn(f, ticks[1], 'End');
+  assert.equal(f.doc.activeElement, ticks[3]);
+  assert.match(rail.innerHTML, /Turn 3 · jump/);
+  keyOn(f, ticks[3], 'Home');
+  assert.equal(f.doc.activeElement, ticks[1]);
+  assert.match(rail.innerHTML, /id="turn-tick-1"[^>]*tabindex="0"/);
+  assert.equal(f.writes, writes, 'the page is not rendered');
+  // the page's own render keeps the focused tick as the rail's one stop
+  h.streams.find(s => s.name === 'session/follow').cbs.onItem({ type: 'event', event: said(41).event });
+  await settle();
+  assert.match(f.html(), /said 41/);
+  assert.match(f.html(), /id="turn-tick-1"[^>]*tabindex="0"/);
+  store.timers.clear();
+});
+
+test("an arrow's redraw removes the focused tick and its focusout hides no card", async () => {
+  const { f, rail, h, snap } = railRig();
+  const ticks = { 1: focusableTick(f, 1), 2: focusableTick(f, 2), 3: focusableTick(f, 3) };
+  // as Chrome does: the write takes the focused tick out of the document, and it fires focusout as it goes
+  rail.afterWrite = was => {
+    if (was?.id?.startsWith('turn-tick-')) f.fire('root', 'focusout', { target: { ...tickEl(Number(was.dataset.turn)), isConnected: false }, relatedTarget: null });
+  };
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  ticks[1].focus();
+  const drawn = rail.writes;
+  keyOn(f, ticks[1], 'ArrowDown');
+  assert.equal(f.doc.activeElement, ticks[2]);
+  assert.match(rail.innerHTML, /Turn 2 · jump/, 'the card stays');
+  assert.equal(rail.writes, drawn + 1, 'one redraw, no loop');
+  store.timers.clear();
+});
+
+test('the arrows do nothing outside the rail', async () => {
+  const { f, rail, h, snap } = railRig();
+  const tick = focusableTick(f, 1);
+  const store = started(f, h);
+  await h.ready();
+  await snap();
+  tick.focus();
+  const say = { tagName: 'DIV', id: 'say', dataset: {}, closest: () => null };
+  const drawn = rail.writes;
+  for (const key of ['ArrowDown', 'ArrowUp', 'Home', 'End']) assert.equal(keyOn(f, say, key), false, `${key} in the editor is the editor's`);
+  assert.equal(rail.writes, drawn, 'the rail is not drawn');
+  assert.equal(f.doc.activeElement, tick, 'focus does not move');
   store.timers.clear();
 });
 

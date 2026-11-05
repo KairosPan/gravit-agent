@@ -449,7 +449,7 @@ test('the rail draws a tick per turn, loaded and active as told, nothing under t
   const c = conv({ outline: [entry(1, 2), entry(2, 14), entry(3, 20)], window: { start: 13, through: 30, hasMore: true, replaced: [] } });
   const h = railHtml(c, { active: 3 });
   assert.equal(h.match(/<div class="turn-row">/g).length, 3);
-  assert.match(h, /<div class="turn-row"><button type="button" class="turn-tick" id="turn-tick-1" data-action="jumpTurn" data-turn="1" aria-label="Turn 1"><\/button><\/div>/);
+  assert.match(h, /<div class="turn-row"><button type="button" class="turn-tick" id="turn-tick-1" data-action="jumpTurn" data-turn="1" aria-label="Turn 1" tabindex="-1"><\/button><\/div>/);
   assert.match(h, /class="turn-tick loaded" id="turn-tick-2"/);
   assert.match(h, /class="turn-tick loaded active" id="turn-tick-3"/);
   assert.match(railHtml(c, { pulse: 1 }), /class="turn-tick pulse" id="turn-tick-1"/);
@@ -463,7 +463,7 @@ test("the hovered tick's card reads its turn, its masked prompt and, once finish
   const { railHtml } = await import('../../client/js/render/thread.js');
   const c = conv({ outline: [entry(1, 2, `use ${SK} <b>`, 'done <i>'), entry(2, 12, 'and now?', '')] });
   const h = railHtml(c, { hover: 1 });
-  const card = h.match(/<div class="turn-card" role="tooltip">[\s\S]*?<\/div><\/div><\/div>/)?.[0] ?? '';
+  const card = h.match(/<div class="turn-card" id="turn-card-1" role="tooltip">[\s\S]*?<\/div><\/div><\/div>/)?.[0] ?? '';
   assert.match(card, /<div class="turn-card-head">Turn 1 · jump<\/div>/);
   assert.match(card, /<div class="turn-card-prompt">use sk-proj-\*+ &lt;b&gt;<\/div>/, 'the prompt masked and escaped');
   assert.ok(!card.includes(SK));
@@ -483,6 +483,36 @@ test("the rail's markup is the same string for the same inputs", async () => {
   assert.ok(Object.is(a, b));
   assert.notEqual(railHtml(conv({ outline, window }), { active: 2 }), a);
   assert.notEqual(railHtml(conv({ outline: [...outline], window }), { active: 2, hover: 2 }), a);
+});
+
+// plan 6, Task 11: the rail as one Tab stop (a toolbar's roving tabindex), its card describing its tick, the pulse busy
+test('one tick is in the Tab order: the active turn\'s, else the last', async () => {
+  const { railHtml } = await import('../../client/js/render/thread.js');
+  const c = conv({ outline: [entry(1, 2), entry(2, 14), entry(3, 20)], window: { start: 13, through: 30, hasMore: true, replaced: [] } });
+  const stops = h => [...h.matchAll(/id="turn-tick-(\d)"[^>]*tabindex="(-1|0)"/g)].map(x => [Number(x[1]), x[2]]);
+  assert.deepEqual(stops(railHtml(c, { active: 2 })), [[1, '-1'], [2, '0'], [3, '-1']]);
+  assert.deepEqual(stops(railHtml(c, {})), [[1, '-1'], [2, '-1'], [3, '0']], 'no active turn: the last');
+  assert.deepEqual(stops(railHtml(c, { active: 2, focus: 1 })), [[1, '0'], [2, '-1'], [3, '-1']], 'the focused tick first');
+  assert.deepEqual(stops(railHtml(c, { active: 9 })), [[1, '-1'], [2, '-1'], [3, '0']], 'a turn the rail has not: the last');
+  assert.match(railHtml(c, {}), /<button type="button" class="turn-tick" id="turn-tick-1" data-action="jumpTurn" data-turn="1" aria-label="Turn 1" tabindex="-1"><\/button>/);
+});
+
+test('the hovered tick is described by its card', async () => {
+  const { railHtml } = await import('../../client/js/render/thread.js');
+  const c = conv({ outline: [entry(1, 2, 'ask', 'reply'), entry(2, 12, 'and now?', '')] });
+  const h = railHtml(c, { hover: 1 });
+  assert.match(h, /id="turn-tick-1"[^>]*aria-describedby="turn-card-1"[^>]*><\/button><div class="turn-card" id="turn-card-1" role="tooltip">/);
+  assert.equal(h.match(/aria-describedby/g).length, 1, 'only the tick whose card is drawn');
+  assert.doesNotMatch(railHtml(c, {}), /aria-describedby|turn-card/);
+});
+
+test('the pulse tick is busy', async () => {
+  const { railHtml } = await import('../../client/js/render/thread.js');
+  const c = conv({ outline: [entry(1, 2), entry(2, 14)], window: { start: 13, through: 30, hasMore: true, replaced: [] } });
+  const h = railHtml(c, { pulse: 1 });
+  assert.match(h, /class="turn-tick pulse" id="turn-tick-1"[^>]*aria-busy="true"/);
+  assert.equal(h.match(/aria-busy/g).length, 1);
+  assert.doesNotMatch(railHtml(c, {}), /aria-busy/);
 });
 
 // the final review's ruling: a title is derived from the first prompt, so a conversation chip's label is masked too

@@ -16,7 +16,7 @@ import { childrenOf } from '../host/children-view.js';
 import { channelLabel } from '../host/list-view.js';
 import { renderMenu, menuAria, filesRail } from '../composer/view.js';
 import { statsView, pillsText, durationText, clockText } from '../host/turns-view.js';
-import { jobsView, metaLine, endLine, isLive } from '../host/jobs-view.js';
+import { jobsView, metaLine, isLive } from '../host/jobs-view.js';
 
 export function currentConversation(state) {
   const id = state.route.screen === 'messages' ? state.route.id : null;
@@ -109,12 +109,12 @@ function usageRows(conv) {
 }
 
 // under a conversation's composer: the status line, then the figures' two pills once a step has closed (each opens
-// Details at Usage; an empty one is not drawn); nothing when both are empty. Each pill has its own id, so focus stays on
-// the one it was on across a render and comes back to it when Details closes
+// Details at Usage, and says so to a screen reader; an empty one is not drawn); nothing when both are empty. Each pill has
+// its own id, so focus stays on the one it was on across a render and comes back to it when Details closes
 const PILLS = ['figures', 'tokens'];
 export function statsPills(conv) {
   return pillsText(statsView(conv.stats, conv.usage?.tokenUsage))
-    .map((text, i) => (text ? `<button${attrs({ type: 'button', class: 'stats-pill', id: `pill-${PILLS[i]}-${conv.id}`, 'data-action': 'openUsage' })}>${esc(text)}</button>` : '')).join('');
+    .map((text, i) => (text ? `<button${attrs({ type: 'button', class: 'stats-pill', id: `pill-${PILLS[i]}-${conv.id}`, 'data-action': 'openUsage', 'aria-label': t('thread.pill.open', { text }) })}>${esc(text)}</button>` : '')).join('');
 }
 function threadFoot(conv, state) {
   const inner = renderStatus(state.status) + statsPills(conv);
@@ -172,7 +172,8 @@ function jobMeta(job, now) {
 function jobDetails(job, state, now) {
   const live = isLive(job);
   const empty = !live && (Number(job.output?.total) || 0) === 0;
-  const end = live ? '' : [empty ? t('jobs.noOutput') : '', endLine(job)].filter(Boolean).join(' · ');
+  // (a finished job's end line is its meta line's: the line under the output says only that there was none)
+  const end = empty ? t('jobs.noOutput') : '';
   return `<details${attrs({ id: `jobd-${job.id}`, class: 'job-details', open: state.jobs?.open === job.id })}>` +
     `<summary${attrs({ 'data-action': 'openJob', 'data-job': job.id })}><span class="${cls('job-dot', live && 'live')}"></span><code class="job-cmd">${esc(job.label)}</code><span class="job-meta">${jobMeta(job, now)}</span></summary>` +
     `<pre${attrs({ class: 'job-out', id: `jobout-${job.id}` })}></pre><div${attrs({ class: 'job-note', id: `jobnote-${job.id}` })}></div>` +
@@ -228,5 +229,5 @@ export function renderMessagesScreen(state, now, composer = {}, page = {}) {
   const conv = currentConversation(state);
   if (!conv) return emptyScreen(state, composer);
   const placeholder = conv.kind === 'group' ? t('composer.placeholderRoom') : t('composer.placeholder');
-  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="${th('thread.turns')}">${railHtml(conv, page.rail)}</nav></div>${renderComposer(composerOf(composer, { placeholder }))}${threadFoot(conv, state)}${state.detailsOpen ? renderDetails(conv, state, now) : ''}</main>`;
+  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="${th('thread.turns')}" role="toolbar" aria-orientation="vertical">${railHtml(conv, page.rail)}</nav></div>${renderComposer(composerOf(composer, { placeholder }))}${threadFoot(conv, state)}${state.detailsOpen ? renderDetails(conv, state, now) : ''}</main>`;
 }

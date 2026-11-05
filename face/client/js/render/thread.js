@@ -252,17 +252,21 @@ export function renderThread(conv, state, now, page = {}) {
 }
 
 // the turn rail (D22), the inside of #turn-rail: a tick per turn, the hovered one's card beside it (its prompt and reply
-// masked whoever spoke, as every excerpt is); '' when the rail does not show. Memoized on its inputs, not on railView's
-// output (new objects every call): the page renders 10–20 times a second while a turn streams
+// masked whoever spoke, as every excerpt is) and describing its tick; '' when the rail does not show. The rail is one Tab
+// stop (a toolbar): the focused tick's, else the active turn's, else the last; the arrows walk the rest (app.js). Memoized
+// on its inputs, not on railView's output (new objects every call): the page renders 10–20 times a second while a turn
+// streams
 let railMemo = null;
-export function railHtml(conv, { active = null, hover = null, pulse = null } = {}) {
+export function railHtml(conv, { active = null, hover = null, pulse = null, focus = null } = {}) {
   const w = conv?.window;
-  const key = [conv?.id, conv?.outline, conv?.loaded, w?.start, w?.hasMore, active, hover, pulse, wordsEpoch()];
+  const key = [conv?.id, conv?.outline, conv?.loaded, w?.start, w?.hasMore, active, hover, pulse, focus, wordsEpoch()];
   if (railMemo && railMemo.key.every((v, i) => Object.is(v, key[i]))) return railMemo.html;
   const { show, ticks } = railOf(conv);
+  const stop = [focus, active].find(n => n !== null && ticks.some(tk => tk.turn === n)) ?? ticks.at(-1)?.turn;
   const html = !show ? '' : ticks.map(tk => {
-    const tick = `<button${attrs({ type: 'button', class: cls('turn-tick', tk.loaded && 'loaded', tk.turn === active && 'active', tk.turn === pulse && 'pulse'), id: `turn-tick-${tk.turn}`, 'data-action': 'jumpTurn', 'data-turn': tk.turn, 'aria-label': t('thread.turn', { n: tk.turn }) })}></button>`;
-    const card = tk.turn !== hover ? '' : `<div class="turn-card" role="tooltip"><div class="turn-card-head">${esc(t('thread.turnJump', { n: tk.turn }))}</div>` +
+    const carded = tk.turn === hover;
+    const tick = `<button${attrs({ type: 'button', class: cls('turn-tick', tk.loaded && 'loaded', tk.turn === active && 'active', tk.turn === pulse && 'pulse'), id: `turn-tick-${tk.turn}`, 'data-action': 'jumpTurn', 'data-turn': tk.turn, 'aria-label': t('thread.turn', { n: tk.turn }), tabindex: tk.turn === stop ? '0' : '-1', 'aria-describedby': carded && `turn-card-${tk.turn}`, 'aria-busy': tk.turn === pulse && 'true' })}></button>`;
+    const card = !carded ? '' : `<div class="turn-card" id="turn-card-${tk.turn}" role="tooltip"><div class="turn-card-head">${esc(t('thread.turnJump', { n: tk.turn }))}</div>` +
       `<div class="turn-card-prompt">${esc(maskExcerpt(tk.prompt))}</div>${tk.response ? `<div class="turn-card-reply">${esc(maskExcerpt(tk.response))}</div>` : ''}</div>`;
     return `<div class="turn-row">${tick}${card}</div>`;
   }).join('');

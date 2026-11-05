@@ -561,9 +561,10 @@ export function boot(win, host = {}) {
   const revealed = new Set();
   let last = { lightbox: false, overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, start: null, anchor: null, editor: null, confirm: null, query: '', key: null };
   let confirmFrom = null;
-  // the turn rail's page state (D22): the turn the view is on, the hovered or focused tick, the tick pulsing while its
-  // pages load and the jump waiting for its mark; forgotten once the conversation leaves the screen
-  const freshRail = () => ({ active: null, hover: null, pulse: null, jump: null });
+  // the turn rail's page state (D22): the turn the view is on, the hovered or focused tick (its card drawn), the tick that
+  // has focus (the rail's one Tab stop), the tick pulsing while its pages load and the jump waiting for its mark; forgotten
+  // once the conversation leaves the screen
+  const freshRail = () => ({ active: null, hover: null, focus: null, pulse: null, jump: null });
   let rail = freshRail();
   let railSeen = null;      // the rail's inputs as last measured: the conversation, its outline, its window's start and more
   let railTimer = null;     // a scroll's measure, coalesced
@@ -833,13 +834,14 @@ export function boot(win, host = {}) {
     clockTimer = timers.after(1000, () => tickClocks(true));
   }
 
-  // the turn rail alone, never the page (a scroll, a hover, a pulse): its focused tick keeps focus by its id
+  // the turn rail alone, never the page (a scroll, a hover, a pulse, an arrow): its focused tick keeps focus by its id, or
+  // focus goes to the tick an arrow named (to)
   const railConv = () => { const s = store.get(); return s.route.screen === 'messages' && !s.draft ? currentConversation(s) ?? null : null; };
-  function drawRail() {
+  function drawRail(to = null) {
     if (pressed) { railHeld = true; return; }   // as a render is held: the press's click must find its element
     const el = doc.getElementById('turn-rail');
     if (!el) return;
-    const focused = doc.activeElement?.id?.startsWith?.('turn-tick-') ? doc.activeElement.id : null;
+    const focused = to ?? (doc.activeElement?.id?.startsWith?.('turn-tick-') ? doc.activeElement.id : null);
     const conv = railConv();
     railDrawing = true;
     try {
@@ -875,10 +877,25 @@ export function boot(win, host = {}) {
     const el = thread.scrollHeight > thread.clientHeight ? thread : doc.scrollingElement;
     return !el || el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   }
-  function hoverRail(turn) {
-    if (railDrawing || turn === rail.hover) return;
+  // the card shown (turn, or null), and the tick that has focus (a pointer leaves it as it is)
+  function hoverRail(turn, focus = rail.focus) {
+    if (railDrawing || (turn === rail.hover && focus === rail.focus)) return;
     rail.hover = turn;
+    rail.focus = focus;
     drawRail();
+  }
+  // ↑ ↓ Home End on a tick: focus to the previous, next, first or last tick, its card shown as a focus shows it, the rail
+  // redrawn alone (its own focus inside the redraw shows no second card, and the tick it took away hides none)
+  function stepRail(from, key) {
+    const conv = railConv();
+    if (!conv) return;
+    const turns = railView(conv).ticks.map(k => k.turn);
+    const i = turns.indexOf(from);
+    const to = key === 'Home' ? turns[0] : key === 'End' ? turns.at(-1) : i < 0 ? undefined : turns[i + (key === 'ArrowDown' ? 1 : -1)];
+    if (to === undefined || to === from) return;
+    rail.hover = to;
+    rail.focus = to;
+    drawRail(`turn-tick-${to}`);
   }
 
   // while an IME composes (pinyin), a render would replace the input and lose the composition: hold it until
@@ -2015,9 +2032,9 @@ export function boot(win, host = {}) {
   const inRail = el => Boolean(el?.closest?.('#turn-rail'));
   root.addEventListener('mouseover', ev => { const tick = tickOf(ev.target); if (tick) hoverRail(Number(tick.dataset.turn)); });
   root.addEventListener('mouseout', ev => { if (tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null); });
-  root.addEventListener('focusin', ev => { const tick = refocusing ? null : tickOf(ev.target); if (tick) hoverRail(Number(tick.dataset.turn)); });
+  root.addEventListener('focusin', ev => { const tick = refocusing ? null : tickOf(ev.target); if (tick) { const turn = Number(tick.dataset.turn); hoverRail(turn, turn); } });
   // (a focused tick a page write took out of the document fires a focusout too, in Chrome: not the focus leaving)
-  root.addEventListener('focusout', ev => { if (!refocusing && ev.target?.isConnected !== false && tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null); });
+  root.addEventListener('focusout', ev => { if (!refocusing && ev.target?.isConnected !== false && tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null, null); });
   root.addEventListener('change', ev => {
     const el = ev.target;
     if (el.tagName === 'SELECT' && el.dataset?.action === 'draftWhere') {
@@ -2162,6 +2179,14 @@ export function boot(win, host = {}) {
         return;
       }
       if (k === 'Escape' || k === 'Tab') { ev.preventDefault(); dismissed = menuTrig; closeMenu(); return; }
+    }
+    // the rail's keys on a tick (a toolbar's): ↑ ↓ the previous and next tick, Home and End the ends; Enter and Space are
+    // the button's own press
+    const onTick = tickOf(ev.target);
+    if (onTick && !imeOpen && !ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(ev.key)) {
+      ev.preventDefault();
+      stepRail(Number(onTick.dataset.turn), ev.key);
+      return;
     }
     if (ev.key === 'Escape') {
       if (imeOpen) return;

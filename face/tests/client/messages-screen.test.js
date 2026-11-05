@@ -253,7 +253,7 @@ test("the editor says whether its menu is open, and which row is active, as it i
 test("a conversation's thread sits in its box beside an empty rail; New message keeps a bare thread", () => {
   const s = listed([conv('a')]);
   const h = renderMessagesScreen(s, NOW);
-  assert.match(h, /<div class="thread-box"><div class="thread" id="thread">[\s\S]*<\/div><nav class="turn-rail" id="turn-rail" aria-label="Turns"><\/nav><\/div>/);
+  assert.match(h, /<div class="thread-box"><div class="thread" id="thread">[\s\S]*<\/div><nav class="turn-rail" id="turn-rail" aria-label="Turns" role="toolbar" aria-orientation="vertical"><\/nav><\/div>/);
   const draft = renderMessagesScreen(R.startDraft(s), NOW);
   assert.match(draft, /<div class="thread" id="thread"><\/div>/);
   assert.doesNotMatch(draft, /thread-box|turn-rail/);
@@ -314,11 +314,23 @@ test('Usage keeps its three rows and gains cache hit, turns and steps, model and
 test('the pills show after the first step, right of the status line, and open Usage', () => {
   const s = R.hostStatus(listed([conv('a', { usage: { tokenUsage: TOKENS }, stats: STATS })]), { line: 'Reconnecting…' });
   const h = renderMessagesScreen(s, NOW);
-  assert.match(h, /<\/form><div class="thread-foot"><div class="status-line" role="status">Reconnecting…<\/div><button type="button" class="stats-pill" id="pill-figures-a" data-action="openUsage">7 turns · 41 steps · 38 tok\/s<\/button><button type="button" class="stats-pill" id="pill-tokens-a" data-action="openUsage">182k tokens · cache 63%<\/button><\/div>/);
+  assert.match(h, /<\/form><div class="thread-foot"><div class="status-line" role="status">Reconnecting…<\/div><button type="button" class="stats-pill" id="pill-figures-a" data-action="openUsage" aria-label="7 turns · 41 steps · 38 tok\/s, open Usage">7 turns · 41 steps · 38 tok\/s<\/button><button type="button" class="stats-pill" id="pill-tokens-a" data-action="openUsage" aria-label="182k tokens · cache 63%, open Usage">182k tokens · cache 63%<\/button><\/div>/);
   // no usage yet: the second pill would be empty, so it is not drawn
   const bare = renderMessagesScreen(R.hostStatus(listed([conv('a', { stats: { ...STATS, turns: 1, steps: 1, decodeMs: 0 } })]), { line: '' }), NOW);
-  assert.match(bare, /<div class="thread-foot"><button type="button" class="stats-pill" id="pill-figures-a" data-action="openUsage">1 turn · 1 step<\/button><\/div>/);
+  assert.match(bare, /<div class="thread-foot"><button type="button" class="stats-pill" id="pill-figures-a" data-action="openUsage" aria-label="1 turn · 1 step, open Usage">1 turn · 1 step<\/button><\/div>/);
   assert.equal(count(bare, /stats-pill/g), 1);
+});
+
+// plan 6, Task 11: a pill says what it does to a screen reader
+test('a pill names its action', () => {
+  const s = R.hostStatus(listed([conv('a', { stats: { ...STATS, decodeMs: 0 } })]), { line: '' });
+  const h = renderMessagesScreen(s, NOW);
+  assert.match(h, /<button type="button" class="stats-pill" id="pill-figures-a" data-action="openUsage" aria-label="7 turns · 41 steps, open Usage">7 turns · 41 steps<\/button>/);
+});
+
+test('the rail is a vertical toolbar named Turns', () => {
+  const h = renderMessagesScreen(listed([conv('a')]), NOW);
+  assert.match(h, /<nav class="turn-rail" id="turn-rail" aria-label="Turns" role="toolbar" aria-orientation="vertical">/);
 });
 
 test('no stats, no pills: the foot is the status line alone, or nothing', () => {
@@ -392,9 +404,10 @@ test('finished jobs fold under Finished · n with Clear, their end lines and (no
   assert.match(d, /<details id="jobs-finished-a" class="jobs-finished"><summary>Finished · 3<\/summary>/);
   const fold = d.slice(d.indexOf('jobs-finished-a'));
   assert.match(fold, /<span class="job-dot"><\/span><code class="job-cmd">run f1<\/code><span class="job-meta">bash · exit 3 · 1m 04s<\/span>/);
-  assert.match(fold, /<div class="job-end">exit 3<\/div>/);
-  assert.match(fold, /<div class="job-end">signal SIGTERM<\/div>/);
-  assert.match(fold, /<div class="job-end">\(no output\) · failed<\/div>/);
+  assert.match(fold, /<span class="job-meta">bash · signal SIGTERM · /);
+  assert.match(fold, /<span class="job-meta">bash · failed · /);
+  assert.equal(count(fold, /class="job-end"/g), 1, 'the end line in the meta line alone; .job-end for (no output) only');
+  assert.match(fold, /<div class="job-end">\(no output\)<\/div>/);
   assert.doesNotMatch(fold, /data-action="stopJob"/, 'no Stop on a finished job');
   assert.doesNotMatch(fold, /data-job-clock/, 'a finished job has no ticking clock');
   assert.match(fold, /<button type="button" class="btn-sm" id="jobs-clear-a" data-action="clearJobs" data-conv="a">Clear<\/button><\/details>/);
@@ -404,6 +417,20 @@ test('finished jobs fold under Finished · n with Clear, their end lines and (no
   assert.doesNotMatch(details(cleared), /jobs-finished/);
   assert.match(details(cleared), /dsec-jobs/);
   assert.doesNotMatch(details(R.clearJobs(withJobs([job('f1', 'completed')]), 'a')), /dsec-jobs/);
+});
+
+test("a finished job's end line is drawn once", () => {
+  const s = withJobs([
+    job('f1', 'completed', { detail: 'exit code: 0', finishedAt: NOW - 1000 }),
+    job('f2', 'completed', { detail: 'exit code: 0', output: { total: 0, earliest: 0 }, finishedAt: NOW }),
+  ]);
+  const d = details(s);
+  const one = d.match(/<details id="jobd-f1"[\s\S]*?<\/details>/)[0];
+  assert.equal(count(one, /exit 0/g), 1, 'exit 0 once, in the meta line');
+  assert.doesNotMatch(one, /job-end/);
+  const empty = d.match(/<details id="jobd-f2"[\s\S]*?<\/details>/)[0];
+  assert.equal(count(empty, /exit 0/g), 1);
+  assert.match(empty, /<div class="job-end">\(no output\)<\/div>/);
 });
 
 test("a job's command is escaped and never masked", () => {

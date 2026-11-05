@@ -141,6 +141,7 @@ export const EN = Object.freeze({
   'thread.turns': 'Turns',
   'thread.turn': 'Turn {n}',
   'thread.turnJump': 'Turn {n} · jump',
+  'thread.pill.open': '{text}, open Usage',
   'thread.gate.approved': 'Approved',
   'thread.gate.declined': 'Declined',
   'thread.gate.answered': 'Answered',
