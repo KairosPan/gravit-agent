@@ -9,6 +9,7 @@
 // logs nothing of a preparation or an answer.
 import { draftOf, fieldsOf, guardFirstOf, guardFirstDone, guardFirstRefused } from './sheet-view.js';
 import { refusedAt, refusalOf, saidOf } from './owner-view.js';
+import { t } from '../i18n/words.js';
 
 /** A change is prepared after this long without another. */
 export const PREPARE_QUIET_MS = 300;
@@ -120,9 +121,9 @@ export function startSheet({ store, owner, schedule, cancelTimer, now, afterActi
     let prepared = s.prepared;
     if (s.deadline !== null && s.deadline - now() < RESIGN_UNDER_MS) {
       prepared = await prepareNow();
-      const t = current();
+      const fresh = current();
       // the fresh one, only while it is still the shown one and the form's
-      if (!prepared || !t || t.status !== 'ready' || t.prepared !== prepared || askedOf(t) !== t.asked) return;
+      if (!prepared || !fresh || fresh.status !== 'ready' || fresh.prepared !== prepared || askedOf(fresh) !== fresh.asked) return;
     }
     const mine = opened;
     seq += 1;   // an ask still in the air would land over the sign: dropped
@@ -133,7 +134,7 @@ export function startSheet({ store, owner, schedule, cancelTimer, now, afterActi
     const first = guardFirstOf(s);
     if (first) {
       let stop;
-      try { stop = await beforeSign(s); } catch (err) { stop = String(err?.message || err || 'no answer'); }
+      try { stop = await beforeSign(s); } catch (err) { stop = String(err?.message || err || t('sheet.noAnswer')); }
       if (mine !== opened || !current()) return;
       if (typeof stop === 'string') { stopTick(); store.dispatch('sheetRefused', { message: stop }); return; }
     }

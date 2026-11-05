@@ -25,21 +25,20 @@ const PENDING = [
   'app.js', 'host/channels.js', 'host/desk-view.js', 'host/desk.js',
   'host/discover-view.js', 'host/discover.js', 'host/explore-join.js',
   'host/lunhui.js', 'host/market-depth-view.js', 'host/market-view.js', 'host/markets.js', 'host/modules-view.js',
-  'host/owner-view.js', 'host/owner.js', 'host/run-sheet-view.js', 'host/run-sheet.js',
-  'host/runs-view.js', 'host/sheet-identity.js', 'host/sheet-market.js', 'host/sheet-money.js',
-  'host/sheet-rules.js', 'host/sheet-view.js', 'host/sheet.js', 'host/trade-view.js', 'reducers/owner.js',
+  'host/run-sheet-view.js', 'host/run-sheet.js',
+  'host/runs-view.js', 'host/trade-view.js',
   'render/channel.js', 'render/chart.js', 'render/desk.js', 'render/discover.js',
   'render/lunhui/breadth.js', 'render/lunhui/composed.js', 'render/lunhui/footer.js', 'render/lunhui/indices.js',
   'render/lunhui/intraday.js', 'render/lunhui/ladder.js', 'render/lunhui/notes.js', 'render/lunhui/signals.js',
   'render/lunhui/sources.js', 'render/lunhui/stock.js', 'render/lunhui/verdicts.js', 'render/lunhui/yesterday.js',
-  'render/markets.js', 'render/modules.js', 'render/owner.js', 'render/run-sheet.js', 'render/trade.js',
+  'render/markets.js', 'render/modules.js', 'render/run-sheet.js', 'render/trade.js',
   'wire/botSettings.js', 'wire/market-model.js', 'wire/member-traces.js', 'wire/room.js', 'wire/subagents.js',
 ];
 
 // the most files PENDING may hold, and the en-kept markers under client/js: each words task lowers the first and states the
 // second
-const PENDING_MAX = 51;
-const EN_KEPT = 18;
+const PENDING_MAX = 41;
+const EN_KEPT = 20;
 
 const texts = src => englishLiterals(src, 'snippet.js').map(l => l.text);
 

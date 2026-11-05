@@ -11,13 +11,16 @@ import { RULES_KINDS, rulesTitleOf, rulesGoOf, rulesFieldsOf, rulesDraftOf } fro
 import { IDENTITY_KINDS, identityTitleOf, identityGoOf, identityFieldsOf, identityDraftOf } from './sheet-identity.js';
 import { MONEY_KINDS, moneyTitleOf, moneyGoOf, moneyFieldsOf, moneyRefieldsOf, moneyDraftOf, moveSeedOf, subWalletSeedOf } from './sheet-money.js';
 import { canMove, servedHere, moveSourcesOf } from './money-view.js';
+import { t, tn } from '../i18n/words.js';
 
 const DAY = 86_400_000;
 const ZERO = '0x0000000000000000000000000000000000000000';
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 // a plain decimal, as the Account takes its amounts
 const AMOUNT = /^\d+(\.\d+)?$/;
-const DAYS = ['1', '7', '30', '90'].map(d => ({ value: d, label: d === '1' ? '1 day' : `${d} days` }));
+const DAY_VALUES = ['1', '7', '30', '90'];
+// how long a key or a limit is good for, its words read at the call
+const dayOptions = () => DAY_VALUES.map(d => ({ value: d, label: tn('sheet.days', Number(d)) }));
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -34,21 +37,36 @@ const isRules = kind => RULES_KINDS.includes(kind);
 const isMoney = kind => MONEY_KINDS.includes(kind);
 const isIdentity = kind => IDENTITY_KINDS.includes(kind);
 
-const GO = new Map([
-  ['letIn', 'Let it in'], ['limit', 'Give the limit'], ['endLimit', 'End the limit'], ['revoke', 'Revoke'], ['connect', 'Connect'],
-  ['paper', 'Open the account'], ['topUp', 'Top up'], ['resetPaper', 'Start over'], ['disconnect', 'Disconnect'], ['approveCard', 'Approve'],
-  ['declineAsk', 'Decline'], ['letDevice', 'Let it sign'], ['signOut', 'Sign out'], ['order', 'Sign and place'],
-  ['reopen', 'Sign and reopen'],
-]);
+// the go key of a kind of this module's own
+function goOf(kind) {
+  switch (kind) {
+    case 'letIn': return t('sheet.go.letIn');
+    case 'limit': return t('sheet.go.limit');
+    case 'endLimit': return t('sheet.go.endLimit');
+    case 'revoke': return t('sheet.go.revoke');
+    case 'connect': return t('sheet.go.connect');
+    case 'paper': return t('sheet.go.paper');
+    case 'topUp': return t('sheet.go.topUp');
+    case 'resetPaper': return t('sheet.go.resetPaper');
+    case 'disconnect': return t('sheet.go.disconnect');
+    case 'approveCard': return t('sheet.go.approve');
+    case 'declineAsk': return t('sheet.go.decline');
+    case 'letDevice': return t('sheet.go.letDevice');
+    case 'signOut': return t('sheet.go.signOut');
+    case 'order': return t('sheet.go.order');
+    case 'reopen': return t('sheet.go.reopen');
+    default: return '';
+  }
+}
 
 /** The sheet's go key: a card's is `Reject` when the seed's decision is to reject; an earn's by the side its fields picked. */
 export function goWord(kind, seed, fields) {
-  if (kind === 'approveCard' && seed?.decision === 'reject') return 'Reject';
+  if (kind === 'approveCard' && seed?.decision === 'reject') return t('sheet.go.reject');
   if (isMarket(kind)) return marketGoOf(kind, seed);
   if (isRules(kind)) return rulesGoOf(kind, seed);
   if (isMoney(kind)) return moneyGoOf(kind, seed, fields);
   if (isIdentity(kind)) return identityGoOf(kind, seed);
-  return GO.get(kind) ?? '';
+  return goOf(kind);
 }
 
 /** The sheet's title, naming what the seed names — a move's, the source its fields have picked. */
@@ -60,24 +78,24 @@ export function titleOf(kind, seed, fields) {
   const s = isRecord(seed) ? seed : {};
   const place = str(s.name) || str(s.venue);
   switch (kind) {
-    case 'letIn': return `Let ${str(s.name) || 'a key'} in`;
-    case 'limit': return `Give ${str(s.name) || 'the agent'} a limit`;
+    case 'letIn': return str(s.name) ? t('sheet.title.letIn', { name: s.name }) : t('sheet.title.letInAny');
+    case 'limit': return str(s.name) ? t('sheet.title.limit', { name: s.name }) : t('sheet.title.limitAny');
     case 'endLimit': {
-      const what = scopeOf(s.scope).limit;
-      return str(s.name) ? `End ${s.name}'s ${what}` : `End the ${what}`;
+      const limit = scopeOf(s.scope).limit;
+      return str(s.name) ? t('sheet.title.endLimit', { name: s.name, limit }) : t('sheet.title.endLimitAny', { limit });
     }
-    case 'revoke': return `Revoke ${str(s.name) || 'the key'}`;
-    case 'connect': return 'Connect an account';
-    case 'paper': return 'Open a paper account';
-    case 'topUp': return `Top up ${place || 'the paper account'}`;
-    case 'resetPaper': return `Start ${place || 'the paper account'} over`;
-    case 'disconnect': return `Disconnect ${place || 'the venue'}`;
-    case 'approveCard': return s.decision === 'reject' ? 'Reject the card' : 'Approve the card';
-    case 'declineAsk': return 'Decline the ask';
-    case 'letDevice': return str(s.kid) ? `Let ${s.kid} sign` : 'Let a browser sign';
-    case 'signOut': return 'Sign this page out';
-    case 'order': return 'Place an order';
-    case 'reopen': return `Reopen ${place || 'the venue'} to agents`;
+    case 'revoke': return str(s.name) ? t('sheet.title.revoke', { name: s.name }) : t('sheet.title.revokeAny');
+    case 'connect': return t('sheet.title.connect');
+    case 'paper': return t('sheet.title.paper');
+    case 'topUp': return place ? t('sheet.title.topUp', { place }) : t('sheet.title.topUpAny');
+    case 'resetPaper': return place ? t('sheet.title.resetPaper', { place }) : t('sheet.title.resetPaperAny');
+    case 'disconnect': return place ? t('sheet.title.disconnect', { place }) : t('sheet.title.disconnectAny');
+    case 'approveCard': return s.decision === 'reject' ? t('sheet.title.reject') : t('sheet.title.approve');
+    case 'declineAsk': return t('sheet.title.declineAsk');
+    case 'letDevice': return str(s.kid) ? t('sheet.title.letDevice', { kid: s.kid }) : t('sheet.title.letDeviceAny');
+    case 'signOut': return t('sheet.title.signOut');
+    case 'order': return t('sheet.title.order');
+    case 'reopen': return place ? t('sheet.title.reopen', { place }) : t('sheet.title.reopenAny');
     default: return '';
   }
 }
@@ -109,15 +127,20 @@ const dollarsText = v => (typeof v === 'number' && Number.isFinite(v) ? String(v
 
 // ── the kinds of limit (portfolio.js:1186-1200 pfLimitForm, agents-mount.js:193-196) ──
 
-/** The kinds of limit an agent is given, in the retired page's words: what it may do, what one of its amounts is (an order, a
- *  move, each time, a payment) and the limit's name. */
-export const LIMIT_SCOPES = [
-  { value: 'trade', label: 'Trading', per: 'per order', limit: 'trading limit' },
-  { value: 'venues', label: 'Moving money between your accounts', per: 'per move', limit: 'limit to move money' },
-  { value: 'earn', label: 'Putting money into earn', per: 'each time', limit: 'earn limit' },
-  { value: 'payees', label: 'Paying for things', per: 'per payment', limit: 'payments limit' },
-];
-const scopeOf = v => LIMIT_SCOPES.find(x => x.value === v) ?? LIMIT_SCOPES[0];
+// the kinds of limit, in their order
+const SCOPES = ['trade', 'venues', 'earn', 'payees'];
+// each kind's words, read at the call: what it may do, its amount's field (an order, a move, each time, a payment), the limit's
+// name, and an amount over the budget
+const SCOPE_WORDS = {
+  trade: () => ({ label: t('sheet.scope.trade'), perField: t('sheet.scopePer.trade'), limit: t('sheet.scopeLimit.trade'), over: t('sheet.scopeOver.trade') }),
+  venues: () => ({ label: t('sheet.scope.venues'), perField: t('sheet.scopePer.venues'), limit: t('sheet.scopeLimit.venues'), over: t('sheet.scopeOver.venues') }),
+  earn: () => ({ label: t('sheet.scope.earn'), perField: t('sheet.scopePer.earn'), limit: t('sheet.scopeLimit.earn'), over: t('sheet.scopeOver.earn') }),
+  payees: () => ({ label: t('sheet.scope.payees'), perField: t('sheet.scopePer.payees'), limit: t('sheet.scopeLimit.payees'), over: t('sheet.scopeOver.payees') }),
+};
+/** The kinds of limit an agent is given, in the retired page's words: what it may do, the field for one of its amounts (an
+ *  order, a move, each time, a payment), the limit's name, and the words for an amount over the budget. */
+export const limitScopes = () => SCOPES.map(value => ({ value, ...SCOPE_WORDS[value]() }));
+const scopeOf = v => { const value = SCOPES.includes(v) ? v : 'trade'; return { value, ...SCOPE_WORDS[value]() }; };
 // core.js:254 — the venues the Account is connected to, as its page lists them
 const connectedOf = page => records(page.venues).filter(v => v.live === true && str(v.id) && v.id !== '*');
 // core.js:1277, :1299 — an order can be placed there: the Account takes writes, the venue trades, its key may (or has not said),
@@ -145,7 +168,7 @@ const paperFirst = list => [...list.filter(v => v.paper), ...list.filter(v => !v
 export function limitSeedOf(page, address, name, scope = 'trade') {
   const seed = { address: str(address), name: str(name), scope: str(scope) || 'trade', scopes: [], standing: {}, venues: [], current: null };
   if (!pageOk(page)) return seed;
-  seed.scopes = LIMIT_SCOPES.map(x => ({ value: x.value, label: x.label, venues: paperFirst(scopeVenues(page, x.value).map(venueRow)) }))
+  seed.scopes = limitScopes().map(x => ({ value: x.value, label: x.label, venues: paperFirst(scopeVenues(page, x.value).map(venueRow)) }))
     .filter(x => x.value === 'payees' || x.venues.length);
   for (const x of seed.scopes) {
     const row = records(page.spend).find(r => r.scope === x.value && r.expired !== true && sameAddress(r.agent, address));
@@ -160,8 +183,8 @@ export function limitSeedOf(page, address, name, scope = 'trade') {
 // the kinds of limit a seed offers: its own, or — a seed with none (a trade limit's, as the sheet was first seeded) — trading
 // over its venues
 function scopesOfSeed(s) {
-  const list = records(s.scopes).filter(x => LIMIT_SCOPES.some(y => y.value === x.value));
-  return list.length ? list : [{ value: 'trade', label: 'Trading', venues: records(s.venues) }];
+  const list = records(s.scopes).filter(x => SCOPES.includes(x.value));
+  return list.length ? list : [{ value: 'trade', label: scopeOf('trade').label, venues: records(s.venues) }];
 }
 // the standing limit of a kind: the seed's, or its `current` for the kind it was seeded on
 const standingOf = (s, scope) => (isRecord(s.standing?.[scope]) ? s.standing[scope]
@@ -175,19 +198,19 @@ function limitFields(s, scope, values = null) {
   const scopes = scopesOfSeed(s);
   const kind = scopeOf(scope);
   const current = standingOf(s, scope);
-  const head = { name: 'scope', label: 'For', type: 'seg', options: scopes.map(x => ({ value: x.value, label: str(x.label) || scopeOf(x.value).label })), value: scope };
+  const head = { name: 'scope', label: t('sheet.field.for'), type: 'seg', options: scopes.map(x => ({ value: x.value, label: str(x.label) || scopeOf(x.value).label })), value: scope };
   let where;
   if (scope === 'payees') {
     const allow = listOf(current?.allow);
     where = [
-      { name: 'payees', label: 'May pay', type: 'text', placeholder: 'api.example.com, data.example.com', value: allow.includes('*') ? '' : allow.join(', '), scope },
-      { name: 'anyPayee', label: 'Any payee', type: 'check', value: allow.includes('*') },
+      { name: 'payees', label: t('sheet.field.mayPay'), type: 'text', placeholder: 'api.example.com, data.example.com', value: allow.includes('*') ? '' : allow.join(', '), scope },
+      { name: 'anyPayee', label: t('sheet.field.anyPayee'), type: 'check', value: allow.includes('*') },
     ];
   } else {
     const options = venueOptions({ venues: scopes.find(x => x.value === scope)?.venues });
     const known = new Set(options.map(o => o.value));
     const asked = values ? [] : listOf(s.asked);
-    where = [{ name: 'allow', label: 'Venues', type: 'pick', options, value: [...new Set([...listOf(current?.allow), ...asked].filter(id => known.has(id)))], scope }];
+    where = [{ name: 'allow', label: t('sheet.field.venues'), type: 'pick', options, value: [...new Set([...listOf(current?.allow), ...asked].filter(id => known.has(id)))], scope }];
   }
   let perPayment, budget, days = '30';
   if (values) ({ perPayment, budget, days } = values);
@@ -196,12 +219,11 @@ function limitFields(s, scope, values = null) {
     const standing = str(current?.perPayment);
     perPayment = standing && AMOUNT.test(budget) && Number(standing) > Number(budget) ? budget : standing;
   }
-  const per = kind.per[0].toUpperCase() + kind.per.slice(1);
   return [
     head, ...where,
-    { name: 'perPayment', label: `${per}, in dollars`, type: 'number', placeholder: '100', value: perPayment },
-    { name: 'budget', label: 'Budget, in dollars', type: 'number', placeholder: '1000', value: budget },
-    { name: 'days', label: 'Good for', type: 'seg', options: DAYS, value: DAYS.some(o => o.value === days) ? days : '30' },
+    { name: 'perPayment', label: kind.perField, type: 'number', placeholder: '100', value: perPayment },
+    { name: 'budget', label: t('sheet.field.budget'), type: 'number', placeholder: '1000', value: budget },
+    { name: 'days', label: t('sheet.field.goodFor'), type: 'seg', options: dayOptions(), value: DAY_VALUES.includes(days) ? days : '30' },
   ];
 }
 // a limit's fields after one changed: the kind changed — the pick swapped for that kind's (its standing limit's), the amounts
@@ -240,9 +262,9 @@ export function fieldsOf(kind, seed) {
   const s = isRecord(seed) ? seed : {};
   switch (kind) {
     case 'letIn': return [
-      { name: 'address', label: 'Key address', type: 'text', placeholder: '0x…', value: str(s.address) },
-      { name: 'name', label: 'Name', type: 'text', placeholder: 'Claude Code', value: str(s.name) },
-      { name: 'days', label: 'Good for', type: 'seg', options: DAYS, value: '30' },
+      { name: 'address', label: t('sheet.field.keyAddress'), type: 'text', placeholder: '0x…', value: str(s.address) },
+      { name: 'name', label: t('sheet.field.name'), type: 'text', placeholder: 'Claude Code', value: str(s.name) }, // en-kept: an agent's name, the placeholder
+      { name: 'days', label: t('sheet.field.goodFor'), type: 'seg', options: dayOptions(), value: '30' },
     ];
     case 'limit': {
       const scopes = scopesOfSeed(s);
@@ -252,14 +274,14 @@ export function fieldsOf(kind, seed) {
       const options = connectOptions(s);
       const picked = options.find(o => o.connector === s.connector);
       // `builtFor`: the option these fields were built for, so a change of connector is seen (connectRefieldsOf)
-      const pick = { name: 'connector', label: 'What to connect', type: 'select', options: options.map(o => ({ value: o.connector, label: str(o.label) || o.connector })), value: picked ? picked.connector : '', builtFor: picked ? picked.connector : '' };
+      const pick = { name: 'connector', label: t('sheet.field.whatToConnect'), type: 'select', options: options.map(o => ({ value: o.connector, label: str(o.label) || o.connector })), value: picked ? picked.connector : '', builtFor: picked ? picked.connector : '' };
       // by what the option needs (the Account's connect.js openConnect): an address and the name it is shown as; a sign-in at
       // the venue, whose state lands in the hidden credentialRef once it is ready; a command line on this machine, nothing
       switch (picked?.needs) {
         case 'address': return [
           pick,
-          { name: 'ref', label: 'Address', type: 'text', placeholder: '0x…', value: str(s.ref) },
-          { name: 'label', label: 'Shown as', type: 'text', value: str(s.label) },
+          { name: 'ref', label: t('sheet.field.address'), type: 'text', placeholder: '0x…', value: str(s.ref) },
+          { name: 'label', label: t('sheet.field.shownAs'), type: 'text', value: str(s.label) },
         ];
         case 'sign-in': return [pick, { name: 'credentialRef', label: '', type: 'hidden', value: '' }];
         case 'cli': return [pick];
@@ -268,23 +290,23 @@ export function fieldsOf(kind, seed) {
       const exchanges = exchangesOf(s);
       return [
         pick,
-        ...(exchanges.length ? [{ name: 'exchange', label: 'Exchange', type: 'select', options: exchanges.map(x => ({ value: x, label: x })), value: exchanges.includes(s.exchange) ? s.exchange : '' }] : []),
-        { name: 'venue', label: 'Venue id', type: 'text', placeholder: 'okx', value: str(s.venue) },
-        { name: 'label', label: 'Name', type: 'text', placeholder: 'My exchange account', value: str(s.label) },
-        { name: 'credentialRef', label: 'Key file', type: 'text', placeholder: str(picked?.defaultRef) || 'credentials/<venue>/api-key.json', value: str(s.credentialRef) },
+        ...(exchanges.length ? [{ name: 'exchange', label: t('sheet.field.exchange'), type: 'select', options: exchanges.map(x => ({ value: x, label: x })), value: exchanges.includes(s.exchange) ? s.exchange : '' }] : []),
+        { name: 'venue', label: t('sheet.field.venueId'), type: 'text', placeholder: 'okx', value: str(s.venue) },
+        { name: 'label', label: t('sheet.field.name'), type: 'text', placeholder: t('sheet.field.exchangeName'), value: str(s.label) },
+        { name: 'credentialRef', label: t('sheet.field.keyFile'), type: 'text', placeholder: str(picked?.defaultRef) || 'credentials/<venue>/api-key.json', value: str(s.credentialRef) },
       ];
     }
     case 'paper': return [
-      { name: 'book', label: 'Paper book', type: 'select', options: [{ value: '', label: 'A new paper account' }, ...paperBooks(s).map(b => ({ value: b.venue, label: str(b.name) || b.venue }))], value: '' },
-      { name: 'label', label: 'Name', type: 'text', placeholder: 'Momentum', value: '' },
-      { name: 'usd', label: 'Paper dollars to start with', type: 'number', placeholder: '10000', value: '' },
+      { name: 'book', label: t('sheet.field.paperBook'), type: 'select', options: [{ value: '', label: t('sheet.field.newPaper') }, ...paperBooks(s).map(b => ({ value: b.venue, label: str(b.name) || b.venue }))], value: '' },
+      { name: 'label', label: t('sheet.field.name'), type: 'text', placeholder: t('sheet.field.paperName'), value: '' },
+      { name: 'usd', label: t('sheet.field.paperUsd'), type: 'number', placeholder: '10000', value: '' },
     ];
     // Beast in force: switching to Guard first is offered, ticked for the last device (agents-mount.js signOutAsk)
     case 'signOut': return s.mode === 'open'
-      ? [{ name: 'guard', label: 'Switch to Guard first: whatever an agent asks for waits for a signature', type: 'check', value: othersOf(s) === 0 }]
+      ? [{ name: 'guard', label: t('sheet.field.guardFirst'), type: 'check', value: othersOf(s) === 0 }]
       : [];
-    case 'topUp': return [{ name: 'usd', label: 'Paper dollars to add', type: 'number', placeholder: '1000', value: str(s.usd) }];
-    case 'resetPaper': return [{ name: 'usd', label: 'Start again with, in dollars', type: 'number', placeholder: '10000', value: str(s.usd) }];
+    case 'topUp': return [{ name: 'usd', label: t('sheet.field.addUsd'), type: 'number', placeholder: '1000', value: str(s.usd) }];
+    case 'resetPaper': return [{ name: 'usd', label: t('sheet.field.againUsd'), type: 'number', placeholder: '10000', value: str(s.usd) }];
     // the Trade ticket's, from the ticket view the trade host seeds it with (`seed.ticket`, host/trade-view.js ticketOf)
     case 'order': return tradeFieldsOf(s.ticket);
     default: return [];
@@ -320,8 +342,8 @@ function valueOf(fields, name) {
 const text = (fields, name) => { const v = valueOf(fields, name); return typeof v === 'string' ? v.trim() : ''; };
 const amount = (fields, name) => { const v = valueOf(fields, name); return typeof v === 'string' ? v : typeof v === 'number' && Number.isFinite(v) ? String(v) : ''; };
 // what is wrong with an amount, or null: blank is the sheet's own words; otherwise a plain decimal above zero
-const amountMissing = (v, blank) => (v === '' ? blank : AMOUNT.test(v) && Number(v) > 0 ? null : 'Type an amount in dollars, more than zero');
-const daysOf = fields => { const d = text(fields, 'days'); return DAYS.some(o => o.value === d) ? Number(d) : null; };
+const amountMissing = (v, blank) => (v === '' ? blank : AMOUNT.test(v) && Number(v) > 0 ? null : t('sheet.missing.dollars'));
+const daysOf = fields => { const d = text(fields, 'days'); return DAY_VALUES.includes(d) ? Number(d) : null; };
 const slug = v => v.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
 /** The Account's draft for the sheet, from its fields and its seed — or, while something is missing, the words for it. */
@@ -334,94 +356,94 @@ export function draftOf(kind, fields, seed, now) {
   switch (kind) {
     case 'letIn': {
       const address = text(fields, 'address'), name = text(fields, 'name'), days = daysOf(fields);
-      if (!address) return "Type the key's address";
-      if (!ADDRESS.test(address)) return 'An address is 0x and 40 hex digits';
-      if (!name) return 'Type a name';
-      if (days === null) return 'Pick how long';
+      if (!address) return t('sheet.missing.keyAddress');
+      if (!ADDRESS.test(address)) return t('sheet.missing.address');
+      if (!name) return t('sheet.missing.name');
+      if (days === null) return t('sheet.missing.howLong');
       return { type: 'approveAgent', agentAddress: address.toLowerCase(), agentName: name, validUntil: now + days * DAY };
     }
     case 'limit': {
       const agent = str(s.address);
-      if (!agent) return 'No agent to give a limit to';
+      if (!agent) return t('sheet.missing.noAgent');
       const scope = text(fields, 'scope');
       const offered = scopesOfSeed(s).find(x => x.value === scope);
-      if (!offered) return 'Pick what the limit is for';
+      if (!offered) return t('sheet.missing.scope');
       let allow;
       if (scope === 'payees') {
         // agents-mount.js:193 — the hosts it may pay, lower-cased, or any payee
         const any = valueOf(fields, 'anyPayee');
         allow = any === true || any === 'true' ? '*' : text(fields, 'payees').split(',').map(x => x.trim().toLowerCase()).filter(Boolean).join(',');
-        if (!allow) return 'Name the hosts it may pay, or tick any payee';
+        if (!allow) return t('sheet.missing.payees');
       } else {
         // only the venues this kind may name, in their order, never *
         const picked = new Set(listOf(valueOf(fields, 'allow')));
         allow = venueOptions({ venues: offered.venues }).map(o => o.value).filter(id => picked.has(id)).join(',');
-        if (!allow) return 'Pick at least one venue';
+        if (!allow) return t('sheet.missing.venues');
       }
       const perPayment = amount(fields, 'perPayment'), budget = amount(fields, 'budget');
-      const missing = amountMissing(perPayment, 'Type an amount') ?? amountMissing(budget, 'Type a budget');
+      const missing = amountMissing(perPayment, t('sheet.missing.amount')) ?? amountMissing(budget, t('sheet.missing.budget'));
       if (missing) return missing;
-      if (Number(perPayment) > Number(budget)) return `The amount ${scopeOf(scope).per} is more than the budget`;
+      if (Number(perPayment) > Number(budget)) return scopeOf(scope).over;
       const days = daysOf(fields);
-      if (days === null) return 'Pick how long';
+      if (days === null) return t('sheet.missing.howLong');
       return { type: 'approveSpend', agent, scope, allow, perPayment, budget, windowHours: 0, validUntil: now + days * DAY };
     }
     // agents-mount.js:123 — the end of one limit: the same agent, kind and places, a budget of nothing
     case 'endLimit': {
       const agent = str(s.address), allow = listOf(s.allow).join(',');
-      if (!agent || !allow) return 'No limit to end';
+      if (!agent || !allow) return t('sheet.missing.noLimit');
       // a kind it does not know is refused, never ended as another; none named is a trading limit
       const scope = s.scope === undefined || s.scope === '' ? 'trade' : s.scope;
-      if (!LIMIT_SCOPES.some(x => x.value === scope)) return 'No limit of that kind to end';
+      if (!SCOPES.includes(scope)) return t('sheet.missing.noLimitKind');
       return { type: 'approveSpend', agent, scope, allow, perPayment: '0', budget: '0', windowHours: 0, validUntil: now + DAY };
     }
     case 'revoke':
-      if (!str(s.name)) return 'No key to revoke';
+      if (!str(s.name)) return t('sheet.missing.noKey');
       return { type: 'approveAgent', agentAddress: ZERO, agentName: s.name, validUntil: 0 };
     case 'connect': {
       const option = connectOptions(s).find(o => o.connector === text(fields, 'connector'));
-      if (!option) return 'Pick what to connect';
+      if (!option) return t('sheet.missing.connector');
       const kind = str(option.kind);
       if (option.needs === 'address') {
         const ref = text(fields, 'ref');
-        if (!ADDRESS.test(ref)) return 'An address is 0x and 40 hex digits';
+        if (!ADDRESS.test(ref)) return t('sheet.missing.address');
         // the venue id the retired page gives it (connect.js venueId): the kind, or a second one numbered by its address
         const venue = records(s.venues).some(v => v.id === kind) ? `${kind}-${ref.slice(2, 8).toLowerCase()}` : kind;
         return { type: 'connectVenue', venue, connector: option.connector, label: text(fields, 'label'), credentialRef: ref };
       }
       if (option.needs === 'sign-in') {
         const state = text(fields, 'credentialRef');
-        if (!state) return `Sign in at ${whoOf(option)} first`;
+        if (!state) return t('sheet.missing.signIn', { who: whoOf(option) });
         return { type: 'connectVenue', venue: kind, connector: option.connector, label: '', credentialRef: state };
       }
       if (option.needs === 'cli') return { type: 'connectVenue', venue: kind, connector: option.connector, label: '', credentialRef: '' };
       let connector = option.connector, exchange = '';
       if (needsExchange(option)) {
         exchange = text(fields, 'exchange');
-        if (!listOf(option.venues).includes(exchange)) return 'Pick the exchange';
+        if (!listOf(option.venues).includes(exchange)) return t('sheet.missing.exchange');
         connector = `live:exchange:${exchange}`;
       }
       // an exchange account's venue id is the exchange's unless another is typed
       const venue = text(fields, 'venue') || exchange, label = text(fields, 'label');
-      if (!venue) return 'Type a venue id';
-      if (!label) return 'Type a name';
+      if (!venue) return t('sheet.missing.venueId');
+      if (!label) return t('sheet.missing.name');
       const credentialRef = text(fields, 'credentialRef') || str(option.defaultRef).replaceAll('<venue>', venue);
-      if (!credentialRef) return "Type the key file's path";
+      if (!credentialRef) return t('sheet.missing.keyFile');
       return { type: 'connectVenue', venue, connector, label, credentialRef };
     }
     case 'paper': {
       const book = text(fields, 'book'), label = text(fields, 'label');
       if (book) {
         const kept = paperBooks(s).find(b => b.venue === book);
-        if (!kept) return 'Pick a kept paper book';
+        if (!kept) return t('sheet.missing.paperBook');
         // '' continues the kept book as it was
         return { type: 'connectVenue', venue: kept.venue, connector: 'live:paper', label: label || str(kept.name) || kept.venue, credentialRef: '' };
       }
-      if (!label) return 'Type a name';
+      if (!label) return t('sheet.missing.name');
       const id = slug(label);
-      if (!id) return 'Type a name with a letter or a digit';
+      if (!id) return t('sheet.missing.nameChar');
       const usd = amount(fields, 'usd');
-      const missing = amountMissing(usd, 'Type an amount');
+      const missing = amountMissing(usd, t('sheet.missing.amount'));
       if (missing) return missing;
       // never an id already in use — on the page, or a kept book (a sum there would be refused): -2, -3… as the Account does
       const used = new Set([...paperBooks(s).map(b => b.venue), ...records(s.venues).map(v => str(v.id))]);
@@ -431,41 +453,41 @@ export function draftOf(kind, fields, seed, now) {
     }
     case 'topUp':
     case 'resetPaper': {
-      if (!str(s.venue)) return 'No paper account named';
+      if (!str(s.venue)) return t('sheet.missing.noPaper');
       const usd = amount(fields, 'usd');
-      const missing = amountMissing(usd, 'Type an amount');
+      const missing = amountMissing(usd, t('sheet.missing.amount'));
       if (missing) return missing;
       return { type: kind === 'topUp' ? 'topUpPaper' : 'resetPaper', venue: s.venue, usd };
     }
     case 'disconnect':
-      if (!str(s.venue)) return 'No venue to disconnect';
+      if (!str(s.venue)) return t('sheet.missing.noVenue');
       return { type: 'disconnectVenue', venue: s.venue };
     case 'approveCard':
-      if (!str(s.card) || !str(s.hash)) return 'No card to answer';
-      if (s.decision !== 'approve' && s.decision !== 'reject') return 'Approve or reject';
+      if (!str(s.card) || !str(s.hash)) return t('sheet.missing.noCard');
+      if (s.decision !== 'approve' && s.decision !== 'reject') return t('sheet.missing.decision');
       return { type: 'approveCard', card: s.card, action: s.hash, decision: s.decision };
     case 'declineAsk':
-      if (!str(s.ask)) return 'No ask to decline';
+      if (!str(s.ask)) return t('sheet.missing.noAsk');
       return { type: 'answerAsk', ask: s.ask, decision: 'decline' };
     case 'letDevice': {
-      if (!str(s.kid)) return 'No browser to let in';
+      if (!str(s.kid)) return t('sheet.missing.noBrowser');
       const owners = (Array.isArray(s.owners) ? s.owners : []).map(o => (isRecord(o) ? str(o.id) : str(o))).filter(Boolean);
       // the list REPLACES the owners: without them it would drop every device that signs, this page's own among them
-      if (owners.length === 0) return 'No owner device to sign with';
+      if (owners.length === 0) return t('sheet.missing.noOwner');
       // the Account's rule: a sorted list without repeats; every device signs alone
       const authorizedUsers = [...new Set([...owners, `device:${s.kid}`])].sort();
       return { type: 'convertToMultiSigUser', signers: JSON.stringify({ authorizedUsers, threshold: 1 }) };
     }
     case 'signOut':
-      if (!str(s.kid)) return 'This page does not sign for the account';
+      if (!str(s.kid)) return t('sheet.missing.notSigning');
       return { type: 'signOut', device: `device:${s.kid}` };
     // the liveOrder draft from the Trade ticket (host/trade-view.js): no clock — its deadline is the Account's prepare's
     case 'order': return tradeDraftOf(fields, s.ticket);
     // a venue closed to agents opened to them again: widening what they may do is signed (portfolio.js pfAgentsSwitch)
     case 'reopen':
-      if (!str(s.venue)) return 'No venue to reopen';
+      if (!str(s.venue)) return t('sheet.missing.noReopen');
       return { type: 'setPolicy', change: 'restore', value: s.venue };
-    default: return 'Nothing to sign here';
+    default: return t('sheet.nothingToSign');
   }
 }
 
@@ -489,8 +511,8 @@ export function signOutSeedOf(page, owner) {
 export function signOutLineOf(sheet) {
   if (!isRecord(sheet) || sheet.kind !== 'signOut') return '';
   const n = othersOf(sheet.seed);
-  if (n > 0) return `Your ${n} other ${n === 1 ? 'device keeps' : 'devices keep'} signing.`;
-  return 'No browser will sign for the account until one pairs again, with a new pairing code: the terminal the Account runs in shows it, or npm run account:service -- code when it runs in the background.';
+  if (n > 0) return tn('sheet.signOut.others', n);
+  return t('sheet.signOut.last');
 }
 
 /** The sheet asks Guard before it signs (the engine's `beforeSign`): a sign-out in Beast with its Guard box ticked. */
@@ -502,12 +524,12 @@ export function guardFirstOf(sheet) {
 /** A sign-out signed after a taken Guard: what it said, ending `Guard is on.` */
 export const guardFirstDone = said => {
   const s = str(said).trim();
-  return s ? `${/[.!?]$/.test(s) ? s : `${s}.`} Guard is on.` : 'Guard is on.';
+  return s ? t('sheet.guard.done', { said: /[.!?]$/.test(s) ? s : `${s}.` }) : t('sheet.guard.on');
 };
 /** A sign-out refused after a taken Guard (Guard stays, and says so): the Account's words. */
 export const guardFirstRefused = words => {
-  const w = (str(words) || 'the account did not answer').trim();
-  return `Not signed out: ${/[.!?]$/.test(w) ? w : `${w}.`} Guard is on.`;
+  const w = (str(words) || t('sheet.guard.noAnswer')).trim();
+  return t('sheet.guard.refused', { words: /[.!?]$/.test(w) ? w : `${w}.` });
 };
 
 // ── granting an agent's ask (plan 4b Task 6, portfolio.js pfGrant) ──
@@ -543,7 +565,7 @@ export function grantsAsk(ask, page) {
 }
 
 // the line under a granting sheet's title: the ask in the Account's words
-const askedWordsOf = ask => (str(ask.text) ? `${str(ask.agentName) || 'An agent'} asked: “${ask.text}”` : '');
+const askedWordsOf = ask => (!str(ask.text) ? '' : str(ask.agentName) ? t('sheet.asked.named', { name: ask.agentName, text: ask.text }) : t('sheet.asked.agent', { text: ask.text }));
 // the name an agent wallet is first given: the agent's, letters and digits, at most 16 (portfolio.js pfWalletForm)
 const walletNameOf = name => str(name).replace(/[^A-Za-z0-9]/g, '').slice(0, 16) || 'agent';
 // the connect option a venue is reached through: one of its kind, else the exchange account that lists it (portfolio.js
@@ -614,7 +636,16 @@ export const isWalletOption = option => isRecord(option) && option.kind === 'wal
 // an exchange account's exchange, when the one picked is the option's
 const exchangeOf = (sheet, option) => { const x = text(sheet.fields, 'exchange'); return listOf(option.venues).includes(x) ? x : ''; };
 // the reach's states in words, where the venue gives none of its own
-const REACH_WORDS = { location: 'Not served from here', 'close-only': 'Close only from here', setup: 'Being set up', closed: 'Closed', unreachable: 'Did not answer' };
+function reachWords(state) {
+  switch (state) {
+    case 'location': return t('sheet.reach.location');
+    case 'close-only': return t('sheet.reach.closeOnly');
+    case 'setup': return t('sheet.reach.setup');
+    case 'closed': return t('sheet.reach.closed');
+    case 'unreachable': return t('sheet.reach.unreachable');
+    default: return '';
+  }
+}
 const sameAsk = (a, b) => isRecord(a) && isRecord(b) && ['kind', 'venue', 'ref', 'exchange'].every(k => a[k] === b[k]);
 
 /** The key file the open connect sheet would connect with, as host/account.js's `checkKeyfile` asks it: the picked option's
@@ -643,10 +674,12 @@ export function reachAskOf(sheet) {
 // address it signed for is the one in the form — or its refusal (the wallet's words, or the Account's)
 function walletWords(sheet, w) {
   if (!isRecord(w)) return '';
-  if (w.status === 'none') return 'No browser wallet answered on this page. Type the address to watch it.';
-  if (w.status === 'asking') return `Waiting for ${str(w.wallet) || 'the wallet'}…`;
+  if (w.status === 'none') return t('sheet.wallet.none');
+  if (w.status === 'asking') return str(w.wallet) ? t('sheet.wallet.asking', { wallet: w.wallet }) : t('sheet.wallet.askingAny');
   if (w.status === 'refused') return str(w.message);
-  if (w.status === 'proven' && str(w.address) && text(sheet.fields, 'ref').toLowerCase() === w.address.toLowerCase()) return `${str(w.wallet) || 'The wallet'} signed: ${short(w.address)} is yours.`;
+  if (w.status === 'proven' && str(w.address) && text(sheet.fields, 'ref').toLowerCase() === w.address.toLowerCase()) {
+    return str(w.wallet) ? t('sheet.wallet.proven', { wallet: w.wallet, address: short(w.address) }) : t('sheet.wallet.provenAny', { address: short(w.address) });
+  }
   return '';
 }
 // a sign-in's part (the account slice's `signIn`), only for the option it was started for
@@ -654,12 +687,12 @@ function signInWords(option, si) {
   if (!isRecord(si) || si.connector !== option.connector) return '';
   const who = whoOf(option);
   switch (si.status) {
-    case 'starting': return `Asking ${who} where to sign in…`;
+    case 'starting': return t('sheet.signIn.starting', { who });
     // with no tab of its own, the renderer draws the link to the venue's page in its place
-    case 'waiting': return si.tab === false ? '' : `Sign in on ${who}'s page, then come back.`;
-    case 'ready': return 'Signed in. Connect it.';
-    case 'expired': return 'The sign-in ran out: start again.';
-    case 'failed': return str(si.message) || 'The sign-in did not finish.';
+    case 'waiting': return si.tab === false ? '' : t('sheet.signIn.waiting', { who });
+    case 'ready': return t('sheet.signIn.ready');
+    case 'expired': return t('sheet.signIn.expired');
+    case 'failed': return str(si.message) || t('sheet.signIn.failed');
     default: return '';
   }
 }
@@ -680,16 +713,16 @@ export function connectCheckOf(sheet, keyfile, reach, more = {}) {
   if (option.verdict && option.verdict !== 'connectable' && str(option.said)) parts.push(option.said);
   const connector = reachAskOf(sheet);
   const r = connector && reach?.data?.ok === true ? records(reach.data.reach).find(e => e.connector === connector) : null;
-  if (r && r.state !== 'ok') parts.push(str(r.said) || (Object.hasOwn(REACH_WORDS, r.state) ? REACH_WORDS[r.state] : ''));
+  if (r && r.state !== 'ok') parts.push(str(r.said) || reachWords(r.state));
   if (isWalletOption(option)) parts.push(walletWords(sheet, more?.wallet));
   if (option.needs === 'sign-in') parts.push(signInWords(option, more?.signIn));
   const ask = keyfileAskOf(sheet);
   if (ask && sameAsk(keyfile?.asked, ask)) {
-    if (keyfile.status === 'loading') parts.push('Checking the key file…');
+    if (keyfile.status === 'loading') parts.push(t('sheet.keyfile.checking'));
     else if (keyfile.status === 'error') parts.push(str(keyfile.message));
     else if (keyfile.status === 'ready') {
       const w = keyfileWords(keyfile.data);
-      parts.push(w.ready ? (w.path ? `Key file found: ${w.path}` : 'Key file found') : w.missing.length ? `Missing: ${w.missing.join(', ')}` : w.message);
+      parts.push(w.ready ? (w.path ? t('sheet.keyfile.foundAt', { path: w.path }) : t('sheet.keyfile.found')) : w.missing.length ? t('sheet.keyfile.missing', { fields: w.missing.join(', ') }) : w.message);
     }
   }
   // one sentence once: a venue that did not answer here says so, and a sign-in it refused may say the same

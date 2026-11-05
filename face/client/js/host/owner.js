@@ -8,14 +8,15 @@
 import { kidOf, publicJwkOf, signPrepared, makeKey } from '../wire/owner-key.js';
 import { pageOk } from './account-view.js';
 import { whyOf, refusedAt } from './owner-view.js';
+import { t } from '../i18n/words.js';
 
 const PAIR = '/data/account/pair', PREPARE = '/data/account/prepare', EXCHANGE = '/data/account/exchange';
 // the Account's pair roles under the face's names
 const ROLE_OF = new Map([['owner', 'signs'], ['pending', 'pending'], ['needs-code', 'needs-code']]);
-const NO_ANSWER = 'The account did not answer. Try again.';
+const noAnswer = () => t('owner.noAnswer');
 // the Account's own sentence for a page that does not sign (owner.js signOut)
-const NOT_SIGNING = 'This browser does not sign for the account.';
-const ANOTHER_KEY = 'The account named another key';
+const notSigning = () => t('owner.notSigning');
+const anotherKey = () => t('owner.anotherKey');
 
 const refused = error => ({ status: 0, body: { ok: false, error } });
 const isObject = v => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
@@ -31,12 +32,12 @@ export function postVia(fetch) {
       const parsed = await r.json().catch(() => ({}));
       return { status: r.status, body: isObject(parsed) ? parsed : {} };
     } catch {
-      return { status: 0, body: { ok: false, error: NO_ANSWER } };
+      return { status: 0, body: { ok: false, error: noAnswer() } };
     }
   };
 }
 
-export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit face' }) {
+export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit face' }) { // en-kept: the device's label at the Account, the product's name
   let closed = false;
   let flight = null;        // the pairing in the air: a plain ready() joins it, one with a code (or a sign-in) runs after it
   let asked = false;        // a page that never paired has asked the door, and that ask is still standing
@@ -77,7 +78,7 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
       if (!current()) return;
       const role = r.status === 200 && r.body?.ok !== false ? ROLE_OF.get(r.body?.role) : undefined;
       if (!role) { say(whyOf(r)); return; }
-      if (r.body.kid !== kid) { stand('none', ''); say(ANOTHER_KEY); return; }
+      if (r.body.kid !== kid) { stand('none', ''); say(anotherKey()); return; }
       stand(role, kid);
       say(null);
     } finally {
@@ -131,18 +132,18 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
    *  it is in the air and, taken, ends the device as signOut() does: the flag set, the key deleted. */
   async function submit(prepared) {
     const { role, kid } = store.get().owner;
-    if (role !== 'signs' || !kid || !subtle) return refused(NOT_SIGNING);
-    if (!isObject(prepared?.action) || !Array.isArray(prepared?.shown)) return refused(NOT_SIGNING);
+    if (role !== 'signs' || !kid || !subtle) return refused(notSigning());
+    if (!isObject(prepared?.action) || !Array.isArray(prepared?.shown)) return refused(notSigning());
     const leaving = prepared.action.type === 'signOut' && prepared.action.device === `device:${kid}`;
     if (leaving) { generation += 1; signingOut = true; }
     try {
       let signature;
       try {
         const pair = await keys.get();
-        if (!pair?.privateKey) return refused(NOT_SIGNING);
+        if (!pair?.privateKey) return refused(notSigning());
         signature = await signPrepared(subtle, pair.privateKey, kid, prepared);
       } catch {
-        return refused(NOT_SIGNING);
+        return refused(notSigning());
       }
       const r = await post(EXCHANGE, { action: prepared.action, nonce: prepared.action.nonce, signature });
       if (closed) return r;
@@ -172,7 +173,7 @@ export function startOwner({ store, post, subtle, keys, flag, label = 'Gravit fa
    *  role as they were. */
   async function signOut() {
     const { role, kid } = store.get().owner;
-    if (role !== 'signs' || !kid) return refused(NOT_SIGNING);
+    if (role !== 'signs' || !kid) return refused(notSigning());
     generation += 1;
     signingOut = true;
     try {

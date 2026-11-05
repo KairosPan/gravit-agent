@@ -170,9 +170,10 @@ test('the routes line: finding, the chosen and the others, the Account\'s words,
   assert.deepEqual(routesWordsOf(sheet, { asked: '{"a":1}', status: 'ready', data: { ok: true, routes } }), {
     lead: 'Via across · at least $24.81 USDC arrives · ~40 s · network fee about $0.004 in your wallet',
     others: 'Other routes: stargate fee $0.30, ~10 min; hop fee $0.50, ~2 h',
+    chosen: true,
   });
   assert.deepEqual(routesWordsOf(sheet, { asked: '{"a":1}', status: 'ready', data: { ok: true, routes: [{ tool: 'x', receiveUsd: 1, etaSec: 0 }] } }),
-    { lead: 'Via x · at least $1.00 USDC arrives · ~1 s', others: '' }, 'no network fee said where none is given');
+    { lead: 'Via x · at least $1.00 USDC arrives · ~1 s', others: '', chosen: true }, 'no network fee said where none is given');
   assert.deepEqual(routesWordsOf(sheet, { asked: '{"a":1}', status: 'error', message: 'no bridge joins these chains' }), { lead: 'no bridge joins these chains', others: '' });
   assert.deepEqual(routesWordsOf(sheet, { asked: '{"a":1}', status: 'error', message: null }), { lead: 'No route answered.', others: '' });
   assert.deepEqual(routesWordsOf(sheet, { asked: '{"a":1}', status: 'ready', data: { ok: true, routes: [] } }), { lead: 'No route answered.', others: '' });

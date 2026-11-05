@@ -3,23 +3,22 @@
 // the Account's own reading of an answer (docs/research/2026-10-22-account-owner-path-map.md §2.6–§2.7) — refused or not, its
 // sentence, what it offers, what it said. Every Account string passes as it came (the renderer escapes). No DOM, no store.
 import { pageOk } from './account-view.js';
+import { t } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
 const str = v => (typeof v === 'string' ? v : '');
 
-const STANDING = new Map([
-  ['signs', { line: 'This page signs for the account', key: null }],
-  ['pending', { line: 'Waiting to be let in — a browser that signs lets it in, under Settings › Devices', key: null }],
-  ['needs-code', { line: 'Pair with the code the Account printed in its terminal', key: 'pair' }],
-  ['signed-out', { line: 'Signed out', key: 'signIn' }],
-  ['none', { line: 'This browser cannot sign for the account', key: null }],
-]);
-
 /** The device line under the Account head's chips, and its one key: `pair` (the code box) or `signIn`. `unknown` says nothing. */
 export function standingWords(owner) {
-  const s = STANDING.get(owner?.role);
-  return s ? { ...s } : { line: '', key: null };
+  switch (owner?.role) {
+    case 'signs': return { line: t('owner.standing.signs'), key: null };
+    case 'pending': return { line: t('owner.standing.pending'), key: null };
+    case 'needs-code': return { line: t('owner.standing.needsCode'), key: 'pair' };
+    case 'signed-out': return { line: t('owner.standing.signedOut'), key: 'signIn' };
+    case 'none': return { line: t('owner.standing.none'), key: null };
+    default: return { line: '', key: null };
+  }
 }
 
 /** Settings › Devices from the page's `signers`: the owners (this page's own `device:<kid>` marked `here`) and the devices
@@ -43,7 +42,7 @@ export function whatYouSignLines(prepared) {
 export function goodForWords(ms) {
   if (!Number.isFinite(ms) || ms <= 0) return '';
   const s = Math.ceil(ms / 1000);
-  return `Your signature is good for ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} more.`;
+  return t('owner.goodFor', { left: `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` });
 }
 
 /** The Account's own refused test (its page's `refusedAt`): no answer, a 4xx or 5xx, no body, `ok: false`, or a result that is
@@ -62,19 +61,27 @@ const AGAIN = new Set(['E_ACCOUNT_REQUOTE', 'E_ACCOUNT_EXPIRED']);
  *  dropped) — not a card's 409 under the same code, which names a different instruction. */
 export function refusalOf(r) {
   const code = r?.body?.refusal?.code ?? r?.body?.result?.code;
-  return { message: whyOf(r) || 'Refused', again: AGAIN.has(code), standing: r?.status === 401 && code === 'E_ACCOUNT_BAD_SIGNATURE' };
+  return { message: whyOf(r) || t('owner.refused'), again: AGAIN.has(code), standing: r?.status === 401 && code === 'E_ACCOUNT_BAD_SIGNATURE' };
 }
 
-const STATUS_WORDS = new Map([['open', 'open on the book'], ['filled', 'filled'], ['canceled', 'canceled']]);
+// an order's status in words; another as the Account said it
+function statusWords(status) {
+  switch (status) {
+    case 'open': return t('owner.order.open');
+    case 'filled': return t('owner.order.filled');
+    case 'canceled': return t('owner.order.canceled');
+    default: return status;
+  }
+}
 
 /** What a taken action said: an order by its id and its status (`ord-0011 · open on the book`), the Account's summary, `Done`
  *  for a result. */
 export function saidOf(body) {
   if (body?.kind === 'order' && isRecord(body.order)) {
     const status = str(body.order.status);
-    return `${str(body.order.id)} · ${STATUS_WORDS.get(status) ?? status}`;
+    return `${str(body.order.id)} · ${statusWords(status)}`;
   }
   if (body?.kind === 'account') return str(body.summary);
-  if (body?.kind === 'result') return 'Done';
+  if (body?.kind === 'result') return t('owner.done');
   return '';
 }

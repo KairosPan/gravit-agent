@@ -6,6 +6,7 @@
 // for, its `deadline` when it carries one), `refused` (the Account's `message`, `again` when preparing again is the answer),
 // `signing`, `done` (what the Account `said`).
 import { refieldsOf } from '../host/sheet-view.js';
+import { t } from '../i18n/words.js';
 
 const ROLES = new Set(['unknown', 'signs', 'pending', 'needs-code', 'signed-out', 'none']);
 const own = (s, patch) => {
@@ -32,8 +33,8 @@ function withField(s, { name, value } = {}) {
     // a kind whose fields follow a field (a move's: its source and its kind) has them rebuilt, the values that survive kept
     const changed = fields.map(f => (f?.name === name ? { ...f, value } : f));
     const was = fields.find(f => f?.name === name)?.value;
-    const t = s.sheet.kind === 'connect' && name === 'connector' && value !== was ? signInIdle(s) : s;
-    return sheet(t, { fields: refieldsOf(s.sheet.kind, changed, s.sheet.seed) });
+    const next = s.sheet.kind === 'connect' && name === 'connector' && value !== was ? signInIdle(s) : s;
+    return sheet(next, { fields: refieldsOf(s.sheet.kind, changed, s.sheet.seed) });
   }
   return sheet(s, { fields: { ...(fields && typeof fields === 'object' ? fields : {}), [name]: value } });
 }
@@ -63,7 +64,7 @@ export const reducers = {
     status: 'ready', words: '', prepared, preparedAt: at, asked, deadline: Number.isFinite(deadline) ? deadline : null, message: null, again: false,
   }),
   sheetRefused: (s, { message, again } = {}) => sheet(s, {
-    status: 'refused', ...UNPREPARED, message: typeof message === 'string' && message ? message : 'Refused', again: again === true,
+    status: 'refused', ...UNPREPARED, message: typeof message === 'string' && message ? message : t('owner.refused'), again: again === true,
   }),
   sheetSigning: s => sheet(s, { status: 'signing' }),
   sheetDone: (s, { said } = {}) => sheet(s, { status: 'done', deadline: null, said: typeof said === 'string' ? said : '' }),

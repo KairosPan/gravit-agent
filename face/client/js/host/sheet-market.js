@@ -7,6 +7,7 @@
 // line — with the retired page saying whether its venue changes, closes or sets leverage. No DOM, no store.
 import { eventPriceOf } from './trade-view.js';
 import { venuesOf } from './account-view.js';
+import { t } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = v => (typeof v === 'string' ? v : '');
@@ -18,10 +19,11 @@ const LIMITED = new Set(['limit', 'stop_limit']);
 const STOPPED = new Set(['stop', 'stop_limit']);
 /** The order types a Change sheet changes: the resting ones, with a price to move. */
 export const CHANGEABLE = new Set(['limit', 'stop', 'stop_limit']);
-const MARGIN_LABELS = { cross: 'Cross', isolated: 'Isolated' };
+const MARGIN_MODES = ['cross', 'isolated'];
+const marginLabel = mode => (mode === 'cross' ? t('sheet.margin.cross') : t('sheet.margin.isolated'));
 // the margin modes a seed offers: a list, or the comma-joined string a key's data-* drew it as; only the two the Account knows
 const modesOf = v => (Array.isArray(v) ? v : str(v).split(','))
-  .map(x => (typeof x === 'string' ? x.trim() : '')).filter((x, i, all) => Object.hasOwn(MARGIN_LABELS, x) && all.indexOf(x) === i);
+  .map(x => (typeof x === 'string' ? x.trim() : '')).filter((x, i, all) => MARGIN_MODES.includes(x) && all.indexOf(x) === i);
 // the most leverage a seed allows: a positive figure as the page takes one (a fraction too), else none said
 const maxOf = v => { const n = Number(figure(v)); return Number.isFinite(n) && n > 0 ? n : null; };
 
@@ -41,9 +43,9 @@ const shownPrice = (v, event) => {
 export function marketTitleOf(kind, seed) {
   const s = isRecord(seed) ? seed : {};
   switch (kind) {
-    case 'close': { const name = str(s.name) || str(s.symbol); return `${sells(s) ? 'Sell' : 'Close'} ${name}`.trim(); }
-    case 'amend': return `Change ${str(s.order)}`.trim();
-    case 'leverage': return `Leverage · ${str(s.name) || str(s.symbol)}`;
+    case 'close': { const name = str(s.name) || str(s.symbol); return (sells(s) ? t('sheet.title.sell', { name }) : t('sheet.title.close', { name })).trim(); }
+    case 'amend': return t('sheet.title.amend', { order: str(s.order) }).trim();
+    case 'leverage': return t('sheet.title.leverage', { name: str(s.name) || str(s.symbol) });
     default: return '';
   }
 }
@@ -52,9 +54,9 @@ export function marketTitleOf(kind, seed) {
 export function marketGoOf(kind, seed) {
   const s = isRecord(seed) ? seed : {};
   switch (kind) {
-    case 'close': return sells(s) ? 'Sign and sell' : 'Sign and close';
-    case 'amend': return 'Sign and change';
-    case 'leverage': return 'Sign leverage';
+    case 'close': return sells(s) ? t('sheet.go.sell') : t('sheet.go.close');
+    case 'amend': return t('sheet.go.amend');
+    case 'leverage': return t('sheet.go.leverage');
     default: return '';
   }
 }
@@ -63,23 +65,23 @@ export function marketGoOf(kind, seed) {
 export function marketFieldsOf(kind, seed) {
   const s = isRecord(seed) ? seed : {};
   switch (kind) {
-    case 'close': return [{ name: 'qty', label: 'How much', type: 'number', placeholder: `All ${figure(s.qty)}`.trim(), value: '' }];
+    case 'close': return [{ name: 'qty', label: t('sheet.field.howMuch'), type: 'number', placeholder: t('sheet.field.all', { qty: figure(s.qty) }).trim(), value: '' }];
     case 'amend': {
       const event = s.kind === 'event';
       const type = str(s.type);
       return [
-        { name: 'qty', label: 'Size', type: 'number', placeholder: figure(s.qty) || null, value: '' },
-        ...(LIMITED.has(type) ? [{ name: 'limitPrice', label: event ? 'Limit, in cents' : 'Limit price', type: 'number', placeholder: shownPrice(s.limitPrice, event) || null, value: '' }] : []),
-        ...(STOPPED.has(type) ? [{ name: 'stopPrice', label: event ? 'Stop, in cents' : 'Stop price', type: 'number', placeholder: shownPrice(s.stopPrice, event) || null, value: '' }] : []),
+        { name: 'qty', label: t('sheet.field.size'), type: 'number', placeholder: figure(s.qty) || null, value: '' },
+        ...(LIMITED.has(type) ? [{ name: 'limitPrice', label: event ? t('sheet.field.limitCents') : t('sheet.field.limitPrice'), type: 'number', placeholder: shownPrice(s.limitPrice, event) || null, value: '' }] : []),
+        ...(STOPPED.has(type) ? [{ name: 'stopPrice', label: event ? t('sheet.field.stopCents') : t('sheet.field.stopPrice'), type: 'number', placeholder: shownPrice(s.stopPrice, event) || null, value: '' }] : []),
       ];
     }
     case 'leverage': {
       const max = maxOf(s.maxLeverage);
       const modes = modesOf(s.marginModes);
       return [
-        { name: 'leverage', label: max ? `Leverage, 1 to ${max}` : 'Leverage', type: 'number', placeholder: figure(s.leverage) || '1', value: '' },
+        { name: 'leverage', label: max ? t('sheet.field.leverageTo', { max }) : t('sheet.field.leverage'), type: 'number', placeholder: figure(s.leverage) || '1', value: '' },
         // a Margin choice only where the venue says which modes it sets
-        ...(modes.length ? [{ name: 'marginMode', label: 'Margin', type: 'select', options: [{ value: '', label: 'Keep it' }, ...modes.map(value => ({ value, label: MARGIN_LABELS[value] }))], value: '' }] : []),
+        ...(modes.length ? [{ name: 'marginMode', label: t('sheet.field.margin'), type: 'select', options: [{ value: '', label: t('sheet.margin.keep') }, ...modes.map(value => ({ value, label: marginLabel(value) }))], value: '' }] : []),
       ];
     }
     default: return [];
@@ -97,14 +99,14 @@ export function marketDraftOf(kind, fields, seed) {
   const s = isRecord(seed) ? seed : {};
   switch (kind) {
     case 'close': {
-      if (!str(s.venue) || !str(s.symbol)) return 'No position to close';
+      if (!str(s.venue) || !str(s.symbol)) return t('sheet.missing.noPosition');
       const qty = text(fields, 'qty');
       // blank closes all of it
-      if (qty !== '' && !(DECIMAL.test(qty) && Number(qty) > 0)) return 'Type how much, or leave it empty for all of it';
+      if (qty !== '' && !(DECIMAL.test(qty) && Number(qty) > 0)) return t('sheet.missing.howMuch');
       return { type: 'liveClose', venue: s.venue, symbol: s.symbol, qty };
     }
     case 'amend': {
-      if (!str(s.venue) || !str(s.order)) return 'No order to change';
+      if (!str(s.venue) || !str(s.order)) return t('sheet.missing.noOrder');
       const event = s.kind === 'event';
       const type = str(s.type);
       const qty = text(fields, 'qty');
@@ -115,21 +117,21 @@ export function marketDraftOf(kind, fields, seed) {
       };
       const limitPrice = LIMITED.has(type) ? price('limitPrice') : '';
       const stopPrice = STOPPED.has(type) ? price('stopPrice') : '';
-      if (limitPrice === null || stopPrice === null) return 'A price in cents is between 0 and 100';
-      if (!qty && !limitPrice && !stopPrice) return 'Type what changes';
+      if (limitPrice === null || stopPrice === null) return t('sheet.missing.cents');
+      if (!qty && !limitPrice && !stopPrice) return t('sheet.missing.change');
       return { type: 'liveAmend', venue: s.venue, order: s.order, qty, limitPrice, stopPrice };
     }
     case 'leverage': {
-      if (!str(s.venue) || !str(s.symbol)) return 'No market to set leverage on';
+      if (!str(s.venue) || !str(s.symbol)) return t('sheet.missing.noMarket');
       const leverage = text(fields, 'leverage');
-      if (!/^\d{1,3}$/.test(leverage) || Number(leverage) < 1) return 'Leverage is a whole number, 1 or more';
+      if (!/^\d{1,3}$/.test(leverage) || Number(leverage) < 1) return t('sheet.missing.leverage');
       const max = maxOf(s.maxLeverage);
-      if (max !== null && Number(leverage) > max) return `Leverage is at most ${max}x here`;
+      if (max !== null && Number(leverage) > max) return t('sheet.missing.leverageMax', { max });
       const marginMode = text(fields, 'marginMode');
-      if (marginMode !== '' && !modesOf(s.marginModes).includes(marginMode)) return 'That margin mode is not offered here';
+      if (marginMode !== '' && !modesOf(s.marginModes).includes(marginMode)) return t('sheet.missing.margin');
       return { type: 'liveLeverage', venue: s.venue, symbol: s.symbol, leverage, marginMode };
     }
-    default: return 'Nothing to sign here';
+    default: return t('sheet.nothingToSign');
   }
 }
 

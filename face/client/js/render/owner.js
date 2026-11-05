@@ -12,6 +12,7 @@ import { askedOf } from '../host/sheet.js';
 import { moveHintsOf, moveSaysOf, routesWordsOf, earnHintsOf, earnSaysOf } from '../host/sheet-money.js';
 import { IDENTITY_KINDS, identityLinesOf, identityStepsOf } from '../host/sheet-identity.js';
 import { seg } from './controls.js';
+import { t, th, rawHtml } from '../i18n/words.js';
 
 const note = text => `<p class="acct-note">${esc(text)}</p>`;
 const key = (action, word, data = {}) => `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': action, ...data })}>${esc(word)}</button>`;
@@ -28,10 +29,10 @@ export function renderDeviceLine(state) {
   const line = note([w.line, typeof owner?.refusal === 'string' ? owner.refusal : ''].filter(Boolean).join(' · '));
   const busy = owner?.busy === true;
   if (w.key === 'pair') {
-    return `${line}<form class="pair-box" data-action="pairDevice" autocomplete="off"><input${attrs({ id: 'pair-code', class: 'input small', type: 'text', autocomplete: 'off', 'aria-label': 'Pairing code' })}>` +
-      `${key('pairDevice', 'Pair', { disabled: busy })}</form>`;
+    return `${line}<form class="pair-box" data-action="pairDevice" autocomplete="off"><input${attrs({ id: 'pair-code', class: 'input small', type: 'text', autocomplete: 'off', 'aria-label': t('owner.pairingCode') })}>` +
+      `${key('pairDevice', t('owner.pair'), { disabled: busy })}</form>`;
   }
-  if (w.key === 'signIn') return `${line}<div class="btn-row">${key('signIn', 'Sign in', { disabled: busy })}</div>`;
+  if (w.key === 'signIn') return `${line}<div class="btn-row">${key('signIn', t('owner.signIn'), { disabled: busy })}</div>`;
   return line;
 }
 
@@ -44,13 +45,13 @@ export function renderDevices(state) {
   const owner = state.owner;
   const signs = owner?.role === 'signs';
   const d = devicesOf(state.account.data, owner);
-  const owners = d.owners.map(o => `<div class="dsec-line">${esc([o.label, o.id, o.here ? 'this page' : ''].filter(Boolean).join(' · '))}</div>`).join('');
+  const owners = d.owners.map(o => `<div class="dsec-line">${esc([o.label, o.id, o.here ? t('owner.devices.thisPage') : ''].filter(Boolean).join(' · '))}</div>`).join('');
   const pending = d.pending.map(p => {
-    const t = Date.parse(p.at);
-    const words = [p.kid, Number.isNaN(t) ? '' : `since ${fmtDate(t)}`].filter(Boolean).join(' · ');
-    return `<div class="venue"><span>${esc(words)}</span>${signs ? key('letDevice', 'Let it sign', { 'data-kid': p.kid }) : ''}</div>`;
+    const at = Date.parse(p.at);
+    const words = [p.kid, Number.isNaN(at) ? '' : t('owner.devices.since', { date: fmtDate(at) })].filter(Boolean).join(' · ');
+    return `<div class="venue"><span>${esc(words)}</span>${signs ? key('letDevice', t('owner.devices.letSign'), { 'data-kid': p.kid }) : ''}</div>`;
   }).join('');
-  return `<div class="dsec"><div class="dsec-label">Devices</div>${owners}${pending}${signs ? `<div class="btn-row">${key('signOut', 'Sign out')}</div>` : ''}</div>`;
+  return `<div class="dsec"><div class="dsec-label">${th('owner.devices.title')}</div>${owners}${pending}${signs ? `<div class="btn-row">${key('signOut', t('owner.devices.signOut'))}</div>` : ''}</div>`;
 }
 
 // ── the sheet ──
@@ -96,9 +97,9 @@ function field(f) {
 // the quote box: what is missing, asking, the Account's refusal (Prepare again when that is the answer), or the quote's words
 function quoteBox(s) {
   let inner = '';
-  if (s.status === 'incomplete') inner = note(s.words || 'Fill it in to see what it would be.');
-  else if (s.status === 'asking') inner = note('Asking…');
-  else if (s.status === 'refused') inner = `${note(s.message)}${s.again ? `<div class="btn-row">${key('sheetAgain', 'Prepare again')}</div>` : ''}`;
+  if (s.status === 'incomplete') inner = note(s.words || t('sheet.quote.fillIn'));
+  else if (s.status === 'asking') inner = note(t('sheet.quote.asking'));
+  else if (s.status === 'refused') inner = `${note(s.message)}${s.again ? `<div class="btn-row">${key('sheetAgain', t('sheet.quote.again'))}</div>` : ''}`;
   else if (typeof s.prepared?.quote?.words === 'string' && s.prepared.quote.words) inner = `<b>${esc(s.prepared.quote.words)}</b>`;
   // an earn's quote is the Account's quote.earn (earn.js:146)
   else if (typeof s.prepared?.quote?.earn?.words === 'string' && s.prepared.quote.earn.words) inner = `<b>${esc(s.prepared.quote.earn.words)}</b>`;
@@ -115,7 +116,7 @@ function connectKeys(s, account) {
     const w = account?.connectWallet;
     const wallets = Array.isArray(w?.wallets) ? w.wallets : [];
     const asking = w?.status === 'asking';
-    const tiles = wallets.map(x => `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'connectWallet', 'data-wallet': x.id, disabled: asking })}>${esc(`Use ${x.name}`)}</button>`).join('');
+    const tiles = wallets.map(x => `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'connectWallet', 'data-wallet': x.id, disabled: asking })}>${esc(t('sheet.connect.use', { wallet: x.name }))}</button>`).join('');
     return { above: tiles ? `<div class="btn-row">${tiles}</div>` : '', below: '' };
   }
   if (option.needs !== 'sign-in') return { above: '', below: '' };
@@ -123,10 +124,10 @@ function connectKeys(s, account) {
   const si = account?.signIn;
   const mine = si?.connector === option.connector;
   const link = mine && si.status === 'waiting' && si.tab === false && si.url
-    ? `<p class="sheet-hint"><a${attrs({ href: si.url, target: '_blank', rel: 'noopener noreferrer' })}>${esc(`Open ${who}'s sign-in page`)}</a>, then come back.</p>` : '';
+    ? `<p class="sheet-hint">${th('sheet.connect.thenBack', { link: rawHtml(`<a${attrs({ href: si.url, target: '_blank', rel: 'noopener noreferrer' })}>${esc(t('sheet.connect.openPage', { who }))}</a>`) })}</p>` : '';
   // off while this option's sign-in is under way or done: a second press would open a stray tab for a state never used
   const busy = mine && ['starting', 'waiting', 'ready'].includes(si.status);
-  return { above: '', below: `<div class="btn-row">${key('connectSignIn', `Sign in at ${who}`, { disabled: busy })}</div>${link}` };
+  return { above: '', below: `<div class="btn-row">${key('connectSignIn', t('sheet.connect.signInAt', { who }), { disabled: busy })}</div>${link}` };
 }
 
 /** The open sheet as a drawer: its title, its fields (a connect sheet's check under them), the quote box, the signature's minutes, What you sign (dimmed while the form
@@ -147,7 +148,7 @@ export function renderSheet(state, now) {
   const left = s.deadline !== null && (s.status === 'ready' || s.status === 'signing') ? goodForWords(s.deadline - now) : '';
   const lines = s.prepared ? whatYouSignLines(s.prepared) : [];
   const signs = lines.length
-    ? `<details${attrs({ class: cls('acct-shown', s.status === 'ready' && !current && 'stale') })}><summary>What you sign</summary>${lines.map(l => `<div class="dsec-line">${esc(l)}</div>`).join('')}</details>`
+    ? `<details${attrs({ class: cls('acct-shown', s.status === 'ready' && !current && 'stale') })}><summary>${th('sheet.whatYouSign')}</summary>${lines.map(l => `<div class="dsec-line">${esc(l)}</div>`).join('')}</details>`
     : '';
   const said = s.status === 'done' && s.said ? note(s.said) : '';
   // a connect sheet's check, under its fields: the key file found or missing, the venue's reach, a browser wallet's or a
@@ -162,7 +163,7 @@ export function renderSheet(state, now) {
   // the page's words under a move's quote (where it goes, Can't be undone.), only beside the preparation that is the form's
   // and an earn's (what it is worth, its yield and lock, where it lands taken out: plan 4b Task 3)
   const says = s.status === 'ready' || s.status === 'signing' ? [...moveSaysOf(s), ...earnSaysOf(s)].map(l => `<p class="sheet-hint">${esc(l)}</p>`).join('') : '';
-  const routes = r ? `<p class="sheet-hint sheet-routes">${r.lead.startsWith('Via ') ? `<b>${esc(r.lead)}</b>` : esc(r.lead)}${r.others ? `<br>${esc(r.others)}` : ''}</p>` : '';
+  const routes = r ? `<p class="sheet-hint sheet-routes">${r.chosen ? `<b>${esc(r.lead)}</b>` : esc(r.lead)}${r.others ? `<br>${esc(r.others)}` : ''}</p>` : '';
   // an Identity sheet's lines above its fields (what the account will hold to) and its numbered steps above its keys (plan B1b
   // Task 2); Connect Telegram's sheet 4, refused (its pending connection expired or gone), offers Start again, which reopens sheet 1
   const identity = IDENTITY_KINDS.includes(s.kind);
@@ -170,10 +171,10 @@ export function renderSheet(state, now) {
   const above = idLines.length ? `<div class="sheet-quote">${idLines.map(l => `<div class="dsec-line">${esc(l)}</div>`).join('')}</div>` : '';
   const idSteps = identity ? identityStepsOf(s.kind) : [];
   const steps = idSteps.length ? `<ol class="sheet-steps">${idSteps.map(l => `<li>${esc(l)}</li>`).join('')}</ol>` : '';
-  const startAgain = s.kind === 'connectNetwork' && s.status === 'refused' ? `<div class="btn-row">${key('identityStartAgain', 'Start again')}</div>` : '';
-  const keys = `<div class="btn-row">${key('sheetClose', 'Cancel')}<button${attrs({ type: 'button', class: 'btn-primary', 'data-action': 'sheetSubmit', disabled: !live })}>${esc(goWord(s.kind, s.seed, s.fields))}</button></div>`;
+  const startAgain = s.kind === 'connectNetwork' && s.status === 'refused' ? `<div class="btn-row">${key('identityStartAgain', t('identity.sheet.again'))}</div>` : '';
+  const keys = `<div class="btn-row">${key('sheetClose', t('common.cancel'))}<button${attrs({ type: 'button', class: 'btn-primary', 'data-action': 'sheetSubmit', disabled: !live })}>${esc(goWord(s.kind, s.seed, s.fields))}</button></div>`;
   // a granting sheet's line under its title: the ask in the Account's words (plan 4b Task 6)
   const asked = typeof s.seed?.askedWords === 'string' && s.seed.askedWords ? `<p class="sheet-hint">${esc(s.seed.askedWords)}</p>` : '';
-  return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="sheetClose" aria-label="Close">×</button></div>` +
+  return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="sheetClose" aria-label="${th('common.close')}">×</button></div>` +
     `<div class="drawer-body">${asked}${above}${fields}${check}${hints}${quoteBox(s)}${routes}${says}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${said}${startAgain}${steps}${keys}</div></aside>`;
 }

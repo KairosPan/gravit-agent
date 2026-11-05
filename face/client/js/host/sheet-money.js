@@ -6,6 +6,7 @@
 // (host/sheet.js) prepares the draft and What you sign shows it. No clock. No DOM, no store.
 import { moveSourcesOf, moveKindsOf, moveDestinationsOf, moveAssetsOf, networksOf, bridgeChainsOf, pageVenueOf, earnListOf, earnRate } from './money-view.js';
 import { pageOk } from './account-view.js';
+import { t } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -15,9 +16,6 @@ const opts = list => list.map(x => ({ value: x, label: x }));
 
 /** The Money tab's sheet kinds: Move, and Earn (plan 4b Task 3); and the agent wallet Agents opens (plan 4b Task 5). */
 export const MONEY_KINDS = ['move', 'earn', 'subWallet'];
-
-const FILL_IN = 'Fill it in to see where it goes and what it costs.';
-const CONNECT_FIRST = 'Connect where it should go first.';
 
 /** The move sheet's seed from the page as it stands: the preset (`from`, `to`, `kind`, `amount` — a Top up's `to` an agent
  *  wallet's venue, its `amount` the ask's), the cap on each move, and every source money moves from with its kinds, its
@@ -58,10 +56,10 @@ function select(name, label, options, value, fallback) {
   const pick = [value, fallback].find(x => typeof x === 'string' && live.some(o => o.value === x)) ?? live[0]?.value ?? '';
   return { name, label, type: 'select', options, value: pick };
 }
-const amountField = (placeholder, value) => ({ name: 'amount', label: 'Amount', type: 'number', placeholder, value: typeof value === 'string' ? value : '' });
+const amountField = (placeholder, value) => ({ name: 'amount', label: t('sheet.field.amount'), type: 'number', placeholder, value: typeof value === 'string' ? value : '' });
 
 // the destinations a withdrawal or a send offers (money.js:85): each by name, a watched address named so and not offered
-const destOptions = src => records(src.dests).map(d => ({ value: d.id, label: `${d.name}${d.address ? (d.proven ? '' : ' · watched') : ''}`, ...(d.address && !d.proven ? { disabled: true } : {}) }));
+const destOptions = src => records(src.dests).map(d => ({ value: d.id, label: d.address && !d.proven ? t('sheet.move.watched', { name: d.name }) : `${d.name}`, ...(d.address && !d.proven ? { disabled: true } : {}) }));
 // money.js:154-158 — money to an agent wallet starts on the chain that wallet already holds money or gas on
 const fundedAt = (src, to) => str(records(src.dests).find(d => d.id === to)?.funded);
 
@@ -80,11 +78,11 @@ function followTo(network, src, to, followed) {
  *  `values` where its field still takes it, else the page's own start. */
 function build(seed, values) {
   const sources = sourcesOf(seed);
-  const fromField = select('from', 'From', sources.map(s => ({ value: s.id, label: s.name })), values.from);
+  const fromField = select('from', t('sheet.move.from'), sources.map(s => ({ value: s.id, label: s.name })), values.from);
   const src = sourceOf(seed, fromField.value);
   if (!src) return [fromField];
   const kinds = records(src.kinds).map(k => ({ value: str(k.value), label: str(k.label) }));
-  const kindField = select('kind', 'What', kinds, values.kind);
+  const kindField = select('kind', t('sheet.move.what'), kinds, values.kind);
   const k = kindField.value;
   const ledgers = opts(src.ledgers ?? []);
   const assets = opts(src.assets ?? []);
@@ -95,24 +93,24 @@ function build(seed, values) {
   let rest;
   if (k === 'transfer') {
     rest = [
-      select('fromLedger', 'From', ledgers, values.fromLedger),
-      select('toLedger', 'To', ledgers, values.toLedger, src.ledgers?.[1]),
-      select('asset', 'Currency', assets, values.asset),
+      select('fromLedger', t('sheet.move.from'), ledgers, values.fromLedger),
+      select('toLedger', t('sheet.move.to'), ledgers, values.toLedger, src.ledgers?.[1]),
+      select('asset', t('sheet.move.currency'), assets, values.asset),
       amountField('50', values.amount),
     ];
   } else if (k === 'swap') {
-    const asset = select('asset', 'Sell', assets, values.asset);
-    rest = [asset, select('toAsset', 'Buy', toAssets, values.toAsset, (src.toAssets ?? []).find(a => a !== asset.value)), amountField('50', values.amount)];
+    const asset = select('asset', t('sheet.move.sell'), assets, values.asset);
+    rest = [asset, select('toAsset', t('sheet.move.buy'), toAssets, values.toAsset, (src.toAssets ?? []).find(a => a !== asset.value)), amountField('50', values.amount)];
   } else if (k === 'bridge') {
-    const to = [{ value: src.id, label: 'This wallet, on the other chain' }, ...records(src.dests).filter(d => !d.address || d.proven).map(d => ({ value: d.id, label: d.name }))];
-    const asset = select('asset', 'Send', assets, values.asset);
-    const toField = select('to', 'To', to, values.to);
+    const to = [{ value: src.id, label: t('sheet.move.thisWallet') }, ...records(src.dests).filter(d => !d.address || d.proven).map(d => ({ value: d.id, label: d.name }))];
+    const asset = select('asset', t('sheet.move.send'), assets, values.asset);
+    const toField = select('to', t('sheet.move.to'), to, values.to);
     rest = [
       toField,
-      followTo(select('network', 'From chain', chains, values.network, src.chains?.[0]), src, toField.value, values.followed),
-      select('toLedger', 'To chain', chains, values.toLedger, src.chains?.[1] ?? src.chains?.[0]),
+      followTo(select('network', t('sheet.move.fromChain'), chains, values.network, src.chains?.[0]), src, toField.value, values.followed),
+      select('toLedger', t('sheet.move.toChain'), chains, values.toLedger, src.chains?.[1] ?? src.chains?.[0]),
       asset,
-      select('toAsset', 'Arrives as', toAssets, values.toAsset, firstAsset),
+      select('toAsset', t('sheet.move.arrivesAs'), toAssets, values.toAsset, firstAsset),
       amountField('25', values.amount),
     ];
   } else if (k) {
@@ -120,9 +118,9 @@ function build(seed, values) {
     // the currency
     const dests = destOptions(src);
     // every destination watched: still listed, each disabled, as the page lists them — so the operator sees why none is picked
-    const to = dests.length ? [select('to', 'To', dests, values.to)] : [];
-    const network = followTo(select('network', 'Network', nets, values.network), src, to[0]?.value ?? '', values.followed);
-    rest = [...to, network, select('asset', 'Currency', assets, values.asset), amountField('25', values.amount)];
+    const to = dests.length ? [select('to', t('sheet.move.to'), dests, values.to)] : [];
+    const network = followTo(select('network', t('sheet.move.network'), nets, values.network), src, to[0]?.value ?? '', values.followed);
+    rest = [...to, network, select('asset', t('sheet.move.currency'), assets, values.asset), amountField('25', values.amount)];
   } else rest = [];
   return [fromField, kindField, ...rest];
 }
@@ -151,20 +149,20 @@ export function moneyRefieldsOf(kind, fields, seed) {
 
 /** The sheet's title: the source picked. */
 export function moneyTitleOf(kind, seed, fields) {
-  if (kind === 'earn') return 'Earn';
-  if (kind === 'subWallet') return 'An agent wallet';
+  if (kind === 'earn') return t('sheet.title.earn');
+  if (kind === 'subWallet') return t('sheet.title.subWallet');
   if (kind !== 'move') return '';
   const id = (fields !== undefined ? valueOf(fields, 'from') : '') || str(seed?.from);
   const src = sourceOf(seed, id) ?? sourcesOf(seed)[0];
-  return src ? `Move money · ${src.name}` : 'Move money';
+  return src ? t('sheet.title.move', { name: src.name }) : t('sheet.title.moveAny');
 }
 
 /** The sheet's go key: an earn's by the side its fields picked (earn.js:83). */
 export function moneyGoOf(kind, seed, fields) {
-  if (kind === 'move') return 'Sign and move';
-  if (kind === 'subWallet') return 'Make it';
+  if (kind === 'move') return t('sheet.go.move');
+  if (kind === 'subWallet') return t('sheet.go.subWallet');
   if (kind !== 'earn') return '';
-  return earnSideOf(seed, fields) === 'withdraw' ? 'Sign and take out' : 'Sign and put in';
+  return earnSideOf(seed, fields) === 'withdraw' ? t('sheet.go.takeOut') : t('sheet.go.putIn');
 }
 
 /** money.js:86-100 — the Account's `liveMove` from the fields, or, while it is not filled in, the page's words for it. Only the
@@ -172,12 +170,12 @@ export function moneyGoOf(kind, seed, fields) {
 export function moneyDraftOf(kind, fields, seed) {
   if (kind === 'earn') return earnDraftOf(fields, seed);
   if (kind === 'subWallet') return subWalletDraftOf(fields, seed);
-  if (kind !== 'move') return 'Nothing to sign here';
+  if (kind !== 'move') return t('sheet.nothingToSign');
   const from = valueOf(fields, 'from');
   const src = sourceOf(seed, from);
-  if (!src) return 'No account to move money from';
+  if (!src) return t('sheet.move.noSource');
   const k = valueOf(fields, 'kind');
-  if (!records(src.kinds).some(x => x.value === k)) return 'Pick what to move';
+  if (!records(src.kinds).some(x => x.value === k)) return t('sheet.move.pickKind');
   const f = name => (has(fields, name) ? valueOf(fields, name) : '');
   const same = k === 'transfer' || k === 'swap';
   const d = {
@@ -185,8 +183,8 @@ export function moneyDraftOf(kind, fields, seed) {
     asset: f('asset') || 'USDC', toAsset: k === 'swap' || k === 'bridge' ? f('toAsset') || f('asset') : f('asset') || 'USDC',
     network: same ? '' : f('network'), amount: f('amount'),
   };
-  if (!(Number(d.amount) > 0)) return FILL_IN;
-  if (!same && !d.to) return CONNECT_FIRST;
+  if (!(Number(d.amount) > 0)) return t('sheet.move.fillIn');
+  if (!same && !d.to) return t('sheet.move.connectFirst');
   return d;
 }
 
@@ -195,11 +193,12 @@ export function moneyDraftOf(kind, fields, seed) {
 export function moveHintsOf(sheet) {
   if (!isRecord(sheet) || sheet.kind !== 'move') return [];
   const seed = isRecord(sheet.seed) ? sheet.seed : {};
-  const cap = typeof seed.capUsd === 'number' ? `Only to your own accounts. Up to $${seed.capUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} a move.` : 'Only to your own accounts.';
+  const cap = typeof seed.capUsd === 'number'
+    ? t('sheet.move.capped', { cap: `$${seed.capUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` }) : t('sheet.move.own');
   const src = sourceOf(seed, valueOf(sheet.fields, 'from'));
   const k = valueOf(sheet.fields, 'kind');
   const away = src && k !== 'transfer' && k !== 'swap' && k !== 'bridge' ? records(src.notServed).map(x => str(x.name)).filter(Boolean) : [];
-  return [cap, away.length ? `Not served on this network now: ${away.join(', ')}.` : ''].filter(Boolean);
+  return [cap, away.length ? t('money.notServed', { venues: away.join(', ') }) : ''].filter(Boolean);
 }
 
 // ── a bridge's routes (money.js:91, :105-118) ──
@@ -216,25 +215,28 @@ function fine(n) {
   return `${v < 0 ? '-' : ''}$${digits}`;
 }
 // money.js:91 — a route's time in the page's words
-const eta = sec => { const s = num(sec); return s < 90 ? `~${Math.max(1, Math.round(s))} s` : s < 5400 ? `~${Math.round(s / 60)} min` : `~${Math.round(s / 3600)} h`; };
+const eta = sec => {
+  const s = num(sec);
+  return s < 90 ? t('sheet.eta.seconds', { n: Math.max(1, Math.round(s)) }) : s < 5400 ? t('sheet.eta.minutes', { n: Math.round(s / 60) }) : t('sheet.eta.hours', { n: Math.round(s / 3600) });
+};
 
 /** The move sheet's routes line, for a bridge's preparation the sheet shows (`routes` the account slice's, asked for the
  *  sheet's own `asked`): `Finding the routes…` while asked; the chosen route (`Via <tool> · at least <$> <toAsset> arrives ·
- *  <eta> · network fee about <$> in your wallet`) and the others (`Other routes: <tool> fee <$>, <eta>; …`); else the
- *  Account's words, else `No route answered.` Any other sheet, or a preparation not a bridge's: null. */
+ *  <eta> · network fee about <$> in your wallet`, `chosen` set) and the others (`Other routes: <tool> fee <$>, <eta>; …`);
+ *  else the Account's words, else `No route answered.` Any other sheet, or a preparation not a bridge's: null. */
 export function routesWordsOf(sheet, routes) {
   if (!isRecord(sheet) || sheet.kind !== 'move' || sheet.status !== 'ready') return null;
   const a = sheet.prepared?.action;
   if (!isRecord(a) || a.kind !== 'bridge') return null;
-  if (!isRecord(routes) || routes.asked !== sheet.asked || routes.status === 'asking' || routes.status === 'idle') return { lead: 'Finding the routes…', others: '' };
-  if (routes.status !== 'ready') return { lead: str(routes.message) || 'No route answered.', others: '' };
+  if (!isRecord(routes) || routes.asked !== sheet.asked || routes.status === 'asking' || routes.status === 'idle') return { lead: t('sheet.routes.finding'), others: '' };
+  if (routes.status !== 'ready') return { lead: str(routes.message) || t('sheet.routes.none'), others: '' };
   const list = records(routes.data?.routes);
   const best = list[0];
-  if (!best) return { lead: 'No route answered.', others: '' };
-  const lead = [`Via ${str(best.tool)}`, `at least ${dollars(best.receiveUsd)} ${str(a.toAsset)} arrives`, eta(best.etaSec),
-    ...(num(best.gasUsd) ? [`network fee about ${fine(best.gasUsd)} in your wallet`] : [])].join(' · ');
-  const others = list.length > 1 ? `Other routes: ${list.slice(1).map(x => `${str(x.tool)} fee ${fine(x.feeUsd)}, ${eta(x.etaSec)}`).join('; ')}` : '';
-  return { lead, others };
+  if (!best) return { lead: t('sheet.routes.none'), others: '' };
+  const lead = [t('sheet.routes.via', { tool: str(best.tool) }), t('sheet.routes.arrives', { usd: dollars(best.receiveUsd), asset: str(a.toAsset) }), eta(best.etaSec),
+    ...(num(best.gasUsd) ? [t('sheet.routes.gas', { usd: fine(best.gasUsd) })] : [])].join(' · ');
+  const others = list.length > 1 ? t('sheet.routes.others', { routes: list.slice(1).map(x => t('sheet.routes.other', { tool: str(x.tool), fee: fine(x.feeUsd), eta: eta(x.etaSec) })).join('; ') }) : '';
+  return { lead, others, chosen: true };
 }
 
 /** money.js:119-121 — the page's lines under a move's quote, for the preparation shown: where it goes (an address the Account
@@ -245,20 +247,20 @@ export function moveSaysOf(sheet) {
   const a = sheet.prepared.action;
   const src = sourceOf(sheet.seed, str(a.from));
   const to = src ? records(src.dests).find(d => d.id === a.to) : null;
-  if (a.kind === 'bridge') return [`Your wallet sends it; it lands on ${str(a.toLedger)} when the bridge delivers. Can't be undone.`];
+  if (a.kind === 'bridge') return [t('sheet.move.bridge', { chain: str(a.toLedger) })];
   const lines = [];
   if (str(a.toAddress)) {
     const name = str(to?.name) || str(a.to);
-    lines.push(to?.address ? (/holds its key/.test(str(to.proven)) ? "The agent wallet's own address: this account holds its key." : 'The address your wallet signed for.')
-      : `${name}'s deposit address, checked again before sending.`);
+    lines.push(to?.address ? (/holds its key/.test(str(to.proven)) ? t('sheet.move.ownKey') : t('sheet.move.signedFor'))
+      : t('sheet.move.deposit', { name }));
   }
-  lines.push("Can't be undone.");
+  lines.push(t('sheet.move.final'));
   return lines;
 }
 
 // ── Earn (plan 4b Task 3; the retired page at 9614314c, ui/earn.js openEarn, :40-196) ──
 
-const SIDES = [{ value: 'supply', label: 'Put in' }, { value: 'withdraw', label: 'Take out' }];
+const sides = () => [{ value: 'supply', label: t('sheet.earn.putIn') }, { value: 'withdraw', label: t('sheet.earn.takeOut') }];
 const sideWord = v => (v === 'withdraw' ? 'withdraw' : 'supply');
 const productKey = p => `${str(p?.venue)}|${str(p?.id)}`;
 // a product as the sheet keeps it: what its fields, its draft and its lines read, nothing else
@@ -282,20 +284,21 @@ export function earnSeedOf(earnBody, page, preset = {}) {
 
 const earnSideOf = (seed, fields) => sideWord((fields !== undefined ? valueOf(fields, 'side') : '') || str(seed?.side));
 const earnListFor = (seed, side) => records(seed?.[side]);
-const productLabel = (p, side) => [p.name, p.venueName, p.asset, p.rate].filter(Boolean).join(' · ') + (side === 'supply' && !p.canSupply ? ` · Closed${p.why ? `: ${p.why}` : ''}` : '');
+const productLabel = (p, side) => [p.name, p.venueName, p.asset, p.rate].filter(Boolean).join(' · ')
+  + (side === 'supply' && !p.canSupply ? ` · ${p.why ? t('sheet.earn.closedWhy', { why: p.why }) : t('sheet.earn.closed')}` : '');
 
 // the fields for a side, each value the one given where its field still takes it: an amount typed for one asset is not carried
 // to a product in another (earn.js:93-97) — the amount field records the asset it was typed for
 function earnBuild(seed, values) {
   const side = sideWord(values.side);
   const list = earnListFor(seed, side);
-  const product = select('product', 'Product', list.map(p => ({ value: p.key, label: productLabel(p, side), ...(side === 'supply' && !p.canSupply ? { disabled: true } : {}) })), values.product);
+  const product = select('product', t('sheet.earn.product'), list.map(p => ({ value: p.key, label: productLabel(p, side), ...(side === 'supply' && !p.canSupply ? { disabled: true } : {}) })), values.product);
   const p = list.find(x => x.key === product.value);
   const asset = str(p?.asset);
   const kept = typeof values.amountAsset !== 'string' || values.amountAsset === asset ? values.amount : '';
-  const amount = { ...amountField('25', kept), label: asset ? `Amount (${asset})` : 'Amount', asset };
-  const all = side === 'withdraw' ? [{ name: 'all', label: 'All of it', type: 'check', value: values.all === true || values.all === 'true' }] : [];
-  return [{ name: 'side', label: 'Put in or take out', type: 'seg', options: SIDES, value: side }, product, amount, ...all];
+  const amount = { ...amountField('25', kept), label: asset ? t('sheet.earn.amountIn', { asset }) : t('sheet.field.amount'), asset };
+  const all = side === 'withdraw' ? [{ name: 'all', label: t('sheet.earn.all'), type: 'check', value: values.all === true || values.all === 'true' }] : [];
+  return [{ name: 'side', label: t('sheet.earn.side'), type: 'seg', options: sides(), value: side }, product, amount, ...all];
 }
 
 function earnFieldsOf(seed) {
@@ -322,11 +325,11 @@ function earnDraftOf(fields, seed) {
   const side = earnSideOf(seed, fields);
   const list = earnListFor(seed, side);
   const p = list.find(x => x.key === valueOf(fields, 'product'));
-  if (!p) return list.length ? 'Pick a product' : side === 'supply' ? 'No product takes money from here right now.' : 'Nothing is earning to take out.';
+  if (!p) return list.length ? t('sheet.earn.pickProduct') : side === 'supply' ? t('sheet.earn.noProduct') : t('sheet.earn.nothingIn');
   const typed = valueOf(fields, 'amount');
   const ticked = has(fields, 'all') && (Array.isArray(fields) ? fields.find(x => x?.name === 'all')?.value : fields.all);
   const all = side === 'withdraw' && (ticked === true || ticked === 'true' || typed.toLowerCase() === 'all');
-  if (!all && !(Number(typed) > 0)) return side === 'withdraw' ? 'Type an amount, or take all of it.' : 'Type an amount.';
+  if (!all && !(Number(typed) > 0)) return side === 'withdraw' ? t('sheet.earn.amountOrAll') : t('sheet.earn.amount');
   return { type: 'liveEarn', venue: p.venue, kind: side, product: p.id, asset: p.asset, amount: all ? 'all' : typed };
 }
 
@@ -339,9 +342,9 @@ export function earnHintsOf(sheet) {
   if (!p) return [];
   const side = earnSideOf(sheet.seed, sheet.fields);
   return [
-    side === 'withdraw' ? `${qty(p.held?.amount ?? 0)} ${p.asset} in it` : `${qty(p.ready)} ${p.asset} at ${p.venueName}`,
-    p.lands ? `Money taken out lands in ${p.lands}.` : '',
-    p.minAmount ? `At least ${qty(p.minAmount)} ${p.asset}.` : '',
+    side === 'withdraw' ? t('sheet.earn.inIt', { qty: qty(p.held?.amount ?? 0), asset: p.asset }) : t('sheet.earn.readyAt', { qty: qty(p.ready), asset: p.asset, venue: p.venueName }),
+    p.lands ? t('sheet.earn.lands', { where: p.lands }) : '',
+    p.minAmount ? t('sheet.earn.least', { qty: qty(p.minAmount), asset: p.asset }) : '',
   ].filter(Boolean);
 }
 
@@ -352,9 +355,11 @@ export function earnSaysOf(sheet) {
   const x = sheet.prepared?.quote?.earn;
   if (!isRecord(x)) return [];
   const usd = typeof x.usd === 'number' ? `≈ ${dollars(x.usd)}` : '';
-  const lock = x.lockDays ? `locked ${x.lockDays} days after you ask for it back` : x.lockDays === 0 ? 'out at once' : '';
-  const held = isRecord(x.held) ? `In it now: ${qty(x.held.amount)} ${str(x.held.asset)}${typeof x.held.usd === 'number' ? ` (${dollars(x.held.usd)})` : ''}` : '';
-  return [usd, [earnRate(x), lock, str(x.protocol), str(x.chain)].filter(Boolean).join(' · '), str(x.lands) ? `Taken out, it lands in ${x.lands}` : '', held, str(x.note)].filter(Boolean);
+  const lock = x.lockDays ? t('sheet.earn.locked', { days: x.lockDays }) : x.lockDays === 0 ? t('sheet.earn.atOnce') : '';
+  const held = !isRecord(x.held) ? ''
+    : typeof x.held.usd === 'number' ? t('sheet.earn.heldUsd', { qty: qty(x.held.amount), asset: str(x.held.asset), usd: dollars(x.held.usd) })
+      : t('sheet.earn.held', { qty: qty(x.held.amount), asset: str(x.held.asset) });
+  return [usd, [earnRate(x), lock, str(x.protocol), str(x.chain)].filter(Boolean).join(' · '), str(x.lands) ? t('sheet.earn.landsOut', { where: x.lands }) : '', held, str(x.note)].filter(Boolean);
 }
 
 /** earn.js:186 — what a taken earn said: `Taking out all USDT · USDT · Flexible: done`; another answer: ''. */
@@ -362,7 +367,8 @@ export function earnSaidOf(body) {
   const e = body?.result?.earn;
   if (!isRecord(e)) return '';
   const status = str(e.status);
-  return `${e.kind === 'withdraw' ? 'Taking out' : 'Putting in'} ${e.all ? 'all' : qty(Number(e.amount))} ${str(e.asset)} · ${str(e.productName)}: ${status === 'done' ? 'done' : status}${str(e.note) ? ` · ${e.note}` : ''}`;
+  const words = { amount: e.all ? t('sheet.earn.saidAll') : qty(Number(e.amount)), asset: str(e.asset), product: str(e.productName), status: status === 'done' ? t('sheet.earn.saidDone') : status };
+  return `${e.kind === 'withdraw' ? t('sheet.earn.saidOut', words) : t('sheet.earn.saidIn', words)}${str(e.note) ? ` · ${e.note}` : ''}`;
 }
 
 // ── An agent wallet (plan 4b Task 5; the retired page at 9614314c, ui/portfolio.js pfWalletForm, :1263-1279, and money.js
@@ -387,19 +393,19 @@ function subWalletFieldsOf(seed) {
   const keys = walletKeysOf(s);
   const asked = keys.find(k => k.address.toLowerCase() === str(s.agent).toLowerCase());
   return [
-    { name: 'name', label: 'Name', type: 'text', placeholder: 'research', value: str(s.name) },
-    { name: 'agent', label: 'For agent', type: 'select', options: keys.map(k => ({ value: k.address, label: k.name || k.address })), value: asked ? asked.address : keys[0]?.address ?? '' },
-    { name: 'float', label: 'Keeps up to ($)', type: 'number', placeholder: '50', value: str(s.float) },
+    { name: 'name', label: t('sheet.field.name'), type: 'text', placeholder: t('sheet.subWallet.example'), value: str(s.name) },
+    { name: 'agent', label: t('sheet.subWallet.agent'), type: 'select', options: keys.map(k => ({ value: k.address, label: k.name || k.address })), value: asked ? asked.address : keys[0]?.address ?? '' },
+    { name: 'float', label: t('sheet.subWallet.float'), type: 'number', placeholder: '50', value: str(s.float) },
   ];
 }
 
 // portfolio.js:1268-1275 — the Account's createSubAccount: the name as typed, the agent's address lower-cased, the float
 function subWalletDraftOf(fields, seed) {
   const name = valueOf(fields, 'name');
-  if (!WALLET_NAME.test(name)) return 'A name of letters and digits, up to 16';
+  if (!WALLET_NAME.test(name)) return t('sheet.subWallet.badName');
   const agent = valueOf(fields, 'agent');
-  if (!walletKeysOf(seed).some(k => k.address === agent)) return 'Pick the agent it pays for';
+  if (!walletKeysOf(seed).some(k => k.address === agent)) return t('sheet.subWallet.pickAgent');
   const float = valueOf(fields, 'float');
-  if (!(Number(float) > 0)) return 'How much it keeps at most';
+  if (!(Number(float) > 0)) return t('sheet.subWallet.noFloat');
   return { type: 'createSubAccount', name, agent: agent.toLowerCase(), float };
 }

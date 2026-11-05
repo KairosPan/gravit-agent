@@ -24,6 +24,13 @@ import { startSellMany, smLegWords } from '../../client/js/host/sell-many.js';
 import { startIdentity, CONNECT_WORDS } from '../../client/js/host/identity.js';
 import { identityOf } from '../../client/js/host/identity-view.js';
 import { fakeProvider, ADDRESS } from './helpers/fake-wallet.js';
+import { draftOf, guardFirstDone, guardFirstRefused, grantOf } from '../../client/js/host/sheet-view.js';
+import { refusalOf, saidOf, goodForWords } from '../../client/js/host/owner-view.js';
+import { postVia, startOwner } from '../../client/js/host/owner.js';
+import { startSheet } from '../../client/js/host/sheet.js';
+import { earnSaidOf, moveSaysOf } from '../../client/js/host/sheet-money.js';
+import { marketDraftOf } from '../../client/js/host/sheet-market.js';
+import { identityLinesOf } from '../../client/js/host/sheet-identity.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
@@ -281,4 +288,45 @@ test("a Sell many leg in words: a close of all of it, a market sale with the Acc
   assert.deepEqual(smLegWords({ item, prepared: { action: { type: 'liveClose', qty: '' } } }), { head: 'Close all 0.5 · BTC', usd: '≈ $100.00', path: 'A&B · at market, it only shrinks the position' });
   const sale = { item, prepared: { action: { type: 'liveOrder' }, quote: { order: { words: 'Sell 0.5 BTC', notionalUsd: 50, note: '<thin> book' } } } };
   assert.deepEqual(smLegWords(sale), { head: 'Sell 0.5 BTC', usd: '≈ $50.00', path: 'A&B · at market · <thin> book' });
+});
+
+test("the owner sheets' lines as the sheet holds them: a sign-out's Guard, what is missing, what was asked, what was said", () => {
+  assert.equal(guardFirstDone("<a> & b's"), "<a> & b's. Guard is on.");
+  assert.equal(guardFirstDone(''), 'Guard is on.');
+  assert.equal(guardFirstRefused("<no> & won't"), "Not signed out: <no> & won't. Guard is on.");
+  assert.equal(guardFirstRefused(''), 'Not signed out: the account did not answer. Guard is on.');
+  const signIn = { options: [{ connector: 'live:x', kind: 'x', needs: 'sign-in', label: "A&B's <x> · more" }] };
+  assert.equal(draftOf('connect', { connector: 'live:x', credentialRef: '' }, signIn, 0), "Sign in at A&B's <x> first");
+  assert.equal(marketDraftOf('leverage', { leverage: '9' }, { venue: 'v', symbol: 's', maxLeverage: 3 }), 'Leverage is at most 3x here');
+  const page = { ok: true, venues: [], cards: [], orders: [], keys: [], signers: { owners: [] }, connectLive: { writes: { capUsd: 1 } } };
+  assert.equal(grantOf({ kind: 'letIn', agent: '0xa', agentName: "<A&B's>", text: "<hi> & 'bye'" }, page).seed.askedWords, "<A&B's> asked: “<hi> & 'bye'”");
+  assert.equal(grantOf({ kind: 'letIn', agent: '0xa', text: '<hi>' }, page).seed.askedWords, 'An agent asked: “<hi>”');
+  assert.equal(earnSaidOf({ result: { earn: { kind: 'withdraw', all: true, asset: '<U&T>', productName: "it's", status: 'done', note: 'n' } } }), "Taking out all <U&T> · it's: done · n");
+  assert.equal(earnSaidOf({ result: { earn: { kind: 'supply', amount: '5', asset: 'U', productName: 'P', status: '<queued>' } } }), 'Putting in 5 U · P: <queued>');
+  const move = { kind: 'move', prepared: { action: { kind: 'withdraw', from: 'a', to: 'b', toAddress: '0x1' } }, seed: { sources: [{ id: 'a', dests: [{ id: 'b', name: "<B&C's>" }] }] } };
+  assert.deepEqual(moveSaysOf(move), ["<B&C's>'s deposit address, checked again before sending.", "Can't be undone."]);
+  assert.deepEqual(identityLinesOf('block', { masked: "<x&y's>" }), ["Messages from <x&y's> are dropped and no longer counted."]);
+});
+
+test("the owner device's lines as the store holds them: a refusal, what was said, the countdown, no answer", async () => {
+  assert.equal(refusalOf({ status: 500, body: {} }).message, 'Refused');
+  assert.equal(refusalOf({ status: 409, body: { ok: false, error: "<no> & won't" } }).message, "<no> & won't");
+  assert.equal(saidOf({ kind: 'order', order: { id: 'o<1>', status: 'open' } }), 'o<1> · open on the book');
+  assert.equal(saidOf({ kind: 'order', order: { id: 'o', status: '<held>' } }), 'o · <held>');
+  assert.equal(saidOf({ kind: 'result' }), 'Done');
+  assert.equal(goodForWords(61_000), 'Your signature is good for 1:01 more.');
+  assert.deepEqual(await postVia(async () => { throw new Error('x'); })('/p', {}), { status: 0, body: { ok: false, error: 'The account did not answer. Try again.' } });
+  const sr = createStore({ initial: emptyState(), reducers });
+  const owner = startOwner({ store: sr, post: async () => ({ status: 0, body: {} }), subtle: {}, keys: { get: async () => null }, flag: { get: () => false, set: () => {} } });
+  assert.deepEqual(await owner.submit({ action: {}, shown: [] }), { status: 0, body: { ok: false, error: 'This browser does not sign for the account.' } });
+  sr.dispatch('sheetOpen', { kind: 'signOut', seed: { kid: 'k', mode: 'open', others: 0 }, fields: [{ name: 'guard', value: true }] });
+  sr.dispatch('sheetRefused', {});
+  assert.equal(sr.get().sheet.message, 'Refused');
+  // a beforeSign that fails with no words of its own: the sheet's own
+  const prepared = { action: { type: 'signOut', device: 'device:k' }, shown: [] };
+  const sheet = startSheet({ store: sr, owner: { prepare: async () => ({ status: 200, body: prepared }), submit: async () => ({ status: 200, body: {} }) },
+    schedule: () => 0, cancelTimer: () => {}, now: () => 0, afterAction: () => {}, beforeSign: () => Promise.reject(undefined) });
+  await sheet.open('signOut', { kid: 'k', mode: 'open', others: 0 }, [{ name: 'guard', value: true }]);
+  await sheet.submit();
+  assert.equal(sr.get().sheet.message, 'no answer');
 });

@@ -3,6 +3,7 @@
 // with (the retired page at 9614314c, ui/agents-mount.js setMode, openCap and renderDial), nothing added and nothing renamed.
 // Guard is no sheet: it is the Account's one unsigned write (host/account.js guard). host/sheet-view.js delegates the four kinds
 // here; the sheet engine (host/sheet.js) prepares the draft and What you sign shows it. No clock. No DOM, no store.
+import { t } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isNum = v => typeof v === 'number' && Number.isFinite(v);
@@ -21,10 +22,10 @@ export const RULES_KINDS = ['beast', 'cap', 'session', 'leverageCap'];
 /** The sheet's title. */
 export function rulesTitleOf(kind) {
   switch (kind) {
-    case 'beast': return 'Switch to Beast';
-    case 'cap': return 'Each move at most';
-    case 'session': return "Agents' session";
-    case 'leverageCap': return 'Their leverage';
+    case 'beast': return t('sheet.title.beast');
+    case 'cap': return t('rules.cap.head');
+    case 'session': return t('rules.session.head');
+    case 'leverageCap': return t('rules.leverage.head');
     default: return '';
   }
 }
@@ -33,10 +34,10 @@ export function rulesTitleOf(kind) {
 export function rulesGoOf(kind, seed) {
   const s = isRecord(seed) ? seed : {};
   switch (kind) {
-    case 'beast': return 'Sign Beast';
-    case 'cap': return 'Sign the cap';
-    case 'session': return s.ended === true ? 'Start a new one' : 'Renew for 30 days';
-    case 'leverageCap': return 'Sign leverage';
+    case 'beast': return t('sheet.go.beast');
+    case 'cap': return t('sheet.go.cap');
+    case 'session': return s.ended === true ? t('rules.session.start') : t('rules.session.renew');
+    case 'leverageCap': return t('sheet.go.leverage');
     default: return '';
   }
 }
@@ -46,9 +47,9 @@ export function rulesGoOf(kind, seed) {
 export function rulesFieldsOf(kind, seed) {
   const s = isRecord(seed) ? seed : {};
   switch (kind) {
-    case 'cap': return [{ name: 'cap', label: 'Dollars', type: 'number', value: figure(s.capUsd) }];
+    case 'cap': return [{ name: 'cap', label: t('sheet.field.dollars'), type: 'number', value: figure(s.capUsd) }];
     case 'leverageCap': return [{
-      name: 'max', label: 'Their leverage', type: 'seg', options: stepsOf(s).map(n => ({ value: String(n), label: `${n}x` })), value: String(leverageNow(s)),
+      name: 'max', label: t('rules.leverage.head'), type: 'seg', options: stepsOf(s).map(n => ({ value: String(n), label: `${n}x` })), value: String(leverageNow(s)),
     }];
     default: return [];
   }
@@ -68,18 +69,18 @@ export function rulesDraftOf(kind, fields, seed) {
     case 'beast': return { type: 'setPolicy', change: 'mode', value: 'open' };
     case 'cap': {
       const v = text(fields, 'cap').replace(/[$,\s]/g, '');
-      if (!CAP.test(v) || !(Number(v) > 0)) return 'A number of dollars, more than zero, to the cent';
-      if (isNum(s.capUsd) && Number(v) === s.capUsd) return 'That is the cap now';
+      if (!CAP.test(v) || !(Number(v) > 0)) return t('sheet.missing.cap');
+      if (isNum(s.capUsd) && Number(v) === s.capUsd) return t('sheet.missing.capNow');
       return { type: 'setPolicy', change: 'cap', value: v };
     }
     case 'session': return { type: 'setPolicy', change: 'session', value: '30d' };
     case 'leverageCap': {
       const picked = text(fields, 'max');
       const n = stepsOf(s).find(step => String(step) === picked);
-      if (n === undefined) return 'Pick a step';
-      if (n === leverageNow(s)) return 'That is their leverage now';
+      if (n === undefined) return t('sheet.missing.step');
+      if (n === leverageNow(s)) return t('sheet.missing.leverageNow');
       return { type: 'setPolicy', change: 'maxLeverage', value: String(n) };
     }
-    default: return 'Nothing to sign here';
+    default: return t('sheet.nothingToSign');
   }
 }

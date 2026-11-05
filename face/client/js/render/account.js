@@ -301,7 +301,7 @@ export function positionKeys(position, page, quotes = null) {
   return [close ? marketKey('close', close, sells ? t('account.key.sell') : t('account.key.close')) : '', lev ? marketKey('leverage', lev, t('account.key.leverage')) : ''].filter(Boolean);
 }
 
-// the kinds of limit the face ends (host/sheet-view.js LIMIT_SCOPES)
+// the kinds of limit the face ends (host/sheet-view.js limitScopes)
 const SCOPES = new Set(['trade', 'venues', 'payees', 'earn']);
 // agents-mount.js:228 — what revoking a key does, asked before its sheet; Gravit's seat revoked stops Gravit's orders too
 const revokeWords = r => (r.gravit ? t('agents.revoke.seat', { name: r.name }) : t('agents.revoke.agent', { name: r.name }));
