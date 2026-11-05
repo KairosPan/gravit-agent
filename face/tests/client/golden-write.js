@@ -3,17 +3,27 @@
 //   npx tsx tests/client/golden-write.js --pin                     add the entries not pinned yet (all of them, on a first pin)
 //   npx tsx tests/client/golden-write.js --pin --repin a,b,…       and take the named entries' new hashes
 //   npx tsx tests/client/golden-write.js --dump <dir>              write <dir>/<name>.html for each entry, to diff a before and after
+//   … --lang zh                                                    the same over the corpus drawn under ZH, fixtures/screens-zh.json
 // The zone is set before the corpus is read, as words-golden.test.js sets it.
 process.env.TZ = 'America/New_York';
 const { writeFileSync, readFileSync, existsSync, mkdirSync } = await import('node:fs');
 const { join, resolve } = await import('node:path');
 const { createHash } = await import('node:crypto');
 const { goldenEntries } = await import('./helpers/screens.js');
+const { tableOf, langOf } = await import('../../client/js/i18n/langs.js');
+const { setTable } = await import('../../client/js/i18n/words.js');
+const { EN } = await import('../../client/js/i18n/en.js');
 
-const FIXTURE = new URL('./fixtures/screens-en.json', import.meta.url);
-const args = process.argv.slice(2);
+const all = process.argv.slice(2);
+const at = all.indexOf('--lang');
+const lang = at >= 0 ? langOf(all[at + 1]) : 'en';
+if (at >= 0 && all[at + 1] !== lang) { console.error(`--lang ${all[at + 1] ?? ''}: en or zh`); process.exit(2); }
+const args = at >= 0 ? [...all.slice(0, at), ...all.slice(at + 2)] : all;
+const FIXTURE = new URL(`./fixtures/screens-${lang}.json`, import.meta.url);
 const flag = args[0];
-const entries = await goldenEntries();
+// the corpus under the language's table (set for the whole read: hostCorpus awaits), then the table before
+setTable(tableOf(lang));
+const entries = await goldenEntries().finally(() => setTable(EN));
 const sha = html => createHash('sha256').update(html).digest('hex');
 
 if (flag === '--pin') {
@@ -52,6 +62,6 @@ if (flag === '--pin') {
   for (const [name, html] of entries) writeFileSync(join(dir, `${name}.html`), html);
   console.log(`dumped ${entries.length} entries into ${dir}`);
 } else {
-  console.error('usage: npx tsx tests/client/golden-write.js --pin [--repin name,…] | --dump <dir>');
+  console.error('usage: npx tsx tests/client/golden-write.js --pin [--repin name,…] | --dump <dir> [--lang en|zh]');
   process.exit(2);
 }

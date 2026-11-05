@@ -14,6 +14,7 @@ import { esc } from '../../client/js/html.js';
 import { askedOf } from '../../client/js/host/sheet.js';
 import { fmtDate } from '../../client/js/time.js';
 import { withTable } from '../../client/js/i18n/words.js';
+import { ZH } from '../../client/js/i18n/zh.js';
 
 const NOW = Date.parse('2026-10-22T07:40:00.000Z');
 const KID = 'a5048199a8081854';
@@ -229,6 +230,24 @@ test('the fields by type: a pick as checkboxes, a select with what is picked, a 
   const order = renderSheet(R.sheetOpen(emptyState(), { kind: 'order', seed: {}, fields: [] }), NOW);
   assert.match(order, /^<aside class="drawer sheet" aria-label="Place an order">/);
   assert.equal(renderSheet(emptyState(), NOW), '', 'no sheet open: nothing');
+});
+
+// Review Focus 5 (plan 7 Task 10): under ZH the sheet's frame is the table's and What you sign's lines are the Account's, byte
+// for byte — what the browser signs is what it draws
+test("under ZH the sheet's frame is Chinese and What you sign's lines are the Account's byte for byte", () => {
+  let s = opened('letIn', {});
+  s = R.sheetField(s, { name: 'address', value: ADDRESS });
+  s = R.sheetField(s, { name: 'name', value: 'Claude Code' });
+  s = prepared(s, letInBody());
+  const en = renderSheet(s, NOW);
+  const zh = withTable(ZH, () => renderSheet(s, NOW));
+  const lines = html => html.match(/<details class="acct-shown"><summary>[^<]*<\/summary>([\s\S]*?)<\/details>/)?.[1];
+  assert.ok(lines(en), 'What you sign is drawn');
+  assert.equal(lines(zh), lines(en), "the Account's lines, unchanged under ZH");
+  has(zh, `<summary>${ZH['sheet.whatYouSign']}</summary>`);
+  assert.deepEqual(goKey(zh), { on: true, word: ZH['sheet.go.letIn'] });
+  has(zh, `aria-label="${ZH['sheet.title.letInAny']}"`, 'the title, from the table');
+  lacks(zh, '>What you sign<');
 });
 
 test('every Account string is escaped: a name with markup in the title, the fields and What you sign', () => {

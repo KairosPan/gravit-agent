@@ -29,8 +29,8 @@ export function renderDeskTab(view, read = {}) {
   const watch = view.watch === null ? empty(t('desk.tab.notRunning'))
     : feed([line('·', esc(view.watch)), ...view.markets.map(m => line('·', esc(m.line ?? m.today), esc(m.line === null ? '' : m.today ?? ''))),
       ...[view.pending, view.muted, view.ledger, view.filings].filter(Boolean).map(w => line('·', esc(w)))]);
-  const alerts = view.alerts.length ? feed(view.alerts.map(a => line(a.outcome === 'sent' ? '✓' : '·', esc(`${a.when} · ${a.what}`),
-    esc(`${a.outcome} · ${a.latency}`), a.outcome === 'sent' ? 'ok' : ''))) : empty(t('desk.tab.noAlerts'));
+  const alerts = view.alerts.length ? feed(view.alerts.map(a => line(a.sent ? '✓' : '·', esc(`${a.when} · ${a.what}`),
+    esc(`${a.outcome} · ${a.latency}`), a.sent ? 'ok' : ''))) : empty(t('desk.tab.noAlerts'));
   const levels = view.levels.length || view.files.length
     ? feed([...view.levels.map(l => line('·', `${esc(`${l.symbol} · ${l.market}`)} <span class="mk-level">${esc(l.label)}</span>`, esc(`${l.plan} · ${l.file}`))),
       ...view.files.map(f => line('!', esc(f.file), esc(f.note), 'down'))])

@@ -140,6 +140,57 @@ function hashCell(o) {
 
 const marketNames = () => ({ us: t('desk.market.us'), cn: t('desk.market.cn') });
 const SUPPRESS_ORDER = ['cap', 'muted', 'off', 'cooldown', 'window'];
+
+// the desk's codes as words (src/watch.ts, src/firing.ts), each a key whose English is the code as drawn; an unknown one is
+// drawn as it came
+function watchStateWord(code) {
+  switch (code) {
+    case 'starting': return t('desk.watchState.starting');
+    case 'watching': return t('desk.watchState.watching');
+    case 'stopped': return t('desk.watchState.stopped');
+    default: return code;
+  }
+}
+function suppressWord(code) {
+  switch (code) {
+    case 'cap': return t('desk.suppress.cap');
+    case 'muted': return t('desk.suppress.muted');
+    case 'off': return t('desk.suppress.off');
+    case 'cooldown': return t('desk.suppress.cooldown');
+    case 'window': return t('desk.suppress.window');
+    default: return code;
+  }
+}
+function alertOutcomeWord(code) {
+  switch (code) {
+    case 'pending': return t('desk.alertOutcome.pending');
+    case 'sent': return t('desk.alertOutcome.sent');
+    case 'queued': return t('desk.alertOutcome.queued');
+    case 'undelivered': return t('desk.alertOutcome.undelivered');
+    case 'suppressed': return t('desk.alertOutcome.suppressed');
+    default: return code;
+  }
+}
+// a firing's kind and its turn's outcome share one set of words (src/firing.ts's ledger records and DeskTurnRecord)
+function firingWord(code) {
+  switch (code) {
+    case 'started': return t('desk.firing.started');
+    case 'finished': return t('desk.firing.finished');
+    case 'missed': return t('desk.firing.missed');
+    case 'interrupted': return t('desk.firing.interrupted');
+    case 'expired': return t('desk.firing.expired');
+    case 'phoned': return t('desk.firing.phoned');
+    case 'woke': return t('desk.firing.woke');
+    case 'refused': return t('desk.firing.refused');
+    case 'ended': return t('desk.firing.ended');
+    case 'timed-out': return t('desk.firing.timedOut');
+    case 'failed': return t('desk.firing.failed');
+    case 'cancelled': return t('desk.firing.cancelled');
+    case 'no-turn': return t('desk.firing.noTurn');
+    case 'error': return t('desk.firing.error');
+    default: return code;
+  }
+}
 const WATCH_ERROR_SHOWN_MAX = 200;
 const FILE_ERROR_SHOWN_MAX = 80;
 
@@ -147,7 +198,7 @@ function watchHead(w) {
   if (w.state === 'idle') return t('desk.watch.idle');
   if (w.state === 'held-elsewhere') return isRecord(w.holder) ? t('desk.watch.heldBy', { pid: w.holder.pid }) : t('desk.watch.held');
   if (w.state === 'lease-failed') return t('desk.watch.lease', { error: str(w.leaseError) || t('desk.watch.unknown') });
-  return t('desk.watch.state', { state: str(w.state) });
+  return t('desk.watch.state', { state: watchStateWord(str(w.state)) });
 }
 function phaseOf(m, now) {
   const date = str(m.session?.date) || t('desk.phase.today');
@@ -176,7 +227,7 @@ function todayLine(name, today) {
   const suppressed = reasons.reduce((n, r) => n + count(by[r]), 0);
   if (count(day.sent) === 0 && suppressed === 0 && count(day.repeats) === 0) return null;
   const parts = [t('desk.today.sent', { n: count(day.sent) })];
-  if (suppressed > 0) parts.push(t('desk.today.suppressed', { n: suppressed, reasons: reasons.map(r => t('desk.today.reason', { reason: r, n: count(by[r]) })).join(t('common.list.sep')) }));
+  if (suppressed > 0) parts.push(t('desk.today.suppressed', { n: suppressed, reasons: reasons.map(r => t('desk.today.reason', { reason: suppressWord(r), n: count(by[r]) })).join(t('common.list.sep')) }));
   if (count(day.repeats) > 0) parts.push(t('desk.today.repeats', { n: count(day.repeats) }));
   return t('desk.today.line', { name, parts: parts.join(t('common.list.sep')) });
 }
@@ -232,9 +283,9 @@ export function markOf(status, rowId) {
 function alertOf(a, now) {
   const price = typeof a.price === 'number' ? `${a.price}${a.feed ? ` ${a.feed}` : ''}` : '';
   const what = [`${str(a.symbol)} ${str(a.label)}`, a.gap === true ? t('desk.alert.gap') : '', price].filter(Boolean).join(' · '); // words-order: an alert's facts under the visual separator
-  const outcome = a.outcome === 'suppressed' && a.suppressed ? t('desk.alert.suppressed', { why: a.suppressed }) : str(a.outcome);
+  const outcome = a.outcome === 'suppressed' && a.suppressed ? t('desk.alert.suppressed', { why: suppressWord(str(a.suppressed)) }) : alertOutcomeWord(str(a.outcome));
   const latency = typeof a.latencyMs === 'number' && Number.isFinite(a.latencyMs) ? t('desk.gap.seconds', { n: (a.latencyMs / 1000).toFixed(1) }) : '—';
-  return { when: etWhen(a.t, now), what, outcome, latency };
+  return { when: etWhen(a.t, now), what, outcome, sent: a.outcome === 'sent', latency };
 }
 function gapWord(ms) {
   const n = count(ms);
@@ -285,11 +336,11 @@ export function deskViewOf(status, nowIso) {
     levels: w ? records(w.marks).map(m => ({ market: Object.hasOwn(names, m.market) ? names[m.market] : str(m.market), symbol: str(m.symbol), label: labelOf(m), plan: str(m.plan), file: str(m.file) })) : [],
     standing: standing ? records(standing.orders).map(o => ({
       id: str(o.id), market: o.market === 'cn' ? 'cn' : 'us', anchor: str(o.at), ...nextOf(o, standing.running, now), hash: hashCell(o),
-      last: isRecord(o.last) ? t('desk.order.last', { outcome: str(o.last.outcome), at: deskTime(o.last.t, now) }) : '',
+      last: isRecord(o.last) ? t('desk.order.last', { outcome: firingWord(str(o.last.outcome)), at: deskTime(o.last.t, now) }) : '',
       sessionId: isRecord(o.last) && str(o.last.sessionId) !== '' ? str(o.last.sessionId) : null,
     })) : [],
     standingNotes: standing ? standingNotesOf(standing) : [],
-    firings: standing ? records(standing.recent).map(f => ({ order: str(f.order), when: etWhen(f.t, now), kind: str(f.kind), outcome: str(f.outcome) })) : [],
+    firings: standing ? records(standing.recent).map(f => ({ order: str(f.order), when: etWhen(f.t, now), kind: firingWord(str(f.kind)), outcome: firingWord(str(f.outcome)) })) : [],
     runs: records(status.runs).slice(-10).reverse().map(r => ({ bootedAt: etWhen(r.bootedAt, now), pid: r.pid, lost: r.lost === true })),
     asleep: records(status.asleep).map(g => ({ from: etWhen(g.from, now), to: etWhen(g.to, now), gap: gapWord(g.gapMs) })),
     files: w ? records(w.files).flatMap(f => { const note = fileNote(f); return note === null ? [] : [{ file: str(f.file), note }]; }) : [],

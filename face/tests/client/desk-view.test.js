@@ -4,6 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DESK_TAB, DESK_POLL_MS, deskViewOf, markOf, phoneLine } from '../../client/js/host/desk-view.js';
 import { deskStatus, DESK_NOW } from './helpers/desk-status.js';
+import { withTable } from '../../client/js/i18n/words.js';
+import { EN } from '../../client/js/i18n/en.js';
 
 const STATUS = deskStatus();
 const NOW_ISO = new Date(DESK_NOW).toISOString();
@@ -30,11 +32,11 @@ test('deskViewOf renders the head, both markets with their own today, the alerts
   assert.equal(v.filings, 'filings: off: set ALPHA_EDGAR_USER_AGENT');
   // newest first; an alert on another New York date is dated; a queued send, and one never sent, has no latency
   assert.deepEqual(v.alerts, [
-    { when: '09:58', what: 'NVDA stop · 169.8 ROBINHOOD', outcome: 'sent', latency: '1.8 s' },
-    { when: '09:50', what: 'AMD move-3 · 151.2 NASDAQ', outcome: 'queued', latency: '—' },
-    { when: '09:40', what: 'AMD move-3 · gap · 150.1 NASDAQ', outcome: 'suppressed (cap)', latency: '—' },
-    { when: '2026-11-01 21:15', what: '600519 buy_zone · 1610 TENCENT', outcome: 'sent', latency: '2.4 s' },
-    { when: '2026-11-01 21:10', what: '600519 move-2', outcome: 'suppressed (muted)', latency: '—' },
+    { when: '09:58', what: 'NVDA stop · 169.8 ROBINHOOD', outcome: 'sent', sent: true, latency: '1.8 s' },
+    { when: '09:50', what: 'AMD move-3 · 151.2 NASDAQ', outcome: 'queued', sent: false, latency: '—' },
+    { when: '09:40', what: 'AMD move-3 · gap · 150.1 NASDAQ', outcome: 'suppressed (cap)', sent: false, latency: '—' },
+    { when: '2026-11-01 21:15', what: '600519 buy_zone · 1610 TENCENT', outcome: 'sent', sent: true, latency: '2.4 s' },
+    { when: '2026-11-01 21:10', what: '600519 move-2', outcome: 'suppressed (muted)', sent: false, latency: '—' },
   ]);
   assert.deepEqual(v.levels, [
     { market: 'US', symbol: 'NVDA', label: 'stop 170 · -1.30%', plan: 'sell half on a close below 170', file: 'desk/levels.yml' },
@@ -196,4 +198,25 @@ test("the desk's lines are in the table's order: a market's error, a suppression
     assert.match(v.phone, /^phone: telegram polling、slack not polling、/);
     assert.match(renderDeskTab(v), /standing brief: \[09:20\] next/);
   });
+});
+
+// plan 7 Task 10: the desk's codes drawn as words — the watch's state, a suppression's reason, an alert's outcome, a firing's
+// kind and outcome — each read from the table, an unknown one drawn as it came
+test("the desk's codes are the table's words, an unknown one as it came", () => {
+  const PROBE = { ...EN, 'desk.watchState.watching': 'W-watching', 'desk.suppress.cap': 'S-cap', 'desk.suppress.muted': 'S-muted',
+    'desk.alertOutcome.sent': 'O-sent', 'desk.alertOutcome.queued': 'O-queued', 'desk.firing.finished': 'F-finished' };
+  const v = withTable(PROBE, () => deskViewOf(STATUS, NOW_ISO));
+  assert.equal(v.watch, 'watch: W-watching');
+  assert.equal(v.markets[0].today, 'alerts today (US): 1 sent, 1 suppressed (S-cap 1)');
+  assert.equal(v.markets[1].today, 'alerts today (A shares): 1 sent, 1 suppressed (S-muted 1)');
+  assert.deepEqual(v.alerts.map(a => [a.outcome, a.sent]), [['O-sent', true], ['O-queued', false], ['suppressed (S-cap)', false], ['O-sent', true], ['suppressed (S-muted)', false]]);
+  assert.deepEqual(v.firings, [{ order: 'brief', when: '09:31', kind: 'F-finished', outcome: 'F-finished' }]);
+  assert.equal(v.standing[0].last, 'last F-finished 09:31 ET');
+  const odd = deskStatus();
+  odd.watch.state = 'dozing';
+  odd.watch.recent[0] = { ...odd.watch.recent[0], outcome: 'bounced' };
+  const w = deskViewOf(odd, NOW_ISO);
+  assert.equal(w.watch, 'watch: dozing');
+  assert.equal(w.alerts[0].outcome, 'bounced');
+  assert.equal(w.alerts[0].sent, false);
 });

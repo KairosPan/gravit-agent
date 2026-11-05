@@ -564,7 +564,7 @@ const CONTENT_FIELDS = new Set([
   'productName', 'protocol', 'quoteFrom', 'sourceWord', 'venueName', 'accountName', 'agentName', 'byName', 'toName', 'unitWord',
   'network', 'networks', 'chain', 'chains', 'bridgeChains', 'funded', 'exchange', 'feed', 'source', 'model', 'route', 'runtime',
   'server', 'bin', 'handle', 'speaksAs', 'talksOnlyWith', 'username', 'tile', 'tools', 'toolName', 'headline', 'channelWords',
-  'strategy', 'where', 'roleId', 'zone', 'clock', 'code',
+  'strategy', 'where', 'roleId', 'zone', 'clock', 'code', 'workspace',
   // tickers, assets and currencies
   'symbol', 'asset', 'assets', 'base', 'quote', 'token', 'sourceToken', 'toAssets', 'dollars', 'currency',
   // paths, commands and links
@@ -572,7 +572,7 @@ const CONTENT_FIELDS = new Set([
   // what the operator typed: a search, a font family
   'q', 'query', 'textFont', 'codeFont',
   // an address, a key's id, a signer, a hash: drawn as they come
-  'address', 'toAddress', 'agent', 'signer', 'kid', 'hash', 'fingerprint',
+  'address', 'toAddress', 'agent', 'signer', 'kid', 'hash', 'fingerprint', 'userId',
   // the Account's sentences and lists: a market with no trades, a limit's hosts and venues, a venue that only watches
   'none', 'allow', 'watchOnly',
   // a starred market's key: the probe reads its symbol

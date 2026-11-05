@@ -9,14 +9,33 @@ const { readFileSync } = await import('node:fs');
 const { createHash } = await import('node:crypto');
 const { goldenEntries } = await import('./helpers/screens.js');
 
+const { existsSync } = await import('node:fs');
+const { setTable } = await import('../../client/js/i18n/words.js');
+const { EN } = await import('../../client/js/i18n/en.js');
+const { ZH } = await import('../../client/js/i18n/zh.js');
+
 const pinned = JSON.parse(readFileSync(new URL('./fixtures/screens-en.json', import.meta.url), 'utf8'));
 const entries = await goldenEntries();
 const sha = html => createHash('sha256').update(html).digest('hex');
+// the same corpus drawn under ZH (plan 7 Task 10), the table set for the whole read and EN after
+const ZH_FIXTURE = new URL('./fixtures/screens-zh.json', import.meta.url);
+setTable(ZH);
+const zhEntries = await goldenEntries().finally(() => setTable(EN));
 
 test('every screen state renders the bytes pinned in fixtures/screens-en.json', () => {
   assert.deepEqual(entries.map(([name]) => name), Object.keys(pinned), 'the corpus names its states as the fixture does, in order (a new state goes at the end: golden-write.js --pin)');
   const differ = entries.filter(([name, html]) => sha(html) !== pinned[name]).map(([name]) => name);
   assert.deepEqual(differ, [], `these states render other bytes: run npx tsx tests/client/golden-write.js --dump <dir> before and after the change and diff the two dirs; a change meant to redraw them is re-pinned with --pin --repin <names>`);
+});
+
+test('every screen state renders the bytes pinned in fixtures/screens-zh.json under ZH', () => {
+  assert.ok(existsSync(ZH_FIXTURE), 'the Chinese golden is pinned (golden-write.js --lang zh --pin)');
+  const zhPinned = JSON.parse(readFileSync(ZH_FIXTURE, 'utf8'));
+  assert.deepEqual(zhEntries.map(([name]) => name), Object.keys(zhPinned), 'the Chinese golden names the corpus as the English one does');
+  assert.deepEqual(zhEntries.map(([name]) => name), entries.map(([name]) => name));
+  const differ = zhEntries.filter(([name, html]) => sha(html) !== zhPinned[name]).map(([name]) => name);
+  assert.deepEqual(differ, [], 'these states draw other bytes under ZH: golden-write.js --lang zh --dump before and after, and --lang zh --pin --repin <names> for a change meant');
+  assert.ok(zhEntries.some(([, html]) => html.includes('>设置<')), 'the corpus is drawn in Chinese');
 });
 
 test('the corpus covers the screens', async () => {

@@ -15,7 +15,8 @@ const { corpus, corpusStrings, everyState, NOW } = await import('./helpers/scree
 const { renderAccountScreen } = await import('../../client/js/render/account.js');
 const { fmtDate } = await import('../../client/js/time.js');
 const { CANDLE_RANGES } = await import('../../client/js/host/market-view.js');
-const { keptLiterals } = await import('./helpers/words-scan.js');
+const { keptLiterals, KEY_NAMES } = await import('./helpers/words-scan.js');
+const { ZH } = await import('../../client/js/i18n/zh.js');
 const { readFileSync, readdirSync } = await import('node:fs');
 const { join } = await import('node:path');
 const { fileURLToPath } = await import('node:url');
@@ -142,4 +143,21 @@ test('no seg draws a label of the table as its value', () => {
   assert.deepEqual([...new Set(bad)], []);
   // the Language seg (plan 7 Task 9): its values the codes, its labels each language's own name
   assert.deepEqual([...langs].sort(), ['en=English', 'zh=中文']);
+});
+
+// the Chinese probe (plan 7 Task 10): under ZH every state of the corpus is drawn, and every Latin word a reader meets must be
+// content (the corpus' own strings), a literal kept on purpose (en-kept), a name the glossary keeps, or a key's name — a word
+// of the face's own English is reported (a code drawn raw inside a table word, a word left outside the table)
+const GLOSSARY = JSON.parse(readFileSync(new URL('./fixtures/zh-glossary.json', import.meta.url), 'utf8'));
+test('no English is drawn under ZH outside content', () => {
+  const { pages, known } = withTable(ZH, () => ({ pages: corpus(), known: knownWords() }));
+  for (const s of GLOSSARY.keep) for (const w of wordsOf(s)) known.add(w);
+  for (const k of KEY_NAMES) known.add(k);
+  const report = [];
+  for (const [name, html] of pages) {
+    const { parts } = readable(html);
+    const stray = [...new Set(parts.flatMap(p => wordsOf(p).filter(w => !known.has(w)).map(w => `${w} (in "${p.trim().slice(0, 60)}")`)))];
+    for (const s of stray) report.push(`${name}: ${s}`);
+  }
+  assert.deepEqual(report, [], 'word these through the table, in en.js and zh.js at once (a code worded by a key, an unknown one drawn as it came)');
 });
