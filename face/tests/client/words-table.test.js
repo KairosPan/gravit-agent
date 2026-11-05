@@ -3,20 +3,11 @@
 // every key a file uses present.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
-import { join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
+import { relative } from 'node:path';
 import { EN } from '../../client/js/i18n/en.js';
 import { wordsCalls, casedWords, wordsProps } from './helpers/words-scan.js';
-
-const AREAS = ['common', 'time', 'status', 'nav', 'list', 'search', 'thread', 'composer', 'details', 'jobs', 'settings', 'shortcuts', 'owner',
-  'sheet', 'account', 'money', 'venues', 'agents', 'cards', 'rules', 'identity', 'markets', 'trade', 'desk', 'discover', 'channel', 'modules',
-  'runSheet', 'lunhui'];
-const KEY = new RegExp(`^(?:${AREAS.join('|')})(?:\\.[a-z][a-zA-Z0-9]*){1,2}$`);
-const ROOT = fileURLToPath(new URL('../../client/js/', import.meta.url));
-const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(join(dir, e.name)) : e.name.endsWith('.js') ? [join(dir, e.name)] : []);
-const params = s => [...s.matchAll(/\{(\w+)\}/g)].map(m => m[1]);
-const forms = v => typeof v === 'string' ? [v] : [v.one, v.other];
+import { KEY, ROOT, walk, ENTITY, params, forms, ampKeys, ampReaders } from './helpers/words-table.js';
 
 test('every key follows the grammar and every value is a string or {one, other}', () => {
   assert.ok(Object.isFrozen(EN));
@@ -27,8 +18,6 @@ test('every key follows the grammar and every value is a string or {one, other}'
   }
 });
 
-// an ampersand that starts no entity (P&L) is a word; one that would read as an entity in HTML (&amp; &#38;) is not
-const ENTITY = /&(#\d+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);/;
 test('no value holds <, > or ", nor an entity', () => {
   for (const [key, v] of Object.entries(EN)) for (const s of forms(v)) {
     assert.doesNotMatch(s, /[<>"]/, key);
@@ -38,10 +27,9 @@ test('no value holds <, > or ", nor an entity', () => {
 
 // th and thn put a value into HTML verbatim: a value holding & is read by t or tn, inside esc, so its & is escaped
 test('a value holding & is read only by t or tn', () => {
-  const amp = new Set(Object.entries(EN).filter(([, v]) => forms(v).some(s => s.includes('&'))).map(([k]) => k));
+  const amp = ampKeys(EN);
   assert.ok(amp.has('account.pnl'), 'P&L is in the table');
-  const bad = walk(ROOT).flatMap(f => wordsCalls(readFileSync(f, 'utf8'), f).filter(c => amp.has(c.key) && c.fn !== 't' && c.fn !== 'tn').map(c => `${relative(ROOT, f)}:${c.line} ${c.fn}('${c.key}')`));
-  assert.deepEqual(bad, []);
+  assert.deepEqual(ampReaders(amp), []);
 });
 
 test('casedWords finds a words call upper- or lower-cased, directly, by a piece of it or by a name it was assigned to', () => {
