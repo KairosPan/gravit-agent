@@ -128,7 +128,7 @@
       "markets.basis.previousClose": "the previous close reads 昨收, one word of its own",
       "markets.cnFact.prevClose": "the previous close reads 昨收, one word of its own",
       "identity.route.brief": {"why":"a session's close (the closing price or time) reads 收盘","zh":"收盘"},
-      "markets.closes": {"why":"a session's close (the closing price or time) reads 收盘","zh":"收盘"},
+      "markets.closes": {"why":"a prediction market's close is its deadline, as markets.sort.closing reads it","zh":"截止"},
       "markets.chart.closesOver": {"why":"a session's close (the closing price or time) reads 收盘","zh":"收盘"},
       "markets.chart.closes": {"why":"a session's close (the closing price or time) reads 收盘","zh":"收盘"},
       "lunhui.stock.sealedHeld": {"why":"a session's close (the closing price or time) reads 收盘","zh":"收盘"},
