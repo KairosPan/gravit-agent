@@ -441,10 +441,12 @@ test('the owner device on the screen: the device line under the head chips, Devi
   const pair = draw(R.ownerStanding(state(), { role: 'needs-code', kid: '' }));
   has(pair, `${HEAD_END}<p class="acct-note">Pair with the code the Account printed in its terminal</p><form class="pair-box" data-action="pairDevice" autocomplete="off"><input id="pair-code"`);
   has(draw(R.ownerStanding(state(), { role: 'signed-out', kid: KID })), 'data-action="signIn">Sign in</button>');
-  // Settings: the theme, then Devices — Sign out only for a page that signs
+  // Settings: the theme, the sizes and fonts, Keyboard shortcuts, then Devices — Sign out only for a page that signs
   const set = renderSettings(R.ownerStanding(R.openSettings(state()), { role: 'signs', kid: KID }));
   has(set, 'data-value="system">System</button></div></div><div class="dsec"><div class="dsec-label">Text size</div>');
-  has(set, '</div></details></div><div class="dsec"><div class="dsec-label">Devices</div>');
+  has(set, '</div></details></div><div class="dsec"><div class="dsec-label">Keyboard shortcuts</div>');
+  has(set, '<kbd class="sc-key">⌘/</kbd></div></div><div class="dsec"><div class="dsec-label">Devices</div>');
+  has(renderSettings(R.openSettings(state()), { mac: false }), '<kbd class="sc-key">Ctrl+/</kbd>');
   has(set, `<div class="dsec-line">Stand-in seed key · device:${KID} · this page</div>`);
   has(set, 'data-action="signOut">Sign out</button>');
   lacks(renderSettings(R.ownerStanding(R.openSettings(state()), { role: 'pending', kid: '0123456789abcdef' })), 'data-action="signOut"');

@@ -6,6 +6,7 @@ import { renderMessagesScreen } from '../../../client/js/render/messages.js';
 import { renderMarketsScreen } from '../../../client/js/render/markets.js';
 import { renderSettings, renderAccountScreen, renderSellMany } from '../../../client/js/render/account.js';
 import { renderSheet } from '../../../client/js/render/owner.js';
+import { renderShortcuts } from '../../../client/js/render/shortcuts.js';
 import { renderConnectDrawer } from '../../../client/js/render/identity.js';
 import { renderTradeScreen } from '../../../client/js/render/trade.js';
 import { ticketOf } from '../../../client/js/host/trade-view.js';
@@ -315,7 +316,15 @@ export function everyState() {
     R.toggleDetails(R.hostList(R.hostProjection(open, { convId: 's1', key: 'subagentCatalog', value: [{ id: 'k1', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'k2', createdAt: 2, mode: 'unknown' }] }), { conversations: open.conversations, childRows: [{ sessionId: 'k1', parentSessionId: 's1', running: true, origin: 'subagent' }] })), ...marketStates(), ...accountStates(), ...channelStates(), ...discoverStates(), ...tradeStates(),
     // the golden is append-only (golden-write.js): a state added later goes after these, so every pinned name keeps its state
     ...laterStates(),
+    ...shortcutStates(open),
   ];
+}
+
+// the shortcut sheet (plan 6 Task 15): open over a conversation (its -pc twin draws it off a Mac), with a query, with none
+// left, and over Settings, as Show all opens it
+function shortcutStates(open) {
+  const sheet = q => R.setShortcutsQuery(R.openShortcuts(open), q);
+  return [sheet(''), sheet('conv'), sheet('zzz'), R.openShortcuts(R.openSettings(open))];
 }
 
 // added in plan 6's first fix round: Account's Money and Rules tabs; a sheet of every kind the owner signs; a move prepared,
@@ -446,8 +455,8 @@ export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMark
 
 // a state's page as css.test.js draws it: the rail, the screen, then every drawer and sheet that may stand over it
 export function pageHtml(st, { mac = true } = {}) {
-  return renderRail(st, NOW, { mac }) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st) : '') + stockDrawerHtml(st) + renderSellMany(st) +
-    renderSheet(st, NOW) + renderConnectDrawer(st) + renderRunSheet(st, NOW);
+  return renderRail(st, NOW, { mac }) + screenOf(st, NOW) + (st.settingsOpen ? renderSettings(st, { mac }) : '') + stockDrawerHtml(st) + renderSellMany(st) +
+    renderSheet(st, NOW) + renderConnectDrawer(st) + renderRunSheet(st, NOW) + renderShortcuts(st, { mac });
 }
 
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0)); };

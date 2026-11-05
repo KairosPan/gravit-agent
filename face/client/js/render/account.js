@@ -35,6 +35,7 @@ import { seg, segLinks, sec, confirmPair } from './controls.js';
 import { grantsAsk } from '../host/sheet-view.js';
 import { curveSvg } from './chart.js';
 import { renderDeviceLine, renderDevices } from './owner.js';
+import { shortcut, chordLabel } from '../keys.js';
 import { renderIdentityTab } from './identity.js';
 import { HOST_NAME } from '../wire/speaker.js';
 import { t, th, tn } from '../i18n/words.js';
@@ -643,7 +644,7 @@ export function renderStatement(state, now) {
     `<div class="drawer-body">${said}${body}</div></aside>`;
 }
 
-export function renderSettings(state) {
+export function renderSettings(state, { mac = true } = {}) {
   // the Theme seg: each value a theme's key (app.js setTheme stores it as it is), each label the table's word for it
   const theme = state.theme === 'cream' || state.theme === 'black' ? state.theme : 'system';
   const themes = [[t('settings.theme.cream'), 'cream'], [t('settings.theme.black'), 'black'], [t('settings.theme.system'), 'system']];
@@ -657,7 +658,10 @@ export function renderSettings(state) {
     `<div class="dsec"><details id="more-fonts" class="fold"><summary>${th('settings.moreFonts')}</summary><div class="fold-body">` +
     `${font('textFont', t('settings.textFont'), t('settings.textFont.default'))}${font('codeFont', t('settings.codeFont'), t('settings.codeFont.default'))}` +
     `<div class="field"><span class="field-label">${th('settings.codeSize')}</span>${stepper('codeSize', state.codeSize, t('settings.codeSize'), t('settings.codeSize.less'), t('settings.codeSize.more'))}</div>` +
-    `</div></details></div>${renderDevices(state)}</div></aside>`;
+    `</div></details></div>` +
+    // the keys (keys.js): Show all opens the shortcut sheet, beside the sheet's own chord
+    `<div class="dsec"><div class="dsec-label">${th('settings.shortcuts')}</div><div class="btn-row"><button type="button" id="show-shortcuts" class="btn-sm" data-action="openShortcuts">${th('settings.shortcuts.showAll')}</button>` +
+    `<kbd class="sc-key">${esc(chordLabel(shortcut('shortcuts'), mac))}</kbd></div></div>${renderDevices(state)}</div></aside>`;
 }
 
 // a size's − and + about its readout; a key at its range's end is disabled

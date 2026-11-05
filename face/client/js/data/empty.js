@@ -29,7 +29,7 @@ export function emptyState() {
     thumbs: {},
     // the image open at full size over the page, { attachmentId, name } (its src is its thumb), or null (plan 4)
     lightbox: null,
-    // the shortcut sheet over the page, { query }, or null (keys.js; ⌘/ opens and closes it)
+    // the shortcut sheet over the page, { q } (its box's words), or null (keys.js; ⌘/ opens and closes it)
     shortcuts: null,
     // the workspace's pinned conversation ids (host/live.js, workspace/follow)
     pinned: [],

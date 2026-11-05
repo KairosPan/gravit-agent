@@ -712,6 +712,8 @@ export const EN = Object.freeze({
   'settings.codeSize': 'Code size',
   'settings.codeSize.less': 'Smaller code',
   'settings.codeSize.more': 'Larger code',
+  'settings.shortcuts': 'Keyboard shortcuts',
+  'settings.shortcuts.showAll': 'Show all',
 
   // the keys' table (keys.js): what each row does
   'shortcuts.newConversation': 'New conversation',
@@ -723,6 +725,13 @@ export const EN = Object.freeze({
   'shortcuts.commands': 'Commands and skills',
   'shortcuts.references': 'Files, conversations, bots',
   'shortcuts.close': 'Close a menu, sheet or drawer',
+  // the shortcut sheet (render/shortcuts.js)
+  'shortcuts.title': 'Keyboard shortcuts',
+  'shortcuts.search': 'Search shortcuts',
+  'shortcuts.section.general': 'General',
+  'shortcuts.section.composer': 'Composer',
+  'shortcuts.none': 'No shortcut matches',
+  'shortcuts.note': "⌘ is Ctrl off a Mac. Keys follow dsh's web bindings.",
 
   // the owner device (host/owner.js, host/owner-view.js, reducers/owner.js): the standing's line, the countdown, a refusal,
   // what a taken action said

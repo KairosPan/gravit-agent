@@ -482,6 +482,20 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .drop-card { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 40px; border: 2px dashed var(--border); border-radius: var(--radius-l); background: var(--surface); color: var(--dim); }
 .drop-title { font-size: calc(16px * var(--fs)); font-weight: 700; color: var(--text); }
 .drop-sub { font-size: calc(13px * var(--fs)); color: var(--dim); }
+/* the shortcut sheet (render/shortcuts.js): centred over the scrim, above the drawers, under the drop overlay and the lightbox */
+.scrim { position: fixed; inset: 0; z-index: 50; background: var(--scrim); }
+.shortcuts { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 51; width: min(440px, calc(100% - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; gap: 12px; padding: 16px 20px 18px; background: var(--surface); border: 1px solid var(--card-border); border-radius: var(--radius-l); box-shadow: var(--shadow-lift); }
+.sc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sc-head h2 { font-size: calc(18px * var(--fs)); }
+.sc-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.sc-section { margin-top: 6px; font-size: calc(12px * var(--fs)); font-weight: 600; color: var(--dim); }
+.sc-rows { list-style: none; margin: 0; padding: 0; }
+.sc-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--border); }
+.sc-row:first-child { border-top: 0; }
+.sc-what { font-size: calc(14px * var(--fs)); }
+.sc-key { flex: none; font-family: var(--font-mono); font-size: calc(12px * var(--fm)); padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-2); white-space: nowrap; }
+.sc-none, .sc-note { font-size: calc(13px * var(--fs)); color: var(--dim); }
+.dsec .btn-row:has(.sc-key) { align-items: center; }
 /* an image at full size; a click outside it closes */
 .lightbox { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--bg) 92%, transparent); }
 .lightbox-img { display: block; max-width: 92vw; max-height: 88vh; border-radius: var(--radius-s); box-shadow: var(--shadow-lift); }

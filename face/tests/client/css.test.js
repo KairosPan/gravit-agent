@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { renderRail } from '../../client/js/render/rail.js';
 import { renderRunSheet } from '../../client/js/render/run-sheet.js';
 import { renderSettings } from '../../client/js/render/account.js';
+import { renderShortcuts } from '../../client/js/render/shortcuts.js';
 import { setMarkdown } from '../../client/js/render/thread.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
@@ -60,6 +61,22 @@ test("Settings' sizes and fonts: the steppers, their readout, the fold and its f
   assert.match(css, /\.stepper \.key:disabled\s*\{[^}]*opacity/);
   assert.match(css, /\.fold > summary\s*\{[^}]*cursor: pointer/);
   assert.match(css, /\.fold-body\s*\{[^}]*display: flex[^}]*flex-direction: column/);
+});
+
+test('the shortcut sheet: its classes have rules; 440 px wide, centred over the scrim', () => {
+  const html = renderShortcuts(R.openShortcuts(emptyState()), { mac: true }) + renderShortcuts(R.setShortcutsQuery(R.openShortcuts(emptyState()), 'zzz'), { mac: false });
+  for (const c of ['scrim', 'shortcuts', 'sc-head', 'close-key', 'input', 'sc-body', 'sc-section', 'sc-rows', 'sc-row', 'sc-what', 'sc-key', 'sc-none', 'sc-note']) {
+    assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), c);
+    assert.match(css, new RegExp(`\\.${c.replace(/-/g, '\\-')}(?![\\w-])[^{]*\\{`), `${c} has a rule`);
+  }
+  const rule = sel => css.match(new RegExp(`^${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`, 'm'))?.[1] ?? '';
+  assert.match(rule('.scrim'), /position: fixed; inset: 0/);
+  assert.match(rule('.scrim'), /background: var\(--scrim\)/);
+  const sheet = rule('.shortcuts');
+  for (const want of [/position: fixed/, /left: 50%/, /top: 50%/, /transform: translate\(-50%, -50%\)/, /width: min\(440px, calc\(100% - 32px\)\)/, /background: var\(--surface\)/]) assert.match(sheet, want);
+  // over the drawers, under the drop overlay and the lightbox
+  const z = sel => Number(rule(sel).match(/z-index: (\d+)/)?.[1]);
+  assert.ok(z('.scrim') > z('.drawer') && z('.shortcuts') > z('.scrim') && z('.shortcuts') < z('.drop-overlay') && z('.drop-overlay') < z('.lightbox'));
 });
 
 test("a module card's Run sheet: the drawer, the On options open and greyed", () => {

@@ -6914,7 +6914,7 @@ test('⌘/ opens the sheet and ⌘/ again closes it', async () => {
   assert.equal(store.get().shortcuts, null, 'closed at boot');
   let prevented = 0;
   f.fire('doc', 'keydown', chord('Slash', { metaKey: true, key: '/' }, () => { prevented += 1; }));
-  assert.deepEqual(store.get().shortcuts, { query: '' });
+  assert.deepEqual(store.get().shortcuts, { q: '' });
   f.fire('doc', 'keydown', chord('Slash', { metaKey: true, key: '/' }, () => { prevented += 1; }));
   assert.equal(store.get().shortcuts, null);
   assert.equal(prevented, 2);
@@ -6950,7 +6950,7 @@ test('Ctrl+Alt+N on a Mac does nothing', async () => {
   await settle();
   assert.deepEqual(s2.get().route, { screen: 'messages', id: 'new' });
   g.fire('doc', 'keydown', chord('Slash', { ctrlKey: true }));
-  assert.deepEqual(s2.get().shortcuts, { query: '' });
+  assert.deepEqual(s2.get().shortcuts, { q: '' });
   store.timers.clear();
   s2.timers.clear();
 });
@@ -6991,5 +6991,130 @@ test('⌥⌘N and ⌘/ do nothing over the lightbox', async () => {
   assert.equal(store.get().shortcuts, null);
   assert.equal(store.get().settingsOpen, false);
   assert.ok(store.get().lightbox, 'the lightbox stays');
+  store.timers.clear();
+});
+
+// the shortcut sheet (plan 6 task 15): over any drawer, focus in its box, Tab kept inside it, Esc after the lightbox and
+// before the drawer under it; focus back on what opened it
+const sheetRig = async (hash = '#/messages/s1') => {
+  const rig = await macRig(hash);
+  const { f } = rig;
+  const showAll = f.withId('show-shortcuts', { tagName: 'BUTTON', dataset: { action: 'openShortcuts' }, presentIf: /id="show-shortcuts"/ });
+  const box = f.withId('sc-q', { tagName: 'INPUT', type: 'search', dataset: { action: 'scQuery' }, presentIf: /id="sc-q"/ });
+  const close = f.alsoAs('.shortcuts .close-key', f.withId('sc-close', { tagName: 'BUTTON', dataset: { action: 'closeShortcuts' }, presentIf: /class="shortcuts"/ }));
+  const drawerClose = f.withSelector('.drawer .close-key', { tagName: 'BUTTON', dataset: { action: 'closeSettings' }, presentIf: /class="drawer"/ });
+  return { ...rig, showAll, box, close, drawerClose };
+};
+
+test('Show all opens the sheet over Settings with focus in its box; Esc closes the sheet, focus back on Show all, a second Esc closes Settings', async () => {
+  const { f, store, showAll, box, drawerClose, say } = await sheetRig();
+  say.focus();
+  f.fire('doc', 'keydown', chord('Comma', { altKey: true, metaKey: true }));
+  assert.equal(f.doc.activeElement, drawerClose, 'Settings takes focus');
+  assert.match(f.html(), /<div class="dsec-label">Keyboard shortcuts<\/div><div class="btn-row"><button type="button" id="show-shortcuts" class="btn-sm" data-action="openShortcuts">Show all<\/button><kbd class="sc-key">⌘\/<\/kbd><\/div>/);
+  showAll.focus();
+  f.click(showAll);
+  assert.deepEqual(store.get().shortcuts, { q: '' });
+  assert.equal(store.get().settingsOpen, true, 'Settings stays under it');
+  assert.match(f.html(), /<aside class="drawer"[\s\S]*<\/main><div class="scrim" data-action="closeShortcuts"><\/div><section class="shortcuts"/, 'drawn after the drawers');
+  assert.equal(f.doc.activeElement, box, 'focus in its box');
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().shortcuts, null);
+  assert.equal(store.get().settingsOpen, true);
+  assert.equal(f.doc.activeElement, showAll, 'back on Show all');
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().settingsOpen, false);
+  assert.equal(f.doc.activeElement, say, "back on Settings' own opener");
+  // ⌘/ from the editor: focus back on the editor
+  f.fire('doc', 'keydown', chord('Slash', { metaKey: true }));
+  assert.equal(f.doc.activeElement, box);
+  f.fire('doc', 'keydown', chord('Slash', { metaKey: true }));
+  assert.equal(f.doc.activeElement, say);
+  store.timers.clear();
+});
+
+test('Tab stays inside the sheet', async () => {
+  const { f, store, box, close, say } = await sheetRig();
+  say.focus();
+  f.fire('doc', 'keydown', chord('Slash', { metaKey: true }));
+  assert.equal(f.doc.activeElement, box);
+  let prevented = 0;
+  const tab = shiftKey => f.fire('doc', 'keydown', { key: 'Tab', shiftKey, preventDefault() { prevented += 1; } });
+  tab(false);
+  assert.equal(f.doc.activeElement, close);
+  tab(false);
+  assert.equal(f.doc.activeElement, box);
+  tab(true);
+  assert.equal(f.doc.activeElement, close);
+  tab(true);
+  assert.equal(f.doc.activeElement, box);
+  assert.equal(prevented, 4, "the browser's own Tab never leaves it");
+  // a render while the close key has focus keeps it there
+  tab(false);
+  store.dispatch('toggleRail');
+  assert.equal(f.doc.activeElement, close);
+  store.timers.clear();
+});
+
+test('Esc with the lightbox over the sheet closes the lightbox first', async () => {
+  const { f, store, image, close: lightClose } = await lightboxRig();
+  const box = f.withId('sc-q', { tagName: 'INPUT', type: 'search', dataset: { action: 'scQuery' }, presentIf: /id="sc-q"/ });
+  f.fire('doc', 'keydown', chord('Slash', { ctrlKey: true }));
+  assert.equal(f.doc.activeElement, box);
+  f.click(image);
+  assert.ok(store.get().lightbox);
+  assert.equal(f.doc.activeElement, lightClose);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().lightbox, null);
+  assert.ok(store.get().shortcuts, 'the sheet stands');
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().shortcuts, null);
+  store.timers.clear();
+});
+
+test('typing in the box filters and keeps the words across the render', async () => {
+  const { f, store, box, say } = await sheetRig();
+  say.focus();
+  f.fire('doc', 'keydown', chord('Slash', { metaKey: true }));
+  box.value = 'Send';
+  box.selectionStart = 4; box.selectionEnd = 4;
+  f.fire('root', 'input', { target: box });
+  assert.deepEqual(store.get().shortcuts, { q: 'Send' });
+  assert.equal(box.value, 'Send', 'the words stay in the box');
+  assert.equal(f.doc.activeElement, box);
+  assert.deepEqual([box.selectionStart, box.selectionEnd], [4, 4], 'and the caret');
+  assert.match(f.html(), /<span class="sc-what">Send<\/span>/);
+  assert.doesNotMatch(f.html(), /New conversation/);
+  // ordinary typing leaves it open; a stream frame keeps the words
+  store.dispatch('toggleRail');
+  assert.equal(box.value, 'Send');
+  assert.ok(store.get().shortcuts);
+  store.timers.clear();
+});
+
+test('the scrim closes it', async () => {
+  const { f, store, say } = await sheetRig();
+  say.focus();
+  f.fire('doc', 'keydown', chord('Slash', { metaKey: true }));
+  assert.match(f.html(), /<div class="scrim" data-action="closeShortcuts"><\/div>/);
+  f.click({ tagName: 'DIV', dataset: { action: 'closeShortcuts' } });
+  assert.equal(store.get().shortcuts, null);
+  assert.equal(f.doc.activeElement, say);
+  store.timers.clear();
+});
+
+test('⌥⌘K over an owner sheet does nothing', async () => {
+  const { f, store, say } = await macRig('#/messages/s1');
+  const cq = searchBox(f);
+  say.focus();
+  store.dispatch('sheetOpen', { kind: 'subWallet', seed: {}, fields: {} });
+  const before = store.get();
+  let prevented = false;
+  f.fire('doc', 'keydown', chord('KeyK', { altKey: true, metaKey: true }, () => { prevented = true; }));
+  await settle();
+  assert.ok(prevented, "the browser's own key is not run either");
+  assert.notEqual(f.doc.activeElement, cq, 'the search box does not take focus behind the sheet');
+  assert.deepEqual(store.get().route, before.route);
+  assert.equal(store.get().sheet.kind, 'subWallet');
   store.timers.clear();
 });

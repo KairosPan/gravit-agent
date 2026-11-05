@@ -10,6 +10,7 @@ import { renderRail } from './render/rail.js';
 import { renderMessagesScreen, currentConversation } from './render/messages.js';
 import { renderMarketsScreen } from './render/markets.js';
 import { renderSettings, renderAccountScreen, renderSellMany } from './render/account.js';
+import { renderShortcuts } from './render/shortcuts.js';
 import { renderSheet } from './render/owner.js';
 import { renderTradeScreen } from './render/trade.js';
 import { setMarkdown } from './render/markdown.js';
@@ -232,7 +233,7 @@ const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.identity?.connec
   : s.account.detailsVenue ? `venue:${s.account.detailsVenue}` : null);
 // the editor an event landed in: #say itself, or a node inside it (a paste's target can be a line's block)
 const sayOf = el => (el?.id === 'say' ? el : el?.closest?.('#say') ?? null);
-const closeKeyOf = overlay => (overlay === 'sheet' ? '.drawer.sheet .close-key' : '.drawer .close-key');
+const closeKeyOf = overlay => (overlay === 'shortcuts' ? '.shortcuts .close-key' : overlay === 'sheet' ? '.drawer.sheet .close-key' : '.drawer .close-key');
 const editorOf = e => (e ? [e.kind, e.convId, e.id].join('|') : null);
 const screenOf = s => `${s.route.screen}/${s.route.id ?? ''}`;
 
@@ -557,10 +558,11 @@ export function boot(win, host = {}) {
   let sheetKind = null;     // the kind of the sheet open as the store last changed: which one a close closed
   let orderFields = null;   // the ticket's order sheet's fields as they last stood, for when another sheet took its place
   let lightFrom = null;     // the image key the lightbox opened from: focus goes back to it on closing
+  let scFrom = null;        // what opened the shortcut sheet (Show all, or what had focus at ⌘/): focus goes back to it on closing
   // the operator's keys shown through their eye, as `<convId>|<msgId>|<n>` (render/thread.js): the page's, not the store's,
   // and forgotten once their conversation leaves the screen (D26)
   const revealed = new Set();
-  let last = { lightbox: false, overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, start: null, anchor: null, editor: null, confirm: null, query: '', key: null };
+  let last = { lightbox: false, shortcuts: false, overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, start: null, anchor: null, editor: null, confirm: null, query: '', key: null };
   let confirmFrom = null;
   // the turn rail's page state (D22): the turn the view is on, the hovered or focused tick (its card drawn), the tick that
   // has focus (the rail's one Tab stop), the tick pulsing while its pages load and the jump waiting for its mark; forgotten
@@ -635,13 +637,15 @@ export function boot(win, host = {}) {
       : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
       : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail });
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
-    const drawers = (s.settingsOpen ? renderSettings(s) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (!sheetUp(s) && s.identity?.connect ? renderConnectDrawer(s) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
+    const drawers = (s.settingsOpen ? renderSettings(s, { mac }) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (!sheetUp(s) && s.identity?.connect ? renderConnectDrawer(s) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
+    // the shortcut sheet over the drawers, under the drop overlay and the lightbox
+    const scHtml = renderShortcuts(s, { mac });
     // files dragged over a screen with a composer: the drop overlay over the page
     const overlayHtml = s.dropping && composerOn(s) ? dropOverlay(attachments.limits()) : '';
     // an operator image at full size, over everything (D34: Esc closes it after a menu)
     const lit = lightboxOf(s);
     const lightHtml = lit ? lightboxHtml(lit) : '';
-    root.innerHTML = renderRail(s, now(), { mac }) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen) + overlayHtml + lightHtml;
+    root.innerHTML = renderRail(s, now(), { mac }) + (drawers ? screen.replace(/<\/main>$/, drawers + '</main>') : screen) + scHtml + overlayHtml + lightHtml;
     const note1 = doc.getElementById('composer-note');
     if (note0 && note1 && note0 !== note1 && typeof note1.replaceWith === 'function') note1.replaceWith(note0);
     // the open job's output in place before any scroll keep: drawn empty it is hidden, and the drawer's keep would be
@@ -723,14 +727,26 @@ export function boot(win, host = {}) {
     // the lightbox first: its close key takes focus on opening and keeps it while it stands (it is the one key inside); on
     // closing, focus goes back to the image it opened from. The drawers under it keep their openers untouched
     const lightUp = lightHtml !== '';
+    // the shortcut sheet next: its box takes focus on opening, focus stays inside it while it stands, and on closing goes
+    // back to what opened it. The drawers under it keep their openers untouched (Esc closes the sheet, then the drawer)
+    const scUp = scHtml !== '';
+    const inSheet = el => el === doc.getElementById('sc-q') || el === root.querySelector(closeKeyOf('shortcuts'));
     if (lightUp) {
       if (!last.lightbox && !lightFrom) lightFrom = activeKey;
       target = root.querySelector('.lightbox-close') ?? target;
     } else if (last.lightbox) {
       target = find(lightFrom) ?? (overlay ? root.querySelector(closeKeyOf(overlay)) : say) ?? target;
+      // over the shortcut sheet, focus stays inside it
+      if (scUp && !inSheet(target)) target = doc.getElementById('sc-q') ?? target;
       lightFrom = null;
       // a drawer that went with it (nav closes both) leaves no opener behind
       if (!overlay) { opener = null; under = null; }
+    } else if (scUp) {
+      if (!last.shortcuts && !scFrom) scFrom = activeKey;
+      if (!last.shortcuts || !inSheet(target)) target = doc.getElementById('sc-q') ?? target;
+    } else if (last.shortcuts && overlay === last.overlay) {
+      target = find(scFrom) ?? (overlay ? root.querySelector(closeKeyOf(overlay)) : say) ?? target;
+      scFrom = null;
     } else if (overlay && overlay !== last.overlay && last.overlay !== 'sheet') {
       if (overlay === 'sheet') under = last.overlay ? opener : null;
       opener = activeKey;
@@ -789,7 +805,8 @@ export function boot(win, host = {}) {
       if (moved) railStale = false;
     }
     if (railStale) drawRail();
-    last = { lightbox: lightUp, overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, start: threadStart, anchor: anchorSeq, editor: editorOf(s.edit), confirm: s.confirm, query, key };
+    if (!scUp) scFrom = null;
+    last = { lightbox: lightUp, shortcuts: scUp, overlay, opener, under, screen: screenOf(s), drawer: drawerOf(s), thread: threadSig, start: threadStart, anchor: anchorSeq, editor: editorOf(s.edit), confirm: s.confirm, query, key };
     // the clocks ticking while a live job is drawn
     tickClocks(false);
     // a composed answer drawn without its run's view asks for it now that the page is whole (its dispatches render again)
@@ -1965,6 +1982,14 @@ export function boot(win, host = {}) {
     },
     lightboxClose: () => store.dispatch('closeLightbox'),
     lightboxKeep: () => {},
+    // Settings' Show all opens the shortcut sheet over the drawer; focus returns to the key pressed, which a click need not
+    // have focused (Safari focuses no clicked button). Its close key and the scrim close it
+    openShortcuts: el => {
+      if (store.get().shortcuts) return;
+      scFrom = focusKey(el);
+      store.dispatch('openShortcuts');
+    },
+    closeShortcuts: () => store.dispatch('closeShortcuts'),
   };
 
   root.addEventListener('click', ev => {
@@ -2008,6 +2033,7 @@ export function boot(win, host = {}) {
     else if (el.dataset?.action === 'tradeQuery') tradeSoon(el.value);   // trade.query moves the query (the box keeps the words)
     else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
     else if (el.dataset?.action === 'convQuery') convSearch.type(el.value);
+    else if (el.dataset?.action === 'scQuery') store.dispatch('setShortcutsQuery', el.value);
     else if (isField(el) && typesWords(el)) changeField(el.name, el.value);
     else if (el.dataset?.action === 'runSheetField' && typesWords(el)) act.runSheetField(el);
     else if (el.dataset?.action === 'sellManyQty') sellMany.setQty(el.dataset.index, el.value);
@@ -2160,8 +2186,8 @@ export function boot(win, host = {}) {
     const chord = chordOf(ev, mac);
     if (chord === 'searchConversations') {
       ev.preventDefault();
-      // over the lightbox the keys do nothing: the search box lies under it; the shortcut sheet closes first
-      if (lightboxOf(store.get())) return;
+      // over the lightbox or an owner sheet the keys do nothing: the search box lies under them; the shortcut sheet closes first
+      if (lightboxOf(store.get()) || sheetUp(store.get())) return;
       store.dispatch('closeShortcuts');
       focusSearch();
       return;
@@ -2182,6 +2208,15 @@ export function boot(win, host = {}) {
     if (ev.key === 'Tab' && lightboxOf(store.get())) {
       ev.preventDefault();
       root.querySelector('.lightbox-close')?.focus();
+      return;
+    }
+    // while the shortcut sheet stands, Tab and Shift+Tab move between its box and its close key only
+    if (ev.key === 'Tab' && store.get().shortcuts) {
+      ev.preventDefault();
+      const box = doc.getElementById('sc-q');
+      const close = root.querySelector(closeKeyOf('shortcuts'));
+      const a = doc.activeElement;
+      (a === box ? close : a === close ? box : ev.shiftKey ? close : box)?.focus();
       return;
     }
     // while a menu shows rows its keys are its own, before the lightbox, the search box and today's Escape chain (D34): ↑ ↓ move, Enter
