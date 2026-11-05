@@ -37,6 +37,7 @@ import { curveSvg } from './chart.js';
 import { renderDeviceLine, renderDevices } from './owner.js';
 import { shortcut, chordLabel } from '../keys.js';
 import { renderIdentityTab } from './identity.js';
+import { LANGS } from '../i18n/langs.js';
 import { HOST_NAME } from '../wire/speaker.js';
 import { t, th, tn, sayOf } from '../i18n/words.js';
 import { SIZES, sizeOf } from '../prefs.js';
@@ -732,7 +733,10 @@ export function renderSettings(state, { mac = true } = {}) {
   // by its id
   const font = (name, label, placeholder) => `<label class="field"><span class="field-label">${esc(label)}</span><input${attrs({ id: `pref-${name}`, class: 'input', type: 'text',
     value: state[name] ?? '', placeholder, autocomplete: 'off', spellcheck: 'false', 'data-action': 'setFont', 'data-pref': name })}></label>`;
+  // the Language seg first: each value a language's code (app.js setLang), each label the language's own name (i18n/langs.js)
+  const langs = LANGS.map(l => [l.name, l.id]);
   return `<aside class="drawer" aria-label="${th('settings.title')}"><div class="drawer-head"><h2>${th('settings.title')}</h2><button type="button" class="close-key" data-action="closeSettings" aria-label="${th('common.close')}">×</button></div><div class="drawer-body">` +
+    `<div class="dsec"><div class="dsec-label">${th('settings.language')}</div>${seg(langs, state.lang === 'zh' ? 'zh' : 'en', 'setLang')}</div>` +
     `<div class="dsec"><div class="dsec-label">${th('settings.theme')}</div>${seg(themes, theme, 'setTheme')}</div>` +
     `<div class="dsec"><div class="dsec-label">${th('settings.textSize')}</div>${stepper('textSize', state.textSize, t('settings.textSize'), t('settings.textSize.less'), t('settings.textSize.more'))}</div>` +
     `<div class="dsec"><details id="more-fonts" class="fold"><summary>${th('settings.moreFonts')}</summary><div class="fold-body">` +

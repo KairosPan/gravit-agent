@@ -130,12 +130,16 @@ test('no seg draws a label of the table as its value', () => {
   const words = new Set(Object.values(EN).filter(v => typeof v === 'string'));
   const ACCOUNT_CODES = new Set(CANDLE_RANGES);
   const bad = [];
+  const langs = new Set();
   for (const [name, html] of corpus()) {
     for (const m of html.matchAll(/<button\b[^>]*class="seg-item[^"]*"[^>]*>([^<]*)<\/button>/g)) {
       const value = m[0].match(/data-value="([^"]*)"/)?.[1];
       const label = decode(m[1]);
       if (words.has(label) && decode(value ?? '') === label && !ACCOUNT_CODES.has(label)) bad.push(`${name}: ${label}`);
+      if (/data-action="setLang"/.test(m[0])) langs.add(`${value}=${label}`);
     }
   }
   assert.deepEqual([...new Set(bad)], []);
+  // the Language seg (plan 7 Task 9): its values the codes, its labels each language's own name
+  assert.deepEqual([...langs].sort(), ['en=English', 'zh=中文']);
 });

@@ -6,6 +6,8 @@ import { said } from '../i18n/words.js';
 export function emptyState() {
   return {
     theme: 'system',
+    // the face's language, a code (i18n/langs.js); the table itself is words.js's, set before the store is made
+    lang: 'en',
     // the text and code sizes in px and the two font families ('' the default), js/prefs.js
     textSize: 15,
     codeSize: 12,

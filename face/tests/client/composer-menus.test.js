@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   HIDDEN_COMMANDS, CONVERSATION_ITEMS, rankByLetters, slashItems, atItems, conversationChoices, flatItems, moveActive, chipOf,
 } from '../../client/js/composer/menus.js';
+import { sayOf } from '../../client/js/i18n/words.js';
 
 const names = items => items.map(i => i.name);
 const cmd = (name, input) => ({ name, description: name + ' d', ...(input ? { input: { hint: 'h' } } : {}) });
@@ -28,7 +29,7 @@ test('the slash menu hides plan, permission and feedback, and lists an argument 
 test('a cold conversation with nothing read for its preset has no Commands group, and Skills still draw', () => {
   const g = slashItems({ commands: null, skills: [{ name: 'style', description: 'd' }], query: '', atStart: true });
   assert.equal(g.length, 1);
-  assert.equal(g[0].label, 'Skills');
+  assert.equal(sayOf(g[0].label), 'Skills');
   assert.equal(g[0].items[0].kind, 'skill');
 });
 
@@ -43,10 +44,10 @@ test('headings hide while a query is typed in the slash menu, and stay in the @ 
   const q = slashItems({ commands, skills, query: 'comp', atStart: true });
   assert.equal(q.length, 2);
   assert.ok(q.every(g => g.label === undefined));
-  assert.deepEqual(slashItems({ commands, skills, query: '', atStart: true }).map(g => g.label), ['Commands', 'Skills']);
+  assert.deepEqual(slashItems({ commands, skills, query: '', atStart: true }).map(g => sayOf(g.label)), ['Commands', 'Skills']);
   assert.deepEqual(slashItems({ commands, skills, query: 'zzz', atStart: true }), []);
   const at = atItems({ bots: [], files: [{ path: 'a.md', kind: 'file' }], conversations: [], query: 'a' });
-  assert.equal(at[0].label, 'Files and folders');
+  assert.equal(sayOf(at[0].label), 'Files and folders');
 });
 
 test('the @ groups in order, bots only in a room, a folder walk shows the files alone under its crumb', () => {
@@ -54,8 +55,8 @@ test('the @ groups in order, bots only in a room, a folder walk shows the files 
   const files = [{ path: 'strategies/a.md', kind: 'file' }, { path: 'strategies/sub', kind: 'directory' }];
   const conversations = [{ id: 's1', title: 'Hello', archived: false, updatedAt: 0 }];
   const g = atItems({ bots, files, conversations, query: '' });
-  assert.deepEqual(g.map(x => x.label), ['Bots in this room', 'Files and folders', 'Conversations']);
-  assert.deepEqual(atItems({ bots: [], files, conversations, query: '' }).map(x => x.label), ['Files and folders', 'Conversations']);
+  assert.deepEqual(g.map(x => sayOf(x.label)), ['Bots in this room', 'Files and folders', 'Conversations']);
+  assert.deepEqual(atItems({ bots: [], files, conversations, query: '' }).map(x => sayOf(x.label)), ['Files and folders', 'Conversations']);
   const f = g[1].items;
   assert.deepEqual(f[0], { kind: 'file', path: 'strategies/a.md', dir: false, name: 'a.md', folder: 'strategies' });
   assert.equal(f[1].dir, true);
@@ -75,7 +76,7 @@ test('conversations: the current one, archived ones and those beyond eight left 
   const out = conversationChoices(list, { exceptId: 'cur', workspaceId: 'w1', now });
   assert.deepEqual(out.map(i => i.id), ['m2', 'm1', 'o2', 'o1']);
   assert.equal(out[0].kind, 'conversation');
-  assert.equal(out[0].age, 'Just now');
+  assert.equal(sayOf(out[0].age), 'Just now', 'a said, read where it is drawn');
   const many = Array.from({ length: 12 }, (_, i) => mk('c' + i, 'w', i));
   const g = atItems({ bots: [], files: [], conversations: conversationChoices(many, { exceptId: null, workspaceId: 'w', now }), query: '' });
   assert.equal(CONVERSATION_ITEMS, 8);

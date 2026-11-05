@@ -1,7 +1,7 @@
 // The composer's view: a draft's runs as the editor's markup, the / and @ menus, the draft's files rail, the drop overlay and
 // the image lightbox. Strings only; app.js puts them in place.
 import { esc, attrs, cls } from '../html.js';
-import { t, th } from '../i18n/words.js';
+import { t, th, sayOf } from '../i18n/words.js';
 import { icon } from '../icons.js';
 import { maskExcerpt } from '../mask.js';
 import { avatarGlyph } from '../wire/room.js';
@@ -39,7 +39,7 @@ function rowParts(it) {
     case 'skill': return [icon('book', 16), it.name, `/${it.name}`, it.description];
     case 'bot': return [esc(avatarGlyph(it.id)), it.name, `@${it.id}`, it.description];
     case 'file': return [icon(it.dir ? 'layers' : 'file', 16), it.name, it.folder, ''];
-    default: return [icon('chat', 16), maskExcerpt(it.title), '', it.age];   // a title, from a first prompt: masked (§5.9)
+    default: return [icon('chat', 16), maskExcerpt(it.title), '', sayOf(it.age)];   // a title, from a first prompt: masked (§5.9)
   }
 }
 
@@ -53,7 +53,7 @@ export function renderMenu(menu) {
   if (!menu || !flatItems(menu).length) return '';
   let i = 0;
   const body = menu.groups.map(g => {
-    const head = (g.label ? `<div class="cmenu-group">${esc(g.label)}</div>` : '') + (g.crumb ? `<div class="cmenu-crumb">${esc(g.crumb)}</div>` : '');
+    const head = (g.label ? `<div class="cmenu-group">${esc(sayOf(g.label))}</div>` : '') + (g.crumb ? `<div class="cmenu-crumb">${esc(g.crumb)}</div>` : '');
     return head + g.items.map(it => {
       const n = i++;
       const on = n === menu.active;

@@ -823,6 +823,7 @@ export const ZH = Object.freeze({
 
   // Settings (render/account.js renderSettings)
   'settings.title': '设置',
+  'settings.language': '语言',
   'settings.theme': '主题',
   'settings.theme.cream': '奶油',
   'settings.theme.black': '黑色',

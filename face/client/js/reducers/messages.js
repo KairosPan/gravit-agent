@@ -59,6 +59,7 @@ export const reducers = {
     return { ...s, collapsed: { ...(s.collapsed ?? {}), [key]: !was } };
   },
   setTheme: (s, theme) => ({ ...s, theme }),
+  setLang: (s, lang) => ({ ...s, lang: lang === 'zh' ? 'zh' : 'en' }),
   // a size or a font from Settings, kept in range or cleaned to a family name (js/prefs.js); any other name is not a pref
   setPref(s, { name, value } = {}) {
     if (name === 'textSize' || name === 'codeSize') return { ...s, [name]: sizeOf(name, value) };

@@ -37,7 +37,9 @@ test('an hour is sixty minutes', () => {
 });
 
 test('ago reads just now, minutes, hours and days, one of each in the singular', async () => {
-  const { ago } = await import('../../client/js/time.js');
+  const { ago: said } = await import('../../client/js/time.js');
+  const { sayOf } = await import('../../client/js/i18n/words.js');
+  const ago = (ts, now) => sayOf(said(ts, now));   // a said: the @ menu keeps it, its draw reads it
   assert.equal(ago(NOW - 20_000, NOW), 'Just now');
   assert.equal(ago(NOW + 5_000, NOW), 'Just now');
   assert.equal(ago(NOW - MIN, NOW), '1 minute ago');

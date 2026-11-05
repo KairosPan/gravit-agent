@@ -12,8 +12,9 @@ import { modulesListing } from './helpers/inventory.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
 import { fakeProvider, ADDRESS as WALLET_ADDRESS, hashOf } from './helpers/fake-wallet.js';
 import { rebuildQuery } from '../../src/account-proxy.ts';
-import { sayOf, setTable } from '../../client/js/i18n/words.js';
+import { sayOf, setTable, said as wordLine, wordsEpoch } from '../../client/js/i18n/words.js';
 import { EN } from '../../client/js/i18n/en.js';
+import { ZH } from '../../client/js/i18n/zh.js';
 
 // every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
 const booted = new Set();
@@ -7438,4 +7439,155 @@ test('a fresh window whose start rose under a reader who has read up starts the 
   await settle();
   assert.deepEqual(scrolled, [{ block: 'start', first: true }], "the window's first message, once");
   store.timers.clear();
+});
+
+// plan 7 task 9: Settings › Language. The table is set before the store is made, so a saved 中文 draws its first render in
+// Chinese; a choice sets the table, keeps the code in the prefs, sets <html lang> and calls reword (Task 3)
+const langPage = saved => {
+  const m = new Map(saved ? [['gravit-ui.prefs', JSON.stringify(saved)]] : []);
+  const storage = { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: k => m.delete(k) };
+  return { f: fakeWindow({ hash: '', storage }), m };
+};
+const langKey = value => ({ tagName: 'BUTTON', dataset: { action: 'setLang', value } });
+// the English a ZH value words otherwise, as a screen draws it between two tags or in a read attribute
+const ENGLISH_ONLY = new Set(Object.keys(EN).filter(k => typeof EN[k] === 'string' && ZH[k] !== EN[k] && /[A-Za-z]{2,}/.test(EN[k]) && !/\{\w+\}/.test(EN[k])).map(k => EN[k]));
+const englishDrawn = html => [...html.matchAll(/>([^<]+)</g), ...html.matchAll(/\s(?:aria-label|placeholder|title)="([^"]*)"/g)]
+  .map(m => m[1].trim()).filter(w => ENGLISH_ONLY.has(w));
+
+test('choosing 中文 redraws Settings in Chinese, sets html lang zh-CN and keeps lang in gravit-ui.prefs', async () => {
+  const { f, m } = langPage();
+  const h = host();
+  try {
+    const store = started(f, h);
+    await h.ready();
+    store.dispatch('openSettings');
+    assert.match(f.html(), /<div class="dsec-label">Language<\/div><div class="seg"><button[^>]*data-action="setLang" data-value="en">English<\/button><button[^>]*data-action="setLang" data-value="zh">中文<\/button><\/div>/, 'Language first, its values the codes');
+    assert.ok(f.html().indexOf('>Language<') < f.html().indexOf('>Theme<'), 'above Theme');
+    f.click(langKey('zh'));
+    assert.equal(f.doc.documentElement.lang, 'zh-CN');
+    assert.equal(JSON.parse(m.get('gravit-ui.prefs')).lang, 'zh');
+    assert.ok(f.html().includes(`>${ZH['settings.language']}<`));
+    assert.ok(f.html().includes(`>${ZH['settings.theme']}<`));
+    assert.match(f.html(), /aria-pressed="true" data-action="setLang" data-value="zh">中文</);
+    assert.deepEqual(englishDrawn(f.html()), []);
+    await settle();
+    assert.ok(h.calls.filter(c => c[0] === 'session/list').length >= 2, 'reword re-listed');
+  } finally {
+    setTable(EN);
+  }
+});
+
+test('a boot with lang zh draws its first render in Chinese, html lang zh-CN before it', async () => {
+  const { f } = langPage({ lang: 'zh' });
+  const h = host();
+  try {
+    started(f, h);
+    const first = f.html();
+    assert.equal(f.doc.documentElement.lang, 'zh-CN');
+    assert.ok(first.includes(ZH['status.connecting']), 'connecting… in Chinese');
+    assert.deepEqual(englishDrawn(first), [], 'no English frame');
+    await h.ready();
+    assert.deepEqual(englishDrawn(f.html()), []);
+  } finally {
+    setTable(EN);
+  }
+});
+
+test('choosing the language standing does nothing; a value that is no language is English', async () => {
+  const { f, m } = langPage();
+  const h = host();
+  const store = started(f, h);
+  await h.ready();
+  store.dispatch('openSettings');
+  const epoch = wordsEpoch();
+  const lists = h.calls.filter(c => c[0] === 'session/list').length;
+  const html = f.html();
+  for (const value of ['en', 'xx', 'zh"; x']) f.click(langKey(value));
+  await settle();
+  assert.equal(wordsEpoch(), epoch, 'the table stands');
+  assert.equal(h.calls.filter(c => c[0] === 'session/list').length, lists, 'no reword');
+  assert.equal(f.html(), html);
+  assert.notEqual(f.doc.documentElement.lang, 'zh-CN');
+  assert.equal(JSON.parse(m.get('gravit-ui.prefs') ?? '{}').lang ?? 'en', 'en');
+});
+
+test('the switch keeps a draft, its chip and its caret', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const say = f.withId('say', { tagName: 'INPUT' });
+  const h = host({ rows: [row('s1')] });
+  const { writes, editor } = recording();
+  try {
+    const store = await bootComposer(f, h, editor);
+    say.focus();
+    type(f, say, 'look at ETH', [bot]);
+    say.setSelectionRange(7, 7);
+    f.click(langKey('zh'));
+    const [el, runs, at] = writes.at(-1);
+    assert.equal(el, say);
+    assert.deepEqual(runs, [{ type: 'text', text: 'look at ETH' }, { type: 'chip', chip: bot }]);
+    assert.equal(at, 7);
+    assert.equal(f.doc.activeElement, say);
+    assert.ok(f.html().includes(`data-placeholder="${ZH['composer.placeholder']}"`), 'the placeholder redrawn');
+    store.timers.clear();
+  } finally {
+    setTable(EN);
+  }
+});
+
+test('the switch keeps an open / menu and redraws it in Chinese', async () => {
+  const { f, say, slot, store } = await menuRig();
+  try {
+    typeMenu(f, say, '/');
+    await settle();
+    assert.match(slot.innerHTML, /cmenu-group">Commands</);
+    f.click(langKey('zh'));
+    assert.match(f.html(), new RegExp(`id="composer-menu"><div class="cmenu"[^]*cmenu-group">${ZH['composer.menu.commands']}<`), 'the menu drawn again in the page, in Chinese');
+    assert.equal(say.value, '/');
+    assert.equal(say.selectionStart, 1);
+    assert.equal(say.attributes['aria-expanded'], 'true');
+    store.timers.clear();
+  } finally {
+    setTable(EN);
+  }
+});
+
+test('a status line on screen before the switch reads in Chinese after it; a line from the Account reads as it came', async () => {
+  const { f } = langPage();
+  const h = host();
+  try {
+    const store = started(f, h);
+    await h.ready();
+    store.dispatch('hostStatus', { line: wordLine('status.pinFailed'), bad: true });
+    assert.ok(f.html().includes(EN['status.pinFailed']));
+    f.click(langKey('zh'));
+    assert.ok(f.html().includes(ZH['status.pinFailed']));
+    assert.ok(!f.html().includes(EN['status.pinFailed']));
+    store.dispatch('hostStatus', { line: 'The Account refused: over the cap', bad: true });
+    f.click(langKey('en'));
+    f.click(langKey('zh'));
+    assert.ok(f.html().includes('The Account refused: over the cap'), "the Account's words as they came");
+  } finally {
+    setTable(EN);
+  }
+});
+
+test('back to English draws the English bytes again', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const h = host({ rows: [row('s1')] });
+  try {
+    const store = started(f, h);
+    await h.ready();
+    store.dispatch('openSettings');
+    await settle();
+    const english = f.html();
+    f.click(langKey('zh'));
+    await settle();
+    assert.notEqual(f.html(), english);
+    f.click(langKey('en'));
+    await settle();
+    assert.equal(f.html(), english);
+    assert.equal(f.doc.documentElement.lang, 'en');
+  } finally {
+    setTable(EN);
+  }
 });

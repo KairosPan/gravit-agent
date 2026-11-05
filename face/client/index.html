@@ -9,12 +9,14 @@
 <link rel="stylesheet" href="/client/css/tokens.css">
 <link rel="stylesheet" href="/client/css/app.css">
 <script>
-  // the theme before the first paint: the saved choice, else the system's own; then the sizes and fonts, as js/prefs.js
+  // the theme before the first paint: the saved choice, else the system's own; <html lang> for a saved Chinese (its words come
+  // with the first render, app.js sets the table before the store); then the sizes and fonts, as js/prefs.js
   // cssOf sets them (written again here: a module runs after the first paint; prefs.test.js holds the two together)
   try {
     const p = JSON.parse(localStorage.getItem('gravit-ui.prefs') ?? '{}') ?? {};
     const r = document.documentElement;
     if (p.theme === 'cream' || p.theme === 'black') r.dataset.theme = p.theme;
+    if (p.lang === 'zh') r.lang = 'zh-CN';
     const size = (v, min, max, base) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : base);
     const font = v => (typeof v === 'string' ? [...v.normalize('NFC').replace(/[^\p{L}\p{N} _.-]/gu, ' ').replace(/ +/g, ' ').trim()].slice(0, 64).join('').trim() : '');
     const fs = size(p.textSize, 12, 20, 15), fm = size(p.codeSize, 10, 16, 12), sans = font(p.textFont), mono = font(p.codeFont);

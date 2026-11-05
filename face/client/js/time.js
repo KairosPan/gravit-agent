@@ -1,5 +1,5 @@
 // gravit-ui/js/time.js — clocks, row times and the centred dividers (spec §5.2)
-import { t, tn } from './i18n/words.js';
+import { t, said, saidn } from './i18n/words.js';
 
 export const MIN = 60_000;
 export const HOUR = 60 * MIN;
@@ -47,11 +47,11 @@ export function fmtDuration(ms) {
   return `${Math.floor(secs / 60)}:${pad(secs % 60)}`;
 }
 
-// a conversation's age in words, for the @ menu
+// a conversation's age, for the @ menu: a said (the menu keeps it while it is open), read by sayOf where it is drawn
 export function ago(ts, now) {
   const d = Math.max(0, now - ts);
-  if (d < MIN) return t('time.justNow');
-  if (d < HOUR) return tn('time.ago.minutes', Math.floor(d / MIN));
-  if (d < DAY) return tn('time.ago.hours', Math.floor(d / HOUR));
-  return tn('time.ago.days', Math.floor(d / DAY));
+  if (d < MIN) return said('time.justNow');
+  if (d < HOUR) return saidn('time.ago.minutes', Math.floor(d / MIN));
+  if (d < DAY) return saidn('time.ago.hours', Math.floor(d / HOUR));
+  return saidn('time.ago.days', Math.floor(d / DAY));
 }

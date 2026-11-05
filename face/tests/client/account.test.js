@@ -424,7 +424,8 @@ test('no CJK, no icon URL, no raw JSON in any rendered string', () => {
     state({ tab: 'agents', seat: seatView({ seat: { name: 'Gravit', status: 'knocking', limits: [] } }), agents: null }));
   for (const s of states) {
     const html = draw(s) + renderStatement(s, NOW) + renderSettings(s);
-    assert.doesNotMatch(html, CJK);
+    // Settings' Language seg names 中文 in its own script (i18n/langs.js), under both tables; nothing else is Chinese
+    assert.doesNotMatch(html.replace('data-action="setLang" data-value="zh">中文<', ''), CJK);
     assert.doesNotMatch(html, /<img|\bsrc=|elbstream|favicon/);
     assert.deepEqual([...html.matchAll(/https?:\/\/[^\s"'<]+/g)].map(m => m[0]), [], 'no address is drawn: no link to the Account\'s own page');
     assert.doesNotMatch(html, /\{"|":|\[object Object\]|undefined|NaN|\bnull\b/);

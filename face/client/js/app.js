@@ -5,6 +5,7 @@ import { chordOf } from './keys.js';
 import { reducers } from './reducers/index.js';
 import { emptyState } from './data/empty.js';
 import { sizeOf, cleanFont, applyPrefs } from './prefs.js';
+import { langOf, tableOf, htmlLangOf } from './i18n/langs.js';
 import { parseHash, toHash } from './router.js';
 import { renderRail } from './render/rail.js';
 import { renderMessagesScreen, currentConversation } from './render/messages.js';
@@ -52,7 +53,7 @@ import { startJobs, shownOutput } from './host/jobs.js';
 import { jobsView, isLive } from './host/jobs-view.js';
 import { admit, blocking, hasImage, contentParts, encodeBase64, modelRefusalLine, isImageSrc } from './composer/files.js';
 import { senderName } from './render/rail.js';
-import { t, said, sayOf, isLine, wordsEpoch } from './i18n/words.js';
+import { t, said, sayOf, isLine, wordsEpoch, setTable } from './i18n/words.js';
 import { HOST_NAME } from './wire/speaker.js';
 import { startAttachments } from './host/attachments.js';
 import { startComposerReads } from './host/composer.js';
@@ -147,13 +148,14 @@ export function readPrefs(storage) {
     return {};
   }
 }
-export const prefsOf = s => ({ theme: s.theme, textSize: s.textSize, codeSize: s.codeSize, textFont: s.textFont, codeFont: s.codeFont, railCollapsed: s.railCollapsed, lastConv: s.lastConv, lastSeen: s.lastSeen, collapsed: s.collapsed });
+export const prefsOf = s => ({ theme: s.theme, lang: s.lang, textSize: s.textSize, codeSize: s.codeSize, textFont: s.textFont, codeFont: s.codeFont, railCollapsed: s.railCollapsed, lastConv: s.lastConv, lastSeen: s.lastSeen, collapsed: s.collapsed });
 export function initialState(storage, now = Date.now()) {
   const p = readPrefs(storage);
   const s = emptyState(now);
   return {
     ...s,
     theme: THEMES.includes(p.theme) ? p.theme : s.theme,
+    lang: langOf(p.lang),
     textSize: sizeOf('textSize', p.textSize),
     codeSize: sizeOf('codeSize', p.codeSize),
     textFont: cleanFont(p.textFont),
@@ -240,6 +242,10 @@ const screenOf = s => `${s.route.screen}/${s.route.id ?? ''}`;
 export function boot(win, host = {}) {
   const doc = win.document;
   const storage = (() => { try { return win.localStorage; } catch { return null; } })();
+  // the saved language's table before the store is made, so the first render is in it (the inline script set <html lang>)
+  const lang = langOf(readPrefs(storage).lang);
+  setTable(tableOf(lang));
+  doc.documentElement.lang = htmlLangOf(lang);
   const store = makeStore(storage);
   const timers = host.timers ?? new Timers();
   const root = doc.getElementById('app');
@@ -1803,6 +1809,16 @@ export function boot(win, host = {}) {
     openSettings: () => store.dispatch('openSettings'),
     closeSettings: () => store.dispatch('closeSettings'),
     setTheme: el => { const theme = el.dataset.value; store.dispatch('setTheme', theme); applyTheme(theme); },
+    // Settings › Language: the table first, so the render the dispatch makes draws every word in it; then what the face
+    // folded from the host, folded again (reword). The language standing, or a value that is none, does nothing
+    setLang: el => {
+      const lang = langOf(el.dataset.value);
+      if (lang === store.get().lang) return;
+      setTable(tableOf(lang));
+      store.dispatch('setLang', lang);
+      doc.documentElement.lang = htmlLangOf(lang);
+      act.reword();
+    },
     // a size's − or + (the reducer keeps it in range; a key at its end is aria-disabled and does nothing), and a font: kept
     // as typed (the reducer cleans it; the box is left alone, so a space can be typed) — a render writes the box back by
     // script while a turn streams, and its blur then fires no change — and on change the box shows the family as kept

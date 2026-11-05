@@ -12,6 +12,7 @@ const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isD
 
 const CONTENT = {
   'i18n/zh.js': 'the Chinese table',
+  'i18n/langs.js': "a language's own name",
   'host/modules-view.js': "the Lunhui modules' Chinese names and sub-titles",
   'host/runs-view.js': "the iFinD provider's name in a run's row",
   'host/run-sheet-view.js': "the Chinese request a Run sends Gravit",

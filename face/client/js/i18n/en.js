@@ -828,6 +828,7 @@ export const EN = Object.freeze({
 
   // Settings (render/account.js renderSettings)
   'settings.title': 'Settings',
+  'settings.language': 'Language',
   'settings.theme': 'Theme',
   'settings.theme.cream': 'Cream',
   'settings.theme.black': 'Black',

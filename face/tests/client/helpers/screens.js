@@ -326,6 +326,8 @@ export function everyState() {
     ...shortcutStates(open),
     // Slack in Account › Identity (plan B2 Task 7), merged from main after plan 6
     ...slackStates(identitySigning(R.nav(seatedOf(accountRead()), { screen: 'account', tab: 'identity' }))),
+    // Settings › Language (plan 7 Task 9) pressed on 中文; the Settings states under ZH are screens-zh.json's (Task 10)
+    R.setLang(R.openSettings(open), 'zh'),
   ];
 }
 

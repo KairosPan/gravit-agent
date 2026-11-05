@@ -71,7 +71,7 @@ test('the inline script in index.html sets the same properties as applyPrefs', (
     const documentElement = { dataset: {}, style };
     const localStorage = { getItem: k => (k === 'gravit-ui.prefs' && saved !== undefined ? JSON.stringify(saved) : null) };
     new Function('localStorage', 'document', script)(localStorage, { documentElement });
-    return { css: Object.fromEntries(style.props), theme: documentElement.dataset.theme };
+    return { css: Object.fromEntries(style.props), theme: documentElement.dataset.theme, lang: documentElement.lang };
   };
   const viaModule = prefs => { const style = recording(); applyPrefs({ style }, prefs); return Object.fromEntries(style.props); };
   const cases = [
@@ -88,4 +88,21 @@ test('the inline script in index.html sets the same properties as applyPrefs', (
   assert.equal(run({ theme: 'black' }).theme, 'black', 'the theme still comes first');
   assert.equal(run({ theme: 'nope' }).theme, undefined);
   assert.deepEqual(run(null).css, {}, 'a saved null reads as nothing');
+});
+
+// plan 7 task 9: <html lang> before the first paint, from the saved code alone (the words come with the first render)
+test('the inline script sets html lang for a saved zh and leaves en alone', () => {
+  const page = readFileSync(new URL('../../client/index.html', import.meta.url), 'utf8');
+  const script = page.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  const run = saved => {
+    const documentElement = { dataset: {}, style: recording() };
+    const localStorage = { getItem: k => (k === 'gravit-ui.prefs' && saved !== undefined ? JSON.stringify(saved) : null) };
+    new Function('localStorage', 'document', script)(localStorage, { documentElement });
+    return documentElement.lang;
+  };
+  assert.equal(run({ lang: 'zh' }), 'zh-CN');
+  assert.equal(run({ lang: 'zh', theme: 'black', textSize: 18 }), 'zh-CN');
+  for (const saved of [undefined, {}, null, { lang: 'en' }, { lang: 'zh"; x' }, { lang: ['zh'] }, { lang: 'ZH' }]) {
+    assert.equal(run(saved), undefined, JSON.stringify(saved));
+  }
 });
