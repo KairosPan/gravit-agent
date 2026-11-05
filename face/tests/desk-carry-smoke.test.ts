@@ -221,7 +221,8 @@ if (process.argv[2] === "one" || process.argv[2] === "two") {
       assert.equal(report.sent.length, 2, JSON.stringify(report.sent));
       assert.match(report.sent[0], /^a restart cut your message of .+ ET before it was answered; send it again$/);
       assert.equal(report.sent[1], "echo QUEUED");
-      assert.deepEqual(report.sends.map((b) => [b.kind, b.network]), [["chat", "telegram"], ["chat", "telegram"]], "both through the account, as chat replies to telegram");
+      assert.deepEqual(report.sends.map((b) => [b.kind, b.network]), [["chat", undefined], ["chat", "telegram"]],
+        "both through the account as chat: the cut turn's line with no network - every network the Chat row ticks (plan B2, ruling 12) - and the carried text's answer back to telegram, its key's network");
     } finally {
       await rm(base, { recursive: true, force: true });
     }

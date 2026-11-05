@@ -44,12 +44,12 @@ test('formatRouting writes the account\'s string', () => {
   assert.equal(formatRouting(null), 'chat=;alerts=;brief=;cards=;fills=');
 });
 
-test('identityOf: a connected Telegram, Slack soon, iMessage later, the grid, quiet hours and Not you', () => {
+test('identityOf: a connected Telegram, Slack not connected, iMessage later, the grid, quiet hours and Not you', () => {
   const v = identityOf(CONNECTED_WITH_STRANGER);
   assert.equal(v.ok, true);
   assert.deepEqual(v.networks, {
     telegram: { state: 'connected', speaksAs: '@gravit_desk_bot', talksOnlyWith: '@pan', since: '2026-11-03T15:20:00.000Z', fingerprint: 'ab12cd34', polling: true },
-    imessage: { state: 'later' }, slack: { state: 'soon' },
+    imessage: { state: 'later' }, slack: { state: 'none' },
   });
   assert.deepEqual(v.grid.map(g => g.row), ['chat', 'alerts', 'brief', 'cards', 'fills']);
   assert.deepEqual(v.grid[0], { row: 'chat', label: 'Chat with Gravit', face: true, telegram: { on: true, enabled: true }, imessage: { on: false, enabled: false }, slack: { on: false, enabled: false } });
@@ -86,7 +86,8 @@ test('routingOf and tickRouting: every row, only networks the account speaks on;
   assert.deepEqual(tickRouting(ROUTING, 'brief', 'telegram', true).brief, ['telegram']);
   assert.deepEqual(tickRouting(ROUTING, 'chat', 'telegram', false).chat, []);
   assert.equal(tickRouting(ROUTING, 'nope', 'telegram', true), ROUTING);
-  assert.equal(tickRouting(ROUTING, 'chat', 'slack', true), ROUTING);
+  assert.equal(tickRouting(ROUTING, 'chat', 'fax', true), ROUTING);
+  assert.deepEqual(tickRouting(ROUTING, 'chat', 'slack', true).chat, ['slack', 'telegram'], 'Slack is spoken now');
 });
 
 test('a connected Telegram row: Connected, Speaks as, Talks only with, Details and Disconnect…', () => {
@@ -109,7 +110,7 @@ test('a connected Telegram row: Connected, Speaks as, Talks only with, Details a
   assert.match(renderIdentityTab(R.identityDetails(signing(idle)), NOW), re('token ab12cd34 · not polling'));
 });
 
-test('Telegram not connected: Not connected and Connect…; Slack: Not connected, Connect… disabled, Soon; iMessage: Later and no button', () => {
+test('Telegram not connected: Not connected and Connect…; Slack: Not connected and Install app…, no Soon; iMessage: Later and no button', () => {
   const html = renderIdentityTab(signing(NOT_CONNECTED), NOW);
   const gravit = boxOf(html, 'Gravit');
   assert.ok(gravit, 'the Gravit card');
@@ -119,10 +120,11 @@ test('Telegram not connected: Not connected and Connect…; Slack: Not connected
   assert.match(tg, /Not connected/);
   assert.match(tg, /<button[^>]*data-action="identityConnect" data-network="telegram"[^>]*>Connect…<\/button>/);
   assert.doesNotMatch(tg, /Disconnect…|Details/);
-  assert.match(sl, /<b>Slack<\/b> <span class="chip grey">Soon<\/span>/);
+  assert.match(sl, /<b>Slack<\/b><br>/);
+  assert.doesNotMatch(sl, /Soon|chip/);
   assert.match(sl, /Not connected/);
-  assert.match(sl, /<button type="button" class="btn-sm" disabled aria-disabled="true">Connect…<\/button>/);
-  assert.doesNotMatch(sl, /data-action/);
+  assert.match(sl, /<button[^>]*data-action="identityConnect" data-network="slack"[^>]*>Install app…<\/button>/);
+  assert.doesNotMatch(sl, /disabled/);
   assert.match(im, /<b>iMessage<\/b> <span class="chip grey">Later<\/span>/);
   assert.doesNotMatch(im, /<button/);
   // the order: Telegram, iMessage, Slack
@@ -200,7 +202,7 @@ test('a page that does not sign draws no owner button on Identity', () => {
   for (const body of [CONNECTED_WITH_STRANGER, NOT_CONNECTED]) {
     const html = renderIdentityTab(readOnly(body), NOW);
     for (const w of ['Connect…', 'Disconnect…', 'Save…', 'Change…', 'Block']) assert.doesNotMatch(html, new RegExp(`data-action[^>]*>${esc(w)}`));
-    assert.doesNotMatch(html, />Connect…</, 'not even Slack\'s disabled one');
+    assert.doesNotMatch(html, />Connect…<|>Install app…</, 'neither network\'s');
     assert.match(html, /Only a browser that signs changes these\./);
     // the ticks read, and change nothing
     for (const box of html.match(/<input[^>]*>/g)) assert.match(box, /disabled aria-disabled="true"/);
@@ -264,4 +266,67 @@ test('no CJK and no raw JSON in the tab', () => {
     assert.doesNotMatch(html, CJK);
     assert.doesNotMatch(html, /\{"|":/);
   }
+});
+
+// ── plan B2 Task 7: Slack's row and its column ──
+
+const SLACK_NET = { network: 'slack', speaksAs: '@gravit', talksOnlyWith: '@pan', since: '2026-11-04T14:00:00.000Z', fingerprint: 'cd56ef78', state: 'connected', polling: true };
+const BOTH = { ...CONNECTED, networks: [...CONNECTED.networks, SLACK_NET], routing: { ...ROUTING, chat: ['slack', 'telegram'], alerts: ['slack'] }, slackManifest: '{\n  "display_information": { "name": "Gravit" }\n}' };
+const SLACK_ONLY = { ...NOT_CONNECTED, networks: [SLACK_NET], routing: { ...NONE_ROUTING, chat: ['slack'] } };
+
+test('Slack not connected: Not connected and Install app…; connected: Connected, Speaks as, Talks only with, Details and Disconnect…', () => {
+  const v = identityOf(BOTH);
+  assert.deepEqual(v.networks.slack, { state: 'connected', speaksAs: '@gravit', talksOnlyWith: '@pan', since: '2026-11-04T14:00:00.000Z', fingerprint: 'cd56ef78', polling: true });
+  assert.equal(v.slackManifest, BOTH.slackManifest);
+  assert.equal(identityOf(CONNECTED).slackManifest, '', 'none given, none drawn');
+  assert.equal(identityOf({ ...CONNECTED, slackManifest: 42 }).slackManifest, '');
+  const gravit = boxOf(renderIdentityTab(signing(BOTH), NOW), 'Gravit');
+  const sl = gravit.match(/<div class="venue"[^>]*data-network="slack"[\s\S]*?<\/div>/)?.[0] ?? '';
+  for (const w of ['Slack', 'Connected', 'Speaks as @gravit', 'Talks only with @pan', 'Details', 'Disconnect…']) assert.match(sl, re(w), w);
+  assert.match(sl, /<button[^>]*data-action="openSheet" data-kind="disconnectNetwork" data-network="slack"[^>]*>Disconnect…<\/button>/);
+  assert.match(sl, /<button[^>]*data-action="identityDetails"[^>]*data-network="slack"[^>]*>Details<\/button>/);
+  assert.doesNotMatch(sl, /Install app…|Soon/);
+  // Details is the row's own: Slack's opens Slack's line, not Telegram's
+  const open = renderIdentityTab(R.identityDetails(signing(BOTH), 'slack'), NOW);
+  assert.match(open, /token cd56ef78/);
+  assert.doesNotMatch(open, /token ab12cd34/);
+  const both = R.identityDetails(R.identityDetails(signing(BOTH), 'slack'), 'telegram');
+  assert.match(renderIdentityTab(both, NOW), /token ab12cd34/);
+  assert.equal(R.identityDetails(R.identityDetails(signing(BOTH), 'slack'), 'slack').identity.details, false);
+  // Slack's trouble in Slack's words
+  const net = over => identityOf({ ...SLACK_ONLY, networks: [{ ...SLACK_NET, ...over }] }, null, () => '09:30').networks.slack.problem;
+  assert.equal(net({ conflictAt: '2026-11-04T14:30:00.000Z' }), "Another program holds this app's connection to Slack (since 09:30): stop it, or Gravit hears nothing.");
+  assert.equal(net({ pollFailing: { since: '2026-11-04T14:30:00.000Z', reason: 'invalid_auth' } }), 'Not hearing Slack since 09:30: invalid_auth.');
+  assert.equal(net({ blocked: true }), undefined, 'blocking is Telegram\'s');
+  // a page that does not sign: the row reads, no key
+  const ro = boxOf(renderIdentityTab(readOnly(SLACK_ONLY), NOW), 'Gravit');
+  assert.match(ro, /Speaks as @gravit/);
+  assert.doesNotMatch(ro, /Disconnect…|Install app…/);
+});
+
+test('the grid enables Slack\'s column once Slack is connected; iMessage stays disabled', () => {
+  const v = identityOf(BOTH);
+  assert.deepEqual(v.grid[0].slack, { on: true, enabled: true });
+  assert.deepEqual(v.grid[1].slack, { on: true, enabled: true });
+  assert.deepEqual(v.grid[2].slack, { on: false, enabled: true });
+  assert.deepEqual(v.grid[0].imessage, { on: false, enabled: false });
+  assert.deepEqual(identityOf(CONNECTED).grid[0].slack, { on: false, enabled: false });
+  const grid = boxOf(renderIdentityTab(signing(BOTH), NOW), 'What reaches you where');
+  const rows = grid.match(/<tr><td>[\s\S]*?<\/tr>/g);
+  for (const r of rows) {
+    const boxes = r.match(/<input[^>]*>/g);
+    assert.match(boxes[2], /disabled aria-disabled="true"/, 'iMessage');
+    assert.doesNotMatch(boxes[3], /disabled/, 'Slack enabled');
+    assert.match(boxes[3], /data-action="identityTick" data-row="[a-z]+" data-network="slack"/);
+  }
+  assert.match(rows[0].match(/<input[^>]*>/g)[3], /checked/);
+  assert.doesNotMatch(rows[2].match(/<input[^>]*>/g)[3], /checked/);
+  // a tick on Slack's column: the draft, sorted with Telegram's
+  const ticked = R.identityTick(signing(BOTH), { row: 'brief', network: 'slack', on: true });
+  assert.deepEqual(ticked.identity.draft.brief, ['slack']);
+  assert.match(renderIdentityTab(ticked, NOW), />Save…</);
+  // not connected: its column disabled and a tick changes nothing
+  assert.equal(R.identityTick(signing(CONNECTED), { row: 'chat', network: 'slack', on: true }).identity.draft, null);
+  // a read that drops Slack drops its ticks from a draft
+  assert.ok(!JSON.stringify(R.identityLoaded(ticked, CONNECTED).identity.draft).includes('slack'));
 });

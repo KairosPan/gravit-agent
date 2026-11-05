@@ -123,7 +123,7 @@ function accountStates() {
   for (const [loaded, name] of [['holdingsLoaded', 'holdings'], ['paperLoaded', 'holdings-paper'], ['historyLoaded', 'history'], ['statementLoaded', 'statement'], ['agentsLoaded', 'agents']]) {
     read = R[loaded](read, { data: fx(name), at: NOW });
   }
-  const seated = R.seatLoaded(read, { data: { ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-19T14:00:00Z', mode: 'guard', writes: { on: true, capUsd: 100 }, seat: { name: 'Gravit', status: 'admitted', address: '0xab12', limits: [] }, venues: [], cards: [] }, at: NOW });
+  const seated = seatedOf(read);
   const at = tab => R.nav(seated, { screen: 'account', tab });
   return [
     R.accountFailed(read, { at: NOW, message: 'The Account is locked until its owner signs in.' }), R.accountLoaded(on, { data: { ok: true, available: false }, at: NOW }), R.accountFailed(on, { at: NOW }), R.accountLoading(on),
@@ -141,13 +141,20 @@ function accountStates() {
   ];
 }
 
-function identityStates(base) {
+const seatedOf = read => R.seatLoaded(read, { data: { ok: true, url: 'http://127.0.0.1:4820', reachable: true, asOf: '2026-10-19T14:00:00Z', mode: 'guard', writes: { on: true, capUsd: 100 }, seat: { name: 'Gravit', status: 'admitted', address: '0xab12', limits: [] }, venues: [], cards: [] }, at: NOW });
+
+// Account › Identity's read on a page that signs: Telegram connected and failing to poll, a stranger, quiet hours
+function identitySigning(base) {
   const read = {
     ok: true, networks: [{ network: 'telegram', speaksAs: '@gravit_desk_bot', talksOnlyWith: '@pan', since: '2026-11-03T15:20:00.000Z', fingerprint: 'ab12cd34', state: 'connected', polling: false, pollFailing: { since: '2026-11-04T14:00:00.000Z', reason: 'ENOTFOUND' } }],
     routing: { chat: ['telegram'], alerts: [], brief: [], cards: [], fills: [] }, quiet: { from: '23:00', to: '07:00', zone: 'America/New_York' },
     strangers: [{ network: 'telegram', sender: '0123456789ab', masked: '…789', count: 3, last: '2026-11-04T13:02:00.000Z' }],
   };
-  const signing = R.ownerStanding(R.identityLoaded(base, read), { role: 'signs', kid: 'a5048199a8081854' });
+  return R.ownerStanding(R.identityLoaded(base, read), { role: 'signs', kid: 'a5048199a8081854' });
+}
+
+function identityStates(base) {
+  const signing = identitySigning(base);
   return [
     R.identityTick(R.identityDetails(signing), { row: 'brief', network: 'telegram', on: true }),
     R.identityLoaded(base, { ok: true, networks: [], routing: {}, quiet: null, strangers: [] }),
@@ -317,6 +324,36 @@ export function everyState() {
     // the golden is append-only (golden-write.js): a state added later goes after these, so every pinned name keeps its state
     ...laterStates(),
     ...shortcutStates(open),
+    // Slack in Account › Identity (plan B2 Task 7), merged from main after plan 6
+    ...slackStates(identitySigning(R.nav(seatedOf(accountRead()), { screen: 'account', tab: 'identity' }))),
+  ];
+}
+
+// the Account's page as accountStates reads it, before the seat
+function accountRead() {
+  const fx = name => JSON.parse(readFileSync(new URL(`../../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
+  let read = R.accountLoaded(R.nav(emptyState(), { screen: 'account', tab: 'portfolio' }), { data: fx('account'), at: NOW });
+  for (const [loaded, name] of [['holdingsLoaded', 'holdings'], ['paperLoaded', 'holdings-paper'], ['historyLoaded', 'history'], ['statementLoaded', 'statement'], ['agentsLoaded', 'agents']]) {
+    read = R[loaded](read, { data: fx(name), at: NOW });
+  }
+  return read;
+}
+
+// Slack (plan B2 Task 7): connected with its Details open, and Install app…'s sheets 1 to 4 (1 with the manifest, 2 in conflict, 4 with
+// its note)
+function slackStates(signing) {
+  const read = { ...signing.identity.data, networks: [...signing.identity.data.networks, { network: 'slack', speaksAs: '@gravit', talksOnlyWith: '@pan', since: '2026-11-04T14:00:00.000Z', fingerprint: 'cd56ef78', state: 'connected', polling: true }], slackManifest: '{\n  "a": 1\n}' };
+  const both = R.identityDetails(R.identityLoaded(signing, read), 'slack');
+  const pending = { id: 'fedcba9876543210fedcba9876543210', network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'Gravit' }, workspace: 'Fake Co', link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'conflict' };
+  const heard = { ...pending, state: 'heard', sender: { id: 'T0FAKE001:U0OPER7QK', name: 'Pan', handle: '@pan', userId: 'U0OPER7QK', masked: '…7QK', text: 'hi' } };
+  const open = R.identityConnectOpen(both, 'slack');
+  const seed = { network: 'slack', pending: pending.id, botId: 'T0FAKE001:U0BOT0001', speaksAs: '@gravit', operatorId: 'T0FAKE001:U0OPER7QK', talksOnlyWith: '@pan', routing: 'chat=slack;alerts=slack;brief=slack;cards=slack;fills=slack', keyHash: 'a'.repeat(64), salt: 'b'.repeat(32) };
+  return [
+    both,
+    R.identityConnectSet(open, { copied: true }),
+    R.identityConnectSet(open, { step: 2, pending }),
+    R.identityConnectSet(open, { step: 3, pending: heard }),
+    R.sheetOpen(both, { kind: 'connectNetwork', seed, fields: [] }),
   ];
 }
 

@@ -275,6 +275,9 @@ async function harness(over: Partial<DeskConversationDeps> = {}, opts: { home?: 
 /* ---------- messages and turns ---------- */
 
 const PHONE = { kind: "telegram", from: 42, chat: 42, messageId: 7 };
+/** A phone text as this face's bridge records it (plan B2): the network it came through, and its id there. */
+const PHONE_TG = { kind: "telegram", network: "telegram", messageId: "telegram:7" };
+const PHONE_SLACK = { kind: "telegram", network: "slack", messageId: "slack:1730812345.001200" };
 const say = (text: string): { type: "text"; text: string }[] => [{ type: "text", text }];
 let ids = 0;
 /** A user message as the loop logs it on `user/message`. */
@@ -653,7 +656,7 @@ test("a phone turn's answer goes as chat to the network it came from; an alert t
   const asked: unknown[] = [];
   h.desk.setOutlet({ send: (text, opts) => { asked.push([text, opts]); return Promise.resolve({ sent: [`telegram:${asked.length}`] }); } });
   const { sessionId } = (await post(h, "hi")) as { sessionId: string };
-  turn(h, sessionId, 1, PHONE, "phone answer");
+  turn(h, sessionId, 1, PHONE_TG, "phone answer");
   turn(h, sessionId, 2, ALERT, "alert answer");
   turn(h, sessionId, 3, JOB, "wake answer");
   await waitFor("three deliveries", () => asked.length === 3);
@@ -661,6 +664,25 @@ test("a phone turn's answer goes as chat to the network it came from; an alert t
     ["phone answer", { kind: "chat", network: "telegram" }],
     ["alert answer", { kind: "alert" }],
     ["wake answer", { kind: "report" }],
+  ]);
+});
+
+test("a Slack text's answer goes back to Slack, a Telegram text's to Telegram", async () => {
+  const h = await harness();
+  const asked: unknown[] = [];
+  h.desk.setOutlet({ send: (text, opts) => { asked.push([text, opts]); return Promise.resolve({ sent: [`x:${asked.length}`] }); } });
+  const { sessionId } = (await post(h, "hi")) as { sessionId: string };
+  turn(h, sessionId, 1, PHONE_SLACK, "to slack");
+  turn(h, sessionId, 2, PHONE_TG, "to telegram");
+  /* an older face's record names no network, and a record with one neither network is: no network, every ticked one */
+  turn(h, sessionId, 3, PHONE, "an older record");
+  turn(h, sessionId, 4, { kind: "telegram", network: "matrix", messageId: "matrix:1" }, "an unknown network");
+  await waitFor("four deliveries", () => asked.length === 4);
+  assert.deepEqual(asked, [
+    ["to slack", { kind: "chat", network: "slack" }],
+    ["to telegram", { kind: "chat", network: "telegram" }],
+    ["an older record", { kind: "chat" }],
+    ["an unknown network", { kind: "chat" }],
   ]);
 });
 
@@ -1023,6 +1045,24 @@ test("start answers a phone turn the restart cut with one line, once per session
   await third.desk.dispose();
 });
 
+test("a cut-turn line goes as chat with no network", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  h.tree.logs.set(sessionId, [
+    row(0, "turn/start", { turn: 3 }, AT - 8 * 60_000),
+    row(1, "user/message", { id: "slack:1730812345.001200", role: "user", content: say("x"), source: PHONE_SLACK }, AT - 8 * 60_000),
+    row(2, "turn/end", { turn: 3, reason: { kind: "interrupted" } }, AT - 7 * 60_000),
+  ]);
+  const { desk } = await restarted(h, sessionId);
+  const asked: unknown[] = [];
+  desk.setOutlet({ send: (text, opts) => { asked.push([text, opts]); return Promise.resolve({ sent: ["slack:1730812400.000001"] }); } });
+  await desk.start();
+  await waitFor("the restart's line", () => asked.length === 1);
+  assert.deepEqual(asked, [[RESTART_LINE, { kind: "chat" }]], "no network: the account sends it to every network the Chat row ticks");
+  await desk.dispose();
+});
+
 test("a resumed session whose log cannot be read still wakes what was left, with one line", async () => {
   const h = await harness();
   h.tree.inboxes = true;
@@ -1186,6 +1226,19 @@ test("the boot posts the carried texts again once, in order, keyed and marked ca
   assert.equal(h.tree.agent(sessionId).followups.length, 0, "carried once");
   assert.equal((await carriedOf(h)).length, 1);
   await second.desk.dispose();
+});
+
+test("a carried Slack text keeps its network: its line says slack, and its record names the network", async () => {
+  const h = await harness();
+  h.tree.inboxes = true;
+  const sessionId = await started(h);
+  await appendEvent(h.home, carryOf(sessionId, [{ key: `slack:1730812345.001200#4@${iso(WROTE)}`, text: "from slack", at: iso(WROTE) }]));
+  const { desk } = await restarted(h, sessionId);
+  await desk.start();
+  const agent = h.tree.agent(sessionId);
+  assert.equal(agent.text(0), "[slack · operator · 13:55 ET (carried over a restart)]\nfrom slack");
+  assert.deepEqual(agent.followups[0].source, { kind: "telegram", network: "slack", carried: true });
+  await desk.dispose();
 });
 
 test("a carried key the session already holds is skipped and counted", async () => {

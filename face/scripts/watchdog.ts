@@ -41,11 +41,17 @@
  * (`credentials/networks/telegram.json`, {@link accountHomeOf}) - only a plain file, inside the home,
  * no link on the way, readable by the operator alone, the account's own rules - and sends that one
  * line itself, with the Bot API's sendMessage to the operator the account bound ({@link
- * phoneDirectOf}). The token is used for nothing else, read only then, and taken out of every line
- * sent and logged, as `<token>`. Until the Bot API takes it (a 2xx), the line is tried again at each
- * run - no token file, a file that fails the rules, a refusal, no answer; once taken it sends
- * nothing more until the account has come back. It reads no
- * TELEGRAM_* name and no `$DSH_HOME/.env`. Under compose the watchdog does not run.
+ * phoneDirectOf}). THE SLACK FALLBACK (plan B2, ruling 13): only when Telegram is not connected (no
+ * `telegram.json`) does it read `credentials/networks/slack.json` under the same rules - its bot token
+ * and the DM channel the account bound - and send the line with Slack's `chat.postMessage`,
+ * form-encoded, the bot token in `Authorization: Bearer`, plain and escaped, taken only when Slack's
+ * body says `ok: true` (Slack answers 200 to a refusal); Slack's address is `https://slack.com/api`
+ * unless `ACCOUNT_SLACK_API` is the account's loopback override ({@link slackApiOf}). One line, on
+ * one network. Each token is used for nothing else, read only then, and taken out of every line
+ * sent and logged - with every Slack token shape - as `<token>`. Until the network takes it, the
+ * line is tried again at each run - no token file, a file that fails the rules, a refusal, no
+ * answer; once taken it sends nothing more until the account has come back. It reads no
+ * TELEGRAM_* or SLACK_* name and no `$DSH_HOME/.env`. Under compose the watchdog does not run.
  * While the desk's `OFF` pause is in force no line is sent - the direct one included - the log says
  * what was not, and the state and the restart go on.
  *
@@ -104,8 +110,8 @@ export interface WatchdogDeps {
   /** `POST /api/account/identity/send {kind: "watchdog", text}`: true when the account answered (sent, queued or
    * held - its own words are logged), false when it did not or refused; never throws. */
   send(text: string): Promise<boolean>;
-  /** The account-down line alone, straight to the Bot API with the token from the account's home
-   * ({@link phoneDirectOf}): true only when the Bot API answered 2xx; never throws. */
+  /** The account-down line alone, straight to the network with the token from the account's home - Telegram's, else,
+   * when Telegram is not connected, Slack's ({@link phoneDirectOf}): true only when the network took it; never throws. */
   sendDirect(text: string): Promise<boolean>;
   /** Whether the desk's `OFF` pause is in force. */
   offInForce(): Promise<boolean>;
@@ -319,7 +325,7 @@ export function redactorOf(token: string): (text: string) => string {
   return (text) => spellings.reduce((out, spelling) => out.split(spelling).join("<token>"), text);
 }
 
-/** The account's home, whose `credentials/networks/telegram.json` {@link phoneDirectOf} reads: `FACE_ACCOUNT_HOME`,
+/** The account's home, whose `credentials/networks/{telegram,slack}.json` {@link phoneDirectOf} reads: `FACE_ACCOUNT_HOME`,
  * else `BUYER_HOME` (the account's own name for it), else `~/.buyer-agent-demo`, the account's default. */
 export function accountHomeOf(env: NodeJS.ProcessEnv): string {
   return env.FACE_ACCOUNT_HOME?.trim() || env.BUYER_HOME?.trim() || join(homedir(), ".buyer-agent-demo");
@@ -331,18 +337,47 @@ const inside = (root: string, path: string): boolean => {
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 };
 
-/** The account's Telegram file, read as the account reads it (account/src/portfolio/identity/secret-file.ts
+/** Slack's own Web API address: the only one the watchdog sends a Slack token to outside a test. */
+export const SLACK_API = "https://slack.com/api";
+/** The one override taken, the account's rule (account/src/portfolio/identity/slack-api.ts `slackApiBase`): plain http to
+ * this machine's 127.0.0.1, a port, and at most `/api`. */
+const SLACK_LOOPBACK = /^http:\/\/127\.0\.0\.1:([1-9]\d{0,4})(?:\/api)?$/;
+/** A Slack token of any kind anywhere in a text (the account's kinds.ts `SLACK_TOKEN_ANYWHERE`). */
+const SLACK_TOKEN_ANYWHERE = /\bx(?:ox[abposre]|app)-[A-Za-z0-9-]{10,}/g;
+/** A Slack DM channel's id, as the account binds one. */
+const DM_SHAPE = /^D[A-Z0-9]{2,20}$/;
+
+/** The Slack Web API's address for the watchdog: Slack's own, unless `ACCOUNT_SLACK_API` is exactly
+ * `http://127.0.0.1:<port>` or that and `/api` - the account's own override and rule, so a fake Slack in a smoke serves
+ * both - which answers `http://127.0.0.1:<port>/api`. Anything else is Slack's own. */
+export function slackApiOf(env: NodeJS.ProcessEnv): string {
+  const m = SLACK_LOOPBACK.exec(env.ACCOUNT_SLACK_API ?? "");
+  return m !== null && Number(m[1]) <= 65_535 ? `http://127.0.0.1:${m[1]}/api` : SLACK_API;
+}
+
+/** What {@link readNetworkFile} reads: Telegram's token and the operator's id, or Slack's bot token, the DM channel and
+ * (to take it out of every line, never to use it) the app-level token; or why not - words that carry no value from the
+ * file, with `absent` when there is no file, the network not connected. */
+export type NetworkFile =
+  | { token: string; operatorId: string }
+  | { botToken: string; channel: string; appToken?: string }
+  | { why: string; absent?: true };
+
+/** A network's file in the account's home, read as the account reads it (account/src/portfolio/identity/secret-file.ts
  * `readNetworkSecret` over live/credentials.ts `readSecretFile`): no link on the way, inside the home, a plain file,
- * readable by its owner alone; its token and the operator's id. Or why not - words that carry no value from the file. */
-function readTelegramFile(accountHome: string): { token: string; operatorId: string } | { why: string } {
+ * readable by its owner alone - `credentials/networks/telegram.json` or `credentials/networks/slack.json`.
+ * @param accountHome - the account's home ({@link accountHomeOf}).
+ * @param network - which file. */
+export function readNetworkFile(accountHome: string, network: "telegram" | "slack"): NetworkFile {
   const root = resolve(accountHome);
-  const ref = "credentials/networks/telegram.json";
-  const file = join(root, ref);
+  const ref = `credentials/networks/${network}.json`;
+  const file = join(root, "credentials", "networks", `${network}.json`);
+  const name = network === "slack" ? "Slack" : "Telegram";
   try {
     for (const p of [join(root, "credentials"), join(root, "credentials", "networks"), file]) {
       if (lstatSync(p, { throwIfNoEntry: false })?.isSymbolicLink()) return { why: `${ref}: a link on the way, not read` };
     }
-    if (!existsSync(file)) return { why: `no ${ref} in the account's home (Telegram not connected)` };
+    if (!existsSync(file)) return { why: `no ${ref} in the account's home (${name} not connected)`, absent: true };
     const real = realpathSync(file);
     if (!inside(realpathSync(root), real)) return { why: `${ref} leads out of the account's home, not read` };
     const st = statSync(real);
@@ -350,54 +385,111 @@ function readTelegramFile(accountHome: string): { token: string; operatorId: str
     if ((st.mode & 0o077) !== 0) return { why: `${ref} can be read by other users (mode ${(st.mode & 0o777).toString(8)}), not read` };
     const parsed: unknown = JSON.parse(readFileSync(real, "utf8"));
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return { why: `${ref} is not a token file` };
-    const { token, operatorId } = parsed as Record<string, unknown>;
-    if (typeof token !== "string" || token === "" || typeof operatorId !== "string" || !/^\d{1,16}$/.test(operatorId)) return { why: `${ref} is not a token file` };
-    return { token, operatorId };
+    const p = parsed as Record<string, unknown>;
+    if (network === "telegram") {
+      const { token, operatorId } = p;
+      if (typeof token !== "string" || token === "" || typeof operatorId !== "string" || !/^\d{1,16}$/.test(operatorId)) return { why: `${ref} is not a token file` };
+      return { token, operatorId };
+    }
+    const { botToken, channel, appToken } = p;
+    if (typeof botToken !== "string" || botToken === "" || typeof channel !== "string" || !DM_SHAPE.test(channel)) return { why: `${ref} is not a token file` };
+    return { botToken, channel, ...(typeof appToken === "string" && appToken !== "" ? { appToken } : {}) };
   } catch (err) {
     return { why: `${ref} could not be read (${(err as NodeJS.ErrnoException).code ?? "unreadable"})` };
   }
 }
 
+/** `text` as Slack shows it literally: `&`, `<` and `>` escaped (the account's slack-api.ts `escapeSlack`). */
+const escapeSlack = (text: string): string => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
 /**
- * The watchdog's direct phone, for the account-down line alone: the Bot API's `sendMessage` to the operator the
- * account bound, with the token from `<accountHome>/credentials/networks/telegram.json` - read at each send, only if
- * the file passes the account's own rules (no link on the way, inside the home, a plain file, mode 0600) - plain
- * text, a 15 s timeout; true only on the Bot API's 2xx. A file that does not pass, a refusal or a failure is
- * logged, never thrown, and answers false. Every token read is
- * taken out of the text sent and of every line logged; `redact` does the same for the caller's own log.
+ * The watchdog's direct phone, for the account-down line alone, on one network (plan B2, ruling 13): Telegram's file
+ * first - the Bot API's `sendMessage` to the operator the account bound - and only when Telegram is not connected (no
+ * `telegram.json`), Slack's - `chat.postMessage` to the DM the account bound, form-encoded with the bot token in
+ * `Authorization: Bearer`, plain (`mrkdwn`, `unfurl_links` and `unfurl_media` off) and escaped. Each file is read at each
+ * send, only if it passes the account's own rules ({@link readNetworkFile}); a 15 s timeout; true only on the Bot API's
+ * 2xx, or on Slack's answer whose body says `ok: true` (Slack answers 200 to a refusal). A file that does not pass, a
+ * refusal or a failure is logged, never thrown, and answers false. Every token read - and every Slack token shape - is
+ * taken out of the text sent and of every line logged, as `<token>`; `redact` does the same for the caller's own log.
  * @param accountHome - the account's home ({@link accountHomeOf}).
- * @param io - `fetch`, and `log`, where a line goes.
+ * @param io - `fetch`; `log`, where a line goes; `slackApi`, Slack's Web API address ({@link slackApiOf}), Slack's own
+ *   unless given.
  */
-export function phoneDirectOf(accountHome: string, io: { fetch: typeof fetch; log(line: string): void }): { send(text: string): Promise<boolean>; redact(text: string): string } {
+export function phoneDirectOf(
+  accountHome: string, io: { fetch: typeof fetch; log(line: string): void; slackApi?: string },
+): { send(text: string): Promise<boolean>; redact(text: string): string } {
   const tokens = new Set<string>();
-  const redact = (text: string): string => [...tokens].reduce((out, token) => redactorOf(token)(out), text);
+  const redact = (text: string): string => [...tokens].reduce((out, token) => redactorOf(token)(out), text).replace(SLACK_TOKEN_ANYWHERE, "<token>");
   const log = (line: string): void => io.log(redact(line));
+  const slackApi = (io.slackApi ?? SLACK_API).replace(/\/+$/, "");
+
+  const viaTelegram = async (file: { token: string; operatorId: string }, text: string): Promise<boolean> => {
+    const chatId = Number.isSafeInteger(Number(file.operatorId)) ? Number(file.operatorId) : file.operatorId;
+    try {
+      const res = await io.fetch(`https://api.telegram.org/bot${file.token}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text: redact(text) }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.ok) {
+        await res.body?.cancel().catch(() => undefined);
+        return true;
+      }
+      const body = await res.text().catch(() => "");
+      log(`telegram refused the line: ${res.status} ${body}`);
+    } catch (err) {
+      log(`telegram send failed: ${messageOf(err)}`);
+    }
+    return false;
+  };
+
+  const viaSlack = async (file: { botToken: string; channel: string }, text: string): Promise<boolean> => {
+    try {
+      const res = await io.fetch(`${slackApi}/chat.postMessage`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${file.botToken}`, "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          channel: file.channel, text: escapeSlack(redact(text)), mrkdwn: "false", unfurl_links: "false", unfurl_media: "false",
+        }).toString(),
+        signal: AbortSignal.timeout(15_000),
+      });
+      const raw = await res.text().catch(() => "");
+      let body: unknown;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        body = undefined;
+      }
+      const answer = body !== null && typeof body === "object" ? body as Record<string, unknown> : {};
+      if (res.ok && answer.ok === true) return true;
+      log(`slack refused the line: ${res.status} ${typeof answer.error === "string" ? answer.error : raw.slice(0, 200)}`);
+    } catch (err) {
+      log(`slack send failed: ${messageOf(err)}`);
+    }
+    return false;
+  };
+
   return {
     redact,
     async send(text) {
-      const file = readTelegramFile(accountHome);
-      if ("why" in file) {
-        log(`${file.why}; not sent: ${text}`);
+      const telegram = readNetworkFile(accountHome, "telegram");
+      if ("token" in telegram) {
+        tokens.add(telegram.token);
+        return viaTelegram(telegram, text);
+      }
+      if (!("why" in telegram) || telegram.absent !== true) {
+        log(`${"why" in telegram ? telegram.why : "telegram.json is not a token file"}; not sent: ${text}`);
         return false;
       }
-      tokens.add(file.token);
-      const chatId = Number.isSafeInteger(Number(file.operatorId)) ? Number(file.operatorId) : file.operatorId;
-      try {
-        const res = await io.fetch(`https://api.telegram.org/bot${file.token}/sendMessage`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, text: redact(text) }),
-          signal: AbortSignal.timeout(15_000),
-        });
-        if (res.ok) {
-          await res.body?.cancel().catch(() => undefined);
-          return true;
-        }
-        const body = await res.text().catch(() => "");
-        log(`telegram refused the line: ${res.status} ${body}`);
-      } catch (err) {
-        log(`telegram send failed: ${messageOf(err)}`);
+      const slack = readNetworkFile(accountHome, "slack");
+      if ("botToken" in slack) {
+        tokens.add(slack.botToken);
+        if (slack.appToken !== undefined) tokens.add(slack.appToken);
+        return viaSlack(slack, text);
       }
+      const why = "why" in slack ? slack.why : "slack.json is not a token file";
+      log(`${"why" in slack && slack.absent === true ? `${telegram.why}; ${why}` : why}; not sent: ${text}`);
       return false;
     },
   };
@@ -450,7 +542,7 @@ export function accountSendOf(base: string, io: { fetch: typeof fetch; log(line:
  * desk's OFF, and stdout - launchd's watchdog.log - for the log, redacted. */
 function realWatchdogDeps(): WatchdogDeps {
   const service = realDeps();
-  const direct = phoneDirectOf(accountHomeOf(process.env), { fetch, log: (line) => console.log(line) });
+  const direct = phoneDirectOf(accountHomeOf(process.env), { fetch, log: (line) => console.log(line), slackApi: slackApiOf(process.env) });
   const log = (line: string): void => console.log(direct.redact(line));
   const quiet = { ...service, out: log };
   const account = seatUrl().replace(/\/+$/, "");

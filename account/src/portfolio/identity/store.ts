@@ -2,7 +2,7 @@
  *
  * `<home>/identity/state.json` holds the bindings (which bot speaks as Gravit, and the one person it talks to), the routing, quiet hours
  * and the senders the owner blocked. `<home>/identity/strangers.json` holds whoever wrote to the bot and is not the operator: a reference
- * (the first 12 hex of sha256("<network>:<id>")), the id masked to its last three digits, how many times and when last — never a name, a
+ * (the first 12 hex of sha256("<network>:<id>")), the id masked to its last three characters, how many times and when last — never a name, a
  * handle, the id itself or a text. At most 50 strangers are kept; the one heard from longest ago leaves first.
  *
  * Both files are 0600 in a 0700 folder, written whole (a temporary file beside it, flushed, renamed over the old one). A token is never
@@ -148,7 +148,7 @@ export interface Stranger {
   network: Network;
   /** the first 12 hex of sha256("<network>:<id>") */
   sender: string;
-  /** "…" and the id's last three digits */
+  /** "…" and the id's last three characters (digits on Telegram, digits and capitals on Slack) */
   masked: string;
   count: number;
   /** when last heard from, ISO */
@@ -159,6 +159,9 @@ export const STRANGERS_MAX = 50;
 
 export const senderRef = (network: Network, id: string): string => createHash("sha256").update(`${network}:${id}`).digest("hex").slice(0, 12);
 export const maskId = (id: string): string => `…${id.slice(-3)}`;
+/** a masked id as Not you shows it and blockSender signs it: "…" and up to three of the id's last characters — digits for Telegram,
+ * digits and capitals for Slack's user ids */
+export const MASKED = /^…[0-9A-Z]{1,3}$/;
 
 function strangerOf(v: unknown): Stranger | undefined {
   if (!v || typeof v !== "object") return undefined;

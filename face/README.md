@@ -226,8 +226,10 @@ one line it cannot send that way, `the account has not answered since <time>;
 nothing reaches the phone until it does`, it sends to Telegram itself, reading
 the token from the account's home (`credentials/networks/telegram.json`, only
 when the file is the owner's alone) for that line and nothing else, tried at each
-run until the Bot API takes it; `the account answers again (down since <time>)`
-goes through the account. The plist carries `FACE_ACCOUNT_URL`,
+run until the Bot API takes it — or, since plan B2, only when Telegram is not
+connected (no `telegram.json`), to the Slack DM with the bot token from
+`credentials/networks/slack.json`, by `chat.postMessage`: one line, on one
+network; `the account answers again (down since <time>)` goes through the account. The plist carries `FACE_ACCOUNT_URL`,
 `FACE_MARKET_URL`, `FACE_ACCOUNT_HOME` and `BUYER_HOME` when `install`'s shell
 sets them, so an account or a market on another port or home is watched there;
 otherwise the defaults (`127.0.0.1:4820`, `127.0.0.1:4821`, `~/.buyer-agent-demo`).
@@ -1743,18 +1745,21 @@ that takes writes:
   beat while `#/account/identity` is on screen, on Refresh and Retry and right after an Identity
   sheet is done (those `?fresh=1`, since a write does not clear the proxy's cache); it does not wait
   for the Account's own read. Three cards. **Gravit** — Telegram `Not connected` with **Connect…**
-  *(signs)*, or `Connected`, `Speaks as @<bot>`, `Talks only with @<you>`, the one problem line
-  when there is one (blocked, a conflict, polls failing), **Details** (since when, the token's
-  fingerprint, polling or not) and **Disconnect…** *(signs)*; iMessage its name and a `Later` chip,
-  no key; Slack `Not connected` with a `Soon` chip and a disabled Connect…. **What reaches you
-  where** — five rows (Chat with Gravit, Watch alerts, Pre-close brief, Cards waiting, Fills and
-  reports) by Face · Telegram · iMessage · Slack: Face ticked and disabled in every row, Telegram's
-  ticks live only once it is connected and only on a page that signs, iMessage and Slack disabled;
+  *(signs)*, Slack (since plan B2) `Not connected` with **Install app…** *(signs)*, or either
+  `Connected`, `Speaks as @<bot>`, `Talks only with @<you>`, the one problem line when there is
+  one (blocked — Telegram's alone —, another program holding the bot's messages or the app's
+  connection to Slack, reads failing), **Details** (since when, the token's fingerprint, polling
+  or not) and **Disconnect…** *(signs)*; iMessage its name and a `Later` chip, no key. **What
+  reaches you where** — five rows (Chat with Gravit, Watch alerts, Pre-close brief, Cards waiting,
+  Fills and reports) by Face · Telegram · iMessage · Slack: Face ticked and disabled in every row,
+  Telegram's and Slack's ticks each live only once that network is connected and only on a page
+  that signs, iMessage disabled;
   ticks that differ from the account's routing say `Not saved yet` with **Save…** *(signs)*, and a
   fresh read drops any tick for a network it does not show connected; **Quiet hours** `23:00–07:00
   ET` or `Off` with **Change…** *(signs)* — inside them alerts, the brief, reports, cards and fills
   are not sent, and not sent later; replies, urgent alerts and the watchdog always go. **Not you ·
-  n** — each stranger who wrote to the bot, `Telegram · …789 · 3 messages · last <time>`, with
+  n** — each stranger who wrote to the bot, `Telegram · …789 · 3 messages · last <time>` (on
+  Slack `Slack · …7QK · …`, the user id's last three characters), with
   **Block** *(signs)*, or `Nobody else has written to Gravit.` On a page that does not sign the
   cards are read, the ticks disabled, with `Only a browser that signs changes these.`; an account
   that does not answer draws `The account is not answering.` and Retry, never a stale Connected
@@ -1782,6 +1787,25 @@ that takes writes:
   is deleted from the account, the desk keeps working in the face), **Save…** and **Change…** (one
   sheet, `routing`, the account's `setRouting`: the ticks as the routing and quiet hours as two
   New York clocks or Off) and **Block** (`blockSender`, `Sign block`) are one signature each.
+
+  **Install app…** (Slack, plan B2) is the same four sheets over the account's Slack routes. **1 ·
+  App tokens** — the account's app manifest (`slackManifest` in the identity read: Socket Mode, a
+  bot user named Gravit, the Messages tab, the bot scopes `chat:write`, `im:history` and
+  `users:read`, the event `message.im`) in a `<pre>` with **Copy**, the steps to create the app
+  from it at api.slack.com/apps, make an app-level token with `connections:write` (`xapp-…`) and
+  install the app for its bot token (`xoxb-…`), then two password fields under the same rules as
+  Telegram's; Next clears both, fingerprints the two together (`keyHash` over salt, the app
+  token, a NUL byte and the bot token) and posts them once to `identity/slack/token`, where the
+  account checks them with `auth.test`, `bots.info` and a Socket Mode socket's hello (the two
+  tokens of two apps are refused); **2 · Say hi** — `Open Gravit in <workspace>` (Slack's
+  `app_redirect` to the app) and its QR: DM the app anything; **3 · Is this you?** — the name, the
+  handle (`@<username>`, which the person cannot change), the full Slack user id (`U…`) and the
+  message; only a full member of the bot's own team is heard — another team's member, a guest or
+  a deactivated account is counted in Not you and the sheet waits on, and a bot is dropped; **4 ·
+  What you sign** — `connectNetwork` with `network: slack`, the bot as `<team>:<bot user>`, you as
+  `<team>:<user>`, Slack ticked in all five rows, the two tokens' one fingerprint, and the note
+  `On Slack, type the phone's commands with ! — !status, !pause 30m, !mute 30m, !new, !stop.`
+  Disconnect… Slack deletes both tokens from the account.
 - **The Statement** (a drawer, its lines read on opening it): the Account's lines newest first,
   each with who it was by, its status in the Account's word and its fee; **Export CSV** — a
   `statement.csv` built in the browser (`date,type,kind,description,amount,fee,status,by`; a text
@@ -1822,8 +1846,8 @@ piped stream and the POST rules); the public `/data/account/{explore,quotes,cand
 went to the market's half, and the five connected reads below took their place.
 
 Each route is `exact` — the table is the allow-list, and nothing else of the Account's surface is
-reachable through the face (forty-three routes since plan B1a: twenty-five reads, the push
-channel's two, fifteen writes, the sign-in's callback):
+reachable through the face (forty-four routes since plan B2: twenty-five reads, the push
+channel's two, sixteen writes, the sign-in's callback):
 
 | Route | What it reads at the Account | TTL | Abort | Query names |
 |---|---|---|---|---|
@@ -1867,6 +1891,7 @@ channel's two, fifteen writes, the sign-in's callback):
 | `POST /data/account/revoke` | `POST /api/revoke`: Close to agents, unsigned (the two parts) | — | 7 s | none; at most 512 bytes |
 | `POST /data/account/guard` | `POST /api/mode`: Guard, unsigned — the face always sends `{"mode":"guard"}` (the two parts) | — | 7 s | none; at most 256 bytes, then discarded |
 | `POST /data/account/identity/telegram/token` | `POST /api/account/identity/telegram/token`: the bot's token, once, beside the fingerprint the page made — Connect's first sheet (plan B1a) | — | 30 s | none; at most 1,024 bytes |
+| `POST /data/account/identity/slack/token` | `POST /api/account/identity/slack/token`: the Slack app's two tokens, once, beside their one fingerprint — Install app…'s first sheet (plan B2), forwarded unparsed and unlogged like Telegram's | — | 30 s | none; at most 1,024 bytes |
 | `POST /data/account/identity/pending/not-me` | `POST /api/account/identity/pending/not-me`: the sender heard is not you (plan B1a) | — | 7 s | none; at most 256 bytes |
 | `POST /data/account/identity/pending/drop` | `POST /api/account/identity/pending/drop`: the sheet closed, the token forgotten (plan B1a) | — | 7 s | none; at most 256 bytes |
 | `GET /data/account/signin/callback` | `GET /api/account/signin/callback`: where a venue sends the browser back after its sign-in (the two parts) | — | 30 s | `state`, `code`, `error`, `error_description`, `error_uri`, `iss` |
@@ -2288,12 +2313,18 @@ the desk conversation that start resumes too.
 **From the phone.** One operator, one private chat. A message from anyone else, or from a group,
 is dropped unanswered by the account and counted in Account › Identity's Not you — a count and a
 time, never its text; `status` shows how many. Text goes to the desk under a first line Gravit
-reads as its provenance — `[telegram · operator · 14:03 ET]`, the time you wrote it; a photo, a
-file or a voice note gets `text only, please` from the account; with Chat with Gravit unticked for
-Telegram a text gets `Chat with Gravit is off on Telegram: Account › Identity turns it on.` and
+reads as its provenance — `[telegram · operator · 14:03 ET]`, or `[slack · operator · 14:03 ET]`
+from the Slack DM (since plan B2), the time you wrote it; a photo, a file or a voice note gets
+`text only, please` from the account; with Chat with Gravit unticked for that network a text gets
+`Chat with Gravit is off on Telegram: Account › Identity turns it on.` (or `… on Slack: …`) and
 reaches no one — but the five commands below still reach the bridge, so the phone can always
-pause or mute. Five commands are the bridge's own, in any letter case, with or without
-`@<bot>` after them:
+pause or mute. A phone text's answer and a command's reply go back to the network the text came
+through; a line no text names (a restart's cut-turn line, or a turn an older face recorded with
+no network) goes to every network the Chat with Gravit row ticks. Five commands are the bridge's
+own, in any letter case, with or without `@<bot>` after them — **on Slack typed with `!`**
+(`!status`, `!pause 30m`, `!mute 30m`, `!new`, `!stop`), since Slack's composer keeps a leading
+`/` for its own commands (`/status` and `/mute` are Slack's built-ins); the account rewrites the
+`!` to `/` before it stores the text, so the bridge reads them as below:
 
 | Command | What it does, and the reply |
 |---|---|
@@ -5987,8 +6018,8 @@ code:
    `/start`. **This is me**, then sheet 4: What you sign names the bot, you, Telegram in all five
    rows and the token's fingerprint, never the token. Sign.
 2. **The tab.** PASS: Telegram `Connected`, `Speaks as @<your bot>`, `Talks only with @<you>`;
-   Details shows since when, the fingerprint and `polling`; Slack `Not connected · Soon` with its
-   Connect… disabled; iMessage `Later`; the grid has Telegram ticked in every row; Not you is
+   Details shows since when, the fingerprint and `polling`; Slack `Not connected` with **Install
+   app…** (since plan B2: "The Slack phone drill" below); iMessage `Later`; the grid has Telegram ticked in every row; Not you is
    empty.
 3. **No tappable host.** Send yourself `evil·com` on Telegram — in Saved Messages, not to the bot,
    which would hand it to the desk — with the middle dot (U+00B7) as a card or fill notice writes
@@ -6032,4 +6063,56 @@ code:
 clients of step 3 in `DEVELOPMENT.md` §7.4's manual B1b row.
 
 **Not yet run.** The automated half passes 2026-11-04; the browser, the phone and Telegram's
+clients are the operator's.
+
+## The Slack phone drill (run after plan B2 lands, and after any change to `../account/src/portfolio/identity/slack*.ts`, its Slack cases elsewhere in that folder, src/phone.ts, src/phone-bridge.ts, scripts/watchdog.ts or the Identity client modules)
+
+Slack end to end through the account (`DEVELOPMENT.md` §3.9 "Identity"; charter D20): Account ›
+Identity › Slack › **Install app…** creates the app from the account's manifest, the account holds
+its two tokens and one outbound Socket Mode socket, the desk talks to the operator's DM through
+the account's inbox and send, and Disconnect… ends it. Every step is the operator's: it drives
+your launchd and your Slack workspace, and an agent never runs it.
+
+**The automated half, no Slack.** The account's `test/unit/identity-seams`, `identity-slack-api`,
+`identity-slack-pending`, `identity-slack-inbox` and `identity-slack-send.test.ts` run Slack's side
+against `test/identity-fakes.ts`'s `fakeSlack`, a Web API and Socket Mode server on loopback; the
+face's `npm test` runs the Slack cases of `phone-bridge`, `watchdog`, `desk`, `desk-session`,
+`desk-conversation`, `account-proxy` and the client's Identity tests. No test reaches Slack.
+
+**Before the drill, once, after the merge:** restart the account, then the face, as after B1;
+hard-reload the page. No `npm ci` is needed.
+
+**The drill**, on a page that signs:
+
+1. **Install app…, four sheets.** Sheet 1: **Copy** the manifest, then at api.slack.com/apps
+   choose Create New App › From a manifest, in a workspace where you are the only person, or one
+   whose owners you trust with what you and Gravit write there (a workspace's owners can export
+   DMs on some plans). Make the app-level token (`xapp-…`) with `connections:write`, install the
+   app, and paste both tokens. PASS: both fields are empty at once, and the browser offers to
+   save nothing. Sheet 2: open the link and DM the app `hi`. PASS: sheet 3 shows you — your name,
+   `@<your username>`, your full Slack id and `hi`. Check that it is you, then read and sign sheet
+   4.
+2. **The tab.** PASS: Slack `Connected`, `Speaks as @gravit`, `Talks only with @you`; Slack's
+   column is enabled and ticked; iMessage is `Later`.
+3. **Status and chat.** In the DM send `!status`. PASS: a `phone: … slack polling …` line. Ask
+   Gravit something. PASS: the answer arrives in the DM, top level (never in a thread).
+4. **Both networks.** With Telegram connected too, ask on Telegram. PASS: the answer comes on
+   Telegram, not on Slack. An alert arrives on both.
+5. **A stranger.** Another member of the workspace DMs the app. PASS: nothing answers, and Not
+   you shows `Slack · …<three characters> · 1`. Block it.
+6. **No formatting, no link.** Ask Gravit to repeat `<!here> *x* a & b`. PASS: it arrives
+   literally, with no mention and no bold.
+7. **The account down.** Stop the account, write `are you there` in the DM, and start the account
+   again within a few minutes. PASS: the desk answers it once (the next socket's hello backfills
+   the DM from the cursor). If Telegram is not connected, after ten minutes the watchdog's
+   account-down line arrives on Slack.
+8. **Pause and mute.** `!pause 30m` and `!mute 30m` answer. Resume from a terminal.
+9. **Disconnect… Slack** and sign. PASS: the app stops answering;
+   `credentials/networks/slack.json` is gone (`ls`, never `cat`). To retire the app, delete it at
+   api.slack.com/apps, which revokes both tokens.
+
+**PASS is steps 1–9.** Record the date, the commit and the Slack clients (desktop and phone) in
+`DEVELOPMENT.md` §7.4's manual B2 row.
+
+**Not yet run.** The automated half passes 2026-11-04; the browser, the workspace and Slack's
 clients are the operator's.

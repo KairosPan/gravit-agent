@@ -1,12 +1,12 @@
-// face/client/js/host/sheet-identity.js — Account › Identity's signed sheets (plan B1b Tasks 2–3): connectNetwork, sheet 4 of Connect
-// Telegram (What you sign: the pending connection the account checked with Telegram and heard Say hi on, its bot, its operator, the
+// face/client/js/host/sheet-identity.js — Account › Identity's signed sheets (plan B1b Tasks 2–3; Slack's words plan B2 Task 7):
+// connectNetwork, sheet 4 of Connect Telegram or Connect Slack (What you sign: the pending connection the account checked with Telegram and heard Say hi on, its bot, its operator, the
 // routing a fresh connection sends and the token's fingerprint, never the token); and Task 3's three: disconnectNetwork (Disconnect
 // Telegram: the binding and its token gone), routing (What reaches you where: the grid's ticks as the account's routing string, and
 // quiet hours as two clocks or Off, which the account stores as null) and block (a stranger in Not you, by its reference).
 // Each sheet is the account's own owner type (account/src/portfolio/account/sign.ts OwnerAction), every field from the seed. The
 // sheet draws its lines above its fields and its numbered steps above its keys (render/owner.js). host/sheet-view.js delegates the
 // kinds here; the sheet engine (host/sheet.js) prepares the draft and What you sign shows it. No clock. No DOM, no store.
-import { routeRows, formatRouting, NETWORKS } from './identity-view.js';
+import { routeRows, formatRouting, NETWORKS, SPOKEN } from './identity-view.js';
 import { HOST_NAME } from '../wire/speaker.js';
 import { t } from '../i18n/words.js';
 
@@ -19,9 +19,11 @@ export const IDENTITY_KINDS = ['connectNetwork', 'disconnectNetwork', 'routing',
 /** Sheet 4's numbered steps (spec §5.2), fixed copy. */
 export const connectSteps4 = () => [t('sheet.identity.read'), t('sheet.identity.sign'), t('sheet.identity.stop')];
 
-// the networks the account speaks on now (kinds.ts NETWORKS): a disconnect or a block names one of them
-const SPOKEN = ['telegram'];
-// their names (identity-view.js NETWORKS)
+/** Sheet 4's note under its steps, Slack's alone (the plan's ruling 5: Slack's composer takes a leading / as its own), fixed copy. */
+export const slackSteps4Note = () => t('sheet.identity.slackNote');
+
+// a disconnect or a block names one of the networks the account speaks on (identity-view.js SPOKEN, kinds.ts NETWORKS); their names
+// (identity-view.js NETWORKS)
 const NETWORK_NAME = Object.fromEntries(NETWORKS.filter(([id]) => SPOKEN.includes(id)));
 const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
 // a network's name, Telegram's for one the account does not speak on
@@ -49,7 +51,7 @@ export function rowsSentOn(routing, network) {
 export function identityTitleOf(kind, seed) {
   const s = isRecord(seed) ? seed : {};
   switch (kind) {
-    case 'connectNetwork': return t('sheet.identity.title');
+    case 'connectNetwork': return t('sheet.identity.title', { network: networkName(s.network) });
     case 'disconnectNetwork': return t('sheet.identity.disconnect', { network: networkName(s.network) });
     case 'routing': return t('identity.grid.title');
     case 'block': return str(s.masked) ? t('sheet.identity.block', { sender: s.masked }) : t('sheet.identity.blockAny');
@@ -104,19 +106,25 @@ export function identityLinesOf(kind, seed) {
         t('sheet.identity.speaksAs', { who: str(s.speaksAs) || '—' }),
         t('sheet.identity.talksWith', { who: str(s.talksOnlyWith) || '—' }),
         sends.length ? t('sheet.identity.maySend', { rows: sends.join(', ') }) : t('sheet.identity.maySendNone'),
-        t('sheet.identity.keptIn'),
+        network === 'slack' ? t('sheet.identity.keptInBoth') : t('sheet.identity.keptIn'),
         t('sheet.identity.signedBy'),
         t('sheet.identity.until'),
       ];
     }
     case 'disconnectNetwork': {
+      const slack = str(s.network) === 'slack';
       const network = networkName(s.network);
-      return [t('sheet.identity.stops', { name: HOST_NAME, network }), t('sheet.identity.tokenGone'), t('sheet.identity.deskKeeps')];
+      return [t('sheet.identity.stops', { name: HOST_NAME, network }), slack ? t('sheet.identity.tokensGone') : t('sheet.identity.tokenGone'), t('sheet.identity.deskKeeps')];
     }
     case 'routing': {
-      const sends = rowsSentOn(formatRouting(s.routing), 'telegram');
-      const network = NETWORK_NAME.telegram;
-      return [sends.length ? t('sheet.identity.on', { network, rows: sends.join(', ') }) : t('sheet.identity.onNone', { network })];
+      // a line for each network the seed names connected (none named: Telegram's alone, as before Slack)
+      const nets = Array.isArray(s.networks) ? SPOKEN.filter(n => s.networks.includes(n)) : ['telegram'];
+      const routing = formatRouting(s.routing);
+      return nets.map(n => {
+        const sends = rowsSentOn(routing, n);
+        const network = NETWORK_NAME[n];
+        return sends.length ? t('sheet.identity.on', { network, rows: sends.join(', ') }) : t('sheet.identity.onNone', { network });
+      });
     }
     case 'block': return [str(s.masked) ? t('sheet.identity.dropped', { sender: s.masked }) : t('sheet.identity.droppedAny')];
     default: return [];
@@ -124,11 +132,16 @@ export function identityLinesOf(kind, seed) {
 }
 
 /** The numbered steps drawn above the sheet's keys. */
-export function identityStepsOf(kind) {
+export function identityStepsOf(kind, _seed) {
   switch (kind) {
     case 'connectNetwork': return connectSteps4();
     default: return [];
   }
+}
+
+/** The note drawn under the steps: Slack's sheet 4 alone; '' for the rest. */
+export function identityNoteOf(kind, seed) {
+  return kind === 'connectNetwork' && isRecord(seed) && seed.network === 'slack' ? slackSteps4Note() : '';
 }
 
 const HEX64 = /^[0-9a-f]{64}$/;

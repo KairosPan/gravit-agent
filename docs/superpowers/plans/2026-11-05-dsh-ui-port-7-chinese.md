@@ -45,7 +45,7 @@ merges after plan 7 instead, skip Tasks 0–1 and run Task 1's steps at that mer
   first `render()`. The inline script sets `<html lang>` from the saved `lang`; `startApp` calls
   `setTable` before `makeStore` (`emptyState` writes `connecting…` through `t`) and so before the first
   render. Nothing English is ever drawn under a saved 中文.
-- **"A line written before a switch keeps its language until the next line"** (§18, R101) is not kept.
+- **"A line written before a switch keeps its language until the next line"** (§18, R102) is not kept.
   §5.10 says a choice switches the face's words at once, and a status line in English under a Chinese
   page reads as broken (D35's reason). Lines the store holds become key and params (`said`) read at the
   draw; what the face folds from the host's records (a seat line, a receipt, a report, `Untitled`) is
@@ -576,7 +576,7 @@ export function langOf(v) {}    // → 'zh' when v === 'zh', else 'en'
     the reorder rule, the Language row, `reword`), §5.5 (`lang` in `gravit-ui.prefs`; `<html lang>`),
     §7.3 (`words-zh`, the zh golden and probe, `zh-review`), §7.4 (the drill's 中文 step), §8 (the
     convention becomes D37's: a new word ships in `en.js` and `zh.js` at once, against the glossary; a line
-    the store keeps is a `said`; no sentence joined in code order), R101 rewritten (a stored line now
+    the store keeps is a `said`; no sentence joined in code order), R102 rewritten (a stored line now
     follows a switch; a switch re-reads the open conversation, dropping its earlier pages; an Account or
     dsh string stays as it came) and the 中文 residuals: the zh draft before the operator's pass; text
     wider or narrower than the layout planned for; per browser;

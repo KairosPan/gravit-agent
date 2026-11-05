@@ -162,7 +162,7 @@ export type DeskEvent =
   | { t: string; kind: "boot"; pid: number; version: string; deskEnabled: boolean }
   | { t: string; kind: "shutdown"; pid: number; code: number }
   | { t: string; kind: "asleep"; from: string; to: string; gapMs: number }
-  | { t: string; kind: "off-set"; by: "telegram" | "page" | "terminal"; until?: string }
+  | { t: string; kind: "off-set"; by: OffState["by"]; until?: string }
   | { t: string; kind: "off-cleared"; by: "terminal" | "expiry" }
   | { t: string; kind: "desk-session"; sessionId: string; reason: "created" | "new" }
   | {
@@ -645,11 +645,11 @@ export function installAsleepWatch(opts: AsleepWatchOptions): () => void {
 /** The switch's file in {@link deskDir}: while it is there, the desk is paused (spec §5.8). */
 export const OFF_FILE = "OFF";
 
-/** What `OFF` holds: when the pause was set and by whom - the phone, the Desk panel or a
- * terminal - and, for a timed pause, when it lifts; both times ISO-8601 UTC. */
+/** What `OFF` holds: when the pause was set and by whom - the phone, by the network its `/pause` came through
+ * (`telegram`, `slack`), the Desk panel or a terminal - and, for a timed pause, when it lifts; both times ISO-8601 UTC. */
 export interface OffState {
   setAt: string;
-  by: "telegram" | "page" | "terminal";
+  by: "telegram" | "slack" | "page" | "terminal";
   until?: string;
 }
 
@@ -657,11 +657,12 @@ export interface OffState {
  * and the ledger go on. A switch as `OFF` is, beside it, with its own lock. */
 export const MUTE_FILE = "MUTE";
 
-/** What `MUTE` holds: when the mute was set and by whom - the phone, or, for a `MUTE` that says nothing
- * a state can be read from, a terminal - and, for a timed mute, when it lifts; both times ISO-8601 UTC. */
+/** What `MUTE` holds: when the mute was set and by whom - the phone, by the network its `/mute` came through
+ * (`telegram`, `slack`), or, for a `MUTE` that says nothing a state can be read from, a terminal - and, for a timed
+ * mute, when it lifts; both times ISO-8601 UTC. */
 export interface MuteState {
   setAt: string;
-  by: "telegram" | "terminal";
+  by: "telegram" | "slack" | "terminal";
   until?: string;
 }
 
@@ -691,7 +692,7 @@ interface Switch<S extends SwitchState> {
 /** The pause: `OFF`, set from the phone, the Desk panel or a terminal. */
 const OFF_SWITCH: Switch<OffState> = {
   file: OFF_FILE,
-  setters: { telegram: true, page: true, terminal: true },
+  setters: { telegram: true, slack: true, page: true, terminal: true },
   set: (s) => ({ t: s.setAt, kind: "off-set", by: s.by, ...(s.until === undefined ? {} : { until: s.until }) }),
   cleared: (t, by) => ({ t, kind: "off-cleared", by }),
 };
@@ -699,7 +700,7 @@ const OFF_SWITCH: Switch<OffState> = {
 /** The mute: `MUTE`, set from the phone; a terminal only lifts it, or `touch`es it. */
 const MUTE_SWITCH: Switch<MuteState> = {
   file: MUTE_FILE,
-  setters: { telegram: true, terminal: true },
+  setters: { telegram: true, slack: true, terminal: true },
   set: (s) => ({ t: s.setAt, kind: "mute-set", by: s.by, ...(s.until === undefined ? {} : { until: s.until }) }),
   cleared: (t, by) => ({ t, kind: "mute-cleared", by }),
 };
@@ -888,11 +889,11 @@ export async function readMuteState(home: string, now: () => number = Date.now):
  * is what this returns. A mute from the phone always has an end. Rejects when `MUTE` cannot be written
  * or its lock taken.
  * @param home - the harness home.
- * @param input - `by`, the phone; `until`, when the mute lifts in ms since the epoch.
+ * @param input - `by`, the phone's network; `until`, when the mute lifts in ms since the epoch.
  * @param now - the clock `setAt` is read from, default `Date.now`.
  * @returns the mute in force afterwards: the one written, or the one that stood.
  */
-export async function writeMute(home: string, input: { by: "telegram"; until: number }, now: () => number = Date.now): Promise<MuteState> {
+export async function writeMute(home: string, input: { by: "telegram" | "slack"; until: number }, now: () => number = Date.now): Promise<MuteState> {
   return writeSwitch(MUTE_SWITCH, home, input, now);
 }
 

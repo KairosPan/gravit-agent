@@ -279,11 +279,16 @@ test("Connect Telegram's lines, and a connected network's trouble, each in its w
   await id.next({ value: 'tok' });
   assert.equal(sr.get().identity.connect.error, 'This browser cannot fingerprint the token on this page: open the face at its 127.0.0.1 address.');
   assert.deepEqual(Object.values(CONNECT_WORDS).map(f => f()), ['Paste the token from BotFather first.', 'This browser cannot fingerprint the token on this page: open the face at its 127.0.0.1 address.',
-    'The account refused the token.', 'This connection waited ten minutes and expired: nothing was kept. Start again.', 'The account did not say who wrote: start again.']);
+    'The account refused the token.', 'The account refused the tokens.', 'Paste the app-level token (xapp-…) first.', 'Paste the bot token (xoxb-…) first.', 'Paste both tokens first.',
+    'This connection waited ten minutes and expired: nothing was kept. Start again.', 'The account did not say who wrote: start again.']);
   const problem = n => identityOf({ ok: true, networks: [{ network: 'telegram', state: 'connected', ...n }] }).networks.telegram.problem;
   assert.equal(problem({ pollFailing: {} }), 'Not hearing Telegram.');
   assert.equal(problem({ pollFailing: { reason: '<502> & down' } }), 'Not hearing Telegram: <502> & down.');
   assert.equal(problem({ conflictAt: 'x' }), "Another program reads this bot's messages (since x): stop it, or Gravit hears nothing.");
+  const slack = n => identityOf({ ok: true, networks: [{ network: 'slack', state: 'connected', ...n }] }).networks.slack.problem;
+  assert.equal(slack({ pollFailing: { since: 'y', reason: 'socket closed' } }), 'Not hearing Slack since y: socket closed.');
+  assert.equal(slack({ conflictAt: 'x' }), "Another program holds this app's connection to Slack (since x): stop it, or Gravit hears nothing.");
+  assert.equal(slack({ blocked: true }), undefined, 'blocked is Telegram\'s alone');
 });
 
 test("Sell many's line for a read that failed in no words of the Account's", async () => {

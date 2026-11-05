@@ -1,5 +1,6 @@
-/** A NETWORK'S TOKEN FILE — `<home>/credentials/networks/<network>.json`, {"token","botId","username","operatorId","operatorHandle"}: the
- * one place a network's token is kept. Readable by the user alone (0600) in a folder only the user can open (0700, set again each time),
+/** A NETWORK'S TOKEN FILE — `<home>/credentials/networks/<network>.json`: Telegram's {"token","botId","username","operatorId",
+ * "operatorHandle"}, Slack's {"appToken","botToken","appId","channel","botId","username","operatorId","operatorHandle"} — the one place a
+ * network's tokens are kept. Readable by the user alone (0600) in a folder only the user can open (0700, set again each time),
  * written whole (a fresh temporary file "wx" 0600, flushed, renamed over the old one), and never through a link — neither the credentials
  * folder, nor the networks folder, nor the file may be one. It follows the brains' key file (account/brain-keys.ts) step for step, with
  * its own words. It is read through live/credentials.ts readSecretFile (inside the home, 0600), and any refusal reads as no token. */
@@ -11,7 +12,8 @@ import { readSecretFile } from "../live/credentials.ts";
 import { no } from "../refuse.ts";
 import { NETWORKS, type Network } from "./kinds.ts";
 
-export interface NetworkSecret {
+/** Telegram's file: the bot's token, the bot, and the one person it talks to */
+export interface TelegramSecret {
   token: string;
   botId: string;
   username: string;
@@ -19,10 +21,42 @@ export interface NetworkSecret {
   operatorHandle: string;
 }
 
+/** Slack's file: the app-level token (Socket Mode) and the bot token (the Web API), the app, the DM channel Gravit speaks in, the bot
+ * (`<team>:<bot user>`) and the one person it talks to (`<team>:<user>`) */
+export interface SlackSecret {
+  appToken: string;
+  botToken: string;
+  appId: string;
+  channel: string;
+  botId: string;
+  username: string;
+  operatorId: string;
+  operatorHandle: string;
+}
+
+/** the file a network keeps */
+export type SecretOf<N extends Network> = N extends "slack" ? SlackSecret : TelegramSecret;
+
 export const NETWORK_SECRET_DIR = "credentials/networks";
 export const networkSecretRef = (network: Network): string => `${NETWORK_SECRET_DIR}/${network}.json`;
 
-const FIELDS = ["token", "botId", "username", "operatorId", "operatorHandle"] as const;
+/** each network's fields, in the order the file is written */
+const FIELDS: { readonly [N in Network]: ReadonlyArray<keyof SecretOf<N>> } = {
+  telegram: ["token", "botId", "username", "operatorId", "operatorHandle"],
+  slack: ["appToken", "botToken", "appId", "channel", "botId", "username", "operatorId", "operatorHandle"],
+};
+
+/** the token strings a network's file holds — what every line said and every text sent has taken out */
+export function secretsOf(s: TelegramSecret | SlackSecret): string[] {
+  return "appToken" in s ? [s.appToken, s.botToken] : [s.token];
+}
+
+/** exactly the network's fields of `content`, in order: nothing else is written */
+function pick<N extends Network>(network: N, content: SecretOf<N>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const f of FIELDS[network] as readonly string[]) out[f] = (content as unknown as Record<string, string>)[f] as string;
+  return out;
+}
 
 const inside = (root: string, path: string): boolean => {
   const rel = relative(root, path);
@@ -56,7 +90,7 @@ function networksDir(home: string, network: Network): string | Refusal {
 
 /** Write a network's token file whole. A link where the file should be is refused (never followed, never replaced). Answers the file's
  * absolute path. */
-export function writeNetworkSecret(home: string, network: Network, content: NetworkSecret): { ok: true; file: string } | Refusal {
+export function writeNetworkSecret<N extends Network>(home: string, network: N, content: SecretOf<N>): { ok: true; file: string } | Refusal {
   if (!known(network)) return badNetwork();
   const dir = networksDir(home, network);
   if (isRefusal(dir)) return dir;
@@ -64,7 +98,7 @@ export function writeNetworkSecret(home: string, network: Network, content: Netw
   const st = lstatOf(file);
   if (st?.isSymbolicLink()) return no("E_ACCOUNT_CREDENTIAL", { venue: network, message: `${networkSecretRef(network)} is a link: a network's token is not written through one. Remove it and connect again` });
   if (st && !st.isFile()) return no("E_ACCOUNT_CREDENTIAL", { venue: network, message: `${networkSecretRef(network)} is not a file: a network's token cannot be written there` });
-  const text = `${JSON.stringify({ token: content.token, botId: content.botId, username: content.username, operatorId: content.operatorId, operatorHandle: content.operatorHandle })}\n`;
+  const text = `${JSON.stringify(pick(network, content))}\n`;
   const tmp = join(dir, `.${network}.json.${randomBytes(6).toString("hex")}.tmp`);
   try {
     const fd = openSync(tmp, "wx", 0o600);
@@ -109,8 +143,11 @@ export function removeNetworkSecret(home: string, network: Network): { ok: true;
   return { ok: true, removed: true };
 }
 
-/** Read a network's token file: inside the home, a plain file, 0600, every field a non-empty string — or undefined */
-export function readNetworkSecret(home: string, network: Network): NetworkSecret | undefined {
+/** Read a network's token file: inside the home, a plain file, 0600, every field of that network's a non-empty string — or undefined */
+export function readNetworkSecret(home: string, network: "telegram"): TelegramSecret | undefined;
+export function readNetworkSecret(home: string, network: "slack"): SlackSecret | undefined;
+export function readNetworkSecret<N extends Network>(home: string, network: N): SecretOf<N> | undefined;
+export function readNetworkSecret(home: string, network: Network): TelegramSecret | SlackSecret | undefined {
   if (!known(network)) return undefined;
   const root = resolve(home);
   // no link on the way: the folders are checked as the writer checks them
@@ -125,6 +162,11 @@ export function readNetworkSecret(home: string, network: Network): NetworkSecret
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
   const p = parsed as Record<string, unknown>;
-  for (const f of FIELDS) if (typeof p[f] !== "string" || (p[f] as string) === "") return undefined;
-  return { token: p.token as string, botId: p.botId as string, username: p.username as string, operatorId: p.operatorId as string, operatorHandle: p.operatorHandle as string };
+  const out: Record<string, string> = {};
+  for (const f of FIELDS[network] as readonly string[]) {
+    const v = p[f];
+    if (typeof v !== "string" || v === "") return undefined;
+    out[f] = v;
+  }
+  return out as unknown as TelegramSecret | SlackSecret;
 }

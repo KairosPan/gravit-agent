@@ -104,7 +104,7 @@ test("readCycle: the limit is inclusive and counts raw bytes - CYCLE_MAX_BYTES a
 /* The desk's contract (`dsh/profile/desk.md`, the `gravit:desk` section) sits beside the cycle's, under
  * its own 3,000-byte budget. Each phrase is a rule it must state: inform and never order; a quiet turn
  * is one line; the two desk tools; the four files a desk turn never writes; the names that must not
- * appear under its directory; the three bracketed lines that say where a message came from; what a
+ * appear under its directory; the phone's two bracketed forms (Telegram and Slack) and the other bracketed lines that say where a message came from; what a
  * standing order's message carries; and what desk_state knows of the standing orders and of the watch; the
  * batch's and the desk state's bracketed lines. */
 test("the shipped desk.md reads, fits 3,000 bytes and states the desk rules", () => {
@@ -113,11 +113,13 @@ test("the shipped desk.md reads, fits 3,000 bytes and states the desk rules", ()
   const text = readDesk(DESK_PATH);
   assert.ok(Buffer.byteLength(text, "utf8") <= DESK_MAX_BYTES);
   for (const phrase of ["You inform", "never place, cancel or propose an order", "one line", "desk_quotes", "desk_state",
-    "STANDING.md", "levels.yml", "rules.yml", "holdings.yml", "GRAVIT.md", ".git", "[telegram · operator", "[schedule ·", "[alert ·",
+    "STANDING.md", "levels.yml", "rules.yml", "holdings.yml", "GRAVIT.md", ".git", "[telegram · operator", "[slack · operator · 14:03 ET]", "[schedule ·", "[alert ·",
     "[alerts ·", "[desk · state ·", "its producer's output", "its standing orders and their last outcomes",
     "and the watch: its files, its symbols and today's alerts"])
     assert.ok(text.includes(phrase), phrase);
   assert.ok(!text.includes("{{"));
+  assert.ok(text.split("\n").includes('- [telegram · operator · 14:03 ET] or [slack · operator · 14:03 ET] is the operator writing from their phone; "(carried over a restart)" after the time means the face sent it again after a restart.'),
+    "one line names both phone forms");
 });
 
 /* readDesk is readCycle's reader under the desk's own name and cap: the same refusals, each opening with

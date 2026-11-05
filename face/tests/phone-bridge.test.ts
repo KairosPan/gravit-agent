@@ -6,7 +6,7 @@
  * repository, under tests/tmp/phone-bridge-<pid>/, and are removed afterwards. */
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { chmod, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,7 @@ import { MUTE_FILE, MUTE_USAGE, OFF_FILE, deskDir, deskStatusLines, readEvents, 
 import type { DeskConversation, DeskOutlet, PostResult } from "../src/desk-conversation.ts";
 import type { DeskClock } from "../src/desk-session.ts";
 import { CURSOR_FILE, deliveryKey, installPhoneBridge, parseCommand, type PhoneBridgeHandle } from "../src/phone-bridge.ts";
-import { createPhoneClient, type InboxMessage } from "../src/phone.ts";
+import { WIRE_ID, createPhoneClient, type InboxMessage } from "../src/phone.ts";
 import { fakePhoneAccount, type FakePhoneAccount } from "./fake-phone-account.ts";
 
 /* ---------- fixtures, inside the repository ---------- */
@@ -188,7 +188,7 @@ test("an inbox text is posted with its key and its reply's context", async () =>
     assert.equal(p.key, deliveryKey(m));
     assert.equal(p.key, `telegram:41#1@${AT}`, "the inbox's own number with the network's id and its time: per binding, per home");
     assert.deepEqual(p.message, { kind: "telegram", network: "telegram", messageId: "telegram:41" });
-    assert.deepEqual(p.source, { kind: "telegram", at: NOW });
+    assert.deepEqual(p.source, { kind: "telegram", network: "telegram", at: NOW });
     assert.equal(p.context, "NVDA 169.82 · ROBINHOOD 10:21:03 ET");
     assert.equal(contextAsked, "telegram:40");
     assert.deepEqual(r.account.sends, [], "an opened turn answers through the outlet, not here");
@@ -226,7 +226,7 @@ test("a text carries when the operator wrote it, not when it arrived", async () 
     const written = NOW - 10 * 3_600_000;
     text(r, "written before the Mac woke", 1, { at: new Date(written).toISOString() });
     await polled(r, 2);
-    assert.deepEqual(r.conversation.posts.map((p) => p.source), [{ kind: "telegram", at: written }]);
+    assert.deepEqual(r.conversation.posts.map((p) => p.source), [{ kind: "telegram", network: "telegram", at: written }]);
   } finally {
     await r.bridge.dispose();
   }
@@ -594,6 +594,80 @@ test("an account that does not answer is backed off from 5 s to 60 s and shows i
     acc.inboxAnswer = () => "drop";
     acc.endPoll();
     await waitFor("a fresh 5 s backoff", () => acc.reads.length === 10 && r.clock.has(5_000));
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+/* ---------- Slack beside Telegram (plan B2) ---------- */
+
+/** An operator's text from Slack, its `ts` the wire's id. */
+function slackText(r: Rig, body: string, ts: string, over: Partial<InboxMessage> = {}): InboxMessage {
+  return r.account.push({ network: "slack", messageId: `slack:${ts}`, text: body, at: AT, ...over });
+}
+
+test("a Slack text is posted with its network and answered on Slack; !-commands arrive as /", async () => {
+  const r = await rig("slack");
+  try {
+    await polled(r, 1);
+    const m = slackText(r, "why?", "1730812345.001200", { replyTo: "slack:1730812300.000100" });
+    await polled(r, 2);
+    const p = r.conversation.posts[0];
+    assert.equal(p.key, `slack:1730812345.001200#1@${AT}`);
+    assert.deepEqual(p.message, { kind: "telegram", network: "slack", messageId: m.messageId }, "the record keeps its name and gains the network");
+    assert.deepEqual(p.source, { kind: "telegram", network: "slack", at: NOW });
+    /* the connector rewrote !status to /status before it stored it: the bridge reads a slash */
+    slackText(r, "/status", "1730812346.000001");
+    await polled(r, 3);
+    assert.equal(r.account.sends.length, 1);
+    assert.equal(r.account.sends[0].kind, "chat");
+    assert.equal(r.account.sends[0].network, "slack", "a Slack command is answered on Slack");
+    text(r, "/stop", 7);
+    await polled(r, 4);
+    assert.deepEqual(r.account.sends.map((s) => s.network), ["slack", "telegram"], "a Telegram command on Telegram");
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("/pause from Slack writes OFF by slack; /mute from Slack writes MUTE by slack", async () => {
+  const r = await rig("slack-pause");
+  try {
+    await polled(r, 1);
+    slackText(r, "/pause 2h", "1730812345.001200");
+    await polled(r, 2);
+    assert.equal(r.account.texts()[0], "paused until 16:30 ET; a terminal resumes it: npm run desk -- resume");
+    assert.deepEqual(JSON.parse(await fileText(r.home, OFF_FILE)), { setAt: "2026-10-20T18:30:00.000Z", by: "slack", until: "2026-10-20T20:30:00.000Z" });
+    slackText(r, "/mute 2h", "1730812346.001200");
+    await polled(r, 3);
+    assert.deepEqual(JSON.parse(await fileText(r.home, MUTE_FILE)), { setAt: "2026-10-20T18:30:00.000Z", by: "slack", until: "2026-10-20T20:30:00.000Z" });
+    const events = (await readEvents(r.home)).events;
+    assert.deepEqual(events.map((e) => [e.kind, (e as { by?: unknown }).by]), [["off-set", "slack"], ["mute-set", "slack"]]);
+    assert.ok(r.account.sends.every((s) => s.network === "slack"));
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("the wire id is the account's rule: face/src/phone.ts and the account's kinds.ts carry the same text", async () => {
+  const rule = (path: string): string => {
+    const m = /const WIRE_ID = (\/.*\/);/.exec(readFileSync(path, "utf8"));
+    assert.ok(m !== null, `WIRE_ID in ${path}`);
+    return m[1];
+  };
+  assert.equal(rule(join(HERE, "../src/phone.ts")), rule(join(HERE, "../../account/src/portfolio/identity/kinds.ts")));
+  assert.equal(WIRE_ID.source, "^(?:telegram:\\d{1,16}|slack:\\d{9,12}\\.\\d{6})$");
+  for (const good of ["telegram:4821", "slack:1730812345.001200"]) assert.ok(WIRE_ID.test(good), good);
+  for (const bad of ["slack:4821", "slack:1730812345.0012", "slack:C0DM:1730812345.001200", "matrix:1", "telegram:1.000001"]) assert.ok(!WIRE_ID.test(bad), bad);
+  /* an inbox message with an id of neither network is left out */
+  const r = await rig("wire-id");
+  try {
+    await polled(r, 1);
+    r.account.push({ network: "matrix", messageId: "matrix:1", text: "x", at: AT });
+    r.account.push({ network: "slack", messageId: "slack:12", text: "y", at: AT });
+    slackText(r, "good", "1730812345.001200");
+    await polled(r, 2);
+    assert.deepEqual(r.conversation.turns, ["good"]);
   } finally {
     await r.bridge.dispose();
   }

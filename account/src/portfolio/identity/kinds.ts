@@ -11,9 +11,23 @@
  * proactive kinds are held — an alert, a brief, a report, a card, a fill — and a held message is not sent later. A reply (`chat`), an
  * urgent alert and the watchdog's notice always go. */
 
-/** the networks the account can speak on; B2 adds more */
-export type Network = "telegram";
-export const NETWORKS: readonly Network[] = ["telegram"];
+/** the networks the account can speak on, in the order the Identity tab shows them */
+export type Network = "slack" | "telegram";
+export const NETWORKS: readonly Network[] = ["telegram", "slack"];
+
+/** each network's name, as the account's words say it */
+export const NETWORK_NAME: Readonly<Record<Network, string>> = { telegram: "Telegram", slack: "Slack" };
+
+/** a message's id on the wire, `<network>:<the network's own id>`: Telegram's message_id (digits), Slack's ts (seconds, a dot, six
+ * digits). There is no channel in Slack's: Gravit has exactly one DM there. The one rule the account's send, its route and the face read */
+export const WIRE_ID = /^(?:telegram:\d{1,16}|slack:\d{9,12}\.\d{6})$/;
+
+/** a Slack token of any kind anywhere in a text (bot, user, app-level, refresh and the rest): taken out as `<token>` wherever the account
+ * says or sends anything, on top of the redactor of its own tokens' exact spellings. Global: use it with replace, or with search */
+export const SLACK_TOKEN_ANYWHERE = /\bx(?:ox[abposre]|app)-[A-Za-z0-9-]{10,}/g;
+
+/** what the operator is answered when they write while the Chat with Gravit row does not tick the network they wrote on */
+export const chatOffLine = (network: Network): string => `Chat with Gravit is off on ${NETWORK_NAME[network]}: Account › Identity turns it on.`;
 
 export type PhoneKind = "chat" | "alert" | "urgent" | "brief" | "report" | "card" | "fill" | "watchdog";
 export const PHONE_KINDS: readonly PhoneKind[] = ["chat", "alert", "urgent", "brief", "report", "card", "fill", "watchdog"];

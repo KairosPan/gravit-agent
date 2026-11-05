@@ -5,7 +5,7 @@ import { chmod, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from "node:
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkHealth, contextOf, LABEL, OTHER_FACE, servicePlan, type HealthCode, type ServiceDeps } from "../scripts/service.ts";
-import { accountHomeOf, accountSendOf, answers, phoneDirectOf, readWatchdogState, runWatchdog, watchdogStatePath, type WatchdogDeps } from "../scripts/watchdog.ts";
+import { accountHomeOf, accountSendOf, answers, phoneDirectOf, readNetworkFile, readWatchdogState, slackApiOf, runWatchdog, watchdogStatePath, type WatchdogDeps } from "../scripts/watchdog.ts";
 import { deskTime } from "../src/desk.ts";
 
 const home = (): Promise<string> => mkdtemp(join(tmpdir(), "face-watchdog-"));
@@ -493,4 +493,114 @@ test("a desk check that throws still checks the account and the market, and the 
   assert.deepEqual([s.accountDownChecks, s.marketDownChecks], [2, 2]);
   assert.equal(w.restarts, 0);
   assert.ok(w.logs.some((l) => l.includes("check failed: launchctl vanished")));
+});
+
+/* Plan B2: Slack beside Telegram (ruling 13). The made-up tokens are built at runtime, so no literal in the tree has a
+ * scanner's shape. */
+const SLACK_BOT = ["xo", "xb-", "1234567890-", "2345678901-", "FakeBotTokenShape0123456"].join("");
+const SLACK_APP = ["xa", "pp-", "1-A0FAKEAPP01-1234567890-", "ab".repeat(32)].join("");
+
+/** An account home holding `networks`' files, each mode 0600 in a 0700 directory. */
+async function accountHomeWith(networks: { telegram?: boolean; slack?: boolean }): Promise<string> {
+  const accountHome = await mkdtemp(join(tmpdir(), "face-watchdog-b2-"));
+  const dir = join(accountHome, "credentials", "networks");
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  if (networks.telegram === true) {
+    await writeFile(join(dir, "telegram.json"), JSON.stringify({ token: "123456:AAH-secret/tok+en", botId: "123456", username: "gravit_bot", operatorId: "777", operatorHandle: "op" }), { mode: 0o600 });
+  }
+  if (networks.slack === true) {
+    await writeFile(join(dir, "slack.json"), JSON.stringify({
+      appToken: SLACK_APP, botToken: SLACK_BOT, appId: "A0FAKEAPP01", channel: "D0FAKEDM01", botId: "T0FAKE001:U0BOT0001",
+      username: "gravit", operatorId: "T0FAKE001:U0OP00001", operatorHandle: "@op",
+    }), { mode: 0o600 });
+  }
+  return accountHome;
+}
+
+test("the account down with only Slack connected: one direct line through chat.postMessage, its tokens taken out", async () => {
+  const accountHome = await accountHomeWith({ slack: true });
+  const asked: { url: string; init: RequestInit }[] = [];
+  let answer: () => Response = () => Response.json({ ok: false, error: `invalid_auth ${SLACK_BOT}` });
+  const fakeSlack = (async (input: string | URL | Request, init?: RequestInit) => {
+    asked.push({ url: String(input), init: init ?? {} });
+    assert.ok(init?.signal instanceof AbortSignal, "a timeout rides on every send");
+    return answer();
+  }) as typeof fetch;
+  const w = await watch();
+  const phone = phoneDirectOf(accountHome, { fetch: fakeSlack, log: (l) => { w.logs.push(l); } });
+  w.deps.sendDirect = (text) => phone.send(`${text} <!channel> & ${SLACK_APP} ${["xo", "xp-", "9999999999-abcdefghij"].join("")}`);
+  w.at(T1); w.account(false);
+  await runWatchdog(w.deps);
+  w.at(T1 + FIVE_MIN);
+  await runWatchdog(w.deps); /* Slack answers 200 with ok: false - a failure, not said */
+  assert.equal(asked.length, 1);
+  assert.equal((await readWatchdogState(w.deps.home)).accountSaid, undefined, "an ok:false answer is not taken");
+  const first = asked[0];
+  assert.equal(first.url, "https://slack.com/api/chat.postMessage");
+  assert.equal(first.init.method, "POST");
+  const headers = first.init.headers as Record<string, string>;
+  assert.equal(headers.authorization, `Bearer ${SLACK_BOT}`, "the bot token in the header alone");
+  assert.equal(headers["content-type"], "application/x-www-form-urlencoded");
+  const form = new URLSearchParams(String(first.init.body));
+  assert.equal(form.get("channel"), "D0FAKEDM01", "to the DM the account bound");
+  assert.equal(form.get("text"), `${ACCOUNT_DOWN} &lt;!channel&gt; &amp; <token> <token>`.replace(/<token>/g, "&lt;token&gt;"), "escaped, both tokens and every Slack shape out");
+  assert.equal(form.get("mrkdwn"), "false"); assert.equal(form.get("unfurl_links"), "false"); assert.equal(form.get("unfurl_media"), "false");
+  assert.ok(!first.url.includes(SLACK_BOT) && !String(first.init.body).includes(SLACK_BOT), "never in the URL or the body");
+
+  answer = () => Response.json({ ok: true, ts: "1730812345.001200" });
+  w.at(T1 + 2 * FIVE_MIN);
+  await runWatchdog(w.deps);
+  assert.equal(asked.length, 2);
+  assert.equal((await readWatchdogState(w.deps.home)).accountSaid, true);
+  for (let i = 3; i < 6; i++) {
+    w.at(T1 + i * FIVE_MIN);
+    await runWatchdog(w.deps);
+  }
+  assert.equal(asked.length, 2, "nothing more until the account is back");
+  assert.ok(w.logs.some((l) => l.includes("invalid_auth")), "the refusal is logged");
+  for (const l of w.logs) assert.ok(!l.includes(SLACK_BOT) && !l.includes(SLACK_APP), l);
+  assert.equal(phone.redact(`x ${SLACK_BOT} ${SLACK_APP} ${["xo", "xe-", "1-abcdefghijkl"].join("")}`), "x <token> <token> <token>");
+
+  /* a Slack file others can read is not read; a channel that is no DM is no token file */
+  const loose = await accountHomeWith({ slack: true });
+  await chmod(join(loose, "credentials", "networks", "slack.json"), 0o644);
+  const logs: string[] = [];
+  assert.equal(await phoneDirectOf(loose, { fetch: fakeSlack, log: (l) => { logs.push(l); } }).send("x"), false);
+  assert.match(logs.at(-1)!, /slack\.json can be read by other users/);
+  assert.equal(asked.length, 2);
+});
+
+test("with both connected, the direct line goes on Telegram alone", async () => {
+  const accountHome = await accountHomeWith({ telegram: true, slack: true });
+  const urls: string[] = [];
+  const fake = (async (input: string | URL | Request) => {
+    urls.push(String(input));
+    return Response.json({ ok: true, result: { message_id: 1 } });
+  }) as typeof fetch;
+  const phone = phoneDirectOf(accountHome, { fetch: fake, log: () => {} });
+  assert.equal(await phone.send("the account is down"), true);
+  assert.deepEqual(urls.map((u) => new URL(u).host), ["api.telegram.org"], "one line, on one network");
+  /* a Telegram file that is there but fails the rules is Telegram connected, unreadable: Slack is not tried for it */
+  await chmod(join(accountHome, "credentials", "networks", "telegram.json"), 0o644);
+  const logs: string[] = [];
+  assert.equal(await phoneDirectOf(accountHome, { fetch: fake, log: (l) => { logs.push(l); } }).send("x"), false);
+  assert.equal(urls.length, 1);
+  assert.match(logs.at(-1)!, /telegram\.json can be read by other users/);
+});
+
+test("the watchdog's Slack address is Slack's own unless ACCOUNT_SLACK_API is a loopback one", async () => {
+  assert.equal(slackApiOf({}), "https://slack.com/api");
+  assert.equal(slackApiOf({ ACCOUNT_SLACK_API: "http://127.0.0.1:4999" }), "http://127.0.0.1:4999/api");
+  assert.equal(slackApiOf({ ACCOUNT_SLACK_API: "http://127.0.0.1:4999/api" }), "http://127.0.0.1:4999/api");
+  for (const other of ["https://evil.example/api", "http://localhost:4999", "http://127.0.0.1:4999/x", "http://127.0.0.1:99999"]) {
+    assert.equal(slackApiOf({ ACCOUNT_SLACK_API: other }), "https://slack.com/api", other);
+  }
+  const accountHome = await accountHomeWith({ slack: true });
+  const urls: string[] = [];
+  const fake = (async (input: string | URL | Request) => { urls.push(String(input)); return Response.json({ ok: true, ts: "1730812345.001200" }); }) as typeof fetch;
+  assert.equal(await phoneDirectOf(accountHome, { fetch: fake, log: () => {}, slackApi: "http://127.0.0.1:4999/api" }).send("x"), true);
+  assert.deepEqual(urls, ["http://127.0.0.1:4999/api/chat.postMessage"]);
+  const read = readNetworkFile(accountHome, "slack");
+  assert.ok("botToken" in read && read.channel === "D0FAKEDM01");
+  assert.ok("why" in readNetworkFile(accountHome, "telegram"));
 });

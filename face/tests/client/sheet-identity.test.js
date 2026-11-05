@@ -8,7 +8,7 @@ import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { renderConnectDrawer, connectSteps, etClock } from '../../client/js/render/identity.js';
 import { renderSheet } from '../../client/js/render/owner.js';
-import { IDENTITY_KINDS, identityTitleOf, identityGoOf, identityFieldsOf, identityDraftOf, identityLinesOf, identityStepsOf, rowsSentOn } from '../../client/js/host/sheet-identity.js';
+import { IDENTITY_KINDS, identityTitleOf, identityGoOf, identityFieldsOf, identityDraftOf, identityLinesOf, identityStepsOf, identityNoteOf, rowsSentOn, slackSteps4Note } from '../../client/js/host/sheet-identity.js';
 import { SHEET_KINDS, titleOf, goWord, fieldsOf, draftOf } from '../../client/js/host/sheet-view.js';
 import { connectRoutingOf } from '../../client/js/host/identity.js';
 
@@ -51,6 +51,7 @@ test('the four steps lists are the spec\'s, word for word', () => {
   assert.deepEqual(connectSteps(1), STEPS_1);
   assert.deepEqual(connectSteps(2), STEPS_2);
   assert.deepEqual(connectSteps(3), STEPS_3);
+  assert.deepEqual(connectSteps(1, 'telegram'), STEPS_1);
   assert.deepEqual(identityStepsOf('connectNetwork'), STEPS_4);
 });
 
@@ -170,7 +171,7 @@ test('disconnect drafts disconnectNetwork with its three lines', () => {
     'The token is deleted from the account.',
     'The desk keeps working in the face.',
   ]);
-  assert.equal(typeof identityDraftOf('disconnectNetwork', [], { network: 'slack' }), 'string', 'only a network the account speaks on');
+  assert.equal(typeof identityDraftOf('disconnectNetwork', [], { network: 'imessage' }), 'string', 'only a network the account speaks on');
   assert.equal(typeof identityDraftOf('disconnectNetwork', [], {}), 'string');
   // drawn: the three lines above the keys, Sign disconnect, no Start again
   const s = R.sheetOpen(R.ownerStanding(emptyState(NOW), { role: 'signs', kid: 'a5048199a8081854' }), { kind: 'disconnectNetwork', seed, fields: [] });
@@ -239,7 +240,8 @@ test('block drafts blockSender for the stranger\'s ref, shown by its masked id',
   assert.deepEqual(identityLinesOf('block', seed), ['Messages from …789 are dropped and no longer counted.']);
   assert.equal(typeof identityDraftOf('block', [], { ...seed, sender: '' }), 'string');
   assert.equal(typeof identityDraftOf('block', [], { ...seed, masked: '' }), 'string');
-  assert.equal(typeof identityDraftOf('block', [], { ...seed, network: 'slack' }), 'string');
+  assert.equal(typeof identityDraftOf('block', [], { ...seed, network: 'imessage' }), 'string');
+  assert.deepEqual(identityDraftOf('block', [], { ...seed, network: 'slack', masked: '…7QK' }), { type: 'blockSender', network: 'slack', sender: '0a1b2c3d4e5f', masked: '…7QK' });
   // an account-supplied masked id is escaped where drawn
   const odd = { ...seed, masked: '<b>…7</b>' };
   const html = renderSheet(R.sheetOpen(emptyState(NOW), { kind: 'block', seed: odd, fields: [] }), NOW);
@@ -254,4 +256,147 @@ test('sheet 1 is no form, so the browser is not invited to keep the bot token as
   assert.match(input, /type="password"/);
   assert.match(input, /data-lpignore="true"/);
   assert.match(input, /data-1p-ignore="true"/);
+});
+
+// ── plan B2 Task 7: Connect Slack's four sheets ──
+
+const SLACK_STEPS_1 = [
+  'Open api.slack.com/apps, choose Create New App, then From a manifest, and pick your workspace.',
+  'Paste the manifest above and create the app.',
+  'In Basic Information › App-Level Tokens, generate a token with the connections:write scope. It starts with xapp-. Paste it in the first field.',
+  'In Install App, install the app to your workspace and copy the Bot User OAuth Token. It starts with xoxb-. Paste it in the second field.',
+  'Paste them only here, never in a chat, not even with Gravit.',
+];
+const SLACK_STEPS_2 = [
+  'Open the link or scan the code: Slack opens Gravit\'s app.',
+  'In its Messages tab, send it any message, for example hi.',
+  'Wait here: this sheet moves on when the app hears you.',
+];
+const SLACK_STEPS_3 = [
+  'Check the name, the handle and the message: they should be yours, sent a moment ago.',
+  'This is me: Gravit talks only with this Slack account, in this direct message.',
+  'Not me: that sender is listed under Not you and never reaches Gravit. Say hi again from your own Slack account.',
+];
+const SLACK_STEPS_4_NOTE_WORDS = 'On Slack, type the phone\'s commands with ! — !status, !pause 30m, !mute 30m, !new, !stop.';
+const MANIFEST = '{\n  "display_information": {\n    "name": "Gravit"\n  },\n  "x": "<b>&"\n}';
+const ALL_BOTH = 'chat=slack,telegram;alerts=slack,telegram;brief=slack,telegram;cards=slack,telegram;fills=slack,telegram';
+const SLACK_SEED = {
+  network: 'slack', pending: 'fedcba9876543210fedcba9876543210', botId: 'T0FAKE001:U0BOT0001', speaksAs: '@gravit', operatorId: 'T0FAKE001:U0OPER7QK',
+  talksOnlyWith: '@pan', routing: ALL_BOTH, keyHash: 'c'.repeat(64), salt: 'd'.repeat(32),
+};
+const SLACK_PENDING = {
+  id: SLACK_SEED.pending, network: 'slack', bot: { id: 'T0FAKE001:U0BOT0001', username: 'gravit', name: 'Gravit' }, workspace: 'Fake Co',
+  link: 'https://slack.com/app_redirect?app=A0FAKE0001&team=T0FAKE001', qr: 'data:image/svg+xml;base64,PHN2Zy8+', expiresAt: '2026-11-04T15:10:00.000Z', state: 'waiting',
+};
+const slackAt = (step, manifest = MANIFEST) => R.identityConnectSet(
+  R.identityConnectOpen(R.identityLoaded(R.nav(emptyState(NOW), { screen: 'account', tab: 'identity' }), { ok: true, networks: [], routing: {}, quiet: null, strangers: [], ...(manifest === null ? {} : { slackManifest: manifest }) }), 'slack'),
+  { step, pending: step > 1 ? (step === 3 ? { ...SLACK_PENDING, state: 'heard', sender: { id: 'T0FAKE001:U0OPER7QK', name: 'Pan', handle: '@pan', userId: 'U0OPER7QK', masked: '…7QK', text: 'hi' } } : SLACK_PENDING) : null },
+);
+
+test('Slack\'s steps lists are the plan\'s, word for word', () => {
+  assert.deepEqual(connectSteps(1, 'slack'), SLACK_STEPS_1);
+  assert.deepEqual(connectSteps(2, 'slack'), SLACK_STEPS_2);
+  assert.deepEqual(connectSteps(3, 'slack'), SLACK_STEPS_3);
+  assert.equal(slackSteps4Note(), SLACK_STEPS_4_NOTE_WORDS);
+  assert.deepEqual(listOf(renderConnectDrawer(slackAt(2))), SLACK_STEPS_2);
+  assert.deepEqual(listOf(renderConnectDrawer(slackAt(3))), SLACK_STEPS_3);
+});
+
+test('sheet 1: Connect Slack · 1 of 4 · App tokens — the manifest with Copy, two password fields, no form, where they are kept, its steps above the keys', () => {
+  const html = renderConnectDrawer(slackAt(1));
+  assert.match(html, /<aside class="drawer sheet" aria-label="Connect Slack · 1 of 4 · App tokens">/);
+  assert.match(html, /<h2>Connect Slack · 1 of 4 · App tokens<\/h2>/);
+  assert.doesNotMatch(html, /<form/);
+  // the manifest as the account gave it, escaped, in a <pre>, with Copy
+  const pre = html.match(/<pre[^>]*id="identity-manifest"[^>]*>([\s\S]*?)<\/pre>/);
+  assert.ok(pre, 'the manifest');
+  assert.equal(decode(pre[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>')), MANIFEST);
+  assert.ok(!html.includes('<b>&'), 'escaped');
+  assert.match(html, /<button[^>]*data-action="identityCopyManifest"[^>]*>Copy<\/button>/);
+  assert.ok(html.indexOf('identity-manifest') < html.indexOf('identity-app-token'), 'the manifest above the fields');
+  // two password fields, the browser told to keep neither
+  const app = html.match(/<input[^>]*id="identity-app-token"[^>]*>/)?.[0] ?? '';
+  const bot = html.match(/<input[^>]*id="identity-bot-token"[^>]*>/)?.[0] ?? '';
+  for (const input of [app, bot]) {
+    assert.match(input, /type="password"/);
+    assert.match(input, /autocomplete="off"/);
+    assert.match(input, /spellcheck="false"/);
+    assert.match(input, /data-lpignore="true"/);
+    assert.match(input, /data-1p-ignore="true"/);
+    assert.match(input, /data-form-type="other"/);
+    assert.doesNotMatch(input, /value=/);
+  }
+  assert.match(html, /<label class="field-label" for="identity-app-token">App-level token \(xapp-…\)<\/label>/);
+  assert.match(html, /<label class="field-label" for="identity-bot-token">Bot token \(xoxb-…\)<\/label>/);
+  assert.ok(html.indexOf('identity-app-token') < html.indexOf('identity-bot-token'), 'the app-level token first');
+  assert.ok(html.includes('Kept in: Account · :4820'));
+  assert.ok(decode(html).includes("Never in: Gravit's box · ~/.dsh"));
+  assert.deepEqual(listOf(html), SLACK_STEPS_1);
+  const ol = html.indexOf('<ol class="sheet-steps">');
+  const lastRow = html.lastIndexOf('<div class="btn-row">');
+  assert.ok(ol > html.indexOf('identity-bot-token') && ol < lastRow, 'steps under the fields, above the buttons');
+  assert.match(html.slice(lastRow), /identityClose[^>]*>Cancel<[\s\S]*identityNext[^>]*>Next</);
+  // no manifest from the account: said, and no Copy
+  const none = renderConnectDrawer(slackAt(1, null));
+  assert.doesNotMatch(none, /<pre|identityCopyManifest/);
+  assert.match(none, /The account gave no manifest: update the account, then open this sheet again\./);
+  // a busy Next is off, both fields too
+  const busy = renderConnectDrawer(R.identityConnectSet(slackAt(1), { busy: true }));
+  assert.match(busy, /data-action="identityNext" disabled>Checking…</);
+  assert.match(busy.match(/<input[^>]*id="identity-bot-token"[^>]*>/)[0], /disabled/);
+  // Telegram's sheet 1 is as it was: one field, no manifest
+  const tg = renderConnectDrawer(at(1));
+  assert.doesNotMatch(tg, /identity-manifest|identity-app-token/);
+  assert.match(tg, /id="identity-token"/);
+});
+
+test('sheet 4 for Slack: its seven lines, B1b\'s steps, and the ! note', () => {
+  assert.deepEqual(identityLinesOf('connectNetwork', SLACK_SEED), ['Network: Slack', 'Speaks as: @gravit', 'Talks only with: @pan',
+    'May send: Chat with Gravit, Watch alerts, Pre-close brief, Cards waiting, Fills and reports', 'Tokens kept in: Account · :4820', 'Signed by: this browser', 'Until: you disconnect']);
+  assert.equal(identityTitleOf('connectNetwork', SLACK_SEED), 'Connect Slack · 4 of 4 · What you sign');
+  assert.deepEqual(identityStepsOf('connectNetwork', SLACK_SEED), STEPS_4);
+  assert.equal(identityNoteOf('connectNetwork', SLACK_SEED), SLACK_STEPS_4_NOTE_WORDS);
+  assert.equal(identityNoteOf('connectNetwork', SEED), '', 'Telegram has no note');
+  assert.deepEqual(identityDraftOf('connectNetwork', [], SLACK_SEED), {
+    type: 'connectNetwork', network: 'slack', pending: SLACK_SEED.pending, botId: 'T0FAKE001:U0BOT0001', speaksAs: '@gravit', operatorId: 'T0FAKE001:U0OPER7QK',
+    talksOnlyWith: '@pan', routing: ALL_BOTH, keyHash: SLACK_SEED.keyHash, salt: SLACK_SEED.salt,
+  });
+  assert.equal(connectRoutingOf({ ok: true, routing: { chat: ['telegram'], alerts: ['telegram'], brief: ['telegram'], cards: ['telegram'], fills: ['telegram'] } }, 'slack'), ALL_BOTH);
+  // drawn: the steps, then the note under them, then the keys
+  const shown = Object.entries({ ...identityDraftOf('connectNetwork', [], SLACK_SEED), nonce: NOW }).map(([name, value]) => ({ name, value: String(value) }));
+  let s = R.sheetOpen(R.ownerStanding(emptyState(NOW), { role: 'signs', kid: 'a5048199a8081854' }), { kind: 'connectNetwork', seed: SLACK_SEED, fields: [] });
+  s = R.sheetAsking(s, { quiet: false });
+  s = R.sheetPrepared(s, { prepared: { ok: true, action: { type: 'connectNetwork' }, shown, quote: null }, at: NOW, asked: JSON.stringify(identityDraftOf('connectNetwork', [], SLACK_SEED)), deadline: null });
+  const html = renderSheet(s, NOW);
+  assert.match(html, /<h2>Connect Slack · 4 of 4 · What you sign<\/h2>/);
+  assert.deepEqual(listOf(html), STEPS_4);
+  const ol = html.indexOf('<ol class="sheet-steps">');
+  const noteAt = html.indexOf('On Slack, type the phone');
+  const keys = html.lastIndexOf('<div class="btn-row">');
+  assert.ok(ol > 0 && ol < noteAt && noteAt < keys, 'steps, the note, keys');
+  assert.ok(decode(html).includes(SLACK_STEPS_4_NOTE_WORDS));
+  // Telegram's sheet 4 draws no note
+  const tg = renderSheet(R.sheetOpen(emptyState(NOW), { kind: 'connectNetwork', seed: SEED, fields: [] }), NOW);
+  assert.doesNotMatch(tg, /type the phone/);
+});
+
+test('Disconnect Slack drafts disconnectNetwork slack with Slack\'s words', () => {
+  const seed = { network: 'slack' };
+  assert.deepEqual(identityDraftOf('disconnectNetwork', [], seed), { type: 'disconnectNetwork', network: 'slack' });
+  assert.equal(titleOf('disconnectNetwork', seed), 'Disconnect Slack');
+  assert.deepEqual(identityLinesOf('disconnectNetwork', seed), [
+    'Gravit stops reading and sending on Slack.',
+    'Both tokens are deleted from the account.',
+    'The desk keeps working in the face.',
+  ]);
+  const html = renderSheet(R.sheetOpen(R.ownerStanding(emptyState(NOW), { role: 'signs', kid: 'a5048199a8081854' }), { kind: 'disconnectNetwork', seed, fields: [] }), NOW);
+  assert.match(html, /<h2>Disconnect Slack<\/h2>/);
+  assert.match(html, /Both tokens are deleted from the account\./);
+});
+
+test('the routing sheet says what each connected network is sent', () => {
+  const seed = { routing: { chat: ['slack', 'telegram'], alerts: ['telegram'], brief: [], cards: ['slack'], fills: [] }, quiet: null, saved: 'chat=;alerts=;brief=;cards=;fills=', networks: ['telegram', 'slack'] };
+  assert.deepEqual(identityLinesOf('routing', seed), ['On Telegram: Chat with Gravit, Watch alerts', 'On Slack: Chat with Gravit, Cards waiting']);
+  assert.deepEqual(identityLinesOf('routing', { ...seed, networks: ['slack'] }), ['On Slack: Chat with Gravit, Cards waiting']);
+  assert.deepEqual(identityLinesOf('routing', { ...seed, networks: undefined }), ['On Telegram: Chat with Gravit, Watch alerts'], 'none named: Telegram, as before');
 });

@@ -82,9 +82,10 @@ const IDENTITY_READS: ReadonlyArray<readonly [face: string, account: string, rou
   ["/data/account/identity", "/api/account/identity", "identity", ""],
   ["/data/account/identity/pending", "/api/account/identity/pending", "identityPending", "id=p0123456789abcdef"],
 ];
-/** The Identity tab's three writes (plan B1a), registered after `guard`. */
-const IDENTITY_WRITES: ReadonlyArray<readonly [face: string, account: string, route: "identityToken" | "identityNotMe" | "identityDrop"]> = [
+/** The Identity tab's four writes (plans B1a and B2), registered after `guard`. */
+const IDENTITY_WRITES: ReadonlyArray<readonly [face: string, account: string, route: "identityToken" | "identitySlackToken" | "identityNotMe" | "identityDrop"]> = [
   ["/data/account/identity/telegram/token", "/api/account/identity/telegram/token", "identityToken"],
+  ["/data/account/identity/slack/token", "/api/account/identity/slack/token", "identitySlackToken"],
   ["/data/account/identity/pending/not-me", "/api/account/identity/pending/not-me", "identityNotMe"],
   ["/data/account/identity/pending/drop", "/api/account/identity/pending/drop", "identityDrop"],
 ];
@@ -213,14 +214,14 @@ test("rebuildQuery: the whitelist, once each, 240 characters, fresh stripped", (
   assert.deepEqual(rebuildQuery("account", "/data/account"), { query: "", fresh: false });
 });
 
-test("the routes: forty-three exact paths, the callback last; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
+test("the routes: forty-four exact paths, the callback last; the fence refuses a foreign Origin and a missing Host before any fetch", async () => {
   const { routes, fetched } = proxyWith(answering(OK_BODY));
   const paths = [
     ...ROUTES.map(([face]) => face), ...NEW_READS.map(([face]) => face), ...CONNECTED.map(([face]) => face),
     ...IDENTITY_READS.map(([face]) => face), STREAM, FOLLOW,
     ...WRITES.map(([face]) => face), ...NEW_WRITES.map(([face]) => face), ...IDENTITY_WRITES.map(([face]) => face), CALLBACK,
   ];
-  assert.equal(paths.length, 43, "forty-three: the five public reads are the market's (src/market-proxy.ts)");
+  assert.equal(paths.length, 44, "forty-four: the five public reads are the market's (src/market-proxy.ts)");
   assert.ok(routes.every((r) => r.kind === "exact"), "no prefix route");
   assert.deepEqual(routes.map((r) => `${r.kind} ${r.path}`), paths.map((face) => `exact ${face}`));
   for (const face of paths) {
@@ -895,7 +896,7 @@ test("a write past its limit is 413, a non-JSON one 415, a query on it 400", asy
   assert.deepEqual(WRITE_BODY_LIMIT, {
     pair: 4_096, prepare: 16_384, exchange: 65_536,
     challenge: 1_024, prove: 2_048, signinStart: 512, bridgeRoutes: 4_096, orderSent: 512, orderRequote: 512, sent: 512, revoke: 512, guard: 256,
-    identityToken: 1_024, identityNotMe: 256, identityDrop: 256,
+    identityToken: 1_024, identitySlackToken: 1_024, identityNotMe: 256, identityDrop: 256,
   });
   const { routes, fetched } = proxyWith(answering(OK_BODY));
   for (const [face, , route] of WRITES) {
@@ -966,7 +967,7 @@ test("a write's abort is the row's", async (t) => {
     pair: 7_000, prepare: 30_000, exchange: 30_000,
     challenge: 7_000, prove: 12_000, signinStart: 30_000, bridgeRoutes: 30_000, orderSent: 30_000, orderRequote: 30_000, sent: 30_000,
     revoke: 7_000, guard: 7_000,
-    identityToken: 30_000, identityNotMe: 7_000, identityDrop: 7_000,
+    identityToken: 30_000, identitySlackToken: 30_000, identityNotMe: 7_000, identityDrop: 7_000,
   });
   t.mock.timers.enable({ apis: ["setTimeout"] });
   for (const [face, , route] of [...WRITES, ...NEW_WRITES, ...IDENTITY_WRITES]) {
@@ -1257,6 +1258,7 @@ test("the identity reads and writes reach the account at their paths", async () 
     ["/api/account/identity", ok('{"ok":true,  "networks":[]}')],
     ["/api/account/identity/pending", ok('{"ok":false,"error":"no pending connection"}', 404)],
     ["/api/account/identity/telegram/token", ok('{"ok":false,"error":"that token does not match"}', 409)],
+    ["/api/account/identity/slack/token", ok('{"ok":false,"error":"those two tokens are not one app"}', 409)],
     ["/api/account/identity/pending/not-me", ok('{"ok":true,"pending":{"state":"waiting"}}')],
     ["/api/account/identity/pending/drop", ok('{"ok":true}', 200)],
   ]);
@@ -1279,13 +1281,13 @@ test("the identity reads and writes reach the account at their paths", async () 
     assert.deepEqual(inits.at(-1)!.headers, { "content-type": "application/json" }, `${face}: content-type alone`);
     assert.equal(a.status, want.status, face); assert.equal(a.body, await want.text(), `${face}: the account's bytes`);
   }
-  assert.equal(fetched.length, 5, "the unknown names never reached the account");
+  assert.equal(fetched.length, 6, "the unknown names never reached the account");
   for (const [face, , route] of IDENTITY_WRITES) {
     assert.equal((await call(routes, face, JSON_POST, "POST", "x".repeat(WRITE_BODY_LIMIT[route] + 1))).status, 413, face);
     assert.equal((await call(routes, face, { host: "127.0.0.1:3090", "content-type": "text/plain" }, "POST", "{}")).status, 415, face);
     assert.equal((await call(routes, `${face}?id=1`, JSON_POST, "POST", "{}")).status, 400, face);
   }
-  assert.equal(fetched.length, 5, "no refused write reaches the account");
+  assert.equal(fetched.length, 6, "no refused write reaches the account");
 });
 
 test("the identity reads take ?fresh=1: past the cache, never forwarded", async () => {
@@ -1350,6 +1352,31 @@ test("the token route forwards the body as it came and keeps nothing", async (t)
   for (const text of answers) assert.equal(text.includes(TOKEN), false, `no answer carries it: ${text.slice(0, 60)}`);
   for (const text of answers) assert.equal(text.includes("AAFakeTokenShape"), false);
   assert.equal(seen.some((line) => line.includes(TOKEN) || line.includes("AAFakeTokenShape")), false, "no log line carries it");
+});
+
+test("the Slack token route forwards the body as it came and keeps nothing", async (t) => {
+  const seen: string[] = [];
+  const keep = (...args: unknown[]): void => { seen.push(args.map((a) => (a instanceof Error ? `${a.message} ${a.stack}` : String(a))).join(" ")); };
+  for (const method of ["log", "error", "warn", "info", "debug", "trace"] as const) t.mock.method(console, method, keep);
+  /* made up at runtime, so no literal in the tree has a scanner's shape */
+  const appToken = ["xa", "pp-", "1-A0FAKEAPP01-1234567890-", "ab".repeat(32)].join("");
+  const botToken = ["xo", "xb-", "1234567890-", "2345678901-", "FakeBotTokenShape0123456"].join("");
+  const SLACK_PATH = "/data/account/identity/slack/token";
+  const body = `{"appToken": "${appToken}",  "botToken":"${botToken}","keyHash":"00ff","salt":"c2FsdA=="}`;
+  const { routes, fetched, inits } = proxyWith(async () => ok('{"ok":true,"pending":{"id":"p1","state":"waiting"}}'));
+  const a = await call(routes, SLACK_PATH, JSON_POST, "POST", body);
+  assert.equal(a.status, 200);
+  assert.equal(fetched.at(-1), `${URL_}/api/account/identity/slack/token`);
+  assert.equal(inits.at(-1)!.body, body, "the identical bytes, never parsed or re-written");
+  await call(routes, SLACK_PATH, JSON_POST, "POST", body);
+  assert.equal(fetched.filter((u) => u.endsWith("/slack/token")).length, 2, "never kept, never served again");
+  const answers: string[] = [a.body];
+  answers.push((await call(routes, SLACK_PATH, JSON_POST, "POST", body + " ".repeat(1_024))).body);
+  answers.push((await call(routes, `${SLACK_PATH}?t=${botToken}`, JSON_POST, "POST", body)).body);
+  const failed = await call(proxyWith(async () => { throw Object.assign(new TypeError(`fetch failed ${botToken}`), { cause: { code: "ECONNREFUSED", message: appToken } }); }).routes, SLACK_PATH, JSON_POST, "POST", body);
+  assert.equal(failed.status, 503); answers.push(failed.body);
+  for (const text of answers) assert.equal(text.includes(appToken) || text.includes(botToken), false, `no answer carries either: ${text.slice(0, 60)}`);
+  assert.equal(seen.some((line) => line.includes(appToken) || line.includes(botToken)), false, "no log line carries either token");
 });
 
 test("the inbox and send routes are not on the face", async () => {
