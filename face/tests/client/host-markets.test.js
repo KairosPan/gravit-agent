@@ -12,6 +12,8 @@ import { emptyState } from '../../client/js/data/empty.js';
 import { startMarkets, EXPLORE_MS, QUOTES_MS, QUOTE_PAIRS, WATCH_LIMIT, RANK_ROWS, BOOK_DEPTH, TRADES_LIMIT, FUNDING_LIMIT } from '../../client/js/host/markets.js';
 import { rowsOf, pageOf, cnStateWord } from '../../client/js/host/market-view.js';
 import { STORAGE_KEY, ACCOUNT_WATCH_KEY, readAccountWatch, saveAccountWatch } from '../../client/js/wire/market-model.js';
+import { setTable } from '../../client/js/i18n/words.js';
+import { EN } from '../../client/js/i18n/en.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 8; i++) await tick(); };
@@ -304,7 +306,9 @@ test('search reads explore?q alone; results land in results', async () => {
   r.markets.show(true);
   await settle();
   r.store.dispatch('setMarketsSort', 'Biggest moves');
-  assert.equal(r.m().sort, 'movers', 'a sort by its label');
+  assert.equal(r.m().sort, 'volume', 'a label is no sort: the seg hands its id');
+  r.store.dispatch('setMarketsSort', 'movers');
+  assert.equal(r.m().sort, 'movers', 'a sort by its id');
   r.markets.search('eth');
   assert.equal(r.m().q, 'eth');
   assert.equal(r.m().tab, 'results', 'a query from nothing opens All results');
@@ -990,7 +994,7 @@ test('the Account down while China is on screen: the kept ranking re-served stal
   assert.equal(r.m().rank.status, 'ready');
   assert.equal(r.m().rank.data.stale, true, 'the proxy said it is the last read');
   // the Venues line: never the Account's last live sentence while it is not answering (plan-1 final review #3)
-  assert.deepEqual(r.m().providers, [{ id: 'tencent', market: 'cn', status: 'error', said: 'The market is not answering · China as last read' }]);
+  assert.deepEqual(r.m().providers, [{ id: 'tencent', market: 'cn', status: 'error', said: 'The market is not answering · China as last read', notAnswering: true }]);
   stale = false;
   r.fire(EXPLORE_MS);
   await settle();
@@ -1137,7 +1141,7 @@ test('the Account answering afresh on another screen reads China’s state again
   await settle();
   assert.equal(ranks(), 0);
   // said not answering: a page the proxy re-served stale asks nothing, a fresh one reads the state again
-  r.store.dispatch('chinaStatusUpdated', { status: { state: 'unavailable', said: 'The market is not answering · China as last read' } });
+  r.store.dispatch('chinaStatusUpdated', { status: { state: 'unavailable', said: 'The market is not answering · China as last read', notAnswering: true } });
   r.markets.accountAnswered({ ok: true, stale: true });
   await settle();
   assert.equal(ranks(), 0);
@@ -1150,6 +1154,31 @@ test('the Account answering afresh on another screen reads China’s state again
   r.markets.accountAnswered({ ok: true });
   await settle();
   assert.equal(ranks(), 1, 'its state known again: nothing more');
+  r.markets.close();
+});
+
+test('China said not answering under another table is read again once the market answers: the host knows it by its flag, not its words', async () => {
+  let stale = true;
+  const r = rig({ answer: path => (isChina(path) ? { ...ranked(query(path).sort), ...(stale ? { stale: true } : {}) } : undefined) });
+  const ranks = () => r.reads.filter(isChina).length;
+  setTable({ 'markets.cn.notAnswering': 'Le marché ne répond pas' });
+  try {
+    r.store.dispatch('setMarketsTab', 'china');
+    r.markets.show(true);
+    await settle();
+    assert.equal(r.m().providers[0]?.said, 'Le marché ne répond pas', 'said in the table that stood');
+    assert.equal(r.m().providers[0]?.notAnswering, true);
+  } finally {
+    setTable(EN);
+  }
+  r.markets.show(false);
+  const before = ranks();
+  stale = false;
+  r.markets.accountAnswered({ ok: true });
+  await settle();
+  assert.equal(ranks(), before + 1, 'China read again, the table switched since');
+  assert.equal(r.m().providers[0].status, 'connected');
+  assert.equal(r.m().providers[0].notAnswering, undefined, 'the flag goes with the fresh state');
   r.markets.close();
 });
 

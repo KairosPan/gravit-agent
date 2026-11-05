@@ -30,8 +30,9 @@ import { joinExplore } from './explore-join.js';
 import { exploreHalves, joinOptsOf, orderOf, MARKET_EXPLORE as EXPLORE, CONNECTED_EXPLORE } from './explore-halves.js';
 import { t } from '../i18n/words.js';
 
-// China's state while the proxy re-serves the market's last read: the market is not answering
-const notAnswering = () => ({ state: 'unavailable', said: notAnsweringWord() });
+// China's state while the proxy re-serves the market's last read: the market is not answering — flagged, so recheckChina knows it
+// by the flag, never by the table's words for it
+const notAnswering = () => ({ state: 'unavailable', said: notAnsweringWord(), notAnswering: true });
 
 export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
 export const WATCH_LIMIT = 100;   // either list's: the cn list's, the Account keys' cap
@@ -171,7 +172,7 @@ export function startMarkets({
   // ranking that carries it — else that sentence would stay on Venues and Markets until a reload
   function recheckChina() {
     const said = store.get().markets.providers;
-    if (!Array.isArray(said) || !said.some(p => p?.market === 'cn' && p.said === notAnsweringWord())) return;
+    if (!Array.isArray(said) || !said.some(p => p?.market === 'cn' && p.notAnswering === true)) return;
     if (!inAir('rank')) readRank();
   }
   // the read for the tab on screen: China's ranking there, else the Account's explore

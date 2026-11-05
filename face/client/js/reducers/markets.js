@@ -3,7 +3,7 @@
 // its base's compare rows, the Account keys starred and what each old us:/crypto: star was found as; the A shares' quotes, their
 // search hits' prices and China's state, the Account's too — and the screen's own view of it: the tab, the sort, the query, a
 // page's range
-import { ACCOUNT_TAB_IDS, accountSorts, CANDLE_RANGES, isAccountKey } from '../host/market-view.js';
+import { ACCOUNT_TAB_IDS, ACCOUNT_SORT_IDS, CANDLE_RANGES, isAccountKey } from '../host/market-view.js';
 import { number } from '../wire/market-model.js';
 import { DESK_TAB } from '../host/desk-view.js';
 import { chinaProviderOf, isCnKey } from '../wire/china.js';
@@ -160,10 +160,9 @@ export const reducers = {
 
   // the Account's tabs, Watching and All results; a tab starts from Most traded
   setMarketsTab: (s, tab) => (TABS.has(tab) && tab !== s.markets.tab ? mk(s, onTab(tab)) : s),
-  // the seg hands its label, a test or a link the id
+  // a sort by its id (the seg's data-value); its word is the renderer's
   setMarketsSort(s, v) {
-    const hit = accountSorts().find(x => x.id === v || x.label === v);
-    return hit && hit.id !== s.markets.sort ? mk(s, { sort: hit.id }) : s;
+    return ACCOUNT_SORT_IDS.includes(v) && v !== s.markets.sort ? mk(s, { sort: v }) : s;
   },
   // a query typed from nothing opens All results; cleared there, it goes back to All; cleared anywhere, the search's read goes
   setMarketsQuery(s, q) {

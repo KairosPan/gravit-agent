@@ -72,8 +72,11 @@ export function cnHitsOf(body) {
   return { assets, quotes };
 }
 
-/** The ranking's ChinaStatus as the provider list the screens read; [] for none. @param {unknown} status */
+/** The ranking's ChinaStatus as the provider list the screens read; [] for none. A status the face set itself for the market
+ *  not answering (`notAnswering: true`) keeps that flag, so the host knows it by its code, never by its words.
+ *  @param {unknown} status */
 export function chinaProviderOf(status) {
   if (!isRecord(status) || !(str(status.state) in PROVIDER_STATUS)) return [];
-  return [{ id: "tencent", market: "cn", status: PROVIDER_STATUS[status.state], said: str(status.said) }];
+  const provider = { id: "tencent", market: "cn", status: PROVIDER_STATUS[status.state], said: str(status.said) };
+  return [status.notAnswering === true ? { ...provider, notAnswering: true } : provider];
 }
