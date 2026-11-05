@@ -15,6 +15,7 @@ import { fmtClock, fmtDate, sameDay } from '../../client/js/time.js';
 import { createStore } from '../../client/js/store.js';
 import { startMarkets } from '../../client/js/host/markets.js';
 import { getJsonVia } from '../../client/js/app.js';
+import { withTable } from '../../client/js/i18n/words.js';
 
 // the renderer's clock: the stand-in's day — its statement is from that morning, its events close after it
 const NOW = Date.parse('2026-10-22T12:00:00.000Z');
@@ -252,6 +253,13 @@ test("Watching is the Account's list and the face's: a row watched at the Accoun
   // a refusal at the Account is its own sentence under the table
   const s = R.accountWatchLoaded(screen({ account: true }).s, { items: [], error: 'ETH/USDT is not listed at Stand-in Exchange.' });
   assert.match(renderMarketsScreen(s, NOW), /<p class="mk-note">ETH\/USDT is not listed at Stand-in Exchange\.<\/p>/);
+});
+
+test('You here sorts the owner’s orders by their authority, never by the word that names the owner: under another table too', () => {
+  const html = withTable({ 'agents.who.you': 'Vous' }, () => screen({ route: { screen: 'markets', id: 'coin:BTC' }, account: true }).html);
+  const here = section(html, 'You here');
+  assert.ok(linesOf(here).map(text).includes('·Stand-in Exchange · Sell 0.002 BTC/USDT · limit 63,226.6 · open · Vous'), 'the owner’s order under You here, in the table’s word');
+  assert.doesNotMatch(here, /What agents do here/, 'the owner’s order is no agent’s');
 });
 
 test('the page: no Buy, no Sell on a page that does not sign; the range seg; Across venues with best and Connect to trade; You here; On the statement', () => {

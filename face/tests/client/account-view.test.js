@@ -162,7 +162,7 @@ test('openOrdersOf: only open, partial and pending; who is You or the agent name
   assert.deepEqual(open.map(o => [o.id, o.status, o.who]), [
     ['ord-0010', 'open', 'Agent · Claude Code'], ['ord-0009', 'pending', 'You'], ['ord-0004', 'open', 'You'], ['ord-0003', 'open', 'You'], ['ord-0002', 'open', 'You'],
   ], "an agent's order is named through the page's keys by its agent address");
-  assert.deepEqual(open[1], { id: 'ord-0009', venue: 'broker', venueName: 'Stand-in Broker', symbol: 'SPY', side: 'buy', type: 'limit', qty: 0.25, filledQty: 0, limitPrice: 660.07, status: 'pending', kind: 'stock', stopPrice: null, base: 'SPY', who: 'You', paper: false, waitingForWallet: false, canceling: false, unfollowed: false, changing: false, unconfirmed: false });
+  assert.deepEqual(open[1], { id: 'ord-0009', venue: 'broker', venueName: 'Stand-in Broker', symbol: 'SPY', side: 'buy', type: 'limit', qty: 0.25, filledQty: 0, limitPrice: 660.07, status: 'pending', kind: 'stock', stopPrice: null, base: 'SPY', who: 'You', mine: true, paper: false, waitingForWallet: false, canceling: false, unfollowed: false, changing: false, unconfirmed: false });
   assert.equal(open[2].type, 'stop'); assert.equal(open[2].limitPrice, null, 'a stop carries no limit price');
   assert.deepEqual([open[2].kind, open[2].stopPrice, open[2].base], ['spot', 137.83, 'SOL'], "a stop's own price, the market's kind and base");
   const hand = openOrdersOf({ ...page,

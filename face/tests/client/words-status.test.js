@@ -31,6 +31,11 @@ import { startSheet } from '../../client/js/host/sheet.js';
 import { earnSaidOf, moveSaysOf } from '../../client/js/host/sheet-money.js';
 import { marketDraftOf } from '../../client/js/host/sheet-market.js';
 import { identityLinesOf } from '../../client/js/host/sheet-identity.js';
+import { startDesk } from '../../client/js/host/desk.js';
+import { accountDown, marketDown } from '../../client/js/host/explore-join.js';
+import { accountDownWord } from '../../client/js/host/markets.js';
+import { notAnsweringWord } from '../../client/js/host/market-view.js';
+import { tradeDraftOf, fillWords } from '../../client/js/host/trade-view.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
@@ -329,4 +334,36 @@ test("the owner device's lines as the store holds them: a refusal, what was said
   await sheet.open('signOut', { kid: 'k', mode: 'open', others: 0 }, [{ name: 'guard', value: true }]);
   await sheet.submit();
   assert.equal(sr.get().sheet.message, 'no answer');
+});
+
+test("Markets', Trade's and the desk's host lines as the store holds them: the desk's failures, the halves down, a draft's missing words, a fill", async () => {
+  // the desk's reads and its Pause (host/desk.js): a body that is no status, a read that throws nothing, a refused pause
+  const ds = createStore({ initial: emptyState(), reducers });
+  const answers = { status: { ok: false }, pause: new Error("<no> & won't") };
+  const desk = startDesk({ store: ds, getJson: async () => answers.status, postJson: async () => { throw answers.pause; }, schedule: () => 0, cancelTimer: () => {}, now: () => 0 });
+  desk.show(true);
+  await settle();
+  assert.equal(ds.get().desk.message, 'not a desk status');
+  await desk.pause();
+  assert.equal(ds.get().desk.message, "Pause failed: <no> & won't");
+  const dn = startDesk({ store: ds, getJson: () => Promise.reject(undefined), postJson: async () => ({}), schedule: () => 0, cancelTimer: () => {}, now: () => 1e9 });
+  dn.show(true);
+  await settle();
+  assert.equal(ds.get().desk.message, 'request failed');
+  desk.dispose(); dn.dispose();
+  // the halves down (host/explore-join.js), the Account down at a connected line and China not answering (host/markets.js)
+  assert.deepEqual(accountDown(), { venue: 'account', venueName: 'the Account', why: 'The Account is not answering: the venues connected are not listed' });
+  assert.deepEqual(marketDown(), { venue: 'market', venueName: 'the market', why: 'The market is not answering: public markets are not listed' });
+  assert.equal(accountDownWord(), 'The Account is not answering');
+  assert.equal(notAnsweringWord(), 'The market is not answering · China as last read');
+  // the order sheet's missing words (host/trade-view.js tradeDraftOf), kept as the sheet's words
+  const ticket = { legs: [{ venue: 'v', symbol: 'S', able: true, session: null }], event: false, outcomes: [] };
+  assert.equal(tradeDraftOf({}, null), 'Pick where');
+  assert.equal(tradeDraftOf({ venue: 'v', amount: '' }, ticket), 'Type an amount');
+  assert.equal(tradeDraftOf({ venue: 'v', amount: '1', orderType: 'limit', limit: 'x' }, ticket), 'Type the limit price');
+  assert.equal(tradeDraftOf({ venue: 'v', amount: '1', orderType: 'limit', limit: '120' }, { ...ticket, event: true, outcomes: [{ at: [{ venue: 'v', symbol: 'Y' }] }] }), 'A price in cents is between 0 and 100');
+  // a fill, as Trade's said line holds it (host/trade.js): the Account's names put in as they are
+  assert.equal(fillWords({ type: 'fill', data: { side: 'buy', qty: 2, kind: 'event', name: "<Fed & co's>", price: 0.62, avg: true, venueName: 'V<1>', paper: true } }),
+    "Bought 2 contracts · <Fed & co's> @ 62¢ avg · V<1> · Paper account");
+  assert.equal(fillWords({ data: { side: 'sell', kind: 'event', symbol: 'X' } }), 'Sold contracts · X');
 });

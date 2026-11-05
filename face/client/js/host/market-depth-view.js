@@ -6,11 +6,12 @@
 // page's rule (its ui/markets.js mkAssetKey). An amount that does not parse is null; a time stays the Account's ISO string. No DOM.
 import { number } from '../wire/account-model.js';
 import { positionsOf, orderRowsOf, missingWords, statementLinesOf, assetsOf } from './account-view.js';
+import { t } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
 const str = v => (typeof v === 'string' ? v : '');
-const stamp = at => { const t = typeof at === 'string' ? Date.parse(at) : NaN; return Number.isFinite(t) ? t : null; };
+const stamp = at => { const ms = typeof at === 'string' ? Date.parse(at) : NaN; return Number.isFinite(ms) ? ms : null; };
 // the newest first, a time that does not parse last; a tie keeps the Account's order
 const newestFirst = (a, b) => { const ta = stamp(a.at), tb = stamp(b.at); return ta === tb ? 0 : ta === null ? 1 : tb === null ? -1 : tb - ta; };
 
@@ -35,6 +36,8 @@ const costRows = v => records(v).map(c => ({
   key: str(c.key), side: str(c.side), symbol: str(c.symbol), avgCostUsd: number(c.avgCostUsd), costUsd: number(c.costUsd),
   coveredQty: number(c.coveredQty), ofQty: number(c.ofQty), words: str(c.words),
 }));
+// the statement's `by` for the owner's own line, as the Account writes it (account/statement.ts)
+const OWNER_BY = 'You'; // en-kept: the Account's word, matched
 const heldRow = row => (isRecord(row) ? assetsOf({ ok: true, rows: [row] })[0] ?? null : null);
 
 /** You here, from the asset sheet: what is held of it across its venues (`held`, the holdings row as assetsOf words one, or
@@ -49,8 +52,8 @@ const heldRow = row => (isRecord(row) ? assetsOf({ ok: true, rows: [row] })[0] ?
 export function hereOf(body, page) {
   if (body?.ok !== true || !Array.isArray(body.positions) || !Array.isArray(body.orders)) return { ...EMPTY_HERE };
   const orders = orderRowsOf(body.orders, isRecord(page) ? page.keys : []);
-  const theirs = orders.filter(o => o.who !== 'You');
-  const said = statementLinesOf({ ok: true, lines: body.lines }).filter(l => l.by !== '' && l.by !== 'You');
+  const theirs = orders.filter(o => !o.mine);
+  const said = statementLinesOf({ ok: true, lines: body.lines }).filter(l => l.by !== '' && l.by !== OWNER_BY);
   const paper = isRecord(body.paper) ? body.paper : {};
   const paperCost = costRows(paper.cost);
   const atPosition = c => c.key.startsWith('position:');
@@ -97,8 +100,8 @@ export function bookOf(body) {
  *  ''); `none`, the answering half's sentence (the market's, or the Account's at a connected venue) when the source publishes no trades at all (else ''); whether a public source's. */
 export function tradesOf(body) {
   if (body?.ok !== true || !Array.isArray(body.trades)) return { trades: [], none: '', public: false };
-  const trades = records(body.trades).map(t => ({ price: number(t.price), size: number(t.size), side: t.side === 'buy' || t.side === 'sell' ? t.side : '', at: str(t.at) }))
-    .filter(t => t.price !== null).sort(newestFirst);
+  const trades = records(body.trades).map(x => ({ price: number(x.price), size: number(x.size), side: x.side === 'buy' || x.side === 'sell' ? x.side : '', at: str(x.at) }))
+    .filter(x => x.price !== null).sort(newestFirst);
   return { trades, none: str(body.none).trim(), public: body.public === true };
 }
 
@@ -125,5 +128,5 @@ export function fundingMissingOf(body, venues = null) {
   const only = Array.isArray(venues) ? new Set(venues) : null;
   const missed = records(body.missing).filter(m => only === null || only.has(m.venue))
     .map(m => `${str(m.venueName) || str(m.venue)}: ${str(m.why).replace(/[.\s]+$/, '')}`);
-  return missed.length ? `Not read: ${missed.join(' · ')}.` : '';
+  return missed.length ? t('markets.funding.notRead', { venues: missed.join(' · ') }) : '';
 }

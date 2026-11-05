@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { assetKeyOf, hereOf, costOf, bookOf, tradesOf, fundingOf, fundingMissingOf } from '../../client/js/host/market-depth-view.js';
+import { withTable } from '../../client/js/i18n/words.js';
 
 const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
 
@@ -52,6 +53,12 @@ test('hereOf names who placed each order and lists the agents’ actions', () =>
   // the venues it could not read, one sentence each
   const missed = hereOf({ ...fx('asset-sol'), missing: [{ venue: '*', venueName: 'every venue', why: 'x', part: 'compare' }, { venue: 'ex', venueName: 'Stand-in Exchange', why: 'y' }] }, page);
   assert.deepEqual(missed.missing, ['every venue did not answer', 'Stand-in Exchange did not answer']);
+});
+
+test('hereOf tells the owner’s orders from the agents’ by their authority: a table that names the owner otherwise moves none', () => {
+  const here = withTable({ 'agents.who.you': 'Vous' }, () => hereOf(fx('asset-sol'), fx('account')));
+  assert.deepEqual(here.orders.map(o => [o.id, o.who, o.mine]), [['ord-0010', 'Agent · Claude Code', false], ['ord-0004', 'Vous', true], ['ord-0002', 'Vous', true]]);
+  assert.deepEqual(here.agents.filter(a => a.type === 'order').map(a => a.order.id), ['ord-0010'], 'the agent’s order alone among What agents do here');
 });
 
 test('hereOf keeps the paper accounts’ holding apart: its row and cost, its positions but the spot one', () => {

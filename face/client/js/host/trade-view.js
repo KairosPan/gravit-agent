@@ -10,9 +10,10 @@
 // preparation; the orders under way with what cancels each; a fill frame as one line. Every Account string passes as it came
 // (the renderer escapes); every figure and word the Trade screen draws is computed here. No DOM, no store.
 import { number, price } from '../wire/market-model.js';
-import { ACCOUNT_TABS, pageOf, legsOf, matchKey, priceOf, watchKeysOf } from './market-view.js';
+import { accountTabs, outcomeWords, pageOf, legsOf, matchKey, priceOf, watchKeysOf } from './market-view.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, worthOf } from './account-view.js';
 import { isCnKey } from '../wire/china.js';
+import { t, tn } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -22,24 +23,25 @@ const EM = '—';
 // a plain decimal, as the Account takes its amounts and prices
 const DECIMAL = /^\d+(\.\d+)?$/;
 
-/** The kinds Trade picks from: the Account's crypto, stocks, RWAs and predictions tabs, its own ids and words. */
-export const TRADE_KINDS = ['crypto', 'stocks', 'rwas', 'predictions'].map(id => ({ id, label: new Map(ACCOUNT_TABS).get(id) }));
-const KIND_IDS = new Set(TRADE_KINDS.map(k => k.id));
+/** The kinds Trade picks from: the Account's crypto, stocks, RWAs and predictions tabs, its own ids — and, read at each call,
+ *  its words (tradeKinds). */
+export const TRADE_KIND_IDS = ['crypto', 'stocks', 'rwas', 'predictions'];
+export const tradeKinds = () => { const tabs = new Map(accountTabs()); return TRADE_KIND_IDS.map(id => ({ id, label: tabs.get(id) })); };
+const KIND_IDS = new Set(TRADE_KIND_IDS);
 
 // the Trade kind an Account key is, by its prefix: perpetuals and pre-IPO contracts are not one
 const KEY_KINDS = { coin: 'crypto', stock: 'stocks', rwa: 'rwas', event: 'predictions', kalshi: 'predictions', pm: 'predictions', pmus: 'predictions' };
 const kindOfKey = key => { const head = str(key).split(':')[0]; return Object.hasOwn(KEY_KINDS, head) ? KEY_KINDS[head] : null; };
 // a market's Trade kind: its own tabs, else its key's
-const kindOfItem = item => (Array.isArray(item.tabs) ? item.tabs.find(t => KIND_IDS.has(t)) ?? null : kindOfKey(item.key));
+const kindOfItem = item => (Array.isArray(item.tabs) ? item.tabs.find(tab => KIND_IDS.has(tab)) ?? null : kindOfKey(item.key));
 
-/** Whether the face's ticket trades a market: its kind is one of TRADE_KINDS, by its tabs, else its key's prefix. Perpetuals and
+/** Whether the face's ticket trades a market: its kind is one of TRADE_KIND_IDS, by its tabs, else its key's prefix. Perpetuals and
  *  pre-IPO perpetuals are listed, not traded from the face this round (spec 2026-10-22 §2); anything not a market is not. */
 export const tradeableOf = item => isRecord(item) && kindOfItem(item) !== null;
 // what the quantity is counted in, as the Account's ticket says it: a stock's shares, an event's contracts, else the base
-const unitWordOf = item => (item.kind === 'stock' ? 'Shares' : item.kind === 'event' ? 'Contracts' : str(item.base) || str(item.name));
+const unitWordOf = item => (item.kind === 'stock' ? t('trade.unit.shares') : item.kind === 'event' ? t('trade.unit.contracts') : str(item.base) || str(item.name));
 // an outcome as a person says it (market-view's words): YES → Yes, UP → Up
-const OUTCOMES = { YES: 'Yes', NO: 'No', UP: 'Up', DOWN: 'Down' };
-const outcomeWord = label => { const s = str(label); return Object.hasOwn(OUTCOMES, s) ? OUTCOMES[s] : s; };
+const outcomeWord = label => { const s = str(label); const words = outcomeWords(); return Object.hasOwn(words, s) ? words[s] : s; };
 // dollars per contract as cents, without the float's noise
 const cents = v => { const n = number(v); return n === null ? null : Number((n * 100).toPrecision(12)); };
 const centsWord = c => (c === null ? EM : `${Number(c.toFixed(1))}¢`);
@@ -52,12 +54,12 @@ const itemsOf = body => (body?.ok === true ? records(body.items) : []);
 const besideOf = body => (body?.ok === true ? [body.movers, body.closing, body.mostTraded].flatMap(records) : []);
 // the bodies a market is looked for in: the kind's picks, the trade search's, the other kinds' picks, then the Markets reads
 function bodiesOf(state) {
-  const t = isRecord(state?.trade) ? state.trade : {};
+  const tr = isRecord(state?.trade) ? state.trade : {};
   const m = isRecord(state?.markets) ? state.markets : {};
-  const picks = isRecord(t.picks) ? t.picks : {};
+  const picks = isRecord(tr.picks) ? tr.picks : {};
   return [
-    own(own(picks, t.kind), 'data'), t.results?.data,
-    ...Object.keys(picks).filter(k => k !== t.kind).map(k => own(picks[k], 'data')),
+    own(own(picks, tr.kind), 'data'), tr.results?.data,
+    ...Object.keys(picks).filter(k => k !== tr.kind).map(k => own(picks[k], 'data')),
     ...Object.values(isRecord(m.explore) ? m.explore : {}).map(r => r?.data), m.results?.data,
   ];
 }
@@ -80,11 +82,11 @@ function whereWords(item, trading) {
   const legs = legsOf(item);
   const able = [...new Set(legs.filter(l => l.connected && trading.has(l.venue)).map(l => l.venueName || l.venue))];
   const pub = legs.filter(l => l.public).length;
-  return [able.join(', '), pub ? `${pub} public venue${pub > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
+  return [able.join(', '), pub ? tn('trade.publicVenues', pub) : ''].filter(Boolean).join(' · ');
 }
 const marketRow = (item, trading) => ({ id: str(item.key), name: str(item.name), sub: whereWords(item, trading), priceWord: priceWordOf(item) });
 // a starred market no read lists: its key's last part as its name
-const placeholderRow = key => ({ id: key, name: key.slice(key.lastIndexOf(':') + 1), sub: 'Not in this read', priceWord: EM });
+const placeholderRow = key => ({ id: key, name: key.slice(key.lastIndexOf(':') + 1), sub: t('markets.notInRead'), priceWord: EM });
 
 // the face id a holdings row is, for matchKey: a crypto asset's dollar pair, an equity's US symbol; anything else is none
 const FACE_IDS = { crypto: a => `crypto:${a}/USD`, equity: a => `us:${a}` };
@@ -113,7 +115,7 @@ function heldRows(state, kind, rows) {
       const outcome = outcomes.findIndex(o => records(o.at).some(l => l.venue === p.venue && l.symbol === p.symbol));
       out.push({
         id: str(item.key), name: str(item.name),
-        sub: [`${amountWord(p.qty)} contracts`, outcomeWord(outcomes[outcome].label), p.venueName || p.venue].join(' · '),
+        sub: [t('trade.contracts', { n: amountWord(p.qty) }), outcomeWord(outcomes[outcome].label), p.venueName || p.venue].join(' · '),
         priceWord: centsWord(cents(p.markPrice)), side: 'sell', venue: p.venue, outcome,
       });
     }
@@ -128,8 +130,8 @@ function heldRows(state, kind, rows) {
  *  list names (watchKeysOf over the reads Trade keeps), once each, of the kind, a star no read lists as a placeholder; `most` — the kind's picks read (`trade.picks[kind]`); `results` — while the query is not blank, the trade
  *  search's (`trade.results`) of the kind. `now` is the renderer's clock (no word here is aged). */
 export function pickerOf(state, now) {
-  const t = isRecord(state?.trade) ? state.trade : {};
-  const kind = str(t.kind);
+  const tr = isRecord(state?.trade) ? state.trade : {};
+  const kind = str(tr.kind);
   const rows = rowsIn(state);
   const trading = tradingVenues(state);
   const ofKind = items => items.filter(i => kindOfItem(i) === kind).map(i => marketRow(i, trading));
@@ -142,8 +144,8 @@ export function pickerOf(state, now) {
       const item = findItem(rows, k);
       return item ? kindOfItem(item) === kind : kindOfKey(k) === kind;
     }).map(k => { const item = findItem(rows, k); return item ? marketRow(item, trading) : placeholderRow(k); }),
-    most: ofKind(itemsOf(own(own(t.picks, kind), 'data'))),
-    results: str(t.q).trim() ? ofKind(itemsOf(t.results?.data)) : [],
+    most: ofKind(itemsOf(own(own(tr.picks, kind), 'data'))),
+    results: str(tr.q).trim() ? ofKind(itemsOf(tr.results?.data)) : [],
   };
 }
 
@@ -209,14 +211,14 @@ export function tradeFieldsOf(ticket) {
   const able = ticket.legs.filter(l => l.able);
   const leg = able.find(l => l.venue === ticket.venue);
   return [
-    { name: 'venue', label: 'Where', type: 'pick', options: able.map(l => ({ value: l.venue, label: l.venueName || l.venue })), value: leg ? leg.venue : '' },
-    { name: 'side', label: 'Buy or sell', type: 'seg', options: [{ value: 'buy', label: 'Buy' }, { value: 'sell', label: 'Sell' }], value: SIDES.has(ticket.side) ? ticket.side : 'buy' },
-    ...(ticket.event ? [{ name: 'outcome', label: 'Outcome', type: 'seg', options: records(ticket.outcomes).map((o, i) => ({ value: String(i), label: o.label })), value: String(ticket.outcome ?? 0) }] : []),
-    { name: 'amount', label: 'Amount', type: 'number', placeholder: '25', value: '' },
-    { name: 'unit', label: 'In', type: 'select', options: [{ value: 'usd', label: 'Dollars' }, { value: 'qty', label: str(ticket.unitWord) || 'Units' }], value: 'usd' },
-    { name: 'orderType', label: 'Order', type: 'select', options: [{ value: 'market', label: 'Market' }, { value: 'limit', label: 'Limit' }], value: 'market' },
-    { name: 'limit', label: ticket.event ? 'Limit, in cents' : 'Limit price', type: 'number', placeholder: '', value: '' },
-    ...(leg?.session?.extendedHours === true ? [{ name: 'extendedHours', label: 'Extended hours', type: 'check', value: false }] : []),
+    { name: 'venue', label: t('trade.field.where'), type: 'pick', options: able.map(l => ({ value: l.venue, label: l.venueName || l.venue })), value: leg ? leg.venue : '' },
+    { name: 'side', label: t('trade.field.side'), type: 'seg', options: [{ value: 'buy', label: t('trade.buy') }, { value: 'sell', label: t('trade.sell') }], value: SIDES.has(ticket.side) ? ticket.side : 'buy' },
+    ...(ticket.event ? [{ name: 'outcome', label: t('trade.field.outcome'), type: 'seg', options: records(ticket.outcomes).map((o, i) => ({ value: String(i), label: o.label })), value: String(ticket.outcome ?? 0) }] : []),
+    { name: 'amount', label: t('trade.field.amount'), type: 'number', placeholder: '25', value: '' },
+    { name: 'unit', label: t('trade.field.unit'), type: 'select', options: [{ value: 'usd', label: t('trade.field.dollars') }, { value: 'qty', label: str(ticket.unitWord) || t('trade.field.units') }], value: 'usd' },
+    { name: 'orderType', label: t('trade.field.orderType'), type: 'select', options: [{ value: 'market', label: t('trade.field.market') }, { value: 'limit', label: t('trade.field.limit') }], value: 'market' },
+    { name: 'limit', label: ticket.event ? t('trade.field.limitCents') : t('trade.field.limitPrice'), type: 'number', placeholder: '', value: '' },
+    ...(leg?.session?.extendedHours === true ? [{ name: 'extendedHours', label: t('trade.field.extendedHours'), type: 'check', value: false }] : []),
   ];
 }
 
@@ -232,9 +234,9 @@ const field = (fields, name) => textOf(valueOf(fields, name));
  *  trailing zeros trimmed, a plain decimal, never an exponent — or null for anything but a plain decimal with `0 < c < 100`
  *  (or one too small to be a dollar figure at six places). The Trade ticket's limit and a Change sheet's prices alike. */
 export function eventPriceOf(typed) {
-  const t = typeof typed === 'string' ? typed.trim() : '';
-  if (!DECIMAL.test(t)) return null;
-  const c = Number(t);
+  const text = typeof typed === 'string' ? typed.trim() : '';
+  if (!DECIMAL.test(text)) return null;
+  const c = Number(text);
   if (!(c > 0 && c < 100)) return null;
   const dollars = (c / 100).toFixed(6).replace(/\.?0+$/, '');
   return dollars === '0' ? null : dollars;
@@ -247,32 +249,32 @@ export function eventPriceOf(typed) {
  *  line offers it), every other field `''` — or, while something is missing, the words for it. Reads no clock: the deadline
  *  is the Account's prepare's. */
 export function tradeDraftOf(fields, ticket) {
-  if (!isRecord(ticket) || !Array.isArray(ticket.legs)) return 'Pick where';
+  if (!isRecord(ticket) || !Array.isArray(ticket.legs)) return t('trade.missing.where');
   const venue = (v => (Array.isArray(v) ? textOf(v[0]) : textOf(v)))(valueOf(fields, 'venue'));
   const leg = ticket.legs.find(l => l.able && l.venue === venue);
-  if (!leg) return 'Pick where';
+  if (!leg) return t('trade.missing.where');
   let symbol = leg.symbol;
   if (ticket.event) {
     const i = Number(field(fields, 'outcome') || 0);
     const outcome = Number.isInteger(i) && i >= 0 ? records(ticket.outcomes)[i] : undefined;
     symbol = str(records(outcome?.at).find(l => l.venue === leg.venue)?.symbol);
   }
-  if (!symbol) return 'Pick where';
+  if (!symbol) return t('trade.missing.where');
   const side = SIDES.has(field(fields, 'side')) ? field(fields, 'side') : 'buy';
   const amount = field(fields, 'amount');
-  if (!DECIMAL.test(amount) || !(Number(amount) > 0)) return 'Type an amount';
+  if (!DECIMAL.test(amount) || !(Number(amount) > 0)) return t('trade.missing.amount');
   const unit = field(fields, 'unit') === 'qty' ? 'qty' : 'usd';
   const orderType = field(fields, 'orderType') === 'limit' ? 'limit' : 'market';
   let limitPrice = '';
   if (orderType === 'limit') {
     const typed = field(fields, 'limit');
-    if (!DECIMAL.test(typed)) return 'Type the limit price';
+    if (!DECIMAL.test(typed)) return t('trade.missing.limit');
     if (ticket.event) {
       const dollars = eventPriceOf(typed);
-      if (dollars === null) return 'A price in cents is between 0 and 100';
+      if (dollars === null) return t('trade.missing.cents');
       limitPrice = dollars;
     } else {
-      if (!(Number(typed) > 0)) return 'Type the limit price';
+      if (!(Number(typed) > 0)) return t('trade.missing.limit');
       limitPrice = typed;
     }
   }
@@ -306,11 +308,12 @@ export function quoteOf(prepared) {
 function paymentWordsOf(p, page) {
   const nameOf = id => str(records(page?.venues).find(v => v.id === id)?.name) || str(id);
   const legs = records(p.legs);
-  if (p.kind === 'swap') return `Swap at ${nameOf(p.from)} · ${str(p.sourceToken)} → ${str(p.token)}`;
-  if (p.kind === 'transfer' && p.from === p.to) return `Transfer at ${nameOf(p.from)} · ${str(legs[0]?.fromLedger)} → ${str(legs[0]?.toLedger)}`;
-  const kind = str(p.kind) || 'payment';
+  if (p.kind === 'swap') return t('trade.payment.swap', { venue: nameOf(p.from), from: str(p.sourceToken), to: str(p.token) });
+  if (p.kind === 'transfer' && p.from === p.to) return t('trade.payment.transfer', { venue: nameOf(p.from), from: str(legs[0]?.fromLedger), to: str(legs[0]?.toLedger) });
+  // the Account's kind, capitalised; none, a payment
+  const kind = str(p.kind) ? `${p.kind[0].toUpperCase()}${p.kind.slice(1)}` : t('trade.payment.kind');
   const network = str(p.live?.network);
-  return `${kind[0].toUpperCase()}${kind.slice(1)} · ${nameOf(p.from)} → ${nameOf(p.to)}${network ? ` · ${network}` : ''}`;
+  return `${kind} · ${nameOf(p.from)} → ${nameOf(p.to)}${network ? ` · ${network}` : ''}`;
 }
 
 /** Under way: the page's working orders (openOrdersOf's rows, by anyone), each with what cancels it — the Account's
@@ -352,16 +355,16 @@ export function fillWords(ev) {
   if (!isRecord(ev)) return '';
   if (typeof ev.type === 'string' && ev.type !== 'fill') return '';
   const f = isRecord(ev.data) ? ev.data : ev;
-  const side = f.side === 'buy' ? 'Bought' : f.side === 'sell' ? 'Sold' : '';
+  const side = f.side === 'buy' ? t('trade.fill.bought') : f.side === 'sell' ? t('trade.fill.sold') : '';
   if (!side) return '';
   const qty = number(f.qty);
   const size = qty !== null && qty > 0 ? amountWord(qty) : '';
   const event = f.kind === 'event';
-  const what = event ? [size ? `${size} contracts` : 'contracts', str(f.name) || str(f.symbol)].filter(Boolean).join(' · ')
+  const what = event ? [size ? t('trade.contracts', { n: size }) : t('trade.contractsAny'), str(f.name) || str(f.symbol)].filter(Boolean).join(' · ')
     : [size, str(f.symbol).split('/')[0]].filter(Boolean).join(' ');
   const p = number(f.price);
-  const at = p === null ? '' : ` @ ${event ? centsWord(cents(p)) : fillPrice(p)}${f.avg === true ? ' avg' : ''}`;
+  const at = p === null ? '' : ` @ ${event ? centsWord(cents(p)) : fillPrice(p)}${f.avg === true ? ` ${t('trade.fill.avg')}` : ''}`;
   const venue = str(f.venueName) || str(f.venue);
-  const paper = f.paper === true && !/\bpaper\b/i.test(venue) ? 'Paper account' : '';
+  const paper = f.paper === true && !/\bpaper\b/i.test(venue) ? t('trade.fill.paper') : '';
   return [[side, what].filter(Boolean).join(' ') + at, venue, paper].filter(Boolean).join(' · ');
 }

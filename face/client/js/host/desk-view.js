@@ -6,6 +6,7 @@
 // no prose. Times are New York's: a line's as deskTime writes them (`14:03 ET`, dated on another New York date), a column's
 // bare (`14:03`, dated the same way). §5.7's "since you last looked" is dropped: the page keeps no reader state, and today's
 // alerts stand in for it. Pure: nothing here reads, polls or touches the DOM.
+import { t, tn } from '../i18n/words.js';
 
 export const DESK_TAB = 'desk';
 export const DESK_POLL_MS = 10_000;
@@ -27,13 +28,13 @@ function etParts(ms) {
 }
 /** A time in a column: `HH:MM` on `now`'s New York date, `YYYY-MM-DD HH:MM` on another; anything that is no time as written. */
 function etWhen(iso, now) {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return str(iso);
-  const at = etParts(t);
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return str(iso);
+  const at = etParts(ms);
   return at.date === etParts(now).date ? at.time : `${at.date} ${at.time}`;
 }
 /** A time in a line, as src/desk.ts deskTime (and statusTime, for a time that is no time) writes it. */
-const deskTime = (iso, now) => (Number.isFinite(Date.parse(iso)) ? `${etWhen(iso, now)} ET` : str(iso));
+const deskTime = (iso, now) => (Number.isFinite(Date.parse(iso)) ? t('desk.et', { time: etWhen(iso, now) }) : str(iso));
 
 /** `text` cut to `max` characters (code points), the last a `…`, as src/desk.ts cutText. */
 function cut(text, max) {
@@ -46,41 +47,46 @@ function cut(text, max) {
 function headLine(s) {
   const up = count(s.uptimeMs);
   const enabled = s.desk?.enabled === true;
-  return `up ${Math.floor(up / 3_600_000)}h ${Math.floor(up / 60_000) % 60}m since ${str(s.bootedAt)} · desk ${enabled ? 'on' : 'off (FACE_DESK=0)'}`;
+  const desk = enabled ? t('desk.head.on') : t('desk.head.off');
+  return t('desk.head.line', { h: Math.floor(up / 3_600_000), m: Math.floor(up / 60_000) % 60, since: str(s.bootedAt), desk });
 }
 function offLine(off, now) {
-  const until = off.until === undefined ? '' : ` until ${deskTime(off.until, now)}`;
-  return `desk: paused since ${deskTime(off.setAt, now)} by ${str(off.by)}${until} (npm run desk -- resume)`;
+  const since = deskTime(off.setAt, now);
+  return off.until === undefined ? t('desk.off.line', { since, by: str(off.by) }) : t('desk.off.until', { since, by: str(off.by), until: deskTime(off.until, now) });
 }
 /** The phone line (src/desk.ts phoneLine): none, nothing connected, or each network as the account polls it; `now` in ms. */
 export function phoneLine(p, now) {
-  if (p.configured !== true) return "phone: none (the account's half is off)";
+  if (p.configured !== true) return t('desk.phone.none');
   const f = isRecord(p.accountFailing) ? p.accountFailing : null;
-  const failing = f ? `, the account has not answered since ${deskTime(f.since, now)}: ${str(f.reason)}` : '';
+  const failing = f ? t('desk.phone.accountFailing', { since: deskTime(f.since, now), reason: str(f.reason) }) : '';
   const networks = records(p.networks);
-  if (networks.length === 0) return `phone: nothing connected (Account › Identity)${failing}`;
+  if (networks.length === 0) return t('desk.phone.nothing', { failing });
   const strangers = count(p.strangers);
+  const network = n => {
+    const polling = n.polling === true ? t('desk.phone.polling') : t('desk.phone.notPolling');
+    return n.blocked === true ? t('desk.phone.blocked', { network: str(n.network), polling }) : t('desk.phone.network', { network: str(n.network), polling });
+  };
   const parts = [
-    networks.map(n => `${str(n.network)} ${n.blocked === true ? 'blocked (403), ' : ''}${n.polling === true ? 'polling' : 'not polling'}`).join(', '),
-    p.lastPollAt === undefined ? 'no poll yet' : `last poll ${deskTime(p.lastPollAt, now)}`,
-    `${count(p.queued)} queued`,
-    `${strangers} stranger${strangers === 1 ? '' : 's'}`,
+    networks.map(network).join(', '),
+    p.lastPollAt === undefined ? t('desk.noPoll') : t('desk.lastPoll', { at: deskTime(p.lastPollAt, now) }),
+    t('desk.phone.queued', { n: count(p.queued) }),
+    tn('desk.phone.strangers', strangers),
   ];
   for (const n of networks) {
-    if (n.conflictAt !== undefined) parts.push(`${str(n.network)} conflict at ${deskTime(n.conflictAt, now)}`);
-    if (isRecord(n.pollFailing)) parts.push(`${str(n.network)} poll failing since ${deskTime(n.pollFailing.since, now)}: ${str(n.pollFailing.reason)}`);
+    if (n.conflictAt !== undefined) parts.push(t('desk.phone.conflict', { network: str(n.network), at: deskTime(n.conflictAt, now) }));
+    if (isRecord(n.pollFailing)) parts.push(t('desk.phone.pollFailing', { network: str(n.network), since: deskTime(n.pollFailing.since, now), reason: str(n.pollFailing.reason) }));
   }
-  return `phone: ${parts.join(', ')}${failing}`;
+  return t('desk.phone.line', { parts: parts.join(', '), failing });
 }
 function budgetLine(b) {
   const used = count(b.used?.total).toLocaleString('en-US');
   const cap = typeof b.dailyTokens === 'number' ? b.dailyTokens.toLocaleString('en-US') : undefined;
   const line = cap === undefined
-    ? `budget: ${used} tokens today, cap not set (budget.dailyTokens in standing.yml)`
+    ? t('desk.budget.noCap', { used })
     : b.spent === true
-      ? `budget: spent, ${used} of ${cap} tokens today; standing orders and phone turns wait for 00:00 ET`
-      : `budget: ${used} of ${cap} tokens today`;
-  return b.error === undefined ? line : `${line} (ledger unreadable: ${str(b.error)})`;
+      ? t('desk.budget.spent', { used, cap })
+      : t('desk.budget.line', { used, cap });
+  return b.error === undefined ? line : t('desk.budget.unreadable', { line, error: str(b.error) });
 }
 
 // ---- the standing orders (src/desk.ts standingLines, orderState)
@@ -90,12 +96,12 @@ const REFUSED_SHOWN_MAX = 200;
 function standingNotesOf(s) {
   const notes = [];
   const orders = records(s.orders);
-  if (s.file?.state === 'refused') notes.push(`standing orders stopped: standing.yml is refused: ${cut((Array.isArray(s.file.errors) ? s.file.errors : []).join('; '), REFUSED_SHOWN_MAX)}`);
-  else if (orders.length === 0) notes.push('standing orders: none armed (npm run desk -- arm)');
-  if (isRecord(s.ledger)) notes.push(`standing orders stopped: the firing ledger cannot be read (${str(s.ledger.error)})`);
-  if (s.calendar?.state === 'failed') notes.push(`standing orders: no calendar today, ${str(s.calendar.clock)}: ${str(s.calendar.error) || 'no reason given'}`);
+  if (s.file?.state === 'refused') notes.push(t('desk.standing.refused', { errors: cut((Array.isArray(s.file.errors) ? s.file.errors : []).join('; '), REFUSED_SHOWN_MAX) }));
+  else if (orders.length === 0) notes.push(t('desk.standing.none'));
+  if (isRecord(s.ledger)) notes.push(t('desk.standing.ledger', { error: str(s.ledger.error) }));
+  if (s.calendar?.state === 'failed') notes.push(t('desk.standing.noCalendar', { clock: str(s.calendar.clock), error: str(s.calendar.error) || t('desk.noReason') }));
   const cn = s.calendars?.cn;
-  if (cn?.state === 'failed') notes.push(`standing orders: no A-share calendar today, ${str(cn.clock)}: ${str(cn.error) || 'no reason given'}`);
+  if (cn?.state === 'failed') notes.push(t('desk.standing.noCnCalendar', { clock: str(cn.clock), error: str(cn.error) || t('desk.noReason') }));
   return notes;
 }
 // an order's state past its anchor: its firing running, disabled, expired, its text's or script's pin moved or gone, its
@@ -103,90 +109,96 @@ function standingNotesOf(s) {
 // orderState says after the order's anchor
 function nextOf(o, running, now) {
   const state = next => ({ next, timed: false });
-  if (isRecord(running) && str(running.key).startsWith(`${o.id}:`)) return state(`running since ${deskTime(running.startedAt, now)}`);
-  if (o.enabled !== true) return state('disabled');
-  if (o.expired === true) return state(`expired after ${str(o.expires)}`);
-  const rearm = `changed since arming (npm run desk -- rearm ${o.id})`;
+  if (isRecord(running) && str(running.key).startsWith(`${o.id}:`)) return state(t('desk.order.running', { since: deskTime(running.startedAt, now) }));
+  if (o.enabled !== true) return state(t('desk.order.disabled'));
+  if (o.expired === true) return state(t('desk.order.expired', { at: str(o.expires) }));
+  const changed = what => t('desk.order.changed', { what, id: o.id });
+  const missing = what => t('desk.order.missing', { what });
   const text = `${str(o.dir)}/${str(o.file)}`;
-  if (o.hash === 'changed') return state(`${text} ${rearm}`);
-  if (o.hash === 'missing') return state(`${text} is missing`);
-  const script = str(o.producer) || 'its producer';
-  if (o.producerHash === 'changed') return state(`${script} ${rearm}`);
-  if (o.producerHash === 'missing') return state(`${script} is missing`);
+  if (o.hash === 'changed') return state(changed(text));
+  if (o.hash === 'missing') return state(missing(text));
+  const script = str(o.producer) || t('desk.order.producer');
+  if (o.producerHash === 'changed') return state(changed(script));
+  if (o.producerHash === 'missing') return state(missing(script));
   const levels = `${str(o.dir)}/levels.yml`;
-  if (o.levelsHash === 'changed') return state(`${levels} ${rearm}`);
-  if (o.levelsHash === 'missing') return state(`${levels} is gone since arming (npm run desk -- rearm ${o.id})`);
-  if (o.levelsHash === 'unreadable') return state(`${levels} cannot be read`);
-  return { next: o.nextAnchor === undefined ? "no session in the calendar's window" : `next ${deskTime(o.nextAnchor, now)}`, timed: true };
+  if (o.levelsHash === 'changed') return state(changed(levels));
+  if (o.levelsHash === 'missing') return state(t('desk.order.gone', { what: levels, id: o.id }));
+  if (o.levelsHash === 'unreadable') return state(t('desk.order.unreadable', { what: levels }));
+  return { next: o.nextAnchor === undefined ? t('desk.order.noSession') : t('desk.order.next', { at: deskTime(o.nextAnchor, now) }), timed: true };
 }
 
 // the hash cell: the text's pin, else - the text's and the script's pins ok - the levels.yml pin's state when it is not
-const LEVELS_CELL = { changed: 'levels.yml changed', missing: 'levels.yml gone', unreadable: 'levels.yml unreadable' };
+const levelsCell = () => ({ changed: t('desk.levels.changed'), missing: t('desk.levels.gone'), unreadable: t('desk.levels.unreadable') });
 function hashCell(o) {
   const hash = str(o.hash);
   if (hash !== 'ok' || (o.producerHash !== undefined && o.producerHash !== 'ok')) return hash;
-  return LEVELS_CELL[o.levelsHash] ?? hash;
+  const cells = levelsCell();
+  return Object.hasOwn(cells, o.levelsHash) ? cells[o.levelsHash] : hash;
 }
 
 // ---- the watch (src/desk.ts watchLines)
 
-const MARKET_NAMES = { us: 'US', cn: 'A shares' };
+const marketNames = () => ({ us: t('desk.market.us'), cn: t('desk.market.cn') });
 const SUPPRESS_ORDER = ['cap', 'muted', 'off', 'cooldown', 'window'];
 const WATCH_ERROR_SHOWN_MAX = 200;
 const FILE_ERROR_SHOWN_MAX = 80;
 
 function watchHead(w) {
-  if (w.state === 'idle') return 'watch: nothing to watch';
-  if (w.state === 'held-elsewhere') return `watch: another face${isRecord(w.holder) ? ` (pid ${w.holder.pid})` : ''} holds the watch on this home`;
-  if (w.state === 'lease-failed') return `watch: off today: its lease cannot be written (${str(w.leaseError) || 'unknown'})`;
-  return `watch: ${str(w.state)}`;
+  if (w.state === 'idle') return t('desk.watch.idle');
+  if (w.state === 'held-elsewhere') return isRecord(w.holder) ? t('desk.watch.heldBy', { pid: w.holder.pid }) : t('desk.watch.held');
+  if (w.state === 'lease-failed') return t('desk.watch.lease', { error: str(w.leaseError) || t('desk.watch.unknown') });
+  return t('desk.watch.state', { state: str(w.state) });
 }
 function phaseOf(m, now) {
-  const date = str(m.session?.date) || "today's";
+  const date = str(m.session?.date) || t('desk.phase.today');
   switch (m.state) {
-    case 'no-calendar': return 'no calendar today';
-    case 'closed': return 'closed today';
-    case 'waiting': return isRecord(m.session) ? `the ${date} session opens at ${deskTime(m.session.open, now)}` : 'waiting for the session';
-    case 'polling': return `polling the ${date} session, ${count(m.watched)} symbols, ${m.lastPollAt === undefined ? 'no poll yet' : `last poll ${deskTime(m.lastPollAt, now)}`}`;
-    default: return `the ${date} session has closed`;
+    case 'no-calendar': return t('desk.phase.noCalendar');
+    case 'closed': return t('desk.phase.closed');
+    case 'waiting': return isRecord(m.session) ? t('desk.phase.opens', { date, at: deskTime(m.session.open, now) }) : t('desk.phase.waiting');
+    case 'polling': {
+      const poll = m.lastPollAt === undefined ? t('desk.noPoll') : t('desk.lastPoll', { at: deskTime(m.lastPollAt, now) });
+      return t('desk.phase.polling', { date, n: count(m.watched), poll });
+    }
+    default: return t('desk.phase.over', { date });
   }
 }
 function marketLine(name, m, now) {
   if (m.state === 'off') return null;
-  const notWatched = Array.isArray(m.notWatched) && m.notWatched.length ? `; not watched: ${m.notWatched.length}` : '';
+  const notWatched = Array.isArray(m.notWatched) && m.notWatched.length ? t('desk.watch.notWatched', { n: m.notWatched.length }) : '';
   const error = m.lastError === undefined ? '' : `; ${cut(m.lastError, WATCH_ERROR_SHOWN_MAX)}`;
-  return `watch ${name}: ${phaseOf(m, now)}${notWatched}${error}`;
+  return t('desk.watch.market', { name, phase: phaseOf(m, now), rest: `${notWatched}${error}` });
 }
 // a market's alerts on its own session date (the status counts each market's apart): none is no line
 function todayLine(name, today) {
-  const t = isRecord(today) ? today : {};
-  const by = isRecord(t.suppressed) ? t.suppressed : {};
+  const day = isRecord(today) ? today : {};
+  const by = isRecord(day.suppressed) ? day.suppressed : {};
   const reasons = SUPPRESS_ORDER.filter(r => count(by[r]) > 0);
   const suppressed = reasons.reduce((n, r) => n + count(by[r]), 0);
-  if (count(t.sent) === 0 && suppressed === 0 && count(t.repeats) === 0) return null;
-  const parts = [`${count(t.sent)} sent`];
-  if (suppressed > 0) parts.push(`${suppressed} suppressed (${reasons.map(r => `${r} ${count(by[r])}`).join(', ')})`);
-  if (count(t.repeats) > 0) parts.push(`${count(t.repeats)} repeats in a cooldown`);
-  return `alerts today (${name}): ${parts.join(', ')}`;
+  if (count(day.sent) === 0 && suppressed === 0 && count(day.repeats) === 0) return null;
+  const parts = [t('desk.today.sent', { n: count(day.sent) })];
+  if (suppressed > 0) parts.push(t('desk.today.suppressed', { n: suppressed, reasons: reasons.map(r => `${r} ${count(by[r])}`).join(', ') }));
+  if (count(day.repeats) > 0) parts.push(t('desk.today.repeats', { n: count(day.repeats) }));
+  return t('desk.today.line', { name, parts: parts.join(', ') });
 }
 function filingsLine(f, now) {
   switch (f.state) {
-    case 'no-contact': return 'filings: off: set ALPHA_EDGAR_USER_AGENT';
-    case 'refused-today': return 'filings: off until tomorrow: SEC refused the requests';
+    case 'no-contact': return t('desk.filings.noContact');
+    case 'refused-today': return t('desk.filings.refused');
     case 'polling': {
-      const poll = f.lastPollAt === undefined ? 'no poll yet' : `last poll ${deskTime(f.lastPollAt, now)}`;
-      return `filings: polling, ${count(f.symbols)} symbols, ${poll}${f.lastError === undefined ? '' : `; last error ${cut(f.lastError, WATCH_ERROR_SHOWN_MAX)}`}`;
+      const poll = f.lastPollAt === undefined ? t('desk.noPoll') : t('desk.lastPoll', { at: deskTime(f.lastPollAt, now) });
+      const error = f.lastError === undefined ? '' : t('desk.filings.lastError', { error: cut(f.lastError, WATCH_ERROR_SHOWN_MAX) });
+      return t('desk.filings.polling', { n: count(f.symbols), poll, error });
     }
-    default: return 'filings: off';
+    default: return t('desk.filings.off');
   }
 }
 // a file refused whole (its last good load kept), or loaded with refusals, each as the phone's line numbers it
 function fileNote(f) {
-  if (f.error !== undefined) return `refused, the last good load kept: ${cut(f.error, FILE_ERROR_SHOWN_MAX)}`;
+  if (f.error !== undefined) return t('desk.file.refused', { error: cut(f.error, FILE_ERROR_SHOWN_MAX) });
   const refusals = records(f.refusals);
   if (!refusals.length) return null;
   const each = refusals.map(r => `${Number.isInteger(r.index) ? `#${r.index + 1}${r.symbol !== undefined ? ` ${r.symbol}` : ''}: ` : ''}${str(r.reason)}`);
-  return `${refusals.length} of ${count(f.entries) + refusals.length} refused: ${each.join('; ')}`;
+  return t('desk.file.refusals', { n: refusals.length, of: count(f.entries) + refusals.length, each: each.join('; ') });
 }
 
 // ---- a level's mark
@@ -218,19 +230,19 @@ export function markOf(status, rowId) {
 // one alert as the tab lists it: when (New York), what fired with its print and feed, what became of it, and the send's latency
 function alertOf(a, now) {
   const price = typeof a.price === 'number' ? `${a.price}${a.feed ? ` ${a.feed}` : ''}` : '';
-  const what = [`${str(a.symbol)} ${str(a.label)}`, a.gap === true ? 'gap' : '', price].filter(Boolean).join(' · ');
-  const outcome = a.outcome === 'suppressed' && a.suppressed ? `suppressed (${a.suppressed})` : str(a.outcome);
-  const latency = typeof a.latencyMs === 'number' && Number.isFinite(a.latencyMs) ? `${(a.latencyMs / 1000).toFixed(1)} s` : '—';
+  const what = [`${str(a.symbol)} ${str(a.label)}`, a.gap === true ? t('desk.alert.gap') : '', price].filter(Boolean).join(' · ');
+  const outcome = a.outcome === 'suppressed' && a.suppressed ? t('desk.alert.suppressed', { why: a.suppressed }) : str(a.outcome);
+  const latency = typeof a.latencyMs === 'number' && Number.isFinite(a.latencyMs) ? t('desk.gap.seconds', { n: (a.latencyMs / 1000).toFixed(1) }) : '—';
   return { when: etWhen(a.t, now), what, outcome, latency };
 }
 function gapWord(ms) {
   const n = count(ms);
   const seconds = Math.round(n / 1000);
-  if (seconds < 60) return `${seconds} s`;
+  if (seconds < 60) return t('desk.gap.seconds', { n: seconds });
   // the total minutes rounded first, then split: never 60 min, never 1 h 60 min
   const minutes = Math.round(n / 60_000);
   const h = Math.floor(minutes / 60);
-  return h ? `${h} h ${minutes % 60} min` : `${minutes} min`;
+  return h ? t('desk.gap.hours', { h, m: minutes % 60 }) : t('desk.gap.minutes', { n: minutes });
 }
 
 /** The Desk tab's view of a DeskStatus read at `nowIso` (ruling 15), or null for anything that is not one. Each line is the
@@ -249,12 +261,13 @@ export function deskViewOf(status, nowIso) {
   const now = Number.isFinite(Date.parse(nowIso)) ? Date.parse(nowIso) : Date.now();
   const w = isRecord(status.watch) ? status.watch : null;
   const standing = isRecord(status.standing) ? status.standing : null;
+  const names = marketNames();
   const markets = w ? ['us', 'cn'].flatMap(k => {
     const m = isRecord(w.markets?.[k]) ? w.markets[k] : null;
     if (!m) return [];
-    const line = marketLine(MARKET_NAMES[k], m, now);
-    const today = todayLine(MARKET_NAMES[k], m.today);
-    return line === null && today === null ? [] : [{ name: MARKET_NAMES[k], line, today }];
+    const line = marketLine(names[k], m, now);
+    const today = todayLine(names[k], m.today);
+    return line === null && today === null ? [] : [{ name: names[k], line, today }];
   }) : [];
   return {
     head: headLine(status),
@@ -263,15 +276,15 @@ export function deskViewOf(status, nowIso) {
     budget: isRecord(status.budget) ? budgetLine(status.budget) : null,
     watch: w ? watchHead(w) : null,
     markets,
-    pending: w && count(w.pending) > 0 ? `alerts: ${count(w.pending)} held for the next hour's batch` : null,
-    muted: w && isRecord(w.muted) ? `alerts: muted until ${w.muted.until === undefined ? 'a terminal lifts it' : deskTime(w.muted.until, now)} (npm run desk -- unmute)` : null,
-    ledger: w && w.ledgerError !== undefined ? `alerts: the ledger cannot be read (${str(w.ledgerError)}), so the watch sends nothing until it can` : null,
+    pending: w && count(w.pending) > 0 ? t('desk.alerts.pending', { n: count(w.pending) }) : null,
+    muted: w && isRecord(w.muted) ? t('desk.alerts.muted', { until: w.muted.until === undefined ? t('desk.alerts.terminal') : deskTime(w.muted.until, now) }) : null,
+    ledger: w && w.ledgerError !== undefined ? t('desk.alerts.ledger', { error: str(w.ledgerError) }) : null,
     filings: w && isRecord(w.filings) ? filingsLine(w.filings, now) : null,
     alerts: w ? records(w.recent).map(a => alertOf(a, now)) : [],
-    levels: w ? records(w.marks).map(m => ({ market: MARKET_NAMES[m.market] ?? str(m.market), symbol: str(m.symbol), label: labelOf(m), plan: str(m.plan), file: str(m.file) })) : [],
+    levels: w ? records(w.marks).map(m => ({ market: Object.hasOwn(names, m.market) ? names[m.market] : str(m.market), symbol: str(m.symbol), label: labelOf(m), plan: str(m.plan), file: str(m.file) })) : [],
     standing: standing ? records(standing.orders).map(o => ({
       id: str(o.id), market: o.market === 'cn' ? 'cn' : 'us', anchor: str(o.at), ...nextOf(o, standing.running, now), hash: hashCell(o),
-      last: isRecord(o.last) ? `last ${str(o.last.outcome)} ${deskTime(o.last.t, now)}` : '',
+      last: isRecord(o.last) ? t('desk.order.last', { outcome: str(o.last.outcome), at: deskTime(o.last.t, now) }) : '',
       sessionId: isRecord(o.last) && str(o.last.sessionId) !== '' ? str(o.last.sessionId) : null,
     })) : [],
     standingNotes: standing ? standingNotesOf(standing) : [],
@@ -279,6 +292,6 @@ export function deskViewOf(status, nowIso) {
     runs: records(status.runs).slice(-10).reverse().map(r => ({ bootedAt: etWhen(r.bootedAt, now), pid: r.pid, lost: r.lost === true })),
     asleep: records(status.asleep).map(g => ({ from: etWhen(g.from, now), to: etWhen(g.to, now), gap: gapWord(g.gapMs) })),
     files: w ? records(w.files).flatMap(f => { const note = fileNote(f); return note === null ? [] : [{ file: str(f.file), note }]; }) : [],
-    ledgerError: status.ledgerError === undefined ? null : `ledger unreadable: ${str(status.ledgerError)}`,
+    ledgerError: status.ledgerError === undefined ? null : t('desk.ledgerUnreadable', { error: str(status.ledgerError) }),
   };
 }

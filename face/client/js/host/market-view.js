@@ -13,22 +13,38 @@ import { CHINA_VENUE, isCnKey, cnHitsOf } from '../wire/china.js';
 import { MIN, HOUR, DAY } from '../time.js';
 import { DESK_TAB } from './desk-view.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
+import { t } from '../i18n/words.js';
 
-// the Account's tabs, in the order the table draws them, the sorts its rows take, and the ranges a market's history is read for
-export const ACCOUNT_TABS = [['all', 'All'], ['crypto', 'Crypto'], ['stocks', 'Stocks'], ['rwas', 'RWAs'], ['perps', 'Perps'], ['preipo', 'Pre-IPO'], ['predictions', 'Predictions']];
-export const ACCOUNT_SORTS = [{ id: 'volume', label: 'Most traded' }, { id: 'movers', label: 'Biggest moves' }, { id: 'closing', label: 'Closing soonest' }];
+// the Account's tabs, in the order the table draws them, the sorts its rows take, and the ranges a market's history is read for;
+// the tabs' and the sorts' words are read from the table at each call (accountTabs, accountSorts)
+export const ACCOUNT_TAB_IDS = ['all', 'crypto', 'stocks', 'rwas', 'perps', 'preipo', 'predictions'];
+export const ACCOUNT_SORT_IDS = ['volume', 'movers', 'closing'];
 export const CANDLE_RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'MAX'];
 
-const PROVIDERS = { tencent: 'Tencent' };
-const MARKET_PROVIDER = { cn: 'Tencent' };
-const PROVIDER_STATUS = { connecting: 'Connecting', connected: 'Connected', unconfigured: 'Not configured', error: 'Error', limited: 'Limited' };
-const QUOTE_STATUS = { live: 'Live', delayed: 'Delayed', stale: 'Stale' };
+const tabWords = () => ({
+  all: t('markets.tab.all'), crypto: t('markets.tab.crypto'), stocks: t('markets.tab.stocks'), rwas: t('markets.tab.rwas'),
+  perps: t('markets.tab.perps'), preipo: t('markets.tab.preipo'), predictions: t('markets.tab.predictions'),
+});
+const sortWords = () => ({ volume: t('markets.sort.volume'), movers: t('markets.sort.movers'), closing: t('markets.sort.closing') });
+/** The Account's tabs as `[id, label]`, in ACCOUNT_TAB_IDS's order. */
+export const accountTabs = () => { const w = tabWords(); return ACCOUNT_TAB_IDS.map(id => [id, w[id]]); };
+/** The sorts as `{ id, label }`, in ACCOUNT_SORT_IDS's order. */
+export const accountSorts = () => { const w = sortWords(); return ACCOUNT_SORT_IDS.map(id => ({ id, label: w[id] })); };
+
+const TENCENT = 'Tencent'; // en-kept: the provider's name
+const PROVIDERS = { tencent: TENCENT };
+const MARKET_PROVIDER = { cn: TENCENT };
+const providerStatus = () => ({
+  connecting: t('markets.provider.connecting'), connected: t('markets.provider.connected'), unconfigured: t('markets.provider.unconfigured'),
+  error: t('markets.provider.error'), limited: t('markets.provider.limited'),
+});
+const quoteStatus = () => ({ live: t('markets.quote.live'), delayed: t('markets.quote.delayed'), stale: t('markets.quote.stale') });
 // `polling` is the A shares' quotes read from the Account every 5 s as they always are now: like streaming, nothing to say
 /** China's words when the proxy re-serves the market's last read (the market not answering): the China tab's, the Venues line's,
  *  Watching's under its A shares. */
-export const NOT_ANSWERING_WORD = 'The market is not answering · China as last read';
-const CONNECTION = { connecting: 'Connecting…', paused: 'Paused', error: 'Quotes unavailable', stale: NOT_ANSWERING_WORD };
-const WATCH = { read: "Couldn't read the saved watchlist", unsaved: "Couldn't save the watchlist", full: 'The watchlist is full' };
+export const notAnsweringWord = () => t('markets.cn.notAnswering');
+const connectionWords = () => ({ connecting: t('markets.connection.connecting'), paused: t('markets.connection.paused'), error: t('markets.quotesUnavailable'), stale: notAnsweringWord() });
+const watchWords = () => ({ read: t('markets.watch.read'), unsaved: t('markets.watch.unsaved'), full: t('markets.watch.full') });
 
 /** A face instrument id in canonical form (`us:aapl` → `us:AAPL`, `crypto:btc-usd` → `crypto:BTC/USD`), or null. */
 export function canonicalId(raw) {
@@ -40,31 +56,36 @@ const blank = q => typeof q !== 'string' || !q.trim();
 /** The quote's state in a word or two: Live, Delayed, Stale or No quote, and Closed when the market is; with no price
  * from a market whose provider says it is not configured, Not configured. */
 export function quoteWord(quote, providers = [], market = quote?.market) {
-  if (!quote || number(quote.price) === null || !QUOTE_STATUS[quote.quote_status]) {
+  const statuses = quoteStatus();
+  if (!quote || number(quote.price) === null || !Object.hasOwn(statuses, quote.quote_status)) {
     const provider = (Array.isArray(providers) ? providers : []).find(p => p?.market === market);
-    return provider?.status === 'unconfigured' ? 'Not configured' : 'No quote';
+    return provider?.status === 'unconfigured' ? t('markets.provider.unconfigured') : t('markets.quote.none');
   }
-  return QUOTE_STATUS[quote.quote_status] + (quote.market_status === 'closed' ? ' · Closed' : '');
+  const status = statuses[quote.quote_status];
+  return quote.market_status === 'closed' ? t('markets.quote.closed', { status }) : status;
 }
 
 /** The live quotes' connection, only when it is not simply streaming. */
 export function connectionWord(status) {
-  return CONNECTION[status] ?? '';
+  const words = connectionWords();
+  return Object.hasOwn(words, status) ? words[status] : '';
 }
 
 export function providerWord(provider) {
-  const status = PROVIDER_STATUS[provider?.status];
-  return `${PROVIDERS[provider?.id] ?? 'Quotes'}${status ? ` · ${status}` : ''}`;
+  const statuses = providerStatus();
+  const status = Object.hasOwn(statuses, provider?.status) ? statuses[provider.status] : '';
+  const name = PROVIDERS[provider?.id] ?? t('markets.quotes');
+  return status ? `${name} · ${status}` : name;
 }
 
 export function basisWord(quote) {
-  return quote?.basis === '24h' ? '24h' : 'vs previous close';
+  return quote?.basis === '24h' ? '24h' : t('markets.basis.previousClose');
 }
 
 /** Where a quote comes from, named by its market's provider (the wire's source name is not English); an old us:/crypto:
  *  star, which no provider of the face quotes, by none. */
 export function sourceWord(quote) {
-  return MARKET_PROVIDER[quote?.market] ?? 'Quotes';
+  return MARKET_PROVIDER[quote?.market] ?? t('markets.quotes');
 }
 
 const UNITS = [[1e9, 'B'], [1e6, 'M'], [1e3, 'k']];
@@ -80,8 +101,8 @@ function compact(value) {
 export function volumeWord(asset, quote) {
   const volume = number(quote?.volume);
   if (volume === null) return '—';
-  const unit = asset?.market === 'crypto' ? String(asset.symbol).split('/')[0] : 'shares';
-  return `${compact(volume)} ${unit}`;
+  if (asset?.market !== 'crypto') return t('markets.volume.shares', { n: compact(volume) });
+  return `${compact(volume)} ${String(asset.symbol).split('/')[0]}`;
 }
 
 /** A row's or a page's day volume (its `priced`) in the same compact word, in its unit: dollars ($1.9B), contracts (412k
@@ -89,8 +110,8 @@ export function volumeWord(asset, quote) {
 export function volumeWordOf(priced) {
   const volume = number(priced?.volume);
   if (volume === null) return '—';
-  if (priced.volumeUnit === 'contracts') return `${compact(volume)} contracts`;
-  if (priced.volumeUnit === 'shares') return `${compact(volume)} shares`;
+  if (priced.volumeUnit === 'contracts') return t('markets.volume.contracts', { n: compact(volume) });
+  if (priced.volumeUnit === 'shares') return t('markets.volume.shares', { n: compact(volume) });
   return `$${compact(volume)}`;
 }
 
@@ -98,7 +119,8 @@ export function volumeWordOf(priced) {
  *  a setWatch (host/markets.js keeps it as the error); nothing else. */
 export function watchWord(error) {
   if (typeof error !== 'string') return '';
-  return Object.hasOwn(WATCH, error) ? WATCH[error] : error.trim();
+  const words = watchWords();
+  return Object.hasOwn(words, error) ? words[error] : error.trim();
 }
 
 const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -173,42 +195,45 @@ export function cnTileOf(name, symbol) {
 const beijing = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 // an instant's Beijing date and time, `MM-DD` and `HH:MM`; null for one that does not parse
 function beijingOf(iso) {
-  const t = typeof iso === 'string' ? Date.parse(iso) : NaN;
-  if (!Number.isFinite(t)) return null;
-  const p = Object.fromEntries(beijing.formatToParts(new Date(t)).map(x => [x.type, x.value]));
+  const ms = typeof iso === 'string' ? Date.parse(iso) : NaN;
+  if (!Number.isFinite(ms)) return null;
+  const p = Object.fromEntries(beijing.formatToParts(new Date(ms)).map(x => [x.type, x.value]));
   return { date: `${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` };
 }
 
 /** The line above the China table, from the ranking's session: closed, the last session's close; the midday break; else nothing. */
 export function chinaWord(session) {
   if (session?.phase === 'closed' && typeof session.lastSession === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(session.lastSession)) {
-    return `Closed · ${session.lastSession.slice(5)} 15:00 Beijing`;
+    return t('markets.cn.closedOn', { day: session.lastSession.slice(5) });
   }
-  if (session?.phase === 'closed') return 'Closed';
-  if (session?.phase === 'midday') return 'Midday break · 11:30 Beijing';
+  if (session?.phase === 'closed') return t('markets.cn.closed');
+  if (session?.phase === 'midday') return t('markets.cn.midday');
   return '';
 }
 
 /** An A-share page's state line (spec 2026-10-31 §5): the wire down, the market not answering (the proxy's last read, as of its time), the midday break, closed (the quote's session's close),
  *  live, delayed (the last trade's time), all in Beijing time; nothing before a priced quote. No Halted: no mark was found. */
 export function cnStateWord(quote, connection, providers = []) {
-  if (connection === 'error') return 'Quotes unavailable';
+  if (connection === 'error') return t('markets.quotesUnavailable');
   // the proxy re-serving the market's last read: the price is as of its own time, never Delayed or Closed
   if (connection === 'stale') {
     const at = beijingOf(quote?.as_of);
-    return at ? `The market is not answering · as of ${at.date} ${at.time} Beijing` : NOT_ANSWERING_WORD;
+    return at ? t('markets.cn.notAnsweringAsOf', { date: at.date, time: at.time }) : notAnsweringWord();
   }
   // the Account answering but Tencent itself failing (China's state not live): a stale price is no delay, it is an outage
   const tencent = (Array.isArray(providers) ? providers : []).find(p => p?.market === 'cn');
-  if (quote?.quote_status === 'stale' && tencent && tencent.status !== 'connected' && tencent.status !== 'limited') return 'Quotes unavailable';
+  if (quote?.quote_status === 'stale' && tencent && tencent.status !== 'connected' && tencent.status !== 'limited') return t('markets.quotesUnavailable');
   if (!quote || number(quote.price) === null) return '';
   const at = beijingOf(quote.as_of);
-  if (quote.market_status === 'midday') return 'Tencent · Midday break · 11:30 Beijing';
+  if (quote.market_status === 'midday') return t('markets.cn.sourceMidday', { source: TENCENT });
   // the session's last trading day, else the quote's own (a halted share's last trade is not the market's)
   const day = typeof quote.last_session === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(quote.last_session) ? quote.last_session.slice(5) : at?.date;
-  if (quote.market_status === 'closed') return day ? `Tencent · Closed · ${day} 15:00 Beijing` : 'Tencent · Closed';
-  if (quote.market_status === 'open') return quote.quote_status === 'live' ? 'Tencent · Live' : at ? `Tencent · Delayed · ${at.time} Beijing` : 'Tencent · Delayed';
-  return 'Tencent';
+  if (quote.market_status === 'closed') return day ? t('markets.cn.sourceClosedOn', { source: TENCENT, day }) : t('markets.cn.sourceClosed', { source: TENCENT });
+  if (quote.market_status === 'open') {
+    if (quote.quote_status === 'live') return t('markets.cn.sourceLive', { source: TENCENT });
+    return at ? t('markets.cn.sourceDelayedAt', { source: TENCENT, time: at.time }) : t('markets.cn.sourceDelayed', { source: TENCENT });
+  }
+  return TENCENT;
 }
 
 // the ranking's answer as the store keeps it, when it is one
@@ -228,14 +253,14 @@ export function chinaRowsOf(markets, atPage = []) {
     const priced = { price: number(i.price), unit: 'cny', changePct: number(i.change_pct), change24h: null, volume: number(i.turnover), volumeUnit: 'yuan', implied: null };
     return {
       id: i.id, source: 'china', kind: 'stock', name: str(i.name) || symbol, tile: cnTileOf(str(i.name), symbol), sub: `${symbol} · ${cnBoardOf(symbol)}`,
-      priced, price: priced.price, live: null, sourceWord: 'Tencent', closeTime: null, pastEnd: false, paper: false,
+      priced, price: priced.price, live: null, sourceWord: TENCENT, closeTime: null, pastEnd: false, paper: false,
       watched: starred.has(i.id), atAccount: false, legs: [], tabs: [CHINA_TAB],
     };
   });
 }
 
 /** The table's tabs from All's explore answer: All first, with the Account's count and the cn rows', then the Account's tabs that
- *  have something in them, in ACCOUNT_TABS's order and words (Stocks is the Account's alone: the A shares' home is China). An
+ *  have something in them, in accountTabs's order and words (Stocks is the Account's alone: the A shares' home is China). An
  *  answer not read, or one that is not an answer, is All alone. China (`opts.china`, `{ count }`) follows the Account's tabs
  *  (spec 2026-10-31 §4). As the retired page orders them, All results leads while `searching` and Watching follows China
  *  while `watching` (anything is starred), neither with a count; the Desk (`opts.desk`, plan 2026-11-01-desk-p3-watch Task 11)
@@ -244,19 +269,19 @@ export function tabsOf(explore, cnCount, opts) {
   const cn = Math.max(0, number(cnCount) ?? 0);
   const counts = new Map();
   if (explore?.ok === true && Array.isArray(explore.tabs)) {
-    for (const t of records(explore.tabs)) if (typeof t.id === 'string' && !counts.has(t.id)) counts.set(t.id, Math.max(0, number(t.count) ?? 0));
+    for (const tab of records(explore.tabs)) if (typeof tab.id === 'string' && !counts.has(tab.id)) counts.set(tab.id, Math.max(0, number(tab.count) ?? 0));
   }
   const out = [];
-  for (const [id, label] of ACCOUNT_TABS) {
+  for (const [id, label] of accountTabs()) {
     const count = (counts.get(id) ?? 0) + (id === 'all' ? cn : 0);
     if (id === 'all' || count > 0) out.push({ id, label, count });
   }
   return [
-    ...(opts?.searching ? [{ id: 'results', label: 'All results', count: null }] : []),
+    ...(opts?.searching ? [{ id: 'results', label: t('markets.tab.results'), count: null }] : []),
     ...out,
-    ...(opts?.china ? [{ id: CHINA_TAB, label: 'China', count: opts.china.count ?? null }] : []),
-    ...(opts?.watching ? [{ id: 'watching', label: 'Watching', count: null }] : []),
-    ...(opts?.desk ? [{ id: DESK_TAB, label: 'Desk', count: null }] : []),
+    ...(opts?.china ? [{ id: CHINA_TAB, label: t('markets.tab.china'), count: opts.china.count ?? null }] : []),
+    ...(opts?.watching ? [{ id: 'watching', label: t('markets.tab.watching'), count: null }] : []),
+    ...(opts?.desk ? [{ id: DESK_TAB, label: t('markets.tab.desk'), count: null }] : []),
   ];
 }
 
@@ -287,13 +312,13 @@ const FRESH_MS = 5_000;   // the Account's own: a price a few seconds old is sai
 // how old a price is once it is past FRESH_MS: `12 s ago`, `3 min ago`, `2 h ago`, `yesterday`, `3 days ago`; nothing while it
 // is fresh, for a stamp that does not parse, or for one ahead of the clock
 function ageWords(at, now) {
-  const t = typeof at === 'string' ? Date.parse(at) : NaN;
-  const ms = Number.isFinite(t) && Number.isFinite(now) ? now - t : NaN;
+  const stamp = typeof at === 'string' ? Date.parse(at) : NaN;
+  const ms = Number.isFinite(stamp) && Number.isFinite(now) ? now - stamp : NaN;
   if (!(ms > FRESH_MS)) return '';
-  if (ms < MIN) return `${Math.floor(ms / 1000)} s ago`;
-  if (ms < HOUR) return `${Math.floor(ms / MIN)} min ago`;
-  if (ms < DAY) return `${Math.floor(ms / HOUR)} h ago`;
-  return ms < 2 * DAY ? 'yesterday' : `${Math.floor(ms / DAY)} days ago`;
+  if (ms < MIN) return t('markets.age.seconds', { n: Math.floor(ms / 1000) });
+  if (ms < HOUR) return t('markets.age.minutes', { n: Math.floor(ms / MIN) });
+  if (ms < DAY) return t('markets.age.hours', { n: Math.floor(ms / HOUR) });
+  return ms < 2 * DAY ? t('markets.age.yesterday') : t('markets.age.days', { n: Math.floor(ms / DAY) });
 }
 
 // a source's words, with the price's age once it is past FRESH_MS
@@ -346,20 +371,22 @@ const pairOf = legs => pairAt(legs.find(l => l.connected && named(l)));
  *  listing — a legsOf line, or null. */
 export const followOf = item => { const legs = legsOf(item); return legs.find(l => l.connected && named(l)) ?? legs.find(l => l.public && named(l)) ?? null; };
 const unpriced = () => ({ price: null, unit: 'usd', changePct: null, change24h: null, volume: null, volumeUnit: 'usd', implied: null });
-const KIND_TABS = new Set(ACCOUNT_TABS.map(([id]) => id).filter(id => id !== 'all'));
+const KIND_TABS = new Set(ACCOUNT_TAB_IDS.filter(id => id !== 'all'));
 // a contract on a venue's estimate of a private company's valuation: its implied valuation, or its tab, says so
 const isPreipo = item => isRecord(item.implied) || (Array.isArray(item.tabs) && item.tabs.includes('preipo'));
 // what a market is, in a word, as the retired page says it
-const KIND_WORDS = { coin: 'Crypto', stock: 'Stock', perp: 'Perpetual', rwa: 'Tokenized asset', event: 'Prediction' };
+const kindWords = () => ({
+  coin: t('markets.kind.coin'), stock: t('markets.kind.stock'), perp: t('markets.kind.perp'), rwa: t('markets.kind.rwa'), event: t('markets.kind.event'),
+});
 // an outcome as a person says it: YES → Yes, UP → Up; a named outcome as its venue writes it
-const OUTCOMES = { YES: 'Yes', NO: 'No', UP: 'Up', DOWN: 'Down' };
-const outcomeWord = label => { const s = str(label); return Object.hasOwn(OUTCOMES, s) ? OUTCOMES[s] : s; };
+export const outcomeWords = () => ({ YES: t('markets.outcome.yes'), NO: t('markets.outcome.no'), UP: t('markets.outcome.up'), DOWN: t('markets.outcome.down') });
+const outcomeWord = label => { const s = str(label); const words = outcomeWords(); return Object.hasOwn(words, s) ? words[s] : s; };
 // a price the Account gives in dollars — a quote's, a line's, an outcome's — in the market's unit: an event's in cents
 const inUnit = (v, unit) => (unit === 'cents' ? cents(v) : number(v));
 // the price a row or a page shows: the latest quote at its line where that says one, else the explore read's
 const shownPrice = (live, priced) => inUnit(live?.price, priced.unit) ?? priced.price;
 // the word a market's tile takes its letters from, as the retired page draws it: an event's category, else its base or name
-const tileOf = item => (item.kind === 'event' ? str(item.category) || 'Event' : str(item.base) || str(item.name));
+const tileOf = item => (item.kind === 'event' ? str(item.category) || t('markets.tile.event') : str(item.base) || str(item.name));
 // the Account's keys starred: the operator's own, then each an old us:/crypto: star was found as
 function starredOf(m) {
   const old = records(m.watchlist).map(a => normalizeAsset(a)).filter(a => a && a.market !== 'cn');
@@ -446,7 +473,7 @@ export function watchedOf(markets, id, page = null) {
 function subOf(item, legs) {
   const base = str(item.base);
   switch (item.kind) {
-    case 'perp': return isPreipo(item) ? 'Pre-IPO · Perpetual' : base ? `${base} · Perpetual` : 'Perpetual';
+    case 'perp': return isPreipo(item) ? t('markets.sub.preipoPerp') : base ? t('markets.sub.basePerp', { base }) : t('markets.kind.perp');
     case 'event': return str(item.category);
     case 'coin': return base;
     case 'stock': case 'rwa': return (legs.find(l => l.connected) ?? legs.find(l => l.public))?.venueName ?? '';
@@ -468,7 +495,7 @@ function accountRow(item, quotes, watched, now, atAccount = false) {
     id: str(item.key), source: 'account', kind: str(item.kind), name: str(item.name), tile: tileOf(item), sub: subOf(item, legs),
     priced, price: shownPrice(live, priced), live, sourceWord: wordOf(item, live, now),
     closeTime: str(item.closeTime) || null, pastEnd: item.pastEnd === true, paper: legs.find(l => l.connected)?.paper === true, watched, atAccount, legs,
-    tabs: Array.isArray(item.tabs) ? item.tabs.filter(t => typeof t === 'string') : [],
+    tabs: Array.isArray(item.tabs) ? item.tabs.filter(tab => typeof tab === 'string') : [],
   };
 }
 
@@ -478,7 +505,7 @@ function placeholderRow(key) {
   const name = key.slice(key.lastIndexOf(':') + 1);
   return {
     id: key, source: 'account', placeholder: true, kind: head > 0 ? key.slice(0, head) : '', name, tile: name,
-    sub: 'Not in this read', priced: unpriced(), price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false, paper: false,
+    sub: t('markets.notInRead'), priced: unpriced(), price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false, paper: false,
     watched: true, atAccount: false, legs: [], tabs: ['all', 'watching'],
   };
 }
@@ -505,7 +532,7 @@ function notListedRow(asset) {
   const name = asset.name || asset.symbol;
   return {
     id: asset.id, source: 'face', notListed: true, kind: coin ? 'coin' : 'stock', name, tile: name,
-    sub: 'Not listed at the Account', priced: unpriced(), price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false,
+    sub: t('markets.notListed'), priced: unpriced(), price: null, live: null, sourceWord: '', closeTime: null, pastEnd: false,
     paper: false, watched: true, atAccount: false, legs: [], tabs: ['all', coin ? 'crypto' : 'stocks'],
   };
 }
@@ -519,7 +546,7 @@ const turnover = p => (p.price !== null && p.volume !== null ? p.price * p.volum
 const SORTS = {
   volume: { dir: -1, side: r => (r.source === 'account' ? 0 : 1), key: r => (r.source === 'account' ? r.priced.volume : turnover(r.priced)) },
   movers: { dir: -1, side: () => 0, key: r => { const v = r.kind === 'event' ? r.priced.change24h : r.priced.changePct; return v === null ? null : Math.abs(v); } },
-  closing: { dir: 1, side: () => 0, key: r => { const t = r.closeTime ? Date.parse(r.closeTime) : NaN; return Number.isFinite(t) ? t : null; } },
+  closing: { dir: 1, side: () => 0, key: r => { const ms = r.closeTime ? Date.parse(r.closeTime) : NaN; return Number.isFinite(ms) ? ms : null; } },
 };
 
 function sorted(rows, sort) {
@@ -532,7 +559,7 @@ function sorted(rows, sort) {
 /** The sorts the table offers for its rows — Closing soonest only where a row closes — and the one in effect: the kept sort
  *  when it is offered, else the first offered, Most traded. */
 export function sortsOf(rows, kept) {
-  const sorts = ACCOUNT_SORTS.filter(s => s.id !== 'closing' || records(rows).some(r => r.closeTime));
+  const sorts = accountSorts().filter(s => s.id !== 'closing' || records(rows).some(r => r.closeTime));
   return { sorts, sort: sorts.some(s => s.id === kept) ? kept : sorts[0].id };
 }
 
@@ -562,7 +589,7 @@ export function tableOf(markets, now = Date.now(), page = null) {
   const onChina = m.tab === CHINA_TAB && !searching;
   const rows = onChina ? chinaRowsOf(m, atPage) : unsortedRowsOf(m, searching, reads, now, atPage);
   const { sorts, sort } = onChina
-    ? { sorts: ACCOUNT_SORTS.filter(s => s.id !== 'closing'), sort: m.sort === 'movers' ? 'movers' : 'volume' }
+    ? { sorts: accountSorts().filter(s => s.id !== 'closing'), sort: m.sort === 'movers' ? 'movers' : 'volume' }
     : sortsOf(rows, m.sort);
   const watchlist = records(m.watchlist).map(a => normalizeAsset(a)).filter(Boolean);
   const all = bodyOf(reads, 'all');
@@ -570,7 +597,7 @@ export function tableOf(markets, now = Date.now(), page = null) {
   const watching = starredOf(m).length > 0 || watchlist.length > 0 || atPage.length > 0;
   const chinaCount = rankOf(m) ? Math.max(0, number(rankOf(m).total) ?? 0) : null;
   const tabs = tabsOf(all, cnStarsOf(m, atPage).length, { watching, searching, china: { count: chinaCount }, desk: true })
-    .map(t => (counted || t.id === CHINA_TAB || t.id === DESK_TAB ? t : { ...t, count: null }));
+    .map(tab => (counted || tab.id === CHINA_TAB || tab.id === DESK_TAB ? tab : { ...tab, count: null }));
   const mine = own(reads, KIND_TABS.has(m.tab) ? m.tab : 'all');
   const source = onChina ? m.rank : searching ? m.results : mine?.data ? mine : own(reads, 'all');
   const read = { status: str(source?.status) || 'idle', answered: isRecord(source) && source.data != null, message: str(source?.message) || null };
@@ -703,7 +730,7 @@ export function pageOf(markets, account, id, now = Date.now()) {
     item, priced, price: shownPrice(live, priced), live, sourceWord: wordOf(item, live, now),
     legs: legs.map(l => ({ ...l, price: inUnit(l.price, priced.unit), bid: inUnit(l.bid, priced.unit), ask: inUnit(l.ask, priced.unit) })),
     name, tile: tileOf(item), preipo, watched: watchedOf(m, id, a.data), about: base ? { symbol: base, name } : { name },
-    sub: (event ? [str(item.category)] : [preipo ? 'Pre-IPO' : own(KIND_WORDS, item.kind) ?? '', str(follow?.symbol)]).filter(Boolean),
+    sub: (event ? [str(item.category)] : [preipo ? t('markets.tab.preipo') : own(kindWords(), item.kind) ?? '', str(follow?.symbol)]).filter(Boolean),
     closesAt,
     outcomes: event ? records(item.outcomes).map(o => ({ label: outcomeWord(o.label), cents: cents(o.price) })) : [],
     candles, range,
@@ -747,10 +774,10 @@ export function faceAssetOf(markets, id) {
 }
 
 // the A-share page's facts, in the order the page draws them (spec 2026-10-31 §5), each a quote field and its unit
-const CN_FACTS = [
-  ['Previous close', 'prev_close', 'cny'], ['Open', 'open', 'cny'], ['High', 'high', 'cny'], ['Low', 'low', 'cny'],
-  ['Turnover', 'turnover', 'yuan'], ['Turnover rate', 'turnover_rate', 'pct'], ['Market cap', 'market_cap', 'yuan'], ['P/E (TTM)', 'pe_ttm', 'ratio'],
-  ['Limit up', 'limit_up', 'cny'], ['Limit down', 'limit_down', 'cny'], ['Volume', 'volume', 'shares'], ['Amplitude', 'amplitude', 'pct'],
+const cnFacts = () => [
+  [t('markets.cnFact.prevClose'), 'prev_close', 'cny'], [t('markets.cnFact.open'), 'open', 'cny'], [t('markets.cnFact.high'), 'high', 'cny'], [t('markets.cnFact.low'), 'low', 'cny'],
+  [t('markets.cnFact.turnover'), 'turnover', 'yuan'], [t('markets.cnFact.turnoverRate'), 'turnover_rate', 'pct'], [t('markets.cnFact.marketCap'), 'market_cap', 'yuan'], [t('markets.cnFact.pe'), 'pe_ttm', 'ratio'],
+  [t('markets.cnFact.limitUp'), 'limit_up', 'cny'], [t('markets.cnFact.limitDown'), 'limit_down', 'cny'], [t('markets.cnFact.volume'), 'volume', 'shares'], [t('markets.cnFact.amplitude'), 'amplitude', 'pct'],
 ];
 
 /** An A share's page (spec 2026-10-31 §5), or null for an id that is not one: its asset, its quote (the live wire's, else its
@@ -767,7 +794,7 @@ export function cnPageOf(markets, id) {
   const current = data !== null && data.range === range;
   return {
     asset, quote, range,
-    facts: CN_FACTS.map(([label, key, unit]) => ({ label, value: number(quote?.[key]), unit })),
+    facts: cnFacts().map(([label, key, unit]) => ({ label, value: number(quote?.[key]), unit })),
     history: {
       status: str(chart?.status) || 'idle', message: chart?.status === 'error' ? str(chart.message) || null : null, current,
       sessions: current && Array.isArray(data.sessions) ? data.sessions : null, candles: current && Array.isArray(data.candles) ? data.candles : null,

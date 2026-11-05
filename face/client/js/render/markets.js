@@ -28,7 +28,7 @@ import { assetKeyOf, hereOf, costOf, bookOf, tradesOf, fundingOf, fundingMissing
 import {
   CANDLE_RANGES, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf, followOf,
   connectionWord, watchWord, basisWord, watchedOf,
-  chinaWord, cnStateWord, NOT_ANSWERING_WORD, cnPageOf, cnTileOf, cnBoardOf,
+  chinaWord, cnStateWord, notAnsweringWord, cnPageOf, cnTileOf, cnBoardOf,
 } from '../host/market-view.js';
 import { yuan, fix2 } from './lunhui/block.js';
 import { intradaySvg } from './lunhui/intraday.js';
@@ -36,6 +36,7 @@ import { tradeableOf } from '../host/trade-view.js';
 import { isCnKey } from '../wire/china.js';
 import { DESK_TAB, deskViewOf, markOf } from '../host/desk-view.js';
 import { renderDeskTab } from './desk.js';
+import { t, th, thn } from '../i18n/words.js';
 
 const EM = '—';
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -48,7 +49,7 @@ const tag = text => `<span class="mk-tag">${esc(text)}</span>`;
 const tone = v => ({ pos: 'up', neg: 'down' })[sign(v)] ?? 'flat';
 // a quantity as the Account gives it, grouped (0.124, 63,226.6); nothing given is no word
 const qtyWord = n => (n === null || n === undefined ? '' : Number(n).toLocaleString('en-US', { maximumFractionDigits: 8 }));
-const when = (at, now) => { const t = Date.parse(at); return Number.isNaN(t) ? '' : sameDay(t, now) ? fmtClock(t) : `${fmtDate(t)} ${fmtClock(t)}`; };
+const when = (at, now) => { const ms = Date.parse(at); return Number.isNaN(ms) ? '' : sameDay(ms, now) ? fmtClock(ms) : `${fmtDate(ms)} ${fmtClock(ms)}`; };
 
 /** A round letter tile: the first word of what it is given — a market's base, an event's category — four letters at most. */
 export function mkAv(name, size = '') {
@@ -71,7 +72,7 @@ function moveHtml(p) {
   const size = cents ? `${Number(Math.abs(v).toFixed(1))}¢` : `${Math.abs(v).toFixed(2)}%`;
   if (v === 0) return `<span class="flat">${size}</span>`;
   const up = v > 0;
-  return `<span class="${up ? 'up' : 'down'}"><span aria-hidden="true">${up ? '▲' : '▼'}</span><span class="sr-only">${up ? 'up' : 'down'}</span> ${size}</span>`;
+  return `<span class="${up ? 'up' : 'down'}"><span aria-hidden="true">${up ? '▲' : '▼'}</span><span class="sr-only">${up ? th('markets.move.up') : th('markets.move.down')}</span> ${size}</span>`;
 }
 
 // ---- the table
@@ -79,15 +80,15 @@ function moveHtml(p) {
 // the star, and under it Watched at the Account for a market on the Account's own list alone; an old star the Account could not
 // find takes Remove in its place
 function starCell(r) {
-  if (r.notListed) return `<button type="button" class="mk-clear" data-action="removeAsked" data-id="${esc(r.id)}" aria-label="Remove ${esc(r.name)}">Remove</button>`;
-  return `<button type="button" class="mk-star" data-action="toggleWatch" data-id="${esc(r.id)}" aria-pressed="${r.watched === true}" aria-label="${r.watched ? 'Stop watching' : 'Watch'} ${esc(r.name)}">${icon('star', 18, 2)}</button>` +
-    (r.watched === true && r.atAccount === true ? '<span class="mk-at">Watched at the Account</span>' : '');
+  if (r.notListed) return `<button type="button" class="mk-clear" data-action="removeAsked" data-id="${esc(r.id)}" aria-label="${th('markets.star.removeName', { name: r.name })}">${th('markets.star.remove')}</button>`;
+  return `<button type="button" class="mk-star" data-action="toggleWatch" data-id="${esc(r.id)}" aria-pressed="${r.watched === true}" aria-label="${r.watched ? th('markets.star.stop', { name: r.name }) : th('markets.star.watch', { name: r.name })}">${icon('star', 18, 2)}</button>` +
+    (r.watched === true && r.atAccount === true ? `<span class="mk-at">${th('markets.star.atAccount')}</span>` : '');
 }
 
 // the tile, the name and under it the sub, Closed past its end, Paper where only a paper account trades it first; a market no
 // read lists, and a star the Account could not find, have no page to open
 function nameCell(r, mark = null) {
-  const tags = [r.pastEnd ? 'Closed' : '', r.paper ? 'Paper' : ''].filter(Boolean).map(tag).join(' ');
+  const tags = [r.pastEnd ? t('markets.tag.closed') : '', r.paper ? t('markets.tag.paper') : ''].filter(Boolean).map(tag).join(' ');
   const inner = `${mkAv(r.tile)}<span class="mk-nm"><b>${esc(r.name)}</b>${mark ? levelMark(mark) : ''}<span class="mk-sub">${esc(r.sub)}${tags ? ` ${tags}` : ''}</span></span>`;
   return r.placeholder || r.notListed ? `<span class="mk-who">${inner}</span>`
     : `<button type="button" class="mk-name" data-action="openMarket" data-id="${esc(r.id)}">${inner}</button>`;
@@ -104,19 +105,19 @@ function row(r, markFor) {
 
 // China's table says Today and Turnover where the Account's say 24h and Volume (spec 2026-10-31 §4)
 function table(rows, { china = false, markFor = () => null } = {}) {
-  const head = '<tr><th scope="col"><span class="sr-only">Watch</span></th><th scope="col" class="mk-c-name">Market</th><th scope="col" class="r">Price</th>' +
-    `<th scope="col" class="r mk-c-chg">${china ? 'Today' : '24h'}</th><th scope="col" class="r mk-c-vol">${china ? 'Turnover' : 'Volume'}</th><th scope="col" class="r mk-c-st">Source</th></tr>`;
-  return `<section class="cardbox mk-tcard" aria-label="Markets"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(r => row(r, markFor)).join('')}</tbody></table></div></section>`;
+  const head = `<tr><th scope="col"><span class="sr-only">${th('markets.head.watch')}</span></th><th scope="col" class="mk-c-name">${th('markets.head.market')}</th><th scope="col" class="r">${th('markets.head.price')}</th>` +
+    `<th scope="col" class="r mk-c-chg">${china ? th('markets.head.today') : '24h'}</th><th scope="col" class="r mk-c-vol">${china ? th('markets.head.turnover') : th('markets.head.volume')}</th><th scope="col" class="r mk-c-st">${th('markets.head.source')}</th></tr>`;
+  return `<section class="cardbox mk-tcard" aria-label="${th('nav.markets')}"><div class="mk-wrap"><table class="mk-t"><thead>${head}</thead><tbody>${rows.map(r => row(r, markFor)).join('')}</tbody></table></div></section>`;
 }
 
 // where the rows would be when there are none, from the read they are from: nothing starred; an answer with nothing in it; a
 // read still on its way; or one that failed before it answered
 function emptyWord(read, tab, searching) {
-  if (tab === 'watching' && !searching) return 'Nothing watched yet';
-  if (tab === 'china' && !searching) return read.status === 'error' ? 'China unavailable' : read.answered && read.status === 'ready' ? 'No markets' : 'Loading…';
-  if (read.answered) return 'No markets';
-  if (read.status !== 'error') return searching ? 'Searching…' : 'Loading…';
-  return searching ? 'Search is unavailable' : 'Markets unavailable';
+  if (tab === 'watching' && !searching) return t('markets.empty.watching');
+  if (tab === 'china' && !searching) return read.status === 'error' ? t('markets.empty.china') : read.answered && read.status === 'ready' ? t('markets.none') : t('common.loading');
+  if (read.answered) return t('markets.none');
+  if (read.status !== 'error') return searching ? t('markets.search.searching') : t('common.loading');
+  return searching ? t('markets.search.unavailable') : t('markets.unavailable');
 }
 
 // the search's A shares, while a query is active: the Account answered without China's hits (its `missing` names china) —
@@ -124,7 +125,7 @@ function emptyWord(read, tab, searching) {
 function cnSearchWord(m, searching) {
   const body = m.results?.data;
   const missed = body?.ok === true && records(body.missing).some(x => x.venue === 'china');
-  return searching && missed ? 'Search is unavailable' : '';
+  return searching && missed ? t('markets.search.unavailable') : '';
 }
 
 // China's muted lines: the session's (Closed, the midday break); then the market's own words when it says China's read is stale,
@@ -132,8 +133,8 @@ function cnSearchWord(m, searching) {
 // rows kept
 function chinaLines(read, data, session) {
   const why = data?.status?.state === 'stale' ? String(data.status.said ?? '').trim()
-    : data?.stale === true ? NOT_ANSWERING_WORD
-    : read.status === 'error' && read.answered ? 'Couldn’t refresh China' : '';
+    : data?.stale === true ? notAnsweringWord()
+    : read.status === 'error' && read.answered ? t('markets.cn.refreshFailed') : '';
   return note(chinaWord(session)) + note(why);
 }
 
@@ -147,9 +148,9 @@ export function renderMarketsScreen(state, now) {
   const q = String(m.q ?? '').trim();
   const searching = q !== '';
   const { rows, tabs, sorts, sort, read, china, session } = tableOf(m, now, state.account?.data);
-  const tabsHtml = `<div class="mk-tabs" role="group" aria-label="Markets">${tabs.map(t => `<button type="button" class="mk-tab" data-action="mkTab" data-value="${esc(t.id)}" aria-pressed="${t.id === m.tab}">${esc(t.count === null ? t.label : `${t.label} · ${t.count.toLocaleString('en-US')}`)}</button>`).join('')}</div>`;
+  const tabsHtml = `<div class="mk-tabs" role="group" aria-label="${th('nav.markets')}">${tabs.map(tab => `<button type="button" class="mk-tab" data-action="mkTab" data-value="${esc(tab.id)}" aria-pressed="${tab.id === m.tab}">${esc(tab.count === null ? tab.label : `${tab.label} · ${tab.count.toLocaleString('en-US')}`)}</button>`).join('')}</div>`;
   const left = searching
-    ? `<p class="mk-q">${rows.length} market${rows.length === 1 ? '' : 's'} for “${esc(q)}” <button type="button" class="mk-clear" data-action="mkClear">Clear</button></p>`
+    ? `<p class="mk-q">${thn('markets.search.count', rows.length, { q })} <button type="button" class="mk-clear" data-action="mkClear">${th('markets.search.clear')}</button></p>`
     : '<span></span>';
   const bar = `<div class="mk-bar">${left}${rows.length > 1 ? seg(sorts.map(s => [s.label, s.id]), sort, 'mkSort') : ''}</div>`;
   // the Desk tab (plan 2026-11-01-desk-p3-watch Task 11): the desk's view in place of the table
@@ -171,8 +172,8 @@ export function renderMarketsScreen(state, now) {
 }
 
 // the screen: its head with the search, the tabs, and what the tab draws
-const screenHtml = (m, tabsHtml, inner) => `<main class="main mkts"><div class="mk-head"><h1 class="head-title">Markets</h1>` +
-  `<div class="search"><label for="mq" class="sr-only">Search markets</label>${icon('search', 18, 2)}<input id="mq" type="search" autocomplete="off" placeholder="Search markets" data-action="mkQuery"${attrs({ value: m.q })}></div></div>` +
+const screenHtml = (m, tabsHtml, inner) => `<main class="main mkts"><div class="mk-head"><h1 class="head-title">${th('nav.markets')}</h1>` +
+  `<div class="search"><label for="mq" class="sr-only">${th('markets.search.label')}</label>${icon('search', 18, 2)}<input id="mq" type="search" autocomplete="off" placeholder="${th('markets.search.label')}" data-action="mkQuery"${attrs({ value: m.q })}></div></div>` +
   `<div class="mk">${tabsHtml}${inner}</div></main>`;
 
 // a level's mark (host/desk-view.js markOf): after a row's name, and on a market's page under its price with its plan and file
@@ -187,7 +188,7 @@ const line = (mark, t1, t2 = '', markClass = '', tail = '') => `<div class="mk-l
 const feed = lines => `<div class="mk-feed">${lines.join('')}</div>`;
 const pageHtml = (who, keys, top, left, right) => {
   const cols = [left, right].filter(c => c.length).map(c => `<div class="mk-pg-col">${c.join('')}</div>`).join('');
-  return `<main class="main mkts mk-page"><a id="page-back" class="back-link page-back" href="#/markets">‹ Markets</a><div class="mk-pg">` +
+  return `<main class="main mkts mk-page"><a id="page-back" class="back-link page-back" href="#/markets">${th('markets.back')}</a><div class="mk-pg">` +
     `<header class="mk-pg-head">${who}${keys}</header><div class="mk-pg-top">${top}</div>` +
     `${cols ? `<div class="mk-pg-cols">${cols}</div>` : ''}</div></main>`;
 };
@@ -195,10 +196,10 @@ const pageHtml = (who, keys, top, left, right) => {
 const ticketKey = (id, side, word) => `<button type="button" class="btn" data-action="openTicket" data-id="${esc(id)}" data-side="${side}">${word}</button>`;
 // the page's keys: Buy, and Sell where it is held, when `trade` is given (an Account market on a page that signs); Hand to
 // Gravit; Watch — and a perpetual's Leverage… (`leverage`, its seed) where it is given
-const keysHtml = (id, watched, trade = null, leverage = null) => `<div class="mk-d-acts">${trade ? ticketKey(id, 'buy', 'Buy') + (trade.held ? ticketKey(id, 'sell', 'Sell') : '') : ''}` +
-  `${leverage ? marketKey('leverage', leverage, 'Leverage…', 'btn') : ''}` +
-  `<button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}Hand to Gravit</button>` +
-  `<button type="button" class="${cls('btn', watched && 'mk-on')}" data-action="toggleWatch" data-id="${esc(id)}" aria-pressed="${watched}">${icon('star', 16, 2)}${watched ? 'Watching' : 'Watch'}</button></div>`;
+const keysHtml = (id, watched, trade = null, leverage = null) => `<div class="mk-d-acts">${trade ? ticketKey(id, 'buy', th('trade.buy')) + (trade.held ? ticketKey(id, 'sell', th('trade.sell')) : '') : ''}` +
+  `${leverage ? marketKey('leverage', leverage, t('account.key.leverage'), 'btn') : ''}` +
+  `<button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}${th('markets.hand')}</button>` +
+  `<button type="button" class="${cls('btn', watched && 'mk-on')}" data-action="toggleWatch" data-id="${esc(id)}" aria-pressed="${watched}">${icon('star', 16, 2)}${watched ? th('markets.tab.watching') : th('markets.head.watch')}</button></div>`;
 const aboutHtml = (conversations, asset, now) => mentionsOf(conversations, asset).map(c => `<a class="mk-line" href="#/messages/${esc(c.id)}" data-action="open" data-id="${esc(c.id)}"><span class="mk-mark">→</span>` +
   `<div class="mk-line-b"><div class="mk-t1">${esc(maskExcerpt(c.title))}</div>${c.updatedAt ? `<div class="mk-t2">${esc(rowTime(c.updatedAt, now))}</div>` : ''}</div></a>`);
 
@@ -207,7 +208,7 @@ const aboutHtml = (conversations, asset, now) => mentionsOf(conversations, asset
 // over the lines kept
 function partBody(r, lines, none, unavailable) {
   const said = r.failed ? note(r.message) : '';
-  if (!r.answered) return `${said}${empty(r.failed ? unavailable : 'Loading…')}`;
+  if (!r.answered) return `${said}${empty(r.failed ? unavailable : t('common.loading'))}`;
   return `${said}${lines.length ? feed(lines) : none ? empty(none) : ''}`;
 }
 
@@ -237,44 +238,44 @@ function depthBody(part, draw, unavailable, now, timeOf = () => '') {
   // a read lands its answer only once it has one
   const answered = data != null;
   const said = p.status === 'error' ? note(p.message) : '';
-  if (!answered) return `${said}${empty(p.status === 'error' ? unavailable : 'Loading…')}`;
+  if (!answered) return `${said}${empty(p.status === 'error' ? unavailable : t('common.loading'))}`;
   const stale = isRecord(data) && data.stale === true;
   const at = stale ? (timeOf() || (typeof p.freshAt === 'number' ? new Date(p.freshAt).toISOString() : '')) : '';
-  const asOf = stale ? note(at ? `As of ${when(at, now)}` : 'As of the last read') : '';
+  const asOf = stale ? note(at ? t('markets.asOf', { when: when(at, now) }) : t('markets.asOfLast')) : '';
   return `${said}${asOf}${draw()}`;
 }
 
 // what was paid, under a holding or a position: the average paid in the market's unit and the cost, then the Account's words
 function costWords(c, unit) {
   if (!c) return '';
-  const avg = c.avgCostUsd === null ? '' : `avg ${priceWord(unit === 'cents' ? c.avgCostUsd * 100 : c.avgCostUsd, unit)}`;
-  return [avg, c.costUsd === null ? '' : `cost ${money(c.costUsd)}`, c.words].filter(Boolean).join(' · ');
+  const avg = c.avgCostUsd === null ? '' : t('markets.cost.avg', { price: priceWord(unit === 'cents' ? c.avgCostUsd * 100 : c.avgCostUsd, unit) });
+  return [avg, c.costUsd === null ? '' : t('markets.cost.cost', { cost: money(c.costUsd) }), c.words].filter(Boolean).join(' · ');
 }
 
 // You here: the venues the sheet could not read; the holding, the positions with their cost and keys, the owner's open orders
 // with Change…; and under What agents do here a line per agent action — an order of theirs working here (with its Change…), a
 // statement line by them — so an agent's order is drawn once. A market the asset read does not name (an event no venue connected lists) holds nothing here.
 function youHere(view, part, here, keyed, page, now, quotes = null) {
-  if (!assetKeyOf(view.item)) return empty('You don’t hold any.');
+  if (!assetKeyOf(view.item)) return empty(t('markets.here.none'));
   const unit = view.priced.unit;
   const tail = keys => (keys.length ? `<span class="btn-row">${keys.join('')}</span>` : '');
   return depthBody(part, () => {
     const h = here.held;
     const lines = [
       ...(h ? [line('·', esc(`${[qtyWord(h.amount), h.asset].filter(Boolean).join(' ')} · ${money(h.usd)}`), esc(costWords(costOf(here, { key: h.key }), unit)))] : []),
-      ...(here.paperHeld ? [line('·', `${esc(`${[qtyWord(here.paperHeld.amount), here.paperHeld.asset].filter(Boolean).join(' ')} · ${money(here.paperHeld.usd)}`)} ${tag('Paper')}`,
+      ...(here.paperHeld ? [line('·', `${esc(`${[qtyWord(here.paperHeld.amount), here.paperHeld.asset].filter(Boolean).join(' ')} · ${money(here.paperHeld.usd)}`)} ${tag(t('markets.tag.paper'))}`,
         esc(costWords(costOf(here, { key: here.paperHeld.key, paper: true }), unit)))] : []),
       ...here.positions.map(p => line('·', `${esc(`${p.venueName || p.venue} · ${[p.side, qtyWord(p.qty), p.symbol].filter(Boolean).join(' ')} · `)}` +
-        `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>${p.paper ? ` ${tag('Paper')}` : ''}`,
+        `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>${p.paper ? ` ${tag(t('markets.tag.paper'))}` : ''}`,
         esc(costWords(costOf(here, p), unit)), '', keyed ? tail(positionKeys(p, page, quotes)) : '')),
-      ...here.orders.filter(o => o.who === 'You').map(o => line('·', esc(orderWords(o)), '', '', keyed ? tail([changeKey(o, page)].filter(Boolean)) : '')),
+      ...here.orders.filter(o => o.mine).map(o => line('·', esc(orderWords(o)), '', '', keyed ? tail([changeKey(o, page)].filter(Boolean)) : '')),
     ];
     const agents = here.agents.map(a => (a.type === 'order' ? line('·', esc(orderWords(a.order)), '', '', keyed ? tail([changeKey(a.order, page)].filter(Boolean)) : '')
       : line(DONE.has(a.line.status) ? '✓' : '·', esc([when(a.line.at, now), a.line.description, money(a.line.amountUsd)].filter(Boolean).join(' · ')),
         esc([a.line.status, a.line.by].filter(Boolean).join(' · ')), DONE.has(a.line.status) ? 'ok' : '')));
-    return here.missing.map(note).join('') + (lines.length ? feed(lines) : empty('You don’t hold any.')) +
-      (agents.length ? `<div class="mk-h3">What agents do here</div>${feed(agents)}` : '');
-  }, 'Account unavailable', now);
+    return here.missing.map(note).join('') + (lines.length ? feed(lines) : empty(t('markets.here.none'))) +
+      (agents.length ? `<div class="mk-h3">${th('markets.here.agents')}</div>${feed(agents)}` : '');
+  }, t('account.unavailable'), now);
 }
 
 // a figure of the book or the trades in the market's unit (an event's in cents), a size as the source gives it
@@ -285,29 +286,29 @@ const sizeWord = n => (n === null || n === undefined ? EM : qtyWord(n));
 // that is the best bid and ask alone
 function bookHtml(b, unit) {
   const rows = Math.min(10, Math.max(b.bids.length, b.asks.length));
-  if (!rows) return empty('No orders on the book.');
+  if (!rows) return empty(t('markets.book.none'));
   const cell = (l, side) => (l ? `<td class="r ${side}">${esc(unitPrice(l.price, unit))}</td><td class="r">${esc(sizeWord(l.size))}</td>` : '<td></td><td></td>');
   const body = Array.from({ length: rows }, (_, i) => `<tr>${cell(b.bids[i], 'up')}${cell(b.asks[i], 'down')}</tr>`).join('');
-  return `<table class="mk-book"><thead><tr><th scope="col" class="r">Bid</th><th scope="col" class="r">Size</th><th scope="col" class="r">Ask</th><th scope="col" class="r">Size</th></tr></thead>` +
-    `<tbody>${body}</tbody></table>${note([b.from, b.depth === 'top' ? 'Top of book only' : ''].filter(Boolean).join(' · '))}`;
+  return `<table class="mk-book"><thead><tr><th scope="col" class="r">${th('markets.book.bid')}</th><th scope="col" class="r">${th('markets.book.size')}</th><th scope="col" class="r">${th('markets.book.ask')}</th><th scope="col" class="r">${th('markets.book.size')}</th></tr></thead>` +
+    `<tbody>${body}</tbody></table>${note([b.from, b.depth === 'top' ? t('markets.book.top') : ''].filter(Boolean).join(' · '))}`;
 }
 
 // the latest trades: twenty, newest first — the price, the size, the side that took where the source says it, when — or the
 // Account's sentence when the source publishes none
-function tradesHtml(t, unit, now) {
-  if (!t.trades.length) return empty(t.none || 'No trades yet.');
-  return feed(t.trades.slice(0, 20).map(x => line('·', esc([unitPrice(x.price, unit), sizeWord(x.size)].join(' · ')),
-    esc([x.side === 'buy' ? 'Buy' : x.side === 'sell' ? 'Sell' : '', when(x.at, now)].filter(Boolean).join(' · ')), x.side === 'buy' ? 'up' : x.side === 'sell' ? 'down' : '')));
+function tradesHtml(tr, unit, now) {
+  if (!tr.trades.length) return empty(tr.none || t('markets.trades.none'));
+  return feed(tr.trades.slice(0, 20).map(x => line('·', esc([unitPrice(x.price, unit), sizeWord(x.size)].join(' · ')),
+    esc([x.side === 'buy' ? t('trade.buy') : x.side === 'sell' ? t('trade.sell') : '', when(x.at, now)].filter(Boolean).join(' · ')), x.side === 'buy' ? 'up' : x.side === 'sell' ? 'down' : '')));
 }
 
 // a perpetual's funding: what was paid out of the position, what was received, each hour's line newest first; None yet. when
 // there is none
 function fundingHtml(lines, now) {
-  if (!lines.length) return empty('None yet.');
+  if (!lines.length) return empty(t('markets.funding.none'));
   return feed(lines.map(l => {
-    const paid = l.usd === null ? '' : l.usd >= 0 ? `Paid ${money(l.usd)}` : `Received ${money(-l.usd)}`;
-    const rate = l.rate === null ? '' : `rate ${(l.rate * 100).toFixed(4)}%`;
-    return line('·', `${esc(paid || EM)}${l.paper ? ` ${tag('Paper')}` : ''}`,
+    const paid = l.usd === null ? '' : l.usd >= 0 ? t('markets.funding.paid', { usd: money(l.usd) }) : t('markets.funding.received', { usd: money(-l.usd) });
+    const rate = l.rate === null ? '' : t('markets.funding.rate', { rate: `${(l.rate * 100).toFixed(4)}%` });
+    return line('·', `${esc(paid || EM)}${l.paper ? ` ${tag(t('markets.tag.paper'))}` : ''}`,
       esc([when(l.at, now), l.venueName, [l.side, qtyWord(l.qty)].filter(Boolean).join(' '), rate].filter(Boolean).join(' · ')), l.usd !== null && l.usd < 0 ? 'ok' : '');
   }));
 }
@@ -315,15 +316,15 @@ function fundingHtml(lines, now) {
 function accountPage(id, view, state, now) {
   const { priced } = view;
   const unit = priced.unit;
-  const closes = view.closesAt ? `closes ${fmtDate(Date.parse(view.closesAt))}` : '';
+  const closes = view.closesAt ? t('markets.closes', { date: fmtDate(Date.parse(view.closesAt)) }) : '';
   const who = `<div class="mk-who">${mkAv(view.tile, 'lg')}<div><h1 class="head-title">${esc(view.name)}</h1>` +
-    `<span class="mk-sub">${esc([...view.sub, closes].filter(Boolean).join(' · '))}${view.item.pastEnd === true ? ` ${tag('Closed')}` : ''}</span></div></div>`;
+    `<span class="mk-sub">${esc([...view.sub, closes].filter(Boolean).join(' · '))}${view.item.pastEnd === true ? ` ${tag(t('markets.tag.closed'))}` : ''}</span></div></div>`;
 
   // the price it shows, its 24 hours and its volume the explore read's; where the price is from, with its age, once, under it, as
   // the retired page says it; an event's outcomes under the price
   const moved = (unit === 'cents' ? priced.change24h : priced.changePct) !== null;
   const outcomes = view.outcomes.map(o => `<span class="mk-out">${esc(`${o.label} ${priceWord(o.cents, 'cents')}`)}</span>`);
-  const facts = [['24h volume', volumeWordOf(priced)], ['Venues', String(view.legs.length)]];
+  const facts = [[th('markets.fact.volume'), volumeWordOf(priced)], [th('account.tab.venues'), String(view.legs.length)]];
   const top = `<div class="mk-d-px"><span class="mk-big">${esc(priceWord(view.price, unit))}</span>${moved ? `${moveHtml(priced)}<span class="mk-basis">24h</span>` : ''}</div>` +
     `${outcomes.length ? `<div class="mk-outs">${outcomes.join('')}</div>` : ''}${view.sourceWord ? `<p class="mk-asof">${esc(view.sourceWord)}</p>` : ''}` +
     planHtml(markOf(state.desk?.data, id)) +
@@ -336,15 +337,15 @@ function accountPage(id, view, state, now) {
   // kept while the range is read again; Loading… while a range not drawn yet is read; nothing before a read
   const h = view.history;
   const svg = h.current ? candlesSvg(view.candles.candles, { unit, range: view.range }) : '';
-  const failed = h.status === 'error' ? note(h.message || 'History unavailable') : '';
-  const closesDrawn = h.current ? (svg ? svg + note([view.candles.ends, view.candles.note].filter(w => typeof w === 'string' && w.trim() !== '').join(' · ')) : note('No history'))
-    : h.status === 'loading' ? note('Loading…') : '';
-  left.push(section('Price history', failed + closesDrawn, seg(CANDLE_RANGES.map(r => [r, r]), view.range, 'setRange', { 'data-id': id })));
+  const failed = h.status === 'error' ? note(h.message || t('markets.history.unavailable')) : '';
+  const closesDrawn = h.current ? (svg ? svg + note([view.candles.ends, view.candles.note].filter(w => typeof w === 'string' && w.trim() !== '').join(' · ')) : note(t('markets.history.none')))
+    : h.status === 'loading' ? note(t('common.loading')) : '';
+  left.push(section(th('markets.history.title'), failed + closesDrawn, seg(CANDLE_RANGES.map(r => [r, r]), view.range, 'setRange', { 'data-id': id })));
   // Across venues: the lines the owner connected, the best marked, Paper where so; a public listing leads to Venues to connect
   const venues = view.legs.map(l => line('·',
-    `${esc([l.venueName || l.venue, l.symbol, priceWord(l.price, unit)].filter(Boolean).join(' · '))}${l.best ? ` ${tag('Best')}` : ''}${l.paper ? ` ${tag('Paper')}` : ''}`,
-    '', '', !l.connected && l.public ? '<a class="link mk-link" href="#/account/venues">Connect to trade</a>' : ''));
-  if (venues.length) left.push(section('Across venues', feed(venues)));
+    `${esc([l.venueName || l.venue, l.symbol, priceWord(l.price, unit)].filter(Boolean).join(' · '))}${l.best ? ` ${tag(t('markets.tag.best'))}` : ''}${l.paper ? ` ${tag(t('markets.tag.paper'))}` : ''}`,
+    '', '', !l.connected && l.public ? `<a class="link mk-link" href="#/account/venues">${th('markets.connectToTrade')}</a>` : ''));
+  if (venues.length) left.push(section(th('markets.venues.title'), feed(venues)));
 
   // You here, from the asset sheet: what is held of it, its positions with their cost, its open orders with who placed them, and
   // what agents do here; on a page that signs for an Account that takes writes, a position's Close… (Sell…) and Leverage…, an
@@ -355,13 +356,13 @@ function accountPage(id, view, state, now) {
   const depth = Object.fromEntries(['here', 'book', 'trades', 'funding'].map(k => [k, isRecord(own(kept, k)) ? kept[k] : {}]));
   const here = hereOf(depth.here.data, page);
   const hereAnswered = depth.here.data != null;
-  right.push(section('You here', youHere(view, depth.here, here, keyed, page, now, state.markets?.accountQuotes)));
+  right.push(section(th('markets.here.title'), youHere(view, depth.here, here, keyed, page, now, state.markets?.accountQuotes)));
   // the order book and the latest trades at the line the page follows
   const follows = followOf(view.item) !== null;
   if (follows) {
-    left.push(section('Order book', depthBody(depth.book, () => bookHtml(bookOf(depth.book.data), unit), 'Order book unavailable', now,
+    left.push(section(th('markets.book.title'), depthBody(depth.book, () => bookHtml(bookOf(depth.book.data), unit), t('markets.book.unavailable'), now,
       () => bookOf(depth.book.data).at)));
-    left.push(section('Latest trades', depthBody(depth.trades, () => tradesHtml(tradesOf(depth.trades.data), unit, now), 'Trades unavailable', now,
+    left.push(section(th('markets.trades.title'), depthBody(depth.trades, () => tradesHtml(tradesOf(depth.trades.data), unit, now), t('markets.trades.unavailable'), now,
       () => tradesOf(depth.trades.data).trades[0]?.at ?? '')));
   }
   // a perpetual's funding: what was paid and received at its lines
@@ -370,15 +371,15 @@ function accountPage(id, view, state, now) {
     // read said under the lines, Not read: …; Unavailable only when the read itself failed
     const connected = view.legs.filter(l => l.connected === true);
     const body = depth.funding.data;
-    right.push(section('Funding', depthBody(depth.funding, () => fundingHtml(fundingOf([body], connected.map(l => l.symbol)), now) +
-      note(fundingMissingOf(body, connected.map(l => l.venue))), 'Funding unavailable', now)));
+    right.push(section(th('markets.funding.title'), depthBody(depth.funding, () => fundingHtml(fundingOf([body], connected.map(l => l.symbol)), now) +
+      note(fundingMissingOf(body, connected.map(l => l.venue))), t('markets.funding.unavailable'), now)));
   }
   const about = aboutHtml(state.conversations, view.about, now);
-  if (about.length) right.push(section('Gravit on it', feed(about)));
+  if (about.length) right.push(section(th('markets.about'), feed(about)));
   const stated = view.lines.map(l => line(DONE.has(l.status) ? '✓' : '·', esc([when(l.at, now), l.description, money(l.amountUsd)].filter(Boolean).join(' · ')),
     esc([l.status, l.by].filter(Boolean).join(' · ')), DONE.has(l.status) ? 'ok' : ''));
-  right.push(section('On the statement', partBody(view.reads.lines, stated, 'Nothing on the statement about it yet.', 'Statement unavailable'),
-    '<button type="button" class="link mk-link" data-action="openStatement">Open the Statement →</button>'));
+  right.push(section(th('markets.statement.title'), partBody(view.reads.lines, stated, t('markets.statement.none'), t('account.statement.unavailable')),
+    `<button type="button" class="link mk-link" data-action="openStatement">${th('markets.statement.open')}</button>`));
   // the hand order is the owner's: Buy and Sell only on a page that signs, for a market of a Trade kind (a perpetual, a pre-IPO
   // one, is listed, not traded from the face), Sell only where something of it is held
   // what is held is the asset sheet's once it has answered, else the holdings' as the page read them
@@ -410,8 +411,8 @@ function cnHistory(view) {
     : view.range === '1D' ? (h.sessions?.length ? intradaySvg(h.sessions.at(-1)) : '')
       : view.range === '5D' ? sessionsSvg(h.sessions)
         : candlesSvg(h.candles, { unit: 'cny', zone: 'Asia/Shanghai', range: view.range });
-  const failed = h.status === 'error' ? note(h.message || 'History unavailable') : '';
-  const drawnNow = h.current ? (svg || note('No history')) : h.status === 'loading' ? note('Loading…') : '';
+  const failed = h.status === 'error' ? note(h.message || t('markets.history.unavailable')) : '';
+  const drawnNow = h.current ? (svg || note(t('markets.history.none'))) : h.status === 'loading' ? note(t('common.loading')) : '';
   return failed + drawnNow;
 }
 
@@ -421,7 +422,7 @@ function cnPage(asset, state, now) {
   const quote = view.quote;
   // starred as the press reads it (app.js toggles by watchedOf): the Account keys, the page's china entry, an old cn star
   const watched = watchedOf(m, asset.id, state.account?.data);
-  const sub = ['A-share', asset.symbol, cnBoardOf(asset.symbol)].filter(Boolean).join(' · ');
+  const sub = [t('markets.cn.aShare'), asset.symbol, cnBoardOf(asset.symbol)].filter(Boolean).join(' · ');
   const who = `<div class="mk-who">${mkAv(cnTileOf(asset.name, asset.symbol), 'lg')}<div><h1 class="head-title">${esc(asset.name || asset.symbol)}</h1><span class="mk-sub">${esc(sub)}</span></div></div>`;
   const priced = number(quote?.price) !== null;
   const stateWord = cnStateWord(quote, m.connection, m.providers);
@@ -429,7 +430,7 @@ function cnPage(asset, state, now) {
     `${priced ? `${chgHtml(number(quote.change_pct))}<span class="mk-basis">${esc(basisWord(quote))}</span>` : ''}</div>` +
     `${stateWord ? `<p class="mk-asof">${esc(stateWord)}</p>` : ''}${planHtml(markOf(state.desk?.data, asset.id))}` +
     `<dl class="mk-facts">${view.facts.map(f => `<div><dt>${esc(f.label)}</dt><dd>${esc(factWord(f))}</dd></div>`).join('')}</dl>`;
-  const left = [section('Price history', cnHistory(view), seg(CANDLE_RANGES.map(r => [r, r]), view.range, 'setRange', { 'data-id': asset.id }))];
+  const left = [section(th('markets.history.title'), cnHistory(view), seg(CANDLE_RANGES.map(r => [r, r]), view.range, 'setRange', { 'data-id': asset.id }))];
   const about = aboutHtml(state.conversations, asset, now);
-  return pageHtml(who, keysHtml(asset.id, watched), top, left, about.length ? [section('Gravit on it', feed(about))] : []);
+  return pageHtml(who, keysHtml(asset.id, watched), top, left, about.length ? [section(th('markets.about'), feed(about))] : []);
 }

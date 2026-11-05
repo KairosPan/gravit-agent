@@ -147,7 +147,7 @@ const OPEN = new Set(['open', 'partial', 'pending']);
 
 /** The page's orders still working — open, partial or pending — newest first as the Account sends them, each with whose it
  *  is: You for the owner's; an agent's is `Agent · <name>`, the name the page's keys give the order's agent address, else
- *  An agent (an order carries the address, never the name). */
+ *  An agent (an order carries the address, never the name) — and `mine`, true for the owner's, the flag a caller sorts on. */
 export function openOrdersOf(page) {
   return pageOk(page) ? orderRowsOf(page.orders, page.keys) : [];
 }
@@ -164,6 +164,8 @@ export function orderRowsOf(orders, keys) {
       qty: number(o.qty), filledQty: number(o.filledQty), limitPrice: number(o.limitPrice), status: o.status,
       kind: str(o.kind), stopPrice: number(o.stopPrice), base: str(o.base),
       who: o.authority === 'owner' ? t('agents.who.you') : name ? t('agents.who.named', { name }) : t('agents.who.unnamed'),
+      // the owner's own order: what a market's page sorts by, never the word `who` says it in
+      mine: o.authority === 'owner',
       paper: o.paper === true,
       // what keeps an order from being changed (the retired page's tkAmendable, and the Account's own refusal of a change not yet
       // confirmed): waiting for the wallet to send it, being canceled, not followed since a restart, a change the venue has not confirmed

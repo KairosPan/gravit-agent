@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { renderTradeScreen } from '../../client/js/render/trade.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { ticketOf, underWayOf, TRADE_KINDS } from '../../client/js/host/trade-view.js';
+import { ticketOf, underWayOf, tradeKinds } from '../../client/js/host/trade-view.js';
 import { headOf } from '../../client/js/host/account-view.js';
 import { whatYouSignLines, standingWords } from '../../client/js/host/owner-view.js';
 import { askedOf } from '../../client/js/host/sheet.js';
@@ -68,7 +68,7 @@ test('the screen with no ticket: the head with the Account\'s writes chip, the k
   assert.match(html, new RegExp(`<span class="chip grey">${writes.replace(/[$.]/g, c => `\\${c}`)}</span>`));
   // the kinds: the Account's tabs, the one Trade is on pressed
   const kinds = [...html.matchAll(/<button type="button" class="seg-item( pressed)?" aria-pressed="(true|false)" data-action="tradeKind" data-value="([a-z]+)">[\s\S]*?<\/svg>([^<]+)<\/button>/g)];
-  assert.deepEqual(kinds.map(m => [m[3], m[2], m[4]]), TRADE_KINDS.map(k => [k.id, String(k.id === 'crypto'), k.label]));
+  assert.deepEqual(kinds.map(m => [m[3], m[2], m[4]]), tradeKinds().map(k => [k.id, String(k.id === 'crypto'), k.label]));
   // the picker: the search box, what is held (the venue it is held at handed on), the starred, the kind's most traded
   assert.match(html, /<h2 class="tk-h2">Crypto<\/h2>/);
   assert.match(html, /<label for="tq" class="sr-only">Search Crypto<\/label><input id="tq" type="search" autocomplete="off" placeholder="Search Crypto" data-action="tradeQuery" value="">/);

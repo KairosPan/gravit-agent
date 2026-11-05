@@ -8,9 +8,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  TRADE_KINDS, tradeableOf, pickerOf, ticketOf, tradeFieldsOf, tradeDraftOf, quoteOf, underWayOf, fillWords, eventPriceOf,
+  TRADE_KIND_IDS, tradeKinds, tradeableOf, pickerOf, ticketOf, tradeFieldsOf, tradeDraftOf, quoteOf, underWayOf, fillWords, eventPriceOf,
 } from '../../client/js/host/trade-view.js';
-import { ACCOUNT_TABS } from '../../client/js/host/market-view.js';
+import { accountTabs } from '../../client/js/host/market-view.js';
 import { fieldsOf, draftOf } from '../../client/js/host/sheet-view.js';
 import { emptyState } from '../../client/js/data/empty.js';
 
@@ -44,11 +44,12 @@ const venueCan = (page, id, can) => ({ ...page, venues: page.venues.map(v => (v.
 // the plain form as the trade host opens the sheet with it, each named value set
 const form = over => ({ venue: 'ex', side: 'buy', outcome: '0', amount: '25', unit: 'usd', orderType: 'market', limit: '', extendedHours: false, ...over });
 
-test('TRADE_KINDS: the Account\'s crypto, stocks, RWAs and predictions tabs, its own ids and words', () => {
-  assert.deepEqual(TRADE_KINDS, [{ id: 'crypto', label: 'Crypto' }, { id: 'stocks', label: 'Stocks' }, { id: 'rwas', label: 'RWAs' }, { id: 'predictions', label: 'Predictions' }]);
-  const tabs = new Map(ACCOUNT_TABS);
-  for (const k of TRADE_KINDS) assert.equal(tabs.get(k.id), k.label, k.id);
-  assert.equal(emptyState().trade.kind, TRADE_KINDS[0].id);
+test('tradeKinds: the Account\'s crypto, stocks, RWAs and predictions tabs, its own ids and words', () => {
+  assert.deepEqual(TRADE_KIND_IDS, ['crypto', 'stocks', 'rwas', 'predictions']);
+  assert.deepEqual(tradeKinds(), [{ id: 'crypto', label: 'Crypto' }, { id: 'stocks', label: 'Stocks' }, { id: 'rwas', label: 'RWAs' }, { id: 'predictions', label: 'Predictions' }]);
+  const tabs = new Map(accountTabs());
+  for (const k of tradeKinds()) assert.equal(tabs.get(k.id), k.label, k.id);
+  assert.equal(emptyState().trade.kind, TRADE_KIND_IDS[0]);
 });
 
 test('pickerOf: Crypto — the coins held from the leading lens by matchKey, the starred, the kind\'s most traded', () => {
@@ -74,7 +75,7 @@ test('pickerOf: an A share starred (the Account key, the page\'s china entry) ne
   // the worst case: an A-share item a read lists under the stocks tab
   all.items.push({ key: 'cn:600519', kind: 'stock', name: '贵州茅台', base: '600519', tabs: ['all', 'stocks'], at: [] });
   const page = { ...fx('account'), watch: [...fx('account').watch, { venue: 'china', symbol: '000001', at: '2026-11-01T01:00:00.000Z' }] };
-  for (const { id: kind } of TRADE_KINDS) {
+  for (const kind of TRADE_KIND_IDS) {
     const p = pickerOf(stateWith({ kind, all, page, watch: ['cn:600519', 'stock:NVDA', 'coin:BTC'] }), NOW);
     assert.equal(ids(p.watching).some(id => id.startsWith('cn:')), false, kind);
   }

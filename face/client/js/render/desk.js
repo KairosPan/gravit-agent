@@ -4,6 +4,7 @@
 // files, the standing orders - each linking its last firing's session - and their firings, and the runs and sleep gaps.
 // Every word is the view's; this module lays them out in the Markets screen's sections and lines.
 import { esc } from '../html.js';
+import { t, th } from '../i18n/words.js';
 
 const note = text => (text ? `<p class="mk-note">${esc(text)}</p>` : '');
 const empty = text => `<p class="mk-empty">${esc(text)}</p>`;
@@ -12,7 +13,7 @@ const line = (mark, t1, t2 = '', markClass = '') => `<div class="mk-line"><span 
 const feed = lines => (lines.length ? `<div class="mk-feed">${lines.join('')}</div>` : '');
 const tag = text => `<span class="mk-tag">${esc(text)}</span>`;
 // the session an order's last firing woke, on the Messages route (P4 ruling 6): its report, read where it was said
-const sessionLink = id => (id ? `<a href="#/messages/${esc(encodeURIComponent(id))}">its session</a>` : '');
+const sessionLink = id => (id ? `<a href="#/messages/${esc(encodeURIComponent(id))}">${th('desk.tab.session')}</a>` : '');
 
 /** The Desk tab: `view` deskViewOf's (null before a status has landed), `read` the slice's `{ status, message }` — the last
  *  failure's sentence (kept while the next read is on its way, cleared when one answers) said over the view kept, or, with
@@ -20,31 +21,31 @@ const sessionLink = id => (id ? `<a href="#/messages/${esc(encodeURIComponent(id
 export function renderDeskTab(view, read = {}) {
   // the last failure's sentence stays said until a read answers, through the polls on their way after it
   const said = note(read.message);
-  if (!view) return `<div class="desk">${said}${empty(read.message ? 'Desk status unavailable' : 'Loading…')}</div>`;
-  const pause = '<button type="button" class="btn" data-action="deskPause">Pause</button>';
+  if (!view) return `<div class="desk">${said}${empty(read.message ? t('desk.tab.unavailable') : t('common.loading'))}</div>`;
+  const pause = `<button type="button" class="btn" data-action="deskPause">${th('desk.tab.pause')}</button>`;
   const status = feed([view.head, view.off, view.phone, view.budget, view.ledgerError].filter(Boolean).map(w => line('·', esc(w))));
   const head = `<div class="desk-head">${status}${pause}</div>`;
 
-  const watch = view.watch === null ? empty('The watch is not running.')
+  const watch = view.watch === null ? empty(t('desk.tab.notRunning'))
     : feed([line('·', esc(view.watch)), ...view.markets.map(m => line('·', esc(m.line ?? m.today), esc(m.line === null ? '' : m.today ?? ''))),
       ...[view.pending, view.muted, view.ledger, view.filings].filter(Boolean).map(w => line('·', esc(w)))]);
   const alerts = view.alerts.length ? feed(view.alerts.map(a => line(a.outcome === 'sent' ? '✓' : '·', esc(`${a.when} · ${a.what}`),
-    esc(`${a.outcome} · ${a.latency}`), a.outcome === 'sent' ? 'ok' : ''))) : empty('No alerts yet.');
+    esc(`${a.outcome} · ${a.latency}`), a.outcome === 'sent' ? 'ok' : ''))) : empty(t('desk.tab.noAlerts'));
   const levels = view.levels.length || view.files.length
     ? feed([...view.levels.map(l => line('·', `${esc(`${l.symbol} · ${l.market}`)} <span class="mk-level">${esc(l.label)}</span>`, esc(`${l.plan} · ${l.file}`))),
       ...view.files.map(f => line('!', esc(f.file), esc(f.note), 'down'))])
-    : empty('No levels loaded.');
+    : empty(t('desk.tab.noLevels'));
   // an order's anchor leads its state only when the state is when it next falls, as src/desk.ts orderState says it; an
   // A-share order's market leads both, as standingLines prints it
   const standing = feed([...view.standingNotes.map(n => line('·', esc(n))),
-    ...view.standing.map(o => line('·', esc(`standing ${o.id}: ${o.market === 'cn' ? 'market cn, ' : ''}${o.timed ? `${o.anchor}, ` : ''}${o.next}`),
+    ...view.standing.map(o => line('·', esc(t('desk.tab.standing', { id: o.id, market: o.market === 'cn' ? t('desk.tab.marketCn') : '', anchor: o.timed ? `${o.anchor}, ` : '', next: o.next })),
       [esc([o.hash === 'ok' ? '' : o.hash, o.last].filter(Boolean).join(' · ')), sessionLink(o.sessionId)].filter(Boolean).join(' · ')))]);
-  const firings = view.firings.length ? feed(view.firings.map(f => line('·', esc(`${f.when} · ${f.order}`), esc(f.kind === f.outcome ? f.kind : `${f.kind} · ${f.outcome}`)))) : empty('No firings yet.');
-  const runs = feed([...view.runs.map(r => line('·', `${esc(`${r.bootedAt} · pid ${r.pid}`)}${r.lost ? ` ${tag('lost')}` : ''}`)),
-    ...view.asleep.map(g => line('·', esc(`asleep ${g.from}–${g.to}`), esc(g.gap)))]);
+  const firings = view.firings.length ? feed(view.firings.map(f => line('·', esc(`${f.when} · ${f.order}`), esc(f.kind === f.outcome ? f.kind : `${f.kind} · ${f.outcome}`)))) : empty(t('desk.tab.noFirings'));
+  const runs = feed([...view.runs.map(r => line('·', `${esc(t('desk.tab.run', { at: r.bootedAt, pid: r.pid }))}${r.lost ? ` ${tag(t('desk.tab.lost'))}` : ''}`)),
+    ...view.asleep.map(g => line('·', esc(t('desk.tab.asleep', { from: g.from, to: g.to })), esc(g.gap)))]);
 
   return `<div class="desk">${said}${head}` +
-    section('The watch', watch) + section('Alerts', alerts) + section('Levels as loaded', levels) +
-    section('Standing orders', standing || empty('None armed.')) + section('Firings', firings) +
-    `${section('Runs and sleep', runs || empty('No runs in the ledger.'))}</div>`;
+    section(t('desk.tab.watch'), watch) + section(t('desk.tab.alerts'), alerts) + section(t('desk.tab.levels'), levels) +
+    section(t('desk.tab.standingOrders'), standing || empty(t('desk.tab.noneArmed'))) + section(t('desk.tab.firings'), firings) +
+    `${section(t('desk.tab.runs'), runs || empty(t('desk.tab.noRuns')))}</div>`;
 }

@@ -4,10 +4,11 @@
 // one write, Pause: POST /data/desk/pause with no `until` (paused until a terminal resumes), its answer landed at once, then
 // the status read again. There is no resume: the page, like the phone, only pauses (spec §5.7). Nothing here touches the DOM.
 import { DESK_POLL_MS } from './desk-view.js';
+import { t } from '../i18n/words.js';
 
 const STATUS = '/data/desk/status';
 const PAUSE = '/data/desk/pause';
-const messageOf = err => (err instanceof Error ? err.message : String(err ?? 'request failed'));
+const messageOf = err => (err instanceof Error ? err.message : String(err ?? t('desk.requestFailed')));
 // a call made now, at once — the read is asked as Markets shows, not a turn later — its throw a rejection
 const attempt = fn => { try { return Promise.resolve(fn()); } catch (err) { return Promise.reject(err); } };
 
@@ -28,7 +29,7 @@ export function startDesk({ store, getJson, postJson, schedule, cancelTimer, now
       .then(data => {
         if (closed) return;
         if (data && data.ok === true) store.dispatch('deskLoaded', { data, at: now() });
-        else store.dispatch('deskFailed', { at: now(), message: typeof data?.error === 'string' ? data.error : 'not a desk status' });
+        else store.dispatch('deskFailed', { at: now(), message: typeof data?.error === 'string' ? data.error : t('desk.notStatus') });
       }, err => { if (!closed) store.dispatch('deskFailed', { at: now(), message: messageOf(err) }); })
       .finally(() => { if (flight === current) flight = null; });
     flight = current;
@@ -65,7 +66,7 @@ export function startDesk({ store, getJson, postJson, schedule, cancelTimer, now
           if (closed) return undefined;
           store.dispatch('pauseAnswered', { off: body?.off });
           return read();
-        }, err => { if (!closed) store.dispatch('deskFailed', { at: now(), message: `Pause failed: ${messageOf(err)}` }); })
+        }, err => { if (!closed) store.dispatch('deskFailed', { at: now(), message: t('desk.pauseFailed', { reason: messageOf(err) }) }); })
         .finally(() => { if (pausing === current) pausing = null; });
       pausing = current;
       return current;

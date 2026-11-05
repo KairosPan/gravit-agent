@@ -22,15 +22,16 @@ import {
   readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY,
 } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, chinaPairOf, rankOf, cnQuoteOf, cnHitsOf } from '../wire/china.js';
-import { ACCOUNT_TABS, CHINA_TAB, NOT_ANSWERING_WORD, canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf } from './market-view.js';
+import { ACCOUNT_TAB_IDS, CHINA_TAB, notAnsweringWord, canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf } from './market-view.js';
 import { refusedAt, refusalOf } from './owner-view.js';
 import { assetKeyOf } from './market-depth-view.js';
 import { venuesOf } from './account-view.js';
 import { joinExplore } from './explore-join.js';
 import { exploreHalves, joinOptsOf, orderOf, MARKET_EXPLORE as EXPLORE, CONNECTED_EXPLORE } from './explore-halves.js';
+import { t } from '../i18n/words.js';
 
 // China's state while the proxy re-serves the market's last read: the market is not answering
-const NOT_ANSWERING = { state: 'unavailable', said: NOT_ANSWERING_WORD };
+const notAnswering = () => ({ state: 'unavailable', said: notAnsweringWord() });
 
 export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
 export const WATCH_LIMIT = 100;   // either list's: the cn list's, the Account keys' cap
@@ -45,10 +46,10 @@ const QUOTES = '/data/market/quotes';
 const CONNECTED_QUOTES = '/data/account/connected/quotes';
 const VENUES = '/data/account/venues';
 // a connected line's part, the account not answering and no public line of the same connection to read instead
-export const ACCOUNT_DOWN_WORD = 'The Account is not answering';
+export const accountDownWord = () => t('markets.accountDown');
 const ROWS = 200;                 // the explore rows a tab's read and a search ask for
 const ASKED_ROWS = 12;            // the rows an old star's ask reads
-const KINDS = new Set(ACCOUNT_TABS.map(([id]) => id).filter(id => id !== 'all'));
+const KINDS = new Set(ACCOUNT_TAB_IDS.filter(id => id !== 'all'));
 // the kinds the Account compares across venues: not an event, not an RWA
 const COMPARED = new Set(['coin', 'perp', 'stock']);
 
@@ -163,14 +164,14 @@ export function startMarkets({
       if (!data) { store.dispatch('rankFailed', { sort, at: now(), message: messageOf(body) }); return; }
       store.dispatch('rankLoaded', { sort, data, at: now() });
       // a ranking the proxy re-served stale is the market not answering: its last sentence is no state of now
-      store.dispatch('chinaStatusUpdated', { status: body.stale === true ? NOT_ANSWERING : body.china.status });
+      store.dispatch('chinaStatusUpdated', { status: body.stale === true ? notAnswering() : body.china.status });
     }, ['rankLoading', { sort }]);
   }
   // China's state last said as the market not answering, and the market answering afresh: its state read again, off the China
   // ranking that carries it — else that sentence would stay on Venues and Markets until a reload
   function recheckChina() {
     const said = store.get().markets.providers;
-    if (!Array.isArray(said) || !said.some(p => p?.market === 'cn' && p.said === NOT_ANSWERING_WORD)) return;
+    if (!Array.isArray(said) || !said.some(p => p?.market === 'cn' && p.said === notAnsweringWord())) return;
     if (!inAir('rank')) readRank();
   }
   // the read for the tab on screen: China's ranking there, else the Account's explore
@@ -230,7 +231,7 @@ export function startMarkets({
       }
       if (body.stale === true) {
         store.dispatch('quotesUpdated', { quotes: next, connection: 'stale' });
-        store.dispatch('chinaStatusUpdated', { status: NOT_ANSWERING });
+        store.dispatch('chinaStatusUpdated', { status: notAnswering() });
         return;
       }
       store.dispatch('quotesUpdated', { quotes: next, connection: 'polling' });
@@ -277,7 +278,7 @@ export function startMarkets({
       const connector = leg.connector || venuesOf(store.get().account?.data).find(v => v.id === leg.venue)?.connector || '';
       const twin = connector ? publicLinesOf(item).find(l => l.public && l.connector === connector && l.venue && l.symbol) : undefined;
       if (twin) fly(kind, `/data/market/${r}?${queryAt(twin)}`, land);
-      else land({ ok: false, error: ACCOUNT_DOWN_WORD }, true);
+      else land({ ok: false, error: accountDownWord() }, true);
     }, loading);
   }
   const at = l => `venue=${encodeURIComponent(l.venue)}&symbol=${encodeURIComponent(l.symbol)}`;

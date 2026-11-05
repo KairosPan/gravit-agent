@@ -15,6 +15,7 @@
 //   move (one row an asset), `closing` the busiest then by the close, `mostTraded` by volume, each cut at the account's top (LIST_TOP) or the
 //   longer source. `missing` says each half that is down.
 // A half passed as `undefined` has not landed yet: it lists nothing and is said missing by no one.
+import { t } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -33,7 +34,7 @@ const moveOf = i => (fin(i.changePct24h) !== undefined ? Math.abs(i.changePct24h
 const byMove = (a, b) => moveOf(b) - moveOf(a) || byVolume(a, b);
 const closeMs = i => (typeof i.closeTime === 'string' ? Date.parse(i.closeTime) : NaN);
 const byClose = now => {
-  const at = i => { const t = closeMs(i); return t > now ? t : Number.POSITIVE_INFINITY; };
+  const at = i => { const ms = closeMs(i); return ms > now ? ms : Number.POSITIVE_INFINITY; };
   return (a, b) => at(a) - at(b) || byVolume(a, b);
 };
 // movers keep one row an asset: a coin over its perpetual (explore.ts oneEach)
@@ -46,8 +47,9 @@ function oneEach(rows) {
 // the venues read's verdicts for a connection that does not serve here: its public lines are offered nowhere
 const AWAY = new Set(['not-served', 'closed', 'close-only']);
 
-export const ACCOUNT_DOWN = { venue: 'account', venueName: 'the Account', why: 'The Account is not answering: the venues connected are not listed' };
-export const MARKET_DOWN = { venue: 'market', venueName: 'the market', why: 'The market is not answering: public markets are not listed' };
+// a half that is down, as `missing` says it
+export const accountDown = () => ({ venue: 'account', venueName: t('markets.down.account'), why: t('markets.down.accountWhy') });
+export const marketDown = () => ({ venue: 'market', venueName: t('markets.down.market'), why: t('markets.down.marketWhy') });
 
 // a half as the join reads it: an answer, null (down), or undefined (not landed yet)
 function halfOf(b, connected) {
@@ -165,11 +167,11 @@ export function joinExplore(market, connected, { venues = [], here = [], tab = '
   // the rows only the account lists, for the tabs' counts
   const only = c ? records(c.items).filter(r => !mRows.has(r.key)) : [];
   const tabs = m
-    ? records(m.tabs).map(t => ({ ...t, count: (num(t.count) ?? 0) + only.filter(r => Array.isArray(r.tabs) && r.tabs.includes(t.id)).length }))
-    : records(c?.tabs).map(t => ({ ...t }));
+    ? records(m.tabs).map(tab => ({ ...tab, count: (num(tab.count) ?? 0) + only.filter(r => Array.isArray(r.tabs) && r.tabs.includes(tab.id)).length }))
+    : records(c?.tabs).map(tab => ({ ...tab }));
   const missing = [...records(m?.missing), ...records(c?.missing)];
-  if (market !== undefined && !m) missing.push({ ...MARKET_DOWN });
-  if (connected !== undefined && !c) missing.push({ ...ACCOUNT_DOWN });
+  if (market !== undefined && !m) missing.push(marketDown());
+  if (connected !== undefined && !c) missing.push(accountDown());
   const notes = [...new Set([...(Array.isArray(m?.notes) ? m.notes : []), ...(Array.isArray(c?.notes) ? c.notes : [])].filter(n => typeof n === 'string'))];
   const out = {
     ok: true, asOf: m ? m.asOf : c.asOf, items, movers, closing, mostTraded,

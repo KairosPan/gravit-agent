@@ -1,6 +1,6 @@
 // face/client/js/data/empty.js — the state the client boots into before the host answers: no conversations, a status line.
 // Every slice a later stage's screen reads keeps its empty shape, so their render code still boots.
-import { TRADE_KINDS } from '../host/trade-view.js';
+import { TRADE_KIND_IDS } from '../host/trade-view.js';
 import { t } from '../i18n/words.js';
 
 export function emptyState() {
@@ -110,7 +110,7 @@ export function emptyState() {
     sheet: null,
     // Trade (host/trade.js): the kind it is on, the query, the kinds' picks reads by kind and the trade search's, the ticket
     // open (its market, side, venue, outcome), the last thing said
-    trade: { kind: TRADE_KINDS[0].id, q: '', picks: {}, results: { status: 'idle', data: null, at: null }, ticket: null, said: null },
+    trade: { kind: TRADE_KIND_IDS[0], q: '', picks: {}, results: { status: 'idle', data: null, at: null }, ticket: null, said: null },
     // a module card's Run sheet open (host/run-sheet.js), and the Runs this page sent by module: { sessionId, title, startedAt }
     runSheet: null,
     moduleRuns: {},

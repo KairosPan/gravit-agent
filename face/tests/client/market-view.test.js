@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   canonicalId, quoteWord, connectionWord, providerWord, basisWord, sourceWord, volumeWord, volumeWordOf, watchWord, mentionsOf,
-  ACCOUNT_TABS, ACCOUNT_SORTS, CANDLE_RANGES, isAccountKey, tabsOf, priceOf, sourceWordOf, legsOf, rowsOf, tableOf, sortsOf, matchKey, pairsOf,
+  accountTabs, accountSorts, ACCOUNT_TAB_IDS, ACCOUNT_SORT_IDS, CANDLE_RANGES, isAccountKey, tabsOf, priceOf, sourceWordOf, legsOf, rowsOf, tableOf, sortsOf, matchKey, pairsOf,
   pageOf, faceAssetOf, handWordsOf, watchedOf, watchKeysOf, setWatchOf,
   CHINA_TAB, cnBoardOf, cnTileOf, chinaRowsOf, chinaWord, cnStateWord, cnPageOf,
 } from '../../client/js/host/market-view.js';
@@ -53,8 +53,10 @@ const UNPRICED = { price: null, unit: 'usd', changePct: null, change24h: null, v
 // ── The Account's markets ──
 
 test('tabsOf: the fixture tabs in order, All first; Stocks raised by cn rows; Watching and Results when due', () => {
-  assert.deepEqual(ACCOUNT_TABS, [['all', 'All'], ['crypto', 'Crypto'], ['stocks', 'Stocks'], ['rwas', 'RWAs'], ['perps', 'Perps'], ['preipo', 'Pre-IPO'], ['predictions', 'Predictions']]);
-  assert.deepEqual(ACCOUNT_SORTS, [{ id: 'volume', label: 'Most traded' }, { id: 'movers', label: 'Biggest moves' }, { id: 'closing', label: 'Closing soonest' }]);
+  assert.deepEqual(ACCOUNT_TAB_IDS, ['all', 'crypto', 'stocks', 'rwas', 'perps', 'preipo', 'predictions']);
+  assert.deepEqual(ACCOUNT_SORT_IDS, ['volume', 'movers', 'closing']);
+  assert.deepEqual(accountTabs(), [['all', 'All'], ['crypto', 'Crypto'], ['stocks', 'Stocks'], ['rwas', 'RWAs'], ['perps', 'Perps'], ['preipo', 'Pre-IPO'], ['predictions', 'Predictions']]);
+  assert.deepEqual(accountSorts(), [{ id: 'volume', label: 'Most traded' }, { id: 'movers', label: 'Biggest moves' }, { id: 'closing', label: 'Closing soonest' }]);
   const explore = fx('explore-all');
   assert.deepEqual(tabsOf(explore, 0), [
     { id: 'all', label: 'All', count: 30 }, { id: 'crypto', label: 'Crypto', count: 6 }, { id: 'stocks', label: 'Stocks', count: 4 },
@@ -63,7 +65,7 @@ test('tabsOf: the fixture tabs in order, All first; Stocks raised by cn rows; Wa
   ]);
   // two cn rows: All counts them; Stocks is the Account's alone (the China tab is the A shares' home)
   assert.deepEqual(tabsOf(explore, 2).map(t => [t.id, t.count]), [['all', 32], ['crypto', 6], ['stocks', 4], ['rwas', 4], ['perps', 6], ['preipo', 1], ['predictions', 9]]);
-  // ACCOUNT_TABS gives the order and the labels, not the Account; an empty tab, or one the face does not know, is not drawn
+  // accountTabs gives the order and the labels, not the Account; an empty tab, or one the face does not know, is not drawn
   const odd = fx('explore-all');
   odd.tabs = [...odd.tabs].reverse().map(t => (t.id === 'crypto' ? { ...t, label: 'Krypto' } : t.id === 'rwas' ? { ...t, count: 0 } : t));
   odd.tabs.push({ id: 'venues', label: 'Venues', count: 3 });
@@ -505,7 +507,7 @@ test('tableOf: the tabs counted once All answers, the sort in effect, the read t
   assert.deepEqual([closing.sort, closing.rows.map(r => r.id)], ['volume', t.rows.map(r => r.id)]);
   const events = tableOf({ ...m, explore: { all: read(fx('explore-predictions')) }, sort: 'closing' }, NOW);
   assert.deepEqual([events.sorts.map(s => s.id), events.sort, events.rows[0].id], [['volume', 'movers', 'closing'], 'closing', 'event:predict:SI-BTC15-2610220730']);
-  assert.deepEqual(sortsOf([], 'closing'), { sorts: ACCOUNT_SORTS.slice(0, 2), sort: 'volume' });
+  assert.deepEqual(sortsOf([], 'closing'), { sorts: accountSorts().slice(0, 2), sort: 'volume' });
   // the read the rows are from: a kind's own once it has answered, else All's, its sentence with it; while searching, the search's
   const refused = { ...read(fx('explore-all')), status: 'error', message: 'All refused' };
   assert.deepEqual(tableOf({ ...m, tab: 'crypto', explore: { all: refused, crypto: { status: 'loading', data: null, at: null } } }, NOW).read, { status: 'error', answered: true, message: 'All refused' });
@@ -761,7 +763,7 @@ test('no icon URL survives any view (an item given an https icon by hand)', () =
   ];
   for (const q of ['', 'fed']) {
     for (const id of ['coin:BTC', 'coin:AVAX', 'coin:ETH', 'stock:NVDA', fed.key]) outputs.push(pageOf({ ...m, q }, acct, id, NOW));
-    for (const tab of ['all', 'crypto', 'predictions', 'watching', 'results']) for (const { id: sort } of ACCOUNT_SORTS) {
+    for (const tab of ['all', 'crypto', 'predictions', 'watching', 'results']) for (const { id: sort } of accountSorts()) {
       const rows = rowsOf({ ...m, q, tab, sort }, NOW);
       outputs.push(rows, pairsOf(rows));
     }
