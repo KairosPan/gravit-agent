@@ -22,7 +22,7 @@ import { price, number } from '../wire/market-model.js';
 import { money, signedMoney, sign } from '../wire/account-model.js';
 import { seg } from './controls.js';
 import { candlesSvg, sessionsSvg } from './chart.js';
-import { orderWords, marketKeysOn, marketKey, changeKey, positionKeys } from './account.js';
+import { orderWords, marketKeysOn, marketKey, changeKey, positionKeys, positionSideWord, statementStatusWord, statementByWord } from './account.js';
 import { marketLeverageSeedOf } from '../host/sheet-market.js';
 import { assetKeyOf, hereOf, costOf, bookOf, tradesOf, fundingOf, fundingMissingOf } from '../host/market-depth-view.js';
 import {
@@ -252,6 +252,22 @@ function costWords(c, unit) {
   return [avg, c.costUsd === null ? '' : t('markets.cost.cost', { cost: money(c.costUsd) }), c.words].filter(Boolean).join(' · '); // words-order: what was paid under the visual separator
 }
 
+// a position held here: its side worded, how many and its symbol — one with no side, size or symbol, its parts as they came
+function positionWords(p) {
+  const side = positionSideWord(p.side);
+  const qty = qtyWord(p.qty);
+  return side && qty && p.symbol ? t('markets.here.position', { side, qty, symbol: p.symbol })
+    : [side, qty, p.symbol].filter(Boolean).join(' '); // words-order: a position with no side, size or symbol, its parts as they came
+}
+// a funding line's position: its side worded and its size; one with no side or no size, the part it has
+const heldWords = l => {
+  const side = positionSideWord(l.side);
+  const qty = qtyWord(l.qty);
+  return side && qty ? t('markets.funding.held', { side, qty }) : side || qty;
+};
+// a statement line's status and who it was by, each worded, under the visual separator
+const statedWords = l => [statementStatusWord(l.status), statementByWord(l.by)].filter(Boolean).join(' · '); // words-order: a statement line's facts under the visual separator
+
 // You here: the venues the sheet could not read; the holding, the positions with their cost and keys, the owner's open orders
 // with Change…; and under What agents do here a line per agent action — an order of theirs working here (with its Change…), a
 // statement line by them — so an agent's order is drawn once. A market the asset read does not name (an event no venue connected lists) holds nothing here.
@@ -265,14 +281,14 @@ function youHere(view, part, here, keyed, page, now, quotes = null) {
       ...(h ? [line('·', esc(`${[qtyWord(h.amount), h.asset].filter(Boolean).join(' ')} · ${money(h.usd)}`), esc(costWords(costOf(here, { key: h.key }), unit)))] : []),
       ...(here.paperHeld ? [line('·', `${esc(`${[qtyWord(here.paperHeld.amount), here.paperHeld.asset].filter(Boolean).join(' ')} · ${money(here.paperHeld.usd)}`)} ${tag(t('markets.tag.paper'))}`,
         esc(costWords(costOf(here, { key: here.paperHeld.key, paper: true }), unit)))] : []),
-      ...here.positions.map(p => line('·', `${esc(`${p.venueName || p.venue} · ${[p.side, qtyWord(p.qty), p.symbol].filter(Boolean).join(' ')} · `)}` +
+      ...here.positions.map(p => line('·', `${esc(`${p.venueName || p.venue} · ${positionWords(p)} · `)}` +
         `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>${p.paper ? ` ${tag(t('markets.tag.paper'))}` : ''}`,
         esc(costWords(costOf(here, p), unit)), '', keyed ? tail(positionKeys(p, page, quotes)) : '')),
       ...here.orders.filter(o => o.mine).map(o => line('·', esc(orderWords(o)), '', '', keyed ? tail([changeKey(o, page)].filter(Boolean)) : '')),
     ];
     const agents = here.agents.map(a => (a.type === 'order' ? line('·', esc(orderWords(a.order)), '', '', keyed ? tail([changeKey(a.order, page)].filter(Boolean)) : '')
       : line(DONE.has(a.line.status) ? '✓' : '·', esc([when(a.line.at, now), a.line.description, money(a.line.amountUsd)].filter(Boolean).join(' · ')),
-        esc([a.line.status, a.line.by].filter(Boolean).join(' · ')), DONE.has(a.line.status) ? 'ok' : '')));
+        esc(statedWords(a.line)), DONE.has(a.line.status) ? 'ok' : '')));
     return here.missing.map(note).join('') + (lines.length ? feed(lines) : empty(t('markets.here.none'))) +
       (agents.length ? `<div class="mk-h3">${th('markets.here.agents')}</div>${feed(agents)}` : '');
   }, t('account.unavailable'), now);
@@ -309,7 +325,7 @@ function fundingHtml(lines, now) {
     const paid = l.usd === null ? '' : l.usd >= 0 ? t('markets.funding.paid', { usd: money(l.usd) }) : t('markets.funding.received', { usd: money(-l.usd) });
     const rate = l.rate === null ? '' : t('markets.funding.rate', { rate: `${(l.rate * 100).toFixed(4)}%` });
     return line('·', `${esc(paid || EM)}${l.paper ? ` ${tag(t('markets.tag.paper'))}` : ''}`,
-      esc([when(l.at, now), l.venueName, [l.side, qtyWord(l.qty)].filter(Boolean).join(' '), rate].filter(Boolean).join(' · ')), l.usd !== null && l.usd < 0 ? 'ok' : '');
+      esc([when(l.at, now), l.venueName, heldWords(l), rate].filter(Boolean).join(' · ')), l.usd !== null && l.usd < 0 ? 'ok' : ''); // words-order: a funding line's facts under the visual separator
   }));
 }
 
@@ -377,7 +393,7 @@ function accountPage(id, view, state, now) {
   const about = aboutHtml(state.conversations, view.about, now);
   if (about.length) right.push(section(th('markets.about'), feed(about)));
   const stated = view.lines.map(l => line(DONE.has(l.status) ? '✓' : '·', esc([when(l.at, now), l.description, money(l.amountUsd)].filter(Boolean).join(' · ')),
-    esc([l.status, l.by].filter(Boolean).join(' · ')), DONE.has(l.status) ? 'ok' : ''));
+    esc(statedWords(l)), DONE.has(l.status) ? 'ok' : ''));
   right.push(section(th('markets.statement.title'), partBody(view.reads.lines, stated, t('markets.statement.none'), t('account.statement.unavailable')),
     `<button type="button" class="link mk-link" data-action="openStatement">${th('markets.statement.open')}</button>`));
   // the hand order is the owner's: Buy and Sell only on a page that signs, for a market of a Trade kind (a perpetual, a pre-IPO

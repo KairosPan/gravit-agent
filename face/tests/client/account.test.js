@@ -1071,3 +1071,26 @@ test("an order's side, status and type and a limit's scope and a key's status ar
   const drawn = draw(state({ tab: 'agents', agents: strange }));
   has(drawn, '<b>Odd</b><br><span class="dim">suspended</span><br><span class="dim">mode · ex</span>', 'a status and a scope with no word, as they came');
 });
+
+test("a position's side and a statement line's status and who it was by are drawn from the table, and an unknown code as it came", async () => {
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  const probe = {
+    'account.positionSide.long': 'LONG-W', 'account.statementStatus.open': 'OPEN-W', 'account.statementStatus.settled': 'SETTLED-W',
+    'account.statementStatus.notFollowedRestart': 'NOT-FOLLOWED-W', 'account.statementBy.you': 'YOU-W', 'account.statementBy.inLimit': '[{name}] in-limit',
+    'account.statementBy.approved': '[{name}] approved', 'account.statementBy.takeProfit': '[{name}] tp {order}', 'account.statementBy.paper': 'PAPER-W',
+  };
+  const positions = withTable(probe, () => draw(state())).match(/<section class="cardbox" aria-label="Positions">[\s\S]*?<\/section>/)?.[0] ?? '';
+  has(positions, '<span class="dim">Stand-in Exchange · LONG-W · 0.01</span>');
+  const line = (over, i = 0) => ({ ...fx('statement').lines[i], ...over });
+  const drawer = lines => withTable(probe, () => renderStatement(R.statementLoaded(R.openStatement(state()), { data: { ok: true, lines }, at: NOW }), NOW));
+  const facts = html => [...html.matchAll(/<br><span class="dim">([^<]*)<\/span>/g)].map(m => m[1]);
+  assert.deepEqual(facts(drawer([
+    line({ by: 'Claude Code, inside its limit', status: 'open' }), line({ by: 'You', status: 'settled', feeUsd: null }), line({ by: 'Codex, approved by you', status: 'not followed since a restart' }),
+    line({ by: 'Codex, take-profit of ord-0007', status: 'open' }), line({ by: 'The paper account', status: 'open' }),
+  ].map((l, i) => ({ ...l, key: `k${i}`, feeUsd: null })))), [
+    '[Claude Code] in-limit · OPEN-W', 'YOU-W · SETTLED-W', '[Codex] approved · NOT-FOLLOWED-W', '[Codex] tp ord-0007 · OPEN-W', 'PAPER-W · OPEN-W',
+  ]);
+  const odd = { ...fx('holdings'), positions: [{ ...fx('holdings').positions[0], side: 'flat' }] };
+  has(draw(state({ holdings: odd })), '<span class="dim">Stand-in Exchange · flat · 0.01</span>', 'a side with no word, as it came');
+  assert.deepEqual(facts(drawer([line({ key: 'k', by: 'Someone else', status: 'held at the bank', feeUsd: null })])), ['Someone else · held at the bank'], 'a status and a by with no word, as they came');
+});

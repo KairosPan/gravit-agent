@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EN } from '../../client/js/i18n/en.js';
-import { wordsCalls, casedWords } from './helpers/words-scan.js';
+import { wordsCalls, casedWords, wordsProps } from './helpers/words-scan.js';
 
 const AREAS = ['common', 'time', 'status', 'nav', 'list', 'search', 'thread', 'composer', 'details', 'jobs', 'settings', 'shortcuts', 'owner',
   'sheet', 'account', 'money', 'venues', 'agents', 'cards', 'rules', 'identity', 'markets', 'trade', 'desk', 'discover', 'channel', 'modules',
@@ -56,16 +56,26 @@ test('casedWords finds a words call upper- or lower-cased, directly, by a piece 
   }
 });
 
+test('casedWords finds a property some source assigns a words call to, upper- or lower-cased in another source', () => {
+  const props = new Set(["const item = () => ({ kind: t('x.y.z') });", "const p = {}; p.word = th('x.y.z');", 'const s = { symbol: code };', "const w = () => t('x.y', { what: t('x.z') });"]
+    .flatMap(src => [...wordsProps(src, 'other.js')]));
+  assert.deepEqual([...props].sort(), ['kind', 'word']);
+  const lines = src => casedWords(src, 'snippet.js', { props }).map(c => c.line);
+  for (const src of ['const a = item => item.kind.toUpperCase();', 'const a = p => p.word[0].toLowerCase();']) assert.deepEqual(lines(src), [1], src);
+  for (const src of ['const a = p => p.symbol.toUpperCase();', 'const a = item => item.code.toLowerCase();']) assert.deepEqual(lines(src), [], src);
+});
+
+const CASE_PROPS = new Set(walk(ROOT).flatMap(f => [...wordsProps(readFileSync(f, 'utf8'), f)]));
 test("no words call's result is upper- or lower-cased", () => {
-  assert.deepEqual(walk(ROOT).flatMap(f => casedWords(readFileSync(f, 'utf8'), f).map(c => `${relative(ROOT, f)}:${c.line} ${c.text}`)), [],
+  assert.deepEqual(walk(ROOT).flatMap(f => casedWords(readFileSync(f, 'utf8'), f, { props: CASE_PROPS }).map(c => `${relative(ROOT, f)}:${c.line} ${c.text}`)), [],
     'a word drawn in another case is its own key');
 });
 
 // two keys may hold one sentence only for two meanings, each named here: a table may word them apart. A sentence of fewer
-// than four words (Refused, Order) is a word's own business
+// than four words (Refused, Order) is a word's own business. A pair is its two keys sorted, wherever they stand in the table
 const SAME_WORDS = {
-  'venues.signIn.unfinished sheet.signIn.failed': "a venue's sign-in the Account said did not finish; the sign-in sheet's own line when it failed",
-  'venues.openPaper sheet.title.paper': "the Venues tab's key; the sheet's title it opens",
+  'sheet.signIn.failed venues.signIn.unfinished': "the sign-in sheet's own line when it failed; a venue's sign-in the Account said did not finish",
+  'sheet.title.paper venues.openPaper': "the sheet's title the Venues tab's key opens; the Venues tab's key",
   'money.earn.none sheet.earn.nothingIn': "Earn's box with nothing earning; the Earn sheet's Take out with nothing in",
   'sheet.quote.fillIn trade.quote.fillIn': "an owner sheet's quote not yet asked; Trade's ticket's quote not yet asked",
   'sheet.missing.cents trade.missing.cents': "a market sheet's stop or limit price out of range; Trade's ticket's price out of range",
@@ -77,7 +87,7 @@ test('no two keys hold the same sentence of four words or more unless listed', (
     if (s.trim().split(/\s+/).length < 4) continue;
     by.set(s, [...(by.get(s) ?? []), key]);
   }
-  const same = [...by.values()].filter(keys => keys.length > 1).map(keys => keys.join(' '));
+  const same = [...by.values()].filter(keys => keys.length > 1).map(keys => [...keys].sort().join(' '));
   assert.deepEqual(same.filter(pair => !Object.hasOwn(SAME_WORDS, pair)), [], 'merge the keys, or list the pair with its two meanings');
   assert.deepEqual(Object.keys(SAME_WORDS).filter(pair => !same.includes(pair)), [], 'a listed pair no longer the same: drop it');
 });

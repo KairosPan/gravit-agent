@@ -262,6 +262,31 @@ test('You here sorts the owner’s orders by their authority, never by the word 
   assert.doesNotMatch(here, /What agents do here/, 'the owner’s order is no agent’s');
 });
 
+test("a position's side, a statement line's status and who it was by, and a funding line's side are drawn from the table, and an unknown code as it came", () => {
+  const probe = {
+    'account.positionSide.long': 'LONG-W', 'markets.here.position': '{symbol} | {qty} | {side}', 'account.statementStatus.canceled': 'CANCELED-W',
+    'account.statementStatus.open': 'OPEN-W', 'account.statementBy.you': 'YOU-W', 'account.statementBy.inLimit': '[{name}] in-limit', 'markets.funding.held': '{qty} {side}',
+  };
+  const btc = withTable(probe, () => screen({ route: { screen: 'markets', id: 'coin:BTC' }, account: true }).html);
+  assert.ok(linesOf(section(btc, 'You here')).map(text).some(l => l.startsWith('·Stand-in Exchange · BTC/USDT:USDT | 0.01 | LONG-W · ')), 'a position in the table’s order');
+  assert.deepEqual(linesOf(section(btc, 'On the statement')).map(text).map(l => l.slice(l.indexOf('$0.00') + 5)), ['CANCELED-W · YOU-W', 'OPEN-W · YOU-W']);
+  const sol = withTable(probe, () => screen({ route: { screen: 'markets', id: 'coin:SOL' }, account: true }).html);
+  assert.ok(linesOf(section(sol, 'You here')).map(text).some(l => l.endsWith('$0.00OPEN-W · [Claude Code] in-limit')), 'an agent’s statement line under what agents do here');
+  const perp = screen({ route: { screen: 'markets', id: 'perp:BTC' }, account: true }).s;
+  const funding = { ok: true, missing: [], lines: [{ at: '2026-10-22T10:00:00.000Z', symbol: 'BTC/USDT:USDT', side: 'long', qty: 0.01, rate: 0.0001, usd: 0.06, venue: 'ex', venueName: 'Stand-in Exchange' }] };
+  const paid = withTable(probe, () => renderMarketsScreen(R.depthLoaded(perp, { id: 'perp:BTC', part: 'funding', data: funding, at: NOW }), NOW));
+  assert.match(section(paid, 'Funding'), / · Stand-in Exchange · 0\.01 LONG-W · rate 0\.0100%/);
+  // codes with no word: drawn as they came
+  const here = fx('asset-btc');
+  here.positions = here.positions.map(p => ({ ...p, side: 'flat' }));
+  const s = screen({ route: { screen: 'markets', id: 'coin:BTC' }, account: true, here }).s;
+  const statement = fx('statement');
+  statement.lines = statement.lines.map(l => ({ ...l, status: 'held at the bank', by: 'Someone else' }));
+  const odd = renderMarketsScreen(R.statementLoaded(s, { data: statement, at: NOW }), NOW);
+  assert.ok(linesOf(section(odd, 'You here')).map(text).some(l => l.startsWith('·Stand-in Exchange · flat 0.01 BTC/USDT:USDT · ')), 'a side with no word');
+  assert.ok(linesOf(section(odd, 'On the statement')).map(text).every(l => l.endsWith('$0.00held at the bank · Someone else')), 'a status and a by with no word');
+});
+
 test('the page: no Buy, no Sell on a page that does not sign; the range seg; Across venues with best and Connect to trade; You here; On the statement', () => {
   const page = (id, over = {}) => screen({ route: { screen: 'markets', id }, account: true, ...over });
   const btc = page('coin:BTC', {

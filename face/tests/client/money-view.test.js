@@ -159,6 +159,17 @@ test('take out lists only what something is in', async () => {
   assert.equal(earnOutAt(ro, 'ex'), false, 'an Account that takes no writes');
 });
 
+test("a yield's kind is the table's word, an unknown kind as it came", async () => {
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  const { earnRate } = await import('../../client/js/host/money-view.js');
+  withTable({ 'money.earnRate.apy': 'yield {rate} a year', 'money.earnRate.apr': 'rate {rate} a year' }, () => {
+    assert.equal(earnRate({ apy: 0.046, rateKind: 'apy' }), 'yield 4.60% a year');
+    assert.equal(earnRate({ apy: 0.03, apyHigh: 0.05 }), 'yield 3.00%–5.00% a year', 'a yield with no kind said is an APY');
+    assert.equal(earnRate({ apy: 0.01, rateKind: 'apr' }), 'rate 1.00% a year');
+    assert.equal(earnRate({ apy: 0.01, rateKind: 'ear' }), '1.00% ear', 'a kind with no word, as it came');
+  });
+});
+
 test("a wallet's networks are listed under the table's separator", async () => {
   const { withTable } = await import('../../client/js/i18n/words.js');
   const wallet = receiveRowsOf(page({ extra: [okx(), mine()] })).find(r => r.venue === 'wallet-mm');

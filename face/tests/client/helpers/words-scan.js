@@ -301,16 +301,34 @@ export function assembled(source, file = 'source.js') {
 // a words call's result upper- or lower-cased (plan 7 Task 6): a script without case (Chinese) has no upper case to take, and
 // a table's word is drawn as the table holds it — a word drawn in capitals is its own key. A .toUpperCase(), .toLowerCase(),
 // .toLocaleUpperCase() or .toLocaleLowerCase() whose receiver is a words call (through parentheses, an element, .charAt,
-// .slice, .substring and .trim), or a name a words call was assigned to in the same function
+// .slice, .substring and .trim), a name a words call was assigned to in the same function, or a property (`x.kind`) whose
+// name is in props — the names wordsProps finds assigned a words call across the sources scanned
 const CASES = new Set(['toUpperCase', 'toLowerCase', 'toLocaleUpperCase', 'toLocaleLowerCase']);
+const unwrap = n => { while (n && ts.isParenthesizedExpression(n)) n = n.expression; return n; };
+
+// the property names a source assigns a words call to — an object literal's `name: t(…)` or `obj.name = t(…)` (t, th, tn,
+// thn) — so casedWords can see a word carried to another file in a property. A words call's own params object is not one:
+// the table reads it, nothing reads its property back
+export function wordsProps(source, file = 'source.js') {
+  const sf = parse(source, file);
+  const out = new Set();
+  const reads = n => { n = unwrap(n); return isWordsCall(n) && READS.has(n.expression.text); };
+  const isParams = obj => isWordsCall(obj.parent) && obj.parent.arguments.includes(obj);
+  const visit = node => {
+    if (ts.isPropertyAssignment(node) && (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) && reads(node.initializer) && !isParams(node.parent)) out.add(node.name.text);
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isPropertyAccessExpression(node.left) && reads(node.right)) out.add(node.left.name.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out;
+}
 const PIECES = new Set(['charAt', 'slice', 'substring', 'substr', 'trim', 'trimStart', 'trimEnd', 'at']);
-export function casedWords(source, file = 'source.js') {
+export function casedWords(source, file = 'source.js', { props = new Set() } = {}) {
   const sf = parse(source, file);
   const out = [];
   const scopeOf = node => { let up = node.parent; while (up && !ts.isFunctionLike(up) && !ts.isSourceFile(up)) up = up.parent; return up; };
   // the names a words call is assigned to, by the function they live in
   const named = new Map();
-  const unwrap = n => { while (n && ts.isParenthesizedExpression(n)) n = n.expression; return n; };
   const visitNames = node => {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && isWordsCall(unwrap(node.initializer))) {
       const scope = scopeOf(node);
@@ -323,6 +341,7 @@ export function casedWords(source, file = 'source.js') {
     n = unwrap(n);
     if (!n) return false;
     if (isWordsCall(n)) return true;
+    if (ts.isPropertyAccessExpression(n) && props.has(n.name.text)) return true;
     if (ts.isElementAccessExpression(n)) return receiverWords(n.expression, at);
     if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && PIECES.has(n.expression.name.text)) return receiverWords(n.expression.expression, at);
     if (ts.isIdentifier(n)) { let scope = scopeOf(at); while (scope) { if (named.get(scope)?.has(n.text)) return true; if (ts.isSourceFile(scope)) break; scope = scopeOf(scope); } }

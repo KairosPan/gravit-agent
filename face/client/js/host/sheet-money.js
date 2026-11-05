@@ -267,7 +267,7 @@ const productKey = p => `${str(p?.venue)}|${str(p?.id)}`;
 // a product as the sheet keeps it: what its fields, its draft and its lines read, nothing else
 const earnProduct = p => ({
   key: productKey(p), venue: str(p.venue), venueName: str(p.venueName) || str(p.venue), id: str(p.id), name: str(p.name) || str(p.id),
-  asset: str(p.asset), rate: earnRate(p), canSupply: p.canSupply === true, why: str(p.why), lands: str(p.lands),
+  asset: str(p.asset), rated: { apy: p.apy, apyHigh: p.apyHigh, rateKind: p.rateKind }, canSupply: p.canSupply === true, why: str(p.why), lands: str(p.lands),
   minAmount: typeof p.minAmount === 'number' ? p.minAmount : null,
   held: isRecord(p.held) && typeof p.held.amount === 'number' ? { amount: p.held.amount, asset: str(p.held.asset) || str(p.asset) } : null,
   ready: typeof p.ready === 'number' ? p.ready : 0,
@@ -285,7 +285,7 @@ export function earnSeedOf(earnBody, page, preset = {}) {
 
 const earnSideOf = (seed, fields) => sideWord((fields !== undefined ? valueOf(fields, 'side') : '') || str(seed?.side));
 const earnListFor = (seed, side) => records(seed?.[side]);
-const productLabel = (p, side) => [p.name, p.venueName, p.asset, p.rate].filter(Boolean).join(' · ')
+const productLabel = (p, side) => [p.name, p.venueName, p.asset, earnRate(p.rated)].filter(Boolean).join(' · ')
   + (side === 'supply' && !p.canSupply ? ` · ${p.why ? t('sheet.earn.closedWhy', { why: p.why }) : t('sheet.earn.closed')}` : '');
 
 // the fields for a side, each value the one given where its field still takes it: an amount typed for one asset is not carried

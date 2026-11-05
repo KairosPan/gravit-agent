@@ -392,6 +392,17 @@ test("a seat write's words are in the table's order: the venue, an order's side,
   });
 });
 
+test("a seat move's and a seat earn's kind are the table's word, an unknown kind as it came", () => {
+  withTable({ 'thread.seatMove.withdraw': 'WITHDRAWS', 'thread.seatMove.bridge': 'BRIDGES', 'thread.seatEarn.supply': 'PUTS IN', 'thread.seatEarn.withdraw': 'TAKES OUT' }, () => {
+    assert.equal(seatLine('portfolio_live_move', { amount: 50, asset: 'USDC', kind: 'withdraw', from: 'okx', to: 'wallet' }), 'move 50 USDC · WITHDRAWS from okx to wallet');
+    assert.equal(seatLine('portfolio_live_move', { amount: 50, asset: 'USDC', kind: 'bridge', from: 'wallet' }), 'move 50 USDC · BRIDGES from wallet');
+    assert.equal(seatLine('portfolio_live_move', { amount: 50, asset: 'USDC', kind: 'teleport', from: 'wallet' }), 'move 50 USDC · teleport from wallet');
+    assert.equal(seatLine('portfolio_live_earn', { kind: 'supply', amount: 100, asset: 'USDT', venue: 'ex' }), 'earn PUTS IN 100 USDT · ex');
+    assert.equal(seatLine('portfolio_live_earn', { kind: 'withdraw', amount: 100, asset: 'USDT', venue: 'ex' }), 'earn TAKES OUT 100 USDT · ex');
+    assert.equal(seatLine('portfolio_live_earn', { kind: 'stake', amount: 100, asset: 'USDT', venue: 'ex' }), 'earn stake 100 USDT · ex');
+  });
+});
+
 test("a seat order's side is the table's word, an unknown side as it came; a batch's venues are the table's list", () => {
   withTable({ 'thread.seat.buy': 'BUYS', 'thread.seat.sell': 'SELLS', 'common.list.sep': ' + ' }, () => {
     assert.equal(seatLine('portfolio_live_order', { side: 'buy', qty: 10, symbol: 'AAPL' }), 'BUYS 10 AAPL · market');

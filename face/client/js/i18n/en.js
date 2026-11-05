@@ -212,6 +212,14 @@ export const EN = Object.freeze({
   'thread.seat.moveTo': 'move {what} · {kind} from {from} to {to}',
   'thread.seat.moveKind': 'move',
   'thread.seat.earn': 'earn {what}',
+  // the Account's codes for a seat move's and a seat earn's kind (host/kinds.js seatLine), worded; an unknown one as it came
+  'thread.seatMove.withdraw': 'withdraw',
+  'thread.seatMove.send': 'send',
+  'thread.seatMove.transfer': 'transfer',
+  'thread.seatMove.swap': 'swap',
+  'thread.seatMove.bridge': 'bridge',
+  'thread.seatEarn.supply': 'supply',
+  'thread.seatEarn.withdraw': 'withdraw',
   'thread.seat.pay': 'pay up to {amount}',
   'thread.seat.execute': 'execute at {account}',
   'thread.seat.transfer': 'transfer {what} · {from} to {to}',
@@ -629,10 +637,12 @@ export const EN = Object.freeze({
   'account.orders.title': 'Open orders',
   'account.orders.none': 'No open orders',
   // an order in a line (render/account.js orderWords): the Account's side, type and status codes worded, an unknown one drawn
-  // as it came; the line's facts under the visual separator ` · ` stay in code
+  // as it came; the line's facts under the visual separator ` · ` stay in code. The shapes, their {side} and {type} the codes
+  // below (account.orderSide.*, account.orderType.*):
   'account.order.sized': '{side} {qty} {symbol}',
   'account.order.unsized': '{side} {symbol}',
   'account.order.typeAt': '{type} {price}',
+  // the codes, put into the shapes above (account.order.*); What you sign's order says its own (owner.order.*)
   'account.orderSide.buy': 'Buy',
   'account.orderSide.sell': 'Sell',
   'account.orderType.market': 'market',
@@ -645,6 +655,11 @@ export const EN = Object.freeze({
   'account.orderStatus.partial': 'partial',
   'account.orderStatus.filled': 'filled',
   'account.orderStatus.canceled': 'canceled',
+  'account.orderStatus.rejected': 'rejected',
+  'account.orderStatus.expired': 'expired',
+  // a position's side, the Account's code worded (an unknown code is drawn as it came)
+  'account.positionSide.long': 'long',
+  'account.positionSide.short': 'short',
   'account.key.change': 'Change…',
   'account.key.sell': 'Sell…',
   'account.key.close': 'Close…',
@@ -654,6 +669,30 @@ export const EN = Object.freeze({
   'account.statement.export': 'Export CSV',
   'account.statement.unavailable': 'Statement unavailable',
   'account.statement.none': 'No statement lines yet',
+  // a statement line's status and who it was by (render/account.js statementStatusWord, statementByWord; the Statement drawer
+  // and a market's page): the Account's codes worded, an agent's line with its name and, for a bracket's exit, its order; an
+  // unknown one drawn as it came
+  'account.statementStatus.pending': 'pending',
+  'account.statementStatus.open': 'open',
+  'account.statementStatus.partial': 'partial',
+  'account.statementStatus.filled': 'filled',
+  'account.statementStatus.canceled': 'canceled',
+  'account.statementStatus.rejected': 'rejected',
+  'account.statementStatus.expired': 'expired',
+  'account.statementStatus.notFollowedRestart': 'not followed since a restart',
+  'account.statementStatus.notFollowed': 'not followed',
+  'account.statementStatus.waitingWallet': 'waiting for wallet',
+  'account.statementStatus.settled': 'settled',
+  'account.statementStatus.failed': 'failed',
+  'account.statementStatus.stranded': 'stranded',
+  'account.statementStatus.unknown': 'unknown',
+  'account.statementStatus.done': 'done',
+  'account.statementBy.you': 'You',
+  'account.statementBy.paper': 'The paper account',
+  'account.statementBy.approved': '{name}, approved by you',
+  'account.statementBy.inLimit': '{name}, inside its limit',
+  'account.statementBy.takeProfit': '{name}, take-profit of {order}',
+  'account.statementBy.stopLoss': '{name}, stop-loss of {order}',
 
   // Account › Venues (render/account.js): a venue's row and its Details, the seat box
   'venues.disconnect': 'Disconnect…',
@@ -763,6 +802,10 @@ export const EN = Object.freeze({
   'money.earn.putIn': 'Put in…',
   'money.earn.none': 'Nothing is earning to take out.',
   'money.earn.readOnly': 'Read-only: the Account was started without trading, so no money goes in or out of earn.',
+  // a yield as the venue states it (host/money-view.js earnRate), by the Account's code for its kind; none stated is an APY,
+  // an unknown kind is drawn as it came
+  'money.earnRate.apy': '{rate} APY',
+  'money.earnRate.apr': '{rate} APR',
   'money.sellMany.title': 'Sell many',
   'money.sellMany.lead': "Everything you hold that isn't a dollar. Pick up to {max}: each is its own order at market and its own signature.",
   'money.sellMany.leadAt': "Everything you hold that isn't a dollar at {venue}. Pick up to {max}: each is its own order at market and its own signature.",
@@ -1370,6 +1413,7 @@ export const EN = Object.freeze({
   'markets.here.title': 'You here',
   'markets.here.none': 'You don’t hold any.',
   'markets.here.agents': 'What agents do here',
+  'markets.here.position': '{side} {qty} {symbol}',
   'markets.book.title': 'Order book',
   'markets.book.none': 'No orders on the book.',
   'markets.book.bid': 'Bid',
@@ -1385,6 +1429,7 @@ export const EN = Object.freeze({
   'markets.funding.paid': 'Paid {usd}',
   'markets.funding.received': 'Received {usd}',
   'markets.funding.rate': 'rate {rate}',
+  'markets.funding.held': '{side} {qty}',
   'markets.funding.unavailable': 'Funding unavailable',
   'markets.funding.notRead': 'Not read: {venues}.',
   'markets.funding.missed': '{venue}: {why}',

@@ -137,13 +137,16 @@ function assetsBox(lens, state) {
 function positionsBox(lens, state) {
   const keyed = marketKeysOn(state);
   const rows = positionsOf(lens.data).map(p => [
-    lines(p.symbol, [[p.venueName || p.venue, p.side, numWord(p.qty)].filter(Boolean).join(' · ')], p.paper ? t('account.chip.paper') : ''),
+    lines(p.symbol, [[p.venueName || p.venue, positionSideWord(p.side), numWord(p.qty)].filter(Boolean).join(' · ')], p.paper ? t('account.chip.paper') : ''), // words-order: a position's facts under the visual separator
     esc(money(p.usd)), esc(price(p.entryPrice)), esc(price(p.markPrice)), `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>`,
     ...(keyed ? [rowKeys(positionKeys(p, state.account.data, state.markets?.accountQuotes))] : []),
   ]);
   const head = [t('account.positions.position'), t('account.positions.value'), t('account.positions.entry'), t('account.positions.mark'), t('account.pnl'), ...(keyed ? [''] : [])];
   return rows.length ? box(`${title(t('account.positions.title'))}${table(head, rows)}`, th('account.positions.title')) : '';
 }
+
+// a position's side, the Account's code worded; a code with no word is drawn as it came
+export const positionSideWord = side => (side === 'long' ? t('account.positionSide.long') : side === 'short' ? t('account.positionSide.short') : side);
 
 // the Account's codes for an order's side, type and status, worded; a code with no word is drawn as it came
 const orderSideWord = side => (side === 'buy' ? t('account.orderSide.buy') : side === 'sell' ? t('account.orderSide.sell') : side);
@@ -164,8 +167,47 @@ function orderStatusWord(status) {
     case 'partial': return t('account.orderStatus.partial');
     case 'filled': return t('account.orderStatus.filled');
     case 'canceled': return t('account.orderStatus.canceled');
+    case 'rejected': return t('account.orderStatus.rejected');
+    case 'expired': return t('account.orderStatus.expired');
     default: return status;
   }
+}
+
+// a statement line's status, the Account's code worded (an order's, a payment's, an earn request's, and the Account's own
+// for an order it stopped following or one its wallet has not sent); a code with no word is drawn as it came
+export function statementStatusWord(status) {
+  switch (status) {
+    case 'pending': return t('account.statementStatus.pending');
+    case 'open': return t('account.statementStatus.open');
+    case 'partial': return t('account.statementStatus.partial');
+    case 'filled': return t('account.statementStatus.filled');
+    case 'canceled': return t('account.statementStatus.canceled');
+    case 'rejected': return t('account.statementStatus.rejected');
+    case 'expired': return t('account.statementStatus.expired');
+    case 'not followed since a restart': return t('account.statementStatus.notFollowedRestart'); // en-kept: the Account's words, matched; never on screen
+    case 'not followed': return t('account.statementStatus.notFollowed'); // en-kept: the Account's words, matched; never on screen
+    case 'waiting for wallet': return t('account.statementStatus.waitingWallet'); // en-kept: the Account's words, matched; never on screen
+    case 'settled': return t('account.statementStatus.settled');
+    case 'failed': return t('account.statementStatus.failed');
+    case 'stranded': return t('account.statementStatus.stranded');
+    case 'unknown': return t('account.statementStatus.unknown');
+    case 'done': return t('account.statementStatus.done');
+    default: return status;
+  }
+}
+
+// who a statement line was by, as the Account writes it (account/statement.ts): You, the paper account, or an agent's name with
+// how it acted — on your yes, inside its limit, or as a bracket's exit of an order; anything else as it came
+const AGENT_BY = /^(.+), (?:(approved by you)|(inside its limit)|take-profit of (\S+)|stop-loss of (\S+))$/;
+export function statementByWord(by) {
+  if (by === 'You') return t('account.statementBy.you'); // en-kept: the Account's word, matched; never on screen
+  if (by === 'The paper account') return t('account.statementBy.paper'); // en-kept: the Account's words, matched; never on screen
+  const m = typeof by === 'string' ? by.match(AGENT_BY) : null;
+  if (!m) return by;
+  const [, name, approved, inLimit, takeProfit, stopLoss] = m;
+  if (approved) return t('account.statementBy.approved', { name });
+  if (inLimit) return t('account.statementBy.inLimit', { name });
+  return takeProfit ? t('account.statementBy.takeProfit', { name, order: takeProfit }) : t('account.statementBy.stopLoss', { name, order: stopLoss });
 }
 
 // an order in a line: `Stand-in Exchange · Buy 0.5 SOL/USDT · limit 142.44 · open · You` (a market's page lists its own so)
@@ -517,6 +559,7 @@ function rulesTab(state, now) {
 const noReceive = () => t('money.receive.none');
 const noSource = () => t('money.move.none');
 const moveReadOnly = () => t('money.move.readOnly');
+// for the Account's own sentence (a receive address's `whose`: a wallet's name, the venue's deposit address in its words), never a code
 const capFirst = s => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 
 // a Receive row: the account and its network words (an exchange's asset chip beside them), Show address, and once read, the
@@ -670,7 +713,7 @@ export function renderSellMany(state) {
 export function renderStatement(state, now) {
   const st = state.account.statement;
   const rows = statementLinesOf(st.data).map(l => {
-    const facts = [l.by, l.status, l.feeUsd === null ? '' : t('account.statement.fee', { fee: money(l.feeUsd) })].filter(Boolean).join(' · '); // words-order: a statement line's facts under the visual separator
+    const facts = [statementByWord(l.by), statementStatusWord(l.status), l.feeUsd === null ? '' : t('account.statement.fee', { fee: money(l.feeUsd) })].filter(Boolean).join(' · '); // words-order: a statement line's facts under the visual separator
     return `<div class="activity-row"><span class="dim">${esc(when(l.at, now))}</span>` +
       `<span class="activity-text">${esc(l.description)}${facts ? `<br><span class="dim">${esc(facts)}</span>` : ''}</span><span class="num">${esc(money(l.amountUsd))}</span></div>`;
   }).join('');

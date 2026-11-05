@@ -168,11 +168,17 @@ export const pageVenueOf = (page, id) => venuesOfPage(page).find(v => v.id === i
 
 // ── Earn (earn.js:9-52) ──
 
-/** earn.js:42 — a yield as the venue states it: `5.20% APY`, or a range `4.00%–6.00% APR`; none stated: ''. */
+/** earn.js:42 — a yield as the venue states it: `5.20% APY`, or a range `4.00%–6.00% APR`, by the Account's code for its kind
+ *  (none is an APY; one with no word is drawn as it came); none stated: ''. */
 export function earnRate(x) {
   if (!isRecord(x) || typeof x.apy !== 'number' || !Number.isFinite(x.apy)) return '';
   const high = typeof x.apyHigh === 'number' && Number.isFinite(x.apyHigh) ? `–${(x.apyHigh * 100).toFixed(2)}%` : '';
-  return `${(x.apy * 100).toFixed(2)}%${high} ${(str(x.rateKind) || 'apy').toUpperCase()}`;
+  const rate = `${(x.apy * 100).toFixed(2)}%${high}`;
+  switch (str(x.rateKind) || 'apy') {
+    case 'apy': return t('money.earnRate.apy', { rate });
+    case 'apr': return t('money.earnRate.apr', { rate });
+    default: return `${rate} ${x.rateKind}`;
+  }
 }
 
 const upper = v => String(v ?? '').toUpperCase();

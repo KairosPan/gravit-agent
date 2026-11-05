@@ -50,6 +50,18 @@ function typeWord(a) {
 // one order in words, without its venue: "buy $100 of AAPL · market", "sell 10 AAPL · limit 187.4"
 // a seat order's side, Gravit's argument worded: buy and sell, any other as it came, none an order
 const sideWord = side => (side === 'buy' ? t('thread.seat.buy') : side === 'sell' ? t('thread.seat.sell') : has(side) ? side : t('thread.seat.order'));
+// a seat move's and a seat earn's kind, the Account's codes (portfolio_live_move, portfolio_live_earn) worded; any other as it came
+function moveKindWord(kind) {
+  switch (kind) {
+    case 'withdraw': return t('thread.seatMove.withdraw');
+    case 'send': return t('thread.seatMove.send');
+    case 'transfer': return t('thread.seatMove.transfer');
+    case 'swap': return t('thread.seatMove.swap');
+    case 'bridge': return t('thread.seatMove.bridge');
+    default: return kind;
+  }
+}
+const earnKindWord = kind => (kind === 'supply' ? t('thread.seatEarn.supply') : kind === 'withdraw' ? t('thread.seatEarn.withdraw') : kind);
 function orderWords(a) {
   const size = has(a.usd) ? t('thread.seat.usdOf', { usd: money(a.usd), symbol: has(a.symbol) ? a.symbol : '?' }) : words(a.qty, a.symbol);
   return t('thread.seat.orderLine', { side: sideWord(a.side), size, type: typeWord(a) });
@@ -69,10 +81,10 @@ export function seatLine(name, a = {}) {
     case 'portfolio_live_close': return at(t('thread.seat.close', { what: words(a.qty, a.symbol) || '?' }), a.venue);
     case 'portfolio_live_leverage': return at(t('thread.seat.leverage', { symbol: has(a.symbol) ? a.symbol : '?', x: has(a.leverage) ? a.leverage : '?' }), a.venue);
     case 'portfolio_live_move': {
-      const move = { what: words(a.amount, a.asset) || '?', kind: has(a.kind) ? a.kind : t('thread.seat.moveKind'), from: has(a.from) ? a.from : '?' };
+      const move = { what: words(a.amount, a.asset) || '?', kind: has(a.kind) ? moveKindWord(a.kind) : t('thread.seat.moveKind'), from: has(a.from) ? a.from : '?' };
       return has(a.to) ? t('thread.seat.moveTo', { ...move, to: a.to }) : t('thread.seat.move', move);
     }
-    case 'portfolio_live_earn': return at(t('thread.seat.earn', { what: words(a.kind, a.amount, a.asset) || '?' }), a.venue);
+    case 'portfolio_live_earn': return at(t('thread.seat.earn', { what: words(earnKindWord(a.kind), a.amount, a.asset) || '?' }), a.venue);
     case 'portfolio_pay': {
       let host = '';
       try { host = new URL(String(a.url)).host; } catch { host = typeof a.url === 'string' ? a.url : ''; }
