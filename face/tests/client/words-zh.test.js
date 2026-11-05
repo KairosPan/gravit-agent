@@ -179,16 +179,8 @@ function guardEndOffenders(table, en, keys) {
   });
 }
 
-// every EN key has a ZH value (D35), but in an area a later batch of Task 8 writes; and every such area still lacks one, so the
-// list cannot outlive its batch. Each batch removes its areas; the last deletes the list
-const PENDING_AREAS = ['discover', 'channel', 'modules', 'runSheet', 'lunhui'];
-const areaOf = key => key.split('.')[0];
-function completeOffenders(table, en, pending) {
-  const keys = Object.keys(en);
-  const missing = keys.filter(key => !pending.includes(areaOf(key)) && typeof table[key] !== 'string').map(key => `${key}: no ZH value`);
-  const done = pending.filter(area => keys.filter(key => areaOf(key) === area).every(key => typeof table[key] === 'string')).map(area => `${area}: pending, but every key has a ZH value`);
-  return [...missing, ...done];
-}
+// every EN key has a ZH value (D35): a new word ships in both tables (D37)
+const completeOffenders = (table, en) => Object.keys(en).filter(key => typeof table[key] !== 'string').map(key => `${key}: no ZH value`);
 
 // ── the keys whose value can end a Guard line ──
 
@@ -462,10 +454,8 @@ test('the keys whose value can end a Guard line end a sentence in ZH exactly whe
 });
 
 test('every EN key has a ZH value', () => {
-  assert.deepEqual(completeOffenders(ZH, EN, PENDING_AREAS), []);
-  assert.ok(PENDING_AREAS.every(area => Object.keys(EN).some(key => areaOf(key) === area)), 'PENDING_AREAS names areas of EN');
-  const en = { 'a.b': 'Save', 'a.c': 'Cancel', 'd.e': 'Open', 'f.g': 'Close' };
-  assert.deepEqual(completeOffenders(bad({ 'a.b': '保存', 'a.c': '取消', 'd.e': '打开' }), en, ['f']), []);
-  assert.deepEqual(completeOffenders(bad({ 'a.b': '保存', 'd.e': '打开' }), en, ['f']), ['a.c: no ZH value']);
-  assert.deepEqual(completeOffenders(bad({ 'a.b': '保存', 'a.c': '取消', 'd.e': '打开', 'f.g': '关闭' }), en, ['f']), ['f: pending, but every key has a ZH value']);
+  assert.deepEqual(completeOffenders(ZH, EN), []);
+  const en = { 'a.b': 'Save', 'a.c': 'Cancel', 'd.e': 'Open' };
+  assert.deepEqual(completeOffenders(bad({ 'a.b': '保存', 'a.c': '取消', 'd.e': '打开' }), en), []);
+  assert.deepEqual(completeOffenders(bad({ 'a.b': '保存', 'd.e': '打开' }), en), ['a.c: no ZH value']);
 });
