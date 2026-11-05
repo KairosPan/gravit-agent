@@ -406,6 +406,38 @@ describe("the connected Slack connector, through the account", () => {
     expect(svc.identity!.inboxRing.last()).toBe(2);
   });
 
+  it("a thread_broadcast from the operator is a plain text with replyTo, live and backfilled, stored once each; other subtypes stay dropped", async () => {
+    const now = Math.floor(clock.now() / 1000);
+    const P = `${now - 600}.000100`;
+    slack.history.push({ ts: P, user: "U0BOT0001", text: "NVDA crossed 150", bot_id: "B0BOT0001" });
+    // live: a reply also sent to the DM
+    const B1 = `${now - 500}.000100`;
+    await acked(push(dm({ text: "seen it", ts: B1, thread_ts: P, subtype: "thread_broadcast" })));
+    expect(svc.identity!.inboxRing.last()).toBe(1);
+    // an edit is still dropped
+    await acked(push(dm({ text: "edited", ts: `${now - 450}.000100`, subtype: "message_changed" })));
+    expect(svc.identity!.inboxRing.last()).toBe(1);
+    slack.history.push({ ts: B1, user: OP, text: "seen it", subtype: "thread_broadcast", thread_ts: P });
+    slack.replies.push({ ts: B1, thread_ts: P, user: OP, text: "seen it", subtype: "thread_broadcast" });
+    // the socket down while the operator broadcasts a second reply: Slack keeps it in the history and in the thread
+    slack.answer("apps.connections.open", 200, { ok: false, error: "internal_error" });
+    const opens = slack.calls.filter((c) => c.method === "apps.connections.open").length;
+    slack.drop();
+    await until(() => slack.calls.filter((c) => c.method === "apps.connections.open").length > opens, 5000, "a failed open");
+    const B2 = `${now - 100}.000100`;
+    slack.history.push({ ts: B2, user: OP, text: "and sell", subtype: "thread_broadcast", thread_ts: P });
+    slack.replies.push({ ts: B2, thread_ts: P, user: OP, text: "and sell", subtype: "thread_broadcast" });
+    slack.answer("apps.connections.open", 0, {});
+    await until(() => svc.identity!.inboxRing.last() === 2, 8000, "the backfilled broadcast");
+    await until(() => cursor() === B2, 5000, "the cursor past the broadcast");
+    await pause(50);
+    const a = await inbox(0, 0);
+    expect(a.messages).toEqual([
+      { id: 1, network: "slack", messageId: `slack:${B1}`, replyTo: `slack:${P}`, text: "seen it", at: new Date(Number(B1.split(".")[0]) * 1000).toISOString() },
+      { id: 2, network: "slack", messageId: `slack:${B2}`, replyTo: `slack:${P}`, text: "and sell", at: new Date(Number(B2.split(".")[0]) * 1000).toISOString() },
+    ]);
+  });
+
   it("a read-only account neither writes Slack's cursor nor listens", async () => {
     await srv.close();
     // a cursor kept in a spelling a write would change (the connector reads it trimmed, and writes it bare)

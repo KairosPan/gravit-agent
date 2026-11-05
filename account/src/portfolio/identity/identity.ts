@@ -26,7 +26,8 @@
  * urgent alert and the watchdog always go. Each text has the account's own tokens (every connected network's) taken out, in every spelling,
  * then every Slack token's shape (`<token>`), and every link to this machine (the face's own address among them) made `<local link>`, before
  * it is cut into parts. What a network cannot take waits in the outbox (outbox.ts), flushed in order before each poll and each send — and,
- * for Slack, which has no poll, again SLACK_FLUSH_MS (or Slack's Retry-After) after it could not take one; what it refuses outright is
+ * for Slack, which has no poll, again SLACK_FLUSH_MS (or Slack's Retry-After) after it could not take one, and at once at boot or a
+ * connect when Slack's rows wait; what it refuses outright is
  * dropped with one line — a 403 makes Telegram's status read `blocked` until a line goes, and tokens a network no longer takes its
  * pollFailing. A network disconnected takes its queued messages with it: whoever connects next never
  * receives them. The account's own notices (notices.ts) go the same way: `onFill` for each fill the pages are told of, `onLedgerRow` for
@@ -227,6 +228,8 @@ export class Identity {
     this.resume();
     // an earlier run may have queued what this one takes out
     this.outbox.rewrite((t) => this.clean(t));
+    // and what it queued for Slack goes now: Slack has no poll to flush it before, and no send may come for hours
+    this.flushSlackQueued();
   }
 
   /** Send `m` as the account decides (see the top of this file). Never throws */
@@ -447,13 +450,20 @@ export class Identity {
 
   /** a Slack message waits in the outbox: flushed again in SLACK_FLUSH_MS, or when Slack's Retry-After says, if it is longer — Telegram's
    * poll flushes before each poll, Slack has none. One timer at a time; a send flushes first all the same */
-  private armFlush(network: Network, err: unknown): void {
+  private armFlush(network: Network, err: unknown, ms = SLACK_FLUSH_MS): void {
     if (network !== "slack" || this.disposed || this.flushTimer !== undefined) return;
     const after = err instanceof SlackApiError && err.retryAfterS !== undefined ? err.retryAfterS * 1000 : 0;
     this.flushTimer = this.clock.setTimeout(() => {
       this.flushTimer = undefined;
       if (this.outbox.length > 0 && !this.disposed) void this.outbound(() => this.flush()).catch(() => undefined);
-    }, Math.max(SLACK_FLUSH_MS, after));
+    }, Math.max(ms, after));
+  }
+
+  /** Slack's rows in the outbox (an earlier run's, or queued before a connect) flushed at once — at boot, and when Slack's transport
+   * starts. A read-only account writes nothing, so it flushes nothing */
+  private flushSlackQueued(): void {
+    if (this.deps.readOnly || !this.transports.has("slack") || !this.outbox.entries().some((e) => e.network === "slack")) return;
+    this.armFlush("slack", undefined, 0);
   }
 
   /** the account's tokens out of `text` in every spelling, then every Slack token's shape, then every link to this machine */
@@ -694,6 +704,7 @@ export class Identity {
     });
     this.connectors.set(binding.network, connector);
     connector.start();
+    this.flushSlackQueued();
   }
 
   /** Telegram's poller, from `offset` on: the offset written first — after a connect, the one after the message the operator was heard by,

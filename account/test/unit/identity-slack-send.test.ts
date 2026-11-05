@@ -15,7 +15,9 @@ import { keyHashOf, newSalt } from "../../src/portfolio/account/brain-keys.ts";
 import { signOwner, simKey, type OwnerAction } from "../../src/portfolio/account/sign.ts";
 import type { PendingView } from "../../src/portfolio/identity/pending.ts";
 import { SlackTransport } from "../../src/portfolio/identity/slack.ts";
+import { SLACK_FLUSH_MS } from "../../src/portfolio/identity/identity.ts";
 import { SlackApi, SlackApiError } from "../../src/portfolio/identity/slack-api.ts";
+import type { IdentityClock } from "../../src/portfolio/identity/telegram.ts";
 import { startPortfolioServer, type PortfolioServerHandle } from "../../src/portfolio/server.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
 import { fakeBotApi, fakeSlack, FAKE_BOT_TOKEN, slackTokens, type FakeBotApi, type FakeSlack } from "../identity-fakes.ts";
@@ -55,6 +57,43 @@ async function until(ok: () => boolean, ms = 5000, what = "the condition"): Prom
   }
 }
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** a clock whose waits of SLACK_FLUSH_MS or longer are held until a test fires them (only those armed after a mark, so a socket's own
+ * 30 s timers armed before it stay put); shorter waits fire at once, moving `now` by what they waited */
+function heldClock(start: number): IdentityClock & { mark(): number; armedSince(mark: number): number[]; fireSince(mark: number, ms: number): number } {
+  let offset = 0;
+  let seq = 0;
+  const held = new Map<object, { seq: number; ms: number; fn: () => void }>();
+  return {
+    now: () => start + offset,
+    setTimeout: (fn, ms) => {
+      if (ms >= SLACK_FLUSH_MS) {
+        const h = {};
+        held.set(h, { seq: ++seq, ms, fn });
+        return h;
+      }
+      const t = setTimeout(() => {
+        offset += ms;
+        fn();
+      }, 5);
+      t.unref();
+      return t;
+    },
+    clearTimeout: (h) => {
+      if (h !== null && typeof h === "object" && held.has(h)) held.delete(h);
+      else clearTimeout(h as NodeJS.Timeout);
+    },
+    mark: () => seq,
+    armedSince: (mark) => [...held.values()].filter((v) => v.seq > mark).map((v) => v.ms),
+    fireSince(mark, ms) {
+      const due = [...held.entries()].filter(([, v]) => v.seq > mark && v.ms === ms);
+      for (const [h] of due) held.delete(h);
+      offset += ms;
+      for (const [, v] of due) v.fn();
+      return due.length;
+    },
+  };
+}
 
 let envelopes = 0;
 const dm = (o: { user?: string; text?: string; ts?: string } = {}) => ({
@@ -112,6 +151,8 @@ describe("sending on Slack, through the account", () => {
   let svc: PortfolioService;
   let srv: PortfolioServerHandle;
   let clock = NOON_ET;
+  /** the identity's clock, when a test injects one before a reboot */
+  let idClock: IdentityClock | undefined;
   /** chat.postMessage fails as a network failure would while set */
   let netDown = false;
 
@@ -120,7 +161,7 @@ describe("sending on Slack, through the account", () => {
     return fetch(input, init);
   };
   const boot = async () => {
-    svc = await PortfolioService.create({ home, venues: "frontline", real: true, liveDeps: { http: async () => ({ status: 599, body: undefined, text: "" }), price: async () => undefined }, publicMarkets: [], liveWrites: { capUsd: 100, pairingCode: "K7QX-M2PA" }, account: { owners: [{ id: owner.address, kind: "eoa", label: "owner", addedAt: new Date().toISOString() }] }, identity: { apiBase: bot.url, slackApiBase: slack.url, fetch: fetchVia, pollTimeoutS: 1, connectedPollTimeoutS: 1, now: () => clock } });
+    svc = await PortfolioService.create({ home, venues: "frontline", real: true, liveDeps: { http: async () => ({ status: 599, body: undefined, text: "" }), price: async () => undefined }, publicMarkets: [], liveWrites: { capUsd: 100, pairingCode: "K7QX-M2PA" }, account: { owners: [{ id: owner.address, kind: "eoa", label: "owner", addedAt: new Date().toISOString() }] }, identity: { apiBase: bot.url, slackApiBase: slack.url, fetch: fetchVia, pollTimeoutS: 1, connectedPollTimeoutS: 1, now: () => clock, ...(idClock ? { clock: idClock } : {}) } });
     await svc.restoring;
     srv = await startPortfolioServer({ port: 0, service: svc, snapshotMs: 0 });
   };
@@ -169,6 +210,7 @@ describe("sending on Slack, through the account", () => {
 
   beforeEach(async () => {
     clock = NOON_ET;
+    idClock = undefined;
     netDown = false;
     slack = await fakeSlack();
     slack.users.set(OP, { name: "pan", displayName: "Pan", realName: "Pan Zhe" });
@@ -321,6 +363,47 @@ describe("sending on Slack, through the account", () => {
     expect((await send({ kind: "chat", text: "back" })).sent).toHaveLength(1);
     expect(slackStatus().pollFailing).toBeUndefined();
     expect(texts()).toEqual(["first", "second", "third", "back"]);
+  });
+
+  it("a queued Slack message goes after SLACK_FLUSH_MS with no other send, and after a longer Retry-After when Slack gives one", async () => {
+    await srv.close();
+    const c = heldClock(NOON_ET);
+    idClock = c;
+    await boot();
+    await until(() => slackStatus()?.polling === true, 5000, "the resumed connector's hello");
+    let mark = c.mark();
+    netDown = true;
+    expect(await send({ kind: "chat", text: "first" })).toEqual({ ok: true, queued: true });
+    netDown = false;
+    expect(c.armedSince(mark)).toEqual([SLACK_FLUSH_MS]);
+    await pause(50);
+    expect(texts()).toEqual([]);
+    expect(c.fireSince(mark, SLACK_FLUSH_MS)).toBe(1);
+    await until(() => texts().includes("first"), 5000, "the flush");
+    expect(status().queued).toBe(0);
+    // a 429 with Retry-After 90: the flush waits 90 s, not 30
+    mark = c.mark();
+    slack.answer("chat.postMessage", 429, { ok: false, error: "ratelimited" }, { "retry-after": "90" });
+    expect(await send({ kind: "alert", text: "second" })).toEqual({ ok: true, queued: true });
+    slack.answer("chat.postMessage", 0, {});
+    expect(c.armedSince(mark)).toEqual([90_000]);
+    expect(c.fireSince(mark, SLACK_FLUSH_MS)).toBe(0);
+    await pause(50);
+    expect(texts()).toEqual(["first"]);
+    expect(c.fireSince(mark, 90_000)).toBe(1);
+    await until(() => texts().includes("second"), 5000, "the flush after Retry-After");
+    expect(status().queued).toBe(0);
+  });
+
+  it("a Slack message queued by an earlier run goes at boot, with no other send", async () => {
+    netDown = true;
+    expect(await send({ kind: "chat", text: "while the net was down" })).toEqual({ ok: true, queued: true });
+    await srv.close();
+    netDown = false;
+    await boot();
+    await until(() => texts().includes("while the net was down"), 5000, "the boot flush");
+    expect(status().queued).toBe(0);
+    expect(slack.posted).toHaveLength(1);
   });
 
   it("a fill and a Guard card notice reach Slack, defanged, with no link", async () => {

@@ -3561,7 +3561,7 @@ test('Install app… opens Slack\'s sheet 1; Next posts both fields once and cle
   assert.equal(app.value, '');
   assert.equal(bot.value, '');
   assert.ok(!JSON.stringify(store.get()).includes(BOT) && !JSON.stringify(store.get()).includes(APP), 'no token in the store');
-  assert.ok(!f.html().includes(BOT), 'none on the page');
+  assert.ok(!f.html().includes(BOT) && !f.html().includes(APP), 'none on the page');
   assert.match(f.html(), /Connect Slack · 2 of 4 · Say hi/);
   f.fire('doc', 'keydown', { key: 'Escape' });
   assert.equal(store.get().identity.connect, null);

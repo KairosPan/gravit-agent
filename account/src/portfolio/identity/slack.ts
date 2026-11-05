@@ -7,7 +7,7 @@
  *     waited for up to HELLO_WAIT_MS, whose app must be the bot's. A bot token Slack does not know is refusedBySlack; an app-level token it
  *     will not open a socket for (no connections:write, Socket Mode off) slackNoSocket; a hello for another app slackPairMismatch; Slack not
  *     answering, a socket URL off Slack's host or no hello slackUnreachable, with one line that names neither token nor URL.
- *   Sheet 2 (listen): on that same socket, the first `message` event in a DM (`channel_type: "im"`, no subtype, no bot_id) from a person,
+ *   Sheet 2 (listen): on that same socket, the first `message` event in a DM (`channel_type: "im"`, no subtype but thread_broadcast, no bot_id) from a person,
  *     for this team and this app. Everything else — a channel, a group or an mpim, a bot, an edit or a deletion, another team or app — is
  *     acked at once and dropped. The person's names are asked of users.info (a user that is a bot is dropped); a sender the shell holds
  *     blocked or counts as a stranger is acked and not heard.
@@ -340,7 +340,8 @@ function envelopeEvent(e: Envelope, teamId: string, appId: string): unknown {
 }
 
 /** a DM's message event read, or undefined for anything that is not one: another type, a channel, a group or an mpim, ids not of Slack's
- * shapes. A user id of another shape reads as no user (and the message is never anyone's) */
+ * shapes. A user id of another shape reads as no user (and the message is never anyone's). A thread_broadcast (a thread reply also sent
+ * to the DM) reads as no subtype: live, backfilled and on the pending listen it is a plain text, with its thread_ts */
 function imMessageOf(raw: unknown): ImMessage | undefined {
   const ev = raw as Record<string, unknown> | null | undefined;
   if (!ev || typeof ev !== "object" || ev.type !== "message" || ev.channel_type !== "im") return undefined;
@@ -352,7 +353,8 @@ function imMessageOf(raw: unknown): ImMessage | undefined {
     channel,
     ts,
     text: typeof text === "string" ? text : "",
-    ...(subtype !== undefined ? { subtype: typeof subtype === "string" ? subtype : "?" } : {}),
+    // a thread reply also sent to the DM is the text it is, with its thread: every other subtype is kept, and dropped by the readers
+    ...(subtype !== undefined && subtype !== "thread_broadcast" ? { subtype: typeof subtype === "string" ? subtype : "?" } : {}),
     bot: ev.bot_id !== undefined || ev.bot_profile !== undefined || subtype === "bot_message",
     ...(typeof thread_ts === "string" && TS_SHAPE.test(thread_ts) ? { threadTs: thread_ts } : {}),
   };
@@ -480,7 +482,7 @@ export interface SlackConnectorDeps {
  *
  * Each message, live or backfilled:
  *   - the bound operator's text (an events_api envelope of this app and this team, a message in the DM `secret.channel`, from the
- *     operator's user id, no bot and no subtype): `!` commands rewritten to `/` (normalizeCommand); with Chat with Gravit not ticking
+ *     operator's user id, no bot and no subtype but thread_broadcast): `!` commands rewritten to `/` (normalizeCommand); with Chat with Gravit not ticking
  *     Slack and no command, answered SLACK_CHAT_OFF and kept nowhere; else appended to the inbox as `slack:<ts>` (with `slack:<thread_ts>`
  *     as replyTo in a thread), and only then acked and the cursor moved past it. A text the inbox cannot store is held (not acked) and
  *     ends its socket, so nothing after it is handled there and the cursor stays before it: the next hello's backfill reads it again.
@@ -489,7 +491,7 @@ export interface SlackConnectorDeps {
  *   - anyone else's DM: by sheet 3's rule (memberKind) a bot is dropped, and anyone else — another team's member, a guest, a deactivated
  *     account, a full member who is not the operator — is a stranger: counted in Not you unless blocked, never stored, never answered;
  *   - everything else (a channel, a group or an mpim, a bot, an edit or a deletion, another team or app, a slash command): dropped.
- * Everything but a held text is acked at once. Each hello's num_connections is read by ruling 8 (ConflictWatch): a conflict is the
+ * Everything is acked at once but a held text and a stranger users.info did not answer for (Slack sends both again). Each hello's num_connections is read by ruling 8 (ConflictWatch): a conflict is the
  * status's conflictAt and a line at most once a minute.
  */
 export class SlackConnector implements Connector {

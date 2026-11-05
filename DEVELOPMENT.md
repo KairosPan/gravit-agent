@@ -1246,7 +1246,7 @@ The modules:
     `slackPairMismatch`, `slackUnreachable`, each one fixed sentence naming neither token nor URL. Both tokens
     live in the pending connection's memory for its ten minutes and nowhere else.
   - **sheets 2 and 3**: on that same socket, the first `message` event in a DM (`channel_type: "im"`, no
-    subtype, no `bot_id`) of this team and app; everything else is acked and dropped. `memberKind(users.info,
+    subtype but `thread_broadcast`, no `bot_id`) of this team and app; everything else is acked and dropped. `memberKind(users.info,
     team)`: a bot is dropped; only a full member of the bot's own team is heard — another team's member, a guest
     (restricted or ultra-restricted) or a deactivated account is a stranger, counted in Not you, and the
     sheet waits on. The sender view carries the display name (else real name, else username), the handle
@@ -1269,7 +1269,9 @@ The modules:
     most 5 pages, one line when that bound is hit), at most 500 (`INBOX_MAX`; over 500 waiting, the newest 500
     with one line), oldest first, each read as the event it would have been. A backfill that fails throws, so the
     link backs off and the next hello backfills from the cursor where it stayed. Each message: the bound
-    operator's text in the bound DM (this app, this team, the operator's user id, no bot, no subtype) has a
+    operator's text in the bound DM (this app, this team, the operator's user id, no bot, no subtype — a
+    `thread_broadcast`, a thread reply also sent to the DM, is taken as a plain text with its thread's `replyTo`,
+    live and backfilled, and stored once though the backfill sees it in the history and the thread alike) has a
     leading `!status`, `!pause`, `!mute`, `!new` or `!stop` rewritten to `/` (`normalizeCommand`), is redacted
     (Slack token shapes and the bound tokens), and — with Chat with Gravit ticking Slack, or a command — is
     appended as `slack:<ts>` (`replyTo: slack:<thread_ts>` in a thread), and only then acked and the cursor
@@ -1277,10 +1279,10 @@ The modules:
     off on Slack: Account › Identity turns it on.` and kept nowhere. A text the inbox cannot store is held (not
     acked) and ends its socket, so the cursor never passes it and the next hello reads it again. A live text is
     skipped (acked) only when the inbox already holds it, or when it is Slack's retry of one at or before the
-    cursor. The operator's file (`file_share`) gets `text only, please`; anyone else in the DM by `memberKind`
-    (a bot dropped) is a stranger, counted unless blocked, never stored or answered; a channel, group or mpim, a
-    bot, an edit or deletion, another team or app, a slash or interactive envelope is dropped. Everything but a
-    held text is acked at once. A read-only account writes no cursor. `invalid_auth`, `token_revoked`,
+    cursor. The operator's file (`file_share`) gets `text only, please`; anyone else who DMs the app, by `memberKind`
+    (a bot dropped), is a stranger, counted unless blocked, never stored or answered; a channel, group or mpim, a
+    bot, an edit or deletion, another team or app, a slash or interactive envelope is dropped. Everything is acked
+    at once but a held text and a stranger whose `users.info` did not answer (held too, so Slack sends it again). A read-only account writes no cursor. `invalid_auth`, `token_revoked`,
     `account_inactive` and `not_authed` read as `pollFailing` with that code until a call goes through.
   - **SlackTransport** (rulings 3, 4, 10): `chat.postMessage` to the bound DM alone, `mrkdwn: false`,
     `unfurl_links: false`, `unfurl_media: false`, top level (never `thread_ts`: `replyTo` is taken and not sent),
@@ -1289,7 +1291,9 @@ The modules:
     failure is `retry` (queued in the outbox); the four auth codes `auth` (the status's `pollFailing`, the message
     dropped); every other code `refused` (dropped with one line). Slack has no `blocked`.
 - `identity.ts` — a Slack-only outbox flush timer: a queued Slack message is tried again 30 s later
-  (`SLACK_FLUSH_MS`), or after Slack's Retry-After when that is longer, since Slack has no poll to flush before.
+  (`SLACK_FLUSH_MS`), or after Slack's Retry-After when that is longer, since Slack has no poll to flush before;
+  Slack rows an earlier run left in the outbox (or queued before a connect) are flushed at once at boot and when
+  Slack's transport starts, with no send needed (a read-only account flushes nothing).
   Every log line has every running network's tokens and every Slack token shape taken out.
 - `routes.ts` — `POST /api/account/identity/slack/token` `{appToken, botToken, keyHash, salt}` (`SLACK_TOKEN_PATH`,
   `parseSlackTokenBody`), on the same own reader, 1,024-byte limit and fence as Telegram's
@@ -7363,7 +7367,10 @@ What actually holds, stated once (charter Rule 3). None is a guarantee; each is 
   frames without closing hears nothing for up to 30 minutes, and the next hello's backfill then
   takes what it missed, late. **Rate limits:** every hello reads `conversations.history` (and
   `conversations.replies` for each thread with a reply after the cursor, the last 24 h of history
-  at most 5 pages); Slack's limits on those methods for a non-Marketplace app can slow a backfill,
+  at most 5 pages); **a reply in an old thread while the account is down is not backfilled:** a
+  reply written while no socket is open, in a thread whose parent is older than 24 h (or beyond
+  those 5 pages of the last day), is never read — the backfill does not search that far for
+  parents, and says so with one line only when the 5-page bound is hit; Slack's limits on those methods for a non-Marketplace app can slow a backfill,
   which then fails, backs off and runs again from the same cursor. **One workspace:** one Slack
   binding, one app, one DM; a second workspace is a second connection the account does not hold.
   **Enterprise Grid** is untested: its org-wide user ids and shared channels may not read as the
