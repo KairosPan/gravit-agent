@@ -30,7 +30,9 @@
     {"en":"tool","zh":"工具","note":"a tool Gravit calls"},
     {"en":"background job","zh":"后台任务","note":"a shell command running behind a turn (the Jobs drawer)"},
     {"en":"turn","zh":"轮","note":"one round of Gravit answering; 第 {n} 轮 for Turn {n}"},
-    {"en":"step","zh":"步","note":"a step inside a turn; 步骤 holds it"},
+    {"en":"step","zh":"步","note":"a step inside a turn; 步骤 holds it", "except": {
+      "sheet.missing.step": {"why":"a step of the leverage cap's ladder (a value to pick), not a step of a turn","zh":"档"}
+    }},
     {"en":"Details","zh":"详情","note":"the details tab and a row's details"},
     {"en":"Usage","zh":"用量","note":"the Usage drawer"},
     {"en":"pin","zh":"置顶","note":"pin a conversation to the top (not 取消置顶 alone: Unpin is its own key)"},
@@ -200,6 +202,7 @@
     "/goal resume",
     "npm run desk",
     "npm run account:service",
+    "npm run account:service -- code",
     "/newbot",
     "!status",
     "!pause 30m",

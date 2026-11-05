@@ -119,13 +119,17 @@ function exceptOffenders(en, glossary) {
 //  - 。 closing a value whose EN closes with no full stop: refused;
 //  - a Han character touching an ASCII run with no space — Latin, a digit, a {param}, or any other ASCII graphic (a path, a
 //    command, a flag, a %: `~/.dsh`, `/newbot`, `!status`, `{n}%`) — refused, and two Han characters with a space between them;
-//    an ASCII mark is judged by the first two rules where they apply (`中.yml` is left as it is).
+//    an ASCII mark is judged by the first two rules where they apply (`中.yml` is left as it is);
+//  - two spaces anywhere, and a visual separator between two Han characters spaced on one side only. One space on each side of
+//    one (`账户 › 卡片`, `买入 / 卖出`) is the register's where EN spaces it: the two-Han rule is for adjacent Han only.
 const FULL_WIDTH = '，、。：；？！（）「」『』《》【】“”‘’';
+const SEPARATORS = '·›—–|/→×';
 function punctuationOffenders(table, en) {
   const after = new RegExp(`${HAN}\\s*([,:?]|!(?![A-Za-z0-9])|\\.(?![A-Za-z0-9.]))`, 'u');
   const beside = new RegExp(`${HAN}\\s*(\\.\\.\\.|[();])|(\\.\\.\\.|[();])\\s*${HAN}`, 'u');
   const spaced = new RegExp(`[ \\t][${FULL_WIDTH}]|[${FULL_WIDTH}][ \\t]`, 'u');
   const gap = new RegExp(`${HAN}\\s+${HAN}`, 'u');
+  const lopsided = new RegExp(`${HAN}[ \\t][${SEPARATORS}]${HAN}|${HAN}[${SEPARATORS}][ \\t]${HAN}`, 'u');
   const OTHER = '[\\x21-\\x7e]';
   const borders = [['Latin', `${HAN}[A-Za-z]|[A-Za-z]${HAN}`], ['a digit', `${HAN}[0-9]|[0-9]${HAN}`], ['a {param}', `${HAN}\\{|\\}${HAN}`],
     // a Han character followed by any other ASCII graphic that is no mark of the first two rules; or such a graphic before one that
@@ -137,11 +141,14 @@ function punctuationOffenders(table, en) {
     if (mark) out.push(`${key}: ASCII "${mark[1]}" after a Chinese character`);
     const next = v.match(beside);
     if (next) out.push(`${key}: ASCII "${next[1] ?? next[2]}" next to a Chinese character`);
-    if (spaced.test(v)) out.push(`${key}: a space beside a full-width mark`);
-    if (v.trimEnd().endsWith('。') && Object.hasOwn(en, key) && !forms(en[key]).some(s => s.trimEnd().endsWith('.'))) out.push(`${key}: ends in 。 where EN has no full stop`);
     // a Chinese date writes its units unspaced (time.date): `{month}月{day}日` is read here as one {param}, so it still takes its
-    // space from the Chinese around it
-    const dated = v.replace(/\{month\}月\{day\}日/g, '{date}');
+    // space from the Chinese around it. A Guard line's {stop} (sheet.guard.done|refused), which follows another {param}, is sheet.guard.stop, 。 or nothing
+    // after words that end in one (stopAfter): it is read as the 。 it is, so the sentence after it takes no space
+    const dated = v.replace(/\{month\}月\{day\}日/g, '{date}').replace(/\}\{stop\}/g, '}。');
+    if (spaced.test(dated)) out.push(`${key}: a space beside a full-width mark`);
+    if (/[ \t]{2}/.test(v)) out.push(`${key}: two spaces`);
+    if (lopsided.test(v)) out.push(`${key}: a separator between Chinese characters spaced on one side`);
+    if (v.trimEnd().endsWith('。') && Object.hasOwn(en, key) && !forms(en[key]).some(s => s.trimEnd().endsWith('.'))) out.push(`${key}: ends in 。 where EN has no full stop`);
     for (const [what, pattern] of borders) if (new RegExp(pattern, 'u').test(dated)) out.push(`${key}: no space between a Chinese character and ${what}`);
     if (gap.test(dated)) out.push(`${key}: a space between two Chinese characters`);
     return out;
@@ -174,8 +181,7 @@ function guardEndOffenders(table, en, keys) {
 
 // every EN key has a ZH value (D35), but in an area a later batch of Task 8 writes; and every such area still lacks one, so the
 // list cannot outlive its batch. Each batch removes its areas; the last deletes the list
-const PENDING_AREAS = ['owner', 'sheet', 'account', 'money', 'venues', 'agents', 'cards', 'rules',
-  'identity', 'markets', 'trade', 'desk', 'discover', 'channel', 'modules', 'runSheet', 'lunhui'];
+const PENDING_AREAS = ['account', 'money', 'venues', 'agents', 'cards', 'rules', 'identity', 'markets', 'trade', 'desk', 'discover', 'channel', 'modules', 'runSheet', 'lunhui'];
 const areaOf = key => key.split('.')[0];
 function completeOffenders(table, en, pending) {
   const keys = Object.keys(en);
@@ -384,6 +390,13 @@ test('ZH\'s punctuation and spacing are the register\'s', () => {
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '截至{month}月{day}日' }), en), ['a.b: no space between a Chinese character and a {param}']);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '{month}月' }), en), ['a.b: no space between a Chinese character and a {param}']);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '{n}月{day}日' }), en), ['a.b: no space between a Chinese character and a {param}']);
+  // decision: a Guard line's {stop} is a full stop (sheet.guard.stop, 。), so the Chinese after it takes no space
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '{said}{stop}守卫已开启' }), en), []);
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '未退出登录：{words}{stop}守卫已开启' }), en), []);
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '{said}{stop} 守卫已开启' }), en), ['a.b: a space beside a full-width mark']);
+  // a {stop} that follows no {param} is a price (thread.seat.stopLimit), no full stop: it is read as a {param}
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '止损 {stop} 限价 {limit}' }), en), []);
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '{said}守卫已开启' }), en), ['a.b: no space between a Chinese character and a {param}']);
   // an ASCII run that is no letter, digit or {param} at its edge — a path, a command, a flag, a percent — is as much a run
   const other = value => assert.deepEqual(punctuationOffenders(bad({ 'a.b': value }), en), ['a.b: no space between a Chinese character and ASCII text'], value);
   other('打开~/.dsh');
@@ -398,6 +411,13 @@ test('ZH\'s punctuation and spacing are the register\'s', () => {
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '输入 /newbot 发送，或 !status' }), en), []);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '占 {n}% 的任务' }), en), []);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '正在 运行' }), en), ['a.b: a space between two Chinese characters']);
+  // a visual separator between Chinese words takes one space on each side, as EN spaces it: the two-Han rule is for adjacent Han
+  for (const ok of ['账户 › 卡片', '账户 · 钱包', '买入 / 卖出', '已生成卡片 · {id} · 请在账户 › 卡片中处理', '平仓 — 全部', '1 – 3 天', '买入 | 卖出', '买 → 卖', '2 × 3'])
+    assert.deepEqual(punctuationOffenders(bad({ 'a.b': ok }), en), [], ok);
+  for (const [value, why] of [['账户  ›  卡片', 'two spaces'], ['账户 ›  卡片', 'two spaces'], ['账户 ›卡片', 'a separator between Chinese characters spaced on one side'],
+    ['买入 /卖出', 'a separator between Chinese characters spaced on one side'], ['账户 › ，卡片', 'a space beside a full-width mark'],
+    ['账户 卡片', 'a space between two Chinese characters'], ['共 {n}  个', 'two spaces']])
+    assert.deepEqual(punctuationOffenders(bad({ 'a.b': value }), en), [`a.b: ${why}`], value);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '第 3 轮，共 {n} 个' }), en), []);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '已连接（{name}）' }), en), [], 'a bracket is not Chinese script');
 });
