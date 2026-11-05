@@ -5,6 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { boardOf } from '../../client/js/host/lunhui.js';
 import {
   canonicalId, quoteWord, connectionWord, providerWord, basisWord, sourceWord, volumeWord, volumeWordOf, watchWord, mentionsOf,
   accountTabs, accountSorts, ACCOUNT_TAB_IDS, ACCOUNT_SORT_IDS, CANDLE_RANGES, isAccountKey, tabsOf, priceOf, sourceWordOf, legsOf, rowsOf, tableOf, sortsOf, matchKey, pairsOf,
@@ -942,6 +943,9 @@ test('no rows in the wrong order: a read for another sort shows none', () => {
 
 test('cnBoardOf and cnTileOf', () => {
   assert.deepEqual(['688981', '689009', '300750', '301132', '600519', '000001', '920306', '430047'].map(cnBoardOf), ['STAR', 'STAR', 'ChiNext', 'ChiNext', 'SH', 'SZ', 'BJ', 'BJ']);
+  // 302 is ChiNext too, here and in a run's words alike (one test, wire/china.js isChiNext)
+  assert.equal(cnBoardOf('302132'), 'ChiNext');
+  assert.equal(boardOf('302132'), 'ChiNext');
   assert.equal(cnTileOf('贵州茅台', '600519'), '贵');
   assert.equal(cnTileOf('', '600519'), '600519');
 });

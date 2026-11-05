@@ -13,6 +13,8 @@ const PROVIDER_STATUS = { live: "connected", stale: "limited", unavailable: "err
 
 /** @param {unknown} id */
 export const isCnKey = id => typeof id === "string" && CN_KEY.test(id);
+/** An A share's code on ChiNext (300, 301, 302): the one test host/market-view.js cnBoardOf and host/lunhui.js boardOf share. */
+export const isChiNext = code => /^30[0-2]/.test(String(code ?? ""));
 
 /** The Account's pair for a cn key (`china|600519`), else null. @param {unknown} id */
 export function chinaPairOf(id) {

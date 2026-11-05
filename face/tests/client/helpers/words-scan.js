@@ -173,16 +173,19 @@ export function wordsBindings(source, file = 'source.js') {
   return out.sort((a, b) => a.line - b.line);
 }
 
-// the literals a source keeps in place on purpose: every string's and template part's text on a line marked `// en-kept:` (a
-// provider's name, a key's name, a path) — the words the probe (words-probe.test.js) may meet on a screen from the source itself
+// the literals a source keeps in place on purpose and on screen: every string's and template part's text on a line marked
+// `// en-kept:` (a provider's name, a key's name, a path) — the words the probe (words-probe.test.js) may meet on a screen
+// from the source itself. A marker whose reason says the literal is never on screen, and an Error's message, count for nothing
+const OFF_SCREEN = /never on screen/;
 export function keptLiterals(source, file = 'source.js') {
   const sf = parse(source, file);
   const lines = source.split('\n');
-  const kept = node => KEPT.test(lines[lineAt(sf, node.getStart(sf)) - 1] ?? '');
+  const kept = node => { const line = lines[lineAt(sf, node.getStart(sf)) - 1] ?? ''; return KEPT.test(line) && !OFF_SCREEN.test(line.slice(line.search(KEPT))); };
+  const inError = node => { let up = node.parent; while (up && (ts.isTemplateSpan(up) || ts.isTemplateExpression(up) || ts.isBinaryExpression(up) || ts.isParenthesizedExpression(up))) up = up.parent; return !!up && ts.isNewExpression(up) && ts.isIdentifier(up.expression) && up.expression.text === 'Error'; };
   const out = [];
   const visit = node => {
-    if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && kept(node)) out.push(node.text);
-    else if (ts.isTemplateExpression(node)) for (const p of [node.head, ...node.templateSpans.map(s => s.literal)]) if (kept(p)) out.push(p.text);
+    if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && kept(node) && !inError(node)) out.push(node.text);
+    else if (ts.isTemplateExpression(node) && !inError(node)) for (const p of [node.head, ...node.templateSpans.map(s => s.literal)]) if (kept(p)) out.push(p.text);
     ts.forEachChild(node, visit);
   };
   visit(sf);

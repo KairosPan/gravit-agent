@@ -2,6 +2,10 @@
 // every value is its English wrapped in ⟦…⟧, every state of the corpus is drawn; what is left once the ⟦…⟧ runs are cut —
 // in the text and in the attributes a reader meets — must be words the corpus' own states and inputs hold (the operator's,
 // Gravit's, a venue's, a ticker), never the face's: a word the face draws from outside the table is reported.
+// The known words come from the corpus' content fields only (helpers/screens.js corpusStrings), never from its codes, and
+// from the literals the sources keep on screen on purpose (en-kept, the off-screen ones left out). An accepted limit: a word
+// the fixtures' own prose happens to hold (closed, filled, Paper, in a venue's note or an Account sentence) is known, so the
+// face drawing that same word from outside the table would pass; a sentinel test below holds the codes' words out.
 process.env.TZ = 'America/New_York';
 const { test } = await import('node:test');
 const assert = (await import('node:assert/strict')).default;
@@ -39,25 +43,40 @@ function cut(text) {
   return { out, open: depth };
 }
 
-// what a reader meets in a page: its text, and the values of aria-label, title, placeholder and alt; the runs are cut before
-// the tags go, so a table word holding markup (a rawHtml param) is cut whole
+// what a reader meets in a page: its text, and the values of the attributes a reader or a screen reader meets (an input's or
+// a button's value among them); the runs are cut before the tags go, so a table word holding markup (a rawHtml param) is cut
+// whole
+const READ = /\s(?:aria-label|aria-placeholder|aria-roledescription|aria-valuetext|title|placeholder|alt)="([^"]*)"/g;
 function readable(html) {
   const { out, open } = cut(decode(html.replace(/<style[\s\S]*?<\/style>/g, '')));
   const parts = [];
-  for (const m of out.matchAll(/<[^>]*>/g)) for (const a of m[0].matchAll(/\b(?:aria-label|title|placeholder|alt)="([^"]*)"/g)) parts.push(a[1]);
+  for (const m of out.matchAll(/<[^>]*>/g)) {
+    for (const a of m[0].matchAll(READ)) parts.push(a[1]);
+    if (/^<(?:input|button)\b/i.test(m[0]) && !/\stype="(?:checkbox|radio|hidden)"/.test(m[0])) for (const a of m[0].matchAll(/\svalue="([^"]*)"/g)) parts.push(a[1]);
+  }
   parts.push(...out.replace(/<[^>]*>/g, '\n').split('\n'));
   return { parts: parts.filter(p => p.trim()), open };
 }
 
 const wordsOf = text => text.match(WORD) ?? [];
-// a data word as the screens may draw it: as it is, upper-cased (a file's extension), its first letter capitalized (the
-// Account's whose), its first four letters (a market's badge)
-const drawnAs = w => [w, w.toUpperCase(), w[0].toUpperCase() + w.slice(1), ...(w.length > 4 ? [w.slice(0, 4)] : [])];
+// a content string's words as the screens draw them: as they are, and for the fields a screen reshapes, as it reshapes them —
+// a file name's extension upper-cased (composer/files.js extOf), the Account's whose with its first letter capitalized
+// (render/account.js), a market's name, category or symbol cut to its first word's four letters (render/markets.js badge)
+function drawnWords({ text, key }) {
+  const plain = cut(text).out;
+  const words = wordsOf(plain);
+  if (key === 'name' || key === 'file' || key === 'path') { const ext = plain.match(/\.([A-Za-z0-9]+)$/)?.[1]; if (ext) words.push(ext.toUpperCase()); }
+  if (key === 'whose') words.push(...wordsOf(plain).map(w => w[0].toUpperCase() + w.slice(1)));
+  if (key === 'watch') words.push(...wordsOf(plain.slice(plain.lastIndexOf(':') + 1).slice(0, 4))); // a starred market's key: its symbol's badge
+  if (key === 'name' || key === 'category' || key === 'symbol') { const badge = plain.trim().split(/\s+/)[0].slice(0, 4); words.push(...wordsOf(badge)); }
+  return words;
+}
+const knownWords = () => new Set([...corpusStrings().flatMap(drawnWords), ...KEPT.flatMap(s => wordsOf(s))]);
 
 test('no English is drawn outside the table', () => {
   const { pages, known } = withTable(PROBE, () => ({
     pages: corpus(),
-    known: new Set([...corpusStrings(), ...KEPT].flatMap(s => wordsOf(cut(s).out)).flatMap(drawnAs)),
+    known: knownWords(),
   }));
   const report = [];
   for (const [name, html] of pages) {
@@ -67,6 +86,27 @@ test('no English is drawn outside the table', () => {
     for (const s of stray) report.push(`${name}: ${s}`);
   }
   assert.deepEqual(report, [], 'move these into client/js/i18n/en.js (a word the corpus holds as a code is no excuse: it is drawn as a word)');
+});
+
+// the probe's own check: the corpus holds these words as codes (a status, a screen, a phase, a run's state) or as the face's
+// words, so the known set must not hold them — were it to, a screen drawing one from outside the table would pass. Three of
+// them are also in the Account's own sentences in the fixtures (a venue's via `… · live · …` and watchOnly `Live · read-only`,
+// `the public markets`): those may be known from that prose alone, never from a code (the header's accepted limit)
+test('the known words hold no code word and no face word', () => {
+  const contributors = withTable(PROBE, () => {
+    const by = new Map();
+    for (const entry of corpusStrings()) for (const w of drawnWords(entry)) by.set(w, (by.get(w) ?? new Set()).add(entry.key));
+    for (const s of KEPT) for (const w of wordsOf(s)) by.set(w, (by.get(w) ?? new Set()).add('en-kept'));
+    return by;
+  });
+  for (const w of ['failed', 'Failed', 'running', 'killed', 'Loading', 'Messages', 'Pending', 'Researching']) {
+    assert.ok(!contributors.has(w), `${w} is not a known word (known from ${[...(contributors.get(w) ?? [])].join(', ')})`);
+  }
+  const ACCOUNT_PROSE = new Set(['via', 'watchOnly', 'what', 'label']);
+  for (const w of ['live', 'Live', 'Markets']) {
+    const from = [...(contributors.get(w) ?? [])];
+    assert.deepEqual(from.filter(k => !ACCOUNT_PROSE.has(k)), [], `${w} is known only from the Account's prose (known from ${from.join(', ')})`);
+  }
 });
 
 test('a word table read after import follows the table (the Account tabs, the history ranges, the months)', () => {

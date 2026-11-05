@@ -5,6 +5,7 @@
 import { firstOpen } from './sessions.js';
 import { cursorPatch } from '../render/lunhui/intraday.js';
 import { t } from '../i18n/words.js';
+import { isChiNext } from '../wire/china.js';
 
 const str = v => (typeof v === 'string' ? v : '');
 const modulesOf = d => (Array.isArray(d?.modules) ? d.modules.filter(m => typeof m === 'string') : []);
@@ -127,7 +128,7 @@ export function boardOf(code) {
   if (/^60/.test(c)) return t('lunhui.board.sh');
   if (/^68[89]/.test(c)) return t('markets.board.star');
   if (/^00[0-3]/.test(c)) return t('lunhui.board.sz');
-  if (/^30[01]/.test(c)) return t('markets.board.chinext');
+  if (isChiNext(c)) return t('markets.board.chinext');
   if (/^(?:4|8|92)/.test(c)) return t('lunhui.board.bse');
   return null;
 }

@@ -7,7 +7,7 @@ import { proposeBotId } from '../wire/botId.js';
 import { t } from '../i18n/words.js';
 
 export const SHELF_PATHS = Object.freeze({ plugins: '/data/plugins.json', bots: '/data/bots.json', agents: '/data/agents.json', memory: '/data/memory.json', modules: '/data/modules.json' });
-export const GRAVIT_KEYS = Object.freeze(['DEEPSEEK_API_KEY']);
+export const GRAVIT_KEYS = Object.freeze(['DEEPSEEK_API_KEY']); // en-kept: an environment variable's name
 
 const VALID = {
   plugins: d => Array.isArray(d?.mcp),

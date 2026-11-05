@@ -21,7 +21,7 @@ const KEPT_FILES = {
 };
 
 // the en-kept markers under client/js
-const EN_KEPT = 54;
+const EN_KEPT = 55;
 
 const texts = src => englishLiterals(src, 'snippet.js').map(l => l.text);
 

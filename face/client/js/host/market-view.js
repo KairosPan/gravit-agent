@@ -9,7 +9,7 @@
 // wire's own text (a quote's message, a provider's message, a search note, a source name) is Chinese and never reaches a word
 // here. No DOM.
 import { normalizeAsset, number } from '../wire/market-model.js';
-import { CHINA_VENUE, isCnKey, cnHitsOf } from '../wire/china.js';
+import { CHINA_VENUE, isCnKey, isChiNext, cnHitsOf } from '../wire/china.js';
 import { MIN, HOUR, DAY } from '../time.js';
 import { DESK_TAB } from './desk-view.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
@@ -186,7 +186,7 @@ export const CHINA_TAB = 'china';
 export function cnBoardOf(symbol) {
   const s = String(symbol ?? '');
   if (/^68[89]/.test(s)) return t('markets.board.star');
-  if (/^30[0-2]/.test(s)) return t('markets.board.chinext');
+  if (isChiNext(s)) return t('markets.board.chinext');
   if (/^6/.test(s)) return t('markets.board.sh');
   if (/^[03]/.test(s)) return t('markets.board.sz');
   if (/^[489]/.test(s)) return t('markets.board.bj');

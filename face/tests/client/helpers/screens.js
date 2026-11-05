@@ -17,6 +17,7 @@ import { renderModule } from '../../../client/js/render/modules.js';
 import { renderRunSheet } from '../../../client/js/render/run-sheet.js';
 import { newSheet } from '../../../client/js/host/run-sheet-view.js';
 import { MODULES } from '../../../client/js/host/modules-view.js';
+import { t } from '../../../client/js/i18n/words.js';
 import { listings, modulesListing } from './inventory.js';
 import { setMarkdown } from '../../../client/js/render/thread.js';
 import { reducers as R } from '../../../client/js/reducers/index.js';
@@ -162,7 +163,7 @@ function connectStates(signing) {
   const open = R.identityConnectOpen(signing);
   const seed = { pending: pending.id, botId: '777', speaksAs: '@gravit_desk_bot', operatorId: '555000123', talksOnlyWith: '@pan', routing: 'chat=telegram;alerts=telegram;brief=telegram;cards=telegram;fills=telegram', keyHash: 'a'.repeat(64), salt: 'b'.repeat(32) };
   return [
-    R.identityConnectSet(open, { busy: true, error: 'Paste the token from BotFather first.' }),
+    R.identityConnectSet(open, { busy: true, error: t('identity.connect.empty') }),
     R.identityConnectSet(open, { step: 2, pending }),
     R.identityConnectSet(open, { step: 3, pending: heard, error: 'This connection is gone: it expired or was closed. Start again.' }),
     R.sheetRefused(R.sheetOpen(signing, { kind: 'connectNetwork', seed, fields: [] }), { message: 'This connection is gone: it expired or was closed. Start again.' }),
@@ -213,8 +214,8 @@ function tradeStates() {
   };
   const ticket = (open, fields = {}, s = base) => {
     const on = { ...s, trade: { ...s.trade, kind: open.kind ?? s.trade.kind, ticket: { id: open.id, side: open.side ?? 'buy', venue: open.venue ?? null, outcome: open.outcome ?? 0 } } };
-    const t = ticketOf(on, NOW);
-    return R.sheetOpen(on, { kind: 'order', seed: { id: open.id, ticket: t }, fields: { venue: t.venue, side: t.side, outcome: String(t.outcome), amount: '', unit: 'usd', orderType: 'market', limit: '', extendedHours: false, ...fields } });
+    const tk = ticketOf(on, NOW);
+    return R.sheetOpen(on, { kind: 'order', seed: { id: open.id, ticket: tk }, fields: { venue: tk.venue, side: tk.side, outcome: String(tk.outcome), amount: '', unit: 'usd', orderType: 'market', limit: '', extendedHours: false, ...fields } });
   };
   const eth = ticket({ id: 'coin:ETH' }, { amount: '25' });
   const prepared = R.sheetPrepared(eth, { prepared: fx('prepared-order'), at: NOW, asked: askedOf(eth.sheet), deadline: NOW + 125_000 });
@@ -237,7 +238,7 @@ function channelStates() {
     agents: ['codex'], bots: ['buffett'], allBots: [{ id: 'buffett', name: 'Buffett Type', listed: true }],
   };
   const loaded = R.channelLoaded(on, { workspaceId: 'w1', data, at: NOW });
-  const editing = R.editFailed(R.startEdit(loaded, { kind: 'roster', which: 'bots', workspaceId: 'w1', choices: [{ value: 'buffett', label: 'Buffett Type' }], ticked: ['buffett'] }), { error: 'roster write failed' });
+  const editing = R.editFailed(R.startEdit(loaded, { kind: 'roster', which: 'bots', workspaceId: 'w1', choices: [{ value: 'buffett', label: 'Buffett Type' }], ticked: ['buffett'] }), { error: 'roster write refused' });
   return [loaded, editing, R.channelLoading(on, { workspaceId: 'w1' }), R.channelFailed(on, { workspaceId: 'w1', at: NOW }), R.channelFailed(loaded, { workspaceId: 'w1', at: NOW }), R.nav(on, { screen: 'channel', id: 'w9' })];
 }
 
@@ -293,10 +294,10 @@ function runSheetStates(all) {
 // the list's search (plan 2 of the dsh UI port): searching, nothing found, failed, results with a marked snippet, an archived
 // hit with Un-archive and the more-than-twenty line
 export function searchStates(s) {
-  const q = (q, then) => { const t = R.setSearchQuery(s, q); return then ? then(t, q) : t; };
+  const q = (q, then) => { const st = R.setSearchQuery(s, q); return then ? then(st, q) : st; };
   return [
-    q('zz'), q('zz', (t, query) => R.searchContent(t, { query, items: [], hasMore: false })), q('zz', (t, query) => R.searchFailed(t, { query })),
-    q('T', (t, query) => R.searchContent(t, { query, items: [{ sessionId: 's1', snippet: 'a T b', match: [2, 3] }], hasMore: true })),
+    q('zz'), q('zz', (st, query) => R.searchContent(st, { query, items: [], hasMore: false })), q('zz', (st, query) => R.searchFailed(st, { query })),
+    q('T', (st, query) => R.searchContent(st, { query, items: [{ sessionId: 's1', snippet: 'a T b', match: [2, 3] }], hasMore: true })),
   ];
 }
 
@@ -306,8 +307,8 @@ export function everyState() {
   const open = R.nav(base, { screen: 'messages', id: 's1' });
   return [
     emptyState(), open, lunhuiStates(open), ...stockStates(open), lunhuiStates(open, { 's1-p1': { tile: 'environment', breadth: 'dist' } }), R.nav(base, { screen: 'messages', id: 'g' }), R.toggleDetails(open), R.askConfirm(R.toggleDetails(open), { action: 'stopGravit', id: 's1' }),
-    R.startEdit(R.toggleDetails(open), { kind: 'rename', convId: 's1', error: 'Cannot be empty' }), R.openSettings(open), R.startDraft(open, { now: NOW }),
-    R.startEdit(R.startDraft(open, { now: NOW }), { kind: 'newChannel', error: 'Letters, digits, - or _' }),
+    R.startEdit(R.toggleDetails(open), { kind: 'rename', convId: 's1', error: t('details.nameEmpty') }), R.openSettings(open), R.startDraft(open, { now: NOW }),
+    R.startEdit(R.startDraft(open, { now: NOW }), { kind: 'newChannel', error: t('channel.name.rule') }),
     R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open),
     ...searchStates(R.hostList(open, { conversations: [...open.conversations, conv('old', { title: 'T old', archived: 'face' })] })), R.hostPins(open, ['s1']),
     R.traceLoaded(R.nav(base, { screen: 'messages', id: 'g' }), { convId: 'g', msgId: 'g1', messages: [m('tg1', { kind: 'tool', text: 'account', data: { callId: 'g1c', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }) } }), m('tg2', { from: 'system', text: 'context' })] }),
@@ -434,7 +435,7 @@ function composerBuild() {
     ['history', renderMessagesScreen(history, NOW)], ['secrets', secrets], ['paging', paging], ['rail', rail], ['jobs', jobsHtml], ['editor', editor],
   ];
   // what the pieces are drawn from, for corpusStrings
-  const inputs = [open, menus, mention, files, 'Up to 20 images a message', DEFAULT_LIMITS, history, masked, railed, outline, jobsOn, jobRows, runs];
+  const inputs = [open, menus, mention, files, { note: 'Up to 20 images a message' }, DEFAULT_LIMITS, history, masked, railed, outline, jobsOn, jobRows, runs];
   return { pieces, inputs };
 }
 export const composerPieces = () => composerBuild().pieces;
@@ -501,34 +502,66 @@ export function corpus() {
   return [...states, ...composerPieces().map(([name, html]) => [`composer-${name}`, html])];
 }
 
-// the keys whose strings are codes a screen compares, not words it draws (a status, a kind, a side…): their values are left out
-// of corpusStrings, so a code word drawn as a word (killed, failed, running) is the probe's to find
-const CODE_KEYS = new Set(['status', 'kind', 'state', 'phase', 'mode', 'side', 'type', 'quote_status', 'market_status']);
-// the parts of a state that are an upstream's content as a whole, drawn as they come — a run's view and its artifacts
-// (Lunhui's output), a strategy's files (Gravit's): every string in them counts, its keys too (a metric's name)
-const CONTENT = [['lunhui', 'views'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data']];
+// the fields whose strings are words a screen draws as they come — the operator's, Gravit's, a bot's, a venue's or the
+// Account's prose, a name, a ticker, a path — and the only ones corpusStrings counts outside an upstream's content: a code
+// (a status, a screen, a phase, a run's state, an id) is never one, so a code word drawn as a word (failed, running,
+// messages) is the probe's to find
+const CONTENT_FIELDS = new Set([
+  // prose
+  'text', 'title', 'name', 'label', 'note', 'notes', 'message', 'description', 'question', 'header', 'prompt', 'response', 'detail',
+  'displayReason', 'reason', 'why', 'whyNot', 'said', 'error', 'words', 'what', 'example', 'via', 'readOnlyBecause', 'noTradeBecause',
+  'proven', 'lands', 'guard', 'beast', 'door', 'request', 'plan', 'soul', 'legs', 'line', 'broken', 'setupIssues', 'freezes',
+  'placeholder', 'rate', 'whose', 'by', 'sub', 'subtitle', 'frontLine', 'category', 'age',
+  // names: a venue's, a product's, an agent's, an account's, a market's, a network's
+  'productName', 'protocol', 'quoteFrom', 'sourceWord', 'venueName', 'accountName', 'agentName', 'byName', 'toName', 'unitWord',
+  'network', 'networks', 'chain', 'chains', 'bridgeChains', 'funded', 'exchange', 'feed', 'source', 'model', 'route', 'runtime',
+  'server', 'bin', 'handle', 'speaksAs', 'talksOnlyWith', 'username', 'tile', 'tools', 'toolName', 'headline', 'channelWords',
+  'strategy', 'where', 'roleId', 'zone', 'clock', 'code',
+  // tickers, assets and currencies
+  'symbol', 'asset', 'assets', 'base', 'quote', 'token', 'sourceToken', 'toAssets', 'dollars', 'currency',
+  // paths, commands and links
+  'file', 'path', 'dir', 'crumb', 'folder', 'command', 'turnOn', 'link', 'url', 'home', 'homeCwd', 'defaultRef',
+  // what the operator typed: a search, a font family
+  'q', 'query', 'textFont', 'codeFont',
+  // an address, a key's id, a signer, a hash: drawn as they come
+  'address', 'toAddress', 'agent', 'signer', 'kid', 'hash', 'fingerprint',
+  // the Account's sentences and lists: a market with no trades, a limit's hosts and venues, a venue that only watches
+  'none', 'allow', 'watchOnly',
+  // a starred market's key: the probe reads its symbol
+  'watch',
+]);
+// the parts of a state that are an upstream's content as a whole, drawn as they come, every string in them and its keys too
+// (a metric's name): a run's view and its artifacts (Lunhui's output), a strategy's files (Gravit's), What you sign's lines
+// (the Account's: every `shown`), and the two rows the face draws in the Account's own grammar, codes and all — an open
+// order (venue · side size · type · status · who) and an agent's limit (scope · status · allow); `*` is any one key
+const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['**', 'shown'],
+  ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits']];
+const isContent = at => CONTENT.some(c => (c[0] === '**' ? at.at(-1) === c[1] : c.length === at.length && c.every((p, i) => p === '*' || p === at[i])));
 
-// every string the corpus' own states, the composer pieces' inputs and the module catalog (its codes, sub-titles, roles and
-// rulings' citations: content, spec §5.10) hold, but those under a code key outside the content: the words a screen may draw
-// that are not the face's (words-probe.test.js)
+// every string, as { text, key }, the corpus' own states, the composer pieces' inputs and the module catalog (its sub-titles,
+// roles, codes and rulings' citations: content, spec §5.10) hold in a content field, or anywhere inside an upstream's content:
+// the words a screen may draw that are not the face's (words-probe.test.js). An object met again is walked again when it is
+// met in another mode (inside content or not), never twice in the same one
 export function corpusStrings() {
   const out = [];
-  const seen = new Set();
+  const seen = new Map();
   const walk = (v, key, path, content) => {
-    if (typeof v === 'string') { if (content || !CODE_KEYS.has(key)) out.push(v); return; }
-    if (v === null || typeof v !== 'object' || seen.has(v)) return;
-    seen.add(v);
+    if (typeof v === 'string') { if (content || CONTENT_FIELDS.has(key)) out.push({ text: v, key }); return; }
+    if (v === null || typeof v !== 'object') return;
+    const modes = seen.get(v) ?? new Set();
+    if (modes.has(content)) return;
+    seen.set(v, modes.add(content));
     if (v instanceof Map) { for (const [k, x] of v) { walk(k, null, path, content); walk(x, typeof k === 'string' ? k : null, path, content); } return; }
     if (v instanceof Set || Array.isArray(v)) { for (const x of v) walk(x, key, path, content); return; }
     for (const [k, x] of Object.entries(v)) {
       const at = [...path, k];
-      const inside = content || CONTENT.some(c => c.length === at.length && c.every((p, i) => p === at[i]));
-      if (inside === true) out.push(k);
+      const inside = content || isContent(at);
+      if (inside === true) out.push({ text: k, key: null });
       walk(x, k, at, inside);
     }
   };
   for (const st of everyState()) walk(st, null, [], false);
   walk(composerBuild().inputs, null, [], false);
-  walk(MODULES, null, [], 'values'); // its values, not its keys
+  walk(MODULES, null, [], 'values'); // every value, its keys not
   return out;
 }
