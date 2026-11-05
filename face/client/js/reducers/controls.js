@@ -45,6 +45,10 @@ export const reducers = {
     ? { ...s, lightbox: { attachmentId, name: typeof name === 'string' ? name : '' } } : s),
   closeLightbox: s => (s.lightbox ? { ...s, lightbox: null } : s),
 
+  // the shortcut sheet (keys.js): ⌘/ opens it from anywhere and closes it again; Esc closes it after the lightbox (D34)
+  openShortcuts: s => (s.shortcuts ? s : { ...s, shortcuts: { query: '' } }),
+  closeShortcuts: s => (s.shortcuts ? { ...s, shortcuts: null } : s),
+
   // Details opened from elsewhere (a pill): opens it, never closes it
   openDetails: s => (s.detailsOpen ? s : { ...closeOverlays(s), detailsOpen: true }),
 

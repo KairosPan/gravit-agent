@@ -6870,3 +6870,126 @@ test('a draft tick for a network a fresh read shows not connected is dropped: af
   assert.equal(door.posts.filter(([p]) => p === '/data/account/prepare').at(-1)[1].draft.routing, 'chat=;alerts=;brief=;cards=;fills=');
   store.timers.clear();
 });
+
+// the keys (plan 6 task 14): one table matched on the code, ⌥⌘N, ⌥⌘, and ⌘/ beside ⌥⌘K; never over the lightbox or an
+// owner sheet, never while an IME composes
+const chord = (code, mods, onPrevent = () => {}) => ({ key: '?', code, altKey: false, metaKey: false, ctrlKey: false, shiftKey: false, ...mods, preventDefault: onPrevent });
+const macRig = async (hash = '#/messages/s1') => {
+  const f = fakeWindow({ hash });
+  f.win.navigator = { platform: 'MacIntel' };
+  const say = f.withId('say', { tagName: 'TEXTAREA' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  await settle();
+  return { f, h, store, say };
+};
+
+test('⌥⌘N from the editor opens New message', async () => {
+  const { f, store, say } = await macRig();
+  say.focus();
+  let prevented = false;
+  f.fire('doc', 'keydown', chord('KeyN', { altKey: true, metaKey: true, key: 'ñ' }, () => { prevented = true; }));
+  await settle();
+  assert.ok(prevented, "the browser's own key is not run");
+  assert.deepEqual(store.get().route, { screen: 'messages', id: 'new' });
+  assert.ok(store.get().draft, 'a draft stands');
+  store.timers.clear();
+});
+
+test('⌥⌘, opens Settings from an input', async () => {
+  const { f, store } = await macRig();
+  const cq = searchBox(f);
+  cq.focus();
+  let prevented = false;
+  f.fire('doc', 'keydown', chord('Comma', { altKey: true, metaKey: true, key: '≤' }, () => { prevented = true; }));
+  assert.ok(prevented);
+  assert.equal(store.get().settingsOpen, true);
+  store.timers.clear();
+});
+
+test('⌘/ opens the sheet and ⌘/ again closes it', async () => {
+  const { f, store, say } = await macRig();
+  say.focus();
+  assert.equal(store.get().shortcuts, null, 'closed at boot');
+  let prevented = 0;
+  f.fire('doc', 'keydown', chord('Slash', { metaKey: true, key: '/' }, () => { prevented += 1; }));
+  assert.deepEqual(store.get().shortcuts, { query: '' });
+  f.fire('doc', 'keydown', chord('Slash', { metaKey: true, key: '/' }, () => { prevented += 1; }));
+  assert.equal(store.get().shortcuts, null);
+  assert.equal(prevented, 2);
+  // with the sheet open another General key closes it first; Esc closes it before Settings under it
+  f.fire('doc', 'keydown', chord('Slash', { metaKey: true }));
+  f.fire('doc', 'keydown', chord('Comma', { altKey: true, metaKey: true }));
+  assert.deepEqual([store.get().shortcuts, store.get().settingsOpen], [null, true]);
+  f.fire('doc', 'keydown', chord('Slash', { metaKey: true }));
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.deepEqual([store.get().shortcuts, store.get().settingsOpen], [null, true], 'Esc closes the sheet, Settings stays');
+  f.fire('doc', 'keydown', chord('Slash', { metaKey: true }));
+  f.fire('doc', 'keydown', chord('KeyK', { altKey: true, metaKey: true }));
+  assert.equal(store.get().shortcuts, null, '⌥⌘K closes it too');
+  store.timers.clear();
+});
+
+test('Ctrl+Alt+N on a Mac does nothing', async () => {
+  const { f, store, say } = await macRig();
+  say.focus();
+  const before = store.get();
+  let prevented = false;
+  f.fire('doc', 'keydown', chord('KeyN', { altKey: true, ctrlKey: true }, () => { prevented = true; }));
+  f.fire('doc', 'keydown', chord('Slash', { ctrlKey: true }, () => { prevented = true; }));
+  await settle();
+  assert.equal(prevented, false, 'the browser keeps the keys');
+  assert.equal(store.get(), before);
+  // off a Mac they are the keys
+  const g = fakeWindow({ hash: '#/messages/s1' });
+  const h2 = host({ rows: [row('s1')] });
+  const s2 = started(g, h2);
+  await h2.ready();
+  g.fire('doc', 'keydown', chord('KeyN', { altKey: true, ctrlKey: true }));
+  await settle();
+  assert.deepEqual(s2.get().route, { screen: 'messages', id: 'new' });
+  g.fire('doc', 'keydown', chord('Slash', { ctrlKey: true }));
+  assert.deepEqual(s2.get().shortcuts, { query: '' });
+  store.timers.clear();
+  s2.timers.clear();
+});
+
+test('⌥⌘, while What you sign stands, and ⌥⌘N while pinyin composes, do nothing', async () => {
+  const { f, store, say } = await macRig('#/account/agents');
+  store.dispatch('sheetOpen', { kind: 'subWallet', seed: {}, fields: {} });
+  const before = store.get();
+  for (const ev of [chord('Comma', { altKey: true, metaKey: true }), chord('KeyN', { altKey: true, metaKey: true }), chord('Slash', { metaKey: true })]) {
+    f.fire('doc', 'keydown', ev);
+  }
+  await settle();
+  assert.equal(store.get().settingsOpen, false, 'no Settings over the signing sheet');
+  assert.equal(store.get().shortcuts, null);
+  assert.deepEqual(store.get().route, before.route);
+  assert.equal(store.get().sheet.kind, 'subWallet', 'the sheet stands');
+  store.dispatch('sheetClose');
+  f.win.location.hash = '#/messages/s1'; f.fire('win', 'hashchange'); await settle();
+  say.focus();
+  const route = store.get().route;
+  f.fire('doc', 'keydown', chord('KeyN', { altKey: true, metaKey: true, isComposing: true }));
+  f.fire('doc', 'keydown', chord('KeyN', { altKey: true, metaKey: true, keyCode: 229 }));
+  await settle();
+  assert.deepEqual(store.get().route, route, 'the composition keeps its keys');
+  assert.equal(store.get().draft, null);
+  store.timers.clear();
+});
+
+test('⌥⌘N and ⌘/ do nothing over the lightbox', async () => {
+  const { f, store, image } = await lightboxRig();
+  f.click(image);
+  const route = store.get().route;
+  f.fire('doc', 'keydown', chord('KeyN', { altKey: true, ctrlKey: true }));
+  f.fire('doc', 'keydown', chord('Slash', { ctrlKey: true }));
+  f.fire('doc', 'keydown', chord('Comma', { altKey: true, ctrlKey: true }));
+  await settle();
+  assert.deepEqual(store.get().route, route);
+  assert.equal(store.get().shortcuts, null);
+  assert.equal(store.get().settingsOpen, false);
+  assert.ok(store.get().lightbox, 'the lightbox stays');
+  store.timers.clear();
+});

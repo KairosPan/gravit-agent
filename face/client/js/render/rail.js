@@ -3,6 +3,7 @@
 import { esc, attrs, cls } from '../html.js';
 import { t, th, thn } from '../i18n/words.js';
 import { icon } from '../icons.js';
+import { shortcut, chordLabel } from '../keys.js';
 import { rowTime } from '../time.js';
 import { needsAnswer } from '../messages.js';
 import { unreadOf, firstOpen } from '../host/sessions.js';
@@ -110,9 +111,10 @@ function groupHead(g, state) {
 }
 
 // the search box under the list head (spec 2026-11-03 §5.1, P1): its words are the store's; the hint names the platform's key
+// from the keys' table
 function searchBox(query, mac) {
   return `<div class="conv-search">${icon('search', 16, 2)}<input${attrs({ id: 'cq', type: 'search', autocomplete: 'off', placeholder: t('search.box'), 'aria-label': t('search.box'), 'data-action': 'convQuery', value: query })}>` +
-    `<kbd class="conv-search-key">${mac ? '⌥⌘K' : 'Ctrl+Alt+K'}</kbd></div>`; // en-kept: the keys' names
+    `<kbd class="conv-search-key">${esc(chordLabel(shortcut('searchConversations'), mac))}</kbd></div>`;
 }
 
 const SEARCH_LINE = {

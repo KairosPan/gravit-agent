@@ -1,6 +1,7 @@
 // face/client/js/app.js — the client's boot on the face (spec 2026-10-19 §5): the store, the host layer, the renderers,
 // and the page's own bookkeeping (what was typed, where the thread stood, who had focus) across every render.
 import { createStore } from './store.js';
+import { chordOf } from './keys.js';
 import { reducers } from './reducers/index.js';
 import { emptyState } from './data/empty.js';
 import { sizeOf, cleanFont, applyPrefs } from './prefs.js';
@@ -2155,10 +2156,26 @@ export function boot(win, host = {}) {
   doc.addEventListener('keydown', ev => {
     // while an IME composes (pinyin), its keys are the composition's: Esc dismisses the candidate, never the query
     const imeOpen = ev.isComposing || ev.keyCode === 229;
-    if (!imeOpen && ev.code === 'KeyK' && ev.altKey && !ev.shiftKey && (mac ? ev.metaKey && !ev.ctrlKey : ev.ctrlKey && !ev.metaKey)) {
+    // the General keys (keys.js), from any focus: matched on the key's place and the modifier flags, never inside a composition
+    const chord = chordOf(ev, mac);
+    if (chord === 'searchConversations') {
       ev.preventDefault();
-      // over the lightbox the keys do nothing: the search box lies under it
-      if (!lightboxOf(store.get())) focusSearch();
+      // over the lightbox the keys do nothing: the search box lies under it; the shortcut sheet closes first
+      if (lightboxOf(store.get())) return;
+      store.dispatch('closeShortcuts');
+      focusSearch();
+      return;
+    }
+    if (chord) {
+      ev.preventDefault();
+      const s = store.get();
+      // over the lightbox or an owner sheet (What you sign) the keys do nothing: the page under them waits
+      if (lightboxOf(s) || sheetUp(s)) return;
+      // ⌘/ opens the shortcut sheet and closes it again; another key closes it first
+      if (chord === 'shortcuts') { store.dispatch(s.shortcuts ? 'closeShortcuts' : 'openShortcuts'); return; }
+      if (s.shortcuts) store.dispatch('closeShortcuts');
+      if (chord === 'newConversation') act.startDraft();
+      else if (chord === 'settings') store.dispatch('openSettings');
       return;
     }
     // while the lightbox stands, Tab and Shift+Tab stay on its one key
@@ -2195,6 +2212,8 @@ export function boot(win, host = {}) {
       const s = store.get();
       // the lightbox after a menu, before the search box (D34)
       if (s.lightbox) { store.dispatch('closeLightbox'); return; }
+      // the shortcut sheet after the lightbox, before the search box (D34)
+      if (s.shortcuts) { store.dispatch('closeShortcuts'); return; }
       // the search box while it has focus, before today's chain (spec D34): the first Esc clears the query, the next leaves the box
       const box = doc.activeElement;
       if (box && box.id === 'cq') {

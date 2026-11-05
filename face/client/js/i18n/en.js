@@ -713,6 +713,17 @@ export const EN = Object.freeze({
   'settings.codeSize.less': 'Smaller code',
   'settings.codeSize.more': 'Larger code',
 
+  // the keys' table (keys.js): what each row does
+  'shortcuts.newConversation': 'New conversation',
+  'shortcuts.searchConversations': 'Search conversations',
+  'shortcuts.settings': 'Settings',
+  'shortcuts.shortcuts': 'This sheet',
+  'shortcuts.send': 'Send',
+  'shortcuts.newLine': 'New line',
+  'shortcuts.commands': 'Commands and skills',
+  'shortcuts.references': 'Files, conversations, bots',
+  'shortcuts.close': 'Close a menu, sheet or drawer',
+
   // the owner device (host/owner.js, host/owner-view.js, reducers/owner.js): the standing's line, the countdown, a refusal,
   // what a taken action said
   'owner.standing.signs': 'This page signs for the account',
