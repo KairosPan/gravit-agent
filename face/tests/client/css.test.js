@@ -44,7 +44,7 @@ test("the Research shelf's cards: a column, the meta and the foot, the chip tone
   for (const c of ['pcard research', 'pcard-meta', 'pcard-foot', 'chip ok', 'chip warn', 'chip grey', 'chip live']) assert.ok(html.includes(`class="${c}`), c);
   assert.match(css, /\.chip\.live\s*\{[^}]*background: var\(--surface-2\)[^}]*color: var\(--text\)/);
   assert.match(css, /\.pcard\.research\s*\{[^}]*flex-direction: column[^}]*gap: 12px/);
-  assert.match(css, /\.pcard-meta\s*\{[^}]*font-size: 12px/);
+  assert.match(css, /\.pcard-meta\s*\{[^}]*font-size: calc\(12px \* var\(--fs\)\)/);
   assert.match(css, /\.pcard-foot\s*\{[^}]*display: flex/);
   assert.match(css, /\.chip\.ok\s*\{\s*background: var\(--up-fill\); color: var\(--up\)/);
   assert.match(css, /\.chip\.warn\s*\{\s*background: var\(--warn-fill\); color: var\(--warn-text\)/);
@@ -101,7 +101,7 @@ test("background jobs: the chip's dot, the command one mono line, the output a m
   assert.match(rule('.job-cmd'), /font-family: var\(--font-mono\)/);
   assert.match(rule('.job-cmd'), /white-space: nowrap; overflow: hidden; text-overflow: ellipsis/);
   const out = rule('.job-out');
-  for (const want of [/font: 12px\/1.5 var\(--font-mono\)/, /white-space: pre-wrap/, /max-height: 320px/, /overflow: auto/, /background: var\(--surface-2\)/]) assert.match(out, want);
+  for (const want of [/font: calc\(12px \* var\(--fm\)\)\/1.5 var\(--font-mono\)/, /white-space: pre-wrap/, /max-height: 320px/, /overflow: auto/, /background: var\(--surface-2\)/]) assert.match(out, want);
   assert.match(rule('.job-out:empty, .job-note:empty'), /display: none/);
 });
 
@@ -253,4 +253,61 @@ test('a masked value: a mono box whose raw run lies transparent over its mask, t
   assert.match(css, /\.secret:not\(\.revealed\) \.secret-raw::selection\s*\{[^}]*color: transparent/);
   assert.match(css, /\.secret\.revealed \.secret-raw\s*\{[^}]*position: static[^}]*color: var\(--text\)/);
   assert.match(css, /\.secret-eye\s*\{[^}]*width: 20px[^}]*height: 20px/);
+});
+
+// the two size scales (D31): every size in app.css is a pixel times --fs (text) or --fm (code), or relative to its parent
+const tokens = readFileSync(new URL('../../client/css/tokens.css', import.meta.url), 'utf8');
+// every innermost rule as [selector, body], comments dropped
+const cssRules = () => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]*)\{([^{}]*)\}/g)].map(m => [m[1].trim(), m[2]]);
+// each size a rule sets: a font-size value, or a font shorthand's value
+const sizesOf = body => [...body.matchAll(/(?:^|;)\s*(font-size|font):\s*([^;]+)/g)].map(m => [m[1], m[2].trim()]);
+const isMonoRule = (sel, body) => /var\(--font-mono\)/.test(body) || /\.mono(?![\w-])/.test(sel);
+
+test('no fixed font size is left outside the two scales', () => {
+  const scaled = /^calc\(\d+(?:\.\d+)?px \* var\(--f[sm]\)\)$/;
+  const loose = [];
+  let seen = 0;
+  for (const [sel, body] of cssRules()) for (const [prop, value] of sizesOf(body)) {
+    seen++;
+    if (prop === 'font-size') { if (!scaled.test(value) && !/^(?:[\d.]+(?:em|%)|inherit|smaller|larger)$/.test(value)) loose.push(`${sel}: ${value}`); continue; }
+    if (value === 'inherit') continue;
+    const bare = value.replace(/calc\(\d+(?:\.\d+)?px \* var\(--f[sm]\)\)/g, '');
+    if (/\d(?:px|pt|rem)\b/.test(bare.replace(/\/[\d.]+\w*/, '')) || !/calc\(\d+(?:\.\d+)?px \* var\(--f[sm]\)\)/.test(value)) loose.push(`${sel}: font: ${value}`);
+  }
+  assert.ok(seen > 200, `the scan reads the sizes (${seen})`);
+  assert.deepEqual(loose, [], 'sizes outside the scales');
+});
+
+test('a mono rule scales with the code size and every other rule with the text size', () => {
+  const wrong = [];
+  for (const [sel, body] of cssRules()) {
+    const want = isMonoRule(sel, body) ? '--fm' : '--fs';
+    for (const [, value] of sizesOf(body)) for (const m of value.matchAll(/var\((--f[sm])\)/g)) if (m[1] !== want) wrong.push(`${sel}: ${value}`);
+  }
+  assert.deepEqual(wrong, []);
+  assert.match(css, /\.mono \{ font-family: var\(--font-mono\); font-size: calc\(13px \* var\(--fm\)\); \}/);
+  assert.match(css, /\.md-code \{ font: calc\(12\.5px \* var\(--fm\)\) var\(--font-mono\)/);
+  assert.match(css, /\.viz-table th \{[^}]*font: 600 calc\(10\.5px \* var\(--fm\)\)\/1 var\(--font-mono\)/);
+});
+
+test('the base is 15 px times the text scale', () => {
+  assert.match(css, /^html, body \{[^}]*font: calc\(15px \* var\(--fs\)\)\/1\.45 var\(--font-sans\)/m);
+});
+
+test('--fs and --fm are 1 at the root, and the two families read their base stacks', () => {
+  const root = tokens.match(/^:root \{([^}]*)\}/m)?.[1] ?? '';
+  assert.match(root, /--fs: 1;/);
+  assert.match(root, /--fm: 1;/);
+  assert.match(root, /--font-sans-base: "Manrope", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Segoe UI", system-ui, sans-serif;/);
+  assert.match(root, /--font-sans: var\(--font-sans-base\);/);
+  assert.match(root, /--font-mono: var\(--font-mono-base\);/);
+});
+
+test('the mono stack falls back to Chinese after its mono faces', () => {
+  assert.match(tokens, /--font-mono-base: "IBM Plex Mono", "SF Mono", Menlo, Consolas, "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", monospace;/);
+});
+
+test('the font link loads Noto Sans SC 800', () => {
+  const page = readFileSync(new URL('../../client/index.html', import.meta.url), 'utf8');
+  assert.match(page, /family=Noto\+Sans\+SC:wght@400;500;700;800&/);
 });
