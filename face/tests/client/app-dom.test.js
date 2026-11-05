@@ -540,17 +540,22 @@ test('+ on Text size reads 16 px, sets --fs and survives a reload', () => {
   again.store.timers.clear();
 });
 
-test('− stops at 12 and its key is disabled', () => {
+// (aria-disabled, not disabled: the key keeps its focus at the end of the range, and a press on it does nothing)
+test('− stops at 12 and its key is aria-disabled, still focusable', () => {
   const { f, props, store } = prefsPage();
   store.dispatch('openSettings');
   for (let i = 0; i < 6; i++) f.click(stepKey('textSize', '-1'));
   assert.equal(store.get().textSize, 12);
   assert.equal(props.get('--fs'), String(12 / 15));
-  assert.match(f.html(), /<button type="button" class="key" data-action="stepPref" data-pref="textSize" data-step="-1" aria-label="Smaller text" disabled>/);
+  assert.match(f.html(), /<button type="button" class="key" data-action="stepPref" data-pref="textSize" data-step="-1" aria-label="Smaller text" aria-disabled="true">/);
+  assert.doesNotMatch(f.html(), /data-action="stepPref"[^>]* disabled[ >]/, 'never disabled');
   assert.match(f.html(), /data-pref="textSize" data-step="1" aria-label="Larger text">/, 'its other key stays live');
   for (let i = 0; i < 9; i++) f.click(stepKey('codeSize', '1'));
   assert.equal(store.get().codeSize, 16);
-  assert.match(f.html(), /data-pref="codeSize" data-step="1" aria-label="Larger code" disabled>/);
+  assert.match(f.html(), /data-pref="codeSize" data-step="1" aria-label="Larger code" aria-disabled="true">/);
+  const ended = { ...stepKey('codeSize', '-1'), getAttribute: k => (k === 'aria-disabled' ? 'true' : null) };
+  f.click(ended);
+  assert.equal(store.get().codeSize, 16, 'a press on an aria-disabled key does nothing');
   store.timers.clear();
 });
 
@@ -567,6 +572,27 @@ test('a typed code font is applied on change and cleared by an empty field', () 
   f.fire('root', 'change', { target: { ...box, value: '' } });
   assert.equal(props.has('--font-mono'), false);
   assert.equal(JSON.parse(m.get('gravit-ui.prefs')).codeFont, '');
+  store.timers.clear();
+});
+
+// while a turn streams each render writes the box back by script, so its blur fires no change: the input commits it
+test('a code font typed while renders run is kept without a change event', () => {
+  const { f, m, props, store } = prefsPage();
+  store.dispatch('openSettings');
+  const box = f.withId('pref-codeFont', { tagName: 'INPUT', type: 'text', value: '', dataset: { action: 'setFont', pref: 'codeFont' } });
+  box.value = 'Fira ';
+  f.fire('root', 'input', { target: box });
+  assert.equal(box.value, 'Fira ', 'the box is not rewritten while typing: a space can be typed');
+  box.value = 'Fira Code';
+  f.fire('root', 'input', { target: box });
+  store.dispatch('setTheme', 'black');   // a render, as a stream frame is
+  f.fire('root', 'blur', { target: box });
+  assert.equal(store.get().codeFont, 'Fira Code');
+  assert.equal(props.get('--font-mono'), '"Fira Code", var(--font-mono-base)');
+  assert.equal(JSON.parse(m.get('gravit-ui.prefs')).codeFont, 'Fira Code');
+  box.value = 'Fira"; }';
+  f.fire('root', 'input', { target: box });
+  assert.equal(store.get().codeFont, 'Fira', 'the reducer cleans');
   store.timers.clear();
 });
 

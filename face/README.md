@@ -5052,7 +5052,11 @@ Account). Open the printed `?token=` URL and hard-reload.
     nothing of its own (no new window, no preferences, no find bar). With a pinyin candidate window
     open in the editor, and with What you sign standing, each does nothing. A key a browser keeps
     for itself: set `bound: false` on its row in `client/js/keys.js` and record it here; the sheet
-    then leaves it out (the spec's §18 names the keys the drill unbound).
+    then leaves it out (the spec's §18 names the keys the drill unbound). Off a Mac, on a layout
+    with AltGr (Polish, German): AltGr+N, AltGr+K and AltGr+, type their characters (`ń` on
+    Polish) in the editor and open nothing. On AZERTY or QWERTZ, the layout's own `,` and `/` with
+    the same modifiers open Settings and the sheet (they match on the character as well as the key's
+    place).
 21. **Text size and Code size before the first paint.** Settings › Text size: `+` to 20, then
     reload. PASS: the page draws at 20 from its first frame, never 15 first; `−` to 12 and reload:
     the same at 12, the `−` key dim at its end. More font settings › Code size at 16 and at 10 with a

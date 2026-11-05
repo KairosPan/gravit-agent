@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderShortcuts } from '../../client/js/render/shortcuts.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
+import { closeOverlays } from '../../client/js/reducers/messages.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { SHORTCUTS } from '../../client/js/keys.js';
 
@@ -60,4 +61,9 @@ test('the slice: opened with an empty query, the query set only while open, kept
   assert.deepEqual(R.setShortcutsQuery(R.openShortcuts(emptyState()), 7).shortcuts, { q: '' });
   const s = open('x');
   assert.equal(R.openShortcuts(s), s, 'open again keeps the query');
+});
+
+test('a move to another screen, or an opener that closes the overlays, closes the sheet as it does the lightbox', () => {
+  assert.equal(R.nav(open('x'), { screen: 'markets', id: null }).shortcuts, null);
+  assert.equal(closeOverlays(open('x')).shortcuts, null);
 });

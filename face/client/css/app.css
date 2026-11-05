@@ -577,7 +577,7 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .dsec > .btn-danger, .dsec > .confirm { align-self: flex-start; }
 /* Settings' sizes and fonts: a size's − and + about its readout; the fonts' fold, its fields in a column */
 .stepper { display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; }
-.stepper .key:disabled { opacity: .4; cursor: default; }
+.stepper .key[aria-disabled="true"] { opacity: .4; cursor: default; }
 .stepper-out { min-width: 48px; text-align: center; font-size: calc(14px * var(--fs)); font-weight: 600; font-variant-numeric: tabular-nums; }
 .fold > summary { color: var(--dim); cursor: pointer; font-size: calc(12px * var(--fs)); font-weight: 600; }
 .fold-body { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; }

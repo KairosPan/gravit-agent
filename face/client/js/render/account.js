@@ -664,11 +664,12 @@ export function renderSettings(state, { mac = true } = {}) {
     `<kbd class="sc-key">${esc(chordLabel(shortcut('shortcuts'), mac))}</kbd></div></div>${renderDevices(state)}</div></aside>`;
 }
 
-// a size's − and + about its readout; a key at its range's end is disabled
+// a size's − and + about its readout; a key at its range's end is aria-disabled, not disabled: it keeps its focus (a press
+// on it does nothing)
 function stepper(name, value, label, less, more) {
   const { min, max } = SIZES[name];
   const size = sizeOf(name, value);
-  const key = (step, words, glyph, off) => `<button type="button"${attrs({ class: 'key', 'data-action': 'stepPref', 'data-pref': name, 'data-step': step, 'aria-label': words, disabled: off })}>${glyph}</button>`;
+  const key = (step, words, glyph, off) => `<button type="button"${attrs({ class: 'key', 'data-action': 'stepPref', 'data-pref': name, 'data-step': step, 'aria-label': words, 'aria-disabled': off ? 'true' : null })}>${glyph}</button>`;
   return `<div class="stepper" role="group"${attrs({ 'aria-label': label })}>${key('-1', less, '−', size <= min)}<output id="pref-${name}" class="stepper-out">${th('settings.px', { size })}</output>${key('1', more, '+', size >= max)}</div>`;
 }
 

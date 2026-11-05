@@ -1784,10 +1784,17 @@ export function boot(win, host = {}) {
     openSettings: () => store.dispatch('openSettings'),
     closeSettings: () => store.dispatch('closeSettings'),
     setTheme: el => { const theme = el.dataset.value; store.dispatch('setTheme', theme); applyTheme(theme); },
-    // a size's − or + (the reducer keeps it in range), and a font committed on change: the box shows the family as kept
+    // a size's − or + (the reducer keeps it in range; a key at its end is aria-disabled and does nothing), and a font: kept
+    // as typed (the reducer cleans it; the box is left alone, so a space can be typed) — a render writes the box back by
+    // script while a turn streams, and its blur then fires no change — and on change the box shows the family as kept
     stepPref: el => {
+      if (el.getAttribute?.('aria-disabled') === 'true') return;
       const name = el.dataset.pref;
       store.dispatch('setPref', { name, value: store.get()[name] + Number(el.dataset.step) });
+      applyPrefs(doc.documentElement, store.get());
+    },
+    typeFont: el => {
+      store.dispatch('setPref', { name: el.dataset.pref, value: el.value });
       applyPrefs(doc.documentElement, store.get());
     },
     setFont: el => {
@@ -2034,6 +2041,7 @@ export function boot(win, host = {}) {
     else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
     else if (el.dataset?.action === 'convQuery') convSearch.type(el.value);
     else if (el.dataset?.action === 'scQuery') store.dispatch('setShortcutsQuery', el.value);
+    else if (el.dataset?.action === 'setFont') act.typeFont(el);
     else if (isField(el) && typesWords(el)) changeField(el.name, el.value);
     else if (el.dataset?.action === 'runSheetField' && typesWords(el)) act.runSheetField(el);
     else if (el.dataset?.action === 'sellManyQty') sellMany.setQty(el.dataset.index, el.value);

@@ -70,3 +70,22 @@ test('the table: its sections, its labels by platform, and words from EN', () =>
   assert.deepEqual(SHORTCUTS.map(shortcutWords), ['New conversation', 'Search conversations', 'Settings', 'This sheet', 'Send', 'New line',
     'Commands and skills', 'Files, conversations, bots', 'Close a menu, sheet or drawer']);
 });
+
+test('off a Mac AltGr (Ctrl+Alt with AltGraph held) is a character, never a key; on a Mac AltGraph is not looked at', () => {
+  const altGr = { getModifierState: k => k === 'AltGraph' };
+  assert.equal(chordOf(press('KeyN', { alt: true, ctrl: true, key: 'ń', ...altGr }), false), null, 'AltGr+N on a Polish layout');
+  assert.equal(chordOf(press('KeyK', { alt: true, ctrl: true, ...altGr }), false), null, 'AltGr+K');
+  assert.equal(chordOf(press('Comma', { alt: true, ctrl: true, ...altGr }), false), null, 'AltGr+,');
+  assert.equal(chordOf(press('KeyN', { alt: true, ctrl: true, getModifierState: () => false }), false), 'newConversation', 'Ctrl+Alt without AltGraph');
+  assert.equal(chordOf(press('KeyN', { alt: true, meta: true, ...altGr }), true), 'newConversation', 'a Mac');
+});
+
+test('the two punctuation keys also match on the character, for layouts that put it elsewhere', () => {
+  assert.equal(chordOf(press('Digit7', { ctrl: true, key: '/' }), false), 'shortcuts', 'a / on another place');
+  assert.equal(chordOf(press('KeyM', { meta: true, key: '/' }), true), 'shortcuts');
+  assert.equal(chordOf(press('KeyM', { alt: true, ctrl: true, key: ',' }), false), 'settings', 'AZERTY , (KeyM)');
+  assert.equal(chordOf(press('KeyM', { alt: true, meta: true, key: ',' }), true), 'settings');
+  assert.equal(chordOf(press('Digit7', { ctrl: true, shift: true, key: '/' }), false), null, 'the same mods only');
+  assert.equal(chordOf(press('KeyM', { meta: true, key: ',' }), true), null, '⌘, stays the browser’s');
+  assert.equal(chordOf(press('KeyX', { alt: true, meta: true, key: 'n' }), true), null, 'a letter row matches on its code alone');
+});

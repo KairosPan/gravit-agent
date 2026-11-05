@@ -58,7 +58,7 @@ test("Settings' sizes and fonts: the steppers, their readout, the fold and its f
   for (const c of ['stepper', 'stepper-out', 'fold', 'fold-body', 'key', 'field', 'field-label', 'input']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), c);
   assert.match(css, /\.stepper\s*\{[^}]*display: inline-flex[^}]*align-items: center/);
   assert.match(css, /\.stepper-out\s*\{[^}]*font-variant-numeric: tabular-nums/);
-  assert.match(css, /\.stepper \.key:disabled\s*\{[^}]*opacity/);
+  assert.match(css, /\.stepper \.key\[aria-disabled="true"\]\s*\{[^}]*opacity/);
   assert.match(css, /\.fold > summary\s*\{[^}]*cursor: pointer/);
   assert.match(css, /\.fold-body\s*\{[^}]*display: flex[^}]*flex-direction: column/);
 });

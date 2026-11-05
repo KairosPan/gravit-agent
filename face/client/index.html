@@ -16,7 +16,7 @@
     const r = document.documentElement;
     if (p.theme === 'cream' || p.theme === 'black') r.dataset.theme = p.theme;
     const size = (v, min, max, base) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : base);
-    const font = v => (typeof v === 'string' ? [...v.replace(/[^\p{L}\p{N} _.-]/gu, ' ').replace(/ +/g, ' ').trim()].slice(0, 64).join('').trim() : '');
+    const font = v => (typeof v === 'string' ? [...v.normalize('NFC').replace(/[^\p{L}\p{N} _.-]/gu, ' ').replace(/ +/g, ' ').trim()].slice(0, 64).join('').trim() : '');
     const fs = size(p.textSize, 12, 20, 15), fm = size(p.codeSize, 10, 16, 12), sans = font(p.textFont), mono = font(p.codeFont);
     if (fs !== 15) r.style.setProperty('--fs', String(fs / 15));
     if (fm !== 12) r.style.setProperty('--fm', String(fm / 12));

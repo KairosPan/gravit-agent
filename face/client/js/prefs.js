@@ -11,11 +11,12 @@ export function sizeOf(name, v) {
   return typeof v === 'number' && Number.isFinite(v) ? Math.min(r.max, Math.max(r.min, Math.round(v))) : r.base;
 }
 
-// a family name and nothing else: letters, digits, spaces, _ . and -, every other character a space, the spaces collapsed,
-// at most 64 characters; '' for anything not a string (the default family)
+// a family name and nothing else: composed first (NFC: a decomposed accent is a mark, not a letter), then letters, digits,
+// spaces, _ . and -, every other character a space, the spaces collapsed, at most 64 characters; '' for anything not a
+// string (the default family)
 export function cleanFont(v) {
   if (typeof v !== 'string') return '';
-  return [...v.replace(/[^\p{L}\p{N} _.-]/gu, ' ').replace(/ +/g, ' ').trim()].slice(0, 64).join('').trim();
+  return [...v.normalize('NFC').replace(/[^\p{L}\p{N} _.-]/gu, ' ').replace(/ +/g, ' ').trim()].slice(0, 64).join('').trim();
 }
 
 // each property's value, null at its default

@@ -32,6 +32,9 @@ test('a font is cleaned: quotes, semicolons, braces and newlines go, 64 characte
   assert.equal(cleanFont('x'.repeat(80)).length, 64);
   assert.equal(cleanFont(`${'x'.repeat(63)} y`), 'x'.repeat(63), 'trimmed after the cut');
   for (const v of [null, undefined, 3, {}]) assert.equal(cleanFont(v), '');
+  // a combining accent is a mark, not a letter: composed first, an NFD é stays é and not 'e '
+  assert.equal(cleanFont('Condense\u0301'), 'Condens\u00e9');
+  assert.equal(cleanFont('Condense\u0301 Pro'), 'Condens\u00e9 Pro');
 });
 
 test('cssOf is all null at the defaults', () => {
@@ -75,7 +78,7 @@ test('the inline script in index.html sets the same properties as applyPrefs', (
     undefined, {}, { textSize: 15, codeSize: 12, textFont: '', codeFont: '' },
     { textSize: 20, codeSize: 16 }, { textSize: 12, codeSize: 10 }, { textSize: 99, codeSize: -4 }, { textSize: '18' },
     { textFont: 'Inter', codeFont: 'JetBrains Mono' }, { textFont: HOSTILE, codeFont: `${HOSTILE}\n}` },
-    { theme: 'black', textSize: 17, textFont: 'x'.repeat(90) },
+    { theme: 'black', textSize: 17, textFont: 'x'.repeat(90) }, { textFont: 'Condense\u0301', codeFont: 'Condense\u0301 Mono' },
   ];
   for (const saved of cases) {
     const got = run(saved);
