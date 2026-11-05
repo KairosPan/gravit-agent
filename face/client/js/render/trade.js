@@ -74,7 +74,7 @@ function picker(state, now) {
     body = p.results.length ? group(t('trade.search.results', { q }), p.results.map(row)) : empty(searchWord(tr.results, q, kind));
   } else {
     const read = isRecord(tr.picks) && Object.hasOwn(tr.picks, kind.id) ? tr.picks[kind.id] : null;
-    const groups = group(t('trade.group.held'), p.held.map(row)) + group(t('markets.tab.watching'), p.watching.map(row)) + group(t('markets.sort.volume'), p.most.map(row));
+    const groups = group(t('trade.group.held'), p.held.map(row)) + group(t('markets.tab.watching'), p.watching.map(row)) + group(t('trade.group.mostTraded'), p.most.map(row));
     // a picks read that failed after an answer keeps its rows, with the Account's sentence over them
     const kept = groups && read?.status === 'error' && str(read.message) ? note(read.message) : '';
     body = groups ? kept + groups : empty(picksWord(read));
@@ -111,7 +111,7 @@ function underWay(state, signs, now) {
     if (o.walletSend) return walletRow(orderWords(o), o.id, o.walletKey, { 'data-order': o.walletSend.order }, o.walletReported, a.wallet, signs, cancel);
     return `<tr><td><b>${esc(orderWords(o))}</b>${o.id ? `<span class="tk-why">${esc(o.id)}</span>` : ''}</td><td class="r">${change ? changeKey(o, a.data) : ''}${cancel}</td></tr>`;
   });
-  const table = `<div class="mk-wrap"><table class="mk-t tk-t"><thead><tr><th scope="col">${th('trade.field.orderType')}</th><th scope="col" class="r"><span class="sr-only">${th('trade.actions')}</span></th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+  const table = `<div class="mk-wrap"><table class="mk-t tk-t"><thead><tr><th scope="col">${th('trade.head.order')}</th><th scope="col" class="r"><span class="sr-only">${th('trade.actions')}</span></th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
   return `<section class="cardbox tk-open">${head(rows.length)}${kept}${rows.length ? table : empty(t('trade.nothingUnderWay'))}${cardsWaiting(a.data, now)}</section>`;
 }
 

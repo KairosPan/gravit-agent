@@ -431,3 +431,14 @@ test("a fill's words are in the table's order — the side and what, the price, 
   assert.equal(p.held[0].sub, '0.124 · Stand-in Exchange、Stand-in Wallet');
   assert.equal(p.most.find(r => r.id === 'coin:ETH').sub, 'Stand-in Exchange、Stand-in Wallet、Momentum · paper · 1 public venue');
 });
+
+test("a payment's kind is the table's word for the Account's code, an unknown kind as it came", () => {
+  const tx = { to: '0x' + '11'.repeat(20), data: '0x', value: '0x0', chainId: '0x2105' };
+  const page = fx('account');
+  page.venues = [...page.venues, { id: 'w1', name: 'My Wallet' }];
+  const pay = kind => ({ id: `pay-${kind}`, at: '2026-11-01T14:00:00.000Z', kind, from: 'w1', to: 'ex', status: 'authorized', legs: [{ native: { walletTx: tx } }] });
+  page.orders = [];
+  page.payments = [pay('send'), pay('refill'), pay('airdrop')];
+  const words = () => underWayOf(page).filter(r => r.payment).map(r => r.words);
+  assert.deepEqual(withTable({ 'trade.paymentKind.send': 'SENDS', 'trade.paymentKind.refill': 'REFILLS' }, words), ['SENDS · My Wallet → Stand-in Exchange', 'REFILLS · My Wallet → Stand-in Exchange', 'airdrop · My Wallet → Stand-in Exchange']);
+});

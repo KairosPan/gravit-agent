@@ -391,3 +391,16 @@ test("a seat write's words are in the table's order: the venue, an order's side,
     assert.equal(seatLift('mcp__account__portfolio_live_order', {}, '{"ok":false,"code":"E_X","message":"no room"}', true, 'c1').text, 'no room (E_X)');
   });
 });
+
+test("a seat order's side is the table's word, an unknown side as it came; a batch's venues are the table's list", () => {
+  withTable({ 'thread.seat.buy': 'BUYS', 'thread.seat.sell': 'SELLS', 'common.list.sep': ' + ' }, () => {
+    assert.equal(seatLine('portfolio_live_order', { side: 'buy', qty: 10, symbol: 'AAPL' }), 'BUYS 10 AAPL · market');
+    assert.equal(seatLine('portfolio_live_order', { side: 'sell', qty: 10, symbol: 'AAPL' }), 'SELLS 10 AAPL · market');
+    assert.equal(seatLine('portfolio_live_order', { side: 'short', qty: 10, symbol: 'AAPL' }), 'short 10 AAPL · market');
+    assert.equal(seatLine('portfolio_order', { side: 'sell', qty: 1, base: 'BTC' }), 'SELLS 1 BTC');
+    const c = new Map();
+    rememberCall(c, seatCallAs('c17', 'mcp__account__portfolio_live_batch', { legs: [{ venue: 'paper-1', symbol: 'A', side: 'buy', usd: 1 }, { venue: 'okx', symbol: 'B', side: 'sell', qty: 2 }] }));
+    const [card] = toMessages(mapFrame({ ...seatGate, eventId: 'ev-17', request: { ...seatGate.request, toolName: 'mcp__account__portfolio_live_batch', callId: 'c17', reason: 'Account seat - mcp__account__portfolio_live_batch: legs=[1: side=buy usd=1 symbol=A venue=paper-1; 2: side=sell qty=2 symbol=B venue=okx]' } }), c, NOW);
+    assert.equal(card.data.venue, 'paper-1 + okx');
+  });
+});

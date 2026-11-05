@@ -1045,3 +1045,29 @@ test("the Account's lines are in the table's order: a day and its clock, a venue
   const st = R.statementLoaded(R.openStatement(state()), { data: { ok: true, lines: [{ ...fx('statement').lines[0], at }] }, at: NOW });
   has(withTable({ 'time.dayClock': '{clock}, {day}' }, () => renderStatement(st, NOW)), `${fmtClock(Date.parse(at))}, ${fmtDate(Date.parse(at))}`);
 });
+
+test("an order's side, status and type and a limit's scope and a key's status are drawn from the table, and an unknown code as it came", async () => {
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  const probe = {
+    'account.orderSide.buy': 'BUYS', 'account.orderSide.sell': 'SELLS', 'account.order.sized': '{symbol} {qty} {side}', 'account.order.typeAt': '{price} @ {type}',
+    'account.orderType.limit': 'LIMIT', 'account.orderType.stop': 'STOP', 'account.orderStatus.open': 'OPEN', 'account.orderStatus.pending': 'PENDING',
+    'account.limitScope.trade': 'TRADE', 'account.limitScope.payees': 'PAYEES', 'account.keyStatus.ok': 'OK-KEY',
+  };
+  const orders = withTable(probe, () => [...draw(state()).matchAll(/<div class="order-row">([^<]+)<\/div>/g)].map(m => m[1]));
+  assert.deepEqual(orders.slice(0, 3), [
+    'Stand-in Exchange · SOL/USDT 0.707 BUYS · 141.44 @ LIMIT · OPEN · Agent · Claude Code',
+    'Stand-in Broker · SPY 0.25 BUYS · 660.07 @ LIMIT · PENDING · You',
+    'Stand-in Exchange · SOL/USDT 0.6 SELLS · STOP · OPEN · You',
+  ]);
+  const page = fx('account');
+  const odd = { ...page, orders: [{ ...page.orders.find(o => o.status === 'open'), side: 'short', type: 'iceberg', limitPrice: null, status: 'partial' }] };
+  const [row] = [...draw(state({ page: odd })).matchAll(/<div class="order-row">([^<]+)<\/div>/g)].map(m => m[1]);
+  assert.match(row, / · short [\d.,]+ \S+ · iceberg · partial · /, 'a side and a type with no word are drawn as they came');
+  const agents = withTable(probe, () => draw(state({ tab: 'agents', seat: seatView() })));
+  has(agents, '<span class="dim">TRADE · paper-1 · $100 an order · $850 of $1,000 left</span>');
+  has(agents, '<span class="dim">PAYEES · api.example.com · $2 an order · $20 of $20 left</span>');
+  has(agents, '<br><span class="dim">OK-KEY · until ');
+  const strange = { ok: true, agents: [{ name: 'Odd', address: '0x9a5', status: 'suspended', limits: [{ scope: 'mode', allow: ['ex'] }] }] };
+  const drawn = draw(state({ tab: 'agents', agents: strange }));
+  has(drawn, '<b>Odd</b><br><span class="dim">suspended</span><br><span class="dim">mode · ex</span>', 'a status and a scope with no word, as they came');
+});

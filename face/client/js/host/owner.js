@@ -13,8 +13,8 @@ import { said } from '../i18n/words.js';
 const PAIR = '/data/account/pair', PREPARE = '/data/account/prepare', EXCHANGE = '/data/account/exchange';
 // the Account's pair roles under the face's names
 const ROLE_OF = new Map([['owner', 'signs'], ['pending', 'pending'], ['needs-code', 'needs-code']]);
-const noAnswer = () => said('owner.noAnswer');
-// the Account's own sentence for a page that does not sign (owner.js signOut)
+const noAnswer = () => said('account.noAnswer');
+// owner.notSigning: the line for a page asked to sign that does not sign (owner.js signOut)
 const notSigning = () => said('owner.notSigning');
 const anotherKey = () => said('owner.anotherKey');
 

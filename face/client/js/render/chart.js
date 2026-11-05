@@ -4,7 +4,7 @@
 import { esc } from '../html.js';
 import { price, number } from '../wire/market-model.js';
 import { fmtClock, fmtDate } from '../time.js';
-import { t, th } from '../i18n/words.js';
+import { t, th, tn } from '../i18n/words.js';
 
 const W = 400;
 const H = 140;
@@ -71,7 +71,7 @@ export function sessionsSvg(sessions) {
   const f = v => price(v, 'CNY');
   const day = d => (typeof d === 'string' ? d.slice(5) : '');
   const first = day(kept[0].date), last = day(kept.at(-1).date);
-  const described = t('markets.chart.sessions', { n: kept.length, first, last, low: f(lo), high: f(hi) });
+  const described = tn('markets.chart.sessions', kept.length, { first, last, low: f(lo), high: f(hi) });
   return `<svg class="mk-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(described)}">${seps}${prev}` +
     `<path class="mk-chart-area" d="${line}L${X(points.at(-1)[0])},${H}L0,${H}Z"></path><path class="mk-chart-line" d="${line}"></path></svg>` +
     `<div class="mk-axis">${kept.map(x => `<span>${esc(day(x.date))}</span>`).join('')}</div>` +

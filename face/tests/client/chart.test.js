@@ -98,3 +98,9 @@ test("a chart's times are a day and a clock in the table's order", async () => {
   const svg = withTable({ 'time.dayClock': '{clock} ({day})' }, () => curveSvg(points([1, 2]), { currency: 'USD' }));
   assert.ok(svg.includes(`<span>${fmtClock(Date.parse(at(0)))} (${fmtDate(Date.parse(at(0)))})</span>`), svg);
 });
+
+test('sessionsSvg says one session in the singular, more in the plural', () => {
+  const session = (date, n = 242) => ({ date, prec: 100, price: Array.from({ length: n }, (_, i) => 100 + (i % 5)), amount: [] });
+  assert.match(sessionsSvg([session('2026-10-30')]), /aria-label="The last session, 10-30 to 10-30: low ¥100\.00, high ¥104\.00"/);
+  assert.match(sessionsSvg([session('2026-10-29'), session('2026-10-30')]), /aria-label="The last 2 sessions, 10-29 to 10-30: /);
+});

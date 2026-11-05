@@ -33,11 +33,24 @@ const line = text => `<div class="dsec-line">${esc(text)}</div>`;
 const dim = text => `<div class="dsec-line dim">${esc(text)}</div>`;
 const shelfOf = id => shelves().find(s => s.id === id) ?? null;
 
+// a card's kind in capitals, by the kind's code: each its own word in the table (a script without case has no capitals to
+// take); an item with no code known draws its kind's word
+function kindUpper(item) {
+  switch (item.kindCode) {
+    case 'mcp': return t('discover.kind.mcpUpper');
+    case 'bot': return t('discover.kind.botUpper');
+    case 'agent': return t('discover.kind.agentUpper');
+    case 'skill': return t('discover.kind.skillUpper');
+    case 'module': return t('discover.kind.moduleUpper');
+    default: return item.kind;
+  }
+}
+
 // a card opens its item's page
 function card(item, grid = false) {
   return `<a${attrs({ class: cls('pcard', grid && 'in-grid'), href: `#/plugin/${encodeURIComponent(item.id)}` })}>${markOf(item.mark, 44)}` +
     `<span class="pcard-body"><span class="pcard-name">${esc(item.name)}</span><span class="pcard-blurb">${esc(item.line)}</span></span>` +
-    `<span class="pcard-side"><span class="pcard-kind">${esc(item.kind.toUpperCase())}</span></span></a>`;
+    `<span class="pcard-side"><span class="pcard-kind">${esc(kindUpper(item))}</span></span></a>`;
 }
 
 // a Research card (module cards spec §5.1): the link to the module's page around its mark, name and 副题, its role and
@@ -47,7 +60,7 @@ function researchCard(item) {
   const name = item.source.name;
   return `<div${attrs({ class: cls('pcard', 'research', 'in-grid', item.dim && 'dim') })}><a${attrs({ class: 'pcard-link', href: `#/module/${encodeURIComponent(name)}` })}>${markOf(item.mark, 44)}` +
     `<span class="pcard-body"><span class="pcard-name">${esc(item.name)}</span><span class="pcard-blurb">${esc(item.line)}</span></span>` +
-    `<span class="pcard-kind">${esc(item.kind.toUpperCase())}</span></a><span class="pcard-meta">${esc(item.meta)}</span>` +
+    `<span class="pcard-kind">${esc(kindUpper(item))}</span></a><span class="pcard-meta">${esc(item.meta)}</span>` +
     `<span class="pcard-foot">${moduleChip(item.chip)}${runKey(name, item.dim === true, item.running === true)}</span></div>`;
 }
 const gridCard = i => (i.shelf === 'research' ? researchCard(i) : card(i, true));

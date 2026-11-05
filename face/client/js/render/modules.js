@@ -34,8 +34,8 @@ function head(m, page, unread, mounted) {
   const c = !unread || page.running ? page.chip : { text: unread === 'failed' ? '—' : '…', tone: 'grey' };
   const model = m.route.slice(m.route.lastIndexOf('/') + 1);
   return `<header class="plug-head">${mark({ type: 'glyph', icon: m.icon }, 72, '10px', '')}<div class="plug-title"><h1 class="plug-name">${esc(m.title)}</h1>` +
-    `<div class="dim">${esc(`${m.role} · ${model} · ${m.channelWords}`)}</div>` +
-    `<div class="mod-tags"><span class="pcard-kind">${esc(t('discover.kind.module').toUpperCase())}</span>${moduleChip(c)}</div></div>` +
+    `<div class="dim">${esc(`${m.role} · ${model} · ${m.channelWords}`)}</div>` + // words-order: a module's role, model and channel under the visual separator
+    `<div class="mod-tags"><span class="pcard-kind">${th('discover.kind.moduleUpper')}</span>${moduleChip(c)}</div></div>` +
     `<div class="plug-key">${runKey(m.name, !mounted, page.running)}</div></header>`;
 }
 

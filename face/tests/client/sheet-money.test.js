@@ -358,3 +358,23 @@ test("the routes' others and what a taken earn said are in the table's order and
   assert.equal(withTable({ 'sheet.earn.saidNote': '{note} — {line}', 'sheet.earn.saidOut': '{status}: {amount} {asset} out of {product}', 'sheet.earn.saidAll': 'everything' }, () => sayOf(line)),
     'settles — done: everything USDT out of Flex', 'kept, it reads in the table that stands');
 });
+
+test('a product locked a day says so in the singular, longer in the plural', async () => {
+  const { earnSaysOf } = await import('../../client/js/host/sheet-money.js');
+  const says = lockDays => earnSaysOf({ kind: 'earn', prepared: { action: { type: 'liveEarn' }, shown: [], quote: { earn: { usd: 25, apy: 0.046, lockDays } } } });
+  assert.ok(says(1).some(l => l.includes('locked 1 day after you ask for it back')), says(1).join(' | '));
+  assert.ok(says(7).some(l => l.includes('locked 7 days after you ask for it back')), says(7).join(' | '));
+});
+
+test("the move's line for an agent wallet follows the Account's own proven sentence, as the fixture has it", async () => {
+  const { moveSaysOf } = await import('../../client/js/host/sheet-money.js');
+  const proven = fx('account').venues.find(v => v.id === 'agent-claude-code').proven;
+  const lineFor = p => {
+    const q = page([okx]);
+    q.venues = q.venues.map(v => (v.id === 'agent-claude-code' ? { ...v, proven: p } : v));
+    const seed = moveSeedOf(q, { from: 'ex' });
+    return withTable({ 'sheet.move.ownKey': 'OWN KEY', 'sheet.move.signedFor': 'SIGNED FOR' }, () => moveSaysOf({ kind: 'move', seed, prepared: { action: { kind: 'withdraw', from: 'ex', to: 'agent-claude-code', toAddress: '0x7f' } } })[0]);
+  };
+  assert.equal(lineFor(proven), 'OWN KEY', `the Account's sentence: ${proven}`);
+  assert.equal(lineFor('signed by its wallet'), 'SIGNED FOR');
+});

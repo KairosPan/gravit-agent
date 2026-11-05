@@ -310,10 +310,23 @@ function paymentWordsOf(p, page) {
   const legs = records(p.legs);
   if (p.kind === 'swap') return t('trade.payment.swap', { venue: nameOf(p.from), from: str(p.sourceToken), to: str(p.token) });
   if (p.kind === 'transfer' && p.from === p.to) return t('trade.payment.transfer', { venue: nameOf(p.from), from: str(legs[0]?.fromLedger), to: str(legs[0]?.toLedger) });
-  // the Account's kind, capitalised; none, a payment
-  const kind = str(p.kind) ? `${p.kind[0].toUpperCase()}${p.kind.slice(1)}` : t('trade.payment.kind');
+  const kind = paymentKindWord(str(p.kind));
   const network = str(p.live?.network);
-  return `${kind} · ${nameOf(p.from)} → ${nameOf(p.to)}${network ? ` · ${network}` : ''}`;
+  return `${kind} · ${nameOf(p.from)} → ${nameOf(p.to)}${network ? ` · ${network}` : ''}`; // words-order: a payment's kind, route and network under the visual separator
+}
+// a payment's kind, the Account's code worded; a code with no word as it came, none a payment
+function paymentKindWord(kind) {
+  switch (kind) {
+    case 'deposit': return t('trade.paymentKind.deposit');
+    case 'withdraw': return t('trade.paymentKind.withdraw');
+    case 'transfer': return t('trade.paymentKind.transfer');
+    case 'send': return t('trade.paymentKind.send');
+    case 'swap': return t('trade.paymentKind.swap');
+    case 'pay': return t('trade.paymentKind.pay');
+    case 'refill': return t('trade.paymentKind.refill');
+    case '': return t('trade.payment.kind');
+    default: return kind;
+  }
 }
 
 /** Under way: the page's working orders (openOrdersOf's rows, by anyone), each with what cancels it — the Account's

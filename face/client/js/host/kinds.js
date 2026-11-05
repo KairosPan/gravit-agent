@@ -48,9 +48,11 @@ function typeWord(a) {
 // a seat write in words (spec 2026-10-20 §6.1): "buy $100 of AAPL · market · paper-1", "cancel ord-0001 · paper-1",
 // "move 50 USDC · withdraw from okx", "pay up to $2 · api.example.com"; a tool the face never classified is its raw name
 // one order in words, without its venue: "buy $100 of AAPL · market", "sell 10 AAPL · limit 187.4"
+// a seat order's side, Gravit's argument worded: buy and sell, any other as it came, none an order
+const sideWord = side => (side === 'buy' ? t('thread.seat.buy') : side === 'sell' ? t('thread.seat.sell') : has(side) ? side : t('thread.seat.order'));
 function orderWords(a) {
   const size = has(a.usd) ? t('thread.seat.usdOf', { usd: money(a.usd), symbol: has(a.symbol) ? a.symbol : '?' }) : words(a.qty, a.symbol);
-  return t('thread.seat.orderLine', { side: has(a.side) ? a.side : t('thread.seat.order'), size, type: typeWord(a) });
+  return t('thread.seat.orderLine', { side: sideWord(a.side), size, type: typeWord(a) });
 }
 export function seatLine(name, a = {}) {
   const raw = rawOf(name);
@@ -76,7 +78,7 @@ export function seatLine(name, a = {}) {
       try { host = new URL(String(a.url)).host; } catch { host = typeof a.url === 'string' ? a.url : ''; }
       return at(t('thread.seat.pay', { amount: money(has(a.maxAmount) ? a.maxAmount : 0) }), host);
     }
-    case 'portfolio_order': return t('thread.seat.sideWhat', { side: has(a.side) ? a.side : t('thread.seat.order'), what: words(a.qty, a.base) || '?' });
+    case 'portfolio_order': return t('thread.seat.sideWhat', { side: sideWord(a.side), what: words(a.qty, a.base) || '?' });
     case 'portfolio_execute': return t('thread.seat.execute', { account: has(a.account) ? a.account : '?' });
     case 'portfolio_transfer': return t('thread.seat.transfer', { what: words(a.amount, has(a.token) ? a.token : 'USD'), from: has(a.from) ? a.from : '?', to: has(a.to) ? a.to : '?' });
     default: return at(raw, a.venue);
@@ -173,7 +175,7 @@ function callOf(calls, view, callId, toolName) {
   return known;
 }
 // the venues a batch's legs name, each once, in order
-const venuesOf = legs => (Array.isArray(legs) ? [...new Set(legs.map(l => l?.venue).filter(v => typeof v === 'string' && v !== ''))].join(', ') : '');
+const venuesOf = legs => (Array.isArray(legs) ? [...new Set(legs.map(l => l?.venue).filter(v => typeof v === 'string' && v !== ''))].join(t('common.list.sep')) : '');
 
 const replaceOf = view => (view.surfaceOp && typeof view.surfaceOp === 'object' && view.surfaceOp.op === 'replace'
   ? { replace: { start: view.surfaceOp.start, end: view.surfaceOp.end } } : {});

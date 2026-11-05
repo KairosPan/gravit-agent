@@ -187,7 +187,7 @@ function stockPatch(stock, symbol, minute) {
   const g = chartGeometry(stock.minutes, limitsOf(stock), { includeUp: includesUp(stock) });
   const p = price[at];
   const pct = prec > 0 && fin(p) ? signedPct((p - prec) / prec * 100) : '—';
-  const where = atLimitUp(p, stock) ? ` · ${t('lunhui.atLimitUp')}` : atLimitDown(p, stock) ? ` · ${t('lunhui.atLimitDown')}` : '';
+  const where = atLimitUp(p, stock) ? ` · ${t('lunhui.atLimitUp')}` : atLimitDown(p, stock) ? ` · ${t('lunhui.atLimitDown')}` : ''; // words-order: a limit's tag after the readout's visual separator
   return {
     x: n1(g.X(at)), y: n1(g.Y(p)),
     readout: `${stock.name ?? stock.code ?? symbol} · ${minuteLabel(at)} · ${fin(p) ? fix2(p) : '—'} · ${pct}${where}`,

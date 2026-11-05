@@ -60,7 +60,6 @@ const retry = () => `<button type="button" class="btn-sm" data-action="refreshAc
 const numWord = n => (n === null ? '—' : Number(n).toLocaleString('en-US', { maximumFractionDigits: 8 }));
 // the Account's percents are percents already (0.72 is 0.72 %), never a fraction to scale; nothing given is —
 const pctWord = v => (v === null ? '—' : `${v > 0 ? '+' : v < 0 ? '-' : ''}${Math.abs(v).toFixed(2)} %`);
-const capital = s => (s ? s[0].toUpperCase() + s.slice(1) : '');
 const when = (at, now) => { const ms = Date.parse(at); return Number.isNaN(ms) ? '' : sameDay(ms, now) ? fmtClock(ms) : t('time.dayClock', { day: fmtDate(ms), clock: fmtClock(ms) }); };
 const dateWord = at => { const ms = Date.parse(at); return Number.isNaN(ms) ? '' : fmtDate(ms); };
 // a row's words: the first bold (a chip beside it), each line under it dim, blanks left out
@@ -142,16 +141,42 @@ function positionsBox(lens, state) {
     esc(money(p.usd)), esc(price(p.entryPrice)), esc(price(p.markPrice)), `<span class="${tone(p.unrealizedUsd)}">${esc(signedMoney(p.unrealizedUsd))}</span>`,
     ...(keyed ? [rowKeys(positionKeys(p, state.account.data, state.markets?.accountQuotes))] : []),
   ]);
-  const pnl = 'P&L'; // en-kept: an abbreviation the table cannot hold (an ampersand before a letter)
-  const head = [t('account.positions.position'), t('account.positions.value'), t('account.positions.entry'), t('account.positions.mark'), pnl, ...(keyed ? [''] : [])];
+  const head = [t('account.positions.position'), t('account.positions.value'), t('account.positions.entry'), t('account.positions.mark'), t('account.pnl'), ...(keyed ? [''] : [])];
   return rows.length ? box(`${title(t('account.positions.title'))}${table(head, rows)}`, th('account.positions.title')) : '';
+}
+
+// the Account's codes for an order's side, type and status, worded; a code with no word is drawn as it came
+const orderSideWord = side => (side === 'buy' ? t('account.orderSide.buy') : side === 'sell' ? t('account.orderSide.sell') : side);
+function orderTypeWord(type) {
+  switch (type) {
+    case 'market': return t('account.orderType.market');
+    case 'limit': return t('account.orderType.limit');
+    case 'stop': return t('account.orderType.stop');
+    case 'stop_limit': return t('account.orderType.stopLimit');
+    case 'trailing_stop': return t('account.orderType.trailingStop');
+    default: return type;
+  }
+}
+function orderStatusWord(status) {
+  switch (status) {
+    case 'pending': return t('account.orderStatus.pending');
+    case 'open': return t('account.orderStatus.open');
+    case 'partial': return t('account.orderStatus.partial');
+    case 'filled': return t('account.orderStatus.filled');
+    case 'canceled': return t('account.orderStatus.canceled');
+    default: return status;
+  }
 }
 
 // an order in a line: `Stand-in Exchange · Buy 0.5 SOL/USDT · limit 142.44 · open · You` (a market's page lists its own so)
 export function orderWords(o) {
-  const type = o.type.replace(/_/g, ' ');
-  const size = [capital(o.side), o.qty === null ? '' : numWord(o.qty), o.symbol].filter(Boolean).join(' ');
-  return [o.venueName || o.venue, size, type && o.limitPrice !== null ? `${type} ${numWord(o.limitPrice)}` : type, o.status, o.who].filter(Boolean).join(' · ');
+  const type = orderTypeWord(o.type);
+  const side = orderSideWord(o.side);
+  const qty = o.qty === null ? '' : numWord(o.qty);
+  const size = side && o.symbol ? (qty ? t('account.order.sized', { side, qty, symbol: o.symbol }) : t('account.order.unsized', { side, symbol: o.symbol }))
+    : [side, qty, o.symbol].filter(Boolean).join(' '); // words-order: an order with no side or no symbol, its parts as they came
+  const typed = type && o.limitPrice !== null ? t('account.order.typeAt', { type, price: numWord(o.limitPrice) }) : type;
+  return [o.venueName || o.venue, size, typed, orderStatusWord(o.status), o.who].filter(Boolean).join(' · '); // words-order: an order's facts under the visual separator
 }
 
 function ordersBox(a) {
@@ -304,6 +329,17 @@ export function positionKeys(position, page, quotes = null) {
   return [close ? marketKey('close', close, sells ? t('account.key.sell') : t('account.key.close')) : '', lev ? marketKey('leverage', lev, t('account.key.leverage')) : ''].filter(Boolean);
 }
 
+// an agent key's status, the Account's code worded; a code with no word is drawn as it came
+function keyStatusWord(status) {
+  switch (status) {
+    case 'ok': return t('account.keyStatus.ok');
+    case 'unknown': return t('account.keyStatus.unknown');
+    case 'expired': return t('account.keyStatus.expired');
+    case 'revoked': return t('account.keyStatus.revoked');
+    default: return status;
+  }
+}
+
 // the kinds of limit the face ends (host/sheet-view.js limitScopes)
 const SCOPES = new Set(['trade', 'venues', 'payees', 'earn']);
 // agents-mount.js:228 — what revoking a key does, asked before its sheet; Gravit's seat revoked stops Gravit's orders too
@@ -370,7 +406,7 @@ function agentsTab(state, now) {
     const limits = r.limits.map(l => l.words);
     return `<div class="venue"><span>${r.gravit
       ? lines(r.standing, [...limits, countsOf(r)])
-      : lines(r.name || t('agents.who.unnamed'), [[r.status, dateWord(r.validUntil) ? t('agents.until', { date: dateWord(r.validUntil) }) : ''].filter(Boolean).join(' · '), ...limits, countsOf(r)])}</span>` + // words-order: an agent's status and its date under the visual separator
+      : lines(r.name || t('agents.who.unnamed'), [[keyStatusWord(r.status), dateWord(r.validUntil) ? t('agents.until', { date: dateWord(r.validUntil) }) : ''].filter(Boolean).join(' · '), ...limits, countsOf(r)])}</span>` + // words-order: an agent's status and its date under the visual separator
       `${owner ? agentKeys(r, state) : ''}</div>`;
   }).join('');
   const status = a.agents.data === null ? note(a.agents.status === 'error' ? t('agents.unavailable') : t('common.loading')) : rows ? '' : note(t('agents.none'));

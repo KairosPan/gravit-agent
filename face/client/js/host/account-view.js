@@ -25,10 +25,20 @@ const modeWords = mode => (mode === 'guard' ? t('account.mode.guard') : mode ===
 const writesWords = w => (w && typeof w === 'object' ? (w.on === true ? (isNum(w.capUsd) ? t('account.writes.onCap', { cap: dollars(w.capUsd) }) : t('account.writes.on')) : t('account.writes.readOnly')) : '');
 // one limit in one line, `trade · paper-1 · $100 an order · $850 of $1,000 left · expired`: the seat's (its perOrderUsd) and
 // an Account agent's (its perPaymentUsd) alike. An amount that is not there is no clause, never $0; a word that is not a string, none.
+// a limit's scope, the Account's code worded; a code with no word is drawn as it came
+function limitScopeWord(scope) {
+  switch (scope) {
+    case 'trade': return t('account.limitScope.trade');
+    case 'venues': return t('account.limitScope.venues');
+    case 'payees': return t('account.limitScope.payees');
+    case 'earn': return t('account.limitScope.earn');
+    default: return scope;
+  }
+}
 const limitWords = (l, perOrderUsd) => {
   const budget = number(l.budgetUsd), left = number(l.leftUsd);
   return [ // words-order: a limit's clauses under the visual separator
-    str(l.scope),
+    limitScopeWord(str(l.scope)),
     (Array.isArray(l.allow) ? l.allow : []).map(str).filter(Boolean).join(t('common.list.sep')),
     isNum(perOrderUsd) ? t('account.limit.perOrder', { amount: dollars(perOrderUsd) }) : '',
     budget !== null && left !== null ? t('account.limit.left', { left: dollars(left), budget: dollars(budget) }) : '',

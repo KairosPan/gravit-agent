@@ -81,7 +81,7 @@ export function providerWord(provider) {
   const statuses = providerStatus();
   const status = Object.hasOwn(statuses, provider?.status) ? statuses[provider.status] : '';
   const name = PROVIDERS[provider?.id] ?? t('markets.quotes');
-  return status ? `${name} · ${status}` : name;
+  return status ? `${name} · ${status}` : name; // words-order: a provider and its status under the visual separator
 }
 
 export function basisWord(quote) {
@@ -330,7 +330,7 @@ function ageWords(at, now) {
 }
 
 // a source's words, with the price's age once it is past FRESH_MS
-const sourced = (from, at, now) => { const age = ageWords(at, now); return age ? `${from} · ${age}` : from; };
+const sourced = (from, at, now) => { const age = ageWords(at, now); return age ? `${from} · ${age}` : from; }; // words-order: a source and its age under the visual separator
 
 /** Where a row's price is from, in the Account's own words: the row's `quoteFrom` (`Robinhood · real time`, `Cboe · 15 min
  *  delayed`), else the venue its 24h change is from (`changeFrom`); else the first venue the owner connected that lists it —

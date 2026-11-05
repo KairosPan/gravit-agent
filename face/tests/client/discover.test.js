@@ -228,3 +228,15 @@ test("an item's line is known by its shelf and a module's unread head by its cod
     assert.match(renderModule(s), /Chargement…/);
   });
 });
+
+test("a card's kind is drawn in the table's capitals, never a table word upper-cased", () => {
+  const table = { 'discover.kind.mcpUpper': 'Srv', 'discover.kind.botUpper': 'Bt', 'discover.kind.agentUpper': 'Agt', 'discover.kind.skillUpper': 'Sk', 'discover.kind.moduleUpper': 'Mod',
+    'discover.kind.mcp': 'xmcp', 'discover.kind.bot': 'xbot', 'discover.kind.agent': 'xagent', 'discover.kind.skill': 'xskill', 'discover.kind.module': 'xmodule' };
+  withTable(table, () => {
+    const kinds = [...renderDiscover(loaded()).matchAll(/<span class="pcard-kind">([^<]*)<\/span>/g)].map(m => m[1]);
+    assert.ok(kinds.length > 0);
+    for (const k of ['Srv', 'Bt', 'Agt', 'Sk', 'Mod']) assert.ok(kinds.includes(k), `${k} drawn: ${kinds}`);
+    assert.deepEqual(kinds.filter(k => !['Srv', 'Bt', 'Agt', 'Sk', 'Mod'].includes(k)), []);
+    assert.match(renderModule(R.nav(emptyState(), { screen: 'module', id: 'sentiment' })), /<span class="pcard-kind">Mod<\/span>/);
+  });
+});

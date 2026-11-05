@@ -244,8 +244,8 @@ export function chipOf(listing, module, mounted = true, active = null) {
 export function researchItems(listing, mounted, actives = {}) {
   const on = plain(actives) ? actives : {};
   return MODULES.map(m => ({
-    id: `module:${m.name}`, shelf: 'research', kind: t('discover.kind.module'), name: m.title, line: m.subtitle,
-    meta: `${m.role} · ${m.channelWords}`, mark: { type: 'glyph', icon: m.icon },
+    id: `module:${m.name}`, shelf: 'research', kind: t('discover.kind.module'), kindCode: 'module', name: m.title, line: m.subtitle,
+    meta: `${m.role} · ${m.channelWords}`, mark: { type: 'glyph', icon: m.icon }, // words-order: a module's role and channel under the visual separator
     chip: chipOf(listing, m.name, mounted, on[m.name] ?? null), dim: mounted === false, running: Boolean(on[m.name]), source: m,
   }));
 }

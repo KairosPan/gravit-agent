@@ -95,7 +95,7 @@ function onOptions(listing, m, sheet) {
     const stale = sheet.on === 'latest' && sheet.run !== run.run;
     options.push(option('latest', latestLabel(run), latestDetail(m, channel, run), latestReason(m, channel, run), stale));
   } else if (m.name === 'mode' || m.name === 'counterevidence') {
-    options.push(option('latest', t('runSheet.on.latest'), null, said('modules.chip.noRun')));
+    options.push(option('latest', t('runSheet.on.latest'), null, said('runSheet.on.noRun')));
   }
   if (MARKET_MODULES.includes(m.name)) {
     options.push(option('new', t('runSheet.on.new'), t('runSheet.on.newMarket', { title: m.title }), null));

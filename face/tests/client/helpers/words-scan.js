@@ -297,3 +297,43 @@ export function assembled(source, file = 'source.js') {
   visit(sf);
   return out.sort((a, b) => a.line - b.line);
 }
+
+// a words call's result upper- or lower-cased (plan 7 Task 6): a script without case (Chinese) has no upper case to take, and
+// a table's word is drawn as the table holds it — a word drawn in capitals is its own key. A .toUpperCase(), .toLowerCase(),
+// .toLocaleUpperCase() or .toLocaleLowerCase() whose receiver is a words call (through parentheses, an element, .charAt,
+// .slice, .substring and .trim), or a name a words call was assigned to in the same function
+const CASES = new Set(['toUpperCase', 'toLowerCase', 'toLocaleUpperCase', 'toLocaleLowerCase']);
+const PIECES = new Set(['charAt', 'slice', 'substring', 'substr', 'trim', 'trimStart', 'trimEnd', 'at']);
+export function casedWords(source, file = 'source.js') {
+  const sf = parse(source, file);
+  const out = [];
+  const scopeOf = node => { let up = node.parent; while (up && !ts.isFunctionLike(up) && !ts.isSourceFile(up)) up = up.parent; return up; };
+  // the names a words call is assigned to, by the function they live in
+  const named = new Map();
+  const unwrap = n => { while (n && ts.isParenthesizedExpression(n)) n = n.expression; return n; };
+  const visitNames = node => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && isWordsCall(unwrap(node.initializer))) {
+      const scope = scopeOf(node);
+      named.set(scope, new Set([...(named.get(scope) ?? []), node.name.text]));
+    }
+    ts.forEachChild(node, visitNames);
+  };
+  visitNames(sf);
+  const receiverWords = (n, at) => {
+    n = unwrap(n);
+    if (!n) return false;
+    if (isWordsCall(n)) return true;
+    if (ts.isElementAccessExpression(n)) return receiverWords(n.expression, at);
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && PIECES.has(n.expression.name.text)) return receiverWords(n.expression.expression, at);
+    if (ts.isIdentifier(n)) { let scope = scopeOf(at); while (scope) { if (named.get(scope)?.has(n.text)) return true; if (ts.isSourceFile(scope)) break; scope = scopeOf(scope); } }
+    return false;
+  };
+  const visit = node => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && CASES.has(node.expression.name.text) && receiverWords(node.expression.expression, node)) {
+      out.push({ line: lineAt(sf, node.getStart(sf)), text: node.getText(sf).replace(/\s+/g, ' ').slice(0, 120) });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out.sort((a, b) => a.line - b.line);
+}

@@ -6,7 +6,7 @@
 // (host/sheet.js) prepares the draft and What you sign shows it. No clock. No DOM, no store.
 import { moveSourcesOf, moveKindsOf, moveDestinationsOf, moveAssetsOf, networksOf, bridgeChainsOf, pageVenueOf, earnListOf, earnRate } from './money-view.js';
 import { pageOk } from './account-view.js';
-import { t, said, sayOf } from '../i18n/words.js';
+import { t, tn, said, sayOf } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -356,7 +356,7 @@ export function earnSaysOf(sheet) {
   const x = sheet.prepared?.quote?.earn;
   if (!isRecord(x)) return [];
   const usd = typeof x.usd === 'number' ? `≈ ${dollars(x.usd)}` : '';
-  const lock = x.lockDays ? t('sheet.earn.locked', { days: x.lockDays }) : x.lockDays === 0 ? t('sheet.earn.atOnce') : '';
+  const lock = x.lockDays ? tn('sheet.earn.locked', x.lockDays) : x.lockDays === 0 ? t('sheet.earn.atOnce') : '';
   const held = !isRecord(x.held) ? ''
     : typeof x.held.usd === 'number' ? t('sheet.earn.heldUsd', { qty: qty(x.held.amount), asset: str(x.held.asset), usd: dollars(x.held.usd) })
       : t('sheet.earn.held', { qty: qty(x.held.amount), asset: str(x.held.asset) });
