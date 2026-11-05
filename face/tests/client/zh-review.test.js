@@ -63,4 +63,11 @@ test('zh-apply writes a fix, keeps every other line byte for byte, and refuses a
   assert.throws(() => applyFixes('key\ten\tzh\tstates\tfix\ncommon.save\tSave\t保存\t—\t{other} 存好\nno.such.key\tX\tY\t—\t坏\n', file, EN),
     /common\.save[\s\S]*no\.such\.key/);
   assert.equal(readFileSync(file, 'utf8'), before, 'a refused run writes nothing');
+  // a line break would split zh.js's single-quoted literal (the review page invites \n; a TSV saved on Windows ends in \r),
+  // and a fix of spaces is no word: each is refused by name and nothing is written
+  const bad = 'key\ten\tzh\tstates\tfix\ncommon.save\tSave\t保存\t—\t保存\\n第二行\ncommon.cancel\tCancel\t取消\t—\t取消\r\n'
+    + 'common.no\tNo\t否\t—\t   \n';
+  assert.throws(() => applyFixes(bad, file, EN), e => /common\.save: holds a line break/.test(e.message)
+    && /common\.cancel: holds a line break/.test(e.message) && /common\.no: empty/.test(e.message));
+  assert.equal(readFileSync(file, 'utf8'), before, 'a line break or a blank fix writes nothing');
 });

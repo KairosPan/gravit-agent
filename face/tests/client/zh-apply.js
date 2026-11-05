@@ -1,9 +1,11 @@
 // Apply the operator's corrections (plan 7 Task 14):
 //   npx tsx tests/client/zh-apply.js <tsv>
 // Each row with a non-empty fix becomes that key's ZH value (\t and \n decoded). A key zh.js lacks, a fix whose {params}
-// differ from the English key's, or a fix the table grammar refuses (empty, <, >, ", or an HTML entity) is named, and the
-// run writes nothing. Otherwise zh.js is rewritten in place: keys, order and comments kept, each changed value one
-// single-quoted literal. Prints the keys changed.
+// differ from the English key's, or a fix the table grammar refuses (empty or blank, a line break or another control
+// character, <, >, ", or an HTML entity) is named, and the run writes nothing. Otherwise zh.js is rewritten in place:
+// keys, order and comments kept, each changed value one single-quoted literal. Prints the keys changed. The Chinese
+// table's own checks (no stray Latin, the register, punctuation after Han, the glossary's terms) are not run here:
+// words-zh.test.js is the second gate, run after the write.
 const { readFileSync, writeFileSync } = await import('node:fs');
 const { resolve } = await import('node:path');
 const { fileURLToPath } = await import('node:url');
@@ -19,7 +21,9 @@ const sameParams = (fix, enValue) => {
 };
 
 const grammarOf = fix => {
-  if (typeof fix !== 'string' || fix === '') return 'empty';
+  if (typeof fix !== 'string' || fix.trim() === '') return 'empty';
+  // no value holds a line break or another control character (a tab aside): it would split the single-quoted literal
+  if (/[\u0000-\u0008\u000a-\u001f\u007f]/.test(fix)) return 'holds a line break';
   if (/[<>"]/.test(fix)) return 'holds <, > or "';
   if (ENTITY.test(fix)) return 'holds an HTML entity';
   return '';
