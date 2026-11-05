@@ -36,14 +36,14 @@ import { tradeableOf } from '../host/trade-view.js';
 import { isCnKey } from '../wire/china.js';
 import { DESK_TAB, deskViewOf, markOf } from '../host/desk-view.js';
 import { renderDeskTab } from './desk.js';
-import { t, th, thn } from '../i18n/words.js';
+import { t, th, thn, sayOf } from '../i18n/words.js';
 
 const EM = '—';
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
 // a record's own entry, never one it inherits
 const own = (o, k) => (isRecord(o) && typeof k === 'string' && Object.hasOwn(o, k) ? o[k] : undefined);
-const note = text => (text ? `<p class="mk-note">${esc(text)}</p>` : '');
+const note = line => { const text = sayOf(line); return text ? `<p class="mk-note">${esc(text)}</p>` : ''; };
 const empty = text => `<p class="mk-empty">${esc(text)}</p>`;
 const tag = text => `<span class="mk-tag">${esc(text)}</span>`;
 const tone = v => ({ pos: 'up', neg: 'down' })[sign(v)] ?? 'flat';
@@ -132,7 +132,7 @@ function cnSearchWord(m, searching) {
 // else, for a ranking the proxy re-served as last read (the market not answering), that; else a refresh that failed over the
 // rows kept
 function chinaLines(read, data, session) {
-  const why = data?.status?.state === 'stale' ? String(data.status.said ?? '').trim()
+  const why = data?.status?.state === 'stale' ? sayOf(data.status.said).trim()
     : data?.stale === true ? notAnsweringWord()
     : read.status === 'error' && read.answered ? t('markets.cn.refreshFailed') : '';
   return note(chinaWord(session)) + note(why);
@@ -207,9 +207,9 @@ const aboutHtml = (conversations, asset, now) => mentionsOf(conversations, asset
 // before any answer the Account's sentence over <unavailable>; after an answer its lines, or <none> — a later failure's sentence
 // over the lines kept
 function partBody(r, lines, none, unavailable) {
-  const said = r.failed ? note(r.message) : '';
-  if (!r.answered) return `${said}${empty(r.failed ? unavailable : t('common.loading'))}`;
-  return `${said}${lines.length ? feed(lines) : none ? empty(none) : ''}`;
+  const kept = r.failed ? note(r.message) : '';
+  if (!r.answered) return `${kept}${empty(r.failed ? unavailable : t('common.loading'))}`;
+  return `${kept}${lines.length ? feed(lines) : none ? empty(none) : ''}`;
 }
 
 /** A market's page, or '' for an id no read lists (the screen then draws the table): an A share's (a cn: id) its own, from its
@@ -237,12 +237,12 @@ function depthBody(part, draw, unavailable, now, timeOf = () => '') {
   const data = p.data;
   // a read lands its answer only once it has one
   const answered = data != null;
-  const said = p.status === 'error' ? note(p.message) : '';
-  if (!answered) return `${said}${empty(p.status === 'error' ? unavailable : t('common.loading'))}`;
+  const kept = p.status === 'error' ? note(p.message) : '';
+  if (!answered) return `${kept}${empty(p.status === 'error' ? unavailable : t('common.loading'))}`;
   const stale = isRecord(data) && data.stale === true;
   const at = stale ? (timeOf() || (typeof p.freshAt === 'number' ? new Date(p.freshAt).toISOString() : '')) : '';
   const asOf = stale ? note(at ? t('markets.asOf', { when: when(at, now) }) : t('markets.asOfLast')) : '';
-  return `${said}${asOf}${draw()}`;
+  return `${kept}${asOf}${draw()}`;
 }
 
 // what was paid, under a holding or a position: the average paid in the market's unit and the cost, then the Account's words

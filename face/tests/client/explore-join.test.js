@@ -5,6 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { joinExplore } from '../../client/js/host/explore-join.js';
+import { spoken } from './helpers/spoken.js';
 
 const pub = (venue, symbol, connector, over = {}) => ({ venue, venueName: venue, symbol, connected: false, public: true, canTrade: false, connector, connectTo: venue, price: 100, ...over });
 const con = (venue, symbol, over = {}) => ({ venue, venueName: venue, symbol, connected: true, public: false, canTrade: true, price: 101, ...over });
@@ -104,7 +105,7 @@ test('a stale connected half is dropped, and missing says the Account is not ans
   const joined = joinExplore(market, connected, {});
   assert.deepEqual(linesOf(joined, 'coin:BTC'), ['kraken|BTC/USD'], 'no connected line is offered on a dead account');
   assert.deepEqual(keys(joined), ['coin:BTC']);
-  assert.deepEqual(joined.missing, [{ venue: 'account', venueName: 'the Account', why: 'The Account is not answering: the venues connected are not listed' }]);
+  assert.deepEqual(spoken(joined.missing), [{ venue: 'account', venueName: 'the Account', why: 'The Account is not answering: the venues connected are not listed' }]);
   assert.equal(joined.stale, undefined);
   // a stale market half is kept, said stale
   const old = joinExplore({ ...market, stale: true }, body([]), {});
@@ -135,7 +136,7 @@ test('the market down: the connected rows alone, and missing says the market is 
     { tabs: [{ id: 'all', label: 'All', count: 2 }, { id: 'stocks', label: 'Stocks', count: 1 }] });
   const joined = joinExplore(null, connected, {});
   assert.deepEqual(keys(joined), ['coin:BTC', 'stock:NVDA']);
-  assert.deepEqual(joined.missing, [{ venue: 'market', venueName: 'the market', why: 'The market is not answering: public markets are not listed' }]);
+  assert.deepEqual(spoken(joined.missing), [{ venue: 'market', venueName: 'the market', why: 'The market is not answering: public markets are not listed' }]);
   assert.deepEqual(joined.tabs.map(t => [t.id, t.count]), [['all', 2], ['stocks', 1]]);
   assert.equal(joined.ok, true);
 });

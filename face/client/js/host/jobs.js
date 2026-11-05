@@ -7,12 +7,18 @@
 // That re-open re-sends the whole retained ring on every reconnect (a known cost: the mux keeps the first args, so no
 // `from` rides it). A job/list the host ends or refuses is opened again after live.js's backoffs.
 import { failLine } from './actions.js';
-import { t } from '../i18n/words.js';
+import { t, said } from '../i18n/words.js';
 import { FOLLOW_RETRY_MS, CONTROL_RETRY_MS } from './live.js';
 
 // characters of output kept in memory per open job, the head dropped first
 export const JOB_OUTPUT_KEEP = 262144;
-const dropped = () => t('jobs.dropped');
+// where output was dropped, held as a sentinel rather than the table's word (so a switch of the table reads it anew, and
+// a re-opened follow under another table finds its own marker): no output holds it, since an output frame's NUL characters
+// become U+FFFD on arrival. shownOutput draws it in the table that stands
+export const DROPPED = '\u0000dropped\u0000\n';
+const NUL = /\u0000/g;
+// the held text as drawn: each marker (at the start or a line's start) in the words of the table that stands
+export const shownOutput = text => (text.includes('\u0000') ? text.replaceAll(DROPPED, `${t('jobs.dropped')}\n`) : text);
 
 export function startJobs({ store, mux, call, timers, onOutput = () => {} }) {
   let list = null;       // { convId, handle, timer }: handle null while a re-open waits on its timer
@@ -45,13 +51,10 @@ export function startJobs({ store, mux, call, timers, onOutput = () => {} }) {
   }
 
   // the dropped line on its own line, at the end of what is held, never twice in a row
-  const mark = text => {
-    const line = `${dropped()}\n`;
-    return text.endsWith(line) ? text : `${text}${text !== '' && !text.endsWith('\n') ? '\n' : ''}${line}`;
-  };
+  const mark = text => (text.endsWith(DROPPED) ? text : `${text}${text !== '' && !text.endsWith('\n') ? '\n' : ''}${DROPPED}`);
   function cap(f) {
     if (f.text.length <= JOB_OUTPUT_KEEP) return;
-    const head = `${dropped()}\n`;
+    const head = DROPPED;
     let cut = f.text.length - (JOB_OUTPUT_KEEP - head.length);
     const unit = f.text.charCodeAt(cut);
     if (unit >= 0xdc00 && unit <= 0xdfff) cut += 1;   // never half a surrogate pair
@@ -64,7 +67,7 @@ export function startJobs({ store, mux, call, timers, onOutput = () => {} }) {
       const from = Number(frame.from) || 0;
       if (!f.opened) {
         f.opened = true;
-        f.text = earliest > 0 ? `${dropped()}\n` : '';
+        f.text = earliest > 0 ? DROPPED : '';
         f.next = Math.max(earliest, from);
       } else if (Math.max(earliest, from) > f.next) {
         // a re-opened follow whose oldest retained byte is past what was held: the bytes between are gone
@@ -77,7 +80,7 @@ export function startJobs({ store, mux, call, timers, onOutput = () => {} }) {
         if (typeof chunk?.text !== 'string' || !(chunk.at >= f.next)) continue;
         if (lossy || chunk.gapBefore === true) f.text = mark(f.text);
         lossy = false;
-        f.text += chunk.text;
+        f.text += chunk.text.replace(NUL, '\uFFFD');
       }
       // offsets are bytes, the text UTF-16: the frame's own `next` is the only resume point
       if (Number.isFinite(frame.next) && frame.next > f.next) f.next = frame.next;
@@ -117,7 +120,7 @@ export function startJobs({ store, mux, call, timers, onOutput = () => {} }) {
       const over = error => {
         if (follow !== mine || mine.ended) return;
         mine.ended = true;
-        if (error !== undefined) mine.error = error?.code ?? t('status.error');
+        if (error !== undefined) mine.error = error?.code ?? said('status.error');
         onOutput(mine.jobId);
       };
       mine.handle = mux.stream('job/follow', { request }, {
@@ -137,10 +140,10 @@ export function startJobs({ store, mux, call, timers, onOutput = () => {} }) {
       try {
         const value = await call('job/kill', { request: { sessionId: convId, jobId } });
         if (value?.outcome === 'requested' || value?.outcome === 'already-finished') return true;
-        say(t('status.fail', { what: t('status.verb.stop'), reason: t('status.failed') }));
+        say(said('status.fail', { what: said('status.verb.stop'), reason: said('status.failed') }));
         return false;
       } catch (err) {
-        say(failLine(err, t('status.verb.stop')));
+        say(failLine(err, said('status.verb.stop')));
         return false;
       }
     },

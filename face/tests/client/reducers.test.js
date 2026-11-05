@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { parseHash } from '../../client/js/router.js';
+import { spoken } from './helpers/spoken.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const hostConv = (id, over = {}) => ({ id, title: id, kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: false, archived: false, updatedAt: 1, created: null, messages: [], loaded: false, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
@@ -162,7 +163,7 @@ test('the sheet slice: open, a field, incomplete, a quiet and a loud ask, prepar
   assert.equal(refused.sheet.again, true);
   assert.equal(refused.sheet.prepared, null, 'nothing left to sign');
   assert.equal(refused.sheet.deadline, null);
-  assert.equal(R.sheetRefused(t, { message: 7, again: 'yes' }).sheet.message, 'Refused', 'only words; again only when true');
+  assert.equal(spoken(R.sheetRefused(t, { message: 7, again: 'yes' }).sheet.message), 'Refused', 'only words; again only when true');
   assert.equal(R.sheetRefused(t, { message: 7, again: 'yes' }).sheet.again, false);
   assert.equal(R.sheetPrepared(refused, { prepared, at: 20, asked: 'x', deadline: null }).sheet.message, null, 'a preparation clears it');
 

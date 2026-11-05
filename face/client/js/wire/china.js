@@ -1,6 +1,7 @@
 // The Account's China answers as the shapes the Markets store already draws: the ranking's rows (chinaRowsOf), a quote (LiveQuote), a
 // search's hits and the provider's state. Pure: no DOM, no fetch; the face holds no key and asks no upstream.
 import { normalizeAsset, number } from "./market-model.js";
+import { isLine } from "../i18n/words.js";
 
 export const CHINA_VENUE = "china";
 
@@ -79,6 +80,6 @@ export function cnHitsOf(body) {
  *  @param {unknown} status */
 export function chinaProviderOf(status) {
   if (!isRecord(status) || !(str(status.state) in PROVIDER_STATUS)) return [];
-  const provider = { id: "tencent", market: "cn", status: PROVIDER_STATUS[status.state], said: str(status.said) };
+  const provider = { id: "tencent", market: "cn", status: PROVIDER_STATUS[status.state], said: isLine(status.said, { empty: true }) ? status.said : "" };
   return [status.notAnswering === true ? { ...provider, notAnswering: true } : provider];
 }

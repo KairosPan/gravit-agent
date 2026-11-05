@@ -3,7 +3,7 @@
 // Stocks check, the conversation's title and the Chinese message to Gravit — from /data/modules.json. Pure. Every wire
 // string passes through as data for the view to escape.
 import { moduleOf, latestOf, headlineWords } from './modules-view.js';
-import { t, tn } from '../i18n/words.js';
+import { t, tn, said, sayOf } from '../i18n/words.js';
 
 const plain = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const channelsOf = listing => (Array.isArray(listing?.channels) ? listing.channels.filter(plain) : []);
@@ -47,23 +47,27 @@ function whereOptions(listing, m) {
 const latestLabel = run => t('runSheet.on.latestRun', { run: run.run, date: dateOf(run) ?? t('runSheet.unknown') });
 const frozenWords = run => t('runSheet.frozen', { what: frozenOf(run).join(' · ') || t('runSheet.nothingYet') });
 // a stale option (G15, the controller's stamp) keeps `enabled` as the artifact rules say, so it can be picked again to
-// re-stamp the run; its reason is the stale one while the newest run would be selectable, else the artifact rule's own
-const option = (id, label, detail, reason, stale = false) => ({ id, label, detail, enabled: reason === null, reason: stale && reason === null ? t('runSheet.stale') : reason, stale });
+// re-stamp the run; its reason is the stale one while the newest run would be selectable, else the artifact rule's own.
+// `why` is the reason as a said (sheetOf's blockedBy, which the Run sheet's line keeps), `reason` its words now
+const option = (id, label, detail, why, stale = false) => {
+  const kept = stale && why === null ? said('runSheet.stale') : why;
+  return { id, label, detail, enabled: why === null, reason: kept === null ? null : sayOf(kept), why: kept, stale };
+};
 
 // two titles as one phrase: `Theme`, `Sentiment and Theme`
 const titlesWords = names => names.map(n => moduleOf(n).title).reduce((a, b) => t('runSheet.both', { a, b }));
 
 // the Latest run option's reason, null when it is open to run: the module's prerequisites on the run (G1, G15)
 function latestReason(m, channel, run) {
-  if (MARKET_MODULES.includes(m.name)) return has(run, m.name) ? t('runSheet.reason.there', { module: m.name }) : null;
-  if (m.name === 'leader') return has(run, 'leader') ? t('runSheet.reason.there', { module: 'leader' }) : null;
+  if (MARKET_MODULES.includes(m.name)) return has(run, m.name) ? said('runSheet.reason.there', { module: m.name }) : null;
+  if (m.name === 'leader') return has(run, 'leader') ? said('runSheet.reason.there', { module: 'leader' }) : null;
   if (m.name === 'mode') {
-    if (has(run, 'mode')) return t('runSheet.reason.modeThere');
-    return has(run, 'leader') && has(run, 'counterevidence') ? null : t('runSheet.reason.needsBoth');
+    if (has(run, 'mode')) return said('runSheet.reason.modeThere');
+    return has(run, 'leader') && has(run, 'counterevidence') ? null : said('runSheet.reason.needsBoth');
   }
-  if (has(run, 'counterevidence')) return t('runSheet.reason.reviewThere');
-  if (channel?.kind === 'market') return MARKET_MODULES.some(n => has(run, n)) ? null : t('runSheet.reason.noMarket');
-  return has(run, 'leader') ? null : t('runSheet.reason.needsLeader');
+  if (has(run, 'counterevidence')) return said('runSheet.reason.reviewThere');
+  if (channel?.kind === 'market') return MARKET_MODULES.some(n => has(run, n)) ? null : said('runSheet.reason.noMarket');
+  return has(run, 'leader') ? null : said('runSheet.reason.needsLeader');
 }
 
 // the Latest run option's detail: what the run froze, or what the review would cover (G15)
@@ -90,7 +94,7 @@ function onOptions(listing, m, sheet) {
     const stale = sheet.on === 'latest' && sheet.run !== run.run;
     options.push(option('latest', latestLabel(run), latestDetail(m, channel, run), latestReason(m, channel, run), stale));
   } else if (m.name === 'mode' || m.name === 'counterevidence') {
-    options.push(option('latest', t('runSheet.on.latest'), null, t('modules.chip.noRun')));
+    options.push(option('latest', t('runSheet.on.latest'), null, said('modules.chip.noRun')));
   }
   if (MARKET_MODULES.includes(m.name)) {
     options.push(option('new', t('runSheet.on.new'), t('runSheet.on.newMarket', { title: m.title }), null));
@@ -148,14 +152,20 @@ function sourceOf(listing, m) {
   return tn('runSheet.source.all', runs.length);
 }
 
+// what is wrong with the Stocks typed, as a said (the line Run leaves keeps it), or null: a token that is no main-board code,
+// or more codes than a run takes
+function stocksWhy(tokens) {
+  const bad = tokens.find(tok => !CODE.test(tok));
+  if (bad !== undefined) return said('runSheet.stocks.notCode', { code: bad });
+  return new Set(tokens).size > MAX_CODES ? said('runSheet.stocks.atMost', { n: MAX_CODES }) : null;
+}
+const tokensOf = text => String(text ?? '').split(/[\s,，、]+/).filter(tok => tok !== '').map(tok => tok.toLowerCase());
+
 /** The Stocks field (G11): main-board codes by shape alone, lower-cased, duplicates folded, at most four. */
 export function stocksOf(text) {
-  const tokens = String(text ?? '').split(/[\s,，、]+/).filter(tok => tok !== '').map(tok => tok.toLowerCase());
-  const bad = tokens.find(tok => !CODE.test(tok));
-  if (bad !== undefined) return { codes: [], error: t('runSheet.stocks.notCode', { code: bad }) };
-  const codes = [...new Set(tokens)];
-  if (codes.length > MAX_CODES) return { codes: [], error: t('runSheet.stocks.atMost', { n: MAX_CODES }) };
-  return { codes, error: null };
+  const tokens = tokensOf(text);
+  const why = stocksWhy(tokens);
+  return why ? { codes: [], error: sayOf(why) } : { codes: [...new Set(tokens)], error: null };
 }
 
 /** The slice's first value for a card, or null for an unknown module; `channel`, when named, is Where (a market card's
@@ -196,16 +206,19 @@ export function sheetOf(listing, sheet, now = Date.now()) {
   const chosen = onOpts.find(o => o.id === sheet.on) ?? null;
   const cites = where ? citesOf(listing, m, sheet) : null;
   // Stocks on a Leader's New run alone: a Latest run's message has no codes slot; the slice keeps the text meanwhile
-  const stocks = m.name === 'leader' && sheet.on !== 'latest' ? { value: sheet.stocks ?? '', error: stocksOf(sheet.stocks).error, hint: t('runSheet.stocks.hint') } : null;
+  const typed = m.name === 'leader' && sheet.on !== 'latest' ? stocksWhy(tokensOf(sheet.stocks)) : undefined;
+  const stocks = typed !== undefined ? { value: sheet.stocks ?? '', error: typed === null ? null : sayOf(typed), hint: t('runSheet.stocks.hint') } : null;
 
-  let blocker = null;
-  if (!plain(listing)) blocker = t('runSheet.unread');
-  else if (!where) blocker = t('runSheet.chooseWhere');
-  else if (!chosen) blocker = t('runSheet.chooseRun');
-  else if (chosen.stale || !chosen.enabled) blocker = chosen.reason;
-  else if (cites && !cites.readOnly && !cites.value) blocker = t('runSheet.chooseCite');
-  else if (cites && cites.readOnly && !cites.value) blocker = t('runSheet.noCite');
-  else if (stocks?.error) blocker = stocks.error;
+  // what blocks Run, as a said (the line Run leaves is kept) and in words now (the button's title)
+  let blockedBy = null;
+  if (!plain(listing)) blockedBy = said('runSheet.unread');
+  else if (!where) blockedBy = said('runSheet.chooseWhere');
+  else if (!chosen) blockedBy = said('runSheet.chooseRun');
+  else if (chosen.stale || !chosen.enabled) blockedBy = chosen.why;
+  else if (cites && !cites.readOnly && !cites.value) blockedBy = said('runSheet.chooseCite');
+  else if (cites && cites.readOnly && !cites.value) blockedBy = said('runSheet.noCite');
+  else if (typed) blockedBy = typed;
+  const blocker = blockedBy === null ? null : sayOf(blockedBy);
 
   return {
     title: t('runSheet.title', { title: m.title }),
@@ -214,7 +227,7 @@ export function sheetOf(listing, sheet, now = Date.now()) {
     cites, stocks, source: sourceOf(listing, m), note: { value: sheet.note ?? '' },
     via: t('runSheet.via', { where: where ?? '…', role: m.role, module: m.name }),
     writes: `${m.file} · ${t('runSheet.aConversation')} "${titleOf(listing, sheet, now)}"`,
-    canRun: blocker === null, blocker,
+    canRun: blocker === null, blocker, blockedBy,
   };
 }
 

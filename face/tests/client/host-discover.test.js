@@ -6,6 +6,7 @@ import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { startDiscover, GRAVIT_KEYS } from '../../client/js/host/discover.js';
+import { spoken } from './helpers/spoken.js';
 
 function rig({ json = {}, calls: answers = {}, posts = {} } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
@@ -80,7 +81,7 @@ test("connect posts the bin and re-reads the agents; a 404 puts its words on Dis
   assert.deepEqual(r.d().shelves.agents.data.local, [{ bin: 'codex', found: true }]);
   const no = rig({ posts: { '/data/agents/connect': Object.assign(new Error('binary did not answer on this machine'), { status: 404, code: 'binary did not answer on this machine' }) } });
   assert.equal(await no.discover.connect('ghost'), false);
-  assert.deepEqual(no.d().status, { line: 'connect: binary did not answer on this machine', bad: true });
+  assert.deepEqual(spoken(no.d().status), { line: 'connect: binary did not answer on this machine', bad: true });
   const rescan = rig({ posts: { '/data/agents/rescan': { ok: true, main: {}, local: [], candidates: [{ bin: 'claude', version: '2.1' }] } } });
   assert.equal(await rescan.discover.rescan(), true);
   assert.deepEqual(rescan.d().shelves.agents.data.candidates, [{ bin: 'claude', version: '2.1' }], 'rescan answers the listing itself');
@@ -96,7 +97,7 @@ test('saveBot posts the revision-checked payload and re-reads the bots', async (
   assert.deepEqual(r.posted, [['/data/bots/settings', { id: 'buffett', revision: 'r1', name: 'Buffett Type', description: 'Buys cheaper', model: null, soul: '# B2' }]]);
   assert.ok(r.reads.includes('/data/bots.json'), 'the bots are read again');
   assert.equal(await r.discover.saveBot(bot, fields({ model: 'not a route' })), 'failed');
-  assert.match(r.d().status.line, /provider\/model/);
+  assert.match(spoken(r.d().status.line), /provider\/model/);
   assert.equal(r.posted.length, 1, 'a bad model route is refused before the post');
 });
 
@@ -104,11 +105,11 @@ test('a stale revision reads stale and the line says Changed elsewhere', async (
   const words = 'bot settings changed since this view was loaded; reload before saving';
   const r = rig({ json: { ...ok }, posts: { '/data/bots/settings': Object.assign(new Error(words), { status: 409, code: words }) } });
   assert.equal(await r.discover.saveBot(bot, fields()), 'stale');
-  assert.deepEqual(r.d().status, { line: 'Changed elsewhere — reloaded', bad: true });
+  assert.deepEqual(spoken(r.d().status), { line: 'Changed elsewhere — reloaded', bad: true });
   assert.ok(r.reads.includes('/data/bots.json'));
   const other = rig({ posts: { '/data/bots/settings': Object.assign(new Error('bot already exists'), { status: 409, code: 'bot already exists' }) } });
   assert.equal(await other.discover.saveBot(bot, fields()), 'failed', 'another 409 is a plain refusal');
-  assert.deepEqual(other.d().status, { line: 'save: bot already exists', bad: true });
+  assert.deepEqual(spoken(other.d().status), { line: 'save: bot already exists', bad: true });
 });
 
 test('a saved-but 500 counts as saved', async () => {
@@ -124,10 +125,10 @@ test('createBot omits blank fields; a name with no ASCII needs an id before any 
   assert.equal(await r.discover.createBot({ name: ' Macro Bot ', id: '', description: '', model: '', soul: '  ' }), 'macro-bot');
   assert.deepEqual(r.posted, [['/data/bots', { name: 'Macro Bot' }]]);
   assert.ok(r.reads.includes('/data/bots.json'), 'an unlisted new bot sends the face back to the listing');
-  assert.deepEqual(await r.discover.createBot({ name: '宏观派', id: '', description: '', model: '', soul: '' }), { error: 'Give it an id: a-z, 0-9, -' });
+  assert.deepEqual(spoken(await r.discover.createBot({ name: '宏观派', id: '', description: '', model: '', soul: '' })), { error: 'Give it an id: a-z, 0-9, -' });
   assert.equal(await r.discover.createBot({ name: '宏观派', id: 'macro', description: 'Top down', model: 'deepseek/deepseek-chat', soul: '# M' }), 'macro');
   assert.deepEqual(r.posted[1], ['/data/bots', { name: '宏观派', id: 'macro', description: 'Top down', model: 'deepseek/deepseek-chat', soul: '# M' }]);
-  assert.deepEqual(await r.discover.createBot({ name: '', id: '', description: '', model: '', soul: '' }), { error: 'Give it a name' });
+  assert.deepEqual(spoken(await r.discover.createBot({ name: '', id: '', description: '', model: '', soul: '' })), { error: 'Give it a name' });
   const taken = rig({ posts: { '/data/bots': Object.assign(new Error('bot already exists'), { status: 409, code: 'bot already exists' }) } });
   assert.deepEqual(await taken.discover.createBot({ name: 'Macro', id: '', description: '', model: '', soul: '' }), { error: 'bot already exists' });
 });

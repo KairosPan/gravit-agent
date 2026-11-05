@@ -6,7 +6,7 @@
 // for, its `deadline` when it carries one), `refused` (the Account's `message`, `again` when preparing again is the answer),
 // `signing`, `done` (what the Account `said`).
 import { refieldsOf } from '../host/sheet-view.js';
-import { t } from '../i18n/words.js';
+import { said, isLine } from '../i18n/words.js';
 
 const ROLES = new Set(['unknown', 'signs', 'pending', 'needs-code', 'signed-out', 'none']);
 const own = (s, patch) => {
@@ -43,7 +43,7 @@ export const reducers = {
   // the standing: a role the device does not know leaves the slice as it is
   ownerStanding: (s, { role, kid } = {}) => (ROLES.has(role) ? own(s, { role, kid: typeof kid === 'string' ? kid : '' }) : s),
   // the Account's words when it refused the device (null clears them)
-  ownerRefusal: (s, message) => own(s, { refusal: typeof message === 'string' ? message : null }),
+  ownerRefusal: (s, message) => own(s, { refusal: isLine(message, { empty: true }) ? message : null }),
   ownerBusy: (s, on) => own(s, { busy: on === true }),
 
   sheetOpen: (s, { kind, seed, fields } = {}) => ({
@@ -64,10 +64,10 @@ export const reducers = {
     status: 'ready', words: '', prepared, preparedAt: at, asked, deadline: Number.isFinite(deadline) ? deadline : null, message: null, again: false,
   }),
   sheetRefused: (s, { message, again } = {}) => sheet(s, {
-    status: 'refused', ...UNPREPARED, message: typeof message === 'string' && message ? message : t('owner.refused'), again: again === true,
+    status: 'refused', ...UNPREPARED, message: isLine(message) ? message : said('owner.refused'), again: again === true,
   }),
   sheetSigning: s => sheet(s, { status: 'signing' }),
-  sheetDone: (s, { said } = {}) => sheet(s, { status: 'done', deadline: null, said: typeof said === 'string' ? said : '' }),
+  sheetDone: (s, { said: words } = {}) => sheet(s, { status: 'done', deadline: null, said: isLine(words, { empty: true }) ? words : '' }),
   // the countdown's second: a new state, so subscribers draw the words from deadline − now
   sheetTick: s => sheet(s, {}),
   sheetClose: s => (s.sheet ? { ...signInIdle(s), sheet: null } : s),

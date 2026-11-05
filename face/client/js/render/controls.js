@@ -1,7 +1,7 @@
 // gravit-ui/js/render/controls.js — the small shared controls: segs, key-value rows, drawer sections, inline editors, two-step confirms
 import { esc, attrs, cls } from '../html.js';
 import { icon } from '../icons.js';
-import { th } from '../i18n/words.js';
+import { th, sayOf } from '../i18n/words.js';
 
 // each item a label, or a [label, value] pair when the action takes a value other than the words: the item whose value is
 // `pressed` is pressed, and each hands its value as data-value — and every item the same further data when it is given (a
@@ -28,7 +28,8 @@ export function sec(label, lines, html = false) {
 // an inline editor: its inputs, a ✓ that commits and a × that cancels (app.js reads every [name] inside .inline-edit)
 // fields: { name, value, type = 'text' | 'number', label, options? } — the label is the box's accessible name; options make
 // a pick list
-export function inlineEdit(fields, error = null) {
+export function inlineEdit(fields, line = null) {
+  const error = sayOf(line);
   const input = f => {
     const named = { 'aria-label': f.label };
     const box = f.options

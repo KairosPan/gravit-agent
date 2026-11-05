@@ -10,6 +10,7 @@ import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { startSheet, PREPARE_QUIET_MS, RESIGN_UNDER_MS, FRESH_MS } from '../../client/js/host/sheet.js';
+import { spoken } from './helpers/spoken.js';
 
 const settle = async () => { for (let i = 0; i < 6; i++) await new Promise(r => setTimeout(r, 0)); };
 const watch = () => JSON.parse(readFileSync(new URL('../fixtures/account/prepared-watch.json', import.meta.url), 'utf8'));
@@ -267,7 +268,7 @@ test('a refusal at prepare is drawn and nothing is signed', async () => {
   r.owner.prepareWith.push({ status: 200, body: { ok: true } });
   await r.sheet.again();
   assert.equal(r.s().status, 'refused');
-  assert.equal(r.s().message, 'Refused');
+  assert.equal(spoken(r.s().message), 'Refused');
   assert.equal(r.s().prepared, null);
 });
 
@@ -454,13 +455,13 @@ test("beforeSign's refusal stops the signature and says it", async () => {
   await t.sheet.open('signOut', SIGN_OUT);
   await t.sheet.submit();
   assert.equal(t.owner.envelopes.length, 1);
-  assert.deepEqual([t.s().status, t.s().said], ['done', 'Done. Guard is on.']);
+  assert.deepEqual(spoken([t.s().status, t.s().said]), ['done', 'Done. Guard is on.']);
   // taken, and the sign-out refused: its words, Not signed out
   const u = rig({ beforeSign: async () => null });
   u.owner.submitWith.push(OUT_REFUSED);
   await u.sheet.open('signOut', SIGN_OUT);
   await u.sheet.submit();
-  assert.deepEqual([u.s().status, u.s().message], ['refused', 'Not signed out: the last owner cannot leave yet. Guard is on.']);
+  assert.deepEqual(spoken([u.s().status, u.s().message]), ['refused', 'Not signed out: the last owner cannot leave yet. Guard is on.']);
   // a sheet closed while Guard is asked signs nothing
   const later = deferred();
   const v = rig({ beforeSign: () => later.promise });
@@ -490,5 +491,5 @@ test('beforeSign is not asked for a sheet that does not need it', async () => {
   await r.sheet.submit();
   assert.deepEqual(asked, []);
   assert.equal(r.owner.envelopes.length, 3);
-  assert.equal(r.s().said, 'Done', 'no Guard words');
+  assert.equal(spoken(r.s().said), 'Done', 'no Guard words');
 });

@@ -8,6 +8,7 @@ import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { mapFrame } from '../../client/js/wire/mapper.js';
 import { startLive, viewFor, LIST_REFRESH_MS, PREVIEW_ROWS, FOLLOW_RETRY_MS, ACTIVATE_MS, EARLIER_MAX_PAGES } from '../../client/js/host/live.js';
+import { spoken } from './helpers/spoken.js';
 
 const NOW = 1_760_000_000_000;
 const frames = readFileSync(new URL('../fixtures/events.jsonl', import.meta.url), 'utf8').trim().split('\n').map(l => JSON.parse(l));
@@ -157,7 +158,7 @@ test('a session whose log needs migration opens on the status line, never throws
   const r = rig({ rows: [row('old'), row('new', { updatedAt: 9 })], projections: id => id === 'old' ? { kind: 'migration-required', values: { title: 'old' } } : { kind: 'sequenced', asOfSeq: 4, values: {} } });
   await r.ready();
   r.live.open('old'); await settle();
-  assert.match(r.store.get().status.line, /^open: session\/migration-required/);
+  assert.match(spoken(r.store.get().status.line), /^open: session\/migration-required/);
   assert.equal(r.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 'old' && c[1].request.maxMessages === undefined), false, 'no page without a cut');
   assert.deepEqual(r.store.get().conversations.map(c => c.id).sort(), ['new', 'old'], 'the list keeps both rows');
   r.live.open('new'); await settle();
@@ -176,7 +177,7 @@ test('a follow the host refuses is reported once on the status line and never re
   await r.ready();
   r.live.open('s'); await settle();
   r.last('session/follow').cbs.onError({ code: 'session/not-found', message: 'gone' });
-  assert.match(r.store.get().status.line, /session\/not-found/);
+  assert.match(spoken(r.store.get().status.line), /session\/not-found/);
   r.live.reconcile();
   assert.equal(r.follows().length, 1);
   assert.equal(r.scheduled.some(s => s.ms === FOLLOW_RETRY_MS), false);
@@ -642,7 +643,7 @@ test('a refused page says earlier: code and keeps the window', async () => {
   await r.ready();
   r.live.open('c'); await settle();
   assert.equal(await r.live.earlier('c'), false);
-  assert.deepEqual(r.store.get().status, { line: 'earlier: gateway/bad-request', bad: true, connected: true });
+  assert.deepEqual(spoken(r.store.get().status), { line: 'earlier: gateway/bad-request', bad: true, connected: true });
   assert.deepEqual(ids(r, 'c'), [30, 31]);
   assert.deepEqual(winOf(r, 'c'), { start: 30, through: 40, hasMore: true, replaced: [] });
 });

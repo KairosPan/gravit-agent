@@ -1,7 +1,7 @@
 // face/client/js/reducers/controls.js — the in-page controls: inline editors and two-step confirms (they replaced prompt
 // and confirm)
 import { reducers as messages, closeOverlays } from './messages.js';
-import { t } from '../i18n/words.js';
+import { said } from '../i18n/words.js';
 
 const fail = (s, error) => ({ ...s, edit: { ...s.edit, error } });
 const done = s => ({ ...s, edit: null });
@@ -17,7 +17,7 @@ export const reducers = {
     switch (e.kind) {
       case 'rename': {
         const title = String(values.title ?? '').trim();
-        return title ? done(messages.rename(s, { convId: e.convId, title })) : fail(s, t('details.nameEmpty'));
+        return title ? done(messages.rename(s, { convId: e.convId, title })) : fail(s, said('details.nameEmpty'));
       }
       default:
         return done(s);

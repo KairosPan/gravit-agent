@@ -2,12 +2,12 @@
 // behind its page (status, thesis, backtests, journal, files, rosters), a new channel, and the two roster writes.
 // Impure; nothing here draws. A write answers {ok: true} or {error: <words>} for the editor that asked.
 import { foldChannelName } from '../wire/channelName.js';
-import { t } from '../i18n/words.js';
+import { said } from '../i18n/words.js';
 
 // the face's own rule for a channel's name (src/channels.ts NAME_RE), checked before anything is posted
 const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N}\p{M}_-]{0,40}$/u;
 export const MAX_BOTS = 6; // a channel rosters at most six bots (src/room-rules.ts ROOM_CAPS.maxMembers)
-const words = err => err?.code ?? err?.message ?? t('channel.failed');
+const words = err => err?.code ?? err?.said ?? err?.message ?? said('channel.failed');
 
 export function startChannels({ store, postJson, getJson, refresh, now = Date.now }) {
   let seq = 0; // only the latest-started overview lands
@@ -30,12 +30,12 @@ export function startChannels({ store, postJson, getJson, refresh, now = Date.no
   // re-read list by the directory the route answered (the route answers no workspace id)
   async function create(raw) {
     const name = foldChannelName(typeof raw === 'string' ? raw : '');
-    if (!NAME_RE.test(name) || name === '_template') return { error: t('channel.name.rule') };
+    if (!NAME_RE.test(name) || name === '_template') return { error: said('channel.name.rule') };
     try {
       const made = await postJson('/data/channels', { name });
       await refresh();
       const ch = (store.get().channels ?? []).find(c => c.dir === made?.dir);
-      return ch ? { workspaceId: ch.workspaceId } : { error: t('channel.notListed') };
+      return ch ? { workspaceId: ch.workspaceId } : { error: said('channel.notListed') };
     } catch (err) {
       return { error: words(err) };
     }
@@ -64,7 +64,7 @@ export function startChannels({ store, postJson, getJson, refresh, now = Date.no
   }
   const setAgents = (workspaceId, bins) => write('/data/channels/agents', { workspaceId, agents: bins }, workspaceId);
   const setBots = (workspaceId, ids) => (ids.length > MAX_BOTS
-    ? Promise.resolve({ error: t('channel.atMostSix') })
+    ? Promise.resolve({ error: said('channel.atMostSix') })
     : write('/data/channels/bots', { workspaceId, bots: ids }, workspaceId));
 
   return { overview, create, agentChoices, setAgents, setBots };

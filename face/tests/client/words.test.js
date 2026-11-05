@@ -3,7 +3,7 @@
 // a while, a key it lacks falling back to EN.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { t, th, tn, thn, rawHtml, withTable, setTable, wordsEpoch } from '../../client/js/i18n/words.js';
+import { t, th, tn, thn, rawHtml, withTable, setTable, wordsEpoch, said, saidn, sayOf, isSaid, isLine, saidError } from '../../client/js/i18n/words.js';
 import { EN } from '../../client/js/i18n/en.js';
 
 const PROBE = Object.freeze({
@@ -104,4 +104,53 @@ test('a null or missing param value reads as nothing in t and th alike; a count 
     assert.equal(tn('probe.jobs', '1'), '1 job running', "the string '1' is one");
     assert.equal(tn('probe.jobs', '2'), '2 jobs running');
   });
+});
+
+// a line the store keeps (plan 7 Task 2): its key and params, read in the table that stands when it is drawn
+test('said reads the table standing at sayOf, not the one at said', () => {
+  const line = said('jobs.dropped');
+  assert.equal(sayOf(line), EN['jobs.dropped']);
+  assert.equal(withTable({ 'jobs.dropped': '…之前的输出已丢弃…' }, () => sayOf(line)), '…之前的输出已丢弃…');
+  const made = withTable(PROBE, () => said('probe.why', { why: 'x' }));
+  assert.equal(sayOf(made), 'probe.why', 'made under the probe, read under EN: EN lacks it');
+  assert.equal(withTable(PROBE, () => sayOf(made)), "Can't run · x");
+});
+
+test('saidn picks its form by its count', () => {
+  withTable(PROBE, () => {
+    assert.equal(sayOf(saidn('probe.jobs', 1)), '1 job running');
+    assert.equal(sayOf(saidn('probe.jobs', 3)), '3 jobs running');
+    assert.equal(sayOf(saidn('probe.items', 2, { where: '<a>' })), '2 items in <a>');
+  });
+});
+
+test('sayOf passes a string through and draws nothing for null', () => {
+  assert.equal(sayOf("the Account's <words>"), "the Account's <words>");
+  assert.equal(sayOf(''), '');
+  for (const none of [null, undefined, 0, {}, { key: 'common.save' }]) assert.equal(sayOf(none), '', String(none));
+});
+
+test('a said is frozen and its params are copied', () => {
+  const params = { why: 'first' };
+  const line = said('probe.why', params);
+  params.why = 'changed';
+  assert.ok(Object.isFrozen(line) && Object.isFrozen(line.params));
+  assert.equal(withTable(PROBE, () => sayOf(line)), "Can't run · first");
+  assert.ok(isSaid(line) && !isSaid({ key: 'probe.why' }) && !isSaid('probe.why'));
+});
+
+test('a said put into another, and into t or th, reads in the table that stands; th escapes it once', () => {
+  const inner = said('probe.why', { why: '<x>' });
+  withTable(PROBE, () => {
+    assert.equal(sayOf(said('probe.greet', { name: inner })), "Hello Can't run · <x> and Can't run · <x>");
+    assert.equal(th('probe.why', { why: inner }), "Can't run · Can&#39;t run · &lt;x&gt;");
+  });
+});
+
+test('isLine takes a string or a said, the empty string only when asked; saidError carries its said', () => {
+  assert.ok(isLine('x') && isLine(said('common.save')) && !isLine('') && isLine('', { empty: true }) && !isLine(null) && !isLine({}));
+  const err = saidError('probe.why', { why: 'w' });
+  assert.ok(err instanceof Error && isSaid(err.said));
+  assert.equal(err.message, 'probe.why', 'its message read now, for a log');
+  assert.equal(withTable(PROBE, () => sayOf(err.said)), "Can't run · w");
 });

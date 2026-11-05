@@ -11,7 +11,7 @@ import { RULES_KINDS, rulesTitleOf, rulesGoOf, rulesFieldsOf, rulesDraftOf } fro
 import { IDENTITY_KINDS, identityTitleOf, identityGoOf, identityFieldsOf, identityDraftOf } from './sheet-identity.js';
 import { MONEY_KINDS, moneyTitleOf, moneyGoOf, moneyFieldsOf, moneyRefieldsOf, moneyDraftOf, moveSeedOf, subWalletSeedOf } from './sheet-money.js';
 import { canMove, servedHere, moveSourcesOf } from './money-view.js';
-import { t, tn } from '../i18n/words.js';
+import { t, tn, said, sayOf } from '../i18n/words.js';
 
 const DAY = 86_400_000;
 const ZERO = '0x0000000000000000000000000000000000000000';
@@ -522,14 +522,14 @@ export function guardFirstOf(sheet) {
   return f?.value === true || f?.value === 'true';
 }
 /** A sign-out signed after a taken Guard: what it said, ending `Guard is on.` */
-export const guardFirstDone = said => {
-  const s = str(said).trim();
-  return s ? t('sheet.guard.done', { said: /[.!?]$/.test(s) ? s : `${s}.` }) : t('sheet.guard.on');
+export const guardFirstDone = words => {
+  const s = sayOf(words).trim();
+  return s ? said('sheet.guard.done', { said: /[.!?]$/.test(s) ? s : `${s}.` }) : said('sheet.guard.on');
 };
 /** A sign-out refused after a taken Guard (Guard stays, and says so): the Account's words. */
 export const guardFirstRefused = words => {
-  const w = (str(words) || t('sheet.guard.noAnswer')).trim();
-  return t('sheet.guard.refused', { words: /[.!?]$/.test(w) ? w : `${w}.` });
+  const w = (sayOf(words) || t('sheet.guard.noAnswer')).trim();
+  return said('sheet.guard.refused', { words: /[.!?]$/.test(w) ? w : `${w}.` });
 };
 
 // ── granting an agent's ask (plan 4b Task 6, portfolio.js pfGrant) ──
@@ -676,7 +676,7 @@ function walletWords(sheet, w) {
   if (!isRecord(w)) return '';
   if (w.status === 'none') return t('sheet.wallet.none');
   if (w.status === 'asking') return str(w.wallet) ? t('sheet.wallet.asking', { wallet: w.wallet }) : t('sheet.wallet.askingAny');
-  if (w.status === 'refused') return str(w.message);
+  if (w.status === 'refused') return sayOf(w.message);
   if (w.status === 'proven' && str(w.address) && text(sheet.fields, 'ref').toLowerCase() === w.address.toLowerCase()) {
     return str(w.wallet) ? t('sheet.wallet.proven', { wallet: w.wallet, address: short(w.address) }) : t('sheet.wallet.provenAny', { address: short(w.address) });
   }
@@ -692,7 +692,7 @@ function signInWords(option, si) {
     case 'waiting': return si.tab === false ? '' : t('sheet.signIn.waiting', { who });
     case 'ready': return t('sheet.signIn.ready');
     case 'expired': return t('sheet.signIn.expired');
-    case 'failed': return str(si.message) || t('sheet.signIn.failed');
+    case 'failed': return sayOf(si.message) || t('sheet.signIn.failed');
     default: return '';
   }
 }

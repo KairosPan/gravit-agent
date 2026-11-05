@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import {
   standingWords, devicesOf, whatYouSignLines, goodForWords, refusedAt, whyOf, refusalOf, saidOf,
 } from '../../client/js/host/owner-view.js';
+import { spoken } from './helpers/spoken.js';
 
 // a fixture of the stand-in's answers, parsed afresh for every call so no test sees another's copy
 const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
@@ -90,7 +91,7 @@ test('refusalOf: Prepare again for a requote or an expiry, the standing for a ba
     { message: 'this approval names a different instruction than the one the card holds', again: false, standing: false });
   assert.deepEqual(refusalOf({ status: 200, body: { ok: true, kind: 'result', result: { ok: false, code: 'E_CARD_REJECTED', message: 'You rejected it; nothing moved' } } }),
     { message: 'You rejected it; nothing moved', again: false, standing: false });
-  assert.deepEqual(refusalOf({ status: 409, body: { ok: false } }), { message: 'Refused', again: false, standing: false });
+  assert.deepEqual(spoken(refusalOf({ status: 409, body: { ok: false } })), { message: 'Refused', again: false, standing: false });
 });
 
 test('saidOf: an order by its id and its status, the Account\'s summary, Done for a result', () => {
@@ -100,6 +101,6 @@ test('saidOf: an order by its id and its status, the Account\'s summary, Done fo
   assert.equal(saidOf(order('canceled')), 'ord-0011 · canceled');
   assert.equal(saidOf(order('pending')), 'ord-0011 · pending');
   assert.equal(saidOf({ ok: true, kind: 'account', summary: 'agent key "Claude Code" authorised until 2026-11-21' }), 'agent key "Claude Code" authorised until 2026-11-21');
-  assert.equal(saidOf({ ok: true, kind: 'result', result: { ok: true } }), 'Done');
+  assert.equal(spoken(saidOf({ ok: true, kind: 'result', result: { ok: true } })), 'Done');
   assert.equal(saidOf(null), '');
 });

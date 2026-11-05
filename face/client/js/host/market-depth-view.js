@@ -53,7 +53,7 @@ export function hereOf(body, page) {
   if (body?.ok !== true || !Array.isArray(body.positions) || !Array.isArray(body.orders)) return { ...EMPTY_HERE };
   const orders = orderRowsOf(body.orders, isRecord(page) ? page.keys : []);
   const theirs = orders.filter(o => !o.mine);
-  const said = statementLinesOf({ ok: true, lines: body.lines }).filter(l => l.by !== '' && l.by !== OWNER_BY);
+  const theirLines = statementLinesOf({ ok: true, lines: body.lines }).filter(l => l.by !== '' && l.by !== OWNER_BY);
   const paper = isRecord(body.paper) ? body.paper : {};
   const paperCost = costRows(paper.cost);
   const atPosition = c => c.key.startsWith('position:');
@@ -64,7 +64,7 @@ export function hereOf(body, page) {
     orders,
     cost: [...costRows(body.cost), ...paperCost.filter(atPosition)],
     paperCost: paperCost.filter(c => !atPosition(c)),
-    agents: [...theirs.map(order => ({ type: 'order', order })), ...said.map(line => ({ type: 'line', line }))],
+    agents: [...theirs.map(order => ({ type: 'order', order })), ...theirLines.map(line => ({ type: 'line', line }))],
     missing: missingWords(body.missing),
   };
 }

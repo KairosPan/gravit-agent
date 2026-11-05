@@ -14,6 +14,7 @@ import { rowsOf, pageOf, cnStateWord } from '../../client/js/host/market-view.js
 import { STORAGE_KEY, ACCOUNT_WATCH_KEY, readAccountWatch, saveAccountWatch } from '../../client/js/wire/market-model.js';
 import { setTable } from '../../client/js/i18n/words.js';
 import { EN } from '../../client/js/i18n/en.js';
+import { spoken } from './helpers/spoken.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 8; i++) await tick(); };
@@ -884,7 +885,7 @@ test("a refused setWatch is the Account's sentence in the watchlist's words; the
   reply = () => { throw new Error('boom'); };
   r.markets.unwatch('coin:BTC');
   await settle();
-  assert.equal(r.m().watchError, 'Refused');
+  assert.equal(spoken(r.m().watchError), 'Refused');
   // taken: the sentence clears
   reply = () => TAKEN;
   r.markets.watch('coin:ETH');
@@ -994,7 +995,7 @@ test('the Account down while China is on screen: the kept ranking re-served stal
   assert.equal(r.m().rank.status, 'ready');
   assert.equal(r.m().rank.data.stale, true, 'the proxy said it is the last read');
   // the Venues line: never the Account's last live sentence while it is not answering (plan-1 final review #3)
-  assert.deepEqual(r.m().providers, [{ id: 'tencent', market: 'cn', status: 'error', said: 'The market is not answering · China as last read', notAnswering: true }]);
+  assert.deepEqual(spoken(r.m().providers), [{ id: 'tencent', market: 'cn', status: 'error', said: 'The market is not answering · China as last read', notAnswering: true }]);
   stale = false;
   r.fire(EXPLORE_MS);
   await settle();
@@ -1119,7 +1120,7 @@ test('a failed A-share quote read keeps the price and says the connection failed
   assert.equal(r.m().connection, 'stale', 'the Account not answering is its own connection (plan-1 final review #1)');
   assert.equal(r.m().quotes['cn:600519'].quote_status, 'stale', "the proxy's last read is no live price");
   assert.match(cnStateWord(r.m().quotes['cn:600519'], r.m().connection, r.m().providers), /^The market is not answering · as of \d{2}-\d{2} \d{2}:\d{2} Beijing$/);
-  assert.equal(r.m().providers[0]?.said, 'The market is not answering · China as last read', 'nor Tencent answering on Venues');
+  assert.equal(spoken(r.m().providers[0]?.said), 'The market is not answering · China as last read', 'nor Tencent answering on Venues');
   mode = 'ok';
   r.fire(QUOTES_MS);
   await settle();
@@ -1166,7 +1167,7 @@ test('China said not answering under another table is read again once the market
     r.store.dispatch('setMarketsTab', 'china');
     r.markets.show(true);
     await settle();
-    assert.equal(r.m().providers[0]?.said, 'Le marché ne répond pas', 'said in the table that stood');
+    assert.equal(spoken(r.m().providers[0]?.said), 'Le marché ne répond pas', 'said in the table that stood');
     assert.equal(r.m().providers[0]?.notAnswering, true);
   } finally {
     setTable(EN);
@@ -1578,7 +1579,7 @@ test('the market down: the connected rows alone, with the market not answering i
   const data = r.m().explore.all.data;
   assert.equal(r.m().explore.all.status, 'ready');
   assert.deepEqual(data.items.map(i => i.key), ['coin:BTC']);
-  assert.deepEqual(data.missing, [{ venue: 'market', venueName: 'the market', why: 'The market is not answering: public markets are not listed' }]);
+  assert.deepEqual(spoken(data.missing), [{ venue: 'market', venueName: 'the market', why: 'The market is not answering: public markets are not listed' }]);
   r.markets.close();
 });
 
@@ -1657,9 +1658,9 @@ test("the Account down: a connected line falls back to its public twin, never an
   await settle();
   assert.equal(r.reads.some(p => /^\/data\/market\/(candles|book|trades)\?/.test(p)), false, "no mainnet read for the testnet's page");
   assert.equal(r.m().depth['coin:HYPE'].book.status, 'error');
-  assert.equal(r.m().depth['coin:HYPE'].book.message, 'The Account is not answering');
-  assert.equal(r.m().depth['coin:HYPE'].trades.message, 'The Account is not answering');
-  assert.equal(r.m().candles['coin:HYPE'].message, 'The Account is not answering');
+  assert.equal(spoken(r.m().depth['coin:HYPE'].book.message), 'The Account is not answering');
+  assert.equal(spoken(r.m().depth['coin:HYPE'].trades.message), 'The Account is not answering');
+  assert.equal(spoken(r.m().candles['coin:HYPE'].message), 'The Account is not answering');
 
   r.markets.page('coin:BTC');
   await settle();

@@ -13,6 +13,7 @@ import { emptyState } from '../../client/js/data/empty.js';
 import { startTrade, PICKS_MS, PICK_LIMIT, FRESH_MS } from '../../client/js/host/trade.js';
 import { ticketOf } from '../../client/js/host/trade-view.js';
 import { askedOf } from '../../client/js/host/sheet.js';
+import { spoken } from './helpers/spoken.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 8; i++) await tick(); };
@@ -477,7 +478,7 @@ test('cancel acts once through the owner device and says the answer; a refusal s
 
   answer = () => { throw new Error('gone'); };
   await r.trade.cancel('broker', 'ord-0011');
-  assert.equal(r.t().said, 'Refused', 'no answer is a refusal');
+  assert.equal(spoken(r.t().said), 'Refused', 'no answer is a refusal');
   assert.equal(r.after.length, 1);
 });
 

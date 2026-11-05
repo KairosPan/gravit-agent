@@ -9,7 +9,7 @@
 // logs nothing of a preparation or an answer.
 import { draftOf, fieldsOf, guardFirstOf, guardFirstDone, guardFirstRefused } from './sheet-view.js';
 import { refusedAt, refusalOf, saidOf } from './owner-view.js';
-import { t } from '../i18n/words.js';
+import { said, isLine } from '../i18n/words.js';
 
 /** A change is prepared after this long without another. */
 export const PREPARE_QUIET_MS = 300;
@@ -134,9 +134,9 @@ export function startSheet({ store, owner, schedule, cancelTimer, now, afterActi
     const first = guardFirstOf(s);
     if (first) {
       let stop;
-      try { stop = await beforeSign(s); } catch (err) { stop = String(err?.message || err || t('sheet.noAnswer')); }
+      try { stop = await beforeSign(s); } catch (err) { stop = err?.said ?? (err?.message || err ? String(err?.message || err) : said('sheet.noAnswer')); }
       if (mine !== opened || !current()) return;
-      if (typeof stop === 'string') { stopTick(); store.dispatch('sheetRefused', { message: stop }); return; }
+      if (isLine(stop, { empty: true })) { stopTick(); store.dispatch('sheetRefused', { message: stop }); return; }
     }
     const r = await owner.submit(prepared);
     const here = mine === opened && current() !== null;

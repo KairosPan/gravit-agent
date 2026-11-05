@@ -5,6 +5,7 @@
 // step, pending, fp, busy, error, silent, copied }` (silent: sheet 2's last read had no answer; copied: Slack's manifest was copied),
 // null while none is open. It never holds a token: only the pending connection the account answered and the fingerprint (salt and
 // keyHash) made in the browser.
+import { isLine } from '../i18n/words.js';
 import { identityOf, routingOf, sameRouting, tickRouting } from '../host/identity-view.js';
 
 const id = (s, patch) => ({ ...s, identity: { ...s.identity, ...patch } });
@@ -26,7 +27,7 @@ function connectPatch(p) {
   if (typeof p.busy === 'boolean') out.busy = p.busy;
   if (typeof p.silent === 'boolean') out.silent = p.silent;
   if (typeof p.copied === 'boolean') out.copied = p.copied;
-  if (p.error === null || typeof p.error === 'string') out.error = p.error;
+  if (p.error === null || isLine(p.error, { empty: true })) out.error = p.error;
   return out;
 }
 // a draft's ticks only for networks the read shows connected (a Disconnect, or a change made elsewhere, takes the rest away)

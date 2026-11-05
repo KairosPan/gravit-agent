@@ -1,7 +1,7 @@
 // face/client/js/render/messages.js — the Messages screen on the host's facts (spec 2026-10-19 §7 "Stage 1"):
 // a conversation (head, thread, composer, the status line), the new-message screen, the empty state, Details.
 import { esc, attrs, cls } from '../html.js';
-import { t, th, thn } from '../i18n/words.js';
+import { t, th, thn, sayOf } from '../i18n/words.js';
 import { icon } from '../icons.js';
 import { maskExcerpt } from '../mask.js';
 import { fmtDate } from '../time.js';
@@ -42,8 +42,9 @@ const composerOf = (composer, extra = {}) => ({ menu: composer?.menu ?? null, fi
 
 // the one line of host status the page keeps: not signed in, reconnecting, a host error, a command's word (spec §3)
 export function renderStatus(status) {
-  if (!status?.line) return '';
-  return `<div class="${cls('status-line', status.bad && 'bad')}" role="status">${esc(status.line)}</div>`;
+  const line = sayOf(status?.line);
+  if (!line) return '';
+  return `<div class="${cls('status-line', status.bad && 'bad')}" role="status">${esc(line)}</div>`;
 }
 
 // the jobs chip (spec §5.8), before Working while the conversation has a job: it opens Details at Background jobs

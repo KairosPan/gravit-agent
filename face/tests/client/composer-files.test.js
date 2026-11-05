@@ -5,6 +5,7 @@ import {
   DEFAULT_LIMITS, kindOf, admit, hasImage, blocking, sizeText, progressText, extOf, metaText, limitsLine,
   modelRefusalLine, encodeBase64, contentParts, attachmentsLine, isImageSrc,
 } from '../../client/js/composer/files.js';
+import { spoken } from './helpers/spoken.js';
 
 const MiB = 1048576;
 let n = 0;
@@ -20,7 +21,7 @@ test('an image is one of the limits\' media types; an SVG and a PDF are files', 
 test('admit keeps files whatever their size and refuses an image over the per-image limit, by name', () => {
   const chart = pick('chart.png', 21 * MiB, 'image/png'), zip = pick('big.zip', 300 * MiB, 'application/zip');
   const { files, refusal } = admit([], [chart, zip], DEFAULT_LIMITS);
-  assert.equal(refusal, 'chart.png is over 20 MB');
+  assert.equal(spoken(refusal), 'chart.png is over 20 MB');
   assert.equal(files.length, 1);
   assert.deepEqual(files[0], { key: zip.key, kind: 'file', name: 'big.zip', bytes: 300 * MiB, mediaType: 'application/zip', blob: zip.blob, status: 'ready', loaded: 0 });
   const ok = admit(files, [pick('a.png', 10, 'image/png')], DEFAULT_LIMITS);
@@ -36,18 +37,18 @@ test('admit stops at the count and at the message total, admitting the rest', ()
   assert.equal(a.files.length, 21);
   assert.equal(a.files.filter(f => f.kind === 'image').length, 20);
   assert.equal(a.files.at(-1).name, 'notes.txt', 'a file after the refused image is still admitted');
-  assert.equal(a.refusal, 'Up to 20 images a message');
+  assert.equal(spoken(a.refusal), 'Up to 20 images a message');
   const again = admit(a.files, [pick('x.png', 1, 'image/png')], DEFAULT_LIMITS);
   assert.equal(again.files.length, 21, 'the draft\'s images count');
-  assert.equal(again.refusal, 'Up to 20 images a message');
+  assert.equal(spoken(again.refusal), 'Up to 20 images a message');
 
   const jpegs = Array.from({ length: 11 }, (_, i) => pick(`j${i}.jpg`, 19 * MiB, 'image/jpeg'));
   const b = admit([], jpegs, DEFAULT_LIMITS);
   assert.equal(b.files.length, 10);
   assert.deepEqual(b.files.map(f => f.name), jpegs.slice(0, 10).map(f => f.name));
-  assert.equal(b.refusal, 'Images in one message: up to 200 MB');
+  assert.equal(spoken(b.refusal), 'Images in one message: up to 200 MB');
   const c = admit([], [pick('big.png', 25 * MiB, 'image/png'), ...pngs.slice(0, 21)], DEFAULT_LIMITS);
-  assert.equal(c.refusal, 'big.png is over 20 MB', 'the first refusal is the line');
+  assert.equal(spoken(c.refusal), 'big.png is over 20 MB', 'the first refusal is the line');
 });
 
 test('blocking reads an upload in flight before a failed one, and nothing for a ready draft', () => {
@@ -76,8 +77,8 @@ test('sizes and progress read B, KB and MB, the progress in the total\'s unit', 
 
 test('the limits line and the model refusal read as the spec writes them', () => {
   assert.equal(limitsLine(DEFAULT_LIMITS), 'Images: up to 20 a message, 20 MB each');
-  assert.equal(modelRefusalLine(), "Gravit's model takes no images. Remove the image, or run Gravit on a model that does.");
-  const bot = modelRefusalLine('news-scout');
+  assert.equal(spoken(modelRefusalLine()), "Gravit's model takes no images. Remove the image, or run Gravit on a model that does.");
+  const bot = spoken(modelRefusalLine('news-scout'));
   assert.equal(bot.split('news-scout').length - 1, 2);
   assert.ok(!bot.includes('Gravit'));
 });

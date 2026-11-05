@@ -1,6 +1,7 @@
 // face/client/js/reducers/run-sheet.js — a module card's Run sheet (module cards spec §5.4): the slice the host
 // recomputes whole on every field (host/run-sheet.js), what it said, and the Runs this page sent, by module (§5.7).
 import { closeOverlays } from './messages.js';
+import { isLine } from '../i18n/words.js';
 
 const sheet = (s, patch) => (s.runSheet ? { ...s, runSheet: { ...s.runSheet, ...patch } } : s);
 const runs = s => (s.moduleRuns && typeof s.moduleRuns === 'object' ? s.moduleRuns : {});
@@ -9,7 +10,7 @@ export const reducers = {
   // the sheet over whatever is open, the other drawers closed as a new message closes them, the owner sheet with them
   runSheetOpen: (s, value) => ({ ...closeOverlays(s), sheet: null, runSheet: value }),
   runSheetSet: (s, value) => (s.runSheet ? { ...s, runSheet: value } : s),
-  runSheetSaid: (s, { line } = {}) => sheet(s, { said: typeof line === 'string' && line !== '' ? line : null }),
+  runSheetSaid: (s, { line } = {}) => sheet(s, { said: isLine(line) ? line : null }),
   runSheetClose: s => ({ ...s, runSheet: null }),
   moduleRunStarted: (s, { module, sessionId, title, startedAt }) => ({ ...s, moduleRuns: { ...runs(s), [module]: { sessionId, title, startedAt } } }),
   moduleRunCleared: (s, { module }) => {

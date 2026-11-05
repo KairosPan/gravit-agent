@@ -5,6 +5,7 @@ import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { makeActions } from '../../client/js/host/actions.js';
+import { sayOf } from '../../client/js/i18n/words.js';
 
 const conv = (id, over = {}) => ({ id, title: 'T', kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: true, updatedAt: 5, created: null, messages: [], loaded: true, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
 
@@ -42,7 +43,7 @@ test('a slash line goes to commands/execute first; only an unclaimed line contin
   const claimed = rig({ answers: { 'commands/execute': { result: { kind: 'ok', text: 'goal resumed' } } } });
   assert.deepEqual(await claimed.actions.send('/goal resume'), { sent: 'command', sessionId: 's1' });
   assert.deepEqual(claimed.calls, [['commands/execute', { agentId: 's1', line: '/goal resume', submittedAttachments: [] }]]);
-  assert.equal(claimed.store.get().status.line, 'goal resumed');
+  assert.equal(sayOf(claimed.store.get().status.line), 'goal resumed');
   const unclaimed = rig({ answers: { 'commands/execute': undefined } });
   assert.deepEqual(await unclaimed.actions.send('/nothing'), { sent: 'prompt', sessionId: 's1' });
   assert.deepEqual(unclaimed.calls.map(c => c[0]), ['commands/execute', 'session/prompt']);
@@ -78,7 +79,7 @@ test('stop cancels the session and says how a paused goal comes back; rename ren
   const r = rig();
   await r.actions.stop('s1');
   assert.deepEqual(r.calls, [['session/cancel', { request: { sessionId: 's1' } }]]);
-  assert.equal(r.store.get().status.line, 'Stopped. A paused goal resumes with /goal resume');
+  assert.equal(sayOf(r.store.get().status.line), 'Stopped. A paused goal resumes with /goal resume');
   await r.actions.rename('s1', ' New words ');
   assert.deepEqual(r.calls[1], ['session/rename', { request: { sessionId: 's1', title: 'New words' } }]);
   await r.actions.rename('s1', '  ');
@@ -93,7 +94,7 @@ test('an answer goes through the mux and marks the card with this tab\'s outcome
   assert.equal(r.store.get().conversations[0].messages.find(m => m.id === 'ev-1').answer, 'approved');
   const refused = rig({ answers: { $answer: err({ code: 'not-pending' }) } });
   assert.equal(await refused.actions.answer('ev-9', 'rejected'), false);
-  assert.match(refused.store.get().status.line, /not-pending/);
+  assert.match(sayOf(refused.store.get().status.line), /not-pending/);
   assert.equal(refused.store.get().status.bad, true);
 });
 
@@ -112,11 +113,11 @@ test('a second press while the first answer is in flight sends nothing: one answ
 test('a 401 says to open the printed URL; a business failure names the host\'s code', async () => {
   const out = rig({ answers: { 'session/prompt': err({ status: 401 }) } });
   assert.equal(await out.actions.send('hi'), null);
-  assert.equal(out.store.get().status.line, 'Not signed in — open the URL gravit-face printed');
+  assert.equal(sayOf(out.store.get().status.line), 'Not signed in — open the URL gravit-face printed');
   assert.equal(out.store.get().status.bad, true);
   const gone = rig({ answers: { 'session/prompt': err({ code: 'session/not-found' }) } });
   await gone.actions.send('hi');
-  assert.match(gone.store.get().status.line, /session\/not-found/);
+  assert.match(sayOf(gone.store.get().status.line), /session\/not-found/);
 });
 
 test('fork returns the new id; a second press while one is in flight sends nothing', async () => {
@@ -129,7 +130,7 @@ test('fork returns the new id; a second press while one is in flight sends nothi
   assert.deepEqual(r.calls.filter(c => c[0] === 'session/fork'), [['session/fork', { request: { sessionId: 's1' } }]]);
   const bad = rig({ answers: { 'session/fork': err({ code: 'session/fork-unavailable' }) } });
   assert.equal(await bad.actions.fork('s1'), null);
-  assert.equal(bad.store.get().status.line, 'fork: session/fork-unavailable');
+  assert.equal(sayOf(bad.store.get().status.line), 'fork: session/fork-unavailable');
 });
 
 test('archive and un-archive post the explicit boolean', async () => {
@@ -143,10 +144,10 @@ test('archive refuses a running conversation or one with a waiting card, without
   const card = { id: 'ev-1', seq: 1.5, at: 1, from: 'gravit', kind: 'card', text: 'Your call', data: { eventId: 'ev-1', sessionId: 's1' } };
   const running = rig({ convs: [conv('s1', { running: true })] });
   assert.equal(await running.actions.archive('s1', true), false);
-  assert.equal(running.store.get().status.line, 'Stop Gravit first');
+  assert.equal(sayOf(running.store.get().status.line), 'Stop Gravit first');
   const waiting = rig({ convs: [conv('s1', { messages: [card] })] });
   assert.equal(await waiting.actions.archive('s1', true), false);
-  assert.equal(waiting.store.get().status.line, 'Answer the waiting card first');
+  assert.equal(sayOf(waiting.store.get().status.line), 'Answer the waiting card first');
   assert.deepEqual([...running.posted, ...waiting.posted], []);
 });
 
@@ -157,14 +158,14 @@ test('delete posts; a running conversation is refused without calling', async ()
   const busy = rig({ convs: [conv('s1', { running: true })] });
   assert.equal(await busy.actions.remove('s1'), false);
   assert.deepEqual(busy.posted, []);
-  assert.equal(busy.store.get().status.line, 'Stop Gravit first');
+  assert.equal(sayOf(busy.store.get().status.line), 'Stop Gravit first');
 });
 
 test("a 409 on un-archive puts the route's words on the status line", async () => {
   const words = 'this session was archived by the host: the face does not un-archive host archives';
   const r = rig({ posts: { '/data/sessions/archive': err({ status: 409, code: words, message: words }) } });
   assert.equal(await r.actions.archive('s1', false), false);
-  assert.equal(r.store.get().status.line, `un-archive: ${words}`);
+  assert.equal(sayOf(r.store.get().status.line), `un-archive: ${words}`);
   assert.equal(r.store.get().status.bad, true);
 });
 
@@ -178,17 +179,17 @@ test("talkTo opens the bot's newest open home conversation, else creates one in 
   assert.deepEqual(await fresh.actions.talkTo(bot), { id: 's-home' });
   assert.deepEqual(fresh.calls, [['session/create', { request: { cwd: '/r/bots/buffett/home', agentPreset: 'buffett' } }]]);
   const down = rig({ answers: { 'session/create': err({ code: 'preset/broken' }) } });
-  assert.deepEqual(await down.actions.talkTo(bot), { error: 'talk to: preset/broken' });
+  assert.equal(sayOf((await down.actions.talkTo(bot)).error), 'talk to: preset/broken');
 });
 
 test('stopChild sends interruptByParent in continuable mode', async () => {
   const r = rig({ answers: { 'subagents/interruptByParent': { accepted: true } } });
   assert.equal(await r.actions.stopChild('p', 'c1', 'Check'), true);
   assert.deepEqual(r.calls, [['subagents/interruptByParent', { childSessionId: 'c1', parentSessionId: 'p', mode: 'continuable' }]]);
-  assert.equal(r.store.get().status.line, 'Stopping Check');
+  assert.equal(sayOf(r.store.get().status.line), 'Stopping Check');
   const no = rig({ answers: { 'subagents/interruptByParent': err({ code: 'subagent/not-found' }) } });
   assert.equal(await no.actions.stopChild('p', 'c1', 'Check'), false);
-  assert.equal(no.store.get().status.line, 'stop: subagent/not-found');
+  assert.equal(sayOf(no.store.get().status.line), 'stop: subagent/not-found');
 });
 
 test('pin and unpin send their remotes and set the pin set from the answer', async () => {
@@ -205,7 +206,7 @@ test('a failed pin says so on the status line and changes nothing', async () => 
   r.store.dispatch('hostPins', ['x']);
   assert.equal(await r.actions.pin('s1'), false);
   assert.deepEqual(r.store.get().pinned, ['x']);
-  assert.equal(r.store.get().status.line, 'Pin failed. Try again later.');
+  assert.equal(sayOf(r.store.get().status.line), 'Pin failed. Try again later.');
   assert.equal(r.store.get().status.bad, true);
 });
 
@@ -238,7 +239,7 @@ test('a conversation that does not open sends nothing and says so', async () => 
   const r = rig({ convs: [conv('s1', { live: false })], activate: () => false });
   assert.equal(await r.actions.send('/compact'), null);
   assert.deepEqual(r.calls.map(c => c[0]), ['activate'], 'neither the command nor a prompt');
-  assert.deepEqual(r.store.get().status.line, 'send: the conversation did not open');
+  assert.deepEqual(sayOf(r.store.get().status.line), 'send: the conversation did not open');
   assert.equal(r.store.get().status.bad, true);
 });
 
@@ -246,21 +247,21 @@ test("runCommand says the command's result, or its failure", async () => {
   const ok = rig({ answers: { 'commands/execute': { result: { kind: 'ok', text: 'compacted' } } } });
   assert.equal(await ok.actions.runCommand('s1', '/compact'), true);
   assert.deepEqual(ok.calls, [['commands/execute', { agentId: 's1', line: '/compact', submittedAttachments: [] }]]);
-  assert.equal(ok.store.get().status.line, 'compacted');
+  assert.equal(sayOf(ok.store.get().status.line), 'compacted');
   const refused = rig({ answers: { 'commands/execute': err({ code: 'gateway/lookup-not-found' }) } });
   assert.equal(await refused.actions.runCommand('s1', '/compact'), false);
-  assert.equal(refused.store.get().status.line, 'command: gateway/lookup-not-found');
+  assert.equal(sayOf(refused.store.get().status.line), 'command: gateway/lookup-not-found');
   assert.equal(refused.store.get().status.bad, true);
   const cold = rig({ activate: () => false });
   assert.equal(await cold.actions.runCommand('s1', '/compact'), false);
-  assert.equal(cold.store.get().status.line, 'command: the conversation did not open');
+  assert.equal(sayOf(cold.store.get().status.line), 'command: the conversation did not open');
   assert.equal(cold.calls.some(c => c[0] === 'commands/execute'), false);
 });
 
 test('runCommand says so when no command claims the line', async () => {
   const none = rig({ answers: { 'commands/execute': null } });
   assert.equal(await none.actions.runCommand('s1', '/compact'), true);
-  assert.equal(none.store.get().status.line, 'no command claimed /compact');
+  assert.equal(sayOf(none.store.get().status.line), 'no command claimed /compact');
 });
 
 test('room: false sends a line with @ straight to Gravit; true posts it to the room', async () => {
@@ -317,16 +318,16 @@ test('an attachment refusal goes to attachmentRefused with its reason and says n
   const reasons = [];
   assert.equal(await r.actions.send('look', { attachments: [imagePart], attachmentRefused: why => reasons.push(why) }), null);
   assert.deepEqual(reasons, ['MODEL_DOES_NOT_SUPPORT_IMAGES']);
-  assert.equal(r.store.get().status.line, emptyState().status.line, 'no send: line');
+  assert.equal(sayOf(r.store.get().status.line), sayOf(emptyState().status.line), 'no send: line');
   const bare = rig({ answers: { 'session/prompt': refusedFor('FILE_NOT_STAGED') } });
   assert.equal(await bare.actions.send('look', { attachments: [filePart] }), null);
-  assert.equal(bare.store.get().status.line, 'send: session/attachment-invalid (FILE_NOT_STAGED)');
+  assert.equal(sayOf(bare.store.get().status.line), 'send: session/attachment-invalid (FILE_NOT_STAGED)');
   assert.equal(bare.store.get().status.bad, true);
   const other = rig({ answers: { 'session/prompt': err({ code: 'session/busy' }) } });
   const none = [];
   await other.actions.send('look', { attachments: [filePart], attachmentRefused: why => none.push(why) });
   assert.deepEqual(none, [], 'only the attachment code goes to the callback');
-  assert.equal(other.store.get().status.line, 'send: session/busy');
+  assert.equal(sayOf(other.store.get().status.line), 'send: session/busy');
 });
 
 test('newConversationWith creates, reports the id, prepares and prompts; a refused prompt answers the id with sent false', async () => {
@@ -351,7 +352,7 @@ test('newConversationWith creates, reports the id, prepares and prompts; a refus
   assert.deepEqual(refused.calls[1][1].request.content, [imagePart]);
   const failed = rig({ answers: { 'session/create': err({ code: 'boom' }) } });
   assert.deepEqual(await failed.actions.newConversationWith({ text: 'x' }), { id: null, sent: false });
-  assert.equal(failed.store.get().status.line, 'new message: boom');
+  assert.equal(sayOf(failed.store.get().status.line), 'new message: boom');
 });
 
 test('newConversation still answers an id or null', async () => {
@@ -369,14 +370,14 @@ test('newConversationWith reports the id before the rename, so a failed rename k
   const got = await r.actions.newConversationWith({ title: 'Look', text: 'x', onCreated: id => seen.push([id, r.calls.length]), prepare: async () => [] });
   assert.deepEqual(got, { id: 's-new', sent: false });
   assert.deepEqual(seen, [['s-new', 1]], 'told right after the create');
-  assert.equal(r.store.get().status.line, 'new message: rename/failed');
+  assert.equal(sayOf(r.store.get().status.line), 'new message: rename/failed');
 });
 
 test('a command that settles as an error with attachments is a refusal; a dropped receipt goes to attachmentRefused', async () => {
   const noFiles = rig({ answers: { 'commands/execute': { result: { kind: 'error', text: '/compact does not accept attachments' } } } });
   const why = [];
   assert.equal(await noFiles.actions.send('/compact', { attachments: [filePart], attachmentRefused: x => why.push(x) }), null);
-  assert.equal(noFiles.store.get().status.line, '/compact does not accept attachments');
+  assert.equal(sayOf(noFiles.store.get().status.line), '/compact does not accept attachments');
   assert.equal(noFiles.store.get().status.bad, true);
   assert.deepEqual(why, []);
   const dropped = rig({ answers: { 'commands/execute': { result: { kind: 'error', text: 'File upload receipt is unknown for this session.' } } } });

@@ -8,15 +8,15 @@
 import { kidOf, publicJwkOf, signPrepared, makeKey } from '../wire/owner-key.js';
 import { pageOk } from './account-view.js';
 import { whyOf, refusedAt } from './owner-view.js';
-import { t } from '../i18n/words.js';
+import { said } from '../i18n/words.js';
 
 const PAIR = '/data/account/pair', PREPARE = '/data/account/prepare', EXCHANGE = '/data/account/exchange';
 // the Account's pair roles under the face's names
 const ROLE_OF = new Map([['owner', 'signs'], ['pending', 'pending'], ['needs-code', 'needs-code']]);
-const noAnswer = () => t('owner.noAnswer');
+const noAnswer = () => said('owner.noAnswer');
 // the Account's own sentence for a page that does not sign (owner.js signOut)
-const notSigning = () => t('owner.notSigning');
-const anotherKey = () => t('owner.anotherKey');
+const notSigning = () => said('owner.notSigning');
+const anotherKey = () => said('owner.anotherKey');
 
 const refused = error => ({ status: 0, body: { ok: false, error } });
 const isObject = v => Boolean(v) && typeof v === 'object' && !Array.isArray(v);

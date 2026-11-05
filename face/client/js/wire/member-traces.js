@@ -1,6 +1,6 @@
 import { isInjectedSource, mapFrame } from "./mapper.js";
 import { readProjections } from "./summaries.js";
-import { t } from "../i18n/words.js";
+import { saidError } from "../i18n/words.js";
 
 /** Read one room answer's process from its member session, without opening,
  * prompting or ACTIVATING that session.
@@ -45,7 +45,7 @@ function traceOf(entries, sessionId, turn) {
   const start = entries.findIndex(({ event }) => event.type === "turn/start" && event.data?.turn === turn);
   const end = entries.findIndex(({ event }, index) => index > start && event.type === "turn/end" && event.data?.turn === turn);
   if (end < 0 || entries.slice(start + 1, end).some(({ event }) => event.type === "turn/start")) {
-    throw new Error(t("thread.trace.incomplete"));
+    throw saidError("thread.trace.incomplete");
   }
 
   /** @type {import("./mapper.js").FrameView[]} */
@@ -86,14 +86,14 @@ function traceOf(entries, sessionId, turn) {
  */
 export async function loadMemberTrace(call, { sessionId, turn }) {
   if (typeof sessionId !== "string" || sessionId.trim() === "" || !Number.isSafeInteger(turn) || turn < 1) {
-    throw new Error(t("thread.trace.noTurn"));
+    throw saidError("thread.trace.noTurn");
   }
   const cut = await call("session/projections", { request: { sessionId } });
-  if (cut === null) throw new Error(t("thread.trace.noSession"));
+  if (cut === null) throw saidError("thread.trace.noSession");
   const { asOfSeq, migrationRequired } = readProjections(cut);
-  if (migrationRequired) throw new Error(t("thread.trace.migration"));
+  if (migrationRequired) throw saidError("thread.trace.migration");
   // throughSeq must be an integer >= -1 (history.ts:305-318); -1 is an empty log.
-  if (asOfSeq === null || asOfSeq < -1) throw new Error(t("thread.trace.malformed"));
+  if (asOfSeq === null || asOfSeq < -1) throw saidError("thread.trace.malformed");
   const address = { kind: "session", sessionId };
   const entries = new Map();
   let beforeSeq;
@@ -102,13 +102,13 @@ export async function loadMemberTrace(call, { sessionId, turn }) {
       request: { address, throughSeq: asOfSeq, maxMessages: 100, ...(beforeSeq === undefined ? {} : { beforeSeq }) },
     });
     if (!object(page) || !Array.isArray(page.records) || typeof page.hasMore !== "boolean") {
-      throw new Error(t("thread.trace.malformed"));
+      throw saidError("thread.trace.malformed");
     }
     let oldest = Infinity;
     for (const record of page.records) {
       if (!object(record) || record.type !== "event" || !object(record.event)
         || !Number.isSafeInteger(record.event.seq) || record.event.seq < 0) {
-        throw new Error(t("thread.trace.malformed"));
+        throw saidError("thread.trace.malformed");
       }
       oldest = Math.min(oldest, record.event.seq);
       if (!entries.has(record.event.seq)) entries.set(record.event.seq, record);
@@ -117,9 +117,9 @@ export async function loadMemberTrace(call, { sessionId, turn }) {
     if (sorted.some(({ event }) => event.type === "turn/start" && event.data?.turn === turn)) {
       return traceOf(sorted, sessionId, turn);
     }
-    if (!page.hasMore) throw new Error(t("thread.trace.notFound"));
+    if (!page.hasMore) throw saidError("thread.trace.notFound");
     if (!Number.isFinite(oldest) || (beforeSeq !== undefined && oldest >= beforeSeq)) {
-      throw new Error(t("thread.trace.stopped"));
+      throw saidError("thread.trace.stopped");
     }
     beforeSeq = oldest;
   }

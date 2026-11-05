@@ -9,6 +9,7 @@ import { emptyState } from '../../client/js/data/empty.js';
 import { startRunSheet } from '../../client/js/host/run-sheet.js';
 import { newSheet, sheetOf } from '../../client/js/host/run-sheet-view.js';
 import { modulesListing, MARKET_RUN, S01_RUN } from './helpers/inventory.js';
+import { spoken } from './helpers/spoken.js';
 
 // a local 14:00 on 2026-10-28, so the browser's date is 10-28 in any zone
 const NOW = new Date(2026, 9, 28, 14, 0).getTime();
@@ -36,7 +37,7 @@ test("open: reads the listing and opens the module's sheet with its preselection
   r.runSheet.close();
   assert.equal(r.sheet(), null);
   await r.runSheet.open('nope');
-  assert.equal(r.store.get().discover.status.line, 'Not a module');
+  assert.equal(spoken(r.store.get().discover.status.line), 'Not a module');
   assert.equal(r.sheet(), null);
 });
 
@@ -92,7 +93,7 @@ test('run: a failed send keeps the sheet with the line and writes no record', as
   await r.runSheet.open('theme');
   await r.runSheet.run();
   assert.equal(r.sent.length, 1);
-  assert.equal(r.sheet().said, FAILED);
+  assert.equal(spoken(r.sheet().said), FAILED);
   assert.equal(r.sheet().module, 'theme');
   assert.deepEqual(r.store.get().moduleRuns, {});
   assert.deepEqual(r.went, []);
@@ -107,14 +108,14 @@ test('run: refused while the sheet cannot run', async () => {
   assert.equal(r.sheet().on, null, 'mode is already registered on the fixture run');
   await r.runSheet.run();
   assert.deepEqual(r.sent, []);
-  assert.equal(r.sheet().said, sheetOf(r.listing, r.sheet(), NOW).blocker);
-  assert.equal(r.sheet().said, 'choose a run');
+  assert.equal(spoken(r.sheet().said), sheetOf(r.listing, r.sheet(), NOW).blocker);
+  assert.equal(spoken(r.sheet().said), 'choose a run');
   const s = rig();
   await s.runSheet.open('leader');
   await s.runSheet.field('stocks', 'sz300750');
   await s.runSheet.run();
   assert.deepEqual(s.sent, []);
-  assert.equal(s.sheet().said, 'not a main-board code: sz300750');
+  assert.equal(spoken(s.sheet().said), 'not a main-board code: sz300750');
   assert.deepEqual(s.went, []);
 });
 
@@ -141,7 +142,7 @@ test('the listing moves under an open sheet: a chosen latest run that is no long
   assert.equal(v.blocker, 'run no longer the latest');
   await r.runSheet.run();
   assert.deepEqual(r.sent, [], 'nothing sent on a run that moved');
-  assert.equal(r.sheet().said, 'run no longer the latest');
+  assert.equal(spoken(r.sheet().said), 'run no longer the latest');
   // choosing Latest run again takes the newest
   await r.runSheet.field('on', 'latest');
   assert.equal(r.sheet().run, NEWER);
@@ -205,10 +206,10 @@ test('the listing could not be read: the sheet opens saying so, and Run sends no
     const r = rig({ listing: null });
     await r.runSheet.open(module);
     assert.equal(r.sheet().module, module);
-    assert.equal(r.sheet().said, 'the modules listing could not be read', module);
+    assert.equal(spoken(r.sheet().said), 'the modules listing could not be read', module);
     await r.runSheet.run();
     assert.deepEqual(r.sent, []);
-    assert.equal(r.sheet().said, 'the modules listing could not be read', module);
+    assert.equal(spoken(r.sheet().said), 'the modules listing could not be read', module);
   }
   // a listing whose channel has no workspaceId: choose where to run
   const listing = modulesListing();
@@ -218,5 +219,5 @@ test('the listing could not be read: the sheet opens saying so, and Run sends no
   assert.equal(w.sheet().said, null);
   await w.runSheet.run();
   assert.deepEqual(w.sent, []);
-  assert.equal(w.sheet().said, 'choose where to run');
+  assert.equal(spoken(w.sheet().said), 'choose where to run');
 });

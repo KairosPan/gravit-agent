@@ -11,6 +11,7 @@ import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { startOwner, postVia } from '../../client/js/host/owner.js';
 import { memoryKeys } from '../../client/js/wire/key-store.js';
+import { spoken } from './helpers/spoken.js';
 
 const subtle = globalThis.crypto.subtle;
 const CODE = 'K7QX-M2PA';
@@ -243,7 +244,7 @@ test('a bad-signature answer re-reads the standing', async () => {
   await p.owner.ready();
   assert.equal(p.o().role, 'pending');
   const refused = await p.owner.act(WATCH);
-  assert.deepEqual(refused, NOT_SIGNING, 'a pending page signs nothing');
+  assert.deepEqual(spoken(refused), NOT_SIGNING, 'a pending page signs nothing');
   assert.equal(p.door.calls('/data/account/exchange').length, 0);
 });
 
@@ -262,8 +263,8 @@ test('a refusal at prepare is handed back unsigned', async () => {
   // fields to show but no action to carry: a refusal in the same shape, never a throw
   const noAction = { status: 200, body: { ok: true, shown: [{ name: 'nonce', value: String(NONCE) }] } };
   r.door.once('/data/account/prepare', noAction);
-  assert.deepEqual(await r.owner.act(WATCH), NOT_SIGNING);
-  assert.deepEqual(await r.owner.submit({ shown: [], action: 'setWatch' }), NOT_SIGNING);
+  assert.deepEqual(spoken(await r.owner.act(WATCH)), NOT_SIGNING);
+  assert.deepEqual(spoken(await r.owner.submit({ shown: [], action: 'setWatch' })), NOT_SIGNING);
   assert.equal(r.door.calls('/data/account/exchange').length, 0, 'exchange never called');
   assert.equal(r.o().refusal, null, "a prepare's refusal is the caller's to draw");
 });
@@ -293,7 +294,7 @@ test('sign-out deletes the key and sets the flag; sign-in makes a new key', asyn
   await r.owner.ready();
   assert.equal(r.o().role, 'signed-out');
   assert.equal(await r.keys.get(), undefined);
-  assert.deepEqual(await r.owner.signOut(), NOT_SIGNING);
+  assert.deepEqual(spoken(await r.owner.signOut()), NOT_SIGNING);
   assert.equal(r.door.calls('/data/account/pair').length, pairs);
 
   await r.owner.signIn();
@@ -333,12 +334,12 @@ test('no WebCrypto is none', async () => {
   d.once('/data/account/pair', other);
   const m = rig({ d });
   await m.owner.ready(CODE);
-  assert.deepEqual(m.o(), { role: 'none', kid: '', refusal: 'The account named another key', busy: false });
+  assert.deepEqual(spoken(m.o()), { role: 'none', kid: '', refusal: 'The account named another key', busy: false });
 });
 
 test('a thrown post is a refusal in the same shape', async () => {
   const thrown = postVia(async () => { throw new TypeError('fetch failed'); });
-  assert.deepEqual(await thrown('/data/account/pair', { label: 'x' }), NO_ANSWER);
+  assert.deepEqual(spoken(await thrown('/data/account/pair', { label: 'x' })), NO_ANSWER);
 
   // the POST itself: JSON declared, the body as text, an unreadable answer as {}
   const seen = [];
@@ -356,8 +357,8 @@ test('a thrown post is a refusal in the same shape', async () => {
   // the device over it: the refusal's words on the slice, the role as it was; an act hands the same shape back
   const r = rig({ post: thrown });
   await r.owner.ready();
-  assert.deepEqual([r.o().role, r.o().refusal, r.o().busy], ['unknown', 'The account did not answer. Try again.', false]);
-  assert.deepEqual(await r.owner.act(WATCH), NO_ANSWER);
+  assert.deepEqual(spoken([r.o().role, r.o().refusal, r.o().busy]), ['unknown', 'The account did not answer. Try again.', false]);
+  assert.deepEqual(spoken(await r.owner.act(WATCH)), NO_ANSWER);
 });
 
 const PAIR = '/data/account/pair', EXCHANGE = '/data/account/exchange';

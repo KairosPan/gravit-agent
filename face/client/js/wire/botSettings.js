@@ -1,5 +1,5 @@
 /** Small, pure translations for the bot settings page. */
-import { t } from "../i18n/words.js";
+import { t, saidError } from "../i18n/words.js";
 
 // The settings endpoint currently accepts this exact provider/model grammar.
 const MODEL_ROUTE = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
@@ -9,7 +9,7 @@ const MODEL_ROUTE = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
 export function normalizeBotModel(value) {
   const route = value.trim();
   if (route === "") return null;
-  if (!MODEL_ROUTE.test(route)) throw new Error(t("discover.bot.modelRoute"));
+  if (!MODEL_ROUTE.test(route)) throw saidError("discover.bot.modelRoute");
   return route;
 }
 

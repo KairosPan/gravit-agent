@@ -3,7 +3,7 @@
 // conversation in the chosen channel — the client's own newConversation (session/create, session/rename, the prompt),
 // nothing else. Impure; nothing here draws (render/run-sheet.js), every word is the view's (host/run-sheet-view.js).
 import { newSheet, sheetOf, titleOf, messageOf } from './run-sheet-view.js';
-import { t } from '../i18n/words.js';
+import { said } from '../i18n/words.js';
 
 const OWN_FIELDS = ['cites', 'stocks', 'note'];
 
@@ -26,9 +26,9 @@ export function startRunSheet({ store, actions, readListing, go, now = Date.now 
   async function open(module) {
     const listing = await read();
     const sheet = newSheet(listing, module);
-    if (!sheet) { store.dispatch('discoverStatus', { line: t('runSheet.notModule'), bad: true }); return; }
+    if (!sheet) { store.dispatch('discoverStatus', { line: said('runSheet.notModule'), bad: true }); return; }
     store.dispatch('runSheetOpen', sheet);
-    if (listing === null || typeof listing !== 'object') store.dispatch('runSheetSaid', { line: t('runSheet.unread') }); // the view blocks Run too
+    if (listing === null || typeof listing !== 'object') store.dispatch('runSheetSaid', { line: said('runSheet.unread') }); // the view blocks Run too
   }
 
   // Where gives the new channel's picks, Stocks and Note kept; On stamps the channel's newest run — both on the listing
@@ -61,12 +61,12 @@ export function startRunSheet({ store, actions, readListing, go, now = Date.now 
       if (!sheet) return;
       const at = now();
       const view = sheetOf(listing, sheet, at);
-      if (!view?.canRun) { store.dispatch('runSheetSaid', { line: view?.blocker ?? t('runSheet.chooseWhere') }); return; }
+      if (!view?.canRun) { store.dispatch('runSheetSaid', { line: view?.blockedBy ?? said('runSheet.chooseWhere') }); return; }
       const workspaceId = channelOf(listing, sheet.where)?.workspaceId;
-      if (typeof workspaceId !== 'string' || !workspaceId) { store.dispatch('runSheetSaid', { line: t('runSheet.chooseWhere') }); return; }
+      if (typeof workspaceId !== 'string' || !workspaceId) { store.dispatch('runSheetSaid', { line: said('runSheet.chooseWhere') }); return; }
       const title = titleOf(listing, sheet, at);
       const id = await actions.newConversation({ title, workspaceId, text: messageOf(listing, sheet) });
-      if (!id) { store.dispatch('runSheetSaid', { line: t('runSheet.failed') }); return; }
+      if (!id) { store.dispatch('runSheetSaid', { line: said('runSheet.failed') }); return; }
       store.dispatch('moduleRunStarted', { module: sheet.module, sessionId: id, title, startedAt: at });
       store.dispatch('runSheetClose');
       // the record and the closed sheet stand whatever the page move does; its own line says what failed

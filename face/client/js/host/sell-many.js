@@ -9,7 +9,7 @@
 // further and lands nothing more; afterAction('sellMany') once when a run ends. The drawer's whole state is the store's
 // `sellMany`; render/account.js draws it.
 import { refusedAt, whyOf, saidOf } from './owner-view.js';
-import { t, tn } from '../i18n/words.js';
+import { t, said, saidn } from '../i18n/words.js';
 
 /** At most this many legs at once (earn.js:221). */
 export const SELL_MANY_MAX = 10;
@@ -17,7 +17,7 @@ export const SELL_MANY_MAX = 10;
 export const SELL_MANY_RESIGN_MS = 15_000;
 const SELLABLE = '/data/account/sellable?fresh=1';
 /** A DEX sale's words (earn.js:321): the order waits for the operator's wallet. */
-export const walletWords = () => t('money.sellMany.wallet');
+export const walletWords = () => said('money.sellMany.wallet');
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -79,7 +79,7 @@ export function startSellMany({ store, getJson, owner, sendOrder = () => {}, aft
     try { body = await getJson(SELLABLE); } catch (e) { body = e?.body ?? null; }
     if (!live(mine)) return;
     if (!isRecord(body) || body.ok === false) {
-      set({ status: 'picking', message: str(body?.refusal?.message) || str(body?.error) || t('money.sellMany.unread') });
+      set({ status: 'picking', message: str(body?.refusal?.message) || str(body?.error) || said('money.sellMany.unread') });
       return;
     }
     set({ status: 'picking', ...smSellable(body, str(venue)) });
@@ -116,7 +116,7 @@ export function startSellMany({ store, getJson, owner, sendOrder = () => {}, aft
       const r = await owner.prepare(leg.draft);
       if (!live(mine)) return;
       const p = preparedOf(r);
-      setLeg(i, p ? { state: 'ready', prepared: p } : { state: 'refused', why: whyOf(r) || t('money.sellMany.refused') });
+      setLeg(i, p ? { state: 'ready', prepared: p } : { state: 'refused', why: whyOf(r) || said('money.sellMany.refused') });
     }
   }
 
@@ -147,12 +147,12 @@ export function startSellMany({ store, getJson, owner, sendOrder = () => {}, aft
           const again = await owner.prepare(leg.draft);
           if (!live(mine)) break;
           p = preparedOf(again);
-          if (!p) { setLeg(i, { state: 'refused', why: whyOf(again) || t('money.sellMany.refused') }); continue; }
+          if (!p) { setLeg(i, { state: 'refused', why: whyOf(again) || said('money.sellMany.refused') }); continue; }
           setLeg(i, { prepared: p });
         }
         const r = await owner.submit(p);
         if (!live(mine)) break;
-        if (refusedAt(r)) { setLeg(i, { state: 'refused', why: whyOf(r) || t('money.sellMany.refused') }); continue; }
+        if (refusedAt(r)) { setLeg(i, { state: 'refused', why: whyOf(r) || said('money.sellMany.refused') }); continue; }
         const o = r.body?.kind === 'order' && isRecord(r.body.order) ? r.body.order : null;
         if (o && o.walletTxs && !o.ref) {
           waiting += 1;
@@ -161,11 +161,11 @@ export function startSellMany({ store, getJson, owner, sendOrder = () => {}, aft
           continue;
         }
         done += 1;
-        const said = saidOf(r.body);
-        setLeg(i, { state: 'sold', said: said ? t('money.sellMany.soldSaid', { said }) : t('money.sellMany.sold') });
+        const words = saidOf(r.body);
+        setLeg(i, { state: 'sold', said: words ? said('money.sellMany.soldSaid', { said: words }) : said('money.sellMany.sold') });
       }
     } finally {
-      if (live(mine)) set({ status: 'done', said: waiting ? tn('money.sellMany.doneWaiting', go.length, { done, waiting }) : tn('money.sellMany.done', go.length, { done }) });
+      if (live(mine)) set({ status: 'done', said: waiting ? saidn('money.sellMany.doneWaiting', go.length, { done, waiting }) : saidn('money.sellMany.done', go.length, { done }) });
       afterAction('sellMany');
     }
   }

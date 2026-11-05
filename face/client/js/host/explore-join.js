@@ -15,7 +15,7 @@
 //   move (one row an asset), `closing` the busiest then by the close, `mostTraded` by volume, each cut at the account's top (LIST_TOP) or the
 //   longer source. `missing` says each half that is down.
 // A half passed as `undefined` has not landed yet: it lists nothing and is said missing by no one.
-import { t } from '../i18n/words.js';
+import { said } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -48,8 +48,8 @@ function oneEach(rows) {
 const AWAY = new Set(['not-served', 'closed', 'close-only']);
 
 // a half that is down, as `missing` says it
-export const accountDown = () => ({ venue: 'account', venueName: t('markets.down.account'), why: t('markets.down.accountWhy') });
-export const marketDown = () => ({ venue: 'market', venueName: t('markets.down.market'), why: t('markets.down.marketWhy') });
+export const accountDown = () => ({ venue: 'account', venueName: said('markets.down.account'), why: said('markets.down.accountWhy') });
+export const marketDown = () => ({ venue: 'market', venueName: said('markets.down.market'), why: said('markets.down.marketWhy') });
 
 // a half as the join reads it: an answer, null (down), or undefined (not landed yet)
 function halfOf(b, connected) {

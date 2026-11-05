@@ -4,9 +4,9 @@
 // files, the standing orders - each linking its last firing's session - and their firings, and the runs and sleep gaps.
 // Every word is the view's; this module lays them out in the Markets screen's sections and lines.
 import { esc } from '../html.js';
-import { t, th } from '../i18n/words.js';
+import { t, th, sayOf } from '../i18n/words.js';
 
-const note = text => (text ? `<p class="mk-note">${esc(text)}</p>` : '');
+const note = line => { const text = sayOf(line); return text ? `<p class="mk-note">${esc(text)}</p>` : ''; };
 const empty = text => `<p class="mk-empty">${esc(text)}</p>`;
 const section = (label, inner) => `<section class="dsec" aria-label="${esc(label)}"><div class="mk-h2">${esc(label)}</div>${inner}</section>`;
 const line = (mark, t1, t2 = '', markClass = '') => `<div class="mk-line"><span class="mk-mark${markClass ? ` ${markClass}` : ''}">${mark}</span><div class="mk-line-b"><div class="mk-t1">${t1}</div>${t2 ? `<div class="mk-t2">${t2}</div>` : ''}</div></div>`;
@@ -20,8 +20,8 @@ const sessionLink = id => (id ? `<a href="#/messages/${esc(encodeURIComponent(id
  *  none kept, Desk status unavailable under it. */
 export function renderDeskTab(view, read = {}) {
   // the last failure's sentence stays said until a read answers, through the polls on their way after it
-  const said = note(read.message);
-  if (!view) return `<div class="desk">${said}${empty(read.message ? t('desk.tab.unavailable') : t('common.loading'))}</div>`;
+  const failed = note(read.message);
+  if (!view) return `<div class="desk">${failed}${empty(read.message ? t('desk.tab.unavailable') : t('common.loading'))}</div>`;
   const pause = `<button type="button" class="btn" data-action="deskPause">${th('desk.tab.pause')}</button>`;
   const status = feed([view.head, view.off, view.phone, view.budget, view.ledgerError].filter(Boolean).map(w => line('·', esc(w))));
   const head = `<div class="desk-head">${status}${pause}</div>`;
@@ -44,7 +44,7 @@ export function renderDeskTab(view, read = {}) {
   const runs = feed([...view.runs.map(r => line('·', `${esc(t('desk.tab.run', { at: r.bootedAt, pid: r.pid }))}${r.lost ? ` ${tag(t('desk.tab.lost'))}` : ''}`)),
     ...view.asleep.map(g => line('·', esc(t('desk.tab.asleep', { from: g.from, to: g.to })), esc(g.gap)))]);
 
-  return `<div class="desk">${said}${head}` +
+  return `<div class="desk">${failed}${head}` +
     section(t('desk.tab.watch'), watch) + section(t('desk.tab.alerts'), alerts) + section(t('desk.tab.levels'), levels) +
     section(t('desk.tab.standingOrders'), standing || empty(t('desk.tab.noneArmed'))) + section(t('desk.tab.firings'), firings) +
     `${section(t('desk.tab.runs'), runs || empty(t('desk.tab.noRuns')))}</div>`;

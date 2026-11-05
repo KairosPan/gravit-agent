@@ -7,6 +7,7 @@ import { createStore } from '../../client/js/store.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
+import { spoken } from './helpers/spoken.js';
 
 const RUN = '20261027T201627Z-6937d208';
 const conv = (id, messages) => ({ id, title: id, kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: true, updatedAt: 5, created: null, messages, loaded: true, preview: null, usage: null, thinking: null, lastSeen: 0 });
@@ -67,9 +68,9 @@ test('a view read that fails (404, a dead face, no view in the answer, a throw b
   const run = async getJson => { const store = storeOf(stateWith([composed('p1')])); await ensureViews(store, getJson); return store.get().lunhui.views[`cn-market/${RUN}/environment,sentiment`]; };
   assert.deepEqual(await run(async path => { throw Object.assign(new Error(`${path}: HTTP 404`), { status: 404 }); }), { status: 'failed', error: 'HTTP 404' });
   assert.deepEqual(await run(async () => { throw new TypeError('Failed to fetch'); }), { status: 'failed', error: 'Failed to fetch' });
-  assert.deepEqual(await run(async () => ({ ok: true })), { status: 'failed', error: 'the answer held no view' });
+  assert.deepEqual(spoken(await run(async () => ({ ok: true }))), { status: 'failed', error: 'the answer held no view' });
   assert.deepEqual(await run(() => { throw new Error('sync'); }), { status: 'failed', error: 'sync' });
-  assert.deepEqual(await run(async () => { throw 'odd'; }), { status: 'failed', error: 'the view could not be read' });
+  assert.deepEqual(spoken(await run(async () => { throw 'odd'; })), { status: 'failed', error: 'the view could not be read' });
 });
 
 test('the lunhui slice: lunhuiUi merges a patch into one answer\'s ui; Retry deletes only its own key', () => {

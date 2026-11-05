@@ -13,6 +13,7 @@ import { startIdentity, fingerprintOf, copyManifest, PENDING_POLL_MS, TOKEN_PATH
 const TOKEN_PATH = TOKEN_PATHS.telegram;
 import { renderConnectDrawer } from '../../client/js/render/identity.js';
 import { renderSheet } from '../../client/js/render/owner.js';
+import { spoken } from './helpers/spoken.js';
 
 const TOKEN = '7000000001:AAFakeTokenForTestsOnly_abcdefghijklmn';
 const START = Date.parse('2026-11-04T15:00:00.000Z');
@@ -155,7 +156,7 @@ test('a token the account refuses shows its sentence on sheet 1 and stays there'
   r3.identity.openConnect();
   await r3.identity.next(field('  '));
   assert.equal(r3.posts.length, 0);
-  assert.equal(r3.store.get().identity.connect.error, 'Paste the token from BotFather first.');
+  assert.equal(spoken(r3.store.get().identity.connect.error), 'Paste the token from BotFather first.');
 });
 
 test('sheet 2: Say hi with the t.me link, the QR as an img, the expiry, and its steps; it moves to 3 when the pending is heard', async () => {
@@ -207,7 +208,7 @@ test('sheet 2: a pending connection gone or expired says so with Start again', a
   r2.identity.openConnect();
   await r2.identity.next(field());
   await r2.timers.advance(PENDING_POLL_MS);
-  assert.match(r2.store.get().identity.connect.error, /expired/);
+  assert.match(spoken(r2.store.get().identity.connect.error), /expired/);
   r2.identity.startAgain();
   assert.equal(r2.store.get().identity.connect.step, 1);
   assert.equal(drops(r2.posts).length, 1);
@@ -360,7 +361,7 @@ test('sheet 2: an expiresAt that cannot be read counts as expired once the ten m
   assert.equal(r.store.get().identity.connect.error, null, 'still waiting inside the ten minutes');
   assert.equal(r.timers.pending.size, 1);
   await r.timers.advance(60_000 + PENDING_POLL_MS);
-  assert.match(r.store.get().identity.connect.error, /expired/);
+  assert.match(spoken(r.store.get().identity.connect.error), /expired/);
   assert.equal(r.timers.pending.size, 0, 'no poll after the window');
   const gets = r.gets.length;
   await r.timers.advance(10 * PENDING_POLL_MS);
@@ -373,7 +374,7 @@ test('sheet 2: an expiresAt that cannot be read counts as expired once the ten m
   await r2.identity.next({ value: TOKEN });
   r2.store.dispatch('identityConnectSet', { pending: { ...r2.store.get().identity.connect.pending, expiresAt: '' } });
   await r2.timers.advance(10 * 60_000 + PENDING_POLL_MS);
-  assert.match(r2.store.get().identity.connect.error, /expired/);
+  assert.match(spoken(r2.store.get().identity.connect.error), /expired/);
   assert.equal(r2.timers.pending.size, 0);
 });
 
@@ -449,7 +450,7 @@ test('Next hashes the pair in the browser, posts it once, clears both fields, an
     r2.identity.openConnect('slack');
     await r2.identity.next(field(APP), field(BOT));
     assert.ok(!JSON.stringify(r2.store.get()).includes(leak));
-    assert.equal(r2.store.get().identity.connect.error, 'The account refused the tokens.');
+    assert.equal(spoken(r2.store.get().identity.connect.error), 'The account refused the tokens.');
   }
 });
 
@@ -461,7 +462,7 @@ test('Next with one field empty posts nothing and says which is missing', async 
     const app = field(a), bot = field(b);
     await r.identity.next(app, bot);
     assert.equal(r.posts.length, 0, words);
-    assert.equal(r.store.get().identity.connect.error, words);
+    assert.equal(spoken(r.store.get().identity.connect.error), words);
     assert.equal(r.store.get().identity.connect.step, 1);
     assert.equal(app.value, '');
     assert.equal(bot.value, '');
@@ -471,7 +472,7 @@ test('Next with one field empty posts nothing and says which is missing', async 
   r.identity.openConnect('slack');
   await r.identity.next(field(APP));
   assert.equal(r.posts.length, 0);
-  assert.equal(r.store.get().identity.connect.error, 'Paste the bot token (xoxb-…) first.');
+  assert.equal(spoken(r.store.get().identity.connect.error), 'Paste the bot token (xoxb-…) first.');
 });
 
 test('sheet 2: Say hi with the app_redirect link, its QR, the workspace and the expiry; sheet 3 and Not me as Telegram\'s', async () => {

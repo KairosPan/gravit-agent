@@ -13,7 +13,7 @@ import { CHINA_VENUE, isCnKey, isChiNext, cnHitsOf } from '../wire/china.js';
 import { MIN, HOUR, DAY } from '../time.js';
 import { DESK_TAB } from './desk-view.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, statementLinesOf, worthOf } from './account-view.js';
-import { t } from '../i18n/words.js';
+import { t, isSaid, sayOf } from '../i18n/words.js';
 
 // the Account's tabs, in the order the table draws them, the sorts its rows take, and the ranges a market's history is read for;
 // the tabs' and the sorts' words are read from the table at each call (accountTabs, accountSorts)
@@ -124,6 +124,7 @@ export function volumeWordOf(priced) {
 /** The watchlist's words: this browser's store's (`read`, `unsaved`, `full`), else the Account's own sentence when it refused
  *  a setWatch (host/markets.js keeps it as the error); nothing else. */
 export function watchWord(error) {
+  if (isSaid(error)) return sayOf(error);
   if (typeof error !== 'string') return '';
   const words = watchWords();
   return Object.hasOwn(words, error) ? words[error] : error.trim();
@@ -329,7 +330,7 @@ function ageWords(at, now) {
 }
 
 // a source's words, with the price's age once it is past FRESH_MS
-const said = (from, at, now) => { const age = ageWords(at, now); return age ? `${from} · ${age}` : from; };
+const sourced = (from, at, now) => { const age = ageWords(at, now); return age ? `${from} · ${age}` : from; };
 
 /** Where a row's price is from, in the Account's own words: the row's `quoteFrom` (`Robinhood · real time`, `Cboe · 15 min
  *  delayed`), else the venue its 24h change is from (`changeFrom`); else the first venue the owner connected that lists it —
@@ -339,10 +340,10 @@ export function sourceWordOf(item, now = Date.now()) {
   const it = isRecord(item) ? item : {};
   const stamp = typeof it.quoteAt === 'string' ? it.quoteAt : undefined;
   const rowWord = str(it.quoteFrom).trim() || (isRecord(it.changeFrom) ? str(it.changeFrom.venueName).trim() : '');
-  if (rowWord) return said(rowWord, stamp, now);
+  if (rowWord) return sourced(rowWord, stamp, now);
   const line = records(it.at).find(l => l.connected === true);
   const lineWord = line ? str(line.quoteFrom).trim() || str(line.venueName).trim() : '';
-  return lineWord ? said(lineWord, stamp ?? line.quoteAt, now) : '';
+  return lineWord ? sourced(lineWord, stamp ?? line.quoteAt, now) : '';
 }
 
 /** A row's lines across venues: the ones the owner connected first, then the public listings, each in the Account's order (the
@@ -489,7 +490,7 @@ function subOf(item, legs) {
 }
 
 // where a row's price is from: the live quote's own source and stamp where it names one, else the item's
-const wordOf = (item, live, now) => { const from = str(live?.quoteFrom).trim(); return from ? said(from, live.quoteAt, now) : sourceWordOf(item, now); };
+const wordOf = (item, live, now) => { const from = str(live?.quoteFrom).trim(); return from ? sourced(from, live.quoteAt, now) : sourceWordOf(item, now); };
 
 // `atAccount`: starred on the Account's own list alone, never the face's
 function accountRow(item, quotes, watched, now, atAccount = false) {

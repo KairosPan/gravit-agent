@@ -7,7 +7,7 @@ import { yuan, fix2, signedPct, count } from './block.js';
 import { intradaySvg, cursorPatch, minuteLabel, sealIndex, atLimitUp, atLimitDown, limitsOf, includesUp } from './intraday.js';
 import { chinaStamp } from './time.js';
 import { boardOf } from '../../host/lunhui.js';
-import { t, th } from '../../i18n/words.js';
+import { t, th, sayOf } from '../../i18n/words.js';
 
 const fin = v => v != null && v !== '' && Number.isFinite(Number(v));
 const word = v => (v == null || v === '' ? '—' : String(v));
@@ -118,7 +118,7 @@ export function stockDrawerHtml(state) {
   const code = open.code;
   const entry = state.lunhui.views?.[open.key];
   if (!entry || entry.status === 'loading') return shell(code, `<div class="lh-none">${esc(t('lunhui.stock.loading', { code }))}</div>`);
-  if (entry.status === 'failed') return shell(code, `<div class="lh-error">${esc(word(entry.error))}</div>`);
+  if (entry.status === 'failed') return shell(code, `<div class="lh-error">${esc(word(sayOf(entry.error)))}</div>`);
   const view = entry.view ?? {};
   const f = view.stocks && typeof view.stocks === 'object' && Object.hasOwn(view.stocks, code) ? view.stocks[code] : null;
   if (!f) return shell(code, `<div class="lh-none">${esc(t('lunhui.stock.notInPools', { code }))}</div>`);

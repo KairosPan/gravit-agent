@@ -1,6 +1,8 @@
 // face/client/js/reducers/discover.js — Discover's store from the face (host/discover.js): the query, a listing per shelf
 // (a failed read keeps what it had), the Gravit item's three cards, the skills read, a module page's latest artifact
 // (host/modules.js), and Discover's own line.
+import { isLine } from '../i18n/words.js';
+
 const disc = (s, patch) => ({ ...s, discover: { ...s.discover, ...patch } });
 const shelf = (s, name, patch) => disc(s, { shelves: { ...s.discover.shelves, [name]: { ...(s.discover.shelves?.[name] ?? { status: 'idle', data: null, at: null }), ...patch } } });
 const skillOf = (s, name, patch) => disc(s, { skills: { ...(s.discover.skills ?? {}), [name]: { ...(s.discover.skills?.[name] ?? {}), ...patch } } });
@@ -21,6 +23,6 @@ export const reducers = {
   moduleArtifactLoading: (s, { module }) => artifactOf(s, module, { status: 'loading' }),
   moduleArtifactLoaded: (s, { module, run, json }) => artifactOf(s, module, { status: 'ready', run: run ?? null, json: json ?? null }),
   moduleArtifactFailed: (s, { module }) => artifactOf(s, module, { status: 'failed' }),
-  discoverStatus: (s, { line, bad = false }) => disc(s, { status: typeof line === 'string' && line !== '' ? { line, bad } : null }),
+  discoverStatus: (s, { line, bad = false }) => disc(s, { status: isLine(line) ? { line, bad } : null }),
   modelsLoaded: (s, { choices }) => disc(s, { models: Array.isArray(choices) ? choices : [] }),
 };

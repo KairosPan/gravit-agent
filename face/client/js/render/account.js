@@ -38,7 +38,7 @@ import { renderDeviceLine, renderDevices } from './owner.js';
 import { shortcut, chordLabel } from '../keys.js';
 import { renderIdentityTab } from './identity.js';
 import { HOST_NAME } from '../wire/speaker.js';
-import { t, th, tn } from '../i18n/words.js';
+import { t, th, tn, sayOf } from '../i18n/words.js';
 import { SIZES, sizeOf } from '../prefs.js';
 
 // the seven tabs, each its id and its word
@@ -51,7 +51,8 @@ const detailsOf = () => [['noTradeBecause', t('venues.detail.noTrade')], ['restr
   ['closeOnly', t('venues.detail.closeOnly')], ['watchOnly', t('venues.detail.watchOnly')], ['keyFile', t('venues.detail.keyFile')]];
 
 const box = (inner, label) => `<section class="cardbox"${label ? ` aria-label="${label}"` : ''}>${inner}</section>`;
-const note = text => `<p class="acct-note">${esc(text)}</p>`;
+// a line drawn as a note: a string as it came, a said in the table that stands
+const note = line => `<p class="acct-note">${esc(sayOf(line))}</p>`;
 const title = text => `<div class="cardbox-title">${esc(text)}</div>`;
 const tone = value => ({ pos: 'up', neg: 'down' })[sign(value)] ?? 'flat';
 const retry = () => `<button type="button" class="btn-sm" data-action="refreshAccount">${th('account.retry')}</button>`;
@@ -125,11 +126,11 @@ function assetsBox(lens, state) {
     lines(r.asset, r.venues.map(v => [v.venueName || v.venue, numWord(v.amount), v.stale ? t('account.venue.stale') : ''].filter(Boolean).join(' · '))) + earnOutKey(r, state),
     esc(numWord(r.amount)), esc(price(r.price)), `<span class="${tone(r.changePct24h)}">${esc(pctWord(r.changePct24h))}</span>`, esc(money(r.usd)),
   ]);
-  const said = lens.status === 'error' && lens.message ? note(lens.message) : '';
+  const kept = lens.status === 'error' && lens.message ? note(lens.message) : '';
   const head = [t('account.assets.asset'), t('account.assets.amount'), t('account.assets.price'), t('account.assets.day'), t('account.assets.value')];
-  const body = rows.length ? table(head, rows) : said && lens.data === null ? '' : readNote(lens, t('account.assets.unavailable'), t('account.assets.none'));
+  const body = rows.length ? table(head, rows) : kept && lens.data === null ? '' : readNote(lens, t('account.assets.unavailable'), t('account.assets.none'));
   const tools = marketKeysOn(state) ? `<div class="btn-row"><button type="button" class="btn-sm" data-action="openSellMany">${th('account.assets.sellMany')}</button></div>` : '';
-  return box(`${title(t('account.assets.title'))}${tools}${said}${body}`, th('account.assets.title'));
+  return box(`${title(t('account.assets.title'))}${tools}${kept}${body}`, th('account.assets.title'));
 }
 
 // the Positions table; on a page that signs, for an Account that takes writes, each row's Close… (Sell…) and a perpetual's
@@ -232,8 +233,8 @@ function venues(state, now) {
   const list = (pageNote(a) ?? (rows ? `<div class="venues">${rows}</div>` : note(t('venues.none')))) + closings + keys;
   // the A-share quotes' provider, as the Account's China status names it: the Account's own sentence where it says one, else its word
   const cn = (Array.isArray(state.markets?.providers) ? state.markets.providers : []).filter(p => p?.market === 'cn');
-  const said = p => (typeof p.said === 'string' && p.said.trim() ? p.said : providerWord(p));
-  const quotes = cn.length ? `<div class="label">${th('venues.aShares')}</div><div class="venues">${cn.map(p => `<div class="venue"><span>${esc(said(p))}</span></div>`).join('')}</div>` : '';
+  const kept = p => (sayOf(p.said).trim() ? sayOf(p.said) : providerWord(p));
+  const quotes = cn.length ? `<div class="label">${th('venues.aShares')}</div><div class="venues">${cn.map(p => `<div class="venue"><span>${esc(kept(p))}</span></div>`).join('')}</div>` : '';
   return `<div class="cards">${box(`${title(t('account.tab.venues'))}${list}${quotes}`, th('account.tab.venues'))}${seatBox(state, now)}</div>`;
 }
 
@@ -419,7 +420,7 @@ function cardsTab(state, now) {
   const groups = cardsOf(a.data).map(g => `<div class="dsec-label">${esc(g.agentName)}</div><div class="venues">${g.cards.map(c => cardRow(c, now, owner)).join('')}</div>`).join('');
   const asks = asksOf(a.data).map(k => askRow(k, a.data, owner)).join('');
   return `<div class="cards">${box(`${title(t('cards.waiting'))}${groups || note(t('cards.none'))}`, th('account.tab.cards'))}` +
-    `${asks ? box(`${title(t('cards.asks'))}<div class="acct-orders">${asks}</div>${typeof a.grantSaid === 'string' && a.grantSaid ? note(a.grantSaid) : ''}`, th('cards.asks')) : ''}</div>`;
+    `${asks ? box(`${title(t('cards.asks'))}<div class="acct-orders">${asks}</div>${sayOf(a.grantSaid) ? note(a.grantSaid) : ''}`, th('cards.asks')) : ''}</div>`;
 }
 
 // ── Rules (plan 4a Task 5) ──
@@ -454,9 +455,9 @@ function rulesTab(state, now) {
   const owner = signs(state);
   const g = a.guard ?? {};
   // what the last Guard press said, only while it still reads true: done while the page is in Guard, a refusal while it is not
-  const said = g.status === 'said' && g.said && r.mode === 'guard' ? note(g.said) : g.status === 'refused' && g.message && r.mode !== 'guard' ? note(g.message) : '';
+  const kept = g.status === 'said' && g.said && r.mode === 'guard' ? note(g.said) : g.status === 'refused' && g.message && r.mode !== 'guard' ? note(g.message) : '';
   const card = r.cardMinutes === null ? '' : note(tn('rules.cardExpires', r.cardMinutes));
-  const mode = box(`${title(t('rules.mode'))}${modeSeg(r.mode, owner)}${said}${owner ? '' : note(t('rules.beastSigns'))}` +
+  const mode = box(`${title(t('rules.mode'))}${modeSeg(r.mode, owner)}${kept}${owner ? '' : note(t('rules.beastSigns'))}` +
     `${note(rulesLead())}${note(gate2())}${modeTable(r)}${card}`, th('rules.mode'));
   const key = (kind, word) => (owner ? `<span class="btn-row">${sheetKey(kind, {}, word)}</span>` : '');
   const cap = r.writes
@@ -503,7 +504,7 @@ function receiveRow(row, receive) {
   }
   let body = '';
   if (asking) body = `<br><span class="dim">${esc(t('money.receive.asking', { venue: row.venueName }))}</span>`;
-  else if (read?.status === 'error') body = `<br><span class="dim">${esc(read.message || t('money.receive.noAnswer'))}</span>`;
+  else if (read?.status === 'error') body = `<br><span class="dim">${esc(sayOf(read.message) || t('money.receive.noAnswer'))}</span>`;
   return `<div class="venue"><span>${head}${body}</span><span class="btn-row">${ask(read?.status === 'error' ? th('money.receive.again') : th('money.receive.show'))}</span></div>`;
 }
 
@@ -541,8 +542,8 @@ function earnBox(state) {
   const a = state.account;
   const e = a.earn ?? {};
   const keys = signs(state) && writesOn(a.data);
-  const said = e.said ? note(e.said) : '';
-  if (!e.data) return box(`${title(t('money.earn.title'))}${said}${note(e.status === 'error' ? e.message || t('money.earn.unread') : t('common.loading'))}`, th('money.earn.title'));
+  const kept = e.said ? note(e.said) : '';
+  if (!e.data) return box(`${title(t('money.earn.title'))}${kept}${note(e.status === 'error' ? e.message || t('money.earn.unread') : t('common.loading'))}`, th('money.earn.title'));
   const l = earnListOf(e.data, a.data, 'withdraw');
   const rows = l.products.map(p => {
     const held = p.held ?? {};
@@ -558,7 +559,7 @@ function earnBox(state) {
   const ro = writesOn(a.data) ? '' : note(earnReadOnly());
   // a failed read says its refusal alone: the empty list's line is not drawn under it
   const list = rows ? `<div class="venues">${rows}</div>` : e.status === 'error' ? '' : note(t('money.earn.none'));
-  return box(`${title(t('money.earn.title'))}${said}${failedNote}${list}${put}${ro}${away}${failed}${refusing}`, th('money.earn.title'));
+  return box(`${title(t('money.earn.title'))}${kept}${failedNote}${list}${put}${ro}${away}${failed}${refusing}`, th('money.earn.title'));
 }
 
 // ── Sell many (plan 4b Task 3; earn.js openSellMany) ──
@@ -570,7 +571,7 @@ function smLeg(l, i) {
   const head = `<div><b>${esc(smLegName(l.item))}</b> · ${esc(l.item.venueName || l.item.venue)}</div>`;
   let body = '';
   if (l.state === 'asking') body = note(t('money.sellMany.asking'));
-  else if (l.state === 'refused') body = `<p class="acct-note sm-no">${esc(l.why)}</p>`;
+  else if (l.state === 'refused') body = `<p class="acct-note sm-no">${esc(sayOf(l.why))}</p>`;
   else if (l.state === 'waiting') body = note(t('money.sellMany.waiting'));
   else if (l.state === 'signing') body = note(t('money.sellMany.signing'));
   else if (l.state === 'sold' || l.state === 'wallet') body = note(l.said);
@@ -637,11 +638,11 @@ export function renderStatement(state, now) {
     return `<div class="activity-row"><span class="dim">${esc(when(l.at, now))}</span>` +
       `<span class="activity-text">${esc(l.description)}${facts ? `<br><span class="dim">${esc(facts)}</span>` : ''}</span><span class="num">${esc(money(l.amountUsd))}</span></div>`;
   }).join('');
-  const said = st.status === 'error' && st.message ? note(st.message) : '';
+  const kept = st.status === 'error' && st.message ? note(st.message) : '';
   const body = rows ? `<div class="activity">${rows}</div><div class="btn-row"><button type="button" class="btn-sm" data-action="exportStatement">${th('account.statement.export')}</button></div>`
     : readNote(st, t('account.statement.unavailable'), t('account.statement.none'));
   return `<aside class="drawer" aria-label="${th('account.statement.title')}"><div class="drawer-head"><h2>${th('account.statement.title')}</h2><button type="button" class="close-key" data-action="closeStatement" aria-label="${th('common.close')}">×</button></div>` +
-    `<div class="drawer-body">${said}${body}</div></aside>`;
+    `<div class="drawer-body">${kept}${body}</div></aside>`;
 }
 
 export function renderSettings(state, { mac = true } = {}) {

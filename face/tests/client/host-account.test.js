@@ -9,6 +9,7 @@ import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { startAccount, ACCOUNT_POLL_MS, ACCOUNT_POLL_STREAM_MS, SIGNIN_POLL_MS, SIGNIN_WITHIN_MS } from '../../client/js/host/account.js';
 import { renderAccountScreen } from '../../client/js/render/account.js';
+import { spoken } from './helpers/spoken.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
@@ -707,7 +708,7 @@ test('guard posts once while one is in the air, says the Account\'s words, and r
   await one;
   await settle();
   assert.equal(r.a().guard.status, 'said');
-  assert.equal(r.a().guard.said, 'Guard: what agents ask for waits for you on a card.');
+  assert.equal(spoken(r.a().guard.said), 'Guard: what agents ask for waits for you on a card.');
   assert.deepEqual(r.reads, ['/data/account?fresh=1'], 'the page read past the face\'s cache');
   assert.equal(r.a().data.mode, 'guard');
   // once settled, the next press posts again
@@ -739,11 +740,11 @@ test('a refused guard says the refusal and leaves the mode drawn as the page has
   await r.account.guard();
   assert.equal(r.a().guard.message, 'unreachable', 'else its error');
   await r.account.guard();
-  assert.equal(r.a().guard.message, 'The account did not answer. Try again.', 'else the fixed words');
+  assert.equal(spoken(r.a().guard.message), 'The account did not answer. Try again.', 'else the fixed words');
   // a post that throws is no answer
   const r2 = rig({ json: { '/data/account': noPaper() }, post: async () => { throw new Error('boom'); } });
   await r2.account.guard();
-  assert.equal(r2.a().guard.message, 'The account did not answer. Try again.');
+  assert.equal(spoken(r2.a().guard.message), 'The account did not answer. Try again.');
 });
 
 // ── the Money tab (plan 4b Task 2) ──
@@ -816,7 +817,7 @@ test("an answer for another account, asset or network is never landed as the row
   const got = r.a().receive['okx|USDT|Base'];
   assert.equal(got.status, 'error');
   assert.equal(got.data, null);
-  assert.match(got.message, /another account or network/);
+  assert.match(spoken(got.message), /another account or network/);
   // an answer with no address is no address
   const e = rig({ json: { '/data/account/receive': { ok: true, venue: 'okx', asset: 'USDT', network: 'Base' } } });
   await e.account.receive({ venue: 'okx', asset: 'USDT', network: 'Base' });
@@ -851,7 +852,7 @@ test('revoke posts once per venue while in the air and reads the page fresh', as
   release.ex({ status: 200, body: { ok: true } });
   await one;
   await settle();
-  assert.deepEqual(r.a().closing.ex, { status: 'said', said: 'Stand-in Exchange is closed to agents: they keep reading it, and place or move nothing there. Reopening it is signed.', message: null });
+  assert.deepEqual(spoken(r.a().closing.ex), { status: 'said', said: 'Stand-in Exchange is closed to agents: they keep reading it, and place or move nothing there. Reopening it is signed.', message: null });
   assert.deepEqual(r.reads, ['/data/account?fresh=1'], "the page read past the face's cache");
   // the Account's refusal in its words
   release.broker({ status: 404, body: { ok: false, refusal: { code: 'E_ACCOUNT_UNKNOWN_VENUE', message: 'no account "broker" here' } } });

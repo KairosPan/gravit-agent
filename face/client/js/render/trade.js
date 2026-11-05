@@ -21,14 +21,14 @@ import { chip } from './thread.js';
 import { mkAv, priceWord } from './markets.js';
 import { orderWords, cardFactsOf, marketKeysOn, changeKey } from './account.js';
 import { walletRow } from './wallet-row.js';
-import { t, th } from '../i18n/words.js';
+import { t, th, sayOf } from '../i18n/words.js';
 
 // the kinds' glyphs, Linqi's sprite
 const KIND_ICONS = { crypto: 'coin', stocks: 'stock', rwas: 'rwa', predictions: 'prediction' };
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = v => (typeof v === 'string' ? v : '');
 const empty = text => `<p class="mk-empty">${esc(text)}</p>`;
-const note = text => `<p class="acct-note">${esc(text)}</p>`;
+const note = line => `<p class="acct-note">${esc(sayOf(line))}</p>`;
 const path = text => `<div class="tk-path">${esc(text)}</div>`;
 const tag = (text, tone = '') => `<span class="${cls('mk-tag', tone)}">${esc(text)}</span>`;
 const group = (title, rows) => (rows.length ? `<div class="tk-pg"><div class="tk-pg-h">${esc(title)}</div><ul class="tk-list">${rows.join('')}</ul></div>` : '');
@@ -76,8 +76,8 @@ function picker(state, now) {
     const read = isRecord(tr.picks) && Object.hasOwn(tr.picks, kind.id) ? tr.picks[kind.id] : null;
     const groups = group(t('trade.group.held'), p.held.map(row)) + group(t('markets.tab.watching'), p.watching.map(row)) + group(t('markets.sort.volume'), p.most.map(row));
     // a picks read that failed after an answer keeps its rows, with the Account's sentence over them
-    const said = groups && read?.status === 'error' && str(read.message) ? note(read.message) : '';
-    body = groups ? said + groups : empty(picksWord(read));
+    const kept = groups && read?.status === 'error' && str(read.message) ? note(read.message) : '';
+    body = groups ? kept + groups : empty(picksWord(read));
   }
   return `<section class="cardbox tk-pick"><div class="tk-pick-head"><h2 class="tk-h2">${esc(kind.label)}</h2><div class="tk-pfind">${icon('search', 16, 2)}` +
     `<label for="tq" class="sr-only">${th('trade.search.label', { kind: kind.label })}</label><input${attrs({ id: 'tq', type: 'search', autocomplete: 'off', placeholder: t('trade.search.label', { kind: kind.label }), 'data-action': 'tradeQuery', value: str(tr.q) })}></div></div>${body}</section>`;
@@ -99,10 +99,10 @@ function cardsWaiting(page, now) {
 // page that signs; Change… where its venue changes it in place, on a page that signs for an Account that takes writes; what was said on Trade (a cancel's answer, a fill) over them; the cards waiting under them
 function underWay(state, signs, now) {
   const a = state.account;
-  const said = str(state.trade.said) ? `<p class="tk-said" role="status">${esc(state.trade.said)}</p>` : '';
+  const kept = sayOf(state.trade.said) ? `<p class="tk-said" role="status">${esc(sayOf(state.trade.said))}</p>` : '';
   const head = n => `<div class="tk-pick-head"><h2 class="tk-h2">${th('trade.underWay')}</h2>${n === null ? '' : `<span class="dim">${n}</span>`}</div>`;
   if (!pageOk(a?.data)) {
-    return `<section class="cardbox tk-open">${head(null)}${said}${empty(a?.data ? t('account.unreadable') : a?.status === 'error' ? t('account.unavailable') : t('common.loading'))}</section>`;
+    return `<section class="cardbox tk-open">${head(null)}${kept}${empty(a?.data ? t('account.unreadable') : a?.status === 'error' ? t('account.unavailable') : t('common.loading'))}</section>`;
   }
   const change = marketKeysOn(state);
   const rows = underWayOf(a.data).map(o => {
@@ -112,7 +112,7 @@ function underWay(state, signs, now) {
     return `<tr><td><b>${esc(orderWords(o))}</b>${o.id ? `<span class="tk-why">${esc(o.id)}</span>` : ''}</td><td class="r">${change ? changeKey(o, a.data) : ''}${cancel}</td></tr>`;
   });
   const table = `<div class="mk-wrap"><table class="mk-t tk-t"><thead><tr><th scope="col">${th('trade.field.orderType')}</th><th scope="col" class="r"><span class="sr-only">${th('trade.actions')}</span></th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
-  return `<section class="cardbox tk-open">${head(rows.length)}${said}${rows.length ? table : empty(t('trade.nothingUnderWay'))}${cardsWaiting(a.data, now)}</section>`;
+  return `<section class="cardbox tk-open">${head(rows.length)}${kept}${rows.length ? table : empty(t('trade.nothingUnderWay'))}${cardsWaiting(a.data, now)}</section>`;
 }
 
 // ── the ticket ──
@@ -216,12 +216,12 @@ function ticketPanel(state, now) {
   const signs = lines.length
     ? `<details${attrs({ id: 'tk-signs', class: cls('acct-shown', stale && 'stale') })}><summary data-action="toggleSigns">${th('sheet.whatYouSign')}</summary>${lines.map(l => `<div class="dsec-line">${esc(l)}</div>`).join('')}</details>`
     : '';
-  const said = s?.status === 'refused' ? s.message : s?.status === 'done' ? str(s.said) : s?.status === 'signing' ? t('trade.placing') : '';
+  const kept = s?.status === 'refused' ? sayOf(s.message) : s?.status === 'done' ? sayOf(s.said) : s?.status === 'signing' ? t('trade.placing') : '';
   const again = s?.status === 'refused' && s.again ? `<div class="btn-row"><button type="button" class="btn-sm" data-action="sheetAgain">${th('sheet.quote.again')}</button></div>` : '';
   const go = `<button${attrs({ type: 'submit', class: 'btn-primary tk-go', disabled: !live })}>${esc(goWord('order'))}</button>`;
   return `${head}<form class="tk-form" data-action="placeOrder" novalidate autocomplete="off">${pickedHtml}${outs}${whereHtml(tk, venue)}` +
     `<div class="tk-stack">${sideHtml}${amount}${order}${extended}${quoteBox(s, leg?.venueName || leg?.venue, stale)}${left ? `<p class="tk-left">${esc(left)}</p>` : ''}${signs}` +
-    `${said ? `<p class="tk-msg" role="status">${esc(said)}</p>` : ''}${again}${go}</div>${hand}</form>`;
+    `${kept ? `<p class="tk-msg" role="status">${esc(kept)}</p>` : ''}${again}${go}</div>${hand}</form>`;
 }
 
 /** The Trade screen: the head with the Account's writes chip, the kinds, the picker and Under way, and the ticket panel. */

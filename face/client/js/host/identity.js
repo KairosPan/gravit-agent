@@ -16,7 +16,7 @@
 // page that reloads holds none (the store keeps no connection) and the account's ten minutes cover a tab that died.
 import { routeRows, routingOf, formatRouting } from './identity-view.js';
 import { refusedAt, whyOf } from './owner-view.js';
-import { t } from '../i18n/words.js';
+import { said } from '../i18n/words.js';
 
 /** Sheet 2 reads the pending connection this often (the plan's ruling 5). */
 export const PENDING_POLL_MS = 1_500;
@@ -28,17 +28,17 @@ const PENDING_PATH = '/data/account/identity/pending';
 const NOT_ME_PATH = '/data/account/identity/pending/not-me';
 const DROP_PATH = '/data/account/identity/pending/drop';
 
-// the drawer's own words, each read when said
+// the drawer's own words, each a said read when drawn
 export const CONNECT_WORDS = {
-  empty: () => t('identity.connect.empty'),
-  noSubtle: () => t('identity.connect.noSubtle'),
-  refused: () => t('identity.connect.refused'),
-  slackRefused: () => t('identity.connect.slackRefused'),
-  slackNoApp: () => t('identity.connect.slackNoApp'),
-  slackNoBot: () => t('identity.connect.slackNoBot'),
-  slackNone: () => t('identity.connect.slackNone'),
-  expired: () => t('identity.connect.expired'),
-  noSender: () => t('identity.connect.noSender'),
+  empty: () => said('identity.connect.empty'),
+  noSubtle: () => said('identity.connect.noSubtle'),
+  refused: () => said('identity.connect.refused'),
+  slackRefused: () => said('identity.connect.slackRefused'),
+  slackNoApp: () => said('identity.connect.slackNoApp'),
+  slackNoBot: () => said('identity.connect.slackNoBot'),
+  slackNone: () => said('identity.connect.slackNone'),
+  expired: () => said('identity.connect.expired'),
+  noSender: () => said('identity.connect.noSender'),
 };
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -215,7 +215,7 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
         : await post(TOKEN_PATHS.telegram, { token, keyHash: fp.keyHash, salt: fp.salt });
       // the account's words, never a token's: a sentence that carried one would be replaced
       words = whyOf(r);
-      if (words.includes(token) || (bot && words.includes(bot))) words = refused;
+      if (typeof words === 'string' && (words.includes(token) || (bot && words.includes(bot)))) words = refused;
     } catch {
       words = fp ? refused : CONNECT_WORDS.noSubtle();
     } finally {

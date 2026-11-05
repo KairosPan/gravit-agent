@@ -15,8 +15,8 @@ function drawn(values, { label, first, last, f }) {
   const hi = Math.max(...values);
   const span = hi - lo || 1;
   const line = values.map((v, i) => `${i ? 'L' : 'M'}${((i * W) / (values.length - 1)).toFixed(1)},${(H - 6 - ((v - lo) / span) * (H - 12)).toFixed(1)}`).join('');
-  const said = t('markets.chart.said', { label, from: f(values[0]), to: f(values.at(-1)), low: f(lo), high: f(hi) });
-  return `<svg class="mk-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(said)}">` +
+  const described = t('markets.chart.said', { label, from: f(values[0]), to: f(values.at(-1)), low: f(lo), high: f(hi) });
+  return `<svg class="mk-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(described)}">` +
     `<path class="mk-chart-area" d="${line}L${W},${H}L0,${H}Z"></path><path class="mk-chart-line" d="${line}"></path></svg>` +
     `<div class="mk-axis"><span>${esc(first)}</span><span>${th('markets.chart.lowHigh', { low: f(lo), high: f(hi) })}</span><span>${esc(last)}</span></div>`;
 }
@@ -71,8 +71,8 @@ export function sessionsSvg(sessions) {
   const f = v => price(v, 'CNY');
   const day = d => (typeof d === 'string' ? d.slice(5) : '');
   const first = day(kept[0].date), last = day(kept.at(-1).date);
-  const said = t('markets.chart.sessions', { n: kept.length, first, last, low: f(lo), high: f(hi) });
-  return `<svg class="mk-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(said)}">${seps}${prev}` +
+  const described = t('markets.chart.sessions', { n: kept.length, first, last, low: f(lo), high: f(hi) });
+  return `<svg class="mk-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(described)}">${seps}${prev}` +
     `<path class="mk-chart-area" d="${line}L${X(points.at(-1)[0])},${H}L0,${H}Z"></path><path class="mk-chart-line" d="${line}"></path></svg>` +
     `<div class="mk-axis">${kept.map(x => `<span>${esc(day(x.date))}</span>`).join('')}</div>` +
     `<div class="mk-axis"><span></span><span>${th('markets.chart.lowHigh', { low: f(lo), high: f(hi) })}</span><span></span></div>`;

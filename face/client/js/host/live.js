@@ -7,7 +7,7 @@ import { rememberCall, toMessages } from './kinds.js';
 import { attachmentsLine } from '../composer/files.js';
 import { listConversations, childRowsOf } from './sessions.js';
 import { foldMessages } from '../reducers/host.js';
-import { t } from '../i18n/words.js';
+import { said, saidError } from '../i18n/words.js';
 
 export const LIST_REFRESH_MS = 1200;   // the list is re-read this long after a burst of host facts
 export const PREVIEW_ROWS = 12;        // how many rows get a one-message page for their preview
@@ -21,8 +21,8 @@ export const EARLIER_MAX_PAGES = 40;   // the most pages one earlier call reads 
 export const viewFor = conv => (conv?.live ? 'follow' : 'page');
 
 const address = id => ({ kind: 'session', sessionId: id });
-const codeOf = err => err?.code ?? (err?.status ? `HTTP ${err.status}` : err?.message ?? t('status.failed'));
-const failedLine = (what, err) => t('status.fail', { what, reason: codeOf(err) });
+const codeOf = err => err?.code ?? (err?.status ? `HTTP ${err.status}` : err?.said ?? err?.message ?? said('status.failed'));
+const failedLine = (what, err) => said('status.fail', { what, reason: codeOf(err) });
 
 // onReceipt: called after a streamed order receipt lands (spec §6: the account is read again right after a fill); a
 // receipt folded into a window is history and calls nothing. atTail(id): whether the reader stands at that conversation's
@@ -157,7 +157,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
         if (!owns()) return;
         release(view, false);
         view = { id, token, mode: 'page', handle: null, failed: true };
-        say(t('status.followRefused', { code: error?.code ?? t('status.error'), message: error?.message ?? t('status.followFailed') }), true);
+        say(said('status.followRefused', { code: error?.code ?? said('status.error'), message: error?.message ?? said('status.followFailed') }), true);
       },
     });
     view = { id, token, mode: 'follow', handle, snapped: false, waiters: [] };
@@ -171,15 +171,15 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       if (view !== v || token !== openSeq) return;
       const { asOfSeq, migrationRequired } = readProjections(cut);
       // rc.5: an older log answers `migration-required` with no cut to page against - the same status line as any refused open
-      if (migrationRequired) throw Object.assign(new Error(t('status.migrationRequired')), { code: 'session/migration-required' });
-      if (asOfSeq === null) throw new Error(t('status.noProjections'));
+      if (migrationRequired) throw Object.assign(saidError('status.migrationRequired'), { code: 'session/migration-required' });
+      if (asOfSeq === null) throw saidError('status.noProjections');
       const pg = await call('session/page', { request: { address: address(id), throughSeq: asOfSeq } });
       if (view !== v || token !== openSeq) return;
       applySnapshot(id, { projections: cut, records: pg?.records }, { through: asOfSeq, hasMore: pg?.hasMore });
     } catch (err) {
       if (view !== v || token !== openSeq) return;
       view = { ...v, failed: true };
-      say(failedLine(t('status.verb.open'), err), true);
+      say(failedLine(said('status.verb.open'), err), true);
     }
   }
   function open(id) {
@@ -246,7 +246,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
         }
       } catch (err) {
         done();
-        if (token === openSeq) say(failedLine(t('status.verb.earlier'), err), true);
+        if (token === openSeq) say(failedLine(said('status.verb.earlier'), err), true);
         return false;
       }
       if (token !== openSeq) { done(); return false; }
@@ -349,11 +349,11 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
         getJson('/data/sessions-meta.json').catch(() => null),
       ]);
     } catch (err) {
-      say(failedLine(t('status.verb.list'), err), true);
+      say(failedLine(said('status.verb.list'), err), true);
       return;
     }
     if (token !== listSeq) return;
-    if (!Array.isArray(list?.items)) { say(t('status.noSessionList'), true); return; }
+    if (!Array.isArray(list?.items)) { say(said('status.noSessionList'), true); return; }
     if (Array.isArray(index?.channels)) lastIndex = index; else index = lastIndex;
     if (Array.isArray(meta?.archived)) lastMeta = meta; else meta = lastMeta;
     if (Array.isArray(botsBody?.bots)) lastBots = botsBody; else botsBody = lastBots;
@@ -445,7 +445,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       }
       case 'api-session/error': {
         const [id, message] = list;
-        if (id === state().route.id) say(typeof message === 'string' && message !== '' ? message : t('status.agentFailed'), true);
+        if (id === state().route.id) say(typeof message === 'string' && message !== '' ? message : said('status.agentFailed'), true);
         return;
       }
       default:
@@ -458,13 +458,13 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     onEvent,
     onGate: acceptGate,
     onGateGone: gateGone,
-    onDown: reason => { say(t('status.reconnecting', { reason }), true, false); suspend(); closePins(); },
+    onDown: reason => { say(said('status.reconnecting', { reason }), true, false); suspend(); closePins(); },
   });
   function openControl() {
     mux.stream('session/control', {}, {
       onItem: item => { if (item?.type === 'baseline') seedBaseline(item.value); else acceptProjection(mapFrame(item)); },
       onEnd: () => timers.after(FOLLOW_RETRY_MS, openControl),
-      onError: error => { say(t('status.controlUnavailable', { code: error?.code ?? t('status.error') }), true); timers.after(CONTROL_RETRY_MS, openControl); },
+      onError: error => { say(said('status.controlUnavailable', { code: error?.code ?? said('status.error') }), true); timers.after(CONTROL_RETRY_MS, openControl); },
     });
   }
   openControl();

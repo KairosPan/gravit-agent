@@ -5,6 +5,7 @@ import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { needsAnswer } from '../../client/js/messages.js';
 import { foldMessages } from '../../client/js/reducers/host.js';
+import { spoken } from './helpers/spoken.js';
 
 const NOW = 1_760_000_000_000;
 const conv = (id, over = {}) => ({ id, title: 'T', kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: false, updatedAt: 5, created: null, messages: [], loaded: false, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
@@ -17,7 +18,7 @@ const get = (s, id) => s.conversations.find(c => c.id === id);
 test('the empty state has no conversations, a connecting status line and the shapes later screens boot on', () => {
   const s = emptyState(NOW);
   assert.deepEqual(s.conversations, []);
-  assert.deepEqual(s.status, { line: 'connecting…', bad: false, connected: false });
+  assert.deepEqual(spoken(s.status), { line: 'connecting…', bad: false, connected: false });
   assert.deepEqual(s.orphanGates, {}); assert.deepEqual(s.lastSeen, {}); assert.deepEqual(s.channels, []);
   assert.deepEqual(s.route, { screen: 'messages', id: null }); assert.equal(s.theme, 'system'); assert.equal(s.draft, null);
   assert.equal(s.counters, undefined);

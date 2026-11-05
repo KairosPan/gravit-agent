@@ -7,14 +7,14 @@ import { esc, attrs, cls } from '../html.js';
 import { fmtDate } from '../time.js';
 import { pageOk } from '../host/account-view.js';
 import { standingWords, devicesOf, whatYouSignLines, goodForWords } from '../host/owner-view.js';
-import { titleOf, goWord, connectCheckOf, connectOptionOf, isWalletOption, whoOf, signOutLineOf } from '../host/sheet-view.js';
+import { titleOf, goWord, connectCheckOf, connectOptionOf, isWalletOption, whoOf, signOutLineOf, draftOf } from '../host/sheet-view.js';
 import { askedOf } from '../host/sheet.js';
 import { moveHintsOf, moveSaysOf, routesWordsOf, earnHintsOf, earnSaysOf } from '../host/sheet-money.js';
 import { IDENTITY_KINDS, identityLinesOf, identityStepsOf, identityNoteOf } from '../host/sheet-identity.js';
 import { seg } from './controls.js';
-import { t, th, rawHtml } from '../i18n/words.js';
+import { t, th, rawHtml, sayOf } from '../i18n/words.js';
 
-const note = text => `<p class="acct-note">${esc(text)}</p>`;
+const note = line => `<p class="acct-note">${esc(sayOf(line))}</p>`;
 const key = (action, word, data = {}) => `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': action, ...data })}>${esc(word)}</button>`;
 
 // ── the device line ──
@@ -26,7 +26,7 @@ export function renderDeviceLine(state) {
   const owner = state.owner;
   const w = standingWords(owner);
   if (!w.line) return '';
-  const line = note([w.line, typeof owner?.refusal === 'string' ? owner.refusal : ''].filter(Boolean).join(' · '));
+  const line = note([w.line, sayOf(owner?.refusal)].filter(Boolean).join(' · '));
   const busy = owner?.busy === true;
   if (w.key === 'pair') {
     return `${line}<form class="pair-box" data-action="pairDevice" autocomplete="off"><input${attrs({ id: 'pair-code', class: 'input small', type: 'text', autocomplete: 'off', 'aria-label': t('owner.pairingCode') })}>` +
@@ -94,10 +94,18 @@ function field(f) {
   }
 }
 
+// what an incomplete sheet misses: the draft read from its fields again now (words are what is missing, never the clock's),
+// so they follow the table that stands rather than the one standing when the field changed; none kept, none drawn
+const missingOf = s => {
+  if (!s.words) return '';
+  const d = draftOf(s.kind, s.fields, s.seed, 0);
+  return typeof d === 'string' ? d : s.words;
+};
+
 // the quote box: what is missing, asking, the Account's refusal (Prepare again when that is the answer), or the quote's words
 function quoteBox(s) {
   let inner = '';
-  if (s.status === 'incomplete') inner = note(s.words || t('sheet.quote.fillIn'));
+  if (s.status === 'incomplete') inner = note(missingOf(s) || t('sheet.quote.fillIn'));
   else if (s.status === 'asking') inner = note(t('sheet.quote.asking'));
   else if (s.status === 'refused') inner = `${note(s.message)}${s.again ? `<div class="btn-row">${key('sheetAgain', t('sheet.quote.again'))}</div>` : ''}`;
   else if (typeof s.prepared?.quote?.words === 'string' && s.prepared.quote.words) inner = `<b>${esc(s.prepared.quote.words)}</b>`;
@@ -150,7 +158,7 @@ export function renderSheet(state, now) {
   const signs = lines.length
     ? `<details${attrs({ class: cls('acct-shown', s.status === 'ready' && !current && 'stale') })}><summary>${th('sheet.whatYouSign')}</summary>${lines.map(l => `<div class="dsec-line">${esc(l)}</div>`).join('')}</details>`
     : '';
-  const said = s.status === 'done' && s.said ? note(s.said) : '';
+  const kept = s.status === 'done' && s.said ? note(s.said) : '';
   // a connect sheet's check, under its fields: the key file found or missing, the venue's reach, a browser wallet's or a
   // sign-in's words, a command line's example — the Account's words, a key file by its path, never what it holds
   const checked = s.kind === 'connect' ? connectCheckOf(s, state.account?.keyfile, state.account?.reach, { wallet: state.account?.connectWallet, signIn: state.account?.signIn }) : '';
@@ -178,5 +186,5 @@ export function renderSheet(state, now) {
   // a granting sheet's line under its title: the ask in the Account's words (plan 4b Task 6)
   const asked = typeof s.seed?.askedWords === 'string' && s.seed.askedWords ? `<p class="sheet-hint">${esc(s.seed.askedWords)}</p>` : '';
   return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="sheetClose" aria-label="${th('common.close')}">×</button></div>` +
-    `<div class="drawer-body">${asked}${above}${fields}${check}${hints}${quoteBox(s)}${routes}${says}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${said}${startAgain}${steps}${keys}</div></aside>`;
+    `<div class="drawer-body">${asked}${above}${fields}${check}${hints}${quoteBox(s)}${routes}${says}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${kept}${startAgain}${steps}${keys}</div></aside>`;
 }

@@ -6,6 +6,7 @@ import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { startChannels } from '../../client/js/host/channels.js';
+import { spoken } from './helpers/spoken.js';
 
 function rig(answer, extra = {}) {
   const store = createStore({ initial: emptyState(), reducers });
@@ -61,7 +62,7 @@ test('create folds the name, posts it and finds the new channel by its dir', asy
 
 test('an invalid name or _template is refused before any post; a route refusal brings its words', async () => {
   const r = rig(() => { throw Object.assign(new Error('channel already exists'), { status: 409, code: 'channel already exists' }); });
-  for (const bad of ['', '   ', '_template', 'a/b', 'x.y', '-lead']) assert.deepEqual(await r.channels.create(bad), { error: 'Letters, digits, - or _' }, bad);
+  for (const bad of ['', '   ', '_template', 'a/b', 'x.y', '-lead']) assert.deepEqual(spoken(await r.channels.create(bad)), { error: 'Letters, digits, - or _' }, bad);
   assert.deepEqual(r.posted, []);
   assert.deepEqual(await r.channels.create('alpha'), { error: 'channel already exists' });
 });
@@ -74,7 +75,7 @@ test('setAgents and setBots post and re-read the overview; a seventh bot is refu
   assert.deepEqual(r.posted[0][1], { workspaceId: 'w1', agents: ['codex'] });
   assert.deepEqual(r.posted[2][1], { workspaceId: 'w1', bots: ['buffett', 'drill-bear'] });
   const seven = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
-  assert.deepEqual(await r.channels.setBots('w1', seven), { error: 'At most six bots' });
+  assert.deepEqual(spoken(await r.channels.setBots('w1', seven)), { error: 'At most six bots' });
   assert.equal(r.posted.length, 4, 'nothing posted for seven');
 });
 

@@ -1,6 +1,7 @@
 // face/client/js/reducers/account.js — Account on the face: what host/account.js and host/seat.js bring in, the Statement
 // drawer, a venue's Details drawer, the Settings drawer, and the Rules tab's Guard press
 import { closeOverlays } from './messages.js';
+import { isLine } from '../i18n/words.js';
 
 const acc = (s, patch) => ({ ...s, account: { ...s.account, ...patch } });
 const seat = (s, patch) => ({ ...s, seat: { ...s.seat, ...patch } });
@@ -56,17 +57,17 @@ export const reducers = {
   // Guard (host/account.js guard, plan 4a Task 5): the press in the air, then what the Account's answer said — done in the
   // face's words, or its refusal in its own; the mode drawn stays the page's
   // a Cards Grant that could not open its sheet, in words; null clears it (plan 4b Task 6)
-  grantSaid: (s, words) => acc(s, { grantSaid: typeof words === 'string' && words ? words : null }),
+  grantSaid: (s, words) => acc(s, { grantSaid: isLine(words) ? words : null }),
   guardAsking: s => acc(s, { guard: { status: 'asking', said: null, message: null } }),
-  guardSaid: (s, said) => acc(s, { guard: { status: 'said', said: typeof said === 'string' ? said : null, message: null } }),
+  guardSaid: (s, words) => acc(s, { guard: { status: 'said', said: isLine(words, { empty: true }) ? words : null, message: null } }),
   // a signed Beast done: the last Guard press's words are no longer the news
   guardClear: s => acc(s, { guard: { status: 'idle', said: null, message: null } }),
-  guardRefused: (s, message) => acc(s, { guard: { status: 'refused', said: null, message: typeof message === 'string' ? message : null } }),
+  guardRefused: (s, message) => acc(s, { guard: { status: 'refused', said: null, message: isLine(message, { empty: true }) ? message : null } }),
   // the browser wallet's sends (host/wallet-send.js, plan 4b Task 1), by key (a payment's `<id>@<at>`, an order's client id):
   // in the air, sent, or refused in the Account's or the wallet's words; `again` while a hash the wallet sent is kept for
   // Report again
-  walletSaid: (s, { key, status, said, again = false } = {}) => (typeof key === 'string' && key !== ''
-    ? acc(s, { wallet: { ...s.account.wallet, [key]: { status, said: typeof said === 'string' ? said : null, again: again === true } } }) : s),
+  walletSaid: (s, { key, status, said: words, again = false } = {}) => (typeof key === 'string' && key !== ''
+    ? acc(s, { wallet: { ...s.account.wallet, [key]: { status, said: isLine(words, { empty: true }) ? words : null, again: again === true } } }) : s),
   // the Money tab (plan 4b Task 2): a Receive row's address by its key (`<venue>|<asset>|<network>`), each { status, data, at,
   // message }, a failed read keeping its last answer and carrying the Account's words; and the bridge's routes for the draft
   // `asked`, only the latest ask's
@@ -86,7 +87,7 @@ export const reducers = {
   earnLoading: s => read(s, 'earn', { status: 'loading' }),
   earnLoaded: (s, { data, at }) => read(s, 'earn', { status: 'ready', data, at, message: null }),
   earnFailed: (s, { at, message = null }) => read(s, 'earn', { status: 'error', at, message }),
-  earnSaid: (s, said) => read(s, 'earn', { said: typeof said === 'string' && said ? said : null }),
+  earnSaid: (s, words) => read(s, 'earn', { said: isLine(words) ? words : null }),
   // the connect sheet's browser wallet and a venue's sign-in (plan 4b Task 4): each a patch over what it was; both forgotten when a
   // connect sheet opens
   connectWallet: (s, patch) => (patch && typeof patch === 'object' ? acc(s, { connectWallet: { ...s.account.connectWallet, ...patch } }) : s),
@@ -96,8 +97,8 @@ export const reducers = {
     signIn: { status: 'idle', connector: '', url: '', tab: false, state: '', message: null },
   }),
   // Close to agents (host/account.js revoke): a venue's press in the air, then the face's words or the Account's refusal
-  closing: (s, { venue, status, said = null, message = null } = {}) => (typeof venue === 'string' && venue !== ''
-    ? acc(s, { closing: { ...s.account.closing, [venue]: { status, said: typeof said === 'string' ? said : null, message: typeof message === 'string' ? message : null } } }) : s),
+  closing: (s, { venue, status, said: words = null, message = null } = {}) => (typeof venue === 'string' && venue !== ''
+    ? acc(s, { closing: { ...s.account.closing, [venue]: { status, said: isLine(words, { empty: true }) ? words : null, message: isLine(message, { empty: true }) ? message : null } } }) : s),
   // a venue reopened to agents (signed): what an earlier Close to agents said of it is no longer the news
   closingClear: (s, venue) => (typeof venue === 'string' && Object.hasOwn(s.account.closing ?? {}, venue)
     ? acc(s, { closing: Object.fromEntries(Object.entries(s.account.closing).filter(([k]) => k !== venue)) }) : s),

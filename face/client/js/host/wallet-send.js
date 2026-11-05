@@ -9,24 +9,24 @@
 // after close(). The face holds no key: the wallet signs in its own extension.
 import { walletFor, sendTxs, short } from '../wire/wallet.js';
 import { whyOf } from './owner-view.js';
-import { t } from '../i18n/words.js';
+import { said, saidError, isLine } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = v => (typeof v === 'string' ? v : '');
 const list = v => (Array.isArray(v) ? v.filter(isRecord) : []);
 const PAGE = '/data/account?fresh=1';
 /** What a press with nothing to key it by answers: nothing was sent. */
-export const noKey = () => t('money.wallet.noKey');
+export const noKey = () => said('money.wallet.noKey');
 
 /** A flight's end as the face says it: its words (`say`) and the Account read again (`reload`); no answer (closed): nothing. A
  *  flight that rejected — past the engine's own words — says why instead of leaving an unhandled rejection. */
 export function settleWalletFlight(flight, { say, reload }) {
   return Promise.resolve(flight).then(r => {
     if (!r) return;
-    if (typeof r.said === 'string') say(r.said);
+    if (isLine(r.said, { empty: true })) say(r.said);
     reload();
   }).catch(err => {
-    try { say(t('money.wallet.unfinished', { why: String(err?.message || err || t('money.wallet.noAnswer')).slice(0, 200) })); } catch { /* nowhere to say it */ }
+    try { const text = String(err?.message || err || '').slice(0, 200); say(said('money.wallet.unfinished', { why: err?.said ?? (text || said('money.wallet.noAnswer')) })); } catch { /* nowhere to say it */ }
     try { reload(); } catch { /* nothing to read again */ }
   });
 }
@@ -41,11 +41,11 @@ export function startWalletSend({ store, post, getJson, getWallets, schedule }) 
   const flights = new Map();   // key → the flow in the air for it
   const kept = new Map();      // key → { kind: 'payment' | 'order', id, hash, name }: sent by the wallet, its report not yet taken
 
-  const say = (key, status, said) => {
-    if (!closed) store.dispatch('walletSaid', { key, status, said, again: kept.has(key) });
-    return { key, status, said };
+  const say = (key, status, words) => {
+    if (!closed) store.dispatch('walletSaid', { key, status, said: words, again: kept.has(key) });
+    return { key, status, said: words };
   };
-  const gone = (id, now) => new Error(t('money.wallet.gone', { id, status: (now && str(now.status)) || t('money.wallet.goneStatus') }));
+  const gone = (id, now) => saidError('money.wallet.gone', { id, status: (now && str(now.status)) || said('money.wallet.goneStatus') });
 
   // one flow per key: a second press while one is in the air joins it; no key (no payment id, no client id): nothing sent, and
   // the answer says why — no row to hang it on, so nothing lands in the store (app.js sendFromWallet says it under Trade)
@@ -54,9 +54,9 @@ export function startWalletSend({ store, post, getJson, getWallets, schedule }) 
     const inAir = flights.get(key);
     if (inAir) return inAir;
     if (closed) return Promise.resolve(null);
-    say(key, 'sending', t('money.wallet.sending'));
+    say(key, 'sending', said('money.wallet.sending'));
     const flight = (async () => {
-      try { return await run(); } catch (err) { return say(key, 'refused', str(err?.message) || t('money.wallet.refused')); }
+      try { return await run(); } catch (err) { return say(key, 'refused', err?.said ?? (str(err?.message) || said('money.wallet.refused'))); }
     })().finally(() => { flights.delete(key); });
     flights.set(key, flight);
     return flight;
@@ -68,16 +68,16 @@ export function startWalletSend({ store, post, getJson, getWallets, schedule }) 
     const r = await post(k.kind === 'payment' ? '/data/account/live/sent' : '/data/account/live/order-sent',
       k.kind === 'payment' ? { payment: k.id, hash: k.hash } : { order: k.id, hash: k.hash });
     if (r?.status !== 200) {
-      return say(key, 'refused', t('money.wallet.notTaken', { why: whyOf(r) || t('money.wallet.notTakenWhy'), hash: short(k.hash) }));
+      return say(key, 'refused', said('money.wallet.notTaken', { why: whyOf(r) || said('money.wallet.notTakenWhy'), hash: short(k.hash) }));
     }
     kept.delete(key);
-    return say(key, 'sent', t('money.wallet.sent', { wallet: k.name || t('money.wallet.yours'), hash: short(k.hash) }));
+    return say(key, 'sent', said('money.wallet.sent', { wallet: k.name || said('money.wallet.yours'), hash: short(k.hash) }));
   }
 
   // the Account's read, asked again past the face's cache; unreadable: said in words, and nothing is sent
   async function pageNow() {
     let page;
-    try { page = await getJson(PAGE); } catch { throw new Error(t('money.wallet.unread')); }
+    try { page = await getJson(PAGE); } catch { throw saidError('money.wallet.unread'); }
     return isRecord(page) ? page : {};
   }
 
@@ -95,7 +95,7 @@ export function startWalletSend({ store, post, getJson, getWallets, schedule }) 
         if (str(now.live?.reported)) kept.set(key, { kind: 'payment', id: p.id, hash: now.live.reported, name: '' });
         else {
           const all = list(txs).length ? list(txs) : list([tx]);
-          if (!all.length) throw new Error(t('money.wallet.empty', { id: p.id }));
+          if (!all.length) throw saidError('money.wallet.empty', { id: p.id });
           const wallet = await walletFor(await getWallets(), all[0].from);
           const hash = await sendTxs(wallet, all, { schedule });
           kept.set(key, { kind: 'payment', id: p.id, hash, name: wallet.name });
@@ -116,13 +116,14 @@ export function startWalletSend({ store, post, getJson, getWallets, schedule }) 
         if (str(now.reported)) kept.set(key, { kind: 'order', id: o.id, hash: now.reported, name: '' });
         else {
           const txs = list(now.walletTxs);
-          if (!txs.length) throw new Error(t('money.wallet.empty', { id: o.id }));
+          if (!txs.length) throw saidError('money.wallet.empty', { id: o.id });
           const wallet = await walletFor(await getWallets(), txs[0].from);
           const requote = async () => {
             const fresh = await post('/data/account/live/order-requote', { order: o.id });
             if (fresh?.status === 200) return list(fresh.body?.order?.walletTxs).at(-1) ?? null;
             if (/cannot build the swap again/.test(str(fresh?.body?.refusal?.message))) return null;
-            throw new Error(whyOf(fresh) || t('money.wallet.noRequote'));
+            const why = whyOf(fresh);
+            throw typeof why === 'string' && why ? new Error(why) : saidError('money.wallet.noRequote');
           };
           const hash = await sendTxs(wallet, txs, { requote, schedule });
           kept.set(key, { kind: 'order', id: o.id, hash, name: wallet.name });

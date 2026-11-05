@@ -4,7 +4,7 @@
 // after a write starts a fresh one, and only the latest-started read of a shelf lands.
 import { botSettingsPayload, botModelChoices, normalizeBotModel } from '../wire/botSettings.js';
 import { proposeBotId } from '../wire/botId.js';
-import { t } from '../i18n/words.js';
+import { said } from '../i18n/words.js';
 
 export const SHELF_PATHS = Object.freeze({ plugins: '/data/plugins.json', bots: '/data/bots.json', agents: '/data/agents.json', memory: '/data/memory.json', modules: '/data/modules.json' });
 export const GRAVIT_KEYS = Object.freeze(['DEEPSEEK_API_KEY']); // en-kept: an environment variable's name
@@ -17,10 +17,10 @@ const VALID = {
   modules: d => Array.isArray(d?.channels),
 };
 const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
-const words = err => err?.code ?? err?.message ?? t('discover.failed');
+const words = err => err?.code ?? err?.said ?? err?.message ?? said('discover.failed');
 // an agent write that failed, in words: the write's name, then why
-const writeFailed = (what, reason) => (what === 'connect' ? t('discover.fail.connect', { reason })
-  : what === 'disconnect' ? t('discover.fail.disconnect', { reason }) : t('discover.fail.rescan', { reason }));
+const writeFailed = (what, reason) => (what === 'connect' ? said('discover.fail.connect', { reason })
+  : what === 'disconnect' ? said('discover.fail.disconnect', { reason }) : said('discover.fail.rescan', { reason }));
 
 export function startDiscover({ store, getJson, postJson, call, now = Date.now }) {
   const flights = new Map(); // shelf → its read in flight
@@ -112,7 +112,7 @@ export function startDiscover({ store, getJson, postJson, call, now = Date.now }
     try {
       payload = botSettingsPayload(bot, fields);
     } catch (err) {
-      store.dispatch('discoverStatus', { line: err?.message ?? t('discover.fail.save', { reason: t('discover.failed') }), bad: true });
+      store.dispatch('discoverStatus', { line: err?.said ?? err?.message ?? said('discover.fail.save', { reason: said('discover.failed') }), bad: true });
       return 'failed';
     }
     try {
@@ -121,18 +121,19 @@ export function startDiscover({ store, getJson, postJson, call, now = Date.now }
       await read('bots', { fresh: true });
       return 'saved';
     } catch (err) {
-      const said = words(err);
-      if (err?.status === 409 && /changed since this view was loaded/.test(said)) {
-        store.dispatch('discoverStatus', { line: t('discover.changedElsewhere'), bad: true });
+      const why = words(err);
+      const text = typeof why === 'string' ? why : '';
+      if (err?.status === 409 && /changed since this view was loaded/.test(text)) {
+        store.dispatch('discoverStatus', { line: said('discover.changedElsewhere'), bad: true });
         await read('bots', { fresh: true });
         return 'stale';
       }
-      if (err?.status === 500 && /^bots\/\S+ was saved, but/.test(said)) {
-        store.dispatch('discoverStatus', { line: said, bad: true });
+      if (err?.status === 500 && /^bots\/\S+ was saved, but/.test(text)) {
+        store.dispatch('discoverStatus', { line: why, bad: true });
         await read('bots', { fresh: true });
         return 'saved';
       }
-      store.dispatch('discoverStatus', { line: t('discover.fail.save', { reason: said }), bad: true });
+      store.dispatch('discoverStatus', { line: said('discover.fail.save', { reason: why }), bad: true });
       return 'failed';
     }
   }
@@ -143,13 +144,13 @@ export function startDiscover({ store, getJson, postJson, call, now = Date.now }
     const clean = v => (typeof v === 'string' ? v.trim() : '');
     const n = clean(name);
     const i = clean(id);
-    if (!n && !i) return { error: t('discover.bot.giveName') };
-    if (!i && proposeBotId(n) === '') return { error: t('discover.bot.giveId') };
+    if (!n && !i) return { error: said('discover.bot.giveName') };
+    if (!i && proposeBotId(n) === '') return { error: said('discover.bot.giveId') };
     let route;
     try {
       route = normalizeBotModel(typeof model === 'string' ? model : '');
     } catch (err) {
-      return { error: err?.message ?? t('discover.bot.useRoute') };
+      return { error: err?.said ?? err?.message ?? said('discover.bot.useRoute') };
     }
     const body = {
       ...(n ? { name: n } : {}), ...(i ? { id: i } : {}), ...(clean(description) ? { description: clean(description) } : {}),
@@ -160,7 +161,7 @@ export function startDiscover({ store, getJson, postJson, call, now = Date.now }
       await read('bots', { fresh: true });
       // the face answers {ok, bot: <the new row>} (src/bots.ts declared())
       const id = made?.bot?.id;
-      return typeof id === 'string' ? id : { error: t('discover.bot.notListed') };
+      return typeof id === 'string' ? id : { error: said('discover.bot.notListed') };
     } catch (err) {
       return { error: words(err) };
     }

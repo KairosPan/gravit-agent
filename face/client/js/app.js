@@ -48,11 +48,11 @@ import { flatItems, slashItems, atItems, conversationChoices, moveActive, chipOf
 import { renderMenu, menuAria, filesRail, dropOverlay, lightboxHtml } from './composer/view.js';
 import { thumbsNeeded, railHtml } from './render/thread.js';
 import { railView, activeTurn, clockText } from './host/turns-view.js';
-import { startJobs } from './host/jobs.js';
+import { startJobs, shownOutput } from './host/jobs.js';
 import { jobsView, isLive } from './host/jobs-view.js';
 import { admit, blocking, hasImage, contentParts, encodeBase64, modelRefusalLine, isImageSrc } from './composer/files.js';
 import { senderName } from './render/rail.js';
-import { t } from './i18n/words.js';
+import { t, said, sayOf } from './i18n/words.js';
 import { HOST_NAME } from './wire/speaker.js';
 import { startAttachments } from './host/attachments.js';
 import { startComposerReads } from './host/composer.js';
@@ -232,7 +232,7 @@ const overlayOf = s => (sheetUp(s) ? 'sheet' : s.identity?.connect || s.sellMany
 const drawerOf = s => (sheetUp(s) ? `sheet:${s.sheet.kind}` : s.identity?.connect ? `identity:${s.identity.connect.step}` : s.sellMany ? 'sellMany' : s.runSheet ? `run:${s.runSheet.module}` : s.lunhui?.stock ? `stock:${s.lunhui.stock.code}` : s.detailsOpen ? 'details' : s.settingsOpen ? 'settings' : s.account.statementOpen ? 'statement'
   : s.account.detailsVenue ? `venue:${s.account.detailsVenue}` : null);
 // the editor an event landed in: #say itself, or a node inside it (a paste's target can be a line's block)
-const sayOf = el => (el?.id === 'say' ? el : el?.closest?.('#say') ?? null);
+const sayBoxOf = el => (el?.id === 'say' ? el : el?.closest?.('#say') ?? null);
 const closeKeyOf = overlay => (overlay === 'shortcuts' ? '.shortcuts .close-key' : overlay === 'sheet' ? '.drawer.sheet .close-key' : '.drawer .close-key');
 const editorOf = e => (e ? [e.kind, e.convId, e.id].join('|') : null);
 const screenOf = s => `${s.route.screen}/${s.route.id ?? ''}`;
@@ -423,13 +423,13 @@ export function boot(win, host = {}) {
       store.dispatch('connectWallet', { status: 'proven', address: proven.address });
     } catch (err) {
       if (!sameConnect(seed, connector)) { settledElsewhere(seed); return; }
-      store.dispatch('connectWallet', { status: 'refused', message: String(err?.message || err || t('money.wallet.refused')).slice(0, 200) });
+      store.dispatch('connectWallet', { status: 'refused', message: err?.said ?? (err?.message || err ? String(err?.message || err).slice(0, 200) : said('money.wallet.refused')) });
     }
   }
   // a wallet flight's words said under Trade and the Account read again once it settles — a rejected one too (host/wallet-send.js
   // settleWalletFlight)
   function sendFromWallet(flight) {
-    void settleWalletFlight(flight, { say: said => store.dispatch('tradeSaid', said), reload: () => { void account.load({ fresh: true }); } });
+    void settleWalletFlight(flight, { say: words => store.dispatch('tradeSaid', words), reload: () => { void account.load({ fresh: true }); } });
   }
   // the owner sheet (prepare → What you sign → sign) over the owner device
   // a bridge's preparation, once it is the one the sheet shows, has its routes read beside it (the retired page's money.js show)
@@ -442,7 +442,7 @@ export function boot(win, host = {}) {
     beforeSign: async () => {
       let r;
       try { r = await account.guard(); } catch { r = null; }
-      return r?.taken === true ? null : t('sheet.signOut.refused', { why: r?.message || t('sheet.noAnswer') });
+      return r?.taken === true ? null : said('sheet.signOut.refused', { why: r?.message || said('sheet.noAnswer') });
     },
   });
   // Sell many (plan 4b Task 3): up to ten holdings at market, each prepared and signed in turn over the owner device; a DEX
@@ -619,7 +619,7 @@ export function boot(win, host = {}) {
     const outTop = out0 ? out0.scrollTop : null;
     // the note above the box is a live region: the node stays across renders, so a new line in it is announced
     const note0 = doc.getElementById('composer-note');
-    const noteText = notes.get(key) ?? '';
+    const noteText = sayOf(notes.get(key));
     // the conversation on screen: another one (or none) than at the last render masks every key again
     const open = s.route.screen === 'messages' ? currentConversation(s) : null;
     const threadSig = open ? open.id : null;
@@ -827,7 +827,7 @@ export function boot(win, host = {}) {
     const out = jobs.outputOf(id);
     const pre = fill ? doc.getElementById(`jobout-${id}`) : null;
     if (pre) {
-      const text = out?.text ?? '';
+      const text = shownOutput(out?.text ?? '');
       const tail = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
       if (pre.textContent !== text) pre.textContent = text;
       if (tail) pre.scrollTop = pre.scrollHeight;
@@ -1267,7 +1267,7 @@ export function boot(win, host = {}) {
       // the read failed: said, under the asks
       if (!g && store.get().account.venuesHere.data === null) {
         const why = store.get().account.venuesHere.message;
-        store.dispatch('grantSaid', typeof why === 'string' && why ? t('venues.grant.unreadWhy', { why }) : t('venues.grant.unread'));
+        store.dispatch('grantSaid', typeof why === 'string' && why ? said('venues.grant.unreadWhy', { why }) : said('venues.grant.unread'));
         return;
       }
     }
@@ -1305,21 +1305,21 @@ export function boot(win, host = {}) {
     if (isBlank(runs) && !files.length) return;
     const refuse = line => store.dispatch('hostStatus', { line, bad: true });
     // the empty state (no conversation, no New message) has nowhere to send: said, the draft kept as it stands
-    if (key === 'empty') { refuse(t('status.openFirst')); return; }
+    if (key === 'empty') { refuse(said('status.openFirst')); return; }
     // the room is a bot chip's, or an @ the operator typed (a chip reads as a space between words): a file or
     // conversation chip's @ never sends to it alone. Files go to Gravit alone (D20): a bot chip with them is refused, and
     // a typed @word beside them is a prompt
     const toBot = hasChip(runs, 'bot');
-    if (files.length && toBot) { refuse(t('status.filesToGravit')); return; }
+    if (files.length && toBot) { refuse(said('status.filesToGravit')); return; }
     const room = !files.length && (toBot || isMentionText(runs.map(r => (r.type === 'text' ? r.text : ' ')).join('')));
     // a room's bots cannot read a conversation chip (O9): a draft bound for the room with one is refused, kept as it stands
     const toRoom = toBot || (room && !s.draft && !!currentConversation(s)?.channel);
-    if (toRoom && hasChip(runs, 'conversation')) { refuse(t('status.convsToGravit')); return; }
+    if (toRoom && hasChip(runs, 'conversation')) { refuse(said('status.convsToGravit')); return; }
     // a file not up yet (one New message moved here, a receipt being staged again) uploads now and holds the send too
     const waiting = isConvKey(key) ? files.filter(f => f.kind === 'file' && f.status === 'ready') : [];
     for (const f of waiting) startUpload(key, f.key);
     const held = blocking(filesOf(key));
-    if (held) { refuse(held === 'uploading' ? t('status.uploading') : t('status.notUploaded')); if (waiting.length) render(); return; }
+    if (held) { refuse(held === 'uploading' ? said('status.uploading') : said('status.notUploaded')); if (waiting.length) render(); return; }
     if (isConvKey(key) && refusesImages.has(key) && hasImage(files)) { notes.set(key, modelLineFor(key)); render(); return; }
     const workspaceId = s.draft ? s.draft.where : currentConversation(s)?.channel?.workspaceId ?? null;
     const text = serialize(runs, serialContext({ channels: s.channels, workspaceId })).trim();
@@ -1328,7 +1328,7 @@ export function boot(win, host = {}) {
     if (!s.draft && files.length && text.startsWith('/')) {
       const name = text.slice(1).split(/\s/)[0];
       const row = (composerReads.keptCommands(currentConversation(s)) ?? []).find(r => r.name === name);
-      if (row && row.input?.attachments !== true) { refuse(t('status.takesNoFiles', { name })); return; }
+      if (row && row.input?.attachments !== true) { refuse(said('status.takesNoFiles', { name })); return; }
     }
     // words and files added under the key while the send was on its way are kept, after the sent ones (A7)
     const back = () => {
@@ -1347,7 +1347,7 @@ export function boot(win, host = {}) {
     const data = new Map();
     for (const f of files) {
       if (f.kind !== 'image') continue;
-      try { data.set(f.key, encodeBase64(new Uint8Array(await f.blob.arrayBuffer()))); } catch { back(); refuse(t('status.fail', { what: t('status.verb.send'), reason: t('status.unreadable', { name: f.name }) })); return; }
+      try { data.set(f.key, encodeBase64(new Uint8Array(await f.blob.arrayBuffer()))); } catch { back(); refuse(said('status.fail', { what: said('status.verb.send'), reason: said('status.unreadable', { name: f.name }) })); return; }
     }
     // the draft left the screen during the read: it goes back under its key, unsent (the send goes to the screen's)
     if (data.size && draftKey(store.get()) !== key) { back(); return; }
@@ -1388,7 +1388,7 @@ export function boot(win, host = {}) {
   function refused(key, reason) {
     if (reason === undefined) return;
     if (reason === 'MODEL_DOES_NOT_SUPPORT_IMAGES') { refusesImages.add(key); notes.set(key, modelLineFor(key)); }
-    else store.dispatch('hostStatus', { line: t('status.fail', { what: t('status.verb.send'), reason: `session/attachment-invalid${reason ? ` (${reason})` : ''}` }), bad: true });
+    else store.dispatch('hostStatus', { line: said('status.fail', { what: said('status.verb.send'), reason: `session/attachment-invalid${reason ? ` (${reason})` : ''}` }), bad: true });
     render();
   }
   // a receipt the host dropped (the face restarted, the agent was disposed): every file up uploads again, once, and the
@@ -1400,7 +1400,7 @@ export function boot(win, host = {}) {
     render();
     if (!oks.every(Boolean)) { refused(key, reason); return; }
     if (draftKey(store.get()) === key) await sendNow({ restaged: true });
-    else store.dispatch('hostStatus', { line: t('status.reuploaded'), bad: true });
+    else store.dispatch('hostStatus', { line: said('status.reuploaded'), bad: true });
   }
   // words put in the composer for the operator (a suggestion, Hand to Gravit): the draft on screen, after what it holds on
   // a new line, the caret after them
@@ -1459,7 +1459,7 @@ export function boot(win, host = {}) {
     };
     // a failure keeps its reason (not signed in, the fence's hint), said on the status line
     return handle.done.then(receiptId => land({ status: 'up', loaded: rec.bytes, receiptId, sessionId: key }), err => {
-      const error = String(err?.message || t('status.uploadFailed', { name: rec.name }));
+      const error = err?.said ?? (err?.message ? String(err.message) : said('status.uploadFailed', { name: rec.name }));
       if (mine()) store.dispatch('hostStatus', { line: error, bad: true });
       land({ status: 'failed', error });
       return false;
@@ -1719,7 +1719,7 @@ export function boot(win, host = {}) {
       const m = conv?.messages.find(x => x.id === el.dataset.msg);
       if (!m) return;
       const batch = answersFrom(el.closest?.('[data-gate]') ?? root, m.data?.questions, m.id);
-      if (!complete(batch)) { store.dispatch('hostStatus', { line: t('status.answerAll'), bad: true }); return; }
+      if (!complete(batch)) { store.dispatch('hostStatus', { line: said('status.answerAll'), bad: true }); return; }
       void actions.answer(m.id, batch);
     },
     toggleDetails: () => store.dispatch('toggleDetails'),
@@ -2053,7 +2053,7 @@ export function boot(win, host = {}) {
   const typesWords = el => el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type !== 'checkbox' && el.type !== 'radio');
   // typing: the composer keeps its words outside the store; the title, the searches and the fields go through it
   function typed(el) {
-    if (sayOf(el)) { setRuns(editor.read(sayOf(el))); menuTick(); }
+    if (sayBoxOf(el)) { setRuns(editor.read(sayBoxOf(el))); menuTick(); }
     else if (el.dataset?.action === 'draftTitle') store.dispatch('setDraftTitle', el.value);
     else if (el.dataset?.action === 'mkQuery') { store.dispatch('setMarketsQuery', el.value); searchSoon(el.value); }
     else if (el.dataset?.action === 'tradeQuery') tradeSoon(el.value);   // trade.query moves the query (the box keeps the words)
@@ -2125,7 +2125,7 @@ export function boot(win, host = {}) {
   // is a rich copy (text/plain and text/html: cells, a document's lines), which also carries a picture of itself that is
   // not an attachment; a Finder file copy carries its name as text/plain alone, and attaches
   root.addEventListener('paste', ev => {
-    const say = sayOf(ev.target);
+    const say = sayBoxOf(ev.target);
     if (!say) return;
     ev.preventDefault();
     const words = (ev.clipboardData?.getData('text/plain') ?? '').replace(/\r\n?/g, '\n');
@@ -2139,7 +2139,7 @@ export function boot(win, host = {}) {
   // dragged over a screen with a composer show the overlay until the dragovers stop (DROP_QUIET_MS), and dropped join the
   // draft on screen; text dropped on the editor is its text/plain at the point (text/html is never read: no chip enters
   // from outside); any other drop (text into a search box, a sheet's field) is the browser's
-  doc.addEventListener('dragstart', ev => { if (sayOf(ev.target)) ev.preventDefault(); });
+  doc.addEventListener('dragstart', ev => { if (sayBoxOf(ev.target)) ev.preventDefault(); });
   doc.addEventListener('dragover', ev => {
     if (hasFiles(ev.dataTransfer)) {
       ev.preventDefault();
@@ -2147,13 +2147,13 @@ export function boot(win, host = {}) {
       store.dispatch('setDropping', true);
       if (dropTimer !== null) timers.cancel(dropTimer);
       dropTimer = timers.after(DROP_QUIET_MS, () => { dropTimer = null; store.dispatch('setDropping', false); });
-    } else if (sayOf(ev.target)) ev.preventDefault();
+    } else if (sayBoxOf(ev.target)) ev.preventDefault();
   });
   doc.addEventListener('dragend', stopDropping);
   doc.addEventListener('drop', ev => {
     const dt = ev.dataTransfer;
     const files = Array.from(dt?.files ?? []);
-    const say = sayOf(ev.target);
+    const say = sayBoxOf(ev.target);
     if (files.length || hasFiles(dt) || say) ev.preventDefault();
     stopDropping();
     if (files.length) { if (composerOn(store.get())) addFiles(files); return; }
@@ -2166,16 +2166,16 @@ export function boot(win, host = {}) {
   });
   // a caret moved by a key: the token before it may open, follow or close the menu (a no-op while it stands where it was)
   const CARET_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
-  root.addEventListener('keyup', ev => { if (CARET_KEYS.has(ev.key) && sayOf(ev.target) && !composing) menuTick(); });
+  root.addEventListener('keyup', ev => { if (CARET_KEYS.has(ev.key) && sayBoxOf(ev.target) && !composing) menuTick(); });
   // a caret moved by the pointer, the same
-  root.addEventListener('click', ev => { if (sayOf(ev.target) && !composing) menuTick(); });
+  root.addEventListener('click', ev => { if (sayBoxOf(ev.target) && !composing) menuTick(); });
   // the editor losing focus (a click in the thread, ⌥⌘K) closes the menu, so Esc is the drawers' again; focus moving into
   // the menu, or a render that gives the editor its focus back at once, keeps it
   root.addEventListener('focusout', ev => {
-    if (!menuTrig || !sayOf(ev.target) || ev.relatedTarget?.closest?.('.cmenu')) return;
+    if (!menuTrig || !sayBoxOf(ev.target) || ev.relatedTarget?.closest?.('.cmenu')) return;
     queueMicrotask(() => {
       const a = doc.activeElement;
-      if (sayOf(a) || a?.closest?.('.cmenu')) return;
+      if (sayBoxOf(a) || a?.closest?.('.cmenu')) return;
       closeMenu();
     });
   });
@@ -2248,7 +2248,7 @@ export function boot(win, host = {}) {
     }
     // while a menu shows rows its keys are its own, before the lightbox, the search box and today's Escape chain (D34): ↑ ↓ move, Enter
     // and Tab choose (Tab on a folder walks into it), Esc and Shift+Tab close it and keep the draft
-    if (menuShowsRows() && sayOf(ev.target) && !imeOpen && !composing) {
+    if (menuShowsRows() && sayBoxOf(ev.target) && !imeOpen && !composing) {
       const k = ev.key;
       if (k === 'ArrowDown' || k === 'ArrowUp') { ev.preventDefault(); menu = moveActive(menu, k === 'ArrowDown' ? 1 : -1); drawMenu(); return; }
       if (k === 'Enter' || (k === 'Tab' && !ev.shiftKey)) {
@@ -2270,7 +2270,7 @@ export function boot(win, host = {}) {
     if (ev.key === 'Escape') {
       if (imeOpen) return;
       // a trigger standing with no rows drawn yet: Esc runs the chain below, and rows that land later open nothing
-      if (menuTrig && sayOf(ev.target)) { dismissed = menuTrig; forgetMenu(); }
+      if (menuTrig && sayBoxOf(ev.target)) { dismissed = menuTrig; forgetMenu(); }
       const s = store.get();
       // the lightbox after a menu, before the search box (D34)
       if (s.lightbox) { store.dispatch('closeLightbox'); return; }
@@ -2299,7 +2299,7 @@ export function boot(win, host = {}) {
     }
     // Enter in the editor sends; Shift+Enter is the browser's new line, an IME's Enter its composition's, and while a
     // menu shows rows Enter is the menu's (above)
-    if (ev.key === 'Enter' && sayOf(ev.target) && !ev.shiftKey && !imeOpen && !composing && !menuShowsRows()) {
+    if (ev.key === 'Enter' && sayBoxOf(ev.target) && !ev.shiftKey && !imeOpen && !composing && !menuShowsRows()) {
       ev.preventDefault();
       void sendNow();
       return;

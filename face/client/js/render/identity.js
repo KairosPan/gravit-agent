@@ -15,7 +15,7 @@ import { fmtClock, fmtDate, sameDay } from '../time.js';
 import { chip } from './thread.js';
 import { identityOf, NETWORKS, routingOf, sameRouting } from '../host/identity-view.js';
 import { HOST_NAME } from '../wire/speaker.js';
-import { t, th, tn } from '../i18n/words.js';
+import { t, th, tn, sayOf } from '../i18n/words.js';
 
 const str = v => (typeof v === 'string' ? v : '');
 const box = (inner, label) => `<section class="cardbox" aria-label="${esc(label)}">${inner}</section>`;
@@ -246,7 +246,7 @@ export function renderConnectDrawer(state) {
   const title = c ? connectTitle(c.step, net) : '';
   if (!title) return '';
   const sheet = c.step === 1 ? (net === 'slack' ? slackSheetOne(c, identityOf(state.identity?.data).slackManifest) : sheetOne(c)) : c.step === 2 ? sheetTwo(c) : sheetThree(c);
-  const error = typeof c.error === 'string' && c.error ? note(c.error) : '';
+  const error = sayOf(c.error) ? note(sayOf(c.error)) : '';
   const again = error && c.step > 1 ? `<div class="btn-row">${button(t('identity.sheet.again'), { 'data-action': 'identityStartAgain' })}</div>` : '';
   return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="identityClose" aria-label="${th('common.close')}">×</button></div>` +
     `<div class="drawer-body">${sheet.body}${error}${again}${stepsList(connectSteps(c.step, net))}<div class="btn-row">${sheet.keys.join('')}</div></div></aside>`;

@@ -12,6 +12,7 @@ import { modulesListing } from './helpers/inventory.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
 import { fakeProvider, ADDRESS as WALLET_ADDRESS, hashOf } from './helpers/fake-wallet.js';
 import { rebuildQuery } from '../../src/account-proxy.ts';
+import { sayOf } from '../../client/js/i18n/words.js';
 
 // every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
 const booted = new Set();
@@ -2068,9 +2069,9 @@ test('a venue Grant whose read of where the account can connect fails says so un
   await until(signs(store), 'the page to sign');
   await settle();
   f.click({ tagName: 'BUTTON', dataset: { action: 'grant', ask: 'ask-0002' } });
-  await until(() => typeof store.get().account.grantSaid === 'string', 'the words');
+  await until(() => sayOf(store.get().account.grantSaid) !== '', 'the words');
   assert.equal(store.get().sheet, null, 'no sheet');
-  const said = store.get().account.grantSaid;
+  const said = sayOf(store.get().account.grantSaid);
   assert.match(said, /^Not opened: where this account can connect was not read(?: — .+)?\. Try Grant again\.$/, 'the line as the store holds it, in plain text');
   assert.ok(f.html().includes(`<p class="acct-note">${said.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')}</p>`), 'escaped once at the draw');
   store.timers.clear();
@@ -2110,7 +2111,7 @@ test('the last device signs out in Beast: Guard refused, nothing signed and the 
   await until(() => store.get().sheet?.status === 'refused', 'the refusal');
   assert.equal(door.sent('/data/account/guard').length, 1);
   assert.equal(door.sent('/data/account/exchange').length, 0, 'nothing signed');
-  assert.equal(store.get().sheet.message, 'Not signed out: Guard was refused — the account is read-only');
+  assert.equal(sayOf(store.get().sheet.message), 'Not signed out: Guard was refused — the account is read-only');
   assert.match(f.html(), /Not signed out: Guard was refused — the account is read-only/);
   assert.equal(store.get().owner.role, 'signs', 'the device still signs');
   // Guard taken, the sign-out refused: Guard stays, the words say so, the device still signs
@@ -2121,7 +2122,7 @@ test('the last device signs out in Beast: Guard refused, nothing signed and the 
   await until(() => store.get().sheet?.status === 'refused', 'the sign-out refused');
   assert.equal(door.sent('/data/account/guard').length, 2);
   assert.equal(door.sent('/data/account/exchange').length, 1, 'signed once Guard was taken');
-  assert.equal(store.get().sheet.message, 'Not signed out: the last owner cannot leave yet. Guard is on.');
+  assert.equal(sayOf(store.get().sheet.message), 'Not signed out: the last owner cannot leave yet. Guard is on.');
   assert.equal(store.get().owner.role, 'signs');
   await until(() => store.get().account.data.mode === 'guard', 'Guard on the page');
   assert.equal(mode, 'guard', 'Guard stays');
@@ -2142,7 +2143,7 @@ test('the last device signs out in Beast with Guard taken: signed out, and the d
   f.click({ tagName: 'BUTTON', dataset: { action: 'refreshAccount' } });
   await until(() => store.get().account.data?.signers?.owners?.length === 1, 'the page naming this device alone');
   const said = [];
-  store.subscribe((st, type) => { if (type === 'sheetDone') said.push(st.sheet.said); });
+  store.subscribe((st, type) => { if (type === 'sheetDone') said.push(sayOf(st.sheet.said)); });
   f.click({ tagName: 'BUTTON', dataset: { action: 'signOut' } });
   await until(() => store.get().sheet.status === 'ready', 'the preparation');
   f.click({ tagName: 'BUTTON', dataset: { action: 'sheetSubmit' } });
@@ -2637,9 +2638,9 @@ test("Cancel in Under way is the Account's liveCancel, signed, and its answer sa
   await until(() => store.get().trade.said !== null, 'the answer said');
   assert.deepEqual(door.sent('/data/account/prepare').at(-1).draft, { type: 'liveCancel', venue: 'ex', order: 'ord-0010' });
   assert.equal(door.sent('/data/account/exchange')[0].action.type, 'liveCancel');
-  assert.equal(store.get().trade.said, 'ord-0010 · canceled');
+  assert.equal(sayOf(store.get().trade.said), 'ord-0010 · canceled');
   st.event('fill', { side: 'buy', qty: 0.04, symbol: 'ETH/USDT', price: 3120.5, venueName: 'Stand-in Exchange' }, 'r.9');
-  assert.equal(store.get().trade.said, 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange');
+  assert.equal(sayOf(store.get().trade.said), 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange');
   assert.match(f.html(), /<p class="tk-said" role="status">Bought 0\.04 ETH @ 3,120\.50 · Stand-in Exchange<\/p>/);
   store.timers.clear();
 });
@@ -2684,7 +2685,7 @@ test("Under way's Send from wallet… sends the waiting order through the fake w
   assert.deepEqual(door.sent('/data/account/live/order-requote'), [{ order: 'ord-0031' }]);
   assert.deepEqual(door.sent('/data/account/live/order-sent'), [{ order: 'ord-0031', hash: hashOf(2) }]);
   await until(() => store.get().trade.said !== null, 'the words said');
-  assert.equal(store.get().trade.said, 'MetaMask sent it: 0xaaaaaa…aaa2');
+  assert.equal(sayOf(store.get().trade.said), 'MetaMask sent it: 0xaaaaaa…aaa2');
   await settle();
   assert.doesNotMatch(f.html(), /data-action="sendFromWallet"/, 'placed: the page read again, the row an order like any other');
   store.timers.clear();
@@ -2747,10 +2748,10 @@ test("an order signed on the ticket that waits for the wallet is sent at once an
   f.click({ tagName: 'BUTTON', dataset: { action: 'cancelOrder', venue: 'ex', order: 'ord-0010' } });
   await until(() => store.get().trade.said !== null, 'the cancel said');
   await settle();
-  const cancelSaid = store.get().trade.said;
+  const cancelSaid = sayOf(store.get().trade.said);
   assert.equal(provider.requests.length, 0, 'a cancel starts no wallet send');
   assert.deepEqual(store.get().account.wallet, {});
-  assert.equal(store.get().trade.said, cancelSaid, "the cancel's line stays");
+  assert.equal(sayOf(store.get().trade.said), cancelSaid, "the cancel's line stays");
   // the ticket: a buy typed, prepared, signed
   f.click({ tagName: 'BUTTON', dataset: { action: 'openTicket', id: 'coin:BTC', side: 'buy' } });
   await settle();
@@ -2762,7 +2763,7 @@ test("an order signed on the ticket that waits for the wallet is sent at once an
   assert.equal(door.sent('/data/account/exchange').at(-1).action.type, 'liveOrder');
   assert.equal(provider.count('eth_sendTransaction'), 1);
   assert.deepEqual(door.sent('/data/account/live/order-sent'), [{ order: 'ord-0031', hash: hashOf(1) }]);
-  await until(() => store.get().trade.said === 'Fake Wallet sent it: 0xaaaaaa…aaa1', 'the words said');
+  await until(() => sayOf(store.get().trade.said) === 'Fake Wallet sent it: 0xaaaaaa…aaa1', 'the words said');
   store.timers.clear();
 });
 
@@ -3011,7 +3012,7 @@ test('a Latest run that is no longer the latest is drawn greyed but pickable; pi
   h.inventory['/data/modules.json'] = moved;
   f.click({ tagName: 'BUTTON', dataset: { action: 'runSheetRun' } });
   await settle();
-  assert.equal(store.get().runSheet.said, 'run no longer the latest');
+  assert.equal(sayOf(store.get().runSheet.said), 'run no longer the latest');
   assert.equal(store.get().runSheet.run, first);
   assert.ok(!h.calls.some(c => c[0] === 'session/create'), 'nothing sent');
   let html = f.html();
@@ -3615,11 +3616,11 @@ test("Sell many's DEX leg reads the Account again after the wallet answers", asy
   await until(() => store.get().sellMany?.legs?.[0]?.state === 'ready', 'the leg prepared');
   f.click({ tagName: 'BUTTON', dataset: { action: 'sellManyRun' } });
   await until(() => store.get().sellMany?.status === 'done', 'the run');
-  assert.equal(store.get().sellMany.said, 'Sell many: 0 of 1 sale went through, 1 waiting for your wallet');
+  assert.equal(sayOf(store.get().sellMany.said), 'Sell many: 0 of 1 sale went through, 1 waiting for your wallet');
   await until(() => door.sent('/data/account/live/order-sent').length === 1, 'the report');
   assert.equal(provider.count('eth_sendTransaction'), 1, 'the swap sent once');
   await until(() => store.get().trade.said !== null, 'the wallet\'s words said');
-  assert.equal(store.get().trade.said, 'MetaMask sent it: 0xaaaaaa…aaa1');
+  assert.equal(sayOf(store.get().trade.said), 'MetaMask sent it: 0xaaaaaa…aaa1');
   await until(() => h.reads.slice(readsAtReport).includes('/data/account?fresh=1'), 'the Account read again after the wallet answered');
   store.timers.clear();
 });
@@ -4525,7 +4526,7 @@ test('Compact from the menu runs /compact at once, and the draft keeps its other
   assert.equal(say.selectionStart, 8);
   assert.equal(slot.innerHTML, '');
   assert.deepEqual(promptsOf(h), [], 'nothing was prompted');
-  assert.equal(store.get().status.line, 'compacted');
+  assert.equal(sayOf(store.get().status.line), 'compacted');
   store.dispatch('toggleRail');
   assert.equal(say.value, 'tidy up ', 'the draft kept its words through a render');
   store.timers.clear();
@@ -4539,7 +4540,7 @@ test('a bot chip with a conversation chip is refused before sending, and the dra
   await settle();
   assert.deepEqual(saysOf(h), []);
   assert.deepEqual(promptsOf(h), []);
-  assert.equal(store.get().status.line, "Conversations go to Gravit, not to a room's bots");
+  assert.equal(sayOf(store.get().status.line), "Conversations go to Gravit, not to a room's bots");
   assert.equal(store.get().status.bad, true);
   store.dispatch('toggleRail');
   assert.deepEqual(say.runs, draft, 'the draft stays');
@@ -4596,7 +4597,7 @@ test('a typed @buffett with a conversation chip in a channel is refused before s
   await settle();
   assert.deepEqual(saysOf(h), []);
   assert.deepEqual(promptsOf(h), []);
-  assert.equal(store.get().status.line, "Conversations go to Gravit, not to a room's bots");
+  assert.equal(sayOf(store.get().status.line), "Conversations go to Gravit, not to a room's bots");
   store.dispatch('toggleRail');
   assert.deepEqual(say.runs, draft);
   store.timers.clear();
@@ -5007,7 +5008,7 @@ test("a failed upload says why on the status line, the host's hint and all", asy
   const why = 'upload prices.csv: not signed in - open the URL gravit-face printed when it started (…/?token=…)';
   att.uploads[0].fail(Object.assign(new Error(why), { status: 401 }));
   await settle();
-  assert.deepEqual([store.get().status.line, store.get().status.bad], [why, true]);
+  assert.deepEqual([sayOf(store.get().status.line), store.get().status.bad], [why, true]);
   assert.match(f.html(), /Upload failed · /);
   store.timers.clear();
 });
@@ -5146,7 +5147,7 @@ test('files with a bot chip are refused before sending, and a typed @word with f
   await settle();
   assert.deepEqual(saysOf(h), []);
   assert.deepEqual(promptsOf(h), []);
-  assert.equal(store.get().status.line, "Files go to Gravit, not to a room's bots");
+  assert.equal(sayOf(store.get().status.line), "Files go to Gravit, not to a room's bots");
   assert.equal(store.get().status.bad, true);
   store.dispatch('toggleRail');
   assert.deepEqual(say.runs, draft, 'the draft stays');
@@ -5169,13 +5170,13 @@ test('a send while a file uploads is refused, and one with a failed file says Re
   type(f, say, 'read it');
   send(f);
   await settle();
-  assert.equal(store.get().status.line, 'Files are still uploading');
+  assert.equal(sayOf(store.get().status.line), 'Files are still uploading');
   assert.equal(say.value, 'read it');
   att.uploads[0].fail(new Error('upload prices.csv: the request failed'));
   await settle();
   send(f);
   await settle();
-  assert.equal(store.get().status.line, 'A file did not upload. Retry it or remove it.');
+  assert.equal(sayOf(store.get().status.line), 'A file did not upload. Retry it or remove it.');
   assert.equal(store.get().status.bad, true);
   assert.deepEqual(promptsOf(h), []);
   assert.equal(say.value, 'read it');
@@ -5201,7 +5202,7 @@ test('/compact with a file is refused as taking no files; /goal, whose input tak
   type(f, say, '/compact');
   send(f);
   await settle();
-  assert.equal(store.get().status.line, '/compact takes no files');
+  assert.equal(sayOf(store.get().status.line), '/compact takes no files');
   assert.deepEqual(h.calls.filter(c => c[0] === 'commands/execute'), []);
   assert.equal(say.value, '/compact');
   type(f, say, '/goal read the file');
@@ -5227,7 +5228,7 @@ test('a refused image keeps the draft, draws the model line, and the next image 
   assert.equal(say.value, 'look', 'the words came back');
   assert.match(f.html(), /alt="chart.png"/, 'and the image');
   assert.match(f.html(), MODEL_LINE);
-  assert.notEqual(store.get().status.line, 'send: session/attachment-invalid (MODEL_DOES_NOT_SUPPORT_IMAGES)', 'the line above the box, not the status line');
+  assert.notEqual(sayOf(store.get().status.line), 'send: session/attachment-invalid (MODEL_DOES_NOT_SUPPORT_IMAGES)', 'the line above the box, not the status line');
   assert.deepEqual(f.revoked, [], 'a kept image keeps its URL');
   const key = f.html().match(/data-action="attachRemove" data-key="(a\d+)"/)[1];
   f.click({ tagName: 'BUTTON', dataset: { action: 'attachRemove', key } });
@@ -5285,7 +5286,7 @@ test('a dropped receipt uploads again once and sends; a second drop keeps the dr
   assert.equal(bad.att.uploads.length, 2, 'no third upload');
   assert.equal(bad.say.value, 'read it');
   assert.match(bad.f.html(), /prices.csv/);
-  assert.equal(bad.store.get().status.line, 'send: session/attachment-invalid (FILE_NOT_STAGED)');
+  assert.equal(sayOf(bad.store.get().status.line), 'send: session/attachment-invalid (FILE_NOT_STAGED)');
   assert.equal(bad.store.get().status.bad, true);
   bad.store.timers.clear();
 });
@@ -5390,7 +5391,7 @@ test('a failed rename on New message opens the conversation with the whole draft
   assert.equal(att.uploads.length, 0, 'nothing uploaded yet');
   send(f);
   await settle();
-  assert.equal(store.get().status.line, 'Files are still uploading', 'a waiting file holds the send');
+  assert.equal(sayOf(store.get().status.line), 'Files are still uploading', 'a waiting file holds the send');
   assert.equal(att.uploads.length, 1, 'and starts its upload');
   assert.equal(att.uploads[0].id, 's-new');
   att.uploads[0].answer('rcpt-1');
@@ -5417,7 +5418,7 @@ test('a command refusing the files on a cold conversation (no kept rows) keeps t
   send(f);
   await settle();
   assert.equal(execsOf(h).length, 1, 'the host judged it');
-  assert.equal(store.get().status.line, '/compact does not accept attachments');
+  assert.equal(sayOf(store.get().status.line), '/compact does not accept attachments');
   assert.equal(say.value, '/compact');
   assert.match(f.html(), /prices.csv/);
   store.timers.clear();
@@ -5441,7 +5442,7 @@ test('a command that finds its receipt gone uploads again once and runs once mor
   await settle();
   assert.deepEqual(execsOf(h).map(e => e.submittedAttachments), [[{ type: 'file', receiptId: 'rcpt-1' }], [{ type: 'file', receiptId: 'rcpt-2' }]]);
   assert.equal(say.value, '');
-  assert.equal(store.get().status.line, 'goal set');
+  assert.equal(sayOf(store.get().status.line), 'goal set');
   store.timers.clear();
 });
 
@@ -5467,7 +5468,7 @@ test('a second Enter during a slow image read sends nothing more; a failed read 
   send(f);
   await settle();
   assert.equal(promptsOf(h).length, 1);
-  assert.equal(store.get().status.line, 'send: broken.png could not be read');
+  assert.equal(sayOf(store.get().status.line), 'send: broken.png could not be read');
   assert.equal(say.value, 'again');
   assert.match(f.html(), /broken.png/);
   store.timers.clear();
@@ -5507,7 +5508,7 @@ test('a restage that ends off screen says the files are up and the message was n
   att.uploads[1].answer('rcpt-2');
   await settle();
   assert.equal(promptsOf(h).length, 1, 'not sent again off screen');
-  assert.equal(store.get().status.line, 'Files uploaded again; the message was not sent');
+  assert.equal(sayOf(store.get().status.line), 'Files uploaded again; the message was not sent');
   f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
   await settle();
   assert.equal(say.value, 'read it');

@@ -5,7 +5,7 @@
 //   Picked     = {key, name, bytes, mediaType, blob}   (one File, as app.js reads it)
 // An image goes inline in the prompt as base64; any other file, an SVG or a HEIC included, uploads and goes as a receipt.
 
-import { t } from '../i18n/words.js';
+import { t, said } from '../i18n/words.js';
 import { HOST_NAME } from '../wire/speaker.js';
 
 const MiB = 1048576;
@@ -33,9 +33,9 @@ export function admit(files, picked, limits = DEFAULT_LIMITS) {
     const kind = kindOf(p.mediaType, limits);
     if (kind === 'image') {
       let line = null;
-      if (p.bytes > limits.maxImageBytes) line = t('composer.limit.size', { name: p.name, mb: mb(limits.maxImageBytes) });
-      else if (count + 1 > limits.maxImagesPerMessage) line = t('composer.limit.count', { n: limits.maxImagesPerMessage });
-      else if (total + p.bytes > limits.maxMessageImageBytes) line = t('composer.limit.total', { mb: mb(limits.maxMessageImageBytes) });
+      if (p.bytes > limits.maxImageBytes) line = said('composer.limit.size', { name: p.name, mb: mb(limits.maxImageBytes) });
+      else if (count + 1 > limits.maxImagesPerMessage) line = said('composer.limit.count', { n: limits.maxImagesPerMessage });
+      else if (total + p.bytes > limits.maxMessageImageBytes) line = said('composer.limit.total', { mb: mb(limits.maxMessageImageBytes) });
       if (line) { refusal ??= line; continue; }
       count++; total += p.bytes;
     }
@@ -91,7 +91,7 @@ export const metaText = file => `${extOf(file.name)} · ${sizeText(file.bytes)}`
 export const limitsLine = limits => t('composer.limit.line', { n: limits.maxImagesPerMessage, mb: mb(limits.maxImageBytes) });
 
 /** Above the box when the conversation's model takes no images; a bot's name stands for Gravit in its own conversation. */
-export const modelRefusalLine = (name = HOST_NAME) => t('composer.noImages', { name });
+export const modelRefusalLine = (name = HOST_NAME) => said('composer.noImages', { name });
 
 const CHUNK = 0x8000;
 

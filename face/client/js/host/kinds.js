@@ -102,8 +102,8 @@ export function seatLift(name, args, text, isError, callId) {
     return { kind: 'receipt', text: t('thread.seat.cardRaised', { id: v.card.id }), data: { seat: true, cardId: v.card.id, callId } };
   }
   if (typeof v.order?.id === 'string') {
-    const said = { line: seatLine(name, args), id: v.order.id };
-    const word = v.order.status === 'canceled' ? t('thread.seat.canceled', said) : t('thread.seat.placed', said);
+    const order = { line: seatLine(name, args), id: v.order.id };
+    const word = v.order.status === 'canceled' ? t('thread.seat.canceled', order) : t('thread.seat.placed', order);
     return { kind: 'receipt', text: v.order.paper === true ? t('thread.seat.paper', { line: word }) : word, data: { seat: true, orderId: v.order.id, callId } };
   }
   if (legs) {

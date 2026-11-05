@@ -9,6 +9,7 @@ import { mapFrame } from '../../client/js/wire/mapper.js';
 import { loadMemberTrace } from '../../client/js/wire/member-traces.js';
 import { startTraces } from '../../client/js/host/traces.js';
 import { memberTurn, memberPage } from './helpers/trace.js';
+import { spoken } from './helpers/spoken.js';
 
 const answer = (over = {}) => ({ id: 'e9', seq: 9, at: 1, from: 'buffett', kind: 'text', text: 'Hold', data: { name: 'Buffett', markdown: true, memberSessionId: 'm1', memberTurn: 3, ...over } });
 const room = (id, memberSessions) => ({ id, title: 'R', kind: 'group', members: ['gravit', 'buffett'], memberSessions, channel: null, preset: 'gravit', running: false, live: true, archived: false, updatedAt: 1, created: null, messages: [], loaded: true, preview: null, usage: null, thinking: null, lastSeen: 0 });
@@ -57,6 +58,6 @@ test("two rooms' answers with the same message id each read their own member's t
 test('a loader error lands as its words', async () => {
   const r = rig(answer({ memberTurn: undefined }));
   await r.traces.open('room', 'e9');
-  assert.deepEqual(r.t(), { status: 'failed', line: 'This answer recorded no member turn.' });
+  assert.deepEqual(spoken(r.t()), { status: 'failed', line: 'This answer recorded no member turn.' });
   assert.deepEqual(r.calls, []);
 });

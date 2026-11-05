@@ -3,7 +3,9 @@
 // the words it imports. words-guard.test.js runs it over face/client/js.
 import ts from 'typescript';
 
-export const WORDS_CALLS = ['t', 'th', 'tn', 'thn'];
+export const WORDS_CALLS = ['t', 'th', 'tn', 'thn', 'said', 'saidn', 'saidError'];
+// the calls that read the table now; said and saidn keep a key and params for the draw
+const READS = new Set(['t', 'th', 'tn', 'thn']);
 export const KEY_NAMES = new Set(['Enter', 'Escape', 'Esc', 'Tab', 'Backspace', 'Delete', 'Home', 'End', 'Shift', 'Meta', 'Control', 'Alt', 'Space']);
 
 // a word is a whole run, never part of `seg-item` or `#/markets/`; it may hold an apostrophe (Can't), and a phrase may lead
@@ -186,6 +188,47 @@ export function keptLiterals(source, file = 'source.js') {
   const visit = node => {
     if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && kept(node) && !inError(node)) out.push(node.text);
     else if (ts.isTemplateExpression(node) && !inError(node)) for (const p of [node.head, ...node.templateSpans.map(s => s.literal)]) if (kept(p)) out.push(p.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+// a words call whose result the store keeps, read under the table standing then rather than the one standing when it is
+// drawn (plan 7 Task 2): a t, th, tn or thn that is an argument of a dispatch, a value in an object literal passed to one,
+// the right side of an assignment to a property, or any in a reducer (a reducer reads no table). The value climbs through
+// parentheses, a conditional's branches, ||, ?? and &&, a concatenation, a template's hole and an object literal's value;
+// en-kept exempts none of them. A line kept this way is said(key, params), read at its draw with sayOf
+const CLIMB_OPS = new Set([ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.PlusToken]);
+export function storedWords(source, file = 'source.js') {
+  const sf = parse(source, file);
+  const inReducer = /(^|\/)reducers\//.test(file);
+  const out = [];
+  const climb = node => {
+    let up = node;
+    for (;;) {
+      const p = up.parent;
+      if (!p) return up;
+      if (ts.isParenthesizedExpression(p)) up = p;
+      else if (ts.isConditionalExpression(p) && p.condition !== up) up = p;
+      else if (ts.isBinaryExpression(p) && CLIMB_OPS.has(p.operatorToken.kind)) up = p;
+      else if (ts.isTemplateSpan(p)) up = p.parent;
+      else if (ts.isPropertyAssignment(p) && p.initializer === up) up = p.parent;
+      else if (ts.isObjectLiteralExpression(p) || ts.isSpreadAssignment(p)) up = p;
+      else return up;
+    }
+  };
+  const isDispatch = call => ts.isCallExpression(call) && (ts.isPropertyAccessExpression(call.expression) ? call.expression.name.text === 'dispatch' : ts.isIdentifier(call.expression) && call.expression.text === 'dispatch');
+  const visit = node => {
+    if (isWordsCall(node) && READS.has(node.expression.text)) {
+      const top = climb(node);
+      const p = top.parent;
+      const why = inReducer ? 'in a reducer'
+        : p && isDispatch(p) && p.arguments.includes(top) ? 'dispatched'
+        : p && ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && p.right === top && (ts.isPropertyAccessExpression(p.left) || ts.isElementAccessExpression(p.left)) ? 'assigned to a property'
+        : null;
+      if (why) out.push({ line: lineAt(sf, node.getStart(sf)), fn: node.expression.text, key: node.arguments[0] && ts.isStringLiteralLike(node.arguments[0]) ? node.arguments[0].text : null, why });
+    }
     ts.forEachChild(node, visit);
   };
   visit(sf);

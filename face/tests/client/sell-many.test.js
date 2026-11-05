@@ -8,6 +8,7 @@ import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { startSellMany, SELL_MANY_MAX, SELL_MANY_RESIGN_MS, walletWords, smDraft } from '../../client/js/host/sell-many.js';
+import { spoken } from './helpers/spoken.js';
 
 const START = 1_792_854_000_000;
 const TEN_MINUTES = 600_000;
@@ -147,8 +148,8 @@ test('run signs each in turn and re-prepares a leg near its deadline', async () 
   assert.equal(r.owner.submitted[0].action.nonce, 3);
   const s = r.state();
   assert.equal(s.status, 'done');
-  assert.deepEqual(s.legs.map(l => [l.state, l.said]), [['sold', 'Sold · ord-1 · filled'], ['sold', 'Sold · ord-2 · filled']]);
-  assert.equal(s.said, 'Sell many: 2 of 2 sales went through');
+  assert.deepEqual(spoken(s.legs.map(l => [l.state, l.said])), [['sold', 'Sold · ord-1 · filled'], ['sold', 'Sold · ord-2 · filled']]);
+  assert.equal(spoken(s.said), 'Sell many: 2 of 2 sales went through');
   assert.deepEqual(r.after, ['sellMany'], 'the Account read again once');
   // a second run of the same review signs nothing again
   await r.sm.run();
@@ -178,7 +179,7 @@ test('a run with a refused prepare, a refused signature, a DEX sale and the draw
     ['WETH', 'wallet', walletWords()],
     ['ETH', 'waiting', ''],
   ]);
-  assert.equal(walletWords(), 'Your wallet has to send it: it waits under Trade › Under way, Send from wallet…');
+  assert.equal(spoken(walletWords()), 'Your wallet has to send it: it waits under Trade › Under way, Send from wallet…');
   assert.deepEqual(r.wallet.orders, [dex], 'the DEX sale\'s wallet send started, once');
   assert.deepEqual(r.owner.submitted.map(p => p.action.symbol), ['BTC/USDT:USDT', 'WETH/USDC'], 'a refused preparation is never signed; nothing after the close');
   assert.equal(r.state(), null, 'closed');
@@ -208,14 +209,14 @@ test('the closing line counts the legs waiting for the wallet', async () => {
   await r.sm.review();
   await r.sm.run();
   assert.deepEqual(r.state().legs.map(l => l.state), ['sold', 'wallet', 'sold']);
-  assert.equal(r.state().said, 'Sell many: 2 of 3 sales went through, 1 waiting for your wallet');
+  assert.equal(spoken(r.state().said), 'Sell many: 2 of 3 sales went through, 1 waiting for your wallet');
   // none waiting: the line as it was
   const two = rig();
   await two.sm.open();
   two.sm.toggle(0);
   await two.sm.review();
   await two.sm.run();
-  assert.equal(two.state().said, 'Sell many: 1 of 1 sale went through');
+  assert.equal(spoken(two.state().said), 'Sell many: 1 of 1 sale went through');
 });
 
 test('closed while a signature is in the air: its answer lands nothing and nothing further is signed', async () => {

@@ -10,7 +10,7 @@ import { chip } from './thread.js';
 import { markdownHtml } from './markdown.js';
 import { kv } from './controls.js';
 import { runsView } from '../host/runs-view.js';
-import { t, th, tn } from '../i18n/words.js';
+import { t, th, tn, sayOf } from '../i18n/words.js';
 
 const JOURNAL_ROWS = 20;
 const LATEST_FIELDS = 12;
@@ -74,7 +74,7 @@ function rosterEditor(e) {
   return `<div class="roster-edit">${boxes || none(t('channel.roster.noChoice'))}<div class="btn-row">` +
     `<button type="button" class="key yes" data-action="commitEdit" aria-label="${th('common.save')}">${icon('check', 14, 2.4)}</button>` +
     `<button type="button" class="key no" data-action="cancelEdit" aria-label="${th('common.cancel')}">${icon('x', 14, 2.4)}</button>` +
-    `${e.error ? `<span class="field-error">${esc(e.error)}</span>` : ''}</div></div>`;
+    `${sayOf(e.error) ? `<span class="field-error">${esc(sayOf(e.error))}</span>` : ''}</div></div>`;
 }
 
 function roster(label, which, names, state, id) {

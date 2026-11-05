@@ -5,7 +5,7 @@
 // ids are log sequences two rooms repeat; a failure may be opened again.
 import { toMessages } from './kinds.js';
 import { reducers as host } from '../reducers/host.js';
-import { t } from '../i18n/words.js';
+import { said } from '../i18n/words.js';
 
 export function startTraces({ store, call, loadMemberTrace, now = Date.now }) {
   const started = new Set();
@@ -24,7 +24,7 @@ export function startTraces({ store, call, loadMemberTrace, now = Date.now }) {
       for (const v of views) for (const msg of toMessages(v, calls, now(), m.from)) scratch = host.hostEvent(scratch, { convId: 'trace', message: msg });
       store.dispatch('traceLoaded', { convId, msgId, messages: scratch.conversations[0].messages });
     } catch (err) {
-      store.dispatch('traceFailed', { convId, msgId, line: err?.message ?? t('thread.trace.failed') });
+      store.dispatch('traceFailed', { convId, msgId, line: err?.said ?? err?.message ?? said('thread.trace.failed') });
     } finally {
       started.delete(key);
     }

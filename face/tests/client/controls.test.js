@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
+import { spoken } from './helpers/spoken.js';
 
 const conv = (id, over = {}) => ({ id, title: 'T ' + id, kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: false, archived: false, updatedAt: 1, created: null, messages: [], loaded: false, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
 const fresh = () => R.nav(R.hostList(emptyState(), { conversations: [conv('c-1', { title: 'BTC under 70k' }), conv('c-2')] }), { screen: 'messages', id: 'c-1' });
@@ -17,7 +18,7 @@ test('an inline edit starts, cancels, and commits through one reducer', () => {
   assert.equal(get(named, 'c-1').title, 'Small BTC');
   assert.equal(named.edit, null);
   const blank = R.commitEdit(s, { values: { title: '  ' } });
-  assert.equal(blank.edit.error, 'Cannot be empty');
+  assert.equal(spoken(blank.edit.error), 'Cannot be empty');
   assert.equal(get(blank, 'c-1').title, 'BTC under 70k');
   const f = fresh();
   assert.equal(R.commitEdit(f, { values: {} }), f, 'nothing to commit without an edit');

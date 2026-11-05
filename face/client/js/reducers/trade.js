@@ -2,6 +2,7 @@
 // kinds' picks reads (explore?tab=<kind>&limit=12) by kind and the trade search's own read (explore?q=, apart from the Markets
 // search's `results`), the ticket open (its market, side, venue and outcome — the order sheet keeps its fields), and the last
 // thing said (a cancel's answer, a fill) as words.
+import { isLine } from '../i18n/words.js';
 import { TRADE_KIND_IDS } from '../host/trade-view.js';
 
 const tr = (s, patch) => ({ ...s, trade: { ...s.trade, ...patch } });
@@ -32,5 +33,5 @@ export const reducers = {
     said: null,
   }) : s),
   ticketClose: s => (s.trade.ticket ? tr(s, { ticket: null }) : s),
-  tradeSaid: (s, words) => tr(s, { said: typeof words === 'string' ? words : null }),
+  tradeSaid: (s, words) => tr(s, { said: isLine(words, { empty: true }) ? words : null }),
 };

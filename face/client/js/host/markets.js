@@ -28,11 +28,11 @@ import { assetKeyOf } from './market-depth-view.js';
 import { venuesOf } from './account-view.js';
 import { joinExplore } from './explore-join.js';
 import { exploreHalves, joinOptsOf, orderOf, MARKET_EXPLORE as EXPLORE, CONNECTED_EXPLORE } from './explore-halves.js';
-import { t } from '../i18n/words.js';
+import { said, isSaid } from '../i18n/words.js';
 
 // China's state while the proxy re-serves the market's last read: the market is not answering — flagged, so recheckChina knows it
 // by the flag, never by the table's words for it
-const notAnswering = () => ({ state: 'unavailable', said: notAnsweringWord(), notAnswering: true });
+const notAnswering = () => ({ state: 'unavailable', said: said('markets.cn.notAnswering'), notAnswering: true });
 
 export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
 export const WATCH_LIMIT = 100;   // either list's: the cn list's, the Account keys' cap
@@ -47,7 +47,7 @@ const QUOTES = '/data/market/quotes';
 const CONNECTED_QUOTES = '/data/account/connected/quotes';
 const VENUES = '/data/account/venues';
 // a connected line's part, the account not answering and no public line of the same connection to read instead
-export const accountDownWord = () => t('markets.accountDown');
+export const accountDownWord = () => said('markets.accountDown');
 const ROWS = 200;                 // the explore rows a tab's read and a search ask for
 const ASKED_ROWS = 12;            // the rows an old star's ask reads
 const KINDS = new Set(ACCOUNT_TAB_IDS.filter(id => id !== 'all'));
@@ -58,7 +58,7 @@ const named = v => typeof v === 'string' && v !== '';
 const blank = q => typeof q !== 'string' || !q.trim();
 // the Account's sentence when it refuses (`refusal.message`), else its error words — only when they are text
 const words = v => (typeof v === 'string' && v.trim() !== '' ? v : null);
-const messageOf = body => words(body?.refusal?.message) ?? words(body?.error);
+const messageOf = body => words(body?.refusal?.message) ?? (isSaid(body?.error) ? body.error : words(body?.error));
 // an answer (`ok: true`) carrying the list the views read: a body of any other shape is never data
 const answered = (body, list) => body?.ok === true && Array.isArray(body[list]);
 
@@ -171,8 +171,8 @@ export function startMarkets({
   // China's state last said as the market not answering, and the market answering afresh: its state read again, off the China
   // ranking that carries it — else that sentence would stay on Venues and Markets until a reload
   function recheckChina() {
-    const said = store.get().markets.providers;
-    if (!Array.isArray(said) || !said.some(p => p?.market === 'cn' && p.notAnswering === true)) return;
+    const providers = store.get().markets.providers;
+    if (!Array.isArray(providers) || !providers.some(p => p?.market === 'cn' && p.notAnswering === true)) return;
     if (!inAir('rank')) readRank();
   }
   // the read for the tab on screen: China's ranking there, else the Account's explore

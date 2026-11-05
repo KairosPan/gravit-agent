@@ -4,7 +4,7 @@
 import { esc, attrs, cls } from '../html.js';
 import { sheetOf } from '../host/run-sheet-view.js';
 import { kv } from './controls.js';
-import { t, th } from '../i18n/words.js';
+import { t, th, sayOf } from '../i18n/words.js';
 
 const hint = text => (text ? `<p class="sheet-hint">${esc(text)}</p>` : '');
 const bad = text => (text ? `<p class="field-error">${esc(text)}</p>` : '');
@@ -63,5 +63,5 @@ export function renderRunSheet(state, now = Date.now()) {
   return `<div${attrs({ class: 'drawer sheet run-sheet', role: 'dialog', 'aria-label': v.title })}><div class="drawer-head"><h2>${esc(v.title)}</h2>` +
     `<button type="button" class="close-key" data-action="runSheetCancel" aria-label="${th('common.close')}">×</button></div>` +
     `<div class="drawer-body">${where(v)}${on(v)}${cites(v.cites)}${stocks(v.stocks)}${hint(v.source)}${note(v.note)}` +
-    `${kv([[t('runSheet.runsVia'), esc(v.via)], [t('modules.writes'), esc(v.writes)]])}${bad(sheet.said)}${keys}</div></div>`;
+    `${kv([[t('runSheet.runsVia'), esc(v.via)], [t('modules.writes'), esc(v.writes)]])}${bad(sayOf(sheet.said))}${keys}</div></div>`;
 }

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { englishLiterals, wordsCalls, wordsBindings } from './helpers/words-scan.js';
+import { englishLiterals, wordsCalls, wordsBindings, storedWords } from './helpers/words-scan.js';
 
 const ROOT = fileURLToPath(new URL('../../client/js/', import.meta.url));
 const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(join(dir, e.name)) : e.name.endsWith('.js') ? [join(dir, e.name)] : []);
@@ -127,6 +127,33 @@ test('no client file binds a words name of its own beside the words it imports',
 });
 
 test('no words call has a computed key or runs at module top level', () => {
-  const bad = FILES.flatMap(f => wordsCalls(source(f), f).filter(c => c.key === null || c.topLevel).map(c => `${f}:${c.line} ${c.fn}(${c.key === null ? 'computed' : `'${c.key}'`})${c.topLevel ? ' at top level' : ''}`));
+  // the words module itself reads a said's key and params, the one place a key is not a literal
+  const bad = FILES.filter(f => f !== 'i18n/words.js').flatMap(f => wordsCalls(source(f), f).filter(c => c.key === null || c.topLevel).map(c => `${f}:${c.line} ${c.fn}(${c.key === null ? 'computed' : `'${c.key}'`})${c.topLevel ? ' at top level' : ''}`));
   assert.deepEqual(bad, []);
+});
+
+// a line the store keeps is a said, read when drawn (plan 7 Task 2): a t/th/tn/thn whose result is dispatched, assigned to a
+// property or written in a reducer is read under the table standing then, and reads wrong after a switch
+const stored = (src, file = 'host/x.js') => storedWords(src, file).map(s => `${s.line} ${s.fn}(${s.key}) ${s.why}`);
+
+test('storedWords finds a words call dispatched, in an object a dispatch carries, assigned to a property or in a reducer', () => {
+  assert.deepEqual(stored("const f = () => store.dispatch('hostStatus', { line: t('a.b'), bad: true });"), ['1 t(a.b) dispatched']);
+  assert.deepEqual(stored("const f = () => dispatch('x', t('a.b'));"), ['1 t(a.b) dispatched']);
+  assert.deepEqual(stored("const f = ok => store.dispatch('x', { at: { line: ok ? t('a.b') : x ?? tn('c.d', 2) } });"), ['1 t(a.b) dispatched', '1 tn(c.d) dispatched']);
+  assert.deepEqual(stored("const f = e => store.dispatch('x', { line: `${t('a.b')}: ${e}` });"), ['1 t(a.b) dispatched']);
+  assert.deepEqual(stored("const f = m => { m.error = e?.code ?? t('a.b'); };"), ['1 t(a.b) assigned to a property']);
+  assert.deepEqual(stored("export const reducers = { x: s => ({ ...s, line: t('a.b') }) };", 'reducers/x.js'), ['1 t(a.b) in a reducer']);
+  assert.deepEqual(stored("const f = () => store.dispatch('x', { line: t('a.b') }); // en-kept: no exemption"), ['1 t(a.b) dispatched'], 'en-kept exempts none');
+});
+
+test('storedWords passes a said, a draw and a words call whose result goes elsewhere', () => {
+  for (const src of ["const f = () => store.dispatch('x', { line: said('a.b', { n: 1 }) });", "const f = () => `<p>${t('a.b')}</p>`;",
+    "const f = () => { const w = t('a.b'); return w; };", "const f = () => say(t('a.b'));", "const f = () => store.dispatch('x', { list: rows.map(r => t('a.b')) });"]) {
+    assert.deepEqual(stored(src), [], src);
+  }
+});
+
+test("no words call's result is stored in state", () => {
+  assert.deepEqual(FILES.flatMap(f => storedWords(source(f), f).map(s => `${f}:${s.line} ${s.fn}(${s.key}) ${s.why}`)), [],
+    'keep these as said(key, params) and read them with sayOf where they are drawn');
 });

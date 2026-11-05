@@ -3,7 +3,7 @@
 // icon-only keys, centred dividers; no tool call is drawn.
 import { esc, attrs, cls } from '../html.js';
 import { setMarkdown, markdownHtml } from './markdown.js';
-import { t, th, wordsEpoch } from '../i18n/words.js';
+import { t, th, wordsEpoch, sayOf } from '../i18n/words.js';
 import { icon } from '../icons.js';
 import { divider } from '../time.js';
 import { levelOf, needsAnswer } from '../messages.js';
@@ -100,7 +100,7 @@ function trace(m, conv, state) {
   const item = x => (x.from === 'system' ? `<div class="sysline">${esc(x.text)}</div>` : `<div class="dsec-line">${esc(x.text)}</div>`);
   const steps = tr?.status === 'ready' ? tr.messages.filter(x => x.kind !== 'tool') : [];
   const inner = !tr || tr.status === 'loading' ? `<div class="dim">${th('common.loading')}</div>`
-    : tr.status === 'failed' ? `<div class="dim">${esc(tr.line)}</div>`
+    : tr.status === 'failed' ? `<div class="dim">${esc(sayOf(tr.line))}</div>`
       : steps.length ? steps.map(item).join('') : `<div class="dim">${th('thread.trace.noSteps')}</div>`;
   return `<details id="trace-${esc(conv.id)}-${esc(m.id)}" class="trace"><summary data-action="openTrace" data-conv="${esc(conv.id)}" data-msg="${esc(m.id)}">${th('thread.trace.title')}</summary>` +
     `<div class="trace-body">${inner}</div></details>`;

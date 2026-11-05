@@ -9,6 +9,7 @@ import { emptyState } from '../../client/js/data/empty.js';
 import { startDesk } from '../../client/js/host/desk.js';
 import { DESK_POLL_MS } from '../../client/js/host/desk-view.js';
 import { deskStatus } from './helpers/desk-status.js';
+import { spoken } from './helpers/spoken.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
@@ -131,7 +132,7 @@ test('Pause posts once and reads the status again; a failed read keeps the last 
   r.answers.status = deskStatus();
   const n = r.reads.length;
   await r.desk.pause(); await settle();
-  assert.equal(r.s().message, 'Pause failed: request failed');
+  assert.equal(spoken(r.s().message), 'Pause failed: request failed');
   assert.equal(r.reads.length, n);
 });
 

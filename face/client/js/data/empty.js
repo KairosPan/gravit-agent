@@ -1,7 +1,7 @@
 // face/client/js/data/empty.js — the state the client boots into before the host answers: no conversations, a status line.
 // Every slice a later stage's screen reads keeps its empty shape, so their render code still boots.
 import { TRADE_KIND_IDS } from '../host/trade-view.js';
-import { t } from '../i18n/words.js';
+import { said } from '../i18n/words.js';
 
 export function emptyState() {
   return {
@@ -36,7 +36,7 @@ export function emptyState() {
     // the channel page's read (host/channels.js)
     channel: { id: null, status: 'idle', data: null, at: null },
     bots: [],
-    status: { line: t('status.connecting'), bad: false, connected: false },
+    status: { line: said('status.connecting'), bad: false, connected: false },
     orphanGates: {},
     lastSeen: {},
     // Discover from the face (host/discover.js): the five listings, the Gravit item, the skills read, its own line; a module

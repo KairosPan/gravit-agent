@@ -5,10 +5,14 @@ import assert from 'node:assert/strict';
 import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { startJobs, JOB_OUTPUT_KEEP } from '../../client/js/host/jobs.js';
+import { startJobs, JOB_OUTPUT_KEEP, shownOutput } from '../../client/js/host/jobs.js';
+import { withTable } from '../../client/js/i18n/words.js';
+import { EN } from '../../client/js/i18n/en.js';
 import { FOLLOW_RETRY_MS, CONTROL_RETRY_MS } from '../../client/js/host/live.js';
+import { spoken } from './helpers/spoken.js';
 
-const DROPPED = '… earlier output dropped …';
+// the marker a held output carries where bytes were dropped (host/jobs.js DROPPED, without its newline)
+const DROPPED = '\u0000dropped\u0000';
 const job = (id, status = 'running', more = {}) => ({ id, kind: 'bash', label: id, owner: 's1', status, startedAt: 1, output: { total: 0, earliest: 0 }, ...more });
 
 function fakeMux() {
@@ -170,11 +174,11 @@ test('kill calls job/kill with {request: {sessionId, jobId}}; a throw says stop:
   assert.equal(await done.jobs.kill('s1', 'a'), true);
   const gone = rig(async () => { throw Object.assign(new Error('gone'), { code: 'job/not-found' }); });
   assert.equal(await gone.jobs.kill('s1', 'a'), false);
-  assert.deepEqual(gone.store.get().status.line, 'stop: job/not-found');
+  assert.deepEqual(spoken(gone.store.get().status.line), 'stop: job/not-found');
   assert.equal(gone.store.get().status.bad, true);
   const out = rig(async () => { throw Object.assign(new Error('401'), { status: 401 }); });
   assert.equal(await out.jobs.kill('s1', 'a'), false);
-  assert.equal(out.store.get().status.line, 'Not signed in — open the URL gravit-face printed');
+  assert.equal(spoken(out.store.get().status.line), 'Not signed in — open the URL gravit-face printed');
 });
 
 test('watching another conversation, or none, cancels the follow too', () => {
@@ -306,5 +310,49 @@ test('a follow the host ends without a status, or refuses, reads as ended and ca
 test('a kill answered with no known outcome says stop: failed and answers false', async () => {
   const r = rig(async () => ({ outcome: 'maybe' }));
   assert.equal(await r.jobs.kill('s1', 'a'), false);
-  assert.equal(r.store.get().status.line, 'stop: failed');
+  assert.equal(spoken(r.store.get().status.line), 'stop: failed');
+});
+
+// the dropped-output marker after a switch of the table (plan 7 Task 2, Review Focus 4): the held text carries a sentinel,
+// so a re-opened follow under another table finds its own marker, and the draw words it in the table that stands
+const ZH_DROPPED = Object.freeze({ 'jobs.dropped': '…之前的输出已丢弃…' });
+const count = (text, word) => text.split(word).length - 1;
+
+test('a re-opened follow after a table switch adds no second marker', () => {
+  const r = rig();
+  r.jobs.follow('s1', job('a'));
+  const f = r.mux.streams[0].handlers;
+  f.onItem({ type: 'opened', job: job('a', 'running', { output: { total: 50, earliest: 0 } }), from: 0 });
+  f.onItem({ type: 'output', chunks: [{ at: 0, text: 'one\n' }], next: 4 });
+  // a re-open under English whose oldest byte is past what was held: the bytes between are gone, one marker
+  f.onItem({ type: 'opened', job: job('a', 'running', { output: { total: 60, earliest: 30 } }), from: 30 });
+  assert.equal(r.jobs.outputOf('a').text, `one\n${DROPPED}\n`);
+  // the mux re-opens the follow under the other table, its oldest byte past what was held: the marker already ends the text
+  withTable(ZH_DROPPED, () => f.onItem({ type: 'opened', job: job('a', 'running', { output: { total: 90, earliest: 60 } }), from: 60 }));
+  const text = r.jobs.outputOf('a').text;
+  assert.equal(count(text, DROPPED), 1, 'one marker');
+  assert.equal(count(withTable(ZH_DROPPED, () => shownOutput(text)), '…之前的输出已丢弃…'), 1);
+  assert.equal(count(withTable(ZH_DROPPED, () => shownOutput(text)), EN['jobs.dropped']), 0, 'no English one beside it');
+});
+
+test('the marker is drawn in the table that stands', () => {
+  const r = rig();
+  r.jobs.follow('s1', job('a'));
+  const f = r.mux.streams[0].handlers;
+  f.onItem({ type: 'opened', job: job('a', 'running', { output: { total: 500, earliest: 200 } }), from: 200 });
+  f.onItem({ type: 'output', chunks: [{ at: 200, text: 'one\n' }, { at: 300, text: 'two', gapBefore: true }], next: 305 });
+  const held = r.jobs.outputOf('a').text;
+  assert.equal(shownOutput(held), `${EN['jobs.dropped']}\none\n${EN['jobs.dropped']}\ntwo`);
+  assert.equal(withTable(ZH_DROPPED, () => shownOutput(held)), '…之前的输出已丢弃…\none\n…之前的输出已丢弃…\ntwo');
+  assert.equal(shownOutput('no marker here'), 'no marker here');
+});
+
+test("an output frame's NUL characters arrive as U+FFFD, so no output can hold the marker", () => {
+  const r = rig();
+  r.jobs.follow('s1', job('a'));
+  const f = r.mux.streams[0].handlers;
+  f.onItem({ type: 'opened', job: job('a', 'running', { output: { total: 20, earliest: 0 } }), from: 0 });
+  f.onItem({ type: 'output', chunks: [{ at: 0, text: `a${DROPPED}\nb\u0000` }], next: 20 });
+  assert.equal(r.jobs.outputOf('a').text, 'a\uFFFDdropped\uFFFD\nb\uFFFD');
+  assert.equal(shownOutput(r.jobs.outputOf('a').text), 'a\uFFFDdropped\uFFFD\nb\uFFFD');
 });

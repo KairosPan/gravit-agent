@@ -5,7 +5,7 @@
 // after it, every send on its own chain, Robinhood Chain offered to a wallet that does not know it (trade.js tkSwitchChain).
 // The face holds no key: the wallet shows and signs everything in its own extension; this module only relays. It talks to the
 // wallet's provider and to the `post` it is handed (the face's /data/account/* proxy), nothing else.
-import { t } from '../i18n/words.js';
+import { t, said, saidError } from '../i18n/words.js';
 
 /* Robinhood Chain, for a wallet that does not know it yet: the wallet shows it to the owner before adding it (chain 4663; its own
  * RPC and the explorer Robinhood publishes for it) — the retired page's TK_ROBINHOOD_CHAIN */
@@ -25,7 +25,7 @@ const words = v => (typeof v === 'string' && v.trim() !== '' ? v : '');
 // the Account's words when it refuses (owner-view.js whyOf's order)
 const whyOf = r => words(r?.body?.refusal?.message) || words(r?.body?.error) || words(r?.body?.result?.message);
 // a wallet's own words for a refusal (an EIP-1193 error is an object with a message, not always an Error)
-const walletWords = err => words(err?.message) || words(typeof err === 'string' ? err : '') || t('money.wallet.refused');
+const walletWords = err => words(err?.message) || words(typeof err === 'string' ? err : '') || said('money.wallet.refused');
 const sleep = (schedule, ms) => new Promise(resolve => schedule(resolve, ms));
 const defaultSchedule = (fn, ms) => setTimeout(fn, ms);
 
@@ -62,7 +62,8 @@ async function ask(wallet, method, params) {
   try {
     return await wallet.provider.request(params === undefined ? { method } : { method, params });
   } catch (err) {
-    throw Object.assign(new Error(walletWords(err)), { code: err?.code });
+    const why = walletWords(err);
+    throw Object.assign(new Error(typeof why === 'string' ? why : t('money.wallet.refused')), { code: err?.code }, typeof why === 'string' ? {} : { said: why });
   }
 }
 
@@ -74,14 +75,14 @@ async function ask(wallet, method, params) {
 export async function proveWallet(wallet, post) {
   const accounts = await ask(wallet, 'eth_requestAccounts');
   const address = Array.isArray(accounts) ? accounts[0] : undefined;
-  if (!words(address)) throw new Error(t('money.wallet.noAddress'));
+  if (!words(address)) throw saidError('money.wallet.noAddress');
   let chainId = 1;
   try { chainId = parseInt(await wallet.provider.request({ method: 'eth_chainId' }), 16) || 1; } catch { chainId = 1; }
   const c = await post('/data/account/wallet/challenge', { address, wallet: wallet.name, chainId });
-  if (c?.status !== 200 || !words(c.body?.message)) throw new Error(whyOf(c) || t('money.wallet.noSentence'));
+  if (c?.status !== 200 || !words(c.body?.message)) throw whyOf(c) ? new Error(whyOf(c)) : saidError('money.wallet.noSentence');
   const signature = await ask(wallet, 'personal_sign', [hexOf(c.body.message), address]);
   const p = await post('/data/account/wallet/prove', { address, signature });
-  if (p?.status !== 200) throw new Error(whyOf(p) || t('money.wallet.badSignature'));
+  if (p?.status !== 200) throw whyOf(p) ? new Error(whyOf(p)) : saidError('money.wallet.badSignature');
   return { address: p.body?.address ?? address, wallet: wallet.name };
 }
 
@@ -99,7 +100,7 @@ export async function walletFor(wallets, address) {
   };
   for (const w of all) if (await holds(w, 'eth_accounts')) return w;
   for (const w of all) if (await holds(w, 'eth_requestAccounts')) return w;
-  throw new Error(t('money.wallet.noneHolds', { address: short(address) }));
+  throw saidError('money.wallet.noneHolds', { address: short(address) });
 }
 
 /* a wallet's "I don't know that chain" (EIP-3085: 4902), as wallets wrap it */
@@ -111,12 +112,12 @@ export async function switchChain(wallet, chainIdHex) {
   try {
     await wallet.provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainIdHex }] });
   } catch (err) {
-    if (!(unknownChain(err) && String(chainIdHex).toLowerCase() === ROBINHOOD_CHAIN.chainId)) throw new Error(t('money.wallet.noSwitch', { wallet: wallet.name, why: walletWords(err) }));
+    if (!(unknownChain(err) && String(chainIdHex).toLowerCase() === ROBINHOOD_CHAIN.chainId)) throw saidError('money.wallet.noSwitch', { wallet: wallet.name, why: walletWords(err) });
     try {
       await wallet.provider.request({ method: 'wallet_addEthereumChain', params: [ROBINHOOD_CHAIN] });
       await wallet.provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainIdHex }] });
     } catch (err2) {
-      throw new Error(t('money.wallet.noAddChain', { wallet: wallet.name, why: walletWords(err2) }));
+      throw saidError('money.wallet.noAddChain', { wallet: wallet.name, why: walletWords(err2) });
     }
   }
 }
@@ -129,12 +130,12 @@ export async function mined(wallet, hash, { schedule = defaultSchedule, everyMs 
     let r = null;
     try { r = await wallet.provider.request({ method: 'eth_getTransactionReceipt', params: [hash] }); } catch { r = null; }
     if (isRecord(r) && r.blockNumber) {
-      if (r.status === '0x0') throw new Error(t('money.wallet.txFailed', { hash: short(hash) }));
+      if (r.status === '0x0') throw saidError('money.wallet.txFailed', { hash: short(hash) });
       return r;
     }
     await sleep(schedule, everyMs);
   }
-  throw new Error(t('money.wallet.txPending', { hash: short(hash) }));
+  throw saidError('money.wallet.txPending', { hash: short(hash) });
 }
 
 // one transaction as the wallet takes it: what the Account built, its gas where it gave one
@@ -146,7 +147,7 @@ const txParams = tx => ({ from: tx.from, to: tx.to, data: tx.data, value: tx.val
  *  own chain first (switchChain). Resolves the last transaction's hash. */
 export async function sendTxs(wallet, txs, { requote = null, schedule = defaultSchedule } = {}) {
   const all = Array.isArray(txs) ? txs.filter(isRecord) : [];
-  if (!all.length) throw new Error(t('money.wallet.nothing'));
+  if (!all.length) throw saidError('money.wallet.nothing');
   const send = async tx => {
     await switchChain(wallet, tx.chainIdHex);
     return ask(wallet, 'eth_sendTransaction', [txParams(tx)]);

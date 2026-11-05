@@ -3,7 +3,7 @@
 // the Account's own reading of an answer (docs/research/2026-10-22-account-owner-path-map.md §2.6–§2.7) — refused or not, its
 // sentence, what it offers, what it said. Every Account string passes as it came (the renderer escapes). No DOM, no store.
 import { pageOk } from './account-view.js';
-import { t } from '../i18n/words.js';
+import { t, said } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -61,7 +61,7 @@ const AGAIN = new Set(['E_ACCOUNT_REQUOTE', 'E_ACCOUNT_EXPIRED']);
  *  dropped) — not a card's 409 under the same code, which names a different instruction. */
 export function refusalOf(r) {
   const code = r?.body?.refusal?.code ?? r?.body?.result?.code;
-  return { message: whyOf(r) || t('owner.refused'), again: AGAIN.has(code), standing: r?.status === 401 && code === 'E_ACCOUNT_BAD_SIGNATURE' };
+  return { message: whyOf(r) || said('owner.refused'), again: AGAIN.has(code), standing: r?.status === 401 && code === 'E_ACCOUNT_BAD_SIGNATURE' };
 }
 
 // an order's status in words; another as the Account said it
@@ -82,6 +82,6 @@ export function saidOf(body) {
     return `${str(body.order.id)} · ${statusWords(status)}`;
   }
   if (body?.kind === 'account') return str(body.summary);
-  if (body?.kind === 'result') return t('owner.done');
+  if (body?.kind === 'result') return said('owner.done');
   return '';
 }
