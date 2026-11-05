@@ -259,6 +259,15 @@ test('a new snapshot keeps the earlier pages below its start and the lower start
   assert.deepEqual(get(fresh, 'b').window, { start: 5, through: 50, hasMore: false, replaced: [] });
 });
 
+// plan 7 task 3: a fresh window (the conversation on screen re-opened by reword) keeps nothing folded before it
+test('a fresh window replaces the earlier pages too, and starts at its own start', () => {
+  let s = R.hostWindow(withConv(conv('a')), { convId: 'a', messages: [msg('e20', 20), msg('e21', 21)], window: win(20) });
+  s = R.hostEarlier(s, { convId: 'a', messages: [msg('e10', 10), msg('e11', 11)], start: 10, hasMore: false });
+  s = R.hostWindow(s, { convId: 'a', messages: [msg('e20', 20), msg('e21', 21)], window: win(20, { fresh: true }) });
+  assert.deepEqual(seqs(s, 'a'), [20, 21]);
+  assert.deepEqual(get(s, 'a').window, { start: 20, through: 50, hasMore: true, replaced: [] }, 'no fresh flag kept');
+});
+
 test('a kept or prepended message a replace range covers is dropped', () => {
   // the window holds a compaction (seq 10) naming seqs 3-9
   let s = R.hostWindow(withConv(conv('a')), { convId: 'a', messages: [msg('e10', 10, { from: 'system' }), msg('e11', 11)], window: win(10, { replaced: [[3, 9]] }) });

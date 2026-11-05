@@ -85,6 +85,16 @@ test('the lunhui slice: lunhuiUi merges a patch into one answer\'s ui; Retry del
   assert.equal(R.lunhuiRetry(kept, 'zzz'), kept, 'retrying an unknown key changes nothing');
 });
 
+// plan 7 task 3: reword forgets every failed view, so a drawn answer reads it again; loading and loaded ones stay
+test('lunhuiForgetFailed drops every failed view and nothing else; with none it changes nothing', () => {
+  let s = R.lunhuiViewFailed(stateWith([]), { key: 'a', error: 'HTTP 500' });
+  s = R.lunhuiViewFailed(s, { key: 'c' });
+  s = R.lunhuiViewLoading(R.lunhuiViewLoaded(s, { key: 'b', view: VIEW_1027 }), 'd');
+  const forgot = R.lunhuiForgetFailed(s);
+  assert.deepEqual(Object.keys(forgot.lunhui.views).sort(), ['b', 'd']);
+  assert.equal(R.lunhuiForgetFailed(forgot), forgot, 'nothing failed: the same state');
+});
+
 // plan 3, task 2: one code for a stock however a source writes it, its market key and its board
 test('stockCode maps sh/sz/bj prefixes, bare six digits and cn: keys to the six digits; anything else is null', () => {
   for (const [raw, code] of [['sh600838', '600838'], ['sz000001', '000001'], ['bj830799', '830799'], ['600838', '600838'], ['cn:600838', '600838']]) assert.equal(stockCode(raw), code, raw);

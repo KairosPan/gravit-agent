@@ -18,6 +18,13 @@ export const reducers = {
     const { [key]: _gone, ...rest } = views;
     return { ...s, lunhui: { ...slice(s), views: rest } };
   },
+  // every failed view forgotten (plan 7's reword): a drawn answer reads its view again, its words in the table that stands;
+  // a loading or loaded view stays, so nothing is asked twice
+  lunhuiForgetFailed(s) {
+    const views = slice(s).views;
+    const kept = Object.fromEntries(Object.entries(views).filter(([, v]) => v?.status !== 'failed'));
+    return Object.keys(kept).length === Object.keys(views).length ? s : { ...s, lunhui: { ...slice(s), views: kept } };
+  },
   lunhuiStockOpen(s, { key, code } = {}) {
     if (typeof key !== 'string' || typeof code !== 'string' || code === '') return s;
     const c = closeOverlays(s);

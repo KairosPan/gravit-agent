@@ -7238,3 +7238,143 @@ test('⌥⌘K over an owner sheet does nothing', async () => {
   assert.equal(store.get().sheet.kind, 'subWallet');
   store.timers.clear();
 });
+
+// plan 7 task 3: what the face folds from the host — a row's title, the open thread's lines, a failed run view — is folded
+// again by reword under the table that stands: one re-list, one re-open of the conversation on screen, one re-read per
+// failed view, and nothing more however often it is called
+const pagesOf = (h, id) => h.calls.filter(c => c[0] === 'session/page' && c[1].request.address.sessionId === id && c[1].request.maxMessages === undefined).length;
+const listsOf = h => h.calls.filter(c => c[0] === 'session/list').length;
+
+test('reword re-lists and re-reads the open conversation, once a call', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const h = host({ rows: [row('s1'), row('s2', { updatedAt: 9, agentAvailable: true })] });
+  const store = started(f, h);
+  await h.ready();
+  const lists = listsOf(h);
+  const pages = pagesOf(h, 's1');
+  store.reword();
+  await settle();
+  assert.equal(listsOf(h), lists + 1, 'one re-list');
+  assert.equal(pagesOf(h, 's1'), pages + 1, 'the paged conversation on screen read again');
+  store.reword();
+  store.reword();
+  await settle();
+  assert.equal(listsOf(h), lists + 3);
+  assert.equal(pagesOf(h, 's1'), pages + 2, 'called twice at once, the first open is superseded before its page: one page read');
+  assert.equal(pagesOf(h, 's2'), 0, 'no other conversation read');
+  // a followed one: a fresh follow, the old one cancelled
+  f.win.location.hash = '#/messages/s2'; f.fire('win', 'hashchange'); await settle();
+  const follows = () => h.streams.filter(s => s.name === 'session/follow' && s.args.request.address.sessionId === 's2');
+  assert.equal(follows().length, 1);
+  store.reword();
+  await settle();
+  assert.equal(follows().length, 2, 'the followed conversation followed afresh');
+  assert.equal(follows()[0].cancelled, true, 'the old follow cancelled');
+  assert.equal(follows()[1].cancelled, false);
+  store.timers.clear();
+});
+
+test('reword away from Messages re-lists and opens nothing', async () => {
+  const f = fakeWindow({ hash: '#/discover' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  const before = h.calls.length;
+  const lists = listsOf(h);
+  store.reword();
+  await settle();
+  assert.equal(listsOf(h), lists + 1);
+  assert.equal(h.calls.slice(before).filter(c => c[0] === 'session/page' && c[1].request.maxMessages === undefined).length, 0, 'nothing opened');
+  assert.equal(h.streams.filter(s => s.name === 'session/follow').length, 0);
+  store.timers.clear();
+});
+
+test('an untitled conversation is drawn in the table standing after reword', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const h = host({ rows: [row('s1')] });
+  const store = started(f, h);
+  await h.ready();
+  assert.match(f.html(), /row-title">Untitled</);
+  try {
+    setTable({ ...EN, 'list.untitled': 'PROBE-untitled' });
+    store.dispatch('hostStatus', { line: 'a render' });
+    await settle();
+    assert.match(f.html(), /row-title">Untitled</, 'the title was folded when listed: a render alone keeps it');
+    store.reword();
+    await settle();
+    assert.match(f.html(), /row-title">PROBE-untitled</);
+    assert.doesNotMatch(f.html(), /row-title">Untitled</);
+  } finally {
+    setTable(EN);
+  }
+  store.timers.clear();
+});
+
+test('a seat line and a round line in the open thread are drawn in the new table after reword; earlier pages go', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const args = { venue: 'paper-1', symbol: 'AAPL', side: 'buy', usd: 100 };
+  const records = [
+    { event: { type: 'user/message', seq: 10, time: 1756512000000, surfaceOp: 'append', data: { id: 'm-10', role: 'user', content: [{ type: 'text', text: 'x' }], source: { kind: 'room', form: 'round-end', round: 1, outcome: 'capped', turns: [] } } } },
+    { event: { type: 'tool/call', seq: 11, time: 1756512300000, data: { turn: 5, step: 1, callId: 'c10', name: 'mcp__account__portfolio_live_order', arguments: JSON.stringify(args) } } },
+    { event: { type: 'tool/result', seq: 12, time: 1756512301000, surfaceOp: 'append', data: { turn: 5, step: 1, message: { id: 'm-12', role: 'tool', source: { kind: 'tool', callId: 'c10' }, toolCallId: 'c10', content: [{ type: 'text', text: JSON.stringify({ ok: true, order: { id: 'ord-1', status: 'filled', paper: true } }) }], isError: false } } } },
+  ];
+  const h = host({ rows: [row('s1')], pages: { s1: req => (req.beforeSeq !== undefined ? { records: [{ event: { type: 'user/message', seq: 3, time: 1756511000000, surfaceOp: 'append', data: { id: 'm-3', role: 'user', content: [{ type: 'text', text: 'an earlier word' }], source: { kind: 'user' } } } }], hasMore: false } : { records, hasMore: true }) } });
+  const store = started(f, h);
+  await h.ready();
+  assert.match(f.html(), /AAPL · market · paper-1/);
+  assert.match(f.html(), /capped - the bot-message cap was reached/);
+  assert.equal(await store.live.earlier('s1'), true);
+  await settle();
+  assert.match(f.html(), /an earlier word/);
+  const ZH = { ...EN, 'thread.seat.market': 'PROBE-market', 'thread.round.capped': 'PROBE-capped' };
+  try {
+    setTable(ZH);
+    store.reword();
+    await settle();
+    assert.match(f.html(), /AAPL · PROBE-market · paper-1/);
+    assert.match(f.html(), /PROBE-capped/);
+    assert.doesNotMatch(f.html(), /AAPL · market · paper-1|capped - the bot-message cap/);
+    assert.doesNotMatch(f.html(), /an earlier word/, 'the earlier pages, folded under the old table, are dropped; Earlier reads them again');
+    assert.equal(store.get().conversations.find(c => c.id === 's1').window.hasMore, true);
+  } finally {
+    setTable(EN);
+  }
+  store.timers.clear();
+});
+
+test('a failed run view is read again after reword, once; a loaded one is not', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const views = [];
+  let fail = true;
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
+    getJson: async path => {
+      if (!path.startsWith('/data/lunhui/view?')) return h.getJson(path);
+      views.push(path);
+      if (path.includes('run=bad') && fail) throw Object.assign(new Error('gone: HTTP 404'), { status: 404 });
+      return { ok: true, view: { strategy: 'cn-market', run: path.includes('run=bad') ? 'bad' : 'good' } };
+    } });
+  await h.ready();
+  const present = (seq, callId, run) => [
+    { event: { type: 'tool/call', seq, time: 1756512200000, data: { turn: 4, step: 1, callId, name: 'lunhui_present', arguments: JSON.stringify({ strategy: 'cn-market', run, summary: `summary ${run}`, blocks: [{ kind: 'ladder' }] }) } } },
+    { event: { type: 'tool/result', seq: seq + 1, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: `m-${seq + 1}`, role: 'tool', source: { kind: 'tool', callId }, toolCallId: callId, content: [{ type: 'text', text: JSON.stringify({ ok: true, blocks: ['ladder'], modules: [] }) }], isError: false } } } },
+  ];
+  const records = [...present(40, 'k1', 'bad'), ...present(50, 'k2', 'good')];
+  const followOf = () => [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 's1');
+  followOf().cbs.onItem({ type: 'snapshot', records });
+  await settle();
+  assert.equal(views.length, 2);
+  assert.equal(store.get().lunhui.views['cn-market/bad/'].status, 'failed');
+  assert.equal(store.get().lunhui.views['cn-market/good/'].status, 'loaded');
+  fail = false;
+  store.reword();
+  followOf().cbs.onItem({ type: 'snapshot', records });
+  await settle();
+  assert.deepEqual(views.slice(2), ['/data/lunhui/view?strategy=cn-market&run=bad&modules='], 'the failed view read again, the loaded one not');
+  assert.equal(store.get().lunhui.views['cn-market/bad/'].status, 'loaded');
+  store.reword();
+  followOf().cbs.onItem({ type: 'snapshot', records });
+  await settle();
+  assert.equal(views.length, 3, 'nothing failed, nothing read');
+  store.timers.clear();
+});

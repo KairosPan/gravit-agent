@@ -106,13 +106,14 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     const first = list[0]?.event?.seq;
     return { messages: foldMessages(out), start: typeof first === 'number' ? first : 0, replaced };
   }
-  // through: the follow's cursor or the page's asOfSeq, the cut every earlier page of this window is read against
-  function applySnapshot(convId, snapshot, { through, hasMore }) {
+  // through: the follow's cursor or the page's asOfSeq, the cut every earlier page of this window is read against; fresh: the
+  // window replaces every message folded before it (a re-open of the conversation on screen), earlier pages included
+  function applySnapshot(convId, snapshot, { through, hasMore, fresh = false }) {
     const created = typeof snapshot?.header?.createdAt === 'number' ? snapshot.header.createdAt : undefined;
     const { messages, start, replaced } = windowOf(convId, snapshot?.records);
     ownStart.set(convId, start);
     const loading = !!earlierRun && earlierRun.id === convId && earlierRun.token === openSeq;   // a read still under way keeps its key
-    store.dispatch('hostWindow', { convId, messages, created, window: { start, through, hasMore: hasMore === true, replaced, ...(loading ? { loading } : {}) } });
+    store.dispatch('hostWindow', { convId, messages, created, window: { start, through, hasMore: hasMore === true, replaced, ...(loading ? { loading } : {}), ...(fresh ? { fresh } : {}) } });
     seedBlock(convId, snapshot?.projections);
     for (const m of pending.values()) { // after the window, wherever the list now says each one belongs
       const g = placeGate(m);
@@ -133,7 +134,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     release(v, false);
     v?.handle?.cancel();
   }
-  function follow(id, token) {
+  function follow(id, token, fresh = false) {
     closeView();
     let handle = null;
     const owns = () => view !== null && view.handle === handle && token === openSeq && view.id === id;
@@ -141,7 +142,8 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       onItem: item => {
         if (!owns()) return;
         if (item?.type === 'snapshot') {
-          applySnapshot(id, item, { through: item.cursor, hasMore: item.hasMore });
+          applySnapshot(id, item, { through: item.cursor, hasMore: item.hasMore, fresh });
+          fresh = false;   // only the first: a later snapshot (past a gap) keeps what the reader read
           if (owns() && !view.snapped) { view.snapped = true; release(view, true); }   // the store's render may have moved on
         }
         else if (item?.type === 'event') accept(id, { type: 'session/event', sessionId: id, event: item.event });
@@ -162,7 +164,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     });
     view = { id, token, mode: 'follow', handle, snapped: false, waiters: [] };
   }
-  async function page(id, token) {
+  async function page(id, token, fresh = false) {
     closeView();
     const v = { id, token, mode: 'page', handle: null };
     view = v;
@@ -175,20 +177,24 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       if (asOfSeq === null) throw saidError('status.noProjections');
       const pg = await call('session/page', { request: { address: address(id), throughSeq: asOfSeq } });
       if (view !== v || token !== openSeq) return;
-      applySnapshot(id, { projections: cut, records: pg?.records }, { through: asOfSeq, hasMore: pg?.hasMore });
+      applySnapshot(id, { projections: cut, records: pg?.records }, { through: asOfSeq, hasMore: pg?.hasMore, fresh });
     } catch (err) {
       if (view !== v || token !== openSeq) return;
       view = { ...v, failed: true };
       say(failedLine(said('status.verb.open'), err), true);
     }
   }
+  // a conversation opened afresh; the one already on screen too (plan 7's reword): its window then replaces everything folded
+  // before it, earlier pages included, as a turn at the tail drops them, so every line is folded again under the table that
+  // stands; Earlier messages reads the pages again
   function open(id) {
     const token = ++openSeq;
     const conv = convOf(id);
     if (!conv) return;
+    const fresh = view !== null && view.id === id;
     store.dispatch('markSeen', { convId: id, seq: conv.updatedAt });
-    if (viewFor(conv) === 'follow') follow(id, token);
-    else void page(id, token);
+    if (viewFor(conv) === 'follow') follow(id, token, fresh);
+    else void page(id, token, fresh);
   }
   // this tab wrote to a paged session: following it now promotes nothing the prompt did not already
   function promote(id) {

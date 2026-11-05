@@ -1683,6 +1683,16 @@ export function boot(win, host = {}) {
     // the research surfaces: a child stopped by its parent (asked twice), a member's trace read on opening
     stopChild: el => store.dispatch('askConfirm', { action: 'stopChild', id: el.dataset.child, parent: el.dataset.parent, label: el.dataset.label }),
     openTrace: el => { void traces.open(el.dataset.conv, el.dataset.msg); },
+    // what the face folded from the host, folded again under the table that stands (plan 7; Language calls it after setTable):
+    // the list re-read (an untitled row's word), the conversation on screen re-opened (its seat lines, receipts, reports,
+    // round lines, refusals and cards; its earlier pages dropped), every failed run view forgotten so the render reads it
+    // again. One read of each a call; a stored line is a said and needs none. A Run's title is the table's at its creation
+    reword: () => {
+      void live.refresh();
+      const r = store.get().route;
+      if (r.screen === 'messages' && typeof r.id === 'string' && r.id !== 'new' && r.id === openedId) live.open(r.id);
+      store.dispatch('lunhuiForgetFailed');
+    },
     // a composed answer's view that could not be read: forget it, and the render asks again
     lunhuiRetry: el => { store.dispatch('lunhuiRetry', el.dataset.key); },
     // a stock name in a composed answer opens the stock drawer on that answer's view
@@ -2364,7 +2374,7 @@ export function boot(win, host = {}) {
   if (!doc.hidden) { stream.open(); marketStream.open(); }
   follow();
   render();
-  return Object.assign(store, { timers, live, actions, markets, channels, discover, owner, sheet, trade, walletSend, sellMany, identity });
+  return Object.assign(store, { timers, live, reword: act.reword, actions, markets, channels, discover, owner, sheet, trade, walletSend, sellMany, identity });
 }
 
 if (typeof window !== 'undefined' && window.document) boot(window);

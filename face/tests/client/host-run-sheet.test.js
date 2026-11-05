@@ -10,6 +10,8 @@ import { startRunSheet } from '../../client/js/host/run-sheet.js';
 import { newSheet, sheetOf } from '../../client/js/host/run-sheet-view.js';
 import { modulesListing, MARKET_RUN, S01_RUN } from './helpers/inventory.js';
 import { spoken } from './helpers/spoken.js';
+import { setTable } from '../../client/js/i18n/words.js';
+import { EN } from '../../client/js/i18n/en.js';
 
 // a local 14:00 on 2026-10-28, so the browser's date is 10-28 in any zone
 const NOW = new Date(2026, 9, 28, 14, 0).getTime();
@@ -220,4 +222,20 @@ test('the listing could not be read: the sheet opens saying so, and Run sends no
   await w.runSheet.run();
   assert.deepEqual(w.sent, []);
   assert.equal(spoken(w.sheet().said), 'choose where to run');
+});
+
+// plan 7 task 3: a Run's title is the table's at its creation, sent and kept as a string; a switch back re-folds nothing
+test('a Run sent under another table is titled in it and keeps that title after a switch back', async () => {
+  const r = rig();
+  await r.runSheet.open('theme');
+  try {
+    setTable({ ...EN, 'modules.theme.title': '题材' });
+    await r.runSheet.run();
+  } finally {
+    setTable(EN);
+  }
+  assert.equal(r.sent[0].title, '题材 · 10-28');
+  assert.deepEqual(r.store.get().moduleRuns, { theme: { sessionId: 's-run', title: '题材 · 10-28', startedAt: NOW } });
+  assert.equal(typeof r.store.get().moduleRuns.theme.title, 'string', 'a string, never a said: it is persisted');
+  assert.equal(JSON.parse(JSON.stringify(r.store.get().moduleRuns)).theme.title, '题材 · 10-28');
 });

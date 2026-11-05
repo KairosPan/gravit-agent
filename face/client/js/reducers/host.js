@@ -92,7 +92,8 @@ export const reducers = {
   // a follow snapshot or a page: the window whole, never appended to what was drawn. With a window that the old one
   // reaches (its cut or its last streamed message at least the seq before the new start), the earlier pages already
   // drawn below the start stay before it (a reconnect while reading up keeps the place), and the start and its hasMore
-  // are the lower window's; a window past a gap is taken whole, so the gap pages in. Loading is only what the payload
+  // are the lower window's; a window past a gap is taken whole, so the gap pages in, and so is a fresh one (the
+  // conversation re-opened to fold its lines again: nothing folded before it stays). Loading is only what the payload
   // says: the live layer folds in a read still under way
   hostWindow(s, { convId, messages, usage, created, window }) {
     const c0 = find(s, convId);
@@ -102,7 +103,7 @@ export const reducers = {
     const replaced = unionRanges(rangesOf(old), rangesOf(window));
     const drawn = new Set(messages.map(m => m.id));
     const reach = old ? Math.max(typeof old.through === 'number' ? old.through : 0, maxSeq(c0.messages.filter(m => !isGate(m)))) : -Infinity;
-    const kept = old && reach >= window.start - 1 ? earlierOf(c0.messages, window.start, replaced, drawn) : [];
+    const kept = old && !window.fresh && reach >= window.start - 1 ? earlierOf(c0.messages, window.start, replaced, drawn) : [];
     const lower = kept.length > 0 && old.start < window.start;
     const next = {
       start: lower ? old.start : window.start, through: window.through,
