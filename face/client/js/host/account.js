@@ -8,6 +8,7 @@
 // B1b), at the page's cadence while that tab is on screen. The views over what lands are account-view.js's and identity-view.js's.
 import { pageOk, worthOf, venuesOf } from './account-view.js';
 import { refusedAt } from './owner-view.js';
+import { t } from '../i18n/words.js';
 
 export const ACCOUNT_POLL_MS = 20_000, ACCOUNT_POLL_STREAM_MS = 80_000;
 /** A venue's sign-in is asked how it stands this often, for at most this long (the Account's connect.js). */
@@ -28,11 +29,11 @@ const hasPaper = page => pageOk(page) && page.venues.some(v => v?.paper === true
 const freshOf = path => `${path}${path.includes('?') ? '&' : '?'}fresh=1`;
 const nothing = () => {};
 const GUARD = '/data/account/guard';
-const GUARD_SAID = 'Guard: what agents ask for waits for you on a card.';
-const NO_ANSWER = 'The account did not answer. Try again.';
-const RECEIVE_ELSEWHERE = 'The account answered for another account or network: nothing is shown. Read again.';
+const guardSaid = () => t('account.guard.said');
+const noAnswer = () => t('account.noAnswer');
+const receiveElsewhere = () => t('money.receive.elsewhere');
 // no door handed in: nothing answers
-const noDoor = async () => ({ status: 0, body: { ok: false, error: NO_ANSWER } });
+const noDoor = async () => ({ status: 0, body: { ok: false, error: noAnswer() } });
 
 // a venue's sign-in page, as the Account answers it: a web address, nothing else
 const webUrl = v => (typeof v === 'string' && /^https?:\/\//i.test(v) ? v : '');
@@ -230,17 +231,17 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
    *  when it did not take it — for a caller that waits on it (the sign-out's Guard first, plan 4b Task 6). */
   let guarding = null;
   function guard() {
-    if (closed) return Promise.resolve({ taken: false, message: NO_ANSWER });
+    if (closed) return Promise.resolve({ taken: false, message: noAnswer() });
     if (guarding) return guarding;
     store.dispatch('guardAsking');
     const current = (async () => {
       let r;
       try { r = await post(GUARD, {}); } catch { r = { status: 0, body: {} }; }
-      if (closed) return { taken: false, message: NO_ANSWER };
+      if (closed) return { taken: false, message: noAnswer() };
       // taken only on a 2xx its refused test does not call refused (the owner device's own `taken`)
       const taken = r?.status >= 200 && r.status < 300 && !refusedAt(r);
-      const message = taken ? null : messageOf(r?.body) ?? NO_ANSWER;
-      if (taken) store.dispatch('guardSaid', GUARD_SAID); else store.dispatch('guardRefused', message);
+      const message = taken ? null : messageOf(r?.body) ?? noAnswer();
+      if (taken) store.dispatch('guardSaid', guardSaid()); else store.dispatch('guardRefused', message);
       await load({ fresh: true });
       return { taken, message };
     })().finally(() => { if (guarding === current) guarding = null; });
@@ -263,7 +264,7 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
         // the answer names the account, asset and network it is for (service.ts receive): one for another is never drawn here
         const named = (k, v) => typeof body?.[k] !== 'string' || body[k].toLowerCase() === v.toLowerCase();
         if (!refused && body?.ok === true && !(named('venue', q.venue) && named('asset', q.asset) && named('network', q.network))) {
-          store.dispatch('receiveFailed', { key, at: now(), message: RECEIVE_ELSEWHERE });
+          store.dispatch('receiveFailed', { key, at: now(), message: receiveElsewhere() });
         } else if (!refused && body?.ok === true && typeof body.address === 'string' && body.address !== '') store.dispatch('receiveLoaded', { key, data: body, at: now() });
         else store.dispatch('receiveFailed', { key, at: now(), message: messageOf(body) });
       },
@@ -309,10 +310,10 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
       let r;
       try { r = await post('/data/account/revoke', { account: id }); } catch { r = { status: 0, body: {} }; }
       if (closed) return;
-      if (!(r?.status >= 200 && r.status < 300) || refusedAt(r)) store.dispatch('closing', { venue: id, status: 'refused', message: messageOf(r?.body) ?? NO_ANSWER });
+      if (!(r?.status >= 200 && r.status < 300) || refusedAt(r)) store.dispatch('closing', { venue: id, status: 'refused', message: messageOf(r?.body) ?? noAnswer() });
       else {
         const name = venuesOf(store.get().account.data).find(v => v.id === id)?.name || id;
-        store.dispatch('closing', { venue: id, status: 'said', said: `${name} is closed to agents: they keep reading it, and place or move nothing there. Reopening it is signed.` });
+        store.dispatch('closing', { venue: id, status: 'said', said: t('venues.closed', { name }) });
       }
       await load({ fresh: true });
     })().finally(() => { if (closing.get(id) === current) closing.delete(id); });
@@ -350,7 +351,7 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
     if (!live()) { try { tab?.close?.(); } catch { /* gone already */ } return; }
     if (!(r?.status >= 200 && r.status < 300) || refusedAt(r) || !url || !state) {
       try { tab?.close?.(); } catch { /* gone already */ }
-      store.dispatch('signIn', { status: 'failed', message: messageOf(r?.body) ?? 'The sign-in could not start.' });
+      store.dispatch('signIn', { status: 'failed', message: messageOf(r?.body) ?? t('venues.signIn.noStart') });
       return;
     }
     let sent = false;
@@ -370,7 +371,7 @@ export function startAccount({ store, getJson, post = noDoor, now = Date.now, sc
         onReady(state);
         return;
       }
-      if (known === 'failed') { store.dispatch('signIn', { status: 'failed', message: words(st.error) ?? 'The sign-in did not finish.' }); return; }
+      if (known === 'failed') { store.dispatch('signIn', { status: 'failed', message: words(st.error) ?? t('venues.signIn.unfinished') }); return; }
       if (now() >= until) { store.dispatch('signIn', { status: 'expired' }); return; }
       signInTimer = schedule(() => { void ask(); }, SIGNIN_POLL_MS);
     };

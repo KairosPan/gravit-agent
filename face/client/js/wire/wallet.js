@@ -5,11 +5,12 @@
 // after it, every send on its own chain, Robinhood Chain offered to a wallet that does not know it (trade.js tkSwitchChain).
 // The face holds no key: the wallet shows and signs everything in its own extension; this module only relays. It talks to the
 // wallet's provider and to the `post` it is handed (the face's /data/account/* proxy), nothing else.
+import { t } from '../i18n/words.js';
 
 /* Robinhood Chain, for a wallet that does not know it yet: the wallet shows it to the owner before adding it (chain 4663; its own
  * RPC and the explorer Robinhood publishes for it) — the retired page's TK_ROBINHOOD_CHAIN */
 export const ROBINHOOD_CHAIN = Object.freeze({
-  chainId: '0x1237', chainName: 'Robinhood Chain', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  chainId: '0x1237', chainName: 'Robinhood Chain', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, // en-kept: the chain's and its coin's names
   rpcUrls: ['https://rpc.mainnet.chain.robinhood.com/'], blockExplorerUrls: ['https://robinhoodchain.blockscout.com'],
 });
 export const MINED_EVERY_MS = 2_000, MINED_WITHIN_MS = 120_000;
@@ -24,13 +25,13 @@ const words = v => (typeof v === 'string' && v.trim() !== '' ? v : '');
 // the Account's words when it refuses (owner-view.js whyOf's order)
 const whyOf = r => words(r?.body?.refusal?.message) || words(r?.body?.error) || words(r?.body?.result?.message);
 // a wallet's own words for a refusal (an EIP-1193 error is an object with a message, not always an Error)
-const walletWords = err => words(err?.message) || words(typeof err === 'string' ? err : '') || 'the wallet refused';
+const walletWords = err => words(err?.message) || words(typeof err === 'string' ? err : '') || t('money.wallet.refused');
 const sleep = (schedule, ms) => new Promise(resolve => schedule(resolve, ms));
 const defaultSchedule = (fn, ms) => setTimeout(fn, ms);
 
 // window.ethereum's name, as connect.js names it
-const ethName = eth => (eth.isOkxWallet || eth.isOKExWallet ? 'OKX Wallet' : eth.isBinance ? 'Binance Wallet' : eth.isCoinbaseWallet ? 'Coinbase Wallet'
-  : eth.isMetaMask ? 'MetaMask' : 'Browser wallet');
+const ethName = eth => (eth.isOkxWallet || eth.isOKExWallet ? 'OKX Wallet' : eth.isBinance ? 'Binance Wallet' : eth.isCoinbaseWallet ? 'Coinbase Wallet' // en-kept: wallets' names
+  : eth.isMetaMask ? 'MetaMask' : t('money.wallet.browser')); // en-kept: a wallet's name
 
 /** The wallets this browser has: every EIP-6963 `announceProvider` answer to one `requestProvider`, heard for `waitMs`, each once
  *  (by its uuid, else its rdns, else its name; the last answer kept); none announced and a `win.ethereum`: that one, as the EIP
@@ -41,7 +42,7 @@ export async function discoverWallets(win, { waitMs = 120 } = {}) {
     const d = e?.detail;
     if (!isRecord(d) || !isRecord(d.info) || !d.provider) return;
     const id = words(d.info.uuid) || words(d.info.rdns) || words(d.info.name);
-    if (id) found.set(id, { id, name: words(d.info.name) || 'Browser wallet', icon: words(d.info.icon), provider: d.provider });
+    if (id) found.set(id, { id, name: words(d.info.name) || t('money.wallet.browser'), icon: words(d.info.icon), provider: d.provider });
   };
   const hears = typeof win?.addEventListener === 'function' && typeof win?.dispatchEvent === 'function';
   if (hears) {
@@ -73,14 +74,14 @@ async function ask(wallet, method, params) {
 export async function proveWallet(wallet, post) {
   const accounts = await ask(wallet, 'eth_requestAccounts');
   const address = Array.isArray(accounts) ? accounts[0] : undefined;
-  if (!words(address)) throw new Error('the wallet gave no address');
+  if (!words(address)) throw new Error(t('money.wallet.noAddress'));
   let chainId = 1;
   try { chainId = parseInt(await wallet.provider.request({ method: 'eth_chainId' }), 16) || 1; } catch { chainId = 1; }
   const c = await post('/data/account/wallet/challenge', { address, wallet: wallet.name, chainId });
-  if (c?.status !== 200 || !words(c.body?.message)) throw new Error(whyOf(c) || 'no sentence to sign');
+  if (c?.status !== 200 || !words(c.body?.message)) throw new Error(whyOf(c) || t('money.wallet.noSentence'));
   const signature = await ask(wallet, 'personal_sign', [hexOf(c.body.message), address]);
   const p = await post('/data/account/wallet/prove', { address, signature });
-  if (p?.status !== 200) throw new Error(whyOf(p) || 'the signature did not check');
+  if (p?.status !== 200) throw new Error(whyOf(p) || t('money.wallet.badSignature'));
   return { address: p.body?.address ?? address, wallet: wallet.name };
 }
 
@@ -98,7 +99,7 @@ export async function walletFor(wallets, address) {
   };
   for (const w of all) if (await holds(w, 'eth_accounts')) return w;
   for (const w of all) if (await holds(w, 'eth_requestAccounts')) return w;
-  throw new Error(`No wallet on this page holds ${short(address)}`);
+  throw new Error(t('money.wallet.noneHolds', { address: short(address) }));
 }
 
 /* a wallet's "I don't know that chain" (EIP-3085: 4902), as wallets wrap it */
@@ -110,12 +111,12 @@ export async function switchChain(wallet, chainIdHex) {
   try {
     await wallet.provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainIdHex }] });
   } catch (err) {
-    if (!(unknownChain(err) && String(chainIdHex).toLowerCase() === ROBINHOOD_CHAIN.chainId)) throw new Error(`${wallet.name} did not switch to the right network: ${walletWords(err)}`);
+    if (!(unknownChain(err) && String(chainIdHex).toLowerCase() === ROBINHOOD_CHAIN.chainId)) throw new Error(t('money.wallet.noSwitch', { wallet: wallet.name, why: walletWords(err) }));
     try {
       await wallet.provider.request({ method: 'wallet_addEthereumChain', params: [ROBINHOOD_CHAIN] });
       await wallet.provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainIdHex }] });
     } catch (err2) {
-      throw new Error(`${wallet.name} did not add Robinhood Chain: ${walletWords(err2)}`);
+      throw new Error(t('money.wallet.noAddChain', { wallet: wallet.name, why: walletWords(err2) }));
     }
   }
 }
@@ -128,16 +129,16 @@ export async function mined(wallet, hash, { schedule = defaultSchedule, everyMs 
     let r = null;
     try { r = await wallet.provider.request({ method: 'eth_getTransactionReceipt', params: [hash] }); } catch { r = null; }
     if (isRecord(r) && r.blockNumber) {
-      if (r.status === '0x0') throw new Error(`transaction ${short(hash)} failed on chain`);
+      if (r.status === '0x0') throw new Error(t('money.wallet.txFailed', { hash: short(hash) }));
       return r;
     }
     await sleep(schedule, everyMs);
   }
-  throw new Error(`transaction ${short(hash)} is not on chain yet: try again in a minute`);
+  throw new Error(t('money.wallet.txPending', { hash: short(hash) }));
 }
 
 // one transaction as the wallet takes it: what the Account built, its gas where it gave one
-const txParams = t => ({ from: t.from, to: t.to, data: t.data, value: t.value, ...(t.gas ? { gas: t.gas } : {}) });
+const txParams = tx => ({ from: tx.from, to: tx.to, data: tx.data, value: tx.value, ...(tx.gas ? { gas: tx.gas } : {}) });
 
 /** What the Account built, sent by the wallet: every transaction but the last sent and waited for on chain (an approval before
  *  its swap, a bridge's approval before its transfer), then — when `requote` is given and there were such — `requote()` once,
@@ -145,12 +146,12 @@ const txParams = t => ({ from: t.from, to: t.to, data: t.data, value: t.value, .
  *  own chain first (switchChain). Resolves the last transaction's hash. */
 export async function sendTxs(wallet, txs, { requote = null, schedule = defaultSchedule } = {}) {
   const all = Array.isArray(txs) ? txs.filter(isRecord) : [];
-  if (!all.length) throw new Error('nothing for the wallet to send');
-  const send = async t => {
-    await switchChain(wallet, t.chainIdHex);
-    return ask(wallet, 'eth_sendTransaction', [txParams(t)]);
+  if (!all.length) throw new Error(t('money.wallet.nothing'));
+  const send = async tx => {
+    await switchChain(wallet, tx.chainIdHex);
+    return ask(wallet, 'eth_sendTransaction', [txParams(tx)]);
   };
-  for (const t of all.slice(0, -1)) await mined(wallet, await send(t), { schedule });
+  for (const tx of all.slice(0, -1)) await mined(wallet, await send(tx), { schedule });
   let last = all[all.length - 1];
   if (typeof requote === 'function' && all.length > 1) {
     const fresh = await requote();

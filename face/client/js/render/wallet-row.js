@@ -1,6 +1,7 @@
 // face/client/js/render/wallet-row.js — a row waiting for the operator's own browser wallet (plan 4b Task 1), drawn by Trade's
 // Under way and the Account's Money tab alike; its own module so neither screen's renderer imports the other's.
 import { esc, attrs } from '../html.js';
+import { t, th } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = v => (typeof v === 'string' ? v : '');
@@ -14,8 +15,8 @@ export function walletRow(what, id, key, data, reported, sends, signs, cancel) {
   const said = at && str(at.said) ? `<span class="tk-why">${esc(at.said)}</span>` : '';
   const sending = at?.status === 'sending';
   const keyOf = !signs ? '' : at?.again === true
-    ? `<button type="button"${attrs({ class: 'btn-sm', 'data-action': 'reportAgain', 'data-key': key, disabled: sending })}>Report again</button>`
-    : `<button type="button"${attrs({ class: 'btn-sm', 'data-action': 'sendFromWallet', ...data, disabled: sending })}>${reported ? 'Report again' : 'Send from wallet…'}</button>`;
-  return `<tr><td><b>${esc(what)}</b><span class="tk-why">${esc(['Waiting for your wallet', id].filter(Boolean).join(' · '))}</span>${said}</td><td class="r">${keyOf}${cancel}</td></tr>`;
+    ? `<button type="button"${attrs({ class: 'btn-sm', 'data-action': 'reportAgain', 'data-key': key, disabled: sending })}>${th('money.wallet.reportAgain')}</button>`
+    : `<button type="button"${attrs({ class: 'btn-sm', 'data-action': 'sendFromWallet', ...data, disabled: sending })}>${reported ? th('money.wallet.reportAgain') : th('money.wallet.send')}</button>`;
+  return `<tr><td><b>${esc(what)}</b><span class="tk-why">${esc(id ? t('money.wallet.waitingFor', { id }) : t('money.wallet.waiting'))}</span>${said}</td><td class="r">${keyOf}${cancel}</td></tr>`;
 }
 

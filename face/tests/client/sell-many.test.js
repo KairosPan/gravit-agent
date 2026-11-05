@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { startSellMany, SELL_MANY_MAX, SELL_MANY_RESIGN_MS, WALLET_WORDS, smDraft } from '../../client/js/host/sell-many.js';
+import { startSellMany, SELL_MANY_MAX, SELL_MANY_RESIGN_MS, walletWords, smDraft } from '../../client/js/host/sell-many.js';
 
 const START = 1_792_854_000_000;
 const TEN_MINUTES = 600_000;
@@ -175,10 +175,10 @@ test('a run with a refused prepare, a refused signature, a DEX sale and the draw
   assert.deepEqual(seen.legs.map(l => [l.item.asset, l.state, l.why || l.said]), [
     ['SOL', 'refused', 'SOL/USDT is not trading now'],
     ['BTC', 'refused', 'the position changed since: prepare it again'],
-    ['WETH', 'wallet', WALLET_WORDS],
+    ['WETH', 'wallet', walletWords()],
     ['ETH', 'waiting', ''],
   ]);
-  assert.equal(WALLET_WORDS, 'Your wallet has to send it: it waits under Trade › Under way, Send from wallet…');
+  assert.equal(walletWords(), 'Your wallet has to send it: it waits under Trade › Under way, Send from wallet…');
   assert.deepEqual(r.wallet.orders, [dex], 'the DEX sale\'s wallet send started, once');
   assert.deepEqual(r.owner.submitted.map(p => p.action.symbol), ['BTC/USDT:USDT', 'WETH/USDC'], 'a refused preparation is never signed; nothing after the close');
   assert.equal(r.state(), null, 'closed');
@@ -197,7 +197,7 @@ test('a DEX leg is handed to sendOrder, once', async () => {
   // handed over, once — what sendOrder does with it (app.js: sendFromWallet, the Account read again after the wallet answers) is
   // app-dom.test.js's "Sell many's DEX leg reads the Account again after the wallet answers"
   assert.deepEqual(r.wallet.orders, [dex], 'handed to sendOrder once');
-  assert.deepEqual(r.state().legs.map(l => [l.state, l.said]), [['wallet', WALLET_WORDS]]);
+  assert.deepEqual(r.state().legs.map(l => [l.state, l.said]), [['wallet', walletWords()]]);
 });
 
 test('the closing line counts the legs waiting for the wallet', async () => {

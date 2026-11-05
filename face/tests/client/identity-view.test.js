@@ -3,7 +3,7 @@
 // quiet hours) and Not you (the strangers, each with Block) — with the owner's keys only on a page that signs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { identityOf, formatRouting, routingOf, tickRouting, ROUTE_ROWS, NETWORKS } from '../../client/js/host/identity-view.js';
+import { identityOf, formatRouting, routingOf, tickRouting, routeRows, NETWORKS } from '../../client/js/host/identity-view.js';
 import { renderIdentityTab } from '../../client/js/render/identity.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
@@ -33,7 +33,7 @@ const boxOf = (html, label) => html.match(new RegExp(`<section class="cardbox" a
 const keyed = (html, w) => new RegExp(`<button[^>]*data-action[^>]*>${esc(w)}</button>`).test(html);
 
 test('the rows and networks are the plan\'s', () => {
-  assert.deepEqual(ROUTE_ROWS, [['chat', 'Chat with Gravit'], ['alerts', 'Watch alerts'], ['brief', 'Pre-close brief'], ['cards', 'Cards waiting'], ['fills', 'Fills and reports']]);
+  assert.deepEqual(routeRows(), [['chat', 'Chat with Gravit'], ['alerts', 'Watch alerts'], ['brief', 'Pre-close brief'], ['cards', 'Cards waiting'], ['fills', 'Fills and reports']]);
   assert.deepEqual(NETWORKS, [['telegram', 'Telegram'], ['imessage', 'iMessage'], ['slack', 'Slack']]);
 });
 

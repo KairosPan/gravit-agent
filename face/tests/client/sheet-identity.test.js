@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { renderConnectDrawer, CONNECT_STEPS, etClock } from '../../client/js/render/identity.js';
+import { renderConnectDrawer, connectSteps, etClock } from '../../client/js/render/identity.js';
 import { renderSheet } from '../../client/js/render/owner.js';
 import { IDENTITY_KINDS, identityTitleOf, identityGoOf, identityFieldsOf, identityDraftOf, identityLinesOf, identityStepsOf, rowsSentOn } from '../../client/js/host/sheet-identity.js';
 import { SHEET_KINDS, titleOf, goWord, fieldsOf, draftOf } from '../../client/js/host/sheet-view.js';
@@ -48,9 +48,9 @@ const listOf = html => [...(html.match(/<ol class="sheet-steps">([\s\S]*?)<\/ol>
 const at = step => R.identityConnectSet(R.identityConnectOpen(R.nav(emptyState(NOW), { screen: 'account', tab: 'identity' })), { step, pending: step > 1 ? (step === 3 ? { ...PENDING, state: 'heard', sender: { id: '555000123', name: 'Pan', handle: '@pan', masked: '…123', text: '/start' } } : PENDING) : null });
 
 test('the four steps lists are the spec\'s, word for word', () => {
-  assert.deepEqual(CONNECT_STEPS[1], STEPS_1);
-  assert.deepEqual(CONNECT_STEPS[2], STEPS_2);
-  assert.deepEqual(CONNECT_STEPS[3], STEPS_3);
+  assert.deepEqual(connectSteps(1), STEPS_1);
+  assert.deepEqual(connectSteps(2), STEPS_2);
+  assert.deepEqual(connectSteps(3), STEPS_3);
   assert.deepEqual(identityStepsOf('connectNetwork'), STEPS_4);
 });
 

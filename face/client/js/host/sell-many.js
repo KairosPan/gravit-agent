@@ -9,6 +9,7 @@
 // further and lands nothing more; afterAction('sellMany') once when a run ends. The drawer's whole state is the store's
 // `sellMany`; render/account.js draws it.
 import { refusedAt, whyOf, saidOf } from './owner-view.js';
+import { t, tn } from '../i18n/words.js';
 
 /** At most this many legs at once (earn.js:221). */
 export const SELL_MANY_MAX = 10;
@@ -16,12 +17,11 @@ export const SELL_MANY_MAX = 10;
 export const SELL_MANY_RESIGN_MS = 15_000;
 const SELLABLE = '/data/account/sellable?fresh=1';
 /** A DEX sale's words (earn.js:321): the order waits for the operator's wallet. */
-export const WALLET_WORDS = 'Your wallet has to send it: it waits under Trade › Under way, Send from wallet…';
+export const walletWords = () => t('money.sellMany.wallet');
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
 const str = v => (typeof v === 'string' ? v : '');
-const plural = (n, one) => `${n} ${n === 1 ? one : `${one}s`}`;
 
 /** earn.js:223-227 — one leg as the owner signs it: a market sell of `qty` (else all the item can sell, `sellQty`), or — a
  *  perpetual, a future — the position's close, of `qty` only where it is less than all of it. */
@@ -40,7 +40,7 @@ export function smSellable(body, venue = '') {
 }
 
 /** earn.js:229 — a holding by name: a position says it is closed. */
-export const smLegName = x => (x.action === 'close' ? `Close ${str(x.side)} ${str(x.asset)}`.replace(/\s+/g, ' ').trim() : str(x.asset));
+export const smLegName = x => (x.action === 'close' ? t('money.sellMany.closeName', { side: str(x.side), asset: str(x.asset) }).replace(/\s+/g, ' ').trim() : str(x.asset));
 
 const qtyWord = n => (typeof n === 'number' && Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: Math.abs(n) >= 1000 ? 2 : 8 }) : '—');
 const dollars = n => (typeof n === 'number' && Number.isFinite(n) ? `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '');
@@ -51,10 +51,11 @@ export function smLegWords(leg) {
   const item = leg?.item ?? {};
   if (!isRecord(p?.action)) return null;
   if (p.action.type === 'liveClose') {
-    return { head: `Close ${str(p.action.qty) || `all ${qtyWord(item.held)}`} · ${str(item.asset)}`, usd: item.usd !== undefined ? `≈ ${dollars(item.usd)}` : '', path: `${str(item.venueName)} · at market, it only shrinks the position` };
+    const head = str(p.action.qty) ? t('money.sellMany.closeQty', { qty: str(p.action.qty), asset: str(item.asset) }) : t('money.sellMany.closeAll', { qty: qtyWord(item.held), asset: str(item.asset) });
+    return { head, usd: item.usd !== undefined ? `≈ ${dollars(item.usd)}` : '', path: t('money.sellMany.closePath', { venue: str(item.venueName) }) };
   }
   const q = isRecord(p.quote?.order) ? p.quote.order : {};
-  return { head: str(q.words), usd: typeof q.notionalUsd === 'number' ? `≈ ${dollars(q.notionalUsd)}` : '', path: `${str(item.venueName)} · at market${str(q.note) ? ` · ${q.note}` : ''}` };
+  return { head: str(q.words), usd: typeof q.notionalUsd === 'number' ? `≈ ${dollars(q.notionalUsd)}` : '', path: str(q.note) ? t('money.sellMany.marketNote', { venue: str(item.venueName), note: q.note }) : t('money.sellMany.market', { venue: str(item.venueName) }) };
 }
 
 // a preparation the Account made: a 200 with an action and the fields it shows
@@ -78,7 +79,7 @@ export function startSellMany({ store, getJson, owner, sendOrder = () => {}, aft
     try { body = await getJson(SELLABLE); } catch (e) { body = e?.body ?? null; }
     if (!live(mine)) return;
     if (!isRecord(body) || body.ok === false) {
-      set({ status: 'picking', message: str(body?.refusal?.message) || str(body?.error) || 'What is held could not be read.' });
+      set({ status: 'picking', message: str(body?.refusal?.message) || str(body?.error) || t('money.sellMany.unread') });
       return;
     }
     set({ status: 'picking', ...smSellable(body, str(venue)) });
@@ -115,7 +116,7 @@ export function startSellMany({ store, getJson, owner, sendOrder = () => {}, aft
       const r = await owner.prepare(leg.draft);
       if (!live(mine)) return;
       const p = preparedOf(r);
-      setLeg(i, p ? { state: 'ready', prepared: p } : { state: 'refused', why: whyOf(r) || 'Refused' });
+      setLeg(i, p ? { state: 'ready', prepared: p } : { state: 'refused', why: whyOf(r) || t('money.sellMany.refused') });
     }
   }
 
@@ -146,25 +147,25 @@ export function startSellMany({ store, getJson, owner, sendOrder = () => {}, aft
           const again = await owner.prepare(leg.draft);
           if (!live(mine)) break;
           p = preparedOf(again);
-          if (!p) { setLeg(i, { state: 'refused', why: whyOf(again) || 'Refused' }); continue; }
+          if (!p) { setLeg(i, { state: 'refused', why: whyOf(again) || t('money.sellMany.refused') }); continue; }
           setLeg(i, { prepared: p });
         }
         const r = await owner.submit(p);
         if (!live(mine)) break;
-        if (refusedAt(r)) { setLeg(i, { state: 'refused', why: whyOf(r) || 'Refused' }); continue; }
+        if (refusedAt(r)) { setLeg(i, { state: 'refused', why: whyOf(r) || t('money.sellMany.refused') }); continue; }
         const o = r.body?.kind === 'order' && isRecord(r.body.order) ? r.body.order : null;
         if (o && o.walletTxs && !o.ref) {
           waiting += 1;
-          setLeg(i, { state: 'wallet', said: WALLET_WORDS });
+          setLeg(i, { state: 'wallet', said: walletWords() });
           try { sendOrder(o); } catch { /* it still waits under Under way */ }
           continue;
         }
         done += 1;
         const said = saidOf(r.body);
-        setLeg(i, { state: 'sold', said: said ? `Sold · ${said}` : 'Sold' });
+        setLeg(i, { state: 'sold', said: said ? t('money.sellMany.soldSaid', { said }) : t('money.sellMany.sold') });
       }
     } finally {
-      if (live(mine)) set({ status: 'done', said: `Sell many: ${done} of ${plural(go.length, 'sale')} went through${waiting ? `, ${waiting} waiting for your wallet` : ''}` });
+      if (live(mine)) set({ status: 'done', said: waiting ? tn('money.sellMany.doneWaiting', go.length, { done, waiting }) : tn('money.sellMany.done', go.length, { done }) });
       afterAction('sellMany');
     }
   }

@@ -17,6 +17,13 @@ import { renderStatus } from '../../client/js/render/messages.js';
 import { boot } from '../../client/js/app.js';
 import { fakeWindow } from './helpers/fake-dom.js';
 import { valueEditor } from './helpers/value-editor.js';
+import { proveWallet, walletFor, switchChain, sendTxs, mined } from '../../client/js/wire/wallet.js';
+import { startWalletSend, noKey } from '../../client/js/host/wallet-send.js';
+import { startAccount } from '../../client/js/host/account.js';
+import { startSellMany, smLegWords } from '../../client/js/host/sell-many.js';
+import { startIdentity, CONNECT_WORDS } from '../../client/js/host/identity.js';
+import { identityOf } from '../../client/js/host/identity-view.js';
+import { fakeProvider, ADDRESS } from './helpers/fake-wallet.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
@@ -190,4 +197,88 @@ test("app.js's upload line: a failure with no words of its own names the file", 
   } finally {
     store.timers.clear();
   }
+});
+
+// ── the Account's lines the host writes (plan 6 Task 6) ──
+
+const refuses = message => Object.assign(new Error(message), { code: 4001 });
+const wallet = (answers, name = 'A&B <W>') => ({ id: 'w', name, icon: '', provider: fakeProvider({ answers }) });
+const rejects = async (p, message) => assert.equal(await p.then(() => 'resolved', e => e.message), message);
+
+test("the wallet module's refusals, in its words or the wallet's, each param as given", async () => {
+  await rejects(proveWallet(wallet({ eth_requestAccounts: () => [] }), async () => ({})), 'the wallet gave no address');
+  await rejects(proveWallet(wallet({ eth_requestAccounts: () => { throw {}; } }), async () => ({})), 'the wallet refused');
+  await rejects(proveWallet(wallet({}), async () => ({ status: 500, body: {} })), 'no sentence to sign');
+  const post = async path => (path.endsWith('/challenge') ? { status: 200, body: { message: 'sign me' } } : { status: 409, body: {} });
+  await rejects(proveWallet(wallet({}), post), 'the signature did not check');
+  await rejects(walletFor([wallet({ eth_accounts: () => [], eth_requestAccounts: () => [] })], ADDRESS), `No wallet on this page holds ${ADDRESS.slice(0, 8)}…${ADDRESS.slice(-4)}`);
+  await rejects(switchChain(wallet({ wallet_switchEthereumChain: () => { throw refuses("<no> & won't"); } }), '0x2105'), "A&B <W> did not switch to the right network: <no> & won't");
+  const unknown = () => { throw Object.assign(new Error('unknown'), { code: 4902 }); };
+  await rejects(switchChain(wallet({ wallet_switchEthereumChain: unknown, wallet_addEthereumChain: () => { throw refuses('<no>'); } }), '0x1237'), 'A&B <W> did not add Robinhood Chain: <no>');
+  await rejects(sendTxs(wallet({}), []), 'nothing for the wallet to send');
+  const hash = '0x' + 'ab'.repeat(32);
+  await rejects(mined(wallet({ eth_getTransactionReceipt: () => ({ blockNumber: '0x1', status: '0x0' }) }), hash), `transaction 0xababab…abab failed on chain`);
+  await rejects(mined(wallet({ eth_getTransactionReceipt: () => null }), hash, { schedule: fn => fn(), everyMs: 1, withinMs: 1 }), 'transaction 0xababab…abab is not on chain yet: try again in a minute');
+});
+
+test("the wallet send's lines: no key, nothing to send, a report the Account did not take", async () => {
+  const PAY = { id: 'p<1>', at: 'x', status: 'authorized' };
+  const store = { s: emptyState(), get() { return this.s; }, dispatch() {} };
+  const page = { ok: true, payments: [PAY], orders: [] };
+  const run = (post = async () => ({ status: 200, body: { ok: true } })) => startWalletSend({ store, post, getJson: async () => page, getWallets: async () => [wallet({})], schedule: fn => fn() });
+  assert.equal(noKey(), 'Nothing was sent: this one carries no id the Account can send for. Refresh and try again.');
+  assert.equal((await run().payment({}, null, [])).said, noKey());
+  assert.equal((await run().payment(PAY, null, [])).said, 'p<1> has nothing for your wallet to send');
+  const TX = { chainIdHex: '0x2105', from: ADDRESS, to: ADDRESS, data: '0x', value: '0x0' };
+  const sent = await run(async () => ({ status: 409, body: { error: "<no> & won't" } })).payment(PAY, TX, []);
+  assert.match(sent.said, /^<no> & won't\. Your wallet sent 0x\w{6}…\w{4}: Report again reports that same transaction, it does not send another$/);
+  const silent = await run(async () => ({ status: 500, body: {} })).payment(PAY, TX, []);
+  assert.match(silent.said, /^the account could not take the transaction\. Your wallet sent /);
+});
+
+test("the Account's own lines: an address for another account, a sign-in that did not start or finish", async () => {
+  const sr = createStore({ initial: emptyState(), reducers });
+  const answers = { receive: { ok: true, venue: 'other', address: '0x1' }, status: { ok: true, status: 'failed' } };
+  let started = { status: 500, body: {} };
+  const account = startAccount({
+    store: sr, getJson: async path => (path.startsWith('/data/account/receive') ? answers.receive : answers.status), post: async () => started,
+    now: () => 1, schedule: () => 0, cancelTimer: () => {}, openTab: () => null,
+  });
+  await account.receive({ venue: 'v', asset: 'USDC', network: 'Base' });
+  assert.equal(sr.get().account.receive['v|USDC|Base'].message, 'The account answered for another account or network: nothing is shown. Read again.');
+  const RH = { connector: 'live:rh', kind: 'robinhood', label: 'Robinhood' };
+  await account.signIn(RH);
+  assert.equal(sr.get().account.signIn.message, 'The sign-in could not start.');
+  started = { status: 200, body: { url: 'https://rh.example/o', state: 's1' } };
+  await account.signIn(RH);
+  assert.equal(sr.get().account.signIn.message, 'The sign-in did not finish.');
+  account.close();
+});
+
+test("Connect Telegram's lines, and a connected network's trouble, each in its words", async () => {
+  const sr = createStore({ initial: emptyState(), reducers });
+  const id = startIdentity({ store: sr, getJson: async () => ({}), post: async () => ({ status: 200, body: {} }), subtle: null, schedule: () => 0, cancelTimer: () => {}, openSheet: () => {} });
+  id.openConnect();
+  await id.next({ value: 'tok' });
+  assert.equal(sr.get().identity.connect.error, 'This browser cannot fingerprint the token on this page: open the face at its 127.0.0.1 address.');
+  assert.deepEqual(Object.values(CONNECT_WORDS).map(f => f()), ['Paste the token from BotFather first.', 'This browser cannot fingerprint the token on this page: open the face at its 127.0.0.1 address.',
+    'The account refused the token.', 'This connection waited ten minutes and expired: nothing was kept. Start again.', 'The account did not say who wrote: start again.']);
+  const problem = n => identityOf({ ok: true, networks: [{ network: 'telegram', state: 'connected', ...n }] }).networks.telegram.problem;
+  assert.equal(problem({ pollFailing: {} }), 'Not hearing Telegram.');
+  assert.equal(problem({ pollFailing: { reason: '<502> & down' } }), 'Not hearing Telegram: <502> & down.');
+  assert.equal(problem({ conflictAt: 'x' }), "Another program reads this bot's messages (since x): stop it, or Gravit hears nothing.");
+});
+
+test("Sell many's line for a read that failed in no words of the Account's", async () => {
+  const sr = createStore({ initial: emptyState(), reducers });
+  const sm = startSellMany({ store: sr, getJson: async () => { throw new Error('x'); }, owner: {} });
+  await sm.open('');
+  assert.equal(sr.get().sellMany.message, 'What is held could not be read.');
+});
+
+test("a Sell many leg in words: a close of all of it, a market sale with the Account's note", () => {
+  const item = { asset: 'BTC', held: 0.5, usd: 100, venueName: 'A&B' };
+  assert.deepEqual(smLegWords({ item, prepared: { action: { type: 'liveClose', qty: '' } } }), { head: 'Close all 0.5 · BTC', usd: '≈ $100.00', path: 'A&B · at market, it only shrinks the position' });
+  const sale = { item, prepared: { action: { type: 'liveOrder' }, quote: { order: { words: 'Sell 0.5 BTC', notionalUsd: 50, note: '<thin> book' } } } };
+  assert.deepEqual(smLegWords(sale), { head: 'Sell 0.5 BTC', usd: '≈ $50.00', path: 'A&B · at market · <thin> book' });
 });

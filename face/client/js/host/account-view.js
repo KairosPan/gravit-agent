@@ -6,6 +6,8 @@
 // stays the Account's ISO string, its words the renderer's. No DOM.
 import { number } from '../wire/account-model.js';
 import { fmtDate } from '../time.js';
+import { HOST_NAME } from '../wire/speaker.js';
+import { t, tn } from '../i18n/words.js';
 
 // ── The seat box, and the Account's words it shares with the views below ──
 
@@ -19,8 +21,8 @@ const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
 const str = v => (typeof v === 'string' ? v : '');
 const EMPTY_SEAT = { service: '', mode: '', writes: '', seat: '', limits: [], venues: [], cards: '', url: '' };
 // the Account's mode and its writes (`connectLive.writes`) as its page words them: the seat box's and the head's alike
-const modeWords = mode => (mode === 'guard' ? 'Guard' : mode === 'open' ? 'Beast' : '');
-const writesWords = w => (w && typeof w === 'object' ? (w.on === true ? `Trading on${isNum(w.capUsd) ? ` · ${dollars(w.capUsd)} a move` : ''}` : 'Read-only') : '');
+const modeWords = mode => (mode === 'guard' ? t('account.mode.guard') : mode === 'open' ? t('account.mode.beast') : '');
+const writesWords = w => (w && typeof w === 'object' ? (w.on === true ? (isNum(w.capUsd) ? t('account.writes.onCap', { cap: dollars(w.capUsd) }) : t('account.writes.on')) : t('account.writes.readOnly')) : '');
 // one limit in one line, `trade · paper-1 · $100 an order · $850 of $1,000 left · expired`: the seat's (its perOrderUsd) and
 // an Account agent's (its perPaymentUsd) alike. An amount that is not there is no clause, never $0; a word that is not a string, none.
 const limitWords = (l, perOrderUsd) => {
@@ -28,9 +30,9 @@ const limitWords = (l, perOrderUsd) => {
   return [
     str(l.scope),
     (Array.isArray(l.allow) ? l.allow : []).map(str).filter(Boolean).join(', '),
-    isNum(perOrderUsd) ? `${dollars(perOrderUsd)} an order` : '',
-    budget !== null && left !== null ? `${dollars(left)} of ${dollars(budget)} left` : '',
-    l.expired === true ? 'expired' : '',
+    isNum(perOrderUsd) ? t('account.limit.perOrder', { amount: dollars(perOrderUsd) }) : '',
+    budget !== null && left !== null ? t('account.limit.left', { left: dollars(left), budget: dollars(budget) }) : '',
+    l.expired === true ? t('account.limit.expired') : '',
   ].filter(Boolean).join(' · ');
 };
 
@@ -42,28 +44,28 @@ export function seatWords(data) {
   const url = typeof data.url === 'string' ? data.url : '';
   let host = url;
   try { host = new URL(url).host; } catch { /* a bare address stays as it is */ }
-  if (data.reachable !== true) return { ...EMPTY_SEAT, service: `${host} · ${data.error === 'disabled' ? 'seat disabled' : 'not reachable'}`, url };
+  if (data.reachable !== true) return { ...EMPTY_SEAT, service: data.error === 'disabled' ? t('account.seat.disabled', { host }) : t('account.seat.unreachable', { host }), url };
   const mode = modeWords(data.mode);
   const writes = writesWords(data.writes);
   const s = data.seat && typeof data.seat === 'object' ? data.seat : {};
-  const name = typeof s.name === 'string' && s.name ? s.name : 'Gravit';
-  const seat = s.status === 'admitted' ? `${name} · admitted${isNum(s.validUntil) ? ` until ${fmtDate(s.validUntil)}` : ''}`
-    : s.status === 'knocking' ? `${name} · knocking — let it in under Account › Agents`
-      : s.status === 'expired' ? `${name} · expired`
-        : s.status === 'revoked' ? `${name} · revoked`
-          : s.status === 'unknown' ? `${name} · on the account · standing unknown`
-            : `${name} · not on the account`;
+  const name = typeof s.name === 'string' && s.name ? s.name : HOST_NAME;
+  const seat = s.status === 'admitted' ? (isNum(s.validUntil) ? t('account.seat.admittedUntil', { name, date: fmtDate(s.validUntil) }) : t('account.seat.admitted', { name }))
+    : s.status === 'knocking' ? t('account.seat.knocking', { name })
+      : s.status === 'expired' ? t('account.seat.expired', { name })
+        : s.status === 'revoked' ? t('account.seat.revoked', { name })
+          : s.status === 'unknown' ? t('account.seat.unknown', { name })
+            : t('account.seat.absent', { name });
   const limits = (Array.isArray(s.limits) ? s.limits : []).map(l => limitWords(l, l.perOrderUsd));
   const venues = (Array.isArray(data.venues) ? data.venues : []).map(v => ({
     id: typeof v.id === 'string' ? v.id : '',
     name: typeof v.name === 'string' && v.name ? v.name : (typeof v.id === 'string' ? v.id : ''),
     paper: v.paper === true,
     usd: isNum(v.usd) ? dollars(v.usd) : '',
-    note: typeof v.notServed === 'string' && v.notServed ? v.notServed : (v.stale === true ? 'stale' : ''),
+    note: typeof v.notServed === 'string' && v.notServed ? v.notServed : (v.stale === true ? t('account.venue.stale') : ''),
   }));
   const n = Array.isArray(data.cards) ? data.cards.length : 0;
-  const cards = n === 0 ? '' : `${n} card${n === 1 ? '' : 's'} waiting`;
-  return { service: `${host} · reachable`, mode, writes, seat, limits, venues, cards, url };
+  const cards = n === 0 ? '' : tn('account.seat.cards', n);
+  return { service: t('account.seat.reachable', { host }), mode, writes, seat, limits, venues, cards, url };
 }
 
 // ── The Account's own payloads (spec 2026-10-22 §6.2), each as its /data/account… route answers it ──
@@ -71,7 +73,7 @@ export function seatWords(data) {
 // a read's list: only an answer (`ok: true`) carries one
 const listOf = (body, key) => (body?.ok === true ? records(body[key]) : []);
 // an ISO time as a number to compare, null when it is not one
-const stamp = at => { const t = typeof at === 'string' ? Date.parse(at) : NaN; return Number.isFinite(t) ? t : null; };
+const stamp = at => { const ms = typeof at === 'string' ? Date.parse(at) : NaN; return Number.isFinite(ms) ? ms : null; };
 // one agent's address and another, in any case (seat.ts compares them so)
 const sameAddress = (a, b) => typeof a === 'string' && typeof b === 'string' && a !== '' && a.toLowerCase() === b.toLowerCase();
 // the largest value first, an unpriced row last; the newest first, a time that does not parse last; a tie keeps the Account's order
@@ -100,13 +102,13 @@ export function headOf(page) {
  *  held; the holdings read repeats it — leads, unless it is zero or does not parse while a paper venue is connected and the
  *  paper lens (`holdings?cost=1&paper=1`) has a total: then Paper leads, and real money, when there is a figure, is second. */
 export function worthOf(page, holdingsBody, paperBody) {
-  if (!pageOk(page)) return { lead: { label: 'Net worth', usd: null }, second: null, paperLeads: false };
+  if (!pageOk(page)) return { lead: { label: t('account.worth.net'), usd: null }, second: null, paperLeads: false };
   const real = number(page.totalUsd);
   const paperTotal = number(paperBody?.totalUsd);
   const hasPaper = page.venues.some(v => v?.paper === true);
   const paperLeads = (real === null || real === 0) && hasPaper && paperTotal !== null;
-  if (paperLeads) return { lead: { label: 'Paper', usd: paperTotal }, second: real === null ? null : { label: 'Net worth', usd: real }, paperLeads };
-  return { lead: { label: 'Net worth', usd: real }, second: hasPaper && paperTotal !== null ? { label: 'Paper', usd: paperTotal } : null, paperLeads };
+  if (paperLeads) return { lead: { label: t('account.worth.paper'), usd: paperTotal }, second: real === null ? null : { label: t('account.worth.net'), usd: real }, paperLeads };
+  return { lead: { label: t('account.worth.net'), usd: real }, second: hasPaper && paperTotal !== null ? { label: t('account.worth.paper'), usd: paperTotal } : null, paperLeads };
 }
 
 /** The change line for the range, from `history` (or `history?paper=1`): `changeUsd`, `changePct` — the Account's percent, 0.72
@@ -161,7 +163,7 @@ export function orderRowsOf(orders, keys) {
       id: str(o.id), venue: str(o.venue), venueName: str(o.venueName), symbol: str(o.symbol), side: str(o.side), type: str(o.type),
       qty: number(o.qty), filledQty: number(o.filledQty), limitPrice: number(o.limitPrice), status: o.status,
       kind: str(o.kind), stopPrice: number(o.stopPrice), base: str(o.base),
-      who: o.authority === 'owner' ? 'You' : name ? `Agent · ${name}` : 'An agent',
+      who: o.authority === 'owner' ? t('agents.who.you') : name ? t('agents.who.named', { name }) : t('agents.who.unnamed'),
       paper: o.paper === true,
       // what keeps an order from being changed (the retired page's tkAmendable, and the Account's own refusal of a change not yet
       // confirmed): waiting for the wallet to send it, being canceled, not followed since a restart, a change the venue has not confirmed
@@ -185,7 +187,7 @@ export function marketOldOf(holdingsBody) {
  *  whose stats and positions both failed is named once. */
 export function missingWords(missing) {
   const words = records(missing).filter(m => typeof m.venue === 'string' && m.venue)
-    .map(m => `${typeof m.venueName === 'string' && m.venueName ? m.venueName : m.venue} did not answer`);
+    .map(m => t('venues.missing', { venue: typeof m.venueName === 'string' && m.venueName ? m.venueName : m.venue }));
   return [...new Set(words)];
 }
 
@@ -221,9 +223,9 @@ export function statementCsvOf(rows) {
  *  never failed); it is not answering since a failure as new as that or newer; it is not read yet when neither is on record. */
 function healthOf(h) {
   const okAt = stamp(h?.lastOkAt), failAt = stamp(h?.lastFailAt);
-  if (okAt !== null && (failAt === null || okAt > failAt)) return { health: 'answers', healthWords: 'Answers', since: null };
-  if (failAt !== null) return { health: 'not-answering', healthWords: 'Not answering', since: h.lastFailAt };
-  return { health: 'not-read', healthWords: 'Not read yet', since: null };
+  if (okAt !== null && (failAt === null || okAt > failAt)) return { health: 'answers', healthWords: t('venues.health.answers'), since: null };
+  if (failAt !== null) return { health: 'not-answering', healthWords: t('venues.health.notAnswering'), since: h.lastFailAt };
+  return { health: 'not-read', healthWords: t('venues.health.notRead'), since: null };
 }
 
 /** What a venue does, in the words its row draws. `watchOnly` is not one of them: the Account sets it on every live connection
@@ -231,10 +233,10 @@ function healthOf(h) {
 function doesOf(v) {
   const can = isRecord(v.liveCan) ? v.liveCan : {};
   return [
-    v.trade?.can === true ? 'Trades' : '',
-    can.transfer === true || can.withdraw === true ? 'Moves money' : '',
-    can.receive === true ? 'Receives' : '',
-    v.earn?.can === true ? 'Earns' : '',
+    v.trade?.can === true ? t('venues.does.trades') : '',
+    can.transfer === true || can.withdraw === true ? t('venues.does.moves') : '',
+    can.receive === true ? t('venues.does.receives') : '',
+    v.earn?.can === true ? t('venues.does.earns') : '',
   ].filter(Boolean);
 }
 
@@ -295,7 +297,7 @@ export function agentsOf(agentsBody, seatView, page = null) {
   const agents = read ? records(agentsBody.agents) : [];
   if (!w.seat) return agents.map(agentRow);
   const s = seatView.seat && typeof seatView.seat === 'object' ? seatView.seat : {};
-  const name = typeof s.name === 'string' && s.name ? s.name : 'Gravit';   // the name seatWords gives the seat
+  const name = typeof s.name === 'string' && s.name ? s.name : HOST_NAME;   // the name seatWords gives the seat
   const isSeat = typeof s.address === 'string' && s.address ? a => sameAddress(a.address, s.address) : a => sameName(a.name, name);
   const seats = agents.filter(isSeat);
   // the seat's knock is bound by the seat view's address alone, and only when exactly one request stands there: a name can be
@@ -322,7 +324,7 @@ export function cardsOf(page) {
   const groups = new Map();
   for (const c of records(page.cards)) {
     const named = str(c.agentName);
-    const key = typeof c.agent === 'string' && c.agent ? `agent:${c.agent.toLowerCase()}` : `name:${named || 'An agent'}`;
+    const key = typeof c.agent === 'string' && c.agent ? `agent:${c.agent.toLowerCase()}` : `name:${named || t('agents.who.unnamed')}`;
     const group = groups.get(key) ?? { agentName: '', cards: [] };
     if (!group.agentName) group.agentName = named;
     group.cards.push({
@@ -331,7 +333,7 @@ export function cardsOf(page) {
     });
     groups.set(key, group);
   }
-  return [...groups.values()].map(g => ({ agentName: g.agentName || 'An agent', cards: g.cards }));
+  return [...groups.values()].map(g => ({ agentName: g.agentName || t('agents.who.unnamed'), cards: g.cards }));
 }
 
 /** The agents' asks (the page's `asks`: a bigger budget, a venue, a session), in their words, each with what its grant is

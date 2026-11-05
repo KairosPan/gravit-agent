@@ -4,6 +4,7 @@
 // chains a bridge joins) with the page's own fallbacks; the Receive rows, one account × one network each; and Move's sources,
 // kinds and destinations. Every word is the retired page's. No DOM, no store.
 import { pageOk, writesOn } from './account-view.js';
+import { t } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -11,9 +12,9 @@ const str = v => (typeof v === 'string' ? v : '');
 
 // core.js:266-267 — the lists the page keeps for an Account that does not publish its own yet
 const DOLLARS_KNOWN = ['USD', 'USDC', 'USDC.E', 'USDT', 'USDT0', 'USD₮0', 'USD₮', 'FDUSD', 'PYUSD', 'DAI', 'TUSD', 'USDP', 'PUSD', 'USDG'];
-const NETWORKS_KNOWN = ['Arbitrum', 'Base', 'Ethereum', 'Optimism', 'Polygon', 'BNB Chain'];
+const NETWORKS_KNOWN = ['Arbitrum', 'Base', 'Ethereum', 'Optimism', 'Polygon', 'BNB Chain']; // en-kept: chains' names, matched
 // money.js:211 — the EVM networks a wallet's one address is said on first
-const RCV_EVM = ['Base', 'Arbitrum', 'Optimism', 'Polygon', 'Ethereum'];
+const RCV_EVM = ['Base', 'Arbitrum', 'Optimism', 'Polygon', 'Ethereum']; // en-kept: chains' names, matched
 
 // the page's venues as it lists them (its own records, every field the rules read)
 const venuesOfPage = page => (pageOk(page) ? records(page.venues) : []);
@@ -64,7 +65,7 @@ export function canReceive(v) {
 // ── Receive (money.js:195-235) ──
 
 // money.js:197 — the networks an address can be asked for: the chains money moves on and the chains a bridge joins
-const receiveNetworks = page => (listed(page, 'networks') ? [...new Set([...networksOf(page), ...bridgeChainsOf(page)])] : [...NETWORKS_KNOWN, 'Robinhood Chain']);
+const receiveNetworks = page => (listed(page, 'networks') ? [...new Set([...networksOf(page), ...bridgeChainsOf(page)])] : [...NETWORKS_KNOWN, 'Robinhood Chain']); // en-kept: a chain's name, matched
 // money.js:202 — what one might send there: the dollars first, then what the Account already holds there
 const receiveAssets = v => [...new Set(['USDC', 'USDT', 'ETH', ...records(v.holdings).filter(h => h.class !== 'cash').map(h => String(h.asset).toUpperCase())])]
   .filter(a => /^[A-Z0-9.]{1,15}$/.test(a));
@@ -88,10 +89,10 @@ export function receiveRowsOf(page) {
   for (const v of connected(page).filter(canReceive)) {
     const base = { venue: str(v.id), venueName: str(v.name) || str(v.id) };
     if (v.address) {
-      if (rcvPolymarket(v)) rows.push({ id: `${v.id}|Polygon`, ...base, network: 'Polygon', networks: ['Polygon'], asset: 'PUSD', assets: ['PUSD'], chip: false, kind: 'wallet' });
+      if (rcvPolymarket(v)) rows.push({ id: `${v.id}|Polygon`, ...base, network: 'Polygon', networks: ['Polygon'], asset: 'PUSD', assets: ['PUSD'], chip: false, kind: 'wallet' }); // en-kept: a chain's name
       else {
         const nets = rcvEvmNetworks(page);
-        rows.push({ id: `${v.id}|evm`, ...base, network: nets.includes('Base') ? 'Base' : nets[0] || 'Base', networks: nets, asset: 'USDC', assets: ['USDC'], chip: false, kind: 'wallet' });
+        rows.push({ id: `${v.id}|evm`, ...base, network: nets.includes('Base') ? 'Base' : nets[0] || 'Base', networks: nets, asset: 'USDC', assets: ['USDC'], chip: false, kind: 'wallet' }); // en-kept: a chain's name
       }
       continue;
     }
@@ -103,7 +104,7 @@ export function receiveRowsOf(page) {
 }
 
 /** money.js:235 — a row's network words: one network, or every EVM network with the same address. */
-export const receiveNetworkWords = row => (row.networks.length > 1 ? `All EVM networks: ${row.networks.join(', ')}` : row.network);
+export const receiveNetworkWords = row => (row.networks.length > 1 ? t('money.receive.allEvm', { networks: row.networks.join(', ') }) : row.network);
 
 // ── Move (money.js:59-191) ──
 
@@ -123,11 +124,11 @@ export function moveKindsOf(v) {
   const c = v.liveCan;
   const ledgers = Array.isArray(c.ledgers) ? c.ledgers : [];
   return [
-    ...(c.withdraw !== false && !c.send ? [{ value: 'withdraw', label: 'Withdraw to another account of yours' }] : []),
-    ...(c.send ? [{ value: 'send', label: 'Send from this wallet' }] : []),
-    ...(c.send === 'wallet' && v.proven ? [{ value: 'bridge', label: 'Across chains' }] : []),
-    ...(ledgers.length > 1 && c.transfer !== false ? [{ value: 'transfer', label: 'Between its own ledgers' }] : []),
-    ...(c.swap !== false && !c.send ? [{ value: 'swap', label: 'Swap stablecoins' }] : []),
+    ...(c.withdraw !== false && !c.send ? [{ value: 'withdraw', label: t('money.move.withdraw') }] : []),
+    ...(c.send ? [{ value: 'send', label: t('money.move.send') }] : []),
+    ...(c.send === 'wallet' && v.proven ? [{ value: 'bridge', label: t('money.move.bridge') }] : []),
+    ...(ledgers.length > 1 && c.transfer !== false ? [{ value: 'transfer', label: t('money.move.transfer') }] : []),
+    ...(c.swap !== false && !c.send ? [{ value: 'swap', label: t('money.move.swap') }] : []),
   ];
 }
 
@@ -217,7 +218,7 @@ export function earnListOf(earnBody, page, side) {
   const failed = missing.filter(m => !seen.has(str(m.venue)) && seen.add(str(m.venue))).map(m => ({ venue: str(m.venue), venueName: str(m.venueName) || str(m.venue), why: str(m.why) }));
   // earn.js:78 — a venue whose key may not put money to earn, in its words
   const refusing = records(body.venues).filter(v => v.can === false && !away.has(str(v.venue)))
-    .map(v => ({ venue: str(v.venue), venueName: str(v.venueName) || str(v.venue), why: str(v.whyNot) || "this key can't put money to earn" }));
+    .map(v => ({ venue: str(v.venue), venueName: str(v.venueName) || str(v.venue), why: str(v.whyNot) || t('money.earn.keyCannot') }));
   return { products: list.map(row), away: [...away.values()], failed, refusing };
 }
 

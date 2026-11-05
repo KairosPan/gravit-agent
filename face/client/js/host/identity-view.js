@@ -3,11 +3,22 @@
 // (Telegram in this round; Slack the next, iMessage later), what reaches them where (the routing's five rows, the face always on),
 // quiet hours on New York's clock, and Not you, the strangers who wrote to the bot. And the routing as the string the owner signs
 // (account/src/portfolio/identity/kinds.ts formatRouting, the same rule). No DOM, no store.
+import { HOST_NAME } from '../wire/speaker.js';
+import { t } from '../i18n/words.js';
 
-/** the routing's rows, in the account's order, with their words */
-export const ROUTE_ROWS = [['chat', 'Chat with Gravit'], ['alerts', 'Watch alerts'], ['brief', 'Pre-close brief'], ['cards', 'Cards waiting'], ['fills', 'Fills and reports']];
+// the routing's rows, in the account's order, and each one's words
+const ROWS = ['chat', 'alerts', 'brief', 'cards', 'fills'];
+const ROW_WORDS = {
+  chat: () => t('identity.route.chat', { name: HOST_NAME }),
+  alerts: () => t('identity.route.alerts'),
+  brief: () => t('identity.route.brief'),
+  cards: () => t('identity.route.cards'),
+  fills: () => t('identity.route.fills'),
+};
+/** the routing's rows, in the account's order, with their words (read when called: the words are the table's now) */
+export const routeRows = () => ROWS.map(row => [row, ROW_WORDS[row]()]);
 /** the networks the tab draws, in its order; only Telegram connects in this round */
-export const NETWORKS = [['telegram', 'Telegram'], ['imessage', 'iMessage'], ['slack', 'Slack']];
+export const NETWORKS = [['telegram', 'Telegram'], ['imessage', 'iMessage'], ['slack', 'Slack']]; // en-kept: the networks' names
 /** the networks the account speaks on now (kinds.ts NETWORKS) */
 const SPOKEN = ['telegram'];
 
@@ -19,13 +30,13 @@ const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
  *  with none written `row=` — `chat=telegram;alerts=telegram;brief=;cards=telegram;fills=telegram`. */
 export function formatRouting(routing) {
   const r = isRecord(routing) ? routing : {};
-  return ROUTE_ROWS.map(([row]) => `${row}=${[...new Set((Array.isArray(r[row]) ? r[row] : []).filter(n => typeof n === 'string'))].sort().join(',')}`).join(';');
+  return ROWS.map(row => `${row}=${[...new Set((Array.isArray(r[row]) ? r[row] : []).filter(n => typeof n === 'string'))].sort().join(',')}`).join(';');
 }
 
 /** The account's routing as read: each row the networks it names that the account speaks on, every row present. */
 export function routingOf(read) {
   const r = isRecord(read?.routing) ? read.routing : {};
-  return Object.fromEntries(ROUTE_ROWS.map(([row]) => [row, [...new Set((Array.isArray(r[row]) ? r[row] : []).filter(n => SPOKEN.includes(n)))].sort()]));
+  return Object.fromEntries(ROWS.map(row => [row, [...new Set((Array.isArray(r[row]) ? r[row] : []).filter(n => SPOKEN.includes(n)))].sort()]));
 }
 
 export const sameRouting = (a, b) => formatRouting(a) === formatRouting(b);
@@ -33,7 +44,7 @@ export const sameRouting = (a, b) => formatRouting(a) === formatRouting(b);
 /** The routing with one tick changed: `network` in `row` on or off. A row or network the tab does not know leaves it as it is. */
 export function tickRouting(routing, row, network, on) {
   const base = isRecord(routing) ? routing : {};
-  if (!ROUTE_ROWS.some(([r]) => r === row) || !SPOKEN.includes(network)) return base;
+  if (!ROWS.includes(row) || !SPOKEN.includes(network)) return base;
   const now = Array.isArray(base[row]) ? base[row] : [];
   const next = on ? [...new Set([...now, network])].sort() : now.filter(n => n !== network);
   return { ...base, [row]: next };
@@ -41,13 +52,15 @@ export function tickRouting(routing, row, network, on) {
 
 // a connected network's trouble in one line, the worst first: the operator blocked the bot, another poller holds the token, polls fail
 function problemOf(n, clock) {
-  if (n.blocked === true) return 'You blocked the bot in Telegram: unblock it, or nothing reaches you there.';
+  if (n.blocked === true) return t('identity.problem.blocked');
   const conflict = str(n.conflictAt);
-  if (conflict) return `Another program reads this bot's messages${clock(conflict) ? ` (since ${clock(conflict)})` : ''}: stop it, or Gravit hears nothing.`;
+  if (conflict) return clock(conflict) ? t('identity.problem.conflictSince', { since: clock(conflict), name: HOST_NAME }) : t('identity.problem.conflict', { name: HOST_NAME });
   if (isRecord(n.pollFailing)) {
     const since = clock(str(n.pollFailing.since));
     const reason = str(n.pollFailing.reason);
-    return `Not hearing Telegram${since ? ` since ${since}` : ''}${reason ? `: ${reason}` : ''}.`;
+    if (since && reason) return t('identity.problem.pollSinceWhy', { since, reason });
+    if (since) return t('identity.problem.pollSince', { since });
+    return reason ? t('identity.problem.pollWhy', { reason }) : t('identity.problem.poll');
   }
   return '';
 }
@@ -70,7 +83,7 @@ export function identityOf(read, draft = null, clock = iso => iso) {
     : { state: 'none' };
   const routing = isRecord(draft) ? routingOf({ routing: draft }) : routingOf(ok ? read : null);
   const on = telegram.state === 'connected';
-  const grid = ROUTE_ROWS.map(([row, label]) => ({
+  const grid = routeRows().map(([row, label]) => ({
     row, label, face: true,
     telegram: { on: routing[row].includes('telegram'), enabled: on },
     imessage: { on: false, enabled: false },

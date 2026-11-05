@@ -13,8 +13,9 @@
 //
 // Closing the drawer, Back from sheet 2, Start again, and the owner sheet's Cancel on sheet 4 drop the pending connection at once; a
 // page that reloads holds none (the store keeps no connection) and the account's ten minutes cover a tab that died.
-import { ROUTE_ROWS, routingOf, formatRouting } from './identity-view.js';
+import { routeRows, routingOf, formatRouting } from './identity-view.js';
 import { refusedAt, whyOf } from './owner-view.js';
+import { t } from '../i18n/words.js';
 
 /** Sheet 2 reads the pending connection this often (the plan's ruling 5). */
 export const PENDING_POLL_MS = 1_500;
@@ -25,12 +26,13 @@ const PENDING_PATH = '/data/account/identity/pending';
 const NOT_ME_PATH = '/data/account/identity/pending/not-me';
 const DROP_PATH = '/data/account/identity/pending/drop';
 
+// the drawer's own words, each read when said
 export const CONNECT_WORDS = {
-  empty: 'Paste the token from BotFather first.',
-  noSubtle: 'This browser cannot fingerprint the token on this page: open the face at its 127.0.0.1 address.',
-  refused: 'The account refused the token.',
-  expired: 'This connection waited ten minutes and expired: nothing was kept. Start again.',
-  noSender: 'The account did not say who wrote: start again.',
+  empty: () => t('identity.connect.empty'),
+  noSubtle: () => t('identity.connect.noSubtle'),
+  refused: () => t('identity.connect.refused'),
+  expired: () => t('identity.connect.expired'),
+  noSender: () => t('identity.connect.noSender'),
 };
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -42,16 +44,16 @@ const randomOf = n => globalThis.crypto.getRandomValues(new Uint8Array(n));
  *  `keyHash` the hex SHA-256 of the salt's bytes then the token's UTF-8 bytes. */
 export async function fingerprintOf(subtle, token, random = randomOf) {
   const salt = random(16);
-  const t = new TextEncoder().encode(token);
-  const both = new Uint8Array(salt.length + t.length);
+  const bytes = new TextEncoder().encode(token);
+  const both = new Uint8Array(salt.length + bytes.length);
   both.set(salt);
-  both.set(t, salt.length);
+  both.set(bytes, salt.length);
   try {
     const digest = await subtle.digest('SHA-256', both);
     return { salt: hex(salt), keyHash: hex(new Uint8Array(digest)) };
   } finally {
     both.fill(0);
-    t.fill(0);
+    bytes.fill(0);
   }
 }
 
@@ -73,7 +75,7 @@ function pendingOf(body) {
 /** The routing a fresh connection signs (the plan's ruling 4): the routing now, `network` ticked in every row. */
 export function connectRoutingOf(read, network = 'telegram') {
   const now = routingOf(read);
-  return formatRouting(Object.fromEntries(ROUTE_ROWS.map(([row]) => [row, [...(now[row] ?? []), network]])));
+  return formatRouting(Object.fromEntries(routeRows().map(([row]) => [row, [...(now[row] ?? []), network]])));
 }
 
 export function startIdentity({ store, getJson, post, subtle, schedule, cancelTimer, now = Date.now, openSheet, loadIdentity = null, random = randomOf }) {
@@ -90,8 +92,8 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
   // the connection's time is up: the account says so, its expiresAt has passed, or — one that cannot be read — ten minutes went by
   const expired = p => {
     if (p?.state === 'expired') return true;
-    const t = Date.parse(str(p?.expiresAt));
-    return Number.isFinite(t) ? t <= now() : now() - waitFrom >= PENDING_WAIT_MS;
+    const ms = Date.parse(str(p?.expiresAt));
+    return Number.isFinite(ms) ? ms <= now() : now() - waitFrom >= PENDING_WAIT_MS;
   };
 
   // sheet 4's Cancel (any close of the owner sheet before it signs) drops the pending connection it was opened for
@@ -123,7 +125,7 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     try {
       body = await getJson(`${PENDING_PATH}?id=${encodeURIComponent(id)}&fresh=1`);
     } catch (err) {
-      if (err?.status === 404) gone = str(err?.body?.error) || CONNECT_WORDS.expired;
+      if (err?.status === 404) gone = str(err?.body?.error) || CONNECT_WORDS.expired();
     }
     const d = connect();
     if (mine !== gen || !d || d.step !== 2 || d.pending?.id !== id) return;
@@ -131,13 +133,13 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     const p = pendingOf(body);
     if (!p) {
       // the account did not answer: said, and read again, unless the connection's time is up
-      if (expired(d.pending)) { set({ error: CONNECT_WORDS.expired, silent: false }); return; }
+      if (expired(d.pending)) { set({ error: CONNECT_WORDS.expired(), silent: false }); return; }
       set({ silent: true });
       armPoll();
       return;
     }
     if (p.state === 'heard' && p.sender) { set({ step: 3, pending: p, error: null, silent: false }); return; }
-    if (expired(p)) { set({ pending: p, error: CONNECT_WORDS.expired, silent: false }); return; }
+    if (expired(p)) { set({ pending: p, error: CONNECT_WORDS.expired(), silent: false }); return; }
     set({ pending: p, error: null, silent: false });
     armPoll();
   }
@@ -155,8 +157,8 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     if (!c || c.step !== 1 || c.busy || sending) return;
     let token = typeof tokenInput?.value === 'string' ? tokenInput.value.trim() : '';
     if (tokenInput) tokenInput.value = '';
-    if (!token) { set({ error: CONNECT_WORDS.empty }); return; }
-    if (!subtle || typeof subtle.digest !== 'function') { token = ''; set({ error: CONNECT_WORDS.noSubtle }); return; }
+    if (!token) { set({ error: CONNECT_WORDS.empty() }); return; }
+    if (!subtle || typeof subtle.digest !== 'function') { token = ''; set({ error: CONNECT_WORDS.noSubtle() }); return; }
     const mine = gen;
     sending = true;
     set({ busy: true, error: null });
@@ -168,16 +170,16 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
       r = await post(TOKEN_PATH, { token, keyHash: fp.keyHash, salt: fp.salt });
       // the account's words, never the token's: a sentence that carried it would be replaced
       words = whyOf(r);
-      if (words.includes(token)) words = CONNECT_WORDS.refused;
+      if (words.includes(token)) words = CONNECT_WORDS.refused();
     } catch {
-      words = fp ? CONNECT_WORDS.refused : CONNECT_WORDS.noSubtle;
+      words = fp ? CONNECT_WORDS.refused() : CONNECT_WORDS.noSubtle();
     } finally {
       token = '';
       sending = false;
     }
     const p = r && !refusedAt(r) ? pendingOf(r.body) : null;
     if (mine !== gen || !connect()) { if (p) void drop(p.id); return; }
-    if (!p) { set({ busy: false, error: words || CONNECT_WORDS.refused }); return; }
+    if (!p) { set({ busy: false, error: words || CONNECT_WORDS.refused() }); return; }
     waitFrom = now();
     set({ step: 2, pending: p, fp, busy: false, error: null, silent: false });
     armPoll();
@@ -192,7 +194,7 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     const r = await post(NOT_ME_PATH, { id: c.pending.id });
     if (mine !== gen || !connect()) return;
     const p = !refusedAt(r) ? pendingOf(r.body) : null;
-    if (!p) { set({ busy: false, error: whyOf(r) || CONNECT_WORDS.expired }); return; }
+    if (!p) { set({ busy: false, error: whyOf(r) || CONNECT_WORDS.expired() }); return; }
     set({ step: 2, pending: p, busy: false, error: null, silent: false });
     armPoll();
   }
@@ -202,7 +204,7 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     const c = connect();
     if (!c || c.step !== 3 || !c.pending?.sender || !c.fp) return;
     const p = c.pending;
-    if (!p.sender.id || !p.bot.id || !p.bot.username) { set({ error: CONNECT_WORDS.noSender }); return; }
+    if (!p.sender.id || !p.bot.id || !p.bot.username) { set({ error: CONNECT_WORDS.noSender() }); return; }
     const seed = {
       pending: p.id, botId: p.bot.id, speaksAs: `@${p.bot.username}`, operatorId: p.sender.id,
       talksOnlyWith: p.sender.handle || p.sender.masked, routing: connectRoutingOf(store.get().identity?.data, p.network || 'telegram'),

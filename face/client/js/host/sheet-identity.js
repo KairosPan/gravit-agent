@@ -6,7 +6,7 @@
 // Each sheet is the account's own owner type (account/src/portfolio/account/sign.ts OwnerAction), every field from the seed. The
 // sheet draws its lines above its fields and its numbered steps above its keys (render/owner.js). host/sheet-view.js delegates the
 // kinds here; the sheet engine (host/sheet.js) prepares the draft and What you sign shows it. No clock. No DOM, no store.
-import { ROUTE_ROWS, formatRouting } from './identity-view.js';
+import { routeRows, formatRouting } from './identity-view.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = v => (typeof v === 'string' ? v : '');
@@ -41,7 +41,7 @@ export function rowsSentOn(routing, network) {
     const i = part.indexOf('=');
     return i < 0 ? [part, []] : [part.slice(0, i), part.slice(i + 1).split(',').filter(Boolean)];
   }));
-  return ROUTE_ROWS.filter(([row]) => (on.get(row) ?? []).includes(network)).map(([, words]) => words);
+  return routeRows().filter(([row]) => (on.get(row) ?? []).includes(network)).map(([, words]) => words);
 }
 
 /** The sheet's title. */
