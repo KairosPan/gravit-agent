@@ -181,7 +181,7 @@ function guardEndOffenders(table, en, keys) {
 
 // every EN key has a ZH value (D35), but in an area a later batch of Task 8 writes; and every such area still lacks one, so the
 // list cannot outlive its batch. Each batch removes its areas; the last deletes the list
-const PENDING_AREAS = ['markets', 'trade', 'desk', 'discover', 'channel', 'modules', 'runSheet', 'lunhui'];
+const PENDING_AREAS = ['discover', 'channel', 'modules', 'runSheet', 'lunhui'];
 const areaOf = key => key.split('.')[0];
 function completeOffenders(table, en, pending) {
   const keys = Object.keys(en);
