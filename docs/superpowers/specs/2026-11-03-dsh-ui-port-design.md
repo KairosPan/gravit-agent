@@ -1631,5 +1631,5 @@ The rulings, as the plan's ledger records them: the operator's answers bind the 
 punctuation checks are stricter than the plan's text, the register being the authority; the
 completeness test carried a pending list through `zh.js`'s six batches and dropped it at the last;
 Slack's own Messages tab is 消息, as Slack's Chinese UI says it; the desk's codes are worded like the
-Account's. The operator's correction pass (Task 13) and its application (Task 14) are owed, and with
-them the drill's step 25 (`face/README.md`).
+Account's. The operator's correction pass (Task 13, 2026-11-05) accepted the draft as written: no key
+changed, no glossary term moved. The drill's step 25 (`face/README.md`) is still owed.

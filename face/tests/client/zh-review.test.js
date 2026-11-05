@@ -3,8 +3,12 @@
 process.env.TZ = 'America/New_York';
 const { test } = await import('node:test');
 const assert = (await import('node:assert/strict')).default;
+const { mkdirSync, copyFileSync, readFileSync, rmSync } = await import('node:fs');
+const { join } = await import('node:path');
+const { fileURLToPath } = await import('node:url');
 const { EN } = await import('../../client/js/i18n/en.js');
 const { reviewRows, tsvOf, parseTsv, encodeCell, decodeCell } = await import('./zh-review.js');
+const { applyFixes } = await import('./zh-apply.js');
 
 const rows = await reviewRows();
 
@@ -38,4 +42,25 @@ test('a value with a tab or a newline survives the round trip', () => {
   assert.deepEqual(back, [{ key: 'x.y.z', en: 'a\tb', zh: '甲\n乙', states: ['state-1', 'state-2'], fix: '' }]);
   const fixed = tsvOf([{ key: 'x.y.z', en: 'E', zh: 'Z', states: [] }]).replace(/\t$/m, '\t改\\t后');
   assert.equal(parseTsv(fixed)[0].fix, '改\t后', 'a fix written with \\t reads as a tab');
+});
+
+// plan 7 task 14: a filled fix column rewrites that one value; every other line of zh.js stays byte for byte, and a fix
+// whose params are not the English key's is refused with the file untouched. The copy lives in the plan's scratch, never /tmp
+test('zh-apply writes a fix, keeps every other line byte for byte, and refuses a fix with other params', () => {
+  const scratch = fileURLToPath(new URL('../../../.superpowers/sdd/2026-11-05-dsh-ui-port-7-chinese/scratch-t14/', import.meta.url));
+  const file = join(scratch, 'zh.js');
+  const source = fileURLToPath(new URL('../../client/js/i18n/zh.js', import.meta.url));
+  rmSync(scratch, { recursive: true, force: true });
+  mkdirSync(scratch, { recursive: true });
+  copyFileSync(source, file);
+  const before = readFileSync(file, 'utf8');
+  const tsv = 'key\ten\tzh\tstates\tfix\ncommon.save\tSave\t保存\t—\t存好\ncommon.cancel\tCancel\t取消\t—\t\n';
+  assert.deepEqual(applyFixes(tsv, file, EN), ['common.save']);
+  const after = readFileSync(file, 'utf8').split('\n');
+  const moved = before.split('\n').flatMap((line, i) => (line === after[i] ? [] : [after[i]]));
+  assert.deepEqual(moved, ["  'common.save': '存好',"]);
+  copyFileSync(source, file);
+  assert.throws(() => applyFixes('key\ten\tzh\tstates\tfix\ncommon.save\tSave\t保存\t—\t{other} 存好\nno.such.key\tX\tY\t—\t坏\n', file, EN),
+    /common\.save[\s\S]*no\.such\.key/);
+  assert.equal(readFileSync(file, 'utf8'), before, 'a refused run writes nothing');
 });
