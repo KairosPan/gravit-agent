@@ -139,8 +139,11 @@ function punctuationOffenders(table, en) {
     if (next) out.push(`${key}: ASCII "${next[1] ?? next[2]}" next to a Chinese character`);
     if (spaced.test(v)) out.push(`${key}: a space beside a full-width mark`);
     if (v.trimEnd().endsWith('。') && Object.hasOwn(en, key) && !forms(en[key]).some(s => s.trimEnd().endsWith('.'))) out.push(`${key}: ends in 。 where EN has no full stop`);
-    for (const [what, pattern] of borders) if (new RegExp(pattern, 'u').test(v)) out.push(`${key}: no space between a Chinese character and ${what}`);
-    if (gap.test(v)) out.push(`${key}: a space between two Chinese characters`);
+    // a Chinese date writes its units unspaced (time.date): `{month}月{day}日` is read here as one {param}, so it still takes its
+    // space from the Chinese around it
+    const dated = v.replace(/\{month\}月\{day\}日/g, '{date}');
+    for (const [what, pattern] of borders) if (new RegExp(pattern, 'u').test(dated)) out.push(`${key}: no space between a Chinese character and ${what}`);
+    if (gap.test(dated)) out.push(`${key}: a space between two Chinese characters`);
     return out;
   });
 }
@@ -167,6 +170,18 @@ function guardEndOffenders(table, en, keys) {
     if (zh === english) return [];
     return [`${key}: ${english ? 'EN ends a sentence, ZH does not' : 'ZH ends a sentence, EN does not'}`];
   });
+}
+
+// every EN key has a ZH value (D35), but in an area a later batch of Task 8 writes; and every such area still lacks one, so the
+// list cannot outlive its batch. Each batch removes its areas; the last deletes the list
+const PENDING_AREAS = ['thread', 'composer', 'details', 'jobs', 'owner', 'sheet', 'account', 'money', 'venues', 'agents', 'cards', 'rules',
+  'identity', 'markets', 'trade', 'desk', 'discover', 'channel', 'modules', 'runSheet', 'lunhui'];
+const areaOf = key => key.split('.')[0];
+function completeOffenders(table, en, pending) {
+  const keys = Object.keys(en);
+  const missing = keys.filter(key => !pending.includes(areaOf(key)) && typeof table[key] !== 'string').map(key => `${key}: no ZH value`);
+  const done = pending.filter(area => keys.filter(key => areaOf(key) === area).every(key => typeof table[key] === 'string')).map(area => `${area}: pending, but every key has a ZH value`);
+  return [...missing, ...done];
 }
 
 // ── the keys whose value can end a Guard line ──
@@ -362,6 +377,13 @@ test('ZH\'s punctuation and spacing are the register\'s', () => {
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '3个任务' }), en), ['a.b: no space between a Chinese character and a digit']);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '{n}个任务' }), en), ['a.b: no space between a Chinese character and a {param}']);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '共{n}' }), en), ['a.b: no space between a Chinese character and a {param}']);
+  // decision: time.date's month and day take their units unspaced, as a Chinese date is written; that one shape only, and it
+  // borders what is around it as a {param} does
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '{month}月{day}日' }), en), []);
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '截至 {month}月{day}日 收盘' }), en), []);
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '截至{month}月{day}日' }), en), ['a.b: no space between a Chinese character and a {param}']);
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '{month}月' }), en), ['a.b: no space between a Chinese character and a {param}']);
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '{n}月{day}日' }), en), ['a.b: no space between a Chinese character and a {param}']);
   // an ASCII run that is no letter, digit or {param} at its edge — a path, a command, a flag, a percent — is as much a run
   const other = value => assert.deepEqual(punctuationOffenders(bad({ 'a.b': value }), en), ['a.b: no space between a Chinese character and ASCII text'], value);
   other('打开~/.dsh');
@@ -417,4 +439,13 @@ test('the keys whose value can end a Guard line end a sentence in ZH exactly whe
   assert.deepEqual(guardEndOffenders(bad({ ...ok, 'sheet.guard.noAnswer': '账户没有回应.' }), EN, GUARD_ENDS), ['sheet.guard.noAnswer: ZH ends a sentence, EN does not']);
   assert.deepEqual(guardEndOffenders(bad({ 'owner.order.said': '{id} · {status}。' }), EN, GUARD_ENDS), ['owner.order.said: ZH ends a sentence, EN does not']);
   assert.deepEqual(guardEndOffenders(bad({ 'common.save': '保存。' }), EN, GUARD_ENDS), [], 'a key outside the list is not read');
+});
+
+test('every EN key has a ZH value', () => {
+  assert.deepEqual(completeOffenders(ZH, EN, PENDING_AREAS), []);
+  assert.ok(PENDING_AREAS.every(area => Object.keys(EN).some(key => areaOf(key) === area)), 'PENDING_AREAS names areas of EN');
+  const en = { 'a.b': 'Save', 'a.c': 'Cancel', 'd.e': 'Open', 'f.g': 'Close' };
+  assert.deepEqual(completeOffenders(bad({ 'a.b': '保存', 'a.c': '取消', 'd.e': '打开' }), en, ['f']), []);
+  assert.deepEqual(completeOffenders(bad({ 'a.b': '保存', 'd.e': '打开' }), en, ['f']), ['a.c: no ZH value']);
+  assert.deepEqual(completeOffenders(bad({ 'a.b': '保存', 'a.c': '取消', 'd.e': '打开', 'f.g': '关闭' }), en, ['f']), ['f: pending, but every key has a ZH value']);
 });
