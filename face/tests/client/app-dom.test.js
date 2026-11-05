@@ -12,7 +12,8 @@ import { modulesListing } from './helpers/inventory.js';
 import { VIEW_1027 } from './helpers/lunhui-view.js';
 import { fakeProvider, ADDRESS as WALLET_ADDRESS, hashOf } from './helpers/fake-wallet.js';
 import { rebuildQuery } from '../../src/account-proxy.ts';
-import { sayOf } from '../../client/js/i18n/words.js';
+import { sayOf, setTable } from '../../client/js/i18n/words.js';
+import { EN } from '../../client/js/i18n/en.js';
 
 // every app booted here has its timers stopped after its test, so one that fails half-way never leaves Markets' polls running
 const booted = new Set();
@@ -6548,6 +6549,43 @@ test("a render keeps the open job's pre: the same node, its output not written a
   assert.equal(pre.scrollTop, 120, 'its scroll put back');
   follows(h)[0].cbs.onItem({ type: 'output', chunks: [{ at: 4, text: 'more' }], next: 8 });
   assert.equal(pre.textContent, 'out\nmore', 'the next frame writes it');
+  store.timers.clear();
+});
+
+test("the kept job pre is written again once the table moves, its dropped marker in the table that stands; never once a render", async () => {
+  const { f, store, h, give } = await jobsRig();
+  give([ajob('j1', 'running')]);
+  store.dispatch('toggleDetails');
+  await settle();
+  freshPres(f, 'j1');
+  f.click({ tagName: 'SUMMARY', dataset: { action: 'openJob', job: 'j1' }, parentElement: { tagName: 'DETAILS', open: false } });
+  await settle();
+  const pre = f.doc.getElementById('jobout-j1');
+  const follow = follows(h)[0].cbs;
+  follow.onItem({ type: 'opened', job: ajob('j1', 'running', { output: { total: 90, earliest: 40 } }), from: 40 });
+  follow.onItem({ type: 'output', chunks: [{ at: 40, text: 'out\n' }], next: 44 });
+  assert.equal(pre.textContent, `${EN['jobs.dropped']}\nout\n`);
+  const writes = pre.writes;
+  store.dispatch('hostStatus', { line: 'a render' });
+  await settle();
+  assert.equal(pre.writes, writes, 'a render under the same table writes nothing');
+  const ZH = { 'jobs.dropped': '…之前的输出已丢弃…' };
+  try {
+    setTable(ZH);
+    store.dispatch('hostStatus', { line: 'a render after the switch' });
+    await settle();
+    assert.equal(f.doc.getElementById('jobout-j1'), pre, 'the kept node');
+    assert.equal(pre.textContent, '…之前的输出已丢弃…\nout\n', 'written again in the table that stands');
+    const after = pre.writes;
+    store.dispatch('hostStatus', { line: 'another render' });
+    await settle();
+    assert.equal(pre.writes, after, 'once, keyed on the epoch');
+  } finally {
+    setTable(EN);
+  }
+  store.dispatch('hostStatus', { line: 'back' });
+  await settle();
+  assert.equal(pre.textContent, `${EN['jobs.dropped']}\nout\n`, 'and back');
   store.timers.clear();
 });
 

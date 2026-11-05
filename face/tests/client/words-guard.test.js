@@ -157,3 +157,22 @@ test("no words call's result is stored in state", () => {
   assert.deepEqual(FILES.flatMap(f => storedWords(source(f), f).map(s => `${f}:${s.line} ${s.fn}(${s.key}) ${s.why}`)), [],
     'keep these as said(key, params) and read them with sayOf where they are drawn');
 });
+
+// a reducer reads no table (plan 7 Task 2): Identity's reducers, over an answer whose connected networks have problem lines,
+// run under a table that throws at any read
+test("Identity's reducers read no table", async () => {
+  const { reducers } = await import('../../client/js/reducers/index.js');
+  const { emptyState } = await import('../../client/js/data/empty.js');
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  const { connectedNetworks } = await import('../../client/js/host/identity-view.js');
+  const read = { ok: true, routing: { brief: ['telegram'] }, networks: [{ network: 'telegram', state: 'connected', pollFailing: { reason: 'x' }, conflictAt: 'y' }, { network: 'slack', state: 'connected', blocked: true }, { network: 'imessage', state: 'connected' }] };
+  assert.deepEqual([...connectedNetworks(read)], ['telegram', 'slack']);
+  assert.deepEqual([...connectedNetworks({ ok: false, networks: read.networks })], []);
+  const boom = new Proxy({}, { getOwnPropertyDescriptor() { throw new Error('a reducer read the table'); } });
+  const base = { ...emptyState(), owner: { ...emptyState().owner, role: 'signs' }, identity: { ...emptyState().identity, draft: { brief: ['telegram', 'slack'] } } };
+  withTable(boom, () => {
+    const loaded = reducers.identityLoaded(base, read);
+    const ticked = reducers.identityTick(loaded, { row: 'brief', network: 'slack', on: true });
+    assert.ok(ticked.identity.data === read);
+  });
+});

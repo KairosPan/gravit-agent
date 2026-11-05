@@ -12,7 +12,7 @@ import { askedOf } from '../host/sheet.js';
 import { moveHintsOf, moveSaysOf, routesWordsOf, earnHintsOf, earnSaysOf } from '../host/sheet-money.js';
 import { IDENTITY_KINDS, identityLinesOf, identityStepsOf, identityNoteOf } from '../host/sheet-identity.js';
 import { seg } from './controls.js';
-import { t, th, rawHtml, sayOf } from '../i18n/words.js';
+import { t, th, rawHtml, sayOf, wordsEpoch } from '../i18n/words.js';
 
 const note = line => `<p class="acct-note">${esc(sayOf(line))}</p>`;
 const key = (action, word, data = {}) => `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': action, ...data })}>${esc(word)}</button>`;
@@ -94,12 +94,20 @@ function field(f) {
   }
 }
 
-// what an incomplete sheet misses: the draft read from its fields again now (words are what is missing, never the clock's),
-// so they follow the table that stands rather than the one standing when the field changed; none kept, none drawn
+// what an incomplete sheet misses: the draft read from its fields again, so the words follow the table that stands rather
+// than the one standing when the field changed; none kept, none drawn. `now` is 0: a draft reads the clock only as an offset
+// added to a time field (host/sheet.js askedOf's contract), so what is missing never depends on it. Read once per table and
+// form (the sheet's fields and seed are replaced, never changed in place), not once a render
+let missingMemo = null;
 const missingOf = s => {
   if (!s.words) return '';
+  const epoch = wordsEpoch();
+  const m = missingMemo;
+  if (m && m.epoch === epoch && m.kind === s.kind && m.fields === s.fields && m.seed === s.seed && m.words === s.words) return m.out;
   const d = draftOf(s.kind, s.fields, s.seed, 0);
-  return typeof d === 'string' ? d : s.words;
+  const out = typeof d === 'string' ? d : s.words;
+  missingMemo = { epoch, kind: s.kind, fields: s.fields, seed: s.seed, words: s.words, out };
+  return out;
 };
 
 // the quote box: what is missing, asking, the Account's refusal (Prepare again when that is the answer), or the quote's words

@@ -58,6 +58,9 @@ export function startJobs({ store, mux, call, timers, onOutput = () => {} }) {
     let cut = f.text.length - (JOB_OUTPUT_KEEP - head.length);
     const unit = f.text.charCodeAt(cut);
     if (unit >= 0xdc00 && unit <= 0xdfff) cut += 1;   // never half a surrogate pair
+    // never part of a marker: one the cut lands in, or starts at, goes whole (the head says the same)
+    const at = f.text.indexOf(DROPPED, Math.max(0, cut - DROPPED.length + 1));
+    if (at !== -1 && at <= cut) cut = at + DROPPED.length;
     f.text = head + f.text.slice(cut);
   }
 

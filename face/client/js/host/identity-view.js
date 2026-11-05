@@ -84,6 +84,15 @@ function networkOf(n, clock) {
   };
 }
 
+// the account's answer's connected rows, or none for an answer the face does not recognise
+const connectedRows = read => (isRecord(read) && read.ok === true && Array.isArray(read.networks) ? read.networks.filter(n => isRecord(n) && n.state === 'connected') : []);
+
+/** The networks the account's answer shows connected, Telegram's and Slack's, read with no words: the reducers' test, so no
+ *  reducer reads the table. */
+export function connectedNetworks(read) {
+  return new Set(connectedRows(read).map(n => n.network).filter(n => n === 'telegram' || n === 'slack'));
+}
+
 /** The Identity tab's reading of the account's answer: `{ ok, networks: { telegram, imessage, slack }, grid, quiet, strangers,
  *  slackManifest }`. A connected Telegram or Slack row carries `speaksAs`, `talksOnlyWith`, `since`, `fingerprint`, `polling` and,
  *  when something is wrong, `problem` (one line); an unconnected one `state: 'none'`; iMessage is `later`. The grid's Telegram and
@@ -93,7 +102,7 @@ function networkOf(n, clock) {
  *  `clock(iso)` words a time for a problem line (the renderer's; none given, the ISO as it came). */
 export function identityOf(read, draft = null, clock = iso => iso) {
   const ok = isRecord(read) && read.ok === true;
-  const list = ok && Array.isArray(read.networks) ? read.networks.filter(n => isRecord(n) && n.state === 'connected') : [];
+  const list = connectedRows(read);
   const telegram = networkOf(list.find(n => n.network === 'telegram'), clock);
   const slack = networkOf(list.find(n => n.network === 'slack'), clock);
   const routing = isRecord(draft) ? routingOf({ routing: draft }) : routingOf(ok ? read : null);

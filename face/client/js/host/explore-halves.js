@@ -9,12 +9,14 @@
 // The host owns the flights (`fly`, `drop`, `kinds`: its one-flight-per-kind table); this owns the halves. No DOM.
 import { venuesOf } from './account-view.js';
 import { joinExplore } from './explore-join.js';
+import { isSaid } from '../i18n/words.js';
 
 export const MARKET_EXPLORE = '/data/market/explore';
 export const CONNECTED_EXPLORE = '/data/account/connected/explore';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
-const words = v => (typeof v === 'string' && v.trim() !== '' ? v : null);
+// a said (the face's words in a refusal body, postVia's no-answer among them) passes as it is
+const words = v => (isSaid(v) ? v : typeof v === 'string' && v.trim() !== '' ? v : null);
 const messageOf = body => words(body?.refusal?.message) ?? words(body?.error);
 const answered = body => body?.ok === true && Array.isArray(body.items);
 

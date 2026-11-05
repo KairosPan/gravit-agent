@@ -6,7 +6,7 @@
 // null while none is open. It never holds a token: only the pending connection the account answered and the fingerprint (salt and
 // keyHash) made in the browser.
 import { isLine } from '../i18n/words.js';
-import { identityOf, routingOf, sameRouting, tickRouting } from '../host/identity-view.js';
+import { connectedNetworks, routingOf, sameRouting, tickRouting } from '../host/identity-view.js';
 
 const id = (s, patch) => ({ ...s, identity: { ...s.identity, ...patch } });
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -33,8 +33,8 @@ function connectPatch(p) {
 // a draft's ticks only for networks the read shows connected (a Disconnect, or a change made elsewhere, takes the rest away)
 function connectedOnly(draft, data) {
   if (draft === null) return null;
-  const v = identityOf(data);
-  const on = n => v.networks[n]?.state === 'connected';
+  const connected = connectedNetworks(data);
+  const on = n => connected.has(n);
   return Object.fromEntries(Object.entries(draft).map(([row, nets]) => [row, Array.isArray(nets) ? nets.filter(on) : nets]));
 }
 // a draft that says what the account says already is no draft
@@ -50,8 +50,7 @@ export const reducers = {
   identityTick: (s, { row, network, on } = {}) => {
     if (s.owner?.role !== 'signs') return s;
     const data = s.identity.data;
-    const v = identityOf(data);
-    if (!v.ok || v.networks[network]?.state !== 'connected') return s;
+    if (!connectedNetworks(data).has(network)) return s;
     const next = tickRouting(s.identity.draft ?? routingOf(data), row, network, on === true);
     return id(s, { draft: settled(next, data) });
   },

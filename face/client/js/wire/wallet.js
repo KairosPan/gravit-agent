@@ -5,7 +5,7 @@
 // after it, every send on its own chain, Robinhood Chain offered to a wallet that does not know it (trade.js tkSwitchChain).
 // The face holds no key: the wallet shows and signs everything in its own extension; this module only relays. It talks to the
 // wallet's provider and to the `post` it is handed (the face's /data/account/* proxy), nothing else.
-import { t, said, saidError } from '../i18n/words.js';
+import { t, said, saidError, isSaid, sayOf } from '../i18n/words.js';
 
 /* Robinhood Chain, for a wallet that does not know it yet: the wallet shows it to the owner before adding it (chain 4663; its own
  * RPC and the explorer Robinhood publishes for it) — the retired page's TK_ROBINHOOD_CHAIN */
@@ -22,8 +22,10 @@ export const hexOf = text => '0x' + [...new TextEncoder().encode(String(text))].
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const words = v => (typeof v === 'string' && v.trim() !== '' ? v : '');
-// the Account's words when it refuses (owner-view.js whyOf's order)
-const whyOf = r => words(r?.body?.refusal?.message) || words(r?.body?.error) || words(r?.body?.result?.message);
+// the Account's words when it refuses (owner-view.js whyOf's order); a said (postVia's no-answer) passes as it is
+const whyOf = r => words(r?.body?.refusal?.message) || (isSaid(r?.body?.error) ? r.body.error : words(r?.body?.error)) || words(r?.body?.result?.message);
+// an Error in the Account's words: a said keeps its key for the draw
+const refusedWith = why => (isSaid(why) ? Object.assign(new Error(sayOf(why)), { said: why }) : new Error(why));
 // a wallet's own words for a refusal (an EIP-1193 error is an object with a message, not always an Error)
 const walletWords = err => words(err?.message) || words(typeof err === 'string' ? err : '') || said('money.wallet.refused');
 const sleep = (schedule, ms) => new Promise(resolve => schedule(resolve, ms));
@@ -79,10 +81,10 @@ export async function proveWallet(wallet, post) {
   let chainId = 1;
   try { chainId = parseInt(await wallet.provider.request({ method: 'eth_chainId' }), 16) || 1; } catch { chainId = 1; }
   const c = await post('/data/account/wallet/challenge', { address, wallet: wallet.name, chainId });
-  if (c?.status !== 200 || !words(c.body?.message)) throw whyOf(c) ? new Error(whyOf(c)) : saidError('money.wallet.noSentence');
+  if (c?.status !== 200 || !words(c.body?.message)) throw whyOf(c) ? refusedWith(whyOf(c)) : saidError('money.wallet.noSentence');
   const signature = await ask(wallet, 'personal_sign', [hexOf(c.body.message), address]);
   const p = await post('/data/account/wallet/prove', { address, signature });
-  if (p?.status !== 200) throw whyOf(p) ? new Error(whyOf(p)) : saidError('money.wallet.badSignature');
+  if (p?.status !== 200) throw whyOf(p) ? refusedWith(whyOf(p)) : saidError('money.wallet.badSignature');
   return { address: p.body?.address ?? address, wallet: wallet.name };
 }
 

@@ -13,6 +13,7 @@ import { connectOptionsOf } from '../../client/js/host/account-view.js';
 import { esc } from '../../client/js/html.js';
 import { askedOf } from '../../client/js/host/sheet.js';
 import { fmtDate } from '../../client/js/time.js';
+import { withTable } from '../../client/js/i18n/words.js';
 
 const NOW = Date.parse('2026-10-22T07:40:00.000Z');
 const KID = 'a5048199a8081854';
@@ -130,6 +131,12 @@ test('a Let in sheet draws its fields by type and no live go key before a prepar
   const missing = renderSheet(R.sheetIncomplete(s, "Type the key's address"), NOW);
   has(missing, '<div class="sheet-quote"><p class="acct-note">Type the key&#39;s address</p></div>');
   assert.equal(goKey(missing).on, false);
+  // kept under English, drawn after a switch: the missing words are the form's, read in the table that stands, and read again
+  // once the table moves (a memo keyed on the epoch and the form)
+  const kept = R.sheetIncomplete(s, "Type the key's address");
+  const ZH = { 'sheet.missing.keyAddress': '输入密钥的地址' };
+  has(withTable(ZH, () => renderSheet(kept, NOW)), '<p class="acct-note">输入密钥的地址</p>');
+  has(renderSheet(kept, NOW), '<p class="acct-note">Type the key&#39;s address</p>');
   // asking: the box says so, the key stays off
   const asking = renderSheet(R.sheetAsking(s, {}), NOW);
   has(asking, '<div class="sheet-quote"><p class="acct-note">Asking…</p></div>');

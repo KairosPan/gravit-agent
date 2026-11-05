@@ -356,3 +356,19 @@ test("an output frame's NUL characters arrive as U+FFFD, so no output can hold t
   assert.equal(r.jobs.outputOf('a').text, 'a\uFFFDdropped\uFFFD\nb\uFFFD');
   assert.equal(shownOutput(r.jobs.outputOf('a').text), 'a\uFFFDdropped\uFFFD\nb\uFFFD');
 });
+
+test('a cap whose cut lands inside a marker drops the fragment: one whole marker heads the text', () => {
+  const r = rig();
+  r.jobs.follow('s1', job('a'));
+  const f = r.mux.streams[0].handlers;
+  const L = DROPPED.length + 1; // the marker with its newline
+  f.onItem({ type: 'opened', job: job('a', 'running', { output: { total: 10, earliest: 0 } }), from: 0 });
+  // held: 100 a's, a newline, the gap's marker, then b's — so many that the cut (the length less the keep, past the new
+  // head) lands 4 into that marker
+  const b = 'b'.repeat(JOB_OUTPUT_KEEP - L - 6);
+  f.onItem({ type: 'output', chunks: [{ at: 0, text: 'a'.repeat(100) }, { at: 200, text: b, gapBefore: true }], next: 200 + b.length });
+  const text = r.jobs.outputOf('a').text;
+  assert.ok(text.length <= JOB_OUTPUT_KEEP);
+  assert.equal(text.split('\u0000').length - 1, 2, 'one marker, no fragment of another');
+  assert.equal(text, `${DROPPED}\n${b}`, 'the head, then the output after the marker the cut fell in');
+});

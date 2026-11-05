@@ -9,7 +9,7 @@
 // after close(). The face holds no key: the wallet signs in its own extension.
 import { walletFor, sendTxs, short } from '../wire/wallet.js';
 import { whyOf } from './owner-view.js';
-import { said, saidError, isLine } from '../i18n/words.js';
+import { said, saidError, isLine, isSaid, sayOf } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = v => (typeof v === 'string' ? v : '');
@@ -123,7 +123,7 @@ export function startWalletSend({ store, post, getJson, getWallets, schedule }) 
             if (fresh?.status === 200) return list(fresh.body?.order?.walletTxs).at(-1) ?? null;
             if (/cannot build the swap again/.test(str(fresh?.body?.refusal?.message))) return null;
             const why = whyOf(fresh);
-            throw typeof why === 'string' && why ? new Error(why) : saidError('money.wallet.noRequote');
+            throw isSaid(why) ? Object.assign(new Error(sayOf(why)), { said: why }) : typeof why === 'string' && why ? new Error(why) : saidError('money.wallet.noRequote');
           };
           const hash = await sendTxs(wallet, txs, { requote, schedule });
           kept.set(key, { kind: 'order', id: o.id, hash, name: wallet.name });

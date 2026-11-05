@@ -43,6 +43,8 @@ import { startDiscover } from '../../client/js/host/discover.js';
 import { startRunSheet } from '../../client/js/host/run-sheet.js';
 import { ensureViews } from '../../client/js/host/lunhui.js';
 import { modulesListing } from './helpers/inventory.js';
+import { exploreHalves } from '../../client/js/host/explore-halves.js';
+import { said } from '../../client/js/i18n/words.js';
 import { sayOf, withTable } from '../../client/js/i18n/words.js';
 import { EN } from '../../client/js/i18n/en.js';
 import { spoken } from './helpers/spoken.js';
@@ -473,4 +475,54 @@ test("the round's end line, a trace's refusals and the model route's refusal rea
   await assert.rejects(loadMemberTrace(async () => null, { sessionId: '', turn: 1 }), { message: 'This answer recorded no member turn.' });
   await assert.rejects(loadMemberTrace(async () => null, { sessionId: 'm1', turn: 1 }), { message: 'The member session does not exist.' });
   assert.throws(() => normalizeBotModel('a/b/c'), { message: 'Use provider/model (one slash, no spaces), or leave the model empty to inherit the default.' });
+});
+
+// a fetch that throws: postVia answers its refusal body with the face's no-answer words, a said (plan 7 Task 2's fix round).
+// Every reader of a refusal body passes it on, so the line is the one it always was, and it follows a switch of the table
+const NO_ANSWER = 'The account did not answer. Try again.';
+const viaFetch = (answer = () => new Error('offline')) => postVia(async (path, init) => {
+  const a = answer(path, JSON.parse(init.body));
+  if (a instanceof Error) throw a;
+  return { status: a.status, json: async () => a.body };
+});
+
+test("a throwing fetch: the Account's bridge routes and a sign-in's start keep the no-answer line", async () => {
+  const sr = createStore({ initial: emptyState(), reducers });
+  const account = startAccount({ store: sr, getJson: async () => ({}), post: viaFetch(), now: () => 1, schedule: () => 0, cancelTimer: () => {}, openTab: () => null });
+  await account.bridgeRoutes({ kind: 'bridge' });
+  follows(sr.get().account.routes.message, NO_ANSWER);
+  await account.signIn({ connector: 'live:rh', kind: 'robinhood', label: 'Robinhood' });
+  follows(sr.get().account.signIn.message, NO_ANSWER);
+  account.close();
+});
+
+test("a throwing fetch: a wallet's proof says the Account did not answer, not that the sentence or signature failed", async () => {
+  const challenge = viaFetch();
+  const first = await proveWallet(wallet({}), challenge).then(() => null, e => e);
+  assert.equal(first.message, NO_ANSWER);
+  follows(first.said, NO_ANSWER);
+  const prove = viaFetch(path => (path.endsWith('/challenge') ? { status: 200, body: { message: 'sign me' } } : new Error('offline')));
+  const second = await proveWallet(wallet({}), prove).then(() => null, e => e);
+  assert.equal(second.message, NO_ANSWER);
+  follows(second.said, NO_ANSWER);
+});
+
+test("a throwing fetch: a DEX order's swap built again says the Account did not answer", async () => {
+  const TXS = ['approve', 'swap'].map(what => ({ chainId: 8453, chainIdHex: '0x2105', from: ADDRESS, to: '0x' + '34'.repeat(20), data: '0xabcd', value: '0x0', what }));
+  const ORDER = { id: 'ord-0031', clientId: 'c0ffee00c0ffee00c0ffee00c0ffee00', venue: 'dex', status: 'pending', walletTxs: TXS };
+  const store = { s: emptyState(), get() { return this.s; }, dispatch() {} };
+  const post = viaFetch(path => (path === '/data/account/live/order-requote' ? new Error('offline') : { status: 200, body: { ok: true } }));
+  const ws = startWalletSend({ store, post, getJson: async () => ({ ok: true, orders: [ORDER] }), getWallets: async () => [{ id: 'fake', name: 'Fake Wallet', icon: '', provider: fakeProvider() }], schedule: fn => fn() });
+  const out = await ws.order(ORDER);
+  assert.equal(out.status, 'refused');
+  follows(out.said, NO_ANSWER);
+});
+
+test("an explore half refused in the face's words (a said) keeps them for the line both halves failing leave", () => {
+  const lands = [];
+  const halves = exploreHalves({ store: { get: () => emptyState() }, kinds: new Map(), drop: () => {},
+    fly: (kind, path, land) => land({ ok: false, error: said('markets.accountDown') }, true) });
+  halves.read('all', 'limit=200', { land: () => {}, failed: why => lands.push(why) });
+  assert.equal(lands.length, 1);
+  follows(lands[0], 'The Account is not answering');
 });

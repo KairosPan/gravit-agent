@@ -8,7 +8,7 @@
 // B1b), at the page's cadence while that tab is on screen. The views over what lands are account-view.js's and identity-view.js's.
 import { pageOk, worthOf, venuesOf } from './account-view.js';
 import { refusedAt } from './owner-view.js';
-import { t, said } from '../i18n/words.js';
+import { said, isSaid } from '../i18n/words.js';
 
 export const ACCOUNT_POLL_MS = 20_000, ACCOUNT_POLL_STREAM_MS = 80_000;
 /** A venue's sign-in is asked how it stands this often, for at most this long (the Account's connect.js). */
@@ -18,7 +18,8 @@ export const SIGNIN_POLL_MS = 1_500, SIGNIN_WITHIN_MS = 15 * 60_000;
 const MOVES = new Set(['order', 'fill', 'paper', 'balance', 'position']);
 
 // the Account's sentence when it refuses (`refusal.message`), else its error words — only when they are text
-const words = v => (typeof v === 'string' && v.trim() !== '' ? v : null);
+// a said (the face's words in a refusal body, postVia's no-answer among them) passes as it is
+const words = v => (isSaid(v) ? v : typeof v === 'string' && v.trim() !== '' ? v : null);
 // a query value as given, or nothing
 const str = v => (typeof v === 'string' ? v.trim() : '');
 const messageOf = body => words(body?.refusal?.message) ?? words(body?.error);
@@ -33,7 +34,7 @@ const guardSaid = () => said('account.guard.said');
 const noAnswer = () => said('account.noAnswer');
 const receiveElsewhere = () => said('money.receive.elsewhere');
 // no door handed in: nothing answers
-const noDoor = async () => ({ status: 0, body: { ok: false, error: t('account.noAnswer') } });
+const noDoor = async () => ({ status: 0, body: { ok: false, error: noAnswer() } });
 
 // a venue's sign-in page, as the Account answers it: a web address, nothing else
 const webUrl = v => (typeof v === 'string' && /^https?:\/\//i.test(v) ? v : '');

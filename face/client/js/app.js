@@ -52,7 +52,7 @@ import { startJobs, shownOutput } from './host/jobs.js';
 import { jobsView, isLive } from './host/jobs-view.js';
 import { admit, blocking, hasImage, contentParts, encodeBase64, modelRefusalLine, isImageSrc } from './composer/files.js';
 import { senderName } from './render/rail.js';
-import { t, said, sayOf } from './i18n/words.js';
+import { t, said, sayOf, isLine, wordsEpoch } from './i18n/words.js';
 import { HOST_NAME } from './wire/speaker.js';
 import { startAttachments } from './host/attachments.js';
 import { startComposerReads } from './host/composer.js';
@@ -463,6 +463,7 @@ export function boot(win, host = {}) {
   // conversation through it first
   // the open conversation's background jobs (spec §5.8): its job/list on the live layer's mux, re-opened on the app's
   // timers after a host end or refusal; the open job's output stays there and is written into its pre on each frame
+  let outEpoch = -1; // the words' epoch the open job's pre was last written under
   const jobs = host.jobs ?? startJobs({ store, mux: live.mux, call, timers, onOutput: () => writeOutput() });
   const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson, activate: id => live.activate(id) });
   // Markets: the market's reads and the Account's connected ones on the app's timers — the A shares' among them — a market's page
@@ -819,14 +820,16 @@ export function boot(win, host = {}) {
   // the open job's output into its pre by textContent, never through a render: on each frame, and once into a pre a render
   // drew for the first time (fill: false, a render that put its kept pre back, writes none); and the line under it once its
   // follow is over while the job runs on or the host refused it. A pre at its end follows the end; one the reader scrolled
-  // up keeps its place
+  // up keeps its place. The kept pre is written again once the words' table has moved since its last write, so its dropped
+  // markers read in the table that stands (keyed on the epoch, never once per render)
   function writeOutput(fill = true) {
     const s = store.get();
     const id = s.jobs.open;
     if (id === null) return;
     const out = jobs.outputOf(id);
-    const pre = fill ? doc.getElementById(`jobout-${id}`) : null;
+    const pre = fill || outEpoch !== wordsEpoch() ? doc.getElementById(`jobout-${id}`) : null;
     if (pre) {
+      outEpoch = wordsEpoch();
       const text = shownOutput(out?.text ?? '');
       const tail = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
       if (pre.textContent !== text) pre.textContent = text;
@@ -1267,7 +1270,7 @@ export function boot(win, host = {}) {
       // the read failed: said, under the asks
       if (!g && store.get().account.venuesHere.data === null) {
         const why = store.get().account.venuesHere.message;
-        store.dispatch('grantSaid', typeof why === 'string' && why ? said('venues.grant.unreadWhy', { why }) : said('venues.grant.unread'));
+        store.dispatch('grantSaid', isLine(why) ? said('venues.grant.unreadWhy', { why }) : said('venues.grant.unread'));
         return;
       }
     }
