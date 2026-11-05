@@ -375,7 +375,7 @@ All three of its stages are built:
   Where, Agent, Members, Children with Stop, Usage, Stop Gravit), the three gate
   cards (the order card, an approval, a question) answered through the mux, the one status
   line under the composer (not signed in, reconnecting, a host error, a command's word), and
-  Settings (Cream · Black · System; since the dsh UI port's plan 6 the text and code sizes, the two
+  Settings (since plan 7 Language first, English · 中文, every word at once and kept in the browser; Cream · Black · System; since plan 6 the text and code sizes, the two
   font families and Keyboard shortcuts, below);
 - **the list's search and pins** (the dsh UI port's plan 2): a box under the list's head, `Search
   conversations`, focused by Option-Command-K (Ctrl+Alt+K off a Mac; from another screen it goes to
@@ -5109,6 +5109,13 @@ Account). Open the printed `?token=` URL and hard-reload.
     `Turn <n>`, its card described; ↑ and ↓ move along the ticks, Home and End to the ends, each
     read once; Tab leaves the rail in one press. A tick pulsing while its pages are read is
     announced busy.
+25. **中文, the operator's.** Settings › Language › 中文, then every screen: Messages with a thread
+    and Details, Markets with a market's page, Trade, Account's tabs, an owner sheet with What you
+    sign, Discover and a module page, a channel page, and the desk. PASS: every word the face writes
+    is Chinese, and what stays in Latin is a name or content (a ticker, a venue, Gravit's and the
+    bots' words, What you sign's lines as the Account gave them). Reload: no English frame, and
+    `<html lang>` is `zh-CN` before the first paint. Back to English: the page is the English one,
+    the Language row included. In Safari, Chrome and Firefox.
 
 **PASS criteria are observations.** Record the run below with the date and the commit.
 

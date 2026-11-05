@@ -1580,3 +1580,56 @@ key a browser keeps marked `bound: false`; Text size and Code size at their ends
 no flash; a code font typed and cleared and a hostile family name; Noto Sans SC 800 loading; the
 sheet over Settings with Esc twice, its Tab trap and focus back on Show all; VoiceOver on a pill and
 on the rail as one Tab stop with its arrows. What stays imperfect is `DEVELOPMENT.md` R101.
+
+## 19. Build notes, plan 7 (2026-11-05)
+
+Plan 7 (the Chinese table and the Language switch; client only) built on `claude/cranky-bun-9f78c8`
+after Task 0, the operator's merge of local `main` (Slack in Account › Identity) at `09d576a2` with
+its counts commit `aea656db`: so the precondition's first path held (D37), and Slack's words were
+already in `en.js` when the plan's own work began. The commits: `7dca62a4` and `2a71567f` (a line
+the store keeps is `said`/`saidn`, read by `sayOf` in the table standing; the jobs' dropped marker a
+sentinel; the review's fix that a refusal's `said` passes every reader and a kept job's output is
+written again once the table moves), `4e55bb82` and `2d6615b9` (`reword`: the list, the open
+conversation as a fresh window, a failed run view forgotten; the review's fix that a fresh window is
+owed until it lands and a host that is down waits for ready), `4c20a984` and `c9429df1` (the
+thread's, the list's, the clocks' and then Account's, Markets', Trade's, the desk's, Discover's and
+the modules' sentences one key each, `ASSEMBLED` gone), `e81ef793` and `7f76a00f` (the table's loose
+ends: `P&L` in it, two plurals, upper case as keys, keys split by meaning, the Account's codes
+worded, and the review's fix that a words call carried through a property is caught and the last
+codes — a position's side, a statement line, a yield's kind, a seat move's and earn's kind — are
+worded too), `792e5bd8` and `37545fbb` (the glossary and `words-zh`'s checks, then the review's
+stricter ones: no English key name passes for a word, ASCII punctuation after Chinese refused, an
+exception names its Chinese), `cd69a503`, `ecdc809f`, `aad76333`, `9a88be72`, `9a77c2d4` and
+`cce839e0` (`zh.js`, every key, in six batches), `9b2c8292` (Settings › Language), `0da1fe7d` (the
+Chinese golden and probe, and the desk's codes worded where the probe found them raw), `86341011`
+(the review dump) and this note's commit. The last full `npm test` in `face/` (at `0da1fe7d`, with
+`86341011`'s three tests passing on their own after it) is 3,802 tests, 3,748 pass, 54 skipped, 0
+fail; typecheck clean; no `FACE_SMOKE` run (the plan is client only) and no flake. The table holds
+1,870 keys in both languages, in the 29 areas, 36 of them plurals in EN and one string each in ZH;
+67 lines are marked `// en-kept:`; each golden holds 230 entries. `GRAVIT.md` is untouched at 4,494
+of 4,500 bytes, and the prompt-loops page moves nowhere.
+
+| Clause | The text | What the tree does | Why |
+|---|---|---|---|
+| §5.10 | applied before the first paint | `index.html`'s inline script sets `<html lang="zh-CN">` for a saved `zh`, and `boot` calls `setTable(tableOf(lang))` before `makeStore`, so the first `render()` is already in the saved table (`#app` is empty until then) | a module runs after the first paint, and nothing is drawn before `render()` |
+| §5.10, §18 R102 | a line keeps its language until the next | not kept: a line the store holds is `said`/`saidn` and `sayOf` reads it in the table standing, and `reword` re-lists and re-opens the conversation on screen | a status line in English under a Chinese page reads as broken (D35's reason) |
+| §5.10 | a fresh window | `reword`'s re-open keeps nothing below its start, an exception to plan 5's adjacency; a window whose start rose — that fresh one, or one taken whole past a gap — scrolls to its first message | the earlier pages were folded under the other table |
+| §7 | every key has a `zh.js` entry or falls back | stricter: every EN key has a ZH value (`words-zh`'s completeness test, D35 and D37); the fallback in `words.js` stays for a key added later | a whole 中文 |
+| §5.10 | plurals | a ZH value for an EN `{one, other}` is one string holding `{n}`; `formOf` already reads a string for any count | Chinese has one form |
+| §5.10 | dates | `time.date` is `{month} {day}` in EN and `{month}月{day}日` in ZH, the months numerals | `fmtDate` joined them in code |
+| §5.10 | the languages' own names | `English` and `中文` live in `js/i18n/langs.js`, the same in both tables, not in `en.js`/`zh.js` | a language's name is content |
+| §5.10 | the Language row | a `seg` first in Settings, its values the codes `en` and `zh`; the pref is `lang`, `<html lang>` is `en` or `zh-CN` | the theme trap: a label as the value would change with the table |
+| the operator, 2026-11-05 | the register and the names | 你 where a pronoun is needed, never 您; only Gravit stays in Latin; Account → 账户, Lunhui → 轮回, Markets → 市场 (消息 · 市场 · 交易 · 发现 · 设置) | `operator-answers.md`; the plan's draft had 行情 and kept Account and Lunhui |
+| the operator | the Account's codes | worded through keys, an unknown code drawn as it came; the desk's codes the same, where the Chinese probe found them raw | a raw English code in a Chinese row reads as an untranslated word |
+| §8, D30 | the wording of `zh.js` | a draft, one register, against `fixtures/zh-glossary.json`, which `words-zh` enforces (grammar, params, no stray Latin, the terms, the punctuation and the spacing) | the operator corrects it last |
+| §8, D30 | how the operator corrects | `zh-review.js` writes `zh-review.html` (English beside Chinese, by area, the states that draw each key) and `zh-review.tsv` with an empty `fix` column; `zh-apply.js` (Task 14) writes the fixes | the correction pass is Task 13, owed |
+| §5.10 | What you sign | the sheet's frame is the table's under ZH and its `shown` lines are the Account's byte for byte (`owner.test.js`) | the signature covers what is drawn |
+| D37 | new words | a new word ships in `en.js` and `zh.js` at once, against the glossary (`DEVELOPMENT.md` §8) | the completeness test fails otherwise |
+
+The rulings, as the plan's ledger records them: the operator's answers bind the glossary (你; 账户,
+轮回, 市场; the codes worded); a words call carried through a property is in the upper-case rule; the
+punctuation checks are stricter than the plan's text, the register being the authority; the
+completeness test carried a pending list through `zh.js`'s six batches and dropped it at the last;
+Slack's own Messages tab is 消息, as Slack's Chinese UI says it; the desk's codes are worded like the
+Account's. The operator's correction pass (Task 13) and its application (Task 14) are owed, and with
+them the drill's step 25 (`face/README.md`).
