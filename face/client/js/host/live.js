@@ -157,7 +157,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
         if (!owns()) return;
         release(view, false);
         view = { id, token, mode: 'page', handle: null, failed: true };
-        say(`${error?.code ?? t('status.error')} — ${error?.message ?? t('status.followFailed')}`, true);
+        say(t('status.followRefused', { code: error?.code ?? t('status.error'), message: error?.message ?? t('status.followFailed') }), true);
       },
     });
     view = { id, token, mode: 'follow', handle, snapped: false, waiters: [] };

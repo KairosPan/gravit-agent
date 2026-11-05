@@ -104,7 +104,7 @@ export function seatLift(name, args, text, isError, callId) {
   if (typeof v.order?.id === 'string') {
     const said = { line: seatLine(name, args), id: v.order.id };
     const word = v.order.status === 'canceled' ? t('thread.seat.canceled', said) : t('thread.seat.placed', said);
-    return { kind: 'receipt', text: `${word}${v.order.paper === true ? ` · ${t('thread.seat.paper')}` : ''}`, data: { seat: true, orderId: v.order.id, callId } };
+    return { kind: 'receipt', text: v.order.paper === true ? t('thread.seat.paper', { line: word }) : word, data: { seat: true, orderId: v.order.id, callId } };
   }
   if (legs) {
     // in Guard the Account answers a leg with a card of its own and places nothing: a card is not a fill

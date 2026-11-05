@@ -39,7 +39,7 @@ const PENDING = [
 // the most files PENDING may hold, and the en-kept markers under client/js: each words task lowers the first and states the
 // second
 const PENDING_MAX = 62;
-const EN_KEPT = 6;
+const EN_KEPT = 5;
 
 const texts = src => englishLiterals(src, 'snippet.js').map(l => l.text);
 

@@ -14,7 +14,9 @@ import { chipText, endLine } from '../../client/js/host/jobs-view.js';
 import { pillsText } from '../../client/js/host/turns-view.js';
 import { admit, limitsLine, modelRefusalLine, attachmentsLine, extOf, DEFAULT_LIMITS } from '../../client/js/composer/files.js';
 import { renderStatus } from '../../client/js/render/messages.js';
-import { t } from '../../client/js/i18n/words.js';
+import { boot } from '../../client/js/app.js';
+import { fakeWindow } from './helpers/fake-dom.js';
+import { valueEditor } from './helpers/value-editor.js';
 
 const tick = () => new Promise(r => setTimeout(r, 0));
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
@@ -134,8 +136,58 @@ test("the jobs' chip and end lines, the pills, and the composer's file lines", (
   assert.equal(modelRefusalLine('<Scout>'), "<Scout>'s model takes no images. Remove the image, or run <Scout> on a model that does.");
   assert.equal(attachmentsLine([{ type: 'image' }, { type: 'file' }]), 'image, file');
   assert.equal(extOf('README'), 'FILE');
-  // app.js's own lines with a param, as the table holds them
-  assert.equal(t('status.uploadFailed', { name: 'a&b.csv' }), 'upload a&b.csv: the upload failed');
-  assert.equal(t('status.fail', { what: t('status.verb.send'), reason: t('status.unreadable', { name: "it's.png" }) }), "send: it's.png could not be read");
-  assert.equal(t('jobs.outputEnded'), 'output ended');
+});
+
+// app.js on a fake window: one live conversation, its mux and its uploads recorded for the test to answer
+async function appRig() {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  const streams = [];
+  let opts = null;
+  const mux = { stream(name, args, cbs) { const st = { name, args, cbs }; streams.push(st); return { cancel() {} }; }, answer: async () => {}, close() {} };
+  const rows = [{ sessionId: 's1', updatedAt: 5, agentAvailable: true, running: false, blank: false }];
+  const call = async endpoint => (endpoint === 'session/list' ? { items: rows } : endpoint === 'session/projections' ? { asOfSeq: 20, values: {} } : endpoint === 'session/page' ? { records: [] } : undefined);
+  const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [], ungrouped: [], archived: [], presets: {} } : { ok: true, archived: [], deleted: [], bots: [] });
+  const uploads = [];
+  const attachments = {
+    limits: () => DEFAULT_LIMITS, readLimits: async () => true, thumb: async () => {},
+    upload(id, file) { const u = {}; u.done = new Promise((resolve, reject) => { u.fail = reject; }); uploads.push(u); return { done: u.done, abort() {} }; },
+  };
+  const store = boot(f.win, { editor: valueEditor, attachments, openMux: o => { opts = o; return mux; }, call, getJson, postJson: async () => ({ ok: true }), markdown: null, now: () => 1 });
+  await settle();
+  opts.onReady({});
+  await settle();
+  return { f, store, streams, uploads };
+}
+
+test("app.js's job note: a follow refused with no code, and one the host ended while the job runs", async () => {
+  for (const [end, line] of [[st => st.cbs.onError({}), 'output unavailable: error'], [st => st.cbs.onEnd(), 'output ended']]) {
+    const { f, store, streams } = await appRig();
+    try {
+      streams.filter(st => st.name === 'job/list').at(-1).cbs.onItem({ type: 'rows', jobs: [{ id: 'j1', kind: 'bash', label: 'run', owner: 's1', status: 'running', startedAt: 0, output: { total: 0, earliest: 0 } }] });
+      store.dispatch('toggleDetails');
+      await settle();
+      const note = f.withId('jobnote-j1', { presentIf: /id="jobnote-j1"/ });
+      f.click({ tagName: 'SUMMARY', dataset: { action: 'openJob', job: 'j1' }, parentElement: { tagName: 'DETAILS', open: false } });
+      await settle();
+      end(streams.filter(st => st.name === 'job/follow').at(-1));
+      assert.equal(note.textContent, line);
+    } finally {
+      store.timers.clear();
+    }
+  }
+});
+
+test("app.js's upload line: a failure with no words of its own names the file", async () => {
+  const { f, store, uploads } = await appRig();
+  try {
+    const input = f.withId('attach-input', { tagName: 'INPUT', type: 'file' });
+    input.files = [{ name: 'a&b.csv', size: 10, type: 'text/csv', arrayBuffer: async () => new ArrayBuffer(0) }];
+    f.fire('root', 'change', { target: input });
+    uploads[0].fail(new Error(''));
+    await settle();
+    assert.equal(store.get().status.line, 'upload a&b.csv: the upload failed');
+    assert.match(f.html(), /role="status">upload a&amp;b\.csv: the upload failed</);
+  } finally {
+    store.timers.clear();
+  }
 });

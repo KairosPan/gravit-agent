@@ -117,7 +117,7 @@ export function startJobs({ store, mux, call, timers, onOutput = () => {} }) {
       const over = error => {
         if (follow !== mine || mine.ended) return;
         mine.ended = true;
-        if (error !== undefined) mine.error = error?.code ?? 'error';
+        if (error !== undefined) mine.error = error?.code ?? t('status.error');
         onOutput(mine.jobId);
       };
       mine.handle = mux.stream('job/follow', { request }, {

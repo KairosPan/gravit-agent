@@ -43,7 +43,10 @@ function rowParts(it) {
   }
 }
 
-const foot = () => `<div class="cmenu-foot"><kbd>↑↓</kbd> ${th('composer.menu.move')} · <kbd>Enter</kbd> ${th('composer.menu.choose')} · <kbd>Esc</kbd> ${th('common.close')}</div>`; // en-kept: key names
+// the keys' names stay as written (§5.10); the words beside them are the table's
+const ENTER = 'Enter';
+const ESC = 'Esc';
+const foot = () => `<div class="cmenu-foot"><kbd>↑↓</kbd> ${th('composer.menu.move')} · <kbd>${ENTER}</kbd> ${th('composer.menu.choose')} · <kbd>${ESC}</kbd> ${th('common.close')}</div>`;
 
 /** The menu: '' for none or for one with no rows. */
 export function renderMenu(menu) {
