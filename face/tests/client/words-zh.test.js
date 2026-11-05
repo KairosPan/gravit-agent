@@ -9,7 +9,6 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EN } from '../../client/js/i18n/en.js';
 import { ZH } from '../../client/js/i18n/zh.js';
-import { KEY_NAMES } from './helpers/words-scan.js';
 import { KEY, ENTITY, ROOT, params, forms, ampKeys, ampReaders } from './helpers/words-table.js';
 
 const GLOSSARY = JSON.parse(readFileSync(new URL('./fixtures/zh-glossary.json', import.meta.url), 'utf8'));
@@ -54,12 +53,13 @@ function paramOffenders(table, en) {
 const keepByLength = keep => [...keep].sort((a, b) => b.length - a.length).map(k => new RegExp(`(?<![A-Za-z0-9])${quote(k)}(?![A-Za-z0-9])`, 'g'));
 const without = (text, patterns, fill) => patterns.reduce((s, re) => s.replace(re, m => fill(m)), text);
 
-// the Latin ZH holds that is no kept name, no {param} and no key name
+// the Latin ZH holds that is no kept name and no {param}. There is no key-name allowance: EN's values draw `Ctrl` only (kept by
+// name) and use Delete, End and Home as plain words, so a ZH value holding one of them is English left in
 function latinOffenders(table, glossary) {
   const patterns = keepByLength(glossary.keep);
   return strings(table).flatMap(([key, v]) => {
     const rest = without(v.replace(/\{\w+\}/g, ' '), patterns, () => ' ');
-    return [...rest.matchAll(/[A-Za-z]{2,}/g)].map(m => m[0]).filter(w => !KEY_NAMES.has(w)).map(w => `${key}: Latin '${w}'`);
+    return [...rest.matchAll(/[A-Za-z]{2,}/g)].map(m => m[0]).map(w => `${key}: Latin '${w}'`);
   });
 }
 
@@ -77,41 +77,69 @@ function termsIn(text, glossary) {
   return found;
 }
 
-// for every term, every key ZH has whose EN value holds `en` has a ZH value holding `zh`, unless the term's except names the key
+// an except of a term is `{ why, zh }` (the key reads another sense, and its value holds that word instead) or a plain reason
+// (another sense with no one word); either way the term's own zh is not wanted there
+const exceptOf = (term, key) => {
+  const ex = term.except?.[key];
+  return ex === undefined ? null : typeof ex === 'string' ? { why: ex } : ex;
+};
+
+// for every term, every key ZH has whose EN value holds `en` has a ZH value holding `zh`, unless the term's except names the key:
+// then the value holds the word the except names, if it names one
 function heldOffenders(table, en, glossary) {
-  return strings(table).filter(([key]) => Object.hasOwn(en, key)).flatMap(([key, v]) => termsIn(forms(en[key]).join('\n'), glossary)
-    .filter(term => !Object.hasOwn(term.except ?? {}, key) && !v.includes(term.zh))
-    .map(term => `${key}: no '${term.zh}' for ${term.en}`));
+  return strings(table).filter(([key]) => Object.hasOwn(en, key)).flatMap(([key, v]) => termsIn(forms(en[key]).join('\n'), glossary).flatMap(term => {
+    const ex = exceptOf(term, key);
+    if (!ex) return v.includes(term.zh) ? [] : [`${key}: no '${term.zh}' for ${term.en}`];
+    return !ex.zh || v.includes(ex.zh) ? [] : [`${key}: no '${ex.zh}' for ${term.en} (${ex.why})`];
+  }));
 }
 
 // a term is a word of Chinese; a name in keep is not
 const keptTermOffenders = glossary => glossary.terms.filter(term => glossary.keep.includes(term.zh)).map(term => `${term.en}: zh '${term.zh}' is in keep`);
 
-// an except that names a key EN lacks, or whose EN value no longer holds the term, is stale: drop it
+// an except that names a key EN lacks, or whose EN value no longer holds the term, is stale: drop it; one has a reason, and a
+// word it names is Chinese and not the term's own
 function exceptOffenders(en, glossary) {
   return glossary.terms.flatMap(term => Object.keys(term.except ?? {}).flatMap(key => {
-    if (!Object.hasOwn(en, key)) return [`${term.en}: except ${key}: not a key of EN`];
-    return termsIn(forms(en[key]).join('\n'), glossary).includes(term) ? [] : [`${term.en}: except ${key}: its EN value does not hold the term`];
+    const at = `${term.en}: except ${key}`;
+    if (!Object.hasOwn(en, key)) return [`${at}: not a key of EN`];
+    const ex = exceptOf(term, key);
+    if (typeof ex.why !== 'string' || !ex.why) return [`${at}: no reason`];
+    if (ex.zh !== undefined && !/\p{Script=Han}/u.test(ex.zh)) return [`${at}: zh is no Chinese`];
+    if (ex.zh === term.zh) return [`${at}: zh is the term's own`];
+    return termsIn(forms(en[key]).join('\n'), glossary).includes(term) ? [] : [`${at}: its EN value does not hold the term`];
   }));
 }
 
-// the register: ASCII , : ? ! never between two Chinese characters; no 。 closing a value whose EN closes with no full stop;
-// one space at a Chinese character's border with Latin, a digit or a {param}, none between two Chinese characters. Chinese is
-// the Han script: a full-width mark is not, so a bracket or ，next to Latin takes no space
+// the register. Chinese is the Han script; a full-width mark is not Han. Exactly:
+//  - ASCII , : ? ! (a ! that starts a word is a command's, a . that ends a sentence) after a Han character, a space between allowed, anywhere in the value: refused.
+//    After Latin, a digit or a } they are the register's (`Telegram: 正常`, `{why}: 请重试`);
+//  - ASCII ( ) ; and ... (a ; is judged here only) on either side of a Han character, a space between allowed: refused; … is the register's;
+//  - an ASCII space beside a full-width mark: refused (`已连接 ，Telegram`);
+//  - 。 closing a value whose EN closes with no full stop: refused;
+//  - a Han character touching an ASCII run with no space — Latin, a digit, a {param}, or any other ASCII graphic (a path, a
+//    command, a flag, a %: `~/.dsh`, `/newbot`, `!status`, `{n}%`) — refused, and two Han characters with a space between them;
+//    an ASCII mark is judged by the first two rules where they apply (`中.yml` is left as it is).
+const FULL_WIDTH = '，、。：；？！（）「」『』《》【】“”‘’';
 function punctuationOffenders(table, en) {
-  const ascii = new RegExp(`${HAN}\\s*([,:?!])\\s*${HAN}`, 'u');
+  const after = new RegExp(`${HAN}\\s*([,:?]|!(?![A-Za-z0-9])|\\.(?![A-Za-z0-9.]))`, 'u');
+  const beside = new RegExp(`${HAN}\\s*(\\.\\.\\.|[();])|(\\.\\.\\.|[();])\\s*${HAN}`, 'u');
+  const spaced = new RegExp(`[ \\t][${FULL_WIDTH}]|[${FULL_WIDTH}][ \\t]`, 'u');
   const gap = new RegExp(`${HAN}\\s+${HAN}`, 'u');
-  const borders = [['Latin', '[A-Za-z]'], ['a digit', '[0-9]'], ['a {param}', '[{}]']];
+  const OTHER = '[\\x21-\\x7e]';
+  const borders = [['Latin', `${HAN}[A-Za-z]|[A-Za-z]${HAN}`], ['a digit', `${HAN}[0-9]|[0-9]${HAN}`], ['a {param}', `${HAN}\\{|\\}${HAN}`],
+    // a Han character followed by any other ASCII graphic that is no mark of the first two rules; or such a graphic before one that
+    // is not itself after a Han character (that is the first rule's)
+    ['ASCII text', `${HAN}(?![A-Za-z0-9{,:?.()\\s;]|!(?![A-Za-z0-9]))${OTHER}|(?<![\\p{Script=Han}\\s])(?![A-Za-z0-9{}();.])${OTHER}${HAN}`]];
   return strings(table).flatMap(([key, v]) => {
     const out = [];
-    const mark = v.match(ascii);
-    if (mark) out.push(`${key}: ASCII "${mark[1]}" between Chinese characters`);
+    const mark = v.match(after);
+    if (mark) out.push(`${key}: ASCII "${mark[1]}" after a Chinese character`);
+    const next = v.match(beside);
+    if (next) out.push(`${key}: ASCII "${next[1] ?? next[2]}" next to a Chinese character`);
+    if (spaced.test(v)) out.push(`${key}: a space beside a full-width mark`);
     if (v.trimEnd().endsWith('。') && Object.hasOwn(en, key) && !forms(en[key]).some(s => s.trimEnd().endsWith('.'))) out.push(`${key}: ends in 。 where EN has no full stop`);
-    for (const [what, edge] of borders) {
-      const touching = new RegExp(`${HAN}${edge}|${edge}${HAN}`, 'u');
-      const hit = what === 'a {param}' ? new RegExp(`${HAN}\\{|\\}${HAN}`, 'u') : touching;
-      if (hit.test(v)) out.push(`${key}: no space between a Chinese character and ${what}`);
-    }
+    for (const [what, pattern] of borders) if (new RegExp(pattern, 'u').test(v)) out.push(`${key}: no space between a Chinese character and ${what}`);
     if (gap.test(v)) out.push(`${key}: a space between two Chinese characters`);
     return out;
   });
@@ -125,6 +153,10 @@ const usedOffenders = (en, glossary) => {
 
 // the register addresses the user as 你, never 您
 const registerOffenders = table => strings(table).filter(([, v]) => v.includes('您')).map(([key]) => `${key}: 您, the register says 你`);
+
+// sheet.guard.stop is the full stop Guard's lines put after words that end none (sheet-view.js stopAfter): `。` in ZH, which is
+// what a Chinese sentence ends in, and which stopAfter's ENDED then reads as ended
+const guardStopOffenders = table => (typeof table['sheet.guard.stop'] === 'string' && table['sheet.guard.stop'] !== '。' ? [`sheet.guard.stop: '${table['sheet.guard.stop']}', not 。`] : []);
 
 // what guardFirstDone and guardFirstRefused read: the sentence's end, of the trimmed words (sheet-view.js ENDED)
 const ends = (s, marks) => marks.test(s.trim());
@@ -167,7 +199,11 @@ test('the glossary is well formed: a register, notes, terms with a zh and a note
     assert.ok(typeof term.en === 'string' && term.en.trim() === term.en && term.en, `en: ${term.en}`);
     assert.match(term.zh, /\p{Script=Han}|…/u, `zh of ${term.en}`);
     assert.ok(typeof term.note === 'string' && term.note, `note of ${term.en}`);
-    for (const [key, why] of Object.entries(term.except ?? {})) assert.ok(typeof why === 'string' && why, `${term.en} except ${key}: its reason`);
+    for (const [key, ex] of Object.entries(term.except ?? {})) {
+      const why = typeof ex === 'string' ? ex : ex?.why;
+      assert.ok(typeof why === 'string' && why, `${term.en} except ${key}: its reason`);
+      if (typeof ex !== 'string') assert.match(ex.zh, /\p{Script=Han}/u, `${term.en} except ${key}: the word it holds instead`);
+    }
   }
   assert.equal(new Set(GLOSSARY.terms.map(t => t.en)).size, GLOSSARY.terms.length, 'one term per en');
   assert.ok(GLOSSARY.keep.every(k => typeof k === 'string' && k) && new Set(GLOSSARY.keep).size === GLOSSARY.keep.length);
@@ -203,8 +239,6 @@ test('a ZH value holding & is read only by t or tn', () => {
   assert.deepEqual(ampOffenders(bad({ 'account.pnl': '盈亏 & 亏损' }), readers), ["render/account.js:1 th('account.pnl')"]);
   assert.deepEqual(ampOffenders(bad({ 'account.pnl': '盈亏' }), readers), []);
   assert.deepEqual(ampOffenders(bad({ 'account.pnl': '盈亏 & 亏损' })), [], 'the real call sites read account.pnl with t');
-  const real = ampOffenders(bad({ 'nav.markets': '市场 & 行情' }));
-  assert.ok(real.length > 0 && real.every(site => site.endsWith("th('nav.markets')")), 'the scan reads the real call sites: th reads nav.markets');
   assert.ok(ampKeys(EN).has('account.pnl') && ampReaders(ampKeys(EN)).length === 0);
 });
 
@@ -219,12 +253,17 @@ test('each ZH value carries exactly its EN key\'s params', () => {
   assert.deepEqual(paramOffenders(bad({ 'time.date': '{day} {day} {month}' }), EN), [], 'a param twice is the same param');
 });
 
-test('ZH holds no Latin word but a kept name, a param or a key name', () => {
+test('ZH holds no Latin word but a kept name or a param', () => {
   assert.deepEqual(latinOffenders(ZH, GLOSSARY), []);
   const glossary = { keep: ['Gravit', 'ET', 'tok/s', 'Noto Sans SC', 'xoxb-', 'token'] };
   assert.deepEqual(latinOffenders(bad({ 'a.b': 'Gravit 正在运行 {n} tok/s，{name}' }), glossary), []);
   assert.deepEqual(latinOffenders(bad({ 'a.b': '打开 Noto Sans SC，粘贴 token（xoxb-…）' }), glossary), []);
-  assert.deepEqual(latinOffenders(bad({ 'a.b': '按 Enter 或 Esc' }), glossary), [], 'a key name');
+  // no English key name or word passes for a key: EN draws none of Enter, Esc... in its values, and Delete, End, Home are words
+  assert.deepEqual(latinOffenders(bad({ 'a.b': '按 Enter 或 Esc' }), glossary), ["a.b: Latin 'Enter'", "a.b: Latin 'Esc'"]);
+  assert.deepEqual(latinOffenders(bad({ 'details.delete': '删除 Delete' }), glossary), ["details.delete: Latin 'Delete'"]);
+  assert.deepEqual(latinOffenders(bad({ 'agents.endLimit': 'End 额度…' }), glossary), ["agents.endLimit: Latin 'End'"]);
+  assert.deepEqual(latinOffenders(bad({ 'discover.key.home': 'Home' }), glossary), ["discover.key.home: Latin 'Home'"]);
+  assert.deepEqual(latinOffenders(bad({ 'shortcuts.note': '⌘ 是 Ctrl' }), { keep: ['Ctrl'] }), [], 'Ctrl is in EN\'s values, so it is kept by name');
   assert.deepEqual(latinOffenders(bad({ 'a.b': '纽约时间 {from}–{to} ET' }), glossary), []);
   assert.deepEqual(latinOffenders(bad({ 'a.b': '已连接 Telegram' }), glossary), ["a.b: Latin 'Telegram'"]);
   assert.deepEqual(latinOffenders(bad({ 'a.b': '打开 gravit' }), glossary), ["a.b: Latin 'gravit'"], 'a kept name is case-sensitive');
@@ -239,7 +278,7 @@ test('the glossary is held: a key whose EN holds a term has the term\'s zh, unle
   const glossary = {
     keep: ['npm run desk'],
     terms: [{ en: 'conversation', zh: '对话' }, { en: 'Account', zh: '账户' }, { en: 'standing order', zh: '常设指令' }, { en: 'order', zh: '订单' },
-      { en: 'limit', zh: '额度', except: { 'account.orderType.limit': 'the order type' } }, { en: 'desk', zh: '值守台' }],
+      { en: 'limit', zh: '额度', except: { 'account.orderType.limit': { why: 'the order type', zh: '限价' }, 'rules.noWord': 'a sense with no single word' } }, { en: 'desk', zh: '值守台' }],
   };
   const en = { 'search.count': { one: '{n} conversation', other: '{n} conversations' }, 'nav.account': 'Account', 'desk.tab.standingOrders': 'Standing orders',
     'account.orders.title': 'Open orders', 'account.orderType.limit': 'limit', 'rules.limits': 'Limits', 'desk.off.line': 'desk: off (npm run desk -- resume)' };
@@ -253,7 +292,9 @@ test('the glossary is held: a key whose EN holds a term has the term\'s zh, unle
   assert.deepEqual(heldOffenders(bad({ ...ok, 'desk.off.line': '已暂停（npm run desk -- resume）' }), en, glossary), ["desk.off.line: no '值守台' for desk"]);
   assert.deepEqual(heldOffenders(bad({ 'desk.arm': '输入 npm run desk -- arm' }), { 'desk.arm': 'Type npm run desk -- arm' }, glossary), [], 'a term inside a kept string is not the term');
   assert.deepEqual(heldOffenders(bad({ 'desk.tab.standingOrders': '订单' }), en, glossary), ["desk.tab.standingOrders: no '常设指令' for standing order"], 'the longer term masks the shorter');
-  assert.deepEqual(heldOffenders(bad({ 'account.orderType.limit': '额度' }), en, glossary), [], 'an excepted key is not held to the term');
+  assert.deepEqual(heldOffenders(bad({ 'account.orderType.limit': '额度' }), en, glossary), ["account.orderType.limit: no '限价' for limit (the order type)"], 'an excepted key is held to the word the except names');
+  assert.deepEqual(heldOffenders(bad({ 'account.orderType.limit': '限价' }), en, glossary), [], 'and not to the term');
+  assert.deepEqual(heldOffenders(bad({ 'account.orderType.limit': '额度' }), { 'account.orderType.limit': 'limit' }, { ...glossary, terms: [{ en: 'limit', zh: '额度', except: { 'account.orderType.limit': 'a plain reason' } }] }), [], 'a plain reason names no word');
   assert.deepEqual(heldOffenders(bad({}), en, glossary), [], 'a key ZH lacks is not held');
 });
 
@@ -261,9 +302,16 @@ test('no term\'s zh is in keep, and each term\'s except names a key whose EN hol
   assert.deepEqual(keptTermOffenders(GLOSSARY), []);
   assert.deepEqual(exceptOffenders(EN, GLOSSARY), []);
   assert.deepEqual(keptTermOffenders({ keep: ['Gravit', 'token', 'Account'], terms: [{ en: 'Account', zh: 'Account' }, { en: 'tokens', zh: 'token' }, { en: 'Run', zh: '运行' }] }), ['Account: zh \'Account\' is in keep', 'tokens: zh \'token\' is in keep']);
-  const glossary = { keep: [], terms: [{ en: 'limit', zh: '额度', except: { 'account.orderType.limit': 'the order type', 'common.save': 'stale', 'common.gone': 'no such key' } }] };
+  const glossary = { keep: [], terms: [{ en: 'limit', zh: '额度', except: { 'account.orderType.limit': { why: 'the order type', zh: '限价' }, 'common.save': 'stale', 'common.gone': 'no such key' } }] };
   assert.deepEqual(exceptOffenders({ 'account.orderType.limit': 'limit', 'common.save': 'Save' }, glossary),
     ['limit: except common.save: its EN value does not hold the term', 'limit: except common.gone: not a key of EN']);
+  const shaped = except => exceptOffenders({ 'account.orderType.limit': 'limit' }, { keep: [], terms: [{ en: 'limit', zh: '额度', except }] });
+  assert.deepEqual(shaped({ 'account.orderType.limit': { why: 'r', zh: '限价' } }), []);
+  assert.deepEqual(shaped({ 'account.orderType.limit': { why: '', zh: '限价' } }), ['limit: except account.orderType.limit: no reason']);
+  assert.deepEqual(shaped({ 'account.orderType.limit': { why: 'r', zh: 'limit' } }), ['limit: except account.orderType.limit: zh is no Chinese']);
+  assert.deepEqual(shaped({ 'account.orderType.limit': { why: 'r', zh: '额度' } }), ['limit: except account.orderType.limit: zh is the term\'s own']);
+  assert.deepEqual(shaped({ 'account.orderType.limit': { zh: '限价' } }), ['limit: except account.orderType.limit: no reason']);
+  assert.deepEqual(shaped({ 'account.orderType.limit': '' }), ['limit: except account.orderType.limit: no reason']);
 });
 
 test('ZH\'s punctuation and spacing are the register\'s', () => {
@@ -272,11 +320,40 @@ test('ZH\'s punctuation and spacing are the register\'s', () => {
   const ok = Object.freeze({ 'a.b': 'Gravit 正在运行', 'a.c': 'Gravit 正在运行。', 'a.d': '{n} 个任务' });
   assert.deepEqual(punctuationOffenders(ok, en), []);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '已连接，Telegram：已开启（ET）；打开 {name}…' }), en), [], 'full-width marks next to Latin take no space');
-  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '已连接, 请重试' }), en), ['a.b: ASCII "," between Chinese characters']);
-  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '已连接:请重试' }), en), ['a.b: ASCII ":" between Chinese characters']);
-  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '确定吗?请稍候' }), en), ['a.b: ASCII "?" between Chinese characters']);
-  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '好!请稍候' }), en), ['a.b: ASCII "!" between Chinese characters']);
-  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '已连接 Telegram: 正常' }), en), [], 'an ASCII mark after Latin is the register\'s');
+  // ASCII , : ? ! after a Chinese character (a space between allowed), wherever in the value: Chinese marks are full-width
+  const after = (value, mark) => assert.deepEqual(punctuationOffenders(bad({ 'a.b': value }), en), [`a.b: ASCII "${mark}" after a Chinese character`], value);
+  after('已连接, 请重试', ',');
+  after('已连接:请重试', ':');
+  after('确定吗?请稍候', '?');
+  after('好!请稍候', '!');
+  after('无法读取: {why}', ':');
+  after('未退出登录: {words}', ':');
+  after('名称:', ':');
+  after('确定吗?', '?');
+  after('已连接: Telegram', ':');
+  after('已连接 : Telegram', ':');
+  // after Latin, a digit or a } an ASCII mark is the register's (ASCII around Latin and numbers), and takes its space after it
+  for (const ok of ['已连接 Telegram: 正常', '共 {n}: 正常', '轮 3: 已完成', '{why}: 请重试', '是 Telegram?', '已连接 Telegram, 正常'])
+    assert.deepEqual(punctuationOffenders(bad({ 'a.b': ok }), en), [], ok);
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '已连接 Telegram:正常' }), en), ['a.b: no space between a Chinese character and ASCII text'], 'an ASCII mark after Latin takes its space before Chinese');
+  // ASCII ( ) ; and ... next to Chinese, on either side, are refused; … is the register's
+  const beside = (value, mark) => assert.deepEqual(punctuationOffenders(bad({ 'a.b': value }), en), [`a.b: ASCII "${mark}" next to a Chinese character`], value);
+  beside('已连接(Telegram)', '(');
+  beside('(Telegram) 已连接', ')');
+  beside('Telegram; 已连接', ';');
+  beside('请先登录; 然后重试', ';');
+  beside('加载中...', '...');
+  beside('...已连接', '...');
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '加载中…' }), en), []);
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '已连接 Telegram (ET)' }), en), [], 'brackets between Latin and a number only');
+  // a space beside a full-width mark is refused, in front, behind, inside a pair
+  const spaced = value => assert.deepEqual(punctuationOffenders(bad({ 'a.b': value }), en), ['a.b: a space beside a full-width mark'], value);
+  spaced('已连接 ，Telegram');
+  spaced('已连接， Telegram');
+  spaced('已连接（ Telegram）');
+  spaced('已连接（Telegram ）');
+  spaced('已连接：Telegram ；已开启');
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '已连接（Telegram），已开启：{n} 个' }), en), []);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '正在运行。' }), en), ['a.b: ends in 。 where EN has no full stop']);
   assert.deepEqual(punctuationOffenders(bad({ 'a.c': '正在运行。', 'a.d': '{n} 个任务。' }), en), [], 'EN ends in a full stop (a plural\'s either form)');
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': 'Gravit正在运行' }), en), ['a.b: no space between a Chinese character and Latin']);
@@ -285,6 +362,19 @@ test('ZH\'s punctuation and spacing are the register\'s', () => {
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '3个任务' }), en), ['a.b: no space between a Chinese character and a digit']);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '{n}个任务' }), en), ['a.b: no space between a Chinese character and a {param}']);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '共{n}' }), en), ['a.b: no space between a Chinese character and a {param}']);
+  // an ASCII run that is no letter, digit or {param} at its edge — a path, a command, a flag, a percent — is as much a run
+  const other = value => assert.deepEqual(punctuationOffenders(bad({ 'a.b': value }), en), ['a.b: no space between a Chinese character and ASCII text'], value);
+  other('打开~/.dsh');
+  other('输入/newbot 发送');
+  other('占 {n}%的任务');
+  other('版本-1');
+  // decision: a ! that starts a word (a command: !status) is no mark, so it is a run like ~/ or /: it takes its space
+  other('输入!status 命令');
+  after('输入!', '!');
+  after('输入! status', '!');
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '打开 ~/.dsh 目录' }), en), []);
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '输入 /newbot 发送，或 !status' }), en), []);
+  assert.deepEqual(punctuationOffenders(bad({ 'a.b': '占 {n}% 的任务' }), en), []);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '正在 运行' }), en), ['a.b: a space between two Chinese characters']);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '第 3 轮，共 {n} 个' }), en), []);
   assert.deepEqual(punctuationOffenders(bad({ 'a.b': '已连接（{name}）' }), en), [], 'a bracket is not Chinese script');
@@ -300,6 +390,14 @@ test('every glossary term is used: its en is in some EN value', () => {
 test('ZH never addresses the user as 您', () => {
   assert.deepEqual(registerOffenders(ZH), []);
   assert.deepEqual(registerOffenders(bad({ 'a.b': '请您重试', 'a.c': '请你重试' })), ['a.b: 您, the register says 你']);
+});
+
+test('sheet.guard.stop, the stop after words that end none, is 。 in ZH', () => {
+  assert.deepEqual(guardStopOffenders(ZH), []);
+  assert.deepEqual(guardStopOffenders(bad({ 'sheet.guard.stop': '。' })), []);
+  assert.deepEqual(guardStopOffenders(bad({ 'sheet.guard.stop': '.' })), ["sheet.guard.stop: '.', not 。"]);
+  assert.deepEqual(guardStopOffenders(bad({ 'sheet.guard.stop': '。 ' })), ["sheet.guard.stop: '。 ', not 。"]);
+  assert.deepEqual(guardStopOffenders(bad({ 'common.save': '保存' })), [], 'a table without the key reads it from EN');
 });
 
 test('the keys whose value can end a Guard line end a sentence in ZH exactly when they do in EN', () => {
