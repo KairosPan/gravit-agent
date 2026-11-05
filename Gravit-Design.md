@@ -23,7 +23,9 @@ approved with it): Telegram's token, poll, inbox and outbox move from the face t
 the desk reaches the phone through it — §1, §3, §4, §5 (D18, D19, D20), §7.3, §8; revised
 2026-11-04 for Slack in the account (plan B2; the same spec's §5.9 as it applies to Slack): Slack
 beside Telegram, its app's two tokens in the account, its connection an outbound Socket Mode
-socket — §1, §3, §4, §5 (D20), §7.3;
+socket — §1, §3, §4, §5 (D20), §7.3; revised 2026-11-05 for the product as a personal
+agent for investors and traders, with persona and growth, and an outbound external identity,
+both stated as direction and not built (§1, §7.3, §9);
 §7.2 re-read 2026-11-02 for the dsh 0.2.1-rc.5 upgrade (a role is a preset of its own behind
 the face's blocking tool; a native child reports by notice; the upgrade's own decisions are PLAN
 D19–D27, `DEVELOPMENT.md` §4.8, not this charter's D19–D28) ·
@@ -42,10 +44,23 @@ page, the content belongs in `DEVELOPMENT.md` or the docs, not here.
 
 ## 1. The product
 
-Gravit is a market–strategy–account research workbench for **one operator, one machine, one
-principal agent**. The agent, also called Gravit, runs on DeepSeek Harness (dsh) inside the
-operator's chat face and works three layers. Gravit organizes work, checks returned evidence and
-owns the research conclusion; the operator retains final judgment. Operator-authored bots carry
+Gravit is a personal agent for investors and traders: **one operator, one machine**, and the
+operator retains final judgment. Gravit is the product name. The principal agent runs on
+DeepSeek Harness (dsh) inside the operator's chat face and works three layers. It organizes
+work, checks returned evidence and owns the research conclusion. The prompt it runs with today
+is the research persona in `dsh/profile/persona.md`.
+
+Two directions are named and not built. Persona and growth: an agent with its own name and
+character, that understands the user and grows with their investing experience, including
+proactive contact on top of the desk's phone, watch and reports, and a dedicated memory module
+that is not yet designed. User-preference modelling, personality formation and autonomous growth
+are not implemented. Git, strategy directories, bot journals and session histories are a
+persistent record of decisions and interactions, not that module. An external identity: the
+product discovers and calls other agents, outbound only, as the approved first step toward a
+wider agent network. No such interface is built, and no agent network exists here. Inbound
+calls from other agents remain unbuilt and would reopen §8.
+
+Operator-authored bots carry
 continuing research perspectives into rooms (§7.1). Temporary subagents perform bounded
 delegated work (§7.2). The role library — one-shot roles with their own persona and tools, three
 shipped since 2026-10-26, the Lunhui analysts and reviewer — is the prebuilt form of that
@@ -398,7 +413,10 @@ is the copy source).
 - **No inbound.** Nothing on this machine listens for the outside. The account polls Telegram and holds Slack's
   outbound socket. The face polls the account. A pasted token passes through the agent box unparsed and unlogged,
   and is never stored there. The browser card remains the only approval surface; the phone is
-  told of a card, never asked to answer one.
+  told of a card, never asked to answer one. The single-operator, single-machine boundary stands.
+  The approved first step toward an agent network is outbound only, and it is not built: Gravit
+  holding its own external identity and discovering and calling other agents. Inbound calls from
+  other agents remain unbuilt and would still require reopening §8.
 - **No hosted face.** Loopback only, one machine, no authentication machinery of the face's own
   on the local surfaces — dsh 0.2's browser cookie on `/api` is dsh's (see D10 for what that
   costs).
@@ -411,8 +429,10 @@ is the copy source).
   key the browser holds, the Account's envelope and nonce) and designs none of its own. The face
   process holds no key and signs nothing; Gate 2 stays the face's only gate for the agent; the
   owner's hand orders pass through no gate of this tree's (D18).
-- **No memory substrate beyond what exists.** Git, strategy artifacts, bot journals and dsh's
-  own session histories are the memory. A dedicated store is chosen when content demands one.
+- **No memory substrate beyond what exists.** Git, strategy directories, bot journals and dsh's
+  own session histories are a persistent record of decisions and interactions, not a memory
+  module. A dedicated memory module is planned and not yet designed; until that design lands,
+  this limit stays. A dedicated store is chosen when content demands one.
 
 ## 8. Revisit triggers
 
@@ -492,3 +512,12 @@ Remaining directions below are not completed capabilities. Further design remain
   move to the tool descriptions, scoped sections and skills dsh provides; the style pack moves
   into a memory substrate the operator designs; the teaching channel is designed with it.
   Deferred by the operator on 2026-10-15.
+- **Persona and growth** (not built; set 2026-11-05). A named agent with its own character,
+  proactive contact building on the desk that already phones, watches and reports, and a
+  dedicated memory module. The module is undesigned. User-preference modelling, personality
+  formation and autonomous growth are not implemented. Git, strategy directories, bot journals
+  and session histories remain a persistent record (§7.3). This entry is the operator's current
+  direction; the 2026-10-15 deferral above stays as the earlier note.
+- **An external identity, outbound only** (not built; set 2026-11-05). Gravit holds an identity
+  of its own and discovers and calls other agents. Inbound calls from other agents are out of
+  scope and would reopen §8. No such interface is built, and no agent network exists in this tree.
