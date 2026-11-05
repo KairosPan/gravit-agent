@@ -373,7 +373,8 @@ All three of its stages are built:
   Where, Agent, Members, Children with Stop, Usage, Stop Gravit), the three gate
   cards (the order card, an approval, a question) answered through the mux, the one status
   line under the composer (not signed in, reconnecting, a host error, a command's word), and
-  Settings (Cream · Black · System);
+  Settings (Cream · Black · System; since the dsh UI port's plan 6 the text and code sizes, the two
+  font families and Keyboard shortcuts, below);
 - **the list's search and pins** (the dsh UI port's plan 2): a box under the list's head, `Search
   conversations`, focused by Option-Command-K (Ctrl+Alt+K off a Mac; from another screen it goes to
   Messages first). Titles and channel names match at once; the words inside conversations come from
@@ -448,6 +449,30 @@ All three of its stages are built:
   output streaming (the last 256K characters kept), its end line (`exit 0`, `signal SIGTERM`,
   `killed`, `failed`), Copy and Stop, asked twice (`Yes, stop`, then `Stopping`); finished jobs fold
   under `Finished · <n>` with Clear. Jobs vanish when the face restarts;
+- **the words, the sizes and the keys** (the dsh UI port's plan 6): **the words** — every word
+  the face writes (a label, a key, an aria-label, a status line, a sheet's line) is read from one
+  English table, `client/js/i18n/en.js`, through `client/js/i18n/words.js`; the move changed no
+  byte of any screen, and plan 7 adds a Chinese table beside it. What anyone else wrote is drawn as
+  written: titles, your words, Gravit's and the bots', Lunhui's output, dsh's and the Account's
+  sentences, tickers, key names, numbers. **The sizes and fonts** — Settings › Text size, a stepper
+  `− 15 px +` from 12 to 20, scales every text size; under **More font settings** (folded), Text
+  font and Code font take a family name typed in (empty is the default, `Default: Manrope, Noto
+  Sans SC` and `Default: IBM Plex Mono`; anything but letters, digits, spaces, `_`, `.` and `-` is
+  taken out, at most 64 characters, and a name the machine lacks falls back to the default) and
+  Code size, `− 12 px +` from 10 to 16, scales every code size. Layout does not scale: widths,
+  avatars, keys and gaps stay. The four are kept in this browser and applied before the first
+  paint, so a reload never flashes the old size. **The keys** — Option-Command-N New message,
+  Option-Command-K the list's search (plan 2's), Option-Command-, Settings and Command-/ the
+  shortcut sheet (Ctrl+Alt+N, Ctrl+Alt+K, Ctrl+Alt+, and Ctrl+/ off a Mac), from anywhere, the
+  editor included, never while an input method composes, and none while an image's lightbox or a
+  What you sign sheet stands. **The shortcut sheet** — Command-/ again, or Settings › Keyboard
+  shortcuts › Show all, opens a centred sheet: `Search shortcuts`, General and Composer, each row
+  what it does and its keys on this platform, and `⌘ is Ctrl off a Mac. Keys follow dsh's web
+  bindings.` It lists keys and changes none. Esc closes it first (after an open menu and the
+  lightbox), then whatever is under it; Tab stays inside it. **Screen readers** (plan 5's carries)
+  — a pill says it opens Usage (`7 turns · 41 steps · 38 tok/s, open Usage`), the turn rail is one
+  Tab stop whose ↑ ↓ Home End move along the ticks, the focused tick names its card, a tick whose
+  pages are being read is busy, and a finished job's end line is said once;
 - **host-fed since stage 2**: Markets (`#/markets`) — the Account's markets by its tabs, the
   stars, a search, and a market's page with its candles and venues — and Account
   (`#/account/portfolio`, `venues`, `agents`, `cards`) — the Account's Portfolio, Venues, Agents
@@ -464,8 +489,8 @@ All three of its stages are built:
   and Account, live while this page signs for the Account as one of its owner devices ("The
   Account in the face" below).
 
-What the browser keeps is three keys: `localStorage["gravit-ui.prefs"]` — the theme, the rail's
-fold, the list groups you folded, the last conversation, what was seen — and the stars: the
+What the browser keeps is three keys: `localStorage["gravit-ui.prefs"]` — the theme, the text and
+code sizes and the two font families, the rail's fold, the list groups you folded, the last conversation, what was seen — and the stars: the
 Account's markets (the A shares among them, as `cn:<code>`) under `gravit.account.watch.v1`, and the
 old face list under `gravit.market.watchlist.v1`, which only an older star still sits on; and, once it has paired with the Account, two more: its owner key in
 IndexedDB (`gravit-face-owner`) and `gravit.owner.signedOut.v1` after a sign-out. Nothing else: a
@@ -1763,7 +1788,8 @@ that takes writes:
   cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is led by an apostrophe);
   `Loading…`, `No statement lines yet`, `Statement unavailable`, the Account's sentence over the
   lines kept after a refusal.
-- **Settings** (a drawer on every screen): the theme, and **Devices** — the Account's owner devices
+- **Settings** (a drawer on every screen): the theme, Text size, More font settings (Text font, Code
+  font, Code size), Keyboard shortcuts (Show all and `⌘/`), and **Devices** — the Account's owner devices
   by label, this page's marked `this page`, the browsers waiting to be let in, with **Let it sign**
   and this page's **Sign out** *(signs;* in Beast it offers `Switch to Guard first: whatever an
   agent asks for waits for a signature`, ticked for the last device that signs*)*.
@@ -4000,7 +4026,7 @@ FACE_SMOKE=1 npm test     # + the 30 smoke files (35 real boots), isolated; loca
 ```
 
 Offline, `npm test` skips the 30 smoke files (35 real boots) listed below; `FACE_SMOKE=1` runs
-them too (3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
+them too (3,664 tests in 241 files on 2026-11-05 with the dsh UI port's words, sizes and keys: 3,610 pass and 54 skipped offline; 3,665 tests, 3,661 pass and 4 skipped under `FACE_SMOKE=1`; 3,554 tests in 231 files on 2026-11-04 with main's Account split and Identity merged into the dsh UI port: 3,500 pass and 54 skipped offline; 3,555 tests, 3,551 pass and 4 skipped under `FACE_SMOKE=1`; 3,439 tests in 222 files on 2026-11-04 with the dsh UI port's thread: 3,385 pass and 54 skipped offline; 3,440 tests, 3,436 pass and 4 skipped under `FACE_SMOKE=1`; 3,307 tests in 217 files on 2026-11-04 with the dsh UI port's attachments: 3,257 pass and 50 skipped offline; 3,308 tests, 3,304 pass and 4 skipped under `FACE_SMOKE=1`; 3,181 tests in 215 files on 2026-11-04 with the dsh UI port's composer: 3,137 pass and 44 skipped offline; 3,182 tests, 3,178 pass and 4 skipped under `FACE_SMOKE=1`; 3,031 tests in 208 files on 2026-11-03 with the dsh UI port's host side: 2,990 pass and 41 skipped offline; 3,032 tests, 3,028 pass and 4 skipped under `FACE_SMOKE=1`; 3,095 tests in 212 files on 2026-11-04 with plan B1b's Account › Identity, on main before the merge: 3,062 pass and 33 skipped offline; 3,096/3,096 under `FACE_SMOKE=1`; before it, 2,993 tests in 203 files on 2026-11-02 at dsh 0.2.1-rc.5 with the desk's hardening and its
 graceful-stop carry merged: 2,960 pass and 33 skipped offline; 2,994/2,994 under `FACE_SMOKE=1`).
 
 **Run them from a checkout outside `/tmp` and `$TMPDIR`.** dsh's `workspace-write` sandbox grants
@@ -4893,13 +4919,14 @@ such an `@` named nobody (the sentence landed the same day in its Rooms paragrap
 face; **on 0.2.0-rc.2 step 0 passes at `8f0dedb`, and the live run is still owed** (go-live
 runbook).
 
-## The dsh UI port drill (keyed; run after any change under client/js/composer/, client/js/host/composer.js, client/js/host/attachments.js, client/js/mask.js, client/js/host/turns-view.js, client/js/host/jobs*.js, client/js/host/live.js, roles/pdf-page-reader/ or the composer's or the thread's part of app.js)
+## The dsh UI port drill (keyed; run after any change under client/js/composer/, client/js/host/composer.js, client/js/host/attachments.js, client/js/mask.js, client/js/host/turns-view.js, client/js/host/jobs*.js, client/js/host/live.js, client/js/i18n/, client/js/prefs.js, client/js/keys.js, roles/pdf-page-reader/, index.html's script or the composer's, the thread's or the keys' part of app.js)
 
 **Owed, the operator's.** The fake DOM proves the draft model, the menus and the routing; it cannot
 type into a real `contenteditable`, compose pinyin or move a real caret, and a stub model does not
 read files. Search and pin are the transport drill's step 8 and earlier history across a restart
-its step 9; the composer's steps are 1–8, the attachments' 9–14, the thread's 15–19, and the other
-picks join as their plans land. The attachment steps need Poppler
+its step 9; the composer's steps are 1–8, the attachments' 9–14, the thread's 15–19, the words',
+sizes' and keys' 20–24 (these need no key and no model: any face of this checkout will do, in
+Safari, Chrome and Firefox each), and the other picks join as their plans land. The attachment steps need Poppler
 on this shell's `PATH` (`brew install poppler`, "Run"), a CSV, a PNG screenshot and a broker
 report's PDF with a table on one of its pages. Keyed, on a second face from your own terminal:
 `source ../.env.deepseek`, then `npm run setup` and `npm start` with
@@ -5017,6 +5044,36 @@ Account). Open the printed `?token=` URL and hard-reload.
 19. **The jobs at a restart.** With a job running, restart the face. PASS: the chip and the job are
     gone once the page reconnects (jobs live in the face's memory), and nothing else on the page
     changed.
+20. **The four General keys, in each browser.** In Safari, Chrome and Firefox, press each of ⌥⌘N,
+    ⌥⌘K, ⌥⌘, and ⌘/ (Ctrl+Alt+N, Ctrl+Alt+K, Ctrl+Alt+, and Ctrl+/ off a Mac) three times: with the
+    caret in the editor, in an input (the list's search box, a Settings font field), and on a page
+    with no focus (click an empty part of the thread first). PASS: New message opens, the search
+    box takes focus, Settings opens, the shortcut sheet opens and closes again; the browser does
+    nothing of its own (no new window, no preferences, no find bar). With a pinyin candidate window
+    open in the editor, and with What you sign standing, each does nothing. A key a browser keeps
+    for itself: set `bound: false` on its row in `client/js/keys.js` and record it here; the sheet
+    then leaves it out (the spec's §18 names the keys the drill unbound).
+21. **Text size and Code size before the first paint.** Settings › Text size: `+` to 20, then
+    reload. PASS: the page draws at 20 from its first frame, never 15 first; `−` to 12 and reload:
+    the same at 12, the `−` key dim at its end. More font settings › Code size at 16 and at 10 with a
+    reload: code (a job's command, a key mask, a market's figures) scales, the rest does not, and
+    widths, avatars and keys keep their size at every step.
+22. **A font typed and cleared.** Type `Courier New` into Code font and leave the box. PASS: code
+    draws in Courier New at once and after a reload. Type `Inter"; } body { display:none` into Text
+    font: the box keeps `Inter body display none`, the page stays drawn. Clear both boxes: the
+    defaults come back, `Default: …` showing in each. With Chinese in a code block (a pasted line in
+    a message), it draws in Noto Sans SC, not a fallback box; a heavy Chinese heading draws in Noto
+    Sans SC's 800 weight (DevTools › Network › Font shows the 800 file loaded).
+23. **The shortcut sheet over Settings.** Settings › Keyboard shortcuts › Show all. PASS: the sheet
+    opens over the drawer, focus in `Search shortcuts`; type `conv`: only the rows that hold it;
+    `zzz`: `No shortcut matches`; Tab and Shift+Tab stay on the box and the close key; Esc closes
+    the sheet and focus is on Show all again; a second Esc closes Settings. ⌘/ from the editor opens
+    it too, and Esc gives focus back to the editor.
+24. **A screen reader on the pills and the rail.** With VoiceOver on, Tab to a pill under the
+    thread. PASS: it reads `<its text>, open Usage`. Tab on to the rail: one stop, a tick read as
+    `Turn <n>`, its card described; ↑ and ↓ move along the ticks, Home and End to the ends, each
+    read once; Tab leaves the rail in one press. A tick pulsing while its pages are read is
+    announced busy.
 
 **PASS criteria are observations.** Record the run below with the date and the commit.
 
@@ -5316,7 +5373,7 @@ run account:owners`, "The owner drill").
    1. Markets › China: rows in CNY from the market (`/data/market/explore?tab=china`) with the
       session phase in the state line (`Tencent · Live`, `Midday break`, `Closed`).
    2. Search `600519`: it is found, among the other markets' hits.
-   3. Open it: the tile, `A-share · 600519 · SH`, the twelve facts (`CN_FACTS`: Previous close
+   3. Open it: the tile, `A-share · 600519 · SH`, the twelve facts (`cnFacts()` in `host/market-view.js`: Previous close
       through Amplitude), and Price history's 1D and 5D minute lines and 1M–MAX bars.
    4. Star it: on a page that signs the star lands in the Account's watch list (`portfolio_account`
       reads it, or the other face browser's star).

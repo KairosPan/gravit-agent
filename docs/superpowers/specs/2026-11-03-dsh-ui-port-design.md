@@ -1477,3 +1477,106 @@ in Safari and Firefox, forced colours, the rail at `right: 0` against a non-over
 active tick after a jump, a job summary clicked inside the Finished fold, a job's output
 keeping its scroll while it streams, a large output's cost, and the narrow layout's keep on a
 prepend. The keyed steps 15–17 and the transport drill's step 9 are the operator's.
+
+## 18. Build notes, plan 6 (2026-11-05)
+
+Plan 6 (the words into the table, fonts and sizes, the keys and the shortcut sheet; client only)
+built on `claude/cranky-bun-9f78c8` after Task 0, the merge of local `main` (the Account split's
+client work and B1b's Identity tab) into the branch at `8b24ca94` and its docs commit `77287488`
+(the suite's counts, the dsh UI port's residuals renumbered R99 and R100, `GRAVIT.md` trimmed to
+4,494 bytes in wording only): so the precondition's first path held (D37), the corpus was pinned
+after the merge and no word move ran before it. The commits: `56b55a1b` (the zero-change harness:
+the corpus and its golden), `811765e0` (the guard, a pending list to empty), `65053950` (the words
+module, `en.js`, time and the shared controls), `85a0608a` and `f4eb8bb0` (the review of Tasks 1–3
+taken as one foundation: the scanner reading contractions, acronym phrases, a template's lone words
+and cut attributes, `setTable`, the `wordsBindings` rule, and the golden over the Money and Rules
+tabs, every sheet kind, a market's depth and host-written lines, append-only), `b9b34abb` (the list
+and the rail), `e0c1c343` and `e9a6e3c9` (the thread, the composer, Details and the status lines,
+and the fix for the job note's error word, the members line kept and two assembled sentences
+keyed), `8ff848bc` (the Account screen, Settings and Identity), `ab9c7ff2` (the owner device and
+its sheets), `f9d0a2f8` and `4a432576` (Markets, Trade and the desk, and the fix that China's
+not-answering state is known by a flag and a sort by its id), `e80ae42b` (Discover, channels, the
+modules, the Run sheet and Lunhui), `5275ec59` and `1611cc2f` (the table closed: the probe render,
+the pending list gone, Theme's values made codes, and the fix that the probe knows content fields
+only, never codes), `cde958f5` (plan 5's screen-reader carries), `760648f1` (the two size scales and
+the fonts in CSS), `50c88c82` (the sizes and fonts in Settings, before the first paint), `ddedb8e4`
+(the keys), `3544f330` (the shortcut sheet and Settings › Keyboard shortcuts), and this note's
+commit (DEVELOPMENT.md, face/README.md, CLAUDE.md, ROADMAP.md). Measured at `3544f330`: the face
+suite 3,664 tests in 241 files, 3,610 pass, 54 skipped, 0 fail; under `FACE_SMOKE=1` 3,665 tests,
+3,661 pass, 4 skipped, 0 fail; the smoke file 21/21 (plan 6 adds no smoke); typecheck clean; no
+flake that run. The table holds 1,686 keys in 29 areas, 33 of them plurals; 63 lines are marked
+`// en-kept:`; the golden holds 223 entries (173 states, 36 drawn off a Mac, 12 composer pieces, 2
+host-written lines). `GRAVIT.md` is untouched at 4,494 of 4,500 bytes, and the prompt-loops page
+moves nowhere (no prompt and no loop station changed). `docs/dsh-upgrade-guide.md` gains nothing:
+no dsh fact moved.
+
+| Clause | The text | What the tree does | Why |
+|---|---|---|---|
+| §5.10 | `t(key, params)` | four functions: `t` plain text (inside `esc()`/`attrs()` and for lines held in state), `th` HTML text (the value verbatim, its params escaped unless `rawHtml`), `tn` and `thn` a plural's form; a missing key reads from `EN`, then as itself; a null param reads as nothing | renderers write words both as raw template text and inside `esc()`; a byte-identical move needs both, and `Can't run · ${esc(reason)}` must still draw `Can't` (Review Focus 1) |
+| §5.10 | a table of words | `client/js/i18n/en.js`, `EN`, frozen and flat; keys `<area>.<part>.<name>` (an area of 29, then one or two lower-camel segments), the same English under two meanings two keys; a value a non-empty string or `{one, other}` with no `<`, `>`, `"` or `&` before a letter or `#`, params `{name}` (`{n}` in a plural) | the plan's grammar, held by `words-table`; `P&L` stays outside the table for it |
+| §5.10, plan 7 | the language switch | `setTable` (an object only; the epoch moves only on a new identity), `withTable` (synchronous, restored in `finally`), `wordsEpoch()`; nothing on the page calls `setTable` yet | plan 7's switch's seam; the tests switch tables with `withTable` to prove no logic follows a word |
+| §5.10, Review Focus 2 | the module constants | every word list once a module constant (`TABS`, `RANGES`, `MONTHS`, `SEARCH_LINE`, `DAYS`, `ACCOUNT_TABS`, `ACCOUNT_SORTS`, `TRADE_KINDS`, `LIMIT_SCOPES`, `ROUTE_ROWS`, `CONNECT_STEPS_4`, `IDENTITY_WORDS`, `SHELVES`, `CN_FACTS`, `WALLET_WORDS`, `NO_KEY`, `ACCOUNT_DOWN`/`MARKET_DOWN`, `NOT_ANSWERING_WORD` and their kind) is a function of no argument, beside its frozen ids where code needs them (`ACCOUNT_TAB_IDS`, `ACCOUNT_SORT_IDS`, `TRADE_KIND_IDS`, `SHELF_IDS`); `MODULES` keeps its codes and reads `title`, `freezes`, `artifacts`, `channelWords` and `legend` through getters; `countWord` became `itemsWord` and plurals | a word read at import would never follow a table change; the scanner refuses a words call outside a function body, an IIFE included |
+| §5.10 | words compared by code | logic never tests a table word: an order row carries `mine` (`authority === 'owner'`), China's provider row `notAnswering`, `setMarketsSort` takes an id, a module headline returns `{words, quiet}`, a module page's unread is a code, Discover's kind line is keyed by shelf, the chosen route carries `chosen` (an Account message that starts `Via ` is no longer bolded), `wire/room.js`'s gate chip state is the code `waiting`; the statement's `by !== 'You'` compares the Account's own wire word (`OWNER_BY`, en-kept) | each was found comparing English that another table would change; each fix has a test under `withTable` that fails with the old comparison |
+| D35 | zero visible change | the golden (`words-golden`, a SHA-256 per state over `fixtures/screens-en.json`) stayed byte-identical through Tasks 3–9, dumped before and after each task with `diff -rq`; the 954 `assert.match` and 245 `assert.doesNotMatch` were not recounted and pass untouched | the plan's harness; the corpus is `css.test.js`'s states, moved to `helpers/screens.js` as they were |
+| D35 | re-pinned on purpose | Task 1 pinned 168 entries and the review's round grew it to 212, append-only (state-87 re-pinned for `now` passed to the module page); Task 10 re-pinned state-14, state-14-pc, state-52 and state-58 (Theme's seg values `cream`, `black`, `system`, codes, not labels; the stored theme was already lower-case, so nothing migrates) and state-79 and state-79-pc (a fixture's server words, `roster write refused`, holding no sentinel word); Task 11 re-pinned 58 (the nav's `role="toolbar"` on every Messages state, the pills' `aria-label` on every state that opens s1, the rail's tick attributes and the job end line; diffed with the new attributes stripped: nothing else); Task 13 re-pinned the four Settings states and added state-166–168; Task 15 re-pinned the seven Settings states and added state-169–172 with their `-pc` twins (the sheet open, a query, no match, over Settings) | `golden-write.js --pin --repin <names>` refuses any other change; Task 11's count is larger than its brief's three because the toolbar is drawn on every Messages state |
+| §5.10 | the guard | `helpers/words-scan.js` over the TypeScript parser: a phrase with whitespace-run word edges (a class list like `seg-item pressed` is no phrase), a contraction, an acronym phrase, `OK`, any word of two letters or more in a template's text outside tags with a hole per `${…}` (a word glued to a hole, `sz${c}`, is part of a name), the read attributes in their parts; a class or `rel` list, a path, a key, a CSS unit and a property name never; `KEPT_FILES` `wire/api.js`, `wire/markdown.js`, `i18n/en.js`; an `// en-kept:` marker exempts its own line, `EN_KEPT` (63) its exact count; `wordsBindings` refuses a local `t`, `th`, `tn` or `thn` in a file that imports the words (every such local renamed as its file moved, `account.js`'s column helper `th` among them, now `colHead`) | the plan's scanner widened by the first review; a pending list ratcheted from 85 to none (Task 10) |
+| §5.10 | the probe | `words-probe` draws the corpus under a probe table (every value wrapped `⟦…⟧`) and reports every word left that the fixtures' content fields (`CONTENT_FIELDS`, an upstream's content whole: Lunhui's views, a module's data, a channel's files, What you sign's `shown`, the Account's orders and limits), an `en-kept` literal (not one whose reason says never on screen, nor an `Error`'s argument) or a data transform the screens apply do not hold; a sentinel asserts `failed`, `running`, `killed`, `Loading`, `Messages`, `Pending`, `Researching` are not known; its first run found 86 words (Theme's three, the composer's size units, `tok/s`, the history ranges `1D…MAX` labelled now by `candleRanges()`, `CST` as `{at} CST`) | the scanner cannot see a lone lowercase word; the first review found the known set admitted status words, and the fix counts content fields only |
+| §5.10 | `thread.members` | one form `{names} · {n} member`, the other `members` (Task 10); no corpus state draws a one-member group, so it is pinned in `messages-screen.test.js` | kept `1 members` through Task 5 for zero change, fixed where a re-pin was allowed |
+| §5.10, the plan's call | state-held lines | a status line, a sheet's `said`, a field's `error`, a seat line, a receipt are `t()` where host code makes them and escaped once at the draw (`words-status` pins each in exact bytes with params holding `<`, `&` and `'`); a Run's conversation title is the module's title in the table that stood when the Run was sent, kept as written in dsh, the face's search index and `moduleRuns` | under plan 7 a line written before a switch keeps its language until the next line (DEVELOPMENT.md R101) |
+| §5.10, §3.3 | wire words | the wire modules' Chinese stays where it was (`client-chinese` allows CJK in ten content files, each with its reason) and their English that reaches a screen moved (`wire/room.js`'s round-end lines, `wire/member-traces.js`'s refusals, `wire/botSettings.js`'s model refusal and tool labels); errors never on screen are en-kept | the wire-words rule re-taken: what is drawn goes through the table, what is dropped stays |
+| §3.3, the plan | the escape chain's head | the shortcut sheet took D34's free slot: an open menu, the lightbox, the shortcut sheet, the search box, then the chain as built (Connect Telegram's drawer after the owner sheet, from main) | plans 2–4 had put the menu, the lightbox and the search box before the chain |
+| §5.12 | ⌥⌘K | its match moved into `keys.js` with the three new keys: `chordOf(ev, mac)` on `ev.code` and the modifier flags, ⌘ `metaKey` on a Mac and `ctrlKey` elsewhere with the other not held, `null` while an IME composes; each General key `preventDefault`s and works from any focus, the editor and every input included | plan 2 built ⌥⌘K on `ev.code`; one table now serves the keydown and the sheet |
+| §5.12, the controller's ruling | over a sheet | none of the four General keys does anything while the lightbox or an owner sheet stands, ⌥⌘K included (plan 2 let it focus the box under one); a General key other than ⌘/ closes the shortcut sheet first; ordinary typing leaves the sheet open (it has a search box); ⌘/ toggles it | focus must not go behind a modal, and What you sign is never navigated away by a key (Review Focus 4) |
+| §5.12 | the keys' table | `SHORTCUTS`: four General rows with `code` and `mods`, five Composer rows the sheet lists and nothing matches; every row `bound: true`; each row's line `// en-kept: key names` rather than `keys.js` in `KEPT_FILES` (the probe reads en-kept lines, and the guard still watches the rest of the file); `shortcutWords(row)` literal-keyed thunks; `chordOf` takes an optional table so a test unbinds a real row | the guard needs literal keys; the browser drill decides `bound` |
+| §5.12 | the keys the drill unbound | none yet: the browser drill (`face/README.md` "The dsh UI port drill", step 20) is owed, and a key a browser keeps is marked `bound: false` there and recorded here | the spec's rule that the sheet lists only keys that work |
+| §5.12 | the sheet | `render/shortcuts.js` after the drawers, outside `<main>`: the scrim (z 50) and a dialog (z 51, above a drawer's 30, under the drop overlay's 60 and the lightbox's 70) `min(440px, 100% - 32px)` wide; the state `{q}`; the close key `#sc-close` and Show all `#show-shortcuts` carry ids (by its action alone focus would find the scrim first); the sheet is tracked beside the drawers (`last.shortcuts`), so the drawer under it keeps its opener; Tab and Shift+Tab alternate the box and the close key; the lightbox over it gives focus back inside it | Review Focus 5: Esc closes the sheet, focus returns to Show all, a second Esc closes Settings |
+| §5.11 | the sizes are not all px | 210 sizes rescaled by a script over innermost rule blocks (202 `font-size`, 8 `font:` shorthands, `html, body` among them), `--fm` in the 14 rules that set `var(--font-mono)` or are `.mono`, `--fs` elsewhere; `.secret`'s `0.875em` and `font: inherit` unchanged; the avatars' inline letter size unscaled (D32); stripping the `calc` wrappers gave the old sheet byte for byte | the plan's count; the golden is HTML, so CSS had its own proof |
+| §5.11, D29 | the fonts | `--font-sans-base` and `--font-mono-base` under `--font-sans` and `--font-mono`; the mono stack gains Noto Sans SC, PingFang SC and Hiragino Sans GB before `monospace`; Noto Sans SC's 800 weight is fetched | D29 and §5.10's CJK fallback landed with the font settings, as the plan placed them |
+| §5.11, Review Focus 3 | a typed family | `cleanFont`: every character outside letters, digits, space, `_`, `.` and `-` a space, spaces collapsed, at most 64 code points, trimmed; set as `"<name>", var(--font-*-base)` in one custom property; the same rules written again in `index.html`'s inline script (`prefs.test.js` runs it against `applyPrefs`); `setFont` reads on `change` and writes the cleaned family back into the box before the render | `Inter"; } body { display:none` lands as `Inter body display none` and nothing else |
+| §5.11, the plan's call | the Settings order | Theme, Text size, More font settings (folded, kept open across renders: Text font, Code font, Code size), Keyboard shortcuts (Show all and the platform's ⌘/), Devices; a stepper's key `disabled` at its range's end | plan 7 puts Language first |
+| §5.7, owed by §17 | the screen-reader carries | each pill `aria-label="<its text>, open Usage"`; the rail `role="toolbar"` `aria-orientation="vertical"`, one tick `tabindex="0"` (the focused, else the active, else the last), ↑ ↓ Home End with no modifier (`stepRail`, on `ev.key` as the menu's arrows; §5.12's `ev.code` rule is for the General keys), Enter and Space the button's own; the card `id="turn-card-<turn>"` named by its tick's `aria-describedby` (one rail on a page, so no conversation id); the pulse `aria-busy`; `.job-end` reads `(no output)` alone, the end line only in the meta line | plan 5's three owed items, paid; Chrome's `focusout` on a removed tick pinned again under the arrows |
+| §3.3 | the client suite's counts | the client suite is 95 files at plan 6 (81 on the branch before the merge); the plan's ten new ones are `words-golden`, `words-guard`, `client-chinese`, `words`, `words-table`, `words-status`, `words-probe`, `prefs`, `keys` and `shortcuts`, with `helpers/screens.js`, `helpers/words-scan.js` and `golden-write.js` | not recounted elsewhere |
+
+The rulings, as `progress.md` records them: Tasks 1–3 were reviewed together after Task 3, as one
+foundation; the words tasks were reviewed in pairs (4+5, 6+7, 8+9), the golden proving no visible
+change per task; the Account's codes drawn as words (an open order's `pending`, `limit`, `open`, a
+limit's `payees` scope, a status `ok`) stay the Account's content for now; the shortcut sheet stays
+open on ordinary typing, and ⌥⌘K over an owner sheet does nothing, like the other General keys;
+Tasks 11–15 got no per-task review, the final review covering them.
+
+What plan 7 inherits. The seam: `setTable` and `withTable` for its switch, `wordsEpoch()` in every
+memoized renderer's key (`railHtml` today), and the state-held lines, which keep the table they were
+written in. Owed to plan 7:
+- on `setTable`, fold the open conversation again and re-list, since titles, seat lines and
+  receipts, reports, the view-failed line, edit errors, composer notes and the stored status lines
+  of Discover, a channel, the Run sheet and the desk are words in state (or store key and params in
+  their place); a Run's title follows the table at its creation and is persisted;
+- the jobs' dropped-output marker is compared with the current table's word, so after a switch a
+  second marker would be appended: give it a sentinel;
+- sentences still assembled in code order become keys: `orderWords`, `at()`, `previewOf`,
+  `imageMeta`, the limit clauses, the venue health line, the agent row, the key file's `Missing:`,
+  `May send:`, the routes' lists, Devices' lines, the desk's lines and the trade fill, a module
+  chip's `<module>: <words>`, the legend rows, the readouts, the stocks' aria-labels, the latest
+  detail's joins, the desk's standing, `withSource` and `DIR_CHANNEL`;
+- `P&L` outside the table (its grammar forbids `&` before a letter);
+- plurals for `sheet.earn.locked` (`{days} days`, `1 days` kept) and `markets.chart.sessions` (`The
+  last {n} sessions`);
+- `toUpperCase` on a table word (`MODULE`, the kind's word upper-cased) may not hold in another
+  script;
+- keys reused across meanings (`trade.field.orderType`, `markets.sort.volume`, `modules.chip.noRun`)
+  and duplicate keys (`owner.noAnswer` and `account.noAnswer`, `owner.refused` and
+  `money.sellMany.refused`);
+- the Account's codes drawn as words, to be worded or left (the ruling above);
+- the modules' Chinese sub-titles' English halves, unreachable by design, en-kept;
+- `notSigning`'s comment against its table word, `sheetRefused` reading the table in a reducer, and
+  the money sheet's test of the Account's proven sentence;
+- `Look at {symbol}` is the operator's draft, so it follows the table at the click;
+- the words-table checks over `zh.js`: its grammar, no `<`, `>`, `"` or entity, and key and param
+  parity with `EN`.
+
+Owed to the browser drill (`face/README.md` "The dsh UI port drill", steps 20–24, in Safari, Chrome
+and Firefox): the four General keys from the editor, an input and a page with no focus, and each
+key a browser keeps marked `bound: false`; Text size and Code size at their ends with a reload and
+no flash; a code font typed and cleared and a hostile family name; Noto Sans SC 800 loading; the
+sheet over Settings with Esc twice, its Tab trap and focus back on Show all; VoiceOver on a pill and
+on the rail as one Tab stop with its arrows. What stays imperfect is `DEVELOPMENT.md` R101.
