@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runsView, valueWord, itemsWord } from '../../client/js/host/runs-view.js';
-import { tn } from '../../client/js/i18n/words.js';
+import { tn, withTable } from '../../client/js/i18n/words.js';
 
 const R1 = '2026-10-24-0930-ab12';
 const R2 = '2026-10-23-0930-cd34';
@@ -129,4 +129,14 @@ test('runsView: the theme chip ends with the boards source only when the run say
   // the other modules never take the suffix
   const b = runsBody(); b.runs[0].boardsProvider = '同花顺问财';
   assert.equal(runsView(b).latest.chips.find(c => c.module === 'sentiment').text, 'sentiment: ice · weak · 0.1235');
+});
+
+test("a run's chip is in the table's order: the module and its words, a theme's boards source; a short list's separator the table's", () => {
+  const b = runsBody();
+  b.runs[0].boardsProvider = '同花顺问财';
+  b.latestRun.artifacts.theme = { headline: { mainline_candidates: ['a', 'b'] }, json: {} };
+  b.runs[0].artifacts.theme.status = null;
+  withTable({ 'channel.chip.module': '{words} ({module})', 'modules.chip.withSource': '{source} / {words}', 'common.list.sep': '、' }, () => {
+    assert.deepEqual(runsView(b).latest.chips.map(c => c.text), ['ice · weak · 0.1235 (sentiment)', 'boards: iFinD (THS concepts) / a、b (theme)', 'S01 (mode)', '3 items (counterevidence)']);
+  });
 });

@@ -38,10 +38,10 @@ export function renderDeskTab(view, read = {}) {
   // an order's anchor leads its state only when the state is when it next falls, as src/desk.ts orderState says it; an
   // A-share order's market leads both, as standingLines prints it
   const standing = feed([...view.standingNotes.map(n => line('·', esc(n))),
-    ...view.standing.map(o => line('·', esc(t('desk.tab.standing', { id: o.id, market: o.market === 'cn' ? t('desk.tab.marketCn') : '', anchor: o.timed ? `${o.anchor}, ` : '', next: o.next })),
-      [esc([o.hash === 'ok' ? '' : o.hash, o.last].filter(Boolean).join(' · ')), sessionLink(o.sessionId)].filter(Boolean).join(' · ')))]);
+    ...view.standing.map(o => line('·', esc(t('desk.tab.standing', { id: o.id, market: o.market === 'cn' ? t('desk.tab.marketCn') : '', anchor: o.timed ? t('desk.tab.anchor', { at: o.anchor }) : '', next: o.next })),
+      [esc([o.hash === 'ok' ? '' : o.hash, o.last].filter(Boolean).join(' · ')), sessionLink(o.sessionId)].filter(Boolean).join(' · ')))]); // words-order: an order's pins, its last firing and its session's link under the visual separator
   const firings = view.firings.length ? feed(view.firings.map(f => line('·', esc(`${f.when} · ${f.order}`), esc(f.kind === f.outcome ? f.kind : `${f.kind} · ${f.outcome}`)))) : empty(t('desk.tab.noFirings'));
-  const runs = feed([...view.runs.map(r => line('·', `${esc(t('desk.tab.run', { at: r.bootedAt, pid: r.pid }))}${r.lost ? ` ${tag(t('desk.tab.lost'))}` : ''}`)),
+  const runs = feed([...view.runs.map(r => line('·', `${esc(t('desk.tab.run', { at: r.bootedAt, pid: r.pid }))}${r.lost ? ` ${tag(t('desk.tab.lost'))}` : ''}`)), // words-order: a run's line, then its tag
     ...view.asleep.map(g => line('·', esc(t('desk.tab.asleep', { from: g.from, to: g.to })), esc(g.gap)))]);
 
   return `<div class="desk">${failed}${head}` +

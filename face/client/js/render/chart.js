@@ -22,7 +22,7 @@ function drawn(values, { label, first, last, f }) {
 }
 
 // a point's time as the axis says it, on the operator's clock (Oct 15 09:30); one that does not parse is no time
-const clockWord = ms => `${fmtDate(ms)} ${fmtClock(ms)}`;
+const clockWord = ms => t('time.dayClock', { day: fmtDate(ms), clock: fmtClock(ms) });
 const timeWord = at => { const ms = Date.parse(at); return Number.isNaN(ms) ? '' : clockWord(ms); };
 // a bar's start, in ms, when it names a moment a date can hold; anything else is no time
 const msOf = v => { const ms = number(v); return ms !== null && !Number.isNaN(new Date(ms).getTime()) ? ms : null; };

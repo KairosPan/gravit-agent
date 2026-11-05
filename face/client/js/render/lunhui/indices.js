@@ -39,8 +39,9 @@ export function indicesHtml(view, block, ui, id) {
     return `${label(t('lunhui.indices.title'))}${headline(block)}<div class="lh-none">${th('lunhui.indices.none')}</div>`;
   }
   const picked = rows.find(r => r.symbol === ui.index) ?? rows[0];
-  const through = typeof view.through === 'string' && view.through !== '' ? ` · ${t('lunhui.indices.through', { at: view.through })}` : '';
-  return `${label(`${t('lunhui.indices.title')}${through}`)}${headline(block)}` +
+  const title = typeof view.through === 'string' && view.through !== ''
+    ? t('lunhui.indices.titleThrough', { title: t('lunhui.indices.title'), through: t('lunhui.indices.through', { at: view.through }) }) : t('lunhui.indices.title');
+  return `${label(title)}${headline(block)}` +
     `<div class="lh-ix-rows">${rows.map(r => rowHtml(r, r === picked, id)).join('')}</div>` +
     chart(view, block, picked, id);
 }

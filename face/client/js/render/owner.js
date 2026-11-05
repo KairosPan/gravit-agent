@@ -26,7 +26,7 @@ export function renderDeviceLine(state) {
   const owner = state.owner;
   const w = standingWords(owner);
   if (!w.line) return '';
-  const line = note([w.line, sayOf(owner?.refusal)].filter(Boolean).join(' · '));
+  const line = note([w.line, sayOf(owner?.refusal)].filter(Boolean).join(' · ')); // words-order: the device's standing, then the Account's refusal, under the visual separator
   const busy = owner?.busy === true;
   if (w.key === 'pair') {
     return `${line}<form class="pair-box" data-action="pairDevice" autocomplete="off"><input${attrs({ id: 'pair-code', class: 'input small', type: 'text', autocomplete: 'off', 'aria-label': t('owner.pairingCode') })}>` +
@@ -45,10 +45,10 @@ export function renderDevices(state) {
   const owner = state.owner;
   const signs = owner?.role === 'signs';
   const d = devicesOf(state.account.data, owner);
-  const owners = d.owners.map(o => `<div class="dsec-line">${esc([o.label, o.id, o.here ? t('owner.devices.thisPage') : ''].filter(Boolean).join(' · '))}</div>`).join('');
+  const owners = d.owners.map(o => `<div class="dsec-line">${esc([o.label, o.id, o.here ? t('owner.devices.thisPage') : ''].filter(Boolean).join(' · '))}</div>`).join(''); // words-order: a device's facts under the visual separator
   const pending = d.pending.map(p => {
     const at = Date.parse(p.at);
-    const words = [p.kid, Number.isNaN(at) ? '' : t('owner.devices.since', { date: fmtDate(at) })].filter(Boolean).join(' · ');
+    const words = [p.kid, Number.isNaN(at) ? '' : t('owner.devices.since', { date: fmtDate(at) })].filter(Boolean).join(' · '); // words-order: a device's facts under the visual separator
     return `<div class="venue"><span>${esc(words)}</span>${signs ? key('letDevice', t('owner.devices.letSign'), { 'data-kid': p.kid }) : ''}</div>`;
   }).join('');
   return `<div class="dsec"><div class="dsec-label">${th('owner.devices.title')}</div>${owners}${pending}${signs ? `<div class="btn-row">${key('signOut', t('owner.devices.signOut'))}</div>` : ''}</div>`;
@@ -192,7 +192,8 @@ export function renderSheet(state, now) {
   const startAgain = s.kind === 'connectNetwork' && s.status === 'refused' ? `<div class="btn-row">${key('identityStartAgain', t('identity.sheet.again'))}</div>` : '';
   const keys = `<div class="btn-row">${key('sheetClose', t('common.cancel'))}<button${attrs({ type: 'button', class: 'btn-primary', 'data-action': 'sheetSubmit', disabled: !live })}>${esc(goWord(s.kind, s.seed, s.fields))}</button></div>`;
   // a granting sheet's line under its title: the ask in the Account's words (plan 4b Task 6)
-  const asked = typeof s.seed?.askedWords === 'string' && s.seed.askedWords ? `<p class="sheet-hint">${esc(s.seed.askedWords)}</p>` : '';
+  const askedWords = sayOf(s.seed?.askedWords);
+  const asked = askedWords ? `<p class="sheet-hint">${esc(askedWords)}</p>` : '';
   return `<aside${attrs({ class: 'drawer sheet', 'aria-label': title })}><div class="drawer-head"><h2>${esc(title)}</h2><button type="button" class="close-key" data-action="sheetClose" aria-label="${th('common.close')}">×</button></div>` +
     `<div class="drawer-body">${asked}${above}${fields}${check}${hints}${quoteBox(s)}${routes}${says}${left ? `<p class="sheet-left">${esc(left)}</p>` : ''}${signs}${kept}${startAgain}${steps}${keys}</div></aside>`;
 }

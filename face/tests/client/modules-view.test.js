@@ -248,3 +248,18 @@ test('a quiet chip is known by what the headline holds, never by its words: no c
   assert.equal(moduleOf('theme').title, 'Theme', 'a title is read when asked, so the table it was drawn under is gone');
   assert.equal(withTable({ 'modules.theme.title': 'Thème' }, () => moduleOf('theme').title), 'Thème');
 });
+
+test("a chip's channel, its boards source and a legend row's ids are in the table's order", () => {
+  const l = modulesListing();
+  const run = channelOf(l, 'cn-market').runs[0];
+  run.artifacts.theme = ok({ mainline_candidates: [{}, {}], theme_stage: 'FERMENT', rotation: 'ROTATING' });
+  run.boardsProvider = '同花顺问财';
+  withTable({ 'modules.chip.inChannel': '{words} ({channel})', 'modules.chip.withSource': '{source} / {words}', 'modules.legend.cites': '{words} ← {ids}', 'modules.legend.at': '{ids} {words}', 'common.list.sep': '、' }, () => {
+    assert.equal(chipOf(l, 'leader').text, 'no candidate (lunhui-s01-repair)');
+    assert.equal(chipOf(l, 'theme').text, 'boards: iFinD (THS concepts) / 2 candidates · FERMENT · ROTATING');
+    const rows = Object.fromEntries(moduleOf('mode').legend.rows.map(r => [r.label, r.text]));
+    assert.match(rows.theme_gate, / ← S01$/);
+    assert.match(rows.minute_confirmation, / ← S01、S02$/);
+    assert.match(moduleOf('sentiment').legend.rows[0].text, /, P0372 the retreat's late leg$/);
+  });
+});

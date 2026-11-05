@@ -8,6 +8,7 @@ import { moveSeedOf, moveHintsOf, routesWordsOf, subWalletSeedOf } from '../../c
 import { fieldsOf, draftOf, titleOf, goWord, refieldsOf } from '../../client/js/host/sheet-view.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
+import { sayOf, withTable } from '../../client/js/i18n/words.js';
 
 const fx = name => JSON.parse(readFileSync(new URL(`../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
 const NOW = 1_792_854_000_000;
@@ -273,8 +274,8 @@ test('earn drafts supply and withdraw, all of it as all', async () => {
   // the quote's lines and what a taken one said
   const prepared = { action: { type: 'liveEarn' }, shown: [], quote: { earn: { words: 'take 25 USDT out of USDT · Flexible at Stand-in Exchange', usd: 25, apy: 0.046, lockDays: 0, lands: 'the funding account', held: { amount: 150, asset: 'USDT', usd: 150 } } } };
   assert.deepEqual(earnSaysOf({ kind: 'earn', prepared }), ['≈ $25.00', '4.60% APY · out at once', 'Taken out, it lands in the funding account', 'In it now: 150 USDT ($150.00)']);
-  assert.equal(earnSaidOf({ ok: true, kind: 'result', result: { earn: { kind: 'withdraw', all: true, asset: 'USDT', productName: 'USDT · Flexible', status: 'done' } } }), 'Taking out all USDT · USDT · Flexible: done');
-  assert.equal(earnSaidOf({ ok: true, kind: 'result', result: { earn: { kind: 'supply', amount: 25, asset: 'USDT', productName: 'USDT · Flexible', status: 'pending', note: 'the venue settles it' } } }), 'Putting in 25 USDT · USDT · Flexible: pending · the venue settles it');
+  assert.equal(sayOf(earnSaidOf({ ok: true, kind: 'result', result: { earn: { kind: 'withdraw', all: true, asset: 'USDT', productName: 'USDT · Flexible', status: 'done' } } })), 'Taking out all USDT · USDT · Flexible: done');
+  assert.equal(sayOf(earnSaidOf({ ok: true, kind: 'result', result: { earn: { kind: 'supply', amount: 25, asset: 'USDT', productName: 'USDT · Flexible', status: 'pending', note: 'the venue settles it' } } })), 'Putting in 25 USDT · USDT · Flexible: pending · the venue settles it');
 });
 
 test('no product picked: Pick a product', async () => {
@@ -345,4 +346,15 @@ test("subWallet's words: a name of letters and digits up to 16, how much it keep
   const none = subWalletSeedOf({ ...fx('account'), keys: [] });
   assert.deepEqual(fieldsOf('subWallet', none)[1].options, []);
   assert.equal(draftOf('subWallet', set(fieldsOf('subWallet', none), { name: 'research', float: '50' }), none, NOW), 'Pick the agent it pays for');
+});
+
+test("the routes' others and what a taken earn said are in the table's order and separators", async () => {
+  const { earnSaidOf } = await import('../../client/js/host/sheet-money.js');
+  const sheet = { kind: 'move', status: 'ready', prepared: { action: { type: 'liveMove', kind: 'bridge', toAsset: 'USDC' } }, asked: '{"a":1}' };
+  const routes = [{ tool: 'across', receiveUsd: 1, etaSec: 40 }, { tool: 'stargate', receiveUsd: 1, etaSec: 600, feeUsd: 0.3 }, { tool: 'hop', receiveUsd: 1, etaSec: 7200, feeUsd: 0.5 }];
+  assert.equal(withTable({ 'common.list.semi': '；' }, () => routesWordsOf(sheet, { asked: '{"a":1}', status: 'ready', data: { ok: true, routes } }).others),
+    'Other routes: stargate fee $0.30, ~10 min；hop fee $0.50, ~2 h');
+  const line = earnSaidOf({ result: { earn: { kind: 'withdraw', all: true, asset: 'USDT', productName: 'Flex', status: 'done', note: 'settles' } } });
+  assert.equal(withTable({ 'sheet.earn.saidNote': '{note} — {line}', 'sheet.earn.saidOut': '{status}: {amount} {asset} out of {product}', 'sheet.earn.saidAll': 'everything' }, () => sayOf(line)),
+    'settles — done: everything USDT out of Flex', 'kept, it reads in the table that stands');
 });

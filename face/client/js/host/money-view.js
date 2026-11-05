@@ -104,7 +104,7 @@ export function receiveRowsOf(page) {
 }
 
 /** money.js:235 — a row's network words: one network, or every EVM network with the same address. */
-export const receiveNetworkWords = row => (row.networks.length > 1 ? t('money.receive.allEvm', { networks: row.networks.join(', ') }) : row.network);
+export const receiveNetworkWords = row => (row.networks.length > 1 ? t('money.receive.allEvm', { networks: row.networks.join(t('common.list.sep')) }) : row.network);
 
 // ── Move (money.js:59-191) ──
 

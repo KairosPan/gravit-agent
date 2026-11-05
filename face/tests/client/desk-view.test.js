@@ -173,3 +173,27 @@ test("a standing row links its last firing's session as #/messages/<sessionId>",
   assert.ok(html.includes('href="#/messages/session-7"'), html);
   assert.equal((html.match(/#\/messages\//g) ?? []).length, 1, 'a firing with no session links none');
 });
+
+test("the desk's lines are in the table's order: a market's error, a suppression's reason, a refused entry, an anchor; its lists' separators the table's", async () => {
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  const { renderDeskTab } = await import('../../client/js/render/desk.js');
+  const s = deskStatus();
+  s.watch.markets.us = { ...s.watch.markets.us, notWatched: ['X'], lastError: 'HTTP 503', today: { sent: 1, suppressed: { cap: 1, muted: 2 }, repeats: 0 } };
+  s.watch.files = [{ file: 'desk/levels.yml', kind: 'levels', entries: 1, refusals: [{ index: 0, symbol: 'TSLA', reason: 'bad' }, { index: 1, reason: 'worse' }] }];
+  s.standing = { ...s.standing, file: { path: 'x', state: 'refused', errors: ['a', 'b'] } };
+  s.phone = { configured: true, polling: true, networks: [{ network: 'telegram', polling: true }, { network: 'slack', polling: false }], queued: 0, strangers: 0 };
+  const table = {
+    'desk.watch.market': '{error}{notWatched} | {phase} | {name}', 'desk.watch.error': ' ({error})', 'desk.today.reason': '{n}×{reason}',
+    'desk.file.refusalOf': '{reason} @{symbol} #{n}', 'desk.file.refusalAt': '{reason} #{n}', 'common.list.sep': '、', 'common.list.semi': '；',
+    'desk.tab.anchor': '[{at}] ',
+  };
+  withTable(table, () => {
+    const v = deskViewOf(s, NOW_ISO);
+    assert.match(v.markets[0].line, /^ \(HTTP 503\); not watched: 1 \| polling/);
+    assert.match(v.markets[0].today, /\(1×cap、2×muted\)/);
+    assert.deepEqual(v.files.map(f => f.note), ['2 of 3 refused: bad @TSLA #1；worse #2']);
+    assert.match(v.standingNotes[0], /refused: a；b$/);
+    assert.match(v.phone, /^phone: telegram polling、slack not polling、/);
+    assert.match(renderDeskTab(v), /standing brief: \[09:20\] next/);
+  });
+});

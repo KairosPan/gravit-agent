@@ -315,3 +315,14 @@ test('a sign-in belongs to its sheet and option: ready, Cancel, reopen — and w
   assert.equal(R.sheetField(waiting, { name: 'credentialRef', value: '' }).account.signIn.status, 'waiting');
   assert.equal(R.sheetField(waiting, { name: 'connector', value: 'live:robinhood' }).account.signIn.status, 'waiting', 'the same connector picked again');
 });
+
+test("a sheet's lines are in the table's order: what was asked, followed after a switch; a key file's missing fields, their separator the table's", async () => {
+  const { said } = await import('../../client/js/i18n/words.js');
+  const asked = opened('session', { ended: false, askedWords: said('sheet.asked.named', { name: 'Claude', text: 'more time' }) });
+  has(renderSheet(asked, NOW), '<p class="sheet-hint">Claude asked: “more time”</p>');
+  has(withTable({ 'sheet.asked.named': '“{text}” ← {name}' }, () => renderSheet(asked, NOW)), '<p class="sheet-hint">“more time” ← Claude</p>');
+  const options = connectOptionsOf(fx('account'), fx('venues'));
+  const open = opened('connect', { options, connector: 'live:alpaca-paper', venue: 'alpaca-paper' });
+  const checked = R.keyfileLoaded(R.keyfileLoading(open, keyfileAskOf(open.sheet)), { data: { ...fx('keyfile'), missing: ['keyId', 'secret'] }, at: NOW });
+  has(withTable({ 'common.list.sep': '、', 'sheet.keyfile.missing': '{fields} missing' }, () => renderSheet(checked, NOW)), '<p class="sheet-hint">keyId、secret missing</p>');
+});

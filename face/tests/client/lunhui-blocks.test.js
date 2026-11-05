@@ -464,3 +464,14 @@ test('yuan: 万亿 from 1e12, 亿 from 1e8, 万 from 1e4, whole yuan below, a da
   assert.equal(yuan(null), '—');
   assert.equal(yuan(Infinity), '—');
 });
+
+test("the sources' codes and modules, a bucket's label and a rung's names are listed under the table's separator and order", async () => {
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  withTable({ 'common.list.sep': '、', 'lunhui.breadth.bucketLabel': '{stocks} ({bucket})' }, () => {
+    const rows = [...sourcesHtml(VIEW_1027, { kind: 'sources' }).matchAll(/<div class="lh-src">([\s\S]*?)<\/div>/g)].map(x => text(x[1]));
+    assert.match(rows[2], /^boards✗ UPSTREAM_TIMEOUT、UPSTREAM_INVALID ×2/);
+    assert.match(breadthHtml(VIEW_1027, { kind: 'breadth' }, { breadth: 'dist' }, ID), /aria-label="1,023 stocks \(Bucket −4\)"/);
+    const focused = ladderHtml(VIEW_1027, { kind: 'ladder', focus: { rung: 3 } }, {}, ID);
+    assert.match(readout(focused), /missed: 样本000022 \+1\.00%、/);
+  });
+});

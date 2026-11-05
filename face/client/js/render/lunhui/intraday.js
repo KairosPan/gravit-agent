@@ -212,7 +212,7 @@ export function cursorPatch(view, symbol, minute) {
   const pct = prec > 0 ? signedPct((price[at] - prec) / prec * 100) : '—';
   return {
     x: n1(g.X(at)), y: n1(g.Y(price[at])),
-    readout: `${row.name ?? symbol} · ${minuteLabel(at)} · ${fix2(price[at])} · ${pct} · ${t('lunhui.thisMinute', { amount: yuan(amount) })}`,
+    readout: `${row.name ?? symbol} · ${minuteLabel(at)} · ${fix2(price[at])} · ${pct} · ${t('lunhui.thisMinute', { amount: yuan(amount) })}`, // words-order: the cursor's facts under the visual separator
   };
 }
 

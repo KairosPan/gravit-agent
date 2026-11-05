@@ -50,8 +50,8 @@ export function stockHeadline(f) {
   let hi = 0;
   for (let i = 1; i < price.length; i++) if (price[i] > price[hi]) hi = i;
   const last = price[price.length - 1];
-  return t('lunhui.stock.yesterdayLine', { n: n(f.yesterdayBoards), high: pctText(pctAt(f, price[hi])), at: minuteLabel(hi), closed: pctText(pctAt(f, last)) }) +
-    (atLimitDown(last, f) ? ` ${t('lunhui.atLimitDown')}` : '');
+  const line = t('lunhui.stock.yesterdayLine', { n: n(f.yesterdayBoards), high: pctText(pctAt(f, price[hi])), at: minuteLabel(hi), closed: pctText(pctAt(f, last)) });
+  return atLimitDown(last, f) ? t('lunhui.stock.lineAtLimitDown', { line, limit: t('lunhui.atLimitDown') }) : line;
 }
 
 /** The note line under the minute line, or null when there is nothing the line does not already say. */

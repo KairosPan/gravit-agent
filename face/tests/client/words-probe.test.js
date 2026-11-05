@@ -32,11 +32,12 @@ const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;
 const decode = s => s.replace(/&(?:amp|lt|gt|quot|#39);/g, e => ENTITIES[e]);
 const WORD = /[A-Za-z]{2,}/g;
 
-// a text with its ⟦…⟧ runs cut (a run may hold another: a table word put into a table word), and whether every ⟦ closed
+// a text with its ⟦…⟧ runs cut (a run may hold another: a table word put into a table word), each run a space, so the words
+// a table separator (common.list.sep) stands between stay two; and whether every ⟦ closed
 function cut(text) {
   let depth = 0, out = '';
   for (const ch of text) {
-    if (ch === '⟦') depth += 1;
+    if (ch === '⟦') { if (depth === 0) out += ' '; depth += 1; }
     else if (ch === '⟧') depth = Math.max(0, depth - 1);
     else if (depth === 0) out += ch;
   }

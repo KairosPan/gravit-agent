@@ -191,3 +191,9 @@ test('reapplyCursors puts each moved slider\'s cursor back; a slider at its max 
   // a view not loaded (or gone) leaves the drawn cursor alone
   reapplyCursors(f.root, f.doc, emptyState());
 });
+
+test("the indices' title and the minute it runs through are in the table's order", async () => {
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  const html = withTable({ 'lunhui.indices.titleThrough': '{through} | {title}' }, () => indicesHtml({ ...VIEW_1027, through: '14:30' }, { kind: 'indices' }, {}, ID));
+  assert.match(html, /<div class="lh-label">[^<]*14:30[^<]* \| Indices<\/div>/);
+});

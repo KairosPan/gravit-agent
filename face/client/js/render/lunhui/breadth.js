@@ -45,7 +45,7 @@ function byChange(b, ui, id) {
   const bars = buckets.map(x => {
     const tone = x.bucket > 0 ? 'up' : x.bucket < 0 ? 'down' : 'flat';
     const on = x === picked;
-    return `<button${attrs({ type: 'button', class: cls('lh-bucket', on && 'pressed'), 'data-action': 'lunhuiUi', 'data-id': id, 'data-field': 'bucket', 'data-value': String(x.bucket), 'aria-pressed': on ? 'true' : 'false', 'aria-label': `${bucketName(x.bucket)}: ${stocks(x.count)}` })}>` +
+    return `<button${attrs({ type: 'button', class: cls('lh-bucket', on && 'pressed'), 'data-action': 'lunhuiUi', 'data-id': id, 'data-field': 'bucket', 'data-value': String(x.bucket), 'aria-pressed': on ? 'true' : 'false', 'aria-label': t('lunhui.breadth.bucketLabel', { bucket: bucketName(x.bucket), stocks: stocks(x.count) }) })}>` +
       `<span class="${cls('lh-bucket-bar', tone)}" style="height:${(max > 0 ? x.count / max * 100 : 0).toFixed(1)}%"></span><span class="lh-bucket-k">${signed(x.bucket)}</span></button>`;
   }).join('');
   const words = picked ? t('lunhui.breadth.picked', { name: bucketName(picked.bucket), stocks: stocks(picked.count), pct: pct(picked.count, total), total: count(b.total) }) : t('lunhui.breadth.noBuckets');

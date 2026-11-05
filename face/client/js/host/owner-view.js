@@ -64,12 +64,12 @@ export function refusalOf(r) {
   return { message: whyOf(r) || said('owner.refused'), again: AGAIN.has(code), standing: r?.status === 401 && code === 'E_ACCOUNT_BAD_SIGNATURE' };
 }
 
-// an order's status in words; another as the Account said it
+// an order's status in words, kept as a said; another as the Account said it
 function statusWords(status) {
   switch (status) {
-    case 'open': return t('owner.order.open');
-    case 'filled': return t('owner.order.filled');
-    case 'canceled': return t('owner.order.canceled');
+    case 'open': return said('owner.order.open');
+    case 'filled': return said('owner.order.filled');
+    case 'canceled': return said('owner.order.canceled');
     default: return status;
   }
 }
@@ -79,7 +79,7 @@ function statusWords(status) {
 export function saidOf(body) {
   if (body?.kind === 'order' && isRecord(body.order)) {
     const status = str(body.order.status);
-    return `${str(body.order.id)} · ${statusWords(status)}`;
+    return said('owner.order.said', { id: str(body.order.id), status: statusWords(status) });
   }
   if (body?.kind === 'account') return str(body.summary);
   if (body?.kind === 'result') return said('owner.done');

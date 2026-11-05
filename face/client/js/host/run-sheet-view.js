@@ -77,12 +77,13 @@ function latestDetail(m, channel, run) {
     const present = MARKET_MODULES.filter(n => has(run, n));
     if (present.length === 0) return null;
     const missing = MARKET_MODULES.filter(n => !has(run, n));
-    return `${t('runSheet.reviews', { modules: present.join(' · ') })}${missing.length ? ` — ${t('runSheet.notRunHere', { titles: titlesWords(missing) })}` : ''}`;
+    const reviews = t('runSheet.reviews', { modules: present.join(' · ') });
+    return missing.length ? t('runSheet.warned', { line: reviews, warning: t('runSheet.notRunHere', { titles: titlesWords(missing) }) }) : reviews;
   }
   const present = ['leader', 'mode'].filter(n => has(run, n));
   const line = present.length ? t('runSheet.reviews', { modules: present.join(' · ') }) : null;
   if (!has(run, 'mode')) return line;
-  return [line, t('runSheet.unanswered')].filter(Boolean).join(' — ');
+  return line ? t('runSheet.warned', { line, warning: t('runSheet.unanswered') }) : t('runSheet.unanswered');
 }
 
 // On (G1, G14, G15): Latest run from the channel's newest run, New run on the three market cards and Leader
@@ -226,7 +227,7 @@ export function sheetOf(listing, sheet, now = Date.now()) {
     on: { options: onOpts, value: chosen ? chosen.id : null },
     cites, stocks, source: sourceOf(listing, m), note: { value: sheet.note ?? '' },
     via: t('runSheet.via', { where: where ?? '…', role: m.role, module: m.name }),
-    writes: `${m.file} · ${t('runSheet.aConversation')} "${titleOf(listing, sheet, now)}"`,
+    writes: t('runSheet.writes', { file: m.file, title: `"${titleOf(listing, sheet, now)}"` }),
     canRun: blocker === null, blocker, blockedBy,
   };
 }

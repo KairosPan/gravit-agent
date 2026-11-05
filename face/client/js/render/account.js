@@ -61,7 +61,7 @@ const numWord = n => (n === null ? '—' : Number(n).toLocaleString('en-US', { m
 // the Account's percents are percents already (0.72 is 0.72 %), never a fraction to scale; nothing given is —
 const pctWord = v => (v === null ? '—' : `${v > 0 ? '+' : v < 0 ? '-' : ''}${Math.abs(v).toFixed(2)} %`);
 const capital = s => (s ? s[0].toUpperCase() + s.slice(1) : '');
-const when = (at, now) => { const ms = Date.parse(at); return Number.isNaN(ms) ? '' : sameDay(ms, now) ? fmtClock(ms) : `${fmtDate(ms)} ${fmtClock(ms)}`; };
+const when = (at, now) => { const ms = Date.parse(at); return Number.isNaN(ms) ? '' : sameDay(ms, now) ? fmtClock(ms) : t('time.dayClock', { day: fmtDate(ms), clock: fmtClock(ms) }); };
 const dateWord = at => { const ms = Date.parse(at); return Number.isNaN(ms) ? '' : fmtDate(ms); };
 // a row's words: the first bold (a chip beside it), each line under it dim, blanks left out
 const lines = (head, dims = [], chipText = '') => `<b>${esc(head)}</b>${chipText ? ` ${chip(chipText)}` : ''}${dims.filter(Boolean).map(d => `<br><span class="dim">${esc(d)}</span>`).join('')}`;
@@ -102,7 +102,7 @@ function changeLine(a, paperLeads) {
   const ranges = rangesOf();
   const range = ranges.find(([id]) => id === a.history.data?.range) ?? ranges.find(([id]) => id === a.history.range);
   const since = range?.[0] === 'all' && c.first ? dateWord(c.first) : '';
-  const words = [
+  const words = [ // words-order: the change line's parts under the visual separator
     c.usd === null ? '—' : `${signedMoney(c.usd)} · ${pctWord(c.pct)}`, range?.[1], c.partial ? t('account.change.partial') : '', since ? t('account.change.since', { date: since }) : '',
     paperLeads && c.sinceStartUsd !== null ? t('account.change.sinceStart', { usd: signedMoney(c.sinceStartUsd) }) : '', paperLeads && c.rebuilt ? t('account.change.rebuilt') : '',
   ].filter(Boolean).join(' · ');
@@ -123,7 +123,7 @@ function earnOutKey(r, state) {
 
 function assetsBox(lens, state) {
   const rows = assetsOf(lens.data).map(r => [
-    lines(r.asset, r.venues.map(v => [v.venueName || v.venue, numWord(v.amount), v.stale ? t('account.venue.stale') : ''].filter(Boolean).join(' · '))) + earnOutKey(r, state),
+    lines(r.asset, r.venues.map(v => [v.venueName || v.venue, numWord(v.amount), v.stale ? t('account.venue.stale') : ''].filter(Boolean).join(' · '))) + earnOutKey(r, state), // words-order: a venue's facts under the visual separator
     esc(numWord(r.amount)), esc(price(r.price)), `<span class="${tone(r.changePct24h)}">${esc(pctWord(r.changePct24h))}</span>`, esc(money(r.usd)),
   ]);
   const kept = lens.status === 'error' && lens.message ? note(lens.message) : '';
@@ -339,7 +339,7 @@ function agentKeys(r, state) {
 // sheet from it), each while the page offers it
 function agentWalletRow(w, sources, keys) {
   const usd = n => (n === null ? '—' : money(n));
-  const words = [t('agents.wallet.paysFor', { who: w.agentName || w.agent || t('agents.wallet.anAgent') }), w.address, t('agents.wallet.holds', { held: usd(w.balanceUsd), cap: usd(w.capUsd) })].join(' · ');
+  const words = [t('agents.wallet.paysFor', { who: w.agentName || w.agent || t('agents.wallet.anAgent') }), w.address, t('agents.wallet.holds', { held: usd(w.balanceUsd), cap: usd(w.capUsd) })].join(' · '); // words-order: a wallet's facts under the visual separator
   const out = [];
   if (keys) {
     const from = sources.find(x => !x.agent);
@@ -370,7 +370,7 @@ function agentsTab(state, now) {
     const limits = r.limits.map(l => l.words);
     return `<div class="venue"><span>${r.gravit
       ? lines(r.standing, [...limits, countsOf(r)])
-      : lines(r.name || t('agents.who.unnamed'), [[r.status, dateWord(r.validUntil) ? t('agents.until', { date: dateWord(r.validUntil) }) : ''].filter(Boolean).join(' · '), ...limits, countsOf(r)])}</span>` +
+      : lines(r.name || t('agents.who.unnamed'), [[r.status, dateWord(r.validUntil) ? t('agents.until', { date: dateWord(r.validUntil) }) : ''].filter(Boolean).join(' · '), ...limits, countsOf(r)])}</span>` + // words-order: an agent's status and its date under the visual separator
       `${owner ? agentKeys(r, state) : ''}</div>`;
   }).join('');
   const status = a.agents.data === null ? note(a.agents.status === 'error' ? t('agents.unavailable') : t('common.loading')) : rows ? '' : note(t('agents.none'));
@@ -389,7 +389,7 @@ function agentsTab(state, now) {
  *  Cards tab's words, which Trade's Under way reads too. */
 export function cardFactsOf(c, now) {
   const by = when(c.expiresAt, now);
-  return [c.usd === null ? '' : money(c.usd), by ? t('cards.answerBy', { by }) : ''].filter(Boolean).join(' · ');
+  return [c.usd === null ? '' : money(c.usd), by ? t('cards.answerBy', { by }) : ''].filter(Boolean).join(' · '); // words-order: a card's facts under the visual separator
 }
 
 // a card: why the agent asks, its value and the time to answer by, and What it asks — every field the owner signs, as the
@@ -552,9 +552,9 @@ function earnBox(state) {
     return `<div class="venue"><span>${lines(p.name || p.id, [facts])}</span>${out}</div>`;
   }).join('');
   const failedNote = e.status === 'error' ? note(e.message || t('money.earn.unread')) : '';
-  const away = l.away.length ? note(t('money.notServed', { venues: l.away.map(m => m.venueName).join(', ') })) : '';
+  const away = l.away.length ? note(t('money.notServed', { venues: l.away.map(m => m.venueName).join(t('common.list.sep')) })) : '';
   const failed = l.failed.map(m => note(t('money.venueUnread', { venue: m.venueName, why: m.why }))).join('');
-  const refusing = l.refusing.map(v => note(`${v.venueName}: ${v.why}`)).join('');
+  const refusing = l.refusing.map(v => note(t('money.earn.refusing', { venue: v.venueName, why: v.why }))).join('');
   const put = keys ? `<div class="btn-row">${sheetKey('earn', { 'data-side': 'supply' }, t('money.earn.putIn'))}</div>` : '';
   const ro = writesOn(a.data) ? '' : note(earnReadOnly());
   // a failed read says its refusal alone: the empty list's line is not drawn under it
@@ -597,7 +597,7 @@ export function renderSellMany(state) {
   else if (m.status === 'picking') {
     const missing = (Array.isArray(m.missing) ? m.missing : []);
     const away = missing.filter(x => x.code === 'E_VENUE_GEOBLOCKED');
-    const missed = (away.length ? note(t('money.notServed', { venues: [...new Set(away.map(x => x.venueName || x.venue))].join(', ') })) : '') +
+    const missed = (away.length ? note(t('money.notServed', { venues: [...new Set(away.map(x => x.venueName || x.venue))].join(t('common.list.sep')) })) : '') +
       missing.filter(x => x.code !== 'E_VENUE_GEOBLOCKED').map(x => note(t('money.venueUnread', { venue: x.venueName || x.venue, why: x.why }))).join('');
     if (m.message) body = note(m.message);
     else if (!m.items.length) body = note(m.hidden ? tn('money.sellMany.noneReady', m.hidden) : t('money.sellMany.allDollars')) + missed;
@@ -605,7 +605,7 @@ export function renderSellMany(state) {
       const picked = new Set(m.picked);
       const rows = m.items.map((x, i) => {
         const qty = Object.hasOwn(m.qtys ?? {}, i) ? m.qtys[i] : String(x.sellQty);
-        const facts = [x.venueName || x.venue, t('money.sellMany.held', { qty: numWord(typeof x.held === 'number' ? x.held : null) }), typeof x.usd === 'number' ? `≈ ${money(x.usd)}` : ''].filter(Boolean).join(' · ');
+        const facts = [x.venueName || x.venue, t('money.sellMany.held', { qty: numWord(typeof x.held === 'number' ? x.held : null) }), typeof x.usd === 'number' ? `≈ ${money(x.usd)}` : ''].filter(Boolean).join(' · '); // words-order: a holding's facts under the visual separator
         return `<li class="sm-row"><label class="sheet-check"><input${attrs({ type: 'checkbox', name: 'pick', value: String(i), checked: picked.has(i), 'data-action': 'sellManyPick', 'aria-label': t('money.sellMany.pick', { asset: x.asset, venue: x.venueName || x.venue }) })}>` +
           `<span>${lines(smLegName(x), [facts])}</span></label><input${attrs({ id: `sm-q-${i}`, class: 'input small', type: 'text', inputmode: 'decimal', autocomplete: 'off', value: qty, 'data-action': 'sellManyQty', 'data-index': String(i), 'aria-label': t('money.sellMany.qty', { asset: x.asset }) })}></li>`;
       }).join('');
@@ -634,7 +634,7 @@ export function renderSellMany(state) {
 export function renderStatement(state, now) {
   const st = state.account.statement;
   const rows = statementLinesOf(st.data).map(l => {
-    const facts = [l.by, l.status, l.feeUsd === null ? '' : t('account.statement.fee', { fee: money(l.feeUsd) })].filter(Boolean).join(' · ');
+    const facts = [l.by, l.status, l.feeUsd === null ? '' : t('account.statement.fee', { fee: money(l.feeUsd) })].filter(Boolean).join(' · '); // words-order: a statement line's facts under the visual separator
     return `<div class="activity-row"><span class="dim">${esc(when(l.at, now))}</span>` +
       `<span class="activity-text">${esc(l.description)}${facts ? `<br><span class="dim">${esc(facts)}</span>` : ''}</span><span class="num">${esc(money(l.amountUsd))}</span></div>`;
   }).join('');

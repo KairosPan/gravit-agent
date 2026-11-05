@@ -349,10 +349,10 @@ test("the owner sheets' lines as the sheet holds them: a sign-out's Guard, what 
   assert.deepEqual(draftOf('connect', { connector: 'live:x', credentialRef: '' }, signIn, 0), "Sign in at A&B's <x> first");
   assert.deepEqual(marketDraftOf('leverage', { leverage: '9' }, { venue: 'v', symbol: 's', maxLeverage: 3 }), 'Leverage is at most 3x here');
   const page = { ok: true, venues: [], cards: [], orders: [], keys: [], signers: { owners: [] }, connectLive: { writes: { capUsd: 1 } } };
-  assert.deepEqual(grantOf({ kind: 'letIn', agent: '0xa', agentName: "<A&B's>", text: "<hi> & 'bye'" }, page).seed.askedWords, "<A&B's> asked: “<hi> & 'bye'”");
-  assert.deepEqual(grantOf({ kind: 'letIn', agent: '0xa', text: '<hi>' }, page).seed.askedWords, 'An agent asked: “<hi>”');
-  assert.deepEqual(earnSaidOf({ result: { earn: { kind: 'withdraw', all: true, asset: '<U&T>', productName: "it's", status: 'done', note: 'n' } } }), "Taking out all <U&T> · it's: done · n");
-  assert.deepEqual(earnSaidOf({ result: { earn: { kind: 'supply', amount: '5', asset: 'U', productName: 'P', status: '<queued>' } } }), 'Putting in 5 U · P: <queued>');
+  follows(grantOf({ kind: 'letIn', agent: '0xa', agentName: "<A&B's>", text: "<hi> & 'bye'" }, page).seed.askedWords, "<A&B's> asked: “<hi> & 'bye'”");
+  follows(grantOf({ kind: 'letIn', agent: '0xa', text: '<hi>' }, page).seed.askedWords, 'An agent asked: “<hi>”');
+  follows(earnSaidOf({ result: { earn: { kind: 'withdraw', all: true, asset: '<U&T>', productName: "it's", status: 'done', note: 'n' } } }), "Taking out all <U&T> · it's: done · n");
+  follows(earnSaidOf({ result: { earn: { kind: 'supply', amount: '5', asset: 'U', productName: 'P', status: '<queued>' } } }), 'Putting in 5 U · P: <queued>');
   const move = { kind: 'move', prepared: { action: { kind: 'withdraw', from: 'a', to: 'b', toAddress: '0x1' } }, seed: { sources: [{ id: 'a', dests: [{ id: 'b', name: "<B&C's>" }] }] } };
   assert.deepEqual(moveSaysOf(move), ["<B&C's>'s deposit address, checked again before sending.", "Can't be undone."]);
   assert.deepEqual(identityLinesOf('block', { masked: "<x&y's>" }), ["Messages from <x&y's> are dropped and no longer counted."]);
@@ -361,8 +361,8 @@ test("the owner sheets' lines as the sheet holds them: a sign-out's Guard, what 
 test("the owner device's lines as the store holds them: a refusal, what was said, the countdown, no answer", async () => {
   follows(refusalOf({ status: 500, body: {} }).message, 'Refused');
   asCame(refusalOf({ status: 409, body: { ok: false, error: "<no> & won't" } }).message, "<no> & won't");
-  assert.deepEqual(saidOf({ kind: 'order', order: { id: 'o<1>', status: 'open' } }), 'o<1> · open on the book');
-  assert.deepEqual(saidOf({ kind: 'order', order: { id: 'o', status: '<held>' } }), 'o · <held>');
+  follows(saidOf({ kind: 'order', order: { id: 'o<1>', status: 'open' } }), 'o<1> · open on the book');
+  follows(saidOf({ kind: 'order', order: { id: 'o', status: '<held>' } }), 'o · <held>');
   follows(saidOf({ kind: 'result' }), 'Done');
   assert.deepEqual(goodForWords(61_000), 'Your signature is good for 1:01 more.');
   follows(await postVia(async () => { throw new Error('x'); })('/p', {}), { status: 0, body: { ok: false, error: 'The account did not answer. Try again.' } });
@@ -408,9 +408,9 @@ test("Markets', Trade's and the desk's host lines as the store holds them: the d
   assert.deepEqual(tradeDraftOf({ venue: 'v', amount: '1', orderType: 'limit', limit: 'x' }, ticket), 'Type the limit price');
   assert.deepEqual(tradeDraftOf({ venue: 'v', amount: '1', orderType: 'limit', limit: '120' }, { ...ticket, event: true, outcomes: [{ at: [{ venue: 'v', symbol: 'Y' }] }] }), 'A price in cents is between 0 and 100');
   // a fill, as Trade's said line holds it (host/trade.js): the Account's names put in as they are
-  assert.deepEqual(fillWords({ type: 'fill', data: { side: 'buy', qty: 2, kind: 'event', name: "<Fed & co's>", price: 0.62, avg: true, venueName: 'V<1>', paper: true } }),
+  follows(fillWords({ type: 'fill', data: { side: 'buy', qty: 2, kind: 'event', name: "<Fed & co's>", price: 0.62, avg: true, venueName: 'V<1>', paper: true } }),
     "Bought 2 contracts · <Fed & co's> @ 62¢ avg · V<1> · Paper account");
-  assert.deepEqual(fillWords({ data: { side: 'sell', kind: 'event', symbol: 'X' } }), 'Sold contracts · X');
+  follows(fillWords({ data: { side: 'sell', kind: 'event', symbol: 'X' } }), 'Sold contracts · X');
 });
 
 test("a channel's, Discover's, the Run sheet's and the run view's host lines as the store or the editor holds them", async () => {

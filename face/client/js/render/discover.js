@@ -85,7 +85,7 @@ function grid(title, items, extra = '', back = false) {
 function header(state) {
   return `<div class="disc-head"><h1 class="head-title">${th('nav.discover')}</h1>` +
     `<div class="search"><label for="dq" class="sr-only">${th('discover.search')}</label>${icon('search', 18, 2)}<input id="dq" type="search" autocomplete="off" placeholder="${th('discover.search')}" data-action="dq"${attrs({ value: state.discover.query })}></div>` +
-    `<span class="spacer"></span><a class="pill" href="#/discover/create">${icon('plus', 14, 2.2)}${th('discover.createBot')}</a></div>`;
+    `<span class="spacer"></span><a class="pill" href="#/discover/create">${icon('plus', 14, 2.2)}${th('discover.createBot')}</a></div>`; // words-order: an icon, then its word
 }
 
 // Create a bot: a name (the id proposed from it unless given), a description, a model, a soul; blank ones are left to the

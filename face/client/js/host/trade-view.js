@@ -13,7 +13,7 @@ import { number, price } from '../wire/market-model.js';
 import { accountTabs, outcomeWords, pageOf, legsOf, matchKey, priceOf, watchKeysOf } from './market-view.js';
 import { pageOk, assetsOf, positionsOf, openOrdersOf, worthOf } from './account-view.js';
 import { isCnKey } from '../wire/china.js';
-import { t, tn } from '../i18n/words.js';
+import { t, tn, said } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -82,7 +82,7 @@ function whereWords(item, trading) {
   const legs = legsOf(item);
   const able = [...new Set(legs.filter(l => l.connected && trading.has(l.venue)).map(l => l.venueName || l.venue))];
   const pub = legs.filter(l => l.public).length;
-  return [able.join(', '), pub ? tn('trade.publicVenues', pub) : ''].filter(Boolean).join(' · ');
+  return [able.join(t('common.list.sep')), pub ? tn('trade.publicVenues', pub) : ''].filter(Boolean).join(' · '); // words-order: where it trades under the visual separator
 }
 const marketRow = (item, trading) => ({ id: str(item.key), name: str(item.name), sub: whereWords(item, trading), priceWord: priceWordOf(item) });
 // a starred market no read lists: its key's last part as its name
@@ -102,7 +102,7 @@ function heldRows(state, kind, rows) {
     if (kindOfKey(key) !== kind) continue;
     const venues = [...new Set(r.venues.map(v => v.venueName || v.venue).filter(Boolean))];
     out.push({
-      id: key, name: str(findItem(rows, key)?.name) || r.asset, sub: [amountWord(r.amount), venues.join(', ')].filter(Boolean).join(' · '),
+      id: key, name: str(findItem(rows, key)?.name) || r.asset, sub: [amountWord(r.amount), venues.join(t('common.list.sep'))].filter(Boolean).join(' · '),
       priceWord: r.price === null ? EM : price(r.price), ...(r.venues[0]?.venue ? { venue: r.venues[0].venue } : {}),
     });
   }
@@ -115,7 +115,7 @@ function heldRows(state, kind, rows) {
       const outcome = outcomes.findIndex(o => records(o.at).some(l => l.venue === p.venue && l.symbol === p.symbol));
       out.push({
         id: str(item.key), name: str(item.name),
-        sub: [t('trade.contracts', { n: amountWord(p.qty) }), outcomeWord(outcomes[outcome].label), p.venueName || p.venue].join(' · '),
+        sub: [t('trade.contracts', { n: amountWord(p.qty) }), outcomeWord(outcomes[outcome].label), p.venueName || p.venue].join(' · '), // words-order: a prediction's facts under the visual separator
         priceWord: centsWord(cents(p.markPrice)), side: 'sell', venue: p.venue, outcome,
       });
     }
@@ -346,25 +346,29 @@ export function underWayOf(page) {
 // a fill's price as the Account's toast groups it: 3,120.50, 0.12143
 const fillPrice = n => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 });
 
-/** A `fill` frame on the Account's stream (`{ type: 'fill', data }`, or its data alone) as one line: `Bought 0.04 ETH @
- *  3,120.50 · Stand-in Exchange` — the side, this fill's size (none drawn unless it is above zero) and the market's base (a
- *  prediction's contracts of its name), its price (a prediction's in cents) where the frame says one, with the Account's ` avg`
- *  when that price is the order's average, the venue, and `· Paper account` from a paper book — once: not where the venue's
- *  name already says paper. Anything else: ''. */
+/** A `fill` frame on the Account's stream (`{ type: 'fill', data }`, or its data alone) as one line, kept as a said: `Bought
+ *  0.04 ETH @ 3,120.50 · Stand-in Exchange` — the side, this fill's size (none drawn unless it is above zero) and the market's
+ *  base (a prediction's contracts of its name), its price (a prediction's in cents) where the frame says one, with the
+ *  Account's ` avg` when that price is the order's average, the venue, and `· Paper account` from a paper book — once: not
+ *  where the venue's name already says paper. Anything else: ''. */
 export function fillWords(ev) {
   if (!isRecord(ev)) return '';
   if (typeof ev.type === 'string' && ev.type !== 'fill') return '';
   const f = isRecord(ev.data) ? ev.data : ev;
-  const side = f.side === 'buy' ? t('trade.fill.bought') : f.side === 'sell' ? t('trade.fill.sold') : '';
+  const side = f.side === 'buy' ? said('trade.fill.bought') : f.side === 'sell' ? said('trade.fill.sold') : '';
   if (!side) return '';
   const qty = number(f.qty);
   const size = qty !== null && qty > 0 ? amountWord(qty) : '';
   const event = f.kind === 'event';
-  const what = event ? [size ? t('trade.contracts', { n: size }) : t('trade.contractsAny'), str(f.name) || str(f.symbol)].filter(Boolean).join(' · ')
+  const name = str(f.name) || str(f.symbol);
+  const contracts = size ? said('trade.contracts', { n: size }) : said('trade.contractsAny');
+  const what = event ? (name ? said('trade.fill.contractsOf', { contracts, name }) : contracts)
     : [size, str(f.symbol).split('/')[0]].filter(Boolean).join(' ');
+  const did = what ? said('trade.fill.did', { side, what }) : side;
   const p = number(f.price);
-  const at = p === null ? '' : ` @ ${event ? centsWord(cents(p)) : fillPrice(p)}${f.avg === true ? ` ${t('trade.fill.avg')}` : ''}`;
+  const priced = p === null ? null : { line: did, price: event ? centsWord(cents(p)) : fillPrice(p) };
+  const at = priced === null ? did : f.avg === true ? said('trade.fill.atAvg', priced) : said('trade.fill.at', priced);
   const venue = str(f.venueName) || str(f.venue);
-  const paper = f.paper === true && !/\bpaper\b/i.test(venue) ? t('trade.fill.paper') : '';
-  return [[side, what].filter(Boolean).join(' ') + at, venue, paper].filter(Boolean).join(' · ');
+  const where = venue ? said('trade.fill.venue', { line: at, venue }) : at;
+  return f.paper === true && !/\bpaper\b/i.test(venue) ? said('trade.fill.onPaper', { line: where, paper: said('trade.fill.paper') }) : where;
 }

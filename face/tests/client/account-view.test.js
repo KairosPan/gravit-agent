@@ -582,3 +582,11 @@ test('Portfolio marks prices old while the market is down', () => {
   assert.equal(marketOldOf({ ...fx('holdings'), marketOld: { since: 'not a time', message: MARKET_DOWN } }), null, 'a since that is no time is no marker');
   assert.equal(marketOldOf({ ...fx('holdings'), marketOld: { since, message: '' } }), null, 'nor one with no words');
 });
+
+test("a limit's venues are listed under the table's separator", async () => {
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  const lim = seatWords(seatView({ seat: { name: 'Gravit', status: 'admitted', limits: [{ scope: 'trade', allow: ['paper-1', 'ex'], perOrderUsd: 100, expired: false }] } })).limits;
+  assert.deepEqual(withTable({ 'common.list.sep': '、' }, () => seatWords(seatView({ seat: { name: 'Gravit', status: 'admitted', limits: [{ scope: 'trade', allow: ['paper-1', 'ex'], perOrderUsd: 100, expired: false }] } })).limits),
+    ['trade · paper-1、ex · $100 an order']);
+  assert.deepEqual(lim, ['trade · paper-1, ex · $100 an order']);
+});

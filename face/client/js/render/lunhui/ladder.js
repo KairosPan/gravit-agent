@@ -67,7 +67,7 @@ export function ladderHtml(view, block, ui, id, key) {
     const missed = list(picked.missed), broke = list(picked.broke);
     words = t('lunhui.ladder.rung', {
       step: `${picked.n - 1}→${picked.n}`, promoted: num(picked.promoted), from: num(picked.from),
-      missed: missed.length ? missed.map(withPct).join(', ') : t('lunhui.ladder.noneWord'), broke: broke.length ? broke.map(nameOf).join(', ') : t('lunhui.ladder.noneWord'),
+      missed: missed.length ? missed.map(withPct).join(t('common.list.sep')) : t('lunhui.ladder.noneWord'), broke: broke.length ? broke.map(nameOf).join(t('common.list.sep')) : t('lunhui.ladder.noneWord'),
     });
   }
   return `${label(t('lunhui.ladder.label', { height: l.height, sealed: count(sealedAll) }))}${headline(block)}<div class="lh-ladder">${rows}</div>${readout(words)}`;

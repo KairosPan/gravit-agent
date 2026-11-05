@@ -28,7 +28,7 @@ const pairRows = pairs => pairs.map(([label, text]) => ({ label, text }));
 const sentimentLegend = () => ({
   title: t('modules.sentiment.legend'),
   rows: pairRows([
-    ['CHAOS', `混沌期 / 情绪冰点 P0161, ${t('modules.sentiment.retreatLate')} P0372`],
+    ['CHAOS', `混沌期 / 情绪冰点 P0161, ${t('modules.legend.at', { words: t('modules.sentiment.retreatLate'), ids: 'P0372' })}`],
     ['IGNITION', '修复启动 P0165, 拐点 P0179, 情绪回暖 P0185, 题材启动日 P0191'],
     ['EXPANSION', '题材启动次日 P0202, 题材发酵 P0208, 主升 P0198, P0213'],
     ['CLIMAX', '加速高潮 P0253, P0337–P0352'],
@@ -58,14 +58,14 @@ function modeLegend() {
   return {
     title: t('modules.mode.legend'),
     rows: pairRows([
-      ['theme_gate', `S01: ${theme}`],
-      ['candidate_before_divergence', `S01: ${candidate}`],
-      ['theme_not_falsified', `S01: ${theme}`],
-      ['negative_tail_not_widening', `S01: ${t('modules.mode.negativeTail')}`],
-      ['minute_confirmation', `S01, S02: ${t('modules.mode.minute')}`],
-      ['old_theme_retreat', `S02: ${t('modules.mode.oldTheme')}`],
-      ['catalyst', `S02: ${t('modules.mode.catalyst')}`],
-      ['candidates_pooled', `S02: ${candidate}`],
+      ['theme_gate', t('modules.legend.cites', { ids: 'S01', words: theme })],
+      ['candidate_before_divergence', t('modules.legend.cites', { ids: 'S01', words: candidate })],
+      ['theme_not_falsified', t('modules.legend.cites', { ids: 'S01', words: theme })],
+      ['negative_tail_not_widening', t('modules.legend.cites', { ids: 'S01', words: t('modules.mode.negativeTail') })],
+      ['minute_confirmation', t('modules.legend.cites', { ids: ['S01', 'S02'].join(t('common.list.sep')), words: t('modules.mode.minute') })],
+      ['old_theme_retreat', t('modules.legend.cites', { ids: 'S02', words: t('modules.mode.oldTheme') })],
+      ['catalyst', t('modules.legend.cites', { ids: 'S02', words: t('modules.mode.catalyst') })],
+      ['candidates_pooled', t('modules.legend.cites', { ids: 'S02', words: candidate })],
     ]),
   };
 }
@@ -151,7 +151,7 @@ const runFacts = (c, r) => ({
 // the theme module's words end with where its boards came from, when Eastmoney's failed and 问财 stood in
 export const THS_STAND_IN = '同花顺问财';
 export const withSource = (module, boardsProvider, words) =>
-  module === 'theme' && boardsProvider === THS_STAND_IN ? `${words} · ${t('modules.boardsThs')}` : words;
+  module === 'theme' && boardsProvider === THS_STAND_IN ? t('modules.chip.withSource', { words, source: t('modules.boardsThs') }) : words;
 
 // the latest run the module's card reads: each accepted channel's newest run, the greatest run id among them
 export function latestOf(listing, module) {
@@ -202,7 +202,7 @@ export const headlineWords = (module, headline) => headlineOf(module, headline).
 function artifactWords(module, a) {
   if (a.status !== 'NOT_EVALUABLE') { const h = headlineOf(module, a.headline); return { words: h.words, tone: null, quiet: h.quiet }; }
   const missing = (Array.isArray(a.missingSources) ? a.missingSources : []).filter(s => typeof s === 'string');
-  return { words: [t('modules.notEvaluable'), ...missing].join(' · '), tone: 'warn', quiet: false };
+  return { words: [t('modules.notEvaluable'), ...missing].join(' · '), tone: 'warn', quiet: false }; // words-order: the word, then the sources it missed under the visual separator
 }
 
 // a Run this page sent (spec §5.7) is running while its conversation says so, or while the record is younger than a
@@ -229,12 +229,12 @@ export function chipOf(listing, module, mounted = true, active = null) {
   if (!m || !latest) chip = { text: t('modules.chip.noRun'), tone: 'grey' };
   else {
     // a strategy or either card names the channel of its newest run, `not run` too
-    const pre = m.channels === 'market' ? '' : `${latest.channel} · `;
-    if (!latest.artifact) chip = { text: `${pre}${t('modules.chip.notRun')}`, tone: 'grey' };
+    const inChannel = words => (m.channels === 'market' ? words : t('modules.chip.inChannel', { channel: latest.channel, words }));
+    if (!latest.artifact) chip = { text: inChannel(t('modules.chip.notRun')), tone: 'grey' };
     else {
       const { words: base, tone, quiet } = artifactWords(module, latest.artifact);
       const words = withSource(module, latest.boardsProvider, base);
-      chip = { text: `${pre}${words}`, tone: tone ?? (quiet ? 'grey' : 'ok') };
+      chip = { text: inChannel(words), tone: tone ?? (quiet ? 'grey' : 'ok') };
     }
   }
   return mounted === false ? { ...chip, tone: 'grey' } : chip;

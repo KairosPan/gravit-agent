@@ -49,7 +49,7 @@ const tag = text => `<span class="mk-tag">${esc(text)}</span>`;
 const tone = v => ({ pos: 'up', neg: 'down' })[sign(v)] ?? 'flat';
 // a quantity as the Account gives it, grouped (0.124, 63,226.6); nothing given is no word
 const qtyWord = n => (n === null || n === undefined ? '' : Number(n).toLocaleString('en-US', { maximumFractionDigits: 8 }));
-const when = (at, now) => { const ms = Date.parse(at); return Number.isNaN(ms) ? '' : sameDay(ms, now) ? fmtClock(ms) : `${fmtDate(ms)} ${fmtClock(ms)}`; };
+const when = (at, now) => { const ms = Date.parse(at); return Number.isNaN(ms) ? '' : sameDay(ms, now) ? fmtClock(ms) : t('time.dayClock', { day: fmtDate(ms), clock: fmtClock(ms) }); };
 
 /** A round letter tile: the first word of what it is given — a market's base, an event's category — four letters at most. */
 export function mkAv(name, size = '') {
@@ -198,8 +198,8 @@ const ticketKey = (id, side, word) => `<button type="button" class="btn" data-ac
 // Gravit; Watch — and a perpetual's Leverage… (`leverage`, its seed) where it is given
 const keysHtml = (id, watched, trade = null, leverage = null) => `<div class="mk-d-acts">${trade ? ticketKey(id, 'buy', th('trade.buy')) + (trade.held ? ticketKey(id, 'sell', th('trade.sell')) : '') : ''}` +
   `${leverage ? marketKey('leverage', leverage, t('account.key.leverage'), 'btn') : ''}` +
-  `<button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}${th('markets.hand')}</button>` +
-  `<button type="button" class="${cls('btn', watched && 'mk-on')}" data-action="toggleWatch" data-id="${esc(id)}" aria-pressed="${watched}">${icon('star', 16, 2)}${watched ? th('markets.tab.watching') : th('markets.head.watch')}</button></div>`;
+  `<button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}${th('markets.hand')}</button>` + // words-order: an icon, then its word
+  `<button type="button" class="${cls('btn', watched && 'mk-on')}" data-action="toggleWatch" data-id="${esc(id)}" aria-pressed="${watched}">${icon('star', 16, 2)}${watched ? th('markets.tab.watching') : th('markets.head.watch')}</button></div>`; // words-order: an icon, then its word
 const aboutHtml = (conversations, asset, now) => mentionsOf(conversations, asset).map(c => `<a class="mk-line" href="#/messages/${esc(c.id)}" data-action="open" data-id="${esc(c.id)}"><span class="mk-mark">→</span>` +
   `<div class="mk-line-b"><div class="mk-t1">${esc(maskExcerpt(c.title))}</div>${c.updatedAt ? `<div class="mk-t2">${esc(rowTime(c.updatedAt, now))}</div>` : ''}</div></a>`);
 
@@ -249,7 +249,7 @@ function depthBody(part, draw, unavailable, now, timeOf = () => '') {
 function costWords(c, unit) {
   if (!c) return '';
   const avg = c.avgCostUsd === null ? '' : t('markets.cost.avg', { price: priceWord(unit === 'cents' ? c.avgCostUsd * 100 : c.avgCostUsd, unit) });
-  return [avg, c.costUsd === null ? '' : t('markets.cost.cost', { cost: money(c.costUsd) }), c.words].filter(Boolean).join(' · ');
+  return [avg, c.costUsd === null ? '' : t('markets.cost.cost', { cost: money(c.costUsd) }), c.words].filter(Boolean).join(' · '); // words-order: what was paid under the visual separator
 }
 
 // You here: the venues the sheet could not read; the holding, the positions with their cost and keys, the owner's open orders
@@ -290,7 +290,7 @@ function bookHtml(b, unit) {
   const cell = (l, side) => (l ? `<td class="r ${side}">${esc(unitPrice(l.price, unit))}</td><td class="r">${esc(sizeWord(l.size))}</td>` : '<td></td><td></td>');
   const body = Array.from({ length: rows }, (_, i) => `<tr>${cell(b.bids[i], 'up')}${cell(b.asks[i], 'down')}</tr>`).join('');
   return `<table class="mk-book"><thead><tr><th scope="col" class="r">${th('markets.book.bid')}</th><th scope="col" class="r">${th('markets.book.size')}</th><th scope="col" class="r">${th('markets.book.ask')}</th><th scope="col" class="r">${th('markets.book.size')}</th></tr></thead>` +
-    `<tbody>${body}</tbody></table>${note([b.from, b.depth === 'top' ? t('markets.book.top') : ''].filter(Boolean).join(' · '))}`;
+    `<tbody>${body}</tbody></table>${note([b.from, b.depth === 'top' ? t('markets.book.top') : ''].filter(Boolean).join(' · '))}`; // words-order: whose book, then its depth, under the visual separator
 }
 
 // the latest trades: twenty, newest first — the price, the size, the side that took where the source says it, when — or the
@@ -298,7 +298,7 @@ function bookHtml(b, unit) {
 function tradesHtml(tr, unit, now) {
   if (!tr.trades.length) return empty(tr.none || t('markets.trades.none'));
   return feed(tr.trades.slice(0, 20).map(x => line('·', esc([unitPrice(x.price, unit), sizeWord(x.size)].join(' · ')),
-    esc([x.side === 'buy' ? t('trade.buy') : x.side === 'sell' ? t('trade.sell') : '', when(x.at, now)].filter(Boolean).join(' · ')), x.side === 'buy' ? 'up' : x.side === 'sell' ? 'down' : '')));
+    esc([x.side === 'buy' ? t('trade.buy') : x.side === 'sell' ? t('trade.sell') : '', when(x.at, now)].filter(Boolean).join(' · ')), x.side === 'buy' ? 'up' : x.side === 'sell' ? 'down' : ''))); // words-order: a trade's side and time under the visual separator
 }
 
 // a perpetual's funding: what was paid out of the position, what was received, each hour's line newest first; None yet. when
@@ -422,7 +422,7 @@ function cnPage(asset, state, now) {
   const quote = view.quote;
   // starred as the press reads it (app.js toggles by watchedOf): the Account keys, the page's china entry, an old cn star
   const watched = watchedOf(m, asset.id, state.account?.data);
-  const sub = [t('markets.cn.aShare'), asset.symbol, cnBoardOf(asset.symbol)].filter(Boolean).join(' · ');
+  const sub = [t('markets.cn.aShare'), asset.symbol, cnBoardOf(asset.symbol)].filter(Boolean).join(' · '); // words-order: an A share's facts under the visual separator
   const who = `<div class="mk-who">${mkAv(cnTileOf(asset.name, asset.symbol), 'lg')}<div><h1 class="head-title">${esc(asset.name || asset.symbol)}</h1><span class="mk-sub">${esc(sub)}</span></div></div>`;
   const priced = number(quote?.price) !== null;
   const stateWord = cnStateWord(quote, m.connection, m.providers);

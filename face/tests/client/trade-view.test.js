@@ -11,6 +11,7 @@ import {
   TRADE_KIND_IDS, tradeKinds, tradeableOf, pickerOf, ticketOf, tradeFieldsOf, tradeDraftOf, quoteOf, underWayOf, fillWords, eventPriceOf,
 } from '../../client/js/host/trade-view.js';
 import { accountTabs } from '../../client/js/host/market-view.js';
+import { sayOf, withTable } from '../../client/js/i18n/words.js';
 import { fieldsOf, draftOf } from '../../client/js/host/sheet-view.js';
 import { emptyState } from '../../client/js/data/empty.js';
 
@@ -385,22 +386,22 @@ test('fillWords: a fill frame as one line — the side, the size and base, the p
     venue: 'ex', venueName: 'Stand-in Exchange', ref: 'sx-00009', clientId: 'c1', filledQty: 0.04, symbol: 'ETH/USDT', name: 'ETH / USDT',
     kind: 'spot', side: 'buy', qty: 0.04, price: 3120.5, at: '2026-10-22T07:40:00.000Z', order: 'ord-0011', by: 'owner',
   };
-  assert.equal(fillWords({ type: 'fill', id: '4dababf8.9', data: fill }), 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange');
-  assert.equal(fillWords(fill), 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange', 'the frame\'s data alone too');
+  assert.equal(sayOf(fillWords({ type: 'fill', id: '4dababf8.9', data: fill })), 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange');
+  assert.equal(sayOf(fillWords(fill)), 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange', 'the frame\'s data alone too');
   const paper = { ...fill, venue: 'paper-momentum', venueName: 'Momentum · paper', paper: true, side: 'sell', symbol: 'SOL/USD', qty: 1, price: 142.85 };
-  assert.equal(fillWords({ type: 'fill', data: paper }), 'Sold 1 SOL @ 142.85 · Momentum · paper', 'paper said once: the venue\'s name says it');
-  assert.equal(fillWords({ type: 'fill', data: { ...paper, venueName: 'Momentum' } }), 'Sold 1 SOL @ 142.85 · Momentum · Paper account');
-  assert.equal(fillWords({ type: 'fill', data: { ...fill, avg: true } }), 'Bought 0.04 ETH @ 3,120.50 avg · Stand-in Exchange', 'the order\'s average, said so');
+  assert.equal(sayOf(fillWords({ type: 'fill', data: paper })), 'Sold 1 SOL @ 142.85 · Momentum · paper', 'paper said once: the venue\'s name says it');
+  assert.equal(sayOf(fillWords({ type: 'fill', data: { ...paper, venueName: 'Momentum' } })), 'Sold 1 SOL @ 142.85 · Momentum · Paper account');
+  assert.equal(sayOf(fillWords({ type: 'fill', data: { ...fill, avg: true } })), 'Bought 0.04 ETH @ 3,120.50 avg · Stand-in Exchange', 'the order\'s average, said so');
   for (const qty of [0, -1, undefined, 'lots']) {
-    const words = fillWords({ type: 'fill', data: { ...fill, qty } });
+    const words = sayOf(fillWords({ type: 'fill', data: { ...fill, qty } }));
     assert.equal(words, 'Bought ETH @ 3,120.50 · Stand-in Exchange', String(qty));
     assert.doesNotMatch(words, /undefined|Bought 0/);
   }
-  assert.equal(fillWords({ type: 'fill', data: { ...fill, symbol: 'SPY', kind: 'stock', price: undefined, qty: 2 } }), 'Bought 2 SPY · Stand-in Exchange', 'no price, no @');
-  assert.equal(fillWords({ type: 'fill', data: { ...fill, symbol: 'SI-FEDCUT-DEC:YES', kind: 'event', name: 'Will the Fed cut rates at its December meeting? · Yes', qty: 10, price: 0.62 } }),
+  assert.equal(sayOf(fillWords({ type: 'fill', data: { ...fill, symbol: 'SPY', kind: 'stock', price: undefined, qty: 2 } })), 'Bought 2 SPY · Stand-in Exchange', 'no price, no @');
+  assert.equal(sayOf(fillWords({ type: 'fill', data: { ...fill, symbol: 'SI-FEDCUT-DEC:YES', kind: 'event', name: 'Will the Fed cut rates at its December meeting? · Yes', qty: 10, price: 0.62 } })),
     'Bought 10 contracts · Will the Fed cut rates at its December meeting? · Yes @ 62¢ · Stand-in Exchange');
-  assert.equal(fillWords({ type: 'quote', data: {} }), '');
-  assert.equal(fillWords(null), '');
+  assert.equal(sayOf(fillWords({ type: 'quote', data: {} })), '');
+  assert.equal(sayOf(fillWords(null)), '');
 });
 
 test('the views read the store as it boots without throwing', () => {
@@ -417,4 +418,16 @@ test('eventPriceOf: cents typed as the dollars the Account signs, six places, tr
   assert.equal(eventPriceOf('99.99'), '0.9999');
   for (const t of ['100', '0', '150', '-5', '', 'abc', '1e1', '0.00001']) assert.equal(eventPriceOf(t), null, JSON.stringify(t));
   assert.equal(eventPriceOf(62), null, 'a typed string only');
+});
+
+test("a fill's words are in the table's order — the side and what, the price, avg, the venue, paper — and a list of venues' separator is the table's", () => {
+  const fill = { venueName: 'V', side: 'buy', qty: 2, symbol: 'ETH/USDT', price: 3, avg: true, paper: true };
+  const table = { 'trade.fill.did': '{what} {side}', 'trade.fill.atAvg': '{price} avg ← {line}', 'trade.fill.venue': '{venue}: {line}', 'trade.fill.onPaper': '{paper} / {line}' };
+  const words = fillWords({ type: 'fill', data: fill });
+  assert.equal(withTable(table, () => sayOf(words)), 'Paper account / V: 3.00 avg ← 2 ETH Bought', 'kept, it is read in the table that stands');
+  assert.equal(sayOf(words), 'Bought 2 ETH @ 3.00 avg · V · Paper account');
+  assert.equal(withTable({ 'trade.fill.at': '{price} ← {line}', 'trade.fill.contractsOf': '{name}: {contracts}' }, () => sayOf(fillWords({ data: { side: 'sell', kind: 'event', name: 'Fed', qty: 1, price: 0.5 } }))), '50¢ ← Sold Fed: 1 contracts');
+  const p = withTable({ 'common.list.sep': '、' }, () => pickerOf(stateWith({ watch: [] }), NOW));
+  assert.equal(p.held[0].sub, '0.124 · Stand-in Exchange、Stand-in Wallet');
+  assert.equal(p.most.find(r => r.id === 'coin:ETH').sub, 'Stand-in Exchange、Stand-in Wallet、Momentum · paper · 1 public venue');
 });

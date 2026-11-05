@@ -127,6 +127,6 @@ export function fundingMissingOf(body, venues = null) {
   if (body?.ok !== true) return '';
   const only = Array.isArray(venues) ? new Set(venues) : null;
   const missed = records(body.missing).filter(m => only === null || only.has(m.venue))
-    .map(m => `${str(m.venueName) || str(m.venue)}: ${str(m.why).replace(/[.\s]+$/, '')}`);
+    .map(m => t('markets.funding.missed', { venue: str(m.venueName) || str(m.venue), why: str(m.why).replace(/[.\s]+$/, '') }));
   return missed.length ? t('markets.funding.notRead', { venues: missed.join(' · ') }) : '';
 }

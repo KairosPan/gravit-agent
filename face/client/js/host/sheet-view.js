@@ -521,15 +521,17 @@ export function guardFirstOf(sheet) {
   const f = (Array.isArray(sheet.fields) ? sheet.fields : []).find(x => isRecord(x) && x.name === 'guard');
   return f?.value === true || f?.value === 'true';
 }
+// a kept line put into another: a string trimmed, a said as it is (read when drawn); and the stop it needs after it, a said
+// too — none when the words already end a sentence, as they read now
+const ENDED = /[.!?。！？]$/;
+const innerOf = words => (typeof words === 'string' ? words.trim() : words);
+const stopAfter = words => (ENDED.test(sayOf(words).trim()) ? '' : said('sheet.guard.stop'));
 /** A sign-out signed after a taken Guard: what it said, ending `Guard is on.` */
-export const guardFirstDone = words => {
-  const s = sayOf(words).trim();
-  return s ? said('sheet.guard.done', { said: /[.!?]$/.test(s) ? s : `${s}.` }) : said('sheet.guard.on');
-};
+export const guardFirstDone = words => (sayOf(words).trim() ? said('sheet.guard.done', { said: innerOf(words), stop: stopAfter(words) }) : said('sheet.guard.on'));
 /** A sign-out refused after a taken Guard (Guard stays, and says so): the Account's words. */
 export const guardFirstRefused = words => {
-  const w = (sayOf(words) || t('sheet.guard.noAnswer')).trim();
-  return said('sheet.guard.refused', { words: /[.!?]$/.test(w) ? w : `${w}.` });
+  const w = sayOf(words).trim() ? innerOf(words) : said('sheet.guard.noAnswer');
+  return said('sheet.guard.refused', { words: w, stop: stopAfter(w) });
 };
 
 // ── granting an agent's ask (plan 4b Task 6, portfolio.js pfGrant) ──
@@ -565,7 +567,7 @@ export function grantsAsk(ask, page) {
 }
 
 // the line under a granting sheet's title: the ask in the Account's words
-const askedWordsOf = ask => (!str(ask.text) ? '' : str(ask.agentName) ? t('sheet.asked.named', { name: ask.agentName, text: ask.text }) : t('sheet.asked.agent', { text: ask.text }));
+const askedWordsOf = ask => (!str(ask.text) ? '' : str(ask.agentName) ? said('sheet.asked.named', { name: ask.agentName, text: ask.text }) : said('sheet.asked.agent', { text: ask.text }));
 // the name an agent wallet is first given: the agent's, letters and digits, at most 16 (portfolio.js pfWalletForm)
 const walletNameOf = name => str(name).replace(/[^A-Za-z0-9]/g, '').slice(0, 16) || 'agent';
 // the connect option a venue is reached through: one of its kind, else the exchange account that lists it (portfolio.js
@@ -722,7 +724,7 @@ export function connectCheckOf(sheet, keyfile, reach, more = {}) {
     else if (keyfile.status === 'error') parts.push(str(keyfile.message));
     else if (keyfile.status === 'ready') {
       const w = keyfileWords(keyfile.data);
-      parts.push(w.ready ? (w.path ? t('sheet.keyfile.foundAt', { path: w.path }) : t('sheet.keyfile.found')) : w.missing.length ? t('sheet.keyfile.missing', { fields: w.missing.join(', ') }) : w.message);
+      parts.push(w.ready ? (w.path ? t('sheet.keyfile.foundAt', { path: w.path }) : t('sheet.keyfile.found')) : w.missing.length ? t('sheet.keyfile.missing', { fields: w.missing.join(t('common.list.sep')) }) : w.message);
     }
   }
   // one sentence once: a venue that did not answer here says so, and a sign-in it refused may say the same

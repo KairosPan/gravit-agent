@@ -21,7 +21,7 @@ const str = v => (typeof v === 'string' ? v : '');
 const box = (inner, label) => `<section class="cardbox" aria-label="${esc(label)}">${inner}</section>`;
 const note = text => `<p class="acct-note">${esc(text)}</p>`;
 const title = text => `<div class="cardbox-title">${esc(text)}</div>`;
-const when = (at, now) => { const ms = Date.parse(at); return Number.isNaN(ms) ? '' : sameDay(ms, now) ? fmtClock(ms) : `${fmtDate(ms)} ${fmtClock(ms)}`; };
+const when = (at, now) => { const ms = Date.parse(at); return Number.isNaN(ms) ? '' : sameDay(ms, now) ? fmtClock(ms) : t('time.dayClock', { day: fmtDate(ms), clock: fmtClock(ms) }); };
 const dateWord = at => { const ms = Date.parse(at); return Number.isNaN(ms) ? '' : fmtDate(ms); };
 const clockWord = at => { const ms = Date.parse(at); return Number.isNaN(ms) ? '' : fmtClock(ms); };
 // a row's words: its icon, its name bold (a chip beside it), each line under it dim
@@ -50,7 +50,7 @@ function networkRow(net, row, state, owner) {
   }
   const open = detailsOpen(state.identity.details, net);
   const status = row.problem ?? (row.polling ? t('identity.telegram.polling') : t('identity.telegram.notPolling'));
-  const since = [dateWord(row.since) ? t('identity.telegram.since', { date: dateWord(row.since) }) : '', row.fingerprint ? t('identity.telegram.token', { fingerprint: row.fingerprint }) : '', status].filter(Boolean).join(' · ');
+  const since = [dateWord(row.since) ? t('identity.telegram.since', { date: dateWord(row.since) }) : '', row.fingerprint ? t('identity.telegram.token', { fingerprint: row.fingerprint }) : '', status].filter(Boolean).join(' · '); // words-order: a network's facts under the visual separator
   const dims = [t('identity.telegram.speaksAs', { who: row.speaksAs || '—' }), t('identity.telegram.talksWith', { who: row.talksOnlyWith || '—' }), row.problem ?? '', open ? since : ''];
   return `<div class="venue" data-network="${esc(net)}"><span>${lines(GLYPH[net], name, dims, t('identity.connected'))}</span>` +
     `${keys(button(t('identity.details'), { 'data-action': 'identityDetails', 'aria-expanded': open ? 'true' : 'false', ...named }), owner ? sheetKey('disconnectNetwork', named, t('identity.disconnect'), 'btn-danger') : '')}</div>`;
@@ -91,7 +91,7 @@ function gridCard(v, state, owner) {
 function notYouCard(v, owner, now) {
   const n = v.strangers.length;
   const rows = v.strangers.map(s => {
-    const words = [NETWORK_NAME[s.network] ?? s.network, s.masked || '…', tn('identity.strangers.messages', s.count), when(s.last, now) ? t('identity.strangers.last', { when: when(s.last, now) }) : ''].filter(Boolean).join(' · ');
+    const words = [NETWORK_NAME[s.network] ?? s.network, s.masked || '…', tn('identity.strangers.messages', s.count), when(s.last, now) ? t('identity.strangers.last', { when: when(s.last, now) }) : ''].filter(Boolean).join(' · '); // words-order: a stranger's facts under the visual separator
     return `<div class="venue"><span>${esc(words)}</span>` +
       `${keys(owner ? sheetKey('block', { 'data-network': s.network, 'data-sender': s.sender, 'data-masked': s.masked }, t('identity.strangers.block')) : '')}</div>`;
   }).join('');

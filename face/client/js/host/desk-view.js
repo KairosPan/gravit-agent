@@ -67,7 +67,7 @@ export function phoneLine(p, now) {
     return n.blocked === true ? t('desk.phone.blocked', { network: str(n.network), polling }) : t('desk.phone.network', { network: str(n.network), polling });
   };
   const parts = [
-    networks.map(network).join(', '),
+    networks.map(network).join(t('common.list.sep')),
     p.lastPollAt === undefined ? t('desk.noPoll') : t('desk.lastPoll', { at: deskTime(p.lastPollAt, now) }),
     t('desk.phone.queued', { n: count(p.queued) }),
     tn('desk.phone.strangers', strangers),
@@ -76,7 +76,7 @@ export function phoneLine(p, now) {
     if (n.conflictAt !== undefined) parts.push(t('desk.phone.conflict', { network: str(n.network), at: deskTime(n.conflictAt, now) }));
     if (isRecord(n.pollFailing)) parts.push(t('desk.phone.pollFailing', { network: str(n.network), since: deskTime(n.pollFailing.since, now), reason: str(n.pollFailing.reason) }));
   }
-  return t('desk.phone.line', { parts: parts.join(', '), failing });
+  return t('desk.phone.line', { parts: parts.join(t('common.list.sep')), failing });
 }
 function budgetLine(b) {
   const used = count(b.used?.total).toLocaleString('en-US');
@@ -96,7 +96,7 @@ const REFUSED_SHOWN_MAX = 200;
 function standingNotesOf(s) {
   const notes = [];
   const orders = records(s.orders);
-  if (s.file?.state === 'refused') notes.push(t('desk.standing.refused', { errors: cut((Array.isArray(s.file.errors) ? s.file.errors : []).join('; '), REFUSED_SHOWN_MAX) }));
+  if (s.file?.state === 'refused') notes.push(t('desk.standing.refused', { errors: cut((Array.isArray(s.file.errors) ? s.file.errors : []).join(t('common.list.semi')), REFUSED_SHOWN_MAX) }));
   else if (orders.length === 0) notes.push(t('desk.standing.none'));
   if (isRecord(s.ledger)) notes.push(t('desk.standing.ledger', { error: str(s.ledger.error) }));
   if (s.calendar?.state === 'failed') notes.push(t('desk.standing.noCalendar', { clock: str(s.calendar.clock), error: str(s.calendar.error) || t('desk.noReason') }));
@@ -165,8 +165,8 @@ function phaseOf(m, now) {
 function marketLine(name, m, now) {
   if (m.state === 'off') return null;
   const notWatched = Array.isArray(m.notWatched) && m.notWatched.length ? t('desk.watch.notWatched', { n: m.notWatched.length }) : '';
-  const error = m.lastError === undefined ? '' : `; ${cut(m.lastError, WATCH_ERROR_SHOWN_MAX)}`;
-  return t('desk.watch.market', { name, phase: phaseOf(m, now), rest: `${notWatched}${error}` });
+  const error = m.lastError === undefined ? '' : t('desk.watch.error', { error: cut(m.lastError, WATCH_ERROR_SHOWN_MAX) });
+  return t('desk.watch.market', { name, phase: phaseOf(m, now), notWatched, error });
 }
 // a market's alerts on its own session date (the status counts each market's apart): none is no line
 function todayLine(name, today) {
@@ -176,9 +176,9 @@ function todayLine(name, today) {
   const suppressed = reasons.reduce((n, r) => n + count(by[r]), 0);
   if (count(day.sent) === 0 && suppressed === 0 && count(day.repeats) === 0) return null;
   const parts = [t('desk.today.sent', { n: count(day.sent) })];
-  if (suppressed > 0) parts.push(t('desk.today.suppressed', { n: suppressed, reasons: reasons.map(r => `${r} ${count(by[r])}`).join(', ') }));
+  if (suppressed > 0) parts.push(t('desk.today.suppressed', { n: suppressed, reasons: reasons.map(r => t('desk.today.reason', { reason: r, n: count(by[r]) })).join(t('common.list.sep')) }));
   if (count(day.repeats) > 0) parts.push(t('desk.today.repeats', { n: count(day.repeats) }));
-  return t('desk.today.line', { name, parts: parts.join(', ') });
+  return t('desk.today.line', { name, parts: parts.join(t('common.list.sep')) });
 }
 function filingsLine(f, now) {
   switch (f.state) {
@@ -197,8 +197,9 @@ function fileNote(f) {
   if (f.error !== undefined) return t('desk.file.refused', { error: cut(f.error, FILE_ERROR_SHOWN_MAX) });
   const refusals = records(f.refusals);
   if (!refusals.length) return null;
-  const each = refusals.map(r => `${Number.isInteger(r.index) ? `#${r.index + 1}${r.symbol !== undefined ? ` ${r.symbol}` : ''}: ` : ''}${str(r.reason)}`);
-  return t('desk.file.refusals', { n: refusals.length, of: count(f.entries) + refusals.length, each: each.join('; ') });
+  const each = refusals.map(r => (!Number.isInteger(r.index) ? str(r.reason)
+    : r.symbol !== undefined ? t('desk.file.refusalOf', { n: r.index + 1, symbol: r.symbol, reason: str(r.reason) }) : t('desk.file.refusalAt', { n: r.index + 1, reason: str(r.reason) })));
+  return t('desk.file.refusals', { n: refusals.length, of: count(f.entries) + refusals.length, each: each.join(t('common.list.semi')) });
 }
 
 // ---- a level's mark
@@ -230,7 +231,7 @@ export function markOf(status, rowId) {
 // one alert as the tab lists it: when (New York), what fired with its print and feed, what became of it, and the send's latency
 function alertOf(a, now) {
   const price = typeof a.price === 'number' ? `${a.price}${a.feed ? ` ${a.feed}` : ''}` : '';
-  const what = [`${str(a.symbol)} ${str(a.label)}`, a.gap === true ? t('desk.alert.gap') : '', price].filter(Boolean).join(' · ');
+  const what = [`${str(a.symbol)} ${str(a.label)}`, a.gap === true ? t('desk.alert.gap') : '', price].filter(Boolean).join(' · '); // words-order: an alert's facts under the visual separator
   const outcome = a.outcome === 'suppressed' && a.suppressed ? t('desk.alert.suppressed', { why: a.suppressed }) : str(a.outcome);
   const latency = typeof a.latencyMs === 'number' && Number.isFinite(a.latencyMs) ? t('desk.gap.seconds', { n: (a.latencyMs / 1000).toFixed(1) }) : '—';
   return { when: etWhen(a.t, now), what, outcome, latency };

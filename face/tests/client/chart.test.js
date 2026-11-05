@@ -92,3 +92,9 @@ test('sessionsSvg writes every session date on its axis (minor #5)', () => {
   const svg = sessionsSvg(['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30'].map(session));
   for (const d of ['10-26', '10-27', '10-28', '10-29', '10-30']) assert.match(svg, new RegExp(`<span>${d}</span>`), d);
 });
+
+test("a chart's times are a day and a clock in the table's order", async () => {
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  const svg = withTable({ 'time.dayClock': '{clock} ({day})' }, () => curveSvg(points([1, 2]), { currency: 'USD' }));
+  assert.ok(svg.includes(`<span>${fmtClock(Date.parse(at(0)))} (${fmtDate(Date.parse(at(0)))})</span>`), svg);
+});

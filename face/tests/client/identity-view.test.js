@@ -330,3 +330,10 @@ test('the grid enables Slack\'s column once Slack is connected; iMessage stays d
   // a read that drops Slack drops its ticks from a draft
   assert.ok(!JSON.stringify(R.identityLoaded(ticked, CONNECTED).identity.draft).includes('slack'));
 });
+
+test("a stranger's last message on another day is a day and a clock in the table's order", async () => {
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  const last = '2026-11-01T13:02:00.000Z';
+  const html = withTable({ 'time.dayClock': '{clock} ({day})' }, () => renderIdentityTab(signing({ ...CONNECTED, strangers: [{ ...STRANGER, last }] }), NOW));
+  assert.ok(html.includes(`${fmtClock(Date.parse(last))} (${fmtDate(Date.parse(last))})`), html);
+});

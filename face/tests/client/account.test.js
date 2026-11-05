@@ -1034,3 +1034,14 @@ test("Theme's keys carry cream, black and system, and pressing Black stores blac
   const pressed = items(drawn('system')).find(([label]) => label === 'Black')[1];
   assert.equal(R.setTheme(state(), pressed).theme, 'black');
 });
+
+test("the Account's lines are in the table's order: a day and its clock, a venue that refuses to earn", async () => {
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  const { earnBody, earnPage } = await import('./helpers/earn-fixture.js');
+  const earned = moneySigns(R.earnLoaded(state({ tab: 'money', page: earnPage() }), { data: earnBody(), at: NOW }));
+  const earn = withTable({ 'money.earn.refusing': '{why} ({venue})' }, () => draw(earned)).match(MONEY_BOX('Earn'))?.[0] ?? '';
+  has(earn, 'the agent wallet has not been approved for vaults (MetaMask)');
+  const at = '2026-10-19T15:00:00.000Z';
+  const st = R.statementLoaded(R.openStatement(state()), { data: { ok: true, lines: [{ ...fx('statement').lines[0], at }] }, at: NOW });
+  has(withTable({ 'time.dayClock': '{clock}, {day}' }, () => renderStatement(st, NOW)), `${fmtClock(Date.parse(at))}, ${fmtDate(Date.parse(at))}`);
+});

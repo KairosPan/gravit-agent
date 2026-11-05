@@ -177,30 +177,8 @@ test("Identity's reducers read no table", async () => {
   });
 });
 
-// a sentence assembled in code order cannot be reordered by a table (plan 7 Tasks 4-5): each becomes one key whose value holds
-// the joins as params. ASSEMBLED lists the files that still assemble one; Task 4 took the thread's, the list's and the
-// clocks' files out, Task 5 empties it
-const ASSEMBLED = [
-  'host/account-view.js',
-  'host/desk-view.js',
-  'host/modules-view.js',
-  'host/run-sheet-view.js',
-  'host/runs-view.js',
-  'host/sheet-money.js',
-  'host/trade-view.js',
-  'render/account.js',
-  'render/desk.js',
-  'render/discover.js',
-  'render/identity.js',
-  'render/lunhui/indices.js',
-  'render/lunhui/intraday.js',
-  'render/lunhui/sources.js',
-  'render/lunhui/stock.js',
-  'render/markets.js',
-  'render/owner.js',
-  'render/trade.js',
-];
-
+// a sentence assembled in code order cannot be reordered by a table (plan 7 Tasks 4-5): each is one key whose value holds the
+// joins as params; a join that is no sentence carries `// words-order: <reason>`
 const joins = src => assembled(src, 'snippet.js').map(a => a.line);
 
 test('assembled finds a words call beside another hole, in a join of an array literal and in a + chain', () => {
@@ -221,12 +199,7 @@ test('assembled passes markup between holes, a call that draws markup, a join of
   }
 });
 
-test('no client file outside ASSEMBLED assembles a sentence', () => {
-  const found = FILES.filter(f => !ASSEMBLED.includes(f)).flatMap(f => assembled(source(f), f).map(a => `${f}:${a.line} ${a.text}`));
+test('no client file assembles a sentence', () => {
+  const found = FILES.flatMap(f => assembled(source(f), f).map(a => `${f}:${a.line} ${a.text}`));
   assert.deepEqual(found, [], 'make each one key whose value holds the joins as params, or mark a join that is no sentence // words-order: <reason>');
-});
-
-test('every ASSEMBLED file still does', () => {
-  assert.deepEqual([...ASSEMBLED].sort(), ASSEMBLED, 'ASSEMBLED is sorted');
-  assert.deepEqual(ASSEMBLED.filter(f => assembled(source(f), f).length === 0), [], 'a file that no longer assembles a sentence leaves ASSEMBLED');
 });

@@ -27,9 +27,9 @@ const writesWords = w => (w && typeof w === 'object' ? (w.on === true ? (isNum(w
 // an Account agent's (its perPaymentUsd) alike. An amount that is not there is no clause, never $0; a word that is not a string, none.
 const limitWords = (l, perOrderUsd) => {
   const budget = number(l.budgetUsd), left = number(l.leftUsd);
-  return [
+  return [ // words-order: a limit's clauses under the visual separator
     str(l.scope),
-    (Array.isArray(l.allow) ? l.allow : []).map(str).filter(Boolean).join(', '),
+    (Array.isArray(l.allow) ? l.allow : []).map(str).filter(Boolean).join(t('common.list.sep')),
     isNum(perOrderUsd) ? t('account.limit.perOrder', { amount: dollars(perOrderUsd) }) : '',
     budget !== null && left !== null ? t('account.limit.left', { left: dollars(left), budget: dollars(budget) }) : '',
     l.expired === true ? t('account.limit.expired') : '',

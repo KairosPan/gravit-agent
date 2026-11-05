@@ -327,3 +327,9 @@ test("the drawer's cursor stands on the drawn chart's geometry, at every minute"
   const yview = ys.lunhui.views[KEY].view;
   for (const m of [0, 3, 120]) assert.equal(cursorPatch(yview, 'sh600100', m).y, Number(gy.Y(y.minutes.price[m]).toFixed(1)), `minute ${m}`);
 });
+
+test("a stock's line and where it closed against the limit are in the table's order", async () => {
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  const down = facts({ pool: 'yesterday', boards: null, yesterdayBoards: 3, firstSeal: null, lastSeal: null, breaks: null, minutes: line(10, i => (i === 1 ? 10.66 : i === 241 ? 9 : 9.8)) });
+  assert.equal(withTable({ 'lunhui.stock.lineAtLimitDown': '{limit}: {line}' }, () => stockHeadline(down)), "at the limit-down: Yesterday's 3-board: high +6.60% at 09:31, closed −10.00%");
+});

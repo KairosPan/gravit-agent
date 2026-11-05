@@ -16,7 +16,7 @@ export const itemsWord = n => tn('channel.count.items', n);
 export function valueWord(v) {
   if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(Math.round(v * 1e4) / 1e4);
   if (scalar(v)) return String(v);
-  if (Array.isArray(v)) return v.length <= ARRAY_SHOWN && v.every(scalar) ? v.map(valueWord).join(', ') : itemsWord(v.length);
+  if (Array.isArray(v)) return v.length <= ARRAY_SHOWN && v.every(scalar) ? v.map(valueWord).join(t('common.list.sep')) : itemsWord(v.length);
   if (plain(v)) return tn('channel.count.fields', Object.keys(v).length);
   return '';
 }
@@ -26,11 +26,11 @@ export function valueWord(v) {
 function chipText(module, art, status, boardsProvider = null) {
   if (status === 'NOT_EVALUABLE') return t('channel.chip.notEvaluable', { module });
   const h = plain(art.headline) ? art.headline : {};
-  if (module === 'counterevidence') return `${module}: ${itemsWord(Array.isArray(h.items) ? h.items.length : 0)}`;
-  if (module === 'mode') return typeof h.mode === 'string' ? `${module}: ${h.mode}` : module;
+  if (module === 'counterevidence') return t('channel.chip.module', { module, words: itemsWord(Array.isArray(h.items) ? h.items.length : 0) });
+  if (module === 'mode') return typeof h.mode === 'string' ? t('channel.chip.module', { module, words: h.mode }) : module;
   const words = Object.values(h).filter(v => v !== undefined).map(valueWord).filter(w => w !== '');
-  const text = words.length ? `${module}: ${words.join(' · ')}` : module;
-  return module === 'theme' && boardsProvider === '同花顺问财' ? `${text} · ${t('modules.boardsThs')}` : text;
+  const text = words.length ? t('channel.chip.module', { module, words: words.join(' · ') }) : module;
+  return module === 'theme' && boardsProvider === '同花顺问财' ? t('modules.chip.withSource', { words: text, source: t('modules.boardsThs') }) : text;
 }
 
 function compact(json) {

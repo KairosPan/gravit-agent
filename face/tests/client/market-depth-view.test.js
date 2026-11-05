@@ -160,3 +160,8 @@ test('fundingOf keeps the page’s symbol only, newest first', () => {
   assert.equal(fundingMissingOf(missed, ['paper']), '');
   assert.equal(fundingMissingOf({ ok: false, refusal: {} }), '');
 });
+
+test("a venue the funding read missed is said in the table's order", () => {
+  const missed = { ok: true, lines: [], missing: [{ venue: 'hl', venueName: 'Hyperliquid', why: 'rate limited' }] };
+  assert.equal(withTable({ 'markets.funding.missed': '{why} ({venue})' }, () => fundingMissingOf(missed)), 'Not read: rate limited (Hyperliquid).');
+});

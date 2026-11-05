@@ -158,3 +158,9 @@ test('take out lists only what something is in', async () => {
   ro.connectLive.writes.on = false;
   assert.equal(earnOutAt(ro, 'ex'), false, 'an Account that takes no writes');
 });
+
+test("a wallet's networks are listed under the table's separator", async () => {
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  const wallet = receiveRowsOf(page({ extra: [okx(), mine()] })).find(r => r.venue === 'wallet-mm');
+  assert.equal(withTable({ 'common.list.sep': '、' }, () => receiveNetworkWords(wallet)), 'All EVM networks: Base、Arbitrum、Optimism、Polygon、Ethereum、BNB Chain、Robinhood Chain');
+});

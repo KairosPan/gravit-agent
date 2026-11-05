@@ -400,3 +400,11 @@ test('the routing sheet says what each connected network is sent', () => {
   assert.deepEqual(identityLinesOf('routing', { ...seed, networks: ['slack'] }), ['On Slack: Chat with Gravit, Cards waiting']);
   assert.deepEqual(identityLinesOf('routing', { ...seed, networks: undefined }), ['On Telegram: Chat with Gravit, Watch alerts'], 'none named: Telegram, as before');
 });
+
+test("what a network may send is listed under the table's separator", async () => {
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  withTable({ 'common.list.sep': '、' }, () => {
+    assert.equal(identityLinesOf('connectNetwork', SEED)[3], 'May send: Chat with Gravit、Watch alerts、Pre-close brief、Cards waiting、Fills and reports');
+    assert.deepEqual(identityLinesOf('routing', { routing: SEED_ROUTING }), ['On Telegram: Chat with Gravit、Watch alerts、Cards waiting、Fills and reports']);
+  });
+});

@@ -105,7 +105,7 @@ export function identityLinesOf(kind, seed) {
         t('sheet.identity.network', { network: NETWORK_NAME[network] ?? network }),
         t('sheet.identity.speaksAs', { who: str(s.speaksAs) || '—' }),
         t('sheet.identity.talksWith', { who: str(s.talksOnlyWith) || '—' }),
-        sends.length ? t('sheet.identity.maySend', { rows: sends.join(', ') }) : t('sheet.identity.maySendNone'),
+        sends.length ? t('sheet.identity.maySend', { rows: sends.join(t('common.list.sep')) }) : t('sheet.identity.maySendNone'),
         network === 'slack' ? t('sheet.identity.keptInBoth') : t('sheet.identity.keptIn'),
         t('sheet.identity.signedBy'),
         t('sheet.identity.until'),
@@ -123,7 +123,7 @@ export function identityLinesOf(kind, seed) {
       return nets.map(n => {
         const sends = rowsSentOn(routing, n);
         const network = NETWORK_NAME[n];
-        return sends.length ? t('sheet.identity.on', { network, rows: sends.join(', ') }) : t('sheet.identity.onNone', { network });
+        return sends.length ? t('sheet.identity.on', { network, rows: sends.join(t('common.list.sep')) }) : t('sheet.identity.onNone', { network });
       });
     }
     case 'block': return [str(s.masked) ? t('sheet.identity.dropped', { sender: s.masked }) : t('sheet.identity.droppedAny')];

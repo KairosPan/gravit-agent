@@ -182,7 +182,7 @@ function ticketPanel(state, now) {
   const closes = tk.page.closesAt ? t('markets.closes', { date: fmtDate(Date.parse(tk.page.closesAt)) }) : '';
   const pickedHtml = `<div class="tk-picked">${mkAv(tk.page.tile, 'sm')}<span class="tk-rn"><b>${esc(tk.page.name)}</b><span class="mk-sub">${esc([...tk.page.sub, closes].filter(Boolean).join(' · '))}</span></span>` +
     `${tk.event ? '' : `<span class="tk-rp"><span class="num">${esc(priceWord(tk.page.price, tk.page.priced.unit))}</span></span>`}</div>`;
-  const hand = `<button type="button"${attrs({ class: 'btn tk-hand', 'data-action': 'handToGravit', 'data-id': tk.id })}>${icon('agent', 18, 2)}${th('trade.handInstead')}</button>`;
+  const hand = `<button type="button"${attrs({ class: 'btn tk-hand', 'data-action': 'handToGravit', 'data-id': tk.id })}>${icon('agent', 18, 2)}${th('trade.handInstead')}</button>`; // words-order: an icon, then its word
 
   // a page that does not sign: its device line where the form would be
   if (state.owner?.role !== 'signs') {

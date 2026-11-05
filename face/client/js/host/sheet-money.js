@@ -6,7 +6,7 @@
 // (host/sheet.js) prepares the draft and What you sign shows it. No clock. No DOM, no store.
 import { moveSourcesOf, moveKindsOf, moveDestinationsOf, moveAssetsOf, networksOf, bridgeChainsOf, pageVenueOf, earnListOf, earnRate } from './money-view.js';
 import { pageOk } from './account-view.js';
-import { t, sayOf } from '../i18n/words.js';
+import { t, said, sayOf } from '../i18n/words.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -198,7 +198,7 @@ export function moveHintsOf(sheet) {
   const src = sourceOf(seed, valueOf(sheet.fields, 'from'));
   const k = valueOf(sheet.fields, 'kind');
   const away = src && k !== 'transfer' && k !== 'swap' && k !== 'bridge' ? records(src.notServed).map(x => str(x.name)).filter(Boolean) : [];
-  return [cap, away.length ? t('money.notServed', { venues: away.join(', ') }) : ''].filter(Boolean);
+  return [cap, away.length ? t('money.notServed', { venues: away.join(t('common.list.sep')) }) : ''].filter(Boolean);
 }
 
 // ── a bridge's routes (money.js:91, :105-118) ──
@@ -233,9 +233,10 @@ export function routesWordsOf(sheet, routes) {
   const list = records(routes.data?.routes);
   const best = list[0];
   if (!best) return { lead: t('sheet.routes.none'), others: '' };
-  const lead = [t('sheet.routes.via', { tool: str(best.tool) }), t('sheet.routes.arrives', { usd: dollars(best.receiveUsd), asset: str(a.toAsset) }), eta(best.etaSec),
+  const lead = [t('sheet.routes.via', { tool: str(best.tool) }), // words-order: the chosen route's facts under the visual separator
+    t('sheet.routes.arrives', { usd: dollars(best.receiveUsd), asset: str(a.toAsset) }), eta(best.etaSec),
     ...(num(best.gasUsd) ? [t('sheet.routes.gas', { usd: fine(best.gasUsd) })] : [])].join(' · ');
-  const others = list.length > 1 ? t('sheet.routes.others', { routes: list.slice(1).map(x => t('sheet.routes.other', { tool: str(x.tool), fee: fine(x.feeUsd), eta: eta(x.etaSec) })).join('; ') }) : '';
+  const others = list.length > 1 ? t('sheet.routes.others', { routes: list.slice(1).map(x => t('sheet.routes.other', { tool: str(x.tool), fee: fine(x.feeUsd), eta: eta(x.etaSec) })).join(t('common.list.semi')) }) : '';
   return { lead, others, chosen: true };
 }
 
@@ -367,8 +368,9 @@ export function earnSaidOf(body) {
   const e = body?.result?.earn;
   if (!isRecord(e)) return '';
   const status = str(e.status);
-  const words = { amount: e.all ? t('sheet.earn.saidAll') : qty(Number(e.amount)), asset: str(e.asset), product: str(e.productName), status: status === 'done' ? t('sheet.earn.saidDone') : status };
-  return `${e.kind === 'withdraw' ? t('sheet.earn.saidOut', words) : t('sheet.earn.saidIn', words)}${str(e.note) ? ` · ${e.note}` : ''}`;
+  const words = { amount: e.all ? said('sheet.earn.saidAll') : qty(Number(e.amount)), asset: str(e.asset), product: str(e.productName), status: status === 'done' ? said('sheet.earn.saidDone') : status };
+  const line = e.kind === 'withdraw' ? said('sheet.earn.saidOut', words) : said('sheet.earn.saidIn', words);
+  return str(e.note) ? said('sheet.earn.saidNote', { line, note: e.note }) : line;
 }
 
 // ── An agent wallet (plan 4b Task 5; the retired page at 9614314c, ui/portfolio.js pfWalletForm, :1263-1279, and money.js

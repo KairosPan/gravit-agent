@@ -96,11 +96,25 @@ test('refusalOf: Prepare again for a requote or an expiry, the standing for a ba
 
 test('saidOf: an order by its id and its status, the Account\'s summary, Done for a result', () => {
   const order = status => ({ ok: true, kind: 'order', order: { id: 'ord-0011', status } });
-  assert.equal(saidOf(order('open')), 'ord-0011 · open on the book');
-  assert.equal(saidOf(order('filled')), 'ord-0011 · filled');
-  assert.equal(saidOf(order('canceled')), 'ord-0011 · canceled');
-  assert.equal(saidOf(order('pending')), 'ord-0011 · pending');
+  assert.equal(spoken(saidOf(order('open'))), 'ord-0011 · open on the book');
+  assert.equal(spoken(saidOf(order('filled'))), 'ord-0011 · filled');
+  assert.equal(spoken(saidOf(order('canceled'))), 'ord-0011 · canceled');
+  assert.equal(spoken(saidOf(order('pending'))), 'ord-0011 · pending');
   assert.equal(saidOf({ ok: true, kind: 'account', summary: 'agent key "Claude Code" authorised until 2026-11-21' }), 'agent key "Claude Code" authorised until 2026-11-21');
   assert.equal(spoken(saidOf({ ok: true, kind: 'result', result: { ok: true } })), 'Done');
   assert.equal(saidOf(null), '');
+});
+
+test("what a taken action said is in the table's order — an order's id and status, a sign-out's Guard after its words — read when drawn", async () => {
+  const { withTable, sayOf, said } = await import('../../client/js/i18n/words.js');
+  const { guardFirstDone, guardFirstRefused } = await import('../../client/js/host/sheet-view.js');
+  const line = saidOf({ ok: true, kind: 'order', order: { id: 'ord-1', status: 'open' } });
+  assert.equal(withTable({ 'owner.order.said': '{status}: {id}', 'owner.order.open': 'on the book' }, () => sayOf(line)), 'on the book: ord-1');
+  const done = guardFirstDone(line);
+  assert.equal(sayOf(done), 'ord-1 · open on the book. Guard is on.');
+  assert.equal(withTable({ 'sheet.guard.done': 'Guard is on: {said}{stop}', 'sheet.guard.stop': '!', 'owner.order.said': '{status} {id}' }, () => sayOf(done)), 'Guard is on: open on the book ord-1!',
+    'the words inside follow the table too');
+  assert.equal(sayOf(guardFirstDone('Signed out.')), 'Signed out. Guard is on.', 'a sentence ended needs no stop');
+  assert.equal(withTable({ 'sheet.guard.refused': '{words}{stop} — not signed out', 'sheet.guard.noAnswer': 'no answer' }, () => sayOf(guardFirstRefused(''))), 'no answer. — not signed out');
+  assert.equal(sayOf(guardFirstRefused(said('sheet.guard.noAnswer'))), 'Not signed out: the account did not answer. Guard is on.');
 });

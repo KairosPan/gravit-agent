@@ -450,11 +450,11 @@ test('a closed ticket\'s quiet re-prepare still in the air never blocks the next
 test('a fill frame is said in its words; a fill with no words says nothing', () => {
   const r = rig();
   r.trade.onStreamEvent({ type: 'fill', data: { venue: 'ex', venueName: 'Stand-in Exchange', side: 'buy', qty: 0.04, symbol: 'ETH/USDT', price: 3120.5 } });
-  assert.equal(r.t().said, 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange');
+  assert.equal(spoken(r.t().said), 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange');
   r.trade.onStreamEvent({ type: 'fill', data: { side: 'sideways' } });
-  assert.equal(r.t().said, 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange', 'no words: nothing said over it');
+  assert.equal(spoken(r.t().said), 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange', 'no words: nothing said over it');
   r.trade.onStreamEvent({ type: 'order', data: { side: 'sell', qty: 1, symbol: 'X' } });
-  assert.equal(r.t().said, 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange', 'an order frame is not a fill');
+  assert.equal(spoken(r.t().said), 'Bought 0.04 ETH @ 3,120.50 · Stand-in Exchange', 'an order frame is not a fill');
 });
 
 test('cancel acts once through the owner device and says the answer; a refusal says the Account\'s sentence', async () => {
@@ -467,7 +467,7 @@ test('cancel acts once through the owner device and says the answer; a refusal s
   const taken = { ok: true, kind: 'order', order: { id: 'ord-0010', status: 'canceled' } };
   held.resolve({ status: 200, body: taken });
   await first;
-  assert.equal(r.t().said, 'ord-0010 · canceled');
+  assert.equal(spoken(r.t().said), 'ord-0010 · canceled');
   assert.deepEqual(r.after, [['cancel', taken]]);
 
   answer = () => ({ status: 409, body: { ok: false, refusal: { code: 'E_ACCOUNT_BAD_ACTION', message: 'That order is already filled' } } });

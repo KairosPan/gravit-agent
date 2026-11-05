@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { newSheet, sheetOf, stocksOf, titleOf, messageOf } from '../../client/js/host/run-sheet-view.js';
 import { modulesListing, MARKET_RUN, S01_RUN } from './helpers/inventory.js';
+import { withTable } from '../../client/js/i18n/words.js';
 
 const l = modulesListing();
 // a local 14:00 on 2026-10-28, so the browser's date is 10-28 in any zone
@@ -334,4 +335,18 @@ test('newSheet: a channel named takes the picks for that channel; a market card 
   assert.equal(newSheet(l, 'counterevidence', 'cn-market').run, MARKET_RUN);
   assert.equal(newSheet(l, 'theme', 'lunhui-s01-repair').where, 'cn-market', 'Where is fixed on a market card');
   assert.deepEqual(newSheet(l, 'mode', undefined), newSheet(l, 'mode'));
+});
+
+test("the Run sheet's lines are in the table's order: a review's warning after its line, what a run writes", () => {
+  const x = modulesListing();
+  delete runOf(x, 'cn-market').artifacts.counterevidence;
+  delete runOf(x, 'cn-market').artifacts.theme;
+  const z = modulesListing();
+  delete runOf(z, 'lunhui-s01-repair').artifacts.counterevidence;
+  withTable({ 'runSheet.warned': '{warning} ! {line}', 'runSheet.writes': '{title} ← {file}' }, () => {
+    const v = sheetOf(x, { ...newSheet(x, 'counterevidence'), where: 'cn-market', on: 'latest', run: MARKET_RUN }, fixed);
+    assert.equal(v.on.options[0].detail, 'Theme not run on this run ! reviews: environment · sentiment');
+    assert.match(sheetOf(z, newSheet(z, 'counterevidence'), fixed).on.options[0].detail, /^warning: mode already registered on this run — this review would go unanswered ! reviews: /);
+    assert.equal(sheetOf(l, newSheet(l, 'theme'), fixed).writes, '"Theme · 10-28" ← theme.json');
+  });
 });
