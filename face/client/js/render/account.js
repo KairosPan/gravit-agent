@@ -38,6 +38,7 @@ import { renderDeviceLine, renderDevices } from './owner.js';
 import { renderIdentityTab } from './identity.js';
 import { HOST_NAME } from '../wire/speaker.js';
 import { t, th, tn } from '../i18n/words.js';
+import { SIZES, sizeOf } from '../prefs.js';
 
 // the seven tabs, each its id and its word
 const tabsOf = () => [['portfolio', t('account.tab.portfolio')], ['money', t('account.tab.money')], ['venues', t('account.tab.venues')], ['agents', t('account.tab.agents')],
@@ -646,8 +647,25 @@ export function renderSettings(state) {
   // the Theme seg: each value a theme's key (app.js setTheme stores it as it is), each label the table's word for it
   const theme = state.theme === 'cream' || state.theme === 'black' ? state.theme : 'system';
   const themes = [[t('settings.theme.cream'), 'cream'], [t('settings.theme.black'), 'black'], [t('settings.theme.system'), 'system']];
+  // the sizes and fonts (js/prefs.js): Text size under Theme, the two families and Code size in a fold the page keeps open
+  // by its id
+  const font = (name, label, placeholder) => `<label class="field"><span class="field-label">${esc(label)}</span><input${attrs({ id: `pref-${name}`, class: 'input', type: 'text',
+    value: state[name] ?? '', placeholder, autocomplete: 'off', spellcheck: 'false', 'data-action': 'setFont', 'data-pref': name })}></label>`;
   return `<aside class="drawer" aria-label="${th('settings.title')}"><div class="drawer-head"><h2>${th('settings.title')}</h2><button type="button" class="close-key" data-action="closeSettings" aria-label="${th('common.close')}">×</button></div><div class="drawer-body">` +
-    `<div class="dsec"><div class="dsec-label">${th('settings.theme')}</div>${seg(themes, theme, 'setTheme')}</div>${renderDevices(state)}</div></aside>`;
+    `<div class="dsec"><div class="dsec-label">${th('settings.theme')}</div>${seg(themes, theme, 'setTheme')}</div>` +
+    `<div class="dsec"><div class="dsec-label">${th('settings.textSize')}</div>${stepper('textSize', state.textSize, t('settings.textSize'), t('settings.textSize.less'), t('settings.textSize.more'))}</div>` +
+    `<div class="dsec"><details id="more-fonts" class="fold"><summary>${th('settings.moreFonts')}</summary><div class="fold-body">` +
+    `${font('textFont', t('settings.textFont'), t('settings.textFont.default'))}${font('codeFont', t('settings.codeFont'), t('settings.codeFont.default'))}` +
+    `<div class="field"><span class="field-label">${th('settings.codeSize')}</span>${stepper('codeSize', state.codeSize, t('settings.codeSize'), t('settings.codeSize.less'), t('settings.codeSize.more'))}</div>` +
+    `</div></details></div>${renderDevices(state)}</div></aside>`;
+}
+
+// a size's − and + about its readout; a key at its range's end is disabled
+function stepper(name, value, label, less, more) {
+  const { min, max } = SIZES[name];
+  const size = sizeOf(name, value);
+  const key = (step, words, glyph, off) => `<button type="button"${attrs({ class: 'key', 'data-action': 'stepPref', 'data-pref': name, 'data-step': step, 'aria-label': words, disabled: off })}>${glyph}</button>`;
+  return `<div class="stepper" role="group"${attrs({ 'aria-label': label })}>${key('-1', less, '−', size <= min)}<output id="pref-${name}" class="stepper-out">${th('settings.px', { size })}</output>${key('1', more, '+', size >= max)}</div>`;
 }
 
 // the screen: the head, the Account's sentence when it refused, the tabs, the tab, and its drawer; app.js adds the Settings

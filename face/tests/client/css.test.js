@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { renderRail } from '../../client/js/render/rail.js';
 import { renderRunSheet } from '../../client/js/render/run-sheet.js';
+import { renderSettings } from '../../client/js/render/account.js';
 import { setMarkdown } from '../../client/js/render/thread.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
@@ -49,6 +50,16 @@ test("the Research shelf's cards: a column, the meta and the foot, the chip tone
   assert.match(css, /\.chip\.ok\s*\{\s*background: var\(--up-fill\); color: var\(--up\)/);
   assert.match(css, /\.chip\.warn\s*\{\s*background: var\(--warn-fill\); color: var\(--warn-text\)/);
   assert.match(css, /\.pcard\.dim\s*\{\s*opacity: \.55/);
+});
+
+test("Settings' sizes and fonts: the steppers, their readout, the fold and its fields", () => {
+  const html = [R.openSettings(emptyState()), R.setPref(R.setPref(R.openSettings(emptyState()), { name: 'textSize', value: 20 }), { name: 'codeSize', value: 10 })].map(st => renderSettings(st)).join('');
+  for (const c of ['stepper', 'stepper-out', 'fold', 'fold-body', 'key', 'field', 'field-label', 'input']) assert.match(html, new RegExp(`class="[^"]*\\b${c}\\b`), c);
+  assert.match(css, /\.stepper\s*\{[^}]*display: inline-flex[^}]*align-items: center/);
+  assert.match(css, /\.stepper-out\s*\{[^}]*font-variant-numeric: tabular-nums/);
+  assert.match(css, /\.stepper \.key:disabled\s*\{[^}]*opacity/);
+  assert.match(css, /\.fold > summary\s*\{[^}]*cursor: pointer/);
+  assert.match(css, /\.fold-body\s*\{[^}]*display: flex[^}]*flex-direction: column/);
 });
 
 test("a module card's Run sheet: the drawer, the On options open and greyed", () => {

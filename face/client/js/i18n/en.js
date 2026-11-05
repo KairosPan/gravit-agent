@@ -699,6 +699,18 @@ export const EN = Object.freeze({
   'settings.theme.cream': 'Cream',
   'settings.theme.black': 'Black',
   'settings.theme.system': 'System',
+  'settings.textSize': 'Text size',
+  'settings.textSize.less': 'Smaller text',
+  'settings.textSize.more': 'Larger text',
+  'settings.px': '{size} px',
+  'settings.moreFonts': 'More font settings',
+  'settings.textFont': 'Text font',
+  'settings.textFont.default': 'Default: Manrope, Noto Sans SC',
+  'settings.codeFont': 'Code font',
+  'settings.codeFont.default': 'Default: IBM Plex Mono',
+  'settings.codeSize': 'Code size',
+  'settings.codeSize.less': 'Smaller code',
+  'settings.codeSize.more': 'Larger code',
 
   // the owner device (host/owner.js, host/owner-view.js, reducers/owner.js): the standing's line, the countdown, a refusal,
   // what a taken action said

@@ -379,7 +379,11 @@ function laterStates() {
   ];
   const marketsOn = R.exploreLoaded(R.nav(emptyState(), { screen: 'markets', id: null }), { tab: 'all', data: fx('explore-all'), at: NOW });
   const watch = ['read', 'unsaved'].map(error => R.watchlistLoaded(marketsOn, { items: [], error }));
-  return [...money, ...rules, ...sheets, prepared, ...markets, ...watch];
+  // Settings' sizes and fonts (plan 6 Task 13): both sizes at their tops, both at their bottoms, a family in each box
+  const prefs = (s, kv) => Object.entries(kv).reduce((acc, [name, value]) => R.setPref(acc, { name, value }), s);
+  const settings = R.openSettings(read);
+  const sized = [prefs(settings, { textSize: 20, codeSize: 16 }), prefs(settings, { textSize: 12, codeSize: 10 }), prefs(settings, { textFont: 'Inter', codeFont: 'JetBrains Mono' })];
+  return [...money, ...rules, ...sheets, prepared, ...markets, ...watch, ...sized];
 }
 // the composer's states (plan 3 of the dsh UI port, Task 3): a / menu with headings and with a query, an @ menu with every kind,
 // a folder walk with its crumb, in a conversation's composer; a draft with each chip kind in the editor; the operator's words

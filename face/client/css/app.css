@@ -561,6 +561,12 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .dsec-title { font-size: calc(15px * var(--fs)); font-weight: 700; }
 .dsec-line { font-size: calc(14px * var(--fs)); line-height: 1.4; }
 .dsec > .btn-danger, .dsec > .confirm { align-self: flex-start; }
+/* Settings' sizes and fonts: a size's − and + about its readout; the fonts' fold, its fields in a column */
+.stepper { display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; }
+.stepper .key:disabled { opacity: .4; cursor: default; }
+.stepper-out { min-width: 48px; text-align: center; font-size: calc(14px * var(--fs)); font-weight: 600; font-variant-numeric: tabular-nums; }
+.fold > summary { color: var(--dim); cursor: pointer; font-size: calc(12px * var(--fs)); font-weight: 600; }
+.fold-body { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; }
 .kv-list { display: flex; flex-direction: column; }
 .kv { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: calc(14px * var(--fs)); }
 .kv:last-child { border-bottom: 0; }

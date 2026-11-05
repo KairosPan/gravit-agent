@@ -514,6 +514,73 @@ test('the theme comes from the prefs before the host answers, and a change is wr
   store.timers.clear();
 });
 
+// the sizes and fonts (plan 6 Task 13): the page's root style recorded, the prefs a memory
+const prefsPage = (m = new Map()) => {
+  const storage = { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: k => m.delete(k) };
+  const f = fakeWindow({ hash: '', storage });
+  const props = new Map();
+  f.doc.documentElement.style = { setProperty: (k, v) => props.set(k, v), removeProperty: k => { props.delete(k); } };
+  return { f, m, props, store: started(f, host()) };
+};
+const stepKey = (pref, step) => ({ tagName: 'BUTTON', dataset: { action: 'stepPref', pref, step } });
+
+test('+ on Text size reads 16 px, sets --fs and survives a reload', () => {
+  const { f, m, props, store } = prefsPage();
+  store.dispatch('openSettings');
+  assert.match(f.html(), /<output id="pref-textSize" class="stepper-out">15 px<\/output>/);
+  assert.equal(props.has('--fs'), false, 'nothing set at the default');
+  f.click(stepKey('textSize', '1'));
+  assert.match(f.html(), /<output id="pref-textSize" class="stepper-out">16 px<\/output>/);
+  assert.equal(props.get('--fs'), String(16 / 15));
+  assert.equal(JSON.parse(m.get('gravit-ui.prefs')).textSize, 16);
+  store.timers.clear();
+  const again = prefsPage(m);
+  assert.equal(again.store.get().textSize, 16, 'a new boot reads it');
+  assert.equal(again.props.get('--fs'), String(16 / 15), 'and applies it on boot');
+  again.store.timers.clear();
+});
+
+test('− stops at 12 and its key is disabled', () => {
+  const { f, props, store } = prefsPage();
+  store.dispatch('openSettings');
+  for (let i = 0; i < 6; i++) f.click(stepKey('textSize', '-1'));
+  assert.equal(store.get().textSize, 12);
+  assert.equal(props.get('--fs'), String(12 / 15));
+  assert.match(f.html(), /<button type="button" class="key" data-action="stepPref" data-pref="textSize" data-step="-1" aria-label="Smaller text" disabled>/);
+  assert.match(f.html(), /data-pref="textSize" data-step="1" aria-label="Larger text">/, 'its other key stays live');
+  for (let i = 0; i < 9; i++) f.click(stepKey('codeSize', '1'));
+  assert.equal(store.get().codeSize, 16);
+  assert.match(f.html(), /data-pref="codeSize" data-step="1" aria-label="Larger code" disabled>/);
+  store.timers.clear();
+});
+
+test('a typed code font is applied on change and cleared by an empty field', () => {
+  const { f, m, props, store } = prefsPage();
+  store.dispatch('openSettings');
+  const box = { tagName: 'INPUT', type: 'text', id: 'pref-codeFont', value: 'JetBrains Mono', dataset: { action: 'setFont', pref: 'codeFont' } };
+  f.fire('root', 'change', { target: box });
+  assert.equal(props.get('--font-mono'), '"JetBrains Mono", var(--font-mono-base)');
+  assert.equal(JSON.parse(m.get('gravit-ui.prefs')).codeFont, 'JetBrains Mono');
+  assert.match(f.html(), /id="pref-codeFont"[^>]*value="JetBrains Mono"/);
+  f.fire('root', 'change', { target: { ...box, value: 'Inter"; } body { display:none' } });
+  assert.equal(props.get('--font-mono'), '"Inter body display none", var(--font-mono-base)', 'a hostile family lands cleaned');
+  f.fire('root', 'change', { target: { ...box, value: '' } });
+  assert.equal(props.has('--font-mono'), false);
+  assert.equal(JSON.parse(m.get('gravit-ui.prefs')).codeFont, '');
+  store.timers.clear();
+});
+
+test('the fold stays open across a render', () => {
+  const { f, store } = prefsPage();
+  store.dispatch('openSettings');
+  assert.match(f.html(), /<details id="more-fonts" class="fold"><summary>More font settings<\/summary>/);
+  f.withSelector('details[id][open]', { tagName: 'DETAILS', id: 'more-fonts', open: true });
+  const again = f.withId('more-fonts', { tagName: 'DETAILS', open: false });
+  f.click(stepKey('codeSize', '1'));
+  assert.equal(again.open, true, 'the render opens it again by its id');
+  store.timers.clear();
+});
+
 // Markets through host: every market read is the Account's, through the host's getJson — there is no wire of the face's to fake
 // (a test's own fakes, `more`, beside); the browser's storage a memory
 const fakeMarkets = () => ({});

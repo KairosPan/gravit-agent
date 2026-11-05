@@ -3,6 +3,7 @@
 import { createStore } from './store.js';
 import { reducers } from './reducers/index.js';
 import { emptyState } from './data/empty.js';
+import { sizeOf, cleanFont, applyPrefs } from './prefs.js';
 import { parseHash, toHash } from './router.js';
 import { renderRail } from './render/rail.js';
 import { renderMessagesScreen, currentConversation } from './render/messages.js';
@@ -133,7 +134,7 @@ export class Timers {
   }
 }
 
-// per-viewer conveniences only: the theme, the rail's fold, the last conversation, what was seen (the watchlist keeps
+// per-viewer conveniences only: the theme, the sizes and fonts, the rail's fold, the last conversation, what was seen (the watchlist keeps
 // its own key, host/markets.js)
 export function readPrefs(storage) {
   try {
@@ -144,13 +145,17 @@ export function readPrefs(storage) {
     return {};
   }
 }
-export const prefsOf = s => ({ theme: s.theme, railCollapsed: s.railCollapsed, lastConv: s.lastConv, lastSeen: s.lastSeen, collapsed: s.collapsed });
+export const prefsOf = s => ({ theme: s.theme, textSize: s.textSize, codeSize: s.codeSize, textFont: s.textFont, codeFont: s.codeFont, railCollapsed: s.railCollapsed, lastConv: s.lastConv, lastSeen: s.lastSeen, collapsed: s.collapsed });
 export function initialState(storage, now = Date.now()) {
   const p = readPrefs(storage);
   const s = emptyState(now);
   return {
     ...s,
     theme: THEMES.includes(p.theme) ? p.theme : s.theme,
+    textSize: sizeOf('textSize', p.textSize),
+    codeSize: sizeOf('codeSize', p.codeSize),
+    textFont: cleanFont(p.textFont),
+    codeFont: cleanFont(p.codeFont),
     railCollapsed: p.railCollapsed === true,
     lastConv: typeof p.lastConv === 'string' ? p.lastConv : null,
     lastSeen: p.lastSeen && typeof p.lastSeen === 'object' && !Array.isArray(p.lastSeen) ? p.lastSeen : {},
@@ -1744,6 +1749,17 @@ export function boot(win, host = {}) {
     openSettings: () => store.dispatch('openSettings'),
     closeSettings: () => store.dispatch('closeSettings'),
     setTheme: el => { const theme = el.dataset.value; store.dispatch('setTheme', theme); applyTheme(theme); },
+    // a size's − or + (the reducer keeps it in range), and a font committed on change: the box shows the family as kept
+    stepPref: el => {
+      const name = el.dataset.pref;
+      store.dispatch('setPref', { name, value: store.get()[name] + Number(el.dataset.step) });
+      applyPrefs(doc.documentElement, store.get());
+    },
+    setFont: el => {
+      el.value = cleanFont(el.value);
+      store.dispatch('setPref', { name: el.dataset.pref, value: el.value });
+      applyPrefs(doc.documentElement, store.get());
+    },
     // Account: Refresh (and Retry) — the page and the seat past the face's cache, the holdings —, the curve's range, a venue's
     // Details, the Statement (its lines read on opening it), its CSV
     refreshAccount: () => {
@@ -2010,6 +2026,7 @@ export function boot(win, host = {}) {
     if (el.type === 'checkbox' && el.name === 'roster') store.dispatch('toggleRosterTick', { value: el.value, on: el.checked === true });
     if (isField(el) && !typesWords(el)) changeField(el.name, fieldValueOf(el));
     if (el.dataset?.action === 'runSheetField' && !typesWords(el)) act.runSheetField(el);
+    if (el.dataset?.action === 'setFont') act.setFont(el);
     if (el.type === 'checkbox' && el.dataset?.action === 'sellManyPick') sellMany.toggle(el.value);
     // the files picked, then the input emptied, so the same file can be picked again
     if (el.id === 'attach-input') { const files = Array.from(el.files ?? []); el.value = ''; addFiles(files); }
@@ -2231,6 +2248,7 @@ export function boot(win, host = {}) {
   // a module's Run reads Running while its conversation runs, and settles on the listing when it stops
   modules.trackRuns();
   applyTheme(store.get().theme);
+  applyPrefs(doc.documentElement, store.get());
   if (!win.location.hash) win.history.replaceState(null, '', toHash(store.get().route));
   if (!doc.hidden) { stream.open(); marketStream.open(); }
   follow();

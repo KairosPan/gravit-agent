@@ -6,6 +6,11 @@ import { t } from '../i18n/words.js';
 export function emptyState() {
   return {
     theme: 'system',
+    // the text and code sizes in px and the two font families ('' the default), js/prefs.js
+    textSize: 15,
+    codeSize: 12,
+    textFont: '',
+    codeFont: '',
     route: { screen: 'messages', id: null },
     lastConv: null,
     railCollapsed: false,

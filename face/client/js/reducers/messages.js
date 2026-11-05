@@ -3,6 +3,7 @@
 import { canonicalId, isAccountKey } from '../host/market-view.js';
 import { firstOpen } from '../host/sessions.js';
 import { ARCHIVED_KEY } from '../wire/grouping.js';
+import { sizeOf, cleanFont } from '../prefs.js';
 
 // one drawer at a time: an opener first closes whatever else was open, with any editor or confirm in it
 // the stock drawer closed, on a state that has the composed answers' slice
@@ -58,6 +59,12 @@ export const reducers = {
     return { ...s, collapsed: { ...(s.collapsed ?? {}), [key]: !was } };
   },
   setTheme: (s, theme) => ({ ...s, theme }),
+  // a size or a font from Settings, kept in range or cleaned to a family name (js/prefs.js); any other name is not a pref
+  setPref(s, { name, value } = {}) {
+    if (name === 'textSize' || name === 'codeSize') return { ...s, [name]: sizeOf(name, value) };
+    if (name === 'textFont' || name === 'codeFont') return { ...s, [name]: cleanFont(value) };
+    return s;
+  },
 
   // the new-message screen: a title and where the session goes (a channel — the one New round names, else the
   // default), then the first words send it
