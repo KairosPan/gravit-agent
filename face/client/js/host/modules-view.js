@@ -274,7 +274,7 @@ export function pageOf(listing, module, mounted, actives = {}) {
     module: m, chip: chipOf(listing, module, mounted, active), running: Boolean(active), latest: latestOf(listing, module), rows: runsOf(listing, module),
     kv: {
       reads: [[t('modules.box.freezes'), m.freezes], [t('modules.box.artifacts'), m.artifacts], [t('modules.box.channel'), m.channelWords]],
-      writes: [[t('modules.box.file'), m.file], [t('modules.box.headline'), m.headline.join(' · ')], [t('modules.box.under'), `strategies/${DIR_CHANNEL[m.channels]}/analysis/<run>/`]],
+      writes: [[t('modules.box.file'), m.file], [t('modules.box.headline'), m.headline.join(' · ')], [t('modules.box.under'), `strategies/${DIR_CHANNEL[m.channels]}/analysis/<run>/`]], // en-kept: a path
       runsOn: [[t('modules.box.role'), m.role], [t('modules.box.route'), m.route], [t('modules.box.budget'), t('modules.budget')]],
     },
   };

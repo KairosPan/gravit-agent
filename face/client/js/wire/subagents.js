@@ -12,6 +12,8 @@
  * `subagent/not-found`, `subagent/unauthorized`; NEW
  * packages/api/session-controller/src/history.ts:341-390). */
 
+import { t } from "../i18n/words.js";
+
 /** @param {unknown} value */
 const object = (value) => value !== null && typeof value === "object";
 /** @param {unknown} value */
@@ -24,9 +26,9 @@ export const isSubagentRow = (summary) => summary?.origin === "subagent";
  * @param {unknown} value
  * @returns {{entries: any[], parentAvailable: boolean}} */
 export function normalizeSubagentCatalog(value) {
-  if (!object(value)) throw new Error("The subagent catalog is unavailable: the host returned an invalid record.");
+  if (!object(value)) throw new Error("The subagent catalog is unavailable: the host returned an invalid record."); // en-kept: an error children-view drops, never on screen
   const body = /** @type {any} */ (value);
-  if (!Array.isArray(body.entries) || typeof body.parentAvailable !== "boolean") throw new Error("The subagent catalog is unavailable: the host returned an invalid record.");
+  if (!Array.isArray(body.entries) || typeof body.parentAvailable !== "boolean") throw new Error("The subagent catalog is unavailable: the host returned an invalid record."); // en-kept: an error children-view drops, never on screen
   const seen = new Set();
   const entries = [];
   for (const row of Array.isArray(body.entries) ? body.entries : []) {
@@ -35,7 +37,7 @@ export function normalizeSubagentCatalog(value) {
     if (row.kind === "diagnostic") {
       entries.push({ kind: "diagnostic", id: row.id, reason: ["corrupt", "unsupported", "unavailable"].includes(row.reason) ? row.reason : "unavailable" });
     } else if (row.kind === "child" && (row.mode === "one-shot" || (row.mode === "continuable" && word(row.label)))) {
-      entries.push({ kind: "child", id: row.id, mode: row.mode, label: word(row.label) ? row.label : "Subagent", activity: ["running", "inactive"].includes(row.activity) ? row.activity : "unknown", hasChildren: row.hasChildren === true });
+      entries.push({ kind: "child", id: row.id, mode: row.mode, label: word(row.label) ? row.label : t("details.subagent"), activity: ["running", "inactive"].includes(row.activity) ? row.activity : "unknown", hasChildren: row.hasChildren === true });
     } else {
       entries.push({ kind: "diagnostic", id: row.id, reason: "unsupported" });
     }
@@ -71,7 +73,7 @@ export function normalizeSubagentCatalog(value) {
  *   projection is "unavailable", never an empty successful listing.
  */
 export function composeSubagentCatalog({ catalog, parentSummary, rows }) {
-  if (catalog !== undefined && !Array.isArray(catalog)) throw new Error("The subagent catalog is unavailable: the host returned an invalid record.");
+  if (catalog !== undefined && !Array.isArray(catalog)) throw new Error("The subagent catalog is unavailable: the host returned an invalid record."); // en-kept: an error children-view drops, never on screen
   const listed = (Array.isArray(rows) ? rows : []).filter(object);
   const byId = new Map(listed.map((row) => [String(row.sessionId), row]));
   const entries = [];

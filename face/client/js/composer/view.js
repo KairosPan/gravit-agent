@@ -44,8 +44,8 @@ function rowParts(it) {
 }
 
 // the keys' names stay as written (§5.10); the words beside them are the table's
-const ENTER = 'Enter';
-const ESC = 'Esc';
+const ENTER = 'Enter'; // en-kept: the key's name
+const ESC = 'Esc'; // en-kept: the key's name
 const foot = () => `<div class="cmenu-foot"><kbd>↑↓</kbd> ${th('composer.menu.move')} · <kbd>${ENTER}</kbd> ${th('composer.menu.choose')} · <kbd>${ESC}</kbd> ${th('common.close')}</div>`;
 
 /** The menu: '' for none or for one with no rows. */

@@ -389,7 +389,7 @@ export function boot(win, host = {}) {
     if (!sameConnect(seed)) return;
     connectWallets = (Array.isArray(found) ? found : []).filter(w => w && typeof w.id === 'string' && w.provider);
     store.dispatch('connectWallet', connectWallets.length
-      ? { status: 'found', wallets: connectWallets.map(w => ({ id: w.id, name: typeof w.name === 'string' && w.name ? w.name : 'Browser wallet' })) }
+      ? { status: 'found', wallets: connectWallets.map(w => ({ id: w.id, name: typeof w.name === 'string' && w.name ? w.name : t('money.wallet.browser') })) }
       : { status: 'none', wallets: [] });
   }
   // a proof that settled after its option was left, on the same sheet: nothing landed, the prompt is closed
@@ -404,7 +404,7 @@ export function boot(win, host = {}) {
     if (s?.kind !== 'connect' || !w || store.get().account.connectWallet.status === 'asking') return;
     const seed = s.seed;
     const connector = connectOptionOf(s)?.connector;
-    const name = typeof w.name === 'string' && w.name ? w.name : 'Browser wallet';
+    const name = typeof w.name === 'string' && w.name ? w.name : t('money.wallet.browser');
     store.dispatch('connectWallet', { status: 'asking', wallet: name, address: '', message: null });
     try {
       const proven = await proveWallet({ ...w, name }, ownerPost);
@@ -416,7 +416,7 @@ export function boot(win, host = {}) {
       store.dispatch('connectWallet', { status: 'proven', address: proven.address });
     } catch (err) {
       if (!sameConnect(seed, connector)) { settledElsewhere(seed); return; }
-      store.dispatch('connectWallet', { status: 'refused', message: String(err?.message || err || 'the wallet refused').slice(0, 200) });
+      store.dispatch('connectWallet', { status: 'refused', message: String(err?.message || err || t('money.wallet.refused')).slice(0, 200) });
     }
   }
   // a wallet flight's words said under Trade and the Account read again once it settles — a rejected one too (host/wallet-send.js
@@ -435,7 +435,7 @@ export function boot(win, host = {}) {
     beforeSign: async () => {
       let r;
       try { r = await account.guard(); } catch { r = null; }
-      return r?.taken === true ? null : `Not signed out: Guard was refused — ${r?.message || 'no answer'}`;
+      return r?.taken === true ? null : t('sheet.signOut.refused', { why: r?.message || t('sheet.noAnswer') });
     },
   });
   // Sell many (plan 4b Task 3): up to ten holdings at market, each prepared and signed in turn over the owner device; a DEX
@@ -1226,7 +1226,7 @@ export function boot(win, host = {}) {
       // the read failed: said, under the asks
       if (!g && store.get().account.venuesHere.data === null) {
         const why = store.get().account.venuesHere.message;
-        store.dispatch('grantSaid', `Not opened: where this account can connect was not read${typeof why === 'string' && why ? ` — ${why}` : ''}. Try Grant again.`);
+        store.dispatch('grantSaid', typeof why === 'string' && why ? t('venues.grant.unreadWhy', { why }) : t('venues.grant.unread'));
         return;
       }
     }
@@ -1463,7 +1463,7 @@ export function boot(win, host = {}) {
     menuTick();
   }
   const atEnd = say => { const n = lengthOf(editor.read(say)); return [n, n]; };
-  const hasFiles = dt => Array.from(dt?.types ?? []).includes('Files');
+  const hasFiles = dt => Array.from(dt?.types ?? []).includes('Files'); // en-kept: the drag's type, matched
   // an image dragged out of the thread carries its src as text: a data: or blob: URL is never words for the draft
   const isDataUrl = words => /^\s*(data|blob):/i.test(words);
   function stopDropping() {
@@ -1743,7 +1743,7 @@ export function boot(win, host = {}) {
     },
     openSettings: () => store.dispatch('openSettings'),
     closeSettings: () => store.dispatch('closeSettings'),
-    setTheme: el => { const theme = el.dataset.value.toLowerCase(); store.dispatch('setTheme', theme); applyTheme(theme); },
+    setTheme: el => { const theme = el.dataset.value; store.dispatch('setTheme', theme); applyTheme(theme); },
     // Account: Refresh (and Retry) — the page and the seat past the face's cache, the holdings —, the curve's range, a venue's
     // Details, the Statement (its lines read on opening it), its CSV
     refreshAccount: () => {
@@ -1820,7 +1820,7 @@ export function boot(win, host = {}) {
       if (!asset) return;
       store.dispatch('startDraft', { now: now() });
       go({ screen: 'messages', id: 'new' });
-      putWords(`Look at ${asset.symbol}${asset.name && asset.name !== asset.symbol ? ` (${asset.name})` : ''}`);
+      putWords(asset.name && asset.name !== asset.symbol ? t('markets.lookAt.named', { symbol: asset.symbol, name: asset.name }) : t('markets.lookAt.symbol', { symbol: asset.symbol }));
     },
     // the owner device: the pair box's code, Sign in, and — on a page that signs — Settings › Devices' Sign out and Let it sign
     pairDevice: () => { void owner.ready(doc.getElementById('pair-code')?.value?.trim() || undefined); },

@@ -73,7 +73,7 @@ test('the head: Guard and Trading on chips; Refresh and Settings; seven tabs wit
   assert.match(draw(set), /^<main class="main acct with-drawer">/);
   const drawer = renderSettings({ ...set, theme: 'black' });
   assert.match(drawer, /<aside class="drawer" aria-label="Settings">/);
-  assert.match(drawer, /class="seg-item pressed" aria-pressed="true" data-action="setTheme" data-value="Black"/);
+  assert.match(drawer, /class="seg-item pressed" aria-pressed="true" data-action="setTheme" data-value="black"/);
 });
 
 test('Portfolio on the stand-in: Paper leads with its label; the change line; the curve; assets and positions rows; open orders with who', () => {
@@ -443,7 +443,7 @@ test('the owner device on the screen: the device line under the head chips, Devi
   has(draw(R.ownerStanding(state(), { role: 'signed-out', kid: KID })), 'data-action="signIn">Sign in</button>');
   // Settings: the theme, then Devices — Sign out only for a page that signs
   const set = renderSettings(R.ownerStanding(R.openSettings(state()), { role: 'signs', kid: KID }));
-  has(set, 'data-value="System">System</button></div></div><div class="dsec"><div class="dsec-label">Devices</div>');
+  has(set, 'data-value="system">System</button></div></div><div class="dsec"><div class="dsec-label">Devices</div>');
   has(set, `<div class="dsec-line">Stand-in seed key · device:${KID} · this page</div>`);
   has(set, 'data-action="signOut">Sign out</button>');
   lacks(renderSettings(R.ownerStanding(R.openSettings(state()), { role: 'pending', kid: '0123456789abcdef' })), 'data-action="signOut"');
@@ -1019,4 +1019,15 @@ test('Portfolio marks prices old while the market is down', () => {
   lacks(plain, 'Prices are old');
   const assets = h => h.match(/<section class="cardbox" aria-label="Assets">[\s\S]*?<\/section>/)?.[0];
   assert.equal(assets(html), assets(plain));
+});
+
+test("Theme's keys carry cream, black and system, and pressing Black stores black", () => {
+  const drawn = theme => renderSettings({ ...R.openSettings(state()), theme });
+  const items = html => [...html.matchAll(/<button type="button" class="seg-item( pressed)?" aria-pressed="(?:true|false)" data-action="setTheme" data-value="([^"]*)">([^<]*)<\/button>/g)]
+    .map(m => [m[3], m[2], !!m[1]]);
+  assert.deepEqual(items(drawn('system')), [['Cream', 'cream', false], ['Black', 'black', false], ['System', 'system', true]]);
+  assert.deepEqual(items(drawn('black')).map(([, , pressed]) => pressed), [false, true, false]);
+  assert.deepEqual(items(drawn('sepia')).map(([, , pressed]) => pressed), [false, false, true], 'a theme the seg does not know presses System');
+  const pressed = items(drawn('system')).find(([label]) => label === 'Black')[1];
+  assert.equal(R.setTheme(state(), pressed).theme, 'black');
 });

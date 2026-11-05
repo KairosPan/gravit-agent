@@ -103,7 +103,7 @@ function usageRows(conv) {
     if (v.modelMs !== null) rows.push([t('details.modelTime'), esc(durationText(v.modelMs))]);
     if (v.toolMs !== null) rows.push([t('details.toolTime'), esc(durationText(v.toolMs))]);
     if (v.firstTokenMs !== null) rows.push([t('details.firstToken'), esc(durationText(v.firstTokenMs))]);
-    if (v.speed !== null) rows.push([t('details.speed'), esc(`${v.speed} tok/s`)]);
+    if (v.speed !== null) rows.push([t('details.speed'), esc(t('details.speedValue', { n: v.speed }))]);
   }
   return rows.length ? `<section class="dsec" id="dsec-usage"><div class="dsec-label">${th('details.usage')}</div>${kv(rows)}</section>` : '';
 }

@@ -69,7 +69,7 @@ export function normalizeAsset(value) {
 export function readWatchlist(storage) {
   let raw;
   try {
-    if (!storage) throw new Error("Storage unavailable");
+    if (!storage) throw new Error("Storage unavailable"); // en-kept: never on screen: the catch below drops it
     raw = storage.getItem(STORAGE_KEY);
     if (raw === null) raw = storage.getItem(LEGACY_STORAGE_KEY);
   } catch {
@@ -114,7 +114,7 @@ export function saveWatchlist(storage, items) {
     if (!seen.has(asset.id)) { normalized.push(asset); seen.add(asset.id); }
   }
   try {
-    if (!storage) throw new Error("Storage unavailable");
+    if (!storage) throw new Error("Storage unavailable"); // en-kept: never on screen: the catch below drops it
     storage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, items: normalized }));
     return null;
   } catch {
@@ -139,20 +139,20 @@ const isAccountWatchKey = (value) => typeof value === "string" && ACCOUNT_KEY.te
 export function readAccountWatch(storage) {
   let raw;
   try {
-    if (!storage) throw new Error("Storage unavailable");
+    if (!storage) throw new Error("Storage unavailable"); // en-kept: never on screen: the catch below drops it
     raw = storage.getItem(ACCOUNT_WATCH_KEY);
   } catch {
-    return { items: [], error: "The saved Account stars could not be read." };
+    return { items: [], error: "The saved Account stars could not be read." }; // en-kept: never on screen: host/markets.js says it as read or unsaved
   }
   if (raw === null) return { items: [], error: null };
   let saved;
   try {
     saved = JSON.parse(raw);
   } catch {
-    return { items: [], error: "The saved Account stars are damaged; they are kept as they were." };
+    return { items: [], error: "The saved Account stars are damaged; they are kept as they were." }; // en-kept: never on screen: host/markets.js says it as read or unsaved
   }
   if (!saved || saved.version !== 1 || !Array.isArray(saved.items)) {
-    return { items: [], error: "The saved Account stars are in a shape this page does not read; they are kept as they were." };
+    return { items: [], error: "The saved Account stars are in a shape this page does not read; they are kept as they were." }; // en-kept: never on screen: host/markets.js says it as read or unsaved
   }
   const items = [];
   const seen = new Set();
@@ -161,7 +161,7 @@ export function readAccountWatch(storage) {
     if (!isAccountWatchKey(entry)) { invalid += 1; continue; }
     if (!seen.has(entry) && items.length < ACCOUNT_WATCH_LIMIT) { items.push(entry); seen.add(entry); }
   }
-  return { items, error: invalid ? `${invalid} saved Account stars could not be read; the rest are restored.` : null };
+  return { items, error: invalid ? `${invalid} saved Account stars could not be read; the rest are restored.` : null }; // en-kept: never on screen: host/markets.js says it as read or unsaved
 }
 
 /** Write the Account keys starred, once each; a list with anything else, or past a hundred, is not written. A failed write
@@ -171,20 +171,20 @@ export function readAccountWatch(storage) {
  * @returns {string | null}
  */
 export function saveAccountWatch(storage, keys) {
-  if (!Array.isArray(keys)) return "The Account stars are not a list; nothing was saved.";
+  if (!Array.isArray(keys)) return "The Account stars are not a list; nothing was saved."; // en-kept: never on screen: host/markets.js says it as read or unsaved
   const items = [];
   const seen = new Set();
   for (const key of keys) {
-    if (!isAccountWatchKey(key)) return "The Account stars hold something that is not an Account market; nothing was saved.";
+    if (!isAccountWatchKey(key)) return "The Account stars hold something that is not an Account market; nothing was saved."; // en-kept: never on screen: host/markets.js says it as read or unsaved
     if (!seen.has(key)) { items.push(key); seen.add(key); }
   }
-  if (items.length > ACCOUNT_WATCH_LIMIT) return "More than a hundred Account stars; nothing was saved.";
+  if (items.length > ACCOUNT_WATCH_LIMIT) return "More than a hundred Account stars; nothing was saved."; // en-kept: never on screen: host/markets.js says it as read or unsaved
   try {
-    if (!storage) throw new Error("Storage unavailable");
+    if (!storage) throw new Error("Storage unavailable"); // en-kept: never on screen: the catch below drops it
     storage.setItem(ACCOUNT_WATCH_KEY, JSON.stringify({ version: 1, items }));
     return null;
   } catch {
-    return "The Account stars could not be saved in this browser; this change may be lost on reload.";
+    return "The Account stars could not be saved in this browser; this change may be lost on reload."; // en-kept: never on screen: host/markets.js says it as read or unsaved
   }
 }
 

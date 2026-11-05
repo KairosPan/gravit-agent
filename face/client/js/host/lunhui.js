@@ -125,9 +125,9 @@ export function boardOf(code) {
   const c = stockCode(code);
   if (!c) return null;
   if (/^60/.test(c)) return t('lunhui.board.sh');
-  if (/^68[89]/.test(c)) return t('lunhui.board.star');
+  if (/^68[89]/.test(c)) return t('markets.board.star');
   if (/^00[0-3]/.test(c)) return t('lunhui.board.sz');
-  if (/^30[01]/.test(c)) return t('lunhui.board.chinext');
+  if (/^30[01]/.test(c)) return t('markets.board.chinext');
   if (/^(?:4|8|92)/.test(c)) return t('lunhui.board.bse');
   return null;
 }

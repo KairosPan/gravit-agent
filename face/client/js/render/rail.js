@@ -112,7 +112,7 @@ function groupHead(g, state) {
 // the search box under the list head (spec 2026-11-03 §5.1, P1): its words are the store's; the hint names the platform's key
 function searchBox(query, mac) {
   return `<div class="conv-search">${icon('search', 16, 2)}<input${attrs({ id: 'cq', type: 'search', autocomplete: 'off', placeholder: t('search.box'), 'aria-label': t('search.box'), 'data-action': 'convQuery', value: query })}>` +
-    `<kbd class="conv-search-key">${mac ? '⌥⌘K' : 'Ctrl+Alt+K'}</kbd></div>`;
+    `<kbd class="conv-search-key">${mac ? '⌥⌘K' : 'Ctrl+Alt+K'}</kbd></div>`; // en-kept: the keys' names
 }
 
 const SEARCH_LINE = {

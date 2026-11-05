@@ -172,3 +172,19 @@ export function wordsBindings(source, file = 'source.js') {
   visit(sf);
   return out.sort((a, b) => a.line - b.line);
 }
+
+// the literals a source keeps in place on purpose: every string's and template part's text on a line marked `// en-kept:` (a
+// provider's name, a key's name, a path) — the words the probe (words-probe.test.js) may meet on a screen from the source itself
+export function keptLiterals(source, file = 'source.js') {
+  const sf = parse(source, file);
+  const lines = source.split('\n');
+  const kept = node => KEPT.test(lines[lineAt(sf, node.getStart(sf)) - 1] ?? '');
+  const out = [];
+  const visit = node => {
+    if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && kept(node)) out.push(node.text);
+    else if (ts.isTemplateExpression(node)) for (const p of [node.head, ...node.templateSpans.map(s => s.literal)]) if (kept(p)) out.push(p.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out;
+}

@@ -643,9 +643,9 @@ export function renderStatement(state, now) {
 }
 
 export function renderSettings(state) {
-  // the Theme seg's labels are its values (app.js setTheme lower-cases one): Task 10 pairs each with its word
-  const theme = { cream: 'Cream', black: 'Black' }[state.theme] ?? 'System'; // en-kept: the seg's values
-  const themes = ['Cream', 'Black', 'System']; // en-kept: the seg's values
+  // the Theme seg: each value a theme's key (app.js setTheme stores it as it is), each label the table's word for it
+  const theme = state.theme === 'cream' || state.theme === 'black' ? state.theme : 'system';
+  const themes = [[t('settings.theme.cream'), 'cream'], [t('settings.theme.black'), 'black'], [t('settings.theme.system'), 'system']];
   return `<aside class="drawer" aria-label="${th('settings.title')}"><div class="drawer-head"><h2>${th('settings.title')}</h2><button type="button" class="close-key" data-action="closeSettings" aria-label="${th('common.close')}">×</button></div><div class="drawer-body">` +
     `<div class="dsec"><div class="dsec-label">${th('settings.theme')}</div>${seg(themes, theme, 'setTheme')}</div>${renderDevices(state)}</div></aside>`;
 }

@@ -26,7 +26,7 @@ import { orderWords, marketKeysOn, marketKey, changeKey, positionKeys } from './
 import { marketLeverageSeedOf } from '../host/sheet-market.js';
 import { assetKeyOf, hereOf, costOf, bookOf, tradesOf, fundingOf, fundingMissingOf } from '../host/market-depth-view.js';
 import {
-  CANDLE_RANGES, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf, followOf,
+  candleRanges, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf, followOf,
   connectionWord, watchWord, basisWord, watchedOf,
   chinaWord, cnStateWord, notAnsweringWord, cnPageOf, cnTileOf, cnBoardOf,
 } from '../host/market-view.js';
@@ -340,7 +340,7 @@ function accountPage(id, view, state, now) {
   const failed = h.status === 'error' ? note(h.message || t('markets.history.unavailable')) : '';
   const closesDrawn = h.current ? (svg ? svg + note([view.candles.ends, view.candles.note].filter(w => typeof w === 'string' && w.trim() !== '').join(' · ')) : note(t('markets.history.none')))
     : h.status === 'loading' ? note(t('common.loading')) : '';
-  left.push(section(th('markets.history.title'), failed + closesDrawn, seg(CANDLE_RANGES.map(r => [r, r]), view.range, 'setRange', { 'data-id': id })));
+  left.push(section(th('markets.history.title'), failed + closesDrawn, seg(candleRanges(), view.range, 'setRange', { 'data-id': id })));
   // Across venues: the lines the owner connected, the best marked, Paper where so; a public listing leads to Venues to connect
   const venues = view.legs.map(l => line('·',
     `${esc([l.venueName || l.venue, l.symbol, priceWord(l.price, unit)].filter(Boolean).join(' · '))}${l.best ? ` ${tag(t('markets.tag.best'))}` : ''}${l.paper ? ` ${tag(t('markets.tag.paper'))}` : ''}`,
@@ -430,7 +430,7 @@ function cnPage(asset, state, now) {
     `${priced ? `${chgHtml(number(quote.change_pct))}<span class="mk-basis">${esc(basisWord(quote))}</span>` : ''}</div>` +
     `${stateWord ? `<p class="mk-asof">${esc(stateWord)}</p>` : ''}${planHtml(markOf(state.desk?.data, asset.id))}` +
     `<dl class="mk-facts">${view.facts.map(f => `<div><dt>${esc(f.label)}</dt><dd>${esc(factWord(f))}</dd></div>`).join('')}</dl>`;
-  const left = [section(th('markets.history.title'), cnHistory(view), seg(CANDLE_RANGES.map(r => [r, r]), view.range, 'setRange', { 'data-id': asset.id }))];
+  const left = [section(th('markets.history.title'), cnHistory(view), seg(candleRanges(), view.range, 'setRange', { 'data-id': asset.id }))];
   const about = aboutHtml(state.conversations, asset, now);
   return pageHtml(who, keysHtml(asset.id, watched), top, left, about.length ? [section(th('markets.about'), feed(about))] : []);
 }

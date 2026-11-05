@@ -17,7 +17,8 @@
  * @module
  */
 
-import { isHostPreset } from "./speaker.js";
+import { isHostPreset, HOST_NAME } from "./speaker.js";
+import { t } from "../i18n/words.js";
 
 /** A dozen distinguishable shapes; a bot keeps its glyph for life (a hash of its id). */
 export const GLYPHS =["◆", "●", "▲", "■", "◇", "○", "△", "□", "⬟", "⬢", "✦", "✧"];
@@ -91,7 +92,7 @@ export function isMemberSession(projection, memberIds, sessionId) {
 /**
  * The participants strip (spec §6): Gravit first, then every rostered bot,
  * then any member the roster no longer carries (`left`). States, in
- * precedence: a pending gate on the member's session → `waiting for you`;
+ * precedence: a pending gate on the member's session → `waiting` (on the operator);
  * while `called`, the live fine state if any; else the projection's coarse
  * state; else `idle`. Gravit is `organizing` while the projection says so,
  * or - before the session is a room - while the list says it is running.
@@ -103,10 +104,10 @@ export function stripChips(input) {
   const projMembers = room !== null && room.members !== null && typeof room.members === "object" ? room.members : {};
   const organizing = room !== null ? room.organizing === true : input.running === true;
   /** @type {Chip[]} */
-  const chips = [{ id: "gravit", name: input.gravitName ?? "Gravit", state: organizing ? "organizing" : "idle", gravit: true }];
+  const chips = [{ id: "gravit", name: input.gravitName ?? HOST_NAME, state: organizing ? "organizing" : "idle", gravit: true }];
   const stateOf = (bot) => {
     const sessionId = input.members[bot]?.sessionId ?? projMembers[bot]?.sessionId;
-    if (sessionId !== undefined && input.gates.has(sessionId)) return { state: "waiting for you", sessionId };
+    if (sessionId !== undefined && input.gates.has(sessionId)) return { state: "waiting", sessionId };
     const coarse = projMembers[bot]?.state;
     if (coarse === "called") return { state: (sessionId !== undefined && input.fine.get(sessionId)) || "called", sessionId };
     return { state: typeof coarse === "string" ? coarse : "idle", sessionId };
@@ -128,14 +129,18 @@ export function stripChips(input) {
 /** The round-end line: `round 1 · settled · answered: A · passed: B`; empty groups are omitted. @param {{round?: unknown, outcome?: unknown, turns?: unknown}} view */
 export function roundEndLine(view) {
   const turns = Array.isArray(view.turns) ? view.turns : [];
-  const group = (state, label) => {
-    const names = turns.filter((t) => t && t.state === state).map((t) => (typeof t.name === "string" && t.name !== "" ? t.name : String(t.bot)));
-    return names.length === 0 ? null : `${label}: ${names.join(", ")}`;
+  // each group's line, its names the bots' own, its label the table's
+  const group = (state, line) => {
+    const names = turns.filter((turn) => turn && turn.state === state).map((turn) => (typeof turn.name === "string" && turn.name !== "" ? turn.name : String(turn.bot)));
+    return names.length === 0 ? null : line(names.join(", "));
   };
-  const head = view.outcome === "capped" ? "capped - the bot-message cap was reached"
-    : view.outcome === "superseded" ? "superseded by a new operator message"
-    : String(view.outcome ?? "ended");
-  return [`round ${String(view.round ?? "?")}`, head, group("answered", "answered"), group("passed", "passed"), group("failed", "failed"), group("timed-out", "timed out")]
+  // an outcome the face has no words for is dsh's, drawn as it comes
+  const head = view.outcome === "capped" ? t("thread.round.capped")
+    : view.outcome === "superseded" ? t("thread.round.superseded")
+    : view.outcome == null ? t("thread.round.ended") : String(view.outcome);
+  return [t("thread.round.number", { n: String(view.round ?? "?") }), head,
+    group("answered", (names) => t("thread.round.answered", { names })), group("passed", (names) => t("thread.round.passed", { names })),
+    group("failed", (names) => t("thread.round.failed", { names })), group("timed-out", (names) => t("thread.round.timedOut", { names }))]
     .filter((part) => part !== null).join(" · ");
 }
 

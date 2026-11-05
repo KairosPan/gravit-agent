@@ -421,3 +421,18 @@ test("a channel's, Discover's, the Run sheet's and the run view's host lines as 
   const errors = Object.values(ls.get().lunhui.views).map(v => v.error);
   assert.deepEqual(errors, ['the answer held no view', 'the view could not be read', "<no> & won't"]);
 });
+
+// the lines the last pending files (Task 10) write, as they leave the wire modules: plain text, each param as it came
+test("the round's end line, a trace's refusals and the model route's refusal read the table, their params as they came", async () => {
+  const { roundEndLine } = await import('../../client/js/wire/room.js');
+  const { loadMemberTrace } = await import('../../client/js/wire/member-traces.js');
+  const { normalizeBotModel } = await import('../../client/js/wire/botSettings.js');
+  const turns = [{ bot: 'a', name: 'A<&\'>', state: 'answered' }, { bot: 'b', name: 'B', state: 'timed-out' }, { bot: 'c', state: 'failed' }];
+  assert.equal(roundEndLine({ round: 3, outcome: 'capped', turns }), "round 3 · capped - the bot-message cap was reached · answered: A<&'> · failed: c · timed out: B");
+  assert.equal(roundEndLine({ round: 1, outcome: 'superseded', turns: [{ bot: 'p', name: 'P', state: 'passed' }] }), 'round 1 · superseded by a new operator message · passed: P');
+  assert.equal(roundEndLine({ turns: [] }), 'round ? · ended');
+  assert.equal(roundEndLine({ round: 2, outcome: 'settled', turns: [] }), 'round 2 · settled', "an outcome the face has no words for is dsh's");
+  await assert.rejects(loadMemberTrace(async () => null, { sessionId: '', turn: 1 }), { message: 'This answer recorded no member turn.' });
+  await assert.rejects(loadMemberTrace(async () => null, { sessionId: 'm1', turn: 1 }), { message: 'The member session does not exist.' });
+  assert.throws(() => normalizeBotModel('a/b/c'), { message: 'Use provider/model (one slash, no spaces), or leave the model empty to inherit the default.' });
+});

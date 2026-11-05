@@ -16,6 +16,7 @@ import { renderDiscover, renderPlugin } from '../../../client/js/render/discover
 import { renderModule } from '../../../client/js/render/modules.js';
 import { renderRunSheet } from '../../../client/js/render/run-sheet.js';
 import { newSheet } from '../../../client/js/host/run-sheet-view.js';
+import { MODULES } from '../../../client/js/host/modules-view.js';
 import { listings, modulesListing } from './inventory.js';
 import { setMarkdown } from '../../../client/js/render/thread.js';
 import { reducers as R } from '../../../client/js/reducers/index.js';
@@ -386,7 +387,7 @@ function laterStates() {
 // a conversation's composer, each piece its own entry (composerPieces): a / menu with headings and with a query, an @ menu with
 // every kind, a folder walk with its crumb; the operator's words with a conversation mention, a chip in the bubble (D17); a draft
 // with each chip kind in the editor
-export function composerPieces() {
+function composerBuild() {
   const open = R.nav(R.hostList(emptyState(), { conversations: [conv('s1')], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, dir: '/r' }] }), { screen: 'messages', id: 's1' });
   const menus = [
     { kind: '/', from: 0, query: '', groups: slashItems({ commands: [{ name: 'compact', description: 'Shrink' }], skills: [{ name: 'rules', description: 'R' }], query: '', atStart: true }), active: 0 },
@@ -422,12 +423,17 @@ export function composerPieces() {
   const jobRows = [job('j1', 'running', { progress: '3/10' }), job('j2', 'running'), job('j3', 'stopping'), job('f1', 'completed', { detail: 'exit code: 0', finishedAt: NOW }), job('f2', 'killed', { finishedAt: NOW }), job('f3', 'failed', { output: { total: 0, earliest: 0 }, finishedAt: NOW })];
   const jobsOn = R.toggleDetails(R.askConfirm(R.openJob(watched(jobRows), 'j1'), { action: 'stopJob', id: 'j2', conv: 's1' }));
   const jobsHtml = renderMessagesScreen(jobsOn, NOW) + renderMessagesScreen(watched([job('f1', 'completed', { finishedAt: NOW })]), NOW);
-  const editor = editorHtml([{ type: 'text', text: 'ask ' }, ...chips.map(chip => ({ type: 'chip', chip }))]);
-  return [
+  const runs = [{ type: 'text', text: 'ask ' }, ...chips.map(chip => ({ type: 'chip', chip }))];
+  const editor = editorHtml(runs);
+  const pieces = [
     ...menus.map((menu, i) => [`menu-${i}`, renderMessagesScreen(open, NOW, { menu })]), ['mention', renderMessagesScreen(mention, NOW)], ['attached', attached],
     ['history', renderMessagesScreen(history, NOW)], ['secrets', secrets], ['paging', paging], ['rail', rail], ['jobs', jobsHtml], ['editor', editor],
   ];
+  // what the pieces are drawn from, for corpusStrings
+  const inputs = [open, menus, mention, files, 'Up to 20 images a message', DEFAULT_LIMITS, history, masked, railed, outline, jobsOn, jobRows, runs];
+  return { pieces, inputs };
 }
+export const composerPieces = () => composerBuild().pieces;
 export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
   : st.route.screen === 'trade' ? renderTradeScreen(st, now)
   : st.route.screen === 'channel' ? renderChannelScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
@@ -489,4 +495,36 @@ export function corpus() {
   setMarkdown(null);
   const states = everyState().flatMap((st, i) => [[`state-${i}`, pageHtml(st)], ...(renderList(st, NOW) ? [[`state-${i}-pc`, pageHtml(st, { mac: false })]] : [])]);
   return [...states, ...composerPieces().map(([name, html]) => [`composer-${name}`, html])];
+}
+
+// the keys whose strings are codes a screen compares, not words it draws (a status, a kind, a side…): their values are left out
+// of corpusStrings, so a code word drawn as a word (killed, failed, running) is the probe's to find
+const CODE_KEYS = new Set(['status', 'kind', 'state', 'phase', 'mode', 'side', 'type', 'quote_status', 'market_status']);
+// the parts of a state that are an upstream's content as a whole, drawn as they come — a run's view and its artifacts
+// (Lunhui's output), a strategy's files (Gravit's): every string in them counts, its keys too (a metric's name)
+const CONTENT = [['lunhui', 'views'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data']];
+
+// every string the corpus' own states, the composer pieces' inputs and the module catalog (its codes, sub-titles, roles and
+// rulings' citations: content, spec §5.10) hold, but those under a code key outside the content: the words a screen may draw
+// that are not the face's (words-probe.test.js)
+export function corpusStrings() {
+  const out = [];
+  const seen = new Set();
+  const walk = (v, key, path, content) => {
+    if (typeof v === 'string') { if (content || !CODE_KEYS.has(key)) out.push(v); return; }
+    if (v === null || typeof v !== 'object' || seen.has(v)) return;
+    seen.add(v);
+    if (v instanceof Map) { for (const [k, x] of v) { walk(k, null, path, content); walk(x, typeof k === 'string' ? k : null, path, content); } return; }
+    if (v instanceof Set || Array.isArray(v)) { for (const x of v) walk(x, key, path, content); return; }
+    for (const [k, x] of Object.entries(v)) {
+      const at = [...path, k];
+      const inside = content || CONTENT.some(c => c.length === at.length && c.every((p, i) => p === at[i]));
+      if (inside === true) out.push(k);
+      walk(x, k, at, inside);
+    }
+  };
+  for (const st of everyState()) walk(st, null, [], false);
+  walk(composerBuild().inputs, null, [], false);
+  walk(MODULES, null, [], 'values'); // its values, not its keys
+  return out;
 }

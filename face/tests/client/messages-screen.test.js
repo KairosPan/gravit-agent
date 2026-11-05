@@ -37,6 +37,8 @@ test('a group head clusters the members and names them from the host\'s bots', (
   const h = renderHead(currentConversation(s), s);
   assert.match(h, /head centered/); assert.equal(count(h, /class="cluster-item"/g), 2);
   assert.match(h, /Gravit · Buffett Type · 2 members/);
+  const one = listed([conv('g', { kind: 'group', members: ['gravit'], title: 'Alone' })]);
+  assert.match(renderHead(currentConversation(one), one), /<div class="dim members">Gravit · 1 member<\/div>/, 'one member is a member');
 });
 
 test('the composer is the menu slot, the note, the box with the rail, the editor and Send', () => {

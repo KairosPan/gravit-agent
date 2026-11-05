@@ -63,7 +63,7 @@ const roster = [{ id: "buffett", name: "巴菲特型" }, { id: "speculator", nam
 test("stripChips: Gravit first; roster members read the projection's coarse state, the pulses' fine state while called, a pending gate over both; a rostered-but-unmounted bot is shown broken; a member no longer rostered is left", () => {
   const projection = { kind: "room", organizing: true, members: { buffett: { sessionId: "m1", state: "called" }, speculator: { sessionId: "m2", state: "passed" }, ghost: { sessionId: "m3", state: "answered", name: "Ghost" } } };
   const chips = stripChips({ roster, projection, members: { ghost: { sessionId: "m3", name: "Ghost" } }, gates: new Set(["m2"]), fine: new Map([["m1", "writing"]]), running: false, gravitName: "Gravit" });
-  assert.deepEqual(chips.map((c) => `${c.id}:${c.state}`), ["gravit:organizing", "buffett:writing", "speculator:waiting for you", "cracked:idle", "ghost:left"]);
+  assert.deepEqual(chips.map((c) => `${c.id}:${c.state}`), ["gravit:organizing", "buffett:writing", "speculator:waiting", "cracked:idle", "ghost:left"]);
   assert.equal(chips[0].gravit, true);
   assert.equal(chips[3].broken, "not a list");
   assert.equal(chips[1].sessionId, "m1");

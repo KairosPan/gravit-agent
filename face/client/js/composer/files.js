@@ -64,16 +64,19 @@ function inUnit(bytes, unit) {
   return (bytes / MiB).toFixed(1);
 }
 
+// a size in its unit, the unit's word the table's (`2 KB`; `1.1 / 2.8 MB`)
+const inWords = (unit, n) => (unit === 'B' ? t('composer.size.b', { n }) : unit === 'KB' ? t('composer.size.kb', { n }) : t('composer.size.mb', { n }));
+
 /** Under 1,024 bytes `<n> B`; under 1 MiB `<n> KB`, rounded; else `<n.n> MB`. */
 export function sizeText(bytes) {
   const unit = unitOf(bytes);
-  return `${inUnit(bytes, unit)} ${unit}`;
+  return inWords(unit, inUnit(bytes, unit));
 }
 
 /** An upload's progress in its total's unit: `1.1 / 2.8 MB`. */
 export function progressText(loaded, total) {
   const unit = unitOf(total);
-  return `${inUnit(loaded, unit)} / ${inUnit(total, unit)} ${unit}`;
+  return inWords(unit, `${inUnit(loaded, unit)} / ${inUnit(total, unit)}`);
 }
 
 /** The name's extension in capitals, 'FILE' with none (a dotfile or a trailing dot has none). */

@@ -505,9 +505,12 @@ test('the theme comes from the prefs before the host answers, and a change is wr
   const h = host();
   const store = started(f, h);
   assert.equal(f.doc.documentElement.dataset.theme, 'black');
-  f.click({ tagName: 'BUTTON', dataset: { action: 'setTheme', value: 'Cream' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'setTheme', value: 'cream' } });
   assert.equal(f.doc.documentElement.dataset.theme, 'cream');
   assert.equal(JSON.parse(m.get('gravit-ui.prefs')).theme, 'cream');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'setTheme', value: 'black' } });
+  assert.equal(f.doc.documentElement.dataset.theme, 'black', 'the seg value is the key, stored as it is');
+  assert.equal(JSON.parse(m.get('gravit-ui.prefs')).theme, 'black');
   store.timers.clear();
 });
 
@@ -1974,8 +1977,9 @@ test('a venue Grant whose read of where the account can connect fails says so un
   f.click({ tagName: 'BUTTON', dataset: { action: 'grant', ask: 'ask-0002' } });
   await until(() => typeof store.get().account.grantSaid === 'string', 'the words');
   assert.equal(store.get().sheet, null, 'no sheet');
-  assert.match(store.get().account.grantSaid, /^Not opened: where this account can connect was not read/);
-  assert.match(f.html(), /<p class="acct-note">Not opened: where this account can connect was not read/);
+  const said = store.get().account.grantSaid;
+  assert.match(said, /^Not opened: where this account can connect was not read(?: — .+)?\. Try Grant again\.$/, 'the line as the store holds it, in plain text');
+  assert.ok(f.html().includes(`<p class="acct-note">${said.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')}</p>`), 'escaped once at the draw');
   store.timers.clear();
 });
 

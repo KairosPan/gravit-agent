@@ -47,7 +47,7 @@ export function statsView(stats, tokenUsage) {
 export function pillsText(view) {
   if (!view) return ['', ''];
   const first = [tn('details.pill.turns', view.turns), tn('details.pill.steps', view.steps)];
-  if (view.speed !== null) first.push(`${view.speed} tok/s`);
+  if (view.speed !== null) first.push(t('details.speedValue', { n: view.speed }));
   const second = [];
   if (view.tokens !== null) second.push(t('details.pill.tokens', { count: compactTokens(view.tokens) }));
   if (view.cache !== null) second.push(t('details.pill.cache', { pct: Math.round(view.cache * 100) }));

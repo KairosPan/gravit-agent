@@ -1,4 +1,5 @@
 /** Small, pure translations for the bot settings page. */
+import { t } from "../i18n/words.js";
 
 // The settings endpoint currently accepts this exact provider/model grammar.
 const MODEL_ROUTE = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
@@ -8,7 +9,7 @@ const MODEL_ROUTE = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.:-]*$/;
 export function normalizeBotModel(value) {
   const route = value.trim();
   if (route === "") return null;
-  if (!MODEL_ROUTE.test(route)) throw new Error("Use provider/model (one slash, no spaces), or leave the model empty to inherit the default.");
+  if (!MODEL_ROUTE.test(route)) throw new Error(t("discover.bot.modelRoute"));
   return route;
 }
 
@@ -30,27 +31,29 @@ export function botModelChoices(catalog) {
 /** @param {Record<string, string>} fields @returns {string} */
 export function draftBotSoul(fields) {
   const sections = [
-    ["Identity and perspective", fields.identity],
-    ["Questions I focus on", fields.focus],
-    ["Evidence I require", fields.evidence],
-    ["What changes my mind", fields.revise],
-    ["When I speak or pass", fields.participation],
-    ["Communication style", fields.style],
+    ["Identity and perspective", fields.identity], // en-kept: the soul's headings, the bot's own words (spec §5.10)
+    ["Questions I focus on", fields.focus], // en-kept: the soul's headings, the bot's own words (spec §5.10)
+    ["Evidence I require", fields.evidence], // en-kept: the soul's headings, the bot's own words (spec §5.10)
+    ["What changes my mind", fields.revise], // en-kept: the soul's headings, the bot's own words (spec §5.10)
+    ["When I speak or pass", fields.participation], // en-kept: the soul's headings, the bot's own words (spec §5.10)
+    ["Communication style", fields.style], // en-kept: the soul's headings, the bot's own words (spec §5.10)
   ];
   return sections.filter(([, text]) => text?.trim()).map(([title, text]) => `## ${title}\n\n${text.trim()}`).join("\n\n");
 }
 
-const TOOL_LABELS = {
-  ask_user_question: "Ask the operator", bash: "Terminal", edit: "Edit files", glob: "Find files",
-  grep: "Search file contents", read: "Read files", read_image: "Inspect images", skill: "Load skills",
-  str_replace_editor: "Replace file text", web_search: "Search the web", write: "Write files",
-};
+// the tools' words, read from the table at each call
+const toolLabels = () => ({
+  ask_user_question: t("discover.tool.askUser"), bash: t("discover.tool.bash"), edit: t("discover.tool.edit"), glob: t("discover.tool.glob"),
+  grep: t("discover.tool.grep"), read: t("discover.tool.read"), read_image: t("discover.tool.readImage"), skill: t("discover.tool.skill"),
+  str_replace_editor: t("discover.tool.replace"), web_search: t("discover.tool.webSearch"), write: t("discover.tool.write"),
+});
 
 /** The raw pattern stays visible in the UI; labels never imply access is granted.
  * @param {string} pattern @returns {string} */
 export function botToolLabel(pattern) {
   const key = pattern.startsWith("mcp__") ? pattern.split("__").at(-1) : pattern;
-  return TOOL_LABELS[key] ?? pattern;
+  const labels = toolLabels();
+  return Object.hasOwn(labels, key) ? labels[key] : pattern;
 }
 
 /** @param {Record<string, any>} bot @param {{name:string, description:string, model:string, soul:string}} fields */

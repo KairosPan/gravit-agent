@@ -30,6 +30,12 @@ const sortWords = () => ({ volume: t('markets.sort.volume'), movers: t('markets.
 export const accountTabs = () => { const w = tabWords(); return ACCOUNT_TAB_IDS.map(id => [id, w[id]]); };
 /** The sorts as `{ id, label }`, in ACCOUNT_SORT_IDS's order. */
 export const accountSorts = () => { const w = sortWords(); return ACCOUNT_SORT_IDS.map(id => ({ id, label: w[id] })); };
+const rangeWords = () => ({
+  '1D': t('markets.range.d1'), '5D': t('markets.range.d5'), '1M': t('markets.range.m1'), '3M': t('markets.range.m3'), '6M': t('markets.range.m6'),
+  YTD: t('markets.range.ytd'), '1Y': t('markets.range.y1'), '5Y': t('markets.range.y5'), MAX: t('markets.range.max'),
+});
+/** A market's history ranges as `[label, id]` (a seg's items), in CANDLE_RANGES's order: the id is the Account's range. */
+export const candleRanges = () => { const w = rangeWords(); return CANDLE_RANGES.map(id => [w[id], id]); };
 
 const TENCENT = 'Tencent'; // en-kept: the provider's name
 const PROVIDERS = { tencent: TENCENT };
@@ -175,14 +181,15 @@ export function isAccountKey(id) {
 /** The China tab's id: the Account's china tab (explore?tab=china, its ranking by a sort), drawn after its other tabs. */
 export const CHINA_TAB = 'china';
 
-/** An A share's board from its code: STAR (688, 689), ChiNext (300–302), SH, SZ or BJ; '' for none. */
+/** An A share's board from its code: STAR (688, 689), ChiNext (300–302), SH, SZ or BJ, in the table's words (STAR's and
+ *  ChiNext's shared with a run's, host/lunhui.js boardOf); '' for none. */
 export function cnBoardOf(symbol) {
   const s = String(symbol ?? '');
-  if (/^68[89]/.test(s)) return 'STAR';
-  if (/^30[0-2]/.test(s)) return 'ChiNext';
-  if (/^6/.test(s)) return 'SH';
-  if (/^[03]/.test(s)) return 'SZ';
-  if (/^[489]/.test(s)) return 'BJ';
+  if (/^68[89]/.test(s)) return t('markets.board.star');
+  if (/^30[0-2]/.test(s)) return t('markets.board.chinext');
+  if (/^6/.test(s)) return t('markets.board.sh');
+  if (/^[03]/.test(s)) return t('markets.board.sz');
+  if (/^[489]/.test(s)) return t('markets.board.bj');
   return '';
 }
 

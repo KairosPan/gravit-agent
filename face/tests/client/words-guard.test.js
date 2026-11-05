@@ -1,8 +1,7 @@
 // The words guard (plan 6, D35): the face's words live in the table (client/js/i18n/en.js), so an English literal left in a
-// client source is a word not yet moved. KEPT_FILES are the files whose English is not the face's words; PENDING the files the
-// words tasks still have to move, each task taking its files off the list (and lowering PENDING_MAX) until Task 10 deletes it.
-// A literal deliberately kept in place carries `// en-kept: <reason>` on its own line; EN_KEPT counts the markers, so a task
-// that adds one says so.
+// client source is a word not moved. KEPT_FILES are the files whose English is not the face's words; every other client file
+// holds none. A literal deliberately kept in place carries `// en-kept: <reason>` on its own line; EN_KEPT counts the markers,
+// so a change that adds one says so. What the scanner cannot see in a source, words-probe.test.js finds on the screens.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -21,14 +20,8 @@ const KEPT_FILES = {
   'wire/markdown.js': "Gravit's words",
 };
 
-const PENDING = [
-  'app.js', 'wire/botSettings.js', 'wire/market-model.js', 'wire/member-traces.js', 'wire/room.js', 'wire/subagents.js',
-];
-
-// the most files PENDING may hold, and the en-kept markers under client/js: each words task lowers the first and states the
-// second
-const PENDING_MAX = 6;
-const EN_KEPT = 30;
+// the en-kept markers under client/js
+const EN_KEPT = 54;
 
 const texts = src => englishLiterals(src, 'snippet.js').map(l => l.text);
 
@@ -116,21 +109,15 @@ test('a file that imports the words binds no local t, th, tn or thn, and imports
   assert.deepEqual(why("import words from './i18n/words.js';"), ['1 words default import']);
 });
 
-test('no client file outside PENDING and KEPT_FILES has an English literal', () => {
-  const found = FILES.filter(f => !(f in KEPT_FILES) && !PENDING.includes(f))
+test('no client file outside KEPT_FILES has an English literal', () => {
+  assert.ok(FILES.length > 100, `the walk finds the client's files (${FILES.length})`);
+  for (const f of Object.keys(KEPT_FILES)) assert.ok(FILES.includes(f), `${f} exists`);
+  const found = FILES.filter(f => !(f in KEPT_FILES))
     .flatMap(f => englishLiterals(source(f), f).map(l => `${f}:${l.line} ${l.text}`));
   assert.deepEqual(found, [], 'move these into client/js/i18n/en.js, or mark a deliberate one // en-kept: <reason>');
 });
 
-test('every PENDING file still has one (a moved file must leave the list)', () => {
-  assert.deepEqual([...PENDING].sort(), PENDING, 'PENDING is sorted');
-  for (const f of PENDING) assert.ok(FILES.includes(f), `${f} exists`);
-  assert.deepEqual(PENDING.filter(f => englishLiterals(source(f), f).length === 0), [], 'these files hold no English literal now: take them off PENDING');
-  for (const f of Object.keys(KEPT_FILES)) assert.ok(FILES.includes(f), `${f} exists`);
-});
-
-test('PENDING stays under its ceiling, and the en-kept markers are the ones counted', () => {
-  assert.ok(PENDING.length <= PENDING_MAX, `PENDING holds ${PENDING.length} files, at most ${PENDING_MAX}`);
+test('the en-kept markers are the ones counted', () => {
   const markers = FILES.reduce((n, f) => n + (source(f).match(/\/\/\s*en-kept:/g) ?? []).length, 0);
   assert.equal(markers, EN_KEPT, 'en-kept markers under client/js: a task that adds or removes one updates EN_KEPT');
 });
