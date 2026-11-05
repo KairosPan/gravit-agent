@@ -1,7 +1,7 @@
 // face/client/js/render/messages.js — the Messages screen on the host's facts (spec 2026-10-19 §7 "Stage 1"):
 // a conversation (head, thread, composer, the status line), the new-message screen, the empty state, Details.
 import { esc, attrs, cls } from '../html.js';
-import { t, th, thn, sayOf } from '../i18n/words.js';
+import { t, th, thn, sayOf, rawHtml } from '../i18n/words.js';
 import { icon } from '../icons.js';
 import { maskExcerpt } from '../mask.js';
 import { fmtDate } from '../time.js';
@@ -56,12 +56,12 @@ function jobsChip(conv, state) {
 
 function headRight(conv, state) {
   const working = conv.running ? `<span class="status up"><span class="status-dot"></span>${th('thread.working')}</span>` : '';
-  return jobsChip(conv, state) + working + `<button type="button"${attrs({ class: cls('btn-sm', state.detailsOpen && 'pressed'), 'data-action': 'toggleDetails', 'aria-expanded': state.detailsOpen ? 'true' : 'false' })}>${th('details.title')}${icon('chevRight', 14, 2.2)}</button>`;
+  return jobsChip(conv, state) + working + `<button type="button"${attrs({ class: cls('btn-sm', state.detailsOpen && 'pressed'), 'data-action': 'toggleDetails', 'aria-expanded': state.detailsOpen ? 'true' : 'false' })}>${th('details.title')}${icon('chevRight', 14, 2.2)}</button>`; // words-order: Details' name and its chevron
 }
 
 export function renderHead(conv, state) {
   if (conv.kind !== 'group') return `<header class="head"><h1 class="head-title">${esc(maskExcerpt(conv.title))}</h1>${headRight(conv, state)}</header>`;
-  const names = conv.members.map(m => senderName(m, state)).join(' · ');
+  const names = conv.members.map(m => senderName(m, state)).join(' · '); // words-order: the members' names under the visual separator
   return `<header class="head centered"><div class="head-right">${headRight(conv, state)}</div>${cluster(conv.members, 44, state)}` +
     `<div class="head-task">${esc(maskExcerpt(conv.title))}</div><div class="dim members">${thn('thread.members', conv.members.length, { names })}</div></header>`;
 }
@@ -100,7 +100,7 @@ function usageRows(conv) {
   const v = statsView(conv.stats, tu);
   if (v) {
     if (v.cache !== null) rows.push([t('details.cacheHit'), `${Math.round(v.cache * 100)}%`]);
-    rows.push([t('details.turnsSteps'), esc(`${v.turns} · ${v.steps}`)]);
+    rows.push([t('details.turnsSteps'), esc(t('details.turnsStepsValue', { turns: v.turns, steps: v.steps }))]);
     if (v.modelMs !== null) rows.push([t('details.modelTime'), esc(durationText(v.modelMs))]);
     if (v.toolMs !== null) rows.push([t('details.toolTime'), esc(durationText(v.toolMs))]);
     if (v.firstTokenMs !== null) rows.push([t('details.firstToken'), esc(durationText(v.firstTokenMs))]);
@@ -145,8 +145,10 @@ function rowKeys(conv, state) {
 }
 
 // the conversation's subagent children: who, how they run, Stop (asked twice) on a running continuable one
-const MODE = { 'one-shot': () => th('details.oneShot'), continuable: () => th('details.continuable') };
-const STATE = { running: () => th('details.running'), inactive: () => th('details.notRunning'), unknown: () => th('details.unknown'), unavailable: () => th('details.unavailable') };
+const MODE = { 'one-shot': () => t('details.oneShot'), continuable: () => t('details.continuable') };
+const STATE = { running: () => t('details.running'), inactive: () => t('details.notRunning'), unknown: () => t('details.unknown'), unavailable: () => t('details.unavailable') };
+// a child's mode and state: both in the table's order, or the one it has
+const childMeta = (mode, state) => (mode && state ? th('details.childMeta', { mode, state }) : esc(mode || state));
 const wordOf = (table, k) => (typeof k === 'string' && Object.hasOwn(table, k) ? table[k]() : '');
 function childrenSection(conv, state) {
   const { children, unavailable } = childrenOf(conv, state.childRows);
@@ -155,7 +157,7 @@ function childrenSection(conv, state) {
     const asking = state.confirm?.action === 'stopChild' && state.confirm?.id === c.id;
     const stop = !c.canStop ? '' : asking ? confirmPair(t('details.yesStop'))
       : `<button type="button" class="btn-sm" data-action="stopChild" data-parent="${esc(conv.id)}" data-child="${esc(c.id)}" data-label="${esc(c.label)}">${th('details.stop')}</button>`;
-    return `<div class="child-row"><span class="child-name">${esc(c.label)}</span><span class="dim">${[wordOf(MODE, c.mode), wordOf(STATE, c.state)].filter(Boolean).join(' · ')}</span>${stop}</div>`;
+    return `<div class="child-row"><span class="child-name">${esc(c.label)}</span><span class="dim">${childMeta(wordOf(MODE, c.mode), wordOf(STATE, c.state))}</span>${stop}</div>`;
   }).join('');
   return `<section class="dsec"><div class="dsec-label">${th('details.children')}</div>${unavailable ? `<div class="dsec-line dim">${th('details.childrenUnavailable')}</div>` : rows}</section>`;
 }
@@ -168,7 +170,7 @@ function jobMeta(job, now) {
   if (!isLive(job) || !Number.isFinite(job.startedAt)) return esc(metaLine(job, now));
   const head = metaLine({ ...job, startedAt: null }, now);
   const clock = `<span${attrs({ 'data-job-clock': job.startedAt })}>${esc(clockText(now - job.startedAt))}</span>`;
-  return head ? `${esc(head)} · ${clock}` : clock;
+  return head ? th('jobs.metaClock', { meta: head, clock: rawHtml(clock) }) : clock;
 }
 function jobDetails(job, state, now) {
   const live = isLive(job);

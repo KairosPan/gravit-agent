@@ -132,13 +132,13 @@ export function roundEndLine(view) {
   // each group's line, its names the bots' own, its label the table's
   const group = (state, line) => {
     const names = turns.filter((turn) => turn && turn.state === state).map((turn) => (typeof turn.name === "string" && turn.name !== "" ? turn.name : String(turn.bot)));
-    return names.length === 0 ? null : line(names.join(", "));
+    return names.length === 0 ? null : line(names.join(t("common.list.sep")));
   };
   // an outcome the face has no words for is dsh's, drawn as it comes
   const head = view.outcome === "capped" ? t("thread.round.capped")
     : view.outcome === "superseded" ? t("thread.round.superseded")
     : view.outcome == null ? t("thread.round.ended") : String(view.outcome);
-  return [t("thread.round.number", { n: String(view.round ?? "?") }), head,
+  return [t("thread.round.number", { n: String(view.round ?? "?") }), head, // words-order: the round's parts under the visual separator
     group("answered", (names) => t("thread.round.answered", { names })), group("passed", (names) => t("thread.round.passed", { names })),
     group("failed", (names) => t("thread.round.failed", { names })), group("timed-out", (names) => t("thread.round.timedOut", { names }))]
     .filter((part) => part !== null).join(" · ");

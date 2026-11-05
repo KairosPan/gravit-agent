@@ -35,7 +35,7 @@ export function previewOf(conv, state = null) {
   const who = m.from === 'you' ? '' : senderName(m.from, state);
   const name = m.data?.name ?? who;
   const line = spokenLine(m);
-  return conv.kind === 'group' && name ? `${name}: ${line}` : line;
+  return conv.kind === 'group' && name ? t('list.preview.from', { name, line }) : line;
 }
 
 function rowMark(conv, state) {

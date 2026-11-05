@@ -32,13 +32,13 @@ export function rowTime(ts, now) {
 
 export function divider(ts, prev, now) {
   if (prev != null && ts - prev < 15 * MIN) return null;
-  if (prev == null || !sameDay(ts, prev)) return `${dayLabel(ts, now)} ${fmtClock(ts)}`;
+  if (prev == null || !sameDay(ts, prev)) return t('time.dayClock', { day: dayLabel(ts, now), clock: fmtClock(ts) });
   return fmtClock(ts);
 }
 
 export function fmtDate(ts) {
   const d = new Date(ts);
-  return `${MONTHS()[d.getMonth()]} ${d.getDate()}`;
+  return t('time.date', { month: MONTHS()[d.getMonth()], day: d.getDate() });
 }
 
 // a call's length as m:ss

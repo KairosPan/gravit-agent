@@ -6,6 +6,7 @@ import {
   modelRefusalLine, encodeBase64, contentParts, attachmentsLine, isImageSrc,
 } from '../../client/js/composer/files.js';
 import { spoken } from './helpers/spoken.js';
+import { withTable } from '../../client/js/i18n/words.js';
 
 const MiB = 1048576;
 let n = 0;
@@ -118,4 +119,9 @@ test('history\'s names: an unnamed image reads image', () => {
 test('an img src is drawn only for an object URL or an inline image of the four kinds; any other scheme is not', () => {
   for (const ok of ['blob:http://127.0.0.1:3090/1f2e', 'data:image/png;base64,AA', 'data:image/jpeg;base64,AA', 'data:image/webp;base64,AA', 'data:image/gif;base64,AA']) assert.equal(isImageSrc(ok), true, ok);
   for (const no of ['https://x.test/a.png', 'http://x.test/a.png', 'data:image/svg+xml;base64,AA', 'data:text/html;base64,AA', 'data:image/png,AA', 'javascript:alert(1)', ' blob:x', '', null, undefined, 7]) assert.equal(isImageSrc(no), false, String(no));
+});
+
+test("a file's meta line is in the table's order, and the attachments' separator is the table's", () => {
+  withTable({ 'composer.fileMeta': '{size} ({ext})' }, () => assert.equal(metaText({ name: 'q3.csv', bytes: 2936013 }), '2.8 MB (CSV)'));
+  withTable({ 'common.list.sep': '、' }, () => assert.equal(attachmentsLine([{ type: 'image', name: 'chart.png' }, { type: 'file', name: 'q3.csv' }]), 'chart.png、q3.csv'));
 });

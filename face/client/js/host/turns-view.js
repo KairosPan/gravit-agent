@@ -51,7 +51,7 @@ export function pillsText(view) {
   const second = [];
   if (view.tokens !== null) second.push(t('details.pill.tokens', { count: compactTokens(view.tokens) }));
   if (view.cache !== null) second.push(t('details.pill.cache', { pct: Math.round(view.cache * 100) }));
-  return [first.join(' · '), second.join(' · ')];
+  return [first.join(' · '), second.join(' · ')]; // words-order: the pills' figures under the visual separator
 }
 
 // 999, 4.2k, 182k, 1.3M; the unit is chosen after rounding, so 9,999 is 10k and 999,999 is 1.0M
@@ -66,23 +66,24 @@ export function compactTokens(n) {
 }
 
 const pad = n => String(n).padStart(2, '0');
-const hours = secs => `${Math.floor(secs / 3600)}h ${pad(Math.floor(secs / 60) % 60)}m`;
+const hours = secs => t('time.duration.hours', { h: Math.floor(secs / 3600), m: pad(Math.floor(secs / 60) % 60) });
+const minutes = secs => t('time.duration.minutes', { m: Math.floor(secs / 60), s: pad(secs % 60) });
 
-// Usage's times: 1.4 s, 42 s, 4m 12s, 1h 04m; the unit is chosen after rounding, so 9,999 ms is 10 s
+// Usage's times: 1.4 s, 42 s, 4m 12s, 1h 04m, their units the table's; the unit is chosen after rounding, so 9,999 ms is 10 s
 export function durationText(ms) {
   const v = Math.max(0, num(ms));
   const tenth = Math.round(v / 100) / 10;
-  if (tenth < 10) return `${tenth.toFixed(1)} s`;
+  if (tenth < 10) return t('time.duration.seconds', { n: tenth.toFixed(1) });
   const secs = Math.max(10, Math.floor(v / 1000));
-  if (secs < 60) return `${secs} s`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ${pad(secs % 60)}s`;
+  if (secs < 60) return t('time.duration.seconds', { n: secs });
+  if (secs < 3600) return minutes(secs);
   return hours(secs);
 }
 
 // a job's running time: 42s, 3m 04s, 1h 04m
 export function clockText(ms) {
   const secs = Math.max(0, Math.floor(num(ms) / 1000));
-  if (secs < 60) return `${secs}s`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ${pad(secs % 60)}s`;
+  if (secs < 60) return t('time.clock.seconds', { n: secs });
+  if (secs < 3600) return minutes(secs);
   return hours(secs);
 }

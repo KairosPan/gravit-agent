@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { englishLiterals, wordsCalls, wordsBindings, storedWords } from './helpers/words-scan.js';
+import { englishLiterals, wordsCalls, wordsBindings, storedWords, assembled } from './helpers/words-scan.js';
 
 const ROOT = fileURLToPath(new URL('../../client/js/', import.meta.url));
 const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(join(dir, e.name)) : e.name.endsWith('.js') ? [join(dir, e.name)] : []);
@@ -175,4 +175,58 @@ test("Identity's reducers read no table", async () => {
     const ticked = reducers.identityTick(loaded, { row: 'brief', network: 'slack', on: true });
     assert.ok(ticked.identity.data === read);
   });
+});
+
+// a sentence assembled in code order cannot be reordered by a table (plan 7 Tasks 4-5): each becomes one key whose value holds
+// the joins as params. ASSEMBLED lists the files that still assemble one; Task 4 took the thread's, the list's and the
+// clocks' files out, Task 5 empties it
+const ASSEMBLED = [
+  'host/account-view.js',
+  'host/desk-view.js',
+  'host/modules-view.js',
+  'host/run-sheet-view.js',
+  'host/runs-view.js',
+  'host/sheet-money.js',
+  'host/trade-view.js',
+  'render/account.js',
+  'render/desk.js',
+  'render/discover.js',
+  'render/identity.js',
+  'render/lunhui/indices.js',
+  'render/lunhui/intraday.js',
+  'render/lunhui/sources.js',
+  'render/lunhui/stock.js',
+  'render/markets.js',
+  'render/owner.js',
+  'render/trade.js',
+];
+
+const joins = src => assembled(src, 'snippet.js').map(a => a.line);
+
+test('assembled finds a words call beside another hole, in a join of an array literal and in a + chain', () => {
+  for (const src of ["const a = x => `${t('a.b')} ${x}`;", "const a = x => `${x} · ${t('a.b')}`;", "const a = x => `${x}: ${esc(t('a.b'))}`;",
+    "const a = (x, ok) => `${ok ? t('a.b') : t('a.c')} (${x})`;", "const a = x => [x, t('a.b')].filter(Boolean).join(' · ');",
+    "const a = x => [t('a.b'), x].join(', ');", "const a = x => [t('a.b'), x].join();", "const a = x => t('a.b') + x;", "const a = x => x + ': ' + tn('a.b', 2);",
+    "const a = x => `${sayOf(x)} ${x}`;", "const a = () => `${th('a.b')}${icon('x')}`;"]) {
+    assert.deepEqual(joins(src), [1], src);
+  }
+});
+
+test('assembled passes markup between holes, a call that draws markup, a join of markup, a literal concatenation and a marked join', () => {
+  for (const src of ["const a = x => `<b>${t('a.b')}</b><i>${x}</i>`;", "const a = x => `${key('k', t('a.b'))}${key('j', x)}`;", "const a = x => `<b title=\"${t('a.b')}\">${x}</b>`;",
+    "const a = x => [t('a.b'), x].map(w => `<li>${w}</li>`).join('');", "const a = () => '<p>' + t('a.b') + '</p>';", "const a = x => `${t('a.b', { x })}`;",
+    "const a = x => [x, t('a.b')].join(' · '); // words-order: a list of codes", "const a = x => [x, y].join(' ');", "const a = x => [t('a.b'), x].join(sep);",
+    "const a = x => `${x} ${y}`;"]) {
+    assert.deepEqual(joins(src), [], src);
+  }
+});
+
+test('no client file outside ASSEMBLED assembles a sentence', () => {
+  const found = FILES.filter(f => !ASSEMBLED.includes(f)).flatMap(f => assembled(source(f), f).map(a => `${f}:${a.line} ${a.text}`));
+  assert.deepEqual(found, [], 'make each one key whose value holds the joins as params, or mark a join that is no sentence // words-order: <reason>');
+});
+
+test('every ASSEMBLED file still does', () => {
+  assert.deepEqual([...ASSEMBLED].sort(), ASSEMBLED, 'ASSEMBLED is sorted');
+  assert.deepEqual(ASSEMBLED.filter(f => assembled(source(f), f).length === 0), [], 'a file that no longer assembles a sentence leaves ASSEMBLED');
 });

@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { railView, activeTurn, statsView, pillsText, compactTokens, durationText, clockText } from '../../client/js/host/turns-view.js';
+import { withTable } from '../../client/js/i18n/words.js';
 
 const entry = (turn, seq) => ({ turn, seq, prompt: `p${turn}`, response: `r${turn}` });
 const stats = (over = {}) => ({ turns: 7, steps: 41, llmMs: 0, toolMs: 0, ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0, ...over });
@@ -94,4 +95,11 @@ test('tokens, durations and clocks read as the constraints write them', () => {
   assert.equal(clockText(42_000), '42s');
   assert.equal(clockText(184_000), '3m 04s');
   assert.equal(clockText(3_840_000), '1h 04m');
+});
+
+test("a duration's and a clock's units are the table's", () => {
+  withTable({ 'time.duration.seconds': '{n}秒', 'time.duration.minutes': '{m}分{s}秒', 'time.duration.hours': '{h}时{m}分', 'time.clock.seconds': '{n}秒' }, () => {
+    assert.deepEqual([durationText(1400), durationText(42_000), durationText(252_000), durationText(3_840_000)], ['1.4秒', '42秒', '4分12秒', '1时04分']);
+    assert.deepEqual([clockText(42_000), clockText(184_000), clockText(3_840_000)], ['42秒', '3分04秒', '1时04分']);
+  });
 });

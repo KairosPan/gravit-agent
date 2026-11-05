@@ -8,6 +8,8 @@ export const EN = Object.freeze({
   'common.no': 'No',
   'common.close': 'Close',
   'common.loading': 'Loading…',
+  // a list's prose separator (a list under the visual separator ` · ` keeps it in code)
+  'common.list.sep': ', ',
 
   // clocks, days and ages (time.js)
   'time.today': 'Today',
@@ -28,6 +30,13 @@ export const EN = Object.freeze({
   'time.ago.minutes': { one: '{n} minute ago', other: '{n} minutes ago' },
   'time.ago.hours': { one: '{n} hour ago', other: '{n} hours ago' },
   'time.ago.days': { one: '{n} day ago', other: '{n} days ago' },
+  'time.date': '{month} {day}',
+  'time.dayClock': '{day} {clock}',
+  // Usage's times and a job's clock (host/turns-view.js)
+  'time.duration.seconds': '{n} s',
+  'time.duration.minutes': '{m}m {s}s',
+  'time.duration.hours': '{h}h {m}m',
+  'time.clock.seconds': '{n}s',
 
   // the first level (render/rail.js renderNav)
   'nav.expand': 'Expand navigation',
@@ -56,6 +65,7 @@ export const EN = Object.freeze({
   'list.untitled': 'Untitled',
   'list.you': 'You',
   'list.role': 'Role · {name}',
+  'list.preview.from': '{name}: {line}',
 
   // the list's search (render/rail.js, host/search-view.js)
   'search.box': 'Search conversations',
@@ -172,6 +182,7 @@ export const EN = Object.freeze({
   'thread.file': 'File',
   'thread.image': 'Image',
   'thread.imageType': 'IMAGE',
+  'thread.imageMeta': '{type} · {size}',
   'thread.context': 'context · {source}',
   'thread.report': 'Report from {child}: {text}',
   'thread.aChild': 'a child',
@@ -211,6 +222,12 @@ export const EN = Object.freeze({
   'thread.seat.batchReceipt': 'Batch · {parts}',
   'thread.seat.venue': 'Account seat',
   'thread.seat.yourCall': 'Your call: {line}',
+  'thread.seat.at': '{line} · {venue}',
+  'thread.seat.orderLine': '{side} {size} · {type}',
+  'thread.seat.sideWhat': '{side} {what}',
+  'thread.seat.batchLegs': '{head}: {legs}',
+  'thread.seat.legSep': '; ',
+  'thread.seat.refusal': '{code} · {message}',
 
   // the composer (render/messages.js renderComposer, composer/*.js): the box, the menus, the files and their limits
   'composer.placeholder': 'Tell Gravit…',
@@ -233,6 +250,7 @@ export const EN = Object.freeze({
   'composer.drop': 'Drop files or images here',
   'composer.image': 'Image',
   'composer.noExt': 'FILE',
+  'composer.fileMeta': '{ext} · {size}',
   'composer.size.b': '{n} B',
   'composer.size.kb': '{n} KB',
   'composer.size.mb': '{n} MB',
@@ -272,6 +290,7 @@ export const EN = Object.freeze({
   'details.notRunning': 'Not running',
   'details.unknown': 'Unknown',
   'details.unavailable': 'Unavailable',
+  'details.childMeta': '{mode} · {state}',
   'details.stop': 'Stop',
   'details.yesStop': 'Yes, stop',
   'details.usage': 'Usage',
@@ -280,6 +299,7 @@ export const EN = Object.freeze({
   'details.context': 'Context',
   'details.cacheHit': 'Cache hit',
   'details.turnsSteps': 'Turns · steps',
+  'details.turnsStepsValue': '{turns} · {steps}',
   'details.modelTime': 'Model time',
   'details.toolTime': 'Tool time',
   'details.firstToken': 'First token',
@@ -295,6 +315,7 @@ export const EN = Object.freeze({
   'jobs.chip.running': { one: '{n} job running', other: '{n} jobs running' },
   'jobs.chip.finished': { one: '{n} job finished', other: '{n} jobs finished' },
   'jobs.finished': 'Finished · {n}',
+  'jobs.metaClock': '{meta} · {clock}',
   'jobs.clear': 'Clear',
   'jobs.copy': 'Copy',
   'jobs.copyCommand': 'Copy command',
@@ -1476,6 +1497,7 @@ export const EN = Object.freeze({
   'channel.run.none': 'no runs yet',
   'channel.run.noneSealed': 'no sealed run with an artifact yet',
   'channel.count.artifacts': { one: '{n} artifact', other: '{n} artifacts' },
+  'channel.count.artifactsNamed': { one: '{n} artifact: {names}', other: '{n} artifacts: {names}' },
   'channel.count.items': { one: '{n} item', other: '{n} items' },
   'channel.count.fields': { one: '{n} field', other: '{n} fields' },
   'channel.chip.notEvaluable': '{module}: not evaluable',

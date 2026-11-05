@@ -32,7 +32,7 @@ export function parseArgs(raw) {
 const has = v => v !== undefined && v !== null && v !== '';
 const words = (...parts) => parts.filter(has).join(' ');
 const money = n => `$${Number(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
-const at = (line, venue) => (typeof venue === 'string' && venue !== '' ? `${line} · ${venue}` : line);
+const at = (line, venue) => (typeof venue === 'string' && venue !== '' ? t('thread.seat.at', { line, venue }) : line);
 // a seat order's type in words: "market", "limit 187.4", "stop 150 limit 148", "trailing 2%"
 function typeWord(a) {
   const type = a.orderType ?? 'market';
@@ -50,7 +50,7 @@ function typeWord(a) {
 // one order in words, without its venue: "buy $100 of AAPL · market", "sell 10 AAPL · limit 187.4"
 function orderWords(a) {
   const size = has(a.usd) ? t('thread.seat.usdOf', { usd: money(a.usd), symbol: has(a.symbol) ? a.symbol : '?' }) : words(a.qty, a.symbol);
-  return `${has(a.side) ? a.side : t('thread.seat.order')} ${size} · ${typeWord(a)}`;
+  return t('thread.seat.orderLine', { side: has(a.side) ? a.side : t('thread.seat.order'), size, type: typeWord(a) });
 }
 export function seatLine(name, a = {}) {
   const raw = rawOf(name);
@@ -60,7 +60,7 @@ export function seatLine(name, a = {}) {
     case 'portfolio_live_batch': {
       const legs = Array.isArray(a.legs) ? a.legs.filter(l => l && typeof l === 'object') : [];
       const head = tn('thread.seat.batch', legs.length);
-      return legs.length ? `${head}: ${legs.map(orderWords).join('; ')}` : head;
+      return legs.length ? t('thread.seat.batchLegs', { head, legs: legs.map(orderWords).join(t('thread.seat.legSep')) }) : head;
     }
     case 'portfolio_live_amend': return at(t('thread.seat.amend', { order: has(a.order) ? a.order : '?' }), a.venue);
     case 'portfolio_live_cancel': return at(t('thread.seat.cancel', { order: has(a.order) ? a.order : '?' }), a.venue);
@@ -74,9 +74,9 @@ export function seatLine(name, a = {}) {
     case 'portfolio_pay': {
       let host = '';
       try { host = new URL(String(a.url)).host; } catch { host = typeof a.url === 'string' ? a.url : ''; }
-      return `${t('thread.seat.pay', { amount: money(has(a.maxAmount) ? a.maxAmount : 0) })}${host ? ` · ${host}` : ''}`;
+      return at(t('thread.seat.pay', { amount: money(has(a.maxAmount) ? a.maxAmount : 0) }), host);
     }
-    case 'portfolio_order': return `${has(a.side) ? a.side : t('thread.seat.order')} ${words(a.qty, a.base) || '?'}`;
+    case 'portfolio_order': return t('thread.seat.sideWhat', { side: has(a.side) ? a.side : t('thread.seat.order'), what: words(a.qty, a.base) || '?' });
     case 'portfolio_execute': return t('thread.seat.execute', { account: has(a.account) ? a.account : '?' });
     case 'portfolio_transfer': return t('thread.seat.transfer', { what: words(a.amount, has(a.token) ? a.token : 'USD'), from: has(a.from) ? a.from : '?', to: has(a.to) ? a.to : '?' });
     default: return at(raw, a.venue);
@@ -85,7 +85,7 @@ export function seatLine(name, a = {}) {
 
 // a seat write's answer, lifted under its tool row (spec 2026-10-20 §6.2): the card the Account raised, the order it placed or
 // canceled, its refusal in its own words, a batch's count; anything else lifts nothing. `seat: true` routes the reload.
-const refusalWords = (v, text) => (typeof v.code === 'string' && typeof v.message === 'string' ? `${v.code} · ${v.message}` : typeof v.message === 'string' ? v.message : text);
+const refusalWords = (v, text) => (typeof v.code === 'string' && typeof v.message === 'string' ? t('thread.seat.refusal', { code: v.code, message: v.message }) : typeof v.message === 'string' ? v.message : text);
 // dsh hands a failed call's text to the thread as `Error: <the server's words>`; the lift reads the words
 const unprefixed = text => (typeof text === 'string' ? text.replace(/^Error:\s*/, '') : '');
 export function seatLift(name, args, text, isError, callId) {
@@ -115,6 +115,7 @@ export function seatLift(name, args, text, isError, callId) {
     if (placed > 0 || (cards === 0 && refused === 0)) parts.push(t('thread.seat.legsPlaced', { placed, total: legs.length }));
     if (cards > 0) parts.push(tn('thread.seat.cardsRaised', cards));
     if (refused > 0) parts.push(t('thread.seat.legsRefused', { n: refused }));
+    // words-order: the receipt's parts under the visual separator
     return { kind: 'receipt', text: t('thread.seat.batchReceipt', { parts: parts.join(' · ') }), data: { seat: true, callId } };
   }
   return null;

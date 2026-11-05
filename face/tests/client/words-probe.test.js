@@ -120,7 +120,7 @@ test('a word table read after import follows the table (the Account tabs, the hi
     assert.ok(html.includes(`>${PROBE[key]}<`), `the range ${key} is drawn from the table`);
   }
   const old = new Date(2026, 2, 3, 9, 0).getTime();
-  assert.equal(withTable(PROBE, () => fmtDate(old)), `${PROBE['time.month.mar']} 3`, "a month is the table's");
+  assert.equal(withTable(PROBE, () => fmtDate(old)), PROBE['time.date'].replace('{month}', PROBE['time.month.mar']).replace('{day}', '3'), "a month and the date's order are the table's");
 });
 
 // a seg's value is a key the face reads (a theme, a tab, a range), never the word it draws: a word as the value would change

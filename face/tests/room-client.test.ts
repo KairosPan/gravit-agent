@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { avatarGlyph, foldMembers, gateSpeaker, isMemberSession, isMentionText, normalizeRoomDiscussion, normalizeRoomView, roomAnswerDisplay, roundEndLine, stripChips } from "../client/js/wire/room.js";
 import { bucketFor } from "../client/js/wire/grouping.js";
+import { withTable } from "../client/js/i18n/words.js";
 
 test("avatarGlyph is deterministic per id and differs between the two template bots", () => {
   assert.equal(avatarGlyph("buffett"), avatarGlyph("buffett"));
@@ -80,6 +81,11 @@ test("roundEndLine reads the outcome and each state group; capped and superseded
   assert.equal(roundEndLine({ round: 1, outcome: "settled", turns }), "round 1 · settled · answered: 巴菲特型 · passed: 投机型 · timed out: Macro");
   assert.match(roundEndLine({ round: 2, outcome: "capped", turns: [] }), /^round 2 · capped/);
   assert.match(roundEndLine({ round: 1, outcome: "superseded", turns: [] }), /superseded/);
+});
+
+test("roundEndLine's names are joined by the table's separator", () => {
+  const turns = [{ bot: "b", name: "巴菲特型", state: "answered" }, { bot: "s", name: "投机型", state: "answered" }];
+  assert.equal(withTable({ "common.list.sep": "、" }, () => roundEndLine({ round: 1, outcome: "settled", turns })), "round 1 · settled · answered: 巴菲特型、投机型");
 });
 
 test("gateSpeaker names the member's bot for a member's gate, else the fallback", () => {

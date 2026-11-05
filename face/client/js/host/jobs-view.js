@@ -44,5 +44,5 @@ export function metaLine(job, now) {
   const middle = live ? (typeof job?.progress === 'string' ? job.progress : '') : endLine(job);
   const end = !live && Number.isFinite(job?.finishedAt) ? job.finishedAt : now;
   const clock = Number.isFinite(job?.startedAt) ? clockText(end - job.startedAt) : '';
-  return [typeof job?.kind === 'string' ? job.kind : '', middle, clock].filter(Boolean).join(' · ');
+  return [typeof job?.kind === 'string' ? job.kind : '', middle, clock].filter(Boolean).join(' · '); // words-order: a job's parts under the visual separator
 }

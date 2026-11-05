@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MIN, HOUR, DAY, fmtClock, rowTime, divider, fmtDate, sameDay } from '../../client/js/time.js';
+import { withTable } from '../../client/js/i18n/words.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime(); // Oct 9 2026 14:07 local
 
@@ -45,4 +46,9 @@ test('ago reads just now, minutes, hours and days, one of each in the singular',
   assert.equal(ago(NOW - 3 * HOUR, NOW), '3 hours ago');
   assert.equal(ago(NOW - DAY, NOW), '1 day ago');
   assert.equal(ago(NOW - 4 * DAY, NOW), '4 days ago');
+});
+
+test("a date and a divider's day and clock are in the table's order", () => {
+  withTable({ 'time.date': '{day} {month}' }, () => assert.equal(fmtDate(NOW), '9 Oct'));
+  withTable({ 'time.dayClock': '{clock}, {day}' }, () => assert.equal(divider(NOW - DAY, null, NOW), '14:07, Yesterday'));
 });

@@ -86,7 +86,7 @@ export function extOf(name) {
   return ext ? ext.toUpperCase() : t('composer.noExt');
 }
 
-export const metaText = file => `${extOf(file.name)} · ${sizeText(file.bytes)}`;
+export const metaText = file => t('composer.fileMeta', { ext: extOf(file.name), size: sizeText(file.bytes) });
 
 export const limitsLine = limits => t('composer.limit.line', { n: limits.maxImagesPerMessage, mb: mb(limits.maxImageBytes) });
 
@@ -113,7 +113,7 @@ export function contentParts(text, files, dataOf) {
   return parts;
 }
 
-/** A history message's attachments (the mapper's `{type: 'image' | 'file', name?}`) by name, joined by ', '; an unnamed
+/** A history message's attachments (the mapper's `{type: 'image' | 'file', name?}`) by name, joined by the table's list separator; an unnamed
  *  one reads as its type. */
 export const attachmentsLine = list =>
-  list.map(a => a.name || (a.type === 'image' ? t('composer.anImage') : t('composer.aFile'))).join(', ');
+  list.map(a => a.name || (a.type === 'image' ? t('composer.anImage') : t('composer.aFile'))).join(t('common.list.sep'));

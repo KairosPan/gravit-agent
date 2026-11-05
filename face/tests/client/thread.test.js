@@ -5,6 +5,7 @@ import { renderMessage, renderThread, setMarkdown, chip, key, ticker, withTicker
 import { emptyState } from '../../client/js/data/empty.js';
 import { MIN } from '../../client/js/time.js';
 import { sessionUri } from '../../client/js/composer/draft.js';
+import { withTable } from '../../client/js/i18n/words.js';
 
 const NOW = new Date(2026, 9, 19, 14, 7).getTime();
 const state = emptyState();
@@ -520,4 +521,9 @@ test("a conversation chip's label in a bubble is masked", () => {
   const h = renderMessage(msg({ id: 'e3', from: 'you', text: `see @[use ${SK}](${sessionUri('s9')})` }), conv(), state);
   assert.ok(h.includes(`<span class="ref-chip-label">use ${MASKED}</span>`));
   assert.doesNotMatch(h, /aB3dE6fG9h/);
+});
+
+test("an image card's meta line is in the table's order", () => {
+  const h = withTable({ 'thread.imageMeta': '{size} ({type})' }, () => renderMessage(you([PNG('i1', { offloaded: true })]), conv(), thumbed({})));
+  assert.match(h, /<span class="file-meta">1\.2 MB \(PNG\)<\/span>/);
 });

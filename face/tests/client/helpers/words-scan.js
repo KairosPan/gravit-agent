@@ -234,3 +234,66 @@ export function storedWords(source, file = 'source.js') {
   visit(sf);
   return out;
 }
+
+// a sentence the code assembles in English word order, which no table can reorder (plan 7 Tasks 4-5): a template literal
+// whose holes stand side by side with only whitespace or punctuation between them, one of them holding a words call; a
+// .join(…) over an array literal (through .filter) with a words call among two items or more, its separator whitespace
+// or punctuation; and a + chain joining a words call to anything but a literal. A hole, an item or an operand holds a words
+// call when it is one (through parentheses, a conditional, ||, ?? and && and esc). A join that is no sentence (a class list, a path, a key, a
+// list of codes) carries `// words-order: <reason>` on the line the join starts or on the words call's line, and is not reported
+const ORDERED = /\/\/\s*words-order:/;
+const READ_CALLS = new Set(['t', 'th', 'tn', 'thn', 'sayOf']);
+const BETWEEN = /^[\s\p{P}\p{S}]*$/u;
+const between = text => BETWEEN.test(text) && !/[<>"'=]/.test(text);
+export function assembled(source, file = 'source.js') {
+  const sf = parse(source, file);
+  const lines = source.split('\n');
+  const marked = node => ORDERED.test(lines[lineAt(sf, node.getStart(sf)) - 1] ?? '');
+  // a words call standing as the value itself: through parentheses, a conditional's branches, ||, ?? and &&, and esc(); one
+  // inside any other call (a key, a chip, a nested template) is markup of its own, not a word in this sentence
+  const words = node => {
+    if (!node) return null;
+    if (ts.isParenthesizedExpression(node)) return words(node.expression);
+    if (ts.isConditionalExpression(node)) return words(node.whenTrue) ?? words(node.whenFalse);
+    if (ts.isBinaryExpression(node) && CLIMB_OPS.has(node.operatorToken.kind) && node.operatorToken.kind !== ts.SyntaxKind.PlusToken) return words(node.left) ?? words(node.right);
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      if (READ_CALLS.has(node.expression.text)) return node;
+      if (node.expression.text === 'esc') return words(node.arguments[0]);
+    }
+    return null;
+  };
+  const isLiteral = n => ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isNumericLiteral(n);
+  const out = [];
+  const report = (node, call) => {
+    if (marked(node) || (call && marked(call))) return;
+    out.push({ line: lineAt(sf, node.getStart(sf)), text: node.getText(sf).replace(/\s+/g, ' ').slice(0, 120) });
+  };
+  const visit = node => {
+    if (ts.isTemplateExpression(node)) {
+      const spans = node.templateSpans;
+      for (let i = 0; i + 1 < spans.length; i += 1) {
+        const a = spans[i].expression, b = spans[i + 1].expression;
+        const call = words(a) ?? words(b);
+        if (call && between(spans[i].literal.text)) { report(node, call); break; }
+      }
+    } else if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'join') {
+      const sep = node.arguments[0];
+      let arr = node.expression.expression;
+      while (ts.isCallExpression(arr) && ts.isPropertyAccessExpression(arr.expression) && arr.expression.name.text === 'filter') arr = arr.expression.expression;
+      if (ts.isArrayLiteralExpression(arr) && arr.elements.length >= 2 && (!sep || (isLiteral(sep) && between(sep.text)))) {
+        const call = arr.elements.map(words).find(Boolean);
+        if (call) report(node, call);
+      }
+    } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken
+      && !(ts.isBinaryExpression(node.parent) && node.parent.operatorToken.kind === ts.SyntaxKind.PlusToken)) {
+      const operands = [];
+      const flat = n => { if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken) { flat(n.left); flat(n.right); } else operands.push(n); };
+      flat(node);
+      const call = operands.map(words).find(Boolean);
+      if (call && operands.some(o => !isLiteral(o) && !words(o))) report(node, call);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out.sort((a, b) => a.line - b.line);
+}

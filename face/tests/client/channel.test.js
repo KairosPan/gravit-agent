@@ -8,6 +8,7 @@ import { renderMarkdown } from '../../client/js/wire/markdown.js';
 import { withMiniDocument } from './helpers/mini-dom.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
+import { withTable } from '../../client/js/i18n/words.js';
 
 const NOW = new Date(2026, 9, 20, 10, 0).getTime();
 const alpha = { workspaceId: 'w1', name: 'alpha', title: 'Alpha', dir: '/r/strategies/alpha', isRoot: false, missingDir: false, sessionIds: [] };
@@ -156,4 +157,12 @@ test('a channel with no runs draws no research runs; runs without an artifact sa
   const h = renderChannelScreen(on(t), NOW);
   assert.match(h, />Research runs<[\s\S]*?no sealed run with an artifact yet/); assert.match(h, /r1/); assert.match(h, /0 artifacts/);
   assert.doesNotMatch(h, /older runs not listed/);
+});
+
+test("a research run's artifacts are counted and named in the table's order, their separator the table's", () => {
+  const o = overview();
+  o.body = { ...o.body, runs: [{ run: 'r1', asOf: '2026-10-24', snapshotId: null, sealed: true, kind: 'market', marketRun: null, bytes: 2048,
+    artifacts: { sentiment: { accepted: true, status: null, contractVersion: '1', headline: {} }, theme: { accepted: true, status: null, contractVersion: '1', headline: {} } } }] };
+  const h = withTable({ 'channel.count.artifactsNamed': { one: '{names} ({n})', other: '{names} ({n})' }, 'common.list.sep': '、' }, () => renderChannelScreen(on(o), NOW));
+  assert.match(h, /as of 2026-10-24 · sentiment、theme \(2\) · 2\.0 KB/);
 });

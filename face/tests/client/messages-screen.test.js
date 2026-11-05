@@ -6,6 +6,7 @@ import { currentConversation, renderMessagesScreen, renderHead, renderComposer, 
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { MIN } from '../../client/js/time.js';
+import { withTable } from '../../client/js/i18n/words.js';
 
 const NOW = new Date(2026, 9, 19, 14, 7).getTime();
 const count = (h, re) => (h.match(re) ?? []).length;
@@ -461,4 +462,14 @@ test('the head and Details\' This task draw the title masked', () => {
     assert.doesNotMatch(renderHead(currentConversation(s), s), /aB3dE6fG9h/);
     assert.doesNotMatch(renderDetails(currentConversation(s), s), /aB3dE6fG9h/);
   }
+});
+
+test("Details' turns and steps, a child's mode and state and a live job's meta and clock are in the table's order", () => {
+  const s = listed([conv('a', { usage: { tokenUsage: TOKENS }, stats: STATS })]);
+  assert.match(withTable({ 'details.turnsStepsValue': '{steps} / {turns}' }, () => renderDetails(currentConversation(s), s)), />Turns · steps<[\s\S]*?>41 \/ 7</);
+  const c = R.hostList(listed([conv('a', { live: true, subagentCatalog: [{ id: 'once', createdAt: 2, mode: 'one-shot' }] })]),
+    { conversations: [conv('a', { live: true })], childRows: [{ sessionId: 'once', parentSessionId: 'a', running: false, origin: 'subagent' }] });
+  assert.match(withTable({ 'details.childMeta': '{state} ({mode})' }, () => renderDetails(currentConversation(c), c)), /Subagent[\s\S]*?Not running \(One-shot\)/);
+  const j = withJobs([job('j1', 'running', { progress: 'page 7 of 12' })]);
+  assert.match(withTable({ 'jobs.metaClock': '{clock} ← {meta}' }, () => details(j)), /<span class="job-meta"><span data-job-clock="\d+">3m 04s<\/span> ← bash · page 7 of 12<\/span>/);
 });

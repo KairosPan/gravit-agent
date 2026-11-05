@@ -8,6 +8,7 @@ import { renderRail, renderNav, renderList, previewOf, senderName } from '../../
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { MIN } from '../../client/js/time.js';
+import { withTable } from '../../client/js/i18n/words.js';
 
 const NOW = new Date(2026, 9, 19, 14, 7).getTime();
 const count = (h, re) => (h.match(re) ?? []).length;
@@ -371,4 +372,9 @@ test("a row's title and a search hit's title are masked", () => {
   const byContent = renderList(searched(s, 'zz', { items: [{ sessionId: 'a', snippet: 'the zz', match: [4, 6] }], hasMore: false }), NOW);
   assert.ok(byContent.includes(`row-title">deploy ${SK_MASKED} &lt;b&gt;<`));
   for (const x of [h, byTitle, byContent]) assert.doesNotMatch(x, /aB3dE6fG9h/);
+});
+
+test("a group row's preview names its speaker in the table's order", () => {
+  const g = conv('g', { kind: 'group', messages: [{ id: 'e1', seq: 1, at: NOW, from: 'buffett', kind: 'text', text: '买。', data: { name: '巴菲特型' } }] });
+  withTable({ 'list.preview.from': '{line} — {name}' }, () => assert.equal(previewOf(g, listed([g])), '买。 — 巴菲特型'));
 });

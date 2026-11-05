@@ -48,14 +48,14 @@ function researchRuns(body) {
   if (!Array.isArray(body?.runs) || body.runs.length === 0) return '';
   const v = runsView(body);
   const l = v.latest;
-  const head = l ? `<div class="chan-row"><span class="chan-row-name mono">${esc([l.run, t('channel.run.asOf', { asOf: l.asOf ?? '—' }), l.session && t('channel.run.session', { session: l.session }), l.snapshotId && t('channel.run.snapshot', { id: l.snapshotId }), l.marketRun && t('channel.run.marketRun', { run: l.marketRun })].filter(Boolean).join(' · '))}</span></div>` +
+  const head = l ? `<div class="chan-row"><span class="chan-row-name mono">${esc([l.run, t('channel.run.asOf', { asOf: l.asOf ?? '—' }), l.session && t('channel.run.session', { session: l.session }), l.snapshotId && t('channel.run.snapshot', { id: l.snapshotId }), l.marketRun && t('channel.run.marketRun', { run: l.marketRun })].filter(Boolean).join(' · '))}</span></div>` + // words-order: a run's facts under the visual separator
     (l.chips.length ? `<div class="btn-row">${l.chips.map(c => chip(c.text)).join('')}</div>` : '') +
     (l.expectation ? kv(l.expectation.map(([k, w]) => [k, esc(w)])) : '') +
     (l.review ? `<div class="dsec-line">${esc(l.review)}</div>` : '') +
     l.details.map(d => `<details class="acct-shown"><summary>${esc(d.module)}</summary><div class="dsec-line mono">${esc(d.json)}</div></details>`).join('') : '';
   const runLines = v.rows.map(r => {
-    const arts = `${tn('channel.count.artifacts', r.artifacts.length)}${r.artifacts.length ? `: ${r.artifacts.join(', ')}` : ''}`;
-    return `<div class="chan-row dim"><span class="chan-row-name mono">${esc(r.run)}</span><span class="chan-row-meta">${esc([t('channel.run.asOf', { asOf: r.asOf ?? '—' }), arts, bytesWord(r.bytes), !r.sealed && t('channel.run.unsealed')].filter(Boolean).join(' · '))}</span></div>`;
+    const arts = r.artifacts.length ? tn('channel.count.artifactsNamed', r.artifacts.length, { names: r.artifacts.join(t('common.list.sep')) }) : tn('channel.count.artifacts', 0);
+    return `<div class="chan-row dim"><span class="chan-row-name mono">${esc(r.run)}</span><span class="chan-row-meta">${esc([t('channel.run.asOf', { asOf: r.asOf ?? '—' }), arts, bytesWord(r.bytes), !r.sealed && t('channel.run.unsealed')].filter(Boolean).join(' · '))}</span></div>`; // words-order: a run's facts under the visual separator
   }).join('');
   return sec(t('channel.researchRuns'), head + (v.empty ? none(v.empty) : '') + runLines + (v.omitted > 0 ? none(t('channel.run.omitted', { n: v.omitted })) : ''));
 }
@@ -109,13 +109,13 @@ export function renderChannelScreen(state, now) {
   if (c.status === 'missing' || (!listed && (state.channels ?? []).length > 0)) return shell(`<div class="chan-none">${th('channel.notFound')}</div>`);
   const data = c.data;
   if (!data) {
-    if (c.status === 'failed') return shell(`<div class="chan-none">${th('channel.unavailable')} ${retry(id)}</div>`);
+    if (c.status === 'failed') return shell(`<div class="chan-none">${th('channel.unavailable')} ${retry(id)}</div>`); // words-order: a line, then its key
     return shell(`<div class="chan-none dim">${th('common.loading')}</div>`);
   }
   const status = data.status && typeof data.status === 'object' ? data.status : {};
   const head = (status.status ? chip(status.status) : '') + '<span class="spacer"></span>' +
     `<button type="button" class="btn-primary small" data-action="newRound" data-id="${esc(id)}">${th('channel.newRound')}</button>`;
-  const stale = c.status === 'failed' ? `<div class="${cls('chan-stale', 'dim')}">${th('channel.stale', { at: fmtClock(c.at ?? now) })} ${retry(id)}</div>` : '';
+  const stale = c.status === 'failed' ? `<div class="${cls('chan-stale', 'dim')}">${th('channel.stale', { at: fmtClock(c.at ?? now) })} ${retry(id)}</div>` : ''; // words-order: a line, then its key
   const body = data.body && typeof data.body === 'object' ? data.body : {};
   return shell(
     stale + headline(status) + thesis(body) + latest(body) + researchRuns(body) +

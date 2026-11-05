@@ -8,6 +8,7 @@ import { describeOrder } from '../../src/orders.ts';
 import * as kinds from '../../client/js/host/kinds.js';
 import { renderMessage } from '../../client/js/render/thread.js';
 import { emptyState } from '../../client/js/data/empty.js';
+import { withTable } from '../../client/js/i18n/words.js';
 
 const { SEAT_TOOLS, isSeatWriteTool, parseArgs, seatLine, rememberCall, toMessages, seatLift, reasonArgs } = kinds;
 
@@ -370,4 +371,23 @@ test("the you row carries the bubble's attachments", () => {
   assert.equal(m.from, 'you'); assert.equal(m.text, '');
   assert.deepEqual(m.data.attachments, [{ type: 'image', ...img }, { type: 'file', attachmentId: 'att-2', name: 'q3.csv', bytes: 20 }]);
   assert.equal(Object.hasOwn(one(0).data, 'attachments'), false, 'a message with none carries none');
+});
+
+test("a seat write's words are in the table's order: the venue, an order's side, size and type, a batch's legs, a refusal", () => {
+  withTable({ 'thread.seat.at': '{venue} ← {line}' }, () => {
+    assert.equal(seatLine('portfolio_live_cancel', { order: 'o1', venue: 'paper-1' }), 'paper-1 ← cancel o1');
+    assert.equal(seatLine('portfolio_pay', { maxAmount: 2, url: 'https://api.example.com/x' }), 'api.example.com ← pay up to $2');
+  });
+  withTable({ 'thread.seat.orderLine': '{type} | {size} | {side}' }, () => {
+    assert.equal(seatLine('portfolio_live_order', { side: 'buy', qty: 10, symbol: 'AAPL', orderType: 'market' }), 'market | 10 AAPL | buy');
+  });
+  withTable({ 'thread.seat.batchLegs': '{legs} ← {head}', 'thread.seat.legSep': ' / ' }, () => {
+    assert.equal(seatLine('portfolio_live_batch', { legs: [{ side: 'buy', qty: 1, symbol: 'A' }, { side: 'sell', qty: 2, symbol: 'B' }] }), 'buy 1 A · market / sell 2 B · market ← batch · 2 legs');
+  });
+  withTable({ 'thread.seat.sideWhat': '{what} {side}' }, () => {
+    assert.equal(seatLine('portfolio_order', { side: 'buy', qty: 1, base: 'BTC' }), '1 BTC buy');
+  });
+  withTable({ 'thread.seat.refusal': '{message} ({code})' }, () => {
+    assert.equal(seatLift('mcp__account__portfolio_live_order', {}, '{"ok":false,"code":"E_X","message":"no room"}', true, 'c1').text, 'no room (E_X)');
+  });
 });

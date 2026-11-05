@@ -134,7 +134,7 @@ function youText(text, m, conv, page) {
 // an image the host cannot give back (no thumb, or offloaded by compaction) is a card: its name or Image, its type and size
 const imageMeta = a => {
   const type = typeof a.mediaType === 'string' && a.mediaType.includes('/') ? a.mediaType.split('/')[1].toUpperCase() : t('thread.imageType');
-  return typeof a.bytes === 'number' ? `${type} · ${sizeText(a.bytes)}` : type;
+  return typeof a.bytes === 'number' ? t('thread.imageMeta', { type, size: sizeText(a.bytes) }) : type;
 };
 const isImage = a => a?.type === 'image';
 
