@@ -40,6 +40,7 @@ export const EN = Object.freeze({
   'time.clock.seconds': '{n}s',
 
   // the first level (render/rail.js renderNav)
+  'nav.workspace': 'Research workspace',
   'nav.expand': 'Expand navigation',
   'nav.collapse': 'Collapse navigation',
   'nav.messages': 'Messages',
@@ -52,6 +53,8 @@ export const EN = Object.freeze({
 
   // the conversation list (render/rail.js renderList, host/list-view.js, host/sessions.js) and who speaks in it
   'list.title': 'Messages',
+  'list.show': 'Show conversations',
+  'list.hide': 'Hide conversations',
   'list.newMessage': 'New message',
   'list.draft.now': 'now',
   'list.draft.notSent': 'Not sent yet',

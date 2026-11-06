@@ -9,7 +9,7 @@ import { needsAnswer } from '../messages.js';
 import { unreadOf, firstOpen } from '../host/sessions.js';
 import { worthOf, cardsOf } from '../host/account-view.js';
 import { money } from '../wire/account-model.js';
-import { avatar, groupMark } from './avatars.js';
+import { avatar } from './avatars.js';
 import { HOST_NAME } from '../wire/speaker.js';
 import { groupsOf } from '../host/list-view.js';
 import { maskExcerpt } from '../mask.js';
@@ -38,24 +38,18 @@ export function previewOf(conv, state = null) {
   return conv.kind === 'group' && name ? t('list.preview.from', { name, line }) : line;
 }
 
-function rowMark(conv, state) {
-  if (conv.kind === 'group') return groupMark(conv.members, 36, state);
-  const who = conv.kind === 'bot' ? conv.preset ?? conv.members.find(x => x !== 'gravit') ?? 'gravit' : 'gravit';
-  return avatar(who, 36, state);
-}
-
 function row(conv, state, now) {
   const current = state.route.screen === 'messages' && state.route.id === conv.id;
   const pin = conv.archived ? '' : `<button type="button" class="pin-key" data-action="${conv.pinned ? 'unpin' : 'pin'}" data-conv="${esc(conv.id)}" aria-label="${conv.pinned ? th('list.unpin') : th('list.pin')}" id="pin-${esc(conv.id)}">${icon('pin', 14, 2)}</button>`;
   return '<div class="row-wrap">' +
     `<a${attrs({ class: cls('row', current && 'current'), 'aria-current': current ? 'page' : null, href: `#/messages/${conv.id}`, 'data-action': 'open', 'data-id': conv.id })}>` +
-    `<span class="${cls('dot', unreadOf(conv) && 'on')}"></span>${rowMark(conv, state)}` +
+    `<span class="${cls('dot', unreadOf(conv) && 'on')}"></span>` +
     `<span class="row-body"><span class="row-top"><span class="row-title">${esc(maskExcerpt(conv.title))}</span>${conv.pinned ? `<span class="row-pin">${icon('pin', 11, 2, true)}</span>` : ''}<span class="row-time">${conv.updatedAt ? rowTime(conv.updatedAt, now) : ''}</span></span>` +
     `<span class="row-preview">${esc(maskExcerpt(previewOf(conv, state)))}</span></span></a>${pin}</div>`;
 }
 
 function draftRow() {
-  return `<a class="row current draft" aria-current="page" href="#/messages/new" data-action="open" data-id="new"><span class="dot"></span><span class="av av-draft">+</span>` +
+  return `<a class="row current draft" aria-current="page" href="#/messages/new" data-action="open" data-id="new"><span class="dot"></span>` +
     `<span class="row-body"><span class="row-top"><span class="row-title">${th('list.newMessage')}</span><span class="row-time">${th('list.draft.now')}</span></span><span class="row-preview">${th('list.draft.notSent')}</span></span></a>`;
 }
 
@@ -84,7 +78,7 @@ export function renderNav(state) {
   const messagesHref = `#/messages/${screen === 'messages' && state.route.id && state.route.id !== 'new' ? state.route.id : last ?? firstOpen(state.conversations)?.id ?? ''}`;
   const cards = cardsWaiting(state);
   return `<nav class="${cls('rail', mini && 'mini')}" aria-label="${esc(HOST_NAME)}">
-  <div class="brand">${avatar('gravit', 28)}<span class="brand-name">${esc(HOST_NAME)}</span>` +
+  <div class="brand">${avatar('gravit', 28)}<span class="brand-name">${esc(HOST_NAME)}<span class="brand-caption">${th('nav.workspace')}</span></span>` +
     `<button type="button" class="rail-toggle" data-action="toggleRail" aria-expanded="${mini ? 'false' : 'true'}" aria-label="${mini ? th('nav.expand') : th('nav.collapse')}">${icon(mini ? 'chevRight' : 'chevLeft', 16, 2.2)}</button></div>
   <div class="rail-group">
     ${navItem(messagesHref, 'chat', t('nav.messages'), screen === 'messages' || screen === 'channel', mini, waiting)}
@@ -93,7 +87,7 @@ export function renderNav(state) {
     ${navItem('#/discover', 'compass', t('nav.discover'), screen === 'discover' || screen === 'plugin' || screen === 'module', mini)}
   </div>
   <div class="rail-foot">
-    <div class="rail-lines"><button type="button" class="line-key" data-action="openSettings" aria-label="${th('nav.settings')}" title="${th('nav.settings')}">${icon('bars', 20, 2)}</button></div>
+    <div class="rail-lines"><button type="button" class="line-key" data-action="openSettings" aria-label="${th('nav.settings')}" title="${th('nav.settings')}">${icon('bars', 20, 2)}<span class="rail-setting-label">${th('nav.settings')}</span></button></div>
     <a${attrs({ class: cls('account', screen === 'account' && 'current'), 'aria-current': screen === 'account' ? 'page' : null, href: '#/account/portfolio', title: mini ? t('nav.account') : null })}>${icon('wallet', 22, 2)}<span class="account-body"><span class="account-title">${th('nav.account')}</span>${worthLine(state)}</span>${cards ? `<span class="nav-badge">${cards}</span>` : ''}</a>
   </div>
 </nav>`;
@@ -155,11 +149,13 @@ function results(state, now) {
 export function renderList(state, now, { mac = true } = {}) {
   if (state.route.screen !== 'messages' && state.route.screen !== 'channel') return '';
   const query = state.search?.query ?? '';
-  const head = `<aside class="list" aria-label="${th('list.title')}"><div class="list-head"><h2 class="list-title">${th('list.title')}</h2>` +
-    `<button type="button" class="new-key" data-action="startDraft" aria-label="${th('list.newMessage')}">${icon('plus', 18, 2.2)}</button></div>` + searchBox(query, mac);
-  if (query.trim() !== '') return `${head}${results(state, now)}</aside>`;
+  const opened = !!state.listOpen;
+  const head = `<aside class="list" data-list-open="${opened}" aria-label="${th('list.title')}"><div class="list-head"><h2 class="list-title">${th('list.title')}</h2>` +
+    `<button type="button" id="list-toggle" class="list-toggle" data-action="toggleList" aria-expanded="${opened}" aria-controls="conversation-list-body" aria-label="${opened ? th('list.hide') : th('list.show')}">${icon('chevDown', 18, 2.2)}</button>` +
+    `<button type="button" class="new-key" data-action="startDraft" aria-label="${th('list.newMessage')}">${icon('plus', 18, 2.2)}</button></div><div class="list-body" id="conversation-list-body">` + searchBox(query, mac);
+  if (query.trim() !== '') return `${head}${results(state, now)}</div></aside>`;
   const rows = (state.draft ? draftRow() : '') + groupsOf(state).map(g => groupHead(g, state) + g.shown.map(c => row(c, state, now)).join('')).join('');
-  return `${head}${rows ? `<div class="rail-rows">${rows}</div>` : ''}</aside>`;
+  return `${head}${rows ? `<div class="rail-rows">${rows}</div>` : ''}</div></aside>`;
 }
 
 export function renderRail(state, now, opts = {}) {

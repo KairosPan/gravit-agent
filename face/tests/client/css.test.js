@@ -133,15 +133,17 @@ test("background jobs: the chip's dot, the command one mono line, the output a m
   assert.match(rule('.job-out:empty, .job-note:empty'), /display: none/);
 });
 
-test('the narrow layout: the main grows with the page and the composer stays pinned to the bottom', () => {
+test('the narrow layout: one dynamic viewport, a scrollable thread and a collapsible list', () => {
   const narrow = css.match(/@media \(max-width: 860px\) \{\n([\s\S]*?)\n\}/)?.[1] ?? '';
   const rule = sel => narrow.match(new RegExp(`^\\s*${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`, 'm'))?.[1] ?? '';
-  assert.match(rule('.main'), /flex: none/, 'no zero basis: the main is as tall as what it holds');
-  assert.match(rule('.thread'), /overflow-y: visible/, 'the page scrolls, not the thread');
-  assert.match(rule('.thread-box'), /display: block/, 'the box no longer holds the thread to a screen');
+  assert.match(rule('.app'), /height: 100dvh/, 'use the available phone viewport');
+  assert.match(rule('.main'), /flex: 1 1 0; height: auto; min-height: 0/, 'the conversation takes the remaining screen');
+  assert.match(rule('.thread'), /overflow-y: auto/, 'the transcript scrolls inside its screen');
+  assert.match(rule('.thread-box'), /min-height: 0; display: flex/, 'the thread can shrink above the composer');
   assert.match(rule('.turn-rail'), /display: none/, 'no rail on a narrow window');
-  assert.match(rule('.composer'), /position: sticky/);
-  assert.match(rule('.composer'), /bottom: 0/);
+  assert.match(rule('.composer'), /position: relative/);
+  assert.match(rule('.composer'), /flex: 0 0 auto/, 'the editor does not shrink out of view');
+  assert.ok(narrow.includes('.list:not([data-list-open="true"]) .list-body { display: none; }'), 'closed list does not take room from the conversation');
   assert.match(rule('.composer'), /background: var\(--bg\)/, 'the thread does not show through it');
 });
 
@@ -265,11 +267,12 @@ test("the pin: the row's wrap, the key in the time's place, the glyph before the
   assert.match(css, /\.row-pin\s*\{[^}]*color: var\(--dim\)/);
 });
 
-test('the time hides under the pin key only on a row that has one; the results cap like the rows on a narrow window', () => {
+test('the time hides under the pin key only on a row that has one; the mobile list has a bounded scroll area', () => {
   assert.match(css, /\.row-wrap:has\(> \.pin-key\):hover \.row-time/);
   assert.doesNotMatch(css, /\.row-wrap:hover \.row-time/, 'an archived row, with no key, keeps its time on hover');
   const narrow = css.match(/@media \(max-width: 860px\) \{\n([\s\S]*?)\n\}/)?.[1] ?? '';
-  assert.match(narrow, /\.conv-results \{ max-height: 40vh; \}/);
+  assert.match(narrow, /\.list-body \{ max-height: min\(42dvh, 360px\)/);
+  assert.match(narrow, /\.rail-rows, \.conv-results \{[^}]*overflow-y: auto/);
 });
 
 test('a masked value: a mono box whose raw run lies transparent over its mask, the mask unselectable, the eye a 20 px key', () => {

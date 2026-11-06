@@ -3670,6 +3670,7 @@ test('⌥⌘K focuses the box from the composer', async () => {
   assert.equal(store.get().route.screen, 'messages');
   assert.match(g.html(), /<kbd class="conv-search-key">Ctrl\+Alt\+K<\/kbd>/);
   assert.equal(g.doc.activeElement, cq2);
+  assert.equal(store.get().listOpen, true, 'the shortcut reveals the mobile conversation list after routing');
 });
 
 test('Esc clears the query, then a second Esc leaves the box, before any drawer closes', async () => {
@@ -7590,4 +7591,35 @@ test('back to English draws the English bytes again', async () => {
   } finally {
     setTable(EN);
   }
+});
+
+
+test('mobile list opens by its disclosure or search shortcut and folds after opening a conversation, preserving the draft', async () => {
+  const f = fakeWindow({ hash: '#/messages/s1' });
+  f.win.navigator = { platform: 'MacIntel' };
+  const cq = searchBox(f);
+  const say = f.withId('say', { tagName: 'TEXTAREA' });
+  const h = host({ rows: [row('s1'), row('s2')] });
+  const store = started(f, h);
+  await h.ready();
+  assert.equal(store.get().listOpen, false);
+  say.value = 'Unsent research question';
+  f.fire('root', 'input', { target: say });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleList' } });
+  assert.equal(store.get().listOpen, true);
+  assert.match(f.html(), /data-action="toggleList" aria-expanded="true"/);
+  assert.equal(say.value, 'Unsent research question');
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  await settle();
+  assert.equal(store.get().listOpen, false, 'choosing even the current conversation folds the list');
+  assert.equal(say.value, 'Unsent research question');
+  f.fire('doc', 'keydown', keyK({ metaKey: true }));
+  assert.equal(store.get().listOpen, true);
+  assert.equal(f.doc.activeElement, cq);
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  await settle();
+  assert.equal(store.get().listOpen, false);
+  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  await settle();
+  assert.equal(say.value, 'Unsent research question');
 });

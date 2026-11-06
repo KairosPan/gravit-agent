@@ -1656,7 +1656,7 @@ export function boot(win, host = {}) {
   }
 
   const act = {
-    open: el => go({ screen: 'messages', id: el.dataset.id }),
+    open: el => { store.dispatch('setListOpen', false); go({ screen: 'messages', id: el.dataset.id }); },
     startDraft: () => { store.dispatch('startDraft', { now: now() }); go({ screen: 'messages', id: 'new' }); },
     // a channel's page: New round is a new message in that channel; Retry reads it again
     newRound: el => { store.dispatch('startDraft', { now: now(), where: el.dataset.id }); go({ screen: 'messages', id: 'new' }); },
@@ -1677,6 +1677,7 @@ export function boot(win, host = {}) {
     editBot: el => { store.dispatch('startEdit', { kind: 'bot', id: el.dataset.id }); void discover.modelChoices(); },
     cancelDraft: () => { store.dispatch('cancelDraft'); go(store.get().route); },
     toggleRail: () => store.dispatch('toggleRail'),
+    toggleList: () => store.dispatch('toggleList'),
     toggleGroup: el => store.dispatch('toggleGroup', el.dataset.key),
     // inline editors (they replaced prompt): a button starts one, ✓ or Enter commits it, × or Escape cancels it
     changeWords: el => store.dispatch('startEdit', { kind: 'rename', convId: el.dataset.conv }),
@@ -2235,10 +2236,16 @@ export function boot(win, host = {}) {
       return;
     }
     const box = doc.getElementById('cq');
-    if (box) { box.focus(); return; }
+    if (box) {
+      store.dispatch('setListOpen', true);
+      doc.getElementById('cq')?.focus();
+      return;
+    }
     const lastOpen = s.lastConv && s.conversations.some(c => c.id === s.lastConv && !c.archived) ? s.lastConv : null;
     searchFocus = true;
     go({ screen: 'messages', id: lastOpen ?? firstOpen(s.conversations)?.id ?? null });
+    store.dispatch('setListOpen', true);
+    doc.getElementById('cq')?.focus();
   }
   doc.addEventListener('keydown', ev => {
     // while an IME composes (pinyin), its keys are the composition's: Esc dismisses the candidate, never the query

@@ -106,12 +106,12 @@ test("a row's preview falls back to the last message's words, and a row with not
   assert.equal(previewOf(conv('g', { kind: 'group', messages: [{ id: 'e1', seq: 1, at: NOW, from: 'buffett', kind: 'text', text: '买。', data: { name: '巴菲特型' } }] }), s), '巴菲特型: 买。');
 });
 
-test('the row mark follows the kind: G, the bot\'s letter from the host\'s bots, a two-circle mark for a group', () => {
-  const s = listed([conv('a'), conv('b', { kind: 'bot', preset: 'buffett', members: ['buffett'] }), conv('c', { kind: 'group', members: ['gravit', 'buffett'] })], 'a');
+test('conversation rows omit avatars for Gravit, named bots and groups', () => {
+  const s = listed([conv('a'), conv('b', { kind: 'bot', preset: 'buffett', members: ['buffett'] }), conv('c', { kind: 'group', members: ['gravit', 'buffett'] }), conv('g', { kind: 'bot', preset: 'gravit-preset', members: ['gravit-preset'] })], 'a');
+  s.bots.push({ id: 'gravit-preset', name: 'Gravit' });
   const h = renderList(s, NOW);
-  assert.equal(count(h, /class="av av-g"/g), 2, 'G on the Gravit row and inside the group mark');
-  assert.match(h, /av-letter tone-grey[^>]*>B</);
-  assert.equal(count(h, /class="group-mark"/g), 1);
+  assert.doesNotMatch(h, /class="[^"]*\b(?:av|group-mark)\b/, 'no icon slot, including bots whose display name starts with G');
+  for (const id of ['a', 'b', 'c', 'g']) assert.ok(h.includes(`href="#/messages/${id}"`));
   assert.equal(senderName('buffett', s), 'Buffett Type');
   assert.equal(senderName('ghost', s), 'ghost');
   assert.match(avatar('buffett', 28, s), />B</);
@@ -232,7 +232,7 @@ const searched = (s, q, answer) => {
 test('the box sits under the list head with its placeholder and key hint', () => {
   const s = listed([conv('a')]);
   const h = renderList(s, NOW);
-  assert.match(h, /<\/div><div class="conv-search"><svg[^>]*>[\s\S]*?<\/svg><input id="cq" type="search" autocomplete="off" placeholder="Search conversations" aria-label="Search conversations" data-action="convQuery" value=""><kbd class="conv-search-key">⌥⌘K<\/kbd><\/div><div class="rail-rows">/);
+  assert.match(h, /<\/div><div class="list-body" id="conversation-list-body"><div class="conv-search"><svg[^>]*>[\s\S]*?<\/svg><input id="cq" type="search" autocomplete="off" placeholder="Search conversations" aria-label="Search conversations" data-action="convQuery" value=""><kbd class="conv-search-key">⌥⌘K<\/kbd><\/div><div class="rail-rows">/);
   assert.ok(h.indexOf('class="list-head"') < h.indexOf('class="conv-search"'));
   assert.match(renderList(s, NOW, { mac: false }), /<kbd class="conv-search-key">Ctrl\+Alt\+K<\/kbd>/, 'off a Mac');
   assert.match(renderList(searched(s, 'T "a'), NOW), /data-action="convQuery" value="T &quot;a"/, "the box's value is the store's");
@@ -286,12 +286,12 @@ test("each state's line, word for word", () => {
   assert.match(renderList(searched(s, 'zz', 'failed'), NOW), /<div class="conv-results"><div class="conv-results-state">Could not search inside conversations<\/div><\/div>/);
   // a failed content search keeps the title matches, the muted line after them
   const kept = renderList(searched(s, 'alpha', 'failed'), NOW);
-  assert.match(kept, /conv-results-count">1 conversation<[\s\S]*data-id="a"[\s\S]*<div class="conv-results-state">Could not search inside conversations<\/div><\/div><\/aside>$/);
+  assert.match(kept, /conv-results-count">1 conversation<[\s\S]*data-id="a"[\s\S]*<div class="conv-results-state">Could not search inside conversations<\/div><\/div><\/div><\/aside>$/);
   // more than twenty: by the merge's cut, and by the wire's hasMore
   const cut = renderList(searched(s, 'kilo'), NOW);
   assert.equal(count(cut, /class="conv-hit[ "]/g), 20);
-  assert.match(cut, /conv-results-count">20 conversations<[\s\S]*<div class="conv-results-state">Showing the first 20\. Narrow your search\.<\/div><\/div><\/aside>$/);
-  assert.match(renderList(searched(s, 'alpha', { items: [], hasMore: true }), NOW), /<div class="conv-results-state">Showing the first 20\. Narrow your search\.<\/div><\/div><\/aside>$/);
+  assert.match(cut, /conv-results-count">20 conversations<[\s\S]*<div class="conv-results-state">Showing the first 20\. Narrow your search\.<\/div><\/div><\/div><\/aside>$/);
+  assert.match(renderList(searched(s, 'alpha', { items: [], hasMore: true }), NOW), /<div class="conv-results-state">Showing the first 20\. Narrow your search\.<\/div><\/div><\/div><\/aside>$/);
   assert.doesNotMatch(renderList(searched(s, 'alpha', { items: [], hasMore: false }), NOW), /conv-results-state/, 'results alone say nothing more');
 });
 
@@ -377,4 +377,20 @@ test("a row's title and a search hit's title are masked", () => {
 test("a group row's preview names its speaker in the table's order", () => {
   const g = conv('g', { kind: 'group', messages: [{ id: 'e1', seq: 1, at: NOW, from: 'buffett', kind: 'text', text: '买。', data: { name: '巴菲特型' } }] });
   withTable({ 'list.preview.from': '{line} — {name}' }, () => assert.equal(previewOf(g, listed([g])), '买。 — 巴菲特型'));
+});
+
+
+test('the mobile conversation disclosure exposes its state and controls the existing search and rows', () => {
+  const s = listed([conv('a')]);
+  assert.equal(s.listOpen, false);
+  const closed = renderList(s, NOW);
+  assert.match(closed, /data-list-open="false"/);
+  assert.match(closed, /id="list-toggle" class="list-toggle" data-action="toggleList" aria-expanded="false" aria-controls="conversation-list-body" aria-label="Show conversations"/);
+  assert.match(closed, /id="conversation-list-body">[\s\S]*id="cq"[\s\S]*class="rail-rows"/);
+  const opened = R.toggleList(s);
+  assert.match(renderList(opened, NOW), /aria-label="Hide conversations"/);
+  assert.equal(R.nav(opened, opened.route).listOpen, true, 'the duplicate hashchange leaves the disclosure alone');
+  assert.equal(R.nav(opened, { screen: 'markets', id: null }).listOpen, false);
+  assert.equal(R.startDraft(opened).listOpen, false);
+  assert.equal(R.toggleList(opened).listOpen, false);
 });
