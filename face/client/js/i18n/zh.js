@@ -42,6 +42,7 @@ export const ZH = Object.freeze({
   'time.clock.seconds': '{n} 秒',
 
   // the first level (render/rail.js renderNav)
+  'nav.workspace': '研究工作台',
   'nav.expand': '展开导航',
   'nav.collapse': '收起导航',
   'nav.messages': '消息',
@@ -54,6 +55,8 @@ export const ZH = Object.freeze({
 
   // the conversation list (render/rail.js renderList, host/list-view.js, host/sessions.js) and who speaks in it
   'list.title': '消息',
+  'list.show': '展开对话列表',
+  'list.hide': '收起对话列表',
   'list.newMessage': '新消息',
   'list.draft.now': '刚刚',
   'list.draft.notSent': '尚未发送',

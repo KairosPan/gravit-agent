@@ -1,9 +1,11 @@
-/* gravit-ui/css/tokens.css — Linqi's tokens.css values (demo @ 0ef5131), Cream and Black, plus the one new edge (spec §3.4) and white words for his equity blue (--alloc-equity) */
+/* Gravit: electric cyan leads, lake blue and jade support, ice-white highlights.
+   Accent fill is shared by both themes; accent ink darkens on light surfaces for legibility.
+   Brand colours remain independent of asset and gain/loss colours. */
 :root,
 :root[data-theme="cream"] {
   color-scheme: light;
-  --bg: #f6f4ef; --surface: #ffffff; --surface-2: #ece8e0; --text: #121417; --dim: #5d5a53;
-  --border: #e6e1d7; --card-border: #ece8e0; --rule: #121417; --primary: #121417; --on-primary: #ffffff;
+  --bg: #f3f6f7; --surface: #ffffff; --surface-2: #e9eff2; --text: #18313b; --dim: #596d77;
+  --border: #d5dfe4; --card-border: #dce5e9; --rule: #18313b; --primary: #18313b; --on-primary: #ffffff;
   --warn: #d9741e; --warn-text: #94480c; --warn-fill: #fdf0e3; --warn-edge: #f3d2b4;
   --up: #0d7a52; --up-fill: #e4efe6; --down: #b4441c; --down-fill: #f6e6df;
   /* new: the soft red edge of an urgent card, down at a third on the surface (spec §3.4) */
@@ -16,38 +18,71 @@
   --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.05);
   --shadow-lift: 0 8px 30px rgba(16, 24, 40, 0.1);
   --shadow: 0 16px 48px rgba(16, 24, 40, 0.16);
-  --rail-bg: #ffffff;
-  --alloc-cash: #c9c3b7; --alloc-stable: #5d5a53; --alloc-crypto: #121417; --alloc-equity: #3b5bdb;
+  --rail-bg: #e6edf0; --list-bg: #eef2f4;
+  --accent: #35d6e3; --accent-soft: #dff6f9; --accent-edge: #78c6d3; --on-accent: #062b35;
+  --user-fill: #e5edf2; --code-text: #146979;
+  --alloc-cash: #c9c3b7; --alloc-stable: #737e77; --alloc-crypto: #232e2a; --alloc-equity: #3b5bdb;
   --alloc-rwa: #d9741e; --alloc-event: #0d7a52; --area: rgba(18, 20, 23, 0.05);
+  --accent-ink: #006573;
+  --accent-bright: #70e7ee;
+  --secondary-ink: #246d92;
+  --feature-edge: #78c6d3;
+  --feature-start: #e6f2f8;
+  --feature-glow: rgba(57, 214, 174, 0.045);
+  --feature-end: #ffffff;
+  --chart-line: #087b89;
+  --chart-area: rgba(53, 214, 227, 0.12);
 }
 :root[data-theme="black"] {
   color-scheme: dark;
-  --bg: #0e0f11; --surface: #17191c; --surface-2: #212429; --text: #f2f3f5; --dim: #a3a9b4;
-  --border: #2b2e34; --card-border: #25282d; --rule: #f2f3f5; --primary: #f2f3f5; --on-primary: #0e0f11;
+  --bg: #0b151b; --surface: #12232b; --surface-2: #1a3039; --text: #e4fcfe; --dim: #97aeb5;
+  --border: #2a424c; --card-border: #243b45; --rule: #e4fcfe; --primary: #e4fcfe; --on-primary: #0b151b;
   --warn: #f0a040; --warn-text: #f5b866; --warn-fill: #2b2112; --warn-edge: #f0a040;
   --up: #4cc38a; --up-fill: #16301f; --down: #f08a6c; --down-fill: #35201a;
   --down-edge: #f08a6c;
   --on-equity: #ffffff;
   --ref-fill: #1e2541; --ref-text: #9db0ff;
   --hover: rgba(242, 243, 245, 0.06); --scrim: rgba(0, 0, 0, 0.6);
-  --shadow-card: none; --shadow-lift: none; --shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
-  --rail-bg: #12151b;
-  --alloc-cash: #4a4e56; --alloc-stable: #a3a9b4; --alloc-crypto: #f2f3f5; --alloc-equity: #5c7cfa; --alloc-rwa: #f0a040; --alloc-event: #4cc38a; --area: rgba(242, 243, 245, 0.06);
+  --shadow-card: none; --shadow-lift: 0 8px 28px rgba(0, 0, 0, 0.12); --shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --rail-bg: #081117; --list-bg: #0e1b23;
+  --accent: #35d6e3; --accent-soft: #123740; --accent-edge: #28606b; --on-accent: #062b35;
+  --user-fill: #1a303e; --code-text: #8cdae4;
+  --alloc-cash: #4a4e56; --alloc-stable: #98a69d; --alloc-crypto: #e9eee8; --alloc-equity: #5c7cfa; --alloc-rwa: #f0a040; --alloc-event: #4cc38a; --area: rgba(242, 243, 245, 0.06);
+  --accent-ink: #35d6e3;
+  --accent-bright: #70e7ee;
+  --secondary-ink: #72bce3;
+  --feature-edge: #28606b;
+  --feature-start: #17374a;
+  --feature-glow: rgba(57, 214, 174, 0.055);
+  --feature-end: #10232c;
+  --chart-line: #35d6e3;
+  --chart-area: rgba(53, 214, 227, 0.10);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
     color-scheme: dark;
-    --bg: #0e0f11; --surface: #17191c; --surface-2: #212429; --text: #f2f3f5; --dim: #a3a9b4;
-    --border: #2b2e34; --card-border: #25282d; --rule: #f2f3f5; --primary: #f2f3f5; --on-primary: #0e0f11;
+    --bg: #0b151b; --surface: #12232b; --surface-2: #1a3039; --text: #e4fcfe; --dim: #97aeb5;
+    --border: #2a424c; --card-border: #243b45; --rule: #e4fcfe; --primary: #e4fcfe; --on-primary: #0b151b;
     --warn: #f0a040; --warn-text: #f5b866; --warn-fill: #2b2112; --warn-edge: #f0a040;
     --up: #4cc38a; --up-fill: #16301f; --down: #f08a6c; --down-fill: #35201a;
     --down-edge: #f08a6c;
     --on-equity: #ffffff;
     --ref-fill: #1e2541; --ref-text: #9db0ff;
     --hover: rgba(242, 243, 245, 0.06); --scrim: rgba(0, 0, 0, 0.6);
-    --shadow-card: none; --shadow-lift: none; --shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
-    --rail-bg: #12151b;
-    --alloc-cash: #4a4e56; --alloc-stable: #a3a9b4; --alloc-crypto: #f2f3f5; --alloc-equity: #5c7cfa; --alloc-rwa: #f0a040; --alloc-event: #4cc38a; --area: rgba(242, 243, 245, 0.06);
+    --shadow-card: none; --shadow-lift: 0 8px 28px rgba(0, 0, 0, 0.12); --shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+    --rail-bg: #081117; --list-bg: #0e1b23;
+    --accent: #35d6e3; --accent-soft: #123740; --accent-edge: #28606b; --on-accent: #062b35;
+    --user-fill: #1a303e; --code-text: #8cdae4;
+    --alloc-cash: #4a4e56; --alloc-stable: #98a69d; --alloc-crypto: #e9eee8; --alloc-equity: #5c7cfa; --alloc-rwa: #f0a040; --alloc-event: #4cc38a; --area: rgba(242, 243, 245, 0.06);
+    --accent-ink: #35d6e3;
+    --accent-bright: #70e7ee;
+    --secondary-ink: #72bce3;
+    --feature-edge: #28606b;
+    --feature-start: #17374a;
+    --feature-glow: rgba(57, 214, 174, 0.055);
+    --feature-end: #10232c;
+    --chart-line: #35d6e3;
+    --chart-area: rgba(53, 214, 227, 0.10);
   }
 }
 :root {
