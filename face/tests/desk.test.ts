@@ -61,6 +61,21 @@ test("readEvents: an absent ledger is empty; a bad line is skipped and counted",
   assert.equal(skipped, 2);
 });
 
+/* A desk turn's web_fetch is on the record (spec 2026-11-07 §5.6): its line carries the session and the URL as
+ * asked, both strings, and a line missing either is no event - the Desk view would have nothing to show for it. */
+test("readEvents keeps a desk-fetch line and skips one without a sessionId or url", async () => {
+  const h = await home();
+  const fetched: DeskEvent = { t: "2026-11-07T21:05:00.000Z", kind: "desk-fetch", sessionId: "desk-1", url: "https://www.nasdaq.com/articles/intc" };
+  await appendEvent(h, fetched);
+  await writeFile(join(deskDir(h), "events.jsonl"), [
+    `{"t":"2026-11-07T21:06:00.000Z","kind":"desk-fetch","url":"https://example.com/"}`,
+    `{"t":"2026-11-07T21:07:00.000Z","kind":"desk-fetch","sessionId":"desk-1"}`,
+    `{"t":"2026-11-07T21:08:00.000Z","kind":"desk-fetch","sessionId":"desk-1","url":42}`,
+    "",
+  ].join("\n"), { flag: "a" });
+  assert.deepEqual(await readEvents(h), { events: [fetched], skipped: 3 });
+});
+
 test("appendEvent rotates a ledger over rotateBytes into a dated sibling", async () => {
   const h = await home();
   await appendEvent(h, boot("2026-10-19T13:00:00.000Z", 11), { rotateBytes: 10 });
@@ -1317,10 +1332,14 @@ test("standingLines and budgetLine print the orders, the calendar and the budget
 /* P2: the clock row (src/schedule.ts), which installDesk loads on first use, once the bridge has set the outlet. */
 
 /** The booted root as the desk tools and the guard read it: one live `gravit-desk` agent, whose own tool layer keeps
- * what is registered in it; `state` calls its desk_state. */
+ * what is registered in it, and whose `inject` starts nothing; `state` calls its desk_state. */
 function deskToolsRoot() {
   const registered: DeskToolDefinition[] = [];
-  const agent = { id: "desk-agent", ctx: { preset: DESK_PRESET, tools: { register(definition: DeskToolDefinition) { registered.push(definition); return () => {}; } } } };
+  const agent = {
+    id: "desk-agent",
+    /* web_fetch's child plugin is never started: this root reads desk_state alone */
+    ctx: { preset: DESK_PRESET, tools: { register(definition: DeskToolDefinition) { registered.push(definition); return () => {}; } }, inject: () => ({}) },
+  };
   const ctx: DeskGuardCtxLike = {
     on: () => () => true,
     inject: () => ({ dispose: async () => {} }),

@@ -16,12 +16,19 @@
  * messages), and with a shell an injected turn could read the repository's and the harness home's key
  * files and send them to any host - an exfiltration path. So {@link DESK_ALLOW} names neither `bash` nor
  * the `job_*` tools, which serve only background shell jobs; the face runs the desk's producers itself.
+ * The desk does reach the network beyond its search: it opens public web pages with dsh's own `web_fetch`
+ * (spec 2026-11-07 §5.6), because search snippets alone cannot explain a move. That is an accepted risk -
+ * charter R1 and D29: a page's planted text could have a turn put what the desk reads (the book, the journal,
+ * the rules) into a URL it opens. Keys stay out - the guard reads no key file or dot-file and refuses any call
+ * that carries a secret - and every fetch that reaches dispatch is a `desk-fetch` line in the ledger.
  *
- * The two desk tools, `desk_quotes` and `desk_state`, are not in this composition. An allow mask filters
- * what the preset's own layer registers too, and `tools.restrict` refuses to name such a tool, so a row
- * here could not offer them past the mask; they are registered into each desk agent's own layer instead,
+ * The two desk tools, `desk_quotes` and `desk_state`, and `web_fetch` are not in this composition. An allow
+ * mask filters what the preset's own layer registers too, and `tools.restrict` refuses to name such a tool, so a
+ * row here could not offer them past the mask; they are registered into each desk agent's own layer instead,
  * which no restriction filters (docs/superpowers/plans/2026-10-20-desk-p1-bridge.md, Global
- * Constraints). A tool the mask hides is refused at dispatch.
+ * Constraints; src/desk-tools.ts `installDeskTools`). `web_fetch` is not in {@link DESK_ALLOW} either: the tree
+ * registers none (src/policy.ts D6), so naming it would expose nothing, and the desk's own layer is the only place
+ * it exists. A tool the mask hides is refused at dispatch.
  *
  * DECLARED AFTER BOOT, like the bots and the role presets (src/roles.ts `rolePresetDefinition`, D20/B1)
  * and unlike Gravit's default. `bootFace` calls {@link declareDeskPreset} right after `declareBots`, and
@@ -35,6 +42,9 @@
  * may write is its session's sandbox and the face's desk guard (src/desk-tools.ts `installDeskGuard`: no
  * write of an instruction file, no read outside the repository or of a key file, no call carrying a
  * secret), and what it may order is nothing - Gate 2 stands between every session and every order tool.
+ * Nor does the mask decide what the desk may fetch: `web_fetch` sits in the desk agent's own layer, past the
+ * mask, and what bounds it is the http provider (public HTTP(S) addresses only, no credentials in a URL,
+ * same-origin redirects only), the guard's secret check, and the record of every fetch (charter D29).
  * @module
  */
 import type { Context } from "@deepseek-ai/cordis";

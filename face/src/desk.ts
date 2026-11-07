@@ -82,7 +82,7 @@ import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { createAnnotator, type Annotator } from "./annotator.ts";
 import { createDeskConversation, type ClaimsOn, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
 import type { DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSessionPersistenceLike, SessionEventsOn } from "./desk-session.ts";
-import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskGuardCtxLike } from "./desk-tools.ts";
+import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskFetch, type DeskGuardCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet, fencedPost, HttpError, isTrustedDataRequest } from "./http.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
@@ -157,7 +157,10 @@ export interface TurnUsage {
  * (`queued`, oldest first: each one's key, the message's id, its text without the provenance or context, and when the
  * operator wrote it) and the phone turn under way (`cut`: its number, its message's key and when that was written) -
  * and a `desk-carried`, the boot that answered it: the carry's `t` (`of`), the texts it posted again and those it
- * skipped as already in the session (src/desk-conversation.ts). */
+ * skipped as already in the session (src/desk-conversation.ts). A `desk-fetch` is one `web_fetch` a desk agent made that
+ * reached dispatch (spec 2026-11-07 §5.6, charter R1 and D29): its session and the URL as the model asked it, cut at
+ * src/desk-tools.ts `DESK_FETCH_URL_MAX` characters - written whatever the fetch then answered, so the operator sees
+ * every page a desk turn opened (src/desk-tools.ts `installDeskGuard`'s fetch record). */
 export type DeskEvent =
   | { t: string; kind: "boot"; pid: number; version: string; deskEnabled: boolean }
   | { t: string; kind: "shutdown"; pid: number; code: number }
@@ -180,7 +183,8 @@ export type DeskEvent =
     t: string; kind: "desk-carry"; sessionId: string; queued: { key: string; text: string; at?: string }[];
     cut?: { turn: number; key?: string; at?: string };
   }
-  | { t: string; kind: "desk-carried"; of: string; posted: number; skipped: number };
+  | { t: string; kind: "desk-carried"; of: string; posted: number; skipped: number }
+  | { t: string; kind: "desk-fetch"; sessionId: string; url: string };
 
 /** Every kind {@link DeskEvent} has, and only those. A record over the union rather than a list,
  * so a kind added to the type and not here fails to compile instead of reading back as skipped. */
@@ -201,6 +205,7 @@ const KINDS: Readonly<Record<DeskEvent["kind"], true>> = {
   "watch-load": true,
   "desk-carry": true,
   "desk-carried": true,
+  "desk-fetch": true,
 };
 
 /** What a failure is reported as - in the append's failure line and the status's `ledgerError`:
@@ -480,12 +485,19 @@ function objectOf(line: string): object | undefined {
   return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
 }
 
-/** Whether a line's object is an event: a string `t` and a known `kind`. Only those two fields are
- * checked - the face is the file's one writer, and the rest of the shape is the writer's to keep. */
+/** Whether a line's object is an event: a string `t` and a known `kind` - and, for a `desk-fetch`, a string
+ * `sessionId` and `url`, the two fields the Desk view reads it for. Nothing else is checked - the face is the
+ * file's one writer, and the rest of the shape is the writer's to keep. */
 function isDeskEvent(x: unknown): x is DeskEvent {
   if (typeof x !== "object" || x === null || Array.isArray(x)) return false;
   const { t, kind } = x as { t?: unknown; kind?: unknown };
-  return typeof t === "string" && typeof kind === "string" && Object.hasOwn(KINDS, kind);
+  if (typeof t !== "string" || typeof kind !== "string" || !Object.hasOwn(KINDS, kind)) return false;
+  /* a fetch line is read for its session and its URL (the Desk view's pages): one without both is no record of a page */
+  if (kind === "desk-fetch") {
+    const { sessionId, url } = x as { sessionId?: unknown; url?: unknown };
+    return typeof sessionId === "string" && typeof url === "string";
+  }
+  return true;
 }
 
 /**
@@ -528,7 +540,7 @@ export async function readRecords<T>(
 
 /**
  * The current ledger's events, in file order, and how many lines were not events: {@link readRecords}
- * on {@link EVENTS_FILE}, a line being an event when it has a string `t` and a known `kind`.
+ * on {@link EVENTS_FILE}, a line being an event when it has a string `t` and a known `kind` ({@link isDeskEvent}).
  *
  * Reads `events.jsonl` only, never a rotated file - a rotation hands its last `desk-session` on
  * ({@link appendEvent}), and the runs and turns before it stay behind. An absent ledger is
@@ -1596,7 +1608,8 @@ const watchClock = (now: () => number): DeskClock => ({
  * anchored on `root`, its secrets taken from `process.env` now: every desk agent's `write`, `edit`
  * or `str_replace_editor` of an instruction file, its read outside `root` or of a key file, and any
  * call of its that carries a secret are denied before they run - and, without a `root`, every desk
- * write and read. With the desk on, `ready`
+ * write and read; and, with it, the fetch record: every desk agent's `web_fetch` that reaches dispatch is a
+ * `desk-fetch` line, stamped `now()`, the desk on or off. With the desk on, `ready`
  * is the `boot` event's append - stamped `bootedAt`, which is
  * `now()` at this call and the status's uptime origin - and the sleep watch starts at once, writing
  * into the ledger. Given `root`, `route`, `sessionCtx` and `installModelSelection`
@@ -1711,7 +1724,10 @@ export function installDesk(
     watch: () => watch?.status(),
   };
   registerDeskRoutes(webServer, status);
-  const removeGuard = deps.ctx === undefined ? async () => {} : installDeskGuard(deps.ctx, deps.root, { log });
+  /* every desk web_fetch that reaches dispatch is a desk-fetch line, the desk on or off (spec 2026-11-07 §5.6) */
+  const recordFetch = ({ sessionId, url }: DeskFetch): Promise<void> =>
+    appendEvent(home, { t: new Date(now()).toISOString(), kind: "desk-fetch", sessionId, url }, { log });
+  const removeGuard = deps.ctx === undefined ? async () => {} : installDeskGuard(deps.ctx, deps.root, { log, recordFetch });
   const removeTools = deps.ctx === undefined || deps.quotes === undefined ? () => {} : installDeskTools(deps.ctx, deskToolDefinitions({
     quotes: deps.quotes,
     readState: () => deskStatus(status),

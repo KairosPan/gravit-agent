@@ -88,7 +88,7 @@ test("composeFace stacks exactly the layers it means to", () => {
         .flatMap((row) => (typeof row.id === "string" ? [row.id] : [])),
     );
     const policy = facePolicyPatches(baseRows);
-    assert.equal(policy.length, 9, "8 id patches + 1 insert at dsh-base 0.2.1-rc.5");
+    assert.equal(policy.length, 8, "7 id patches + 1 insert at dsh-base 0.2.1-rc.5 (D6 keeps the web-fetch-http provider on since 2026-11-07)");
     assert.equal(patches.length, 8 + policy.length, patches.map((p) => p.id ?? "insert").join(","));
     assert.deepEqual(patches.slice(1, 1 + policy.length), policy, "the policy layer sits right above the bundle layer");
     assert.equal((patches[1 + policy.length] as InsertPatch).insert?.[0]?.id, ACCOUNT_SEAT_ROW_ID, "the Account seat row sits right above the policy layer");

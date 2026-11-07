@@ -30,6 +30,7 @@
  * tests/policy.test.ts pins every id against the installed dsh-base.
  * @module
  */
+import { LOCAL_FETCH_PROVIDER_ID } from "@deepseek-ai/dsh-web-fetch-http";
 import type { FacePatchList } from "./boot.ts";
 
 /** One id-targeted restoration: which decision it implements, and the patch. */
@@ -70,18 +71,21 @@ export const POLICY_ID_PATCHES: readonly PolicyIdPatch[] = [
    * plugin-package-inventory-deepseek/src/index.ts:27-39, 188-193). A function
    * plugin: no service. */
   { decision: "D5 package inventory", patch: { id: "plugin-package-inventory-deepseek", disabled: true } },
-  /* D6, three rows. Upstream enabled `web_fetch` by default (commit
+  /* D6, two rows. Upstream enabled `web_fetch` by default (commit
    * 0a0f9e59ff): `tool-web.fetch: true` plus a new `web-fetch-http` provider
    * and `web.fetchProvider: http` (base :472-490). 0.1.1 shipped fetch OFF
    * (OLD base :404-418). `tool-web` registers `web_fetch` iff `fetch` is set
-   * (NEW packages/web/tool-web/src/index.ts:83-95). Both configs are restated
-   * WHOLE (a named config replaces the row's), with 0.1.1's exact values; with
-   * `fetchProvider` omitted, `web` falls back to `$DSH_WEB_FETCH_PROVIDER` (NEW
-   * packages/web/web/src/index.ts:90-94), and with `web-fetch-http` disabled no
-   * fetch provider exists for it to select anyway. */
+   * (NEW packages/web/tool-web/src/index.ts:83-95), so `fetch: false` keeps
+   * the tree registering none: no global `web_fetch`, for Gravit, a bot or a
+   * role. The `web-fetch-http` provider stays ON and `web` selects it
+   * (`LOCAL_FETCH_PROVIDER_ID`, "http"), so the desk's own `web_fetch` - dsh's
+   * tool, registered by the face in each desk agent's own layer
+   * (src/desk-tools.ts `installDeskTools`, spec 2026-11-07 §5.6, charter R1
+   * and D29) - can fetch. Both configs are restated WHOLE (a named config
+   * replaces the row's); without `fetchProvider`, `web` would fall back to
+   * `$DSH_WEB_FETCH_PROVIDER` (NEW packages/web/web/src/index.ts:90-94). */
   { decision: "D6 web_fetch", patch: { id: "tool-web", config: { fetch: false, searchTimeoutMs: 60000 } } },
-  { decision: "D6 web_fetch", patch: { id: "web", config: { searchProvider: "deepseek-official" } } },
-  { decision: "D6 web_fetch", patch: { id: "web-fetch-http", disabled: true } },
+  { decision: "D6 web_fetch", patch: { id: "web", config: { searchProvider: "deepseek-official", fetchProvider: LOCAL_FETCH_PROVIDER_ID } } },
   /* D7. New in dsh-base (commit e08468954a; base :492-493): three global
    * model-facing tools (`list_mcp_resources`, `list_mcp_resource_templates`,
    * `read_mcp_resource`, NEW packages/mcp/mcp-resources/src/tools.ts:31-64)
