@@ -2,7 +2,7 @@
 /** The desk's two tools: `desk_quotes`, the price now, and `desk_state`, what the desk knows about itself
  * (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.3, §8). Every agent on the `gravit-desk`
  * preset has them; no other agent does. Beside them each desk agent gets dsh's own `web_fetch`
- * (`@deepseek-ai/dsh-tool-web` `applyWebFetchTool`; spec 2026-11-07 §5.6, charter R1 and D29): the tree registers
+ * (`@deepseek-ai/dsh-tool-web` `applyWebFetchTool`; spec 2026-11-07 §5.6, charter A1 and D29): the tree registers
  * none (src/policy.ts D6 keeps `tool-web`'s `fetch` off) but leaves the http fetch provider on, so the desk alone
  * opens pages - Gravit's other sessions, the bots and the roles never see the tool.
  *
@@ -404,8 +404,9 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
  * injected: `applyWebFetchTool` registers the tool and its prompt section (`tool:web_fetch`, shown only where the
  * tool is visible) through `layer`, which carries the agent's scope - so both are the agent's own, and are withdrawn
  * when the agent's scope is disposed. The tool's budget and output cap are dsh's own defaults (30 s, 200,000
- * characters); what it may reach is the http provider's (public HTTP(S) only, no credentials in a URL, same-origin
- * redirects only). Named, and one function for every agent, so cordis keeps one plugin record for all of them.
+ * characters); what it may reach is the http provider's (public HTTP(S) only - its address check skipped for a
+ * hop routed through a configured HTTP(S)_PROXY - no credentials in a URL, same-origin redirects only). Named,
+ * and one function for every agent, so cordis keeps one plugin record for all of them.
  */
 function deskWebFetchLayer(layer: Context): void {
   applyWebFetchTool(layer, DEFAULT_WEB_TOOL_TIMEOUT_MS, DEFAULT_FETCH_MAX_OUTPUT_CHARS);
@@ -1231,7 +1232,7 @@ export function installDeskGuard(
       if (!desk) return undefined;
       const id: unknown = exec.agent.session.header.id;
       const url: unknown = (exec.arguments as { url?: unknown } | null | undefined)?.url;
-      return { sessionId: String(id), url: (typeof url === "string" ? url : String(url)).slice(0, DESK_FETCH_URL_MAX) };
+      return { sessionId: typeof id === "string" ? id : "unknown", url: (typeof url === "string" ? url : String(url)).slice(0, DESK_FETCH_URL_MAX) };
     } catch (error) {
       tell(exec, unrecordedLine(exec, error));
       return undefined;

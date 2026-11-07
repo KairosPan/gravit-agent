@@ -18,7 +18,7 @@
  * the `job_*` tools, which serve only background shell jobs; the face runs the desk's producers itself.
  * The desk does reach the network beyond its search: it opens public web pages with dsh's own `web_fetch`
  * (spec 2026-11-07 §5.6), because search snippets alone cannot explain a move. That is an accepted risk -
- * charter R1 and D29: a page's planted text could have a turn put what the desk reads (the book, the journal,
+ * charter A1 and D29: a page's planted text could have a turn put what the desk reads (the book, the journal,
  * the rules) into a URL it opens. Keys stay out - the guard reads no key file or dot-file and refuses any call
  * that carries a secret - and every fetch that reaches dispatch is a `desk-fetch` line in the ledger.
  *
@@ -43,7 +43,8 @@
  * write of an instruction file, no read outside the repository or of a key file, no call carrying a
  * secret), and what it may order is nothing - Gate 2 stands between every session and every order tool.
  * Nor does the mask decide what the desk may fetch: `web_fetch` sits in the desk agent's own layer, past the
- * mask, and what bounds it is the http provider (public HTTP(S) addresses only, no credentials in a URL,
+ * mask, and what bounds it is the http provider (public HTTP(S) addresses only while no proxy is set in the
+ * environment, no credentials in a URL,
  * same-origin redirects only), the guard's secret check, and the record of every fetch (charter D29).
  * @module
  */

@@ -2,7 +2,7 @@
 /** The desk's two tools (src/desk-tools.ts), offline: which agents get them, what they answer, and how
  * `installDesk` carries them. Every root context, agent and hub here is a fake - the registration's own
  * contract is what is under test: one root `agent/created` listener that never throws, and one sweep of
- * the agents already live, registering both tools into a `gravit-desk` agent's own tool layer once. That
+ * the agents already live, registering both tools and dsh's `web_fetch` into a `gravit-desk` agent's own tool layer once. That
  * a real tree shows them to the desk's sessions and to nobody else's is the smokes' to prove. */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -183,7 +183,7 @@ function byName(definitions: readonly DeskToolDefinition[], name: string): DeskT
   return found;
 }
 
-test("a gravit-desk agent gets both tools once; a Gravit agent gets none", () => {
+test("a gravit-desk agent gets the desk tools and web_fetch once; a Gravit agent gets none", () => {
   const root = fakeRoot();
   const definitions = deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus });
   const dispose = installDeskTools(root.ctx, definitions);
@@ -192,7 +192,7 @@ test("a gravit-desk agent gets both tools once; a Gravit agent gets none", () =>
   const desk = fakeAgent("desk-1", DESK_PRESET);
   assert.deepEqual(root.create(desk.agent), [undefined], "the listener answers undefined: nothing for the serial dispatch to wait on");
   root.create(desk.agent);
-  assert.deepEqual(desk.names(), ["desk_quotes", "desk_state", "web_fetch"], "both tools, into the agent's own layer, exactly once");
+  assert.deepEqual(desk.names(), ["desk_quotes", "desk_state", "web_fetch"], "the two desk tools and web_fetch, into the agent's own layer, exactly once");
   assert.deepEqual(desk.registered.slice(0, 2), definitions, "the definitions themselves, then dsh's own web_fetch");
 
   const gravit = fakeAgent("gravit-1", "gravit");
@@ -211,7 +211,7 @@ test("a gravit-desk agent gets both tools once; a Gravit agent gets none", () =>
 
 /* bootFace serves unary `/api` - `session/create` among it - before main.ts reaches `installDesk`, so a
  * desk agent can be live before the listener exists. */
-test("a desk agent live before install gets both tools from the sweep, once; one created after install gets them from the listener", () => {
+test("a desk agent live before install gets the desk tools and web_fetch from the sweep, once; one created after install gets them from the listener", () => {
   const before = fakeAgent("desk-before", DESK_PRESET);
   const gravit = fakeAgent("gravit-before", "gravit");
   const composing = fakeAgent("desk-composing", undefined);
@@ -533,7 +533,7 @@ test("desk_quotes on an unwired source answers NO_QUOTES for every symbol", asyn
     { error: "unavailable: no quote source is wired: this face has no Market read to ask" });
 });
 
-/* ---------- web_fetch: the desk's alone, and on the record (spec 2026-11-07 §5.6, charter R1 and D29) ---------- */
+/* ---------- web_fetch: the desk's alone, and on the record (spec 2026-11-07 §5.6, charter A1 and D29) ---------- */
 
 test("a desk agent's own layer offers web_fetch beside desk_quotes and desk_state; another agent's offers none of them", async () => {
   const root = fakeRoot();
@@ -624,6 +624,11 @@ test("the fetch record takes a session's own word when the registry throws, and 
   assert.equal((await dispatch(root, callFrom(DESK_PRESET, "web_fetch", { url: "https://example.com/fails" }))).ran, true, "the fetch goes on");
   assert.equal(lines.length, 2);
   assert.match(lines[1], /^gravit-face: desk: a desk web_fetch of https:\/\/example\.com\/fails was not recorded: the ledger is gone$/);
+  /* a desk session whose header carries no id is recorded as "unknown", never as the string "undefined" */
+  const idless = callFrom(DESK_PRESET, "web_fetch", { url: "https://example.com/c" });
+  delete (idless.agent!.session.header as { id?: string }).id;
+  assert.equal((await dispatch(root, idless)).ran, true);
+  assert.deepEqual(recorded.at(-1), { sessionId: "unknown", url: "https://example.com/c" });
   await dispose();
   assert.equal(root.executes.length, 0);
 });

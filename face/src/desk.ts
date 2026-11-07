@@ -158,7 +158,7 @@ export interface TurnUsage {
  * operator wrote it) and the phone turn under way (`cut`: its number, its message's key and when that was written) -
  * and a `desk-carried`, the boot that answered it: the carry's `t` (`of`), the texts it posted again and those it
  * skipped as already in the session (src/desk-conversation.ts). A `desk-fetch` is one `web_fetch` a desk agent made that
- * reached dispatch (spec 2026-11-07 §5.6, charter R1 and D29): its session and the URL as the model asked it, cut at
+ * reached dispatch (spec 2026-11-07 §5.6, charter A1 and D29): its session and the URL as the model asked it, cut at
  * src/desk-tools.ts `DESK_FETCH_URL_MAX` characters - written whatever the fetch then answered, so the operator sees
  * every page a desk turn opened (src/desk-tools.ts `installDeskGuard`'s fetch record). */
 export type DeskEvent =

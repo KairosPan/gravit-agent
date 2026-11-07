@@ -80,7 +80,7 @@ export const POLICY_ID_PATCHES: readonly PolicyIdPatch[] = [
    * role. The `web-fetch-http` provider stays ON and `web` selects it
    * (`LOCAL_FETCH_PROVIDER_ID`, "http"), so the desk's own `web_fetch` - dsh's
    * tool, registered by the face in each desk agent's own layer
-   * (src/desk-tools.ts `installDeskTools`, spec 2026-11-07 §5.6, charter R1
+   * (src/desk-tools.ts `installDeskTools`, spec 2026-11-07 §5.6, charter A1
    * and D29) - can fetch. Both configs are restated WHOLE (a named config
    * replaces the row's); without `fetchProvider`, `web` would fall back to
    * `$DSH_WEB_FETCH_PROVIDER` (NEW packages/web/web/src/index.ts:90-94). */
