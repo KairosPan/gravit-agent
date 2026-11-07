@@ -230,7 +230,7 @@ export const ACCOUNT_QUERY: Readonly<Record<ReadRoute, readonly string[]>> = {
   earn: ["venue", "asset", "fresh"],
   sellable: ["fresh"],
   signinStatus: ["state"],
-  connectedExplore: ["tab", "q", "key", "sort", "limit"],
+  connectedExplore: ["tab", "q", "key", "sort", "limit", "scope", "source"],
   connectedQuotes: ["pairs"],
   connectedCandles: ["venue", "symbol", "interval", "range", "before", "limit"],
   connectedBook: ["venue", "symbol", "depth"],

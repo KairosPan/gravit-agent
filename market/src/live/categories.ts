@@ -9,9 +9,10 @@
  * "Macro Election 2" (a Polymarket tag about elections) is not "macro". A word no row names is shown as the venue gives it, when nothing
  * better is there.
  *
- * The tabs come from what a market is, not from its category: a coin is Crypto, a stock Stocks, a token that stands for a share or a fund
- * RWAs, a perpetual Perps, a pre-IPO perpetual — a contract on a private company's implied valuation (live/preipo.ts) — Pre-IPO and not
- * Perps, an event contract Predictions (an IPO question among them). All is every row as one table; what closes within a day, what moves
+ * The tabs retain what a market is: a coin is Crypto, a stock Stocks, a token that stands for a share or a fund RWAs, a perpetual Perps.
+ * A perpetual's explicit underlying category also adds Crypto, Stocks, Indices, Commodities, FX or Pre-IPO; an unknown category adds
+ * nothing. A grouped pre-IPO valuation contract (live/preipo.ts) keeps its established Pre-IPO-only tab. An event contract is Predictions
+ * (an IPO question among them). All is every row as one table; what closes within a day, what moves
  * and what trades most are still worked out by the aggregator (explore.ts) for the body, for agents. Predictions is a few of the busiest
  * markets, not every market a venue has: the public sources (public-markets.ts) read Kalshi by the series named below and Polymarket by
  * 24-hour volume, leave out every event carrying an excluded word, and the aggregator shows at most a dozen of them, each venue's busiest
@@ -29,7 +30,7 @@ export const RWA_CATEGORY = "RWA";
 /** a token market that says it stands for a share or a fund */
 export const isRwaMarket = (m: { kind: string; category?: string | undefined }): boolean => m.kind === "token" && m.category === RWA_CATEGORY;
 
-export type TabId = "all" | "crypto" | "stocks" | "rwas" | "perps" | "preipo" | "predictions" | "china";
+export type TabId = "all" | "crypto" | "stocks" | "indices" | "commodities" | "fx" | "rwas" | "perps" | "preipo" | "predictions" | "china";
 
 /** every tab, in the order the screen shows them; a tab with nothing in it is not shown. All is first and holds every row (each row's `tabs`
  * starts with it); the page adds its own Watching after these */
@@ -37,6 +38,9 @@ export const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
   { id: "all", label: "All" },
   { id: "crypto", label: "Crypto" },
   { id: "stocks", label: "Stocks" },
+  { id: "indices", label: "Indices" },
+  { id: "commodities", label: "Commodities" },
+  { id: "fx", label: "FX" },
   { id: "rwas", label: "RWAs" },
   { id: "perps", label: "Perps" },
   { id: "preipo", label: "Pre-IPO" },
@@ -52,6 +56,14 @@ export const normalWords = (words: string): string =>
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+
+/** An ordinary perpetual's underlying tab, only when the source explicitly classifies it. Its instrument remains a perpetual;
+ * neither its ticker nor a missing HIP-3 category implies crypto, and a preipo label alone creates no valuation metadata. */
+export function perpCategoryTab(category?: string): TabId | undefined {
+  const word = typeof category === "string" ? normalWords(category) : "";
+  if (word === "pre ipo" || word === "preipo") return "preipo";
+  return ["crypto", "stocks", "indices", "commodities", "fx"].includes(word) ? word as TabId : undefined;
+}
 
 /** what the table says of a word: shown as a row's category, the event left out, or the venue's plumbing */
 export type CategoryRole = "shown" | "excluded" | "plumbing";

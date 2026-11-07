@@ -4,7 +4,8 @@
 //   offered on a dead account. A stale market half is kept, and the join says it is stale.
 // - A public line is left out where a connected venue that is not paper speaks for its connection (the same `connector`), and
 //   where the venues read says its connection does not serve here (`not-served`, `closed`, `close-only`); a row left with no
-//   lines goes.
+//   lines goes. The focused Hyperliquid and xyz scopes keep the latter as read-only public data, without a connect-to-trade
+//   route; an explicitly selected More provider does the same. Broad More and unscoped reads retain the original contract.
 // - A row both halves list carries the connected lines that are not paper, then the market's kept lines, then the paper ones; the
 //   row's own fields are lent by the market where the connected row is paper or trades less, else by the connected row, the
 //   other filling what the lender lacks.
@@ -16,6 +17,7 @@
 //   longer source. `missing` says each half that is down.
 // A half passed as `undefined` has not landed yet: it lists nothing and is said missing by no one.
 import { said } from '../i18n/words.js';
+import { marketOriginOf } from './market-view.js';
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const records = v => (Array.isArray(v) ? v.filter(isRecord) : []);
@@ -44,7 +46,7 @@ function oneEach(rows) {
   for (const i of rows) { const was = by.get(asset(i)); if (!was || (was.kind === 'perp' && i.kind !== 'perp')) by.set(asset(i), i); }
   return rows.filter(i => by.get(asset(i)) === i);
 }
-// the venues read's verdicts for a connection that does not serve here: its public lines are offered nowhere
+// the venues read's verdicts for a connection that does not serve here: never offer a connection to trade
 const AWAY = new Set(['not-served', 'closed', 'close-only']);
 
 // a half that is down, as `missing` says it
@@ -66,16 +68,16 @@ function byKey(b) {
   return map;
 }
 // a row's lines as the join drops them: its own `at` and each outcome's
-function withLines(r, keep) {
+function withLines(r, keep, map = l => l) {
   const at = records(r.at);
-  const kept = at.filter(keep);
+  const kept = at.filter(keep).map(map);
   const out = { ...r, at: kept };
   let had = at.length > 0, has = kept.length > 0;
   if (Array.isArray(r.outcomes)) {
     out.outcomes = r.outcomes.map(o => {
       if (!isRecord(o)) return o;
       const lines = records(o.at);
-      const left = lines.filter(keep);
+      const left = lines.filter(keep).map(map);
       had ||= lines.length > 0;
       has ||= left.length > 0;
       return { ...o, at: left };
@@ -111,12 +113,12 @@ function joinRow(m, c) {
  * @param {object|null|undefined} market the market's body; null for a half that failed, undefined for one not landed yet
  * @param {object|null|undefined} connected the account's connected body, the same way; `stale: true` is down
  * @param {{venues?: Array<{connector?: string, paper?: boolean}>, here?: Array<{connector?: string, verdict?: string}>,
- *   tab?: string, q?: string, sort?: string, limit?: number, now?: number}} [opts]
+ *   tab?: string, q?: string, sort?: string, scope?: string, source?: string, limit?: number, now?: number}} [opts]
  *   `venues` the page's venues (venuesOf), `here` the venues read's rows; `tab`, `q`, `sort` and `limit` the question both
  *   halves were asked (the order and the cut of `items`; no limit: the longer half's length); `now` the clock `closing` sorts by
  * @returns {object|null} an explore body as the views read it ({ok:true, items, movers, closing, mostTraded, tabs, missing,
  *   notes, asOf, china?, stale?}); null when neither half answers */
-export function joinExplore(market, connected, { venues = [], here = [], tab = '', q = '', sort = '', limit, now = Date.now() } = {}) {
+export function joinExplore(market, connected, { venues = [], here = [], tab = '', q = '', sort = '', scope = '', source = '', limit, now = Date.now() } = {}) {
   const m = halfOf(market, false);
   const c = halfOf(connected, true);
   if (!m && !c) return null;
@@ -124,14 +126,37 @@ export function joinExplore(market, connected, { venues = [], here = [], tab = '
   // Account down or stale the screens fall back to the public data
   const speaks = c === null ? new Set() : new Set(records(venues).filter(v => v.paper !== true && str(v.connector)).map(v => v.connector));
   const away = new Set(records(here).filter(v => AWAY.has(str(v.verdict)) && str(v.connector)).map(v => v.connector));
-  const keep = l => !(l.public === true && (speaks.has(str(l.connector)) || away.has(str(l.connector))));
-  const mRows = byKey(m), cRows = byKey(c);
+  const scoped = ['hyperliquid', 'xyz', 'more'].includes(scope);
+  const provider = scope === 'more' && str(source) !== '';
+  const focused = scope === 'hyperliquid' || scope === 'xyz' || provider;
+  const connectorOf = l => str(l.connector) || str(records(venues).find(v => v.id === l.venue)?.connector);
+  const inScope = (row, line) => {
+    if (!scoped) return true;
+    // The connected service has already selected its matching source; public rows use the registry's exact venue id.
+    if (provider) return line.public !== true || line.venue === source;
+    const origin = row.kind === 'perp' ? marketOriginOf({ ...line, connector: connectorOf(line) }) : null;
+    return scope === 'more' ? origin === null : origin === scope;
+  };
+  const scopedRows = body => new Map([...byKey(body)].flatMap(([key, row]) => {
+    const kept = scoped ? withLines(row, l => inScope(row, l)) : row;
+    return kept ? [[key, kept]] : [];
+  }));
+  const mRows = scopedRows(m), cRows = scopedRows(c);
   const joined = new Map();
   const rowOf = key => {
     if (joined.has(key)) return joined.get(key);
     const mr = mRows.get(key), cr = cRows.get(key);
-    const kept = mr ? withLines(mr, keep) : undefined;
-    const r = cr && kept ? joinRow(kept, cr) : cr && mr ? cr : cr ?? kept ?? null;
+    // A focused public market remains discoverable when the connected venue's shorter list omits it. Only a connected
+    // line for this same row replaces it; a connected Hyperliquid wallet must not hide the entire xyz public universe.
+    const rowSpeaks = scoped ? new Set(records(cr?.at).filter(l => l.paper !== true).map(connectorOf)) : speaks;
+    const keep = l => !(l.public === true && (rowSpeaks.has(str(l.connector)) || (!focused && away.has(str(l.connector)))));
+    const readOnly = l => {
+      if (!focused || l.public !== true || !away.has(str(l.connector))) return l;
+      const { connectTo, ...data } = l;
+      return { ...data, canTrade: false };
+    };
+    const kept = mr ? withLines(mr, keep, readOnly) : undefined;
+    const r = cr && kept ? joinRow(kept, cr) : cr ?? kept ?? null;
     joined.set(key, r);
     return r;
   };
@@ -164,11 +189,22 @@ export function joinExplore(market, connected, { venues = [], here = [], tab = '
   // the busiest closing soon, cut there, then in the order they close (explore.ts: `soon` by volume, `closing` by close)
   const closing = merged('closing').sort(byVolume).slice(0, cap('closing')).sort(byClose(now));
   const mostTraded = merged('mostTraded').sort(byVolume).slice(0, cap('mostTraded'));
-  // the rows only the account lists, for the tabs' counts
-  const only = c ? records(c.items).filter(r => !mRows.has(r.key)) : [];
+  // Count connected-only rows before the final list cut, after the same scope and line filtering as the rows. The server's
+  // counts may cover more than its returned items: preserve those totals instead of rebuilding tabs from the visible list.
+  const connectedItems = [...new Map(records(c?.items).filter(r => str(r.key)).map(r => [r.key, r])).values()];
+  const countedIn = (rows, id) => rows.filter(r => Array.isArray(r.tabs) && r.tabs.includes(id)).length;
+  const keptConnected = connectedItems.map(r => cRows.get(r.key)).filter(r => r && rowOf(r.key));
+  const only = keptConnected.filter(r => !mRows.has(r.key));
+  const removedConnected = connectedItems.filter(r => !cRows.has(r.key) || !rowOf(r.key));
+  const connectedTabs = records(c?.tabs).map(tab => ({ ...tab, count: Math.max(0, (num(tab.count) ?? 0) - countedIn(removedConnected, tab.id)) }));
   const tabs = m
-    ? records(m.tabs).map(tab => ({ ...tab, count: (num(tab.count) ?? 0) + only.filter(r => Array.isArray(r.tabs) && r.tabs.includes(tab.id)).length }))
-    : records(c?.tabs).map(tab => ({ ...tab }));
+    ? records(m.tabs).map(tab => ({ ...tab, count: (num(tab.count) ?? 0) + countedIn(only, tab.id) }))
+    : connectedTabs;
+  if (m) {
+    const ids = new Set(tabs.map(tab => tab.id));
+    // A missing public tab has no public rows; the connected half can supply it, including its rows beyond the list limit.
+    for (const tab of connectedTabs) if (!ids.has(tab.id) && tab.count > 0) { tabs.push(tab); ids.add(tab.id); }
+  }
   const missing = [...records(m?.missing), ...records(c?.missing)];
   if (market !== undefined && !m) missing.push(marketDown());
   if (connected !== undefined && !c) missing.push(accountDown());

@@ -73,7 +73,8 @@ import { KEY_SHAPES, keyFileStatus, liveOptions, openLive, parseConnector, type 
 import { exchangeEarner, type EarnPosition, type EarnProduct, type LiveEarner } from "./live/earn.ts";
 import { exchangeEarnHook } from "./live/exchange-trade.ts";
 import type { LiveVenue } from "./account/live-moves.ts";
-import { CANDLE_INTERVALS, CANDLE_RANGES, DONE, floorTo, HISTORY_MOST, inDollars, INTERVAL_MS, type Candle, type CandleInterval, type CandlePage, type CandleRange, type CandleWindow, type FundingLine, type LiveTrader, type Market, type MarketKind, type MarketStats, type OrderBook, type Position, type PublicTrade } from "./live/trade.ts";
+import { scopedExploreVenues } from "./live/market-scope.ts";
+import { CANDLE_INTERVALS, CANDLE_RANGES, DONE, floorTo, HISTORY_MOST, inDollars, INTERVAL_MS, type Candle, type CandleInterval, type CandlePage, type CandleRange, type CandleWindow, type FundingLine, type LiveTrader, type Market, type MarketKind, type MarketScope, type MarketStats, type OrderBook, type Position, type PublicTrade } from "./live/trade.ts";
 import { historyKeep, INTERVAL_RANGE, keepMsOf, PAGE_MOST, pageOf, pageWeight, RANGE_BAR, rangeSince, sessionsSince, windowKey } from "./live/history.ts";
 import { compareAcross, normalBase, type Comparison, type PlaceRule } from "./live/compare.ts";
 import { fold, paperFillLine, type StatementLine } from "./account/statement.ts";
@@ -183,7 +184,7 @@ export interface ServiceOptions {
 /** the kept reads that list the venues connected: forgotten whenever a venue is connected or unplugged, or an agent's wallet added */
 const VENUE_SET_READS = ["connected-explore", "compare"] as const;
 /** a Markets question (explore, connectedExplore) */
-type ExploreAsk = { tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined };
+type ExploreAsk = { scope?: string | undefined; source?: string | undefined; tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined };
 const noPrice: Price = () => Promise.resolve(undefined);
 
 /** one slice of an order (or any step an agent flies): where, what, and the agent's words for it */
@@ -793,10 +794,10 @@ export class PortfolioService {
     const historyAt = (sym: string): string => (v.paper ? `${id}#history` : inner(mmInner(sym)));
     const read = <T>(key: string, ttlMs: number, load: () => Promise<T | Refusal>, at = id): Promise<T | Refusal> => c.get(key, ttlMs, () => load().catch((err: unknown) => thrownBy(id, v.name, err)), at, true);
     return Object.assign(Object.create(t) as LiveTrader, {
-      markets: (q: string) => read(`markets|${id}|${q.trim().toUpperCase()}`, 60_000, () => t.markets(q), inner("markets")),
+      markets: (q: string, scope?: MarketScope, source?: string) => read(`markets|${id}|${q.trim().toUpperCase()}${scope ? `|${scope}` : ""}${source ? `|source:${source}` : ""}`, 60_000, () => t.markets(q, scope, source), inner("markets")),
       market: (sym: string) => read(`market|${id}|${sym}`, MARKET_KEEP_MS, () => t.market(sym), inner(mmInner(sym))),
       ...(t.stats ? { stats: (symbols?: string[]) => read(`stats|${id}|${symbols ? [...symbols].sort().join(",") : ""}`, 60_000, () => t.stats!(symbols), inner("markets")) } : {}),
-      ...(t.events ? { events: (o: { category?: string | undefined; closingWithinMs?: number | undefined; limit: number }) => read(`events|${id}|${o.category ?? ""}|${o.closingWithinMs ?? ""}|${o.limit}`, 300_000, () => t.events!(o), inner("predict")) } : {}),
+      ...(t.events ? { events: (o: { category?: string | undefined; closingWithinMs?: number | undefined; limit: number }, source?: string) => read(`events|${id}|${o.category ?? ""}|${o.closingWithinMs ?? ""}|${o.limit}${source ? `|source:${source}` : ""}`, 300_000, () => t.events!(o, source), inner("predict")) } : {}),
       // a history is kept by its window (live/history.ts windowKey): a first view by its range, a page by where it ends
       ...(t.candles ? { candles: (sym: string, interval: CandleInterval, w: CandleWindow) => this.historyRead(`candles|${id}|${sym}|${windowKey(interval, w)}`, historyAt(sym), keepMsOf(interval, w), () => t.candles!(sym, interval, w), id, v.name) } : {}),
     });
@@ -937,8 +938,13 @@ export class PortfolioService {
 
   /** a Markets question's checks (connectedExplore's): the tab, the sort, the search, the row's key and the limit, each in the account's
    * words */
-  private exploreAsk(o: ExploreAsk): { tab: string | undefined; sort: string | undefined; q: string; key: string; limit: number } | Refusal {
+  private exploreAsk(o: ExploreAsk): { scope: MarketScope | undefined; source: string | undefined; tab: string | undefined; sort: string | undefined; q: string; key: string; limit: number } | Refusal {
     if (!this.account) return no("E_ACCOUNT_BAD_ACTION", { message: "the account layer is not mounted" });
+    const scope = o.scope?.trim() || undefined;
+    if (scope !== undefined && scope !== "hyperliquid" && scope !== "xyz" && scope !== "more") return no("E_ACCOUNT_BAD_ACTION", { message: "a market scope is hyperliquid, xyz or more" });
+    const source = o.source?.trim() || undefined;
+    if (source && source.length > 80) return no("E_ACCOUNT_BAD_ACTION", { message: "a source id is at most 80 characters" });
+    if (source && (scope === "hyperliquid" || scope === "xyz")) return no("E_ACCOUNT_BAD_ACTION", { message: "a source is selected only in more markets or without a scope" });
     const tab = o.tab?.trim() || undefined;
     if (tab !== undefined && !TABS.some((t) => t.id === tab)) return no("E_ACCOUNT_BAD_ACTION", { message: `a tab is one of ${TABS.map((t) => t.id).join(", ")}` });
     const sort = o.sort?.trim() || undefined;
@@ -949,7 +955,7 @@ export class PortfolioService {
     if (key.length > 200) return no("E_ACCOUNT_BAD_ACTION", { message: "a row's key is at most 200 characters" });
     const limit = o.limit === undefined ? 60 : Math.floor(o.limit);
     if (!(limit >= 1 && limit <= 200)) return no("E_ACCOUNT_BAD_ACTION", { message: "a limit is 1 to 200 markets" });
-    return { tab, sort, q, key, limit };
+    return { scope, source, tab, sort, q, key, limit };
   }
 
   /** each connected venue with the connection it was made with: exploreAcross leaves out the public source that connection speaks for */
@@ -990,12 +996,14 @@ export class PortfolioService {
   async connectedExplore(o: ExploreAsk = {}): Promise<Exploration | Refusal> {
     const ask = this.exploreAsk(o);
     if (isRefusal(ask)) return ask;
-    const { tab, sort, q, key, limit } = ask;
+    const { scope, source, tab, sort, q, key, limit } = ask;
     if (tab === "china") return no("E_ACCOUNT_BAD_ACTION", { venue: CHINA_ID, message: "China is the market's: its explore answers it" });
-    const connected = this.exploreVenues();
-    return this.marketReads.get(`connected-explore|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}`, 30_000, async (): Promise<Exploration | Refusal> => {
+    const selected = source ? this.publicMarkets().find((s) => s.id === source) : undefined;
+    if (source && (!selected || (scope === "more" && ["hyperliquid", "trade-xyz"].includes(source)))) return no("E_ACCOUNT_BAD_ACTION", { message: "the source is not available in this market scope" });
+    const connected = scopedExploreVenues(this.exploreVenues(), scope, selected);
+    return this.marketReads.get(`connected-explore|${scope ?? ""}|${source ?? ""}|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}`, 30_000, async (): Promise<Exploration | Refusal> => {
       const { placed, serves } = await this.placedServing(connected);
-      return exploreAcross({ connected: placed, public: [] }, { q, ...(key ? { key } : {}), limit, clock: () => this.realNow(), serves, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) });
+      return exploreAcross({ connected: placed, public: [] }, { q, ...(key ? { key } : {}), limit, ...(source ? { perSource: 200 } : {}), clock: () => this.realNow(), serves, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) });
     });
   }
 
@@ -4076,7 +4084,8 @@ function assetKeyOf(raw: string): AssetKey | undefined {
 /** is a market (an order's, a position's) the asset `k`: a coin by its one name in any market but a stock's or an event's (a perpetual on it
  * included), a share by its ticker, an event contract by its symbol */
 function sameThing(k: AssetKey, kind: MarketKind, base: string, symbol: string): boolean {
-  const b = base || symbol;
+  // Old recorded xyz orders used an unqualified base; their CCXT symbol still identifies the precise contract.
+  const b = kind === "perp" && /^XYZ-[A-Za-z0-9]+\//i.test(symbol) ? symbol : base || symbol;
   if (k.cls === "event") return kind === "event" && symbol.toUpperCase() === k.name;
   if (k.cls === "equity") return kind === "stock" && normalBase(b, "stock") === k.name;
   if (k.cls === "rwa") return kind === "token" && b.toUpperCase() === k.name;

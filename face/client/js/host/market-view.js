@@ -17,12 +17,74 @@ import { t, isSaid, sayOf } from '../i18n/words.js';
 
 // the Account's tabs, in the order the table draws them, the sorts its rows take, and the ranges a market's history is read for;
 // the tabs' and the sorts' words are read from the table at each call (accountTabs, accountSorts)
-export const ACCOUNT_TAB_IDS = ['all', 'crypto', 'stocks', 'rwas', 'perps', 'preipo', 'predictions'];
+export const ACCOUNT_TAB_IDS = ['all', 'crypto', 'stocks', 'indices', 'commodities', 'fx', 'rwas', 'perps', 'preipo', 'predictions'];
 export const ACCOUNT_SORT_IDS = ['volume', 'movers', 'closing'];
 export const CANDLE_RANGES = ['1D', '5D', '1M', '3M', '6M', 'YTD', '1Y', '5Y', 'MAX'];
+export const MARKET_SCOPE_IDS = ['hyperliquid', 'xyz', 'more'];
+/** Fresh states explicitly start on Hyperliquid; an older, unscoped read remains the broad market view. */
+export const marketScopeOf = markets => MARKET_SCOPE_IDS.includes(markets?.scope) ? markets.scope : 'more';
+/** A public provider is a further selection within More; other scopes always name their own source. */
+export const marketSourceOf = markets => marketScopeOf(markets) === 'more' && typeof markets?.source === 'string' ? markets.source : '';
+/** The live public registry supplies the names and exact ids; no inferred connector groups. */
+export function moreSourcesOf(markets) {
+  const seen = new Set();
+  return records(markets?.sources?.data?.value).filter(source => {
+    if (typeof source.id !== 'string' || !source.id || typeof source.name !== 'string' || !source.name
+      || ['hyperliquid', 'trade-xyz'].includes(source.id) || seen.has(source.id)) return false;
+    seen.add(source.id);
+    return true;
+  }).map(source => ({ ...source, label: source.id === 'hyperliquid-preipo' ? t('markets.source.hip3', { name: t('markets.scope.hyperliquid') })
+    : source.id.endsWith('-preipo') ? t('markets.source.preipo', { name: source.name }) : source.name }));
+}
+export const marketScopes = () => [
+  { id: 'hyperliquid', label: t('markets.scope.hyperliquid') },
+  { id: 'xyz', label: t('markets.scope.xyz') },
+  { id: 'more', label: t('markets.scope.more') },
+];
+const FOCUSED_CATEGORIES = { hyperliquid: ['all', 'crypto'], xyz: ['all', 'stocks', 'indices', 'commodities', 'fx', 'preipo'] };
+const MORE_CATEGORIES = ['all', 'crypto', 'stocks', 'rwas', 'perps', 'preipo', 'predictions', 'china'];
+/** Categories accepted within a source. Perpetual stays the contract kind, separate from its underlying asset category. */
+export const marketCategoryIds = scope => Object.hasOwn(FOCUSED_CATEGORIES, scope) ? FOCUSED_CATEGORIES[scope] : scope === 'more' ? [...ACCOUNT_TAB_IDS, 'china'] : [];
+
+/** All three sources stay expanded; only the selected source's All read can lend category counts. */
+export function marketNavigationOf(markets) {
+  const m = isRecord(markets) ? markets : {};
+  const selected = marketScopeOf(m);
+  // Watching's All read spans every source, so it cannot lend any source's counts.
+  const all = m.tab === 'watching' ? null : bodyOf(m.explore, 'all');
+  const counts = new Map(records(all?.tabs).filter(tab => typeof tab.id === 'string' && number(tab.count) !== null).map(tab => [tab.id, Math.max(0, number(tab.count))]));
+  const words = { ...tabWords(), china: t('markets.tab.china') };
+  return marketScopes().map(scope => {
+    const active = scope.id === selected;
+    const ids = FOCUSED_CATEGORIES[scope.id] ?? (marketSourceOf(m)
+      ? ACCOUNT_TAB_IDS.filter(id => id === 'all' || (active && ((counts.get(id) ?? 0) > 0 || m.tab === id)))
+      : ACCOUNT_TAB_IDS.filter(id => MORE_CATEGORIES.includes(id)
+        || (active && ((counts.get(id) ?? 0) > 0 || m.tab === id))).concat('china'));
+    return { ...scope, active, categories: ids.map(id => ({ id, label: words[id], count: active ? counts.get(id) ?? null : null })) };
+  });
+}
+
+/** The market a line belongs to, independent of a connected account's display name. The colon after a CCXT settlement
+ *  pair (BTC/USDC:USDC) is not a HIP-3 prefix; other deployers are never presented as native Hyperliquid or trade.xyz. */
+export function marketOriginOf(leg) {
+  const venue = typeof leg?.venue === 'string' ? leg.venue : '';
+  const connector = typeof leg?.connector === 'string' ? leg.connector : '';
+  const symbol = typeof leg?.symbol === 'string' ? leg.symbol : '';
+  if (venue === 'trade-xyz') return 'xyz';
+  if (leg?.paper === true && connector === 'live:paper' && typeof leg.dex === 'string') return leg.dex === 'xyz' ? 'xyz' : leg.dex === '' ? 'hyperliquid' : null;
+  const hl = /^hyperliquid(?:-(?:preipo|trade|paper))?$/.test(venue) || /^live:hyperliquid(?:-(?:trade|paper))?$/.test(connector);
+  if (!hl) return null;
+  if (typeof leg?.dex === 'string') return leg.dex === 'xyz' ? 'xyz' : leg.dex === '' ? 'hyperliquid' : null;
+  if (/^xyz[:-]/i.test(symbol)) return 'xyz';
+  // CCXT HIP-3 symbols use DEX-COIN/QUOTE:SETTLE. Without explicit metadata, an unrecognised deployer gets no native badge.
+  if (/^[a-z0-9]+-[^/]+\/[^/]+:[^/]+$/i.test(symbol)) return null;
+  if (/^[a-z0-9]+:/i.test(symbol) || venue === 'hyperliquid-preipo') return null;
+  return 'hyperliquid';
+}
 
 const tabWords = () => ({
   all: t('markets.tab.all'), crypto: t('markets.tab.crypto'), stocks: t('markets.tab.stocks'), rwas: t('markets.tab.rwas'),
+  indices: t('markets.tab.indices'), commodities: t('markets.tab.commodities'), fx: t('markets.tab.fx'),
   perps: t('markets.tab.perps'), preipo: t('markets.tab.preipo'), predictions: t('markets.tab.predictions'),
 });
 const sortWords = () => ({ volume: t('markets.sort.volume'), movers: t('markets.sort.movers'), closing: t('markets.sort.closing') });
@@ -360,6 +422,7 @@ export function legsOf(item) {
     connected: l.connected === true, paper: l.paper === true,
     canTrade: l.canTrade === true ? true : l.canTrade === 'unknown' ? 'unknown' : false,
     public: l.public === true, connectTo: str(l.connectTo), connector: str(l.connector),
+    ...(typeof l.dex === 'string' ? { dex: l.dex } : {}),
     price: number(l.price), bid: number(l.bid), ask: number(l.ask), best: false,
   }));
   const takes = legs.filter((l, i) => l.connected && l.canTrade === true && ordered[i].open !== false);
@@ -394,7 +457,17 @@ const inUnit = (v, unit) => (unit === 'cents' ? cents(v) : number(v));
 // the price a row or a page shows: the latest quote at its line where that says one, else the explore read's
 const shownPrice = (live, priced) => inUnit(live?.price, priced.unit) ?? priced.price;
 // the word a market's tile takes its letters from, as the retired page draws it: an event's category, else its base or name
-const tileOf = item => (item.kind === 'event' ? str(item.category) || t('markets.tile.event') : str(item.base) || str(item.name));
+const displayBase = item => str(item.base).replace(/^[a-z0-9]+:/i, '');
+const tileOf = item => (item.kind === 'event' ? str(item.category) || t('markets.tile.event') : displayBase(item) || str(item.name));
+// The aggregator synthesizes <base> perpetual. Its namespace belongs to the identity and source badge, not the title.
+// Only that exact generated form is shortened; a market's supplied name remains verbatim.
+function displayName(item) {
+  const base = str(item.base);
+  const name = str(item.name);
+  const dex = base.match(/^([a-z0-9]+):/i)?.[1];
+  const recognized = dex && records(item.at).some(l => l.dex === dex || (dex === 'xyz' && marketOriginOf(l) === 'xyz'));
+  return item.kind === 'perp' && recognized && name === base + ' perpetual' ? name.slice(dex.length + 1) : name;
+}
 // the Account's keys starred: the operator's own, then each an old us:/crypto: star was found as
 function starredOf(m) {
   const old = records(m.watchlist).map(a => normalizeAsset(a)).filter(a => a && a.market !== 'cn');
@@ -421,7 +494,8 @@ function cnAssetOf(m, key) {
 
 // every row the slice's reads carry — each explore read's (All's, each kind's) and the search's, every list in each — to find a
 // market the page watches by its lines
-const exploreRowsOf = m => [...Object.values(isRecord(m.explore) ? m.explore : {}).map(r => own(r, 'data')), m.results?.data].flatMap(everyRow);
+const locatedRowsOf = m => Object.values(isRecord(m.located) ? m.located : {}).flatMap(r => everyRow(own(r, 'data')));
+const exploreRowsOf = m => [...Object.values(isRecord(m.explore) ? m.explore : {}).map(r => own(r, 'data')), m.results?.data].flatMap(everyRow).concat(locatedRowsOf(m));
 // the page's watch entries that name a market: a venue and a symbol, as the page keeps them
 const watchEntries = page => (pageOk(page) ? records(page.watch).filter(named).map(w => ({ venue: w.venue, symbol: w.symbol })) : []);
 // an entry is one of a row's markets, as the retired page reads it: a line of the row's own or of an outcome's at the entry's
@@ -479,7 +553,7 @@ export function watchedOf(markets, id, page = null) {
 // a row's second line: a pre-IPO perpetual's kind, another perpetual's base, an event's category, a coin's base, a stock's or an
 // RWA's venue — the first the owner connected, else the first public listing
 function subOf(item, legs) {
-  const base = str(item.base);
+  const base = displayBase(item);
   switch (item.kind) {
     case 'perp': return isPreipo(item) ? t('markets.sub.preipoPerp') : base ? t('markets.sub.basePerp', { base }) : t('markets.kind.perp');
     case 'event': return str(item.category);
@@ -500,7 +574,7 @@ function accountRow(item, quotes, watched, now, atAccount = false) {
   const live = isRecord(quote) ? noIcon(quote) : null;
   const priced = priceOf(item);
   return {
-    id: str(item.key), source: 'account', kind: str(item.kind), name: str(item.name), tile: tileOf(item), sub: subOf(item, legs),
+    id: str(item.key), source: 'account', kind: str(item.kind), name: displayName(item), tile: tileOf(item), sub: subOf(item, legs),
     priced, price: shownPrice(live, priced), live, sourceWord: wordOf(item, live, now),
     closeTime: str(item.closeTime) || null, pastEnd: item.pastEnd === true, paper: legs.find(l => l.connected)?.paper === true, watched, atAccount, legs,
     tabs: Array.isArray(item.tabs) ? item.tabs.filter(tab => typeof tab === 'string') : [],
@@ -604,11 +678,14 @@ export function tableOf(markets, now = Date.now(), page = null) {
   const counted = all !== undefined && all !== null;
   const watching = starredOf(m).length > 0 || watchlist.length > 0 || atPage.length > 0;
   const chinaCount = rankOf(m) ? Math.max(0, number(rankOf(m).total) ?? 0) : null;
-  const tabs = tabsOf(all, cnStarsOf(m, atPage).length, { watching, searching, china: { count: chinaCount }, desk: true })
+  const more = marketScopeOf(m) === 'more' && !marketSourceOf(m);
+  const tabs = tabsOf(all, more ? cnStarsOf(m, atPage).length : 0, { watching: watching || !more, searching, china: more ? { count: chinaCount } : null, desk: true })
+    .filter(tab => more || [...marketCategoryIds(marketScopeOf(m)), 'results', 'watching', DESK_TAB].includes(tab.id))
     .map(tab => (counted || tab.id === CHINA_TAB || tab.id === DESK_TAB ? tab : { ...tab, count: null }));
   const mine = own(reads, KIND_TABS.has(m.tab) ? m.tab : 'all');
   const source = onChina ? m.rank : searching ? m.results : mine?.data ? mine : own(reads, 'all');
-  const read = { status: str(source?.status) || 'idle', answered: isRecord(source) && source.data != null, message: str(source?.message) || null };
+  const read = { status: str(source?.status) || 'idle', answered: isRecord(source) && source.data != null,
+    message: (isSaid(source?.message) ? sayOf(source.message) : str(source?.message)) || null };
   return { rows: onChina ? rows : sorted(rows, sort), sorts, sort, tabs, read, china: onChina, session: onChina ? rankOf(m)?.session ?? null : null };
 }
 
@@ -640,7 +717,7 @@ function unsortedRowsOf(m, searching, reads, now, atPage) {
   const dollars = body => itemsOf(body).filter(i => !isCnKey(i.key));
   let rows;
   if (tab === 'watching') {
-    const lists = [...everyRow(bodyOf(reads, 'watching')), ...everyRow(all)];
+    const lists = [...everyRow(bodyOf(reads, 'watching')), ...everyRow(all), ...locatedRowsOf(m)];
     const everywhere = exploreRowsOf(m);
     rows = [
       ...starred.map(key => { const item = lists.find(i => i.key === key); return item ? row(item) : placeholderRow(key); }),
@@ -652,7 +729,7 @@ function unsortedRowsOf(m, searching, reads, now, atPage) {
   } else {
     const tabBody = bodyOf(reads, tab);
     const body = fromResults ? m.results.data : readable(tabBody) ? tabBody : all;
-    rows = [...dollars(body).map(row), ...(searching ? hits : face())];
+    rows = [...dollars(body).map(row), ...(searching ? hits : marketScopeOf(m) === 'more' && !marketSourceOf(m) ? face() : [])];
     if (KIND_TABS.has(tab)) rows = rows.filter(r => r.tabs.includes(tab));
   }
   return rows;
@@ -707,7 +784,7 @@ export function pageOf(markets, account, id, now = Date.now()) {
   const m = isRecord(markets) ? markets : {};
   if (typeof id !== 'string' || id === '') return null;
   const reads = isRecord(m.explore) ? m.explore : {};
-  const found = [bodyOf(reads, m.tab), bodyOf(reads, 'all'), m.results?.data].flatMap(everyRow).find(i => i.key === id);
+  const found = [bodyOf(reads, m.tab), bodyOf(reads, 'all'), m.results?.data, own(m.located, id)?.data].flatMap(everyRow).find(i => i.key === id);
   if (!found) return null;
   const item = noIcon(found);
   const legs = legsOf(item);
@@ -733,7 +810,7 @@ export function pageOf(markets, account, id, now = Date.now()) {
   const atPlace = x => places.some(p => p.venue === x.venue && p.symbol === x.symbol);
   const symbols = [...new Set(places.map(p => str(p.symbol)))];
   const closesAt = event && typeof item.closeTime === 'string' && !Number.isNaN(Date.parse(item.closeTime)) ? item.closeTime : null;
-  const name = str(item.name);
+  const name = displayName(item);
   return {
     item, priced, price: shownPrice(live, priced), live, sourceWord: wordOf(item, live, now),
     legs: legs.map(l => ({ ...l, price: inUnit(l.price, priced.unit), bid: inUnit(l.bid, priced.unit), ask: inUnit(l.ask, priced.unit) })),

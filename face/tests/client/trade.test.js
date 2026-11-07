@@ -145,6 +145,22 @@ test('a ticket: Where with the best marked and Paper, a public listing leading t
   assert.match(nvda, /<h2 class="tk-title">Buy NVDA<\/h2>/);
 });
 
+test('a read-only public price is shown without offering a connection to trade', () => {
+  const all = fx('explore-all');
+  const item = all.items.find(i => i.key === ETH.id);
+  for (const line of item.at.filter(l => l.public)) delete line.connectTo;
+  const state = stateWith({ all, ticket: ETH });
+  const ticket = ticketOf(state, NOW);
+  const publicLeg = ticket.legs.find(l => l.public);
+  assert.ok(publicLeg, 'the public price remains among the ticket lines');
+  assert.equal(publicLeg.able, false);
+  assert.equal(publicLeg.best, false);
+  assert.equal(publicLeg.connectTo, undefined);
+  assert.match(panel(draw(state)), /class="tk-at pub"/);
+  assert.doesNotMatch(panel(draw(state)), /Connect to trade/);
+  assert.ok(ticket.legs.some(l => l.paper && l.able), 'an allowed paper venue is still available');
+});
+
 test('a limit: the limit field; extended hours only on a limit, only where the picked line offers them', () => {
   const eth = panel(draw(stateWith({ ticket: ETH, fields: { orderType: 'limit', limit: '2400' } })));
   assert.match(eth, /<option value="limit" selected>Limit<\/option>/);

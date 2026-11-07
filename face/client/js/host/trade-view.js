@@ -178,6 +178,7 @@ export function ticketOf(state, now) {
   const legs = page.legs.map(l => ({
     venue: l.venue, venueName: l.venueName, symbol: l.symbol, price: l.price, bid: l.bid, ask: l.ask, best: false, paper: l.paper,
     able: l.connected && trading.has(l.venue), public: l.public, session: isRecord(lineOf(l).session) ? lineOf(l).session : null,
+    ...(l.connectTo ? { connectTo: l.connectTo } : {}),
     takes: l.connected && trading.has(l.venue) && l.canTrade === true && lineOf(l).open !== false,
   }));
   const takes = legs.filter(l => l.takes);

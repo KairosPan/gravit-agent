@@ -53,8 +53,10 @@ export function emptyState() {
     // Account keys starred and what each old us:/crypto: star was found as; then the A shares — the cn list, their quotes by cn
     // id and that read's state, China's state as a provider, the search hits' prices
     markets: {
-      tab: 'all', sort: 'volume', q: '',
+      scope: 'hyperliquid', source: '', tab: 'all', sort: 'volume', q: '',
+      sources: { status: 'idle', data: null, at: null },
       explore: {}, results: { status: 'idle', data: null, at: null },
+      located: {},
       accountQuotes: {}, candles: {}, compare: {},
       watch: [], watchError: null, asked: {},
       watchlist: [], quotes: {}, providers: [], connection: 'idle', hitQuotes: {},

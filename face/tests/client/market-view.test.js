@@ -11,6 +11,7 @@ import {
   accountTabs, accountSorts, ACCOUNT_TAB_IDS, ACCOUNT_SORT_IDS, CANDLE_RANGES, isAccountKey, tabsOf, priceOf, sourceWordOf, legsOf, rowsOf, tableOf, sortsOf, matchKey, pairsOf,
   pageOf, faceAssetOf, handWordsOf, watchedOf, watchKeysOf, setWatchOf,
   CHINA_TAB, cnBoardOf, cnTileOf, chinaRowsOf, chinaWord, cnStateWord, cnPageOf,
+  marketScopeOf, marketScopes, marketOriginOf,
 } from '../../client/js/host/market-view.js';
 
 const CJK = /[㐀-鿿]/;
@@ -34,7 +35,7 @@ const quote = (id, over = {}) => ({
 // the markets slice: the face's own fields as today, and the Account's reads beside them (Task 10 builds it so) — `explore` by
 // tab: `all` is explore?limit=200, a kind's own explore?tab=<kind>&limit=200
 const markets = (over = {}) => ({
-  tab: 'all', sort: 'volume', q: '', watchlist: [], watchError: null, quotes: {}, providers: [], connection: 'idle',
+  scope: 'more', tab: 'all', sort: 'volume', q: '', watchlist: [], watchError: null, quotes: {}, providers: [], connection: 'idle',
   hitQuotes: {},
   explore: {}, results: { status: 'idle', data: null, at: null },
   accountQuotes: {}, candles: {}, compare: {}, watch: [], asked: {}, ...over,
@@ -54,9 +55,9 @@ const UNPRICED = { price: null, unit: 'usd', changePct: null, change24h: null, v
 // ── The Account's markets ──
 
 test('tabsOf: the fixture tabs in order, All first; Stocks raised by cn rows; Watching and Results when due', () => {
-  assert.deepEqual(ACCOUNT_TAB_IDS, ['all', 'crypto', 'stocks', 'rwas', 'perps', 'preipo', 'predictions']);
+  assert.deepEqual(ACCOUNT_TAB_IDS, ['all', 'crypto', 'stocks', 'indices', 'commodities', 'fx', 'rwas', 'perps', 'preipo', 'predictions']);
   assert.deepEqual(ACCOUNT_SORT_IDS, ['volume', 'movers', 'closing']);
-  assert.deepEqual(accountTabs(), [['all', 'All'], ['crypto', 'Crypto'], ['stocks', 'Stocks'], ['rwas', 'RWAs'], ['perps', 'Perps'], ['preipo', 'Pre-IPO'], ['predictions', 'Predictions']]);
+  assert.deepEqual(accountTabs(), [['all', 'All'], ['crypto', 'Crypto'], ['stocks', 'Stocks'], ['indices', 'Indices'], ['commodities', 'Commodities'], ['fx', 'FX'], ['rwas', 'RWAs'], ['perps', 'Perps'], ['preipo', 'Pre-IPO'], ['predictions', 'Predictions']]);
   assert.deepEqual(accountSorts(), [{ id: 'volume', label: 'Most traded' }, { id: 'movers', label: 'Biggest moves' }, { id: 'closing', label: 'Closing soonest' }]);
   const explore = fx('explore-all');
   assert.deepEqual(tabsOf(explore, 0), [

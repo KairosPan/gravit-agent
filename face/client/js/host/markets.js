@@ -22,7 +22,7 @@ import {
   readWatchlist, saveWatchlist, STORAGE_KEY, readAccountWatch, saveAccountWatch, ACCOUNT_WATCH_KEY,
 } from '../wire/market-model.js';
 import { CHINA_VENUE, isCnKey, chinaPairOf, rankOf, cnQuoteOf, cnHitsOf } from '../wire/china.js';
-import { ACCOUNT_TAB_IDS, CHINA_TAB, notAnsweringWord, canonicalId, isAccountKey, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf } from './market-view.js';
+import { ACCOUNT_TAB_IDS, CHINA_TAB, notAnsweringWord, canonicalId, isAccountKey, marketSourceOf, rowsOf, matchKey, pairsOf, pageOf, followOf, legsOf, watchedOf, setWatchOf } from './market-view.js';
 import { refusedAt, refusalOf } from './owner-view.js';
 import { assetKeyOf } from './market-depth-view.js';
 import { venuesOf } from './account-view.js';
@@ -35,6 +35,9 @@ import { said, isSaid } from '../i18n/words.js';
 const notAnswering = () => ({ state: 'unavailable', said: said('markets.cn.notAnswering'), notAnswering: true });
 
 export const EXPLORE_MS = 20_000, QUOTES_MS = 5_000, QUOTE_PAIRS = 12;
+// Longer than the explore proxies' 10 s bound, but shorter than the next poll. A browser request can otherwise stay
+// pending before reaching the proxy and hold the host's same-path deduplication lock forever.
+export const EXPLORE_TIMEOUT_MS = 15_000;
 export const WATCH_LIMIT = 100;   // either list's: the cn list's, the Account keys' cap
 // the China tab's rows one ranking read asks for
 export const RANK_ROWS = 20;
@@ -46,6 +49,7 @@ const DEPTH_KINDS = ['asset', 'book', 'trades', 'funding'];
 const QUOTES = '/data/market/quotes';
 const CONNECTED_QUOTES = '/data/account/connected/quotes';
 const VENUES = '/data/account/venues';
+const SOURCES = '/data/market/sources';
 // a connected line's part, the account not answering and no public line of the same connection to read instead
 export const accountDownWord = () => said('markets.accountDown');
 const ROWS = 200;                 // the explore rows a tab's read and a search ask for
@@ -61,12 +65,14 @@ const words = v => (typeof v === 'string' && v.trim() !== '' ? v : null);
 const messageOf = body => words(body?.refusal?.message) ?? (isSaid(body?.error) ? body.error : words(body?.error));
 // an answer (`ok: true`) carrying the list the views read: a body of any other shape is never data
 const answered = (body, list) => body?.ok === true && Array.isArray(body[list]);
+// An older state without a scope keeps the all-market contract; fresh states start on Hyperliquid.
+const scopeQuery = m => ['hyperliquid', 'xyz', 'more'].includes(m.scope) ? `&scope=${m.scope}${marketSourceOf(m) ? `&source=${encodeURIComponent(marketSourceOf(m))}` : ''}` : '';
 
 // the explore read the tab on screen takes: All, Watching, and All results with no query read All's; a kind's tab its own; All
 // results while searching is the search's read, not this — its query, asked of both halves
 function exploreOf(m) {
-  if (KINDS.has(m.tab)) return { tab: m.tab, query: `tab=${m.tab}&limit=${ROWS}` };
-  if (m.tab === 'all' || m.tab === 'watching' || (m.tab === 'results' && blank(m.q))) return { tab: 'all', query: `limit=${ROWS}` };
+  if (KINDS.has(m.tab)) return { tab: m.tab, query: `tab=${m.tab}&limit=${ROWS}${scopeQuery(m)}` };
+  if (m.tab === 'all' || m.tab === 'watching' || (m.tab === 'results' && blank(m.q))) return { tab: 'all', query: `limit=${ROWS}${m.tab === 'watching' ? '' : scopeQuery(m)}` };
   return null;
 }
 // a rejection the proxy answered for an upstream not answering: its 503 `{unreachable}`, or no body at all — never a refusal
@@ -83,14 +89,17 @@ export function startMarkets({
   let exploreTimer = null;
   let quotesTimer = null;
   let readTab = null;        // the tab the explore poll reads for while shown
+  let readSelection = scopeQuery(store.get().markets);
   let readSort = null;       // the sort the China ranking was last asked for while shown
   let inView = null;         // the row ids rowsInView last named; null: every row
   let waiting = null;        // a page asked for whose market no read lists yet: its reads wait for the read that does
   let followed = false;      // a stream follows a page's market
   let venuesAsked = false;   // the venues read asked, once, when Markets is first shown
+  let sourcesAskedAt = null; // an unsuccessful catalog retries no faster than the visible explore beat
   let depthId = null;        // the Account market page whose four reads are read, from entering it to leaving it
-  const kinds = new Map();   // a kind of read → { flight, path, seq }
+  const kinds = new Map();   // a kind of read → { flight, path, seq, cancel }
   const signing = new Set(); // the Account keys whose setWatch is in the air
+  const located = new Map(); // last exact-key lookup, independently of the selected scope; failures retry on a later poll
 
   // One flight per kind of read: an ask for the path in the air joins it; another path starts a read whose answer alone lands —
   // the one it overtook is dropped — and nothing lands after close(). `land(body, refused)` takes the answer, or for a rejection
@@ -98,21 +107,36 @@ export function startMarkets({
   function fly(kind, path, land, loading = null) {
     if (closed) return;
     let k = kinds.get(kind);
-    if (!k) { k = { flight: null, path: null, seq: 0 }; kinds.set(kind, k); }
+    if (!k) { k = { flight: null, path: null, seq: 0, cancel: null }; kinds.set(kind, k); }
     if (k.flight !== null && k.path === path) return;
+    k.cancel?.();
     const mine = ++k.seq;
+    const bounded = path === SOURCES || path.startsWith(`${EXPLORE}?`) || path.startsWith(`${CONNECTED_EXPLORE}?`);
+    const controller = bounded && typeof AbortController === 'function' ? new AbortController() : null;
+    let deadline = null, settled = false;
+    const clear = () => { if (deadline !== null) { cancelTimer(deadline); deadline = null; } };
+    const finish = (body, refused) => {
+      if (settled) return;
+      settled = true;
+      clear();
+      if (k.flight === flight) { k.flight = null; k.path = null; k.cancel = null; }
+      if (!closed && mine === k.seq) land(body, refused);
+    };
     let asked;
-    try { asked = Promise.resolve(getJson(path)); } catch (error) { asked = Promise.reject(error); }
-    const flight = asked
-      .then(body => { if (!closed && mine === k.seq) land(body, false); }, error => { if (!closed && mine === k.seq) land(error?.body, true); })
-      .finally(() => { if (k.flight === flight) { k.flight = null; k.path = null; } });
+    try { asked = Promise.resolve(getJson(path, controller ? { signal: controller.signal } : undefined)); } catch (error) { asked = Promise.reject(error); }
+    const flight = asked.then(body => finish(body, false), error => finish(error?.body, true));
     k.flight = flight;
     k.path = path;
+    k.cancel = () => { settled = true; clear(); controller?.abort(); };
+    if (bounded) deadline = schedule(() => {
+      finish({ unreachable: 'timeout', error: said('markets.loadTimedOut') }, true);
+      controller?.abort();
+    }, EXPLORE_TIMEOUT_MS);
     if (loading) store.dispatch(...loading);
   }
   const inAir = kind => (kinds.get(kind)?.flight ?? null) !== null;
   // a kind's flight dropped: its answer, when it comes, lands nowhere, and the next ask reads again
-  function drop(kind) { const k = kinds.get(kind); if (k) { k.seq += 1; k.flight = null; k.path = null; } }
+  function drop(kind) { const k = kinds.get(kind); if (k) { k.seq += 1; k.cancel?.(); k.cancel = null; k.flight = null; k.path = null; } }
 
   // the explore reads' two halves (host/explore-halves.js); a market half answered afresh rechecks China's state
   const halves = exploreHalves({ store, fly, drop, kinds, now, onMarket: body => { if (body.stale !== true) recheckChina(); } });
@@ -155,6 +179,18 @@ export function startMarkets({
     });
   }
 
+  // Provider discovery is independent of the selected market read: a slow registry never blocks Hyperliquid's list.
+  // Keep one successful catalog for this page; a failure retries on a later visible beat or explicit one-shot entry.
+  function readSources() {
+    if (store.get().markets.sources?.status === 'ready' || inAir('sources')) return;
+    if (sourcesAskedAt !== null && now() - sourcesAskedAt < EXPLORE_MS) return;
+    sourcesAskedAt = now();
+    fly('sources', SOURCES, (body, refused) => {
+      if (!refused && answered(body, 'value')) store.dispatch('marketSourcesLoaded', { data: body, at: now() });
+      else store.dispatch('marketSourcesFailed', { at: now(), message: messageOf(body) });
+    }, ['marketSourcesLoading']);
+  }
+
   // China's ranking for the sort in effect, the market's china tab: the answer for a sort the screen has left lands nowhere (one
   // flight, the newer path's); an answer kept and re-served stale by the proxy lands as the ranking it was, marked stale (rankOf)
   function readRank() {
@@ -178,6 +214,20 @@ export function startMarkets({
   // the read for the tab on screen: China's ranking there, else the Account's explore
   function readShown() {
     if (store.get().markets.tab === CHINA_TAB) readRank(); else readExplore();
+    if (store.get().markets.tab === 'watching' && scopeQuery(store.get().markets)) {
+      for (const id of store.get().markets.watch ?? []) if (!isCnKey(id) && isAccountKey(id)) locate(id);
+    }
+  }
+
+  // Loading a requested screen is independent of periodic visibility-based polling. Embedded browsers can start hidden,
+  // or keep reporting hidden during a user interaction; they still need one answer without starting background polls.
+  function readOnce() {
+    if (closed) return;
+    readTab = store.get().markets.tab;
+    leaveExplores();
+    readVenues();
+    readShown();
+    readSources();
   }
 
   // the quotes of the rows in view — the table's rows, those rowsInView last named — at their most traded connected lines,
@@ -243,7 +293,7 @@ export function startMarkets({
 
   // while Markets is on screen: explore every EXPLORE_MS for the tab on screen, the quotes every QUOTES_MS
   function armExplore() {
-    exploreTimer = schedule(() => { exploreTimer = null; if (closed || !shown) return; armExplore(); readShown(); }, EXPLORE_MS);
+    exploreTimer = schedule(() => { exploreTimer = null; if (closed || !shown) return; armExplore(); readShown(); readSources(); }, EXPLORE_MS);
   }
   function armQuotes() {
     quotesTimer = schedule(() => { quotesTimer = null; if (closed || !shown) return; armQuotes(); readQuotes(); readCnQuotes(); beatDepth(); }, QUOTES_MS);
@@ -331,6 +381,18 @@ export function startMarkets({
     const key = `${leg.venue}:${leg.symbol}`;
     if (leg.connected) { marketStream.follow([]); stream.follow([key]); } else { stream.follow([]); marketStream.follow([key]); }
   }
+  // A saved link or star can belong to another entry, or lie below its busiest rows. Resolve its exact key without
+  // replacing the selected entry's list. Qualified xyz coins ask that source alone, even on a fresh Hyperliquid screen.
+  function locate(id) {
+    if (located.has(id) && now() - located.get(id) < EXPLORE_MS) return;
+    located.set(id, now());
+    const q = id.slice(id.indexOf(':') + 1).slice(0, 60);
+    const scope = id.startsWith('perp:xyz:') ? '&scope=xyz' : '';
+    halves.read(`locate:${id}`, `q=${encodeURIComponent(q)}&key=${encodeURIComponent(id)}&limit=${ASKED_ROWS}${scope}`, {
+      land: data => store.dispatch('marketLocated', { id, data, at: now() }),
+      failed: () => {},
+    });
+  }
   // A market's page: the candles at its line — its first connected line, else its first public listing — for its kept range, the
   // compare rows for its base (a coin, a perpetual, a stock) and that line followed on its stream. A page whose market no read
   // lists yet (a deep link before explore answers) waits for the read that lists it; meanwhile it follows nothing.
@@ -340,6 +402,7 @@ export function startMarkets({
     if (!view) {
       waiting = id;
       if (followed) unfollow();
+      if (scopeQuery(s.markets)) locate(id);
       return;
     }
     waiting = null;
@@ -502,7 +565,16 @@ export function startMarkets({
 
   function onStore() {
     if (closed) return;
-    if (shown && store.get().markets.tab !== readTab) retab();
+    const selection = scopeQuery(store.get().markets);
+    if (selection !== readSelection) {
+      readSelection = selection;
+      for (const kind of kinds.keys()) {
+        const match = /^(explore:[^:]+|results):(market|account)$/.exec(kind);
+        if (match) halves.forget(match[1]);
+      }
+      drop('rank');
+      if (shown) retab();
+    } else if (shown && store.get().markets.tab !== readTab) retab();
     else if (shown && store.get().markets.tab === CHINA_TAB && (store.get().markets.sort === 'movers' ? 'movers' : 'volume') !== readSort) readRank();
     if (waiting !== null) open(waiting);
   }
@@ -514,24 +586,23 @@ export function startMarkets({
   void askOld();
 
   return {
+    readOnce,
     /** The Account's read answered afresh (not one the proxy re-served stale): China's state, when last said as the Account
      *  not answering, is read again, on any screen. */
     accountAnswered(body) {
       if (closed || body?.stale === true) return;
       recheckChina();
     },
-    /** Markets on screen in a visible tab, or not: the reads run only while it is. */
+    /** Visible Markets polls; hiding pauses polls but lets a bounded one-shot read finish. */
     show(on) {
       if (closed) return;
       const next = Boolean(on);
       if (next === shown) return;
       shown = next;
       if (!shown) { stopPolls(); return; }
-      readTab = store.get().markets.tab;
-      readVenues();
       armExplore();
       armQuotes();
-      readShown();
+      readOnce();
     },
     /** The query typed: the Account's search (explore?q=, the latest one lands) into results — its A shares the hits, with the
      *  prices the search carries. */
@@ -544,7 +615,7 @@ export function startMarkets({
         return;
       }
       // a new query forgets what the last one kept (explore-halves.js)
-      halves.read('results', `q=${encodeURIComponent(q.trim())}&limit=${ROWS}`, {
+      halves.read('results', `q=${encodeURIComponent(q.trim())}&limit=${ROWS}${scopeQuery(store.get().markets)}`, {
         land: (data, kept) => {
           store.dispatch('resultsLoaded', { data, at: now() });
           // the A shares the hits, the market's alone

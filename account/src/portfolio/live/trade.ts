@@ -37,7 +37,13 @@ export const ORDER_TYPES: readonly OrderType[] = ["market", "limit", "stop", "st
 export const TIFS: readonly TimeInForce[] = ["gtc", "ioc", "fok", "day"];
 export type MarketKind = "spot" | "perp" | "future" | "stock" | "crypto" | "event" | "token";
 
+export type MarketScope = "hyperliquid" | "xyz" | "more";
+
 export interface Market {
+  /** Hyperliquid's HIP-3 deployer namespace, when this contract belongs to one. */
+  dex?: string | undefined;
+  /** A generic paper market's actual public price source, retained when browsing one source. */
+  publicSource?: string | undefined;
   /** the account's name for it — what the owner and an agent type: `BTC/USDT` at an exchange, `AAPL` at a broker, `BTC-USD` at Robinhood
    * Crypto, `KXFED-25DEC-T4.00:YES` at Kalshi, `<token id>` or `<slug>:<outcome>` at Polymarket, `WETH/USDC@Base` from a wallet */
   symbol: string;
@@ -441,8 +447,9 @@ export interface LiveTrader {
    * account reads them from the connector the owner signed (accounts.ts tradeKinds) */
   kinds?: MarketKind[] | undefined;
   /** a few markets to start from (query empty), or the ones matching a query; about 20 — an exchange's start-from list carries its pre-IPO
-   * perpetuals too, after the well-known markets, so that Markets groups them with the public venues' (exchange-trade.ts) */
-  markets(query: string): Promise<Market[] | Refusal>;
+   * perpetuals too, after the well-known markets, so that Markets groups them with the public venues' (exchange-trade.ts). Generic paper
+   * accepts a scope or exact public source before reading its listings; other traders may ignore those optional selectors. */
+  markets(query: string, scope?: MarketScope, source?: string): Promise<Market[] | Refusal>;
   /** one market, with a fresh price */
   market(symbol: string): Promise<Market | Refusal>;
   place(order: OrderRequest): Promise<OrderState | Refusal>;
@@ -474,8 +481,8 @@ export interface LiveTrader {
   /** the last 24 hours of many markets in one call where the venue has one: by symbol. `symbols` absent: the venue's well-known markets */
   stats?(symbols?: string[]): Promise<Map<string, MarketStats> | Refusal>;
   /** event contracts, each carrying its `group` (the question), `closeTime` and `category`: the open ones, in one category when asked,
-   * closing within `closingWithinMs` when asked, at most `limit`, most traded first */
-  events?(o: { category?: string | undefined; closingWithinMs?: number | undefined; limit: number }): Promise<Market[] | Refusal>;
+   * closing within `closingWithinMs` when asked, at most `limit`, most traded first. Generic paper may select one exact public source. */
+  events?(o: { category?: string | undefined; closingWithinMs?: number | undefined; limit: number }, source?: string): Promise<Market[] | Refusal>;
   /** price history in a window (CandleWindow: a first view's range, or one page before the first bar a chart has), oldest first: a page
    * that says whether older bars exist and where the history ends (CandlePage), or a plain list where the venue says nothing of it */
   candles?(symbol: string, interval: CandleInterval, window: CandleWindow): Promise<Candle[] | CandlePage | Refusal>;

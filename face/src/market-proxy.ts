@@ -4,8 +4,8 @@
  * as the account's half (src/upstream-proxy.ts: the fence, 405, the rebuilt query, the kept-answer cache, stale
  * re-serve, the unreachable codes, the piped stream and the POST rules).
  *
- * Seven exact routes, mapped one to one onto the market's own paths:
- * - five reads ({@link MARKET_READS}): `explore`, `quotes`, `candles`, `book` and `trades`, each
+ * Eight exact routes, mapped one to one onto the market's own paths:
+ * - six reads ({@link MARKET_READS}): `explore`, `quotes`, `candles`, `book`, `trades` and `sources`, each
  *   `/data/market/<read>` → `/api/<read>`, their query names, TTLs and aborts the market's own
  *   ({@link MARKET_QUERY}, {@link MARKET_TTL_MS}, {@link MARKET_ABORT_MS}; the account's public reads they came from
  *   are gone since plan A2's Task 7), `pairs` with its own 2 000 characters;
@@ -23,8 +23,8 @@ import { marketUrl } from "./market-row.ts";
 import type { RouteRegistrar } from "./static.ts";
 import { mountReads, mountStream, type UpstreamRead, type UpstreamRouteRead, type UpstreamSettings } from "./upstream-proxy.ts";
 
-/** The market's five public reads, in the order they are mounted. */
-const READ_NAMES = ["explore", "quotes", "candles", "book", "trades"] as const;
+/** The market's public reads and source directory, in the order they are mounted. */
+const READ_NAMES = ["explore", "quotes", "candles", "book", "trades", "sources"] as const;
 type MarketReadName = typeof READ_NAMES[number];
 /** `pairs` carries twelve `venue|symbol` markets: its bound is its own, as the account's `quotes` has it. */
 const LONG_VALUES: Readonly<Partial<Record<MarketReadName, ReadonlyMap<string, number>>>> = { quotes: new Map([["pairs", 2_000]]) };
@@ -32,20 +32,21 @@ const LONG_VALUES: Readonly<Partial<Record<MarketReadName, ReadonlyMap<string, n
 /** The whitelist: read → allowed query names (`explore`'s `sort` is China's ranking's too, `volume` or `movers`,
  * beside its `tab=china`); a value is at most 240 characters (`quotes`' `pairs` 2 000), each name at most once. */
 export const MARKET_QUERY: Readonly<Record<MarketReadName, readonly string[]>> = {
-  explore: ["tab", "q", "key", "sort", "limit"],
+  explore: ["tab", "q", "key", "sort", "limit", "scope", "source"],
   quotes: ["pairs"],
   candles: ["venue", "symbol", "interval", "range", "before", "limit"],
   book: ["venue", "symbol", "depth"],
   trades: ["venue", "symbol", "limit"],
+  sources: [],
 };
 
 /** How long one answer is served without asking again, per read. */
-export const MARKET_TTL_MS: Readonly<Record<MarketReadName, number>> = { explore: 20_000, quotes: 3_000, candles: 30_000, book: 2_000, trades: 2_000 };
+export const MARKET_TTL_MS: Readonly<Record<MarketReadName, number>> = { explore: 20_000, quotes: 3_000, candles: 30_000, book: 2_000, trades: 2_000, sources: 30_000 };
 
 /** How long the market may take, headers and body, per read: a first candles view waits for a source. */
-export const MARKET_ABORT_MS: Readonly<Record<MarketReadName, number>> = { explore: 10_000, quotes: 7_000, candles: 25_000, book: 7_000, trades: 7_000 };
+export const MARKET_ABORT_MS: Readonly<Record<MarketReadName, number>> = { explore: 10_000, quotes: 7_000, candles: 25_000, book: 7_000, trades: 7_000, sources: 7_000 };
 
-/** explore, quotes, candles, book, trades: face `/data/market/<r>` → `/api/<r>`, with the read's query names, TTL and
+/** explore, quotes, candles, book, trades, sources: face `/data/market/<r>` → `/api/<r>`, with the read's query names, TTL and
  * abort. */
 export const MARKET_READS: readonly UpstreamRead[] = READ_NAMES.map((name) => ({
   face: `/data/market/${name}`,
@@ -59,7 +60,7 @@ export const MARKET_READS: readonly UpstreamRead[] = READ_NAMES.map((name) => ({
 /** A malformed request's answer, in the market's words. */
 const INVALID = '{"ok":false,"error":"invalid market request"}';
 
-/** Mount the market's seven routes on the host webserver. `url` defaults to `FACE_MARKET_URL` or
+/** Mount the market's eight routes on the host webserver. `url` defaults to `FACE_MARKET_URL` or
  * `http://127.0.0.1:4821`; `disabled` is the composed `mcp-market` row's. `explore` and `quotes` are those reads
  * in-process, through the same caches their routes are served from; `dispose` forgets every kept answer and aborts
  * every open stream's upstream. */

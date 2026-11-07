@@ -529,7 +529,7 @@ describe("the markets, as the library loads them", () => {
     const list = ok(await t.markets(""));
     expect(list.map((m) => m.symbol)).toEqual(["BTC/USDC:USDC", "ETH/USDC:USDC", "XYZ-XYZ100/USDC:USDC", "SOL/USDC:USDC", "XYZ-NVDA/USDC:USDC", "XYZ-GOLD/USDC:USDC", "XYZ-TSLA/USDC:USDC", "XYZ-HOOD/USDC:USDC", "IO-ANTH/USDC:USDC", "IO-OAI/USDC:USDC", "ATOM/USDC:USDC", "DYDX/USDC:USDC", "HYPE/USDC", "BTC/USDC", "PURR/USDC", "USDT/USDC"]);
     const nvda = list.find((m) => m.symbol === "XYZ-NVDA/USDC:USDC")!;
-    expect(nvda).toMatchObject({ name: "NVDA perpetual on XYZ (HIP-3, xyz:NVDA)", kind: "perp", base: "NVDA", quote: "USDC", qtyStep: 0.001, priceStep: 0.01, minNotional: 10, contractSize: 1, open: true, types: ["market", "limit"], tifs: ["gtc", "ioc"], tifsByType: { market: ["ioc"] }, postOnly: true, reduceOnly: true, maxLeverage: 20, marginModes: ["cross", "isolated"] });
+    expect(nvda).toMatchObject({ name: "NVDA perpetual on XYZ (HIP-3, xyz:NVDA)", kind: "perp", base: "xyz:NVDA", dex: "xyz", quote: "USDC", qtyStep: 0.001, priceStep: 0.01, minNotional: 10, contractSize: 1, open: true, types: ["market", "limit"], tifs: ["gtc", "ioc"], tifsByType: { market: ["ioc"] }, postOnly: true, reduceOnly: true, maxLeverage: 20, marginModes: ["cross", "isolated"] });
     expect(nvda.note).toContain("margined in USDC in that DEX's own perps balance");
     expect(list.find((m) => m.symbol === "XYZ-HOOD/USDC:USDC")!.marginModes).toEqual(["isolated"]);
     const btc = list.find((m) => m.symbol === "BTC/USDC")!;
@@ -540,13 +540,25 @@ describe("the markets, as the library loads them", () => {
     // other venues' Anthropic contracts; a stock filed under "stocks" is not one
     const anth = list.find((m) => m.symbol === "IO-ANTH/USDC:USDC")!;
     expect(anth).toMatchObject({ name: "ANTH perpetual on EntropyIO (HIP-3, io:ANTH)", base: "ANTH", category: "Pre-IPO", group: { id: "preipo:anthropic", title: "Anthropic" }, implied: { perPoint: 1_000_000_000 }, marginModes: ["isolated"], maxLeverage: 6 });
-    expect(nvda.category).toBeUndefined();
+    expect(nvda.category).toBe("stocks");
+    expect(list.find((m) => m.symbol === "XYZ-GOLD/USDC:USDC")!.category).toBe("commodities");
+    expect(list.find((m) => m.symbol === "XYZ-XYZ100/USDC:USDC")!.category).toBe("indices");
+    expect(list.find((m) => m.symbol === "BTC/USDC:USDC")!.category).toBe("crypto");
     // a search, and Hyperliquid's own names for a market
     expect(ok(await t.markets("nvda")).map((m) => m.symbol)).toEqual(["XYZ-NVDA/USDC:USDC"]);
     expect(ok(await t.markets("io:ANTH-PERP"))[0]!.symbol).toBe("IO-ANTH/USDC:USDC");
     expect(ok(await t.markets("xyz:GOLD"))[0]!.symbol).toBe("XYZ-GOLD/USDC:USDC");
     expect(ok(await t.markets("@107"))[0]!.symbol).toBe("HYPE/USDC");
     expect(ok(await t.markets("BTC-PERP"))[0]!.symbol).toBe("BTC/USDC:USDC");
+    const xyz = ok(await t.markets("", "xyz"));
+    expect(xyz).toHaveLength(5);
+    expect(xyz.every((m) => m.dex === "xyz" && m.kind === "perp" && m.base?.startsWith("xyz:"))).toBe(true);
+    const native = ok(await t.markets("", "hyperliquid"));
+    expect(native).toHaveLength(5);
+    expect(native.every((m) => m.dex === "" && m.kind === "perp")).toBe(true);
+    expect(ok(await t.markets("BTC-PERP", "hyperliquid"))[0]!.symbol).toBe("BTC/USDC:USDC");
+    expect(ok(await t.markets("xyz:NVDA", "hyperliquid"))).toEqual([]);
+    expect(ok(await t.markets("", "more")).map((m) => m.symbol)).toEqual(expect.arrayContaining(["IO-ANTH/USDC:USDC", "HYPE/USDC"]));
     // what is not traded here, and why
     expect(refusal(await t.market("FLX-TSLA/USDH:USDH")).code).toBe("E_ACCOUNT_UNPRICED");
     expect(refusal(await t.market("DOGE/USDC:USDC")).code).toBe("E_VENUE_REJECTED");

@@ -61,9 +61,10 @@ const conv = (id, over = {}) => ({ id, title: 'T ' + id, kind: 'gravit', members
 function screen({
   route = { screen: 'markets', id: null }, all = fx('explore-all'), predictions = null, tab = null, sort = null, q = '', results = null,
   cn = [], quotes = {}, connection = 'polling', status = null, watch = [], asked = {}, live = [], candles = null, account = false,
-  conversations = [], watchError = null, role = null, here,
+  conversations = [], watchError = null, role = null, here, scope = 'more',
 } = {}) {
   let s = R.nav(emptyState(), route);
+  s = { ...s, markets: { ...s.markets, scope } };
   if (all) s = R.exploreLoaded(s, { tab: 'all', data: all, at: NOW });
   if (predictions) s = R.exploreLoaded(s, { tab: 'predictions', data: predictions, at: NOW });
   s = R.accountWatchLoaded(s, { items: watch, error: null });
@@ -113,11 +114,11 @@ test('the table: the Account tabs, rows with source words, cents for an event, c
   assert.match(html, /^<main class="main mkts">/);
   assert.match(html, /<h1 class="head-title">Markets<\/h1>/);
   assert.match(html, /id="mq" type="search" autocomplete="off" placeholder="Search markets" data-action="mkQuery" value=""/);
-  // the Account's tabs in its order, each with its count; nothing starred and nothing searched: no Watching, no All results
-  const tabs = [...html.matchAll(/<button type="button" class="mk-tab" data-action="mkTab" data-value="([^"]+)" aria-pressed="(true|false)">([^<]+)<\/button>/g)].map(m => [m[1], m[2], m[3]]);
+  // More's categories carry only its own counts; Watching and Desk are separate global controls.
+  const tabs = [...html.matchAll(/<button type="button" class="mk-category" data-action="mkCategory" data-scope="more" data-value="([^"]+)" aria-pressed="(true|false)">([^<]+)<\/button>/g)].map(m => [m[1], m[2], m[3]]);
   assert.deepEqual(tabs, [
     ['all', 'true', 'All · 30'], ['crypto', 'false', 'Crypto · 6'], ['stocks', 'false', 'Stocks · 4'], ['rwas', 'false', 'RWAs · 4'],
-    ['perps', 'false', 'Perps · 6'], ['preipo', 'false', 'Pre-IPO · 1'], ['predictions', 'false', 'Predictions · 9'], ['china', 'false', 'China'], ['desk', 'false', 'Desk'],
+    ['perps', 'false', 'Perps · 6'], ['preipo', 'false', 'Pre-IPO · 1'], ['predictions', 'false', 'Predictions · 9'], ['china', 'false', 'China'],
   ]);
   assert.match(html, /<th scope="col" class="r">Price<\/th><th scope="col" class="r mk-c-chg">24h<\/th><th scope="col" class="r mk-c-vol">Volume<\/th><th scope="col" class="r mk-c-st">Source<\/th>/);
   // every row of the tab, each by its key, in the view's order: Most traded, the events' smaller volumes last
@@ -191,8 +192,8 @@ test('sorts: Most traded, Biggest moves, Closing soonest only with events', () =
 test('a cn row beside the Account rows under All, not under Stocks; Not listed line with Remove for a missed star', () => {
   const cnState = (over = {}) => screen({ cn: [MOUTAI, ZED], asked: { 'us:ZZZZ': null }, quotes: { 'cn:600519': moutaiQuote() }, ...over });
   const stocks = cnState({ tab: 'stocks' }).html;
-  // Stocks is the Account's alone (China is the A shares' home); All counts the A share; the star the Account did not list stays
-  assert.match(stocks, /data-value="all" aria-pressed="false">All · 31</);
+  // Source counts come from its All read; local A-share stars do not change the public source count.
+  assert.match(stocks, /data-scope="more" data-value="all" aria-pressed="false">All · 30</);
   assert.match(stocks, /data-value="stocks" aria-pressed="true">Stocks · 4</);
   assert.match(stocks, /data-value="watching" aria-pressed="false">Watching</);
   assert.deepEqual(rowIds(stocks), ['stock:NVDA', 'stock:SPY', 'stock:AAPL', 'us:ZZZZ']);
@@ -243,9 +244,9 @@ test("Watching is the Account's list and the face's: a row watched at the Accoun
   assert.match(cells(rowOf(all, 'coin:BTC'))[0], /aria-pressed="true" aria-label="Stop watching BTC">[\s\S]*Watched at the Account/);
   assert.match(cells(rowOf(all, 'coin:ETH'))[0], /aria-pressed="false"/);
   assert.doesNotMatch(cells(rowOf(all, 'coin:ETH'))[0], /mk-at/);
-  // no page: no Watching tab, no star on
+  // no page: Watching remains available, with no star on
   const none = screen().html;
-  assert.doesNotMatch(none, /data-value="watching"/);
+  assert.match(none, /data-value="watching"/);
   assert.doesNotMatch(none, /mk-at|aria-pressed="true" aria-label="Stop watching/);
   // a market's page reads it watched
   const pageHtml = screen({ account: true, route: { screen: 'markets', id: 'coin:DOGE' } }).html;
@@ -360,7 +361,7 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
   assert.ok(chart.includes('aria-label="Closes over 1D: from $179.16 to $179.20, low $178.50, high $179.20"'), chart);
   assert.match(chart, /<p class="mk-note">Ends 16:00 New York · A stand-in: nothing here is real<\/p><\/section>$/);
   assert.deepEqual(linesOf(section(nvda.html, 'Across venues')).map(text), [
-    '·Stand-in Broker · NVDA · $182.40 Best', '·Momentum · paper · NVDA · $182.40 Paper', '·Stand-in · 15 min delayed · NVDA · $182.40Connect to trade',
+    '·Stand-in Broker · NVDA · $182.40 Best', '·Momentum · paper · NVDA · $182.40 Paper', '·Stand-in · 15 min delayed · NVDA · $182.40',
   ]);
   assert.deepEqual(linesOf(section(nvda.html, 'You here')).map(text), ['·2 NVDA · $364.80cost known for 0 of 2 NVDA'], 'nothing working: no order line');
   // what the paper accounts hold of it is its own line, marked Paper, with the paper cost: a sheet with no real row
@@ -695,7 +696,7 @@ function chinaScreen(rank = s => R.rankLoaded(s, { sort: 'volume', data: RANK, a
 
 test("the China table: Today and Turnover in its header, a row's cells, the closed line", () => {
   const { html } = chinaScreen();
-  assert.match(html, /data-value="china" aria-pressed="true">China · 5,577</);
+  assert.match(html, /data-scope="more" data-value="china" aria-pressed="true">China</);
   assert.match(html, /<th scope="col" class="r mk-c-chg">Today<\/th>/);
   assert.match(html, /<th scope="col" class="r mk-c-vol">Turnover<\/th>/);
   assert.match(html, /<p class="mk-note">Closed · 10-30 15:00 Beijing<\/p>/);
