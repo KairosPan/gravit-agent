@@ -110,7 +110,7 @@
  *                                                        reads it: its notes (the waiting ones too), the switches, what its limits say
  *   GET  /api/account/memory/agent?address=&q=           one agent's memory as that agent reads it (portfolio_memory): its notes kept,
  *                                                        the ones waiting for the owner, its limits in words, and what other agents share
- *   GET  /api/account/connected/explore?tab=&q=&key=&sort=&limit=   Markets, the connected half: what the venues connected to this
+ *   GET  /api/account/connected/explore?scope=&tab=&q=&key=&sort=&limit=   Markets, the connected half: what the venues connected to this
  *                                                        account list, as one list with tabs, movers, what closes soon and what trades
  *                                                        most; `key`, a row's own exactly as `items` names it, keeps only that row (at
  *                                                        most 200 characters). No public line and no China: those are the market's
@@ -173,6 +173,7 @@ import { pairingCode } from "./account/pairing.ts";
 import type { Side } from "./venues.ts";
 import { MARKET_URL_DEFAULT } from "./market/client.ts";
 import { connectMarket, type MarketLink } from "./market/link.ts";
+import { marketDown } from "./market/client.ts";
 
 /** what every request outside /api/ is answered (404), with or without the account layer: the Account serves no page */
 export const NO_PAGE = "The Account serves no page: its owner's screens are Gravit's face (Markets, Trade, Account). This address answers its API under /api/.";
@@ -722,10 +723,13 @@ export async function startPortfolioServer(opts: PortfolioServerOptions): Promis
   // by name (409 E_WALLET_NOT_CONNECTED): its public data is the market's
   app.get("/api/account/connected/explore", wrap(async (req, res) => {
     if (!mounted(res)) return;
-    const q = strings(req, res, { tab: 20, q: 80, key: 240, sort: 20, limit: 6 });
+    const q = strings(req, res, { scope: 20, source: 81, tab: 20, q: 80, key: 240, sort: 20, limit: 6 });
     if (!q) return;
     if (q.limit && !/^\d{1,3}$/.test(q.limit)) return void bad(res, "limit is a count of markets, 1 to 200, in digits");
-    answerOf(res, await svc.connectedExplore({ tab: q.tab, q: q.q, key: q.key, sort: q.sort, ...(q.limit ? { limit: Number(q.limit) } : {}) }));
+    // The server may begin listening before the link's first registry answer. Give an exact-source question a bounded chance to
+    // resolve that registry instead of incorrectly declaring a known source unknown during a cold start.
+    if (q.source && opts.market && !opts.market.sources().length && !(await opts.market.ready(3_000))) return answerOf(res, marketDown());
+    answerOf(res, await svc.connectedExplore({ scope: q.scope, source: q.source, tab: q.tab, q: q.q, key: q.key, sort: q.sort, ...(q.limit ? { limit: Number(q.limit) } : {}) }));
   }));
   app.get("/api/account/connected/quotes", wrap(async (req, res) => {
     if (!mounted(res)) return;

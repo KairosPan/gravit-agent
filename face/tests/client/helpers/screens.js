@@ -77,7 +77,7 @@ const quote = (id, over = {}) => ({ id, market: id.slice(0, id.indexOf(':')), sy
 // its history; an A share's page; a key no read lists
 function marketStates() {
   const fx = name => JSON.parse(readFileSync(new URL(`../../fixtures/account/${name}.json`, import.meta.url), 'utf8'));
-  const on = R.nav(emptyState(), { screen: 'markets', id: null });
+  const on = R.setMarketsScope(R.nav(emptyState(), { screen: 'markets', id: null }), 'more');
   const all = fx('explore-all');
   all.items.push(fx('explore-predictions').items[0], {
     key: 'pm:0xab', kind: 'event', name: 'Will it rain in Paris on Sunday?', price: 0.12, change24h: -0.01, volumeUsd24h: 18000, category: 'Climate',
@@ -328,7 +328,38 @@ export function everyState() {
     ...slackStates(identitySigning(R.nav(seatedOf(accountRead()), { screen: 'account', tab: 'identity' }))),
     // Settings › Language (plan 7 Task 9) pressed on 中文; the Settings states under ZH are screens-zh.json's (Task 10)
     R.setLang(R.openSettings(open), 'zh'),
+    ...focusedMarketStates(),
+    ...providerMarketStates(),
   ];
+}
+
+// The two default source entries, with a local source badge on each contract. Appended so existing golden state names stay put.
+function focusedMarketStates() {
+  return [
+    ['hyperliquid', 'hyperliquid', 'BTC', 'BTC-PERP', 'Bitcoin perpetual'],
+    ['xyz', 'trade-xyz', 'xyz:NVDA', 'xyz:NVDA-PERP', 'NVIDIA perpetual'],
+  ].map(([scope, venue, base, symbol, name]) => {
+    const s = R.nav(emptyState(), { screen: 'markets', id: null });
+    const category = scope === 'xyz' ? 'stocks' : 'crypto';
+    const row = { key: `perp:${base}`, kind: 'perp', name, base, price: 100, changePct24h: 1, volumeUsd24h: 1e6, tabs: ['all', 'perps', category],
+      at: [{ venue, symbol, venueName: scope === 'xyz' ? 'trade.xyz' : 'Hyperliquid', public: true, connected: false,
+        connector: 'live:hyperliquid-trade', connectTo: 'hyperliquid-trade', price: 100 }] };
+    return R.exploreLoaded({ ...s, markets: { ...s.markets, scope } }, { tab: 'all', at: NOW,
+      data: { ok: true, items: [row], movers: [], closing: [], mostTraded: [], tabs: [{ id: 'all', count: 1 }, { id: category, count: 1 }], missing: [], notes: [] } });
+  });
+}
+
+// The provider catalog is independent of the selected market, and More opens an exact source, not a connector group.
+function providerMarketStates() {
+  const s = focusedMarketStates()[0];
+  const data = { ok: true, value: [{ id: 'okx', name: 'OKX' }, { id: 'robinhood-stock-tokens', name: 'Robinhood Stock Tokens', kind: 'tokens' },
+    { id: 'okx-preipo', name: 'OKX' }, { id: 'hyperliquid-preipo', name: 'Hyperliquid' }] };
+  const ready = R.marketSourcesLoaded(s, { data, at: NOW });
+  const picked = R.setMarketsLocation(ready, { scope: 'more', source: 'robinhood-stock-tokens' });
+  const item = { key: 'rwa:NVDA', kind: 'rwa', base: 'NVDA', name: 'NVIDIA', price: 100, tabs: ['all', 'rwas'],
+    at: [{ venue: 'robinhood-stock-tokens', venueName: 'Robinhood Stock Tokens', symbol: 'NVDA', public: true, connected: false, price: 100 }] };
+  return [ready, R.exploreLoaded(picked, { tab: 'all', at: NOW, data: { ok: true, items: [item], tabs: [{ id: 'all', count: 1 }, { id: 'rwas', count: 1 }] } }),
+    R.marketSourcesLoading(s), R.marketSourcesFailed(s, { at: NOW })];
 }
 
 // the Account's page as accountStates reads it, before the seat

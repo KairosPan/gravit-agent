@@ -39,6 +39,10 @@ export const TIFS: readonly TimeInForce[] = ["gtc", "ioc", "fok", "day"];
 export type MarketKind = "spot" | "perp" | "future" | "stock" | "crypto" | "event" | "token";
 
 export interface Market {
+  /** The exact public source backing a generic paper market, when supplied by a connected adapter. */
+  publicSource?: string | undefined;
+  /** Hyperliquid HIP-3 deployer namespace; empty for a native perpetual when supplied. */
+  dex?: string | undefined;
   /** the account's name for it — what the owner and an agent type: `BTC/USDT` at an exchange, `AAPL` at a broker, `BTC-USD` at Robinhood
    * Crypto, `KXFED-25DEC-T4.00:YES` at Kalshi, `<token id>` or `<slug>:<outcome>` at Polymarket, `WETH/USDC@Base` from a wallet */
   symbol: string;

@@ -315,7 +315,7 @@ test("a repeated or unknown name, an over-long value: 400 invalid account reques
     earn: ["venue", "asset", "fresh"],
     sellable: ["fresh"],
     signinStatus: ["state"],
-    connectedExplore: ["tab", "q", "key", "sort", "limit"],
+    connectedExplore: ["tab", "q", "key", "sort", "limit", "scope", "source"],
     connectedQuotes: ["pairs"],
     connectedCandles: ["venue", "symbol", "interval", "range", "before", "limit"],
     connectedBook: ["venue", "symbol", "depth"],
@@ -1219,7 +1219,7 @@ test("funding is read with no venue, as the Account's own page reads it: every v
 test("the connected reads go to /api/account/connected/*", async () => {
   /* the connected reads keep the names, TTLs and aborts the account's public reads had (now the market's own, src/market-proxy.ts) */
   assert.deepEqual([ACCOUNT_QUERY.connectedExplore, ACCOUNT_QUERY.connectedQuotes, ACCOUNT_QUERY.connectedCandles, ACCOUNT_QUERY.connectedBook, ACCOUNT_QUERY.connectedTrades], [
-    ["tab", "q", "key", "sort", "limit"], ["pairs"], ["venue", "symbol", "interval", "range", "before", "limit"], ["venue", "symbol", "depth"], ["venue", "symbol", "limit"],
+    ["tab", "q", "key", "sort", "limit", "scope", "source"], ["pairs"], ["venue", "symbol", "interval", "range", "before", "limit"], ["venue", "symbol", "depth"], ["venue", "symbol", "limit"],
   ]);
   for (const [face, account, own, query] of CONNECTED) {
     let clock = NOW;

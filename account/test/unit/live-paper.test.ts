@@ -9,6 +9,8 @@ import { rebuildEquity, replayPaperBook } from "../../src/portfolio/live/paper-h
 import type { Listing, PublicSource } from "../../../market/src/live/public-markets.ts";
 import type { LiveTrader, Market, OrderRequest, OrderState } from "../../src/portfolio/live/trade.ts";
 import type { LiveBalance, LiveSource } from "../../src/portfolio/live/types.ts";
+import { scopedExploreVenues } from "../../src/portfolio/live/market-scope.ts";
+import { exploreAcross } from "../../src/portfolio/live/explore.ts";
 
 /** THE ACCOUNT'S OWN PAPER ACCOUNT (live/paper.ts): paper money, the markets the public sources list, fills by the account's own declared
  * rule, a book in the home. The public sources here are stand-ins that speak the real ones' shape (public-markets.ts PublicSource), with
@@ -84,6 +86,161 @@ const cashOf = (first: LiveBalance[]) => first.find((b) => b.asset === "USD" && 
 const book = (h: string, venue = "paper-1"): PaperBook => JSON.parse(readFileSync(paperBookPath(h, venue), "utf8")) as PaperBook;
 
 describe("a paper account: opened with paper money, its book in the home", () => {
+  it("keeps its paper line in the preferred scopes while fetching only that scope's public sources", async () => {
+    const s = sources();
+    const xyz = source("trade-xyz", "trade.xyz", "exchange", Array.from({ length: 55 }, (_, i) => row(`xyz:COIN${i}-PERP`, "perp", `xyz:COIN${i}`, "USDC", 100 + i)));
+    const reads: string[] = [];
+    const all = [...s.all, xyz].map((s) => ({ ...s, listings: async (ask: Parameters<PublicSource["listings"]>[0]) => { reads.push(s.id); return s.listings(ask); } }));
+    const { t } = await open(home(), "paper-scopes", { all });
+    const venue = { id: "paper-scopes", name: "Paper", paper: true as const, connector: "live:paper", trader: t };
+    const out = await exploreAcross({ connected: scopedExploreVenues([venue], "xyz") }, { limit: 200 });
+    expect(reads).toEqual(["trade-xyz"]);
+    expect(out.items).toHaveLength(55);
+    expect(out.items.every((i) => i.paper && i.at[0]?.paper && i.at[0]?.dex === "xyz")).toBe(true);
+    reads.length = 0;
+    const main = ok(await t.markets("", "hyperliquid"));
+    expect(reads).toEqual(["hyperliquid"]);
+    expect(main.map((m) => m.symbol)).toEqual(["BTC-PERP", "ETH-PERP"]);
+    expect(main.every((m) => m.dex === "")).toBe(true);
+    reads.length = 0;
+    const more = ok(await t.markets("", "more"));
+    expect(reads).not.toContain("hyperliquid");
+    expect(reads).not.toContain("trade-xyz");
+    expect(more.some((m) => m.symbol === "BTC/USD")).toBe(true);
+    expect(more.some((m) => m.symbol.startsWith("xyz:") || m.symbol.endsWith("-PERP"))).toBe(false);
+  });
+
+  it("selects one exact public source before fetching and its list limit, and searches beyond the first 200", async () => {
+    const selected = source("okx", "OKX", "exchange", Array.from({ length: 205 }, (_, i) => row(`COIN${i}/USD`, "spot", `COIN${i}`, "USD", 100 + i)));
+    const other = source("okx-preipo", "OKX", "exchange", [row("PRIVATE-PERP", "perp", "PRIVATE", "USD", 100)]);
+    const reads: Array<{ source: string; limit: number }> = [];
+    const all = [other, selected].map((s) => ({ ...s, listings: async (ask: Parameters<PublicSource["listings"]>[0]) => { reads.push({ source: s.id, limit: ask.limit }); return s.listings(ask); } }));
+    const { t } = await open(home(), "paper-source", { all });
+    const rows = ok(await t.markets("", "more", "okx"));
+    expect(rows).toHaveLength(200);
+    expect(rows.every((m) => m.publicSource === "okx")).toBe(true);
+    expect(reads).toEqual([{ source: "okx", limit: 200 }]);
+    reads.length = 0;
+    expect(ok(await t.markets("COIN204", undefined, "okx")).map((m) => m.symbol)).toEqual(["COIN204/USD"]);
+    expect(reads).toEqual([{ source: "okx", limit: 200 }]);
+    reads.length = 0;
+    expect(ok(await t.markets("", "more", "missing"))).toEqual([]);
+    expect(reads).toEqual([]);
+  });
+
+  it("paper tokenised shares retain the public source's RWA identity and merge into its row instead of becoming crypto", async () => {
+    for (const [id, symbol, issuer] of [
+      ["robinhood-stock-tokens", "NVDA", "Robinhood Assets (Jersey) Limited"],
+      ["xstocks", "NVDAX", "Backed (xStocks)"],
+      ["ondo-stocks", "NVDAON", "Ondo Global Markets"],
+    ]) {
+      const tokens = source(id!, id!, "tokens", [row(symbol!, "token", symbol!, "USD", 180, { issuer, eligibility: "the issuer's terms" })]);
+      const { t } = await open(home(), "paper-rwa", { all: [tokens] });
+      const paper = ok(await t.markets("", "more", id));
+      expect(paper).toHaveLength(1);
+      expect(paper[0]).toMatchObject({ symbol, kind: "token", category: "RWA", publicSource: id, issuer, eligibility: "the issuer's terms" });
+      const connected = scopedExploreVenues([{ id: "paper-rwa", name: "Paper", paper: true, connector: "live:paper", trader: t }], "more", tokens);
+      const publicRows = await exploreAcross({ public: [tokens], connected: [] }, { limit: 200 });
+      const paperRows = await exploreAcross({ connected }, { limit: 200 });
+      expect(paperRows.items.map((i) => [i.key, i.kind, i.tabs])).toEqual(publicRows.items.map((i) => [i.key, i.kind, i.tabs]));
+      const together = await exploreAcross({ public: [tokens], connected }, { limit: 200 });
+      expect(together.items).toHaveLength(1);
+      expect(together.items[0]).toMatchObject({ key: `rwa:${symbol}`, kind: "rwa", tabs: ["all", "rwas"] });
+      expect(together.items[0]!.at.map((at) => at.venue)).toEqual([id, "paper-rwa"]);
+      expect(together.tabs.map((tab) => [tab.id, tab.count])).toEqual([["all", 1], ["rwas", 1]]);
+    }
+    const coin = source("other", "Other", "exchange", [row("COIN", "token", "COIN", "USD", 1)]);
+    const { t } = await open(home(), "paper-coin", { all: [coin] });
+    expect(ok(await t.markets("", "more", "other"))[0]).not.toHaveProperty("category");
+  });
+
+  it("source browsing leaves a remembered symbol with its source even when the newly selected source has higher precedence", async () => {
+    const share = source("cboe", "US stocks", "stocks", [row("NVDA", "stock", "NVDA", "USD", 190)]);
+    const tokens = source("robinhood-stock-tokens", "Robinhood Stock Tokens", "tokens", [row("NVDA", "token", "NVDA", "USD", 191), row("HOOD", "token", "HOOD", "USD", 100)]);
+    for (const first of ["cboe", "robinhood-stock-tokens"]) {
+      const { t, source: paper } = await open(home(), "paper-bound", { all: [share, tokens] });
+      expect(ok(await t.markets("NVDA", "more", first))).toHaveLength(1);
+      const next = first === "cboe" ? "robinhood-stock-tokens" : "cboe";
+      expect(ok(await t.markets("", "more", next)).map((m) => m.symbol)).toEqual(next === "cboe" ? [] : ["HOOD"]);
+      expect(paper.priceSource!("NVDA")).toBe(first);
+      expect(ok(await t.market("NVDA"))).toMatchObject({ publicSource: first, kind: first === "cboe" ? "stock" : "token" });
+    }
+  });
+
+  it("a delayed market read cannot overwrite the source selected while it was waiting", async () => {
+    const shareRow = row("NVDA", "stock", "NVDA", "USD", 190);
+    const tokenRow = row("NVDA", "token", "NVDA", "USD", 191);
+    const shares = source("cboe", "US stocks", "stocks", []);
+    let entered!: () => void;
+    let release!: (m: Listing) => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const delayed = new Promise<Listing>((resolve) => { release = resolve; });
+    const tokens = source("robinhood-stock-tokens", "Robinhood Stock Tokens", "tokens", [tokenRow], {
+      line: async () => { entered(); return delayed; },
+    });
+    const { t, source: paper } = await open(home(), "paper-concurrent-source", { all: [shares, tokens] });
+    expect(ok(await t.markets("NVDA"))[0]?.publicSource).toBe("robinhood-stock-tokens");
+    const pending = t.market("NVDA");
+    await started;
+    try {
+      // The share becomes available and takes its old, unselected preference before the owner chooses it explicitly.
+      shares.rows.push(shareRow);
+      expect(ok(await t.markets("NVDA"))[0]?.publicSource).toBe("cboe");
+      expect(ok(await t.markets("NVDA", "more", "cboe"))[0]?.publicSource).toBe("cboe");
+    } finally {
+      release(tokenRow);
+    }
+    expect(ok(await pending)).toMatchObject({ publicSource: "cboe", kind: "stock" });
+    expect(paper.priceSource!("NVDA")).toBe("cboe");
+    expect(ok(await t.markets("NVDA", "more", "robinhood-stock-tokens"))).toEqual([]);
+  });
+
+  it("source browsing respects a persisted paper book before its remembered listings after a restart", async () => {
+    const h = home();
+    const { t } = await open(h);
+    expect(ok(await t.markets("BTC", "more", "kraken"))).toHaveLength(1);
+    ok(await t.place(order({ type: "limit", qty: 0.01, limitPrice: 58000 })));
+    expect(book(h).markets["BTC/USD"]?.source).toBe("kraken");
+    const saved = book(h);
+    const again = await open(h);
+    const rows = ok(await again.t.markets("", "more", "coinbase"));
+    expect(rows.map((m) => m.symbol)).toEqual(["ETH/USD"]);
+    expect(again.source.priceSource!("BTC/USD")).toBe("kraken");
+    expect(book(h)).toEqual(saved);
+    const broad = ok(await again.t.markets("", "more"));
+    expect(broad.find((m) => m.symbol === "BTC/USD")?.publicSource).toBe("kraken");
+    expect(ok(await again.t.market("BTC/USD"))).toMatchObject({ publicSource: "kraken", price: 60100 });
+  });
+
+  it("a paper events query fetches only its selected source and keeps colliding event symbols bound", async () => {
+    const reads: string[] = [];
+    const event = (symbol: string) => row(symbol, "event", symbol, "USD", 0.5, { group: { id: symbol, title: symbol }, outcome: "YES" });
+    const make = (id: string, rows: Row[]) => source(id, id, "events", rows, { events: async () => { reads.push(id); return rows; } });
+    const kalshi = make("kalshi", [event("SHARED:YES")]);
+    const polymarket = make("polymarket", [event("SHARED:YES"), event("POLY:YES")]);
+    const { t, source: paper } = await open(home(), "paper-events", { all: [kalshi, polymarket] });
+    expect(ok(await t.events!({ limit: 200 }, "kalshi")).map((m) => [m.symbol, m.publicSource])).toEqual([["SHARED:YES", "kalshi"]]);
+    expect(reads).toEqual(["kalshi"]);
+    reads.length = 0;
+    expect(ok(await t.events!({ limit: 200 }, "polymarket")).map((m) => [m.symbol, m.publicSource])).toEqual([["POLY:YES", "polymarket"]]);
+    expect(reads).toEqual(["polymarket"]);
+    expect(paper.priceSource!("SHARED:YES")).toBe("kalshi");
+    reads.length = 0;
+    expect(ok(await t.events!({ limit: 200 }, "missing"))).toEqual([]);
+    expect(reads).toEqual([]);
+  });
+
+  it("an explicitly selected event source remains its source during later broad event reads", async () => {
+    const event = row("SHARED:YES", "event", "SHARED:YES", "USD", 0.5, { group: { id: "SHARED", title: "Shared question" }, outcome: "YES" });
+    const earlier = source("kalshi", "Kalshi", "events", [event], { events: async () => [event] });
+    const selected = source("polymarket", "Polymarket", "events", [event], { events: async () => [event] });
+    const { t, source: paper } = await open(home(), "paper-events-stable", { all: [earlier, selected] });
+    expect(ok(await t.events!({ limit: 10 }, "polymarket"))[0]?.publicSource).toBe("polymarket");
+    expect(ok(await t.events!({ limit: 10 })).map((m) => m.publicSource)).toEqual(["polymarket"]);
+    expect(ok(await t.markets("", "more")).map((m) => m.publicSource)).toEqual(["polymarket"]);
+    expect(paper.priceSource!("SHARED:YES")).toBe("polymarket");
+  });
+
   it("opens with the default paper money, or the sum given; says paper in its name; keeps its book for the user alone", async () => {
     const h = home();
     const { source, first } = await open(h);
@@ -586,6 +743,24 @@ describe("stops, trailing stops and brackets", () => {
 });
 
 describe("perpetuals with leverage: isolated margin, funding each hour, liquidation at the mark", () => {
+  it("settles trade.xyz's quoted funding at its hourly rate, including the source-id fallback", async () => {
+    try {
+      for (const explicit of [true, false]) {
+        now = NOW;
+        const h = home();
+        const xyz = source("trade-xyz", "trade.xyz", "exchange", [row("xyz:NVDA-PERP", "perp", "xyz:NVDA", "USDC", 100, { fundingRate: 0.0001, ...(explicit ? { fundingEveryH: 1 } : {}) })]);
+        const { t, source: src } = await open(h, "paper-1", { all: [xyz] });
+        ok(await t.place(order({ symbol: "xyz:NVDA-PERP", qty: 1 })));
+        now = NEXT_HOUR + 61_000;
+        await src.read();
+        expect(book(h).funding).toHaveLength(1);
+        expect(book(h).positions["xyz:NVDA-PERP"]!.fundingUsd).toBeCloseTo(0.01, 8);
+      }
+    } finally {
+      now = NOW;
+    }
+  });
+
   const leveraged = () => {
     const s = sources();
     const hl = source("hyperliquid", "Hyperliquid", "exchange", [row("BTC-PERP", "perp", "BTC", "USDC", 60005, { fundingRate: 0.0001, maxLeverage: 40 }), row("ETH-PERP", "perp", "ETH", "USDC", 2001)]);

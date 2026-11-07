@@ -187,19 +187,20 @@ describe("Hyperliquid's HIP-3 pre-IPO perpetuals, keyless", () => {
     expect(got.map((m) => [m.symbol, m.venueName])).toEqual([
       ["io:ANTH-PERP", "Hyperliquid · io"],
       ["io:OAI-PERP", "Hyperliquid · io"],
-      ["xyz:OURA-PERP", "Hyperliquid · xyz"],
     ]);
     expect(got[0]).toEqual({ symbol: "io:ANTH-PERP", name: "Anthropic pre-IPO perpetual on Hyperliquid · io", kind: "perp", base: "ANTH", quote: "USDC", price: 2044.55, bid: undefined, ask: undefined, open: true, types: [], changePct24h: -3.6726, change24h: -77.95, volumeUsd24h: Number("11791556.5899999943"), fundingRate: 0.0000185782, nextFundingAt: "2026-10-08T19:00:00.000Z", fundingEveryH: 1, markPrice: 2045.1, oraclePrice: 2041.6, premium: 0.0015323766, openInterest: 19475.704, openInterestUsd: 39829762.25, qtyStep: 0.001, minQty: 0.001, priceStep: 0.1, minNotional: 10, maxLeverage: 6, category: "Pre-IPO", group: { id: "preipo:anthropic", title: "Anthropic" }, implied: { perPoint: 1_000_000_000, unit: UNIT, usd: 2_044_550_000_000 }, issuer: "Anthropic", eligibility: PRE_IPO_ISSUERS.anthropic!.eligibility, venueName: "Hyperliquid · io" });
     expect(got[1]).toMatchObject({ base: "OAI", price: 1644.65, change24h: -86.45, changePct24h: -4.9939, maxLeverage: 6, group: { id: "preipo:openai", title: "OpenAI" }, implied: { usd: 1_644_650_000_000 }, issuer: "OpenAI" });
-    expect(got[2]).toMatchObject({ name: "Oura pre-IPO perpetual on Hyperliquid · xyz", base: "OURA", price: 48.551, change24h: -0.38, changePct24h: -0.7766, volumeUsd24h: 17688.0185, fundingRate: 0.0000011593, maxLeverage: 5, group: { id: "preipo:oura" }, implied: { usd: Math.round(48.551 * 320_945_459), perPoint: 320_945_459 } });
+    const oldXyz = (await hl.listings({ q: "xyz:oura", limit: 10 })) as Listing[];
+    expect(oldXyz[0]).toMatchObject({ name: "Oura pre-IPO perpetual on Hyperliquid · xyz", base: "OURA", price: 48.551, change24h: -0.38, changePct24h: -0.7766, volumeUsd24h: 17688.0185, fundingRate: 0.0000011593, maxLeverage: 5, group: { id: "preipo:oura" }, implied: { usd: Math.round(48.551 * 320_945_459), perPoint: 320_945_459 } });
     // Oura is priced one share per contract (trade.xyz's words): the price times the share count the venues size on, about $15.6B — not $48.6B
-    expect((got[2]! as { implied: { usd: number } }).implied.usd).toBeGreaterThan(15.5e9);
-    expect((got[2]! as { implied: { usd: number } }).implied.usd).toBeLessThan(15.7e9);
-    expect(hl.notes!({})).toEqual(["Hyperliquid · io, xyz: pre-IPO perpetuals on Hyperliquid's HIP-3 markets, which anyone may deploy; shown while someone holds or trades one."]);
+    expect((oldXyz[0]! as { implied: { usd: number } }).implied.usd).toBeGreaterThan(15.5e9);
+    expect((oldXyz[0]! as { implied: { usd: number } }).implied.usd).toBeLessThan(15.7e9);
+    expect(hl.notes!({})).toEqual(["Hyperliquid · io: pre-IPO perpetuals on Hyperliquid's HIP-3 markets, which anyone may deploy; shown while someone holds or trades one."]);
     expect(hl.notes!({})[0]!.length).toBeLessThan(160);
     // a search: the company's name or the coin
     expect(((await hl.listings({ q: "openai", limit: 10 })) as Listing[]).map((m) => m.symbol)).toEqual(["io:OAI-PERP"]);
     expect(((await hl.listings({ q: "xyz:oura", limit: 10 })) as Listing[]).map((m) => m.symbol)).toEqual(["xyz:OURA-PERP"]);
+    expect(await hl.listings({ q: "oura", limit: 10 })).toEqual([]);
     expect(net.sent).toHaveLength(8);
   });
 
@@ -212,8 +213,8 @@ describe("Hyperliquid's HIP-3 pre-IPO perpetuals, keyless", () => {
     expect(net.sent).toHaveLength(8);
     now += KEEP_MS + 1_000;
     await hl.listings({ limit: 10 });
-    // xyz, mkts (its POLYMARKET is a company's, so it is watched until someone trades it) and io; not the dexes holding none
-    expect(net.asked("metaAndAssetCtxs").slice(6)).toEqual(["xyz", "mkts", "io"]);
+    // mkts (its POLYMARKET is a company's, so it is watched until someone trades it) and io; xyz is now its own public source
+    expect(net.asked("metaAndAssetCtxs").slice(6)).toEqual(["mkts", "io"]);
     expect(net.asked("perpDexs")).toHaveLength(1);
     now += LIST_MS;
     await hl.listings({ limit: 10 });
@@ -226,14 +227,15 @@ describe("Hyperliquid's HIP-3 pre-IPO perpetuals, keyless", () => {
     const unfiled = hip3Net({ perpCategories: { status: 500, body: null, text: "null" } });
     const hl = hyperliquidPreIpoPublic({ http: unfiled.http, clock: () => now });
     // mkts:KALSHI is filed under stocks only in the answer that did not come: by its name it is Kalshi's
-    expect(((await hl.listings({ limit: 10 })) as Listing[]).map((m) => m.symbol)).toEqual(["io:ANTH-PERP", "io:OAI-PERP", "mkts:KALSHI-PERP", "xyz:OURA-PERP"]);
+    expect(((await hl.listings({ limit: 10 })) as Listing[]).map((m) => m.symbol)).toEqual(["io:ANTH-PERP", "io:OAI-PERP", "mkts:KALSHI-PERP"]);
     now += KEEP_MS + 1_000;
     await hl.listings({ limit: 10 });
     expect(unfiled.asked("perpDexs")).toHaveLength(2);
 
     const ioDown = hip3Net({ "dex:io": { status: 429, body: undefined, text: "Too many requests" } });
     const one = hyperliquidPreIpoPublic({ http: ioDown.http, clock: () => NOW });
-    expect(((await one.listings({ limit: 10 })) as Listing[]).map((m) => m.symbol)).toEqual(["xyz:OURA-PERP"]);
+    expect(await one.listings({ limit: 10 })).toEqual([]);
+    expect(((await one.listings({ q: "xyz:OURA", limit: 10 })) as Listing[]).map((m) => m.symbol)).toEqual(["xyz:OURA-PERP"]);
   });
 
   it("Hyperliquid's own refusal of its dex list is its refusal, said once and held back ten minutes", async () => {

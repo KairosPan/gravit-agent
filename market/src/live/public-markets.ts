@@ -110,6 +110,10 @@
  *                       dollars, funding, maxLeverage), 72 KB, each as `<COIN>-PERP`. They are placed through Hyperliquid's connection to
  *                       trade, live:hyperliquid-trade (an API wallet that places orders and cannot withdraw), so the Perps tab is real
  *                       prices marked "Connect to trade"
+ *   trade.xyz           POST {"type":"metaAndAssetCtxs","dex":"xyz"} plus perpCategories: the complete active xyz perpetual universe,
+ *                       including equity, index, commodity, FX and pre-IPO contracts, as xyz:<COIN>-PERP. Ordinary bases keep xyz:
+ *                       so these contracts stay distinct from shares and other deployers. The same Hyperliquid reads supply their
+ *                       history, depth, latest trades and hourly funding; no spot or account endpoint is asked
  *   Hyperliquid HIP-3   the pre-IPO perpetuals its deployers list (hyperliquidPreIpoPublic; hyperliquid.gitbook.io …/info-endpoint/perpetuals,
  *                       read 2026-10-08): POST {"type":"perpDexs"} (21.5 KB; ten dexes that day) and {"type":"perpCategories"} (5 KB:
  *                       Hyperliquid's category for each market, "preipo" among them), then {"type":"metaAndAssetCtxs","dex":<name>} for
@@ -120,7 +124,8 @@
  *                       its line named for Hyperliquid and the deployer's dex ("Hyperliquid · io", `venueName`), with the deployer's mid
  *                       (its mark when there is none), the change from prevDayPx, dayNtlVlm in the dex's collateral (USDC for io and xyz),
  *                       the hourly funding and maxLeverage; traded through the same connection. Live that day: io:ANTH ($11.8M a day),
- *                       io:OAI ($5.9M), xyz:OURA ($17.7K); vntl:ANTHROPIC, vntl:OPENAI, para:ANTH and xyz:YMTC delisted
+ *                       io:OAI ($5.9M), xyz:OURA ($17.7K); vntl:ANTHROPIC, vntl:OPENAI, para:ANTH and xyz:YMTC delisted. Since the
+ *                       dedicated trade.xyz listing, xyz is returned here only when explicitly searched as xyz:<COIN>, for old paths
  *   Stock Tokens        GET api.robinhood.com/rhj/assets and /rhj/prices/{symbol}, the reads robinhood.ts makes: each token, and its own bid
  *                       and ask in dollars per token (tokenBid, tokenAsk). The listing itself is only read: the tokens trade from a
  *                       connected wallet on Robinhood Chain, against USDG through LI.FI (dex.ts), where the wallet's own rows offer them
@@ -1832,8 +1837,8 @@ function hlPerpFigures(u: Record<string, unknown>, c: Record<string, unknown>, p
     ...(sz !== undefined && Number.isInteger(sz) && sz <= 8 && price !== undefined ? hlPerpSteps(sz, price) : {}),
   };
 }
-/** Hyperliquid's connection to trade: an API wallet that places orders and cannot withdraw (the connector live:hyperliquid-trade). Both
- * Hyperliquid listings name it: its perpetuals and its HIP-3 deployers' pre-IPO ones trade there */
+/** Hyperliquid's connection to trade: an API wallet that places orders and cannot withdraw (the connector live:hyperliquid-trade).
+ * The main perpetuals, trade.xyz and the other HIP-3 deployers' pre-IPO listings all name it. */
 const HL_TRADE = { connectTo: "hyperliquid-trade", connector: "live:hyperliquid-trade" } as const;
 
 /** one POST's JSON answer, or Hyperliquid's refusal in its own words */
@@ -2017,6 +2022,8 @@ export function hyperliquidPublic(deps: PublicDeps = {}): PublicSource {
           symbol: `${coin}-PERP`,
           name: `${coin} perpetual on ${name}`,
           kind: "perp",
+          // The native dex's token perpetuals browse under Crypto; this is not a fallback for unclassified HIP-3 markets.
+          category: "crypto",
           base: coin,
           quote: "USDC",
           price,
@@ -2059,6 +2066,95 @@ export function hyperliquidPublic(deps: PublicDeps = {}): PublicSource {
     },
     candles: bars,
     notes: (o) => (!o.q?.trim() && shown && shown.of < shown.total ? [`${name}: ${shown.of} of ${shown.total} perpetuals shown · search for the rest · traded once Hyperliquid is connected to trade`] : []),
+  };
+}
+
+/** trade.xyz's entire active HIP-3 perpetual universe, read from the xyz dex alone. The qualified coin stays in an ordinary
+ * perpetual's base so an equity, index, commodity or FX contract is never merged with a share, spot coin or another deployer's
+ * contract. Known pre-IPO contracts retain their company and valuation convention. No wallet or spot endpoint is read. */
+export function tradeXyzPublic(deps: PublicDeps = {}): PublicSource {
+  const id = "trade-xyz";
+  const name = "trade.xyz";
+  const clock = deps.clock ?? Date.now;
+  const info = hyperliquidInfo(deps.http ?? realHttp, deps.timeoutMs ?? TIMEOUT_MS);
+  const keep = keeper<Listing[]>(clock, KEEP_MS);
+  const filed = keeper<Map<string, string>>(clock, LIST_MS);
+  let shown: { of: number; total: number } | undefined;
+  const categories = () => filed("categories", async () => {
+    const body = await hlAsk(info, id, name, { type: "perpCategories" });
+    if (isRefusal(body)) return body;
+    const out = new Map<string, string>();
+    for (const pair of list(body)) {
+      const [coin, category] = [str(list(pair)[0]), str(list(pair)[1])];
+      if (coin?.startsWith("xyz:") && category) out.set(coin, category);
+    }
+    return out;
+  });
+  const load = (): Promise<Listing[] | Refusal> => keep("xyz", async () => {
+    const [body, cats] = await Promise.all([hlAsk(info, id, name, { type: "metaAndAssetCtxs", dex: "xyz" }), categories()]);
+    if (isRefusal(body)) return body;
+    const answer = list(body);
+    const meta = rec(answer[0]);
+    const universe = list(meta.universe);
+    const ctxs = list(answer[1]);
+    if (!Array.isArray(meta.universe) || !Array.isArray(answer[1]) || universe.length !== ctxs.length)
+      return no("E_VENUE_REJECTED", { venue: id, message: `${name} answered without its perpetuals` });
+    const quote = HL_COLLATERAL[fin(meta.collateralToken) ?? 0];
+    if (!quote || !inDollars(quote)) return no("E_ACCOUNT_UNPRICED", { venue: id, message: `${name}'s collateral is not a supported dollar token` });
+    const nextFundingAt = hlNextFunding(clock());
+    const out: Listing[] = [];
+    universe.forEach((entry, i) => {
+      const u = rec(entry);
+      const c = rec(ctxs[i]);
+      const coin = str(u.name);
+      if (!coin?.startsWith("xyz:") || coin.length <= 4 || !HL_COIN.test(coin) || u.isDelisted === true) return;
+      const base = coin.slice(4);
+      const category = isRefusal(cats) ? undefined : cats.get(coin);
+      const mark = preIpoOf("hyperliquid", category !== undefined ? { category } : {}, base, coin);
+      const price = pos(c.midPx) ?? pos(c.markPx);
+      const day = since(price, pos(c.prevDayPx));
+      const funding = fin(c.funding);
+      const volume = nonNeg(c.dayNtlVlm);
+      const maxLeverage = pos(u.maxLeverage);
+      const ordinary: Listing = {
+        symbol: `${coin}-PERP`, name: `${base} perpetual on ${name}`, kind: "perp", base: coin, quote,
+        open: true, types: [], contractSize: 1,
+        ...(price !== undefined ? { price } : {}),
+        ...(day.change !== undefined ? { change24h: day.change, changePct24h: day.changePct } : {}),
+        ...(volume !== undefined ? { volumeUsd24h: volume } : {}),
+        ...(funding !== undefined ? { fundingRate: funding, nextFundingAt } : {}),
+        ...(maxLeverage !== undefined ? { maxLeverage } : {}),
+        ...(category ? { category } : {}),
+      };
+      const listing = mark ? preIpoListing({ symbol: ordinary.symbol, base, quote, open: true, maxLeverage, contractSize: 1, mark }, {
+        price, change24h: day.change, changePct24h: day.changePct, volumeUsd24h: volume, fundingRate: funding, nextFundingAt,
+      }, name) ?? { ...ordinary, name: `${mark.name} pre-IPO perpetual on ${name}`, base, category: mark.category, group: mark.group, implied: mark.implied,
+        ...(mark.issuer ? { issuer: mark.issuer, eligibility: mark.eligibility } : {}) } : ordinary;
+      out.push(readLike({ ...listing, venueName: name, ...hlPerpFigures(u, c, price) }, body));
+    });
+    return out.sort(busierFirst);
+  });
+  const form = { test: (coin: string) => coin.startsWith("xyz:") && coin.length > 4, example: "xyz:<COIN>-PERP (xyz:NVDA-PERP)" };
+  const bars = hyperliquidBars(info, id, name, clock, form, deps.pace ?? hostLane);
+  const depth = hyperliquidDepth(info, id, name, clock, form);
+  const funding = hyperliquidFunding(info, id, name, form, deps.pace ?? hostLane);
+  return {
+    id, name, kind: "exchange", ...HL_TRADE,
+    reset: () => { keep.clear(); filed.clear(); bars.clear(); depth.clear(); funding.clear(); },
+    async listings(o) {
+      const all = await load();
+      if (isRefusal(all)) return all;
+      const q = (o.q ?? "").trim().toUpperCase();
+      const pool = (q ? all.filter((m) => has(q, m.symbol, m.base, m.name, m.category, m.group?.title)) : all).slice(0, Math.max(1, o.limit));
+      if (!q) shown = { of: pool.length, total: all.length };
+      return pool;
+    },
+    async line(symbol) {
+      const all = await load();
+      return isRefusal(all) ? all : all.find((m) => m.symbol.toUpperCase() === symbol.trim().toUpperCase()) ?? null;
+    },
+    candles: bars, book: depth.book, trades: depth.trades, fundingHistory: funding.history,
+    notes: (o) => !o.q?.trim() && shown ? [`${name}: ${shown.of} of ${shown.total} active xyz perpetuals shown · contracts on Hyperliquid, not ownership of their underlying assets.`] : [],
   };
 }
 
@@ -2618,7 +2714,7 @@ interface Hip3Market {
  * for a company that Hyperliquid files under no other category than "preipo", not delisted; then every ninety seconds the dexes that hold
  * one, and each such market someone holds or trades, as `<dex>:<COIN>-PERP` with its line named "Hyperliquid · <dex>", its day, its
  * hourly funding, its leverage and the valuation its price implies. One refusal of perpDexs is Hyperliquid's refusal; a dex that does not
- * answer is left out until it does */
+ * answer is left out until it does. xyz is listed by tradeXyzPublic; explicit xyz: searches preserve the old source's saved paths. */
 export function hyperliquidPreIpoPublic(deps: PublicDeps = {}): PublicSource {
   const id = "hyperliquid-preipo";
   const name = "Hyperliquid";
@@ -2692,7 +2788,10 @@ export function hyperliquidPreIpoPublic(deps: PublicDeps = {}): PublicSource {
       const got = await found();
       if (isRefusal(got)) return got;
       const Q = (o.q ?? "").trim().toUpperCase();
-      const want = Q ? got.markets.filter((m) => has(Q, m.base, m.coin, m.mark.name, m.mark.slug)) : got.markets;
+      // trade.xyz has its own complete public listing. Keep explicitly named old xyz paths readable, while ordinary browsing and
+      // company-name searches list its contracts only once, through trade-xyz.
+      const markets = got.markets.filter((m) => m.dex !== "xyz" || Q.startsWith("XYZ:"));
+      const want = Q ? markets.filter((m) => has(Q, m.base, m.coin, m.mark.name, m.mark.slug)) : markets;
       const bodies = new Map(await Promise.all([...new Set(want.map((m) => m.dex))].map(async (dex) => [dex, await dexRead(dex)] as const)));
       const nextFundingAt = hlNextFunding(clock());
       const out: Listing[] = [];
@@ -2729,10 +2828,10 @@ export function hyperliquidPreIpoPublic(deps: PublicDeps = {}): PublicSource {
 }
 
 /** every public source, in the order the Markets screen asks them: the exchanges (PUBLIC_EXCHANGES unless others are named), Kalshi,
- * Polymarket, Polymarket US, Hyperliquid's perpetuals, US stocks (real-time public quotes, Cboe's delayed ones behind them), Robinhood's Stock Tokens, xStocks at Gate, Ondo
+ * Polymarket, Polymarket US, Hyperliquid's perpetuals, trade.xyz, US stocks (real-time public quotes, Cboe's delayed ones behind them), Robinhood's Stock Tokens, xStocks at Gate, Ondo
  * Stocks as LI.FI prices them, the eight exchanges' pre-IPO perpetuals and Hyperliquid's HIP-3 ones. The stocks come before the Stock
  * Tokens: a paper account lists a symbol by the first source that names it (paper.ts), and "NVDA" there is the share, not Robinhood's
  * token of it. Made once and kept: what each keeps lives in it */
 export function publicSources(deps: PublicDeps & { exchanges?: readonly string[] | undefined } = {}): PublicSource[] {
-  return [...(deps.exchanges ?? PUBLIC_EXCHANGES).map((x) => exchangeTickers(x, deps)), kalshiPublic(deps), polymarketPublic(deps), polymarketUsPublic(deps), hyperliquidPublic(deps), usStocksPublic(deps), stockTokensPublic(deps), xstocksPublic(deps), ondoStocksPublic(deps), ...PRE_IPO_VENUES.map((v) => preIpoPublic(v, deps)), hyperliquidPreIpoPublic(deps)];
+  return [...(deps.exchanges ?? PUBLIC_EXCHANGES).map((x) => exchangeTickers(x, deps)), kalshiPublic(deps), polymarketPublic(deps), polymarketUsPublic(deps), hyperliquidPublic(deps), tradeXyzPublic(deps), usStocksPublic(deps), stockTokensPublic(deps), xstocksPublic(deps), ondoStocksPublic(deps), ...PRE_IPO_VENUES.map((v) => preIpoPublic(v, deps)), hyperliquidPreIpoPublic(deps)];
 }

@@ -58,6 +58,8 @@
   --font-mono-base: "IBM Plex Mono", "SF Mono", Menlo, Consolas, "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", monospace;
   --font-sans: var(--font-sans-base);
   --font-mono: var(--font-mono-base);
+  /* Hyperliquid's source mark keeps its mint colour in both themes. */
+  --market-hl-ink: #97fce4; --market-hl-fill: #173b35;
   --radius-s: 10px; --radius-m: 16px; --radius-l: 20px; --radius-pill: 999px;
   --rail: 248px;
 }

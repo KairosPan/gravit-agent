@@ -81,6 +81,9 @@ describe("which market is streamed, and by whom (streamOf)", () => {
     expect(streamOf("okx", "BTC/USDT")).toEqual({ venue: "okx", sym: "BTC-USDT" });
     expect(streamOf("hyperliquid", "BTC-PERP")).toEqual({ venue: "hyperliquid", sym: "BTC" });
     expect(streamOf("hyperliquid-preipo", "io:ANTH-PERP")).toEqual({ venue: "hyperliquid", sym: "io:ANTH" });
+    expect(streamOf("trade-xyz", "xyz:NVDA-PERP")).toEqual({ venue: "hyperliquid", sym: "xyz:NVDA" });
+    expect(streamOf("trade-xyz", "io:ANTH-PERP")).toBeUndefined();
+    expect(streamOf("trade-xyz", "BTC-PERP")).toBeUndefined();
     for (const [s, sym] of [["binance", "BTC/USDT"], ["bybit", "BTC/USDT"], ["us-stocks", "AAPL"], ["kalshi", "KXFED-25DEC-T4.00:YES"], ["okx-preipo", "ANTHROPIC/USDT:USDT"], ["okx", "BTC/USDT:USDT"], ["hyperliquid", "io:ANTH-PERP"]] as const) expect(streamOf(s, sym)).toBeUndefined();
     make();
     expect(hub.covers("binance", "BTC/USDT")).toBe(false);

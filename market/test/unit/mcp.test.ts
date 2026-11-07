@@ -67,6 +67,32 @@ describe("market:mcp", () => {
     const r = await client.callTool({ name: "market_explore", arguments: {} });
     expect(r.isError).toBeFalsy();
     expect(body(r).items[0].key).toBe(direct.items[0]!.key);
+    const scoped = await client.callTool({ name: "market_explore", arguments: { scope: "xyz" } });
+    expect(scoped.isError).toBeFalsy();
+    expect(body(scoped).items).toEqual([]); // the fake source is outside xyz; scope reached the HTTP reader
+    const more = await client.callTool({ name: "market_explore", arguments: { scope: "more" } });
+    expect(body(more).items[0].key).toBe(direct.items[0]!.key);
+    for (const tab of ["indices", "commodities", "fx"]) {
+      const categorized = await client.callTool({ name: "market_explore", arguments: { scope: "xyz", tab } });
+      expect(categorized.isError).toBeFalsy();
+      expect(body(categorized).items).toEqual([]);
+    }
+  });
+
+  it("market_explore accepts and forwards an exact public source, including the reader's validation", async () => {
+    const { tools } = await client.listTools();
+    expect(tools.find((t) => t.name === "market_explore")!.inputSchema.properties!.source).toMatchObject({ type: "string", maxLength: 80 });
+    const selected = await client.callTool({ name: "market_explore", arguments: { scope: "more", source: "fake" } });
+    expect(selected.isError).toBeFalsy();
+    expect(body(selected).items.length).toBeGreaterThan(0);
+    expect(body(selected).items.every((row: { at: Array<{ venue: string }> }) => row.at.every((at) => at.venue === "fake"))).toBe(true);
+    for (const args of [{ source: "unknown" }, { scope: "xyz", source: "fake" }, { source: "fake", tab: "china" }]) {
+      const refused = await client.callTool({ name: "market_explore", arguments: args });
+      expect(refused.isError).toBe(true);
+      expect(body(refused).code).toBe("E_MARKET_BAD_REQUEST");
+    }
+    const long = await client.callTool({ name: "market_explore", arguments: { source: "x".repeat(81) } });
+    expect(long.isError).toBe(true);
   });
 
   it("market_candles answers a public source's history", async () => {

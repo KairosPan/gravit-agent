@@ -160,7 +160,7 @@ function whereHtml(tk, venue) {
         `<span>${name}${l.best ? tag(t('markets.tag.best'), 'up') : ''}${l.paper ? tag(t('markets.tag.paper')) : ''}</span><span class="tk-at-r">${px}</span></button>`;
     }
     return `<div class="tk-at pub"><span>${name}${l.public ? tag(t('trade.tag.public')) : ''}${l.paper ? tag(t('markets.tag.paper')) : ''}</span>` +
-      `<span class="tk-at-r">${px}${l.public ? `<a class="link" href="#/account/venues">${th('markets.connectToTrade')}</a>` : ''}</span></div>`;
+      `<span class="tk-at-r">${px}${l.public && l.connectTo ? `<a class="link" href="#/account/venues">${th('markets.connectToTrade')}</a>` : ''}</span></div>`;
   });
   return rows.length ? `<div class="tk-where-w"><div class="dsec-label">${th('trade.field.where')}</div><div class="tk-where">${rows.join('')}</div></div>` : '';
 }

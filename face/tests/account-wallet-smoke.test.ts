@@ -42,6 +42,7 @@ import { earnSeedOf, moveSeedOf, subWalletSeedOf } from "../client/js/host/sheet
 import { grantOf, limitSeedOf, signOutSeedOf } from "../client/js/host/sheet-view.js";
 import { asksOf, venuesOf, writesOn } from "../client/js/host/account-view.js";
 import { proveWallet } from "../client/js/wire/wallet.js";
+import { sayOf } from "../client/js/i18n/words.js";
 
 const skip = standinSkip();
 
@@ -204,7 +205,7 @@ test("account wallet smoke: through the face's port, the owner receives, moves, 
     assert.deepEqual(sm().legs.map((l) => l.state), ["ready", "ready"], `both legs prepared: ${json(sm().legs.map((l) => [l.state, l.why, l.item.symbol]))}`);
     await sellMany.run();
     assert.deepEqual(sm().legs.map((l) => l.state), ["sold", "sold"], `both legs sold: ${json(sm().legs.map((l) => [l.state, l.why]))}`);
-    assert.equal(sm().said, "Sell many: 2 of 2 sales went through");
+    assert.equal(sayOf(sm().said), "Sell many: 2 of 2 sales went through");
     sellMany.close();
 
     /* 6. Close to agents (unsigned): Stand-in Predictions in the dial's revoked; Reopen… signed takes it out. */
@@ -276,7 +277,7 @@ test("account wallet smoke: through the face's port, the owner receives, moves, 
     const outSeed = signOutSeedOf(await pageNow(), device.standing()) as Body;
     assert.equal(outSeed.mode, "open");
     const out = await signSheet("signOut", outSeed, [["guard", true]]);
-    assert.match(String(out.said), / Guard is on\.$/, `the done line: ${out.said}`);
+    assert.match(sayOf(out.said), / Guard is on\.$/, `the done line: ${sayOf(out.said)}`);
     assert.equal(device.standing().role, "signed-out", json(device.standing()));
     const after = await pageNow();
     assert.equal(after.mode, "guard");

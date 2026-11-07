@@ -70,6 +70,14 @@ function threeBtc() {
 }
 
 describe("normalBase: one name for one thing", () => {
+  it("preserves a builder namespace across public, asset-sheet and CCXT position names", () => {
+    for (const value of ["xyz:NVDA", "XYZ:NVDA", "xyz:NVDA-PERP", "xyz:NVDA/USDC:USDC", "XYZ-NVDA/USDC:USDC"]) expect(normalBase(value, "perp")).toBe("XYZ:NVDA");
+    expect(normalBase("xyz:NVDA", "crypto")).toBe("XYZ:NVDA");
+    expect(normalBase("xyz:GOLD", "crypto")).toBe("XYZ:GOLD");
+    expect(normalBase("NVDA", "stock")).toBe("NVDA");
+    expect(normalBase("BTC/USDC:USDC", "perp")).toBe("BTC");
+    expect(normalBase("SOME-COIN/USDC:USDC", "perp")).toBe("SOME-COIN");
+  });
   it("names a coin the same whatever the venue calls it, from its base or its symbol", () => {
     for (const b of ["BTC", "XBT", "WBTC", "cbBTC", "BTCB", "btc"]) expect(normalBase(b, "spot")).toBe("BTC");
     for (const b of ["ETH", "WETH"]) expect(normalBase(b, "token")).toBe("ETH");
@@ -93,6 +101,14 @@ describe("normalBase: one name for one thing", () => {
 });
 
 describe("compareAcross: where the same thing is cheapest", () => {
+  it("compares only the named xyz contract, not another xyz market or a stock", async () => {
+    const nvda = mk("XYZ-NVDA/USDC:USDC", "perp", "xyz:NVDA", "USDC", { price: 120, bid: 119, ask: 121 });
+    const hl = stand([nvda, mk("XYZ-GOLD/USDC:USDC", "perp", "xyz:GOLD", "USDC", { price: 2500 }), mk("NVDA", "stock", "NVDA", "USD", { price: 110 })]);
+    const r = await compareAcross([venue("my-hl", "Hyperliquid", hl)], "xyz:NVDA", "buy", { asset: "crypto" });
+    expect(r.base).toBe("XYZ:NVDA");
+    expect(r.rows.map((x) => x.symbol)).toEqual([nvda.symbol]);
+    expect(hl.calls).not.toContain("market:XYZ-GOLD/USDC:USDC");
+  });
   it("a buy ranks BTC across three venues by the ask, under three names, and marks the best", async () => {
     const { ex, rh, dex, venues } = threeBtc();
     const c = await compareAcross(venues, "BTC", "buy");

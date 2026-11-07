@@ -83,7 +83,7 @@
  */
 // Copy of account/src/portfolio/live/explore.ts at 20ead850 (account split, plan A1): the market's own from here.
 import { isRefusal, type Refusal } from "../core/errors.ts";
-import { isExcludedCategory, isIpoCategory, isRwaMarket, TABS, type TabId } from "./categories.ts";
+import { isExcludedCategory, isIpoCategory, isRwaMarket, perpCategoryTab, TABS, type TabId } from "./categories.ts";
 import { normalBase, scopeOf, type CompareMissing, type PlaceRule } from "./compare.ts";
 import { iconOf } from "./icons.ts";
 import { impliedUsd, PER_SHARE, PRE_IPO_CATEGORY, PRE_IPO_GROUP, PRE_IPO_PER_POINT } from "./preipo.ts";
@@ -151,6 +151,10 @@ export interface ExploreOptions {
 
 /** one venue where a row's thing is listed */
 export interface ExploreAt {
+  /** The exact source a generic paper market is bound to; never a provider inferred from its ticker. */
+  publicSource?: string | undefined;
+  /** Hyperliquid HIP-3 deployer namespace; empty for a native perpetual when supplied. */
+  dex?: string | undefined;
   venue: string;
   venueName: string;
   /** the market there: at a connected venue, exactly what the account's order there names; at a public one, what it would name once the
@@ -590,6 +594,9 @@ function keyOf(m: Market, kind: ExploreKind, r: Reader): string | undefined {
   }
   // a pre-IPO perpetual is one row per company, whatever each venue calls the contract (ANTHROPIC, ANTH, ANTHROPICx)
   if (kind === "perp" && m.category === PRE_IPO_CATEGORY && m.group?.id.startsWith(PRE_IPO_GROUP)) return m.group.id;
+  // A builder's perpetual keeps its namespace: xyz:NVDA is not another deployer's NVDA or Hyperliquid's native coin.
+  const qualified = kind === "perp" ? /^([a-z][a-z0-9]{0,15}):([A-Za-z0-9]{1,20})$/i.exec(String(m.base ?? "")) : null;
+  if (qualified) return `perp:${qualified[1]!.toLowerCase()}:${qualified[2]!.toUpperCase()}`;
   const b = normalBase(String(m.base || m.symbol), m.kind);
   if (!b || isStable(b)) return undefined;
   return `${kind}:${b}`;
@@ -643,6 +650,8 @@ function atOf(r: Reader, m: Market, symbol = m.symbol, price = priceOf(m), open 
     venueName: lineName(r, m),
     symbol,
     connected: r.connected,
+    ...(m.dex !== undefined ? { dex: m.dex } : {}),
+    ...(m.publicSource !== undefined ? { publicSource: m.publicSource } : {}),
     ...(r.paper ? { paper: true as const } : {}),
     canTrade: r.connected ? (ordersTaken ? r.canTrade : false) : false,
     public: !r.connected,
@@ -657,7 +666,7 @@ function atOf(r: Reader, m: Market, symbol = m.symbol, price = priceOf(m), open 
     ...(typeof open === "boolean" ? { open } : {}),
     ...(session ? { session } : {}),
     ...(!r.connected && offer && r.connectTo ? { connectTo: r.connectTo } : {}),
-    ...(!r.connected && offer && r.connector ? { connector: r.connector } : {}),
+    ...(((r.connected && m.dex !== undefined) || (!r.connected && offer)) && r.connector ? { connector: r.connector } : {}),
     ...(note ? { note } : {}),
     ...(issuer ? { issuer } : {}),
     ...(eligibility ? { eligibility } : {}),
@@ -712,7 +721,8 @@ function rowOf(key: string, kind: ExploreKind, venues: Map<string, Got[]>, aside
   const sessioned = entries.find((e) => e.r.connected && sessionOf(e.m) !== undefined);
   const named = [...entries, ...papers].find((e) => e.m.name && !e.m.name.includes(" / ") && e.m.name.toUpperCase() !== e.m.symbol.toUpperCase());
   const name = kind === "coin" ? base : kind === "perp" ? `${base} perpetual` : (named?.m.name ?? base);
-  const category = entries.map((e) => e.m.category).find((c): c is string => typeof c === "string" && c !== "");
+  const category = [...entries, ...papers].map((e) => e.m.category).find((c): c is string => typeof c === "string" && c !== "");
+  const underlying = kind === "perp" ? perpCategoryTab(category) : undefined;
   const issued = kind === "rwa" ? entries.find((e) => typeof e.m.issuer === "string" && e.m.issuer !== "") : undefined;
   const eligible = kind === "rwa" ? entries.find((e) => typeof e.m.eligibility === "string" && e.m.eligibility !== "") : undefined;
   // the row trades at a venue the owner connected: a read-only listing's line (Stock Tokens) is then its price, with no connection to offer
@@ -731,7 +741,7 @@ function rowOf(key: string, kind: ExploreKind, venues: Map<string, Got[]>, aside
     ...(sessioned ? { session: sessionOf(sessioned.m) } : {}),
     ...(issued ? { issuer: issued.m.issuer } : {}),
     ...(eligible ? { eligibility: eligible.m.eligibility } : {}),
-    tabs: ["all", TAB_OF[kind as DollarKind]],
+    tabs: ["all", TAB_OF[kind as DollarKind], ...(underlying ? [underlying] : [])],
     at: [...entries.map((e) => atOf(e.r, e.m, e.m.symbol, priceOf(e.m), e.m.open, !(trades && e.r.readOnly !== undefined))), ...papers.map((e) => atOf(e.r, e.m, e.m.symbol, priceOf(e.m), e.m.open))],
   };
 }

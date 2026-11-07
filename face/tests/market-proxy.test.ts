@@ -1,5 +1,5 @@
 /** `/data/market/<read>` (plan A2 Task 5): the market's public reads and its push channel through the face, on the
- * proxy core the account's half is built on (src/upstream-proxy.ts) — seven exact routes, each read at the market's
+ * proxy core the account's half is built on (src/upstream-proxy.ts) — eight exact routes, each read at the market's
  * own `/api/<read>` with its rebuilt query, the market not answering as 503 `unreachable` with a kept answer re-served
  * stale, a disabled `mcp-market` row disabling the market half alone, and the stream piped from `/api/stream` with
  * its follows posted to `/api/stream/markets`. The market and the account are stub servers on ephemeral loopback
@@ -62,14 +62,14 @@ const register = (): { routes: WebRoute[]; registrar: { register(route: WebRoute
   return { routes, registrar: { register: (route: WebRoute) => { routes.push(route); } } };
 };
 
-test("mounts seven routes under /data/market and nothing else", () => {
+test("mounts eight routes under /data/market and nothing else", () => {
   const { routes, registrar } = register();
   const proxy = registerMarketProxy(registrar, { url: "http://127.0.0.1:9" });
   assert.deepEqual(routes.map((r) => `${r.kind} ${r.path}`), [
     "exact /data/market/explore", "exact /data/market/quotes", "exact /data/market/candles", "exact /data/market/book",
-    "exact /data/market/trades", "exact /data/market/stream", "exact /data/market/stream/markets",
+    "exact /data/market/trades", "exact /data/market/sources", "exact /data/market/stream", "exact /data/market/stream/markets",
   ]);
-  const names = ["explore", "quotes", "candles", "book", "trades"] as const;
+  const names = ["explore", "quotes", "candles", "book", "trades", "sources"] as const;
   assert.deepEqual(MARKET_READS.map((r) => [r.face, r.upstream]), names.map((n) => [`/data/market/${n}`, `/api/${n}`]));
   for (const [i, n] of names.entries()) {
     const r = MARKET_READS[i]!;
@@ -79,11 +79,11 @@ test("mounts seven routes under /data/market and nothing else", () => {
   }
   /* the market's own tables, the values the account's public reads had before plan A2's Task 7 removed them */
   assert.deepEqual(MARKET_QUERY, {
-    explore: ["tab", "q", "key", "sort", "limit"], quotes: ["pairs"], candles: ["venue", "symbol", "interval", "range", "before", "limit"],
-    book: ["venue", "symbol", "depth"], trades: ["venue", "symbol", "limit"],
+    explore: ["tab", "q", "key", "sort", "limit", "scope", "source"], quotes: ["pairs"], candles: ["venue", "symbol", "interval", "range", "before", "limit"],
+    book: ["venue", "symbol", "depth"], trades: ["venue", "symbol", "limit"], sources: [],
   });
-  assert.deepEqual(MARKET_TTL_MS, { explore: 20_000, quotes: 3_000, candles: 30_000, book: 2_000, trades: 2_000 });
-  assert.deepEqual(MARKET_ABORT_MS, { explore: 10_000, quotes: 7_000, candles: 25_000, book: 7_000, trades: 7_000 });
+  assert.deepEqual(MARKET_TTL_MS, { explore: 20_000, quotes: 3_000, candles: 30_000, book: 2_000, trades: 2_000, sources: 30_000 });
+  assert.deepEqual(MARKET_ABORT_MS, { explore: 10_000, quotes: 7_000, candles: 25_000, book: 7_000, trades: 7_000, sources: 7_000 });
   assert.equal(MARKET_READS[1]!.long?.get("pairs"), 2_000, "pairs keeps its own 2 000");
   assert.ok(!routes.some((r) => /account/.test(r.path)), "nothing under the market says account");
   proxy.dispose();
@@ -201,5 +201,59 @@ test("the stream is piped from /api/stream, follows posted to /api/stream/market
     assert.equal(market.seen.length, 2);
   } finally {
     await market.close();
+  }
+});
+
+test("market scopes pass both proxies and keep independent cached answers", async () => {
+  const upstream = await stub((q, res) => json(res, 200, { ok: true, scope: new URL(q.url!, "http://x").searchParams.get("scope"), items: [] }));
+  const { routes, registrar } = register();
+  const market = registerMarketProxy(registrar, { url: upstream.url });
+  const account = registerAccountProxy(registrar, { url: upstream.url });
+  try {
+    for (const base of ["/data/market/explore", "/data/account/connected/explore"]) {
+      for (const scope of ["hyperliquid", "xyz", "more"]) {
+        const answer = await call(routes, `${base}?limit=200&scope=${scope}`);
+        assert.equal(answer.status, 200);
+        assert.equal(JSON.parse(answer.body).scope, scope);
+      }
+      assert.equal((await call(routes, `${base}?scope=xyz&scope=more`)).status, 400);
+    }
+    assert.equal(upstream.seen.length, 6, "each upstream and scope has its own cache entry");
+    await call(routes, "/data/market/explore?limit=200&scope=xyz");
+    assert.equal(upstream.seen.length, 6, "the xyz answer is cached independently");
+  } finally {
+    market.dispose(); account.dispose(); await upstream.close();
+  }
+});
+
+test("the source directory and source filters reach their upstreams without mixing cached providers", async () => {
+  const upstream = await stub((q, res) => {
+    const url = new URL(q.url!, "http://x");
+    json(res, 200, url.pathname === "/api/sources"
+      ? { ok: true, value: [{ id: "okx", name: "OKX" }, { id: "robinhood-stock-tokens", name: "Robinhood Stock Tokens" }] }
+      : { ok: true, source: url.searchParams.get("source"), items: [] });
+  });
+  const { routes, registrar } = register();
+  const market = registerMarketProxy(registrar, { url: upstream.url });
+  const account = registerAccountProxy(registrar, { url: upstream.url });
+  try {
+    const catalog = await call(routes, "/data/market/sources");
+    assert.equal(catalog.status, 200);
+    assert.deepEqual(JSON.parse(catalog.body).value.map((source: { id: string }) => source.id), ["okx", "robinhood-stock-tokens"]);
+    assert.equal((await call(routes, "/data/market/sources?source=okx")).status, 400);
+    assert.equal((await call(routes, "/data/market/sources", HOST, "POST")).status, 405);
+    for (const base of ["/data/market/explore", "/data/account/connected/explore"]) {
+      for (const source of ["okx", "robinhood-stock-tokens"]) {
+        const answer = await call(routes, `${base}?scope=more&source=${source}&tab=rwas&limit=200`);
+        assert.equal(answer.status, 200);
+        assert.equal(JSON.parse(answer.body).source, source);
+      }
+      assert.equal((await call(routes, `${base}?source=okx&source=coinbase`)).status, 400);
+    }
+    assert.equal(upstream.seen.length, 5);
+    await call(routes, "/data/market/explore?scope=more&source=okx&tab=rwas&limit=200");
+    assert.equal(upstream.seen.length, 5, "the OKX answer is cached separately from Robinhood's");
+  } finally {
+    market.dispose(); account.dispose(); await upstream.close();
   }
 });
