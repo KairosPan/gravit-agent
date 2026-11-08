@@ -2,6 +2,9 @@
 # Tracked - it holds no position and no price. Kinds: move_pct, gap, filing; a halt rule is refused.
 # A symbol is a US ticker or six digits for an A share; filings are US only.
 # urgent: true lets a rule's alerts through quiet hours (Account › Identity); no rule is urgent unless it says so.
+# A US move_pct rule also judges pre-market from 04:00 and after-hours to 20:00 ET; sessions: regular keeps it to the session.
+# A move or gap rule's alert gets Gravit's reason unless annotate: false; a plan, when given, is checked too.
+# This file is public, and so are the names on it.
 - id: holding-move
   kind: move_pct           # the move from the previous close reaches move_pct, either way
   symbols: holdings
@@ -15,6 +18,14 @@
   kind: filing             # a new 8-K, 8-K/A or Form 4: polled every 5 minutes, 07:00-20:00 ET on session days
   symbols: [holdings, levels]
   forms: [8-K, 8-K/A, 4]
+- id: watch-crwv           # the watch list: names followed whether held or not, each with its own threshold
+  kind: move_pct
+  symbols: [CRWV]
+  move_pct: 8
+- id: watch-intc
+  kind: move_pct
+  symbols: [INTC]
+  move_pct: 5
 # - id: holding-gap        # gap: the session's first judged print is gap_pct or more from the previous close
 #   kind: gap
 #   symbols: holdings
