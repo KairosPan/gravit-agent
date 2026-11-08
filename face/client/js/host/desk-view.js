@@ -302,8 +302,9 @@ function gapWord(ms) {
  *  without), `watch` the watch's head (null while it does not run); `markets` each market's line (null while it is off) and
  *  its own session date's counts (`today`, null with none) — a market with neither is left out; `pending`, `muted` and
  *  `ledger` the alert lines (null when they do not hold), `filings` the filings' line; `alerts` the watch's recent ones,
- *  newest first; `levels` the watch's marks; `standing` the orders of the last good load (`market` its market, `us` when
- *  it names none; `hash` its pins' state, a strategy's levels.yml named when the text's and the script's hold; `timed` when
+ *  newest first; `pages` the pages the desk opened today (`fetchesToday`), newest first as the status lists them, each
+ *  `{ time, url }` - `time` as deskTime writes it (`14:03 ET`), the URL as it came, for the tab to draw as text; `levels`
+ *  the watch's marks; `standing` the orders of the last good load (`market` its market, `us` when it names none; `hash` its pins' state, a strategy's levels.yml named when the text's and the script's hold; `timed` when
  *  its state is when it next falls, which its anchor leads; `sessionId` the session its last firing woke, null for none -
  *  the tab links it on the Messages route, P4 ruling 6) and `standingNotes` what holds the
  *  whole book; `firings` the recent firings; `runs` the last ten, newest first; `asleep` this run's gaps; `files` the watch's
@@ -333,6 +334,7 @@ export function deskViewOf(status, nowIso) {
     ledger: w && w.ledgerError !== undefined ? t('desk.alerts.ledger', { error: str(w.ledgerError) }) : null,
     filings: w && isRecord(w.filings) ? filingsLine(w.filings, now) : null,
     alerts: w ? records(w.recent).map(a => alertOf(a, now)) : [],
+    pages: records(status.fetchesToday).flatMap(f => (typeof f.t === 'string' && typeof f.url === 'string' ? [{ time: deskTime(f.t, now), url: f.url }] : [])),
     levels: w ? records(w.marks).map(m => ({ market: Object.hasOwn(names, m.market) ? names[m.market] : str(m.market), symbol: str(m.symbol), label: labelOf(m), plan: str(m.plan), file: str(m.file) })) : [],
     standing: standing ? records(standing.orders).map(o => ({
       id: str(o.id), market: o.market === 'cn' ? 'cn' : 'us', anchor: str(o.at), ...nextOf(o, standing.running, now), hash: hashCell(o),

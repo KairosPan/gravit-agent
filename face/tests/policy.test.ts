@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { composeEntries } from "@deepseek-ai/dsh-app-boot";
 import { setupFaceProfile } from "../src/setup.ts";
 import { composeFace } from "../src/boot.ts";
+import { LOCAL_FETCH_PROVIDER_ID } from "@deepseek-ai/dsh-web-fetch-http";
 import { POLICY_ID_PATCHES, POLICY_INSERTS, facePolicyPatches } from "../src/policy.ts";
 
 /** A throwaway $DSH_HOME with the face profile already laid out in it. */
@@ -60,11 +61,13 @@ test("the composed tree keeps the 0.1.1 roster, egress and telemetry posture", (
     assert.equal(matches.length, 1, `${id} should compose once, saw ${matches.length}`);
     return matches[0]!;
   };
-  // D6: no web_fetch - the tool, its provider and the runtime's provider id, all 0.1.1's.
+  // D6: the tree registers no web_fetch, but the http fetch provider is on and selected, for the desk's
+  // own tool (src/desk-tools.ts; spec 2026-11-07 §5.6, charter D29).
   assert.deepEqual(one("tool-web").config, { fetch: false, searchTimeoutMs: 60000 });
-  assert.deepEqual(one("web").config, { searchProvider: "deepseek-official" }, "no fetchProvider");
+  assert.deepEqual(one("web").config, { searchProvider: "deepseek-official", fetchProvider: LOCAL_FETCH_PROVIDER_ID });
+  assert.notEqual(one("web-fetch-http").disabled, true, "the fetch provider is on");
   // D3-D7: the new egress and the new tools, off.
-  for (const id of ["web-fetch-http", "mcp-resources", "session-log-deepseek",
+  for (const id of ["mcp-resources", "session-log-deepseek",
     "plugin-package-inventory-deepseek", "session-telemetry-otel"]) {
     assert.equal(one(id).disabled, true, `${id} must be disabled`);
   }
@@ -104,7 +107,22 @@ test("an operator row overrides a policy default", () => {
   // D9's row is an INSERT now, and an operator row still reaches it (B4: one row turns ralph off).
   assert.equal(rows.find((row) => row.id === "tool-ralph")?.disabled, true);
   // An override is per row: the neighbouring defaults are untouched.
-  assert.equal(rows.find((row) => row.id === "web-fetch-http")?.disabled, true);
+  assert.equal(rows.find((row) => row.id === "plugin-package-inventory-deepseek")?.disabled, true);
+  assert.deepEqual(rows.find((row) => row.id === "web")?.config, { searchProvider: "deepseek-official", fetchProvider: LOCAL_FETCH_PROVIDER_ID });
+});
+
+/* D6 as the policy table states it: one `tool-web` row keeping fetch off, so no `web_fetch` is registered
+ * anywhere in the tree; one `web` row selecting the http fetch provider the desk's own tool fetches through; and no
+ * row disabling that provider. */
+test("D6: the tree registers no web_fetch; the http fetch provider is on for the desk's own tool", () => {
+  const patchOf = (id: string) => {
+    const found = POLICY_ID_PATCHES.filter(({ patch }) => patch.id === id);
+    assert.equal(found.length, 1, `one ${id} row`);
+    return found[0]!.patch;
+  };
+  assert.deepEqual(patchOf("tool-web").config, { fetch: false, searchTimeoutMs: 60000 });
+  assert.deepEqual(patchOf("web").config, { searchProvider: "deepseek-official", fetchProvider: LOCAL_FETCH_PROVIDER_ID });
+  assert.equal(POLICY_ID_PATCHES.some((p) => p.patch.id === "web-fetch-http"), false);
 });
 
 /* The telemetry opt-out keeps working on top of the policy, and still wins over

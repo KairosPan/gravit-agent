@@ -820,13 +820,16 @@ type GuardCheck = (exec: DeskGuardExecution) => string | undefined;
 function fakeRoot(options: { presetError?: unknown } = {}) {
   const preExecute: GuardListener[] = [];
   const agentCreated: unknown[] = [];
+  /* installDesk's fetch record (src/desk-tools.ts), tests/desk-tools.test.ts's to drive */
+  const execute: unknown[] = [];
   const registeredWith: unknown[] = [];
   const guards: GuardCheck[] = [];
   const injected: unknown[] = [];
   let presetReads = 0;
   const ctx: DeskGuardCtxLike = {
     on(name: string, listener: (...args: never[]) => unknown, opts?: { prepend?: boolean }) {
-      const list: unknown[] = name === "tools/pre-execute" ? preExecute : name === "agent/created" ? agentCreated : assert.fail(`no listener on ${name}`);
+      const list: unknown[] = name === "tools/pre-execute" ? preExecute : name === "agent/created" ? agentCreated
+        : name === "tools/execute" ? execute : assert.fail(`no listener on ${name}`);
       if (opts?.prepend === true) list.unshift(listener);
       else list.push(listener);
       if (name === "tools/pre-execute") registeredWith.push(opts);
@@ -865,7 +868,7 @@ function fakeRoot(options: { presetError?: unknown } = {}) {
       },
     },
   };
-  return { ctx, preExecute, agentCreated, registeredWith, guards, injected, presetReads: () => presetReads };
+  return { ctx, preExecute, agentCreated, execute, registeredWith, guards, injected, presetReads: () => presetReads };
 }
 
 /** An agent whose composition reads as `composed` (none when `undefined`) and whose session's header is `header` -
@@ -1284,6 +1287,7 @@ test("installDesk installs the guard with the tools, whatever enabled says, and 
     assert.equal(root.preExecute.length, 1, `the guard's listener is installed (enabled: ${enabled})`);
     assert.equal(root.guards.length, 1, `and its backstop (enabled: ${enabled})`);
     assert.equal(root.agentCreated.length, 1, `beside the tools' listener (enabled: ${enabled})`);
+    assert.equal(root.execute.length, 1, `and the fetch record (enabled: ${enabled})`);
     assert.deepEqual(await judged(root.preExecute[0], deskWrite), { decision: denied("GRAVIT.md"), nexts: 0 });
     assert.equal(root.guards[0](deskWrite), denied("GRAVIT.md").reason);
     assert.deepEqual(await judged(root.preExecute[0], deskRead), { decision: keyRead(".env.alpaca"), nexts: 0 });
@@ -1295,6 +1299,7 @@ test("installDesk installs the guard with the tools, whatever enabled says, and 
     assert.equal(root.preExecute.length, 0, `dispose removes the listener (enabled: ${enabled})`);
     assert.equal(root.guards.length, 0, `and the backstop (enabled: ${enabled})`);
     assert.equal(root.agentCreated.length, 0);
+    assert.equal(root.execute.length, 0, `and the fetch record (enabled: ${enabled})`);
   }
   /* Given the context alone, the guard - which needs no quote source - is installed, and the tools are not. */
   const root = fakeRoot();

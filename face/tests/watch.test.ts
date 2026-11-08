@@ -13,9 +13,10 @@ import { fileURLToPath } from "node:url";
 import {
   ALERTS_FILE, deskDir, FILINGS_FILE, readEvents, WATCH_LEASE_FILE, writeMute, writeOff, type BudgetState,
 } from "../src/desk.ts";
-import { alertText } from "../src/alert-text.ts";
+import { alertText, WHY_INSTRUCTIONS, WHY_OUTSIDE_LINE } from "../src/alert-text.ts";
 import type { DeliverResult, PostResult } from "../src/desk-conversation.ts";
 import type { EdgarFetch } from "../src/edgar.ts";
+import type { NewsAnswer } from "../src/market-news.ts";
 import { bjDate } from "../src/et.ts";
 import { HttpError } from "../src/http.ts";
 import { deskCalendars, type DeskCalendars, type MarketCalendar, type MarketSession } from "../src/market-clock.ts";
@@ -101,8 +102,10 @@ interface HarnessOpts {
   source?: FakeSource;
   wall?: WallClock;
   deliver?: (text: string, n: number) => DeliverResult | Promise<DeliverResult>;
-  post?: (input: { text: string; source: unknown; message: unknown; replyTo?: string }) => PostResult | Promise<PostResult>;
+  post?: (input: { text: string; source: unknown; message: unknown; replyTo?: string; urgent?: boolean }) => PostResult | Promise<PostResult>;
   budget?: BudgetState;
+  news?: (symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>>;
+  idle?: () => Promise<void>;
   edgar?: { fetch: EdgarFetch; userAgent: string };
   calendars?: Partial<DeskCalendars>;
   pid?: number;
@@ -145,6 +148,8 @@ async function harness(o: HarnessOpts): Promise<Harness> {
       return o.budget ?? { used: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, total: 0 }, spent: false };
     },
     ...(o.edgar === undefined ? {} : { edgar: o.edgar }),
+    ...(o.news === undefined ? {} : { news: o.news }),
+    ...(o.idle === undefined ? {} : { idle: o.idle }),
     pid: o.pid ?? 4242,
     alive: o.alive ?? ((p) => p === (o.pid ?? 4242)),
     log: (line) => { logs.push(line); },
@@ -237,13 +242,13 @@ test("an A-share crossing is sent with the TENCENT stamp; the US poll is not ask
 });
 
 test("each market polls at its cadence, never two in flight, and only inside its window", async () => {
-  const h = await harness({ start: "2026-11-30T14:19:00Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") } });
-  h.source.tables.us.set("NVDA", us(171, "2026-11-30T14:19:00Z"));
+  const h = await harness({ start: "2026-11-30T08:59:00Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") } });
+  h.source.tables.us.set("NVDA", us(171, "2026-11-30T08:59:00Z"));
   await h.wall.advance(0);
   await h.wall.advance(55_000);
-  assert.equal(h.source.calls.length, 0, "no us poll before 14:20Z");
+  assert.equal(h.source.calls.length, 0, "no us poll before 09:00Z, 04:00 ET");
   await h.wall.advance(5_000);
-  assert.deepEqual(h.source.calls.map((c) => c.at), [Date.parse("2026-11-30T14:20:00Z")]);
+  assert.deepEqual(h.source.calls.map((c) => c.at), [Date.parse("2026-11-30T09:00:00Z")]);
   await h.wall.advance(20_000);
   assert.equal(h.source.calls.length, 2);
   let release!: () => void;
@@ -256,10 +261,10 @@ test("each market polls at its cadence, never two in flight, and only inside its
   release();
   await h.wall.advance(5_000);
   assert.equal(h.source.calls.length, 4, "the next tick after it settles polls");
-  h.wall.set("2026-11-30T21:01:00Z");
+  h.wall.set("2026-12-01T01:00:00Z");
   const before = h.source.calls.length;
   await h.wall.advance(60_000);
-  assert.equal(h.source.calls.length, before, "nothing from 21:01Z");
+  assert.equal(h.source.calls.length, before, "nothing from 01:00Z, 20:00 ET");
   assert.equal(h.watch.status().markets.us.state, "after-close");
   await h.watch.dispose();
 
@@ -272,6 +277,140 @@ test("each market polls at its cadence, never two in flight, and only inside its
   await c.wall.advance(10_000);
   assert.deepEqual(c.source.calls.map((x) => x.at), [Date.parse("2026-12-01T01:20:00Z"), Date.parse("2026-12-01T01:20:10Z")]);
   await c.watch.dispose();
+});
+
+/* ---------- the US window, the reference close and the ledger's five days (why-it-moved task 8) ---------- */
+
+const US_1029: MarketSession = { date: "2026-10-29", open: "2026-10-29T13:30:00Z", close: "2026-10-29T20:00:00Z", early: false };
+const US_1030: MarketSession = { date: "2026-10-30", open: "2026-10-30T13:30:00Z", close: "2026-10-30T20:00:00Z", early: false };
+const US_1102: MarketSession = { date: "2026-11-02", open: "2026-11-02T14:30:00Z", close: "2026-11-02T21:00:00Z", early: false };
+const US_1127: MarketSession = { date: "2026-11-27", open: "2026-11-27T14:30:00Z", close: "2026-11-27T18:00:00Z", early: true };
+/** The week daylight saving ends (Sunday 2026-11-01). */
+const dstWeek = (): MarketCalendar & { asked: string[] } =>
+  fakeCalendar({ "2026-10-29": US_1029, "2026-10-30": US_1030, "2026-10-31": "closed", "2026-11-01": "closed", "2026-11-02": US_1102 });
+const INTC_RULE = "- id: watch-intc\n  kind: move_pct\n  symbols: [INTC]\n  move_pct: 5\n  cooldown: 1440m\n";
+
+/** The times of a harness's US polls, as ISO text. */
+const usPolls = (h: Harness): string[] => h.source.callsFor("us").map((c) => new Date(c.at).toISOString().replace(".000Z", "Z"));
+
+test("the US watch polls from 04:00 ET to 20:00 ET on a session day, and to 17:00 ET on an early close", async () => {
+  const h = await harness({ start: "2026-11-30T08:59:40Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") } });
+  h.source.tables.us.set("NVDA", us(171, "2026-11-30T08:59:40Z"));
+  await h.wall.advance(0);
+  await h.wall.advance(15_000);
+  assert.deepEqual(usPolls(h), [], "nothing before 04:00 ET");
+  assert.equal(h.watch.status().markets.us.state, "waiting");
+  await h.wall.advance(5_000);
+  assert.deepEqual(usPolls(h), ["2026-11-30T09:00:00Z"]);
+  assert.equal(h.watch.status().markets.us.state, "polling");
+  h.wall.set("2026-12-01T00:59:40Z");
+  const before = usPolls(h).length;
+  await h.wall.advance(0);
+  assert.equal(usPolls(h).length, before + 1, "19:59:40 ET still polls");
+  await h.wall.advance(20_000);
+  assert.equal(usPolls(h).length, before + 1, "none at 20:00 ET");
+  assert.equal(h.watch.status().markets.us.state, "after-close");
+  await h.watch.dispose();
+
+  const early = await harness({
+    start: "2026-11-27T21:59:40Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") },
+    calendars: { us: fakeCalendar({ "2026-11-25": { date: "2026-11-25", open: "2026-11-25T14:30:00Z", close: "2026-11-25T21:00:00Z", early: false }, "2026-11-26": "closed", "2026-11-27": US_1127 }) },
+  });
+  early.source.tables.us.set("NVDA", us(171, "2026-11-27T21:59:40Z"));
+  await early.wall.advance(0);
+  assert.deepEqual(usPolls(early), ["2026-11-27T21:59:40Z"], "16:59:40 ET on an early close polls");
+  await early.wall.advance(20_000);
+  assert.deepEqual(usPolls(early), ["2026-11-27T21:59:40Z"], "none at 17:00 ET");
+  assert.equal(early.watch.status().markets.us.state, "after-close");
+  await early.watch.dispose();
+});
+
+test("in the week daylight saving ends, the first US poll is 08:00Z on Friday 2026-10-30 and 09:00Z on Monday 2026-11-02", async () => {
+  const fri = await harness({ start: "2026-10-30T07:59:40Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") }, calendars: { us: dstWeek() } });
+  fri.source.tables.us.set("NVDA", us(171, "2026-10-30T07:59:40Z"));
+  await fri.wall.advance(0);
+  await fri.wall.advance(15_000);
+  assert.deepEqual(usPolls(fri), []);
+  await fri.wall.advance(5_000);
+  assert.deepEqual(usPolls(fri), ["2026-10-30T08:00:00Z"]);
+  await fri.watch.dispose();
+
+  const mon = await harness({ start: "2026-11-02T08:59:40Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") }, calendars: { us: dstWeek() } });
+  mon.source.tables.us.set("NVDA", us(171, "2026-11-02T08:59:40Z"));
+  await mon.wall.advance(0);
+  await mon.wall.advance(15_000);
+  assert.deepEqual(usPolls(mon), [], "08:00Z on Monday is 03:00 ET");
+  await mon.wall.advance(5_000);
+  assert.deepEqual(usPolls(mon), ["2026-11-02T09:00:00Z"]);
+  await mon.watch.dispose();
+});
+
+test("a restart at Monday 04:00 remembers Friday's after-hours alert and stays quiet", async () => {
+  const files = { "desk/rules.yml": INTC_RULE };
+  const fri = await harness({ start: "2026-10-30T20:05:00Z", files, calendars: { us: dstWeek() } });
+  fri.source.tables.us.set("INTC", us(70, "2026-10-30T20:04:59Z", 92.07));
+  await fri.wall.advance(0);
+  await until("the first poll", () => fri.source.calls.length === 1);
+  fri.source.tables.us.set("INTC", us(69.5, "2026-10-30T20:05:19Z", 92.07));
+  await fri.wall.advance(20_000);
+  await until("the after-hours alert", () => fri.sent.length === 1);
+  const lines = fri.sent[0].text.split("\n");
+  assert.equal(lines.at(-2), "after hours: -24.51% from today's close 92.07");
+  assert.equal(lines.at(-1), "reason follows", "a sent US move whose rule annotates is told a reason follows");
+  await until("the record", async () => (await fri.alertRecords()).some((r) => r.kind === "alert"));
+  const rec = (await fri.alertRecords()).find((r) => r.kind === "alert");
+  assert.deepEqual([rec?.date, rec?.ref, rec?.phase, rec?.onePrint], ["2026-10-30", "2026-10-30", "after", undefined]);
+  await fri.watch.dispose();
+
+  const wall = new WallClock("2026-11-02T08:59:55Z");
+  const source = new FakeSource(() => wall.now());
+  source.tables.us.set("INTC", us(68, "2026-11-02T09:00:00Z", 92.07));
+  const mon = await harness({ start: "", wall, source, home: fri.home, root: fri.root, calendars: { us: dstWeek() }, pid: 4343 });
+  await wall.advance(0);
+  await wall.advance(5_000);
+  await until("the first Monday poll", () => source.calls.length === 1);
+  assert.equal(source.calls[0].at, Date.parse("2026-11-02T09:00:00Z"));
+  for (let i = 1; i <= 8; i++) {
+    source.tables.us.set("INTC", us(68 - i / 10, `2026-11-02T09:00:${String(i * 5).padStart(2, "0")}Z`, 92.07));
+    await wall.advance(20_000);
+  }
+  await until("the eighth Monday poll", () => source.calls.length >= 9);
+  assert.equal(mon.sent.length, 0, "the pre-market measures from Friday's close, which already alerted");
+  assert.equal((await mon.alertRecords()).filter((r) => r.kind === "alert").length, 1);
+  await mon.watch.dispose();
+});
+
+test("a restart in the regular session remembers a lone pre-market print's alert, and counts its repeat today", async () => {
+  const files = { "desk/rules.yml": INTC_RULE };
+  const pre = await harness({ start: "2026-10-30T11:00:00Z", files, calendars: { us: dstWeek() } });
+  pre.source.tables.us.set("INTC", us(69.05, "2026-10-30T10:59:58Z", 92.07));
+  await pre.wall.advance(0);
+  await until("the first poll", () => pre.source.calls.length === 1);
+  for (let i = 0; i < 6; i++) await pre.wall.advance(20_000);
+  await until("the lone print's alert", () => pre.sent.length === 1);
+  assert.deepEqual(pre.sent[0].text.split("\n").slice(-3), [
+    "pre-market: -25.00% from the 2026-10-29 close 92.07",
+    "one print: no second print within 2 minutes",
+    "reason follows",
+  ]);
+  await until("the record", async () => (await pre.alertRecords()).some((r) => r.kind === "alert"));
+  const rec = (await pre.alertRecords()).find((r) => r.kind === "alert");
+  assert.deepEqual([rec?.date, rec?.ref, rec?.phase, rec?.onePrint], ["2026-10-30", "2026-10-29", "pre", true]);
+  await pre.watch.dispose();
+
+  const wall = new WallClock("2026-10-30T14:00:00Z");
+  const source = new FakeSource(() => wall.now());
+  source.tables.us.set("INTC", us(90, "2026-10-30T13:59:59Z", 92.07));
+  const reg = await harness({ start: "", wall, source, home: pre.home, root: pre.root, calendars: { us: dstWeek() }, pid: 4343 });
+  await wall.advance(0);
+  await until("the first poll", () => source.calls.length === 1);
+  source.tables.us.set("INTC", us(86, "2026-10-30T14:00:19Z", 92.07));
+  await wall.advance(20_000);
+  await until("the second poll", () => source.calls.length === 2);
+  await wall.advance(0);
+  assert.equal(reg.sent.length, 0, "the session's crossing measures from the 2026-10-29 close, inside the pre-market alert's cooldown");
+  assert.equal(reg.watch.status().markets.us.today.repeats, 1, "a repeat judged on today's date counts today, whatever its reference");
+  await reg.watch.dispose();
 });
 
 test("a closed XSHG day polls no A share; past the table the watch says so once and judges on the Market's phase", async () => {
@@ -706,6 +845,84 @@ test("a batch that carries an urgent rule's hit goes as urgent, and so does a la
   await late.watch.dispose();
 });
 
+test("an A-share move says annotation follows with a plan, and nothing follows without one", async () => {
+  const h = await harness({
+    start: "2026-12-01T02:03:00Z",
+    files: { "desk/rules.yml": "- id: cn-plan\n  kind: move_pct\n  symbols: [\"600519\"]\n  move_pct: 4\n  plan: trim a third\n- id: cn-bare\n  kind: move_pct\n  symbols: [\"000001\"]\n  move_pct: 4\n" },
+  });
+  h.source.tables.cn.set("600519", cn(1400, "2026-12-01T02:02:58Z", "trading", 1400));
+  h.source.tables.cn.set("000001", cn(10, "2026-12-01T02:02:58Z", "trading", 10));
+  await h.wall.advance(0);
+  await until("the first poll", () => h.source.calls.length === 1);
+  h.source.tables.cn.set("600519", cn(1330, "2026-12-01T02:03:08Z", "trading", 1400));
+  h.source.tables.cn.set("000001", cn(9.5, "2026-12-01T02:03:08Z", "trading", 10));
+  await h.wall.advance(10_000);
+  await until("two alerts", () => h.sent.length === 2);
+  const last = (symbol: string): string | undefined => h.sent.find((x) => x.text.startsWith(`${symbol} `))?.text.split("\n").at(-1);
+  assert.equal(last("600519"), "annotation follows");
+  assert.equal(last("000001"), "day: -5.00% from the previous close 10");
+  await h.watch.dispose();
+
+  const spent = await harness({
+    start: "2026-12-01T02:03:00Z", budget: { used: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, total: 0 }, spent: true },
+    files: { "desk/rules.yml": "- id: cn-plan\n  kind: move_pct\n  symbols: [\"600519\"]\n  move_pct: 4\n  plan: trim a third\n- id: cn-bare\n  kind: move_pct\n  symbols: [\"000001\"]\n  move_pct: 4\n" },
+  });
+  spent.source.tables.cn.set("600519", cn(1400, "2026-12-01T02:02:58Z", "trading", 1400));
+  spent.source.tables.cn.set("000001", cn(10, "2026-12-01T02:02:58Z", "trading", 10));
+  await spent.wall.advance(0);
+  await until("the first poll", () => spent.source.calls.length === 1);
+  spent.source.tables.cn.set("600519", cn(1330, "2026-12-01T02:03:08Z", "trading", 1400));
+  spent.source.tables.cn.set("000001", cn(9.5, "2026-12-01T02:03:08Z", "trading", 10));
+  await spent.wall.advance(10_000);
+  await until("two alerts", () => spent.sent.length === 2);
+  const lastOf = (symbol: string): string | undefined => spent.sent.find((x) => x.text.startsWith(`${symbol} `))?.text.split("\n").at(-1);
+  assert.equal(lastOf("600519"), "no annotation: the desk's token budget for today is spent");
+  assert.equal(lastOf("000001"), "day: -5.00% from the previous close 10", "nothing would follow it, so the spent budget is not named");
+  await spent.watch.dispose();
+});
+
+test("with the face's own calendar, whose window starts on the session date, a pre-market alert measures from the session before it", async () => {
+  const h = await harness({ start: "2026-10-30T11:00:00Z", files: { "desk/rules.yml": INTC_RULE }, calendars: { us: deskCalendars().us } });
+  h.source.tables.us.set("INTC", us(69.05, "2026-10-30T10:59:58Z", 92.07));
+  await h.wall.advance(0);
+  await until("the first poll", () => h.source.calls.length === 1);
+  assert.equal(h.calendars.us.window()?.from, "2026-10-30", "the window starts on the session date");
+  h.source.tables.us.set("INTC", us(69, "2026-10-30T11:00:18Z", 92.07));
+  await h.wall.advance(20_000);
+  await until("the alert", () => h.sent.length === 1);
+  await until("the record", async () => (await h.alertRecords()).some((r) => r.kind === "alert"));
+  const rec = (await h.alertRecords()).find((r) => r.kind === "alert");
+  assert.deepEqual([rec?.date, rec?.ref, rec?.phase], ["2026-10-30", "2026-10-29", "pre"]);
+  assert.match(h.sent[0].text, /^pre-market: -25\.06% from the 2026-10-29 close 92\.07$/m);
+  await h.watch.dispose();
+});
+
+test("a held alert sixty hours old is not restored: no send and no batch record; one held minutes ago still batches", async () => {
+  const capped = (id: string, t: string): Record<string, unknown> => ({ ...orphan(id, t), decision: "suppressed", suppressed: "cap" });
+  const old = await overLedger([capped("a-old-cap", "2026-11-28T03:20:45.000Z")]);
+  await old.wall.advance(0);
+  await old.wall.advance(5_000);
+  old.wall.set("2026-11-30T16:00:00Z");
+  await old.wall.advance(5_000);
+  await old.wall.advance(5_000);
+  assert.deepEqual(old.sent, []);
+  assert.equal(old.watch.status().pending, 0);
+  assert.deepEqual((await old.alertRecords()).filter((r) => r.kind === "batch"), []);
+  await old.watch.dispose();
+
+  const fresh = await overLedger([capped("a-fresh-cap", "2026-11-30T15:16:45.000Z")]);
+  await fresh.wall.advance(0);
+  assert.equal(fresh.watch.status().pending, 1);
+  fresh.wall.set("2026-11-30T16:00:00Z");
+  await fresh.wall.advance(5_000);
+  await until("the batch", () => fresh.sent.length === 1);
+  assert.match(fresh.sent[0].text, /^1 more alert suppressed: NVDA stop 10:16 ET/);
+  await until("the batch record", async () => (await fresh.alertRecords()).some((r) => r.kind === "batch"));
+  const batch = (await fresh.alertRecords()).find((r) => r.kind === "batch");
+  assert.deepEqual(batch?.alerts, ["a-fresh-cap"]);
+  await fresh.watch.dispose();
+});
+
 test("a rule marked urgent sends urgent; a level and an unmarked rule send alert", async () => {
   const h = await harness({
     start: "2026-11-30T15:20:45Z",
@@ -862,7 +1079,7 @@ test("two watches started together over a stale lease: one holds it, the other s
 
 test("levels.yml edited while the face runs is reloaded on the next tick; a broken edit keeps the last good load with one line", async () => {
   const four = ["NVDA", "AMD", "AAPL", "MSFT"].map((s) => level(s, "stop", 100, "cross_down")).join("");
-  const h = await harness({ start: "2026-11-30T12:00:00Z", files: { "desk/levels.yml": four } });
+  const h = await harness({ start: "2026-11-30T08:00:00Z", files: { "desk/levels.yml": four } });
   await h.wall.advance(0);
   assert.equal(h.sent.length, 0, "the boot's load is the baseline");
   assert.equal(h.watch.status().files.find((f) => f.file === "desk/levels.yml")?.entries, 4);
@@ -1074,20 +1291,20 @@ test("an unreadable alerts.jsonl judges nothing and says why once", async () => 
 
 test("stateText lists both markets' holdings, the levels within 2% and today's counts; a source slower than 3 s gives the counts without its prices", async () => {
   const h = await harness({
-    start: "2026-11-30T12:00:00Z",
+    start: "2026-11-30T08:00:00Z",
     files: {
       "desk/holdings.yml": "- symbol: NVDA\n  qty: 10\n  avg_cost: 100\n- symbol: \"600519\"\n  qty: 100\n  avg_cost: 1400\n",
       "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") + level("600519", "watch", 1400, "cross_down"),
     },
   });
-  h.source.tables.us.set("NVDA", us(171, "2026-11-30T11:59:00Z", 170));
+  h.source.tables.us.set("NVDA", us(171, "2026-11-30T07:59:00Z", 170));
   h.source.tables.cn.set("600519", cn(1500, "2026-11-30T07:00:00Z", "closed"));
   await h.wall.advance(0);
   const view = JSON.parse((await h.watch.stateText()) ?? "null") as {
     holdings: { symbol: string; last: number | null; at: string | null }[]; near: { symbol: string; distancePct: number }[]; alerts: unknown; prices?: string;
   };
   assert.deepEqual(view.holdings.map((x) => [x.symbol, x.last]), [["NVDA", 171], ["600519", 1500]]);
-  assert.equal(view.holdings[0].at, "ROBINHOOD 06:59:00 ET");
+  assert.equal(view.holdings[0].at, "ROBINHOOD 02:59:00 ET");
   assert.deepEqual(view.near.map((x) => [x.symbol, x.distancePct]), [["NVDA", -0.58]]);
   assert.deepEqual(view.alerts, { sent: 0, suppressed: 0 });
   assert.equal(view.prices, undefined);
@@ -1159,13 +1376,13 @@ test("an A-share calendar that fails inside the table is one log line", async ()
 test("the desk state asks each market at most its watch cap, a symbol past it priced from its last poll or counted", async () => {
   const names = Array.from({ length: 45 }, (_, i) => `A${i}`);
   const h = await harness({
-    start: "2026-11-30T12:00:00Z",
+    start: "2026-11-30T08:00:00Z",
     files: {
       "desk/levels.yml": names.slice(0, 40).map((x) => level(x, "watch", 10, "cross_down")).join(""),
       "strategies/demo/levels.yml": names.slice(40).map((x) => level(x, "watch", 10, "cross_down")).join(""),
     },
   });
-  for (const x of names) h.source.tables.us.set(x, us(20, "2026-11-30T11:59:00Z"));
+  for (const x of names) h.source.tables.us.set(x, us(20, "2026-11-30T07:59:00Z"));
   await h.wall.advance(0);
   const view = JSON.parse((await h.watch.stateText()) ?? "null") as { prices?: string };
   assert.deepEqual(h.source.calls.map((c) => c.ids.length), [WATCH_US_MAX]);
@@ -1298,7 +1515,7 @@ test("a filings poll still running at 120 s is aborted", async () => {
 
 test("a level that expires at the ET date change is refused with its line", async () => {
   const text = "- symbol: NVDA\n  kind: stop\n  price: 170\n  when: cross_down\n  plan: sell half\n  expires: 2026-11-30\n";
-  const h = await harness({ start: "2026-11-30T23:00:00Z", files: { "desk/levels.yml": text } });
+  const h = await harness({ start: "2026-12-01T01:30:00Z", files: { "desk/levels.yml": text } });
   await h.wall.advance(0);
   assert.equal(h.watch.status().files.find((f) => f.file === "desk/levels.yml")?.entries, 1);
   assert.equal(h.sent.length, 0);
@@ -1375,5 +1592,310 @@ test("an idle watch still lifts an expired mute, and its status shows the mute u
   assert.ok((await readEvents(h.home)).events.some((e) => e.kind === "mute-cleared" && e.by === "expiry"));
   assert.equal(h.watch.status().muted, undefined);
   assert.equal(h.sent.length, 0);
+  await h.watch.dispose();
+});
+
+/* ---------- the why post (why-it-moved task 10) ---------- */
+
+const NVDA_MOVE = "- id: nvda-move\n  kind: move_pct\n  symbols: [NVDA]\n  move_pct: 5\n";
+/** A headline read that records what it was asked and answers each symbol from `answer`. */
+function fakeNews(answer: (symbol: string) => NewsAnswer = () => ({ headlines: [] })): { asked: { symbols: string[]; since: string }[]; read: (symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>> } {
+  const asked: { symbols: string[]; since: string }[] = [];
+  return {
+    asked,
+    read: async (symbols, since) => {
+      asked.push({ symbols: [...symbols], since });
+      return new Map(symbols.map((s) => [s.toUpperCase(), answer(s.toUpperCase())] as const));
+    },
+  };
+}
+/** NVDA's gap at the first poll of 2026-11-30 15:20:45Z: 94 against Friday's close 100. */
+async function nvdaGap(h: Harness): Promise<void> {
+  h.source.tables.us.set("NVDA", us(94, "2026-11-30T15:20:44Z", 100));
+  await h.wall.advance(0);
+  await until("the alert", () => h.sent.length === 1);
+}
+
+test("a US move alert's post is a why post: its alert, its headlines since its reference close, its filings of the last 24 hours and the instructions", async () => {
+  const news = fakeNews(() => ({ headlines: [{ time: "2026-11-30T13:05:00Z", outlet: "Reuters", title: "Nvidia cuts its outlook", url: "https://example.com/a" }] }));
+  const sec = fakeSec();
+  /* SEC's acceptanceDateTime is New York wall time marked Z: 07:00 ET today, and 09:00 ET yesterday - 30 hours back */
+  sec.filings.push(
+    { accession: "0001045810-26-000010", accepted: "2026-11-30T07:00:00.000Z" },
+    { accession: "0001045810-26-000009", accepted: "2026-11-29T09:00:00.000Z" },
+  );
+  const h = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: news.read, edgar: { fetch: sec.fetch, userAgent: "ops@example.com" } });
+  await nvdaGap(h);
+  assert.equal(h.sent[0].text.split("\n").at(-1), "reason follows");
+  await until("the post", () => h.posts.length === 1);
+  /* the reference close is Friday 2026-11-27's, an early close at 13:00 ET */
+  assert.deepEqual(news.asked, [{ symbols: ["NVDA"], since: "2026-11-27T18:00:00.000Z" }]);
+  const post = h.posts[0];
+  const text = post.text;
+  assert.ok(text.startsWith("NVDA 94"), text);
+  assert.ok(text.includes(WHY_OUTSIDE_LINE));
+  assert.ok(text.includes("Headlines for NVDA:\n- 08:05 ET · Reuters · Nvidia cuts its outlook · https://example.com/a"), text);
+  assert.ok(text.includes("Filings for NVDA in the last 24 h:\n- 8-K · items 2.02 · accepted 07:00 ET"), text);
+  assert.ok(!text.includes("0001045810-26-000009"), "a filing accepted 30 hours ago is left out");
+  assert.ok(text.endsWith(WHY_INSTRUCTIONS), "the instructions close it");
+  assert.ok(sec.urls.some((u) => u.includes("CIK0001045810")), "the filings were read from SEC");
+  assert.deepEqual([(post.source as { kind: string }).kind, (post.source as { symbol: string }).symbol], ["alert", "NVDA"]);
+  assert.equal(post.replyTo, "telegram:100");
+  assert.equal(post.urgent, undefined, "an alert of a rule not marked urgent posts no urgent");
+  await until("the annotation record", async () => (await h.alertRecords()).some((r) => r.kind === "annotation"));
+  await h.watch.dispose();
+});
+
+test("an A-share move alert from a rule with no plan gets no post; a level alert's post is the plan check as before", async () => {
+  const h = await harness({
+    start: "2026-12-01T02:03:00Z",
+    files: { "desk/rules.yml": "- id: cn-bare\n  kind: move_pct\n  symbols: [\"000001\"]\n  move_pct: 4\n" },
+  });
+  h.source.tables.cn.set("000001", cn(10, "2026-12-01T02:02:58Z", "trading", 10));
+  await h.wall.advance(0);
+  await until("the first poll", () => h.source.calls.length === 1);
+  h.source.tables.cn.set("000001", cn(9.5, "2026-12-01T02:03:08Z", "trading", 10));
+  await h.wall.advance(10_000);
+  await until("the alert", () => h.sent.length === 1);
+  await until("its delivered record", async () => (await h.alertRecords()).some((r) => r.kind === "delivered"));
+  await h.wall.advance(0);
+  await new Promise((done) => setTimeout(done, 50));
+  assert.deepEqual(h.posts, [], "nothing is posted for it");
+  assert.ok(!(await h.alertRecords()).some((r) => r.kind === "annotation"));
+  await h.watch.dispose();
+  assert.deepEqual(h.posts, [], "nor at dispose");
+
+  const news = fakeNews();
+  const lv = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") }, news: news.read });
+  lv.source.tables.us.set("NVDA", us(171, "2026-11-30T15:20:44Z", 174.05));
+  await lv.wall.advance(0);
+  lv.source.tables.us.set("NVDA", us(169.82, "2026-11-30T15:21:03Z", 174.05));
+  await lv.wall.advance(20_000);
+  await until("the post", () => lv.posts.length === 1);
+  assert.ok(lv.sent[0].text.endsWith("annotation follows"));
+  // The alert record is appended on the ledger's own chain, which nothing orders before the post: wait for it.
+  await until("its alert record", async () => (await lv.alertRecords()).some((r) => r.kind === "alert"));
+  assert.equal(lv.posts[0].text, alertText(JSON.parse(JSON.stringify((await lv.alertRecords()).find((r) => r.kind === "alert"))) as AlertHit, lv.wall.now(), "none"));
+  assert.deepEqual(news.asked, [], "a plan check reads no headline");
+  await lv.watch.dispose();
+});
+
+test("passes that come while a turn runs are folded into one post when the lane is idle, and share one annotation record", async () => {
+  let busy: Promise<void> = Promise.resolve();
+  let free!: () => void;
+  const idleCalls: number[] = [];
+  const h = await harness({
+    start: "2026-11-30T15:20:45Z",
+    files: {
+      "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") + level("AMD", "stop", 100, "cross_down"),
+      "desk/rules.yml": "- id: intc-move\n  kind: move_pct\n  symbols: [INTC]\n  move_pct: 5\n  urgent: true\n",
+    },
+    news: fakeNews().read,
+    idle: () => { idleCalls.push(h.wall.now()); return busy; },
+  });
+  h.source.tables.us.set("NVDA", us(171, "2026-11-30T15:20:44Z"));
+  h.source.tables.us.set("AMD", us(101, "2026-11-30T15:20:44Z"));
+  h.source.tables.us.set("INTC", us(100, "2026-11-30T15:20:44Z", 100));
+  await h.wall.advance(0);
+  h.source.tables.us.set("NVDA", us(169, "2026-11-30T15:21:00Z"));
+  await h.wall.advance(20_000);
+  await until("the first post", () => h.posts.length === 1);
+  assert.equal(idleCalls.length, 1, "the first post asked the lane once, and it was idle");
+  /* a turn runs now: the lane is busy until `free` */
+  busy = new Promise<void>((done) => { free = done; });
+  h.source.tables.us.set("AMD", us(99, "2026-11-30T15:21:20Z"));
+  await h.wall.advance(20_000);
+  await until("AMD's alert", () => h.sent.length === 2);
+  h.source.tables.us.set("INTC", us(94, "2026-11-30T15:21:40Z", 100));
+  await h.wall.advance(20_000);
+  await until("INTC's alert", () => h.sent.length === 3);
+  await h.wall.advance(0);
+  assert.equal(h.posts.length, 1, "nothing posts while the turn runs");
+  free();
+  await until("the folded post", () => h.posts.length === 2);
+  await h.wall.advance(0);
+  assert.equal(h.posts.length, 2, "one post for both passes");
+  const folded = h.posts[1];
+  assert.deepEqual(folded.source, { kind: "alerts", count: 2 });
+  assert.equal(folded.replyTo, "telegram:101", "it replies to the first entry's alert");
+  assert.equal(folded.urgent, true, "urgent, since one of its alerts is");
+  assert.ok(folded.text.startsWith("AMD 99"), folded.text);
+  assert.ok(folded.text.includes("\n\nINTC 94"), "both alerts");
+  assert.ok(folded.text.endsWith(WHY_INSTRUCTIONS), "a fold holding a US move is a why post");
+  await until("two annotation records", async () => (await h.alertRecords()).filter((r) => r.kind === "annotation").length === 2);
+  const records = await h.alertRecords();
+  const ids = (symbol: string): unknown => records.find((r) => r.kind === "alert" && r.symbol === symbol)?.id;
+  const second = records.filter((r) => r.kind === "annotation")[1];
+  assert.deepEqual(second.alerts, [ids("AMD"), ids("INTC")]);
+  assert.equal(second.pass, records.find((r) => r.kind === "alert" && r.symbol === "AMD")?.pass, "the record names the first entry's pass");
+  await h.watch.dispose();
+});
+
+test("alerts the hourly cap batches get no post", async () => {
+  const names = Array.from({ length: 8 }, (_, i) => `M${i}`);
+  const news = fakeNews();
+  const h = await harness({
+    start: "2026-11-30T14:30:05Z",
+    files: { "desk/rules.yml": `- id: burst\n  kind: move_pct\n  symbols: [${names.join(", ")}]\n  move_pct: 5\n` },
+    news: news.read,
+  });
+  for (const s of names) h.source.tables.us.set(s, us(90, "2026-11-30T14:30:01Z", 100));
+  await h.wall.advance(0);
+  await until("six alerts", () => h.sent.length === 6);
+  await until("the post", () => h.posts.length === 1);
+  assert.deepEqual(h.posts[0].source, { kind: "alerts", count: 6 });
+  h.wall.set("2026-11-30T14:59:58Z");
+  await h.wall.advance(5_000);
+  await until("the batch", () => h.sent.length === 7);
+  await until("the batch record", async () => (await h.alertRecords()).some((r) => r.kind === "batch"));
+  await h.wall.advance(0);
+  assert.equal(h.posts.length, 1, "the batch is posted nothing");
+  assert.equal(news.asked.length, 1);
+  await h.watch.dispose();
+});
+
+test("a headline read that fails or times out leaves the post saying headlines unavailable, and the post still goes", async () => {
+  const failing = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: async () => { throw new Error("socket hang up"); } });
+  await nvdaGap(failing);
+  await until("the post", () => failing.posts.length === 1);
+  assert.ok(failing.posts[0].text.includes("Headlines for NVDA: unavailable: the headline read failed: socket hang up"), failing.posts[0].text);
+  await failing.watch.dispose();
+
+  const hanging = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: () => new Promise(() => {}) });
+  await nvdaGap(hanging);
+  await hanging.wall.advance(9_000);
+  assert.equal(hanging.posts.length, 0, "it waits for the read");
+  await hanging.wall.advance(1_000);
+  await until("the post", () => hanging.posts.length === 1);
+  assert.ok(hanging.posts[0].text.includes("Headlines for NVDA: unavailable: the headline read passed 10 s"), hanging.posts[0].text);
+  await hanging.watch.dispose();
+});
+
+test("a filings read with no SEC contact, or one that fails or passes 10 s, is said in the post, and the post still goes", async () => {
+  const none = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: fakeNews().read });
+  await nvdaGap(none);
+  await until("the post", () => none.posts.length === 1);
+  assert.ok(none.posts[0].text.includes("Filings for NVDA in the last 24 h: unavailable: no SEC contact: ALPHA_EDGAR_USER_AGENT is not set"), none.posts[0].text);
+  await none.watch.dispose();
+
+  const refused = fakeSec();
+  refused.refuse = true;
+  const failing = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: fakeNews().read, edgar: { fetch: refused.fetch, userAgent: "ops@example.com" } });
+  await nvdaGap(failing);
+  await until("the post", () => failing.posts.length === 1);
+  assert.match(failing.posts[0].text, /Filings for NVDA in the last 24 h: unavailable: EDGAR could not read it: .*403/);
+  await failing.watch.dispose();
+
+  const hang: EdgarFetch = async (url) => {
+    if (url.endsWith("company_tickers.json")) return new Response(JSON.stringify({ 0: { cik_str: 1045810, ticker: "NVDA", title: "NVIDIA CORP" } }));
+    return new Promise<Response>(() => {});
+  };
+  const slow = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: fakeNews().read, edgar: { fetch: hang, userAgent: "ops@example.com" } });
+  await nvdaGap(slow);
+  await slow.wall.advance(9_000);
+  assert.equal(slow.posts.length, 0, "it waits for the read");
+  await slow.wall.advance(1_000);
+  await until("the post", () => slow.posts.length === 1);
+  assert.ok(slow.posts[0].text.includes("Filings for NVDA in the last 24 h: unavailable: the EDGAR read passed 10 s"), slow.posts[0].text);
+  await slow.watch.dispose();
+});
+
+/** A fake SEC knowing NVDA (CIK 1045810) and AMD (CIK 2488): each one's submissions from `subs`, a status for a
+ * failing one. SEC's acceptanceDateTime is New York wall time marked Z; "" is none. */
+function twoSec(subs: Record<"NVDA" | "AMD", { accession: string; filingDate: string; accepted: string }[] | number>): EdgarFetch {
+  const ciks: Record<string, "NVDA" | "AMD"> = { CIK0001045810: "NVDA", CIK0000002488: "AMD" };
+  return (async (url: string) => {
+    if (url.endsWith("company_tickers.json")) {
+      return new Response(JSON.stringify({ 0: { cik_str: 1045810, ticker: "NVDA", title: "NVIDIA CORP" }, 1: { cik_str: 2488, ticker: "AMD", title: "ADVANCED MICRO DEVICES" } }));
+    }
+    const symbol = Object.entries(ciks).find(([cik]) => url.includes(cik))?.[1];
+    const answer = symbol === undefined ? 404 : subs[symbol];
+    if (typeof answer === "number") return new Response("no", { status: answer });
+    return new Response(JSON.stringify({
+      filings: {
+        recent: {
+          form: answer.map(() => "8-K"), filingDate: answer.map((f) => f.filingDate), accessionNumber: answer.map((f) => f.accession),
+          acceptanceDateTime: answer.map((f) => f.accepted), items: answer.map(() => "7.01"), primaryDocument: answer.map(() => "doc.htm"),
+        },
+      },
+    }));
+  }) as EdgarFetch;
+}
+const MOVES = "- id: moves\n  kind: move_pct\n  symbols: [NVDA, AMD]\n  move_pct: 5\n";
+/** NVDA's and AMD's gaps in one pass at 2026-11-30 15:20:45Z. */
+async function twoGaps(h: Harness): Promise<void> {
+  h.source.tables.us.set("NVDA", us(94, "2026-11-30T15:20:44Z", 100));
+  h.source.tables.us.set("AMD", us(94, "2026-11-30T15:20:44Z", 100));
+  await h.wall.advance(0);
+  await until("the post", () => h.posts.length === 1);
+}
+
+test("each symbol's filings read is said on its own: one failing beside one with a filing, and beside one read cleanly with none", async () => {
+  const mixed = await harness({
+    start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": MOVES }, news: fakeNews().read,
+    edgar: { fetch: twoSec({ NVDA: [{ accession: "0001045810-26-000020", filingDate: "2026-11-30", accepted: "2026-11-30T07:00:00.000Z" }], AMD: 500 }), userAgent: "ops@example.com" },
+  });
+  await twoGaps(mixed);
+  const text = mixed.posts[0].text;
+  assert.ok(text.includes("Filings for NVDA in the last 24 h:\n- 8-K · items 7.01 · accepted 07:00 ET"), text);
+  assert.match(text, /Filings for AMD in the last 24 h: unavailable: EDGAR could not read it: .*500/);
+  await mixed.watch.dispose();
+
+  const clean = await harness({
+    start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": MOVES }, news: fakeNews().read,
+    edgar: { fetch: twoSec({ NVDA: 503, AMD: [] }), userAgent: "ops@example.com" },
+  });
+  await twoGaps(clean);
+  const plain = clean.posts[0].text;
+  assert.match(plain, /Filings for NVDA in the last 24 h: unavailable: EDGAR could not read it: .*503/);
+  assert.ok(plain.includes("Filings for AMD in the last 24 h: none"), "AMD read cleanly, with nothing, and not NVDA's failure");
+  await clean.watch.dispose();
+});
+
+test("a filing with no acceptance time, filed inside the lookback, is kept and said so", async () => {
+  const h = await harness({
+    start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: fakeNews().read,
+    edgar: { fetch: twoSec({ NVDA: [{ accession: "0001045810-26-000030", filingDate: "2026-11-30", accepted: "" }], AMD: [] }), userAgent: "ops@example.com" },
+  });
+  await nvdaGap(h);
+  await until("the post", () => h.posts.length === 1);
+  assert.ok(h.posts[0].text.includes("Filings for NVDA in the last 24 h:\n- 8-K · items 7.01 · accepted time unknown"), h.posts[0].text);
+  await h.watch.dispose();
+});
+
+test("a fold of an A-share alert and a US move is one why post: the A share's headlines said unavailable, and no filings line for it", async () => {
+  let free!: () => void;
+  const busy = new Promise<void>((done) => { free = done; });
+  const sec = fakeSec();
+  const h = await harness({
+    start: "2026-11-30T01:59:50Z",
+    files: { "desk/levels.yml": level("600519", "stop", 1400, "cross_down"), "desk/rules.yml": NVDA_MOVE },
+    news: fakeNews().read, idle: () => busy, edgar: { fetch: sec.fetch, userAgent: "ops@example.com" },
+    calendars: { us: fakeCalendar({ "2026-11-29": "closed", "2026-11-30": US_1130 }) },
+  });
+  h.source.tables.cn.set("600519", cn(1410, "2026-11-30T01:59:48Z"));
+  await h.wall.advance(0);
+  await until("the first A-share poll", () => h.source.callsFor("cn").length === 1);
+  h.source.tables.cn.set("600519", cn(1390, "2026-11-30T02:00:00Z"));
+  await h.wall.advance(10_000);
+  await until("the A-share alert", () => h.sent.length === 1);
+  /* the pre-market: NVDA's gap on two distinct prints */
+  h.wall.set("2026-11-30T08:59:55Z");
+  h.source.tables.us.set("NVDA", us(94, "2026-11-30T09:00:00Z", 100));
+  await h.wall.advance(5_000);
+  h.source.tables.us.set("NVDA", us(94.1, "2026-11-30T09:00:20Z", 100));
+  await h.wall.advance(20_000);
+  await until("NVDA's alert", () => h.sent.length === 2);
+  assert.equal(h.posts.length, 0, "the lane is busy");
+  free();
+  await until("the folded post", () => h.posts.length === 1);
+  const text = h.posts[0].text;
+  assert.deepEqual(h.posts[0].source, { kind: "alerts", count: 2 });
+  assert.equal(h.posts[0].replyTo, "telegram:100", "it replies to the A-share alert, the first entry's");
+  assert.ok(text.includes("Headlines for 600519: unavailable: an A share: the headline read covers US shares"), text);
+  assert.ok(!text.includes("Filings for 600519"), "no filings line for an A share");
+  assert.ok(text.includes("Filings for NVDA in the last 24 h: none"), text);
+  assert.ok(text.endsWith(WHY_INSTRUCTIONS));
+  assert.ok(sec.urls.every((u) => !u.includes("600519")), "an A share is never asked of SEC");
   await h.watch.dispose();
 });

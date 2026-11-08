@@ -1,8 +1,8 @@
 // face/src/watch.ts
 /** The watch row (P3): the desk's eye on the operator's book between turns. It polls the Market's read for the US
  * shares and the A shares the book names, judges the operator's levels and rules on each print (src/watch-eval.ts),
- * sends each alert to the phone itself, the plan verbatim (src/alert-text.ts), posts one annotation turn per pass on
- * the desk conversation, and alerts on a held name's new US filings (src/edgar.ts, src/filings.ts). Nothing here
+ * sends each alert to the phone itself, the plan verbatim (src/alert-text.ts), posts its annotation to the
+ * annotation lane - a why post for a US price move, a plan check otherwise - and alerts on a held name's new US filings (src/edgar.ts, src/filings.ts). Nothing here
  * places, cancels or proposes an order (B2).
  *
  * ONE WATCH PER HOME (ruling 7). `watch.lease` (`{ pid, since, beat }`, `0600`) names the face that watches; it
@@ -22,15 +22,21 @@
  * line; the ledgers, read once before any pass is judged (`alerts.jsonl` into src/watch-eval.ts `rebuildDay`,
  * `filings.jsonl` into src/filings.ts `baselineFrom`; an unreadable `alerts.jsonl` judges nothing until it reads,
  * with one line; its orphans handled at that first read, see below); each
- * market, its calendar's answer for its own date, its window (ruling 2: 10 minutes before the open to a minute after
- * the close) and a poll when due by its cadence (ruling 3), never two in flight per market; a due batch; and the
+ * market, its calendar's answer for its own date, its window (a US share's from 04:00 ET of its date to the close
+ * plus 4 h, 20:00 ET or 17:00 on an early close, its session handed over with the date of the one before it; an A
+ * share's, ruling 2, 10 minutes before the open to a minute after the close) and a poll when due by its cadence
+ * (ruling 3), never two in flight per market; a due batch; and the
  * filings (ruling 9), one single-flight poll when due, aborted at 120 s.
  *
  * A PASS is one market's poll - one snapshot over that market's ids alone - or one filings poll. Its hits are judged
  * synchronously and go on the send chain in order: the flags read once (OFF and MUTE, then the budget when an alert
  * would be annotated), each hit recorded with its gate's decision, each send delivered and its delivery recorded, and
- * then one annotation post on a second chain no pass waits on (ruling 5) - to the annotation lane
- * (src/annotator.ts, spec §16 H1), whose run comes back as one `annotated` record ({@link WatchHandle.noteAnnotated});
+ * then its posted alerts - an annotated hit that is a US price move (a why post: its headlines from the Market since
+ * its reference close and its 8-K filings of the last 24 h, each read bounded at {@link WHY_READ_MS}) or has a plan to
+ * check; an A-share move with no plan is posted nothing - on a buffer that a second chain no pass waits on (ruling 5)
+ * drains: it waits for the lane to be idle, then posts the whole buffer as one to the annotation lane (src/annotator.ts,
+ * spec §16 H1), so passes that come while a turn runs are folded into one post and one `annotation` record; a batch
+ * the hour's cap held gets no post. The lane's run comes back as one `annotated` record ({@link WatchHandle.noteAnnotated});
  * a send that dispose cuts off is recorded `{ undelivered: "the face shut down" }`, never delivered. A failed poll - rejected, or every quote
  * `unavailable` - judges nothing and says so once per session date per market; a watched symbol unpriced on its
  * first {@link UNPRICED_POLLS} polls of a session date says so once (ruling 16).
@@ -52,7 +58,9 @@
 import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
-import { alertText, annotationPost, batchText, lateAlertText, lostAlertsLine, priceStamp, stateBody, WATCH_LINES, type DeskStateView, type NearView } from "./alert-text.ts";
+import {
+  alertText, annotationPost, batchText, lateAlertText, lostAlertsLine, priceStamp, stateBody, WATCH_LINES, whyPost, type DeskStateView, type NearView, type WhyContext,
+} from "./alert-text.ts";
 import { listChannelDirs } from "./channels.ts";
 import {
   ALERTS_FILE, appendChain, clearMute, deskDir, deskTime, EVENTS_FILE, FILINGS_FILE, readMuteState, readOffState, readRecords, WATCH_LEASE_FILE,
@@ -63,18 +71,20 @@ import {
 } from "./desk-book.ts";
 import type { DeliverOpts, DeliverResult, DeskConversation, PostResult } from "./desk-conversation.ts";
 import type { DeskClock, DeskTurnRecord } from "./desk-session.ts";
-import { createEdgar, type Edgar, type EdgarFetch, type EdgarResult } from "./edgar.ts";
+import { createEdgar, type Edgar, type EdgarFetch, type EdgarResult, type Filing } from "./edgar.ts";
 import { bjDate, etDate } from "./et.ts";
 import {
   allRefused, baselineFrom, diffFilings, FILINGS_ABORT_MS, FILINGS_LOOKBACK_DAYS, FILINGS_STOP_AFTER_MS, filingSymbols, inFilingWindow, isFilingRecord, pollDue,
   seenKey, type Baseline, type FilingRecord,
 } from "./filings.ts";
 import { HttpError } from "./http.ts";
-import type { DayAnswer, DeskCalendars, MarketSession } from "./market-clock.ts";
+import { nyInstant, sessionBefore, sessionFor, xnysPrevious, xnysWindow, type DayAnswer, type DeskCalendars, type MarketSession } from "./market-clock.ts";
+import type { NewsAnswer } from "./market-news.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
 import { idOf, type Market } from "./symbols.ts";
 import {
-  alertId, batchDue, batchId, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, passId, priceKeys, rebuildDay, snapOf, takeBatch, watchQuoteOf,
+  AFTER_HOURS_MS, alertId, batchDue, batchId, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, passId, priceKeys, REBUILD_WINDOW_MS, rebuildDay, snapOf,
+  takeBatch, watchQuoteOf,
   type AlertAnnotation, type AlertBatch, type AlertDelivered, type AlertHit, type AlertRecord, type Hit, type PriceKey, type WatchDay, type WatchQuote,
 } from "./watch-eval.ts";
 import { XSHG_COVERED } from "./xshg-clock.ts";
@@ -89,9 +99,10 @@ export const WATCH_CN_POLL_MS = 10_000;
 export const WATCH_US_MAX = 40;
 /** The most A-share symbols polled. */
 export const WATCH_CN_MAX = 60;
-/** How long before a market's open its polls begin. */
+/** How long before an A-share open its polls begin. A US share's begin at 04:00 ET of the session date. */
 export const WATCH_LEAD_MS = 600_000;
-/** How long after its close they go on. */
+/** How long after an A-share close they go on. A US share's go on to the close plus 4 h (20:00 ET, or 17:00 on an
+ * early close): src/watch-eval.ts `AFTER_HOURS_MS`. */
 export const WATCH_TAIL_MS = 60_000;
 /** How often the face that watches rewrites its lease's beat. */
 export const LEASE_BEAT_MS = 30_000;
@@ -108,11 +119,20 @@ export const UNPRICED_POLLS = 3;
 
 /** How near a level is "near", in percent of its last price (ruling 6). */
 const NEAR_PCT = 2;
+/** How long a why post waits for each of its reads - the headlines, the filings - before it says so and goes. */
+export const WHY_READ_MS = 10_000;
+/** What a why post says of its filings with no SEC contact. */
+export const WHY_NO_SEC = "no SEC contact: ALPHA_EDGAR_USER_AGENT is not set";
+/** The forms a why post's filings read asks for, whatever the filing rules name. */
+const WHY_FORMS: readonly string[] = ["8-K", "8-K/A"];
+/** How far back a why post's filings reach, by their acceptance time. */
+const WHY_FILINGS_MS = 24 * 3_600_000;
 /** How long `dispose` waits for the passes, the posts and the chains. */
 const DISPOSE_WAIT_MS = 2_000;
 /** How many alerts the status's `recent` lists. */
 const RECENT_MAX = 10;
-/** How long the watch keeps its records and its dated line memories in memory: the rebuild's 36 hours, with room. */
+/** How long the watch keeps its records and its dated line memories in memory, for a reply's context and the
+ * orphans; the crossing state is rebuilt from {@link REBUILD_WINDOW_MS} of the ledger, apart from it. */
 const MEMORY_MS = 48 * 3_600_000;
 const DAY_MS = 86_400_000;
 const BIN = "gravit-face";
@@ -121,8 +141,11 @@ const MARKETS: readonly Market[] = ["us", "cn"];
 /* ---------- the shapes ---------- */
 
 /** What {@link installWatch} needs. `quotes` is the one source for both markets; `calendars` the desk's two;
- * `deliver`, `post` and `budget` the desk conversation's; `edgar`, SEC's fetch and contact - none, no filings;
- * `pid` this face's (`process.pid`), `alive` whether a pid lives (`process.kill(pid, 0)`), `tickMs`, `log`. */
+ * `deliver` and `budget` the desk conversation's, `post` and `idle` the annotation lane's (src/annotator.ts) - with no
+ * `idle` a post waits for nothing but the one before it; `news` the Market's headline read (src/market-news.ts), for
+ * a why post - none, each symbol's headlines unavailable; `edgar`, SEC's fetch and contact - none, no filings and a
+ * why post's filings unavailable; `pid` this face's (`process.pid`), `alive` whether a pid lives
+ * (`process.kill(pid, 0)`), `tickMs`, `log`. */
 export interface WatchDeps {
   home: string;
   root: string;
@@ -133,6 +156,8 @@ export interface WatchDeps {
   post: DeskConversation["post"];
   budget: () => Promise<BudgetState>;
   edgar?: { fetch: EdgarFetch; userAgent: string };
+  news?: (symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>>;
+  idle?: () => Promise<void>;
   pid?: number;
   alive?: (pid: number) => boolean;
   tickMs?: number;
@@ -320,6 +345,10 @@ interface BookFile<T> {
  * window or cooldown). */
 type Pending = { record: Omit<AlertHit, "decision" | "suppressed" | "id">; pre?: "window" | "cooldown" };
 
+/** A pass's posted alerts waiting for the annotation lane: its pass, its hits, the message its post replies to, and
+ * whether any of its hits is an urgent rule's. */
+type PostEntry = { pass: string; hits: AlertHit[]; replyTo: string | undefined; urgent: boolean };
+
 /* ---------- small helpers ---------- */
 
 const iso = (ms: number): string => new Date(ms).toISOString();
@@ -434,6 +463,8 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   const lastStart: Partial<Record<Market, number>> = {};
   /** Each market's watched symbols by session date: how many polls answered, and whether one priced it. */
   const unpriced: Record<Market, { date?: string; seen: Map<string, { polls: number; priced: boolean }> }> = { us: { seen: new Map() }, cn: { seen: new Map() } };
+  /** Each market's repeats its keys' cooldowns swallowed on a session date, as this run counted them. */
+  const repeats: Record<Market, { date?: string; n: number }> = { us: { n: 0 }, cn: { n: 0 } };
   const filings: WatchStatus["filings"] = { state: "off", symbols: 0, aShares: 0, seeded: 0 };
   let filingsInflight = false;
   let filingsLastStart: number | undefined;
@@ -765,8 +796,10 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     mk.session = { date: session.date, open: session.open, close: session.close };
     if (uncovered) mk.uncovered = true;
     else delete mk.uncovered;
-    const from = Date.parse(session.open) - WATCH_LEAD_MS;
-    const to = Date.parse(session.close) + WATCH_TAIL_MS;
+    /* a US share from 04:00 ET of its date to the close plus 4 h; an A share ten minutes before the open to a minute
+     * after the close */
+    const from = m === "us" ? Date.parse(nyInstant(session.date, 4, 0)) : Date.parse(session.open) - WATCH_LEAD_MS;
+    const to = Date.parse(session.close) + (m === "us" ? AFTER_HOURS_MS : WATCH_TAIL_MS);
     mk.state = at < from ? "waiting" : at >= to ? "after-close" : "polling";
     if (mk.state !== "polling") return answer;
     if (uncovered) sayOnce(`pastTable:${session.date}`, WATCH_LINES.cnPastTable(XSHG_COVERED.through), { at });
@@ -778,7 +811,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       lastStart[m] = at;
       mk.lastPollAt = iso(at);
       const watched = symbols.slice(0, max);
-      const sessions = m === "us" ? { us: session } : { cn: uncovered ? { ...session, uncovered: true as const } : session };
+      const sessions = m === "us" ? { us: { ...session, prev: prevSession(session.date) } } : { cn: uncovered ? { ...session, uncovered: true as const } : session };
       track((async () => {
         try {
           await pricePass(m, watched, session, sessions, at);
@@ -790,6 +823,13 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       })());
     }
     return answer;
+  }
+
+  /** The date of the US session before `date`: the calendar's window's, else the XNYS rules' (the calendar's window
+   * starts on the date it was asked for, so it rarely holds the one before); the date itself, as a last resort, when
+   * neither can say - every print of the session then measures from one reference. */
+  function prevSession(date: string): string {
+    return sessionBefore(deps.calendars.us.window(), date) ?? xnysPrevious(date) ?? date;
   }
 
   /** A failed poll: its reason the market's `lastError`, said once per session date. */
@@ -836,7 +876,25 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       }
     }
     const watchedSet = new Set(watched);
-    const hits = evaluatePass(day, keys.filter((k) => k.market === m && watchedSet.has(k.symbol)), quotes, sessions, at);
+    const judged = keys.filter((k) => k.market === m && watchedSet.has(k.symbol));
+    const before = new Map(judged.map((k) => [k.key, day.keys.get(k.key)] as const));
+    const counts = new Map([...before].map(([key, kd]) => [key, kd?.repeats ?? 0] as const));
+    const hits = evaluatePass(day, judged, quotes, sessions, at);
+    /* the repeats this pass swallowed, on the session date it judged: a US key's reference is the previous close in
+     * pre-market and the session, so its day's repeats cannot be told by its reference */
+    let swallowed = 0;
+    for (const [key, kd] of before) {
+      const now = day.keys.get(key);
+      if (now !== undefined) swallowed += now.repeats - (now === kd ? (counts.get(key) ?? 0) : 0);
+    }
+    if (swallowed > 0) {
+      const r = repeats[m];
+      if (r.date !== session.date) {
+        r.date = session.date;
+        r.n = 0;
+      }
+      r.n += swallowed;
+    }
     if (hits.length === 0) return;
     const pass = passId();
     queueHits(pass, hits.map((h) => ({ record: priceRecord(h, pass, at) })), at);
@@ -848,12 +906,18 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     return h === undefined ? null : { qty: h.qty, avgCost: h.avgCost };
   };
 
+  /** Whether a sent alert gets a why turn (spec §5.3): a US price move, a `move` hit (labelled `gap` or not) or a
+   * `gap` rule's. */
+  const whyOf = (rec: AlertHit): boolean => rec.market === "us" && (rec.trigger.type === "move" || rec.trigger.type === "gap");
+
   /** A price hit's record, but for its id and decision. */
   function priceRecord(h: Hit, pass: string, at: number): Pending["record"] {
     return {
       t: iso(at), kind: "alert", pass, date: h.date, key: h.key.key, market: h.key.market, symbol: h.key.symbol, label: h.key.label,
       trigger: h.key.trigger, gap: h.gap, quote: snapOf(h.quote), holding: holdingOf(h.key.symbol), plan: h.key.plan, source: h.key.source,
-      annotate: h.key.annotate,
+      annotate: h.key.annotate, ref: h.ref,
+      ...(h.phase !== undefined ? { phase: h.phase } : {}),
+      ...(h.onePrint === true ? { onePrint: true as const } : {}),
       ...(h.key.urgent ? { urgent: true as const } : {}),
     };
   }
@@ -906,7 +970,10 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       for (const rec of sends) {
         /* dispose has begun: no deliver after it and no post, and each send left is recorded undelivered, so none
          * stays pending */
-        const note = rec.annotate ? (spent ? "budget" : "follows") : "none";
+        /* a why turn for a US price move; a plan check for another annotated hit with a plan; an A-share move with
+         * no plan is posted nothing (why-it-moved task 10), so nothing is said to follow, the budget or not */
+        const why = whyOf(rec);
+        const note = !rec.annotate || (!why && rec.plan === null) ? "none" : spent ? "budget" : why ? "why" : "follows";
         let result: DeliverResult;
         if (stopped) result = { undelivered: "the face shut down" };
         else {
@@ -930,34 +997,153 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         if (!("undelivered" in result)) delivered.push({ rec, result });
       }
       if (stopped) return;
-      const annotated = delivered.filter((d) => d.rec.annotate);
-      if (spent || annotated.length === 0) return;
-      /* the post replies to the first annotated alert delivered - none when the outlet queued it (ruling 16) */
-      const first = annotated[0];
+      /* posted: an annotated alert that gets a why turn or has a plan to check - the hits whose note was not "none" */
+      const posted = delivered.filter((d) => d.rec.annotate && (whyOf(d.rec) || d.rec.plan !== null));
+      if (spent || posted.length === 0) return;
+      /* the post replies to the first posted alert delivered - none when the outlet queued it (ruling 16) */
+      const first = posted[0];
       const replyTo = "sent" in first.result ? first.result.sent[0] : undefined;
-      queuePost(pass, annotated.map((d) => d.rec), replyTo);
+      queuePost({ pass, hits: posted.map((d) => d.rec), replyTo, urgent: posted.some((d) => d.rec.urgent === true) });
     });
   }
 
-  /** The pass's annotation post, on the post chain: its record, and a refused post's line as a reply once per ET date. */
-  function queuePost(pass: string, hits: AlertHit[], replyTo: string | undefined): void {
+  /** A pass's posted alerts waiting for the annotation lane (why-it-moved task 10), and whether a drain runs. */
+  const postBuffer: PostEntry[] = [];
+  let draining = false;
+
+  /** Put a pass's posted alerts on the buffer, and start the drain on the post chain unless one runs. The drain waits
+   * for the lane to be idle (`deps.idle`), takes the whole buffer, posts it as one ({@link postFolded}) and goes round
+   * again while entries wait - so the passes that come while a turn runs are folded into one post when it ends. No
+   * wait comes before a post when the lane is idle. */
+  function queuePost(entry: PostEntry): void {
+    postBuffer.push(entry);
+    if (draining) return;
+    draining = true;
     postChain = postChain.then(async () => {
+      try {
+        while (postBuffer.length > 0 && !stopped) {
+          await deps.idle?.().catch(() => {});
+          if (stopped) break;
+          const taken = postBuffer.splice(0);
+          try {
+            await postFolded(taken);
+          } catch (err) {
+            fail("post", err);
+          }
+        }
+      } finally {
+        draining = false;
+      }
+    }).catch((err: unknown) => { fail("post", err); });
+  }
+
+  /** One post over `entries`' hits, in order: the first entry's pass and reply, `urgent` if any entry's is - a why
+   * post when any hit is a US price move, else the plan check; then one annotation record naming every alert, and a
+   * refused post's line as a reply once per ET date. */
+  async function postFolded(entries: readonly PostEntry[]): Promise<void> {
+    const hits = entries.flatMap((e) => e.hits);
+    const { pass, replyTo } = entries[0]!;
+    const urgent = entries.some((e) => e.urgent);
+    let r: PostResult;
+    try {
+      const ctx = hits.some(whyOf) ? await whyContext(hits) : undefined;
       if (stopped) return;
       const at = clock.now();
-      let r: PostResult;
-      try {
-        r = await deps.post({ ...annotationPost(hits, pass, at), ...(replyTo === undefined ? {} : { replyTo }) });
-      } catch (err) {
-        r = { refused: "error", line: `the desk could not annotate this alert: ${errText(err)}` };
-      }
-      const done = clock.now();
-      const rec: AlertAnnotation = "opened" in r
-        ? { t: iso(done), kind: "annotation", pass, alerts: hits.map((h) => h.id), result: "opened", sessionId: r.sessionId }
-        : { t: iso(done), kind: "annotation", pass, alerts: hits.map((h) => h.id), result: "refused", reason: r.refused };
-      records.push(rec);
-      alerts.append(rec);
-      if ("refused" in r) sayOnce(`post:${etDate(new Date(done))}:${r.line}`, r.line, { at: done, ...(replyTo === undefined ? {} : { replyTo }) });
-    }).catch((err: unknown) => { fail("post", err); });
+      const body = ctx === undefined ? annotationPost(hits, pass, at) : whyPost(hits, pass, at, ctx);
+      r = await deps.post({ ...body, ...(replyTo === undefined ? {} : { replyTo }), ...(urgent ? { urgent: true } : {}) });
+    } catch (err) {
+      r = { refused: "error", line: `the desk could not annotate this alert: ${errText(err)}` };
+    }
+    const done = clock.now();
+    const rec: AlertAnnotation = "opened" in r
+      ? { t: iso(done), kind: "annotation", pass, alerts: hits.map((h) => h.id), result: "opened", sessionId: r.sessionId }
+      : { t: iso(done), kind: "annotation", pass, alerts: hits.map((h) => h.id), result: "refused", reason: r.refused };
+    records.push(rec);
+    alerts.append(rec);
+    if ("refused" in r) sayOnce(`post:${etDate(new Date(done))}:${r.line}`, r.line, { at: done, ...(replyTo === undefined ? {} : { replyTo }) });
+  }
+
+  /** `work`, or why not: a rejection's reason, or {@link WHY_READ_MS} on the clock passing - when its signal aborts. */
+  async function bounded<T>(what: string, work: (signal: AbortSignal) => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; reason: string }> {
+    const abort = new AbortController();
+    let timer: unknown;
+    const late = new Promise<{ ok: false; reason: string }>((done) => {
+      timer = clock.setTimeout(() => {
+        const reason = `the ${what} read passed ${WHY_READ_MS / 1000} s`;
+        abort.abort(new Error(reason));
+        done({ ok: false, reason });
+      }, WHY_READ_MS);
+    });
+    try {
+      const read = (async () => work(abort.signal))().then(
+        (value) => ({ ok: true as const, value }),
+        (err: unknown) => ({ ok: false as const, reason: `the ${what} read failed: ${errText(err)}` }),
+      );
+      return await Promise.race([read, late]);
+    } finally {
+      clock.clearTimeout(timer);
+    }
+  }
+
+  /** The close instant of the US session dated `date`: the calendar's, else the XNYS rules', else 16:00 ET. */
+  function closeOf(date: string): number {
+    const window = deps.calendars.us.window();
+    const session = window === undefined ? undefined : sessionFor(window, date);
+    if (session !== undefined && session !== "closed") return Date.parse(session.close);
+    try {
+      const rules = xnysWindow(date, 1).sessions[0];
+      if (rules !== undefined) return Date.parse(rules.close);
+    } catch {
+      /* not a date: the fallback below */
+    }
+    return Date.parse(nyInstant(date, 16, 0));
+  }
+
+  /** What a why post reads besides its alerts (spec §5.3): the US symbols' headlines since the earliest reference
+   * close of their price alerts, and their 8-K filings accepted in the last 24 h - each read bounded at
+   * {@link WHY_READ_MS}, a failure said in its place. An A share's headlines are said unavailable. */
+  async function whyContext(hits: readonly AlertHit[]): Promise<WhyContext> {
+    const usHits = hits.filter((h) => h.market === "us");
+    const symbols = [...new Set(usHits.map((h) => h.symbol))];
+    const closes = usHits.filter((h) => h.trigger.type !== "filing").map((h) => closeOf(h.ref ?? h.date)).filter(Number.isFinite);
+    const since = new Date(closes.length > 0 ? Math.min(...closes) : clock.now() - WHY_FILINGS_MS).toISOString();
+    const [news, filings] = await Promise.all([newsFor(symbols, since), filingsFor(symbols)]);
+    for (const h of hits) if (h.market !== "us" && !news.has(h.symbol)) news.set(h.symbol, { unavailable: "an A share: the headline read covers US shares" });
+    return { news, filings };
+  }
+
+  /** The symbols' headlines since `since`, or each one's reason none could be read. */
+  async function newsFor(symbols: readonly string[], since: string): Promise<Map<string, NewsAnswer>> {
+    const all = (unavailable: string): Map<string, NewsAnswer> => new Map(symbols.map((s) => [s, { unavailable }] as const));
+    if (symbols.length === 0) return new Map();
+    const read = deps.news;
+    if (read === undefined) return all("the face has no headline read");
+    const r = await bounded("headline", () => read(symbols, since));
+    return r.ok ? r.value : all(r.reason);
+  }
+
+  /** Each symbol's 8-K filings accepted in the last 24 h (one whose acceptance time is unknown kept, its filing date
+   * being inside the lookback), or its own error when EDGAR could not read it (`deadline` among them); or why none
+   * could be read at all: no SEC contact, or the read's failure or deadline. A symbol read cleanly with nothing fresh
+   * is left out - the post says `none`. */
+  async function filingsFor(symbols: string[]): Promise<WhyContext["filings"]> {
+    if (edgar === undefined) return { unavailable: WHY_NO_SEC };
+    const out = new Map<string, Filing[] | { unavailable: string }>();
+    if (symbols.length === 0) return out;
+    const now = clock.now();
+    const r = await bounded("EDGAR", (signal) => edgar.recentFilings(symbols, WHY_FORMS, daysBefore(etDate(new Date(now)), 1), { stopAfterMs: WHY_READ_MS, signal }));
+    if (!r.ok) return { unavailable: r.reason };
+    const fresh = r.value.filings.filter((f) => {
+      if (f.accepted === null) return true;
+      const t = Date.parse(f.accepted);
+      return Number.isFinite(t) && now - t <= WHY_FILINGS_MS;
+    });
+    for (const f of fresh) {
+      const had = out.get(f.symbol);
+      out.set(f.symbol, [...(Array.isArray(had) ? had : []), f]);
+    }
+    for (const e of r.value.errors) out.set(e.symbol, { unavailable: `EDGAR could not read it: ${e.error}` });
+    return out;
   }
 
   /** The batch step: the held alerts, once due, delivered as one line - or dropped under OFF or MUTE. */
@@ -1079,13 +1265,13 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         if (!inFilingWindow(f.accepted, answer, at)) pre = "window";
         else {
           const kd = day.keys.get(key);
-          if (kd !== undefined && kd.date === date && kd.lastHitAt !== undefined && at - kd.lastHitAt < rule.cooldownMs) pre = "cooldown";
+          if (kd !== undefined && kd.ref === date && kd.lastHitAt !== undefined && at - kd.lastHitAt < rule.cooldownMs) pre = "cooldown";
         }
         if (pre === undefined) {
           /* a filing that reaches the gate starts its rule's cooldown; one outside the window or inside the cooldown
            * does not (the T9 review's ruling), as filingCooldowns reads the ledger back */
           const kd = day.keys.get(key);
-          day.keys.set(key, { date, alerted: true, repeats: kd?.date === date ? kd.repeats : 0, lastHitAt: at });
+          day.keys.set(key, { ref: date, alerted: true, repeats: kd?.ref === date ? kd.repeats : 0, lastHitAt: at });
         }
         pending.push({
           pre,
@@ -1112,7 +1298,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     const latest = new Map<string, number>();
     for (const r of read) {
       if (r.kind !== "alert" || !r.key.startsWith("filing:")) continue;
-      if (rebuilt.keys.get(r.key)?.date !== r.date || r.suppressed === "cooldown" || r.suppressed === "window") continue;
+      if (rebuilt.keys.get(r.key)?.ref !== (r.ref ?? r.date) || r.suppressed === "cooldown" || r.suppressed === "window") continue;
       const at = Date.parse(r.t);
       if (Number.isFinite(at) && at > (latest.get(r.key) ?? Number.NEGATIVE_INFINITY)) latest.set(r.key, at);
     }
@@ -1165,10 +1351,13 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     if (!alertsRead) {
       try {
         const { records: read } = await readRecords(home, ALERTS_FILE, isWatchRecord);
+        /* the crossing state from the ledger's five days, so a long weekend keeps Friday's after-hours alert; the
+         * orphans, the reply context and the records kept from its 48 hours */
+        const back = [...read.filter((r) => at - Date.parse(r.t) <= REBUILD_WINDOW_MS).map(withStringIds), ...records];
         const merged = [...read.filter((r) => at - Date.parse(r.t) <= MEMORY_MS).map(withStringIds), ...records];
         const orphans = findOrphans(merged, at);
-        day = rebuildDay(merged, at, new Set(orphans.lost.map((r) => r.id)));
-        filingCooldowns(day, merged);
+        day = rebuildDay(back, at, new Set(orphans.lost.map((r) => r.id)));
+        filingCooldowns(day, back);
         records = merged;
         for (const r of merged) if (r.kind === "delivered") deliveries.set(r.id, r);
         alertsRead = true;
@@ -1323,8 +1512,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       if (r.decision === "send") today.sent += 1;
       else if (r.suppressed !== undefined) today.suppressed[r.suppressed] += 1;
     }
-    const marketOfKey = new Map(keys.map((k) => [k.key, k.market]));
-    for (const [key, kd] of day.keys) if (kd.date === date && (marketOfKey.get(key) ?? (key.startsWith("filing:") ? "us" : undefined)) === m) today.repeats += kd.repeats;
+    if (repeats[m].date === date) today.repeats = repeats[m].n;
     return today;
   }
 

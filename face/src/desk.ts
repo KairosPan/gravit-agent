@@ -82,7 +82,7 @@ import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import { createAnnotator, type Annotator } from "./annotator.ts";
 import { createDeskConversation, type ClaimsOn, type DeskConversation, type DeskConversationCtxLike } from "./desk-conversation.ts";
 import type { DeskClock, DeskSessionCtxLike, DeskSessionDeps, DeskSessionPersistenceLike, SessionEventsOn } from "./desk-session.ts";
-import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskGuardCtxLike } from "./desk-tools.ts";
+import { deskToolDefinitions, installDeskGuard, installDeskTools, type DeskFetch, type DeskGuardCtxLike } from "./desk-tools.ts";
 import { etDate, etDayStart, etTime } from "./et.ts";
 import { fencedGet, fencedPost, HttpError, isTrustedDataRequest } from "./http.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
@@ -94,6 +94,7 @@ import type { AccountPhoneStatus, PhoneClient } from "./phone.ts";
 import { DSH_PIN } from "./version.ts";
 import type { DeskCalendars } from "./market-clock.ts";
 import type { EdgarFetch } from "./edgar.ts";
+import type { NewsAnswer } from "./market-news.ts";
 import type { WatchHandle, WatchStatus } from "./watch.ts";
 
 /** Diagnostic label, the same string every other `${BIN}:`-prefixed line in this program uses
@@ -157,7 +158,10 @@ export interface TurnUsage {
  * (`queued`, oldest first: each one's key, the message's id, its text without the provenance or context, and when the
  * operator wrote it) and the phone turn under way (`cut`: its number, its message's key and when that was written) -
  * and a `desk-carried`, the boot that answered it: the carry's `t` (`of`), the texts it posted again and those it
- * skipped as already in the session (src/desk-conversation.ts). */
+ * skipped as already in the session (src/desk-conversation.ts). A `desk-fetch` is one `web_fetch` a desk agent made that
+ * reached dispatch (spec 2026-11-07 §5.6, charter A1 and D29): its session and the URL as the model asked it, cut at
+ * src/desk-tools.ts `DESK_FETCH_URL_MAX` characters - written whatever the fetch then answered, so the operator sees
+ * every page a desk turn opened (src/desk-tools.ts `installDeskGuard`'s fetch record). */
 export type DeskEvent =
   | { t: string; kind: "boot"; pid: number; version: string; deskEnabled: boolean }
   | { t: string; kind: "shutdown"; pid: number; code: number }
@@ -180,7 +184,8 @@ export type DeskEvent =
     t: string; kind: "desk-carry"; sessionId: string; queued: { key: string; text: string; at?: string }[];
     cut?: { turn: number; key?: string; at?: string };
   }
-  | { t: string; kind: "desk-carried"; of: string; posted: number; skipped: number };
+  | { t: string; kind: "desk-carried"; of: string; posted: number; skipped: number }
+  | { t: string; kind: "desk-fetch"; sessionId: string; url: string };
 
 /** Every kind {@link DeskEvent} has, and only those. A record over the union rather than a list,
  * so a kind added to the type and not here fails to compile instead of reading back as skipped. */
@@ -201,6 +206,7 @@ const KINDS: Readonly<Record<DeskEvent["kind"], true>> = {
   "watch-load": true,
   "desk-carry": true,
   "desk-carried": true,
+  "desk-fetch": true,
 };
 
 /** What a failure is reported as - in the append's failure line and the status's `ledgerError`:
@@ -480,12 +486,19 @@ function objectOf(line: string): object | undefined {
   return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
 }
 
-/** Whether a line's object is an event: a string `t` and a known `kind`. Only those two fields are
- * checked - the face is the file's one writer, and the rest of the shape is the writer's to keep. */
+/** Whether a line's object is an event: a string `t` and a known `kind` - and, for a `desk-fetch`, a string
+ * `sessionId` and `url`, the two fields the Desk view reads it for. Nothing else is checked - the face is the
+ * file's one writer, and the rest of the shape is the writer's to keep. */
 function isDeskEvent(x: unknown): x is DeskEvent {
   if (typeof x !== "object" || x === null || Array.isArray(x)) return false;
   const { t, kind } = x as { t?: unknown; kind?: unknown };
-  return typeof t === "string" && typeof kind === "string" && Object.hasOwn(KINDS, kind);
+  if (typeof t !== "string" || typeof kind !== "string" || !Object.hasOwn(KINDS, kind)) return false;
+  /* a fetch line is read for its session and its URL (the Desk view's pages): one without both is no record of a page */
+  if (kind === "desk-fetch") {
+    const { sessionId, url } = x as { sessionId?: unknown; url?: unknown };
+    return typeof sessionId === "string" && typeof url === "string";
+  }
+  return true;
 }
 
 /**
@@ -528,7 +541,7 @@ export async function readRecords<T>(
 
 /**
  * The current ledger's events, in file order, and how many lines were not events: {@link readRecords}
- * on {@link EVENTS_FILE}, a line being an event when it has a string `t` and a known `kind`.
+ * on {@link EVENTS_FILE}, a line being an event when it has a string `t` and a known `kind` ({@link isDeskEvent}).
  *
  * Reads `events.jsonl` only, never a rotated file - a rotation hands its last `desk-session` on
  * ({@link appendEvent}), and the runs and turns before it stay behind. An absent ledger is
@@ -1103,8 +1116,10 @@ export interface PhoneStatus {
  * (src/standing.ts `StandingStatus`), present only while a provider has one; `watch`, the watch's status
  * (src/watch.ts `WatchStatus`), present only while the watch runs; `phone`, the bridge's
  * state, present only when a provider is passed - {@link installDesk} always passes one, so the route
- * and `desk_state` always carry it. `ledgerError` is present only when the ledger could not be
- * read - its code, or its message when it has none - and `asleep` and `runs` are then empty,
+ * and `desk_state` always carry it; `fetchesToday`, today's `desk-fetch` lines ({@link fetchesSince}) -
+ * optional in the type as `budget` is, always set by {@link deskStatus}, and left out of `desk_state`'s answer
+ * (src/desk-tools.ts). `ledgerError` is present only when the ledger could not be
+ * read - its code, or its message when it has none - and `asleep`, `runs` and `fetchesToday` are then empty,
  * `turnsToday` zero, and the budget zeros and not spent, its `error` the same: an unreadable ledger is
  * named, never passed off as an empty one. */
 export interface DeskStatus {
@@ -1123,7 +1138,34 @@ export interface DeskStatus {
   standing?: StandingStatus;
   phone?: PhoneStatus;
   watch?: WatchStatus;
+  fetchesToday?: OpenedPage[];
   ledgerError?: string;
+}
+
+/** One page a desk agent opened, as `GET /data/desk/status` lists it in `fetchesToday`: a `desk-fetch` line's
+ * time, session (`unknown` when the call carried none) and URL. */
+export interface OpenedPage {
+  t: string;
+  sessionId: string;
+  url: string;
+}
+
+/** How many of today's opened pages the status lists, the newest kept. */
+export const FETCHES_TODAY_MAX = 50;
+
+/**
+ * Today's `desk-fetch` lines - those whose `t` is at or after `since` - newest first, at most
+ * {@link FETCHES_TODAY_MAX}.
+ * @param events - the ledger's events in file order, as {@link readEvents} returns them.
+ * @param since - the start of today in New York, as an ISO-8601 UTC string.
+ */
+export function fetchesSince(events: DeskEvent[], since: string): OpenedPage[] {
+  const fetches: OpenedPage[] = [];
+  for (let i = events.length - 1; i >= 0 && fetches.length < FETCHES_TODAY_MAX; i--) {
+    const e = events[i];
+    if (e.kind === "desk-fetch" && e.t >= since) fetches.push({ t: e.t, sessionId: e.sessionId, url: e.url });
+  }
+  return fetches;
 }
 
 /**
@@ -1135,7 +1177,8 @@ export interface DeskStatus {
  * on the strings, as it is for `turnsToday`: the `desk-turn` events whose `t` is at or after the
  * start of today in New York ({@link etDayStart}), counted, their tokens summed - a turn recorded
  * without usage counts and adds nothing. `budget` is the same turns' tokens against `dailyTokens`'
- * cap ({@link budgetState}). `runs` is {@link runsOf} over the whole current file.
+ * cap ({@link budgetState}). `fetchesToday` is {@link fetchesSince} from the same start of the day.
+ * `runs` is {@link runsOf} over the whole current file.
  * `off` is {@link readOffState}'s state unless it has expired: a pause past its `until` is no
  * longer in force, though its file waits for whoever lifts it. Never rejects on the ledger: a read
  * that fails ({@link readEvents} rejects on EACCES, EISDIR, EIO by design) is `ledgerError`, and the
@@ -1178,7 +1221,9 @@ export async function deskStatus(deps: {
   }
   const asleep = events.flatMap((e) =>
     e.kind === "asleep" && e.from >= since ? [{ from: e.from, to: e.to, gapMs: e.gapMs }] : []);
-  const today = turnsSince(events, new Date(etDayStart(at)).toISOString());
+  const dayStart = new Date(etDayStart(at)).toISOString();
+  const today = turnsSince(events, dayStart);
+  const fetchesToday = fetchesSince(events, dayStart);
   const { uncachedInputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = today.used;
   const turnsToday = { count: today.count, usage: { uncachedInputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } };
   const budget = budgetOf(today.used, deps.dailyTokens?.(), ledgerError);
@@ -1201,6 +1246,7 @@ export async function deskStatus(deps: {
     ...(standing === undefined ? {} : { standing }),
     ...(deps.phone === undefined ? {} : { phone: deps.phone() }),
     ...(watch === undefined ? {} : { watch }),
+    fetchesToday,
     ...(ledgerError === undefined ? {} : { ledgerError }),
   };
 }
@@ -1571,9 +1617,10 @@ export interface DeskHandle {
   dispose(code: number): Promise<void>;
 }
 
-/** An alert's annotation turn's deadline (P3-12): 90 s from its own `turn/start` in the annotation lane
- * (src/annotator.ts), then the turn is cut with its own line as a reply. */
-export const ALERT_DEADLINE_MS = 90_000;
+/** An alert's annotation turn's deadline (P3-12; 240 s since the why-it-moved plan, room for a US move's look at the
+ * news): 240 s from its own `turn/start` in the annotation lane (src/annotator.ts), then the turn is cut with its own
+ * line as a reply. */
+export const ALERT_DEADLINE_MS = 240_000;
 
 /** The watch's timers: the wall clock, `unref`'d, so the watch never holds the process open. */
 const watchClock = (now: () => number): DeskClock => ({
@@ -1596,7 +1643,8 @@ const watchClock = (now: () => number): DeskClock => ({
  * anchored on `root`, its secrets taken from `process.env` now: every desk agent's `write`, `edit`
  * or `str_replace_editor` of an instruction file, its read outside `root` or of a key file, and any
  * call of its that carries a secret are denied before they run - and, without a `root`, every desk
- * write and read. With the desk on, `ready`
+ * write and read; and, with it, the fetch record: every desk agent's `web_fetch` that reaches dispatch is a
+ * `desk-fetch` line, stamped `now()`, the desk on or off. With the desk on, `ready`
  * is the `boot` event's append - stamped `bootedAt`, which is
  * `now()` at this call and the status's uptime origin - and the sleep watch starts at once, writing
  * into the ledger. Given `root`, `route`, `sessionCtx` and `installModelSelection`
@@ -1654,8 +1702,11 @@ const watchClock = (now: () => number): DeskClock => ({
  *   clock, calendar (the XNYS one), calendars (either market's), script runner, builtins, tick and grace;
  *   `alertDeadlineMs`, an alert's annotation turn's deadline, {@link ALERT_DEADLINE_MS} when absent - a test seam;
  *   `watchRow`, the watch's switch and seams - its clock (the wall clock, `unref`'d), tick, calendars (over the
- *   schedule's), whether a pid lives, and `edgar`, SEC's fetch and contact: `null` for none, absent for the face's
- *   own, the global `fetch` with `ALPHA_EDGAR_USER_AGENT` when that is set; `log`,
+ *   schedule's), whether a pid lives, `edgar`, SEC's fetch and contact: `null` for none, absent for the face's
+ *   own, the global `fetch` with `ALPHA_EDGAR_USER_AGENT` when that is set - the watch's filings poll and its why
+ *   posts' filings read both use it - and `news`, a why post's headline read: `null` for none, absent for the
+ *   Market's (src/market-news.ts `marketNews`, loaded with the watch); the watch's posts wait on the annotation
+ *   lane's `idle`, so passes that come while a turn runs fold into one post; `log`,
  *   where every line of the desk's goes - the guard's, its line at install naming what the secret
  *   check covers included, the tools', the ledger's, the conversation's, the bridge's and the clock's -
  *   stderr when absent, as main.ts leaves it; tests pass their own, or one that drops the line.
@@ -1685,6 +1736,7 @@ export function installDesk(
       tickMs?: number;
       calendars?: Partial<DeskCalendars>;
       edgar?: { fetch: EdgarFetch; userAgent: string } | null;
+      news?: ((symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>>) | null;
       alive?: (pid: number) => boolean;
     };
     log?: (line: string) => void;
@@ -1711,7 +1763,10 @@ export function installDesk(
     watch: () => watch?.status(),
   };
   registerDeskRoutes(webServer, status);
-  const removeGuard = deps.ctx === undefined ? async () => {} : installDeskGuard(deps.ctx, deps.root, { log });
+  /* every desk web_fetch that reaches dispatch is a desk-fetch line, the desk on or off (spec 2026-11-07 §5.6) */
+  const recordFetch = ({ sessionId, url }: DeskFetch): Promise<void> =>
+    appendEvent(home, { t: new Date(now()).toISOString(), kind: "desk-fetch", sessionId, url }, { log });
+  const removeGuard = deps.ctx === undefined ? async () => {} : installDeskGuard(deps.ctx, deps.root, { log, recordFetch });
   const removeTools = deps.ctx === undefined || deps.quotes === undefined ? () => {} : installDeskTools(deps.ctx, deskToolDefinitions({
     quotes: deps.quotes,
     readState: () => deskStatus(status),
@@ -1834,6 +1889,8 @@ export function installDesk(
       const userAgent = process.env.ALPHA_EDGAR_USER_AGENT;
       const edgar = watchRow.edgar === null ? undefined
         : watchRow.edgar ?? (userAgent ? { fetch: globalThis.fetch as EdgarFetch, userAgent } : undefined);
+      const news = watchRow.news === null ? undefined : watchRow.news ?? (await import("./market-news.ts")).marketNews();
+      if (disposing !== undefined) return undefined;
       const handle = watchModule.installWatch({
         home,
         root: wiring?.root ?? "",
@@ -1842,8 +1899,10 @@ export function installDesk(
         clock: watchRow.clock ?? watchClock(now),
         deliver: (text, opts) => conversation.deliver(text, opts),
         post: (input) => annotator.post(input),
+        idle: () => annotator.idle(),
         budget: () => readBudget(home, now(), schedule?.dailyTokens()),
         ...(edgar === undefined ? {} : { edgar }),
+        ...(news === undefined ? {} : { news }),
         ...(watchRow.alive === undefined ? {} : { alive: watchRow.alive }),
         ...(watchRow.tickMs === undefined ? {} : { tickMs: watchRow.tickMs }),
         log,

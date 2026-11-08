@@ -1,7 +1,10 @@
 // face/src/desk-tools.ts
 /** The desk's two tools: `desk_quotes`, the price now, and `desk_state`, what the desk knows about itself
  * (docs/superpowers/specs/2026-10-19-always-on-gravit-design.md §5.3, §8). Every agent on the `gravit-desk`
- * preset has them; no other agent does.
+ * preset has them; no other agent does. Beside them each desk agent gets dsh's own `web_fetch`
+ * (`@deepseek-ai/dsh-tool-web` `applyWebFetchTool`; spec 2026-11-07 §5.6, charter A1 and D29): the tree registers
+ * none (src/policy.ts D6 keeps `tool-web`'s `fetch` off) but leaves the http fetch provider on, so the desk alone
+ * opens pages - Gravit's other sessions, the bots and the roles never see the tool.
  *
  * WHERE THEY REGISTER: into each desk agent's OWN tool layer, from one root `agent/created` listener and
  * one sweep of the agents already live ({@link installDeskTools}). The desk's preset carries an allow mask
@@ -10,7 +13,11 @@
  * `tools.restrict` refuses to name a tool its scope does not inherit. An agent's own registrations are
  * the one layer no restriction filters (dsh-tools `view`). So `DESK_ALLOW` does not list these two,
  * Gravit's agents never see them, and the global view - `/data/plugins.json` - never lists them, as with
- * the role tools. They unwind with the agent.
+ * the role tools. They unwind with the agent. `web_fetch` lands in the same layer through a child plugin of the
+ * agent's context that injects `web` ({@link deskWebFetchLayer}): the agent's context reaches `tools` and
+ * `systemPrompt` through the agent loop's injects, but no fiber above it injects `web`, and cordis refuses a service a
+ * context did not inject. The child inherits the agent's scope, so the tool and its prompt section are the agent's
+ * own, and it is disposed with the agent.
  *
  * WHAT THEY CLOSE OVER: process state main.ts owns, as `agent_<bin>` and `dispatch` close over theirs
  * (src/agents.ts, src/room.ts) - the quote source main.ts creates once over the Market's reads
@@ -28,7 +35,8 @@
  *
  * THE GUARD. This module also holds the desk's guard ({@link installDeskGuard}): one root `tools/pre-execute`
  * listener, and a `tools.guard` behind it that no listener can talk out of a denial, that judge every call a desk
- * agent makes, in three checks, before it runs:
+ * agent makes, in three checks, before it runs - and, beside them, the fetch record, one root `tools/execute`
+ * listener that writes every desk `web_fetch` that reached dispatch into the ledger:
  * - the write check ({@link deskWriteDecision}) denies a `write`, `edit` or `str_replace_editor` (a `view`
  *   excepted) whose path names an instruction file, a project root or a skill root (src/desk-names.ts
  *   `FENCE_NAMES`) at any depth below the repository root, or below a path's common ancestor with it - and every
@@ -43,7 +51,8 @@
  * - the secret check ({@link deskSecretDecision}) denies any call, of any tool, whose arguments carry the value of
  *   a key, password, secret or token in the face's environment ({@link deskSecrets}): to DeepSeek's search, to an
  *   MCP server, or to a file.
- * src/desk.ts `installDesk` installs it beside the tools, anchored on its `root`. The phone's client
+ * The secret check is what keeps a key out of a URL `web_fetch` opens. src/desk.ts `installDesk` installs the guard
+ * beside the tools, anchored on its `root`, its fetch record writing `desk-fetch` lines. The phone's client
  * (src/phone.ts) is the second line on the way out: it redacts the same secrets from everything it sends.
  *
  * MODULE WEIGHT: the preset id, the guard's names and their fold come from src/desk-names.ts, a leaf, not from
@@ -51,7 +60,9 @@
  * desk` and scripts/service.ts too - and src/desk-preset.ts would bring src/roles.ts, src/bots.ts and
  * js-yaml with it. The guard adds `node:crypto` (a session's spill directory is named by a hash of its id),
  * `node:fs`, `node:os` (the temp directory spills lie under) and `node:path`, all built in, which the face loads
- * already.
+ * already. `web_fetch` adds `@deepseek-ai/dsh-tool-web`, which brings dsh-tools and turndown - some tens of
+ * milliseconds on a load of this module that runs no agent (`npm run desk`, scripts/service.ts), and nothing in a
+ * face, which has loaded them already.
  *
  * Both tools follow the call's cancellation: a cancelled call settles at once. What it started runs on - the
  * proxy's read is shared with every other reader and keeps its own deadline, so it is not one call's
@@ -62,6 +73,8 @@ import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import type { Context } from "@deepseek-ai/cordis";
+import { applyWebFetchTool, DEFAULT_FETCH_MAX_OUTPUT_CHARS, DEFAULT_WEB_TOOL_TIMEOUT_MS } from "@deepseek-ai/dsh-tool-web";
 import { agentFileNameOf, DESK_PRESET, fenceNameOf, foldName, isDotName, type AgentFileName, type FenceName } from "./desk-names.ts";
 import type { DeskStatus } from "./desk.ts";
 import { bjStamp, etClock, etDate } from "./et.ts";
@@ -102,10 +115,14 @@ export interface DeskToolDeps {
 }
 
 /** An agent as {@link installDeskTools} sees it: its id, for the log, and its own context, which the
- * preset registry reads and the tools register through. */
+ * preset registry reads, the tools register through, and cordis's `inject` starts `web_fetch`'s child plugin in
+ * ({@link deskWebFetchLayer}). */
 export interface DeskAgentLike {
   id: string;
-  ctx: { tools: { register(definition: DeskToolDefinition): unknown } };
+  ctx: {
+    tools: { register(definition: DeskToolDefinition): unknown };
+    inject(deps: ["web"], callback: (layer: never) => void): unknown;
+  };
 }
 
 /** The slice of the booted ROOT context {@link installDeskTools} uses: the `agent/created` event, a
@@ -155,7 +172,8 @@ const QUOTE_SCHEMA = {
 /** `desk_state`'s value: the fields of {@link DeskStatus} every status carries - `runs` cut to the last
  * {@link STATE_RUNS} - with `runsInLedger`, and those it carries when there is something to say; `watch`
  * without its `marks` (every level's distance, the Markets rows' - the route carries them): its `near`, the
- * nearest levels, and its `recent`, the last alerts, say what the model needs (the old P3 plan's ruling 15). Open,
+ * nearest levels, and its `recent`, the last alerts, say what the model needs (the old P3 plan's ruling 15). Never
+ * `fetchesToday`, the pages the desk opened today: the operator's to read on the Desk view, not the model's. Open,
  * so a field the status gains later is no failure. */
 const STATE_SCHEMA = {
   type: "object",
@@ -298,8 +316,8 @@ const asJson = (_args: unknown, value: unknown): { type: "text"; text: string }[
  *   error. The model reads one line per quote ({@link quoteLine}), its time on its exchange's clock as the desk
  *   quotes one, or the `error` as it is.
  * - `desk_state` (`timeoutMs` 5,000): no parameters; answers `deps.readState()`'s status with `runs` cut
- *   to the last {@link STATE_RUNS} and `runsInLedger`, how many the ledger holds, and its `watch` without
- *   `marks` - the route `GET /data/desk/status` answers them all.
+ *   to the last {@link STATE_RUNS} and `runsInLedger`, how many the ledger holds, its `watch` without
+ *   `marks`, and no `fetchesToday` - the route `GET /data/desk/status` answers them all.
  * @param deps - the quote source, the status reader and the clock.
  */
 export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
@@ -371,7 +389,7 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
     output: { schema: STATE_SCHEMA, render: asJson },
     timeoutMs: 5_000,
     execute: (_args, exec) => untilCancelled(exec.signal, async () => {
-      const status = await deps.readState();
+      const { fetchesToday: _fetches, ...status } = await deps.readState();
       const value = { ...status, runs: status.runs.slice(-STATE_RUNS), runsInLedger: status.runs.length };
       if (status.watch === undefined) return value;
       const { marks: _marks, ...watch } = status.watch;
@@ -383,7 +401,21 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
 }
 
 /**
- * Give every `gravit-desk` agent `definitions`, in its own tool layer: one listener on the ROOT
+ * The child plugin that gives one desk agent dsh's own `web_fetch`, started in the agent's context with `web`
+ * injected: `applyWebFetchTool` registers the tool and its prompt section (`tool:web_fetch`, shown only where the
+ * tool is visible) through `layer`, which carries the agent's scope - so both are the agent's own, and are withdrawn
+ * when the agent's scope is disposed. The tool's budget and output cap are dsh's own defaults (30 s, 200,000
+ * characters); what it may reach is the http provider's (public HTTP(S) only - its address check skipped for a
+ * hop routed through a configured HTTP(S)_PROXY - no credentials in a URL, same-origin redirects only). Named,
+ * and one function for every agent, so cordis keeps one plugin record for all of them.
+ */
+function deskWebFetchLayer(layer: Context): void {
+  applyWebFetchTool(layer, DEFAULT_WEB_TOOL_TIMEOUT_MS, DEFAULT_FETCH_MAX_OUTPUT_CHARS);
+}
+
+/**
+ * Give every `gravit-desk` agent `definitions`, and dsh's `web_fetch` ({@link deskWebFetchLayer}), in its own tool
+ * layer: one listener on the ROOT
  * context's `agent/created`, which sees every agent's create and resume - the face's, a browser's
  * `session/create` with `agentPreset: "gravit-desk"`, a controller's resume - and, in the same tick, one
  * sweep of `ctx.agents.list()`, the agents already live. bootFace serves unary `/api` before main.ts
@@ -394,7 +426,8 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
  * throw or rejection there fails the agent's creation (src/bot-runtime.ts says the same). An agent whose
  * preset `ctx.agentPresets.composedPreset(agent.ctx)` reads as `gravit-desk` - the registry read late,
  * so a reloaded registry is followed - and that it has not seen gets `agent.ctx.tools.register(d)` for
- * each definition, by the listener or the sweep alike. It is marked seen first, in a `WeakSet`, so an
+ * each definition, then `web_fetch` through `agent.ctx.inject(["web"], ...)`, by the listener or the sweep
+ * alike. It is marked seen first, in a `WeakSet`, so an
  * agent both reach is equipped once, a registration that fails is logged once and never retried, and
  * none is made twice; any failure, the registry's and the sweep's own included, is one `gravit-face:`
  * line through `log`. An agent still composing when swept - its preset not mounted yet - is not marked,
@@ -417,6 +450,7 @@ export function installDeskTools(
       if (equipped.has(agent) || ctx.agentPresets.composedPreset(agent.ctx) !== DESK_PRESET) return;
       equipped.add(agent);
       for (const definition of definitions) agent.ctx.tools.register(definition);
+      agent.ctx.inject(["web"], deskWebFetchLayer as (layer: never) => void);
     } catch (error) {
       log(`${BIN}: the desk tools were not registered for agent ${agent.id}: ${messageOf(error)}`);
     }
@@ -962,6 +996,17 @@ export interface DeskGuardToolsLike {
   guard(check: (exec: DeskGuardExecution) => string | undefined): () => unknown;
 }
 
+/** The most characters of a URL a `desk-fetch` line keeps (src/desk.ts `DeskEvent`): the URL as the model asked it,
+ * cut here, so one fetch is one bounded line however long a URL a turn is led to ask for. */
+export const DESK_FETCH_URL_MAX = 2_000;
+
+/** One desk `web_fetch` as the fetch record hands it on: the calling session's id and the URL as asked, cut at
+ * {@link DESK_FETCH_URL_MAX}. */
+export interface DeskFetch {
+  sessionId: string;
+  url: string;
+}
+
 /** The context an `inject` callback runs in, as the backstop reads it: the tool registry, through `get`. */
 export interface DeskGuardInjectCtxLike {
   get(name: "tools"): unknown;
@@ -970,15 +1015,18 @@ export interface DeskGuardInjectCtxLike {
 /** The booted ROOT context as {@link installDeskGuard} uses it: {@link DeskToolsCtxLike}, since
  * `installDesk` hands both installers one context; the `tools/pre-execute` waterfall (dsh-tools), run before
  * every call dispatches - a listener takes the pending call and `next`, and answers a decision, and one that
- * answers without calling `next` vetoes every listener behind it, and the call; and cordis's `inject`, which
- * runs a callback in a fiber of its own once the services it names are live, again whenever one is replaced,
- * and withdraws what the callback registered when the fiber is disposed. */
+ * answers without calling `next` vetoes every listener behind it, and the call; the `tools/execute` waterfall
+ * (dsh-tools), run around the body of a call every pre-execute listener and every guard allowed - the fetch record
+ * hands its result on from `next()` untouched; and cordis's `inject`, which runs a callback in a fiber of its own
+ * once the services it names are live, again whenever one is replaced, and withdraws what the callback registered
+ * when the fiber is disposed. */
 export type DeskGuardCtxLike = DeskToolsCtxLike & {
   on(
     name: "tools/pre-execute",
     listener: (exec: DeskGuardExecution, next: () => Promise<DeskPreDecision>) => Promise<DeskPreDecision>,
     options?: { prepend?: boolean },
   ): () => unknown;
+  on(name: "tools/execute", listener: (exec: DeskGuardExecution, next: () => Promise<unknown>) => Promise<unknown>): () => unknown;
   inject(deps: ["tools"], callback: (ctx: DeskGuardInjectCtxLike) => void): { dispose(): Promise<void> };
 };
 
@@ -1023,10 +1071,22 @@ function uncheckedFor(exec: unknown): string {
 
 /** What {@link installDeskGuard} takes beside the context and the root: `log`, where a line is written (default
  * `console.error`), and `env`, the environment the secret check takes its secrets from, once, at install (default
- * `process.env`) - both for tests. */
+ * `process.env`) - both for tests; and `recordFetch`, given which the fetch record is installed and hands it each desk
+ * `web_fetch` that reached dispatch (src/desk.ts `installDesk` appends it as a `desk-fetch` line). It must not reject;
+ * the call waits for it. */
 export interface DeskGuardOptions {
   log?: (line: string) => void;
   env?: NodeJS.ProcessEnv;
+  recordFetch?: (fetch: DeskFetch) => Promise<void>;
+}
+
+/** The fetch record's line for a `web_fetch` it could not judge, and left unrecorded; it cannot throw. */
+function unrecordedLine(exec: DeskGuardExecution, error: unknown): string {
+  try {
+    return `${BIN}: desk: the desk's fetch record could not judge a web_fetch call from agent ${String(exec.agent?.id)}, and did not record it: ${shownError(error)}`;
+  } catch {
+    return `${BIN}: desk: the desk's fetch record could not judge a web_fetch call, and did not record it`;
+  }
 }
 
 /**
@@ -1066,13 +1126,23 @@ export interface DeskGuardOptions {
  * its own spilled results, and nobody else's ({@link deskReadDecision}).
  *
  * The fence (src/desk-session.ts) stays behind both, for a file another session plants.
+ *
+ * THE FETCH RECORD. Given `options.recordFetch`, a third registration: one listener on the ROOT context's
+ * `tools/execute` waterfall, which dsh runs around a call's body only once every pre-execute listener and every guard
+ * allowed it - so a fetch the guard refused, a secret in its URL, is never recorded, and every one that goes on is.
+ * For a desk agent's `web_fetch` - the desk's as the guard judges one, and, a registry that throws for a session
+ * created as the desk's, that session's word - it awaits `recordFetch({ sessionId, url })`, the session's id and the
+ * `url` argument as the model sent it, cut at {@link DESK_FETCH_URL_MAX}, then hands the call on, its result
+ * untouched. Nothing is refused for it. Every other call is handed on at the cost of a name check. A call it could not
+ * judge, or a `recordFetch` that rejects, is one line and the call goes on unrecorded.
  * @param ctx - the booted ROOT context.
  * @param root - the repository root the face runs from (src/desk.ts `installDesk`'s `root`, main.ts's
  *   `process.cwd()`), which every desk write is judged below and every desk read must stay inside; `undefined` when
  *   the face has none.
  * @param options - see {@link DeskGuardOptions}.
- * @returns the disposer. It removes the listener at once, then disposes the backstop's fiber, which withdraws
- *   the guard, and settles once it has. Each step is guarded on its own: a listener that cannot be removed, or a
+ * @returns the disposer. It removes the listener and the fetch record at once, then disposes the backstop's
+ *   fiber, which withdraws the guard, and settles once it has. Each step is guarded on its own: a listener that
+ *   cannot be removed, or a
  *   fiber that cannot be disposed, is one line, the other step runs regardless, and the disposer never rejects.
  */
 export function installDeskGuard(
@@ -1097,6 +1167,23 @@ export function installDeskGuard(
       /* the decision stands without its line */
     }
   };
+  /** Whether `exec`'s agent is the desk's: its preset as the registry composes it, read at the call, or the preset its
+   * session was created with. A registry that throws for a session created as the desk's throws on; for any other
+   * session it leaves the session's word - not the desk's - with one line. */
+  const fromDesk = (exec: DeskGuardExecution, agent: NonNullable<DeskGuardExecution["agent"]>): boolean => {
+    const header = agent.session.header;
+    let composed: string | undefined;
+    try {
+      composed = ctx.agentPresets.composedPreset(agent.ctx);
+    } catch (error) {
+      if (header.agentPreset !== DESK_PRESET) {
+        tell(exec, headerLine(exec, error));
+        return false;
+      }
+      throw error;
+    }
+    return composed === DESK_PRESET || header.agentPreset === DESK_PRESET;
+  };
   /** The guard's decision for `exec`, read afresh: `null` when the call is not its to judge, else the deny. Never throws. */
   const judge = (exec: DeskGuardExecution): DeskDeny | null => {
     try {
@@ -1108,18 +1195,8 @@ export function installDeskGuard(
       if (!writes && !reads && secret === null) return null;
       const agent = exec.agent;
       if (agent === undefined) return null;
+      if (!fromDesk(exec, agent)) return null;
       const header = agent.session.header;
-      let composed: string | undefined;
-      try {
-        composed = ctx.agentPresets.composedPreset(agent.ctx);
-      } catch (error) {
-        if (header.agentPreset !== DESK_PRESET) {
-          tell(exec, headerLine(exec, error));
-          return null;
-        }
-        throw error;
-      }
-      if (composed !== DESK_PRESET && header.agentPreset !== DESK_PRESET) return null;
       if (writes || reads) {
         const cwd: unknown = header.cwd;
         if (typeof cwd !== "string") throw new Error("its session has no cwd");
@@ -1142,6 +1219,39 @@ export function installDeskGuard(
     : `${BIN}: desk: the secret check covers ${covered.join(", ")}`);
   if (root === undefined) tell(undefined, `${BIN}: desk: the desk guard was given no repository root; every desk write and read will be denied, unjudged`);
   const off = ctx.on("tools/pre-execute", async (exec, next) => judge(exec) ?? next(), { prepend: true });
+  /** The fetch record's `{ sessionId, url }` for `exec` when it is a desk agent's `web_fetch`, else `undefined`. Never throws. */
+  const fetchOf = (exec: DeskGuardExecution): DeskFetch | undefined => {
+    try {
+      if (exec?.name !== "web_fetch" || exec.agent === undefined) return undefined;
+      let desk: boolean;
+      try {
+        desk = fromDesk(exec, exec.agent);
+      } catch {
+        /* the registry threw for a session created as the desk's: the session's word stands */
+        desk = true;
+      }
+      if (!desk) return undefined;
+      const id: unknown = exec.agent.session.header.id;
+      const url: unknown = (exec.arguments as { url?: unknown } | null | undefined)?.url;
+      return { sessionId: typeof id === "string" ? id : "unknown", url: (typeof url === "string" ? url : String(url)).slice(0, DESK_FETCH_URL_MAX) };
+    } catch (error) {
+      tell(exec, unrecordedLine(exec, error));
+      return undefined;
+    }
+  };
+  const recordFetch = options.recordFetch;
+  /* the record sits at execute, not pre-execute: the backstop can still deny a call every pre-execute listener let go */
+  const offFetch = recordFetch === undefined ? undefined : ctx.on("tools/execute", async (exec, next) => {
+    const fetch = fetchOf(exec);
+    if (fetch !== undefined) {
+      try {
+        await recordFetch(fetch);
+      } catch (error) {
+        tell(undefined, `${BIN}: desk: a desk web_fetch of ${fetch.url} was not recorded: ${shownError(error)}`);
+      }
+    }
+    return next();
+  });
   const backstop = ctx.inject(["tools"], function deskGuardBackstop(injected) {
     const tools = injected.get("tools") as DeskGuardToolsLike | undefined;
     if (tools === undefined) throw new Error(`${BIN}: desk: the tools service vanished before the desk guard's backstop armed`);
@@ -1152,6 +1262,11 @@ export function installDeskGuard(
       off();
     } catch (error) {
       tell(undefined, `${BIN}: desk: the desk guard's listener could not be removed: ${shownError(error)}`);
+    }
+    try {
+      offFetch?.();
+    } catch (error) {
+      tell(undefined, `${BIN}: desk: the desk's fetch record could not be removed: ${shownError(error)}`);
     }
     try {
       await backstop.dispose();

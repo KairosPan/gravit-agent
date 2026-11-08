@@ -6,7 +6,8 @@ import { isRefusal, type Refusal } from "../../src/core/errors.ts";
 import type { ExchangeClient, OpenExchange } from "../../src/live/exchange.ts";
 import { exchangeTickers, kalshiPublic, polymarketPublic, PUBLIC_HOSTS } from "../../src/live/public-markets.ts";
 import type { Http } from "../../src/live/types.ts";
-import { CHINA_SEARCH_WAIT_MS, historyAsk, marketReads, mountReads, type CandlesView } from "../../src/reads.ts";
+import { CHINA_SEARCH_WAIT_MS, historyAsk, marketReads, mountReads, NEWS_PER_SYMBOL, type CandlesView } from "../../src/reads.ts";
+import type { Headline, NewsSource } from "../../src/live/news.ts";
 import { CHINA_NOTE, chinaSource, type ChinaHistory, type ChinaMarket, type ChinaRead, type ChinaSource, type ChinaStatus } from "../../src/live/china.ts";
 import type { CnHttp, CnReply } from "../../src/live/cn-http.ts";
 import { historyUrl } from "../../src/live/cn-history.ts";
@@ -803,5 +804,81 @@ describe("the hold-back reaches the market's reads", () => {
     const c = await r.candles("geo", "BTC/USD", "1h", {});
     expect(isRefusal(c) && c.code).toBe("E_VENUE_GEOBLOCKED");
     expect(geo.listings + geo.stats - before).toBe(0);
+  });
+});
+
+describe("the market's headline read, GET /api/news", () => {
+  /** twelve headlines a symbol, an hour apart, the newest at 2026-11-07T12:00Z; ZZZZ's feed refuses */
+  const headlinesOf = (sym: string): Headline[] =>
+    Array.from({ length: 12 }, (_, i) => ({ time: new Date(Date.parse("2026-11-07T12:00:00Z") - i * 3_600_000).toISOString(), outlet: "Reuters", title: `${sym} story ${i}`, url: `https://www.nasdaq.com/articles/${sym.toLowerCase()}-${i}` }));
+  const fakeNews: NewsSource = { headlines: async (sym) => (sym === "ZZZZ" ? no("E_VENUE_REJECTED", { venue: "nasdaq-news", message: "Nasdaq's news feed refused the request (HTTP 403)" }) : headlinesOf(sym)) };
+  async function newsMarket() {
+    const core = createMarketCore({ news: fakeNews });
+    const srv = await startMarketServer({ port: 0, mount: (app) => mountReads(app, core, marketReads(core)) });
+    servers.push(srv);
+    return async (path: string) => {
+      const r = await fetch(`${srv.url}${path}`);
+      return { status: r.status, body: (await r.json()) as Record<string, any> };
+    };
+  }
+
+  it("GET /api/news answers each symbol at most ten headlines since the time asked", async () => {
+    expect(NEWS_PER_SYMBOL).toBe(10);
+    const get = await newsMarket();
+    const all = await get("/api/news?symbols=INTC,CRWV");
+    expect(all.status).toBe(200);
+    expect(all.body.ok).toBe(true);
+    expect(Object.keys(all.body.news).sort()).toEqual(["CRWV", "INTC"]);
+    expect(all.body.news.INTC).toHaveLength(10);
+    expect(all.body.news.INTC[0]).toEqual(headlinesOf("INTC")[0]);
+    expect(all.body.unavailable).toBeUndefined();
+    // since 08:00Z: the five from 08:00 to 12:00, the one at 08:00 itself among them
+    const since = await get("/api/news?symbols=INTC&since=2026-11-07T08:00:00Z");
+    expect((since.body.news.INTC as Headline[]).map((h) => h.time)).toEqual(["2026-11-07T12:00:00.000Z", "2026-11-07T11:00:00.000Z", "2026-11-07T10:00:00.000Z", "2026-11-07T09:00:00.000Z", "2026-11-07T08:00:00.000Z"]);
+    // an offset is a time too: 03:00-05:00 is 08:00Z
+    const offset = await get(`/api/news?symbols=INTC&since=${encodeURIComponent("2026-11-07T03:00:00-05:00")}`);
+    expect(offset.body.news.INTC).toHaveLength(5);
+    // a symbol whose feed refuses is under unavailable, with the refusal's words; a repeated symbol is asked once
+    const mixed = await get("/api/news?symbols=INTC,ZZZZ,INTC");
+    expect(mixed.status).toBe(200);
+    expect(Object.keys(mixed.body.news)).toEqual(["INTC"]);
+    expect(mixed.body.unavailable).toEqual({ ZZZZ: "Nasdaq's news feed refused the request (HTTP 403)" });
+    // BRK.B is a US ticker by the Market's rule
+    expect((await get("/api/news?symbols=BRK.B")).status).toBe(200);
+  });
+
+  it("GET /api/news refuses a bad symbol, more than ten symbols, or a since that is not a time, with 400", async () => {
+    const get = await newsMarket();
+    for (const path of [
+      "/api/news",
+      "/api/news?symbols=",
+      "/api/news?symbols=intc",
+      "/api/news?symbols=INTC,TOOLONG",
+      "/api/news?symbols=600519",
+      "/api/news?symbols=INTC,,CRWV",
+      `/api/news?symbols=${encodeURIComponent("../etc")}`,
+      "/api/news?symbols=A,B,C,D,E,F,G,H,I,J,K",
+      "/api/news?symbols=INTC&since=yesterday",
+      "/api/news?symbols=INTC&since=2026-11-07",
+      "/api/news?symbols=INTC&since=2026-13-45T99:00:00Z",
+      "/api/news?symbols=INTC&symbols=CRWV",
+      "/api/news?symbols=INTC&since=2026-11-07T08:00:00Z&since=2026-11-07T09:00:00Z",
+    ]) {
+      const r = await get(path);
+      expect([path, r.status]).toEqual([path, 400]);
+      expect(r.body.ok).toBe(false);
+      expect(typeof r.body.error).toBe("string");
+    }
+    // ten is allowed
+    expect((await get("/api/news?symbols=A,B,C,D,E,F,G,H,I,J")).status).toBe(200);
+  });
+
+  it("a market with no headline source refuses the read, 409", async () => {
+    const core = createMarketCore({});
+    const srv = await startMarketServer({ port: 0, mount: (app) => mountReads(app, core, marketReads(core)) });
+    servers.push(srv);
+    const r = await fetch(`${srv.url}/api/news?symbols=INTC`);
+    expect(r.status).toBe(409);
+    expect(((await r.json()) as { refusal: { code: string } }).refusal.code).toBe("E_MARKET_UNKNOWN_SOURCE");
   });
 });

@@ -1,6 +1,6 @@
 // face/tests/annotator.test.ts
 /** The annotation lane (src/annotator.ts, spec §16 H1): each alert pass's plan check in a fresh desk agent of its own,
- * on a chain of its own - the pause, the budget and the fence before the agent is made, the 90 s deadline from its own
+ * on a chain of its own - the pause, the budget and the fence before the agent is made, the 240 s deadline from its own
  * `turn/start`, the watchdog at the deadline plus the slack, the `desk-turn` record, the reply under the alert through
  * the conversation's `deliver`, the `annotated` note, and the agent let go. Offline: a fake agent factory and a fake
  * bus (tests/desk-fakes.ts) under the real supervisor, a WallClock, a recording `deliver`, and a home and a repository
@@ -141,22 +141,22 @@ test("an annotation opens at once in its own session while the desk conversation
   await h.annotator.dispose();
 });
 
-test("its 90 s deadline runs from its own turn's start, and the cut is answered as a reply to the alert", async () => {
+test("its 240 s deadline runs from its own turn's start, and the cut is answered as a reply to the alert", async () => {
   const h = await harness();
   const sessionId = sessionOf(await annotate(h, "a-000000000001", 11));
   const agent = h.agents.agents[0];
   await h.clock.advance(30_000); // the turn starts 30 s after the post
   startTurn(h, sessionId, 1, alertOf("a-000000000001"));
-  await h.clock.advance(89_999);
-  assert.deepEqual(agent.cancels, [], "not yet: 90 s from the turn's start, not the post's");
+  await h.clock.advance(239_999);
+  assert.deepEqual(agent.cancels, [], "not yet: 240 s from the turn's start, not the post's");
   await h.clock.advance(1);
   assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "desk deadline" }, { keepInbox: true }]]);
   endTurn(h, sessionId, 1, ABORTED("desk deadline"));
   await waitFor("the cut's line", () => h.sent.length === 1);
-  assert.deepEqual(h.sent, [["timed out after 90 s; a card or a long tool was pending", "telegram:11"]]);
+  assert.deepEqual(h.sent, [["timed out after 4 min; a card or a long tool was pending", "telegram:11"]]);
   await waitFor("the note", () => h.noted.length === 1);
   assert.equal(h.noted[0].outcome, "timed-out");
-  assert.deepEqual((await turnsOf(h)).map((e) => [e.sessionId, e.source, e.outcome, e.wallMs]), [[sessionId, "alert", "timed-out", 90_000]]);
+  assert.deepEqual((await turnsOf(h)).map((e) => [e.sessionId, e.source, e.outcome, e.wallMs]), [[sessionId, "alert", "timed-out", 240_000]]);
 });
 
 test("its text is delivered as a reply, recorded as a desk-turn with source alert, noted annotated with the sent ids, and its agent disposed", async () => {
@@ -284,17 +284,102 @@ test("a second pass posted 15 s later waits only for the first run's delivery", 
   assert.deepEqual(second, { opened: true, sessionId: "session-fake-2" }, "it opens once the first is delivered, its dispose still hanging");
   assert.deepEqual(h.sent, [["first checked", "telegram:11"]], "the first was delivered before the second opened");
   assert.equal(h.agents.agents[0].disposed, 1, "the first agent's dispose began");
-  assert.ok(h.clock.now() - Date.parse(AT) < 90_000, "well inside the first's deadline");
+  assert.ok(h.clock.now() - Date.parse(AT) < 240_000, "well inside the first's deadline");
+});
+
+test("idle resolves at once with nothing posted, waits for a running post's delivered reply, and for a queued one", async () => {
+  const h = await harness();
+  await h.annotator.idle(); // at once with nothing posted
+
+  const first = sessionOf(await annotate(h, "a-000000000001", 11));
+  startTurn(h, first, 1, alertOf("a-000000000001"));
+  const queued = annotate(h, "a-000000000002", 12);
+  let idle = false;
+  const waiting = h.annotator.idle().then(() => { idle = true; });
+  await h.clock.flush();
+  assert.equal(idle, false, "not while the first runs");
+  answer(h, first, 1, "first checked");
+  endTurn(h, first, 1);
+  const second = sessionOf(await queued);
+  await h.clock.flush();
+  assert.deepEqual(h.sent, [["first checked", "telegram:11"]]);
+  assert.equal(idle, false, "not while the queued one runs");
+  startTurn(h, second, 1, alertOf("a-000000000002"));
+  answer(h, second, 1, "second checked");
+  endTurn(h, second, 1);
+  await waiting;
+  assert.deepEqual(h.sent, [["first checked", "telegram:11"], ["second checked", "telegram:12"]], "idle once the queued reply is delivered");
+  assert.equal(h.noted.length, 2, "and noted");
+  await h.annotator.idle();
+
+  await h.annotator.dispose();
+  await h.annotator.idle(); // and at once after the dispose
+});
+
+test("an idle already waiting when the dispose begins resolves, though the post it waits on is still making its agent", async () => {
+  let release: () => void = () => {};
+  let making = false;
+  const h = await harness({
+    createAgent: async (opts) => {
+      making = true;
+      await new Promise<void>((done) => { release = done; });
+      return h.agents.createAgent(opts);
+    },
+  });
+  const posting = annotate(h, "a-000000000001", 11);
+  await waitFor("the making under way", () => making);
+  let idle = false;
+  const waiting = h.annotator.idle().then(() => { idle = true; });
+  await h.clock.flush();
+  assert.equal(idle, false, "not while the post is making its agent");
+  const disposing = h.annotator.dispose();
+  await waiting;
+  assert.equal(idle, true, "the dispose's beginning answers it, the making still hanging");
+  release();
+  assert.deepEqual(await posting, { refused: "error", line: "the desk could not annotate this alert: the desk is shut down" });
+  await disposing;
+});
+
+test("an urgent post with no replyTo replies { kind: \"urgent\" } and nothing else", async () => {
+  const opts: unknown[] = [];
+  const h = await harness({ deliver: async (_text, o) => { opts.push(o); return { sent: ["telegram:201"] }; } });
+  const sessionId = sessionOf(await h.annotator.post({
+    text: "NVDA 160.00 is down 7.0% from its close", source: { kind: "alert", symbol: "NVDA", rule: "move" }, message: alertOf("a-000000000001"), urgent: true,
+  }));
+  startTurn(h, sessionId, 1, alertOf("a-000000000001"));
+  answer(h, sessionId, 1, "Why it moved: guidance cut.");
+  endTurn(h, sessionId, 1);
+  await h.annotator.idle();
+  assert.deepEqual(opts, [{ kind: "urgent" }]);
+  assert.deepEqual(h.noted[0]?.sent, ["telegram:201"]);
+  await h.annotator.dispose();
+});
+
+test("an urgent post's reply goes urgent; another's goes alert", async () => {
+  const h = await harness();
+  const urgent = sessionOf(await h.annotator.post({
+    text: "NVDA 160.00 is down 7.0% from its close", source: { kind: "alert", symbol: "NVDA", rule: "move" }, message: alertOf("a-000000000001"), replyTo: "telegram:11", urgent: true,
+  }));
+  startTurn(h, urgent, 1, alertOf("a-000000000001"));
+  answer(h, urgent, 1, "Why it moved: guidance cut.");
+  endTurn(h, urgent, 1);
+  const plain = sessionOf(await annotate(h, "a-000000000002", 12));
+  startTurn(h, plain, 1, alertOf("a-000000000002"));
+  answer(h, plain, 1, "Stop met.");
+  endTurn(h, plain, 1);
+  await h.annotator.idle();
+  assert.deepEqual([h.sent, h.kinds], [[["Why it moved: guidance cut.", "telegram:11"], ["Stop met.", "telegram:12"]], ["urgent", "alert"]]);
+  await h.annotator.dispose();
 });
 
 test("a turn that never starts is cut by the watchdog at the deadline plus the slack, with the no-text line as a reply", async () => {
   const h = await harness();
   const sessionId = sessionOf(await annotate(h, "a-000000000001", 11));
   const agent = h.agents.agents[0];
-  await h.clock.advance(149_999);
+  await h.clock.advance(299_999);
   assert.deepEqual(agent.cancels, []);
   await h.clock.advance(1);
-  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "desk deadline" }]], "the watchdog's cancel at 90 s + 60 s");
+  assert.deepEqual(agent.cancels, [[{ kind: "hook", reason: "desk deadline" }]], "the watchdog's cancel at 240 s + 60 s");
   await waitFor("the line", () => h.sent.length === 1);
   assert.deepEqual(h.sent, [["the desk's check of this alert ended with no text", "telegram:11"]]);
   await waitFor("the note", () => h.noted.length === 1);
@@ -330,10 +415,10 @@ test("a create that never settles makes the post refuse at the bound, an agent m
   });
   let first: PostResult | undefined;
   const posting = annotate(h, "a-000000000001", 11).then((r) => { first = r; return r; });
-  await h.clock.advance(149_999);
+  await h.clock.advance(299_999);
   assert.equal(first, undefined, "still waiting inside the bound");
   await h.clock.advance(1);
-  assert.deepEqual(await posting, { refused: "error", line: "the desk could not annotate this alert: the desk agent was not made in 150 s" },
+  assert.deepEqual(await posting, { refused: "error", line: "the desk could not annotate this alert: the desk agent was not made in 5 min" },
     "refused at the deadline plus the slack");
   assert.deepEqual(await annotate(h, "a-000000000002", 12), { opened: true, sessionId: "session-fake-1" }, "the lane is not stalled");
   release();

@@ -179,6 +179,22 @@ describe("US stocks, keyless: Cboe's delayed quotes where no real-time source an
     expect(cboeTimeMs("2026-10-13 09:45")).toBeUndefined();
   });
 
+  it("a Cboe-priced line carries Cboe's change (from prev_day_close) only while its last trade is in the regular session or the close's own minute: one stamped after-hours carries none, never a change from yesterday said beside today's after-hours price", async () => {
+    const evening = fromEt(2026, 10, 13, 18, 0);
+    const at = (t: string) => network([["/quotes/NVDA.json", quoteOf("NVDA", 180.5, { last_trade_time: t })], ["/symbol_book/symbol-book.json", BOOK], ...noRealTime()]);
+    const after = (await listings({ limit: 1 }, at("2026-10-13T17:30:12"), () => evening))[0]!;
+    expect(after.price).toBe(180.5);
+    expect(after.quoteAt).toBe(new Date(fromEt(2026, 10, 13, 17, 30) + 12_000).toISOString());
+    expect(after.change24h).toBeUndefined();
+    expect(after.changePct24h).toBeUndefined();
+    // the closing cross, stamped in the close's own minute, is the regular session's last trade: its change from the close before stands
+    const cross = (await listings({ limit: 1 }, at("2026-10-13T16:00:00"), () => evening))[0]!;
+    expect([cross.change24h, cross.changePct24h]).toEqual([0.84, 0.2464]);
+    // and a regular-session trade read in the evening keeps it too
+    const regular = (await listings({ limit: 1 }, at("2026-10-13T15:59:58"), () => evening))[0]!;
+    expect([regular.change24h, regular.changePct24h]).toEqual([0.84, 0.2464]);
+  });
+
   it("price history where Robinhood keeps none and Nasdaq keeps no minutes: Cboe's minutes folded into 5m and 1h bars, its daily closes for 1d (since the start asked), the volume in shares", async () => {
     const net = network([...routes(), ...noRealTime()]);
     const src = usStocksPublic({ http: net.http, clock: () => NOW, pace: async () => undefined });
@@ -291,9 +307,10 @@ describe("US stocks in real time: Robinhood's quote, else Nasdaq's, else Cboe's 
     const a = await read(pre, "AAPL");
     expect(a.session).toEqual({ open: false, opensAt: new Date(fromEt(2026, 10, 13, 9, 30)).toISOString(), phase: "pre", phaseEndsAt: new Date(fromEt(2026, 10, 13, 9, 30)).toISOString(), extendedHours: true });
     expect(a.note).toBe("pre-market trading is on until 09:30 New York: the price is Robinhood's real-time quote; the regular session opens Tue 13 Oct, 09:30 New York");
-    // no change beside a Robinhood price out of the regular session: the close it would be measured from is not one Cboe's file says
+    // no change beside a Robinhood price where no read says the close it is measured from: Cboe's file here is not from Monday's close
+    // (and no Nasdaq answer is kept) — the change from the right close is the next block's
     expect([a.change24h, a.changePct24h]).toEqual([undefined, undefined]);
-    // nor from 09:30 until Cboe's file has the day's first trade: at 09:35 on Wednesday Cboe's file is still Tuesday's
+    // nor at 09:35 on Wednesday from a Cboe file written in the middle of Tuesday's session: its last trade is not Tuesday's close
     const opening = await read(fromEt(2026, 10, 14, 9, 35), "AAPL");
     expect([opening.quoteFrom, opening.session!.phase, opening.change24h]).toEqual([ROBINHOOD_FROM, "regular", undefined]);
     // after-hours, 17:00: JPM at Nasdaq — its last trade stamped 10:29, from the regular session, said so and not called the phase's live
@@ -417,6 +434,143 @@ describe("US stocks in real time: Robinhood's quote, else Nasdaq's, else Cboe's 
       expect(await src.line!("JPM")).toMatchObject(cboe);
     }
   });
+  describe("the day's change outside the regular session, and early in it, whoever priced the line (why-it-moved task 6)", () => {
+    /** Cboe's file for AAPL written `stamp` (UTC, as Cboe writes it), its last trade `last` (New York), at `price` beside `prev` */
+    const cboeAapl = (price: number, prev: number, last: string, stamp: string) =>
+      json({ timestamp: stamp, data: { symbol: "AAPL", security_type: "stock", exchange_id: 2, current_price: price, price_change: round2(price - prev), price_change_percent: 0.5, bid: 0, ask: 0, open: prev, high: price, low: prev, close: price, prev_day_close: prev, volume: 50000000, last_trade_time: last, tick: "up" }, symbol: "AAPL" });
+    const round2 = (v: number) => Math.round(v * 100) / 100;
+    /** Tuesday 13 October's regular session as Cboe's file has it once the close is fifteen minutes behind: last trade 15:59:59, 340.50 */
+    const tuesdayClosed = (stamp: string) => cboeAapl(340.5, 338, "2026-10-13T15:59:59", stamp);
+    /** a source watched at `at` (Robinhood's AAPL at 341.80/341.84, so 341.82), read for AAPL twice: Cboe, asked at the same time as the
+     * chain, has answered by the second read (a Robinhood line never waits for it) */
+    const settled = async (at: number, extra: Array<[string, HttpReply]>, q = "AAPL") => {
+      const net = network(live(at, extra));
+      const src = await watched(net, at);
+      await src.listings({ q, limit: 1 });
+      await new Promise((go) => setTimeout(go, 0));
+      return { line: ((await src.listings({ q, limit: 1 })) as Listing[])[0]!, net };
+    };
+
+    it("a Robinhood-priced row in after-hours carries its change from that day's close", async () => {
+      // Tuesday 17:00: Cboe's file written 16:59:31 New York, fifteen minutes behind, so its last trade (15:59:59, 340.50) is the session's
+      const { line, net } = await settled(fromEt(2026, 10, 13, 17, 0), [["/quotes/AAPL.json", tuesdayClosed("2026-10-13 20:59:31")]]);
+      expect([line.quoteFrom, line.session!.phase, line.price]).toEqual([ROBINHOOD_FROM, "after", 341.82]);
+      // 341.82 - 340.50 — not from Cboe's previous close (338, Monday's), which the regular session's change is measured from
+      expect([line.change24h, line.changePct24h]).toEqual([1.32, 0.3877]);
+      // the price less the change is the reference close, as the face reads it (prev_close = price - change)
+      expect(round2(line.price! - line.change24h!)).toBe(340.5);
+      // no read was added for it: Nasdaq is not asked for a share Robinhood priced
+      expect(net.sent.some((s) => s.url.includes("/quote/AAPL/"))).toBe(false);
+    });
+
+    it("a Robinhood-priced row in pre-market carries its change from the previous close", async () => {
+      // Wednesday 08:00: Cboe's file is still Tuesday's, written 07:59:30 New York — its last trade is Tuesday's close
+      const { line } = await settled(fromEt(2026, 10, 14, 8, 0), [["/quotes/AAPL.json", tuesdayClosed("2026-10-14 11:59:30")]]);
+      expect([line.quoteFrom, line.session!.phase]).toEqual([ROBINHOOD_FROM, "pre"]);
+      expect([line.change24h, line.changePct24h]).toEqual([1.32, 0.3877]);
+    });
+
+    it("a Robinhood-priced row at 09:35, before Cboe's first trade of the day, carries its change from the previous close", async () => {
+      const { line } = await settled(fromEt(2026, 10, 14, 9, 35), [["/quotes/AAPL.json", tuesdayClosed("2026-10-14 13:34:30")]]);
+      expect([line.quoteFrom, line.session!.phase]).toEqual([ROBINHOOD_FROM, "regular"]);
+      expect([line.change24h, line.changePct24h]).toEqual([1.32, 0.3877]);
+      // from Cboe's first trade of the day on, the close is the file's previous close (Tuesday's, 340.50) as before
+      const later = await settled(fromEt(2026, 10, 14, 10, 30), [["/quotes/AAPL.json", cboeAapl(341, 340.5, "2026-10-14T10:15:44", "2026-10-14 14:30:46")]]);
+      expect([later.line.quoteFrom, later.line.change24h, later.line.changePct24h]).toEqual([ROBINHOOD_FROM, 1.32, 0.3877]);
+    });
+
+    it("Nasdaq's kept answer for the share wins over Cboe's file where they disagree: its change is measured from the official close", async () => {
+      // the first read, 15 s before, finds Robinhood's book first seen (not taken) and asks Nasdaq, which answers: 341.70, +3.39 from
+      // the close, so 338.31; the second, Robinhood's book moved, is Robinhood's — and Nasdaq's answer is still recent
+      const at = fromEt(2026, 10, 13, 17, 0);
+      const net = network(live(at, [[nq("AAPL"), nqInfo("AAPL", "341.70", "341.65", "341.75", "Oct 13, 2026 4:58 PM ET")], ["/quotes/AAPL.json", tuesdayClosed("2026-10-13 20:59:31")]]));
+      let t = at - 15_000;
+      const src = usStocksPublic({ pace: async () => undefined, http: net.http, clock: () => t });
+      const first = ((await src.listings({ q: "AAPL", limit: 1 })) as Listing[])[0]!;
+      expect(first.quoteFrom).toBe(NASDAQ_FROM);
+      await new Promise((go) => setTimeout(go, 0));
+      t = at;
+      const line = ((await src.listings({ q: "AAPL", limit: 1 })) as Listing[])[0]!;
+      expect(line.quoteFrom).toBe(ROBINHOOD_FROM);
+      // 341.82 - 338.31, not 341.82 - 340.50 (Cboe's last trade, beside it in the same read)
+      expect(line.change24h).toBe(3.51);
+      expect(line.changePct24h).toBe(1.0375);
+      // a Nasdaq trade stamped 4:00 PM may be the regular session's closing print, its change from Monday's close: not taken, Cboe's is
+      const closing = network(live(at, [[nq("AAPL"), nqInfo("AAPL", "341.70", "341.65", "341.75", "Oct 13, 2026 4:00 PM ET")], ["/quotes/AAPL.json", tuesdayClosed("2026-10-13 20:59:31")]]));
+      t = at - 15_000;
+      const again = usStocksPublic({ pace: async () => undefined, http: closing.http, clock: () => t });
+      await again.listings({ q: "AAPL", limit: 1 });
+      await new Promise((go) => setTimeout(go, 0));
+      t = at;
+      const fromCboe = ((await again.listings({ q: "AAPL", limit: 1 })) as Listing[])[0]!;
+      expect([fromCboe.quoteFrom, fromCboe.change24h]).toEqual([ROBINHOOD_FROM, 1.32]);
+    });
+
+    it("a Nasdaq-priced after-hours row keeps Nasdaq's change from that day's close", async () => {
+      // JPM traded at 16:58: Nasdaq's own change (+3.39, +1.02%), not one worked out from Cboe's JPM file beside it
+      const { line } = await settled(fromEt(2026, 10, 13, 17, 0), [[nq("JPM"), nqInfo("JPM", "334.90", "334.85", "334.95", "Oct 13, 2026 4:58 PM ET")]], "JPM");
+      expect([line.quoteFrom, line.session!.phase, line.change24h, line.changePct24h]).toEqual([NASDAQ_FROM, "after", 3.39, 1.02]);
+    });
+
+    it("a Robinhood row right after the close, before Cboe's file has it, takes its close from one Nasdaq read, kept for the close", async () => {
+      // Tuesday 16:03: Cboe's file written 16:02, fifteen minutes behind (last trade 15:47) — not yet the close
+      const at = fromEt(2026, 10, 13, 16, 3);
+      const cboeEarly: [string, HttpReply] = ["/quotes/AAPL.json", cboeAapl(340.4, 338, "2026-10-13T15:47:10", "2026-10-13 20:02:00")];
+      const nqAsked = (net: { sent: Array<{ url: string }> }) => net.sent.filter((x) => x.url.includes("/quote/AAPL/info")).length;
+      // Nasdaq's last trade stamped 4:00 PM — the closing print, its change from Monday's close — is the session's close: 340.75
+      const print = await settled(at, [[nq("AAPL"), nqInfo("AAPL", "340.75", "340.70", "340.80", "Oct 13, 2026 4:00 PM ET")], cboeEarly]);
+      expect([print.line.quoteFrom, print.line.session!.phase, print.line.change24h, print.line.changePct24h]).toEqual([ROBINHOOD_FROM, "after", 1.07, 0.314]);
+      expect(nqAsked(print.net)).toBe(1);
+      // secondaryData's close wins over a later after-hours trade's price less its change (341.70 - 3.39)
+      const closed = await settled(at, [[nq("AAPL"), nqInfo("AAPL", "341.70", "341.65", "341.75", "Oct 13, 2026 4:02 PM ET", { secondaryData: { lastSalePrice: "$340.60", netChange: "+2.10", percentageChange: "+0.62%", lastTradeTimestamp: "Closed at Oct 13, 2026 4:00 PM ET", isRealTime: false } })], cboeEarly]);
+      expect([closed.line.change24h, closed.line.changePct24h]).toEqual([1.22, 0.3582]);
+      // the close is kept: later reads within the hour ask Nasdaq no more
+      let t = at;
+      const net = network(live(at, [[nq("AAPL"), nqInfo("AAPL", "340.75", "340.70", "340.80", "Oct 13, 2026 4:00 PM ET")], cboeEarly]));
+      const src = usStocksPublic({ pace: async () => undefined, http: net.http, clock: () => t });
+      t = at - 15_000;
+      await src.listings({ q: "#", limit: 1 });
+      await new Promise((go) => setTimeout(go, 0));
+      t = at;
+      await src.listings({ q: "#", limit: 1 });
+      await new Promise((go) => setTimeout(go, 0));
+      for (let i = 0; i < 3; i++) {
+        const l = ((await src.listings({ q: "AAPL", limit: 1 })) as Listing[])[0]!;
+        expect([l.quoteFrom, l.change24h]).toEqual([ROBINHOOD_FROM, 1.07]);
+        await new Promise((go) => setTimeout(go, 0));
+      }
+      expect(nqAsked(net)).toBe(1);
+      // Nasdaq refusing: no change, as before — and not asked again within the minute
+      const down = await settled(at, [[nq("AAPL"), { status: 500, body: undefined, text: "" }], cboeEarly]);
+      expect([down.line.quoteFrom, down.line.change24h, down.line.changePct24h]).toEqual([ROBINHOOD_FROM, undefined, undefined]);
+      expect(nqAsked(down.net)).toBe(1);
+    });
+
+    it("Cboe's file past the close: its close field where it gives one, else its last trade", async () => {
+      const after = fromEt(2026, 10, 13, 17, 0);
+      const withClose = json({ timestamp: "2026-10-13 20:59:31", data: { symbol: "AAPL", security_type: "stock", current_price: 340.5, close: 340.62, prev_day_close: 338, bid: 0, ask: 0, last_trade_time: "2026-10-13T15:59:59" }, symbol: "AAPL" });
+      expect((await settled(after, [["/quotes/AAPL.json", withClose]])).line.change24h).toBe(1.2);
+      const noClose = json({ timestamp: "2026-10-13 20:59:31", data: { symbol: "AAPL", security_type: "stock", current_price: 340.5, close: 0, prev_day_close: 338, bid: 0, ask: 0, last_trade_time: "2026-10-13T15:59:59" }, symbol: "AAPL" });
+      expect((await settled(after, [["/quotes/AAPL.json", noClose]])).line.change24h).toBe(1.32);
+    });
+
+    it("a row whose reference close no source answers has no change, as today", async () => {
+      const after = fromEt(2026, 10, 13, 17, 0);
+      // Cboe refusing the share's file, no Nasdaq answer kept: Robinhood's price, no change
+      const down = await settled(after, [["/quotes/AAPL.json", { status: 503, body: undefined, text: "" }]]);
+      expect([down.line.quoteFrom, down.line.change24h, down.line.changePct24h]).toEqual([ROBINHOOD_FROM, undefined, undefined]);
+      // Cboe's file written at 16:05 New York, its last trade 15:50 (fifteen minutes behind): not yet the session's last trade
+      const early = await settled(after, [["/quotes/AAPL.json", cboeAapl(340.4, 338, "2026-10-13T15:50:02", "2026-10-13 20:05:10")]]);
+      expect([early.line.quoteFrom, early.line.change24h]).toEqual([ROBINHOOD_FROM, undefined]);
+      // a last trade after the close is an extended-hours print, not the close
+      const late = await settled(after, [["/quotes/AAPL.json", cboeAapl(340.9, 338, "2026-10-13T16:30:00", "2026-10-13 20:59:31")]]);
+      expect(late.line.change24h).toBeUndefined();
+      // overnight (not this plan's): no change from the after-hours file
+      const night = await settled(fromEt(2026, 10, 13, 22, 0), [["/quotes/AAPL.json", tuesdayClosed("2026-10-14 01:59:31")]]);
+      expect([night.line.quoteFrom, night.line.session!.phase, night.line.change24h]).toEqual([ROBINHOOD_FROM, "overnight", undefined]);
+    });
+  });
+
 });
 
 describe("one share's line, asked alone (line) — what a paper account prices a share it knows by — and a line said again at a newer quote (usLineAt)", () => {

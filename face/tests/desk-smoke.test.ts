@@ -333,13 +333,14 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     const eventsOf = (agent: Agent, n: number): Ev[] =>
       (agent.session.snapshotEvents() as unknown as Ev[]).filter((e) => (e.data as { turn?: unknown } | undefined)?.turn === n);
 
-    /* 1. THE ROSTER: DESK_ALLOW against this tree, plus the two desk tools from the desk agent's own layer -
-     * on the agent and in the very first request, so their registration did not race the first turn. */
+    /* 1. THE ROSTER: DESK_ALLOW against this tree, plus the two desk tools and dsh's own web_fetch from the desk
+     * agent's own layer - on the agent and in the very first request, so their registration did not race the first
+     * turn. web_fetch is the desk's alone (spec 2026-11-07 §5.6): the tree registers none. */
     const roster = await turn("ROSTER_PROBE");
     const known = new Set(tools.schemas().map((s) => s.name));
     const expanded = expandAllow([...DESK_ALLOW], known);
     assert.deepEqual(expanded.missing, [], "every name DESK_ALLOW asks for is in this tree, the stand-in answering for alpaca-kit");
-    const expected = [...expanded.allow, "desk_quotes", "desk_state"].sort();
+    const expected = [...expanded.allow, "desk_quotes", "desk_state", "web_fetch"].sort();
     assert.deepEqual(names(tools.schemas(deskAgent)), expected, "the desk sees (DESK_ALLOW expanded ∩ tree) ∪ the desk tools, exactly");
     const first = requests.get(deskId)?.[0];
     assert.ok(first !== undefined, "the desk's first request reached the model");
@@ -387,7 +388,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
       assert.equal(parameters?.required?.includes(arg) ?? false, tool === "glob", `${tool}'s ${arg} is ${tool === "glob" ? "required" : "optional"}`);
     }
     assert.equal(names(tools.schemas(deskAgent)).includes(ORDER_STAND_IN), false, "the desk never sees the order stand-in");
-    for (const deskTool of ["desk_quotes", "desk_state"]) assert.equal(known.has(deskTool), false, `the global view has no ${deskTool}`);
+    for (const deskTool of ["desk_quotes", "desk_state", "web_fetch"]) assert.equal(known.has(deskTool), false, `the global view has no ${deskTool}`);
     const base = `http://127.0.0.1:${ctx.webServer.port}`;
     mountClient(ctx);
     const cookie = await signIn(ctx, base);
@@ -397,7 +398,7 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     assert.ok(gravit !== undefined);
     const gravitTools = names(tools.schemas(gravit));
     assert.ok(gravitTools.includes(ORDER_STAND_IN) && gravitTools.includes(`mcp__${SERVER}__earnings`), "Gravit's view is the tree's");
-    for (const deskTool of ["desk_quotes", "desk_state"]) assert.equal(gravitTools.includes(deskTool), false, `Gravit's session has no ${deskTool}`);
+    for (const deskTool of ["desk_quotes", "desk_state", "web_fetch"]) assert.equal(gravitTools.includes(deskTool), false, `Gravit's session has no ${deskTool}`);
 
     /* 2. THE PROMPT the desk's first request carried: Gravit's persona, the date, the desk contract - and neither
      * the cycle contract nor the roles section, which belong to Gravit's preset. The control is a turn on the
@@ -469,6 +470,20 @@ test("desk smoke: the preset's roster and prompt, Gate 2 from the desk, the sand
     assert.equal(dirname(dirname(dirname(await realpath(spilledPath)))), await realpath(tmpdir()), "in the OS temp directory");
     assert.match(spillResults[1], /"isError":false/, `the desk's read of its own spill went through; saw ${spillResults[1].slice(0, 400)}`);
     assert.ok(spillResults[1].includes(`${SPILL_LINE} 1`), "and read the spilled matches back");
+
+    /* THE DESK'S web_fetch through the real registry (spec 2026-11-07 §5.6): dsh's own tool in the desk agent's layer,
+     * fetching through the http provider the policy leaves on - which refuses a loopback address before any socket
+     * opens, so nothing leaves the machine - and the call that reached dispatch is a desk-fetch line, the URL as
+     * asked. Gravit's session has no such tool, and its call writes no line. */
+    const fetchProbe = "http://127.0.0.1:9/desk-fetch-probe";
+    const fetched = await tools.execute({ callId: "fetch-probe", name: "web_fetch", arguments: { url: fetchProbe }, agent: deskAgent, signal: new AbortController().signal });
+    assert.equal(fetched.isError, true, `the provider refuses a loopback address; saw ${JSON.stringify(fetched.content)}`);
+    assert.match(fetched.content?.[0]?.text ?? "", /non-public IP address/, "in the http provider's own words: the tool fetched through it");
+    const fetchLines = (await readEvents(HOME)).events.filter((e) => e.kind === "desk-fetch");
+    assert.deepEqual(fetchLines.map((e) => [e.sessionId, e.url]), [[deskId, fetchProbe]], "one desk-fetch line, the desk session's, the URL as asked");
+    const gravitFetch = await tools.execute({ callId: "fetch-control", name: "web_fetch", arguments: { url: fetchProbe }, agent: gravit, signal: new AbortController().signal });
+    assert.equal(gravitFetch.isError, true, "Gravit's session has no web_fetch to call");
+    assert.equal((await readEvents(HOME)).events.filter((e) => e.kind === "desk-fetch").length, 1, "and its call writes no line");
 
     /* 5. THE WRITE GUARD'S BACKSTOP through the real waterfall: a tools/pre-execute listener registered after the
      * guard, in front of it, answers allow without calling next - so the guard's own listener never runs, and

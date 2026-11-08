@@ -60,10 +60,13 @@
  * (`^[a-z][a-z0-9-]{0,39}$`); `kind`, move_pct, gap or filing - a halt rule is refused, since the
  * Market's read carries no trading status; `symbols`, the word `holdings`, the word `levels`, or a non-empty list
  * of tickers, A shares and those two words, never `on:`; `move_pct` or `gap_pct`, above 0 and at most
- * {@link RULE_PCT_MAX}, each only on its own kind; `forms`, only on a filing rule, a list of 8-K, 8-K/A and 4, all
- * three by default; `cooldown`, the level's grammar, 30m by default, on any kind but gap - a kind's own key left
- * empty on another kind counts as absent, as any empty optional key does; `annotate`, false by default, and true
- * only with a `plan`, one line of at most 300 characters; `urgent`, false by default - true sends the rule's alerts
+ * {@link RULE_PCT_MAX}, each only on its own kind; `sessions`, only on a move_pct rule, `regular` to judge the
+ * regular session alone, all three sessions (pre-market, regular, after-hours) when left out; `forms`, only on a
+ * filing rule, a list of 8-K, 8-K/A and 4, all three by default; `cooldown`, the level's grammar, 30m by default, on
+ * any kind but gap - a kind's own key left empty on another kind counts as absent, as any empty optional key does;
+ * `annotate`, true by default on a move_pct or gap rule and needing no plan there (the alert gets Gravit's reason; a
+ * plan, when given, is checked too), false by default on a filing rule and true there only with a `plan`; a `plan`
+ * is one line of at most 300 characters; `urgent`, false by default - true sends the rule's alerts
  * `urgent`, through the account's quiet hours (src/phone.ts); a level is never urgent. An id is defined once: a second rule with it is refused
  * `<id> is defined twice; the first stands`, or `...; neither entry loads` when the first was refused, as a held
  * symbol is. A filing rule lists no A share -
@@ -192,9 +195,13 @@ export interface SymbolSet {
   symbols: string[];
 }
 
+/** The sessions a `move_pct` rule judges: `all` (pre-market, the regular session and after-hours for a US symbol),
+ * the default, or `regular`, the session alone. */
+export type RuleSessions = "all" | "regular";
+
 /** One urgent-event rule, with the file and the place it came from. */
 export type Rule = { file: string; index: number; id: string; symbols: SymbolSet; annotate: boolean; urgent: boolean; plan?: string } & (
-  | { kind: "move_pct"; movePct: number; cooldownMs: number }
+  | { kind: "move_pct"; movePct: number; cooldownMs: number; sessions: RuleSessions }
   | { kind: "gap"; gapPct: number }
   | { kind: "filing"; forms: FilingForm[]; cooldownMs: number }
 );
@@ -206,11 +213,11 @@ const LEVEL_KEYS: ReadonlySet<string> = new Set(["symbol", "kind", "price", "ran
 const LEVEL_KINDS: ReadonlySet<string> = new Set<LevelKind>(["buy_zone", "stop", "target", "watch"]);
 
 /** A rule's keys. */
-const RULE_KEYS: ReadonlySet<string> = new Set(["id", "kind", "symbols", "move_pct", "gap_pct", "forms", "cooldown", "annotate", "urgent", "plan"]);
+const RULE_KEYS: ReadonlySet<string> = new Set(["id", "kind", "symbols", "move_pct", "gap_pct", "sessions", "forms", "cooldown", "annotate", "urgent", "plan"]);
 /** The keys only some kinds take, and the keys each kind takes of them. */
-const KIND_ONLY_KEYS = ["move_pct", "gap_pct", "forms", "cooldown"] as const;
+const KIND_ONLY_KEYS = ["move_pct", "gap_pct", "sessions", "forms", "cooldown"] as const;
 const KIND_KEYS: Readonly<Record<RuleKind, ReadonlySet<string>>> = {
-  move_pct: new Set(["move_pct", "cooldown"]),
+  move_pct: new Set(["move_pct", "sessions", "cooldown"]),
   gap: new Set(["gap_pct"]),
   filing: new Set(["forms", "cooldown"]),
 };
@@ -464,7 +471,7 @@ function judgeRule(raw: unknown, index: number, file: string, seen: Map<string, 
 /** One rule's verdict. `first` is whether the first rule with its id loaded; `undefined` when it is that first
  * rule. */
 function ruleVerdict(raw: unknown, index: number, file: string, first: boolean | undefined): Verdict<Rule> {
-  if (!isRecord(raw)) return { reason: "a rule must be a mapping: id, kind, symbols, move_pct, gap_pct, forms, cooldown, annotate, urgent, plan" };
+  if (!isRecord(raw)) return { reason: "a rule must be a mapping: id, kind, symbols, move_pct, gap_pct, sessions, forms, cooldown, annotate, urgent, plan" };
   if ("on" in raw) return { reason: 'unknown key "on": a rule names its symbols under symbols:' };
   const unknown = unknownKey(raw, RULE_KEYS);
   if (unknown !== undefined) return { reason: unknown };
@@ -490,7 +497,7 @@ function ruleVerdict(raw: unknown, index: number, file: string, first: boolean |
     if (aShare !== undefined) return { reason: `filings are SEC's: ${aShare} is an A share` };
   }
 
-  let body: { kind: "move_pct"; movePct: number } | { kind: "gap"; gapPct: number } | { kind: "filing"; forms: FilingForm[] };
+  let body: { kind: "move_pct"; movePct: number; sessions: RuleSessions } | { kind: "gap"; gapPct: number } | { kind: "filing"; forms: FilingForm[] };
   if (ruleKind === "filing") {
     const forms = filingForms(raw.forms);
     if (forms === undefined) return { reason: "forms must be a list of 8-K, 8-K/A and 4" };
@@ -499,7 +506,14 @@ function ruleVerdict(raw: unknown, index: number, file: string, first: boolean |
     const key = ruleKind === "move_pct" ? "move_pct" : "gap_pct";
     const pct = raw[key];
     if (!isNumber(pct) || pct <= 0 || pct > RULE_PCT_MAX) return { reason: `${key} must be a number above 0 and at most ${RULE_PCT_MAX}` };
-    body = ruleKind === "move_pct" ? { kind: "move_pct", movePct: pct } : { kind: "gap", gapPct: pct };
+    if (ruleKind === "move_pct") {
+      /* Only regular is spelled: all three sessions are the default, so sessions: all is refused with the rest. */
+      const sessions: RuleSessions | undefined = raw.sessions === undefined || raw.sessions === null ? "all" : raw.sessions === "regular" ? "regular" : undefined;
+      if (sessions === undefined) return { reason: "sessions must be regular; leave it out for all three sessions" };
+      body = { kind: "move_pct", movePct: pct, sessions };
+    } else {
+      body = { kind: "gap", gapPct: pct };
+    }
   }
 
   let cooldown: number | undefined;
@@ -510,7 +524,8 @@ function ruleVerdict(raw: unknown, index: number, file: string, first: boolean |
     }
   }
 
-  const annotate = raw.annotate === undefined || raw.annotate === null ? false : raw.annotate;
+  /* A move or gap rule's alert gets Gravit's reason by default (ruling 2); a filing rule's check stays opt-in. */
+  const annotate = raw.annotate === undefined || raw.annotate === null ? ruleKind !== "filing" : raw.annotate;
   if (typeof annotate !== "boolean") return annotateFault(raw.annotate);
 
   const urgent = raw.urgent === undefined || raw.urgent === null ? false : raw.urgent;
@@ -522,7 +537,7 @@ function ruleVerdict(raw: unknown, index: number, file: string, first: boolean |
     if ("reason" in line) return line;
     plan = line.text;
   }
-  if (annotate && plan === "") return { reason: "annotate: true needs a plan: write what the check is for" };
+  if (annotate && ruleKind === "filing" && plan === "") return { reason: "annotate: true needs a plan: write what the check is for" };
 
   return {
     entry: {

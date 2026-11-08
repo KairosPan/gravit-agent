@@ -61,6 +61,21 @@ test("readEvents: an absent ledger is empty; a bad line is skipped and counted",
   assert.equal(skipped, 2);
 });
 
+/* A desk turn's web_fetch is on the record (spec 2026-11-07 §5.6): its line carries the session and the URL as
+ * asked, both strings, and a line missing either is no event - the Desk view would have nothing to show for it. */
+test("readEvents keeps a desk-fetch line and skips one without a sessionId or url", async () => {
+  const h = await home();
+  const fetched: DeskEvent = { t: "2026-11-07T21:05:00.000Z", kind: "desk-fetch", sessionId: "desk-1", url: "https://www.nasdaq.com/articles/intc" };
+  await appendEvent(h, fetched);
+  await writeFile(join(deskDir(h), "events.jsonl"), [
+    `{"t":"2026-11-07T21:06:00.000Z","kind":"desk-fetch","url":"https://example.com/"}`,
+    `{"t":"2026-11-07T21:07:00.000Z","kind":"desk-fetch","sessionId":"desk-1"}`,
+    `{"t":"2026-11-07T21:08:00.000Z","kind":"desk-fetch","sessionId":"desk-1","url":42}`,
+    "",
+  ].join("\n"), { flag: "a" });
+  assert.deepEqual(await readEvents(h), { events: [fetched], skipped: 3 });
+});
+
 test("appendEvent rotates a ledger over rotateBytes into a dated sibling", async () => {
   const h = await home();
   await appendEvent(h, boot("2026-10-19T13:00:00.000Z", 11), { rotateBytes: 10 });
@@ -610,6 +625,25 @@ test("deskStatus reports off, the desk session and today's desk turns", async ()
   const empty = await deskStatus({ home: await home(), bootedAt: now(), enabled: true, now });
   assert.deepEqual(empty.turnsToday, { count: 0, usage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } });
   for (const key of ["off", "deskSession", "phone", "ledgerError"]) assert.equal(Object.hasOwn(empty, key), false, key);
+});
+
+test("deskStatus lists today's desk-fetch lines newest first, at most 50, none from yesterday", async () => {
+  const h = await home();
+  const now = () => Date.parse("2026-11-07T21:00:00Z"); // 16:00 ET: the ET day began at 05:00 UTC (EST)
+  const fetch = (t: string, url: string, sessionId = "desk-1"): DeskEvent => ({ t, kind: "desk-fetch", sessionId, url });
+  await appendEvent(h, fetch("2026-11-07T04:59:59.999Z", "https://example.com/yesterday")); // 23:59 ET on the 6th
+  for (let i = 0; i < 52; i++) {
+    await appendEvent(h, fetch(new Date(Date.parse("2026-11-07T05:00:00.000Z") + i * 60_000).toISOString(), `https://example.com/${i}`, i === 51 ? "unknown" : "desk-1"));
+  }
+  await appendEvent(h, { t: "2026-11-07T20:00:00.000Z", kind: "desk-session", sessionId: "desk-2", reason: "new" });
+  const s = await deskStatus({ home: h, bootedAt: now() - 60_000, enabled: true, now });
+  assert.equal(s.fetchesToday?.length, 50, "at most 50");
+  assert.deepEqual(s.fetchesToday?.[0], { t: "2026-11-07T05:51:00.000Z", sessionId: "unknown", url: "https://example.com/51" }, "newest first");
+  assert.deepEqual(s.fetchesToday?.at(-1), { t: "2026-11-07T05:02:00.000Z", sessionId: "desk-1", url: "https://example.com/2" }, "the oldest two of today's fall off");
+  assert.ok(!s.fetchesToday?.some((f) => f.url.endsWith("/yesterday")), "none from yesterday");
+
+  const empty = await deskStatus({ home: await home(), bootedAt: now(), enabled: true, now });
+  assert.deepEqual(empty.fetchesToday, [], "no fetch today: an empty list");
 });
 
 test("deskStatus still answers when the desk's directory cannot be read: ledgerError names it, and there is no off", async () => {
@@ -1317,10 +1351,14 @@ test("standingLines and budgetLine print the orders, the calendar and the budget
 /* P2: the clock row (src/schedule.ts), which installDesk loads on first use, once the bridge has set the outlet. */
 
 /** The booted root as the desk tools and the guard read it: one live `gravit-desk` agent, whose own tool layer keeps
- * what is registered in it; `state` calls its desk_state. */
+ * what is registered in it, and whose `inject` starts nothing; `state` calls its desk_state. */
 function deskToolsRoot() {
   const registered: DeskToolDefinition[] = [];
-  const agent = { id: "desk-agent", ctx: { preset: DESK_PRESET, tools: { register(definition: DeskToolDefinition) { registered.push(definition); return () => {}; } } } };
+  const agent = {
+    id: "desk-agent",
+    /* web_fetch's child plugin is never started: this root reads desk_state alone */
+    ctx: { preset: DESK_PRESET, tools: { register(definition: DeskToolDefinition) { registered.push(definition); return () => {}; } }, inject: () => ({}) },
+  };
   const ctx: DeskGuardCtxLike = {
     on: () => () => true,
     inject: () => ({ dispose: async () => {} }),
@@ -1545,7 +1583,7 @@ test("events.jsonl takes the three new kinds", async () => {
 /* ---------- P3: the watch row ---------- */
 
 test("installDesk starts the watch with a source, shares the US calendar with the schedule, wires the watch's post to the annotator, not to the conversation, and disposes schedule, watch, annotator, bridge, conversation in order", async () => {
-  assert.equal(ALERT_DEADLINE_MS, 90_000);
+  assert.equal(ALERT_DEADLINE_MS, 240_000);
   const h = join(TMP, "watch-home");
   const root = join(TMP, "repo-watch");
   await mkdir(join(root, "desk", "journal"), { recursive: true });

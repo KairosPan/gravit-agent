@@ -183,8 +183,9 @@ function isDaylight(date: string): boolean {
   return date >= nthWeekday(y, 3, 0, 2) && date < nthWeekday(y, 11, 0, 1);
 }
 
-/** A New York wall time on a session date as a UTC instant to the second. */
-function nyInstant(date: string, hour: number, minute: number): string {
+/** A New York wall time on a date as a UTC instant to the second (`nyInstant("2026-11-30", 4, 0)` is
+ * `2026-11-30T09:00:00Z`), at the offset the date keeps: right on a weekday, which is never a change day. */
+export function nyInstant(date: string, hour: number, minute: number): string {
   const [y, m, d] = date.split("-").map(Number);
   const offset = isDaylight(date) ? 4 : 5;
   return new Date(Date.UTC(y, m - 1, d, hour + offset, minute)).toISOString().replace(".000Z", "Z");
@@ -238,6 +239,34 @@ export function windowCovers(window: MarketWindow, date: string): boolean {
 export function sessionFor(window: MarketWindow, date: string): MarketSession | "closed" | undefined {
   if (!windowCovers(window, date)) return undefined;
   return window.sessions.find((session) => session.date === date) ?? "closed";
+}
+
+/**
+ * The date of the session before `date` in the window: its latest session dated before `date`, when the window
+ * holds the day before it.
+ * @param window - a window, or none.
+ * @param date - a New York date, `YYYY-MM-DD`.
+ * @returns the date, or `undefined` when the window cannot say (it starts on `date` or later, or holds no session
+ *   before it).
+ */
+export function sessionBefore(window: MarketWindow | undefined, date: string): string | undefined {
+  if (window === undefined || !isDateText(date) || !windowCovers(window, addDays(date, -1))) return undefined;
+  let found: string | undefined;
+  for (const s of window.sessions) if (s.date < date && (found === undefined || s.date > found)) found = s.date;
+  return found;
+}
+
+/**
+ * The date of the XNYS session before `date`, by the builtin rules, at most {@link MAX_WINDOW_DAYS} days back.
+ * @param date - a New York date, `YYYY-MM-DD`; anything else has none.
+ */
+export function xnysPrevious(date: string): string | undefined {
+  if (!isDateText(date)) return undefined;
+  for (let n = 1; n <= MAX_WINDOW_DAYS; n++) {
+    const before = addDays(date, -n);
+    if (xnysSession(before) !== undefined) return before;
+  }
+  return undefined;
 }
 
 /* ---------- the clock ---------- */

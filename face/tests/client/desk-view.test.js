@@ -162,6 +162,48 @@ test("a strategy's levels.yml pin shows in its order's hash cell, its market in 
   assert.ok(html.includes('standing brief: 09:20, next'), 'a US order as before');
 });
 
+test('the Desk tab lists today\'s opened pages as escaped text, newest first, and says None today when there are none', async () => {
+  const { renderDeskTab } = await import('../../client/js/render/desk.js');
+  const none = deskViewOf(STATUS, NOW_ISO);
+  assert.deepEqual(none.pages, [], 'a status without fetchesToday has no pages');
+  const noneHtml = renderDeskTab(none);
+  assert.ok(noneHtml.includes('aria-label="Pages opened today"'), 'the section is drawn');
+  assert.ok(noneHtml.includes('None today'));
+  const alerts = noneHtml.indexOf('aria-label="Alerts"');
+  const pagesAt = noneHtml.indexOf('aria-label="Pages opened today"');
+  assert.ok(alerts >= 0 && pagesAt > alerts, 'after the alerts');
+
+  const s = deskStatus();
+  const evil = 'https://example.com/a?q=<script>alert(1)</script>&x="y"';
+  s.fetchesToday = [
+    { t: '2026-11-02T14:55:00.000Z', sessionId: 'desk-1', url: evil },
+    { t: '2026-11-02T14:05:00.000Z', sessionId: 'unknown', url: 'https://www.nasdaq.com/articles/intc' },
+    { t: 3, sessionId: 'x', url: 'https://bad.example/' },
+    { t: '2026-11-02T14:00:00.000Z', sessionId: 'desk-1' },
+  ];
+  const v = deskViewOf(s, NOW_ISO);
+  assert.deepEqual(v.pages, [
+    { time: '09:55 ET', url: evil },
+    { time: '09:05 ET', url: 'https://www.nasdaq.com/articles/intc' },
+  ], 'newest first, as the status lists them; a line with no string t or url is passed over');
+  const html = renderDeskTab(v);
+  assert.ok(!html.includes('<script>'), 'never raw');
+  assert.ok(html.includes('https://example.com/a?q=&lt;script&gt;alert(1)&lt;/script&gt;&amp;x=&quot;y&quot;'), html);
+  assert.ok(html.includes('https://www.nasdaq.com/articles/intc'));
+  assert.ok(html.indexOf('09:55 ET') < html.indexOf('09:05 ET'), 'newest first');
+  assert.ok(!html.includes('None today'));
+  const section = html.slice(html.indexOf('aria-label="Pages opened today"'), html.indexOf('aria-label="Levels as loaded"'));
+  assert.ok(!section.includes('<a'), 'no link wraps an opened page');
+  assert.ok(!html.includes('href="https://'), 'no page is a link anywhere on the tab');
+
+  const { withTable } = await import('../../client/js/i18n/words.js');
+  const { ZH } = await import('../../client/js/i18n/zh.js');
+  withTable(ZH, () => {
+    const zh = renderDeskTab(deskViewOf(STATUS, NOW_ISO));
+    assert.ok(zh.includes('今天打开的网页') && zh.includes('今天没有'), 'the two words in Chinese');
+  });
+});
+
 test("a standing row links its last firing's session as #/messages/<sessionId>", async () => {
   const s = deskStatus();
   s.standing.orders = [

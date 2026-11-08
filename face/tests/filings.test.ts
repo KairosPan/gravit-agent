@@ -129,7 +129,7 @@ function rule(kind: Rule["kind"], symbols: Partial<Rule["symbols"]>): Rule {
   const base = { file: "desk/rules.yml", index: 0, id: kind, symbols: { holdings: false, levels: false, symbols: [], ...symbols }, annotate: false, urgent: false };
   if (kind === "filing") return { ...base, kind, forms: ["8-K"], cooldownMs: 0 };
   if (kind === "gap") return { ...base, kind, gapPct: 3 };
-  return { ...base, kind, movePct: 5, cooldownMs: 0 };
+  return { ...base, kind, movePct: 5, sessions: "all", cooldownMs: 0 };
 }
 
 test("filingSymbols polls US symbols only, holdings first, at most 60", () => {

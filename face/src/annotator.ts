@@ -15,7 +15,7 @@
  *
  * THE RUN. A fresh desk agent (src/desk-session.ts `createDeskAgent`) in `desk/journal`, on the desk's route - no
  * `desk-session` record, so it never becomes the phone's conversation; its turns supervised with the alert deadline
- * (src/desk.ts `ALERT_DEADLINE_MS`, 90 s from its own `turn/start`) and the fence; the alerts' text sent once, under
+ * (src/desk.ts `ALERT_DEADLINE_MS`, 240 s from its own `turn/start`) and the fence; the alerts' text sent once, under
  * its provenance line, with the alert's message as its source. The post resolves `opened` there and the run goes on:
  * - the watchdog: no turn's end by the deadline plus src/firing.ts `FIRING_SLACK_MS` from the followup - a turn that
  *   never started, or one that hung past the supervisor's cut - cancels it (`desk deadline`), and the run ends without
@@ -23,10 +23,10 @@
  * - the turn's end: one `desk-turn` (a `desk-refused` for a turn the fence cut) in `events.jsonl`, as the conversation
  *   records a phone turn, so the day's budget counts it; a turn the supervisor reports after the watchdog is recorded
  *   too, and nothing more;
- * - the reply, after its record, through the conversation's `deliver` (so the pause holds it) as a reply to the first
- *   delivered alert's message: the turn's final text - with the cut line after an answer a cut interrupted - or the
- *   line for why there is none: the fence's refusal, the timed-out line, {@link notAnnotatedLine} for a failed model
- *   call, {@link NO_CHECK} for no text at all;
+ * - the reply, after its record, through the conversation's `deliver` (so the pause holds it) - `urgent` for a post
+ *   marked `urgent`, else `alert` - as a reply to the first delivered alert's message: the turn's final text - with
+ *   the cut line after an answer a cut interrupted - or the line for why there is none: the fence's refusal, the
+ *   timed-out line, {@link notAnnotatedLine} for a failed model call, {@link NO_CHECK} for no text at all;
  * - the note: `onAnnotated` with the pass, the session, the outcome, the ids `deliver` sent and the reply, cut at
  *   {@link ANNOTATED_TEXT_MAX} - the watch's `annotated` record in `alerts.jsonl`;
  * - letting go: the agent's dispose, then the supervision's end, so a turn the dispose drains is still recorded; the
@@ -35,8 +35,8 @@
  * ONE AT A TIME. Posts run on the annotator's own chain, each once the one before has delivered and noted its reply -
  * not once its agent is let go, which goes on beside the next run. Each wait is bounded, so a check waits behind
  * another for a bounded time, never behind the operator: the agent's making at the deadline plus src/firing.ts
- * `FIRING_SLACK_MS` (150 s with the 90 s deadline; past it, the not-annotated line and the lane moves on, the agent let
- * go when it comes), the turn by the watchdog above (the same 150 s from the followup), and the reply by `deliver`'s
+ * `FIRING_SLACK_MS` (300 s with the 240 s deadline; past it, the not-annotated line and the lane moves on, the agent let
+ * go when it comes), the turn by the watchdog above (the same 300 s from the followup), and the reply by `deliver`'s
  * own minute.
  *
  * SHUTDOWN ({@link Annotator.dispose}). A turn under way is cancelled as `shutdown`; its run sends nothing and notes
@@ -109,9 +109,12 @@ export interface AnnotatorDeps {
 
 /** The lane. `post` takes the watch's annotation post - `message.pass`, else `message.alert`, names the pass - and
  * answers `opened` once its agent has the message, or why not (the module header); it never rejects. `dispose` shuts it
- * down (the module header's SHUTDOWN), once. */
+ * down (the module header's SHUTDOWN), once. `idle` resolves once no post is running or waiting on the chain - each
+ * reply delivered and noted (the module header's ONE AT A TIME) - at once when the lane is idle, and at once once the
+ * dispose has begun; it never rejects. */
 export interface Annotator {
   post: DeskConversation["post"];
+  idle(): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -159,6 +162,9 @@ export function createAnnotator(deps: AnnotatorDeps): Annotator {
 
   /* one post at a time; the chain itself never rejects */
   let chain: Promise<unknown> = Promise.resolve();
+  /* settled when the dispose begins, so an idle waiting on the chain answers at once */
+  let signalDisposed: () => void = () => {};
+  const disposedSignal = new Promise<void>((done) => { signalDisposed = done; });
 
   /* every turn's record, in the order reported */
   let recording: Promise<void> = Promise.resolve();
@@ -392,8 +398,9 @@ export function createAnnotator(deps: AnnotatorDeps): Annotator {
       }
       let sent: string[] = [];
       try {
-        /* an annotation goes as `alert` (src/phone.ts), threaded under the alert's message */
-        const result = await deps.deliver(reply, input.replyTo === undefined ? { kind: "alert" } : { kind: "alert", replyTo: input.replyTo });
+        /* an annotation goes as its alerts went - `urgent` or `alert` (src/phone.ts) - threaded under the alert's message */
+        const kind = input.urgent === true ? "urgent" : "alert";
+        const result = await deps.deliver(reply, input.replyTo === undefined ? { kind } : { kind, replyTo: input.replyTo });
         if ("sent" in result) sent = result.sent;
       } catch (err) {
         log(`${BIN}: desk: the reply of ${where} could not be delivered: ${errText(err)}`);
@@ -430,9 +437,19 @@ export function createAnnotator(deps: AnnotatorDeps): Annotator {
       });
     },
 
+    async idle() {
+      /* a post queued while the chain is awaited extends it: wait again until it stands still */
+      for (let seen = chain; ; seen = chain) {
+        if (disposed) return;
+        await Promise.race([seen, disposedSignal]);
+        if (disposed || seen === chain) return;
+      }
+    },
+
     dispose() {
       disposing ??= (async () => {
         disposed = true;
+        signalDisposed();
         for (const run of runs) run.shutDown();
         const loaded = machinery === undefined ? undefined : await machinery.catch(() => undefined);
         await settlesWithin((loaded?.firing.FIRING_DISPOSE_MS ?? 0) + SHUTDOWN_MARGIN_MS, (async () => {

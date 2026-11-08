@@ -1621,6 +1621,8 @@ export const EN = Object.freeze({
   'desk.tab.firings': 'Firings',
   'desk.tab.runs': 'Runs and sleep',
   'desk.tab.noRuns': 'No runs in the ledger.',
+  'desk.tab.pages': 'Pages opened today',
+  'desk.tab.pagesNone': 'None today',
 
   // a channel (host/channels.js, render/channel.js, host/runs-view.js): its page, its rosters, its research runs and their
   // chips, a write that failed

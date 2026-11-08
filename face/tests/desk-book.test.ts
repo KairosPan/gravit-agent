@@ -613,16 +613,135 @@ test("the shipped desk/rules.yml loads with no refusal", async () => {
   assert.equal(r.error, undefined);
   assert.equal(r.missing, undefined);
   assert.deepEqual(r.refusals, []);
-  assert.deepEqual(r.entries.map((e) => [e.id, e.kind]), [["holding-move", "move_pct"], ["index-move", "move_pct"], ["filing", "filing"]]);
+  assert.deepEqual(r.entries.map((e) => [e.id, e.kind]), [
+    ["holding-move", "move_pct"], ["index-move", "move_pct"], ["filing", "filing"], ["watch-crwv", "move_pct"], ["watch-intc", "move_pct"],
+  ]);
   assert.deepEqual(r.entries[2].symbols, { holdings: true, levels: true, symbols: [] });
-  assert.equal(r.entries[0].annotate, false);
+  assert.equal(r.entries[0].annotate, true);
   assert.equal((r.entries[0] as { cooldownMs: number }).cooldownMs, 3_600_000);
   const want: Rule[] = [
-    { file: RULES, index: 0, id: "holding-move", symbols: { holdings: true, levels: false, symbols: [] }, annotate: false, urgent: false, kind: "move_pct", movePct: 4, cooldownMs: 3_600_000 },
-    { file: RULES, index: 1, id: "index-move", symbols: { holdings: false, levels: false, symbols: ["SPY", "QQQ"] }, annotate: false, urgent: false, kind: "move_pct", movePct: 1.5, cooldownMs: 1_800_000 },
+    { file: RULES, index: 0, id: "holding-move", symbols: { holdings: true, levels: false, symbols: [] }, annotate: true, urgent: false, kind: "move_pct", movePct: 4, sessions: "all", cooldownMs: 3_600_000 },
+    { file: RULES, index: 1, id: "index-move", symbols: { holdings: false, levels: false, symbols: ["SPY", "QQQ"] }, annotate: true, urgent: false, kind: "move_pct", movePct: 1.5, sessions: "all", cooldownMs: 1_800_000 },
     { file: RULES, index: 2, id: "filing", symbols: { holdings: true, levels: true, symbols: [] }, annotate: false, urgent: false, kind: "filing", forms: ["8-K", "8-K/A", "4"], cooldownMs: 1_800_000 },
+    { file: RULES, index: 3, id: "watch-crwv", symbols: { holdings: false, levels: false, symbols: ["CRWV"] }, annotate: true, urgent: false, kind: "move_pct", movePct: 8, sessions: "all", cooldownMs: 1_800_000 },
+    { file: RULES, index: 4, id: "watch-intc", symbols: { holdings: false, levels: false, symbols: ["INTC"] }, annotate: true, urgent: false, kind: "move_pct", movePct: 5, sessions: "all", cooldownMs: 1_800_000 },
   ];
   assert.deepEqual(r.entries, want);
+});
+
+test("a move_pct rule takes sessions: regular, defaults to all, and refuses any other value", async () => {
+  const path = await fixture(`- id: day-only
+  kind: move_pct
+  symbols: [CRWV]
+  move_pct: 8
+  sessions: regular
+- id: unsaid
+  kind: move_pct
+  symbols: [INTC]
+  move_pct: 5
+- id: empty
+  kind: move_pct
+  symbols: [INTC]
+  move_pct: 5
+  sessions:
+- id: said-all
+  kind: move_pct
+  symbols: [SPY]
+  move_pct: 1.5
+  sessions: all
+- id: extended
+  kind: move_pct
+  symbols: [SPY]
+  move_pct: 1.5
+  sessions: [pre, post]
+- id: numbered
+  kind: move_pct
+  symbols: [SPY]
+  move_pct: 1.5
+  sessions: 1
+`);
+  const r = await loadRules(path, RULES);
+  assert.deepEqual(r.entries.map((e) => [e.id, e.kind === "move_pct" ? e.sessions : undefined]), [["day-only", "regular"], ["unsaid", "all"], ["empty", "all"]]);
+  const reason = "sessions must be regular; leave it out for all three sessions";
+  assert.deepEqual(r.refusals, [
+    { file: RULES, index: 3, reason },
+    { file: RULES, index: 4, reason },
+    { file: RULES, index: 5, reason },
+  ]);
+});
+
+test("sessions is not a key of a gap or filing rule", async () => {
+  const path = await fixture(`- id: gap-sessions
+  kind: gap
+  symbols: holdings
+  gap_pct: 2
+  sessions: regular
+- id: filing-sessions
+  kind: filing
+  symbols: holdings
+  sessions: regular
+- id: gap-empty
+  kind: gap
+  symbols: holdings
+  gap_pct: 2
+  sessions:
+`);
+  const r = await loadRules(path, RULES);
+  assert.deepEqual(r.entries.map((e) => e.id), ["gap-empty"]);
+  assert.deepEqual(r.refusals, [
+    { file: RULES, index: 0, reason: "sessions is not a key of a gap rule" },
+    { file: RULES, index: 1, reason: "sessions is not a key of a filing rule" },
+  ]);
+});
+
+test("a move_pct or gap rule annotates by default and needs no plan; a filing rule's annotate: true still needs one", async () => {
+  const path = await fixture(`- id: move
+  kind: move_pct
+  symbols: holdings
+  move_pct: 4
+- id: gap
+  kind: gap
+  symbols: holdings
+  gap_pct: 2
+- id: move-off
+  kind: move_pct
+  symbols: holdings
+  move_pct: 4
+  annotate: false
+- id: gap-said
+  kind: gap
+  symbols: holdings
+  gap_pct: 2
+  annotate: true
+- id: move-plan
+  kind: move_pct
+  symbols: holdings
+  move_pct: 4
+  plan: trim if it breaks the stop
+- id: filing
+  kind: filing
+  symbols: holdings
+- id: filing-plan
+  kind: filing
+  symbols: holdings
+  annotate: true
+  plan: read the 8-K before the open
+- id: filing-no-plan
+  kind: filing
+  symbols: holdings
+  annotate: true
+`);
+  const r = await loadRules(path, RULES);
+  assert.deepEqual(r.entries.map((e) => [e.id, e.annotate, e.plan]), [
+    ["move", true, undefined],
+    ["gap", true, undefined],
+    ["move-off", false, undefined],
+    ["gap-said", true, undefined],
+    ["move-plan", true, "trim if it breaks the stop"],
+    ["filing", false, undefined],
+    ["filing-plan", true, "read the 8-K before the open"],
+  ]);
+  assert.deepEqual(r.refusals, [{ file: RULES, index: 7, reason: "annotate: true needs a plan: write what the check is for" }]);
 });
 
 test("a rule takes urgent: true or false, and refuses any other value", async () => {
@@ -713,9 +832,8 @@ test("each bad rule is refused by index with its reason, and the rest load", asy
   symbols: holdings
   forms: [8-K, 10-Q]
 - id: no-plan
-  kind: move_pct
+  kind: filing
   symbols: levels
-  move_pct: 2
   annotate: true
 - id: good-move
   kind: gap
@@ -750,7 +868,7 @@ test("each bad rule is refused by index with its reason, and the rest load", asy
     refusal(6, "gap_pct is not a key of a move_pct rule"),
     refusal(7, "cooldown is not a key of a gap rule"),
     refusal(8, "symbols must be holdings, levels or a list of tickers, holdings and levels"),
-    refusal(9, "a rule must be a mapping: id, kind, symbols, move_pct, gap_pct, forms, cooldown, annotate, urgent, plan"),
+    refusal(9, "a rule must be a mapping: id, kind, symbols, move_pct, gap_pct, sessions, forms, cooldown, annotate, urgent, plan"),
     refusal(10, "move_pct must be a number above 0 and at most 50"),
     refusal(11, "move_pct must be a number above 0 and at most 50"),
     refusal(12, "gap_pct must be a number above 0 and at most 50"),
@@ -764,9 +882,9 @@ test("each bad rule is refused by index with its reason, and the rest load", asy
   const want: Rule[] = [
     {
       file: RULES, index: 0, id: "good-move", symbols: { holdings: true, levels: false, symbols: ["NVDA"] }, annotate: true, urgent: false,
-      plan: "check the news before acting", kind: "move_pct", movePct: 3, cooldownMs: 1_800_000,
+      plan: "check the news before acting", kind: "move_pct", movePct: 3, sessions: "all", cooldownMs: 1_800_000,
     },
-    { file: RULES, index: 16, id: "good-gap", symbols: { holdings: false, levels: true, symbols: [] }, annotate: false, urgent: false, kind: "gap", gapPct: 2.5 },
+    { file: RULES, index: 16, id: "good-gap", symbols: { holdings: false, levels: true, symbols: [] }, annotate: true, urgent: false, kind: "gap", gapPct: 2.5 },
   ];
   assert.deepEqual(r.entries, want);
 });
