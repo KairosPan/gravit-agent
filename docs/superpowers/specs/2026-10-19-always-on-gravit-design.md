@@ -1207,6 +1207,12 @@ ones and argue from this section where it and §5.5, §5.9, §5.10 or §12 disag
 
 ## 16. Hardening after the Super-agent review (2026-11-02)
 
+*Amended 2026-11-07 by the why-it-moved spec (`docs/superpowers/specs/2026-11-07-why-it-moved-design.md`): the US
+window, the why turn, the desk's web_fetch.* The watch's US window runs 04:00–20:00 ET (17:00 on an early close), a US
+move judged from its reference close; a US price move's annotation is a why turn under a 240 s deadline, H1's lane
+folding the passes that queue behind a running turn into one post; and each desk agent opens web pages with dsh's
+`web_fetch`, every one a `desk-fetch` line in the ledger (charter A1, D29).
+
 The operator had PR #9 read against DeepSeek's Super-agent prototype (`deepseek-ai/dsh-superagent-prototype`, MIT,
 2026-10-31). Its relevant patterns are:
 

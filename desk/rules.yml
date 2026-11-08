@@ -1,5 +1,5 @@
 # The operator's urgent-event rules: what the watch (face/src/watch.ts) sends besides price levels.
-# Tracked - it holds no position and no price. Kinds: move_pct, gap, filing; a halt rule is refused.
+# Tracked - it holds no position and no price, only names. Kinds: move_pct, gap, filing; a halt rule is refused.
 # A symbol is a US ticker or six digits for an A share; filings are US only.
 # urgent: true lets a rule's alerts through quiet hours (Account › Identity); no rule is urgent unless it says so.
 # A US move_pct rule also judges pre-market from 04:00 and after-hours to 20:00 ET; sessions: regular keeps it to the session.
