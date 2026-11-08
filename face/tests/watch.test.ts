@@ -1673,6 +1673,8 @@ test("an A-share move alert from a rule with no plan gets no post; a level alert
   await lv.wall.advance(20_000);
   await until("the post", () => lv.posts.length === 1);
   assert.ok(lv.sent[0].text.endsWith("annotation follows"));
+  // The alert record is appended on the ledger's own chain, which nothing orders before the post: wait for it.
+  await until("its alert record", async () => (await lv.alertRecords()).some((r) => r.kind === "alert"));
   assert.equal(lv.posts[0].text, alertText(JSON.parse(JSON.stringify((await lv.alertRecords()).find((r) => r.kind === "alert"))) as AlertHit, lv.wall.now(), "none"));
   assert.deepEqual(news.asked, [], "a plan check reads no headline");
   await lv.watch.dispose();
