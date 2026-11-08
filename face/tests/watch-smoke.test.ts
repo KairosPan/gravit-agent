@@ -419,7 +419,8 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
       home: HOME, enabled: true, root: ROOT, route: STUB, sessionCtx, installModelSelection: install, ctx, quotes,
       python: process.execPath, alertDeadlineMs: ALERT_DEADLINE_MS,
       schedule: { clock: wall, calendars, tickMs: TICK_MS },
-      watchRow: { calendars, clock: wall, tickMs: TICK_MS, edgar: { fetch: fakeEdgar, userAgent: UA } },
+      /* a why post's headline read stands in here: no test reaches the Market */
+      watchRow: { calendars, clock: wall, tickMs: TICK_MS, edgar: { fetch: fakeEdgar, userAgent: UA }, news: async (symbols) => new Map(symbols.map((s) => [s, { headlines: [] }] as const)) },
       log: (line) => { faceLog.push(line); },
     });
     const conversation = desk.conversation;

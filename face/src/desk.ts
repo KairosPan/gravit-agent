@@ -94,6 +94,7 @@ import type { AccountPhoneStatus, PhoneClient } from "./phone.ts";
 import { DSH_PIN } from "./version.ts";
 import type { DeskCalendars } from "./market-clock.ts";
 import type { EdgarFetch } from "./edgar.ts";
+import type { NewsAnswer } from "./market-news.ts";
 import type { WatchHandle, WatchStatus } from "./watch.ts";
 
 /** Diagnostic label, the same string every other `${BIN}:`-prefixed line in this program uses
@@ -1701,8 +1702,11 @@ const watchClock = (now: () => number): DeskClock => ({
  *   clock, calendar (the XNYS one), calendars (either market's), script runner, builtins, tick and grace;
  *   `alertDeadlineMs`, an alert's annotation turn's deadline, {@link ALERT_DEADLINE_MS} when absent - a test seam;
  *   `watchRow`, the watch's switch and seams - its clock (the wall clock, `unref`'d), tick, calendars (over the
- *   schedule's), whether a pid lives, and `edgar`, SEC's fetch and contact: `null` for none, absent for the face's
- *   own, the global `fetch` with `ALPHA_EDGAR_USER_AGENT` when that is set; `log`,
+ *   schedule's), whether a pid lives, `edgar`, SEC's fetch and contact: `null` for none, absent for the face's
+ *   own, the global `fetch` with `ALPHA_EDGAR_USER_AGENT` when that is set - the watch's filings poll and its why
+ *   posts' filings read both use it - and `news`, a why post's headline read: `null` for none, absent for the
+ *   Market's (src/market-news.ts `marketNews`, loaded with the watch); the watch's posts wait on the annotation
+ *   lane's `idle`, so passes that come while a turn runs fold into one post; `log`,
  *   where every line of the desk's goes - the guard's, its line at install naming what the secret
  *   check covers included, the tools', the ledger's, the conversation's, the bridge's and the clock's -
  *   stderr when absent, as main.ts leaves it; tests pass their own, or one that drops the line.
@@ -1732,6 +1736,7 @@ export function installDesk(
       tickMs?: number;
       calendars?: Partial<DeskCalendars>;
       edgar?: { fetch: EdgarFetch; userAgent: string } | null;
+      news?: ((symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>>) | null;
       alive?: (pid: number) => boolean;
     };
     log?: (line: string) => void;
@@ -1884,6 +1889,8 @@ export function installDesk(
       const userAgent = process.env.ALPHA_EDGAR_USER_AGENT;
       const edgar = watchRow.edgar === null ? undefined
         : watchRow.edgar ?? (userAgent ? { fetch: globalThis.fetch as EdgarFetch, userAgent } : undefined);
+      const news = watchRow.news === null ? undefined : watchRow.news ?? (await import("./market-news.ts")).marketNews();
+      if (disposing !== undefined) return undefined;
       const handle = watchModule.installWatch({
         home,
         root: wiring?.root ?? "",
@@ -1892,8 +1899,10 @@ export function installDesk(
         clock: watchRow.clock ?? watchClock(now),
         deliver: (text, opts) => conversation.deliver(text, opts),
         post: (input) => annotator.post(input),
+        idle: () => annotator.idle(),
         budget: () => readBudget(home, now(), schedule?.dailyTokens()),
         ...(edgar === undefined ? {} : { edgar }),
+        ...(news === undefined ? {} : { news }),
         ...(watchRow.alive === undefined ? {} : { alive: watchRow.alive }),
         ...(watchRow.tickMs === undefined ? {} : { tickMs: watchRow.tickMs }),
         log,

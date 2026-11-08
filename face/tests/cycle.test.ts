@@ -122,6 +122,18 @@ test("the shipped desk.md reads, fits 3,000 bytes and states the desk rules", ()
     "one line names both phone forms");
 });
 
+/** The alert lines (why-it-moved task 10, spec §5.3): a single alert is explained in the shape its message brings,
+ * several are answered in one reply, and a plan check states each condition - the shape itself lives in the post. */
+test("the shipped desk.md's alert lines: explain the move in the message's shape, several in one reply, the plan check", () => {
+  const lines = readDesk(DESK_PATH).split("\n");
+  for (const line of [
+    "- [alert · <symbol> · <rule>] is an alert the face has already sent. When it brings headlines and a shape, explain the move in that shape; check any plan it quotes.",
+    "- [alerts · <n> · <HH:MM ET>] is several alerts the face has already sent at once. Answer them in one reply, a shared cause first.",
+    "- A plan check quotes the plan and states each condition as met or not met with its measurement. The decision is the operator's.",
+  ]) assert.ok(lines.includes(line), line);
+  assert.ok(!lines.some((l) => l.includes("Check each plan in turn") || l.startsWith("- An alert check quotes")), "the old alert lines are gone");
+});
+
 /* readDesk is readCycle's reader under the desk's own name and cap: the same refusals, each opening with
  * the absolute path - missing, unreadable, empty, and over DESK_MAX_BYTES counted in raw bytes with the
  * limit inclusive - and the same trimmed, literal text. The desk's text has middle dots in it: "·"

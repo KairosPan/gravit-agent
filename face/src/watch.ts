@@ -1,8 +1,8 @@
 // face/src/watch.ts
 /** The watch row (P3): the desk's eye on the operator's book between turns. It polls the Market's read for the US
  * shares and the A shares the book names, judges the operator's levels and rules on each print (src/watch-eval.ts),
- * sends each alert to the phone itself, the plan verbatim (src/alert-text.ts), posts one annotation turn per pass on
- * the desk conversation, and alerts on a held name's new US filings (src/edgar.ts, src/filings.ts). Nothing here
+ * sends each alert to the phone itself, the plan verbatim (src/alert-text.ts), posts its annotation to the
+ * annotation lane - a why post for a US price move, a plan check otherwise - and alerts on a held name's new US filings (src/edgar.ts, src/filings.ts). Nothing here
  * places, cancels or proposes an order (B2).
  *
  * ONE WATCH PER HOME (ruling 7). `watch.lease` (`{ pid, since, beat }`, `0600`) names the face that watches; it
@@ -31,7 +31,11 @@
  * A PASS is one market's poll - one snapshot over that market's ids alone - or one filings poll. Its hits are judged
  * synchronously and go on the send chain in order: the flags read once (OFF and MUTE, then the budget when an alert
  * would be annotated), each hit recorded with its gate's decision, each send delivered and its delivery recorded, and
- * then one annotation post on a second chain no pass waits on (ruling 5) - to the annotation lane
+ * then its posted alerts - an annotated hit that is a US price move (a why post: its headlines from the Market since
+ * its reference close and its 8-K filings of the last 24 h, each read bounded at {@link WHY_READ_MS}) or has a plan to
+ * check; an A-share move with no plan is posted nothing - on a buffer that a second chain no pass waits on (ruling 5)
+ * drains: it waits for the lane to be idle, then posts the whole buffer as one, so passes that come while a turn
+ * runs are folded into one post and one `annotation` record; a batch the hour's cap held gets no post - to the annotation lane
  * (src/annotator.ts, spec §16 H1), whose run comes back as one `annotated` record ({@link WatchHandle.noteAnnotated});
  * a send that dispose cuts off is recorded `{ undelivered: "the face shut down" }`, never delivered. A failed poll - rejected, or every quote
  * `unavailable` - judges nothing and says so once per session date per market; a watched symbol unpriced on its
@@ -54,7 +58,9 @@
 import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileLock, writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
-import { alertText, annotationPost, batchText, lateAlertText, lostAlertsLine, priceStamp, stateBody, WATCH_LINES, type DeskStateView, type NearView } from "./alert-text.ts";
+import {
+  alertText, annotationPost, batchText, lateAlertText, lostAlertsLine, priceStamp, stateBody, WATCH_LINES, whyPost, type DeskStateView, type NearView, type WhyContext,
+} from "./alert-text.ts";
 import { listChannelDirs } from "./channels.ts";
 import {
   ALERTS_FILE, appendChain, clearMute, deskDir, deskTime, EVENTS_FILE, FILINGS_FILE, readMuteState, readOffState, readRecords, WATCH_LEASE_FILE,
@@ -65,14 +71,15 @@ import {
 } from "./desk-book.ts";
 import type { DeliverOpts, DeliverResult, DeskConversation, PostResult } from "./desk-conversation.ts";
 import type { DeskClock, DeskTurnRecord } from "./desk-session.ts";
-import { createEdgar, type Edgar, type EdgarFetch, type EdgarResult } from "./edgar.ts";
+import { createEdgar, type Edgar, type EdgarFetch, type EdgarResult, type Filing } from "./edgar.ts";
 import { bjDate, etDate } from "./et.ts";
 import {
   allRefused, baselineFrom, diffFilings, FILINGS_ABORT_MS, FILINGS_LOOKBACK_DAYS, FILINGS_STOP_AFTER_MS, filingSymbols, inFilingWindow, isFilingRecord, pollDue,
   seenKey, type Baseline, type FilingRecord,
 } from "./filings.ts";
 import { HttpError } from "./http.ts";
-import { nyInstant, sessionBefore, xnysPrevious, type DayAnswer, type DeskCalendars, type MarketSession } from "./market-clock.ts";
+import { nyInstant, sessionBefore, sessionFor, xnysPrevious, xnysWindow, type DayAnswer, type DeskCalendars, type MarketSession } from "./market-clock.ts";
+import type { NewsAnswer } from "./market-news.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
 import { idOf, type Market } from "./symbols.ts";
 import {
@@ -112,6 +119,14 @@ export const UNPRICED_POLLS = 3;
 
 /** How near a level is "near", in percent of its last price (ruling 6). */
 const NEAR_PCT = 2;
+/** How long a why post waits for each of its reads - the headlines, the filings - before it says so and goes. */
+export const WHY_READ_MS = 10_000;
+/** What a why post says of its filings with no SEC contact. */
+export const WHY_NO_SEC = "no SEC contact: ALPHA_EDGAR_USER_AGENT is not set";
+/** The forms a why post's filings read asks for, whatever the filing rules name. */
+const WHY_FORMS: readonly string[] = ["8-K", "8-K/A"];
+/** How far back a why post's filings reach, by their acceptance time. */
+const WHY_FILINGS_MS = 24 * 3_600_000;
 /** How long `dispose` waits for the passes, the posts and the chains. */
 const DISPOSE_WAIT_MS = 2_000;
 /** How many alerts the status's `recent` lists. */
@@ -126,8 +141,11 @@ const MARKETS: readonly Market[] = ["us", "cn"];
 /* ---------- the shapes ---------- */
 
 /** What {@link installWatch} needs. `quotes` is the one source for both markets; `calendars` the desk's two;
- * `deliver`, `post` and `budget` the desk conversation's; `edgar`, SEC's fetch and contact - none, no filings;
- * `pid` this face's (`process.pid`), `alive` whether a pid lives (`process.kill(pid, 0)`), `tickMs`, `log`. */
+ * `deliver` and `budget` the desk conversation's, `post` and `idle` the annotation lane's (src/annotator.ts) - with no
+ * `idle` a post waits for nothing but the one before it; `news` the Market's headline read (src/market-news.ts), for
+ * a why post - none, each symbol's headlines unavailable; `edgar`, SEC's fetch and contact - none, no filings and a
+ * why post's filings unavailable; `pid` this face's (`process.pid`), `alive` whether a pid lives
+ * (`process.kill(pid, 0)`), `tickMs`, `log`. */
 export interface WatchDeps {
   home: string;
   root: string;
@@ -138,6 +156,8 @@ export interface WatchDeps {
   post: DeskConversation["post"];
   budget: () => Promise<BudgetState>;
   edgar?: { fetch: EdgarFetch; userAgent: string };
+  news?: (symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>>;
+  idle?: () => Promise<void>;
   pid?: number;
   alive?: (pid: number) => boolean;
   tickMs?: number;
@@ -324,6 +344,10 @@ interface BookFile<T> {
 /** A hit before the gate: its record but for the decision, and a decision taken before the gate (a filing's
  * window or cooldown). */
 type Pending = { record: Omit<AlertHit, "decision" | "suppressed" | "id">; pre?: "window" | "cooldown" };
+
+/** A pass's posted alerts waiting for the annotation lane: its pass, its hits, the message its post replies to, and
+ * whether any of its hits is an urgent rule's. */
+type PostEntry = { pass: string; hits: AlertHit[]; replyTo: string | undefined; urgent: boolean };
 
 /* ---------- small helpers ---------- */
 
@@ -973,34 +997,151 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         if (!("undelivered" in result)) delivered.push({ rec, result });
       }
       if (stopped) return;
-      const annotated = delivered.filter((d) => d.rec.annotate);
-      if (spent || annotated.length === 0) return;
-      /* the post replies to the first annotated alert delivered - none when the outlet queued it (ruling 16) */
-      const first = annotated[0];
+      /* posted: an annotated alert that gets a why turn or has a plan to check - the hits whose note was not "none" */
+      const posted = delivered.filter((d) => d.rec.annotate && (whyOf(d.rec) || d.rec.plan !== null));
+      if (spent || posted.length === 0) return;
+      /* the post replies to the first posted alert delivered - none when the outlet queued it (ruling 16) */
+      const first = posted[0];
       const replyTo = "sent" in first.result ? first.result.sent[0] : undefined;
-      queuePost(pass, annotated.map((d) => d.rec), replyTo);
+      queuePost({ pass, hits: posted.map((d) => d.rec), replyTo, urgent: posted.some((d) => d.rec.urgent === true) });
     });
   }
 
-  /** The pass's annotation post, on the post chain: its record, and a refused post's line as a reply once per ET date. */
-  function queuePost(pass: string, hits: AlertHit[], replyTo: string | undefined): void {
+  /** A pass's posted alerts waiting for the annotation lane (why-it-moved task 10), and whether a drain runs. */
+  const postBuffer: PostEntry[] = [];
+  let draining = false;
+
+  /** Put a pass's posted alerts on the buffer, and start the drain on the post chain unless one runs. The drain waits
+   * for the lane to be idle (`deps.idle`), takes the whole buffer, posts it as one ({@link postFolded}) and goes round
+   * again while entries wait - so the passes that come while a turn runs are folded into one post when it ends. No
+   * wait comes before a post when the lane is idle. */
+  function queuePost(entry: PostEntry): void {
+    postBuffer.push(entry);
+    if (draining) return;
+    draining = true;
     postChain = postChain.then(async () => {
+      try {
+        while (postBuffer.length > 0 && !stopped) {
+          await deps.idle?.();
+          if (stopped) break;
+          const taken = postBuffer.splice(0);
+          try {
+            await postFolded(taken);
+          } catch (err) {
+            fail("post", err);
+          }
+        }
+      } finally {
+        draining = false;
+      }
+    }).catch((err: unknown) => { fail("post", err); });
+  }
+
+  /** One post over `entries`' hits, in order: the first entry's pass and reply, `urgent` if any entry's is - a why
+   * post when any hit is a US price move, else the plan check; then one annotation record naming every alert, and a
+   * refused post's line as a reply once per ET date. */
+  async function postFolded(entries: readonly PostEntry[]): Promise<void> {
+    const hits = entries.flatMap((e) => e.hits);
+    const { pass, replyTo } = entries[0]!;
+    const urgent = entries.some((e) => e.urgent);
+    let r: PostResult;
+    try {
+      const ctx = hits.some(whyOf) ? await whyContext(hits) : undefined;
       if (stopped) return;
       const at = clock.now();
-      let r: PostResult;
-      try {
-        r = await deps.post({ ...annotationPost(hits, pass, at), ...(replyTo === undefined ? {} : { replyTo }) });
-      } catch (err) {
-        r = { refused: "error", line: `the desk could not annotate this alert: ${errText(err)}` };
-      }
-      const done = clock.now();
-      const rec: AlertAnnotation = "opened" in r
-        ? { t: iso(done), kind: "annotation", pass, alerts: hits.map((h) => h.id), result: "opened", sessionId: r.sessionId }
-        : { t: iso(done), kind: "annotation", pass, alerts: hits.map((h) => h.id), result: "refused", reason: r.refused };
-      records.push(rec);
-      alerts.append(rec);
-      if ("refused" in r) sayOnce(`post:${etDate(new Date(done))}:${r.line}`, r.line, { at: done, ...(replyTo === undefined ? {} : { replyTo }) });
-    }).catch((err: unknown) => { fail("post", err); });
+      const body = ctx === undefined ? annotationPost(hits, pass, at) : whyPost(hits, pass, at, ctx);
+      r = await deps.post({ ...body, ...(replyTo === undefined ? {} : { replyTo }), ...(urgent ? { urgent: true } : {}) });
+    } catch (err) {
+      r = { refused: "error", line: `the desk could not annotate this alert: ${errText(err)}` };
+    }
+    const done = clock.now();
+    const rec: AlertAnnotation = "opened" in r
+      ? { t: iso(done), kind: "annotation", pass, alerts: hits.map((h) => h.id), result: "opened", sessionId: r.sessionId }
+      : { t: iso(done), kind: "annotation", pass, alerts: hits.map((h) => h.id), result: "refused", reason: r.refused };
+    records.push(rec);
+    alerts.append(rec);
+    if ("refused" in r) sayOnce(`post:${etDate(new Date(done))}:${r.line}`, r.line, { at: done, ...(replyTo === undefined ? {} : { replyTo }) });
+  }
+
+  /** `work`, or why not: a rejection's reason, or {@link WHY_READ_MS} on the clock passing - when its signal aborts. */
+  async function bounded<T>(what: string, work: (signal: AbortSignal) => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; reason: string }> {
+    const abort = new AbortController();
+    let timer: unknown;
+    const late = new Promise<{ ok: false; reason: string }>((done) => {
+      timer = clock.setTimeout(() => {
+        const reason = `the ${what} read passed ${WHY_READ_MS / 1000} s`;
+        abort.abort(new Error(reason));
+        done({ ok: false, reason });
+      }, WHY_READ_MS);
+    });
+    try {
+      const read = (async () => work(abort.signal))().then(
+        (value) => ({ ok: true as const, value }),
+        (err: unknown) => ({ ok: false as const, reason: `the ${what} read failed: ${errText(err)}` }),
+      );
+      return await Promise.race([read, late]);
+    } finally {
+      clock.clearTimeout(timer);
+    }
+  }
+
+  /** The close instant of the US session dated `date`: the calendar's, else the XNYS rules', else 16:00 ET. */
+  function closeOf(date: string): number {
+    const window = deps.calendars.us.window();
+    const session = window === undefined ? undefined : sessionFor(window, date);
+    if (session !== undefined && session !== "closed") return Date.parse(session.close);
+    try {
+      const rules = xnysWindow(date, 1).sessions[0];
+      if (rules !== undefined) return Date.parse(rules.close);
+    } catch {
+      /* not a date: the fallback below */
+    }
+    return Date.parse(nyInstant(date, 16, 0));
+  }
+
+  /** What a why post reads besides its alerts (spec §5.3): the US symbols' headlines since the earliest reference
+   * close of their price alerts, and their 8-K filings accepted in the last 24 h - each read bounded at
+   * {@link WHY_READ_MS}, a failure said in its place. An A share's headlines are said unavailable. */
+  async function whyContext(hits: readonly AlertHit[]): Promise<WhyContext> {
+    const usHits = hits.filter((h) => h.market === "us");
+    const symbols = [...new Set(usHits.map((h) => h.symbol))];
+    const closes = usHits.filter((h) => h.trigger.type !== "filing").map((h) => closeOf(h.ref ?? h.date)).filter(Number.isFinite);
+    const since = new Date(closes.length > 0 ? Math.min(...closes) : clock.now() - WHY_FILINGS_MS).toISOString();
+    const [news, filings] = await Promise.all([newsFor(symbols, since), filingsFor(symbols)]);
+    for (const h of hits) if (h.market !== "us" && !news.has(h.symbol)) news.set(h.symbol, { unavailable: "an A share: the headline read covers US shares" });
+    return { news, filings };
+  }
+
+  /** The symbols' headlines since `since`, or each one's reason none could be read. */
+  async function newsFor(symbols: readonly string[], since: string): Promise<Map<string, NewsAnswer>> {
+    const all = (unavailable: string): Map<string, NewsAnswer> => new Map(symbols.map((s) => [s, { unavailable }] as const));
+    if (symbols.length === 0) return new Map();
+    const read = deps.news;
+    if (read === undefined) return all("the face has no headline read");
+    const r = await bounded("headline", () => read(symbols, since));
+    return r.ok ? r.value : all(r.reason);
+  }
+
+  /** The symbols' 8-K filings accepted in the last 24 h (one whose acceptance time is unknown kept, its filing date
+   * being inside the lookback), or why none could be read: no SEC contact, the read's failure or deadline, or the
+   * symbols EDGAR could not read when it found no filing. */
+  async function filingsFor(symbols: string[]): Promise<WhyContext["filings"]> {
+    if (edgar === undefined) return { unavailable: WHY_NO_SEC };
+    const out = new Map<string, Filing[]>();
+    if (symbols.length === 0) return out;
+    const now = clock.now();
+    const r = await bounded("EDGAR", (signal) => edgar.recentFilings(symbols, WHY_FORMS, daysBefore(etDate(new Date(now)), 1), { stopAfterMs: WHY_READ_MS, signal }));
+    if (!r.ok) return { unavailable: r.reason };
+    const fresh = r.value.filings.filter((f) => {
+      if (f.accepted === null) return true;
+      const t = Date.parse(f.accepted);
+      return Number.isFinite(t) && now - t <= WHY_FILINGS_MS;
+    });
+    if (fresh.length === 0 && r.value.errors.length > 0) {
+      return { unavailable: `EDGAR could not read ${r.value.errors.map((e) => `${e.symbol}: ${e.error}`).join("; ")}` };
+    }
+    for (const f of fresh) out.set(f.symbol, [...(out.get(f.symbol) ?? []), f]);
+    return out;
   }
 
   /** The batch step: the held alerts, once due, delivered as one line - or dropped under OFF or MUTE. */

@@ -13,9 +13,10 @@ import { fileURLToPath } from "node:url";
 import {
   ALERTS_FILE, deskDir, FILINGS_FILE, readEvents, WATCH_LEASE_FILE, writeMute, writeOff, type BudgetState,
 } from "../src/desk.ts";
-import { alertText } from "../src/alert-text.ts";
+import { alertText, WHY_INSTRUCTIONS, WHY_OUTSIDE_LINE } from "../src/alert-text.ts";
 import type { DeliverResult, PostResult } from "../src/desk-conversation.ts";
 import type { EdgarFetch } from "../src/edgar.ts";
+import type { NewsAnswer } from "../src/market-news.ts";
 import { bjDate } from "../src/et.ts";
 import { HttpError } from "../src/http.ts";
 import { deskCalendars, type DeskCalendars, type MarketCalendar, type MarketSession } from "../src/market-clock.ts";
@@ -101,8 +102,10 @@ interface HarnessOpts {
   source?: FakeSource;
   wall?: WallClock;
   deliver?: (text: string, n: number) => DeliverResult | Promise<DeliverResult>;
-  post?: (input: { text: string; source: unknown; message: unknown; replyTo?: string }) => PostResult | Promise<PostResult>;
+  post?: (input: { text: string; source: unknown; message: unknown; replyTo?: string; urgent?: boolean }) => PostResult | Promise<PostResult>;
   budget?: BudgetState;
+  news?: (symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>>;
+  idle?: () => Promise<void>;
   edgar?: { fetch: EdgarFetch; userAgent: string };
   calendars?: Partial<DeskCalendars>;
   pid?: number;
@@ -145,6 +148,8 @@ async function harness(o: HarnessOpts): Promise<Harness> {
       return o.budget ?? { used: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, total: 0 }, spent: false };
     },
     ...(o.edgar === undefined ? {} : { edgar: o.edgar }),
+    ...(o.news === undefined ? {} : { news: o.news }),
+    ...(o.idle === undefined ? {} : { idle: o.idle }),
     pid: o.pid ?? 4242,
     alive: o.alive ?? ((p) => p === (o.pid ?? 4242)),
     log: (line) => { logs.push(line); },
@@ -1588,4 +1593,205 @@ test("an idle watch still lifts an expired mute, and its status shows the mute u
   assert.equal(h.watch.status().muted, undefined);
   assert.equal(h.sent.length, 0);
   await h.watch.dispose();
+});
+
+/* ---------- the why post (why-it-moved task 10) ---------- */
+
+const NVDA_MOVE = "- id: nvda-move\n  kind: move_pct\n  symbols: [NVDA]\n  move_pct: 5\n";
+/** A headline read that records what it was asked and answers each symbol from `answer`. */
+function fakeNews(answer: (symbol: string) => NewsAnswer = () => ({ headlines: [] })): { asked: { symbols: string[]; since: string }[]; read: (symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>> } {
+  const asked: { symbols: string[]; since: string }[] = [];
+  return {
+    asked,
+    read: async (symbols, since) => {
+      asked.push({ symbols: [...symbols], since });
+      return new Map(symbols.map((s) => [s.toUpperCase(), answer(s.toUpperCase())] as const));
+    },
+  };
+}
+/** NVDA's gap at the first poll of 2026-11-30 15:20:45Z: 94 against Friday's close 100. */
+async function nvdaGap(h: Harness): Promise<void> {
+  h.source.tables.us.set("NVDA", us(94, "2026-11-30T15:20:44Z", 100));
+  await h.wall.advance(0);
+  await until("the alert", () => h.sent.length === 1);
+}
+
+test("a US move alert's post is a why post: its alert, its headlines since its reference close, its filings of the last 24 hours and the instructions", async () => {
+  const news = fakeNews(() => ({ headlines: [{ time: "2026-11-30T13:05:00Z", outlet: "Reuters", title: "Nvidia cuts its outlook", url: "https://example.com/a" }] }));
+  const sec = fakeSec();
+  /* SEC's acceptanceDateTime is New York wall time marked Z: 07:00 ET today, and 09:00 ET yesterday - 30 hours back */
+  sec.filings.push(
+    { accession: "0001045810-26-000010", accepted: "2026-11-30T07:00:00.000Z" },
+    { accession: "0001045810-26-000009", accepted: "2026-11-29T09:00:00.000Z" },
+  );
+  const h = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: news.read, edgar: { fetch: sec.fetch, userAgent: "ops@example.com" } });
+  await nvdaGap(h);
+  assert.equal(h.sent[0].text.split("\n").at(-1), "reason follows");
+  await until("the post", () => h.posts.length === 1);
+  /* the reference close is Friday 2026-11-27's, an early close at 13:00 ET */
+  assert.deepEqual(news.asked, [{ symbols: ["NVDA"], since: "2026-11-27T18:00:00.000Z" }]);
+  const post = h.posts[0];
+  const text = post.text;
+  assert.ok(text.startsWith("NVDA 94"), text);
+  assert.ok(text.includes(WHY_OUTSIDE_LINE));
+  assert.ok(text.includes("Headlines for NVDA:\n- 08:05 ET · Reuters · Nvidia cuts its outlook · https://example.com/a"), text);
+  assert.ok(text.includes("Filings for NVDA in the last 24 h:\n- 8-K · items 2.02 · accepted 07:00 ET"), text);
+  assert.ok(!text.includes("0001045810-26-000009"), "a filing accepted 30 hours ago is left out");
+  assert.ok(text.endsWith(WHY_INSTRUCTIONS), "the instructions close it");
+  assert.ok(sec.urls.some((u) => u.includes("CIK0001045810")), "the filings were read from SEC");
+  assert.deepEqual([(post.source as { kind: string }).kind, (post.source as { symbol: string }).symbol], ["alert", "NVDA"]);
+  assert.equal(post.replyTo, "telegram:100");
+  assert.equal(post.urgent, undefined, "an alert of a rule not marked urgent posts no urgent");
+  await until("the annotation record", async () => (await h.alertRecords()).some((r) => r.kind === "annotation"));
+  await h.watch.dispose();
+});
+
+test("an A-share move alert from a rule with no plan gets no post; a level alert's post is the plan check as before", async () => {
+  const h = await harness({
+    start: "2026-12-01T02:03:00Z",
+    files: { "desk/rules.yml": "- id: cn-bare\n  kind: move_pct\n  symbols: [\"000001\"]\n  move_pct: 4\n" },
+  });
+  h.source.tables.cn.set("000001", cn(10, "2026-12-01T02:02:58Z", "trading", 10));
+  await h.wall.advance(0);
+  await until("the first poll", () => h.source.calls.length === 1);
+  h.source.tables.cn.set("000001", cn(9.5, "2026-12-01T02:03:08Z", "trading", 10));
+  await h.wall.advance(10_000);
+  await until("the alert", () => h.sent.length === 1);
+  await until("its delivered record", async () => (await h.alertRecords()).some((r) => r.kind === "delivered"));
+  await h.wall.advance(0);
+  await h.watch.dispose();
+  assert.deepEqual(h.posts, [], "nothing is posted for it");
+  assert.ok(!(await h.alertRecords()).some((r) => r.kind === "annotation"));
+
+  const news = fakeNews();
+  const lv = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") }, news: news.read });
+  lv.source.tables.us.set("NVDA", us(171, "2026-11-30T15:20:44Z", 174.05));
+  await lv.wall.advance(0);
+  lv.source.tables.us.set("NVDA", us(169.82, "2026-11-30T15:21:03Z", 174.05));
+  await lv.wall.advance(20_000);
+  await until("the post", () => lv.posts.length === 1);
+  assert.ok(lv.sent[0].text.endsWith("annotation follows"));
+  assert.equal(lv.posts[0].text, alertText(JSON.parse(JSON.stringify((await lv.alertRecords()).find((r) => r.kind === "alert"))) as AlertHit, lv.wall.now(), "none"));
+  assert.deepEqual(news.asked, [], "a plan check reads no headline");
+  await lv.watch.dispose();
+});
+
+test("passes that come while a turn runs are folded into one post when the lane is idle, and share one annotation record", async () => {
+  let busy: Promise<void> = Promise.resolve();
+  let free!: () => void;
+  const idleCalls: number[] = [];
+  const h = await harness({
+    start: "2026-11-30T15:20:45Z",
+    files: {
+      "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") + level("AMD", "stop", 100, "cross_down"),
+      "desk/rules.yml": "- id: intc-move\n  kind: move_pct\n  symbols: [INTC]\n  move_pct: 5\n  urgent: true\n",
+    },
+    news: fakeNews().read,
+    idle: () => { idleCalls.push(h.wall.now()); return busy; },
+  });
+  h.source.tables.us.set("NVDA", us(171, "2026-11-30T15:20:44Z"));
+  h.source.tables.us.set("AMD", us(101, "2026-11-30T15:20:44Z"));
+  h.source.tables.us.set("INTC", us(100, "2026-11-30T15:20:44Z", 100));
+  await h.wall.advance(0);
+  h.source.tables.us.set("NVDA", us(169, "2026-11-30T15:21:00Z"));
+  await h.wall.advance(20_000);
+  await until("the first post", () => h.posts.length === 1);
+  assert.equal(idleCalls.length, 1, "the first post asked the lane once, and it was idle");
+  /* a turn runs now: the lane is busy until `free` */
+  busy = new Promise<void>((done) => { free = done; });
+  h.source.tables.us.set("AMD", us(99, "2026-11-30T15:21:20Z"));
+  await h.wall.advance(20_000);
+  await until("AMD's alert", () => h.sent.length === 2);
+  h.source.tables.us.set("INTC", us(94, "2026-11-30T15:21:40Z", 100));
+  await h.wall.advance(20_000);
+  await until("INTC's alert", () => h.sent.length === 3);
+  await h.wall.advance(0);
+  assert.equal(h.posts.length, 1, "nothing posts while the turn runs");
+  free();
+  await until("the folded post", () => h.posts.length === 2);
+  await h.wall.advance(0);
+  assert.equal(h.posts.length, 2, "one post for both passes");
+  const folded = h.posts[1];
+  assert.deepEqual(folded.source, { kind: "alerts", count: 2 });
+  assert.equal(folded.replyTo, "telegram:101", "it replies to the first entry's alert");
+  assert.equal(folded.urgent, true, "urgent, since one of its alerts is");
+  assert.ok(folded.text.startsWith("AMD 99"), folded.text);
+  assert.ok(folded.text.includes("\n\nINTC 94"), "both alerts");
+  assert.ok(folded.text.endsWith(WHY_INSTRUCTIONS), "a fold holding a US move is a why post");
+  await until("two annotation records", async () => (await h.alertRecords()).filter((r) => r.kind === "annotation").length === 2);
+  const records = await h.alertRecords();
+  const ids = (symbol: string): unknown => records.find((r) => r.kind === "alert" && r.symbol === symbol)?.id;
+  const second = records.filter((r) => r.kind === "annotation")[1];
+  assert.deepEqual(second.alerts, [ids("AMD"), ids("INTC")]);
+  assert.equal(second.pass, records.find((r) => r.kind === "alert" && r.symbol === "AMD")?.pass, "the record names the first entry's pass");
+  await h.watch.dispose();
+});
+
+test("alerts the hourly cap batches get no post", async () => {
+  const names = Array.from({ length: 8 }, (_, i) => `M${i}`);
+  const news = fakeNews();
+  const h = await harness({
+    start: "2026-11-30T14:30:05Z",
+    files: { "desk/rules.yml": `- id: burst\n  kind: move_pct\n  symbols: [${names.join(", ")}]\n  move_pct: 5\n` },
+    news: news.read,
+  });
+  for (const s of names) h.source.tables.us.set(s, us(90, "2026-11-30T14:30:01Z", 100));
+  await h.wall.advance(0);
+  await until("six alerts", () => h.sent.length === 6);
+  await until("the post", () => h.posts.length === 1);
+  assert.deepEqual(h.posts[0].source, { kind: "alerts", count: 6 });
+  h.wall.set("2026-11-30T14:59:58Z");
+  await h.wall.advance(5_000);
+  await until("the batch", () => h.sent.length === 7);
+  await until("the batch record", async () => (await h.alertRecords()).some((r) => r.kind === "batch"));
+  await h.wall.advance(0);
+  assert.equal(h.posts.length, 1, "the batch is posted nothing");
+  assert.equal(news.asked.length, 1);
+  await h.watch.dispose();
+});
+
+test("a headline read that fails or times out leaves the post saying headlines unavailable, and the post still goes", async () => {
+  const failing = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: async () => { throw new Error("socket hang up"); } });
+  await nvdaGap(failing);
+  await until("the post", () => failing.posts.length === 1);
+  assert.ok(failing.posts[0].text.includes("Headlines for NVDA: unavailable: the headline read failed: socket hang up"), failing.posts[0].text);
+  await failing.watch.dispose();
+
+  const hanging = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: () => new Promise(() => {}) });
+  await nvdaGap(hanging);
+  await hanging.wall.advance(9_000);
+  assert.equal(hanging.posts.length, 0, "it waits for the read");
+  await hanging.wall.advance(1_000);
+  await until("the post", () => hanging.posts.length === 1);
+  assert.ok(hanging.posts[0].text.includes("Headlines for NVDA: unavailable: the headline read passed 10 s"), hanging.posts[0].text);
+  await hanging.watch.dispose();
+});
+
+test("a filings read with no SEC contact, or one that fails or passes 10 s, is said in the post, and the post still goes", async () => {
+  const none = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: fakeNews().read });
+  await nvdaGap(none);
+  await until("the post", () => none.posts.length === 1);
+  assert.ok(none.posts[0].text.includes("Filings for NVDA in the last 24 h: unavailable: no SEC contact: ALPHA_EDGAR_USER_AGENT is not set"), none.posts[0].text);
+  await none.watch.dispose();
+
+  const refused = fakeSec();
+  refused.refuse = true;
+  const failing = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: fakeNews().read, edgar: { fetch: refused.fetch, userAgent: "ops@example.com" } });
+  await nvdaGap(failing);
+  await until("the post", () => failing.posts.length === 1);
+  assert.match(failing.posts[0].text, /Filings for NVDA in the last 24 h: unavailable: EDGAR could not read NVDA: .*403/);
+  await failing.watch.dispose();
+
+  const hang: EdgarFetch = async (url) => {
+    if (url.endsWith("company_tickers.json")) return new Response(JSON.stringify({ 0: { cik_str: 1045810, ticker: "NVDA", title: "NVIDIA CORP" } }));
+    return new Promise<Response>(() => {});
+  };
+  const slow = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: fakeNews().read, edgar: { fetch: hang, userAgent: "ops@example.com" } });
+  await nvdaGap(slow);
+  await slow.wall.advance(9_000);
+  assert.equal(slow.posts.length, 0, "it waits for the read");
+  await slow.wall.advance(1_000);
+  await until("the post", () => slow.posts.length === 1);
+  assert.ok(slow.posts[0].text.includes("Filings for NVDA in the last 24 h: unavailable: the EDGAR read passed 10 s"), slow.posts[0].text);
+  await slow.watch.dispose();
 });
