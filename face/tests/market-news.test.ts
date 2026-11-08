@@ -132,3 +132,17 @@ test("symbols are upper-cased, and one not a US ticker is left out without faili
   assert.equal(none.urls.length, 0, "nothing to ask, no request");
   assert.deepEqual(only.get("600519"), { unavailable: "not a US ticker" });
 });
+
+test("a headline whose url is not https or is longer than 500 characters is left out", async () => {
+  const at500 = { ...NVDA_1, url: `https://www.nasdaq.com/${"a".repeat(500 - "https://www.nasdaq.com/".length)}` };
+  assert.equal(at500.url.length, 500);
+  const bad = [
+    { ...NVDA_2, url: "http://www.nasdaq.com/articles/plain" },
+    { ...NVDA_2, url: "javascript:alert(1)" },
+    { ...NVDA_2, url: "HTTPS://www.nasdaq.com/upper" },
+    { ...NVDA_2, url: `${at500.url}b` },
+  ];
+  const s = stub(200, { ok: true, news: { NVDA: [NVDA_1, ...bad, at500] } });
+  const got = await marketNews({ fetch: s.fetch, baseUrl: BASE })(["NVDA"], SINCE);
+  assert.deepEqual(got.get("NVDA"), { headlines: [NVDA_1, at500] });
+});

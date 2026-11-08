@@ -12,7 +12,8 @@
  * - a symbol not a US ticker by the Market's rule: `not a US ticker`, never asked;
  * - a refusal (409), a malformed query (400), any other status, no answer in time, or a body not of the news shape:
  *   every symbol of that GET, the reason naming which;
- * - a symbol the answer does not list. A headline not of the shape is left out. Never rejects.
+ * - a symbol the answer does not list. A headline not of the shape, or whose URL is not `https://` or is longer than
+ *   {@link NEWS_URL_MAX} characters, is left out. Never rejects.
  * @module
  */
 import { marketUrl } from "./market-row.ts";
@@ -38,8 +39,14 @@ function reasonOf(text: string): string {
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
+/** The longest headline URL the read keeps, in characters. */
+export const NEWS_URL_MAX = 500;
+
+/** A headline of the shape, its URL `https://` and at most {@link NEWS_URL_MAX} characters - any other is left out, so
+ * the desk is never handed a link of another scheme. */
 const isHeadline = (v: unknown): v is Headline =>
-  isRecord(v) && typeof v.time === "string" && typeof v.outlet === "string" && typeof v.title === "string" && typeof v.url === "string";
+  isRecord(v) && typeof v.time === "string" && typeof v.outlet === "string" && typeof v.title === "string" && typeof v.url === "string"
+  && v.url.startsWith("https://") && v.url.length <= NEWS_URL_MAX;
 
 /** Why a non-200 answer has no headlines: the refusal's code and words, a 400's error, or the status. */
 function failureOf(status: number, body: string): string {

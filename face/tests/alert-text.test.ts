@@ -365,6 +365,29 @@ test("an unavailable headline or filing read is said, and the instructions still
   assert.ok(post.text.endsWith(`\n\n${WHY_VERBATIM}`));
 });
 
+test("a symbol whose own filings read failed says so beside one read cleanly, with filings or none", () => {
+  const post = whyPost([NVDA_STOP, SPY_MOVE], "p-aaaaaaaaaaaa", NOW, {
+    news: new Map(),
+    filings: new Map<string, Filing[] | { unavailable: string }>([["NVDA", [NVDA_FILING]], ["SPY", { unavailable: "deadline" }]]),
+  });
+  assert.ok(post.text.includes("Filings for NVDA in the last 24 h:\n- 8-K · items 2.02, 9.01"), post.text);
+  assert.ok(post.text.includes("Filings for SPY in the last 24 h: unavailable: deadline"));
+  const none = whyPost([NVDA_STOP, SPY_MOVE], "p-aaaaaaaaaaaa", NOW, {
+    news: new Map(),
+    filings: new Map<string, Filing[] | { unavailable: string }>([["NVDA", { unavailable: "HTTP 500" }]]),
+  });
+  assert.ok(none.text.includes("Filings for NVDA in the last 24 h: unavailable: HTTP 500"));
+  assert.ok(none.text.includes("Filings for SPY in the last 24 h: none"), "a symbol read cleanly with nothing says none");
+});
+
+test("an A share in a why post has headlines but no filings line", () => {
+  const moutai = { ...SPY_MOVE, id: "a-000000000009", market: "cn" as const, symbol: "600519" };
+  const post = whyPost([SPY_MOVE, moutai], "p-aaaaaaaaaaaa", NOW, { news: new Map(), filings: { unavailable: "no SEC contact" } });
+  assert.ok(post.text.includes("Headlines for 600519: unavailable: not read"));
+  assert.ok(post.text.includes("Filings for SPY in the last 24 h: unavailable: no SEC contact"));
+  assert.ok(!post.text.includes("Filings for 600519"), post.text);
+});
+
 test("a post of twelve alerts with ten headlines each stays within 12,000 characters, dropping the oldest headlines first and keeping every alert", () => {
   assert.equal(WHY_POST_MAX, 12_000);
   const symbols = Array.from({ length: 12 }, (_, i) => `SYM${String.fromCharCode(65 + i)}`);

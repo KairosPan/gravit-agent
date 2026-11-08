@@ -1659,9 +1659,11 @@ test("an A-share move alert from a rule with no plan gets no post; a level alert
   await until("the alert", () => h.sent.length === 1);
   await until("its delivered record", async () => (await h.alertRecords()).some((r) => r.kind === "delivered"));
   await h.wall.advance(0);
-  await h.watch.dispose();
+  await new Promise((done) => setTimeout(done, 50));
   assert.deepEqual(h.posts, [], "nothing is posted for it");
   assert.ok(!(await h.alertRecords()).some((r) => r.kind === "annotation"));
+  await h.watch.dispose();
+  assert.deepEqual(h.posts, [], "nor at dispose");
 
   const news = fakeNews();
   const lv = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") }, news: news.read });
@@ -1779,7 +1781,7 @@ test("a filings read with no SEC contact, or one that fails or passes 10 s, is s
   const failing = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: fakeNews().read, edgar: { fetch: refused.fetch, userAgent: "ops@example.com" } });
   await nvdaGap(failing);
   await until("the post", () => failing.posts.length === 1);
-  assert.match(failing.posts[0].text, /Filings for NVDA in the last 24 h: unavailable: EDGAR could not read NVDA: .*403/);
+  assert.match(failing.posts[0].text, /Filings for NVDA in the last 24 h: unavailable: EDGAR could not read it: .*403/);
   await failing.watch.dispose();
 
   const hang: EdgarFetch = async (url) => {
@@ -1794,4 +1796,104 @@ test("a filings read with no SEC contact, or one that fails or passes 10 s, is s
   await until("the post", () => slow.posts.length === 1);
   assert.ok(slow.posts[0].text.includes("Filings for NVDA in the last 24 h: unavailable: the EDGAR read passed 10 s"), slow.posts[0].text);
   await slow.watch.dispose();
+});
+
+/** A fake SEC knowing NVDA (CIK 1045810) and AMD (CIK 2488): each one's submissions from `subs`, a status for a
+ * failing one. SEC's acceptanceDateTime is New York wall time marked Z; "" is none. */
+function twoSec(subs: Record<"NVDA" | "AMD", { accession: string; filingDate: string; accepted: string }[] | number>): EdgarFetch {
+  const ciks: Record<string, "NVDA" | "AMD"> = { CIK0001045810: "NVDA", CIK0000002488: "AMD" };
+  return (async (url: string) => {
+    if (url.endsWith("company_tickers.json")) {
+      return new Response(JSON.stringify({ 0: { cik_str: 1045810, ticker: "NVDA", title: "NVIDIA CORP" }, 1: { cik_str: 2488, ticker: "AMD", title: "ADVANCED MICRO DEVICES" } }));
+    }
+    const symbol = Object.entries(ciks).find(([cik]) => url.includes(cik))?.[1];
+    const answer = symbol === undefined ? 404 : subs[symbol];
+    if (typeof answer === "number") return new Response("no", { status: answer });
+    return new Response(JSON.stringify({
+      filings: {
+        recent: {
+          form: answer.map(() => "8-K"), filingDate: answer.map((f) => f.filingDate), accessionNumber: answer.map((f) => f.accession),
+          acceptanceDateTime: answer.map((f) => f.accepted), items: answer.map(() => "7.01"), primaryDocument: answer.map(() => "doc.htm"),
+        },
+      },
+    }));
+  }) as EdgarFetch;
+}
+const MOVES = "- id: moves\n  kind: move_pct\n  symbols: [NVDA, AMD]\n  move_pct: 5\n";
+/** NVDA's and AMD's gaps in one pass at 2026-11-30 15:20:45Z. */
+async function twoGaps(h: Harness): Promise<void> {
+  h.source.tables.us.set("NVDA", us(94, "2026-11-30T15:20:44Z", 100));
+  h.source.tables.us.set("AMD", us(94, "2026-11-30T15:20:44Z", 100));
+  await h.wall.advance(0);
+  await until("the post", () => h.posts.length === 1);
+}
+
+test("each symbol's filings read is said on its own: one failing beside one with a filing, and beside one read cleanly with none", async () => {
+  const mixed = await harness({
+    start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": MOVES }, news: fakeNews().read,
+    edgar: { fetch: twoSec({ NVDA: [{ accession: "0001045810-26-000020", filingDate: "2026-11-30", accepted: "2026-11-30T07:00:00.000Z" }], AMD: 500 }), userAgent: "ops@example.com" },
+  });
+  await twoGaps(mixed);
+  const text = mixed.posts[0].text;
+  assert.ok(text.includes("Filings for NVDA in the last 24 h:\n- 8-K · items 7.01 · accepted 07:00 ET"), text);
+  assert.match(text, /Filings for AMD in the last 24 h: unavailable: EDGAR could not read it: .*500/);
+  await mixed.watch.dispose();
+
+  const clean = await harness({
+    start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": MOVES }, news: fakeNews().read,
+    edgar: { fetch: twoSec({ NVDA: 503, AMD: [] }), userAgent: "ops@example.com" },
+  });
+  await twoGaps(clean);
+  const plain = clean.posts[0].text;
+  assert.match(plain, /Filings for NVDA in the last 24 h: unavailable: EDGAR could not read it: .*503/);
+  assert.ok(plain.includes("Filings for AMD in the last 24 h: none"), "AMD read cleanly, with nothing, and not NVDA's failure");
+  await clean.watch.dispose();
+});
+
+test("a filing with no acceptance time, filed inside the lookback, is kept and said so", async () => {
+  const h = await harness({
+    start: "2026-11-30T15:20:45Z", files: { "desk/rules.yml": NVDA_MOVE }, news: fakeNews().read,
+    edgar: { fetch: twoSec({ NVDA: [{ accession: "0001045810-26-000030", filingDate: "2026-11-30", accepted: "" }], AMD: [] }), userAgent: "ops@example.com" },
+  });
+  await nvdaGap(h);
+  await until("the post", () => h.posts.length === 1);
+  assert.ok(h.posts[0].text.includes("Filings for NVDA in the last 24 h:\n- 8-K · items 7.01 · accepted time unknown"), h.posts[0].text);
+  await h.watch.dispose();
+});
+
+test("a fold of an A-share alert and a US move is one why post: the A share's headlines said unavailable, and no filings line for it", async () => {
+  let free!: () => void;
+  const busy = new Promise<void>((done) => { free = done; });
+  const sec = fakeSec();
+  const h = await harness({
+    start: "2026-11-30T01:59:50Z",
+    files: { "desk/levels.yml": level("600519", "stop", 1400, "cross_down"), "desk/rules.yml": NVDA_MOVE },
+    news: fakeNews().read, idle: () => busy, edgar: { fetch: sec.fetch, userAgent: "ops@example.com" },
+    calendars: { us: fakeCalendar({ "2026-11-29": "closed", "2026-11-30": US_1130 }) },
+  });
+  h.source.tables.cn.set("600519", cn(1410, "2026-11-30T01:59:48Z"));
+  await h.wall.advance(0);
+  await until("the first A-share poll", () => h.source.callsFor("cn").length === 1);
+  h.source.tables.cn.set("600519", cn(1390, "2026-11-30T02:00:00Z"));
+  await h.wall.advance(10_000);
+  await until("the A-share alert", () => h.sent.length === 1);
+  /* the pre-market: NVDA's gap on two distinct prints */
+  h.wall.set("2026-11-30T08:59:55Z");
+  h.source.tables.us.set("NVDA", us(94, "2026-11-30T09:00:00Z", 100));
+  await h.wall.advance(5_000);
+  h.source.tables.us.set("NVDA", us(94.1, "2026-11-30T09:00:20Z", 100));
+  await h.wall.advance(20_000);
+  await until("NVDA's alert", () => h.sent.length === 2);
+  assert.equal(h.posts.length, 0, "the lane is busy");
+  free();
+  await until("the folded post", () => h.posts.length === 1);
+  const text = h.posts[0].text;
+  assert.deepEqual(h.posts[0].source, { kind: "alerts", count: 2 });
+  assert.equal(h.posts[0].replyTo, "telegram:100", "it replies to the A-share alert, the first entry's");
+  assert.ok(text.includes("Headlines for 600519: unavailable: an A share: the headline read covers US shares"), text);
+  assert.ok(!text.includes("Filings for 600519"), "no filings line for an A share");
+  assert.ok(text.includes("Filings for NVDA in the last 24 h: none"), text);
+  assert.ok(text.endsWith(WHY_INSTRUCTIONS));
+  assert.ok(sec.urls.every((u) => !u.includes("600519")), "an A share is never asked of SEC");
+  await h.watch.dispose();
 });

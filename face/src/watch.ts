@@ -34,9 +34,9 @@
  * then its posted alerts - an annotated hit that is a US price move (a why post: its headlines from the Market since
  * its reference close and its 8-K filings of the last 24 h, each read bounded at {@link WHY_READ_MS}) or has a plan to
  * check; an A-share move with no plan is posted nothing - on a buffer that a second chain no pass waits on (ruling 5)
- * drains: it waits for the lane to be idle, then posts the whole buffer as one, so passes that come while a turn
- * runs are folded into one post and one `annotation` record; a batch the hour's cap held gets no post - to the annotation lane
- * (src/annotator.ts, spec §16 H1), whose run comes back as one `annotated` record ({@link WatchHandle.noteAnnotated});
+ * drains: it waits for the lane to be idle, then posts the whole buffer as one to the annotation lane (src/annotator.ts,
+ * spec §16 H1), so passes that come while a turn runs are folded into one post and one `annotation` record; a batch
+ * the hour's cap held gets no post. The lane's run comes back as one `annotated` record ({@link WatchHandle.noteAnnotated});
  * a send that dispose cuts off is recorded `{ undelivered: "the face shut down" }`, never delivered. A failed poll - rejected, or every quote
  * `unavailable` - judges nothing and says so once per session date per market; a watched symbol unpriced on its
  * first {@link UNPRICED_POLLS} polls of a session date says so once (ruling 16).
@@ -1022,7 +1022,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     postChain = postChain.then(async () => {
       try {
         while (postBuffer.length > 0 && !stopped) {
-          await deps.idle?.();
+          await deps.idle?.().catch(() => {});
           if (stopped) break;
           const taken = postBuffer.splice(0);
           try {
@@ -1122,12 +1122,13 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     return r.ok ? r.value : all(r.reason);
   }
 
-  /** The symbols' 8-K filings accepted in the last 24 h (one whose acceptance time is unknown kept, its filing date
-   * being inside the lookback), or why none could be read: no SEC contact, the read's failure or deadline, or the
-   * symbols EDGAR could not read when it found no filing. */
+  /** Each symbol's 8-K filings accepted in the last 24 h (one whose acceptance time is unknown kept, its filing date
+   * being inside the lookback), or its own error when EDGAR could not read it (`deadline` among them); or why none
+   * could be read at all: no SEC contact, or the read's failure or deadline. A symbol read cleanly with nothing fresh
+   * is left out - the post says `none`. */
   async function filingsFor(symbols: string[]): Promise<WhyContext["filings"]> {
     if (edgar === undefined) return { unavailable: WHY_NO_SEC };
-    const out = new Map<string, Filing[]>();
+    const out = new Map<string, Filing[] | { unavailable: string }>();
     if (symbols.length === 0) return out;
     const now = clock.now();
     const r = await bounded("EDGAR", (signal) => edgar.recentFilings(symbols, WHY_FORMS, daysBefore(etDate(new Date(now)), 1), { stopAfterMs: WHY_READ_MS, signal }));
@@ -1137,10 +1138,11 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       const t = Date.parse(f.accepted);
       return Number.isFinite(t) && now - t <= WHY_FILINGS_MS;
     });
-    if (fresh.length === 0 && r.value.errors.length > 0) {
-      return { unavailable: `EDGAR could not read ${r.value.errors.map((e) => `${e.symbol}: ${e.error}`).join("; ")}` };
+    for (const f of fresh) {
+      const had = out.get(f.symbol);
+      out.set(f.symbol, [...(Array.isArray(had) ? had : []), f]);
     }
-    for (const f of fresh) out.set(f.symbol, [...(out.get(f.symbol) ?? []), f]);
+    for (const e of r.value.errors) out.set(e.symbol, { unavailable: `EDGAR could not read it: ${e.error}` });
     return out;
   }
 
