@@ -9,7 +9,7 @@ import type { Level, LevelKind, Rule } from "../src/desk-book.ts";
 import { nyInstant, type MarketSession } from "../src/market-clock.ts";
 import type { MarketQuote } from "../src/market-quotes.ts";
 import {
-  ALERTS_PER_HOUR, GAP_RULE_WINDOW_MS, HOUR_MS, REBUILD_WINDOW_MS, THIN_ALONE_MS, THIN_SECOND_MS,
+  ALERTS_PER_HOUR, GAP_RULE_WINDOW_MS, HOUR_MS, REBUILD_WINDOW_MS, THIN_ALONE_MS, THIN_SECOND_MS, THIN_STALE_MS,
   ALERT_REPLAY_MS, alertId, batchDue, batchId, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, judgedDate, passId, pastOf, priceKeys, rebuildDay, snapOf,
   takeBatch, referenceOf, usPhaseOf, watchQuoteOf,
   type AlertHit, type PriceKey, type UsSession, type WatchDay, type WatchQuote, type WatchSessions,
@@ -501,6 +501,52 @@ test("a lone print past the threshold hits alone after 2 minutes with onePrint: 
   assert.deepEqual(passAt(day, [move], u("NVDA", 89, "2026-11-30T21:45:00Z", 100), BOTH), [], "still past");
 });
 
+test("a waiting print 10 minutes old is dropped: never fired alone, never confirmed, and the next past print waits afresh", () => {
+  assert.equal(THIN_STALE_MS, 600_000);
+  const [move] = keysOf({ rules: [moveRule("m", ["NVDA"], 5)] });
+  /* the same as_of, first polled 10 minutes ago (the watch was asleep between) */
+  const day = emptyDay();
+  const first = u("NVDA", 90, "2026-11-30T21:40:00Z", 100);
+  passAt(day, [move], first, BOTH, T("2026-11-30T21:40:05Z"));
+  assert.deepEqual(passAt(day, [move], first, BOTH, T("2026-11-30T21:50:05Z")), []);
+  assert.equal(day.keys.get(move.key)?.pending, undefined, "dropped");
+  /* last night's waiting print, and the next morning's first pre-market print on the same reference */
+  const night = emptyDay();
+  passAt(night, [move], u("NVDA", 90, "2026-12-01T00:59:50Z", 100), BOTH);
+  const dec1: WatchSessions = { us: usSession("2026-12-01", "2026-11-30") };
+  assert.deepEqual(passAt(night, [move], u("NVDA", 89, "2026-12-01T09:00:10Z", 100), dec1), [], "not confirmed");
+  assert.equal(night.keys.get(move.key)?.ref, "2026-11-30", "the same reference");
+  assert.equal(night.keys.get(move.key)?.pending?.asOf, "2026-12-01T09:00:10Z", "a new waiting print");
+  assert.equal(passAt(night, [move], u("NVDA", 89, "2026-12-01T09:00:40Z", 100), dec1).length, 1, "which its own second confirms");
+});
+
+test("a waiting print over 2 minutes old is settled by a new print first: back under clears it, past confirms it", () => {
+  const [move] = keysOf({ rules: [moveRule("m", ["NVDA"], 5)] });
+  const back = emptyDay();
+  passAt(back, [move], u("NVDA", 90, "2026-11-30T12:00:00Z", 100), BOTH);
+  assert.deepEqual(passAt(back, [move], u("NVDA", 97, "2026-11-30T12:03:00Z", 100), BOTH), [], "back under: no hit");
+  assert.equal(back.keys.get(move.key)?.pending, undefined);
+  const on = emptyDay();
+  passAt(on, [move], u("NVDA", 90, "2026-11-30T12:00:00Z", 100), BOTH);
+  const hits = passAt(on, [move], u("NVDA", 89, "2026-11-30T12:03:00Z", 100), BOTH);
+  assert.deepEqual(shape(hits), [["m", true, "2026-11-27", "pre"]]);
+  assert.equal(hits[0].onePrint, undefined, "a confirmed hit, not a lone one");
+  assert.equal(hits[0].quote.asOf, "2026-11-30T12:03:00Z");
+});
+
+test("a waiting print fires alone on a pass with no print its key judges", () => {
+  const [move] = keysOf({ rules: [moveRule("m", ["NVDA"], 5)] });
+  const day = emptyDay();
+  const first = u("NVDA", 90, "2026-11-30T21:40:00Z", 100);
+  passAt(day, [move], first, BOTH, T("2026-11-30T21:40:05Z"));
+  assert.deepEqual(evaluatePass(day, [move], [], BOTH, T("2026-11-30T21:41:00Z")), [], "no print, too soon");
+  const stale = { ...u("NVDA", 90, "2026-11-30T21:42:00Z", 100), status: "stale" as const };
+  const hits = evaluatePass(day, [move], [stale], BOTH, T("2026-11-30T21:42:10Z"));
+  assert.deepEqual(shape(hits), [["m", true, "2026-11-30", "after"]]);
+  assert.equal(hits[0].onePrint, true);
+  assert.equal(hits[0].quote, first);
+});
+
 test("a gap rule never judges a pre-market print", () => {
   const [gap] = keysOf({ rules: [gapRule("g", ["NVDA"], 2)] });
   const day = emptyDay();
@@ -596,6 +642,7 @@ test("rebuildDay leaves a lost send out of the hour's count and keeps its cooldo
 
 test("isAlertRecord accepts the four kinds and rejects a torn or kindless line", () => {
   assert.equal(isAlertRecord(alertRecord({})), true);
+  assert.equal(isAlertRecord(alertRecord({ ref: "2026-11-30", phase: "after", onePrint: true })), true);
   assert.equal(isAlertRecord({ t: "2026-11-30T14:30:03.000Z", kind: "delivered", id: "a-1", delivery: { sent: [12] }, latency: { tradeMs: 2000, receivedMs: 1500 } }), true);
   assert.equal(isAlertRecord({ t: "2026-11-30T16:00:05.000Z", kind: "batch", id: "b-1", date: "2026-11-30", alerts: ["a-1"], dropped: "muted" }), true);
   assert.equal(isAlertRecord({ t: "2026-11-30T14:31:00.000Z", kind: "annotation", pass: "p-1", alerts: ["a-1"], result: "opened", sessionId: "s-1" }), true);
@@ -605,6 +652,7 @@ test("isAlertRecord accepts the four kinds and rejects a torn or kindless line",
     { ...alertRecord({}), decision: "maybe" }, { ...alertRecord({}), key: undefined },
     { t: "2026-11-30T14:31:00.000Z", kind: "annotation", pass: "p-1", alerts: ["a-1"], result: "lost" },
     { t: "2026-11-30T14:30:03.000Z", kind: "delivered", id: "a-1" },
+    { ...alertRecord({}), ref: 20261127 }, { ...alertRecord({}), phase: "night" }, { ...alertRecord({}), onePrint: false },
   ]) assert.equal(isAlertRecord(bad), false, JSON.stringify(bad));
 });
 

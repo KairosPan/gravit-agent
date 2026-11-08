@@ -55,6 +55,9 @@ export const THIN_SECOND_MS = 20_000;
 /** Outside the regular session, how long after it was first seen a lone print past a threshold waits for a second
  * before it fires alone. */
 export const THIN_ALONE_MS = 120_000;
+/** How old, from when it was first seen, a print waiting for its second may grow before it is dropped, never fired
+ * alone or confirmed: a print left at the end of after-hours is not the next morning's news. */
+export const THIN_STALE_MS = 600_000;
 /** How long after the close after-hours runs. */
 const AFTER_HOURS_MS = 4 * HOUR_MS;
 
@@ -285,9 +288,10 @@ export type Hit = { key: PriceKey; quote: WatchQuote; gap: boolean; date: string
 /**
  * Judges one pass: each key against its symbol's print, in key order, mutating `day`. Per key: a print it does not
  * judge is skipped; a lone print outside the regular session older than {@link THIN_ALONE_MS} fires (before the
- * unchanged-`as_of` skip, unless the new print settles it); a print with a new reference starts the key afresh; a
- * first past print of a fresh key hits as `gap`, a not-past to past one as a crossing - outside the regular session
- * only once a second distinct print confirms it.
+ * unchanged-`as_of` skip, unless the new print settles it, and on a pass with no print the key judges too), and one
+ * {@link THIN_STALE_MS} old is dropped first, neither fired nor confirmed; a print with a new reference starts the
+ * key afresh; a first past print of a fresh key hits as `gap`, a not-past to past one as a crossing - outside the
+ * regular session only once a second distinct print confirms it.
  * @param day - the watch's state.
  * @param keys - the price keys.
  * @param quotes - the pass's prints, at most one a market and symbol counted (the first).
@@ -312,8 +316,13 @@ export function evaluatePass(day: WatchDay, keys: readonly PriceKey[], quotes: r
     kd.alerted = true;
     hits.push({ key: k, ...hit, ref: kd.ref });
   };
-  /** A lone print past the threshold that waited long enough fires alone. */
+  /** A waiting print {@link THIN_STALE_MS} old or more is dropped. */
+  const dropStale = (kd: KeyDay): void => {
+    if (kd.pending !== undefined && now - kd.pending.firstAt >= THIN_STALE_MS) delete kd.pending;
+  };
+  /** A lone print past the threshold that waited long enough, and not too long, fires alone. */
   const alone = (k: PriceKey, kd: KeyDay): void => {
+    dropStale(kd);
     const p = kd.pending;
     if (p === undefined || now - p.firstAt < THIN_ALONE_MS) return;
     delete kd.pending;
@@ -322,13 +331,16 @@ export function evaluatePass(day: WatchDay, keys: readonly PriceKey[], quotes: r
     fire(k, kd, { quote: p.quote, gap, date: p.date, phase: p.phase, onePrint: true });
   };
   for (const k of keys) {
-    const q = prints.get(`${k.market}:${k.symbol}`);
-    if (q === undefined) continue;
-    const j = judgedOf(q, sessions);
-    if (j === undefined) continue;
-    if (j.phase !== undefined && j.phase !== "regular" && k.sessions !== "all") continue;
     const held = day.keys.get(k.key);
+    const q = prints.get(`${k.market}:${k.symbol}`);
+    const j = q === undefined ? undefined : judgedOf(q, sessions);
+    if (q === undefined || j === undefined || (j.phase !== undefined && j.phase !== "regular" && k.sessions !== "all")) {
+      /* no print, or none this key judges: a waiting print may still fire alone */
+      if (held !== undefined) alone(k, held);
+      continue;
+    }
     const same = held !== undefined && held.ref === j.ref ? held : undefined;
+    if (same !== undefined) dropStale(same);
     if (same !== undefined && same.lastAsOf === q.asOf) {
       alone(k, same);
       continue;
@@ -343,8 +355,8 @@ export function evaluatePass(day: WatchDay, keys: readonly PriceKey[], quotes: r
       kd = { ref: j.ref, alerted: false, repeats: 0 };
       day.keys.set(k.key, kd);
     }
-    kd.lastAsOf = q.asOf as string;
     const asOf = q.asOf as string;
+    kd.lastAsOf = asOf;
     const at = { date: j.date, ...(j.phase !== undefined && { phase: j.phase }) };
     if (k.trigger.type === "gap") {
       if (kd.side === undefined) {
@@ -510,7 +522,8 @@ export function isAlertRecord(x: unknown): x is AlertRecord {
     case "alert":
       return isText(x.id) && isText(x.pass) && isText(x.date) && isText(x.key) && isText(x.symbol) && (x.market === "us" || x.market === "cn")
         && (x.decision === "send" || x.decision === "suppressed") && (x.suppressed === undefined || isText(x.suppressed))
-        && (x.ref === undefined || isText(x.ref));
+        && (x.ref === undefined || isText(x.ref)) && (x.phase === undefined || x.phase === "pre" || x.phase === "regular" || x.phase === "after")
+        && (x.onePrint === undefined || x.onePrint === true);
     case "delivered":
       return isText(x.id) && isRecord(x.delivery) && isRecord(x.latency);
     case "batch":
