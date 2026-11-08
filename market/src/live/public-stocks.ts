@@ -12,10 +12,12 @@
  *
  * The DAY'S CHANGE on a line (change24h, changePct24h) is the change of the line's price from the last regular-session close before the
  * price's own time — yesterday's close in pre-market and the regular session, today's in after-hours — so the price less the change is that
- * close: Nasdaq's own figure (primaryData); for a Robinhood line, its price less Cboe's previous close (prev_day_close), and only while
- * Cboe's file is from the regular session the quote is in (DAY_CHANGE_FROM_CBOE: from Cboe's first trade of the day, about 09:45 New York,
- * to the close; in pre-market, after-hours and overnight the close it would be measured from is one Cboe's file does not say for certain,
- * and none is said); for a Cboe line, Cboe's own (price_change, from prev_day_close), only where Cboe gives a previous close.
+ * close: Nasdaq's own figure (primaryData); for a Robinhood line, which gives none, its price less that close as the Market's other reads of
+ * the same share say it (robinhoodDay, DAY_CHANGE_FROM_CBOE) in pre-market, the regular session and after-hours — Nasdaq's answer for the
+ * share where one is kept (its price less its change), else Cboe's file (its previous close while the file is from the regular session the
+ * quote is in; its last trade where the file is from the session whose close is the one wanted and was written after that close) — and
+ * none overnight or where neither says it; for a Cboe line, Cboe's own (price_change, from prev_day_close), only where Cboe gives a
+ * previous close.
  *
  * What is read from Cboe, and what it is (cboe.com's own quote pages read the same files; checked keyless from this machine 2026-10-13, 14:00
  * UTC, and 2026-10-14 17:49 UTC):
@@ -98,8 +100,9 @@ export const CBOE_FROM = "Cboe · 15 min delayed";
 /** the source's line in words: real time, with the delayed fallback */
 export const US_STOCKS_LINE = "US stocks · real time, else Cboe 15 min delayed";
 export const US_STOCKS_READ_ONLY = "Real-time quotes from Robinhood or Nasdaq, else Cboe's own delayed ones, 15 minutes behind the market — each line says which: a US stock trades at a connected broker (Alpaca, Robinhood), or in a paper account";
-/** a share priced by a source that gives no day's change (Robinhood) carries its change from Cboe's previous close, read from Cboe's file
- * beside it while that file is from the regular session the quote is in (see the top of this file). False: such a line carries no change */
+/** a share priced by a source that gives no day's change (Robinhood) carries its change from the reference close as the Market's other reads
+ * of it say it — Nasdaq's kept answer, else Cboe's file beside it (robinhoodDay, and the top of this file). False: such a line carries no
+ * change */
 export const DAY_CHANGE_FROM_CBOE = true;
 /** a plain ticker: one to five letters, a class letter after a dot (BRK.B) — the same as us-quotes.ts US_TICKER, written out here: this file
  * and that one import each other (through public-markets.ts), so neither reads the other's values while it is being loaded */
@@ -134,6 +137,8 @@ interface Quote {
   prevClose?: number | undefined;
   /** the last trade, as Cboe stamps it (New York time), in ms */
   lastTradeMs?: number | undefined;
+  /** when Cboe wrote the file (its `timestamp`, UTC), in ms: the file says the trades up to fifteen minutes before it */
+  writtenMs?: number | undefined;
 }
 interface BookEntry {
   symbol: string;
@@ -193,17 +198,61 @@ export function usSessionWords(session: MarketSession, quoteFrom: string, quoteA
   return `${until}: the price is ${who}'s ${who === "Nasdaq" ? "last trade" : "quote"} at ${etClock(quoteAt)} New York${day} (${PHASE_NAMES[usPhaseAt(quoteAt)] ?? usPhaseAt(quoteAt)})${opening}`;
 }
 
-/** A Robinhood line's day change (see the top of this file): its price less Cboe's previous close, where Cboe's file is from the regular
- * session the quote is in — Cboe's last trade at or after that session's open — so the close it is measured from is the one before that
- * session, the same Nasdaq measures from. Nothing otherwise: in pre-market, after-hours and overnight, from the open until Cboe's file has
- * the day's first trade, or where Cboe gives no previous close */
-function robinhoodDay(rt: UsQuote, cb: Quote | undefined): { change: number; changePct: number } | undefined {
-  if (!DAY_CHANGE_FROM_CBOE || !cb || rt.price === undefined || cb.prevClose === undefined || cb.lastTradeMs === undefined) return undefined;
-  if (usPhaseAt(rt.at) !== "regular") return undefined;
-  const s = nextRegularSession(rt.at);
-  if (!s.open || cb.lastTradeMs < s.opensAt || cb.lastTradeMs > s.closesAt) return undefined;
-  const change = rt.price - cb.prevClose;
-  return { change: round(change, 6), changePct: round((change / cb.prevClose) * 100, 4) };
+/** "2026-10-13 14:30:46" (UTC, as Cboe writes a file's `timestamp`) in ms; nothing for anything else (a bare time, "11:00:08") */
+function cboeWrittenMs(v: unknown): number | undefined {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/.exec(String(v ?? ""));
+  return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6])) : undefined;
+}
+
+/** a trade stamped up to this long after the close is still the session's: the closing cross is printed in the moments after it */
+const CLOSE_PRINT_MS = 60_000;
+/** the phases in which a line carries a change from a regular close (the overnight session is not one: no read here says its close) */
+const CHANGE_PHASES = new Set(["pre", "regular", "after"]);
+
+/** THE REFERENCE CLOSE of a price stamped `ms`: the last regular session that has closed by then — the day before's in pre-market and the
+ * regular session, the same day's in after-hours — as the calendar says it. Each step back is half a day, shorter than the time between one
+ * session's close and the next one's (21 hours at the least, after an early close), so none is passed over */
+function closedSessionBefore(ms: number): { opensAt: number; closesAt: number } | undefined {
+  for (let k = 1; k <= 24; k++) {
+    const s = nextRegularSession(ms - k * 12 * 3_600_000);
+    if (s.closesAt <= ms) return s;
+  }
+  return undefined;
+}
+
+/** A ROBINHOOD LINE'S DAY CHANGE (see the top of this file): Robinhood's price is the middle of its bid and ask and carries no change, so
+ * the reference close — the last regular close before the quote's own time — is taken from the Market's other reads of the same share, and
+ * no read is added for it (Cboe's file is asked beside every line anyway; Nasdaq's answer is one already kept). In order, the first that
+ * says it WINS:
+ *   1. NASDAQ'S ANSWER FOR THE SHARE, where one is kept (Nasdaq.latest: it came within FRESH_MS) and its own trade is of the same reference
+ *      close: its price less its change, measured by Nasdaq from the official close — the closing cross — in real time. Nasdaq stamps a
+ *      trade to the minute, so one stamped in the close's own minute (4:00 PM) may be the regular session's last, whose change is from the
+ *      close before: it is read as of the session before (CLOSE_PRINT_MS);
+ *   2. CBOE'S FILE, fifteen minutes behind: its previous close (prev_day_close) where the file is from the regular session the quote is in
+ *      (its last trade at or after that session's open); else its last trade where the file is from the session whose close is wanted (its
+ *      last trade in that session, at most CLOSE_PRINT_MS after the close) and was written at least fifteen minutes after that close, so
+ *      the file has the session's last trade — the close as Cboe's file says it, which can differ from the official close by the cross.
+ * So where the two disagree, Nasdaq's is said. Nothing otherwise — overnight, where no answer of Nasdaq is kept and Cboe's file is from
+ * neither session (or is not yet past the close), or where Cboe gives no previous close beside its file of the session */
+function robinhoodDay(rt: UsQuote, cb: Quote | undefined, nq: UsQuote | null | undefined): { change: number; changePct: number } | undefined {
+  if (!DAY_CHANGE_FROM_CBOE || rt.price === undefined || !CHANGE_PHASES.has(usPhaseAt(rt.at))) return undefined;
+  const ref = closedSessionBefore(rt.at);
+  if (!ref) return undefined;
+  let close: number | undefined;
+  // 1. Nasdaq's kept answer, of the same reference close
+  if (nq && nq.from === NASDAQ_FROM && nq.price !== undefined && nq.change !== undefined && CHANGE_PHASES.has(usPhaseAt(nq.at)) && closedSessionBefore(nq.at - CLOSE_PRINT_MS)?.closesAt === ref.closesAt) {
+    const c = nq.price - nq.change;
+    if (c > 0) close = c;
+  }
+  // 2. Cboe's file: of the session the quote is in (its previous close), or of the reference session once past its close (its last trade)
+  if (close === undefined && cb?.lastTradeMs !== undefined) {
+    const s = nextRegularSession(rt.at);
+    if (s.open && cb.lastTradeMs >= s.opensAt && cb.lastTradeMs <= s.closesAt) close = cb.prevClose;
+    else if (cb.price !== undefined && cb.writtenMs !== undefined && cb.lastTradeMs >= ref.opensAt && cb.lastTradeMs <= ref.closesAt + CLOSE_PRINT_MS && cb.writtenMs - CBOE_DELAY_MS >= ref.closesAt) close = cb.price;
+  }
+  if (close === undefined || !(close > 0)) return undefined;
+  const change = rt.price - close;
+  return { change: round(change, 6), changePct: round((change / close) * 100, 4) };
 }
 
 /** A US LINE SAID AGAIN AT A NEWER REAL-TIME QUOTE — the background reader's (live/us-quotes.ts UsQuoteFeed), which a paper account prices a
@@ -312,7 +361,7 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
       const d = rec(rec(r.body).data);
       if (str(d.security_type)?.toLowerCase() !== "stock") return null;
       const prevClose = pos(d.prev_day_close);
-      return { symbol, price: pos(d.current_price), bid: pos(d.bid), ask: pos(d.ask), ...(prevClose !== undefined ? { change: fin(d.price_change), changePct: fin(d.price_change_percent), prevClose } : {}), lastTradeMs: cboeTimeMs(d.last_trade_time) };
+      return { symbol, price: pos(d.current_price), bid: pos(d.bid), ask: pos(d.ask), ...(prevClose !== undefined ? { change: fin(d.price_change), changePct: fin(d.price_change_percent), prevClose } : {}), lastTradeMs: cboeTimeMs(d.last_trade_time), writtenMs: cboeWrittenMs(rec(r.body).timestamp) };
     });
   /** the last market day's regular-session minutes from Cboe (see the top of this file) */
   const cboeMinutes = (sym: string): Promise<Candle[] | Refusal> =>
@@ -422,7 +471,7 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
     const px = rt ?? cb;
     const at = rt ? rt.at : cb?.lastTradeMs;
     const from = rt ? rt.from : CBOE_FROM;
-    const day = rt ? (rt.from === ROBINHOOD_FROM ? robinhoodDay(rt, cb) : rt) : cb;
+    const day = rt ? (rt.from === ROBINHOOD_FROM ? robinhoodDay(rt, cb, nasdaq.latest(symbol)) : rt) : cb;
     const note = usSessionWords(session, from, at, now);
     return {
       symbol,
