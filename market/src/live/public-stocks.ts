@@ -14,9 +14,10 @@
  * price's own time — yesterday's close in pre-market and the regular session, today's in after-hours — so the price less the change is that
  * close: Nasdaq's own figure (primaryData); for a Robinhood line, which gives none, its price less that close as the Market's other reads of
  * the same share say it (robinhoodDay, DAY_CHANGE_FROM_CBOE) in pre-market, the regular session and after-hours — Nasdaq's answer for the
- * share where one is kept (its price less its change), else Cboe's file (its previous close while the file is from the regular session the
- * quote is in; its last trade where the file is from the session whose close is the one wanted and was written after that close) — and
- * none overnight or where neither says it; for a Cboe line, Cboe's own (price_change, from prev_day_close), only where Cboe gives a
+ * share where one is kept (its price less its change), else the close one read of Nasdaq's quote page found (asked in pre-market and
+ * after-hours only where nothing else at hand says it — from 16:00 to about 16:15 Cboe's file cannot — once per share and close, kept),
+ * else Cboe's file (its previous close while the file is from the regular session the quote is in; its close, else its last trade, where
+ * the file is from the session whose close is the one wanted and was written after that close) — and none overnight or where none says it; for a Cboe line, Cboe's own (price_change, from prev_day_close), only where Cboe gives a
  * previous close.
  *
  * What is read from Cboe, and what it is (cboe.com's own quote pages read the same files; checked keyless from this machine 2026-10-13, 14:00
@@ -79,7 +80,7 @@ import { stockHistory } from "./history-stocks.ts";
 import { badHistory, fin, fixedHosts, has, keeper, LIST_MS, list, nonNeg, pos, PUBLIC_HOSTS, publicNo, rec, round, str, type Listing, type PublicDeps, type PublicSource } from "./public-markets.ts";
 import type { Candle, MarketSession } from "./trade.ts";
 import { realHttp, unreachable, type HttpReply } from "./types.ts";
-import { FRESH_MS, NASDAQ_FROM, nasdaqSource, ROBINHOOD_FROM, ROBINHOOD_OVERNIGHT, usQuote, UsQuoteFeed, type UsQuote } from "./us-quotes.ts";
+import { FRESH_MS, NASDAQ_AT_ONCE, NASDAQ_FROM, nasdaqSource, ROBINHOOD_FROM, ROBINHOOD_OVERNIGHT, usQuote, UsQuoteFeed, type NasdaqClosing, type UsQuote } from "./us-quotes.ts";
 
 /** whether Robinhood's quotes are taken in the overnight session (us-quotes.ts, where it is set): a share Robinhood priced is then offered
  * for an extended-hours limit order overnight */
@@ -137,6 +138,8 @@ interface Quote {
   prevClose?: number | undefined;
   /** the last trade, as Cboe stamps it (New York time), in ms */
   lastTradeMs?: number | undefined;
+  /** the file's close field, where it gives one (a positive figure) */
+  close?: number | undefined;
   /** when Cboe wrote the file (its `timestamp`, UTC), in ms: the file says the trades up to fifteen minutes before it */
   writtenMs?: number | undefined;
 }
@@ -208,6 +211,10 @@ function cboeWrittenMs(v: unknown): number | undefined {
 const CLOSE_PRINT_MS = 60_000;
 /** the phases in which a line carries a change from a regular close (the overnight session is not one: no read here says its close) */
 const CHANGE_PHASES = new Set(["pre", "regular", "after"]);
+/** a Nasdaq read for a close that found none (a refusal, no answer, no close said) is asked again no sooner than this */
+export const CLOSE_RETRY_MS = 60_000;
+/** the closes one read of Nasdaq found are kept for this many shares and closes at most (the oldest let go first); a close never changes */
+const CLOSES_KEPT = 1_000;
 
 /** THE REFERENCE CLOSE of a price stamped `ms`: the last regular session that has closed by then — the day before's in pre-market and the
  * regular session, the same day's in after-hours — as the calendar says it. Each step back is half a day, shorter than the time between one
@@ -220,36 +227,70 @@ function closedSessionBefore(ms: number): { opensAt: number; closesAt: number } 
   return undefined;
 }
 
+/** a Nasdaq trade's change is measured from this reference close: the trade is in a phase with a change, and its stamp — to the minute —
+ * less CLOSE_PRINT_MS is past that close. A trade stamped in the close's own minute (4:00 PM) may be the regular session's last, whose
+ * change is from the close before: it is read as of the session before */
+function changeIsFrom(at: number, ref: { closesAt: number }): boolean {
+  return CHANGE_PHASES.has(usPhaseAt(at)) && closedSessionBefore(at - CLOSE_PRINT_MS)?.closesAt === ref.closesAt;
+}
+
+/** the close Nasdaq's kept answer for the share says (Nasdaq.latest: it came within FRESH_MS): its price less its change, where its own trade's
+ * change is from the reference close (changeIsFrom) */
+function keptNasdaqClose(nq: UsQuote | null | undefined, ref: { closesAt: number }): number | undefined {
+  if (!nq || nq.from !== NASDAQ_FROM || nq.price === undefined || nq.change === undefined || !changeIsFrom(nq.at, ref)) return undefined;
+  const c = nq.price - nq.change;
+  return c > 0 ? c : undefined;
+}
+
+/** THE CLOSE ONE READ OF NASDAQ'S QUOTE PAGE SAYS (Nasdaq.closing) for the reference session `ref`, in order: secondaryData's close stamped
+ * in that session (to its close's minute); else primaryData's last trade stamped in the close's own minute — right after the close that
+ * print IS the session's close (the one changeIsFrom refuses as a change's base: its change is from the close before, its price is this
+ * close); else primaryData's price less its change, where its change is from that close. Nothing otherwise */
+export function nasdaqCloseOf(a: NasdaqClosing, ref: { opensAt: number; closesAt: number }): number | undefined {
+  if (a.closed && a.closed.at >= ref.opensAt && a.closed.at <= ref.closesAt + CLOSE_PRINT_MS) return a.closed.price;
+  if (a.last && a.last.at >= ref.closesAt && a.last.at < ref.closesAt + CLOSE_PRINT_MS) return a.last.price;
+  if (a.last && a.last.change !== undefined && changeIsFrom(a.last.at, ref)) {
+    const c = a.last.price - a.last.change;
+    if (c > 0) return c;
+  }
+  return undefined;
+}
+
+/** the reference close Cboe's file says (see robinhoodDay) */
+function cboeClose(rt: UsQuote, cb: Quote | undefined, ref: { opensAt: number; closesAt: number }): number | undefined {
+  if (cb?.lastTradeMs === undefined) return undefined;
+  const s = nextRegularSession(rt.at);
+  // the file is of the session the quote is in: its previous close, or none. A dead or odd file with no previous close (prev_day_close 0.0)
+  // gives none here and does NOT fall through to the reference-file branch below — its last trade is of this session, not a close
+  if (s.open && cb.lastTradeMs >= s.opensAt && cb.lastTradeMs <= s.closesAt) return cb.prevClose;
+  // the file is of the reference session and was written fifteen minutes past its close: its close field where it gives one, else its last
+  // trade. Which of the two is the OFFICIAL close (the closing cross) is not yet confirmed by a live read: a recorded file (SATS, at the
+  // top of the tests) carries a close beside a different current_price
+  if (cb.writtenMs !== undefined && cb.lastTradeMs >= ref.opensAt && cb.lastTradeMs <= ref.closesAt + CLOSE_PRINT_MS && cb.writtenMs - CBOE_DELAY_MS >= ref.closesAt) return cb.close ?? cb.price;
+  return undefined;
+}
+
+/** THE REFERENCE CLOSE OF A ROBINHOOD LINE from what is at hand — no read is made here — in order, the first that says it WINS:
+ *   1. NASDAQ'S KEPT ANSWER for the share (keptNasdaqClose), measured by Nasdaq from the official close — the closing cross — in real time;
+ *   2. THE CLOSE ONE NASDAQ READ FOUND for this share and this close (`known`: usStocksPublic asks it right after the close, see robinhoodDay);
+ *   3. CBOE'S FILE, fifteen minutes behind (cboeClose).
+ * So where Nasdaq and Cboe disagree, Nasdaq's is said */
+function referenceClose(rt: UsQuote, cb: Quote | undefined, nq: UsQuote | null | undefined, known: number | undefined, ref: { opensAt: number; closesAt: number }): number | undefined {
+  return keptNasdaqClose(nq, ref) ?? known ?? cboeClose(rt, cb, ref);
+}
+
 /** A ROBINHOOD LINE'S DAY CHANGE (see the top of this file): Robinhood's price is the middle of its bid and ask and carries no change, so
- * the reference close — the last regular close before the quote's own time — is taken from the Market's other reads of the same share, and
- * no read is added for it (Cboe's file is asked beside every line anyway; Nasdaq's answer is one already kept). In order, the first that
- * says it WINS:
- *   1. NASDAQ'S ANSWER FOR THE SHARE, where one is kept (Nasdaq.latest: it came within FRESH_MS) and its own trade is of the same reference
- *      close: its price less its change, measured by Nasdaq from the official close — the closing cross — in real time. Nasdaq stamps a
- *      trade to the minute, so one stamped in the close's own minute (4:00 PM) may be the regular session's last, whose change is from the
- *      close before: it is read as of the session before (CLOSE_PRINT_MS);
- *   2. CBOE'S FILE, fifteen minutes behind: its previous close (prev_day_close) where the file is from the regular session the quote is in
- *      (its last trade at or after that session's open); else its last trade where the file is from the session whose close is wanted (its
- *      last trade in that session, at most CLOSE_PRINT_MS after the close) and was written at least fifteen minutes after that close, so
- *      the file has the session's last trade — the close as Cboe's file says it, which can differ from the official close by the cross.
- * So where the two disagree, Nasdaq's is said. Nothing otherwise — overnight, where no answer of Nasdaq is kept and Cboe's file is from
- * neither session (or is not yet past the close), or where Cboe gives no previous close beside its file of the session */
-function robinhoodDay(rt: UsQuote, cb: Quote | undefined, nq: UsQuote | null | undefined): { change: number; changePct: number } | undefined {
+ * the reference close — the last regular close before the quote's own time, in pre-market, the regular session and after-hours — is taken
+ * from the Market's other reads of the same share (referenceClose): Nasdaq's kept answer; else the close one read of Nasdaq found
+ * (Nasdaq.closing — asked in pre-market and after-hours only where neither of the others says it, once per share and close, kept, and a
+ * failed read asked again no sooner than CLOSE_RETRY_MS: from 16:00 to about 16:15 Cboe's file, fifteen minutes behind, has not the close
+ * yet); else Cboe's file, which is asked beside every line anyway — its previous close where it is of the session the quote is in, else its
+ * close where it is of the reference session and written fifteen minutes past it. Nothing otherwise: overnight, or where none says it */
+function robinhoodDay(rt: UsQuote, cb: Quote | undefined, nq: UsQuote | null | undefined, known: number | undefined): { change: number; changePct: number } | undefined {
   if (!DAY_CHANGE_FROM_CBOE || rt.price === undefined || !CHANGE_PHASES.has(usPhaseAt(rt.at))) return undefined;
   const ref = closedSessionBefore(rt.at);
   if (!ref) return undefined;
-  let close: number | undefined;
-  // 1. Nasdaq's kept answer, of the same reference close
-  if (nq && nq.from === NASDAQ_FROM && nq.price !== undefined && nq.change !== undefined && CHANGE_PHASES.has(usPhaseAt(nq.at)) && closedSessionBefore(nq.at - CLOSE_PRINT_MS)?.closesAt === ref.closesAt) {
-    const c = nq.price - nq.change;
-    if (c > 0) close = c;
-  }
-  // 2. Cboe's file: of the session the quote is in (its previous close), or of the reference session once past its close (its last trade)
-  if (close === undefined && cb?.lastTradeMs !== undefined) {
-    const s = nextRegularSession(rt.at);
-    if (s.open && cb.lastTradeMs >= s.opensAt && cb.lastTradeMs <= s.closesAt) close = cb.prevClose;
-    else if (cb.price !== undefined && cb.writtenMs !== undefined && cb.lastTradeMs >= ref.opensAt && cb.lastTradeMs <= ref.closesAt + CLOSE_PRINT_MS && cb.writtenMs - CBOE_DELAY_MS >= ref.closesAt) close = cb.price;
-  }
+  const close = referenceClose(rt, cb, nq, known, ref);
   if (close === undefined || !(close > 0)) return undefined;
   const change = rt.price - close;
   return { change: round(change, 6), changePct: round((change / close) * 100, 4) };
@@ -361,7 +402,7 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
       const d = rec(rec(r.body).data);
       if (str(d.security_type)?.toLowerCase() !== "stock") return null;
       const prevClose = pos(d.prev_day_close);
-      return { symbol, price: pos(d.current_price), bid: pos(d.bid), ask: pos(d.ask), ...(prevClose !== undefined ? { change: fin(d.price_change), changePct: fin(d.price_change_percent), prevClose } : {}), lastTradeMs: cboeTimeMs(d.last_trade_time), writtenMs: cboeWrittenMs(rec(r.body).timestamp) };
+      return { symbol, price: pos(d.current_price), bid: pos(d.bid), ask: pos(d.ask), ...(prevClose !== undefined ? { change: fin(d.price_change), changePct: fin(d.price_change_percent), prevClose } : {}), lastTradeMs: cboeTimeMs(d.last_trade_time), close: pos(d.close), writtenMs: cboeWrittenMs(rec(r.body).timestamp) };
     });
   /** the last market day's regular-session minutes from Cboe (see the top of this file) */
   const cboeMinutes = (sym: string): Promise<Candle[] | Refusal> =>
@@ -459,6 +500,56 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
     },
     clock,
   });
+  // THE CLOSES ONE READ OF NASDAQ FOUND (robinhoodDay), by share and close: a close found is kept (it never changes), a read on its way is
+  // shared, and one that found none is asked again no sooner than CLOSE_RETRY_MS — at most one Nasdaq read a share a close, but for retries
+  const closes = new Map<string, { close?: number; failedAt?: number; on?: Promise<void> }>();
+  const closeKey = (sym: string, ref: { closesAt: number }) => `${sym}@${ref.closesAt}`;
+  const setClose = (k: string, v: { close?: number; failedAt?: number; on?: Promise<void> }) => {
+    closes.delete(k);
+    closes.set(k, v);
+    if (closes.size > CLOSES_KEPT) closes.delete(closes.keys().next().value!);
+  };
+  const knownClose = (sym: string, at: number): number | undefined => {
+    const ref = closedSessionBefore(at);
+    return ref ? closes.get(closeKey(sym, ref))?.close : undefined;
+  };
+  /** whether a line wants Nasdaq asked for its close now: Robinhood priced it in pre-market or after-hours, nothing at hand says the close,
+   * no read for it is on its way or has found none within CLOSE_RETRY_MS — and Cboe has answered for it without the close, or its file
+   * cannot have the close yet (from the close to fifteen minutes after it). Where Cboe has not answered yet and may, the next read asks */
+  const wantsClose = (sym: string, rt: UsQuote | undefined, cb: Quote | undefined, now: number): { opensAt: number; closesAt: number } | undefined => {
+    if (!DAY_CHANGE_FROM_CBOE || !rt || rt.from !== ROBINHOOD_FROM || rt.price === undefined) return undefined;
+    const phase = usPhaseAt(rt.at);
+    if (phase !== "pre" && phase !== "after") return undefined;
+    const ref = closedSessionBefore(rt.at);
+    if (!ref || referenceClose(rt, cb, nasdaq.latest(sym), knownClose(sym, rt.at), ref) !== undefined) return undefined;
+    const c = closes.get(closeKey(sym, ref));
+    if (c?.on || (c?.failedAt !== undefined && clock() - c.failedAt < CLOSE_RETRY_MS)) return undefined;
+    return cb || now - CBOE_DELAY_MS < ref.closesAt ? ref : undefined;
+  };
+  /** one read of Nasdaq for a share's close (Nasdaq.closing, on its lane, under its hold), kept by share and close */
+  const askClose = (sym: string, ref: { opensAt: number; closesAt: number }): Promise<void> => {
+    const k = closeKey(sym, ref);
+    const on = nasdaq.closing(sym).then(
+      (a) => {
+        const close = a && !isRefusal(a) ? nasdaqCloseOf(a, ref) : undefined;
+        setClose(k, close !== undefined ? { close } : { failedAt: clock() });
+      },
+      () => setClose(k, { failedAt: clock() }),
+    );
+    setClose(k, { on });
+    return on;
+  };
+  /** the closes the lines want asked, NASDAQ_AT_ONCE at most at a time, waited for until `by` (Date.now()) at most: an answer that comes
+   * later is kept for the next read */
+  const closesFor = async (lines: Array<{ sym: string; rt: UsQuote | undefined; cb: Quote | undefined }>, now: number, by: number): Promise<void> => {
+    const asks: Promise<void>[] = [];
+    for (const l of lines) {
+      if (asks.length >= NASDAQ_AT_ONCE) break;
+      const ref = wantsClose(l.sym, l.rt, l.cb, now);
+      if (ref) asks.push(askClose(l.sym, ref));
+    }
+    if (asks.length) await within(Promise.all(asks), by - Date.now());
+  };
   // how much of the list a listing with nothing searched for shows, for the sentence under it
   let shown: { of: number; total: number } | undefined;
   /** one line: the real-time source's price, bid, ask, stamp and delay where one priced it, else Cboe's — never one source's price beside
@@ -471,7 +562,7 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
     const px = rt ?? cb;
     const at = rt ? rt.at : cb?.lastTradeMs;
     const from = rt ? rt.from : CBOE_FROM;
-    const day = rt ? (rt.from === ROBINHOOD_FROM ? robinhoodDay(rt, cb, nasdaq.latest(symbol)) : rt) : cb;
+    const day = rt ? (rt.from === ROBINHOOD_FROM ? robinhoodDay(rt, cb, nasdaq.latest(symbol), knownClose(symbol, rt.at)) : rt) : cb;
     const note = usSessionWords(session, from, at, now);
     return {
       symbol,
@@ -513,6 +604,7 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
      * is asked of Nasdaq alone (Cboe's store keeps files of tickers that no longer trade). Null: not a plain ticker, or no source prices it;
      * Cboe's refusal where nothing priced it and Cboe refused */
     async line(symbol) {
+      const started = Date.now();
       live.warm();
       const sym = symbol.trim().toUpperCase();
       if (!TICKER.test(sym)) return null;
@@ -525,8 +617,10 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
       const now = clock();
       if (rt) {
         // Cboe's quote where it has already answered, and nothing waited for where it has not
-        const cb = cbP ? await Promise.race([cbP, Promise.resolve(undefined)]) : undefined;
-        return listing(sym, rt, cb && !isRefusal(cb) ? cb : undefined, company, now);
+        const got = cbP ? await Promise.race([cbP, Promise.resolve(undefined)]) : undefined;
+        const cb = got && !isRefusal(got) ? got : undefined;
+        await closesFor([{ sym, rt, cb }], now, started + CBOE_WAIT_MS);
+        return listing(sym, rt, cb, company, now);
       }
       const cb = cbP ? await cbP : null;
       if (isRefusal(cb)) return cb;
@@ -535,6 +629,7 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
     reset: () => {
       live.clear();
       quotes.clear();
+      closes.clear();
       book.clear();
       minutes.clear();
       days.clear();
@@ -619,6 +714,8 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
       // nothing priced and Cboe refused (a place rule, an edge, a ban, no answer): that is the answer, not a list with no prices
       if (!rt.size && !cb.size && refused) return refused;
       const now = clock();
+      // a Robinhood line right after the close (or in pre-market) whose close nothing at hand says: one Nasdaq read for it, in Cboe's time
+      await closesFor(pool.map((e) => ({ sym: e.symbol, rt: rt.get(e.symbol), cb: cb.get(e.symbol) })), now, started + CBOE_WAIT_MS);
       const out = pool.filter((e) => rt.has(e.symbol) || cb.has(e.symbol)).map((e) => listing(e.symbol, rt.get(e.symbol), cb.get(e.symbol), names.get(e.symbol) ?? (e.company !== e.symbol ? e.company : undefined), now));
       if (!Q) shown = { of: out.length, total: US_SHARES.length };
       return out;

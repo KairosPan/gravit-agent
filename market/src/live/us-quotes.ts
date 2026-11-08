@@ -436,6 +436,15 @@ export function robinhoodQuotes(deps: PublicDeps = {}): RobinhoodReader {
 
 export type AssetClass = "stocks" | "etf";
 
+/** WHAT NASDAQ'S QUOTE PAGE SAYS OF THE LAST REGULAR CLOSE (Nasdaq.closing), as read, nothing worked out: primaryData's last trade — its price,
+ * its stamp to the minute and its change from the last regular close before it — and secondaryData's close where it gives one (in
+ * pre-market and after-hours: "Closed at Apr 13, 2026 4:00 PM ET", the archived answers at the top of this file; null in the session and
+ * while closed). The caller says which close each is of, by its stamps */
+export interface NasdaqClosing {
+  last?: { price: number; at: number; change?: number | undefined } | undefined;
+  closed?: { price: number; at: number } | undefined;
+}
+
 /** NASDAQ as one source (see the top of this file): its quote and its chart, sharing what is known of each symbol's class and one hold on
  * the whole source after a refusal that says to wait */
 export interface Nasdaq {
@@ -447,6 +456,10 @@ export interface Nasdaq {
    * undefined: never answered, answered too long ago, or held back (null: it has no real-time quote for it). Its own stamp says how old its
    * quote is */
   latest(symbol: string): UsQuote | null | undefined;
+  /** ONE READ OF A SHARE'S QUOTE PAGE FOR ITS LAST REGULAR CLOSE (NasdaqClosing), asked now — through the one lane and the one hold, as
+   * every ask of Nasdaq is — and kept by no one here: the caller keeps the close it finds (public-stocks.ts). Null where Nasdaq does not
+   * know the symbol */
+  closing(symbol: string): Promise<NasdaqClosing | null | Refusal>;
   /** one share's minutes, or null where Nasdaq does not know the symbol or keeps no minutes for it */
   chart(symbol: string): Promise<Candle[] | null | Refusal>;
   /** ONE SHARE'S DAILY BARS between two New York dates, both included (YYYY-MM-DD), oldest first — the chart page asked by dates, which
@@ -581,6 +594,21 @@ export function nasdaqSource(deps: PublicDeps = {}): Nasdaq {
       });
       asking.set(sym, p);
       return p;
+    },
+    async closing(symbol) {
+      const d = await data("info", symbol.trim().toUpperCase());
+      if (isRefusal(d) || d === null) return d;
+      const p = rec(d.primaryData);
+      const price = nasdaqNumber(p.lastSalePrice);
+      const at = nasdaqTimeMs(p.lastTradeTimestamp);
+      const change = nasdaqNumber(p.netChange);
+      const c = rec(d.secondaryData);
+      const closePrice = nasdaqNumber(c.lastSalePrice);
+      const closeAt = nasdaqTimeMs(String(c.lastTradeTimestamp ?? "").replace(/^\s*Closed at\s+/i, ""));
+      return {
+        ...(price !== undefined && price > 0 && at !== undefined ? { last: { price, at, ...(change !== undefined ? { change } : {}) } } : {}),
+        ...(closePrice !== undefined && closePrice > 0 && closeAt !== undefined ? { closed: { price: closePrice, at: closeAt } } : {}),
+      };
     },
     latest(symbol) {
       const a = answers.get(symbol.trim().toUpperCase());

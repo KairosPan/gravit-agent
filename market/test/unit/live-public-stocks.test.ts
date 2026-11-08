@@ -496,6 +496,48 @@ describe("US stocks in real time: Robinhood's quote, else Nasdaq's, else Cboe's 
       expect([line.quoteFrom, line.session!.phase, line.change24h, line.changePct24h]).toEqual([NASDAQ_FROM, "after", 3.39, 1.02]);
     });
 
+    it("a Robinhood row right after the close, before Cboe's file has it, takes its close from one Nasdaq read, kept for the close", async () => {
+      // Tuesday 16:03: Cboe's file written 16:02, fifteen minutes behind (last trade 15:47) — not yet the close
+      const at = fromEt(2026, 10, 13, 16, 3);
+      const cboeEarly: [string, HttpReply] = ["/quotes/AAPL.json", cboeAapl(340.4, 338, "2026-10-13T15:47:10", "2026-10-13 20:02:00")];
+      const nqAsked = (net: { sent: Array<{ url: string }> }) => net.sent.filter((x) => x.url.includes("/quote/AAPL/info")).length;
+      // Nasdaq's last trade stamped 4:00 PM — the closing print, its change from Monday's close — is the session's close: 340.75
+      const print = await settled(at, [[nq("AAPL"), nqInfo("AAPL", "340.75", "340.70", "340.80", "Oct 13, 2026 4:00 PM ET")], cboeEarly]);
+      expect([print.line.quoteFrom, print.line.session!.phase, print.line.change24h, print.line.changePct24h]).toEqual([ROBINHOOD_FROM, "after", 1.07, 0.314]);
+      expect(nqAsked(print.net)).toBe(1);
+      // secondaryData's close wins over a later after-hours trade's price less its change (341.70 - 3.39)
+      const closed = await settled(at, [[nq("AAPL"), nqInfo("AAPL", "341.70", "341.65", "341.75", "Oct 13, 2026 4:02 PM ET", { secondaryData: { lastSalePrice: "$340.60", netChange: "+2.10", percentageChange: "+0.62%", lastTradeTimestamp: "Closed at Oct 13, 2026 4:00 PM ET", isRealTime: false } })], cboeEarly]);
+      expect([closed.line.change24h, closed.line.changePct24h]).toEqual([1.22, 0.3582]);
+      // the close is kept: later reads within the hour ask Nasdaq no more
+      let t = at;
+      const net = network(live(at, [[nq("AAPL"), nqInfo("AAPL", "340.75", "340.70", "340.80", "Oct 13, 2026 4:00 PM ET")], cboeEarly]));
+      const src = usStocksPublic({ pace: async () => undefined, http: net.http, clock: () => t });
+      t = at - 15_000;
+      await src.listings({ q: "#", limit: 1 });
+      await new Promise((go) => setTimeout(go, 0));
+      t = at;
+      await src.listings({ q: "#", limit: 1 });
+      await new Promise((go) => setTimeout(go, 0));
+      for (let i = 0; i < 3; i++) {
+        const l = ((await src.listings({ q: "AAPL", limit: 1 })) as Listing[])[0]!;
+        expect([l.quoteFrom, l.change24h]).toEqual([ROBINHOOD_FROM, 1.07]);
+        await new Promise((go) => setTimeout(go, 0));
+      }
+      expect(nqAsked(net)).toBe(1);
+      // Nasdaq refusing: no change, as before — and not asked again within the minute
+      const down = await settled(at, [[nq("AAPL"), { status: 500, body: undefined, text: "" }], cboeEarly]);
+      expect([down.line.quoteFrom, down.line.change24h, down.line.changePct24h]).toEqual([ROBINHOOD_FROM, undefined, undefined]);
+      expect(nqAsked(down.net)).toBe(1);
+    });
+
+    it("Cboe's file past the close: its close field where it gives one, else its last trade", async () => {
+      const after = fromEt(2026, 10, 13, 17, 0);
+      const withClose = json({ timestamp: "2026-10-13 20:59:31", data: { symbol: "AAPL", security_type: "stock", current_price: 340.5, close: 340.62, prev_day_close: 338, bid: 0, ask: 0, last_trade_time: "2026-10-13T15:59:59" }, symbol: "AAPL" });
+      expect((await settled(after, [["/quotes/AAPL.json", withClose]])).line.change24h).toBe(1.2);
+      const noClose = json({ timestamp: "2026-10-13 20:59:31", data: { symbol: "AAPL", security_type: "stock", current_price: 340.5, close: 0, prev_day_close: 338, bid: 0, ask: 0, last_trade_time: "2026-10-13T15:59:59" }, symbol: "AAPL" });
+      expect((await settled(after, [["/quotes/AAPL.json", noClose]])).line.change24h).toBe(1.32);
+    });
+
     it("a row whose reference close no source answers has no change, as today", async () => {
       const after = fromEt(2026, 10, 13, 17, 0);
       // Cboe refusing the share's file, no Nasdaq answer kept: Robinhood's price, no change
