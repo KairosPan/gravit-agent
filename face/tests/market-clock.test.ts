@@ -15,7 +15,7 @@ import { XSHG_CLOCK } from "../src/xshg-clock.ts";
 import { fakeCalendar } from "./desk-fakes.ts";
 import {
   CALENDAR_DAYS, CALENDAR_RETRY_MS, MAX_WINDOW_DAYS, XNYS_AD_HOC_CLOSURES, XNYS_CLOCK, builtinMarketClock, createMarketCalendar, deskCalendars, easterSunday,
-  sessionFor, windowCovers, xnysEarlyCloses, xnysHolidays, xnysWindow,
+  sessionBefore, sessionFor, windowCovers, xnysEarlyCloses, xnysHolidays, xnysPrevious, xnysWindow,
   type DayAnswer, type MarketClock, type MarketSession, type MarketWindow,
 } from "../src/market-clock.ts";
 
@@ -169,6 +169,18 @@ test("the clock is Node alone: market-clock.ts imports only et.ts and xshg-clock
 });
 
 /* ---------- a window ---------- */
+
+test("the session before a date: the window's latest before it, else none; by the XNYS rules across holidays and weekends", () => {
+  assert.equal(sessionBefore(WINDOW, "2026-11-30"), "2026-11-27", "the early close, over the weekend");
+  assert.equal(sessionBefore(WINDOW, "2026-11-27"), "2026-11-25", "over Thanksgiving");
+  assert.equal(sessionBefore(WINDOW, "2026-11-24"), undefined, "the window's first day has none before it");
+  assert.equal(sessionBefore(undefined, "2026-11-30"), undefined);
+  assert.equal(xnysPrevious("2026-11-30"), "2026-11-27");
+  assert.equal(xnysPrevious("2026-11-27"), "2026-11-25");
+  assert.equal(xnysPrevious("2026-11-02"), "2026-10-30");
+  assert.equal(xnysPrevious("2027-01-04"), "2026-12-31", "over New Year's Day");
+  assert.equal(xnysPrevious("2026-11-2"), undefined, "a malformed date has none");
+});
 
 test("sessionFor: a session, closed inside the window, undefined outside it", () => {
   const w = WINDOW;

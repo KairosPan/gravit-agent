@@ -22,8 +22,10 @@
  * line; the ledgers, read once before any pass is judged (`alerts.jsonl` into src/watch-eval.ts `rebuildDay`,
  * `filings.jsonl` into src/filings.ts `baselineFrom`; an unreadable `alerts.jsonl` judges nothing until it reads,
  * with one line; its orphans handled at that first read, see below); each
- * market, its calendar's answer for its own date, its window (ruling 2: 10 minutes before the open to a minute after
- * the close) and a poll when due by its cadence (ruling 3), never two in flight per market; a due batch; and the
+ * market, its calendar's answer for its own date, its window (a US share's from 04:00 ET of its date to the close
+ * plus 4 h, 20:00 ET or 17:00 on an early close, its session handed over with the date of the one before it; an A
+ * share's, ruling 2, 10 minutes before the open to a minute after the close) and a poll when due by its cadence
+ * (ruling 3), never two in flight per market; a due batch; and the
  * filings (ruling 9), one single-flight poll when due, aborted at 120 s.
  *
  * A PASS is one market's poll - one snapshot over that market's ids alone - or one filings poll. Its hits are judged
@@ -70,11 +72,12 @@ import {
   seenKey, type Baseline, type FilingRecord,
 } from "./filings.ts";
 import { HttpError } from "./http.ts";
-import type { DayAnswer, DeskCalendars, MarketSession } from "./market-clock.ts";
+import { nyInstant, sessionBefore, xnysPrevious, type DayAnswer, type DeskCalendars, type MarketSession } from "./market-clock.ts";
 import type { MarketQuoteSource } from "./market-quotes.ts";
 import { idOf, type Market } from "./symbols.ts";
 import {
-  alertId, batchDue, batchId, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, passId, priceKeys, rebuildDay, snapOf, takeBatch, watchQuoteOf,
+  AFTER_HOURS_MS, alertId, batchDue, batchId, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, passId, priceKeys, REBUILD_WINDOW_MS, rebuildDay, snapOf,
+  takeBatch, watchQuoteOf,
   type AlertAnnotation, type AlertBatch, type AlertDelivered, type AlertHit, type AlertRecord, type Hit, type PriceKey, type WatchDay, type WatchQuote,
 } from "./watch-eval.ts";
 import { XSHG_COVERED } from "./xshg-clock.ts";
@@ -89,9 +92,10 @@ export const WATCH_CN_POLL_MS = 10_000;
 export const WATCH_US_MAX = 40;
 /** The most A-share symbols polled. */
 export const WATCH_CN_MAX = 60;
-/** How long before a market's open its polls begin. */
+/** How long before an A-share open its polls begin. A US share's begin at 04:00 ET of the session date. */
 export const WATCH_LEAD_MS = 600_000;
-/** How long after its close they go on. */
+/** How long after an A-share close they go on. A US share's go on to the close plus 4 h (20:00 ET, or 17:00 on an
+ * early close): src/watch-eval.ts `AFTER_HOURS_MS`. */
 export const WATCH_TAIL_MS = 60_000;
 /** How often the face that watches rewrites its lease's beat. */
 export const LEASE_BEAT_MS = 30_000;
@@ -112,7 +116,8 @@ const NEAR_PCT = 2;
 const DISPOSE_WAIT_MS = 2_000;
 /** How many alerts the status's `recent` lists. */
 const RECENT_MAX = 10;
-/** How long the watch keeps its records and its dated line memories in memory: the rebuild's 36 hours, with room. */
+/** How long the watch keeps its records and its dated line memories in memory, for a reply's context and the
+ * orphans; the crossing state is rebuilt from {@link REBUILD_WINDOW_MS} of the ledger, apart from it. */
 const MEMORY_MS = 48 * 3_600_000;
 const DAY_MS = 86_400_000;
 const BIN = "gravit-face";
@@ -434,6 +439,8 @@ export function installWatch(deps: WatchDeps): WatchHandle {
   const lastStart: Partial<Record<Market, number>> = {};
   /** Each market's watched symbols by session date: how many polls answered, and whether one priced it. */
   const unpriced: Record<Market, { date?: string; seen: Map<string, { polls: number; priced: boolean }> }> = { us: { seen: new Map() }, cn: { seen: new Map() } };
+  /** Each market's repeats its keys' cooldowns swallowed on a session date, as this run counted them. */
+  const repeats: Record<Market, { date?: string; n: number }> = { us: { n: 0 }, cn: { n: 0 } };
   const filings: WatchStatus["filings"] = { state: "off", symbols: 0, aShares: 0, seeded: 0 };
   let filingsInflight = false;
   let filingsLastStart: number | undefined;
@@ -765,8 +772,10 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     mk.session = { date: session.date, open: session.open, close: session.close };
     if (uncovered) mk.uncovered = true;
     else delete mk.uncovered;
-    const from = Date.parse(session.open) - WATCH_LEAD_MS;
-    const to = Date.parse(session.close) + WATCH_TAIL_MS;
+    /* a US share from 04:00 ET of its date to the close plus 4 h; an A share ten minutes before the open to a minute
+     * after the close */
+    const from = m === "us" ? Date.parse(nyInstant(session.date, 4, 0)) : Date.parse(session.open) - WATCH_LEAD_MS;
+    const to = Date.parse(session.close) + (m === "us" ? AFTER_HOURS_MS : WATCH_TAIL_MS);
     mk.state = at < from ? "waiting" : at >= to ? "after-close" : "polling";
     if (mk.state !== "polling") return answer;
     if (uncovered) sayOnce(`pastTable:${session.date}`, WATCH_LINES.cnPastTable(XSHG_COVERED.through), { at });
@@ -778,9 +787,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       lastStart[m] = at;
       mk.lastPollAt = iso(at);
       const watched = symbols.slice(0, max);
-      /* prev is the session's own date until the watch reads the one before it (why-it-moved task 8): every US print
-       * then measures from one reference a session, as before */
-      const sessions = m === "us" ? { us: { ...session, prev: session.date } } : { cn: uncovered ? { ...session, uncovered: true as const } : session };
+      const sessions = m === "us" ? { us: { ...session, prev: prevSession(session.date) } } : { cn: uncovered ? { ...session, uncovered: true as const } : session };
       track((async () => {
         try {
           await pricePass(m, watched, session, sessions, at);
@@ -792,6 +799,13 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       })());
     }
     return answer;
+  }
+
+  /** The date of the US session before `date`: the calendar's window's, else the XNYS rules' (the calendar's window
+   * starts on the date it was asked for, so it rarely holds the one before); the date itself, as a last resort, when
+   * neither can say - every print of the session then measures from one reference. */
+  function prevSession(date: string): string {
+    return sessionBefore(deps.calendars.us.window(), date) ?? xnysPrevious(date) ?? date;
   }
 
   /** A failed poll: its reason the market's `lastError`, said once per session date. */
@@ -838,7 +852,25 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       }
     }
     const watchedSet = new Set(watched);
-    const hits = evaluatePass(day, keys.filter((k) => k.market === m && watchedSet.has(k.symbol)), quotes, sessions, at);
+    const judged = keys.filter((k) => k.market === m && watchedSet.has(k.symbol));
+    const before = new Map(judged.map((k) => [k.key, day.keys.get(k.key)] as const));
+    const counts = new Map([...before].map(([key, kd]) => [key, kd?.repeats ?? 0] as const));
+    const hits = evaluatePass(day, judged, quotes, sessions, at);
+    /* the repeats this pass swallowed, on the session date it judged: a US key's reference is the previous close in
+     * pre-market and the session, so its day's repeats cannot be told by its reference */
+    let swallowed = 0;
+    for (const [key, kd] of before) {
+      const now = day.keys.get(key);
+      if (now !== undefined) swallowed += now.repeats - (now === kd ? (counts.get(key) ?? 0) : 0);
+    }
+    if (swallowed > 0) {
+      const r = repeats[m];
+      if (r.date !== session.date) {
+        r.date = session.date;
+        r.n = 0;
+      }
+      r.n += swallowed;
+    }
     if (hits.length === 0) return;
     const pass = passId();
     queueHits(pass, hits.map((h) => ({ record: priceRecord(h, pass, at) })), at);
@@ -850,12 +882,18 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     return h === undefined ? null : { qty: h.qty, avgCost: h.avgCost };
   };
 
+  /** Whether a sent alert gets a why turn (spec §5.3): a US price move, a `move` hit (labelled `gap` or not) or a
+   * `gap` rule's. */
+  const whyOf = (rec: AlertHit): boolean => rec.market === "us" && (rec.trigger.type === "move" || rec.trigger.type === "gap");
+
   /** A price hit's record, but for its id and decision. */
   function priceRecord(h: Hit, pass: string, at: number): Pending["record"] {
     return {
       t: iso(at), kind: "alert", pass, date: h.date, key: h.key.key, market: h.key.market, symbol: h.key.symbol, label: h.key.label,
       trigger: h.key.trigger, gap: h.gap, quote: snapOf(h.quote), holding: holdingOf(h.key.symbol), plan: h.key.plan, source: h.key.source,
-      annotate: h.key.annotate,
+      annotate: h.key.annotate, ref: h.ref,
+      ...(h.phase !== undefined ? { phase: h.phase } : {}),
+      ...(h.onePrint === true ? { onePrint: true as const } : {}),
       ...(h.key.urgent ? { urgent: true as const } : {}),
     };
   }
@@ -908,7 +946,9 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       for (const rec of sends) {
         /* dispose has begun: no deliver after it and no post, and each send left is recorded undelivered, so none
          * stays pending */
-        const note = rec.annotate ? (spent ? "budget" : "follows") : "none";
+        /* a why turn for a US price move; a plan check for another annotated hit with a plan; an A-share move with
+         * no plan is posted nothing (why-it-moved task 10), so nothing is said to follow */
+        const note = !rec.annotate ? "none" : spent ? "budget" : whyOf(rec) ? "why" : rec.plan !== null ? "follows" : "none";
         let result: DeliverResult;
         if (stopped) result = { undelivered: "the face shut down" };
         else {
@@ -1167,10 +1207,13 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     if (!alertsRead) {
       try {
         const { records: read } = await readRecords(home, ALERTS_FILE, isWatchRecord);
+        /* the crossing state from the ledger's five days, so a long weekend keeps Friday's after-hours alert; the
+         * orphans, the reply context and the records kept from its 48 hours */
+        const back = [...read.filter((r) => at - Date.parse(r.t) <= REBUILD_WINDOW_MS).map(withStringIds), ...records];
         const merged = [...read.filter((r) => at - Date.parse(r.t) <= MEMORY_MS).map(withStringIds), ...records];
         const orphans = findOrphans(merged, at);
-        day = rebuildDay(merged, at, new Set(orphans.lost.map((r) => r.id)));
-        filingCooldowns(day, merged);
+        day = rebuildDay(back, at, new Set(orphans.lost.map((r) => r.id)));
+        filingCooldowns(day, back);
         records = merged;
         for (const r of merged) if (r.kind === "delivered") deliveries.set(r.id, r);
         alertsRead = true;
@@ -1325,8 +1368,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       if (r.decision === "send") today.sent += 1;
       else if (r.suppressed !== undefined) today.suppressed[r.suppressed] += 1;
     }
-    const marketOfKey = new Map(keys.map((k) => [k.key, k.market]));
-    for (const [key, kd] of day.keys) if (kd.ref === date && (marketOfKey.get(key) ?? (key.startsWith("filing:") ? "us" : undefined)) === m) today.repeats += kd.repeats;
+    if (repeats[m].date === date) today.repeats = repeats[m].n;
     return today;
   }
 

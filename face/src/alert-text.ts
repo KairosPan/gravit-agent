@@ -12,11 +12,15 @@
  * - **A level or a price rule:** `<SYMBOL> <price> · <stamp>`; what fired - `<kind> <price | low-high> <when>[ · gap]
  *   · <file>[ · <levelSource>]`, `<id>: the move from the previous close reached <pct>%[ · gap] · <file>` or `<id>:
  *   the first print is <pct>% or more from the previous close · gap · <file>`; the holding, `held <qty> @ <avg cost,
- *   2 dp>[ · day P&L <signed, en-US, 2 dp>]` or `not held`; `plan: <plan>`, verbatim, when there is one; and `day:
- *   <signed %, 2 dp> from the previous close <prevClose>` or `day: no previous close yet`.
+ *   2 dp>[ · day P&L <signed, en-US, 2 dp>]` or `not held`; `plan: <plan>`, verbatim, when there is one; the move by
+ *   the print's phase - `day: <signed %, 2 dp> from the previous close <prevClose>` (or `day: no previous close yet`),
+ *   `pre-market: <%> from the <ref> close <prevClose>`, `after hours: <%> from today's close <prevClose>` (or `<phase>:
+ *   no reference close yet`); and, for an alert that fired on a lone print, `one print: no second print within 2
+ *   minutes`.
  * - **A filing:** `<SYMBOL> <form> · accepted <HH:MM:SS> ET · filed <date>` (`accepted time unknown` without one);
  *   `items <a>, <b>` when it lists any; its URL; `<rule id> · <file> · <holding>`; and its plan, when it has one.
- * - **The note,** last: `annotation follows`, the budget's `no annotation: …`, or nothing.
+ * - **The note,** last: `reason follows` before a why turn, `annotation follows` before a plan check, the budget's
+ *   `no annotation: …`, or nothing.
  *
  * THE WHY POST (spec §5.3, §5.4). {@link whyPost} posts the desk a US price move's alerts with what may explain them:
  * each symbol's headlines from the Market (src/market-news.ts) and its EDGAR filings, then {@link WHY_INSTRUCTIONS},
@@ -86,12 +90,27 @@ function holdingLine(hit: AlertHit): string {
   return `${head} · day P&L ${signed(hit.holding.qty * (q.price - q.prevClose), true)}`;
 }
 
-/** The day's line: the print's change, else read from its previous close. */
-function dayLine(q: QuoteSnap | null): string {
-  if (q === null || q.prevClose === null || !(q.prevClose > 0)) return "day: no previous close yet";
-  const pct = q.chgPct ?? ((q.price - q.prevClose) / q.prevClose) * 100;
-  return `day: ${signed(pct, false)}% from the previous close ${q.prevClose}`;
+/** The move's line, by the print's phase: `day: <pct>% from the previous close <close>` in the regular session (and
+ * on an A share's, a filing's and an older record's, which carry none), `pre-market: <pct>% from the <ref> close
+ * <close>` before the open, `after hours: <pct>% from today's close <close>` after the close; the change the print's,
+ * else read from its reference close, which the Market carries as its `prevClose`. */
+function dayLine(hit: AlertHit): string {
+  const q = hit.quote;
+  const phase = hit.phase === "pre" && hit.ref === undefined ? "regular" : hit.phase;
+  const label = phase === "pre" ? "pre-market" : phase === "after" ? "after hours" : "day";
+  if (q === null || q.prevClose === null || !(q.prevClose > 0)) return label === "day" ? "day: no previous close yet" : `${label}: no reference close yet`;
+  const pct = `${signed(q.chgPct ?? ((q.price - q.prevClose) / q.prevClose) * 100, false)}%`;
+  if (phase === "pre") return `pre-market: ${pct} from the ${hit.ref} close ${q.prevClose}`;
+  if (phase === "after") return `after hours: ${pct} from today's close ${q.prevClose}`;
+  return `day: ${pct} from the previous close ${q.prevClose}`;
 }
+
+/** What follows the alert, its last line: `reason follows` before a why turn, `annotation follows` before a plan check. */
+const NOTE_LINES: Record<"why" | "follows" | "budget", string> = {
+  why: "reason follows",
+  follows: "annotation follows",
+  budget: "no annotation: the desk's token budget for today is spent",
+};
 
 /** What a level or a price rule fired on: line 2 of its alert. */
 function firedLine(hit: AlertHit): string {
@@ -116,9 +135,10 @@ function firedLine(hit: AlertHit): string {
  * An alert as the phone shows it, in spec §5.9's order (see the module header).
  * @param hit - the alert's record.
  * @param now - the time it is sent at, for the stamp's date.
- * @param note - `follows` when an annotation will reply, `budget` when the day's tokens are spent, `none` for neither.
+ * @param note - `why` when a why turn will reply, `follows` when a plan check will, `budget` when the day's tokens are
+ *   spent, `none` for neither.
  */
-export function alertText(hit: AlertHit, now: number, note: "follows" | "budget" | "none"): string {
+export function alertText(hit: AlertHit, now: number, note: "why" | "follows" | "budget" | "none"): string {
   const t = hit.trigger;
   const lines: string[] = [];
   if (t.type === "filing") {
@@ -134,10 +154,10 @@ export function alertText(hit: AlertHit, now: number, note: "follows" | "budget"
     lines.push(q === null ? `${hit.symbol} no price` : `${hit.symbol} ${q.price} · ${priceStamp(q, now)}`);
     lines.push(firedLine(hit), holdingLine(hit));
     if (hit.plan !== null) lines.push(`plan: ${hit.plan}`);
-    lines.push(dayLine(q));
+    lines.push(dayLine(hit));
+    if (hit.onePrint === true) lines.push("one print: no second print within 2 minutes");
   }
-  if (note === "follows") lines.push("annotation follows");
-  else if (note === "budget") lines.push("no annotation: the desk's token budget for today is spent");
+  if (note !== "none") lines.push(NOTE_LINES[note]);
   return lines.join("\n");
 }
 

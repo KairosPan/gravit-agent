@@ -164,6 +164,41 @@ test("a filing's form, items and url, and every quoted reason, stay one line", (
   }
 });
 
+const INTC_MOVE = hit({
+  symbol: "INTC", label: "watch-intc", source: { file: "desk/rules.yml", index: 3 }, annotate: true,
+  trigger: { type: "move", rule: "watch-intc", pct: 5 },
+});
+
+test("an after-hours alert names today's close, a pre-market alert names its reference date's close, and a one-print alert says so", () => {
+  const after = { ...INTC_MOVE, date: "2026-10-29", ref: "2026-10-29", phase: "after" as const, quote: us(70.16, "2026-10-29T21:05:00Z", "robinhood", 92.07, -23.8) };
+  assert.equal(alertText(after, NOW, "none").split("\n").at(-1), "after hours: -23.80% from today's close 92.07");
+  const pre = { ...INTC_MOVE, date: "2026-10-30", ref: "2026-10-29", phase: "pre" as const, quote: us(69.05, "2026-10-30T11:00:00Z", "robinhood", 92.07, -25) };
+  assert.equal(alertText(pre, NOW, "none").split("\n").at(-1), "pre-market: -25.00% from the 2026-10-29 close 92.07");
+  const regular = { ...INTC_MOVE, date: "2026-10-30", ref: "2026-10-29", phase: "regular" as const, quote: us(86.45, "2026-10-30T14:00:00Z", "robinhood", 92.07, -6.1) };
+  assert.equal(alertText(regular, NOW, "none").split("\n").at(-1), "day: -6.10% from the previous close 92.07");
+  const lone = { ...pre, onePrint: true as const };
+  assert.deepEqual(alertText(lone, NOW, "none").split("\n").slice(-2), [
+    "pre-market: -25.00% from the 2026-10-29 close 92.07",
+    "one print: no second print within 2 minutes",
+  ]);
+  assert.deepEqual(alertText(lone, NOW, "why").split("\n").slice(-3), [
+    "pre-market: -25.00% from the 2026-10-29 close 92.07",
+    "one print: no second print within 2 minutes",
+    "reason follows",
+  ], "the one-print line before the note");
+  assert.equal(alertText({ ...after, quote: us(70.16, "2026-10-29T21:05:00Z", "robinhood", null) }, NOW, "none").split("\n").at(-1), "after hours: no reference close yet");
+  assert.equal(alertText({ ...pre, quote: us(69.05, "2026-10-30T11:00:00Z", "robinhood", null) }, NOW, "none").split("\n").at(-1), "pre-market: no reference close yet");
+});
+
+test("the why note ends reason follows", () => {
+  const move = { ...INTC_MOVE, quote: us(86.45, "2026-11-30T15:21:00Z", "robinhood", 92.07) };
+  const lines = alertText(move, NOW, "why").split("\n");
+  assert.equal(lines.at(-1), "reason follows");
+  assert.equal(lines.at(-2), "day: -6.10% from the previous close 92.07");
+  assert.ok(!alertText(move, NOW, "why").includes("annotation follows"));
+  assert.equal(alertText(move, NOW, "follows").split("\n").at(-1), "annotation follows");
+});
+
 test("numbers: prices as the feed gave them, signs on change and P&L, none on zero, en-US P&L", () => {
   const flat = { ...NVDA_STOP, quote: us(174.05, "2026-11-30T15:21:03Z", "nasdaq", 174.05) };
   assert.deepEqual(alertText(flat, NOW, "none").split("\n").filter((l) => /P&L|^day:/.test(l)), [

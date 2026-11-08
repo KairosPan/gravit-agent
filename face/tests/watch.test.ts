@@ -237,13 +237,13 @@ test("an A-share crossing is sent with the TENCENT stamp; the US poll is not ask
 });
 
 test("each market polls at its cadence, never two in flight, and only inside its window", async () => {
-  const h = await harness({ start: "2026-11-30T14:19:00Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") } });
-  h.source.tables.us.set("NVDA", us(171, "2026-11-30T14:19:00Z"));
+  const h = await harness({ start: "2026-11-30T08:59:00Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") } });
+  h.source.tables.us.set("NVDA", us(171, "2026-11-30T08:59:00Z"));
   await h.wall.advance(0);
   await h.wall.advance(55_000);
-  assert.equal(h.source.calls.length, 0, "no us poll before 14:20Z");
+  assert.equal(h.source.calls.length, 0, "no us poll before 09:00Z, 04:00 ET");
   await h.wall.advance(5_000);
-  assert.deepEqual(h.source.calls.map((c) => c.at), [Date.parse("2026-11-30T14:20:00Z")]);
+  assert.deepEqual(h.source.calls.map((c) => c.at), [Date.parse("2026-11-30T09:00:00Z")]);
   await h.wall.advance(20_000);
   assert.equal(h.source.calls.length, 2);
   let release!: () => void;
@@ -256,10 +256,10 @@ test("each market polls at its cadence, never two in flight, and only inside its
   release();
   await h.wall.advance(5_000);
   assert.equal(h.source.calls.length, 4, "the next tick after it settles polls");
-  h.wall.set("2026-11-30T21:01:00Z");
+  h.wall.set("2026-12-01T01:00:00Z");
   const before = h.source.calls.length;
   await h.wall.advance(60_000);
-  assert.equal(h.source.calls.length, before, "nothing from 21:01Z");
+  assert.equal(h.source.calls.length, before, "nothing from 01:00Z, 20:00 ET");
   assert.equal(h.watch.status().markets.us.state, "after-close");
   await h.watch.dispose();
 
@@ -272,6 +272,140 @@ test("each market polls at its cadence, never two in flight, and only inside its
   await c.wall.advance(10_000);
   assert.deepEqual(c.source.calls.map((x) => x.at), [Date.parse("2026-12-01T01:20:00Z"), Date.parse("2026-12-01T01:20:10Z")]);
   await c.watch.dispose();
+});
+
+/* ---------- the US window, the reference close and the ledger's five days (why-it-moved task 8) ---------- */
+
+const US_1029: MarketSession = { date: "2026-10-29", open: "2026-10-29T13:30:00Z", close: "2026-10-29T20:00:00Z", early: false };
+const US_1030: MarketSession = { date: "2026-10-30", open: "2026-10-30T13:30:00Z", close: "2026-10-30T20:00:00Z", early: false };
+const US_1102: MarketSession = { date: "2026-11-02", open: "2026-11-02T14:30:00Z", close: "2026-11-02T21:00:00Z", early: false };
+const US_1127: MarketSession = { date: "2026-11-27", open: "2026-11-27T14:30:00Z", close: "2026-11-27T18:00:00Z", early: true };
+/** The week daylight saving ends (Sunday 2026-11-01). */
+const dstWeek = (): MarketCalendar & { asked: string[] } =>
+  fakeCalendar({ "2026-10-29": US_1029, "2026-10-30": US_1030, "2026-10-31": "closed", "2026-11-01": "closed", "2026-11-02": US_1102 });
+const INTC_RULE = "- id: watch-intc\n  kind: move_pct\n  symbols: [INTC]\n  move_pct: 5\n  cooldown: 1440m\n";
+
+/** The times of a harness's US polls, as ISO text. */
+const usPolls = (h: Harness): string[] => h.source.callsFor("us").map((c) => new Date(c.at).toISOString().replace(".000Z", "Z"));
+
+test("the US watch polls from 04:00 ET to 20:00 ET on a session day, and to 17:00 ET on an early close", async () => {
+  const h = await harness({ start: "2026-11-30T08:59:40Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") } });
+  h.source.tables.us.set("NVDA", us(171, "2026-11-30T08:59:40Z"));
+  await h.wall.advance(0);
+  await h.wall.advance(15_000);
+  assert.deepEqual(usPolls(h), [], "nothing before 04:00 ET");
+  assert.equal(h.watch.status().markets.us.state, "waiting");
+  await h.wall.advance(5_000);
+  assert.deepEqual(usPolls(h), ["2026-11-30T09:00:00Z"]);
+  assert.equal(h.watch.status().markets.us.state, "polling");
+  h.wall.set("2026-12-01T00:59:40Z");
+  const before = usPolls(h).length;
+  await h.wall.advance(0);
+  assert.equal(usPolls(h).length, before + 1, "19:59:40 ET still polls");
+  await h.wall.advance(20_000);
+  assert.equal(usPolls(h).length, before + 1, "none at 20:00 ET");
+  assert.equal(h.watch.status().markets.us.state, "after-close");
+  await h.watch.dispose();
+
+  const early = await harness({
+    start: "2026-11-27T21:59:40Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") },
+    calendars: { us: fakeCalendar({ "2026-11-25": { date: "2026-11-25", open: "2026-11-25T14:30:00Z", close: "2026-11-25T21:00:00Z", early: false }, "2026-11-26": "closed", "2026-11-27": US_1127 }) },
+  });
+  early.source.tables.us.set("NVDA", us(171, "2026-11-27T21:59:40Z"));
+  await early.wall.advance(0);
+  assert.deepEqual(usPolls(early), ["2026-11-27T21:59:40Z"], "16:59:40 ET on an early close polls");
+  await early.wall.advance(20_000);
+  assert.deepEqual(usPolls(early), ["2026-11-27T21:59:40Z"], "none at 17:00 ET");
+  assert.equal(early.watch.status().markets.us.state, "after-close");
+  await early.watch.dispose();
+});
+
+test("in the week daylight saving ends, the first US poll is 08:00Z on Friday 2026-10-30 and 09:00Z on Monday 2026-11-02", async () => {
+  const fri = await harness({ start: "2026-10-30T07:59:40Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") }, calendars: { us: dstWeek() } });
+  fri.source.tables.us.set("NVDA", us(171, "2026-10-30T07:59:40Z"));
+  await fri.wall.advance(0);
+  await fri.wall.advance(15_000);
+  assert.deepEqual(usPolls(fri), []);
+  await fri.wall.advance(5_000);
+  assert.deepEqual(usPolls(fri), ["2026-10-30T08:00:00Z"]);
+  await fri.watch.dispose();
+
+  const mon = await harness({ start: "2026-11-02T08:59:40Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") }, calendars: { us: dstWeek() } });
+  mon.source.tables.us.set("NVDA", us(171, "2026-11-02T08:59:40Z"));
+  await mon.wall.advance(0);
+  await mon.wall.advance(15_000);
+  assert.deepEqual(usPolls(mon), [], "08:00Z on Monday is 03:00 ET");
+  await mon.wall.advance(5_000);
+  assert.deepEqual(usPolls(mon), ["2026-11-02T09:00:00Z"]);
+  await mon.watch.dispose();
+});
+
+test("a restart at Monday 04:00 remembers Friday's after-hours alert and stays quiet", async () => {
+  const files = { "desk/rules.yml": INTC_RULE };
+  const fri = await harness({ start: "2026-10-30T20:05:00Z", files, calendars: { us: dstWeek() } });
+  fri.source.tables.us.set("INTC", us(70, "2026-10-30T20:04:59Z", 92.07));
+  await fri.wall.advance(0);
+  await until("the first poll", () => fri.source.calls.length === 1);
+  fri.source.tables.us.set("INTC", us(69.5, "2026-10-30T20:05:19Z", 92.07));
+  await fri.wall.advance(20_000);
+  await until("the after-hours alert", () => fri.sent.length === 1);
+  const lines = fri.sent[0].text.split("\n");
+  assert.equal(lines.at(-2), "after hours: -24.51% from today's close 92.07");
+  assert.equal(lines.at(-1), "reason follows", "a sent US move whose rule annotates is told a reason follows");
+  await until("the record", async () => (await fri.alertRecords()).some((r) => r.kind === "alert"));
+  const rec = (await fri.alertRecords()).find((r) => r.kind === "alert");
+  assert.deepEqual([rec?.date, rec?.ref, rec?.phase, rec?.onePrint], ["2026-10-30", "2026-10-30", "after", undefined]);
+  await fri.watch.dispose();
+
+  const wall = new WallClock("2026-11-02T08:59:55Z");
+  const source = new FakeSource(() => wall.now());
+  source.tables.us.set("INTC", us(68, "2026-11-02T09:00:00Z", 92.07));
+  const mon = await harness({ start: "", wall, source, home: fri.home, root: fri.root, calendars: { us: dstWeek() }, pid: 4343 });
+  await wall.advance(0);
+  await wall.advance(5_000);
+  await until("the first Monday poll", () => source.calls.length === 1);
+  assert.equal(source.calls[0].at, Date.parse("2026-11-02T09:00:00Z"));
+  for (let i = 1; i <= 8; i++) {
+    source.tables.us.set("INTC", us(68 - i / 10, `2026-11-02T09:00:${String(i * 5).padStart(2, "0")}Z`, 92.07));
+    await wall.advance(20_000);
+  }
+  await until("the eighth Monday poll", () => source.calls.length >= 9);
+  assert.equal(mon.sent.length, 0, "the pre-market measures from Friday's close, which already alerted");
+  assert.equal((await mon.alertRecords()).filter((r) => r.kind === "alert").length, 1);
+  await mon.watch.dispose();
+});
+
+test("a restart in the regular session remembers a lone pre-market print's alert, and counts its repeat today", async () => {
+  const files = { "desk/rules.yml": INTC_RULE };
+  const pre = await harness({ start: "2026-10-30T11:00:00Z", files, calendars: { us: dstWeek() } });
+  pre.source.tables.us.set("INTC", us(69.05, "2026-10-30T10:59:58Z", 92.07));
+  await pre.wall.advance(0);
+  await until("the first poll", () => pre.source.calls.length === 1);
+  for (let i = 0; i < 6; i++) await pre.wall.advance(20_000);
+  await until("the lone print's alert", () => pre.sent.length === 1);
+  assert.deepEqual(pre.sent[0].text.split("\n").slice(-3), [
+    "pre-market: -25.00% from the 2026-10-29 close 92.07",
+    "one print: no second print within 2 minutes",
+    "reason follows",
+  ]);
+  await until("the record", async () => (await pre.alertRecords()).some((r) => r.kind === "alert"));
+  const rec = (await pre.alertRecords()).find((r) => r.kind === "alert");
+  assert.deepEqual([rec?.date, rec?.ref, rec?.phase, rec?.onePrint], ["2026-10-30", "2026-10-29", "pre", true]);
+  await pre.watch.dispose();
+
+  const wall = new WallClock("2026-10-30T14:00:00Z");
+  const source = new FakeSource(() => wall.now());
+  source.tables.us.set("INTC", us(90, "2026-10-30T13:59:59Z", 92.07));
+  const reg = await harness({ start: "", wall, source, home: pre.home, root: pre.root, calendars: { us: dstWeek() }, pid: 4343 });
+  await wall.advance(0);
+  await until("the first poll", () => source.calls.length === 1);
+  source.tables.us.set("INTC", us(86, "2026-10-30T14:00:19Z", 92.07));
+  await wall.advance(20_000);
+  await until("the second poll", () => source.calls.length === 2);
+  await wall.advance(0);
+  assert.equal(reg.sent.length, 0, "the session's crossing measures from the 2026-10-29 close, inside the pre-market alert's cooldown");
+  assert.equal(reg.watch.status().markets.us.today.repeats, 1, "a repeat judged on today's date counts today, whatever its reference");
+  await reg.watch.dispose();
 });
 
 test("a closed XSHG day polls no A share; past the table the watch says so once and judges on the Market's phase", async () => {
@@ -706,6 +840,25 @@ test("a batch that carries an urgent rule's hit goes as urgent, and so does a la
   await late.watch.dispose();
 });
 
+test("an A-share move says annotation follows with a plan, and nothing follows without one", async () => {
+  const h = await harness({
+    start: "2026-12-01T02:03:00Z",
+    files: { "desk/rules.yml": "- id: cn-plan\n  kind: move_pct\n  symbols: [\"600519\"]\n  move_pct: 4\n  plan: trim a third\n- id: cn-bare\n  kind: move_pct\n  symbols: [\"000001\"]\n  move_pct: 4\n" },
+  });
+  h.source.tables.cn.set("600519", cn(1400, "2026-12-01T02:02:58Z", "trading", 1400));
+  h.source.tables.cn.set("000001", cn(10, "2026-12-01T02:02:58Z", "trading", 10));
+  await h.wall.advance(0);
+  await until("the first poll", () => h.source.calls.length === 1);
+  h.source.tables.cn.set("600519", cn(1330, "2026-12-01T02:03:08Z", "trading", 1400));
+  h.source.tables.cn.set("000001", cn(9.5, "2026-12-01T02:03:08Z", "trading", 10));
+  await h.wall.advance(10_000);
+  await until("two alerts", () => h.sent.length === 2);
+  const last = (symbol: string): string | undefined => h.sent.find((x) => x.text.startsWith(`${symbol} `))?.text.split("\n").at(-1);
+  assert.equal(last("600519"), "annotation follows");
+  assert.equal(last("000001"), "day: -5.00% from the previous close 10");
+  await h.watch.dispose();
+});
+
 test("a rule marked urgent sends urgent; a level and an unmarked rule send alert", async () => {
   const h = await harness({
     start: "2026-11-30T15:20:45Z",
@@ -862,7 +1015,7 @@ test("two watches started together over a stale lease: one holds it, the other s
 
 test("levels.yml edited while the face runs is reloaded on the next tick; a broken edit keeps the last good load with one line", async () => {
   const four = ["NVDA", "AMD", "AAPL", "MSFT"].map((s) => level(s, "stop", 100, "cross_down")).join("");
-  const h = await harness({ start: "2026-11-30T12:00:00Z", files: { "desk/levels.yml": four } });
+  const h = await harness({ start: "2026-11-30T08:00:00Z", files: { "desk/levels.yml": four } });
   await h.wall.advance(0);
   assert.equal(h.sent.length, 0, "the boot's load is the baseline");
   assert.equal(h.watch.status().files.find((f) => f.file === "desk/levels.yml")?.entries, 4);
@@ -1074,20 +1227,20 @@ test("an unreadable alerts.jsonl judges nothing and says why once", async () => 
 
 test("stateText lists both markets' holdings, the levels within 2% and today's counts; a source slower than 3 s gives the counts without its prices", async () => {
   const h = await harness({
-    start: "2026-11-30T12:00:00Z",
+    start: "2026-11-30T08:00:00Z",
     files: {
       "desk/holdings.yml": "- symbol: NVDA\n  qty: 10\n  avg_cost: 100\n- symbol: \"600519\"\n  qty: 100\n  avg_cost: 1400\n",
       "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") + level("600519", "watch", 1400, "cross_down"),
     },
   });
-  h.source.tables.us.set("NVDA", us(171, "2026-11-30T11:59:00Z", 170));
+  h.source.tables.us.set("NVDA", us(171, "2026-11-30T07:59:00Z", 170));
   h.source.tables.cn.set("600519", cn(1500, "2026-11-30T07:00:00Z", "closed"));
   await h.wall.advance(0);
   const view = JSON.parse((await h.watch.stateText()) ?? "null") as {
     holdings: { symbol: string; last: number | null; at: string | null }[]; near: { symbol: string; distancePct: number }[]; alerts: unknown; prices?: string;
   };
   assert.deepEqual(view.holdings.map((x) => [x.symbol, x.last]), [["NVDA", 171], ["600519", 1500]]);
-  assert.equal(view.holdings[0].at, "ROBINHOOD 06:59:00 ET");
+  assert.equal(view.holdings[0].at, "ROBINHOOD 02:59:00 ET");
   assert.deepEqual(view.near.map((x) => [x.symbol, x.distancePct]), [["NVDA", -0.58]]);
   assert.deepEqual(view.alerts, { sent: 0, suppressed: 0 });
   assert.equal(view.prices, undefined);
@@ -1159,13 +1312,13 @@ test("an A-share calendar that fails inside the table is one log line", async ()
 test("the desk state asks each market at most its watch cap, a symbol past it priced from its last poll or counted", async () => {
   const names = Array.from({ length: 45 }, (_, i) => `A${i}`);
   const h = await harness({
-    start: "2026-11-30T12:00:00Z",
+    start: "2026-11-30T08:00:00Z",
     files: {
       "desk/levels.yml": names.slice(0, 40).map((x) => level(x, "watch", 10, "cross_down")).join(""),
       "strategies/demo/levels.yml": names.slice(40).map((x) => level(x, "watch", 10, "cross_down")).join(""),
     },
   });
-  for (const x of names) h.source.tables.us.set(x, us(20, "2026-11-30T11:59:00Z"));
+  for (const x of names) h.source.tables.us.set(x, us(20, "2026-11-30T07:59:00Z"));
   await h.wall.advance(0);
   const view = JSON.parse((await h.watch.stateText()) ?? "null") as { prices?: string };
   assert.deepEqual(h.source.calls.map((c) => c.ids.length), [WATCH_US_MAX]);
@@ -1298,7 +1451,7 @@ test("a filings poll still running at 120 s is aborted", async () => {
 
 test("a level that expires at the ET date change is refused with its line", async () => {
   const text = "- symbol: NVDA\n  kind: stop\n  price: 170\n  when: cross_down\n  plan: sell half\n  expires: 2026-11-30\n";
-  const h = await harness({ start: "2026-11-30T23:00:00Z", files: { "desk/levels.yml": text } });
+  const h = await harness({ start: "2026-12-01T01:30:00Z", files: { "desk/levels.yml": text } });
   await h.wall.advance(0);
   assert.equal(h.watch.status().files.find((f) => f.file === "desk/levels.yml")?.entries, 1);
   assert.equal(h.sent.length, 0);

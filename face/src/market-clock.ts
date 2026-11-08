@@ -241,6 +241,34 @@ export function sessionFor(window: MarketWindow, date: string): MarketSession | 
   return window.sessions.find((session) => session.date === date) ?? "closed";
 }
 
+/**
+ * The date of the session before `date` in the window: its latest session dated before `date`, when the window
+ * holds the day before it.
+ * @param window - a window, or none.
+ * @param date - a New York date, `YYYY-MM-DD`.
+ * @returns the date, or `undefined` when the window cannot say (it starts on `date` or later, or holds no session
+ *   before it).
+ */
+export function sessionBefore(window: MarketWindow | undefined, date: string): string | undefined {
+  if (window === undefined || !isDateText(date) || !windowCovers(window, addDays(date, -1))) return undefined;
+  let found: string | undefined;
+  for (const s of window.sessions) if (s.date < date && (found === undefined || s.date > found)) found = s.date;
+  return found;
+}
+
+/**
+ * The date of the XNYS session before `date`, by the builtin rules, at most {@link MAX_WINDOW_DAYS} days back.
+ * @param date - a New York date, `YYYY-MM-DD`; anything else has none.
+ */
+export function xnysPrevious(date: string): string | undefined {
+  if (!isDateText(date)) return undefined;
+  for (let n = 1; n <= MAX_WINDOW_DAYS; n++) {
+    const before = addDays(date, -n);
+    if (xnysSession(before) !== undefined) return before;
+  }
+  return undefined;
+}
+
 /* ---------- the clock ---------- */
 
 /** Ask the clock for the window of `days` days from the New York date `from`. Rejects with why it has none. */

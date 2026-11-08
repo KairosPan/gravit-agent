@@ -58,8 +58,8 @@ export const THIN_ALONE_MS = 120_000;
 /** How old, from when it was first seen, a print waiting for its second may grow before it is dropped, never fired
  * alone or confirmed: a print left at the end of after-hours is not the next morning's news. */
 export const THIN_STALE_MS = 600_000;
-/** How long after the close after-hours runs. */
-const AFTER_HOURS_MS = 4 * HOUR_MS;
+/** How long after the close after-hours runs: to 20:00 ET, or 17:00 on an early close. */
+export const AFTER_HOURS_MS = 4 * HOUR_MS;
 
 /* ---------- the quote ---------- */
 
