@@ -28,7 +28,8 @@ export const reducers = {
     // cn:sh600519, us:AAPL, crypto:BTC/USD) canonicalised; one that is neither opens Markets
     if (route.screen === 'markets' && route.id) route = { screen: 'markets', id: !String(route.id).startsWith('cn:') && isAccountKey(route.id) ? route.id : canonicalId(route.id) };
     // (and the lightbox: an image belongs to the conversation it was opened in; and the shortcut sheet)
-    let s = { ...state, route, detailsOpen: false, settingsOpen: false, edit: null, confirm: null, lightbox: null, shortcuts: null, ...stockClosed(state) };
+    const changedRoute = state.route.screen !== route.screen || state.route.id !== route.id;
+    let s = { ...state, route, listOpen: changedRoute ? false : state.listOpen, detailsOpen: false, settingsOpen: false, edit: null, confirm: null, lightbox: null, shortcuts: null, ...stockClosed(state) };
     // the first level's Messages key returns to the conversation you last had open
     if (route.screen === 'messages' && route.id && route.id !== 'new') s.lastConv = route.id;
     // the Statement and a venue's Details belong to Account
@@ -52,6 +53,8 @@ export const reducers = {
     return s;
   },
   toggleRail: s => ({ ...s, railCollapsed: !s.railCollapsed }),
+  toggleList: s => ({ ...s, listOpen: !s.listOpen }),
+  setListOpen: (s, open) => (s.listOpen === !!open ? s : { ...s, listOpen: !!open }),
   // a list group folds or opens; Archived starts folded (host/list-view.js)
   toggleGroup(s, key) {
     if (typeof key !== 'string' || key === '') return s;
@@ -71,7 +74,7 @@ export const reducers = {
   // default), then the first words send it
   startDraft(s, { where } = {}) {
     const known = typeof where === 'string' && (s.channels ?? []).some(c => c.workspaceId === where);
-    return { ...closeOverlays(s), draft: { title: '', where: known ? where : defaultWhere(s) }, route: { screen: 'messages', id: 'new' } };
+    return { ...closeOverlays(s), listOpen: false, draft: { title: '', where: known ? where : defaultWhere(s) }, route: { screen: 'messages', id: 'new' } };
   },
   cancelDraft: s => ({ ...s, draft: null, route: { screen: 'messages', id: firstOpen(s.conversations)?.id ?? null } }),
   setDraftTitle: (s, title) => (s.draft ? { ...s, draft: { ...s.draft, title } } : s),
