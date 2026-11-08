@@ -6128,7 +6128,7 @@ D29). Markets › Desk open, the phone at hand.
 7. **The headline lag.** On the first live weekday event, compare the newest headline's time in the
    reply (Nasdaq's `pubDate`) with the company's release time (its press release or 8-K's accepted
    time). PASS: the lag is recorded, and the feed answered on a weekday (`www.nasdaq.com` accepted
-   the market's user-agent: no `headlines unavailable` in the turn's message, which
+   the market's user-agent: no `Headlines for <SYM>: unavailable: <reason>` in the turn's message, which
    `alerts.jsonl`'s pass and the session in Messages show).
 8. **The Market's after-hours rows.** About 17:00 ET on a session day, on an active name: in
    Markets, the row's change is measured from today's close whichever source priced it. With

@@ -26,7 +26,7 @@ beside Telegram, its app's two tokens in the account, its connection an outbound
 socket — §1, §3, §4, §5 (D20), §7.3; revised 2026-11-07 for why it moved (spec
 `docs/superpowers/specs/2026-11-07-why-it-moved-design.md`): the desk opens web pages, the risk
 read first (A1, D29 added, D25 re-read), a US move's alert answered by a why turn under a 240 s
-deadline (§1), the watch's US hours 04:00–20:00 ET from each move's reference close (D23);
+deadline (§1), the watch's US hours 04:00–20:00 ET from each move's reference close (§3, D23);
 §7.2 re-read 2026-11-02 for the dsh 0.2.1-rc.5 upgrade (a role is a preset of its own behind
 the face's blocking tool; a native child reports by notice; the upgrade's own decisions are PLAN
 D19–D27, `DEVELOPMENT.md` §4.8, not this charter's D19–D28) ·
@@ -221,7 +221,8 @@ run as the screen line, its status, and its levels against the last prints) the 
 shares that `desk/holdings.yml`, the desk's and each strategy's `levels.yml` and the rules in
 `desk/rules.yml` name, priced from the Market part's reads through the face's proxy, as the
 Markets screen reads them — US shares by its `explore` read every 20 s, A shares by its `quotes`
-read every 10 s — and judged inside each market's own session. An alert goes to the phone from
+read every 10 s — and judged inside each market's own session, a US move rule also in pre-market
+from 04:00 and after-hours to 20:00 ET (D23). An alert goes to the phone from
 the face itself through the account's send, the plan quoted verbatim and no model in its path, and, when the level or rule
 asks for one, one annotation turn follows as a reply, in a fresh desk session of its own so it never waits on the operator's turns; a new 8-K or Form 4 of
 a US name a filing rule covers, read from SEC in the face's own code, alerts the same way. The phone's `/mute` silences the alerts for a while;
