@@ -770,5 +770,6 @@ describe("the market's headline read, GET /api/news", () => {
     servers.push(srv);
     const r = await fetch(`${srv.url}/api/news?symbols=INTC`);
     expect(r.status).toBe(409);
+    expect(((await r.json()) as { refusal: { code: string } }).refusal.code).toBe("E_MARKET_UNKNOWN_SOURCE");
   });
 });

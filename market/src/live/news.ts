@@ -106,19 +106,20 @@ function field(item: string, tag: string): string | undefined {
   return t === "" ? undefined : t;
 }
 
-/** an absolute http(s) URL, or nothing */
+/** a nasdaq.com article's URL (https, www.nasdaq.com, the default port, no user), or nothing: a link anywhere else is not the feed's */
 function urlOf(v: string | undefined): string | undefined {
   if (!v) return undefined;
   try {
     const u = new URL(v);
-    return u.protocol === "https:" || u.protocol === "http:" ? u.toString() : undefined;
+    return u.protocol === "https:" && u.hostname === "www.nasdaq.com" && !u.port && !u.username && !u.password ? u.toString() : undefined;
   } catch {
     return undefined;
   }
 }
 
 /** Nasdaq's RSS for `symbol`, as headlines newest first: each <item> with its <pubDate> (RFC 822, to ISO UTC), <dc:creator> (the outlet),
- * <title> and <link>; an item missing any of the four, or with a date or link that does not read, is skipped. An item whose
+ * <title> and <link>; an item missing any of the four, with a date that does not read, or with a link that is not an https
+ * www.nasdaq.com URL, is skipped. An item whose
  * <nasdaq:tickers> names more than WRAP_TICKERS distinct tickers is a market wrap, kept only when `symbol` leads the list. One URL once */
 export function parseNasdaqRss(xml: string, symbol: string): Headline[] {
   const sym = symbol.trim().toUpperCase();

@@ -382,7 +382,7 @@ export function marketReads(core: MarketCore): MarketReads {
      * its symbol under `unavailable` with the refusal's words; the others answer. A repeated symbol is asked once */
     async news(symbols, since) {
       const source = core.news;
-      if (!source) return no("E_MARKET_BAD_REQUEST", { venue: NEWS_ID, message: NEWS_NOT_READ });
+      if (!source) return no("E_MARKET_UNKNOWN_SOURCE", { venue: NEWS_ID, message: NEWS_NOT_READ });
       const asked = [...new Set(symbols)];
       if (asked.length < 1 || asked.length > NEWS_SYMBOLS_MOST || !asked.every((x) => US_TICKER.test(x))) return no("E_MARKET_BAD_REQUEST", { venue: NEWS_ID, message: `headlines are read for 1 to ${NEWS_SYMBOLS_MOST} US shares, each by its ticker` });
       const sinceMs = since === undefined ? undefined : Date.parse(since);

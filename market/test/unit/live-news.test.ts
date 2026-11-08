@@ -78,6 +78,8 @@ describe("Nasdaq's per-symbol RSS, parsed", () => {
       item({ ...base, title: undefined }),
       item({ ...base, title: "no link", link: undefined }),
       item({ ...base, title: "not a URL", link: "/articles/relative" }),
+      item({ ...base, title: "plain http", link: "http://www.nasdaq.com/articles/plain" }),
+      item({ ...base, title: "off host", link: "https://www.marketbeat.com/instant-alerts/intc" }),
       item({ ...base, title: "no outlet", outlet: undefined }),
       item({ ...base, title: "AT&amp;T &lt;up&gt; on &quot;deal&quot; &apos;talks&apos;", link: "https://www.nasdaq.com/articles/att?a=1&amp;b=2", date: "Fri, 06 Nov 2026 16:00:00 +0000" }),
       item({ ...base, title: "<![CDATA[Q3 <beat> & raise]]>", outlet: "<![CDATA[Zacks & Co]]>", date: "Fri, 06 Nov 2026 17:00:00 +0000", link: "https://www.nasdaq.com/articles/cdata" }),
