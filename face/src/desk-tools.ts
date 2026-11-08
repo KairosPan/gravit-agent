@@ -172,7 +172,8 @@ const QUOTE_SCHEMA = {
 /** `desk_state`'s value: the fields of {@link DeskStatus} every status carries - `runs` cut to the last
  * {@link STATE_RUNS} - with `runsInLedger`, and those it carries when there is something to say; `watch`
  * without its `marks` (every level's distance, the Markets rows' - the route carries them): its `near`, the
- * nearest levels, and its `recent`, the last alerts, say what the model needs (the old P3 plan's ruling 15). Open,
+ * nearest levels, and its `recent`, the last alerts, say what the model needs (the old P3 plan's ruling 15). Never
+ * `fetchesToday`, the pages the desk opened today: the operator's to read on the Desk view, not the model's. Open,
  * so a field the status gains later is no failure. */
 const STATE_SCHEMA = {
   type: "object",
@@ -315,8 +316,8 @@ const asJson = (_args: unknown, value: unknown): { type: "text"; text: string }[
  *   error. The model reads one line per quote ({@link quoteLine}), its time on its exchange's clock as the desk
  *   quotes one, or the `error` as it is.
  * - `desk_state` (`timeoutMs` 5,000): no parameters; answers `deps.readState()`'s status with `runs` cut
- *   to the last {@link STATE_RUNS} and `runsInLedger`, how many the ledger holds, and its `watch` without
- *   `marks` - the route `GET /data/desk/status` answers them all.
+ *   to the last {@link STATE_RUNS} and `runsInLedger`, how many the ledger holds, its `watch` without
+ *   `marks`, and no `fetchesToday` - the route `GET /data/desk/status` answers them all.
  * @param deps - the quote source, the status reader and the clock.
  */
 export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
@@ -388,7 +389,7 @@ export function deskToolDefinitions(deps: DeskToolDeps): DeskToolDefinition[] {
     output: { schema: STATE_SCHEMA, render: asJson },
     timeoutMs: 5_000,
     execute: (_args, exec) => untilCancelled(exec.signal, async () => {
-      const status = await deps.readState();
+      const { fetchesToday: _fetches, ...status } = await deps.readState();
       const value = { ...status, runs: status.runs.slice(-STATE_RUNS), runsInLedger: status.runs.length };
       if (status.watch === undefined) return value;
       const { marks: _marks, ...watch } = status.watch;

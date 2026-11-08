@@ -383,6 +383,15 @@ test("desk_state carries the watch's block without its marks: near and recent st
     "no watch, no watch key");
 });
 
+test("desk_state does not show fetchesToday", async () => {
+  const fetchesToday = [{ t: "2026-11-07T20:05:00.000Z", sessionId: "desk-1", url: "https://www.nasdaq.com/articles/intc" }];
+  const status: DeskStatus = { ...STATUS, fetchesToday };
+  const value = await byName(deskToolDefinitions({ quotes: fakeHub().hub, readState: async () => status }), "desk_state").execute({}, exec()) as Record<string, unknown>;
+  assert.ok(!Object.hasOwn(value, "fetchesToday"), "no fetchesToday key: the route carries it, the model reads its own turns");
+  assert.deepEqual(value, { ...STATUS, runsInLedger: 0 });
+  assert.deepEqual(status.fetchesToday, fetchesToday, "the status read keeps its fetches");
+});
+
 test("a cancelled call settles at once, whatever the hub or the ledger is doing", async () => {
   let snapshots = 0;
   const never = new Promise<never>(() => {});
@@ -454,8 +463,9 @@ test("installDesk installs the desk tools whatever enabled says, desk_state read
     const fromRoute = JSON.parse(await rec.call("/data/desk/status")) as { status: number; body: DeskStatus };
     assert.equal(fromRoute.status, 200);
     const { runs: toolRuns, runsInLedger, ...toolRest } = fromTool;
-    const { runs: routeRuns, ...routeRest } = fromRoute.body;
-    assert.deepEqual(toolRest, routeRest, `the tool and GET /data/desk/status agree on every field but runs (enabled: ${enabled})`);
+    const { runs: routeRuns, fetchesToday: routeFetches, ...routeRest } = fromRoute.body;
+    assert.deepEqual(toolRest, routeRest, `the tool and GET /data/desk/status agree on every field but runs and fetchesToday (enabled: ${enabled})`);
+    assert.deepEqual(routeFetches, [], "the route lists today's opened pages, none here");
     assert.equal(routeRuns.length, enabled ? 13 : 12, "the route answers every run");
     assert.deepEqual(toolRuns, routeRuns.slice(-10), "the tool, the route's last ten");
     assert.equal(runsInLedger, routeRuns.length);

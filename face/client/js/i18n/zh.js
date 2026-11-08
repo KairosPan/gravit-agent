@@ -1602,6 +1602,8 @@ export const ZH = Object.freeze({
   'desk.tab.firings': '触发记录',
   'desk.tab.runs': '运行与休眠',
   'desk.tab.noRuns': '账本中没有运行记录。',
+  'desk.tab.pages': '今天打开的网页',
+  'desk.tab.pagesNone': '今天没有',
 
   // a channel (host/channels.js, render/channel.js, host/runs-view.js): its page, its rosters, its research runs and their
   // chips, a write that failed

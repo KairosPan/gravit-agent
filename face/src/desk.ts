@@ -1115,8 +1115,10 @@ export interface PhoneStatus {
  * (src/standing.ts `StandingStatus`), present only while a provider has one; `watch`, the watch's status
  * (src/watch.ts `WatchStatus`), present only while the watch runs; `phone`, the bridge's
  * state, present only when a provider is passed - {@link installDesk} always passes one, so the route
- * and `desk_state` always carry it. `ledgerError` is present only when the ledger could not be
- * read - its code, or its message when it has none - and `asleep` and `runs` are then empty,
+ * and `desk_state` always carry it; `fetchesToday`, today's `desk-fetch` lines ({@link fetchesSince}) -
+ * optional in the type as `budget` is, always set by {@link deskStatus}, and left out of `desk_state`'s answer
+ * (src/desk-tools.ts). `ledgerError` is present only when the ledger could not be
+ * read - its code, or its message when it has none - and `asleep`, `runs` and `fetchesToday` are then empty,
  * `turnsToday` zero, and the budget zeros and not spent, its `error` the same: an unreadable ledger is
  * named, never passed off as an empty one. */
 export interface DeskStatus {
@@ -1135,7 +1137,34 @@ export interface DeskStatus {
   standing?: StandingStatus;
   phone?: PhoneStatus;
   watch?: WatchStatus;
+  fetchesToday?: OpenedPage[];
   ledgerError?: string;
+}
+
+/** One page a desk agent opened, as `GET /data/desk/status` lists it in `fetchesToday`: a `desk-fetch` line's
+ * time, session (`unknown` when the call carried none) and URL. */
+export interface OpenedPage {
+  t: string;
+  sessionId: string;
+  url: string;
+}
+
+/** How many of today's opened pages the status lists, the newest kept. */
+export const FETCHES_TODAY_MAX = 50;
+
+/**
+ * Today's `desk-fetch` lines - those whose `t` is at or after `since` - newest first, at most
+ * {@link FETCHES_TODAY_MAX}.
+ * @param events - the ledger's events in file order, as {@link readEvents} returns them.
+ * @param since - the start of today in New York, as an ISO-8601 UTC string.
+ */
+export function fetchesSince(events: DeskEvent[], since: string): OpenedPage[] {
+  const fetches: OpenedPage[] = [];
+  for (let i = events.length - 1; i >= 0 && fetches.length < FETCHES_TODAY_MAX; i--) {
+    const e = events[i];
+    if (e.kind === "desk-fetch" && e.t >= since) fetches.push({ t: e.t, sessionId: e.sessionId, url: e.url });
+  }
+  return fetches;
 }
 
 /**
@@ -1147,7 +1176,8 @@ export interface DeskStatus {
  * on the strings, as it is for `turnsToday`: the `desk-turn` events whose `t` is at or after the
  * start of today in New York ({@link etDayStart}), counted, their tokens summed - a turn recorded
  * without usage counts and adds nothing. `budget` is the same turns' tokens against `dailyTokens`'
- * cap ({@link budgetState}). `runs` is {@link runsOf} over the whole current file.
+ * cap ({@link budgetState}). `fetchesToday` is {@link fetchesSince} from the same start of the day.
+ * `runs` is {@link runsOf} over the whole current file.
  * `off` is {@link readOffState}'s state unless it has expired: a pause past its `until` is no
  * longer in force, though its file waits for whoever lifts it. Never rejects on the ledger: a read
  * that fails ({@link readEvents} rejects on EACCES, EISDIR, EIO by design) is `ledgerError`, and the
@@ -1190,7 +1220,9 @@ export async function deskStatus(deps: {
   }
   const asleep = events.flatMap((e) =>
     e.kind === "asleep" && e.from >= since ? [{ from: e.from, to: e.to, gapMs: e.gapMs }] : []);
-  const today = turnsSince(events, new Date(etDayStart(at)).toISOString());
+  const dayStart = new Date(etDayStart(at)).toISOString();
+  const today = turnsSince(events, dayStart);
+  const fetchesToday = fetchesSince(events, dayStart);
   const { uncachedInputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = today.used;
   const turnsToday = { count: today.count, usage: { uncachedInputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } };
   const budget = budgetOf(today.used, deps.dailyTokens?.(), ledgerError);
@@ -1213,6 +1245,7 @@ export async function deskStatus(deps: {
     ...(standing === undefined ? {} : { standing }),
     ...(deps.phone === undefined ? {} : { phone: deps.phone() }),
     ...(watch === undefined ? {} : { watch }),
+    fetchesToday,
     ...(ledgerError === undefined ? {} : { ledgerError }),
   };
 }

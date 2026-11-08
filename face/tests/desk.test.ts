@@ -627,6 +627,25 @@ test("deskStatus reports off, the desk session and today's desk turns", async ()
   for (const key of ["off", "deskSession", "phone", "ledgerError"]) assert.equal(Object.hasOwn(empty, key), false, key);
 });
 
+test("deskStatus lists today's desk-fetch lines newest first, at most 50, none from yesterday", async () => {
+  const h = await home();
+  const now = () => Date.parse("2026-11-07T21:00:00Z"); // 16:00 ET: the ET day began at 05:00 UTC (EST)
+  const fetch = (t: string, url: string, sessionId = "desk-1"): DeskEvent => ({ t, kind: "desk-fetch", sessionId, url });
+  await appendEvent(h, fetch("2026-11-07T04:59:59.999Z", "https://example.com/yesterday")); // 23:59 ET on the 6th
+  for (let i = 0; i < 52; i++) {
+    await appendEvent(h, fetch(new Date(Date.parse("2026-11-07T05:00:00.000Z") + i * 60_000).toISOString(), `https://example.com/${i}`, i === 51 ? "unknown" : "desk-1"));
+  }
+  await appendEvent(h, { t: "2026-11-07T20:00:00.000Z", kind: "desk-session", sessionId: "desk-2", reason: "new" });
+  const s = await deskStatus({ home: h, bootedAt: now() - 60_000, enabled: true, now });
+  assert.equal(s.fetchesToday?.length, 50, "at most 50");
+  assert.deepEqual(s.fetchesToday?.[0], { t: "2026-11-07T05:51:00.000Z", sessionId: "unknown", url: "https://example.com/51" }, "newest first");
+  assert.deepEqual(s.fetchesToday?.at(-1), { t: "2026-11-07T05:02:00.000Z", sessionId: "desk-1", url: "https://example.com/2" }, "the oldest two of today's fall off");
+  assert.ok(!s.fetchesToday?.some((f) => f.url.endsWith("/yesterday")), "none from yesterday");
+
+  const empty = await deskStatus({ home: await home(), bootedAt: now(), enabled: true, now });
+  assert.deepEqual(empty.fetchesToday, [], "no fetch today: an empty list");
+});
+
 test("deskStatus still answers when the desk's directory cannot be read: ledgerError names it, and there is no off", async () => {
   const h = join(await home(), "x".repeat(300)); // a name past NAME_MAX: every read under it fails ENAMETOOLONG
   const s = await deskStatus({ home: h, bootedAt: Date.now(), enabled: true });

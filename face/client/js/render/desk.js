@@ -1,7 +1,8 @@
 // face/client/js/render/desk.js — the Desk tab inside Markets (plan 2026-11-01-desk-p3-watch Task 11, ruling 15), from
 // host/desk-view.js's view: the desk's status and its one control, Pause — no Resume and no arming, both the terminal's
-// (spec §5.7) — then the watch by market with each market's today, today's alerts, the levels as loaded and the refused
-// files, the standing orders - each linking its last firing's session - and their firings, and the runs and sleep gaps.
+// (spec §5.7) — then the watch by market with each market's today, today's alerts, the pages the desk opened today (as
+// text), the levels as loaded and the refused files, the standing orders - each linking its last firing's session - and
+// their firings, and the runs and sleep gaps.
 // Every word is the view's; this module lays them out in the Markets screen's sections and lines.
 import { esc } from '../html.js';
 import { t, th, sayOf } from '../i18n/words.js';
@@ -31,6 +32,9 @@ export function renderDeskTab(view, read = {}) {
       ...[view.pending, view.muted, view.ledger, view.filings].filter(Boolean).map(w => line('·', esc(w)))]);
   const alerts = view.alerts.length ? feed(view.alerts.map(a => line(a.sent ? '✓' : '·', esc(`${a.when} · ${a.what}`),
     esc(`${a.outcome} · ${a.latency}`), a.sent ? 'ok' : ''))) : empty(t('desk.tab.noAlerts'));
+  // an opened page is escaped text, never a link: the URL is the turn's, as asked, perhaps from a planted page - read, not
+  // followed (spec 2026-11-07 §5.6)
+  const pages = view.pages.length ? feed(view.pages.map(p => line('·', esc(p.url), esc(p.time)))) : empty(t('desk.tab.pagesNone'));
   const levels = view.levels.length || view.files.length
     ? feed([...view.levels.map(l => line('·', `${esc(`${l.symbol} · ${l.market}`)} <span class="mk-level">${esc(l.label)}</span>`, esc(`${l.plan} · ${l.file}`))),
       ...view.files.map(f => line('!', esc(f.file), esc(f.note), 'down'))])
@@ -45,7 +49,7 @@ export function renderDeskTab(view, read = {}) {
     ...view.asleep.map(g => line('·', esc(t('desk.tab.asleep', { from: g.from, to: g.to })), esc(g.gap)))]);
 
   return `<div class="desk">${failed}${head}` +
-    section(t('desk.tab.watch'), watch) + section(t('desk.tab.alerts'), alerts) + section(t('desk.tab.levels'), levels) +
+    section(t('desk.tab.watch'), watch) + section(t('desk.tab.alerts'), alerts) + section(t('desk.tab.pages'), pages) + section(t('desk.tab.levels'), levels) +
     section(t('desk.tab.standingOrders'), standing || empty(t('desk.tab.noneArmed'))) + section(t('desk.tab.firings'), firings) +
     `${section(t('desk.tab.runs'), runs || empty(t('desk.tab.noRuns')))}</div>`;
 }
