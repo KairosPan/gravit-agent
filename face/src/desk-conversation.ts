@@ -244,9 +244,10 @@ export interface DeskConversation {
    * session already holds answers `duplicate`, and the post answers once the session's log is flushed (the module
    * header's ONE TEXT, ONE MESSAGE). With `context` - the bridge's, for a phone reply to an alert or its annotation
    * (spec §16 H1b, src/watch.ts `contextFor`) - the message is three text parts: the provenance line, the context
-   * headed `the message this replies to:`, then `text`. Never rejects. */
+   * headed `the message this replies to:`, then `text`. `urgent` is the annotation lane's too: its reply goes `urgent`
+   * rather than `alert`; the conversation ignores it. Never rejects. */
   post(input: {
-    text: string; source: DeskSource; message: { kind: string } & Record<string, unknown>; replyTo?: string; key?: string; context?: string;
+    text: string; source: DeskSource; message: { kind: string } & Record<string, unknown>; replyTo?: string; key?: string; context?: string; urgent?: boolean;
   }): Promise<PostResult>;
   /** Open another desk conversation (the phone's `/new`), recorded as `new`, and supervise it; resolves its id.
    * Rejects when the ensure does, and when the conversation is disposed before or while it runs. */
@@ -311,7 +312,7 @@ export function pausedLine(state: OffState, now: Date, deskTime: (at: Date, now:
 }
 
 /** The phone's line for a turn its deadline cut before it said anything, the deadline as `format` spells it -
- * desk-session.ts's `formatDuration`: the default `5 min`, an annotation's `90 s` - the conversation's and the
+ * desk-session.ts's `formatDuration`: the default `5 min`, an annotation's `4 min` - the conversation's and the
  * annotation lane's (src/annotator.ts). */
 export function timedOutLine(deadlineMs: number, format: (ms: number) => string): string {
   return `timed out after ${format(deadlineMs)}; a card or a long tool was pending`;

@@ -1616,9 +1616,10 @@ export interface DeskHandle {
   dispose(code: number): Promise<void>;
 }
 
-/** An alert's annotation turn's deadline (P3-12): 90 s from its own `turn/start` in the annotation lane
- * (src/annotator.ts), then the turn is cut with its own line as a reply. */
-export const ALERT_DEADLINE_MS = 90_000;
+/** An alert's annotation turn's deadline (P3-12; 240 s since the why-it-moved plan, room for a US move's look at the
+ * news): 240 s from its own `turn/start` in the annotation lane (src/annotator.ts), then the turn is cut with its own
+ * line as a reply. */
+export const ALERT_DEADLINE_MS = 240_000;
 
 /** The watch's timers: the wall clock, `unref`'d, so the watch never holds the process open. */
 const watchClock = (now: () => number): DeskClock => ({

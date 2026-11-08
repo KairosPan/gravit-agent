@@ -1583,7 +1583,7 @@ test("events.jsonl takes the three new kinds", async () => {
 /* ---------- P3: the watch row ---------- */
 
 test("installDesk starts the watch with a source, shares the US calendar with the schedule, wires the watch's post to the annotator, not to the conversation, and disposes schedule, watch, annotator, bridge, conversation in order", async () => {
-  assert.equal(ALERT_DEADLINE_MS, 90_000);
+  assert.equal(ALERT_DEADLINE_MS, 240_000);
   const h = join(TMP, "watch-home");
   const root = join(TMP, "repo-watch");
   await mkdir(join(root, "desk", "journal"), { recursive: true });

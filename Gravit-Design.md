@@ -113,7 +113,7 @@ never orders. The operator trades in their own broker app on what the desk tells
 
 **What it is not.** Not an automated trading system, not an autonomy ladder, not a hosted or
 multi-user service.
-Nothing starts unattended except a standing order the operator armed in the harness home, with a cap and an expiry, and the watch's annotation of an alert that a level or rule asking for one raised, under a 90 s deadline and the same budget; a standing or annotation turn informs the operator — it never orders, asks, opens a goal or edits what it runs.
+Nothing starts unattended except a standing order the operator armed in the harness home, with a cap and an expiry, and the watch's annotation of an alert that a level or rule asking for one raised — for a US price move, why it moved — under a 240 s deadline and the same budget; a standing or annotation turn informs the operator — it never orders, asks, opens a goal or edits what it runs.
 Beside the face's own LaunchAgent a second one runs unattended, the watchdog (`com.gravit.face.watchdog`, every five minutes, no model): it tells the phone when the desk stops answering or degrades and restarts a face that does not answer, once per outage, and tells it when the account or the market stops answering, restarting neither; its lines go through the account, and only the one that says the account is down goes to Telegram directly, or to Slack when Telegram is not connected (D20) — it informs and restarts, nothing more.
 A research cycle the operator starts runs to
 its verdict inside its strategy directory without further attention; the operator judges it
