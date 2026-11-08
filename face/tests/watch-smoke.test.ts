@@ -4,8 +4,9 @@
  * (src/watch.ts) - polling a book in both markets, sending each alert itself and posting its annotation to the
  * annotation lane (src/annotator.ts), each check in a desk session of its own under `desk/journal`, and the canary's
  * annotation half. One boot, from 09:15 ET on 2026-11-30, and the cases in this order:
- * 1. before the open: a tick before the window polls no US symbol; one inside it polls, and a print before the open
- *    makes no record - while the boot's filings poll seeds NVDA silently;
+ * 1. before the open: the boot's tick at 09:15 ET is inside the US window, which opens at 04:00 ET, and polls the US
+ *    market alone; its pre-market prints, and a print just before the open, make no record - a level is judged in the
+ *    regular session alone - while the boot's filings poll seeds NVDA silently;
  * 2. a US gap: NVDA under its stop at its first judged print is one `alert` (`gap`) and one `delivered`, the message
  *    stamped `ROBINHOOD … ET` and ending `annotation follows`, and the annotation - run in its own session, never the
  *    desk conversation's - comes back as a reply under it, recorded `annotated` with the message it went out as;
@@ -13,8 +14,9 @@
  * 4. the cooldown: NVDA back over its stop and under it again inside 30 minutes makes no record, one repeat;
  * 5. the cap and the batch: five more sends fill the hour's six, the seventh is held `cap`, and the next ET hour's
  *    tick sends the batch line;
- * 6. an A share: 600519 under its stop at 09:30:02 Beijing is a `gap` alert stamped `TENCENT … Beijing`, and a print
- *    at the midday break - which would cross it again - makes none;
+ * 6. an A share: at 20:29 ET the US window has closed and only the A shares are polled; 600519 under its stop at
+ *    09:30:02 Beijing is a `gap` alert stamped `TENCENT … Beijing`, and a print at the midday break - which would
+ *    cross it again - makes none;
  * 7. a cut and a failed model call: one annotation waiting in a long tool is cut at its deadline, another whose model
  *    call fails is answered with the failed line - each a reply under its own alert;
  * 8. the phone's state: a phone text is preceded by the watch's desk state, which names both markets' holdings;
@@ -91,7 +93,8 @@ const BOTS = join(BASE, "bots");
 const JOURNAL = deskJournalDir(ROOT);
 const STUB = { provider: "stub", model: "echo" };
 
-/** When the face boots: 09:15 ET on 2026-11-30, five minutes before the US window opens. */
+/** When the face boots: 09:15 ET on 2026-11-30, in the US pre-market, inside the watch's window (04:00-20:00 ET) and
+ *  the filings window (07:00-20:00 ET). */
 const BOOT_AT = "2026-11-30T14:15:00Z";
 /** The watch's and the clock row's own tick: a day, so no timer ticks inside the file - every case ticks by hand. */
 const TICK_MS = 86_400_000;
@@ -488,9 +491,12 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     /* ---------- 1. BEFORE THE OPEN ---------- */
     await wall.advance(0); // the boot: the clock row's first tick, then the watch's, at 09:15 ET
     assert.equal(watch.status().state, "watching", `the book names something to watch; saw ${JSON.stringify(watch.status().state)}`);
-    assert.equal(watch.status().markets.us.state, "waiting", "09:15 ET is before the window, which opens at 09:20 ET");
+    assert.equal(watch.status().markets.us.state, "polling", "09:15 ET is inside the US window, which opens at 04:00 ET");
     assert.equal(watch.status().markets.cn.state, "after-close", "22:15 Beijing: the A-share session is over");
-    assert.equal(asked.length, 0, "the boot's tick polled no symbol of either market");
+    assert.equal(usAsked(), 1, "the boot's tick polled the US market once");
+    assert.deepEqual(asked[0].symbols, ["NVDA", "AAPL", "MSFT", ...BS, "CNRY", "SPY"], "the held symbol first, then the levels', then the rules'");
+    assert.equal(cnAsked(), 0, "and not the A shares");
+    assert.deepEqual(await hits(), [], "the pre-market prints make no record: no level judges them, and SPY has not moved");
     /* the filing rule on holdings: 09:15 ET on a session day is inside the filings window, so the boot's tick polls SEC,
      * and NVDA's first good poll seeds it with what it lists - silently */
     await waitFor("NVDA seeded by the boot's filings poll", async () => (await filings()).some((r) => r.kind === "seeded" && r.symbol === "NVDA"));
@@ -503,8 +509,8 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     print("us", "NVDA", 168, "2026-11-30T14:29:59Z");
     await tickAt("2026-11-30T14:21:00Z");
     assert.equal(watch.status().markets.us.state, "polling", "09:21 ET is inside the window");
-    assert.equal(usAsked(), 1, "the tick polled the US market once");
-    assert.deepEqual(asked[0].symbols, ["NVDA", "AAPL", "MSFT", ...BS, "CNRY", "SPY"], "the held symbol first, then the levels', then the rules'");
+    assert.equal(usAsked(), 2, "the tick polled the US market again");
+    assert.deepEqual(asked[1].symbols, asked[0].symbols, "the same symbols, in the same order");
     assert.equal(cnAsked(), 0, "and not the A shares");
     assert.deepEqual(await hits(), [], "an NVDA print timed 09:29:59 ET, before the open, makes no record");
     heard([], "and sends nothing");
@@ -600,9 +606,11 @@ test("watch smoke: a US and an A-share gap, restart, cooldown, cap and batch, a 
     assert.equal(rewatch.status().pending, 0, "and nothing is held");
 
     /* ---------- 6. AN A SHARE ---------- */
+    const usBeforeClose = usAsked();
     await tickAt("2026-12-01T01:29:00Z");
     assert.equal(rewatch.status().markets.cn.state, "polling", "09:29 Beijing is inside the A-share window");
-    assert.equal(rewatch.status().markets.us.state, "after-close", "20:29 ET: the US session is over");
+    assert.equal(rewatch.status().markets.us.state, "after-close", "20:29 ET: the US window, which closes at 20:00 ET, is over");
+    assert.equal(usAsked(), usBeforeClose, "the tick polled no US symbol");
     assert.equal(cnAsked(), 1, "the A shares are polled");
     assert.deepEqual(asked.at(-1)?.symbols, ["600519", SLOW, CRSH], "the held one first, then the levels'");
     assert.equal((await hits()).length, 7, "yesterday's prints are not judged today");
