@@ -179,6 +179,22 @@ describe("US stocks, keyless: Cboe's delayed quotes where no real-time source an
     expect(cboeTimeMs("2026-10-13 09:45")).toBeUndefined();
   });
 
+  it("a Cboe-priced line carries Cboe's change (from prev_day_close) only while its last trade is in the regular session or the close's own minute: one stamped after-hours carries none, never a change from yesterday said beside today's after-hours price", async () => {
+    const evening = fromEt(2026, 10, 13, 18, 0);
+    const at = (t: string) => network([["/quotes/NVDA.json", quoteOf("NVDA", 180.5, { last_trade_time: t })], ["/symbol_book/symbol-book.json", BOOK], ...noRealTime()]);
+    const after = (await listings({ limit: 1 }, at("2026-10-13T17:30:12"), () => evening))[0]!;
+    expect(after.price).toBe(180.5);
+    expect(after.quoteAt).toBe(new Date(fromEt(2026, 10, 13, 17, 30) + 12_000).toISOString());
+    expect(after.change24h).toBeUndefined();
+    expect(after.changePct24h).toBeUndefined();
+    // the closing cross, stamped in the close's own minute, is the regular session's last trade: its change from the close before stands
+    const cross = (await listings({ limit: 1 }, at("2026-10-13T16:00:00"), () => evening))[0]!;
+    expect([cross.change24h, cross.changePct24h]).toEqual([0.84, 0.2464]);
+    // and a regular-session trade read in the evening keeps it too
+    const regular = (await listings({ limit: 1 }, at("2026-10-13T15:59:58"), () => evening))[0]!;
+    expect([regular.change24h, regular.changePct24h]).toEqual([0.84, 0.2464]);
+  });
+
   it("price history where Robinhood keeps none and Nasdaq keeps no minutes: Cboe's minutes folded into 5m and 1h bars, its daily closes for 1d (since the start asked), the volume in shares", async () => {
     const net = network([...routes(), ...noRealTime()]);
     const src = usStocksPublic({ http: net.http, clock: () => NOW, pace: async () => undefined });

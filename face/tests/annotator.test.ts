@@ -316,6 +316,45 @@ test("idle resolves at once with nothing posted, waits for a running post's deli
   await h.annotator.idle(); // and at once after the dispose
 });
 
+test("an idle already waiting when the dispose begins resolves, though the post it waits on is still making its agent", async () => {
+  let release: () => void = () => {};
+  let making = false;
+  const h = await harness({
+    createAgent: async (opts) => {
+      making = true;
+      await new Promise<void>((done) => { release = done; });
+      return h.agents.createAgent(opts);
+    },
+  });
+  const posting = annotate(h, "a-000000000001", 11);
+  await waitFor("the making under way", () => making);
+  let idle = false;
+  const waiting = h.annotator.idle().then(() => { idle = true; });
+  await h.clock.flush();
+  assert.equal(idle, false, "not while the post is making its agent");
+  const disposing = h.annotator.dispose();
+  await waiting;
+  assert.equal(idle, true, "the dispose's beginning answers it, the making still hanging");
+  release();
+  assert.deepEqual(await posting, { refused: "error", line: "the desk could not annotate this alert: the desk is shut down" });
+  await disposing;
+});
+
+test("an urgent post with no replyTo replies { kind: \"urgent\" } and nothing else", async () => {
+  const opts: unknown[] = [];
+  const h = await harness({ deliver: async (_text, o) => { opts.push(o); return { sent: ["telegram:201"] }; } });
+  const sessionId = sessionOf(await h.annotator.post({
+    text: "NVDA 160.00 is down 7.0% from its close", source: { kind: "alert", symbol: "NVDA", rule: "move" }, message: alertOf("a-000000000001"), urgent: true,
+  }));
+  startTurn(h, sessionId, 1, alertOf("a-000000000001"));
+  answer(h, sessionId, 1, "Why it moved: guidance cut.");
+  endTurn(h, sessionId, 1);
+  await h.annotator.idle();
+  assert.deepEqual(opts, [{ kind: "urgent" }]);
+  assert.deepEqual(h.noted[0]?.sent, ["telegram:201"]);
+  await h.annotator.dispose();
+});
+
 test("an urgent post's reply goes urgent; another's goes alert", async () => {
   const h = await harness();
   const urgent = sessionOf(await h.annotator.post({

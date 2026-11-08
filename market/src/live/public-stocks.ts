@@ -18,7 +18,8 @@
  * after-hours only where nothing else at hand says it — from 16:00 to about 16:15 Cboe's file cannot — once per share and close, kept),
  * else Cboe's file (its previous close while the file is from the regular session the quote is in; its close, else its last trade, where
  * the file is from the session whose close is the one wanted and was written after that close) — and none overnight or where none says it; for a Cboe line, Cboe's own (price_change, from prev_day_close), only where Cboe gives a
- * previous close.
+ * previous close and only while its last trade is in the regular session or the close's own minute (cboeDay): one stamped after-hours
+ * carries none.
  *
  * What is read from Cboe, and what it is (cboe.com's own quote pages read the same files; checked keyless from this machine 2026-10-13, 14:00
  * UTC, and 2026-10-14 17:49 UTC):
@@ -277,6 +278,16 @@ function cboeClose(rt: UsQuote, cb: Quote | undefined, ref: { opensAt: number; c
  * So where Nasdaq and Cboe disagree, Nasdaq's is said */
 function referenceClose(rt: UsQuote, cb: Quote | undefined, nq: UsQuote | null | undefined, known: number | undefined, ref: { opensAt: number; closesAt: number }): number | undefined {
   return keptNasdaqClose(nq, ref) ?? known ?? cboeClose(rt, cb, ref);
+}
+
+/** A CBOE-PRICED LINE'S DAY CHANGE: Cboe's own, measured from the file's prev_day_close, only where its last trade is in the regular session
+ * or stamped in the close's own minute (the closing cross, the session's last trade: its change is from the close before). A file whose last
+ * trade is stamped after-hours carries no change: its prev_day_close is the close before that day's, not the day's own close an after-hours
+ * price is measured from, and a change from yesterday beside today's after-hours price would be read as one from today's close */
+function cboeDay(cb: Quote | undefined): Quote | undefined {
+  if (!cb || cb.lastTradeMs === undefined) return cb;
+  const at = cb.lastTradeMs;
+  return usPhaseAt(at) === "regular" || usPhaseAt(at - CLOSE_PRINT_MS) === "regular" ? cb : undefined;
 }
 
 /** A ROBINHOOD LINE'S DAY CHANGE (see the top of this file): Robinhood's price is the middle of its bid and ask and carries no change, so
@@ -562,7 +573,7 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
     const px = rt ?? cb;
     const at = rt ? rt.at : cb?.lastTradeMs;
     const from = rt ? rt.from : CBOE_FROM;
-    const day = rt ? (rt.from === ROBINHOOD_FROM ? robinhoodDay(rt, cb, nasdaq.latest(symbol), knownClose(symbol, rt.at)) : rt) : cb;
+    const day = rt ? (rt.from === ROBINHOOD_FROM ? robinhoodDay(rt, cb, nasdaq.latest(symbol), knownClose(symbol, rt.at)) : rt) : cboeDay(cb);
     const note = usSessionWords(session, from, at, now);
     return {
       symbol,
@@ -599,8 +610,9 @@ export function usStocksPublic(deps: PublicDeps = {}): PublicSource {
     feed,
     /** ONE SHARE'S LINE, asked alone (live/paper.ts Pricer.find: a paper account pricing a share it knows): the real-time chain for it and
      * Cboe's quote for it AT THE SAME TIME — one GET of Cboe at most (P16: a search of a short ticker reads forty) — and a line the chain
-     * priced never waits for Cboe: the previous close beside a Robinhood price is Cboe's answer where it has come, and the day's change is
-     * left out where it has not. Cboe's delayed quote is the line only where the chain priced nothing. A ticker the loaded book does not list
+     * priced does not wait for Cboe: the previous close beside a Robinhood price is Cboe's answer where it has come, and the day's change is
+     * left out where it has not — but for a Robinhood line in pre-market or after-hours whose close nothing at hand says, which waits for one
+     * read of Nasdaq for it (closesFor), to CBOE_WAIT_MS from the start at most, once per share and close. Cboe's delayed quote is the line only where the chain priced nothing. A ticker the loaded book does not list
      * is asked of Nasdaq alone (Cboe's store keeps files of tickers that no longer trade). Null: not a plain ticker, or no source prices it;
      * Cboe's refusal where nothing priced it and Cboe refused */
     async line(symbol) {

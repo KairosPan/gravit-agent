@@ -4,7 +4,8 @@
  *
  * WHAT IS JUDGED (ruling 2). Only a `live` or `delayed` print with an `as_of`, inside its own market's session:
  * - **US.** `as_of` in one of the three phases of the XNYS session handed over ({@link usPhaseOf}): pre-market from
- *   04:00 ET to the open, the regular session `[open, close)`, after-hours from the close to the close plus 4 h. A
+ *   04:00 ET to the open, the regular session `[open, close)`, after-hours from the close's minute's end
+ *   ({@link CLOSE_PRINT_MS}: a print stamped in `[close, close + 60 s)` is not judged) to the close plus 4 h. A
  *   US `move_pct` key with `sessions: all` judges all three; a `sessions: regular` key, a level and a `gap` key judge
  *   the regular session alone.
  * - **A shares.** The Market's phase `trading`, the session's Beijing date, and the Beijing clock in `[09:30, 11:30)`
@@ -60,6 +61,11 @@ export const THIN_ALONE_MS = 120_000;
 export const THIN_STALE_MS = 600_000;
 /** How long after the close after-hours runs: to 20:00 ET, or 17:00 on an early close. */
 export const AFTER_HOURS_MS = 4 * HOUR_MS;
+/** A US print stamped in `[close, close + CLOSE_PRINT_MS)` is not judged: Nasdaq stamps trades to the minute, so the
+ * closing cross arrives stamped 16:00:00 (13:00:00 on an early close) with its change still from the previous close,
+ * and judged as after-hours it would start a fresh crossing from today's close at yesterday's. The face's mirror of
+ * the Market's `CLOSE_PRINT_MS` (market/src/live/public-stocks.ts), which reads such a trade as the session's. */
+export const CLOSE_PRINT_MS = 60_000;
 
 /* ---------- the quote ---------- */
 
@@ -105,7 +111,8 @@ const CN_CLOSE_PRINT = ["15:00:00", "15:00:30"] as const;
 
 /**
  * A US print's phase in `s`: `pre` from 04:00 ET of its date to the open, `regular` from the open to the close,
- * `after` from the close to the close plus 4 h (20:00 ET, or 17:00 on an early close); else `undefined`.
+ * `after` from the close plus {@link CLOSE_PRINT_MS} to the close plus 4 h (20:00 ET, or 17:00 on an early close);
+ * else `undefined` - a print stamped in the close's own minute among them.
  * @param asOf - the print's `as_of`, in ms.
  * @param s - the session.
  */
@@ -114,7 +121,7 @@ export function usPhaseOf(asOf: number, s: UsSession): UsPhase | undefined {
   const close = Date.parse(s.close);
   if (asOf >= Date.parse(nyInstant(s.date, 4, 0)) && asOf < open) return "pre";
   if (asOf >= open && asOf < close) return "regular";
-  if (asOf >= close && asOf < close + AFTER_HOURS_MS) return "after";
+  if (asOf >= close + CLOSE_PRINT_MS && asOf < close + AFTER_HOURS_MS) return "after";
   return undefined;
 }
 

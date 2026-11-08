@@ -10,7 +10,7 @@ import { nyInstant, type MarketSession } from "../src/market-clock.ts";
 import type { MarketQuote } from "../src/market-quotes.ts";
 import {
   ALERTS_PER_HOUR, GAP_RULE_WINDOW_MS, HOUR_MS, REBUILD_WINDOW_MS, THIN_ALONE_MS, THIN_SECOND_MS, THIN_STALE_MS,
-  ALERT_REPLAY_MS, alertId, batchDue, batchId, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, judgedDate, passId, pastOf, priceKeys, rebuildDay, snapOf,
+  ALERT_REPLAY_MS, CLOSE_PRINT_MS, alertId, batchDue, batchId, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, judgedDate, passId, pastOf, priceKeys, rebuildDay, snapOf,
   takeBatch, referenceOf, usPhaseOf, watchQuoteOf,
   type AlertHit, type PriceKey, type UsSession, type WatchDay, type WatchQuote, type WatchSessions,
 } from "../src/watch-eval.ts";
@@ -161,7 +161,9 @@ test("a US print is judged on as_of inside its own session's three phases, not o
   assert.equal(at("2026-11-30T14:29:59Z"), "2026-11-30");
   assert.equal(phase("2026-11-30T14:30:00Z"), "regular");
   assert.equal(phase("2026-11-30T20:59:59Z"), "regular");
-  assert.equal(phase("2026-11-30T21:00:00Z"), "after", "the close starts after-hours");
+  assert.equal(phase("2026-11-30T21:00:00Z"), undefined, "a print stamped in the close's minute is not judged");
+  assert.equal(phase("2026-11-30T21:00:59Z"), undefined);
+  assert.equal(phase("2026-11-30T21:01:00Z"), "after", "16:01 ET starts after-hours");
   assert.equal(phase("2026-12-01T00:59:59Z"), "after", "19:59:59 ET");
   assert.equal(at("2026-12-01T00:59:59Z"), "2026-11-30", "judged on its session's date");
   assert.equal(phase("2026-12-01T01:00:00Z"), undefined, "20:00 ET is outside");
@@ -446,6 +448,33 @@ test("one event alerts once across after-hours, the next pre-market and the next
   assert.deepEqual(shape(passAt(restarted, [move], u("INTC", 80, "2026-12-01T21:30:30Z", 85), dec1)), [["m", true, "2026-12-01", "after"]]);
 });
 
+test("a print stamped in the close's minute (the closing cross, its change still from the previous close) is not judged: a 15:59 print past 5% alerts, the 16:00:00 one leaves no pending and no hit, after-hours judging starts at 16:01", () => {
+  assert.equal(CLOSE_PRINT_MS, 60_000);
+  const [move] = keysOf({ rules: [moveRule("m", ["THIN"], 5)] });
+  const day = emptyDay();
+  assert.deepEqual(shape(passAt(day, [move], u("THIN", 94, "2026-11-30T20:59:00Z", 100), BOTH)), [["m", true, "2026-11-27", "regular"]]);
+  /* Nasdaq stamps the 16:00 cross to the minute; its change is from 11-27's close, so the face's prev_close is 100, not today's close */
+  const cross = u("THIN", 94, "2026-11-30T21:00:00Z", 100);
+  assert.equal(judgedDate(cross, BOTH), undefined);
+  assert.deepEqual(passAt(day, [move], cross, BOTH), []);
+  assert.deepEqual(passAt(day, [move], cross, BOTH, T("2026-11-30T21:02:30Z")), [], "no lone after-hours print two minutes on");
+  assert.equal(day.keys.get(move.key)?.ref, "2026-11-27", "no fresh key for today's close");
+  assert.equal(day.keys.get(move.key)?.pending, undefined);
+  /* 16:01: after-hours, measured from today's close (94) */
+  assert.deepEqual(passAt(day, [move], u("THIN", 88, "2026-11-30T21:01:00Z", 94), BOTH), []);
+  assert.equal(day.keys.get(move.key)?.ref, "2026-11-30");
+  assert.equal(day.keys.get(move.key)?.pending?.asOf, "2026-11-30T21:01:00Z");
+  /* on an early close the same, at 13:00 */
+  const nov27 = usSession("2026-11-27", "2026-11-25", true);
+  const early = emptyDay();
+  const at13 = u("THIN", 94, "2026-11-27T18:00:00Z", 100);
+  assert.deepEqual(passAt(early, [move], at13, { us: nov27 }), []);
+  assert.deepEqual(passAt(early, [move], at13, { us: nov27 }, T("2026-11-27T18:02:30Z")), []);
+  assert.equal(early.keys.size, 0);
+  passAt(early, [move], u("THIN", 88, "2026-11-27T18:01:00Z", 94), { us: nov27 });
+  assert.equal(early.keys.get(move.key)?.pending?.asOf, "2026-11-27T18:01:00Z", "13:01 ET is after-hours");
+});
+
 test("a key first judged already past its threshold hits at that print with gap: true, its ref and its phase", () => {
   const [move] = keysOf({ rules: [moveRule("m", ["CRWV"], 8)] });
   const reg = emptyDay();
@@ -585,7 +614,9 @@ test("on an early-close day after-hours runs 13:00 to 17:00 and measures from th
   const nov27 = usSession("2026-11-27", "2026-11-25", true);
   assert.equal(nov27.close, "2026-11-27T18:00:00Z");
   assert.equal(usPhaseOf(T("2026-11-27T17:59:59Z"), nov27), "regular");
-  assert.equal(usPhaseOf(T("2026-11-27T18:00:00Z"), nov27), "after", "13:00 ET");
+  assert.equal(usPhaseOf(T("2026-11-27T18:00:00Z"), nov27), undefined, "13:00 ET, the close's minute");
+  assert.equal(usPhaseOf(T("2026-11-27T18:00:59Z"), nov27), undefined);
+  assert.equal(usPhaseOf(T("2026-11-27T18:01:00Z"), nov27), "after", "13:01 ET");
   assert.equal(usPhaseOf(T("2026-11-27T21:59:59Z"), nov27), "after");
   assert.equal(usPhaseOf(T("2026-11-27T22:00:00Z"), nov27), undefined, "17:00 ET");
   assert.equal(referenceOf("after", nov27), "2026-11-27");
