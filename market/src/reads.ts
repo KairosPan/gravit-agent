@@ -9,6 +9,7 @@
  *   GET  /api/candles   ?venue= &symbol= &interval= &range= &before= &limit=   CandlesView, or an A share's ChinaHistory
  *   GET  /api/book      ?venue= &symbol= &depth=                  BookView
  *   GET  /api/trades    ?venue= &symbol= &limit=                  TradesView
+ *   GET  /api/news      ?symbols=<A,B> &since=<ISO time>          {news: {<SYM>: Headline[]}, unavailable?: {<SYM>: reason}}: US shares
  *
  * Each answers 200 with `{ok: true, …}`, a refusal 409 `{ok: false, refusal}`, a malformed question 400 `{ok: false, error}`. Nothing is
  * ordered or signed. */
@@ -20,6 +21,8 @@ import { TABS, type TabId } from "./live/categories.ts";
 import { CHINA_ID, CHINA_NAME, CHINA_NOTE, type ChinaHistory, type ChinaMarket } from "./live/china.ts";
 import type { ChinaRange } from "./live/cn-history.ts";
 import { RANK_ROWS } from "./live/cn-rank.ts";
+import { NEWS_ID, NEWS_KEEP_MS, NEWS_NAME, type Headline } from "./live/news.ts";
+import { US_TICKER } from "./live/us-quotes.ts";
 import { exploreAcross, type Exploration, type ExploreSort } from "./live/explore.ts";
 import { INTERVAL_RANGE, PAGE_MOST, pageOf, RANGE_BAR, rangeSince, sessionsSince } from "./live/history.ts";
 import { KEEP_MS as LISTING_KEEP_MS, type PublicSource } from "./live/public-markets.ts";
@@ -33,7 +36,23 @@ export interface MarketReads {
   candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; limit?: string | number | undefined }): Promise<CandlesView | ChinaHistory | Refusal>;
   book(venue: string, symbol: string, depth?: number): Promise<BookView | Refusal>;
   trades(venue: string, symbol: string, limit?: number): Promise<TradesView | Refusal>;
+  /** each US share's latest headlines (at most NEWS_PER_SYMBOL, newest first, none older than `since`), a feed that refuses under
+   * `unavailable` with its reason */
+  news(symbols: readonly string[], since?: string): Promise<NewsView | Refusal>;
 }
+
+/** the headlines GET /api/news answers: by symbol, and the symbols whose feed refused, each with the refusal's words */
+export interface NewsView {
+  news: Record<string, Headline[]>;
+  unavailable?: Record<string, string> | undefined;
+}
+/** the most headlines a symbol answers */
+export const NEWS_PER_SYMBOL = 10;
+/** the most symbols one ask names */
+export const NEWS_SYMBOLS_MOST = 10;
+/** how long one symbol's feed is waited for, its turn in Nasdaq's line included: inside the face's ten seconds (face/src/market-news.ts) */
+const NEWS_WAIT_MS = 9_000;
+const NEWS_NOT_READ = "this market reads no headlines";
 
 /** one market's price history, as GET /api/candles answers it (live/trade.ts CandlePage for the words) */
 export interface CandlesView {
@@ -357,6 +376,27 @@ export function marketReads(core: MarketCore): MarketReads {
       const got = await publicRead(src, "trades", sym, limit);
       return isRefusal(got) ? got : { venue: id, venueName: src.name, symbol: sym, trades: got as PublicTrade[], public: true };
     },
+
+    /** EACH US SHARE'S LATEST HEADLINES (live/news.ts), Nasdaq's: each symbol's feed kept a minute (NEWS_KEEP_MS) and asked side by side,
+     * at most NEWS_PER_SYMBOL a symbol, newest first, none older than `since`. A feed that refuses, or does not answer in NEWS_WAIT_MS, puts
+     * its symbol under `unavailable` with the refusal's words; the others answer. A repeated symbol is asked once */
+    async news(symbols, since) {
+      const source = core.news;
+      if (!source) return no("E_MARKET_BAD_REQUEST", { venue: NEWS_ID, message: NEWS_NOT_READ });
+      const asked = [...new Set(symbols)];
+      if (asked.length < 1 || asked.length > NEWS_SYMBOLS_MOST || !asked.every((x) => US_TICKER.test(x))) return no("E_MARKET_BAD_REQUEST", { venue: NEWS_ID, message: `headlines are read for 1 to ${NEWS_SYMBOLS_MOST} US shares, each by its ticker` });
+      const sinceMs = since === undefined ? undefined : Date.parse(since);
+      if (sinceMs !== undefined && !Number.isFinite(sinceMs)) return no("E_MARKET_BAD_REQUEST", { venue: NEWS_ID, message: "since is an ISO 8601 time" });
+      const got = await Promise.all(asked.map((sym) => within(NEWS_WAIT_MS, cache.get(`news|${NEWS_ID}|${sym}`, NEWS_KEEP_MS, () => source.headlines(sym)), NEWS_ID, NEWS_NAME)));
+      const news: Record<string, Headline[]> = {};
+      const unavailable: Record<string, string> = {};
+      asked.forEach((sym, i) => {
+        const r = got[i]!;
+        if (isRefusal(r)) unavailable[sym] = r.message;
+        else news[sym] = r.filter((h) => sinceMs === undefined || Date.parse(h.time) >= sinceMs).slice(0, NEWS_PER_SYMBOL);
+      });
+      return { news, ...(Object.keys(unavailable).length ? { unavailable } : {}) };
+    },
   };
 }
 
@@ -417,4 +457,19 @@ export function mountReads(app: express.Express, _core: MarketCore, reads: Marke
     if (q.limit && !/^\d{1,3}$/.test(q.limit)) return void bad(res, "limit is a count of trades, 1 to 100, in digits");
     answerOf(res, await reads.trades(q.venue, q.symbol, q.limit ? Number(q.limit) : 30));
   }));
+
+  // each US share's latest headlines: ?symbols=INTC,CRWV (1 to 10 tickers, the Market's rule: us-quotes.ts US_TICKER) and an optional
+  // ?since=<ISO 8601 time, with its zone>. A feed that refuses is its symbol's `unavailable`, never the answer's
+  app.get("/api/news", wrap(async (req, res) => {
+    const raw = { symbols: req.query.symbols, since: req.query.since };
+    if (Array.isArray(raw.symbols) || Array.isArray(raw.since)) return void bad(res, "symbols and since are each given once");
+    const symbols = typeof raw.symbols === "string" && raw.symbols.length <= 100 ? raw.symbols.split(",").map((x) => x.trim()) : [];
+    if (symbols.length < 1 || symbols.length > NEWS_SYMBOLS_MOST || !symbols.every((x) => US_TICKER.test(x))) return void bad(res, `symbols is 1 to ${NEWS_SYMBOLS_MOST} US tickers, comma-separated, e.g. INTC,CRWV`);
+    const since = typeof raw.since === "string" && raw.since !== "" ? raw.since : undefined;
+    if (raw.since !== undefined && (since === undefined || !ISO_TIME.test(since) || !Number.isFinite(Date.parse(since)))) return void bad(res, "since is an ISO 8601 time with its zone, e.g. 2026-11-07T13:30:00Z");
+    answerOf(res, await reads.news(symbols, since));
+  }));
 }
+
+/** an ISO 8601 time with its zone (Z or an offset), to the minute at least */
+const ISO_TIME = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d{1,3})?)?(Z|[+-]([01]\d|2[0-3]):[0-5]\d)$/;

@@ -1,6 +1,6 @@
 /** THE MARKET'S CORE: what the market's routes answer from — the keyless public sources (each read through the market's own read cache,
  * read-cache.ts keptSource), the stream hub (the venues' streams joined with the US shares' background reader), China, a coin's price,
- * Lunhui's relay and iFinD client, and the AKShare sidecar. `createMarketCore` takes each as it is handed (a test's fakes; absent: none);
+ * Nasdaq's headlines, Lunhui's relay and iFinD client, and the AKShare sidecar. `createMarketCore` takes each as it is handed (a test's fakes; absent: none);
  * `realMarketCore` is the main's, built over the real network. It holds no wallet, no home and no key, and writes nothing to disk. */
 import { createAkshare, akshareCommand, type Akshare } from "./live/akshare.ts";
 import { chinaSource, type ChinaSource } from "./live/china.ts";
@@ -8,6 +8,7 @@ import { cnHosts, realCnHttp } from "./live/cn-http.ts";
 import { createIfind, IFIND_HOST, type CnIfind } from "./live/cn-ifind.ts";
 import { createCnRelay, type CnRelay } from "./live/cn-relay.ts";
 import { historyKeep, pageWeight } from "./live/history.ts";
+import { nasdaqNews, type NewsSource } from "./live/news.ts";
 import { publicPrices, type Price } from "./live/prices.ts";
 import { publicSources, type PublicSource } from "./live/public-markets.ts";
 import { joinHubs, StreamHub, type HubVenue, type MarketHub } from "./live/stream-hub.ts";
@@ -20,6 +21,8 @@ export interface MarketCoreOptions {
   /** the stream hub (absent: none) */
   hub?: MarketHub | undefined;
   china?: ChinaSource | undefined;
+  /** a US share's headlines (absent: none — GET /api/news refuses) */
+  news?: NewsSource | undefined;
   /** a coin's price in dollars (absent: none, every asset undefined) */
   price?: Price | undefined;
   /** Lunhui's reach behind /api/cn/* (absent: both routes answer `off`) */
@@ -35,6 +38,7 @@ export interface MarketCore {
   source(id: string): PublicSource | undefined;
   readonly hub: MarketHub | undefined;
   readonly china: ChinaSource | undefined;
+  readonly news: NewsSource | undefined;
   readonly price: Price;
   readonly cn: MarketCoreOptions["cn"];
   readonly akshare: Akshare | undefined;
@@ -60,6 +64,7 @@ function coreOver(cache: ReadCache, o: MarketCoreOptions): MarketCore {
     source: (id) => byId.get(id),
     hub: o.hub,
     china: o.china,
+    news: o.news,
     price: o.price ?? noPrice,
     cn: o.cn,
     akshare: o.akshare,
@@ -108,6 +113,7 @@ export function realMarketCore(): MarketCore {
     sources,
     hub,
     china: chinaSource(),
+    news: nasdaqNews(),
     price: publicPrices(),
     cn: { relay: createCnRelay(realCnHttp), ifind: createIfind({ env: () => process.env, http: cnHosts(realCnHttp, [IFIND_HOST]) }) },
     akshare: createAkshare({ command: akshareCommand() }),

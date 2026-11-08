@@ -334,9 +334,10 @@ export interface PublicDeps {
  * venues, Robinhood's, Cboe's delayed-quote CDN, xStocks' and LI.FI's (public-stocks.ts, public-rwa.ts), Coinbase Exchange's, for a pair's
  * long price history only (live/history-crypto.ts), then the eight pre-IPO perpetuals'
  * venues (Binance's USDⓈ-M futures host and Bybit's v5 host the last two; Gate's host serves the xStocks tickers too), then the US stocks'
- * real-time quotes and charts (Nasdaq's, us-quotes.ts). Polymarket's Data API (beside its CLOB) is asked for its latest trades only, keyless.
+ * real-time quotes and charts (Nasdaq's, us-quotes.ts) and Nasdaq's per-symbol news feeds (www.nasdaq.com, news.ts, before the last two).
+ * Polymarket's Data API (beside its CLOB) is asked for its latest trades only, keyless.
  * Polymarket US's public gateway is its keyless market data only: its signed API (api.polymarket.us) is never asked from here */
-export const PUBLIC_HOSTS: readonly string[] = ["external-api.kalshi.com", "gamma-api.polymarket.com", "clob.polymarket.com", "data-api.polymarket.com", "gateway.polymarket.us", "api.robinhood.com", "api.nasdaq.com", "cdn-api.cboe.com", "api.xstocks.fi", "li.quest", "api.exchange.coinbase.com", "www.okx.com", "api.gateio.ws", "futures.kraken.com", "www.deribit.com", "api-futures.kucoin.com", "contract.mexc.com", "fapi.binance.com", "api.bybit.com"];
+export const PUBLIC_HOSTS: readonly string[] = ["external-api.kalshi.com", "gamma-api.polymarket.com", "clob.polymarket.com", "data-api.polymarket.com", "gateway.polymarket.us", "api.robinhood.com", "api.nasdaq.com", "cdn-api.cboe.com", "api.xstocks.fi", "li.quest", "api.exchange.coinbase.com", "www.okx.com", "api.gateio.ws", "futures.kraken.com", "www.deribit.com", "api-futures.kucoin.com", "contract.mexc.com", "www.nasdaq.com", "fapi.binance.com", "api.bybit.com"];
 const KALSHI = "https://external-api.kalshi.com/trade-api/v2";
 const GAMMA = "https://gamma-api.polymarket.com";
 const CLOB = "https://clob.polymarket.com";

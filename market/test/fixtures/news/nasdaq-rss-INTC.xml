@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/"
+  xmlns:foaf="http://xmlns.com/foaf/0.1/" xmlns:og="http://ogp.me/ns#"
+  xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#" xmlns:schema="http://schema.org/"
+  xmlns:sioc="http://rdfs.org/sioc/ns#" xmlns:sioct="http://rdfs.org/sioc/types#"
+  xmlns:skos="http://www.w3.org/2004/02/skos/core#" xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+  xmlns:nasdaq="http://nasdaq.com/reference/feeds/1.0" version="2.0" xml:base="https://www.nasdaq.com/feed/rssoutbound">
+ <channel>
+  <title>INTC Feed</title>
+  <link>https://www.nasdaq.com/feed/rssoutbound</link>
+  <description>This feed is responsible for generating the rss feed related to the topic INTC</description>
+  <language>en</language>
+  <item>
+   <title>Stock Indexes Settle Mostly Higher as Chipmakers Rebound</title>
+   <link>https://www.nasdaq.com/articles/stock-indexes-settle-mostly-higher-chipmakers-rebound</link>
+   <description>
+        The S&amp;P 500 Index ($SPX ) (SPY ) closed up +0.31% on Friday, the Dow Jones Industrial Average ($DOWI ) (DIA ) closed down -0.46%, and the Nasdaq 100 Index ($IUXX ) (QQQ ) closed up +1.35%.  December E-mini S&amp;P futures (ESZ26 ) rose +0.31%, and December E-mini Nasdaq futures...
+    </description>
+   <pubDate>Sat, 07 Nov 2026 20:40:46 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/stock-indexes-settle-mostly-higher-chipmakers-rebound?time=1794084046</guid>
+   <dc:creator>Barchart</dc:creator>
+   <category>Stocks</category>
+   <nasdaq:tickers>AMAT,ANET,SNDK,INTU,AKAM,AXON,TRI,ABNB,LITE,ASML,CRWV,QCOM,AMD,LRCX,SPY,DIA,KLAC,DKNG,ADSK,MU,WDAY,QQQ,INTC,ADBE,APLD,SOXX,NBIS,TEAM,MCHP,ARM,NET,MRNA,CHTR,MRVL,CRM</nasdaq:tickers>
+  </item>
+  <item>
+   <title>AI Stocks Are Falling; Bitcoin Is Holding Ground. Here's What Could Come Next.</title>
+   <link>https://www.nasdaq.com/articles/ai-stocks-are-falling-bitcoin-holding-ground-heres-what-could-come-next</link>
+   <description>
+        Key PointsStocks associated with the AI value chain are falling right now.
+    </description>
+   <pubDate>Sat, 07 Nov 2026 16:51:00 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/ai-stocks-are-falling-bitcoin-holding-ground-heres-what-could-come-next?time=1794070260</guid>
+   <dc:creator>The Motley Fool</dc:creator>
+   <category>Markets</category>
+   <nasdaq:tickers>BTC,BTC,INTC,ORCL,MU,SNDK</nasdaq:tickers>
+  </item>
+  <item>
+   <title>Here's Where I Think Intel Stock Will Be at the End of 2030</title>
+   <link>https://www.nasdaq.com/articles/heres-where-i-think-intel-stock-will-be-end-2030</link>
+   <description>
+        Key PointsIntel stock closed Nov. 3 around 57% under its June record close.
+    </description>
+   <pubDate>Sat, 07 Nov 2026 09:12:02 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/heres-where-i-think-intel-stock-will-be-end-2030?time=1794042722</guid>
+   <dc:creator>The Motley Fool</dc:creator>
+   <category>Markets</category>
+   <nasdaq:tickers>INTC,INTC</nasdaq:tickers>
+  </item>
+  <item>
+   <title>Stocks Supported by Chipmaker Strength and a Blowout US Payroll Report</title>
+   <link>https://www.nasdaq.com/articles/stocks-supported-chipmaker-strength-and-blowout-us-payroll-report</link>
+   <description>
+        The S&amp;P 500 Index ($SPX ) (SPY ) is up +0.89% today, the Dow Jones Industrial Average ($DOWI ) (DIA ) is down -0.42%, and the Nasdaq 100 Index ($IUXX ) (QQQ ) is up +2.12%.  December E-mini S&amp;P futures (ESZ26 ) are up +0.90%, and December E-mini Nasdaq futures...
+    </description>
+   <pubDate>Sat, 07 Nov 2026 00:14:57 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/stocks-supported-chipmaker-strength-and-blowout-us-payroll-report?time=1794010497</guid>
+   <dc:creator>Barchart</dc:creator>
+   <category>Stocks</category>
+   <nasdaq:tickers>ANET,SNDK,TRI,ABNB,LITE,CRWV,AMD,SPY,DKNG,ADSK,MU,ORCL,QQQ,FTNT,ADBE,ZS,MRNA,CHTR,CRM,AMAT,AVGO,INTU,AKAM,AXON,ASML,MSFT,S,QCOM,IBM,LRCX,DIA,PANW,KLAC,CRWD,OKTA,WDAY,INTC,APLD,SOXX,NBIS,TEAM,NET</nasdaq:tickers>
+  </item>
+  <item>
+   <title>Stock Indexes Push Higher as Chipmakers Roar Back</title>
+   <link>https://www.nasdaq.com/articles/stock-indexes-push-higher-chipmakers-roar-back</link>
+   <description>
+        The S&amp;P 500 Index ($SPX ) (SPY ) is up +1.07% today, the Dow Jones Industrial Average ($DOWI ) (DIA ) is up +0.21%, and the Nasdaq 100 Index ($IUXX ) (QQQ ) is up +2.09%.  December E-mini S&amp;P futures (ESZ26 ) are up +0.90%, and December E-mini Nasdaq futures...
+    </description>
+   <pubDate>Fri, 06 Nov 2026 22:11:49 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/stock-indexes-push-higher-chipmakers-roar-back?time=1794003109</guid>
+   <dc:creator>Barchart</dc:creator>
+   <category>Stocks</category>
+   <nasdaq:tickers>AMAT,GOOGL,AAPL,ANET,SNDK,INTU,AKAM,AXON,TRI,ABNB,LITE,ASML,CRWV,TSLA,QCOM,IBM,AMD,LRCX,SPY,DIA,KLAC,DKNG,META,ADSK,ORCL,WDAY,QQQ,INTC,ADBE,APLD,SOXX,NBIS,TEAM,MCHP,NET,MRNA,CHTR,AMZN,MRVL,CRM</nasdaq:tickers>
+  </item>
+  <item>
+   <title>After the Midterm Rally, the Dow Is on Track to Beat the Nasdaq for the First Time Since 2022. Here's What History Says Could Come Next.</title>
+   <link>https://www.nasdaq.com/articles/after-midterm-rally-dow-track-beat-nasdaq-first-time-2022-heres-what-history-says-could</link>
+   <description>
+        Key PointsThe Nasdaq has sold off in the last month while the Dow has gained.
+    </description>
+   <pubDate>Fri, 06 Nov 2026 19:50:00 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/after-midterm-rally-dow-track-beat-nasdaq-first-time-2022-heres-what-history-says-could?time=1793994600</guid>
+   <dc:creator>The Motley Fool</dc:creator>
+   <category>Markets</category>
+   <nasdaq:tickers>GOOGL,AMZN,META,MSFT,AAPL,VZ,KO,GS,INTC,XOM,RTX,PFE,CRM,NVDA,HON,AVGO,SHW,AMGN,GOOG,DOW</nasdaq:tickers>
+  </item>
+  <item>
+   <title>Noteworthy Friday Option Activity: INTC, CRM, HUM</title>
+   <link>https://www.nasdaq.com/articles/noteworthy-friday-option-activity-intc-crm-hum</link>
+   <description>
+        Among the underlying components of the S&amp;amp;P 500 index, we saw noteworthy options trading volume today in Intel Corp (Symbol: INTC), where a total of 583,273 contracts have traded so far, representing approximately 58.3 million underlying shares.  That amounts to about 42% of
+    </description>
+   <pubDate>Fri, 06 Nov 2026 18:38:54 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/noteworthy-friday-option-activity-intc-crm-hum?time=1793990334</guid>
+   <dc:creator>BNK Invest</dc:creator>
+   <category>Markets,Stocks,Options</category>
+   <nasdaq:tickers>INTC,INTC,CRM,HUM</nasdaq:tickers>
+   <nasdaq:partnerlink url="https://www.ytdreturn.com/intc/">Intel YTD Return</nasdaq:partnerlink>
+   <nasdaq:partnerlink url="https://www.stockrsi.com/intc/">INTC RSI</nasdaq:partnerlink>
+   <nasdaq:partnerlink url="https://www.preferredstockchannel.com/highest-monthly-yield/">Highest Yield Monthly Preferreds</nasdaq:partnerlink>
+  </item>
+  <item>
+   <title>Friday's ETF with Unusual Volume: SOXX</title>
+   <link>https://www.nasdaq.com/articles/fridays-etf-unusual-volume-soxx</link>
+   <description>
+        The iShares Semiconductor ETF is seeing unusually high volume in afternoon trading Friday, with over 37.5 million shares traded versus three month average volume of about 3.7 million.  Shares of SOXX were up about 3.7% on the day.
+
+Components of that ETF with the highest volume
+    </description>
+   <pubDate>Fri, 06 Nov 2026 17:10:19 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/fridays-etf-unusual-volume-soxx?time=1793985019</guid>
+   <dc:creator>BNK Invest</dc:creator>
+   <category>Markets,Stocks,ETFs</category>
+   <nasdaq:tickers>SOXX,SOXX,NVDA,INTC,LRCX,MCHP</nasdaq:tickers>
+   <nasdaq:partnerlink url="http://www.marketnewsvideo.com/slideshows/cheaper-stocks-than-insiders/">10 Bargains You Can Buy Cheaper Than Insiders Did</nasdaq:partnerlink>
+   <nasdaq:partnerlink url="http://www.marketnewsvideo.com/slideshows/ten-stocks-below-book/">10 Stocks Crossing Below Book Value</nasdaq:partnerlink>
+   <nasdaq:partnerlink url="http://www.marketnewsvideo.com/slideshows/ten-oversold-stocks/">10 Oversold Stocks You Need To Know About</nasdaq:partnerlink>
+  </item>
+  <item>
+   <title>Stock Indexes Routed on Capitulation out of Chipmakers and AI Stocks</title>
+   <link>https://www.nasdaq.com/articles/stock-indexes-routed-capitulation-out-chipmakers-and-ai-stocks</link>
+   <description>
+        The S&amp;P 500 Index ($SPX ) (SPY ) closed down -4.36% on Thursday, the Dow Jones Industrial Average ($DOWI ) (DIA ) closed down -3.44%, and the Nasdaq 100 Index ($IUXX ) (QQQ ) closed down -6.36%.  December E-mini S&amp;P futures (ESZ26 ) fell -4.46%, and December E-mini Nasdaq futures...
+    </description>
+   <pubDate>Fri, 06 Nov 2026 16:33:43 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/stock-indexes-routed-capitulation-out-chipmakers-and-ai-stocks?time=1793982823</guid>
+   <dc:creator>Barchart</dc:creator>
+   <category>Stocks</category>
+   <nasdaq:tickers>MSTR,GOOGL,APP,AAPL,ANET,SNDK,GLXY,LITE,COIN,CRWV,TSLA,STX,WDC,AMD,SPY,META,MU,ORCL,ZG,QQQ,IREN,GEN,MELI,FTNT,EPAM,ZS,MCHP,ARM,HOOD,MRVL,AMAT,AVGO,EXPE,TXN,MSFT,BMNR,S,QCOM,TPR,LRCX,DIA,PANW,KLAC,MARA,NVDA,CRWD,OKTA,INTC,APLD,SOXX,NBIS,RIOT,CPAY,NET,AMZN</nasdaq:tickers>
+  </item>
+  <item>
+   <title>VUG, AVGO, GOOG, INTC: Large Inflows Detected at ETF</title>
+   <link>https://www.nasdaq.com/articles/vug-avgo-goog-intc-large-inflows-detected-etf</link>
+   <description>
+        Looking today at week-over-week shares outstanding changes among the universe of ETFs covered at ETF Channel, one standout is the Vanguard Growth ETF (Symbol: VUG) where we have detected an approximate $1.0 billion dollar inflow -- that's a 0.5% increase week over week in outsta
+    </description>
+   <pubDate>Fri, 06 Nov 2026 15:49:41 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/vug-avgo-goog-intc-large-inflows-detected-etf?time=1793980181</guid>
+   <dc:creator>BNK Invest</dc:creator>
+   <category>Markets,Stocks,ETFs</category>
+   <nasdaq:tickers>VUG,VUG,AVGO,GOOG,INTC</nasdaq:tickers>
+   <nasdaq:partnerlink url="https://www.dividendchannel.com/symbol/vug/">VUG Dividend History</nasdaq:partnerlink>
+   <nasdaq:partnerlink url="https://www.averageannualreturn.com/vug/">VUG Average Annual Return</nasdaq:partnerlink>
+   <nasdaq:partnerlink url="https://www.canadastockchannel.com/dividends/ex-dividend-calendar/">Canadian ex-dividend calendar</nasdaq:partnerlink>
+  </item>
+  <item>
+   <title>Is Qualcomm Stock Worth Buying After Mixed Q4 Results?</title>
+   <link>https://www.nasdaq.com/articles/qualcomm-stock-worth-buying-after-mixed-q4-results</link>
+   <description>
+        QCOM's fiscal Q4 earnings fall 28% as handset weakness and rising costs offset automotive growth. Can diversification revive QCOM's prospects amid margin pressures?
+    </description>
+   <pubDate>Fri, 06 Nov 2026 15:10:00 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/qualcomm-stock-worth-buying-after-mixed-q4-results?time=1793977800</guid>
+   <dc:creator>Zacks</dc:creator>
+   <category>Stocks</category>
+   <nasdaq:tickers>QCOM,INTC,AMD</nasdaq:tickers>
+  </item>
+  <item>
+   <title>What Makes Jabil a Buy Despite the Recent Stock Price Slump?</title>
+   <link>https://www.nasdaq.com/articles/what-makes-jabil-buy-despite-recent-stock-price-slump</link>
+   <description>
+        Despite a 30.7% stock price slump, JBL's AI-driven growth opportunities, diversified operations and rising earnings estimates bolster its long-term outlook.
+    </description>
+   <pubDate>Fri, 06 Nov 2026 11:24:00 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/what-makes-jabil-buy-despite-recent-stock-price-slump?time=1793964240</guid>
+   <dc:creator>Zacks</dc:creator>
+   <category>Stocks</category>
+   <nasdaq:tickers>JBL,INTC,FLEX,CLS</nasdaq:tickers>
+  </item>
+  <item>
+   <title>Stock Indexes Pressured as Chipmakers and AI Stocks Plunge</title>
+   <link>https://www.nasdaq.com/articles/stock-indexes-pressured-chipmakers-and-ai-stocks-plunge</link>
+   <description>
+        The S&amp;P 500 Index ($SPX ) (SPY ) is down -1.70% today, the Dow Jones Industrial Average ($DOWI ) (DIA ) is down -0.76%, and the Nasdaq 100 Index ($IUXX ) (QQQ ) is down -3.60%.  December E-mini S&amp;P futures (ESZ26 ) are down -1.76%, and December E-mini Nasdaq futures...
+    </description>
+   <pubDate>Fri, 06 Nov 2026 00:40:27 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/stock-indexes-pressured-chipmakers-and-ai-stocks-plunge?time=1793925627</guid>
+   <dc:creator>Barchart</dc:creator>
+   <category>Stocks</category>
+   <nasdaq:tickers>GOOGL,APP,ANET,SNDK,LITE,ELV,CRWV,TSLA,WDC,AMD,SPY,META,UHS,HCA,MU,ORCL,CAH,ZG,QQQ,MELI,EPAM,CNC,ARM,AMAT,AVGO,EXPE,ASML,MSFT,QCOM,TPR,LRCX,DIA,KLAC,NVDA,CI,MOH,INTC,APLD,SOXX,NBIS,AMZN</nasdaq:tickers>
+  </item>
+  <item>
+   <title>Stock Market Today, Nov. 5: Intel Falls on Weak Fourth-Quarter Sales Outlook Amid Chip Selloff</title>
+   <link>https://www.nasdaq.com/articles/stock-market-today-nov-5-intel-falls-weak-fourth-quarter-sales-outlook-amid-chip-selloff</link>
+   <description>
+        Intel (NASDAQ:INTC), an x86 CPUs, data center chips, and contract chip manufacturing provider, closed at $52.25, down 10.33%. Intel fell after a broader semiconductor sell-off and weak fourth-quarter guidance, while investors are watching data-center spending and server demand ne
+    </description>
+   <pubDate>Thu, 05 Nov 2026 22:22:16 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/stock-market-today-nov-5-intel-falls-weak-fourth-quarter-sales-outlook-amid-chip-selloff?time=1793917336</guid>
+   <dc:creator>The Motley Fool</dc:creator>
+   <category>Markets</category>
+   <nasdaq:tickers>INTC,INTC</nasdaq:tickers>
+  </item>
+  <item>
+   <title>Nasdaq Stock Market Correction: History Says This Is What Happens Next</title>
+   <link>https://www.nasdaq.com/articles/nasdaq-stock-market-correction-history-says-what-happens-next</link>
+   <description>
+        Key PointsThe Nasdaq Composite closed more than 10% below its record on Nov. 5, its third correction this year.
+    </description>
+   <pubDate>Thu, 05 Nov 2026 21:39:01 +0000</pubDate>
+   <guid isPermaLink="true">https://www.nasdaq.com/articles/nasdaq-stock-market-correction-history-says-what-happens-next?time=1793914741</guid>
+   <dc:creator>The Motley Fool</dc:creator>
+   <category>Markets</category>
+   <nasdaq:tickers>AMZN,AMZN,GOOGL,GOOG,INTC</nasdaq:tickers>
+  </item>
+ </channel>
+</rss>
