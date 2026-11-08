@@ -18,6 +18,10 @@
  *   `items <a>, <b>` when it lists any; its URL; `<rule id> · <file> · <holding>`; and its plan, when it has one.
  * - **The note,** last: `annotation follows`, the budget's `no annotation: …`, or nothing.
  *
+ * THE WHY POST (spec §5.3, §5.4). {@link whyPost} posts the desk a US price move's alerts with what may explain them:
+ * each symbol's headlines from the Market (src/market-news.ts) and its EDGAR filings, then {@link WHY_INSTRUCTIONS},
+ * the reply's shape - cut to {@link WHY_POST_MAX} by its headlines alone.
+ *
  * Prices print as the feed gave them. A change and a P&L carry their sign, and a zero none, as rounded.
  *
  * THE WATCH'S LINES. {@link WATCH_LINES} renders the plan's phone-line table, row for row. A row is one line of at
@@ -29,8 +33,10 @@ import { deskTime } from "./desk.ts";
 import type { AlertMessageSource, DeskSource } from "./desk-session.ts";
 import type { LevelKind, LoadRefusal, Level } from "./desk-book.ts";
 import { cnQuoteTime, quoteTime } from "./desk-tools.ts";
+import type { Filing } from "./edgar.ts";
 import { etClock } from "./et.ts";
 import { FILINGS_SYMBOLS_MAX } from "./filings.ts";
+import type { Headline, NewsAnswer } from "./market-news.ts";
 import type { Market } from "./symbols.ts";
 import type { AlertHit, QuoteSnap } from "./watch-eval.ts";
 
@@ -198,6 +204,119 @@ export function annotationPost(hits: readonly AlertHit[], pass: string, now: num
   }
   const symbols = [...new Set(hits.map((h) => h.symbol))].join(",");
   return { text, source: { kind: "alerts", count: hits.length }, message: { kind: "alert", alert: pass, symbol: symbols, pass } };
+}
+
+/* ---------- the why post ---------- */
+
+/** The longest why post, in characters (code points): only its headlines are cut to fit it. */
+export const WHY_POST_MAX = 12_000;
+
+/** The why post's last block, verbatim: what to find and the reply's shape (spec §5.4). */
+export const WHY_INSTRUCTIONS = [
+  "Explain why this moved. Answer in Chinese, plain text, at most 4,000 characters. For each symbol, in this shape (a shared cause first when several moved together):",
+  "<SYMBOL> <盘前|盘中|盘后> <±x.x%> · <the cause in a few words>",
+  "<one label>",
+  "· <a fact, with its numbers>",
+  "· <a fact, with its numbers>",
+  "· <它自己|整个板块|大盘>：QQQ <±x.x%>，<its sector ETF> <±x.x%>，<two or three peers> <±x.x%>",
+  "· 计划：<the plan the alert quotes> → <满足|未满足>（<the measurement>） — only when the alert quotes a plan",
+  "来源：<outlet or filing> <HH:MM ET> · <outlet or filing> <HH:MM ET>",
+  "The label is exactly one of: 公司公布 · 确定 — the company's own filing, release or statement says what happened; 媒体报道 — a named outlet reports a concrete event the company has not confirmed; 媒体解读 · 公司没发公告 — outlets put the move down to sentiment, flows, a sector or a macro event; 没找到明确原因 — nothing fits, and then say what you checked.",
+  "For an index, name the sectors leading the move instead of peers. Price QQQ, SPY, the sector ETF and the peers in one desk_quotes call. Open a page with web_fetch when a headline is not enough. Never state a cause without a source, an outlet's claim as the company's, or an older story as today's cause, and never advise a trade.",
+].join("\n");
+
+/** What a why post reads besides its alerts: each symbol's headlines, and its filings of the last 24 hours (the
+ * caller's window) or why none could be read. A symbol missing from `news` was not read; from `filings`, has none. */
+export interface WhyContext {
+  news: Map<string, NewsAnswer>;
+  filings: Map<string, Filing[]> | { unavailable: string };
+}
+
+/** `text`'s length in characters (code points). */
+const charCount = (text: string): number => [...text].length;
+
+/** An instant as the desk writes it, `10:05 ET`, dated when not `at`'s date; a time `Date` cannot read stays as given. */
+function whenOf(time: string, at: Date): string {
+  const ms = Date.parse(time);
+  return Number.isNaN(ms) ? oneLine(time) : deskTime(new Date(ms), at);
+}
+
+/** A headline's line: `- <time> · <outlet> · <title> · <url>`. */
+const headlineLine = (h: Headline, at: Date): string =>
+  `- ${whenOf(h.time, at)} · ${oneLine(h.outlet)} · ${oneLine(h.title)} · ${oneLine(h.url)}`;
+
+/** A filing's line: `- <form>[ · items <a>, <b>] · accepted <time> · <url>`, `accepted time unknown` without one. */
+function filingLine(f: Filing, at: Date): string {
+  const parts = [oneLine(f.form)];
+  const items = (f.items ?? "").split(",").map((i) => oneLine(i).trim()).filter((i) => i !== "");
+  if (items.length > 0) parts.push(`items ${items.join(", ")}`);
+  parts.push(f.accepted === null || Number.isNaN(Date.parse(f.accepted)) ? "accepted time unknown" : `accepted ${whenOf(f.accepted, at)}`);
+  parts.push(oneLine(f.url));
+  return `- ${parts.join(" · ")}`;
+}
+
+/** Newest first; a time `Date` cannot read counts as the oldest. The sort is stable. */
+function newestFirst(headlines: readonly Headline[]): Headline[] {
+  const ms = (h: Headline): number => {
+    const t = Date.parse(h.time);
+    return Number.isNaN(t) ? -Infinity : t;
+  };
+  return [...headlines].sort((a, b) => ms(b) - ms(a));
+}
+
+/**
+ * A US price move's why post (spec §5.3): the alerts, each with no note, a blank line between; then per alerted
+ * symbol, each once in the alerts' order, `Headlines for <SYM>:` with its lines newest first, `: none` or
+ * `: unavailable: <reason>`; then per symbol `Filings for <SYM> in the last 24 h:` likewise; then
+ * {@link WHY_INSTRUCTIONS}. Past {@link WHY_POST_MAX} the oldest headline of the symbol keeping the most is dropped,
+ * the first such symbol first, until the post fits or none is left - so each symbol loses its oldest in turn - and a
+ * symbol that lost any says `- <n> older headlines left out for length`; an alert, a filing or the instructions are
+ * never cut. Its source and message are {@link annotationPost}'s.
+ * @param hits - the delivered alerts, in order.
+ * @param pass - the pass's id.
+ * @param now - the time of the post.
+ * @param ctx - the headlines and filings read for the alerted symbols.
+ */
+export function whyPost(hits: readonly AlertHit[], pass: string, now: number, ctx: WhyContext): { text: string; source: DeskSource; message: AlertMessageSource } {
+  const { source, message } = annotationPost(hits, pass, now);
+  const at = new Date(now);
+  const alerts = hits.map((h) => alertText(h, now, "none"));
+  const symbols = [...new Set(hits.map((h) => h.symbol))];
+  const news = symbols.map((symbol): { unavailable: string } | { lines: string[] } => {
+    const answer = ctx.news.get(symbol);
+    if (answer === undefined) return { unavailable: "not read" };
+    if ("unavailable" in answer) return { unavailable: oneLine(answer.unavailable) };
+    return { lines: newestFirst(answer.headlines).map((h) => headlineLine(h, at)) };
+  });
+  const filings = symbols.map((symbol) => {
+    const head = `Filings for ${symbol} in the last 24 h:`;
+    if (!(ctx.filings instanceof Map)) return `${head} unavailable: ${oneLine(ctx.filings.unavailable)}`;
+    const list = ctx.filings.get(symbol) ?? [];
+    return list.length === 0 ? `${head} none` : [head, ...list.map((f) => filingLine(f, at))].join("\n");
+  });
+  const keep = news.map((n) => ("lines" in n ? n.lines.length : 0));
+  const compose = (): string => {
+    const headlines = symbols.map((symbol, i) => {
+      const head = `Headlines for ${symbol}:`;
+      const n = news[i]!;
+      if ("unavailable" in n) return `${head} unavailable: ${n.unavailable}`;
+      if (n.lines.length === 0) return `${head} none`;
+      const out = keep[i]!;
+      const left = n.lines.length - out;
+      const tail = left > 0 ? [`- ${left} older headline${left === 1 ? "" : "s"} left out for length`] : [];
+      return [head, ...n.lines.slice(0, out), ...tail].join("\n");
+    });
+    return [...alerts, ...headlines, ...filings, WHY_INSTRUCTIONS].join("\n\n");
+  };
+  let text = compose();
+  while (charCount(text) > WHY_POST_MAX) {
+    const most = Math.max(0, ...keep);
+    if (most === 0) break;
+    const i = keep.indexOf(most);
+    keep[i] = most - 1;
+    text = compose();
+  }
+  return { text, source, message };
 }
 
 /* ---------- the desk state ---------- */

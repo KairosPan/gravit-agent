@@ -6,9 +6,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  BATCH_ITEMS_MAX, WATCH_LINES, alertText, annotationPost, batchText, lateAlertText, lostAlertsLine, priceStamp, stateBody,
-  type DeskStateView,
+  BATCH_ITEMS_MAX, WATCH_LINES, WHY_INSTRUCTIONS, WHY_POST_MAX, alertText, annotationPost, batchText, lateAlertText, lostAlertsLine,
+  priceStamp, stateBody, whyPost, type DeskStateView, type WhyContext,
 } from "../src/alert-text.ts";
+import type { Filing } from "../src/edgar.ts";
+import type { Headline, NewsAnswer } from "../src/market-news.ts";
 import type { AlertHit, FilingTrigger, KeyTrigger, QuoteSnap } from "../src/watch-eval.ts";
 
 const NOW = Date.parse("2026-11-30T15:21:04Z");
@@ -233,6 +235,115 @@ test("annotationPost: one alert keeps its rule's form, several become the alerts
     source: { kind: "alerts", count: 3 },
     message: { kind: "alert", alert: "p-aaaaaaaaaaaa", symbol: "NVDA,AAPL", pass: "p-aaaaaaaaaaaa" },
   });
+});
+
+/** WHY_INSTRUCTIONS as the plan gives it, verbatim. */
+const WHY_VERBATIM = `Explain why this moved. Answer in Chinese, plain text, at most 4,000 characters. For each symbol, in this shape (a shared cause first when several moved together):
+<SYMBOL> <盘前|盘中|盘后> <±x.x%> · <the cause in a few words>
+<one label>
+· <a fact, with its numbers>
+· <a fact, with its numbers>
+· <它自己|整个板块|大盘>：QQQ <±x.x%>，<its sector ETF> <±x.x%>，<two or three peers> <±x.x%>
+· 计划：<the plan the alert quotes> → <满足|未满足>（<the measurement>） — only when the alert quotes a plan
+来源：<outlet or filing> <HH:MM ET> · <outlet or filing> <HH:MM ET>
+The label is exactly one of: 公司公布 · 确定 — the company's own filing, release or statement says what happened; 媒体报道 — a named outlet reports a concrete event the company has not confirmed; 媒体解读 · 公司没发公告 — outlets put the move down to sentiment, flows, a sector or a macro event; 没找到明确原因 — nothing fits, and then say what you checked.
+For an index, name the sectors leading the move instead of peers. Price QQQ, SPY, the sector ETF and the peers in one desk_quotes call. Open a page with web_fetch when a headline is not enough. Never state a cause without a source, an outlet's claim as the company's, or an older story as today's cause, and never advise a trade.`;
+
+const NVDA_NEWS: Headline[] = [
+  { time: "2026-11-30T15:05:00Z", outlet: "Reuters", title: "Nvidia falls as US weighs new chip export curbs", url: "https://www.nasdaq.com/articles/nvda-curbs" },
+  { time: "2026-11-29T23:00:00Z", outlet: "Zacks", title: "Is Nvidia still a buy?", url: "https://www.nasdaq.com/articles/nvda-buy" },
+];
+
+const NVDA_FILING: Filing = {
+  symbol: "NVDA", cik: 1045810, accession: "0001045810-26-000123", form: "8-K", filingDate: "2026-11-30",
+  accepted: "2026-11-30T10:05:12-05:00", items: "2.02,9.01", primaryDocument: "nvda-20261130.htm",
+  url: "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000123/nvda-20261130.htm",
+};
+
+test("whyPost carries each alert, each symbol's headlines and filings, and ends with WHY_INSTRUCTIONS verbatim", () => {
+  assert.equal(WHY_INSTRUCTIONS, WHY_VERBATIM);
+  const ctx: WhyContext = {
+    news: new Map<string, NewsAnswer>([["NVDA", { headlines: NVDA_NEWS }], ["SPY", { headlines: [] }]]),
+    filings: new Map([["NVDA", [NVDA_FILING]]]),
+  };
+  const post = whyPost([NVDA_STOP, SPY_MOVE], "p-aaaaaaaaaaaa", NOW, ctx);
+  assert.equal(post.text, [
+    alertText(NVDA_STOP, NOW, "none"),
+    alertText(SPY_MOVE, NOW, "none"),
+    [
+      "Headlines for NVDA:",
+      "- 10:05 ET · Reuters · Nvidia falls as US weighs new chip export curbs · https://www.nasdaq.com/articles/nvda-curbs",
+      "- 2026-11-29 18:00 ET · Zacks · Is Nvidia still a buy? · https://www.nasdaq.com/articles/nvda-buy",
+    ].join("\n"),
+    "Headlines for SPY: none",
+    [
+      "Filings for NVDA in the last 24 h:",
+      "- 8-K · items 2.02, 9.01 · accepted 10:05 ET · https://www.sec.gov/Archives/edgar/data/1045810/000104581026000123/nvda-20261130.htm",
+    ].join("\n"),
+    "Filings for SPY in the last 24 h: none",
+    WHY_VERBATIM,
+  ].join("\n\n"));
+  assert.ok(post.text.endsWith(`\n\n${WHY_VERBATIM}`));
+
+  const bare = whyPost([{ ...NVDA_STOP }], "p-aaaaaaaaaaaa", NOW, {
+    news: new Map([["NVDA", { headlines: [] }]]),
+    filings: new Map([["NVDA", [{ ...NVDA_FILING, accepted: null, items: null }]]]),
+  });
+  assert.ok(bare.text.includes(`Filings for NVDA in the last 24 h:\n- 8-K · accepted time unknown · ${NVDA_FILING.url}`));
+  const twice = whyPost([NVDA_STOP, { ...NVDA_STOP, id: "a-000000000002" }], "p-aaaaaaaaaaaa", NOW, ctx);
+  assert.equal(twice.text.split("Headlines for NVDA:").length, 2, "a symbol alerted twice is read once");
+});
+
+test("an unavailable headline or filing read is said, and the instructions still follow", () => {
+  const post = whyPost([NVDA_STOP, SPY_MOVE], "p-aaaaaaaaaaaa", NOW, {
+    news: new Map<string, NewsAnswer>([["NVDA", { unavailable: "the Market did not answer: timeout" }]]),
+    filings: { unavailable: "SEC refused the request (403)" },
+  });
+  assert.ok(post.text.includes("Headlines for NVDA: unavailable: the Market did not answer: timeout"));
+  assert.ok(post.text.includes("Headlines for SPY: unavailable: not read"));
+  assert.ok(post.text.includes("Filings for NVDA in the last 24 h: unavailable: SEC refused the request (403)"));
+  assert.ok(post.text.includes("Filings for SPY in the last 24 h: unavailable: SEC refused the request (403)"));
+  assert.ok(post.text.endsWith(`\n\n${WHY_VERBATIM}`));
+});
+
+test("a post of twelve alerts with ten headlines each stays within 12,000 characters, dropping the oldest headlines first and keeping every alert", () => {
+  assert.equal(WHY_POST_MAX, 12_000);
+  const symbols = Array.from({ length: 12 }, (_, i) => `SYM${String.fromCharCode(65 + i)}`);
+  const hits = symbols.map((symbol, i) => ({ ...SPY_MOVE, id: `a-00000000000${i}`, symbol }));
+  const news = new Map<string, NewsAnswer>(symbols.map((symbol) => [symbol, {
+    /* newest first, as the Market lists them: minute 50, 45, … */
+    headlines: Array.from({ length: 10 }, (_, k) => ({
+      time: `2026-11-30T15:${String(50 - k * 5).padStart(2, "0")}:00Z`, outlet: "Reuters",
+      title: `${symbol} headline ${k} ${"x".repeat(150)}`, url: `https://www.nasdaq.com/articles/${symbol.toLowerCase()}-${k}`,
+    })),
+  }]));
+  const post = whyPost(hits, "p-aaaaaaaaaaaa", NOW, { news, filings: new Map() });
+  assert.ok([...post.text].length <= WHY_POST_MAX, `${[...post.text].length} characters`);
+  for (const h of hits) assert.ok(post.text.includes(alertText(h, NOW, "none")), `${h.symbol}'s alert is kept`);
+  assert.ok(post.text.endsWith(`\n\n${WHY_VERBATIM}`));
+  const kept = symbols.map((symbol) => {
+    const block = post.text.split(`Headlines for ${symbol}:`)[1]!.split("\n\n")[0]!;
+    const ks = [...block.matchAll(new RegExp(`${symbol} headline (\\d+)`, "g"))].map((m) => Number(m[1]));
+    assert.deepEqual(ks, Array.from({ length: ks.length }, (_, k) => k), `${symbol} keeps its newest headlines`);
+    if (ks.length < 10) assert.ok(block.includes(`- ${10 - ks.length} older headline${10 - ks.length === 1 ? "" : "s"} left out for length`));
+    return ks.length;
+  });
+  assert.ok(kept.some((n) => n < 10), "some headlines are dropped");
+  assert.ok(Math.max(...kept) - Math.min(...kept) <= 1, `each symbol's oldest in turn: ${kept.join(",")}`);
+  assert.ok(kept.every((n) => n > 0), "it keeps what fits");
+  /* a smaller post is not cut */
+  const small = whyPost(hits.slice(0, 1), "p-aaaaaaaaaaaa", NOW, { news, filings: new Map() });
+  assert.ok(!small.text.includes("left out for length"));
+});
+
+test("whyPost's source and message are annotationPost's for the same hits", () => {
+  const ctx: WhyContext = { news: new Map(), filings: new Map() };
+  for (const hits of [[NVDA_STOP], [NVDA_STOP, { ...SPY_MOVE, id: "a-000000000002" }, { ...NVDA_STOP, id: "a-000000000003" }]]) {
+    const why = whyPost(hits, "p-aaaaaaaaaaaa", NOW, ctx);
+    const plain = annotationPost(hits, "p-aaaaaaaaaaaa", NOW);
+    assert.deepEqual(why.source, plain.source);
+    assert.deepEqual(why.message, plain.message);
+  }
 });
 
 test("stateBody is the view as JSON, each holding and near level naming its market", () => {
