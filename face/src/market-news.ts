@@ -4,13 +4,14 @@
  * server-side for the desk's why post (src/alert-text.ts `whyPost`, spec §5.3). It is mounted for no browser: no
  * route of the face's proxies it.
  *
- * {@link marketNews} makes one GET for all the symbols asked, each once, at the market the `mcp-market` row reads
- * (`FACE_MARKET_URL`, src/market-row.ts `marketUrl`), cut at {@link NEWS_ABORT_MS} on the headers and the body
+ * {@link marketNews} asks the symbols, each once and upper-cased, {@link NEWS_SYMBOLS_MOST} to a GET, at the market the
+ * `mcp-market` row reads (`FACE_MARKET_URL`, src/market-row.ts `marketUrl`), cut at {@link NEWS_ABORT_MS} on the headers and the body
  * (src/upstream-proxy.ts `askUpstream`; the Market bounds each symbol inside it). Each symbol comes back as its
  * headlines, newest first as the Market lists them, or `unavailable` with why:
  * - the Market's own `unavailable` reason for a symbol whose feed refused;
+ * - a symbol not a US ticker by the Market's rule: `not a US ticker`, never asked;
  * - a refusal (409), a malformed query (400), any other status, no answer in time, or a body not of the news shape:
- *   every symbol, the reason naming which;
+ *   every symbol of that GET, the reason naming which;
  * - a symbol the answer does not list. A headline not of the shape is left out. Never rejects.
  * @module
  */
@@ -56,41 +57,62 @@ function failureOf(status: number, body: string): string {
   return `the Market answered ${status}`;
 }
 
+/** The most symbols one GET asks: the Market refuses more (market/src/reads.ts `NEWS_SYMBOLS_MOST`). */
+export const NEWS_SYMBOLS_MOST = 10;
+
+/** A US ticker by the Market's rule (market/src/live/us-quotes.ts `US_TICKER`): the Market refuses a query naming
+ * any other, so the read leaves such a symbol out rather than lose the rest. */
+const US_TICKER = /^[A-Z]{1,5}(\.[A-Z])?$/;
+
+/** One GET for `asked` (at most {@link NEWS_SYMBOLS_MOST}): each symbol's headlines or why it has none. */
+async function askChunk(doFetch: typeof fetch, base: string, abortMs: number, asked: readonly string[], since: string): Promise<Map<string, NewsAnswer>> {
+  const out = new Map<string, NewsAnswer>();
+  const all = (unavailable: string): Map<string, NewsAnswer> => {
+    for (const sym of asked) out.set(sym, { unavailable });
+    return out;
+  };
+  const query = new URLSearchParams({ symbols: asked.join(","), since });
+  const answer = await askUpstream(doFetch, `${base}/api/news?${query.toString()}`, abortMs);
+  if ("unreachable" in answer) return all(`the Market did not answer: ${answer.unreachable}`);
+  if (answer.status !== 200) return all(failureOf(answer.status, answer.body));
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(answer.body);
+  } catch {
+    parsed = undefined;
+  }
+  if (!isRecord(parsed) || parsed.ok !== true || !isRecord(parsed.news)) return all("the Market's answer is not its news shape");
+  const news = parsed.news;
+  const unavailable = isRecord(parsed.unavailable) ? parsed.unavailable : {};
+  for (const sym of asked) {
+    const why = Object.hasOwn(unavailable, sym) ? unavailable[sym] : undefined;
+    const list = Object.hasOwn(news, sym) ? news[sym] : undefined;
+    if (typeof why === "string") out.set(sym, { unavailable: reasonOf(why) });
+    else if (Array.isArray(list)) out.set(sym, { headlines: list.filter(isHeadline) });
+    else out.set(sym, { unavailable: "the Market's answer does not list it" });
+  }
+  return out;
+}
+
 /**
- * The headline read.
- * @param deps - the fetch (the global one), the Market's base URL (`marketUrl()` at each read) and the deadline.
- * @returns a read of `symbols`' headlines since `since`, keyed by each symbol asked.
+ * The headline read: the symbols upper-cased, each once; one not a US ticker is `not a US ticker` and never asked;
+ * the rest asked {@link NEWS_SYMBOLS_MOST} to a GET, the GETs side by side, a failing GET marking only its own symbols.
+ * @param deps - the fetch (the global one), the Market's base URL (`marketUrl()` at each read) and each GET's deadline.
+ * @returns a read of `symbols`' headlines since `since`, keyed by each symbol upper-cased.
  */
 export function marketNews(deps: { fetch?: typeof fetch; baseUrl?: string; abortMs?: number } = {}): (symbols: readonly string[], since: string) => Promise<Map<string, NewsAnswer>> {
   return async (symbols, since) => {
-    const asked = [...new Set(symbols)];
     const out = new Map<string, NewsAnswer>();
-    if (asked.length === 0) return out;
-    const all = (unavailable: string): Map<string, NewsAnswer> => {
-      for (const sym of asked) out.set(sym, { unavailable });
-      return out;
-    };
-    const query = new URLSearchParams({ symbols: asked.join(","), since });
-    const url = `${deps.baseUrl ?? marketUrl()}/api/news?${query.toString()}`;
-    const answer = await askUpstream(deps.fetch ?? fetch, url, deps.abortMs ?? NEWS_ABORT_MS);
-    if ("unreachable" in answer) return all(`the Market did not answer: ${answer.unreachable}`);
-    if (answer.status !== 200) return all(failureOf(answer.status, answer.body));
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(answer.body);
-    } catch {
-      parsed = undefined;
+    const asked: string[] = [];
+    for (const sym of new Set(symbols.map((s) => s.toUpperCase()))) {
+      if (US_TICKER.test(sym)) asked.push(sym);
+      else out.set(sym, { unavailable: "not a US ticker" });
     }
-    if (!isRecord(parsed) || parsed.ok !== true || !isRecord(parsed.news)) return all("the Market's answer is not its news shape");
-    const news = parsed.news;
-    const unavailable = isRecord(parsed.unavailable) ? parsed.unavailable : {};
-    for (const sym of asked) {
-      const why = Object.hasOwn(unavailable, sym) ? unavailable[sym] : undefined;
-      const list = Object.hasOwn(news, sym) ? news[sym] : undefined;
-      if (typeof why === "string") out.set(sym, { unavailable: reasonOf(why) });
-      else if (Array.isArray(list)) out.set(sym, { headlines: list.filter(isHeadline) });
-      else out.set(sym, { unavailable: "the Market's answer does not list it" });
-    }
+    const chunks: string[][] = [];
+    for (let i = 0; i < asked.length; i += NEWS_SYMBOLS_MOST) chunks.push(asked.slice(i, i + NEWS_SYMBOLS_MOST));
+    const base = deps.baseUrl ?? marketUrl();
+    const answers = await Promise.all(chunks.map((chunk) => askChunk(deps.fetch ?? fetch, base, deps.abortMs ?? NEWS_ABORT_MS, chunk, since)));
+    for (const answer of answers) for (const [sym, a] of answer) out.set(sym, a);
     return out;
   };
 }

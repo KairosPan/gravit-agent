@@ -4,7 +4,7 @@
  * stub. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { NEWS_ABORT_MS, marketNews } from "../src/market-news.ts";
+import { NEWS_ABORT_MS, NEWS_SYMBOLS_MOST, marketNews } from "../src/market-news.ts";
 
 const BASE = "http://127.0.0.1:4821";
 const SINCE = "2026-11-06T21:00:00Z";
@@ -97,4 +97,38 @@ test("a symbol the answer lists under unavailable stays unavailable", async () =
   const odd = stub(200, { ok: true, news: { NVDA: [NVDA_1, { time: 5, outlet: "x" }, "junk"] } });
   assert.deepEqual((await marketNews({ fetch: odd.fetch, baseUrl: BASE })(["NVDA"], SINCE)).get("NVDA"), { headlines: [NVDA_1] },
     "a headline not of the shape is left out");
+});
+
+test("eleven symbols are asked in two GETs of at most ten, and a failing GET leaves the other's headlines intact", async () => {
+  assert.equal(NEWS_SYMBOLS_MOST, 10);
+  const symbols = Array.from({ length: 11 }, (_, i) => `S${String.fromCharCode(65 + i)}`);
+  const urls: string[] = [];
+  const doFetch = (async (url: string | URL | Request) => {
+    urls.push(String(url));
+    const asked = new URL(String(url)).searchParams.get("symbols")!.split(",");
+    if (asked.includes("SK")) return new Response(JSON.stringify({ ok: false, error: "boom" }), { status: 500 });
+    return new Response(JSON.stringify({ ok: true, news: Object.fromEntries(asked.map((s) => [s, [NVDA_1]])) }), { status: 200 });
+  }) as typeof fetch;
+  const got = await marketNews({ fetch: doFetch, baseUrl: BASE })(symbols, SINCE);
+  assert.equal(urls.length, 2);
+  const sizes = urls.map((u) => new URL(u).searchParams.get("symbols")!.split(",").length).sort((a, b) => a - b);
+  assert.deepEqual(sizes, [1, 10]);
+  for (const sym of symbols.slice(0, 10)) assert.deepEqual(got.get(sym), { headlines: [NVDA_1] });
+  assert.deepEqual(got.get("SK"), { unavailable: "the Market answered 500" });
+});
+
+test("symbols are upper-cased, and one not a US ticker is left out without failing the rest", async () => {
+  const s = stub(200, { ok: true, news: { NVDA: [NVDA_1], "BRK.B": [] } });
+  const got = await marketNews({ fetch: s.fetch, baseUrl: BASE })(["nvda", "brk.b", "600519", "TOOLONG"], SINCE);
+  assert.equal(s.urls.length, 1);
+  assert.equal(new URL(s.urls[0]!).searchParams.get("symbols"), "NVDA,BRK.B");
+  assert.deepEqual(got.get("NVDA"), { headlines: [NVDA_1] });
+  assert.deepEqual(got.get("BRK.B"), { headlines: [] });
+  assert.deepEqual(got.get("600519"), { unavailable: "not a US ticker" });
+  assert.deepEqual(got.get("TOOLONG"), { unavailable: "not a US ticker" });
+
+  const none = stub(200, { ok: true, news: {} });
+  const only = await marketNews({ fetch: none.fetch, baseUrl: BASE })(["600519"], SINCE);
+  assert.equal(none.urls.length, 0, "nothing to ask, no request");
+  assert.deepEqual(only.get("600519"), { unavailable: "not a US ticker" });
 });
