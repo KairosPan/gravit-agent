@@ -778,7 +778,9 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       lastStart[m] = at;
       mk.lastPollAt = iso(at);
       const watched = symbols.slice(0, max);
-      const sessions = m === "us" ? { us: session } : { cn: uncovered ? { ...session, uncovered: true as const } : session };
+      /* prev is the session's own date until the watch reads the one before it (why-it-moved task 8): every US print
+       * then measures from one reference a session, as before */
+      const sessions = m === "us" ? { us: { ...session, prev: session.date } } : { cn: uncovered ? { ...session, uncovered: true as const } : session };
       track((async () => {
         try {
           await pricePass(m, watched, session, sessions, at);
@@ -1079,13 +1081,13 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         if (!inFilingWindow(f.accepted, answer, at)) pre = "window";
         else {
           const kd = day.keys.get(key);
-          if (kd !== undefined && kd.date === date && kd.lastHitAt !== undefined && at - kd.lastHitAt < rule.cooldownMs) pre = "cooldown";
+          if (kd !== undefined && kd.ref === date && kd.lastHitAt !== undefined && at - kd.lastHitAt < rule.cooldownMs) pre = "cooldown";
         }
         if (pre === undefined) {
           /* a filing that reaches the gate starts its rule's cooldown; one outside the window or inside the cooldown
            * does not (the T9 review's ruling), as filingCooldowns reads the ledger back */
           const kd = day.keys.get(key);
-          day.keys.set(key, { date, alerted: true, repeats: kd?.date === date ? kd.repeats : 0, lastHitAt: at });
+          day.keys.set(key, { ref: date, alerted: true, repeats: kd?.ref === date ? kd.repeats : 0, lastHitAt: at });
         }
         pending.push({
           pre,
@@ -1112,7 +1114,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     const latest = new Map<string, number>();
     for (const r of read) {
       if (r.kind !== "alert" || !r.key.startsWith("filing:")) continue;
-      if (rebuilt.keys.get(r.key)?.date !== r.date || r.suppressed === "cooldown" || r.suppressed === "window") continue;
+      if (rebuilt.keys.get(r.key)?.ref !== (r.ref ?? r.date) || r.suppressed === "cooldown" || r.suppressed === "window") continue;
       const at = Date.parse(r.t);
       if (Number.isFinite(at) && at > (latest.get(r.key) ?? Number.NEGATIVE_INFINITY)) latest.set(r.key, at);
     }
@@ -1324,7 +1326,7 @@ export function installWatch(deps: WatchDeps): WatchHandle {
       else if (r.suppressed !== undefined) today.suppressed[r.suppressed] += 1;
     }
     const marketOfKey = new Map(keys.map((k) => [k.key, k.market]));
-    for (const [key, kd] of day.keys) if (kd.date === date && (marketOfKey.get(key) ?? (key.startsWith("filing:") ? "us" : undefined)) === m) today.repeats += kd.repeats;
+    for (const [key, kd] of day.keys) if (kd.ref === date && (marketOfKey.get(key) ?? (key.startsWith("filing:") ? "us" : undefined)) === m) today.repeats += kd.repeats;
     return today;
   }
 

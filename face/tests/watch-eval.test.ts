@@ -6,19 +6,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { Level, LevelKind, Rule } from "../src/desk-book.ts";
-import type { MarketSession } from "../src/market-clock.ts";
+import { nyInstant, type MarketSession } from "../src/market-clock.ts";
 import type { MarketQuote } from "../src/market-quotes.ts";
 import {
-  ALERTS_PER_HOUR, GAP_RULE_WINDOW_MS, HOUR_MS,
+  ALERTS_PER_HOUR, GAP_RULE_WINDOW_MS, HOUR_MS, REBUILD_WINDOW_MS, THIN_ALONE_MS, THIN_SECOND_MS,
   ALERT_REPLAY_MS, alertId, batchDue, batchId, emptyDay, evaluatePass, findOrphans, gate, isAlertRecord, judgedDate, passId, pastOf, priceKeys, rebuildDay, snapOf,
-  takeBatch, watchQuoteOf,
-  type AlertHit, type PriceKey, type WatchDay, type WatchQuote, type WatchSessions,
+  takeBatch, referenceOf, usPhaseOf, watchQuoteOf,
+  type AlertHit, type PriceKey, type UsSession, type WatchDay, type WatchQuote, type WatchSessions,
 } from "../src/watch-eval.ts";
 
-const S: MarketSession = { date: "2026-11-30", open: "2026-11-30T14:30:00Z", close: "2026-11-30T21:00:00Z", early: false };
+const S: UsSession = { date: "2026-11-30", open: "2026-11-30T14:30:00Z", close: "2026-11-30T21:00:00Z", early: false, prev: "2026-11-27" };
 const C: MarketSession = { date: "2026-12-01", open: "2026-12-01T01:30:00Z", close: "2026-12-01T07:00:00Z", early: false };
 const BOTH: WatchSessions = { us: S, cn: C };
 const T = (iso: string): number => Date.parse(iso);
+/** The XNYS session of `date` as the watch hands it over, `prev` the session before it. */
+function usSession(date: string, prev: string, early = false): UsSession {
+  return { date, open: nyInstant(date, 9, 30), close: nyInstant(date, early ? 13 : 16, 0), early, prev };
+}
 
 /** A live US print on the nasdaq feed; its change from `prev` when there is one. */
 function u(symbol: string, price: number | null, asOf: string, prev?: number): WatchQuote {
@@ -40,8 +44,8 @@ function level(symbol: string, kind: LevelKind, at: number | [number, number], w
     ...extra,
   };
 }
-function moveRule(id: string, symbols: string[], movePct: number, cooldownMs = 1_800_000): Rule {
-  return { file: "desk/rules.yml", index: 0, id, symbols: { holdings: false, levels: false, symbols }, annotate: false, urgent: false, kind: "move_pct", movePct, sessions: "all", cooldownMs };
+function moveRule(id: string, symbols: string[], movePct: number, cooldownMs = 1_800_000, sessions: "all" | "regular" = "all"): Rule {
+  return { file: "desk/rules.yml", index: 0, id, symbols: { holdings: false, levels: false, symbols }, annotate: false, urgent: false, kind: "move_pct", movePct, sessions, cooldownMs };
 }
 function gapRule(id: string, symbols: string[], gapPct: number): Rule {
   return { file: "desk/rules.yml", index: 1, id, symbols: { holdings: false, levels: false, symbols }, annotate: false, urgent: false, kind: "gap", gapPct };
@@ -148,25 +152,34 @@ test("past at the first judged observation fires once as gap - a level, a move r
   assert.deepEqual(evaluatePass(day, [cnLate], [c("601318", 48, "2026-12-01T02:01:00Z", "trading", 50)], BOTH, T("2026-12-01T02:01:00Z")), [], "10:01 Beijing");
 });
 
-test("a US print is judged on as_of inside its own session, not on the clock", () => {
+test("a US print is judged on as_of inside its own session's three phases, not on the clock", () => {
   const at = (asOf: string, sessions: WatchSessions = BOTH) => judgedDate(u("NVDA", 100, asOf), sessions);
-  assert.equal(at("2026-11-30T14:29:59Z"), undefined, "a print before the open, read after it");
-  assert.equal(at("2026-11-30T14:30:00Z"), "2026-11-30");
-  assert.equal(at("2026-11-30T20:59:59Z"), "2026-11-30");
-  assert.equal(at("2026-11-30T21:00:00Z"), undefined, "the close is outside");
+  const phase = (asOf: string, s: UsSession = S) => usPhaseOf(T(asOf), s);
+  assert.equal(at("2026-11-30T08:59:59Z"), undefined, "before 04:00 ET");
+  assert.equal(phase("2026-11-30T09:00:00Z"), "pre", "04:00 ET");
+  assert.equal(phase("2026-11-30T14:29:59Z"), "pre", "a print before the open, read after it");
+  assert.equal(at("2026-11-30T14:29:59Z"), "2026-11-30");
+  assert.equal(phase("2026-11-30T14:30:00Z"), "regular");
+  assert.equal(phase("2026-11-30T20:59:59Z"), "regular");
+  assert.equal(phase("2026-11-30T21:00:00Z"), "after", "the close starts after-hours");
+  assert.equal(phase("2026-12-01T00:59:59Z"), "after", "19:59:59 ET");
+  assert.equal(at("2026-12-01T00:59:59Z"), "2026-11-30", "judged on its session's date");
+  assert.equal(phase("2026-12-01T01:00:00Z"), undefined, "20:00 ET is outside");
   assert.equal(at("2026-11-30T15:00:00Z", { cn: C }), undefined, "no US session, no judgement");
   assert.equal(at("2026-12-01T15:00:00Z"), undefined, "another ET date");
-  const nov2: MarketSession = { date: "2026-11-02", open: "2026-11-02T14:30:00Z", close: "2026-11-02T21:00:00Z", early: false };
-  assert.equal(at("2026-11-02T13:45:00Z", { us: nov2 }), undefined, "09:45 had DST held; 08:45 EST");
-  assert.equal(at("2026-11-02T14:30:00Z", { us: nov2 }), "2026-11-02");
-  const nov27: MarketSession = { date: "2026-11-27", open: "2026-11-27T14:30:00Z", close: "2026-11-27T18:00:00Z", early: true };
-  assert.equal(at("2026-11-27T17:59:00Z", { us: nov27 }), "2026-11-27");
-  assert.equal(at("2026-11-27T18:05:00Z", { us: nov27 }), undefined, "after the early close");
+  const nov2 = usSession("2026-11-02", "2026-10-30");
+  assert.equal(nov2.open, "2026-11-02T14:30:00Z");
+  assert.equal(phase("2026-11-02T13:45:00Z", nov2), "pre", "09:45 had DST held; 08:45 EST");
+  assert.equal(phase("2026-11-02T08:59:00Z", nov2), undefined, "03:59 EST");
+  assert.equal(phase("2026-11-02T14:30:00Z", nov2), "regular");
+  const nov27 = usSession("2026-11-27", "2026-11-25", true);
+  assert.equal(phase("2026-11-27T17:59:00Z", nov27), "regular");
+  assert.equal(phase("2026-11-27T18:05:00Z", nov27), "after", "after the early close");
 
   const [stop] = keysOf({ levels: [level("NVDA", "stop", 170, "cross_down")] });
   const day = emptyDay();
   assert.deepEqual(evaluatePass(day, [stop], [u("NVDA", 168, "2026-11-30T14:29:59Z")], BOTH, T("2026-11-30T14:30:05Z")), [], "the clock is in the session, the print is not");
-  assert.equal(day.keys.has(stop.key), false, "and it is no observation");
+  assert.equal(day.keys.has(stop.key), false, "and it is no observation for a level");
 });
 
 test("an A-share print is judged only inside 09:30-11:30 and 13:00-15:00 Beijing with the phase trading", () => {
@@ -249,10 +262,10 @@ test("a key's day is its session's: a US gap and an A-share gap on one evening a
   /* 20:31 New York on the 30th is 09:31 Beijing on the 1st */
   const cn = evaluatePass(day, [stop, cnStop], [u("NVDA", 168, "2026-11-30T20:59:00Z"), c("600519", 1390, "2026-12-01T01:31:00Z", "trading")], BOTH, T("2026-12-01T01:31:00Z"));
   assert.deepEqual(cn.map((h) => [h.key.symbol, h.gap, h.date]), [["600519", true, "2026-12-01"]]);
-  assert.equal(day.keys.get(stop.key)?.date, "2026-11-30");
-  assert.equal(day.keys.get(cnStop.key)?.date, "2026-12-01");
+  assert.equal(day.keys.get(stop.key)?.ref, "2026-11-27", "a regular US print measures from the previous close");
+  assert.equal(day.keys.get(cnStop.key)?.ref, "2026-12-01", "an A share keeps its Beijing session date");
   /* the next US session starts the US key afresh */
-  const dec1: MarketSession = { date: "2026-12-01", open: "2026-12-01T14:30:00Z", close: "2026-12-01T21:00:00Z", early: false };
+  const dec1 = usSession("2026-12-01", "2026-11-30");
   const next = evaluatePass(day, [stop, cnStop], [u("NVDA", 168, "2026-12-01T14:31:00Z")], { us: dec1, cn: C }, T("2026-12-01T14:31:00Z"));
   assert.deepEqual(next.map((h) => [h.key.symbol, h.gap, h.date]), [["NVDA", true, "2026-12-01"]]);
 });
@@ -318,42 +331,236 @@ test("rebuildDay restores the day across both markets' session dates", () => {
   const nvda = "level:desk/levels.yml:NVDA:stop:170:cross_down";
   const cnKey = "level:desk/levels.yml:600519:stop:1400:cross_down";
   const records: unknown[] = [
-    alertRecord({ t: "2026-11-30T14:30:02.000Z", key: nvda, id: "a-nvda" }),
+    alertRecord({ t: "2026-11-30T14:30:02.000Z", key: nvda, id: "a-nvda", ref: "2026-11-27", phase: "regular" }),
     alertRecord({ t: "2026-11-30T14:41:00.000Z", key: "rule:m:AAPL", symbol: "AAPL", id: "a-aapl", decision: "suppressed", suppressed: "cap" }),
     alertRecord({ t: "2026-11-30T14:20:00.000Z", key: "rule:m:AMD", symbol: "AMD", id: "a-old-cap", decision: "suppressed", suppressed: "cap" }),
     { t: "2026-11-30T15:00:00.000Z", kind: "batch", id: "b-1", date: "2026-11-30", alerts: ["a-old-cap"] },
-    alertRecord({ t: "2026-11-30T14:50:00.000Z", key: nvda, id: "a-nvda-repeat", decision: "suppressed", suppressed: "cooldown" }),
+    alertRecord({ t: "2026-11-30T14:50:00.000Z", key: nvda, id: "a-nvda-repeat", ref: "2026-11-27", phase: "regular", decision: "suppressed", suppressed: "cooldown" }),
     alertRecord({ t: "2026-12-01T01:30:05.000Z", key: cnKey, id: "a-cn", market: "cn", symbol: "600519", date: "2026-12-01" }),
-    alertRecord({ t: "2026-11-28T14:30:00.000Z", key: "rule:m:MSFT", symbol: "MSFT", id: "a-ancient", date: "2026-11-27" }),
-    /* its t is bent to 2026-11-29 so the 11-27 record stays inside the 36 h window and the newer date must win */
+    alertRecord({ t: "2026-11-25T20:00:00.000Z", key: "rule:m:MSFT", symbol: "MSFT", id: "a-ancient", date: "2026-11-25" }),
+    /* its t is bent to 2026-11-29 so the 11-27 record and the 11-30 one are both read and the newer date must win */
     alertRecord({ t: "2026-11-29T23:00:00.000Z", key: "rule:g:TSLA", symbol: "TSLA", id: "a-tsla-27", date: "2026-11-27", decision: "suppressed", suppressed: "muted" }),
     alertRecord({ t: "2026-11-30T14:35:00.000Z", key: "rule:g:TSLA", symbol: "TSLA", id: "a-tsla-30", date: "2026-11-30", decision: "suppressed", suppressed: "muted" }),
     "a torn line", { kind: "alert" }, null,
   ];
   const now = T("2026-12-01T01:35:00Z");
   const day = rebuildDay(records, now);
-  assert.deepEqual(day.keys.get(nvda), { date: "2026-11-30", alerted: true, repeats: 0, lastHitAt: T("2026-11-30T14:30:02Z") }, "the cooldown repeat is no hit");
-  assert.equal(day.keys.get(cnKey)?.date, "2026-12-01");
+  assert.deepEqual(day.keys.get(nvda), { ref: "2026-11-27", alerted: true, repeats: 0, lastHitAt: T("2026-11-30T14:30:02Z") }, "the cooldown repeat is no hit");
+  assert.equal(day.keys.get(cnKey)?.ref, "2026-12-01");
   assert.equal(day.keys.get(cnKey)?.alerted, true);
-  assert.equal(day.keys.has("rule:m:MSFT"), false, "a record older than 36 h is ignored");
-  assert.equal(day.keys.get("rule:g:TSLA")?.date, "2026-11-30", "a key's newest date");
+  assert.equal(day.keys.has("rule:m:MSFT"), false, "a record older than five days is ignored");
+  assert.equal(day.keys.get("rule:g:TSLA")?.ref, "2026-11-30", "a key's newest date");
   assert.deepEqual(day.sends, [T("2026-12-01T01:30:05Z")], "the sends within the hour");
   assert.deepEqual(day.pending, [{ id: "a-aapl", t: T("2026-11-30T14:41:00Z") }], "the caps no batch lists");
 
-  /* NVDA still past on its date: no second gap; the A share likewise */
+  /* NVDA still past against its reference close: no second gap; the A share likewise */
   const keys = keysOf({ levels: [level("NVDA", "stop", 170, "cross_down"), level("600519", "stop", 1400, "cross_down")] });
   assert.deepEqual(evaluatePass(day, keys, [u("NVDA", 168, "2026-11-30T20:00:00Z"), c("600519", 1390, "2026-12-01T01:34:00Z", "trading")], BOTH, now), []);
   assert.equal(day.keys.get(nvda)?.side, true, "the side is read afresh");
   assert.deepEqual(rebuildDay([], now), emptyDay());
 
   /* a rebuilt cooldown swallows a crossing after the restart */
-  const restarted = rebuildDay([alertRecord({ t: "2026-11-30T15:00:00.000Z", key: nvda, id: "a-before", gap: false })], T("2026-11-30T15:05:00Z"));
+  const restarted = rebuildDay([alertRecord({ t: "2026-11-30T15:00:00.000Z", key: nvda, id: "a-before", gap: false, ref: "2026-11-27" })], T("2026-11-30T15:05:00Z"));
   const [stop] = keys;
   assert.deepEqual(evaluatePass(restarted, [stop], [u("NVDA", 171, "2026-11-30T15:06:00Z")], BOTH, T("2026-11-30T15:06:00Z")), []);
   assert.deepEqual(evaluatePass(restarted, [stop], [u("NVDA", 169, "2026-11-30T15:10:00Z")], BOTH, T("2026-11-30T15:10:00Z")), [], "inside 30 minutes of the last hit");
   assert.equal(restarted.keys.get(nvda)?.repeats, 1);
   assert.equal(evaluatePass(restarted, [stop], [u("NVDA", 171, "2026-11-30T15:35:00Z")], BOTH, T("2026-11-30T15:35:00Z")).length, 0);
   assert.equal(evaluatePass(restarted, [stop], [u("NVDA", 169, "2026-11-30T15:40:00Z")], BOTH, T("2026-11-30T15:40:00Z")).length, 1, "and after it a crossing hits");
+});
+
+/* ---------- pre-market and after-hours: the reference close, thin prints, the long weekend ---------- */
+
+/** One pass of `keys` over one US print at its own as_of, or at `now`. */
+const passAt = (day: WatchDay, keys: PriceKey[], q: WatchQuote, sessions: WatchSessions, now = T(q.asOf as string)) => evaluatePass(day, keys, [q], sessions, now);
+/** The hits as [symbol, gap, ref, phase]. */
+const shape = (hits: { key: PriceKey; gap: boolean; ref: string; phase?: string }[]) => hits.map((h) => [h.key.label, h.gap, h.ref, h.phase]);
+
+test("a US move key judges pre-market, regular and after-hours prints; a sessions: regular key, a level and a gap key judge only the regular session", () => {
+  assert.equal(THIN_SECOND_MS, 20_000);
+  assert.equal(THIN_ALONE_MS, 120_000);
+  const keys = keysOf({
+    levels: [level("NVDA", "stop", 170, "cross_down")],
+    rules: [moveRule("all", ["NVDA"], 4), moveRule("reg", ["NVDA"], 4, 1_800_000, "regular"), gapRule("gap", ["NVDA"], 2)],
+  });
+  assert.deepEqual(keys.map((k) => [k.label, k.sessions]), [["stop", "regular"], ["all", "all"], ["reg", "regular"], ["gap", "regular"]]);
+  /* pre-market: only the all-sessions key observes, and fires on the second print */
+  const pre = emptyDay();
+  assert.deepEqual(passAt(pre, keys, u("NVDA", 160, "2026-11-30T13:00:00Z", 180), BOTH), []);
+  assert.deepEqual([...pre.keys.keys()], ["rule:all:NVDA"]);
+  assert.deepEqual(shape(passAt(pre, keys, u("NVDA", 159, "2026-11-30T13:00:30Z", 180), BOTH)), [["all", true, "2026-11-27", "pre"]]);
+  /* the regular session: all four */
+  const reg = emptyDay();
+  assert.deepEqual(shape(passAt(reg, keys, u("NVDA", 160, "2026-11-30T14:45:00Z", 180), BOTH)), [
+    ["stop", true, "2026-11-27", "regular"], ["all", true, "2026-11-27", "regular"], ["reg", true, "2026-11-27", "regular"], ["gap", true, "2026-11-27", "regular"],
+  ]);
+  /* after-hours: the all-sessions key alone */
+  const after = emptyDay();
+  assert.deepEqual(passAt(after, keys, u("NVDA", 150, "2026-11-30T21:30:00Z", 160), BOTH), []);
+  assert.deepEqual([...after.keys.keys()], ["rule:all:NVDA"]);
+  assert.deepEqual(shape(passAt(after, keys, u("NVDA", 150, "2026-11-30T21:31:00Z", 160), BOTH)), [["all", true, "2026-11-30", "after"]]);
+  /* outside 04:00-20:00 ET nothing */
+  const out = emptyDay();
+  assert.deepEqual(passAt(out, keys, u("NVDA", 150, "2026-12-01T01:00:00Z", 160), BOTH), []);
+  assert.equal(out.keys.size, 0);
+});
+
+test("after-hours measures from that day's close and starts a new crossing: a 6% fall in the session and another after the close alert twice, each with its ref", () => {
+  assert.equal(referenceOf("pre", S), "2026-11-27");
+  assert.equal(referenceOf("regular", S), "2026-11-27");
+  assert.equal(referenceOf("after", S), "2026-11-30");
+  const [move] = keysOf({ rules: [moveRule("m", ["INTC"], 5)] });
+  const day = emptyDay();
+  assert.deepEqual(passAt(day, [move], u("INTC", 99, "2026-11-30T14:31:00Z", 100), BOTH), []);
+  const first = passAt(day, [move], u("INTC", 94, "2026-11-30T15:00:00Z", 100), BOTH);
+  assert.deepEqual(shape(first), [["m", false, "2026-11-27", "regular"]]);
+  assert.equal(first[0].date, "2026-11-30");
+  /* the close is 94; after-hours reads its change from it */
+  assert.deepEqual(passAt(day, [move], u("INTC", 88, "2026-11-30T21:30:00Z", 94), BOTH), []);
+  const second = passAt(day, [move], u("INTC", 87.5, "2026-11-30T21:30:40Z", 94), BOTH);
+  assert.deepEqual(shape(second), [["m", true, "2026-11-30", "after"]], "a new reference, a new crossing, inside the old cooldown too");
+  assert.equal(second[0].date, "2026-11-30");
+  assert.equal(day.keys.get(move.key)?.ref, "2026-11-30");
+});
+
+test("one event alerts once across after-hours, the next pre-market and the next session", () => {
+  const [move] = keysOf({ rules: [moveRule("m", ["INTC"], 5, 0)] });
+  const day = emptyDay();
+  passAt(day, [move], u("INTC", 88, "2026-11-30T21:30:00Z", 94), BOTH);
+  assert.equal(passAt(day, [move], u("INTC", 88, "2026-11-30T21:30:30Z", 94), BOTH).length, 1);
+  const dec1: WatchSessions = { us: usSession("2026-12-01", "2026-11-30") };
+  assert.deepEqual(passAt(day, [move], u("INTC", 86, "2026-12-01T09:00:00Z", 94), dec1), [], "04:00 ET, still past the 11-30 close");
+  assert.deepEqual(passAt(day, [move], u("INTC", 86, "2026-12-01T09:00:30Z", 94), dec1), []);
+  assert.deepEqual(passAt(day, [move], u("INTC", 85, "2026-12-01T14:31:00Z", 94), dec1), [], "09:31 ET, still past");
+  /* and after a restart, from the ledger */
+  const ledger = [alertRecord({ t: "2026-11-30T21:30:31.000Z", key: move.key, symbol: "INTC", label: "m", id: "a-intc", ref: "2026-11-30", phase: "after", gap: true })];
+  const restarted = rebuildDay(ledger, T("2026-12-01T09:00:00Z"));
+  assert.deepEqual(passAt(restarted, [move], u("INTC", 86, "2026-12-01T09:00:10Z", 94), dec1), []);
+  assert.deepEqual(passAt(restarted, [move], u("INTC", 86, "2026-12-01T09:00:40Z", 94), dec1), []);
+  assert.deepEqual(passAt(restarted, [move], u("INTC", 86, "2026-12-01T09:00:40Z", 94), dec1, T("2026-12-01T09:05:00Z")), [], "and no lone print fires");
+  assert.deepEqual(passAt(restarted, [move], u("INTC", 85, "2026-12-01T14:31:00Z", 94), dec1), []);
+  /* the next after-hours is a new reference */
+  passAt(restarted, [move], u("INTC", 80, "2026-12-01T21:30:00Z", 85), dec1);
+  assert.deepEqual(shape(passAt(restarted, [move], u("INTC", 80, "2026-12-01T21:30:30Z", 85), dec1)), [["m", true, "2026-12-01", "after"]]);
+});
+
+test("a key first judged already past its threshold hits at that print with gap: true, its ref and its phase", () => {
+  const [move] = keysOf({ rules: [moveRule("m", ["CRWV"], 8)] });
+  const reg = emptyDay();
+  const q = u("CRWV", 90, "2026-11-30T15:00:00Z", 100);
+  const hits = passAt(reg, [move], q, BOTH);
+  assert.deepEqual(shape(hits), [["m", true, "2026-11-27", "regular"]]);
+  assert.equal(hits[0].quote, q);
+  assert.equal(hits[0].onePrint, undefined);
+  /* outside the session it waits for its second print, and still says gap */
+  const pre = emptyDay();
+  passAt(pre, [move], u("CRWV", 90, "2026-11-30T12:00:00Z", 100), BOTH);
+  const second = u("CRWV", 89, "2026-11-30T12:00:20Z", 100);
+  const late = passAt(pre, [move], second, BOTH);
+  assert.deepEqual(shape(late), [["m", true, "2026-11-27", "pre"]]);
+  assert.equal(late[0].quote, second, "the hit reads the second print");
+  /* an A share has no phase; its ref is its session date */
+  const [cnMove] = keysOf({ rules: [moveRule("c", ["600519"], 4)] });
+  assert.deepEqual(shape(passAt(emptyDay(), [cnMove], c("600519", 1300, "2026-12-01T01:31:00Z", "trading", 1400), BOTH)), [["c", true, "2026-12-01", undefined]]);
+});
+
+test("outside the regular session a move hits on a second distinct print 20 s or more after the first; a print back under the threshold clears the first; the same as_of again does not count", () => {
+  const [move] = keysOf({ rules: [moveRule("m", ["NVDA"], 5)] });
+  const day = emptyDay();
+  assert.deepEqual(passAt(day, [move], u("NVDA", 90, "2026-11-30T12:00:00Z", 100), BOTH), []);
+  assert.equal(day.keys.get(move.key)?.pending?.asOf, "2026-11-30T12:00:00Z");
+  assert.deepEqual(passAt(day, [move], u("NVDA", 90, "2026-11-30T12:00:10Z", 100), BOTH), [], "10 s after the first");
+  assert.equal(day.keys.get(move.key)?.pending?.asOf, "2026-11-30T12:00:00Z", "the first stays pending");
+  assert.equal(passAt(day, [move], u("NVDA", 90, "2026-11-30T12:00:25Z", 100), BOTH).length, 1, "25 s after the first");
+  assert.equal(day.keys.get(move.key)?.pending, undefined);
+
+  const back = emptyDay();
+  passAt(back, [move], u("NVDA", 90, "2026-11-30T12:00:00Z", 100), BOTH);
+  assert.deepEqual(passAt(back, [move], u("NVDA", 97, "2026-11-30T12:00:30Z", 100), BOTH), [], "back under 5%");
+  assert.equal(back.keys.get(move.key)?.pending, undefined, "the first is cleared");
+  assert.equal(back.keys.get(move.key)?.side, false);
+  assert.deepEqual(passAt(back, [move], u("NVDA", 90, "2026-11-30T12:01:00Z", 100), BOTH), [], "a new first");
+  assert.deepEqual(passAt(back, [move], u("NVDA", 90, "2026-11-30T12:01:00Z", 100), BOTH, T("2026-11-30T12:01:40Z")), [], "the same as_of on a later poll does not count");
+  const hits = passAt(back, [move], u("NVDA", 89, "2026-11-30T12:01:30Z", 100), BOTH);
+  assert.deepEqual(shape(hits), [["m", false, "2026-11-27", "pre"]], "a crossing, the side having been read");
+  assert.equal(hits[0].onePrint, undefined);
+});
+
+test("a lone print past the threshold hits alone after 2 minutes with onePrint: true", () => {
+  const [move] = keysOf({ rules: [moveRule("m", ["NVDA"], 5)] });
+  const day = emptyDay();
+  const first = u("NVDA", 90, "2026-11-30T21:40:00Z", 100);
+  assert.deepEqual(passAt(day, [move], first, BOTH, T("2026-11-30T21:40:05Z")), []);
+  assert.deepEqual(passAt(day, [move], first, BOTH, T("2026-11-30T21:42:04Z")), [], "1:59 after it was first seen");
+  const alone = passAt(day, [move], first, BOTH, T("2026-11-30T21:42:05Z"));
+  assert.deepEqual(shape(alone), [["m", true, "2026-11-30", "after"]]);
+  assert.equal(alone[0].onePrint, true);
+  assert.equal(alone[0].quote, first);
+  assert.equal(alone[0].date, "2026-11-30");
+  assert.deepEqual(passAt(day, [move], first, BOTH, T("2026-11-30T21:45:00Z")), [], "once");
+  assert.deepEqual(passAt(day, [move], u("NVDA", 89, "2026-11-30T21:45:00Z", 100), BOTH), [], "still past");
+});
+
+test("a gap rule never judges a pre-market print", () => {
+  const [gap] = keysOf({ rules: [gapRule("g", ["NVDA"], 2)] });
+  const day = emptyDay();
+  assert.deepEqual(passAt(day, [gap], u("NVDA", 90, "2026-11-30T14:00:00Z", 100), BOTH), []);
+  assert.deepEqual(passAt(day, [gap], u("NVDA", 90, "2026-11-30T14:00:30Z", 100), BOTH, T("2026-11-30T14:05:00Z")), []);
+  assert.equal(day.keys.size, 0, "no observation");
+  assert.deepEqual(shape(passAt(day, [gap], u("NVDA", 90, "2026-11-30T14:31:00Z", 100), BOTH)), [["g", true, "2026-11-27", "regular"]], "its first observation is the open's");
+});
+
+test("rebuildDay keeps a crossing from Friday's after-hours to Monday's pre-market, and from Wednesday's after-hours across Thanksgiving to Friday's early close", () => {
+  assert.equal(REBUILD_WINDOW_MS, 432_000_000);
+  const [move] = keysOf({ rules: [moveRule("m", ["INTC"], 5, 0)] });
+  const rec = (t: string, ref: string) => alertRecord({ t, key: move.key, symbol: "INTC", label: "m", id: `a-${ref}`, date: ref, ref, phase: "after", gap: true });
+  /* Friday 2026-11-20 16:05 ET; a restart at Monday 04:00 ET */
+  const monday = rebuildDay([rec("2026-11-20T21:05:30.000Z", "2026-11-20")], T("2026-11-23T09:00:00Z"));
+  assert.deepEqual(monday.keys.get(move.key), { ref: "2026-11-20", alerted: true, repeats: 0, lastHitAt: T("2026-11-20T21:05:30Z") });
+  const mon: WatchSessions = { us: usSession("2026-11-23", "2026-11-20") };
+  assert.deepEqual(passAt(monday, [move], u("INTC", 85, "2026-11-23T09:00:05Z", 94), mon), []);
+  assert.deepEqual(passAt(monday, [move], u("INTC", 85, "2026-11-23T09:00:40Z", 94), mon), []);
+  assert.deepEqual(passAt(monday, [move], u("INTC", 85, "2026-11-23T09:00:40Z", 94), mon, T("2026-11-23T09:10:00Z")), []);
+  assert.deepEqual(passAt(monday, [move], u("INTC", 85, "2026-11-23T14:31:00Z", 94), mon), [], "nor at Monday's open");
+  /* Wednesday 2026-11-25 16:10 ET; Thursday closed; a restart at Friday 04:00 ET, Friday closing at 13:00 */
+  const friday = rebuildDay([rec("2026-11-25T21:10:30.000Z", "2026-11-25")], T("2026-11-27T09:00:00Z"));
+  const fri: WatchSessions = { us: usSession("2026-11-27", "2026-11-25", true) };
+  assert.deepEqual(passAt(friday, [move], u("INTC", 85, "2026-11-27T09:00:05Z", 94), fri), []);
+  assert.deepEqual(passAt(friday, [move], u("INTC", 85, "2026-11-27T09:00:40Z", 94), fri), []);
+  assert.deepEqual(passAt(friday, [move], u("INTC", 85, "2026-11-27T14:31:00Z", 94), fri), []);
+  /* Friday's after-hours measures from Friday's 13:00 close: a new reference */
+  assert.deepEqual(passAt(friday, [move], u("INTC", 80, "2026-11-27T18:30:00Z", 85), fri), []);
+  assert.deepEqual(shape(passAt(friday, [move], u("INTC", 80, "2026-11-27T18:30:30Z", 85), fri)), [["m", true, "2026-11-27", "after"]]);
+});
+
+test("on an early-close day after-hours runs 13:00 to 17:00 and measures from the 13:00 close", () => {
+  const nov27 = usSession("2026-11-27", "2026-11-25", true);
+  assert.equal(nov27.close, "2026-11-27T18:00:00Z");
+  assert.equal(usPhaseOf(T("2026-11-27T17:59:59Z"), nov27), "regular");
+  assert.equal(usPhaseOf(T("2026-11-27T18:00:00Z"), nov27), "after", "13:00 ET");
+  assert.equal(usPhaseOf(T("2026-11-27T21:59:59Z"), nov27), "after");
+  assert.equal(usPhaseOf(T("2026-11-27T22:00:00Z"), nov27), undefined, "17:00 ET");
+  assert.equal(referenceOf("after", nov27), "2026-11-27");
+  assert.equal(referenceOf("pre", nov27), "2026-11-25", "Thanksgiving had no session");
+  const [move] = keysOf({ rules: [moveRule("m", ["NVDA"], 5)] });
+  const day = emptyDay();
+  const sessions: WatchSessions = { us: nov27 };
+  passAt(day, [move], u("NVDA", 90, "2026-11-27T18:05:00Z", 100), sessions);
+  assert.deepEqual(shape(passAt(day, [move], u("NVDA", 90, "2026-11-27T18:05:30Z", 100), sessions)), [["m", true, "2026-11-27", "after"]]);
+  assert.deepEqual(passAt(emptyDay(), [move], u("NVDA", 90, "2026-11-27T22:00:00Z", 100), sessions), [], "17:00 ET is not judged");
+});
+
+test("a record without ref rebuilds by its date, as before", () => {
+  const cnKey = "level:desk/levels.yml:600519:stop:1400:cross_down";
+  const day = rebuildDay([
+    alertRecord({ t: "2026-12-01T01:31:00.000Z", key: cnKey, id: "a-cn", market: "cn", symbol: "600519", date: "2026-12-01" }),
+    alertRecord({ t: "2026-11-30T15:00:00.000Z", key: "rule:m:NVDA", symbol: "NVDA", id: "a-old", date: "2026-11-30" }),
+  ], T("2026-12-01T01:40:00Z"));
+  assert.equal(day.keys.get(cnKey)?.ref, "2026-12-01");
+  assert.equal(day.keys.get("rule:m:NVDA")?.ref, "2026-11-30");
+  const [cnStop] = keysOf({ levels: [level("600519", "stop", 1400, "cross_down")] });
+  assert.deepEqual(evaluatePass(day, [cnStop], [c("600519", 1390, "2026-12-01T01:35:00Z", "trading")], BOTH, T("2026-12-01T01:35:00Z")), [], "still past on its date: no second gap");
+  assert.equal(day.keys.get(cnKey)?.side, true);
 });
 
 /* ---------- the orphans: a send a restart caught before its delivered record (spec §16 H2) ---------- */

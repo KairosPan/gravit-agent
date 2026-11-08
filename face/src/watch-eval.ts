@@ -3,7 +3,10 @@
  * appends to `alerts.jsonl` - pure, but for the ids' randomness. src/watch.ts polls the Market's read and drives it.
  *
  * WHAT IS JUDGED (ruling 2). Only a `live` or `delayed` print with an `as_of`, inside its own market's session:
- * - **US.** `as_of` in `[open, close)` of the XNYS session of its own ET date.
+ * - **US.** `as_of` in one of the three phases of the XNYS session handed over ({@link usPhaseOf}): pre-market from
+ *   04:00 ET to the open, the regular session `[open, close)`, after-hours from the close to the close plus 4 h. A
+ *   US `move_pct` key with `sessions: all` judges all three; a `sessions: regular` key, a level and a `gap` key judge
+ *   the regular session alone.
  * - **A shares.** The Market's phase `trading`, the session's Beijing date, and the Beijing clock in `[09:30, 11:30)`
  *   or `[13:00, 15:00)`, so the auction and the midday break are never judged; and, whatever the phase says, a print
  *   stamped inside `[15:00:00, 15:00:30]` - the close print. Past the XSHG table (a session marked `uncovered`) the
@@ -11,14 +14,17 @@
  *   inside them and the close print still decide which prints are judged, since the Market says `trading` through
  *   the 09:15-09:25 auction too.
  *
- * Each key judges a print once per `as_of`, and its day is its session's date: a US key and an A-share key judged on
- * one New York evening are on two dates, and a key judged on a new date starts afresh.
+ * Each key judges a print once per `as_of`. Its state belongs to its reference ({@link referenceOf}): for a US print the
+ * date of the close its change is measured from - that day's close after-hours, the previous session's before and
+ * during the session - and for an A share its Beijing session date. A print with another reference starts the key
+ * afresh, so after-hours, the next pre-market and the next session share one crossing.
  *
  * WHAT FIRES (ruling 1). A level or a `move_pct` key fires on a crossing between two judged observations, and once,
  * labelled `gap`, when already past at its first judged observation of the session and not yet alerted for it. A key
  * that reads the previous close (`move_pct`, `gap`) observes only prints that carry one. A `gap` rule judges only its
  * first such observation, and only inside {@link GAP_RULE_WINDOW_MS} of its market's open. A hit inside its cooldown
- * is a repeat, counted and not returned.
+ * is a repeat, counted and not returned. Outside the regular session a hit waits for a second distinct print still
+ * past, {@link THIN_SECOND_MS} or more after the first, or fires the first alone ({@link THIN_ALONE_MS}).
  *
  * THE GATE (ruling 5). OFF, then MUTE, then the cap: {@link ALERTS_PER_HOUR} sends in a rolling hour. A capped alert
  * is held for the batch, which falls due in a later ET hour.
@@ -27,7 +33,7 @@
 import { randomBytes } from "node:crypto";
 import type { DeliverResult } from "./desk-conversation.ts";
 import { resolveSymbols, type Holding, type Level, type LevelKind, type Rule } from "./desk-book.ts";
-import type { MarketSession } from "./market-clock.ts";
+import { nyInstant, type MarketSession } from "./market-clock.ts";
 import type { MarketQuote } from "./market-quotes.ts";
 import { bjClock, bjDate, etDate } from "./et.ts";
 import { marketOf, type Market } from "./symbols.ts";
@@ -38,8 +44,19 @@ export const ALERTS_PER_HOUR = 6;
 export const HOUR_MS = 3_600_000;
 /** How long after its market's open a `gap` rule still judges its first observation. */
 export const GAP_RULE_WINDOW_MS = 1_800_000;
-/** How far back {@link rebuildDay} reads: an A-share session and the US one before it, with room. */
-const REBUILD_WINDOW_MS = 36 * HOUR_MS;
+/** How far back {@link rebuildDay} reads: five days, so a long weekend or Thanksgiving between an after-hours alert
+ * and the next pre-market keeps its crossing. */
+export const REBUILD_WINDOW_MS = 432_000_000;
+/** How far back {@link findOrphans} reads: an A-share session and the US one before it, with room. */
+const ORPHAN_WINDOW_MS = 36 * HOUR_MS;
+/** Outside the regular session, how long after the first print past a threshold a second one must be stamped to
+ * confirm it. */
+export const THIN_SECOND_MS = 20_000;
+/** Outside the regular session, how long after it was first seen a lone print past a threshold waits for a second
+ * before it fires alone. */
+export const THIN_ALONE_MS = 120_000;
+/** How long after the close after-hours runs. */
+const AFTER_HOURS_MS = 4 * HOUR_MS;
 
 /* ---------- the quote ---------- */
 
@@ -65,11 +82,17 @@ export function watchQuoteOf(q: MarketQuote): WatchQuote {
   };
 }
 
+/** A US print's phase in its session. */
+export type UsPhase = "pre" | "regular" | "after";
+
+/** An XNYS session as the watch hands it over: `prev` the date of the session before it. */
+export type UsSession = MarketSession & { prev: string };
+
 /** Each market's session for the pass: the XNYS one on its ET date, the XSHG one on its Beijing date - `uncovered`
  * when the date is past the table and the Market's phase, not the calendar, made the day a session. The prints are
  * judged as on a covered day. */
 export interface WatchSessions {
-  us?: MarketSession;
+  us?: UsSession;
   cn?: MarketSession & { uncovered?: true };
 }
 
@@ -78,11 +101,35 @@ const CN_BANDS: readonly (readonly [string, string])[] = [["09:30:00", "11:30:00
 const CN_CLOSE_PRINT = ["15:00:00", "15:00:30"] as const;
 
 /**
- * The session date a print is judged in, else `undefined` (ruling 2).
- * @param q - the print.
- * @param sessions - each market's session for the pass.
+ * A US print's phase in `s`: `pre` from 04:00 ET of its date to the open, `regular` from the open to the close,
+ * `after` from the close to the close plus 4 h (20:00 ET, or 17:00 on an early close); else `undefined`.
+ * @param asOf - the print's `as_of`, in ms.
+ * @param s - the session.
  */
-export function judgedDate(q: WatchQuote, sessions: WatchSessions): string | undefined {
+export function usPhaseOf(asOf: number, s: UsSession): UsPhase | undefined {
+  const open = Date.parse(s.open);
+  const close = Date.parse(s.close);
+  if (asOf >= Date.parse(nyInstant(s.date, 4, 0)) && asOf < open) return "pre";
+  if (asOf >= open && asOf < close) return "regular";
+  if (asOf >= close && asOf < close + AFTER_HOURS_MS) return "after";
+  return undefined;
+}
+
+/**
+ * The date of the close a US print in `phase` measures its change from: that day's after-hours, the previous
+ * session's before and during the session.
+ * @param phase - the print's phase.
+ * @param s - its session.
+ */
+export function referenceOf(phase: UsPhase, s: UsSession): string {
+  return phase === "after" ? s.date : s.prev;
+}
+
+/** Where a print is judged: its session's date, its reference, and a US print's phase. */
+type Judged = { date: string; ref: string; phase?: UsPhase };
+
+/** Where `q` is judged, else `undefined` (ruling 2). */
+function judgedOf(q: WatchQuote, sessions: WatchSessions): Judged | undefined {
   if (q.status !== "live" && q.status !== "delayed") return undefined;
   if (q.asOf === null) return undefined;
   const at = Date.parse(q.asOf);
@@ -91,14 +138,26 @@ export function judgedDate(q: WatchQuote, sessions: WatchSessions): string | und
   if (q.market === "us") {
     const s = sessions.us;
     if (s === undefined || etDate(when) !== s.date) return undefined;
-    return at >= Date.parse(s.open) && at < Date.parse(s.close) ? s.date : undefined;
+    const phase = usPhaseOf(at, s);
+    return phase === undefined ? undefined : { date: s.date, ref: referenceOf(phase, s), phase };
   }
   const s = sessions.cn;
   if (s === undefined || bjDate(when) !== s.date) return undefined;
+  const cn = { date: s.date, ref: s.date };
   const clock = bjClock(when);
-  if (clock >= CN_CLOSE_PRINT[0] && clock <= CN_CLOSE_PRINT[1]) return s.date;
+  if (clock >= CN_CLOSE_PRINT[0] && clock <= CN_CLOSE_PRINT[1]) return cn;
   if (q.phase !== "trading") return undefined;
-  return CN_BANDS.some(([from, to]) => clock >= from && clock < to) ? s.date : undefined;
+  return CN_BANDS.some(([from, to]) => clock >= from && clock < to) ? cn : undefined;
+}
+
+/**
+ * The session date a print is judged in, else `undefined` (ruling 2): a US print in any of its session's three
+ * phases, which a key may still not judge (its `sessions`).
+ * @param q - the print.
+ * @param sessions - each market's session for the pass.
+ */
+export function judgedDate(q: WatchQuote, sessions: WatchSessions): string | undefined {
+  return judgedOf(q, sessions)?.date;
 }
 
 /* ---------- the keys ---------- */
@@ -122,6 +181,9 @@ export interface PriceKey {
   label: string;
   trigger: KeyTrigger;
   cooldownMs: number;
+  /** The US phases it judges: `all` for a `move_pct` rule's key unless the rule says `regular`; `regular` for a
+   * level and a `gap` key. An A-share key judges its own session whatever it says. */
+  sessions: "all" | "regular";
   annotate: boolean;
   /** Whether its alerts go `urgent`, through quiet hours: its rule's `urgent`; a level never. */
   urgent: boolean;
@@ -148,7 +210,7 @@ export function priceKeys(book: { levels: readonly Level[]; rules: readonly Rule
         type: "level", kind: l.kind, ...(l.price !== undefined && { price: l.price }), ...(l.range !== undefined && { range: l.range }), when: l.when,
         ...(l.source !== undefined && { levelSource: l.source }),
       },
-      cooldownMs: l.cooldownMs, annotate: l.annotate, urgent: false, plan: l.plan, source: { file: l.file, index: l.index },
+      cooldownMs: l.cooldownMs, sessions: "regular", annotate: l.annotate, urgent: false, plan: l.plan, source: { file: l.file, index: l.index },
     });
   }
   const scope = { holdings: book.holdings.map((h) => h.symbol), levels: book.levels.map((l) => l.symbol) };
@@ -160,7 +222,7 @@ export function priceKeys(book: { levels: readonly Level[]; rules: readonly Rule
       if (market === undefined) continue;
       add({
         key: `rule:${r.id}:${symbol}`, market, symbol, label: r.id, trigger, cooldownMs: r.kind === "gap" ? 0 : r.cooldownMs,
-        annotate: r.annotate, urgent: r.urgent, plan: r.plan ?? null, source: { file: r.file, index: r.index },
+        sessions: r.kind === "move_pct" ? r.sessions : "regular", annotate: r.annotate, urgent: r.urgent, plan: r.plan ?? null, source: { file: r.file, index: r.index },
       });
     }
   }
@@ -189,15 +251,18 @@ export function pastOf(k: PriceKey, q: WatchQuote): boolean | undefined {
 
 /* ---------- the day ---------- */
 
-/** One key on one session date: its last reading (`side`, unknown until judged), its last hit, the `as_of` it last
- * judged, whether it alerted that date, and the repeats its cooldown swallowed. */
+/** One key against one reference (`ref`, the date of the close it measures from; an A share's session date; a
+ * filing key's ET date): its last reading (`side`, unknown until judged), its last hit, the `as_of` it last judged,
+ * whether it alerted against that reference, the repeats its cooldown swallowed, and, outside the regular session,
+ * the first print past its threshold still waiting for a second (`pending`, never recorded: a restart forgets it). */
 export interface KeyDay {
-  date: string;
+  ref: string;
   side?: boolean;
   lastHitAt?: number;
   lastAsOf?: string;
   alerted: boolean;
   repeats: number;
+  pending?: { asOf: string; firstAt: number; quote: WatchQuote; date: string; phase: UsPhase };
 }
 
 /** The watch's state: each key's day, the sends of the last hour (ms), and the alerts the cap holds for the batch. */
@@ -212,17 +277,22 @@ export function emptyDay(): WatchDay {
   return { keys: new Map(), sends: [], pending: [] };
 }
 
-/** One hit: the key, the print it read, whether it is the session's first observation (`gap`) or a crossing, and the
- * session date it was judged in. */
-export type Hit = { key: PriceKey; quote: WatchQuote; gap: boolean; date: string };
+/** One hit: the key, the print it read, whether it is the reference's first observation (`gap`) or a crossing, the
+ * session date it was judged in, its reference, a US print's phase, and `onePrint` when it fired on a lone print
+ * outside the regular session. */
+export type Hit = { key: PriceKey; quote: WatchQuote; gap: boolean; date: string; ref: string; phase?: UsPhase; onePrint?: true };
 
 /**
- * Judges one pass: each key against its symbol's print, in key order, mutating `day`.
+ * Judges one pass: each key against its symbol's print, in key order, mutating `day`. Per key: a print it does not
+ * judge is skipped; a lone print outside the regular session older than {@link THIN_ALONE_MS} fires (before the
+ * unchanged-`as_of` skip, unless the new print settles it); a print with a new reference starts the key afresh; a
+ * first past print of a fresh key hits as `gap`, a not-past to past one as a crossing - outside the regular session
+ * only once a second distinct print confirms it.
  * @param day - the watch's state.
  * @param keys - the price keys.
  * @param quotes - the pass's prints, at most one a market and symbol counted (the first).
  * @param sessions - each market's session.
- * @param now - the pass's time, for the cooldowns.
+ * @param now - the pass's time, for the cooldowns and the lone prints.
  * @returns the hits, in key order; repeats inside a cooldown are counted on the key's day, not returned.
  */
 export function evaluatePass(day: WatchDay, keys: readonly PriceKey[], quotes: readonly WatchQuote[], sessions: WatchSessions, now: number): Hit[] {
@@ -232,45 +302,80 @@ export function evaluatePass(day: WatchDay, keys: readonly PriceKey[], quotes: r
     if (!prints.has(id)) prints.set(id, q);
   }
   const hits: Hit[] = [];
-  for (const k of keys) {
-    const q = prints.get(`${k.market}:${k.symbol}`);
-    if (q === undefined) continue;
-    const date = judgedDate(q, sessions);
-    if (date === undefined) continue;
-    const held = day.keys.get(k.key);
-    if (held !== undefined && held.date === date && held.lastAsOf === q.asOf) continue;
-    const past = pastOf(k, q);
-    if (past === undefined) continue;
-    let kd = held;
-    if (kd === undefined || kd.date !== date) {
-      kd = { date, alerted: false, repeats: 0 };
-      day.keys.set(k.key, kd);
-    }
-    kd.lastAsOf = q.asOf as string;
-    let hit: boolean | undefined; // true: gap, false: a crossing
-    if (k.trigger.type === "gap") {
-      if (kd.side === undefined) {
-        const open = sessions[k.market]?.open;
-        const early = open !== undefined && Date.parse(q.asOf as string) < Date.parse(open) + GAP_RULE_WINDOW_MS;
-        if (early && past && !kd.alerted) hit = true;
-        kd.side = past;
-      }
-    } else {
-      if (kd.side === undefined) {
-        if (past && !kd.alerted) hit = true;
-      } else if (!kd.side && past) {
-        hit = false;
-      }
-      kd.side = past;
-    }
-    if (hit === undefined) continue;
+  /** A hit, unless its cooldown swallows it as a repeat. */
+  const fire = (k: PriceKey, kd: KeyDay, hit: Omit<Hit, "key" | "ref">): void => {
     if (kd.lastHitAt !== undefined && now - kd.lastHitAt < k.cooldownMs) {
       kd.repeats += 1;
-      continue;
+      return;
     }
     kd.lastHitAt = now;
     kd.alerted = true;
-    hits.push({ key: k, quote: q, gap: hit, date });
+    hits.push({ key: k, ...hit, ref: kd.ref });
+  };
+  /** A lone print past the threshold that waited long enough fires alone. */
+  const alone = (k: PriceKey, kd: KeyDay): void => {
+    const p = kd.pending;
+    if (p === undefined || now - p.firstAt < THIN_ALONE_MS) return;
+    delete kd.pending;
+    const gap = kd.side === undefined;
+    kd.side = true;
+    fire(k, kd, { quote: p.quote, gap, date: p.date, phase: p.phase, onePrint: true });
+  };
+  for (const k of keys) {
+    const q = prints.get(`${k.market}:${k.symbol}`);
+    if (q === undefined) continue;
+    const j = judgedOf(q, sessions);
+    if (j === undefined) continue;
+    if (j.phase !== undefined && j.phase !== "regular" && k.sessions !== "all") continue;
+    const held = day.keys.get(k.key);
+    const same = held !== undefined && held.ref === j.ref ? held : undefined;
+    if (same !== undefined && same.lastAsOf === q.asOf) {
+      alone(k, same);
+      continue;
+    }
+    const past = pastOf(k, q);
+    if (past === undefined) {
+      if (same !== undefined) alone(k, same);
+      continue;
+    }
+    let kd = same;
+    if (kd === undefined) {
+      kd = { ref: j.ref, alerted: false, repeats: 0 };
+      day.keys.set(k.key, kd);
+    }
+    kd.lastAsOf = q.asOf as string;
+    const asOf = q.asOf as string;
+    const at = { date: j.date, ...(j.phase !== undefined && { phase: j.phase }) };
+    if (k.trigger.type === "gap") {
+      if (kd.side === undefined) {
+        const open = sessions[k.market]?.open;
+        const early = open !== undefined && Date.parse(asOf) < Date.parse(open) + GAP_RULE_WINDOW_MS;
+        kd.side = past;
+        if (early && past && !kd.alerted) fire(k, kd, { quote: q, gap: true, ...at });
+      }
+      continue;
+    }
+    /* true: a gap, false: a crossing, undefined: nothing */
+    const hit = kd.side === undefined ? (past && !kd.alerted ? true : undefined) : !kd.side && past ? false : undefined;
+    if (hit === undefined) {
+      kd.side = past;
+      delete kd.pending;
+      continue;
+    }
+    if (j.phase === "pre" || j.phase === "after") {
+      const p = kd.pending;
+      if (p === undefined) {
+        kd.pending = { asOf, firstAt: now, quote: q, date: j.date, phase: j.phase };
+        continue;
+      }
+      if (Date.parse(asOf) - Date.parse(p.asOf) < THIN_SECOND_MS) {
+        alone(k, kd);
+        continue;
+      }
+    }
+    delete kd.pending;
+    kd.side = true;
+    fire(k, kd, { quote: q, gap: hit, ...at });
   }
   return hits;
 }
@@ -355,6 +460,13 @@ export type AlertHit = {
   annotate: boolean;
   /** Its rule said `urgent: true`: sent `urgent`, through quiet hours (src/phone.ts). Absent otherwise. */
   urgent?: true;
+  /** The date of the close a price alert measured from (an A share's: its session date). Absent on older records,
+   * whose `date` stands in. */
+  ref?: string;
+  /** A US price alert's phase. Absent on an A share's, a filing's and older records. */
+  phase?: UsPhase;
+  /** It fired on a lone print outside the regular session. Absent otherwise. */
+  onePrint?: true;
 };
 
 /** A sent alert's delivery: its `delivery.sent` ids are `<network>:<id>` - alerts.jsonl keeps an older face's numeric
@@ -397,7 +509,8 @@ export function isAlertRecord(x: unknown): x is AlertRecord {
   switch (x.kind) {
     case "alert":
       return isText(x.id) && isText(x.pass) && isText(x.date) && isText(x.key) && isText(x.symbol) && (x.market === "us" || x.market === "cn")
-        && (x.decision === "send" || x.decision === "suppressed") && (x.suppressed === undefined || isText(x.suppressed));
+        && (x.decision === "send" || x.decision === "suppressed") && (x.suppressed === undefined || isText(x.suppressed))
+        && (x.ref === undefined || isText(x.ref));
     case "delivered":
       return isText(x.id) && isRecord(x.delivery) && isRecord(x.latency);
     case "batch":
@@ -429,7 +542,7 @@ export function findOrphans(records: readonly unknown[], now: number): { replay:
     if (r.kind === "delivered") delivered.add(r.id);
     else if (r.kind === "alert" && r.decision === "send") {
       const at = Date.parse(r.t);
-      if (Number.isFinite(at) && now - at <= REBUILD_WINDOW_MS) sends.push({ at, r });
+      if (Number.isFinite(at) && now - at <= ORPHAN_WINDOW_MS) sends.push({ at, r });
     }
   }
   const replay: AlertHit[] = [];
@@ -442,10 +555,11 @@ export function findOrphans(records: readonly unknown[], now: number): { replay:
 }
 
 /**
- * The day as `alerts.jsonl` leaves it, from its `alert` and `batch` records of the last 36 hours: a key's day is its
- * newest record's date, alerted, its `lastHitAt` that date's latest record not suppressed `cooldown`, its side
- * unknown; `sends` the `send` decisions within the hour, but for the `lost` ones - never sent, they spend none of the
- * hour's cap, though each still starts its key's cooldown; `pending` the `cap` alerts no batch lists.
+ * The day as `alerts.jsonl` leaves it, from its `alert` and `batch` records of the last {@link REBUILD_WINDOW_MS}: a
+ * key's reference is its newest record's `ref` (a record without one: its `date`), alerted, its `lastHitAt` that
+ * reference's latest record not suppressed `cooldown`, its side unknown and nothing pending; `sends` the `send`
+ * decisions within the hour, but for the `lost` ones - never sent, they spend none of the hour's cap, though each
+ * still starts its key's cooldown; `pending` the `cap` alerts no batch lists.
  * @param records - the file's lines, parsed; anything not a record is skipped.
  * @param now - the time of the rebuild.
  * @param lost - the ids of the orphans {@link findOrphans} found lost.
@@ -461,12 +575,13 @@ export function rebuildDay(records: readonly unknown[], now: number, lost: Reado
     else if (r.kind === "batch") for (const id of r.alerts) batched.add(id);
   }
   alerts.sort((a, b) => a.at - b.at);
+  const refOf = (r: AlertHit): string => r.ref ?? r.date;
   const newest = new Map<string, string>();
-  for (const { r } of alerts) newest.set(r.key, r.date);
+  for (const { r } of alerts) newest.set(r.key, refOf(r));
   const day = emptyDay();
   for (const { at, r } of alerts) {
-    if (r.date === newest.get(r.key)) {
-      const kd = day.keys.get(r.key) ?? { date: r.date, alerted: true, repeats: 0 };
+    if (refOf(r) === newest.get(r.key)) {
+      const kd = day.keys.get(r.key) ?? { ref: refOf(r), alerted: true, repeats: 0 };
       if (r.suppressed !== "cooldown") kd.lastHitAt = at;
       day.keys.set(r.key, kd);
     }

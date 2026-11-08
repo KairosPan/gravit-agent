@@ -183,8 +183,9 @@ function isDaylight(date: string): boolean {
   return date >= nthWeekday(y, 3, 0, 2) && date < nthWeekday(y, 11, 0, 1);
 }
 
-/** A New York wall time on a session date as a UTC instant to the second. */
-function nyInstant(date: string, hour: number, minute: number): string {
+/** A New York wall time on a date as a UTC instant to the second (`nyInstant("2026-11-30", 4, 0)` is
+ * `2026-11-30T09:00:00Z`), at the offset the date keeps: right on a weekday, which is never a change day. */
+export function nyInstant(date: string, hour: number, minute: number): string {
   const [y, m, d] = date.split("-").map(Number);
   const offset = isDaylight(date) ? 4 : 5;
   return new Date(Date.UTC(y, m - 1, d, hour + offset, minute)).toISOString().replace(".000Z", "Z");
