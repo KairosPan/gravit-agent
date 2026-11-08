@@ -4,7 +4,7 @@
  * and China alone: the market keeps no venue connected (a connected venue's own reads are the account's, /api/account/connected/…), no
  * list of where the user can connect, and no market-down hold (the market never sees itself down).
  *
- *   GET  /api/explore   ?tab= &q= &key= &sort= &limit=            Exploration
+ *   GET  /api/explore   ?scope= &source= &tab= &q= &key= &sort= &limit=  Exploration
  *   GET  /api/quotes    ?pairs=<venue>|<symbol>,… (or ?pair= each)  {quotes: [{venue, symbol, market? | refusal?}]}: A shares only
  *   GET  /api/candles   ?venue= &symbol= &interval= &range= &before= &limit=   CandlesView, or an A share's ChinaHistory
  *   GET  /api/book      ?venue= &symbol= &depth=                  BookView
@@ -28,7 +28,7 @@ import { PUBLIC_KEEP_MS, thrownBy } from "./read-cache.ts";
 import { wrap } from "./routes-cn.ts";
 
 export interface MarketReads {
-  explore(o: { tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined }): Promise<Exploration | Refusal>;
+  explore(o: { scope?: string | undefined; source?: string | undefined; tab?: string | undefined; q?: string | undefined; key?: string | undefined; sort?: string | undefined; limit?: number | undefined }): Promise<Exploration | Refusal>;
   quotes(pairs: Array<{ venue: string; symbol: string }>): Promise<Array<{ venue: string; symbol: string; market?: Market; refusal?: Refusal }> | Refusal>;
   candles(venue: string, symbol: string, interval: string, ask: { range?: string | undefined; before?: string | number | undefined; limit?: string | number | undefined }): Promise<CandlesView | ChinaHistory | Refusal>;
   book(venue: string, symbol: string, depth?: number): Promise<BookView | Refusal>;
@@ -213,6 +213,12 @@ export function marketReads(core: MarketCore): MarketReads {
      * soon and what trades most (live/explore.ts), China's hits beside them on a search. The same question is answered from what was found
      * for thirty seconds. `key`, a row's own exactly as `items` names it, keeps only that row */
     async explore(o = {}) {
+      const scope = o.scope?.trim() || undefined;
+      if (scope !== undefined && !["hyperliquid", "xyz", "more"].includes(scope)) return no("E_MARKET_BAD_REQUEST", { message: "a market scope is hyperliquid, xyz or more" });
+      const source = o.source?.trim() || undefined;
+      if (source && source.length > 80) return no("E_MARKET_BAD_REQUEST", { message: "a public source ID is at most 80 characters" });
+      if (source && (scope === "hyperliquid" || scope === "xyz")) return no("E_MARKET_BAD_REQUEST", { message: "a source is selected only in more markets or without a scope" });
+      if (source && (!core.source(source) || (scope === "more" && ["hyperliquid", "trade-xyz"].includes(source)))) return no("E_MARKET_BAD_REQUEST", { message: "the source is not available in this market scope" });
       const tab = o.tab?.trim() || undefined;
       if (tab !== undefined && !TABS.some((t) => t.id === tab)) return no("E_MARKET_BAD_REQUEST", { message: `a tab is one of ${TABS.map((t) => t.id).join(", ")}` });
       const sort = o.sort?.trim() || undefined;
@@ -224,15 +230,29 @@ export function marketReads(core: MarketCore): MarketReads {
       const limit = o.limit === undefined ? 60 : Math.floor(o.limit);
       if (!(limit >= 1 && limit <= 200)) return no("E_MARKET_BAD_REQUEST", { message: "a limit is 1 to 200 markets" });
       // CHINA is its own tab, asked of its own source (which keeps its reads): never kept here, never in All
-      if (tab === "china") return exploreChina(q, sort, limit);
+      if (tab === "china") {
+        if (source) return no("E_MARKET_BAD_REQUEST", { message: "China is not part of a selected public source" });
+        if (scope && scope !== "more") return no("E_MARKET_BAD_REQUEST", { message: "China is in more markets" });
+        return exploreChina(q, sort, limit);
+      }
       // a search on All asks China too, beside the other sources and within their budget; no other tab ever asks it
-      const china = q && !key && (tab === undefined || tab === "all") ? core.china : undefined;
-      const pub = core.sources();
+      const china = !source && (!scope || scope === "more") && q && !key && (tab === undefined || tab === "all") ? core.china : undefined;
+      const pub = core.sources()
+        .filter((s) => !source || s.id === source)
+        .filter((s) => scope === "hyperliquid" ? s.id === "hyperliquid" : scope === "xyz" ? s.id === "trade-xyz" : scope === "more" ? s.id !== "hyperliquid" && s.id !== "trade-xyz" : true)
+        .map((s) => scope === "more" && s.id === "hyperliquid-preipo" ? {
+          ...s,
+          // The legacy source still resolves saved xyz: paths on an explicit query; those belong only to trade.xyz in scoped browsing.
+          listings: async (ask: Parameters<PublicSource["listings"]>[0]) => {
+            const got = await s.listings(ask);
+            return isRefusal(got) ? got : got.filter((m) => !m.symbol.startsWith("xyz:"));
+          },
+        } : s);
       // the key exactly as asked (a row's key is not a search: kalshi:KXFED and kalshi:kxfed are not one row), written so that no `|` in it
       // reads as the next part of the question
-      return cache.get(`explore|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}`, 30_000, async (): Promise<Exploration | Refusal> => {
+      return cache.get(`explore|${scope ?? ""}|${source ?? ""}|${tab ?? ""}|${q.toUpperCase()}|${encodeURIComponent(key)}|${sort ?? ""}|${limit}`, 30_000, async (): Promise<Exploration | Refusal> => {
         const [explored, hits] = await Promise.all([
-          exploreAcross({ connected: [], public: pub }, { q, ...(key ? { key } : {}), limit, clock: now, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) }),
+          exploreAcross({ connected: [], public: pub }, { q, ...(key ? { key } : {}), limit, ...(source || scope === "hyperliquid" || scope === "xyz" ? { perSource: 200 } : {}), clock: now, ...(tab ? { tab: tab as TabId } : {}), ...(sort ? { sort: sort as ExploreSort } : {}) }),
           china ? within(CHINA_SEARCH_WAIT_MS, china.search(q), CHINA_ID, CHINA_NAME) : undefined,
         ]);
         if (hits === undefined) return explored;
@@ -376,13 +396,13 @@ export function mountReads(app: express.Express, _core: MarketCore, reads: Marke
   const answerOf = <T extends object>(res: express.Response, r: T | Refusal, key?: string) => void res.status(isRefusal(r) ? 409 : 200).json(isRefusal(r) ? { ok: false, refusal: r } : key ? { ok: true, [key]: r } : { ok: true, ...r });
 
   // MARKETS: what there is to trade, keyless ("Connect to trade"). A limit is a plain count of markets (digits), nothing a number parser
-  // would also take. A key is one row's own, given once: read past the 200 characters the read takes, so that a longer one is refused there
-  // rather than cut into another
+  // would also take. A key and a source ID are read past their respective limits, so a longer value is refused rather than cut into
+  // another registered identity.
   app.get("/api/explore", wrap(async (req, res) => {
-    const q = strings(req, res, { tab: 20, q: 80, key: 240, sort: 20, limit: 6 });
+    const q = strings(req, res, { scope: 20, source: 81, tab: 20, q: 80, key: 240, sort: 20, limit: 6 });
     if (!q) return;
     if (q.limit && !/^\d{1,3}$/.test(q.limit)) return void bad(res, "limit is a count of markets, 1 to 200, in digits");
-    answerOf(res, await reads.explore({ tab: q.tab, q: q.q, key: q.key, sort: q.sort, ...(q.limit ? { limit: Number(q.limit) } : {}) }));
+    answerOf(res, await reads.explore({ scope: q.scope, source: q.source, tab: q.tab, q: q.q, key: q.key, sort: q.sort, ...(q.limit ? { limit: Number(q.limit) } : {}) }));
   }));
 
   // a fresh price for each of up to twelve markets: ?pairs=china|600519,okx|BTC/USDT (or one ?pair= each). How many is the read's rule,

@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { categoryOf, isExcludedCategory, isIpoCategory, KALSHI_SERIES, roleOfCategory, TABS, type TabId } from "../../src/portfolio/live/categories.ts";
+import { categoryOf, isExcludedCategory, isIpoCategory, KALSHI_SERIES, perpCategoryTab, roleOfCategory, TABS, type TabId } from "../../src/portfolio/live/categories.ts";
 
 /** The Markets screen's tabs, the table of venues' category words, and the Kalshi series the public read is made of. */
 
 describe("the tabs", () => {
-  it("are All first, then Crypto, Stocks, RWAs, Perps, Pre-IPO, Predictions, China — no Now, no Venues", () => {
+  it("keep All first and add the explicit underlying categories before the other instrument tabs", () => {
     expect(TABS).toEqual([
       { id: "all", label: "All" },
       { id: "crypto", label: "Crypto" },
       { id: "stocks", label: "Stocks" },
+      { id: "indices", label: "Indices" },
+      { id: "commodities", label: "Commodities" },
+      { id: "fx", label: "FX" },
       { id: "rwas", label: "RWAs" },
       { id: "perps", label: "Perps" },
       { id: "preipo", label: "Pre-IPO" },
@@ -18,6 +21,10 @@ describe("the tabs", () => {
     const ids: TabId[] = TABS.map((t) => t.id);
     expect(ids).not.toContain("now");
     expect(ids).not.toContain("venues");
+  });
+  it("normalizes only explicit underlying categories, without treating unknown perpetuals as crypto", () => {
+    expect(["CRYPTO", " Stocks ", "indices", "commodities", "FX", "preipo", "Pre-IPO"].map(perpCategoryTab)).toEqual(["crypto", "stocks", "indices", "commodities", "fx", "preipo", "preipo"]);
+    expect([undefined, "", "unknown", "NVDA", "IPO"].map(perpCategoryTab)).toEqual([undefined, undefined, undefined, undefined, undefined]);
   });
 });
 

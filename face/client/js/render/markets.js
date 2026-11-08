@@ -29,6 +29,7 @@ import {
   candleRanges, isAccountKey, tableOf, pageOf, faceAssetOf, mentionsOf, volumeWordOf, followOf,
   connectionWord, watchWord, basisWord, watchedOf,
   chinaWord, cnStateWord, notAnsweringWord, cnPageOf, cnTileOf, cnBoardOf,
+  marketNavigationOf, marketOriginOf, marketSourceOf, moreSourcesOf,
 } from '../host/market-view.js';
 import { yuan, fix2 } from './lunhui/block.js';
 import { intradaySvg } from './lunhui/intraday.js';
@@ -56,6 +57,17 @@ export function mkAv(name, size = '') {
   const word = String(name ?? '').trim().split(/\s+/)[0].slice(0, 4);
   return `<span class="${cls('mk-av', size && `mk-av-${size}`)}" aria-hidden="true">${esc(word)}</span>`;
 }
+
+// Local, compact venue marks: they stay visible beside a contract when the Source column is hidden on a narrow screen.
+// The name is available to assistive technology and on hover; the glyph itself is decorative.
+export function sourceBadge(origin, decorative = false) {
+  if (origin !== 'hyperliquid' && origin !== 'xyz') return '';
+  const name = origin === 'xyz' ? t('markets.scope.xyz') : t('markets.scope.hyperliquid');
+  const mark = origin === 'xyz' ? '<span aria-hidden="true">xyz</span>'
+    : '<svg viewBox="0 0 24 18" width="19" height="15" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3.7 3.1C1.4 3.1.4 5.6.4 9s1.1 5.9 3.4 5.9c2.8 0 3.6-4 5.6-4 2.2 0 2.4 5.2 6.5 5.2 4.8 0 7.7-2.8 7.7-7.1S20.8 1.9 16 1.9c-4.1 0-4.5 5.2-6.6 5.2-2 0-2.8-4-5.7-4Z"></path></svg>';
+  return `<span class="mk-source-badge mk-source-${origin}"${attrs(decorative ? { 'aria-hidden': 'true' } : { role: 'img', 'aria-label': name, title: name })}>${mark}</span>`;
+}
+const badgeFor = legs => sourceBadge(marketOriginOf(legs.find(l => l.connected) ?? legs.find(l => l.public)));
 
 /** A price in its unit's words: an event's in cents (62¢, 62.5¢), an A share's in yuan, anything else in dollars; none is —. */
 export function priceWord(v, unit) {
@@ -89,7 +101,8 @@ function starCell(r) {
 // read lists, and a star the Account could not find, have no page to open
 function nameCell(r, mark = null) {
   const tags = [r.pastEnd ? t('markets.tag.closed') : '', r.paper ? t('markets.tag.paper') : ''].filter(Boolean).map(tag).join(' ');
-  const inner = `${mkAv(r.tile)}<span class="mk-nm"><b>${esc(r.name)}</b>${mark ? levelMark(mark) : ''}<span class="mk-sub">${esc(r.sub)}${tags ? ` ${tags}` : ''}</span></span>`;
+  const badge = badgeFor(r.legs ?? []);
+  const inner = `${mkAv(r.tile)}<span class="mk-nm"><b>${esc(r.name)}</b>${mark ? levelMark(mark) : ''}<span class="mk-sub">${badge ? `${badge} ` : ''}${esc(r.sub)}${tags ? ` ${tags}` : ''}</span></span>`;
   return r.placeholder || r.notListed ? `<span class="mk-who">${inner}</span>`
     : `<button type="button" class="mk-name" data-action="openMarket" data-id="${esc(r.id)}">${inner}</button>`;
 }
@@ -148,7 +161,19 @@ export function renderMarketsScreen(state, now) {
   const q = String(m.q ?? '').trim();
   const searching = q !== '';
   const { rows, tabs, sorts, sort, read, china, session } = tableOf(m, now, state.account?.data);
-  const tabsHtml = `<div class="mk-tabs" role="group" aria-label="${th('nav.markets')}">${tabs.map(tab => `<button type="button" class="mk-tab" data-action="mkTab" data-value="${esc(tab.id)}" aria-pressed="${tab.id === m.tab}">${esc(tab.count === null ? tab.label : `${tab.label} · ${tab.count.toLocaleString('en-US')}`)}</button>`).join('')}</div>`;
+  const source = marketSourceOf(m);
+  const categoriesHtml = scope => `<div class="mk-categories" role="group" aria-label="${esc(scope.label)}">${scope.categories.map(category => `<button type="button" class="mk-category" data-action="mkCategory" data-scope="${scope.id}" data-value="${category.id}"${scope.id === 'more' && source ? attrs({ 'data-source': source }) : ''} aria-pressed="${scope.active && category.id === m.tab}">${esc(category.count === null ? category.label : `${category.label} · ${category.count.toLocaleString('en-US')}`)}</button>`).join('')}</div>`;
+  const providers = [{ id: '', label: t('markets.tab.all') }, ...moreSourcesOf(m)];
+  const providersHtml = active => `<div class="mk-providers" role="group" aria-label="${th('markets.scope.more')}">${providers.map(provider => `<button type="button" class="mk-category mk-provider" data-action="mkSource" data-value="${esc(provider.id)}" aria-pressed="${active && provider.id === source}">${esc(provider.label)}</button>`).join('')}` +
+    `${m.sources?.status === 'loading' ? `<span class="mk-source-status">${th('common.loading')}</span>` : m.sources?.status === 'error' ? `<span class="mk-source-status">${th('markets.sources.unavailable')}</span>` : ''}</div>`;
+  const scopesHtml = `<div class="mk-scopes" role="group" aria-label="${th('markets.scope.label')}">${marketNavigationOf(m).map(scope =>
+    `<div class="mk-scope-row"><button type="button" class="mk-scope" data-action="mkScope" data-value="${scope.id}" aria-pressed="${scope.active}">${scope.id === 'more' ? icon('layers', 18, 2) : sourceBadge(scope.id, true)}<span>${esc(scope.label)}</span></button>` +
+    (scope.id === 'more' ? `<div class="mk-more">${providersHtml(scope.active)}${scope.active ? categoriesHtml(scope) : ''}</div>` : categoriesHtml(scope)) + '</div>').join('')}</div>`;
+  const globalTabs = [
+    ...tabs.filter(tab => tab.id === 'results'),
+    { id: 'watching', label: t('markets.tab.watching') }, { id: DESK_TAB, label: t('markets.tab.desk') },
+  ];
+  const tabsHtml = scopesHtml + `<div class="mk-tabs" role="group" aria-label="${th('nav.markets')}">${globalTabs.map(tab => `<button type="button" class="mk-tab" data-action="mkTab" data-value="${esc(tab.id)}" aria-pressed="${tab.id === m.tab}">${esc(tab.label)}</button>`).join('')}</div>`;
   const left = searching
     ? `<p class="mk-q">${thn('markets.search.count', rows.length, { q })} <button type="button" class="mk-clear" data-action="mkClear">${th('markets.search.clear')}</button></p>`
     : '<span></span>';
@@ -333,8 +358,9 @@ function accountPage(id, view, state, now) {
   const { priced } = view;
   const unit = priced.unit;
   const closes = view.closesAt ? t('markets.closes', { date: fmtDate(Date.parse(view.closesAt)) }) : '';
+  const badge = badgeFor(view.legs);
   const who = `<div class="mk-who">${mkAv(view.tile, 'lg')}<div><h1 class="head-title">${esc(view.name)}</h1>` +
-    `<span class="mk-sub">${esc([...view.sub, closes].filter(Boolean).join(' · '))}${view.item.pastEnd === true ? ` ${tag(t('markets.tag.closed'))}` : ''}</span></div></div>`;
+    `<span class="mk-sub">${badge ? `${badge} ` : ''}${esc([...view.sub, closes].filter(Boolean).join(' · '))}${view.item.pastEnd === true ? ` ${tag(t('markets.tag.closed'))}` : ''}</span></div></div>`;
 
   // the price it shows, its 24 hours and its volume the explore read's; where the price is from, with its age, once, under it, as
   // the retired page says it; an event's outcomes under the price
@@ -360,7 +386,7 @@ function accountPage(id, view, state, now) {
   // Across venues: the lines the owner connected, the best marked, Paper where so; a public listing leads to Venues to connect
   const venues = view.legs.map(l => line('·',
     `${esc([l.venueName || l.venue, l.symbol, priceWord(l.price, unit)].filter(Boolean).join(' · '))}${l.best ? ` ${tag(t('markets.tag.best'))}` : ''}${l.paper ? ` ${tag(t('markets.tag.paper'))}` : ''}`,
-    '', '', !l.connected && l.public ? `<a class="link mk-link" href="#/account/venues">${th('markets.connectToTrade')}</a>` : ''));
+    '', '', !l.connected && l.public && l.connectTo ? `<a class="link mk-link" href="#/account/venues">${th('markets.connectToTrade')}</a>` : ''));
   if (venues.length) left.push(section(th('markets.venues.title'), feed(venues)));
 
   // You here, from the asset sheet: what is held of it, its positions with their cost, its open orders with who placed them, and

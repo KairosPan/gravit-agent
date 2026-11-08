@@ -35,6 +35,115 @@ async function market(o: { sources?: PublicSource[]; china?: boolean } = {}) {
 }
 
 describe("the market's public reads", () => {
+  it("selects an exact source before fetching, keeps source caches apart and lists up to 200 before the final cut", async () => {
+    const calls: Array<{ id: string; limit: number; q?: string | undefined }> = [];
+    const source = (id: string): PublicSource => ({
+      ...fakeSource({ id }),
+      listings: async ({ q, limit }) => {
+        calls.push({ id, limit, q });
+        return Array.from({ length: 205 }, (_, i) => listing(`COIN${i}/USDT`, 100 + i)).filter((m) => !q || m.symbol.includes(q.toUpperCase())).slice(0, limit);
+      },
+    });
+    const { get } = await market({ sources: [source("okx"), source("okx-preipo"), source("other")] });
+    const first = await get("/api/explore?scope=more&source=okx&limit=200");
+    expect(first.status).toBe(200);
+    expect(first.body.items).toHaveLength(200);
+    expect(first.body.items.every((i: ExploreItem) => i.at.every((a) => a.venue === "okx"))).toBe(true);
+    expect(calls.map((c) => [c.id, c.limit])).toEqual([["okx", 200]]);
+    const other = await get("/api/explore?scope=more&source=okx-preipo&limit=200");
+    expect(other.body.items.every((i: ExploreItem) => i.at.every((a) => a.venue === "okx-preipo"))).toBe(true);
+    expect(calls.map((c) => c.id)).toEqual(["okx", "okx-preipo"]);
+    expect((await get("/api/explore?scope=more&source=okx&limit=200")).body).toEqual(first.body);
+    const small = await get("/api/explore?source=okx&limit=1");
+    expect(small.body.items).toHaveLength(1);
+    expect(small.body.tabs.find((t: { id: string }) => t.id === "all").count).toBe(200);
+    expect(calls).toHaveLength(2); // a smaller result cap still uses the source's cached full listing
+    const found = await get("/api/explore?source=okx&q=COIN204&limit=200");
+    expect(found.body.items.map((i: ExploreItem) => i.key)).toEqual(["coin:COIN204"]);
+    expect(calls.map((c) => c.id)).toEqual(["okx", "okx-preipo", "okx"]);
+  });
+
+  it("rejects an unavailable source or incompatible scope before reading any source", async () => {
+    const calls: string[] = [];
+    const sources = ["okx", "hyperliquid", "trade-xyz", "x".repeat(80)].map((id) => ({ ...fakeSource({ id }), listings: async () => { calls.push(id); return []; } }));
+    const { get } = await market({ sources });
+    for (const query of ["source=unknown", "scope=xyz&source=okx", "scope=hyperliquid&source=okx", "scope=more&source=hyperliquid", "scope=more&source=trade-xyz", "source=okx&tab=china"]) {
+      const got = await get(`/api/explore?${query}`);
+      expect(got.status, query).toBe(409);
+      expect(got.body.refusal.code).toBe("E_MARKET_BAD_REQUEST");
+    }
+    expect((await get("/api/explore?source=okx&source=unknown")).status).toBe(400);
+    expect((await get(`/api/explore?source=${"x".repeat(81)}`)).status).toBe(409); // never truncate into the registered 80-character ID
+    expect(calls).toEqual([]);
+  });
+
+  it("does not ask China for a selected source search, while unfiltered More retains its China search", async () => {
+    const china = fakeChina();
+    const search = vi.fn(china.search);
+    const reads = marketReads(createMarketCore({ sources: [fakeSource({ id: "okx" })], china: { ...china, search } }));
+    for (const scope of [undefined, "more"]) {
+      const result = await reads.explore({ scope, source: "okx", q: "600519" });
+      expect(isRefusal(result) ? result : result.items).toEqual([]);
+    }
+    expect(search).not.toHaveBeenCalled();
+    const result = await reads.explore({ scope: "more", q: "600519" });
+    expect(isRefusal(result) ? result : result.items.map((i) => i.key)).toEqual(["cn:600519"]);
+    expect(search).toHaveBeenCalledOnce();
+  });
+
+  it("enumerates a focused source before category filtering and the final result limit", async () => {
+    const asked: number[] = [];
+    const rows = [["GOLD", "commodities"], ["NVDA", "stocks"], ["XYZ100", "indices"], ["EUR", "fx"], ["ANT", "preipo"]].map(([base, category], i) => ({ ...listing(`xyz:${base}`, 100), kind: "perp" as const, base: `xyz:${base}`, symbol: `xyz:${base}-PERP`, category, volumeUsd24h: 100 - i }));
+    const source: PublicSource = { ...fakeSource({ id: "trade-xyz" }), listings: async ({ limit }) => { asked.push(limit); return rows.slice(0, limit); } };
+    const reads = marketReads(createMarketCore({ sources: [source] }));
+    for (const [tab, key] of [["stocks", "NVDA"], ["indices", "XYZ100"], ["commodities", "GOLD"], ["fx", "EUR"], ["preipo", "ANT"]]) {
+      const got = await reads.explore({ scope: "xyz", tab, limit: 1 });
+      expect(isRefusal(got) ? got : got.items.map((i) => i.key)).toEqual([`perp:xyz:${key}`]);
+    }
+    expect(asked).toEqual([200]); // the source's complete cached universe is reused across category questions
+  });
+
+  it("does not leak legacy xyz pre-IPO aliases into More markets", async () => {
+    const legacy = { ...fakeSource({ id: "hyperliquid-preipo" }), listings: async () => [{ ...listing("xyz:OURA", 1), kind: "perp" as const, base: "xyz:OURA", symbol: "xyz:OURA-PERP" }] };
+    const core = createMarketCore({ sources: [legacy] });
+    const reads = marketReads(core);
+    const old = await reads.explore({ q: "xyz:OURA" });
+    const more = await reads.explore({ scope: "more", q: "xyz:OURA" });
+    expect(isRefusal(old) ? old : old.items).toHaveLength(1);
+    expect(isRefusal(more) ? more : more.items).toEqual([]);
+  });
+
+  it("scopes sources before fetching, keeps their caches apart and reads more than the old per-source preview", async () => {
+    const calls: string[] = [];
+    const source = (id: string): PublicSource => ({
+      ...fakeSource({ id }),
+      listings: async ({ limit }) => {
+        calls.push(id);
+        return Array.from({ length: 65 }, (_, i) => ({ ...listing(`${id === "trade-xyz" ? "xyz:" : ""}COIN${i}`, 100 + i), kind: "perp" as const, base: `${id === "trade-xyz" ? "xyz:" : ""}COIN${i}`, symbol: `${id === "trade-xyz" ? "xyz:" : ""}COIN${i}-PERP` })).slice(0, limit);
+      },
+    });
+    const { get } = await market({ sources: [source("hyperliquid"), source("trade-xyz"), source("other")] });
+    const main = await get("/api/explore?scope=hyperliquid&limit=200");
+    expect(calls).toEqual(["hyperliquid"]);
+    expect(main.body.items).toHaveLength(65);
+    expect(main.body.items.every((i: ExploreItem) => i.at.every((a) => a.venue === "hyperliquid"))).toBe(true);
+    const xyz = await get("/api/explore?scope=xyz&limit=200");
+    expect(calls).toEqual(["hyperliquid", "trade-xyz"]);
+    expect(xyz.body.items).toHaveLength(65);
+    expect(new Set(xyz.body.items.map((i: ExploreItem) => i.key)).size).toBe(65);
+    expect(xyz.body.items.every((i: ExploreItem) => i.key.startsWith("perp:xyz:") && i.at.every((a) => a.venue === "trade-xyz"))).toBe(true);
+    const more = await get("/api/explore?scope=more&limit=200");
+    expect(calls).toEqual(["hyperliquid", "trade-xyz", "other"]);
+    expect(more.body.items.every((i: ExploreItem) => i.at.every((a) => a.venue === "other"))).toBe(true);
+    expect((await get("/api/explore?scope=xyz&limit=200")).body).toEqual(xyz.body);
+    expect(calls).toHaveLength(3);
+    expect((await get("/api/explore?scope=xyz&q=600519")).body.items.some((i: ExploreItem) => i.kind === "ashare")).toBe(false);
+    expect((await get("/api/explore?scope=more&q=600519")).body.items.some((i: ExploreItem) => i.kind === "ashare")).toBe(true);
+    expect((await get("/api/explore?scope=xyz&tab=china")).status).toBe(409);
+    expect((await get("/api/explore?scope=bad")).status).toBe(409);
+    expect((await get("/api/explore?scope=xyz&scope=more")).status).toBe(400);
+  });
+
   it("explores the public markets and finds China on a search", async () => {
     const { get } = await market();
     const btc = await get("/api/explore?q=BTC");

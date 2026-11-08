@@ -1,13 +1,14 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { isRefusal } from "../../src/core/errors.ts";
 import { signOwner, simKey, type OwnerAction } from "../../src/portfolio/account/sign.ts";
 import type { LiveDeps } from "../../src/portfolio/live/index.ts";
 import type { Listing, PublicSource } from "../../../market/src/live/public-markets.ts";
 import { startPortfolioServer } from "../../src/portfolio/server.ts";
 import { PortfolioService } from "../../src/portfolio/service.ts";
+import type { MarketLink } from "../../src/portfolio/market/link.ts";
 
 /** A CONNECTED VENUE'S OWN READS under /api/account/connected/: what the account answers for the venues the owner connected — their
  * explore rows, their quotes, their candles, book and trades — and a public source refused by name, its data being the market's. */
@@ -37,16 +38,16 @@ const fake: PublicSource = {
   trades: async () => [{ at: REAL - 1000, price: 60000, qty: 0.1, side: "buy" }] as never,
 };
 
-async function boot() {
+async function boot(sources: PublicSource[] | (() => PublicSource[]) = [fake], market?: MarketLink) {
   const home = mkdtempSync(join(tmpdir(), "account-connected-"));
   homes.push(home);
   const liveDeps: Partial<LiveDeps> = { clock: () => REAL, http: async () => ({ status: 599, body: undefined, text: "" }), price: async () => undefined };
-  const svc = await PortfolioService.create({ home, now: () => new Date(START).toISOString(), venues: "frontline", real: true, liveDeps, publicMarkets: [fake], liveWrites: { capUsd: 100, pairingCode: "K7QX-M2PA" }, account: { owners: [{ id: owner.address, kind: "eoa", label: "owner", addedAt: new Date(START).toISOString() }] } });
+  const svc = await PortfolioService.create({ home, now: () => new Date(START).toISOString(), venues: "frontline", real: true, liveDeps, publicMarkets: sources, liveWrites: { capUsd: 100, pairingCode: "K7QX-M2PA" }, account: { owners: [{ id: owner.address, kind: "eoa", label: "owner", addedAt: new Date(START).toISOString() }] } });
   let n = 0;
   const own = async (a: NoNonce<OwnerAction>) => svc.exchange(await signOwner(owner, { ...a, nonce: START + ++n } as OwnerAction));
   const r = await own({ type: "connectVenue", venue: "paper-1", connector: "live:paper", label: "", credentialRef: "" });
   if (isRefusal(r)) throw new Error(r.message);
-  const srv = await startPortfolioServer({ port: 0, service: svc, snapshotMs: 0 });
+  const srv = await startPortfolioServer({ port: 0, service: svc, snapshotMs: 0, ...(market ? { market } : {}) });
   const get = async (path: string) => {
     const res = await fetch(`${srv.url}${path}`);
     return { status: res.status, body: (await res.json()) as Record<string, any> };
@@ -55,6 +56,53 @@ async function boot() {
 }
 
 describe("a connected venue's own reads (GET /api/account/connected/…)", () => {
+  it("keeps selected-source paper reads and their cache keys separate and validates the source query", async () => {
+    const second: PublicSource = { ...fake, id: "second", listings: async () => [{ ...btc, symbol: "ETH/USDT", base: "ETH" }] };
+    const { srv, get } = await boot([fake, second]);
+    try {
+      const one = await get("/api/account/connected/explore?scope=more&source=fake");
+      const two = await get("/api/account/connected/explore?scope=more&source=second");
+      expect(one.body.items.map((i: { key: string }) => i.key)).toEqual(["coin:BTC"]);
+      expect(two.body.items.map((i: { key: string }) => i.key)).toEqual(["coin:ETH"]);
+      expect(one.body.items[0].at[0].publicSource).toBe("fake");
+      expect(two.body.items[0].at[0].publicSource).toBe("second");
+      expect((await get("/api/account/connected/explore?scope=more&source=fake")).body).toEqual(one.body);
+      expect((await get("/api/account/connected/explore?source=fake")).body.items[0].key).toBe("coin:BTC");
+      for (const q of ["scope=xyz&source=fake", "scope=hyperliquid&source=fake", "source=missing", `source=${"a".repeat(81)}`]) expect((await get(`/api/account/connected/explore?${q}`)).status).toBe(409);
+      expect((await get("/api/account/connected/explore?source=fake&source=second")).status).toBe(400);
+    } finally { await srv.close(); }
+  });
+
+  it("keeps a selected paper token's identity through broad reads and both listing and explore caches", async () => {
+    const token: Listing = { ...btc, symbol: "NVDA", base: "NVDA", quote: "USD", kind: "token", price: 180 };
+    const share: PublicSource = { ...fake, id: "cboe", name: "US stocks", kind: "stocks", listings: async () => [{ ...token, kind: "stock", price: 190 }] };
+    const tokens: PublicSource = { ...fake, id: "robinhood-stock-tokens", name: "Robinhood Stock Tokens", kind: "tokens", listings: async () => [token] };
+    const { srv, get } = await boot([share, tokens]);
+    try {
+      const selected = await get("/api/account/connected/explore?scope=more&source=robinhood-stock-tokens");
+      expect(selected.body.items.map((i: { key: string }) => i.key)).toEqual(["rwa:NVDA"]);
+      const broad = await get("/api/account/connected/explore?scope=more");
+      expect(broad.body.items.map((i: { key: string }) => i.key)).toEqual(["rwa:NVDA"]);
+      expect((await get("/api/account/connected/explore?scope=more&source=robinhood-stock-tokens")).body).toEqual(selected.body);
+      expect((await get("/api/account/connected/explore?scope=more&source=cboe")).body.items).toEqual([]);
+      const quote = await get("/api/account/connected/quotes?pairs=paper-1|NVDA");
+      expect(quote.body.quotes[0].market).toMatchObject({ symbol: "NVDA", kind: "token", publicSource: "robinhood-stock-tokens" });
+    } finally { await srv.close(); }
+  });
+
+  it("waits for the first source registry on a cold exact-source request", async () => {
+    let sources: PublicSource[] = [];
+    const ready = vi.fn(async () => { sources = [fake]; return true; });
+    const market = { sources: () => sources, ready, close() {}, marketOld: () => undefined } as unknown as MarketLink;
+    const { srv, get } = await boot(() => sources, market);
+    try {
+      const r = await get("/api/account/connected/explore?scope=more&source=fake");
+      expect(ready).toHaveBeenCalledWith(3_000);
+      expect(r.status).toBe(200);
+      expect(r.body.items[0].key).toBe("coin:BTC");
+    } finally { await srv.close(); }
+  });
+
   it("explores the venues connected, and no public line", async () => {
     const { srv, get } = await boot();
     try {
@@ -100,6 +148,12 @@ describe("a connected venue's own reads (GET /api/account/connected/…)", () =>
       expect((await get("/api/account/connected/explore?limit=0")).status).toBe(409);
       expect((await get("/api/account/connected/explore?limit=x")).status).toBe(400);
       expect((await get("/api/account/connected/explore?tab=nowhere")).status).toBe(409);
+      expect((await get("/api/account/connected/explore?scope=nowhere")).status).toBe(409);
+      expect((await get("/api/account/connected/explore?scope=xyz&scope=more")).status).toBe(400);
+      // This generic paper fixture has no Hyperliquid or xyz source, so preferred scopes are empty; More and the legacy read include it.
+      expect((await get("/api/account/connected/explore?scope=xyz&q=BTC")).body.items).toEqual([]);
+      expect((await get("/api/account/connected/explore?scope=hyperliquid&q=BTC")).body.items).toEqual([]);
+      expect((await get("/api/account/connected/explore?scope=more&q=BTC")).body.items.length).toBeGreaterThan(0);
     } finally {
       await srv.close();
     }

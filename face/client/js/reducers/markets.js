@@ -3,7 +3,7 @@
 // its base's compare rows, the Account keys starred and what each old us:/crypto: star was found as; the A shares' quotes, their
 // search hits' prices and China's state, the Account's too — and the screen's own view of it: the tab, the sort, the query, a
 // page's range
-import { ACCOUNT_TAB_IDS, ACCOUNT_SORT_IDS, CANDLE_RANGES, isAccountKey } from '../host/market-view.js';
+import { ACCOUNT_TAB_IDS, ACCOUNT_SORT_IDS, CANDLE_RANGES, MARKET_SCOPE_IDS, marketScopeOf, marketSourceOf, moreSourcesOf, marketCategoryIds, isAccountKey } from '../host/market-view.js';
 import { number } from '../wire/market-model.js';
 import { DESK_TAB } from '../host/desk-view.js';
 import { chinaProviderOf, isCnKey } from '../wire/china.js';
@@ -48,6 +48,9 @@ const depth = (s, id, part, patch) => {
 const onTab = tab => ({ tab, sort: 'volume' });
 
 export const reducers = {
+  marketSourcesLoading: s => mk(s, { sources: { ...IDLE, ...s.markets.sources, status: 'loading', message: null } }),
+  marketSourcesLoaded: (s, { data, at } = {}) => mk(s, { sources: { status: 'ready', data, at, message: null } }),
+  marketSourcesFailed: (s, { at, message = null } = {}) => mk(s, { sources: { ...IDLE, ...s.markets.sources, status: 'error', at, message } }),
   // the A shares: the cn watchlist as stored; their quotes by cn id (the Account's, host/markets.js merges them) and the state of
   // that read; China's state as the Account says it (its ranking's status, or a refused quote's), the only setter of the
   // providers; the prices a search's A-share hits carry, by cn id
@@ -69,6 +72,8 @@ export const reducers = {
   resultsLoading: s => read(s, { status: 'loading' }),
   resultsLoaded: (s, { data, at } = {}) => read(s, { status: 'ready', data, at, message: null }),
   resultsFailed: (s, { at, message = null } = {}) => read(s, { status: 'error', at, message }),
+  // A market fetched by exact key for a page or a star stays available when the browsing source changes.
+  marketLocated: (s, { id, data, at = null } = {}) => (isAccountKey(id) ? keyed(s, 'located', id, { status: 'ready', data, at, message: null }) : s),
 
   // the quotes?pairs= answer's rows, by 'venue|symbol': a row with its market sets the pair's figures; a refused one leaves the
   // pair as it was, and so does one whose price is stamped before the price kept (the stream's fresher frame stays)
@@ -159,7 +164,29 @@ export const reducers = {
   },
 
   // the Account's tabs, Watching and All results; a tab starts from Most traded
-  setMarketsTab: (s, tab) => (TABS.has(tab) && tab !== s.markets.tab ? mk(s, onTab(tab)) : s),
+  setMarketsScope(s, scope) {
+    if (!MARKET_SCOPE_IDS.includes(scope) || (scope === marketScopeOf(s.markets) && !marketSourceOf(s.markets))) return s;
+    return mk(s, {
+      scope, source: '', ...onTab('all'), q: '', explore: {}, results: { ...IDLE },
+      rank: { ...IDLE, sort: 'volume', message: null },
+    });
+  },
+  // Choosing another source's category is one transition: the host asks only that final source and tab.
+  setMarketsLocation(s, { scope, source = '', tab = 'all' } = {}) {
+    if (!MARKET_SCOPE_IDS.includes(scope) || !marketCategoryIds(scope).includes(tab)) return s;
+    if (source && (scope !== 'more' || tab === 'china' || !moreSourcesOf(s.markets).some(item => item.id === source))) return s;
+    if (scope === marketScopeOf(s.markets) && source === marketSourceOf(s.markets)) return reducers.setMarketsTab(s, tab);
+    return mk(s, {
+      scope, source, ...onTab(tab), q: '', explore: {}, results: { ...IDLE },
+      rank: { ...IDLE, sort: 'volume', message: null },
+    });
+  },
+  setMarketsTab(s, tab) {
+    if (!TABS.has(tab) || tab === s.markets.tab || (tab === 'china' && marketSourceOf(s.markets))) return s;
+    // Watching reads across every source. Its broad answer must never stand in for a focused source's next list.
+    const leavingWatch = s.markets.tab === 'watching' && MARKET_SCOPE_IDS.includes(s.markets.scope);
+    return mk(s, { ...onTab(tab), ...(leavingWatch ? { explore: {} } : {}) });
+  },
   // a sort by its id (the seg's data-value); its word is the renderer's
   setMarketsSort(s, v) {
     return ACCOUNT_SORT_IDS.includes(v) && v !== s.markets.sort ? mk(s, { sort: v }) : s;

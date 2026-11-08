@@ -328,9 +328,9 @@ export function streamOf(source: string, symbol: string): { venue: HubVenue; sym
     const k = HL_PERP.exec(s);
     return k ? { venue: "hyperliquid", sym: k[1]! } : undefined;
   }
-  if (source === "hyperliquid-preipo") {
+  if (source === "hyperliquid-preipo" || source === "trade-xyz") {
     const k = HIP3_PERP.exec(s);
-    return k ? { venue: "hyperliquid", sym: k[1]! } : undefined;
+    return k && (source !== "trade-xyz" || k[1]!.startsWith("xyz:")) ? { venue: "hyperliquid", sym: k[1]! } : undefined;
   }
   return undefined;
 }
@@ -581,7 +581,7 @@ export class StreamHub implements MarketHub {
     const seenAt = top ? (live ? Math.max(mk.bookRecvAt, c.lastMsgAt) : mk.bookRecvAt) : mk.bboSnapped ? (live && BBO_EVERY_CHANGE[mk.venue] ? Math.max(mk.bboRecvAt, c.lastMsgAt) : mk.bboRecvAt) : mk.recvAt;
     // the venue's own moment of that best bid and ask: the book's top's message, else their channel's — none before either has spoken
     const priceAt = top ? mk.topAt : mk.bboSnapped ? mk.bboAt : undefined;
-    return { ...(bid !== undefined ? { bid } : {}), ...(ask !== undefined ? { ask } : {}), ...(bid !== undefined && bidSz !== undefined ? { bidSz } : {}), ...(ask !== undefined && askSz !== undefined ? { askSz } : {}), ...(mk.last !== undefined ? { last: mk.last } : {}), ...(mk.mark !== undefined ? { mark: mk.mark } : {}), ...(mk.oracle !== undefined ? { oracle: mk.oracle } : {}), ...(mk.funding !== undefined ? { funding: mk.funding } : {}), ...(mk.openInterest !== undefined ? { openInterest: mk.openInterest } : {}), ...(mk.volumeUsd24h !== undefined ? { volumeUsd24h: mk.volumeUsd24h } : {}), ...(mk.prevDayPx !== undefined ? { prevDayPx: mk.prevDayPx } : {}), ...(mk.premium !== undefined ? { premium: mk.premium } : {}), at: mk.at, ...(priceAt !== undefined ? { priceAt } : {}), recvAt: mk.recvAt, seenAt, src: HUB_NAMES[mk.venue], seq: mk.seq, live, ...(mk.bar ? { bar: { ...mk.bar } } : {}) };
+    return { ...(bid !== undefined ? { bid } : {}), ...(ask !== undefined ? { ask } : {}), ...(bid !== undefined && bidSz !== undefined ? { bidSz } : {}), ...(ask !== undefined && askSz !== undefined ? { askSz } : {}), ...(mk.last !== undefined ? { last: mk.last } : {}), ...(mk.mark !== undefined ? { mark: mk.mark } : {}), ...(mk.oracle !== undefined ? { oracle: mk.oracle } : {}), ...(mk.funding !== undefined ? { funding: mk.funding } : {}), ...(mk.openInterest !== undefined ? { openInterest: mk.openInterest } : {}), ...(mk.volumeUsd24h !== undefined ? { volumeUsd24h: mk.volumeUsd24h } : {}), ...(mk.prevDayPx !== undefined ? { prevDayPx: mk.prevDayPx } : {}), ...(mk.premium !== undefined ? { premium: mk.premium } : {}), at: mk.at, ...(priceAt !== undefined ? { priceAt } : {}), recvAt: mk.recvAt, seenAt, src: source === "trade-xyz" ? "trade.xyz" : HUB_NAMES[mk.venue], seq: mk.seq, live, ...(mk.bar ? { bar: { ...mk.bar } } : {}) };
   }
 
   book(source: string, symbol: string, depth = BOOK_TOP): HubBook | undefined {
@@ -595,7 +595,7 @@ export class StreamHub implements MarketHub {
     // Coinbase's book is the venue's whole, level for level, to each side's boundary (where it was cut): whole for a depth that boundary
     // holds, and not beyond it
     const whole = mk.venue === "coinbase" && (mk.bidCut === undefined || mk.bids.size >= d) && (mk.askCut === undefined || mk.asks.size >= d);
-    return { bids: sideOut(mk.bids, true, d), asks: sideOut(mk.asks, false, d), at: mk.bookAt, recvAt: mk.bookRecvAt, seenAt: live ? Math.max(mk.bookRecvAt, c.lastMsgAt) : mk.bookRecvAt, src: HUB_NAMES[mk.venue], live, ...(whole ? { whole: true as const } : {}) };
+    return { bids: sideOut(mk.bids, true, d), asks: sideOut(mk.asks, false, d), at: mk.bookAt, recvAt: mk.bookRecvAt, seenAt: live ? Math.max(mk.bookRecvAt, c.lastMsgAt) : mk.bookRecvAt, src: source === "trade-xyz" ? "trade.xyz" : HUB_NAMES[mk.venue], live, ...(whole ? { whole: true as const } : {}) };
   }
 
   trades(source: string, symbol: string, limit: number): PublicTrade[] {

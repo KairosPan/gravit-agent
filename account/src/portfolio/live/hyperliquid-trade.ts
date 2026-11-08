@@ -74,6 +74,7 @@
  * the totals. The testnet app is Hyperliquid's Interface under the same Terms of Use, so the same line (§1.6) is held to where the user is,
  * before connecting and before every order: a paper account is not a way around it.
  */
+import { marketInScope } from "./market-scope.ts";
 import { createHash } from "node:crypto";
 import { getAddress, isAddress, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -758,12 +759,15 @@ function hyperliquidTrader(c: { venue: string; name: string; b: Book; client: Hy
     const priceStep = e.refPrice !== undefined ? hlPriceStep(e.refPrice, e.decimals) : undefined;
     // a HIP-3 pre-IPO perpetual, by Hyperliquid's own category for it and the company's name (live/preipo.ts: anyone may deploy one, so the
     // category alone never makes one): its company, the unit its price is in, the issuer's words
-    const pre = perp && e.dex ? preIpoOf("hyperliquid", { category: b.categoryOf(e.coin) }, e.base, e.coin) : undefined;
+    const category = perp ? (e.dex ? b.categoryOf(e.coin) : "crypto") : undefined;
+    const pre = perp && e.dex ? preIpoOf("hyperliquid", { category }, e.base, e.coin) : undefined;
     return {
       symbol: e.symbol,
       name: label,
       kind: perp ? "perp" : "spot",
-      base: e.base,
+      base: e.dex === "xyz" && !pre ? e.coin : e.base,
+      ...(perp ? { dex: e.dex ?? "" } : {}),
+      ...(category ? { category } : {}),
       quote: e.quote,
       qtyStep: Number((10 ** -e.szDecimals).toFixed(e.szDecimals)),
       ...(priceStep !== undefined ? { priceStep } : {}),
@@ -887,10 +891,18 @@ function hyperliquidTrader(c: { venue: string; name: string; b: Book; client: Hy
     what: "spot and perpetuals",
     kinds: ["spot", "perp"],
 
-    async markets(query) {
+    async markets(query, scope) {
       const failed = await b.load();
       if (failed) return failed;
       const q = query.trim();
+      if (scope) {
+        const selected = b.entries().filter((e) => e.offered).map(marketOf).filter((m) => marketInScope(m, scope));
+        const needle = q.toUpperCase();
+        if (!needle) return selected;
+        const own = await b.find(q);
+        const exact = !isRefusal(own) && own.offered ? marketOf(own) : undefined;
+        return selected.filter((m) => m.symbol === exact?.symbol || [m.symbol, m.base, m.name].some((s) => String(s ?? "").toUpperCase().includes(needle)));
+      }
       if (!q) return startFrom().map(marketOf);
       // Hyperliquid's own name for a market finds it too (xyz:NVDA, @107, BTC-PERP)
       const own = await b.find(q);

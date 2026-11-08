@@ -113,13 +113,14 @@ import { join } from "node:path";
 import { isRefusal, type Refusal } from "../../core/errors.ts";
 import type { AssetClass } from "../accounts.ts";
 import { no } from "../refuse.ts";
+import { RWA_CATEGORY } from "./categories.ts";
 import { coarserThan } from "./history.ts";
 import { readAtOf, type Listing, type PublicSource } from "../market/shapes.ts";
 import { usClock } from "../account/calendar.ts";
 import { CBOE_DELAY_MS, cboeQuoteInSession, US_STOCKS_ID, usLineAt, usSession } from "../market/shapes.ts";
 import type { HubQuote, HubRange, HubTick, MarketHub } from "../market/shapes.ts";
 import { FRESH_MS as US_FRESH_MS } from "../market/shapes.ts";
-import { badOrder, CANDLE_INTERVALS, ceilTo, floorTo, HISTORY_MOST, INTERVAL_MS, inDollars, onStep, pick, type Candle, type CandleInterval, type CandlePage, type LiveTrader, type Market, type MarketKind, type MarketStats, type OrderBook, type OrderEstimate, type OrderRequest, type OrderState, type OrderStatus, type OrderType, type Position, type SessionPhase, type Side, type TimeInForce } from "./trade.ts";
+import { badOrder, CANDLE_INTERVALS, ceilTo, floorTo, HISTORY_MOST, INTERVAL_MS, inDollars, onStep, pick, type Candle, type CandleInterval, type CandlePage, type LiveTrader, type Market, type MarketKind, type MarketScope, type MarketStats, type OrderBook, type OrderEstimate, type OrderRequest, type OrderState, type OrderStatus, type OrderType, type Position, type SessionPhase, type Side, type TimeInForce } from "./trade.ts";
 import { isStable, type LiveBalance, type LiveSource, type PaperControls, type PaperEvents } from "./types.ts";
 
 export const PAPER_DEFAULT_CASH = 10_000;
@@ -144,7 +145,7 @@ const RATE_WAIT_MS = 60_000;
 const RATES_AGAIN_MS = 10_000;
 const RATES_KEPT = 2_000;
 /** the sources whose funding rate is hourly (Hyperliquid's); another perpetual venue's rate is for an eight-hour interval */
-const HOURLY_FUNDING = /^hyperliquid/;
+const HOURLY_FUNDING = /^(?:hyperliquid|trade-xyz$)/;
 /** how much older than its source's own delay a stock's quote may be and still fill: a quote that stopped moving (a halt, a feed gone
  * quiet, the last trade of a session hours ago) fills nothing. A last-trade stamp of a quiet share can be minutes old in session */
 const QUOTE_GRACE_MS = 15 * 60_000;
@@ -661,26 +662,32 @@ function inTime<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
  * when it is priced in dollars (a dated future is not offered) */
 class Pricer {
   private readonly known = new Map<string, { source: string; m: Listing; at: number }>();
-  constructor(private readonly sources: () => PublicSource[], private readonly clock: () => number) {}
+  /** An explicitly browsed paper symbol keeps that identity for this trader's lifetime, including while its listings are cached. */
+  private readonly selected = new Map<string, string>();
+  constructor(private readonly sources: () => PublicSource[], private readonly clock: () => number, private readonly boundSource: (symbol: string) => string | undefined) {}
 
-  /** which source a symbol is remembered by. Two sources may name the same symbol (the US share NVDA and Robinhood's Stock Token NVDA):
-   * the one first in the account's own order keeps it, whichever answered last, so a source that was slow to answer once (the share's line
-   * at startup) takes its symbol back when it answers, and the other never takes it from it again — a market asked by that symbol is the
-   * same market every time */
-  private remember(symbol: string, source: string, m: Listing): void {
+  /** Remember a listing only under its paper identity: a persisted book's source first, then an explicitly selected source. Broad
+   * reads cannot reinterpret either while a cached explore still offers it. Before any selection or trade, retain the existing source
+   * preference: a preferred source that answered late can take its symbol back. False means this listing is a different product. */
+  private remember(symbol: string, source: string, m: Listing, selected?: string): boolean {
+    const bound = this.boundSource(symbol) ?? this.selected.get(symbol);
     const was = this.known.get(symbol);
-    if (was && was.source !== source) {
+    if (bound !== undefined && bound !== source) return false;
+    if (selected && bound === undefined && was && was.source !== source) return false;
+    if (selected) this.selected.set(symbol, source);
+    if (bound === undefined && !selected && was && was.source !== source) {
       const order = this.sources().map((s) => s.id);
       const [mine, theirs] = [order.indexOf(source), order.indexOf(was.source)];
-      if (theirs !== -1 && (mine === -1 || theirs < mine)) return;
+      if (theirs !== -1 && (mine === -1 || theirs < mine)) return true;
     }
     this.known.set(symbol, { source, m, at: this.clock() });
+    return true;
   }
 
   /** every source's listing for `q`, in the sources' order — or, where `one` names the market looked for and a source answers one market
    * alone (PublicSource.line), that market's line from it instead of its search (P16) */
-  async listAll(q: string, limit: number, one?: string): Promise<Array<{ source: PublicSource; m: Listing }>> {
-    const all = this.sources();
+  async listAll(q: string, limit: number, one?: string, scope?: MarketScope, selected?: string): Promise<Array<{ source: PublicSource; m: Listing }>> {
+    const all = this.sources().filter((s) => (!selected || s.id === selected) && (scope === "hyperliquid" ? s.id === "hyperliquid" : scope === "xyz" ? s.id === "trade-xyz" : scope === "more" ? s.id !== "hyperliquid" && s.id !== "trade-xyz" : true));
     const answers = await Promise.all(
       all.map((s) =>
         one && s.line
@@ -694,17 +701,18 @@ class Pricer {
       if (!Array.isArray(a)) return;
       const source = all[i]!;
       for (const m of a) {
+        if (scope === "more" && source.id === "hyperliquid-preipo" && m?.symbol?.startsWith("xyz:")) continue;
         if (!m || typeof m.symbol !== "string" || seen.has(m.symbol) || !this.offered(m)) continue;
+        if (!this.remember(m.symbol, source.id, m, selected)) continue;
         seen.add(m.symbol);
-        this.remember(m.symbol, source.id, m);
         out.push({ source, m });
       }
     });
     return out;
   }
 
-  async events(o: { category?: string | undefined; closingWithinMs?: number | undefined; limit: number }): Promise<Array<{ source: PublicSource; m: Listing }>> {
-    const all = this.sources().filter((s) => s.events);
+  async events(o: { category?: string | undefined; closingWithinMs?: number | undefined; limit: number }, selected?: string): Promise<Array<{ source: PublicSource; m: Listing }>> {
+    const all = this.sources().filter((s) => s.events && (!selected || s.id === selected));
     const answers = await Promise.all(all.map((s) => inTime(s.events!(o), SOURCE_MS)));
     const out: Array<{ source: PublicSource; m: Listing }> = [];
     const seen = new Set<string>();
@@ -712,8 +720,8 @@ class Pricer {
       if (!Array.isArray(a)) return;
       for (const m of a) {
         if (!m || typeof m.symbol !== "string" || seen.has(m.symbol) || !this.offered(m)) continue;
+        if (!this.remember(m.symbol, all[i]!.id, m, selected)) continue;
         seen.add(m.symbol);
-        this.remember(m.symbol, all[i]!.id, m);
         out.push({ source: all[i]!, m });
       }
     });
@@ -740,7 +748,8 @@ class Pricer {
    * source's market of the same symbol) — or nothing: what a stream's prices stand on (they say the price, the listing what the market is) */
   knownOf(symbol: string, ref: PaperMarketRef | undefined): { source: PublicSource; m: Listing; at: number } | undefined {
     const k = this.known.get(symbol);
-    if (!k || (ref && ref.source !== k.source)) return undefined;
+    const bound = this.boundSource(symbol) ?? this.selected.get(symbol);
+    if (!k || (ref && ref.source !== k.source) || (bound !== undefined && bound !== k.source)) return undefined;
     const source = this.sourceOf(k.source);
     return source ? { source, m: k.m, at: k.at } : undefined;
   }
@@ -754,7 +763,7 @@ class Pricer {
    * is remembered here is which source lists a symbol, never a price */
   async find(symbol: string, ref: PaperMarketRef | undefined): Promise<{ source: PublicSource; m: Listing; at: number } | undefined> {
     const k = this.known.get(symbol);
-    const source = this.sourceOf(ref?.source ?? k?.source ?? "");
+    const source = this.sourceOf(this.boundSource(symbol) ?? this.selected.get(symbol) ?? ref?.source ?? k?.source ?? "");
     const base = ref?.base ?? k?.m.base ?? symbol.split(/[/:@-]/)[0] ?? symbol;
     // a source that answers one market alone (PublicSource.line: the US stocks line) is asked for this one market and nothing else — never
     // the search of its base, which for a short ticker reads forty quotes (P16)
@@ -770,13 +779,14 @@ class Pricer {
     let refused: Refusal | undefined;
     for (const t of tries) {
       const a = await t();
+      // The owner may have selected or traded this symbol while its previous source was answering.
+      const bound = this.boundSource(symbol) ?? this.selected.get(symbol);
+      if (bound !== undefined && bound !== source!.id) return this.knownOf(symbol, ref);
       if (isRefusal(a)) refused = a;
       const m = Array.isArray(a) ? a.find((x) => x?.symbol === symbol) : undefined;
       if (m && this.offered(m)) {
-        const at = this.clock();
-        this.known.set(symbol, { source: source!.id, m, at });
-        this.refused.delete(symbol);
-        return { source: source!, m, at };
+        if (this.remember(symbol, source!.id, m)) this.refused.delete(symbol);
+        return this.knownOf(symbol, ref);
       }
     }
     if (source) {
@@ -787,7 +797,7 @@ class Pricer {
     }
     for (const q of [base, symbol]) {
       const got = (await this.listAll(q, LIST_LIMIT, symbol)).find((x) => x.m.symbol === symbol && (!ref || x.m.kind === ref.kind));
-      if (got) return { ...got, at: this.clock() };
+      if (got) return this.knownOf(symbol, ref);
     }
     return undefined;
   }
@@ -833,7 +843,7 @@ export async function paperSource(req: PaperRequest): Promise<{ source: LiveSour
   }
   // a coin pair's listing from Coinbase first, then Kraken, then OKX (paperOrder)
   const sources = (): PublicSource[] => paperOrder(req.sources());
-  const pricer = new Pricer(sources, req.clock);
+  const pricer = new Pricer(sources, req.clock, (symbol) => b.markets[symbol]?.source);
   const rule = paperRule(b.feeBps);
 
   // ---- THE BOOK'S OPEN ORDERS, INDEXED (what a tick, a look, a hold and a word of the book's change read) ------------------------------
@@ -1073,6 +1083,9 @@ export async function paperSource(req: PaperRequest): Promise<{ source: LiveSour
     const ownNote = typeof m.note === "string" && m.note ? ` · ${m.note}` : "";
     const { symbol, name: mname, kind, base, quote, price, bid, ask, open, changePct24h, change24h, volumeUsd24h, contracts24h, closeTime, category, group, outcome, fundingRate, nextFundingAt, fundingEveryH, markPrice, oraclePrice, premium, openInterest, openInterestUsd, implied, issuer, eligibility, session, quoteAt, delayMs, quoteFrom, pastEnd: _p, ...rest } = m as Listing & { pastEnd?: unknown };
     void rest;
+    // Public token sources are tokenised shares/funds. Carry that source-level classification into the paper market, whose connected
+    // explore row cannot see the public source's kind; its token remains a token, with the same RWA key as the public listing.
+    const marketCategory = kind === "token" && source.kind === "tokens" ? RWA_CATEGORY : category;
     const at = req.clock();
     const stockSession = stock ? (session ?? usSession(at)) : undefined;
     // in session by the market's own clock now (marketTakes), never by a delayed quote's view of it: from 16:00 a market order is queued for
@@ -1099,9 +1112,11 @@ export async function paperSource(req: PaperRequest): Promise<{ source: LiveSour
     const step = event ? 1 : (pos(m.qtyStep) ?? DEFAULT_QTY_STEP);
     return {
       symbol,
+      publicSource: source.id,
       name: mname,
       kind,
       base,
+      ...(source.id === "hyperliquid" ? { dex: "" } : source.id === "trade-xyz" ? { dex: "xyz" } : m.dex !== undefined ? { dex: m.dex } : {}),
       quote,
       ...(pos(price) !== undefined ? { price } : {}),
       ...(pos(bid) !== undefined ? { bid } : {}),
@@ -1128,7 +1143,7 @@ export async function paperSource(req: PaperRequest): Promise<{ source: LiveSour
       ...(volumeUsd24h !== undefined ? { volumeUsd24h } : {}),
       ...(contracts24h !== undefined ? { contracts24h } : {}),
       ...(closeTime ? { closeTime } : {}),
-      ...(category ? { category } : {}),
+      ...(marketCategory ? { category: marketCategory } : {}),
       ...(group ? { group } : {}),
       ...(outcome ? { outcome } : {}),
       ...(fundingRate !== undefined ? { fundingRate } : {}),
@@ -1926,7 +1941,8 @@ export async function paperSource(req: PaperRequest): Promise<{ source: LiveSour
   const hourlyFunding = (source: PublicSource, m: Listing): number | undefined => {
     const r = m.fundingRate;
     if (typeof r !== "number" || !Number.isFinite(r)) return undefined;
-    return HOURLY_FUNDING.test(source.id) ? r : r / FUNDING_INTERVAL_HOURS;
+    const hours = pos(m.fundingEveryH) ?? (HOURLY_FUNDING.test(source.id) ? 1 : FUNDING_INTERVAL_HOURS);
+    return r / hours;
   };
   /** each perpetual's hourly funding rates as its source's history says them (PublicSource.fundingHistory: Hyperliquid's), by the hour
    * paid, ms — read once each, kept in memory only — and when each market's history was last asked */
@@ -2695,9 +2711,9 @@ export async function paperSource(req: PaperRequest): Promise<{ source: LiveSour
     /** the markets to start from: what every source lists before anything is typed (each source's own few, as Markets reads them), the
      * sources in turn — a coin, a perpetual, a stock, a token, a contract … — so every market Markets shows carries this account's line;
      * a query: every match */
-    async markets(q) {
+    async markets(q, scope, selected) {
       const Q = q.trim();
-      const got = await pricer.listAll(Q, LIST_LIMIT);
+      const got = await pricer.listAll(Q, selected || scope === "hyperliquid" || scope === "xyz" ? 200 : LIST_LIMIT, undefined, scope, selected);
       // a query: every match, the market whose symbol or base IS the words first (AAPL the share before "aapl-close-above-350…:Yes")
       if (Q) {
         const exact = (m: Market): number => (m.symbol.toUpperCase() === Q.toUpperCase() || m.base.toUpperCase() === Q.toUpperCase() ? 0 : 1);
@@ -3094,8 +3110,8 @@ export async function paperSource(req: PaperRequest): Promise<{ source: LiveSour
       return out;
     },
 
-    async events(o) {
-      return (await pricer.events(o)).map(({ source, m }) => marketOf(source, m));
+    async events(o, selected) {
+      return (await pricer.events(o, selected)).map(({ source, m }) => marketOf(source, m));
     },
 
     /** the market's price history, its public source's, passed through as the source gives it — the window asked, its pages and its words

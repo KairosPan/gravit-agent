@@ -583,7 +583,8 @@ describe("Hyperliquid, keyless", () => {
     expect(got.map((m) => m.symbol)).toEqual(["BTC-PERP", "ETH-PERP"]);
     // its mark is markPx, not the mid the price is; its open interest in dollars at that mark, to the cent; its funding paid every hour; a
     // size in steps of 10^-szDecimals (BTC's 5), a price on the fifth significant figure (whole dollars at 85,738), $10 at least
-    expect(got[0]).toEqual({ symbol: "BTC-PERP", name: "BTC perpetual on Hyperliquid", kind: "perp", base: "BTC", quote: "USDC", price: 85738.5, open: true, types: [], change24h: 304.5, changePct24h: 0.3564, volumeUsd24h: 1820069402.6143524647, fundingRate: 0.0000125, nextFundingAt: "2026-10-05T15:00:00.000Z", fundingEveryH: 1, maxLeverage: 40, markPrice: 85738, oraclePrice: 85752, premium: -0.0001516, openInterest: 41005.04312, openInterestUsd: 3515690387.02, qtyStep: 0.00001, minQty: 0.00001, priceStep: 1, minNotional: 10 });
+    expect(got[0]).toEqual({ symbol: "BTC-PERP", name: "BTC perpetual on Hyperliquid", kind: "perp", category: "crypto", base: "BTC", quote: "USDC", price: 85738.5, open: true, types: [], change24h: 304.5, changePct24h: 0.3564, volumeUsd24h: 1820069402.6143524647, fundingRate: 0.0000125, nextFundingAt: "2026-10-05T15:00:00.000Z", fundingEveryH: 1, maxLeverage: 40, markPrice: 85738, oraclePrice: 85752, premium: -0.0001516, openInterest: 41005.04312, openInterestUsd: 3515690387.02, qtyStep: 0.00001, minQty: 0.00001, priceStep: 1, minNotional: 10 });
+    expect(got.every((m) => m.category === "crypto" && m.kind === "perp")).toBe(true);
     // ETH: szDecimals 4 — sizes of 0.0001 ETH, and at 2,698 a price on the tenth of a dollar (five significant figures, under 6 − 4 decimals)
     expect(got[1]).toMatchObject({ price: 2698.24, maxLeverage: 25, qtyStep: 0.0001, priceStep: 0.1, minNotional: 10 });
     // traded through the account's Hyperliquid connection: an API wallet that places orders and cannot withdraw
@@ -928,7 +929,7 @@ describe("every public source", () => {
   it("is the five exchanges (Bybit by default, after Binance), Kalshi, Polymarket, Polymarket US, Hyperliquid, US stocks at Cboe, the Stock Tokens, xStocks at Gate, Ondo Stocks, the eight exchanges' pre-IPO perpetuals and Hyperliquid's HIP-3 ones, unless other exchanges are named", () => {
     const preipo = ["okx-preipo", "gate-preipo", "krakenfutures-preipo", "deribit-preipo", "kucoinfutures-preipo", "mexc-preipo", "binance-preipo", "bybit-preipo", "hyperliquid-preipo"];
     // the stocks before the Stock Tokens: a paper account's "NVDA" is the share
-    const rest = ["kalshi", "polymarket", "polymarket-us", "hyperliquid", "cboe", "robinhood-stock-tokens", "xstocks", "ondo-stocks", ...preipo];
+    const rest = ["kalshi", "polymarket", "polymarket-us", "hyperliquid", "trade-xyz", "cboe", "robinhood-stock-tokens", "xstocks", "ondo-stocks", ...preipo];
     expect(publicSources().map((s) => s.id)).toEqual(["kraken", "coinbase", "okx", "binance", "bybit", ...rest]);
     expect(publicSources({ exchanges: ["kraken"] }).map((s) => s.id)).toEqual(["kraken", ...rest]);
     expect(PRE_IPO_VENUES.map((v) => v.id)).toEqual(["okx", "gate", "krakenfutures", "deribit", "kucoinfutures", "mexc", "binance", "bybit"]);

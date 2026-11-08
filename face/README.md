@@ -1475,13 +1475,37 @@ keys are absent, not disabled, and the device line under the Account head says w
 
 ### Markets
 
-One table under the search box (`Search markets`). Its tabs are the market's: **All**, then
-**Crypto · Stocks · RWAs · Perps · Pre-IPO · Predictions** where the joined read lists something
-— each with the market's count plus the Account's connected-only rows once All's read has answered, All counting the starred A shares
-too (Stocks is the Account's alone) — then **China**, the market's own tab, then **Watching** once
-anything is starred, and **Desk** last, the desk's view ("The watch" under "The desk" below), with
-**All results** first while searching;
-a tab starts from Most traded. With two or more rows, the sorts **Most traded · Biggest moves**,
+Markets opens on **Hyperliquid**, with **Hyperliquid** and **trade.xyz** showing their asset
+categories directly. **More markets** expands the actual public sources as buttons, including
+OKX, Coinbase, Kraken, US stocks and Robinhood Stock Tokens. The first
+two entries list native Hyperliquid perpetuals and the complete active `xyz` HIP-3 perpetual
+universe respectively; More markets holds the other public sources and connected markets.
+Lists and searches send `scope=hyperliquid|xyz|more` to both explore reads, with `source=<id>`
+when one More markets source is selected, so the services select their sources before fetching.
+The source directory comes from `/data/market/sources` independently of the first market list;
+it lists configured data products, not trading availability. Switching entries clears the previous list and search and
+discards their in-flight answers. A compact local Hyperliquid mark or `xyz` badge beside a
+contract names its origin on hover and to screen readers, including on its market page.
+The focused entries keep public quotes visible for reading even where the live connector is
+unavailable: those lines offer no connection-to-trade link, and still supply a paper row's day figures.
+Watching spans entries; exact-key lookups let saved xyz links and quieter watched contracts
+resolve without changing the selected entry. A missing `scope` retains the all-market API.
+
+One table under the search box (`Search markets`). Hyperliquid offers **All · Crypto**;
+trade.xyz offers **All · Stocks · Indices · Commodities · FX · Pre-IPO**, following its official
+underlying categories while retaining perpetual contract identities. More markets keeps **All**
+and its individual source buttons visible; a selected source's category row offers **All ·
+Crypto · Stocks · RWAs · Perps · Pre-IPO · Predictions**, with **China** for the aggregate view,
+adding Indices, Commodities
+and FX when its joined All read lists them. Selected-source counts are the market's count plus
+the Account's connected-only rows once All's read has answered, All counting the starred A shares
+too; China is the market's own tab. **Watching** and **Desk** stay available below the source rows,
+Desk being the desk's view ("The watch" under "The desk" below), with
+**All results** first while searching. Watching and Desk remain separate shared entries.
+Changing a source and category is one state transition and requests the chosen category directly;
+source-filtered paper rows retain their bound data source even when another product uses the same symbol.
+Tokenized-share sources retain RWAs classification in paper rows, so public and paper lines merge under one market key.
+Unread source rows show no guessed counts. A tab starts from Most traded. With two or more rows, the sorts **Most traded · Biggest moves**,
 and **Closing soonest** where a row closes: Most traded ranks the rows by their volume
 (a Kalshi row's contracts by their number), then the A shares by turnover (China's rows, in yuan); Biggest moves by the
 size of the 24-hour move; Closing soonest by the close; a row without the figure sorts last.
@@ -1538,11 +1562,13 @@ and the star follows it, refused the Account's sentence is the watchlist's words
 the Account's entry off and takes the key off this browser's store too. **Watching** is then both
 lists at once.
 
-While Markets is on screen in a visible tab it reads the tab on screen at once and every 20
-seconds, and every 5 seconds the quotes of the rows drawn (on a market's page, its own market's),
-twelve markets a call; the search reads
-once the box has been quiet for 300 ms. Another screen or a hidden tab stops both ("The Account in
-the face" has every read).
+Entering Markets or explicitly switching its source, tab or sort reads once even if the browser
+reports a hidden tab. While Markets is on screen in a visible tab it reads every 20 seconds,
+and every 5 seconds the quotes of the rows drawn (on a market's page, its own market's), twelve
+markets a call; the search reads once the box has been quiet for 300 ms. Another screen or a
+hidden tab stops both polls. Each explore half has a 15-second client deadline: a hung request
+is cancelled, its last rows kept, and the next poll or entry can retry; an overtaken request
+cannot replace the selected source's rows ("The Account in the face" has every read).
 
 The A shares are the market's like every other public market (since plan A2; `DEVELOPMENT.md`
 §3.10 "China"): the ranking is `/data/market/explore?tab=china&sort=volume|movers`, the search is
@@ -1871,7 +1897,7 @@ channel's two, sixteen writes, the sign-in's callback):
 | `GET /data/account/earn` | what is earning and where it can (the two parts) | 15 s | 30 s | `venue`, `asset`, `fresh` |
 | `GET /data/account/sellable` | what Sell many can sell (the two parts) | 5 s | 30 s | `fresh` |
 | `GET /data/account/signin/status` | where a venue's sign-in stands (the two parts) | 1 s | 7 s | `state` |
-| `GET /data/account/connected/explore` | the connected venues' own rows, by tab, or a search — never a public line; `tab=china` refused (plan A2) | 20 s | 10 s | `tab`, `q`, `key`, `sort`, `limit` |
+| `GET /data/account/connected/explore` | the connected venues' own rows, by scope, exact public source, tab, or search — never a public line; `tab=china` refused (plan A2) | 20 s | 10 s | `tab`, `q`, `key`, `sort`, `limit`, `scope`, `source` |
 | `GET /data/account/connected/quotes` | the latest quotes of up to twelve connected markets (plan A2) | 3 s | 7 s | `pairs` (2,000 characters) |
 | `GET /data/account/connected/candles` | a connected line's price history (plan A2) | 30 s | 25 s | `venue`, `symbol`, `interval`, `range`, `before`, `limit` |
 | `GET /data/account/connected/book` | a connected line's order book (plan A2) | 2 s | 7 s | `venue`, `symbol`, `depth` |
@@ -2041,11 +2067,12 @@ asks `/data/market…`, and `src/market-proxy.ts` asks the market with the same 
 at the URL of the `mcp-market` row as composed (`FACE_MARKET_URL`, default
 `http://127.0.0.1:4821`, unless a patch moved it); a disabled market row answers 503 `disabled` on
 every valid request and leaves the account's half alone; a malformed query is 400 `invalid market
-request`. Seven exact routes, none naming the account:
+request`. Eight exact routes, none naming the account:
 
 | Route | What it reads at the market | TTL | Abort | Query names |
 |---|---|---|---|---|
-| `GET /data/market/explore` | `GET /api/explore`: the public markets, by tab, China's ranking, or a search | 20 s | 10 s | `tab`, `q`, `key`, `sort`, `limit` |
+| `GET /data/market/explore` | `GET /api/explore`: the public markets, by scope, exact source, tab, China's ranking, or search | 20 s | 10 s | `tab`, `q`, `key`, `sort`, `limit`, `scope`, `source` |
+| `GET /data/market/sources` | `GET /api/sources`: the configured public source directory; data products, not trading availability | 30 s | 7 s | none |
 | `GET /data/market/quotes` | `GET /api/quotes`: up to twelve A shares (`china|<code>`); any other pair is refused, its price being in explore | 3 s | 7 s | `pairs` (2,000 characters) |
 | `GET /data/market/candles` | `GET /api/candles`: a public line's or an A share's price history | 30 s | 25 s | `venue`, `symbol`, `interval`, `range`, `before`, `limit` |
 | `GET /data/market/book` | `GET /api/book`: a public line's order book | 2 s | 7 s | `venue`, `symbol`, `depth` |
@@ -2053,18 +2080,25 @@ request`. Seven exact routes, none naming the account:
 | `GET /data/market/stream` | `GET /api/stream`: the market's push channel (`snapshot`, `quote`, `trades`, `book`, `hb`), one upstream request per browser connection | — | — | `client` (required), `since`, `markets` (4,000 characters) |
 | `POST /data/market/stream/markets` | `POST /api/stream/markets`: the public markets a stream follows | — | 7 s | none |
 
+Both explore reads accept `source` as one exact public source ID, only with `scope=more` or no
+scope; the selection filters sources and connected products before fetching or limiting rows.
+A selected source cannot include China.
+
 The join (`client/js/host/explore-join.js`, `joinExplore`) makes one table of the two halves'
 explore answers to one query: a connected half the proxy re-served stale is dropped, a stale
 market half kept and marked; a public line is dropped where a connected (non-paper) venue of the
 same connection speaks for it, or where the venues read (`/data/account/venues`, once) says the
-venue is `not-served`, `closed` or `close-only` here; a market both halves list is one row, its
+venue is `not-served`, `closed` or `close-only` here. The focused Hyperliquid and trade.xyz entries
+retain those public lines for reading, with `canTrade: false` and no `connectTo`; a market both halves list is one row, its
 lines the connected ones first, then the public, then the paper; both halves sort together as the
 Account's old explore sorted and are cut once at the limit; a half that failed is named in
 `missing` (`The Account is not answering: the venues connected are not listed`, `The market is not
 answering: public markets are not listed`) and the other half's rows stand. Trade's picks and
 search use the same join. The market's stream (`wire/market-stream.js`, `createMarketStream`) is
-the Account stream's module on the market's paths, opened at boot beside it; a public market a
-page follows is followed there, a connected one on the Account's. The desk's prices are the same
+the Account stream's transport on the market's paths, connected only while a visible page follows
+a public market. Leaving the detail or hiding the page closes it; an idle list holds no public
+SSE connection, leaving browser HTTP connections available for reads across tabs. A connected
+market is followed on the Account's stream. The desk's prices are the same
 proxy's `explore` and `quotes`, read in-process (`src/market-quotes.ts`).
 
 ### The owner device (client/js/host/owner.js + client/js/wire/owner-key.js)

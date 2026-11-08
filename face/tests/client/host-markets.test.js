@@ -9,8 +9,8 @@ import { readFileSync } from 'node:fs';
 import { createStore } from '../../client/js/store.js';
 import { reducers } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
-import { startMarkets, EXPLORE_MS, QUOTES_MS, QUOTE_PAIRS, WATCH_LIMIT, RANK_ROWS, BOOK_DEPTH, TRADES_LIMIT, FUNDING_LIMIT } from '../../client/js/host/markets.js';
-import { rowsOf, pageOf, cnStateWord } from '../../client/js/host/market-view.js';
+import { startMarkets, EXPLORE_MS, EXPLORE_TIMEOUT_MS, QUOTES_MS, QUOTE_PAIRS, WATCH_LIMIT, RANK_ROWS, BOOK_DEPTH, TRADES_LIMIT, FUNDING_LIMIT } from '../../client/js/host/markets.js';
+import { rowsOf, pageOf, tableOf, cnStateWord } from '../../client/js/host/market-view.js';
 import { STORAGE_KEY, ACCOUNT_WATCH_KEY, readAccountWatch, saveAccountWatch } from '../../client/js/wire/market-model.js';
 import { setTable } from '../../client/js/i18n/words.js';
 import { EN } from '../../client/js/i18n/en.js';
@@ -67,19 +67,30 @@ function memoryStorage(seed = {}, { failWrites = false, failKeys = [] } = {}) {
 
 // the account's connected explore where a test gives none: it lists nothing, so the join is the market's rows
 const NO_CONNECTED = () => ({ ok: true, asOf: '2026-10-22T08:00:00.000Z', items: [], movers: [], closing: [], mostTraded: [], tabs: [], missing: [], notes: [] });
-const isTwin = path => path.startsWith('/data/account/connected/explore?') || path === '/data/account/venues';
+const focused = (scope, coin = scope === 'xyz' ? 'xyz:NVDA' : 'BTC') => ({
+  ...NO_CONNECTED(),
+  items: [{ key: `perp:${coin}`, kind: 'perp', base: coin, name: coin, price: 100, volumeUsd24h: 1e8, tabs: ['all', 'perps'],
+    at: [{ venue: scope === 'xyz' ? 'trade-xyz' : 'hyperliquid', venueName: scope === 'xyz' ? 'trade.xyz' : 'Hyperliquid',
+      symbol: `${coin}-PERP`, connector: 'live:hyperliquid-trade', public: true, connected: false, price: 100 }] }],
+  tabs: [{ id: 'all', label: 'All', count: 1 }, { id: 'perps', label: 'Perps', count: 1 }],
+});
+const isTwin = path => path.startsWith('/data/account/connected/explore?') || path === '/data/account/venues' || path === '/data/market/sources';
 
 // `reads` are the reads but each explore's connected twin and the venues read (`allReads` has them: the tests of the two
 // halves read those); the connected explore a test does not answer lists nothing
-function rig({ storage = memoryStorage(), answer = () => undefined, owner, afterAction } = {}) {
-  const store = createStore({ initial: emptyState(), reducers });
+function rig({ storage = memoryStorage(), answer = () => undefined, owner, afterAction, scope, clock = () => NOW } = {}) {
+  const initial = emptyState();
+  // Most of this file exercises the pre-scope all-market contract; scoped default and transitions are covered below.
+  if (scope === undefined) delete initial.markets.scope; else initial.markets.scope = scope;
+  const store = createStore({ initial, reducers });
   const reads = [];
   const allReads = [];
-  const getJson = path => {
+  const getJson = (path, init) => {
     allReads.push(path);
     if (!isTwin(path)) reads.push(path);
-    let a = answer(path);
+    let a = answer(path, init);
     if (a === undefined && path.startsWith('/data/account/connected/explore?')) a = NO_CONNECTED();
+    if (a === undefined && path === '/data/market/sources') a = { ok: true, value: [] };
     return a instanceof Error ? Promise.reject(a) : Promise.resolve(a);
   };
   // recording timers: nothing runs until a test fires the ones due at a delay
@@ -97,15 +108,15 @@ function rig({ storage = memoryStorage(), answer = () => undefined, owner, after
     addEventListener(type, fn) { (listeners[type] ??= new Set()).add(fn); },
     removeEventListener(type, fn) { listeners[type]?.delete(fn); },
   };
-  const markets = startMarkets({ store, getJson, storage, win, stream, marketStream, schedule, cancelTimer, now: () => NOW, owner, afterAction });
+  const markets = startMarkets({ store, getJson, storage, win, stream, marketStream, schedule, cancelTimer, now: clock, owner, afterAction });
   const emit = (type, event) => { for (const fn of listeners[type] ?? []) fn(event); };
   return { store, markets, reads, allReads, storage, timers, due, fire, follows, marketFollows, listeners, emit, m: () => store.get().markets };
 }
 
 test('show reads explore now and every 20 s; quotes for the pairs in view every 5 s, twelve a call; show(false) cancels', async () => {
   assert.deepEqual(emptyState().markets, {
-    tab: 'all', sort: 'volume', q: '',
-    explore: {}, results: IDLE, accountQuotes: {}, candles: {}, compare: {}, watch: [], watchError: null, asked: {},
+    scope: 'hyperliquid', source: '', sources: IDLE, tab: 'all', sort: 'volume', q: '',
+    explore: {}, located: {}, results: IDLE, accountQuotes: {}, candles: {}, compare: {}, watch: [], watchError: null, asked: {},
     watchlist: [], quotes: {}, providers: [], connection: 'idle', hitQuotes: {},
     rank: { status: 'idle', data: null, at: null, sort: 'volume', message: null }, depth: {},
   }, 'the slice the host starts from');
@@ -133,10 +144,10 @@ test('show reads explore now and every 20 s; quotes for the pairs in view every 
   r.markets.show(true);
   assert.deepEqual(r.reads, [ALL], 'explore at once');
   assert.equal(r.m().explore.all.status, 'loading');
-  assert.deepEqual(r.due().map(t => t.ms).sort((a, b) => a - b), [QUOTES_MS, EXPLORE_MS]);
+  assert.deepEqual(r.due().map(t => t.ms).sort((a, b) => a - b), [QUOTES_MS, EXPLORE_TIMEOUT_MS, EXPLORE_TIMEOUT_MS, EXPLORE_TIMEOUT_MS, EXPLORE_MS]);
   assert.deepEqual([EXPLORE_MS, QUOTES_MS, QUOTE_PAIRS], [20_000, 5_000, 12]);
   r.markets.show(true);
-  assert.equal(r.due().length, 2, 'shown again: no second poll');
+  assert.equal(r.due().length, 5, 'shown again: no second poll or duplicate request deadline');
   assert.equal(r.reads.length, 1);
   await settle();
   assert.equal(r.m().explore.all.status, 'ready');
@@ -200,7 +211,11 @@ test('show reads explore now and every 20 s; quotes for the pairs in view every 
   assert.equal(r.reads.at(-1), ALL, "Watching reads All's");
 
   r.markets.show(false);
-  assert.deepEqual(r.due(), [], 'both polls cancelled');
+  assert.deepEqual(r.due(EXPLORE_MS), [], 'explore poll cancelled');
+  assert.deepEqual(r.due(QUOTES_MS), [], 'quotes poll cancelled');
+  assert.equal(r.due(EXPLORE_TIMEOUT_MS).length, 2, 'the one-shot reads still have deadlines while hidden');
+  await settle();
+  assert.deepEqual(r.due(), [], 'settled reads leave no deadlines');
   assert.equal(r.timers.filter(t => t.cancelled).length >= 2, true);
   const hidden = r.reads.length;
   r.store.dispatch('setMarketsTab', 'crypto');
@@ -1752,4 +1767,219 @@ test("China's ranking, search and history are the market's", async () => {
   assert.ok(r.reads.includes('/data/market/candles?venue=china&symbol=600519&range=1D'));
   assert.equal(r.allReads.some(p => /^\/data\/account\/(candles|quotes|explore)\?/.test(p)), false, "nothing of China's is asked of the account's old routes");
   r.markets.close();
+});
+
+test('default entry and search read only their scope; switching discards late old lists and searches', async () => {
+  const late = deferred(), lateSearch = deferred();
+  const r = rig({ scope: emptyState().markets.scope, answer: path => {
+    const p = query(path);
+    if (!path.startsWith('/data/market/explore?')) return undefined;
+    if (p.scope === 'hyperliquid') return p.q ? lateSearch.promise : late.promise;
+    if (p.scope === 'xyz') return focused('xyz');
+    return fx('explore-all');
+  } });
+  r.markets.show(true);
+  assert.ok(r.allReads.includes('/data/market/explore?limit=200&scope=hyperliquid'));
+  assert.ok(r.allReads.includes('/data/account/connected/explore?limit=200&scope=hyperliquid'));
+  r.markets.search('BTC');
+  assert.ok(r.reads.includes('/data/market/explore?q=BTC&limit=200&scope=hyperliquid'));
+  r.store.dispatch('setMarketsScope', 'xyz');
+  await settle();
+  assert.equal(r.m().q, '');
+  assert.deepEqual(rowsOf(r.m(), NOW).map(row => row.id), ['perp:xyz:NVDA']);
+  late.resolve(focused('hyperliquid'));
+  lateSearch.resolve(focused('hyperliquid'));
+  await settle();
+  assert.deepEqual(rowsOf(r.m(), NOW).map(row => row.id), ['perp:xyz:NVDA'], 'old scope cannot overwrite the new list');
+  assert.equal(r.m().results.data, null, 'old search cannot leak after switching');
+  r.store.dispatch('setMarketsScope', 'more');
+  await settle();
+  assert.ok(r.reads.includes('/data/market/explore?limit=200&scope=more'));
+  r.markets.close();
+});
+
+test('provider catalog reads independently, times out, retries at the next visible beat, and stays cached', async () => {
+  let clock = NOW, requests = 0, signal;
+  const late = deferred();
+  const r = rig({ scope: 'hyperliquid', clock: () => clock, answer: (path, init) => {
+    if (path === '/data/market/sources') {
+      requests += 1;
+      signal = init?.signal;
+      return requests === 1 ? late.promise : { ok: true, value: [{ id: 'okx', name: 'OKX' }] };
+    }
+    if (path.startsWith('/data/market/explore?')) return focused('hyperliquid');
+  } });
+  r.markets.show(true);
+  await settle();
+  assert.equal(r.m().sources.status, 'loading');
+  assert.equal(rowsOf(r.m(), NOW).length, 1, 'the market list is not held by the catalog');
+  const firstSignal = signal;
+  r.fire(EXPLORE_TIMEOUT_MS);
+  assert.equal(r.m().sources.status, 'error');
+  assert.equal(firstSignal.aborted, true);
+  r.markets.readOnce();
+  assert.equal(requests, 1, 'an immediate repeated entry cannot spin retries');
+  clock += EXPLORE_MS;
+  r.fire(EXPLORE_MS);
+  await settle();
+  assert.equal(requests, 2);
+  assert.equal(r.m().sources.status, 'ready');
+  late.resolve({ ok: true, value: [{ id: 'stale', name: 'Stale' }] });
+  await settle();
+  assert.equal(r.m().sources.data.value[0].id, 'okx', 'the timed out catalog cannot replace the newer answer');
+  clock += EXPLORE_MS;
+  r.fire(EXPLORE_MS);
+  await settle();
+  assert.equal(requests, 2, 'a successful catalog is read once for the page');
+  r.markets.close();
+});
+
+test('More provider changes isolate lists and searches while Watching stays global', async () => {
+  const old = deferred();
+  const catalog = { ok: true, value: [{ id: 'okx', name: 'OKX' }, { id: 'robinhood-stock-tokens', name: 'Robinhood Stock Tokens', kind: 'tokens' }] };
+  const token = { ...NO_CONNECTED(), items: [{ key: 'rwa:NVDA', kind: 'rwa', base: 'NVDA', name: 'NVIDIA', tabs: ['all', 'rwas'],
+    at: [{ venue: 'robinhood-stock-tokens', symbol: 'NVDA', public: true, connected: false, price: 10 }] }] };
+  const r = rig({ scope: 'hyperliquid', answer: path => {
+    if (path === '/data/market/sources') return catalog;
+    if (!path.startsWith('/data/market/explore?')) return undefined;
+    const p = query(path);
+    return p.source === 'okx' ? old.promise : p.source === 'robinhood-stock-tokens' ? token : focused('hyperliquid');
+  } });
+  r.markets.show(true);
+  await settle();
+  r.store.dispatch('setMarketsLocation', { scope: 'more', source: 'okx' });
+  assert.ok(r.allReads.includes('/data/market/explore?limit=200&scope=more&source=okx'));
+  assert.ok(r.allReads.includes('/data/account/connected/explore?limit=200&scope=more&source=okx'));
+  r.markets.search('BTC');
+  assert.ok(r.reads.includes('/data/market/explore?q=BTC&limit=200&scope=more&source=okx'));
+  r.store.dispatch('setMarketsLocation', { scope: 'more', source: 'robinhood-stock-tokens', tab: 'rwas' });
+  await settle();
+  assert.deepEqual(r.reads.filter(path => path.includes('source=robinhood-stock-tokens')), ['/data/market/explore?tab=rwas&limit=200&scope=more&source=robinhood-stock-tokens']);
+  assert.deepEqual(rowsOf(r.m(), NOW).map(item => item.id), ['rwa:NVDA']);
+  old.resolve(focused('hyperliquid'));
+  await settle();
+  assert.deepEqual(rowsOf(r.m(), NOW).map(item => item.id), ['rwa:NVDA']);
+  assert.equal(r.m().results.data, null);
+  r.store.dispatch('setMarketsTab', 'watching');
+  assert.equal(r.reads.at(-1), ALL, 'Watching asks every source');
+  r.markets.close();
+});
+
+test('a cold xyz deep link resolves its exact market without changing the Hyperliquid entry', async () => {
+  const r = rig({ scope: 'hyperliquid', answer: path => path.startsWith('/data/market/explore?') && query(path).key ? focused('xyz') : undefined });
+  r.markets.page('perp:xyz:NVDA');
+  await settle();
+  assert.ok(r.reads.includes('/data/market/explore?q=xyz%3ANVDA&key=perp%3Axyz%3ANVDA&limit=12&scope=xyz'));
+  assert.equal(r.m().scope, 'hyperliquid');
+  assert.equal(r.m().explore.all, undefined);
+  assert.equal(pageOf(r.m(), r.store.get().account, 'perp:xyz:NVDA', NOW)?.item.key, 'perp:xyz:NVDA');
+  assert.deepEqual(r.marketFollows.at(-1), ['trade-xyz:xyz:NVDA-PERP']);
+  assert.ok(r.reads.some(path => path.startsWith('/data/market/candles?venue=trade-xyz&symbol=xyz%3ANVDA-PERP')));
+  r.markets.close();
+});
+
+test('a missing xyz deep link retries after a transient failure on a later poll', async () => {
+  let clock = NOW, available = false;
+  const r = rig({ scope: 'hyperliquid', clock: () => clock, answer: path => {
+    if (!path.startsWith('/data/market/explore?')) return undefined;
+    return query(path).key ? available ? focused('xyz') : undefined : focused('hyperliquid');
+  } });
+  r.markets.show(true);
+  r.markets.page('perp:xyz:NVDA');
+  await settle();
+  assert.equal(pageOf(r.m(), r.store.get().account, 'perp:xyz:NVDA', clock), null);
+  available = true;
+  clock += EXPLORE_MS;
+  r.fire(EXPLORE_MS);
+  await settle();
+  assert.equal(pageOf(r.m(), r.store.get().account, 'perp:xyz:NVDA', clock)?.item.key, 'perp:xyz:NVDA');
+  assert.equal(r.reads.filter(path => query(path).key === 'perp:xyz:NVDA').length, 2);
+  r.markets.close();
+});
+
+test('a hung explore expires, the next poll recovers, and its late answer cannot overwrite the retry', async () => {
+  const latePublic = deferred(), lateAccount = deferred();
+  let hung = true;
+  const r = rig({ scope: 'hyperliquid', answer: path => {
+    if (path.startsWith('/data/market/explore?')) return hung ? latePublic.promise : focused('hyperliquid', 'ETH');
+    if (path.startsWith('/data/account/connected/explore?')) return hung ? lateAccount.promise : NO_CONNECTED();
+  } });
+  r.markets.show(true);
+  await settle();
+  assert.equal(r.m().explore.all.status, 'loading');
+  r.fire(EXPLORE_TIMEOUT_MS);
+  await settle();
+  assert.equal(r.m().explore.all.status, 'error', 'a request that never settles must leave Loading');
+  assert.equal(tableOf(r.m(), NOW).read.message, 'The market request timed out.');
+  hung = false;
+  r.fire(EXPLORE_MS);
+  await settle();
+  assert.equal(r.m().explore.all.status, 'ready');
+  assert.deepEqual(rowsOf(r.m(), NOW).map(row => row.id), ['perp:ETH']);
+  latePublic.resolve(focused('hyperliquid', 'BTC'));
+  lateAccount.resolve(NO_CONNECTED());
+  await settle();
+  assert.deepEqual(rowsOf(r.m(), NOW).map(row => row.id), ['perp:ETH'], 'expired results cannot replace a recovered list');
+  r.markets.close();
+});
+
+test('one requested market read loads while polling is paused and deduplicates its in-flight halves', async () => {
+  const late = deferred();
+  const r = rig({ scope: 'hyperliquid', answer: path => path.startsWith('/data/market/explore?') ? late.promise : undefined });
+  r.markets.readOnce();
+  r.markets.readOnce();
+  assert.equal(r.reads.length, 1);
+  assert.equal(r.due(EXPLORE_MS).length, 0);
+  assert.equal(r.due(QUOTES_MS).length, 0);
+  late.resolve(focused('hyperliquid'));
+  await settle();
+  assert.equal(r.m().explore.all.status, 'ready');
+  assert.equal(r.due().length, 0, 'a completed one-shot read leaves no timer');
+  r.store.dispatch('setMarketsScope', 'xyz');
+  r.markets.readOnce();
+  await settle();
+  assert.ok(r.reads.some(path => query(path).scope === 'xyz'));
+  assert.equal(r.due(EXPLORE_MS).length, 0, 'switching while paused starts no recurring poll');
+  r.markets.close();
+  r.markets.readOnce();
+  assert.equal(r.due().length, 0);
+});
+
+test('a hung connected half cannot hold public markets in Loading or erase them when it expires', async () => {
+  const stuck = deferred();
+  const r = rig({ scope: 'xyz', answer: path => {
+    if (path.startsWith('/data/market/explore?')) return focused('xyz');
+    if (path.startsWith('/data/account/connected/explore?')) return stuck.promise;
+  } });
+  r.markets.readOnce();
+  await settle();
+  assert.equal(r.m().explore.all.status, 'ready');
+  r.fire(EXPLORE_TIMEOUT_MS);
+  await settle();
+  assert.equal(r.m().explore.all.status, 'ready');
+  assert.deepEqual(rowsOf(r.m(), NOW).map(row => row.id), ['perp:xyz:NVDA']);
+  assert.ok(r.m().explore.all.data.missing.some(row => row.venue === 'account'));
+  assert.equal(r.due().length, 0);
+  r.markets.close();
+});
+
+test('changing scope aborts old explore requests and their deadlines without aborting the new scope', async () => {
+  const late = deferred(), requests = [];
+  const r = rig({ scope: 'hyperliquid', answer: (path, init) => {
+    if (!path.includes('/explore?')) return undefined;
+    requests.push({ scope: query(path).scope, signal: init?.signal });
+    if (query(path).scope === 'hyperliquid') return late.promise;
+    return path.startsWith('/data/market/') ? focused('xyz') : NO_CONNECTED();
+  } });
+  r.markets.show(true);
+  r.store.dispatch('setMarketsScope', 'xyz');
+  await settle();
+  assert.ok(requests.filter(r => r.scope === 'hyperliquid').every(r => r.signal.aborted));
+  assert.ok(requests.filter(r => r.scope === 'xyz').every(r => !r.signal.aborted));
+  assert.equal(r.due(EXPLORE_TIMEOUT_MS).length, 0);
+  late.resolve(focused('hyperliquid'));
+  await settle();
+  assert.deepEqual(rowsOf(r.m(), NOW).map(row => row.id), ['perp:xyz:NVDA']);
+  r.markets.close();
+  assert.equal(r.due().length, 0);
 });

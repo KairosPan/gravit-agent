@@ -41,7 +41,7 @@ import { loadMemberTrace } from './wire/member-traces.js';
 import { isHostPreset } from './wire/speaker.js';
 import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk, writesOn, venuesOf } from './host/account-view.js';
 import { rulesOf } from './host/rules-view.js';
-import { isAccountKey, handWordsOf, watchedOf } from './host/market-view.js';
+import { isAccountKey, handWordsOf, watchedOf, marketCategoryIds, marketScopeOf, marketSourceOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
 import { makeEditor } from './composer/dom.js';
 import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt, hasChip } from './composer/draft.js';
@@ -94,8 +94,8 @@ export const isMac = win => /mac/i.test(String(win?.navigator?.userAgentData?.pl
 // a /data read: an answer is its JSON; any other status rejects with the status and, when it parses, the body the face sent —
 // the Account's refusal rides on it (`error.body`), for the hosts to read its sentence from
 export function getJsonVia(fetch) {
-  return async path => {
-    const r = await fetch(path);
+  return async (path, init) => {
+    const r = await fetch(path, init);
     if (r.ok) return r.json();
     let body;
     try { body = await r.json(); } catch { /* not JSON: the status speaks */ }
@@ -253,7 +253,7 @@ export function boot(win, host = {}) {
   // the composer's editor (div#say, contenteditable): the only code that reads or writes its nodes
   const editor = host.editor ?? makeEditor(doc);
   const call = host.call ?? wireCall;
-  const getJson = host.getJson ?? getJsonVia(path => win.fetch(path));
+  const getJson = host.getJson ?? getJsonVia((path, init) => win.fetch(path, init));
   const postJson = host.postJson ?? postJsonVia((path, init) => win.fetch(path, init));
   const schedule = (fn, ms) => timers.after(ms, fn);
   const cancelTimer = id => timers.cancel(id);
@@ -500,6 +500,9 @@ export function boot(win, host = {}) {
   const traces = startTraces({ store, call, loadMemberTrace, now });
   // the quotes, and the desk's status, run only while Markets is on screen in a visible tab; Trade's picks only while Trade is
   const showMarkets = () => { const on = store.get().route.screen === 'markets' && !doc.hidden; markets.show(on); desk.show(on); };
+  // Embedded browsers may report hidden before their first visibility event. Opening Markets or choosing a source still
+  // needs one answer; only the recurring polls depend on visibility.
+  const readHiddenMarkets = () => { if (doc.hidden && store.get().route.screen === 'markets') markets.readOnce(); };
   const showTrade = () => trade.show(store.get().route.screen === 'trade' && !doc.hidden);
   // the owner's keys act only for a page that signs (the renderers draw them for no other)
   const signs = () => store.get().owner.role === 'signs';
@@ -959,6 +962,7 @@ export function boot(win, host = {}) {
     // ⌥⌘K's focus waits only for the list it was asked on: a route without one forgets it
     if (r.screen !== 'messages' && r.screen !== 'channel') searchFocus = false;
     showMarkets();
+    if (r.screen === 'markets' && was?.screen !== 'markets') readHiddenMarkets();
     showAccount();
     // Account: its page on entering it — past the face's cache when it opens on Cards, whose cards are the page's — and each tab
     // what it draws on entering it: Portfolio the holdings, then the curve they lead to; Venues the seat box; Agents the
@@ -1129,15 +1133,30 @@ export function boot(win, host = {}) {
   }
 
   // the Markets search: the query moves with each keystroke (setMarketsQuery), its reads once the box has been quiet for
-  // SEARCH_QUIET_MS; a blank box searches at once — nothing to read, and what was read goes
+  // SEARCH_QUIET_MS; a blank box clears the search at once and returns to the selected market list
   function searchNow(q) {
     if (searchTimer !== null) { timers.cancel(searchTimer); searchTimer = null; }
     markets.search(q);
+    if (!String(q).trim()) readHiddenMarkets();
   }
   function searchSoon(q) {
     if (!String(q).trim()) { searchNow(q); return; }
     if (searchTimer !== null) timers.cancel(searchTimer);
     searchTimer = timers.after(SEARCH_QUIET_MS, () => { searchTimer = null; markets.search(q); });
+  }
+  function chooseMarket(scope, tab = 'all', source = '') {
+    if (!marketCategoryIds(scope).includes(tab)) return;
+    const before = store.get().markets;
+    const changedSource = scope !== marketScopeOf(before) || source !== marketSourceOf(before);
+    if (changedSource) {
+      const box = doc.getElementById('mq');
+      if (box) box.value = '';
+      if (searchTimer !== null) { timers.cancel(searchTimer); searchTimer = null; }
+    }
+    store.dispatch('setMarketsLocation', { scope, source, tab });
+    if (store.get().markets === before) return;
+    if (changedSource) markets.search('');
+    readHiddenMarkets();
   }
   // Trade's search, the same quiet: trade.query (the query and its read) once the box has been quiet, a blank box at once; a
   // search still waiting goes when Trade is left
@@ -1902,8 +1921,19 @@ export function boot(win, host = {}) {
       timers.after(0, () => win.URL.revokeObjectURL(url));
     },
     // Markets: the tabs, the sort, Clear, the star, Remove, a row's page, a page's range
-    mkTab: el => store.dispatch('setMarketsTab', el.dataset.value),
-    mkSort: el => store.dispatch('setMarketsSort', el.dataset.value),
+    mkScope: el => chooseMarket(el.dataset.value),
+    mkCategory: el => chooseMarket(el.dataset.scope, el.dataset.value, el.dataset.source || ''),
+    mkSource: el => chooseMarket('more', 'all', el.dataset.value),
+    mkTab: el => {
+      const before = store.get().markets.tab;
+      store.dispatch('setMarketsTab', el.dataset.value);
+      if (store.get().markets.tab !== before) readHiddenMarkets();
+    },
+    mkSort: el => {
+      const before = store.get().markets.sort;
+      store.dispatch('setMarketsSort', el.dataset.value);
+      if (store.get().markets.tab === 'china' && store.get().markets.sort !== before) readHiddenMarkets();
+    },
     // the Desk tab's one control: Pause (no Resume: a terminal resumes)
     deskPause: () => { void desk.pause(); },
     // the render keeps what an input holds, so Clear empties the box before the query; a search still waiting goes with it

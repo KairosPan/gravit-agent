@@ -129,6 +129,19 @@ test('getJsonVia: an answer is its JSON; any other status rejects with the statu
   assert.deepEqual(asked, ['/data/account', '/data/account/holdings?cost=1', '/data/quotes']);
 });
 
+test('getJsonVia carries a host read cancellation through to fetch', async () => {
+  const controller = new AbortController();
+  let received;
+  const getJson = getJsonVia((_path, init) => {
+    received = init.signal;
+    return new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true }));
+  });
+  const pending = getJson('/data/market/explore', { signal: controller.signal });
+  assert.equal(received, controller.signal);
+  controller.abort(new Error('read timed out'));
+  await assert.rejects(pending, /read timed out/);
+});
+
 // a card as the browser hands it to answersFrom: its own inputs, nothing from any other card
 const card = inputs => ({ querySelectorAll: sel => (sel === 'input' ? inputs : []) });
 

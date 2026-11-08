@@ -295,6 +295,21 @@ describe("the median guard", () => {
 });
 
 describe("tabs", () => {
+  it("classifies the underlying of an explicitly tagged perpetual without changing its instrument or inventing valuations", async () => {
+    const cases = [["BTC", "crypto"], ["xyz:NVDA", "stocks"], ["xyz:XYZ100", "indices"], ["xyz:GOLD", "commodities"], ["xyz:EUR", "fx"], ["xyz:ANT", "preipo"], ["xyz:UNKNOWN", "unknown"]] as const;
+    const source = pub("trade-xyz", "trade.xyz", { listings: cases.map(([base, category]) => mk(`${base}-PERP`, "perp", base, "USDC", { category, price: 100 })) });
+    const all = await exploreAcross({ public: [source] }, { clock });
+    for (const [base, category] of cases) {
+      const item = all.items.find((i) => i.key === `perp:${base}`)!;
+      expect(item.kind).toBe("perp");
+      expect(item.tabs).toEqual(["all", "perps", ...(category === "unknown" ? [] : [category])]);
+      expect(item.implied).toBeUndefined();
+      expect(item.group).toBeUndefined();
+    }
+    expect((await exploreAcross({ public: [source] }, { clock, tab: "stocks", limit: 1 })).items.map((i) => i.key)).toEqual(["perp:xyz:NVDA"]);
+    expect((await exploreAcross({ public: [source] }, { clock, tab: "crypto" })).items.map((i) => i.key)).toEqual(["perp:BTC"]);
+  });
+
   it("shows a tab only when something is in it, in the screen's order", async () => {
     const x = trader({ markets: [mk("BTC/USDT", "spot", "BTC", "USDT", { price: 100_000, volumeUsd24h: 2e9, changePct24h: 1 })] });
     const out = await exploreAcross({ connected: [venue("okx", "OKX", x)] }, { clock });

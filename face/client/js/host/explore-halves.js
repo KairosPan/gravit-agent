@@ -31,7 +31,7 @@ export function joinOptsOf(state) {
 export function orderOf(query) {
   const p = new URLSearchParams(query);
   const limit = Number(p.get('limit'));
-  return { tab: p.get('tab') ?? '', q: p.get('q') ?? '', sort: p.get('sort') ?? '', ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}) };
+  return { tab: p.get('tab') ?? '', q: p.get('q') ?? '', sort: p.get('sort') ?? '', scope: p.get('scope') ?? '', source: p.get('source') ?? '', ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}) };
 }
 
 /** The halves of a host's explore reads.

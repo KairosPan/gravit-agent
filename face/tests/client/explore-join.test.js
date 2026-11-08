@@ -5,6 +5,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { joinExplore } from '../../client/js/host/explore-join.js';
+import { rowsOf, pageOf } from '../../client/js/host/market-view.js';
+import { renderMarketsScreen } from '../../client/js/render/markets.js';
+import { emptyState } from '../../client/js/data/empty.js';
 import { spoken } from './helpers/spoken.js';
 
 const pub = (venue, symbol, connector, over = {}) => ({ venue, venueName: venue, symbol, connected: false, public: true, canTrade: false, connector, connectTo: venue, price: 100, ...over });
@@ -46,6 +49,28 @@ test('a public line is left out where the venues read says its venue does not se
   assert.deepEqual(linesOf(closed, 'coin:BTC'), ['okx|BTC/USDT', 'geo|BTC/USD']);
 });
 
+test('an explicit More provider keeps only its public lines and keeps unavailable trading routes read-only', () => {
+  const market = body([
+    row('coin:BTC', [pub('okx', 'BTC/USDT', 'live:exchange:okx'), pub('kraken', 'BTC/USD', 'live:exchange:kraken')]),
+    row('coin:ETH', [pub('okx', 'ETH/USDT', 'live:exchange:okx')]),
+    row('coin:SOL', [pub('kraken', 'SOL/USD', 'live:exchange:kraken')]),
+  ]);
+  const connected = body([row('coin:BTC', [con('practice', 'BTC/USDT', { paper: true, connector: 'live:paper' })], { paper: true, price: 99, volumeUsd24h: undefined })]);
+  const joined = joinExplore(market, connected, { scope: 'more', source: 'okx', here: [{ connector: 'live:exchange:okx', verdict: 'not-served' }] });
+  assert.deepEqual(keys(joined), ['coin:BTC', 'coin:ETH']);
+  assert.deepEqual(linesOf(joined, 'coin:BTC'), ['okx|BTC/USDT', 'practice|BTC/USDT']);
+  for (const item of joined.items) for (const line of item.at.filter(line => line.public)) {
+    assert.equal(line.venue, 'okx');
+    assert.equal(line.canTrade, false);
+    assert.equal(line.connectTo, undefined);
+  }
+  assert.equal(joined.items[0].volumeUsd24h, 1_000, 'the paper line borrows its matching public statistics');
+  const s = emptyState();
+  s.route = { screen: 'markets', id: 'coin:ETH' };
+  s.markets = { ...s.markets, scope: 'more', source: 'okx', explore: { all: { status: 'ready', data: joined } } };
+  assert.doesNotMatch(renderMarketsScreen(s), /Connect to trade/);
+});
+
 test('a row both list carries the connected lines first, then the public, then the paper', () => {
   const market = body([row('coin:BTC', [pub('kraken', 'BTC/USD', 'live:exchange:kraken')], { volumeUsd24h: 5_000, name: 'Bitcoin (public)' })]);
   const connected = body([row('coin:BTC', [con('paper-1', 'BTC/USD', { paper: true }), con('my-okx', 'BTC/USDT')], { volumeUsd24h: 9_000, name: 'Bitcoin (connected)', icon: undefined })]);
@@ -83,6 +108,35 @@ test("a row only the Account lists competes on the sort with the market's rows",
   assert.equal(joined.asOf, market.asOf);
   assert.deepEqual(joined.china, { status: { state: 'open' } });
   assert.equal(joined.ok, true);
+});
+
+test('connected-only categories join the public tabs and retain server totals beyond either list limit', () => {
+  const connector = 'live:hyperliquid-trade';
+  const nvda = row('perp:xyz:NVDA', [pub('trade-xyz', 'xyz:NVDA-PERP', connector)], { category: 'stocks', tabs: ['all', 'stocks'], volumeUsd24h: 5_000 });
+  const gold = row('perp:xyz:GOLD', [con('wallet', 'XYZ-GOLD/USDC:USDC', { connector, dex: 'xyz' })], { category: 'commodities', tabs: ['all', 'commodities'] });
+  const market = body([nvda], { tabs: [{ id: 'all', label: 'All', count: 80 }, { id: 'stocks', label: 'Stocks', count: 80 }] });
+  const connected = body([gold], { tabs: [{ id: 'all', label: 'All', count: 9 }, { id: 'commodities', label: 'Commodities', count: 9 }, { id: 'fx', label: 'FX', count: 0 }] });
+  const joined = joinExplore(market, connected, { scope: 'xyz', limit: 200 });
+  assert.deepEqual(keys(joined), ['perp:xyz:NVDA', 'perp:xyz:GOLD']);
+  assert.deepEqual(joined.tabs.map(t => [t.id, t.label, t.count]), [['all', 'All', 81], ['stocks', 'Stocks', 80], ['commodities', 'Commodities', 9]]);
+  const capped = joinExplore(market, connected, { scope: 'xyz', limit: 1 });
+  assert.deepEqual(keys(capped), ['perp:xyz:NVDA']);
+  assert.deepEqual(capped.tabs, joined.tabs, 'the final visible list cut changes no category totals');
+});
+
+test('a connected row removed by the source scope adds neither a count nor a category tab', () => {
+  const connector = 'live:hyperliquid-trade';
+  const nvda = row('perp:xyz:NVDA', [pub('trade-xyz', 'xyz:NVDA-PERP', connector)], { category: 'stocks', tabs: ['all', 'stocks'] });
+  const native = row('perp:BTC', [con('wallet', 'BTC/USDC:USDC', { connector, dex: '' })], { category: 'crypto', tabs: ['all', 'crypto'] });
+  const gold = row('perp:xyz:GOLD', [con('wallet', 'XYZ-GOLD/USDC:USDC', { connector, dex: 'xyz' })], { category: 'commodities', tabs: ['all', 'commodities'] });
+  const market = body([nvda], { tabs: [{ id: 'all', label: 'All', count: 1 }, { id: 'stocks', label: 'Stocks', count: 1 }] });
+  const connected = body([native, gold], { tabs: [{ id: 'all', label: 'All', count: 2 }, { id: 'crypto', label: 'Crypto', count: 1 }, { id: 'commodities', label: 'Commodities', count: 1 }] });
+  const joined = joinExplore(market, connected, { scope: 'xyz', limit: 200 });
+  assert.deepEqual(keys(joined), ['perp:xyz:NVDA', 'perp:xyz:GOLD']);
+  assert.deepEqual(joined.tabs.map(t => [t.id, t.count]), [['all', 2], ['stocks', 1], ['commodities', 1]]);
+  const alone = joinExplore(null, connected, { scope: 'xyz', limit: 200 });
+  assert.deepEqual(keys(alone), ['perp:xyz:GOLD']);
+  assert.deepEqual(alone.tabs.filter(t => t.count > 0).map(t => [t.id, t.count]), [['all', 1], ['commodities', 1]], 'the same filtering applies while the public half is down');
 });
 
 test('the market half full at the limit: an account-only row that sorts high enough makes the cut, one that does not is cut', () => {
@@ -147,4 +201,97 @@ test('a half not landed yet is no failure: nothing said missing for it', () => {
   assert.deepEqual(joined.missing, []);
   assert.deepEqual(keys(joined), ['coin:BTC']);
   assert.equal(joinExplore(undefined, undefined, {}), null);
+});
+
+test('focused entries keep missing public contracts visible beside a connected Hyperliquid wallet', () => {
+  const connector = 'live:hyperliquid-trade';
+  const market = body([
+    row('perp:xyz:NVDA', [pub('trade-xyz', 'xyz:NVDA-PERP', connector)], { tabs: ['all', 'perps'] }),
+    row('perp:xyz:GOLD', [pub('trade-xyz', 'xyz:GOLD-PERP', connector)], { tabs: ['all', 'perps'] }),
+  ]);
+  const connected = body([row('perp:xyz:NVDA', [con('hl-wallet', 'XYZ-NVDA/USDC:USDC')], { tabs: ['all', 'perps'] })]);
+  const venues = [{ id: 'hl-wallet', connector }];
+  const joined = joinExplore(market, connected, { scope: 'xyz', venues });
+  assert.deepEqual(keys(joined), ['perp:xyz:NVDA', 'perp:xyz:GOLD']);
+  assert.deepEqual(linesOf(joined, 'perp:xyz:NVDA'), ['hl-wallet|XYZ-NVDA/USDC:USDC']);
+  assert.deepEqual(linesOf(joined, 'perp:xyz:GOLD'), ['trade-xyz|xyz:GOLD-PERP']);
+  const pending = joinExplore(market, undefined, { scope: 'xyz', venues });
+  assert.deepEqual(keys(pending), ['perp:xyz:NVDA', 'perp:xyz:GOLD'], 'public markets remain visible while the wallet answers');
+});
+
+test('scoped joins keep native, xyz and other deployers distinct', () => {
+  const connector = 'live:hyperliquid-trade';
+  const market = body([
+    row('perp:BTC', [pub('hyperliquid', 'BTC-PERP', connector)]),
+    row('perp:xyz:NVDA', [pub('trade-xyz', 'xyz:NVDA-PERP', connector)]),
+    row('preipo:anthropic', [pub('hyperliquid-preipo', 'io:ANTH-PERP', connector)], { kind: 'perp' }),
+  ]);
+  assert.deepEqual(keys(joinExplore(market, body([]), { scope: 'hyperliquid' })), ['perp:BTC']);
+  assert.deepEqual(keys(joinExplore(market, body([]), { scope: 'xyz' })), ['perp:xyz:NVDA']);
+  assert.deepEqual(keys(joinExplore(market, body([]), { scope: 'more' })), ['preipo:anthropic']);
+});
+
+test('scoped joins preserve generic paper rehearsals with explicit source identity', () => {
+  const market = body([row('perp:xyz:NVDA', [pub('trade-xyz', 'xyz:NVDA-PERP', 'live:hyperliquid-trade')], { price: 100 })]);
+  const connected = body([row('perp:xyz:NVDA', [con('paper', 'xyz:NVDA-PERP', { paper: true, dex: 'xyz', connector: 'live:paper', price: 99 })], { paper: true, price: 99 })]);
+  const joined = joinExplore(market, connected, { scope: 'xyz' });
+  assert.deepEqual(linesOf(joined, 'perp:xyz:NVDA'), ['trade-xyz|xyz:NVDA-PERP', 'paper|xyz:NVDA-PERP']);
+  assert.equal(joined.items[0].price, 100, 'the public market lends its price, the rehearsal remains a separate line');
+});
+
+test('focused unavailable markets retain read-only public data, including paper statistics and public-only contracts', () => {
+  for (const [scope, venue, base, extraBase, dex] of [['hyperliquid', 'hyperliquid', 'BTC', 'ETH', ''], ['xyz', 'trade-xyz', 'xyz:NVDA', 'xyz:GOLD', 'xyz']]) {
+    const key = `perp:${base}`, symbol = `${base}-PERP`;
+    const publicRow = row(key, [pub(venue, symbol, 'live:hyperliquid-trade', { dex })], {
+      base, tabs: ['all', 'perps'], price: 100, changePct24h: -5, change24h: -5.263, volumeUsd24h: 1_234_567,
+      changeFrom: { venue, venueName: scope === 'xyz' ? 'trade.xyz' : 'Hyperliquid' },
+    });
+    const publicOnly = row(`perp:${extraBase}`, [pub(venue, `${extraBase}-PERP`, 'live:hyperliquid-trade', { dex })], {
+      base: extraBase, tabs: ['all', 'perps'], changePct24h: 2, volumeUsd24h: 500_000,
+    });
+    const paperRow = row(key, [con('paper', symbol, { paper: true, dex, connector: 'live:paper', price: 99 })], {
+      base, tabs: ['all', 'perps'], paper: true, price: 99, volumeUsd24h: undefined,
+    });
+    const market = body([publicRow, publicOnly]), connected = body([paperRow]);
+    const original = structuredClone([market, connected]);
+    for (const verdict of ['not-served', 'closed', 'close-only']) {
+      const here = [{ connector: 'live:hyperliquid-trade', verdict }];
+      const joined = joinExplore(market, connected, { scope, here });
+      assert.deepEqual(keys(joined), [key, publicOnly.key], 'the public-only contract remains discoverable');
+      assert.deepEqual(linesOf(joined, key), [`${venue}|${symbol}`, `paper|${symbol}`]);
+      const got = joined.items[0];
+      assert.deepEqual([got.price, got.paper, got.changePct24h, got.change24h, got.volumeUsd24h], [100, true, -5, -5.263, 1_234_567]);
+      assert.deepEqual(got.changeFrom, publicRow.changeFrom, 'statistics keep their public provenance');
+      for (const item of joined.items) {
+        const leg = item.at[0];
+        assert.deepEqual([leg.venue, leg.connector, leg.dex, leg.public, leg.canTrade], [venue, 'live:hyperliquid-trade', dex, true, false]);
+        assert.equal(Object.hasOwn(leg, 'connectTo'), false, 'the unavailable real trading connection is not offered');
+      }
+      assert.equal(got.at[1].canTrade, true, 'the allowed paper line is unchanged');
+      const state = emptyState();
+      state.markets = { ...state.markets, scope, explore: { all: { status: 'ready', data: joined } } };
+      const renderedRow = rowsOf(state.markets)[0];
+      const page = pageOf(state.markets, state.account, key);
+      assert.deepEqual([renderedRow.priced.changePct, renderedRow.priced.volume, page.priced.changePct, page.priced.volume], [-5, 1_234_567, -5, 1_234_567]);
+      for (const id of [key, publicOnly.key]) {
+        state.route = { screen: 'markets', id };
+        const html = renderMarketsScreen(state);
+        assert.match(html, new RegExp(`aria-label="${scope === 'xyz' ? 'trade.xyz' : 'Hyperliquid'}"`), 'public source badge remains');
+        assert.doesNotMatch(html, /Connect to trade/, 'a read-only market offers no real connection');
+        assert.ok(pageOf(state.markets, state.account, id), 'the public-only market has a detail page');
+      }
+      const unscoped = joinExplore(market, connected, { here });
+      assert.deepEqual(keys(unscoped), [key], 'unscoped availability filtering is unchanged');
+      assert.deepEqual(linesOf(unscoped, key), [`paper|${symbol}`]);
+      assert.equal(unscoped.items[0].changePct24h, undefined);
+      assert.equal(unscoped.items[0].volumeUsd24h, undefined);
+      assert.equal(joinExplore(null, connected, { scope, here }).items[0].changePct24h, undefined, 'a missing public read invents no statistics');
+    }
+    assert.deepEqual([market, connected], original, 'availability never rewrites source responses');
+  }
+});
+
+test('More keeps excluding an unavailable public market', () => {
+  const market = body([row('coin:BTC', [pub('kraken', 'BTC/USD', 'live:exchange:kraken')])]);
+  assert.deepEqual(keys(joinExplore(market, body([]), { scope: 'more', here: [{ connector: 'live:exchange:kraken', verdict: 'not-served' }] })), []);
 });

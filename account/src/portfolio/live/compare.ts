@@ -80,6 +80,13 @@ export function normalBase(symbolOrBase: string, kind: string): string {
   const s = symbolOrBase.trim();
   if (!s) return "";
   if (kind === "stock") return s.toUpperCase();
+  // HIP-3's explicit namespace is part of a contract's identity; it is not CCXT's settlement suffix after a slash.
+  const qualified = /^([a-z][a-z0-9]{0,15}):([A-Za-z0-9]{1,20})(?:-PERP)?(?:\/[^/]+)?$/i.exec(s);
+  if (qualified) return `${qualified[1]!.toUpperCase()}:${qualified[2]!.toUpperCase()}`;
+  // CCXT names trade.xyz positions XYZ-NVDA/USDC:USDC, while public reads use xyz:NVDA-PERP.
+  // Restrict this alias to xyz; a native coin may itself contain a dash.
+  const xyz = kind === "perp" ? /^XYZ-([A-Za-z0-9]{1,20})\/[^/]+$/i.exec(s) : null;
+  if (xyz) return `XYZ:${xyz[1]!.toUpperCase()}`;
   // a wallet's market names its chain after @; an exchange's pair its quote after / (and a contract's settlement after :)
   let base = s.split("@")[0]!.split(/[/:]/)[0]!.trim();
   // Robinhood Crypto and Coinbase write BTC-USD: the part after the last dash is cut only when it is a dollar quote

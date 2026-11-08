@@ -614,7 +614,12 @@ test('the fold stays open across a render', () => {
 // (a test's own fakes, `more`, beside); the browser's storage a memory
 const fakeMarkets = () => ({});
 const memoryStorage = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), m }; };
-const bootMarkets = (f, h, _mk, more = {}) => boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, ...more });
+// These fixtures span exchanges, stocks and China. They exercise the broad entry; the focused default has its own drill below.
+const bootMarkets = (f, h, _mk, more = {}) => {
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, ...more });
+  store.dispatch('setMarketsScope', 'more');
+  return store;
+};
 
 // the Account's search finds the A shares too: a hit is a cn row, starred on the face's cn list
 test("typing in the search box searches; a star watches and writes the face's key; a row opens its page", async () => {
@@ -638,7 +643,7 @@ test("typing in the search box searches; a star watches and writes the face's ke
   assert.equal(reads.some(p => p.startsWith('/data/market/explore?q=')), false, 'nothing searched before the wait');
   timers.run(300);
   await settle();
-  assert.deepEqual(reads.filter(p => p.startsWith('/data/market/explore?q=')), ['/data/market/explore?q=600&limit=200'], "one read, the Account's");
+  assert.deepEqual(reads.filter(p => p.startsWith('/data/market/explore?q=')), ['/data/market/explore?q=600&limit=200&scope=more'], "one read in More markets, the Account's");
   assert.match(f.html(), /<tr data-id="cn:600519">/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'cn:600519' } });
   // an A share is an Account key: its star is kept in this browser's Account store (the page does not sign), never the cn list
@@ -721,7 +726,7 @@ test('a market page reads no /data/bars, whatever its id; Markets on screen read
   await h.ready();
   assert.match(f.html(), /<main class="main mkts mk-page">/);
   assert.match(f.html(), /A-share · 600519 · SH/, 'the A-share page, cold');
-  assert.ok(reads.includes('/data/market/explore?limit=200'), "Markets on screen reads the Account's explore");
+  assert.ok(reads.includes('/data/market/explore?limit=200&scope=hyperliquid'), 'the default entry reads Hyperliquid while the deep link reads its own China history');
   assert.ok(reads.includes('/data/market/candles?venue=china&symbol=600519&range=1D'), 'its history at venue china');
   assert.equal(reads.some(p => p.startsWith('/data/account/holdings') || p.startsWith('/data/account/statement')), false, 'nothing held or stated read for an A share');
   await settle();
@@ -771,6 +776,7 @@ function standinAnswer(path) {
     case '/data/account/agents': return fx('agents');
     // the market's explore, and the account's connected one beside it listing nothing: their join is the stand-in's rows
     case '/data/market/explore': return fx('explore-all');
+    case '/data/market/sources': return { ok: true, value: [] };
     case '/data/account/connected/explore': return { ok: true, asOf: '2026-10-22T08:00:00.000Z', items: [], movers: [], closing: [], mostTraded: [], tabs: [], missing: [], notes: [] };
     case '/data/market/candles':
     case '/data/account/connected/candles': return { ...fx('candles'), venue: q.get('venue'), symbol: q.get('symbol'), range: q.get('range') };
@@ -801,7 +807,167 @@ function accountHost(opts = {}, { answers = {} } = {}) {
   };
   return { ...h, getJson, reads, accountReads: () => reads.filter(isPage).length };
 }
-const bootAccount = (f, h, _mk = fakeMarkets(), more = {}) => boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, ...more });
+const bootAccount = (f, h, _mk = fakeMarkets(), more = {}) => bootMarkets(f, h, _mk, more);
+
+test('Markets boots on Hyperliquid; another source category loads atomically with the correct badge', async () => {
+  const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
+  const mq = f.withId('mq', { tagName: 'INPUT', type: 'search', dataset: { action: 'mkQuery' } });
+  const timers = new HeldTimers(ms => ms >= 5_000 || ms === 300);
+  const item = (key, venue, symbol, name) => ({
+    key, kind: 'perp', name, base: key.slice(5), price: 100, changePct24h: 1, volumeUsd24h: 1e6, tabs: ['all', 'perps'],
+    at: [{ venue, venueName: venue === 'trade-xyz' ? 'trade.xyz' : 'Hyperliquid', symbol, public: true, connected: false,
+      canTrade: false, connector: 'live:hyperliquid-trade', connectTo: 'hyperliquid-trade', price: 100 }],
+  });
+  const body = row => ({ ok: true, items: [row], movers: [], closing: [], mostTraded: [], tabs: [{ id: 'all', count: 1 }], missing: [], notes: [] });
+  const btc = body(item('perp:BTC', 'hyperliquid', 'BTC-PERP', 'Bitcoin perpetual'));
+  const nvda = body(item('perp:xyz:NVDA', 'trade-xyz', 'xyz:NVDA-PERP', 'NVIDIA perpetual'));
+  nvda.items[0].tabs.push('stocks');
+  let answerXyz;
+  const h = accountHost({}, { answers: { '/data/market/explore': path => {
+    const scope = new URLSearchParams(path.split('?')[1]).get('scope');
+    return scope === 'hyperliquid' ? btc : scope === 'xyz' ? new Promise(resolve => { answerXyz = resolve; }) : fx('explore-all');
+  } } });
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers });
+  await h.ready();
+  assert.equal(store.get().markets.scope, 'hyperliquid');
+  assert.match(f.html(), /<tr data-id="perp:BTC">[\s\S]*?mk-source-hyperliquid" role="img"/);
+  assert.ok(h.reads.includes('/data/market/explore?limit=200&scope=hyperliquid'));
+  mq.value = 'BTC';
+  f.fire('root', 'input', { target: mq });
+  assert.equal(timers.delays().includes(300), true);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'mkCategory', scope: 'xyz', value: 'stocks' } });
+  assert.equal(store.get().markets.scope, 'xyz');
+  assert.equal(store.get().markets.tab, 'stocks');
+  assert.equal(mq.value, '', 'the old source’s query is cleared in the preserved input too');
+  assert.equal(timers.delays().includes(300), false, 'the old source’s pending search is cancelled');
+  assert.doesNotMatch(f.html(), /<tr data-id="perp:BTC">/, 'the previous source vanishes while the next read is pending');
+  await settle();
+  answerXyz(nvda);
+  await settle();
+  assert.deepEqual(h.reads.filter(path => path.startsWith('/data/market/explore?') && path.includes('scope=xyz')), ['/data/market/explore?tab=stocks&limit=200&scope=xyz'], 'there is no intermediate All request');
+  assert.match(f.html(), /<tr data-id="perp:xyz:NVDA">[\s\S]*?mk-source-xyz" role="img" aria-label="trade.xyz"/);
+  assert.match(f.html(), /data-action="mkScope" data-value="xyz" aria-pressed="true"/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'mkScope', value: 'more' } });
+  await settle();
+  assert.ok(h.reads.includes('/data/market/explore?limit=200&scope=more'));
+  assert.match(f.html(), /<tr data-id="stock:NVDA">/);
+  assert.match(f.html(), /data-action="mkCategory" data-scope="more" data-value="china"/);
+  store.timers.clear();
+});
+
+test('More provider buttons are visible from the default entry and a hidden provider click reads once', async () => {
+  const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
+  f.doc.hidden = true;
+  const mq = f.withId('mq', { tagName: 'INPUT', type: 'search', dataset: { action: 'mkQuery' } });
+  const timers = new HeldTimers();
+  const catalog = { ok: true, value: [{ id: 'okx', name: 'OKX' }, { id: 'robinhood-stock-tokens', name: 'Robinhood Stock Tokens', kind: 'tokens' }] };
+  const h = accountHost({}, { answers: {
+    '/data/market/sources': catalog,
+    '/data/market/explore': path => {
+      const source = new URLSearchParams(path.split('?')[1]).get('source');
+      const venue = source || 'hyperliquid';
+      const key = source === 'robinhood-stock-tokens' ? 'rwa:NVDA' : 'perp:BTC';
+      return { ok: true, items: [{ key, kind: key.split(':')[0], base: key.split(':')[1], name: key, tabs: ['all', source ? 'rwas' : 'crypto'],
+        at: [{ venue, symbol: key.split(':')[1], public: true, connected: false, price: 100 }] }],
+      tabs: [{ id: 'all', count: 1 }, { id: source ? 'rwas' : 'crypto', count: 1 }], missing: [], notes: [] };
+    },
+  } });
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: null, timers });
+  await h.ready();
+  assert.equal(store.get().markets.scope, 'hyperliquid');
+  assert.match(f.html(), /data-action="mkSource" data-value="okx"/);
+  assert.match(f.html(), /data-action="mkSource" data-value="robinhood-stock-tokens"[^>]*>Robinhood Stock Tokens/);
+  mq.value = 'BTC';
+  f.fire('root', 'input', { target: mq });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'mkSource', value: 'robinhood-stock-tokens' } });
+  await settle();
+  assert.equal(store.get().markets.source, 'robinhood-stock-tokens');
+  assert.equal(mq.value, '');
+  assert.equal(timers.delays().includes(300), false);
+  assert.deepEqual(h.reads.filter(path => path.startsWith('/data/market/explore?') && path.includes('source=')), ['/data/market/explore?limit=200&scope=more&source=robinhood-stock-tokens']);
+  assert.match(f.html(), /<tr data-id="rwa:NVDA">/);
+  assert.doesNotMatch(f.html(), /data-action="mkCategory" data-scope="more" data-value="china"/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'mkCategory', scope: 'more', source: 'robinhood-stock-tokens', value: 'rwas' } });
+  await settle();
+  assert.equal(h.reads.filter(path => path.startsWith('/data/market/explore?') && path.includes('source=robinhood-stock-tokens')).length, 2);
+  assert.ok(h.reads.includes('/data/market/explore?tab=rwas&limit=200&scope=more&source=robinhood-stock-tokens'));
+  assert.equal(h.reads.filter(path => path === '/data/market/sources').length, 1);
+  assert.equal(timers.delays().some(ms => ms === 5_000 || ms === 20_000), false);
+  store.timers.clear();
+});
+
+test('a hidden Markets entry and source changes read once without starting hidden polls', async () => {
+  const f = fakeWindow({ hash: '#/markets', storage: memoryStorage() });
+  f.doc.hidden = true;
+  const timers = new HeldTimers();
+  const body = (key, venue) => ({ ok: true, items: [{
+    key, kind: 'perp', base: key.slice(5), name: `${key.slice(5)} perpetual`, price: 100, tabs: ['all', 'perps'],
+    at: [{ venue, symbol: `${key.slice(5)}-PERP`, connector: 'live:hyperliquid-trade', public: true, connected: false, canTrade: false, price: 100 }],
+  }], tabs: [{ id: 'all', count: 1 }], missing: [], notes: [] });
+  const h = accountHost({}, { answers: { '/data/market/explore': path => {
+    const q = new URLSearchParams(path.split('?')[1]);
+    if (q.get('tab') === 'china') { const china = fx('explore-china'); china.china.sort = q.get('sort'); return china; }
+    return q.get('scope') === 'hyperliquid' ? body('perp:BTC', 'hyperliquid')
+      : q.get('scope') === 'xyz' ? body('perp:xyz:NVDA', 'trade-xyz') : fx('explore-all');
+  } } });
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: null, timers });
+  const publicReads = () => h.reads.filter(p => p.startsWith('/data/market/explore?'));
+  const noPolls = () => assert.equal(timers.delays().some(ms => ms === 5_000 || ms === 20_000), false, 'hidden one-shot reads arm no quote or explore poll');
+  await h.ready();
+  assert.equal(publicReads().length, 1, 'a fresh browser load reads even before a visibility event');
+  assert.match(f.html(), /<tr data-id="perp:BTC">/);
+  assert.equal(store.get().markets.explore.all.status, 'ready');
+  noPolls();
+  store.dispatch('hostStatus', { line: 'still connected' });
+  f.fire('win', 'hashchange');
+  await settle();
+  assert.equal(publicReads().length, 1, 'ordinary rendering and the same route do not start another read');
+  for (const [scope, key] of [['xyz', 'perp:xyz:NVDA'], ['more', 'stock:NVDA'], ['hyperliquid', 'perp:BTC']]) {
+    const count = publicReads().length;
+    f.click({ tagName: 'BUTTON', dataset: { action: 'mkScope', value: scope } });
+    await settle();
+    assert.equal(publicReads().length, count + 1, 'each source action reads exactly once');
+    assert.ok(publicReads().at(-1).endsWith(`scope=${scope}`));
+    assert.ok(f.html().includes(`<tr data-id="${key}">`), 'the chosen source finishes loading while still reported hidden');
+    noPolls();
+  }
+  f.click({ tagName: 'BUTTON', dataset: { action: 'mkScope', value: 'more' } });
+  await settle();
+  for (const tab of ['stocks', 'china']) {
+    const count = publicReads().length;
+    f.click({ tagName: 'BUTTON', dataset: { action: 'mkCategory', scope: 'more', value: tab } });
+    await settle();
+    assert.equal(publicReads().length, count + 1);
+    assert.ok(publicReads().at(-1).includes(`tab=${tab}`));
+    assert.doesNotMatch(f.html(), /<p class="mk-empty">Loading…<\/p>/);
+    noPolls();
+  }
+  f.click({ tagName: 'BUTTON', dataset: { action: 'mkSort', value: 'movers' } });
+  await settle();
+  assert.equal(store.get().markets.rank.status, 'ready');
+  assert.ok(publicReads().at(-1).includes('sort=movers'));
+  noPolls();
+  // A hidden return from another screen must refresh once too; the browser's later visibility event owns the polls.
+  f.win.location.hash = '#/discover';
+  await settle();
+  const beforeReturn = publicReads().length;
+  f.win.location.hash = '#/markets';
+  await settle();
+  assert.equal(publicReads().length, beforeReturn + 1);
+  noPolls();
+  f.doc.hidden = false;
+  f.fire('doc', 'visibilitychange');
+  await settle();
+  assert.ok(timers.delays().includes(5_000));
+  assert.ok(timers.delays().includes(20_000));
+  const beforeHide = publicReads().length;
+  f.doc.hidden = true;
+  f.fire('doc', 'visibilitychange');
+  await settle();
+  assert.equal(publicReads().length, beforeHide, 'hiding a loaded page does not fetch again');
+  noPolls();
+  store.timers.clear();
+});
 
 // the Account's push channel as the app is handed it: its opens, closes and follows recorded, its status the test's to set; the
 // app's two callbacks kept, so a test delivers an event or a change of status as the stream would
@@ -1296,7 +1462,7 @@ test('the search box moves the query at once and searches after 300 ms of quiet:
   assert.notDeepEqual(second, first, 'a keystroke restarts it');
   timers.run(300);
   await settle();
-  assert.deepEqual(searched(), ['/data/market/explore?q=BTC&limit=200'], "the Account's search, once, for what was typed last — the A shares' with it");
+  assert.deepEqual(searched(), ['/data/market/explore?q=BTC&limit=200&scope=more'], "the Account's search, once, for what was typed last — the A shares' with it");
   // a wait cut short by Clear: the search goes blank at once, and the wait never searches
   mq.value = 'ETH';
   f.fire('root', 'input', { target: mq });
@@ -1323,10 +1489,11 @@ test('a press holds renders until it ends, so a streaming quote cannot swallow t
   const f = fakeWindow({ hash: '#/markets', storage });
   const h = host();
   const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, pointerHoldMs: 20 });
+  store.dispatch('setMarketsScope', 'more');
   await h.ready();
   // a quote landing, as the quotes poll lands one: a store change, which renders
   const tick = price => store.dispatch('accountQuotesLoaded', { quotes: [{ venue: 'ex', symbol: 'BTC/USDT', market: { price, quoteAt: '2026-10-20T14:00:00Z' } }] });
-  // the old star is a star: Watching is among the tabs until it goes
+  // Watching stays available; its empty state changes only after the held render lands.
   assert.match(f.html(), /data-action="mkTab" data-value="watching"/);
   const before = f.writes;
   f.fire('root', 'pointerdown', { button: 0 });
@@ -1337,7 +1504,7 @@ test('a press holds renders until it ends, so a streaming quote cannot swallow t
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleWatch', id: 'crypto:BTC/USD' } });
   assert.deepEqual(store.get().markets.watchlist, [], 'the click ran');
   await settle();
-  assert.doesNotMatch(f.html(), /data-value="watching"/, 'the held render landed');
+  assert.ok(f.writes > before, 'the held render landed');
   const held = f.writes;
   f.fire('root', 'pointerdown', { button: 0 });
   tick(82_002);

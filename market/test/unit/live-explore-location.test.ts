@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { exploreAcross, type ExploreVenue } from "../../src/live/explore.ts";
-import { exchangeTickers, hyperliquidPreIpoPublic, hyperliquidPublic, preIpoPublic, type Listing, type PublicSource } from "../../src/live/public-markets.ts";
+import { exchangeTickers, hyperliquidPreIpoPublic, hyperliquidPublic, preIpoPublic, tradeXyzPublic, type Listing, type PublicSource } from "../../src/live/public-markets.ts";
 import type { LiveTrader, Market } from "../../src/live/trade.ts";
 import { BINANCE_451_BODY, BINANCE_SAID, BN_DAY, BN_INFO, BN_MARK, BY_PAGES, BY_PAGE, BY_TICK, BYBIT_403_BODY, BYBIT_SAID, binance451, bybit403, hip3Net, json, MIN, network, NOW, refusing, UNIT, venueOf } from "./live-public-markets-fixtures.ts";
 
@@ -51,7 +51,7 @@ describe("a pre-IPO company across every venue, wherever this machine is", () =>
     const bn = binanceAnswering();
     const by = bybitAnswering();
     const hl = hip3Net();
-    const sources = [...SIX(), preIpoPublic(venueOf("binance"), { http: bn.http, clock }), preIpoPublic(venueOf("bybit"), { http: by.http, clock }), hyperliquidPreIpoPublic({ http: hl.http, clock })];
+    const sources = [...SIX(), preIpoPublic(venueOf("binance"), { http: bn.http, clock }), preIpoPublic(venueOf("bybit"), { http: by.http, clock }), hyperliquidPreIpoPublic({ http: hl.http, clock }), tradeXyzPublic({ http: hl.http, clock })];
     const out = await exploreAcross({ public: sources }, { clock, tab: "preipo" });
     const row = out.items.find((i) => i.key === "preipo:anthropic")!;
     expect(row.at.map((a) => [a.venue, a.venueName, a.symbol, a.price, a.implied?.usd])).toEqual([
@@ -76,8 +76,8 @@ describe("a pre-IPO company across every venue, wherever this machine is", () =>
     // OpenAI and Oura are rows of their own (Binance's and Bybit's answer for those two refused here, so they are left out this time)
     const keys = out.items.map((i) => i.key).sort();
     expect(keys).toEqual(["preipo:anthropic", "preipo:openai", "preipo:oura"]);
-    expect(out.items.find((i) => i.key === "preipo:oura")!.at.map((a) => a.venueName).sort()).toEqual(["Hyperliquid · xyz"]);
-    expect(out.notes).toContain("Hyperliquid · io, xyz: pre-IPO perpetuals on Hyperliquid's HIP-3 markets, which anyone may deploy; shown while someone holds or trades one.");
+    expect(out.items.find((i) => i.key === "preipo:oura")!.at).toEqual([expect.objectContaining({ venue: "trade-xyz", venueName: "trade.xyz", symbol: "xyz:OURA-PERP" })]);
+    expect(out.notes).toContain("Hyperliquid · io: pre-IPO perpetuals on Hyperliquid's HIP-3 markets, which anyone may deploy; shown while someone holds or trades one.");
   });
 
   it("sets aside a venue whose contract has been resized away from the others (Binance may resize once a filing gives the share count) and says so under the venue's name", async () => {
