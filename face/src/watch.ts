@@ -947,8 +947,9 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         /* dispose has begun: no deliver after it and no post, and each send left is recorded undelivered, so none
          * stays pending */
         /* a why turn for a US price move; a plan check for another annotated hit with a plan; an A-share move with
-         * no plan is posted nothing (why-it-moved task 10), so nothing is said to follow */
-        const note = !rec.annotate ? "none" : spent ? "budget" : whyOf(rec) ? "why" : rec.plan !== null ? "follows" : "none";
+         * no plan is posted nothing (why-it-moved task 10), so nothing is said to follow, the budget or not */
+        const why = whyOf(rec);
+        const note = !rec.annotate || (!why && rec.plan === null) ? "none" : spent ? "budget" : why ? "why" : "follows";
         let result: DeliverResult;
         if (stopped) result = { undelivered: "the face shut down" };
         else {

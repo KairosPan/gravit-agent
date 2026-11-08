@@ -332,7 +332,8 @@ test("rebuildDay restores the day across both markets' session dates", () => {
   const cnKey = "level:desk/levels.yml:600519:stop:1400:cross_down";
   const records: unknown[] = [
     alertRecord({ t: "2026-11-30T14:30:02.000Z", key: nvda, id: "a-nvda", ref: "2026-11-27", phase: "regular" }),
-    alertRecord({ t: "2026-11-30T14:41:00.000Z", key: "rule:m:AAPL", symbol: "AAPL", id: "a-aapl", decision: "suppressed", suppressed: "cap" }),
+    alertRecord({ t: "2026-12-01T01:00:00.000Z", key: "rule:m:AAPL", symbol: "AAPL", id: "a-aapl", decision: "suppressed", suppressed: "cap" }),
+    alertRecord({ t: "2026-11-30T14:41:00.000Z", key: "rule:m:IBM", symbol: "IBM", id: "a-stale-cap", decision: "suppressed", suppressed: "cap" }),
     alertRecord({ t: "2026-11-30T14:20:00.000Z", key: "rule:m:AMD", symbol: "AMD", id: "a-old-cap", decision: "suppressed", suppressed: "cap" }),
     { t: "2026-11-30T15:00:00.000Z", kind: "batch", id: "b-1", date: "2026-11-30", alerts: ["a-old-cap"] },
     alertRecord({ t: "2026-11-30T14:50:00.000Z", key: nvda, id: "a-nvda-repeat", ref: "2026-11-27", phase: "regular", decision: "suppressed", suppressed: "cooldown" }),
@@ -351,7 +352,8 @@ test("rebuildDay restores the day across both markets' session dates", () => {
   assert.equal(day.keys.has("rule:m:MSFT"), false, "a record older than five days is ignored");
   assert.equal(day.keys.get("rule:g:TSLA")?.ref, "2026-11-30", "a key's newest date");
   assert.deepEqual(day.sends, [T("2026-12-01T01:30:05Z")], "the sends within the hour");
-  assert.deepEqual(day.pending, [{ id: "a-aapl", t: T("2026-11-30T14:41:00Z") }], "the caps no batch lists");
+  assert.deepEqual(day.pending, [{ id: "a-aapl", t: T("2026-12-01T01:00:00Z") }], "the caps no batch lists, held within the hour; a-stale-cap is not restored");
+  assert.equal(day.keys.get("rule:m:IBM")?.ref, "2026-11-30", "though its key keeps its crossing");
 
   /* NVDA still past against its reference close: no second gap; the A share likewise */
   const keys = keysOf({ levels: [level("NVDA", "stop", 170, "cross_down"), level("600519", "stop", 1400, "cross_down")] });

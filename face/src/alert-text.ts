@@ -10,8 +10,9 @@
  *
  * THE ALERT (spec §5.9). Its lines, in order:
  * - **A level or a price rule:** `<SYMBOL> <price> · <stamp>`; what fired - `<kind> <price | low-high> <when>[ · gap]
- *   · <file>[ · <levelSource>]`, `<id>: the move from the previous close reached <pct>%[ · gap] · <file>` or `<id>:
- *   the first print is <pct>% or more from the previous close · gap · <file>`; the holding, `held <qty> @ <avg cost,
+ *   · <file>[ · <levelSource>]`, `<id>: the move from <close> reached <pct>%[ · gap] · <file>` (the close by the
+ *   print's phase, as the move's line names it: the previous close, the <ref> close, today's close) or `<id>: the
+ *   first print is <pct>% or more from the previous close · gap · <file>`; the holding, `held <qty> @ <avg cost,
  *   2 dp>[ · day P&L <signed, en-US, 2 dp>]` or `not held`; `plan: <plan>`, verbatim, when there is one; the move by
  *   the print's phase - `day: <signed %, 2 dp> from the previous close <prevClose>` (or `day: no previous close yet`),
  *   `pre-market: <%> from the <ref> close <prevClose>`, `after hours: <%> from today's close <prevClose>` (or `<phase>:
@@ -112,6 +113,14 @@ const NOTE_LINES: Record<"why" | "follows" | "budget", string> = {
   budget: "no annotation: the desk's token budget for today is spent",
 };
 
+/** The close a price move measures from, by its phase, as the move's line names it: `today's close` after hours,
+ * `the <ref> close` in pre-market, `the previous close` in the session and on a record with no phase. */
+function closeOf(hit: AlertHit): string {
+  if (hit.phase === "after") return "today's close";
+  if (hit.phase === "pre" && hit.ref !== undefined) return `the ${hit.ref} close`;
+  return "the previous close";
+}
+
 /** What a level or a price rule fired on: line 2 of its alert. */
 function firedLine(hit: AlertHit): string {
   const t = hit.trigger;
@@ -123,7 +132,7 @@ function firedLine(hit: AlertHit): string {
       return `${t.kind} ${at} ${t.when}${gap} · ${file}${t.levelSource !== undefined ? ` · ${t.levelSource}` : ""}`;
     }
     case "move":
-      return `${t.rule}: the move from the previous close reached ${t.pct}%${gap} · ${file}`;
+      return `${t.rule}: the move from ${closeOf(hit)} reached ${t.pct}%${gap} · ${file}`;
     case "gap":
       return `${t.rule}: the first print is ${t.pct}% or more from the previous close · gap · ${file}`;
     case "filing":

@@ -171,10 +171,13 @@ const INTC_MOVE = hit({
 
 test("an after-hours alert names today's close, a pre-market alert names its reference date's close, and a one-print alert says so", () => {
   const after = { ...INTC_MOVE, date: "2026-10-29", ref: "2026-10-29", phase: "after" as const, quote: us(70.16, "2026-10-29T21:05:00Z", "robinhood", 92.07, -23.8) };
+  assert.equal(alertText(after, NOW, "none").split("\n")[1], "watch-intc: the move from today's close reached 5% · desk/rules.yml");
   assert.equal(alertText(after, NOW, "none").split("\n").at(-1), "after hours: -23.80% from today's close 92.07");
   const pre = { ...INTC_MOVE, date: "2026-10-30", ref: "2026-10-29", phase: "pre" as const, quote: us(69.05, "2026-10-30T11:00:00Z", "robinhood", 92.07, -25) };
+  assert.equal(alertText({ ...pre, gap: true }, NOW, "none").split("\n")[1], "watch-intc: the move from the 2026-10-29 close reached 5% · gap · desk/rules.yml");
   assert.equal(alertText(pre, NOW, "none").split("\n").at(-1), "pre-market: -25.00% from the 2026-10-29 close 92.07");
   const regular = { ...INTC_MOVE, date: "2026-10-30", ref: "2026-10-29", phase: "regular" as const, quote: us(86.45, "2026-10-30T14:00:00Z", "robinhood", 92.07, -6.1) };
+  assert.equal(alertText(regular, NOW, "none").split("\n")[1], "watch-intc: the move from the previous close reached 5% · desk/rules.yml");
   assert.equal(alertText(regular, NOW, "none").split("\n").at(-1), "day: -6.10% from the previous close 92.07");
   const lone = { ...pre, onePrint: true as const };
   assert.deepEqual(alertText(lone, NOW, "none").split("\n").slice(-2), [

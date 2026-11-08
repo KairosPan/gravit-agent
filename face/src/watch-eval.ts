@@ -572,7 +572,8 @@ export function findOrphans(records: readonly unknown[], now: number): { replay:
  * key's reference is its newest record's `ref` (a record without one: its `date`), alerted, its `lastHitAt` that
  * reference's latest record not suppressed `cooldown`, its side unknown and nothing pending; `sends` the `send`
  * decisions within the hour, but for the `lost` ones - never sent, they spend none of the hour's cap, though each
- * still starts its key's cooldown; `pending` the `cap` alerts no batch lists.
+ * still starts its key's cooldown; `pending` the `cap` alerts no batch lists held within the hour (an older one would
+ * have batched by now, and is not restored).
  * @param records - the file's lines, parsed; anything not a record is skipped.
  * @param now - the time of the rebuild.
  * @param lost - the ids of the orphans {@link findOrphans} found lost.
@@ -599,7 +600,9 @@ export function rebuildDay(records: readonly unknown[], now: number, lost: Reado
       day.keys.set(r.key, kd);
     }
     if (r.decision === "send" && !lost.has(r.id) && now - at < HOUR_MS && at <= now) day.sends.push(at);
-    if (r.suppressed === "cap" && !batched.has(r.id)) day.pending.push({ id: r.id, t: at });
+    /* a held alert waits at most into the next ET hour for its batch: one older than an hour is not restored - no
+     * send and no batch record for it - while the crossing state keeps the five days */
+    if (r.suppressed === "cap" && !batched.has(r.id) && now - at < HOUR_MS && at <= now) day.pending.push({ id: r.id, t: at });
   }
   return day;
 }

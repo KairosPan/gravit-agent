@@ -857,6 +857,65 @@ test("an A-share move says annotation follows with a plan, and nothing follows w
   assert.equal(last("600519"), "annotation follows");
   assert.equal(last("000001"), "day: -5.00% from the previous close 10");
   await h.watch.dispose();
+
+  const spent = await harness({
+    start: "2026-12-01T02:03:00Z", budget: { used: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, total: 0 }, spent: true },
+    files: { "desk/rules.yml": "- id: cn-plan\n  kind: move_pct\n  symbols: [\"600519\"]\n  move_pct: 4\n  plan: trim a third\n- id: cn-bare\n  kind: move_pct\n  symbols: [\"000001\"]\n  move_pct: 4\n" },
+  });
+  spent.source.tables.cn.set("600519", cn(1400, "2026-12-01T02:02:58Z", "trading", 1400));
+  spent.source.tables.cn.set("000001", cn(10, "2026-12-01T02:02:58Z", "trading", 10));
+  await spent.wall.advance(0);
+  await until("the first poll", () => spent.source.calls.length === 1);
+  spent.source.tables.cn.set("600519", cn(1330, "2026-12-01T02:03:08Z", "trading", 1400));
+  spent.source.tables.cn.set("000001", cn(9.5, "2026-12-01T02:03:08Z", "trading", 10));
+  await spent.wall.advance(10_000);
+  await until("two alerts", () => spent.sent.length === 2);
+  const lastOf = (symbol: string): string | undefined => spent.sent.find((x) => x.text.startsWith(`${symbol} `))?.text.split("\n").at(-1);
+  assert.equal(lastOf("600519"), "no annotation: the desk's token budget for today is spent");
+  assert.equal(lastOf("000001"), "day: -5.00% from the previous close 10", "nothing would follow it, so the spent budget is not named");
+  await spent.watch.dispose();
+});
+
+test("with the face's own calendar, whose window starts on the session date, a pre-market alert measures from the session before it", async () => {
+  const h = await harness({ start: "2026-10-30T11:00:00Z", files: { "desk/rules.yml": INTC_RULE }, calendars: { us: deskCalendars().us } });
+  h.source.tables.us.set("INTC", us(69.05, "2026-10-30T10:59:58Z", 92.07));
+  await h.wall.advance(0);
+  await until("the first poll", () => h.source.calls.length === 1);
+  assert.equal(h.calendars.us.window()?.from, "2026-10-30", "the window starts on the session date");
+  h.source.tables.us.set("INTC", us(69, "2026-10-30T11:00:18Z", 92.07));
+  await h.wall.advance(20_000);
+  await until("the alert", () => h.sent.length === 1);
+  await until("the record", async () => (await h.alertRecords()).some((r) => r.kind === "alert"));
+  const rec = (await h.alertRecords()).find((r) => r.kind === "alert");
+  assert.deepEqual([rec?.date, rec?.ref, rec?.phase], ["2026-10-30", "2026-10-29", "pre"]);
+  assert.match(h.sent[0].text, /^pre-market: -25\.06% from the 2026-10-29 close 92\.07$/m);
+  await h.watch.dispose();
+});
+
+test("a held alert sixty hours old is not restored: no send and no batch record; one held minutes ago still batches", async () => {
+  const capped = (id: string, t: string): Record<string, unknown> => ({ ...orphan(id, t), decision: "suppressed", suppressed: "cap" });
+  const old = await overLedger([capped("a-old-cap", "2026-11-28T03:20:45.000Z")]);
+  await old.wall.advance(0);
+  await old.wall.advance(5_000);
+  old.wall.set("2026-11-30T16:00:00Z");
+  await old.wall.advance(5_000);
+  await old.wall.advance(5_000);
+  assert.deepEqual(old.sent, []);
+  assert.equal(old.watch.status().pending, 0);
+  assert.deepEqual((await old.alertRecords()).filter((r) => r.kind === "batch"), []);
+  await old.watch.dispose();
+
+  const fresh = await overLedger([capped("a-fresh-cap", "2026-11-30T15:16:45.000Z")]);
+  await fresh.wall.advance(0);
+  assert.equal(fresh.watch.status().pending, 1);
+  fresh.wall.set("2026-11-30T16:00:00Z");
+  await fresh.wall.advance(5_000);
+  await until("the batch", () => fresh.sent.length === 1);
+  assert.match(fresh.sent[0].text, /^1 more alert suppressed: NVDA stop 10:16 ET/);
+  await until("the batch record", async () => (await fresh.alertRecords()).some((r) => r.kind === "batch"));
+  const batch = (await fresh.alertRecords()).find((r) => r.kind === "batch");
+  assert.deepEqual(batch?.alerts, ["a-fresh-cap"]);
+  await fresh.watch.dispose();
 });
 
 test("a rule marked urgent sends urgent; a level and an unmarked rule send alert", async () => {
