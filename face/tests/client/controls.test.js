@@ -10,10 +10,11 @@ const conv = (id, over = {}) => ({ id, title: 'T ' + id, kind: 'gravit', members
 const fresh = () => R.nav(R.hostList(emptyState(), { conversations: [conv('c-1', { title: 'BTC under 70k' }), conv('c-2')] }), { screen: 'messages', id: 'c-1' });
 const get = (s, id) => s.conversations.find(c => c.id === id);
 
-test('an editor starts, fails with its words, and cancels', () => {
-  const s = R.startEdit(fresh(), { kind: 'roster', which: 'bots', workspaceId: 'w1', choices: [], ticked: [] });
-  assert.equal(s.edit.kind, 'roster');
-  assert.equal(spoken(R.editFailed(s, { error: 'refused' }).edit.error), 'refused');
+test('an editor starts and cancels; no roster edit kind, no refused-write line', () => {
+  const s = R.startEdit(fresh(), { kind: 'bot', id: 'drill-bear' });
+  assert.equal(s.edit.kind, 'bot');
+  assert.equal(R.editFailed, undefined, 'the roster editor was its only refused write');
+  assert.equal(R.toggleRosterTick, undefined);
   assert.equal(R.cancelEdit(s).edit, null);
   const f = fresh();
   assert.equal(R.cancelEdit(f), f, 'nothing to cancel without an edit');

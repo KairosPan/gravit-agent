@@ -249,10 +249,8 @@ function fakeRegistry(): any {
 async function modulesRoute(root: string, opts: { mounted?: boolean; registry?: any } = {}): Promise<WebRoute> {
   const routes: WebRoute[] = [];
   registerChannelRoutes({ register: (route) => routes.push(route) }, {
-    registry: opts.registry ?? fakeRegistry(), root, home: await mkdtemp(join(tmpdir(), "face-modules-home-")),
+    registry: opts.registry ?? fakeRegistry(), root,
     listSessions: async () => [],
-    connectedBins: async () => [],
-    listBots: async () => [],
     lunhuiMounted: () => opts.mounted ?? true,
   });
   const route = routes.find((r) => r.path === "/data/modules.json");

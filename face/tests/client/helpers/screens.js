@@ -250,10 +250,8 @@ function strategyStates() {
   const data = {
     ok: true, channel: alpha, status: { status: 'researching', one_line: 'Holds', next: 'Rerun', numbers: { sharpe: '1.4' } },
     body: { thesis: { markdown: '# A', isTemplate: false }, journal: [{ date: '2026-10-19', text: 'Ran' }], backtests: [{ file: 'b.json', bytes: 9 }], latest: { file: 'b.json', json: { sharpe: 1.4 } }, files: [{ name: 'n.md', bytes: 9, mtime: '2026-10-19T09:00:00.000Z' }] },
-    agents: ['codex'], bots: ['buffett'], allBots: [{ id: 'buffett', name: 'Buffett Type', listed: true }],
   };
   const loaded = R.channelLoaded(on, { workspaceId: 'w1', data, at: NOW });
-  const editing = R.editFailed(R.startEdit(loaded, { kind: 'roster', which: 'bots', workspaceId: 'w1', choices: [{ value: 'buffett', label: 'Buffett Type' }], ticked: ['buffett'] }), { error: 'roster write refused' });
   const task = (id, over) => ({ id, title: `Size the hedge ${id}`, origin: 'web', state: 'running', group: 'running', steps: ['Read the book'], startedAt: NOW - 3 * MIN, lastEventAt: NOW, lastSeq: 1, strategy: 'alpha', ...over });
   const tasked = R.tasksLoaded(loaded, { conversation: 'c1', tasks: [task('t1'), task('t2', { state: 'done', group: 'done', result: { text: 'Hedged a third' } }), task('t3', { strategy: 'beta' })], at: NOW });
   const venued = R.channelLoaded(on, { workspaceId: 'w1', data: { ...data, status: { ...data.status, venue: 'paper-us' } }, at: NOW });
@@ -263,7 +261,7 @@ function strategyStates() {
     { venue: 'paper-us', venueName: 'Paper US', symbol: 'TSLA', name: 'Tesla', side: 'short', qty: 3, entryPrice: 250, markPrice: 262, usd: 786, unrealizedUsd: -36, paper: true, kind: 'stock', leverage: null },
   ];
   return [
-    loaded, editing, R.channelLoading(on, { workspaceId: 'w1' }), R.channelFailed(on, { workspaceId: 'w1', at: NOW }), R.channelFailed(loaded, { workspaceId: 'w1', at: NOW }), R.nav(on, { screen: 'strategy', id: 'w9' }),
+    loaded, R.channelLoading(on, { workspaceId: 'w1' }), R.channelFailed(on, { workspaceId: 'w1', at: NOW }), R.channelFailed(loaded, { workspaceId: 'w1', at: NOW }), R.nav(on, { screen: 'strategy', id: 'w9' }),
     R.hostListFailed(R.nav(emptyState(), { screen: 'strategy', id: 'w9' })),
     tasked, R.tasksLoaded(loaded, { conversation: 'c1', tasks: [task('t3', { strategy: 'beta' })], at: NOW }),
     asked, R.channelPositionsLoaded(asked, { workspaceId: 'w1', venue: 'paper-us', rows }), R.channelPositionsLoaded(asked, { workspaceId: 'w1', venue: 'paper-us', rows: [] }),
@@ -497,7 +495,7 @@ function deskRailStates(base) {
   const alone = R.nav(R.tasksLoaded(base, { conversation: 's1', tasks: [], desk: { scheduled: desk.scheduled.slice(1, 2), lines: [] }, at: NOW }), { screen: 'messages', id: null });
   const page = R.nav(R.tasksLoaded(base, { conversation: 's1', tasks: [], desk, at: NOW }), { screen: 'strategy', id: 'cn-market' });
   const channel = base.channels.find(c => c.name === 'cn-market');
-  const strategy = R.channelLoaded(page, { workspaceId: channel.workspaceId, data: { ok: true, channel, status: { status: 'researching' }, body: {}, agents: [], bots: [], allBots: [] }, at: NOW });
+  const strategy = R.channelLoaded(page, { workspaceId: channel.workspaceId, data: { ok: true, channel, status: { status: 'researching' }, body: {} }, at: NOW });
   return [on, alone, strategy];
 }
 

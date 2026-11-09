@@ -50,25 +50,6 @@ test('a failed read keeps the last data and reads failed; a 404 reads missing', 
   assert.equal(r.store.get().channel.status, 'missing');
 });
 
-test('setAgents and setBots post and re-read the overview; a seventh bot is refused', async () => {
-  const r = rig((path, body) => (path === '/data/channels/overview' ? { ok: true, channel: { workspaceId: body.workspaceId } } : { ok: true }));
-  assert.deepEqual(await r.channels.setAgents('w1', ['codex']), { ok: true });
-  assert.deepEqual(await r.channels.setBots('w1', ['buffett', 'drill-bear']), { ok: true });
-  assert.deepEqual(r.posted.map(p => p[0]), ['/data/channels/agents', '/data/channels/overview', '/data/channels/bots', '/data/channels/overview']);
-  assert.deepEqual(r.posted[0][1], { workspaceId: 'w1', agents: ['codex'] });
-  assert.deepEqual(r.posted[2][1], { workspaceId: 'w1', bots: ['buffett', 'drill-bear'] });
-  const seven = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
-  assert.deepEqual(spoken(await r.channels.setBots('w1', seven)), { error: 'At most six bots' });
-  assert.equal(r.posted.length, 4, 'nothing posted for seven');
-});
-
-test('agentChoices are the connected agents that answered', async () => {
-  const r = rig(() => ({ ok: true }), {
-    getJson: async () => ({ main: {}, local: [{ bin: 'codex', label: 'Codex', found: true }, { bin: 'gone', label: 'Gone', found: false }, { bin: 'claude', found: true }], candidates: [{ bin: 'gemini' }] }),
-  });
-  assert.deepEqual(await r.channels.agentChoices(), [{ bin: 'codex', label: 'Codex' }, { bin: 'claude', label: 'claude' }]);
-});
-
 // one-entry plan 2: the paper positions at the venue a strategy's status.yaml names
 test('positions reads /data/account/positions?venue=… and maps through positionsOf', async () => {
   const reads = [];

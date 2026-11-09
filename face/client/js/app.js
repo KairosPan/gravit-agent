@@ -41,7 +41,6 @@ import { startTraces } from './host/traces.js';
 import { wantedViews, ensureViews, minuteAt, applyCursor, cursorFor, reapplyCursors, marketKey, stockCode } from './host/lunhui.js';
 import { stockDrawerHtml, askText } from './render/lunhui/stock.js';
 import { loadMemberTrace } from './wire/member-traces.js';
-import { isHostPreset } from './wire/speaker.js';
 import { statementLinesOf, statementCsvOf, connectOptionsOf, asksOf, pageOk, writesOn, venuesOf } from './host/account-view.js';
 import { rulesOf } from './host/rules-view.js';
 import { isAccountKey, handWordsOf, watchedOf, marketCategoryIds, marketScopeOf, marketSourceOf } from './host/market-view.js';
@@ -1082,30 +1081,6 @@ export function boot(win, host = {}) {
     else store.dispatch('discoverStatus', { line: made.error, bad: true });
   }
 
-  // a channel's roster editor: what the store holds ticked goes to the face
-  async function commitRoster(e) {
-    const done = e.which === 'agents' ? await channels.setAgents(e.workspaceId, e.ticked) : await channels.setBots(e.workspaceId, e.ticked);
-    if (done.error) store.dispatch('editFailed', { error: done.error });
-    else if (store.get().edit?.kind === 'roster') store.dispatch('cancelEdit');
-  }
-  // the choices a roster editor offers: the connected agents, or every bot; a rostered one that is gone stays to untick
-  async function editRoster(which, workspaceId) {
-    const data = store.get().channel?.id === workspaceId ? store.get().channel.data : null;
-    if (!data) return;
-    const rostered = (which === 'agents' ? data.agents : data.bots) ?? [];
-    const offered = which === 'agents'
-      ? (await channels.agentChoices()).map(a => ({ value: a.bin, label: a.label }))
-      : (data.allBots ?? []).filter(b => !isHostPreset(b.id)).map(b => ({ value: b.id, label: b.name })); // Gravit's own composition is no bot
-    const choices = [...offered, ...rostered.filter(v => !offered.some(c => c.value === v)).map(v => ({ value: v, label: v }))];
-    store.dispatch('startEdit', { kind: 'roster', which, workspaceId, choices, ticked: [...rostered] });
-  }
-
-  // commit the open editor: a roster's ticks go to the face (the one editor with a ✓ since the rename went, one-entry plan 2)
-  function commitEdit() {
-    const e = store.get().edit;
-    if (e?.kind === 'roster') void commitRoster(e);
-  }
-
   // the second press of a two-step confirm
   // Details open (never closed by this) at a section: the next render scrolls it into view; Details open already changes
   // no state, so a render is asked for to carry the scroll
@@ -1665,7 +1640,6 @@ export function boot(win, host = {}) {
   const act = {
     // a channel's page: Retry reads it again
     channelRetry: el => { void channels.overview(el.dataset.id); },
-    editRoster: el => { void editRoster(el.dataset.which, el.dataset.id); },
     // Discover: a shelf read again, the CLI agents' three writes
     shelfRetry: el => { void discover.read(el.dataset.shelf, { fresh: true }); },
     connectAgent: el => { void discover.connect(el.dataset.bin); },
@@ -1681,7 +1655,6 @@ export function boot(win, host = {}) {
     toggleRail: () => store.dispatch('toggleRail'),
     toggleList: () => store.dispatch('toggleList'),
     // inline editors (they replaced prompt): a button starts one, ✓ or Enter commits it, × or Escape cancels it
-    commitEdit: () => commitEdit(),
     cancelEdit: () => store.dispatch('cancelEdit'),
     // two-step confirms (they replaced confirm): the first press asks in place, the second acts
     stopGravit: el => store.dispatch('askConfirm', { action: 'stopGravit', id: el.dataset.conv }),
@@ -2135,7 +2108,6 @@ export function boot(win, host = {}) {
   root.addEventListener('focusout', ev => { if (!refocusing && ev.target?.isConnected !== false && tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null, null); });
   root.addEventListener('change', ev => {
     const el = ev.target;
-    if (el.type === 'checkbox' && el.name === 'roster') store.dispatch('toggleRosterTick', { value: el.value, on: el.checked === true });
     if (isField(el) && !typesWords(el)) changeField(el.name, fieldValueOf(el));
     if (el.dataset?.action === 'runSheetField' && !typesWords(el)) act.runSheetField(el);
     if (el.dataset?.action === 'setFont') act.setFont(el);

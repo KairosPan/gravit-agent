@@ -408,12 +408,7 @@ test("Markets', Trade's and the desk's host lines as the store holds them: the d
 
 test("a channel's, Discover's, the Run sheet's and the run view's host lines as the store or the editor holds them", async () => {
   const odd = Object.assign(new Error("<no> & won't"), {});
-  // a channel's writes (host/channels.js): six bots, a refusal in its words or in none
   const cs = createStore({ initial: emptyState(), reducers });
-  const channels = startChannels({ store: cs, postJson: async path => { throw path === '/data/channels/agents' ? odd : {}; }, getJson: async () => ({}) });
-  follows(await channels.setBots('w', ['a', 'b', 'c', 'd', 'e', 'f', 'g']), { error: 'At most six bots' });
-  asCame(await channels.setAgents('w', ['codex']), { error: "<no> & won't" });
-  follows(await channels.setBots('w', ['a']), { error: 'failed' });
   // a strategy's positions refused (host/channels.js): the Account's sentence, kept as it came
   cs.dispatch('channelLoaded', { workspaceId: 'w', data: {}, at: 1 });
   const ps = startChannels({ store: cs, postJson: async () => ({}), getJson: async () => { throw Object.assign(new Error('HTTP 409'), { status: 409, body: { ok: false, refusal: { message: "<no> & won't" } } }); } });

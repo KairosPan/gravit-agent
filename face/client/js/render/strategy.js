@@ -1,12 +1,11 @@
 // face/client/js/render/strategy.js — a strategy's page (#/strategy/<name>, one-entry plan 2; the channel page before it, spec
-// 2026-10-19 §7 Stage 3 "Channels"), read-only but for the rosters (kept until plan 4): the status headline, the thesis, the
-// latest backtest, the research runs, the backtests, the journal, the files and the rosters, from /data/channels/overview;
+// 2026-10-19 §7 Stage 3 "Channels"), read-only: the status headline, the thesis, the
+// latest backtest, the research runs, the backtests, the journal and the files, from /data/channels/overview;
 // then the strategy's tasks and its standing orders, each the rail's line; then the paper positions of the venue its
 // status.yaml names (or a line saying it names none, never a guessed venue).
 // Everything here was written by Gravit or the operator into the channel's directory: text through esc, the thesis
 // through the thread's DOM-built markdown.
-import { esc, cls, attrs } from '../html.js';
-import { icon } from '../icons.js';
+import { esc, cls } from '../html.js';
 import { fmtClock, fmtDate } from '../time.js';
 import { chip } from './thread.js';
 import { markdownHtml } from './markdown.js';
@@ -17,7 +16,7 @@ import { railLineHtml } from './tasks.js';
 import { positionSideWord } from './account.js';
 import { money, signedMoney, sign } from '../wire/account-model.js';
 import { price } from '../wire/market-model.js';
-import { t, th, tn, sayOf } from '../i18n/words.js';
+import { t, th, tn } from '../i18n/words.js';
 
 const JOURNAL_ROWS = 20;
 const LATEST_FIELDS = 12;
@@ -71,32 +70,6 @@ function rows(label, list, toLine) {
   return Array.isArray(list) && list.length ? sec(label, list.map(toLine).join('')) : '';
 }
 
-// a roster's editor: a box per choice, ticked as the store holds it; a seventh bot box is shut while six are ticked
-function rosterEditor(e) {
-  const full = e.which === 'bots' && e.ticked.length >= 6;
-  const boxes = e.choices.map((c, i) => {
-    const on = e.ticked.includes(c.value);
-    return `<label class="opt"><input type="checkbox"${attrs({ id: `roster-${e.which}-${i}`, name: 'roster', value: c.value, checked: on, disabled: !on && full })}><span>${esc(c.label)}</span></label>`;
-  }).join('');
-  return `<div class="roster-edit">${boxes || none(t('channel.roster.noChoice'))}<div class="btn-row">` +
-    `<button type="button" class="key yes" data-action="commitEdit" aria-label="${th('common.save')}">${icon('check', 14, 2.4)}</button>` +
-    `<button type="button" class="key no" data-action="cancelEdit" aria-label="${th('common.cancel')}">${icon('x', 14, 2.4)}</button>` +
-    `${sayOf(e.error) ? `<span class="field-error">${esc(sayOf(e.error))}</span>` : ''}</div></div>`;
-}
-
-function roster(label, which, names, state, id) {
-  const e = state.edit?.kind === 'roster' && state.edit.which === which && state.edit.workspaceId === id ? state.edit : null;
-  const edit = e ? '' : `<button type="button" class="btn-sm" data-action="editRoster" data-which="${which}" data-id="${esc(id)}">${th('channel.roster.edit')}</button>`;
-  const body = e ? rosterEditor(e) : names.length ? names.map(n => `<div class="dsec-line">${esc(n)}</div>`).join('') : none(t('channel.none'));
-  return `<section class="dsec"><div class="dsec-label chan-label">${esc(label)}${edit}</div>${body}</section>`;
-}
-
-function rosters(data, state, id) {
-  const names = new Map((Array.isArray(data.allBots) ? data.allBots : []).map(b => [b.id, b.name]));
-  const agents = Array.isArray(data.agents) ? data.agents : [];
-  const bots = Array.isArray(data.bots) ? data.bots : [];
-  return roster(t('channel.roster.agents'), 'agents', agents, state, id) + roster(t('channel.roster.bots'), 'bots', bots.map(b => names.get(b) ?? b), state, id);
-}
 
 function headline(status) {
   const s = status && typeof status === 'object' ? status : {};
@@ -160,7 +133,7 @@ export function renderStrategyScreen(state, now, { open = null } = {}) {
     rows(t('channel.backtests'), body.backtests, b => line(b.file, bytesWord(b.bytes))) +
     rows(t('channel.journal'), (body.journal ?? []).slice(0, JOURNAL_ROWS), j => `<div class="chan-row"><span class="chan-row-meta">${esc(j.date)}</span><span class="chan-row-name">${esc(j.text)}</span></div>`) +
     rows(t('channel.files'), body.files, f => line(f.name, [bytesWord(f.bytes), Number.isFinite(Date.parse(f.mtime)) ? fmtDate(Date.parse(f.mtime)) : ''].filter(Boolean).join(' · '))) +
-    rosters(data, state, id) + tasks(state, listed?.name ?? null, now, open) + positions(status, c.positions),
+    tasks(state, listed?.name ?? null, now, open) + positions(status, c.positions),
     head,
   );
 }

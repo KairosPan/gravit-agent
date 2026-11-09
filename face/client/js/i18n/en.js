@@ -1633,10 +1633,8 @@ export const EN = Object.freeze({
   'desk.tab.pages': 'Pages opened today',
   'desk.tab.pagesNone': 'None today',
 
-  // a channel (host/channels.js, render/strategy.js, host/runs-view.js): its page, its rosters, its research runs and their
-  // chips, a write that failed
-  'channel.failed': 'failed',
-  'channel.atMostSix': 'At most six bots',
+  // a channel (host/channels.js, render/strategy.js, host/runs-view.js): its page, its research runs and their
+  // chips
   'channel.bytes.b': '{n} B',
   'channel.bytes.kb': '{n} KB',
   'channel.bytes.mb': '{n} MB',
@@ -1659,11 +1657,6 @@ export const EN = Object.freeze({
   'channel.count.fields': { one: '{n} field', other: '{n} fields' },
   'channel.chip.notEvaluable': '{module}: not evaluable',
   'channel.chip.module': '{module}: {words}',
-  'channel.roster.noChoice': 'None to choose',
-  'channel.roster.edit': 'Edit',
-  'channel.roster.agents': 'Agents',
-  'channel.roster.bots': 'Bots',
-  'channel.none': 'None',
   'channel.next': 'Next: {next}',
   'channel.retry': 'Retry',
   'channel.stale': 'As of {at} · stale',

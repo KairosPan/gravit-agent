@@ -14,10 +14,7 @@ import { join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { load } from "js-yaml";
 import type { RouteRegistrar } from "./static.ts";
-import { isBotId } from "./bots.ts";
 import { FORBIDDEN, HttpError, isJsonBody, isTrustedDataRequest, readBody } from "./http.ts";
-import { botsFor, logBotsWrite, logRosterWrite, rosterFor, setBots, setRoster } from "./roster.ts";
-import { ROOM_CAPS } from "./room-rules.ts";
 import { NAME_RE } from "./channel-name.ts";
 
 /** Diagnostic label, the same string every other `${BIN}:`-prefixed line in this
@@ -678,7 +675,7 @@ export interface RegistryLike {
   /** Look up by canonical directory path without creating or mutating
    * anything — the same `fs.realpath` canonicalization `create` applies, but
    * a missing path rejects instead of being adopted as a new channel. This is
-   * the lookup a session's cwd needs (panels.ts's `channelFor`): asking which
+   * the lookup a session's cwd needs (room.ts's `placeFor`): asking which
    * channel a directory belongs to must never conjure one into existence. */
   resolveByPath(path: string): Promise<WorkspaceLike | undefined>;
 }
@@ -815,10 +812,6 @@ export async function reconcileChannels(deps: {
   registry: RegistryLike;
   root: string;
   sessions: readonly SessionHeadLike[];
-  /** @deprecated unread since the one roster (plan 4 Task 1), which ensureRoster seeds at boot; Task 4 removes it */
-  home: string;
-  /** @deprecated as `home` */
-  connectedBins: readonly string[];
 }): Promise<{ channels: ChannelRow[]; ungrouped: SessionHeadLike[] }> {
   const { registry, root, sessions } = deps;
 
@@ -1002,16 +995,10 @@ export interface ChannelRouteDeps {
   registry: RegistryLike;
   /** Absolute workbench repo root. */
   root: string;
-  /** The harness home holding `face/channels.json`. */
-  home: string;
   /** Every persisted and live session's id, cwd and header preset - main.ts
    * maps `sessionPersistence.list()` snapshots and `sessions.list()` through
    * {@link listSessionHeads}. */
   listSessions(): Promise<SessionHeadLike[]>;
-  /** The bins a newly adopted channel's roster is seeded from. */
-  connectedBins(): Promise<string[]>;
-  /** Every bot directory with dsh's view merged in (`listBots` in bots.ts, narrowed). */
-  listBots(): Promise<{ id: string; name: string; broken?: string; listed: boolean }[]>;
   /** Whether the Lunhui runs row is mounted (`lunhuiMounted` in panels.ts over the loader's entries). */
   lunhuiMounted(): boolean;
 }
@@ -1043,8 +1030,7 @@ export function registerChannelRoutes(webServer: RouteRegistrar, deps: ChannelRo
   const reconcile = async (): Promise<{ channels: ChannelRow[]; ungrouped: SessionHeadLike[]; heads: SessionHeadLike[] }> => {
     const heads = await deps.listSessions();
     const reconciled = await reconcileChannels({
-      registry: deps.registry, root: deps.root, home: deps.home,
-      sessions: heads, connectedBins: await deps.connectedBins(),
+      registry: deps.registry, root: deps.root, sessions: heads,
     });
     return { ...reconciled, heads };
   };
@@ -1119,103 +1105,11 @@ export function registerChannelRoutes(webServer: RouteRegistrar, deps: ChannelRo
           ok: true, channel,
           status: await readChannelStatus(channel.dir),
           body: await readChannelBody(channel.dir),
-          agents: await rosterFor(deps.home, channel.workspaceId) ?? [],
-          bots: await botsFor(deps.home, channel.workspaceId) ?? [],
-          allBots: await deps.listBots(),
         });
       } catch (err) {
         if (err instanceof HttpError) return send(res, err.status, { ok: false, error: err.message });
         return send(res, 500, { ok: false, error: "overview failed" });
       }
-    },
-  });
-
-  webServer.register({
-    kind: "exact",
-    path: "/data/channels/agents",
-    handler: async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-      if (!guardPost(req, res)) return;
-      try {
-        const { workspaceId, agents } = await bodyOf(req);
-        const { channels } = await reconcile();
-        if (!channels.some((c) => c.workspaceId === workspaceId)) return send(res, 404, { ok: false, error: "no such channel" });
-        if (!Array.isArray(agents) || agents.some((a) => typeof a !== "string")) {
-          return send(res, 400, { ok: false, error: "agents must be an array of bin names" });
-        }
-        const id = workspaceId as string;
-        await setRoster(deps.home, id, agents as string[]);
-        /* The roster is operator-owned, but the surface that writes it is an
-         * unauthenticated loopback route (spec section 5, limit 3). What
-         * cannot be prevented is at least made VISIBLE - Rule 5 - via a
-         * dated line in a durable face log (I2; see roster.ts's
-         * `logRosterWrite`), not just a bare, undated stdout line. */
-        await logRosterWrite(deps.home, id, agents as string[]);
-        return send(res, 200, { ok: true, agents: await rosterFor(deps.home, id) ?? [] });
-      } catch (err) {
-        if (err instanceof HttpError) return send(res, err.status, { ok: false, error: err.message });
-        return send(res, 500, { ok: false, error: "roster write failed" });
-      }
-    },
-  });
-
-  webServer.register({
-    kind: "exact",
-    path: "/data/channels/bots",
-    handler: async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-      if (!guardPost(req, res)) return;
-      try {
-        const { workspaceId, bots } = await bodyOf(req);
-        const { channels } = await reconcile();
-        if (!channels.some((c) => c.workspaceId === workspaceId)) return send(res, 404, { ok: false, error: "no such channel" });
-        if (!Array.isArray(bots) || bots.some((b) => !isBotId(b))) {
-          return send(res, 400, { ok: false, error: "bots must be an array of bot ids" });
-        }
-        const ids = [...new Set(bots as string[])];
-        /* The cap is the room's, not the store's: six members is what one
-         * operator message may cost (spec §4.6, P5). Refused here, before the
-         * write, so the file never holds a roster the engine would refuse. */
-        if (ids.length > ROOM_CAPS.maxMembers) {
-          return send(res, 400, { ok: false, error: `a channel rosters at most ${ROOM_CAPS.maxMembers} bots` });
-        }
-        const id = workspaceId as string;
-        await setBots(deps.home, id, ids);
-        await logBotsWrite(deps.home, id, ids);
-        return send(res, 200, { ok: true, bots: await botsFor(deps.home, id) ?? [] });
-      } catch (err) {
-        if (err instanceof HttpError) return send(res, err.status, { ok: false, error: err.message });
-        return send(res, 500, { ok: false, error: "roster write failed" });
-      }
-    },
-  });
-
-  webServer.register({
-    kind: "exact",
-    path: "/data/channels",
-    handler: async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-      if (!guardPost(req, res)) return;
-      let made: ChannelDir;
-      try {
-        made = await createChannel(deps.root, (await bodyOf(req)).name);
-      } catch (err) {
-        if (err instanceof HttpError) return send(res, err.status, { ok: false, error: err.message });
-        return send(res, 500, { ok: false, error: "create failed" });
-      }
-      /* I3: the directory is ON DISK once createChannel above returns - the
-       * channel exists whether or not this reconcile succeeds. A throw here
-       * (EACCES out of listChannelDirs, an EIO in ws.status()) must NOT be reported as "create
-       * failed": that would be a successful creation answered as a 500, the
-       * client showing no row, and a retry hitting 409 "channel already
-       * exists" - the face contradicting its own filesystem. Adoption is a convenience that also runs on every ordinary
-       * listing, so a failure here just means the NEXT listing does the
-       * adopting instead - never fatal to this response. */
-      try {
-        await reconcile(); // adopt it before the client asks
-      } catch (err) {
-        /* Not fatal to this response - the next listing adopts it instead - but
-         * the codebase says a swallowed failure still gets a line. */
-        console.warn(`${BIN}: created ${made.name}, but adopting it now failed; the next listing will:`, err);
-      }
-      return send(res, 200, { ok: true, ...made });
     },
   });
 }

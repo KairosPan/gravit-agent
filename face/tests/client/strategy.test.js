@@ -26,8 +26,6 @@ export const overview = (over = {}) => ({
     latest: { file: 'bt-2026-10-19.json', json: { sharpe: 1.4123456, trades: 212, window: '2024-06..2026-07', rows: [1, 2] } },
     files: [{ name: 'notes.md', bytes: 512, mtime: '2026-10-19T09:00:00.000Z' }],
   },
-  agents: ['codex'], bots: ['buffett'],
-  allBots: [{ id: 'buffett', name: 'Buffett Type', listed: true }, { id: 'drill-bear', name: 'Bear', listed: true }],
   ...over,
 });
 // a strategy's page, by its name (#/strategy/<name>); the page reads its channel by the workspace the name has
@@ -39,7 +37,7 @@ const on = (data, status = 'ready') => {
   return R.channelLoaded(s, { workspaceId: 'w1', data, at: NOW });
 };
 
-test('the page draws the status headline, thesis, latest backtest, backtests, journal, files and rosters', () => {
+test('the page draws the status headline, thesis, latest backtest, backtests, journal and files', () => {
   setMarkdown(null);
   const h = renderStrategyScreen(on(overview()), NOW);
   assert.match(h, /<main class="main chan strat">/);
@@ -55,7 +53,6 @@ test('the page draws the status headline, thesis, latest backtest, backtests, jo
   assert.match(h, />Backtests</); assert.match(h, /2\.0 KB/);
   assert.match(h, />Journal</); assert.match(h, /2026-10-19[\s\S]*?Ran the screen[\s\S]*?2026-10-18[\s\S]*?Started/);
   assert.match(h, />Files</); assert.match(h, /notes\.md/); assert.match(h, /512 B/);
-  assert.match(h, />Agents<[\s\S]*?codex/); assert.match(h, />Bots<[\s\S]*?Buffett Type/);
   assert.doesNotMatch(h, /data-action="newRound"/, 'no New round: the one conversation takes every new word');
 });
 
@@ -68,7 +65,7 @@ test('a template thesis reads No thesis yet', () => {
 
 test('markup in every field stays text', () => {
   const bad = '<img src=x onerror=alert(1)>';
-  const t = overview({ status: { status: bad, one_line: bad, next: bad, numbers: { [bad]: bad } }, agents: [bad], bots: ['evil'], allBots: [{ id: 'evil', name: bad }] });
+  const t = overview({ status: { status: bad, one_line: bad, next: bad, numbers: { [bad]: bad } } });
   t.body = {
     thesis: { markdown: `# ${bad}\n\n${bad}`, isTemplate: false }, journal: [{ date: bad, text: bad }],
     backtests: [{ file: bad, bytes: 1 }], latest: { file: bad, json: { [bad]: bad } }, files: [{ name: bad, bytes: 1, mtime: '2026-10-19T09:00:00.000Z' }],
@@ -93,26 +90,13 @@ test('loading, unavailable with Retry, a stale page after a failed re-read, not 
   assert.match(renderStrategyScreen(missing, NOW), /Strategy not found/);
 });
 
-test('the roster editors tick what is rostered, offer the connected agents and every bot, and stop at six bots', () => {
+test('the strategy page draws no roster editor', () => {
   setMarkdown(null);
-  const s = on(overview());
-  const agents = R.startEdit(s, { kind: 'roster', which: 'agents', workspaceId: 'w1', choices: [{ value: 'codex', label: 'Codex' }, { value: 'claude', label: 'Claude' }], ticked: ['codex'] });
-  const a = renderStrategyScreen(agents, NOW);
-  assert.match(a, /class="roster-edit"/);
-  assert.match(a, /<input type="checkbox" id="roster-agents-0" name="roster" value="codex" checked>/);
-  assert.match(a, /<input type="checkbox" id="roster-agents-1" name="roster" value="claude">/);
-  assert.match(a, /data-action="commitEdit"/); assert.match(a, /data-action="cancelEdit"/);
-  assert.doesNotMatch(a, /data-action="editRoster" data-which="agents"/, 'the Edit key gives way to the editor');
-  assert.match(renderStrategyScreen(s, NOW), /data-action="editRoster" data-which="bots" data-id="w1"/);
-  const six = ['b1', 'b2', 'b3', 'b4', 'b5', 'b6'];
-  const choices = [...six, 'b7'].map(v => ({ value: v, label: v.toUpperCase() }));
-  const full = R.startEdit(s, { kind: 'roster', which: 'bots', workspaceId: 'w1', choices, ticked: six });
-  const b = renderStrategyScreen(full, NOW);
-  assert.match(b, /value="b7" disabled>/, 'a seventh bot cannot be ticked while six are');
-  assert.doesNotMatch(b, /value="b1" checked disabled/);
-  assert.equal(R.toggleRosterTick(full, { value: 'b7', on: true }).edit.ticked.length, 6, 'nor added through the store');
-  assert.deepEqual(R.toggleRosterTick(full, { value: 'b1', on: false }).edit.ticked, ['b2', 'b3', 'b4', 'b5', 'b6']);
-  assert.match(renderStrategyScreen(R.editFailed(full, { error: 'roster write failed' }), NOW), /roster write failed/);
+  // an older face's overview may still carry its rosters: the page reads them as nothing
+  const h = renderStrategyScreen(on(overview({ agents: ['codex'], bots: ['buffett'], allBots: [{ id: 'buffett', name: 'Buffett Type', listed: true }] })), NOW);
+  assert.doesNotMatch(h, /roster|editRoster|commitEdit/);
+  assert.doesNotMatch(h, />Agents</); assert.doesNotMatch(h, />Bots</);
+  assert.doesNotMatch(h, /Buffett Type|codex/);
 });
 
 test('the strategy page draws the research runs after the latest backtest, every string escaped', () => {

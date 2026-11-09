@@ -351,7 +351,6 @@ registerRosterRoutes(booted.ctx.webServer, { home: dshHome });
 registerChannelRoutes(booted.ctx.webServer, {
   registry: workspaceRegistry,
   root: process.cwd(),
-  home: dshHome,
   listSessions: () => listSessionHeads(
     async () => (await sessionPersistence.list()).map((s) => ({
       sessionId: String(s.header.id), cwd: s.header.cwd, agentPreset: s.header.agentPreset,
@@ -359,8 +358,6 @@ registerChannelRoutes(booted.ctx.webServer, {
     () => sessions.list().map((s) => ({ sessionId: String(s.id), cwd: s.header.cwd, agentPreset: s.header.agentPreset })),
     (err) => console.error(`${BIN}: the durable session listing failed; this listing groups only live sessions:`, err),
   ),
-  connectedBins,
-  listBots: allBots,
   /* the same live row tree panelDeps wraps, read on each request: whether include:lunhui-runs
    * is active now, not at boot */
   lunhuiMounted: () => {

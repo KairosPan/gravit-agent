@@ -83,8 +83,6 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .hist-back:hover { background: var(--hover); color: var(--text); }
 .hist-tag { flex: none; }
 .chan-stale { display: flex; align-items: center; gap: 10px; font-size: calc(12px * var(--fs)); }
-.chan-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.roster-edit { display: flex; flex-direction: column; gap: 4px; }
 /* a strategy's page (one-entry plan 2): the channel page's sections, then its tasks drawn as the rail's lines and the paper
    positions of the venue its status.yaml names, a table that scrolls sideways rather than the page */
 .main.strat .dsec { min-width: 0; }

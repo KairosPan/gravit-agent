@@ -13,7 +13,6 @@ import {
   ANALYSIS_RUN_RE, MODULE_HEADLINES, parseChannelStatus, presetHintsOf, readAnalysisRuns, readChannelStatus, readChannelBody, readRunManifests, reconcileChannels, registerChannelRoutes, statusOfText,
   RUN_MANIFEST_MAX_BYTES, WORKBENCH,
 } from "../src/channels.ts";
-import { rosterFor } from "../src/roster.ts";
 import { HttpError } from "../src/http.ts";
 import { MODULES } from "../plugins/lunhui/lib/modules.mjs";
 import { addEvidence, openRun, sealRun } from "../plugins/lunhui/lib/runs.mjs";
@@ -757,13 +756,13 @@ test("reconcileChannels adopts every channel dir plus the repo root, and is idem
     { sessionId: "session-b", cwd: join(root, "strategies", "alpha") },
     { sessionId: "session-c", cwd: "/Users/pan/Desktop/trend-dragon" },
   ];
-  const first = await reconcileChannels({ registry, root, home, sessions, connectedBins: ["claude", "codex"] });
+  const first = await reconcileChannels({ registry, root, sessions });
 
   assert.deepEqual(first.channels.map((c) => c.name), ["workbench", "alpha", "市场情绪"]);
   assert.deepEqual(first.ungrouped.map((s) => s.sessionId), ["session-c"], "a foreign session is counted, never dropped");
   assert.equal(attaches.length, 2, "session-a to the workbench, session-b to alpha");
 
-  const second = await reconcileChannels({ registry, root, home, sessions, connectedBins: ["claude", "codex"] });
+  const second = await reconcileChannels({ registry, root, sessions });
   assert.equal(attaches.length, 2, "a repeat listing attaches nothing new");
   assert.deepEqual(second.channels.map((c) => c.workspaceId), first.channels.map((c) => c.workspaceId), "ids are stable");
 });
@@ -778,7 +777,7 @@ test("reconcileChannels leaves the display title to the registry, so the repo ro
   const home = await mkdtemp(join(tmpdir(), "face-home-title-"));
   const { registry } = fakeRegistry();
 
-  const out = await reconcileChannels({ registry, root, home, sessions: [], connectedBins: [] });
+  const out = await reconcileChannels({ registry, root, sessions: [] });
   const workbench = out.channels.find((c) => c.isRoot)!;
 
   assert.equal(workbench.name, WORKBENCH, "the directory-side identity is still the code's");
@@ -793,13 +792,13 @@ test("reconcileChannels never overwrites a title the operator renamed", async ()
   const root = await makeRoot();
   const home = await mkdtemp(join(tmpdir(), "face-home-rename-"));
   const { registry } = fakeRegistry();
-  const first = await reconcileChannels({ registry, root, home, sessions: [], connectedBins: [] });
+  const first = await reconcileChannels({ registry, root, sessions: [] });
   const alpha = first.channels.find((c) => c.name === "alpha")!;
 
   // exactly what `/api/workspace.rename` does: Workspace.setTitle
   await registry.list().find((ws: { id: string }) => ws.id === alpha.workspaceId)!.setTitle("动量");
 
-  const second = await reconcileChannels({ registry, root, home, sessions: [], connectedBins: [] });
+  const second = await reconcileChannels({ registry, root, sessions: [] });
   const renamed = second.channels.find((c) => c.name === "alpha")!;
   assert.equal(renamed.title, "动量", "a listing is a read of the title, never a write");
   assert.equal(renamed.name, "alpha", "and the rename never touched the directory-side name");
@@ -817,7 +816,7 @@ test("reconcileChannels carries status and reports a missing directory instead o
   await registry.create(vanishedDir);
   await rm(vanishedDir, { recursive: true, force: true });
 
-  const out = await reconcileChannels({ registry, root, home, sessions: [], connectedBins: [] });
+  const out = await reconcileChannels({ registry, root, sessions: [] });
   assert.equal(out.channels.find((c) => c.name === "alpha")?.status, "researching");
   const gone = out.channels.find((c) => c.dir.endsWith("vanished"));
   assert.equal(gone?.missingDir, true, "a registered workspace whose directory is gone still lists, greyed");
@@ -828,7 +827,7 @@ test("reconcileChannels attaches only sessions whose cwd IS the channel director
   const home = await mkdtemp(join(tmpdir(), "face-home4-"));
   const { registry, attaches } = fakeRegistry();
   await reconcileChannels({
-    registry, root, home, connectedBins: [],
+    registry, root,
     sessions: [{ sessionId: "session-deep", cwd: join(root, "strategies", "alpha", "notes") }],
   });
   assert.deepEqual(attaches, [], "a subdirectory is not the channel; the host would reject the attach anyway");
@@ -840,7 +839,7 @@ test("reconcileChannels: a session the host refuses to attach falls into ungroup
   const { registry, attaches } = fakeRegistry({ rejectSessionIds: ["session-bad"] });
   const sessions = [{ sessionId: "session-bad", cwd: join(root, "strategies", "alpha") }];
 
-  const out = await reconcileChannels({ registry, root, home, sessions, connectedBins: [] });
+  const out = await reconcileChannels({ registry, root, sessions });
   assert.deepEqual(attaches, [], "the host's rejection is not forced through");
   assert.deepEqual(
     out.ungrouped.map((s) => s.sessionId),
@@ -864,7 +863,7 @@ test("reconcileChannels: a directory vanishing between readdir and create skips 
     },
   };
 
-  const out = await reconcileChannels({ registry, root, home, sessions: [], connectedBins: [] });
+  const out = await reconcileChannels({ registry, root, sessions: [] });
   assert.deepEqual(
     out.channels.map((c) => c.name),
     ["workbench", "市场情绪"],
@@ -940,7 +939,7 @@ test("reconcileChannels attaches a session that ONLY the persisted listing repor
     [{ sessionId: "session-from-disk", cwd: alphaDir }],
     [],
   );
-  const out = await reconcileChannels({ registry, root, home, sessions: persistedOnly, connectedBins: [] });
+  const out = await reconcileChannels({ registry, root, sessions: persistedOnly });
   const alpha = out.channels.find((c) => c.name === "alpha")!;
   assert.deepEqual(attaches, [`${alpha.workspaceId}:session-from-disk`], "a persisted-only session is attached");
   assert.deepEqual(out.ungrouped, [], "it is not left ungrouped just because it was never live");
@@ -972,10 +971,8 @@ async function routesFor(root: string, home: string): Promise<Map<string, WebRou
   const { registry } = fakeRegistry();
   const routes: WebRoute[] = [];
   registerChannelRoutes({ register: (route) => routes.push(route) }, {
-    registry, root, home,
+    registry, root,
     listSessions: async () => [],
-    connectedBins: async () => ["codex"],
-    listBots: async () => [],
     lunhuiMounted: () => false,
   });
   return new Map(routes.map((r) => [r.path, r]));
@@ -989,11 +986,10 @@ async function channelNamed(routes: Map<string, WebRoute>, name: string): Promis
   return payload.channels.find((c) => c.name === name)!;
 }
 
-test("routes: exactly six paths, and every one refuses a forged Host FIRST", async () => {
+test("routes: exactly three paths, and every one refuses a forged Host FIRST", async () => {
   const routes = await routesFor(await makeRoot(), await mkdtemp(join(tmpdir(), "face-rt-")));
   assert.deepEqual([...routes.keys()].sort(), [
-    "/data/channels", "/data/channels.json", "/data/channels/agents", "/data/channels/bots", "/data/channels/overview",
-    "/data/modules.json",
+    "/data/channels.json", "/data/channels/overview", "/data/modules.json",
   ]);
   for (const [path, route] of routes) {
     const forged = fakeRes();
@@ -1005,7 +1001,7 @@ test("routes: exactly six paths, and every one refuses a forged Host FIRST", asy
 
 test("routes: the POSTs are POST-only and application/json-only", async () => {
   const routes = await routesFor(await makeRoot(), await mkdtemp(join(tmpdir(), "face-rt2-")));
-  for (const path of ["/data/channels", "/data/channels/agents", "/data/channels/overview"]) {
+  for (const path of ["/data/channels/overview"]) {
     const wrongMethod = fakeRes();
     await routes.get(path)!.handler(getReq("127.0.0.1:3090"), wrongMethod.res);
     assert.equal(wrongMethod.out.status, 405, path);
@@ -1055,7 +1051,7 @@ test("routes: the listing's presets come from the same merged heads the reconcil
   const { registry } = fakeRegistry();
   const routes: WebRoute[] = [];
   registerChannelRoutes({ register: (route) => routes.push(route) }, {
-    registry, root, home: await mkdtemp(join(tmpdir(), "face-rt-presets-")),
+    registry, root,
     // The shape main.ts feeds: persisted heads (from snapshot headers) merged with live ones.
     listSessions: () => listSessionHeads(
       async () => [
@@ -1065,8 +1061,6 @@ test("routes: the listing's presets come from the same merged heads the reconcil
       () => [{ sessionId: "re-pointed", cwd: root, agentPreset: "speculator" }, { sessionId: "live-host", cwd: root }],
       () => { throw new Error("the durable listing did not fail here"); },
     ),
-    connectedBins: async () => [],
-    listBots: async () => [],
     lunhuiMounted: () => false,
   });
   const out = fakeRes();
@@ -1115,15 +1109,12 @@ test("routes: a body that cannot be serialized answers one clean 500 with fixed 
   const { registry } = fakeRegistry();
   const routes: WebRoute[] = [];
   registerChannelRoutes({ register: (route) => routes.push(route) }, {
-    registry, root, home: await mkdtemp(join(tmpdir(), "face-rt-ser-")),
-    listSessions: async () => [],
-    connectedBins: async () => ["codex"],
-    // a value JSON.stringify refuses, standing in for anything a block might one day carry
-    listBots: async () => [{ id: "b", name: "b", listed: true, size: 1n }] as never,
+    registry, root,
+    // a head no channel adopts rides the listing's `ungrouped` verbatim: a value JSON.stringify refuses
+    listSessions: async () => [{ sessionId: "stray", cwd: "/nowhere", size: 1n }] as never,
     lunhuiMounted: () => false,
   });
   const byPath = new Map(routes.map((r) => [r.path, r]));
-  const ws = await channelNamed(byPath, "alpha");
   // a response that refuses a second head, as Node's does once the first is written
   const heads: number[] = [];
   let sent = "";
@@ -1135,77 +1126,10 @@ test("routes: a body that cannot be serialized answers one clean 500 with fixed 
     },
     end(chunk?: string) { sent = String(chunk ?? ""); return res; },
   };
-  await byPath.get("/data/channels/overview")!.handler(postReq(JSON.stringify({ workspaceId: ws.workspaceId })), res as unknown as ServerResponse);
+  await byPath.get("/data/channels.json")!.handler(getReq("127.0.0.1:3090"), res as unknown as ServerResponse);
   assert.deepEqual(heads, [500]);
   assert.deepEqual(JSON.parse(sent), { ok: false, error: "response could not be serialized" });
 });
-
-test("routes: the roster write replaces the set and refuses an unknown channel", async () => {
-  const home = await mkdtemp(join(tmpdir(), "face-rt5-"));
-  const routes = await routesFor(await makeRoot(), home);
-  const alpha = await channelNamed(routes, "alpha");
-
-  const set = fakeRes();
-  await routes.get("/data/channels/agents")!.handler(
-    postReq(JSON.stringify({ workspaceId: alpha.workspaceId, agents: ["codex", "codex"] })), set.res);
-  assert.equal(set.out.status, 200);
-  assert.deepEqual(await rosterFor(home, alpha.workspaceId), ["codex"]);
-
-  const unknown = fakeRes();
-  await routes.get("/data/channels/agents")!.handler(postReq(JSON.stringify({ workspaceId: "ws-nope", agents: [] })), unknown.res);
-  assert.equal(unknown.out.status, 404);
-
-  const junk = fakeRes();
-  await routes.get("/data/channels/agents")!.handler(
-    postReq(JSON.stringify({ workspaceId: alpha.workspaceId, agents: "codex" })), junk.res);
-  assert.equal(junk.out.status, 400);
-});
-
-test("routes: POST /data/channels creates once, then conflicts; bad JSON is a 400", async () => {
-  const root = await makeRoot();
-  const routes = await routesFor(root, await mkdtemp(join(tmpdir(), "face-rt6-")));
-  const create = routes.get("/data/channels")!;
-
-  const first = fakeRes();
-  await create.handler(postReq('{"name":"gamma"}'), first.res);
-  assert.equal(first.out.status, 200);
-  await stat(join(root, "strategies", "gamma"));
-
-  const again = fakeRes();
-  await create.handler(postReq('{"name":"gamma"}'), again.res);
-  assert.equal(again.out.status, 409);
-
-  const junkBody = fakeRes();
-  await create.handler(postReq("not json"), junkBody.res);
-  assert.equal(junkBody.out.status, 400);
-});
-
-test("routes: POST /data/channels stays 200 even when the reconcile AFTER creation fails (I3)", async () => {
-  const root = await makeRoot();
-  const { registry } = fakeRegistry();
-  const routes: WebRoute[] = [];
-  registerChannelRoutes({ register: (route) => routes.push(route) }, {
-    registry, root, home: await mkdtemp(join(tmpdir(), "face-rt7-")),
-    listSessions: async () => [],
-    // Fails BEFORE reconcileChannels/registry.create ever runs (reconcile()
-    // awaits this first) - simulates the EACCES/lock-timeout/EIO class I3
-    // is about, entirely decoupled from directory creation itself.
-    connectedBins: async () => { throw new Error("EACCES: permission denied"); },
-    listBots: async () => [],
-    lunhuiMounted: () => false,
-  });
-  const create = new Map(routes.map((r) => [r.path, r])).get("/data/channels")!;
-
-  const out = fakeRes();
-  await create.handler(postReq('{"name":"delta"}'), out.res);
-  assert.equal(out.out.status, 200, "the directory is already on disk; a reconcile failure must not be reported as create failed");
-  assert.equal((JSON.parse(out.out.body) as { ok: boolean }).ok, true);
-  await stat(join(root, "strategies", "delta")); // the channel really was created, not just claimed to be
-});
-
-/* The name-validation cases carry over from strategies.test.ts:36-72. The NUL
- * case is built with String.fromCharCode and the two normalizations with
- * escapes, so this file has no literal control characters. */
 
 test("createChannel copies the template, skips __pycache__, never overwrites", async () => {
   const root = await makeRoot();
@@ -1245,50 +1169,22 @@ test("createChannel takes a name in any script and creates it in NFC", async () 
   assert.equal((await createChannel(root, "存储超级周期")).name, "存储超级周期", "a Chinese name is a name");
 });
 
-test("the overview carries the bot roster and every preset the roster reports; POST /data/channels/bots writes it under the members cap", async () => {
-  const root = await makeRoot();
-  const home = await mkdtemp(join(tmpdir(), "face-home-"));
-  const { registry } = fakeRegistry();
-  const built: WebRoute[] = [];
-  registerChannelRoutes({ register: (route) => built.push(route) }, {
-    registry, root, home,
-    listSessions: async () => [], connectedBins: async () => [],
-    listBots: async () => [
-      { id: "buffett", name: "巴菲特型", listed: true },
-      { id: "cracked", name: "cracked", broken: "not a list", listed: true },
-    ],
-    lunhuiMounted: () => false,
-  });
-  const routes = new Map(built.map((r) => [r.path, r]));
+test("the channel roster routes are gone: none of the three POSTs is registered", async () => {
+  const routes = await routesFor(await makeRoot(), await mkdtemp(join(tmpdir(), "face-rt-gone-")));
+  for (const path of ["/data/channels", "/data/channels/agents", "/data/channels/bots"]) {
+    assert.equal(routes.has(path), false, `${path} answers the web server's own 404`);
+  }
+});
+
+test("the overview answers no roster: no agents, no bots, no allBots", async () => {
+  const routes = await routesFor(await makeRoot(), await mkdtemp(join(tmpdir(), "face-rt-over-")));
   const ws = await channelNamed(routes, "alpha");
-
-  const ok = fakeRes();
-  await routes.get("/data/channels/bots")!.handler(
-    postReq(JSON.stringify({ workspaceId: ws.workspaceId, bots: ["buffett", "ghost"] })), ok.res);
-  assert.equal(ok.out.status, 200);
-  const okBody = JSON.parse(ok.out.body) as { bots: string[] };
-  assert.deepEqual(okBody.bots, ["buffett", "ghost"], "an id the mount does not report is kept and shown (Rule 5), not dropped");
-
   const over = fakeRes();
   await routes.get("/data/channels/overview")!.handler(postReq(JSON.stringify({ workspaceId: ws.workspaceId })), over.res);
-  const overBody = JSON.parse(over.out.body) as { bots: string[]; allBots: { id: string; broken?: string }[] };
-  assert.deepEqual(overBody.bots, ["buffett", "ghost"]);
-  assert.deepEqual(overBody.allBots.map((b) => b.id), ["buffett", "cracked"]);
-  assert.equal(overBody.allBots[1].broken, "not a list");
-
-  const tooMany = fakeRes();
-  await routes.get("/data/channels/bots")!.handler(
-    postReq(JSON.stringify({ workspaceId: ws.workspaceId, bots: ["a1", "a2", "a3", "a4", "a5", "a6", "a7"] })), tooMany.res);
-  assert.equal(tooMany.out.status, 400);
-  assert.match((JSON.parse(tooMany.out.body) as { error: string }).error, /6/);
-
-  const junk = fakeRes();
-  await routes.get("/data/channels/bots")!.handler(postReq(JSON.stringify({ workspaceId: ws.workspaceId, bots: ["Not Valid"] })), junk.res);
-  assert.equal(junk.out.status, 400);
-
-  const nowhere = fakeRes();
-  await routes.get("/data/channels/bots")!.handler(postReq(JSON.stringify({ workspaceId: "ws-none", bots: [] })), nowhere.res);
-  assert.equal(nowhere.out.status, 404);
+  assert.equal(over.out.status, 200);
+  const body = JSON.parse(over.out.body) as Record<string, unknown>;
+  assert.equal(body.ok, true);
+  for (const key of ["agents", "bots", "allBots"]) assert.equal(key in body, false, key);
 });
 
 test("the repository's strategies/cn-market lists as a channel, the market read's own directory", async () => {

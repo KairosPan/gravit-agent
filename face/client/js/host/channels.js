@@ -1,15 +1,11 @@
 // face/client/js/host/channels.js — a strategy's channel from the face (spec 2026-10-19 §7 Stage 3 "Channels"): the overview
-// read behind its page (status, thesis, backtests, journal, files, rosters), the paper positions of the venue its status.yaml
-// names (one-entry plan 2: only that venue, never a guess), and the two roster writes.
-// Impure; nothing here draws. A write answers {ok: true} or {error: <words>} for the editor that asked.
+// read behind its page (status, thesis, backtests, journal, files), the paper positions of the venue its status.yaml
+// names (one-entry plan 2: only that venue, never a guess). Impure; nothing here draws.
 import { positionsOf } from './account-view.js';
-import { said } from '../i18n/words.js';
 
-export const MAX_BOTS = 6; // a channel rosters at most six bots (src/room-rules.ts ROOM_CAPS.maxMembers)
 // the Account's refusal as one line: its sentence, else its code; null when the body carries none
 const text = v => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
 const refusalLine = body => text(body?.refusal?.message) ?? text(body?.refusal?.code) ?? null;
-const words = err => err?.code ?? err?.said ?? err?.message ?? said('channel.failed');
 
 export function startChannels({ store, postJson, getJson, now = Date.now }) {
   let seq = 0; // only the latest-started overview lands
@@ -49,31 +45,5 @@ export function startChannels({ store, postJson, getJson, now = Date.now }) {
     }
   }
 
-  // the agents a channel may roster: the connected CLI agents that answered on this machine
-  async function agentChoices() {
-    try {
-      const body = await getJson('/data/agents.json');
-      return (Array.isArray(body?.local) ? body.local : [])
-        .filter(a => a && a.found === true && typeof a.bin === 'string' && a.bin !== '')
-        .map(a => ({ bin: a.bin, label: typeof a.label === 'string' && a.label !== '' ? a.label : a.bin }));
-    } catch {
-      return [];
-    }
-  }
-
-  async function write(path, body, workspaceId) {
-    try {
-      await postJson(path, body);
-    } catch (err) {
-      return { error: words(err) };
-    }
-    await overview(workspaceId);
-    return { ok: true };
-  }
-  const setAgents = (workspaceId, bins) => write('/data/channels/agents', { workspaceId, agents: bins }, workspaceId);
-  const setBots = (workspaceId, ids) => (ids.length > MAX_BOTS
-    ? Promise.resolve({ error: said('channel.atMostSix') })
-    : write('/data/channels/bots', { workspaceId, bots: ids }, workspaceId));
-
-  return { overview, positions, agentChoices, setAgents, setBots };
+  return { overview, positions };
 }

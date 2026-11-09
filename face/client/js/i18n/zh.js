@@ -1628,10 +1628,8 @@ export const ZH = Object.freeze({
   'desk.tab.pages': '今天打开的网页',
   'desk.tab.pagesNone': '今天没有',
 
-  // a channel (host/channels.js, render/strategy.js, host/runs-view.js): its page, its rosters, its research runs and their
-  // chips, a write that failed
-  'channel.failed': '失败',
-  'channel.atMostSix': '最多六个机器人',
+  // a channel (host/channels.js, render/strategy.js, host/runs-view.js): its page, its research runs and their
+  // chips
   'channel.bytes.b': '{n} B',
   'channel.bytes.kb': '{n} KB',
   'channel.bytes.mb': '{n} MB',
@@ -1654,11 +1652,6 @@ export const ZH = Object.freeze({
   'channel.count.fields': '{n} 个字段',
   'channel.chip.notEvaluable': '{module}：无法评估',
   'channel.chip.module': '{module}：{words}',
-  'channel.roster.noChoice': '没有可选的',
-  'channel.roster.edit': '编辑',
-  'channel.roster.agents': '智能体',
-  'channel.roster.bots': '机器人',
-  'channel.none': '无',
   'channel.next': '下一步：{next}',
   'channel.retry': '重试',
   'channel.stale': '截至 {at} · 已过时',
