@@ -6,9 +6,10 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { Readable } from "node:stream";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { routerEnabled, installRouter, installTasks, RECOVERY_NOTE, IDLE_DISPOSE_MS, type TasksDeps, type TasksHandle } from "../src/tasks.ts";
+import { routerEnabled, installRouter, installTasks, RECOVERY_NOTE, CONTINUE_NOTE, IDLE_DISPOSE_MS, type TasksDeps, type TasksHandle } from "../src/tasks.ts";
 import type { ConversationHandle } from "../src/conversation.ts";
 import type { EventLike, MessageLike } from "../src/room-rules.ts";
 import type { AgentLike } from "../src/room.ts";
@@ -257,20 +258,31 @@ const report = (turn: number, callId: string, status: string, text: string): Ev[
 /* ---------- the route recorder ---------- */
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => Promise<void> | void;
-function recorder(): { register(route: { path: string; handler: Handler }): void; paths(): string[]; get(path: string, host?: string): Promise<{ status: number; body: Record<string, unknown> }> } {
+type Rec = {
+  register(route: { path: string; handler: Handler }): void;
+  paths(): string[];
+  get(path: string, host?: string): Promise<{ status: number; body: Record<string, unknown> }>;
+  post(path: string, body: unknown, host?: string, method?: string): Promise<{ status: number; body: Record<string, unknown> }>;
+};
+function recorder(): Rec {
   const routes = new Map<string, Handler>();
+  const call = async (path: string, method: string, host: string, payload: string | undefined): Promise<{ status: number; body: Record<string, unknown> }> => {
+    const handler = routes.get(path);
+    assert.ok(handler, `a route at ${path}`);
+    let status = 0;
+    let body = "";
+    const res = { writeHead(s: number) { status = s; return res; }, end(b: string) { body = b; } } as unknown as ServerResponse;
+    const req = Object.assign(Readable.from(payload === undefined ? [] : [Buffer.from(payload)]), {
+      method, url: path, headers: { host, ...(payload === undefined ? {} : { "content-type": "application/json" }) },
+    }) as unknown as IncomingMessage;
+    await handler(req, res);
+    return { status, body: JSON.parse(body) as Record<string, unknown> };
+  };
   return {
     register(route) { routes.set(route.path, route.handler); },
     paths: () => [...routes.keys()],
-    async get(path, host = "127.0.0.1:3090") {
-      const handler = routes.get(path);
-      assert.ok(handler, `a route at ${path}`);
-      let status = 0;
-      let body = "";
-      const res = { writeHead(s: number) { status = s; return res; }, end(b: string) { body = b; } } as unknown as ServerResponse;
-      await handler({ method: "GET", url: path, headers: { host } } as unknown as IncomingMessage, res);
-      return { status, body: JSON.parse(body) as Record<string, unknown> };
-    },
+    get: (path, host = "127.0.0.1:3090") => call(path, "GET", host, undefined),
+    post: (path, body, host = "127.0.0.1:3090", method = "POST") => call(path, method, host, JSON.stringify(body)),
   };
 }
 
@@ -289,7 +301,7 @@ test("GET /data/tasks lists the conversation's workers — waiting for you first
   const tasks = await install(h, rec);
   t.after(() => tasks.dispose());
 
-  assert.deepEqual(rec.paths(), ["/data/tasks"]);
+  assert.deepEqual(rec.paths(), ["/data/tasks", "/data/tasks/stop", "/data/tasks/continue"]);
   const got = await rec.get("/data/tasks");
   assert.equal(got.status, 200);
   assert.equal(got.body.ok, true);
@@ -577,4 +589,59 @@ test("installRouter checks the conversation's fence once: a violation is one lou
   await installRouter({ conversation: handle, tasks: () => tasks, fence: async (): Promise<string | undefined> => { throw new Error("EACCES"); }, log: (line) => { lines.push(line); } });
   assert.equal(lines.length, 1);
   assert.match(lines[0]!, /EACCES/);
+});
+
+test("POST /data/tasks/stop calls ops.stop once and answers {ok, task}", async (t) => {
+  const h = await harness();
+  const rec = recorder();
+  const tasks = await install(h, rec);
+  t.after(() => tasks.dispose());
+  h.tree.script("gravit", () => ({ kind: "hang" }));
+  const started = await tasks.ops.start({ title: "Long", brief: "work" });
+  const calls: string[] = [];
+  const real = tasks.ops.stop.bind(tasks.ops);
+  tasks.ops.stop = async (id) => { calls.push(id); return real(id); };
+  const pending = rec.post("/data/tasks/stop", { task: started.id });
+  await h.tree.clock.advance(10);
+  const got = await pending;
+  assert.equal(got.status, 200);
+  assert.equal(got.body.ok, true);
+  assert.deepEqual(calls, [started.id]);
+  assert.equal((got.body.task as { id: string }).id, started.id);
+  assert.equal((got.body.task as { state: string }).state, "stopped");
+});
+
+test("POST /data/tasks/continue sends CONTINUE_NOTE through ops.steer", async (t) => {
+  const h = await harness();
+  h.seed("w-done", [brief("w-done", "Done", AT - 60_000), start(1), said(1, "done"), end(1)]);
+  const rec = recorder();
+  const tasks = await install(h, rec);
+  t.after(() => tasks.dispose());
+  assert.equal(CONTINUE_NOTE, "Continue the task. First check what you already did \u2014 files written, orders proposed, messages sent \u2014 and do not repeat any of it.");
+  const calls: [string, string][] = [];
+  const real = tasks.ops.steer.bind(tasks.ops);
+  tasks.ops.steer = async (id, text) => { calls.push([id, text]); return real(id, text); };
+  const pending = rec.post("/data/tasks/continue", { task: "w-done" });
+  await h.tree.clock.advance(50);
+  const got = await pending;
+  assert.equal(got.status, 200);
+  assert.deepEqual(calls, [["w-done", CONTINUE_NOTE]]);
+  assert.equal((got.body.task as { id: string }).id, "w-done");
+});
+
+test("the Stop and Continue routes: an unknown task is 404, a bad body 400, GET 405, an untrusted request 403", async (t) => {
+  const h = await harness();
+  const rec = recorder();
+  const tasks = await install(h, rec);
+  t.after(() => tasks.dispose());
+  for (const path of ["/data/tasks/stop", "/data/tasks/continue"]) {
+    const missing = await rec.post(path, { task: "x" });
+    assert.deepEqual([missing.status, missing.body], [404, { ok: false, error: "no such task" }]);
+    for (const bad of [{}, { task: 3 }, { task: "" }, { task: "x".repeat(201) }]) {
+      const got = await rec.post(path, bad);
+      assert.deepEqual([got.status, got.body.error], [400, "task is required"]);
+    }
+    assert.equal((await rec.post(path, { task: "x" }, "127.0.0.1:3090", "GET")).status, 405);
+    assert.equal((await rec.post(path, { task: "x" }, "evil.example")).status, 403);
+  }
 });

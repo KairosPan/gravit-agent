@@ -1376,3 +1376,15 @@ test("readRunManifests lists run directories by the id form, newest first, and s
   await assert.rejects(readRunManifests(linked, 5), (err: NodeJS.ErrnoException) => err.code === "ENOTDIR");
   await assert.rejects(readRunManifests(join(dir, "nowhere"), 5), (err: NodeJS.ErrnoException) => err.code === "ENOENT");
 });
+
+test("status.yaml venue: paper-cn is read into the overview's status", async () => {
+  const dir = await statusDir("status: paper\nvenue: paper-cn\n");
+  assert.deepEqual(await readChannelStatus(dir), { status: "paper", venue: "paper-cn" });
+});
+
+test("a venue with a space or upper case is dropped", async () => {
+  for (const venue of ["paper cn", "Paper-CN", "-x", "", "a/b"]) {
+    const dir = await statusDir(`status: paper\nvenue: ${JSON.stringify(venue)}\n`);
+    assert.deepEqual(await readChannelStatus(dir), { status: "paper" }, venue);
+  }
+});

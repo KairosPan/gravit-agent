@@ -25,7 +25,7 @@ import { CONVERSATION_PRESET } from "./desk-names.ts";
 import { readSessionEvents, type DeskSessionPersistenceLike } from "./desk-session.ts";
 import type { DeskAgentLike, DeskToolsCtxLike } from "./desk-tools.ts";
 import { etDayStart } from "./et.ts";
-import { fencedGet } from "./http.ts";
+import { fencedGet, fencedPost, HttpError } from "./http.ts";
 import type { AgentLike, PersistedSnapshotLike, RoomDeps } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
 import type { RouteRegistrar } from "./static.ts";
@@ -47,6 +47,8 @@ export const IDLE_DISPOSE_MS = 600_000;
 /** How often the stalls and the idle workers are looked at (60 s). */
 export const TICK_MS = 60_000;
 export { RECOVERY_NOTE } from "./task-recovery.ts";
+/** The steer text Continue sends a task from its page. */
+export const CONTINUE_NOTE = "Continue the task. First check what you already did \u2014 files written, orders proposed, messages sent \u2014 and do not repeat any of it.";
 /** The stopped marker's text. */
 export const STOPPED_TEXT = "Stopped by the conversation.";
 
@@ -360,6 +362,20 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
     path: "/data/tasks",
     handler: fencedGet(deps.isTrusted, async () => ({ conversation: convId() ?? null, tasks: await ops.list() })),
   });
+
+  /* Stop and Continue from the task's page: `body.task` a non-empty string, an unknown id 404 */
+  const taskRoute = (act: (id: string) => Promise<TaskView>) => fencedPost(deps.isTrusted, async (body) => {
+    const id = body.task;
+    if (typeof id !== "string" || id === "" || id.length > 200) throw new HttpError(400, "task is required");
+    try {
+      return { task: await act(id) };
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("no task ")) throw new HttpError(404, "no such task");
+      throw err;
+    }
+  });
+  webServer.register({ kind: "exact", path: "/data/tasks/stop", handler: taskRoute((id) => ops.stop(id)) });
+  webServer.register({ kind: "exact", path: "/data/tasks/continue", handler: taskRoute((id) => ops.steer(id, CONTINUE_NOTE)) });
 
   const isConversation = (agent: DeskAgentLike): boolean => {
     if (ctx.agentPresets.composedPreset(agent.ctx) !== CONVERSATION_PRESET) return false;
