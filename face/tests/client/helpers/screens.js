@@ -378,6 +378,25 @@ export function everyState() {
     // plan 3 of one entry, Task 8: the rail's desk lines and its scheduled group, a phone task naming its origin, and a
     // strategy's page listing its standing order
     ...deskRailStates(base),
+    // plan 4 of one entry, Task 5: Available to Gravit on, off and unreadable, and a bot task's line on the rail
+    ...rosterStates(base),
+  ];
+}
+
+// the one roster (one-entry plan 4 Task 5): a bot's page and a connected CLI agent's with the switch on, off, and the roster
+// file unreadable (the switches disabled under its line); then a bot task's rail line beside a Gravit task's
+function rosterStates(base) {
+  let all = emptyState();
+  for (const [shelf, v] of Object.entries(listings())) all = R.shelfLoaded(all, { shelf, data: v.data, at: 1 });
+  const page = (id, roster) => R.rosterLoaded(R.nav(all, { screen: 'plugin', id }), roster);
+  const on = { ok: true, agents: ['codex'], bots: ['buffett'] };
+  const off = { ok: true, agents: [], bots: [] };
+  const bad = { ok: false, corrupt: true };
+  const task = (id, over = {}) => ({ id, title: `Task ${id}`, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW - 12 * MIN, lastEventAt: NOW - MIN, lastSeq: 1, ...over });
+  const tasks = [task('bb', { title: 'Argue the bull case', bot: 'drill-bull' }), task('gg', { title: 'Price the basket' })];
+  return [
+    page('bot:buffett', on), page('agent:codex', on), page('bot:buffett', off), page('agent:codex', off), page('bot:buffett', bad), page('agent:codex', bad),
+    R.nav(R.tasksLoaded(base, { conversation: 's1', tasks, at: NOW }), { screen: 'messages', id: null }),
   ];
 }
 
@@ -783,7 +802,7 @@ const CONTENT_FIELDS = new Set([
   // names: a venue's, a product's, an agent's, an account's, a market's, a network's
   'productName', 'protocol', 'quoteFrom', 'sourceWord', 'venueName', 'accountName', 'agentName', 'byName', 'toName', 'unitWord',
   'network', 'networks', 'chain', 'chains', 'bridgeChains', 'funded', 'exchange', 'feed', 'source', 'model', 'route', 'runtime',
-  'server', 'bin', 'handle', 'speaksAs', 'talksOnlyWith', 'username', 'tile', 'tools', 'toolName', 'headline', 'channelWords',
+  'server', 'bin', 'bot', 'handle', 'speaksAs', 'talksOnlyWith', 'username', 'tile', 'tools', 'toolName', 'headline', 'channelWords',
   'strategy', 'where', 'roleId', 'zone', 'clock', 'code', 'workspace',
   // tickers, assets and currencies
   'symbol', 'asset', 'assets', 'base', 'quote', 'token', 'sourceToken', 'toAssets', 'dollars', 'currency',

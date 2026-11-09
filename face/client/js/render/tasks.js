@@ -51,10 +51,12 @@ const strategyRow = name => (typeof name === 'string' && name !== ''
 const historyLink = id => (typeof id === 'string' && id !== ''
   ? `<div class="task-keys"><a class="btn-sm" href="#/history/${esc(encodeURIComponent(id))}">${th('tasks.desk.session')}</a></div>` : '');
 
-// a line's disclosure: its summary only the dot, the title, the status and the caret; the body as given
-function lineHtml(id, dot, title, status, body, open) {
+// a line's disclosure: its summary only the dot, a bot task's bot (one-entry plan 4), the title, the status and the caret;
+// the body as given
+function lineHtml(id, dot, title, status, body, open, bot = '') {
+  const who = typeof bot === 'string' && bot !== '' ? `<span class="task-bot">${esc(bot)}</span>` : '';
   return `<details${attrs({ class: 'task-line', 'data-task': id, open: open?.has(id) === true })}>` +
-    `<summary${attrs({ id: `tline-${id}`, 'data-action': 'toggleTask', 'data-task': id })}><span class="${cls('task-dot', dot)}"></span>` +
+    `<summary${attrs({ id: `tline-${id}`, 'data-action': 'toggleTask', 'data-task': id })}><span class="${cls('task-dot', dot)}"></span>${who}` +
     `<span class="task-title">${esc(maskExcerpt(title ?? ''))}</span><span class="task-status">${esc(status)}</span><span class="task-caret">${icon('chevDown', 14, 2.2)}</span></summary>` +
     `<div class="task-body">${body}</div></details>`;
 }
@@ -88,7 +90,7 @@ export function taskLineHtml({ task, gate, status }, group, state, open) {
     // a gate the read says waits but this page has not seen (after a reload, until the worker is opened): its full process
     : task.waitingFor && group !== 'running' ? `<div class="task-gate-there">${th('tasks.gateThere')}</div>`
     : task.result?.text ? `<div class="task-result">${esc(maskExcerpt(task.result.text))}</div>` : '';
-  return lineHtml(task.id, dot, task.title, status, `${originOf(task)}${strategy}${steps}${end}${usageOf(task.usage)}${keys(task, state.tasks.busy.includes(task.id))}`, open);
+  return lineHtml(task.id, dot, task.title, status, `${originOf(task)}${strategy}${steps}${end}${usageOf(task.usage)}${keys(task, state.tasks.busy.includes(task.id))}`, open, task.bot);
 }
 
 /** Any line of the rail in its group: a task's, the desk's or a standing order's. */

@@ -179,3 +179,11 @@ test('a phone task names its origin', () => {
   assert.doesNotMatch(lineOf(h, 'w1'), /task-origin/);
   withTable(ZH, () => assert.match(lineOf(renderTaskRail(state([task('p1', { origin: 'phone', network: 'telegram' })]), NOW), 'p1'), /class="task-origin">手机 · Telegram</));
 });
+
+test("a bot task's rail line shows the bot before its title; a Gravit task's none", () => {
+  const h = renderTaskRail(state([task('b1', { title: 'Argue the bull case', bot: 'drill-bull' }), task('g1')]), NOW);
+  const summary = lineOf(h, 'b1').match(/<summary[\s\S]*?<\/summary>/)[0];
+  assert.match(summary, /<span class="task-dot running"><\/span><span class="task-bot">drill-bull<\/span><span class="task-title">Argue the bull case<\/span>/);
+  assert.doesNotMatch(lineOf(h, 'g1'), /task-bot/);
+  assert.match(renderTaskRail(state([task('x', { bot: '<b>' })]), NOW), /task-bot">&lt;b&gt;</, 'the bot id is escaped');
+});

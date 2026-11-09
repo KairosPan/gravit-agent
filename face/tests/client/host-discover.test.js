@@ -20,12 +20,12 @@ function rig({ json = {}, calls: answers = {}, posts = {} } = {}) {
   const discover = startDiscover({ store, getJson, postJson, call, now: () => ++t });
   return { store, discover, reads, called, posted, d: () => store.get().discover };
 }
-const ok = { '/data/plugins.json': { ok: true, mcp: [], agentTools: [], rows: [] }, '/data/bots.json': { ok: true, bots: [] }, '/data/agents.json': { ok: true, main: {}, local: [], candidates: [] }, '/data/memory.json': { ok: true, groups: [] }, '/data/modules.json': { ok: true, mounted: true, root: '/r', channels: [] } };
+const ok = { '/data/plugins.json': { ok: true, mcp: [], agentTools: [], rows: [] }, '/data/bots.json': { ok: true, bots: [] }, '/data/agents.json': { ok: true, main: {}, local: [], candidates: [] }, '/data/memory.json': { ok: true, groups: [] }, '/data/modules.json': { ok: true, mounted: true, root: '/r', channels: [] }, '/data/roster.json': { ok: true, agents: [], bots: [] } };
 
-test('load reads the five listings once each; one failing marks only its shelf and keeps its data', async () => {
+test('load reads the five listings and the roster once each; one failing marks only its shelf and keeps its data', async () => {
   const r = rig({ json: { ...ok } });
   await Promise.all([r.discover.load(), r.discover.load()]);
-  assert.deepEqual(r.reads.sort(), ['/data/agents.json', '/data/bots.json', '/data/memory.json', '/data/modules.json', '/data/plugins.json']);
+  assert.deepEqual(r.reads.sort(), ['/data/agents.json', '/data/bots.json', '/data/memory.json', '/data/modules.json', '/data/plugins.json', '/data/roster.json']);
   for (const s of ['plugins', 'bots', 'agents', 'memory', 'modules']) assert.equal(r.d().shelves[s].status, 'ready', s);
   const bad = rig({ json: { ...ok, '/data/modules.json': { ok: true } } });
   await bad.discover.load();
@@ -139,4 +139,48 @@ test('modelChoices reads the catalog once into the store', async () => {
   await r.discover.modelChoices();
   assert.deepEqual(r.d().models, [{ value: 'deepseek/deepseek-chat', label: 'DeepSeek · Chat' }]);
   assert.equal(r.called.filter(c => c[0] === 'session/modelCatalog').length, 1);
+});
+
+// the one roster (one-entry plan 4 Task 5): read with the shelves, switched from a bot's or a CLI agent's page
+const roster = { ok: true, agents: ['codex'], bots: [] };
+
+test('load reads the roster with the shelves; an unreadable answer is corrupt, a failed read keeps what it had', async () => {
+  const r = rig({ json: { ...ok, '/data/roster.json': roster } });
+  await r.discover.load();
+  assert.ok(r.reads.includes('/data/roster.json'));
+  assert.deepEqual(r.d().roster, { status: 'ready', agents: ['codex'], bots: [] });
+  const bad = rig({ json: { ...ok, '/data/roster.json': { ok: false, corrupt: true } } });
+  await bad.discover.load();
+  assert.deepEqual(bad.d().roster, { status: 'corrupt', agents: [], bots: [] });
+  let fail = false;
+  const keep = rig({ json: { ...ok, '/data/roster.json': () => (fail ? new Error('HTTP 500') : roster) } });
+  await keep.discover.load();
+  fail = true;
+  await keep.discover.load();
+  assert.deepEqual(keep.d().roster, { status: 'failed', agents: ['codex'], bots: [] });
+});
+
+test('toggling posts {kind, id, on} to /data/roster and redraws from the answer', async () => {
+  const r = rig({ json: { ...ok, '/data/roster.json': roster }, posts: { '/data/roster': body => ({ ok: true, agents: ['codex'], bots: body.on ? [body.id] : [] }) } });
+  await r.discover.load();
+  r.store.dispatch('discoverStatus', { line: 'old trouble', bad: true });
+  assert.equal(await r.discover.toggleAvailable('bot', 'buffett'), true);
+  assert.deepEqual(r.posted, [['/data/roster', { kind: 'bot', id: 'buffett', on: true }]]);
+  assert.deepEqual(r.d().roster, { status: 'ready', agents: ['codex'], bots: ['buffett'] });
+  assert.equal(r.d().status, null, "a landed switch clears Discover's line");
+  assert.equal(await r.discover.toggleAvailable('agent', 'codex'), true);
+  assert.deepEqual(r.posted[1], ['/data/roster', { kind: 'agent', id: 'codex', on: false }], 'on is the flip of what the roster says');
+});
+
+test('a failed post leaves the switch as it was and shows the error', async () => {
+  const words = 'the roster file cannot be read';
+  const r = rig({ json: { ...ok, '/data/roster.json': roster }, posts: { '/data/roster': Object.assign(new Error(words), { status: 409, code: words }) } });
+  await r.discover.load();
+  assert.equal(await r.discover.toggleAvailable('agent', 'codex'), false);
+  assert.deepEqual(r.d().roster, { status: 'ready', agents: ['codex'], bots: [] });
+  assert.deepEqual(spoken(r.d().status), { line: 'Available to Gravit: the roster file cannot be read', bad: true });
+  const unread = rig({ json: { ...ok, '/data/roster.json': { ok: false, corrupt: true } } });
+  await unread.discover.load();
+  assert.equal(await unread.discover.toggleAvailable('bot', 'buffett'), false, 'an unreadable roster posts nothing');
+  assert.deepEqual(unread.posted, []);
 });

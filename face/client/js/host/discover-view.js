@@ -29,20 +29,24 @@ function dataItems(plugins) {
   });
 }
 
-function botItems(bots) {
+// the one roster's lists (one-entry plan 4): an item is available when its id is on them; none read yet, none is
+const rosterOf = r => ({ agents: Array.isArray(r?.agents) ? r.agents : [], bots: Array.isArray(r?.bots) ? r.bots : [] });
+
+function botItems(bots, roster) {
   return list(bots?.bots).filter(b => word(b.id) && b.isDefault !== true).map(b => {
     const name = word(b.name) ? b.name : b.id;
-    return { id: `bot:${b.id}`, shelf: 'bots', kind: t('discover.kind.bot'), kindCode: 'bot', name, line: word(b.description) ? b.description : '', mark: letter(name), source: b };
+    return { id: `bot:${b.id}`, shelf: 'bots', kind: t('discover.kind.bot'), kindCode: 'bot', name, line: word(b.description) ? b.description : '', mark: letter(name), source: b, available: roster.bots.includes(b.id) };
   });
 }
 
-// Gravit first (the main agent is always there), then the connected agents, then the ones found but not connected
-function agentItems(agents) {
+// Gravit first (the main agent is always there), then the connected agents - each available or not to Gravit - then the
+// ones found but not connected
+function agentItems(agents, roster) {
   const main = agents?.main && typeof agents.main === 'object' ? agents.main : {};
   const gravit = { id: 'agent:gravit', shelf: 'agents', kind: t('discover.kind.agent'), kindCode: 'agent', name: word(main.name) ? main.name : HOST_NAME, line: word(main.runtime) ? main.runtime : '', mark: { type: 'gravit' }, source: main };
   const local = list(agents?.local).filter(a => word(a.bin)).map(a => ({
     id: `agent:${a.bin}`, shelf: 'agents', kind: t('discover.kind.agent'), kindCode: 'agent', name: word(a.label) ? a.label : a.bin, line: a.found === true ? t('discover.agent.connected') : t('discover.notFound'),
-    mark: { type: 'glyph', icon: 'agent' }, source: { ...a, connected: true },
+    mark: { type: 'glyph', icon: 'agent' }, source: { ...a, connected: true }, available: roster.agents.includes(a.bin),
   }));
   const found = list(agents?.candidates).filter(a => word(a.bin)).map(a => ({
     id: `agent:${a.bin}`, shelf: 'agents', kind: t('discover.kind.agent'), kindCode: 'agent', name: word(a.label) ? a.label : a.bin, line: word(a.version) ? t('discover.agent.foundVersion', { version: a.version }) : t('discover.agent.found'),
@@ -61,11 +65,12 @@ function skillItems(memory) {
 // actives: the modules whose Run is running (modules-view's activeRuns), their cards live
 export function itemsOf(discover, actives = {}) {
   const sh = discover?.shelves ?? {};
+  const roster = rosterOf(discover?.roster);
   return {
     data: dataItems(sh.plugins?.data),
     research: researchItems(sh.modules?.data ?? null, sh.modules?.data?.mounted !== false, actives),
-    bots: botItems(sh.bots?.data),
-    agents: agentItems(sh.agents?.data),
+    bots: botItems(sh.bots?.data, roster),
+    agents: agentItems(sh.agents?.data, roster),
     skills: skillItems(sh.memory?.data),
   };
 }

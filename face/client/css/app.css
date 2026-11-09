@@ -426,6 +426,8 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .task-dot.done, .task-dot.stopped { background: var(--dim); }
 .task-dot.scheduled { background: transparent; box-shadow: inset 0 0 0 1.5px var(--dim); }
 .task-title { flex: 1 1 auto; min-width: 0; font-size: calc(13px * var(--fs)); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* a bot task's bot (one-entry plan 4), before its title */
+.task-bot { flex: none; max-width: 40%; padding: 0 6px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--dim); font-size: calc(11px * var(--fs)); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .task-status { flex: none; font-size: calc(12px * var(--fs)); color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .task-caret { flex: none; display: inline-flex; color: var(--dim); }
 .task-line[open] > summary .task-caret { transform: rotate(180deg); }
@@ -673,6 +675,16 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .tool-desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--dim); }
 .disc-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: calc(12px * var(--fm)); line-height: 1.5; background: var(--surface-2); border-radius: var(--radius-s); padding: 12px; }
 .disc-broken { color: var(--down); font-weight: 700; font-size: calc(13px * var(--fs)); }
+/* Available to Gravit (one-entry plan 4): the one roster's switch, its track filled while on, greyed while the roster is
+   unread or unreadable */
+.switch { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 4px; background: none; border: 0; color: var(--text); font-size: calc(13px * var(--fs)); font-weight: 600; cursor: pointer; }
+.switch-track { flex: none; position: relative; width: 34px; height: 20px; border-radius: var(--radius-pill); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); }
+.switch-knob { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: var(--radius-pill); background: var(--surface); box-shadow: var(--shadow-card), inset 0 0 0 1px var(--border); transition: transform .15s; }
+.switch[aria-checked="true"] .switch-track { background: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-edge); }
+.switch[aria-checked="true"] .switch-knob { transform: translateX(14px); }
+.switch-label { white-space: nowrap; }
+.switch:disabled { color: var(--dim); cursor: default; }
+.switch:disabled .switch-track { opacity: .5; }
 .bot-edit { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
 /* a Lunhui module's page: the kind beside the chip, the three boxes side by side where they fit, the runs as a table that
    scrolls in its own box, and the legend's label beside its reading, both read from the left */

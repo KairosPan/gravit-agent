@@ -1779,6 +1779,7 @@ export const EN = Object.freeze({
   'discover.fail.disconnect': 'disconnect: {reason}',
   'discover.fail.rescan': 'rescan: {reason}',
   'discover.fail.save': 'save: {reason}',
+  'discover.fail.available': 'Available to Gravit: {reason}',
   'discover.changedElsewhere': 'Changed elsewhere — reloaded',
   'discover.bot.giveName': 'Give it a name',
   'discover.bot.giveId': 'Give it an id: a-z, 0-9, -',
@@ -1870,6 +1871,8 @@ export const EN = Object.freeze({
   'discover.edit': 'Edit',
   'discover.disconnect': 'Disconnect',
   'discover.connect': 'Connect',
+  'discover.available': 'Available to Gravit',
+  'discover.rosterUnreadable': 'The roster file cannot be read; repair channels.json in the harness home.',
 
   // a module card's Run sheet (host/run-sheet-view.js, host/run-sheet.js, render/run-sheet.js): its fields, its options and
   // their reasons, the cites, the Stocks check, what blocks Run; the message to Gravit stays in Chinese (Appendix B)

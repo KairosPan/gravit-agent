@@ -1,12 +1,15 @@
 // face/client/js/host/discover.js — Discover from the face (spec 2026-10-19 §7 Stage 3 "Discover = My plugins"): the
 // five listings (the Lunhui modules' since the module cards spec §5.1), each alone; the Gravit item's three reads, each
-// alone; a skill's content; the agent writes. Impure; nothing here draws. A plain read joins the shelf's flight, a read
+// alone; a skill's content; the agent writes; the one roster (one-entry plan 4), read with the listings, and its
+// Available to Gravit switch. Impure; nothing here draws. A plain read joins the shelf's flight, a read
 // after a write starts a fresh one, and only the latest-started read of a shelf lands.
 import { botSettingsPayload, botModelChoices, normalizeBotModel } from '../wire/botSettings.js';
 import { proposeBotId } from '../wire/botId.js';
 import { said } from '../i18n/words.js';
 
 export const SHELF_PATHS = Object.freeze({ plugins: '/data/plugins.json', bots: '/data/bots.json', agents: '/data/agents.json', memory: '/data/memory.json', modules: '/data/modules.json' });
+export const ROSTER_PATH = '/data/roster.json';
+const ROSTER_SWITCH = '/data/roster';
 export const GRAVIT_KEYS = Object.freeze(['DEEPSEEK_API_KEY']); // en-kept: an environment variable's name
 
 const VALID = {
@@ -42,7 +45,42 @@ export function startDiscover({ store, getJson, postJson, call, now = Date.now }
     return p;
   }
 
-  const load = () => Promise.all(Object.keys(SHELF_PATHS).map(shelf => read(shelf))).then(() => {});
+  // the one roster, read as a shelf is: a plain read joins the one in flight, and only the latest-started read or switch
+  // lands; a failed read keeps the lists it had
+  let rosterSeq = 0;
+  let rosterFlight = null;
+  function readRoster({ fresh = false } = {}) {
+    if (!fresh && rosterFlight) return rosterFlight;
+    const mine = ++rosterSeq;
+    const p = Promise.resolve()
+      .then(() => getJson(ROSTER_PATH))
+      .then(data => { if (mine === rosterSeq) store.dispatch('rosterLoaded', data); })
+      .catch(() => { if (mine === rosterSeq) store.dispatch('rosterFailed'); })
+      .finally(() => { if (rosterFlight === p) rosterFlight = null; });
+    rosterFlight = p;
+    return p;
+  }
+
+  // a switch: on is the flip of what the roster says; the answer is the roster as written. A roster the page could not
+  // read posts nothing (its switches are drawn disabled); a refusal leaves the switch as it was, its words on the line
+  async function toggleAvailable(kind, id) {
+    const roster = store.get().discover.roster;
+    if (roster?.status !== 'ready' || (kind !== 'agent' && kind !== 'bot') || typeof id !== 'string' || id === '') return false;
+    const on = !(kind === 'bot' ? roster.bots : roster.agents).includes(id);
+    let answer;
+    try {
+      answer = await postJson(ROSTER_SWITCH, { kind, id, on });
+    } catch (err) {
+      store.dispatch('discoverStatus', { line: said('discover.fail.available', { reason: words(err) }), bad: true });
+      return false;
+    }
+    rosterSeq += 1;
+    store.dispatch('rosterLoaded', answer);
+    store.dispatch('discoverStatus', { line: null });
+    return true;
+  }
+
+  const load = () => Promise.all([...Object.keys(SHELF_PATHS).map(shelf => read(shelf)), readRoster()]).then(() => {});
 
   // the old main-agent page's three cards: the host, the default model selection, the keys — each failing alone
   async function gravit() {
@@ -167,5 +205,5 @@ export function startDiscover({ store, getJson, postJson, call, now = Date.now }
     }
   }
 
-  return { load, read, gravit, skill, connect, disconnect, rescan, modelChoices, saveBot, createBot };
+  return { load, read, readRoster, toggleAvailable, gravit, skill, connect, disconnect, rescan, modelChoices, saveBot, createBot };
 }

@@ -198,17 +198,29 @@ function kindLine(i) {
   return i.kind;
 }
 
-function keysOf(item) {
+// Available to Gravit (one-entry plan 4): the one roster's switch on a bot or a connected CLI agent, pressed while it is on
+// the roster; disabled while the roster is unread or unreadable
+function availableKey(item, state, kind, id) {
+  const ready = state.discover.roster?.status === 'ready';
+  return `<button${attrs({ type: 'button', class: 'switch', role: 'switch', 'aria-checked': String(ready && item.available === true), 'data-action': 'toggleAvailable', 'data-kind': kind, 'data-id': id, disabled: !ready })}>` +
+    `<span class="switch-track"><span class="switch-knob"></span></span><span class="switch-label">${th('discover.available')}</span></button>`;
+}
+const switchable = item => typeof item.available === 'boolean';
+
+function keysOf(item, state) {
   if (item.shelf === 'bots') {
-    // a bot is talked to in a room, through Gravit (one-entry plan 2): its card edits it, nothing else
-    return `<button type="button" class="btn-sm" data-action="editBot" data-id="${esc(item.source.id)}">${th('discover.edit')}</button>`;
+    // a bot is talked to in a room or a task, through Gravit (one-entry plans 2 and 4): its card switches it and edits it
+    return `${availableKey(item, state, 'bot', item.source.id)}<button type="button" class="btn-sm" data-action="editBot" data-id="${esc(item.source.id)}">${th('discover.edit')}</button>`;
   }
   if (item.shelf !== 'agents' || item.id === 'agent:gravit') return '';
   const bin = esc(item.source.bin);
   return item.source.connected
-    ? `<button type="button" id="plug-key" class="btn-sm" data-action="disconnectAgent" data-bin="${bin}">${th('discover.disconnect')}</button>`
+    ? `${switchable(item) ? availableKey(item, state, 'agent', item.source.bin) : ''}<button type="button" id="plug-key" class="btn-sm" data-action="disconnectAgent" data-bin="${bin}">${th('discover.disconnect')}</button>`
     : `<button type="button" id="plug-key" class="btn-primary" data-action="connectAgent" data-bin="${bin}">${th('discover.connect')}</button>`;
 }
+
+// the roster file the face cannot read, said on a page whose switch it disables
+const rosterLine = (item, state) => (switchable(item) && state.discover.roster?.status === 'corrupt' ? `<div class="disc-broken">${th('discover.rosterUnreadable')}</div>` : '');
 
 function bodyOf(item, state) {
   if (item.id === 'agent:gravit') return gravitPage(state);
@@ -232,6 +244,6 @@ export function renderPlugin(state) {
     return `<main class="main disc plugin-page">${back}<div class="disc-none dim">${status === 'idle' || status === 'loading' ? th('common.loading') : th('discover.notFound')}</div></main>`;
   }
   const head = `<header class="plug-head">${markOf(item.mark, 72)}<div class="plug-title"><h1 class="plug-name">${esc(item.name)}</h1>` +
-    `<div class="dim">${esc(kindLine(item))}</div></div><div class="plug-key">${keysOf(item)}</div></header>`;
-  return `<main class="main disc plugin-page">${back}${head}<div class="plug-body">${bodyOf(item, state)}</div>${renderStatus(state.discover.status)}</main>`;
+    `<div class="dim">${esc(kindLine(item))}</div></div><div class="plug-key">${keysOf(item, state)}</div></header>`;
+  return `<main class="main disc plugin-page">${back}${head}<div class="plug-body">${rosterLine(item, state)}${bodyOf(item, state)}</div>${renderStatus(state.discover.status)}</main>`;
 }

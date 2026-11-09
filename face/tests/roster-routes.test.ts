@@ -36,6 +36,19 @@ test("GET /data/roster.json says a file it cannot read is corrupt", async () => 
   assert.deepEqual(answer(await routes.call("/data/roster.json")).body, { ok: false, corrupt: true });
 });
 
+test("GET /data/roster.json says an absent file is unreadable too: after boot it means ensureRoster failed", async () => {
+  const { routes } = await mounted();
+  assert.deepEqual(answer(await routes.call("/data/roster.json")), { status: 200, body: { ok: false, corrupt: true } });
+});
+
+test("GET /data/roster.json says unparseable text is corrupt and leaves it as it is", async () => {
+  const { home, routes } = await mounted();
+  await mkdir(join(home, "face"), { recursive: true });
+  await writeFile(join(home, "face", "channels.json"), "{not json");
+  assert.deepEqual(answer(await routes.call("/data/roster.json")).body, { ok: false, corrupt: true });
+  assert.equal(await readFile(join(home, "face", "channels.json"), "utf8"), "{not json");
+});
+
 test("GET /data/roster.json refuses an untrusted request", async () => {
   const { routes } = await mounted(["claude"]);
   assert.equal(answer(await routes.call("/data/roster.json", { host: "evil.example" })).status, 403);

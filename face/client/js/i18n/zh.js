@@ -1774,6 +1774,7 @@ export const ZH = Object.freeze({
   'discover.fail.disconnect': '断开连接：{reason}',
   'discover.fail.rescan': '重新扫描：{reason}',
   'discover.fail.save': '保存：{reason}',
+  'discover.fail.available': 'Gravit 可用：{reason}',
   'discover.changedElsewhere': '已在别处更改 — 已重新加载',
   'discover.bot.giveName': '请为它取个名称',
   'discover.bot.giveId': '请为它取个 ID：a-z、0-9、-',
@@ -1865,6 +1866,8 @@ export const ZH = Object.freeze({
   'discover.edit': '编辑',
   'discover.disconnect': '断开连接',
   'discover.connect': '连接',
+  'discover.available': 'Gravit 可用',
+  'discover.rosterUnreadable': '名单文件读不出来；请修好 harness 目录里的 channels.json。',
 
   // a module card's Run sheet (host/run-sheet-view.js, host/run-sheet.js, render/run-sheet.js): its fields, its options and
   // their reasons, the cites, the Stocks check, what blocks Run; the message to Gravit stays in Chinese (Appendix B)

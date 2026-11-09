@@ -1,10 +1,10 @@
 /** The one roster's two routes (one-entry plan 4): the read Discover draws its
  * "Available to Gravit" switches from, and the switch itself.
  *
- * `GET /data/roster.json` answers `{ok: true, agents, bots}` - empty lists while
- * no file exists - or `{ok: false, corrupt: true}` for a file the face does not
- * understand, so the page can say the file needs repair rather than draw every
- * switch off. `POST /data/roster` takes `{kind: "agent" | "bot", id, on}` and
+ * `GET /data/roster.json` answers `{ok: true, agents, bots}`, or `{ok: false,
+ * corrupt: true}` for a file the face does not understand or no file at all (after
+ * boot an absent file means ensureRoster failed, and every switch would be a 409),
+ * so the page can say the file needs repair rather than draw every switch off. `POST /data/roster` takes `{kind: "agent" | "bot", id, on}` and
  * answers the roster as written; the store refuses a bot id outside the grammar
  * (400) and a corrupt or absent file (409), and each landed switch is one dated
  * line in the roster log.
@@ -30,9 +30,9 @@ export function registerRosterRoutes(webServer: RouteRegistrar, deps: { home: st
     handler: async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
       if (!isTrustedDataRequest(req)) return send(res, 403, FORBIDDEN);
       try {
-        const { roster, corrupt } = await readRoster(deps.home);
-        if (corrupt) return send(res, 200, { ok: false, corrupt: true });
-        return send(res, 200, { ok: true, agents: roster?.agents ?? [], bots: roster?.bots ?? [] });
+        const { roster } = await readRoster(deps.home);
+        if (roster === null) return send(res, 200, { ok: false, corrupt: true });
+        return send(res, 200, { ok: true, agents: roster.agents, bots: roster.bots });
       } catch {
         return send(res, 500, { ok: false, error: "request failed" });
       }

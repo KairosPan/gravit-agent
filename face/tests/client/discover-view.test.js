@@ -70,3 +70,14 @@ test('a listing that failed or never came draws no items, and nothing throws on 
   const items = itemsOf({ query: '', shelves: { plugins: { status: 'failed', data: null }, bots: shelf({ bots: 'x' }), memory: shelf({ groups: [{ name: 'g', skills: 'x' }, null] }) } });
   assert.deepEqual(items.data, []); assert.deepEqual(items.bots, []); assert.deepEqual(items.skills, []);
 });
+
+test("the one roster (one-entry plan 4): each bot but the default and each connected CLI agent carries available", () => {
+  const on = { ...discover(), roster: { status: 'ready', agents: ['codex'], bots: ['buffett'] } };
+  const items = itemsOf(on);
+  assert.deepEqual(items.bots.map(i => [i.id, i.available]), [['bot:buffett', true]]);
+  assert.deepEqual(items.agents.map(i => [i.id, i.available]), [['agent:gravit', undefined], ['agent:codex', true], ['agent:gone', false], ['agent:claude', undefined]]);
+  const off = itemsOf({ ...discover(), roster: { status: 'ready', agents: [], bots: [] } });
+  assert.equal(off.bots[0].available, false);
+  assert.equal(off.agents[1].available, false);
+  assert.equal(itemsOf(discover()).bots[0].available, false, 'no roster read yet: off');
+});

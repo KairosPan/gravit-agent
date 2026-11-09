@@ -1645,6 +1645,8 @@ export function boot(win, host = {}) {
     connectAgent: el => { void discover.connect(el.dataset.bin); },
     disconnectAgent: el => { void discover.disconnect(el.dataset.bin); },
     rescanAgents: () => { void discover.rescan(); },
+    // Available to Gravit: a bot's or a connected CLI agent's switch on the one roster (one-entry plan 4)
+    toggleAvailable: el => { void discover.toggleAvailable(el.dataset.kind, el.dataset.id); },
     // a module's Run: its sheet, its fields (a box's words as typed, a pick as changed), Cancel, and Run itself
     runModule: el => { void runSheet.open(el.dataset.module); },
     runSheetField: el => { void runSheet.field(el.name, el.value); },

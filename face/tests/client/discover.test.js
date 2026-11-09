@@ -8,6 +8,7 @@ import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { listings, buffett, modulesListing, MARKET_RUN } from './helpers/inventory.js';
 import { withTable } from '../../client/js/i18n/words.js';
+import { ZH } from '../../client/js/i18n/zh.js';
 
 const loadedFrom = (lists, route = { screen: 'discover', id: null }) => {
   let s = emptyState();
@@ -238,4 +239,40 @@ test("a card's kind is drawn in the table's capitals, never a table word upper-c
     assert.deepEqual(kinds.filter(k => !['Srv', 'Bt', 'Agt', 'Sk', 'Mod'].includes(k)), []);
     assert.match(renderModule(R.nav(emptyState(), { screen: 'module', id: 'sentiment' })), /<span class="pcard-kind">Mod<\/span>/);
   });
+});
+
+// the one roster (one-entry plan 4 Task 5): the Available to Gravit switch on a bot's and a connected CLI agent's page
+const rostered = (route, roster = { ok: true, agents: ['codex'], bots: ['buffett'] }) => R.rosterLoaded(loaded(route), roster);
+const switchOf = h => h.match(/<button[^>]*class="switch"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? '';
+
+test('the bot card draws the Available to Gravit switch, pressed when the bot is on the roster', () => {
+  const on = switchOf(renderPlugin(rostered({ screen: 'plugin', id: 'bot:buffett' })));
+  assert.match(on, /<button type="button" class="switch" role="switch" aria-checked="true" data-action="toggleAvailable" data-kind="bot" data-id="buffett">/);
+  assert.match(on, /Available to Gravit/);
+  assert.doesNotMatch(on, /disabled/);
+  const off = switchOf(renderPlugin(rostered({ screen: 'plugin', id: 'bot:buffett' }, { ok: true, agents: [], bots: [] })));
+  assert.match(off, /aria-checked="false" data-action="toggleAvailable" data-kind="bot" data-id="buffett"/);
+  assert.match(renderPlugin(rostered({ screen: 'plugin', id: 'bot:buffett' })), /data-action="editBot"/, 'Edit stays beside it');
+  withTable(ZH, () => assert.match(switchOf(renderPlugin(rostered({ screen: 'plugin', id: 'bot:buffett' }))), /Gravit 可用/));
+});
+
+test('a connected CLI agent draws the switch too; Gravit and a candidate not connected draw none', () => {
+  const codex = renderPlugin(rostered({ screen: 'plugin', id: 'agent:codex' }));
+  assert.match(switchOf(codex), /class="switch" role="switch" aria-checked="true" data-action="toggleAvailable" data-kind="agent" data-id="codex"/);
+  assert.match(codex, /data-action="disconnectAgent"/);
+  assert.match(switchOf(renderPlugin(rostered({ screen: 'plugin', id: 'agent:gone' }))), /aria-checked="false"[^>]*data-kind="agent" data-id="gone"/);
+  for (const id of ['agent:gravit', 'agent:claude', 'mcp:alpaca-kit', 'skill:rules']) {
+    assert.doesNotMatch(renderPlugin(rostered({ screen: 'plugin', id })), /toggleAvailable/, id);
+  }
+});
+
+test('an unreadable roster draws discover.rosterUnreadable and disabled switches; an unread one disabled switches alone', () => {
+  const bad = renderPlugin(rostered({ screen: 'plugin', id: 'bot:buffett' }, { ok: false, corrupt: true }));
+  assert.match(bad, /The roster file cannot be read; repair channels\.json in the harness home\./);
+  assert.match(switchOf(bad), /aria-checked="false"[^>]*disabled/);
+  withTable(ZH, () => assert.match(renderPlugin(rostered({ screen: 'plugin', id: 'agent:codex' }, { ok: false, corrupt: true })), /名单文件读不出来；请修好 harness 目录里的 channels\.json。/));
+  const unread = renderPlugin(loaded({ screen: 'plugin', id: 'bot:buffett' }));
+  assert.match(switchOf(unread), /disabled/);
+  assert.doesNotMatch(unread, /roster file/);
+  assert.doesNotMatch(renderPlugin(rostered({ screen: 'plugin', id: 'bot:buffett' })), /roster file/);
 });
