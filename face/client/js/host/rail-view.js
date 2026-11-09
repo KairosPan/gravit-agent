@@ -48,6 +48,12 @@ export function railOf(state, now = Date.now()) {
   return rail;
 }
 
+/** One task's line and its group, as the rail draws it (a task's page heads with it); null for a task the face did not give. */
+export function taskLine(state, id, now = Date.now()) {
+  const task = (state.tasks?.items ?? []).find(x => x.id === id);
+  return task ? lineOf(task, state, now) : null;
+}
+
 /** The lines waiting on the operator: the Messages badge. */
 export const waitingCount = state => railOf(state).you.length;
 

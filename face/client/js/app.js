@@ -9,7 +9,8 @@ import { sizeOf, cleanFont, applyPrefs } from './prefs.js';
 import { langOf, tableOf, htmlLangOf } from './i18n/langs.js';
 import { parseHash, toHash } from './router.js';
 import { renderRail } from './render/rail.js';
-import { renderMessagesScreen, renderSessionPage, currentConversation } from './render/messages.js';
+import { renderMessagesScreen, currentConversation } from './render/messages.js';
+import { renderTaskScreen } from './render/task.js';
 import { renderHistoryScreen } from './render/history.js';
 import { renderMarketsScreen } from './render/markets.js';
 import { renderSettings, renderAccountScreen, renderSellMany } from './render/account.js';
@@ -27,7 +28,7 @@ import { startDesk } from './host/desk.js';
 import { startAccount } from './host/account.js';
 import { startSeat } from './host/seat.js';
 import { startChannels } from './host/channels.js';
-import { startTasks } from './host/tasks.js';
+import { startTasks, followUpText } from './host/tasks.js';
 import { renderChannelScreen } from './render/channel.js';
 import { startDiscover } from './host/discover.js';
 import { renderDiscover, renderPlugin } from './render/discover.js';
@@ -661,7 +662,7 @@ export function boot(win, host = {}) {
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
       : s.route.screen === 'strategy' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
       : s.route.screen === 'history' ? renderHistoryScreen(s, now(), { revealed, anchor: anchorSeq, rail })
-      : s.route.screen === 'task' ? renderSessionPage(s, now(), { revealed, anchor: anchorSeq, rail })
+      : s.route.screen === 'task' ? renderTaskScreen(s, now(), { revealed, anchor: anchorSeq, rail })
       : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail, tasksOpen });
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
     const drawers = (s.settingsOpen ? renderSettings(s, { mac }) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (!sheetUp(s) && s.identity?.connect ? renderConnectDrawer(s) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
@@ -1036,10 +1037,10 @@ export function boot(win, host = {}) {
     if (r.screen === 'module' && !(was?.screen === 'module' && was.id === r.id)) void modules.latestArtifact(r.id);
     if (r.screen === 'discover' && r.id === 'create' && !(was?.screen === 'discover' && was.id === 'create')) void discover.modelChoices();
     was = r;
-    // the session on screen: Messages opens the conversation (its jobs watched), a task's page the worker's, a history page
-    // its session cold — paged, never followed; one the list does not carry yet waits for it
+    // the session on screen: Messages opens the conversation, a task's page the worker's — each its jobs watched for Details —,
+    // a history page its session cold — paged, never followed; one the list does not carry yet waits for it
     const conv = shownConv(store.get());
-    jobs.watch(r.screen === 'messages' && conv ? conv.id : null);
+    jobs.watch((r.screen === 'messages' || r.screen === 'task') && conv ? conv.id : null);
     if (opens(store.get())) {
       openedId = conv.id;
       openedCold = coldOn(store.get());
@@ -1423,6 +1424,21 @@ export function boot(win, host = {}) {
     return sent;
   }
 
+  // a Lunhui follow-up (a composed answer's choice, the stock drawer's Ask): on Messages its words as they are; on a task's page
+  // the same words tagged with the task (followUpText), to Gravit's conversation — which passes them to the same worker — and
+  // the page goes to Messages to watch it; from anywhere else (a history page draws none) nothing
+  function followUp(text) {
+    const s = store.get();
+    if (s.route.screen === 'task') {
+      if (!s.tasks.conversation) return;
+      const task = s.tasks.items.find(x => x.id === s.route.id) ?? { id: s.route.id, title: s.conversations.find(c => c.id === s.route.id)?.title ?? '' };
+      go({ screen: 'messages', id: null });
+      void sendText(followUpText(task, text));
+      return;
+    }
+    void sendText(text);
+  }
+
   // ---- the draft's files: added (picked, pasted, dropped), uploaded on a conversation, removed, retried ----
   // the record under its own key by its file key, patched; false when it is gone (removed meanwhile), and nothing changes
   function patchFile(key, fileKey, patch) {
@@ -1688,7 +1704,7 @@ export function boot(win, host = {}) {
     // a follow-up: a stock opens its drawer, anything else is one message through the composer's path
     lunhuiChoice: el => {
       if (el.dataset.code) store.dispatch('lunhuiStockOpen', { key: el.dataset.key, code: el.dataset.code });
-      else if (el.dataset.label) void sendText(el.dataset.label);
+      else if (el.dataset.label) followUp(el.dataset.label);
     },
     lunhuiOpenRun: el => go({ screen: 'channel', id: el.dataset.id }),
     lunhuiStockClose: () => store.dispatch('lunhuiStockClose'),
@@ -1699,7 +1715,7 @@ export function boot(win, host = {}) {
       pressedItem = null;
       if (menu) chooseItem(item);
     },
-    lunhuiAsk: () => { const text = askText(store.get()); if (text) void sendText(text); },
+    lunhuiAsk: () => { const text = askText(store.get()); if (text) followUp(text); },
     lunhuiMarkets: () => { const code = stockCode(store.get().lunhui?.stock?.code); if (code) go({ screen: 'markets', id: marketKey(code) }); },
     // a composed answer's picks, by the answer's id: a verdict tile (pressed again, it closes), Counts or By change, a bucket
     lunhuiUi: el => {

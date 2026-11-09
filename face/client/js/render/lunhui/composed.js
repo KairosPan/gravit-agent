@@ -62,15 +62,15 @@ function footer(view, channels) {
 }
 
 // the follow-up buttons the call gave, in its order: a stock choice carries its code and opens the drawer, a plain one sends its
-// label; everything the model wrote is escaped
-function choicesHtml(d, key) {
-  const list = Array.isArray(d.choices) ? d.choices.filter(c => c && typeof c.label === 'string' && c.label !== '') : [];
+// label; everything the model wrote is escaped. None where nothing would send them (a history page, `asks` false)
+function choicesHtml(d, key, asks = true) {
+  const list = !asks ? [] : Array.isArray(d.choices) ? d.choices.filter(c => c && typeof c.label === 'string' && c.label !== '') : [];
   if (!list.length) return '';
   const btns = list.map(c => `<button${attrs({ type: 'button', class: 'lh-choice', 'data-action': 'lunhuiChoice', 'data-key': key, 'data-label': c.label, 'data-code': stockCode(c.stock) })}>${esc(c.label)}</button>`);
   return `<div class="lh-choices">${btns.join('')}</div>`;
 }
 
-export function composedHtml(m, entry, ui, conv, channels) {
+export function composedHtml(m, entry, ui, conv, channels, { asks = true } = {}) {
   const d = m.data ?? {};
   const blocks = Array.isArray(d.blocks) ? d.blocks.filter(b => b && typeof b.kind === 'string') : [];
   const loaded = entry?.status === 'loaded' && entry.view && typeof entry.view === 'object';
@@ -79,9 +79,9 @@ export function composedHtml(m, entry, ui, conv, channels) {
   const summary = `<div class="lh-summary">${loaded ? linkNames(text, entry.view, key) : text}</div>`;
   if (entry?.status === 'failed') {
     return `<div class="lh-answer">${summary}<div class="lh-error" role="status">${th('lunhui.viewFailed', { error: entry.error ?? '' })} ` +
-      `<button type="button" class="btn-sm" data-action="lunhuiRetry" data-key="${esc(key)}">${th('lunhui.retry')}</button></div>${choicesHtml(d, key)}</div>`;
+      `<button type="button" class="btn-sm" data-action="lunhuiRetry" data-key="${esc(key)}">${th('lunhui.retry')}</button></div>${choicesHtml(d, key, asks)}</div>`;
   }
   const id = composedId(m, conv);
   const body = blocks.map(b => `<section class="lh-block">${loaded ? drawn(b, entry.view, ui, id, key) : skeleton(b)}</section>`).join('');
-  return `<div class="lh-answer">${summary}${body}${choicesHtml(d, key)}${loaded ? footer(entry.view, channels) : ''}</div>`;
+  return `<div class="lh-answer">${summary}${body}${choicesHtml(d, key, asks)}${loaded ? footer(entry.view, channels) : ''}</div>`;
 }

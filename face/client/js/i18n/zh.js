@@ -115,6 +115,8 @@ export const ZH = Object.freeze({
   'tasks.usage': '输入 {in} token · 输出 {out} token',
   'tasks.continue': '继续',
   'tasks.full': '查看完整过程',
+  'tasks.page.back': '返回消息',
+  'tasks.page.tell': '要改方向，告诉 Gravit',
   'history.title': '历史',
   'history.none': '历史里还没有内容',
   'history.notFound': '未找到',

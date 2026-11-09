@@ -37,6 +37,7 @@ test("wantedViews: the open conversation's composed messages whose view has no e
   assert.deepEqual(wantedViews(R.lunhuiRetry(failed, `cn-market/${RUN}/`)).map(w => w.key), [`cn-market/${RUN}/`], 'Retry forgets it, so it is wanted again');
   assert.deepEqual(wantedViews({ ...s, route: { screen: 'markets', id: null } }), [], 'off Messages nothing is read');
   assert.deepEqual(wantedViews({ ...s, route: { screen: 'history', id: 'c2' } }).map(w => w.run), ['other'], "a history page reads its own session's views");
+  assert.deepEqual(wantedViews({ ...s, route: { screen: 'task', id: 'c2' } }).map(w => w.run), ['other'], "a task's page reads its worker's views");
   assert.deepEqual(wantedViews(stateWith([composed('p1', { modules: 'x' })])).map(w => w.modules), [[]], 'modules that are not a list ask none');
 });
 

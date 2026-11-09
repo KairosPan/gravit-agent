@@ -113,6 +113,8 @@ export const EN = Object.freeze({
   'tasks.usage': '{in} tokens in · {out} out',
   'tasks.continue': 'Continue',
   'tasks.full': 'View the full process',
+  'tasks.page.back': 'Back to Messages',
+  'tasks.page.tell': 'To change course, tell Gravit',
   'history.title': 'History',
   'history.none': 'Nothing in history yet',
   'history.notFound': 'Not found',

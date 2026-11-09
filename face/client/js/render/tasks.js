@@ -22,16 +22,23 @@ function usageOf(u) {
   return `<div class="task-usage">${tokens}</div>`;
 }
 
-function keys(task, busy) {
+/** The keys a task's state allows: Stop while it runs, waits or stalls; Continue once it stalled, failed or was blocked —
+ * both disabled while one is in flight. The line and the task's page draw the same. */
+export function stateKeys(task, busy) {
   const key = (action, label) => `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': action, 'data-task': task.id, disabled: busy })}>${label}</button>`;
-  return `<div class="task-keys">${STOPS.has(task.state) ? key('taskStop', th('details.stop')) : ''}${CONTINUES.has(task.state) ? key('taskResume', th('tasks.continue')) : ''}` +
-    `<a class="btn-sm" href="#/task/${esc(encodeURIComponent(task.id))}">${th('tasks.full')}</a></div>`;
+  return `${STOPS.has(task.state) ? key('taskStop', th('details.stop')) : ''}${CONTINUES.has(task.state) ? key('taskResume', th('tasks.continue')) : ''}`;
 }
+
+function keys(task, busy) {
+  return `<div class="task-keys">${stateKeys(task, busy)}<a class="btn-sm" href="#/task/${esc(encodeURIComponent(task.id))}">${th('tasks.full')}</a></div>`;
+}
+
+/** A line's dot: waiting while a gate waits on the operator; a waiting task answered here reads running until the next read. */
+export const dotOf = ({ task, gate }, group) => (gate ? 'waiting' : task.state === 'waiting' && group === 'running' ? 'running' : task.state);
 
 function line({ task, gate, status }, group, state, open) {
   const record = gate ? state.conversations.find(c => c.id === task.id) : null;
-  // (a waiting task answered here reads running until the next read)
-  const dot = gate ? 'waiting' : task.state === 'waiting' && group === 'running' ? 'running' : task.state;
+  const dot = dotOf({ task, gate }, group);
   const strategy = typeof task.strategy === 'string' && task.strategy !== ''
     ? `<div class="task-strategy"><span class="task-strategy-label">${th('tasks.strategy')}</span><a class="task-strategy-link" href="#/strategy/${esc(encodeURIComponent(task.strategy))}">${esc(task.strategy)}</a></div>` : '';
   const steps = Array.isArray(task.steps) && task.steps.length ? `<ol class="task-steps">${task.steps.map(s => `<li>${esc(maskExcerpt(String(s)))}</li>`).join('')}</ol>` : '';

@@ -55,7 +55,7 @@ function jobsChip(conv, state) {
   return `<button type="button" class="btn-sm jobs-chip" data-action="openJobs"><span class="${cls('jobs-dot', v.running.length > 0 && 'live')}"></span>${esc(v.chip)}${icon('chevDown', 14, 2.2)}</button>`;
 }
 
-function headRight(conv, state) {
+export function headRight(conv, state) {
   const working = conv.running ? `<span class="status up"><span class="status-dot"></span>${th('thread.working')}</span>` : '';
   return jobsChip(conv, state) + working + `<button type="button"${attrs({ class: cls('btn-sm', state.detailsOpen && 'pressed'), 'data-action': 'toggleDetails', 'aria-expanded': state.detailsOpen ? 'true' : 'false' })}>${th('details.title')}${icon('chevRight', 14, 2.2)}</button>`; // words-order: Details' name and its chevron
 }
@@ -185,17 +185,19 @@ function jobsSection(conv, state, now) {
 }
 
 // the conversation's Details: This task (Gravit, when it began, the agent) — nothing renames, forks, pins, archives or deletes
-// the one conversation —, its background jobs, children, usage, and Stop while a turn runs
-export function renderDetails(conv, state, now = Date.now()) {
+// the one conversation —, its background jobs, children, usage, and Stop while a turn runs. A task's page (`task`, one-entry
+// plan 2 Task 8) draws its worker's: the task's title, and no Stop of its own (the page's head stops the task)
+export function renderDetails(conv, state, now = Date.now(), { task = null } = {}) {
   const asking = state.confirm?.action === 'stopGravit' && state.confirm?.id === conv.id;
   const facts = kv([...(conv.created ? [[t('details.created'), esc(fmtDate(conv.created))]] : []), [t('details.agent'), esc(HOST_NAME)]]);
-  const stop = conv.running
+  const title = task ? esc(maskExcerpt(task.title ?? conv.title ?? '')) : esc(HOST_NAME);
+  const stop = conv.running && !task
     ? `<section class="dsec">${asking ? confirmPair(t('details.yesStopGravit')) : `<button type="button" class="btn-danger" data-action="stopGravit" data-conv="${esc(conv.id)}">${th('details.stopGravit')}</button>`}</section>`
     : '';
   return `<aside class="drawer details" aria-label="${th('details.title')}">
   <div class="drawer-head"><h2>${th('details.title')}</h2><button type="button" class="close-key" data-action="toggleDetails" aria-label="${th('common.close')}">×</button></div>
   <div class="drawer-body">
-    <section class="dsec"><div class="dsec-label">${th('details.thisTask')}</div><div class="dsec-title">${esc(HOST_NAME)}</div>${facts}</section>
+    <section class="dsec"><div class="dsec-label">${th('details.thisTask')}</div><div class="dsec-title">${title}</div>${facts}</section>
     ${jobsSection(conv, state, now)}${childrenSection(conv, state)}${usageRows(conv)}${stop}
   </div>
 </aside>`;
@@ -207,18 +209,6 @@ export function earlierKey(conv) {
   const w = conv.window;
   if (!w?.hasMore) return '';
   return `<button${attrs({ class: 'btn-sm earlier-key', type: 'button', id: `earlier-${conv.id}`, 'data-action': 'earlier', 'data-conv': conv.id, 'aria-disabled': w.loading ? 'true' : null })}>${w.loading ? th('common.loading') : th('thread.earlier')}</button>`;
-}
-
-// a task's page (#/task/<id>), read-only until Task 8 of plan 2 draws its own:
-// its title and its transcript — no composer, no Details, nothing that writes to the session. One the list does not carry
-// reads Loading… until the list is in, then Not found
-export function renderSessionPage(state, now, page = {}) {
-  const conv = state.conversations.find(c => c.id === state.route.id) ?? null;
-  if (!conv) {
-    const word = state.conversations.length ? th('history.notFound') : th('common.loading');
-    return `<main class="main chan"><header class="head"><h1 class="head-title">${esc(state.route.id ?? '')}</h1></header><div class="chan-body"><div class="chan-none dim">${word}</div></div></main>`;
-  }
-  return `<main class="main"><header class="head"><h1 class="head-title">${esc(maskExcerpt(conv.title))}</h1></header><div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div></div></main>`;
 }
 
 // Messages is Gravit's one conversation (one-entry plan 2): its head, then its column (the thread with the turn rail, the one

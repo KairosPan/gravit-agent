@@ -3,7 +3,8 @@
 import { readFileSync } from 'node:fs';
 import { renderRail } from '../../../client/js/render/rail.js';
 import { renderSide } from '../../../client/js/render/side.js';
-import { renderMessagesScreen, renderSessionPage } from '../../../client/js/render/messages.js';
+import { renderMessagesScreen } from '../../../client/js/render/messages.js';
+import { renderTaskScreen } from '../../../client/js/render/task.js';
 import { renderHistoryScreen } from '../../../client/js/render/history.js';
 import { renderMarketsScreen } from '../../../client/js/render/markets.js';
 import { renderSettings, renderAccountScreen, renderSellMany } from '../../../client/js/render/account.js';
@@ -349,7 +350,29 @@ export function everyState() {
     R.tasksFailed(R.nav(R.hostList(emptyState(), { conversations: base.conversations, channels: base.channels }), { screen: 'messages', id: null }), { at: NOW }),
     // plan 2 of one entry, Task 7: History's rows with a strategy and a preview, and one session read-only with its gates closed
     ...historyStates(base),
+    // plan 2 of one entry, Task 8: a task's full process
+    ...taskPageStates(base),
   ];
+}
+
+// a task's full process (one-entry plan 2 Task 8): a running worker with its strategy, a brief, an answer with follow-ups and
+// an approval still open (answerable here), the stock drawer open over it; one stalled with Stop and Continue busy and Details
+// on its jobs; one done (no keys); one whose transcript the list does not carry yet
+function taskPageStates(base) {
+  const task = (id, over = {}) => ({ id, title: `Task ${id}`, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW - 12 * MIN, lastEventAt: NOW - MIN, lastSeq: 1, ...over });
+  const messages = [
+    m('wb', { from: 'system', kind: 'task', text: 'Read the tape\n\nPrice the leaders', seq: 1, data: { form: 'brief' } }),
+    m('wp', { kind: 'composed', text: '弱势日', seq: 2, data: { callId: 'w', strategy: 'cn-market', run: 'loaded', summary: '弱势日', blocks: [{ kind: 'ladder' }], choices: [{ label: 'Look again at the leaders' }], modules: [] } }),
+    m('wa', { kind: 'approval', text: 'run it', seq: 3, data: { eventId: 'wa', sessionId: 'wk', toolName: 'bash', reason: 'reads the tape' } }),
+  ];
+  const workers = [conv('wk', { title: 'Read the tape', messages, loaded: true, live: true }), conv('ws', { title: 'Scan filings', loaded: true, messages: [m('ws1', { text: 'Opened EDGAR' })] }), conv('wd', { title: 'Morning read', loaded: true })];
+  const tasks = [task('wk', { title: 'Read the tape', strategy: 'cn-market', steps: ['Read quotes'] }), task('ws', { title: 'Scan filings', state: 'stalled', group: 'you' }), task('wd', { title: 'Morning read', state: 'done', group: 'done' }), task('wn', { title: 'Fresh one' })];
+  const on = R.tasksLoaded(R.hostList(base, { conversations: [...base.conversations, ...workers] }), { conversation: 's1', tasks, at: NOW });
+  const opened = R.nav(on, { screen: 'task', id: 'wk' });
+  const read = { ...opened, lunhui: { ...opened.lunhui, views: { 'cn-market/loaded/': { status: 'loaded', view: VIEW_1027 } }, ui: {}, stock: { key: 'cn-market/loaded/', code: '600001' } } };
+  const job = { id: 'wj', kind: 'bash', label: 'fetch filings', owner: 'ws', status: 'running', startedAt: NOW - 64_000, output: { total: 6, earliest: 0 } };
+  const stalled = R.toggleDetails(R.taskBusy(R.hostJobs(R.watchJobs(R.nav(on, { screen: 'task', id: 'ws' }), 'ws'), { convId: 'ws', jobs: [job] }), { id: 'ws', on: true }));
+  return [read, stalled, R.nav(on, { screen: 'task', id: 'wd' }), R.nav(on, { screen: 'task', id: 'wn' })];
 }
 
 // History (one-entry plan 2 Task 7): rows naming a strategy, with a preview and without; one session opened read-only, an
@@ -609,7 +632,7 @@ export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMark
   : st.route.screen === 'trade' ? renderTradeScreen(st, now)
   : st.route.screen === 'strategy' ? renderChannelScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
   : st.route.screen === 'history' ? renderHistoryScreen(st, now)
-  : st.route.screen === 'task' ? renderSessionPage(st, now)
+  : st.route.screen === 'task' ? renderTaskScreen(st, now)
   : st.route.screen === 'plugin' ? renderPlugin(st, now) : st.route.screen === 'module' ? renderModule(st, now) : renderMessagesScreen(st, now));
 
 // a state's page as css.test.js draws it: the rail, the screen, then every drawer and sheet that may stand over it

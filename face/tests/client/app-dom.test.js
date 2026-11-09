@@ -112,7 +112,7 @@ test('an old #/messages/<task id> link opens the task page', async () => {
   await h.ready();
   assert.deepEqual(store.get().route, { screen: 'task', id: 't1' });
   assert.equal(f.win.location.hash, '#/task/t1', 'the address bar shows where it landed');
-  assert.match(f.html(), /head-title">Read the tape</);
+  assert.match(f.html(), /head-title">Task t1</, "the task's own title, as its line reads");
   assert.equal(h.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 't1' && c[1].request.maxMessages === undefined), true, "the worker's transcript was read");
   assert.doesNotMatch(f.html(), /class="composer"/, 'no composer on a task page');
   store.timers.clear();
@@ -3491,6 +3491,80 @@ test('Open run goes to the strategy page', async () => {
   f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiOpenRun', id: 'w-cn' } }));
   await settle();
   assert.deepEqual(store.get().route, { screen: 'strategy', id: 'cn-market' }, 'the old channel route lands on the strategy page');
+  store.timers.clear();
+});
+
+// one-entry plan 2 Task 8: a task's full process, and its follow-ups through Gravit. A worker `t1` beside the conversation
+// `c`, the page opened on `hash`, a composed answer with `choices` in the worker's transcript (followed: it is live)
+async function taskAnswer(choices, hash = '#/task/t1') {
+  const f = fakeWindow({ hash });
+  const h = host({ rows: [row('c', { agentAvailable: true, updatedAt: 9 }), row('t1', { agentAvailable: true })], conversation: 'c', tasks: [taskRow('t1', { title: 'Read the tape' })] });
+  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, postJson: h.postJson, markdown: null,
+    getJson: async path => (path.startsWith('/data/lunhui/view?') ? { ok: true, view: VIEW_1027 } : h.getJson(path)) });
+  await h.ready();
+  const follow = [...h.streams].reverse().find(x => x.name === 'session/follow' && x.args.request.address.sessionId === 't1');
+  follow.cbs.onItem({ type: 'snapshot', records: [] });
+  const args = { strategy: VIEW_1027.strategy, run: VIEW_1027.run, summary: '弱势日。', blocks: [{ kind: 'ladder' }], choices };
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/call', seq: 40, time: 1756512200000, data: { turn: 4, step: 1, callId: 'k1', name: 'lunhui_present', arguments: JSON.stringify(args) } } });
+  follow.cbs.onItem({ type: 'event', event: { type: 'tool/result', seq: 41, time: 1756512201000, surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: 'm-41', role: 'tool', source: { kind: 'tool', callId: 'k1' }, toolCallId: 'k1', content: [{ type: 'text', text: JSON.stringify({ ok: true, blocks: ['ladder'], modules: [] }) }], isError: false } } } });
+  await settle();
+  return { f, store, h };
+}
+
+test('View the full process on a line opens #/task/<id> and follows the running worker', async () => {
+  const f = fakeWindow({ hash: '#/messages' });
+  const h = host({ rows: [row('c', { agentAvailable: true, updatedAt: 9 }), row('t1', { agentAvailable: true, projections: { values: { title: 'Read the tape' } } })], conversation: 'c', tasks: [taskRow('t1', { title: 'Read the tape' })] });
+  const store = started(f, h);
+  await h.ready();
+  assert.match(f.html(), /<a class="btn-sm" href="#\/task\/t1">View the full process<\/a>/);
+  f.win.location.hash = '#/task/t1';
+  f.fire('win', 'hashchange');
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'task', id: 't1' });
+  assert.ok(h.streams.some(s => s.name === 'session/follow' && s.args.request.address.sessionId === 't1' && !s.cancelled), 'the running worker followed');
+  assert.equal(store.get().jobs.convId, 't1', "Details' jobs watch the worker");
+  assert.match(f.html(), /<h1 class="head-title">Read the tape<\/h1>/);
+  assert.match(f.html(), /class="task-tell" href="#\/messages"/);
+  assert.doesNotMatch(f.html(), /class="composer"|id="say"/, 'no composer');
+  store.timers.clear();
+});
+
+test('a Lunhui follow-up button on a task page prompts the conversation with the tag and goes to Messages', async () => {
+  const { f, store, h } = await taskAnswer([{ label: '再看龙头' }]);
+  const before = prompts(h).length;
+  f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiChoice', label: '再看龙头' } }));
+  await settle();
+  assert.equal(prompts(h).length, before + 1, 'one message');
+  assert.equal(prompts(h).at(-1)[1].request.sessionId, 'c', 'to the conversation, never the worker');
+  const [part] = prompts(h).at(-1)[1].request.content;
+  assert.ok(part.text.startsWith('[follow-up · task t1 · Read the tape]\n'), part.text);
+  assert.equal(part.text, '[follow-up · task t1 · Read the tape]\n再看龙头');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(f.win.location.hash, '#/messages');
+  store.timers.clear();
+});
+
+test("the stock drawer's Ask on a task page prompts the conversation with the tag too", async () => {
+  const { f, store, h } = await taskAnswer([]);
+  store.dispatch('lunhuiStockOpen', { key: `${VIEW_1027.strategy}/${VIEW_1027.run}/`, code: '600001' });
+  await settle();
+  const before = prompts(h).length;
+  f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiAsk', code: '600001' } }));
+  await settle();
+  assert.equal(prompts(h).length, before + 1);
+  assert.equal(prompts(h).at(-1)[1].request.sessionId, 'c');
+  assert.equal(prompts(h).at(-1)[1].request.content[0].text, '[follow-up · task t1 · Read the tape]\n说说 上海九百（600001）在这次运行里的情况。');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  store.timers.clear();
+});
+
+test('the same button on Messages sends its label as is', async () => {
+  const { f, store, h } = await choiceAnswer([{ label: '再看龙头' }]);
+  f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiChoice', label: '再看龙头' } }));
+  await settle();
+  assert.equal(prompts(h).at(-1)[1].request.sessionId, 's1');
+  assert.deepEqual(prompts(h).at(-1)[1].request.content, [{ type: 'text', text: '再看龙头' }], 'no tag');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null }, 'it stays on Messages');
   store.timers.clear();
 });
 

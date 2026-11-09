@@ -68,3 +68,21 @@ test('a history page the list does not carry reads Loading… then Not found', (
   assert.match(renderHistoryScreen(R.nav(emptyState(), { screen: 'history', id: 'x' }), NOW), /Loading…/);
   assert.match(renderHistoryScreen(listed([conv('c')], { route: { screen: 'history', id: 'gone' } }), NOW), /Not found/);
 });
+
+test("a history page draws no Lunhui follow-ups and the stock drawer no Ask: nothing there would send", async () => {
+  const { VIEW_1027 } = await import('./helpers/lunhui-view.js');
+  const { stockDrawerHtml } = await import('../../client/js/render/lunhui/stock.js');
+  const composed = { id: 'p1', seq: 1, at: NOW, from: 'gravit', kind: 'composed', text: '弱势日', data: { callId: 'k1', strategy: VIEW_1027.strategy, run: VIEW_1027.run, summary: '弱势日', blocks: [], choices: [{ label: '再看龙头' }], modules: [] } };
+  const key = `${VIEW_1027.strategy}/${VIEW_1027.run}/`;
+  const at = (route, tasks = []) => {
+    const s = listed([conv('c', { messages: [composed], loaded: true }), conv('h1', { messages: [composed], loaded: true })], { route, tasks });
+    return { ...s, lunhui: { ...s.lunhui, views: { [key]: { status: 'loaded', view: VIEW_1027 } }, stock: { key, code: '600001' } } };
+  };
+  const h = renderHistoryScreen(at({ screen: 'history', id: 'h1' }), NOW);
+  assert.match(h, /lh-answer/, 'the composed answer is drawn');
+  assert.doesNotMatch(h, /lh-choice|lunhuiChoice/, 'its follow-ups are not');
+  assert.doesNotMatch(stockDrawerHtml(at({ screen: 'history', id: 'h1' })), /lunhuiAsk/);
+  assert.match(stockDrawerHtml(at({ screen: 'task', id: 'h1' }, [task('h1')])), /lunhuiAsk/, 'a task page keeps its Ask');
+  const { renderTaskScreen } = await import('../../client/js/render/task.js');
+  assert.match(renderTaskScreen(at({ screen: 'task', id: 'h1' }, [task('h1')]), NOW), /lunhuiChoice/, 'and its follow-ups');
+});
