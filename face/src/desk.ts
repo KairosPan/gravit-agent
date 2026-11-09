@@ -90,6 +90,7 @@ import type { FiringRouteCtx, ScheduleDeps, ScheduleHandle } from "./schedule.ts
 import type { StandingStatus } from "./standing.ts";
 import type { RouteRegistrar } from "./static.ts";
 import type { PhoneBridgeHandle, PhoneConversation } from "./phone-bridge.ts";
+import type { DeskLine } from "./conversation.ts";
 import type { AccountPhoneStatus, PhoneClient } from "./phone.ts";
 import { DSH_PIN } from "./version.ts";
 import type { DeskCalendars } from "./market-clock.ts";
@@ -1854,6 +1855,16 @@ export function installDesk(
       clock,
       log,
     });
+  /* Gravit's one conversation, once main.ts binds it (`deps.router`, below); `note` hands it what the firings, the
+   * annotations and the watch sent the phone - a no-op until it is bound, and always with `FACE_ROUTER=0`. */
+  let routed: PhoneConversation | undefined;
+  const note = (line: DeskLine): void => {
+    try {
+      routed?.note(line);
+    } catch (err) {
+      log(`${BIN}: desk: a line could not be noted in the conversation: ${reasonOf(err)}`);
+    }
+  };
   /* The alert annotations' lane (spec §16 H1): each pass's check in a fresh desk agent of its own, never queued behind
    * the conversation's turns; its reply leaves through the conversation's `deliver`, and its run is noted on the watch,
    * read when the run ends - the watch is installed later, after the clock row. */
@@ -1865,6 +1876,7 @@ export function installDesk(
       root: wiring.root,
       on: wiring.on,
       deliver: (text, opts) => conversation.deliver(text, opts),
+      note,
       budget: () => readBudget(home, now(), schedule?.dailyTokens()),
       deadlineMs: deps.alertDeadlineMs ?? ALERT_DEADLINE_MS,
       onAnnotated: (r) => { watch?.noteAnnotated(r); },
@@ -1875,7 +1887,6 @@ export function installDesk(
   /* Gravit's one conversation, once main.ts binds it (`deps.router`): until then the bridge sets the outlet but reads no
    * inbox, so no phone text reaches the desk session first; the schedule and the watch do not wait. Dispose and
    * quiesce end the wait too. */
-  let routed: PhoneConversation | undefined;
   let decide: () => void = () => {};
   const decided = deps.router === true ? new Promise<void>((done) => { decide = done; }) : Promise.resolve();
   let bound = deps.router !== true;
@@ -1949,6 +1960,7 @@ export function installDesk(
         sessionCtx: wiring.sessionCtx,
         on: wiring.on,
         deliver: (text, opts) => conversation.deliver(text, opts),
+        note,
         log,
         /* the schedule's clock reads the same now as the conversation's, unless a test hands it a clock of its own */
         ...(deps.now === undefined ? {} : { now: deps.now }),
@@ -1984,6 +1996,7 @@ export function installDesk(
         calendars,
         clock: watchRow.clock ?? watchClock(now),
         deliver: (text, opts) => conversation.deliver(text, opts),
+        note,
         post: (input) => annotator.post(input),
         idle: () => annotator.idle(),
         budget: () => readBudget(home, now(), schedule?.dailyTokens()),

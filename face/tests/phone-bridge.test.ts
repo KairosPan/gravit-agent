@@ -131,6 +131,7 @@ class FakeRouter implements PhoneConversation {
   statusFails: string | undefined;
   carries = 0;
   readonly carry = async (): Promise<void> => { this.carries += 1; };
+  readonly note = (): void => {};
   readonly status = async (): Promise<{ sessionId?: string; running: number; waiting: number }> => {
     if (this.statusFails !== undefined) throw new Error(this.statusFails);
     return { sessionId: "conv-1", running: 2, waiting: 1 };

@@ -54,6 +54,7 @@
  */
 import type { MessageSource } from "@deepseek-ai/dsh-llm";
 import type { BudgetState, OffState } from "./desk.ts";
+import type { DeskLine } from "./conversation.ts";
 import type { DeskConversation, PostResult } from "./desk-conversation.ts";
 import type { DeskClock, DeskSessionDeps, DeskTurnRecord, SessionEventsOn } from "./desk-session.ts";
 import type { AgentLike } from "./room.ts";
@@ -99,6 +100,9 @@ export interface AnnotatorDeps {
   root: string;
   on: SessionEventsOn;
   deliver: DeskConversation["deliver"];
+  /** Note a reply `deliver` did not refuse as a line in Gravit's one conversation (src/conversation.ts `note`, through
+   * src/desk.ts); none when absent. */
+  note?: (line: DeskLine) => void;
   budget?: () => Promise<BudgetState>;
   deadlineMs?: number;
   onAnnotated?: (r: AnnotatedRecord) => void;
@@ -397,15 +401,28 @@ export function createAnnotator(deps: AnnotatorDeps): Annotator {
         reply = ending.started ? m.conversation.timedOutLine(deadlineMs, m.session.formatDuration) : NO_CHECK;
       }
       let sent: string[] = [];
+      let delivered = false;
       try {
         /* an annotation goes as its alerts went - `urgent` or `alert` (src/phone.ts) - threaded under the alert's message */
         const kind = input.urgent === true ? "urgent" : "alert";
         const result = await deps.deliver(reply, input.replyTo === undefined ? { kind } : { kind, replyTo: input.replyTo });
         if ("sent" in result) sent = result.sent;
+        delivered = !("undelivered" in result);
       } catch (err) {
         log(`${BIN}: desk: the reply of ${where} could not be delivered: ${errText(err)}`);
       }
       const pass = typeof input.message.pass === "string" ? input.message.pass : typeof input.message.alert === "string" ? input.message.alert : "";
+      /* the reply the phone got, a line in the conversation under its pass: the first alert's id and symbol (the
+       * pass's id and the symbols, for several - src/alert-text.ts annotationPost) */
+      const alert = input.message.alert;
+      const symbol = input.message.symbol;
+      if (delivered && deps.note !== undefined && typeof alert === "string" && typeof symbol === "string" && pass !== "") {
+        try {
+          deps.note({ kind: "alert", alert, symbol, pass, label: "annotation", text: reply });
+        } catch (err) {
+          log(`${BIN}: desk: the reply of ${where} could not be noted in the conversation: ${errText(err)}`);
+        }
+      }
       try {
         deps.onAnnotated?.({ t: stamp(), kind: "annotated", pass, sessionId, outcome, sent, text: reply.slice(0, ANNOTATED_TEXT_MAX) });
       } catch (err) {

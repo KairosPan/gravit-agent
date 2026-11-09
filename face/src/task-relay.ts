@@ -9,6 +9,7 @@
  * conversation to `idle`, from a microtask, never inside the bus. */
 import { randomBytes } from "node:crypto";
 import { MessageId, freezeMessage } from "@deepseek-ai/dsh-llm";
+import { INJECTED_KINDS } from "./conversation.ts";
 import { readSessionEvents, type DeskSessionCtxLike } from "./desk-session.ts";
 import type { AgentLike } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
@@ -68,9 +69,17 @@ function inboxIds(agent: AgentLike): string[] {
   return [...(inbox?.nextTurn ?? []), ...(inbox?.nextStep ?? [])].map((message) => message.id);
 }
 
-/** Whether `agent` may take a relay now: idle, nothing on either inbox list. */
+/** Whether `agent` may take a relay now: idle, nothing on either inbox list but the lines the face injects
+ * (src/conversation.ts `INJECTED_KINDS`, a firing's or an alert's line on the next-step list): such a line wakes no
+ * turn, and the relay's turn claims it as context, so it never holds a report back. */
 function ready(agent: AgentLike): boolean {
-  return agent.status === "idle" && inboxIds(agent).length === 0;
+  if (agent.status !== "idle") return false;
+  const inbox = (agent as AgentLike & InboxAware).inbox;
+  if ((inbox?.nextTurn ?? []).length > 0) return false;
+  return (inbox?.nextStep ?? []).every((message) => {
+    const kind = (message.source as { kind?: unknown } | undefined)?.kind;
+    return typeof kind === "string" && INJECTED_KINDS.has(kind);
+  });
 }
 
 /** The id of the message a `user/message` event logs, when it has one. */

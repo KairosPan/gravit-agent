@@ -17,6 +17,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDeskConversation } from "../src/desk-conversation.ts";
 import type { DeliverResult } from "../src/desk-conversation.ts";
+import type { DeskLine } from "../src/conversation.ts";
 import {
   clearOff, deskDir, FIRINGS_FILE, readEvents, readRecords, writeOff, type BudgetState, type DeskEvent, type TurnUsage,
 } from "../src/desk.ts";
@@ -431,6 +432,28 @@ test("the pre-close brief is sent as brief, a strategy's report as report", asyn
   await ran(itemWith({ id: "nvda", producer: { kind: "builtin", name: "report" } }));
   await ran(itemWith({ id: "plain", producer: undefined }));
   assert.deepEqual(kinds, [["preclose text", { kind: "brief" }], ["nvda text", { kind: "report" }], ["plain text", { kind: "report" }]]);
+});
+
+test("a delivered firing is noted with its order, firing and date", async () => {
+  const noted: DeskLine[] = [];
+  const { r } = await fireAndEnd(ITEM, { outcome: "ended", finalText: "BRIEF TEXT" }, { over: { note: (line) => { noted.push(line); } } });
+  assert.deepEqual(r.out.texts, ["BRIEF TEXT"]);
+  assert.deepEqual(noted, [{ kind: "schedule", order: "preclose", firing: KEY, date: "2026-11-27", text: "BRIEF TEXT" }]);
+  /* queued by the outlet counts as sent */
+  const queued: DeskLine[] = [];
+  await fireAndEnd(ITEM, { outcome: "ended", finalText: "Q" }, { deliver: { queued: true }, over: { note: (line) => { queued.push(line); } } });
+  assert.equal(queued.length, 1);
+});
+
+test("a refused or paused firing notes nothing", async () => {
+  const noted: DeskLine[] = [];
+  const note = (line: DeskLine): void => { noted.push(line); };
+  /* the pause: the conversation's deliver answers undelivered */
+  await fireAndEnd(ITEM, { outcome: "ended", finalText: "BRIEF TEXT" }, { deliver: { undelivered: "paused" }, over: { note } });
+  /* an outlet refusing it, and a delivery that throws */
+  await fireAndEnd(ITEM, { outcome: "ended", finalText: "BRIEF TEXT" }, { deliver: { undelivered: "telegram not configured" }, over: { note } });
+  await fireAndEnd(ITEM, { outcome: "ended", finalText: "BRIEF TEXT" }, { over: { note, deliver: async () => { throw new Error("down"); } } });
+  assert.deepEqual(noted, []);
 });
 
 test("a firing that finishes after its market moment is held back with one line", async () => { // Review Focus 1

@@ -1087,6 +1087,7 @@ test("with the router bound the desk session is not created", async () => {
       stop: async () => false,
       carry: async () => { carried.push(await desk.conversation!.deliver("a carried answer", { kind: "chat", network: "telegram" })); },
       status: async () => ({ sessionId: "conv-1", running: 0, waiting: 0 }),
+      note: () => {},
     });
     await until("the carry", () => carried.length === 1);
     assert.deepEqual(carried, [{ sent: ["telegram:900"] }], "the carry ran after the outlet was set");
@@ -1135,7 +1136,7 @@ test("quiesce stops reading the phone's inbox and keeps the outlet for the conve
       home: h, enabled: true, router: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, phone,
       root: join(TMP, "repo-quiesce"), route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
     });
-    desk.bindRouter({ post: async () => ({ opened: true, sessionId: "c" }), stop: async () => false, carry: async () => {}, status: async () => ({ running: 0, waiting: 0 }) });
+    desk.bindRouter({ post: async () => ({ opened: true, sessionId: "c" }), stop: async () => false, carry: async () => {}, status: async () => ({ running: 0, waiting: 0 }), note: () => {} });
     await until("the first read", () => state.reads === 1);
     await desk.quiesce();
     await new Promise((done) => setTimeout(done, 20));

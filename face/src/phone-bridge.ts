@@ -57,6 +57,7 @@ import {
 } from "./desk.ts";
 import type { DeskConversation, DeskOutlet, PhonePost, PostResult } from "./desk-conversation.ts";
 import type { DeskClock } from "./desk-session.ts";
+import type { DeskLine } from "./conversation.ts";
 import type { AccountPhoneStatus, InboxMessage, PhoneClient } from "./phone.ts";
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; the bridge's lines add `phone:`. */
@@ -133,11 +134,13 @@ export function parseCommand(text: string): Command | undefined {
 /** Gravit's one conversation as the phone reaches it (src/conversation.ts, src/tasks.ts `phoneConversation`):
  * `post`, a text's post (pause, fence, key); `stop`, its turn under way cut, the queue behind it kept - whether one was;
  * `carry`, what a graceful stop carried answered (src/desk.ts calls it once the outlet is set; the bridge does not);
- * `status`, its session and how many of its tasks run and wait for the operator. */
+ * `status`, its session and how many of its tasks run and wait for the operator; `note`, what the desk sent the phone
+ * noted as a line in the conversation (src/desk.ts hands it to the firings, the annotations and the watch). */
 export interface PhoneConversation {
   post(input: PhonePost): Promise<PostResult>;
   stop(reason: string): Promise<boolean>;
   carry(): Promise<void>;
+  note(line: DeskLine): void;
   status(): Promise<{ sessionId?: string; running: number; waiting: number }>;
 }
 

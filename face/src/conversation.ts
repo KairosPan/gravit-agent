@@ -31,6 +31,12 @@
  * ({@link OPERATOR_SOURCES}); a schedule or alert line injected into the conversation ({@link INJECTED_KINDS}) never
  * names a turn and never makes one someone else's.
  *
+ * THE DESK'S LINES (plan 3). What a firing, an annotation or a watch alert sent the phone is noted in the conversation
+ * ({@link ConversationHandle.note}, through src/desk.ts once the conversation is bound): one `user` message with a
+ * fixed id, injected to the next step - it wakes nothing, and the next turn claims it as context. Its id is checked
+ * as a phone text's key is, so a line noted twice is one message. Nothing sent, nothing noted: a paused desk notes
+ * nothing. The relay (src/task-relay.ts) does not wait for such a line.
+ *
  * ANSWERS (plan 3). At a turn's end the conversation answers the phone through `deps.deliver` - the desk
  * conversation's `deliver`, the pause's choke point (src/desk-conversation.ts), absent with the desk off, when nothing
  * is sent: a turn that logged a phone text - whatever message named it, a parked browser steer claimed first included -
@@ -90,6 +96,52 @@ export const OPERATOR_SOURCES: ReadonlySet<string> = new Set(["user", "telegram"
 /** The source kinds of the lines the face injects into the conversation - a standing order's firing (`schedule`) and
  * an alert (`alert`): context claimed at a turn's next step, never a turn's name and never another speaker in it. */
 export const INJECTED_KINDS: ReadonlySet<string> = new Set(["schedule", "alert"]);
+
+/** What the desk sent the phone, as a line in the conversation ({@link ConversationHandle.note}): a standing order's
+ * firing - its order's id, the firing's key and its date - or an alert - its id (the pass's, for several), its symbol
+ * or symbols, and, for an annotation's reply, its pass; `label`, the third part of the line's head (an alert's rule,
+ * `annotation`, ...). `text` is what the phone was sent. */
+export type DeskLine =
+  | { kind: "schedule"; order: string; firing: string; date: string; text: string }
+  | { kind: "alert"; alert: string; symbol: string; pass?: string; label?: string; text: string };
+
+/** The longest text a {@link DeskLine} carries into the conversation; past it, cut with an ellipsis. */
+export const NOTE_TEXT_MAX = 4_000;
+
+/** A {@link DeskLine} as the message the conversation is injected: its fixed id - `note-schedule:<firing key>`,
+ * `note-annotation:<pass>` for an annotation's reply, else `note-alert:<alert id>` - its source (the client's shapes:
+ * `schedule` with `order`, `firing`, `date`; `alert` with `alert`, `symbol` and the `pass` when there is one), and its
+ * text: the desk's bracketed head - `[schedule · <order> · <date>]`, `[alert · <symbol> · <label>]` - then the text
+ * sent, cut at {@link NOTE_TEXT_MAX}. `undefined` for a line with an empty or non-string field.
+ * @param line - the line.
+ */
+export function noteMessage(line: DeskLine): { id: string; source: Record<string, string>; text: string } | undefined {
+  const ok = (v: unknown): v is string => typeof v === "string" && v !== "";
+  if (line === null || typeof line !== "object" || typeof line.text !== "string") return undefined;
+  const body = line.text.length > NOTE_TEXT_MAX ? `${line.text.slice(0, NOTE_TEXT_MAX - 1)}…` : line.text;
+  if (line.kind === "schedule") {
+    if (!ok(line.order) || !ok(line.firing) || !ok(line.date)) return undefined;
+    return {
+      id: `note-schedule:${line.firing}`,
+      source: { kind: "schedule", order: line.order, firing: line.firing, date: line.date },
+      text: `[schedule · ${line.order} · ${line.date}]\n${body}`,
+    };
+  }
+  if (line.kind === "alert") {
+    if (!ok(line.alert) || !ok(line.symbol)) return undefined;
+    const pass = ok(line.pass) ? line.pass : undefined;
+    const label = ok(line.label) ? line.label : pass === undefined ? "alert" : "annotation";
+    return {
+      id: pass === undefined ? `note-alert:${line.alert}` : `note-annotation:${pass}`,
+      source: { kind: "alert", alert: line.alert, symbol: line.symbol, ...(pass === undefined ? {} : { pass }) },
+      text: `[alert · ${line.symbol} · ${label}]\n${body}`,
+    };
+  }
+  return undefined;
+}
+
+/** How many note ids a handle remembers it injected, so a second note of one id is skipped before any log read. */
+const NOTED_KEPT = 512;
 
 /** Where the open turn came from, as a task it starts records it: the phone - with the network the text came
  * through - or the web (the browser, and every turn that is not a phone text's). */
@@ -330,6 +382,11 @@ export interface ConversationHandle {
    * violation's path), or `error` (disposed, no session persistence, the log unreadable, the open or followup
    * failing). Posts run one at a time. Never rejects. */
   post(input: PhonePost): Promise<PostResult>;
+  /** Note what the desk sent the phone as a line in the conversation (the module header's THE DESK'S LINES): injected
+   * with its fixed id ({@link noteMessage}) to the inbox's next step - it starts no turn; the next turn claims it -
+   * unless that id is already in the log, on the inbox, or noted by this handle. Runs on the posts' chain; a line that
+   * cannot be noted is one log line. Never throws. */
+  note(line: DeskLine): void;
   /** The phone's `/stop`: when the conversation's agent has work under way - a turn running, or one latched behind
    * maintenance (src/desk-conversation.ts `busy`) - cut it with `reason`, keeping the messages queued behind it
    * (src/desk-session.ts `cancelKeepingQueue`) - `true`; else `false`. Rejects when the cancel throws. */
@@ -693,6 +750,40 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
   };
   let posting: Promise<unknown> = Promise.resolve();
 
+  /** The note ids this handle injected, the newest {@link NOTED_KEPT}. */
+  const noted = new Set<string>();
+  /** {@link ConversationHandle.note}'s work, in its turn. Never rejects. */
+  const noteNow = async (line: DeskLine): Promise<void> => {
+    const made = noteMessage(line);
+    if (made === undefined) {
+      log(`${BIN}: conversation: a desk line was not noted: it names no ${line?.kind === "schedule" ? "order, firing or date" : "alert or symbol"}`);
+      return;
+    }
+    if (disposed || noted.has(made.id)) return;
+    try {
+      const { agent, sessionId } = await ensure();
+      const persistence = deps.ctx.sessionPersistence;
+      if (persistence !== undefined) {
+        await persistence.flush();
+        for (const event of await readSessionEvents(deps.ctx, sessionId)) {
+          if (loggedId(event) === made.id) return;
+        }
+      }
+      if (disposed || noted.has(made.id) || waiting(agent, made.id)) return;
+      const inject = (agent as AgentLike & { inject?: (message: MessageLike) => void }).inject;
+      if (typeof inject !== "function") {
+        log(`${BIN}: conversation: the desk line ${made.id} was not noted: the conversation's agent takes no injected message`);
+        return;
+      }
+      const message = freezeMessage({ id: MessageId(made.id), role: "user", content: [{ type: "text", text: made.text }], source: made.source as unknown as MessageSource });
+      inject.call(agent, message as unknown as MessageLike);
+      noted.add(made.id);
+      if (noted.size > NOTED_KEPT) noted.delete(noted.values().next().value as string);
+    } catch (err) {
+      log(`${BIN}: conversation: the desk line ${made.id} could not be noted: ${errText(err)}`);
+    }
+  };
+
   /** The restart line for a carry's `cut` - a phone turn a graceful stop cut, the conversation's or a desk's from before
    * the one entry - to the network its key names (`telegram` when it names none), through `deps.deliver`: unless the
    * desk's boot already answered that turn (a `desk-turn` cancelled by `restart`), and none with no `deliver`. A ledger
@@ -814,6 +905,10 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       const run = posting.then(() => postNow(input));
       posting = run.catch(() => undefined);
       return run;
+    },
+    note(line) {
+      const run = posting.then(() => noteNow(line));
+      posting = run.catch(() => undefined);
     },
     turnOrigin() {
       return held?.watch.turnOrigin() ?? { kind: "web" };

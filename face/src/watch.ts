@@ -71,6 +71,7 @@ import {
 } from "./desk-book.ts";
 import type { DeliverOpts, DeliverResult, DeskConversation, PostResult } from "./desk-conversation.ts";
 import type { DeskClock, DeskTurnRecord } from "./desk-session.ts";
+import type { DeskLine } from "./conversation.ts";
 import { createEdgar, type Edgar, type EdgarFetch, type EdgarResult, type Filing } from "./edgar.ts";
 import { bjDate, etDate } from "./et.ts";
 import {
@@ -153,6 +154,9 @@ export interface WatchDeps {
   calendars: DeskCalendars;
   clock: DeskClock;
   deliver: DeskConversation["deliver"];
+  /** Note an alert or a batch `deliver` did not refuse as a line in Gravit's one conversation (src/conversation.ts
+   * `note`, through src/desk.ts); none when absent - and never a late replay or the lost line. */
+  note?: (line: DeskLine) => void;
   post: DeskConversation["post"];
   budget: () => Promise<BudgetState>;
   edgar?: { fetch: EdgarFetch; userAgent: string };
@@ -505,6 +509,15 @@ export function installWatch(deps: WatchDeps): WatchHandle {
     if (failed.has(line)) return;
     failed.add(line);
     log(line);
+  };
+  /** An alert the phone got, noted in the conversation (`deps.note`); a note that throws is one line. */
+  const noteLine = (line: DeskLine): void => {
+    if (deps.note === undefined) return;
+    try {
+      deps.note(line);
+    } catch (err) {
+      fail("note", err);
+    }
   };
   /** Queue `job` behind every send before it; it never rejects. */
   const onSendChain = (job: () => Promise<void>): void => {
@@ -977,11 +990,13 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         let result: DeliverResult;
         if (stopped) result = { undelivered: "the face shut down" };
         else {
+          const text = alertText(rec, clock.now(), note);
           try {
-            result = await deps.deliver(alertText(rec, clock.now(), note), rec.urgent === true ? URGENT : ALERT);
+            result = await deps.deliver(text, rec.urgent === true ? URGENT : ALERT);
           } catch (err) {
             result = { undelivered: `send failed: ${errText(err)}` };
           }
+          if (!("undelivered" in result)) noteLine({ kind: "alert", alert: rec.id, symbol: rec.symbol, label: rec.label, text });
         }
         const done = clock.now();
         const sent = "sent" in result;
@@ -1162,10 +1177,14 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         const byId = new Map(records.flatMap((r) => (r.kind === "alert" ? [[r.id, r] as const] : [])));
         const held = ids.flatMap((id) => { const r = byId.get(id); return r === undefined ? [] : [r]; });
         let delivery: DeliverResult;
+        const text = batchText(held, at);
         try {
-          delivery = held.length === 0 ? { undelivered: "the held alerts are not in memory" } : await deps.deliver(batchText(held, at), kindOfHits(held));
+          delivery = held.length === 0 ? { undelivered: "the held alerts are not in memory" } : await deps.deliver(text, kindOfHits(held));
         } catch (err) {
           delivery = { undelivered: `send failed: ${errText(err)}` };
+        }
+        if (!("undelivered" in delivery)) {
+          noteLine({ kind: "alert", alert: base.id, symbol: [...new Set(held.map((h) => h.symbol))].join(","), label: "batch", text });
         }
         rec = { ...base, delivery };
       }

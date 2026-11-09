@@ -57,6 +57,12 @@ class FakeConvAgent implements AgentLike {
     this.session = { id, header, seq: 0, snapshotEvents: () => [], append: () => undefined };
   }
   followup(message: MessageLike): void { this.followups.push(message); }
+  /** dsh-agent's inject: to the next step's list, waking nothing. */
+  readonly injects: MessageLike[] = [];
+  inject(message: MessageLike): void {
+    this.injects.push(message);
+    this.inbox?.nextStep.push(message);
+  }
   cancel(...args: unknown[]): void { this.cancels.push(args); }
   /** dsh-agent's inbox, when a test gives the agent one. */
   inbox?: { nextTurn: MessageLike[]; nextStep: MessageLike[]; remove(id: string): boolean };
@@ -1182,4 +1188,68 @@ test("a desk's carry from before the one entry has its cut answered, unless the 
   await handle.carry();
   assert.deepEqual(sent, [{ text: "a restart cut your message of 13:01 ET before it was answered; send it again", opts: { kind: "chat", network: "telegram" } }]);
   assert.equal((await readEvents(home)).events.filter((e) => e.kind === "desk-carried").length, 2, "both answered");
+});
+
+/* ---------- plan 3: the desk's lines ---------- */
+
+test("note injects one line and starts no turn", async (t) => {
+  const home = await scratch("note");
+  const tree = new FakeConversationTree();
+  const lines: string[] = [];
+  const handle = install(t, deps(tree, home, lines));
+  const { sessionId } = await handle.ensure();
+  const agent = tree.agent(sessionId);
+  agent.inbox = inboxOf([]);
+  handle.note({ kind: "schedule", order: "brief", firing: "brief@2026-11-09", date: "2026-11-09", text: "the pre-close brief" });
+  await until(() => agent.injects.length === 1, "the schedule line");
+  assert.equal(agent.followups.length, 0, "no followup: nothing wakes a turn");
+  assert.equal(agent.status, "idle");
+  const [m] = agent.injects;
+  assert.equal(m.id, "note-schedule:brief@2026-11-09");
+  assert.equal(m.role, "user");
+  assert.deepEqual(m.source, { kind: "schedule", order: "brief", firing: "brief@2026-11-09", date: "2026-11-09" });
+  assert.deepEqual(textsOf(m), ["[schedule · brief · 2026-11-09]\nthe pre-close brief"]);
+  assert.deepEqual(agent.inbox.nextStep.map((x) => x.id), ["note-schedule:brief@2026-11-09"], "on the next step's list");
+  assert.deepEqual(agent.inbox.nextTurn, []);
+  /* an alert, and an annotation's reply under its pass */
+  handle.note({ kind: "alert", alert: "al-1", symbol: "NVDA", label: "move", text: "NVDA +6%" });
+  handle.note({ kind: "alert", alert: "al-1", symbol: "NVDA", pass: "pass-7", label: "annotation", text: "earnings beat" });
+  await until(() => agent.injects.length === 3, "the alert lines");
+  assert.equal(agent.injects[1].id, "note-alert:al-1");
+  assert.deepEqual(agent.injects[1].source, { kind: "alert", alert: "al-1", symbol: "NVDA" });
+  assert.deepEqual(textsOf(agent.injects[1]), ["[alert · NVDA · move]\nNVDA +6%"]);
+  assert.equal(agent.injects[2].id, "note-annotation:pass-7");
+  assert.deepEqual(agent.injects[2].source, { kind: "alert", alert: "al-1", symbol: "NVDA", pass: "pass-7" });
+  assert.deepEqual(textsOf(agent.injects[2]), ["[alert · NVDA · annotation]\nearnings beat"]);
+  /* a line naming nothing is one log line, and nothing */
+  handle.note({ kind: "schedule", order: "", firing: "k", date: "2026-11-09", text: "x" });
+  await settle();
+  assert.equal(agent.injects.length, 3);
+  assert.ok(lines.some((l) => l.includes("a desk line was not noted")), lines.join("\n"));
+});
+
+test("the same id twice injects once", async (t) => {
+  const home = await scratch("note-dupe");
+  const tree = new FakeConversationTree();
+  const handle = install(t, deps(tree, home, []));
+  const { sessionId } = await handle.ensure();
+  const agent = tree.agent(sessionId);
+  const line = { kind: "alert" as const, alert: "al-2", symbol: "AMD", label: "level", text: "AMD under 140" };
+  handle.note(line);
+  handle.note(line);
+  await settle();
+  assert.equal(agent.injects.length, 1, "the handle remembers what it noted");
+  /* in the log (a restart's): a fresh handle reads it */
+  tree.logs.set(sessionId, [{ type: "user/message", seq: 1, data: { id: "note-schedule:k1", role: "user" } }]);
+  await handle.dispose();
+  const second = install(t, deps(tree, home, []));
+  const again = await second.ensure();
+  const resumed = tree.agent(again.sessionId);
+  resumed.inbox = inboxOf([]);
+  resumed.inbox.nextStep.push({ id: "note-alert:al-9", role: "user", content: [], source: { kind: "alert" } });
+  second.note({ kind: "schedule", order: "brief", firing: "k1", date: "2026-11-09", text: "logged already" });
+  /* on the inbox */
+  second.note({ kind: "alert", alert: "al-9", symbol: "TSLA", text: "queued already" });
+  await settle();
+  assert.equal(resumed.injects.length, 0, "logged or queued: nothing injected");
 });

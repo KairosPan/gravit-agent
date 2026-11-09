@@ -14,6 +14,7 @@ import { ANNOTATED_TEXT_MAX, createAnnotator, type Annotator, type AnnotatorDeps
 import { clearOff, readEvents, writeOff, type BudgetState, type DeskEvent } from "../src/desk.ts";
 import type { DeliverResult, DeskConversation, PostResult } from "../src/desk-conversation.ts";
 import type { DeskSessionCtxLike } from "../src/desk-session.ts";
+import type { DeskLine } from "../src/conversation.ts";
 import type { AnnotatedRecord } from "../src/watch.ts";
 import { fakeAgents, fakeBus, WallClock, type FakeAgents, type FakeBus } from "./desk-fakes.ts";
 
@@ -126,6 +127,28 @@ test("an annotation's reply goes as alert, threaded under the alert's message, a
   assert.deepEqual([h.sent, h.kinds], [[["Stop met.", "telegram:41"]], ["alert"]]);
   assert.deepEqual(h.noted[0].sent, ["telegram:101"]);
   await h.annotator.dispose();
+});
+
+test("an annotation's reply is noted", async () => {
+  const lines: DeskLine[] = [];
+  const h = await harness({ note: (line) => { lines.push(line); } });
+  const sessionId = sessionOf(await annotate(h, "a-000000000001", 41));
+  startTurn(h, sessionId, 1, alertOf("a-000000000001"));
+  answer(h, sessionId, 1, "Stop met.");
+  endTurn(h, sessionId, 1);
+  await waitFor("the annotation", () => h.noted.length === 1);
+  assert.deepEqual(lines, [{ kind: "alert", alert: "a-000000000001", symbol: "NVDA", pass: "p-000000000001", label: "annotation", text: "Stop met." }]);
+  await h.annotator.dispose();
+  /* a reply the pause held back is not noted */
+  const held: DeskLine[] = [];
+  const p = await harness({ note: (line) => { held.push(line); } }, async () => ({ undelivered: "paused" }));
+  const id = sessionOf(await annotate(p, "a-000000000002", 42));
+  startTurn(p, id, 1, alertOf("a-000000000002"));
+  answer(p, id, 1, "Stop met.");
+  endTurn(p, id, 1);
+  await waitFor("the annotation", () => p.noted.length === 1);
+  assert.deepEqual(held, []);
+  await p.annotator.dispose();
 });
 
 test("an annotation opens at once in its own session while the desk conversation's turn is under way", async () => {

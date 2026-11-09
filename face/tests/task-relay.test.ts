@@ -106,6 +106,29 @@ test("while the conversation runs, or while its inbox holds a message, the relay
   assert.equal(conv.sent[0]!.id, "task-report:w1:c1");
 });
 
+test("a relay goes out while an injected line waits in the next-step inbox", async () => { // Review Focus 2
+  const { relay } = setup();
+  const firing = { id: "note-schedule:brief@2026-11-09", role: "user", content: [], source: { kind: "schedule", order: "brief", firing: "brief@2026-11-09", date: "2026-11-09" } };
+  const alert = { id: "note-alert:al-1", role: "user", content: [], source: { kind: "alert", alert: "al-1", symbol: "NVDA" } };
+  conv.inbox.nextStep.push(firing as unknown as MessageLike, alert as unknown as MessageLike);
+  /* beside them a steer that is no injected line still holds the relay back */
+  conv.inbox.nextStep.push({ id: "steered", role: "user", content: [], source: { kind: "user" } } as unknown as MessageLike);
+  relay.offer(item(1));
+  await relay.pump();
+  assert.equal(conv.sent.length, 0, "a steer waits on the next step: the relay waits");
+  conv.inbox.nextStep.splice(2);
+  await relay.pump();
+  assert.equal(conv.sent.length, 1, "only injected lines wait: the relay goes, and its turn claims them");
+  assert.equal(conv.sent[0]!.id, "task-report:w1:c1");
+  assert.deepEqual(conv.inbox.nextStep.map((m) => m.id), ["note-schedule:brief@2026-11-09", "note-alert:al-1"], "the lines stay for that turn");
+  /* a running conversation still holds it back */
+  conv.answer();
+  conv.status = "running";
+  relay.offer(item(2));
+  await relay.pump();
+  assert.equal(conv.sent.length, 1);
+});
+
 test("no conversation: the relay waits and nothing is read", async () => {
   let exists = false;
   const { relay } = setup({ exists: () => exists });

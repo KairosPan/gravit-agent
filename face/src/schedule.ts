@@ -1243,7 +1243,7 @@ const FACE_CLOCK: DeskClock = {
  * @param opts - `home` the harness home; `root` the repository root; `python` the interpreter a `.py` script producer runs
  *   under; `quotes` the desk's quote source, the Market's reads (src/market-quotes.ts); `session` the desk session's deps; `sessionCtx` the booted ROOT context, whose
  *   `agentDefaultModel` and `llm` a firing's route needs - a firing on a context without them could not run; `on` the
- *   root bus; `deliver` the desk conversation's; `log`, stderr by default; `now`, the owner's clock - the wall clock
+ *   root bus; `deliver` the desk conversation's; `note`, what a firing sent noted in Gravit's one conversation; `log`, stderr by default; `now`, the owner's clock - the wall clock
  *   by default - under the face's timers; `seams`, for tests.
  */
 export function createDeskSchedule(opts: {
@@ -1255,6 +1255,7 @@ export function createDeskSchedule(opts: {
   sessionCtx: Partial<FiringRouteCtx>;
   on: SessionEventsOn;
   deliver: FiringDeps["deliver"];
+  note?: FiringDeps["note"];
   log?: (line: string) => void;
   now?: () => number;
   seams?: { clock?: DeskClock; calendars?: Partial<DeskCalendars> } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;
@@ -1283,6 +1284,7 @@ export function createDeskSchedule(opts: {
     },
     on: opts.on,
     deliver: opts.deliver,
+    ...(opts.note === undefined ? {} : { note: opts.note }),
     budget: () => readBudget(opts.home, clock.now(), handle.dailyTokens()),
     log,
     ...(seams.tickMs === undefined ? {} : { tickMs: seams.tickMs }),

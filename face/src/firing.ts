@@ -68,6 +68,7 @@ import {
   appendEvent, appendRecord, budgetReplyLine, deskDir, deskTime, FIRINGS_FILE, readOffState, type BudgetState, type TurnUsage,
 } from "./desk.ts";
 import type { DeliverOpts, DeliverResult } from "./desk-conversation.ts";
+import type { DeskLine } from "./conversation.ts";
 import {
   cutOffLine, deskTurnEvent, findChainViolation, provenanceLine, resolveDeskRoute, superviseDeskTurns, type DeskClock, type DeskTurnRecord,
   type SessionEventsOn,
@@ -560,6 +561,9 @@ export interface FiringDeps {
   on: SessionEventsOn;
   supervise?: typeof superviseDeskTurns;
   deliver(text: string, opts: DeliverOpts): Promise<DeliverResult>;
+  /** Note a text `deliver` did not refuse as a line in Gravit's one conversation (src/conversation.ts `note`, through
+   * src/desk.ts - a no-op until it is bound, and with `FACE_ROUTER=0`); none when absent. */
+  note?: (line: DeskLine) => void;
   budget(): Promise<BudgetState>;
   log?: (line: string) => void;
   /** What a rotation of `firings.jsonl` that one of the firing's own appends sets off hands on to the new file -
@@ -907,14 +911,24 @@ export function kindOf(order: Pick<StandingOrder, "producer">): DeliverOpts {
 }
 
 /** Send `text` through the firing's `deliver` as its order's kind ({@link kindOf}), which should never reject; one that
- * does is one line and an `undelivered` answer. */
+ * does is one line and an `undelivered` answer. A text sent or queued - not `undelivered`, so never under the pause - is
+ * noted (`deps.note`) with the run's order, key and date; its id is the firing's, so a firing's later texts are not. */
 async function send(run: Run, text: string): Promise<DeliverResult> {
+  let result: DeliverResult;
   try {
-    return await run.deps.deliver(text, kindOf(run.item.order));
+    result = await run.deps.deliver(text, kindOf(run.item.order));
   } catch (err) {
     run.log(`${BIN}: desk: firing ${run.item.key} could not deliver its message: ${errText(err)}`);
     return { undelivered: `send failed: ${errText(err)}` };
   }
+  if (!("undelivered" in result) && run.deps.note !== undefined) {
+    try {
+      run.deps.note({ kind: "schedule", order: run.item.order.id, firing: run.item.key, date: run.item.date, text });
+    } catch (err) {
+      run.log(`${BIN}: desk: firing ${run.item.key} could not be noted in the conversation: ${errText(err)}`);
+    }
+  }
+  return result;
 }
 
 /** The firing's `finished` record, appended: its wall time, its producer, and `rest` - each key only when it has a
