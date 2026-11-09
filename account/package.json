@@ -13,6 +13,7 @@
     "account:service": "tsx src/portfolio/account-service.ts",
     "account:check": "tsx src/portfolio/account-check.ts",
     "account:owners": "tsx src/portfolio/owners-check.ts",
+    "photon:check": "tsx scripts/photon-check.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
