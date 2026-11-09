@@ -13,7 +13,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  CONVERSATION_DEADLINE_MS, INJECTED_KINDS, OPERATOR_SOURCES, conversationDir, conversationFence, ensureConversation, installConversation,
+  CONVERSATION_DEADLINE_MS, INJECTED_KINDS, conversationFenceRefusalLine, OPERATOR_SOURCES, conversationDir, conversationFence, ensureConversation, installConversation,
   type ConversationCtxLike, type ConversationDeps,
 } from "../src/conversation.ts";
 import { appendEvent, readEvents, writeOff, type DeskEvent } from "../src/desk.ts";
@@ -695,7 +695,7 @@ test("a post while paused is refused with the paused line, and opens nothing", a
   assert.equal(tree.created.length, 0, "no conversation was opened for it");
 });
 
-test("a fence violation is refused with the fence's line, and nothing is followed up", async (t) => {
+test("an in-folder fence violation is refused with a line that says to remove it from the conversation's folder", async (t) => {
   const home = await scratch("fenced");
   const tree = new FakeConversationTree();
   const handle = install(t, deps(tree, home, []));
@@ -704,8 +704,66 @@ test("a fence violation is refused with the fence's line, and nothing is followe
   const result = await handle.post(phonePost());
   assert.ok("refused" in result && result.refused === "fence", JSON.stringify(result));
   assert.equal(result.path, "GRAVIT.md");
-  assert.match(result.line, /^refused: GRAVIT\.md exists/);
+  assert.equal(result.line, "refused: GRAVIT.md is in the conversation's folder; it would steer every turn. Remove GRAVIT.md from the conversation's folder, then write again.");
+  assert.doesNotMatch(result.line, /desk/);
   assert.equal(tree.agent(sessionId).followups.length, 0);
+});
+
+test("a repository above the folder is refused with a line naming its .git, never the directory to remove", async (t) => {
+  const repo = await scratch("repo");
+  await mkdir(join(repo, ".git"));
+  const home = join(repo, "home");
+  const tree = new FakeConversationTree();
+  const handle = install(t, deps(tree, home, []));
+  const result = await handle.post(phonePost());
+  assert.ok("refused" in result && result.refused === "fence", JSON.stringify(result));
+  assert.equal(result.path, repo);
+  assert.equal(result.line, conversationFenceRefusalLine(repo));
+  assert.equal(result.line, `refused: the conversation's folder sits inside a repository (${join(repo, ".git")}); its instruction files would steer every turn. Move the harness home out of the repository, then write again.`);
+  assert.doesNotMatch(result.line, new RegExp(`Remove ${repo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[ ,]`));
+  assert.equal(tree.created.length, 0, "nothing opened");
+});
+
+test("a post that is not a phone text is refused as an error, logged, and opens nothing", async (t) => {
+  const home = await scratch("not-phone");
+  const tree = new FakeConversationTree();
+  const lines: string[] = [];
+  const handle = install(t, deps(tree, home, lines));
+  const bad: unknown[] = [
+    { ...phonePost(), message: { kind: "user", network: "telegram", messageId: "telegram:1" } },
+    { ...phonePost(), source: { kind: "schedule", order: "o", date: "2026-11-09" } },
+    { ...phonePost(), message: { kind: "telegram", network: "imessage", messageId: "imessage:1" } },
+  ];
+  for (const input of bad) {
+    const result = await handle.post(input as PhonePost);
+    assert.deepEqual(result, { refused: "error", line: "the conversation could not open a turn: the post is not a phone text (telegram or slack)" });
+  }
+  assert.equal(lines.filter((line) => line.includes("not a phone text")).length, 3);
+  assert.equal(tree.created.length, 0);
+  /* an unknown provenance network is dropped, the line falling back to telegram */
+  const ok = await handle.post(phonePost({ source: { kind: "telegram", network: "imessage", at: AT } }));
+  assert.ok("opened" in ok);
+  assert.deepEqual(textsOf(tree.agent(ok.sessionId).followups[0]), ["[telegram · operator · 13:03 ET]\nhow is NVDA doing?"]);
+});
+
+test("dispose waits for a post under way", async (t) => {
+  const home = await scratch("dispose-post");
+  const tree = new FakeConversationTree();
+  const handle = install(t, deps(tree, home, []));
+  await handle.ensure();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const flush = tree.ctx.sessionPersistence!.flush;
+  tree.ctx.sessionPersistence!.flush = async () => { await gate; await flush(); };
+  const order: string[] = [];
+  const posted = handle.post(phonePost()).then(() => { order.push("post"); });
+  await settle();
+  const disposed = handle.dispose().then(() => { order.push("dispose"); });
+  await settle();
+  assert.deepEqual(order, [], "dispose waits");
+  release();
+  await Promise.all([posted, disposed]);
+  assert.deepEqual(order, ["post", "dispose"]);
 });
 
 test("a phone turn is the operator's", async (t) => {

@@ -34,7 +34,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import { installModelSelection as installDshModelSelection } from "@deepseek-ai/dsh-agent";
 import { MessageId, freezeMessage, type MessageSource } from "@deepseek-ai/dsh-llm";
@@ -44,7 +44,7 @@ import {
 } from "./desk-conversation.ts";
 import { CONVERSATION_PRESET } from "./desk-names.ts";
 import {
-  fenceRefusalLine, findFenceViolation, provenanceLine, readSessionEvents, superviseDeskTurns,
+  findFenceViolation, provenanceLine, readSessionEvents, superviseDeskTurns,
   type DeskSessionCtxLike, type DeskTurnRecord, type SessionEventsOn,
 } from "./desk-session.ts";
 import type { AgentLike, MemberSetup, RoomDeps, SessionLike } from "./room.ts";
@@ -99,6 +99,20 @@ export async function conversationFence(dir: string): Promise<string | undefined
       if (code !== "ENOENT" && code !== "ENOTDIR") return at;
     }
   }
+}
+
+/**
+ * The phone's line for a text the conversation's fence refused, naming what to remove: for a violation inside the
+ * folder ({@link conversationFence}'s relative path), that entry in the conversation's folder; for a repository above
+ * it (an absolute path, the directory holding the `.git`), that `.git` - the folder must not sit inside a repository,
+ * and nothing tells the operator to remove the directory itself.
+ * @param path - what {@link conversationFence} found.
+ */
+export function conversationFenceRefusalLine(path: string): string {
+  if (isAbsolute(path)) {
+    return `refused: the conversation's folder sits inside a repository (${join(path, ".git")}); its instruction files would steer every turn. Move the harness home out of the repository, then write again.`;
+  }
+  return `refused: ${path} is in the conversation's folder; it would steer every turn. Remove ${path} from the conversation's folder, then write again.`;
 }
 
 /** The booted ROOT context as the conversation reads it: the desk session's slice, the root bus, and dsh's working-
@@ -481,6 +495,19 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
   /** {@link ConversationHandle.post}'s work, in its turn. */
   const postNow = async (input: PhonePost): Promise<PostResult> => {
     if (disposed) return failed("the conversation is disposed");
+    /* checked, never cast: only a phone text's two sources open a phone turn */
+    const msg = input.message as { kind?: unknown; network?: unknown; messageId?: unknown };
+    if (input.source?.kind !== "telegram" || msg?.kind !== "telegram" || !isPhoneNetwork(msg.network) || typeof msg.messageId !== "string" || typeof input.key !== "string") {
+      return failed("the post is not a phone text (telegram or slack)");
+    }
+    const network = input.source.network;
+    const source = {
+      kind: "telegram" as const,
+      ...(isPhoneNetwork(network) ? { network } : {}),
+      ...(input.source.at === undefined ? {} : { at: input.source.at }),
+      ...(input.source.carried === true ? { carried: true as const } : {}),
+    };
+    const logged = { kind: "telegram" as const, network: msg.network, messageId: msg.messageId };
     try {
       const clock = deps.now ?? Date.now;
       const paused = await pauseInForce({ readOffState, clearOff }, deps.home, clock, log);
@@ -489,7 +516,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       const path = await conversationFence(dir);
       if (path !== undefined) {
         log(`${BIN}: conversation: a phone text was refused: the fence found ${path}`);
-        return { refused: "fence", path, line: fenceRefusalLine(path) };
+        return { refused: "fence", path, line: conversationFenceRefusalLine(path) };
       }
       const persistence = deps.ctx.sessionPersistence;
       if (persistence === undefined) return failed("this face has no session persistence, so a phone text cannot be checked against the conversation's log");
@@ -502,8 +529,8 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       }
       if (disposed) return failed("the conversation is disposed");
       if (seen.has(input.key) || waiting(agent, input.key)) return { opened: true, sessionId, duplicate: true };
-      const content = phoneContent(provenanceLine(input.source, new Date(clock())), input.text, input.context);
-      const message = freezeMessage({ id: MessageId(input.key), role: "user", content, source: input.message as MessageSource });
+      const content = phoneContent(provenanceLine(source, new Date(clock())), input.text, input.context);
+      const message = freezeMessage({ id: MessageId(input.key), role: "user", content, source: logged as MessageSource });
       agent.followup(message as unknown as MessageLike);
       sent.add(input.key);
       await flush(`after the phone text ${input.key}`);
@@ -532,6 +559,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
     },
     async dispose() {
       disposed = true;
+      await posting;
       await tail;
       const was = held;
       held = undefined;
