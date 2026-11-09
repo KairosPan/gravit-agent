@@ -168,7 +168,7 @@ describe("the real Photon link", () => {
     return route(s);
   }) as typeof fetch;
 
-  const createClient = (o: { address: string; token: string; tls: boolean }): PhotonImClient => {
+  const createClient = (o: { address: string; token: string; tls: boolean; timeout: number }): PhotonImClient => {
     const c = { ...o, closed: false };
     clients.push(c);
     return {
@@ -389,7 +389,7 @@ describe("the real Photon link", () => {
   describe("the line token and the send", () => {
     it("sendText mints a token, opens the client over TLS and sends to the DM chat with the part id", async () => {
       expect(await link.sendText(p, "+14155550100", "hi", "r1:0")).toEqual({ guid: "out-1" });
-      expect(clients).toEqual([{ address: "imessage.spectrum.photon.codes:443", token: "line-token-1", tls: true, closed: false }]);
+      expect(clients).toEqual([{ address: "imessage.spectrum.photon.codes:443", token: "line-token-1", tls: true, timeout: 15_000, closed: false }]);
       expect(sends).toEqual([{ chat: "any;-;+14155550100", text: "hi", clientMessageId: "r1:0", token: "line-token-1" }]);
       expect(seen.at(-1)).toMatchObject({ url: `${API}/projects/prj_1/imessage/tokens`, method: "POST", auth: `Basic ${basicOf("prj_1", secret)}` });
     });

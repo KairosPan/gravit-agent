@@ -627,9 +627,10 @@ export class Identity {
    * later row of that network is passed over, so its order holds, while the other networks' rows go on. One refused outright is dropped
    * with one line, as is one quiet hours hold now, one too old, and one for a network not connected. An iMessage row whose line Photon
    * moved (the connector's movedAt) is dropped, never sent. `watch` names a written-ahead row a send is waiting on: the ids of its parts
-   * sent, and why it was refused, are noted there. `stalled` is shared by the flushes of one send. `timerDue`: the flush timer's, when it
-   * is the one flushing (the time it was armed for), so a network whose own wait ends later is passed over */
-  private async flush(watch?: RowWatch, stalled: Set<Network> = new Set(), timerDue?: number): Promise<void> {
+   * sent, and why it was refused, are noted there. `stalled` is shared by the flushes of one send. `waitsFrom`: set by the flush timer (the
+   * time it was armed for) and Telegram's poll (now), which keep each network's own wait — a network whose wait ends after it, or after
+   * now if that is later, is passed over; a send's flush leaves it unset and tries every row */
+  private async flush(watch?: RowWatch, stalled: Set<Network> = new Set(), waitsFrom?: number): Promise<void> {
     let i = 0;
     while (i < this.outbox.length && !this.disposed) {
       const head = this.outbox.at(i)!;
@@ -637,11 +638,12 @@ export class Identity {
         i += 1;
         continue;
       }
-      // a timer flush due before the wait a network asked for passes it over, and arms again for when that wait ends
+      // a timer's or a poll's flush within the wait a network asked for passes it over, and arms again for when that wait ends
       const at = this.retryAt.get(head.network);
-      if (timerDue !== undefined && at !== undefined && at > timerDue) {
+      const ref = waitsFrom === undefined ? undefined : Math.max(waitsFrom, this.now());
+      if (ref !== undefined && at !== undefined && at > ref) {
         stalled.add(head.network);
-        this.armFlush(head.network, undefined, at - timerDue);
+        this.armFlush(head.network, undefined, at - ref);
         i += 1;
         continue;
       }
@@ -974,7 +976,7 @@ export class Identity {
       clock: this.clock,
       log,
       pollTimeoutS: this.deps.connectedPollTimeoutS,
-      beforePoll: () => (this.outbox.length > 0 ? this.outbound(() => this.flush()) : Promise.resolve()),
+      beforePoll: () => (this.outbox.length > 0 ? this.outbound(() => this.flush(undefined, new Set(), this.now())) : Promise.resolve()),
     });
     this.connectors.set(binding.network, connector);
     connector.start();

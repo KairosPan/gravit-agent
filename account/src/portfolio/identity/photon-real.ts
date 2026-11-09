@@ -28,7 +28,7 @@ export interface RealPhotonLinkOptions {
   grpcAddress?: string;
   fetch?: typeof fetch;
   /** advanced-imessage/grpc's createClient */
-  createClient?: (o: { address: string; token: string; tls: boolean }) => PhotonImClient;
+  createClient?: (o: { address: string; token: string; tls: boolean; timeout: number }) => PhotonImClient;
   clock?: IdentityClock;
   log: (l: string) => void;
 }
@@ -50,6 +50,9 @@ const RATE_CODES = new Set([
   "newContactThrottled",
   "sendReceiveRatioExceeded",
 ]);
+/** every unary gRPC call (a send among them) given up after this, as Telegram's and Slack's sends are: a call Photon never answers would
+ * otherwise hold the account's send chain, and the connects and disconnects that wait on it, for good. Streams are left open */
+export const PHOTON_CALL_TIMEOUT_MS = 15_000;
 const RETRY_CODES = new Set(["tokenExpired", "serviceUnavailable", "timeout", "networkError", "internalError"]);
 
 /** what a REST call is, for its status mapping */
@@ -231,7 +234,7 @@ export function realPhotonLink(o: RealPhotonLinkOptions): PhotonLink {
     if (pending) return pending;
     const done = (async () => {
       const t = await mint(p);
-      const next: Held = { key, token: t.token, renewAt: clock.now() + t.expiresIn * 1000 * RENEW_SHARE, im: createClient({ address: grpcAddress, token: t.token, tls: true }) };
+      const next: Held = { key, token: t.token, renewAt: clock.now() + t.expiresIn * 1000 * RENEW_SHARE, im: createClient({ address: grpcAddress, token: t.token, tls: true, timeout: PHOTON_CALL_TIMEOUT_MS }) };
       const old = held.get(key);
       held.set(key, next);
       log(`imessage: line token minted (renews in ${Math.round(t.expiresIn * RENEW_SHARE)} s)`);
