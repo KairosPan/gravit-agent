@@ -22,6 +22,8 @@ import { randomBytes } from "node:crypto";
 import { fenceTaskData } from "./task-relay.ts";
 import { cut, type TaskGroup, type TaskState, type TaskView } from "./task-view.ts";
 
+/** The most characters a bot's id takes (src/bots.ts `isBotId`). */
+export const TASK_BOT_MAX = 64;
 /** The most characters a steer's text takes. */
 export const TASK_STEER_MAX = 2_000;
 /** The most characters `task_read` answers in `text`. */
@@ -38,7 +40,7 @@ const BIN = "gravit-face";
  * `Error("no task " + id)` for an id they do not know; `list()` is windowed and is not the registry. */
 export interface TaskOps {
   /** `origin`, where the turn that starts it came from (`web` when absent). */
-  start(input: { title: string; brief: string; strategy?: string; origin?: TaskOrigin }): Promise<TaskView>;
+  start(input: { title: string; brief: string; strategy?: string; bot?: string; origin?: TaskOrigin }): Promise<TaskView>;
   steer(id: string, text: string): Promise<TaskView>;
   stop(id: string): Promise<TaskView>;
   read(id: string): Promise<{ view: TaskView; text: string }>;
@@ -85,13 +87,15 @@ export function taskToolDefinitions(ops: TaskOps, operatorTurn: () => boolean, t
     name: "task_start",
     description:
       "Start a task: a worker session that does the brief on its own and reports back to you. Only in a turn the operator's message opened. " +
-      "`strategy` names a strategy directory the worker works in; leave it out for the workspace root.",
+      "`strategy` names a strategy directory the worker works in; leave it out for the workspace root. " +
+      "`bot` names a bot available to Gravit: the worker is that bot, in its home folder. Not with `strategy`.",
     parameters: {
       type: "object",
       properties: {
         title: { type: "string", minLength: 1, maxLength: TASK_TITLE_MAX },
         brief: { type: "string", minLength: 1, maxLength: TASK_BRIEF_MAX },
         strategy: { type: "string", minLength: 1 },
+        bot: { type: "string", minLength: 1, maxLength: TASK_BOT_MAX },
       },
       required: ["title", "brief"],
       additionalProperties: false,
@@ -99,7 +103,7 @@ export function taskToolDefinitions(ops: TaskOps, operatorTurn: () => boolean, t
     output: {
       schema: {
         type: "object",
-        properties: { task: { type: "string" }, title: { type: "string" }, strategy: { type: "string" } },
+        properties: { task: { type: "string" }, title: { type: "string" }, strategy: { type: "string" }, bot: { type: "string" } },
         required: ["task", "title"],
         additionalProperties: false,
       },
@@ -113,9 +117,19 @@ export function taskToolDefinitions(ops: TaskOps, operatorTurn: () => boolean, t
       // The strategy's length and folder are validated by startWorker (src/task-worker.ts).
       const strategy = objectOf(args).strategy;
       if (strategy !== undefined && (typeof strategy !== "string" || strategy.length < 1)) throw new Error("the strategy is a non-empty string");
+      // Whether the bot is available is startWorker's to say (src/task-worker.ts); only its length is checked here.
+      const bot = objectOf(args).bot;
+      if (bot !== undefined && (typeof bot !== "string" || bot.length < 1 || bot.length > TASK_BOT_MAX)) {
+        throw new Error(`the bot is a string of 1 to ${TASK_BOT_MAX} characters`);
+      }
       const origin = turnOrigin?.() ?? { kind: "web" as const };
-      const view = await ops.start(strategy === undefined ? { title, brief, origin } : { title, brief, strategy, origin });
-      return view.strategy === undefined ? { task: view.id, title: view.title } : { task: view.id, title: view.title, strategy: view.strategy };
+      const view = await ops.start({
+        title, brief, ...(strategy === undefined ? {} : { strategy }), ...(bot === undefined ? {} : { bot }), origin,
+      });
+      return {
+        task: view.id, title: view.title,
+        ...(view.strategy === undefined ? {} : { strategy: view.strategy }), ...(view.bot === undefined ? {} : { bot: view.bot }),
+      };
     },
     presentCall: (args) => ({ card: "generic", title: `Start task: ${String(objectOf(args).title ?? "")}`, kind: "read" }),
   };
@@ -194,7 +208,7 @@ export function taskToolDefinitions(ops: TaskOps, operatorTurn: () => boolean, t
   };
   const list: DeskToolDefinition = {
     name: "task_list",
-    description: "List the tasks: id, title, strategy, state and group.",
+    description: "List the tasks: id, title, strategy or bot, state and group.",
     parameters: { type: "object", properties: {}, additionalProperties: false },
     output: {
       schema: {
@@ -208,6 +222,7 @@ export function taskToolDefinitions(ops: TaskOps, operatorTurn: () => boolean, t
                 task: { type: "string" },
                 title: { type: "string" },
                 strategy: { type: "string" },
+                bot: { type: "string" },
                 state: { type: "string", enum: STATES },
                 group: { type: "string", enum: GROUPS },
               },
@@ -229,6 +244,7 @@ export function taskToolDefinitions(ops: TaskOps, operatorTurn: () => boolean, t
           task: v.id,
           title: v.title,
           ...(v.strategy === undefined ? {} : { strategy: v.strategy }),
+          ...(v.bot === undefined ? {} : { bot: v.bot }),
           state: v.state,
           group: v.group,
         })),

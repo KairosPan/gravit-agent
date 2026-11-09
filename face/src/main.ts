@@ -35,6 +35,7 @@ import type { DeliverOpts, DeskConversationCtxLike } from "./desk-conversation.t
 import { resolveDeskRoute } from "./desk-session.ts";
 import { conversationDir, conversationFence, installConversation, type ConversationCtxLike, type ConversationHandle } from "./conversation.ts";
 import { installRouter, installTasks, phoneConversation, routerEnabled, type TasksCtxLike, type TasksHandle } from "./tasks.ts";
+import { rosterBots } from "./task-worker.ts";
 import { createPhoneClient, type PhoneClient } from "./phone.ts";
 import { announceCard } from "./card-notice.ts";
 import { marketQuotes } from "./market-quotes.ts";
@@ -522,6 +523,8 @@ if (routerEnabled(process.env)) {
       route: routerRoute,
       installModelSelection: routerInstall,
       conversation: held,
+      /* a bot task's bot: on the one roster, listed and unbroken (src/task-worker.ts `rosterBots`) */
+      bots: rosterBots(dshHome, allBots),
       ...(desk?.enabled ? { deskLines: () => desk!.lines() } : {}),
       isTrusted: isTrustedDataRequest,
     }),

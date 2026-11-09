@@ -1,27 +1,31 @@
 // face/src/task-worker.ts
-/** Task workers: one root dsh session on the `gravit` preset per task, started by the conversation (src/conversation.ts;
- * spec docs/superpowers/specs/2026-11-08-one-entry-router-design.md §5.3).
+/** Task workers: one root dsh session per task, on the `gravit` preset or - for a bot task - on that bot's own preset in
+ * its home folder, started by the conversation (src/conversation.ts; spec
+ * docs/superpowers/specs/2026-11-08-one-entry-router-design.md §5.3, §5.12).
  *
  * A worker is a runtime ROOT - `agents.create` gets `meta.parentSession` (the conversation, so the list can group it)
  * and never `parentAgent`: a parent agent would make the session unreachable from the browser (`session/agent-busy`).
  * Its setup installs the model selection and mounts the preset as the desk's does (src/desk-session.ts `deskSetup`) and
  * pins no permission, so a worker gets what a browser conversation gets: order cards wait for the operator there.
  *
- * Everything the model supplied - the strategy's name, the title, the brief - is checked before any session exists
- * ({@link TaskInputError}).
+ * Everything the model supplied - the strategy's name, the bot's, the title, the brief - is checked before any session
+ * exists ({@link TaskInputError}). A bot is one the operator made available to Gravit (the one roster, src/roster.ts)
+ * and dsh lists, unbroken; never the default, the desk's, the conversation's or a role's preset.
  * @module
  */
 import { randomUUID } from "node:crypto";
-import { lstat } from "node:fs/promises";
+import { lstat, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import { installModelSelection as installDshModelSelection } from "@deepseek-ai/dsh-agent";
 import { MessageId, freezeMessage } from "@deepseek-ai/dsh-llm";
+import { isBotId, type BotRow } from "./bots.ts";
 import type { DeskSessionCtxLike } from "./desk-session.ts";
 import type { DeskToolDefinition } from "./desk-tools.ts";
 import { DEFAULT_PRESET } from "./overlay.ts";
 import type { AgentLike, MemberSetup, RoomDeps } from "./room.ts";
 import type { MessageLike } from "./room-rules.ts";
+import { readRoster } from "./roster.ts";
 import { REPORT_STATUSES, TASK_TEXT_MAX, reportOf, type RelayStatus, type ReportStatus } from "./task-view.ts";
 
 const BIN = "gravit-face";
@@ -101,31 +105,71 @@ export type WorkerCtxLike = Pick<DeskSessionCtxLike, "agents" | "agentPresets" |
   get(name: "sessionTitle"): { rename(session: unknown, title: string): unknown } | undefined;
 };
 
+/** The bots a bot task may name, as {@link WorkerDeps.bots} reads them: `available`, the one roster's bots in its order;
+ * `rows`, the bots dsh and the face know (src/bots.ts `listBots`). */
+export interface WorkerBots {
+  available: string[];
+  rows: Pick<BotRow, "id" | "homeCwd" | "listed" | "broken">[];
+}
+
 /** What {@link startWorker} needs: `root`, the repository root; `route`, the workers' model route;
- * `installModelSelection`, dsh-agent's, injected as src/room.ts's is; `log`, where a line goes (stderr). */
+ * `installModelSelection`, dsh-agent's, injected as src/room.ts's is; `bots`, the bots a bot task may name (read on
+ * every bot task; absent, none may be named); `log`, where a line goes (stderr). */
 export interface WorkerDeps {
   ctx: WorkerCtxLike;
   root: string;
   route: { provider: string; model: string };
   installModelSelection: RoomDeps["installModelSelection"];
+  bots?: () => Promise<WorkerBots>;
   log?: (line: string) => void;
 }
 
+/**
+ * {@link WorkerDeps.bots} over the one roster in `home` (src/roster.ts) and `listBots`. Fails CLOSED, as the agent
+ * tools' and `dispatch`'s checks do: a roster file the face does not understand, or none at all, refuses every bot task
+ * with a {@link TaskInputError} naming `channels.json`.
+ */
+export function rosterBots(home: string, listBots: () => Promise<WorkerBots["rows"]>): () => Promise<WorkerBots> {
+  return async () => {
+    const { roster, corrupt } = await readRoster(home);
+    if (roster === null) {
+      throw new TaskInputError(`the roster ${join(home, "face", "channels.json")} ${corrupt ? "cannot be read" : "is missing"}, so no bot task can start; repair channels.json in the harness home`);
+    }
+    return { available: [...roster.bots], rows: await listBots() };
+  };
+}
+
+/** The home folder of bot `bot` for a task: refused unless the bot is on the roster, a bot id ({@link isBotId}: not
+ * `gravit`, the desk's, the conversation's or a role's), listed by dsh and unbroken. The folder is made when missing. */
+async function botHome(deps: WorkerDeps, bot: string): Promise<string> {
+  const { available, rows } = deps.bots === undefined ? { available: [], rows: [] } : await deps.bots();
+  const usable = (id: string) => {
+    const row = rows.find((r) => r.id === id);
+    return isBotId(id) && row !== undefined && row.listed && row.broken === undefined ? row : undefined;
+  };
+  const names = available.filter((id) => usable(id) !== undefined);
+  const row = names.includes(bot) ? usable(bot) : undefined;
+  if (row === undefined) throw new TaskInputError(`no bot available named ${bot}; available: ${names.length === 0 ? "none" : names.join(", ")}`);
+  await mkdir(row.homeCwd, { recursive: true });
+  return row.homeCwd;
+}
+
 /** A worker's composition, for its creation and every resume (src/tasks.ts): the model selection on `deps.route`, then
- * the `gravit` preset's mount. No permission is pinned. */
-export function workerSetup(deps: WorkerDeps): MemberSetup {
+ * the mount of `preset` - `gravit`, or a bot task's bot. No permission is pinned. */
+export function workerSetup(deps: WorkerDeps, preset: string = DEFAULT_PRESET): MemberSetup {
   const route = { provider: deps.route.provider, model: deps.route.model };
   const install = deps.installModelSelection ?? ((agentCtx, ref) => installDshModelSelection(agentCtx as unknown as Context, ref));
   return async (agentCtx) => {
     install(agentCtx, { current: route, assembled: undefined });
-    await deps.ctx.agentPresets.mount(agentCtx, DEFAULT_PRESET);
+    await deps.ctx.agentPresets.mount(agentCtx, preset);
   };
 }
 
 /**
  * Start a worker: check the title (1-{@link TASK_TITLE_MAX} characters after trimming, one line), the brief
- * (1-{@link TASK_BRIEF_MAX}) and the strategy's folder - `root` itself when `strategy` is absent - before any session
- * exists; create the root session on `gravit` under `conversationId`; set its title; hand it the brief as one followup
+ * (1-{@link TASK_BRIEF_MAX}) and the folder - a bot task's bot's home (its preset the worker's; not with `strategy`), else
+ * the strategy's, else `root` itself - before any session exists; create the root session on that preset under
+ * `conversationId`; set its title; hand it the brief as one followup
  * with the fixed id `task-brief:<sessionId>`, its source naming the task's `origin` (and, for a phone's, its `network`);
  * flush the log.
  * @throws {TaskInputError} for input the face refuses; whatever `agents.create` rejects with otherwise.
@@ -133,7 +177,7 @@ export function workerSetup(deps: WorkerDeps): MemberSetup {
  */
 export async function startWorker(
   deps: WorkerDeps,
-  input: { conversationId: string; title: string; brief: string; strategy?: string; origin: "web" | "phone"; network?: "telegram" | "slack" },
+  input: { conversationId: string; title: string; brief: string; strategy?: string; bot?: string; origin: "web" | "phone"; network?: "telegram" | "slack" },
 ): Promise<{ sessionId: string; agent: AgentLike; dispose(): Promise<void> }> {
   const log = deps.log ?? defaultLog;
   const title = input.title.trim();
@@ -143,13 +187,16 @@ export async function startWorker(
   if (input.brief.length < 1 || input.brief.length > TASK_BRIEF_MAX) {
     throw new TaskInputError(`the brief is 1 to ${TASK_BRIEF_MAX} characters`);
   }
-  const cwd = input.strategy === undefined ? deps.root : await strategyDir(deps.root, input.strategy);
+  if (input.bot !== undefined && input.strategy !== undefined) throw new TaskInputError("a task is a bot or a strategy, not both");
+  const preset = input.bot ?? DEFAULT_PRESET;
+  const cwd = input.bot !== undefined ? await botHome(deps, input.bot)
+    : input.strategy === undefined ? deps.root : await strategyDir(deps.root, input.strategy);
   const sessionId = `session-${randomUUID()}`;
   const handle = await deps.ctx.agents.create({
     sessionId,
-    meta: { cwd, parentSession: input.conversationId, agentPreset: DEFAULT_PRESET },
+    meta: { cwd, parentSession: input.conversationId, agentPreset: preset },
     agentOptions: { provider: deps.route.provider, model: deps.route.model },
-    setup: workerSetup(deps),
+    setup: workerSetup(deps, preset),
   });
   let disposing: Promise<void> | undefined;
   const dispose = (): Promise<void> => {

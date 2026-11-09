@@ -363,3 +363,15 @@ test("an old brief without origin reads web", () => {
   assert.deepEqual(briefOrigin(log.events), { conversation: "session-conv", origin: "web" });
   assert.equal(briefOrigin([]), undefined);
 });
+
+test("TaskView.bot is the header's preset when it is not gravit, absent for gravit", () => {
+  const log = new Log().brief().start(1);
+  const of = (agentPreset?: string) => taskViewOf({
+    id: ID, header: { createdAt: T0, cwd: "/repo/bots/drill-bull/journal", ...(agentPreset === undefined ? {} : { agentPreset }) },
+    events: log.events, root: ROOT, now: log.t + 1_000,
+  });
+  assert.equal(of("drill-bull").bot, "drill-bull");
+  assert.equal(of("drill-bull").strategy, undefined, "a bot's home is no strategy");
+  assert.equal("bot" in of("gravit"), false);
+  assert.equal("bot" in of(undefined), false);
+});

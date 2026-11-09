@@ -11,6 +11,7 @@
 import { relative, sep } from "node:path";
 import type { TurnUsage } from "./desk.ts";
 import { turnUsage } from "./desk-session.ts";
+import { DEFAULT_PRESET } from "./overlay.ts";
 import { finalTextOf, type EventLike } from "./room-rules.ts";
 
 /** A worker with an open turn and no session event for this long is stalled (20 minutes). */
@@ -40,6 +41,8 @@ export interface TaskView {
   id: string;
   title: string;
   strategy?: string;
+  /** A bot task's bot: the worker's preset (its header's `agentPreset`) when it is not `gravit`. */
+  bot?: string;
   /** Where the task was asked: the brief's `origin` (src/task-worker.ts), `web` for a brief that names none. */
   origin: "web" | "phone";
   /** For a phone task, the network its text came through. */
@@ -331,10 +334,10 @@ const GROUP: Record<TaskState, TaskGroup> = {
  * since that turn started (`ready` → `done`, `blocked`, `failed`), and with none the turn's end kind ({@link
  * turnOutcome}); no turn yet - `running`. A gate is pending only while the turn that asked it is open, and a report
  * counts once its result is logged and is no error.
- * @param input - `id`, the worker's session id; `header`, its creation time and folder; `events`, its log in order;
+ * @param input - `id`, the worker's session id; `header`, its creation time, folder and preset; `events`, its log in order;
  *   `root`, the repository root its strategy is read against; `now`, the clock the stall is judged by.
  */
-export function taskViewOf(input: { id: string; header: { createdAt: number; cwd?: string }; events: readonly TimedEvent[]; root: string; now: number }): TaskView {
+export function taskViewOf(input: { id: string; header: { createdAt: number; cwd?: string; agentPreset?: string }; events: readonly TimedEvent[]; root: string; now: number }): TaskView {
   const { events } = input;
   const s = scan(events);
   const last = events.at(-1);
@@ -372,10 +375,12 @@ export function taskViewOf(input: { id: string; header: { createdAt: number; cwd
   }
   const usage = usageOf(events, s);
   const strategy = strategyOf(input.root, input.header.cwd);
+  const bot = input.header.agentPreset !== undefined && input.header.agentPreset !== DEFAULT_PRESET ? input.header.agentPreset : undefined;
   return {
     id: input.id,
     title: s.title !== undefined && s.title !== "" ? s.title : input.id,
     ...(strategy === undefined ? {} : { strategy }),
+    ...(bot === undefined ? {} : { bot }),
     origin: s.origin?.origin ?? "web",
     ...(s.origin?.network === undefined ? {} : { network: s.origin.network }),
     state,

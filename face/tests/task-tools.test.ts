@@ -143,3 +143,23 @@ test("task_stop's timeout outlasts a 60 s foreground shell unwinding", () => {
   assert.ok(TASK_STOP_TIMEOUT_MS >= 75_000);
   assert.equal(stop.timeoutMs, TASK_STOP_TIMEOUT_MS);
 });
+
+test("task_start passes bot through", async () => {
+  const seen: unknown[] = [];
+  const ops: TaskOps = {
+    async start(input) { seen.push(input); return view("w3", { title: input.title, ...(input.bot === undefined ? {} : { bot: input.bot }) }); },
+    async steer() { throw new Error("no"); }, async stop() { throw new Error("no"); },
+    async read() { throw new Error("no"); }, async list() { return []; },
+  };
+  const start = byName(taskToolDefinitions(ops, () => true), "task_start");
+  const out = await start.execute({ title: "Debate", brief: "argue it", bot: "drill-bull" }, exec);
+  assert.deepEqual(seen, [{ title: "Debate", brief: "argue it", bot: "drill-bull", origin: { kind: "web" } }]);
+  assert.deepEqual(out, { task: "w3", title: "Debate", bot: "drill-bull" });
+  const schema = start.parameters as { properties: Record<string, unknown> };
+  assert.deepEqual(schema.properties.bot, { type: "string", minLength: 1, maxLength: 64 });
+  assert.ok(start.description.includes("`bot` names a bot available to Gravit: the worker is that bot, in its home folder. Not with `strategy`."), start.description);
+  for (const bad of ["", "x".repeat(65), 7]) {
+    await assert.rejects(Promise.resolve().then(() => start.execute({ title: "t", brief: "b", bot: bad }, exec)), /the bot is a string of 1 to 64 characters/);
+  }
+  assert.equal(seen.length, 1, "a bad bot never reaches ops");
+});

@@ -177,12 +177,12 @@ class Harness {
   }
 
   /** A worker session already on disk (`live` false) or live, with `events` in its log. */
-  seed(id: string, events: Ev[], opts: { cwd?: string; parentSession?: string; origin?: string; live?: boolean; running?: boolean } = {}): FakeSession {
+  seed(id: string, events: Ev[], opts: { cwd?: string; parentSession?: string; origin?: string; live?: boolean; running?: boolean; agentPreset?: string } = {}): FakeSession {
     const header = {
       id,
       cwd: opts.cwd ?? this.root,
       parentSession: opts.parentSession ?? CONV,
-      agentPreset: "gravit",
+      agentPreset: opts.agentPreset ?? "gravit",
       createdAt: AT - 3_600_000,
       ...(opts.origin === undefined ? {} : { origin: opts.origin }),
     };
@@ -734,4 +734,62 @@ test("a provider that throws leaves desk out and the route answers", async (t) =
   assert.equal(Object.hasOwn(got.body, "desk"), false);
   await rec.get("/data/tasks");
   assert.equal(h.lines.filter((l) => l.includes("ledger gone")).length, 1, "logged once");
+});
+
+/* ---------- bot tasks (one-entry plan 4 task 3) ---------- */
+
+test("a bot worker is resumed on its own preset", async () => {
+  const h = await harness();
+  const home = join(h.root, "bots", "drill-bull", "journal");
+  await mkdir(home, { recursive: true });
+  /* a bot task whose turn the restart cut, and a gravit one beside it */
+  h.seed("w-bot", [brief("w-bot", "Bull case", AT - 60_000), start(1, AT - 60_000)], { cwd: home, agentPreset: "drill-bull" });
+  h.seed("w-plain", [brief("w-plain", "Plain", AT - 60_000), start(1, AT - 60_000)]);
+  const tasks = await install(h);
+  const mounted = (id: string) => h.tree.mounts.filter((m) => m.agent === id).map((m) => m.preset);
+  assert.deepEqual(mounted("w-bot"), ["drill-bull"], "the recovery's resume mounts the bot's preset, not gravit");
+  assert.deepEqual(mounted("w-plain"), ["gravit"]);
+  /* a later steer of a disposed bot worker resumes it on its preset too */
+  await h.tree.clock.advance(100);
+  await tasks.dispose();
+  h.tree.agents.delete("w-bot");
+  const again = await install(h);
+  await again.ops.steer("w-bot", "and the bear case");
+  assert.deepEqual(mounted("w-bot"), ["drill-bull", "drill-bull"]);
+  await again.dispose();
+});
+
+test("GET /data/tasks shows a bot task's bot", async (t) => {
+  const h = await harness();
+  const home = join(h.root, "bots", "drill-bull", "journal");
+  await mkdir(home, { recursive: true });
+  h.seed("w-bot", [brief("w-bot", "Bull case", AT - 600_000), start(1, AT - 600_000), said(1, "bullish", AT - 600_000), end(1, "completed", AT - 600_000)], { cwd: home, agentPreset: "drill-bull" });
+  h.seed("w-plain", [brief("w-plain", "Plain", AT - 700_000), start(1, AT - 700_000), said(1, "ok", AT - 700_000), end(1, "completed", AT - 700_000)], { cwd: join(h.root, "strategies", "fx") });
+  const web = recorder();
+  const tasks = await install(h, web);
+  t.after(() => tasks.dispose());
+  const got = await web.get("/data/tasks");
+  const listed = got.body.tasks as TaskView[];
+  assert.deepEqual(listed.map((v) => ({ id: v.id, bot: v.bot, strategy: v.strategy })), [
+    { id: "w-bot", bot: "drill-bull", strategy: undefined },
+    { id: "w-plain", bot: undefined, strategy: "fx" },
+  ]);
+});
+
+test("task_start with bot starts a worker on the bot's preset in its home, through TasksDeps.bots", async (t) => {
+  const h = await harness();
+  const home = join(h.root, "bots", "drill-bull", "journal");
+  await mkdir(home, { recursive: true });
+  const tasks = installTasks(recorder(), {
+    ...h.deps(),
+    bots: async () => ({ available: ["drill-bull"], rows: [{ id: "drill-bull", homeCwd: home, listed: true }] }),
+  });
+  await tasks.ready;
+  t.after(() => tasks.dispose());
+  const out = await h.tool("task_start").execute({ title: "Bull case", brief: "argue it", bot: "drill-bull" }) as { task: string; bot?: string };
+  assert.equal(out.bot, "drill-bull");
+  const created = h.tree.agentsCreated.find((c) => (c as { sessionId: string }).sessionId === out.task) as { meta: { cwd: string; agentPreset: string } };
+  assert.deepEqual({ cwd: created.meta.cwd, agentPreset: created.meta.agentPreset }, { cwd: home, agentPreset: "drill-bull" });
+  assert.deepEqual(h.tree.mounts.filter((m) => m.agent === out.task).map((m) => m.preset), ["drill-bull"]);
+  await assert.rejects(h.tool("task_start").execute({ title: "Bear case", brief: "argue it", bot: "drill-bear" }), /^Error: no bot available named drill-bear; available: drill-bull$|no bot available named drill-bear; available: drill-bull/);
 });

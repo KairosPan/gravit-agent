@@ -17,6 +17,11 @@
  * workers' route), scripted per session by its header: the conversation (`gravit-router`) and the worker
  * (`parentSession` = the conversation). AKShare and the Account seat are off.
  *
+ * THE BOT TASK. The sixth boots once more after a scratch bot (`smoke-bull`, its `allow` only `read` and `grep`) is
+ * written into the bots root and put on the one roster: an operator prompt has the stub call `task_start` with `bot`, the
+ * worker runs on the bot's preset in its home folder, its first request carries `task_report` and neither `dispatch`
+ * nor `bash`, and its report reaches the conversation.
+ *
  * ONE FILE, THREE BOOTS. The four tests share one boot, in order; the fourth disposes it and boots again on the same home,
  * as tests/subagents-smoke.test.ts does (a second boot in one process, `dshHome` passed both times). The fifth boots
  * once more with the desk and its phone bridge as main.ts installs them (one-entry plan 3): a text from a fake account
@@ -29,7 +34,7 @@ import "./helpers/no-market.ts";
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
@@ -47,7 +52,10 @@ import { setupFaceProfile } from "../src/setup.ts";
 import { OPERATOR_ONLY } from "../src/task-tools.ts";
 import { createPhoneClient } from "../src/phone.ts";
 import { installRouter, installTasks, phoneConversation, type TasksCtxLike, type TasksHandle } from "../src/tasks.ts";
-import { makeBotsRoot } from "./bots-fixture.ts";
+import { rosterBots } from "../src/task-worker.ts";
+import { listBots } from "../src/bots.ts";
+import { ensureRoster, setAvailable } from "../src/roster.ts";
+import { PLUGIN_ABS, makeBotsRoot } from "./bots-fixture.ts";
 import { fakePhoneAccount, type FakePhoneAccount } from "./fake-phone-account.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
 import { StubAdapter, type StubReply } from "./stub-llm.ts";
@@ -61,6 +69,10 @@ const TITLE = "FX probe";
 const BRIEF = "BRIEF_FX: read the fixture strategy and report.";
 /** What the worker reports. */
 const REPORT = "REPORT_FX: the fixture strategy holds nothing yet.";
+/** The operator's prompt that has the conversation start a bot task, the scratch bot it names, and what it reports. */
+const START_BOT = "START_BOT_TASK";
+const BOT = "smoke-bull";
+const BOT_REPORT = "REPORT_BOT: the bull case holds.";
 /** How the conversation answers a phone text. */
 const PHONE_HEARD = "PHONE_HEARD";
 
@@ -106,6 +118,8 @@ let home = "";
 let root = "";
 let bots = "";
 let face: Face | undefined;
+/** Each session's first model request's tool names, by session id. */
+const firstTools = new Map<string, string[]>();
 
 async function stopFace(): Promise<void> {
   const held = face;
@@ -130,9 +144,13 @@ async function boot(phone?: FakePhoneAccount): Promise<Face> {
   const script = (r: GenerateOptions): StubReply => {
     if (r.purpose !== undefined) return { kind: "text", text: "router smoke" }; // titles, compaction
     const header = ctx.sessions.get(r.sessionId!)?.header;
+    if (r.sessionId !== undefined && !firstTools.has(String(r.sessionId))) firstTools.set(String(r.sessionId), (r.tools ?? []).map((t) => t.name));
     const { message, results } = trigger(r);
     const kind = message === undefined ? undefined : sourceOf(message).kind;
     if (header?.agentPreset === CONVERSATION_PRESET) {
+      if (kind === "user" && textOf(message!).includes(START_BOT)) {
+        return results === 0 ? { kind: "tool", name: "task_start", args: { title: "Bull case", brief: "BRIEF_BOT: argue the bull case.", bot: BOT } } : { kind: "text", text: "STARTED_BOT" };
+      }
       if (kind === "user" && textOf(message!).includes(START)) {
         return results === 0 ? { kind: "tool", name: "task_start", args: { title: TITLE, brief: BRIEF, strategy: "fx" } } : { kind: "text", text: "STARTED" };
       }
@@ -144,7 +162,8 @@ async function boot(phone?: FakePhoneAccount): Promise<Face> {
       return { kind: "text", text: "OK" };
     }
     if (header?.parentSession !== undefined && kind === "task") {
-      return results === 0 ? { kind: "tool", name: "task_report", args: { status: "ready", text: REPORT } } : { kind: "text", text: "WORKER_DONE" };
+      const text = header.agentPreset === BOT ? BOT_REPORT : REPORT;
+      return results === 0 ? { kind: "tool", name: "task_report", args: { status: "ready", text } } : { kind: "text", text: "WORKER_DONE" };
     }
     return { kind: "text", text: "OK" };
   };
@@ -166,6 +185,7 @@ async function boot(phone?: FakePhoneAccount): Promise<Face> {
     }),
     tasks: (held) => installTasks(ctx.webServer, {
       ctx: ctx as unknown as TasksCtxLike, root, route: STUB, installModelSelection: install, conversation: held,
+      bots: rosterBots(home, () => listBots(bots, () => (ctx.get("agentPresets") as { list(): Promise<{ id: string; broken?: string }[]> }).list(), booted.botPresets.errors)),
       isTrusted: isTrustedDataRequest, log,
     }),
     log,
@@ -337,4 +357,47 @@ test("with the desk's phone bridge bound, a fake phone text reaches the conversa
     await stopFace();
     await account.close();
   }
+});
+
+test("a bot task runs on the bot's preset and reports", { skip, timeout: 120_000 }, async () => {
+  assert.ok(home !== "", "the home from the first test");
+  await stopFace();
+  /* a scratch bot whose allow leaves bash out, declared by the next boot, and on the one roster */
+  const dir = join(bots, BOT);
+  await mkdir(join(dir, "journal"), { recursive: true });
+  await mkdir(join(dir, "skills"), { recursive: true });
+  await writeFile(join(dir, "preset.yml"), "name: Smoke Bull\ndescription: the router smoke's bot\n");
+  await writeFile(join(dir, "SOUL.md"), "You are Smoke Bull, a test bot.\n");
+  await writeFile(join(dir, "agent.cordis.yml"),
+    `- id: bot\n  name: ${JSON.stringify(PLUGIN_ABS)}\n  config:\n    persona: 'You are Smoke Bull, a test bot.'\n    allow:\n      - read\n      - grep\n`);
+  await ensureRoster(home, []);
+  await setAvailable(home, "bot", BOT, true);
+
+  face = await boot();
+  const f = face;
+  await remote(f.base, f.cookie, "session/prompt", {
+    request: { requestId: `router-${crypto.randomUUID()}`, sessionId: f.sessionId, mode: "queue", content: [{ type: "text", text: START_BOT }] },
+  });
+  const botWorker = () => workers(f).find((a) => a.session.header.agentPreset === BOT);
+  await waitFor("a bot worker under the conversation", () => botWorker() !== undefined);
+  const worker = botWorker()!;
+  assert.equal(worker.session.header.cwd, join(bots, BOT, "journal"), "the worker runs in the bot's home folder");
+  assert.equal(worker.session.header.parentSession, f.sessionId);
+  assert.equal(worker.session.header.origin, undefined, "a runtime root, not a subagent");
+
+  /* its first request's tools: task_report survives the bot's mask; dispatch and bash, outside its allow, do not */
+  await waitFor("the bot worker's first request", () => firstTools.has(worker.id));
+  const tools = firstTools.get(worker.id)!;
+  assert.ok(tools.includes("task_report"), tools.join(", "));
+  assert.equal(tools.includes("dispatch"), false, tools.join(", "));
+  assert.equal(tools.includes("bash"), false, tools.join(", "));
+
+  /* its report reaches the conversation as one relay naming it */
+  const relayOf = () => relaysIn(convEvents(f)).find((e) => String((e.data as { id?: string }).id).startsWith(`task-report:${worker.id}:`));
+  await waitFor("the bot task's relay in the conversation", () => relayOf() !== undefined, 60_000);
+  assert.ok(eventText(relayOf()!).includes(BOT_REPORT), "the bot's report is quoted in the relay");
+  const listed = await f.tasks.ops.list();
+  const view = listed.find((t) => t.id === worker.id);
+  assert.equal(view?.bot, BOT);
+  assert.equal(view?.state, "done");
 });

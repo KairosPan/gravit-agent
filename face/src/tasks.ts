@@ -23,6 +23,7 @@ import { MessageId, freezeMessage } from "@deepseek-ai/dsh-llm";
 import type { ConversationCtxLike, ConversationHandle } from "./conversation.ts";
 import type { DeskLines } from "./desk.ts";
 import { CONVERSATION_PRESET } from "./desk-names.ts";
+import { DEFAULT_PRESET } from "./overlay.ts";
 import { readSessionEvents, type DeskSessionPersistenceLike } from "./desk-session.ts";
 import type { DeskAgentLike, DeskToolsCtxLike } from "./desk-tools.ts";
 import type { PhoneConversation } from "./phone-bridge.ts";
@@ -88,6 +89,9 @@ export interface TasksDeps {
   route: { provider: string; model: string };
   installModelSelection: RoomDeps["installModelSelection"];
   conversation: ConversationHandle;
+  /** The bots a bot task may name (src/task-worker.ts `WorkerDeps.bots`; main.ts hands `rosterBots` over the one roster
+   * and `listBots`). Absent, every bot task is refused. */
+  bots?: WorkerDeps["bots"];
   /** The desk's lines for the rail (src/desk.ts `deskLines`); `GET /data/tasks` carries them as `desk`. A provider that
    * throws leaves `desk` out and the route answers. */
   deskLines?: () => Promise<DeskLines | undefined>;
@@ -107,8 +111,8 @@ export interface TasksHandle {
   dispose(): Promise<void>;
 }
 
-/** One worker as the store and the registry give it. */
-interface Row { id: string; createdAt: number; cwd?: string; live?: TaskAgent }
+/** One worker as the store and the registry give it: `agentPreset` is its header's, the preset it resumes on. */
+interface Row { id: string; createdAt: number; cwd?: string; agentPreset?: string; live?: TaskAgent }
 /** A worker handle the tasks hold, and since when its finished task has been idle. */
 interface Held { agent: TaskAgent; dispose(): Promise<void>; idleSince?: number }
 
@@ -161,7 +165,10 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
   const now = deps.now ?? Date.now;
   const every = deps.setInterval ?? setInterval;
   const stopEvery = deps.clearInterval ?? clearInterval;
-  const workerDeps: WorkerDeps = { ctx, root: deps.root, route: deps.route, installModelSelection: deps.installModelSelection, log };
+  const workerDeps: WorkerDeps = {
+    ctx, root: deps.root, route: deps.route, installModelSelection: deps.installModelSelection, log,
+    ...(deps.bots === undefined ? {} : { bots: deps.bots }),
+  };
   const relay = createRelay({ conversation: () => deps.conversation.current(), ctx, log });
   const convId = (): string | undefined => deps.conversation.current()?.sessionId;
   const held = new Map<string, Held>();
@@ -199,11 +206,15 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
     id: agent.id,
     createdAt: createdAtOf(agent.session.header) ?? createdAt ?? now(),
     ...(agent.session.header.cwd === undefined ? {} : { cwd: agent.session.header.cwd }),
+    ...(agent.session.header.agentPreset === undefined ? {} : { agentPreset: agent.session.header.agentPreset }),
     live: agent,
   });
   const viewOf = (row: Row, events: readonly TimedEvent[]): TaskView => taskViewOf({
     id: row.id,
-    header: { createdAt: row.createdAt, ...(row.cwd === undefined ? {} : { cwd: row.cwd }) },
+    header: {
+      createdAt: row.createdAt, ...(row.cwd === undefined ? {} : { cwd: row.cwd }),
+      ...(row.agentPreset === undefined ? {} : { agentPreset: row.agentPreset }),
+    },
     events,
     root: deps.root,
     now: now(),
@@ -225,7 +236,10 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
     const found = new Map<string, Row>();
     for (const { header } of (await ctx.sessionPersistence?.list()) ?? []) {
       if (header.parentSession !== conv || header.origin !== undefined) continue;
-      found.set(header.id, { id: header.id, createdAt: header.createdAt, ...(header.cwd === undefined ? {} : { cwd: header.cwd }) });
+      found.set(header.id, {
+        id: header.id, createdAt: header.createdAt, ...(header.cwd === undefined ? {} : { cwd: header.cwd }),
+        ...(header.agentPreset === undefined ? {} : { agentPreset: header.agentPreset }),
+      });
     }
     for (const agent of ctx.agents.list() as unknown as readonly TaskAgent[]) {
       if (agent.session.header.parentSession !== conv || agent.session.header.origin !== undefined) continue;
@@ -244,7 +258,8 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
     return { conv, row };
   }
 
-  /** The worker live, or resumed - once at a time per worker - and held. */
+  /** The worker live, or resumed - once at a time per worker - and held, on the preset its header names: a bot task's
+   * bot, else `gravit`. */
   function agentFor(row: Row): Promise<TaskAgent> {
     const live = liveWorker(row.id);
     if (live !== undefined) return Promise.resolve(live);
@@ -254,7 +269,7 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
         const handle = await ctx.agents.resume({
           resumeSessionId: row.id,
           agentOptions: { provider: deps.route.provider, model: deps.route.model },
-          setup: workerSetup(workerDeps),
+          setup: workerSetup(workerDeps, row.agentPreset ?? DEFAULT_PRESET),
         });
         let disposing: Promise<void> | undefined;
         const dispose = (): Promise<void> => {
@@ -327,6 +342,7 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
         conversationId: conv, title: input.title, brief: input.brief,
         ...(input.origin?.kind === "phone" ? { origin: "phone", network: input.origin.network } : { origin: "web" }),
         ...(input.strategy === undefined ? {} : { strategy: input.strategy }),
+        ...(input.bot === undefined ? {} : { bot: input.bot }),
       });
       const agent = started.agent as TaskAgent;
       held.set(started.sessionId, { agent, dispose: started.dispose });

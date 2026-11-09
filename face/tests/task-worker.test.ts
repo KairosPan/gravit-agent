@@ -9,7 +9,7 @@ import { assertSupportedJsonSchema } from "@deepseek-ai/dsh-tools";
 import { DEFAULT_PRESET } from "../src/overlay.ts";
 import {
   TASK_BRIEF_MAX, TASK_FOOTER, TASK_TITLE_MAX, TaskInputError, briefText, equipWorkers, isStrategyName, startWorker,
-  strategyDir, taskReportTool, type WorkerAgentLike, type WorkerCtxLike, type WorkerToolsCtxLike,
+  rosterBots, strategyDir, taskReportTool, type WorkerAgentLike, type WorkerCtxLike, type WorkerToolsCtxLike,
 } from "../src/task-worker.ts";
 import type { CreateDeskAgentOptions } from "../src/desk-session.ts";
 import { taskViewOf } from "../src/task-view.ts";
@@ -250,4 +250,83 @@ test("a phone-started task's brief carries origin phone and its network, and its
   });
   assert.equal(v.origin, "phone");
   assert.equal(v.network, "slack");
+});
+
+/* ---------- bot tasks (one-entry plan 4 task 3) ---------- */
+
+/** The bots a test's deps offer: `drill-bull` and `drill-bear` usable, `quiet` unlisted, `cracked` broken, `off-bot`
+ * usable but off the roster; every home under `root`. */
+async function botsOf(root: string) {
+  const row = async (id: string, extra: { listed?: boolean; broken?: string } = {}) => {
+    const homeCwd = join(root, "bots", id, "journal");
+    await mkdir(homeCwd, { recursive: true });
+    return { id, homeCwd, listed: extra.listed ?? true, ...(extra.broken === undefined ? {} : { broken: extra.broken }) };
+  };
+  const rows = [
+    await row("drill-bull"), await row("drill-bear"), await row("quiet", { listed: false }),
+    await row("cracked", { broken: "bad yaml" }), await row("off-bot"), await row("gravit"),
+  ];
+  return async () => ({ available: ["drill-bull", "drill-bear", "quiet", "cracked", "gravit"], rows });
+}
+
+test("a bot task starts on the bot's preset in its home folder", async () => {
+  const root = await repo(["alpha"]);
+  const f = new Fake();
+  const w = await startWorker({ ...f.deps(root), bots: await botsOf(root) }, { ...input, bot: "drill-bull" });
+  assert.equal(f.created.length, 1);
+  const c = f.created[0]!;
+  assert.equal(w.sessionId, c.sessionId);
+  assert.deepEqual(c.meta, { cwd: join(root, "bots", "drill-bull", "journal"), parentSession: "session-conv", agentPreset: "drill-bull" });
+  assert.deepEqual(f.mounts, ["drill-bull"], "the setup mounts the bot's preset");
+  assert.deepEqual(f.selections[0]?.current, { provider: "p", model: "m" });
+  assert.equal(f.followups.length, 1, "the brief is sent as for any task");
+});
+
+test("startWorker refuses a bad bot before any session exists", async () => {
+  const root = await repo(["alpha"]);
+  const bots = await botsOf(root);
+  const cases: { bot: string; strategy?: string; message: string | RegExp; bots?: typeof bots }[] = [
+    { bot: "drill-bull", strategy: "alpha", message: "a task is a bot or a strategy, not both" },
+    { bot: "gravit", message: "no bot available named gravit; available: drill-bull, drill-bear" },
+    { bot: "role-cn-reviewer", message: "no bot available named role-cn-reviewer; available: drill-bull, drill-bear" },
+    { bot: "gravit-desk", message: "no bot available named gravit-desk; available: drill-bull, drill-bear" },
+    { bot: "off-bot", message: "no bot available named off-bot; available: drill-bull, drill-bear" },
+    { bot: "quiet", message: "no bot available named quiet; available: drill-bull, drill-bear" },
+    { bot: "cracked", message: "no bot available named cracked; available: drill-bull, drill-bear" },
+    { bot: "drill-bull", message: "no bot available named drill-bull; available: none", bots: async () => ({ available: [], rows: [] }) },
+  ];
+  for (const c of cases) {
+    const f = new Fake();
+    const deps = { ...f.deps(root), bots: c.bots ?? bots };
+    await assert.rejects(
+      startWorker(deps, { ...input, bot: c.bot, ...(c.strategy === undefined ? {} : { strategy: c.strategy }) }),
+      (err: unknown) => err instanceof TaskInputError && err.message === c.message,
+      c.bot,
+    );
+    assert.equal(f.created.length, 0, c.bot);
+  }
+  /* no bots provider at all: none available */
+  const f = new Fake();
+  await assert.rejects(startWorker(f.deps(root), { ...input, bot: "drill-bull" }), { name: "TaskInputError", message: "no bot available named drill-bull; available: none" });
+  assert.equal(f.created.length, 0);
+});
+
+test("rosterBots reads the one roster: its bots in order beside the rows; a roster missing or unreadable refuses, naming channels.json", async () => {
+  const home = join(TMP, `${++made}-home`);
+  const rows = [{ id: "drill-bull", homeCwd: "/x", listed: true }];
+  const read = rosterBots(home, async () => rows);
+  await assert.rejects(read(), (err: unknown) => err instanceof TaskInputError
+    && err.message === `the roster ${join(home, "face", "channels.json")} is missing, so no bot task can start; repair channels.json in the harness home`);
+  await mkdir(join(home, "face"), { recursive: true });
+  await writeFile(join(home, "face", "channels.json"), "{ not json");
+  await assert.rejects(read(), (err: unknown) => err instanceof TaskInputError
+    && err.message === `the roster ${join(home, "face", "channels.json")} cannot be read, so no bot task can start; repair channels.json in the harness home`);
+  await writeFile(join(home, "face", "channels.json"), JSON.stringify({ version: 2, agents: [], bots: ["drill-bear", "drill-bull"] }));
+  assert.deepEqual(await read(), { available: ["drill-bear", "drill-bull"], rows });
+  /* a bot task over the unreadable roster is refused before any session exists */
+  await writeFile(join(home, "face", "channels.json"), JSON.stringify({ version: 3 }));
+  const root = await repo(["alpha"]);
+  const f = new Fake();
+  await assert.rejects(startWorker({ ...f.deps(root), bots: read }, { ...input, bot: "drill-bull" }), /channels\.json cannot be read/);
+  assert.equal(f.created.length, 0);
 });
