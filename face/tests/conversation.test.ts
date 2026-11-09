@@ -6,7 +6,7 @@
  * The homes here are `mkdtemp` directories under the system's temp directory, as the smoke files' are, NOT under
  * tests/tmp/<pid>: the conversation's fence refuses a folder with a `.git` anywhere above it, and tests/tmp sits inside
  * this checkout. No real dsh runs here, so no sandbox is in play. */
-import test, { after, mock } from "node:test";
+import test, { after, mock, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
@@ -149,13 +149,21 @@ function startTurn(bus: FakeBus, sessionId: string, turn: number, source?: Recor
   if (source !== null) bus.emit(sessionId, "user/message", { id: `m-${turn}`, role: "user", content: [{ type: "text", text: "hi" }], ...(source === undefined ? {} : { source }) });
 }
 
+/** installConversation, its handle disposed after the test whatever the test did: a red test never leaves a
+ * supervision with a live 300 s timer holding the process open. */
+function install(t: TestContext, d: ConversationDeps): ReturnType<typeof installConversation> {
+  const handle = installConversation(d);
+  t.after(() => handle.dispose());
+  return handle;
+}
+
 /* ---------- 1-2: create once, resume after ---------- */
 
-test("the first boot creates one conversation in <home>/face/conversation on gravit-router, pinned workspace-write, and records it once", async () => {
+test("the first boot creates one conversation in <home>/face/conversation on gravit-router, pinned workspace-write, and records it once", async (t) => {
   const home = await scratch("first");
   const tree = new FakeConversationTree();
   const lines: string[] = [];
-  const handle = installConversation(deps(tree, home, lines));
+  const handle = install(t, deps(tree, home, lines));
   assert.equal(handle.current(), undefined, "nothing before the first ensure");
   const [a, b] = await Promise.all([handle.ensure(), handle.ensure()]);
   assert.equal(a.sessionId, b.sessionId, "two ensures at once open one conversation");
@@ -183,7 +191,7 @@ test("the first boot creates one conversation in <home>/face/conversation on gra
   await assert.rejects(handle.ensure(), /disposed/);
 });
 
-test("the next boot resumes the recorded conversation and records nothing", async () => {
+test("the next boot resumes the recorded conversation and records nothing", async (t) => {
   const home = await scratch("next");
   const first = new FakeConversationTree();
   const lines: string[] = [];
@@ -212,11 +220,11 @@ test("the next boot resumes the recorded conversation and records nothing", asyn
 
 /* ---------- 3-5: the fence and the folder ---------- */
 
-test("a GRAVIT.md, an .agents or a symlink planted in the folder cancels the turn as a fence cut, keeping the queue", async () => {
+test("a GRAVIT.md, an .agents or a symlink planted in the folder cancels the turn as a fence cut, keeping the queue", async (t) => {
   const home = await scratch("fence");
   const tree = new FakeConversationTree();
   const lines: string[] = [];
-  const handle = installConversation(deps(tree, home, lines));
+  const handle = install(t, deps(tree, home, lines));
   const { sessionId } = await handle.ensure();
   const agent = tree.agent(sessionId);
   const dir = conversationDir(home);
@@ -247,7 +255,7 @@ test("a GRAVIT.md, an .agents or a symlink planted in the folder cancels the tur
   await handle.dispose();
 });
 
-test("a .git in an ancestor of the folder is the violation, named by its path", async () => {
+test("a .git in an ancestor of the folder is the violation, named by its path", async (t) => {
   const base = await scratch("git");
   const outer = join(base, "outer");
   const home = join(outer, "home");
@@ -271,7 +279,7 @@ test("a .git in an ancestor of the folder is the violation, named by its path", 
   /* and a turn over the ancestor's .git is cut, the line naming it */
   const tree = new FakeConversationTree();
   const lines: string[] = [];
-  const handle = installConversation(deps(tree, home, lines));
+  const handle = install(t, deps(tree, home, lines));
   const { sessionId } = await handle.ensure();
   const agent = tree.agent(sessionId);
   startTurn(tree.bus, sessionId, 1, { kind: "user", rpcId: "r1" });
@@ -283,7 +291,7 @@ test("a .git in an ancestor of the folder is the violation, named by its path", 
   await handle.dispose();
 });
 
-test("a deleted folder is made again before the first turn, and the same conversation resumes", async () => {
+test("a deleted folder is made again before the first turn, and the same conversation resumes", async (t) => {
   const home = await scratch("deleted");
   const lines: string[] = [];
   const first = await ensureConversation(deps(new FakeConversationTree(), home, lines));
@@ -292,7 +300,7 @@ test("a deleted folder is made again before the first turn, and the same convers
   assert.equal(existsSync(dir), false);
   const tree = new FakeConversationTree();
   tree.persist(first.sessionId, { cwd: dir, agentPreset: CONVERSATION_PRESET });
-  const handle = installConversation(deps(tree, home, lines));
+  const handle = install(t, deps(tree, home, lines));
   const again = await handle.ensure();
   assert.ok(existsSync(dir), "made again before any turn");
   assert.equal(again.sessionId, first.sessionId, "the same conversation");
@@ -311,7 +319,7 @@ test("a deleted folder is made again before the first turn, and the same convers
 
 /* ---------- 6-7: what the ledger names is checked ---------- */
 
-test("a recorded session on another preset, or one resume refuses, gives a new conversation with reason new, and one line", async () => {
+test("a recorded session on another preset, or one resume refuses, gives a new conversation with reason new, and one line", async (t) => {
   const home = await scratch("wrong");
   const dir = conversationDir(home);
   await appendEvent(home, { t: "2026-11-08T10:00:00.000Z", kind: "conversation", sessionId: "session-old-gravit", reason: "created" });
@@ -343,7 +351,7 @@ test("a recorded session on another preset, or one resume refuses, gives a new c
   assert.deepEqual(gone.pins, [{ session: fresh.sessionId, name: "workspace-write" }]);
 });
 
-test("a recorded conversation whose header names another folder is pointed at this one with workingDirectory.set", async () => {
+test("a recorded conversation whose header names another folder is pointed at this one with workingDirectory.set", async (t) => {
   const home = await scratch("moved");
   await appendEvent(home, { t: "2026-11-08T10:00:00.000Z", kind: "conversation", sessionId: "session-moved", reason: "created" });
   const tree = new FakeConversationTree();
@@ -361,12 +369,12 @@ test("a recorded conversation whose header names another folder is pointed at th
 
 /* ---------- 8-9: supervision ---------- */
 
-test("operatorTurn is true only while a turn that a source-kind user message opened runs; a task message's turn and a wake are not", async () => {
+test("operatorTurn is true only while a turn that a source-kind user message opened runs; a task message's turn and a wake are not", async (t) => {
   assert.deepEqual([...OPERATOR_SOURCES], ["user"]);
   const home = await scratch("operator");
   const tree = new FakeConversationTree();
   const lines: string[] = [];
-  const handle = installConversation(deps(tree, home, lines));
+  const handle = install(t, deps(tree, home, lines));
   assert.equal(handle.operatorTurn(), false, "no conversation yet");
   const { sessionId } = await handle.ensure();
   assert.equal(handle.operatorTurn(), false, "no turn");
@@ -399,12 +407,12 @@ test("operatorTurn is true only while a turn that a source-kind user message ope
   assert.equal(tree.bus.listeners.size, 0, "the supervision's listener is gone");
 });
 
-test("a turn that runs 300 s is cut, keeping the queue", async () => {
+test("a turn that runs 300 s is cut, keeping the queue", async (t) => {
   assert.equal(CONVERSATION_DEADLINE_MS, 300_000);
   const home = await scratch("deadline");
   const tree = new FakeConversationTree();
   const lines: string[] = [];
-  const handle = installConversation(deps(tree, home, lines));
+  const handle = install(t, deps(tree, home, lines));
   const { sessionId } = await handle.ensure();
   const agent = tree.agent(sessionId);
   mock.timers.enable({ apis: ["setTimeout"] });
@@ -425,4 +433,79 @@ test("a turn that runs 300 s is cut, keeping the queue", async () => {
   assert.ok(lines.some((line) => line.includes("turn 1") && line.includes("timed out")), JSON.stringify(lines));
   assert.deepEqual((await readEvents(home)).events.map((e) => e.kind), ["conversation"], "no desk-turn, no budget");
   await handle.dispose();
+});
+
+/* ---------- fix round 1 ---------- */
+
+test("a turn the operator opened stops being the operator's once a task message is logged in it", async (t) => {
+  const home = await scratch("taint");
+  const tree = new FakeConversationTree();
+  const handle = install(t, deps(tree, home, []));
+  const { sessionId } = await handle.ensure();
+  startTurn(tree.bus, sessionId, 1, { kind: "user", rpcId: "r1" });
+  assert.equal(handle.operatorTurn(), true);
+  /* the desk's state note and dsh's working-directory notice change nothing; a browser steer neither */
+  tree.bus.emit(sessionId, "user/message", { id: "d1", role: "user", content: [], source: { kind: "desk", form: "state" } });
+  tree.bus.emit(sessionId, "user/message", { id: "w1", role: "user", content: [], source: { kind: "working-directory" } });
+  tree.bus.emit(sessionId, "user/message", { id: "u2", role: "user", content: [], source: { kind: "user", rpcId: "r2" } });
+  assert.equal(handle.operatorTurn(), true);
+  tree.bus.emit(sessionId, "user/message", { id: "t1", role: "user", content: [], source: { kind: "task", form: "report", task: "session-w" } });
+  assert.equal(handle.operatorTurn(), false, "a task's text is in the turn now");
+  tree.bus.emit(sessionId, "user/message", { id: "u3", role: "user", content: [], source: { kind: "user", rpcId: "r3" } });
+  assert.equal(handle.operatorTurn(), false, "for the rest of that turn");
+  tree.bus.emit(sessionId, "turn/end", { turn: 1, reason: { kind: "completed" } });
+  assert.equal(handle.operatorTurn(), false);
+  /* the next operator turn is the operator's again; a sourceless message mid-turn ends that too */
+  startTurn(tree.bus, sessionId, 2, { kind: "user", rpcId: "r4" });
+  assert.equal(handle.operatorTurn(), true, "a new turn starts clean");
+  tree.bus.emit(sessionId, "user/message", { id: "x", role: "user", content: [] });
+  assert.equal(handle.operatorTurn(), false, "a wake mid-turn");
+  tree.bus.emit(sessionId, "turn/end", { turn: 2, reason: { kind: "completed" } });
+  await settle();
+});
+
+test("a reopened conversation that does not run workspace-write is refused, and what was resumed is disposed", async () => {
+  const home = await scratch("perm");
+  const dir = conversationDir(home);
+  await appendEvent(home, { t: "2026-11-08T10:00:00.000Z", kind: "conversation", sessionId: "session-ro", reason: "created" });
+  /* resumed */
+  const cold = new FakeConversationTree();
+  cold.persist("session-ro", { cwd: dir, agentPreset: CONVERSATION_PRESET }, "read-only");
+  await assert.rejects(ensureConversation(deps(cold, home, [])), /session-ro is "read-only", not workspace-write/);
+  assert.deepEqual(cold.disposed, ["session-ro"]);
+  assert.equal(cold.created.length, 0, "no new conversation beside it");
+  /* live: someone else's, refused but not disposed */
+  const warm = new FakeConversationTree();
+  warm.persist("session-ro", { cwd: dir, agentPreset: CONVERSATION_PRESET }, "full-access");
+  warm.live.set("session-ro", new FakeConvAgent("session-ro", { cwd: dir, agentPreset: CONVERSATION_PRESET }));
+  await assert.rejects(ensureConversation(deps(warm, home, [])), /"full-access"/);
+  assert.deepEqual(warm.disposed, []);
+  assert.equal((await conversationLines(home)).length, 1, "nothing recorded");
+});
+
+test("a later ensure that finds another agent object for the session supervises that one, without reopening", async (t) => {
+  const home = await scratch("swap");
+  const tree = new FakeConversationTree();
+  const lines: string[] = [];
+  const handle = install(t, deps(tree, home, lines));
+  const first = await handle.ensure();
+  const old = tree.agent(first.sessionId);
+  const replacement = new FakeConvAgent(first.sessionId, old.session.header);
+  tree.live.set(first.sessionId, replacement);
+  const again = await handle.ensure();
+  assert.equal(again.agent, replacement);
+  assert.equal(handle.current()?.agent, replacement);
+  assert.equal(tree.created.length, 1);
+  assert.equal(tree.resumed.length, 0, "not reopened");
+  assert.equal((await conversationLines(home)).length, 1);
+  assert.equal(lines.length, 1, JSON.stringify(lines));
+  /* the supervision is the new agent's: one listener pair, and a fence cut lands on the replacement */
+  assert.equal(tree.bus.listeners.size, 2, "the old supervision and its note are gone");
+  await writeFile(join(conversationDir(home), "GRAVIT.md"), "x\n");
+  startTurn(tree.bus, first.sessionId, 1, { kind: "user", rpcId: "r1" });
+  await until(() => replacement.cancels.length > 0, "the cut on the replacement");
+  assert.deepEqual(old.cancels, []);
+  assert.equal(handle.operatorTurn(), true);
+  tree.bus.emit(first.sessionId, "turn/end", { turn: 1, reason: { kind: "cancelled" } });
+  await settle();
 });

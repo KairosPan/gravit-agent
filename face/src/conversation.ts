@@ -32,7 +32,7 @@ import { appendEvent, lastConversation, readEvents } from "./desk.ts";
 import { CONVERSATION_PRESET } from "./desk-names.ts";
 import {
   findFenceViolation, superviseDeskTurns,
-  type DeskSessionCtxLike, type DeskSupervision, type DeskTurnRecord, type SessionEventsOn,
+  type DeskSessionCtxLike, type DeskTurnRecord, type SessionEventsOn,
 } from "./desk-session.ts";
 import type { AgentLike, MemberSetup, RoomDeps, SessionLike } from "./room.ts";
 
@@ -131,7 +131,8 @@ interface Opened {
  * `agents.resume` on `deps.route` with the conversation's setup, never re-pinned). A reopened session whose header's
  * preset is not `gravit-router`, or one the resume refuses, gives a new conversation, recorded with reason `new`, and
  * one line naming the old id and why; what this call resumed and does not use is disposed. A reopened one whose
- * header's folder is not {@link conversationDir} is pointed there with `ctx.workingDirectory.set`, with one line. With
+ * header's folder is not {@link conversationDir} is pointed there with `ctx.workingDirectory.set`, with one line; one
+ * that does not run `workspace-write` is refused - what this call resumed is disposed and it rejects. With
  * no id it creates one - `session-<uuid>`, `gravit-router`, `workspace-write` pinned and checked after publication -
  * and records it `created`.
  *
@@ -139,7 +140,7 @@ interface Opened {
  * serialises its own.
  * @param deps - see {@link ConversationDeps}.
  * @throws when the ledger cannot be read, when creation fails or the pin does not hold (the agent is disposed first),
- *   and when `workingDirectory.set` rejects.
+ *   when a reopened conversation does not run `workspace-write`, and when `workingDirectory.set` rejects.
  */
 export async function ensureConversation(deps: ConversationDeps): Promise<{ agent: AgentLike; sessionId: string; created: boolean }> {
   const { agent, sessionId, created } = await openConversation(deps);
@@ -173,7 +174,8 @@ async function openConversation(deps: ConversationDeps): Promise<Opened> {
 }
 
 /** The ledger's conversation `id`, live or resumed and pointed at `dir`, or `undefined`, with its line, when it cannot
- * be had or is not a `gravit-router` session. */
+ * be had or is not a `gravit-router` session; a rejection, after disposing what it resumed, when it does not run
+ * `workspace-write`. */
 async function reopen(deps: ConversationDeps, id: string, dir: string, log: (line: string) => void): Promise<Opened | undefined> {
   const live = deps.ctx.agents.get(id);
   let resumed: { agent: AgentLike; dispose(): Promise<void> } | undefined;
@@ -205,6 +207,12 @@ async function reopen(deps: ConversationDeps, id: string, dir: string, log: (lin
       throw err;
     }
   }
+  /* as the desk's reopen does: a conversation that does not run workspace-write is refused, never prompted */
+  const effective = deps.ctx.permissionPresets.current(agent.session);
+  if (effective !== WORKSPACE_WRITE) {
+    if (resumed !== undefined) await disposeQuietly(resumed, id, log);
+    throw new Error(`the conversation ${id} is "${effective}", not ${WORKSPACE_WRITE}; the face will not prompt it`);
+  }
   return { agent, sessionId: id, created: false, ...(resumed === undefined ? {} : { handle: resumed }) };
 }
 
@@ -228,10 +236,23 @@ export interface ConversationHandle {
   /** The conversation held now, or `undefined` before the first ensure settles and after dispose. */
   current(): { agent: AgentLike; sessionId: string } | undefined;
   /** Whether the turn running now on the conversation is the operator's: one whose first message's source kind is in
-   * {@link OPERATOR_SOURCES}. False with no turn, before a message names it, and for a task's or a wake's turn. */
+   * {@link OPERATOR_SOURCES} and which has logged no message of any other kind since (a `task` message, a wake; the
+   * desk's state note and dsh's working-directory notice excepted). False with no turn, before a message names it,
+   * and for a task's or a wake's turn. */
   operatorTurn(): boolean;
   /** Ends the supervision and disposes the agent this handle created or resumed; waits for an ensure under way. */
   dispose(): Promise<void>;
+}
+
+/** Source kinds that never make a turn someone else's: the desk's state note and dsh's own working-directory notice. */
+const NOT_A_SPEAKER: ReadonlySet<string> = new Set(["desk", "working-directory"]);
+
+/** One supervised session: its supervision and the note of who has spoken in the open turn. */
+interface Watch {
+  /** Ends the supervision and the note; idempotent. */
+  end(): void;
+  /** Whether the open turn is the operator's: opened by an operator source, and no other speaker logged in it since. */
+  operatorTurn(): boolean;
 }
 
 /** One line for a turn that did not simply end; nothing for one that did. */
@@ -257,30 +278,16 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
   const log = deps.log ?? defaultLog;
   const dir = conversationDir(deps.home);
   let tail: Promise<unknown> = Promise.resolve();
-  let held: { agent: AgentLike; sessionId: string; handle?: Held; supervision: DeskSupervision } | undefined;
+  let held: { agent: AgentLike; sessionId: string; handle?: Held; watch: Watch } | undefined;
   let disposed = false;
 
-  const open = async (): Promise<{ agent: AgentLike; sessionId: string }> => {
-    if (disposed) throw new Error("the conversation is disposed");
-    if (held !== undefined) {
-      if (deps.ctx.agents.get(held.sessionId) !== undefined) {
-        await mkdir(dir, { recursive: true });
-        return { agent: held.agent, sessionId: held.sessionId };
-      }
-      /* disposed under the face: let go of it and open it again */
-      log(`${BIN}: conversation: session ${held.sessionId} is no longer live; opening it again`);
-      held.supervision();
-      held = undefined;
-    }
-    const opened = await openConversation(deps);
-    if (disposed) {
-      if (opened.handle !== undefined) await disposeQuietly(opened.handle, opened.sessionId, log);
-      throw new Error("the conversation is disposed");
-    }
+  /** Supervise `agent` as session `sessionId`, and note, per turn, whether the turn has logged a message that is not
+   * the operator's: once it has, the turn is not the operator's any more, whoever opened it. */
+  const watch = (agent: AgentLike, sessionId: string): Watch => {
     const supervision = superviseDeskTurns({
       on: deps.ctx.on,
-      sessionId: opened.sessionId,
-      agent: opened.agent,
+      sessionId,
+      agent,
       deadlineMs: CONVERSATION_DEADLINE_MS,
       fence: () => conversationFence(dir),
       fenceLabel: "the conversation's folder",
@@ -290,7 +297,65 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       },
       log,
     });
-    held = { agent: opened.agent, sessionId: opened.sessionId, supervision, ...(opened.handle === undefined ? {} : { handle: opened.handle }) };
+    const state: { turn?: number; foreign: boolean } = { foreign: false };
+    /* only notes: nothing here calls into the agent, so the session's own append is never re-entered */
+    const off = deps.ctx.on("session/event", (session, event) => {
+      if (session.id !== sessionId) return;
+      const data = event.data as { turn?: unknown; source?: unknown } | undefined;
+      if (event.type === "turn/start") {
+        state.turn = typeof data?.turn === "number" ? data.turn : undefined;
+        state.foreign = false;
+        return;
+      }
+      if (event.type !== "user/message") return;
+      const source = data?.source;
+      const kind = typeof source === "object" && source !== null ? (source as { kind?: unknown }).kind : undefined;
+      if (typeof kind === "string" && (OPERATOR_SOURCES.has(kind) || NOT_A_SPEAKER.has(kind))) return;
+      state.foreign = true;
+    });
+    let ended = false;
+    return {
+      end: () => {
+        if (ended) return;
+        ended = true;
+        supervision();
+        off();
+      },
+      operatorTurn: () => {
+        if (ended) return false;
+        const open = supervision.openTurn();
+        if (open?.source === undefined || !OPERATOR_SOURCES.has(open.source)) return false;
+        return !(state.foreign && state.turn === open.turn);
+      },
+    };
+  };
+
+  const open = async (): Promise<{ agent: AgentLike; sessionId: string }> => {
+    if (disposed) throw new Error("the conversation is disposed");
+    if (held !== undefined) {
+      const live = deps.ctx.agents.get(held.sessionId);
+      if (live !== undefined) {
+        await mkdir(dir, { recursive: true });
+        if (live !== held.agent) {
+          /* the registry holds another object for the session now: supervise that one, not the one it replaced */
+          log(`${BIN}: conversation: session ${held.sessionId} has a new agent object; supervising it`);
+          held.watch.end();
+          held.agent = live;
+          held.watch = watch(live, held.sessionId);
+        }
+        return { agent: held.agent, sessionId: held.sessionId };
+      }
+      /* disposed under the face: let go of it and open it again */
+      log(`${BIN}: conversation: session ${held.sessionId} is no longer live; opening it again`);
+      held.watch.end();
+      held = undefined;
+    }
+    const opened = await openConversation(deps);
+    if (disposed) {
+      if (opened.handle !== undefined) await disposeQuietly(opened.handle, opened.sessionId, log);
+      throw new Error("the conversation is disposed");
+    }
+    held = { agent: opened.agent, sessionId: opened.sessionId, watch: watch(opened.agent, opened.sessionId), ...(opened.handle === undefined ? {} : { handle: opened.handle }) };
     return { agent: opened.agent, sessionId: opened.sessionId };
   };
 
@@ -304,8 +369,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       return held === undefined ? undefined : { agent: held.agent, sessionId: held.sessionId };
     },
     operatorTurn() {
-      const source = held?.supervision.openTurn()?.source;
-      return source !== undefined && OPERATOR_SOURCES.has(source);
+      return held?.watch.operatorTurn() ?? false;
     },
     async dispose() {
       disposed = true;
@@ -313,7 +377,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       const was = held;
       held = undefined;
       if (was === undefined) return;
-      was.supervision();
+      was.watch.end();
       if (was.handle !== undefined) await disposeQuietly(was.handle, was.sessionId, log);
     },
   };
