@@ -40,7 +40,7 @@
  * identity logs, its connectors' and its pending connections' among them, has every connected network's tokens taken out in every spelling,
  * and every Slack token's shape. */
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { isRefusal, type Refusal } from "../../core/errors.ts";
 import { fingerprintOf, keyMatches } from "../account/brain-keys.ts";
@@ -51,7 +51,7 @@ import type { LedgerRow } from "../../agent/ledger.ts";
 import { formatRouting, isClock, NETWORK_NAME, NETWORKS, parseRouting, PHONE_KINDS, quietHolds, rowOf, SLACK_TOKEN_ANYWHERE, WIRE_ID, type Network, type PhoneKind, type Routing } from "./kinds.ts";
 import { redactorOf, splitMessage } from "./bot-api.ts";
 import { cardNotice, fillNotice, type FillFields } from "./notices.ts";
-import { ImessageConnector, ImessageTransport } from "./imessage.ts";
+import { IMESSAGE_CURSOR_FILE, ImessageConnector, ImessageTransport } from "./imessage.ts";
 import { lateLine, Outbox, OUTBOX_MAX, OUTBOX_MAX_AGE_MS, type OutboxEntry } from "./outbox.ts";
 import { InboxRing, type InboxMessage } from "./inbox.ts";
 import { operatorHandleOf, PendingConnections, speaksAsOf, type PendingResume } from "./pending.ts";
@@ -122,7 +122,7 @@ export type SendAnswer = { ok: true; sent: string[]; queued?: true } | { ok: tru
 
 export type IdentityView = {
   ok: true;
-  networks: Array<Omit<Binding, "botId" | "operatorId"> & { state: "connected"; polling: boolean; lastPollAt?: string; conflictAt?: string; blocked?: true; pollFailing?: { since: string; reason: string } }>;
+  networks: Array<Omit<Binding, "botId" | "operatorId"> & { state: "connected"; polling: boolean; lastPollAt?: string; conflictAt?: string; blocked?: true; pollFailing?: { since: string; reason: string }; gapAt?: string; movedAt?: string; refusedAt?: string }>;
   routing: Routing;
   quiet: { from: string; to: string; zone: "America/New_York" } | null;
   strangers: Stranger[];
@@ -726,6 +726,8 @@ export class Identity {
     await this.stopConnector(network);
     this.dropQueued(network);
     const left = this.removeSecret(network);
+    // iMessage's cursor goes with its binding; its refused line stays, so a connect later registers the number again past it
+    if (network === "imessage") rmSync(join(identityDir(this.home), IMESSAGE_CURSOR_FILE), { force: true });
     if (left) return refusal(`${NETWORK_NAME[network]} is disconnected and its poller stopped, but ${left}`);
     return { ok: true, kind: "account", summary: `${NETWORK_NAME[network]} disconnected: its token removed from the account` };
   }
@@ -751,6 +753,18 @@ export class Identity {
     try {
       const line = readFileSync(join(identityDir(this.home), IMESSAGE_REFUSED_FILE), "utf8").trim();
       return line !== "" ? line : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** when the line the binding speaks as was refused: the marker file's time, if it holds that line */
+  private imessageRefusedAt(): string | undefined {
+    const line = this.imessageRefusedLine();
+    const secret = readNetworkSecret(this.home, "imessage");
+    if (line === undefined || !secret || !("projectSecret" in secret) || secret.line !== line) return undefined;
+    try {
+      return statSync(join(identityDir(this.home), IMESSAGE_REFUSED_FILE)).mtime.toISOString();
     } catch {
       return undefined;
     }
@@ -929,6 +943,8 @@ export class Identity {
   private statusOf(network: Network): NetworkStatus {
     const st = this.connectors.get(network)?.status() ?? { network, polling: false, ...(this.sendBlocked.get(network) ? { blocked: true as const } : {}) };
     const auth = this.sendAuthFailing.get(network);
-    return auth && st.pollFailing === undefined ? { ...st, pollFailing: { ...auth } } : st;
+    const out = auth && st.pollFailing === undefined ? { ...st, pollFailing: { ...auth } } : st;
+    const refusedAt = network === "imessage" ? this.imessageRefusedAt() : undefined;
+    return refusedAt ? { ...out, refusedAt } : out;
   }
 }

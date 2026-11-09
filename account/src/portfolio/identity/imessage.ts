@@ -74,7 +74,7 @@ export interface ImessageTransportDeps {
  * sent again within the hour is dropped by Photon: that duplicate answers "" and counts as sent. A part with no id is refused here. What
  * goes answers `imessage:<GUID>`. Photon refusing the number (addressNotFound, chatNotFound, recipientLocked, "Target not allowed") calls
  * `refusedLine` before the error goes on. `classify`: Photon's `retry` waits in the outbox, `auth` is the project refused, everything else
- * is refused outright — there is no `blocked`. Its tokens are the project secret and its Basic spelling; `dispose` disposes the link. */
+ * is refused outright — there is no `blocked`. Its tokens are the project secret and its Basic spelling; `dispose` leaves the link alone — the connector closes its own stream, and the link belongs to whoever made it (the service). */
 export class ImessageTransport implements Transport {
   readonly network = "imessage" as const;
   readonly partMax = IMESSAGE_PART_MAX;
@@ -104,7 +104,7 @@ export class ImessageTransport implements Transport {
   }
 
   dispose(): void {
-    void this.o.link.dispose().catch(() => undefined);
+    // the shared link is the service's to dispose: a later connection goes through it again
   }
 }
 
