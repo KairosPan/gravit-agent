@@ -67,14 +67,31 @@ describe("the Photon fake", () => {
   });
 
   it("openStreams counts every stream not yet closed", async () => {
-    const h = { event: async () => {}, heartbeat: () => {}, gap: () => {}, failed: () => {} };
+    const got: number[] = [];
+    const h = { event: async (e: PhotonEvent) => void got.push((e as { sequence: number }).sequence), heartbeat: () => {}, gap: () => {}, failed: () => {} };
     const s1 = fake.stream(p, undefined, h);
-    const s2 = fake.stream(p, undefined, { ...h });
+    const s2 = fake.stream(p, undefined, h);
     expect(fake.openStreams()).toBe(2);
     await s2.close();
     expect(fake.openStreams()).toBe(1);
+    await fake.push(ev(9));
+    expect(got).toEqual([9]);
     await s1.close();
     expect(fake.openStreams()).toBe(0);
+  });
+
+  it("a rejecting handler does not poison later pushes", async () => {
+    let n = 0;
+    fake.stream(p, undefined, {
+      event: async () => {
+        if (++n === 1) throw new Error("boom");
+      },
+      heartbeat: () => {},
+      gap: () => {},
+      failed: () => {},
+    });
+    await expect(fake.push(ev(1))).rejects.toThrow("boom");
+    await expect(fake.push(ev(2))).resolves.toBeUndefined();
   });
 
   it("beat, gap and fail reach the open stream; close drops it", async () => {

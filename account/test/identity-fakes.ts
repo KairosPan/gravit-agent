@@ -482,8 +482,8 @@ export function fakePhotonLink(o: { project?: PhotonProject; users?: PhotonUser[
   const project = o.project ?? { projectId: "prj_1", secret: "photon-secret-for-tests" };
   const users = [...(o.users ?? [])];
   let seq = 0;
-  const opened = new Set<PhotonStreamHandlers>();
-  let open: PhotonStreamHandlers | undefined;
+  const opened: Array<{ h: PhotonStreamHandlers }> = [];
+  const current = () => opened[opened.length - 1]?.h;
   let tail: Promise<void> = Promise.resolve();
   let since: number | undefined;
   let sendFailure: PhotonError | undefined;
@@ -495,8 +495,9 @@ export function fakePhotonLink(o: { project?: PhotonProject; users?: PhotonUser[
     if (p.projectId !== project.projectId || p.secret !== project.secret) throw new PhotonError("auth", "unauthorized", "Photon refused the project");
   };
   const stream = () => {
-    if (!open) throw new Error("fake Photon: no open stream");
-    return open;
+    const h = current();
+    if (!h) throw new Error("fake Photon: no open stream");
+    return h;
   };
   return {
     calls,
@@ -526,14 +527,14 @@ export function fakePhotonLink(o: { project?: PhotonProject; users?: PhotonUser[
     },
     stream(p, s, h) {
       enter("stream", p);
-      open = h;
-      opened.add(h);
+      const token = { h };
+      opened.push(token);
       since = s;
       return {
         async close() {
           calls.push("stream.close");
-          opened.delete(h);
-          if (open === h) open = [...opened].pop();
+          const i = opened.indexOf(token);
+          if (i >= 0) opened.splice(i, 1);
         },
       };
     },
@@ -553,13 +554,13 @@ export function fakePhotonLink(o: { project?: PhotonProject; users?: PhotonUser[
     },
     async dispose() {
       calls.push("dispose");
-      opened.clear();
-      open = undefined;
+      opened.length = 0;
     },
     push: (e) => {
       const h = stream();
-      tail = tail.then(() => h.event(e));
-      return tail;
+      const mine = tail.then(() => h.event(e));
+      tail = mine.catch(() => {});
+      return mine;
     },
     beat: (at = Date.now()) => stream().heartbeat(at),
     gap: () => stream().gap(),
@@ -570,7 +571,7 @@ export function fakePhotonLink(o: { project?: PhotonProject; users?: PhotonUser[
     duplicateNextSend: () => {
       duplicate = true;
     },
-    openStreams: () => opened.size,
+    openStreams: () => opened.length,
     lastSince: () => since,
   };
 }
