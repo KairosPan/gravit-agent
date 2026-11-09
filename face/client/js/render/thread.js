@@ -160,11 +160,26 @@ function youFiles(list, thumbs) {
   }).join('')}</div>`;
 }
 
+// a text from the operator's phone (host/kinds.js phoneMessage) is the operator's bubble under a Phone chip naming its network
+const NETWORKS = { telegram: 'Telegram', slack: 'Slack' }; // en-kept: the networks' own names
+const phoneChip = network => chip(Object.hasOwn(NETWORKS, network) ? t('thread.phone.on', { network: NETWORKS[network] }) : t('thread.phone'));
+
 function youMessage(m, conv, state, page) {
   const list = Array.isArray(m.data?.attachments) ? m.data.attachments : [];
-  if (!list.length) return `<div class="msg you"><div class="bubble you">${youText(m.text, m, conv, page)}</div>${avatar('you', 28)}</div>`;
+  const tag = m.data?.source === 'telegram' ? phoneChip(m.data.network) : '';
+  if (!list.length && !tag) return `<div class="msg you"><div class="bubble you">${youText(m.text, m, conv, page)}</div>${avatar('you', 28)}</div>`;
   const bubble = m.text ? `<div class="bubble you">${youText(m.text, m, conv, page)}</div>` : '';
-  return `<div class="msg you"><div class="you-body">${youFiles(list, state?.thumbs ?? {})}${bubble}</div>${avatar('you', 28)}</div>`;
+  const files = list.length ? youFiles(list, state?.thumbs ?? {}) : '';
+  return `<div class="msg you"><div class="you-body">${tag}${files}${bubble}</div>${avatar('you', 28)}</div>`;
+}
+
+// a desk line (host/kinds.js deskMessage): a firing of the face's clock or an alert of its watch, noted into the conversation,
+// one centred line under its Scheduled or Watch chip; its body as the face wrote it, escaped, its head already left out
+const DESK_CHIP = { schedule: () => t('thread.desk.schedule'), alert: () => t('thread.desk.alert') };
+function deskLine(m) {
+  const line = m.data?.line;
+  const label = Object.hasOwn(DESK_CHIP, line) ? DESK_CHIP[line]() : String(line ?? '');
+  return `<div class="sysline desk-line">${chip(label)}${m.text ? `<span class="desk-text">${esc(m.text)}</span>` : ''}</div>`;
 }
 
 /** The conversation's operator images still to read from the host: not offloaded, with no entry in `thumbs` yet, each once. */
@@ -210,6 +225,7 @@ export function renderMessage(m, conv, state, page = {}) {
   // a tool call is drawn nowhere (the operator's word, 2026-10-28): its gate, receipt or refusal is a message of its own
   if (m.kind === 'tool') return '';
   if (m.kind === 'task') return taskMessage(m, conv, state);
+  if (m.kind === 'desk') return deskLine(m);
   // a producer-sourced user record (a runtime snapshot, a plugin notice, a member's delta) is context, folded away under its source;
   // a line the page itself writes (a round end, a child's report) stays a centred line
   if (m.from === 'system') {

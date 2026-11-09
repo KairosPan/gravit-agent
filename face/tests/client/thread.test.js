@@ -573,3 +573,41 @@ test('the fenced body is escaped', () => {
   assert.match(h, /<pre>&lt;script&gt;x&lt;\/script&gt; &amp; y<\/pre>/);
   assert.doesNotMatch(h, /<script>|<b>T/);
 });
+
+// ---- the desk folds in (one-entry plan 3 Task 7)
+test('a phone bubble carries the 手机 chip', () => {
+  const phone = (data, text = 'NVDA now?') => renderMessage(msg({ id: 'e80', from: 'you', text, data }), conv(), state);
+  const h = phone({ source: 'telegram', network: 'slack' });
+  assert.match(h, /^<div class="msg you"><div class="you-body"><span class="chip grey">Phone · Slack<\/span><div class="bubble you">NVDA now\?<\/div><\/div>/);
+  assert.match(phone({ source: 'telegram', network: 'telegram' }), />Phone · Telegram</);
+  assert.match(phone({ source: 'telegram' }), /<span class="chip grey">Phone<\/span>/, 'no network named: the phone alone');
+  withTable({ 'thread.phone': '手机', 'thread.phone.on': '手机 · {network}' }, () => {
+    assert.match(phone({ source: 'telegram', network: 'telegram' }), /<span class="chip grey">手机 · Telegram<\/span>/);
+  });
+  // the browser's own words carry no chip
+  assert.doesNotMatch(renderMessage(msg({ from: 'you', text: 'hi', data: {} }), conv(), state), /chip/);
+  assert.match(phone({ source: 'telegram' }, '<b>x</b>'), /&lt;b&gt;x&lt;\/b&gt;/);
+});
+
+const deskMsg = (data, text) => msg({ id: 'e81', seq: 81, from: 'system', kind: 'desk', text, data });
+test('a schedule line carries 定时 and an alert line 盯盘', () => {
+  assert.equal(renderMessage(deskMsg({ line: 'schedule', order: 'preclose' }, 'Check the book.'), conv(), state),
+    '<div class="sysline desk-line"><span class="chip grey">Scheduled</span><span class="desk-text">Check the book.</span></div>');
+  assert.match(renderMessage(deskMsg({ line: 'alert', symbol: 'NVDA' }, 'NVDA fell'), conv(), state), /<span class="chip grey">Watch<\/span>/);
+  withTable({ 'thread.desk.schedule': '定时', 'thread.desk.alert': '盯盘' }, () => {
+    assert.match(renderMessage(deskMsg({ line: 'schedule' }, 'x'), conv(), state), />定时</);
+    assert.match(renderMessage(deskMsg({ line: 'alert' }, 'x'), conv(), state), />盯盘</);
+  });
+  assert.equal(renderMessage(deskMsg({ line: 'alert' }, ''), conv(), state), '<div class="sysline desk-line"><span class="chip grey">Watch</span></div>', 'no body: the chip alone');
+});
+
+test("a desk line's text is escaped and its head left out", async () => {
+  const { toMessages } = await import('../../client/js/host/kinds.js');
+  const { mapFrame } = await import('../../client/js/wire/mapper.js');
+  const text = '[alert · NVDA · annotation]\n<<<desk-data z1>>>\n<script>x</script> & y\n<<<end z1>>>';
+  const frame = { type: 'session/event', sessionId: 's1', event: { type: 'user/message', seq: 82, time: 1, surfaceOp: 'append', data: { id: 'm82', role: 'user', content: [{ type: 'text', text }], source: { kind: 'alert', alert: 'a', symbol: 'NVDA' } } } };
+  const [m] = toMessages(mapFrame(frame), new Map(), NOW);
+  const h = renderMessage(m, conv(), state);
+  assert.match(h, /<span class="desk-text">&lt;script&gt;x&lt;\/script&gt; &amp; y<\/span>/);
+  assert.doesNotMatch(h, /<script>|\[alert ·|desk-data|&lt;&lt;&lt;/);
+});

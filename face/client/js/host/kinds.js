@@ -213,6 +213,7 @@ function bubble(view, speaker) {
   if (view.source === 'user' || view.source === undefined) {
     return { ...b, from: 'you', kind: 'text', text: view.text ?? '', data: { mention: view.mention, ...(Array.isArray(view.attachments) ? { attachments: view.attachments } : {}) } };
   }
+  if (view.source === 'telegram') return phoneMessage(b, view);
   if (view.source === 'task' && TASK_FORMS.has(view.form)) return taskMessage(b, view);
   return { ...b, from: 'system', kind: 'text', text: view.text ?? '', data: { source: view.source } };
 }
@@ -229,12 +230,16 @@ function relayParts(text) {
   const end = head.startsWith(RELAY_HEAD) ? head.lastIndexOf(' · ') : -1;
   if (end < RELAY_HEAD.length) return { title: null, status: null, body: text };
   const status = head.endsWith(']') ? head.slice(end + 3, -1) : null;
-  let rest = lines.slice(1);
-  const open = /^<<<task-data (\S+)>>>$/.exec(rest[0] ?? '');
+  return { title: head.slice(RELAY_HEAD.length, end), status, body: unfenced(lines.slice(1), 'task-data', '[task ·').join('\n') };
+}
+// the lines after a head, out of the face's data fence (src/task-relay.ts fenceData): between `<<<tag NONCE>>>` and the last
+// `<<<end NONCE>>>`, a line the face quoted - one that would read as a head (`quoted`) or a fence, one space before it - given
+// back as it was; lines in no fence as they came
+function unfenced(rest, tag, quoted) {
+  const open = new RegExp(`^<<<${tag} (\\S+)>>>$`).exec(rest[0] ?? '');
   const close = open ? rest.lastIndexOf(`<<<end ${open[1]}>>>`) : -1;
-  // the face quoted a line that would read as a head or a fence with one space before it: given back as it was
-  if (close > 0) rest = rest.slice(1, close).map(l => (l.startsWith(' [task ·') || l.startsWith(' <<<') ? l.slice(1) : l));
-  return { title: head.slice(RELAY_HEAD.length, end), status, body: rest.join('\n') };
+  if (close <= 0) return rest;
+  return rest.slice(1, close).map(l => (l.startsWith(` ${quoted}`) || l.startsWith(' <<<') ? l.slice(1) : l));
 }
 function withoutFooter(text) {
   const lines = text.split('\n');
@@ -247,6 +252,28 @@ function taskMessage(b, view) {
   if (view.form !== 'report') return { ...b, from: 'system', kind: 'task', text: view.form === 'brief' ? withoutFooter(text) : text, data: { form: view.form, ...ids } };
   const { title, status, body } = relayParts(text);
   return { ...b, from: 'system', kind: 'task', text, data: { form: 'report', ...ids, status: typeof view.status === 'string' ? view.status : status, title, body } };
+}
+
+// the desk folded into the conversation (one-entry plan 3): a text from the operator's phone is the operator's own words,
+// its provenance line `[<network> · operator · HH:MM ET…]` left to the phone's chip; a reply to an alert draws the
+// operator's words alone (the mapper's `said`), the alert it answers being a line of the conversation already
+const PROVENANCE = /^\[(telegram|slack) · operator · [^\n]*\]$/;
+function phoneMessage(b, view) {
+  const text = view.text ?? '';
+  const [first, ...rest] = text.split('\n');
+  const words = typeof view.said === 'string' ? view.said : PROVENANCE.test(first) ? rest.join('\n') : text;
+  return { ...b, from: 'you', kind: 'text', text: words, data: { source: 'telegram', ...(typeof view.network === 'string' ? { network: view.network } : {}) } };
+}
+// a firing of the face's clock (`schedule`) or an alert of its watch (`alert`), noted into the conversation
+// (src/conversation.ts noteMessage): its head `[schedule · <order> · <date>]` / `[alert · <symbol> · <label>]` left out,
+// its body out of the `desk-data` fence; the fields the mapper kept, by name
+const DESK_FIELDS = ['order', 'firing', 'date', 'alert', 'symbol'];
+function deskMessage(view) {
+  const line = view.line;
+  const lines = (view.text ?? '').split('\n');
+  const rest = lines[0]?.startsWith(`[${line} · `) ? lines.slice(1) : lines;
+  const fields = Object.fromEntries(DESK_FIELDS.filter(k => typeof view[k] === 'string').map(k => [k, view[k]]));
+  return { ...base(view), from: 'system', kind: 'desk', text: unfenced(rest, 'desk-data', '[').join('\n'), data: { line, ...fields } };
 }
 
 function toolMessages(view, calls) {
@@ -287,6 +314,7 @@ export function toMessages(view, calls, now, speaker = 'gravit') {
   switch (view?.kind) {
     case 'bubble': { const m = bubble(view, speaker); return m ? [m] : []; }
     case 'room-line': return [sys(view, roundEndLine(view))];
+    case 'desk-line': return [deskMessage(view)];
     case 'subagent-message': return [sys(view, t('thread.report', { child: view.childSessionId ?? t('thread.aChild'), text: view.text ?? '' }))];
     case 'card': return toolMessages(view, calls);
     case 'approval': return [gate(view, now)];

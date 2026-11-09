@@ -603,6 +603,27 @@ test("a phone message is the operator's own bubble, carrying the sender, the cha
   for (const field of ["from", "chat", "messageId"] as const) assert.equal(Object.hasOwn(odd, field), false, `a malformed ${field} is dropped, never guessed`);
 });
 
+test("a telegram bubble keeps its network", () => {
+  const text = "[slack · operator · 14:03 ET]\nNVDA now?";
+  const v = deskMessage(44, text, { kind: "telegram", network: "slack", messageId: "slack:C1:1731.2" });
+  assert.equal(v.kind, "bubble");
+  assert.equal(v.source, "telegram");
+  assert.equal(v.network, "slack", "the network the text came through");
+  assert.equal(Object.hasOwn(v, "messageId"), false, "a string id is not the retired bridge's integer");
+  assert.equal(deskMessage(45, text, { kind: "telegram", network: "telegram", messageId: "telegram:1:2" }).network, "telegram");
+  for (const network of ["imessage", 7, ""]) {
+    assert.equal(Object.hasOwn(deskMessage(46, text, { kind: "telegram", network, messageId: "x" }), "network"), false, `${String(network)} is no network the face names`);
+  }
+  // a reply to an alert: three parts - the provenance line, the context, then the operator's words, kept apart as said
+  const event = { type: "user/message", seq: 47, time: 1, surfaceOp: "append", data: {
+    id: "m-47", role: "user", source: { kind: "telegram", network: "telegram", messageId: "telegram:1:3" },
+    content: [{ type: "text", text: "[telegram · operator · 14:05 ET]" }, { type: "text", text: "the message this replies to:\nNVDA crossed 180\nsecond line" }, { type: "text", text: "sell half" }],
+  } };
+  const reply = mapFrame({ type: "session/event", sessionId: "desk", event });
+  assert.equal(reply.said, "sell half", "the operator's own words, apart from the context they reply to");
+  assert.equal(Object.hasOwn(v, "said"), false, "one part: nothing kept apart");
+});
+
 test("a firing of the desk's clock or watch is a desk line with its fields, as a round's end is a room line", () => {
   const scheduleText = "[schedule · preclose · 2026-10-20]\nCheck the book before the close.";
   const schedule = deskMessage(40, scheduleText, { kind: "schedule", order: "preclose", firing: "preclose:2026-10-20", date: "2026-10-20" });

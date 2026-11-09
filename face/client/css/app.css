@@ -190,6 +190,8 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .divider { text-align: center; font-size: calc(11px * var(--fs)); font-weight: 600; color: var(--dim); padding: 4px 0 8px; }
 .sysline { text-align: center; font-size: calc(11px * var(--fs)); color: var(--dim); padding: 4px 0; }
 /* an injected context row folds away under its source; opened, it reads as the record it is */
+.sysline.desk-line { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.desk-text { max-width: 66%; white-space: pre-line; overflow-wrap: anywhere; color: var(--text); font-size: calc(12px * var(--fs)); }
 .sysline.ctx summary { cursor: pointer; list-style: none; }
 .sysline.ctx summary::-webkit-details-marker { display: none; }
 .sysline.ctx summary::before { content: '› '; font-weight: 700; }

@@ -374,7 +374,24 @@ export function everyState() {
     ...taskPageStates(base),
     // the final review's fixes: a waiting line whose gate this page has not seen yet (after a reload) points at its full process
     R.nav(R.tasksLoaded(R.hostList(base, { conversations: [...base.conversations, conv('wr', { title: 'Buy back the hedge' })] }), { conversation: 's1', tasks: [{ id: 'wr', title: 'Buy back the hedge', origin: 'web', state: 'waiting', group: 'you', steps: [], startedAt: NOW - 3 * MIN, lastEventAt: NOW - MIN, lastSeq: 1, waitingFor: { kind: 'approval', id: 'c9', tool: 'mcp__account__portfolio_place_order' } }], at: NOW }), { screen: 'messages', id: null }),
+    // plan 3 of one entry, Task 7: the desk in the conversation - a phone text from each network and one naming none, a
+    // schedule line, an alert line, and a line with no body
+    deskFoldState(base),
   ];
+}
+
+// the desk folded into the conversation (one-entry plan 3 Task 7): the operator's phone texts under their chip, and the
+// face's firings and alerts as centred lines under theirs
+function deskFoldState(base) {
+  const messages = [
+    m('d1', { from: 'you', text: 'NVDA now?', seq: 1, data: { source: 'telegram', network: 'telegram' } }),
+    m('d2', { from: 'system', kind: 'desk', text: 'Check the book before the close.\nName what moved.', seq: 2, data: { line: 'schedule', order: 'preclose', firing: 'preclose:2026-11-09', date: '2026-11-09' } }),
+    m('d3', { from: 'system', kind: 'desk', text: 'NVDA fell 6% on guidance', seq: 3, data: { line: 'alert', alert: 'a-1', symbol: 'NVDA' } }),
+    m('d4', { from: 'you', text: 'sell half', seq: 4, data: { source: 'telegram', network: 'slack' } }),
+    m('d5', { from: 'you', text: 'and the rest?', seq: 5, data: { source: 'telegram' } }),
+    m('d6', { from: 'system', kind: 'desk', text: '', seq: 6, data: { line: 'alert' } }),
+  ];
+  return R.tasksLoaded(R.nav(R.hostList(base, { conversations: [...base.conversations, conv('dk', { messages, loaded: true })] }), { screen: 'messages', id: null }), { conversation: 'dk', tasks: [], at: NOW });
 }
 
 // a task's full process (one-entry plan 2 Task 8): a running worker with its strategy, a brief, an answer with follow-ups and

@@ -455,3 +455,46 @@ test('an unknown source still becomes a folded context row', () => {
     assert.equal(m.from, 'system'); assert.equal(m.kind, 'text'); assert.equal(m.data.source, source.kind);
   }
 });
+
+// ---- the desk folds in (one-entry plan 3 Task 7): a phone text, a schedule line, an alert line
+const deskFrame = (source, text, seq = 80) => ({ type: 'session/event', sessionId: 's1', event: { type: 'user/message', seq, time: 1, surfaceOp: 'append', data: { id: `m${seq}`, role: 'user', content: [{ type: 'text', text }], source } } });
+
+test("a phone text is the operator's message with its network", () => {
+  const [m] = toMessages(mapFrame(deskFrame({ kind: 'telegram', network: 'slack', messageId: 'slack:1' }, '[slack · operator · 14:03 ET]\nNVDA now?\nand AMD')), new Map(), NOW);
+  assert.equal(m.from, 'you'); assert.equal(m.kind, 'text');
+  assert.equal(m.text, 'NVDA now?\nand AMD', 'the provenance line left to the chip');
+  assert.deepEqual(m.data, { source: 'telegram', network: 'slack' });
+  assert.equal(m.id, 'e80'); assert.equal(m.seq, 80);
+  // an old desk's text: no network, the provenance line still read off; a first line that is no provenance stays
+  const [old] = toMessages(mapFrame(deskFrame({ kind: 'telegram', from: 1, chat: 1, messageId: 2 }, '[telegram · operator · 09:00 ET (carried over a restart)]\nhi')), new Map(), NOW);
+  assert.deepEqual(old.data, { source: 'telegram' }); assert.equal(old.text, 'hi');
+  const [bare] = toMessages(mapFrame(deskFrame({ kind: 'telegram', network: 'telegram', messageId: 't:1' }, '[not provenance]\nhi')), new Map(), NOW);
+  assert.equal(bare.text, '[not provenance]\nhi');
+  // a reply to an alert: the context it replies to is left out, the operator's words drawn
+  const frame = deskFrame({ kind: 'telegram', network: 'telegram', messageId: 't:2' }, '');
+  frame.event.data.content = [{ type: 'text', text: '[telegram · operator · 14:05 ET]' }, { type: 'text', text: 'the message this replies to:\nNVDA crossed 180' }, { type: 'text', text: 'sell half' }];
+  const [reply] = toMessages(mapFrame(frame), new Map(), NOW);
+  assert.equal(reply.from, 'you'); assert.equal(reply.text, 'sell half');
+});
+
+test('a schedule desk-line is a desk message', () => {
+  const text = '[schedule · preclose · 2026-11-09]\n<<<desk-data n1>>>\nCheck the book before the close.\n [schedule · not a head\n <<<end n1>>>\n<<<end n1>>>';
+  const [m] = toMessages(mapFrame(deskFrame({ kind: 'schedule', order: 'preclose', firing: 'preclose:2026-11-09', date: '2026-11-09' }, text)), new Map(), NOW);
+  assert.equal(m.from, 'system'); assert.equal(m.kind, 'desk');
+  assert.deepEqual(m.data, { line: 'schedule', order: 'preclose', firing: 'preclose:2026-11-09', date: '2026-11-09' });
+  assert.equal(m.text, 'Check the book before the close.\n[schedule · not a head\n<<<end n1>>>', 'the body unfenced and unquoted, its head left out');
+  // an older desk's line, unfenced: the head off, the rest as it came
+  const [old] = toMessages(mapFrame(deskFrame({ kind: 'schedule', order: 'preclose', firing: 'f', date: 'd' }, '[schedule · preclose · d]\nCheck the book.')), new Map(), NOW);
+  assert.equal(old.text, 'Check the book.');
+});
+
+test('an alert desk-line is a desk message', () => {
+  const text = '[alert · NVDA · annotation]\n<<<desk-data q9>>>\nNVDA fell 6% on <guidance> & more\n<<<end q9>>>';
+  const [m] = toMessages(mapFrame(deskFrame({ kind: 'alert', alert: 'a-1', symbol: 'NVDA', pass: 'p1' }, text)), new Map(), NOW);
+  assert.equal(m.from, 'system'); assert.equal(m.kind, 'desk');
+  assert.deepEqual(m.data, { line: 'alert', alert: 'a-1', symbol: 'NVDA' });
+  assert.equal(m.text, 'NVDA fell 6% on <guidance> & more');
+  // a line with no head of its own kind keeps its first line
+  const [odd] = toMessages(mapFrame(deskFrame({ kind: 'alert', alert: 'a-2', symbol: 'AMD' }, '[schedule · x · y]\nbody')), new Map(), NOW);
+  assert.equal(odd.text, '[schedule · x · y]\nbody');
+});
