@@ -20,12 +20,13 @@ const bots = [{ id: 'buffett', name: 'Buffett Type' }];
 const listed = (convs, open = convs[0]?.id ?? null, extra = {}) => {
   let s = R.hostList(emptyState(), { conversations: convs, channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }], bots });
   s = { ...s, ...extra };
-  return R.nav(s, { screen: 'messages', id: open });
+  // `open` is the conversation /data/tasks names, on Messages
+  return R.nav(open ? R.tasksLoaded(s, { conversation: open, tasks: [], at: NOW }) : s, { screen: 'messages', id: null });
 };
 
 test('the first level: Messages, Markets and Account on the face; no phone or mail', () => {
   const h = renderNav(listed([conv('a')]));
-  assert.match(h, /href="#\/messages\/a"[^>]*>[\s\S]*?Messages/);
+  assert.match(h, /href="#\/messages"[^>]*>[\s\S]*?Messages/);
   assert.match(h, /class="nav-item" href="#\/markets"[^>]*>[\s\S]*?Markets/);
   assert.doesNotMatch(h, /href="\/market"/);
   assert.match(h, /class="account" href="#\/account\/portfolio"/);
@@ -179,11 +180,11 @@ test('rail: the Account key carries the count of the cards waiting, as Messages 
   assert.match(renderNav(R.toggleRail(R.accountLoaded(on, { data: page, at: NOW }))), /class="account"[^>]*title="Account">[\s\S]*<span class="nav-badge">1<\/span><\/a>/);
 });
 
-test('the Messages key never points at an archived conversation', () => {
+test('the Messages key goes to Messages, the conversation, never to a session by its id', () => {
   const s = R.nav(listed([conv('z', { archived: 'face', updatedAt: NOW }), conv('a')], 'a'), { screen: 'markets', id: null });
-  const h = renderNav({ ...s, lastConv: null });
-  assert.match(h, /href="#\/messages\/a"/);
-  assert.doesNotMatch(h, /href="#\/messages\/z"/);
+  const h = renderNav({ ...s, lastConv: 'z' });
+  assert.match(h, /class="nav-item" href="#\/messages"/);
+  assert.doesNotMatch(h, /href="#\/messages\/[az]"/);
 });
 
 test('a header per group with its collapse key and its channel link', () => {
@@ -197,19 +198,20 @@ test('a header per group with its collapse key and its channel link', () => {
 });
 
 test('group and channel names are escaped', () => {
-  const s = R.nav(R.hostList(emptyState(), { conversations: [conv('a')], channels: [{ workspaceId: 'w1', name: '<b>x</b>', title: '<b>x</b>', isRoot: true }], bots: [{ id: 'evil', name: '<i>bot</i>' }] }), { screen: 'messages', id: 'a' });
+  const s = R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('a')], channels: [{ workspaceId: 'w1', name: '<b>x</b>', title: '<b>x</b>', isRoot: true }], bots: [{ id: 'evil', name: '<i>bot</i>' }] }), { conversation: 'a', tasks: [], at: NOW }), { screen: 'messages', id: null });
   const t = R.hostList(s, { conversations: [conv('a'), conv('h', { kind: 'bot', preset: 'evil', members: ['evil'] })] });
   const h = renderList(t, NOW);
   assert.doesNotMatch(h, /<b>x<\/b>|<i>bot<\/i>/);
   assert.match(h, /&lt;b&gt;x&lt;\/b&gt;/); assert.match(h, /&lt;i&gt;bot&lt;\/i&gt;/);
 });
 
-test('on a channel page the list stays beside it, Messages is current and the channel is marked', () => {
-  const s = R.nav(listed([conv('a', { channel: { workspaceId: 'w0', name: 'workbench' } })], 'a'), { screen: 'channel', id: 'w0' });
+test('on a strategy page the list stays beside it, Messages is current and the channel is marked', () => {
+  const at = R.hostList(listed([conv('a', { channel: { workspaceId: 'w1', name: 'alpha' } })], 'a'), { conversations: [conv('a', { channel: { workspaceId: 'w1', name: 'alpha' } })], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }, { workspaceId: 'w1', name: 'alpha', isRoot: false }] });
+  const s = R.nav(at, { screen: 'strategy', id: 'alpha' });
   const h = renderRail(s, NOW);
-  assert.match(h, /class="nav-item current" aria-current="page" href="#\/messages\/a"/);
+  assert.match(h, /class="nav-item current" aria-current="page" href="#\/messages"/);
   assert.match(h, /class="list"/);
-  assert.match(h, /<a class="grp-name current" aria-current="page" href="#\/channel\/w0">/);
+  assert.match(h, /<a class="grp-name current" aria-current="page" href="#\/channel\/w1">/);
 });
 
 test('Discover is in the first level, current on Discover, on a plugin page and on a module page', () => {

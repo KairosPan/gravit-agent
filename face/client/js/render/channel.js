@@ -100,11 +100,12 @@ function headline(status) {
 
 const retry = id => `<button type="button" class="btn-sm" data-action="channelRetry" data-id="${esc(id)}">${th('channel.retry')}</button>`;
 
+// a strategy's page (#/strategy/<name>): its channel by name, the page read by the channel's workspace id
 export function renderChannelScreen(state, now) {
-  const id = state.route.id;
-  const listed = (state.channels ?? []).find(c => c.workspaceId === id) ?? null;
+  const listed = (state.channels ?? []).find(c => !c.isRoot && c.name === state.route.id) ?? null;
+  const id = listed?.workspaceId ?? null;
   const c = state.channel?.id === id ? state.channel : { status: 'idle', data: null, at: null };
-  const name = listed ? listed.title || listed.name : c.data?.channel?.name ?? id ?? '';
+  const name = listed ? listed.title || listed.name : state.route.id ?? '';
   const shell = (body, head = '') => `<main class="main chan"><header class="head"><h1 class="head-title">${esc(name)}</h1>${head}</header><div class="chan-body">${body}</div></main>`;
   if (c.status === 'missing' || (!listed && (state.channels ?? []).length > 0)) return shell(`<div class="chan-none">${th('channel.notFound')}</div>`);
   const data = c.data;

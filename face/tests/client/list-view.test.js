@@ -41,9 +41,9 @@ test("a bot's home sessions group under the bot; sessions in no channel under No
   assert.equal(flipped.find(g => g.key === 'w0').collapsed, true);
 });
 
-test('a collapsed group keeps the conversation on screen', () => {
+test('a collapsed group keeps the session on screen', () => {
   const convs = [conv('a', { channel: { workspaceId: 'w1', name: 'alpha' }, updatedAt: 3 }), conv('b', { channel: { workspaceId: 'w1', name: 'alpha' }, updatedAt: 2 })];
-  const open = groupsOf(state(convs, { collapsed: { w1: true }, route: { screen: 'messages', id: 'b' } }));
+  const open = groupsOf(state(convs, { collapsed: { w1: true }, route: { screen: 'history', id: 'b' } }));
   assert.deepEqual(open.find(g => g.key === 'w1').shown.map(c => c.id), ['b']);
   const shut = groupsOf(state(convs, { collapsed: { w1: true }, route: { screen: 'markets', id: null } }));
   assert.deepEqual(shut.find(g => g.key === 'w1').shown, []);

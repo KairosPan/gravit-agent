@@ -2,7 +2,7 @@
 // or to its classes (css.test.js). Paths below resolve from tests/client/helpers/.
 import { readFileSync } from 'node:fs';
 import { renderRail, renderList } from '../../../client/js/render/rail.js';
-import { renderMessagesScreen } from '../../../client/js/render/messages.js';
+import { renderMessagesScreen, renderSessionPage, renderHistoryList } from '../../../client/js/render/messages.js';
 import { renderMarketsScreen } from '../../../client/js/render/markets.js';
 import { renderSettings, renderAccountScreen, renderSellMany } from '../../../client/js/render/account.js';
 import { renderSheet } from '../../../client/js/render/owner.js';
@@ -236,10 +236,13 @@ function tradeStates() {
   ];
 }
 
+// Messages with `id` the conversation /data/tasks names (plan 2 of one entry)
+export const onConv = (s, id) => R.nav(R.tasksLoaded(s, { conversation: id, tasks: [], at: NOW }), { screen: 'messages', id: null });
+
 // the channel page: loaded with every section, loading, unavailable, stale after a failed re-read, not found
 function channelStates() {
   const alpha = { workspaceId: 'w1', name: 'alpha', title: 'Alpha', dir: '/r/strategies/alpha', isRoot: false, missingDir: false, sessionIds: [] };
-  const on = R.nav(R.hostList(emptyState(), { conversations: [conv('c1', { channel: { workspaceId: 'w1', name: 'alpha' } })], channels: [alpha] }), { screen: 'channel', id: 'w1' });
+  const on = R.nav(R.hostList(emptyState(), { conversations: [conv('c1', { channel: { workspaceId: 'w1', name: 'alpha' } })], channels: [alpha] }), { screen: 'strategy', id: 'alpha' });
   const data = {
     ok: true, channel: alpha, status: { status: 'researching', one_line: 'Holds', next: 'Rerun', numbers: { sharpe: '1.4' } },
     body: { thesis: { markdown: '# A', isTemplate: false }, journal: [{ date: '2026-10-19', text: 'Ran' }], backtests: [{ file: 'b.json', bytes: 9 }], latest: { file: 'b.json', json: { sharpe: 1.4 } }, files: [{ name: 'n.md', bytes: 9, mtime: '2026-10-19T09:00:00.000Z' }] },
@@ -247,7 +250,7 @@ function channelStates() {
   };
   const loaded = R.channelLoaded(on, { workspaceId: 'w1', data, at: NOW });
   const editing = R.editFailed(R.startEdit(loaded, { kind: 'roster', which: 'bots', workspaceId: 'w1', choices: [{ value: 'buffett', label: 'Buffett Type' }], ticked: ['buffett'] }), { error: 'roster write refused' });
-  return [loaded, editing, R.channelLoading(on, { workspaceId: 'w1' }), R.channelFailed(on, { workspaceId: 'w1', at: NOW }), R.channelFailed(loaded, { workspaceId: 'w1', at: NOW }), R.nav(on, { screen: 'channel', id: 'w9' })];
+  return [loaded, editing, R.channelLoading(on, { workspaceId: 'w1' }), R.channelFailed(on, { workspaceId: 'w1', at: NOW }), R.channelFailed(loaded, { workspaceId: 'w1', at: NOW }), R.nav(on, { screen: 'strategy', id: 'w9' })];
 }
 
 // Discover: the shelves, a failed shelf, a query, a shelf's grid, every kind of page, its own line
@@ -312,14 +315,14 @@ export function searchStates(s) {
 // the states stage 1 can show: empty, a conversation with every kind, a group thinking, Details, Settings, a draft, a bad status, the rail folded
 export function everyState() {
   const base = R.hostList(emptyState(), { conversations: [conv('s1', { messages: KINDS, running: true, usage: { tokenUsage: { outputTokens: 1 }, contextPressure: 0.5 }, stats: { turns: 1, steps: 2, llmMs: 900, toolMs: 0, ttftMs: 300, ttftSteps: 2, decodeMs: 500, decodeTokens: 20 }, created: NOW }), conv('g', { kind: 'group', members: ['gravit', 'buffett'], thinking: 'text', messages: [m('g1', { from: 'buffett', text: 'hold', data: { name: 'Buffett Type', markdown: true, memberSessionId: 'm1', memberTurn: 2 } })] })], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }, { workspaceId: 'w-cn', name: 'cn-market', isRoot: false }], bots: [{ id: 'buffett', name: 'Buffett Type' }] });
-  const open = R.nav(base, { screen: 'messages', id: 's1' });
+  const open = onConv(base, 's1');
   return [
-    emptyState(), open, lunhuiStates(open), ...stockStates(open), lunhuiStates(open, { 's1-p1': { tile: 'environment', breadth: 'dist' } }), R.nav(base, { screen: 'messages', id: 'g' }), R.toggleDetails(open), R.askConfirm(R.toggleDetails(open), { action: 'stopGravit', id: 's1' }),
+    emptyState(), open, lunhuiStates(open), ...stockStates(open), lunhuiStates(open, { 's1-p1': { tile: 'environment', breadth: 'dist' } }), onConv(base, 'g'), R.toggleDetails(open), R.askConfirm(R.toggleDetails(open), { action: 'stopGravit', id: 's1' }),
     R.startEdit(R.toggleDetails(open), { kind: 'rename', convId: 's1', error: t('details.nameEmpty') }), R.openSettings(open), R.startDraft(open, { now: NOW }),
     R.startEdit(R.startDraft(open, { now: NOW }), { kind: 'newChannel', error: t('channel.name.rule') }),
     R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open),
     ...searchStates(R.hostList(open, { conversations: [...open.conversations, conv('old', { title: 'T old', archived: 'face' })] })), R.hostPins(open, ['s1']),
-    R.traceLoaded(R.nav(base, { screen: 'messages', id: 'g' }), { convId: 'g', msgId: 'g1', messages: [m('tg1', { kind: 'tool', text: 'account', data: { callId: 'g1c', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }) } }), m('tg2', { from: 'system', text: 'context' })] }),
+    R.traceLoaded(onConv(base, 'g'), { convId: 'g', msgId: 'g1', messages: [m('tg1', { kind: 'tool', text: 'account', data: { callId: 'g1c', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }) } }), m('tg2', { from: 'system', text: 'context' })] }),
     R.toggleDetails(R.hostList(R.hostProjection(open, { convId: 's1', key: 'subagentCatalog', value: [{ id: 'k1', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'k2', createdAt: 2, mode: 'unknown' }] }), { conversations: open.conversations, childRows: [{ sessionId: 'k1', parentSessionId: 's1', running: true, origin: 'subagent' }] })), ...marketStates(), ...accountStates(), ...channelStates(), ...discoverStates(), ...tradeStates(),
     // the golden is append-only (golden-write.js): a state added later goes after these, so every pinned name keeps its state
     ...laterStates(),
@@ -330,6 +333,21 @@ export function everyState() {
     R.setLang(R.openSettings(open), 'zh'),
     ...focusedMarketStates(),
     ...providerMarketStates(),
+    // plan 2 of one entry, Task 3: a task's page, history and its list, and an old link waiting on the tasks
+    ...sessionPageStates(base),
+  ];
+}
+
+// the read-only pages Tasks 7 and 8 of plan 2 replace: a task's page, a history session, one gone, one before the list, the
+// history list full and empty; and Messages while an old #/messages/<id> link waits for the tasks (no composer bound to it)
+function sessionPageStates(base) {
+  const task = { id: 'g', title: 'Debate', origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW, lastEventAt: NOW, lastSeq: 1 };
+  const ready = R.tasksLoaded(base, { conversation: 's1', tasks: [task], at: NOW });
+  const plain = R.tasksLoaded(base, { conversation: 's1', tasks: [], at: NOW });
+  return [
+    R.nav(ready, { screen: 'task', id: 'g' }), R.nav(plain, { screen: 'history', id: 'g' }), R.nav(plain, { screen: 'history', id: 'gone' }),
+    R.nav(emptyState(), { screen: 'history', id: 'x' }), R.nav(plain, { screen: 'history', id: null }), R.nav(ready, { screen: 'history', id: null }),
+    R.nav(base, { screen: 'messages', id: 's1' }),
   ];
 }
 
@@ -472,7 +490,7 @@ function laterStates() {
 // every kind, a folder walk with its crumb; the operator's words with a conversation mention, a chip in the bubble (D17); a draft
 // with each chip kind in the editor
 function composerBuild() {
-  const open = R.nav(R.hostList(emptyState(), { conversations: [conv('s1')], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, dir: '/r' }] }), { screen: 'messages', id: 's1' });
+  const open = onConv(R.hostList(emptyState(), { conversations: [conv('s1')], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, dir: '/r' }] }), 's1');
   const menus = [
     { kind: '/', from: 0, query: '', groups: slashItems({ commands: [{ name: 'compact', description: 'Shrink' }], skills: [{ name: 'rules', description: 'R' }], query: '', atStart: true }), active: 0 },
     { kind: '/', from: 0, query: 'r', groups: slashItems({ commands: [], skills: [{ name: 'rules' }], query: 'r', atStart: true }), active: 0 },
@@ -520,7 +538,9 @@ function composerBuild() {
 export const composerPieces = () => composerBuild().pieces;
 export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
   : st.route.screen === 'trade' ? renderTradeScreen(st, now)
-  : st.route.screen === 'channel' ? renderChannelScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
+  : st.route.screen === 'strategy' ? renderChannelScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
+  : st.route.screen === 'history' && !st.route.id ? renderHistoryList(st, now)
+  : st.route.screen === 'task' || st.route.screen === 'history' ? renderSessionPage(st, now)
   : st.route.screen === 'plugin' ? renderPlugin(st, now) : st.route.screen === 'module' ? renderModule(st, now) : renderMessagesScreen(st, now));
 
 // a state's page as css.test.js draws it: the rail, the screen, then every drawer and sheet that may stand over it
@@ -550,7 +570,7 @@ export async function hostCorpus() {
     const rows = [{ sessionId: 's1', updatedAt: 5, agentAvailable: false, running: false, blank: false }];
     const call = async endpoint => (endpoint === 'session/list' ? { items: rows } : endpoint === 'session/projections' ? { asOfSeq: 20, values: {} } : endpoint === 'session/page' ? { records: [] } : undefined);
     const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, sessionIds: [] }], ungrouped: [], archived: [], presets: {} }
-      : path === '/data/sessions-meta.json' ? { ok: true, archived: [], deleted: [] } : { ok: true, bots: [] });
+      : path === '/data/sessions-meta.json' ? { ok: true, archived: [], deleted: [] } : path === '/data/tasks' ? { ok: true, conversation: 's1', tasks: [] } : { ok: true, bots: [] });
     const store = boot(f.win, { editor: valueEditor, openMux: o => { opts = o; return mux; }, call, getJson, postJson: async () => ({ ok: true }), markdown: null, now: () => NOW });
     try {
       await settle();

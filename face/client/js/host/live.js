@@ -5,7 +5,7 @@ import { foldMembers } from '../wire/room.js';
 import { summaryOf, readProjections } from '../wire/summaries.js';
 import { rememberCall, toMessages } from './kinds.js';
 import { attachmentsLine } from '../composer/files.js';
-import { listConversations, childRowsOf } from './sessions.js';
+import { listConversations, childRowsOf, onScreenId } from './sessions.js';
 import { foldMessages } from '../reducers/host.js';
 import { said, saidError } from '../i18n/words.js';
 
@@ -394,7 +394,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       childRows: childRowsOf(list.items),
     });
     for (const r of list.items) if (typeof r?.sessionId === 'string') seedBlock(r.sessionId, r.projections);
-    const openId = state().route.screen === 'messages' ? state().route.id : null;
+    const openId = onScreenId(state());
     const openConv = openId ? convOf(openId) : null;
     if (openConv) store.dispatch('markSeen', { convId: openConv.id, seq: openConv.updatedAt }); // the one on screen is read as it moves
     reconcile();
@@ -422,7 +422,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   // a row is read when it was never read, or when its session moved past the read (previewAt is the row's updatedAt
   // then): a moved row is refreshed, a silent one waits for activity; the one on screen previews from its own window
   async function previews() {
-    const openId = state().route.screen === 'messages' ? state().route.id : null;
+    const openId = onScreenId(state());
     const todo = state().conversations.filter(c => c.id !== openId && (c.previewAt === undefined || c.updatedAt > c.previewAt)).slice(0, PREVIEW_ROWS);
     for (const c of todo) {
       try {
@@ -461,7 +461,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
       }
       case 'api-session/error': {
         const [id, message] = list;
-        if (id === state().route.id) say(typeof message === 'string' && message !== '' ? message : said('status.agentFailed'), true);
+        if (id === onScreenId(state())) say(typeof message === 'string' && message !== '' ? message : said('status.agentFailed'), true);
         return;
       }
       default:

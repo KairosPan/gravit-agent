@@ -270,7 +270,7 @@ test('a gate for a session the list does not know yet waits, and lands once the 
 test('host facts: status sets running, activity and added schedule a list refresh, an error reaches the status line', async () => {
   const r = rig({ rows: [row('s1')] });
   await r.ready();
-  r.store.dispatch('nav', { screen: 'messages', id: 's1' });
+  r.store.dispatch('nav', { screen: 'history', id: 's1' });
   const before = r.scheduled.length;
   r.opts().onEvent('api-session/status', ['s1', true]);
   assert.equal(r.store.get().conversations[0].running, true);
@@ -279,7 +279,9 @@ test('host facts: status sets running, activity and added schedule a list refres
   const refreshes = r.scheduled.slice(before).filter(s => s.ms === LIST_REFRESH_MS);
   assert.equal(refreshes.length, 1, 'a burst of host facts is one coalesced list refresh');
   r.opts().onEvent('api-session/error', ['s1', 'the model is out']);
-  assert.equal(r.store.get().status.line, 'the model is out'); assert.equal(r.store.get().status.bad, true);
+  assert.equal(r.store.get().status.line, 'the model is out', "an error of the session on screen"); assert.equal(r.store.get().status.bad, true);
+  r.opts().onEvent('api-session/error', ['s9', 'elsewhere']);
+  assert.equal(r.store.get().status.line, 'the model is out', "another session's error is not said");
 });
 
 test('control projections reach the conversation; a baseline seeds every listed session', async () => {
@@ -327,7 +329,8 @@ test('previews: a conversation that ends in a composed answer previews its summa
 test('opening marks the conversation seen; the list keeps the open one seen when its activity moves', async () => {
   const r = rig({ rows: [row('s1', { updatedAt: 50 })] });
   await r.ready();
-  r.store.dispatch('nav', { screen: 'messages', id: 's1' });
+  r.store.dispatch('tasksLoaded', { conversation: 's1', tasks: [], at: 1 });
+  r.store.dispatch('nav', { screen: 'messages', id: null });
   r.live.open('s1'); await settle();
   assert.equal(r.store.get().conversations[0].lastSeen, 50);
 });

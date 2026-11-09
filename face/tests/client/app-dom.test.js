@@ -28,8 +28,10 @@ const settle = async () => { for (let i = 0; i < 8; i++) await tick(); };
 const row = (id, over = {}) => ({ sessionId: id, updatedAt: 5, agentAvailable: false, running: false, blank: false, ...over });
 
 // a fake host: the mux records its streams and keeps the options; the calls are canned per endpoint and recorded
-function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted: [] } } = {}) {
-  const channelRows = [{ workspaceId: 'w0', name: 'workbench', isRoot: true, sessionIds: [] }];
+// /data/tasks names the conversation: `conversation` when given (null: the face has none), else the newest row not archived,
+// as the old list opened first; `tasks` are its TaskView rows
+function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted: [] }, conversation, tasks = [], channels = [] } = {}) {
+  const channelRows = [{ workspaceId: 'w0', name: 'workbench', isRoot: true, sessionIds: [] }, ...channels];
   const streams = [];
   let opts = null;
   const mux = { stream(name, args, cbs) { const s = { name, args, cbs, cancelled: false }; streams.push(s); return { cancel() { s.cancelled = true; } }; }, answer: async (id, value) => { answered.push([id, value]); }, close() {} };
@@ -55,7 +57,9 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
     '/data/bots.json': { ok: true, bots: [{ id: 'buffett', name: 'Buffett Type', description: '', homeCwd: '/r/bots/buffett/home', soul: '# B', revision: 'r1', isDefault: false, listed: true, skills: [], setupIssues: [] }] },
     '/data/modules.json': modulesListing(),
   };
-  const getJson = async path => { reads.push(path); return path === '/data/channels.json' ? { ok: true, root: '/r', channels: [...channelRows], ungrouped: [], archived: [], presets: {} } : path === '/data/sessions-meta.json' ? meta : inventory[path] ?? { ok: true, bots: [] }; };
+  const newest = () => [...rows].filter(r => !meta.archived.includes(r.sessionId)).sort((x, y) => y.updatedAt - x.updatedAt)[0]?.sessionId ?? null;
+  inventory['/data/tasks'] = () => ({ ok: true, conversation: conversation === undefined ? newest() : conversation, tasks });
+  const getJson = async path => { reads.push(path); if (typeof inventory[path] === 'function') return inventory[path](); return path === '/data/channels.json' ? { ok: true, root: '/r', channels: [...channelRows], ungrouped: [], archived: [], presets: {} } : path === '/data/sessions-meta.json' ? meta : inventory[path] ?? { ok: true, bots: [] }; };
   const posted = [];
   // an overview's body by workspace id, for a test that reads a channel's runs
   const overviews = {};
@@ -85,31 +89,52 @@ test('before the host answers, the empty state shows with a connecting status li
   assert.match(f.html(), /status-line" role="status">connecting…</);
   await h.ready();
   assert.match(f.html(), /row-title">One</);
-  assert.equal(store.get().route.id, 's2', 'the newest first, as the list orders them');
-  assert.equal(h.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 's2' && c[1].request.maxMessages === undefined), true, 'the open one was paged');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(store.get().tasks.conversation, 's2', 'the conversation /data/tasks names');
+  assert.equal(h.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 's2' && c[1].request.maxMessages === undefined), true, 'the conversation was paged');
   assert.doesNotMatch(f.html(), /connecting…/);
   store.timers.clear();
 });
 
-test('a deep link to a conversation the list has not carried yet opens it once the list lands', async () => {
-  const f = fakeWindow({ hash: '#/messages/s1' });
-  const h = host({ rows: [row('s1'), row('s2', { updatedAt: 9 })] });
+const taskRow = (id, over = {}) => ({ id, title: `Task ${id}`, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: 1, lastEventAt: 1, lastSeq: 1, ...over });
+
+test('an old #/messages/<task id> link opens the task page', async () => {
+  const f = fakeWindow({ hash: '#/messages/t1' });
+  const h = host({ rows: [row('conv', { updatedAt: 9 }), row('t1', { projections: { values: { title: 'Read the tape' } } })], conversation: 'conv', tasks: [taskRow('t1')] });
+  const store = started(f, h);
+  assert.deepEqual(store.get().route, { screen: 'messages', id: 't1' }, 'waits while the tasks load');
+  await h.ready();
+  assert.deepEqual(store.get().route, { screen: 'task', id: 't1' });
+  assert.equal(f.win.location.hash, '#/task/t1', 'the address bar shows where it landed');
+  assert.match(f.html(), /head-title">Read the tape</);
+  assert.equal(h.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 't1' && c[1].request.maxMessages === undefined), true, "the worker's transcript was read");
+  assert.doesNotMatch(f.html(), /class="composer"/, 'no composer on a task page');
+  store.timers.clear();
+});
+
+test('an old #/messages/<other id> opens history read-only — no composer in the page', async () => {
+  const f = fakeWindow({ hash: '#/messages/old' });
+  const h = host({ rows: [row('conv', { updatedAt: 9 }), row('old', { projections: { values: { title: 'Last week' } } })], conversation: 'conv', pages: { old: [{ seq: 3, kind: 'message', role: 'assistant', parts: [{ type: 'text', text: 'held' }] }] } });
   const store = started(f, h);
   await h.ready();
-  assert.equal(store.get().route.id, 's1');
-  assert.match(f.html(), /row current[^>]*href="#\/messages\/s1"/);
+  assert.deepEqual(store.get().route, { screen: 'history', id: 'old' });
+  assert.equal(f.win.location.hash, '#/history/old');
+  assert.match(f.html(), /head-title">Last week</);
+  assert.doesNotMatch(f.html(), /class="composer"/, 'no composer on a history page');
+  assert.doesNotMatch(f.html(), /id="say"/);
+  assert.equal(h.streams.some(st => st.name === 'session/follow' && st.args.request.address.sessionId === 'old'), false, 'history is never followed');
   store.timers.clear();
 });
 
 test('clicking a row opens it: the page read happens and its dot clears; the composer sends a prompt and empties', async () => {
-  const f = fakeWindow({ hash: '' });
+  const f = fakeWindow({ hash: '#/history' });
   const say = f.withId('say', { tagName: 'INPUT' });
-  const h = host({ rows: [row('s1', { updatedAt: 50, agentAvailable: true }), row('s2', { updatedAt: 9 })] });
+  const h = host({ rows: [row('s1', { updatedAt: 50, agentAvailable: true }), row('s2', { updatedAt: 9 })], conversation: 's2' });
   const store = started(f, h);
   await h.ready();
   f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
   await settle();
-  assert.equal(store.get().route.id, 's2');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null }, "the conversation's row is Messages");
   assert.equal(store.get().conversations.find(c => c.id === 's2').lastSeen, 9);
   say.value = 'look at ETH';
   f.fire('root', 'input', { target: say });
@@ -435,7 +460,7 @@ test('an @ goes through the room route: one that addressed a bot sends nothing m
   const f = fakeWindow({ hash: '' });
   const say = f.withId('say', { tagName: 'INPUT' });
   const h = host({ rows: [row('s1')] });
-  const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w1', name: 'room-drill', isRoot: false, sessionIds: ['s1'] }], ungrouped: [], archived: [], presets: {} } : { bots: [] });
+  const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w1', name: 'room-drill', isRoot: false, sessionIds: ['s1'] }], ungrouped: [], archived: [], presets: {} } : path === '/data/tasks' ? { ok: true, conversation: 's1', tasks: [] } : { bots: [] });
   const answers = [{ ok: true, status: 200, body: { ok: true, addressed: ['buffett'] } }, { ok: false, status: 409, body: { ok: false, error: 'channel room-drill has no roster' } }];
   const fetched = [];
   f.win.fetch = async (path, init) => { fetched.push([path, JSON.parse(init.body)]); const a = answers.shift(); return { ok: a.ok, status: a.status, json: async () => a.body }; };
@@ -1520,70 +1545,70 @@ test('a press holds renders until it ends, so a streaming quote cannot swallow t
   store.timers.clear();
 });
 
-test('boot opens the newest open conversation when the newest is archived', async () => {
+test('boot opens the conversation /data/tasks names, though a newer session is archived', async () => {
   const f = fakeWindow({ hash: '' });
-  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })], meta: { ok: true, archived: ['s1'], deleted: [] } });
+  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5, projections: { values: { title: 'Gravit here' } } })], meta: { ok: true, archived: ['s1'], deleted: [] }, conversation: 's2' });
   const store = started(f, h);
   await h.ready();
-  assert.equal(store.get().route.id, 's2');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.match(f.html(), /head-title">Gravit here</);
   assert.equal(store.get().conversations.find(c => c.id === 's1').archived, 'face');
   store.timers.clear();
 });
 
-test('Fork opens the new conversation', async () => {
+test('Fork opens the new session on its history page', async () => {
   const f = fakeWindow({ hash: '' });
-  const h = host({ rows: [row('s1')] });
+  const h = host({ rows: [row('s1')], conversation: 's1' });
   const store = started(f, h);
   await h.ready();
   f.click({ tagName: 'BUTTON', dataset: { action: 'fork', conv: 's1' } });
   await settle();
   assert.deepEqual(h.calls.find(c => c[0] === 'session/fork')[1], { request: { sessionId: 's1' } });
-  assert.equal(store.get().route.id, 's-fork');
-  assert.equal(f.win.location.hash, '#/messages/s-fork');
+  assert.deepEqual(store.get().route, { screen: 'history', id: 's-fork' }, 'a fork is no conversation: its history page');
+  assert.equal(f.win.location.hash, '#/history/s-fork');
   store.timers.clear();
 });
 
-test('Delete asks first, then the page moves to the first open conversation', async () => {
-  const f = fakeWindow({ hash: '' });
-  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })] });
+test('Delete asks first, then a history page it was on goes back to Messages', async () => {
+  const f = fakeWindow({ hash: '#/history/s2' });
+  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })], conversation: 's1' });
   const store = started(f, h);
   await h.ready();
-  assert.equal(store.get().route.id, 's1');
-  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleDetails' } });
-  f.click({ tagName: 'BUTTON', dataset: { action: 'deleteConv', conv: 's1' } });
+  assert.deepEqual(store.get().route, { screen: 'history', id: 's2' });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'deleteConv', conv: 's2' } });
   assert.deepEqual(h.posted.filter(p => p[0] === '/data/sessions/delete'), [], 'nothing until the second press');
-  assert.match(f.html(), /Yes, delete/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
   await settle();
-  assert.deepEqual(h.posted.find(p => p[0] === '/data/sessions/delete')[1], { sessionId: 's1' });
-  assert.equal(store.get().route.id, 's2');
-  assert.equal(store.get().conversations.some(c => c.id === 's1'), false);
+  assert.deepEqual(h.posted.find(p => p[0] === '/data/sessions/delete')[1], { sessionId: 's2' });
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(store.get().conversations.some(c => c.id === 's2'), false);
   store.timers.clear();
 });
 
-test('Archive moves the page to the first open conversation; the archived one stays in the store', async () => {
-  const f = fakeWindow({ hash: '' });
-  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })] });
+test('Archive moves a history page it was on back to Messages; the archived one stays in the store', async () => {
+  const f = fakeWindow({ hash: '#/history/s2' });
+  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })], conversation: 's1' });
   const store = started(f, h);
   await h.ready();
-  f.click({ tagName: 'BUTTON', dataset: { action: 'archive', conv: 's1' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'archive', conv: 's2' } });
   await settle();
-  assert.deepEqual(h.posted.find(p => p[0] === '/data/sessions/archive')[1], { sessionId: 's1', archived: true });
-  assert.equal(store.get().conversations.find(c => c.id === 's1').archived, 'face');
-  assert.equal(store.get().route.id, 's2');
+  assert.deepEqual(h.posted.find(p => p[0] === '/data/sessions/archive')[1], { sessionId: 's2', archived: true });
+  assert.equal(store.get().conversations.find(c => c.id === 's2').archived, 'face');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
   store.timers.clear();
 });
 
-test('a conversation deleted elsewhere leaves the screen at the next list', async () => {
-  const f = fakeWindow({ hash: '' });
-  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })] });
+test('a session deleted elsewhere reads Not found on its page at the next list, and is read no more', async () => {
+  const f = fakeWindow({ hash: '#/history/s2' });
+  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })], conversation: 's1' });
   const store = started(f, h);
   await h.ready();
-  assert.equal(store.get().route.id, 's1');
-  h.rows.splice(0, 1);
+  assert.match(f.html(), /class="thread"/);
+  h.rows.splice(1, 1);
   await store.live.refresh();
   await settle();
-  assert.equal(store.get().route.id, 's2');
+  assert.deepEqual(store.get().route, { screen: 'history', id: 's2' });
+  assert.match(f.html(), /chan-none dim">Not found</);
   store.timers.clear();
 });
 
@@ -1607,7 +1632,7 @@ test('collapsing a group hides its rows and the prefs remember it', async () => 
   const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })] });
   const store = started(f, h);
   await h.ready();
-  assert.equal(store.get().route.id, 's1');
+  assert.equal(store.get().tasks.conversation, 's1');
   assert.match(f.html(), /data-id="s2"/);
   f.click({ tagName: 'BUTTON', dataset: { action: 'toggleGroup', key: '__ungrouped' } });
   assert.doesNotMatch(f.html(), /data-id="s2"/, 'the collapsed group hides its other rows');
@@ -1618,20 +1643,25 @@ test('collapsing a group hides its rows and the prefs remember it', async () => 
   store.timers.clear();
 });
 
-test('a channel header opens its page and reads its overview once', async () => {
+test('an old channel link lands on its strategy page, which reads its overview once; the root lands on Messages', async () => {
   const f = fakeWindow({ hash: '' });
-  const h = host({ rows: [row('s1')] });
+  const h = host({ rows: [row('s1')], channels: [{ workspaceId: 'w1', name: 'alpha', title: 'Alpha', isRoot: false, sessionIds: [] }] });
   const store = started(f, h);
   await h.ready();
-  f.win.location.hash = '#/channel/w0';
+  f.win.location.hash = '#/channel/w1';
   f.fire('win', 'hashchange');
   await settle();
-  assert.equal(store.get().route.screen, 'channel');
-  assert.deepEqual(h.posted.filter(p => p[0] === '/data/channels/overview'), [['/data/channels/overview', { workspaceId: 'w0' }]]);
+  assert.deepEqual(store.get().route, { screen: 'strategy', id: 'alpha' });
+  assert.equal(f.win.location.hash, '#/strategy/alpha');
+  assert.deepEqual(h.posted.filter(p => p[0] === '/data/channels/overview'), [['/data/channels/overview', { workspaceId: 'w1' }]]);
   assert.match(f.html(), /<main class="main chan">/);
   assert.match(f.html(), /class="rail-rows"/, 'the list stays beside the channel page');
   store.dispatch('toggleRail');
   assert.equal(h.posted.filter(p => p[0] === '/data/channels/overview').length, 1, 'a render reads nothing');
+  f.win.location.hash = '#/channel/w0';
+  f.fire('win', 'hashchange');
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null }, 'the root is the conversation');
   store.timers.clear();
 });
 
@@ -1666,18 +1696,18 @@ test('New channel… creates the channel and selects it in Where', async () => {
 });
 
 test('the bots editor posts the ticked ids', async () => {
-  const f = fakeWindow({ hash: '#/channel/w0' });
-  const h = host({ rows: [row('s1')] });
+  const f = fakeWindow({ hash: '#/strategy/alpha' });
+  const h = host({ rows: [row('s1')], channels: [{ workspaceId: 'w1', name: 'alpha', title: 'Alpha', isRoot: false, sessionIds: [] }] });
   const store = started(f, h);
   await h.ready();
   await settle();
-  f.click({ tagName: 'BUTTON', dataset: { action: 'editRoster', which: 'bots', id: 'w0' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'editRoster', which: 'bots', id: 'w1' } });
   await settle();
   assert.deepEqual(store.get().edit.ticked, ['buffett']);
   f.fire('root', 'change', { target: { tagName: 'INPUT', type: 'checkbox', name: 'roster', value: 'drill-bear', checked: true, dataset: {} } });
   f.click({ tagName: 'BUTTON', dataset: { action: 'commitEdit' } });
   await settle();
-  assert.deepEqual(h.posted.find(p => p[0] === '/data/channels/bots')[1], { workspaceId: 'w0', bots: ['buffett', 'drill-bear'] });
+  assert.deepEqual(h.posted.find(p => p[0] === '/data/channels/bots')[1], { workspaceId: 'w1', bots: ['buffett', 'drill-bear'] });
   assert.equal(store.get().edit, null);
   store.timers.clear();
 });
@@ -1843,17 +1873,16 @@ test('Create a bot creates it and opens its page', async () => {
   store.timers.clear();
 });
 
-test("Talk to opens the bot's conversation", async () => {
+test("Talk to opens the bot's session on its history page", async () => {
   const f = fakeWindow({ hash: '#/plugin/bot:buffett' });
-  const h = host({ rows: [row('s1')] });
+  const h = host({ rows: [row('s1')], conversation: 's1' });
   const store = started(f, h);
   await h.ready();
   await settle();
   f.click({ tagName: 'BUTTON', dataset: { action: 'talkTo', id: 'buffett' } });
   await settle();
   assert.deepEqual(h.calls.find(c => c[0] === 'session/create')[1], { request: { cwd: '/r/bots/buffett/home', agentPreset: 'buffett' } });
-  assert.equal(store.get().route.screen, 'messages');
-  assert.equal(store.get().route.id, 's-bot');
+  assert.deepEqual(store.get().route, { screen: 'history', id: 's-bot' }, 'a bot session is no conversation (Task 10 retires Talk to)');
   store.timers.clear();
 });
 
@@ -1928,12 +1957,12 @@ test('Stop on a child asks first, then interrupts it', async () => {
 });
 
 test("the bots editor never offers Gravit's own composition as a bot", async () => {
-  const f = fakeWindow({ hash: '#/channel/w0' });
-  const h = host({ rows: [row('s1')] });
+  const f = fakeWindow({ hash: '#/strategy/alpha' });
+  const h = host({ rows: [row('s1')], channels: [{ workspaceId: 'w1', name: 'alpha', title: 'Alpha', isRoot: false, sessionIds: [] }] });
   const store = started(f, h);
   await h.ready();
   await settle();
-  f.click({ tagName: 'BUTTON', dataset: { action: 'editRoster', which: 'bots', id: 'w0' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'editRoster', which: 'bots', id: 'w1' } });
   await settle();
   assert.deepEqual(store.get().edit.choices.map(c => c.value), ['buffett', 'drill-bear'], 'the host presets (gravit and its kairos alias) are no bots');
   store.timers.clear();
@@ -3108,7 +3137,7 @@ test('an order the stream reports filled while its Change… sheet is open', asy
   store.timers.clear();
 });
 
-test('Run on a card opens the sheet; Escape closes it; Run sends the message, the page moves to the new conversation', async () => {
+test('Run on a card opens the sheet; Escape closes it; Run sends the message, the page moves to the new session', async () => {
   const f = fakeWindow({ hash: '' });
   const close = f.withSelector('.drawer .close-key', { tagName: 'BUTTON', presentIf: /run-sheet/ });
   const h = host({ rows: [row('s1')] });
@@ -3152,7 +3181,7 @@ test('Run on a card opens the sheet; Escape closes it; Run sends the message, th
   assert.equal(h.calls.find(c => c[0] === 'session/rename')[1].request.title, title);
   assert.equal(h.calls.find(c => c[0] === 'session/prompt')[1].request.content[0].text,
     '请只跑 Lunhui 的 theme 模块：频道 cn-market，开新运行——先按 lunhui:run 第 1 步冻结整套（index、limit-up、boards），再只写 theme。');
-  assert.deepEqual(store.get().route, { screen: 'messages', id: 's-new' });
+  assert.deepEqual(store.get().route, { screen: 'history', id: 's-new' }, 'a new session is no conversation: its history page until Task 10 sends Run to the conversation');
   assert.equal(store.get().runSheet, null);
   assert.equal(store.get().moduleRuns.theme.sessionId, 's-new');
   assert.equal(store.get().moduleRuns.theme.title, title);
@@ -3212,7 +3241,7 @@ test('after Run the card reads Running and links to the conversation; when the s
   await settle();
   f.click({ tagName: 'BUTTON', dataset: { action: 'runSheetRun' } });
   await settle();
-  assert.deepEqual(store.get().route, { screen: 'messages', id: 's-new' });
+  assert.deepEqual(store.get().route, { screen: 'history', id: 's-new' }, 'a new session is no conversation: its history page until Task 10 sends Run to the conversation');
   const d = new Date(clock.at);
   const title = `Theme · ${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   assert.deepEqual(JSON.parse(storage.getItem('gravit-face.module-runs')), { theme: { sessionId: 's-new', title, startedAt: clock.at } }, 'mirrored to storage');
@@ -3544,12 +3573,12 @@ test('a stock choice opens the drawer', async () => {
   store.timers.clear();
 });
 
-test('Open run goes to the channel page', async () => {
+test('Open run goes to the strategy page', async () => {
   const { f, store } = await choiceAnswer([]);
   assert.match(f.html(), /data-action="lunhuiOpenRun" data-id="w-cn">Open run ›/);
   f.click(f.element({ tagName: 'BUTTON', dataset: { action: 'lunhuiOpenRun', id: 'w-cn' } }));
   await settle();
-  assert.deepEqual(store.get().route, { screen: 'channel', id: 'w-cn' });
+  assert.deepEqual(store.get().route, { screen: 'strategy', id: 'cn-market' }, 'the old channel route lands on the strategy page');
   store.timers.clear();
 });
 
@@ -4104,26 +4133,23 @@ test('Enter sends; Shift+Enter does not; Enter during a composition (isComposing
   store.timers.clear();
 });
 
-test('each conversation keeps its own draft, and sending in one leaves the other\'s', async () => {
-  const f = fakeWindow({ hash: '#/messages/s1' });
+test("the conversation's draft survives a visit to a history page, where no composer is drawn, and sends to the conversation", async () => {
+  const f = fakeWindow({ hash: '#/messages' });
   const say = f.withId('say', { tagName: 'INPUT' });
-  const h = host({ rows: [row('s1', { updatedAt: 50, agentAvailable: true }), row('s2', { updatedAt: 9, agentAvailable: true })] });
+  const h = host({ rows: [row('s1', { updatedAt: 50, agentAvailable: true }), row('s2', { updatedAt: 9, agentAvailable: true })], conversation: 's1' });
   const store = await bootComposer(f, h, valueEditor);
   type(f, say, 'for A');
   f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
   await settle();
-  assert.equal(say.value, '', 'B starts empty');
-  type(f, say, 'for B');
-  send(f);
-  await settle();
-  assert.deepEqual(promptsOf(h), [['s2', 'for B']]);
-  assert.equal(say.value, '');
+  assert.deepEqual(store.get().route, { screen: 'history', id: 's2' });
+  assert.doesNotMatch(f.html(), /class="composer"/, 'no composer for another session');
   f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
   await settle();
-  assert.equal(say.value, 'for A', 'A kept its words');
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  assert.equal(say.value, 'for A', 'the conversation kept its words');
+  send(f);
   await settle();
-  assert.equal(say.value, '', 'B was sent and cleared');
+  assert.deepEqual(promptsOf(h), [['s1', 'for A']]);
+  assert.equal(say.value, '');
   store.timers.clear();
 });
 
@@ -5489,9 +5515,10 @@ test('New message with a file creates, uploads to the new conversation, then pro
 });
 
 test('New message refused for its image opens the created conversation with the whole draft and the line', async () => {
-  const f = fakeWindow({ hash: '#/messages/s1' });
+  const f = fakeWindow({ hash: '' });
   const { say, input } = composerEls(f);
-  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  // the session New message makes is the one /data/tasks names, so it opens on Messages with its composer (Task 5 retires New message)
+  const h = host({ rows: [row('s1', { agentAvailable: true })], conversation: 's-new' });
   prompting(h, () => attachmentInvalid('MODEL_DOES_NOT_SUPPORT_IMAGES'));
   const store = await bootFiles(f, h, fakeAttachments());
   f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
@@ -5501,7 +5528,7 @@ test('New message refused for its image opens the created conversation with the 
   send(f);
   await settle();
   assert.equal(promptsOf(h).length, 1);
-  assert.equal(store.get().route.id, 's-new', 'the created conversation is open');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null }, 'the created conversation is open');
   assert.equal(store.get().draft, null);
   assert.equal(say.value, 'look', 'its words');
   assert.match(f.html(), /alt="chart.png"/, 'its image');
@@ -5540,10 +5567,11 @@ const executing = (h, answer) => {
 const execsOf = h => h.calls.filter(c => c[0] === 'commands/execute').map(c => c[1]);
 
 test('a failed rename on New message opens the conversation with the whole draft, and its waiting file uploads on send', async () => {
-  const f = fakeWindow({ hash: '#/messages/s1' });
+  const f = fakeWindow({ hash: '' });
   const { say, input } = composerEls(f);
   const title = f.withId('nm-title', { tagName: 'INPUT' });
-  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  // the session New message makes is the one /data/tasks names, so it opens on Messages with its composer (Task 5 retires New message)
+  const h = host({ rows: [row('s1', { agentAvailable: true })], conversation: 's-new' });
   const call = h.call;
   h.call = async (endpoint, args) => { if (endpoint === 'session/rename') { h.calls.push([endpoint, args]); throw Object.assign(new Error('no'), { code: 'rename/failed' }); } return call(endpoint, args); };
   const att = fakeAttachments();
@@ -5556,7 +5584,7 @@ test('a failed rename on New message opens the conversation with the whole draft
   type(f, say, 'read it');
   send(f);
   await settle();
-  assert.equal(store.get().route.id, 's-new');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
   assert.equal(say.value, 'read it');
   assert.match(f.html(), /prices.csv/);
   assert.equal(att.uploads.length, 0, 'nothing uploaded yet');
@@ -5688,9 +5716,10 @@ test('a restage that ends off screen says the files are up and the message was n
 });
 
 test('New message refused for its image keeps a chip and a file beside it', async () => {
-  const f = fakeWindow({ hash: '#/messages/s1' });
+  const f = fakeWindow({ hash: '' });
   const { say, input } = composerEls(f);
-  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  // the session New message makes is the one /data/tasks names, so it opens on Messages with its composer (Task 5 retires New message)
+  const h = host({ rows: [row('s1', { agentAvailable: true })], conversation: 's-new' });
   prompting(h, () => attachmentInvalid('MODEL_DOES_NOT_SUPPORT_IMAGES'));
   const att = fakeAttachments();
   const store = await bootFiles(f, h, att, runsEditor);
@@ -5704,7 +5733,7 @@ test('New message refused for its image keeps a chip and a file beside it', asyn
   att.uploads[0].answer('rcpt-1');
   await settle();
   assert.equal(promptsOf(h).length, 1);
-  assert.equal(store.get().route.id, 's-new');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
   store.dispatch('toggleRail');
   assert.deepEqual(say.runs, draft, 'the words and the chip');
   assert.match(f.html(), /prices.csv/, 'the file');
@@ -6070,7 +6099,7 @@ test('each pill keeps its own focus: pill 2 stays focused across a render, and E
 // 30, drawn though its turn/start lies before the window), turn 3 at 31. Each mark is registered by its id and as a
 // .turn-mark, found while its id is drawn, with a fixed offsetTop and its scrollIntoView calls recorded
 const outline = [{ turn: 1, seq: 9, prompt: 'first ask', response: 'first reply' }, { turn: 2, seq: 29, prompt: 'second ask', response: '' }, { turn: 3, seq: 31, prompt: 'third ask', response: 'third reply' }];
-function railRig({ pages, rows = [row('s1', { agentAvailable: true })], turns = outline } = {}) {
+function railRig({ pages, rows = [row('s1', { agentAvailable: true })], turns = outline, tasks = [] } = {}) {
   const f = fakeWindow({ hash: '' });
   const thread = f.withId('thread', { clientHeight: 400 });
   // #turn-rail as the browser has it: what the page last drew in it, until the rail alone is written after that render
@@ -6092,7 +6121,7 @@ function railRig({ pages, rows = [row('s1', { agentAvailable: true })], turns = 
     marks[turn] = el;
   }
   const book = { 30: { records: [said(10), said(11)], hasMore: true }, 10: { records: [said(2), said(3)], hasMore: false } };
-  const h = host({ rows, pages: { s1: pages ?? (req => book[req.beforeSeq] ?? { records: [], hasMore: false }) } });
+  const h = host({ rows, conversation: 's1', tasks, pages: { s1: pages ?? (req => book[req.beforeSeq] ?? { records: [], hasMore: false }) } });
   const snap = async () => {
     h.streams.find(s => s.name === 'session/follow' && s.args.request.address.sessionId === 's1').cbs.onItem({ type: 'snapshot', header: {}, cursor: 40, hasMore: true, records: [said(30), said(32)], projections: { asOfSeq: 40, values: { turnOutline: turns } } });
     await settle();
@@ -6244,9 +6273,9 @@ test('an unloaded tick whose read fails stops pulsing', async () => {
   store.timers.clear();
 });
 
-test('a conversation opened while the pages load clears the pulse and the jump', async () => {
+test("a task's page opened while the pages load clears the pulse and the jump", async () => {
   const waits = [];
-  const { f, thread, rail, marks, h, book, snap } = railRig({ rows: [row('s1', { agentAvailable: true }), row('s2', { agentAvailable: true, updatedAt: 4 })], pages: req => new Promise(r => waits.push(() => r(book[req.beforeSeq]))) });
+  const { f, thread, rail, marks, h, book, snap } = railRig({ rows: [row('s1', { agentAvailable: true }), row('s2', { agentAvailable: true, updatedAt: 4 })], tasks: [taskRow('s2')], pages: req => new Promise(r => waits.push(() => r(book[req.beforeSeq]))) });
   const store = started(f, h);
   await h.ready();
   await snap();
@@ -6258,7 +6287,7 @@ test('a conversation opened while the pages load clears the pulse and the jump',
   h.streams.filter(s => s.name === 'session/follow' && s.args.request.address.sessionId === 's2').at(-1).cbs.onItem({ type: 'snapshot', header: {}, cursor: 9, hasMore: false, records: [said(5)], projections: { asOfSeq: 9, values: {} } });
   await settle();
   while (waits.length) { waits.shift()(); await settle(); }
-  assert.equal(store.get().route.id, 's2');
+  assert.deepEqual(store.get().route, { screen: 'task', id: 's2' });
   assert.doesNotMatch(f.html(), /pulse/);
   assert.doesNotMatch(rail.innerHTML, /pulse/);
   assert.equal(marks[1].scrolled.length, 0, 'no jump on the other conversation');
@@ -6484,15 +6513,16 @@ async function jobsRig({ holds = ms => ms === 1000 || ms === 2000 || ms === 10_0
 }
 const goTo = async (f, hash) => { f.win.location.hash = hash; await settle(); };
 
-test('opening a conversation watches its jobs, another conversation moves the watch, Markets stops it', async () => {
+test("Messages watches the conversation's jobs; a history page and Markets stop the watch", async () => {
   const { f, h, store } = await jobsRig();
-  assert.equal(store.get().route.id, 's1');
+  assert.equal(store.get().tasks.conversation, 's1');
   assert.deepEqual(liveList(h).map(s => s.args), [{ request: { sessionId: 's1' } }]);
-  await goTo(f, '#/messages/s2');
-  assert.deepEqual(liveList(h).map(s => s.args), [{ request: { sessionId: 's2' } }], "s1's list cancelled, s2's open");
-  assert.equal(jobLists(h).length, 2);
-  await goTo(f, '#/messages/s2');
-  assert.equal(jobLists(h).length, 2, 'the same conversation keeps its stream');
+  await goTo(f, '#/messages/s1');
+  assert.equal(jobLists(h).length, 1, 'the conversation keeps its stream');
+  await goTo(f, '#/history/s2');
+  assert.deepEqual(liveList(h), [], 'a history page watches none');
+  await goTo(f, '#/messages');
+  assert.deepEqual(liveList(h).map(s => s.args), [{ request: { sessionId: 's1' } }], 'back on Messages the watch opens again');
   await goTo(f, '#/markets');
   assert.deepEqual(liveList(h), [], 'off Messages nothing is watched');
   assert.equal(store.get().jobs.convId, null);

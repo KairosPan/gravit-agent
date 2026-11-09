@@ -9,11 +9,12 @@ import { sayOf } from '../../client/js/i18n/words.js';
 
 const conv = (id, over = {}) => ({ id, title: 'T', kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: true, updatedAt: 5, created: null, messages: [], loaded: true, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
 
-// a store on screen at conversation `id`, a recording host whose answers are canned per endpoint
+// a store on Messages with `open` the conversation, a recording host whose answers are canned per endpoint
 function rig({ answers = {}, posts = {}, convs = [conv('s1')], open = 's1', activate } = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   store.dispatch('hostList', { conversations: convs });
-  store.dispatch('nav', { screen: 'messages', id: open });
+  store.dispatch('tasksLoaded', { conversation: open, tasks: [], at: 1 });
+  store.dispatch('nav', { screen: 'messages', id: null });
   const calls = [];
   const call = async (endpoint, args) => {
     calls.push([endpoint, args]);

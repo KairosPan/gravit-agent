@@ -6,6 +6,7 @@
 import { bucketFor, ARCHIVED_KEY, DESK_KEY, UNGROUPED_KEY, BOT_KEY_PREFIX } from '../wire/grouping.js';
 import { isDeskPreset } from '../wire/speaker.js';
 import { t } from '../i18n/words.js';
+import { onScreenId } from './sessions.js';
 
 // a channel goes by one name everywhere: its display title (the registry's, the operator's to change), else its name
 export const channelLabel = ch => (typeof ch.title === 'string' && ch.title !== '' ? ch.title : ch.name);
@@ -52,7 +53,7 @@ export function groupsOf(state) {
     ...live.filter(g => !g.isRoot && !g.conversations.length).sort((a, b) => a.label.localeCompare(b.label)),
     ...all.filter(g => g.kind === 'archived'),
   ];
-  const current = state.route?.screen === 'messages' ? state.route.id : null;
+  const current = state.route ? onScreenId(state) : null;
   return order.map(g => {
     const set = state.collapsed?.[g.key];
     const collapsed = typeof set === 'boolean' ? set : g.kind === 'archived';

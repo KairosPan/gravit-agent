@@ -70,3 +70,11 @@ export const firstOpen = conversations => (Array.isArray(conversations) ? conver
 
 // the host moved it after the operator last looked
 export const unreadOf = conv => conv.updatedAt > (conv.lastSeen ?? 0);
+
+// the session a route reads (plan 2 of one entry): the conversation on Messages (none while an old link there waits to land),
+// the task's or the history session's on theirs; none on any other screen
+export function onScreenId(state) {
+  const r = state.route;
+  if (r.screen === 'messages') return r.id || r.channel ? null : state.tasks?.conversation ?? null;
+  return (r.screen === 'task' || r.screen === 'history') && r.id ? r.id : null;
+}

@@ -26,7 +26,8 @@ export const overview = (over = {}) => ({
   allBots: [{ id: 'buffett', name: 'Buffett Type', listed: true }, { id: 'drill-bear', name: 'Bear', listed: true }],
   ...over,
 });
-const listedOn = (id = 'w1') => R.nav(R.hostList(emptyState(), { conversations: [], channels: [alpha] }), { screen: 'channel', id });
+// a strategy's page, by its name (#/strategy/<name>); the page reads its channel by the workspace the name has
+const listedOn = (name = 'alpha') => R.nav(R.hostList(emptyState(), { conversations: [], channels: [alpha] }), { screen: 'strategy', id: name });
 const on = (data, status = 'ready') => {
   const s = listedOn();
   if (status === 'loading') return R.channelLoading(s, { workspaceId: 'w1' });
@@ -83,7 +84,7 @@ test('loading, unavailable with Retry, a stale page after a failed re-read, not 
   const st = renderChannelScreen(R.channelFailed(on(overview()), { workspaceId: 'w1', at: NOW + 60_000 }), NOW);
   assert.match(st, /Momentum holds after costs/, 'a failed re-read keeps the page');
   assert.match(st, /As of 10:00 · stale/); assert.match(st, /data-action="channelRetry"/);
-  assert.match(renderChannelScreen(listedOn('w9'), NOW), /Channel not found/);
+  assert.match(renderChannelScreen(listedOn('nope'), NOW), /Channel not found/);
   const missing = R.channelFailed(on(null, 'loading'), { workspaceId: 'w1', at: NOW, missing: true });
   assert.match(renderChannelScreen(missing, NOW), /Channel not found/);
 });

@@ -3,12 +3,13 @@
 import { createStore } from './store.js';
 import { chordOf } from './keys.js';
 import { reducers } from './reducers/index.js';
+import { landingOf } from './reducers/messages.js';
 import { emptyState } from './data/empty.js';
 import { sizeOf, cleanFont, applyPrefs } from './prefs.js';
 import { langOf, tableOf, htmlLangOf } from './i18n/langs.js';
 import { parseHash, toHash } from './router.js';
 import { renderRail } from './render/rail.js';
-import { renderMessagesScreen, currentConversation } from './render/messages.js';
+import { renderMessagesScreen, renderSessionPage, renderHistoryList, currentConversation } from './render/messages.js';
 import { renderMarketsScreen } from './render/markets.js';
 import { renderSettings, renderAccountScreen, renderSellMany } from './render/account.js';
 import { renderShortcuts } from './render/shortcuts.js';
@@ -70,7 +71,7 @@ import { startTrade } from './host/trade.js';
 import { startSearch } from './host/search.js';
 import { tradeableOf } from './host/trade-view.js';
 import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
-import { firstOpen } from './host/sessions.js';
+import { onScreenId } from './host/sessions.js';
 import { createAccountStream } from './wire/account-stream.js';
 import { createMarketStream } from './wire/market-stream.js';
 import { discoverWallets, proveWallet } from './wire/wallet.js';
@@ -173,11 +174,12 @@ export function makeStore(storage, now = Date.now()) {
   return createStore({ initial: initialState(storage, now), reducers, storage, key: PREFS_KEY, accept: () => false, persist: prefsOf });
 }
 
-// Messages (with a channel's page), Markets, Trade, Discover (with an item's page) and Account are served; every other screen
-// the router knows folds to Messages
-const SCREENS = new Set(['messages', 'channel', 'markets', 'trade', 'discover', 'plugin', 'module', 'account']);
+// Messages (with a task's page, history and a strategy's page), Markets, Trade, Discover (with an item's page) and Account are
+// served; every other screen the router knows folds to Messages
+const SCREENS = new Set(['messages', 'task', 'history', 'strategy', 'markets', 'trade', 'discover', 'plugin', 'module', 'account']);
 export const routeOf = hash => { const r = parseHash(hash); return SCREENS.has(r.screen) ? r : { screen: 'messages', id: null }; };
-// route by the address bar; a normalised route says which hash the bar should show instead
+// route by the address bar; a normalised route says which hash the bar should show instead. An old link lands where nav's
+// landing puts it (reducers/messages.js landingOf): a session on the conversation, its task or history, a channel on its strategy
 export function settle(store, hash) {
   const next = store.dispatch('nav', routeOf(hash)).route;
   const h = toHash(next);
@@ -494,7 +496,8 @@ export function boot(win, host = {}) {
   // again first, so the row is there when the page moves to it, then followed
   const runSheet = startRunSheet({
     store, actions, readListing, now,
-    go: async route => { await live.refresh(); go(route); live.promote(route.id); },
+    // (a session that lands on history is paged there, never followed: plan 2 of one entry)
+    go: async route => { await live.refresh(); go(route); if (store.get().route.screen !== 'history') live.promote(route.id); },
   });
   // the list's search: the box's words in the store at once, the face's index read once the box is quiet
   const convSearch = startSearch({ store, getJson, timers });
@@ -516,6 +519,8 @@ export function boot(win, host = {}) {
   const draftKey = s => (s.draft ? 'new' : currentConversation(s)?.id ?? 'empty');
   // Messages is the one screen with a composer (a conversation, New message, the empty state)
   const composerOn = s => s.route.screen === 'messages';
+  // the session the screen draws a transcript of: the conversation on Messages, a task's or a history session's on theirs
+  const shownConv = s => { const id = onScreenId(s); return id ? s.conversations.find(c => c.id === id) ?? null : null; };
   // a conversation's draft, whose files upload to it as they are added; New message's (and the empty state's) wait (D10)
   const isConvKey = key => key !== 'new' && key !== 'empty';
   const runsOf = key => drafts.get(key)?.runs ?? [];
@@ -563,7 +568,7 @@ export function boot(win, host = {}) {
   let openedId = null;   // the conversation the live layer was told to open
   let detailsAt = null;  // the Details section the next render scrolls into view (a pill names Usage), then cleared
   let was = null;        // the route follow() last settled: entering a screen, a tab or a market's page reads what it draws
-  let wanted = null;     // a deep link the list has not answered yet
+  let overviewWs = null; // the workspace of the strategy page on screen whose overview follow() asked for
   let searchTimer = null;   // the Markets search waiting for the box to be quiet
   let tradeTimer = null;    // Trade's search, the same
   let ticketAsked = null;   // a market page's Buy or Sell on its way to Trade: the side follow() opens the ticket with
@@ -634,7 +639,7 @@ export function boot(win, host = {}) {
     const note0 = doc.getElementById('composer-note');
     const noteText = sayOf(notes.get(key));
     // the conversation on screen: another one (or none) than at the last render masks every key again
-    const open = s.route.screen === 'messages' ? currentConversation(s) : null;
+    const open = shownConv(s);
     const threadSig = open ? open.id : null;
     const threadStart = open?.window?.start ?? null;
     // the anchor seq stays on the message it marked while earlier pages land above it (the start falls or holds); a new
@@ -647,7 +652,9 @@ export function boot(win, host = {}) {
 
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
-      : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
+      : s.route.screen === 'strategy' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
+      : s.route.screen === 'history' && !s.route.id ? renderHistoryList(s, now())
+      : s.route.screen === 'task' || s.route.screen === 'history' ? renderSessionPage(s, now(), { revealed, anchor: anchorSeq, rail })
       : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail });
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
     const drawers = (s.settingsOpen ? renderSettings(s, { mac }) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (!sheetUp(s) && s.identity?.connect ? renderConnectDrawer(s) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
@@ -956,14 +963,22 @@ export function boot(win, host = {}) {
     follow();
   }
 
+  // the session on screen the live layer has yet to open: a history session is paged only, never followed (Task 7 of plan 2 reads
+  // it cold), so a live one is left as it stands
+  const opens = s => { const conv = shownConv(s); return !!conv && conv.id !== openedId && !(s.route.screen === 'history' && conv.live); };
+  // a strategy page's channel, by its name, once the channels are read (the root is no strategy)
+  const strategyWs = s => (s.route.screen === 'strategy' ? s.channels.find(c => c.name === s.route.id && !c.isRoot)?.workspaceId ?? null : null);
+  // what an answer of the list or the tasks leaves follow() to do
+  const followOwed = s => toHash(landingOf(s, s.route)) !== toHash(s.route) || opens(s) || (strategyWs(s) !== null && strategyWs(s) !== overviewWs)
+    || (openedId !== null && !shownConv(s) && !s.conversations.some(c => c.id === openedId));
+
   // route by the address bar, then tell the live layer which conversation is on screen
   function follow() {
-    const asked = routeOf(win.location.hash);
     const fixed = settle(store, win.location.hash);
     if (fixed) win.history.replaceState(null, '', fixed);
     const r = store.get().route;
     // ⌥⌘K's focus waits only for the list it was asked on: a route without one forgets it
-    if (r.screen !== 'messages' && r.screen !== 'channel') searchFocus = false;
+    if (!['messages', 'task', 'history', 'strategy'].includes(r.screen)) searchFocus = false;
     showMarkets();
     if (r.screen === 'markets' && was?.screen !== 'markets') readHiddenMarkets();
     showAccount();
@@ -998,7 +1013,10 @@ export function boot(win, host = {}) {
       pickTicket(r.id, ticketAsked?.id === r.id ? { side: ticketAsked.side } : {});
     }
     showTrade();
-    if (r.screen === 'channel' && !(was?.screen === 'channel' && was.id === r.id)) void channels.overview(r.id);
+    // a strategy's page reads its channel's overview, by the workspace its name has (once the channels are read)
+    const ws = strategyWs(store.get());
+    if (ws && ws !== overviewWs) void channels.overview(ws);
+    overviewWs = ws;
     const inDiscover = route => route?.screen === 'discover' || route?.screen === 'plugin' || route?.screen === 'module';
     if (inDiscover(r) && !inDiscover(was)) void discover.load();
     if (r.screen === 'plugin' && !(was?.screen === 'plugin' && was.id === r.id)) {
@@ -1008,16 +1026,16 @@ export function boot(win, host = {}) {
     if (r.screen === 'module' && !(was?.screen === 'module' && was.id === r.id)) void modules.latestArtifact(r.id);
     if (r.screen === 'discover' && r.id === 'create' && !(was?.screen === 'discover' && was.id === 'create')) void discover.modelChoices();
     was = r;
-    // a deep link the list does not carry yet waits for it
-    if (asked.screen === 'messages' && asked.id && asked.id !== 'new' && !store.get().conversations.some(c => c.id === asked.id)) wanted = asked.id;
-    // the jobs of the conversation on Messages; no screen else watches any
-    jobs.watch(r.screen === 'messages' && r.id && r.id !== 'new' ? r.id : null);
-    if (r.screen === 'messages' && r.id && r.id !== 'new' && r.id !== openedId) {
-      openedId = r.id;
-      live.open(r.id);
-      if (!limitsRead) void attachments.readLimits(r.id).then(ok => { if (ok === true) limitsRead = true; });
-    } else if (r.screen === 'messages' && !r.id && openedId && !store.get().conversations.some(c => c.id === openedId)) {
-      // the last open conversation went (deleted) and nothing took its place: stop reading it
+    // the session on screen: Messages opens the conversation (its jobs watched), a task's page the worker's, a history page
+    // its session paged — never followed (Task 7 of plan 2 reads it cold); one the list does not carry yet waits for it
+    const conv = shownConv(store.get());
+    jobs.watch(r.screen === 'messages' && conv ? conv.id : null);
+    if (opens(store.get())) {
+      openedId = conv.id;
+      live.open(conv.id);
+      if (!limitsRead) void attachments.readLimits(conv.id).then(ok => { if (ok === true) limitsRead = true; });
+    } else if (!conv && openedId && !store.get().conversations.some(c => c.id === openedId)) {
+      // the last open session went (deleted) and nothing took its place: stop reading it
       openedId = null;
       live.leave();
     }
@@ -1083,10 +1101,10 @@ export function boot(win, host = {}) {
     if (e?.kind === 'rename' && store.get().edit === null) void actions.rename(e.convId, values.title);
   }
 
-  // the conversation on screen went away (archived or deleted): the first open one takes its place
+  // the session on screen went away (archived or deleted): a task's or a history page goes back to Messages
   function leaveIfOpen(id) {
     const s = store.get();
-    if (s.route.screen === 'messages' && s.route.id === id) go({ screen: 'messages', id: firstOpen(s.conversations)?.id ?? null });
+    if (s.route.screen !== 'messages' && onScreenId(s) === id) go({ screen: 'messages', id: null });
   }
   async function archiveNow(id, archived) {
     if (!(await actions.archive(id, archived))) return;
@@ -1723,8 +1741,8 @@ export function boot(win, host = {}) {
     // again. One read of each a call; a stored line is a said and needs none. A Run's title is the table's at its creation
     reword: () => {
       void live.refresh();
-      const r = store.get().route;
-      if (r.screen === 'messages' && typeof r.id === 'string' && r.id !== 'new' && r.id === openedId) live.open(r.id);
+      const id = onScreenId(store.get());
+      if (id !== null && id === openedId) live.open(id);
       store.dispatch('lunhuiForgetFailed');
     },
     // a composed answer's view that could not be read: forget it, and the render asks again
@@ -2066,7 +2084,7 @@ export function boot(win, host = {}) {
     // a key's eye in the operator's bubble shows or hides it (display only); its id keeps the focus on it as its label flips
     // (a reveal is lost when an optimistic bubble is re-keyed to its seq id: D26 accepts it)
     toggleSecret: el => {
-      const open = currentConversation(store.get());
+      const open = shownConv(store.get());
       const id = el.dataset.secret ?? '';
       const cut = id.lastIndexOf('-');
       if (!open || cut < 0) return;
@@ -2274,9 +2292,8 @@ export function boot(win, host = {}) {
       doc.getElementById('cq')?.focus();
       return;
     }
-    const lastOpen = s.lastConv && s.conversations.some(c => c.id === s.lastConv && !c.archived) ? s.lastConv : null;
     searchFocus = true;
-    go({ screen: 'messages', id: lastOpen ?? firstOpen(s.conversations)?.id ?? null });
+    go({ screen: 'messages', id: null });
     store.dispatch('setListOpen', true);
     doc.getElementById('cq')?.focus();
   }
@@ -2420,13 +2437,11 @@ export function boot(win, host = {}) {
     const otherClosed = type === 'sheetClose' && sheetKind !== 'order';
     sheetKind = s.sheet?.kind ?? null;
     if (type === 'ownerStanding' || otherClosed) schedule(resumeTicket, 0);
-    if (type !== 'hostList') return;
-    void tasks.refresh();
-    // the list answered a deep link, or there was no conversation on screen: open one
-    if (wanted && s.conversations.some(c => c.id === wanted)) { const id = wanted; wanted = null; go({ screen: 'messages', id }); }
-    // the conversation on screen left the list (deleted here or in another tab)
-    else if (s.route.screen === 'messages' && s.route.id && s.route.id !== 'new' && !s.conversations.some(c => c.id === s.route.id)) go({ screen: 'messages', id: firstOpen(s.conversations)?.id ?? null });
-    else if (s.route.screen === 'messages' && s.route.id === null && firstOpen(s.conversations)) go({ screen: 'messages', id: firstOpen(s.conversations).id });
+    if (type !== 'hostList' && type !== 'tasksLoaded' && type !== 'tasksOff' && type !== 'tasksFailed') return;
+    if (type === 'hostList') void tasks.refresh();
+    // the list or the tasks answered: an old link waiting on them lands, the session on screen the list now carries opens (or,
+    // gone from it, is let go), a strategy page whose channel is now known reads it — each once, by follow()
+    if (followOwed(s)) follow();
   });
   // a module's Run reads Running while its conversation runs, and settles on the listing when it stops
   modules.trackRuns();

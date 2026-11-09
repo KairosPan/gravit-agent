@@ -6,7 +6,7 @@ import { icon } from '../icons.js';
 import { shortcut, chordLabel } from '../keys.js';
 import { rowTime } from '../time.js';
 import { needsAnswer } from '../messages.js';
-import { unreadOf, firstOpen } from '../host/sessions.js';
+import { unreadOf, onScreenId } from '../host/sessions.js';
 import { worthOf, cardsOf } from '../host/account-view.js';
 import { money } from '../wire/account-model.js';
 import { avatar } from './avatars.js';
@@ -16,6 +16,9 @@ import { maskExcerpt } from '../mask.js';
 import { titleMatches, mergeResults, highlightRuns, searchPhase, moreThanTwenty, spoken, spokenLine } from '../host/search-view.js';
 
 const NAME = { gravit: HOST_NAME, system: '' };
+// the screens the second level stands beside: Messages and the pages a session or a strategy opens on
+const LISTED = new Set(['messages', 'task', 'history', 'strategy']);
+
 // a bot's display name comes with the list (/data/bots.json); an unknown sender keeps its id
 export function senderName(from, state) {
   if (from === 'you') return t('list.you');
@@ -29,7 +32,7 @@ export function senderName(from, state) {
 export function previewOf(conv, state = null) {
   const m = conv.messages.findLast(spoken);
   const read = typeof conv.preview === 'string' && conv.preview !== '' ? conv.preview : null;
-  const onScreen = state?.route?.screen === 'messages' && state.route.id === conv.id;
+  const onScreen = !!state?.route && onScreenId(state) === conv.id;
   if (read && !(onScreen && m)) return read;
   if (!m) return '';
   const who = m.from === 'you' ? '' : senderName(m.from, state);
@@ -39,7 +42,7 @@ export function previewOf(conv, state = null) {
 }
 
 function row(conv, state, now) {
-  const current = state.route.screen === 'messages' && state.route.id === conv.id;
+  const current = onScreenId(state) === conv.id;
   const pin = conv.archived ? '' : `<button type="button" class="pin-key" data-action="${conv.pinned ? 'unpin' : 'pin'}" data-conv="${esc(conv.id)}" aria-label="${conv.pinned ? th('list.unpin') : th('list.pin')}" id="pin-${esc(conv.id)}">${icon('pin', 14, 2)}</button>`;
   return '<div class="row-wrap">' +
     `<a${attrs({ class: cls('row', current && 'current'), 'aria-current': current ? 'page' : null, href: `#/messages/${conv.id}`, 'data-action': 'open', 'data-id': conv.id })}>` +
@@ -73,15 +76,12 @@ export function renderNav(state) {
   const { screen } = state.route;
   const mini = !!state.railCollapsed;
   const waiting = state.conversations.filter(c => c.messages.some(needsAnswer)).length;
-  // the last one open, unless it has since been archived; else the first open one
-  const last = state.lastConv && !state.conversations.some(c => c.id === state.lastConv && c.archived) ? state.lastConv : null;
-  const messagesHref = `#/messages/${screen === 'messages' && state.route.id && state.route.id !== 'new' ? state.route.id : last ?? firstOpen(state.conversations)?.id ?? ''}`;
   const cards = cardsWaiting(state);
   return `<nav class="${cls('rail', mini && 'mini')}" aria-label="${esc(HOST_NAME)}">
   <div class="brand">${avatar('gravit', 28)}<span class="brand-name">${esc(HOST_NAME)}<span class="brand-caption">${th('nav.workspace')}</span></span>` +
     `<button type="button" class="rail-toggle" data-action="toggleRail" aria-expanded="${mini ? 'false' : 'true'}" aria-label="${mini ? th('nav.expand') : th('nav.collapse')}">${icon(mini ? 'chevRight' : 'chevLeft', 16, 2.2)}</button></div>
   <div class="rail-group">
-    ${navItem(messagesHref, 'chat', t('nav.messages'), screen === 'messages' || screen === 'channel', mini, waiting)}
+    ${navItem('#/messages', 'chat', t('nav.messages'), LISTED.has(screen), mini, waiting)}
     ${navItem('#/markets', 'markets', t('nav.markets'), screen === 'markets', mini)}
     ${navItem('#/trade', 'trade', t('nav.trade'), screen === 'trade', mini)}
     ${navItem('#/discover', 'compass', t('nav.discover'), screen === 'discover' || screen === 'plugin' || screen === 'module', mini)}
@@ -96,7 +96,7 @@ export function renderNav(state) {
 // a group's head: the collapse key, then the channel's name as a link to its page (a bot's or the other groups' as text)
 function groupHead(g, state) {
   const label = g.collapsed ? t('list.group.expand', { name: g.label }) : t('list.group.collapse', { name: g.label });
-  const here = state.route.screen === 'channel' && state.route.id === g.workspaceId;
+  const here = state.route.screen === 'strategy' && (state.channels ?? []).some(c => c.workspaceId === g.workspaceId && c.name === state.route.id);
   const name = g.kind === 'channel'
     ? `<a${attrs({ class: cls('grp-name', here && 'current'), 'aria-current': here ? 'page' : null, href: `#/channel/${encodeURIComponent(g.workspaceId)}` })}>${esc(g.label)}</a>`
     : `<span class="grp-name">${esc(g.label)}</span>`;
@@ -147,7 +147,7 @@ function results(state, now) {
 // the second level, open on Messages: the new-message key on top, the search box, then the groups (host/list-view.js), each
 // its head and its rows, newest first — or, while a query stands, its results in their place
 export function renderList(state, now, { mac = true } = {}) {
-  if (state.route.screen !== 'messages' && state.route.screen !== 'channel') return '';
+  if (!LISTED.has(state.route.screen)) return '';
   const query = state.search?.query ?? '';
   const opened = !!state.listOpen;
   const head = `<aside class="list" data-list-open="${opened}" aria-label="${th('list.title')}"><div class="list-head"><h2 class="list-title">${th('list.title')}</h2>` +

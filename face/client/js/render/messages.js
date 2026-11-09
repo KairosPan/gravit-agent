@@ -4,13 +4,13 @@ import { esc, attrs, cls } from '../html.js';
 import { t, th, thn, sayOf, rawHtml } from '../i18n/words.js';
 import { icon } from '../icons.js';
 import { maskExcerpt } from '../mask.js';
-import { fmtDate } from '../time.js';
+import { fmtDate, rowTime } from '../time.js';
 import { avatar, cluster } from './avatars.js';
 import { renderThread, railHtml } from './thread.js';
 import { senderName } from './rail.js';
 import { HOST_NAME } from '../wire/speaker.js';
 import { kv, inlineEdit, confirmPair } from './controls.js';
-import { firstOpen } from '../host/sessions.js';
+import { onScreenId } from '../host/sessions.js';
 import { needsAnswer } from '../messages.js';
 import { childrenOf } from '../host/children-view.js';
 import { channelLabel } from '../host/list-view.js';
@@ -18,9 +18,11 @@ import { renderMenu, menuAria, filesRail } from '../composer/view.js';
 import { statsView, pillsText, durationText, clockText } from '../host/turns-view.js';
 import { jobsView, metaLine, isLive } from '../host/jobs-view.js';
 
+// the conversation Messages writes to (plan 2 of one entry): the one /data/tasks names, once the list carries it; none while
+// it is unknown (the tasks loading, off or failed) or on any other screen, so no composer is ever bound to another session
 export function currentConversation(state) {
-  const id = state.route.screen === 'messages' ? state.route.id : null;
-  return state.conversations.find(c => c.id === id) ?? firstOpen(state.conversations);
+  const id = state.route.screen === 'messages' ? onScreenId(state) : null;
+  return id ? state.conversations.find(c => c.id === id) ?? null : null;
 }
 
 // the menu's slot above the box, the note (a refusal of the draft's files), then the box: the files rail, then the input row
@@ -225,6 +227,29 @@ function earlierKey(conv) {
   const w = conv.window;
   if (!w?.hasMore) return '';
   return `<button${attrs({ class: 'btn-sm earlier-key', type: 'button', id: `earlier-${conv.id}`, 'data-action': 'earlier', 'data-conv': conv.id, 'aria-disabled': w.loading ? 'true' : null })}>${w.loading ? th('common.loading') : th('thread.earlier')}</button>`;
+}
+
+// a task's or a history session's page (#/task/<id>, #/history/<id>), read-only until Tasks 7 and 8 of plan 2 draw their own:
+// its title and its transcript — no composer, no Details, nothing that writes to the session. One the list does not carry
+// reads Loading… until the list is in, then Not found
+export function renderSessionPage(state, now, page = {}) {
+  const conv = state.conversations.find(c => c.id === state.route.id) ?? null;
+  if (!conv) {
+    const word = state.conversations.length ? th('history.notFound') : th('common.loading');
+    return `<main class="main chan"><header class="head"><h1 class="head-title">${esc(state.route.id ?? '')}</h1></header><div class="chan-body"><div class="chan-none dim">${word}</div></div></main>`;
+  }
+  return `<main class="main"><header class="head"><h1 class="head-title">${esc(maskExcerpt(conv.title))}</h1></header><div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div></div></main>`;
+}
+
+// History (#/history) until Task 7 of plan 2 draws its own: every session but the conversation and its tasks, newest first,
+// each a link to its read-only page
+export function renderHistoryList(state, now) {
+  const skip = new Set([state.tasks?.conversation, ...(state.tasks?.items ?? []).map(task => task.id)]);
+  const rows = state.conversations.filter(c => !skip.has(c.id)).sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  const body = rows.length
+    ? rows.map(c => `<a class="chan-row" href="#/history/${esc(encodeURIComponent(c.id))}"><span class="chan-row-name">${esc(maskExcerpt(c.title))}</span><span class="chan-row-meta">${c.updatedAt ? rowTime(c.updatedAt, now) : ''}</span></a>`).join('')
+    : `<div class="chan-none dim">${th('history.none')}</div>`;
+  return `<main class="main chan"><header class="head"><h1 class="head-title">${th('history.title')}</h1></header><div class="chan-body">${body}</div></main>`;
 }
 
 export function renderMessagesScreen(state, now, composer = {}, page = {}) {

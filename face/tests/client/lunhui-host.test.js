@@ -12,7 +12,8 @@ import { spoken } from './helpers/spoken.js';
 const RUN = '20261027T201627Z-6937d208';
 const conv = (id, messages) => ({ id, title: id, kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: true, updatedAt: 5, created: null, messages, loaded: true, preview: null, usage: null, thinking: null, lastSeen: 0 });
 const composed = (id, over = {}) => ({ id, seq: 1, at: 1, from: 'gravit', kind: 'composed', text: '弱势日', data: { callId: id.slice(1), strategy: 'cn-market', run: RUN, summary: '弱势日', blocks: [{ kind: 'breadth' }], choices: [], modules: ['environment', 'sentiment'], ...over } });
-const stateWith = (messages, route = { screen: 'messages', id: 'c1' }) => ({ ...emptyState(), route, conversations: [conv('c1', messages), conv('c2', [composed('p9', { run: 'other' })])] });
+// Messages with c1 the conversation /data/tasks names
+const stateWith = (messages, route = { screen: 'messages', id: null }) => ({ ...emptyState(), route, tasks: { ...emptyState().tasks, status: 'ready', conversation: 'c1' }, conversations: [conv('c1', messages), conv('c2', [composed('p9', { run: 'other' })])] });
 const storeOf = state => createStore({ initial: state, reducers: R });
 
 test('viewKey joins strategy, run and modules; viewPath encodes each value and an empty list asks modules=', () => {
@@ -35,6 +36,7 @@ test("wantedViews: the open conversation's composed messages whose view has no e
   assert.deepEqual(wantedViews(failed), [], 'a failed view waits for Retry');
   assert.deepEqual(wantedViews(R.lunhuiRetry(failed, `cn-market/${RUN}/`)).map(w => w.key), [`cn-market/${RUN}/`], 'Retry forgets it, so it is wanted again');
   assert.deepEqual(wantedViews({ ...s, route: { screen: 'markets', id: null } }), [], 'off Messages nothing is read');
+  assert.deepEqual(wantedViews({ ...s, route: { screen: 'history', id: 'c2' } }).map(w => w.run), ['other'], "a history page reads its own session's views");
   assert.deepEqual(wantedViews(stateWith([composed('p1', { modules: 'x' })])).map(w => w.modules), [[]], 'modules that are not a list ask none');
 });
 

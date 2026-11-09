@@ -73,7 +73,8 @@ const err = over => Object.assign(new Error('boom'), over);
 function actionsRig(answers = {}, convs = [conv('s1')]) {
   const store = createStore({ initial: emptyState(), reducers });
   store.dispatch('hostList', { conversations: convs });
-  store.dispatch('nav', { screen: 'messages', id: 's1' });
+  store.dispatch('tasksLoaded', { conversation: 's1', tasks: [], at: 1 });
+  store.dispatch('nav', { screen: 'messages', id: null });
   const call = async endpoint => { const a = answers[endpoint]; if (a instanceof Error) throw a; return typeof a === 'function' ? a() : a; };
   const postJson = async () => { throw err({ code: 'face/<refused>' }); };
   const actions = makeActions({ store, call, answerGate: async () => { throw err({ code: 'gate/gone' }); }, postJson, requestId: () => 'r', timeZone: () => 'UTC' });
@@ -171,7 +172,8 @@ test("the live layer's lines", async () => {
   const cold = liveRig({ call: async endpoint => (endpoint === 'session/list' ? { items: rows } : endpoint === 'session/projections' ? { values: {} } : undefined) });
   cold.opts().onReady({});
   await settle();
-  cold.store.dispatch('nav', { screen: 'messages', id: 's1' });
+  cold.store.dispatch('tasksLoaded', { conversation: 's1', tasks: [], at: 1 });
+  cold.store.dispatch('nav', { screen: 'messages', id: null });
   cold.opts().onEvent('api-session/error', ['s1', '']);
   follows(cold.line(), 'the agent failed');
 });
@@ -205,13 +207,13 @@ test("the jobs' chip and end lines, the pills, and the composer's file lines", (
 
 // app.js on a fake window: one live conversation, its mux and its uploads recorded for the test to answer
 async function appRig() {
-  const f = fakeWindow({ hash: '#/messages/s1' });
+  const f = fakeWindow({ hash: '#/messages' });
   const streams = [];
   let opts = null;
   const mux = { stream(name, args, cbs) { const st = { name, args, cbs }; streams.push(st); return { cancel() {} }; }, answer: async () => {}, close() {} };
   const rows = [{ sessionId: 's1', updatedAt: 5, agentAvailable: true, running: false, blank: false }];
   const call = async endpoint => (endpoint === 'session/list' ? { items: rows } : endpoint === 'session/projections' ? { asOfSeq: 20, values: {} } : endpoint === 'session/page' ? { records: [] } : undefined);
-  const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [], ungrouped: [], archived: [], presets: {} } : { ok: true, archived: [], deleted: [], bots: [] });
+  const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [], ungrouped: [], archived: [], presets: {} } : path === '/data/tasks' ? { ok: true, conversation: 's1', tasks: [] } : { ok: true, archived: [], deleted: [], bots: [] });
   const uploads = [];
   const attachments = {
     limits: () => DEFAULT_LIMITS, readLimits: async () => true, thumb: async () => {},
@@ -462,7 +464,7 @@ test("a channel's, Discover's, the Run sheet's and the run view's host lines as 
   const RUN = '20261027T201627Z-6937d208';
   const msg = id => ({ id, seq: 1, at: 1, from: 'gravit', kind: 'composed', text: 's', data: { strategy: 'cn-market', run: RUN, blocks: [], choices: [], modules: [id] } });
   const conv = { id: 'c1', title: 'c1', kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: true, updatedAt: 5, created: null, messages: [msg('a'), msg('b'), msg('c')], loaded: true, preview: null, usage: null, thinking: null, lastSeen: 0 };
-  const ls = createStore({ initial: { ...emptyState(), route: { screen: 'messages', id: 'c1' }, conversations: [conv] }, reducers });
+  const ls = createStore({ initial: { ...emptyState(), tasks: { ...emptyState().tasks, status: 'ready', conversation: 'c1' }, conversations: [conv] }, reducers });
   await ensureViews(ls, async path => { if (path.endsWith('=a')) return { ok: true }; if (path.endsWith('=b')) throw undefined; throw odd; });
   const errors = Object.values(ls.get().lunhui.views).map(v => v.error);
   follows(errors, ['the answer held no view', 'the view could not be read', "<no> & won't"]);

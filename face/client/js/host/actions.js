@@ -4,6 +4,7 @@
 import { randomUuid } from '../wire/api.js';
 import { isMentionText } from '../wire/room.js';
 import { needsAnswer } from '../messages.js';
+import { onScreenId } from './sessions.js';
 import { said, saidError } from '../i18n/words.js';
 
 // the status line's words for a 401, a said read when drawn
@@ -69,7 +70,7 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     const words = clean(text);
     if (!words && !attachments.length) return null;
     const s = store.get();
-    const id = s.route.screen === 'messages' ? s.route.id : null;
+    const id = s.route.screen === 'messages' ? onScreenId(s) : null;
     const conv = s.conversations.find(c => c.id === id);
     if (!conv) return null;
     try {
