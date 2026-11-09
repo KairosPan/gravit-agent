@@ -57,6 +57,23 @@ class FakeConvAgent implements AgentLike {
   }
   followup(message: MessageLike): void { this.followups.push(message); }
   cancel(...args: unknown[]): void { this.cancels.push(args); }
+  /** dsh-agent's inbox, when a test gives the agent one. */
+  inbox?: { nextTurn: MessageLike[]; nextStep: MessageLike[]; remove(id: string): boolean };
+}
+
+/** An inbox over `nextTurn`, as dsh-agent's resume rebuilds it from the durable projection. */
+function inboxOf(nextTurn: MessageLike[]): NonNullable<FakeConvAgent["inbox"]> {
+  const inbox = {
+    nextTurn,
+    nextStep: [] as MessageLike[],
+    remove(id: string): boolean {
+      const at = inbox.nextTurn.findIndex((m) => m.id === id);
+      if (at < 0) return false;
+      inbox.nextTurn.splice(at, 1);
+      return true;
+    },
+  };
+  return inbox;
 }
 
 /** A root context over one harness home's sessions: created, stored (header + permission preset), live. */
@@ -72,6 +89,8 @@ class FakeConversationTree {
   readonly disposed: string[] = [];
   readonly cwdSets: { agent: string; path: string }[] = [];
   readonly bus: FakeBus = fakeBus();
+  /** What a resumed session's inbox holds on its next-turn list: the durable projection a restart rebuilds. */
+  readonly queued = new Map<string, MessageLike[]>();
 
   /** A session on disk from an earlier boot. */
   persist(id: string, header: SessionLike["header"], preset = "workspace-write"): void {
@@ -106,6 +125,8 @@ class FakeConversationTree {
         const header = this.headers.get(options.resumeSessionId);
         if (header === undefined) throw new Error(`session "${options.resumeSessionId}" not found`);
         const agent = new FakeConvAgent(options.resumeSessionId, header);
+        const queued = this.queued.get(options.resumeSessionId);
+        if (queued !== undefined) agent.inbox = inboxOf([...queued]);
         await options.setup({}, agent);
         this.live.set(options.resumeSessionId, agent);
         return this.handle(agent);
@@ -458,6 +479,13 @@ test("a turn the operator opened stops being the operator's once a task message 
   assert.equal(handle.operatorTurn(), true, "the agent-instructions context");
   tree.bus.emit(sessionId, "user/message", { id: "m1", role: "user", content: [], source: { kind: "model-selection", form: "notice" } });
   assert.equal(handle.operatorTurn(), true, "the model-selection notice");
+  /* dsh's own mid-turn context: dsh-compaction's checkpoint, dsh-repeat-tool-reminder's REMINDER_SOURCE, dsh-plan-mode's notice */
+  tree.bus.emit(sessionId, "user/message", { id: "k1", role: "user", content: [], source: { kind: "compact-checkpoint" } });
+  assert.equal(handle.operatorTurn(), true, "the compaction checkpoint");
+  tree.bus.emit(sessionId, "user/message", { id: "k2", role: "user", content: [], source: { kind: "repeat-tool-reminder" } });
+  assert.equal(handle.operatorTurn(), true, "the repeat-tool reminder");
+  tree.bus.emit(sessionId, "user/message", { id: "k3", role: "user", content: [], source: { kind: "plan-mode", form: "notice" } });
+  assert.equal(handle.operatorTurn(), true, "the plan-mode notice");
   tree.bus.emit(sessionId, "user/message", { id: "u2", role: "user", content: [], source: { kind: "user", rpcId: "r2" } });
   assert.equal(handle.operatorTurn(), true);
   tree.bus.emit(sessionId, "user/message", { id: "t1", role: "user", content: [], source: { kind: "task", form: "report", task: "session-w" } });
@@ -519,4 +547,60 @@ test("a later ensure that finds another agent object for the session supervises 
   assert.equal(handle.operatorTurn(), true);
   tree.bus.emit(first.sessionId, "turn/end", { turn: 1, reason: { kind: "cancelled" } });
   await settle();
+});
+
+/* ---------- final review fixes ---------- */
+
+test("a folder deleted while the face runs is made again at the next turn's start, and the turn runs", async (t) => {
+  const home = await scratch("gone-mid");
+  const tree = new FakeConversationTree();
+  const lines: string[] = [];
+  const handle = install(t, deps(tree, home, lines));
+  const { sessionId } = await handle.ensure();
+  const dir = conversationDir(home);
+  await rm(dir, { recursive: true });
+  startTurn(tree.bus, sessionId, 1, { kind: "user", rpcId: "r1" });
+  await settle();
+  assert.deepEqual(tree.agent(sessionId).cancels, [], "the turn is not refused");
+  assert.ok(existsSync(dir), "the fence made the folder again");
+  tree.bus.emit(sessionId, "turn/end", { turn: 1, reason: { kind: "completed" } });
+  await settle();
+  assert.deepEqual(lines, []);
+});
+
+test("a resumed conversation idle with task messages left on its inbox sends them again, oldest first, with one line; other sources stay", async (t) => {
+  const home = await scratch("requeue");
+  const dir = conversationDir(home);
+  await appendEvent(home, { t: "2026-11-08T10:00:00.000Z", kind: "conversation", sessionId: "session-q", reason: "created" });
+  const tree = new FakeConversationTree();
+  tree.persist("session-q", { cwd: dir, agentPreset: CONVERSATION_PRESET });
+  const msg = (id: string, kind: string): MessageLike => ({ id, role: "user", content: [{ type: "text", text: id }], source: { kind } } as unknown as MessageLike);
+  tree.queued.set("session-q", [msg("task-a", "task"), msg("browser-1", "user"), msg("task-b", "task")]);
+  const lines: string[] = [];
+  const handle = install(t, deps(tree, home, lines));
+  await handle.ensure();
+  const agent = tree.agent("session-q");
+  assert.deepEqual(agent.followups.map((m) => m.id), ["task-a", "task-b"], "the task messages, sent again in order");
+  assert.deepEqual(agent.inbox!.nextTurn.map((m) => m.id), ["browser-1"], "the browser's stays where it was");
+  assert.equal(lines.length, 1, JSON.stringify(lines));
+  assert.match(lines[0]!, /conversation: session session-q .*2 task message/);
+  /* a second ensure on the live conversation sends nothing again */
+  await handle.ensure();
+  assert.equal(agent.followups.length, 2);
+  await handle.dispose();
+});
+
+test("a resumed conversation with no task message waiting sends nothing again", async (t) => {
+  const home = await scratch("requeue-none");
+  const dir = conversationDir(home);
+  await appendEvent(home, { t: "2026-11-08T10:00:00.000Z", kind: "conversation", sessionId: "session-n", reason: "created" });
+  const tree = new FakeConversationTree();
+  tree.persist("session-n", { cwd: dir, agentPreset: CONVERSATION_PRESET });
+  tree.queued.set("session-n", []);
+  const lines: string[] = [];
+  const handle = install(t, deps(tree, home, lines));
+  await handle.ensure();
+  assert.deepEqual(tree.agent("session-n").followups, []);
+  assert.deepEqual(lines, []);
+  await handle.dispose();
 });

@@ -37,7 +37,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join, relative, resolve } from "node:path";
 import { entryListSchema } from "@deepseek-ai/cordis-plugin-include";
 import { dump, load } from "js-yaml";
-import { DESK_PRESET } from "./desk-names.ts";
+import { CONVERSATION_PRESET, DESK_PRESET } from "./desk-names.ts";
 import { FORBIDDEN, HttpError, isJsonBody, isTrustedDataRequest, readBody } from "./http.ts";
 import { DEFAULT_PRESET, LEGACY_PRESET } from "./overlay.ts";
 import type { RouteRegistrar } from "./static.ts";
@@ -49,10 +49,10 @@ export const TEMPLATE = "_template";
  *  to 64 code points - kept as the face's own gate now that dsh has none. */
 export const BOT_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** Ids the grammar admits but the face refuses: the default preset and its
- *  pre-rename alias are the host, and `gravit-desk` is the desk's preset - none
- *  is ever a bot. The desk's id comes from src/desk-names.ts, a leaf that imports
+ *  pre-rename alias are the host, `gravit-desk` is the desk's preset and
+ *  `gravit-router` the conversation's - none is ever a bot. Both ids come from src/desk-names.ts, a leaf that imports
  *  nothing, so no import cycle can read it before it is set. */
-export const RESERVED_IDS: ReadonlySet<string> = new Set([DEFAULT_PRESET, LEGACY_PRESET, DESK_PRESET]);
+export const RESERVED_IDS: ReadonlySet<string> = new Set([DEFAULT_PRESET, LEGACY_PRESET, DESK_PRESET, CONVERSATION_PRESET]);
 /** The namespace of the role presets: a role's preset is `role-<id>` (src/roles.ts `rolePresetId`), which
  *  the face declares from `roles/` after boot (D20/B1). The grammar admits such an id, so a bot could take
  *  one, and the registry would then refuse the second declaration (`Duplicate agent preset`); {@link isBotId}

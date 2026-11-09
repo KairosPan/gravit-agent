@@ -17,19 +17,27 @@ import { TASK_TEXT_MAX, cut, type RelayItem } from "./task-view.ts";
 const BIN = "gravit-face";
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/** The relay's message text: the bracketed head `[task · <title> · <status>]` - every `]` and line break in the title
- * a space, so the head stays one line and one bracket - then the text, cut at {@link TASK_TEXT_MAX} characters, quoted
- * as data between `<<<task-data NONCE>>>` and `<<<end NONCE>>>` with a fresh random nonce per message, so a worker's
- * words cannot close the quote; a line of the text that starts with `[task ·` or `<<<` gets a leading space, so the text
- * cannot forge a relay's head or a fence either.
+/** `text` quoted as task data: between `<<<task-data NONCE>>>` and `<<<end NONCE>>>` lines, with a fresh random nonce
+ * per call, so a worker's words cannot close the quote; a line of the text - split at every line break, `\r`, U+2028
+ * and U+2029 included - that starts with `[task ·` or `<<<` gets a leading space, so the text cannot forge a relay's
+ * head or a fence either. Nothing is cut: the caller cuts first. The relay's message ({@link relayText}) and
+ * `task_read`'s answer (src/task-tools.ts) both quote a worker's words this way.
  * @param nonce - the fence's nonce; a fresh 16-hex-digit one when omitted (tests pass their own). */
-export function relayText(item: RelayItem, nonce: string = randomBytes(8).toString("hex")): string {
-  const title = item.title.replace(/\r\n|[\]\r\n\u2028\u2029]/g, " ");
-  const body = cut(item.text, TASK_TEXT_MAX)
+export function fenceTaskData(text: string, nonce: string = randomBytes(8).toString("hex")): string {
+  const body = text
     .split(/\r\n|\r|\n|\u2028|\u2029/)
     .map((line) => (line.startsWith("[task ·") || line.startsWith("<<<") ? ` ${line}` : line))
     .join("\n");
-  return `[task · ${title} · ${item.status}]\n<<<task-data ${nonce}>>>\n${body}\n<<<end ${nonce}>>>`;
+  return `<<<task-data ${nonce}>>>\n${body}\n<<<end ${nonce}>>>`;
+}
+
+/** The relay's message text: the bracketed head `[task · <title> · <status>]` - every `]` and line break in the title
+ * a space, so the head stays one line and one bracket - then the text, cut at {@link TASK_TEXT_MAX} characters and
+ * quoted as data ({@link fenceTaskData}).
+ * @param nonce - the fence's nonce; a fresh 16-hex-digit one when omitted (tests pass their own). */
+export function relayText(item: RelayItem, nonce?: string): string {
+  const title = item.title.replace(/\r\n|[\]\r\n\u2028\u2029]/g, " ");
+  return `[task · ${title} · ${item.status}]\n${fenceTaskData(cut(item.text, TASK_TEXT_MAX), nonce)}`;
 }
 
 /** The relays waiting for the conversation, and the pump that delivers them. */

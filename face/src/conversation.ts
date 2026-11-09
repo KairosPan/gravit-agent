@@ -13,7 +13,8 @@
  * does: a missing folder is made again, and a header that names another folder is pointed here with the working-
  * directory service's `set`.
  *
- * THE FENCE. Every turn's start is checked as the desk journal's is ({@link conversationFence}): no instruction file,
+ * THE FENCE. Every turn's start makes the folder again if it went, then is checked as the desk journal's is
+ * ({@link conversationFence}): no instruction file,
  * skill root or symlink in the folder, and no `.git` in any directory above it - a project root above would make dsh
  * read `GRAVIT.md` along the chain down to the folder. A violation cuts the turn and keeps its inbox.
  *
@@ -35,6 +36,7 @@ import {
   type DeskSessionCtxLike, type DeskTurnRecord, type SessionEventsOn,
 } from "./desk-session.ts";
 import type { AgentLike, MemberSetup, RoomDeps, SessionLike } from "./room.ts";
+import type { MessageLike } from "./room-rules.ts";
 
 const BIN = "gravit-face";
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -231,7 +233,9 @@ async function disposeQuietly(handle: Held, id: string, log: (line: string) => v
 /** The conversation as the face holds it. */
 export interface ConversationHandle {
   /** The conversation, opened once ({@link ensureConversation}) and supervised; later calls answer the one held, its
-   * folder made again if it went. Calls run one at a time. Rejects when the open does, and once disposed. */
+   * folder made again if it went (every turn's fence check makes it again too, before it looks). A conversation this
+   * call resumed, idle with `task` messages a restart left on its inbox, sends them again, with one line. Calls run one
+   * at a time. Rejects when the open does, and once disposed. */
   ensure(): Promise<{ agent: AgentLike; sessionId: string }>;
   /** The conversation held now, or `undefined` before the first ensure settles and after dispose. */
   current(): { agent: AgentLike; sessionId: string } | undefined;
@@ -246,8 +250,46 @@ export interface ConversationHandle {
 
 /** Source kinds that never make a turn someone else's: the desk's state note and dsh's own context - the
  * working-directory notice, dsh-agent-loop's runtime-context snapshot (the cwd and file policy, logged after the turn's
- * first message in every turn), dsh-agent-instructions' context and dsh-agent's model-selection notice. */
-const NOT_A_SPEAKER: ReadonlySet<string> = new Set(["desk", "working-directory", "runtime-context", "agent-instructions", "model-selection"]);
+ * first message in every turn), dsh-agent-instructions' context, dsh-agent's model-selection notice, and three that
+ * dsh logs mid-turn: dsh-compaction's `compact-checkpoint` (an automatic compaction under context pressure),
+ * dsh-repeat-tool-reminder's `repeat-tool-reminder` (its REMINDER_SOURCE) and dsh-plan-mode's `plan-mode` notice. */
+const NOT_A_SPEAKER: ReadonlySet<string> = new Set([
+  "desk", "working-directory", "runtime-context", "agent-instructions", "model-selection",
+  "compact-checkpoint", "repeat-tool-reminder", "plan-mode",
+]);
+
+/** The message source kind {@link requeueTasks} sends again: a task's relay, report or note (src/task-relay.ts). */
+const TASK_KIND = "task";
+
+/** dsh-agent's `Agent.inbox`, the next-turn list and its `remove`, as src/desk-session.ts reads it. */
+type InboxAware = { inbox?: { readonly nextTurn: readonly MessageLike[]; remove(id: string): boolean } };
+
+/**
+ * The resume's wake for the conversation: when `agent` is idle, take each `task` message waiting on its inbox's
+ * next-turn list out and send it again with `followup`, oldest first, with one line. dsh opens no turn on a resume for
+ * a message already on that list (src/desk-session.ts `requeuePending`), and the relay (src/task-relay.ts) waits for
+ * an empty inbox, so a relay left there across a restart would block every relay after it. Any other source - the
+ * browser's - stays where it is. A message `remove` says is gone was taken by a turn since: skipped, never sent twice.
+ * @returns how many it sent again.
+ */
+function requeueTasks(agent: AgentLike, sessionId: string, log: (line: string) => void): number {
+  const inbox = (agent as AgentLike & InboxAware).inbox;
+  if (inbox === undefined || agent.status !== "idle") return 0;
+  const waiting = inbox.nextTurn.filter((message) => message.source?.kind === TASK_KIND);
+  if (waiting.length === 0) return 0;
+  let sent = 0;
+  for (const message of waiting) {
+    if (!inbox.remove(message.id)) continue;
+    try {
+      agent.followup(message);
+      sent += 1;
+    } catch (err) {
+      log(`${BIN}: conversation: task message ${message.id} on session ${sessionId} could not be queued again, and is lost: ${errText(err)}`);
+    }
+  }
+  log(`${BIN}: conversation: session ${sessionId} was resumed idle with ${waiting.length} task message(s) on its inbox; ${sent} sent again`);
+  return sent;
+}
 
 /** One supervised session: its supervision and the note of who has spoken in the open turn. */
 interface Watch {
@@ -291,7 +333,11 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       sessionId,
       agent,
       deadlineMs: CONVERSATION_DEADLINE_MS,
-      fence: () => conversationFence(dir),
+      /* a folder deleted while the face runs is made again first, so the turn's working directory is there */
+      fence: async () => {
+        await mkdir(dir, { recursive: true });
+        return conversationFence(dir);
+      },
       fenceLabel: "the conversation's folder",
       onTurnEnd: (record) => {
         const line = turnEndLine(record);
@@ -358,6 +404,8 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       throw new Error("the conversation is disposed");
     }
     held = { agent: opened.agent, sessionId: opened.sessionId, watch: watch(opened.agent, opened.sessionId), ...(opened.handle === undefined ? {} : { handle: opened.handle }) };
+    /* resumed here, under supervision: what a restart left on its inbox is sent again */
+    if (!opened.created && opened.handle !== undefined) requeueTasks(opened.agent, opened.sessionId, log);
     return { agent: opened.agent, sessionId: opened.sessionId };
   };
 

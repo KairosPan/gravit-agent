@@ -484,7 +484,10 @@ test("steering a task whose strategy directory was renamed points the worker at 
   await tasks.ops.steer("w-here", "again");
   assert.equal(h.cwdSets.length, 1);
   await h.tree.clock.advance(50);
-  assert.equal((await tasks.ops.read("w-here")).text, "(pass)");
+  /* the task's result - its last turn's words, here the steer's turn's - is what task_read says */
+  const here = await tasks.ops.read("w-here");
+  assert.ok(here.text.endsWith("(pass)"), here.text);
+  assert.equal(here.text, here.view.result?.text);
 });
 
 test("a running worker the face disposes at shutdown gets one recovery note on the next boot", async () => {
@@ -541,4 +544,37 @@ test("routerEnabled is false only for FACE_ROUTER=0", () => {
   assert.equal(routerEnabled({ FACE_ROUTER: "1" }), true);
   assert.equal(routerEnabled({ FACE_ROUTER: "" }), true);
   assert.equal(routerEnabled({ FACE_ROUTER: "0" }), false);
+});
+
+/* ---------- final review fixes ---------- */
+
+test("task_read's text is the task's report when it has one, over its closing words; the closing words when it has none", async (t) => {
+  const h = await harness();
+  h.seed("w-rep", [brief("w-rep", "Rep", AT - 60_000), start(1), ...report(1, "c1", "ready", "the report itself"), said(1, "closing words"), end(1)]);
+  h.seed("w-bare", [brief("w-bare", "Bare", AT - 60_000), start(1), said(1, "only closing words"), end(1)]);
+  const tasks = await install(h);
+  t.after(() => tasks.dispose());
+  const rep = await tasks.ops.read("w-rep");
+  assert.equal(rep.view.result?.text, "the report itself");
+  assert.equal(rep.text, "the report itself");
+  assert.equal((await tasks.ops.read("w-bare")).text, "only closing words");
+});
+
+test("installRouter checks the conversation's fence once: a violation is one loud line naming it, and the face still starts", async () => {
+  const handle = (): ConversationHandle => ({
+    ensure: async () => ({ agent: {} as AgentLike, sessionId: "session-c" }), current: () => undefined, operatorTurn: () => false, dispose: async () => {},
+  });
+  const tasks = { ops: {}, ready: Promise.resolve(), dispose: async () => {} } as unknown as TasksHandle;
+  const lines: string[] = [];
+  const conv = handle();
+  const ok = await installRouter({ conversation: () => conv, tasks: () => tasks, fence: async () => "/Users/op", log: (line) => { lines.push(line); } });
+  assert.deepEqual(ok, { conversation: conv, tasks, sessionId: "session-c" }, "the face still starts with it");
+  assert.equal(lines.length, 1, JSON.stringify(lines));
+  assert.match(lines[0]!, /^gravit-face: conversation: .*REFUSE.*\/Users\/op/);
+  lines.length = 0;
+  await installRouter({ conversation: handle, tasks: () => tasks, fence: async () => undefined, log: (line) => { lines.push(line); } });
+  assert.equal(lines.length, 0, "a clean folder says nothing");
+  await installRouter({ conversation: handle, tasks: () => tasks, fence: async (): Promise<string | undefined> => { throw new Error("EACCES"); }, log: (line) => { lines.push(line); } });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0]!, /EACCES/);
 });

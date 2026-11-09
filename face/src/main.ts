@@ -33,7 +33,7 @@ import { registerSeatRoute } from "./seat.ts";
 import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
 import type { DeskConversationCtxLike } from "./desk-conversation.ts";
 import { resolveDeskRoute } from "./desk-session.ts";
-import { installConversation, type ConversationCtxLike, type ConversationHandle } from "./conversation.ts";
+import { conversationDir, conversationFence, installConversation, type ConversationCtxLike, type ConversationHandle } from "./conversation.ts";
 import { installRouter, installTasks, routerEnabled, type TasksCtxLike, type TasksHandle } from "./tasks.ts";
 import { createPhoneClient, type PhoneClient } from "./phone.ts";
 import { announceCard } from "./card-notice.ts";
@@ -491,6 +491,7 @@ if (routerEnabled(process.env)) {
       conversation: held,
       isTrusted: isTrustedDataRequest,
     }),
+    fence: () => conversationFence(conversationDir(dshHome)),
   });
   if ("sessionId" in router) {
     conversation = router.conversation;

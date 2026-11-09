@@ -3063,7 +3063,11 @@ face checks it: an instruction file (`GRAVIT.md`, `GRAVIT.local.md`), a skill ro
 `gravit-face: conversation: turn … was refused` line on stderr), keeping what is queued behind it. So
 the harness home must not sit inside a git checkout: a scratch `DSH_HOME` under the repository —
 `face/tests/tmp/…`, a worktree — cannot host the conversation; put a scratch home under the
-system's temp directory, or start the scratch face with `FACE_ROUTER=0`.
+system's temp directory, or start the scratch face with `FACE_ROUTER=0`. A home directory that is
+itself a git checkout (a dotfiles repository) refuses every turn too, since `~/.dsh` sits under it;
+the face checks the fence once at boot and says so in one loud line
+(`conversation: THE FENCE WILL REFUSE EVERY TURN … it found <path>`), and starts regardless. A
+folder deleted while the face runs is made again at the next turn's start.
 
 **Switches.** `FACE_ROUTER=0` installs neither the conversation nor its tasks (`conversation: off
 (FACE_ROUTER=0)` at boot); the `gravit-router` preset is still declared, so nothing else changes.

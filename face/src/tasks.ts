@@ -335,8 +335,9 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
       const { row } = await find(id);
       const events = await eventsOf(row);
       const view = viewOf(row, events);
-      const said = lastAssistantText(events);
-      return { view, text: cut(said !== "" ? said : view.result?.text ?? "", TASK_READ_MAX) };
+      /* the task's report first, when it has one: what it was asked for; else its closing words */
+      const reported = view.result?.text ?? "";
+      return { view, text: cut(reported !== "" ? reported : lastAssistantText(events), TASK_READ_MAX) };
     },
     async list() {
       const conv = convId();
@@ -487,13 +488,17 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
 export type RouterInstall = { conversation: ConversationHandle; tasks: TasksHandle; sessionId: string } | Record<string, never>;
 
 /**
- * The conversation and its tasks as main.ts installs them: `open.conversation()`, its `ensure()`, then
- * `open.tasks(conversation)`. A throw or rejection at any step is one line; the conversation already made is disposed
+ * The conversation and its tasks as main.ts installs them: `open.conversation()`, its `ensure()`, the fence checked
+ * once (`open.fence`, a violation one loud line), then `open.tasks(conversation)`. A throw or rejection at any step is one line; the conversation already made is disposed
  * (a failure there is one more line), and the answer is empty, so the face starts without them. Never rejects.
  */
 export async function installRouter(open: {
   conversation(): ConversationHandle;
   tasks(conversation: ConversationHandle): TasksHandle;
+  /** The conversation's fence check (src/conversation.ts `conversationFence` over its folder), run once after the
+   * ensure: a violation - a home that is itself a git checkout, a dotfiles repository - would refuse every turn, so it
+   * is one loud line at boot rather than only a line per refused turn. The face still starts. */
+  fence?: () => Promise<string | undefined>;
   log?: (line: string) => void;
 }): Promise<RouterInstall> {
   const log = open.log ?? defaultLog;
@@ -501,6 +506,16 @@ export async function installRouter(open: {
   try {
     conversation = open.conversation();
     const { sessionId } = await conversation.ensure();
+    if (open.fence !== undefined) {
+      try {
+        const violation = await open.fence();
+        if (violation !== undefined) {
+          log(`${BIN}: conversation: THE FENCE WILL REFUSE EVERY TURN of ${sessionId}: it found ${violation} (a .git above the folder, or a file planted in it); remove it, or move the harness home`);
+        }
+      } catch (err) {
+        log(`${BIN}: conversation: its fence could not be checked at boot (${errText(err)}); every turn checks it again`);
+      }
+    }
     return { conversation, tasks: open.tasks(conversation), sessionId };
   } catch (err) {
     log(`${BIN}: conversation: could not be installed (${errText(err)}); the face starts without the conversation and its tasks`);

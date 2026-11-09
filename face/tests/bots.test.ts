@@ -15,6 +15,7 @@ import {
   type BotRouteDeps,
 } from "../src/bots.ts";
 import { DESK_PRESET } from "../src/desk-preset.ts";
+import { CONVERSATION_PRESET } from "../src/desk-names.ts";
 import { HttpError } from "../src/http.ts";
 import { BOTS_ROOT } from "../src/overlay.ts";
 import { LUNHUI_TOOL_NAMES } from "../src/lunhui.ts";
@@ -48,7 +49,7 @@ test("createBot refuses both host ids and names them in its error", async () => 
   const root = await makeBotsRoot();
   for (const id of ["gravit", "kairos"]) {
     await assert.rejects(createBot(root, { id, name: "X" }),
-      (err: HttpError) => err.status === 400 && /not gravit, kairos, gravit-desk or _template/.test(err.message), id);
+      (err: HttpError) => err.status === 400 && /not gravit, kairos, gravit-desk, gravit-router or _template/.test(err.message), id);
   }
 });
 
@@ -69,9 +70,12 @@ test("gravit-desk is a reserved bot id", async () => {
   assert.equal(isBotId("gravit-desk"), false);
   assert.equal(isBotId(DESK_PRESET), false);
   assert.equal(RESERVED_IDS.has(DESK_PRESET), true);
+  /* the conversation's preset is the face's too, declared from memory */
+  assert.equal(RESERVED_IDS.has(CONVERSATION_PRESET), true);
+  assert.equal(isBotId("gravit-router"), false);
   const root = await makeBotsRoot();
   await assert.rejects(createBot(root, { id: "gravit-desk", name: "X" }),
-    (err: HttpError) => err.status === 400 && /not gravit, kairos, gravit-desk or _template/.test(err.message));
+    (err: HttpError) => err.status === 400 && /not gravit, kairos, gravit-desk, gravit-router or _template/.test(err.message));
   await mkdir(join(root, "gravit-desk"));
   await writeFile(join(root, "gravit-desk", "preset.yml"), "name: Stray\n");
   const rows = await listBots(root, async () => [{ id: "gravit" }, { id: "gravit-desk" }]);

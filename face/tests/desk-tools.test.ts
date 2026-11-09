@@ -675,7 +675,7 @@ test("a gravit-router call that carries an environment secret is denied", async 
   const dispose = installDeskGuard(root.ctx, "/repo", { env: { ROUTER_GUARD_TEST_TOKEN: SECRET }, log: () => {} });
   const refused = await dispatch(root, routerCall("mcp__market__market_quotes", { symbols: [SECRET] }));
   assert.equal(refused.ran, false);
-  assert.deepEqual(refused.decision, { kind: "deny", reason: "the desk never sends a secret: this call carries one" });
+  assert.deepEqual(refused.decision, { kind: "deny", reason: "the conversation never sends a secret: this call carries one" }, "the reason names the conversation");
   assert.equal((await dispatch(root, routerCall("mcp__market__market_quotes", { symbols: ["NVDA"] }))).ran, true, "the same call without it goes on");
   await dispose();
 });
@@ -687,4 +687,17 @@ test("the router's agent gets no desk tools: installDeskTools still equips gravi
   root.create(router.agent);
   assert.deepEqual(router.names(), []);
   assert.deepEqual(router.injected, []);
+});
+
+test("the guard's reasons name the agent it judged: the conversation for gravit-router, the desk for gravit-desk", async () => {
+  const root = fakeRoot();
+  const dispose = installDeskGuard(root.ctx, "/repo", { env: {}, log: () => {} });
+  const reason = async (exec: DeskGuardExecution): Promise<unknown> => ((await dispatch(root, exec)).decision as { reason?: unknown }).reason;
+  assert.equal(await reason(routerCall("read", { file_path: "/etc/hosts" })), "the conversation reads only inside the repository; /etc/hosts is outside it");
+  assert.equal(await reason(routerCall("read", { file_path: "/repo/.env.deepseek" })), "the conversation never reads .env.deepseek: it can hold a key");
+  assert.equal(await reason(routerCall("write", { file_path: "/repo/strategies/x/GRAVIT.md", content: "x" })),
+    "the conversation never writes GRAVIT.md: it would steer every desk turn after it");
+  assert.equal(await reason(routerCall("read", 5)), "the conversation could not check this read's path; nothing was read");
+  assert.equal(await reason(callFrom(DESK_PRESET, "read", { file_path: "/etc/hosts" })), "the desk reads only inside the repository; /etc/hosts is outside it");
+  await dispose();
 });

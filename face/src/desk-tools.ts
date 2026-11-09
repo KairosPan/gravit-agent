@@ -1075,6 +1075,15 @@ function uncheckedFor(exec: unknown): string {
  * desk's agents alone. */
 const GUARDED_PRESETS: ReadonlySet<string | undefined> = new Set([DESK_PRESET, CONVERSATION_PRESET]);
 
+/** `refusal` as the agent it judged reads it: every reason is written for the desk (`the desk never …`); for the
+ * conversation's agent, `gravit-router`, its first words name the conversation instead (`the conversation never …`).
+ * A preset not yet known - a failure before the agent was read - keeps the desk's words. */
+function spokenFor(refusal: DeskDeny, preset: string | undefined): DeskDeny {
+  return preset === CONVERSATION_PRESET && refusal.reason.startsWith("the desk ")
+    ? deny(`the conversation ${refusal.reason.slice("the desk ".length)}`)
+    : refusal;
+}
+
 /** What {@link installDeskGuard} takes beside the context and the root: `log`, where a line is written (default
  * `console.error`), and `env`, the environment the secret check takes its secrets from, once, at install (default
  * `process.env`) - both for tests; and `recordFetch`, given which the fetch record is installed and hands it each desk
@@ -1115,7 +1124,10 @@ function unrecordedLine(exec: DeskGuardExecution, error: unknown): string {
  * followed - or whose session was created as `gravit-desk` (its header's `agentPreset`, fixed then): its call gets
  * the three checks' answer, the write and the read over the session's cwd and `root`. The conversation's agents,
  * `gravit-router` (src/router-preset.ts), are judged exactly as the desk's are, by the same two reads
- * ({@link GUARDED_PRESETS}); a desk agent below means either. Anyone else's call - Gravit's workbench sessions, a
+ * ({@link GUARDED_PRESETS}); a desk agent below means either, and a deny's reason, quoted below as the desk's, opens
+ * `the conversation …` for the conversation's agent. Its reads are judged against the repository root only, as the
+ * desk's are: it cannot read its own folder, and a `grep` or `glob` with no path - its folder - is denied; harmless,
+ * since it writes nothing there. Anyone else's call - Gravit's workbench sessions, a
  * task's worker, a bot's - is handed on unjudged.
  *
  * Neither ever throws. A failure to judge - an agent whose session or cwd cannot be read, or a registry that throws
@@ -1175,11 +1187,11 @@ export function installDeskGuard(
       /* the decision stands without its line */
     }
   };
-  /** Whether `exec`'s agent is one the guard judges - the desk's or the conversation's ({@link GUARDED_PRESETS}): its
-   * preset as the registry composes it, read at the call, or the preset its session was created with. A registry that
-   * throws for a session created on a guarded preset throws on; for any other session it leaves the session's word -
-   * not a guarded one - with one line. */
-  const fromDesk = (exec: DeskGuardExecution, agent: NonNullable<DeskGuardExecution["agent"]>): boolean => {
+  /** The guarded preset `exec`'s agent is on - the desk's or the conversation's ({@link GUARDED_PRESETS}) - or
+   * `undefined` when the guard does not judge it: its preset as the registry composes it, read at the call, else the
+   * preset its session was created with. A registry that throws for a session created on a guarded preset throws on;
+   * for any other session it leaves the session's word - not a guarded one - with one line. */
+  const fromDesk = (exec: DeskGuardExecution, agent: NonNullable<DeskGuardExecution["agent"]>): string | undefined => {
     const header = agent.session.header;
     let composed: string | undefined;
     try {
@@ -1187,14 +1199,16 @@ export function installDeskGuard(
     } catch (error) {
       if (!GUARDED_PRESETS.has(header.agentPreset)) {
         tell(exec, headerLine(exec, error));
-        return false;
+        return undefined;
       }
       throw error;
     }
-    return GUARDED_PRESETS.has(composed) || GUARDED_PRESETS.has(header.agentPreset);
+    return GUARDED_PRESETS.has(composed) ? composed : GUARDED_PRESETS.has(header.agentPreset) ? header.agentPreset : undefined;
   };
   /** The guard's decision for `exec`, read afresh: `null` when the call is not its to judge, else the deny. Never throws. */
   const judge = (exec: DeskGuardExecution): DeskDeny | null => {
+    /** The guarded preset the call's agent is on, once known: a deny's reason names that agent. */
+    let preset: string | undefined;
     try {
       const name = exec?.name;
       const writes = isDeskWriteTool(name);
@@ -1204,7 +1218,8 @@ export function installDeskGuard(
       if (!writes && !reads && secret === null) return null;
       const agent = exec.agent;
       if (agent === undefined) return null;
-      if (!fromDesk(exec, agent)) return null;
+      preset = fromDesk(exec, agent);
+      if (preset === undefined) return null;
       const header = agent.session.header;
       if (writes || reads) {
         const cwd: unknown = header.cwd;
@@ -1214,12 +1229,12 @@ export function installDeskGuard(
         /* no root: each check's own fail-closed deny, without a line - the install said it once */
         const decided = (writes ? deskWriteDecision(exec.name, exec.arguments, cwd, root as string) : null)
           ?? (reads ? deskReadDecision(exec.name, exec.arguments, cwd, root as string, typeof id === "string" ? id : undefined) : null);
-        if (decided !== null) return decided;
+        if (decided !== null) return spokenFor(decided, preset);
       }
-      return secret;
+      return secret === null ? null : spokenFor(secret, preset);
     } catch (error) {
       tell(exec, unjudgedLine(exec, error));
-      return deny(uncheckedFor(exec));
+      return spokenFor(deny(uncheckedFor(exec)), preset);
     }
   };
   /* what the secret check covers, by name and never by value: the operator reads which keys are kept in */
@@ -1234,7 +1249,7 @@ export function installDeskGuard(
       if (exec?.name !== "web_fetch" || exec.agent === undefined) return undefined;
       let desk: boolean;
       try {
-        desk = fromDesk(exec, exec.agent);
+        desk = fromDesk(exec, exec.agent) !== undefined;
       } catch {
         /* the registry threw for a session created as the desk's: the session's word stands */
         desk = true;
