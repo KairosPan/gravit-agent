@@ -1,10 +1,13 @@
 // face/client/js/host/rail-view.js — the rail of tasks as facts (one-entry plan 2): each task the face's /data/tasks gave, in
 // its group — waiting on you, running, done today — with its worker's open gate and its short status in words. A gate the mux
 // delivered moves its line under you before the next read says so; a waiting task whose gate the operator answered here
-// waits on no one until that read. Pure: no clock but the `now` it is handed.
+// waits on no one until that read. The desk folds in (one-entry plan 3): today's firings and annotations run or are done
+// beside the tasks, never waiting on you, and the standing orders are a group of their own after done, read-only. Their
+// times are New York's. Pure: no clock but the `now` it is handed.
 import { t, tn } from '../i18n/words.js';
 import { needsAnswer } from '../messages.js';
 import { fmtClock, MIN } from '../time.js';
+import { etWhen, deskTime } from './desk-view.js';
 
 const GATE_KINDS = new Set(['card', 'approval', 'question']);
 const GROUPS = new Set(['you', 'running', 'done']);
@@ -38,13 +41,31 @@ function lineOf(task, state, now) {
   return { group, line: { task, gate, status: statusOf(task, gate, shown, now) } };
 }
 
-/** The tasks in their groups, in the order the face gave them. */
+// a firing's or an annotation's short status: since when it runs, the New York clock it ended at, or failed
+function deskStatusOf(line, now) {
+  if (line.state === 'running') return t('tasks.desk.since', { clock: etWhen(line.startedAt, now) });
+  if (line.state === 'failed') return t('tasks.status.failed');
+  return t('tasks.status.done', { clock: etWhen(line.endedAt ?? line.startedAt, now) });
+}
+
+// a standing order's short status: its next firing in New York's time, else why it has none
+function scheduledStatusOf(order, now) {
+  if (order.expired === true) return t('tasks.scheduled.expired');
+  if (order.enabled !== true) return t('tasks.scheduled.disabled');
+  return typeof order.next === 'string' && order.next !== '' ? t('tasks.scheduled.next', { at: deskTime(order.next, now) }) : t('tasks.scheduled.noNext');
+}
+
+/** The tasks in their groups, in the order the face gave them; the desk's lines of today after them in running or done (a
+ * task line is `{task, gate, status}`, a desk line `{desk, status}`); the standing orders as `{scheduled, status}`. */
 export function railOf(state, now = Date.now()) {
-  const rail = { you: [], running: [], done: [] };
+  const rail = { you: [], running: [], done: [], scheduled: [] };
   for (const task of state.tasks?.items ?? []) {
     const { group, line } = lineOf(task, state, now);
     rail[group].push(line);
   }
+  const desk = state.tasks?.desk ?? null;
+  for (const line of desk?.lines ?? []) rail[line.state === 'running' ? 'running' : 'done'].push({ desk: line, status: deskStatusOf(line, now) });
+  for (const order of desk?.scheduled ?? []) rail.scheduled.push({ scheduled: order, status: scheduledStatusOf(order, now) });
   return rail;
 }
 
@@ -54,7 +75,7 @@ export function taskLine(state, id, now = Date.now()) {
   return task ? lineOf(task, state, now) : null;
 }
 
-/** The lines waiting on the operator: the Messages badge. */
+/** The lines waiting on the operator: the Messages badge (task lines alone: the desk never waits on you). */
 export const waitingCount = state => railOf(state).you.length;
 
 // a strategy goes by one name everywhere: its channel's display title (the registry's, the operator's to change), else its name

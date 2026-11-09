@@ -242,3 +242,14 @@ test("the strategy's tasks are listed with their lines", () => {
   assert.doesNotMatch(h, /data-task="t2"|data-task="t4"/, "another strategy's task, or one with none, is not this one's");
   assert.match(renderStrategyScreen(R.tasksLoaded(on(overview()), { conversation: 'c', tasks: [taskOf('t2', { strategy: 'beta' })], at: NOW }), NOW), />Tasks<[\s\S]*?No tasks for this strategy/);
 });
+
+test("a strategy's scheduled lines are listed", () => {
+  setMarkdown(null);
+  const desk = { scheduled: [{ order: 'alpha-pre', strategy: 'alpha', enabled: true, expired: false }, { order: 'brief', enabled: true, expired: false }, { order: 'beta-pre', strategy: 'beta', enabled: true, expired: false }], lines: [] };
+  const h = renderStrategyScreen(R.tasksLoaded(on(overview()), { conversation: 'c', tasks: [taskOf('t1', { strategy: 'alpha' })], desk, at: NOW }), NOW);
+  assert.match(h, /class="strat-tasks"[\s\S]*?data-task="t1"[\s\S]*?data-task="order:alpha-pre"/);
+  assert.doesNotMatch(h, /order:brief|order:beta-pre/);
+  const only = renderStrategyScreen(R.tasksLoaded(on(overview()), { conversation: 'c', tasks: [], desk, at: NOW }), NOW);
+  assert.match(only, /data-task="order:alpha-pre"/);
+  assert.doesNotMatch(only, /No tasks for this strategy/);
+});

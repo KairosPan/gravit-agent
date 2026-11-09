@@ -426,6 +426,7 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .task-dot.waiting, .task-dot.stalled, .task-dot.blocked { background: var(--warn); }
 .task-dot.failed { background: var(--down); }
 .task-dot.done, .task-dot.stopped { background: var(--dim); }
+.task-dot.scheduled { background: transparent; box-shadow: inset 0 0 0 1.5px var(--dim); }
 .task-title { flex: 1 1 auto; min-width: 0; font-size: calc(13px * var(--fs)); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .task-status { flex: none; font-size: calc(12px * var(--fs)); color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .task-caret { flex: none; display: inline-flex; color: var(--dim); }
@@ -438,6 +439,7 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .task-gate { max-width: 560px; }
 .task-result { white-space: pre-wrap; overflow-wrap: anywhere; }
 .task-gate-there { color: var(--dim); }
+.task-origin, .task-meta { font-size: calc(12px * var(--fs)); color: var(--dim); }
 .task-usage { font-size: calc(12px * var(--fs)); color: var(--dim); font-variant-numeric: tabular-nums; }
 .task-keys { display: flex; flex-wrap: wrap; gap: 6px; }
 /* a task's full process (#/task/<id>): back to Messages, the title, the state, the strategy and the keys in the head; in

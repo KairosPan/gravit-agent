@@ -1,8 +1,8 @@
 // face/client/js/render/strategy.js — a strategy's page (#/strategy/<name>, one-entry plan 2; the channel page before it, spec
 // 2026-10-19 §7 Stage 3 "Channels"), read-only but for the rosters (kept until plan 4): the status headline, the thesis, the
 // latest backtest, the research runs, the backtests, the journal, the files and the rosters, from /data/channels/overview;
-// then the strategy's tasks, each the rail's line; then the paper positions of the venue its status.yaml names (or a line
-// saying it names none, never a guessed venue).
+// then the strategy's tasks and its standing orders, each the rail's line; then the paper positions of the venue its
+// status.yaml names (or a line saying it names none, never a guessed venue).
 // Everything here was written by Gravit or the operator into the channel's directory: text through esc, the thesis
 // through the thread's DOM-built markdown.
 import { esc, cls, attrs } from '../html.js';
@@ -13,7 +13,7 @@ import { markdownHtml } from './markdown.js';
 import { kv } from './controls.js';
 import { runsView } from '../host/runs-view.js';
 import { railOf } from '../host/rail-view.js';
-import { taskLineHtml } from './tasks.js';
+import { railLineHtml } from './tasks.js';
 import { positionSideWord } from './account.js';
 import { money, signedMoney, sign } from '../wire/account-model.js';
 import { price } from '../wire/market-model.js';
@@ -105,10 +105,12 @@ function headline(status) {
     (s.next ? `<div class="dsec-line">${th('channel.next', { next: s.next })}</div>` : '') + (numbers.length ? kv(numbers) : '');
 }
 
-// the strategy's tasks: the rail's lines whose task names this strategy, in the rail's groups' order, each drawn as the rail draws it
+// the strategy's tasks: the rail's lines whose task names this strategy, in the rail's groups' order, then its standing
+// orders' scheduled lines, each drawn as the rail draws it
 function tasks(state, name, now, open) {
   const rail = railOf(state, now);
-  const lines = ['you', 'running', 'done'].flatMap(g => rail[g].filter(l => l.task.strategy === name).map(l => taskLineHtml(l, g, state, open)));
+  const mine = l => (l.scheduled ? l.scheduled.strategy : l.task?.strategy) === name;
+  const lines = ['you', 'running', 'done', 'scheduled'].flatMap(g => rail[g].filter(mine).map(l => railLineHtml(l, g, state, now, open)));
   return sec(t('strategy.tasks'), lines.length ? `<div class="strat-tasks">${lines.join('')}</div>` : none(t('strategy.noTasks')));
 }
 

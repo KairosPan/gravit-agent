@@ -20,7 +20,7 @@ export function startTasks({ store, getJson, postJson, timers, now = Date.now })
     try {
       const body = await getJson('/data/tasks');
       if (mine !== seq || disposed) return;
-      store.dispatch('tasksLoaded', { conversation: body?.conversation ?? null, tasks: body?.tasks ?? [], at: now() });
+      store.dispatch('tasksLoaded', { conversation: body?.conversation ?? null, tasks: body?.tasks ?? [], desk: body?.desk ?? null, at: now() });
     } catch (err) {
       if (mine !== seq || disposed) return;
       store.dispatch(err?.status === 404 ? 'tasksOff' : 'tasksFailed', { at: now() });

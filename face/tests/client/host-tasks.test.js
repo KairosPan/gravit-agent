@@ -40,7 +40,7 @@ test('refresh fills state.tasks with the conversation and the views', async () =
   const r = rig();
   assert.equal(r.s().status, 'loading');
   await settle();
-  assert.deepEqual(r.s(), { status: 'ready', conversation: 'conv-1', items: [view('a'), view('b')], at: 777, busy: [] });
+  assert.deepEqual(r.s(), { status: 'ready', conversation: 'conv-1', items: [view('a'), view('b')], desk: { scheduled: [], lines: [] }, at: 777, busy: [] });
   r.answers.read = { ok: true, conversation: null, tasks: [] };
   await r.tasks.refresh();
   assert.equal(r.s().conversation, null);
@@ -129,4 +129,14 @@ test('a failed stop is a status line, not a throw', async () => {
 test('followUpText puts the tag on its own first line', () => {
   assert.equal(followUpText({ id: 'session-1', title: 'CRWV' }, '再看一下'), '[follow-up · task session-1 · CRWV]\n再看一下');
   assert.equal(followUpText({ id: 's', title: 'a\nb] c' }, 'x'), '[follow-up · task s · a b c]\nx');
+});
+
+test('a body without desk leaves the desk lines empty', async () => {
+  const desk = { scheduled: [{ order: 'brief', enabled: true, expired: false }, { nope: 1 }], lines: [{ id: 'x', kind: 'firing', title: 'brief', state: 'done', startedAt: 'z' }, null] };
+  const r = rig({ read: { ok: true, conversation: 'conv-1', tasks: [], desk } });
+  await settle();
+  assert.deepEqual(r.s().desk, { scheduled: [desk.scheduled[0]], lines: [desk.lines[0]] }, 'what is no line is dropped');
+  r.answers.read = { ok: true, conversation: 'conv-1', tasks: [] };
+  await r.tasks.refresh();
+  assert.deepEqual(r.s().desk, { scheduled: [], lines: [] });
 });

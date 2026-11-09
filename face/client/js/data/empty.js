@@ -114,7 +114,7 @@ export function emptyState() {
     jobs: { convId: null, rows: [], open: null, cleared: {} },
     // the conversation's tasks (host/tasks.js): GET /data/tasks as last read — `off` when the face has no conversation, `failed`
     // keeping the last items — and the ids with a Stop or Continue in flight
-    tasks: { status: 'loading', conversation: null, items: [], at: null, busy: [] },
+    tasks: { status: 'loading', conversation: null, items: [], desk: { scheduled: [], lines: [] }, at: null, busy: [] },
     // the owner device (host/owner.js): whether this page signs for the Account, its key's id there, the Account's last
     // refusal to it, a pairing or sign-out in the air
     owner: { role: 'unknown', kid: '', refusal: null, busy: false },

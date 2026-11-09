@@ -27,14 +27,14 @@ function etParts(ms) {
   return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` };
 }
 /** A time in a column: `HH:MM` on `now`'s New York date, `YYYY-MM-DD HH:MM` on another; anything that is no time as written. */
-function etWhen(iso, now) {
+export function etWhen(iso, now) {
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms)) return str(iso);
   const at = etParts(ms);
   return at.date === etParts(now).date ? at.time : `${at.date} ${at.time}`;
 }
 /** A time in a line, as src/desk.ts deskTime (and statusTime, for a time that is no time) writes it. */
-const deskTime = (iso, now) => (Number.isFinite(Date.parse(iso)) ? t('desk.et', { time: etWhen(iso, now) }) : str(iso));
+export const deskTime = (iso, now) => (Number.isFinite(Date.parse(iso)) ? t('desk.et', { time: etWhen(iso, now) }) : str(iso));
 
 /** `text` cut to `max` characters (code points), the last a `…`, as src/desk.ts cutText. */
 function cut(text, max) {
@@ -172,7 +172,7 @@ function alertOutcomeWord(code) {
   }
 }
 // a firing's kind and its turn's outcome share one set of words (src/firing.ts's ledger records and DeskTurnRecord)
-function firingWord(code) {
+export function firingWord(code) {
   switch (code) {
     case 'started': return t('desk.firing.started');
     case 'finished': return t('desk.firing.finished');

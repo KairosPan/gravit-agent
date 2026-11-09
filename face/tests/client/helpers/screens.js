@@ -377,6 +377,9 @@ export function everyState() {
     // plan 3 of one entry, Task 7: the desk in the conversation - a phone text from each network and one naming none, a
     // schedule line, an alert line, and a line with no body
     deskFoldState(base),
+    // plan 3 of one entry, Task 8: the rail's desk lines and its scheduled group, a phone task naming its origin, and a
+    // strategy's page listing its standing order
+    ...deskRailStates(base),
   ];
 }
 
@@ -467,6 +470,35 @@ function taskRailStates(base) {
   on = R.taskBusy(R.nav(on, { screen: 'messages', id: null }), { id: 'st', on: true });
   const running = R.nav(R.tasksLoaded(base, { conversation: 's1', tasks: [task('ru', { title: 'Price the basket' })], at: NOW }), { screen: 'messages', id: null });
   return [on, running];
+}
+
+// the desk folds into the rail (one-entry plan 3 Task 8): a task from each network's phone; a firing running, one done with
+// its session, one failed, an annotation with its text; the standing orders armed with a next firing, a last outcome and a
+// strategy, armed with none next, disabled and expired; then the scheduled group alone; then a strategy's page with its order
+function deskRailStates(base) {
+  const iso = ms => new Date(ms).toISOString();
+  const task = (id, over = {}) => ({ id, title: `Task ${id}`, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW - 12 * MIN, lastEventAt: NOW - MIN, lastSeq: 1, ...over });
+  const tasks = [task('ph', { title: 'Why did NVDA fall', origin: 'phone', network: 'telegram' }), task('sl', { title: 'Size the hedge', origin: 'phone', network: 'slack', state: 'done', group: 'done' })];
+  const desk = {
+    scheduled: [
+      { order: 'pre-close', strategy: 'cn-market', next: iso(NOW + 60 * MIN), last: { outcome: 'finished', t: iso(NOW - 24 * 60 * MIN), sessionId: 'desk-s1' }, enabled: true, expired: false },
+      { order: 'brief', enabled: true, expired: false },
+      { order: 'old-watch', enabled: false, expired: false, last: { outcome: 'failed', t: iso(NOW - 2 * 24 * 60 * MIN) } },
+      { order: 'report-q3', strategy: 'cn-market', enabled: true, expired: true },
+    ],
+    lines: [
+      { id: 'pre-close:2026-10-19', kind: 'firing', title: 'pre-close', state: 'running', startedAt: iso(NOW - 4 * MIN), sessionId: 'desk-s2' },
+      { id: 'brief:2026-10-19', kind: 'firing', title: 'brief', state: 'done', startedAt: iso(NOW - 90 * MIN), endedAt: iso(NOW - 80 * MIN), sessionId: 'desk-s3' },
+      { id: 'report:2026-10-19', kind: 'firing', title: 'report', state: 'failed', startedAt: iso(NOW - 70 * MIN), endedAt: iso(NOW - 69 * MIN) },
+      { id: 'annotation:p7', kind: 'annotation', title: 'NVDA AMD', state: 'done', startedAt: iso(NOW - 30 * MIN), endedAt: iso(NOW - 30 * MIN), sessionId: 'desk-s4', text: 'NVDA fell 6% on export news; AMD followed.' },
+    ],
+  };
+  const on = R.nav(R.tasksLoaded(base, { conversation: 's1', tasks, desk, at: NOW }), { screen: 'messages', id: null });
+  const alone = R.nav(R.tasksLoaded(base, { conversation: 's1', tasks: [], desk: { scheduled: desk.scheduled.slice(1, 2), lines: [] }, at: NOW }), { screen: 'messages', id: null });
+  const page = R.nav(R.tasksLoaded(base, { conversation: 's1', tasks: [], desk, at: NOW }), { screen: 'strategy', id: 'cn-market' });
+  const channel = base.channels.find(c => c.name === 'cn-market');
+  const strategy = R.channelLoaded(page, { workspaceId: channel.workspaceId, data: { ok: true, channel, status: { status: 'researching' }, body: {}, agents: [], bots: [], allBots: [] }, at: NOW });
+  return [on, alone, strategy];
 }
 
 // the read-only pages Tasks 7 and 8 of plan 2 replace: a task's page, a history session, one gone, one before the list, the
