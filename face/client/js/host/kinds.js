@@ -213,7 +213,39 @@ function bubble(view, speaker) {
   if (view.source === 'user' || view.source === undefined) {
     return { ...b, from: 'you', kind: 'text', text: view.text ?? '', data: { mention: view.mention, ...(Array.isArray(view.attachments) ? { attachments: view.attachments } : {}) } };
   }
+  if (view.source === 'task' && TASK_FORMS.has(view.form)) return taskMessage(b, view);
   return { ...b, from: 'system', kind: 'text', text: view.text ?? '', data: { source: view.source } };
+}
+
+// a task's message (one-entry plan 2, the face's src/task-*.ts): a report relayed into the conversation, and in a worker its
+// brief, a steer Gravit relayed, a recovery note, a stop. A report's head `[task · <title> · <status>]` gives the title (the
+// text up to the next ` · `) and its fenced body; a brief loses the footer the face appends after its last `---` line
+const TASK_FORMS = new Set(['report', 'brief', 'steer', 'recovery', 'stopped']);
+const RELAY_HEAD = '[task · ';
+function relayParts(text) {
+  const lines = text.split('\n');
+  const head = lines[0] ?? '';
+  const end = head.startsWith(RELAY_HEAD) ? head.indexOf(' · ', RELAY_HEAD.length) : -1;
+  if (end < 0) return { title: null, status: null, body: text };
+  const status = head.endsWith(']') ? head.slice(end + 3, -1) : null;
+  let rest = lines.slice(1);
+  const open = /^<<<task-data (\S+)>>>$/.exec(rest[0] ?? '');
+  const close = open ? rest.lastIndexOf(`<<<end ${open[1]}>>>`) : -1;
+  // the face quoted a line that would read as a head or a fence with one space before it: given back as it was
+  if (close > 0) rest = rest.slice(1, close).map(l => (l.startsWith(' [task ·') || l.startsWith(' <<<') ? l.slice(1) : l));
+  return { title: head.slice(RELAY_HEAD.length, end), status, body: rest.join('\n') };
+}
+function withoutFooter(text) {
+  const lines = text.split('\n');
+  const cut = lines.lastIndexOf('---');
+  return cut < 0 ? text : lines.slice(0, cut).join('\n').trimEnd();
+}
+function taskMessage(b, view) {
+  const text = view.text ?? '';
+  const ids = { ...(typeof view.task === 'string' ? { task: view.task } : {}) };
+  if (view.form !== 'report') return { ...b, from: 'system', kind: 'task', text: view.form === 'brief' ? withoutFooter(text) : text, data: { form: view.form, ...ids } };
+  const { title, status, body } = relayParts(text);
+  return { ...b, from: 'system', kind: 'task', text, data: { form: 'report', ...ids, status: typeof view.status === 'string' ? view.status : status, title, body } };
 }
 
 function toolMessages(view, calls) {

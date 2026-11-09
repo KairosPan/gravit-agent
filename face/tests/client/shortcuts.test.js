@@ -17,7 +17,7 @@ test("the sheet lists the bound rows of each section with the platform's chords"
   assert.match(mac, /<h2 id="sc-title">Keyboard shortcuts<\/h2><button type="button" id="sc-close" class="close-key" data-action="closeShortcuts" aria-label="Close">/);
   assert.match(mac, /<input id="sc-q" class="input" type="search" value="" placeholder="Search shortcuts" aria-label="Search shortcuts" autocomplete="off" spellcheck="false" data-action="scQuery">/);
   assert.match(mac, /<h3 class="sc-section">General<\/h3>[\s\S]*<h3 class="sc-section">Composer<\/h3>/);
-  assert.deepEqual(rows(mac), [['New conversation', '⌥⌘N'], ['Search conversations', '⌥⌘K'], ['Settings', '⌥⌘,'], ['This sheet', '⌘/'],
+  assert.deepEqual(rows(mac), [['Write to Gravit', '⌥⌘N'], ['Search conversations', '⌥⌘K'], ['Settings', '⌥⌘,'], ['This sheet', '⌘/'],
     ['Send', 'Enter'], ['New line', '⇧Enter'], ['Commands and skills', '/'], ['Files, conversations, bots', '@'], ['Close a menu, sheet or drawer', 'Esc']]);
   assert.match(mac, /<p class="sc-note">⌘ is Ctrl off a Mac. Keys follow dsh's web bindings.<\/p><\/section>$/);
   const pc = renderShortcuts(open(), { mac: false });
@@ -27,11 +27,11 @@ test("the sheet lists the bound rows of each section with the platform's chords"
 test('an unbound row is not listed', () => {
   const table = SHORTCUTS.map(r => (r.id === 'settings' || r.id === 'send' ? { ...r, bound: false } : r));
   const html = renderShortcuts(open(), { mac: true, table });
-  assert.deepEqual(rows(html).map(r => r[0]), ['New conversation', 'Search conversations', 'This sheet', 'New line', 'Commands and skills', 'Files, conversations, bots', 'Close a menu, sheet or drawer']);
+  assert.deepEqual(rows(html).map(r => r[0]), ['Write to Gravit', 'Search conversations', 'This sheet', 'New line', 'Commands and skills', 'Files, conversations, bots', 'Close a menu, sheet or drawer']);
 });
 
 test('a query keeps the matching rows, any case, and none left says No shortcut matches', () => {
-  assert.deepEqual(rows(renderShortcuts(open('CONVERSATION'), { mac: true })).map(r => r[0]), ['New conversation', 'Search conversations', 'Files, conversations, bots']);
+  assert.deepEqual(rows(renderShortcuts(open('CONVERSATION'), { mac: true })).map(r => r[0]), ['Search conversations', 'Files, conversations, bots']);
   // a chord holds it too, on the platform's names; a section left empty draws no heading
   const ctrl = renderShortcuts(open('ctrl+alt'), { mac: false });
   assert.deepEqual(rows(ctrl).map(r => r[1]), ['Ctrl+Alt+N', 'Ctrl+Alt+K', 'Ctrl+Alt+,']);

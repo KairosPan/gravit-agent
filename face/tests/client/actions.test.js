@@ -32,35 +32,35 @@ function rig({ answers = {}, posts = {}, convs = [conv('s1')], open = 's1', acti
 }
 const err = (over) => Object.assign(new Error('boom'), over);
 
+test('send prompts the session it is given, in queue mode', async () => {
+  // the one conversation is the caller's to name (app.js): not the route's, and never a room's
+  const r = rig({ convs: [conv('s1', { channel: { workspaceId: 'w1', name: 'alpha' } }), conv('c9')], posts: { '/data/rooms/say': { addressed: ['buffett'] } } });
+  assert.deepEqual(await r.actions.send('@buffett look', { sessionId: 'c9' }), { sent: 'prompt', sessionId: 'c9' });
+  assert.deepEqual(r.calls, [['session/prompt', { request: { requestId: 'req-1', sessionId: 'c9', mode: 'queue', content: [{ type: 'text', text: '@buffett look' }], clientTimeZone: 'Asia/Shanghai' } }]]);
+  assert.equal(r.posted.length, 0, 'no room is tried');
+  // one the list does not carry yet still takes it; no session named sends nothing
+  assert.deepEqual(await r.actions.send('hi', { sessionId: 'fresh' }), { sent: 'prompt', sessionId: 'fresh' });
+  assert.equal(await r.actions.send('hi'), null);
+  assert.equal(await r.actions.send('hi', { sessionId: '' }), null);
+  assert.equal(r.calls.length, 2);
+});
+
 test('a plain send is one session/prompt in queue mode with a minted requestId and the zone', async () => {
   const r = rig();
-  assert.deepEqual(await r.actions.send('  look at ETH  '), { sent: 'prompt', sessionId: 's1' });
+  assert.deepEqual(await r.actions.send('  look at ETH  ', { sessionId: 's1', sessionId: 's1' }), { sent: 'prompt', sessionId: 's1' });
   assert.deepEqual(r.calls, [['session/prompt', { request: { requestId: 'req-1', sessionId: 's1', mode: 'queue', content: [{ type: 'text', text: 'look at ETH' }], clientTimeZone: 'Asia/Shanghai' } }]]);
-  assert.equal(await r.actions.send('   '), null);
+  assert.equal(await r.actions.send('   ', { sessionId: 's1', sessionId: 's1' }), null);
   assert.equal(r.calls.length, 1);
 });
 
 test('a slash line goes to commands/execute first; only an unclaimed line continues as a prompt', async () => {
   const claimed = rig({ answers: { 'commands/execute': { result: { kind: 'ok', text: 'goal resumed' } } } });
-  assert.deepEqual(await claimed.actions.send('/goal resume'), { sent: 'command', sessionId: 's1' });
+  assert.deepEqual(await claimed.actions.send('/goal resume', { sessionId: 's1', sessionId: 's1' }), { sent: 'command', sessionId: 's1' });
   assert.deepEqual(claimed.calls, [['commands/execute', { agentId: 's1', line: '/goal resume', submittedAttachments: [] }]]);
   assert.equal(sayOf(claimed.store.get().status.line), 'goal resumed');
   const unclaimed = rig({ answers: { 'commands/execute': undefined } });
-  assert.deepEqual(await unclaimed.actions.send('/nothing'), { sent: 'prompt', sessionId: 's1' });
+  assert.deepEqual(await unclaimed.actions.send('/nothing', { sessionId: 's1', sessionId: 's1' }), { sent: 'prompt', sessionId: 's1' });
   assert.deepEqual(unclaimed.calls.map(c => c[0]), ['commands/execute', 'session/prompt']);
-});
-
-test('an @ in a channel conversation goes to the room first; nobody addressed means an ordinary prompt', async () => {
-  const room = rig({ convs: [conv('s1', { channel: { workspaceId: 'w1', name: 'alpha' } })], posts: { '/data/rooms/say': { addressed: ['buffett'] } } });
-  assert.deepEqual(await room.actions.send('@buffett leverage?'), { sent: 'say', sessionId: 's1' });
-  assert.deepEqual(room.posted, [['/data/rooms/say', { sessionId: 's1', text: '@buffett leverage?' }]]);
-  assert.equal(room.calls.length, 0);
-  const nobody = rig({ convs: [conv('s1', { channel: { workspaceId: 'w1', name: 'alpha' } })], posts: { '/data/rooms/say': { addressed: [] } } });
-  assert.deepEqual(await nobody.actions.send('@nobody hi'), { sent: 'prompt', sessionId: 's1' });
-  assert.equal(nobody.calls[0][0], 'session/prompt');
-  const plain = rig();
-  await plain.actions.send('@buffett hi');
-  assert.equal(plain.posted.length, 0, 'outside a channel an @ is just text');
 });
 
 test('a new conversation is create, rename, prompt in that order, and its id comes back', async () => {
@@ -113,11 +113,11 @@ test('a second press while the first answer is in flight sends nothing: one answ
 
 test('a 401 says to open the printed URL; a business failure names the host\'s code', async () => {
   const out = rig({ answers: { 'session/prompt': err({ status: 401 }) } });
-  assert.equal(await out.actions.send('hi'), null);
+  assert.equal(await out.actions.send('hi', { sessionId: 's1', sessionId: 's1' }), null);
   assert.equal(sayOf(out.store.get().status.line), 'Not signed in — open the URL gravit-face printed');
   assert.equal(out.store.get().status.bad, true);
   const gone = rig({ answers: { 'session/prompt': err({ code: 'session/not-found' }) } });
-  await gone.actions.send('hi');
+  await gone.actions.send('hi', { sessionId: 's1', sessionId: 's1' });
   assert.match(sayOf(gone.store.get().status.line), /session\/not-found/);
 });
 
@@ -228,17 +228,17 @@ test('archiving a pinned conversation unpins it after the archive succeeds; a fa
   assert.deepEqual(un.calls, []);
 });
 
-// ---- plan 3 task 8: a command on a cold conversation, runCommand, and send's room option
+// ---- plan 3 task 8: a command on a cold conversation, runCommand
 test('a slash line on a cold conversation opens it before commands/execute', async () => {
   const r = rig({ convs: [conv('s1', { live: false })], activate: () => true, answers: { 'commands/execute': { result: { kind: 'ok', text: 'compacted' } } } });
-  assert.deepEqual(await r.actions.send('/compact'), { sent: 'command', sessionId: 's1' });
+  assert.deepEqual(await r.actions.send('/compact', { sessionId: 's1', sessionId: 's1' }), { sent: 'command', sessionId: 's1' });
   assert.deepEqual(r.calls.map(c => c[0]), ['activate', 'commands/execute']);
   assert.equal(r.calls[0][1], 's1');
 });
 
 test('a conversation that does not open sends nothing and says so', async () => {
   const r = rig({ convs: [conv('s1', { live: false })], activate: () => false });
-  assert.equal(await r.actions.send('/compact'), null);
+  assert.equal(await r.actions.send('/compact', { sessionId: 's1', sessionId: 's1' }), null);
   assert.deepEqual(r.calls.map(c => c[0]), ['activate'], 'neither the command nor a prompt');
   assert.deepEqual(sayOf(r.store.get().status.line), 'send: the conversation did not open');
   assert.equal(r.store.get().status.bad, true);
@@ -265,20 +265,6 @@ test('runCommand says so when no command claims the line', async () => {
   assert.equal(sayOf(none.store.get().status.line), 'no command claimed /compact');
 });
 
-test('room: false sends a line with @ straight to Gravit; true posts it to the room', async () => {
-  const inRoom = { convs: [conv('s1', { channel: { workspaceId: 'w1', name: 'alpha' } })], posts: { '/data/rooms/say': { addressed: ['buffett'] } } };
-  const direct = rig(inRoom);
-  assert.deepEqual(await direct.actions.send('read @strategies/x.md', { room: false }), { sent: 'prompt', sessionId: 's1' });
-  assert.equal(direct.posted.length, 0);
-  assert.equal(direct.calls[0][1].request.content[0].text, 'read @strategies/x.md');
-  const room = rig(inRoom);
-  assert.deepEqual(await room.actions.send('plain words', { room: true }), { sent: 'say', sessionId: 's1' });
-  assert.deepEqual(room.posted, [['/data/rooms/say', { sessionId: 's1', text: 'plain words' }]]);
-  const outside = rig({ posts: inRoom.posts });
-  await outside.actions.send('plain words', { room: true });
-  assert.equal(outside.posted.length, 0, 'no channel, no room');
-});
-
 // ---- attachments (plan 4 task 6) ----
 const imagePart = { type: 'image', mediaType: 'image/png', data: 'iVBORw0KGgo=', name: 'shot.png' };
 const filePart = { type: 'file', receiptId: 'r-1' };
@@ -286,47 +272,38 @@ const refusedFor = reason => err({ code: 'session/attachment-invalid', details: 
 
 test('a prompt with attachments sends the text part, then the parts in order; an image-only prompt sends no text part', async () => {
   const r = rig();
-  assert.deepEqual(await r.actions.send(' read these ', { attachments: [filePart, imagePart] }), { sent: 'prompt', sessionId: 's1' });
+  assert.deepEqual(await r.actions.send(' read these ', { sessionId: 's1', attachments: [filePart, imagePart] }), { sent: 'prompt', sessionId: 's1' });
   assert.deepEqual(r.calls[0][1].request.content, [{ type: 'text', text: 'read these' }, filePart, imagePart]);
   const only = rig();
-  assert.deepEqual(await only.actions.send('   ', { attachments: [imagePart] }), { sent: 'prompt', sessionId: 's1' });
+  assert.deepEqual(await only.actions.send('   ', { sessionId: 's1', attachments: [imagePart] }), { sent: 'prompt', sessionId: 's1' });
   assert.deepEqual(only.calls[0][1].request.content, [imagePart]);
   const none = rig();
-  assert.equal(await none.actions.send('  ', { attachments: [] }), null);
+  assert.equal(await none.actions.send('  ', { sessionId: 's1', attachments: [] }), null);
   assert.equal(none.calls.length, 0);
 });
 
 test('a slash line with attachments sends them as submittedAttachments', async () => {
   const r = rig({ answers: { 'commands/execute': { result: { kind: 'ok', text: 'goal set' } } } });
-  assert.deepEqual(await r.actions.send('/goal read the file', { attachments: [filePart] }), { sent: 'command', sessionId: 's1' });
+  assert.deepEqual(await r.actions.send('/goal read the file', { sessionId: 's1', attachments: [filePart] }), { sent: 'command', sessionId: 's1' });
   assert.deepEqual(r.calls, [['commands/execute', { agentId: 's1', line: '/goal read the file', submittedAttachments: [filePart] }]]);
   const unclaimed = rig({ answers: { 'commands/execute': undefined } });
-  await unclaimed.actions.send('/nothing', { attachments: [filePart] });
+  await unclaimed.actions.send('/nothing', { sessionId: 's1', attachments: [filePart] });
   assert.deepEqual(unclaimed.calls[1][1].request.content, [{ type: 'text', text: '/nothing' }, filePart], 'an unclaimed line prompts with its files');
-});
-
-test('with attachments the room is never tried, even for a line with @', async () => {
-  const inRoom = { convs: [conv('s1', { channel: { workspaceId: 'w1', name: 'alpha' } })], posts: { '/data/rooms/say': { addressed: ['buffett'] } } };
-  const r = rig(inRoom);
-  assert.deepEqual(await r.actions.send('@buffett look', { attachments: [filePart] }), { sent: 'prompt', sessionId: 's1' });
-  const forced = rig(inRoom);
-  assert.deepEqual(await forced.actions.send('look', { room: true, attachments: [filePart] }), { sent: 'prompt', sessionId: 's1' });
-  assert.equal(r.posted.length + forced.posted.length, 0);
 });
 
 test('an attachment refusal goes to attachmentRefused with its reason and says nothing else', async () => {
   const r = rig({ answers: { 'session/prompt': refusedFor('MODEL_DOES_NOT_SUPPORT_IMAGES') } });
   const reasons = [];
-  assert.equal(await r.actions.send('look', { attachments: [imagePart], attachmentRefused: why => reasons.push(why) }), null);
+  assert.equal(await r.actions.send('look', { sessionId: 's1', attachments: [imagePart], attachmentRefused: why => reasons.push(why) }), null);
   assert.deepEqual(reasons, ['MODEL_DOES_NOT_SUPPORT_IMAGES']);
   assert.equal(sayOf(r.store.get().status.line), sayOf(emptyState().status.line), 'no send: line');
   const bare = rig({ answers: { 'session/prompt': refusedFor('FILE_NOT_STAGED') } });
-  assert.equal(await bare.actions.send('look', { attachments: [filePart] }), null);
+  assert.equal(await bare.actions.send('look', { sessionId: 's1', attachments: [filePart] }), null);
   assert.equal(sayOf(bare.store.get().status.line), 'send: session/attachment-invalid (FILE_NOT_STAGED)');
   assert.equal(bare.store.get().status.bad, true);
   const other = rig({ answers: { 'session/prompt': err({ code: 'session/busy' }) } });
   const none = [];
-  await other.actions.send('look', { attachments: [filePart], attachmentRefused: why => none.push(why) });
+  await other.actions.send('look', { sessionId: 's1', attachments: [filePart], attachmentRefused: why => none.push(why) });
   assert.deepEqual(none, [], 'only the attachment code goes to the callback');
   assert.equal(sayOf(other.store.get().status.line), 'send: session/busy');
 });
@@ -377,13 +354,13 @@ test('newConversationWith reports the id before the rename, so a failed rename k
 test('a command that settles as an error with attachments is a refusal; a dropped receipt goes to attachmentRefused', async () => {
   const noFiles = rig({ answers: { 'commands/execute': { result: { kind: 'error', text: '/compact does not accept attachments' } } } });
   const why = [];
-  assert.equal(await noFiles.actions.send('/compact', { attachments: [filePart], attachmentRefused: x => why.push(x) }), null);
+  assert.equal(await noFiles.actions.send('/compact', { sessionId: 's1', attachments: [filePart], attachmentRefused: x => why.push(x) }), null);
   assert.equal(sayOf(noFiles.store.get().status.line), '/compact does not accept attachments');
   assert.equal(noFiles.store.get().status.bad, true);
   assert.deepEqual(why, []);
   const dropped = rig({ answers: { 'commands/execute': { result: { kind: 'error', text: 'File upload receipt is unknown for this session.' } } } });
-  assert.equal(await dropped.actions.send('/goal x', { attachments: [filePart], attachmentRefused: x => why.push(x) }), null);
+  assert.equal(await dropped.actions.send('/goal x', { sessionId: 's1', attachments: [filePart], attachmentRefused: x => why.push(x) }), null);
   assert.deepEqual(why, ['ATTACHMENT_NOT_FOUND']);
   const plain = rig({ answers: { 'commands/execute': { result: { kind: 'error', text: 'no goal' } } } });
-  assert.deepEqual(await plain.actions.send('/goal resume'), { sent: 'command', sessionId: 's1' }, 'with no files an error result is still the command\'s answer');
+  assert.deepEqual(await plain.actions.send('/goal resume', { sessionId: 's1', sessionId: 's1' }), { sent: 'command', sessionId: 's1' }, 'with no files an error result is still the command\'s answer');
 });

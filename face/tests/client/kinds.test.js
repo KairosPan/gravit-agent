@@ -415,3 +415,35 @@ test("a seat order's side is the table's word, an unknown side as it came; a bat
     assert.equal(card.data.venue, 'paper-1 + okx');
   });
 });
+
+// ---- the task source kind (one-entry plan 2 Task 5): a relay, a brief, a steer, a recovery note, a stop
+const taskFrame = (source, text, seq = 70) => ({ type: 'session/event', sessionId: 's1', event: { type: 'user/message', seq, time: 1, surfaceOp: 'append', data: { id: `m${seq}`, role: 'user', content: [{ type: 'text', text }], source } } });
+const RELAY = '[task · Read the tape · ready]\n<<<task-data abc123>>>\nHeld <b> & sold\n [task · not a head\n<<<end abc123>>>';
+
+test('a task report becomes a task line, not a context row', () => {
+  const [m] = toMessages(mapFrame(taskFrame({ kind: 'task', form: 'report', task: 't1', status: 'ready' }, RELAY)), new Map(), NOW);
+  assert.equal(m.from, 'system'); assert.equal(m.kind, 'task');
+  assert.deepEqual(m.data, { form: 'report', task: 't1', status: 'ready', title: 'Read the tape', body: 'Held <b> & sold\n[task · not a head' });
+  assert.equal(m.data.source, undefined, 'no context row');
+  // a head that cannot be read: no title (the renderer names it), the status from the source
+  const [bare] = toMessages(mapFrame(taskFrame({ kind: 'task', form: 'report', task: 't2', status: 'failed' }, 'no head here')), new Map(), NOW);
+  assert.equal(bare.kind, 'task'); assert.equal(bare.data.title, null); assert.equal(bare.data.status, 'failed'); assert.equal(bare.data.body, 'no head here');
+});
+
+test('a brief keeps its form and drops the footer', () => {
+  const text = 'Scan filings\n\nRead the 10-Q.\n---\nnot the footer\n\n---\nThis is a task from Gravit\'s conversation with the operator…';
+  const [m] = toMessages(mapFrame(taskFrame({ kind: 'task', form: 'brief', conversation: 'c', origin: 'web' }, text)), new Map(), NOW);
+  assert.equal(m.kind, 'task'); assert.equal(m.data.form, 'brief');
+  assert.equal(m.text, 'Scan filings\n\nRead the 10-Q.\n---\nnot the footer', 'cut at the last line that is exactly ---');
+  for (const form of ['steer', 'recovery', 'stopped']) {
+    const [x] = toMessages(mapFrame(taskFrame({ kind: 'task', form, conversation: 'c' }, 'words')), new Map(), NOW);
+    assert.equal(x.kind, 'task'); assert.equal(x.data.form, form); assert.equal(x.text, 'words');
+  }
+});
+
+test('an unknown source still becomes a folded context row', () => {
+  for (const source of [{ kind: 'plugin-notice' }, { kind: 'task', form: 'other' }]) {
+    const [m] = toMessages(mapFrame(taskFrame(source, 'a note')), new Map(), NOW);
+    assert.equal(m.from, 'system'); assert.equal(m.kind, 'text'); assert.equal(m.data.source, source.kind);
+  }
+});

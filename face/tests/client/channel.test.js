@@ -52,7 +52,7 @@ test('the page draws the status headline, thesis, latest backtest, backtests, jo
   assert.match(h, />Journal</); assert.match(h, /2026-10-19[\s\S]*?Ran the screen[\s\S]*?2026-10-18[\s\S]*?Started/);
   assert.match(h, />Files</); assert.match(h, /notes\.md/); assert.match(h, /512 B/);
   assert.match(h, />Agents<[\s\S]*?codex/); assert.match(h, />Bots<[\s\S]*?Buffett Type/);
-  assert.match(h, /data-action="newRound" data-id="w1"/);
+  assert.doesNotMatch(h, /data-action="newRound"/, 'no New round: the one conversation takes every new word');
 });
 
 test('a template thesis reads No thesis yet', () => {

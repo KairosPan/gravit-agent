@@ -81,11 +81,12 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
 const started = (f, h) => boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
 const send = f => f.fire('root', 'submit', { target: { closest: () => ({ dataset: { action: 'send' } }) } });
 
-test('before the host answers, the empty state shows with a connecting status line; the list then draws rows and opens the first', async () => {
+test('before the host answers, Messages reads Loading… with a connecting status line and no composer; the list then draws rows and opens the conversation', async () => {
   const f = fakeWindow({ hash: '' });
   const h = host({ rows: [row('s1', { projections: { values: { title: 'One' } } }), row('s2', { updatedAt: 9 })] });
   const store = started(f, h);
-  assert.match(f.html(), /Nothing handed to Gravit yet/);
+  assert.match(f.html(), /<div class="dim">Loading…<\/div>/);
+  assert.doesNotMatch(f.html(), /class="composer"/, 'no composer while the tasks load');
   assert.match(f.html(), /status-line" role="status">connecting…</);
   await h.ready();
   assert.match(f.html(), /row-title">One</);
@@ -93,6 +94,7 @@ test('before the host answers, the empty state shows with a connecting status li
   assert.equal(store.get().tasks.conversation, 's2', 'the conversation /data/tasks names');
   assert.equal(h.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 's2' && c[1].request.maxMessages === undefined), true, 'the conversation was paged');
   assert.doesNotMatch(f.html(), /connecting…/);
+  assert.match(f.html(), /class="composer"/, 'the composer once the conversation is known');
   store.timers.clear();
 });
 
@@ -147,27 +149,22 @@ test('clicking a row opens it: the page read happens and its dot clears; the com
   store.timers.clear();
 });
 
-test('a new message creates the session in the chosen channel, names it, prompts it, and the page moves to it', async () => {
-  const f = fakeWindow({ hash: '' });
+test('typing on Messages prompts the conversation', async () => {
+  const f = fakeWindow({ hash: '#/messages' });
   const say = f.withId('say', { tagName: 'INPUT' });
-  const title = f.withId('nm-title', { tagName: 'INPUT' });
-  const h = host({ rows: [row('s1')] });
+  const h = host({ rows: [row('s1', { updatedAt: 50, agentAvailable: true }), row('conv', { updatedAt: 9, agentAvailable: true })], conversation: 'conv' });
   const store = started(f, h);
   await h.ready();
-  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
-  await settle();
-  assert.match(f.html(), /<select id="nm-where"/);
-  title.value = 'BTC under 70k';
-  f.fire('root', 'input', { target: { ...title, dataset: { action: 'draftTitle' } } });
+  for (const gone of ['startDraft', 'nm-where', 'nm-title', 'new-key']) assert.doesNotMatch(f.html(), new RegExp(gone), gone);
   say.value = 'Buy a little';
   f.fire('root', 'input', { target: say });
   send(f);
   await settle();
-  assert.deepEqual(h.calls.filter(c => c[0] !== 'session/list' && c[0] !== 'session/projections' && c[0] !== 'session/page').map(c => c[0]), ['session/create', 'session/rename', 'session/prompt']);
-  assert.deepEqual(h.calls.find(c => c[0] === 'session/create')[1], { request: { workspaceId: 'w0' } });
-  assert.equal(h.calls.find(c => c[0] === 'session/rename')[1].request.title, 'BTC under 70k');
-  assert.equal(store.get().route.id, 's-new');
-  assert.equal(store.get().draft, null);
+  assert.deepEqual(h.calls.filter(c => !['session/list', 'session/projections', 'session/page'].includes(c[0])).map(c => [c[0], c[1].request?.sessionId]), [['session/prompt', 'conv']], 'one prompt, to the conversation /data/tasks names: no create, no rename');
+  assert.equal(h.calls.find(c => c[0] === 'session/prompt')[1].request.content[0].text, 'Buy a little');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(say.value, '');
+  assert.equal(h.posted.some(p => p[0] === '/data/rooms/say'), false, 'no room is tried');
   store.timers.clear();
 });
 
@@ -456,30 +453,6 @@ test('at the tail, a streamed message still follows the tail', async () => {
   store.timers.clear();
 });
 
-test('an @ goes through the room route: one that addressed a bot sends nothing more; one that fails says so, sends nothing and keeps the words', async () => {
-  const f = fakeWindow({ hash: '' });
-  const say = f.withId('say', { tagName: 'INPUT' });
-  const h = host({ rows: [row('s1')] });
-  const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w1', name: 'room-drill', isRoot: false, sessionIds: ['s1'] }], ungrouped: [], archived: [], presets: {} } : path === '/data/tasks' ? { ok: true, conversation: 's1', tasks: [] } : { bots: [] });
-  const answers = [{ ok: true, status: 200, body: { ok: true, addressed: ['buffett'] } }, { ok: false, status: 409, body: { ok: false, error: 'channel room-drill has no roster' } }];
-  const fetched = [];
-  f.win.fetch = async (path, init) => { fetched.push([path, JSON.parse(init.body)]); const a = answers.shift(); return { ok: a.ok, status: a.status, json: async () => a.body }; };
-  // no postJson handed in: the page's own, on the window's fetch
-  const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson, markdown: null });
-  await h.ready();
-  for (const words of ['@buffett leverage?', '@buffett and now?']) {
-    say.value = words;
-    f.fire('root', 'input', { target: say });
-    send(f);
-    await settle();
-  }
-  assert.deepEqual(fetched.map(x => x[0]), ['/data/rooms/say', '/data/rooms/say']);
-  assert.equal(h.calls.filter(c => c[0] === 'session/prompt').length, 0, 'neither @-line was re-sent to Gravit as a prompt');
-  assert.match(f.html(), /status-line bad" role="status">send: channel room-drill has no roster</);
-  assert.equal(say.value, '@buffett and now?', 'the failed words stay in the composer');
-  store.timers.clear();
-});
-
 test('Details opens on its key and takes focus on its close key; Escape closes it and focus returns to the opener', async () => {
   const f = fakeWindow({ hash: '' });
   const details = f.withSelector('[data-action="toggleDetails"]', { tagName: 'BUTTON', dataset: { action: 'toggleDetails' } });
@@ -765,7 +738,7 @@ test('a market page reads no /data/bars, whatever its id; Markets on screen read
   store.timers.clear();
 });
 
-test('Hand to Gravit opens New message with the words in the composer', async () => {
+test('Hand to Gravit opens the conversation with the words in the composer', async () => {
   const storage = memoryStorage();
   storage.setItem('gravit.market.watchlist.v1', JSON.stringify({ version: 1, items: [{ id: 'us:AAPL', market: 'us', symbol: 'AAPL', name: 'Apple', exchange: 'NASDAQ', currency: 'USD' }] }));
   const f = fakeWindow({ hash: '#/markets/us:AAPL', storage });
@@ -775,8 +748,7 @@ test('Hand to Gravit opens New message with the words in the composer', async ()
   await h.ready();
   f.click({ tagName: 'BUTTON', dataset: { action: 'handToGravit', id: 'us:AAPL' } });
   await settle();
-  assert.deepEqual(store.get().route, { screen: 'messages', id: 'new' });
-  assert.equal(store.get().draft.where, 'w0', 'the root channel');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
   assert.equal(say.value, 'Look at AAPL (Apple)');
   assert.equal(f.doc.activeElement, say);
   store.timers.clear();
@@ -1551,50 +1523,9 @@ test('boot opens the conversation /data/tasks names, though a newer session is a
   const store = started(f, h);
   await h.ready();
   assert.deepEqual(store.get().route, { screen: 'messages', id: null });
-  assert.match(f.html(), /head-title">Gravit here</);
+  assert.equal(store.get().tasks.conversation, 's2');
+  assert.match(f.html(), /head-title">Gravit</);
   assert.equal(store.get().conversations.find(c => c.id === 's1').archived, 'face');
-  store.timers.clear();
-});
-
-test('Fork opens the new session on its history page', async () => {
-  const f = fakeWindow({ hash: '' });
-  const h = host({ rows: [row('s1')], conversation: 's1' });
-  const store = started(f, h);
-  await h.ready();
-  f.click({ tagName: 'BUTTON', dataset: { action: 'fork', conv: 's1' } });
-  await settle();
-  assert.deepEqual(h.calls.find(c => c[0] === 'session/fork')[1], { request: { sessionId: 's1' } });
-  assert.deepEqual(store.get().route, { screen: 'history', id: 's-fork' }, 'a fork is no conversation: its history page');
-  assert.equal(f.win.location.hash, '#/history/s-fork');
-  store.timers.clear();
-});
-
-test('Delete asks first, then a history page it was on goes back to Messages', async () => {
-  const f = fakeWindow({ hash: '#/history/s2' });
-  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })], conversation: 's1' });
-  const store = started(f, h);
-  await h.ready();
-  assert.deepEqual(store.get().route, { screen: 'history', id: 's2' });
-  f.click({ tagName: 'BUTTON', dataset: { action: 'deleteConv', conv: 's2' } });
-  assert.deepEqual(h.posted.filter(p => p[0] === '/data/sessions/delete'), [], 'nothing until the second press');
-  f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
-  await settle();
-  assert.deepEqual(h.posted.find(p => p[0] === '/data/sessions/delete')[1], { sessionId: 's2' });
-  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
-  assert.equal(store.get().conversations.some(c => c.id === 's2'), false);
-  store.timers.clear();
-});
-
-test('Archive moves a history page it was on back to Messages; the archived one stays in the store', async () => {
-  const f = fakeWindow({ hash: '#/history/s2' });
-  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })], conversation: 's1' });
-  const store = started(f, h);
-  await h.ready();
-  f.click({ tagName: 'BUTTON', dataset: { action: 'archive', conv: 's2' } });
-  await settle();
-  assert.deepEqual(h.posted.find(p => p[0] === '/data/sessions/archive')[1], { sessionId: 's2', archived: true });
-  assert.equal(store.get().conversations.find(c => c.id === 's2').archived, 'face');
-  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
   store.timers.clear();
 });
 
@@ -1609,21 +1540,6 @@ test('a session deleted elsewhere reads Not found on its page at the next list, 
   await settle();
   assert.deepEqual(store.get().route, { screen: 'history', id: 's2' });
   assert.match(f.html(), /chan-none dim">Not found</);
-  store.timers.clear();
-});
-
-test('deleting the only open conversation stops reading it', async () => {
-  const f = fakeWindow({ hash: '' });
-  const h = host({ rows: [row('s1', { agentAvailable: true })] });
-  const store = started(f, h);
-  await h.ready();
-  const followed = h.streams.find(s => s.name === 'session/follow' && s.args.request.address.sessionId === 's1');
-  assert.ok(followed, 'the live conversation is followed');
-  f.click({ tagName: 'BUTTON', dataset: { action: 'deleteConv', conv: 's1' } });
-  f.click({ tagName: 'BUTTON', dataset: { action: 'confirmYes' } });
-  await settle();
-  assert.equal(store.get().route.id, null);
-  assert.equal(followed.cancelled, true, 'the follow of the deleted conversation ends');
   store.timers.clear();
 });
 
@@ -1662,36 +1578,6 @@ test('an old channel link lands on its strategy page, which reads its overview o
   f.fire('win', 'hashchange');
   await settle();
   assert.deepEqual(store.get().route, { screen: 'messages', id: null }, 'the root is the conversation');
-  store.timers.clear();
-});
-
-test('New round opens New message with Where on the channel', async () => {
-  const f = fakeWindow({ hash: '#/channel/w0' });
-  const h = host({ rows: [row('s1')] });
-  const store = started(f, h);
-  await h.ready();
-  f.click({ tagName: 'BUTTON', dataset: { action: 'newRound', id: 'w0' } });
-  assert.equal(store.get().route.id, 'new');
-  assert.equal(store.get().draft.where, 'w0');
-  store.timers.clear();
-});
-
-test('New channel… creates the channel and selects it in Where', async () => {
-  const f = fakeWindow({ hash: '' });
-  const h = host({ rows: [row('s1')] });
-  const store = started(f, h);
-  await h.ready();
-  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
-  f.fire('root', 'change', { target: { tagName: 'SELECT', value: '__new', dataset: { action: 'draftWhere' } } });
-  assert.equal(store.get().edit.kind, 'newChannel');
-  assert.equal(store.get().draft.where, 'w0', 'Where keeps its channel while the name is typed');
-  f.withSelector('.inline-edit [name]', { tagName: 'INPUT', name: 'channel', value: 'gamma ray' });
-  f.click({ tagName: 'BUTTON', dataset: { action: 'commitEdit' } });
-  await settle();
-  assert.deepEqual(h.posted.find(p => p[0] === '/data/channels')[1], { name: 'gamma-ray' });
-  assert.equal(store.get().edit, null);
-  assert.equal(store.get().draft.where, 'w-gamma-ray');
-  assert.match(f.html(), /<option value="w-gamma-ray" selected>gamma-ray<\/option>/);
   store.timers.clear();
 });
 
@@ -3991,7 +3877,7 @@ test('the rows keep their scroll for when a query clears; the results keep their
   store.timers.clear();
 });
 
-test('focus stays on the row\'s pin key and on Details\' Pin key through pin and unpin', async () => {
+test('focus stays on the row\'s pin key through pin and unpin', async () => {
   const f = fakeWindow({ hash: '' });
   const say = f.withId('say', { tagName: 'TEXTAREA' });
   const key = f.withId('pin-s2', { tagName: 'BUTTON', dataset: { action: 'pin', conv: 's2' }, presentIf: /id="pin-s2"/ });
@@ -4010,15 +3896,6 @@ test('focus stays on the row\'s pin key and on Details\' Pin key through pin and
   assert.deepEqual(store.get().pinned, []);
   assert.equal(f.doc.activeElement, key, 'and back to Pin');
   assert.notEqual(f.doc.activeElement, say);
-
-  const dkey = f.withId('details-pin-s1', { tagName: 'BUTTON', dataset: { action: 'pin', conv: 's1' }, presentIf: /id="details-pin-s1"/ });
-  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleDetails' } });
-  dkey.focus();
-  f.click(dkey);
-  await settle();
-  assert.deepEqual(store.get().pinned, ['s1']);
-  assert.match(f.html(), /data-action="unpin" data-conv="s1" id="details-pin-s1"/);
-  assert.equal(f.doc.activeElement, dkey, "Details' key keeps focus as it turns to Unpin");
   store.timers.clear();
 });
 
@@ -4176,30 +4053,21 @@ test('a failed send keeps the whole draft, chips included, under its own convers
   store.timers.clear();
 });
 
-test('New message keeps its draft under new, and a created conversation clears it', async () => {
-  const f = fakeWindow({ hash: '#/messages/s1' });
-  const say = f.withId('say', { tagName: 'INPUT' });
-  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+test("the conversation's draft stays across a visit elsewhere, and a send takes it", async () => {
+  const f = fakeWindow({ hash: '#/messages' });
+  const say = f.withId('say', { tagName: 'INPUT', presentIf: /id="say"/ });
+  const h = host({ rows: [row('s1', { agentAvailable: true })], conversation: 's1' });
   const store = await bootComposer(f, h, valueEditor);
-  type(f, say, 'in s1');
-  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
-  await settle();
-  assert.equal(say.value, '', 'New message has its own draft');
   type(f, say, 'a new thought');
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
-  await settle();
-  assert.equal(say.value, 'in s1');
-  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
-  await settle();
-  assert.equal(say.value, 'a new thought', 'kept under new');
+  f.win.location.hash = '#/history'; f.fire('win', 'hashchange'); await settle();
+  assert.doesNotMatch(f.html(), /class="composer"/, 'no composer off Messages');
+  f.win.location.hash = '#/messages'; f.fire('win', 'hashchange'); await settle();
+  assert.equal(say.value, 'a new thought', "kept under the conversation's id");
   send(f);
   await settle();
-  assert.equal(store.get().route.id, 's-new');
-  assert.deepEqual(promptsOf(h), [['s-new', 'a new thought']]);
+  assert.deepEqual(promptsOf(h), [['s1', 'a new thought']]);
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
   assert.equal(say.value, '');
-  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
-  await settle();
-  assert.equal(say.value, '', 'the created conversation took it');
   store.timers.clear();
 });
 
@@ -4327,8 +4195,8 @@ const CMDS = [{ name: 'compact', description: 'Compact the conversation' }, { na
 const SKILLS = [{ name: 'lunhui', description: 'An A-share run', modelInvocable: true }];
 const FILES = [{ path: 'strategies/x.md', kind: 'file' }, { path: 'strategies', kind: 'directory' }];
 // the test host with a root at /r, s1 in the channel alpha (/r/strategies/alpha), and the menus' reads answered
-function menuHost({ rows, files, roster = [] } = {}) {
-  const h = host({ rows: rows ?? [titled('s1', 'Alpha', { updatedAt: 50, agentAvailable: true }), titled('s2', 'Beta', { updatedAt: 9 })] });
+function menuHost({ rows, files, roster = [], conversation } = {}) {
+  const h = host({ rows: rows ?? [titled('s1', 'Alpha', { updatedAt: 50, agentAvailable: true }), titled('s2', 'Beta', { updatedAt: 9 })], conversation });
   h.inventory['/data/bots.json'].bots[0].description = 'A value investor';
   const call = h.call, getJson = h.getJson, postJson = h.postJson;
   h.call = async (endpoint, args) => {
@@ -4348,6 +4216,7 @@ function menuHost({ rows, files, roster = [] } = {}) {
   return h;
 }
 const menuRig = async (opts = {}) => {
+  // (opts.conversation: the one /data/tasks names, else the newest row)
   const f = fakeWindow({ hash: opts.hash ?? '#/messages/s1' });
   const say = f.withId('say', { tagName: 'INPUT' });
   const slot = f.withId('composer-menu');
@@ -4381,11 +4250,9 @@ test('typing / on a live conversation opens the menu with no page render, and ea
   store.timers.clear();
 });
 
-test('/ on New message opens nothing; @ there lists files and conversations', async () => {
-  const { f, say, slot, h, store } = await menuRig();
-  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
-  await settle();
-  say.focus();
+test('/ on a conversation the list does not carry yet opens nothing; @ there lists files and conversations', async () => {
+  const { f, say, slot, h, store } = await menuRig({ hash: '#/messages', conversation: 'fresh' });
+  assert.match(f.html(), /Nothing handed to Gravit yet[\s\S]*class="composer"/, 'the empty state with its composer');
   typeMenu(f, say, '/');
   await settle();
   assert.equal(slot.innerHTML ?? '', '');
@@ -4395,7 +4262,7 @@ test('/ on New message opens nothing; @ there lists files and conversations', as
   assert.match(slot.innerHTML, /cmenu-group">Files and folders</);
   assert.match(slot.innerHTML, /cmenu-group">Conversations</);
   assert.doesNotMatch(slot.innerHTML, /Bots in this room/);
-  assert.ok(h.reads.includes('/data/files?q='), 'New message in the root channel reads the root');
+  assert.ok(h.reads.includes('/data/files?q='), 'a conversation in no channel reads the root');
   store.timers.clear();
 });
 
@@ -4729,31 +4596,26 @@ test('Compact from the menu runs /compact at once, and the draft keeps its other
   store.timers.clear();
 });
 
-test('a bot chip with a conversation chip is refused before sending, and the draft stays', async () => {
+test('a bot chip with a conversation chip is one prompt to Gravit; no room is tried', async () => {
   const { f, say, h, store } = await menuRig();
-  const draft = [{ type: 'text', text: 'ask ' }, { type: 'chip', chip: botChip }, { type: 'text', text: ' about ' }, { type: 'chip', chip: { kind: 'conversation', id: 's2', label: 'Beta' } }];
-  putRuns(f, say, draft);
+  putRuns(f, say, [{ type: 'text', text: 'ask ' }, { type: 'chip', chip: botChip }, { type: 'text', text: ' about ' }, { type: 'chip', chip: { kind: 'conversation', id: 's2', label: 'Beta' } }]);
   send(f);
   await settle();
   assert.deepEqual(saysOf(h), []);
-  assert.deepEqual(promptsOf(h), []);
-  assert.equal(sayOf(store.get().status.line), "Conversations go to Gravit, not to a room's bots");
-  assert.equal(store.get().status.bad, true);
-  store.dispatch('toggleRail');
-  assert.deepEqual(say.runs, draft, 'the draft stays');
+  assert.equal(promptsOf(h).length, 1);
+  assert.equal(promptsOf(h)[0][0], 's1');
+  assert.match(promptsOf(h)[0][1], /^ask @buffett about /);
+  assert.equal(store.get().status.bad, false);
   store.timers.clear();
 });
 
-test("a bot chip with a file chip goes to the room with the bot's @id and the file's path", async () => {
-  const { f, say, h, store } = await menuRig({ wrap: h => {
-    const postJson = h.postJson;
-    h.postJson = async (path, body) => (path === '/data/rooms/say' ? (h.posted.push([path, body]), { ok: true, addressed: ['buffett'] }) : postJson(path, body));
-  } });
+test("a bot chip with a file chip is prompted to Gravit with the bot's @id and the file's path", async () => {
+  const { f, say, h, store } = await menuRig();
   putRuns(f, say, [{ type: 'text', text: 'ask ' }, { type: 'chip', chip: botChip }, { type: 'text', text: ' about ' }, { type: 'chip', chip: { kind: 'file', path: 'strategies/alpha/notes.md', dir: false, label: 'notes.md' } }]);
   send(f);
   await settle();
-  assert.deepEqual(saysOf(h), [['/data/rooms/say', { sessionId: 's1', text: 'ask @buffett about @notes.md' }]]);
-  assert.deepEqual(promptsOf(h), []);
+  assert.deepEqual(saysOf(h), []);
+  assert.deepEqual(promptsOf(h), [['s1', 'ask @buffett about @notes.md']]);
   store.timers.clear();
 });
 
@@ -4767,36 +4629,13 @@ test('a file chip that reads like a bot, with no bot chip, is prompted to Gravit
   store.timers.clear();
 });
 
-test('a typed @buffett with no chip still tries the room, as today', async () => {
+test('a typed @buffett is prompted to Gravit; no room is tried', async () => {
   const { f, say, h, store } = await menuRig();
   putRuns(f, say, [{ type: 'text', text: '@buffett leverage?' }]);
   send(f);
   await settle();
-  assert.deepEqual(saysOf(h), [['/data/rooms/say', { sessionId: 's1', text: '@buffett leverage?' }]]);
-  assert.deepEqual(promptsOf(h), [['s1', '@buffett leverage?']], 'nobody addressed, so an ordinary prompt');
-  store.timers.clear();
-});
-
-test('a typed @buffett after a chip still reads as a mention: text runs are joined across chips as a space', async () => {
-  const { f, say, h, store } = await menuRig();
-  putRuns(f, say, [{ type: 'text', text: 'hi' }, { type: 'chip', chip: { kind: 'file', path: 'strategies/alpha/notes.md', dir: false, label: 'notes.md' } }, { type: 'text', text: '@buffett look' }]);
-  send(f);
-  await settle();
-  assert.equal(saysOf(h).length, 1, 'the typed @buffett tries the room');
-  store.timers.clear();
-});
-
-test('a typed @buffett with a conversation chip in a channel is refused before sending, and the draft stays', async () => {
-  const { f, say, h, store } = await menuRig();
-  const draft = [{ type: 'text', text: '@buffett see ' }, { type: 'chip', chip: { kind: 'conversation', id: 's2', label: 'Beta' } }];
-  putRuns(f, say, draft);
-  send(f);
-  await settle();
   assert.deepEqual(saysOf(h), []);
-  assert.deepEqual(promptsOf(h), []);
-  assert.equal(sayOf(store.get().status.line), "Conversations go to Gravit, not to a room's bots");
-  store.dispatch('toggleRail');
-  assert.deepEqual(say.runs, draft);
+  assert.deepEqual(promptsOf(h), [['s1', '@buffett leverage?']]);
   store.timers.clear();
 });
 
@@ -4952,24 +4791,6 @@ test('an image over the limit is refused above the box by name, and the rest are
   f.click({ tagName: 'BUTTON', dataset: { action: 'attachRemove', key } });
   assert.match(f.html(), /id="composer-note" role="status"><\/div>/, 'a remove clears the note');
   assert.equal(note.textContent, '');
-  store.timers.clear();
-});
-
-test('on New message files wait as ready and nothing uploads', async () => {
-  const f = fakeWindow({ hash: '#/messages/s1' });
-  const { input } = composerEls(f);
-  const h = host({ rows: [row('s1', { agentAvailable: true })] });
-  const att = fakeAttachments();
-  const store = await bootFiles(f, h, att);
-  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
-  await settle();
-  pick(f, input, [CSV()]);
-  assert.equal(att.uploads.length, 0);
-  assert.match(f.html(), /<div class="file-card"><span class="file-icon">/);
-  assert.match(f.html(), /file-meta">CSV · 2.8 MB</);
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
-  await settle();
-  assert.doesNotMatch(f.html(), /prices.csv/, 'the file is New message\'s');
   store.timers.clear();
 });
 
@@ -5329,7 +5150,7 @@ test('an image goes inline as base64 with its media type and name', async () => 
   store.timers.clear();
 });
 
-test('files with a bot chip are refused before sending, and a typed @word with files goes to Gravit as a prompt', async () => {
+test('files with a bot chip go to Gravit as one prompt; no room is tried', async () => {
   const f = fakeWindow({ hash: '#/messages/s1' });
   const { say, input } = composerEls(f);
   const h = menuHost();
@@ -5338,22 +5159,12 @@ test('files with a bot chip are refused before sending, and a typed @word with f
   pick(f, input, [CSV()]);
   att.uploads[0].answer('rcpt-1');
   await settle();
-  const draft = [{ type: 'text', text: 'ask ' }, { type: 'chip', chip: botChip }];
-  putRuns(f, say, draft);
-  send(f);
-  await settle();
-  assert.deepEqual(saysOf(h), []);
-  assert.deepEqual(promptsOf(h), []);
-  assert.equal(sayOf(store.get().status.line), "Files go to Gravit, not to a room's bots");
-  assert.equal(store.get().status.bad, true);
-  store.dispatch('toggleRail');
-  assert.deepEqual(say.runs, draft, 'the draft stays');
-  assert.match(f.html(), /prices.csv/, 'and its file');
-  typeMenu(f, say, '@buffett look');
+  putRuns(f, say, [{ type: 'text', text: 'ask ' }, { type: 'chip', chip: botChip }]);
   send(f);
   await settle();
   assert.deepEqual(saysOf(h), [], 'never tried at the room');
-  assert.deepEqual(contentsOf(h), [['s1', [{ type: 'text', text: '@buffett look' }, { type: 'file', receiptId: 'rcpt-1' }]]]);
+  assert.deepEqual(contentsOf(h), [['s1', [{ type: 'text', text: 'ask @buffett' }, { type: 'file', receiptId: 'rcpt-1' }]]]);
+  assert.equal(store.get().status.bad, false);
   store.timers.clear();
 });
 
@@ -5488,55 +5299,45 @@ test('a dropped receipt uploads again once and sends; a second drop keeps the dr
   bad.store.timers.clear();
 });
 
-test('New message with a file creates, uploads to the new conversation, then prompts', async () => {
-  const f = fakeWindow({ hash: '#/messages/s1' });
+test('on the empty state a file uploads to the conversation /data/tasks names, and the send prompts it', async () => {
+  const f = fakeWindow({ hash: '#/messages' });
   const { say, input } = composerEls(f);
-  const h = host({ rows: [row('s1', { agentAvailable: true })] });
+  const h = host({ rows: [row('s1', { agentAvailable: true })], conversation: 'fresh' });
   const att = fakeAttachments();
   const store = await bootFiles(f, h, att);
-  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
-  await settle();
+  assert.match(f.html(), /Nothing handed to Gravit yet/);
   pick(f, input, [CSV()]);
+  assert.equal(att.uploads.length, 1);
+  assert.equal(att.uploads[0].id, 'fresh', 'uploaded to the conversation, listed or not');
+  att.uploads[0].answer('rcpt-9');
+  await settle();
   type(f, say, 'read it');
   send(f);
   await settle();
-  assert.equal(att.uploads.length, 1);
-  assert.equal(att.uploads[0].id, 's-new', 'uploaded to the conversation just made');
-  assert.ok(h.calls.some(c => c[0] === 'session/create'));
-  assert.deepEqual(promptsOf(h), [], 'no prompt before the file is up');
-  att.uploads[0].answer('rcpt-9');
-  await settle();
-  assert.deepEqual(contentsOf(h), [['s-new', [{ type: 'text', text: 'read it' }, { type: 'file', receiptId: 'rcpt-9' }]]]);
-  assert.equal(store.get().route.id, 's-new');
+  assert.equal(h.calls.some(c => c[0] === 'session/create'), false, 'nothing is created');
+  assert.deepEqual(contentsOf(h), [['fresh', [{ type: 'text', text: 'read it' }, { type: 'file', receiptId: 'rcpt-9' }]]]);
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
   assert.equal(say.value, '');
-  assert.doesNotMatch(f.html(), /prices.csv/, 'the created conversation took the draft and sent it');
+  assert.doesNotMatch(f.html(), /prices.csv/, 'the send took the draft');
   noBareReceipts(h);
   store.timers.clear();
 });
 
-test('New message refused for its image opens the created conversation with the whole draft and the line', async () => {
+test('a send refused for its image keeps the whole draft and draws the line', async () => {
   const f = fakeWindow({ hash: '' });
   const { say, input } = composerEls(f);
-  // the session New message makes is the one /data/tasks names, so it opens on Messages with its composer (Task 5 retires New message)
-  const h = host({ rows: [row('s1', { agentAvailable: true })], conversation: 's-new' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })], conversation: 's1' });
   prompting(h, () => attachmentInvalid('MODEL_DOES_NOT_SUPPORT_IMAGES'));
   const store = await bootFiles(f, h, fakeAttachments());
-  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
-  await settle();
   type(f, say, 'look');
   pick(f, input, [pngFile()]);
   send(f);
   await settle();
   assert.equal(promptsOf(h).length, 1);
-  assert.deepEqual(store.get().route, { screen: 'messages', id: null }, 'the created conversation is open');
-  assert.equal(store.get().draft, null);
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null }, 'the conversation stays open');
   assert.equal(say.value, 'look', 'its words');
   assert.match(f.html(), /alt="chart.png"/, 'its image');
   assert.match(f.html(), MODEL_LINE, 'and the line');
-  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
-  await settle();
-  assert.equal(say.value, '', 'New message is empty again');
-  assert.doesNotMatch(f.html(), /chart.png/);
   store.timers.clear();
 });
 
@@ -5565,42 +5366,6 @@ const executing = (h, answer) => {
   };
 };
 const execsOf = h => h.calls.filter(c => c[0] === 'commands/execute').map(c => c[1]);
-
-test('a failed rename on New message opens the conversation with the whole draft, and its waiting file uploads on send', async () => {
-  const f = fakeWindow({ hash: '' });
-  const { say, input } = composerEls(f);
-  const title = f.withId('nm-title', { tagName: 'INPUT' });
-  // the session New message makes is the one /data/tasks names, so it opens on Messages with its composer (Task 5 retires New message)
-  const h = host({ rows: [row('s1', { agentAvailable: true })], conversation: 's-new' });
-  const call = h.call;
-  h.call = async (endpoint, args) => { if (endpoint === 'session/rename') { h.calls.push([endpoint, args]); throw Object.assign(new Error('no'), { code: 'rename/failed' }); } return call(endpoint, args); };
-  const att = fakeAttachments();
-  const store = await bootFiles(f, h, att);
-  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
-  await settle();
-  title.value = 'Prices';
-  f.fire('root', 'input', { target: { ...title, dataset: { action: 'draftTitle' } } });
-  pick(f, input, [CSV()]);
-  type(f, say, 'read it');
-  send(f);
-  await settle();
-  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
-  assert.equal(say.value, 'read it');
-  assert.match(f.html(), /prices.csv/);
-  assert.equal(att.uploads.length, 0, 'nothing uploaded yet');
-  send(f);
-  await settle();
-  assert.equal(sayOf(store.get().status.line), 'Files are still uploading', 'a waiting file holds the send');
-  assert.equal(att.uploads.length, 1, 'and starts its upload');
-  assert.equal(att.uploads[0].id, 's-new');
-  att.uploads[0].answer('rcpt-1');
-  await settle();
-  send(f);
-  await settle();
-  assert.deepEqual(contentsOf(h), [['s-new', [{ type: 'text', text: 'read it' }, { type: 'file', receiptId: 'rcpt-1' }]]]);
-  noBareReceipts(h);
-  store.timers.clear();
-});
 
 test('a command refusing the files on a cold conversation (no kept rows) keeps the whole draft and shows its text', async () => {
   const f = fakeWindow({ hash: '#/messages/s1' });
@@ -5715,22 +5480,19 @@ test('a restage that ends off screen says the files are up and the message was n
   store.timers.clear();
 });
 
-test('New message refused for its image keeps a chip and a file beside it', async () => {
+test('a send refused for its image keeps a chip and a file beside it', async () => {
   const f = fakeWindow({ hash: '' });
   const { say, input } = composerEls(f);
-  // the session New message makes is the one /data/tasks names, so it opens on Messages with its composer (Task 5 retires New message)
-  const h = host({ rows: [row('s1', { agentAvailable: true })], conversation: 's-new' });
+  const h = host({ rows: [row('s1', { agentAvailable: true })], conversation: 's1' });
   prompting(h, () => attachmentInvalid('MODEL_DOES_NOT_SUPPORT_IMAGES'));
   const att = fakeAttachments();
   const store = await bootFiles(f, h, att, runsEditor);
-  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
+  pick(f, input, [CSV(), pngFile()]);
+  att.uploads[0].answer('rcpt-1');
   await settle();
   const draft = [{ type: 'text', text: 'compare ' }, { type: 'chip', chip: fileChip }];
   putRuns(f, say, draft);
-  pick(f, input, [CSV(), pngFile()]);
   send(f);
-  await settle();
-  att.uploads[0].answer('rcpt-1');
   await settle();
   assert.equal(promptsOf(h).length, 1);
   assert.deepEqual(store.get().route, { screen: 'messages', id: null });
@@ -5961,26 +5723,21 @@ test('focus returns to the image clicked, though the click did not focus it (Saf
   store.timers.clear();
 });
 
-test('a send from the empty state (no conversation, no New message) says to open one first and keeps the draft', async () => {
+test('with no conversation to write to Messages draws no composer, and a send says so, keeps the words and sends nothing', async () => {
   const f = fakeWindow({ hash: '#/messages' });
-  const { say, input } = composerEls(f);
-  const h = host({ rows: [] });
+  const { say } = composerEls(f);
+  const h = host({ rows: [row('s1')], conversation: null });
   const att = fakeAttachments();
   const store = await bootFiles(f, h, att);
-  assert.equal(store.get().route.id ?? null, null, 'the empty state');
+  assert.match(f.html(), /Gravit's conversation is off/);
+  assert.doesNotMatch(f.html(), /class="composer"/);
   type(f, say, 'hello');
   send(f);
   await settle();
-  assert.match(f.html(), /status-line bad" role="status">Open a conversation first</);
+  assert.match(f.html(), /status-line bad" role="status">Gravit(&#39;|')s conversation is not open</);
   assert.equal(say.value, 'hello', 'the words are kept');
-  pick(f, input, [CSV()]);
-  type(f, say, '');
-  send(f);
-  await settle();
-  assert.match(f.html(), /status-line bad" role="status">Open a conversation first</, 'files alone too');
-  assert.match(f.html(), /file-name">prices.csv</, 'the file is kept');
   assert.deepEqual(promptsOf(h), []);
-  assert.equal(att.uploads.length, 0, 'nothing uploads from the empty state');
+  assert.equal(att.uploads.length, 0);
   store.timers.clear();
 });
 
@@ -6475,21 +6232,6 @@ test('the rail is not redrawn while a press is down, and is once it lets go', as
   f.fire('doc', 'pointerup', { button: 0 });
   await settle();
   assert.match(rail.innerHTML, /Turn 1 · jump/);
-  store.timers.clear();
-});
-
-test('the turn the view is on is measured once the draft screen gives the conversation back', async () => {
-  const { f, rail, h, snap } = railRig();
-  const store = started(f, h);
-  await h.ready();
-  f.click({ tagName: 'BUTTON', dataset: { action: 'startDraft' } });
-  await settle();
-  assert.ok(store.get().draft);
-  await snap();
-  f.click({ tagName: 'BUTTON', dataset: { action: 'cancelDraft' } });
-  await settle();
-  assert.equal(store.get().draft, null);
-  assert.match(rail.innerHTML, /class="turn-tick loaded active" id="turn-tick-3"/);
   store.timers.clear();
 });
 
@@ -7205,16 +6947,29 @@ const macRig = async (hash = '#/messages/s1') => {
   return { f, h, store, say };
 };
 
-test('⌥⌘N from the editor opens New message', async () => {
+test('⌥⌘N focuses the composer on Messages', async () => {
   const { f, store, say } = await macRig();
-  say.focus();
+  const cq = searchBox(f);
+  cq.focus();
   let prevented = false;
   f.fire('doc', 'keydown', chord('KeyN', { altKey: true, metaKey: true, key: 'ñ' }, () => { prevented = true; }));
   await settle();
   assert.ok(prevented, "the browser's own key is not run");
-  assert.deepEqual(store.get().route, { screen: 'messages', id: 'new' });
-  assert.ok(store.get().draft, 'a draft stands');
+  assert.equal(f.doc.activeElement, say, 'the composer has focus');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  // from another screen: Messages, then the composer once it is drawn
+  const g = fakeWindow({ hash: '#/discover' });
+  g.win.navigator = { platform: 'MacIntel' };
+  const gsay = g.withId('say', { tagName: 'TEXTAREA', presentIf: /id="say"/ });
+  const h2 = host({ rows: [row('s1')] });
+  const s2 = started(g, h2);
+  await h2.ready();
+  g.fire('doc', 'keydown', chord('KeyN', { altKey: true, metaKey: true }));
+  await settle();
+  assert.deepEqual(s2.get().route, { screen: 'messages', id: null });
+  assert.equal(g.doc.activeElement, gsay);
   store.timers.clear();
+  s2.timers.clear();
 });
 
 test('⌥⌘, opens Settings from an input', async () => {
@@ -7263,12 +7018,13 @@ test('Ctrl+Alt+N on a Mac does nothing', async () => {
   assert.equal(store.get(), before);
   // off a Mac they are the keys
   const g = fakeWindow({ hash: '#/messages/s1' });
+  const gsay = g.withId('say', { tagName: 'TEXTAREA' });
   const h2 = host({ rows: [row('s1')] });
   const s2 = started(g, h2);
   await h2.ready();
   g.fire('doc', 'keydown', chord('KeyN', { altKey: true, ctrlKey: true }));
   await settle();
-  assert.deepEqual(s2.get().route, { screen: 'messages', id: 'new' });
+  assert.equal(g.doc.activeElement, gsay, 'Ctrl+Alt+N focuses the composer');
   g.fire('doc', 'keydown', chord('Slash', { ctrlKey: true }));
   assert.deepEqual(s2.get().shortcuts, { q: '' });
   store.timers.clear();
@@ -7291,11 +7047,12 @@ test('⌥⌘, while What you sign stands, and ⌥⌘N while pinyin composes, do 
   f.win.location.hash = '#/messages/s1'; f.fire('win', 'hashchange'); await settle();
   say.focus();
   const route = store.get().route;
-  f.fire('doc', 'keydown', chord('KeyN', { altKey: true, metaKey: true, isComposing: true }));
-  f.fire('doc', 'keydown', chord('KeyN', { altKey: true, metaKey: true, keyCode: 229 }));
+  let taken = false;
+  f.fire('doc', 'keydown', chord('KeyN', { altKey: true, metaKey: true, isComposing: true }, () => { taken = true; }));
+  f.fire('doc', 'keydown', chord('KeyN', { altKey: true, metaKey: true, keyCode: 229 }, () => { taken = true; }));
   await settle();
   assert.deepEqual(store.get().route, route, 'the composition keeps its keys');
-  assert.equal(store.get().draft, null);
+  assert.equal(taken, false, 'neither is taken from the composition');
   store.timers.clear();
 });
 

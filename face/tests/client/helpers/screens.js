@@ -312,14 +312,17 @@ export function searchStates(s) {
   ];
 }
 
-// the states stage 1 can show: empty, a conversation with every kind, a group thinking, Details, Settings, a draft, a bad status, the rail folded
+// the states stage 1 can show: loading, a conversation with every kind, a group thinking, Details, the task kinds, Settings, the
+// conversation off and loading, a bad status, the rail folded
 export function everyState() {
   const base = R.hostList(emptyState(), { conversations: [conv('s1', { messages: KINDS, running: true, usage: { tokenUsage: { outputTokens: 1 }, contextPressure: 0.5 }, stats: { turns: 1, steps: 2, llmMs: 900, toolMs: 0, ttftMs: 300, ttftSteps: 2, decodeMs: 500, decodeTokens: 20 }, created: NOW }), conv('g', { kind: 'group', members: ['gravit', 'buffett'], thinking: 'text', messages: [m('g1', { from: 'buffett', text: 'hold', data: { name: 'Buffett Type', markdown: true, memberSessionId: 'm1', memberTurn: 2 } })] })], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }, { workspaceId: 'w-cn', name: 'cn-market', isRoot: false }], bots: [{ id: 'buffett', name: 'Buffett Type' }] });
   const open = onConv(base, 's1');
   return [
     emptyState(), open, lunhuiStates(open), ...stockStates(open), lunhuiStates(open, { 's1-p1': { tile: 'environment', breadth: 'dist' } }), onConv(base, 'g'), R.toggleDetails(open), R.askConfirm(R.toggleDetails(open), { action: 'stopGravit', id: 's1' }),
-    R.startEdit(R.toggleDetails(open), { kind: 'rename', convId: 's1', error: t('details.nameEmpty') }), R.openSettings(open), R.startDraft(open, { now: NOW }),
-    R.startEdit(R.startDraft(open, { now: NOW }), { kind: 'newChannel', error: t('channel.name.rule') }),
+    // (where the rename editor, New message and its New channel… stood: one-entry plan 2 Task 5 drew them away) the task kinds,
+    // the conversation off, and its tasks loading
+    taskKindStates(base), R.openSettings(open), R.tasksOff(open, { at: NOW }),
+    R.nav(R.hostList(emptyState(), { conversations: base.conversations, channels: base.channels }), { screen: 'messages', id: null }),
     R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open),
     ...searchStates(R.hostList(open, { conversations: [...open.conversations, conv('old', { title: 'T old', archived: 'face' })] })), R.hostPins(open, ['s1']),
     R.traceLoaded(onConv(base, 'g'), { convId: 'g', msgId: 'g1', messages: [m('tg1', { kind: 'tool', text: 'account', data: { callId: 'g1c', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }) } }), m('tg2', { from: 'system', text: 'context' })] }),
@@ -337,7 +340,25 @@ export function everyState() {
     ...sessionPageStates(base),
     // plan 2 of one entry, Task 4: the rail of tasks on Messages
     ...taskRailStates(base),
+    // plan 2 of one entry, Task 5: the conversation known but not listed yet (its empty state, the rail beside it), and the
+    // tasks' first read failed
+    R.tasksLoaded(onConv(base, 'fresh'), { conversation: 'fresh', tasks: [{ id: 'ru', title: 'Price the basket', origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW - 3 * MIN, lastEventAt: NOW - MIN, lastSeq: 1 }], at: NOW }),
+    R.tasksFailed(R.nav(R.hostList(emptyState(), { conversations: base.conversations, channels: base.channels }), { screen: 'messages', id: null }), { at: NOW }),
   ];
+}
+
+// the task source kind (one-entry plan 2 Task 5): a report relayed into the conversation (its title read, and one unread named
+// by the tasks slice), a worker's brief and a steer Gravit relayed, a recovery note, a stop
+function taskKindStates(base) {
+  const k = (id, form, text, data = {}) => m(id, { from: 'system', kind: 'task', text, data: { form, ...data } });
+  const messages = [
+    k('k1', 'report', '[task · Read the tape · ready]', { task: 'rt', status: 'ready', title: 'Read the tape', body: 'Held the line; sold half' }),
+    k('k2', 'report', 'no head', { task: 'sf', status: 'blocked', title: null, body: 'No paper venue is granted' }),
+    k('k3', 'brief', 'Scan filings\n\nRead the 10-Q'), k('k4', 'steer', 'Carry on with the second filing'),
+    k('k5', 'recovery', 'The face restarted while you worked.'), k('k6', 'stopped', 'Stopped by the conversation.'),
+  ];
+  const listed = R.hostList(base, { conversations: [...base.conversations, conv('tk', { messages, loaded: true })] });
+  return R.tasksLoaded(R.nav(listed, { screen: 'messages', id: null }), { conversation: 'tk', tasks: [{ id: 'sf', title: 'Scan filings', origin: 'web', state: 'blocked', group: 'you', steps: [], startedAt: NOW, lastEventAt: NOW, lastSeq: 1 }], at: NOW });
 }
 
 // the rail of tasks under Messages' head: a line in every state — a worker's order card and a question waiting on it, one
@@ -637,7 +658,7 @@ const CONTENT_FIELDS = new Set([
   'text', 'title', 'name', 'label', 'note', 'notes', 'message', 'description', 'question', 'header', 'prompt', 'response', 'detail',
   'displayReason', 'reason', 'why', 'whyNot', 'said', 'error', 'words', 'what', 'example', 'via', 'readOnlyBecause', 'noTradeBecause',
   'proven', 'lands', 'guard', 'beast', 'door', 'request', 'plan', 'soul', 'legs', 'line', 'broken', 'setupIssues', 'freezes',
-  'placeholder', 'rate', 'whose', 'by', 'sub', 'subtitle', 'frontLine', 'category', 'age', 'steps',
+  'placeholder', 'rate', 'whose', 'by', 'sub', 'subtitle', 'frontLine', 'category', 'age', 'steps', 'body',
   // names: a venue's, a product's, an agent's, an account's, a market's, a network's
   'productName', 'protocol', 'quoteFrom', 'sourceWord', 'venueName', 'accountName', 'agentName', 'byName', 'toName', 'unitWord',
   'network', 'networks', 'chain', 'chains', 'bridgeChains', 'funded', 'exchange', 'feed', 'source', 'model', 'route', 'runtime',

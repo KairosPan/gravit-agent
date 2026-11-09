@@ -1,4 +1,4 @@
-// face/client/js/reducers/messages.js — the conversation side on the host (spec 2026-10-19 §5, §7): routes, the draft, Details.
+// face/client/js/reducers/messages.js — the conversation side on the host (spec 2026-10-19 §5, §7): routes, Details.
 // What the host says about a conversation lives in reducers/host.js; what the operator does with the page lives here.
 import { canonicalId, isAccountKey } from '../host/market-view.js';
 import { onScreenId } from '../host/sessions.js';
@@ -15,13 +15,10 @@ export const closeOverlays = s => ({
 });
 const upd = (state, id, fn) => ({ ...state, conversations: state.conversations.map(c => (c.id === id ? fn(c) : c)) });
 
-// the channel a new conversation goes to by default: the root (the workbench), else the first listed
-const defaultWhere = s => s.channels?.find(c => c.isRoot)?.workspaceId ?? s.channels?.[0]?.workspaceId ?? null;
-
 const MESSAGES = { screen: 'messages', id: null };
 // where a route lands (plan 2 of one entry). Messages is the conversation and carries no id. An old #/messages/<id> link lands
 // on Messages (the conversation's id), the task's page (a task's) or history (any other id) once the tasks are read, and
-// waits while they load; new is Messages but while a draft stands. An old #/channel/<workspaceId> link lands on its strategy's
+// waits while they load; new (New message's, retired) is Messages. An old #/channel/<workspaceId> link lands on its strategy's
 // page once the channels are read, the root or an id no channel has on Messages. A task page for a session the list knows
 // that is no task is history; a task or strategy page with no id is Messages. Every other route is as it was asked
 export function landingOf(state, route) {
@@ -35,7 +32,7 @@ export function landingOf(state, route) {
     return ch && !ch.isRoot && ch.name ? { screen: 'strategy', id: ch.name } : MESSAGES;
   }
   if (route.screen === 'messages' && route.id) {
-    if (route.id === 'new') return state.draft ? route : MESSAGES;
+    if (route.id === 'new') return MESSAGES;
     if (loading) return route;
     if (route.id === tasks.conversation) return MESSAGES;
     return isTask(route.id) ? { screen: 'task', id: route.id } : { screen: 'history', id: route.id };
@@ -71,7 +68,6 @@ export const reducers = {
         s.lastSeen = { ...(s.lastSeen ?? {}), [c.id]: c.updatedAt };
       }
     }
-    if (!(route.screen === 'messages' && route.id === 'new')) s.draft = null;
     return s;
   },
   toggleRail: s => ({ ...s, railCollapsed: !s.railCollapsed }),
@@ -90,23 +86,6 @@ export const reducers = {
     if (name === 'textSize' || name === 'codeSize') return { ...s, [name]: sizeOf(name, value) };
     if (name === 'textFont' || name === 'codeFont') return { ...s, [name]: cleanFont(value) };
     return s;
-  },
-
-  // the new-message screen: a title and where the session goes (a channel — the one New round names, else the
-  // default), then the first words send it
-  startDraft(s, { where } = {}) {
-    const known = typeof where === 'string' && (s.channels ?? []).some(c => c.workspaceId === where);
-    return { ...closeOverlays(s), listOpen: false, draft: { title: '', where: known ? where : defaultWhere(s) }, route: { screen: 'messages', id: 'new' } };
-  },
-  cancelDraft: s => ({ ...s, draft: null, route: MESSAGES }),
-  setDraftTitle: (s, title) => (s.draft ? { ...s, draft: { ...s.draft, title } } : s),
-  setDraftWhere: (s, where) => (s.draft ? { ...s, draft: { ...s.draft, where: where || null } } : s),
-
-  // the optimistic half of Change words; the host's title projection confirms it
-  rename(s, { convId, title }) {
-    const t = (title ?? '').trim();
-    if (!t) return s;
-    return upd(s, convId, c => ({ ...c, title: t }));
   },
 
   toggleDetails: s => (s.detailsOpen ? { ...s, detailsOpen: false, edit: null, confirm: null } : { ...closeOverlays(s), detailsOpen: true }),

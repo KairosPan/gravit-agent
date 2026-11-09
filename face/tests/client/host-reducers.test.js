@@ -20,7 +20,7 @@ test('the empty state has no conversations, a connecting status line and the sha
   assert.deepEqual(s.conversations, []);
   assert.deepEqual(spoken(s.status), { line: 'connecting…', bad: false, connected: false });
   assert.deepEqual(s.orphanGates, {}); assert.deepEqual(s.lastSeen, {}); assert.deepEqual(s.channels, []);
-  assert.deepEqual(s.route, { screen: 'messages', id: null }); assert.equal(s.theme, 'system'); assert.equal(s.draft, null);
+  assert.deepEqual(s.route, { screen: 'messages', id: null }); assert.equal(s.theme, 'system'); assert.equal('draft' in s, false, 'no New message draft (one-entry plan 2)');
   assert.equal(s.counters, undefined);
   assert.equal(s.discover.query, ''); assert.deepEqual(s.discover.shelves.bots, { status: 'idle', data: null, at: null });
   assert.deepEqual(s.channel, { id: null, status: 'idle', data: null, at: null }); assert.deepEqual(s.childRows, []); assert.deepEqual(s.collapsed, {});
@@ -216,8 +216,8 @@ test("a module card's run sheet: open closes the other drawers, set replaces it 
   assert.equal(owned.sheet, null);
   assert.deepEqual(owned.runSheet, sheet);
   // another drawer opened over the sheet closes it: two drawers never stack
-  for (const over of [R.openSettings, R.openStatement, R.toggleDetails, x => R.startDraft(x)]) {
-    assert.equal(over(R.runSheetOpen(s, sheet)).runSheet, null, over.name || 'startDraft');
+  for (const over of [R.openSettings, R.openStatement, R.toggleDetails]) {
+    assert.equal(over(R.runSheetOpen(s, sheet)).runSheet, null, over.name);
   }
   s = R.moduleRunStarted(s, { module: 'theme', sessionId: 's1', title: 'Theme · 10-28', startedAt: NOW });
   s = R.moduleRunStarted(s, { module: 'leader', sessionId: 's2', title: 'Leader · 10-28', startedAt: NOW + 1 });

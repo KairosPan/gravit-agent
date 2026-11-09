@@ -21,7 +21,6 @@ import { call as wireCall, openMux as wireOpenMux } from './wire/api.js';
 import { mapFrame } from './wire/mapper.js';
 import { startLive } from './host/live.js';
 import { makeActions } from './host/actions.js';
-import { isMentionText } from './wire/room.js';
 import { startMarkets } from './host/markets.js';
 import { startDesk } from './host/desk.js';
 import { startAccount } from './host/account.js';
@@ -46,7 +45,7 @@ import { rulesOf } from './host/rules-view.js';
 import { isAccountKey, handWordsOf, watchedOf, marketCategoryIds, marketScopeOf, marketSourceOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
 import { makeEditor } from './composer/dom.js';
-import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt, hasChip } from './composer/draft.js';
+import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt } from './composer/draft.js';
 import { flatItems, slashItems, atItems, conversationChoices, moveActive, chipOf } from './composer/menus.js';
 import { renderMenu, menuAria, filesRail, dropOverlay, lightboxHtml } from './composer/view.js';
 import { thumbsNeeded, railHtml } from './render/thread.js';
@@ -513,16 +512,21 @@ export function boot(win, host = {}) {
   // the owner's keys act only for a page that signs (the renderers draw them for no other)
   const signs = () => store.get().owner.role === 'signs';
 
-  // the composer's drafts (D8), in memory: one per conversation by its id, `new` for New message, `empty` with neither;
-  // each its runs and its files (composer/files.js), the entry gone only when both are empty
+  // the session the one composer writes to (one-entry plan 2): Gravit's conversation as /data/tasks last named it (a failed
+  // re-read keeps it), on Messages with no old link waiting to land — listed or not yet (a fresh one); none while the tasks
+  // load, or once it is off or unknown
+  const writeTo = s => (s.route.screen === 'messages' && !s.route.id && !s.route.channel ? s.tasks?.conversation ?? null : null);
+  // the composer's drafts (D8), in memory: the conversation's by its id, `empty` with none to write to (words put there by Hand
+  // to Gravit while the conversation is unknown); each its runs and its files (composer/files.js), the entry gone only when
+  // both are empty
   const drafts = new Map();
-  const draftKey = s => (s.draft ? 'new' : currentConversation(s)?.id ?? 'empty');
-  // Messages is the one screen with a composer (a conversation, New message, the empty state)
-  const composerOn = s => s.route.screen === 'messages';
+  const draftKey = s => writeTo(s) ?? 'empty';
+  // Messages is the one screen with a composer, drawn while there is a conversation to write to
+  const composerOn = s => writeTo(s) !== null;
   // the session the screen draws a transcript of: the conversation on Messages, a task's or a history session's on theirs
   const shownConv = s => { const id = onScreenId(s); return id ? s.conversations.find(c => c.id === id) ?? null : null; };
-  // a conversation's draft, whose files upload to it as they are added; New message's (and the empty state's) wait (D10)
-  const isConvKey = key => key !== 'new' && key !== 'empty';
+  // a conversation's draft, whose files upload to it as they are added; the `empty` one's wait (D10)
+  const isConvKey = key => key !== 'empty';
   const runsOf = key => drafts.get(key)?.runs ?? [];
   const filesOf = key => drafts.get(key)?.files ?? [];
   const currentRuns = () => runsOf(draftKey(store.get()));
@@ -597,6 +601,7 @@ export function boot(win, host = {}) {
   let clockTimer = null;    // the jobs' ticking clocks in Details, written each second without a render while one is drawn
   let railHeld = false;     // a rail redraw asked for while a press is down: drawn when it lets go
   let searchFocus = false;  // ⌥⌘K from a screen with no list: the box takes focus once Messages draws it
+  let sayFocus = false;     // ⌥⌘N from another screen: the composer takes focus once Messages draws it
   let rowsAt = null;        // where the groups last stood: a query hides them, and they come back there when it clears (spec §5.1)
 
   function applyTheme(theme) {
@@ -610,7 +615,7 @@ export function boot(win, host = {}) {
 
   function render() {
     const s = store.get();
-    // a menu stands on its own draft's trigger: another draft on screen (another conversation, New message) closes it
+    // a menu stands on its own draft's trigger: another draft on screen (the conversation known, or gone) closes it
     if (menuTrig && menuTrig.key !== draftKey(s)) { forgetMenu(); dismissed = null; }
     // what the person had: focus and caret, typed text, picked radios, and where each scrolling box stood
     const active = doc.activeElement;
@@ -692,8 +697,7 @@ export function boot(win, host = {}) {
     for (const [id, value] of typed) {
       const el = doc.getElementById(id);
       // an editor's box (edit-*) keeps what was typed only while the same editor stays open
-      // Where's channel is the store's (draft.where), never the box's: New channel… must not stick in it
-      if (el && id !== 'say' && id !== 'nm-where' && (sameEditor || !id.startsWith('edit-'))) el.value = value;
+      if (el && id !== 'say' && (sameEditor || !id.startsWith('edit-'))) el.value = value;
     }
     // a minute slider the person moved: the redraw drew its cursor at the last minute, put it back at the slider's
     reapplyCursors(root, doc, s);
@@ -786,8 +790,6 @@ export function boot(win, host = {}) {
     } else if (!overlay && last.overlay) {
       target = find(last.opener) ?? target;
       opener = null;
-    } else if (s.edit && editorOf(s.edit) !== last.editor) {
-      target = root.querySelector('.inline-edit [name]') ?? target; // an editor that just opened takes focus
     } else if (s.confirm && s.confirm !== last.confirm) {
       confirmFrom = last.confirm ? confirmFrom : activeKey;
       target = root.querySelector('.confirm [data-action="confirmYes"]') ?? target; // a confirm that just asked takes focus
@@ -798,6 +800,9 @@ export function boot(win, host = {}) {
       target = overlay ? root.querySelector(closeKeyOf(overlay)) : say;
     }
     if (searchFocus && doc.getElementById('cq')) { target = doc.getElementById('cq'); searchFocus = false; }
+    // ⌥⌘N's composer, its caret after what it holds
+    let sayEnd = false;
+    if (sayFocus && say) { target = say; sayFocus = false; sayEnd = true; }
     if (target) {
       // the same control focused again, or the composer after the earlier key went: never scrolled into view (the thread's
       // keep above stands)
@@ -811,6 +816,7 @@ export function boot(win, host = {}) {
       if (caret && target === find(activeKey) && typeof target.setSelectionRange === 'function') target.setSelectionRange(caret[0], caret[1]);
       // focus can move a contenteditable's caret: the editor's goes back where write put it
       if (target === say && keep !== null) editor.place(say, keep[0], keep[1]);
+      else if (sayEnd) editor.place(say, lengthOf(currentRuns()));
     }
     // the rail: a jump waiting for its mark scrolls to it once drawn; inputs changed (another conversation, its outline, its
     // window) measure the turn the view is on once
@@ -826,7 +832,7 @@ export function boot(win, host = {}) {
       }
     }
     const inputs = open ? [open.id, open.outline, open.window?.start, open.window?.hasMore] : null;
-    // (inputs that could not be measured, as under the draft screen, are not taken as seen: measured once they can be)
+    // (inputs that could not be measured, as with no thread on screen, are not taken as seen: measured once they can be)
     if (inputs ? !railSeen || inputs.some((v, i) => !Object.is(v, railSeen[i])) : railSeen !== null) {
       const moved = measureRail();
       if (moved !== null || !inputs) railSeen = inputs;
@@ -884,7 +890,7 @@ export function boot(win, host = {}) {
 
   // the turn rail alone, never the page (a scroll, a hover, a pulse, an arrow): its focused tick keeps focus by its id, or
   // focus goes to the tick an arrow named (to)
-  const railConv = () => { const s = store.get(); return s.route.screen === 'messages' && !s.draft ? currentConversation(s) ?? null : null; };
+  const railConv = () => { const s = store.get(); return s.route.screen === 'messages' ? currentConversation(s) ?? null : null; };
   function drawRail(to = null) {
     if (pressed) { railHeld = true; return; }   // as a render is held: the press's click must find its element
     const el = doc.getElementById('turn-rail');
@@ -982,6 +988,7 @@ export function boot(win, host = {}) {
     const r = store.get().route;
     // ⌥⌘K's focus waits only for the list it was asked on: a route without one forgets it
     if (!['messages', 'task', 'history', 'strategy'].includes(r.screen)) searchFocus = false;
+    if (r.screen !== 'messages') sayFocus = false;
     showMarkets();
     if (r.screen === 'markets' && was?.screen !== 'markets') readHiddenMarkets();
     showAccount();
@@ -1069,13 +1076,6 @@ export function boot(win, host = {}) {
     else store.dispatch('discoverStatus', { line: made.error, bad: true });
   }
 
-  // New channel… in Where: create it, then Where names it; a refusal stays in the editor
-  async function commitNewChannel(name) {
-    const made = await channels.create(name);
-    if (made.error) { store.dispatch('editFailed', { error: made.error }); return; }
-    store.dispatch('cancelEdit');
-    store.dispatch('setDraftWhere', made.workspaceId);
-  }
   // a channel's roster editor: what the store holds ticked goes to the face
   async function commitRoster(e) {
     const done = e.which === 'agents' ? await channels.setAgents(e.workspaceId, e.ticked) : await channels.setBots(e.workspaceId, e.ticked);
@@ -1094,36 +1094,15 @@ export function boot(win, host = {}) {
     store.dispatch('startEdit', { kind: 'roster', which, workspaceId, choices, ticked: [...rostered] });
   }
 
-  // commit the open editor with what its inputs hold; a rename also reaches the host
+  // commit the open editor: a roster's ticks go to the face (the one editor with a ✓ since the rename went, one-entry plan 2)
   function commitEdit() {
     const e = store.get().edit;
-    if (e?.kind === 'roster') { void commitRoster(e); return; }
-    const values = Object.fromEntries([...root.querySelectorAll('.inline-edit [name]')].map(el => [el.name, el.value]));
-    if (e?.kind === 'newChannel') { void commitNewChannel(values.channel); return; }
-    store.dispatch('commitEdit', { values });
-    if (e?.kind === 'rename' && store.get().edit === null) void actions.rename(e.convId, values.title);
+    if (e?.kind === 'roster') void commitRoster(e);
   }
 
-  // the session on screen went away (archived or deleted): a task's or a history page goes back to Messages
-  function leaveIfOpen(id) {
-    const s = store.get();
-    if (s.route.screen !== 'messages' && onScreenId(s) === id) go({ screen: 'messages', id: null });
-  }
-  async function archiveNow(id, archived) {
-    if (!(await actions.archive(id, archived))) return;
-    await live.refresh();
-    if (archived) leaveIfOpen(id);
-  }
-  async function deleteNow(id) {
-    if (!(await actions.remove(id))) return;
-    await live.refresh();
-    leaveIfOpen(id);
-  }
-  async function forkNow(id) {
-    const child = await actions.fork(id);
-    if (!child) return;
-    await live.refresh();
-    go({ screen: 'messages', id: child });
+  // a search hit's Un-archive: the face's own archive undone, the list read again
+  async function unarchiveNow(id) {
+    if (await actions.archive(id, false)) await live.refresh();
   }
 
   // the second press of a two-step confirm
@@ -1149,7 +1128,6 @@ export function boot(win, host = {}) {
     if (c.action === 'stopJob') { confirmFrom = { id: `job-stopping-${c.id}` }; void stopJobNow(c.conv, c.id); }
     store.dispatch('cancelConfirm');
     if (c.action === 'stopGravit') void actions.stop(c.id);
-    if (c.action === 'deleteConv') void deleteNow(c.id);
     if (c.action === 'stopChild') void actions.stopChild(c.parent, c.id, c.label);
     // Revoke… and Disconnect…, asked twice: then their sheet, on a page that signs
     if (c.action === 'revoke' && signs()) void sheet.open('revoke', { name: c.name, address: c.address });
@@ -1351,9 +1329,10 @@ export function boot(win, host = {}) {
     void findConnectWallets();
   }
 
-  // the draft on screen, serialized against its conversation's channel (or New message's Where), cleared as it goes; a
-  // failure puts the whole draft, chips and files and all, back under the key it came from. Each refusal before the call
-  // keeps the draft as it stands. restaged: this send follows the re-upload of a receipt the host dropped (D18)
+  // the draft on screen to Gravit's conversation (one-entry plan 2), serialized against its channel (none: the conversation lives
+  // outside every checkout), cleared as it goes; a failure puts the whole draft, chips and files and all, back under the key it
+  // came from. Each refusal before the call keeps the draft as it stands. restaged: this send follows the re-upload of a
+  // receipt the host dropped (D18)
   async function sendNow({ restaged = false } = {}) {
     const s = store.get();
     const key = draftKey(s);
@@ -1361,28 +1340,19 @@ export function boot(win, host = {}) {
     const files = filesOf(key);
     if (isBlank(runs) && !files.length) return;
     const refuse = line => store.dispatch('hostStatus', { line, bad: true });
-    // the empty state (no conversation, no New message) has nowhere to send: said, the draft kept as it stands
+    // no conversation to write to (the tasks loading, or it is off): said, the draft kept as it stands
     if (key === 'empty') { refuse(said('status.openFirst')); return; }
-    // the room is a bot chip's, or an @ the operator typed (a chip reads as a space between words): a file or
-    // conversation chip's @ never sends to it alone. Files go to Gravit alone (D20): a bot chip with them is refused, and
-    // a typed @word beside them is a prompt
-    const toBot = hasChip(runs, 'bot');
-    if (files.length && toBot) { refuse(said('status.filesToGravit')); return; }
-    const room = !files.length && (toBot || isMentionText(runs.map(r => (r.type === 'text' ? r.text : ' ')).join('')));
-    // a room's bots cannot read a conversation chip (O9): a draft bound for the room with one is refused, kept as it stands
-    const toRoom = toBot || (room && !s.draft && !!currentConversation(s)?.channel);
-    if (toRoom && hasChip(runs, 'conversation')) { refuse(said('status.convsToGravit')); return; }
-    // a file not up yet (one New message moved here, a receipt being staged again) uploads now and holds the send too
+    // a file not up yet (one added before the conversation was known, a receipt being staged again) uploads now and holds the send too
     const waiting = isConvKey(key) ? files.filter(f => f.kind === 'file' && f.status === 'ready') : [];
     for (const f of waiting) startUpload(key, f.key);
     const held = blocking(filesOf(key));
     if (held) { refuse(held === 'uploading' ? said('status.uploading') : said('status.notUploaded')); if (waiting.length) render(); return; }
     if (isConvKey(key) && refusesImages.has(key) && hasImage(files)) { notes.set(key, modelLineFor(key)); render(); return; }
-    const workspaceId = s.draft ? s.draft.where : currentConversation(s)?.channel?.workspaceId ?? null;
+    const workspaceId = currentConversation(s)?.channel?.workspaceId ?? null;
     const text = serialize(runs, serialContext({ channels: s.channels, workspaceId })).trim();
     // a / line with files: a command the kept rows know takes them only when its input says so (D12); a name the rows do
     // not know is the host's to judge
-    if (!s.draft && files.length && text.startsWith('/')) {
+    if (files.length && text.startsWith('/')) {
       const name = text.slice(1).split(/\s/)[0];
       const row = (composerReads.keptCommands(currentConversation(s)) ?? []).find(r => r.name === name);
       if (row && row.input?.attachments !== true) { refuse(said('status.takesNoFiles', { name })); return; }
@@ -1409,30 +1379,7 @@ export function boot(win, host = {}) {
     // the draft left the screen during the read: it goes back under its key, unsent (the send goes to the screen's)
     if (data.size && draftKey(store.get()) !== key) { back(); return; }
     const parts = contentParts('', files, k => data.get(k));
-    if (s.draft) {
-      // New message: the draft moves to the conversation as it is made, its files upload there, then the first words
-      const got = await actions.newConversationWith({
-        title: s.draft.title, workspaceId: s.draft.where, text, attachmentRefused,
-        onCreated: id => {
-          putDraft(id, runs, files);
-          if (notes.has(key)) { notes.set(id, notes.get(key)); notes.delete(key); }
-        },
-        prepare: async id => {
-          const ups = await Promise.all(filesOf(id).filter(f => f.kind === 'file').map(f => startUpload(id, f.key)));
-          if (!ups.every(Boolean)) return null;
-          const staged = filesOf(id).filter(f => files.some(g => g.key === f.key));
-          return contentParts('', staged, k => data.get(k));
-        },
-      });
-      if (!got.id) { back(); return; }
-      if (got.sent) { putDraft(got.id, [], filesOf(got.id).filter(f => !files.some(g => g.key === f.key))); sentOff(got.id); }
-      else refused(got.id, reason);
-      await live.refresh();
-      go({ screen: 'messages', id: got.id });
-      live.promote(got.id);
-      return;
-    }
-    const sent = await sendText(text, { room, attachments: parts, attachmentRefused });
+    const sent = await sendText(text, { attachments: parts, attachmentRefused });
     if (sent) { sentOff(key); render(); return; }
     back();
     if (RESTAGED.has(reason) && !restaged) { void restage(key, reason); return; }
@@ -1470,11 +1417,12 @@ export function boot(win, host = {}) {
     const say = doc.getElementById('say');
     if (say) { say.focus(); editor.place(say, lengthOf(runs)); }
   }
-  // one message to the open conversation by the composer's own path (the composer, the stock drawer's Ask, a follow-up): what
-  // actions.send answers, the conversation promoted to a follow when it prompted; the composer's words are never touched
-  async function sendText(text, opts) {
-    const sent = await actions.send(text, opts);
-    if (sent && (sent.sent === 'prompt' || sent.sent === 'say')) live.promote(sent.sessionId);
+  // one message to Gravit's conversation by the composer's own path (the composer, the stock drawer's Ask, a follow-up): what
+  // actions.send answers, the conversation promoted to a follow when it prompted; the composer's words are never touched.
+  // Nothing goes while there is none to write to (off Messages, the tasks loading, the conversation off)
+  async function sendText(text, opts = {}) {
+    const sent = await actions.send(text, { ...opts, sessionId: writeTo(store.get()) });
+    if (sent && sent.sent === 'prompt') live.promote(sent.sessionId);
     return sent;
   }
 
@@ -1571,11 +1519,11 @@ export function boot(win, host = {}) {
 
   // ---- the / and @ menus: opened, filtered and moved in #composer-menu alone, never by a page render ----
   const sameTrig = (a, b) => !!a && !!b && a.kind === b.kind && a.from === b.from && a.query === b.query && a.key === b.key;
-  // the conversation the composer writes to (none on New message), its channel, and that channel's folder relative to the
-  // root (undefined with no root, or a conversation in no channel)
+  // the conversation the composer writes to, its channel, and that channel's folder relative to the root (undefined with no
+  // root, or a conversation in no channel)
   function menuContext(s) {
-    const conv = s.draft ? null : currentConversation(s);
-    const workspaceId = s.draft ? s.draft.where : conv?.channel?.workspaceId ?? null;
+    const conv = currentConversation(s);
+    const workspaceId = conv?.channel?.workspaceId ?? null;
     const { repoRoot, cwd } = serialContext({ channels: s.channels, workspaceId });
     const root = repoRoot == null ? null : repoRoot.replace(/\/+$/, '');
     const dir = cwd == null ? null : cwd.replace(/\/+$/, '');
@@ -1700,9 +1648,7 @@ export function boot(win, host = {}) {
 
   const act = {
     open: el => { store.dispatch('setListOpen', false); go({ screen: 'messages', id: el.dataset.id }); },
-    startDraft: () => { store.dispatch('startDraft', { now: now() }); go({ screen: 'messages', id: 'new' }); },
-    // a channel's page: New round is a new message in that channel; Retry reads it again
-    newRound: el => { store.dispatch('startDraft', { now: now(), where: el.dataset.id }); go({ screen: 'messages', id: 'new' }); },
+    // a channel's page: Retry reads it again
     channelRetry: el => { void channels.overview(el.dataset.id); },
     editRoster: el => { void editRoster(el.dataset.which, el.dataset.id); },
     // Discover: a shelf read again, the CLI agents' three writes
@@ -1718,23 +1664,19 @@ export function boot(win, host = {}) {
     // a bot: Talk to opens its conversation, Edit opens its editor (the model routes read for it)
     talkTo: el => { void talkToNow(el.dataset.id); },
     editBot: el => { store.dispatch('startEdit', { kind: 'bot', id: el.dataset.id }); void discover.modelChoices(); },
-    cancelDraft: () => { store.dispatch('cancelDraft'); go(store.get().route); },
     toggleRail: () => store.dispatch('toggleRail'),
     toggleList: () => store.dispatch('toggleList'),
     toggleGroup: el => store.dispatch('toggleGroup', el.dataset.key),
     // inline editors (they replaced prompt): a button starts one, ✓ or Enter commits it, × or Escape cancels it
-    changeWords: el => store.dispatch('startEdit', { kind: 'rename', convId: el.dataset.conv }),
     commitEdit: () => commitEdit(),
     cancelEdit: () => store.dispatch('cancelEdit'),
     // two-step confirms (they replaced confirm): the first press asks in place, the second acts
     stopGravit: el => store.dispatch('askConfirm', { action: 'stopGravit', id: el.dataset.conv }),
-    // the row actions: Fork opens the new conversation; Archive and Delete leave the screen when it was this one
-    fork: el => { void forkNow(el.dataset.conv); },
+    // the list's row actions: Pin and Unpin; a search hit's Un-archive (the conversation itself is never renamed, forked,
+    // archived or deleted: one-entry plan 2)
     pin: el => { void actions.pin(el.dataset.conv); },
     unpin: el => { void actions.unpin(el.dataset.conv); },
-    archive: el => { void archiveNow(el.dataset.conv, true); },
-    unarchive: el => { void archiveNow(el.dataset.conv, false); },
-    deleteConv: el => store.dispatch('askConfirm', { action: 'deleteConv', id: el.dataset.conv }),
+    unarchive: el => { void unarchiveNow(el.dataset.conv); },
     // the research surfaces: a child stopped by its parent (asked twice), a member's trace read on opening
     stopChild: el => store.dispatch('askConfirm', { action: 'stopChild', id: el.dataset.child, parent: el.dataset.parent, label: el.dataset.label }),
     openTrace: el => { void traces.open(el.dataset.conv, el.dataset.msg); },
@@ -1984,13 +1926,12 @@ export function boot(win, host = {}) {
     removeAsked: el => markets.unwatch(el.dataset.id),
     openMarket: el => go({ screen: 'markets', id: el.dataset.id }),
     setRange: el => markets.range(el.dataset.id, el.dataset.value),
-    // a new message in the root channel with the market named in the composer: the operator says what to look for
+    // Gravit's conversation with the market named in the composer: the operator says what to look for
     handToGravit: el => {
       const s = store.get();
       const asset = handWordsOf(s.markets, s.account, el.dataset.id, now());
       if (!asset) return;
-      store.dispatch('startDraft', { now: now() });
-      go({ screen: 'messages', id: 'new' });
+      go({ screen: 'messages', id: null });
       putWords(asset.name && asset.name !== asset.symbol ? t('markets.lookAt.named', { symbol: asset.symbol, name: asset.name }) : t('markets.lookAt.symbol', { symbol: asset.symbol }));
     },
     // the owner device: the pair box's code, Sign in, and — on a page that signs — Settings › Devices' Sign out and Let it sign
@@ -2148,7 +2089,6 @@ export function boot(win, host = {}) {
   // typing: the composer keeps its words outside the store; the title, the searches and the fields go through it
   function typed(el) {
     if (sayBoxOf(el)) { setRuns(editor.read(sayBoxOf(el))); menuTick(); }
-    else if (el.dataset?.action === 'draftTitle') store.dispatch('setDraftTitle', el.value);
     else if (el.dataset?.action === 'mkQuery') { store.dispatch('setMarketsQuery', el.value); searchSoon(el.value); }
     else if (el.dataset?.action === 'tradeQuery') tradeSoon(el.value);   // trade.query moves the query (the box keeps the words)
     else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
@@ -2185,9 +2125,6 @@ export function boot(win, host = {}) {
   root.addEventListener('focusout', ev => { if (!refocusing && ev.target?.isConnected !== false && tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null, null); });
   root.addEventListener('change', ev => {
     const el = ev.target;
-    if (el.tagName === 'SELECT' && el.dataset?.action === 'draftWhere') {
-      if (el.value === '__new') store.dispatch('startEdit', { kind: 'newChannel' }); else store.dispatch('setDraftWhere', el.value);
-    }
     if (el.type === 'checkbox' && el.name === 'roster') store.dispatch('toggleRosterTick', { value: el.value, on: el.checked === true });
     if (isField(el) && !typesWords(el)) changeField(el.name, fieldValueOf(el));
     if (el.dataset?.action === 'runSheetField' && !typesWords(el)) act.runSheetField(el);
@@ -2305,6 +2242,14 @@ export function boot(win, host = {}) {
     store.dispatch('setListOpen', true);
     doc.getElementById('cq')?.focus();
   }
+  // ⌥⌘N: the conversation's composer takes focus, its caret after what it holds; from another screen once Messages draws it
+  function focusComposer() {
+    const s = store.get();
+    const say = doc.getElementById('say');
+    if (s.route.screen === 'messages' && say) { say.focus(); editor.place(say, lengthOf(currentRuns())); return; }
+    sayFocus = true;
+    go({ screen: 'messages', id: null });
+  }
   doc.addEventListener('keydown', ev => {
     // while an IME composes (pinyin), its keys are the composition's: Esc dismisses the candidate, never the query
     const imeOpen = ev.isComposing || ev.keyCode === 229;
@@ -2326,7 +2271,7 @@ export function boot(win, host = {}) {
       // ⌘/ opens the shortcut sheet and closes it again; another key closes it first
       if (chord === 'shortcuts') { store.dispatch(s.shortcuts ? 'closeShortcuts' : 'openShortcuts'); return; }
       if (s.shortcuts) store.dispatch('closeShortcuts');
-      if (chord === 'newConversation') act.startDraft();
+      if (chord === 'writeToGravit') focusComposer();
       else if (chord === 'settings') store.dispatch('openSettings');
       return;
     }
@@ -2408,7 +2353,6 @@ export function boot(win, host = {}) {
     // (no login for the browser to offer to keep)
     if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && a?.id === 'identity-app-token') { ev.preventDefault(); root.querySelector('#identity-bot-token')?.focus?.(); return; }
     if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && (a?.id === 'identity-token' || a?.id === 'identity-bot-token')) { ev.preventDefault(); act.identityNext(); return; }
-    if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && store.get().edit && a?.closest?.('.inline-edit') && a.tagName !== 'BUTTON') { ev.preventDefault(); commitEdit(); }
   });
 
   // a hidden tab stops everything — the Markets polls and the face's wire, the Account's read, and both streams with the market a

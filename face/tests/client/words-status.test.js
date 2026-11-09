@@ -108,7 +108,7 @@ test("the actions' lines, each verb in its words", async () => {
   await r.actions.rename('s1', 'New'); follows(r.line(), 'rename: x/2');
   await r.actions.fork('s1'); follows(r.line(), 'fork: session/fork returned no sessionId');
   await r.actions.runCommand('s1', '/<b>'); follows(r.line(), 'no command claimed /<b>');
-  await r.actions.send('hello'); follows(r.line(), 'send: x/3');
+  await r.actions.send('hello', { sessionId: 's1' }); follows(r.line(), 'send: x/3');
   await r.actions.newConversation({ text: 'hi' }); follows(r.line(), 'new message: session/create returned no sessionId');
   await r.actions.stopChild('s1', 'c1', 'x'); follows(r.line(), 'stop: refused');
   await r.actions.pin('s1'); follows(r.line(), 'Pin failed. Try again later.');

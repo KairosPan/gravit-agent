@@ -148,9 +148,22 @@ test('the narrow layout: one dynamic viewport, a scrollable thread and a collaps
 });
 
 test('Details never covers the conversation: it makes room, folding the list away on a medium window', () => {
-  assert.match(css, /\.main\.with-drawer > \.head, \.main\.with-drawer > \.thread-box, \.main\.with-drawer > \.composer \{ margin-right: 400px; \}/);
-  assert.match(css, /\.main\.with-drawer\.with-stock > \.head, \.main\.with-drawer\.with-stock > \.thread-box, \.main\.with-drawer\.with-stock > \.composer \{ margin-right: 460px; \}/);
+  assert.match(css, /\.main\.with-drawer > \.head, \.main\.with-drawer > \.conv-cols \{ margin-right: 400px; \}/);
+  assert.match(css, /\.main\.with-drawer\.with-stock > \.head, \.main\.with-drawer\.with-stock > \.conv-cols \{ margin-right: 460px; \}/);
+  // the drawer takes the rail of tasks' side (one-entry plan 2 Task 5)
+  assert.match(css, /\.main\.with-drawer \.conv-cols > \.tasks \{ display: none; \}/);
   assert.match(css, /@media \(min-width: 861px\) and \(max-width: 1399px\) \{\s*\.list:has\(~ \.main\.with-drawer\) \{ display: none; \}/);
+});
+
+test('Messages lays the rail of tasks out on the right of the conversation, and folds it above the thread on a narrow window', () => {
+  const rule = sel => css.match(new RegExp(`^${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`, 'm'))?.[1] ?? '';
+  assert.match(rule('.conv-cols'), /display: flex/);
+  assert.match(rule('.conv-col'), /flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column/);
+  assert.match(rule('.tasks'), /flex: 0 0 320px[^}]*border-left: 1px solid var\(--border\)/);
+  const narrow = css.match(/@media \(max-width: 860px\) \{\n([\s\S]*?)\n\}/)?.[1] ?? '';
+  assert.match(narrow, /\.conv-cols \{ flex-direction: column; \}/);
+  assert.match(narrow, /\.conv-cols > \.tasks \{ order: -1;/);
+  assert.match(narrow, /\.tasks-fold:not\(\[open\]\) ~ \.tasks-body \{ display: none; \}/);
 });
 
 test('a long tool description is clamped to two lines, and the page keys keep a gap', () => {

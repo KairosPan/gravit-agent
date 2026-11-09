@@ -1,5 +1,6 @@
-// The Messages screen on the host's facts (spec 2026-10-19 §7): the head, the composer, the status line, the new-message
-// screen with its Where, the Details drawer with This task, Members, Usage, Stop and Change words.
+// The Messages screen on the host's facts (spec 2026-10-19 §7; one-entry plan 2 Task 5): Gravit's one conversation — its head,
+// thread, composer and the rail of tasks beside it, or one line while it is off or unknown — and the Details drawer with This
+// task, Usage, Background jobs, the children and Stop.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { currentConversation, renderMessagesScreen, renderHead, renderComposer, renderDetails, renderStatus, renderSessionPage, renderHistoryList } from '../../client/js/render/messages.js';
@@ -26,24 +27,16 @@ test('currentConversation is the conversation /data/tasks names on Messages, and
   assert.equal(currentConversation(R.nav(R.hostList(emptyState(), { conversations: [conv('a')], channels, bots }), { screen: 'messages', id: null })), null, 'none while the tasks load');
 });
 
-test('the head is the title, a Working chip only while the host runs a turn, and Details', () => {
+test('the head reads Gravit, a Working chip only while the host runs a turn, and Details', () => {
   const s = listed([conv('a', { title: 'BTC under 70k' })]);
   const quiet = renderHead(currentConversation(s), s);
-  assert.match(quiet, /<h1 class="head-title">BTC under 70k<\/h1>/);
+  assert.match(quiet, /^<header class="head"><h1 class="head-title">Gravit<\/h1>/);
+  assert.doesNotMatch(quiet, /BTC under 70k/, "the session's own title is not drawn");
   assert.doesNotMatch(quiet, /status up/);
   assert.match(quiet, /data-action="toggleDetails"[^>]*aria-expanded="false"/);
   const busy = renderHead({ ...currentConversation(s), running: true }, { ...s, detailsOpen: true });
   assert.match(busy, /class="status up"><span class="status-dot"><\/span>Working</);
   assert.match(busy, /aria-expanded="true"/);
-});
-
-test('a group head clusters the members and names them from the host\'s bots', () => {
-  const s = listed([conv('g', { kind: 'group', members: ['gravit', 'buffett'], title: 'Pick stocks' })]);
-  const h = renderHead(currentConversation(s), s);
-  assert.match(h, /head centered/); assert.equal(count(h, /class="cluster-item"/g), 2);
-  assert.match(h, /Gravit · Buffett Type · 2 members/);
-  const one = listed([conv('g', { kind: 'group', members: ['gravit'], title: 'Alone' })]);
-  assert.match(renderHead(currentConversation(one), one), /<div class="dim members">Gravit · 1 member<\/div>/, 'one member is a member');
 });
 
 test('the composer is the menu slot, the note, the box with the rail, the editor and Send', () => {
@@ -81,26 +74,25 @@ test('a note handed in is drawn above the box, escaped', () => {
   assert.match(h, /<div class="composer-note" id="composer-note" role="status">Gravit&#39;s model takes &lt;no&gt; images\.<\/div><div class="composer-box">/);
 });
 
-test("the three screens pass the draft's files and note on", () => {
+test("the conversation and its empty state pass the draft's files and note on", () => {
   const composer = { menu: null, files: [{ key: 'f1', kind: 'file', name: 'a.csv', bytes: 2048, mediaType: 'text/csv', status: 'ready', loaded: 0 }], note: 'Up to 20 images a message' };
   const s = listed([conv('a')]);
-  for (const h of [renderMessagesScreen(s, NOW, composer), renderMessagesScreen(R.startDraft(s, {}), NOW, composer), renderMessagesScreen(listed([]), NOW, composer)]) {
+  for (const h of [renderMessagesScreen(s, NOW, composer), renderMessagesScreen(listed([], 'c0'), NOW, composer)]) {
     assert.match(h, /id="composer-files"><div class="file-card">/);
     assert.match(h, /role="status">Up to 20 images a message<\/div>/);
   }
   assert.match(renderMessagesScreen(s, NOW, { menu: null }), /id="composer-files"><\/div>/, 'a composer with no files key draws an empty rail');
 });
 
-test("a group's composer keeps its @ placeholder, and a menu handed in is drawn in the slot", () => {
+test('the composer says Tell Gravit…, and a menu handed in is drawn in the slot', () => {
   const menu = { kind: '@', from: 0, query: '', groups: [{ label: 'Bots in this room', items: [{ kind: 'bot', id: 'buffett', name: 'Buffett Type', description: '' }] }], active: 0 };
-  const group = listed([conv('g', { kind: 'group', members: ['gravit', 'buffett'] })]);
-  const h = renderMessagesScreen(group, NOW, { menu });
-  assert.match(h, /data-placeholder="Tell Gravit… @ a bot by name"/);
+  const s = listed([conv('a')]);
+  const h = renderMessagesScreen(s, NOW, { menu });
+  assert.match(h, /data-placeholder="Tell Gravit…"/);
   assert.match(h, /<div class="composer-menu" id="composer-menu"><div class="cmenu" role="listbox" aria-label="References">/);
-  assert.match(renderMessagesScreen(group, NOW), /<div class="composer-menu" id="composer-menu"><\/div>/, 'no menu by default');
-  // the new-message screen and the empty state pass it on too
-  assert.match(renderMessagesScreen(R.startDraft(group, {}), NOW, { menu }), /id="composer-menu"><div class="cmenu"/);
-  assert.match(renderMessagesScreen(listed([]), NOW, { menu }), /id="composer-menu"><div class="cmenu"/);
+  assert.match(renderMessagesScreen(s, NOW), /<div class="composer-menu" id="composer-menu"><\/div>/, 'no menu by default');
+  // the empty state passes it on too
+  assert.match(renderMessagesScreen(listed([], 'c0'), NOW, { menu }), /id="composer-menu"><div class="cmenu"/);
 });
 
 test('the status line under the composer carries the host\'s word, marked bad when it is', () => {
@@ -110,87 +102,32 @@ test('the status line under the composer carries the host\'s word, marked bad wh
   assert.match(renderMessagesScreen(s, NOW), /class="status-line" role="status">sent</);
 });
 
-test('the new-message screen: a title, Where among the channels with the root first, no To: row, no limit chips', () => {
-  const s = R.startDraft(listed([conv('a')]), { now: NOW });
-  assert.equal(s.draft.where, 'w0', 'the root channel is the default');
-  const h = renderMessagesScreen(s, NOW);
-  assert.match(h, /<input id="nm-title" class="title-input"[^>]*data-action="draftTitle"/);
-  assert.match(h, /<select id="nm-where" name="where"[^>]*data-action="draftWhere">/);
-  assert.match(h, /<option value="w0" selected>workbench<\/option><option value="w1">alpha<\/option>/);
-  assert.match(h, /data-action="cancelDraft"/);
-  for (const gone of ['To:', 'Attach a limit', 'toggleDraftPicker', 'draftLimit']) assert.doesNotMatch(h, new RegExp(gone));
-  const moved = R.setDraftWhere(s, 'w1');
-  assert.match(renderMessagesScreen(moved, NOW), /<option value="w1" selected>/);
-});
-
-test('Details: This task with its facts and Change words, Members for a group, Usage when the host reported it, Stop only while running', () => {
-  const quiet = listed([conv('a', { title: 'BTC under 70k', created: NOW - 3 * 24 * 60 * MIN, channel: { workspaceId: 'w1', name: 'alpha' } })]);
+test('Details: This task with its facts, Usage when the host reported it, Stop only while running', () => {
+  const quiet = listed([conv('a', { title: 'BTC under 70k', created: NOW - 3 * 24 * 60 * MIN })]);
   const h = renderDetails(currentConversation(quiet), quiet);
-  assert.match(h, /dsec-title">BTC under 70k</);
-  assert.match(h, /data-action="changeWords"/);
-  assert.match(h, />Where<[\s\S]*?>alpha</); assert.match(h, />Agent<[\s\S]*?>Gravit</);
+  assert.match(h, /dsec-title">Gravit</);
+  assert.match(h, />Agent<[\s\S]*?>Gravit</);
   assert.match(h, />Created</);
-  for (const gone of ['Limit', 'wallet', 'Mode', 'withdraw', 'Beast', 'stopGravit', 'Usage', 'Members']) assert.doesNotMatch(h, new RegExp(gone), gone);
-  const busy = listed([conv('b', { running: true, kind: 'group', members: ['gravit', 'buffett'], usage: { tokenUsage: { uncachedInputTokens: 8123, outputTokens: 2411, cacheReadTokens: 51200, cacheWriteTokens: 900 }, contextPressure: 0.42 } })]);
+  for (const gone of ['Limit', 'wallet', 'Mode', 'withdraw', 'Beast', 'stopGravit', 'Usage', 'Members', 'Where', 'BTC under 70k']) assert.doesNotMatch(h, new RegExp(gone), gone);
+  const busy = listed([conv('b', { running: true, usage: { tokenUsage: { uncachedInputTokens: 8123, outputTokens: 2411, cacheReadTokens: 51200, cacheWriteTokens: 900 }, contextPressure: 0.42 } })]);
   const d = renderDetails(currentConversation(busy), busy);
   assert.match(d, /data-action="stopGravit"[^>]*data-conv="b"/);
-  assert.match(d, />Members<[\s\S]*?Buffett Type/);
   assert.match(d, />Tokens in<[\s\S]*?>59,323</); assert.match(d, />Tokens out<[\s\S]*?>2,411</); assert.match(d, />Context<[\s\S]*?>42%</);
-  assert.match(renderDetails(currentConversation(listed([conv('c', { channel: null, created: null })])), quiet), />Where<[\s\S]*?>Default directory</);
   const asking = R.askConfirm(busy, { action: 'stopGravit', id: 'b' });
   assert.match(renderDetails(currentConversation(asking), asking), /data-action="confirmYes"/);
 });
 
-test('the empty state offers three plain prompts', () => {
-  const h = renderMessagesScreen(listed([]), NOW);
-  assert.equal(count(h, /data-action="suggest"/g), 3);
-  assert.match(h, /Nothing handed to Gravit yet/);
-});
-
-test('Details offers Fork, Archive and Delete on an idle conversation', () => {
+test('Details offers no rename, fork, pin, archive or delete: the conversation is one and stays', () => {
   const said = { id: 'e1', seq: 1, at: NOW, from: 'you', kind: 'text', text: 'hi', data: {} };
   const s = listed([conv('a', { archived: false, loaded: true, messages: [said] })]);
-  const h = renderDetails(currentConversation(s), s);
-  assert.match(h, /data-action="fork"[^>]*data-conv="a"/);
-  assert.match(h, /data-action="archive"[^>]*data-conv="a"/);
-  assert.match(h, /data-action="deleteConv"[^>]*data-conv="a"/);
-  assert.doesNotMatch(h, /data-action="unarchive"/);
-  const asking = R.askConfirm(s, { action: 'deleteConv', id: 'a' });
-  assert.match(renderDetails(currentConversation(asking), asking), /data-action="confirmYes"[^>]*>Yes, delete</);
+  const h = renderDetails(currentConversation(s), { ...s, pinned: ['a'] });
+  for (const gone of ['changeWords', 'fork', 'pin', 'unpin', 'archive', 'unarchive', 'deleteConv']) assert.doesNotMatch(h, new RegExp(`data-action="${gone}"`), gone);
 });
 
-test('no Archive or Delete while running or while a card waits', () => {
-  const card = { id: 'ev-1', seq: 1.5, at: NOW, from: 'gravit', kind: 'card', text: 'Your call', data: { eventId: 'ev-1', sessionId: 'a' } };
-  const said = { id: 'e1', seq: 1, at: NOW, from: 'you', kind: 'text', text: 'hi', data: {} };
-  for (const over of [{ running: true, messages: [said] }, { messages: [said, card] }]) {
-    const s = listed([conv('a', { archived: false, ...over })]);
-    const h = renderDetails(currentConversation(s), s);
-    assert.match(h, /data-action="fork"/);
-    assert.doesNotMatch(h, /data-action="archive"/);
-    assert.doesNotMatch(h, /data-action="deleteConv"/);
-  }
-});
-
-test('a face archive offers Un-archive; a host archive says so and offers nothing', () => {
-  const face = listed([conv('a', { archived: 'face' })]);
-  const f = renderDetails(currentConversation(face), face);
-  assert.match(f, /data-action="unarchive"[^>]*data-conv="a"/);
-  assert.doesNotMatch(f, /data-action="archive"/);
-  const host = listed([conv('a', { archived: 'host' })]);
-  const h = renderDetails(currentConversation(host), host);
-  assert.match(h, />Archived<[\s\S]*?>By the host</);
-  assert.doesNotMatch(h, /data-action="unarchive"|data-action="archive"/);
-});
-
-test('Where offers New channel…; the edit asks for the name', () => {
-  const s = R.startDraft(listed([conv('a')]), {});
-  const h = renderMessagesScreen(s, NOW);
-  assert.match(h, /<option value="__new">New channel…<\/option>/);
-  const naming = R.startEdit(s, { kind: 'newChannel' });
-  const n = renderMessagesScreen(naming, NOW);
-  assert.match(n, /class="inline-edit"/);
-  assert.match(n, /name="channel"[^>]*aria-label="Name the channel"|aria-label="Name the channel"[^>]*name="channel"/);
-  assert.match(renderMessagesScreen(R.editFailed(naming, { error: 'Letters, digits, - or _' }), NOW), /Letters, digits, - or _/);
+test('the empty state offers three plain prompts', () => {
+  const h = renderMessagesScreen(listed([], 'c0'), NOW);
+  assert.equal(count(h, /data-action="suggest"/g), 3);
+  assert.match(h, /Nothing handed to Gravit yet/);
 });
 
 test('Details lists the children with Stop on the one that can', () => {
@@ -209,41 +146,6 @@ test('Details lists the children with Stop on the one that can', () => {
   assert.doesNotMatch(renderDetails(currentConversation(listed([conv('b')])), listed([conv('b')])), />Children</);
 });
 
-test('an empty conversation offers no Fork: dsh forks from a completed turn', () => {
-  const s = listed([conv('a', { archived: false, loaded: true, messages: [] })]);
-  const h = renderDetails(currentConversation(s), s);
-  assert.doesNotMatch(h, /data-action="fork"/);
-  assert.match(h, /data-action="archive"/); assert.match(h, /data-action="deleteConv"/);
-});
-
-test('a channel goes by its display title in Where and in Details, as the list names it', () => {
-  const titled = [{ workspaceId: 'w0', name: 'workbench', title: 'evolving-alpha-us', isRoot: true }, { workspaceId: 'w1', name: 'alpha', title: 'Alpha momentum', isRoot: false }];
-  const base = R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('a', { channel: { workspaceId: 'w1', name: 'alpha' } })], channels: titled, bots }), { conversation: 'a', tasks: [], at: NOW }), { screen: 'messages', id: null });
-  const draft = renderMessagesScreen(R.startDraft(base, {}), NOW);
-  assert.match(draft, /<option value="w0" selected>evolving-alpha-us<\/option><option value="w1">Alpha momentum<\/option>/);
-  assert.match(renderDetails(currentConversation(base), base), />Where<[\s\S]*?>Alpha momentum</);
-});
-
-test('Details offers Pin between Fork and Archive, Unpin once pinned, nothing when archived', () => {
-  const said = { id: 'e1', seq: 1, at: NOW, from: 'you', kind: 'text', text: 'hi', data: {} };
-  const mk = (over, extra = {}) => { const s = { ...listed([conv('a', { archived: false, loaded: true, messages: [said], ...over })]), ...extra }; return renderDetails(currentConversation(s), s); };
-  const h = mk({});
-  assert.match(h, /data-action="fork"[\s\S]*data-action="pin"[^>]*data-conv="a"[^>]*>Pin<[\s\S]*data-action="archive"/);
-  assert.doesNotMatch(h, /data-action="unpin"/);
-  const p = mk({}, { pinned: ['a'] });
-  assert.match(p, /data-action="fork"[\s\S]*data-action="unpin"[^>]*data-conv="a"[^>]*>Unpin<[\s\S]*data-action="archive"/);
-  assert.doesNotMatch(p, /data-action="pin"/);
-  const old = mk({ archived: 'face' }, { pinned: ['a'] });
-  assert.doesNotMatch(old, /data-action="(un)?pin"/);
-});
-
-test("Details' Pin and Unpin key carries one stable id, so focus finds it after the press flips it", () => {
-  const said = { id: 'e1', seq: 1, at: NOW, from: 'you', kind: 'text', text: 'hi', data: {} };
-  const mk = extra => { const s = { ...listed([conv('a', { archived: false, loaded: true, messages: [said] })]), ...extra }; return renderDetails(currentConversation(s), s); };
-  assert.match(mk({}), /data-action="pin" data-conv="a" id="details-pin-a">Pin</);
-  assert.match(mk({ pinned: ['a'] }), /data-action="unpin" data-conv="a" id="details-pin-a">Unpin</);
-});
-
 test("the editor says whether its menu is open, and which row is active, as it is drawn", () => {
   const menu = { kind: '@', from: 0, query: '', groups: [{ label: 'Bots in this room', items: [{ kind: 'bot', id: 'a', name: 'A', description: '' }, { kind: 'bot', id: 'b', name: 'B', description: '' }] }], active: 1 };
   const open = renderComposer({ menu }).match(/<div id="say"([^>]*)>/)[1];
@@ -255,13 +157,10 @@ test("the editor says whether its menu is open, and which row is active, as it i
 });
 
 // ---- the thread box and the earlier key (plan 5 task 4)
-test("a conversation's thread sits in its box beside an empty rail; New message keeps a bare thread", () => {
+test("a conversation's thread sits in its box beside an empty turn rail; the empty state has neither", () => {
   const s = listed([conv('a')]);
   const h = renderMessagesScreen(s, NOW);
   assert.match(h, /<div class="thread-box"><div class="thread" id="thread">[\s\S]*<\/div><nav class="turn-rail" id="turn-rail" aria-label="Turns" role="toolbar" aria-orientation="vertical"><\/nav><\/div>/);
-  const draft = renderMessagesScreen(R.startDraft(s), NOW);
-  assert.match(draft, /<div class="thread" id="thread"><\/div>/);
-  assert.doesNotMatch(draft, /thread-box|turn-rail/);
   const empty = renderMessagesScreen({ ...s, conversations: [] }, NOW);
   assert.doesNotMatch(empty, /thread-box|turn-rail/);
 });
@@ -344,10 +243,7 @@ test('no stats, no pills: the foot is the status line alone, or nothing', () => 
   const said = renderMessagesScreen(R.hostStatus(quiet, { line: 'Reconnecting…', bad: true }), NOW);
   assert.match(said, /<\/form><div class="thread-foot"><div class="status-line bad" role="status">Reconnecting…<\/div><\/div>/);
   assert.doesNotMatch(said, /stats-pill/);
-  // New message and the empty state keep the status line alone
-  const draft = renderMessagesScreen(R.hostStatus(R.startDraft(quiet), { line: 'Reconnecting…' }), NOW);
-  assert.match(draft, /<\/form><div class="status-line" role="status">Reconnecting…<\/div><\/main>/);
-  assert.doesNotMatch(draft, /thread-foot/);
+  // the empty state keeps the status line alone
   const empty = renderMessagesScreen(R.hostStatus({ ...quiet, conversations: [] }, { line: 'Reconnecting…' }), NOW);
   assert.doesNotMatch(empty, /thread-foot/);
 });
@@ -453,19 +349,14 @@ test('the Finished fold is drawn open while it holds the open job', () => {
   assert.match(details(R.openJob(s, 'r1')), /<details id="jobs-finished-a" class="jobs-finished"><summary>/, 'a running job open leaves it as it is');
 });
 
-// the final review's ruling: a title is derived from the first prompt, so it is masked wherever drawn
-test('the head and Details\' This task draw the title masked', () => {
+// a title is derived from the first prompt and can hold a key: the conversation's head and Details name Gravit and never draw it
+test("the head and Details' This task never draw the session's title", () => {
   const SK = 'sk-proj-aB3dE6fG9hJ2kL5mN8pQ1rS4';
-  const MASKED = 'sk-proj-' + '*'.repeat(SK.length - 8);
   const one = listed([conv('a', { title: `use ${SK}` })]);
-  assert.ok(renderHead(currentConversation(one), one).includes(`head-title">use ${MASKED}<`));
-  assert.ok(renderDetails(currentConversation(one), one).includes(`dsec-title">use ${MASKED}<`));
-  const group = listed([conv('g', { kind: 'group', members: ['gravit', 'buffett'], title: `use ${SK}` })]);
-  assert.ok(renderHead(currentConversation(group), group).includes(`head-task">use ${MASKED}<`));
-  for (const s of [one, group]) {
-    assert.doesNotMatch(renderHead(currentConversation(s), s), /aB3dE6fG9h/);
-    assert.doesNotMatch(renderDetails(currentConversation(s), s), /aB3dE6fG9h/);
-  }
+  assert.match(renderHead(currentConversation(one), one), /head-title">Gravit</);
+  assert.match(renderDetails(currentConversation(one), one), /dsec-title">Gravit</);
+  assert.doesNotMatch(renderHead(currentConversation(one), one), /sk-proj/);
+  assert.doesNotMatch(renderDetails(currentConversation(one), one), /sk-proj/);
 });
 
 test("Details' turns and steps, a child's mode and state and a live job's meta and clock are in the table's order", () => {
@@ -500,4 +391,52 @@ test('History lists every session but the conversation and its tasks, newest fir
   assert.deepEqual([...h.matchAll(/href="#\/history\/([^"]+)"/g)].map(m => m[1]), ['o2', 'o1']);
   assert.match(h, /&lt;i&gt;old&lt;\/i&gt;/);
   assert.match(renderHistoryList(R.nav(listed([conv('a')], 'a'), { screen: 'history', id: null }), NOW), /chan-none dim">Nothing in history yet</);
+});
+
+// ---- Messages is the one conversation (one-entry plan 2 Task 5)
+const taskRow = (id, over = {}) => ({ id, title: `Task ${id}`, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW - 3 * MIN, lastEventAt: NOW - MIN, lastSeq: 1, ...over });
+
+test('Messages draws the conversation, its composer and the rail', () => {
+  const said = { id: 'e1', seq: 1, at: NOW, from: 'gravit', kind: 'text', text: 'On it', data: {} };
+  const s = R.tasksLoaded(listed([conv('c', { loaded: true, messages: [said] })], 'c'), { conversation: 'c', tasks: [taskRow('t1', { title: 'Read the tape' })], at: NOW });
+  const h = renderMessagesScreen(s, NOW);
+  // the head, then the two columns: the conversation (thread, composer, foot) and the rail on its right
+  assert.match(h, /^<main class="main"><header class="head"><h1 class="head-title">Gravit<\/h1>[\s\S]*?<\/header><div class="conv-cols"><div class="conv-col"><div class="thread-box">/);
+  assert.match(h, /On it/);
+  assert.ok(h.indexOf('class="composer"') > h.indexOf('class="thread-box"'), 'the composer under the thread');
+  const col = h.indexOf('class="conv-col"'); const rail = h.indexOf('<aside class="tasks"');
+  assert.ok(rail > h.indexOf('class="composer"') && rail > col, 'the rail after the conversation column, laid out on its right');
+  assert.match(h, /Read the tape/);
+  assert.equal(count(h, /class="composer"/g), 1, 'one composer');
+  for (const gone of ['nm-where', 'nm-title', 'draftWhere', 'draftTitle', 'cancelDraft', 'startDraft']) assert.doesNotMatch(h, new RegExp(gone), gone);
+  // no task under way: no rail, the conversation column alone
+  assert.doesNotMatch(renderMessagesScreen(listed([conv('c')], 'c'), NOW), /class="tasks"/);
+});
+
+test('with tasks off it says the conversation is off and draws no composer', () => {
+  const off = R.tasksOff(R.nav(R.hostList(emptyState(), { conversations: [conv('a')], channels, bots }), { screen: 'messages', id: null }), { at: NOW });
+  const h = renderMessagesScreen(off, NOW);
+  assert.match(h, /<header class="head"><h1 class="head-title">Gravit<\/h1><\/header>/);
+  assert.match(h, /Gravit's conversation is off/);
+  assert.doesNotMatch(h, /class="composer"|id="say"|class="tasks"|data-action="suggest"/);
+  const failed = renderMessagesScreen(R.tasksFailed(R.nav(R.hostList(emptyState(), { conversations: [conv('a')], channels, bots }), { screen: 'messages', id: null }), { at: NOW }), NOW);
+  assert.match(failed, /Gravit's conversation could not be read/);
+  assert.doesNotMatch(failed, /class="composer"|id="say"/);
+  // a face that names no conversation reads as off
+  assert.match(renderMessagesScreen(listed([conv('a')], null), NOW), /Gravit's conversation is off/);
+  // a re-read that fails keeps the conversation it last read, its composer with it
+  const kept = renderMessagesScreen(R.tasksFailed(listed([conv('a')], 'a'), { at: NOW }), NOW);
+  assert.match(kept, /class="composer"/);
+  assert.doesNotMatch(kept, /could not be read/);
+});
+
+test('while tasks load it draws no composer', () => {
+  const loading = R.nav(R.hostList(emptyState(), { conversations: [conv('a')], channels, bots }), { screen: 'messages', id: null });
+  const h = renderMessagesScreen(loading, NOW);
+  assert.match(h, /<h1 class="head-title">Gravit<\/h1>/);
+  assert.match(h, />Loading…</);
+  assert.doesNotMatch(h, /class="composer"|id="say"/);
+  // an old link waiting on the tasks binds nothing either
+  assert.doesNotMatch(renderMessagesScreen({ ...loading, route: { screen: 'messages', id: 'a' } }, NOW), /class="composer"|id="say"/);
+  assert.match(renderMessagesScreen(R.hostStatus(loading, { line: 'connecting…' }), NOW), /status-line" role="status">connecting…</);
 });

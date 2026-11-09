@@ -1,10 +1,8 @@
 // face/client/js/host/actions.js — a data-action becomes the Remote the old client sent (spec 2026-10-19 §5, §7 "Composer").
 // Every wire shape here is chat.js's as it stood on main: session/prompt in queue mode with a client-minted requestId
-// and the browser's zone; a slash line to commands/execute first; an @ inside a channel to /data/rooms/say first.
+// and the browser's zone; a slash line to commands/execute first.
 import { randomUuid } from '../wire/api.js';
-import { isMentionText } from '../wire/room.js';
 import { needsAnswer } from '../messages.js';
-import { onScreenId } from './sessions.js';
 import { said, saidError } from '../i18n/words.js';
 
 // the status line's words for a 401, a said read when drawn
@@ -63,16 +61,14 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     }
   }
 
-  // room: whether a channel conversation's words go to its room first (the composer decides by its chips; a bare call by
-  // an @ in the words, as before). attachments (content parts) go to Gravit: the room, which carries text only, is never
-  // tried with them. attachmentRefused(reason) answers a refusal of the attachments in place of the status line
-  async function send(text, { room, attachments = [], attachmentRefused } = {}) {
+  // the words and attachments (content parts) to the session the caller names — Gravit's one conversation (one-entry plan 2),
+  // which is never in a channel, so no room is tried. attachmentRefused(reason) answers a refusal of the attachments in place
+  // of the status line
+  async function send(text, { sessionId, attachments = [], attachmentRefused } = {}) {
     const words = clean(text);
     if (!words && !attachments.length) return null;
-    const s = store.get();
-    const id = s.route.screen === 'messages' ? onScreenId(s) : null;
-    const conv = s.conversations.find(c => c.id === id);
-    if (!conv) return null;
+    if (typeof sessionId !== 'string' || sessionId === '') return null;
+    const id = sessionId;
     try {
       if (words.startsWith('/')) {
         const executed = await command(id, words, attachments);
@@ -83,10 +79,6 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
           return null;
         }
         if (executed !== null) return { sent: 'command', sessionId: id };
-      }
-      if (!attachments.length && conv.channel && (room ?? isMentionText(words))) {
-        const answer = await postJson('/data/rooms/say', { sessionId: id, text: words });
-        if (Array.isArray(answer?.addressed) && answer.addressed.length > 0) return { sent: 'say', sessionId: id };
       }
       await prompt(id, words, attachments);
       return { sent: 'prompt', sessionId: id };

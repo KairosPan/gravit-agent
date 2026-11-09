@@ -1,28 +1,12 @@
 // face/client/js/reducers/controls.js — the in-page controls: inline editors and two-step confirms (they replaced prompt
 // and confirm)
-import { reducers as messages, closeOverlays } from './messages.js';
-import { said } from '../i18n/words.js';
+import { closeOverlays } from './messages.js';
 
 const fail = (s, error) => ({ ...s, edit: { ...s.edit, error } });
-const done = s => ({ ...s, edit: null });
 
 export const reducers = {
   startEdit: (s, spec) => ({ ...s, edit: spec, confirm: null }),
   cancelEdit: s => (s.edit ? { ...s, edit: null } : s),
-
-  // one commit for every editor: it reads the values the editor's inputs held and checks them
-  commitEdit(s, { values = {} }) {
-    const e = s.edit;
-    if (!e) return s;
-    switch (e.kind) {
-      case 'rename': {
-        const title = String(values.title ?? '').trim();
-        return title ? done(messages.rename(s, { convId: e.convId, title })) : fail(s, said('details.nameEmpty'));
-      }
-      default:
-        return done(s);
-    }
-  },
 
   // a write the editor asked for was refused: the editor stays open with the words
   editFailed: (s, { error }) => (s.edit ? fail(s, error) : s),

@@ -51,11 +51,6 @@ function row(conv, state, now) {
     `<span class="row-preview">${esc(maskExcerpt(previewOf(conv, state)))}</span></span></a>${pin}</div>`;
 }
 
-function draftRow() {
-  return `<a class="row current draft" aria-current="page" href="#/messages/new" data-action="open" data-id="new"><span class="dot"></span>` +
-    `<span class="row-body"><span class="row-top"><span class="row-title">${th('list.newMessage')}</span><span class="row-time">${th('list.draft.now')}</span></span><span class="row-preview">${th('list.draft.notSent')}</span></span></a>`;
-}
-
 // a first-level key: an icon and its name; collapsed, the name stays as the title and for screen readers
 function navItem(href, name, label, current, mini, badge = 0) {
   return `<a${attrs({ class: cls('nav-item', current && 'current'), 'aria-current': current ? 'page' : null, href, title: mini ? label : null })}>${icon(name, 22, current ? 2.1 : 2)}` +
@@ -144,7 +139,7 @@ function results(state, now) {
   return `<div class="conv-results">${inner}</div>`;
 }
 
-// the second level, open on Messages: the new-message key on top, the search box, then the groups (host/list-view.js), each
+// the second level, open on Messages: the search box, then the groups (host/list-view.js), each
 // its head and its rows, newest first — or, while a query stands, its results in their place
 export function renderList(state, now, { mac = true } = {}) {
   if (!LISTED.has(state.route.screen)) return '';
@@ -152,9 +147,9 @@ export function renderList(state, now, { mac = true } = {}) {
   const opened = !!state.listOpen;
   const head = `<aside class="list" data-list-open="${opened}" aria-label="${th('list.title')}"><div class="list-head"><h2 class="list-title">${th('list.title')}</h2>` +
     `<button type="button" id="list-toggle" class="list-toggle" data-action="toggleList" aria-expanded="${opened}" aria-controls="conversation-list-body" aria-label="${opened ? th('list.hide') : th('list.show')}">${icon('chevDown', 18, 2.2)}</button>` +
-    `<button type="button" class="new-key" data-action="startDraft" aria-label="${th('list.newMessage')}">${icon('plus', 18, 2.2)}</button></div><div class="list-body" id="conversation-list-body">` + searchBox(query, mac);
+    `</div><div class="list-body" id="conversation-list-body">` + searchBox(query, mac);
   if (query.trim() !== '') return `${head}${results(state, now)}</div></aside>`;
-  const rows = (state.draft ? draftRow() : '') + groupsOf(state).map(g => groupHead(g, state) + g.shown.map(c => row(c, state, now)).join('')).join('');
+  const rows = groupsOf(state).map(g => groupHead(g, state) + g.shown.map(c => row(c, state, now)).join('')).join('');
   return `${head}${rows ? `<div class="rail-rows">${rows}</div>` : ''}</div></aside>`;
 }
 

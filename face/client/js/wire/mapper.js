@@ -357,6 +357,8 @@ function bubble(role, message, base, interrupted) {
     interrupted,
     source: kind,
     form,
+    // a task's message (one-entry plan 2): the task a relay names and the status it reports, as the face writes them
+    ...(kind === "task" ? pick(src, ["task", "status"], isId) : {}),
     ...(mention !== undefined && mention.length > 0 ? { mention } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(role === "operator" && kind === "telegram" ? pick(src, PHONE_FIELDS, Number.isSafeInteger) : {}),

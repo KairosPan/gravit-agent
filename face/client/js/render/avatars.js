@@ -17,10 +17,6 @@ export function avatar(who, size = 28, state = null) {
   return mark({ type: 'letter', text: name.slice(0, 1).toUpperCase(), tone: 'grey' }, size, '999px', name);
 }
 
-// the group head: overlapping avatars (spec §5.1)
-export function cluster(members, size = 44, state = null) {
-  return `<span class="cluster">${members.map(m => `<span class="cluster-item">${avatar(m, size, state)}</span>`).join('')}</span>`;
-}
 
 // the group row mark: two small circles in one slot (spec §4.3)
 export function groupMark(members, size = 36, state = null) {

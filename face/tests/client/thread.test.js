@@ -527,3 +527,35 @@ test("an image card's meta line is in the table's order", () => {
   const h = withTable({ 'thread.imageMeta': '{size} ({type})' }, () => renderMessage(you([PNG('i1', { offloaded: true })]), conv(), thumbed({})));
   assert.match(h, /<span class="file-meta">1\.2 MB \(PNG\)<\/span>/);
 });
+
+// ---- the task source kind (one-entry plan 2 Task 5)
+const taskMsg = (data, text = '') => msg({ id: 'e70', seq: 70, from: 'system', kind: 'task', text, data });
+
+test('a task line links its task and folds its body', () => {
+  const h = renderMessage(taskMsg({ form: 'report', task: 't1', status: 'ready', title: 'Read the tape', body: 'Held and sold' }), conv(), state);
+  assert.match(h, /^<details class="sysline ctx" id="relay-s1-e70"><summary><a class="task-link" href="#\/task\/t1">Task · Read the tape · Done<\/a><\/summary><pre>Held and sold<\/pre><\/details>$/);
+  // the title unread: the task's own from the tasks slice, else Task; a status no table names as it came
+  const named = { ...state, tasks: { ...state.tasks, items: [{ id: 't2', title: 'Scan filings' }] } };
+  assert.match(renderMessage(taskMsg({ form: 'report', task: 't2', status: 'blocked', title: null, body: '' }), conv(), named), />Task · Scan filings · Blocked</);
+  assert.match(renderMessage(taskMsg({ form: 'report', task: 't3', status: 'odd', title: null, body: '' }), conv(), state), />Task · Task · odd</);
+  // no task id: the line alone, no link
+  assert.match(renderMessage(taskMsg({ form: 'report', status: 'failed', title: 'X', body: 'b' }), conv(), state), /<summary>Task · X · Failed<\/summary>/);
+  // a worker's own lines: the brief and the steer are Gravit's bubbles under their labels, a recovery and a stop centred lines
+  const brief = renderMessage(taskMsg({ form: 'brief' }, 'Scan filings\n\nRead the 10-Q'), conv(), state);
+  assert.match(brief, /^<div class="msg left"><div class="sender-name">Task instructions<\/div><div class="msg-row"><span[^>]*class="av[^"]*"[\s\S]*<div class="bubble grey">/);
+  assert.match(brief, /Read the 10-Q/);
+  assert.match(renderMessage(taskMsg({ form: 'steer' }, 'Carry on'), conv(), state), /<div class="sender-name">Gravit relays<\/div>[\s\S]*Carry on/);
+  assert.match(renderMessage(taskMsg({ form: 'recovery' }, 'The face restarted while you worked.'), conv(), state), /^<div class="sysline">[^<]+<\/div>$/);
+  assert.equal(renderMessage(taskMsg({ form: 'stopped' }, 'Stopped by the conversation.'), conv(), state), '<div class="sysline">Stopped</div>');
+  withTable({ 'thread.task.line': '{status} — {title}' }, () => {
+    assert.match(renderMessage(taskMsg({ form: 'report', task: 't1', status: 'ready', title: 'R', body: '' }), conv(), state), />Done — R</);
+  });
+});
+
+test('the fenced body is escaped', () => {
+  const h = renderMessage(taskMsg({ form: 'report', task: 't<1>', status: 'ready', title: '<b>T</b>', body: '<script>x</script> & y' }), conv(), state);
+  assert.match(h, /href="#\/task\/t%3C1%3E"/);
+  assert.match(h, />Task · &lt;b&gt;T&lt;\/b&gt; · Done</);
+  assert.match(h, /<pre>&lt;script&gt;x&lt;\/script&gt; &amp; y<\/pre>/);
+  assert.doesNotMatch(h, /<script>|<b>T/);
+});

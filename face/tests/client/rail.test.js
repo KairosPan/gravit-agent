@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { avatar, cluster, groupMark } from '../../client/js/render/avatars.js';
+import { avatar, groupMark } from '../../client/js/render/avatars.js';
 import { renderRail, renderNav, renderList, previewOf, senderName } from '../../client/js/render/rail.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
@@ -119,15 +119,13 @@ test('conversation rows omit avatars for Gravit, named bots and groups', () => {
   assert.equal(senderName('buffett', s), 'Buffett Type');
   assert.equal(senderName('ghost', s), 'ghost');
   assert.match(avatar('buffett', 28, s), />B</);
-  assert.equal(count(cluster(['gravit', 'buffett'], 44, s), /class="cluster-item"/g), 2);
   assert.equal(count(groupMark(['gravit', 'buffett'], 36, s), /class="av /g), 2);
 });
 
-test('a draft puts a New message row on top; the list is only on Messages', () => {
-  const s = R.startDraft(listed([conv('a')]), { now: NOW });
+test('the list has no New message key or row (one-entry plan 2); it is only on Messages', () => {
+  const s = listed([conv('a')]);
   const h = renderList(s, NOW);
-  assert.match(h, /row current draft[^>]*href="#\/messages\/new"/);
-  assert.ok(h.indexOf('New message') < h.indexOf('T a'));
+  assert.doesNotMatch(h, /startDraft|new-key|messages\/new|New message/);
   assert.equal(renderList({ ...s, route: { screen: 'account', tab: 'portfolio' } }, NOW), '');
   assert.match(renderRail(s, NOW), /class="rail"[\s\S]*class="list"/);
 });
@@ -245,9 +243,9 @@ test('the box sits under the list head with its placeholder and key hint', () =>
 });
 
 test('a query replaces the groups with the results and their count', () => {
-  const s = R.startDraft(listed([conv('a', { title: 'Moutai notes', channel: { workspaceId: 'w0', name: 'workbench' } }), conv('b', { title: 'Other' }), conv('c', { title: 'moutai again', updatedAt: NOW - 1 * MIN })], 'a'), { now: NOW });
+  const s = listed([conv('a', { title: 'Moutai notes', channel: { workspaceId: 'w0', name: 'workbench' } }), conv('b', { title: 'Other' }), conv('c', { title: 'moutai again', updatedAt: NOW - 1 * MIN })], 'a');
   const h = renderList(searched(s, 'moutai'), NOW);
-  assert.doesNotMatch(h, /class="rail-rows"|class="grp-head"|draft/, 'no groups and no draft row while a query stands');
+  assert.doesNotMatch(h, /class="rail-rows"|class="grp-head"/, 'no groups while a query stands');
   assert.match(h, /<div class="conv-results"><div class="conv-results-count">2 conversations<\/div>/);
   const ids = [...h.matchAll(/class="conv-hit[^"]*" href="#\/messages\/(\w+)" data-action="open" data-id="(\w+)"/g)].map(m => m[1] + m[2]);
   assert.deepEqual(ids, ['cc', 'aa'], 'newest first, each a link that opens it');
@@ -396,6 +394,5 @@ test('the mobile conversation disclosure exposes its state and controls the exis
   assert.match(renderList(opened, NOW), /aria-label="Hide conversations"/);
   assert.equal(R.nav(opened, opened.route).listOpen, true, 'the duplicate hashchange leaves the disclosure alone');
   assert.equal(R.nav(opened, { screen: 'markets', id: null }).listOpen, false);
-  assert.equal(R.startDraft(opened).listOpen, false);
   assert.equal(R.toggleList(opened).listOpen, false);
 });

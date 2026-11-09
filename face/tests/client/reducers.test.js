@@ -79,14 +79,12 @@ test('settle: history and a strategy route as they are', () => {
   assert.equal(settle(store, '#/strategy/cn-market'), null);
 });
 
-test('nav opens the conversation read: its dot clears; a draft is dropped and drawers close', () => {
+test('nav opens the conversation read: its dot clears and drawers close', () => {
   const s = ready({ ...emptyState(), conversations: [hostConv('conv', { updatedAt: 9 }), hostConv('b')] });
   let t = R.nav(s, { screen: 'messages', id: null });
   assert.equal(t.conversations.find(c => c.id === 'conv').lastSeen, 9);
-  t = R.startDraft(R.toggleDetails(t), { now: NOW });
-  assert.ok(t.draft);
-  t = R.nav(t, { screen: 'history', id: 'b' });
-  assert.equal(t.draft, null); assert.equal(t.detailsOpen, false); assert.deepEqual(t.route, { screen: 'history', id: 'b' });
+  t = R.nav(R.toggleDetails(t), { screen: 'history', id: 'b' });
+  assert.equal(t.detailsOpen, false); assert.deepEqual(t.route, { screen: 'history', id: 'b' });
   assert.equal(R.nav(t, { screen: 'discover', id: null }).route.screen, 'discover');
 });
 
@@ -326,10 +324,9 @@ test('the lightbox opens on an attachment and closes', () => {
   for (const bad of [{}, { attachmentId: '' }, { attachmentId: 7 }, undefined]) assert.equal(R.openLightbox(s, bad), s, JSON.stringify(bad));
   assert.equal(R.closeLightbox(open).lightbox, null);
   assert.equal(R.closeLightbox(s), s, 'closing none is no change');
-  // leaving the conversation closes it: another conversation, another screen, New message
+  // leaving the conversation closes it: another conversation, another screen
   assert.equal(R.nav(open, { screen: 'messages', id: 'b' }).lightbox, null);
   assert.equal(R.nav(open, { screen: 'discover', id: null }).lightbox, null);
-  assert.equal(R.startDraft(open, {}).lightbox, null);
 });
 
 test('openDetails opens Details and leaves it open', () => {

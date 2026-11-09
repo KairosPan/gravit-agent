@@ -114,8 +114,8 @@ export function renderChannelScreen(state, now) {
     return shell(`<div class="chan-none dim">${th('common.loading')}</div>`);
   }
   const status = data.status && typeof data.status === 'object' ? data.status : {};
-  const head = (status.status ? chip(status.status) : '') + '<span class="spacer"></span>' +
-    `<button type="button" class="btn-primary small" data-action="newRound" data-id="${esc(id)}">${th('channel.newRound')}</button>`;
+  // (New round, a new message in the channel, retired with New message: one-entry plan 2)
+  const head = status.status ? chip(status.status) : '';
   const stale = c.status === 'failed' ? `<div class="${cls('chan-stale', 'dim')}">${th('channel.stale', { at: fmtClock(c.at ?? now) })} ${retry(id)}</div>` : ''; // words-order: a line, then its key
   const body = data.body && typeof data.body === 'object' ? data.body : {};
   return shell(

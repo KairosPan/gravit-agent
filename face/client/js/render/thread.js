@@ -179,9 +179,34 @@ export function thumbsNeeded(conv, thumbs) {
   return out;
 }
 
+// a task's message (host/kinds.js): a report relayed into the conversation is one centred line linking its task's page, its
+// body folded under it (open across a render by its id); a worker's brief and a steer Gravit relayed are Gravit's bubbles
+// under their labels; a recovery note and a stop are centred lines in the face's words. A report's title is its head's, else
+// the task's own, else Task; its status in the table's words, one it does not name as it came. Masked as every worker's words
+const REPORT_STATUS = {
+  ready: () => t('thread.task.ready'), waiting: () => t('tasks.group.you'), blocked: () => t('tasks.status.blocked'),
+  failed: () => t('tasks.status.failed'), stalled: () => t('tasks.status.stalled'),
+};
+function taskMessage(m, conv, state) {
+  const d = m.data ?? {};
+  if (d.form === 'report') {
+    const known = typeof d.task === 'string' ? (state?.tasks?.items ?? []).find(task => task.id === d.task)?.title : null;
+    const title = maskExcerpt(d.title || known || t('thread.task.untitled'));
+    const status = typeof d.status === 'string' && Object.hasOwn(REPORT_STATUS, d.status) ? REPORT_STATUS[d.status]() : String(d.status ?? '');
+    const line = esc(t('thread.task.line', { title, status }));
+    const head = typeof d.task === 'string' ? `<a class="task-link" href="#/task/${esc(encodeURIComponent(d.task))}">${line}</a>` : line;
+    return `<details class="sysline ctx" id="relay-${esc(conv.id)}-${esc(m.id)}"><summary>${head}</summary><pre>${esc(maskExcerpt(d.body ?? ''))}</pre></details>`;
+  }
+  if (d.form === 'recovery') return `<div class="sysline">${th('thread.task.recovery')}</div>`;
+  if (d.form === 'stopped') return `<div class="sysline">${th('tasks.status.stopped')}</div>`;
+  const label = d.form === 'brief' ? th('thread.task.brief') : th('thread.task.steer');
+  return `<div class="msg left"><div class="sender-name">${label}</div><div class="msg-row">${avatar('gravit', 28)}<div class="msg-body"><div class="bubble grey">${markdownHtml(maskExcerpt(m.text ?? ''))}</div></div></div></div>`;
+}
+
 export function renderMessage(m, conv, state, page = {}) {
   // a tool call is drawn nowhere (the operator's word, 2026-10-28): its gate, receipt or refusal is a message of its own
   if (m.kind === 'tool') return '';
+  if (m.kind === 'task') return taskMessage(m, conv, state);
   // a producer-sourced user record (a runtime snapshot, a plugin notice, a member's delta) is context, folded away under its source;
   // a line the page itself writes (a round end, a child's report) stays a centred line
   if (m.from === 'system') {
