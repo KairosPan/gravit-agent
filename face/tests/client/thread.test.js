@@ -1,7 +1,7 @@
 // The thread draws the kind table (spec 2026-10-19 §6) on host-shaped messages: text, tool, card, approval, question, receipt, refusal.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { renderMessage, renderThread, setMarkdown, chip, key, ticker, withTickers, thumbsNeeded } from '../../client/js/render/thread.js';
+import { renderMessage, renderThread, setMarkdown, chip, key, ticker, withTickers, thumbsNeeded, DESK_SUMMARY_MAX } from '../../client/js/render/thread.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { MIN } from '../../client/js/time.js';
 import { sessionUri } from '../../client/js/composer/draft.js';
@@ -592,13 +592,30 @@ test('a phone bubble carries the 手机 chip', () => {
 const deskMsg = (data, text) => msg({ id: 'e81', seq: 81, from: 'system', kind: 'desk', text, data });
 test('a schedule line carries 定时 and an alert line 盯盘', () => {
   assert.equal(renderMessage(deskMsg({ line: 'schedule', order: 'preclose' }, 'Check the book.'), conv(), state),
-    '<div class="sysline desk-line"><span class="chip grey">Scheduled</span><span class="desk-text">Check the book.</span></div>');
-  assert.match(renderMessage(deskMsg({ line: 'alert', symbol: 'NVDA' }, 'NVDA fell'), conv(), state), /<span class="chip grey">Watch<\/span>/);
+    '<details class="sysline ctx desk-line" id="desk-s1-e81"><summary><span class="chip grey">Scheduled</span> <span class="desk-text">Check the book.</span></summary><pre>Check the book.</pre></details>');
+  assert.match(renderMessage(deskMsg({ line: 'alert', symbol: 'NVDA' }, 'NVDA fell'), conv(), state), /<summary><span class="chip grey">Watch<\/span> /);
   withTable({ 'thread.desk.schedule': '定时', 'thread.desk.alert': '盯盘' }, () => {
     assert.match(renderMessage(deskMsg({ line: 'schedule' }, 'x'), conv(), state), />定时</);
     assert.match(renderMessage(deskMsg({ line: 'alert' }, 'x'), conv(), state), />盯盘</);
   });
   assert.equal(renderMessage(deskMsg({ line: 'alert' }, ''), conv(), state), '<div class="sysline desk-line"><span class="chip grey">Watch</span></div>', 'no body: the chip alone');
+});
+
+test("a desk line folds: its first line clipped in the summary, its whole body under it", () => {
+  const long = 'B'.repeat(DESK_SUMMARY_MAX + 30);
+  const body = `\n${long}\n- hold NVDA\n- trim AMD`;
+  const h = renderMessage(deskMsg({ line: 'schedule' }, body), conv(), state);
+  const summary = /<summary>([\s\S]*)<\/summary>/.exec(h)[1];
+  assert.match(summary, new RegExp(`<span class="desk-text">B{${DESK_SUMMARY_MAX - 1}}…</span>$`), 'the first line with words, clipped');
+  assert.doesNotMatch(summary, /hold NVDA/, 'the rest stays under the fold');
+  assert.ok(h.includes(`<pre>\n${long}\n- hold NVDA\n- trim AMD</pre>`), 'the whole body under it, as written');
+});
+
+test('a desk line masks a pasted key in its summary and its body', () => {
+  const h = renderMessage(deskMsg({ line: 'schedule' }, `use ${SK}\nthen ${SK}`), conv(), state);
+  assert.ok(!h.includes(SK), 'the key appears nowhere raw');
+  assert.ok(h.includes(`<span class="desk-text">use ${MASKED}</span>`));
+  assert.ok(h.includes(`<pre>use ${MASKED}\nthen ${MASKED}</pre>`));
 });
 
 test("a desk line's text is escaped and its head left out", async () => {
@@ -608,6 +625,6 @@ test("a desk line's text is escaped and its head left out", async () => {
   const frame = { type: 'session/event', sessionId: 's1', event: { type: 'user/message', seq: 82, time: 1, surfaceOp: 'append', data: { id: 'm82', role: 'user', content: [{ type: 'text', text }], source: { kind: 'alert', alert: 'a', symbol: 'NVDA' } } } };
   const [m] = toMessages(mapFrame(frame), new Map(), NOW);
   const h = renderMessage(m, conv(), state);
-  assert.match(h, /<span class="desk-text">&lt;script&gt;x&lt;\/script&gt; &amp; y<\/span>/);
+  assert.match(h, /<span class="desk-text">&lt;script&gt;x&lt;\/script&gt; &amp; y<\/span><\/summary><pre>&lt;script&gt;x&lt;\/script&gt; &amp; y<\/pre>/);
   assert.doesNotMatch(h, /<script>|\[alert ·|desk-data|&lt;&lt;&lt;/);
 });

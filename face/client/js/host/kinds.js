@@ -256,7 +256,9 @@ function taskMessage(b, view) {
 
 // the desk folded into the conversation (one-entry plan 3): a text from the operator's phone is the operator's own words,
 // its provenance line `[<network> · operator · HH:MM ET…]` left to the phone's chip; a reply to an alert draws the
-// operator's words alone (the mapper's `said`), the alert it answers being a line of the conversation already
+// operator's words alone (the mapper's `said`). On the router's path the alert it answers is a desk line of this same
+// conversation, so nothing is lost; under FACE_ROUTER=0 the reply lands in the desk session, whose thread need not hold
+// the alert they answer - a known loss, the context staying in the session's log
 const PROVENANCE = /^\[(telegram|slack) · operator · [^\n]*\]$/;
 function phoneMessage(b, view) {
   const text = view.text ?? '';

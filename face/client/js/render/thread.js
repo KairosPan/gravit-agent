@@ -173,13 +173,20 @@ function youMessage(m, conv, state, page) {
   return `<div class="msg you"><div class="you-body">${tag}${files}${bubble}</div>${avatar('you', 28)}</div>`;
 }
 
-// a desk line (host/kinds.js deskMessage): a firing of the face's clock or an alert of its watch, noted into the conversation,
-// one centred line under its Scheduled or Watch chip; its body as the face wrote it, escaped, its head already left out
+// a desk line (host/kinds.js deskMessage): a firing of the face's clock or an alert of its watch, noted into the conversation.
+// A firing's body is the whole brief or report the phone got, so the line folds as a task's report does: its Scheduled or
+// Watch chip and its first line (clipped at DESK_SUMMARY_MAX) as the summary, the body under it (open across a render by its
+// id); a line with no body is the chip alone. Masked as a worker's words are: an agent wrote it, and it may hold a pasted key
 const DESK_CHIP = { schedule: () => t('thread.desk.schedule'), alert: () => t('thread.desk.alert') };
-function deskLine(m) {
+export const DESK_SUMMARY_MAX = 120;
+function deskLine(m, conv) {
   const line = m.data?.line;
-  const label = Object.hasOwn(DESK_CHIP, line) ? DESK_CHIP[line]() : String(line ?? '');
-  return `<div class="sysline desk-line">${chip(label)}${m.text ? `<span class="desk-text">${esc(m.text)}</span>` : ''}</div>`;
+  const label = chip(Object.hasOwn(DESK_CHIP, line) ? DESK_CHIP[line]() : String(line ?? ''));
+  const body = m.text ?? '';
+  if (body.trim() === '') return `<div class="sysline desk-line">${label}</div>`;
+  const first = body.split('\n').find(l => l.trim() !== '') ?? '';
+  const clipped = first.length > DESK_SUMMARY_MAX ? `${first.slice(0, DESK_SUMMARY_MAX - 1)}…` : first;
+  return `<details class="sysline ctx desk-line" id="desk-${esc(conv.id)}-${esc(m.id)}"><summary>${label} <span class="desk-text">${esc(maskExcerpt(clipped))}</span></summary><pre>${esc(maskExcerpt(body))}</pre></details>`;
 }
 
 /** The conversation's operator images still to read from the host: not offloaded, with no entry in `thumbs` yet, each once. */
@@ -225,7 +232,7 @@ export function renderMessage(m, conv, state, page = {}) {
   // a tool call is drawn nowhere (the operator's word, 2026-10-28): its gate, receipt or refusal is a message of its own
   if (m.kind === 'tool') return '';
   if (m.kind === 'task') return taskMessage(m, conv, state);
-  if (m.kind === 'desk') return deskLine(m);
+  if (m.kind === 'desk') return deskLine(m, conv);
   // a producer-sourced user record (a runtime snapshot, a plugin notice, a member's delta) is context, folded away under its source;
   // a line the page itself writes (a round end, a child's report) stays a centred line
   if (m.from === 'system') {
