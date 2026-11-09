@@ -37,6 +37,8 @@
  * is in no answer, no summary, no log line and no ledger row: the summary of a connect names the token by its fingerprint only. Every line the
  * identity logs, its connectors' and its pending connections' among them, has every connected network's tokens taken out in every spelling,
  * and every Slack token's shape. */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { isRefusal, type Refusal } from "../../core/errors.ts";
 import { fingerprintOf, keyMatches } from "../account/brain-keys.ts";
 import type { Outcome } from "../account/exchange.ts";
@@ -48,18 +50,22 @@ import { redactorOf, splitMessage } from "./bot-api.ts";
 import { cardNotice, fillNotice, type FillFields } from "./notices.ts";
 import { lateLine, Outbox, OUTBOX_MAX, OUTBOX_MAX_AGE_MS } from "./outbox.ts";
 import { InboxRing, type InboxMessage } from "./inbox.ts";
-import { operatorHandleOf, PendingConnections, type PendingResume } from "./pending.ts";
+import { operatorHandleOf, PendingConnections, speaksAsOf, type PendingResume } from "./pending.ts";
+import type { PhotonLink } from "./photon-link.ts";
 import { IDENTITY_WORDS } from "./routes.ts";
-import { readNetworkSecret, removeNetworkSecret, secretsOf, writeNetworkSecret, type SlackSecret, type TelegramSecret } from "./secret-file.ts";
+import { readNetworkSecret, removeNetworkSecret, secretsOf, writeNetworkSecret, type ImessageSecret, type SlackSecret, type TelegramSecret } from "./secret-file.ts";
 import { CURSOR_FILE, SlackConnector, SlackTransport } from "./slack.ts";
 import { SLACK_API, SLACK_MANIFEST, SlackApi, SlackApiError } from "./slack-api.ts";
 import { SlackSocket, type OpenSocket } from "./slack-socket.ts";
-import { BLOCKED_MAX, loadIdentity, MASKED, saveIdentity, Strangers, writeIdentityFile, type Binding, type IdentityState, type Stranger } from "./store.ts";
+import { BLOCKED_MAX, identityDir, loadIdentity, MASKED, saveIdentity, Strangers, writeIdentityFile, type Binding, type IdentityState, type Stranger } from "./store.ts";
 import { OFFSET_FILE, realClock, TelegramConnector, TelegramTransport, type IdentityClock, type NetworkStatus } from "./telegram.ts";
 
 export type IdentityAction = Extract<OwnerAction, { type: "connectNetwork" | "disconnectNetwork" | "setRouting" | "blockSender" }>;
 export const IDENTITY_TYPES: ReadonlySet<string> = new Set(["connectNetwork", "disconnectNetwork", "setRouting", "blockSender"]);
 export const isIdentityAction = (a: { type: string }): a is IdentityAction => IDENTITY_TYPES.has(a.type);
+
+/** the line Photon refused to write to, kept in the home's identity directory: a connect registers the number again past it */
+export const IMESSAGE_REFUSED_FILE = "imessage.refused";
 
 export interface IdentityDeps {
   home: string;
@@ -68,6 +74,8 @@ export interface IdentityDeps {
   /** Slack's Web API (slack-api.ts slackApiBase: Slack's own unless set) and how its sockets are opened (Node's WebSocket unless set) */
   slackApiBase?: string | undefined;
   openSocket?: OpenSocket | undefined;
+  /** Photon's link, iMessage's seam (photon-link.ts): none, and iMessage cannot be connected */
+  photon?: PhotonLink | undefined;
   fetch?: typeof fetch | undefined;
   pollTimeoutS?: number | undefined;
   now?: (() => number) | undefined;
@@ -224,7 +232,7 @@ export class Identity {
     this.store = new Strangers(deps.home);
     this.inboxRing = new InboxRing(deps.home);
     this.outbox = new Outbox(deps.home, OUTBOX_MAX, this.log);
-    this.pending = new PendingConnections({ apiBase: deps.apiBase, slackApiBase: deps.slackApiBase, openSocket: deps.openSocket, clock: this.clock, strangers: this.store, bound: (network) => this.bound(network) !== undefined, blocked: () => this.state.blocked, fetch: deps.fetch, pollTimeoutS: deps.pollTimeoutS, now: deps.now, log: this.log });
+    this.pending = new PendingConnections({ apiBase: deps.apiBase, slackApiBase: deps.slackApiBase, openSocket: deps.openSocket, clock: this.clock, photon: deps.photon, imessageRefusedLine: () => this.imessageRefusedLine(), strangers: this.store, bound: (network) => this.bound(network) !== undefined, blocked: () => this.state.blocked, fetch: deps.fetch, pollTimeoutS: deps.pollTimeoutS, now: deps.now, log: this.log });
     this.resume();
     // an earlier run may have queued what this one takes out
     this.outbox.rewrite((t) => this.clean(t));
@@ -362,8 +370,8 @@ export class Identity {
         // a pending connection to another network is not the one signed for
         if (!p || p.network !== a.network) return IDENTITY_WORDS.noPending;
         if (!keyMatches(a.salt, p.keyInput, a.keyHash)) return IDENTITY_WORDS.mismatchOn(p.network);
-        if (a.botId !== p.bot.id || a.speaksAs !== `@${p.bot.username}`) return IDENTITY_WORDS.botMismatchOn(p.network);
-        if (a.operatorId !== p.sender.id || a.talksOnlyWith !== operatorHandleOf(p.sender)) return IDENTITY_WORDS.senderMismatch;
+        if (a.botId !== p.bot.id || a.speaksAs !== speaksAsOf(p.network, p.bot)) return IDENTITY_WORDS.botMismatchOn(p.network);
+        if (a.operatorId !== p.sender.id || a.talksOnlyWith !== operatorHandleOf(p.sender, p.network)) return IDENTITY_WORDS.senderMismatch;
         return null;
       }
       case "disconnectNetwork":
@@ -606,7 +614,7 @@ export class Identity {
     this.dropQueued(network);
     this.startConnector(binding, { ...taken.secret, operatorHandle: a.talksOnlyWith }, taken.resume);
     // Slack's fingerprint is of its two tokens together
-    return { ok: true, kind: "account", summary: `${NETWORK_NAME[network]} connected: Gravit speaks as ${a.speaksAs} and talks only with ${a.talksOnlyWith} · ${network === "slack" ? "tokens" : "token"} ${fingerprint}` };
+    return { ok: true, kind: "account", summary: `${NETWORK_NAME[network]} connected: Gravit speaks as ${a.speaksAs} and talks only with ${a.talksOnlyWith} · ${network === "slack" ? "tokens" : network === "imessage" ? "project secret" : "token"} ${fingerprint}` };
   }
 
   private async disconnect(a: Extract<IdentityAction, { type: "disconnectNetwork" }>): Promise<Outcome> {
@@ -640,6 +648,16 @@ export class Identity {
     }
   }
 
+  /** the line Photon refused to write to, as <home>/identity/imessage.refused keeps it (trimmed), or undefined when there is none */
+  private imessageRefusedLine(): string | undefined {
+    try {
+      const line = readFileSync(join(identityDir(this.home), IMESSAGE_REFUSED_FILE), "utf8").trim();
+      return line !== "" ? line : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** at service creation: a binding whose token file is there listens again from where its connector kept (its own resumeFrom) */
   private resume(): void {
     for (const b of this.state.bindings) {
@@ -652,8 +670,9 @@ export class Identity {
 
   /** the network's transport and connector, by network: from `resume` after a connect (where the pending connection stood after the
    * message heard), else from where the connector's own file says it stopped */
-  private startConnector(binding: Binding, secret: TelegramSecret | SlackSecret, resume?: PendingResume): void {
+  private startConnector(binding: Binding, secret: TelegramSecret | SlackSecret | ImessageSecret, resume?: PendingResume): void {
     if (this.transports.has(binding.network) || this.connectors.has(binding.network)) return;
+    if (binding.network === "imessage") return; // no iMessage connector yet: a later task of the iMessage plan starts it
     if (binding.network === "telegram" && "token" in secret) {
       const offset = resume?.network === "telegram" ? resume.offset : TelegramConnector.resumeFrom(this.home);
       return this.startTelegram(binding, secret, offset);

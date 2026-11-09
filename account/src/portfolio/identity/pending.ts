@@ -6,9 +6,13 @@
  *     to check who the bot is (Telegram's getMe; Slack's auth.test, bots.info and a socket's hello). A key the network does not know is
  *     refused; nothing is kept of a refused one. Telegram's route calls the short form, begin(token, keyHash, salt), which checks the
  *     token's shape first (TOKEN_SHAPE); Slack's calls beginSlack(appToken, botToken, keyHash, salt), which checks both tokens' shapes
- *     (slack.ts) and joins them with a NUL. Every refusal is in the network's own fixed words (IDENTITY_WORDS).
+ *     (slack.ts) and joins them with a NUL; iMessage's calls beginImessage(projectId, projectSecret, phone, keyHash, salt), which checks
+ *     the project's ID, its secret and the operator's number (E.164), joins the ID and the secret with a NUL, and asks Photon through
+ *     imessage-pending.ts. Every refusal is in the network's own fixed words (IDENTITY_WORDS).
  *   Sheet 2, Say hi: the key is held in this process's memory — never a file, a log line, an answer or a ledger row — and the source
  *     listens for the first private message to the bot (Telegram: getUpdates, messages only; a group's message is skipped).
+ *   A sender a source reports as a stranger while waiting (on iMessage: any handle but the number typed) is counted in Not you, and the
+ *     view says so, masked (strangerHeard).
  *   Sheet 3, Is this you?: the sender heard — their name, @handle, their id masked to its last three characters, and what they wrote. "Not
  *     me" counts them as a stranger (store.ts Strangers) and waits again; a later message from the same person is counted, never heard.
  *     "Yes" is the signed connectNetwork, whose door handler takes the pending connection (take) and checks it against what was signed.
@@ -32,7 +36,9 @@ import { no } from "../refuse.ts";
 import { redactorOf } from "./bot-api.ts";
 import { NETWORK_NAME, type Network } from "./kinds.ts";
 import { IDENTITY_WORDS } from "./routes.ts";
-import type { SlackSecret, TelegramSecret } from "./secret-file.ts";
+import { ImessagePendingSource } from "./imessage-pending.ts";
+import { E164, type PhotonLink } from "./photon-link.ts";
+import type { ImessageSecret, SlackSecret, TelegramSecret } from "./secret-file.ts";
 import { SLACK_APP_TOKEN_SHAPE, SLACK_BOT_TOKEN_SHAPE, SlackPendingSource } from "./slack.ts";
 import { SLACK_API } from "./slack-api.ts";
 import type { OpenSocket } from "./slack-socket.ts";
@@ -69,7 +75,11 @@ export interface PendingSender {
 }
 
 /** where the source stood after the message heard, for the connected connector to start from */
-export type PendingResume = { network: "telegram"; offset: number } | { network: "slack"; appId: string; channel: string; cursor: string };
+export type PendingResume =
+  | { network: "telegram"; offset: number }
+  | { network: "slack"; appId: string; channel: string; cursor: string }
+  /** iMessage's: the heard message's sequence on the project's stream, the Photon user and its line, and the operator's number */
+  | { network: "imessage"; sequence: number | undefined; userId: string; line: string; phone: string };
 
 /** A network's side of a pending connection: the key it was made with (its token strings, for every line to take out), the check of who
  * the bot is, and the listening for the first sender — which asks the shell about each sender (`admit`), tells it whom it heard (`heard`)
@@ -96,6 +106,9 @@ export interface PendingView {
   state: "waiting" | "heard" | "conflict" | "expired";
   /** the sender heard: `id` their network id, which the page signs as connectNetwork's operatorId and draws only masked */
   sender?: PendingSender;
+  /** the last sender the source reported as a stranger while waiting: masked, and when (sheet 2 says a message came from another
+   * address) */
+  strangerHeard?: { masked: string; at: string };
 }
 
 /** the QR code of a bot's link, as the pending view carries it */
@@ -104,7 +117,8 @@ export const qrOf = async (link: string): Promise<string> =>
 
 export interface PendingTaken {
   network: Network;
-  /** the string the fingerprint hashes: Telegram's token; Slack's app-level token, a NUL and its bot token */
+  /** the string the fingerprint hashes: Telegram's token; Slack's app-level token, a NUL and its bot token; iMessage's project ID, a NUL
+   * and its secret */
   keyInput: string;
   keyHash: string;
   salt: string;
@@ -112,7 +126,7 @@ export interface PendingTaken {
   sender: { id: string; handle: string };
   resume: PendingResume;
   /** the token file the connect writes */
-  secret: TelegramSecret | SlackSecret;
+  secret: TelegramSecret | SlackSecret | ImessageSecret;
   /** B1's names, on Telegram's alone: its token (keyInput) and the getUpdates offset after the update heard (resume.offset) */
   token?: string;
   offset?: number;
@@ -126,6 +140,10 @@ export interface PendingDeps {
   /** how a Slack socket is opened (Node's WebSocket unless set) and the clock its waits run on (real timers unless set) */
   openSocket?: OpenSocket | undefined;
   clock?: IdentityClock | undefined;
+  /** Photon's link, for beginImessage (none: iMessage cannot be connected) */
+  photon?: PhotonLink | undefined;
+  /** the line Photon refused to write to (<home>/identity/imessage.refused), which a connect registers the number again past */
+  imessageRefusedLine?: (() => string | undefined) | undefined;
   strangers: Strangers;
   /** whether `network` is connected already: a connection is refused while it is */
   bound: (network: Network) => boolean;
@@ -150,6 +168,7 @@ interface Entry {
   expiresAt: number;
   state: PendingView["state"];
   sender?: PendingSender;
+  strangerHeard?: { masked: string; at: string };
   /** who said "Not me" during this connection: counted as strangers if they write again, never heard */
   notMe: Set<string>;
   /** the source, which holds the key: dropped with it (cut), so an expired tombstone holds neither */
@@ -165,8 +184,23 @@ interface Entry {
 
 const refusal = (message: string): Refusal => no("E_ACCOUNT_BAD_ACTION", { message });
 
-/** the operator's handle as sheet 3 showed it: their @handle, or their masked id when they have none */
-export const operatorHandleOf = (sender: { id: string; handle: string }): string => (sender.handle !== "" ? sender.handle : maskId(sender.id));
+/** the operator's handle as sheet 3 showed it: their @handle, or their masked id when they have none — on iMessage their number, as it is */
+export const operatorHandleOf = (sender: { id: string; handle: string }, network: Network): string =>
+  network === "imessage" || sender.handle !== "" ? sender.handle : maskId(sender.id);
+
+/** whom Gravit speaks as, as connectNetwork signs it: the bot's @username — on iMessage the pool number, with no @ */
+export const speaksAsOf = (network: Network, bot: { username: string }): string => (network === "imessage" ? bot.username : `@${bot.username}`);
+
+/** iMessage's key, its two halves: the project ID and its secret either side of the first NUL (an ID never holds one) — or undefined */
+export function imessagePairOf(keyInput: string): { projectId: string; projectSecret: string } | undefined {
+  const at = keyInput.indexOf("\u0000");
+  if (at <= 0 || at === keyInput.length - 1) return undefined;
+  return { projectId: keyInput.slice(0, at), projectSecret: keyInput.slice(at + 1) };
+}
+
+/** iMessage's shapes on sheet 1: a project ID, a secret, and the operator's number in E.164 */
+const IMESSAGE_PROJECT_SHAPE = /^[A-Za-z0-9_-]{4,128}$/;
+const IMESSAGE_SECRET_SHAPE = /^\S{16,256}$/;
 
 /** Slack's key, its two halves: the app-level token and the bot token either side of the one NUL — or undefined when it is not two
  * non-empty halves (a key without its NUL, with a second, or with a half empty is never split) */
@@ -177,8 +211,13 @@ export function slackPairOf(keyInput: string): { appToken: string; botToken: str
 }
 
 /** the token file a connect writes, from what the pending connection holds; undefined when the key and the network do not agree */
-function secretOf(network: Network, keyInput: string, bot: PendingBot, sender: { id: string; handle: string }, resume: PendingResume): TelegramSecret | SlackSecret | undefined {
-  const operatorHandle = operatorHandleOf(sender);
+function secretOf(network: Network, keyInput: string, bot: PendingBot, sender: { id: string; handle: string }, resume: PendingResume): TelegramSecret | SlackSecret | ImessageSecret | undefined {
+  const operatorHandle = operatorHandleOf(sender, network);
+  if (network === "imessage") {
+    const pair = imessagePairOf(keyInput);
+    if (!pair || resume.network !== "imessage" || resume.line === "" || resume.userId === "") return undefined;
+    return { projectId: pair.projectId, projectSecret: pair.projectSecret, phone: resume.phone, line: resume.line, userId: resume.userId, operatorId: sender.id, operatorHandle };
+  }
   if (network === "slack") {
     const pair = slackPairOf(keyInput);
     if (!pair || resume.network !== "slack" || resume.channel === "") return undefined;
@@ -220,6 +259,17 @@ export class PendingConnections {
     if (!SLACK_APP_TOKEN_SHAPE.test(appToken) || !SLACK_BOT_TOKEN_SHAPE.test(botToken)) return refusal(IDENTITY_WORDS.slackTokenShape);
     const source = new SlackPendingSource({ appToken, botToken, apiBase: this.deps.slackApiBase ?? SLACK_API, fetch: this.deps.fetch, open: this.deps.openSocket, clock: this.deps.clock ?? realClock(), log: this.log });
     return this.beginWith("slack", source, `${appToken}\u0000${botToken}`, keyHash, salt);
+  }
+
+  /** iMessage's Sheet 1 Next: the project ID's, the secret's and the number's shapes checked, then the ID and the secret joined with a NUL
+   * and held by an ImessagePendingSource — the fingerprint checked against that join before Photon is asked */
+  async beginImessage(projectId: string, projectSecret: string, phone: string, keyHash: string, salt: string): Promise<PendingView | Refusal> {
+    if (this.disposed) return refusal(IDENTITY_WORDS.noPending);
+    if (!IMESSAGE_PROJECT_SHAPE.test(projectId) || !IMESSAGE_SECRET_SHAPE.test(projectSecret) || !E164.test(phone)) return refusal(IDENTITY_WORDS.imessageShape);
+    const link = this.deps.photon;
+    if (!link) return refusal(IDENTITY_WORDS.photonUnreachable);
+    const source = new ImessagePendingSource({ link, project: { projectId, secret: projectSecret }, phone, refusedLine: this.deps.imessageRefusedLine ?? (() => undefined), clock: this.deps.clock ?? realClock(), log: this.log });
+    return this.beginWith("imessage", source, `${projectId}\u0000${projectSecret}`, keyHash, salt);
   }
 
   /** the pending connection `id` as sheets 2 and 3 show it, or undefined when there is none by that id */
@@ -290,6 +340,7 @@ export class PendingConnections {
     if (source.network !== network) return refusal(IDENTITY_WORDS.networkUnknown);
     // Slack's key is two tokens either side of one NUL: anything else is not split, and not taken
     if (network === "slack" && !slackPairOf(keyInput)) return refusal(IDENTITY_WORDS.slackTokenShape);
+    if (network === "imessage" && !imessagePairOf(keyInput)) return refusal(IDENTITY_WORDS.imessageShape);
     if (!keyMatches(salt, keyInput, keyHash)) return refusal(IDENTITY_WORDS.mismatchOn(network));
     if (this.deps.bound(network)) return refusal(IDENTITY_WORDS.connectedOn(network));
     const stop = new AbortController();
@@ -343,6 +394,7 @@ export class PendingConnections {
       qr: e.qr,
       expiresAt: new Date(e.expiresAt).toISOString(),
       state: e.state,
+      ...(e.strangerHeard ? { strangerHeard: { ...e.strangerHeard } } : {}),
       ...(e.state === "heard" && e.sender ? { sender: { id: e.sender.id, name: e.sender.name, handle: e.sender.handle, masked: e.sender.masked, text: e.sender.text, ...(e.sender.userId !== undefined ? { userId: e.sender.userId } : {}) } } : {}),
     };
   }
@@ -369,6 +421,7 @@ export class PendingConnections {
     e.keyHash = "";
     e.salt = "";
     delete e.sender;
+    delete e.strangerHeard;
     e.notMe.clear();
   }
 
@@ -435,6 +488,7 @@ export class PendingConnections {
         stranger: (senderId) => {
           if (e.gen !== gen || !this.live(e) || this.deps.blocked?.().includes(senderRef(e.network, senderId))) return;
           this.noteStranger(e.network, senderId);
+          e.strangerHeard = { masked: maskId(senderId), at: new Date(this.now()).toISOString() };
         },
         heard: (s) => {
           if (!current()) return;
