@@ -140,8 +140,8 @@ outside the whole repo.
 |---|---|---|
 | `FACE_PORT` | `3090` | webserver port. `0` asks the OS for a free one |
 | `FACE_PROFILE` | `face` | profile directory name — honored by BOTH `npm run setup` and `npm start` |
-| `FACE_DESK` | unset | `0` mounts none of the desk's rows — no ledger `boot` or `shutdown`, no sleep watch, no desk conversation, no phone bridge, no Gate 2 card notice — for a second face beside the service, which runs on a scratch home ("Run as a service" below); `/data/desk/status` and the Pause route still answer, `desk.enabled: false`. Any other value, empty included, leaves the desk on |
-| `FACE_DESK_MODEL` | `deepseek-official/deepseek-flash` | the desk session's model route, `provider/model`; one the tree does not serve falls back to the tree's default selection — Gravit's model — with one line ("The desk" below) |
+| `FACE_DESK` | unset | `0` mounts none of the desk's rows — no ledger `boot` or `shutdown`, no sleep watch, no desk outlet, no phone bridge, no Gate 2 card notice, no firings or annotations noted in the conversation — for a second face beside the service, which runs on a scratch home ("Run as a service" below); `/data/desk/status` and the Pause route still answer, `desk.enabled: false`. Any other value, empty included, leaves the desk on |
+| `FACE_DESK_MODEL` | `deepseek-official/deepseek-flash` | the desk's model route, `provider/model` — its firings', its annotations' and, with `FACE_ROUTER=0`, the phone's desk session's; one the tree does not serve falls back to the tree's default selection — Gravit's model — with one line ("The desk" below) |
 | `FACE_PYTHON` | `python3` | the interpreter a standing order's `.py` script producer runs under, `-I`; none ships, and nothing else in the face needs Python — the desk's market clock is Node (`src/market-clock.ts`) |
 | `DSH_HOME` | `~/.dsh` | the harness home: profiles, sessions, storages, credentials — the browser-session signing secret included |
 | `DEEPSEEK_API_KEY` | — | resolved per request through the credential seam, then the environment |
@@ -330,11 +330,14 @@ should end a run cleanly — launchd's `bootout` sends SIGTERM, and the face's
 desk writes its `shutdown` before anything else is torn down; the desk
 drill's steps 3 and 4 check it. With a desk turn under way that takes up to
 about 7 s more: the desk cancels the turn and gives its agent 2 s to go idle,
-so the cut turn is recorded, and what it is still opening — a phone text, a
-`/new`, the boot's own resume — up to 5 s, so nothing lands after the
-`shutdown`. The ledger also records each pause and
-its lift, each desk conversation the face opens, each desk turn and each turn
-it refused ("The desk" below).
+so the cut turn is recorded, and what it is still opening — a phone text, the
+boot's own resume — up to 5 s, so nothing lands after the `shutdown`; the
+phone bridge stops reading first, so the one conversation takes no text it
+would then refuse, and its claimed and queued phone texts are written as one
+`desk-carry` for the next boot. The ledger also records each pause and its
+lift, the one conversation, each desk session the face opens (the phone's only
+with `FACE_ROUTER=0`), each desk turn and each turn it refused ("The desk"
+below).
 
 **A second face uses a scratch home.** A face beside the service — a terminal
 `npm start`, a drill face — runs on its own home and port with the desk off:
@@ -2252,14 +2255,31 @@ device you do not recognise. One stream per tab: three tabs are three of the Acc
 
 ## The desk (src/desk*.ts + src/phone-bridge.ts + src/phone.ts + src/market-quotes.ts)
 
-The desk is Gravit on the operator's phone: one long-lived desk conversation that informs and
-never orders (the desk spec's P1,
-`../docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` §5.3 and §5.6–§5.8). It runs
-in every face with the desk on — `FACE_DESK` unset — whether a phone is connected or not.
+The desk is the face's always-on side: the phone's outlet and the work that runs unattended —
+the standing orders' firings, the watch and its annotations — and it informs, never orders (the
+desk spec's P1, `../docs/superpowers/specs/2026-10-19-always-on-gravit-design.md` §5.3 and
+§5.6–§5.8). It runs in every face with the desk on — `FACE_DESK` unset — whether a phone is
+connected or not.
 
-**The desk session.** One dsh session of the `gravit-desk` preset, its cwd `desk/journal/` and
-its sandbox `workspace-write`, pinned when the face creates it. The face opens it at boot —
-the newest one the ledger names, or a new one — and keeps it until the phone's `/new`. A ledger
+**Since one entry's plan 3 (2026-11-09) the phone reaches Gravit's one conversation**, the same
+one Messages shows ("The conversation and its tasks" below; plan
+`../docs/superpowers/plans/2026-11-09-one-entry-3-desk.md`). A text from the phone is your turn
+there, as a browser prompt is: Gravit answers it, or starts a task — with the web page's power,
+no budget and no cap (charter D20, accepted 2026-11-08) — and the answer goes back to the phone it
+came from; a task you asked for from the phone reports to that phone too, and one asked for in
+the browser reports in the browser only. A proposed order and a worker's question still wait in
+the browser: the phone is told so and has no button. What the desk sends the phone — a firing's
+brief or report, an alert, an alert's annotation — is also a line in the conversation, drawn under
+a `Scheduled` (定时) or `Watch` (盯盘) chip and quoted as data: it starts no turn, so you can ask
+Gravit about it later. The desk session below answers the phone only with `FACE_ROUTER=0`, or
+when the conversation could not be installed; every statement below about the desk session's
+phone turns is about that case. The desk keeps the outlet, the pause, the clock, the watch and
+the annotations either way.
+
+**The desk session** (the phone's conversation only with `FACE_ROUTER=0`). One dsh session of
+the `gravit-desk` preset, its cwd `desk/journal/` and its sandbox `workspace-write`, pinned when
+the face creates it. The face opens it at boot — the newest one the ledger names, or a new one —
+and keeps it until the phone's `/new`. A ledger
 session whose header names another preset or another directory is replaced by a fresh one; one
 that runs any permission preset but `workspace-write` — switched in the browser, say — is not,
 and every text then gets `the desk could not open a turn: …` until `/new` opens a fresh one. The
@@ -2283,7 +2303,8 @@ cannot see it.
 
 **The desk opens web pages** (since the why-it-moved plan, 2026-11-07; charter A1, D29 — the risk
 you accepted, read first in the charter). Each desk agent — the phone's conversation, a standing
-order's firing, an alert's annotation — has dsh's own `web_fetch`, so a turn can read the page
+order's firing, an alert's annotation (the one conversation the phone reaches since plan 3 has
+none: it reads no web page) — has dsh's own `web_fetch`, so a turn can read the page
 behind a headline: any public page, no allow-list of sites, 30 s and 200,000 characters at most.
 No other session has it: the tree turns `web_fetch` off for Gravit, the bots and the roles (D6
 above), and the face registers it in each desk agent's own layer. What still holds: no shell;
@@ -2302,7 +2323,9 @@ listed under **Pages opened today** on Markets › Desk, as text you read, never
 refused for it; it is how you see what was opened. `desk_state` does not show the list to the
 model.
 
-Every turn on the desk session is supervised, whoever opened it — the phone or the browser: a
+Every turn on the desk session is supervised, whoever opened it — the phone (with
+`FACE_ROUTER=0`) or the browser — and so is every turn of the one conversation, with the same
+5-minute cut and its own fence, but no `desk-turn` and no budget: a
 5-minute deadline from its start that no card or tool extends, the fence below checked at its
 start, and one ledger line: a `desk-turn` with its outcome — `ended`, `timed-out`, `cancelled`
 with what cancelled it (`stopped from the phone`, `shutdown`, `stopped in the browser`), or
@@ -2373,11 +2396,12 @@ default selection — Gravit's model, the `agent-default-model` row's — with o
 `gravit-face: desk: model route <route> is not usable (<reason>); the desk uses the default
 <provider/model>`. For the service, set it in `$DSH_HOME/.env` by hand
 (`install` copies an allow-list, and this is not on it). It takes effect at the next start, on
-the desk conversation that start resumes too.
+the desk session that start resumes too. The one conversation's route is `FACE_ROUTER_MODEL`.
 
 **From the phone.** One operator, one private chat. A message from anyone else, or from a group,
 is dropped unanswered by the account and counted in Account › Identity's Not you — a count and a
-time, never its text; `status` shows how many. Text goes to the desk under a first line Gravit
+time, never its text; `status` shows how many. Text goes to the one conversation (to the desk
+session with `FACE_ROUTER=0`) under a first line Gravit
 reads as its provenance — `[telegram · operator · 14:03 ET]`, or `[slack · operator · 14:03 ET]`
 from the Slack DM (since plan B2), the time you wrote it; a photo, a file or a voice note gets
 `text only, please` from the account; with Chat with Gravit unticked for that network a text gets
@@ -2393,12 +2417,12 @@ own, in any letter case, with or without `@<bot>` after them — **on Slack type
 
 | Command | What it does, and the reply |
 |---|---|
-| `/status` | `npm run service -- status`'s desk, pause and phone lines — with the budget, standing-order and watch lines after them — then `desk session <id>` and `turns today <n>` |
-| `/pause` | pauses the desk until a terminal resumes it: `paused; a terminal resumes it: npm run desk -- resume` |
+| `/status` | `npm run service -- status`'s desk, pause and phone lines — with the budget, standing-order and watch lines after them — then `conversation <id>`, `tasks: <n> running, <m> waiting for you` and `desk turns today <n> (firings, annotations)`; with `FACE_ROUTER=0`, `desk session <id>` and `turns today <n>` instead |
+| `/pause` | pauses the desk until a terminal resumes it: `paused; a terminal resumes it: npm run desk -- resume` — what a pause stops is "The pause" below |
 | `/pause 30m` (`Nm`, `Nh`, `Nd`) | pauses it for that long: `paused until 14:33 ET; …`; any other argument pauses nothing and says how to write one |
 | `/mute 30m` (`Nm`, `Nh`, `Nd`) | silences the watch's alerts for that long ("The watch" below): `alerts muted until 14:33 ET; detection and the ledger go on. A terminal lifts it: npm run desk -- unmute`; no or a bad duration mutes nothing and says `mute needs a duration: /mute 30m, /mute 2h or /mute 1d` |
-| `/new` | opens another desk conversation: `a new desk conversation`; a turn under way on the old one still answers |
-| `/stop` | cancels the turn under way, and only it: `stopped`, or `nothing is running`; texts you sent while it ran are answered after it, in order |
+| `/new` | retired since one entry's plan 3: `there is one conversation: Gravit's; /new opens no other. /stop cuts its turn under way`. With `FACE_ROUTER=0` it opens another desk session: `a new desk conversation`; a turn under way on the old one still answers |
+| `/stop` | cancels the conversation's turn under way (the desk session's with `FACE_ROUTER=0`), and only it: `stopped`, or `nothing is running`; texts you sent while it ran are answered after it, in order. A task keeps running: ask Gravit to stop it |
 
 Any other `/word` is text for Gravit. There is no `/resume` and no `/unmute`: the phone only makes
 the desk quieter, and a pause or a mute from the phone never shortens one in force — `/pause 1m` during a 2-hour
@@ -2408,8 +2432,9 @@ What comes back: the answer as plain text, in parts of at most 4,000 characters,
 ends where it can be — followed by a line `(cut off: <what cut it>)`, such as `(cut off: timed
 out after 5 min)` or `(cut off: stopped from the phone)`, when a cut caught the answer
 mid-sentence; `timed out after 5 min; a
-card or a long tool was pending` when the deadline cut a turn before it said anything; `the desk
-could not answer: <error>; nothing was done - send it again later` when the model call failed;
+card or a long tool was pending` when the deadline cut a turn before it said anything; `Gravit could not answer: <error>;
+nothing was done - send it again later` when the model call failed (`the desk could not answer: …`
+from the desk session);
 and `the desk is slow to take this; it will answer when it can` when the desk took more than 30 s
 to accept a text. The account decides what goes and where: a reply to your text always goes;
 alerts, briefs, reports, cards and fills go on the networks their routing row ticks, and quiet
@@ -2436,16 +2461,24 @@ account's Guard card for the same write sends a notice of its own, so one seat w
 the Cards waiting row and quiet hours decide both, and `/pause` and `/mute` hold neither.
 
 **A lost phone.** The account admits by your user id, not by the device, so a phone that is still
-signed in to your Telegram account keeps chatting with the desk — having it read inside the
-repository, write in its journal and spend tokens — and can pause it. Rotating the token does
-not stop it. End that device's session from another device (Telegram → Settings → Devices), or
+signed in to your Telegram account keeps talking to Gravit — since one entry's plan 3 with the web
+page's power: it can start any task, whose worker has a shell and writes files, have Gravit read
+the Account, have a worker propose a paper order and spend tokens with no cap (charter D20) — and
+can pause the desk. What it cannot do is approve: every order waits for its card in the browser.
+Cut it off at once. Rotating the token does not stop it. End that device's session from another device (Telegram → Settings → Devices), or
 Disconnect… Telegram in Account › Identity until you can. Rotate the token — @BotFather's
 `/revoke`, then connect again with the new one — only when the token itself leaked: whoever holds it can read what you send the bot, through `getUpdates` or a
 webhook of their own, which the face sees only as a 409 (`conflict at …`).
 
-**The pause.** The switch is a file, `$DSH_HOME/face/desk/OFF`. While it is there the desk opens
-no turn, and a text gets `paused since 14:03 ET by telegram until 16:03 ET; a terminal resumes
-it: npm run desk -- resume`. Set it from the phone (`/pause`), from `POST /data/desk/pause` (Markets ›
+**The pause.** The switch is a file, `$DSH_HOME/face/desk/OFF`. While it is there a phone text
+opens no turn and gets `paused since 14:03 ET by telegram until 16:03 ET; a terminal resumes it:
+npm run desk -- resume`; no standing order fires and no annotation runs; and nothing goes to the
+phone through the desk's send — not the conversation's answer to a browser turn, not a phone
+task's report (kept in the conversation, not sent later), not a brief or an alert. The bridge's own
+replies (a command's answer, the paused line) and Gate 2's card notice still go. A pause does not
+stop the one conversation in the browser, nor any task already started: they run on. Phone texts a
+graceful stop carried over a restart that a pause refuses at boot wait for a later boot with no
+pause in force (the lift alone does not post them). Set it from the phone (`/pause`), from `POST /data/desk/pause` (Markets ›
 Desk's **Pause**), or from a terminal:
 
 ```bash
@@ -2462,6 +2495,13 @@ set `DSH_HOME` to match when they differ. It waits up to 2 s for the switch's lo
 and says `cannot remove …/OFF: atomic-write: timed out waiting for the writer lock at
 …/OFF.lock` when it cannot get it. A lock left by a killed holder whose pid has since been
 reused stays until you remove it by hand; deleting `OFF` still lifts the pause meanwhile.
+
+**The conversation's fence.** A phone text the one conversation's fence refuses (an instruction
+file, a skill root or a symlink in `$DSH_HOME/face/conversation/`, or a `.git` above it — "The
+conversation and its tasks" below) gets `refused: <entry> is in the conversation's folder; it would
+steer every turn. Remove <entry> from the conversation's folder, then write again.`, or, for a
+repository above it, `refused: the conversation's folder sits inside a repository (<path>/.git); …
+Move the harness home out of the repository, then write again.`, and opens no turn.
 
 **The fence.** dsh reads `GRAVIT.md` and `GRAVIT.local.md` in every directory from the
 repository root down to a session's cwd, and in any directory a turn touches below it; a `.git`
@@ -2500,8 +2540,13 @@ turn (`DEVELOPMENT.md` §9).
 **In the browser.** Markets › Desk, the Markets screen's last tab (since P3; the old client's Desk
 panel left with that client in the merge): the desk's status and **Pause**, the watch, today's
 alerts, the levels as loaded, the standing orders and their firings, and the runs and sleep gaps,
-read from `GET /data/desk/status` every 10 s ("The watch" below). gravit-ui lists the desk's
-sessions as it lists any.
+read from `GET /data/desk/status` every 10 s ("The watch" below). Since one entry's plan 3 the rail
+beside Messages also draws today's firings and annotations under Running and Done today — never
+under Waiting on you, and never in the badge — and the standing orders as a **Scheduled** (定时)
+group after Done today, each with its next firing (New York time); opened, a firing or an
+annotation shows its kind, its text and its session in History, and a scheduled line its strategy,
+its last outcome and that session — nothing to press: an order's switch stays in `standing.yml`. A
+strategy's page draws its own orders' scheduled lines. The desk's sessions are in History.
 Both desk routes, `GET /data/desk/status` and `POST /data/desk/pause`, keep only the `/data`
 loopback fence and no cookie ("Data routes and caches"), so anything on this machine — a shell
 turn included — can read the status and pause the desk: the safe direction (charter D19).
@@ -2607,10 +2652,13 @@ orders:
 ```
 
 `budget.dailyTokens` caps the plain sum of the four token buckets of every desk turn since 00:00
-ET — the phone's, the browser's and the firings'. Set it after the first measured week (the spec's
-§6); until then the status says `cap not set`. Spent, the standing orders are refused for the rest
-of the day with one line, and each phone text is answered with the budget line instead of a turn;
-a turn opened in the browser still runs, and the pause outranks the budget.
+ET — the firings', the annotations' and, with `FACE_ROUTER=0`, the desk session's phone and
+browser turns. The one conversation's turns and its tasks are never counted or refused by it: each
+task shows its own usage on its line. Set it after the first measured week (the spec's §6); until
+then the status says `cap not set`. Spent, the standing orders and annotations are refused for the
+rest of the day with one line (`… Standing orders and annotations wait for midnight ET, …`); only
+with `FACE_ROUTER=0` is each phone text answered with the budget line instead of a turn; a turn
+opened in the browser still runs, and the pause outranks the budget.
 
 **When an order fires.** The clock ticks every 30 s and asks the market calendar — the XNYS rule
 table in `src/market-clock.ts`, Node alone (the fixed holidays with weekend observance, the
@@ -2660,7 +2708,7 @@ session's date, times New York's:
 | `standing.yml` refused | `standing.yml is refused, so no standing order runs until it is fixed: <errors>` (joined with `; `, cut at 500 characters) |
 | `firings.jsonl` unreadable | `the firing ledger <path> cannot be read (<code>), so no standing order runs until it can` |
 | no calendar | `no standing order runs today: the market calendar failed in <clock> (<error>)` — for the A-share calendar, `no A-share standing order runs on <date>: the market calendar failed in <clock> (<error>)`, its Beijing date, and only the A-share orders stop |
-| a phone text while the budget is spent | `the desk's token budget for today is spent: <used> of <cap> tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml` |
+| a phone text while the budget is spent (`FACE_ROUTER=0` only) | `the desk's token budget for today is spent: <used> of <cap> tokens since 00:00 ET; your text was not taken. It opens again at 00:00 ET, or raise budget.dailyTokens in standing.yml` |
 
 The pause sends none of them: a paused order is refused in silence. A line the pause holds back
 is not lost: a missed, interrupted or expired line and a firing's refusal go out, in order, at
@@ -2765,8 +2813,9 @@ that spends it refuses the next morning's A-share report, which fires that eveni
 | the A-share calendar failed | `no A-share standing order runs on <date>: the market calendar failed in <clock> (<error>)` |
 
 A line the pause held reaches the phone once after the lift — after a restart too: a `phoned`
-record follows it in `firings.jsonl`. Reports show in the conversation list's **Desk** group, with
-every desk conversation, never among the strategy's research.
+record follows it in `firings.jsonl`. A firing's session is in History, opened from its rail line
+(since one entry's plan 3), never among the strategy's research; what it sent the phone is a
+`Scheduled` line in the one conversation.
 
 
 ### The watch (src/watch.ts + src/watch-eval.ts + src/alert-text.ts + src/edgar.ts + src/filings.ts + src/xshg-clock.ts + src/market-news.ts)
@@ -2778,7 +2827,7 @@ path — with, when the level or rule asks for one, one annotation turn that ans
 in a desk session of its own (`src/annotator.ts`, spec §16 H1), so it never waits on your turns;
 for a US price move that turn tells you why it moved (since the why-it-moved plan, 2026-11-07;
 "Why it moved" below). It informs and never orders. It runs in every face with the desk on, once the
-desk conversation and the clock are up, and only when the Market's reads are wired (the Account
+desk's outlet and the clock are up, and only when the Market's reads are wired (the Account
 running is what makes them answer); with nothing to watch it asks no calendar, polls nothing and
 says nothing.
 
@@ -3057,8 +3106,23 @@ conversation, tasks }`, each task's state (`waiting`, `stalled`, `blocked`, `fai
 `done`, `stopped`), its last ten steps, its result and its usage — read from the workers' logs on
 every request; `POST /data/tasks/stop` and `/data/tasks/continue` (`{task}`) are the two keys.
 With `FACE_ROUTER=0` Messages says the conversation is off, with no composer and no rail; History
-and the strategy pages still work. The phone still talks to the desk until plan 3, and the rail has
-no scheduled or firing lines until then.
+and the strategy pages still work, and the phone talks to the desk session as before plan 3.
+
+**The phone and the desk's lines** (since plan 3, `../docs/superpowers/plans/2026-11-09-one-entry-3-desk.md`).
+Your phone reaches this conversation too ("The desk" above): a text arrives as your own bubble under
+a `Phone · Telegram` (手机) chip, it is your turn as a browser prompt is — so it may start a task,
+whose line names the phone as its origin — and Gravit's answer goes back to that phone. A text sent
+while a turn runs waits for it and is answered once, after it; the bridge's retries never open a
+second turn (the message's id is the key). A task asked for from the phone reports to that phone as
+well as here. What the desk sent the phone — a firing's brief or report, an alert, an annotation — is
+a line here too, under a `Scheduled` (定时) or `Watch` (盯盘) chip, its first line as the summary and
+the rest folded under it: it starts no turn, it is quoted between `<<<desk-data …>>>` fences that
+the conversation's contract reads as data, never as a request, and a line that arrives while
+Gravit is busy waits for the conversation to go idle. The rail adds today's firings and annotations
+and the read-only **Scheduled** group (`GET /data/tasks`'s `desk`). A restart while a phone text is
+queued, claimed or being answered answers it once after the boot: a graceful stop writes it to the
+ledger as a `desk-carry`, and the next boot sends it again, `(carried over a restart)`, with the cut
+turn's restart line.
 
 **What to ask it.** A question — "what is AAPL at", "what does cn-market's status say" — it
 answers itself. A piece of work — "run the market read for cn-market and tell me what changed" —
@@ -3143,6 +3207,44 @@ first (`client/*` is served with no cache headers).
    the line that it names none). Then Run a module card in Discover › Research: the sheet closes,
    Messages opens, the card reads `Sent · <title>`, then `Running · <title>` linking the task once
    Gravit starts it with that exact title.
+
+### The one-entry phone drill (owed; keyed)
+
+On the operator's face, after a restart on plan 3's code, with a phone network connected (Account ›
+Identity, "The phone drill" below), the router on (`FACE_ROUTER` unset), the account and the market
+running, and at least one standing order armed. Hard-reload the page first.
+
+1. From the phone, ask for a piece of work, e.g. "run a short read of cn-market and tell me what
+   changed". PASS: one short confirmation on the phone; in the browser, your text in the
+   conversation under a `Phone · Telegram` chip, Gravit's confirmation after it, and a new line on
+   the rail naming the phone as its origin; no new `desk-turn` line in `events.jsonl`.
+2. Wait for the task to finish. PASS: its report reaches the phone in a sentence or two, once, and
+   the same report sits in the conversation; the line moves to Done today. A task started from the
+   browser meanwhile reports in the browser only.
+3. From the phone, `/status`. PASS: the desk, pause and phone lines, then `conversation <id>` (the
+   id `GET /data/tasks` names), `tasks: <n> running, <m> waiting for you` and `desk turns today <n>
+   (firings, annotations)`. Then `/new`. PASS: `there is one conversation: Gravit's; /new opens no
+   other. /stop cuts its turn under way`, and no new session in History.
+4. From the phone, `/pause 5m`, then a text. PASS: `paused until …`, then `paused since … by
+   telegram until …; …` for the text, and no turn. In the browser meanwhile ask Gravit something:
+   it answers there, and nothing of it reaches the phone. Then `npm run desk -- resume`.
+5. A firing: let an armed standing order fire (or arm one a few minutes ahead). PASS: its brief or
+   report reaches the phone; in the browser the conversation shows it as a line under a `Scheduled`
+   chip, folded; the rail shows the firing under Running while it runs, then under Done today, and
+   the order in the Scheduled group with its next firing. Then ask Gravit in the browser "what did
+   the last brief say?". PASS: it answers from that line.
+6. An alert: let a level cross (or wait for one). PASS: the alert on the phone, its line under a
+   `Watch` chip in the conversation and, when it asks for an annotation, the annotation's reply on
+   the phone, its line in the conversation and under Done today on the rail.
+7. A restart with a text queued: from the phone ask for something long, send a second text at
+   once, then `npm run service -- restart`. PASS: after the boot the phone gets `a restart cut your
+   message of <time> before it was answered; send it again` for the first and an answer for the
+   second, each once; `events.jsonl` has a `desk-carry` before the `shutdown` and a `desk-carried`
+   after the boot.
+
+**PASS is steps 1–7.** Record the date, the commit, the network and what each step met in
+`DEVELOPMENT.md` §7.4's one-entry plan 3 row. With `FACE_ROUTER=0` the phone is the desk
+session's: that half is "The desk drill" P1.
 
 ## Channels (src/channels.ts + src/roster.ts + a strategy's page)
 
@@ -5894,7 +5996,10 @@ those in the conversation list, and `npm run service -- status`, the phone's `/s
 ledgers beside it. Two more things read differently on the merged tree: a price asked of the
 desk (P1's step 1) and the brief (P2's step 2) come from the Market's reads, so the Account must be
 running (`npm run account`); and the calendar needs no interpreter. The drill is to be run again
-on the merged tree.
+on the merged tree. **Since one entry's plan 3** the phone reaches the one conversation, so P1's
+phone steps, the hardening's steps 1 and 2 and every other step that talks to "the desk
+conversation" drive the desk session only with `FACE_ROUTER=0` set for the service; with the router
+on, the phone's half is "The one-entry phone drill" above.
 It is the operator's, never an agent's — every step drives the operator's own launchd, harness
 home, bot and phone.
 
