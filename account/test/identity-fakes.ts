@@ -458,3 +458,111 @@ export async function fakeSlack(o: FakeSlackOptions = {}): Promise<FakeSlack> {
     },
   };
 }
+
+// ---- a fake Photon link, in memory: the seam the iMessage connector is tested through ----
+import { randomUUID } from "node:crypto";
+import { PhotonError } from "../src/portfolio/identity/photon-link.ts";
+import type { PhotonEvent, PhotonLink, PhotonProject, PhotonStreamHandlers, PhotonUser } from "../src/portfolio/identity/photon-link.ts";
+
+export interface FakePhoton extends PhotonLink {
+  /** every call, as "<method>" or "<method>:<arg>" */
+  calls: string[];
+  sent: Array<{ to: string; text: string; clientMessageId: string }>;
+  /** delivers to the open stream's event handler; resolves after that handler resolves */
+  push(e: PhotonEvent): Promise<void>;
+  beat(at?: number): void;
+  gap(): void;
+  fail(err: PhotonError): void;
+  failNextSend(err: PhotonError): void;
+  duplicateNextSend(): void;
+  openStreams(): number;
+  lastSince(): number | undefined;
+}
+
+export function fakePhotonLink(o: { project?: PhotonProject; users?: PhotonUser[]; nextLine?: string } = {}): FakePhoton {
+  const project = o.project ?? { projectId: "prj_1", secret: "photon-secret-for-tests" };
+  const users = [...(o.users ?? [])];
+  let seq = 0;
+  let open: PhotonStreamHandlers | undefined;
+  let since: number | undefined;
+  let sendFailure: PhotonError | undefined;
+  let duplicate = false;
+  const calls: string[] = [];
+  const sent: FakePhoton["sent"] = [];
+  const enter = (method: string, p: PhotonProject, arg?: string) => {
+    calls.push(arg === undefined ? method : `${method}:${arg}`);
+    if (p.projectId !== project.projectId || p.secret !== project.secret) throw new PhotonError("auth", "unauthorized", "Photon refused the project");
+  };
+  const stream = () => {
+    if (!open) throw new Error("fake Photon: no open stream");
+    return open;
+  };
+  return {
+    calls,
+    sent,
+    async checkProject(p) {
+      enter("checkProject", p);
+    },
+    async findUser(p, phone) {
+      enter("findUser", p, phone);
+      return users.find((u) => u.phone === phone);
+    },
+    async getUser(p, userId) {
+      enter("getUser", p, userId);
+      return users.find((u) => u.userId === userId);
+    },
+    async addUser(p, phone) {
+      enter("addUser", p, phone);
+      seq += 1;
+      const u: PhotonUser = { userId: `usr_${seq}`, phone, line: o.nextLine ?? `+1415555${String(1000 + seq).slice(-4)}` };
+      users.push(u);
+      return u;
+    },
+    async removeUser(p, userId) {
+      enter("removeUser", p, userId);
+      const i = users.findIndex((u) => u.userId === userId);
+      if (i >= 0) users.splice(i, 1);
+    },
+    stream(p, s, h) {
+      enter("stream", p);
+      open = h;
+      since = s;
+      return {
+        async close() {
+          calls.push("stream.close");
+          if (open === h) open = undefined;
+        },
+      };
+    },
+    async sendText(p, to, text, clientMessageId) {
+      enter("sendText", p, to);
+      if (sendFailure) {
+        const e = sendFailure;
+        sendFailure = undefined;
+        throw e;
+      }
+      sent.push({ to, text, clientMessageId });
+      if (duplicate) {
+        duplicate = false;
+        return { duplicate: true };
+      }
+      return { guid: randomUUID().toUpperCase() };
+    },
+    async dispose() {
+      calls.push("dispose");
+      open = undefined;
+    },
+    push: (e) => stream().event(e),
+    beat: (at = Date.now()) => stream().heartbeat(at),
+    gap: () => stream().gap(),
+    fail: (err) => stream().failed(err),
+    failNextSend: (err) => {
+      sendFailure = err;
+    },
+    duplicateNextSend: () => {
+      duplicate = true;
+    },
+    openStreams: () => (open ? 1 : 0),
+    lastSince: () => since,
+  };
+}
