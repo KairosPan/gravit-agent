@@ -45,6 +45,13 @@ test('the panel holds Gravit, History and one row per strategy, root left out', 
   // the conversation moved after the operator last looked: Gravit's dot is on
   const unread = R.hostList(s, { conversations: [conv('c', { updatedAt: NOW + MIN, lastSeen: NOW })] });
   assert.match(renderSide(unread, NOW), /href="#\/messages"><span class="dot on">/);
+  // a workspace whose directory is gone (the old folder's, after the repository's rename) is no strategy: the listing keeps
+  // it as a record, the panel does not draw it
+  const gone = { ...CHANNELS[1], workspaceId: 'ws-old', dir: '/old/strategies/cn-market', missingDir: true };
+  const oldRoot = { ...CHANNELS[1], workspaceId: 'ws-old-root', name: 'evolving-alpha-us', dir: '/old', missingDir: true };
+  const withGone = listed([conv('c')], { channels: [...CHANNELS, gone, oldRoot] });
+  assert.deepEqual(strategiesOf(withGone).map(c => c.name), ['cn-market', 'momentum'], 'one row per live strategy');
+  assert.doesNotMatch(renderSide(withGone, NOW), /evolving-alpha-us/);
   // no strategies: no head
   assert.doesNotMatch(renderSide(listed([conv('c')], { channels: [CHANNELS[0]] }), NOW), /grp-head/);
 });

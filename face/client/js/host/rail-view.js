@@ -82,10 +82,11 @@ export const waitingCount = state => railOf(state).you.length;
 // a strategy goes by one name everywhere: its channel's display title (the registry's, the operator's to change), else its name
 export const channelLabel = ch => (typeof ch.title === 'string' && ch.title !== '' ? ch.title : ch.name);
 
-/** The strategies: every channel but the root, by name. */
+/** The strategies: every channel but the root and those whose directory is gone (the listing keeps a vanished workspace
+ * as a record, e.g. the old folder's after the repository's rename), by name. */
 export function strategiesOf(state) {
   return (Array.isArray(state.channels) ? state.channels : [])
-    .filter(ch => !ch.isRoot && typeof ch.name === 'string' && ch.name !== '')
+    .filter(ch => !ch.isRoot && !ch.missingDir && typeof ch.name === 'string' && ch.name !== '')
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
