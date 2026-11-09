@@ -272,6 +272,9 @@ function strategyStates() {
 }
 
 // Discover: the shelves, a failed shelf, a query, a shelf's grid, every kind of page, its own line
+// the task Gravit started for a Run of Theme, as GET /data/tasks shows it
+const runTask = { id: 't-run', title: 'Theme · 10-19', origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW, lastEventAt: NOW, lastSeq: 1 };
+
 export function discoverStates() {
   let all = emptyState();
   for (const [shelf, v] of Object.entries(listings())) all = R.shelfLoaded(all, { shelf, data: v.data, at: 1 });
@@ -281,9 +284,11 @@ export function discoverStates() {
   const unmounted = R.shelfLoaded(at({ screen: 'discover', id: null }), { shelf: 'modules', data: { ...modulesListing(), mounted: false }, at: 2 });
   return [
     unmounted, at({ screen: 'discover', id: 'research' }),
-    // a card whose Run is running: its chip a link to the conversation
-    R.moduleRunStarted(at({ screen: 'discover', id: 'research' }), { module: 'theme', sessionId: 's-run', title: 'Theme · 10-19', startedAt: NOW }),
-    R.moduleRunStarted(at({ screen: 'module', id: 'theme' }), { module: 'theme', sessionId: 's-run', title: 'Theme · 10-19', startedAt: NOW }),
+    // a card whose Run was sent to Gravit (one-entry plan 2): before its task shows, Sent linking to Messages; once Gravit
+    // started the task of the Run's title, Running linking to the task
+    R.moduleRunStarted(at({ screen: 'discover', id: 'research' }), { module: 'theme', title: 'Theme · 10-19', startedAt: NOW }),
+    R.tasksLoaded(R.moduleRunStarted(at({ screen: 'discover', id: 'research' }), { module: 'theme', title: 'Theme · 10-19', startedAt: NOW }), { conversation: 'c-gravit', tasks: [runTask], at: NOW }),
+    R.tasksLoaded(R.moduleRunStarted(at({ screen: 'module', id: 'theme' }), { module: 'theme', title: 'Theme · 10-19', startedAt: NOW }), { conversation: 'c-gravit', tasks: [runTask], at: NOW }),
     at({ screen: 'discover', id: null }), R.shelfFailed(at({ screen: 'discover', id: null }), { shelf: 'bots', at: 1 }), R.nav(emptyState(), { screen: 'discover', id: null }),
     R.setDiscoverQuery(at({ screen: 'discover', id: null }), 'rules'), at({ screen: 'discover', id: 'agents' }),
     page('mcp:alpaca-kit'), page('bot:buffett'), page('agent:codex'), page('agent:claude'), page('agent:gravit'), page('bot:nobody'),
@@ -658,17 +663,25 @@ export function pageHtml(st, { mac = true } = {}) {
 
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0)); };
 
-// lines a host writes into the store from its own source, drawn as the page would: a module card's Run that could not send
-// (host/run-sheet.js); an Answer pressed with a question unanswered (app.js). The states come from running the host, so a
+// lines a host writes into the store from its own source, drawn as the page would: a module card's Run that could not send,
+// or found Gravit's conversation not known (host/run-sheet.js); an Answer pressed with a question unanswered (app.js). The states come from running the host, so a
 // word moved there shows here
 export async function hostCorpus() {
   const entries = [];
   {
-    const store = createStore({ initial: R.nav(emptyState(), { screen: 'discover', id: null }), reducers: R });
-    const sheet = startRunSheet({ store, actions: { newConversation: async () => null }, readListing: async () => modulesListing(), go: () => {}, now: () => NOW });
+    const known = R.tasksLoaded(R.nav(emptyState(), { screen: 'discover', id: null }), { conversation: 'c-gravit', tasks: [], at: NOW });
+    const store = createStore({ initial: known, reducers: R });
+    const sheet = startRunSheet({ store, actions: { send: async () => null }, readListing: async () => modulesListing(), go: () => {}, now: () => NOW });
     await sheet.open('theme');
     await sheet.run();
     entries.push(['host-run-sheet-failed', renderRunSheet(store.get(), NOW)]);
+  }
+  {
+    const store = createStore({ initial: R.nav(emptyState(), { screen: 'discover', id: null }), reducers: R });
+    const sheet = startRunSheet({ store, actions: { send: async () => null }, readListing: async () => modulesListing(), go: () => {}, now: () => NOW });
+    await sheet.open('theme');
+    await sheet.run();
+    entries.push(['host-run-sheet-no-conversation', renderRunSheet(store.get(), NOW)]);
   }
   {
     const f = fakeWindow({ hash: '' });

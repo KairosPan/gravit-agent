@@ -3,17 +3,18 @@
 // it). Impure; nothing here draws. The listing is Discover's modules listing (host/discover.js), the run picked by
 // modules-view's latestOf; the overview's latestRun holds the json only when it is that same run. One read per page
 // entered, and only the latest-started read of a module lands.
-// The Runs this page sent (spec §5.7, G10): trackRuns drops a record when its conversation stops or is gone — re-reading
-// the listing at once and once more 5 s later, a backstop for the file write — or when it is an hour old, and mirrors
-// the records to this browser's storage as a convenience, read back at boot; the page is right without it.
-import { latestOf, FRESH_MS, MODULE_NAMES } from './modules-view.js';
+// The Runs this page sent (spec §5.7, G10; one-entry plan 2): trackRuns drops a record when the task it asked Gravit for
+// is done — re-reading the listing at once and once more 5 s later, a backstop for the file write — when no such task
+// showed within FRESH_MS of it, or when it is an hour old, and mirrors the records to this browser's storage as a
+// convenience, read back at boot; the page is right without it.
+import { latestOf, FRESH_MS, MODULE_NAMES, taskOfRun } from './modules-view.js';
 
 export const RUNS_KEY = 'gravit-face.module-runs';
 const STALE_MS = 60 * 60_000;
 const BACKSTOP_MS = 5000;
 
 const plain = v => v !== null && typeof v === 'object' && !Array.isArray(v);
-const recordOk = r => plain(r) && typeof r.sessionId === 'string' && typeof r.title === 'string' && typeof r.startedAt === 'number' && Number.isFinite(r.startedAt);
+const recordOk = r => plain(r) && typeof r.title === 'string' && typeof r.startedAt === 'number' && Number.isFinite(r.startedAt);
 
 // the records as storage keeps them, or {} when they are missing, unreadable or not of the shape
 export function readRuns(storage) {
@@ -63,21 +64,21 @@ export function startModules({ store, postJson, readListing, refreshListing = as
   }
 
   // one pass over the records: what ended goes, the listing read again for what may have landed
-  function pass(s, listed) {
+  function pass(s) {
     const runs = plain(s.moduleRuns) ? s.moduleRuns : {};
     const at = now();
+    const answered = s.tasks?.status !== undefined && s.tasks.status !== 'loading'; // a task is missing only once /data/tasks answered
     for (const [module, r] of Object.entries(runs)) {
       const age = at - (recordOk(r) ? r.startedAt : -Infinity);
       if (age > STALE_MS) { store.dispatch('moduleRunCleared', { module }); continue; }
-      if (age <= FRESH_MS) continue;
-      const c = s.conversations.find(x => x.id === r.sessionId);
-      if (!c && listed) {
-        store.dispatch('moduleRunCleared', { module });
-        reread();
-      } else if (c && c.running === false) {
+      const task = taskOfRun(r, s.tasks?.items);
+      if (task && task.group === 'done') {
         store.dispatch('moduleRunCleared', { module });
         reread();
         timers?.after(BACKSTOP_MS, reread);
+      } else if (!task && age > FRESH_MS && answered) {
+        store.dispatch('moduleRunCleared', { module });
+        reread();
       }
     }
   }
@@ -85,14 +86,12 @@ export function startModules({ store, postJson, readListing, refreshListing = as
   function trackRuns() {
     if (tracking) return;
     tracking = true;
-    let listed = false; // a session is missing only once the list has answered
     store.dispatch('moduleRunsLoaded', { runs: readRuns(storage) });
     mirrored = store.get().moduleRuns;
-    store.subscribe((s, type) => {
-      if (type === 'hostList') listed = true;
+    store.subscribe(() => {
       if (passing) return;
       passing = true;
-      try { pass(s, listed); } finally { passing = false; }
+      try { pass(store.get()); } finally { passing = false; }
       mirror(store.get().moduleRuns);
     });
   }

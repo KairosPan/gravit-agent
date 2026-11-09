@@ -1,6 +1,6 @@
 // face/client/js/host/run-sheet-view.js — a module card's Run sheet (module cards spec §4 G5, G11–G16, G18,
 // §5.4–§5.5, Appendix B): the slice's first value, the render model with each field's options and greying, the
-// Stocks check, the conversation's title and the Chinese message to Gravit — from /data/modules.json. Pure. Every wire
+// Stocks check, the Run's task title and the Chinese message to Gravit — from /data/modules.json. Pure. Every wire
 // string passes through as data for the view to escape.
 import { moduleOf, latestOf, headlineWords } from './modules-view.js';
 import { t, tn, said, sayOf } from '../i18n/words.js';
@@ -21,7 +21,9 @@ const MAX_CODES = 4;
 const CODE = /^(sh60|sz00)\d{4}$/;
 const CITES_SHOWN = 2;
 
-// Appendix B, one constant per line; the slots in braces
+// Appendix B, one constant per line; the slots in braces. T_TASK is the first line since one entry's plan 2: the Run asks
+// Gravit for a task under its exact title, the title the card's chip finds it by
+const T_TASK = '请为此开一个任务，标题恰为「{title}」：';
 const T_MARKET_LATEST = '请只跑 Lunhui 的 {module} 模块：频道 cn-market，运行 {run}（已有运行，不要再冻结）。';
 const T_MARKET_NEW = '请只跑 Lunhui 的 {module} 模块：频道 cn-market，开新运行——先按 lunhui:run 第 1 步冻结整套（index、limit-up、boards），再只写 {module}。';
 const T_LEADER_NEW = '请只跑 Lunhui 的 leader 模块：策略 {strategy}，开新运行，引用 cn-market 运行 {market_run}；股票 {codes}。';
@@ -185,7 +187,7 @@ export function newSheet(listing, module, channel) {
   return { module: m.name, where, on, run, cites, stocks: '', note: '', said: null };
 }
 
-/** The conversation's title, `<Title> · MM-DD`: for a Latest run the stamped run's date while it is listed, else the
+/** The Run's task title, `<Title> · MM-DD`: for a Latest run the stamped run's date while it is listed, else the
  *  channel's newest; the browser's date otherwise. */
 export function titleOf(listing, sheet, now) {
   const m = moduleOf(sheet?.module);
@@ -250,4 +252,11 @@ export function messageOf(listing, sheet) {
   else text = fill(channel?.kind === 'market' ? T_REVIEW_MARKET : T_REVIEW_STRATEGY, slots);
   const note = typeof sheet.note === 'string' ? sheet.note.trim() : '';
   return note ? text + fill(T_NOTE, { note }) : text;
+}
+
+/** What a Run sends Gravit's conversation: the line asking for a task titled exactly `titleOf(...)`, then the message;
+ *  null where messageOf is. */
+export function askOf(listing, sheet, now) {
+  const text = messageOf(listing, sheet);
+  return text === null ? null : `${fill(T_TASK, { title: titleOf(listing, sheet, now) })}\n${text}`;
 }

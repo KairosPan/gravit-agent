@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  MODULES, MODULE_NAMES, moduleOf, latestOf, headlineWords, chipOf, researchItems, runsOf, pageOf, activeRuns,
+  MODULES, MODULE_NAMES, moduleOf, latestOf, headlineWords, chipOf, researchItems, runsOf, pageOf, activeRuns, FRESH_MS,
 } from '../../client/js/host/modules-view.js';
 import { modulesListing, MARKET_RUN, S01_RUN } from './helpers/inventory.js';
 import { withTable } from '../../client/js/i18n/words.js';
@@ -192,27 +192,62 @@ test('runsOf: at most 24 rows, newest first by run id', () => {
   assert.deepEqual(runsOf(null, 'environment'), []);
 });
 
-test('activeRuns: running, or younger than a minute; chipOf and researchItems read it', () => {
+// a Run asks Gravit for a task under its title (one-entry plan 2): a task as GET /data/tasks shows it
+const taskView = (id, title, group, startedAt) => ({ id, title, origin: 'web', state: group === 'done' ? 'done' : 'running', group, steps: [], startedAt, lastEventAt: startedAt, lastSeq: 1 });
+
+test('the chip follows the task with the Run\'s title', () => {
   const now = 1_000_000;
-  const runs = { theme: { sessionId: 's-a', title: 'Theme · 10-28', startedAt: now - 120_000 }, leader: { sessionId: 's-b', title: 'Leader · 10-28', startedAt: now - 10_000 }, mode: { sessionId: 's-c', title: 'Mode · 10-28', startedAt: now - 120_000 } };
-  const convs = [{ id: 's-a', running: true }, { id: 's-c', running: false }];
-  assert.deepEqual(activeRuns(runs, convs, now), { theme: { sessionId: 's-a', title: 'Theme · 10-28' }, leader: { sessionId: 's-b', title: 'Leader · 10-28' } });
-  assert.deepEqual(chipOf(modulesListing(), 'theme', true, { sessionId: 's-a', title: 'Theme · 10-28' }), { text: 'Running · Theme · 10-28', tone: 'live', href: '#/messages/s-a' });
-  const items = researchItems(modulesListing(), true, activeRuns(runs, convs, now));
+  const runs = { theme: { title: 'Theme · 10-28', startedAt: now - 120_000 }, mode: { title: 'Mode · 10-28', startedAt: now - 120_000 } };
+  const tasks = [
+    taskView('t-old', 'Theme · 10-28', 'done', now - 900_000), // an earlier task of the same title is not this Run's
+    taskView('t-theme', 'Theme · 10-28', 'running', now - 100_000),
+    taskView('t-mode', 'Mode · 10-28', 'done', now - 100_000),
+    taskView('t-other', 'Theme · 10-27', 'running', now - 100_000),
+  ];
+  assert.deepEqual(activeRuns(runs, tasks, now), { theme: { title: 'Theme · 10-28', taskId: 't-theme' } }, 'a done task is no Run running');
+  assert.deepEqual(chipOf(modulesListing(), 'theme', true, { title: 'Theme · 10-28', taskId: 't-theme' }), { text: 'Running · Theme · 10-28', tone: 'live', href: '#/task/t-theme' });
+  const items = researchItems(modulesListing(), true, activeRuns(runs, tasks, now));
   assert.equal(items.find(i => i.id === 'module:theme').running, true);
+  assert.deepEqual(items.find(i => i.id === 'module:theme').chip, { text: 'Running · Theme · 10-28', tone: 'live', href: '#/task/t-theme' });
   assert.equal(items.find(i => i.id === 'module:mode').running, false);
-  assert.deepEqual(items.find(i => i.id === 'module:leader').chip, { text: 'Running · Leader · 10-28', tone: 'live', href: '#/messages/s-b' });
   assert.equal(items.find(i => i.id === 'module:environment').chip.tone, 'ok', 'a card with no run keeps the listing\'s chip');
   // the page reads the same
-  const page = pageOf(modulesListing(), 'theme', true, activeRuns(runs, convs, now));
+  const page = pageOf(modulesListing(), 'theme', true, activeRuns(runs, tasks, now));
   assert.equal(page.running, true);
   assert.equal(page.chip.text, 'Running · Theme · 10-28');
+  assert.equal(page.chip.href, '#/task/t-theme');
   assert.equal(pageOf(modulesListing(), 'mode', true, {}).running, false);
+  // a task id is escaped into the link
+  assert.equal(chipOf(modulesListing(), 'theme', true, { title: 'x', taskId: 'a/b c' }).href, '#/task/a%2Fb%20c');
   // malformed records and a missing argument read as nothing running
-  assert.deepEqual(activeRuns(null, convs, now), {});
-  assert.deepEqual(activeRuns({ theme: null, mode: { sessionId: 7, title: 'x', startedAt: now } }, convs, now), {});
-  assert.deepEqual(activeRuns(runs, null, now), { leader: { sessionId: 's-b', title: 'Leader · 10-28' } });
+  assert.deepEqual(activeRuns(null, tasks, now), {});
+  assert.deepEqual(activeRuns({ theme: null, mode: { title: 7, startedAt: now } }, tasks, now), {});
   assert.equal(researchItems(modulesListing(), true).every(i => i.running === false), true);
+});
+
+test('before the task shows, the chip reads sent and links Messages', () => {
+  const now = 1_000_000;
+  const runs = { leader: { title: 'Leader · 10-28', startedAt: now - 10_000 } };
+  for (const tasks of [[], null, [taskView('t-x', 'Something else', 'running', now)]]) {
+    assert.deepEqual(activeRuns(runs, tasks, now), { leader: { title: 'Leader · 10-28', taskId: null } }, JSON.stringify(tasks));
+  }
+  const active = activeRuns(runs, [], now);
+  assert.deepEqual(chipOf(modulesListing(), 'leader', true, active.leader), { text: 'Sent · Leader · 10-28', tone: 'live', href: '#/messages' });
+  const items = researchItems(modulesListing(), true, active);
+  assert.equal(items.find(i => i.id === 'module:leader').running, true);
+  assert.equal(items.find(i => i.id === 'module:leader').chip.href, '#/messages');
+  // and once the task shows, its link
+  assert.equal(chipOf(modulesListing(), 'leader', true, activeRuns(runs, [taskView('t-l', 'Leader · 10-28', 'running', now - 5_000)], now).leader).href, '#/task/t-l');
+});
+
+test('after FRESH_MS with no task, no chip', () => {
+  const now = 1_000_000;
+  const runs = { leader: { title: 'Leader · 10-28', startedAt: now - FRESH_MS } };
+  assert.deepEqual(activeRuns(runs, [], now), {});
+  assert.deepEqual(activeRuns({ leader: { ...runs.leader, startedAt: now - FRESH_MS + 1 } }, [], now), { leader: { title: 'Leader · 10-28', taskId: null } });
+  const items = researchItems(modulesListing(), true, activeRuns(runs, [], now));
+  assert.equal(items.find(i => i.id === 'module:leader').running, false);
+  assert.doesNotMatch(items.find(i => i.id === 'module:leader').chip.text, /^(Sent|Running) · /);
 });
 
 test('the theme card and page end with the boards source only when the newest run says 同花顺问财', () => {

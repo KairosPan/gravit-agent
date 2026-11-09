@@ -105,10 +105,8 @@ test("the actions' lines, each verb in its words", async () => {
   await r.actions.stop('s1'); follows(r.line(), 'stop: x/1');
   await r.actions.runCommand('s1', '/<b>'); follows(r.line(), 'no command claimed /<b>');
   await r.actions.send('hello', { sessionId: 's1' }); follows(r.line(), 'send: x/3');
-  await r.actions.newConversation({ text: 'hi' }); follows(r.line(), 'new message: session/create returned no sessionId');
   await r.actions.stopChild('s1', 'c1', 'x'); follows(r.line(), 'stop: refused');
   await r.actions.answer('ev', 'rejected'); follows(r.line(), 'answer: gate/gone');
-  follows(await r.actions.talkTo({ id: 'b', homeCwd: '/b' }), { error: 'talk to: session/create returned no sessionId' });
 
   const ok = actionsRig({ 'session/cancel': () => ({}), 'subagents/interruptByParent': () => ({}) });
   await ok.actions.stop('s1'); follows(ok.line(), 'Stopped. A paused goal resumes with /goal resume');
@@ -443,15 +441,18 @@ test("a channel's, Discover's, the Run sheet's and the run view's host lines as 
   follows(await discover.createBot({ name: 'Bot', id: '' }), { error: 'Created, not listed yet' });
   // the Run sheet's lines (host/run-sheet.js): no such module, the listing unread
   const rs = createStore({ initial: emptyState(), reducers });
-  const unread = startRunSheet({ store: rs, actions: { newConversation: async () => null }, readListing: async () => null, go: () => {}, now: () => 0 });
+  const unread = startRunSheet({ store: rs, actions: { send: async () => null }, readListing: async () => null, go: () => {}, now: () => 0 });
   await unread.open('nope');
   follows(rs.get().discover.status, { line: 'Not a module', bad: true });
   await unread.open('theme');
   follows(rs.get().runSheet.said, 'the modules listing could not be read');
-  const listed = startRunSheet({ store: rs, actions: { newConversation: async () => null }, readListing: async () => modulesListing(), go: () => {}, now: () => 0 });
+  const listed = startRunSheet({ store: rs, actions: { send: async () => null }, readListing: async () => modulesListing(), go: () => {}, now: () => 0 });
   await listed.open('theme');
   await listed.run();
-  follows(rs.get().runSheet.said, "Couldn't send — the conversation may exist untitled in the channel");
+  follows(rs.get().runSheet.said, "Gravit's conversation is not known yet — open Messages");
+  rs.dispatch('tasksLoaded', { conversation: 'c-gravit', tasks: [], at: 0 });
+  await listed.run();
+  follows(rs.get().runSheet.said, "Couldn't send to Gravit's conversation");
   // the run view's failure words (host/lunhui.js), as the slice holds them: an answer with no view, a read failed in no words
   const RUN = '20261027T201627Z-6937d208';
   const msg = id => ({ id, seq: 1, at: 1, from: 'gravit', kind: 'composed', text: 's', data: { strategy: 'cn-market', run: RUN, blocks: [], choices: [], modules: [id] } });

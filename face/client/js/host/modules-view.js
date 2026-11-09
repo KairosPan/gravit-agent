@@ -205,24 +205,40 @@ function artifactWords(module, a) {
   return { words: [t('modules.notEvaluable'), ...missing].join(' · '), tone: 'warn', quiet: false }; // words-order: the word, then the sources it missed under the visual separator
 }
 
-// a Run this page sent (spec §5.7) is running while its conversation says so, or while the record is younger than a
-// minute (the create just happened, the list may not carry the session yet); nothing else is
+// a Run this page sent (spec §5.7; one-entry plan 2, §5.13) asks Gravit for a task under its exact title: it is running
+// while the newest task of that title, started no earlier than the Run (give or take the clocks), is not done; before such
+// a task shows, for FRESH_MS, it is sent; nothing else is
 export const FRESH_MS = 60_000;
-export function activeRuns(moduleRuns, conversations, now) {
-  const convs = Array.isArray(conversations) ? conversations : [];
+const CLOCK_SLACK_MS = 10_000;
+const recordOk = r => plain(r) && typeof r.title === 'string' && typeof r.startedAt === 'number' && Number.isFinite(r.startedAt);
+/** The task a Run record asks for: the newest of `tasks` (state.tasks.items) titled exactly as the Run, started no earlier
+ *  than it; null before one shows. */
+export function taskOfRun(r, tasks) {
+  if (!recordOk(r)) return null;
+  const mine = (Array.isArray(tasks) ? tasks : []).filter(x => plain(x) && typeof x.id === 'string' && x.title === r.title
+    && typeof x.startedAt === 'number' && x.startedAt >= r.startedAt - CLOCK_SLACK_MS);
+  return mine.sort((x, y) => y.startedAt - x.startedAt)[0] ?? null;
+}
+export function activeRuns(moduleRuns, tasks, now) {
   const out = {};
   for (const [module, r] of Object.entries(plain(moduleRuns) ? moduleRuns : {})) {
-    if (!plain(r) || typeof r.sessionId !== 'string' || typeof r.title !== 'string' || typeof r.startedAt !== 'number') continue;
-    const running = convs.some(c => c?.id === r.sessionId && c.running === true);
-    if (running || now - r.startedAt < FRESH_MS) out[module] = { sessionId: r.sessionId, title: r.title };
+    if (!recordOk(r)) continue;
+    const task = taskOfRun(r, tasks);
+    if (task) { if (task.group !== 'done') out[module] = { title: r.title, taskId: task.id }; }
+    else if (now - r.startedAt < FRESH_MS) out[module] = { title: r.title, taskId: null };
   }
   return out;
 }
 
 // the card's chip (spec §5.1): the latest run's artifact read for the module, grey when the rows are not mounted; while
-// a Run of it is running, `Running · <title>` linking to its conversation
+// a Run of it is running, `Running · <title>` linking to its task, and before the task shows `Sent · <title>` linking to
+// Messages
 export function chipOf(listing, module, mounted = true, active = null) {
-  if (active) return { text: t('modules.chip.running', { title: active.title }), tone: 'live', href: `#/messages/${encodeURIComponent(active.sessionId)}` };
+  if (active) {
+    return active.taskId
+      ? { text: t('modules.chip.running', { title: active.title }), tone: 'live', href: `#/task/${encodeURIComponent(active.taskId)}` }
+      : { text: t('modules.chip.sent', { title: active.title }), tone: 'live', href: '#/messages' };
+  }
   const m = moduleOf(module);
   const latest = latestOf(listing, module);
   let chip;

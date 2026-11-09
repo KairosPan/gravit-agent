@@ -490,13 +490,9 @@ export function boot(win, host = {}) {
   const readListing = () => discover.read('modules').then(() => store.get().discover.shelves.modules.data);
   // and the Runs it sent: the listing read afresh when one ends, on the live layer's timers; mirrored in this browser
   const modules = startModules({ store, postJson, readListing, refreshListing: () => discover.read('modules', { fresh: true }), timers, storage, now });
-  // a module card's Run sheet: Run is a new conversation in the chosen channel, opened as a new message's is — the list read
-  // again first, so the row is there when the page moves to it, then followed
-  const runSheet = startRunSheet({
-    store, actions, readListing, now,
-    // (a session that lands on history is opened cold there, which promote refuses: plan 2 of one entry)
-    go: async route => { await live.refresh(); go(route); live.promote(route.id); },
-  });
+  // a module card's Run sheet: Run is one message to Gravit's conversation (one-entry plan 2), and the page goes to Messages,
+  // where it is; nothing is created, so nothing is promoted
+  const runSheet = startRunSheet({ store, actions, readListing, now, go: route => { go(route); } });
   // the list's search: the box's words in the store at once, the face's index read once the box is quiet
   const convSearch = startSearch({ store, getJson, timers });
   const mac = isMac(win);
@@ -1056,14 +1052,6 @@ export function boot(win, host = {}) {
 
   // a bot from Discover's bots listing, by its id
   const botOf = id => itemById(store.get().discover, `bot:${id}`)?.source ?? null;
-  async function talkToNow(id) {
-    const bot = botOf(id);
-    if (!bot) return;
-    const r = await actions.talkTo(bot);
-    if (r.error) { store.dispatch('discoverStatus', { line: r.error, bad: true }); return; }
-    await live.refresh();
-    go({ screen: 'messages', id: r.id });
-  }
   // the editor's boxes are read by the ids the page drew them with: the bot's id and the revision it was drawn from
   async function saveBotNow(id) {
     const bot = botOf(id);
@@ -1673,8 +1661,7 @@ export function boot(win, host = {}) {
     runSheetField: el => { void runSheet.field(el.name, el.value); },
     runSheetCancel: () => runSheet.close(),
     runSheetRun: () => { void runSheet.run(); },
-    // a bot: Talk to opens its conversation, Edit opens its editor (the model routes read for it)
-    talkTo: el => { void talkToNow(el.dataset.id); },
+    // a bot: Edit opens its editor (the model routes read for it)
     editBot: el => { store.dispatch('startEdit', { kind: 'bot', id: el.dataset.id }); void discover.modelChoices(); },
     toggleRail: () => store.dispatch('toggleRail'),
     toggleList: () => store.dispatch('toggleList'),

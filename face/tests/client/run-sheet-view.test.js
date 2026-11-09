@@ -3,7 +3,7 @@
 // message — from /data/modules.json.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newSheet, sheetOf, stocksOf, titleOf, messageOf } from '../../client/js/host/run-sheet-view.js';
+import { newSheet, sheetOf, stocksOf, titleOf, messageOf, askOf } from '../../client/js/host/run-sheet-view.js';
 import { modulesListing, MARKET_RUN, S01_RUN } from './helpers/inventory.js';
 import { withTable } from '../../client/js/i18n/words.js';
 
@@ -52,7 +52,7 @@ test('sheetOf: a market card — Where fixed, Latest run greyed with its reason,
   assert.equal(v.cites, null); assert.equal(v.stocks, null);
   assert.equal(v.note.value, '');
   assert.equal(v.via, 'Gravit in cn-market → CN market analyst, theme alone');
-  assert.equal(v.writes, 'theme.json · a conversation "Theme · 10-28"');
+  assert.equal(v.writes, 'theme.json · a task "Theme · 10-28"');
   assert.equal(v.canRun, true);
   assert.equal(v.blocker, null);
   assert.equal(sheetOf(l, newSheet(l, 'environment'), fixed).source, null, 'the source line is Theme\'s alone');
@@ -327,6 +327,14 @@ test('messageOf: Appendix B, slot by slot', () => {
   assert.equal(messageOf(l, { ...newSheet(l, 'mode'), on: 'latest' }), `请只跑 Lunhui 的 mode 模块：策略 lunhui-s01-repair，运行 ${S01_RUN}（已有运行），引用 cn-market 运行 ${MARKET_RUN}。`);
   assert.equal(messageOf(l, { ...newSheet(l, 'theme'), on: 'new', note: ' boards 再失败就报 ' }), '请只跑 Lunhui 的 theme 模块：频道 cn-market，开新运行——先按 lunhui:run 第 1 步冻结整套（index、limit-up、boards），再只写 theme。\n备注：boards 再失败就报');
   assert.equal(messageOf(l, { ...newSheet(l, 'mode'), on: null }), null, 'no On, no message');
+});
+
+test('askOf: the line asking Gravit for a task titled exactly as titleOf, then the message', () => {
+  const sheet = { ...newSheet(l, 'theme'), on: 'new', note: '看量能' };
+  const at = new Date(2026, 9, 29, 3, 0);
+  assert.equal(askOf(l, sheet, at), `请为此开一个任务，标题恰为「${titleOf(l, sheet, at)}」：\n${messageOf(l, sheet)}`);
+  assert.equal(askOf(l, sheet, at), '请为此开一个任务，标题恰为「Theme · 10-29」：\n请只跑 Lunhui 的 theme 模块：频道 cn-market，开新运行——先按 lunhui:run 第 1 步冻结整套（index、limit-up、boards），再只写 theme。\n备注：看量能');
+  assert.equal(askOf(l, { ...newSheet(l, 'mode'), on: null }, at), null, 'no message, no ask');
 });
 
 test('newSheet: a channel named takes the picks for that channel; a market card stays on cn-market', () => {

@@ -1836,19 +1836,6 @@ test('Create a bot creates it and opens its page', async () => {
   store.timers.clear();
 });
 
-test("Talk to opens the bot's session on its history page", async () => {
-  const f = fakeWindow({ hash: '#/plugin/bot:buffett' });
-  const h = host({ rows: [row('s1')], conversation: 's1' });
-  const store = started(f, h);
-  await h.ready();
-  await settle();
-  f.click({ tagName: 'BUTTON', dataset: { action: 'talkTo', id: 'buffett' } });
-  await settle();
-  assert.deepEqual(h.calls.find(c => c[0] === 'session/create')[1], { request: { cwd: '/r/bots/buffett/home', agentPreset: 'buffett' } });
-  assert.deepEqual(store.get().route, { screen: 'history', id: 's-bot' }, 'a bot session is no conversation (Task 10 retires Talk to)');
-  store.timers.clear();
-});
-
 test('an opened disclosure stays open across the next render', async () => {
   const f = fakeWindow({ hash: '' });
   const h = host({ rows: [row('s1')] });
@@ -3100,7 +3087,7 @@ test('an order the stream reports filled while its Change… sheet is open', asy
   store.timers.clear();
 });
 
-test('Run on a card opens the sheet; Escape closes it; Run sends the message, the page moves to the new session', async () => {
+test("Run on a card opens the sheet; Escape closes it; Run sends the module's message to the conversation, the page moves to Messages", async () => {
   const f = fakeWindow({ hash: '' });
   const close = f.withSelector('.drawer .close-key', { tagName: 'BUTTON', presentIf: /run-sheet/ });
   const h = host({ rows: [row('s1')] });
@@ -3139,15 +3126,14 @@ test('Run on a card opens the sheet; Escape closes it; Run sends the message, th
   await settle();
   const d = new Date();
   const title = `Theme · ${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  assert.deepEqual(h.calls.filter(c => c[0] !== 'session/list' && c[0] !== 'session/projections' && c[0] !== 'session/page').map(c => c[0]), ['session/create', 'session/rename', 'session/prompt']);
-  assert.deepEqual(h.calls.find(c => c[0] === 'session/create')[1], { request: { workspaceId: 'ws-cn-market' } });
-  assert.equal(h.calls.find(c => c[0] === 'session/rename')[1].request.title, title);
+  // one prompt, to the conversation /data/tasks names: no create, no rename
+  assert.deepEqual(h.calls.filter(c => !['session/list', 'session/projections', 'session/page', 'session/follow'].includes(c[0])).map(c => [c[0], c[1].request?.sessionId]), [['session/prompt', 's1']]);
   assert.equal(h.calls.find(c => c[0] === 'session/prompt')[1].request.content[0].text,
-    '请只跑 Lunhui 的 theme 模块：频道 cn-market，开新运行——先按 lunhui:run 第 1 步冻结整套（index、limit-up、boards），再只写 theme。');
-  assert.deepEqual(store.get().route, { screen: 'history', id: 's-new' }, 'a new session is no conversation: its history page until Task 10 sends Run to the conversation');
+    `请为此开一个任务，标题恰为「${title}」：\n请只跑 Lunhui 的 theme 模块：频道 cn-market，开新运行——先按 lunhui:run 第 1 步冻结整套（index、limit-up、boards），再只写 theme。`);
+  assert.equal(store.get().route.screen, 'messages');
+  assert.ok(!store.get().route.id, 'Messages itself, the conversation: no session to open');
   assert.equal(store.get().runSheet, null);
-  assert.equal(store.get().moduleRuns.theme.sessionId, 's-new');
-  assert.equal(store.get().moduleRuns.theme.title, title);
+  assert.deepEqual(store.get().moduleRuns.theme, { title, startedAt: store.get().moduleRuns.theme.startedAt });
   assert.doesNotMatch(f.html(), /role="dialog"/);
   store.timers.clear();
 });
@@ -3176,7 +3162,7 @@ test('a Latest run that is no longer the latest is drawn greyed but pickable; pi
   await settle();
   assert.equal(sayOf(store.get().runSheet.said), 'run no longer the latest');
   assert.equal(store.get().runSheet.run, first);
-  assert.ok(!h.calls.some(c => c[0] === 'session/create'), 'nothing sent');
+  assert.ok(!h.calls.some(c => c[0] === 'session/prompt' || c[0] === 'session/create'), 'nothing sent');
   let html = f.html();
   assert.match(html, /<label class="opt off"><input type="radio" name="on" value="latest" data-action="runSheetField"><span>Latest run · 20261029T020000Z-aaaaaaaa · session 2026-10-29<\/span><p class="sheet-hint">run no longer the latest<\/p>/,
     'greyed with its reason, neither disabled nor checked, so a click on it is a change');
@@ -3190,10 +3176,11 @@ test('a Latest run that is no longer the latest is drawn greyed but pickable; pi
   store.timers.clear();
 });
 
-test('after Run the card reads Running and links to the conversation; when the session stops the listing is re-read and the chip settles', async () => {
+test('after Run the card links the task', async () => {
   const storage = memoryStorage();
   const f = fakeWindow({ hash: '', storage });
-  const h = host({ rows: [row('s1')] });
+  const tasks = [];
+  const h = host({ rows: [row('s1')], conversation: 's1', tasks });
   const clock = { at: Date.now() };
   const timers = new HeldTimers(ms => ms === 5000);
   const store = boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown, timers, now: () => clock.at });
@@ -3204,37 +3191,39 @@ test('after Run the card reads Running and links to the conversation; when the s
   await settle();
   f.click({ tagName: 'BUTTON', dataset: { action: 'runSheetRun' } });
   await settle();
-  assert.deepEqual(store.get().route, { screen: 'history', id: 's-new' }, 'a new session is no conversation: its history page until Task 10 sends Run to the conversation');
+  assert.equal(store.get().route.screen, 'messages');
   const d = new Date(clock.at);
   const title = `Theme · ${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  assert.deepEqual(JSON.parse(storage.getItem('gravit-face.module-runs')), { theme: { sessionId: 's-new', title, startedAt: clock.at } }, 'mirrored to storage');
-  // back on Discover: the theme card is live and links to the conversation, its Run off; the other cards as they were
+  assert.deepEqual(JSON.parse(storage.getItem('gravit-face.module-runs')), { theme: { title, startedAt: clock.at } }, 'mirrored to storage');
+  // back on Discover before the task shows: the theme card reads Sent and links to Messages, its Run off
   f.win.location.hash = '#/discover';
   await settle();
   const card = () => f.html().match(/<div class="pcard research in-grid"><a class="pcard-link" href="#\/module\/theme">[\s\S]*?<\/button><\/span><\/div>/)?.[0] ?? '';
-  assert.ok(card().includes(`<a class="chip live" href="#/messages/s-new">Running · ${title} ›</a>`), card());
+  assert.ok(card().includes(`<a class="chip live" href="#/messages">Sent · ${title} ›</a>`), card());
   assert.match(card(), /data-action="runModule" data-module="theme" disabled title="Running">Run</);
   assert.ok(f.html().includes('>IGNITION · POSITIVE · NONE</span>'), 'sentiment keeps its chip');
-  // the module page reads the same
+  // Gravit starts the task under the Run's title: the card follows it, and the module page reads the same
+  tasks.push(taskRow('t-theme', { title, startedAt: clock.at + 2_000, lastEventAt: clock.at + 2_000 }));
+  await store.tasks.refresh();
+  await settle();
+  assert.ok(card().includes(`<a class="chip live" href="#/task/t-theme">Running · ${title} ›</a>`), card());
   f.win.location.hash = '#/module/theme';
   await settle();
-  assert.ok(f.html().includes(`<a class="chip live" href="#/messages/s-new">Running · ${title} ›</a>`));
+  assert.ok(f.html().includes(`<a class="chip live" href="#/task/t-theme">Running · ${title} ›</a>`));
   assert.match(f.html(), /data-action="runModule" data-module="theme" disabled title="Running">Run</);
   f.win.location.hash = '#/discover';
   await settle();
-  // the session runs past the minute: still Running, nothing re-read
+  // the task runs past the minute: still Running, nothing re-read
   const listed = () => h.reads.filter(p => p === '/data/modules.json').length;
   const before = listed();
-  h.rows.find(r => r.sessionId === 's-new').running = true;
-  await store.live.refresh();
   clock.at += 61_000;
-  await store.live.refresh();
+  await store.tasks.refresh();
   await settle();
-  assert.equal(store.get().moduleRuns.theme.sessionId, 's-new');
+  assert.equal(store.get().moduleRuns.theme.title, title);
   assert.equal(listed(), before);
-  // it stops: the record goes, the listing is read again now and once more 5 s later, the chip back to the listing's words
-  h.rows.find(r => r.sessionId === 's-new').running = false;
-  await store.live.refresh();
+  // it is done: the record goes, the listing is read again now and once more 5 s later, the chip back to the listing's words
+  tasks[0] = { ...tasks[0], state: 'done', group: 'done' };
+  await store.tasks.refresh();
   await settle();
   assert.equal(store.get().moduleRuns.theme, undefined);
   assert.equal(listed(), before + 1);
@@ -3248,8 +3237,6 @@ test('after Run the card reads Running and links to the conversation; when the s
   store.timers.clear();
 });
 
-// plan 2 of the Lunhui run view, task 4: an ok lunhui_present result draws a composed answer that reads its run's view; a
-// failed read (the face restarted, the run deleted) shows its summary, one error line and Retry, and Retry reads it again
 test('a composed answer reads its view; a 404 draws the summary, the error line and Retry; Retry reads again and the skeletons go', async () => {
   const f = fakeWindow({ hash: '#/messages/s1' });
   const h = host({ rows: [row('s1', { agentAvailable: true })] });

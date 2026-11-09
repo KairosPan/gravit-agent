@@ -63,19 +63,6 @@ test('a slash line goes to commands/execute first; only an unclaimed line contin
   assert.deepEqual(unclaimed.calls.map(c => c[0]), ['commands/execute', 'session/prompt']);
 });
 
-test('a new conversation is create, rename, prompt in that order, and its id comes back', async () => {
-  const r = rig({ answers: { 'session/create': { sessionId: 's-new', agentPreset: 'gravit' } } });
-  assert.equal(await r.actions.newConversation({ title: ' BTC under 70k ', workspaceId: 'w1', text: 'Buy a little' }), 's-new');
-  assert.deepEqual(r.calls.map(c => c[0]), ['session/create', 'session/rename', 'session/prompt']);
-  assert.deepEqual(r.calls[0][1], { request: { workspaceId: 'w1' } });
-  assert.deepEqual(r.calls[1][1], { request: { sessionId: 's-new', title: 'BTC under 70k' } });
-  assert.equal(r.calls[2][1].request.sessionId, 's-new');
-  const bare = rig({ answers: { 'session/create': { sessionId: 's-2' } } });
-  await bare.actions.newConversation({ title: '', workspaceId: null, text: 'hi' });
-  assert.deepEqual(bare.calls.map(c => c[0]), ['session/create', 'session/prompt']);
-  assert.deepEqual(bare.calls[0][1], { request: {} });
-});
-
 test('stop cancels the session and says how a paused goal comes back', async () => {
   const r = rig();
   await r.actions.stop('s1');
@@ -115,19 +102,6 @@ test('a 401 says to open the printed URL; a business failure names the host\'s c
   const gone = rig({ answers: { 'session/prompt': err({ code: 'session/not-found' }) } });
   await gone.actions.send('hi', { sessionId: 's1', sessionId: 's1' });
   assert.match(sayOf(gone.store.get().status.line), /session\/not-found/);
-});
-
-test("talkTo opens the bot's newest open home conversation, else creates one in its home with its preset", async () => {
-  const bot = { id: 'buffett', homeCwd: '/r/bots/buffett/home' };
-  const convs = [conv('h-old', { kind: 'bot', preset: 'buffett', updatedAt: 3 }), conv('h-new', { kind: 'bot', preset: 'buffett', updatedAt: 9 }), conv('h-arch', { kind: 'bot', preset: 'buffett', updatedAt: 99, archived: 'face' }), conv('s1')];
-  const r = rig({ convs });
-  assert.deepEqual(await r.actions.talkTo(bot), { id: 'h-new' });
-  assert.deepEqual(r.calls, [], 'an open home conversation needs no call');
-  const fresh = rig({ answers: { 'session/create': { sessionId: 's-home', agentPreset: 'buffett' } } });
-  assert.deepEqual(await fresh.actions.talkTo(bot), { id: 's-home' });
-  assert.deepEqual(fresh.calls, [['session/create', { request: { cwd: '/r/bots/buffett/home', agentPreset: 'buffett' } }]]);
-  const down = rig({ answers: { 'session/create': err({ code: 'preset/broken' }) } });
-  assert.equal(sayOf((await down.actions.talkTo(bot)).error), 'talk to: preset/broken');
 });
 
 test('stopChild sends interruptByParent in continuable mode', async () => {
@@ -220,49 +194,6 @@ test('an attachment refusal goes to attachmentRefused with its reason and says n
   assert.equal(sayOf(other.store.get().status.line), 'send: session/busy');
 });
 
-test('newConversationWith creates, reports the id, prepares and prompts; a refused prompt answers the id with sent false', async () => {
-  const r = rig({ answers: { 'session/create': { sessionId: 's-new' } } });
-  const seen = [];
-  const got = await r.actions.newConversationWith({
-    title: 'Look', workspaceId: 'w1', text: 'read it',
-    onCreated: id => seen.push(['created', id, r.calls.length]),
-    prepare: async id => { seen.push(['prepare', id]); return [filePart]; },
-  });
-  assert.deepEqual(got, { id: 's-new', sent: true });
-  assert.deepEqual(seen, [['created', 's-new', 1], ['prepare', 's-new']], 'created right after the create, before the rename and the prompt');
-  assert.deepEqual(r.calls.map(c => c[0]), ['session/create', 'session/rename', 'session/prompt']);
-  assert.deepEqual(r.calls[2][1].request.content, [{ type: 'text', text: 'read it' }, filePart]);
-  const notUp = rig({ answers: { 'session/create': { sessionId: 's-2' } } });
-  assert.deepEqual(await notUp.actions.newConversationWith({ text: 'x', prepare: async () => null }), { id: 's-2', sent: false });
-  assert.deepEqual(notUp.calls.map(c => c[0]), ['session/create'], 'files not up: no prompt');
-  const refused = rig({ answers: { 'session/create': { sessionId: 's-3' }, 'session/prompt': refusedFor('MODEL_DOES_NOT_SUPPORT_IMAGES') } });
-  const why = [];
-  assert.deepEqual(await refused.actions.newConversationWith({ text: '', prepare: async () => [imagePart], attachmentRefused: x => why.push(x) }), { id: 's-3', sent: false });
-  assert.deepEqual(why, ['MODEL_DOES_NOT_SUPPORT_IMAGES']);
-  assert.deepEqual(refused.calls[1][1].request.content, [imagePart]);
-  const failed = rig({ answers: { 'session/create': err({ code: 'boom' }) } });
-  assert.deepEqual(await failed.actions.newConversationWith({ text: 'x' }), { id: null, sent: false });
-  assert.equal(sayOf(failed.store.get().status.line), 'new message: boom');
-});
-
-test('newConversation still answers an id or null', async () => {
-  const r = rig({ answers: { 'session/create': { sessionId: 's-new' } } });
-  assert.equal(await r.actions.newConversation({ title: '', workspaceId: null, text: 'hi' }), 's-new');
-  const refused = rig({ answers: { 'session/create': { sessionId: 's-4' }, 'session/prompt': err({ code: 'session/busy' }) } });
-  assert.equal(await refused.actions.newConversation({ text: 'hi' }), null, 'a failure after the create answers null, as before');
-  const failed = rig({ answers: { 'session/create': err({ code: 'boom' }) } });
-  assert.equal(await failed.actions.newConversation({ text: 'hi' }), null);
-});
-
-test('newConversationWith reports the id before the rename, so a failed rename keeps the draft with the conversation', async () => {
-  const r = rig({ answers: { 'session/create': { sessionId: 's-new' }, 'session/rename': err({ code: 'rename/failed' }) } });
-  const seen = [];
-  const got = await r.actions.newConversationWith({ title: 'Look', text: 'x', onCreated: id => seen.push([id, r.calls.length]), prepare: async () => [] });
-  assert.deepEqual(got, { id: 's-new', sent: false });
-  assert.deepEqual(seen, [['s-new', 1]], 'told right after the create');
-  assert.equal(sayOf(r.store.get().status.line), 'new message: rename/failed');
-});
-
 test('a command that settles as an error with attachments is a refusal; a dropped receipt goes to attachmentRefused', async () => {
   const noFiles = rig({ answers: { 'commands/execute': { result: { kind: 'error', text: '/compact does not accept attachments' } } } });
   const why = [];
@@ -275,4 +206,8 @@ test('a command that settles as an error with attachments is a refusal; a droppe
   assert.deepEqual(why, ['ATTACHMENT_NOT_FOUND']);
   const plain = rig({ answers: { 'commands/execute': { result: { kind: 'error', text: 'no goal' } } } });
   assert.deepEqual(await plain.actions.send('/goal resume', { sessionId: 's1', sessionId: 's1' }), { sent: 'command', sessionId: 's1' }, 'with no files an error result is still the command\'s answer');
+});
+
+test('the actions create no session: the conversation is the one entry, a bot is talked to through Gravit', () => {
+  assert.deepEqual(Object.keys(rig().actions).sort(), ['answer', 'command', 'runCommand', 'send', 'stop', 'stopChild']);
 });

@@ -87,34 +87,6 @@ export function makeActions({ store, call, answerGate, requestId = randomUuid, t
     }
   }
 
-  // create (in a channel, or the host's default directory), name it when a title was typed, tell the caller its id, let
-  // it prepare the files there (their parts, or null when they did not go up), then the first words and the parts. A
-  // failure after the create still answers the id, with sent false, so the caller can open what was made
-  async function newConversationWith({ title, workspaceId, text, onCreated, prepare, attachmentRefused }) {
-    let sessionId = null;
-    try {
-      const created = await call('session/create', { request: workspaceId ? { workspaceId } : {} });
-      if (typeof created?.sessionId !== 'string') throw saidError('status.noSessionId', { remote: 'session/create' });
-      sessionId = created.sessionId;
-      onCreated?.(sessionId);   // before the rename: a failure from here on still leaves the draft with the conversation
-      const name = clean(title);
-      if (name) await call('session/rename', { request: { sessionId, title: name } });
-      const parts = prepare ? await prepare(sessionId) : [];
-      if (parts === null) return { id: sessionId, sent: false };
-      const words = clean(text);
-      if (words || parts.length) await prompt(sessionId, words, parts);
-      return { id: sessionId, sent: true };
-    } catch (err) {
-      failSend(err, said('status.verb.newMessage'), attachmentRefused);
-      return { id: sessionId, sent: false };
-    }
-  }
-  // the words alone (the Run sheet): the id when they went, else null
-  async function newConversation({ title, workspaceId, text }) {
-    const { id, sent } = await newConversationWith({ title, workspaceId, text });
-    return sent ? id : null;
-  }
-
   // the mux's answer under the current generation; the card takes this tab's outcome at once. One answer per gate is
   // in flight at a time: a second press (a double-click on ✓) sends nothing, where it would earn api.js's gate-gone
   // refusal in red over an approval that stood
@@ -143,19 +115,6 @@ export function makeActions({ store, call, answerGate, requestId = randomUuid, t
     }
   }
 
-  // Talk to <bot>: its newest home conversation that is not archived, else a new one in the bot's home with its preset
-  async function talkTo(bot) {
-    const home = store.get().conversations.filter(c => c.kind === 'bot' && c.preset === bot?.id && !c.archived).sort((a, b) => b.updatedAt - a.updatedAt)[0];
-    if (home) return { id: home.id };
-    try {
-      const created = await call('session/create', { request: { cwd: bot.homeCwd, agentPreset: bot.id } });
-      if (typeof created?.sessionId !== 'string') throw saidError('status.noSessionId', { remote: 'session/create' });
-      return { id: created.sessionId };
-    } catch (err) {
-      return { error: said('status.fail', { what: said('status.verb.talkTo'), reason: err?.code ?? err?.said ?? err?.message ?? said('status.failed') }) };
-    }
-  }
-
   // a running continuable child, stopped by its parent: its current turn is interrupted (a one-shot child is never sent)
   async function stopChild(parentSessionId, childSessionId, label) {
     try {
@@ -169,5 +128,5 @@ export function makeActions({ store, call, answerGate, requestId = randomUuid, t
     }
   }
 
-  return { send, newConversation, newConversationWith, answer, stop, command, runCommand, talkTo, stopChild };
+  return { send, answer, stop, command, runCommand, stopChild };
 }

@@ -220,13 +220,14 @@ test("a module card's run sheet: open closes the other drawers, set replaces it 
   for (const over of [R.openSettings, R.openStatement, R.toggleDetails]) {
     assert.equal(over(R.runSheetOpen(s, sheet)).runSheet, null, over.name);
   }
-  s = R.moduleRunStarted(s, { module: 'theme', sessionId: 's1', title: 'Theme · 10-28', startedAt: NOW });
-  s = R.moduleRunStarted(s, { module: 'leader', sessionId: 's2', title: 'Leader · 10-28', startedAt: NOW + 1 });
-  assert.deepEqual(s.moduleRuns, { theme: { sessionId: 's1', title: 'Theme · 10-28', startedAt: NOW }, leader: { sessionId: 's2', title: 'Leader · 10-28', startedAt: NOW + 1 } });
+  // a Run records its task's title and when it was sent: no session, the conversation is the one entry (one-entry plan 2)
+  s = R.moduleRunStarted(s, { module: 'theme', title: 'Theme · 10-28', startedAt: NOW });
+  s = R.moduleRunStarted(s, { module: 'leader', title: 'Leader · 10-28', startedAt: NOW + 1 });
+  assert.deepEqual(s.moduleRuns, { theme: { title: 'Theme · 10-28', startedAt: NOW }, leader: { title: 'Leader · 10-28', startedAt: NOW + 1 } });
   s = R.moduleRunCleared(s, { module: 'theme' });
   assert.deepEqual(Object.keys(s.moduleRuns), ['leader']);
   assert.equal(R.moduleRunCleared(s, { module: 'theme' }), s, 'clearing what is not there changes nothing');
-  const runs = { mode: { sessionId: 's3', title: 'Mode · 10-28', startedAt: NOW } };
+  const runs = { mode: { title: 'Mode · 10-28', startedAt: NOW } };
   assert.deepEqual(R.moduleRunsLoaded(s, { runs }).moduleRuns, runs);
   assert.deepEqual(R.moduleRunsLoaded(s, { runs: null }).moduleRuns, {});
 });
