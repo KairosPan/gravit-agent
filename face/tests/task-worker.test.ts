@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertSupportedJsonSchema } from "@deepseek-ai/dsh-tools";
 import { DEFAULT_PRESET } from "../src/overlay.ts";
 import {
   TASK_BRIEF_MAX, TASK_FOOTER, TASK_TITLE_MAX, TaskInputError, briefText, equipWorkers, isStrategyName, startWorker,
@@ -200,6 +201,11 @@ test("task_report is on a worker's own layer and on no other agent's", () => {
 
   dispose();
   assert.equal(root.listeners.length, 0);
+});
+
+test("task_report's output schema is one dsh's tool layer registers (task 8's real boot)", () => {
+  /* dsh-tools ToolRuntime.register runs this on every output schema: a `const` without a `type` is refused */
+  assert.doesNotThrow(() => assertSupportedJsonSchema(taskReportTool().output.schema));
 });
 
 test("task_report refuses an unknown status, an empty text and a text over 600 characters", async () => {

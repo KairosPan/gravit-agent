@@ -237,15 +237,17 @@ export interface ConversationHandle {
   current(): { agent: AgentLike; sessionId: string } | undefined;
   /** Whether the turn running now on the conversation is the operator's: one whose first message's source kind is in
    * {@link OPERATOR_SOURCES} and which has logged no message of any other kind since (a `task` message, a wake; the
-   * desk's state note and dsh's working-directory notice excepted). False with no turn, before a message names it,
-   * and for a task's or a wake's turn. */
+   * desk's state note, dsh's working-directory notice and its runtime-context snapshot excepted). False with no turn,
+   * before a message names it, and for a task's or a wake's turn. */
   operatorTurn(): boolean;
   /** Ends the supervision and disposes the agent this handle created or resumed; waits for an ensure under way. */
   dispose(): Promise<void>;
 }
 
-/** Source kinds that never make a turn someone else's: the desk's state note and dsh's own working-directory notice. */
-const NOT_A_SPEAKER: ReadonlySet<string> = new Set(["desk", "working-directory"]);
+/** Source kinds that never make a turn someone else's: the desk's state note, dsh's own working-directory notice, and
+ * dsh-agent-loop's runtime-context snapshot (the cwd and file policy, logged after the turn's first message in every
+ * turn). */
+const NOT_A_SPEAKER: ReadonlySet<string> = new Set(["desk", "working-directory", "runtime-context"]);
 
 /** One supervised session: its supervision and the note of who has spoken in the open turn. */
 interface Watch {

@@ -196,7 +196,7 @@ export function taskReportTool(): DeskToolDefinition {
     output: {
       schema: {
         type: "object",
-        properties: { kind: { const: "reported" }, status: { type: "string", enum: [...REPORT_STATUSES] } },
+        properties: { kind: { type: "string", const: "reported" }, status: { type: "string", enum: [...REPORT_STATUSES] } },
         required: ["kind", "status"],
         additionalProperties: false,
       },

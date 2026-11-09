@@ -444,9 +444,14 @@ test("a turn the operator opened stops being the operator's once a task message 
   const { sessionId } = await handle.ensure();
   startTurn(tree.bus, sessionId, 1, { kind: "user", rpcId: "r1" });
   assert.equal(handle.operatorTurn(), true);
-  /* the desk's state note and dsh's working-directory notice change nothing; a browser steer neither */
+  /* the desk's state note, dsh's working-directory notice and its runtime-context snapshot change nothing; a browser
+   * steer neither */
   tree.bus.emit(sessionId, "user/message", { id: "d1", role: "user", content: [], source: { kind: "desk", form: "state" } });
   tree.bus.emit(sessionId, "user/message", { id: "w1", role: "user", content: [], source: { kind: "working-directory" } });
+  assert.equal(handle.operatorTurn(), true, "the desk's note and the working-directory notice");
+  /* dsh-agent-loop's runtime-context snapshot, logged after the operator's message in every turn (task 8's real boot) */
+  tree.bus.emit(sessionId, "user/message", { id: "c1", role: "user", content: [], source: { kind: "runtime-context" } });
+  assert.equal(handle.operatorTurn(), true, "the runtime-context snapshot");
   tree.bus.emit(sessionId, "user/message", { id: "u2", role: "user", content: [], source: { kind: "user", rpcId: "r2" } });
   assert.equal(handle.operatorTurn(), true);
   tree.bus.emit(sessionId, "user/message", { id: "t1", role: "user", content: [], source: { kind: "task", form: "report", task: "session-w" } });
