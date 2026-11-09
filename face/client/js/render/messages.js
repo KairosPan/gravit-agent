@@ -13,6 +13,7 @@ import { HOST_NAME } from '../wire/speaker.js';
 import { kv, confirmPair } from './controls.js';
 import { onScreenId } from '../host/sessions.js';
 import { childrenOf } from '../host/children-view.js';
+import { historyOf } from '../host/rail-view.js';
 import { renderMenu, menuAria, filesRail } from '../composer/view.js';
 import { statsView, pillsText, durationText, clockText } from '../host/turns-view.js';
 import { jobsView, metaLine, isLive } from '../host/jobs-view.js';
@@ -224,8 +225,7 @@ export function renderSessionPage(state, now, page = {}) {
 // History (#/history) until Task 7 of plan 2 draws its own: every session but the conversation and its tasks, newest first,
 // each a link to its read-only page
 export function renderHistoryList(state, now) {
-  const skip = new Set([state.tasks?.conversation, ...(state.tasks?.items ?? []).map(task => task.id)]);
-  const rows = state.conversations.filter(c => !skip.has(c.id)).sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  const rows = historyOf(state);
   const body = rows.length
     ? rows.map(c => `<a class="chan-row" href="#/history/${esc(encodeURIComponent(c.id))}"><span class="chan-row-name">${esc(maskExcerpt(c.title))}</span><span class="chan-row-meta">${c.updatedAt ? rowTime(c.updatedAt, now) : ''}</span></a>`).join('')
     : `<div class="chan-none dim">${th('history.none')}</div>`;

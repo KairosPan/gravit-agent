@@ -1,54 +1,21 @@
-// face/client/js/render/rail.js — the two-level navigation on the host's facts (spec 2026-10-19 §7 "Rail", "List"):
-// a first level that collapses to icons, and the conversation list as the second level on Messages.
+// face/client/js/render/rail.js — the two-level navigation on the host's facts (spec 2026-10-19 §7 "Rail"): a first level
+// that collapses to icons, and the side panel (render/side.js) as the second level beside Messages and its pages.
 import { esc, attrs, cls } from '../html.js';
-import { t, th, thn } from '../i18n/words.js';
+import { t, th } from '../i18n/words.js';
 import { icon } from '../icons.js';
-import { shortcut, chordLabel } from '../keys.js';
-import { rowTime } from '../time.js';
-import { unreadOf, onScreenId } from '../host/sessions.js';
 import { worthOf, cardsOf } from '../host/account-view.js';
 import { money } from '../wire/account-model.js';
 import { avatar } from './avatars.js';
 import { HOST_NAME } from '../wire/speaker.js';
-import { groupsOf } from '../host/list-view.js';
 import { waitingCount } from '../host/rail-view.js';
-import { maskExcerpt } from '../mask.js';
-import { titleMatches, mergeResults, highlightRuns, searchPhase, moreThanTwenty, spoken, spokenLine } from '../host/search-view.js';
+import { renderSide, SIDE_SCREENS } from './side.js';
 
 const NAME = { gravit: HOST_NAME, system: '' };
-// the screens the second level stands beside: Messages and the pages a session or a strategy opens on
-const LISTED = new Set(['messages', 'task', 'history', 'strategy']);
 
 // a bot's display name comes with the list (/data/bots.json); an unknown sender keeps its id
 export function senderName(from, state) {
   if (from === 'you') return t('list.you');
   return NAME[from] ?? state?.bots?.find(b => b.id === from)?.name ?? from;
-}
-
-// a row's line (drawn masked, as every excerpt is, with no eye: spec §5.9): the conversation on screen previews from
-// its own window; any other row from the host's one-message page (`preview`, re-read when its session moves), and until
-// that lands from the last line drawn. Only SPOKEN lines count — never a context row (a runtime snapshot, a plugin
-// notice) or a tool row
-export function previewOf(conv, state = null) {
-  const m = conv.messages.findLast(spoken);
-  const read = typeof conv.preview === 'string' && conv.preview !== '' ? conv.preview : null;
-  const onScreen = !!state?.route && onScreenId(state) === conv.id;
-  if (read && !(onScreen && m)) return read;
-  if (!m) return '';
-  const who = m.from === 'you' ? '' : senderName(m.from, state);
-  const name = m.data?.name ?? who;
-  const line = spokenLine(m);
-  return conv.kind === 'group' && name ? t('list.preview.from', { name, line }) : line;
-}
-
-function row(conv, state, now) {
-  const current = onScreenId(state) === conv.id;
-  const pin = conv.archived ? '' : `<button type="button" class="pin-key" data-action="${conv.pinned ? 'unpin' : 'pin'}" data-conv="${esc(conv.id)}" aria-label="${conv.pinned ? th('list.unpin') : th('list.pin')}" id="pin-${esc(conv.id)}">${icon('pin', 14, 2)}</button>`;
-  return '<div class="row-wrap">' +
-    `<a${attrs({ class: cls('row', current && 'current'), 'aria-current': current ? 'page' : null, href: `#/messages/${conv.id}`, 'data-action': 'open', 'data-id': conv.id })}>` +
-    `<span class="${cls('dot', unreadOf(conv) && 'on')}"></span>` +
-    `<span class="row-body"><span class="row-top"><span class="row-title">${esc(maskExcerpt(conv.title))}</span>${conv.pinned ? `<span class="row-pin">${icon('pin', 11, 2, true)}</span>` : ''}<span class="row-time">${conv.updatedAt ? rowTime(conv.updatedAt, now) : ''}</span></span>` +
-    `<span class="row-preview">${esc(maskExcerpt(previewOf(conv, state)))}</span></span></a>${pin}</div>`;
 }
 
 // a first-level key: an icon and its name; collapsed, the name stays as the title and for screen readers
@@ -76,7 +43,7 @@ export function renderNav(state) {
   <div class="brand">${avatar('gravit', 28)}<span class="brand-name">${esc(HOST_NAME)}<span class="brand-caption">${th('nav.workspace')}</span></span>` +
     `<button type="button" class="rail-toggle" data-action="toggleRail" aria-expanded="${mini ? 'false' : 'true'}" aria-label="${mini ? th('nav.expand') : th('nav.collapse')}">${icon(mini ? 'chevRight' : 'chevLeft', 16, 2.2)}</button></div>
   <div class="rail-group">
-    ${navItem('#/messages', 'chat', t('nav.messages'), LISTED.has(screen), mini, waiting)}
+    ${navItem('#/messages', 'chat', t('nav.messages'), SIDE_SCREENS.has(screen), mini, waiting)}
     ${navItem('#/markets', 'markets', t('nav.markets'), screen === 'markets', mini)}
     ${navItem('#/trade', 'trade', t('nav.trade'), screen === 'trade', mini)}
     ${navItem('#/discover', 'compass', t('nav.discover'), screen === 'discover' || screen === 'plugin' || screen === 'module', mini)}
@@ -88,71 +55,6 @@ export function renderNav(state) {
 </nav>`;
 }
 
-// a group's head: the collapse key, then the channel's name as a link to its page (a bot's or the other groups' as text)
-function groupHead(g, state) {
-  const label = g.collapsed ? t('list.group.expand', { name: g.label }) : t('list.group.collapse', { name: g.label });
-  const here = state.route.screen === 'strategy' && (state.channels ?? []).some(c => c.workspaceId === g.workspaceId && c.name === state.route.id);
-  const name = g.kind === 'channel'
-    ? `<a${attrs({ class: cls('grp-name', here && 'current'), 'aria-current': here ? 'page' : null, href: `#/channel/${encodeURIComponent(g.workspaceId)}` })}>${esc(g.label)}</a>`
-    : `<span class="grp-name">${esc(g.label)}</span>`;
-  return `<div class="grp-head"><button type="button" class="grp-key" data-action="toggleGroup"${attrs({ 'data-key': g.key, 'aria-expanded': g.collapsed ? 'false' : 'true', 'aria-label': label })}>` +
-    `${icon(g.collapsed ? 'chevRight' : 'chevDown', 14, 2.2)}</button>${name}</div>`;
-}
-
-// the search box under the list head (spec 2026-11-03 §5.1, P1): its words are the store's; the hint names the platform's key
-// from the keys' table
-function searchBox(query, mac) {
-  return `<div class="conv-search">${icon('search', 16, 2)}<input${attrs({ id: 'cq', type: 'search', autocomplete: 'off', placeholder: t('search.box'), 'aria-label': t('search.box'), 'data-action': 'convQuery', value: query })}>` +
-    `<kbd class="conv-search-key">${esc(chordLabel(shortcut('searchConversations'), mac))}</kbd></div>`;
-}
-
-const SEARCH_LINE = {
-  searching: () => th('search.searching'), empty: () => th('search.empty'), failed: () => th('search.failed'), more: () => th('search.more'),
-};
-const stateLine = key => `<div class="conv-results-state">${SEARCH_LINE[key]()}</div>`;
-
-// a result: its title and time, then its channel in bold and the snippet with the match marked; an archived one dim with its
-// chip, and the face's own archive undone by the key after the link (the host's cannot be undone here). The snippet is masked
-// first (an excerpt, whoever spoke: spec §5.9), which keeps its length, so the match's offsets stand
-function hit(it, now) {
-  const runs = highlightRuns(typeof it.snippet === 'string' ? maskExcerpt(it.snippet) : it.snippet, it.match).map(r => (r.mark ? `<mark>${esc(r.text)}</mark>` : esc(r.text))).join('');
-  const link = `<a${attrs({ class: cls('conv-hit', it.archived && 'archived'), href: `#/messages/${it.id}`, 'data-action': 'open', 'data-id': it.id })}>` +
-    `<span class="row-top"><span class="row-title">${esc(maskExcerpt(it.title))}</span>${it.archived ? `<span class="chip grey">${th('list.archived')}</span>` : ''}<span class="row-time">${it.at ? rowTime(it.at, now) : ''}</span></span>` +
-    `<span class="conv-hit-line"><b class="conv-hit-channel">${esc(it.channelLabel)}</b>${runs ? ` ${runs}` : ''}</span></a>`;
-  return link + (it.archived === 'face' ? `<button type="button" class="btn-sm" data-action="unarchive"${attrs({ 'data-conv': it.id })}>${th('list.unarchive')}</button>` : '');
-}
-
-// the results in place of the groups: the title matches at once, the content ones as they land, at most twenty
-function results(state, now) {
-  const { query, contentPhase, content, hasMore } = state.search;
-  const titles = titleMatches(state.conversations, state.channels, query);
-  const merged = mergeResults({ titles, content, conversations: state.conversations, channels: state.channels });
-  const phase = searchPhase({ query, contentPhase, merged });
-  let inner;
-  if (phase === 'searching') inner = stateLine('searching') + '<div class="sk"></div>'.repeat(3);
-  else if (phase === 'empty' || phase === 'failed') inner = stateLine(phase);
-  else {
-    inner = `<div class="conv-results-count">${thn('search.count', merged.length)}</div>` +
-      merged.map(it => hit(it, now)).join('') +
-      (moreThanTwenty(merged, hasMore) ? stateLine('more') : '') + (contentPhase === 'failed' ? stateLine('failed') : '');
-  }
-  return `<div class="conv-results">${inner}</div>`;
-}
-
-// the second level, open on Messages: the search box, then the groups (host/list-view.js), each
-// its head and its rows, newest first — or, while a query stands, its results in their place
-export function renderList(state, now, { mac = true } = {}) {
-  if (!LISTED.has(state.route.screen)) return '';
-  const query = state.search?.query ?? '';
-  const opened = !!state.listOpen;
-  const head = `<aside class="list" data-list-open="${opened}" aria-label="${th('list.title')}"><div class="list-head"><h2 class="list-title">${th('list.title')}</h2>` +
-    `<button type="button" id="list-toggle" class="list-toggle" data-action="toggleList" aria-expanded="${opened}" aria-controls="conversation-list-body" aria-label="${opened ? th('list.hide') : th('list.show')}">${icon('chevDown', 18, 2.2)}</button>` +
-    `</div><div class="list-body" id="conversation-list-body">` + searchBox(query, mac);
-  if (query.trim() !== '') return `${head}${results(state, now)}</div></aside>`;
-  const rows = groupsOf(state).map(g => groupHead(g, state) + g.shown.map(c => row(c, state, now)).join('')).join('');
-  return `${head}${rows ? `<div class="rail-rows">${rows}</div>` : ''}</div></aside>`;
-}
-
 export function renderRail(state, now, opts = {}) {
-  return renderNav(state) + renderList(state, now, opts);
+  return renderNav(state) + renderSide(state, now, opts);
 }

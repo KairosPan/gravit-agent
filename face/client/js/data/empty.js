@@ -14,11 +14,9 @@ export function emptyState() {
     textFont: '',
     codeFont: '',
     route: { screen: 'messages', id: null },
-    lastConv: null,
     railCollapsed: false,
     // the narrow-screen list is an in-page disclosure, never a saved preference
     listOpen: false,
-    collapsed: {},
     // files are being dragged over the page: the drop overlay shows over a screen with a composer (plan 4)
     dropping: false,
     detailsOpen: false,

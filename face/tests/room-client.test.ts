@@ -2,7 +2,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { avatarGlyph, foldMembers, gateSpeaker, isMemberSession, isMentionText, normalizeRoomDiscussion, normalizeRoomView, roomAnswerDisplay, roundEndLine, stripChips } from "../client/js/wire/room.js";
-import { bucketFor } from "../client/js/wire/grouping.js";
 import { withTable } from "../client/js/i18n/words.js";
 
 test("avatarGlyph is deterministic per id and differs between the two template bots", () => {
@@ -49,14 +48,6 @@ test("isMemberSession: a member's own transcript is not a room - the delta's pro
   assert.equal(isMemberSession({ kind: "room", organizing: true, members: {} }, members, "room"), false);
   assert.equal(isMemberSession(undefined, members, "solo"), false);
   assert.equal(isMemberSession(undefined, members, null), false);
-});
-
-test("bucketFor: a member never files under its bot's home bucket, whatever precedence says otherwise", () => {
-  const bot = { id: "buffett", label: "巴菲特型" };
-  assert.equal(bucketFor({ workspaceId: "ws", title: "c" }, false, bot, false).key, "bot:buffett");
-  assert.equal(bucketFor({ workspaceId: "ws", title: "c" }, false, bot, true).key, "ws");
-  assert.equal(bucketFor(null, false, bot, true).key, "__ungrouped");
-  assert.equal(bucketFor(null, true, bot, true).key, "__archived");
 });
 
 const roster = [{ id: "buffett", name: "巴菲特型" }, { id: "speculator", name: "投机型" }, { id: "cracked", name: "cracked", broken: "not a list" }];

@@ -61,17 +61,18 @@ test('parseHash and toHash round-trip; Messages and Markets route, every other s
 
 test('initialState is the empty state plus the viewer\'s prefs; garbage prefs are ignored', () => {
   const storage = memory();
+  // a lastConv or collapsed an older page saved (the channel list's, gone with it) is ignored
   storage.setItem(PREFS_KEY, JSON.stringify({ theme: 'black', railCollapsed: true, lastConv: 's9', lastSeen: { s9: 40 }, collapsed: { w1: true, __archived: false }, watch: ['BTC'] }));
   const s = initialState(storage);
-  assert.equal(s.theme, 'black'); assert.equal(s.railCollapsed, true); assert.equal(s.lastConv, 's9');
+  assert.equal(s.theme, 'black'); assert.equal(s.railCollapsed, true);
+  assert.equal('lastConv' in s, false); assert.equal('collapsed' in s, false);
   assert.deepEqual(s.lastSeen, { s9: 40 });
-  assert.deepEqual(s.collapsed, { w1: true, __archived: false });
   assert.deepEqual(s.markets.watch, [], 'the stars live under their own keys, never in the prefs');
   assert.deepEqual(s.markets.watchlist, []);
   assert.deepEqual(s.conversations, []);
-  storage.setItem(PREFS_KEY, '{"theme":"neon","lastSeen":[1],"collapsed":["w1"],"watch":"x"}');
+  storage.setItem(PREFS_KEY, '{"theme":"neon","lastSeen":[1],"watch":"x"}');
   const bad = initialState(storage);
-  assert.equal(bad.theme, 'system'); assert.deepEqual(bad.lastSeen, {}); assert.deepEqual(bad.collapsed, {});
+  assert.equal(bad.theme, 'system'); assert.deepEqual(bad.lastSeen, {});
   storage.setItem(PREFS_KEY, 'not json');
   assert.equal(initialState(storage).theme, 'system');
   assert.equal(initialState(null).theme, 'system');
@@ -84,9 +85,9 @@ test('the store writes only the prefs, never the conversations, and never loads 
   assert.deepEqual(store.get().conversations, []);
   store.dispatch('toggleRail');
   const saved = JSON.parse(storage.getItem(PREFS_KEY));
-  assert.deepEqual(Object.keys(saved).sort(), ['codeFont', 'codeSize', 'collapsed', 'lang', 'lastConv', 'lastSeen', 'railCollapsed', 'textFont', 'textSize', 'theme']);
+  assert.deepEqual(Object.keys(saved).sort(), ['codeFont', 'codeSize', 'lang', 'lastSeen', 'railCollapsed', 'textFont', 'textSize', 'theme']);
   assert.equal(saved.railCollapsed, true);
-  assert.deepEqual(prefsOf(emptyState()), { theme: 'system', lang: 'en', textSize: 15, codeSize: 12, textFont: '', codeFont: '', railCollapsed: false, lastConv: null, lastSeen: {}, collapsed: {} });
+  assert.deepEqual(prefsOf(emptyState()), { theme: 'system', lang: 'en', textSize: 15, codeSize: 12, textFont: '', codeFont: '', railCollapsed: false, lastSeen: {} });
 });
 
 test('settle routes by the hash and says which hash the address bar should show', () => {

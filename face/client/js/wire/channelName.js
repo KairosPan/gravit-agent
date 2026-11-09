@@ -3,7 +3,7 @@
  *
  * No DOM, no network, no state — the string the operator typed in, the
  * directory name that will be created out. Split out of chat.js for the same
- * reason grouping.js is: the decision has to be drillable without a browser.
+ * reason speaker.js is: the decision has to be drillable without a browser.
  *
  * WHAT IT IS NOT. It is not a fence. `createChannel` (src/channels.ts) keeps
  * the only gate standing between the create route and `join()`, and its rule

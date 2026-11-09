@@ -23,7 +23,7 @@ test('the empty state has no conversations, a connecting status line and the sha
   assert.deepEqual(s.route, { screen: 'messages', id: null }); assert.equal(s.theme, 'system'); assert.equal('draft' in s, false, 'no New message draft (one-entry plan 2)');
   assert.equal(s.counters, undefined);
   assert.equal(s.discover.query, ''); assert.deepEqual(s.discover.shelves.bots, { status: 'idle', data: null, at: null });
-  assert.deepEqual(s.channel, { id: null, status: 'idle', data: null, at: null }); assert.deepEqual(s.childRows, []); assert.deepEqual(s.collapsed, {});
+  assert.deepEqual(s.channel, { id: null, status: 'idle', data: null, at: null }); assert.deepEqual(s.childRows, []); assert.equal('collapsed' in s, false);
 });
 
 test('hostStatus merges the line, the flag and the connection', () => {

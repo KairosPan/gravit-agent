@@ -26,7 +26,7 @@ import { mkdtemp, mkdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 // channelName.js is plain ESM JS (it ships to the browser); tsconfig `allowJs`
-// lets this test import it, the same way grouping.test.ts imports grouping.js.
+// lets this test import it.
 import { foldChannelName } from "../client/js/wire/channelName.js";
 import { createChannel } from "../src/channels.ts";
 import { HttpError } from "../src/http.ts";

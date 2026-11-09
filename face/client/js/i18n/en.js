@@ -51,24 +51,20 @@ export const EN = Object.freeze({
   'nav.account': 'Account',
   'nav.worthPaper': '{worth} · Paper',
 
-  // the conversation list (render/rail.js renderList, host/list-view.js, host/sessions.js) and who speaks in it
+  // the side panel beside Messages (render/side.js), the search's channel names (host/search-view.js), a session's
+  // title (host/sessions.js) and who speaks in it
   'list.title': 'Messages',
   'list.show': 'Show conversations',
   'list.hide': 'Hide conversations',
-  'list.pin': 'Pin',
-  'list.unpin': 'Unpin',
-  'list.group.expand': 'Expand {name}',
-  'list.group.collapse': 'Collapse {name}',
   'list.archived': 'Archived',
-  'list.unarchive': 'Un-archive',
   'list.desk': 'Desk',
   'list.noChannel': 'No channel',
+  'list.strategies': 'Strategies',
   'list.untitled': 'Untitled',
   'list.you': 'You',
   'list.role': 'Role · {name}',
-  'list.preview.from': '{name}: {line}',
 
-  // the list's search (render/rail.js, host/search-view.js)
+  // the side panel's search (render/side.js, host/search-view.js)
   'search.box': 'Search conversations',
   'search.searching': 'Searching every conversation…',
   'search.empty': 'No matching conversations',
@@ -90,11 +86,6 @@ export const EN = Object.freeze({
   'status.verb.newMessage': 'new message',
   'status.verb.answer': 'answer',
   'status.verb.stop': 'stop',
-  'status.verb.rename': 'rename',
-  'status.verb.fork': 'fork',
-  'status.verb.archive': 'archive',
-  'status.verb.unarchive': 'un-archive',
-  'status.verb.delete': 'delete',
   'status.verb.talkTo': 'talk to',
   'status.verb.open': 'open',
   'status.verb.earlier': 'earlier',
@@ -126,9 +117,6 @@ export const EN = Object.freeze({
   'history.none': 'Nothing in history yet',
   'history.notFound': 'Not found',
   'status.stopped': 'Stopped. A paused goal resumes with /goal resume',
-  'status.pinFailed': 'Pin failed. Try again later.',
-  'status.stopFirst': 'Stop Gravit first',
-  'status.answerCardFirst': 'Answer the waiting card first',
   'status.stopping': 'Stopping {label}',
   'status.theChild': 'the child',
   'status.followFailed': 'the follow failed',

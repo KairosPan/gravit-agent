@@ -2,7 +2,7 @@
  *
  * No DOM, no network, no state - session rows, a projection value and the
  * live maps in, chips / labels / folds out. Split out of chat.js for the
- * reason grouping.js and speaker.js are: the rules must be drillable
+ * reason speaker.js is: the rules must be drillable
  * without a browser.
  *
  * WHAT THE WIRE CARRIES (plan 2 of the bots-and-rooms spec): no `room/*`

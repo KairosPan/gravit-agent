@@ -76,8 +76,7 @@ function actionsRig(answers = {}, convs = [conv('s1')]) {
   store.dispatch('tasksLoaded', { conversation: 's1', tasks: [], at: 1 });
   store.dispatch('nav', { screen: 'messages', id: null });
   const call = async endpoint => { const a = answers[endpoint]; if (a instanceof Error) throw a; return typeof a === 'function' ? a() : a; };
-  const postJson = async () => { throw err({ code: 'face/<refused>' }); };
-  const actions = makeActions({ store, call, answerGate: async () => { throw err({ code: 'gate/gone' }); }, postJson, requestId: () => 'r', timeZone: () => 'UTC' });
+  const actions = makeActions({ store, call, answerGate: async () => { throw err({ code: 'gate/gone' }); }, requestId: () => 'r', timeZone: () => 'UTC' });
   return { store, actions, line: () => store.get().status.line };
 }
 
@@ -100,21 +99,14 @@ test('the boot line, and a failure line: its verb, then the code, the HTTP statu
 
 test("the actions' lines, each verb in its words", async () => {
   const r = actionsRig({
-    'session/cancel': err({ code: 'x/1' }), 'session/rename': err({ code: 'x/2' }), 'session/fork': () => ({}), 'commands/execute': () => undefined,
+    'session/cancel': err({ code: 'x/1' }), 'commands/execute': () => undefined,
     'session/prompt': err({ code: 'x/3' }), 'session/create': () => ({}), 'subagents/interruptByParent': () => ({ accepted: false }),
-    'workspace/pinSession': () => ({}),
   });
   await r.actions.stop('s1'); follows(r.line(), 'stop: x/1');
-  await r.actions.rename('s1', 'New'); follows(r.line(), 'rename: x/2');
-  await r.actions.fork('s1'); follows(r.line(), 'fork: session/fork returned no sessionId');
   await r.actions.runCommand('s1', '/<b>'); follows(r.line(), 'no command claimed /<b>');
   await r.actions.send('hello', { sessionId: 's1' }); follows(r.line(), 'send: x/3');
   await r.actions.newConversation({ text: 'hi' }); follows(r.line(), 'new message: session/create returned no sessionId');
   await r.actions.stopChild('s1', 'c1', 'x'); follows(r.line(), 'stop: refused');
-  await r.actions.pin('s1'); follows(r.line(), 'Pin failed. Try again later.');
-  await r.actions.archive('s1', true); follows(r.line(), 'archive: face/<refused>');
-  await r.actions.archive('s1', false); follows(r.line(), 'un-archive: face/<refused>');
-  await r.actions.remove('s1'); follows(r.line(), 'delete: face/<refused>');
   await r.actions.answer('ev', 'rejected'); follows(r.line(), 'answer: gate/gone');
   follows(await r.actions.talkTo({ id: 'b', homeCwd: '/b' }), { error: 'talk to: session/create returned no sessionId' });
 
@@ -122,11 +114,6 @@ test("the actions' lines, each verb in its words", async () => {
   await ok.actions.stop('s1'); follows(ok.line(), 'Stopped. A paused goal resumes with /goal resume');
   await ok.actions.stopChild('s1', 'c1', ''); follows(ok.line(), 'Stopping the child');
   await ok.actions.stopChild('s1', 'c1', '<Scout>'); follows(ok.line(), 'Stopping <Scout>');
-
-  const busy = actionsRig({}, [conv('s1', { running: true })]);
-  await busy.actions.archive('s1', true); follows(busy.line(), 'Stop Gravit first');
-  const waiting = actionsRig({}, [conv('s1', { messages: [{ id: 'q', kind: 'question', from: 'gravit', text: '', data: { questions: [] } }] })]);
-  await waiting.actions.archive('s1', true); follows(waiting.line(), 'Answer the waiting card first');
 });
 
 test("a command's own result and a desk refusal in the desk's words read as they came under any table", async () => {

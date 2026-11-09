@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const MOVED = ['grouping', 'channelName', 'botId', 'botSettings', 'subagents', 'member-traces'];
+const MOVED = ['channelName', 'botId', 'botSettings', 'subagents', 'member-traces'];
 
 test('the moved wire modules carry no Chinese', async () => {
   for (const name of MOVED) {

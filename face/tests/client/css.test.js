@@ -32,8 +32,8 @@ test('every class the screens emit has a rule in app.css, and app.css names no c
   assert.match(css, /\.key\.no[^{]*\{[^}]*color: var\(--down\)/);
 });
 
-test("the list's search: the box a pill, the results' lines, the match in the warn colours", () => {
-  const html = searchStates(R.nav(R.hostList(emptyState(), { conversations: [conv('s1'), conv('old', { title: 'T old', archived: 'face' })] }), { screen: 'messages', id: 's1' })).map(st => renderRail(st, NOW)).join('');
+test("the side panel's search: the box a pill, the results' lines, the match in the warn colours", () => {
+  const html = searchStates(R.nav(R.hostList(emptyState(), { conversations: [conv('s1'), conv('old', { title: 'T old', archived: 'face' })] }), { screen: 'history', id: null })).map(st => renderRail(st, NOW)).join('');
   for (const c of ['conv-search', 'conv-search-key', 'conv-results', 'conv-results-count', 'conv-hit', 'conv-hit archived', 'conv-hit-line', 'conv-hit-channel', 'conv-results-state', 'sk']) assert.ok(html.includes(`class="${c}"`), c);
   assert.match(html, /<mark>T<\/mark>/);
   assert.match(css, /\.conv-search\s*\{[^}]*height: 36px[^}]*border-radius: var\(--radius-pill\)/);
@@ -271,18 +271,12 @@ test("the operator's attachments in the thread: the column, the right-aligned ro
   assert.match(css, /\.you-thumb img \{[^}]*object-fit: cover/);
 });
 
-test("the pin: the row's wrap, the key in the time's place, the glyph before the time", () => {
-  const html = renderRail(R.hostPins(R.nav(R.hostList(emptyState(), { conversations: [conv('s1'), conv('s2')] }), { screen: 'messages', id: 's1' }), ['s1']), NOW);
-  for (const c of ['row-wrap', 'pin-key', 'row-pin']) assert.ok(html.includes(`class="${c}"`), c);
-  assert.match(css, /\.row-wrap\s*\{[^}]*position: relative/);
-  assert.match(css, /\.row-wrap:hover \.pin-key[^{]*\{[^}]*opacity: 1/);
-  assert.match(css, /\.row-wrap:focus-within \.pin-key/);
-  assert.match(css, /\.row-pin\s*\{[^}]*color: var\(--dim\)/);
-});
-
-test('the time hides under the pin key only on a row that has one; the mobile list has a bounded scroll area', () => {
-  assert.match(css, /\.row-wrap:has\(> \.pin-key\):hover \.row-time/);
-  assert.doesNotMatch(css, /\.row-wrap:hover \.row-time/, 'an archived row, with no key, keeps its time on hover');
+test("the side panel: its rows, a row's note after its title, the strategies' head; no pin or fold rules left; the mobile panel has a bounded scroll area", () => {
+  const channels = [{ workspaceId: 'w0', name: 'workbench', isRoot: true }, { workspaceId: 'w1', name: 'alpha', isRoot: false, status: 'paper' }];
+  const html = renderRail(R.nav(R.tasksLoaded(R.hostList(emptyState(), { conversations: [conv('s1'), conv('s2')], channels }), { conversation: 's1', tasks: [], at: NOW }), { screen: 'messages', id: null }), NOW);
+  for (const c of ['rail-rows', 'row current', 'dot', 'row-body', 'row-top', 'row-title', 'row-note', 'grp-head', 'grp-name']) assert.ok(html.includes(`class="${c}"`), c);
+  assert.match(css, /\.row-note\s*\{[^}]*color: var\(--dim\)[^}]*white-space: nowrap/);
+  for (const gone of ['pin-key', 'row-pin', 'row-wrap', 'grp-key', 'row-preview']) assert.doesNotMatch(css, new RegExp(`\\.${gone}\\b`), gone);
   const narrow = css.match(/@media \(max-width: 860px\) \{\n([\s\S]*?)\n\}/)?.[1] ?? '';
   assert.match(narrow, /\.list-body \{ max-height: min\(42dvh, 360px\)/);
   assert.match(narrow, /\.rail-rows, \.conv-results \{[^}]*overflow-y: auto/);

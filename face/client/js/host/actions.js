@@ -2,7 +2,6 @@
 // Every wire shape here is chat.js's as it stood on main: session/prompt in queue mode with a client-minted requestId
 // and the browser's zone; a slash line to commands/execute first.
 import { randomUuid } from '../wire/api.js';
-import { needsAnswer } from '../messages.js';
 import { said, saidError } from '../i18n/words.js';
 
 // the status line's words for a 401, a said read when drawn
@@ -17,7 +16,7 @@ const zone = () => {
 const clean = text => (typeof text === 'string' ? text.trim() : '');
 
 // activate(sessionId) → Promise<boolean>: the conversation made live before a command runs on it (live.activate)
-export function makeActions({ store, call, answerGate, postJson, requestId = randomUuid, timeZone = zone, activate = async () => true }) {
+export function makeActions({ store, call, answerGate, requestId = randomUuid, timeZone = zone, activate = async () => true }) {
   const say = (line, bad = false) => store.dispatch('hostStatus', { line, bad });
   const fail = (err, what) => say(failLine(err, what), true);
   // the content: the text part when the words are not blank, then the attachments (already parts: an image inline, a file
@@ -144,75 +143,6 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     }
   }
 
-  async function rename(sessionId, title) {
-    const name = clean(title);
-    if (!name) return;
-    try {
-      await call('session/rename', { request: { sessionId, title: name } });
-    } catch (err) {
-      fail(err, said('status.verb.rename'));
-    }
-  }
-
-  // the row actions (spec §7 Stage 3 "Row actions"): fork, archive / un-archive, delete. One fork per source in flight;
-  // archiving waits for a running turn or a waiting card to end, deleting for a running turn
-  const convOf = id => store.get().conversations.find(c => c.id === id);
-  const forking = new Set();
-  async function fork(sessionId) {
-    if (forking.has(sessionId)) return null;
-    forking.add(sessionId);
-    try {
-      const forked = await call('session/fork', { request: { sessionId } });
-      if (typeof forked?.sessionId !== 'string') throw saidError('status.noSessionId', { remote: 'session/fork' });
-      return forked.sessionId;
-    } catch (err) {
-      fail(err, said('status.verb.fork'));
-      return null;
-    } finally {
-      forking.delete(sessionId);
-    }
-  }
-
-  // pin / unpin: the answer is the whole set; a throw leaves the set as it was
-  async function setPin(remote, sessionId) {
-    try {
-      const answer = await call(remote, { request: { sessionId } });
-      if (!Array.isArray(answer?.pinnedSessionIds)) throw new TypeError(remote);   // said as Pin failed below
-      store.dispatch('hostPins', answer.pinnedSessionIds);
-      return true;
-    } catch {
-      say(said('status.pinFailed'), true);
-      return false;
-    }
-  }
-  const pin = sessionId => setPin('workspace/pinSession', sessionId);
-  const unpin = sessionId => setPin('workspace/unpinSession', sessionId);
-
-  async function archive(sessionId, archived) {
-    const c = convOf(sessionId);
-    if (archived && c?.running) { say(said('status.stopFirst'), true); return false; }
-    if (archived && c?.messages.some(needsAnswer)) { say(said('status.answerCardFirst'), true); return false; }
-    try {
-      await postJson('/data/sessions/archive', { sessionId, archived: archived === true });
-      if (archived === true && store.get().pinned?.includes(sessionId)) await unpin(sessionId); // an archived row is never pinned (D7)
-      return true;
-    } catch (err) {
-      fail(err, archived ? said('status.verb.archive') : said('status.verb.unarchive'));
-      return false;
-    }
-  }
-
-  async function remove(sessionId) {
-    if (convOf(sessionId)?.running) { say(said('status.stopFirst'), true); return false; }
-    try {
-      await postJson('/data/sessions/delete', { sessionId });
-      return true;
-    } catch (err) {
-      fail(err, said('status.verb.delete'));
-      return false;
-    }
-  }
-
   // Talk to <bot>: its newest home conversation that is not archived, else a new one in the bot's home with its preset
   async function talkTo(bot) {
     const home = store.get().conversations.filter(c => c.kind === 'bot' && c.preset === bot?.id && !c.archived).sort((a, b) => b.updatedAt - a.updatedAt)[0];
@@ -239,5 +169,5 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     }
   }
 
-  return { send, newConversation, newConversationWith, answer, stop, rename, command, runCommand, fork, archive, pin, unpin, remove, talkTo, stopChild };
+  return { send, newConversation, newConversationWith, answer, stop, command, runCommand, talkTo, stopChild };
 }

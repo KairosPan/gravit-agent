@@ -80,8 +80,11 @@ function host({ rows = [], pages = {}, meta = { ok: true, archived: [], deleted:
 }
 const started = (f, h) => boot(f.win, { editor: valueEditor, openMux: h.openMux, call: h.call, getJson: h.getJson, postJson: h.postJson, markdown: h.markdown });
 const send = f => f.fire('root', 'submit', { target: { closest: () => ({ dataset: { action: 'send' } }) } });
+// a session opened as a link the browser followed (one-entry plan 2: no row action opens one): its old address, which lands on
+// Messages, its task's page or history
+const openSession = (f, id) => { f.win.location.hash = `#/messages/${id}`; f.fire('win', 'hashchange'); };
 
-test('before the host answers, Messages reads Loading… with a connecting status line and no composer; the list then draws rows and opens the conversation', async () => {
+test('before the host answers, Messages reads Loading… with a connecting status line and no composer; the side panel then counts history and opens the conversation', async () => {
   const f = fakeWindow({ hash: '' });
   const h = host({ rows: [row('s1', { projections: { values: { title: 'One' } } }), row('s2', { updatedAt: 9 })] });
   const store = started(f, h);
@@ -89,7 +92,8 @@ test('before the host answers, Messages reads Loading… with a connecting statu
   assert.doesNotMatch(f.html(), /class="composer"/, 'no composer while the tasks load');
   assert.match(f.html(), /status-line" role="status">connecting…</);
   await h.ready();
-  assert.match(f.html(), /row-title">One</);
+  assert.match(f.html(), /class="row current" aria-current="page" href="#\/messages">/);
+  assert.match(f.html(), /href="#\/history"><span class="row-body"><span class="row-top"><span class="row-title">History<\/span><span class="row-note">1</, 'One, the session that is not the conversation');
   assert.deepEqual(store.get().route, { screen: 'messages', id: null });
   assert.equal(store.get().tasks.conversation, 's2', 'the conversation /data/tasks names');
   assert.equal(h.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 's2' && c[1].request.maxMessages === undefined), true, 'the conversation was paged');
@@ -134,7 +138,7 @@ test('clicking a row opens it: the page read happens and its dot clears; the com
   const h = host({ rows: [row('s1', { updatedAt: 50, agentAvailable: true }), row('s2', { updatedAt: 9 })], conversation: 's2' });
   const store = started(f, h);
   await h.ready();
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  openSession(f, 's2');
   await settle();
   assert.deepEqual(store.get().route, { screen: 'messages', id: null }, "the conversation's row is Messages");
   assert.equal(store.get().conversations.find(c => c.id === 's2').lastSeen, 9);
@@ -207,9 +211,9 @@ test('a gate this tab answered stays answered: re-opening its conversation or a 
   approve(f);
   await settle();
   assert.match(f.html(), /class="chip up">Approved</);
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  openSession(f, 's2');
   await settle();
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  openSession(f, 's1');
   await settle();
   snapshot();
   await settle();
@@ -1540,22 +1544,6 @@ test('a session deleted elsewhere reads Not found on its page at the next list, 
   await settle();
   assert.deepEqual(store.get().route, { screen: 'history', id: 's2' });
   assert.match(f.html(), /chan-none dim">Not found</);
-  store.timers.clear();
-});
-
-test('collapsing a group hides its rows and the prefs remember it', async () => {
-  const f = fakeWindow({ hash: '', storage: memoryStorage() });
-  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })] });
-  const store = started(f, h);
-  await h.ready();
-  assert.equal(store.get().tasks.conversation, 's1');
-  assert.match(f.html(), /data-id="s2"/);
-  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleGroup', key: '__ungrouped' } });
-  assert.doesNotMatch(f.html(), /data-id="s2"/, 'the collapsed group hides its other rows');
-  assert.match(f.html(), /data-id="s1"/, 'and keeps the one on screen');
-  assert.deepEqual(JSON.parse(f.win.localStorage.getItem('gravit-ui.prefs')).collapsed, { __ungrouped: true });
-  f.click({ tagName: 'BUTTON', dataset: { action: 'toggleGroup', key: '__ungrouped' } });
-  assert.match(f.html(), /data-id="s2"/);
   store.timers.clear();
 });
 
@@ -3768,12 +3756,12 @@ test('Esc clears the query, then a second Esc leaves the box, before any drawer 
   cq.value = 'mou';
   f.fire('root', 'input', { target: cq });
   assert.equal(store.get().search.query, 'mou');
-  assert.match(f.html(), /class="conv-results"[\s\S]*data-id="s1"/);
-  assert.doesNotMatch(f.html(), /data-id="s2"/);
+  assert.match(f.html(), /class="conv-results"[\s\S]*row-title">Moutai</);
+  assert.doesNotMatch(f.html(), /row-title">Other</);
   f.fire('doc', 'keydown', { key: 'Escape' });
   assert.equal(store.get().search.query, '', 'the first Esc clears the query');
   assert.equal(cq.value, '', 'and the box');
-  assert.match(f.html(), /class="rail-rows"[\s\S]*data-id="s2"/, 'the groups are back');
+  assert.match(f.html(), /class="rail-rows"[\s\S]*href="#\/history"/, 'the rows are back');
   assert.equal(f.doc.activeElement, cq, 'the box keeps focus');
   assert.equal(store.get().settingsOpen, true, 'Settings is still open');
   f.fire('doc', 'keydown', { key: 'Escape' });
@@ -3833,22 +3821,7 @@ test('Esc while an IME composes in the box dismisses the candidate: the query an
   assert.equal(f.doc.activeElement, say);
 });
 
-test('pressing the pin key pins and does not open the conversation', async () => {
-  const f = fakeWindow({ hash: '' });
-  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })] });
-  const store = started(f, h);
-  await h.ready();
-  const before = store.get().route;
-  h.calls.length = 0;
-  f.click({ tagName: 'BUTTON', dataset: { action: 'pin', conv: 's2' } });
-  await settle();
-  assert.ok(h.calls.some(([e, a]) => e === 'workspace/pinSession' && a.request.sessionId === 's2'));
-  assert.deepEqual(store.get().route, before, 'the route did not move');
-  assert.deepEqual(store.get().pinned, ['s2']);
-  store.timers.clear();
-});
-
-// the final review's fixes (plan 2 of the dsh UI port): the scroll boxes a query hides or redraws, the pin key's focus, ⌥⌘K's edges
+// the final review's fixes (plan 2 of the dsh UI port): the scroll boxes a query hides or redraws, ⌥⌘K's edges
 test('the rows keep their scroll for when a query clears; the results keep theirs across a render while the query stands', async () => {
   const f = fakeWindow({ hash: '' });
   const cq = searchBox(f);
@@ -3874,28 +3847,6 @@ test('the rows keep their scroll for when a query clears; the results keep their
   assert.equal(store.get().search.query, '');
   assert.match(f.html(), /class="rail-rows"/);
   assert.equal(rows.scrollTop, 120, 'the groups come back where they stood');
-  store.timers.clear();
-});
-
-test('focus stays on the row\'s pin key through pin and unpin', async () => {
-  const f = fakeWindow({ hash: '' });
-  const say = f.withId('say', { tagName: 'TEXTAREA' });
-  const key = f.withId('pin-s2', { tagName: 'BUTTON', dataset: { action: 'pin', conv: 's2' }, presentIf: /id="pin-s2"/ });
-  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })] });
-  const store = started(f, h);
-  await h.ready();
-  key.focus();
-  f.click(key);
-  await settle();
-  assert.deepEqual(store.get().pinned, ['s2']);
-  assert.match(f.html(), /data-action="unpin" data-conv="s2"[^>]*id="pin-s2"/);
-  assert.equal(f.doc.activeElement, key, 'the row key keeps focus as it turns to Unpin');
-  key.dataset = { action: 'unpin', conv: 's2' };
-  f.click(key);
-  await settle();
-  assert.deepEqual(store.get().pinned, []);
-  assert.equal(f.doc.activeElement, key, 'and back to Pin');
-  assert.notEqual(f.doc.activeElement, say);
   store.timers.clear();
 });
 
@@ -4016,11 +3967,11 @@ test("the conversation's draft survives a visit to a history page, where no comp
   const h = host({ rows: [row('s1', { updatedAt: 50, agentAvailable: true }), row('s2', { updatedAt: 9, agentAvailable: true })], conversation: 's1' });
   const store = await bootComposer(f, h, valueEditor);
   type(f, say, 'for A');
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  openSession(f, 's2');
   await settle();
   assert.deepEqual(store.get().route, { screen: 'history', id: 's2' });
   assert.doesNotMatch(f.html(), /class="composer"/, 'no composer for another session');
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  openSession(f, 's1');
   await settle();
   assert.equal(say.value, 'for A', 'the conversation kept its words');
   send(f);
@@ -4044,10 +3995,10 @@ test('a failed send keeps the whole draft, chips included, under its own convers
   assert.deepEqual(promptsOf(h), [['s1', 'ask @strategies/x.md']], 'the chip serialized');
   const draft = [{ type: 'text', text: 'ask ' }, { type: 'chip', chip: fileChip }];
   assert.deepEqual(writes.at(-1)[1], draft, 'back in the editor');
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  openSession(f, 's2');
   await settle();
   assert.deepEqual(writes.at(-1)[1], [], 'not in another conversation');
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  openSession(f, 's1');
   await settle();
   assert.deepEqual(writes.at(-1)[1], draft, 'under its own');
   store.timers.clear();
@@ -4137,12 +4088,12 @@ test('a render keeps a selection in the editor, and a new draft on screen puts t
   say.setSelectionRange(2, 5);
   store.dispatch('toggleRail');
   assert.deepEqual([say.selectionStart, say.selectionEnd], [2, 5], 'the selection is kept');
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  openSession(f, 's2');
   await settle();
   type(f, say, 'abc');
   say.focus();
   say.setSelectionRange(0, 0);
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  openSession(f, 's1');
   await settle();
   assert.equal(say.value, 'hello world');
   assert.equal(f.doc.activeElement, say);
@@ -4868,7 +4819,7 @@ test('a drop of files on the page adds them to the draft on screen; the overlay 
   f.fire('doc', 'dragover', { target: f.body, dataTransfer: { types: ['Files'] } });
   assert.equal(store.get().dropping, false);
   f.fire('doc', 'drop', { target: f.body, dataTransfer: { types: ['Files'], files: [PNG()], getData: () => '' } });
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  openSession(f, 's1');
   await settle();
   assert.doesNotMatch(f.html(), /chart.png/);
   store.timers.clear();
@@ -4935,7 +4886,7 @@ test('switching conversations mid-upload: the progress and the receipt land in t
   const att = fakeAttachments();
   const store = await bootFiles(f, h, att);
   pick(f, input, [CSV()]);
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  openSession(f, 's2');
   await settle();
   assert.doesNotMatch(f.html(), /prices.csv/, 'B has no files');
   att.uploads[0].onProgress(Math.round(1.1 * MiB));
@@ -4943,7 +4894,7 @@ test('switching conversations mid-upload: the progress and the receipt land in t
   att.uploads[0].answer('rcpt-1');
   await settle();
   assert.doesNotMatch(f.html(), /prices.csv/, "A's receipt lands in A, not on screen");
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  openSession(f, 's1');
   await settle();
   assert.match(f.html(), /file-meta">CSV · 2.8 MB</, 'A shows the file up on return');
   assert.doesNotMatch(f.html(), /file-card uploading/);
@@ -4959,9 +4910,9 @@ test('a draft with files and no words stays when its conversation is left and op
   pick(f, input, [PNG()]);
   type(f, say, 'x');
   type(f, say, '');
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  openSession(f, 's2');
   await settle();
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  openSession(f, 's1');
   await settle();
   assert.match(f.html(), /alt="chart.png"/);
   assert.equal(att.limitReads.length, 1, 'the image limits read once a read succeeds, on the first conversation opened');
@@ -5040,11 +4991,11 @@ test('a failed image-limits read is tried again on the next conversation opened;
   att.readLimits = async id => { att.limitReads.push(id); return answers.shift() ?? true; };
   const store = await bootFiles(f, h, att);
   await settle();
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  openSession(f, 's2');
   await settle();
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's3' } });
+  openSession(f, 's3');
   await settle();
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  openSession(f, 's1');
   await settle();
   assert.deepEqual(att.limitReads, ['s1', 's2']);
   store.timers.clear();
@@ -5467,13 +5418,13 @@ test('a restage that ends off screen says the files are up and the message was n
   type(f, say, 'read it');
   send(f);
   await settle();
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  openSession(f, 's2');
   await settle();
   att.uploads[1].answer('rcpt-2');
   await settle();
   assert.equal(promptsOf(h).length, 1, 'not sent again off screen');
   assert.equal(sayOf(store.get().status.line), 'Files uploaded again; the message was not sent');
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  openSession(f, 's1');
   await settle();
   assert.equal(say.value, 'read it');
   assert.match(f.html(), /prices.csv/);
@@ -5650,7 +5601,7 @@ test('leaving the conversation closes the lightbox', async () => {
   const { f, store, image } = await lightboxRig();
   f.click(image);
   assert.ok(store.get().lightbox);
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  openSession(f, 's2');
   await settle();
   assert.equal(store.get().route.id, 's2');
   assert.equal(store.get().lightbox, null);
@@ -6039,7 +5990,7 @@ test("a task's page opened while the pages load clears the pulse and the jump", 
   f.click({ tagName: 'BUTTON', dataset: { action: 'jumpTurn', turn: '1' } });
   await settle();
   assert.match(rail.innerHTML, /pulse/);
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  openSession(f, 's2');
   await settle();
   h.streams.filter(s => s.name === 'session/follow' && s.args.request.address.sessionId === 's2').at(-1).cbs.onItem({ type: 'snapshot', header: {}, cursor: 9, hasMore: false, records: [said(5)], projections: { asOfSeq: 9, values: {} } });
   await settle();
@@ -6052,7 +6003,7 @@ test("a task's page opened while the pages load clears the pulse and the jump", 
   assert.equal(store.get().conversations.find(c => c.id === 's2').messages.some(m => m.seq === 10), false, 'nor to s2');
   assert.equal(thread.scrollTop, thread.scrollHeight, "s2's thread at its tail");
   // back on s1: the rail starts afresh, no pulse
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  openSession(f, 's1');
   await settle();
   assert.doesNotMatch(f.html(), /pulse/);
   store.timers.clear();
@@ -7247,20 +7198,20 @@ test('reword away from Messages re-lists and opens nothing', async () => {
 });
 
 test('an untitled conversation is drawn in the table standing after reword', async () => {
-  const f = fakeWindow({ hash: '#/messages/s1' });
-  const h = host({ rows: [row('s1')] });
+  const f = fakeWindow({ hash: '#/history' });
+  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })], conversation: 's1' });
   const store = started(f, h);
   await h.ready();
-  assert.match(f.html(), /row-title">Untitled</);
+  assert.match(f.html(), /chan-row-name">Untitled</);
   try {
     setTable({ ...EN, 'list.untitled': 'PROBE-untitled' });
     store.dispatch('hostStatus', { line: 'a render' });
     await settle();
-    assert.match(f.html(), /row-title">Untitled</, 'the title was folded when listed: a render alone keeps it');
+    assert.match(f.html(), /chan-row-name">Untitled</, 'the title was folded when listed: a render alone keeps it');
     store.reword();
     await settle();
-    assert.match(f.html(), /row-title">PROBE-untitled</);
-    assert.doesNotMatch(f.html(), /row-title">Untitled</);
+    assert.match(f.html(), /chan-row-name">PROBE-untitled</);
+    assert.doesNotMatch(f.html(), /chan-row-name">Untitled</);
   } finally {
     setTable(EN);
   }
@@ -7513,11 +7464,11 @@ test('a status line on screen before the switch reads in Chinese after it; a lin
   try {
     const store = started(f, h);
     await h.ready();
-    store.dispatch('hostStatus', { line: wordLine('status.pinFailed'), bad: true });
-    assert.ok(f.html().includes(EN['status.pinFailed']));
+    store.dispatch('hostStatus', { line: wordLine('status.notOpened'), bad: true });
+    assert.ok(f.html().includes(EN['status.notOpened']));
     f.click(langKey('zh'));
-    assert.ok(f.html().includes(ZH['status.pinFailed']));
-    assert.ok(!f.html().includes(EN['status.pinFailed']));
+    assert.ok(f.html().includes(ZH['status.notOpened']));
+    assert.ok(!f.html().includes(EN['status.notOpened']));
     store.dispatch('hostStatus', { line: 'The Account refused: over the cap', bad: true });
     f.click(langKey('en'));
     f.click(langKey('zh'));
@@ -7549,12 +7500,12 @@ test('back to English draws the English bytes again', async () => {
 });
 
 
-test('mobile list opens by its disclosure or search shortcut and folds after opening a conversation, preserving the draft', async () => {
-  const f = fakeWindow({ hash: '#/messages/s1' });
+test('the narrow side panel opens by its disclosure or the search shortcut and folds when a link in it is followed, preserving the draft', async () => {
+  const f = fakeWindow({ hash: '#/messages' });
   f.win.navigator = { platform: 'MacIntel' };
   const cq = searchBox(f);
   const say = f.withId('say', { tagName: 'TEXTAREA' });
-  const h = host({ rows: [row('s1'), row('s2')] });
+  const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })], conversation: 's1' });
   const store = started(f, h);
   await h.ready();
   assert.equal(store.get().listOpen, false);
@@ -7564,19 +7515,22 @@ test('mobile list opens by its disclosure or search shortcut and folds after ope
   assert.equal(store.get().listOpen, true);
   assert.match(f.html(), /data-action="toggleList" aria-expanded="true"/);
   assert.equal(say.value, 'Unsent research question');
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
-  await settle();
-  assert.equal(store.get().listOpen, false, 'choosing even the current conversation folds the list');
+  // the Gravit row, its page already on screen: the browser follows nothing new, the panel folds
+  f.click({ tagName: 'A', dataset: {} });
+  assert.equal(store.get().listOpen, false, 'following even the page on screen folds the panel');
   assert.equal(say.value, 'Unsent research question');
   f.fire('doc', 'keydown', keyK({ metaKey: true }));
   assert.equal(store.get().listOpen, true);
   assert.equal(f.doc.activeElement, cq);
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's2' } });
+  f.win.location.hash = '#/history';
+  f.fire('win', 'hashchange');
   await settle();
-  assert.equal(store.get().listOpen, false);
-  f.click({ tagName: 'A', dataset: { action: 'open', id: 's1' } });
+  assert.equal(store.get().listOpen, false, 'a new page folds it');
+  f.win.location.hash = '#/messages';
+  f.fire('win', 'hashchange');
   await settle();
   assert.equal(say.value, 'Unsent research question');
+  store.timers.clear();
 });
 
 // the rail of tasks (one-entry plan 2 Task 4): a worker's gate counted on the Messages badge wherever the operator is, drawn

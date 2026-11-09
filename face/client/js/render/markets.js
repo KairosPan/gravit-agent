@@ -225,7 +225,7 @@ const keysHtml = (id, watched, trade = null, leverage = null) => `<div class="mk
   `${leverage ? marketKey('leverage', leverage, t('account.key.leverage'), 'btn') : ''}` +
   `<button type="button" class="btn" data-action="handToGravit" data-id="${esc(id)}">${icon('agent', 16, 2)}${th('markets.hand')}</button>` + // words-order: an icon, then its word
   `<button type="button" class="${cls('btn', watched && 'mk-on')}" data-action="toggleWatch" data-id="${esc(id)}" aria-pressed="${watched}">${icon('star', 16, 2)}${watched ? th('markets.tab.watching') : th('markets.head.watch')}</button></div>`; // words-order: an icon, then its word
-const aboutHtml = (conversations, asset, now) => mentionsOf(conversations, asset).map(c => `<a class="mk-line" href="#/messages/${esc(c.id)}" data-action="open" data-id="${esc(c.id)}"><span class="mk-mark">→</span>` +
+const aboutHtml = (conversations, asset, now) => mentionsOf(conversations, asset).map(c => `<a class="mk-line" href="#/messages/${esc(c.id)}"><span class="mk-mark">→</span>` +
   `<div class="mk-line-b"><div class="mk-t1">${esc(maskExcerpt(c.title))}</div>${c.updatedAt ? `<div class="mk-t2">${esc(rowTime(c.updatedAt, now))}</div>` : ''}</div></a>`);
 
 // a part of the page as its read allows (the view's `reads`): Loading… until that read has answered, and once it has failed

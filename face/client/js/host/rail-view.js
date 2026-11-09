@@ -50,3 +50,22 @@ export function railOf(state, now = Date.now()) {
 
 /** The lines waiting on the operator: the Messages badge. */
 export const waitingCount = state => railOf(state).you.length;
+
+// a strategy goes by one name everywhere: its channel's display title (the registry's, the operator's to change), else its name
+export const channelLabel = ch => (typeof ch.title === 'string' && ch.title !== '' ? ch.title : ch.name);
+
+/** The strategies: every channel but the root, by name. */
+export function strategiesOf(state) {
+  return (Array.isArray(state.channels) ? state.channels : [])
+    .filter(ch => !ch.isRoot && typeof ch.name === 'string' && ch.name !== '')
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** History: every session the list holds that is neither the conversation nor one of its tasks, newest first. */
+export function historyOf(state) {
+  const tasks = new Set((state.tasks?.items ?? []).map(task => task.id));
+  const conversation = state.tasks?.conversation ?? null;
+  return (state.conversations ?? [])
+    .filter(c => c.id !== conversation && !tasks.has(c.id))
+    .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+}

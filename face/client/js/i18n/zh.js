@@ -53,24 +53,20 @@ export const ZH = Object.freeze({
   'nav.account': '账户',
   'nav.worthPaper': '{worth} · 模拟',
 
-  // the conversation list (render/rail.js renderList, host/list-view.js, host/sessions.js) and who speaks in it
+  // the side panel beside Messages (render/side.js), the search's channel names (host/search-view.js), a session's
+  // title (host/sessions.js) and who speaks in it
   'list.title': '消息',
   'list.show': '展开对话列表',
   'list.hide': '收起对话列表',
-  'list.pin': '置顶',
-  'list.unpin': '取消置顶',
-  'list.group.expand': '展开 {name}',
-  'list.group.collapse': '收起 {name}',
   'list.archived': '已归档',
-  'list.unarchive': '取消归档',
   'list.desk': '值守台',
   'list.noChannel': '未分频道',
+  'list.strategies': '策略',
   'list.untitled': '未命名',
   'list.you': '你',
   'list.role': '角色 · {name}',
-  'list.preview.from': '{name}：{line}',
 
-  // the list's search (render/rail.js, host/search-view.js)
+  // the side panel's search (render/side.js, host/search-view.js)
   'search.box': '搜索对话',
   'search.searching': '正在搜索所有对话…',
   'search.empty': '没有匹配的对话',
@@ -92,11 +88,6 @@ export const ZH = Object.freeze({
   'status.verb.newMessage': '新建消息',
   'status.verb.answer': '回答',
   'status.verb.stop': '停止',
-  'status.verb.rename': '重命名',
-  'status.verb.fork': '创建分支',
-  'status.verb.archive': '归档',
-  'status.verb.unarchive': '取消归档',
-  'status.verb.delete': '删除',
   'status.verb.talkTo': '发起对话',
   'status.verb.open': '打开',
   'status.verb.earlier': '加载更早的消息',
@@ -128,9 +119,6 @@ export const ZH = Object.freeze({
   'history.none': '历史里还没有内容',
   'history.notFound': '未找到',
   'status.stopped': '已停止。暂停的目标可用 /goal resume 恢复',
-  'status.pinFailed': '置顶失败，请稍后再试。',
-  'status.stopFirst': '请先停止 Gravit',
-  'status.answerCardFirst': '请先处理等待中的卡片',
   'status.stopping': '正在停止 {label}',
   'status.theChild': '子任务',
   'status.followFailed': '实时跟随失败',

@@ -27,7 +27,7 @@ function rig({ answers = {}, posts = {}, convs = [conv('s1')], open = 's1', acti
   const answered = [];
   const answerGate = async (eventId, value) => { answered.push([eventId, value]); if (answers.$answer instanceof Error) throw answers.$answer; };
   const opened = activate ? async id => { calls.push(['activate', id]); return activate(id); } : undefined;
-  const actions = makeActions({ store, call, answerGate, postJson, requestId: () => 'req-1', timeZone: () => 'Asia/Shanghai', activate: opened });
+  const actions = makeActions({ store, call, answerGate, requestId: () => 'req-1', timeZone: () => 'Asia/Shanghai', activate: opened });
   return { store, actions, calls, posted, answered };
 }
 const err = (over) => Object.assign(new Error('boom'), over);
@@ -76,15 +76,11 @@ test('a new conversation is create, rename, prompt in that order, and its id com
   assert.deepEqual(bare.calls[0][1], { request: {} });
 });
 
-test('stop cancels the session and says how a paused goal comes back; rename renames', async () => {
+test('stop cancels the session and says how a paused goal comes back', async () => {
   const r = rig();
   await r.actions.stop('s1');
   assert.deepEqual(r.calls, [['session/cancel', { request: { sessionId: 's1' } }]]);
   assert.equal(sayOf(r.store.get().status.line), 'Stopped. A paused goal resumes with /goal resume');
-  await r.actions.rename('s1', ' New words ');
-  assert.deepEqual(r.calls[1], ['session/rename', { request: { sessionId: 's1', title: 'New words' } }]);
-  await r.actions.rename('s1', '  ');
-  assert.equal(r.calls.length, 2);
 });
 
 test('an answer goes through the mux and marks the card with this tab\'s outcome; a refused answer reaches the status line', async () => {
@@ -121,55 +117,6 @@ test('a 401 says to open the printed URL; a business failure names the host\'s c
   assert.match(sayOf(gone.store.get().status.line), /session\/not-found/);
 });
 
-test('fork returns the new id; a second press while one is in flight sends nothing', async () => {
-  let release;
-  const r = rig({ answers: { 'session/fork': () => new Promise(res => { release = () => res({ sessionId: 's-fork' }); }) } });
-  const first = r.actions.fork('s1');
-  assert.equal(await r.actions.fork('s1'), null, 'the second press is refused while the first is in flight');
-  release();
-  assert.equal(await first, 's-fork');
-  assert.deepEqual(r.calls.filter(c => c[0] === 'session/fork'), [['session/fork', { request: { sessionId: 's1' } }]]);
-  const bad = rig({ answers: { 'session/fork': err({ code: 'session/fork-unavailable' }) } });
-  assert.equal(await bad.actions.fork('s1'), null);
-  assert.equal(sayOf(bad.store.get().status.line), 'fork: session/fork-unavailable');
-});
-
-test('archive and un-archive post the explicit boolean', async () => {
-  const r = rig();
-  assert.equal(await r.actions.archive('s1', true), true);
-  assert.equal(await r.actions.archive('s1', false), true);
-  assert.deepEqual(r.posted, [['/data/sessions/archive', { sessionId: 's1', archived: true }], ['/data/sessions/archive', { sessionId: 's1', archived: false }]]);
-});
-
-test('archive refuses a running conversation or one with a waiting card, without calling', async () => {
-  const card = { id: 'ev-1', seq: 1.5, at: 1, from: 'gravit', kind: 'card', text: 'Your call', data: { eventId: 'ev-1', sessionId: 's1' } };
-  const running = rig({ convs: [conv('s1', { running: true })] });
-  assert.equal(await running.actions.archive('s1', true), false);
-  assert.equal(sayOf(running.store.get().status.line), 'Stop Gravit first');
-  const waiting = rig({ convs: [conv('s1', { messages: [card] })] });
-  assert.equal(await waiting.actions.archive('s1', true), false);
-  assert.equal(sayOf(waiting.store.get().status.line), 'Answer the waiting card first');
-  assert.deepEqual([...running.posted, ...waiting.posted], []);
-});
-
-test('delete posts; a running conversation is refused without calling', async () => {
-  const r = rig();
-  assert.equal(await r.actions.remove('s1'), true);
-  assert.deepEqual(r.posted, [['/data/sessions/delete', { sessionId: 's1' }]]);
-  const busy = rig({ convs: [conv('s1', { running: true })] });
-  assert.equal(await busy.actions.remove('s1'), false);
-  assert.deepEqual(busy.posted, []);
-  assert.equal(sayOf(busy.store.get().status.line), 'Stop Gravit first');
-});
-
-test("a 409 on un-archive puts the route's words on the status line", async () => {
-  const words = 'this session was archived by the host: the face does not un-archive host archives';
-  const r = rig({ posts: { '/data/sessions/archive': err({ status: 409, code: words, message: words }) } });
-  assert.equal(await r.actions.archive('s1', false), false);
-  assert.equal(sayOf(r.store.get().status.line), `un-archive: ${words}`);
-  assert.equal(r.store.get().status.bad, true);
-});
-
 test("talkTo opens the bot's newest open home conversation, else creates one in its home with its preset", async () => {
   const bot = { id: 'buffett', homeCwd: '/r/bots/buffett/home' };
   const convs = [conv('h-old', { kind: 'bot', preset: 'buffett', updatedAt: 3 }), conv('h-new', { kind: 'bot', preset: 'buffett', updatedAt: 9 }), conv('h-arch', { kind: 'bot', preset: 'buffett', updatedAt: 99, archived: 'face' }), conv('s1')];
@@ -191,41 +138,6 @@ test('stopChild sends interruptByParent in continuable mode', async () => {
   const no = rig({ answers: { 'subagents/interruptByParent': err({ code: 'subagent/not-found' }) } });
   assert.equal(await no.actions.stopChild('p', 'c1', 'Check'), false);
   assert.equal(sayOf(no.store.get().status.line), 'stop: subagent/not-found');
-});
-
-test('pin and unpin send their remotes and set the pin set from the answer', async () => {
-  const r = rig({ answers: { 'workspace/pinSession': a => ({ pinnedSessionIds: ['x', a.request.sessionId] }), 'workspace/unpinSession': () => ({ pinnedSessionIds: ['x'] }) } });
-  assert.equal(await r.actions.pin('s1'), true);
-  assert.deepEqual(r.store.get().pinned, ['x', 's1']);
-  assert.equal(await r.actions.unpin('s1'), true);
-  assert.deepEqual(r.store.get().pinned, ['x']);
-  assert.deepEqual(r.calls, [['workspace/pinSession', { request: { sessionId: 's1' } }], ['workspace/unpinSession', { request: { sessionId: 's1' } }]]);
-});
-
-test('a failed pin says so on the status line and changes nothing', async () => {
-  const r = rig({ answers: { 'workspace/pinSession': err({ code: 'x' }) } });
-  r.store.dispatch('hostPins', ['x']);
-  assert.equal(await r.actions.pin('s1'), false);
-  assert.deepEqual(r.store.get().pinned, ['x']);
-  assert.equal(sayOf(r.store.get().status.line), 'Pin failed. Try again later.');
-  assert.equal(r.store.get().status.bad, true);
-});
-
-test('archiving a pinned conversation unpins it after the archive succeeds; a failed archive unpins nothing', async () => {
-  const r = rig({ answers: { 'workspace/unpinSession': () => ({ pinnedSessionIds: [] }) } });
-  r.store.dispatch('hostPins', ['s1']);
-  assert.equal(await r.actions.archive('s1', true), true);
-  assert.deepEqual(r.calls, [['workspace/unpinSession', { request: { sessionId: 's1' } }]]);
-  assert.deepEqual(r.store.get().pinned, []);
-  const bad = rig({ posts: { '/data/sessions/archive': err({ status: 500 }) } });
-  bad.store.dispatch('hostPins', ['s1']);
-  assert.equal(await bad.actions.archive('s1', true), false);
-  assert.deepEqual(bad.calls, []);
-  assert.deepEqual(bad.store.get().pinned, ['s1']);
-  const un = rig();
-  un.store.dispatch('hostPins', ['s1']);
-  await un.actions.archive('s1', false);
-  assert.deepEqual(un.calls, []);
 });
 
 // ---- plan 3 task 8: a command on a cold conversation, runCommand

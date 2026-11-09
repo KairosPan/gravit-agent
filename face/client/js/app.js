@@ -149,7 +149,7 @@ export function readPrefs(storage) {
     return {};
   }
 }
-export const prefsOf = s => ({ theme: s.theme, lang: s.lang, textSize: s.textSize, codeSize: s.codeSize, textFont: s.textFont, codeFont: s.codeFont, railCollapsed: s.railCollapsed, lastConv: s.lastConv, lastSeen: s.lastSeen, collapsed: s.collapsed });
+export const prefsOf = s => ({ theme: s.theme, lang: s.lang, textSize: s.textSize, codeSize: s.codeSize, textFont: s.textFont, codeFont: s.codeFont, railCollapsed: s.railCollapsed, lastSeen: s.lastSeen });
 export function initialState(storage, now = Date.now()) {
   const p = readPrefs(storage);
   const s = emptyState(now);
@@ -162,10 +162,7 @@ export function initialState(storage, now = Date.now()) {
     textFont: cleanFont(p.textFont),
     codeFont: cleanFont(p.codeFont),
     railCollapsed: p.railCollapsed === true,
-    lastConv: typeof p.lastConv === 'string' ? p.lastConv : null,
     lastSeen: p.lastSeen && typeof p.lastSeen === 'object' && !Array.isArray(p.lastSeen) ? p.lastSeen : {},
-    collapsed: p.collapsed && typeof p.collapsed === 'object' && !Array.isArray(p.collapsed)
-      ? Object.fromEntries(Object.entries(p.collapsed).filter(([, v]) => typeof v === 'boolean')) : {},
   };
 }
 // the store never loads a saved state (the host is the state); it writes the prefs on every change
@@ -473,7 +470,7 @@ export function boot(win, host = {}) {
   // timers after a host end or refusal; the open job's output stays there and is written into its pre on each frame
   let outEpoch = -1; // the words' epoch the open job's pre was last written under
   const jobs = host.jobs ?? startJobs({ store, mux: live.mux, call, timers, onOutput: () => writeOutput() });
-  const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson, activate: id => live.activate(id) });
+  const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), activate: id => live.activate(id) });
   // Markets: the market's reads and the Account's connected ones on the app's timers — the A shares' among them — a market's page
   // followed on the stream its line is on; the stars in this browser's storage
   const markets = startMarkets({ store, storage, getJson, win, now, stream, marketStream, schedule, cancelTimer, owner, afterAction });
@@ -1100,11 +1097,6 @@ export function boot(win, host = {}) {
     if (e?.kind === 'roster') void commitRoster(e);
   }
 
-  // a search hit's Un-archive: the face's own archive undone, the list read again
-  async function unarchiveNow(id) {
-    if (await actions.archive(id, false)) await live.refresh();
-  }
-
   // the second press of a two-step confirm
   // Details open (never closed by this) at a section: the next render scrolls it into view; Details open already changes
   // no state, so a render is asked for to carry the scroll
@@ -1647,7 +1639,6 @@ export function boot(win, host = {}) {
   }
 
   const act = {
-    open: el => { store.dispatch('setListOpen', false); go({ screen: 'messages', id: el.dataset.id }); },
     // a channel's page: Retry reads it again
     channelRetry: el => { void channels.overview(el.dataset.id); },
     editRoster: el => { void editRoster(el.dataset.which, el.dataset.id); },
@@ -1666,17 +1657,11 @@ export function boot(win, host = {}) {
     editBot: el => { store.dispatch('startEdit', { kind: 'bot', id: el.dataset.id }); void discover.modelChoices(); },
     toggleRail: () => store.dispatch('toggleRail'),
     toggleList: () => store.dispatch('toggleList'),
-    toggleGroup: el => store.dispatch('toggleGroup', el.dataset.key),
     // inline editors (they replaced prompt): a button starts one, ✓ or Enter commits it, × or Escape cancels it
     commitEdit: () => commitEdit(),
     cancelEdit: () => store.dispatch('cancelEdit'),
     // two-step confirms (they replaced confirm): the first press asks in place, the second acts
     stopGravit: el => store.dispatch('askConfirm', { action: 'stopGravit', id: el.dataset.conv }),
-    // the list's row actions: Pin and Unpin; a search hit's Un-archive (the conversation itself is never renamed, forked,
-    // archived or deleted: one-entry plan 2)
-    pin: el => { void actions.pin(el.dataset.conv); },
-    unpin: el => { void actions.unpin(el.dataset.conv); },
-    unarchive: el => { void unarchiveNow(el.dataset.conv); },
     // the research surfaces: a child stopped by its parent (asked twice), a member's trace read on opening
     stopChild: el => store.dispatch('askConfirm', { action: 'stopChild', id: el.dataset.child, parent: el.dataset.parent, label: el.dataset.label }),
     openTrace: el => { void traces.open(el.dataset.conv, el.dataset.msg); },
@@ -2054,12 +2039,14 @@ export function boot(win, host = {}) {
   };
 
   root.addEventListener('click', ev => {
+    // a row or a hit followed from the side panel folds it on a narrow window, the page it names already on screen too
+    if (ev.target.closest('.list-body a[href]')?.tagName === 'A') store.dispatch('setListOpen', false);
     const el = ev.target.closest('[data-action]');
     if (!el || el.tagName === 'FORM' || el.tagName === 'INPUT' || el.tagName === 'SELECT') return;
     const fn = act[el.dataset.action];
     if (!fn) return;
-    if (el.tagName === 'A' && el.dataset.action !== 'open') return;
-    if (el.tagName === 'A') ev.preventDefault();
+    // a link is the browser's to follow: the route moves on its hashchange
+    if (el.tagName === 'A') return;
     // a disclosure's own key (Trace): its action re-renders the page before the browser would toggle the <details>, so
     // the page toggles it first, where the render's keep-open pass finds it; the action runs on opening only
     if (el.tagName === 'SUMMARY' && el.parentElement?.tagName === 'DETAILS') {

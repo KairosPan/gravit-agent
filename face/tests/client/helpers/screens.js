@@ -1,7 +1,8 @@
 // The screen corpus: every state css.test.js draws, named, so a test can hold each screen to its bytes (words-golden.test.js)
 // or to its classes (css.test.js). Paths below resolve from tests/client/helpers/.
 import { readFileSync } from 'node:fs';
-import { renderRail, renderList } from '../../../client/js/render/rail.js';
+import { renderRail } from '../../../client/js/render/rail.js';
+import { renderSide } from '../../../client/js/render/side.js';
 import { renderMessagesScreen, renderSessionPage, renderHistoryList } from '../../../client/js/render/messages.js';
 import { renderMarketsScreen } from '../../../client/js/render/markets.js';
 import { renderSettings, renderAccountScreen, renderSellMany } from '../../../client/js/render/account.js';
@@ -302,8 +303,8 @@ function runSheetStates(all) {
   ];
 }
 
-// the list's search (plan 2 of the dsh UI port): searching, nothing found, failed, results with a marked snippet, an archived
-// hit with Un-archive and the more-than-twenty line
+// the side panel's search (plan 2 of the dsh UI port): searching, nothing found, failed, results with a marked snippet, an
+// archived hit and the more-than-twenty line
 export function searchStates(s) {
   const q = (q, then) => { const st = R.setSearchQuery(s, q); return then ? then(st, q) : st; };
   return [
@@ -315,7 +316,7 @@ export function searchStates(s) {
 // the states stage 1 can show: loading, a conversation with every kind, a group thinking, Details, the task kinds, Settings, the
 // conversation off and loading, a bad status, the rail folded
 export function everyState() {
-  const base = R.hostList(emptyState(), { conversations: [conv('s1', { messages: KINDS, running: true, usage: { tokenUsage: { outputTokens: 1 }, contextPressure: 0.5 }, stats: { turns: 1, steps: 2, llmMs: 900, toolMs: 0, ttftMs: 300, ttftSteps: 2, decodeMs: 500, decodeTokens: 20 }, created: NOW }), conv('g', { kind: 'group', members: ['gravit', 'buffett'], thinking: 'text', messages: [m('g1', { from: 'buffett', text: 'hold', data: { name: 'Buffett Type', markdown: true, memberSessionId: 'm1', memberTurn: 2 } })] })], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }, { workspaceId: 'w-cn', name: 'cn-market', isRoot: false }], bots: [{ id: 'buffett', name: 'Buffett Type' }] });
+  const base = R.hostList(emptyState(), { conversations: [conv('s1', { messages: KINDS, running: true, usage: { tokenUsage: { outputTokens: 1 }, contextPressure: 0.5 }, stats: { turns: 1, steps: 2, llmMs: 900, toolMs: 0, ttftMs: 300, ttftSteps: 2, decodeMs: 500, decodeTokens: 20 }, created: NOW }), conv('g', { kind: 'group', members: ['gravit', 'buffett'], thinking: 'text', messages: [m('g1', { from: 'buffett', text: 'hold', data: { name: 'Buffett Type', markdown: true, memberSessionId: 'm1', memberTurn: 2 } })] })], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }, { workspaceId: 'w-cn', name: 'cn-market', isRoot: false, status: 'researching' }], bots: [{ id: 'buffett', name: 'Buffett Type' }] });
   const open = onConv(base, 's1');
   return [
     emptyState(), open, lunhuiStates(open), ...stockStates(open), lunhuiStates(open, { 's1-p1': { tile: 'environment', breadth: 'dist' } }), onConv(base, 'g'), R.toggleDetails(open), R.askConfirm(R.toggleDetails(open), { action: 'stopGravit', id: 's1' }),
@@ -324,7 +325,8 @@ export function everyState() {
     taskKindStates(base), R.openSettings(open), R.tasksOff(open, { at: NOW }),
     R.nav(R.hostList(emptyState(), { conversations: base.conversations, channels: base.channels }), { screen: 'messages', id: null }),
     R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open),
-    ...searchStates(R.hostList(open, { conversations: [...open.conversations, conv('old', { title: 'T old', archived: 'face' })] })), R.hostPins(open, ['s1']),
+    ...searchStates(R.hostList(open, { conversations: [...open.conversations, conv('old', { title: 'T old', archived: 'face' })] })), // (where the pinned row stood: one-entry plan 2 Task 6) the side panel beside a strategy's page, Gravit's dot on
+    R.nav(R.hostList(open, { conversations: open.conversations.map(c => (c.id === 's1' ? { ...c, updatedAt: NOW + MIN } : c)) }), { screen: 'strategy', id: 'cn-market' }),
     R.traceLoaded(onConv(base, 'g'), { convId: 'g', msgId: 'g1', messages: [m('tg1', { kind: 'tool', text: 'account', data: { callId: 'g1c', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }) } }), m('tg2', { from: 'system', text: 'context' })] }),
     R.toggleDetails(R.hostList(R.hostProjection(open, { convId: 's1', key: 'subagentCatalog', value: [{ id: 'k1', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'k2', createdAt: 2, mode: 'unknown' }] }), { conversations: open.conversations, childRows: [{ sessionId: 'k1', parentSessionId: 's1', running: true, origin: 'subagent' }] })), ...marketStates(), ...accountStates(), ...channelStates(), ...discoverStates(), ...tradeStates(),
     // the golden is append-only (golden-write.js): a state added later goes after these, so every pinned name keeps its state
@@ -641,11 +643,11 @@ export async function goldenEntries() {
   return [...corpus(), ...await hostCorpus()];
 }
 
-// the corpus, named and in order: every state, again off a Mac when it draws the list (whose search key names the chord), then
+// the corpus, named and in order: every state, again off a Mac when it draws the side panel (whose search key names the chord), then
 // the composer's pieces; the markdown renderer unset, as the screens draw with it
 export function corpus() {
   setMarkdown(null);
-  const states = everyState().flatMap((st, i) => [[`state-${i}`, pageHtml(st)], ...(renderList(st, NOW) ? [[`state-${i}-pc`, pageHtml(st, { mac: false })]] : [])]);
+  const states = everyState().flatMap((st, i) => [[`state-${i}`, pageHtml(st)], ...(renderSide(st, NOW) ? [[`state-${i}-pc`, pageHtml(st, { mac: false })]] : [])]);
   return [...states, ...composerPieces().map(([name, html]) => [`composer-${name}`, html])];
 }
 

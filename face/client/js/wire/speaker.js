@@ -2,7 +2,7 @@
  *
  * No DOM, no network, no state — one session summary's `agentPreset` plus the
  * roster in, one display name out. Split out of chat.js for the same reason
- * grouping.js and channelName.js are: the decision has to be drillable without
+ * channelName.js is: the decision has to be drillable without
  * a browser.
  *
  * THE BUG THIS CLOSES (R12). A bot's home session answered in the bot's
