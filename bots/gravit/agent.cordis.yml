@@ -17,7 +17,7 @@
       # The research cycle
 
       You run research in cycles: one idea, one strategy directory, one cycle, run to its verdict in
-      its channel session, whose cwd is the directory.
+      its task's session, whose cwd is the directory.
 
       Step 0 — ask once. A new strategy starts with ONE batched ask_user_question and no code: the
       thesis in a paragraph; the falsification terms as metric, threshold and window; the paper venue
@@ -26,7 +26,7 @@
 
       Step 1 — open the goal. create_goal with the brief and the verdict criteria as the objective
       and max_goal_rounds 24; it is refused while an incomplete goal exists, so a new idea takes a
-      new channel session. The goal is the cycle's record; active and armed, it re-prompts you at
+      new task. The goal is the cycle's record; active and armed, it re-prompts you at
       idle until you complete or block it. Take goal_id and revision from get_goal. A restart, an
       errored round or a max-tokens one disarms the goal; when the operator asks you to continue, in
       any wording, update_goal with action resume re-arms it. The face's Stop during a round pauses
@@ -64,16 +64,16 @@
         text: |-
           # A 股研究运行
 
-          市场频道 cn-market 与策略频道按下面顺序。工具的 strategy 传所在频道名。
+          市场目录 cn-market 与策略目录按下面顺序。工具的 strategy 传所在目录名。
 
-          ## 市场频道 cn-market
+          ## 市场目录 cn-market
 
           1. 冻结。先调用 lunhui_freeze_index，不带 run：它开一个新运行，回复给出 run。再带 run 调用 lunhui_freeze_limit_up 与 lunhui_freeze_boards；lunhui_freeze_quotes 可选，同样带 run。某来源被拒只缺这个来源；第一次冻结被拒时，拒绝里写明已开启的 run，之后带上它，不再开新运行。
           2. 分析。调用 role_cn_market_analyst 一次，写明 cn-market 与 run；它提交环境、情绪、题材三份工件。
           3. 反证。调用 role_cn_reviewer，写明 cn-market 与 run，不传 market_run。
           4. 核对。调用 lunhui_read_run 读运行清单、证据的 delayed 标记与工件要点。角色报告待核对，以读到的为准。
 
-          ## 策略频道
+          ## 策略目录
 
           1. 找市场运行。对 cn-market 调用 lunhui_read_run，不带 run：列出最近封存的运行。取 session 为当日或前一个交易日的一个，记为 market_run；没有就先做上一节。
           2. 选股。带 run 读它，从 theme.json 的 mainline_candidates 板块成分股与涨停池里选 1–4 只主板个股（sh60xxxx、sz00xxxx）；两者只在 ../cn-market/analysis/<run>/ 的 evidence-boards.json、evidence-limit-up.json 里，用读文件工具读。
@@ -90,24 +90,24 @@
           - 冻结只能由你调用。角色读过上下文后运行即封存，再冻结会被 RUN_SEALED 拒绝；需要新证据就开新运行。
           - 不要手工编辑 analysis/ 下的任何文件。
           - 不要自己提交工件：提交工具只接受角色，你调用会被 NOT_A_ROLE 拒绝。
-          - 运行中有 status 为 NOT_EVALUABLE 的工件时，在本频道 journal.md 末尾追加带日期的一条：运行编号、哪些模块、缺失的来源。
+          - 运行中有 status 为 NOT_EVALUABLE 的工件时，在本目录 journal.md 末尾追加带日期的一条：运行编号、哪些模块、缺失的来源。
 
-          最后：市场频道调用 lunhui_present 作答：一两句结论；按当天轻重选块排序，每块一句标题，可标重点；至多三个追问；数字只取自 lunhui_read_run 的 view 摘要，不要另写报告。策略频道给操作者的消息：leader、反证、mode 要点，哪些模块 NOT_EVALUABLE、缺哪些来源，行情是否 delayed。
+          最后：市场目录调用 lunhui_present 作答：一两句结论；按当天轻重选块排序，每块一句标题，可标重点；至多三个追问；数字只取自 lunhui_read_run 的 view 摘要，不要另写报告。策略目录给操作者的消息：leader、反证、mode 要点，哪些模块 NOT_EVALUABLE、缺哪些来源，行情是否 delayed。
       - name: lunhui:module
         probe: lunhui_read_run
         text: |-
           # 单模块请求
 
-          面从模块卡发来的消息写明：模块、频道、运行（已有运行或开新运行），策略模块还有 market_run 与可选代码。只做这一个模块，其余照 lunhui:run。
+          面从模块卡发来的消息写明：模块、目录、运行（已有运行或开新运行），策略模块还有 market_run 与可选代码。只做这一个模块，其余照 lunhui:run。
 
           - cn-market 的 environment、sentiment、theme 调 role_cn_market_analyst，任务说明点名只写哪个模块；它没点名时会写三份。
           - 开新运行（cn-market）：先按 lunhui:run 第 1 步冻结整套——运行一被角色读过即封存，不先冻整套，别的卡就不能再用它；再调角色只写所请求的模块。
           - 已有运行：不再冻结，直接调角色。
           - leader 开新运行：先调用 lunhui_freeze_quotes 开运行（代码用消息给的，没给就按 lunhui:run 第 2 步自选 1–4 只），再调 role_cn_stock_analyst 只写 leader。
-          - counterevidence 只在已有接受的 leader（策略频道）或至少一份市场工件（cn-market）的运行上调 role_cn_reviewer。
+          - counterevidence 只在已有接受的 leader（策略目录）或至少一份市场工件（cn-market）的运行上调 role_cn_reviewer。
           - mode 只在 leader 与反证都被接受后调 role_cn_stock_analyst；反证在 mode 之前，两者不并行。
           - 只写请求的模块，不补其余；被 ALREADY_SUBMITTED、STALE_MARKET_RUN、MISSING_EVIDENCE 拒绝时如实回报并结束，不换运行、不自行开新的市场运行、不改结论。
-          - 最后：cn-market 的 environment、sentiment、theme、counterevidence 调用 lunhui_present 作答并写明 module；leader、mode 与策略频道只报模块要点、是否 NOT_EVALUABLE 及缺哪些来源、行情是否 delayed。
+          - 最后：cn-market 的 environment、sentiment、theme、counterevidence 调用 lunhui_present 作答并写明 module；leader、mode 与策略目录只报模块要点、是否 NOT_EVALUABLE 及缺哪些来源、行情是否 delayed。
 - id: role-cn-market-analyst
   name: ../../face/plugins/role.mjs
   config:

@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { CYCLE_MAX_BYTES, CYCLE_PATH, DESK_MAX_BYTES, DESK_PATH, ROUTER_MAX_BYTES, readCycle, readDesk, readRouter } from "../src/cycle.ts";
 import { ROLES_ROOT, readRoles } from "../src/roles.ts";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { PERSONA_PATH } from "../src/persona.ts";
+import { LUNHUI_MODULE_PATH, LUNHUI_RUN_PATH } from "../src/protocols.ts";
 
 test("the shipped cycle.md reads, fits its budget, and carries the six steps and the cap", () => {
   const text = readCycle(CYCLE_PATH);
@@ -188,4 +192,23 @@ test("readDesk refuses missing, empty and oversized files with the path first", 
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+/** One entry's plan 4 task 6: the router starts a bot's task by naming `bot`, and a debate is an ordinary task whose
+ * worker hosts the bots with dispatch - the router itself has neither dispatch nor an agent tool. */
+test("router.md names bot tasks and debates", () => {
+  const text = readRouter();
+  assert.ok(Buffer.byteLength(text, "utf8") <= ROUTER_MAX_BYTES);
+  assert.ok(text.includes("`bot`"), "task_start's bot field");
+  assert.ok(text.includes("dispatch"), "the worker hosts a debate with dispatch");
+  assert.ok(/debate/i.test(text), "a debate is named");
+});
+
+/** Since one entry's plan 4 there are no channels and no rooms: no prompt any agent reads names them. */
+test("no prompt names channels", () => {
+  const repo = (path: string) => fileURLToPath(new URL(`../../${path}`, import.meta.url));
+  const files = [repo("GRAVIT.md"), PERSONA_PATH, CYCLE_PATH, DESK_PATH, LUNHUI_RUN_PATH, LUNHUI_MODULE_PATH,
+    ...readRoles(ROLES_ROOT).map((role) => join(ROLES_ROOT, role.id, "ROLE.md")), repo("bots/news-scout/SOUL.md")];
+  for (const file of files) assert.doesNotMatch(readFileSync(file, "utf8"), /channel|频道/i, file);
+  assert.doesNotMatch(readRouter(), /channel|频道/i, "router.md");
 });

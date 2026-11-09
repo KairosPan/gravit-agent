@@ -29,22 +29,21 @@ a truncated result is not the whole market). Retrieval time is not exchange time
 ## A strategy directory
 
 Lifecycle, in `status.yaml`: `idea | researching | validated | paper | retired` (`paper`: a
-forward paper trade is running on the Account). Three optional headline keys the channel page
+forward paper trade is running on the Account). Three optional headline keys the strategy page
 renders, none required: `one_line` (the current conclusion, one sentence), `next` (the next
 step), `numbers` (free figures as a mapping of scalar values). Name a strategy as the face
-names channels: a letter or digit in any script first, then letters, digits, `-` and `_`, at
+names strategies: a letter or digit in any script first, then letters, digits, `-` and `_`, at
 most 41 code points, no spaces or dots — the name becomes a path typed into shell by hand, and
 zsh's `cd x y` exits 0 in the wrong directory when the substituted path exists.
 Commit your own iterations between cycles; a cycle commits once, with its verdict, or leaves
 the commit to the operator. git log is the audit trail.
-`analysis/<run>/` holds frozen A-share research runs the Lunhui rows write; never edit them by hand, and `strategies/cn-market/` is the market read's channel.
+`analysis/<run>/` holds frozen A-share research runs the Lunhui rows write; never edit them by hand, and `strategies/cn-market/` is the market read's directory.
 After a Lunhui market run, answer with `lunhui_present`, and answer follow-ups about that run the same way; every number you write comes from `lunhui_read_run`'s view digest.
 
-## Rooms
+## Debates
 
-A channel whose roster has bots is a room; Gravit organizes it with `dispatch`. Caps per
-operator message: 3 rounds, 10 bot messages, 2 peer continuations per round. The operator's
-`@<bot>` reaches a voice directly; an `@` naming nobody on the roster is a plain prompt to Gravit.
+A task's worker hosts bots from the operator's one roster with `dispatch`; each is a read-only
+member. Caps per operator message: 3 rounds, 10 bot messages, 2 peer continuations per round.
 
 ## The Account seat
 

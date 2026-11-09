@@ -77,7 +77,7 @@ const SYMBOLS = ["sh600519", "sz000333"];
 /** The run protocol (`dsh/profile/lunhui-run.md`, the `lunhui:run` section), read from the file: its first line and its strategy channel. */
 const PROTOCOL = readProtocol(LUNHUI_RUN_PATH);
 const RUN_HEADING = PROTOCOL.split("\n")[0];
-const STRATEGY_CHANNEL = PROTOCOL.includes("## 策略频道") ? PROTOCOL.slice(PROTOCOL.indexOf("## 策略频道"), PROTOCOL.indexOf("\n## ", PROTOCOL.indexOf("## 策略频道") + 1)).trim() : null;
+const STRATEGY_CHANNEL = PROTOCOL.includes("## 策略目录") ? PROTOCOL.slice(PROTOCOL.indexOf("## 策略目录"), PROTOCOL.indexOf("\n## ", PROTOCOL.indexOf("## 策略目录") + 1)).trim() : null;
 
 const sourceKind = (m: { source?: unknown }) => ((m.source ?? {}) as { kind?: string }).kind;
 const textOf = (m: GenerateOptions["messages"][number]) => m.content.map((b) => "text" in b ? b.text : "").join("\n");

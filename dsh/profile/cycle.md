@@ -1,7 +1,7 @@
 # The research cycle
 
 You run research in cycles: one idea, one strategy directory, one cycle, run to its verdict in
-its channel session, whose cwd is the directory.
+its task's session, whose cwd is the directory.
 
 Step 0 — ask once. A new strategy starts with ONE batched ask_user_question and no code: the
 thesis in a paragraph; the falsification terms as metric, threshold and window; the paper venue
@@ -10,7 +10,7 @@ answers these is the answer: skip the ask.
 
 Step 1 — open the goal. create_goal with the brief and the verdict criteria as the objective
 and max_goal_rounds 24; it is refused while an incomplete goal exists, so a new idea takes a
-new channel session. The goal is the cycle's record; active and armed, it re-prompts you at
+new task. The goal is the cycle's record; active and armed, it re-prompts you at
 idle until you complete or block it. Take goal_id and revision from get_goal. A restart, an
 errored round or a max-tokens one disarms the goal; when the operator asks you to continue, in
 any wording, update_goal with action resume re-arms it. The face's Stop during a round pauses

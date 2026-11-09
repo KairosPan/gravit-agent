@@ -1,15 +1,15 @@
 # A 股研究运行
 
-市场频道 cn-market 与策略频道按下面顺序。工具的 strategy 传所在频道名。
+市场目录 cn-market 与策略目录按下面顺序。工具的 strategy 传所在目录名。
 
-## 市场频道 cn-market
+## 市场目录 cn-market
 
 1. 冻结。先调用 lunhui_freeze_index，不带 run：它开一个新运行，回复给出 run。再带 run 调用 lunhui_freeze_limit_up 与 lunhui_freeze_boards；lunhui_freeze_quotes 可选，同样带 run。某来源被拒只缺这个来源；第一次冻结被拒时，拒绝里写明已开启的 run，之后带上它，不再开新运行。
 2. 分析。调用 role_cn_market_analyst 一次，写明 cn-market 与 run；它提交环境、情绪、题材三份工件。
 3. 反证。调用 role_cn_reviewer，写明 cn-market 与 run，不传 market_run。
 4. 核对。调用 lunhui_read_run 读运行清单、证据的 delayed 标记与工件要点。角色报告待核对，以读到的为准。
 
-## 策略频道
+## 策略目录
 
 1. 找市场运行。对 cn-market 调用 lunhui_read_run，不带 run：列出最近封存的运行。取 session 为当日或前一个交易日的一个，记为 market_run；没有就先做上一节。
 2. 选股。带 run 读它，从 theme.json 的 mainline_candidates 板块成分股与涨停池里选 1–4 只主板个股（sh60xxxx、sz00xxxx）；两者只在 ../cn-market/analysis/<run>/ 的 evidence-boards.json、evidence-limit-up.json 里，用读文件工具读。
@@ -26,6 +26,6 @@ WAIT、NOT_EVALUABLE 工件与被拒的 mode 都是结果，不是失败：不�
 - 冻结只能由你调用。角色读过上下文后运行即封存，再冻结会被 RUN_SEALED 拒绝；需要新证据就开新运行。
 - 不要手工编辑 analysis/ 下的任何文件。
 - 不要自己提交工件：提交工具只接受角色，你调用会被 NOT_A_ROLE 拒绝。
-- 运行中有 status 为 NOT_EVALUABLE 的工件时，在本频道 journal.md 末尾追加带日期的一条：运行编号、哪些模块、缺失的来源。
+- 运行中有 status 为 NOT_EVALUABLE 的工件时，在本目录 journal.md 末尾追加带日期的一条：运行编号、哪些模块、缺失的来源。
 
-最后：市场频道调用 lunhui_present 作答：一两句结论；按当天轻重选块排序，每块一句标题，可标重点；至多三个追问；数字只取自 lunhui_read_run 的 view 摘要，不要另写报告。策略频道给操作者的消息：leader、反证、mode 要点，哪些模块 NOT_EVALUABLE、缺哪些来源，行情是否 delayed。
+最后：市场目录调用 lunhui_present 作答：一两句结论；按当天轻重选块排序，每块一句标题，可标重点；至多三个追问；数字只取自 lunhui_read_run 的 view 摘要，不要另写报告。策略目录给操作者的消息：leader、反证、mode 要点，哪些模块 NOT_EVALUABLE、缺哪些来源，行情是否 delayed。

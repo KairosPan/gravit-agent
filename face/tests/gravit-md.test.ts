@@ -59,3 +59,12 @@ test("GRAVIT.md reads a PDF with Poppler and hands a layout page to a shipped ro
   const shipped = readRoles(ROLES_ROOT).map((role) => role.tool);
   for (const tool of named) assert.ok(shipped.includes(tool), `${tool} is a shipped role's tool`);
 });
+
+/* One entry's plan 4 task 6: no rooms - a task's worker hosts bots from the one roster with dispatch, read-only. */
+test("GRAVIT.md states debates, not rooms", () => {
+  const text = readFileSync(GRAVIT_MD, "utf8");
+  assert.ok(text.includes("## Debates") && !text.includes("## Rooms"), "the section is Debates");
+  assert.match(text, /`dispatch`/);
+  assert.match(text, /read-only/);
+  assert.equal(text.includes("@<bot>"), false, "the operator's @ in a room has no surface left");
+});

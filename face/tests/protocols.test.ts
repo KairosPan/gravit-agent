@@ -21,7 +21,7 @@ test("the shipped lunhui-run.md reads, fits its budget, and states the cn-market
   const text = readProtocol(LUNHUI_RUN_PATH);
   assert.equal(text.includes("{{"), false);
   assert.ok(/[一-鿿]/.test(text), "the protocol is Chinese");
-  const market = text.slice(0, text.indexOf("## 策略频道"));
+  const market = text.slice(0, text.indexOf("## 策略目录"));
   const at = (name: string) => market.indexOf(name);
   for (const name of ["lunhui_freeze_index", "lunhui_freeze_limit_up", "lunhui_freeze_boards", "lunhui_freeze_quotes", "role_cn_market_analyst", "role_cn_reviewer", "lunhui_read_run"]) assert.ok(at(name) >= 0, `names ${name}`);
   assert.ok(at("lunhui_freeze_index") < at("lunhui_freeze_limit_up") && at("lunhui_freeze_limit_up") < at("role_cn_market_analyst")
@@ -42,7 +42,7 @@ test("the shipped lunhui-run.md reads, fits its budget, and states the cn-market
  * until its leader is accepted - so no "a sealed run cannot be re-anchored" reason. */
 test("lunhui-run.md states the strategy channel's order after the cn-market one", () => {
   const text = readProtocol(LUNHUI_RUN_PATH);
-  const strategy = text.indexOf("## 策略频道");
+  const strategy = text.indexOf("## 策略目录");
   assert.ok(strategy > text.indexOf("role_cn_reviewer"), "the strategy channel follows the market one");
   const part = text.slice(strategy, text.indexOf("## 规则"));
   const at = (word: string, from = 0) => part.indexOf(word, from);
