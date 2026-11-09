@@ -403,7 +403,8 @@ All three of its stages are built:
   `/permission` and `/feedback` are not listed. Choosing a command that takes no arguments runs it
   at once (a cold conversation is opened first; its answer reaches the status line); a skill or a
   command that takes arguments becomes `/name ` in the draft. `@` anywhere opens **Bots in this
-  room** (a channel conversation's roster), **Files and folders** (`GET /data/files`; Tab on a
+  room** (a channel conversation's roster — drawn only on a conversation in a channel, which since
+  one entry's plan 2 no live one is), **Files and folders** (`GET /data/files`; Tab on a
   folder walks into it) and **Conversations** (eight, this channel's first, with their age). ↑ ↓
   move, Enter or Tab chooses, Esc closes and keeps the draft; letters typed filter in order,
   prefixes first. A choice is a chip: a bot sends as `@<id>`, a file as its path (relative to the
@@ -489,8 +490,8 @@ All three of its stages are built:
   since 2026-10-22 ("Markets and Account" and "The Account in the face" below), the A shares
   included since 2026-11-01. The old `/market` and `/account` pages are gone (404);
 - **host-fed since stage 3**: a channel's page (since one entry's plan 2 a strategy's,
-  `#/strategy/<name>`: its status, thesis, an old strategy's backtests, journal, files, its agent
-  and bot rosters with their editors, its tasks and its paper positions), Discover
+  `#/strategy/<name>`: its status, thesis, an old strategy's backtests, journal, files, its tasks
+  and its paper positions; its roster editors left with one entry's plan 4), Discover
   (`#/discover`, the inventory of what Gravit runs — "Discover" below), no tool
   call drawn (not in the thread, not in a member's Trace), a conversation's subagent children
   ("Temporary subagents" below) and a room member's trace. There is no shop, no Mail and no
@@ -3094,8 +3095,9 @@ no shell, no write, no order.
 **Where it is.** Since plan 2 the conversation is **Messages**: open the face and you are in it
 (the head reads `Gravit`), with the **rail of tasks** on its right — `Tasks under way` (在办的事),
 grouped `Waiting on you`, `Running`, `Done today`. Each task is a **worker**, a root `gravit`
-session in `strategies/<name>/` (or the repository root when no strategy is named), titled by the
-task; it is one line on the rail — its state's dot, its title, its short status (`Needs your
+session in `strategies/<name>/` (or the repository root when no strategy is named) — or, since
+plan 4, a **bot task**: the bot's own preset in `bots/<id>/journal` ("Bots" below) —, titled by the
+task; it is one line on the rail — its state's dot, a bot task's bot, its title, its short status (`Needs your
 approval`, `3 steps · 4 min`, `Done 14:02`, `Stalled`) — and opens in place: its strategy, its last
 steps, its result or its open gate, its tokens, and its keys. A worker's order card or question is
 answered **on its line**, whatever screen you are on: the Messages badge counts the lines waiting on
@@ -3251,18 +3253,18 @@ session's: that half is "The desk drill" P1.
 
 ## Channels (src/channels.ts + src/roster.ts + a strategy's page)
 
-A channel is one directory, given an identity by the host and a roster by the
-operator. Since one entry's plan 2 the operator no longer picks one: the browser
-has no channel list, no New message and no Where, and a channel's page is a
-strategy's read-only page (below); the face, the registry and the rosters still
-keep every channel as this section describes, and a worker runs in its
-strategy's directory. Three layers, split by who may write them:
+A channel is one directory, given an identity by the host. Since one entry's plan 2 the
+operator no longer picks one: the browser has no channel list, no New message and no Where,
+and a channel's page is a strategy's read-only page (below); the face and the registry still
+keep every channel as this section describes, and a worker runs in its strategy's directory.
+Since plan 4 a channel has no roster of its own: the roster is one list for the whole face
+(below). The layers, split by who may write them:
 
 | Layer | Lives in | Writer |
 |---|---|---|
 | **Body** (content) | `strategies/<dir>/`, or the repo root | Gravit, freely |
 | **Identity** (container) | the dsh workspace registry (`~/.dsh/storages/workspace.json`) | host-owned, only through the registry — the host's `workspace/*` Remotes, and the face's reconcile calling it in-process |
-| **Roster** (runtime) | `$DSH_HOME/face/channels.json` — `agents[]` (local CLIs Gravit may call) and `bots[]` (the voices a room may dispatch) | the operator, on the channel page |
+| **Roster** (runtime; since plan 4 the whole face's, not a channel's) | `$DSH_HOME/face/channels.json` — `agents[]` (local CLIs Gravit may call) and `bots[]` (the bots a bot task may run on and a debate may dispatch) | the operator, with Discover's **Available to Gravit** switches |
 
 The directory is the truth of existence, not the registry: `listChannelDirs`
 (`src/channels.ts`) walks `strategies/*`, skipping `_template` and any name
@@ -3276,12 +3278,8 @@ returns the existing title unchanged — so a channel Gravit makes with a plain
 listing — both the `GET` that feeds the side panel's strategies and History's
 strategy names and the `POST` that feeds a strategy's page — and is idempotent by construction: `create`
 is a no-op past its first call, `attachSession` early-outs on membership
-before validating anything, and seeding a roster (`seedRoster`) is a no-op
-once the channel has one. A steady-state listing performs no writes at all.
-Because it CAN write on a `GET`, `channels.json`'s two writers — the
-reconcile's seed and the operator's roster edit — both go through
-`withFileLock` + `writeFileAtomic`, reading the file *inside* the lock, so a
-list refresh racing an operator's save cannot silently revert it. A
+before validating anything. A steady-state listing performs no writes at all,
+and since plan 4 it seeds no roster: it never writes `channels.json`. A
 workspace whose directory has vanished is reported (`missingDir`), never
 deleted; its sessions stay attached and reachable (the gravit-ui client lists
 such a channel like any other, its sessions in History, and its page reads empty).
@@ -3295,7 +3293,7 @@ Delete). All of that left the client: a session is now the conversation, one of
 its tasks (on the rail) or History (`#/history`, read cold and read-only: the
 title, the strategy its channel names, when, a one-line preview). Nothing in
 the browser creates, renames, forks, pins, archives, un-archives or deletes a
-session. The face's routes behind them stay (`POST /data/channels`,
+session. The face's routes behind them stay (`POST /data/channels` until plan 4,
 `/data/sessions/archive`, `/data/sessions/delete`, `GET /data/sessions-meta.json`;
 the session list still hides tombstoned ids and marks the archived — the
 UNION of the face's own `archived.json` and the host's one-way
@@ -3328,16 +3326,16 @@ writes its own `strategies/<name>/` freely, and anything outside (the repo's
 channel session is an approval the operator answers — accepted trade,
 2026-09-01.
 
-Four routes feed all of this, every one behind the same `isTrustedDataRequest`
+Two routes feed all of this since plan 4, both behind the same `isTrustedDataRequest`
 fence as `/data` everywhere else — read "the honest limits" below before
-treating that fence as authentication:
+treating that fence as authentication (`POST /data/channels/agents`,
+`POST /data/channels/bots` and `POST /data/channels`, the new channel, left
+with plan 4; the one roster's routes are below):
 
 | Route | What |
 |---|---|
 | `GET /data/channels.json` | the reconciled list, the `ungrouped` bucket, the archive set |
 | `POST /data/channels/overview` | one channel's page payload — `{workspaceId}` in |
-| `POST /data/channels/agents` | the operator's roster write — `{workspaceId, agents}` in |
-| `POST /data/channels` | create — `{name}`, copies `strategies/_template`, then reconciles; answers `{name, dir, isRoot}` (no workspace id — the client finds the new channel by its `dir` in the next listing) |
 
 **A strategy's page** (`client/js/render/strategy.js`, `#/strategy/<name>`; the
 channel's page at `#/channel/<workspaceId>` until plan 2 — an old link of that
@@ -3353,12 +3351,8 @@ twelve of its top-level scalar fields — the whole file stays in the channel's
 directory) and **Backtests** (file and size), both only for an old strategy
 that carries a `backtests/` directory — nothing writes one since 2026-10-24;
 **Journal** (`journal.md`'s `- YYYY-MM-DD:` lines, the newest twenty); **Files** (one level of the directory,
-`__pycache__` filtered: name, size, date); **Agents** and **Bots** — the
-channel's rosters, each with **Edit**: a box per choice (the connected CLI
-agents that answered on this machine; every bot but Gravit's own composition),
-ticked as rostered, a rostered one no longer offered kept to untick, at most six
-bots; ✓ saves through the roster routes and re-reads the page — the roster
-editors stay here until plan 4's one roster; **Tasks** — the rail's lines whose
+`__pycache__` filtered: name, size, date) — the **Agents** and **Bots** roster editors left
+with plan 4's one roster —; **Tasks** — the rail's lines whose
 task names this strategy, each with its Stop and Continue and its gate
 answerable on the line, as on the rail (read-only means no composer, not keyless
 task lines); and **Paper positions** at the venue `status.yaml` names in its
@@ -3371,26 +3365,41 @@ unknown name reads `Strategy not found`. Everything on the page was written into
 the channel's directory and is drawn as text (the thesis through the DOM-built
 markdown), never as markup.
 
-**The roster**, `$DSH_HOME/face/channels.json` (`src/roster.ts`), keyed by
-workspace id so a directory rename never loses it:
-`{"version":1,"channels":{"<workspaceId>":{"agents":["codex"]}}}`. A newly
-adopted channel is seeded from whichever agents are connected at that
-moment — there is no "absent means everything" rule; a channel's roster is a
-definite, visible set at every moment. The enforcement point is
-`agent_<bin>`'s own `execute` (`agentToolDefinition`, `src/agents.ts`): it
-reads the calling session's cwd, resolves its channel, and on a miss THROWS —
-naming the channel and its current roster verbatim. The tool pipeline
+**The roster** (since one entry's plan 4 one roster for the whole face),
+`$DSH_HOME/face/channels.json` (`src/roster.ts`, `src/roster-routes.ts`). It
+keeps its old name so an operator who repaired it by hand finds it where it
+always was: `{"version":2,"agents":["codex"],"bots":["drill-bull"]}`. At every
+boot `ensureRoster` makes sure it exists: a version-1 file (the per-channel
+rosters, `{"version":1,"channels":{"<workspaceId>":{"agents":[…],"bots":[…]}}}`)
+becomes the union of its channels' lists — a bot or agent on any channel's
+roster is on the one roster — its old text first written beside it as
+`channels.v1.json` (never overwritten); an absent file is seeded with the
+connected CLI agents and no bots; a file the face does not understand —
+unparseable text, a non-object, a version other than 1 or 2, a v1 file whose
+`channels` is not an object, a hand-written file with no `version` — is left
+byte for byte, one stderr line says `roster: unreadable, every agent and bot
+refused`, and everything it would allow is refused until you repair it by hand.
+There is no "absent means everything" rule; the roster is a definite, visible
+set at every moment. You edit it in Discover, one switch at a time
+(`POST /data/roster`, below); every write is a read-modify-write inside the
+file lock, queued in the face first, so two switches flipped at once land in
+the order you flipped them. The enforcement points are `agent_<bin>`'s own
+`execute` (`agentToolDefinition`, `src/agents.ts`), `dispatch` and a bot
+task's start: each reads the one roster, whatever the calling session's
+folder, and on a miss THROWS — naming what is available. The tool pipeline
 (`dsh-tools`) catches a thrown `execute` and turns it into an `isError` result
 carrying that message, so what Gravit actually sees is a tool result, never a
 crash — but the mechanism there is a thrown `Error`, not a returned value.
 That refusal message IS the roster's contract; it is deliberately not written
 into the channel's own `GRAVIT.md`, which is Gravit-writable and would drift
-from the operator-owned file. A channel with no roster entry yet (created
-straight through the registry, before a listing has seeded it) reads as "no
-roster yet" and refuses; an unparseable `channels.json` reads as "no rosters"
-and refuses every call — fail CLOSED, *within a resolved channel*. What
-happens when there is no channel to resolve in the first place is honest
-limit 2, below.
+from the operator-owned file. A roster file that cannot be read, or is
+missing, refuses every agent call, dispatch and bot task with a message naming
+`channels.json` — fail CLOSED, from every session.
+
+| Route | What |
+|---|---|
+| `GET /data/roster.json` | `{ok: true, agents, bots}`, or `{ok: false, corrupt: true}` (status 200) for a file the face cannot read and for no file at all — after boot an absent file means `ensureRoster` failed |
+| `POST /data/roster` | `{kind: "agent" \| "bot", id, on}` → `{ok: true, agents, bots}` as written; 400 a bad `kind`, an `id` that is not a 1–64 character string, an `on` that is not boolean, or a bot id outside the grammar; 409 an absent or unreadable file, named, never written over; each landed switch one dated `available <kind> <id> = on\|off` line in `$DSH_HOME/face/roster.log` |
 
 **Deleting a channel** needs no new route and no button: remove the
 directory (Gravit's own write map, or the operator's shell), then call the
@@ -3412,29 +3421,18 @@ down this file:
 1. **dsh tool registration is tree-wide.** There is no per-session scoping
    seam — `tools.register` (`registerTool` in `panelDeps`, `src/panels.ts`)
    publishes one flat name per bin (`agent_<bin>`, `toolNameFor` at
-   `src/agents.ts:84`) that every session sees. A non-member agent's SCHEMA is
-   still visible in every channel; only the call is refused.
-2. **The roster check only runs inside a resolved channel — a session in NO
-   channel is not roster-checked at all.** `agent_<bin>`'s `execute` reads
-   `const channel = await deps.channelFor(cwd)` and gates the entire roster
-   read behind `if (channel !== null)` (`src/agents.ts:469-470`); when
-   `channel` is `null` there is no `else`, and control falls straight through
-   to `runAgentRecipe` — every connected agent callable, unconditionally. This
-   is deliberate, not an oversight: `channelFor`'s own comment says "the
-   caller fails open either way" (`panelDeps`, `src/panels.ts`), because there
-   is no roster to consult and tools are registered tree-wide regardless of
-   channel. It is also cheap to reach, not a rare edge case: the old chat page's
-   **`choose a local folder…`** row created a session straight from a raw
-   `cwd`, never a `workspaceId` (`showStrategyPicker`; the gravit-ui client's New message
-   offered channels only until one entry's plan 2 retired it, and a create with no channel lands in
-   the host's default directory, which no channel claims either), so
-   such a session resolves to no channel and is never roster-checked; a channel directory
-   that exists on disk but has not yet been through a reconcile lands in the
-   same place.
+   `src/agents.ts:84`) that every session sees. An agent off the roster still
+   has its SCHEMA visible in every session; only the call is refused.
+2. **Closed since one entry's plan 4: every session is checked.** Until plan 4
+   the check ran only inside a resolved channel, and a session in no channel —
+   one created from a raw folder, or a channel directory not yet reconciled —
+   fell straight through to the spawn, every connected agent callable. Now
+   `execute` reads the one roster for every calling session; nothing resolves a
+   channel, so nothing fails open.
 3. **Gravit has a shell.** One shell turn can invoke `claude` directly. This
    roster is a MENU, not a fence — it reduces noise and states intent; it
    does not contain.
-4. **One un-escalated shell turn can `curl` `POST /data/channels/agents` —
+4. **One un-escalated shell turn can `curl` `POST /data/roster` (before plan 4 `POST /data/channels/agents`) —
    no approval card, no git diff, no session event.** The sandbox confines
    FILE effects only: the emitted Seatbelt profile is `(allow default) (deny
    file-write*)` plus write allow-lists (`seatbeltProfileArgs`,
@@ -3459,10 +3457,10 @@ down this file:
    writes `$DSH_HOME/face/agents.json` and registers a tool live by the same
    path, and predates this design entirely. **The mitigation is visibility,
    not prevention**: a roster write appends a dated line to a durable face log,
-   `$DSH_HOME/face/roster.log` (`src/roster.ts`'s `logRosterWrite`, called
-   from the `POST /data/channels/agents` handler in `src/channels.ts`), naming
-   the workspace, the resulting agent list and an ISO timestamp, so a change
-   is SEEN even though it cannot be stopped. Building a token for `/data`
+   `$DSH_HOME/face/roster.log` (`src/roster.ts`'s `logAvailable`, called from
+   the `POST /data/roster` handler in `src/roster-routes.ts`), naming the kind,
+   the id, `on` or `off` and an ISO timestamp, so a change is SEEN even though
+   it cannot be stopped. Building a token for `/data`
    would be new face security machinery against the charter's §7.4; dsh now
    ships one for `/api`, and putting `/data` behind it too is D8's open
    alternative. Recording this is what Rule 3 actually asks for instead.
@@ -3568,7 +3566,7 @@ convenience.
   connected agent the face has a recipe for is registered in the dsh tree as
   a tool, `agent_<bin>` (`ctx.tools.register`, synced at boot and after every
   roster write, disposed on disconnect), so **Gravit calls it from any
-  channel that offers it on its roster** (see "Channels" above) —
+  session while it is on the one roster** (see "Channels" above) —
   `agent_claude(prompt, resume?)`. The tool spawns the
   operator's own UNMODIFIED CLI as a child in the calling session's directory
   (`exec.agent.session.header.cwd` — the strategy's workspace), forwards the
@@ -3604,6 +3602,15 @@ convenience.
   tokens, so it stays a directory entry until its provider is pinned.
   The **Bots** shelf indexes the operator's own voices, one directory each under `bots/`, and
   Discover's head carries **Create a bot** (see "Bots" below).
+- **Available to Gravit** (since one entry's plan 4) — the one roster's switch, on the page of
+  every bot (before **Edit**; the default, Gravit's own composition, has none) and of every
+  connected CLI agent (before **Disconnect**). Pressed, it reads as the roster says; pressing it
+  posts `{kind, id, on}` to `POST /data/roster`, the flip of what the page last read, and redraws
+  from the answer. A refusal lands on Discover's line (`Available to Gravit: <reason>`) and the
+  switch stays as it was. Until the roster is read the switches are disabled; a roster file the
+  face cannot read disables them and puts `The roster file cannot be read; repair channels.json in
+  the harness home.` at the top of the page. A bot off the roster cannot be a task or a debate's
+  voice; an agent off it cannot be called.
 - **Skills** — the wire's `skills/list` is addressed by a session and carries no SKILL.md body
   or pack, so two face routes read `ctx.skills` in-process: `GET /data/memory.json` (grouped by
   pack — the directory under `dsh/skills/`, mechanics first) and `POST /data/memory/skill`
@@ -3628,12 +3635,12 @@ Fetch-Metadata `cross-site`, and a present `Origin` that matches the Host —
 and, unlike `/api`, behind nothing else: no browser cookie (D8). Every `/data` POST
 additionally requires `application/json` (415 otherwise), so a cross-site
 page cannot reach a side-effectful route with a "simple" request that needs
-no preflight. The roster's connect/disconnect are the only writes to face
-state (its own metadata file); an agent tool spawns that agent's own CLI
+no preflight. The local agents' connect/disconnect and the Available to Gravit
+switch are Discover's only writes to face state (`agents.json`, `channels.json`); an agent tool spawns that agent's own CLI
 with a fixed argv and writes nothing durable of its own — a Codex call gets a
 `mkdtemp` scratch directory under the OS tmpdir for `-o`, read once and
 removed when the run ends. `panelDeps` fails loud at boot when
-`skills`/`tools`/`loader`/`workspaceRegistry`/`agents` are missing from the
+`skills`/`tools`/`loader`/`agents` are missing from the
 tree — a dead shelf with nothing on stderr is the failure mode it exists to
 prevent.
 
@@ -3779,9 +3786,9 @@ prompt is a strict template with no escape, and both write paths (`rejectSoul`, 
 in) and the plugin itself (`validateBotConfig`, at mount) refuse it.
 
 **A bot's home** is a session created with `cwd = bots/<id>/journal` and `agentPreset = <id>`;
-the host's own `session/create` mounts the preset (no in-process agent creation). Since one
+the host's own `session/create` mounted the preset (no in-process agent creation). Since one
 entry's plan 2 the browser has no **Talk to <bot>**: a bot's home sessions are read in History,
-read-only, and talking to a bot comes back as plan 4's bot tasks. A home session carries the bot's
+read-only, and since plan 4 a bot is reached as a **bot task** (below). A home session carries the bot's
 letter, from the session's preset, which
 0.2.0's `session/list` rows no longer carry: `client/js/wire/summaries.js` `summaryOf` restores it
 from the row's `agentPreset` projection first, then from `/data/channels.json`'s `presets`
@@ -3806,7 +3813,10 @@ that button. A bot's `provider/model` seeds its home session's first request wit
 the host default; subsequent requests inherit their own logged model, and a saved route the
 tree does not serve fails that first request (`Bot model <route> is unavailable. Update the
 saved route and start a new conversation.`). Room model
-selection stays with the room engine. The face seeds through its own prompt-assembly and
+selection stays with the room engine. A bot task takes no saved route: the seed is a home
+session's only (no `parentSession`, in the bot's home folder), and a bot task's worker names the
+conversation as its parent, so it runs on the workers' model route — a known gap, as for every
+worker (`DEVELOPMENT.md` R111). The face seeds through its own prompt-assembly and
 request hooks, never through dsh's `session/selectModel`, whose default save persists nothing
 in this tree anyway (D2). A model selected over the wire (`session/selectModel`) before a
 bot's first request is superseded by that bot's saved initial route; the face has no such
@@ -3823,14 +3833,15 @@ The saved revision and startup revision are diagnostics, not claims that every p
 request is frozen. Resuming after a host restart mounts the bot's current declaration.
 
 **Journal context** (`src/bot-journal.ts`). Before every bot request, the runtime reads that
-bot's own `journal/notes.md`, in both home and room sessions. It is a separate `bot-journal`
+bot's own `journal/notes.md`, in every session on the bot's preset — its tasks, its debate member
+turns and its home sessions. It is a separate `bot-journal`
 context section, not part of SOUL: historical notes to check against current evidence, not
 new instructions. Reads are bounded to 12 KiB, reject symlinks, and report missing, empty or
 unavailable notes without blocking the request. Inspection shows the status, content revision
 and truncation flag. dsh 0.2.0 persists the assembled context as a runtime-context snapshot —
 a `user/message` whose source is `{kind: 'runtime-context', form: 'snapshot', sections}` —
 with a `bot-journal` section. An edited journal refreshes on the next request; this hook
-neither writes notes nor retrieves other channels' conversations.
+neither writes notes nor retrieves other conversations.
 
 | Route | What |
 |---|---|
@@ -3857,10 +3868,23 @@ session that has not started its first turn to another preset (`agent-preset/loc
 after). The face offers neither in its UI, and the room's `dispatch` refuses a session whose
 header OR `agentPreset` projection names a bot.
 
-**A bot in a room** — dispatched by Gravit, addressed by the operator's `@`, its answers in the
-room's transcript in its own voice — is the "Rooms" section below. What is still not built (spec
-§11, on purpose): bot-to-bot messaging outside a room, cross-channel conversation retrieval,
-automatic journal writing, a delete button, a channel-scoped 1:1 with a bot.
+**A bot task** (since one entry's plan 4). Switch the bot on in Discover (**Available to
+Gravit**), then ask Gravit — "让 news-scout 看看今天的新闻". The conversation calls `task_start`
+with `bot`: the face checks, before any session exists, that the task names no strategy as well
+(`a task is a bot or a strategy, not both`) and that the bot is on the one roster, a bot id (never
+`gravit`, `kairos`, `gravit-desk`, `gravit-router` or a `role-` preset), listed and not broken —
+else `no bot available named <id>; available: <…> | none` — then creates the worker with
+`agentPreset = <id>` in `bots/<id>/journal` (made when missing), so its journal grows where a home
+session's did. It runs with the bot's persona, mask and journal context; `task_report` sits on the
+worker's own layer, past the mask, so it reports like any worker; the rail's line names the bot
+before the title; Stop, Continue, a steer and a restart's recovery resume it on the bot's preset,
+never on Gravit's. A roster file that cannot be read, or is missing, refuses every bot task naming
+`channels.json`.
+
+**A bot in a debate** — dispatched by a task's worker, its answers in that worker's transcript in
+its own voice — is the "Debates" section below. What is still not built (spec §11, on purpose):
+bot-to-bot messaging outside a debate, cross-conversation retrieval, automatic journal writing, a
+delete button, a direct 1:1 with a bot (a bot is reached through Gravit).
 
 ## Roles (roles/ + src/roles.ts + plugins/role.mjs + plugins/gravit.js)
 
@@ -4022,28 +4046,39 @@ host's tools; `role-plugin.test.ts` pins the role tool offline; "The role drill"
 the live check, and the live market and strategy runs ("Lunhui analysis") the first that each
 role meets.
 
-## Rooms (src/room.ts + src/room-rules.ts + src/room-contract.ts + src/room-projection.ts + client/js/wire/room.js)
+## Debates (src/room.ts + src/room-rules.ts + src/room-contract.ts + src/room-projection.ts + client/js/wire/room.js)
 
-A room is an ordinary channel session whose agent is Gravit and which has **members**: one
-session per bot the channel rosters, created lazily the first time that bot is named. Nothing
-is created to make a session a room. The operator checks bots into a channel on its page
-("bots in this channel", `POST /data/channels/bots`, at most six — `ROOM_CAPS.maxMembers`); the
-roster stays a menu, not a fence (the channels section's honest limits apply verbatim).
+A **debate** (a room until one entry's plan 4; the engine and its code keep the word) is a task
+whose brief names the bots and their question: ask Gravit for one, and the conversation starts a
+task — no field of its own — whose worker, Gravit on `gravit` in its strategy's directory or at the
+repository root, hosts them. The conversation itself never dispatches: `dispatch` refuses any
+session whose preset is not `gravit` (or the `kairos` alias), so a bot, the desk and the
+conversation's `gravit-router` are all refused. The room is keyed by the calling session — the
+worker — and has **members**: one session per bot, created lazily the first time that bot is
+named, in the worker's folder, joining no workspace. Nothing is created to make a session a room,
+and no channel is needed. The bots it may name are the one roster's ("Channels" above; at most six
+members, `ROOM_CAPS.maxMembers`); the roster stays a menu, not a fence (the channels section's
+honest limits apply verbatim).
 
 **Gravit organizes the room through one tool, `dispatch`** (`to`, `mode` parallel or serial,
 `brief`, `reason`). It is registered globally on the root context (`installRoom` in `main.ts`),
 so it is in Gravit's roster; every bot's allow-list mask excludes it without naming it. The
-call validates `to` against the channel's bot roster (the refusal names the roster), starts
+call validates `to` against the one roster (the refusal names the bots it offers and ends `The
+operator turns bots on in Discover.`; a roster file that cannot be read or is missing refuses every
+dispatch, naming `channels.json`), starts
 the round, and returns at once — the result text names who was called, how, **who was not
-called**, and tells the model to end its turn. Gravit is woken once per round, by a
-`followup` that names who answered and who passed.
+called**, and tells the model to end its turn. The worker is woken once per round, by a
+`followup` that names who answered and who passed, and its `task_report` carries the conclusion
+into the conversation. A bot switched off in Discover is refused at the next `dispatch` naming
+it; a member mid-turn finishes, and within that round a peer's `@` continuation can still pull it
+in once.
 
 The brief accepts the existing string or an object with `question` and optional `context`,
 `evidence` requirements, `falsification` terms and desired `output`. `src/room-contract.ts`
 validates and formats both forms; the tool schema prefers the object for research questions.
 
 **A member session** is created in-process by the engine (`ctx.agents.create`) with the
-channel directory as `cwd`, `parentSession` = the room, `agentPreset` = the bot, the bot's
+worker's folder as `cwd` (`placeFor`, `RoomPlace`), `parentSession` = the room, `agentPreset` = the bot, the bot's
 `preset.yml` `model:` when the tree serves it (else the default, with a line in the dispatch
 result), and — inside the same creation `setup`, before the session is published — the
 **`read-only`** permission preset: a bot in a room does not write files, by sandbox mode, not
@@ -4104,8 +4139,10 @@ A member whose model fails is `failed` and counts as a pass; the round continues
 turns finish and land, nothing further starts) — three words for three facts. Every operator
 send resets the caps.
 
-**The operator's `@`** is deterministic and never passes through Gravit: the composer sends a
-text containing `(^|\s)@` to `POST /data/rooms/say`, which resolves mentions against the roster
+**The operator's `@`** has had no surface since one entry's plan 2: the composer sends only to
+the one conversation, which is in no channel, and plan 4 adds none — you steer a debate through
+Gravit. The route stays, as it was: deterministic and never passing through Gravit, it took a
+text containing `(^|\s)@` at `POST /data/rooms/say`, which resolves mentions against the roster
 by id (by display name only when it is one token), appends the message to the room as the
 operator's own (`kind: 'user'`, `mention: [...]`) without waking Gravit, and turns each named
 member — one mid-turn is queued behind that turn, never refused. A text that names nobody comes
@@ -4117,7 +4154,8 @@ room messages the 0.2 migration refuses - the file stays on disk untouched`.
 `POST /data/rooms/state` answers the roster, the members the engine drove this boot, and the
 caps left.
 
-**The client.** A member's answer renders as a bubble in the bot's own voice — its display name
+**The client** — wherever the host session's transcript is drawn: a debate task's page, or
+History for a room from before plan 4. A member's answer renders as a bubble in the bot's own voice — its display name
 over it and its letter — never as a context row (`client/js/wire/room.js`, `mapper.js`,
 `client/js/host/kinds.js`): the room's `displayText` when the answer has one (the prose of a
 structured answer, its valid JSON fence kept out), else its text, through the same markdown hook
@@ -4136,8 +4174,9 @@ then the history paged back as needed, never a follow — so it does not resume 
 member; it draws the turn's context lines and words — never a tool call — with `Loading…`, the
 loader's words or `No steps` (`client/js/host/traces.js` over `client/js/wire/member-traces.js`). Membership still
 follows the header: `parentSessionId` set, no `origin`, a bot preset, the parent running the host.
-A pending gate in a room counts toward the rail's Messages badge (the conversations with a card
-waiting on you).
+Since one entry's plan 2 the Messages badge counts only the rail's waiting lines, and a debate's
+member is no task (its parent is the worker, not the conversation), so a member's pending gate
+badges nothing (`DEVELOPMENT.md` R111).
 
 **The honest limits, in the register of the channels section.** Dispatch grants nothing and the
 mask is visibility; a member's write fence is its sandbox mode, its order fence is Gate 2,
@@ -4146,7 +4185,7 @@ Four voices on one model will tend to converge (R3); parallel first answers are 
 not a cure. Dispatch is Gravit's judgment (R2): it may under- or over-call; the "not called"
 clause and the operator's `@` are the answer. A member's pending gate with no client connected
 blocks until the hard cap (R6). A bot can read its own shared journal, but does not retrieve
-other channels' conversations or automatically maintain those notes (R5 remains partial).
+other conversations or automatically maintain those notes (R5 remains partial).
 
 **A member session dsh 0.2 cannot open** — one written under 0.1.1 — fails only that
 member's turn, recorded `failed` with the reason `<bot>'s member session <id> is unreadable
@@ -4160,9 +4199,8 @@ the voice's memory (upgrade decision D11).
 
 | Route | What |
 |---|---|
-| `POST /data/channels/bots` | `{workspaceId, bots[]}` — the channel's bot roster, at most six ids; 400 a bad id or over the cap, 404 no such channel, 409 a corrupt roster file; a dated `bots` line to `roster.log` |
-| `POST /data/rooms/say` | `{sessionId, text}` → `{addressed: [...]}`; 400 a bad id or empty text, 404 not in a channel or no such session, 409 a corrupt roster or a room dsh cannot resume (dsh's code and message) |
-| `POST /data/rooms/state` | `{sessionId}` → `{roster, members, caps, round?}`; never resumes a session |
+| `POST /data/rooms/say` | `{sessionId, text}` → `{addressed: [...]}`; 400 a bad id or empty text, 404 a session whose header has no folder or no such session, 409 a roster that cannot be read or is missing, or a room dsh cannot resume (dsh's code and message); no client calls it |
+| `POST /data/rooms/state` | `{sessionId}` → `{roster, members, caps, round?}`, `roster` the one roster's bots (an unreadable roster read as none); never resumes a session |
 
 ## Temporary subagents (client/js/wire/subagents.js + client/js/host/children-view.js)
 
@@ -4348,7 +4386,7 @@ refusal; an answered or closed gate shows its end state as a chip and no keys. A
 opened (a Trace) stays open across the page's renders. The old chat page's
 closed **思考轨迹** disclosure (`client/answer-traces.js`, deleted) folded context, thinking and
 tool calls under every answer; on the gravit-ui client the thread draws no
-tool call, a room member's answer has its **Trace** ("Rooms" above), and there is no `think` row
+tool call, a room member's answer has its **Trace** ("Debates" above), and there is no `think` row
 (the reasoning text the mapper carries is not drawn).
 
 An ok `lunhui_present` call is the one tool call that draws, as Gravit's **composed answer**
@@ -4698,7 +4736,7 @@ keeps every one of the 14 that way — nothing here rewrites an operator log:
   subagent child) is refused, the status line shows the host's error, and
   nothing is drawn or written.
 - `POST /data/rooms/say` into a legacy room answers 409 with dsh's code and
-  message and the legacy hint ("Rooms", above).
+  message and the legacy hint ("Debates", above).
 - A legacy MEMBER session fails only that member's turn; the round goes on.
 - Delete still works on them: the face reads the header itself.
 
@@ -5150,11 +5188,11 @@ are the runbook's §7 A, on a copy of the real home.
 A mask never pulled is presumed decorative.
 
 **On the gravit-ui client** the bot pages are on Discover: **Create a bot** on its head, a bot's
-page (model, home, soul, skills, setup issues) with **Edit** (Talk to and the list's bot group
-left with one entry's plan 2, so the steps that talk to a bot wait for plan 4's bot tasks). The
-steps below were written on the old chat page:
-read "agent face → bots → `+ new bot`" as Discover → Create a bot, its settings page as the bot
-page's Edit, "New test conversation" as Talk to, and "the sidebar" as the list.
+page (model, home, soul, skills, setup issues) with **Available to Gravit** and **Edit** (Talk to
+and the list's bot group left with one entry's plan 2; since plan 4 a bot is reached as a bot task,
+and the one-roster steps below replace steps 3 and 6, which talked to a bot directly). Steps 1–7
+were written on the old chat page: read "agent face → bots → `+ new bot`" as Discover → Create a
+bot and its settings page as the bot page's Edit.
 
 **Step 0, no model, no key.** `FACE_SMOKE=1 npm test` boots isolated real trees.
 `bots-smoke.test.ts` proves the face declares every bot directory and never `_template`, that
@@ -5197,6 +5235,44 @@ cache headers.
 7. Clean up: `git rm -r bots/<id>` (or keep it — it is yours). The running face keeps the
    declaration until its next restart.
 
+**The one-roster steps** (one entry's plan 4; keyed — the face started with its DeepSeek key, on
+the tracked fixtures `drill-bull` (看多派) and `drill-bear` (看空派); owed, not yet run). Step 0
+for them: `FACE_SMOKE=1 npm test` boots `router-smoke.test.ts`'s bot task (a scratch bot on the
+roster, `task_start` with `bot`: the worker on its preset in `bots/<id>/journal`, `task_report` in
+its tools and `dispatch` and `bash` not, its report relayed, `bot` in the task list) and
+`room-smoke.test.ts` and `room-discussion-smoke.test.ts` on the one roster.
+
+8. **Switch a bot on.** At the first boot of a plan-4 face the stdout says `roster: migrated v1`
+   (your per-channel rosters, folded into one; `channels.v1.json` beside `channels.json` holds the
+   old text) or `roster: seeded`. Discover → Bots → `drill-bull`'s page → **Available to Gravit**,
+   then the same on `drill-bear`'s. PASS, part eight: each switch reads pressed; `channels.json`
+   reads `{"version":2,…,"bots":[…"drill-bull","drill-bear"]}`; `$DSH_HOME/face/roster.log` gained
+   `available bot drill-bull = on` and `available bot drill-bear = on`, dated. A connected CLI agent's
+   page carries the same switch beside Disconnect.
+9. **Ask Gravit for a bot task.** In Messages: `让 drill-bull 看看 NVDA 现在值不值得买，记进它的日志`.
+   PASS, part nine: one rail line under Running, `drill-bull` before its title; its page (View the
+   full process) shows the worker answering in 看多派's persona, its folder `bots/drill-bull/journal`;
+   its report comes back into the conversation as a `Task · <title> · <status>` line; `GET
+   /data/tasks` carries `"bot": "drill-bull"` on that task. Ask for a bot that is off
+   (`让 news-scout 看看今天的新闻` with news-scout switched off): Gravit says the face refused it,
+   naming the bots available, and no line appears.
+10. **Ask for a debate.** `开一个辩论：drill-bull 和 drill-bear 谈谈 NVDA 现在值不值得买，在 room-drill 里`.
+    PASS, part ten: one task, Gravit's (no bot before its title), in `strategies/room-drill`; its page
+    shows the worker's `dispatch`, both answers as bubbles in the bots' voices, the round line, the
+    worker's synthesis naming the disagreements, and its report relayed into the conversation; the
+    two member sessions are `read-only` and their folder is `strategies/room-drill`.
+11. **Switch a bot off, and see the next dispatch refused.** Switch `drill-bear` off in Discover
+    (`available bot drill-bear = off` in `roster.log`), then tell Gravit to have that debate ask both
+    voices once more. PASS, part eleven: the worker's next `dispatch` naming `drill-bear` is refused —
+    `drill-bear is not on the roster. It currently offers: drill-bull. The operator turns bots on in
+    Discover.` — and the worker goes on with `drill-bull` alone or reports the refusal. Switch it on
+    again to leave the fixtures as they were.
+12. **An unreadable roster.** Stop the face, copy `channels.json` aside, write `{` into it, start the
+    face. PASS, part twelve: stderr says `roster: unreadable, every agent and bot refused`; Discover's
+    switches are disabled under `The roster file cannot be read; repair channels.json in the harness
+    home.`; a bot task Gravit tries is refused naming `channels.json`; the file is still `{`. Put the
+    copy back and restart.
+
 **Drilled and PASSED 2026-09-07 and again 2026-09-08** on the operator's own face (real
 `$DSH_HOME`, the Alpaca MCP server of the time connected; `main` @ `b6dbce0` the second time).
 Second run: `Growth Momentum Scout` folded to `growth-momentum-scout`; six files; the restart's boot line
@@ -5213,15 +5289,16 @@ step 6 included — is still owed** (go-live runbook).
 
 A room whose strip never moved is presumed decorative.
 
-**On the gravit-ui client** a channel's page checks voices in (Bots → **Edit**, the boxes
-standing for the old page's chips) and a member's answer opens its **Trace**; the participants
-strip and the discussion card are not drawn, so the steps that watch them do not apply. What
-holds: a room's members in the head cluster and Details, an `@` through `/data/rooms/say`, a
-member's answer in the bot's voice, the round end as a line, a member's question on the room in
-the bot's name.
+**Since one entry's plan 4** a room is a debate task's (above, "Debates"): bots are checked in
+by Discover's **Available to Gravit**, a round starts when you ask Gravit for a debate, and the
+operator's `@` has no surface — so steps 1, 4, 5's `@`, 7 and 9 do not apply as written, and the
+bots drill's steps 8–11 are the live run of a debate. Step 0 holds on the one roster, and steps 2,
+3, 6 and 8 hold on the debate task's page in place of the channel conversation. Before plan 4 (on
+the gravit-ui client) a channel's page checked voices in (Bots → **Edit**) and a member's answer
+opened its **Trace**; the participants strip and the discussion card are not drawn.
 
 **Step 0, no model, no key.** `FACE_SMOKE=1 npm test` boots `room-smoke.test.ts`: a stub model
-route, three bots in a temp channel, one operator prompt → Gravit dispatches all three in
+route, three bots on the one roster and a room in a temp strategy folder, one operator prompt → Gravit dispatches all three in
 parallel → alpha answers, beta passes, gamma's model fails → the answer is on the room log before
 the round-end wake, the wake is one turn, Gravit's synthesis is in it; every member is parented,
 preset-joined, `read-only` as its first event (and its only permission pin before its first
@@ -5375,7 +5452,7 @@ Account). Open the printed `?token=` URL and hard-reload.
     takes no images. Remove the image, or run Gravit on a model that does.` sits above the box in
     the down colour and the whole draft stays; paste the image again and the line shows at once,
     nothing sent. Remove the image: the line goes.
-11. **The same image on deepseek-flash.** *(Plan 4's: skip until then — Talk to a bot left with one entry's plan 2.)*
+11. **The same image on deepseek-flash.** *(Skip: Talk to a bot left with one entry's plan 2, and plan 4's bot task runs on the workers' model route, not the bot's saved one — `DEVELOPMENT.md` R111.)*
     Create a scratch bot whose model is
     `deepseek-official/deepseek-flash` (Discover › Create), Talk to it, and paste the same image
     with a line asking what it shows. PASS: the message is accepted and the image drawn above your
