@@ -444,14 +444,20 @@ test("a turn the operator opened stops being the operator's once a task message 
   const { sessionId } = await handle.ensure();
   startTurn(tree.bus, sessionId, 1, { kind: "user", rpcId: "r1" });
   assert.equal(handle.operatorTurn(), true);
-  /* the desk's state note, dsh's working-directory notice and its runtime-context snapshot change nothing; a browser
-   * steer neither */
+  /* the desk's state note and dsh's own context - the working-directory notice, the runtime-context snapshot, the
+   * agent-instructions context, the model-selection notice - change nothing; a browser steer neither; a task message
+   * after them still does */
   tree.bus.emit(sessionId, "user/message", { id: "d1", role: "user", content: [], source: { kind: "desk", form: "state" } });
   tree.bus.emit(sessionId, "user/message", { id: "w1", role: "user", content: [], source: { kind: "working-directory" } });
   assert.equal(handle.operatorTurn(), true, "the desk's note and the working-directory notice");
   /* dsh-agent-loop's runtime-context snapshot, logged after the operator's message in every turn (task 8's real boot) */
   tree.bus.emit(sessionId, "user/message", { id: "c1", role: "user", content: [], source: { kind: "runtime-context" } });
   assert.equal(handle.operatorTurn(), true, "the runtime-context snapshot");
+  /* dsh's instruction context and its model-change notice are the harness's, not a speaker's */
+  tree.bus.emit(sessionId, "user/message", { id: "i1", role: "user", content: [], source: { kind: "agent-instructions", form: "instructions" } });
+  assert.equal(handle.operatorTurn(), true, "the agent-instructions context");
+  tree.bus.emit(sessionId, "user/message", { id: "m1", role: "user", content: [], source: { kind: "model-selection", form: "notice" } });
+  assert.equal(handle.operatorTurn(), true, "the model-selection notice");
   tree.bus.emit(sessionId, "user/message", { id: "u2", role: "user", content: [], source: { kind: "user", rpcId: "r2" } });
   assert.equal(handle.operatorTurn(), true);
   tree.bus.emit(sessionId, "user/message", { id: "t1", role: "user", content: [], source: { kind: "task", form: "report", task: "session-w" } });

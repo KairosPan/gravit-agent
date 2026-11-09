@@ -178,9 +178,12 @@ const workers = (f: Face) => f.booted.ctx.agents.list().filter((a) => a.session.
 
 test("a boot opens the conversation on gravit-router in <home>/face/conversation, and session/list shows it", { skip, timeout: 120_000 }, async () => {
   home = await mkdtemp(join(tmpdir(), "face-router-home-"));
-  root = await realpath(await mkdtemp(join(tmpdir(), "face-router-root-")));
+  made.push(home);
+  const rawRoot = await mkdtemp(join(tmpdir(), "face-router-root-"));
+  made.push(rawRoot);
+  root = await realpath(rawRoot);
   bots = await makeBotsRoot();
-  made.push(home, root, bots);
+  made.push(bots);
   await mkdir(join(root, ".git"));
   await mkdir(join(root, "strategies", "fx"), { recursive: true });
   setupFaceProfile(home);
