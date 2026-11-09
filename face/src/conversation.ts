@@ -39,15 +39,19 @@
  * phone that asked for the task (its brief's `origin`, src/task-view.ts `briefOrigin`); every other turn - the
  * browser's, a web task's report - sends nothing. Deliveries go in turn order. Still no `desk-turn` is written.
  *
- * A RESTART (plan 3). The phone's `/stop` ({@link ConversationHandle.stop}) cuts the turn under way and keeps the queue
- * behind it (src/desk-session.ts `cancelKeepingQueue`). dsh's teardown clears the inbox, so at dispose the phone texts
- * still waiting on it - at most {@link CARRY_MAX}, each cut at {@link CARRY_TEXT_MAX} characters - are one `desk-carry`
- * in the ledger, as the desk's are (src/desk-conversation.ts WHAT A GRACEFUL STOP CARRIED); the first time the
- * conversation is open again, every carry no `desk-carried` names is posted again, oldest first, each text as a phone
- * post with its own key - one the log already holds is skipped - its provenance line saying `(carried over a
- * restart)`; a refused post (the pause, the fence) stops the carrying for a later boot, with one line. A crash leaves
- * the inbox's durable projection instead: a resumed conversation sends its phone texts again, as it does its task
- * messages.
+ * A RESTART (plan 3). The phone's `/stop` ({@link ConversationHandle.stop}) cuts the work under way and keeps the queue
+ * behind it (src/desk-session.ts `cancelKeepingQueue`). dsh's teardown clears the inbox, so at dispose the phone's part
+ * is one `desk-carry` in the ledger, as the desk's is (src/desk-conversation.ts WHAT A GRACEFUL STOP CARRIED): the
+ * phone texts dsh claimed for the open turn and has not logged (`deps.onClaimed`), then those waiting on the inbox - at
+ * most {@link CARRY_MAX}, each cut at {@link CARRY_TEXT_MAX} characters - and, when the open turn holds a phone text,
+ * that turn as the carry's `cut`. {@link ConversationHandle.carry} - which src/desk.ts calls once the conversation is
+ * bound to the phone and the outlet is set - answers every carry no `desk-carried` names, oldest first, a desk's from
+ * before the one entry included: each text posted again as a phone post with its own key - one the log already holds
+ * is skipped - its provenance line saying `(carried over a restart)`; then the cut turn's restart line
+ * (src/desk-session.ts `cutPhoneTurnLine`) to the network its key names, unless the desk already answered that turn (a
+ * `desk-turn` cancelled by `restart`); then the `desk-carried`. A refused post (the pause, the fence) stops the carrying
+ * for a later boot, with one line. A crash leaves the inbox's durable projection instead: a resumed conversation sends
+ * its phone texts again, as it does its task messages.
  * @module
  */
 import { randomUUID } from "node:crypto";
@@ -58,13 +62,13 @@ import { installModelSelection as installDshModelSelection } from "@deepseek-ai/
 import { MessageId, freezeMessage, type MessageSource } from "@deepseek-ai/dsh-llm";
 import { appendEvent, clearOff, deskTime, lastConversation, readEvents, readOffState } from "./desk.ts";
 import {
-  CARRY_MAX, CARRY_TEXT_MAX, loggedId, operatorText, pauseInForce, pausedLine, pendingCarries, phoneContent, replyOf, waiting,
-  type Carry, type DeliverOpts, type DeliverResult, type PhonePost, type PostResult, type ReplyLines,
+  CARRY_MAX, CARRY_TEXT_MAX, busy, loggedId, operatorText, pauseInForce, pausedLine, pendingCarries, phoneContent, replyOf, waiting,
+  type Carry, type ClaimsOn, type DeliverOpts, type DeliverResult, type PhonePost, type PostResult, type ReplyLines,
 } from "./desk-conversation.ts";
 import { CONVERSATION_PRESET } from "./desk-names.ts";
 import {
-  cancelKeepingQueue, cutOffLine, findFenceViolation, formatDuration, provenanceLine, readSessionEvents, superviseDeskTurns,
-  type DeskSessionCtxLike, type DeskTurnRecord, type SessionEventsOn,
+  cancelKeepingQueue, cutOffLine, cutPhoneTurnLine, findFenceViolation, formatDuration, provenanceLine, readSessionEvents, superviseDeskTurns,
+  type DeskSessionCtxLike, type DeskTurnRecord, type OpenTurnView, type SessionEventsOn,
 } from "./desk-session.ts";
 import type { AgentLike, MemberSetup, RoomDeps, SessionLike } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
@@ -155,6 +159,9 @@ export interface ConversationDeps {
   /** How an answer reaches the phone: the desk conversation's `deliver` (src/desk-conversation.ts), absent with the
    * desk off (`FACE_DESK=0`) - then no turn sends anything. Never rejects. */
   deliver?: (text: string, opts: DeliverOpts) => Promise<DeliverResult>;
+  /** dsh-agent's `agent/inbox/claimed` on the root context (src/desk.ts `claimsOf`): what a turn has claimed and not
+   * yet logged, for the carry at dispose. Without it, such a text is not carried. */
+  onClaimed?: ClaimsOn;
 }
 
 /** The label a fence check that rejects names: the turn is cut as a violation here. */
@@ -323,9 +330,15 @@ export interface ConversationHandle {
    * violation's path), or `error` (disposed, no session persistence, the log unreadable, the open or followup
    * failing). Posts run one at a time. Never rejects. */
   post(input: PhonePost): Promise<PostResult>;
-  /** The phone's `/stop`: when the conversation's agent has a turn running, cut it with `reason`, keeping the messages
-   * queued behind it (src/desk-session.ts `cancelKeepingQueue`) - `true`; else `false`. Rejects when the cancel throws. */
+  /** The phone's `/stop`: when the conversation's agent has work under way - a turn running, or one latched behind
+   * maintenance (src/desk-conversation.ts `busy`) - cut it with `reason`, keeping the messages queued behind it
+   * (src/desk-session.ts `cancelKeepingQueue`) - `true`; else `false`. Rejects when the cancel throws. */
   stop(reason: string): Promise<boolean>;
+  /** Answer what a graceful stop carried (the module header's A RESTART), once per handle - later calls answer the
+   * first's promise - after any post under way. Called once the phone is bound to the conversation and its outlet set
+   * (src/desk.ts), never at a first open: a conversation that turns out not to be installed leaves its carries to the
+   * desk session's fallback, so a carry is never posted twice. Never rejects. */
+  carry(): Promise<void>;
   /** Ends the supervision, writes the phone texts still on the inbox as one `desk-carry` (the module header's A
    * RESTART), and disposes the agent this handle created or resumed; waits for an ensure and a post under way. */
   dispose(): Promise<void>;
@@ -401,6 +414,8 @@ interface Watch {
   operatorTurn(): boolean;
   /** The open turn's origin. */
   turnOrigin(): TaskOrigin;
+  /** The open turn and, when it logged a phone text, that text's network and id - read for a shutdown's carry. */
+  openPhoneTurn(): { open: OpenTurnView; phone?: { network?: "telegram" | "slack"; id?: string } } | undefined;
 }
 
 /** One line for a turn that did not simply end; nothing for one that did. */
@@ -434,7 +449,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
   const watch = (agent: AgentLike, sessionId: string): Watch => {
     /* the phone texts each turn logged, by turn: a parked browser steer claimed first names the turn `user`, and a
      * phone text that follows it in the same turn must still be answered (and a task it starts is the phone's) */
-    const phones = new Map<number, { network?: "telegram" | "slack" }>();
+    const phones = new Map<number, { network?: "telegram" | "slack"; id?: string }>();
     const supervision = superviseDeskTurns({
       on: deps.ctx.on,
       sessionId,
@@ -470,7 +485,8 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       const kind = typeof source === "object" && source !== null ? (source as { kind?: unknown }).kind : undefined;
       if (kind === "telegram" && state.turn !== undefined) {
         const network = (source as { network?: unknown }).network;
-        phones.set(state.turn, isPhoneNetwork(network) ? { network } : {});
+        const id = (data as { id?: unknown }).id;
+        phones.set(state.turn, { ...(isPhoneNetwork(network) ? { network } : {}), ...(typeof id === "string" ? { id } : {}) });
         /* a turn whose end was never heard leaves its entry: keep the newest few */
         if (phones.size > PHONES_KEPT) phones.delete(phones.keys().next().value as number);
       }
@@ -490,6 +506,12 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
         const open = supervision.openTurn();
         if (open?.source === undefined || !OPERATOR_SOURCES.has(open.source)) return false;
         return !(state.foreign && state.turn === open.turn);
+      },
+      openPhoneTurn: () => {
+        const open = ended ? undefined : supervision.openTurn();
+        if (open === undefined) return undefined;
+        const phone = phones.get(open.turn);
+        return { open, ...(phone === undefined ? {} : { phone }) };
       },
       turnOrigin: () => {
         const open = ended ? undefined : supervision.openTurn();
@@ -529,7 +551,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
 
   /* a turn's answer, in turn order; the chain never rejects */
   let answering: Promise<void> = Promise.resolve();
-  const answer = (r: DeskTurnRecord, phone: { network?: "telegram" | "slack" } | undefined): void => {
+  const answer = (r: DeskTurnRecord, phone: { network?: "telegram" | "slack"; id?: string } | undefined): void => {
     const deliver = deps.deliver;
     if (deliver === undefined) return;
     answering = answering.then(async () => {
@@ -571,12 +593,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
     held = { agent: opened.agent, sessionId: opened.sessionId, watch: watch(opened.agent, opened.sessionId), ...(opened.handle === undefined ? {} : { handle: opened.handle }) };
     /* resumed here, under supervision: what a restart left on its inbox is sent again */
     if (!opened.created && opened.handle !== undefined) requeueTasks(opened.agent, opened.sessionId, log);
-    /* the first open: what a graceful stop carried, after any post already under way */
-    if (!carried) {
-      carried = true;
-      const run = posting.then(carryAll);
-      posting = run.catch(() => undefined);
-    }
+    hearClaims();
     return { agent: opened.agent, sessionId: opened.sessionId };
   };
 
@@ -591,8 +608,24 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
   /** When the operator wrote each phone text this handle sent, by key - the newest {@link CARRY_MAX} times ten - for a
    * `desk-carry` to name: the message keeps it only in its provenance line. */
   const atOf = new Map<string, number>();
-  /** Whether the boot's carry has been scheduled: once, at the first open. */
-  let carried = false;
+  /** The carry pass, once {@link ConversationHandle.carry} asked for it. */
+  let carrying: Promise<void> | undefined;
+  /** The phone texts dsh claimed for each agent's latest turn, by agent id: what a turn holds before it logs it. */
+  const claims = new Map<string, { turn: number; messages: MessageLike[] }>();
+  let unclaim: (() => void) | undefined;
+  const hearClaims = (): void => {
+    if (unclaim !== undefined || deps.onClaimed === undefined || disposed) return;
+    try {
+      unclaim = deps.onClaimed(({ agent, message, turn }) => {
+        if (message?.source?.kind !== "telegram" || typeof agent?.id !== "string") return;
+        const entry = claims.get(agent.id);
+        if (entry === undefined || entry.turn !== turn) claims.set(agent.id, { turn, messages: [message] });
+        else entry.messages.push(message);
+      });
+    } catch (err) {
+      log(`${BIN}: conversation: dsh's inbox claims could not be heard (${errText(err)}); a text claimed but not yet logged at a shutdown is not carried`);
+    }
+  };
   const failed = (reason: string): PostResult => {
     const line = `the conversation could not open a turn: ${reason}`;
     log(`${BIN}: conversation: ${line}`);
@@ -660,9 +693,35 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
   };
   let posting: Promise<unknown> = Promise.resolve();
 
-  /** One carry answered: each text posted again in order, as carried; then its `desk-carried`. `false`, with one line,
-   * when a post was refused: that carry and every later one wait for a later boot. A carry's `cut` - the desk's phone
-   * turn a stop cut - gets no line here: the conversation never wrote one. */
+  /** The restart line for a carry's `cut` - a phone turn a graceful stop cut, the conversation's or a desk's from before
+   * the one entry - to the network its key names (`telegram` when it names none), through `deps.deliver`: unless the
+   * desk's boot already answered that turn (a `desk-turn` cancelled by `restart`), and none with no `deliver`. A ledger
+   * that cannot be read sends nothing, with one line. Never rejects. */
+  const answerCut = async (carry: Carry): Promise<void> => {
+    const cut = carry.cut!;
+    const deliver = deps.deliver;
+    if (deliver === undefined) return;
+    try {
+      const { events } = await readEvents(deps.home);
+      if (events.some((e) => e.kind === "desk-turn" && e.sessionId === carry.sessionId && e.turn === cut.turn && e.cancel === "restart")) return;
+    } catch (err) {
+      log(`${BIN}: conversation: the ledger could not be read for turn ${cut.turn} on ${carry.sessionId}, which a graceful stop cut (${errText(err)}); it goes unanswered`);
+      return;
+    }
+    const prefix = cut.key === undefined ? "" : cut.key.slice(0, Math.max(0, cut.key.indexOf(":")));
+    const network = isPhoneNetwork(prefix) ? prefix : "telegram";
+    const clock = deps.now ?? Date.now;
+    const at = [cut.at, carry.t].map((x) => (x === undefined ? NaN : Date.parse(x))).find(Number.isFinite) ?? clock();
+    try {
+      await deliver(cutPhoneTurnLine(new Date(at), new Date(clock())), { kind: "chat", network });
+    } catch (err) {
+      log(`${BIN}: conversation: the restart line for turn ${cut.turn} on ${carry.sessionId} could not be delivered: ${errText(err)}`);
+    }
+  };
+
+  /** One carry answered: each text posted again in order, as carried; then its cut turn's restart line; then its
+   * `desk-carried`. `false`, with one line, when a post was refused: that carry and every later one wait for a later
+   * boot. */
   const carryOne = async (carry: Carry): Promise<boolean> => {
     let posted = 0;
     let skipped = 0;
@@ -685,6 +744,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       if (result.duplicate === true) skipped += 1;
       else posted += 1;
     }
+    if (carry.cut !== undefined) await answerCut(carry);
     await appendEvent(deps.home, { t: new Date((deps.now ?? Date.now)()).toISOString(), kind: "desk-carried", of: carry.t, posted, skipped }, { log });
     return true;
   };
@@ -709,32 +769,43 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
     }
   };
 
-  /** The phone texts waiting on `agent`'s inbox, as one `desk-carry` of session `sessionId`, or `undefined` when there
-   * are none. Synchronous: read in the tick before the agent is disposed. */
-  const carryEvent = (agent: AgentLike, sessionId: string): Carry | undefined => {
+  /** The phone's part of the held conversation, as one `desk-carry` of session `sessionId`, or `undefined` when there is
+   * none (the module header's A RESTART): the phone texts claimed for the open turn and not yet logged, then those
+   * waiting on the inbox's two lists, and the open turn as `cut` when it logged a phone text. Synchronous: read in the
+   * tick before the agent is disposed. */
+  const carryEvent = (agent: AgentLike, sessionId: string, w: Watch): Carry | undefined => {
     const inbox = (agent as AgentLike & InboxAware).inbox;
-    if (inbox === undefined) return undefined;
+    const turn = w.openPhoneTurn();
+    const claim = claims.get(agent.id);
+    const held = turn !== undefined && claim?.turn === turn.open.turn
+      ? claim.messages.filter((message) => !turn.open.logged.includes(message.id))
+      : [];
     const queued: { key: string; text: string; at?: string }[] = [];
     const seenHere = new Set<string>();
     let dropped = 0;
-    for (const message of [...inbox.nextTurn, ...(inbox.nextStep ?? [])]) {
+    for (const message of [...held, ...(inbox?.nextTurn ?? []), ...(inbox?.nextStep ?? [])]) {
       if (message.source?.kind !== "telegram" || seenHere.has(message.id)) continue;
       seenHere.add(message.id);
       if (queued.length >= CARRY_MAX) {
         dropped += 1;
         continue;
       }
-      const text = operatorText(message);
       const at = atOf.get(message.id);
       queued.push({
         key: message.id,
-        text: cutText(text, CARRY_TEXT_MAX),
+        text: cutText(operatorText(message), CARRY_TEXT_MAX),
         ...(at === undefined ? {} : { at: new Date(at).toISOString() }),
       });
     }
     if (dropped > 0) log(`${BIN}: conversation: ${dropped} phone text(s) queued past the first ${CARRY_MAX} are not carried over the shutdown`);
-    if (queued.length === 0) return undefined;
-    return { t: new Date((deps.now ?? Date.now)()).toISOString(), kind: "desk-carry", sessionId, queued };
+    let cut: Carry["cut"];
+    if (turn?.phone !== undefined) {
+      const key = turn.phone.id;
+      const at = (key === undefined ? undefined : atOf.get(key)) ?? turn.open.at;
+      cut = { turn: turn.open.turn, ...(key === undefined ? {} : { key }), ...(at === undefined ? {} : { at: new Date(at).toISOString() }) };
+    }
+    if (queued.length === 0 && cut === undefined) return undefined;
+    return { t: new Date((deps.now ?? Date.now)()).toISOString(), kind: "desk-carry", sessionId, queued, ...(cut === undefined ? {} : { cut }) };
   };
 
   return {
@@ -755,9 +826,17 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
     },
     async stop(reason) {
       const agent = held?.agent;
-      if (agent === undefined || agent.status !== "running") return false;
+      if (agent === undefined || !(await busy(agent))) return false;
       cancelKeepingQueue(agent, { kind: "hook", reason }, log);
       return true;
+    },
+    carry() {
+      if (carrying === undefined) {
+        const run = posting.then(carryAll);
+        posting = run.catch(() => undefined);
+        carrying = run.then(() => undefined, () => undefined);
+      }
+      return carrying;
     },
     async dispose() {
       disposed = true;
@@ -765,14 +844,21 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       await tail;
       const was = held;
       held = undefined;
-      if (was === undefined) return;
-      was.watch.end();
+      if (was === undefined) {
+        unclaim?.();
+        return;
+      }
+      /* the snapshot before the supervision ends: the open turn is still known */
       let event: ReturnType<typeof carryEvent>;
       try {
-        event = carryEvent(was.agent, was.sessionId);
+        event = carryEvent(was.agent, was.sessionId, was.watch);
       } catch (err) {
         log(`${BIN}: conversation: the phone's texts could not be carried over the shutdown: ${errText(err)}`);
       }
+      was.watch.end();
+      unclaim?.();
+      unclaim = undefined;
+      claims.clear();
       /* the snapshot, then the teardown that clears the inbox; the write after it */
       const disposing = was.handle === undefined ? Promise.resolve() : disposeQuietly(was.handle, was.sessionId, log);
       if (event !== undefined) await appendEvent(deps.home, event, { log });

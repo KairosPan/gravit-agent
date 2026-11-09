@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import {
   ALERTS_FILE, ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, EVENTS_FILE, FILINGS_FILE, FIRINGS_FILE, LEDGER_ROTATE_BYTES, MUTE_FILE, MUTE_USAGE, OFF_FILE,
-  ALERT_DEADLINE_MS, WATCH_LEASE_FILE, appendChain, appendEvent, appendRecord, appendRecordOnce, budgetLine, budgetReplyLine, budgetState, clearMute, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastConversation, lastDeskSession, noteBudgetSpent,
+  ALERT_DEADLINE_MS, WATCH_LEASE_FILE, appendChain, appendEvent, appendRecord, appendRecordOnce, budgetLine, budgetPhoneLine, budgetReplyLine, budgetState, clearMute, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastConversation, lastDeskSession, noteBudgetSpent,
   muteReplyLine, parseDuration, phoneLine, readBudget, readEvents, readMuteState, readOffState, readRecords, registerDeskRoutes, runsOf, standingLines, watchLines, writeMute,
   writeOff,
   type BudgetState, type DeskEvent, type DeskStatus, type PhoneStatus, type TurnUsage,
@@ -1080,11 +1080,17 @@ test("with the router bound the desk session is not created", async () => {
     assert.equal(state.reads, 0, "the bridge waits for the router's bind");
     assert.equal(fake.state.creates, 0, "and the desk session is not opened meanwhile");
     const posts: unknown[] = [];
+    /* the carry is asked for once the outlet is set: a line it delivers reaches the phone, not "no phone" */
+    const carried: unknown[] = [];
     desk.bindRouter({
       post: async (input) => { posts.push(input); return { opened: true, sessionId: "conv-1" }; },
       stop: async () => false,
+      carry: async () => { carried.push(await desk.conversation!.deliver("a carried answer", { kind: "chat", network: "telegram" })); },
       status: async () => ({ sessionId: "conv-1", running: 0, waiting: 0 }),
     });
+    await until("the carry", () => carried.length === 1);
+    assert.deepEqual(carried, [{ sent: ["telegram:900"] }], "the carry ran after the outlet was set");
+    assert.deepEqual(state.sends, [{ kind: "chat", text: "a carried answer", network: "telegram" }]);
     await until("the text reaches the conversation", () => posts.length === 1);
     assert.equal((posts[0] as { text: string }).text, "how is NVDA?");
     await new Promise((done) => setTimeout(done, 50));
@@ -1092,6 +1098,50 @@ test("with the router bound the desk session is not created", async () => {
     assert.equal(fake.agents.length, 0);
     await desk.dispose(0);
     assert.deepEqual((await readEvents(h)).events.map((e) => e.kind), ["boot", "shutdown"], "no desk-session line");
+  } finally {
+    await rm(h, { recursive: true, force: true });
+  }
+});
+
+test("with the router expected, the standing orders' clock loads before the bind", async () => {
+  const h = join(TMP, "routed-schedule");
+  await mkdir(h, { recursive: true });
+  try {
+    const fake = persistedRoot();
+    const timer = fakeTimer();
+    const desk = installDesk(recorder(), {
+      home: h, enabled: true, router: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval },
+      root: join(TMP, "repo-routed-schedule"), route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
+      schedule: { calendar: fakeCalendar({}), tickMs: 86_400_000 },
+    });
+    const made = await Promise.race([desk.schedule, new Promise<"late">((done) => setTimeout(() => done("late"), 3_000))]);
+    assert.notEqual(made, "late", "the clock does not wait for the router");
+    assert.notEqual(made, undefined);
+    desk.bindRouter(undefined);
+    await desk.dispose(0);
+  } finally {
+    await rm(h, { recursive: true, force: true });
+  }
+});
+
+test("quiesce stops reading the phone's inbox and keeps the outlet for the conversation's last answers", async () => {
+  const h = join(TMP, "quiesce");
+  await mkdir(h, { recursive: true });
+  try {
+    const fake = persistedRoot();
+    const { state, phone } = phoneWith([]);
+    const timer = fakeTimer();
+    const desk = installDesk(recorder(), {
+      home: h, enabled: true, router: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, phone,
+      root: join(TMP, "repo-quiesce"), route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
+    });
+    desk.bindRouter({ post: async () => ({ opened: true, sessionId: "c" }), stop: async () => false, carry: async () => {}, status: async () => ({ running: 0, waiting: 0 }) });
+    await until("the first read", () => state.reads === 1);
+    await desk.quiesce();
+    await new Promise((done) => setTimeout(done, 20));
+    assert.equal(state.reads, 1, "no read after quiesce");
+    assert.deepEqual(await desk.conversation!.deliver("last answer", { kind: "chat", network: "telegram" }), { sent: ["telegram:900"] }, "the outlet stays");
+    await desk.dispose(0);
   } finally {
     await rm(h, { recursive: true, force: true });
   }
@@ -1231,6 +1281,11 @@ test("budgetState: a cancelled, failed or timed-out turn's tokens count; a turn 
   assert.deepEqual(budgetState(events, now, 66), {
     dailyTokens: 66, used: { uncachedInputTokens: 60, outputTokens: 6, cacheReadTokens: 0, cacheWriteTokens: 0, total: 66 }, spent: true,
   });
+});
+
+test("budgetPhoneLine: the fallback's refusal says the text was not taken and when the budget opens again", () => {
+  assert.equal(budgetPhoneLine(SPENT),
+    "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET; your text was not taken. It opens again at 00:00 ET, or raise budget.dailyTokens in standing.yml");
 });
 
 test("budgetReplyLine: the budget line names standing orders and annotations", () => {
@@ -1594,7 +1649,7 @@ test("installDesk loads the schedule only with the conversation; its status reac
   const posted = await desk.conversation?.post({ text: "how is the book?", source: { kind: "telegram" }, message: { kind: "telegram", from: 42, chat: 42, messageId: 7 } });
   assert.deepEqual(posted, {
     refused: "budget",
-    line: "the desk's token budget for today is spent: 1,000 of 1,000 tokens since 00:00 ET. Standing orders and annotations wait for midnight ET, or raise budget.dailyTokens in standing.yml",
+    line: "the desk's token budget for today is spent: 1,000 of 1,000 tokens since 00:00 ET; your text was not taken. It opens again at 00:00 ET, or raise budget.dailyTokens in standing.yml",
   }, "the conversation's budget is the clock row's cap");
 
   await desk.dispose(0);

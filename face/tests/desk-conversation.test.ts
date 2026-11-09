@@ -2094,7 +2094,7 @@ test("a spent budget answers a post with the budget line and opens no turn; OFF 
   await put(h.root, "desk/journal/.git/"); // the budget is read before the fence: a spent desk refuses as spent
   assert.deepEqual(await post(h, "hi"), {
     refused: "budget",
-    line: "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. Standing orders and annotations wait for midnight ET, or raise budget.dailyTokens in standing.yml",
+    line: "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET; your text was not taken. It opens again at 00:00 ET, or raise budget.dailyTokens in standing.yml",
   });
   assert.equal(h.tree.created.length, 0, "no session ensured, no turn");
   assert.deepEqual(await kinds(h), [], "and no event");

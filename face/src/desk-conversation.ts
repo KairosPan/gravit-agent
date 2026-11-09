@@ -17,7 +17,7 @@
  *
  * BEFORE A TURN ({@link DeskConversation.post}), in this order: the pause - an `OFF` past its `until` is lifted,
  * one in force refuses (src/desk.ts); the day's token budget, when the owner passes one - spent, it refuses
- * with src/desk.ts `budgetReplyLine`, no turn and no event, and one that cannot be read lets the post go on,
+ * with src/desk.ts `budgetPhoneLine`, no turn and no event, and one that cannot be read lets the post go on,
  * with a line (ruling P2-8: the pause outranks the budget, and a paused post never reads it); the
  * instruction-chain fence - a violation refuses, and is a `desk-refused` event (src/desk-session.ts
  * `findDeskFenceViolation`); the desk session, ensured - live, resumed or created; for a phone's text, the
@@ -506,7 +506,7 @@ function idleWaitOf(agent: AgentLike): (() => Promise<void>) | undefined {
 /** Whether `agent` has work under way. With `whenIdle`, an idle agent's settles within microtasks, so one
  * still pending after a turn of the event loop is work under way; a `whenIdle` that rejects counts as idle.
  * Without it, the status. */
-async function busy(agent: AgentLike): Promise<boolean> {
+export async function busy(agent: AgentLike): Promise<boolean> {
   const wait = idleWaitOf(agent);
   if (wait === undefined) return agent.status === "running";
   let idle = false;
@@ -986,7 +986,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
       const paused = await pause(m);
       if (paused !== undefined) return { refused: "paused", line: pausedLine(paused, new Date(clock.now()), m.desk.deskTime) };
       const spent = await spentBudget();
-      if (spent !== undefined) return { refused: "budget", line: m.desk.budgetReplyLine(spent) };
+      if (spent !== undefined) return { refused: "budget", line: m.desk.budgetPhoneLine(spent) };
       const path = await m.session.findDeskFenceViolation(root);
       if (path !== undefined) {
         await m.desk.appendEvent(home, { t: stamp(), kind: "desk-refused", reason: "fence", path }, { log });

@@ -1106,14 +1106,27 @@ export async function noteBudgetSpent(
  * is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. Standing orders and annotations wait for midnight ET, or
  * raise budget.dailyTokens in standing.yml` - numbers as `en-US` writes them, and no `of <cap>` for a state that has
  * none. The budget caps the unattended work - standing orders and annotations - not the phone's texts, which reach
- * Gravit's one conversation unbudgeted (one-entry plan 3); only the desk session's fallback (`FACE_ROUTER=0`) still
- * answers a phone post with it.
+ * Gravit's one conversation unbudgeted (one-entry plan 3); the desk session's fallback answers a refused text with
+ * {@link budgetPhoneLine}.
  * @param state - the day's budget.
  */
 export function budgetReplyLine(state: BudgetState): string {
   const cap = state.dailyTokens === undefined ? "" : ` of ${state.dailyTokens.toLocaleString("en-US")}`;
   return `the desk's token budget for today is spent: ${state.used.total.toLocaleString("en-US")}${cap} tokens since 00:00 ET. `
     + "Standing orders and annotations wait for midnight ET, or raise budget.dailyTokens in standing.yml";
+}
+
+/**
+ * The phone's line for a text the desk session refused while the day's budget is spent - only on its fallback
+ * (`FACE_ROUTER=0`, or a conversation that could not be installed; Gravit's one conversation takes texts unbudgeted):
+ * `the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET; your text was not taken.
+ * It opens again at 00:00 ET, or raise budget.dailyTokens in standing.yml`.
+ * @param state - the day's budget.
+ */
+export function budgetPhoneLine(state: BudgetState): string {
+  const cap = state.dailyTokens === undefined ? "" : ` of ${state.dailyTokens.toLocaleString("en-US")}`;
+  return `the desk's token budget for today is spent: ${state.used.total.toLocaleString("en-US")}${cap} tokens since 00:00 ET; `
+    + "your text was not taken. It opens again at 00:00 ET, or raise budget.dailyTokens in standing.yml";
 }
 
 /** The phone bridge as the status reports it (src/phone-bridge.ts): `configured`, whether the face has the account's
@@ -1599,7 +1612,7 @@ function busOf(ctx: DeskConversationCtxLike): SessionEventsOn {
 
 /** dsh-agent's `agent/inbox/claimed` on the booted root context, as the desk conversation hears it: every agent's
  * claims (the event is scope-filtered, and the root's listener is unscoped). */
-function claimsOf(ctx: DeskConversationCtxLike): ClaimsOn {
+export function claimsOf(ctx: object): ClaimsOn {
   return (listener) => {
     const off = (ctx as unknown as { on(name: string, listener: (payload: never) => void): () => unknown }).on("agent/inbox/claimed", listener);
     return () => { off(); };
@@ -1642,9 +1655,15 @@ export interface DeskHandle {
   schedule?: Promise<ScheduleHandle | undefined>;
   watchRow?: Promise<WatchHandle | undefined>;
   /** Bind Gravit's one conversation, once main.ts has installed it (`deps.router`): the phone's texts, `/stop` and
-   * `/status` go to it, and the desk session is never ensured; `undefined` - the install failed - and the desk
-   * session answers the phone as with `FACE_ROUTER=0`. The first call counts; a desk without `deps.router` ignores it. */
+   * `/status` go to it, the desk session is never ensured, and once the outlet is set the conversation answers what a
+   * graceful stop carried (its `carry`); `undefined` - the install failed - and the desk session answers the phone as
+   * with `FACE_ROUTER=0`, its own boot answering the carries. The first call counts; a desk without `deps.router`
+   * ignores it, and a desk that is off only asks the target to `carry`. */
   bindRouter(target: PhoneConversation | undefined): void;
+  /** Stop reading the phone's inbox - the read under way cut, the message in hand waited for up to 2 s - keeping the
+   * outlet, so the conversation's last answers still go out: main.ts calls it first at shutdown, before it disposes the
+   * conversation, so no text is taken that a disposed conversation would refuse. Idempotent; never rejects. */
+  quiesce(): Promise<void>;
   dispose(code: number): Promise<void>;
 }
 
@@ -1807,7 +1826,15 @@ export function installDesk(
     quotes: deps.quotes,
     readState: () => deskStatus(status),
   }), { log });
-  if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), bindRouter: () => {}, dispose: async () => { removeTools(); await removeGuard(); } };
+  if (!enabled) {
+    return {
+      enabled, bootedAt, ready: Promise.resolve(),
+      /* no desk, no phone: the conversation still answers its carries, its answers sent nowhere */
+      bindRouter: (target) => { void target?.carry(); },
+      quiesce: async () => {},
+      dispose: async () => { removeTools(); await removeGuard(); },
+    };
+  }
   const ready = appendEvent(home, { t: new Date(bootedAt).toISOString(), kind: "boot", pid: process.pid, version, deskEnabled: true }, { log });
   const stopWatch = installAsleepWatch({ now, ...deps.watch, append: (event) => appendEvent(home, event, { log }) });
   const clock: DeskClock = { now, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout) };
@@ -1845,8 +1872,9 @@ export function installDesk(
       log,
     });
   let disposing: Promise<void> | undefined;
-  /* Gravit's one conversation, once main.ts binds it (`deps.router`): until then the bridge waits, so no phone text
-   * reaches the desk session first; dispose ends the wait too. */
+  /* Gravit's one conversation, once main.ts binds it (`deps.router`): until then the bridge sets the outlet but reads no
+   * inbox, so no phone text reaches the desk session first; the schedule and the watch do not wait. Dispose and
+   * quiesce end the wait too. */
   let routed: PhoneConversation | undefined;
   let decide: () => void = () => {};
   const decided = deps.router === true ? new Promise<void>((done) => { decide = done; }) : Promise.resolve();
@@ -1862,8 +1890,8 @@ export function installDesk(
    * awaited, and it never rejects - a module that cannot load, or a bridge that throws as it installs, is one line; a
    * module that arrives once dispose has begun installs nothing. */
   const client = deps.phone;
-  const bridging = client === undefined || conversation === undefined ? decided : Promise.all([import("./phone-bridge.ts"), decided]).then(
-    ([bridgeModule]) => {
+  const bridging = client === undefined || conversation === undefined ? Promise.resolve() : import("./phone-bridge.ts").then(
+    (bridgeModule) => {
       if (disposing !== undefined) return;
       bridge = bridgeModule.installPhoneBridge({
         phone: client,
@@ -1875,8 +1903,9 @@ export function installDesk(
         /* a reply's alert and its annotation (spec §16 H1b): the watch is installed after the bridge, so it is read at
          * each reply - none until it runs, and none in a face that runs none */
         contextFor: (messageId) => watch?.contextFor(messageId),
-        /* bound once, before the bridge starts: Gravit's one conversation takes the phone's texts */
+        /* bound once, before the bridge reads: Gravit's one conversation takes the phone's texts */
         router: () => routed,
+        hold: decided,
       });
     },
   ).catch((err: unknown) => {
@@ -1886,9 +1915,15 @@ export function installDesk(
   /* The conversation starts once the bridge has set the outlet (or there is no bridge): a start that resumed the desk
    * session may answer a phone turn the restart cut at once (src/desk-conversation.ts AFTER A RESTART), and that line
    * must find the outlet. `bridging` never rejects; were it to, the conversation starts all the same. */
-  /* with the one conversation bound, never; with `deps.router` and no bind - a dispose ended the wait - never either */
-  const startConversation = (): Promise<void> | undefined => (bound && routed === undefined ? conversation?.start() : undefined);
-  void bridging.then(startConversation, startConversation);
+  /* Once the outlet is set and the router decided: bound to the conversation, it answers its carries (only after a bind
+   * that succeeded - a failed install leaves them to the desk session's start, so none is posted twice); else the desk
+   * session starts; with `deps.router` and no bind - a dispose or quiesce ended the wait - neither. */
+  const afterBind = (): Promise<void> | undefined => {
+    if (!bound) return undefined;
+    if (routed !== undefined) return routed.carry();
+    return conversation?.start();
+  };
+  void Promise.all([bridging, decided]).then(afterBind, afterBind);
   /* The standing orders' clock (src/schedule.ts) loads on first use too - with it src/firing.ts, src/standing.ts and
    * js-yaml - once the bridge has set the outlet, so the boot's lines reach the phone. It never rejects: a module that
    * cannot load, or a clock that cannot start, is one line and `undefined`; one that arrives once dispose has begun
@@ -1975,6 +2010,11 @@ export function installDesk(
     ...(scheduling === undefined ? {} : { schedule: scheduling }),
     ...(watching === undefined ? {} : { watchRow: watching }),
     bindRouter,
+    async quiesce() {
+      decide();
+      await bridging;
+      await bridge?.stop();
+    },
     dispose(code) {
       disposing ??= (async () => {
         decide();

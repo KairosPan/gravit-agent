@@ -30,7 +30,7 @@ import { registerMarketProxy } from "./market-proxy.ts";
 import { composedMarketRow } from "./market-row.ts";
 import { composedSeatRow, seatUrl, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
-import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
+import { claimsOf, deskDir, installDesk, type DeskHandle } from "./desk.ts";
 import type { DeliverOpts, DeskConversationCtxLike } from "./desk-conversation.ts";
 import { resolveDeskRoute } from "./desk-session.ts";
 import { conversationDir, conversationFence, installConversation, type ConversationCtxLike, type ConversationHandle } from "./conversation.ts";
@@ -131,6 +131,8 @@ let disposeMarketProxy: (() => void) | undefined;
  * beats waiting on an unbounded teardown. */
 async function shutdown(code: number): Promise<void> {
   try {
+    /* the phone first: no text is taken that a disposed conversation would refuse; the outlet stays for its last answers */
+    await desk?.quiesce();
     await tasks?.dispose();
     await conversation?.dispose();
     await desk?.dispose(code);
@@ -165,6 +167,8 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
  * under a 2 s bound, and exits 1 (:679-728). `release` unwinds what this entry
  * installed on the tree before the tree itself. */
 installFailLoud(BIN, process, async () => {
+  /* the phone first: no text is taken that a disposed conversation would refuse; the outlet stays for its last answers */
+  await desk?.quiesce();
   await tasks?.dispose();
   await conversation?.dispose();
   await desk?.dispose(1);
@@ -492,6 +496,8 @@ if (routerEnabled(process.env)) {
       /* the desk's deliver, the pause's choke point: a phone turn's answer and a phone task's report go back to the
        * phone through it; with the desk off there is none, and nothing is sent */
       ...(deskConversation === undefined ? {} : { deliver: (text: string, opts: DeliverOpts) => deskConversation.deliver(text, opts) }),
+      /* what a turn claimed and has not logged, for the carry over a shutdown */
+      onClaimed: claimsOf(booted.ctx),
     }),
     tasks: (held) => installTasks(booted.ctx.webServer, {
       ctx: booted.ctx as unknown as TasksCtxLike,
@@ -511,6 +517,7 @@ if (routerEnabled(process.env)) {
   /* the phone reaches the conversation from here on; a conversation that could not be installed leaves it the desk
    * session's, as with FACE_ROUTER=0 */
   desk.bindRouter("sessionId" in router ? phoneConversation(router.conversation, router.tasks.ops) : undefined);
+  /* (the conversation answers what a graceful stop carried only once bound, the outlet set - src/desk.ts) */
 } else {
   console.log(`${BIN}: conversation: off (FACE_ROUTER=0)`);
 }

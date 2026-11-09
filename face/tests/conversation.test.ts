@@ -1027,6 +1027,9 @@ test("a queued phone text is carried over a restart and answered once", async (t
   const lines: string[] = [];
   const second = install(t, deps(tree, home, lines));
   await second.ensure();
+  await settle();
+  assert.equal(tree.agent(sessionId).followups.length, 0, "an open alone carries nothing: the carry waits for carry()");
+  await second.carry();
   const resumed = tree.agent(sessionId);
   await until(() => resumed.followups.length === 1, "the carried text");
   await until(() => second.current() !== undefined, "open");
@@ -1042,6 +1045,7 @@ test("a queued phone text is carried over a restart and answered once", async (t
   /* a third boot posts nothing: the carry is answered */
   const third = install(t, deps(tree, home, []));
   await third.ensure();
+  await third.carry();
   await settle();
   assert.equal(tree.agent(sessionId).followups.length, 0);
   assert.equal((await readEvents(home)).events.filter((e) => e.kind === "desk-carried").length, 1);
@@ -1062,6 +1066,7 @@ test("a carried text the log already holds is skipped, and a paused boot leaves 
   const lines: string[] = [];
   const paused = install(t, deps(tree, home, lines));
   await paused.ensure();
+  await paused.carry();
   await settle();
   assert.equal(tree.agent("session-c").followups.length, 0, "a paused boot posts nothing");
   assert.equal((await readEvents(home)).events.filter((e) => e.kind === "desk-carried").length, 0);
@@ -1071,6 +1076,7 @@ test("a carried text the log already holds is skipped, and a paused boot leaves 
   await clearOff(home, "terminal");
   const open = install(t, deps(tree, home, []));
   await open.ensure();
+  await open.carry();
   const agent = tree.agent("session-c");
   await until(() => agent.followups.length === 1, "the one still to answer");
   await settle();
@@ -1093,4 +1099,87 @@ test("a resumed conversation idle with a phone text left on its inbox sends it a
   const agent = tree.agent("session-p");
   assert.deepEqual(agent.followups.map((m) => m.id), ["telegram:1#1@x"]);
   assert.deepEqual(agent.inbox!.nextTurn.map((m) => m.id), ["browser-1"]);
+});
+
+test("stop counts work latched behind maintenance as running (whenIdle pending)", async (t) => {
+  const home = await scratch("stop-busy");
+  const tree = new FakeConversationTree();
+  const handle = install(t, deps(tree, home, []));
+  const { sessionId } = await handle.ensure();
+  const agent = tree.agent(sessionId) as FakeConvAgent & { whenIdle?: () => Promise<void> };
+  agent.whenIdle = () => new Promise<void>(() => {});
+  assert.equal(agent.status, "idle");
+  assert.equal(await handle.stop("stopped from the phone"), true);
+  assert.equal(agent.cancels.length, 1);
+  agent.whenIdle = () => Promise.resolve();
+  assert.equal(await handle.stop("stopped from the phone"), false);
+});
+
+test("a phone turn under way at shutdown is carried as a cut, and the next boot tells that phone once", async (t) => {
+  const home = await scratch("carry-cut");
+  const tree = new FakeConversationTree();
+  const first = install(t, deps(tree, home, []));
+  const { sessionId } = await first.ensure();
+  const key = "slack:9#4@2026-11-08T18:03:00.000Z";
+  await first.post(phonePost({ key, source: { kind: "telegram", network: "slack", at: AT }, message: { kind: "telegram", network: "slack", messageId: "slack:9" } }));
+  /* its turn runs and has logged it */
+  tree.bus.emit(sessionId, "turn/start", { turn: 1 });
+  tree.bus.emit(sessionId, "user/message", { id: key, role: "user", content: [], source: { kind: "telegram", network: "slack", messageId: "slack:9" } });
+  await first.dispose();
+  const carry = (await readEvents(home)).events.find((e) => e.kind === "desk-carry") as Extract<DeskEvent, { kind: "desk-carry" }>;
+  assert.ok(carry !== undefined);
+  assert.deepEqual(carry.queued, []);
+  assert.deepEqual(carry.cut, { turn: 1, key, at: "2026-11-08T18:03:00.000Z" });
+
+  const sent: Delivered[] = [];
+  const second = install(t, delivering(tree, home, [], sent));
+  await second.ensure();
+  await second.carry();
+  assert.deepEqual(sent, [{ text: "a restart cut your message of 13:03 ET before it was answered; send it again", opts: { kind: "chat", network: "slack" } }]);
+  assert.equal(tree.agent(sessionId).followups.length, 0, "the logged text is not posted again");
+  await second.carry();
+  assert.equal(sent.length, 1, "once");
+  await second.dispose();
+  const third = install(t, delivering(tree, home, [], sent));
+  await third.ensure();
+  await third.carry();
+  assert.equal(sent.length, 1, "and not at a later boot");
+});
+
+test("a phone text the open turn claimed and has not logged is carried and posted again", async (t) => {
+  const home = await scratch("carry-claimed");
+  const tree = new FakeConversationTree();
+  let listener: Parameters<NonNullable<ConversationDeps["onClaimed"]>>[0] | undefined;
+  const onClaimed: ConversationDeps["onClaimed"] = (l) => { listener = l; return () => { listener = undefined; }; };
+  const first = install(t, { ...deps(tree, home, []), onClaimed });
+  const { sessionId, agent } = await first.ensure();
+  const key = "telegram:5#2@2026-11-08T18:03:00.000Z";
+  await first.post(phonePost({ key, text: "claimed, not logged" }));
+  tree.bus.emit(sessionId, "turn/start", { turn: 1 });
+  assert.ok(listener !== undefined, "the claims are heard");
+  listener({ agent: { id: agent.id }, message: (agent as FakeConvAgent).followups[0]!, turn: 1 });
+  await first.dispose();
+  assert.equal(listener, undefined, "and let go at dispose");
+  const carry = (await readEvents(home)).events.find((e) => e.kind === "desk-carry") as Extract<DeskEvent, { kind: "desk-carry" }>;
+  assert.deepEqual(carry.queued, [{ key, text: "claimed, not logged", at: "2026-11-08T18:03:00.000Z" }]);
+  assert.equal(carry.cut, undefined, "a turn that logged no phone text is no cut");
+
+  const second = install(t, deps(tree, home, []));
+  await second.ensure();
+  await second.carry();
+  assert.deepEqual(tree.agent(sessionId).followups.map((m) => m.id), [key]);
+});
+
+test("a desk's carry from before the one entry has its cut answered, unless the desk already answered it", async (t) => {
+  const home = await scratch("carry-desk-cut");
+  await appendEvent(home, { t: "2026-11-08T10:05:00.000Z", kind: "desk-carry", sessionId: "desk-s1", queued: [], cut: { turn: 4, key: "telegram:3#1@x", at: "2026-11-08T18:01:00.000Z" } });
+  await appendEvent(home, { t: "2026-11-08T10:06:00.000Z", kind: "desk-carry", sessionId: "desk-s1", queued: [], cut: { turn: 5 } });
+  await appendEvent(home, { t: "2026-11-08T10:06:01.000Z", kind: "desk-turn", sessionId: "desk-s1", source: "telegram", turn: 5, outcome: "cancelled", wallMs: 0, cancel: "restart" });
+  const tree = new FakeConversationTree();
+  const sent: Delivered[] = [];
+  const handle = install(t, delivering(tree, home, [], sent));
+  await handle.ensure();
+  await handle.carry();
+  assert.deepEqual(sent, [{ text: "a restart cut your message of 13:01 ET before it was answered; send it again", opts: { kind: "chat", network: "telegram" } }]);
+  assert.equal((await readEvents(home)).events.filter((e) => e.kind === "desk-carried").length, 2, "both answered");
 });

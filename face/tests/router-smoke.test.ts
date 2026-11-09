@@ -38,7 +38,7 @@ import type { GenerateOptions } from "@deepseek-ai/dsh-llm";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import { bootFace, type BootedFace } from "../src/boot.ts";
 import { conversationDir, installConversation, type ConversationCtxLike, type ConversationHandle } from "../src/conversation.ts";
-import { installDesk, readEvents, type DeskHandle } from "../src/desk.ts";
+import { claimsOf, installDesk, readEvents, type DeskHandle } from "../src/desk.ts";
 import type { DeskConversationCtxLike } from "../src/desk-conversation.ts";
 import { CONVERSATION_PRESET } from "../src/desk-names.ts";
 import { isTrustedDataRequest } from "../src/http.ts";
@@ -111,6 +111,7 @@ async function stopFace(): Promise<void> {
   const held = face;
   face = undefined;
   if (held === undefined) return;
+  await held.desk?.quiesce();
   await held.tasks.dispose();
   await held.conversation.dispose();
   await held.desk?.dispose(0);
@@ -161,6 +162,7 @@ async function boot(phone?: FakePhoneAccount): Promise<Face> {
     conversation: () => installConversation({
       ctx: ctx as unknown as ConversationCtxLike, home, route: STUB, installModelSelection: install, log,
       ...(deskConversation === undefined ? {} : { deliver: (text, opts) => deskConversation.deliver(text, opts) }),
+      onClaimed: claimsOf(ctx),
     }),
     tasks: (held) => installTasks(ctx.webServer, {
       ctx: ctx as unknown as TasksCtxLike, root, route: STUB, installModelSelection: install, conversation: held,

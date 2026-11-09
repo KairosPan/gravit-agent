@@ -128,7 +128,13 @@ class FakeRouter implements PhoneConversation {
     this.stops.push(reason);
     return this.stopAnswer;
   };
-  readonly status = async (): Promise<{ sessionId?: string; running: number; waiting: number }> => ({ sessionId: "conv-1", running: 2, waiting: 1 });
+  statusFails: string | undefined;
+  carries = 0;
+  readonly carry = async (): Promise<void> => { this.carries += 1; };
+  readonly status = async (): Promise<{ sessionId?: string; running: number; waiting: number }> => {
+    if (this.statusFails !== undefined) throw new Error(this.statusFails);
+    return { sessionId: "conv-1", running: 2, waiting: 1 };
+  };
 }
 
 const noTurns: DeskStatus["turnsToday"] = { count: 0, usage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } };
@@ -414,11 +420,54 @@ test("/status names the conversation and the tasks", async () => {
       "phone: telegram polling, last poll 14:29 ET, 0 queued, 1 stranger",
       "conversation conv-1",
       "tasks: 2 running, 1 waiting for you",
-      "turns today 3",
+      "desk turns today 3 (firings, annotations)",
     ].join("\n") });
+    /* a tasks read that throws is its own line; the rest of the status stands */
+    router.statusFails = "the store is gone";
+    text(r, "/status", 2);
+    await polled(r, 3);
+    assert.deepEqual(String(r.account.sends[1]!.text).split("\n").slice(-2), ["tasks: unreadable (the store is gone)", "desk turns today 3 (firings, annotations)"]);
+    assert.equal(router.carries, 0, "the bridge never asks for the carry");
   } finally {
     await r.bridge.dispose();
   }
+});
+
+test("with a hold, the outlet is set at once and the inbox is read only once it settles", async () => {
+  const conversation = new FakeConversation();
+  const acc = await account();
+  const lines: string[] = [];
+  let release: () => void = () => {};
+  const hold = new Promise<void>((done) => { release = done; });
+  const bridge = installPhoneBridge({
+    phone: createPhoneClient({ url: acc.url, secrets: [] }), home: await freshHome("hold"), conversation, clock: new Clock(NOW),
+    status: async () => STATUS, log: (line) => { lines.push(line); }, hold,
+  });
+  try {
+    assert.ok(conversation.outlets[0] !== undefined, "the outlet at once");
+    await new Promise((done) => setTimeout(done, 30));
+    assert.equal(acc.reads.length, 0, "no read while held");
+    release();
+    await waitFor("the first read", () => acc.reads.length === 1);
+  } finally {
+    await bridge.dispose();
+  }
+});
+
+test("stop cuts the read and keeps the outlet; dispose then lets it go", async () => {
+  const r = await rig("stop-reading");
+  await polled(r, 1);
+  await r.bridge.stop();
+  await waitFor("the read under way cut", () => r.account.pending === 0);
+  assert.equal(r.bridge.status().polling, false);
+  assert.equal(r.conversation.outlets.length, 1, "the outlet stays");
+  await r.conversation.outlets[0]!.send("a last answer", { kind: "chat", network: "telegram" });
+  assert.deepEqual(r.account.texts(), ["a last answer"], "and still reaches the account");
+  r.account.push({ network: "telegram", messageId: "telegram:1", text: "too late", at: AT });
+  await new Promise((done) => setTimeout(done, 30));
+  assert.equal(r.conversation.posts.length, 0, "nothing more is read");
+  await r.bridge.dispose();
+  assert.deepEqual(r.conversation.outlets.at(-1), undefined, "the outlet let go at dispose");
 });
 
 test("/stop cancels the conversation's turn", async () => {

@@ -74,7 +74,7 @@ class Harness {
       operatorTurn: () => this.operator,
       turnOrigin: () => this.origin,
       post: async () => ({ refused: "error", line: "no phone here" }),
-      stop: async () => false,
+      stop: async () => false, carry: async () => {},
       dispose: async () => {},
     };
     const handle = (agent: FakeAgent) => ({
@@ -527,7 +527,7 @@ test("installRouter: a conversation that cannot be opened is one line, is dispos
   const made: string[] = [];
   const handle = (ensure: () => Promise<{ agent: AgentLike; sessionId: string }>): ConversationHandle => ({
     ensure, current: () => undefined, operatorTurn: () => false, turnOrigin: () => ({ kind: "web" }),
-    post: async () => ({ refused: "error", line: "no phone here" }), stop: async () => false, dispose: async () => { made.push("disposed"); },
+    post: async () => ({ refused: "error", line: "no phone here" }), stop: async () => false, carry: async () => {}, dispose: async () => { made.push("disposed"); },
   });
   const lines: string[] = [];
   const failed = await installRouter({
@@ -564,6 +564,7 @@ test("phoneConversation posts and stops through the conversation and counts its 
     operatorTurn: () => false, turnOrigin: () => ({ kind: "web" as const }),
     post: async () => { calls.push("post"); return { opened: true as const, sessionId: "session-c" }; },
     stop: async (reason: string) => { calls.push(`stop ${reason}`); return true; },
+    carry: async () => { calls.push("carry"); },
     dispose: async () => {},
   } satisfies ConversationHandle;
   const views = ["running", "stalled", "waiting", "done", "waiting", "failed"].map((state) => ({ state })) as unknown as TaskView[];
@@ -598,7 +599,7 @@ test("task_read's text is the task's report when it has one, over its closing wo
 test("installRouter checks the conversation's fence once: a violation is one loud line naming it, and the face still starts", async () => {
   const handle = (): ConversationHandle => ({
     ensure: async () => ({ agent: {} as AgentLike, sessionId: "session-c" }), current: () => undefined, operatorTurn: () => false,
-    turnOrigin: () => ({ kind: "web" }), post: async () => ({ refused: "error", line: "no phone here" }), stop: async () => false, dispose: async () => {},
+    turnOrigin: () => ({ kind: "web" }), post: async () => ({ refused: "error", line: "no phone here" }), stop: async () => false, carry: async () => {}, dispose: async () => {},
   });
   const tasks = { ops: {}, ready: Promise.resolve(), dispose: async () => {} } as unknown as TasksHandle;
   const lines: string[] = [];
