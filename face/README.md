@@ -2473,8 +2473,10 @@ webhook of their own, which the face sees only as a 409 (`conflict at …`).
 **The pause.** The switch is a file, `$DSH_HOME/face/desk/OFF`. While it is there a phone text
 opens no turn and gets `paused since 14:03 ET by telegram until 16:03 ET; a terminal resumes it:
 npm run desk -- resume`; no standing order fires and no annotation runs; and nothing goes to the
-phone through the desk's send — not the conversation's answer to a browser turn, not a phone
-task's report (kept in the conversation, not sent later), not a brief or an alert. The bridge's own
+phone through the desk's send — not the conversation's answer to a phone text the pause caught
+mid-turn or still queued behind a turn (the text is still answered, in the conversation, and the
+answer is not sent later), not a phone task's report (kept in the conversation, not sent later), not
+a cut turn's restart line, not a brief or an alert. The bridge's own
 replies (a command's answer, the paused line) and Gate 2's card notice still go. A pause does not
 stop the one conversation in the browser, nor any task already started: they run on. Phone texts a
 graceful stop carried over a restart that a pause refuses at boot wait for a later boot with no
@@ -2966,7 +2968,8 @@ alert is still recorded (`suppressed: off`). Before each of your phone texts, wh
 session is idle, the face adds `[desk · state · <HH:MM ET>]` — every holding, the levels within
 2% and today's counts — so "sell half?" has the alert in context. A text that replies to an alert
 or to its check carries that alert and its check, as `the message this replies to:` (spec §16 H1b),
-for 48 hours.
+for 48 hours — quoted as data, between `<<<desk-data NONCE>>>` and `<<<end NONCE>>>`, since the check
+can carry what a web page said; your own words stay a part of their own after it.
 
 **Why it moved** (since the why-it-moved plan, 2026-11-07; spec
 `docs/superpowers/specs/2026-11-07-why-it-moved-design.md`). A US price-move alert — `index-move`

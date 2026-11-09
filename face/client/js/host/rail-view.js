@@ -7,7 +7,7 @@
 import { t, tn } from '../i18n/words.js';
 import { needsAnswer } from '../messages.js';
 import { fmtClock, MIN } from '../time.js';
-import { etWhen, deskTime } from './desk-view.js';
+import { deskTime } from './desk-view.js';
 
 const GATE_KINDS = new Set(['card', 'approval', 'question']);
 const GROUPS = new Set(['you', 'running', 'done']);
@@ -41,11 +41,12 @@ function lineOf(task, state, now) {
   return { group, line: { task, gate, status: statusOf(task, gate, shown, now) } };
 }
 
-// a firing's or an annotation's short status: since when it runs, the New York clock it ended at, or failed
+// a firing's or an annotation's short status: since when it runs, the clock it ended at - New York's, saying ET, as a
+// scheduled line's - or failed
 function deskStatusOf(line, now) {
-  if (line.state === 'running') return t('tasks.desk.since', { clock: etWhen(line.startedAt, now) });
+  if (line.state === 'running') return t('tasks.desk.since', { clock: deskTime(line.startedAt, now) });
   if (line.state === 'failed') return t('tasks.status.failed');
-  return t('tasks.status.done', { clock: etWhen(line.endedAt ?? line.startedAt, now) });
+  return t('tasks.status.done', { clock: deskTime(line.endedAt ?? line.startedAt, now) });
 }
 
 // a standing order's short status: its next firing in New York's time, else why it has none

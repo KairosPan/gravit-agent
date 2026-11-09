@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { railOf, waitingCount } from '../../client/js/host/rail-view.js';
+import { deskLineHtml } from '../../client/js/render/tasks.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { withTable } from '../../client/js/i18n/words.js';
@@ -99,6 +100,25 @@ test('desk lines fall in running or done, never you', () => {
   assert.deepEqual(rail.done.map(l => l.desk.id), ['annotation:p1', 'report:2026-11-09']);
   assert.equal(rail.done[1].status, 'Failed');
   withTable(ZH, () => assert.match(railOf(s, NOW).done[0].status, /完成$/));
+});
+
+test("a desk line's time is New York's, saying ET, as a scheduled line's is", () => {
+  const s = withDesk(state([]), {
+    scheduled: [], lines: [deskLine('brief:2026-11-09', { state: 'running', startedAt: '2026-11-09T19:03:00.000Z', endedAt: undefined }), deskLine('annotation:p1', { kind: 'annotation', startedAt: '2026-11-09T19:00:00.000Z', endedAt: '2026-11-09T19:05:00.000Z' })],
+  });
+  const rail = railOf(s, Date.parse('2026-11-09T19:10:00.000Z'));
+  assert.equal(rail.running[0].status, 'Since 14:03 ET');
+  assert.equal(rail.done[0].status, 'Done 14:05 ET');
+  withTable(ZH, () => assert.equal(railOf(s, Date.parse('2026-11-09T19:10:00.000Z')).done[0].status, '14:05 ET 完成'));
+});
+
+test("a desk line's state is running, done or failed, anything else done: it never reaches a class unpinned", () => {
+  const s = withDesk(state([]), { scheduled: [], lines: [deskLine('a', { state: 'x" onclick="alert(1)' }), deskLine('b', { state: 7 }), deskLine('c', { state: 'failed' }), deskLine('d', { state: 'running' })] });
+  assert.deepEqual(s.tasks.desk.lines.map(l => l.state), ['done', 'done', 'failed', 'running']);
+  const rail = railOf(s, NOW);
+  const html = deskLineHtml(rail.done[0], new Set());
+  assert.match(html, /<span class="task-dot done"><\/span>/);
+  assert.doesNotMatch(html, /onclick/);
 });
 
 test('scheduled lines are their own group, after done', () => {

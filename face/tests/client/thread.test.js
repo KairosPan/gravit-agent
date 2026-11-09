@@ -618,6 +618,18 @@ test('a desk line masks a pasted key in its summary and its body', () => {
   assert.ok(h.includes(`<pre>use ${MASKED}\nthen ${MASKED}</pre>`));
 });
 
+test('a desk line masks its first line before clipping it: a key the cut falls inside never shows a raw piece', () => {
+  // a bot token has no prefix the clip rule knows: only masking the whole line first hides its front
+  const token = `123456789:${'A1b2C3d4E5'.repeat(3)}xyz12`;
+  const first = `${'w'.repeat(DESK_SUMMARY_MAX - 25)} ${token} tail`;
+  const h = renderMessage(deskMsg({ line: 'alert' }, `${first}\nbody`), conv(), state);
+  const summary = /<span class="desk-text">([^<]*)<\/span>/.exec(h)[1];
+  assert.equal(summary.length, DESK_SUMMARY_MAX, 'clipped to the summary\'s length');
+  assert.ok(summary.endsWith('…'));
+  assert.ok(summary.includes(' 12345678*'), summary);
+  assert.ok(!summary.includes('123456789:A1b2'), 'no raw piece of the key');
+});
+
 test("a desk line's text is escaped and its head left out", async () => {
   const { toMessages } = await import('../../client/js/host/kinds.js');
   const { mapFrame } = await import('../../client/js/wire/mapper.js');

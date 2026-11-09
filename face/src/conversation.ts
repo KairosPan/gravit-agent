@@ -96,6 +96,8 @@ const WORKSPACE_WRITE = "workspace-write";
 
 /** Every conversation turn's deadline: the desk's 300 s (spec §5.6). */
 export const CONVERSATION_DEADLINE_MS = 300_000;
+/** The longest {@link ConversationHandle.dispose} waits for the answers still being delivered: five seconds. */
+export const ANSWER_WAIT_MS = 5_000;
 
 /** The message source kinds whose turn is the operator's - the only turns that may start, steer or stop a task
  * (spec §5.2). The browser's prompt is `user`; the phone's text is `telegram`, for both networks (plan 3). */
@@ -156,6 +158,8 @@ export function noteMessage(line: DeskLine, nonce?: string): { id: string; sourc
 
 /** How many note ids a handle remembers it injected, so a second note of one id is skipped before any log read. */
 const NOTED_KEPT = 512;
+/** The most desk lines held for the conversation's idle at once: past it the oldest is dropped, with one line. */
+export const HELD_MAX = 64;
 
 /** Where the open turn came from, as a task it starts records it: the phone - with the network the text came
  * through - or the web (the browser, and every turn that is not a phone text's). */
@@ -412,7 +416,10 @@ export interface ConversationHandle {
    * desk session's fallback, so a carry is never posted twice. Never rejects. */
   carry(): Promise<void>;
   /** Ends the supervision, writes the phone texts still on the inbox as one `desk-carry` (the module header's A
-   * RESTART), and disposes the agent this handle created or resumed; waits for an ensure and a post under way. */
+   * RESTART), and disposes the agent this handle created or resumed; waits for an ensure and a post under way, and
+   * for the answers still being delivered - at most {@link ANSWER_WAIT_MS} - so a turn that ended just before a
+   * shutdown reaches the phone before its owner takes the outlet away. Runs once: a later call answers the first's
+   * promise. */
   dispose(): Promise<void>;
 }
 
@@ -519,6 +526,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
   let tail: Promise<unknown> = Promise.resolve();
   let held: { agent: AgentLike; sessionId: string; handle?: Held; watch: Watch } | undefined;
   let disposed = false;
+  let disposal: Promise<void> | undefined;
 
   /** Supervise `agent` as session `sessionId`, and note, per turn, whether the turn has logged a message that is not
    * the operator's: once it has, the turn is not the operator's any more, whoever opened it. */
@@ -651,6 +659,8 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
           /* the registry holds another object for the session now: supervise that one, not the one it replaced */
           log(`${BIN}: conversation: session ${held.sessionId} has a new agent object; supervising it`);
           held.watch.end();
+          /* the lines held for the old object wait for the new one's idle */
+          for (const entry of heldLines.values()) if (entry.agent === held.agent) entry.agent = live;
           held.agent = live;
           held.watch = watch(live, held.sessionId);
         }
@@ -719,8 +729,8 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
   const postNow = async (input: PhonePost): Promise<PostResult> => {
     if (disposed) return failed("the conversation is disposed");
     /* checked, never cast: only a phone text's two sources open a phone turn */
-    const msg = input.message as { kind?: unknown; network?: unknown; messageId?: unknown };
-    if (input.source?.kind !== "telegram" || msg?.kind !== "telegram" || !isPhoneNetwork(msg.network) || typeof msg.messageId !== "string" || typeof input.key !== "string") {
+    const msg = input?.message as { kind?: unknown; network?: unknown; messageId?: unknown } | undefined;
+    if (input?.source?.kind !== "telegram" || msg?.kind !== "telegram" || !isPhoneNetwork(msg.network) || typeof msg.messageId !== "string" || typeof input.key !== "string") {
       return failed("the post is not a phone text (telegram or slack)");
     }
     const network = input.source.network;
@@ -773,7 +783,8 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
   const noted = new Set<string>();
   /** The lines noted while the conversation was busy, by id, in order, with the agent they wait for: injected at its
    * next `agent/status` idle ({@link injectHeld}) - never into a turn under way, which dsh would not let end while its
-   * next-step list holds one (the module header's THE DESK'S LINES). */
+   * next-step list holds one (the module header's THE DESK'S LINES). At most {@link HELD_MAX}, the oldest dropped past
+   * it; an ensure that finds a new agent object for the session moves them to it ({@link open}). */
   const heldLines = new Map<string, { agent: AgentLike; message: MessageLike }>();
   const remember = (id: string): void => {
     noted.add(id);
@@ -840,6 +851,12 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       if (agent.status !== "idle") {
         heldLines.set(made.id, { agent, message });
         remember(made.id);
+        if (heldLines.size > HELD_MAX) {
+          const oldest = heldLines.keys().next().value as string;
+          heldLines.delete(oldest);
+          noted.delete(oldest);
+          log(`${BIN}: conversation: more than ${HELD_MAX} desk lines waited for the conversation's idle; the oldest, ${oldest}, was dropped`);
+        }
         return;
       }
       /* earlier lines held for this agent go first: an idle missed while the log was read */
@@ -852,18 +869,19 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
 
   /** The restart line for a carry's `cut` - a phone turn a graceful stop cut, the conversation's or a desk's from before
    * the one entry - to the network its key names (`telegram` when it names none), through `deps.deliver`: unless the
-   * desk's boot already answered that turn (a `desk-turn` cancelled by `restart`), and none with no `deliver`. A ledger
-   * that cannot be read sends nothing, with one line. Never rejects. */
-  const answerCut = async (carry: Carry): Promise<void> => {
+   * desk's boot already answered that turn (a `desk-turn` cancelled by `restart`), and none with no `deliver`. `false`
+   * when the ledger cannot be read - nothing sent, one line, and the carry left for a later boot (as the desk's
+   * src/desk-conversation.ts `carryOver`); else `true`, a failed delivery among them (one line). Never rejects. */
+  const answerCut = async (carry: Carry): Promise<boolean> => {
     const cut = carry.cut!;
     const deliver = deps.deliver;
-    if (deliver === undefined) return;
+    if (deliver === undefined) return true;
     try {
       const { events } = await readEvents(deps.home);
-      if (events.some((e) => e.kind === "desk-turn" && e.sessionId === carry.sessionId && e.turn === cut.turn && e.cancel === "restart")) return;
+      if (events.some((e) => e.kind === "desk-turn" && e.sessionId === carry.sessionId && e.turn === cut.turn && e.cancel === "restart")) return true;
     } catch (err) {
-      log(`${BIN}: conversation: the ledger could not be read for turn ${cut.turn} on ${carry.sessionId}, which a graceful stop cut (${errText(err)}); it goes unanswered`);
-      return;
+      log(`${BIN}: conversation: the ledger could not be read for turn ${cut.turn} on ${carry.sessionId}, which a graceful stop cut (${errText(err)}); a later boot tries again`);
+      return false;
     }
     const prefix = cut.key === undefined ? "" : cut.key.slice(0, Math.max(0, cut.key.indexOf(":")));
     const network = isPhoneNetwork(prefix) ? prefix : "telegram";
@@ -874,11 +892,12 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
     } catch (err) {
       log(`${BIN}: conversation: the restart line for turn ${cut.turn} on ${carry.sessionId} could not be delivered: ${errText(err)}`);
     }
+    return true;
   };
 
   /** One carry answered: each text posted again in order, as carried; then its cut turn's restart line; then its
-   * `desk-carried`. `false`, with one line, when a post was refused: that carry and every later one wait for a later
-   * boot. */
+   * `desk-carried`. `false`, with one line, when a post was refused or the ledger could not be read for the cut: that
+   * carry and every later one wait for a later boot. */
   const carryOne = async (carry: Carry): Promise<boolean> => {
     let posted = 0;
     let skipped = 0;
@@ -901,7 +920,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       if (result.duplicate === true) skipped += 1;
       else posted += 1;
     }
-    if (carry.cut !== undefined) await answerCut(carry);
+    if (carry.cut !== undefined && !(await answerCut(carry))) return false;
     await appendEvent(deps.home, { t: new Date((deps.now ?? Date.now)()).toISOString(), kind: "desk-carried", of: carry.t, posted, skipped }, { log });
     return true;
   };
@@ -999,34 +1018,46 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       }
       return carrying;
     },
-    async dispose() {
-      disposed = true;
-      await posting;
-      await tail;
-      offStatus?.();
-      offStatus = undefined;
-      heldLines.clear();
-      const was = held;
-      held = undefined;
-      if (was === undefined) {
+    dispose() {
+      /* once: a second call answers the first's promise */
+      disposal ??= (async () => {
+        disposed = true;
+        await posting;
+        await tail;
+        /* the answers under way, bounded: a delivery that hangs must not hold the shutdown */
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const waited = await Promise.race([
+          answering.then(() => true),
+          new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), ANSWER_WAIT_MS); timer.unref?.(); }),
+        ]);
+        clearTimeout(timer);
+        if (!waited) log(`${BIN}: conversation: an answer was still being delivered after ${ANSWER_WAIT_MS / 1000} s at shutdown; it may not reach the phone`);
+        offStatus?.();
+        offStatus = undefined;
+        heldLines.clear();
+        const was = held;
+        held = undefined;
+        if (was === undefined) {
+          unclaim?.();
+          return;
+        }
+        /* the snapshot before the supervision ends: the open turn is still known */
+        let event: ReturnType<typeof carryEvent>;
+        try {
+          event = carryEvent(was.agent, was.sessionId, was.watch);
+        } catch (err) {
+          log(`${BIN}: conversation: the phone's texts could not be carried over the shutdown: ${errText(err)}`);
+        }
+        was.watch.end();
         unclaim?.();
-        return;
-      }
-      /* the snapshot before the supervision ends: the open turn is still known */
-      let event: ReturnType<typeof carryEvent>;
-      try {
-        event = carryEvent(was.agent, was.sessionId, was.watch);
-      } catch (err) {
-        log(`${BIN}: conversation: the phone's texts could not be carried over the shutdown: ${errText(err)}`);
-      }
-      was.watch.end();
-      unclaim?.();
-      unclaim = undefined;
-      claims.clear();
-      /* the snapshot, then the teardown that clears the inbox; the write after it */
-      const disposing = was.handle === undefined ? Promise.resolve() : disposeQuietly(was.handle, was.sessionId, log);
-      if (event !== undefined) await appendEvent(deps.home, event, { log });
-      await disposing;
+        unclaim = undefined;
+        claims.clear();
+        /* the snapshot, then the teardown that clears the inbox; the write after it */
+        const disposing = was.handle === undefined ? Promise.resolve() : disposeQuietly(was.handle, was.sessionId, log);
+        if (event !== undefined) await appendEvent(deps.home, event, { log });
+        await disposing;
+      })();
+      return disposal;
     },
   };
 }

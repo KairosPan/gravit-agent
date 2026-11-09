@@ -7,8 +7,8 @@
  * restart that re-offers a relay already delivered sends nothing twice (the fixed-id pattern of
  * src/desk-conversation.ts's keyed posts). The caller (task 7) pumps on each offer and on each `agent/status` of the
  * conversation to `idle`, from a microtask, never inside the bus. */
-import { randomBytes } from "node:crypto";
 import { MessageId, freezeMessage } from "@deepseek-ai/dsh-llm";
+import { fenceData } from "./data-fence.ts";
 import { INJECTED_KINDS } from "./desk-names.ts";
 import { readSessionEvents, type DeskSessionCtxLike } from "./desk-session.ts";
 import type { AgentLike } from "./room.ts";
@@ -18,22 +18,7 @@ import { TASK_TEXT_MAX, cut, type RelayItem } from "./task-view.ts";
 const BIN = "gravit-face";
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/** `text` quoted as data between `<<<<tag> NONCE>>>` and `<<<end NONCE>>>` lines, with a fresh random nonce per call,
- * so the words inside cannot close the quote; a line of the text - split at every line break, `\r`, U+2028 and U+2029
- * included - that starts with `<<<` or with one of `heads` gets a leading space, so the text cannot forge a fence or a
- * head either. Nothing is cut: the caller cuts first. The task relay's quote ({@link fenceTaskData}) and the desk's
- * lines in the conversation (src/conversation.ts `noteMessage`, tag `desk-data`, every line starting `[`) both use it.
- * @param text - the words to quote.
- * @param opts - `tag`, the opening fence's word; `heads`, the line starts that are quoted; `nonce`, the fence's - a
- *   fresh 16-hex-digit one when omitted (tests pass their own). */
-export function fenceData(text: string, opts: { tag: string; heads: readonly string[]; nonce?: string }): string {
-  const nonce = opts.nonce ?? randomBytes(8).toString("hex");
-  const body = text
-    .split(/\r\n|\r|\n|\u2028|\u2029/)
-    .map((line) => (line.startsWith("<<<") || opts.heads.some((head) => line.startsWith(head)) ? ` ${line}` : line))
-    .join("\n");
-  return `<<<${opts.tag} ${nonce}>>>\n${body}\n<<<end ${nonce}>>>`;
-}
+export { fenceData };
 
 /** `text` quoted as task data ({@link fenceData}): between `<<<task-data NONCE>>>` and `<<<end NONCE>>>` lines, a line
  * that starts with `[task ·` or `<<<` given a leading space, so a worker's words can neither close the quote nor forge

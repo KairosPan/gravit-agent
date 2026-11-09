@@ -175,7 +175,7 @@ function youMessage(m, conv, state, page) {
 
 // a desk line (host/kinds.js deskMessage): a firing of the face's clock or an alert of its watch, noted into the conversation.
 // A firing's body is the whole brief or report the phone got, so the line folds as a task's report does: its Scheduled or
-// Watch chip and its first line (clipped at DESK_SUMMARY_MAX) as the summary, the body under it (open across a render by its
+// Watch chip and its first line (masked, then clipped at DESK_SUMMARY_MAX) as the summary, the body under it (open across a render by its
 // id); a line with no body is the chip alone. Masked as a worker's words are: an agent wrote it, and it may hold a pasted key
 const DESK_CHIP = { schedule: () => t('thread.desk.schedule'), alert: () => t('thread.desk.alert') };
 export const DESK_SUMMARY_MAX = 120;
@@ -184,9 +184,10 @@ function deskLine(m, conv) {
   const label = chip(Object.hasOwn(DESK_CHIP, line) ? DESK_CHIP[line]() : String(line ?? ''));
   const body = m.text ?? '';
   if (body.trim() === '') return `<div class="sysline desk-line">${label}</div>`;
-  const first = body.split('\n').find(l => l.trim() !== '') ?? '';
+  // masked whole, then clipped: a key the cut falls inside is hidden before any piece of it is kept
+  const first = maskExcerpt(body.split('\n').find(l => l.trim() !== '') ?? '');
   const clipped = first.length > DESK_SUMMARY_MAX ? `${first.slice(0, DESK_SUMMARY_MAX - 1)}…` : first;
-  return `<details class="sysline ctx desk-line" id="desk-${esc(conv.id)}-${esc(m.id)}"><summary>${label} <span class="desk-text">${esc(maskExcerpt(clipped))}</span></summary><pre>${esc(maskExcerpt(body))}</pre></details>`;
+  return `<details class="sysline ctx desk-line" id="desk-${esc(conv.id)}-${esc(m.id)}"><summary>${label} <span class="desk-text">${esc(clipped)}</span></summary><pre>${esc(maskExcerpt(body))}</pre></details>`;
 }
 
 /** The conversation's operator images still to read from the host: not offloaded, with no entry in `thumbs` yet, each once. */

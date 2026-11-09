@@ -5,9 +5,13 @@
 const tasks = (s, patch) => ({ ...s, tasks: { ...s.tasks, ...patch } });
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const NO_DESK = { scheduled: [], lines: [] };
+// a line's state, which the rail draws as a class: one of the three the face sends, anything else done
+const DESK_STATES = new Set(['running', 'done', 'failed']);
 const deskOf = d => (isRecord(d) ? {
   scheduled: Array.isArray(d.scheduled) ? d.scheduled.filter(o => isRecord(o) && typeof o.order === 'string') : [],
-  lines: Array.isArray(d.lines) ? d.lines.filter(l => isRecord(l) && typeof l.id === 'string') : [],
+  lines: Array.isArray(d.lines)
+    ? d.lines.filter(l => isRecord(l) && typeof l.id === 'string').map(l => (DESK_STATES.has(l.state) ? l : { ...l, state: 'done' }))
+    : [],
 } : NO_DESK);
 
 export const reducers = {

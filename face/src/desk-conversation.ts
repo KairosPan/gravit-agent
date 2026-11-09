@@ -110,7 +110,7 @@
  *
  * MODULE WEIGHT. src/desk.ts imports this module, and `npm run desk` and scripts/service.ts import src/desk.ts.
  * src/desk-session.ts brings src/desk-preset.ts (src/roles.ts, src/bots.ts, js-yaml) and dsh-agent with it,
- * and dsh-llm brings cordis. So this module imports nothing but types: src/desk.ts, src/desk-session.ts, src/watch.ts
+ * and dsh-llm brings cordis. So this module imports nothing but types and the leaf src/data-fence.ts: src/desk.ts, src/desk-session.ts, src/watch.ts
  * (its `cutAt`) and dsh-llm load on a conversation's first use ({@link loadMachinery}). The pause switch loads no more than it
  * did, and the cycle with src/desk.ts has no value edge.
  * @module
@@ -123,6 +123,7 @@ import type {
 import type { PhoneKind } from "./phone.ts";
 import type { AgentLike } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
+import { fenceData } from "./data-fence.ts";
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; desk lines add `desk:`. */
 const BIN = "gravit-face";
@@ -212,13 +213,17 @@ export type PhonePost = {
 };
 
 /** A phone message's content: one text part, the provenance line then `text`; or, with `context` (spec §16 H1b), three -
- * the provenance line, the context headed {@link CONTEXT_HEAD}, then `text`. */
-export function phoneContent(provenance: string, text: string, context?: string): { type: "text"; text: string }[] {
+ * the provenance line, the context headed {@link CONTEXT_HEAD} and quoted as data between `<<<desk-data NONCE>>>` and
+ * `<<<end NONCE>>>` (src/data-fence.ts `fenceData`, every line starting `[` or `<<<` given a leading space), then `text`.
+ * The context is the alert and the annotator's reply, which can carry what a web page said, and it lands in a turn the
+ * operator's words opened: fenced here, so both the conversation's post and the desk's (`FACE_ROUTER=0`) quote it.
+ * @param nonce - the fence's nonce; a fresh one when omitted (tests pass their own). */
+export function phoneContent(provenance: string, text: string, context?: string, nonce?: string): { type: "text"; text: string }[] {
   return context === undefined
     ? [{ type: "text", text: `${provenance}\n${text}` }]
     : [
       { type: "text", text: provenance },
-      { type: "text", text: `${CONTEXT_HEAD}\n${context}` },
+      { type: "text", text: `${CONTEXT_HEAD}\n${fenceData(context, { tag: "desk-data", heads: ["["], ...(nonce === undefined ? {} : { nonce }) })}` },
       { type: "text", text },
     ];
 }

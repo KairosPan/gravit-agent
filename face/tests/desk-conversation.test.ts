@@ -403,11 +403,13 @@ test("the context is its own part between the provenance line and the operator's
   const agent = h.tree.agents[0];
   assert.deepEqual(result, { opened: true, sessionId: agent.id });
   assert.equal(agent.followups[0].id, "telegram:43", "still keyed");
-  assert.deepEqual(agent.followups[0].content, [
-    { type: "text", text: "[telegram · operator · 14:03 ET]" },
-    { type: "text", text: "the message this replies to:\nNVDA 169.82 · ROBINHOOD 10:21:03 ET\n\nannotation:\nStop met." },
-    { type: "text", text: "why did this fire?" },
-  ]);
+  const parts = agent.followups[0].content as { type: string; text: string }[];
+  assert.equal(parts.length, 3);
+  assert.deepEqual(parts[0], { type: "text", text: "[telegram · operator · 14:03 ET]" });
+  const fenced = /^the message this replies to:\n<<<desk-data ([0-9a-f]{16})>>>\n([\s\S]*)\n<<<end \1>>>$/.exec(parts[1].text);
+  assert.ok(fenced, parts[1].text);
+  assert.equal(fenced[2], "NVDA 169.82 · ROBINHOOD 10:21:03 ET\n\nannotation:\nStop met.", "the context, quoted as data");
+  assert.deepEqual(parts[2], { type: "text", text: "why did this fire?" });
   await post(h, "and a plain one");
   assert.deepEqual(agent.followups[1].content, [{ type: "text", text: "[telegram · operator · 14:03 ET]\nand a plain one" }], "no context, one part as before");
   assert.deepEqual(h.lines, []);
@@ -848,12 +850,18 @@ test("a send that never settles is given a minute, then one line, and the next r
   ]);
 });
 
-test("the conversation imports nothing but types: desk.ts, desk-session.ts and dsh-llm load on first use", async () => {
+test("the conversation imports nothing but types and the data fence's leaf: desk.ts, desk-session.ts and dsh-llm load on first use", async () => {
   const { readFile } = await import("node:fs/promises");
-  const source = await readFile(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "desk-conversation.ts"), "utf8");
+  const src = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
+  const source = await readFile(join(src, "desk-conversation.ts"), "utf8");
   const imports = source.match(/^import\b.*$/gm) ?? [];
   assert.ok(imports.some((line) => line.includes('"./desk.ts"')), "it does name desk.ts");
-  for (const line of imports) assert.match(line, /^import type /, `a value edge: ${line}`);
+  for (const line of imports) {
+    if (line === 'import { fenceData } from "./data-fence.ts";') continue;
+    assert.match(line, /^import type /, `a value edge: ${line}`);
+  }
+  /* the leaf imports nothing */
+  assert.deepEqual((await readFile(join(src, "data-fence.ts"), "utf8")).match(/^import\b.*$/gm) ?? [], []);
 });
 
 test("the desk contract says where each answer goes, as the delivery does", () => {

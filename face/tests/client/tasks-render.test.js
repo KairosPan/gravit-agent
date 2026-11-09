@@ -166,7 +166,7 @@ test('a desk line links its session in History', () => {
   const line = h.match(/<details class="task-line"[^>]*data-task="desk:annotation:p1"[\s\S]*?<\/details>/)?.[0] ?? '';
   assert.match(line, / open>/);
   assert.match(line, /task-title">NVDA</);
-  assert.match(line, /task-status">Done 14:02</, 'the clock in New York');
+  assert.match(line, /task-status">Done 14:02 ET</, 'the clock in New York, saying ET');
   assert.match(line, /NVDA fell on &lt;guidance&gt;/);
   assert.match(line, /href="#\/history\/desk-9"/);
   assert.doesNotMatch(line, /<button/);
