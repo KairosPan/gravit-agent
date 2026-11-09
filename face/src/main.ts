@@ -34,7 +34,7 @@ import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
 import type { DeliverOpts, DeskConversationCtxLike } from "./desk-conversation.ts";
 import { resolveDeskRoute } from "./desk-session.ts";
 import { conversationDir, conversationFence, installConversation, type ConversationCtxLike, type ConversationHandle } from "./conversation.ts";
-import { installRouter, installTasks, routerEnabled, type TasksCtxLike, type TasksHandle } from "./tasks.ts";
+import { installRouter, installTasks, phoneConversation, routerEnabled, type TasksCtxLike, type TasksHandle } from "./tasks.ts";
 import { createPhoneClient, type PhoneClient } from "./phone.ts";
 import { announceCard } from "./card-notice.ts";
 import { marketQuotes } from "./market-quotes.ts";
@@ -426,17 +426,20 @@ await registerPanelRoutes(booted.ctx.webServer, deps);
  * readiness, and `dispose` orders the `shutdown` after the `boot` anyway.
  *
  * With the desk on, `installDesk` also creates the desk conversation's owner
- * (desk-conversation.ts) and starts it without awaiting it: the desk session -
- * cwd `desk/journal/` under the repo root this process chdir'd to - is ensured
- * and supervised from here on, Telegram or not, so a turn the operator opens in
- * the browser gets the desk's deadline, fence check and ledger record too. Its
+ * (desk-conversation.ts) - the outlet and the pause's choke point. With
+ * `FACE_ROUTER=0`, or once a conversation that could not be installed is bound
+ * as none, it is started without being awaited: the desk session - cwd
+ * `desk/journal/` under the repo root this process chdir'd to - is ensured and
+ * supervised, and answers the phone. Otherwise (`router`) the phone waits for
+ * `desk.bindRouter` below and reaches Gravit's one conversation, and the desk
+ * session is never opened. Its
  * model route is `FACE_DESK_MODEL`, validated as a bot's route is and falling
  * back to the default with one line (`resolveDeskRoute`); only a desk that is on
  * resolves one. `installModelSelection` is dsh-agent's, wrapped the way room.ts's
  * own default wraps it.
  *
  * And with the desk on and the `mcp-account` row not disabled, the phone bridge
- * (phone-bridge.ts) runs on that conversation: the operator's phone, through the
+ * (phone-bridge.ts) runs - on the one conversation once bound, else on the desk's: the operator's phone, through the
  * account at the row's URL - the proxy's - which holds the networks' tokens,
  * long-polls them and keeps an inbox the bridge reads (phone.ts). The face holds
  * no network's token. A disabled row, and there is no bridge and the status says
@@ -461,6 +464,9 @@ desk = installDesk(booted.ctx.webServer, {
   sessionCtx: booted.ctx as unknown as DeskConversationCtxLike,
   installModelSelection: (agentCtx, ref) => installModelSelection(agentCtx as unknown as Context, ref),
   ...(phone === undefined ? {} : { phone }),
+  /* the one conversation is coming: the phone waits for it (desk.bindRouter below), and the desk session is never
+   * opened unless its install fails */
+  router: routerEnabled(process.env),
   /* the watch (src/watch.ts) on the production defaults: the wall clock, the face's calendars, and SEC's filings
    * only once ALPHA_EDGAR_USER_AGENT names a contact */
   watchRow: {},
@@ -502,6 +508,9 @@ if (routerEnabled(process.env)) {
     tasks = router.tasks;
     console.log(`${BIN}: conversation: ${router.sessionId} on ${routerRoute.provider}/${routerRoute.model}`);
   }
+  /* the phone reaches the conversation from here on; a conversation that could not be installed leaves it the desk
+   * session's, as with FACE_ROUTER=0 */
+  desk.bindRouter("sessionId" in router ? phoneConversation(router.conversation, router.tasks.ops) : undefined);
 } else {
   console.log(`${BIN}: conversation: off (FACE_ROUTER=0)`);
 }

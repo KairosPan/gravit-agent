@@ -1256,7 +1256,7 @@ test("LINES: every row of the phone-line table, exactly", () => {
   assert.equal(LINES.afterClose(id), "preclose finished after the close; not sent - it describes a market that has moved");
   assert.equal(LINES.afterOpen("premarket"), "premarket finished after the open; not sent - it describes a market that has moved");
   assert.equal(LINES.budgetSpent(SPENT), "standing orders are refused for the rest of the day: the desk's token budget is spent (2,013,402 of 2,000,000 tokens since 00:00 ET)");
-  assert.equal(LINES.budgetReply(SPENT), "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml");
+  assert.equal(LINES.budgetReply(SPENT), "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. Standing orders and annotations wait for midnight ET, or raise budget.dailyTokens in standing.yml");
   const missed = { order: id, date: "2026-11-30", anchor: "2026-11-30T20:30:00.000Z" };
   assert.equal(LINES.missed({ ...missed, why: "asleep", asleep: { from: "2026-11-30T20:25:00.000Z", to: "2026-11-30T20:36:00.000Z" }, foundAt: "2026-11-30T20:36:00.000Z" }),
     "preclose · 2026-11-30 missed its 15:30 ET anchor: the face was asleep from 15:25 ET to 15:36 ET. A standing order never runs late");

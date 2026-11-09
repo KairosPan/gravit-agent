@@ -89,7 +89,7 @@ import type { MarketQuoteSource } from "./market-quotes.ts";
 import type { FiringRouteCtx, ScheduleDeps, ScheduleHandle } from "./schedule.ts";
 import type { StandingStatus } from "./standing.ts";
 import type { RouteRegistrar } from "./static.ts";
-import type { PhoneBridgeHandle } from "./phone-bridge.ts";
+import type { PhoneBridgeHandle, PhoneConversation } from "./phone-bridge.ts";
 import type { AccountPhoneStatus, PhoneClient } from "./phone.ts";
 import { DSH_PIN } from "./version.ts";
 import type { DeskCalendars } from "./market-clock.ts";
@@ -1102,16 +1102,18 @@ export async function noteBudgetSpent(
 }
 
 /**
- * The phone's line for a post while the day's budget is spent (the plan's Global Constraints):
- * `the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. It opens
- * again at midnight ET, or raise budget.dailyTokens in standing.yml` - numbers as `en-US` writes them,
- * and no `of <cap>` for a state that has none.
+ * The phone's line when the day's budget is spent (the plan's Global Constraints): `the desk's token budget for today
+ * is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. Standing orders and annotations wait for midnight ET, or
+ * raise budget.dailyTokens in standing.yml` - numbers as `en-US` writes them, and no `of <cap>` for a state that has
+ * none. The budget caps the unattended work - standing orders and annotations - not the phone's texts, which reach
+ * Gravit's one conversation unbudgeted (one-entry plan 3); only the desk session's fallback (`FACE_ROUTER=0`) still
+ * answers a phone post with it.
  * @param state - the day's budget.
  */
 export function budgetReplyLine(state: BudgetState): string {
   const cap = state.dailyTokens === undefined ? "" : ` of ${state.dailyTokens.toLocaleString("en-US")}`;
   return `the desk's token budget for today is spent: ${state.used.total.toLocaleString("en-US")}${cap} tokens since 00:00 ET. `
-    + "It opens again at midnight ET, or raise budget.dailyTokens in standing.yml";
+    + "Standing orders and annotations wait for midnight ET, or raise budget.dailyTokens in standing.yml";
 }
 
 /** The phone bridge as the status reports it (src/phone-bridge.ts): `configured`, whether the face has the account's
@@ -1312,7 +1314,7 @@ export function phoneLine(phone: PhoneStatus, now: Date): string {
  * The day's budget as one status line (ruling P2-8), numbers as `en-US` writes them: `budget: 1,234,567
  * tokens today, cap not set (budget.dailyTokens in standing.yml)` with no cap; `budget: 1,234,567 of
  * 2,000,000 tokens today` under it; `budget: spent, 2,013,402 of 2,000,000 tokens today; standing orders
- * and phone turns wait for 00:00 ET` once it is reached - and after any of them ` (ledger unreadable:
+ * and annotations wait for 00:00 ET` once it is reached - and after any of them ` (ledger unreadable:
  * <error>)` when the ledger could not be read, the zeros then counted being no measure of the day.
  * @param b - the day's budget.
  */
@@ -1322,7 +1324,7 @@ export function budgetLine(b: BudgetState): string {
   const line = cap === undefined
     ? `budget: ${used} tokens today, cap not set (budget.dailyTokens in standing.yml)`
     : b.spent
-      ? `budget: spent, ${used} of ${cap} tokens today; standing orders and phone turns wait for 00:00 ET`
+      ? `budget: spent, ${used} of ${cap} tokens today; standing orders and annotations wait for 00:00 ET`
       : `budget: ${used} of ${cap} tokens today`;
   return b.error === undefined ? line : `${line} (ledger unreadable: ${b.error})`;
 }
@@ -1639,6 +1641,10 @@ export interface DeskHandle {
   annotator?: Annotator;
   schedule?: Promise<ScheduleHandle | undefined>;
   watchRow?: Promise<WatchHandle | undefined>;
+  /** Bind Gravit's one conversation, once main.ts has installed it (`deps.router`): the phone's texts, `/stop` and
+   * `/status` go to it, and the desk session is never ensured; `undefined` - the install failed - and the desk
+   * session answers the phone as with `FACE_ROUTER=0`. The first call counts; a desk without `deps.router` ignores it. */
+  bindRouter(target: PhoneConversation | undefined): void;
   dispose(code: number): Promise<void>;
 }
 
@@ -1726,6 +1732,10 @@ const watchClock = (now: () => number): DeskClock => ({
  *   (no calendar needs it: the market clock is builtin); `schedule`, the clock's seams for tests - its
  *   clock, calendar (the XNYS one), calendars (either market's), script runner, builtins, tick and grace;
  *   `alertDeadlineMs`, an alert's annotation turn's deadline, {@link ALERT_DEADLINE_MS} when absent - a test seam;
+ *   `router`, whether Gravit's one conversation is coming (main.ts: `FACE_ROUTER` not `0`) - then the bridge and the
+ *   desk conversation's start wait for {@link DeskHandle.bindRouter}: bound, the phone reaches that conversation and the
+ *   desk session is neither ensured nor started (firings and annotations keep their fresh sessions, and the desk
+ *   conversation stays the outlet and the pause's choke point); bound to nothing, the desk works as without it;
  *   `watchRow`, the watch's switch and seams - its clock (the wall clock, `unref`'d), tick, calendars (over the
  *   schedule's), whether a pid lives, `edgar`, SEC's fetch and contact: `null` for none, absent for the face's
  *   own, the global `fetch` with `ALPHA_EDGAR_USER_AGENT` when that is set - the watch's filings poll and its why
@@ -1756,6 +1766,7 @@ export function installDesk(
     python?: string;
     schedule?: { clock?: DeskClock; calendars?: Partial<DeskCalendars> } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;
     alertDeadlineMs?: number;
+    router?: boolean;
     watchRow?: {
       clock?: DeskClock;
       tickMs?: number;
@@ -1796,7 +1807,7 @@ export function installDesk(
     quotes: deps.quotes,
     readState: () => deskStatus(status),
   }), { log });
-  if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), dispose: async () => { removeTools(); await removeGuard(); } };
+  if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), bindRouter: () => {}, dispose: async () => { removeTools(); await removeGuard(); } };
   const ready = appendEvent(home, { t: new Date(bootedAt).toISOString(), kind: "boot", pid: process.pid, version, deskEnabled: true }, { log });
   const stopWatch = installAsleepWatch({ now, ...deps.watch, append: (event) => appendEvent(home, event, { log }) });
   const clock: DeskClock = { now, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout) };
@@ -1834,13 +1845,25 @@ export function installDesk(
       log,
     });
   let disposing: Promise<void> | undefined;
+  /* Gravit's one conversation, once main.ts binds it (`deps.router`): until then the bridge waits, so no phone text
+   * reaches the desk session first; dispose ends the wait too. */
+  let routed: PhoneConversation | undefined;
+  let decide: () => void = () => {};
+  const decided = deps.router === true ? new Promise<void>((done) => { decide = done; }) : Promise.resolve();
+  let bound = deps.router !== true;
+  const bindRouter = (target: PhoneConversation | undefined): void => {
+    if (bound) return;
+    bound = true;
+    routed = target;
+    decide();
+  };
   /* The bridge's module loads on first use, as the conversation's machinery does (src/desk-conversation.ts,
    * MODULE WEIGHT): the pause switch and scripts/service.ts import this module and never run a bridge. Not
    * awaited, and it never rejects - a module that cannot load, or a bridge that throws as it installs, is one line; a
    * module that arrives once dispose has begun installs nothing. */
   const client = deps.phone;
-  const bridging = client === undefined || conversation === undefined ? Promise.resolve() : import("./phone-bridge.ts").then(
-    (bridgeModule) => {
+  const bridging = client === undefined || conversation === undefined ? decided : Promise.all([import("./phone-bridge.ts"), decided]).then(
+    ([bridgeModule]) => {
       if (disposing !== undefined) return;
       bridge = bridgeModule.installPhoneBridge({
         phone: client,
@@ -1852,6 +1875,8 @@ export function installDesk(
         /* a reply's alert and its annotation (spec §16 H1b): the watch is installed after the bridge, so it is read at
          * each reply - none until it runs, and none in a face that runs none */
         contextFor: (messageId) => watch?.contextFor(messageId),
+        /* bound once, before the bridge starts: Gravit's one conversation takes the phone's texts */
+        router: () => routed,
       });
     },
   ).catch((err: unknown) => {
@@ -1861,7 +1886,8 @@ export function installDesk(
   /* The conversation starts once the bridge has set the outlet (or there is no bridge): a start that resumed the desk
    * session may answer a phone turn the restart cut at once (src/desk-conversation.ts AFTER A RESTART), and that line
    * must find the outlet. `bridging` never rejects; were it to, the conversation starts all the same. */
-  const startConversation = (): Promise<void> | undefined => conversation?.start();
+  /* with the one conversation bound, never; with `deps.router` and no bind - a dispose ended the wait - never either */
+  const startConversation = (): Promise<void> | undefined => (bound && routed === undefined ? conversation?.start() : undefined);
   void bridging.then(startConversation, startConversation);
   /* The standing orders' clock (src/schedule.ts) loads on first use too - with it src/firing.ts, src/standing.ts and
    * js-yaml - once the bridge has set the outlet, so the boot's lines reach the phone. It never rejects: a module that
@@ -1948,8 +1974,10 @@ export function installDesk(
     ...(annotator === undefined ? {} : { annotator }),
     ...(scheduling === undefined ? {} : { schedule: scheduling }),
     ...(watching === undefined ? {} : { watchRow: watching }),
+    bindRouter,
     dispose(code) {
       disposing ??= (async () => {
+        decide();
         await (await scheduling)?.dispose();
         await (await watching)?.dispose();
         await annotator?.dispose();

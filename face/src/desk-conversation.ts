@@ -9,6 +9,12 @@
  * DeskConversation.start} - because what it does for a turn does not depend on who opened it: a turn the
  * operator opens in the browser gets the same deadline, fence check and ledger record as a phone turn.
  *
+ * THE FALLBACK (one-entry plan 3). With Gravit's one conversation bound (src/desk.ts `bindRouter`), the phone's texts go
+ * there - pause, fence and key, but no budget (src/conversation.ts) - and this conversation is never started: it stays
+ * only the outlet and the pause's choke point ({@link DeskConversation.deliver}). The desk session answers the phone
+ * only with `FACE_ROUTER=0` or a conversation that could not be installed, and only there does the budget below still
+ * refuse a phone post.
+ *
  * BEFORE A TURN ({@link DeskConversation.post}), in this order: the pause - an `OFF` past its `until` is lifted,
  * one in force refuses (src/desk.ts); the day's token budget, when the owner passes one - spent, it refuses
  * with src/desk.ts `budgetReplyLine`, no turn and no event, and one that cannot be read lets the post go on,
@@ -141,9 +147,10 @@ const DELIVERY_MS = 60_000;
 const SHUTDOWN_IDLE_MS = 2_000;
 /** How long {@link DeskConversation.dispose} gives a start, post or renew under way to settle. */
 const SHUTDOWN_QUEUE_MS = 5_000;
-/** The most phone texts one `desk-carry` holds, oldest first; and the longest each is, in characters. */
-const CARRY_MAX = 20;
-const CARRY_TEXT_MAX = 4_000;
+/** The most phone texts one `desk-carry` holds, oldest first; and the longest each is, in characters. The
+ * conversation's carry (src/conversation.ts) holds as many. */
+export const CARRY_MAX = 20;
+export const CARRY_TEXT_MAX = 4_000;
 /** How many phone texts' `at` the conversation remembers by key, newest kept, for a `desk-carry` to name. */
 const AT_KEPT = 200;
 
@@ -424,7 +431,7 @@ export function loggedId(event: EventLike): string | undefined {
 
 /** The operator's own words in a phone message the conversation built: the last of a reply's three parts, else its one
  * part after the provenance line. */
-function operatorText(message: MessageLike): string {
+export function operatorText(message: MessageLike): string {
   const parts = (message.content ?? []).flatMap((part) => (typeof part?.text === "string" ? [part.text] : []));
   if (parts.length > 1) return parts[parts.length - 1];
   const only = parts[0] ?? "";
@@ -439,7 +446,7 @@ type Carried = {
 };
 
 /** A `desk-carry` as the ledger holds one. */
-type Carry = Extract<DeskEvent, { kind: "desk-carry" }>;
+export type Carry = Extract<DeskEvent, { kind: "desk-carry" }>;
 
 /** Whether a ledger line of kind `desk-carry` has the shape a dispose writes: a session id, `queued` an array of
  * string keys and texts with an optional string `at`, and `cut`, when present, an object with a numeric turn. */
@@ -455,6 +462,26 @@ function isCarry(e: DeskEvent): e is Carry {
   if (x.cut === undefined) return true;
   const c = x.cut as { turn?: unknown; key?: unknown; at?: unknown } | null;
   return typeof c === "object" && c !== null && typeof c.turn === "number" && Number.isFinite(c.turn) && optString(c.key) && optString(c.at);
+}
+
+/** Every `desk-carry` in `events` that no `desk-carried` names after it, oldest first - a malformed one skipped, with
+ * one line: the ledger's reader checks only `t` and `kind`, and a hand-edited line must never stop the boot. The desk's
+ * start and the conversation's boot (src/conversation.ts) both answer them.
+ * @param events - the ledger's events, in order.
+ * @param log - where the line goes.
+ * @param who - the line's prefix after the face's name (`desk`, `conversation`). */
+export function pendingCarries(events: readonly DeskEvent[], log: (line: string) => void, who = "desk"): Carry[] {
+  const pending: Carry[] = [];
+  events.forEach((e, i) => {
+    if (e.kind !== "desk-carry") return;
+    if (events.slice(i + 1).some((later) => later.kind === "desk-carried" && later.of === e.t)) return;
+    if (!isCarry(e)) {
+      log(`${BIN}: ${who}: the desk-carry of ${String((e as { t?: unknown }).t)} in the ledger is malformed and is skipped`);
+      return;
+    }
+    pending.push(e);
+  });
+  return pending;
 }
 
 /** dsh-agent's `Agent.whenIdle`, which the structural {@link AgentLike} leaves out: it resolves once the
@@ -716,7 +743,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     } catch (err) {
       log(`${BIN}: desk: the ledger could not be read at boot (${errText(err)}); what a graceful stop carried waits for a later boot`);
     }
-    const carries = ledger === undefined ? [] : pendingCarries(ledger);
+    const carries = ledger === undefined ? [] : pendingCarries(ledger, log);
     if (!resumed && carries.length === 0) return;
     if (resumed) {
       /* the turns a carry names on this session: their line is the carry's, when dsh closed them `disposed` */
@@ -760,22 +787,6 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
       }
       if (!done) return;
     }
-  };
-
-  /** Every `desk-carry` in `events` that no `desk-carried` names after it, oldest first - a malformed one skipped, with
-   * one line: the ledger's reader checks only `t` and `kind`, and a hand-edited line must never stop the boot. */
-  const pendingCarries = (events: readonly DeskEvent[]): Carry[] => {
-    const pending: Carry[] = [];
-    events.forEach((e, i) => {
-      if (e.kind !== "desk-carry") return;
-      if (events.slice(i + 1).some((later) => later.kind === "desk-carried" && later.of === e.t)) return;
-      if (!isCarry(e)) {
-        log(`${BIN}: desk: the desk-carry of ${String((e as { t?: unknown }).t)} in the ledger is malformed and is skipped`);
-        return;
-      }
-      pending.push(e);
-    });
-    return pending;
   };
 
   /** A carry, answered (the module header's WHAT A GRACEFUL STOP CARRIED): each text posted again, in order; then the

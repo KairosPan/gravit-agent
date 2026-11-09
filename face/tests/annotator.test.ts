@@ -255,7 +255,7 @@ test("the pause, the budget and the fence refuse before any agent is made", asyn
   await mkdir(join(h.root, "desk", "journal", ".git"), { recursive: true }); // the budget is read before the fence
   assert.deepEqual(await annotate(h, "a-000000000002", 12), {
     refused: "budget",
-    line: "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml",
+    line: "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. Standing orders and annotations wait for midnight ET, or raise budget.dailyTokens in standing.yml",
   });
   state = { ...state, spent: false };
   const fenced = await annotate(h, "a-000000000003", 13);

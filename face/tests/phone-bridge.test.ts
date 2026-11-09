@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { MUTE_FILE, MUTE_USAGE, OFF_FILE, deskDir, deskStatusLines, readEvents, type DeskStatus } from "../src/desk.ts";
 import type { DeskConversation, DeskOutlet, PostResult } from "../src/desk-conversation.ts";
 import type { DeskClock } from "../src/desk-session.ts";
-import { CURSOR_FILE, deliveryKey, installPhoneBridge, parseCommand, type PhoneBridgeHandle } from "../src/phone-bridge.ts";
+import { CURSOR_FILE, ONE_CONVERSATION, deliveryKey, installPhoneBridge, parseCommand, type PhoneBridgeHandle, type PhoneConversation } from "../src/phone-bridge.ts";
 import { WIRE_ID, createPhoneClient, type InboxMessage } from "../src/phone.ts";
 import { fakePhoneAccount, type FakePhoneAccount } from "./fake-phone-account.ts";
 
@@ -114,6 +114,23 @@ class FakeConversation {
   readonly setOutlet = (outlet: DeskOutlet | undefined): void => { this.outlets.push(outlet); };
 }
 
+/** Gravit's one conversation as the bridge reaches it once bound: its posts, its stops and a status. */
+class FakeRouter implements PhoneConversation {
+  readonly posts: PostInput[] = [];
+  readonly stops: string[] = [];
+  readonly answers: PostResult[] = [];
+  stopAnswer = true;
+  readonly post = async (input: PostInput): Promise<PostResult> => {
+    this.posts.push(input);
+    return this.answers.shift() ?? { opened: true, sessionId: "conv-1" };
+  };
+  readonly stop = async (reason: string): Promise<boolean> => {
+    this.stops.push(reason);
+    return this.stopAnswer;
+  };
+  readonly status = async (): Promise<{ sessionId?: string; running: number; waiting: number }> => ({ sessionId: "conv-1", running: 2, waiting: 1 });
+}
+
 const noTurns: DeskStatus["turnsToday"] = { count: 0, usage: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } };
 /** The face's status as `/status` reads it: up 90 minutes, paused from the phone until 16:00 ET. */
 const STATUS: DeskStatus = {
@@ -141,7 +158,11 @@ async function account(): Promise<FakePhoneAccount> {
 
 async function rig(
   label: string,
-  o: Partial<Omit<Rig, "bridge" | "lines">> & { status?: () => Promise<DeskStatus>; contextFor?: (messageId: string) => string | undefined } = {},
+  o: Partial<Omit<Rig, "bridge" | "lines">> & {
+    status?: () => Promise<DeskStatus>;
+    contextFor?: (messageId: string) => string | undefined;
+    router?: () => PhoneConversation | undefined;
+  } = {},
 ): Promise<Rig> {
   const home = o.home ?? await freshHome(label);
   const acc = o.account ?? await account();
@@ -152,6 +173,7 @@ async function rig(
     phone: createPhoneClient({ url: acc.url, secrets: [] }),
     home, conversation, clock, status: o.status ?? (async () => STATUS), log: (line) => { lines.push(line); },
     ...(o.contextFor === undefined ? {} : { contextFor: o.contextFor }),
+    ...(o.router === undefined ? {} : { router: o.router }),
   });
   return { home, account: acc, clock, conversation, lines, bridge };
 }
@@ -333,6 +355,102 @@ test("commands answer as chat to the network they came from; /pause and /mute wr
     assert.equal(existsSync(join(deskDir(r.home), OFF_FILE)), true, "and the pause stands");
     assert.ok(r.account.sends.every((s) => s.kind === "chat" && s.network === "telegram"), "every line a chat reply to telegram");
     assert.deepEqual((await readEvents(r.home)).events.map((e) => e.kind), ["off-set", "off-set", "mute-set"]);
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+/* ---------- the one conversation (one-entry plan 3) ---------- */
+
+test("with the conversation bound, a text posts to it and not to the desk", async () => {
+  const router = new FakeRouter();
+  let bound: PhoneConversation | undefined;
+  const r = await rig("routed-post", { router: () => bound });
+  try {
+    await polled(r, 1);
+    text(r, "before the bind", 1);
+    await polled(r, 2);
+    bound = router;
+    const m = text(r, "after the bind", 2);
+    await polled(r, 3);
+    assert.deepEqual(r.conversation.posts.map((p) => p.text), ["before the bind"], "the desk only until the router is bound");
+    assert.deepEqual(router.posts.map((p) => p.text), ["after the bind"]);
+    const p = router.posts[0];
+    assert.equal(p.key, deliveryKey(m));
+    assert.deepEqual(p.message, { kind: "telegram", network: "telegram", messageId: "telegram:2" });
+    assert.deepEqual(p.source, { kind: "telegram", network: "telegram", at: NOW });
+    assert.deepEqual(r.account.sends, [], "an opened turn answers through the outlet");
+    assert.ok(r.conversation.outlets[0] !== undefined, "the desk conversation stays the outlet");
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("/new answers that there is one conversation", async () => {
+  const router = new FakeRouter();
+  const r = await rig("routed-new", { router: () => router });
+  try {
+    await polled(r, 1);
+    text(r, "/new", 1);
+    await polled(r, 2);
+    assert.equal(r.conversation.renews, 0, "no desk conversation is opened");
+    assert.deepEqual(chats(r), [["chat", "telegram", ONE_CONVERSATION]]);
+    assert.match(ONE_CONVERSATION, /^there is one conversation/);
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("/status names the conversation and the tasks", async () => {
+  const router = new FakeRouter();
+  const r = await rig("routed-status", { router: () => router });
+  try {
+    await polled(r, 1);
+    text(r, "/status", 1);
+    await polled(r, 2);
+    assert.deepEqual(r.account.sends[0], { kind: "chat", network: "telegram", text: [
+      "up 1h 30m since 2026-10-20T17:00:00.000Z · desk on",
+      "desk: paused since 14:00 ET by telegram until 16:00 ET (npm run desk -- resume)",
+      "phone: telegram polling, last poll 14:29 ET, 0 queued, 1 stranger",
+      "conversation conv-1",
+      "tasks: 2 running, 1 waiting for you",
+      "turns today 3",
+    ].join("\n") });
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("/stop cancels the conversation's turn", async () => {
+  const router = new FakeRouter();
+  const r = await rig("routed-stop", { router: () => router });
+  try {
+    await polled(r, 1);
+    text(r, "/stop", 1);
+    await polled(r, 2);
+    router.stopAnswer = false;
+    text(r, "/stop", 2);
+    await polled(r, 3);
+    assert.deepEqual(router.stops, ["stopped from the phone", "stopped from the phone"]);
+    assert.deepEqual(r.conversation.stops, [], "the desk conversation is not asked");
+    assert.deepEqual(r.account.texts(), ["stopped", "nothing is running"]);
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
+test("while paused, a text is refused with the paused line", async () => {
+  const router = new FakeRouter();
+  const PAUSED = "paused since 14:00 ET by telegram until 16:00 ET; a terminal resumes it: npm run desk -- resume";
+  router.answers.push({ refused: "paused", line: PAUSED });
+  const r = await rig("routed-paused", { router: () => router });
+  try {
+    await polled(r, 1);
+    text(r, "anything new?", 1);
+    await polled(r, 2);
+    assert.deepEqual(router.posts.map((p) => p.text), ["anything new?"]);
+    assert.deepEqual(r.conversation.posts, []);
+    assert.deepEqual(chats(r), [["chat", "telegram", PAUSED]]);
   } finally {
     await r.bridge.dispose();
   }

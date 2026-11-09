@@ -24,6 +24,7 @@ import type { ConversationCtxLike, ConversationHandle } from "./conversation.ts"
 import { CONVERSATION_PRESET } from "./desk-names.ts";
 import { readSessionEvents, type DeskSessionPersistenceLike } from "./desk-session.ts";
 import type { DeskAgentLike, DeskToolsCtxLike } from "./desk-tools.ts";
+import type { PhoneConversation } from "./phone-bridge.ts";
 import { etDayStart } from "./et.ts";
 import { fencedGet, fencedPost, HttpError } from "./http.ts";
 import type { AgentLike, PersistedSnapshotLike, RoomDeps } from "./room.ts";
@@ -511,6 +512,28 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
         await Promise.all(handles.map((h) => h.dispose()));
       })();
       return disposing;
+    },
+  };
+}
+
+/** Gravit's one conversation as the phone bridge reaches it (src/phone-bridge.ts `PhoneConversation`; src/desk.ts
+ * binds it): `post` and `stop` are the conversation's; `status` names its session and counts its tasks - `running`
+ * those running or stalled, `waiting` those waiting for the operator at a gate.
+ * @param conversation - the conversation's handle.
+ * @param ops - its tasks' operations.
+ */
+export function phoneConversation(conversation: ConversationHandle, ops: Pick<TaskOps, "list">): PhoneConversation {
+  return {
+    post: (input) => conversation.post(input),
+    stop: (reason) => conversation.stop(reason),
+    status: async () => {
+      const views = await ops.list();
+      const sessionId = conversation.current()?.sessionId;
+      return {
+        ...(sessionId === undefined ? {} : { sessionId }),
+        running: views.filter((v) => v.state === "running" || v.state === "stalled").length,
+        waiting: views.filter((v) => v.state === "waiting").length,
+      };
     },
   };
 }
