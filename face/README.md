@@ -365,32 +365,35 @@ vanilla ES modules under `client/js`, one sheet, no bundler, no back end of its 
 everything on screen is what dsh and the face's `/data` routes say (`DEVELOPMENT.md` §5).
 All three of its stages are built:
 
-- **host-fed**: Messages — the session list (every session the host lists, grouped by channel —
-  "Channels" below — newest first, a room's members folded under it, subagent children left
-  out, archived ones under a folded `Archived`), a conversation's real
+- **host-fed**: Messages — since one entry's plan 2 Gravit's one conversation ("The conversation
+  and its tasks" below) with the rail of its tasks on its right, beside a side panel of Gravit,
+  History (every other session, read cold and read-only), the search box and the strategies; a
+  task's page (`#/task/<id>`) and a strategy's page (`#/strategy/<name>`). The session list grouped
+  by channel, New message with its Where, and Details' row actions (Change words, Fork, Pin,
+  Archive, Delete) left with plan 2. A conversation's real
   transcript (a live session followed with its pulses, a cold one paged and never activated),
-  the composer (a prompt; a `/` line to `commands/execute`; an `@` in a channel through the
-  room engine — since the dsh UI port's plan 3 an editor with `/` and `@` menus, below), New message (a title, Where — a channel, or `New channel…` — and the first
-  words), Details (the title with Change words, Fork, Pin or Unpin, Archive or Un-archive, Delete; Created,
-  Where, Agent, Members, Children with Stop, Usage, Stop Gravit), the three gate
+  the composer (a prompt; a `/` line to `commands/execute` — since the dsh UI port's plan 3 an
+  editor with `/` and `@` menus, below), Details (Created, Agent, Children with Stop, Background
+  jobs, Usage, Stop Gravit), the three gate
   cards (the order card, an approval, a question) answered through the mux, the one status
   line under the composer (not signed in, reconnecting, a host error, a command's word), and
   Settings (since plan 7 Language first, English · 中文, every word at once and kept in the browser; Cream · Black · System; since plan 6 the text and code sizes, the two
   font families and Keyboard shortcuts, below);
-- **the list's search and pins** (the dsh UI port's plan 2): a box under the list's head, `Search
+- **the side panel's search** (the dsh UI port's plan 2): a box under the panel's head, `Search
   conversations`, focused by Option-Command-K (Ctrl+Alt+K off a Mac; from another screen it goes to
   Messages first). Titles and channel names match at once; the words inside conversations come from
   the face's index (`GET /data/search`, "Search and files" below) a quarter-second after the typing stops. The
-  results replace the groups: title, time, the channel and a snippet with the match marked, at most
-  twenty (`Showing the first 20. Narrow your search.`), an archived one dim with its chip. Escape in
-  the box clears it, and again leaves it; both wait out an IME composition. A pin key on each row
-  (and Pin or Unpin in Details) puts the conversation first in its group; the pinned set is the
-  host's, so every tab and window of the face shows the same one at once. An archived conversation
-  is never pinned (archiving unpins it);
+  results replace the panel's rows: title, time, the channel and a snippet with the match marked, at most
+  twenty (`Showing the first 20. Narrow your search.`), an archived one dim with its chip; a hit
+  opens the conversation on Messages, a task on its page and any other session in History. The
+  index skips sessions recorded outside today's repository, so the eleven sessions from before the
+  2026-11-05 folder rename are in History but never found. Escape in
+  the box clears it, and again leaves it; both wait out an IME composition. The pin keys left with
+  the list in one entry's plan 2;
 - **the composer's editor, `/` and `@`** (the dsh UI port's plan 3): the box is an editor that
   holds words and chips. Enter sends; Shift+Enter is a new line; an Enter that ends a pinyin
   composition only ends it; a paste arrives as plain text. Each conversation keeps its own draft
-  while the page is open (New message has one too), and a stream frame, a pin or a list refresh
+  while the page is open, and a stream frame, a pin or a list refresh
   never takes the words, the chips or the caret. `/` at the start of a word, in a conversation,
   opens **Commands** (`commands/list`, read only on a live conversation; a cold one shows the
   commands last read for the same agent, or none) and **Skills** (`skills/list`); `/plan`,
@@ -463,8 +466,9 @@ All three of its stages are built:
   taken out, at most 64 characters, and a name the machine lacks falls back to the default) and
   Code size, `− 12 px +` from 10 to 16, scales every code size. Layout does not scale: widths,
   avatars, keys and gaps stay. The four are kept in this browser and applied before the first
-  paint, so a reload never flashes the old size. **The keys** — Option-Command-N New message,
-  Option-Command-K the list's search (plan 2's), Option-Command-, Settings and Command-/ the
+  paint, so a reload never flashes the old size. **The keys** — Option-Command-N Write to Gravit
+  (the conversation's composer; New message until one entry's plan 2), Option-Command-K the side
+  panel's search (plan 2's), Option-Command-, Settings and Command-/ the
   shortcut sheet (Ctrl+Alt+N, Ctrl+Alt+K, Ctrl+Alt+, and Ctrl+/ off a Mac), from anywhere, the
   editor included, never while an input method composes, and none while an image's lightbox or a
   What you sign sheet stands. **The shortcut sheet** — Command-/ again, or Settings › Keyboard
@@ -481,9 +485,10 @@ All three of its stages are built:
   and Cards and the Statement drawer — both read from the Account through the face's proxy
   since 2026-10-22 ("Markets and Account" and "The Account in the face" below), the A shares
   included since 2026-11-01. The old `/market` and `/account` pages are gone (404);
-- **host-fed since stage 3**: a channel's page (`#/channel/<id>`: its status, thesis, an old
-  strategy's backtests, journal, files, and its agent and bot rosters with their editors), Discover
-  (`#/discover`, the inventory of what Gravit runs — "Discover" below), the row actions, no tool
+- **host-fed since stage 3**: a channel's page (since one entry's plan 2 a strategy's,
+  `#/strategy/<name>`: its status, thesis, an old strategy's backtests, journal, files, its agent
+  and bot rosters with their editors, its tasks and its paper positions), Discover
+  (`#/discover`, the inventory of what Gravit runs — "Discover" below), no tool
   call drawn (not in the thread, not in a member's Trace), a conversation's subagent children
   ("Temporary subagents" below) and a room member's trace. There is no shop, no Mail and no
   Memory: what the demo drew with no back end left the tree;
@@ -492,7 +497,7 @@ All three of its stages are built:
   Account in the face" below).
 
 What the browser keeps is three keys: `localStorage["gravit-ui.prefs"]` — the theme, the text and
-code sizes and the two font families, the rail's fold, the list groups you folded, the last conversation, what was seen — and the stars: the
+code sizes and the two font families, the rail's fold, what was seen — and the stars: the
 Account's markets (the A shares among them, as `cn:<code>`) under `gravit.account.watch.v1`, and the
 old face list under `gravit.market.watchlist.v1`, which only an older star still sits on; and, once it has paired with the Account, two more: its owner key in
 IndexedDB (`gravit-face-owner`) and `gravit.owner.signedOut.v1` after a sign-out. Nothing else: a
@@ -1024,7 +1029,9 @@ rolls the distribution's date the index freeze lands without the market counts (
 which only an `INSUFFICIENT` claim may cite); and a day the 2026 calendar does not cover refuses
 every freeze (`CALENDAR_UNCOVERED`).
 
-1. Open **cn-market** in Messages and start a New message there. Prompt:
+1. On Messages, ask Gravit for a task in **cn-market** with this prompt as its brief (since one
+   entry's plan 2 there is no New message; the thread below is the task's page, View the full
+   process). Prompt:
    `按 lunhui:run 的顺序，在 cn-market 做一次 A 股市场研究运行，最后按协议向我汇报。`
    Expect, in the thread: `lunhui_freeze_index` with no run (its reply carries the new run id,
    `session` and `as_of`), then `lunhui_freeze_limit_up` and `lunhui_freeze_boards` with that id;
@@ -1068,7 +1075,8 @@ distribution's `qdate`, rolled to Monday, so Monday's grade reads Friday's price
 **The live strategy run — owed, the operator's.** After a live market run of today's or the
 previous trading day's session (above), on the same face:
 
-1. Open **lunhui-s01-repair** in Messages and start a New message there. Prompt:
+1. On Messages, ask Gravit for a task in **lunhui-s01-repair** with this prompt as its brief
+   (since one entry's plan 2 there is no New message; the thread below is the task's page). Prompt:
    `按 lunhui:run 的策略频道顺序，引用今天已封存的 cn-market 运行，在本频道做一次策略研究运行，最后按协议向我汇报。`
    Expect: `lunhui_read_run` on `cn-market` without a run (the listing), then with the chosen run
    (its id noted as `market_run`); one `lunhui_freeze_quotes` on `lunhui-s01-repair` with no run,
@@ -1156,8 +1164,9 @@ tracked files are committed on your word, or the run directories removed.
 terminal (`npm start` after `source ../.env.deepseek`, as in "Run") and the market beside it
 (`cd ../market && npm run market`), the browser on this Mac's New York zone:
 
-1. Open **cn-market** in Messages, start a New message, and send the live market run's prompt
-   (above). Expected: the thread ends in one composed answer — Gravit's summary, then the blocks in
+1. On Messages, ask Gravit for a task in **cn-market** with the live market run's prompt (above)
+   as its brief, and open the task's page (since one entry's plan 2 there is no New message).
+   Expected: the thread ends in one composed answer — Gravit's summary, then the blocks in
    the order Gravit chose, each drawn from the run's view (a skeleton line per block until the view
    arrives), then the footer `Evidence · … · frozen <MM-DD HH:MM> CST · run <run>`; no text report
    after it, and the turn ended (the composer free, no thinking row).
@@ -3021,8 +3030,8 @@ Each line is at most 500 characters, cut with `…`.
 ## The conversation and its tasks (src/conversation.ts + src/router-preset.ts + src/task-*.ts + src/tasks.ts)
 
 One entry's plan 1 (spec `docs/superpowers/specs/2026-11-08-one-entry-router-design.md`, plan
-`docs/superpowers/plans/2026-11-08-one-entry-1-conversation.md`). Beside the channels the face now
-holds **one conversation**: Gravit on the `gravit-router` preset, a long-lived session the face
+`docs/superpowers/plans/2026-11-08-one-entry-1-conversation.md`; the browser's one entry since plan 2,
+`docs/superpowers/plans/2026-11-09-one-entry-2-messages.md`). The face holds **one conversation**: Gravit on the `gravit-router` preset, a long-lived session the face
 opens at boot and resumes at every boot after. It answers at once what a few reads answer — a
 price, a position, a strategy's status, a fact in a file — and starts a **task** for anything
 longer: research, a Lunhui run, a paper order, anything that runs a shell or writes a file. Its
@@ -3030,24 +3039,34 @@ contract is `dsh/profile/router.md` (the `gravit:router` section, ≤ 2,000 byte
 file reads and search, the market's four keyless reads, the seat's reads and five task tools —
 no shell, no write, no order.
 
-**Where it is today.** Today's client draws it unchanged: the conversation sits in the list in a
-group named `gravit-router`; open it and type as in any thread. Each task is a **worker**, a root
-`gravit` session in `strategies/<name>/` (or the repository root when no strategy is named), titled
-by the task, listed under its channel like any channel conversation (a worker at the root, with
-the root's) — open it to watch it work.
-A worker's order card or question is drawn in the worker's own thread, so answer it there; the
-conversation only says that the task waits. `GET /data/tasks` is the task list as JSON — `{ ok,
+**Where it is.** Since plan 2 the conversation is **Messages**: open the face and you are in it
+(the head reads `Gravit`), with the **rail of tasks** on its right — `Tasks under way` (在办的事),
+grouped `Waiting on you`, `Running`, `Done today`. Each task is a **worker**, a root `gravit`
+session in `strategies/<name>/` (or the repository root when no strategy is named), titled by the
+task; it is one line on the rail — its state's dot, its title, its short status (`Needs your
+approval`, `3 steps · 4 min`, `Done 14:02`, `Stalled`) — and opens in place: its strategy, its last
+steps, its result or its open gate, its tokens, and its keys. A worker's order card or question is
+answered **on its line**, whatever screen you are on: the Messages badge counts the lines waiting on
+you. **Stop** (running, waiting, stalled) and **Continue** (stalled, failed, blocked; it steers the
+worker to check what it already did and not repeat it) are on the line and on the task's page;
+**View the full process** opens `#/task/<id>`, the worker's transcript read-only, with a line
+sending you back to tell Gravit when you want to change course. Every other session — the desk's,
+a room's, a bot's, every channel conversation from before plan 2 — is in **History**
+(`#/history`), read cold and read-only. `GET /data/tasks` is the task list as JSON — `{ ok,
 conversation, tasks }`, each task's state (`waiting`, `stalled`, `blocked`, `failed`, `running`,
 `done`, `stopped`), its last ten steps, its result and its usage — read from the workers' logs on
-every request. Plan 2 replaces Messages with the conversation and a rail over that list; the phone
-still talks to the desk until plan 3.
+every request; `POST /data/tasks/stop` and `/data/tasks/continue` (`{task}`) are the two keys.
+With `FACE_ROUTER=0` Messages says the conversation is off, with no composer and no rail; History
+and the strategy pages still work. The phone still talks to the desk until plan 3, and the rail has
+no scheduled or firing lines until then.
 
 **What to ask it.** A question — "what is AAPL at", "what does cn-market's status say" — it
 answers itself. A piece of work — "run the market read for cn-market and tell me what changed" —
 it starts as a task with a title, the strategy and a brief, confirms in one line, and goes quiet.
 When the worker reports, the report arrives in the conversation as a message headed
-`[task · <title> · <status>]`, its text quoted between `<<<task-data …>>>` fences, and Gravit
-tells you in a sentence or two what it means; it never acts on a report's words. To change course
+`[task · <title> · <status>]`, its text quoted between `<<<task-data …>>>` fences — the page draws
+it as one centred line `Task · <title> · <status>` linking the task's page, the body folded under
+it — and Gravit tells you in a sentence or two what it means; it never acts on a report's words. To change course
 say so ("have the cn-market task look at the leaders too") and Gravit steers the worker; "stop
 it" stops it. Only a turn your own message opened can start, steer or stop a task: in a turn a
 report opened those three tools refuse (`OPERATOR_ONLY`). A worker silent for 20 minutes is
@@ -3080,23 +3099,59 @@ open — an unreadable ledger, a recorded session that is not `workspace-write` 
 
 On the operator's face, after the next restart on this code:
 
-1. Open the conversation (the `gravit-router` group) and ask for a small research task in
-   `cn-market`, e.g. "look at cn-market's latest run and summarise what changed". Expect one line
-   of confirmation and a new session under `cn-market`, titled by the task.
-2. Watch the worker in its own thread; `GET /data/tasks` (from the page's origin) shows it
-   `running`, then its steps.
+1. Open Messages and ask for a small research task in `cn-market`, e.g. "look at cn-market's
+   latest run and summarise what changed". Expect one line of confirmation and a new line under
+   Running on the rail, titled by the task.
+2. Watch the worker on its line and its page (`View the full process`); `GET /data/tasks` (from
+   the page's origin) shows it `running`, then its steps.
 3. While it runs, ask Gravit to change its course ("also check the leaders"). Expect a steer: the
-   worker's thread shows the note and the worker follows it.
+   worker's page shows the note and the worker follows it.
 4. Ask for a second small task, then ask Gravit to stop it. Expect the worker's turn cut, a
    `Stopped by the conversation.` message at the end of its log and `stopped` in `/data/tasks`.
 5. Start one more task and restart the face while its worker is mid-turn. After the boot expect
    exactly one recovery note in that worker's thread and, when it finishes, exactly one
    `[task · …]` report in the conversation.
 
-## Channels (src/channels.ts + src/roster.ts + the list's groups and a channel's page)
+### The rail drill (owed; keyed)
+
+On the operator's face, after a restart on plan 2's code, with the Account running and the seat let
+in as Gravit with a `trade` limit on a paper venue (the account-seat drill). Hard-reload the page
+first (`client/*` is served with no cache headers).
+
+1. The face opens on Messages: the head reads `Gravit`, the composer is there, and the side panel
+   lists Gravit, History and the strategies — no channel list, no New message.
+2. Ask for a task that ends in a paper order, e.g. "in cn-market, propose a one-lot paper buy of
+   600519 on <paper venue>". Expect a line under `Running`, then, when the worker proposes the
+   order, the line under `Waiting on you` reading `Needs your approval` and the Messages badge at 1.
+   Go to Markets: the badge stays.
+3. Back on Messages, open the line and approve the card on it. Expect the badge to clear and the
+   line back under Running until the next read, then the Account's own Guard card in Account ›
+   Cards (answer it there).
+4. Start a second task and press **Stop** on its line. Expect the key disabled while the post is in
+   flight, the line under `Done today` reading `Stopped` within a read, and pressing Stop again on
+   a task that has ended saying `That task has already ended`.
+5. When a task reads `Stalled`, `Failed` or `Blocked` (a worker silent for 20 minutes reads
+   Stalled), press **Continue** on its line. Expect the worker's page to show the steer (`Continue
+   the task. First check what you already did …`) and the line running again.
+6. Open **View the full process** on a task: its transcript read-only, Stop or Continue by its
+   state, and the line `To change course, tell Gravit` linking Messages.
+7. Open **History** in the side panel: every other session, newest first. Open one of the eleven
+   sessions from before the 2026-11-05 rename: it reads, with no composer, and `Read-only`; nothing
+   it shows can be answered or sent. A search for its words finds nothing (R106).
+8. Open a strategy in the side panel: its status, thesis, runs, journal and files, its tasks (their
+   lines keep Stop and Continue) and its paper positions at the venue its `status.yaml` names (or
+   the line that it names none). Then Run a module card in Discover › Research: the sheet closes,
+   Messages opens, the card reads `Sent · <title>`, then `Running · <title>` linking the task once
+   Gravit starts it with that exact title.
+
+## Channels (src/channels.ts + src/roster.ts + a strategy's page)
 
 A channel is one directory, given an identity by the host and a roster by the
-operator. Three layers, split by who may write them:
+operator. Since one entry's plan 2 the operator no longer picks one: the browser
+has no channel list, no New message and no Where, and a channel's page is a
+strategy's read-only page (below); the face, the registry and the rosters still
+keep every channel as this section describes, and a worker runs in its
+strategy's directory. Three layers, split by who may write them:
 
 | Layer | Lives in | Writer |
 |---|---|---|
@@ -3113,8 +3168,8 @@ returns the existing title unchanged — so a channel Gravit makes with a plain
 `mkdir` becomes a channel on the very next listing.
 
 **The reconcile** (`reconcileChannels`, `src/channels.ts`) runs on every
-listing — both the `GET` that feeds the list and New message's Where and the
-`POST` that feeds a channel's own page — and is idempotent by construction: `create`
+listing — both the `GET` that feeds the side panel's strategies and History's
+strategy names and the `POST` that feeds a strategy's page — and is idempotent by construction: `create`
 is a no-op past its first call, `attachSession` early-outs on membership
 before validating anything, and seeding a roster (`seedRoster`) is a no-op
 once the channel has one. A steady-state listing performs no writes at all.
@@ -3124,56 +3179,31 @@ reconcile's seed and the operator's roster edit — both go through
 list refresh racing an operator's save cannot silently revert it. A
 workspace whose directory has vanished is reported (`missingDir`), never
 deleted; its sessions stay attached and reachable (the gravit-ui client lists
-such a channel like any other, and its page reads empty).
+such a channel like any other, its sessions in History, and its page reads empty).
 
-**Where and the list are registry-driven, not directory-scanned.** **New
-message** offers **Where** — a select of the channels from `/data/channels.json`
-by their display titles, the root first, then **New channel…**, which opens a
-name box under it (the name folded as below, `POST /data/channels`, the new
-channel selected once the list carries it) — and `session/create` takes the
-chosen `workspaceId`. (The old chat page's picker also had a `choose a local
-folder…` row through the OS's own dialog, `directoryPicker/pick`; the gravit-ui
-client has none.) The list groups sessions by channel MEMBERSHIP, not by path
-prefix: every channel is a group — an empty one too, so a new channel's page is
-reachable — the root first, then by each group's newest session; a bot's home
-sessions under the bot; a session no channel claims under **No channel** —
-never dropped, charter Rule 5 — and the archived ones last, under a folded
-**Archived**. The archive is the UNION of the face's own reversible set
-(`archived.json`, read through `/data/sessions-meta.json`) and the host's one-way
-`workspaceRegistry.archivedSessionIds`, because the two already disagree on
-disk and neither alone is honest about what is archived.
-
-Groups fold (the chevron on a group's head; the fold is per browser, in
-`gravit-ui.prefs`, and a folded group still shows the conversation on screen),
-and a conversation's **Details** carries its row actions: **Change words** and
-**Fork** are the host's own Remotes (`session/rename`, `session/fork` — a fork
-opens at once; dsh forks only from a completed turn, so a conversation with
-nothing in it offers no Fork; a rename resumes the session first, so on a cold
-one it is a write like a prompt, see "The wire and the transcript"); **Archive**
-(or **Un-archive**) and **Delete** are face routes, neither offered while Gravit
-runs or a card waits. dsh 0.2.0-rc.2 has no
-session delete Remote at all (nor has 0.2.1-rc.5), and its archive (`workspace/archiveSession`) is
-not presentation: a host-archived session runs no model step until the host
-restores it. So the face keeps its own fold — metadata in
-`$DSH_HOME/face/archived.json`; the session still exists, under **Archived** at
-the list's end, reversible — and never un-archives a host archive: Details says
-`Archived · By the host` and offers no key, and the route answers 409 with the
-reason (upgrade decision D14). Delete removes the session's persistence
-directory permanently (asked twice, never offered on a running session, no
-undo) and tombstones the id: a session deleted while its agent is still
-attached keeps listing from host memory until the next face restart — and
-write-behind can even re-persist its directory — so the list hides tombstoned
-ids unconditionally and the ghost dies with the restart. Archiving or deleting
-the conversation on screen opens the first open one. Opening a cold session no longer attaches it (it is paged, not
-followed — D16), so viewing and then deleting stays off that path; the
-attached case is a session this face run prompted, renamed or `@`-addressed.
-`deleteSession` also constrains itself to sessions whose `cwd` resolves inside
-this repo, not merely to an id it happens to find, closing a pre-existing gap
-where the delete button could reach another project's session directory. It
-reads that `cwd` from the directory's highest canonical log generation —
-`session.v4.jsonl.zstd` for a session born or written under 0.2.0, else the
-0.1.1 `session.jsonl.zstd` — and the `rm -r` takes every generation, the lock
-and any staging file with it.
+**The browser after the channel list** (one entry's plan 2). Until plan 2 the
+browser's **New message** offered **Where** — a select of the channels by their
+display titles, then **New channel…** (`POST /data/channels`) — and the list
+grouped sessions by channel membership, with pins, folds, an **Archived** group
+and Details' row actions (Change words, Fork, Pin, Archive, Un-archive,
+Delete). All of that left the client: a session is now the conversation, one of
+its tasks (on the rail) or History (`#/history`, read cold and read-only: the
+title, the strategy its channel names, when, a one-line preview). Nothing in
+the browser creates, renames, forks, pins, archives, un-archives or deletes a
+session. The face's routes behind them stay (`POST /data/channels`,
+`/data/sessions/archive`, `/data/sessions/delete`, `GET /data/sessions-meta.json`;
+the session list still hides tombstoned ids and marks the archived — the
+UNION of the face's own `archived.json` and the host's one-way
+`workspaceRegistry.archivedSessionIds`), with no key calling the writes: a
+session archived before plan 2 stays archived and is listed in History. dsh
+0.2.0-rc.2 has no session delete Remote at all (nor has 0.2.1-rc.5), and its
+archive (`workspace/archiveSession`) is not presentation: a host-archived
+session runs no model step until the host restores it — why the face kept its
+own reversible fold (upgrade decision D14). `deleteSession` constrains itself to
+sessions whose `cwd` resolves inside this repo, reads that `cwd` from the
+directory's highest canonical log generation — `session.v4.jsonl.zstd`, else the
+0.1.1 `session.jsonl.zstd` — and its `rm -r` takes every generation, the lock and
+any staging file with it.
 
 Deleting a session does NOT detach it from its channel: the id stays in the
 registry's `sessionIds`, because the host's `workspace/*` Remotes at 0.2.0-rc.2 (unchanged at 0.2.1-rc.5)
@@ -3204,13 +3234,14 @@ treating that fence as authentication:
 | `POST /data/channels/agents` | the operator's roster write — `{workspaceId, agents}` in |
 | `POST /data/channels` | create — `{name}`, copies `strategies/_template`, then reconciles; answers `{name, dir, isRoot}` (no workspace id — the client finds the new channel by its `dir` in the next listing) |
 
-**A channel's page** (`client/js/render/channel.js`, `#/channel/<workspaceId>`)
-opens from a channel's name in its group head — the chevron only folds the
-group — and the list stays beside it. The head: the channel by its title, the
-`status.yaml` status as a chip, and **New round** (New message with Where on
-this channel). Then, each skipped when its source is absent: the headline
-(`one_line`, `Next: <next>`, `numbers` as rows — see `GRAVIT.md`); **Thesis**
-(`THESIS.md` drawn as markdown, an untouched `_template` copy detected
+**A strategy's page** (`client/js/render/strategy.js`, `#/strategy/<name>`; the
+channel's page at `#/channel/<workspaceId>` until plan 2 — an old link of that
+form lands here once the channels are read) opens from the strategy's row in the
+side panel, the side panel beside it. It is read-only: nobody chats there. The
+head: the strategy's name and its `status.yaml` status as a chip (`New round`
+left with New message). Then, each skipped when its source is absent: the
+headline (`one_line`, `Next: <next>`, `numbers` as rows — see `GRAVIT.md`);
+**Thesis** (`THESIS.md` drawn as markdown, an untouched `_template` copy detected
 byte-exact and shown as `No thesis yet` rather than presented as content);
 **Latest backtest** (the newest `backtests/*.json`: its file name and up to
 twelve of its top-level scalar fields — the whole file stays in the channel's
@@ -3221,11 +3252,19 @@ that carries a `backtests/` directory — nothing writes one since 2026-10-24;
 channel's rosters, each with **Edit**: a box per choice (the connected CLI
 agents that answered on this machine; every bot but Gravit's own composition),
 ticked as rostered, a rostered one no longer offered kept to untick, at most six
-bots; ✓ saves through the roster routes and re-reads the page. A failed read
-says `Channel unavailable` with Retry, or keeps the page under `As of HH:MM ·
-stale`; an unknown id reads `Channel not found`. Everything on the page was
-written into the channel's directory and is drawn as text (the thesis through
-the DOM-built markdown), never as markup.
+bots; ✓ saves through the roster routes and re-reads the page — the roster
+editors stay here until plan 4's one roster; **Tasks** — the rail's lines whose
+task names this strategy, each with its Stop and Continue and its gate
+answerable on the line, as on the rail (read-only means no composer, not keyless
+task lines); and **Paper positions** at the venue `status.yaml` names in its
+optional `venue:` key (`venue: paper-cn`; symbol, side, quantity, entry, mark,
+unrealised P&L, read from `GET /data/account/positions?venue=<venue>`, a refusal
+one line in the Account's words) — with no `venue:` the page says none is named
+and reads nothing; it never guesses a venue. A failed read says `Strategy
+unavailable` with Retry, or keeps the page under `As of HH:MM · stale`; an
+unknown name reads `Strategy not found`. Everything on the page was written into
+the channel's directory and is drawn as text (the thesis through the DOM-built
+markdown), never as markup.
 
 **The roster**, `$DSH_HOME/face/channels.json` (`src/roster.ts`), keyed by
 workspace id so a directory rename never loses it:
@@ -3282,8 +3321,8 @@ down this file:
    channel. It is also cheap to reach, not a rare edge case: the old chat page's
    **`choose a local folder…`** row created a session straight from a raw
    `cwd`, never a `workspaceId` (`showStrategyPicker`; the gravit-ui client's New message
-   offers channels only, and a create with no channel lands in the host's
-   default directory, which no channel claims either), so
+   offered channels only until one entry's plan 2 retired it, and a create with no channel lands in
+   the host's default directory, which no channel claims either), so
    such a session resolves to no channel and is never roster-checked; a channel directory
    that exists on disk but has not yet been through a reconcile lands in the
    same place.
@@ -3376,14 +3415,21 @@ longer the latest` — the last picked again to take the newest run) —, **Cite
 Leader (the two newest sealed `cn-market` runs; read-only for Mode and a strategy's review),
 **Stocks** for a Leader New run alone (1–4 main-board codes, empty for Gravit's pick; hidden on a
 Latest run, whose message has no slot for codes), Theme's boards line, a
-**Note to Gravit**, and what it writes. **Run** sends Gravit one message in that channel as a new
-conversation `<Title> · MM-DD` — the composer's own `session/create`, `session/rename` and
-prompt, the text the spec's Appendix B line (`请只跑 Lunhui 的 … 模块`), read by Gravit's
-`lunhui:module` section; the face starts no role and calls no Lunhui tool — and the page moves to
-it. While it runs the card's chip reads `Running · <title> ›`, a link to the conversation, and
-Run is off; when the session stops the chip reads the listing again (re-read at once and 5 s
-later). This browser remembers the Runs it sent (`localStorage["gravit-face.module-runs"]`) only
-as a convenience.
+**Note to Gravit**, and what it writes (the file and `a task <title>`). **Discover's Run**, since
+one entry's plan 2, creates no session: it sends Gravit's one conversation one message — a first
+line asking for a task titled exactly `<Title> · MM-DD`, then the spec's Appendix B line (`请只跑
+Lunhui 的 … 模块`), read by Gravit's `lunhui:module` section; the face starts no role and calls no
+Lunhui tool — closes the sheet and moves to Messages, where Gravit starts the task. With the
+conversation unknown or off (`FACE_ROUTER=0`) Run is refused on the sheet and sends nothing. The
+card's chip **follows the task by its exact title**: before such a task shows, for a minute, it
+reads `Sent · <title> ›` linking Messages; while the newest task of that title, started no earlier
+than the Run, is not done, `Running · <title> ›` linking the task's page, and Run is off; when the
+task is done the chip reads the listing again (re-read at once and 5 s later). A task Gravit titles
+otherwise is never found — the chip goes after the minute and the task is on the rail all the same
+— and a Run prompt queued behind a long turn of the conversation can outlive the minute, so a
+second Run may be sent and the chip may briefly link the first (`DEVELOPMENT.md` R105). This
+browser remembers the Runs it sent (`localStorage["gravit-face.module-runs"]`) only as a
+convenience.
 
 - **Gravit** (the first card on Agents) — its page is three cards over three reads:
   `session/modelCatalog`'s `default` (provider, model and reasoning effort — the selection a new
@@ -3627,12 +3673,11 @@ in a soul: the
 prompt is a strict template with no escape, and both write paths (`rejectSoul`, on the way
 in) and the plugin itself (`validateBotConfig`, at mount) refuse it.
 
-**A bot's home** is a session created with `cwd = bots/<id>/journal` and `agentPreset = <id>`
-— **Talk to <bot>** on its page opens its newest home conversation that is not archived, else
-creates one with exactly that cwd and preset (`session/create {cwd, agentPreset}`; not offered
-for a broken bot or one the preset roster does not list) — and the host's own `session/create`
-mounts the preset (no in-process agent creation). The list groups a bot's home sessions under
-the bot, each with the bot's letter, from the session's preset, which
+**A bot's home** is a session created with `cwd = bots/<id>/journal` and `agentPreset = <id>`;
+the host's own `session/create` mounts the preset (no in-process agent creation). Since one
+entry's plan 2 the browser has no **Talk to <bot>**: a bot's home sessions are read in History,
+read-only, and talking to a bot comes back as plan 4's bot tasks. A home session carries the bot's
+letter, from the session's preset, which
 0.2.0's `session/list` rows no longer carry: `client/js/wire/summaries.js` `summaryOf` restores it
 from the row's `agentPreset` projection first, then from `/data/channels.json`'s `presets`
 (built from the persisted and live session headers), and leaves it absent rather than
@@ -4936,7 +4981,10 @@ Every byte between the page and the host is new at 0.2.0 ("The wire and the
 transcript"). `client-mux-smoke.test.ts` proves the page's own wire modules against a
 real host without a browser, `gravit-client-smoke.test.ts` the host layer over them;
 this drill is the browser half. Hard-reload first — `registerStatic` sets no cache
-headers. With the face live:
+headers. Since one entry's plan 2 the browser has no New message, Change words, Fork or pin keys:
+skip parts four, six and seven and part eight's pin half (part nine), open the sessions of parts
+two and three from History (read cold, never prompted there; prompt the conversation on Messages
+instead), and read the address bar's route as `#/messages`. With the face live:
 
 1. In a browser not yet signed in to this host:port (a private window will do), open
    the bare `http://127.0.0.1:3090/`. PASS, part one: `401`. Open the printed
@@ -4997,8 +5045,9 @@ are the runbook's §7 A, on a copy of the real home.
 A mask never pulled is presumed decorative.
 
 **On the gravit-ui client** the bot pages are on Discover: **Create a bot** on its head, a bot's
-page (model, home, soul, skills, setup issues) with **Edit** and **Talk to <bot>**; the list
-groups a bot's home sessions under the bot. The steps below were written on the old chat page:
+page (model, home, soul, skills, setup issues) with **Edit** (Talk to and the list's bot group
+left with one entry's plan 2, so the steps that talk to a bot wait for plan 4's bot tasks). The
+steps below were written on the old chat page:
 read "agent face → bots → `+ new bot`" as Discover → Create a bot, its settings page as the bot
 page's Edit, "New test conversation" as Talk to, and "the sidebar" as the list.
 
@@ -5290,7 +5339,8 @@ Account). Open the printed `?token=` URL and hard-reload.
 20. **The four General keys, in each browser.** In Safari, Chrome and Firefox, press each of ⌥⌘N,
     ⌥⌘K, ⌥⌘, and ⌘/ (Ctrl+Alt+N, Ctrl+Alt+K, Ctrl+Alt+, and Ctrl+/ off a Mac) three times: with the
     caret in the editor, in an input (the list's search box, a Settings font field), and on a page
-    with no focus (click an empty part of the thread first). PASS: New message opens, the search
+    with no focus (click an empty part of the thread first). PASS: the conversation's composer takes
+    focus (Write to Gravit; New message until one entry's plan 2), the search
     box takes focus, Settings opens, the shortcut sheet opens and closes again; the browser does
     nothing of its own (no new window, no preferences, no find bar). With a pinyin candidate window
     open in the editor, and with What you sign standing, each does nothing. A key a browser keeps
