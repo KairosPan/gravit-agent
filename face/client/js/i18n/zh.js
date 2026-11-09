@@ -111,6 +111,7 @@ export const ZH = Object.freeze({
   'tasks.strategy': '策略',
   'tasks.usage': '输入 {in} token · 输出 {out} token',
   'tasks.continue': '继续',
+  'tasks.gateThere': '要回答，请打开查看完整过程',
   'tasks.full': '查看完整过程',
   'tasks.page.back': '返回消息',
   'tasks.page.tell': '要改方向，告诉 Gravit',
@@ -1618,8 +1619,6 @@ export const ZH = Object.freeze({
   // a channel (host/channels.js, render/strategy.js, host/runs-view.js): its page, its rosters, its research runs and their
   // chips, a write that failed
   'channel.failed': '失败',
-  'channel.name.rule': '字母、数字、- 或 _',
-  'channel.notListed': '已创建，尚未列出',
   'channel.atMostSix': '最多六个机器人',
   'channel.bytes.b': '{n} B',
   'channel.bytes.kb': '{n} KB',

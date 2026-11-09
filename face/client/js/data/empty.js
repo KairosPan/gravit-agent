@@ -34,8 +34,6 @@ export function emptyState() {
     lightbox: null,
     // the shortcut sheet over the page, { q } (its box's words), or null (keys.js; ⌘/ opens and closes it)
     shortcuts: null,
-    // the workspace's pinned conversation ids (host/live.js, workspace/follow)
-    pinned: [],
     // a strategy page's reads (host/channels.js): its channel's overview, and the paper positions of the venue its status.yaml
     // names
     channel: { id: null, status: 'idle', data: null, at: null, positions: { status: 'idle', venue: null, rows: [], message: null } },

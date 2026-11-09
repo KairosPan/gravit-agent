@@ -160,6 +160,13 @@ test('trackRuns: stale records — no task after 60 s once the tasks answered, a
   off.store.dispatch('moduleRunStarted', { module: 'theme', title: 'Theme · 10-28', startedAt: T0 - 120_000 });
   off.store.dispatch('tasksOff', { at: T0 });
   assert.deepEqual(off.runs(), {});
+  // a failed read has not answered: the record stands until a read that did
+  const failed = tracker();
+  failed.modules.trackRuns();
+  failed.store.dispatch('moduleRunStarted', { module: 'theme', title: 'Theme · 10-28', startedAt: T0 - 120_000 });
+  failed.store.dispatch('tasksFailed', { at: T0 });
+  assert.deepEqual(Object.keys(failed.runs()), ['theme'], 'a failed read is not an answer');
+  assert.equal(failed.refreshed.count, 0);
 });
 
 test('the mirror: records are written to storage on change and read back at boot; a throwing storage changes nothing', async () => {

@@ -430,6 +430,14 @@ test('a task report becomes a task line, not a context row', () => {
   assert.equal(bare.kind, 'task'); assert.equal(bare.data.title, null); assert.equal(bare.data.status, 'failed'); assert.equal(bare.data.body, 'no head here');
 });
 
+test('a relay head whose title holds \' · \' keeps the whole title: it ends at the last \' · \' (ruling R9)', () => {
+  const text = '[task · CRWV read · 11-09 · blocked]\n<<<task-data q1>>>\nwhy\n<<<end q1>>>';
+  const [m] = toMessages(mapFrame(taskFrame({ kind: 'task', form: 'report', task: 't3', status: 'blocked' }, text)), new Map(), NOW);
+  assert.equal(m.data.title, 'CRWV read · 11-09');
+  assert.equal(m.data.status, 'blocked');
+  assert.equal(m.data.body, 'why');
+});
+
 test('a brief keeps its form and drops the footer', () => {
   const text = 'Scan filings\n\nRead the 10-Q.\n---\nnot the footer\n\n---\nThis is a task from Gravit\'s conversation with the operator…';
   const [m] = toMessages(mapFrame(taskFrame({ kind: 'task', form: 'brief', conversation: 'c', origin: 'web' }, text)), new Map(), NOW);

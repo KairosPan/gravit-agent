@@ -372,6 +372,8 @@ export function everyState() {
     ...historyStates(base),
     // plan 2 of one entry, Task 8: a task's full process
     ...taskPageStates(base),
+    // the final review's fixes: a waiting line whose gate this page has not seen yet (after a reload) points at its full process
+    R.nav(R.tasksLoaded(R.hostList(base, { conversations: [...base.conversations, conv('wr', { title: 'Buy back the hedge' })] }), { conversation: 's1', tasks: [{ id: 'wr', title: 'Buy back the hedge', origin: 'web', state: 'waiting', group: 'you', steps: [], startedAt: NOW - 3 * MIN, lastEventAt: NOW - MIN, lastSeq: 1, waitingFor: { kind: 'approval', id: 'c9', tool: 'mcp__account__portfolio_place_order' } }], at: NOW }), { screen: 'messages', id: null }),
   ];
 }
 

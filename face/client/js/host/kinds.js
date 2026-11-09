@@ -219,14 +219,15 @@ function bubble(view, speaker) {
 
 // a task's message (one-entry plan 2, the face's src/task-*.ts): a report relayed into the conversation, and in a worker its
 // brief, a steer Gravit relayed, a recovery note, a stop. A report's head `[task · <title> · <status>]` gives the title (the
-// text up to the next ` · `) and its fenced body; a brief loses the footer the face appends after its last `---` line
+// text up to the head's last ` · `) and its fenced body; a brief loses the footer the face appends after its last `---` line
 const TASK_FORMS = new Set(['report', 'brief', 'steer', 'recovery', 'stopped']);
 const RELAY_HEAD = '[task · ';
 function relayParts(text) {
   const lines = text.split('\n');
   const head = lines[0] ?? '';
-  const end = head.startsWith(RELAY_HEAD) ? head.indexOf(' · ', RELAY_HEAD.length) : -1;
-  if (end < 0) return { title: null, status: null, body: text };
+  // the title runs to the head's last ' · ' (ruling R9): a Run task's title holds one (`<Title> · MM-DD`), a status never
+  const end = head.startsWith(RELAY_HEAD) ? head.lastIndexOf(' · ') : -1;
+  if (end < RELAY_HEAD.length) return { title: null, status: null, body: text };
   const status = head.endsWith(']') ? head.slice(end + 3, -1) : null;
   let rest = lines.slice(1);
   const open = /^<<<task-data (\S+)>>>$/.exec(rest[0] ?? '');

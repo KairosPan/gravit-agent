@@ -69,11 +69,6 @@ export const reducers = {
     return { ...s, status: { line: line ?? s.status?.line ?? '', bad, connected: connected ?? s.status?.connected ?? false } };
   },
 
-  // the pin set, whole, as the host last said it
-  hostPins(s, ids) {
-    return { ...s, pinned: Array.isArray(ids) ? ids.filter(x => typeof x === 'string') : [] };
-  },
-
   // the list as the host gives it; a surviving conversation keeps its window and what the viewer did with it
   hostList(s, { conversations, channels, bots, childRows }) {
     const old = new Map(s.conversations.map(c => [c.id, c]));

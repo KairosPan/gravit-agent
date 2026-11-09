@@ -435,6 +435,7 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .task-steps { margin: 0; padding-left: 18px; color: var(--dim); }
 .task-gate { max-width: 560px; }
 .task-result { white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-gate-there { color: var(--dim); }
 .task-usage { font-size: calc(12px * var(--fs)); color: var(--dim); font-variant-numeric: tabular-nums; }
 .task-keys { display: flex; flex-wrap: wrap; gap: 6px; }
 /* a task's full process (#/task/<id>): back to Messages, the title, the state, the strategy and the keys in the head; in
@@ -1167,8 +1168,6 @@ button.tk-at:hover { border-color: var(--dim); }
   .empty-title { font-size: calc(24px * var(--fs)); }
   .drawer-head { min-height: 64px; }
   .drawer-body { padding: 20px; }
-}
-@media (hover: none) {
 }
 @media (max-width: 370px) {
   .rail, .rail.mini { padding-left: 8px; padding-right: 8px; gap: 2px; }

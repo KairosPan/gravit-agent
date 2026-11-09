@@ -186,12 +186,13 @@ function jobsSection(conv, state, now) {
 
 // the conversation's Details: This task (Gravit, when it began, the agent) — nothing renames, forks, pins, archives or deletes
 // the one conversation —, its background jobs, children, usage, and Stop while a turn runs. A task's page (`task`, one-entry
-// plan 2 Task 8) draws its worker's: the task's title, and no Stop of its own (the page's head stops the task)
-export function renderDetails(conv, state, now = Date.now(), { task = null } = {}) {
+// plan 2 Task 8) draws its worker's (`worker`, whether or not the tasks list it): the task's title, else its session's, and
+// no Stop of its own (the page's head stops the task)
+export function renderDetails(conv, state, now = Date.now(), { worker = false, task = null } = {}) {
   const asking = state.confirm?.action === 'stopGravit' && state.confirm?.id === conv.id;
   const facts = kv([...(conv.created ? [[t('details.created'), esc(fmtDate(conv.created))]] : []), [t('details.agent'), esc(HOST_NAME)]]);
-  const title = task ? esc(maskExcerpt(task.title ?? conv.title ?? '')) : esc(HOST_NAME);
-  const stop = conv.running && !task
+  const title = worker ? esc(maskExcerpt(task?.title || conv.title || '')) : esc(HOST_NAME);
+  const stop = conv.running && !worker
     ? `<section class="dsec">${asking ? confirmPair(t('details.yesStopGravit')) : `<button type="button" class="btn-danger" data-action="stopGravit" data-conv="${esc(conv.id)}">${th('details.stopGravit')}</button>`}</section>`
     : '';
   return `<aside class="drawer details" aria-label="${th('details.title')}">

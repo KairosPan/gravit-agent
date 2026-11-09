@@ -43,11 +43,33 @@ test('settle: an old #/messages/<id> link waits while tasks load, then settles o
   assert.deepEqual(store.get().route, { screen: 'messages', id: 't1' });
   store.dispatch('tasksLoaded', { conversation: 'conv', tasks: [taskRow('t1')], at: 1 });
   assert.equal(settle(store, '#/messages/t1'), '#/task/t1');
-  // off (FACE_ROUTER=0) or failed before any read: there is no conversation, so every id is history
+  // off (FACE_ROUTER=0): there is no conversation, so every id is history
   const off = storeOf(R.tasksOff(listed(), { at: 1 }));
   assert.equal(settle(off, '#/messages/conv'), '#/history/conv');
+  // failed before any read named the conversation: still waiting, as while loading — a later read lands it
   const failed = storeOf(R.tasksFailed(listed(), { at: 1 }));
-  assert.equal(settle(failed, '#/messages/t1'), '#/history/t1');
+  assert.equal(settle(failed, '#/messages/conv'), null, 'a failed first read waits');
+  assert.deepEqual(failed.get().route, { screen: 'messages', id: 'conv' });
+  failed.dispatch('tasksLoaded', { conversation: 'conv', tasks: [taskRow('t1')], at: 2 });
+  assert.equal(settle(failed, '#/messages/conv'), '#/messages', 'the next read lands it on the conversation');
+  // a failed re-read after one that named the conversation keeps it: the link lands
+  const later = storeOf(R.tasksFailed(ready(listed()), { at: 2 }));
+  assert.equal(later.get().tasks.conversation, 'conv');
+  assert.equal(settle(later, '#/messages/t1'), '#/task/t1');
+});
+
+test('history/<id> and task/<id> land again when a later tasks read names the id', () => {
+  const store = storeOf(ready(listed()));
+  assert.equal(settle(store, '#/history/conv'), '#/messages', "history of the conversation's id is Messages");
+  assert.equal(settle(store, '#/history/t1'), '#/task/t1', "history of a task's id is its task page");
+  assert.equal(settle(store, '#/task/conv'), '#/messages', "a task page for the conversation's id is Messages");
+  assert.equal(settle(store, '#/history/old'), null, 'any other id stays history');
+  // while the tasks load (or a first read failed) nothing re-lands
+  const loading = storeOf(listed());
+  assert.equal(settle(loading, '#/history/t1'), null);
+  const failed = storeOf(R.tasksFailed(listed(), { at: 1 }));
+  assert.equal(settle(failed, '#/history/conv'), null);
+  assert.equal(settle(failed, '#/task/conv'), null);
 });
 
 test('settle: #/channel/<workspaceId> lands on a strategy page, the root or an unknown id on Messages', () => {

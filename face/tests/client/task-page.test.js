@@ -36,6 +36,14 @@ test('the page has no composer and says to tell Gravit', () => {
   assert.doesNotMatch(d, /data-action="stopGravit"/);
 });
 
+test('a worker no task lists (aged out of the window) still gets the worker\'s Details: no Stop Gravit, titled from its session', () => {
+  const s = R.toggleDetails(on([conv('c'), conv('w', { title: 'Old <run>', running: true, loaded: true })], [], 'w'));
+  const d = renderTaskScreen(s, NOW);
+  assert.match(d, /class="drawer details"/);
+  assert.doesNotMatch(d, /data-action="stopGravit"/, 'never Stop Gravit on a worker');
+  assert.match(d, /<div class="dsec-title">Old &lt;run&gt;<\/div>/, "titled from the session's record");
+});
+
 test('Stop and Continue follow the state', () => {
   const keysOf = (state, busy = false) => {
     let s = on([conv('c'), conv('w', { loaded: true })], [task('w', { state, group: 'running' })], 'w');

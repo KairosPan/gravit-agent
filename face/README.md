@@ -5270,7 +5270,8 @@ Account). Open the printed `?token=` URL and hard-reload.
     takes no images. Remove the image, or run Gravit on a model that does.` sits above the box in
     the down colour and the whole draft stays; paste the image again and the line shows at once,
     nothing sent. Remove the image: the line goes.
-11. **The same image on deepseek-flash.** Create a scratch bot whose model is
+11. **The same image on deepseek-flash.** *(Plan 4's: skip until then — Talk to a bot left with one entry's plan 2.)*
+    Create a scratch bot whose model is
     `deepseek-official/deepseek-flash` (Discover › Create), Talk to it, and paste the same image
     with a line asking what it shows. PASS: the message is accepted and the image drawn above your
     bubble (up to 240 px wide), the bot describes it; click it: the lightbox opens, its close key

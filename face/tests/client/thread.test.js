@@ -134,6 +134,20 @@ test('a question card lists each question with inputs named by the gate and the 
   assert.match(answered, />Answered</);
 });
 
+test('on a live thread a pending question\'s inputs are enabled and an answered one\'s disabled', () => {
+  const questions = [{ id: 'q1', question: 'Which venue?', options: [{ label: 'Paper' }, { label: 'Paper US' }] }];
+  const pending = gate('question', { id: 'ev-p', seq: 2, text: '', data: { eventId: 'ev-p', sessionId: 's1', questions } });
+  const done = gate('question', { id: 'ev-d', seq: 1, text: '', answer: 'answered', data: { eventId: 'ev-d', sessionId: 's1', questions } });
+  const html = renderThread(conv({ live: true, messages: [done, pending] }), state, NOW);
+  const inputsOf = id => [...html.matchAll(/<input [^>]*>/g)].map(m => m[0]).filter(i => i.includes(`name="q-${id}-`));
+  assert.equal(inputsOf('ev-p').length, 3, 'two options and the free answer');
+  assert.ok(inputsOf('ev-p').every(i => !/ disabled/.test(i)), 'the pending one takes an answer');
+  assert.equal(inputsOf('ev-d').length, 3);
+  assert.ok(inputsOf('ev-d').every(i => / disabled>$/.test(i)), 'the answered one takes nothing more');
+  assert.equal((html.match(/data-action="answerQuestion"/g) ?? []).length, 1, 'one Answer key, the pending one\'s');
+  assert.match(html, /data-action="answerQuestion" data-conv="s1" data-msg="ev-p"/);
+});
+
 test('a receipt is a green bubble, a refusal a red card', () => {
   const r = renderMessage(msg({ id: 'rc9', kind: 'receipt', text: 'Order accepted · buy 0.00008 BTC/USD · market · ord-1', data: { orderId: 'ord-1' } }), conv(), state);
   assert.match(r, /bubble green/); assert.match(r, /Order accepted · buy 0.00008 BTC\/USD · market · ord-1/);

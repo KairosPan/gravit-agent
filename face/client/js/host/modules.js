@@ -67,7 +67,7 @@ export function startModules({ store, postJson, readListing, refreshListing = as
   function pass(s) {
     const runs = plain(s.moduleRuns) ? s.moduleRuns : {};
     const at = now();
-    const answered = s.tasks?.status !== undefined && s.tasks.status !== 'loading'; // a task is missing only once /data/tasks answered
+    const answered = s.tasks?.status === 'ready' || s.tasks?.status === 'off'; // a task is missing only once /data/tasks answered (a failed read did not)
     for (const [module, r] of Object.entries(runs)) {
       const age = at - (recordOk(r) ? r.startedAt : -Infinity);
       if (age > STALE_MS) { store.dispatch('moduleRunCleared', { module }); continue; }

@@ -476,11 +476,11 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   }
 
   const mux = openMux({
-    onReady: () => { say('', false, true); void refresh(); openPins(); },
+    onReady: () => { say('', false, true); void refresh(); },
     onEvent,
     onGate: acceptGate,
     onGateGone: gateGone,
-    onDown: reason => { say(said('status.reconnecting', { reason }), true, false); suspend(); closePins(); },
+    onDown: reason => { say(said('status.reconnecting', { reason }), true, false); suspend(); },
   });
   function openControl() {
     mux.stream('session/control', {}, {
@@ -490,24 +490,6 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     });
   }
   openControl();
-
-  // the pin set: workspace/follow's baseline, then a frame per change. One stream at a time; it opens again on its end,
-  // after an error, and after a reconnect, and the new baseline replaces whatever was drawn
-  let pins = null;
-  function closePins() { pins?.cancel(); pins = null; }
-  function openPins() {
-    if (pins) return;
-    const mine = mux.stream('workspace/follow', {}, {
-      onItem: item => {
-        const ids = item?.type === 'baseline' ? item.value?.pinnedSessionIds : item?.type === 'pinned' ? item.pinnedSessionIds : undefined;
-        if (Array.isArray(ids)) store.dispatch('hostPins', ids);
-      },
-      onEnd: () => { if (pins === mine) pins = null; timers.after(FOLLOW_RETRY_MS, openPins); },
-      onError: () => { if (pins === mine) pins = null; timers.after(CONTROL_RETRY_MS, openPins); },
-    });
-    pins = mine;
-  }
-  openPins();
 
   // leave: no conversation is on screen any more (the last open one was deleted): stop reading the one that was
   return { open, promote, activate, earlier, refresh, reconcile, retryOrphans, answer, leave: closeView, close: () => { closeView(); mux.close(); }, mux };

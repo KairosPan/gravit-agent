@@ -1,20 +1,17 @@
 // face/client/js/host/channels.js — a strategy's channel from the face (spec 2026-10-19 §7 Stage 3 "Channels"): the overview
 // read behind its page (status, thesis, backtests, journal, files, rosters), the paper positions of the venue its status.yaml
-// names (one-entry plan 2: only that venue, never a guess), a new channel, and the two roster writes.
+// names (one-entry plan 2: only that venue, never a guess), and the two roster writes.
 // Impure; nothing here draws. A write answers {ok: true} or {error: <words>} for the editor that asked.
-import { foldChannelName } from '../wire/channelName.js';
 import { positionsOf } from './account-view.js';
 import { said } from '../i18n/words.js';
 
-// the face's own rule for a channel's name (src/channels.ts NAME_RE), checked before anything is posted
-const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N}\p{M}_-]{0,40}$/u;
 export const MAX_BOTS = 6; // a channel rosters at most six bots (src/room-rules.ts ROOM_CAPS.maxMembers)
 // the Account's refusal as one line: its sentence, else its code; null when the body carries none
 const text = v => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
 const refusalLine = body => text(body?.refusal?.message) ?? text(body?.refusal?.code) ?? null;
 const words = err => err?.code ?? err?.said ?? err?.message ?? said('channel.failed');
 
-export function startChannels({ store, postJson, getJson, refresh, now = Date.now }) {
+export function startChannels({ store, postJson, getJson, now = Date.now }) {
   let seq = 0; // only the latest-started overview lands
 
   async function overview(workspaceId) {
@@ -52,21 +49,6 @@ export function startChannels({ store, postJson, getJson, refresh, now = Date.no
     }
   }
 
-  // birth strategies/<name> from the template: the name folded as the old page folded it, then found again in the
-  // re-read list by the directory the route answered (the route answers no workspace id)
-  async function create(raw) {
-    const name = foldChannelName(typeof raw === 'string' ? raw : '');
-    if (!NAME_RE.test(name) || name === '_template') return { error: said('channel.name.rule') };
-    try {
-      const made = await postJson('/data/channels', { name });
-      await refresh();
-      const ch = (store.get().channels ?? []).find(c => c.dir === made?.dir);
-      return ch ? { workspaceId: ch.workspaceId } : { error: said('channel.notListed') };
-    } catch (err) {
-      return { error: words(err) };
-    }
-  }
-
   // the agents a channel may roster: the connected CLI agents that answered on this machine
   async function agentChoices() {
     try {
@@ -93,5 +75,5 @@ export function startChannels({ store, postJson, getJson, refresh, now = Date.no
     ? Promise.resolve({ error: said('channel.atMostSix') })
     : write('/data/channels/bots', { workspaceId, bots: ids }, workspaceId));
 
-  return { overview, positions, create, agentChoices, setAgents, setBots };
+  return { overview, positions, agentChoices, setAgents, setBots };
 }

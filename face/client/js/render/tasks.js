@@ -44,6 +44,8 @@ export function taskLineHtml({ task, gate, status }, group, state, open) {
     ? `<div class="task-strategy"><span class="task-strategy-label">${th('tasks.strategy')}</span><a class="task-strategy-link" href="#/strategy/${esc(encodeURIComponent(task.strategy))}">${esc(task.strategy)}</a></div>` : '';
   const steps = Array.isArray(task.steps) && task.steps.length ? `<ol class="task-steps">${task.steps.map(s => `<li>${esc(maskExcerpt(String(s)))}</li>`).join('')}</ol>` : '';
   const end = record ? `<div class="task-gate">${gateHtml(record, gate, state)}</div>`
+    // a gate the read says waits but this page has not seen (after a reload, until the worker is opened): its full process
+    : task.waitingFor && group !== 'running' ? `<div class="task-gate-there">${th('tasks.gateThere')}</div>`
     : task.result?.text ? `<div class="task-result">${esc(maskExcerpt(task.result.text))}</div>` : '';
   return `<details${attrs({ class: 'task-line', 'data-task': task.id, open: open?.has(task.id) === true })}>` +
     `<summary${attrs({ id: `tline-${task.id}`, 'data-action': 'toggleTask', 'data-task': task.id })}><span class="${cls('task-dot', dot)}"></span>` +

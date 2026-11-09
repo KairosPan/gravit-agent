@@ -67,7 +67,6 @@ const SAME_WORDS = {
   'money.earn.none sheet.earn.nothingIn': "Earn's box with nothing earning; the Earn sheet's Take out with nothing in",
   'sheet.quote.fillIn trade.quote.fillIn': "an owner sheet's quote not yet asked; Trade's ticket's quote not yet asked",
   'sheet.missing.cents trade.missing.cents': "a market sheet's stop or limit price out of range; Trade's ticket's price out of range",
-  'channel.notListed discover.bot.notListed': 'a channel created and not yet listed; a bot created and not yet listed',
 };
 test('no two keys hold the same sentence of four words or more unless listed', () => {
   const by = new Map();

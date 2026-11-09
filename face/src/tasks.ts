@@ -52,6 +52,16 @@ export const CONTINUE_NOTE = "Continue the task. First check what you already di
 /** The stopped marker's text. */
 export const STOPPED_TEXT = "Stopped by the conversation.";
 
+/** The states a task has ended in: a Stop on one of them is refused, so it never overwrites a result. */
+const ENDED: ReadonlySet<TaskView["state"]> = new Set(["done", "stopped", "failed", "blocked"]);
+
+/** A Stop on a task that already ended (`ENDED`): the route answers 409, `task_stop` says so. */
+export class TaskEndedError extends Error {
+  constructor(id: string, state: string) {
+    super(`task ${id} already ended (${state}); there is nothing to stop`);
+  }
+}
+
 /** Whether the conversation and its tasks are installed: unless `FACE_ROUTER` is `"0"`. */
 export function routerEnabled(env: NodeJS.ProcessEnv): boolean {
   return env.FACE_ROUTER !== "0";
@@ -318,6 +328,9 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
     }),
     stop: (id) => using(id, async () => {
       const { conv, row } = await find(id);
+      /* read first: a Stop clicked in the poll's lag after the worker finished must not turn its result into stopped */
+      const now0 = viewOf(row, await eventsOf(row));
+      if (ENDED.has(now0.state)) throw new TaskEndedError(id, now0.state);
       const agent = await agentFor(row);
       agent.cancel({ kind: "hook", reason: "task stopped" });
       await agent.whenIdle();
@@ -363,7 +376,7 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
     handler: fencedGet(deps.isTrusted, async () => ({ conversation: convId() ?? null, tasks: await ops.list() })),
   });
 
-  /* Stop and Continue from the task's page: `body.task` a non-empty string, an unknown id 404 */
+  /* Stop and Continue from the task's page: `body.task` a non-empty string, an unknown id 404, a Stop on an ended task 409 */
   const taskRoute = (act: (id: string) => Promise<TaskView>) => fencedPost(deps.isTrusted, async (body) => {
     const id = body.task;
     if (typeof id !== "string" || id === "" || id.length > 200) throw new HttpError(400, "task is required");
@@ -371,6 +384,7 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
       return { task: await act(id) };
     } catch (err) {
       if (err instanceof Error && err.message.startsWith("no task ")) throw new HttpError(404, "no such task");
+      if (err instanceof TaskEndedError) throw new HttpError(409, "task already ended");
       throw err;
     }
   });

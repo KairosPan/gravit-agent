@@ -39,7 +39,7 @@ export function startTasks({ store, getJson, postJson, timers, now = Date.now })
     try {
       await postJson(path, { task: id });
     } catch (err) {
-      const line = failed === 'stop' && err?.status === 404 ? said('tasks.stop.gone') : failed === 'stop' ? said('tasks.stop.failed') : said('tasks.resume.failed');
+      const line = failed === 'stop' && (err?.status === 404 || err?.status === 409) ? said('tasks.stop.gone') : failed === 'stop' ? said('tasks.stop.failed') : said('tasks.resume.failed');
       store.dispatch('hostStatus', { line, bad: true });
     } finally {
       store.dispatch('taskBusy', { id, on: false });

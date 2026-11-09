@@ -109,6 +109,7 @@ export const EN = Object.freeze({
   'tasks.strategy': 'Strategy',
   'tasks.usage': '{in} tokens in · {out} out',
   'tasks.continue': 'Continue',
+  'tasks.gateThere': 'To answer it, open View the full process',
   'tasks.full': 'View the full process',
   'tasks.page.back': 'Back to Messages',
   'tasks.page.tell': 'To change course, tell Gravit',
@@ -1623,8 +1624,6 @@ export const EN = Object.freeze({
   // a channel (host/channels.js, render/strategy.js, host/runs-view.js): its page, its rosters, its research runs and their
   // chips, a write that failed
   'channel.failed': 'failed',
-  'channel.name.rule': 'Letters, digits, - or _',
-  'channel.notListed': 'Created, not listed yet',
   'channel.atMostSix': 'At most six bots',
   'channel.bytes.b': '{n} B',
   'channel.bytes.kb': '{n} KB',

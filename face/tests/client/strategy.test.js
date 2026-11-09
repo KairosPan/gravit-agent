@@ -185,7 +185,7 @@ function positionsRig(answer, status = {}) {
   const reads = [];
   const getJson = async path => { reads.push(path); return answer(path); };
   const postJson = async () => overview({ status: { status: 'researching', ...status } });
-  const channels = startChannels({ store, postJson, getJson, refresh: async () => {}, now: () => NOW });
+  const channels = startChannels({ store, postJson, getJson, now: () => NOW });
   return { store, reads, channels };
 }
 const POSITIONS = { ok: true, positions: [

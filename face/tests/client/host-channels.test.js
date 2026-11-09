@@ -12,7 +12,7 @@ function rig(answer, extra = {}) {
   const store = createStore({ initial: emptyState(), reducers });
   const posted = [];
   const postJson = async (path, body) => { posted.push([path, body]); return answer(path, body); };
-  const channels = startChannels({ store, postJson, getJson: async () => ({}), refresh: async () => {}, now: () => 7, ...extra });
+  const channels = startChannels({ store, postJson, getJson: async () => ({}), now: () => 7, ...extra });
   return { store, channels, posted };
 }
 
@@ -48,23 +48,6 @@ test('a failed read keeps the last data and reads failed; a 404 reads missing', 
   fail = Object.assign(new Error('no such channel'), { status: 404 });
   await r.channels.overview('w1');
   assert.equal(r.store.get().channel.status, 'missing');
-});
-
-const gamma = { workspaceId: 'w9', name: 'gamma-ray', title: 'gamma-ray', dir: '/r/strategies/gamma-ray', isRoot: false, missingDir: false, sessionIds: [] };
-
-test('create folds the name, posts it and finds the new channel by its dir', async () => {
-  const r = rig((path, body) => ({ ok: true, name: body.name, dir: `/r/strategies/${body.name}`, isRoot: false }), {
-    refresh: async () => { r.store.dispatch('hostList', { conversations: [], channels: [gamma] }); },
-  });
-  assert.deepEqual(await r.channels.create('  gamma ray '), { workspaceId: 'w9' });
-  assert.deepEqual(r.posted, [['/data/channels', { name: 'gamma-ray' }]]);
-});
-
-test('an invalid name or _template is refused before any post; a route refusal brings its words', async () => {
-  const r = rig(() => { throw Object.assign(new Error('channel already exists'), { status: 409, code: 'channel already exists' }); });
-  for (const bad of ['', '   ', '_template', 'a/b', 'x.y', '-lead']) assert.deepEqual(spoken(await r.channels.create(bad)), { error: 'Letters, digits, - or _' }, bad);
-  assert.deepEqual(r.posted, []);
-  assert.deepEqual(await r.channels.create('alpha'), { error: 'channel already exists' });
 });
 
 test('setAgents and setBots post and re-read the overview; a seventh bot is refused', async () => {

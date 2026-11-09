@@ -41,5 +41,5 @@ export function renderTaskScreen(state, now, page = {}) {
   const thread = `<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div></div>`;
   const foot = `<div class="task-foot"><a class="task-tell" href="#/messages">${th('tasks.page.tell')}</a></div>`;
   return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${head}${thread}${foot}` +
-    `${state.detailsOpen ? renderDetails(conv, state, now, { task: found?.line.task ?? null }) : ''}</main>`;
+    `${state.detailsOpen ? renderDetails(conv, state, now, { worker: true, task: found?.line.task ?? null }) : ''}</main>`;
 }

@@ -116,6 +116,9 @@ test('a failed stop is a status line, not a throw', async () => {
   assert.equal(r.store.get().status.bad, true);
   assert.equal(spoken(r.store.get().status.line), 'That task has already ended');
   assert.deepEqual(r.s().busy, []);
+  r.answers.post = err(409);
+  await r.tasks.stop('a');
+  assert.equal(spoken(r.store.get().status.line), 'That task has already ended', 'a 409 (the task ended meanwhile) is the gone line too');
   r.answers.post = err(500);
   await r.tasks.stop('a');
   assert.equal(spoken(r.store.get().status.line), 'Could not stop the task');

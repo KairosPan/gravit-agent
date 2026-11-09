@@ -1,7 +1,7 @@
 // face/tests/room-client.test.ts
 import test from "node:test";
 import assert from "node:assert/strict";
-import { avatarGlyph, foldMembers, gateSpeaker, isMemberSession, isMentionText, normalizeRoomDiscussion, normalizeRoomView, roomAnswerDisplay, roundEndLine, stripChips } from "../client/js/wire/room.js";
+import { avatarGlyph, foldMembers, gateSpeaker, isMemberSession, normalizeRoomDiscussion, normalizeRoomView, roomAnswerDisplay, roundEndLine, stripChips } from "../client/js/wire/room.js";
 import { withTable } from "../client/js/i18n/words.js";
 
 test("avatarGlyph is deterministic per id and differs between the two template bots", () => {
@@ -10,14 +10,6 @@ test("avatarGlyph is deterministic per id and differs between the two template b
   assert.equal(avatarGlyph("buffett").length > 0, true);
   const set = new Set(["buffett", "speculator", "macro-view", "alpha", "beta", "gamma"].map(avatarGlyph));
   assert.ok(set.size >= 4, "six ids spread over at least four glyphs");
-});
-
-test("isMentionText is the composer anchor: start or whitespace, then @ and a token; an e-mail is not one", () => {
-  assert.equal(isMentionText("@buffett hi"), true);
-  assert.equal(isMentionText("hi @投机型"), true);
-  assert.equal(isMentionText("mail pan@example.com"), false);
-  assert.equal(isMentionText("no mention"), false);
-  assert.equal(isMentionText("@ alone"), false);
 });
 
 const rows = [

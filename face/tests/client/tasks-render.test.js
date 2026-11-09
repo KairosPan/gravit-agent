@@ -60,6 +60,19 @@ test('an expanded waiting line draws the card with its approve and reject keys',
   assert.match(closed, /^<details class="task-line" data-task="t1">/, 'closed unless the page holds it open');
 });
 
+test('a waiting line whose gate this page has not seen (after a reload) points at the full process', () => {
+  const w = task('t1', { state: 'waiting', group: 'you', waitingFor: { kind: 'approval', id: 'c', tool: 'x' } });
+  const line = lineOf(renderTaskRail(state([w], [conv('t1')]), NOW), 't1');
+  assert.doesNotMatch(line, /class="task-gate"/, 'no gate to draw');
+  assert.match(line, /<div class="task-gate-there">To answer it, open View the full process<\/div>/);
+  withTable(ZH, () => assert.match(lineOf(renderTaskRail(state([w], [conv('t1')]), NOW), 't1'), /task-gate-there">要回答，请打开查看完整过程</));
+  // once the gate is on the page, the card stands in its place
+  const s = R.hostGate(state([w], [conv('t1')]), { convId: 't1', message: { id: 'ev-1', seq: 1.5, at: NOW, from: 'gravit', kind: 'card', text: 'Buy 1 NVDA', data: { eventId: 'ev-1', sessionId: 't1', title: 'Buy 1 NVDA', venue: 'paper' } } });
+  assert.doesNotMatch(lineOf(renderTaskRail(s, NOW), 't1'), /task-gate-there/);
+  // a running task waits on nobody
+  assert.doesNotMatch(lineOf(renderTaskRail(state([task('t2')]), NOW), 't2'), /task-gate-there/);
+});
+
 test('a question gate is answered on its line', () => {
   const w = task('t1', { state: 'waiting', group: 'you', waitingFor: { kind: 'question', id: 'c', tool: 'ask_user_question' } });
   const s = R.hostGate(state([w], [conv('t1')]), { convId: 't1', message: { id: 'ev-2', seq: 1.5, at: NOW, from: 'gravit', kind: 'question', text: '', data: { eventId: 'ev-2', sessionId: 't1', questions: [{ id: 'q1', question: 'Which venue?', options: [{ label: 'Paper' }] }] } } });

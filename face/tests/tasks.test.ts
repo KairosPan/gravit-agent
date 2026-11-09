@@ -611,6 +611,23 @@ test("POST /data/tasks/stop calls ops.stop once and answers {ok, task}", async (
   assert.equal((got.body.task as { state: string }).state, "stopped");
 });
 
+test("Stop on a task that already ended is 409 and leaves it alone: no cancel, no stopped marker, its result kept", async (t) => {
+  const h = await harness();
+  h.seed("w-ended", [brief("w-ended", "Ended", AT - 60_000), start(1), said(1, "the answer"), end(1)]);
+  const rec = recorder();
+  const tasks = await install(h, rec);
+  t.after(() => tasks.dispose());
+  const before = await tasks.ops.read("w-ended");
+  assert.equal(before.view.state, "done");
+  const got = await rec.post("/data/tasks/stop", { task: "w-ended" });
+  assert.deepEqual([got.status, got.body], [409, { ok: false, error: "task already ended" }]);
+  assert.equal(h.ids("w-ended").filter((m) => m.startsWith("task-stopped:")).length, 0, "the log gains no stopped marker");
+  const after = await tasks.ops.read("w-ended");
+  assert.equal(after.view.state, "done");
+  assert.deepEqual(after.view.result, before.view.result);
+  await assert.rejects(h.tool("task_stop").execute({ task: "w-ended" }), /^Error: task w-ended already ended \(done\); there is nothing to stop$/);
+});
+
 test("POST /data/tasks/continue sends CONTINUE_NOTE through ops.steer", async (t) => {
   const h = await harness();
   h.seed("w-done", [brief("w-done", "Done", AT - 60_000), start(1), said(1, "done"), end(1)]);

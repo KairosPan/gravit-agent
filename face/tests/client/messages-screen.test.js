@@ -120,7 +120,7 @@ test('Details: This task with its facts, Usage when the host reported it, Stop o
 test('Details offers no rename, fork, pin, archive or delete: the conversation is one and stays', () => {
   const said = { id: 'e1', seq: 1, at: NOW, from: 'you', kind: 'text', text: 'hi', data: {} };
   const s = listed([conv('a', { archived: false, loaded: true, messages: [said] })]);
-  const h = renderDetails(currentConversation(s), { ...s, pinned: ['a'] });
+  const h = renderDetails(currentConversation(s), s);
   for (const gone of ['changeWords', 'fork', 'pin', 'unpin', 'archive', 'unarchive', 'deleteConv']) assert.doesNotMatch(h, new RegExp(`data-action="${gone}"`), gone);
 });
 

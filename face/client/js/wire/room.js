@@ -30,11 +30,6 @@ export function avatarGlyph(id) {
   return GLYPHS[h % GLYPHS.length];
 }
 
-/** The composer anchor: start of text or whitespace, then `@` and a token. An e-mail's `@` follows a non-space. */
-export const MENTION_RE = /(^|\s)@[^\s@]/u;
-/** @param {string} text @returns {boolean} */
-export const isMentionText = (text) => MENTION_RE.test(text);
-
 /** Whether a row runs the host: no preset, or a host id (the default or its pre-rename alias). @param {{agentPreset?: unknown}} row */
 const isHost = (row) => typeof row.agentPreset !== "string" || row.agentPreset === "" || isHostPreset(row.agentPreset);
 

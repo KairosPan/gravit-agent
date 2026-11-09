@@ -481,7 +481,7 @@ export function boot(win, host = {}) {
   // Trade: the kinds' picks on screen, a ticket's order sheet, its line on the stream, Under way's Cancel
   const trade = startTrade({ store, getJson, owner, sheet, stream, schedule, cancelTimer, now, afterAction });
   // a channel's page: its overview read on entering it
-  const channels = startChannels({ store, postJson, getJson, refresh: () => live.refresh(), now });
+  const channels = startChannels({ store, postJson, getJson, now });
   // the conversation's tasks: read at once, after each list refresh and on the poll
   const tasks = host.tasks ?? startTasks({ store, getJson, postJson, timers, now });
   // Discover: the face's inventory, read on entering it; a page's own reads (the Gravit item, a skill) on opening it
@@ -528,6 +528,21 @@ export function boot(win, host = {}) {
   const putDraft = (key, runs, files) => { if (runs.length || files.length) drafts.set(key, { runs, files }); else drafts.delete(key); };
   const setRuns = (runs, key = draftKey(store.get())) => putDraft(key, runs, filesOf(key));
   const setFiles = (files, key = draftKey(store.get())) => putDraft(key, runsOf(key), files);
+  // the `empty` draft taken over once, when the composer first has a conversation to write to: words Hand to Gravit put there
+  // while /data/tasks loaded move under the conversation's key (unless it holds a draft already), its waiting files uploading
+  let emptyAdopted = false;
+  function adoptEmptyDraft(s) {
+    if (emptyAdopted) return;
+    const conv = writeTo(s);
+    if (conv === null) return;
+    emptyAdopted = true;
+    const held = drafts.get('empty');
+    if (!held || drafts.has(conv)) return;
+    drafts.delete('empty');
+    drafts.set(conv, held);
+    if (notes.has('empty')) { notes.set(conv, notes.get('empty')); notes.delete('empty'); }
+    for (const f of held.files) startUpload(conv, f.key);
+  }
   // the attachments' reads: the image limits, a file's upload to its session, a history thumb (a test hands in its own)
   const attachments = host.attachments ?? startAttachments({ call, store, win, now });
   let connected = false;   // the live layer's link as the store last said: a reconnect frees the thumb reads a fence stopped
@@ -2360,6 +2375,7 @@ export function boot(win, host = {}) {
     if (doc.hidden) { stream.close(); marketStream.close(); } else { stream.open(); marketStream.open(); }
   });
   store.subscribe((s, type) => {
+    adoptEmptyDraft(s);
     // the live layer back (connected again after a drop, or for the first time): thumb reads a fence stopped go again
     const linked = s.status?.connected === true;
     if (linked && !connected) attachments.reconnected?.();

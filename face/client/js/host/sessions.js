@@ -65,9 +65,6 @@ export function childRowsOf(items) {
   }));
 }
 
-// the conversation a default opens: the first that is not archived
-export const firstOpen = conversations => (Array.isArray(conversations) ? conversations.find(c => !c.archived) : undefined) ?? null;
-
 // the host moved it after the operator last looked
 export const unreadOf = conv => conv.updatedAt > (conv.lastSeen ?? 0);
 

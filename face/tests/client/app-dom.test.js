@@ -157,6 +157,29 @@ test('opening #/history/<id> sends session/projections and session/page and neve
   store.timers.clear();
 });
 
+test('#/history/X then #/task/X (a live task) opens X again warm: a session/follow goes out', async () => {
+  const f = fakeWindow({ hash: '#/history/t1' });
+  const h = host({ rows: [row('conv', { updatedAt: 9 }), row('t1', { agentAvailable: true, projections: { values: { title: 'Read the tape' } } })], conversation: 'conv', tasks: [taskRow('t1')] });
+  const held = [];
+  const answer = h.inventory['/data/tasks'];
+  h.inventory['/data/tasks'] = () => new Promise(r => held.push(() => r(answer())));
+  const store = started(f, h);
+  await h.ready();
+  assert.deepEqual(store.get().route, { screen: 'history', id: 't1' });
+  const follows = () => h.streams.filter(st => st.name === 'session/follow' && st.args.request.address.sessionId === 't1');
+  assert.deepEqual(follows(), [], 'history reads it cold');
+  assert.ok(h.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 't1'), 'paged');
+  f.win.location.hash = '#/task/t1';
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'task', id: 't1' });
+  assert.equal(follows().length, 1, 'the task page follows it');
+  while (held.length) held.shift()();
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'task', id: 't1' }, 'the tasks read keeps it on its task page');
+  assert.equal(follows().filter(st => !st.cancelled).length, 1);
+  store.timers.clear();
+});
+
 test('Enter in the page sends nothing', async () => {
   const f = fakeWindow({ hash: '#/history/old' });
   const h = host({ rows: [row('conv', { updatedAt: 9 }), row('old', { projections: { values: { title: 'Last week' } } })], conversation: 'conv' });
@@ -795,6 +818,28 @@ test('Hand to Gravit opens the conversation with the words in the composer', asy
   assert.deepEqual(store.get().route, { screen: 'messages', id: null });
   assert.equal(say.value, 'Look at AAPL (Apple)');
   assert.equal(f.doc.activeElement, say);
+  store.timers.clear();
+});
+
+test('Hand to Gravit while /data/tasks still loads: the words move to the conversation once it is known', async () => {
+  const storage = memoryStorage();
+  storage.setItem('gravit.market.watchlist.v1', JSON.stringify({ version: 1, items: [{ id: 'us:AAPL', market: 'us', symbol: 'AAPL', name: 'Apple', exchange: 'NASDAQ', currency: 'USD' }] }));
+  const f = fakeWindow({ hash: '#/markets/us:AAPL', storage });
+  const say = f.withId('say', { tagName: 'TEXTAREA' });
+  const h = host({ rows: [row('s1')], conversation: 's1' });
+  const held = [];
+  const answer = h.inventory['/data/tasks'];
+  h.inventory['/data/tasks'] = () => new Promise(r => held.push(() => r(answer())));
+  const store = bootMarkets(f, h, fakeMarkets());
+  await h.ready();
+  assert.equal(store.get().tasks.conversation, null, 'the tasks still load');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'handToGravit', id: 'us:AAPL' } });
+  await settle();
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  while (held.length) held.shift()();
+  await settle();
+  assert.equal(store.get().tasks.conversation, 's1');
+  assert.equal(say.value, 'Look at AAPL (Apple)', 'the words are the conversation\'s draft now');
   store.timers.clear();
 });
 
@@ -3237,6 +3282,8 @@ test('after Run the card links the task', async () => {
   store.timers.clear();
 });
 
+// plan 2 of the Lunhui run view, task 4: an ok lunhui_present result draws a composed answer that reads its run's view; a
+// failed read (the face restarted, the run deleted) shows its summary, one error line and Retry, and Retry reads it again
 test('a composed answer reads its view; a 404 draws the summary, the error line and Retry; Retry reads again and the skeletons go', async () => {
   const f = fakeWindow({ hash: '#/messages/s1' });
   const h = host({ rows: [row('s1', { agentAvailable: true })] });

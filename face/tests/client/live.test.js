@@ -442,33 +442,6 @@ test("a seat gate is titled from the host's line before its tool/call reaches th
   assert.equal(conv().messages.filter(m => m.id === 'ev-seat').length, 1);
 });
 
-test("the workspace follow's baseline sets the pin set and a pinned frame replaces it", async () => {
-  const r = rig();
-  const w = r.last('workspace/follow');
-  assert.deepEqual(w.args, {});
-  w.cbs.onItem({ type: 'baseline', value: { items: [], archivedSessionIds: [], pinnedSessionIds: ['a', 'b'] } });
-  assert.deepEqual(r.store.get().pinned, ['a', 'b']);
-  w.cbs.onItem({ type: 'pinned', pinnedSessionIds: ['c'] });
-  assert.deepEqual(r.store.get().pinned, ['c']);
-});
-
-test('the follow opens again after the mux reconnects, and the new baseline wins', async () => {
-  const r = rig();
-  r.last('workspace/follow').cbs.onItem({ type: 'baseline', value: { pinnedSessionIds: ['a'] } });
-  r.opts().onDown('lost');
-  assert.equal(r.last('workspace/follow').cancelled, true);
-  r.opts().onReady({ home: '/h' });
-  await settle();
-  const again = r.streams.filter(s => s.name === 'workspace/follow');
-  assert.equal(again.length, 2);
-  again[1].cbs.onItem({ type: 'baseline', value: { pinnedSessionIds: ['z'] } });
-  assert.deepEqual(r.store.get().pinned, ['z']);
-  // a stream the host ended is opened again on the retry timer, once
-  again[1].cbs.onEnd();
-  for (const t of r.scheduled.splice(0)) t.fn();
-  assert.equal(r.streams.filter(s => s.name === 'workspace/follow').length, 3);
-});
-
 // ---- activate (plan 3 task 8): a cold conversation opened before a command runs on it
 const watch = p => { const out = { done: false, value: undefined }; void p.then(v => { out.done = true; out.value = v; }); return out; };
 

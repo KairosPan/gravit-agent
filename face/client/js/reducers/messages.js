@@ -17,13 +17,16 @@ const upd = (state, id, fn) => ({ ...state, conversations: state.conversations.m
 const MESSAGES = { screen: 'messages', id: null };
 // where a route lands (plan 2 of one entry). Messages is the conversation and carries no id. An old #/messages/<id> link lands
 // on Messages (the conversation's id), the task's page (a task's) or history (any other id) once the tasks are read, and
-// waits while they load; new (New message's, retired) is Messages. An old #/channel/<workspaceId> link lands on its strategy's
-// page once the channels are read, the root or an id no channel has on Messages. A task page for a session the list knows
-// that is no task is history; a task or strategy page with no id is Messages. Every other route is as it was asked
+// waits while they load or while a failed first read has named no conversation; new (New message's, retired) is Messages. An
+// old #/channel/<workspaceId> link lands on its strategy's page once the channels are read, the root or an id no channel has
+// on Messages. A task page for a session the list knows that is no task is history; a history or task page for the
+// conversation's id is Messages, and a history page for a task's id is the task's page — each once a read says so; a task or
+// strategy page with no id is Messages. Every other route is as it was asked
 export function landingOf(state, route) {
   const tasks = state.tasks ?? { status: 'loading', conversation: null, items: [] };
-  const loading = tasks.status === 'loading';
+  const loading = tasks.status === 'loading' || (tasks.status === 'failed' && tasks.conversation === null);
   const isTask = id => tasks.items.some(t => t.id === id);
+  const isConversation = id => !loading && id != null && id === tasks.conversation;
   if (route.screen === 'messages' && route.channel) {
     const channels = state.channels ?? [];
     if (channels.length === 0 && state.channelsRead !== true) return route;
@@ -37,6 +40,8 @@ export function landingOf(state, route) {
     return isTask(route.id) ? { screen: 'task', id: route.id } : { screen: 'history', id: route.id };
   }
   if ((route.screen === 'task' || route.screen === 'strategy') && !route.id) return MESSAGES;
+  if ((route.screen === 'task' || route.screen === 'history') && isConversation(route.id)) return MESSAGES;
+  if (route.screen === 'history' && route.id && !loading && isTask(route.id)) return { screen: 'task', id: route.id };
   if (route.screen === 'task' && !loading && !isTask(route.id) && state.conversations.some(c => c.id === route.id)) return { screen: 'history', id: route.id };
   return route;
 }
