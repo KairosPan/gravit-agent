@@ -725,10 +725,9 @@ export class Identity {
     if (saved) return saved;
     await this.stopConnector(network);
     this.dropQueued(network);
-    const left = this.removeSecret(network);
     // iMessage's cursor goes with its binding; its refused line stays, so a connect later registers the number again past it
-    if (network === "imessage") rmSync(join(identityDir(this.home), IMESSAGE_CURSOR_FILE), { force: true });
-    if (left) return refusal(`${NETWORK_NAME[network]} is disconnected and its poller stopped, but ${left}`);
+    const left = [this.removeSecret(network), network === "imessage" ? this.removeCursor() : undefined].filter((x): x is string => x !== undefined);
+    if (left.length > 0) return refusal(`${NETWORK_NAME[network]} is disconnected and its poller stopped, but ${left.join("; and ")}`);
     return { ok: true, kind: "account", summary: `${NETWORK_NAME[network]} disconnected: its token removed from the account` };
   }
 
@@ -745,6 +744,16 @@ export class Identity {
       return isRefusal(r) ? `its token file could not be removed: ${r.message}` : undefined;
     } catch (err) {
       return `its token file could not be removed (${err instanceof Error ? ((err as NodeJS.ErrnoException).code ?? err.name) : "error"})`;
+    }
+  }
+
+  /** iMessage's cursor taken away; what went wrong in words (its code, no path), or undefined when it is gone */
+  private removeCursor(): string | undefined {
+    try {
+      rmSync(join(identityDir(this.home), IMESSAGE_CURSOR_FILE), { force: true });
+      return undefined;
+    } catch (err) {
+      return `its cursor file could not be removed (${codeOf(err)})`;
     }
   }
 

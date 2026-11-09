@@ -166,6 +166,23 @@ describe("iMessage connected through the signed door", () => {
     expect(fake.calls).not.toContain("dispose");
   });
 
+  it("a cursor that cannot be removed is said in the disconnect's answer, after the binding and the token are gone", async () => {
+    await connect();
+    await until(() => fake.openStreams() === 1);
+    await fake.push(hello(42));
+    const cursor = join(home, "identity", "imessage.cursor");
+    await until(() => existsSync(cursor));
+    // a cursor rmSync cannot take away: a folder with a file in it
+    rmSync(cursor);
+    mkdirSync(cursor);
+    writeFileSync(join(cursor, "x"), "x");
+    const r = await own({ type: "disconnectNetwork", network: "imessage" });
+    expect(isRefusal(r) && r.message).toMatch(/^iMessage is disconnected and its poller stopped, but its cursor file could not be removed \(\w+\)$/);
+    expect(existsSync(join(home, "credentials/networks/imessage.json"))).toBe(false);
+    expect(svc.identity!.view().networks.find((x) => x.network === "imessage")).toBeUndefined();
+    expect(fake.openStreams()).toBe(0);
+  });
+
   it("closing the service leaves a link it was given to its owner", async () => {
     await connect();
     await srv.close();
