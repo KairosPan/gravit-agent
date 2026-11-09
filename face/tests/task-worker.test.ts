@@ -7,10 +7,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_PRESET } from "../src/overlay.ts";
 import {
-  TASK_BRIEF_MAX, TASK_FOOTER, TASK_TITLE_MAX, TaskInputError, briefText, isStrategyName, startWorker, strategyDir,
-  type WorkerCtxLike,
+  TASK_BRIEF_MAX, TASK_FOOTER, TASK_TITLE_MAX, TaskInputError, briefText, equipWorkers, isStrategyName, startWorker,
+  strategyDir, taskReportTool, type WorkerAgentLike, type WorkerCtxLike, type WorkerToolsCtxLike,
 } from "../src/task-worker.ts";
 import type { CreateDeskAgentOptions } from "../src/desk-session.ts";
+import type { DeskToolDefinition } from "../src/desk-tools.ts";
 import type { AgentCtxLike, AgentLike, ModelSelectionRefLike, SessionLike } from "../src/room.ts";
 import type { MessageLike } from "../src/room-rules.ts";
 
@@ -142,4 +143,90 @@ test("a title over 80 characters or with a newline, and a brief empty or over 4,
   const f = new Fake();
   await startWorker(f.deps(root), { ...input, title: "x".repeat(TASK_TITLE_MAX), brief: "y".repeat(TASK_BRIEF_MAX) });
   assert.equal(f.created.length, 1);
+});
+
+/** A root context with `agent/created` and the live agents `live`; `create` plays one agent's creation through every
+ * listener and hands back what each answered. */
+function fakeRoot(live: WorkerAgentLike[] = []) {
+  const listeners: ((event: { agent: WorkerAgentLike }) => undefined)[] = [];
+  const ctx: WorkerToolsCtxLike = {
+    on(name, listener) {
+      assert.equal(name, "agent/created");
+      listeners.push(listener);
+      return () => { listeners.splice(listeners.indexOf(listener), 1); };
+    },
+    agents: { list: () => live },
+  };
+  return { ctx, listeners, create: (agent: WorkerAgentLike) => listeners.map((l) => l({ agent })) };
+}
+
+function fakeWorkerAgent(id: string, header: { parentSession?: string; origin?: string; agentPreset?: string }) {
+  const registered: DeskToolDefinition[] = [];
+  const agent: WorkerAgentLike = { id, session: { header }, ctx: { tools: { register: (d: DeskToolDefinition) => { registered.push(d); return () => {}; } } } };
+  return { agent, names: () => registered.map((d) => d.name) };
+}
+
+test("task_report is on a worker's own layer and on no other agent's", () => {
+  const isWorker = (h: { parentSession?: string; origin?: string }) => h.parentSession === "session-conv" && h.origin === undefined;
+  const early = fakeWorkerAgent("w-early", { parentSession: "session-conv", agentPreset: DEFAULT_PRESET });
+  const root = fakeRoot([early.agent]);
+  const dispose = equipWorkers(root.ctx, isWorker, { log: () => {} });
+  assert.equal(root.listeners.length, 1);
+  assert.deepEqual(early.names(), ["task_report"], "an agent already live is swept");
+
+  const worker = fakeWorkerAgent("w-1", { parentSession: "session-conv", agentPreset: DEFAULT_PRESET });
+  assert.deepEqual(root.create(worker.agent), [undefined]);
+  root.create(worker.agent);
+  root.create(early.agent);
+  assert.deepEqual(worker.names(), ["task_report"], "once");
+  assert.deepEqual(early.names(), ["task_report"], "once, by the sweep or the listener");
+
+  const conversation = fakeWorkerAgent("conv", { agentPreset: "gravit-router" });
+  const member = fakeWorkerAgent("member", { parentSession: "session-room", agentPreset: "drill-bull" });
+  const fork = fakeWorkerAgent("fork", { parentSession: "session-conv", origin: "fork" });
+  for (const other of [conversation, member, fork]) {
+    root.create(other.agent);
+    assert.deepEqual(other.names(), [], other.agent.id);
+  }
+
+  // a registration that throws is one line, never a throw in the dispatch
+  const lines: string[] = [];
+  const bad: WorkerAgentLike = { id: "bad", session: { header: { parentSession: "session-conv" } }, ctx: { tools: { register: () => { throw new Error("dup"); } } } };
+  const r2 = fakeRoot();
+  equipWorkers(r2.ctx, isWorker, { log: (l) => lines.push(l) });
+  assert.deepEqual(r2.create(bad), [undefined]);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0]!, /^gravit-face: /);
+
+  dispose();
+  assert.equal(root.listeners.length, 0);
+});
+
+test("task_report refuses an unknown status, an empty text and a text over 600 characters", async () => {
+  const tool = taskReportTool();
+  assert.equal(tool.name, "task_report");
+  assert.equal(tool.timeoutMs, 10_000);
+  assert.deepEqual(tool.parameters, {
+    type: "object",
+    properties: {
+      status: { type: "string", enum: ["progress", "ready", "blocked", "failed"] },
+      text: { type: "string", minLength: 1, maxLength: 600 },
+    },
+    required: ["status", "text"],
+    additionalProperties: false,
+  });
+  const exec = { signal: new AbortController().signal };
+  for (const status of ["progress", "ready", "blocked", "failed"]) {
+    assert.deepEqual(await tool.execute({ status, text: "a line" }, exec), { kind: "reported", status });
+  }
+  assert.deepEqual(await tool.execute({ status: "ready", text: "市".repeat(600) }, exec), { kind: "reported", status: "ready" });
+  for (const bad of [
+    { status: "done", text: "x" }, { status: "ready", text: "" }, { status: "ready", text: "   " },
+    { status: "ready", text: "x".repeat(601) }, { status: "ready" }, { text: "x" }, null, "ready",
+    { status: "ready", text: "x", extra: 1 },
+  ]) {
+    await assert.rejects(Promise.resolve().then(() => tool.execute(bad, exec)), Error, JSON.stringify(bad));
+  }
+  assert.deepEqual(tool.output.render({ status: "ready", text: "x" }, { kind: "reported", status: "ready" }), [{ type: "text", text: "reported ready" }]);
+  assert.equal(tool.presentCall({ status: "blocked", text: "x" }).kind, "read");
 });

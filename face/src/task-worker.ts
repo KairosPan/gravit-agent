@@ -18,9 +18,11 @@ import type { Context } from "@deepseek-ai/cordis";
 import { installModelSelection as installDshModelSelection } from "@deepseek-ai/dsh-agent";
 import { MessageId, freezeMessage } from "@deepseek-ai/dsh-llm";
 import type { DeskSessionCtxLike } from "./desk-session.ts";
+import type { DeskToolDefinition } from "./desk-tools.ts";
 import { DEFAULT_PRESET } from "./overlay.ts";
 import type { AgentLike, MemberSetup, RoomDeps } from "./room.ts";
 import type { MessageLike } from "./room-rules.ts";
+import { REPORT_STATUSES, TASK_TEXT_MAX, reportOf, type RelayStatus, type ReportStatus } from "./task-view.ts";
 
 const BIN = "gravit-face";
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -39,7 +41,7 @@ export type TaskMessageSource = {
   conversation?: string;
   task?: string;
   origin?: "web";
-  status?: "ready" | "blocked" | "failed" | "waiting" | "stalled";
+  status?: RelayStatus;
 };
 
 declare module "@deepseek-ai/dsh-llm" {
@@ -165,4 +167,106 @@ export async function startWorker(
     throw err;
   }
   return { sessionId, agent: handle.agent, dispose };
+}
+
+/**
+ * The worker's `task_report`: `{ status, text }`, both required, nothing else - `progress` with one short line at a
+ * milestone, or `ready`, `blocked` or `failed` with at most {@link TASK_TEXT_MAX} characters. It checks its arguments
+ * ({@link reportOf}) and answers `{ kind: "reported", status }`; it sends nothing - the call in the worker's log is the
+ * report, and src/task-view.ts reads the relay from there.
+ */
+export function taskReportTool(): DeskToolDefinition {
+  return {
+    name: "task_report",
+    description:
+      "Report this task to Gravit's conversation with the operator. \"progress\": one short line at a milestone (it shows on the task's " +
+      "line and reaches nobody). \"ready\": what you found or did and where the full result is. \"blocked\": what you need to go on. " +
+      "\"failed\": why you cannot. At most 600 characters.",
+    parameters: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: [...REPORT_STATUSES] },
+        text: { type: "string", minLength: 1, maxLength: TASK_TEXT_MAX },
+      },
+      required: ["status", "text"],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: "object",
+        properties: { kind: { const: "reported" }, status: { type: "string", enum: [...REPORT_STATUSES] } },
+        required: ["kind", "status"],
+        additionalProperties: false,
+      },
+      render(_args, value) {
+        const status = (value as { status?: unknown } | null)?.status;
+        return [{ type: "text", text: `reported ${typeof status === "string" ? status : "?"}` }];
+      },
+    },
+    timeoutMs: 10_000,
+    async execute(args): Promise<{ kind: "reported"; status: ReportStatus }> {
+      const report = reportOf(args);
+      if (report === undefined) {
+        throw new Error(`task_report takes { status, text }: status one of ${REPORT_STATUSES.join(", ")}, text 1 to ${TASK_TEXT_MAX} characters`);
+      }
+      return { kind: "reported", status: report.status };
+    },
+    presentCall(args) {
+      const status = (args !== null && typeof args === "object" ? (args as { status?: unknown }).status : undefined);
+      return { card: "generic", title: typeof status === "string" ? `Report: ${status}` : "Report", kind: "read" };
+    },
+  };
+}
+
+/** An agent as {@link equipWorkers} sees it: its id, for the log, its session's header, which says whether it is a
+ * worker, and its own tool layer. */
+export interface WorkerAgentLike {
+  id: string;
+  session: { header: { parentSession?: string; origin?: string } };
+  ctx: { tools: { register(definition: DeskToolDefinition): unknown } };
+}
+
+/** The slice of the booted ROOT context {@link equipWorkers} uses: `agent/created` (every agent's create and resume)
+ * and the agents already live. */
+export interface WorkerToolsCtxLike {
+  on(name: "agent/created", listener: (event: { agent: WorkerAgentLike }) => undefined): () => unknown;
+  agents: { list(): readonly WorkerAgentLike[] };
+}
+
+/**
+ * Give every worker {@link taskReportTool} in its own tool layer, as src/desk-tools.ts `installDeskTools` gives the
+ * desk its tools: one listener on the ROOT context's `agent/created` and one sweep of `ctx.agents.list()`. An agent
+ * whose session header `isWorker` accepts, and that has not been seen (a `WeakSet`, marked first), gets the tool once;
+ * the listener is synchronous and never throws - a failure, `isWorker`'s own included, is one `gravit-face:` line.
+ * @returns the disposer that removes the listener; tools already registered stay with their agents.
+ */
+export function equipWorkers(
+  ctx: WorkerToolsCtxLike,
+  isWorker: (header: { parentSession?: string; origin?: string }) => boolean,
+  options: { log?: (line: string) => void } = {},
+): () => void {
+  const log = options.log ?? defaultLog;
+  const tool = taskReportTool();
+  const equipped = new WeakSet<WorkerAgentLike>();
+  const equip = (agent: WorkerAgentLike): void => {
+    try {
+      if (equipped.has(agent) || !isWorker(agent.session.header)) return;
+      equipped.add(agent);
+      agent.ctx.tools.register(tool);
+    } catch (err) {
+      log(`${BIN}: task: task_report was not registered for agent ${agent.id}: ${errText(err)}`);
+    }
+  };
+  const off = ctx.on("agent/created", ({ agent }) => {
+    equip(agent);
+    return undefined;
+  });
+  try {
+    for (const agent of ctx.agents.list()) equip(agent);
+  } catch (err) {
+    log(`${BIN}: task: the agents already live could not be reached: ${errText(err)}`);
+  }
+  return () => {
+    off();
+  };
 }

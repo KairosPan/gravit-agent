@@ -956,7 +956,7 @@ const isTimerMs = (ms: number): boolean => Number.isInteger(ms) && ms >= 1 && ms
 /** A turn's tokens as the ledger keeps them, or `undefined` when `deriveTurnTokenUsage` cannot prove
  * them. A bucket it leaves out is 0 and absent routes are `[]`; `totalTokens` and `reasoningTokens` are
  * not kept. */
-function turnUsage(events: readonly EventLike[]): TurnUsage | undefined {
+export function turnUsage(events: readonly EventLike[]): TurnUsage | undefined {
   const usage = deriveTurnTokenUsage(events as unknown as Parameters<typeof deriveTurnTokenUsage>[0]);
   if (usage === undefined) return undefined;
   return {
