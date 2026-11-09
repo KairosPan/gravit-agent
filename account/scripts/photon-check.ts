@@ -1,7 +1,7 @@
 // A live check of a real Photon project, run by the operator in their own terminal:
 //   PHOTON_PROJECT_ID=… PHOTON_PROJECT_SECRET=… PHOTON_PHONE=+1… npm run photon:check
 // It prints neither the project secret nor a line token. The summary block at the end holds no secret.
-import { E164, PhotonError, type PhotonEvent, type PhotonMessage, type PhotonProject, type PhotonStream, type PhotonUser } from "../src/portfolio/identity/photon-link.ts";
+import { E164, isGroupChat, PhotonError, type PhotonEvent, type PhotonMessage, type PhotonProject, type PhotonStream, type PhotonUser } from "../src/portfolio/identity/photon-link.ts";
 import { realPhotonLink } from "../src/portfolio/identity/photon-real.ts";
 
 const projectId = process.env.PHOTON_PROJECT_ID ?? "";
@@ -69,12 +69,14 @@ async function main(): Promise<void> {
   let onHi: () => void = () => {};
   const gotHi = new Promise<void>((r) => (onHi = r));
   const first = open(undefined, (m) => {
-    if (!hi && !m.fromMe && normal(m.from) === normal(phone)) {
-      hi = m;
-      onHi();
-    }
+    if (hi || m.fromMe || normal(m.from) !== normal(phone)) return;
+    if (m.service !== "iMessage" || isGroupChat(m.chatGuid)) return say(`  ignored: from the phone but not a 1:1 iMessage (service ${m.service})`);
+    hi = m;
+    onHi();
   });
-  await Promise.race([gotHi, new Promise<void>((r) => setTimeout(r, 5 * 60_000))]);
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([gotHi, new Promise<void>((r) => (timer = setTimeout(r, 5 * 60_000)))]);
+  clearTimeout(timer);
   if (!hi) {
     await first.close();
     await link.dispose();
@@ -90,20 +92,26 @@ async function main(): Promise<void> {
   let secondDuplicate = false;
   for (const len of [4000, 1000, 200]) {
     const text = "photon:check ".repeat(Math.ceil(len / 13)).slice(0, len);
+    let r: { guid: string } | { duplicate: true };
     try {
-      const r = await guard(() => link.sendText(project, chat, text, clientId));
-      if ("guid" in r) {
-        replyGuid = r.guid;
-        longest = len;
-      }
-      say(`   first reply (${len} chars): ${"guid" in r ? `guid ${r.guid}` : "duplicate"}`);
+      r = await guard(() => link.sendText(project, chat, text, clientId));
+    } catch (e) {
+      say(`   first reply (${len} chars) failed: ${e instanceof PhotonError ? `${e.kind}:${e.code}` : "error"}`);
+      continue;
+    }
+    if ("guid" in r) {
+      replyGuid = r.guid;
+      longest = len;
+    }
+    say(`   first reply (${len} chars): ${"guid" in r ? `guid ${r.guid}` : "duplicate"}`);
+    try {
       const again = await guard(() => link.sendText(project, chat, text, clientId));
       secondDuplicate = !("guid" in again);
       say(`   second reply, same id: ${"guid" in again ? `guid ${again.guid}` : "duplicate"}`);
-      break;
     } catch (e) {
-      say(`   first reply (${len} chars) failed: ${e instanceof PhotonError ? `${e.kind}:${e.code}` : "error"}`);
+      say(`   second reply failed: ${e instanceof PhotonError ? `${e.kind}:${e.code}` : "error"}`);
     }
+    break;
   }
 
   say("5. reopen with since = the sequence before the hi");
@@ -130,6 +138,7 @@ async function main(): Promise<void> {
   say(`  longest reply part through: ${longest} chars`);
   say(`  second send with the same id was a duplicate: ${secondDuplicate}`);
   await link.dispose();
+  process.exit(0);
 }
 
 main().catch(async (e) => {
