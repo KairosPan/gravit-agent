@@ -12,15 +12,15 @@
  * urgent alert and the watchdog's notice always go. */
 
 /** the networks the account can speak on, in the order the Identity tab shows them */
-export type Network = "slack" | "telegram";
-export const NETWORKS: readonly Network[] = ["telegram", "slack"];
+export type Network = "imessage" | "slack" | "telegram";
+export const NETWORKS: readonly Network[] = ["telegram", "imessage", "slack"];
 
 /** each network's name, as the account's words say it */
-export const NETWORK_NAME: Readonly<Record<Network, string>> = { telegram: "Telegram", slack: "Slack" };
+export const NETWORK_NAME: Readonly<Record<Network, string>> = { telegram: "Telegram", imessage: "iMessage", slack: "Slack" };
 
 /** a message's id on the wire, `<network>:<the network's own id>`: Telegram's message_id (digits), Slack's ts (seconds, a dot, six
- * digits). There is no channel in Slack's: Gravit has exactly one DM there. The one rule the account's send, its route and the face read */
-export const WIRE_ID = /^(?:telegram:\d{1,16}|slack:\d{9,12}\.\d{6})$/;
+ * digits), iMessage's message GUID (provisional until Photon's is seen). There is no channel in Slack's: Gravit has exactly one DM there. The one rule the account's send, its route and the face read */
+export const WIRE_ID = /^(?:telegram:\d{1,16}|slack:\d{9,12}\.\d{6}|imessage:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$/;
 
 /** a Slack token of any kind anywhere in a text (bot, user, app-level, refresh and the rest): taken out as `<token>` wherever the account
  * says or sends anything, on top of the redactor of its own tokens' exact spellings. Global: use it with replace, or with search */

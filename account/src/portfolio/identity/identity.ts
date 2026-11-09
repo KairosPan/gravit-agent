@@ -643,6 +643,7 @@ export class Identity {
   /** at service creation: a binding whose token file is there listens again from where its connector kept (its own resumeFrom) */
   private resume(): void {
     for (const b of this.state.bindings) {
+      if (b.network === "imessage") continue; // no iMessage connector yet: a later task of the iMessage plan starts it
       const secret = readNetworkSecret(this.home, b.network);
       if (!secret || secret.operatorId !== b.operatorId || secret.botId !== b.botId) continue;
       this.startConnector(b, secret);
