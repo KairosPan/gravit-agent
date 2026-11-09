@@ -74,7 +74,7 @@ export function renderModule(state, now = Date.now()) {
   const back = `<a id="page-back" class="back-link page-back" href="${esc(toHash(state.lastDiscover ?? { screen: 'discover', id: null }))}">${th('discover.back')}</a>`;
   const listing = state.discover.shelves?.modules;
   const mounted = listing?.data?.mounted !== false;
-  const page = pageOf(listing?.data ?? null, name, mounted, activeRuns(state.moduleRuns, state.conversations, now));
+  const page = pageOf(listing?.data ?? null, name, mounted, activeRuns(state.moduleRuns, state.tasks?.items, now));
   if (!page) {
     const status = listing?.status ?? 'idle';
     return `<main class="main disc plugin-page">${back}<div class="disc-none dim">${status === 'idle' || status === 'loading' ? th('common.loading') : th('discover.notFound')}</div></main>`;

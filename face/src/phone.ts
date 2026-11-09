@@ -68,10 +68,12 @@ export const INBOX_SLACK_MS = 10_000;
 
 const isRecord = (x: unknown): x is Record<string, unknown> => x !== null && typeof x === "object" && !Array.isArray(x);
 const optString = (x: unknown): boolean => x === undefined || typeof x === "string";
+/** A network a phone message comes through (the account's `Network`). */
+export type PhoneNetwork = "telegram" | "slack" | "imessage";
 /** The networks a phone message comes through (the account's `NETWORKS`). */
-export const PHONE_NETWORKS: readonly string[] = ["telegram", "slack", "imessage"];
+export const PHONE_NETWORKS: readonly PhoneNetwork[] = ["telegram", "slack", "imessage"];
 /** Whether `x` names one of {@link PHONE_NETWORKS}. */
-export const isPhoneNetwork = (x: unknown): x is string => typeof x === "string" && PHONE_NETWORKS.includes(x);
+export const isPhoneNetwork = (x: unknown): x is PhoneNetwork => typeof x === "string" && (PHONE_NETWORKS as readonly string[]).includes(x);
 /** A message's id on the wire: Telegram's message_id, Slack's `ts`, iMessage's chat GUID. The account's rule (account/src/portfolio/identity/kinds.ts
  * `WIRE_ID`), redeclared here byte for byte - the face does not import the account's package - and tied to it by
  * tests/phone-bridge.test.ts. */

@@ -6,7 +6,7 @@
  * may omit it. Read raw, every bot home session, every room member and every
  * bot-bucketed row silently reads as the host. `summaryOf` restores the field
  * at intake - projection first, the face's header hint second, never a guess -
- * so room.js, speaker.js, grouping.js and chat.js keep reading
+ * so room.js, speaker.js and chat.js keep reading
  * `summary.agentPreset` unchanged.
  */
 import test from "node:test";

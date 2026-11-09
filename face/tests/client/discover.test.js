@@ -139,10 +139,9 @@ test('markup in a soul, a skill, a tool description and a reason stays text', ()
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
 });
 
-test("the bot page offers Talk to and Edit; the editor's field ids carry the revision", () => {
+test("the bot page offers Edit; the editor's field ids carry the revision", () => {
   const s = loaded({ screen: 'plugin', id: 'bot:buffett' });
   const h = renderPlugin(s);
-  assert.match(h, /data-action="talkTo" data-id="buffett"[^>]*>Talk to Buffett Type</);
   assert.match(h, /data-action="editBot" data-id="buffett"/);
   const editing = R.startEdit(s, { kind: 'bot', id: 'buffett' });
   const e = renderPlugin(R.modelsLoaded(editing, { choices: [{ value: 'deepseek/deepseek-chat', label: 'DeepSeek · Chat' }, { value: 'kimi/k2', label: 'Kimi · K2' }] }));
@@ -159,12 +158,12 @@ test("the bot page offers Talk to and Edit; the editor's field ids carry the rev
   assert.match(later, /<option value="other\/route" selected>other\/route<\/option>/, 'a model not in the catalog is still offered');
 });
 
-test('a broken or unlisted bot offers no Talk to', () => {
-  for (const over of [{ broken: 'cannot mount' }, { listed: false }]) {
+test('bot cards have no Talk to key', () => {
+  for (const over of [{}, { broken: 'cannot mount' }, { listed: false }]) {
     const l = listings();
     l.bots.data.bots = [{ ...buffett, ...over }];
     const h = renderPlugin(loadedFrom(l, { screen: 'plugin', id: 'bot:buffett' }));
-    assert.doesNotMatch(h, /data-action="talkTo"/, JSON.stringify(over));
+    assert.doesNotMatch(h, /data-action="talkTo"|Talk to/, JSON.stringify(over));
     assert.match(h, /data-action="editBot"/);
   }
 });

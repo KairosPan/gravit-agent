@@ -89,7 +89,8 @@ import type { MarketQuoteSource } from "./market-quotes.ts";
 import type { FiringRouteCtx, ScheduleDeps, ScheduleHandle } from "./schedule.ts";
 import type { StandingStatus } from "./standing.ts";
 import type { RouteRegistrar } from "./static.ts";
-import type { PhoneBridgeHandle } from "./phone-bridge.ts";
+import type { PhoneBridgeHandle, PhoneConversation } from "./phone-bridge.ts";
+import type { DeskLine } from "./conversation.ts";
 import type { AccountPhoneStatus, PhoneClient } from "./phone.ts";
 import { DSH_PIN } from "./version.ts";
 import type { DeskCalendars } from "./market-clock.ts";
@@ -1102,16 +1103,31 @@ export async function noteBudgetSpent(
 }
 
 /**
- * The phone's line for a post while the day's budget is spent (the plan's Global Constraints):
- * `the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. It opens
- * again at midnight ET, or raise budget.dailyTokens in standing.yml` - numbers as `en-US` writes them,
- * and no `of <cap>` for a state that has none.
+ * The phone's line when the day's budget is spent (the plan's Global Constraints): `the desk's token budget for today
+ * is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. Standing orders and annotations wait for midnight ET, or
+ * raise budget.dailyTokens in standing.yml` - numbers as `en-US` writes them, and no `of <cap>` for a state that has
+ * none. The budget caps the unattended work - standing orders and annotations - not the phone's texts, which reach
+ * Gravit's one conversation unbudgeted (one-entry plan 3); the desk session's fallback answers a refused text with
+ * {@link budgetPhoneLine}.
  * @param state - the day's budget.
  */
 export function budgetReplyLine(state: BudgetState): string {
   const cap = state.dailyTokens === undefined ? "" : ` of ${state.dailyTokens.toLocaleString("en-US")}`;
   return `the desk's token budget for today is spent: ${state.used.total.toLocaleString("en-US")}${cap} tokens since 00:00 ET. `
-    + "It opens again at midnight ET, or raise budget.dailyTokens in standing.yml";
+    + "Standing orders and annotations wait for midnight ET, or raise budget.dailyTokens in standing.yml";
+}
+
+/**
+ * The phone's line for a text the desk session refused while the day's budget is spent - only on its fallback
+ * (`FACE_ROUTER=0`, or a conversation that could not be installed; Gravit's one conversation takes texts unbudgeted):
+ * `the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET; your text was not taken.
+ * It opens again at 00:00 ET, or raise budget.dailyTokens in standing.yml`.
+ * @param state - the day's budget.
+ */
+export function budgetPhoneLine(state: BudgetState): string {
+  const cap = state.dailyTokens === undefined ? "" : ` of ${state.dailyTokens.toLocaleString("en-US")}`;
+  return `the desk's token budget for today is spent: ${state.used.total.toLocaleString("en-US")}${cap} tokens since 00:00 ET; `
+    + "your text was not taken. It opens again at 00:00 ET, or raise budget.dailyTokens in standing.yml";
 }
 
 /** The phone bridge as the status reports it (src/phone-bridge.ts): `configured`, whether the face has the account's
@@ -1312,7 +1328,7 @@ export function phoneLine(phone: PhoneStatus, now: Date): string {
  * The day's budget as one status line (ruling P2-8), numbers as `en-US` writes them: `budget: 1,234,567
  * tokens today, cap not set (budget.dailyTokens in standing.yml)` with no cap; `budget: 1,234,567 of
  * 2,000,000 tokens today` under it; `budget: spent, 2,013,402 of 2,000,000 tokens today; standing orders
- * and phone turns wait for 00:00 ET` once it is reached - and after any of them ` (ledger unreadable:
+ * and annotations wait for 00:00 ET` once it is reached - and after any of them ` (ledger unreadable:
  * <error>)` when the ledger could not be read, the zeros then counted being no measure of the day.
  * @param b - the day's budget.
  */
@@ -1322,7 +1338,7 @@ export function budgetLine(b: BudgetState): string {
   const line = cap === undefined
     ? `budget: ${used} tokens today, cap not set (budget.dailyTokens in standing.yml)`
     : b.spent
-      ? `budget: spent, ${used} of ${cap} tokens today; standing orders and phone turns wait for 00:00 ET`
+      ? `budget: spent, ${used} of ${cap} tokens today; standing orders and annotations wait for 00:00 ET`
       : `budget: ${used} of ${cap} tokens today`;
   return b.error === undefined ? line : `${line} (ledger unreadable: ${b.error})`;
 }
@@ -1597,7 +1613,7 @@ function busOf(ctx: DeskConversationCtxLike): SessionEventsOn {
 
 /** dsh-agent's `agent/inbox/claimed` on the booted root context, as the desk conversation hears it: every agent's
  * claims (the event is scope-filtered, and the root's listener is unscoped). */
-function claimsOf(ctx: DeskConversationCtxLike): ClaimsOn {
+export function claimsOf(ctx: object): ClaimsOn {
   return (listener) => {
     const off = (ctx as unknown as { on(name: string, listener: (payload: never) => void): () => unknown }).on("agent/inbox/claimed", listener);
     return () => { off(); };
@@ -1639,6 +1655,18 @@ export interface DeskHandle {
   annotator?: Annotator;
   schedule?: Promise<ScheduleHandle | undefined>;
   watchRow?: Promise<WatchHandle | undefined>;
+  /** Bind Gravit's one conversation, once main.ts has installed it (`deps.router`): the phone's texts, `/stop` and
+   * `/status` go to it, the desk session is never ensured, and once the outlet is set the conversation answers what a
+   * graceful stop carried (its `carry`); `undefined` - the install failed - and the desk session answers the phone as
+   * with `FACE_ROUTER=0`, its own boot answering the carries. The first call counts; a desk without `deps.router`
+   * ignores it, and a desk that is off only asks the target to `carry`. */
+  bindRouter(target: PhoneConversation | undefined): void;
+  /** The rail's desk lines ({@link deskLines}) over the schedule once it runs; none while there is no schedule. */
+  lines(): Promise<DeskLines | undefined>;
+  /** Stop reading the phone's inbox - the read under way cut, the message in hand waited for up to 2 s - keeping the
+   * outlet, so the conversation's last answers still go out: main.ts calls it first at shutdown, before it disposes the
+   * conversation, so no text is taken that a disposed conversation would refuse. Idempotent; never rejects. */
+  quiesce(): Promise<void>;
   dispose(code: number): Promise<void>;
 }
 
@@ -1653,6 +1681,133 @@ const watchClock = (now: () => number): DeskClock => ({
   setTimeout: (fn, ms) => setTimeout(fn, ms).unref(),
   clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
 });
+
+/* ---------- the rail's desk lines (one-entry plan 3 task 5) ---------- */
+
+/** One standing order as the rail's scheduled group draws it. */
+export interface ScheduledLine {
+  order: string;
+  strategy?: string;
+  next?: string;
+  last?: { outcome: string; t: string; sessionId?: string };
+  enabled: boolean;
+  expired: boolean;
+}
+
+/** One firing or annotation of today as the rail draws it; `text` is at most {@link RAIL_TEXT_MAX} characters. */
+export interface DeskRailLine {
+  id: string;
+  kind: "firing" | "annotation";
+  title: string;
+  state: "running" | "done" | "failed";
+  startedAt: string;
+  endedAt?: string;
+  sessionId?: string;
+  text?: string;
+}
+
+/** What `GET /data/tasks` carries as `desk`. */
+export interface DeskLines { scheduled: ScheduledLine[]; lines: DeskRailLine[] }
+
+/** An annotation line's text is cut to this many characters. */
+export const RAIL_TEXT_MAX = 600;
+
+/** Outcomes (a firing's, a turn's) the rail reads as a failure. */
+const FAILED_OUTCOMES: ReadonlySet<string> = new Set(["failed", "error", "timed-out", "refused", "fence"]);
+
+type RailAlert = { kind: "alert"; pass: string; symbol: string };
+type RailAnnotated = { kind: "annotated"; t: string; pass: string; sessionId: string; outcome: string; text: string };
+const isRailRecord = (x: unknown): x is RailAlert | RailAnnotated => {
+  if (typeof x !== "object" || x === null) return false;
+  const r = x as Record<string, unknown>;
+  if (r.kind === "alert") return typeof r.pass === "string" && typeof r.symbol === "string";
+  return r.kind === "annotated" && typeof r.t === "string" && typeof r.pass === "string" && typeof r.sessionId === "string"
+    && typeof r.outcome === "string" && typeof r.text === "string";
+};
+
+/** The rail's desk lines: every standing order as a scheduled line, and today's (since 00:00 New York) firings -
+ * the one running, the recent ones - and annotations as rail lines, newest first. Cheap: the status is in memory, and
+ * `alerts.jsonl` is re-read only when its size or mtime moved.
+ * @param deps - `home`; `standing`, the schedule's status; `now`.
+ * @returns `undefined` while there is no standing status. Rejects when `alerts.jsonl` cannot be read. */
+export async function deskLines(deps: { home: string; standing: () => StandingStatus | undefined; now?: () => number }): Promise<DeskLines | undefined> {
+  const standing = deps.standing();
+  if (standing === undefined) return undefined;
+  const at = (deps.now ?? Date.now)();
+  const dayStart = etDayStart(at);
+  const today = (iso: string): boolean => { const ms = Date.parse(iso); return Number.isFinite(ms) && ms >= dayStart; };
+  const strategyOf = (dir: string | undefined): string | undefined => {
+    const m = dir === undefined ? null : /^strategies\/([^/]+)$/.exec(dir);
+    return m === null || dir === undefined ? undefined : m[1];
+  };
+  const scheduled: ScheduledLine[] = standing.orders.map((o) => {
+    const strategy = strategyOf(o.dir);
+    return {
+      order: o.id,
+      ...(strategy === undefined ? {} : { strategy }),
+      ...(o.nextAnchor === undefined ? {} : { next: o.nextAnchor }),
+      ...(o.last === undefined ? {} : { last: { outcome: o.last.outcome, t: o.last.t, ...(o.last.sessionId === undefined ? {} : { sessionId: o.last.sessionId }) } }),
+      enabled: o.enabled,
+      expired: o.expired,
+    };
+  });
+  const lines: DeskRailLine[] = [];
+  const seen = new Set<string>();
+  const running = standing.running;
+  if (running !== undefined) {
+    seen.add(running.key);
+    lines.push({
+      id: running.key, kind: "firing", title: running.key.replace(/:[^:]*$/, ""), state: "running", startedAt: running.startedAt,
+      ...(running.sessionId === undefined ? {} : { sessionId: running.sessionId }),
+    });
+  }
+  for (const f of standing.recent) {
+    if (seen.has(f.key) || !today(f.t)) continue;
+    if (f.kind !== "finished" && f.kind !== "refused" && f.kind !== "interrupted") continue;
+    seen.add(f.key);
+    const ended = Date.parse(f.t);
+    const started = f.wallMs === undefined ? f.t : new Date(ended - f.wallMs).toISOString();
+    lines.push({
+      id: f.key, kind: "firing", title: f.order,
+      state: f.kind !== "finished" || FAILED_OUTCOMES.has(f.outcome) ? "failed" : "done",
+      startedAt: started, endedAt: f.t,
+      ...(f.sessionId === undefined ? {} : { sessionId: f.sessionId }),
+    });
+  }
+  const { records } = await readAlertsCached(deps.home);
+  const symbols = new Map<string, string[]>();
+  for (const r of records) {
+    if (r.kind !== "alert") continue;
+    const list = symbols.get(r.pass) ?? [];
+    if (!list.includes(r.symbol)) list.push(r.symbol);
+    symbols.set(r.pass, list);
+  }
+  for (const r of records) {
+    if (r.kind !== "annotated" || !today(r.t)) continue;
+    lines.push({
+      id: `annotation:${r.pass}`, kind: "annotation", title: (symbols.get(r.pass) ?? []).join(" ") || r.pass,
+      state: FAILED_OUTCOMES.has(r.outcome) ? "failed" : "done", startedAt: r.t, endedAt: r.t, sessionId: r.sessionId,
+      ...(r.text === "" ? {} : { text: r.text.length > RAIL_TEXT_MAX ? r.text.slice(0, RAIL_TEXT_MAX) : r.text }),
+    });
+  }
+  lines.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+  return { scheduled, lines };
+}
+
+/** The last parse of `alerts.jsonl` per home, valid while its size and mtime hold. */
+const alertsCache = new Map<string, { key: string; records: (RailAlert | RailAnnotated)[] }>();
+async function readAlertsCached(home: string): Promise<{ records: (RailAlert | RailAnnotated)[] }> {
+  let key = "absent";
+  try {
+    const st = await stat(join(deskDir(home), ALERTS_FILE));
+    key = `${st.size}:${st.mtimeMs}`;
+  } catch { /* absent or unreadable: readRecords decides */ }
+  const hit = alertsCache.get(home);
+  if (hit !== undefined && hit.key === key) return hit;
+  const { records } = await readRecords(home, ALERTS_FILE, isRailRecord);
+  alertsCache.set(home, { key, records });
+  return { records };
+}
 
 /**
  * Mount the desk's rows on a booted face.
@@ -1726,6 +1881,10 @@ const watchClock = (now: () => number): DeskClock => ({
  *   (no calendar needs it: the market clock is builtin); `schedule`, the clock's seams for tests - its
  *   clock, calendar (the XNYS one), calendars (either market's), script runner, builtins, tick and grace;
  *   `alertDeadlineMs`, an alert's annotation turn's deadline, {@link ALERT_DEADLINE_MS} when absent - a test seam;
+ *   `router`, whether Gravit's one conversation is coming (main.ts: `FACE_ROUTER` not `0`) - then the bridge and the
+ *   desk conversation's start wait for {@link DeskHandle.bindRouter}: bound, the phone reaches that conversation and the
+ *   desk session is neither ensured nor started (firings and annotations keep their fresh sessions, and the desk
+ *   conversation stays the outlet and the pause's choke point); bound to nothing, the desk works as without it;
  *   `watchRow`, the watch's switch and seams - its clock (the wall clock, `unref`'d), tick, calendars (over the
  *   schedule's), whether a pid lives, `edgar`, SEC's fetch and contact: `null` for none, absent for the face's
  *   own, the global `fetch` with `ALPHA_EDGAR_USER_AGENT` when that is set - the watch's filings poll and its why
@@ -1756,6 +1915,7 @@ export function installDesk(
     python?: string;
     schedule?: { clock?: DeskClock; calendars?: Partial<DeskCalendars> } & Partial<Pick<ScheduleDeps, "calendar" | "runScript" | "builtins" | "tickMs" | "graceMs">>;
     alertDeadlineMs?: number;
+    router?: boolean;
     watchRow?: {
       clock?: DeskClock;
       tickMs?: number;
@@ -1796,7 +1956,16 @@ export function installDesk(
     quotes: deps.quotes,
     readState: () => deskStatus(status),
   }), { log });
-  if (!enabled) return { enabled, bootedAt, ready: Promise.resolve(), dispose: async () => { removeTools(); await removeGuard(); } };
+  if (!enabled) {
+    return {
+      enabled, bootedAt, ready: Promise.resolve(),
+      /* no desk, no phone: the conversation still answers its carries, its answers sent nowhere */
+      bindRouter: (target) => { void target?.carry(); },
+      lines: async () => undefined,
+      quiesce: async () => {},
+      dispose: async () => { removeTools(); await removeGuard(); },
+    };
+  }
   const ready = appendEvent(home, { t: new Date(bootedAt).toISOString(), kind: "boot", pid: process.pid, version, deskEnabled: true }, { log });
   const stopWatch = installAsleepWatch({ now, ...deps.watch, append: (event) => appendEvent(home, event, { log }) });
   const clock: DeskClock = { now, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout) };
@@ -1816,6 +1985,16 @@ export function installDesk(
       clock,
       log,
     });
+  /* Gravit's one conversation, once main.ts binds it (`deps.router`, below); `note` hands it what the firings, the
+   * annotations and the watch sent the phone - a no-op until it is bound, and always with `FACE_ROUTER=0`. */
+  let routed: PhoneConversation | undefined;
+  const note = (line: DeskLine): void => {
+    try {
+      routed?.note(line);
+    } catch (err) {
+      log(`${BIN}: desk: a line could not be noted in the conversation: ${reasonOf(err)}`);
+    }
+  };
   /* The alert annotations' lane (spec §16 H1): each pass's check in a fresh desk agent of its own, never queued behind
    * the conversation's turns; its reply leaves through the conversation's `deliver`, and its run is noted on the watch,
    * read when the run ends - the watch is installed later, after the clock row. */
@@ -1827,6 +2006,7 @@ export function installDesk(
       root: wiring.root,
       on: wiring.on,
       deliver: (text, opts) => conversation.deliver(text, opts),
+      note,
       budget: () => readBudget(home, now(), schedule?.dailyTokens()),
       deadlineMs: deps.alertDeadlineMs ?? ALERT_DEADLINE_MS,
       onAnnotated: (r) => { watch?.noteAnnotated(r); },
@@ -1834,6 +2014,18 @@ export function installDesk(
       log,
     });
   let disposing: Promise<void> | undefined;
+  /* Gravit's one conversation, once main.ts binds it (`deps.router`): until then the bridge sets the outlet but reads no
+   * inbox, so no phone text reaches the desk session first; the schedule and the watch do not wait. Dispose and
+   * quiesce end the wait too. */
+  let decide: () => void = () => {};
+  const decided = deps.router === true ? new Promise<void>((done) => { decide = done; }) : Promise.resolve();
+  let bound = deps.router !== true;
+  const bindRouter = (target: PhoneConversation | undefined): void => {
+    if (bound) return;
+    bound = true;
+    routed = target;
+    decide();
+  };
   /* The bridge's module loads on first use, as the conversation's machinery does (src/desk-conversation.ts,
    * MODULE WEIGHT): the pause switch and scripts/service.ts import this module and never run a bridge. Not
    * awaited, and it never rejects - a module that cannot load, or a bridge that throws as it installs, is one line; a
@@ -1852,6 +2044,9 @@ export function installDesk(
         /* a reply's alert and its annotation (spec §16 H1b): the watch is installed after the bridge, so it is read at
          * each reply - none until it runs, and none in a face that runs none */
         contextFor: (messageId) => watch?.contextFor(messageId),
+        /* bound once, before the bridge reads: Gravit's one conversation takes the phone's texts */
+        router: () => routed,
+        hold: decided,
       });
     },
   ).catch((err: unknown) => {
@@ -1861,8 +2056,15 @@ export function installDesk(
   /* The conversation starts once the bridge has set the outlet (or there is no bridge): a start that resumed the desk
    * session may answer a phone turn the restart cut at once (src/desk-conversation.ts AFTER A RESTART), and that line
    * must find the outlet. `bridging` never rejects; were it to, the conversation starts all the same. */
-  const startConversation = (): Promise<void> | undefined => conversation?.start();
-  void bridging.then(startConversation, startConversation);
+  /* Once the outlet is set and the router decided: bound to the conversation, it answers its carries (only after a bind
+   * that succeeded - a failed install leaves them to the desk session's start, so none is posted twice); else the desk
+   * session starts; with `deps.router` and no bind - a dispose or quiesce ended the wait - neither. */
+  const afterBind = (): Promise<void> | undefined => {
+    if (!bound) return undefined;
+    if (routed !== undefined) return routed.carry();
+    return conversation?.start();
+  };
+  void Promise.all([bridging, decided]).then(afterBind, afterBind);
   /* The standing orders' clock (src/schedule.ts) loads on first use too - with it src/firing.ts, src/standing.ts and
    * js-yaml - once the bridge has set the outlet, so the boot's lines reach the phone. It never rejects: a module that
    * cannot load, or a clock that cannot start, is one line and `undefined`; one that arrives once dispose has begun
@@ -1888,6 +2090,7 @@ export function installDesk(
         sessionCtx: wiring.sessionCtx,
         on: wiring.on,
         deliver: (text, opts) => conversation.deliver(text, opts),
+        note,
         log,
         /* the schedule's clock reads the same now as the conversation's, unless a test hands it a clock of its own */
         ...(deps.now === undefined ? {} : { now: deps.now }),
@@ -1923,6 +2126,7 @@ export function installDesk(
         calendars,
         clock: watchRow.clock ?? watchClock(now),
         deliver: (text, opts) => conversation.deliver(text, opts),
+        note,
         post: (input) => annotator.post(input),
         idle: () => annotator.idle(),
         budget: () => readBudget(home, now(), schedule?.dailyTokens()),
@@ -1948,8 +2152,16 @@ export function installDesk(
     ...(annotator === undefined ? {} : { annotator }),
     ...(scheduling === undefined ? {} : { schedule: scheduling }),
     ...(watching === undefined ? {} : { watchRow: watching }),
+    bindRouter,
+    lines: () => deskLines({ home, now, standing: () => schedule?.status() }),
+    async quiesce() {
+      decide();
+      await bridging;
+      await bridge?.stop();
+    },
     dispose(code) {
       disposing ??= (async () => {
+        decide();
         await (await scheduling)?.dispose();
         await (await watching)?.dispose();
         await annotator?.dispose();

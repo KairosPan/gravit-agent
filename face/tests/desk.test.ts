@@ -9,13 +9,14 @@ import { fileURLToPath } from "node:url";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import {
   ALERTS_FILE, ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, EVENTS_FILE, FILINGS_FILE, FIRINGS_FILE, LEDGER_ROTATE_BYTES, MUTE_FILE, MUTE_USAGE, OFF_FILE,
-  ALERT_DEADLINE_MS, WATCH_LEASE_FILE, appendChain, appendEvent, appendRecord, appendRecordOnce, budgetLine, budgetReplyLine, budgetState, clearMute, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastConversation, lastDeskSession, noteBudgetSpent,
+  ALERT_DEADLINE_MS, WATCH_LEASE_FILE, deskLines, RAIL_TEXT_MAX, appendChain, appendEvent, appendRecord, appendRecordOnce, budgetLine, budgetPhoneLine, budgetReplyLine, budgetState, clearMute, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastConversation, lastDeskSession, noteBudgetSpent,
   muteReplyLine, parseDuration, phoneLine, readBudget, readEvents, readMuteState, readOffState, readRecords, registerDeskRoutes, runsOf, standingLines, watchLines, writeMute,
   writeOff,
   type BudgetState, type DeskEvent, type DeskStatus, type PhoneStatus, type TurnUsage,
 } from "../src/desk.ts";
 import type { PhoneClient } from "../src/phone.ts";
 import type { DeskConversationCtxLike } from "../src/desk-conversation.ts";
+import type { DeskLine } from "../src/conversation.ts";
 import { DESK_PRESET } from "../src/desk-names.ts";
 import type { DeskGuardCtxLike, DeskToolDefinition } from "../src/desk-tools.ts";
 import type { AgentLike, SessionLike } from "../src/room.ts";
@@ -1030,6 +1031,197 @@ test("installDesk runs the phone bridge only with the desk on, a phone client an
   }
 });
 
+/* One-entry plan 3: the phone reaches Gravit's one conversation once main.ts binds it; with FACE_ROUTER=0 the desk
+ * session answers it as before. */
+
+/** A phone client that hands over `texts` on its first read, then holds each read until it is aborted; and what was sent. */
+function phoneWith(texts: string[]) {
+  const state = { reads: 0, sends: [] as { kind: string; text: string; network?: string }[] };
+  const phone: PhoneClient = {
+    send: async (kind, text, opts) => { state.sends.push({ kind, text, ...(opts?.network === undefined ? {} : { network: opts.network }) }); return { sent: ["telegram:900"] }; },
+    inbox: (after, _wait, signal) => {
+      state.reads += 1;
+      if (after === 0 && texts.length > 0) {
+        const at = "2026-10-20T18:03:00.000Z";
+        const messages = texts.map((text, i) => ({ id: i + 1, network: "telegram", messageId: `telegram:${i + 41}`, text, at }));
+        return Promise.resolve({ messages, last: messages.length, status: { networks: [], queued: 0, strangers: 0 } });
+      }
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => { reject(signal.reason); }, { once: true });
+      });
+    },
+  };
+  return { state, phone };
+}
+
+/** The conversation root with a session persistence, so a keyed post can be checked against the desk session's log. */
+function persistedRoot() {
+  const fake = conversationRoot(() => "");
+  const ctx: DeskConversationCtxLike = {
+    ...fake.ctx,
+    agents: {
+      ...fake.ctx.agents,
+      /* a desk session, as a real one's header says: the next ensure keeps it */
+      create: async (options) => {
+        const made = await fake.ctx.agents.create(options);
+        (made.agent.session as { header: SessionLike["header"] }).header = { agentPreset: DESK_PRESET, cwd: options.meta.cwd };
+        return made;
+      },
+    },
+    sessionPersistence: {
+      open: async () => ({ read: async () => ({ events: [] }), [Symbol.asyncDispose]: async () => {} }),
+      flush: async () => {},
+    },
+  };
+  return { ...fake, ctx };
+}
+
+test("with the router bound the desk session is not created", async () => {
+  const h = join(TMP, "routed");
+  await mkdir(h, { recursive: true });
+  try {
+    const fake = persistedRoot();
+    const { state, phone } = phoneWith(["how is NVDA?"]);
+    const timer = fakeTimer();
+    const desk = installDesk(recorder(), {
+      home: h, enabled: true, router: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, phone,
+      root: join(TMP, "repo-routed"), route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
+    });
+    await new Promise((done) => setTimeout(done, 50));
+    assert.equal(state.reads, 0, "the bridge waits for the router's bind");
+    assert.equal(fake.state.creates, 0, "and the desk session is not opened meanwhile");
+    const posts: unknown[] = [];
+    /* the carry is asked for once the outlet is set: a line it delivers reaches the phone, not "no phone" */
+    const carried: unknown[] = [];
+    desk.bindRouter({
+      post: async (input) => { posts.push(input); return { opened: true, sessionId: "conv-1" }; },
+      stop: async () => false,
+      carry: async () => { carried.push(await desk.conversation!.deliver("a carried answer", { kind: "chat", network: "telegram" })); },
+      status: async () => ({ sessionId: "conv-1", running: 0, waiting: 0 }),
+      note: () => {},
+    });
+    await until("the carry", () => carried.length === 1);
+    assert.deepEqual(carried, [{ sent: ["telegram:900"] }], "the carry ran after the outlet was set");
+    assert.deepEqual(state.sends, [{ kind: "chat", text: "a carried answer", network: "telegram" }]);
+    await until("the text reaches the conversation", () => posts.length === 1);
+    assert.equal((posts[0] as { text: string }).text, "how is NVDA?");
+    await new Promise((done) => setTimeout(done, 50));
+    assert.equal(fake.state.creates, 0, "no desk session was created");
+    assert.equal(fake.agents.length, 0);
+    await desk.dispose(0);
+    assert.deepEqual((await readEvents(h)).events.map((e) => e.kind), ["boot", "shutdown"], "no desk-session line");
+  } finally {
+    await rm(h, { recursive: true, force: true });
+  }
+});
+
+test("with the router expected, the standing orders' clock loads before the bind", async () => {
+  const h = join(TMP, "routed-schedule");
+  await mkdir(h, { recursive: true });
+  try {
+    const fake = persistedRoot();
+    const timer = fakeTimer();
+    const desk = installDesk(recorder(), {
+      home: h, enabled: true, router: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval },
+      root: join(TMP, "repo-routed-schedule"), route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
+      schedule: { calendar: fakeCalendar({}), tickMs: 86_400_000 },
+    });
+    const made = await Promise.race([desk.schedule, new Promise<"late">((done) => setTimeout(() => done("late"), 3_000))]);
+    assert.notEqual(made, "late", "the clock does not wait for the router");
+    assert.notEqual(made, undefined);
+    desk.bindRouter(undefined);
+    await desk.dispose(0);
+  } finally {
+    await rm(h, { recursive: true, force: true });
+  }
+});
+
+test("quiesce stops reading the phone's inbox and keeps the outlet for the conversation's last answers", async () => {
+  const h = join(TMP, "quiesce");
+  await mkdir(h, { recursive: true });
+  try {
+    const fake = persistedRoot();
+    const { state, phone } = phoneWith([]);
+    const timer = fakeTimer();
+    const desk = installDesk(recorder(), {
+      home: h, enabled: true, router: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, phone,
+      root: join(TMP, "repo-quiesce"), route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
+    });
+    desk.bindRouter({ post: async () => ({ opened: true, sessionId: "c" }), stop: async () => false, carry: async () => {}, status: async () => ({ running: 0, waiting: 0 }), note: () => {} });
+    await until("the first read", () => state.reads === 1);
+    await desk.quiesce();
+    await new Promise((done) => setTimeout(done, 20));
+    assert.equal(state.reads, 1, "no read after quiesce");
+    assert.deepEqual(await desk.conversation!.deliver("last answer", { kind: "chat", network: "telegram" }), { sent: ["telegram:900"] }, "the outlet stays");
+    await desk.dispose(0);
+  } finally {
+    await rm(h, { recursive: true, force: true });
+  }
+});
+
+test("with the router expected, a dispose before the bind opens no desk session and starts no bridge", async () => {
+  const h = join(TMP, "routed-disposed");
+  await mkdir(h, { recursive: true });
+  try {
+    const fake = persistedRoot();
+    const { state, phone } = phoneWith(["too early"]);
+    const timer = fakeTimer();
+    const desk = installDesk(recorder(), {
+      home: h, enabled: true, router: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, phone,
+      root: join(TMP, "repo-routed-disposed"), route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
+    });
+    await desk.dispose(0);
+    await new Promise((done) => setTimeout(done, 20));
+    assert.equal(state.reads, 0);
+    assert.equal(fake.state.creates, 0);
+  } finally {
+    await rm(h, { recursive: true, force: true });
+  }
+});
+
+test("with the router expected but not installed, the desk session answers the phone as before", async () => {
+  const h = join(TMP, "routed-failed");
+  await mkdir(h, { recursive: true });
+  try {
+    const fake = persistedRoot();
+    const { phone } = phoneWith(["anyone there?"]);
+    const timer = fakeTimer();
+    const desk = installDesk(recorder(), {
+      home: h, enabled: true, router: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, phone,
+      root: join(TMP, "repo-routed-failed"), route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
+    });
+    desk.bindRouter(undefined);
+    await until("the desk session's followup", () => fake.agents[0]?.followups.length === 1);
+    await desk.dispose(0);
+  } finally {
+    await rm(h, { recursive: true, force: true });
+  }
+});
+
+test("with the router off the desk session answers the phone as before", async () => {
+  const h = join(TMP, "router-off");
+  await mkdir(h, { recursive: true });
+  try {
+    const fake = persistedRoot();
+    const { phone } = phoneWith(["anyone there?"]);
+    const timer = fakeTimer();
+    const desk = installDesk(recorder(), {
+      home: h, enabled: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval }, phone,
+      root: join(TMP, "repo-router-off"), route: { provider: "stub", model: "echo" }, sessionCtx: fake.ctx, installModelSelection: () => () => {},
+    });
+    await until("the desk session's followup", () => fake.agents[0]?.followups.length === 1);
+    const sent = fake.agents[0]!.followups[0] as { id: string; content: { text: string }[]; source: unknown };
+    assert.equal(sent.id, "telegram:41#1@2026-10-20T18:03:00.000Z");
+    assert.match(sent.content.at(-1)!.text, /anyone there\?$/);
+    assert.deepEqual(sent.source, { kind: "telegram", network: "telegram", messageId: "telegram:41" });
+    assert.equal(fake.agents.length, 1, "one desk session");
+    await desk.dispose(0);
+    assert.ok((await readEvents(h)).events.some((e) => e.kind === "desk-session"));
+  } finally {
+    await rm(h, { recursive: true, force: true });
+  }
+});
+
 /* The final review's M3: a bridge whose install throws is one line, and the conversation still starts - no unhandled
  * rejection (a process exit under installFailLoud), and dispose still settles. */
 test("installDesk: a phone bridge that throws as it installs is one line, and the conversation starts all the same", async () => {
@@ -1103,11 +1295,16 @@ test("budgetState: a cancelled, failed or timed-out turn's tokens count; a turn 
   });
 });
 
-test("budgetReplyLine is the phone's line for a post while the budget is spent", () => {
+test("budgetPhoneLine: the fallback's refusal says the text was not taken and when the budget opens again", () => {
+  assert.equal(budgetPhoneLine(SPENT),
+    "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET; your text was not taken. It opens again at 00:00 ET, or raise budget.dailyTokens in standing.yml");
+});
+
+test("budgetReplyLine: the budget line names standing orders and annotations", () => {
   assert.equal(budgetReplyLine(SPENT),
-    "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml");
+    "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. Standing orders and annotations wait for midnight ET, or raise budget.dailyTokens in standing.yml");
   assert.equal(budgetReplyLine({ used: SPENT.used, spent: false }),
-    "the desk's token budget for today is spent: 2,013,402 tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml",
+    "the desk's token budget for today is spent: 2,013,402 tokens since 00:00 ET. Standing orders and annotations wait for midnight ET, or raise budget.dailyTokens in standing.yml",
     "a state with no cap names none");
 });
 
@@ -1366,7 +1563,7 @@ test("standingLines and budgetLine print the orders, the calendar and the budget
     "budget: 1,234,567 tokens today, cap not set (budget.dailyTokens in standing.yml)");
   assert.equal(budgetLine({ dailyTokens: 2_000_000, used: used(1_234_567), spent: false }), "budget: 1,234,567 of 2,000,000 tokens today");
   assert.equal(budgetLine({ dailyTokens: 2_000_000, used: used(2_013_402), spent: true }),
-    "budget: spent, 2,013,402 of 2,000,000 tokens today; standing orders and phone turns wait for 00:00 ET");
+    "budget: spent, 2,013,402 of 2,000,000 tokens today; standing orders and annotations wait for 00:00 ET");
   assert.equal(budgetLine({ dailyTokens: 2_000_000, used: used(0), spent: false, error: "EACCES" }), "budget: 0 of 2,000,000 tokens today (ledger unreadable: EACCES)");
 
   /* deskStatusLines: the budget line, then the standing orders', after the phone line - each only with its field. */
@@ -1464,7 +1661,7 @@ test("installDesk loads the schedule only with the conversation; its status reac
   const posted = await desk.conversation?.post({ text: "how is the book?", source: { kind: "telegram" }, message: { kind: "telegram", from: 42, chat: 42, messageId: 7 } });
   assert.deepEqual(posted, {
     refused: "budget",
-    line: "the desk's token budget for today is spent: 1,000 of 1,000 tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml",
+    line: "the desk's token budget for today is spent: 1,000 of 1,000 tokens since 00:00 ET; your text was not taken. It opens again at 00:00 ET, or raise budget.dailyTokens in standing.yml",
   }, "the conversation's budget is the clock row's cap");
 
   await desk.dispose(0);
@@ -1727,6 +1924,69 @@ test("installDesk starts the watch with a source, shares the US calendar with th
   assert.equal(fake.listeners.size, 0, "the annotation's supervision and the conversation's both let go");
 });
 
+test("a delivered alert reaches the bound conversation's note with its source; unbound, nothing is noted", async () => {
+  const run = async (label: string, bind: boolean): Promise<{ notes: DeskLine[]; phone: string[] }> => {
+    const h = join(TMP, `note-${label}`);
+    const root = join(TMP, `repo-note-${label}`);
+    await mkdir(join(root, "desk", "journal"), { recursive: true });
+    await writeFile(join(root, "desk", "levels.yml"), "- symbol: \"600519\"\n  kind: watch\n  price: 1400\n  when: cross_down\n  plan: reread the thesis\n  expires: 2027-12-31\n");
+    const timer = fakeTimer();
+    const watchClock = new WallClock("2026-12-01T02:00:00Z");
+    let price: number | undefined;
+    const quotes: MarketQuoteSource = {
+      snapshot: async (assets) => {
+        const at = new Date(watchClock.now()).toISOString();
+        const priced = price === undefined ? [] : assets.filter((a) => a.symbol === "600519").map((a) => ({
+          ...a, change: null, volume: null, volume_as_of: null, source: "market", feed: "tencent", basis: "previous_close" as const,
+          cn: { phase: "trading", lastSession: null }, price: price!, prev_close: 1410, change_pct: null, as_of: at, received_at: at,
+          quote_status: "live", market_status: "open", message: "",
+        }));
+        return { ok: true, generated_at: at, quotes: priced, providers: [] } as Awaited<ReturnType<MarketQuoteSource["snapshot"]>>;
+      },
+    };
+    const cn = fakeCalendar({ "2026-12-01": { date: "2026-12-01", open: "2026-12-01T01:30:00Z", close: "2026-12-01T07:00:00Z", early: false } }, "fake XSHG", (n) => bjDate(new Date(n)));
+    const fake = conversationRoot(() => "");
+    const desk = installDesk(recorder(), {
+      enabled: true, router: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval },
+      root, route: { provider: "stub", model: "echo" }, installModelSelection: () => () => {}, log: () => {},
+      home: h, sessionCtx: fake.ctx, quotes, alertDeadlineMs: 40,
+      schedule: { clock: new WallClock("2026-12-01T02:00:00Z"), calendar: fakeCalendar({ "2026-11-30": "closed" }), tickMs: 86_400_000 },
+      watchRow: { clock: watchClock, tickMs: 5_000, edgar: null, alive: () => false, calendars: { cn } },
+    });
+    const notes: DeskLine[] = [];
+    if (bind) {
+      desk.bindRouter({
+        post: async () => ({ opened: true, sessionId: "conv-1" }), stop: async () => false, carry: async () => {},
+        status: async () => ({ running: 0, waiting: 0 }), note: (line) => { notes.push(line); },
+      });
+    }
+    const phone: string[] = [];
+    desk.conversation!.setOutlet({ send: async (text) => { phone.push(text); return { sent: [`telegram:${phone.length}`] }; } });
+    const handle = await desk.watchRow;
+    assert.ok(handle !== undefined);
+    await watchClock.advance(0);
+    price = 1390;
+    await watchClock.advance(10_000);
+    await until("the alert", () => phone.some((t) => t.startsWith("600519")));
+    if (bind) await until("the note", () => notes.length >= 1);
+    else await new Promise((done) => setTimeout(done, 50));
+    await desk.dispose(0);
+    await rm(h, { recursive: true, force: true });
+    return { notes, phone };
+  };
+  const bound = await run("bound", true);
+  const alertNotes = bound.notes.filter((n) => n.kind === "alert" && n.label !== "annotation");
+  assert.equal(alertNotes.length, 1, JSON.stringify(bound));
+  const [n] = alertNotes as Extract<DeskLine, { kind: "alert" }>[];
+  assert.match(n.alert, /^a-/);
+  assert.equal(n.symbol, "600519");
+  assert.equal(n.label, "watch");
+  assert.equal(n.text, bound.phone.find((t) => t.startsWith("600519")), "the text the phone got");
+  const unbound = await run("unbound", false);
+  assert.ok(unbound.phone.length >= 1, "the alert still went to the phone");
+  assert.deepEqual(unbound.notes, [], "no conversation bound: nothing noted");
+});
+
 /* P3: the watch's lines (the P3 plan's Task 10), appended by deskStatusLines after P2's. */
 
 const quietToday = (): MarketWatchStatus["today"] => ({ sent: 0, suppressed: { cooldown: 0, cap: 0, muted: 0, off: 0, window: 0 }, repeats: 0 });
@@ -1820,4 +2080,70 @@ test("deskStatusLines appends the watch's lines after P2's", () => {
   };
   assert.deepEqual(deskStatusLines({ ...base, watch: watching() }, now), [...deskStatusLines(base, now), ...watchLines(watching(), now)]);
   assert.equal(deskStatusLines({ ...base, watch: watching() }, now).at(-1), "watch files refused: desk/levels.yml 2 of 9");
+});
+
+/* ---------- the rail's desk lines (one-entry plan 3 task 5) ---------- */
+
+const RAIL_NOW = Date.parse("2026-11-10T18:00:00.000Z"); /* 13:00 ET */
+const railOrder = (id: string, dir: string, extra: Partial<StandingStatus["orders"][number]> = {}): StandingStatus["orders"][number] => ({
+  id, dir, file: "x.md", at: "15:30", wake: true, enabled: true, expires: "2027-01-01", expired: false, hash: "ok", ...extra,
+});
+const railStanding = (over: Partial<StandingStatus> = {}): StandingStatus => ({
+  file: { path: "standing.yml", state: "loaded" }, calendar: { clock: "x", state: "ok" }, orders: [], queued: [], recent: [], ...over,
+});
+const firing = (key: string, over: Partial<FiringSummary> = {}): FiringSummary => {
+  const [order, date] = key.split(":") as [string, string];
+  return { key, order, date, kind: "finished", outcome: "ended", t: "2026-11-10T15:00:00.000Z", sessionId: "s-" + order, wallMs: 60_000, ...over };
+};
+
+test("rail: scheduled lines carry each order's next firing and last outcome", async () => {
+  const h = await home();
+  const last = firing("preclose:2026-11-09", { t: "2026-11-09T20:30:00.000Z" });
+  const standing = railStanding({ orders: [
+    railOrder("preclose", "desk", { nextAnchor: "2026-11-10T20:30:00.000Z", last }),
+    railOrder("report", "strategies/alpha", { enabled: false, expired: true }),
+  ] });
+  const got = await deskLines({ home: h, standing: () => standing, now: () => RAIL_NOW });
+  assert.deepEqual(got?.scheduled, [
+    { order: "preclose", next: "2026-11-10T20:30:00.000Z", last: { outcome: "ended", t: last.t, sessionId: "s-preclose" }, enabled: true, expired: false },
+    { order: "report", strategy: "alpha", enabled: false, expired: true },
+  ]);
+  assert.equal(await deskLines({ home: h, standing: () => undefined, now: () => RAIL_NOW }), undefined, "no standing status: no desk");
+});
+
+test("rail: today's firings are lines; yesterday's are not", async () => {
+  const h = await home();
+  const standing = railStanding({
+    running: { key: "preclose:2026-11-10", startedAt: "2026-11-10T17:55:00.000Z", sessionId: "s-run" },
+    recent: [firing("report:2026-11-10"), firing("old:2026-11-09", { t: "2026-11-10T04:00:00.000Z" })],
+  });
+  const got = await deskLines({ home: h, standing: () => standing, now: () => RAIL_NOW });
+  assert.deepEqual(got?.lines.map((l) => [l.id, l.title, l.state]), [["preclose:2026-11-10", "preclose", "running"], ["report:2026-11-10", "report", "done"]]);
+  assert.equal(got?.lines[1]?.startedAt, "2026-11-10T14:59:00.000Z");
+  assert.equal(got?.lines[1]?.endedAt, "2026-11-10T15:00:00.000Z");
+  assert.equal(got?.lines[1]?.sessionId, "s-report");
+});
+
+test("rail: a failed firing reads failed", async () => {
+  const h = await home();
+  const standing = railStanding({ recent: [
+    firing("a:2026-11-10", { outcome: "timed-out" }), firing("b:2026-11-10", { kind: "refused", outcome: "budget" }), firing("c:2026-11-10", { outcome: "fence" }),
+  ] });
+  const got = await deskLines({ home: h, standing: () => standing, now: () => RAIL_NOW });
+  assert.deepEqual(got?.lines.map((l) => l.state), ["failed", "failed", "failed"]);
+});
+
+test("rail: an annotation line carries its text, cut", async () => {
+  const h = await home();
+  const alert = { t: "2026-11-10T16:00:00.000Z", kind: "alert", id: "a1", pass: "p1", date: "2026-11-10", key: "k", market: "us", symbol: "NVDA", label: "x", trigger: "t", gap: 1, decision: "send" };
+  const alert2 = { ...alert, id: "a2", symbol: "AMD" };
+  const ann = (pass: string, t: string, text: string, outcome = "ended") => ({ t, kind: "annotated", pass, sessionId: "s-" + pass, outcome, sent: [], text });
+  await mkdir(deskDir(h), { recursive: true });
+  const lines = [alert, alert2, ann("p1", "2026-11-10T16:05:00.000Z", "x".repeat(900)), ann("p0", "2026-11-09T16:05:00.000Z", "yesterday"), ann("p2", "2026-11-10T17:00:00.000Z", "", "failed")];
+  await writeFile(join(deskDir(h), ALERTS_FILE), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const got = await deskLines({ home: h, standing: () => railStanding(), now: () => RAIL_NOW });
+  assert.deepEqual(got?.lines.map((l) => [l.id, l.title, l.state, l.kind]), [["annotation:p2", "p2", "failed", "annotation"], ["annotation:p1", "NVDA AMD", "done", "annotation"]]);
+  assert.equal(got?.lines[1]?.text?.length, RAIL_TEXT_MAX);
+  assert.equal(got?.lines[0]?.text, undefined);
+  assert.equal(got?.lines[1]?.sessionId, "s-p1");
 });

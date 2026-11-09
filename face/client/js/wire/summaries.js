@@ -3,7 +3,7 @@
  *
  * No DOM, no network, no state - one list row plus the face's own preset
  * hints in, one row out. Split out of chat.js for the same reason speaker.js
- * and grouping.js are: the decision has to be drillable without a browser.
+ * is: the decision has to be drillable without a browser.
  *
  * WHY IT EXISTS. dsh 0.1.1-rc.2's apiproxy summary carried `agentPreset`
  * directly. dsh 0.2.0-rc.2's `SessionSummary` does not (NEW

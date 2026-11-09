@@ -8,6 +8,11 @@
  * recipient: it long-polls the account's inbox (src/phone.ts `inbox`) - only the operator's own texts are ever in it -
  * and sends through the account's send route (src/phone.ts `send`), naming each send's kind.
  *
+ * WHERE A TEXT GOES (one-entry plan 3). To Gravit's one conversation once src/desk.ts binds it (`router`): its post,
+ * its `/stop`, its `/status` lines (`conversation <id>`, `tasks: <n> running, <m> waiting for you`), and `/new` answered
+ * that there is one conversation. Unbound - `FACE_ROUTER=0`, or a conversation that could not be installed - to the
+ * desk conversation, as below. The desk conversation stays the outlet either way.
+ *
  * WHAT A MESSAGE DOES. A text goes to the desk conversation (src/desk-conversation.ts) with the telegram source - the
  * kind keeps its name for every network, and `network` says which (`telegram`, `slack`, `imessage`) - and the time the operator
  * wrote it (the inbox's `at`). A text that replies to one of the desk's messages carries that
@@ -50,8 +55,9 @@ import { writeFileAtomic } from "@deepseek-ai/dsh-atomic-write";
 import {
   MUTE_USAGE, deskDir, deskStatusLines, deskTime, muteReplyLine, parseDuration, writeMute, writeOff, type DeskStatus, type PhoneStatus,
 } from "./desk.ts";
-import type { DeskConversation, DeskOutlet, PostResult } from "./desk-conversation.ts";
+import type { DeskConversation, DeskOutlet, PhonePost, PostResult } from "./desk-conversation.ts";
 import type { DeskClock } from "./desk-session.ts";
+import type { DeskLine } from "./conversation.ts";
 import type { AccountPhoneStatus, InboxMessage, PhoneClient } from "./phone.ts";
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; the bridge's lines add `phone:`. */
@@ -79,6 +85,8 @@ export const CURSOR_FILE = "inbox.cursor";
 const RESUMES = "a terminal resumes it: npm run desk -- resume";
 const PAUSE_USAGE = "/pause takes Nm, Nh or Nd - 30m, 2h, 1d - or nothing; nothing was paused";
 const RENEWED = "a new desk conversation";
+/** `/new`'s answer once the phone reaches Gravit's one conversation: there is no other to open. */
+export const ONE_CONVERSATION = "there is one conversation: Gravit's; /new opens no other. /stop cuts its turn under way";
 const SLOW = "the desk is slow to take this; it will answer when it can";
 /** What `/stop` cancels the turn under way with. */
 const STOP_REASON = "stopped from the phone";
@@ -123,11 +131,27 @@ export function parseCommand(text: string): Command | undefined {
   return arg === undefined || arg === "" ? { cmd } : { cmd, arg };
 }
 
+/** Gravit's one conversation as the phone reaches it (src/conversation.ts, src/tasks.ts `phoneConversation`):
+ * `post`, a text's post (pause, fence, key); `stop`, its turn under way cut, the queue behind it kept - whether one was;
+ * `carry`, what a graceful stop carried answered (src/desk.ts calls it once the outlet is set; the bridge does not);
+ * `status`, its session and how many of its tasks run and wait for the operator; `note`, what the desk sent the phone
+ * noted as a line in the conversation (src/desk.ts hands it to the firings, the annotations and the watch). */
+export interface PhoneConversation {
+  post(input: PhonePost): Promise<PostResult>;
+  stop(reason: string): Promise<boolean>;
+  carry(): Promise<void>;
+  note(line: DeskLine): void;
+  status(): Promise<{ sessionId?: string; running: number; waiting: number }>;
+}
+
 /** What {@link installPhoneBridge} needs: the account's client; the harness home, whose desk directory holds the
  * cursor; the desk conversation, as the bridge uses it; `status`, what `/status` reads (src/desk.ts `deskStatus`);
  * `log`, where a line goes (stderr); `clock`, the timers (the global ones); `contextFor`, what a reply to one of the desk's
  * messages carries to the conversation - the watch's alert and its annotation (src/watch.ts `contextFor`), `undefined`
- * for a message it does not know or while there is no watch. */
+ * for a message it does not know or while there is no watch; `router`, Gravit's one conversation when it is bound
+ * (read at each message): then a text is posted to it, not to the desk conversation, and `/new`, `/status` and `/stop`
+ * are its (one-entry plan 3) - `undefined`, or no `router`, and the desk conversation answers as before
+ * (`FACE_ROUTER=0`). The desk conversation stays the outlet either way. */
 export interface PhoneBridgeDeps {
   phone: PhoneClient;
   home: string;
@@ -136,11 +160,18 @@ export interface PhoneBridgeDeps {
   log?: (line: string) => void;
   clock?: DeskClock;
   contextFor?: (messageId: string) => string | undefined;
+  router?: () => PhoneConversation | undefined;
+  /** When given, the inbox is not read until it settles (src/desk.ts: the router's bind): the outlet is set at once. */
+  hold?: Promise<void>;
 }
 
-/** The running bridge: `status`, what the desk's status reports of it; `dispose`, its end. */
+/** The running bridge: `status`, what the desk's status reports of it; `stop`, the inbox no longer read - the read under
+ * way cut, the message in hand waited for up to 2 s - while the bridge stays the outlet, so the conversation's last
+ * answers still reach the phone (main.ts calls it, through src/desk.ts `quiesce`, before it disposes the
+ * conversation); `dispose`, its end: `stop`, then the outlet let go. */
 export interface PhoneBridgeHandle {
   status(): PhoneStatus;
+  stop(): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -193,6 +224,7 @@ export function installPhoneBridge(deps: PhoneBridgeDeps): PhoneBridgeHandle {
   let cursor = 0;
   let disposed = false;
   let disposing: Promise<void> | undefined;
+  let halting: Promise<void> | undefined;
   /** Aborted at dispose: the read under way is cut. */
   const stopping = new AbortController();
   /** Ends the loop's wait early, at dispose. */
@@ -243,12 +275,23 @@ export function installPhoneBridge(deps: PhoneBridgeDeps): PhoneBridgeHandle {
 
   /* ---------- the commands ---------- */
 
-  const statusReply = async (): Promise<string> => {
+  const statusReply = async (routed: PhoneConversation | undefined): Promise<string> => {
     try {
       const status = await deps.status();
       const lines = deskStatusLines(status, new Date(clock.now()));
       if (status.ledgerError !== undefined) lines.push(`ledger: unreadable (${status.ledgerError})`);
-      lines.push(`desk session ${status.deskSession ?? "none yet"}`, `turns today ${status.turnsToday.count}`);
+      if (routed === undefined) {
+        lines.push(`desk session ${status.deskSession ?? "none yet"}`, `turns today ${status.turnsToday.count}`);
+      } else {
+        try {
+          const conv = await routed.status();
+          lines.push(`conversation ${conv.sessionId ?? "none yet"}`, `tasks: ${conv.running} running, ${conv.waiting} waiting for you`);
+        } catch (err) {
+          lines.push(`tasks: unreadable (${reasonOf(err)})`);
+        }
+        /* the desk's own turns now: the standing orders' firings and the alerts' annotations, never the phone's */
+        lines.push(`desk turns today ${status.turnsToday.count} (firings, annotations)`);
+      }
       return lines.join("\n");
     } catch (err) {
       return `the status could not be read: ${reasonOf(err)}`;
@@ -279,11 +322,11 @@ export function installPhoneBridge(deps: PhoneBridgeDeps): PhoneBridgeHandle {
     }
   };
 
-  const stopReply = async (): Promise<string> => {
+  const stopReply = async (routed: PhoneConversation | undefined): Promise<string> => {
     try {
-      return (await conversation.stop(STOP_REASON)) ? "stopped" : "nothing is running";
+      return (await (routed ?? conversation).stop(STOP_REASON)) ? "stopped" : "nothing is running";
     } catch (err) {
-      return `the desk could not be stopped: ${reasonOf(err)}`;
+      return `${routed === undefined ? "the desk" : "the conversation"} could not be stopped: ${reasonOf(err)}`;
     }
   };
 
@@ -317,20 +360,26 @@ export function installPhoneBridge(deps: PhoneBridgeDeps): PhoneBridgeHandle {
   /** Handle one message; resolves once it is taken - a text's post or a `/new` settled, a command answered. */
   const handle = async (m: InboxMessage): Promise<void> => {
     const command = parseCommand(m.text);
+    /* read at each message: the router is bound after the bridge may have started */
+    const routed = deps.router?.();
+    if (command?.cmd === "new" && routed !== undefined) {
+      await reply(ONE_CONVERSATION, m.network);
+      return;
+    }
     if (command?.cmd === "new") {
       await answerWithin(conversation.renew().then(() => RENEWED, (err: unknown) => `a new desk conversation could not be opened: ${reasonOf(err)}`), m.network);
       return;
     }
     if (command !== undefined) {
-      await reply(command.cmd === "status" ? await statusReply()
+      await reply(command.cmd === "status" ? await statusReply(routed)
         : command.cmd === "pause" ? await pauseReply(command.arg, setterOf(m.network))
         : command.cmd === "mute" ? await muteReply(command.arg, setterOf(m.network))
-        : await stopReply(), m.network);
+        : await stopReply(routed), m.network);
       return;
     }
     const at = Date.parse(m.at);
     const context = replyContext(m);
-    const posted = conversation.post({
+    const posted = (routed ?? conversation).post({
       text: m.text,
       source: { kind: "telegram", network: m.network, ...(Number.isFinite(at) && at > 0 ? { at } : {}) },
       message: { kind: "telegram", network: m.network, messageId: m.messageId },
@@ -379,6 +428,8 @@ export function installPhoneBridge(deps: PhoneBridgeDeps): PhoneBridgeHandle {
   });
 
   const run = async (): Promise<void> => {
+    if (deps.hold !== undefined) await deps.hold;
+    if (disposed) return;
     await load();
     let backoff = 0;
     let failureSaidAt = Number.NEGATIVE_INFINITY;
@@ -436,6 +487,18 @@ export function installPhoneBridge(deps: PhoneBridgeDeps): PhoneBridgeHandle {
   };
   conversation.setOutlet(outlet);
 
+  /** The inbox no longer read: the read under way cut, the message in hand waited for up to 2 s; the outlet kept. */
+  const halt = (): Promise<void> => {
+    halting ??= (async () => {
+      disposed = true;
+      polling = false;
+      stopping.abort(new Error("the bridge is shut down"));
+      wake?.();
+      await bounded(DISPOSE_MS, loop);
+    })();
+    return halting;
+  };
+
   return {
     status: () => ({
       configured: true,
@@ -446,14 +509,11 @@ export function installPhoneBridge(deps: PhoneBridgeDeps): PhoneBridgeHandle {
       queued: account.queued,
       strangers: account.strangers,
     }),
+    stop: halt,
     dispose() {
       disposing ??= (async () => {
-        disposed = true;
-        polling = false;
+        await halt();
         conversation.setOutlet(undefined);
-        stopping.abort(new Error("the bridge is shut down"));
-        wake?.();
-        await bounded(DISPOSE_MS, loop);
       })();
       return disposing;
     },

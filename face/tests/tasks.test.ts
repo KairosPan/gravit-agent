@@ -6,10 +6,12 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { Readable } from "node:stream";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { routerEnabled, installRouter, installTasks, RECOVERY_NOTE, IDLE_DISPOSE_MS, type TasksDeps, type TasksHandle } from "../src/tasks.ts";
-import type { ConversationHandle } from "../src/conversation.ts";
+import type { TaskView } from "../src/task-view.ts";
+import { phoneConversation, routerEnabled, installRouter, installTasks, RECOVERY_NOTE, CONTINUE_NOTE, IDLE_DISPOSE_MS, type TasksDeps, type TasksHandle } from "../src/tasks.ts";
+import type { ConversationHandle, TaskOrigin } from "../src/conversation.ts";
 import type { EventLike, MessageLike } from "../src/room-rules.ts";
 import type { AgentLike } from "../src/room.ts";
 import { FakeAgent, FakeSession, FakeTree, toolResultMessage } from "./room-fake.ts";
@@ -39,6 +41,7 @@ class Harness {
   readonly tree = new FakeTree();
   readonly conv: FakeAgent;
   operator = true;
+  origin: TaskOrigin = { kind: "web" };
   readonly lines: string[] = [];
   readonly disposed: string[] = [];
   readonly cwdSets: { agent: string; path: string }[] = [];
@@ -69,6 +72,9 @@ class Harness {
       ensure: async () => ({ agent: conv as unknown as AgentLike, sessionId: CONV }),
       current: () => ({ agent: conv as unknown as AgentLike, sessionId: CONV }),
       operatorTurn: () => this.operator,
+      turnOrigin: () => this.origin,
+      post: async () => ({ refused: "error", line: "no phone here" }),
+      stop: async () => false, carry: async () => {}, note: () => {},
       dispose: async () => {},
     };
     const handle = (agent: FakeAgent) => ({
@@ -257,20 +263,31 @@ const report = (turn: number, callId: string, status: string, text: string): Ev[
 /* ---------- the route recorder ---------- */
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => Promise<void> | void;
-function recorder(): { register(route: { path: string; handler: Handler }): void; paths(): string[]; get(path: string, host?: string): Promise<{ status: number; body: Record<string, unknown> }> } {
+type Rec = {
+  register(route: { path: string; handler: Handler }): void;
+  paths(): string[];
+  get(path: string, host?: string): Promise<{ status: number; body: Record<string, unknown> }>;
+  post(path: string, body: unknown, host?: string, method?: string): Promise<{ status: number; body: Record<string, unknown> }>;
+};
+function recorder(): Rec {
   const routes = new Map<string, Handler>();
+  const call = async (path: string, method: string, host: string, payload: string | undefined): Promise<{ status: number; body: Record<string, unknown> }> => {
+    const handler = routes.get(path);
+    assert.ok(handler, `a route at ${path}`);
+    let status = 0;
+    let body = "";
+    const res = { writeHead(s: number) { status = s; return res; }, end(b: string) { body = b; } } as unknown as ServerResponse;
+    const req = Object.assign(Readable.from(payload === undefined ? [] : [Buffer.from(payload)]), {
+      method, url: path, headers: { host, ...(payload === undefined ? {} : { "content-type": "application/json" }) },
+    }) as unknown as IncomingMessage;
+    await handler(req, res);
+    return { status, body: JSON.parse(body) as Record<string, unknown> };
+  };
   return {
     register(route) { routes.set(route.path, route.handler); },
     paths: () => [...routes.keys()],
-    async get(path, host = "127.0.0.1:3090") {
-      const handler = routes.get(path);
-      assert.ok(handler, `a route at ${path}`);
-      let status = 0;
-      let body = "";
-      const res = { writeHead(s: number) { status = s; return res; }, end(b: string) { body = b; } } as unknown as ServerResponse;
-      await handler({ method: "GET", url: path, headers: { host } } as unknown as IncomingMessage, res);
-      return { status, body: JSON.parse(body) as Record<string, unknown> };
-    },
+    get: (path, host = "127.0.0.1:3090") => call(path, "GET", host, undefined),
+    post: (path, body, host = "127.0.0.1:3090", method = "POST") => call(path, method, host, JSON.stringify(body)),
   };
 }
 
@@ -289,7 +306,7 @@ test("GET /data/tasks lists the conversation's workers — waiting for you first
   const tasks = await install(h, rec);
   t.after(() => tasks.dispose());
 
-  assert.deepEqual(rec.paths(), ["/data/tasks"]);
+  assert.deepEqual(rec.paths(), ["/data/tasks", "/data/tasks/stop", "/data/tasks/continue"]);
   const got = await rec.get("/data/tasks");
   assert.equal(got.status, 200);
   assert.equal(got.body.ok, true);
@@ -509,7 +526,8 @@ test("a running worker the face disposes at shutdown gets one recovery note on t
 test("installRouter: a conversation that cannot be opened is one line, is disposed, and the face goes on without it", async () => {
   const made: string[] = [];
   const handle = (ensure: () => Promise<{ agent: AgentLike; sessionId: string }>): ConversationHandle => ({
-    ensure, current: () => undefined, operatorTurn: () => false, dispose: async () => { made.push("disposed"); },
+    ensure, current: () => undefined, operatorTurn: () => false, turnOrigin: () => ({ kind: "web" }),
+    post: async () => ({ refused: "error", line: "no phone here" }), stop: async () => false, carry: async () => {}, note: () => {}, dispose: async () => { made.push("disposed"); },
   });
   const lines: string[] = [];
   const failed = await installRouter({
@@ -539,6 +557,26 @@ test("installRouter: a conversation that cannot be opened is one line, is dispos
   assert.deepEqual(ok, { conversation: conv, tasks, sessionId: "session-c" });
 });
 
+test("phoneConversation posts and stops through the conversation and counts its tasks running and waiting", async () => {
+  const calls: string[] = [];
+  const conv = {
+    ensure: async () => ({ agent: {} as AgentLike, sessionId: "session-c" }), current: () => ({ agent: {} as AgentLike, sessionId: "session-c" }),
+    operatorTurn: () => false, turnOrigin: () => ({ kind: "web" as const }),
+    post: async () => { calls.push("post"); return { opened: true as const, sessionId: "session-c" }; },
+    stop: async (reason: string) => { calls.push(`stop ${reason}`); return true; },
+    carry: async () => { calls.push("carry"); },
+    note: (line) => { calls.push(`note ${line.kind}`); },
+    dispose: async () => {},
+  } satisfies ConversationHandle;
+  const views = ["running", "stalled", "waiting", "done", "waiting", "failed"].map((state) => ({ state })) as unknown as TaskView[];
+  const phone = phoneConversation(conv, { list: async () => views });
+  assert.deepEqual(await phone.status(), { sessionId: "session-c", running: 2, waiting: 2 });
+  assert.equal(await phone.stop("stopped from the phone"), true);
+  await phone.post({ text: "t", key: "k", source: { kind: "telegram" }, message: { kind: "telegram", network: "telegram", messageId: "telegram:1" } });
+  phone.note({ kind: "schedule", order: "brief", firing: "brief@2026-11-09", date: "2026-11-09", text: "the brief" });
+  assert.deepEqual(calls, ["stop stopped from the phone", "post", "note schedule"]);
+});
+
 test("routerEnabled is false only for FACE_ROUTER=0", () => {
   assert.equal(routerEnabled({}), true);
   assert.equal(routerEnabled({ FACE_ROUTER: "1" }), true);
@@ -562,7 +600,8 @@ test("task_read's text is the task's report when it has one, over its closing wo
 
 test("installRouter checks the conversation's fence once: a violation is one loud line naming it, and the face still starts", async () => {
   const handle = (): ConversationHandle => ({
-    ensure: async () => ({ agent: {} as AgentLike, sessionId: "session-c" }), current: () => undefined, operatorTurn: () => false, dispose: async () => {},
+    ensure: async () => ({ agent: {} as AgentLike, sessionId: "session-c" }), current: () => undefined, operatorTurn: () => false,
+    turnOrigin: () => ({ kind: "web" }), post: async () => ({ refused: "error", line: "no phone here" }), stop: async () => false, carry: async () => {}, note: () => {}, dispose: async () => {},
   });
   const tasks = { ops: {}, ready: Promise.resolve(), dispose: async () => {} } as unknown as TasksHandle;
   const lines: string[] = [];
@@ -577,4 +616,122 @@ test("installRouter checks the conversation's fence once: a violation is one lou
   await installRouter({ conversation: handle, tasks: () => tasks, fence: async (): Promise<string | undefined> => { throw new Error("EACCES"); }, log: (line) => { lines.push(line); } });
   assert.equal(lines.length, 1);
   assert.match(lines[0]!, /EACCES/);
+});
+
+test("POST /data/tasks/stop calls ops.stop once and answers {ok, task}", async (t) => {
+  const h = await harness();
+  const rec = recorder();
+  const tasks = await install(h, rec);
+  t.after(() => tasks.dispose());
+  h.tree.script("gravit", () => ({ kind: "hang" }));
+  const started = await tasks.ops.start({ title: "Long", brief: "work" });
+  const calls: string[] = [];
+  const real = tasks.ops.stop.bind(tasks.ops);
+  tasks.ops.stop = async (id) => { calls.push(id); return real(id); };
+  const pending = rec.post("/data/tasks/stop", { task: started.id });
+  await h.tree.clock.advance(10);
+  const got = await pending;
+  assert.equal(got.status, 200);
+  assert.equal(got.body.ok, true);
+  assert.deepEqual(calls, [started.id]);
+  assert.equal((got.body.task as { id: string }).id, started.id);
+  assert.equal((got.body.task as { state: string }).state, "stopped");
+});
+
+test("Stop on a task that already ended is 409 and leaves it alone: no cancel, no stopped marker, its result kept", async (t) => {
+  const h = await harness();
+  h.seed("w-ended", [brief("w-ended", "Ended", AT - 60_000), start(1), said(1, "the answer"), end(1)]);
+  const rec = recorder();
+  const tasks = await install(h, rec);
+  t.after(() => tasks.dispose());
+  const before = await tasks.ops.read("w-ended");
+  assert.equal(before.view.state, "done");
+  const got = await rec.post("/data/tasks/stop", { task: "w-ended" });
+  assert.deepEqual([got.status, got.body], [409, { ok: false, error: "task already ended" }]);
+  assert.equal(h.ids("w-ended").filter((m) => m.startsWith("task-stopped:")).length, 0, "the log gains no stopped marker");
+  const after = await tasks.ops.read("w-ended");
+  assert.equal(after.view.state, "done");
+  assert.deepEqual(after.view.result, before.view.result);
+  await assert.rejects(h.tool("task_stop").execute({ task: "w-ended" }), /^Error: task w-ended already ended \(done\); there is nothing to stop$/);
+});
+
+test("POST /data/tasks/continue sends CONTINUE_NOTE through ops.steer", async (t) => {
+  const h = await harness();
+  h.seed("w-done", [brief("w-done", "Done", AT - 60_000), start(1), said(1, "done"), end(1)]);
+  const rec = recorder();
+  const tasks = await install(h, rec);
+  t.after(() => tasks.dispose());
+  assert.equal(CONTINUE_NOTE, "Continue the task. First check what you already did \u2014 files written, orders proposed, messages sent \u2014 and do not repeat any of it.");
+  const calls: [string, string][] = [];
+  const real = tasks.ops.steer.bind(tasks.ops);
+  tasks.ops.steer = async (id, text) => { calls.push([id, text]); return real(id, text); };
+  const pending = rec.post("/data/tasks/continue", { task: "w-done" });
+  await h.tree.clock.advance(50);
+  const got = await pending;
+  assert.equal(got.status, 200);
+  assert.deepEqual(calls, [["w-done", CONTINUE_NOTE]]);
+  assert.equal((got.body.task as { id: string }).id, "w-done");
+});
+
+test("the Stop and Continue routes: an unknown task is 404, a bad body 400, GET 405, an untrusted request 403", async (t) => {
+  const h = await harness();
+  const rec = recorder();
+  const tasks = await install(h, rec);
+  t.after(() => tasks.dispose());
+  for (const path of ["/data/tasks/stop", "/data/tasks/continue"]) {
+    const missing = await rec.post(path, { task: "x" });
+    assert.deepEqual([missing.status, missing.body], [404, { ok: false, error: "no such task" }]);
+    for (const bad of [{}, { task: 3 }, { task: "" }, { task: "x".repeat(201) }]) {
+      const got = await rec.post(path, bad);
+      assert.deepEqual([got.status, got.body.error], [400, "task is required"]);
+    }
+    assert.equal((await rec.post(path, { task: "x" }, "127.0.0.1:3090", "GET")).status, 405);
+    assert.equal((await rec.post(path, { task: "x" }, "evil.example")).status, 403);
+  }
+});
+
+test("task_start in a phone turn starts a phone task", async (t) => {
+  const h = await harness();
+  const tasks = await install(h);
+  t.after(() => tasks.dispose());
+  h.origin = { kind: "phone", network: "slack" };
+  const out = await h.tool("task_start").execute({ title: "From the phone", brief: "look" }) as { task: string };
+  const brief = h.tree.sessions.get(out.task)!.snapshotEvents().find((e) => e.type === "user/message" && (e.data as MessageLike).id === `task-brief:${out.task}`)!;
+  assert.deepEqual((brief.data as { source: unknown }).source, { kind: "task", form: "brief", conversation: CONV, origin: "phone", network: "slack" });
+  const { view } = await tasks.ops.read(out.task);
+  assert.equal(view.origin, "phone");
+  assert.equal(view.network, "slack");
+  h.origin = { kind: "web" };
+  const web = await h.tool("task_start").execute({ title: "From the browser", brief: "look" }) as { task: string };
+  assert.equal((await tasks.ops.read(web.task)).view.origin, "web");
+});
+
+test("GET /data/tasks carries desk when a provider is given and omits it otherwise", async (t) => {
+  const h = await harness();
+  const none = recorder();
+  const a = await install(h, none);
+  t.after(() => a.dispose());
+  assert.equal(Object.hasOwn((await none.get("/data/tasks")).body, "desk"), false);
+
+  const h2 = await harness();
+  const desk = { scheduled: [{ order: "preclose", enabled: true, expired: false }], lines: [] };
+  const rec = recorder();
+  const b = installTasks(rec, { ...h2.deps(), deskLines: async () => desk });
+  await b.ready;
+  t.after(() => b.dispose());
+  assert.deepEqual((await rec.get("/data/tasks")).body.desk, desk);
+});
+
+test("a provider that throws leaves desk out and the route answers", async (t) => {
+  const h = await harness();
+  const rec = recorder();
+  const tasks = installTasks(rec, { ...h.deps(), deskLines: async () => { throw new Error("ledger gone"); } });
+  await tasks.ready;
+  t.after(() => tasks.dispose());
+  const got = await rec.get("/data/tasks");
+  assert.equal(got.status, 200);
+  assert.equal(got.body.ok, true);
+  assert.equal(Object.hasOwn(got.body, "desk"), false);
+  await rec.get("/data/tasks");
+  assert.equal(h.lines.filter((l) => l.includes("ledger gone")).length, 1, "logged once");
 });

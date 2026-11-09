@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { formatSessionReferenceMention, parseSessionReferenceText, encodeSessionReferenceUri } from '@deepseek-ai/dsh-session-reference';
 import {
-  emptyDraft, textDraft, normalize, lengthOf, isBlank, plainText, hasChip, replaceRange, triggerAt,
+  emptyDraft, textDraft, normalize, lengthOf, isBlank, plainText, replaceRange, triggerAt,
   sessionUri, filePathFor, serialize, serialContext, sessionRefRuns,
 } from '../../client/js/composer/draft.js';
 
@@ -20,9 +20,6 @@ test('runs normalize, and the caret counts a chip as one', () => {
   assert.deepEqual(normalize([T('a'), T(''), T('b'), bot('x'), T(''), T('c'), T('d')]), [T('ab'), bot('x'), T('cd')]);
   assert.equal(lengthOf([T('ab'), bot('x'), T('😀')]), 2 + 1 + 2);
   assert.equal(plainText([T('hi '), bot('news', 'News Scout'), T(' ok')]), 'hi News Scout ok');
-  assert.equal(hasChip([T('a'), bot('x')], 'bot'), true);
-  assert.equal(hasChip([T('a'), bot('x')], 'file'), false);
-  assert.equal(hasChip([T('a')], 'bot'), false);
 });
 
 test('a blank draft is whitespace with no chip', () => {

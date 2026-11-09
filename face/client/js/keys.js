@@ -10,7 +10,7 @@ import { t } from './i18n/words.js';
 const row = r => Object.freeze({ bound: true, ...r });
 
 export const SHORTCUTS = Object.freeze([
-  row({ id: 'newConversation', section: 'general', words: 'shortcuts.newConversation', mac: '⌥⌘N', other: 'Ctrl+Alt+N', code: 'KeyN', mods: 'alt-cmd' }), // en-kept: key names
+  row({ id: 'writeToGravit', section: 'general', words: 'shortcuts.writeToGravit', mac: '⌥⌘N', other: 'Ctrl+Alt+N', code: 'KeyN', mods: 'alt-cmd' }), // en-kept: key names
   row({ id: 'searchConversations', section: 'general', words: 'shortcuts.searchConversations', mac: '⌥⌘K', other: 'Ctrl+Alt+K', code: 'KeyK', mods: 'alt-cmd' }), // en-kept: key names
   row({ id: 'settings', section: 'general', words: 'shortcuts.settings', mac: '⌥⌘,', other: 'Ctrl+Alt+,', code: 'Comma', char: ',', mods: 'alt-cmd' }), // en-kept: key names
   row({ id: 'shortcuts', section: 'general', words: 'shortcuts.shortcuts', mac: '⌘/', other: 'Ctrl+/', code: 'Slash', char: '/', mods: 'cmd' }), // en-kept: key names
@@ -26,7 +26,7 @@ export const shortcut = id => BY_ID[id] ?? null;
 
 // what a row does, in the active table: each key literal, read when asked (never at import)
 const WORDS = {
-  'shortcuts.newConversation': () => t('shortcuts.newConversation'),
+  'shortcuts.writeToGravit': () => t('shortcuts.writeToGravit'),
   'shortcuts.searchConversations': () => t('shortcuts.searchConversations'),
   'shortcuts.settings': () => t('shortcuts.settings'),
   'shortcuts.shortcuts': () => t('shortcuts.shortcuts'),

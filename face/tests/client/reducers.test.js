@@ -5,35 +5,115 @@ import assert from 'node:assert/strict';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { parseHash } from '../../client/js/router.js';
+import { settle } from '../../client/js/app.js';
 import { spoken } from './helpers/spoken.js';
 
 const NOW = new Date(2026, 9, 9, 14, 7).getTime();
 const hostConv = (id, over = {}) => ({ id, title: id, kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: false, archived: false, updatedAt: 1, created: null, messages: [], loaded: false, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
 
-test('nav to a missing id and Cancel open the first open conversation, never an archived one', () => {
-  const s = { ...emptyState(), conversations: [hostConv('old', { archived: 'face' }), hostConv('a')] };
-  assert.equal(R.nav(s, { screen: 'messages', id: 'gone' }).route.id, 'a');
-  assert.equal(R.nav(s, { screen: 'messages', id: null }).route.id, 'a');
-  assert.equal(R.nav(s, { screen: 'messages', id: 'old' }).route.id, 'old', 'an archived conversation opens by its id');
-  assert.equal(R.cancelDraft(R.startDraft(s, { now: NOW })).route.id, 'a');
-  const allArchived = { ...s, conversations: [hostConv('old', { archived: 'host' })] };
-  assert.equal(R.nav(allArchived, { screen: 'messages', id: null }).route.id, null);
+// a store over the reducers, as app.js's settle drives it
+const storeOf = state => { let s = state; return { get: () => s, dispatch(type, p) { s = R[type](s, p); return s; } }; };
+const ws = (workspaceId, name, isRoot = false) => ({ workspaceId, name, title: name, isRoot, sessionIds: [] });
+const taskRow = id => ({ id, title: id, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: 1, lastEventAt: 1, lastSeq: 1 });
+// the host's list (the conversation, a worker, an old session) with the channels, and the tasks as /data/tasks gave them
+const listed = () => R.hostList(emptyState(), { conversations: [hostConv('conv'), hostConv('t1'), hostConv('old')], channels: [ws('w0', 'workbench', true), ws('w1', 'cn-market')] });
+const ready = s => R.tasksLoaded(s, { conversation: 'conv', tasks: [taskRow('t1')], at: 1 });
+
+test('settle: an old #/messages/<id> link lands on the conversation, its task or history', () => {
+  const store = storeOf(ready(listed()));
+  assert.equal(settle(store, '#/messages/conv'), '#/messages', "the conversation's id is Messages");
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+  assert.equal(settle(store, '#/messages/t1'), '#/task/t1', "a task's id is its task page");
+  assert.deepEqual(store.get().route, { screen: 'task', id: 't1' });
+  assert.equal(settle(store, '#/messages/old'), '#/history/old', 'any other id is history');
+  assert.equal(settle(store, '#/messages/unknown'), '#/history/unknown', 'an id the list does not carry is history too');
+  assert.equal(settle(store, '#/messages'), null);
 });
 
-test('nav opens a conversation, closes drawers and drops a draft', () => {
-  const s = { ...emptyState(), conversations: [hostConv('a'), hostConv('b')] };
-  let t = R.startDraft(R.toggleDetails(R.nav(s, { screen: 'messages', id: 'a' })), { now: NOW });
-  assert.ok(t.draft);
-  t = R.nav(t, { screen: 'messages', id: 'b' });
-  assert.equal(t.draft, null); assert.equal(t.detailsOpen, false); assert.equal(t.route.id, 'b');
+test('settle: #/messages/new is Messages', () => {
+  const store = storeOf(ready(listed()));
+  assert.equal(settle(store, '#/messages/new'), '#/messages');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
+});
+
+test('settle: an old #/messages/<id> link waits while tasks load, then settles once they land', () => {
+  const store = storeOf(listed());
+  assert.equal(store.get().tasks.status, 'loading');
+  assert.equal(settle(store, '#/messages/t1'), null, 'waits: no redirect');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: 't1' });
+  store.dispatch('tasksLoaded', { conversation: 'conv', tasks: [taskRow('t1')], at: 1 });
+  assert.equal(settle(store, '#/messages/t1'), '#/task/t1');
+  // off (FACE_ROUTER=0): there is no conversation, so every id is history
+  const off = storeOf(R.tasksOff(listed(), { at: 1 }));
+  assert.equal(settle(off, '#/messages/conv'), '#/history/conv');
+  // failed before any read named the conversation: still waiting, as while loading — a later read lands it
+  const failed = storeOf(R.tasksFailed(listed(), { at: 1 }));
+  assert.equal(settle(failed, '#/messages/conv'), null, 'a failed first read waits');
+  assert.deepEqual(failed.get().route, { screen: 'messages', id: 'conv' });
+  failed.dispatch('tasksLoaded', { conversation: 'conv', tasks: [taskRow('t1')], at: 2 });
+  assert.equal(settle(failed, '#/messages/conv'), '#/messages', 'the next read lands it on the conversation');
+  // a failed re-read after one that named the conversation keeps it: the link lands
+  const later = storeOf(R.tasksFailed(ready(listed()), { at: 2 }));
+  assert.equal(later.get().tasks.conversation, 'conv');
+  assert.equal(settle(later, '#/messages/t1'), '#/task/t1');
+});
+
+test('history/<id> and task/<id> land again when a later tasks read names the id', () => {
+  const store = storeOf(ready(listed()));
+  assert.equal(settle(store, '#/history/conv'), '#/messages', "history of the conversation's id is Messages");
+  assert.equal(settle(store, '#/history/t1'), '#/task/t1', "history of a task's id is its task page");
+  assert.equal(settle(store, '#/task/conv'), '#/messages', "a task page for the conversation's id is Messages");
+  assert.equal(settle(store, '#/history/old'), null, 'any other id stays history');
+  // while the tasks load (or a first read failed) nothing re-lands
+  const loading = storeOf(listed());
+  assert.equal(settle(loading, '#/history/t1'), null);
+  const failed = storeOf(R.tasksFailed(listed(), { at: 1 }));
+  assert.equal(settle(failed, '#/history/conv'), null);
+  assert.equal(settle(failed, '#/task/conv'), null);
+});
+
+test('settle: #/channel/<workspaceId> lands on a strategy page, the root or an unknown id on Messages', () => {
+  const store = storeOf(ready(listed()));
+  assert.equal(settle(store, '#/channel/w1'), '#/strategy/cn-market');
+  assert.deepEqual(store.get().route, { screen: 'strategy', id: 'cn-market' });
+  assert.equal(settle(store, '#/channel/w0'), '#/messages', 'the root is the conversation');
+  assert.equal(settle(store, '#/channel/w9'), '#/messages', 'an unknown workspace too');
+  // before the channels land, the link waits for them
+  const early = storeOf(emptyState());
+  assert.equal(settle(early, '#/channel/w1'), null);
+  assert.equal(early.get().route.screen, 'messages');
+});
+
+test('settle: #/task/<id> for a known session that is not a task is history; a task stays', () => {
+  const store = storeOf(ready(listed()));
+  assert.equal(settle(store, '#/task/t1'), null);
+  assert.equal(settle(store, '#/task/old'), '#/history/old');
+  assert.equal(settle(store, '#/task/nowhere'), null, 'an id nothing knows stays where it was asked');
+  const loading = storeOf(listed());
+  assert.equal(settle(loading, '#/task/old'), null, 'waits while tasks load');
+});
+
+test('settle: history and a strategy route as they are', () => {
+  const store = storeOf(ready(listed()));
+  assert.equal(settle(store, '#/history'), null);
+  assert.deepEqual(store.get().route, { screen: 'history', id: null });
+  assert.equal(settle(store, '#/history/old'), null);
+  assert.equal(settle(store, '#/strategy/cn-market'), null);
+});
+
+test('nav opens the conversation read: its dot clears and drawers close', () => {
+  const s = ready({ ...emptyState(), conversations: [hostConv('conv', { updatedAt: 9 }), hostConv('b')] });
+  let t = R.nav(s, { screen: 'messages', id: null });
+  assert.equal(t.conversations.find(c => c.id === 'conv').lastSeen, 9);
+  t = R.nav(R.toggleDetails(t), { screen: 'history', id: 'b' });
+  assert.equal(t.detailsOpen, false); assert.deepEqual(t.route, { screen: 'history', id: 'b' });
   assert.equal(R.nav(t, { screen: 'discover', id: null }).route.screen, 'discover');
-  assert.equal(R.nav(s, { screen: 'messages', id: 'new' }).route.id, 'a', 'new without a draft opens the first');
 });
 
 test('nav folds #/mail to Messages', () => {
   const s = { ...emptyState(), conversations: [hostConv('a')] };
   assert.deepEqual(parseHash('#/mail/x'), { screen: 'messages', id: null });
-  assert.deepEqual(R.nav(s, parseHash('#/mail')).route, { screen: 'messages', id: 'a' });
+  assert.deepEqual(R.nav(s, parseHash('#/mail')).route, { screen: 'messages', id: null });
 });
 
 // the Account's quotes: the poll's answer and the stream's frames write the same pair, and the fresher price stays
@@ -266,10 +346,9 @@ test('the lightbox opens on an attachment and closes', () => {
   for (const bad of [{}, { attachmentId: '' }, { attachmentId: 7 }, undefined]) assert.equal(R.openLightbox(s, bad), s, JSON.stringify(bad));
   assert.equal(R.closeLightbox(open).lightbox, null);
   assert.equal(R.closeLightbox(s), s, 'closing none is no change');
-  // leaving the conversation closes it: another conversation, another screen, New message
+  // leaving the conversation closes it: another conversation, another screen
   assert.equal(R.nav(open, { screen: 'messages', id: 'b' }).lightbox, null);
   assert.equal(R.nav(open, { screen: 'discover', id: null }).lightbox, null);
-  assert.equal(R.startDraft(open, {}).lightbox, null);
 });
 
 test('openDetails opens Details and leaves it open', () => {

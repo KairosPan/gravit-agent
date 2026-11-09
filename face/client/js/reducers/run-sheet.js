@@ -12,7 +12,7 @@ export const reducers = {
   runSheetSet: (s, value) => (s.runSheet ? { ...s, runSheet: value } : s),
   runSheetSaid: (s, { line } = {}) => sheet(s, { said: isLine(line) ? line : null }),
   runSheetClose: s => ({ ...s, runSheet: null }),
-  moduleRunStarted: (s, { module, sessionId, title, startedAt }) => ({ ...s, moduleRuns: { ...runs(s), [module]: { sessionId, title, startedAt } } }),
+  moduleRunStarted: (s, { module, title, startedAt }) => ({ ...s, moduleRuns: { ...runs(s), [module]: { title, startedAt } } }),
   moduleRunCleared: (s, { module }) => {
     if (!(module in runs(s))) return s;
     const { [module]: _gone, ...rest } = runs(s);

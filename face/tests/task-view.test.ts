@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import {
-  STALL_MS, STEPS_KEPT, TASK_TEXT_MAX, cut, relaysOf, stallOf, taskViewOf, type TimedEvent,
+  STALL_MS, STEPS_KEPT, TASK_TEXT_MAX, briefOrigin, cut, relaysOf, stallOf, taskViewOf, type TimedEvent,
 } from "../src/task-view.ts";
 import { briefText } from "../src/task-worker.ts";
 
@@ -337,4 +337,38 @@ test("stallOf relays only an open turn gone quiet; a turn cut by aborted or inte
   }
   const open = new Log().brief().start(1).say(1, "half");
   assert.equal(stallOf(view(open, open.t + STALL_MS), open.events)?.id, `task-stall:${ID}:${open.events.length}`);
+});
+
+test("a phone-started task's view reads origin phone and its network from the brief", () => {
+  const log = new Log().push("user/message", {
+    id: `task-brief:${ID}`, role: "user", content: [{ type: "text", text: briefText("T", "b") }],
+    source: { kind: "task", form: "brief", conversation: "session-conv", origin: "phone", network: "telegram" },
+  });
+  const v = view(log);
+  assert.equal(v.origin, "phone");
+  assert.equal(v.network, "telegram");
+  assert.deepEqual(briefOrigin(log.events), { conversation: "session-conv", origin: "phone", network: "telegram" });
+});
+
+test("an iMessage-started task's view keeps its network", () => {
+  const log = new Log().push("user/message", {
+    id: `task-brief:${ID}`, role: "user", content: [{ type: "text", text: briefText("T", "b") }],
+    source: { kind: "task", form: "brief", conversation: "session-conv", origin: "phone", network: "imessage" },
+  });
+  assert.equal(view(log).network, "imessage");
+  assert.deepEqual(briefOrigin(log.events), { conversation: "session-conv", origin: "phone", network: "imessage" });
+});
+
+test("an old brief without origin reads web", () => {
+  const log = new Log().push("user/message", {
+    id: `task-brief:${ID}`, role: "user", content: [{ type: "text", text: briefText("T", "b") }],
+    source: { kind: "task", form: "brief", conversation: "session-conv" },
+  });
+  const v = view(log);
+  assert.equal(v.origin, "web");
+  assert.equal("network" in v, false);
+  assert.equal(view(new Log().brief()).origin, "web");
+  assert.equal("network" in view(new Log().brief()), false);
+  assert.deepEqual(briefOrigin(log.events), { conversation: "session-conv", origin: "web" });
+  assert.equal(briefOrigin([]), undefined);
 });

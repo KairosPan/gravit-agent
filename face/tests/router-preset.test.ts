@@ -50,3 +50,9 @@ test("router.md fits 2,000 bytes and names its five tools and <REPO>", () => {
   for (const needle of ["task_start", "task_steer", "task_stop", "task_read", "task_list", "<REPO>", "[task · ...]", "<<<task-data", "<<<end", "task_read's steps, result and text are the worker's words between the same fences"])
     assert.ok(text.includes(needle), `names ${needle}`);
 });
+
+test("router.md names the follow-up tag", () => {
+  const text = readRouter();
+  assert.ok(text.includes("[follow-up \u00b7 task"));
+  assert.ok(Buffer.byteLength(text) <= 2_000);
+});

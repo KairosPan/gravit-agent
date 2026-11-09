@@ -9,9 +9,15 @@
  * DeskConversation.start} - because what it does for a turn does not depend on who opened it: a turn the
  * operator opens in the browser gets the same deadline, fence check and ledger record as a phone turn.
  *
+ * THE FALLBACK (one-entry plan 3). With Gravit's one conversation bound (src/desk.ts `bindRouter`), the phone's texts go
+ * there - pause, fence and key, but no budget (src/conversation.ts) - and this conversation is never started: it stays
+ * only the outlet and the pause's choke point ({@link DeskConversation.deliver}). The desk session answers the phone
+ * only with `FACE_ROUTER=0` or a conversation that could not be installed, and only there does the budget below still
+ * refuse a phone post.
+ *
  * BEFORE A TURN ({@link DeskConversation.post}), in this order: the pause - an `OFF` past its `until` is lifted,
  * one in force refuses (src/desk.ts); the day's token budget, when the owner passes one - spent, it refuses
- * with src/desk.ts `budgetReplyLine`, no turn and no event, and one that cannot be read lets the post go on,
+ * with src/desk.ts `budgetPhoneLine`, no turn and no event, and one that cannot be read lets the post go on,
  * with a line (ruling P2-8: the pause outranks the budget, and a paused post never reads it); the
  * instruction-chain fence - a violation refuses, and is a `desk-refused` event (src/desk-session.ts
  * `findDeskFenceViolation`); the desk session, ensured - live, resumed or created; for a phone's text, the
@@ -104,7 +110,7 @@
  *
  * MODULE WEIGHT. src/desk.ts imports this module, and `npm run desk` and scripts/service.ts import src/desk.ts.
  * src/desk-session.ts brings src/desk-preset.ts (src/roles.ts, src/bots.ts, js-yaml) and dsh-agent with it,
- * and dsh-llm brings cordis. So this module imports nothing but types: src/desk.ts, src/desk-session.ts, src/watch.ts
+ * and dsh-llm brings cordis. So this module imports nothing but types and the leaf src/data-fence.ts: src/desk.ts, src/desk-session.ts, src/watch.ts
  * (its `cutAt`) and dsh-llm load on a conversation's first use ({@link loadMachinery}). The pause switch loads no more than it
  * did, and the cycle with src/desk.ts has no value edge.
  * @module
@@ -117,6 +123,7 @@ import type {
 import type { PhoneKind } from "./phone.ts";
 import type { AgentLike } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
+import { fenceData } from "./data-fence.ts";
 
 /** Diagnostic label, the one every `${BIN}:`-prefixed line in the face uses; desk lines add `desk:`. */
 const BIN = "gravit-face";
@@ -134,16 +141,17 @@ const DESK_DEADLINE_MS = 300_000;
 /** The longest a phone's post waits for the desk state before it goes without (the P3 plan's ruling 6). */
 export const STATE_WAIT_MS = 3_500;
 /** The line a phone reply's context opens with, in its own part of the message (spec §16 H1b). */
-const CONTEXT_HEAD = "the message this replies to:";
+export const CONTEXT_HEAD = "the message this replies to:";
 /** The longest a delivery waits on the outlet before the next one goes ahead. */
 const DELIVERY_MS = 60_000;
 /** How long {@link DeskConversation.dispose} gives an agent it cancelled to go idle, so the cut turn is recorded. */
 const SHUTDOWN_IDLE_MS = 2_000;
 /** How long {@link DeskConversation.dispose} gives a start, post or renew under way to settle. */
 const SHUTDOWN_QUEUE_MS = 5_000;
-/** The most phone texts one `desk-carry` holds, oldest first; and the longest each is, in characters. */
-const CARRY_MAX = 20;
-const CARRY_TEXT_MAX = 4_000;
+/** The most phone texts one `desk-carry` holds, oldest first; and the longest each is, in characters. The
+ * conversation's carry (src/conversation.ts) holds as many. */
+export const CARRY_MAX = 20;
+export const CARRY_TEXT_MAX = 4_000;
 /** How many phone texts' `at` the conversation remembers by key, newest kept, for a `desk-carry` to name. */
 const AT_KEPT = 200;
 
@@ -191,6 +199,59 @@ export interface DeskOutlet {
  * `no phone`, the account's hold (`quiet hours`, `not routed`, `nothing connected`), `send failed: <reason>`,
  * `the outlet did not answer in 60 s`, `the pause could not be read: <reason>`, or `the desk could not load: <reason>`. */
 export type DeliverResult = { sent: string[]; queued?: true } | { queued: true } | { undelivered: string };
+
+/** A text from the phone as the bridge posts it (src/phone-bridge.ts): the operator's `text`, the provenance `source`, the
+ * logged `message` source (`<network>:<id>`), its delivery `key` - the message's id - and, for a reply to an alert or its
+ * annotation, the `context`. The desk conversation's {@link DeskConversation.post} takes it, and so does the router
+ * conversation's (src/conversation.ts `ConversationHandle.post`). */
+export type PhonePost = {
+  text: string;
+  source: { kind: "telegram"; network?: string; at?: number; carried?: true };
+  message: { kind: "telegram"; network: string; messageId: string };
+  key: string;
+  context?: string;
+};
+
+/** A phone message's content: one text part, the provenance line then `text`; or, with `context` (spec §16 H1b), three -
+ * the provenance line, the context headed {@link CONTEXT_HEAD} and quoted as data between `<<<desk-data NONCE>>>` and
+ * `<<<end NONCE>>>` (src/data-fence.ts `fenceData`, every line starting `[` or `<<<` given a leading space), then `text`.
+ * The context is the alert and the annotator's reply, which can carry what a web page said, and it lands in a turn the
+ * operator's words opened: fenced here, so both the conversation's post and the desk's (`FACE_ROUTER=0`) quote it.
+ * @param nonce - the fence's nonce; a fresh one when omitted (tests pass their own). */
+export function phoneContent(provenance: string, text: string, context?: string, nonce?: string): { type: "text"; text: string }[] {
+  return context === undefined
+    ? [{ type: "text", text: `${provenance}\n${text}` }]
+    : [
+      { type: "text", text: provenance },
+      { type: "text", text: `${CONTEXT_HEAD}\n${fenceData(context, { tag: "desk-data", heads: ["["], ...(nonce === undefined ? {} : { nonce }) })}` },
+      { type: "text", text },
+    ];
+}
+
+/** The pause as a post reads it: an `OFF` past its `until` is lifted (a failure to lift is one line, and the post goes
+ * on), then the switch is read again - a pause set since stands. The one in force, or `undefined`. Rejects when the
+ * switch cannot be read: a post fails closed. `desk` is src/desk.ts, loaded by the caller.
+ * @param desk - src/desk.ts's `readOffState` and `clearOff`.
+ * @param home - the harness home, the switch's.
+ * @param now - the clock.
+ * @param log - where the line goes. */
+export async function pauseInForce(
+  desk: { readOffState: (typeof import("./desk.ts"))["readOffState"]; clearOff: (typeof import("./desk.ts"))["clearOff"] },
+  home: string,
+  now: () => number,
+  log: (line: string) => void,
+): Promise<OffState | undefined> {
+  let off = await desk.readOffState(home, now);
+  if (off.state !== undefined && off.expired) {
+    try {
+      await desk.clearOff(home, "expiry", now);
+    } catch (err) {
+      log(`${BIN}: desk: the expired pause could not be lifted (${errText(err)}); the desk goes on`);
+    }
+    off = await desk.readOffState(home, now);
+  }
+  return off.state !== undefined && !off.expired ? off.state : undefined;
+}
 
 /** What {@link DeskConversation.post} answers: the turn opened on `sessionId` - `duplicate` when its key was already
  * there, and nothing was sent - or why not, with the line the phone gets. */
@@ -327,15 +388,27 @@ const notOpenedLine = (reason: string): string => `the desk could not open a tur
 /** Why a keyed post refuses on a face with no session persistence. */
 const NO_PERSISTENCE = "this face has no session persistence, so a phone text cannot be checked against the desk session's log";
 
-/** What a turn's end sends: the refusal line for a refused turn; else its final text - with a line naming the cut
+/** The lines {@link replyOf} is written with: src/desk-session.ts's three - the refusal line of the fence that cut the
+ * turn, the cut line, and the duration's spelling - and, optionally, the line for a turn that failed before it said
+ * anything (the desk's own when absent). The desk passes the module itself; the router conversation
+ * (src/conversation.ts) its own refusal and failure lines beside the other two. */
+export type ReplyLines = {
+  fenceRefusalLine(path: string): string;
+  cutOffLine(r: DeskTurnRecord): string;
+  formatDuration(ms: number): string;
+  notAnsweredLine?(error: string): string;
+};
+
+/** What a turn's end sends: the refusal line for a refused turn (at `fallbackPath`, the journal by default, when the
+ * record names no violation); else its final text - with a line naming the cut
  * when a cut interrupted it mid-stream; else why it said nothing - cut by its deadline, or failed - and `""`,
  * nothing to send, for one that just ended on a tool or was cancelled before it said anything (the phone's `/stop`
- * is answered by the bridge, a shutdown by nobody). */
-function replyOf(r: DeskTurnRecord, m: Machinery): string {
-  if (r.outcome === "refused") return m.session.fenceRefusalLine(r.violation ?? JOURNAL);
-  if (r.finalText !== "") return r.interrupted === true ? `${r.finalText}\n${m.session.cutOffLine(r)}` : r.finalText;
-  if (r.outcome === "timed-out") return timedOutLine(r.deadlineMs, m.session.formatDuration);
-  if (r.outcome === "failed") return notAnsweredLine(r.error ?? "error");
+ * is answered by the bridge, a shutdown by nobody). The desk's and the router conversation's (src/conversation.ts). */
+export function replyOf(r: DeskTurnRecord, lines: ReplyLines, fallbackPath: string = JOURNAL): string {
+  if (r.outcome === "refused") return lines.fenceRefusalLine(r.violation ?? fallbackPath);
+  if (r.finalText !== "") return r.interrupted === true ? `${r.finalText}\n${lines.cutOffLine(r)}` : r.finalText;
+  if (r.outcome === "timed-out") return timedOutLine(r.deadlineMs, lines.formatDuration);
+  if (r.outcome === "failed") return (lines.notAnsweredLine ?? notAnsweredLine)(r.error ?? "error");
   return "";
 }
 
@@ -349,13 +422,13 @@ type Injecting = { inject?: (message: MessageLike) => void };
 type InboxAware = { inbox?: { readonly nextTurn?: readonly MessageLike[]; readonly nextStep?: readonly MessageLike[]; remove(id: string): boolean } };
 
 /** Whether `agent`'s inbox holds a message with id `id` on either list. */
-function waiting(agent: AgentLike, id: string): boolean {
+export function waiting(agent: AgentLike, id: string): boolean {
   const inbox = (agent as AgentLike & InboxAware).inbox;
   return [...(inbox?.nextTurn ?? []), ...(inbox?.nextStep ?? [])].some((message) => message.id === id);
 }
 
 /** The id of the message a `user/message` event logs, when it has one. */
-function loggedId(event: EventLike): string | undefined {
+export function loggedId(event: EventLike): string | undefined {
   if (event.type !== "user/message" || event.data === null || typeof event.data !== "object") return undefined;
   const id = (event.data as { id?: unknown }).id;
   return typeof id === "string" ? id : undefined;
@@ -363,7 +436,7 @@ function loggedId(event: EventLike): string | undefined {
 
 /** The operator's own words in a phone message the conversation built: the last of a reply's three parts, else its one
  * part after the provenance line. */
-function operatorText(message: MessageLike): string {
+export function operatorText(message: MessageLike): string {
   const parts = (message.content ?? []).flatMap((part) => (typeof part?.text === "string" ? [part.text] : []));
   if (parts.length > 1) return parts[parts.length - 1];
   const only = parts[0] ?? "";
@@ -378,7 +451,7 @@ type Carried = {
 };
 
 /** A `desk-carry` as the ledger holds one. */
-type Carry = Extract<DeskEvent, { kind: "desk-carry" }>;
+export type Carry = Extract<DeskEvent, { kind: "desk-carry" }>;
 
 /** Whether a ledger line of kind `desk-carry` has the shape a dispose writes: a session id, `queued` an array of
  * string keys and texts with an optional string `at`, and `cut`, when present, an object with a numeric turn. */
@@ -394,6 +467,26 @@ function isCarry(e: DeskEvent): e is Carry {
   if (x.cut === undefined) return true;
   const c = x.cut as { turn?: unknown; key?: unknown; at?: unknown } | null;
   return typeof c === "object" && c !== null && typeof c.turn === "number" && Number.isFinite(c.turn) && optString(c.key) && optString(c.at);
+}
+
+/** Every `desk-carry` in `events` that no `desk-carried` names after it, oldest first - a malformed one skipped, with
+ * one line: the ledger's reader checks only `t` and `kind`, and a hand-edited line must never stop the boot. The desk's
+ * start and the conversation's boot (src/conversation.ts) both answer them.
+ * @param events - the ledger's events, in order.
+ * @param log - where the line goes.
+ * @param who - the line's prefix after the face's name (`desk`, `conversation`). */
+export function pendingCarries(events: readonly DeskEvent[], log: (line: string) => void, who = "desk"): Carry[] {
+  const pending: Carry[] = [];
+  events.forEach((e, i) => {
+    if (e.kind !== "desk-carry") return;
+    if (events.slice(i + 1).some((later) => later.kind === "desk-carried" && later.of === e.t)) return;
+    if (!isCarry(e)) {
+      log(`${BIN}: ${who}: the desk-carry of ${String((e as { t?: unknown }).t)} in the ledger is malformed and is skipped`);
+      return;
+    }
+    pending.push(e);
+  });
+  return pending;
 }
 
 /** dsh-agent's `Agent.whenIdle`, which the structural {@link AgentLike} leaves out: it resolves once the
@@ -418,7 +511,7 @@ function idleWaitOf(agent: AgentLike): (() => Promise<void>) | undefined {
 /** Whether `agent` has work under way. With `whenIdle`, an idle agent's settles within microtasks, so one
  * still pending after a turn of the event loop is work under way; a `whenIdle` that rejects counts as idle.
  * Without it, the status. */
-async function busy(agent: AgentLike): Promise<boolean> {
+export async function busy(agent: AgentLike): Promise<boolean> {
   const wait = idleWaitOf(agent);
   if (wait === undefined) return agent.status === "running";
   let idle = false;
@@ -571,7 +664,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
   const deliverTurn = async (r: DeskTurnRecord, m: Machinery): Promise<void> => {
     const opts = deliverOptsOf(r);
     if (opts === undefined) return;
-    const text = replyOf(r, m);
+    const text = replyOf(r, m.session);
     if (text === "") return; // it ended on a tool: there is nothing to say
     await sendOut(text, opts,
       `${BIN}: desk: the reply to turn ${r.turn} on desk session ${r.sessionId} could not be sent`, "; the next reply goes ahead");
@@ -655,7 +748,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
     } catch (err) {
       log(`${BIN}: desk: the ledger could not be read at boot (${errText(err)}); what a graceful stop carried waits for a later boot`);
     }
-    const carries = ledger === undefined ? [] : pendingCarries(ledger);
+    const carries = ledger === undefined ? [] : pendingCarries(ledger, log);
     if (!resumed && carries.length === 0) return;
     if (resumed) {
       /* the turns a carry names on this session: their line is the carry's, when dsh closed them `disposed` */
@@ -699,22 +792,6 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
       }
       if (!done) return;
     }
-  };
-
-  /** Every `desk-carry` in `events` that no `desk-carried` names after it, oldest first - a malformed one skipped, with
-   * one line: the ledger's reader checks only `t` and `kind`, and a hand-edited line must never stop the boot. */
-  const pendingCarries = (events: readonly DeskEvent[]): Carry[] => {
-    const pending: Carry[] = [];
-    events.forEach((e, i) => {
-      if (e.kind !== "desk-carry") return;
-      if (events.slice(i + 1).some((later) => later.kind === "desk-carried" && later.of === e.t)) return;
-      if (!isCarry(e)) {
-        log(`${BIN}: desk: the desk-carry of ${String((e as { t?: unknown }).t)} in the ledger is malformed and is skipped`);
-        return;
-      }
-      pending.push(e);
-    });
-    return pending;
   };
 
   /** A carry, answered (the module header's WHAT A GRACEFUL STOP CARRIED): each text posted again, in order; then the
@@ -853,19 +930,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
   const shutDown = (): PostResult => ({ refused: "error", line: notOpenedLine(SHUT_DOWN) });
 
   /** The pause as a post reads it: lifted when past its `until`, then read again - a pause set since stands. */
-  const pause = async (m: Machinery): Promise<OffState | undefined> => {
-    const now = (): number => clock.now();
-    let off = await m.desk.readOffState(home, now);
-    if (off.state !== undefined && off.expired) {
-      try {
-        await m.desk.clearOff(home, "expiry", now);
-      } catch (err) {
-        log(`${BIN}: desk: the expired pause could not be lifted (${errText(err)}); the desk goes on`);
-      }
-      off = await m.desk.readOffState(home, now);
-    }
-    return off.state !== undefined && !off.expired ? off.state : undefined;
-  };
+  const pause = (m: Machinery): Promise<OffState | undefined> => pauseInForce(m.desk, home, () => clock.now(), log);
 
   /** The day's budget as a post reads it: its state when it is spent, else `undefined` - and `undefined`, with a
    * line, when it cannot be read, the budget failing open (the plan's ruling 8) where the pause and the fence fail
@@ -926,7 +991,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
       const paused = await pause(m);
       if (paused !== undefined) return { refused: "paused", line: pausedLine(paused, new Date(clock.now()), m.desk.deskTime) };
       const spent = await spentBudget();
-      if (spent !== undefined) return { refused: "budget", line: m.desk.budgetReplyLine(spent) };
+      if (spent !== undefined) return { refused: "budget", line: m.desk.budgetPhoneLine(spent) };
       const path = await m.session.findDeskFenceViolation(root);
       if (path !== undefined) {
         await m.desk.appendEvent(home, { t: stamp(), kind: "desk-refused", reason: "fence", path }, { log });
@@ -950,13 +1015,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
       const now = new Date(clock.now());
       const provenance = m.session.provenanceLine(input.source, now);
       /* a reply's context is its own part, between the provenance line and the operator's text (spec §16 H1b) */
-      const content = input.context === undefined
-        ? [{ type: "text" as const, text: `${provenance}\n${input.text}` }]
-        : [
-          { type: "text" as const, text: provenance },
-          { type: "text" as const, text: `${CONTEXT_HEAD}\n${input.context}` },
-          { type: "text" as const, text: input.text },
-        ];
+      const content = phoneContent(provenance, input.text, input.context);
       const source = input.message as MessageSource;
       const message = key === undefined
         ? m.createUserMessage({ content, source })

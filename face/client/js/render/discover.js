@@ -118,7 +118,7 @@ function createPage(state) {
 export function renderDiscover(state, now = Date.now()) {
   if (state.route.id === 'create') return createPage(state);
   const d = state.discover;
-  const items = itemsOf(d, activeRuns(state.moduleRuns, state.conversations, now));
+  const items = itemsOf(d, activeRuns(state.moduleRuns, state.tasks?.items, now));
   let body;
   if (d.query.trim()) {
     const found = searchItems(Object.values(items).flat(), d.query);
@@ -200,10 +200,8 @@ function kindLine(i) {
 
 function keysOf(item) {
   if (item.shelf === 'bots') {
-    const b = item.source;
-    // Talk to needs a bot dsh can run: not broken, and on the preset roster
-    const talk = b.broken || b.listed === false ? '' : `<button type="button" class="btn-primary" data-action="talkTo" data-id="${esc(b.id)}">${th('discover.talkTo', { name: item.name })}</button>`;
-    return `${talk}<button type="button" class="btn-sm" data-action="editBot" data-id="${esc(b.id)}">${th('discover.edit')}</button>`;
+    // a bot is talked to in a room, through Gravit (one-entry plan 2): its card edits it, nothing else
+    return `<button type="button" class="btn-sm" data-action="editBot" data-id="${esc(item.source.id)}">${th('discover.edit')}</button>`;
   }
   if (item.shelf !== 'agents' || item.id === 'agent:gravit') return '';
   const bin = esc(item.source.bin);

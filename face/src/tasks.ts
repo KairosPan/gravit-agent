@@ -21,11 +21,13 @@ import { stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { MessageId, freezeMessage } from "@deepseek-ai/dsh-llm";
 import type { ConversationCtxLike, ConversationHandle } from "./conversation.ts";
+import type { DeskLines } from "./desk.ts";
 import { CONVERSATION_PRESET } from "./desk-names.ts";
 import { readSessionEvents, type DeskSessionPersistenceLike } from "./desk-session.ts";
 import type { DeskAgentLike, DeskToolsCtxLike } from "./desk-tools.ts";
+import type { PhoneConversation } from "./phone-bridge.ts";
 import { etDayStart } from "./et.ts";
-import { fencedGet } from "./http.ts";
+import { fencedGet, fencedPost, HttpError } from "./http.ts";
 import type { AgentLike, PersistedSnapshotLike, RoomDeps } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
 import type { RouteRegistrar } from "./static.ts";
@@ -47,8 +49,20 @@ export const IDLE_DISPOSE_MS = 600_000;
 /** How often the stalls and the idle workers are looked at (60 s). */
 export const TICK_MS = 60_000;
 export { RECOVERY_NOTE } from "./task-recovery.ts";
+/** The steer text Continue sends a task from its page. */
+export const CONTINUE_NOTE = "Continue the task. First check what you already did \u2014 files written, orders proposed, messages sent \u2014 and do not repeat any of it.";
 /** The stopped marker's text. */
 export const STOPPED_TEXT = "Stopped by the conversation.";
+
+/** The states a task has ended in: a Stop on one of them is refused, so it never overwrites a result. */
+const ENDED: ReadonlySet<TaskView["state"]> = new Set(["done", "stopped", "failed", "blocked"]);
+
+/** A Stop on a task that already ended (`ENDED`): the route answers 409, `task_stop` says so. */
+export class TaskEndedError extends Error {
+  constructor(id: string, state: string) {
+    super(`task ${id} already ended (${state}); there is nothing to stop`);
+  }
+}
 
 /** Whether the conversation and its tasks are installed: unless `FACE_ROUTER` is `"0"`. */
 export function routerEnabled(env: NodeJS.ProcessEnv): boolean {
@@ -74,6 +88,9 @@ export interface TasksDeps {
   route: { provider: string; model: string };
   installModelSelection: RoomDeps["installModelSelection"];
   conversation: ConversationHandle;
+  /** The desk's lines for the rail (src/desk.ts `deskLines`); `GET /data/tasks` carries them as `desk`. A provider that
+   * throws leaves `desk` out and the route answers. */
+  deskLines?: () => Promise<DeskLines | undefined>;
   isTrusted: (req: IncomingMessage) => boolean;
   now?: () => number;
   setInterval?: typeof setInterval;
@@ -126,6 +143,21 @@ function lastAssistantText(events: readonly EventLike[]): string {
 export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksHandle {
   const { ctx } = deps;
   const log = deps.log ?? defaultLog;
+  /* the desk's lines for the rail: a failure is logged once per kind of message, and the route answers without them */
+  const deskFailures = new Set<string>();
+  const deskOf = async (): Promise<DeskLines | undefined> => {
+    if (deps.deskLines === undefined) return undefined;
+    try {
+      return await deps.deskLines();
+    } catch (err) {
+      const why = errText(err);
+      if (!deskFailures.has(why)) {
+        deskFailures.add(why);
+        log(`${BIN}: task: the desk's lines could not be read (${why}); left out of the list`);
+      }
+      return undefined;
+    }
+  };
   const now = deps.now ?? Date.now;
   const every = deps.setInterval ?? setInterval;
   const stopEvery = deps.clearInterval ?? clearInterval;
@@ -292,7 +324,8 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
       const conv = convId();
       if (conv === undefined) throw new Error("there is no conversation");
       const started = await startWorker(workerDeps, {
-        conversationId: conv, title: input.title, brief: input.brief, origin: "web",
+        conversationId: conv, title: input.title, brief: input.brief,
+        ...(input.origin?.kind === "phone" ? { origin: "phone", network: input.origin.network } : { origin: "web" }),
         ...(input.strategy === undefined ? {} : { strategy: input.strategy }),
       });
       const agent = started.agent as TaskAgent;
@@ -316,6 +349,9 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
     }),
     stop: (id) => using(id, async () => {
       const { conv, row } = await find(id);
+      /* read first: a Stop clicked in the poll's lag after the worker finished must not turn its result into stopped */
+      const now0 = viewOf(row, await eventsOf(row));
+      if (ENDED.has(now0.state)) throw new TaskEndedError(id, now0.state);
       const agent = await agentFor(row);
       agent.cancel({ kind: "hook", reason: "task stopped" });
       await agent.whenIdle();
@@ -358,15 +394,34 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
   webServer.register({
     kind: "exact",
     path: "/data/tasks",
-    handler: fencedGet(deps.isTrusted, async () => ({ conversation: convId() ?? null, tasks: await ops.list() })),
+    handler: fencedGet(deps.isTrusted, async () => {
+      const tasks = await ops.list();
+      const desk = await deskOf();
+      return { conversation: convId() ?? null, tasks, ...(desk === undefined ? {} : { desk }) };
+    }),
   });
+
+  /* Stop and Continue from the task's page: `body.task` a non-empty string, an unknown id 404, a Stop on an ended task 409 */
+  const taskRoute = (act: (id: string) => Promise<TaskView>) => fencedPost(deps.isTrusted, async (body) => {
+    const id = body.task;
+    if (typeof id !== "string" || id === "" || id.length > 200) throw new HttpError(400, "task is required");
+    try {
+      return { task: await act(id) };
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("no task ")) throw new HttpError(404, "no such task");
+      if (err instanceof TaskEndedError) throw new HttpError(409, "task already ended");
+      throw err;
+    }
+  });
+  webServer.register({ kind: "exact", path: "/data/tasks/stop", handler: taskRoute((id) => ops.stop(id)) });
+  webServer.register({ kind: "exact", path: "/data/tasks/continue", handler: taskRoute((id) => ops.steer(id, CONTINUE_NOTE)) });
 
   const isConversation = (agent: DeskAgentLike): boolean => {
     if (ctx.agentPresets.composedPreset(agent.ctx) !== CONVERSATION_PRESET) return false;
     const conv = convId();
     return conv === undefined || conv === agent.id;
   };
-  const offTools = equipConversation(ctx, isConversation, taskToolDefinitions(ops, () => deps.conversation.operatorTurn()), { log });
+  const offTools = equipConversation(ctx, isConversation, taskToolDefinitions(ops, () => deps.conversation.operatorTurn(), () => deps.conversation.turnOrigin()), { log });
   const offReport = equipWorkers(ctx as unknown as WorkerToolsCtxLike, isWorker, { log });
 
   /* the bus: note, and leave the work to a microtask */
@@ -480,6 +535,30 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
         await Promise.all(handles.map((h) => h.dispose()));
       })();
       return disposing;
+    },
+  };
+}
+
+/** Gravit's one conversation as the phone bridge reaches it (src/phone-bridge.ts `PhoneConversation`; src/desk.ts
+ * binds it): `post`, `stop`, `carry` and `note` are the conversation's; `status` names its session and counts its tasks - `running`
+ * those running or stalled, `waiting` those waiting for the operator at a gate.
+ * @param conversation - the conversation's handle.
+ * @param ops - its tasks' operations.
+ */
+export function phoneConversation(conversation: ConversationHandle, ops: Pick<TaskOps, "list">): PhoneConversation {
+  return {
+    post: (input) => conversation.post(input),
+    stop: (reason) => conversation.stop(reason),
+    carry: () => conversation.carry(),
+    note: (line) => { conversation.note(line); },
+    status: async () => {
+      const views = await ops.list();
+      const sessionId = conversation.current()?.sessionId;
+      return {
+        ...(sessionId === undefined ? {} : { sessionId }),
+        running: views.filter((v) => v.state === "running" || v.state === "stalled").length,
+        waiting: views.filter((v) => v.state === "waiting").length,
+      };
     },
   };
 }

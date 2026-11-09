@@ -30,11 +30,11 @@ import { registerMarketProxy } from "./market-proxy.ts";
 import { composedMarketRow } from "./market-row.ts";
 import { composedSeatRow, seatUrl, type SeatEntryLike } from "./account-seat.ts";
 import { registerSeatRoute } from "./seat.ts";
-import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
-import type { DeskConversationCtxLike } from "./desk-conversation.ts";
+import { claimsOf, deskDir, installDesk, type DeskHandle } from "./desk.ts";
+import type { DeliverOpts, DeskConversationCtxLike } from "./desk-conversation.ts";
 import { resolveDeskRoute } from "./desk-session.ts";
 import { conversationDir, conversationFence, installConversation, type ConversationCtxLike, type ConversationHandle } from "./conversation.ts";
-import { installRouter, installTasks, routerEnabled, type TasksCtxLike, type TasksHandle } from "./tasks.ts";
+import { installRouter, installTasks, phoneConversation, routerEnabled, type TasksCtxLike, type TasksHandle } from "./tasks.ts";
 import { createPhoneClient, type PhoneClient } from "./phone.ts";
 import { announceCard } from "./card-notice.ts";
 import { marketQuotes } from "./market-quotes.ts";
@@ -131,6 +131,8 @@ let disposeMarketProxy: (() => void) | undefined;
  * beats waiting on an unbounded teardown. */
 async function shutdown(code: number): Promise<void> {
   try {
+    /* the phone first: no text is taken that a disposed conversation would refuse; the outlet stays for its last answers */
+    await desk?.quiesce();
     await tasks?.dispose();
     await conversation?.dispose();
     await desk?.dispose(code);
@@ -165,6 +167,8 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
  * under a 2 s bound, and exits 1 (:679-728). `release` unwinds what this entry
  * installed on the tree before the tree itself. */
 installFailLoud(BIN, process, async () => {
+  /* the phone first: no text is taken that a disposed conversation would refuse; the outlet stays for its last answers */
+  await desk?.quiesce();
   await tasks?.dispose();
   await conversation?.dispose();
   await desk?.dispose(1);
@@ -426,17 +430,20 @@ await registerPanelRoutes(booted.ctx.webServer, deps);
  * readiness, and `dispose` orders the `shutdown` after the `boot` anyway.
  *
  * With the desk on, `installDesk` also creates the desk conversation's owner
- * (desk-conversation.ts) and starts it without awaiting it: the desk session -
- * cwd `desk/journal/` under the repo root this process chdir'd to - is ensured
- * and supervised from here on, Telegram or not, so a turn the operator opens in
- * the browser gets the desk's deadline, fence check and ledger record too. Its
+ * (desk-conversation.ts) - the outlet and the pause's choke point. With
+ * `FACE_ROUTER=0`, or once a conversation that could not be installed is bound
+ * as none, it is started without being awaited: the desk session - cwd
+ * `desk/journal/` under the repo root this process chdir'd to - is ensured and
+ * supervised, and answers the phone. Otherwise (`router`) the phone waits for
+ * `desk.bindRouter` below and reaches Gravit's one conversation, and the desk
+ * session is never opened. Its
  * model route is `FACE_DESK_MODEL`, validated as a bot's route is and falling
  * back to the default with one line (`resolveDeskRoute`); only a desk that is on
  * resolves one. `installModelSelection` is dsh-agent's, wrapped the way room.ts's
  * own default wraps it.
  *
  * And with the desk on and the `mcp-account` row not disabled, the phone bridge
- * (phone-bridge.ts) runs on that conversation: the operator's phone, through the
+ * (phone-bridge.ts) runs - on the one conversation once bound, else on the desk's: the operator's phone, through the
  * account at the row's URL - the proxy's - which holds the networks' tokens,
  * long-polls them and keeps an inbox the bridge reads (phone.ts). The face holds
  * no network's token. A disabled row, and there is no bridge and the status says
@@ -461,6 +468,9 @@ desk = installDesk(booted.ctx.webServer, {
   sessionCtx: booted.ctx as unknown as DeskConversationCtxLike,
   installModelSelection: (agentCtx, ref) => installModelSelection(agentCtx as unknown as Context, ref),
   ...(phone === undefined ? {} : { phone }),
+  /* the one conversation is coming: the phone waits for it (desk.bindRouter below), and the desk session is never
+   * opened unless its install fails */
+  router: routerEnabled(process.env),
   /* the watch (src/watch.ts) on the production defaults: the wall clock, the face's calendars, and SEC's filings
    * only once ALPHA_EDGAR_USER_AGENT names a contact */
   watchRow: {},
@@ -474,6 +484,7 @@ console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "r
  * the stalls. Its route is `FACE_ROUTER_MODEL`, read as `FACE_DESK_MODEL` is; the workers run on the same route. The
  * root is this process's cwd, as the desk's is. */
 if (routerEnabled(process.env)) {
+  const deskConversation = desk.conversation;
   const routerRoute = await resolveDeskRoute(booted.ctx as unknown as RoomContextLike, process.env.FACE_ROUTER_MODEL, console.log);
   const routerInstall = (agentCtx: object, ref: Parameters<typeof installModelSelection>[1]) => installModelSelection(agentCtx as unknown as Context, ref);
   const router = await installRouter({
@@ -482,6 +493,11 @@ if (routerEnabled(process.env)) {
       home: dshHome,
       route: routerRoute,
       installModelSelection: routerInstall,
+      /* the desk's deliver, the pause's choke point: a phone turn's answer and a phone task's report go back to the
+       * phone through it; with the desk off there is none, and nothing is sent */
+      ...(deskConversation === undefined ? {} : { deliver: (text: string, opts: DeliverOpts) => deskConversation.deliver(text, opts) }),
+      /* what a turn claimed and has not logged, for the carry over a shutdown */
+      onClaimed: claimsOf(booted.ctx),
     }),
     tasks: (held) => installTasks(booted.ctx.webServer, {
       ctx: booted.ctx as unknown as TasksCtxLike,
@@ -489,6 +505,7 @@ if (routerEnabled(process.env)) {
       route: routerRoute,
       installModelSelection: routerInstall,
       conversation: held,
+      ...(desk?.enabled ? { deskLines: () => desk!.lines() } : {}),
       isTrusted: isTrustedDataRequest,
     }),
     fence: () => conversationFence(conversationDir(dshHome)),
@@ -498,6 +515,10 @@ if (routerEnabled(process.env)) {
     tasks = router.tasks;
     console.log(`${BIN}: conversation: ${router.sessionId} on ${routerRoute.provider}/${routerRoute.model}`);
   }
+  /* the phone reaches the conversation from here on; a conversation that could not be installed leaves it the desk
+   * session's, as with FACE_ROUTER=0 */
+  desk.bindRouter("sessionId" in router ? phoneConversation(router.conversation, router.tasks.ops) : undefined);
+  /* (the conversation answers what a graceful stop carried only once bound, the outlet set - src/desk.ts) */
 } else {
   console.log(`${BIN}: conversation: off (FACE_ROUTER=0)`);
 }

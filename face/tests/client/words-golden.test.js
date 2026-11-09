@@ -48,7 +48,7 @@ test('the corpus covers the screens', async () => {
   holds('Markets', 'class="main mkts');
   holds('Account', 'class="main acct');
   holds('Trade', 'class="main trade');
-  holds('a channel', 'class="main chan');
+  holds('a strategy page', 'class="main chan strat');
   holds('Discover', 'class="main disc');
   holds('a module', 'class="mod-boxes');
   holds('a Run sheet', 'class="drawer sheet run-sheet');
@@ -56,7 +56,8 @@ test('the corpus covers the screens', async () => {
   holds('Sell many', 'aria-label="Sell many"');
   holds('the stock drawer', 'class="drawer stock');
   holds("Connect Telegram's drawer", 'data-action="identityClose"');
-  holds('a list off a Mac', 'Ctrl+Alt+K');
+  holds('the side panel off a Mac', 'Ctrl+Alt+K');
+  holds('the side panel', 'class="row-note"');
   holds("Account's Money", 'Send only the asset on the network the row names');
   holds("Account's Rules", 'Only a browser that signs switches to Beast.');
   holds('a prepared move', 'Can&#39;t be undone.');

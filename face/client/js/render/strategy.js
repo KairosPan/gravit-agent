@@ -1,6 +1,8 @@
-// face/client/js/render/channel.js — a channel's page (spec 2026-10-19 §7 Stage 3 "Channels"): the status headline,
-// the thesis, the latest backtest, the research runs, the backtests, the journal, the files and the rosters, from
-// /data/channels/overview.
+// face/client/js/render/strategy.js — a strategy's page (#/strategy/<name>, one-entry plan 2; the channel page before it, spec
+// 2026-10-19 §7 Stage 3 "Channels"), read-only but for the rosters (kept until plan 4): the status headline, the thesis, the
+// latest backtest, the research runs, the backtests, the journal, the files and the rosters, from /data/channels/overview;
+// then the strategy's tasks and its standing orders, each the rail's line; then the paper positions of the venue its
+// status.yaml names (or a line saying it names none, never a guessed venue).
 // Everything here was written by Gravit or the operator into the channel's directory: text through esc, the thesis
 // through the thread's DOM-built markdown.
 import { esc, cls, attrs } from '../html.js';
@@ -10,6 +12,11 @@ import { chip } from './thread.js';
 import { markdownHtml } from './markdown.js';
 import { kv } from './controls.js';
 import { runsView } from '../host/runs-view.js';
+import { railOf } from '../host/rail-view.js';
+import { railLineHtml } from './tasks.js';
+import { positionSideWord } from './account.js';
+import { money, signedMoney, sign } from '../wire/account-model.js';
+import { price } from '../wire/market-model.js';
 import { t, th, tn, sayOf } from '../i18n/words.js';
 
 const JOURNAL_ROWS = 20;
@@ -98,23 +105,54 @@ function headline(status) {
     (s.next ? `<div class="dsec-line">${th('channel.next', { next: s.next })}</div>` : '') + (numbers.length ? kv(numbers) : '');
 }
 
+// the strategy's tasks: the rail's lines whose task names this strategy, in the rail's groups' order, then its standing
+// orders' scheduled lines, each drawn as the rail draws it
+function tasks(state, name, now, open) {
+  const rail = railOf(state, now);
+  const mine = l => (l.scheduled ? l.scheduled.strategy : l.task?.strategy) === name;
+  const lines = ['you', 'running', 'done', 'scheduled'].flatMap(g => rail[g].filter(mine).map(l => railLineHtml(l, g, state, now, open)));
+  return sec(t('strategy.tasks'), lines.length ? `<div class="strat-tasks">${lines.join('')}</div>` : none(t('strategy.noTasks')));
+}
+
+const qtyWord = n => (n === null ? '—' : Number(n).toLocaleString('en-US', { maximumFractionDigits: 8 }));
+const tone = v => ({ pos: 'up', neg: 'down' })[sign(v)] ?? 'flat';
+
+// the paper positions at the venue status.yaml names: symbol, side, quantity, entry, mark and unrealised P&L; the Account's
+// refusal as one line; with no venue named, a line saying so (no venue is guessed)
+function positions(status, p) {
+  const venue = typeof status.venue === 'string' && status.venue !== '' ? status.venue : null;
+  const label = venue ? t('strategy.positions.at', { venue }) : t('strategy.positions.title');
+  if (!venue) return sec(label, none(t('strategy.positions.noVenue')));
+  const mine = p && p.venue === venue ? p : { status: 'idle', rows: [], message: null };
+  if (mine.status === 'refused') return sec(label, `<div class="dsec-line">${esc(mine.message)}</div>`);
+  if (mine.status === 'failed') return sec(label, none(t('strategy.positions.unavailable')));
+  if (!mine.rows.length) return sec(label, none(mine.status === 'ready' ? t('strategy.positions.none') : t('common.loading')));
+  const head = [t('strategy.positions.symbol'), t('strategy.positions.side'), t('strategy.positions.qty'), t('account.positions.entry'), t('account.positions.mark'), t('strategy.positions.unrealized')];
+  const rows = mine.rows.map(r => [esc(r.symbol), esc(positionSideWord(r.side)), esc(qtyWord(r.qty)), esc(price(r.entryPrice)), esc(price(r.markPrice)), `<span class="${tone(r.unrealizedUsd)}">${esc(signedMoney(r.unrealizedUsd))}</span>`]);
+  return sec(label, `<div class="acct-wrap strat-pos"><table class="acct-t"><thead><tr>${head.map((h, i) => `<th scope="col"${i ? ' class="r"' : ''}>${esc(h)}</th>`).join('')}</tr></thead>` +
+    `<tbody>${rows.map(cells => `<tr>${cells.map((c, i) => `<td${i ? ' class="r"' : ''}>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+}
+
 const retry = id => `<button type="button" class="btn-sm" data-action="channelRetry" data-id="${esc(id)}">${th('channel.retry')}</button>`;
 
-export function renderChannelScreen(state, now) {
-  const id = state.route.id;
-  const listed = (state.channels ?? []).find(c => c.workspaceId === id) ?? null;
+// a strategy's page (#/strategy/<name>): its channel by name, the page read by the channel's workspace id; a name no channel
+// has is not found once the channels read has answered (state.channelsRead), even with none listed. `open`: the task lines the
+// page holds open (app.js)
+export function renderStrategyScreen(state, now, { open = null } = {}) {
+  const listed = (state.channels ?? []).find(c => !c.isRoot && c.name === state.route.id) ?? null;
+  const id = listed?.workspaceId ?? null;
   const c = state.channel?.id === id ? state.channel : { status: 'idle', data: null, at: null };
-  const name = listed ? listed.title || listed.name : c.data?.channel?.name ?? id ?? '';
-  const shell = (body, head = '') => `<main class="main chan"><header class="head"><h1 class="head-title">${esc(name)}</h1>${head}</header><div class="chan-body">${body}</div></main>`;
-  if (c.status === 'missing' || (!listed && (state.channels ?? []).length > 0)) return shell(`<div class="chan-none">${th('channel.notFound')}</div>`);
+  const name = listed ? listed.title || listed.name : state.route.id ?? '';
+  const shell = (body, head = '') => `<main class="main chan strat"><header class="head"><h1 class="head-title">${esc(name)}</h1>${head}</header><div class="chan-body">${body}</div></main>`;
+  if (c.status === 'missing' || (!listed && ((state.channels ?? []).length > 0 || state.channelsRead === true))) return shell(`<div class="chan-none">${th('strategy.notFound')}</div>`);
   const data = c.data;
   if (!data) {
-    if (c.status === 'failed') return shell(`<div class="chan-none">${th('channel.unavailable')} ${retry(id)}</div>`); // words-order: a line, then its key
+    if (c.status === 'failed') return shell(`<div class="chan-none">${th('strategy.unavailable')} ${retry(id)}</div>`); // words-order: a line, then its key
     return shell(`<div class="chan-none dim">${th('common.loading')}</div>`);
   }
   const status = data.status && typeof data.status === 'object' ? data.status : {};
-  const head = (status.status ? chip(status.status) : '') + '<span class="spacer"></span>' +
-    `<button type="button" class="btn-primary small" data-action="newRound" data-id="${esc(id)}">${th('channel.newRound')}</button>`;
+  // (New round, a new message in the channel, retired with New message: one-entry plan 2)
+  const head = status.status ? chip(status.status) : '';
   const stale = c.status === 'failed' ? `<div class="${cls('chan-stale', 'dim')}">${th('channel.stale', { at: fmtClock(c.at ?? now) })} ${retry(id)}</div>` : ''; // words-order: a line, then its key
   const body = data.body && typeof data.body === 'object' ? data.body : {};
   return shell(
@@ -122,7 +160,7 @@ export function renderChannelScreen(state, now) {
     rows(t('channel.backtests'), body.backtests, b => line(b.file, bytesWord(b.bytes))) +
     rows(t('channel.journal'), (body.journal ?? []).slice(0, JOURNAL_ROWS), j => `<div class="chan-row"><span class="chan-row-meta">${esc(j.date)}</span><span class="chan-row-name">${esc(j.text)}</span></div>`) +
     rows(t('channel.files'), body.files, f => line(f.name, [bytesWord(f.bytes), Number.isFinite(Date.parse(f.mtime)) ? fmtDate(Date.parse(f.mtime)) : ''].filter(Boolean).join(' · '))) +
-    rosters(data, state, id),
+    rosters(data, state, id) + tasks(state, listed?.name ?? null, now, open) + positions(status, c.positions),
     head,
   );
 }

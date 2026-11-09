@@ -1,8 +1,11 @@
 // The screen corpus: every state css.test.js draws, named, so a test can hold each screen to its bytes (words-golden.test.js)
 // or to its classes (css.test.js). Paths below resolve from tests/client/helpers/.
 import { readFileSync } from 'node:fs';
-import { renderRail, renderList } from '../../../client/js/render/rail.js';
+import { renderRail } from '../../../client/js/render/rail.js';
+import { renderSide } from '../../../client/js/render/side.js';
 import { renderMessagesScreen } from '../../../client/js/render/messages.js';
+import { renderTaskScreen } from '../../../client/js/render/task.js';
+import { renderHistoryScreen } from '../../../client/js/render/history.js';
 import { renderMarketsScreen } from '../../../client/js/render/markets.js';
 import { renderSettings, renderAccountScreen, renderSellMany } from '../../../client/js/render/account.js';
 import { renderSheet } from '../../../client/js/render/owner.js';
@@ -12,7 +15,7 @@ import { renderTradeScreen } from '../../../client/js/render/trade.js';
 import { ticketOf } from '../../../client/js/host/trade-view.js';
 import { fieldsOf } from '../../../client/js/host/sheet-view.js';
 import { askedOf } from '../../../client/js/host/sheet.js';
-import { renderChannelScreen } from '../../../client/js/render/channel.js';
+import { renderStrategyScreen } from '../../../client/js/render/strategy.js';
 import { renderDiscover, renderPlugin } from '../../../client/js/render/discover.js';
 import { renderModule } from '../../../client/js/render/modules.js';
 import { renderRunSheet } from '../../../client/js/render/run-sheet.js';
@@ -236,10 +239,14 @@ function tradeStates() {
   ];
 }
 
-// the channel page: loaded with every section, loading, unavailable, stale after a failed re-read, not found
-function channelStates() {
+// Messages with `id` the conversation /data/tasks names (plan 2 of one entry)
+export const onConv = (s, id) => R.nav(R.tasksLoaded(s, { conversation: id, tasks: [], at: NOW }), { screen: 'messages', id: null });
+
+// a strategy's page: loaded with every section, loading, unavailable, stale after a failed re-read, not found (listed or after
+// a failed list read); its tasks, one open; its paper positions — no venue named, being read, read, none open, refused, failed
+function strategyStates() {
   const alpha = { workspaceId: 'w1', name: 'alpha', title: 'Alpha', dir: '/r/strategies/alpha', isRoot: false, missingDir: false, sessionIds: [] };
-  const on = R.nav(R.hostList(emptyState(), { conversations: [conv('c1', { channel: { workspaceId: 'w1', name: 'alpha' } })], channels: [alpha] }), { screen: 'channel', id: 'w1' });
+  const on = R.nav(R.hostList(emptyState(), { conversations: [conv('c1', { channel: { workspaceId: 'w1', name: 'alpha' } })], channels: [alpha] }), { screen: 'strategy', id: 'alpha' });
   const data = {
     ok: true, channel: alpha, status: { status: 'researching', one_line: 'Holds', next: 'Rerun', numbers: { sharpe: '1.4' } },
     body: { thesis: { markdown: '# A', isTemplate: false }, journal: [{ date: '2026-10-19', text: 'Ran' }], backtests: [{ file: 'b.json', bytes: 9 }], latest: { file: 'b.json', json: { sharpe: 1.4 } }, files: [{ name: 'n.md', bytes: 9, mtime: '2026-10-19T09:00:00.000Z' }] },
@@ -247,10 +254,27 @@ function channelStates() {
   };
   const loaded = R.channelLoaded(on, { workspaceId: 'w1', data, at: NOW });
   const editing = R.editFailed(R.startEdit(loaded, { kind: 'roster', which: 'bots', workspaceId: 'w1', choices: [{ value: 'buffett', label: 'Buffett Type' }], ticked: ['buffett'] }), { error: 'roster write refused' });
-  return [loaded, editing, R.channelLoading(on, { workspaceId: 'w1' }), R.channelFailed(on, { workspaceId: 'w1', at: NOW }), R.channelFailed(loaded, { workspaceId: 'w1', at: NOW }), R.nav(on, { screen: 'channel', id: 'w9' })];
+  const task = (id, over) => ({ id, title: `Size the hedge ${id}`, origin: 'web', state: 'running', group: 'running', steps: ['Read the book'], startedAt: NOW - 3 * MIN, lastEventAt: NOW, lastSeq: 1, strategy: 'alpha', ...over });
+  const tasked = R.tasksLoaded(loaded, { conversation: 'c1', tasks: [task('t1'), task('t2', { state: 'done', group: 'done', result: { text: 'Hedged a third' } }), task('t3', { strategy: 'beta' })], at: NOW });
+  const venued = R.channelLoaded(on, { workspaceId: 'w1', data: { ...data, status: { ...data.status, venue: 'paper-us' } }, at: NOW });
+  const asked = R.channelPositionsLoading(venued, { workspaceId: 'w1', venue: 'paper-us' });
+  const rows = [
+    { venue: 'paper-us', venueName: 'Paper US', symbol: 'NVDA', name: 'NVIDIA', side: 'long', qty: 12, entryPrice: 120.5, markPrice: 131.25, usd: 1575, unrealizedUsd: 129, paper: true, kind: 'stock', leverage: null },
+    { venue: 'paper-us', venueName: 'Paper US', symbol: 'TSLA', name: 'Tesla', side: 'short', qty: 3, entryPrice: 250, markPrice: 262, usd: 786, unrealizedUsd: -36, paper: true, kind: 'stock', leverage: null },
+  ];
+  return [
+    loaded, editing, R.channelLoading(on, { workspaceId: 'w1' }), R.channelFailed(on, { workspaceId: 'w1', at: NOW }), R.channelFailed(loaded, { workspaceId: 'w1', at: NOW }), R.nav(on, { screen: 'strategy', id: 'w9' }),
+    R.hostListFailed(R.nav(emptyState(), { screen: 'strategy', id: 'w9' })),
+    tasked, R.tasksLoaded(loaded, { conversation: 'c1', tasks: [task('t3', { strategy: 'beta' })], at: NOW }),
+    asked, R.channelPositionsLoaded(asked, { workspaceId: 'w1', venue: 'paper-us', rows }), R.channelPositionsLoaded(asked, { workspaceId: 'w1', venue: 'paper-us', rows: [] }),
+    R.channelPositionsFailed(asked, { workspaceId: 'w1', venue: 'paper-us', message: 'paper-us is not a paper venue' }), R.channelPositionsFailed(asked, { workspaceId: 'w1', venue: 'paper-us' }),
+  ];
 }
 
 // Discover: the shelves, a failed shelf, a query, a shelf's grid, every kind of page, its own line
+// the task Gravit started for a Run of Theme, as GET /data/tasks shows it
+const runTask = { id: 't-run', title: 'Theme · 10-19', origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW, lastEventAt: NOW, lastSeq: 1 };
+
 export function discoverStates() {
   let all = emptyState();
   for (const [shelf, v] of Object.entries(listings())) all = R.shelfLoaded(all, { shelf, data: v.data, at: 1 });
@@ -260,9 +284,11 @@ export function discoverStates() {
   const unmounted = R.shelfLoaded(at({ screen: 'discover', id: null }), { shelf: 'modules', data: { ...modulesListing(), mounted: false }, at: 2 });
   return [
     unmounted, at({ screen: 'discover', id: 'research' }),
-    // a card whose Run is running: its chip a link to the conversation
-    R.moduleRunStarted(at({ screen: 'discover', id: 'research' }), { module: 'theme', sessionId: 's-run', title: 'Theme · 10-19', startedAt: NOW }),
-    R.moduleRunStarted(at({ screen: 'module', id: 'theme' }), { module: 'theme', sessionId: 's-run', title: 'Theme · 10-19', startedAt: NOW }),
+    // a card whose Run was sent to Gravit (one-entry plan 2): before its task shows, Sent linking to Messages; once Gravit
+    // started the task of the Run's title, Running linking to the task
+    R.moduleRunStarted(at({ screen: 'discover', id: 'research' }), { module: 'theme', title: 'Theme · 10-19', startedAt: NOW }),
+    R.tasksLoaded(R.moduleRunStarted(at({ screen: 'discover', id: 'research' }), { module: 'theme', title: 'Theme · 10-19', startedAt: NOW }), { conversation: 'c-gravit', tasks: [runTask], at: NOW }),
+    R.tasksLoaded(R.moduleRunStarted(at({ screen: 'module', id: 'theme' }), { module: 'theme', title: 'Theme · 10-19', startedAt: NOW }), { conversation: 'c-gravit', tasks: [runTask], at: NOW }),
     at({ screen: 'discover', id: null }), R.shelfFailed(at({ screen: 'discover', id: null }), { shelf: 'bots', at: 1 }), R.nav(emptyState(), { screen: 'discover', id: null }),
     R.setDiscoverQuery(at({ screen: 'discover', id: null }), 'rules'), at({ screen: 'discover', id: 'agents' }),
     page('mcp:alpaca-kit'), page('bot:buffett'), page('agent:codex'), page('agent:claude'), page('agent:gravit'), page('bot:nobody'),
@@ -299,8 +325,8 @@ function runSheetStates(all) {
   ];
 }
 
-// the list's search (plan 2 of the dsh UI port): searching, nothing found, failed, results with a marked snippet, an archived
-// hit with Un-archive and the more-than-twenty line
+// the side panel's search (plan 2 of the dsh UI port): searching, nothing found, failed, results with a marked snippet, an
+// archived hit and the more-than-twenty line
 export function searchStates(s) {
   const q = (q, then) => { const st = R.setSearchQuery(s, q); return then ? then(st, q) : st; };
   return [
@@ -309,18 +335,22 @@ export function searchStates(s) {
   ];
 }
 
-// the states stage 1 can show: empty, a conversation with every kind, a group thinking, Details, Settings, a draft, a bad status, the rail folded
+// the states stage 1 can show: loading, a conversation with every kind, a group thinking, Details, the task kinds, Settings, the
+// conversation off and loading, a bad status, the rail folded
 export function everyState() {
-  const base = R.hostList(emptyState(), { conversations: [conv('s1', { messages: KINDS, running: true, usage: { tokenUsage: { outputTokens: 1 }, contextPressure: 0.5 }, stats: { turns: 1, steps: 2, llmMs: 900, toolMs: 0, ttftMs: 300, ttftSteps: 2, decodeMs: 500, decodeTokens: 20 }, created: NOW }), conv('g', { kind: 'group', members: ['gravit', 'buffett'], thinking: 'text', messages: [m('g1', { from: 'buffett', text: 'hold', data: { name: 'Buffett Type', markdown: true, memberSessionId: 'm1', memberTurn: 2 } })] })], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }, { workspaceId: 'w-cn', name: 'cn-market', isRoot: false }], bots: [{ id: 'buffett', name: 'Buffett Type' }] });
-  const open = R.nav(base, { screen: 'messages', id: 's1' });
+  const base = R.hostList(emptyState(), { conversations: [conv('s1', { messages: KINDS, running: true, usage: { tokenUsage: { outputTokens: 1 }, contextPressure: 0.5 }, stats: { turns: 1, steps: 2, llmMs: 900, toolMs: 0, ttftMs: 300, ttftSteps: 2, decodeMs: 500, decodeTokens: 20 }, created: NOW }), conv('g', { kind: 'group', members: ['gravit', 'buffett'], thinking: 'text', messages: [m('g1', { from: 'buffett', text: 'hold', data: { name: 'Buffett Type', markdown: true, memberSessionId: 'm1', memberTurn: 2 } })] })], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true }, { workspaceId: 'w-cn', name: 'cn-market', isRoot: false, status: 'researching' }], bots: [{ id: 'buffett', name: 'Buffett Type' }] });
+  const open = onConv(base, 's1');
   return [
-    emptyState(), open, lunhuiStates(open), ...stockStates(open), lunhuiStates(open, { 's1-p1': { tile: 'environment', breadth: 'dist' } }), R.nav(base, { screen: 'messages', id: 'g' }), R.toggleDetails(open), R.askConfirm(R.toggleDetails(open), { action: 'stopGravit', id: 's1' }),
-    R.startEdit(R.toggleDetails(open), { kind: 'rename', convId: 's1', error: t('details.nameEmpty') }), R.openSettings(open), R.startDraft(open, { now: NOW }),
-    R.startEdit(R.startDraft(open, { now: NOW }), { kind: 'newChannel', error: t('channel.name.rule') }),
+    emptyState(), open, lunhuiStates(open), ...stockStates(open), lunhuiStates(open, { 's1-p1': { tile: 'environment', breadth: 'dist' } }), onConv(base, 'g'), R.toggleDetails(open), R.askConfirm(R.toggleDetails(open), { action: 'stopGravit', id: 's1' }),
+    // (where the rename editor, New message and its New channel… stood: one-entry plan 2 Task 5 drew them away) the task kinds,
+    // the conversation off, and its tasks loading
+    taskKindStates(base), R.openSettings(open), R.tasksOff(open, { at: NOW }),
+    R.nav(R.hostList(emptyState(), { conversations: base.conversations, channels: base.channels }), { screen: 'messages', id: null }),
     R.hostStatus(open, { line: 'Reconnecting…', bad: true }), R.toggleRail(open),
-    ...searchStates(R.hostList(open, { conversations: [...open.conversations, conv('old', { title: 'T old', archived: 'face' })] })), R.hostPins(open, ['s1']),
-    R.traceLoaded(R.nav(base, { screen: 'messages', id: 'g' }), { convId: 'g', msgId: 'g1', messages: [m('tg1', { kind: 'tool', text: 'account', data: { callId: 'g1c', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }) } }), m('tg2', { from: 'system', text: 'context' })] }),
-    R.toggleDetails(R.hostList(R.hostProjection(open, { convId: 's1', key: 'subagentCatalog', value: [{ id: 'k1', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'k2', createdAt: 2, mode: 'unknown' }] }), { conversations: open.conversations, childRows: [{ sessionId: 'k1', parentSessionId: 's1', running: true, origin: 'subagent' }] })), ...marketStates(), ...accountStates(), ...channelStates(), ...discoverStates(), ...tradeStates(),
+    ...searchStates(R.hostList(open, { conversations: [...open.conversations, conv('old', { title: 'T old', archived: 'face' })] })), // (where the pinned row stood: one-entry plan 2 Task 6) the side panel beside a strategy's page, Gravit's dot on
+    R.nav(R.hostList(open, { conversations: open.conversations.map(c => (c.id === 's1' ? { ...c, updatedAt: NOW + MIN } : c)) }), { screen: 'strategy', id: 'cn-market' }),
+    R.traceLoaded(onConv(base, 'g'), { convId: 'g', msgId: 'g1', messages: [m('tg1', { kind: 'tool', text: 'account', data: { callId: 'g1c', name: 'mcp__alpaca-kit__account', result: JSON.stringify({ ok: true, equity: '1' }) } }), m('tg2', { from: 'system', text: 'context' })] }),
+    R.toggleDetails(R.hostList(R.hostProjection(open, { convId: 's1', key: 'subagentCatalog', value: [{ id: 'k1', createdAt: 1, mode: 'continuable', label: 'Check' }, { id: 'k2', createdAt: 2, mode: 'unknown' }] }), { conversations: open.conversations, childRows: [{ sessionId: 'k1', parentSessionId: 's1', running: true, origin: 'subagent' }] })), ...marketStates(), ...accountStates(), ...strategyStates(), ...discoverStates(), ...tradeStates(),
     // the golden is append-only (golden-write.js): a state added later goes after these, so every pinned name keeps its state
     ...laterStates(),
     ...shortcutStates(open),
@@ -330,8 +360,159 @@ export function everyState() {
     R.setLang(R.openSettings(open), 'zh'),
     ...focusedMarketStates(),
     ...providerMarketStates(),
-    // iMessage in Account › Identity (the iMessage plan), appended after the states above
+    // plan 2 of one entry, Task 3: a task's page, history and its list, and an old link waiting on the tasks
+    ...sessionPageStates(base),
+    // plan 2 of one entry, Task 4: the rail of tasks on Messages
+    ...taskRailStates(base),
+    // plan 2 of one entry, Task 5: the conversation known but not listed yet (its empty state, the rail beside it), and the
+    // tasks' first read failed
+    R.tasksLoaded(onConv(base, 'fresh'), { conversation: 'fresh', tasks: [{ id: 'ru', title: 'Price the basket', origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW - 3 * MIN, lastEventAt: NOW - MIN, lastSeq: 1 }], at: NOW }),
+    R.tasksFailed(R.nav(R.hostList(emptyState(), { conversations: base.conversations, channels: base.channels }), { screen: 'messages', id: null }), { at: NOW }),
+    // plan 2 of one entry, Task 7: History's rows with a strategy and a preview, and one session read-only with its gates closed
+    ...historyStates(base),
+    // plan 2 of one entry, Task 8: a task's full process
+    ...taskPageStates(base),
+    // the final review's fixes: a waiting line whose gate this page has not seen yet (after a reload) points at its full process
+    R.nav(R.tasksLoaded(R.hostList(base, { conversations: [...base.conversations, conv('wr', { title: 'Buy back the hedge' })] }), { conversation: 's1', tasks: [{ id: 'wr', title: 'Buy back the hedge', origin: 'web', state: 'waiting', group: 'you', steps: [], startedAt: NOW - 3 * MIN, lastEventAt: NOW - MIN, lastSeq: 1, waitingFor: { kind: 'approval', id: 'c9', tool: 'mcp__account__portfolio_place_order' } }], at: NOW }), { screen: 'messages', id: null }),
+    // plan 3 of one entry, Task 7: the desk in the conversation - a phone text from each network and one naming none, a
+    // schedule line, an alert line, and a line with no body
+    deskFoldState(base),
+    // plan 3 of one entry, Task 8: the rail's desk lines and its scheduled group, a phone task naming its origin, and a
+    // strategy's page listing its standing order
+    ...deskRailStates(base),
+    // iMessage in Account › Identity (the iMessage plan), appended after the states above (after one entry's plan 3 since the merge)
     ...imessageStates(identitySigning(R.nav(seatedOf(accountRead()), { screen: 'account', tab: 'identity' }))),
+  ];
+}
+
+// the desk folded into the conversation (one-entry plan 3 Task 7): the operator's phone texts under their chip, and the
+// face's firings and alerts as centred lines under theirs
+function deskFoldState(base) {
+  const messages = [
+    m('d1', { from: 'you', text: 'NVDA now?', seq: 1, data: { source: 'telegram', network: 'telegram' } }),
+    m('d2', { from: 'system', kind: 'desk', text: 'Check the book before the close.\nName what moved.', seq: 2, data: { line: 'schedule', order: 'preclose', firing: 'preclose:2026-11-09', date: '2026-11-09' } }),
+    m('d3', { from: 'system', kind: 'desk', text: 'NVDA fell 6% on guidance', seq: 3, data: { line: 'alert', alert: 'a-1', symbol: 'NVDA' } }),
+    m('d4', { from: 'you', text: 'sell half', seq: 4, data: { source: 'telegram', network: 'slack' } }),
+    m('d5', { from: 'you', text: 'and the rest?', seq: 5, data: { source: 'telegram' } }),
+    m('d6', { from: 'system', kind: 'desk', text: '', seq: 6, data: { line: 'alert' } }),
+  ];
+  return R.tasksLoaded(R.nav(R.hostList(base, { conversations: [...base.conversations, conv('dk', { messages, loaded: true })] }), { screen: 'messages', id: null }), { conversation: 'dk', tasks: [], at: NOW });
+}
+
+// a task's full process (one-entry plan 2 Task 8): a running worker with its strategy, a brief, an answer with follow-ups and
+// an approval still open (answerable here), the stock drawer open over it; one stalled with Stop and Continue busy and Details
+// on its jobs; one done (no keys); one whose transcript the list does not carry yet
+function taskPageStates(base) {
+  const task = (id, over = {}) => ({ id, title: `Task ${id}`, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW - 12 * MIN, lastEventAt: NOW - MIN, lastSeq: 1, ...over });
+  const messages = [
+    m('wb', { from: 'system', kind: 'task', text: 'Read the tape\n\nPrice the leaders', seq: 1, data: { form: 'brief' } }),
+    m('wp', { kind: 'composed', text: '弱势日', seq: 2, data: { callId: 'w', strategy: 'cn-market', run: 'loaded', summary: '弱势日', blocks: [{ kind: 'ladder' }], choices: [{ label: 'Look again at the leaders' }], modules: [] } }),
+    m('wa', { kind: 'approval', text: 'run it', seq: 3, data: { eventId: 'wa', sessionId: 'wk', toolName: 'bash', reason: 'reads the tape' } }),
+  ];
+  const workers = [conv('wk', { title: 'Read the tape', messages, loaded: true, live: true }), conv('ws', { title: 'Scan filings', loaded: true, messages: [m('ws1', { text: 'Opened EDGAR' })] }), conv('wd', { title: 'Morning read', loaded: true })];
+  const tasks = [task('wk', { title: 'Read the tape', strategy: 'cn-market', steps: ['Read quotes'] }), task('ws', { title: 'Scan filings', state: 'stalled', group: 'you' }), task('wd', { title: 'Morning read', state: 'done', group: 'done' }), task('wn', { title: 'Fresh one' })];
+  const on = R.tasksLoaded(R.hostList(base, { conversations: [...base.conversations, ...workers] }), { conversation: 's1', tasks, at: NOW });
+  const opened = R.nav(on, { screen: 'task', id: 'wk' });
+  const read = { ...opened, lunhui: { ...opened.lunhui, views: { 'cn-market/loaded/': { status: 'loaded', view: VIEW_1027 } }, ui: {}, stock: { key: 'cn-market/loaded/', code: '600001' } } };
+  const job = { id: 'wj', kind: 'bash', label: 'fetch filings', owner: 'ws', status: 'running', startedAt: NOW - 64_000, output: { total: 6, earliest: 0 } };
+  const stalled = R.toggleDetails(R.taskBusy(R.hostJobs(R.watchJobs(R.nav(on, { screen: 'task', id: 'ws' }), 'ws'), { convId: 'ws', jobs: [job] }), { id: 'ws', on: true }));
+  return [read, stalled, R.nav(on, { screen: 'task', id: 'wd' }), R.nav(on, { screen: 'task', id: 'wn' })];
+}
+
+// History (one-entry plan 2 Task 7): rows naming a strategy, with a preview and without; one session opened read-only, an
+// approval and a question still open in its record drawn closed, an answered card, earlier pages to load, one loading them
+function historyStates(base) {
+  const gates = [
+    m('h1', { from: 'you', text: 'Price the basket', seq: 1, at: NOW - 9 * MIN }),
+    m('h2', { kind: 'approval', text: 'run it', seq: 2, data: { eventId: 'h2', sessionId: 'old', toolName: 'bash', reason: 'reads the tape' } }),
+    m('h3', { kind: 'question', text: '', seq: 3, data: { eventId: 'h3', sessionId: 'old', questions: [{ id: 'q1', header: 'Venue', question: 'Which paper venue?', options: [{ label: 'Paper US' }] }] } }),
+    m('h4', { kind: 'card', text: 'Buy 2 NVDA', seq: 4, answer: 'approved', data: { eventId: 'h4', sessionId: 'old', title: 'Buy 2 NVDA', venue: 'paper', line: 'limit 120' } }),
+  ];
+  const old = conv('old', { title: 'Last week', channel: { workspaceId: 'w-cn', name: 'cn-market' }, preview: 'Held the line\nsold half', updatedAt: NOW - 2 * MIN, messages: gates, loaded: true, window: { start: 1, through: 4, hasMore: true } });
+  const quiet = conv('quiet', { title: 'A quiet one', channel: { workspaceId: 'w0', name: 'workbench' }, updatedAt: NOW - 3 * 24 * 60 * MIN });
+  const listed = R.tasksLoaded(R.hostList(base, { conversations: [...base.conversations, old, quiet] }), { conversation: 's1', tasks: [], at: NOW });
+  const loading = R.hostEarlierLoading(R.nav(listed, { screen: 'history', id: 'old' }), { convId: 'old', on: true });
+  return [R.nav(listed, { screen: 'history', id: null }), R.nav(listed, { screen: 'history', id: 'old' }), loading];
+}
+
+// the task source kind (one-entry plan 2 Task 5): a report relayed into the conversation (its title read, and one unread named
+// by the tasks slice), a worker's brief and a steer Gravit relayed, a recovery note, a stop
+function taskKindStates(base) {
+  const k = (id, form, text, data = {}) => m(id, { from: 'system', kind: 'task', text, data: { form, ...data } });
+  const messages = [
+    k('k1', 'report', '[task · Read the tape · ready]', { task: 'rt', status: 'ready', title: 'Read the tape', body: 'Held the line; sold half' }),
+    k('k2', 'report', 'no head', { task: 'sf', status: 'blocked', title: null, body: 'No paper venue is granted' }),
+    k('k3', 'brief', 'Scan filings\n\nRead the 10-Q'), k('k4', 'steer', 'Carry on with the second filing'),
+    k('k5', 'recovery', 'The face restarted while you worked.'), k('k6', 'stopped', 'Stopped by the conversation.'),
+  ];
+  const listed = R.hostList(base, { conversations: [...base.conversations, conv('tk', { messages, loaded: true })] });
+  return R.tasksLoaded(R.nav(listed, { screen: 'messages', id: null }), { conversation: 'tk', tasks: [{ id: 'sf', title: 'Scan filings', origin: 'web', state: 'blocked', group: 'you', steps: [], startedAt: NOW, lastEventAt: NOW, lastSeq: 1 }], at: NOW });
+}
+
+// the rail of tasks under Messages' head: a line in every state — a worker's order card and a question waiting on it, one
+// stalled with Stop and Continue busy, one blocked and one failed with their results, one running with its strategy and
+// steps, one done with its tokens, one stopped — and a rail of running lines alone
+function taskRailStates(base) {
+  const task = (id, over = {}) => ({ id, title: `Task ${id}`, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW - 12 * MIN, lastEventAt: NOW - MIN, lastSeq: 1, ...over });
+  const usage = { uncachedInputTokens: 1200, cacheReadTokens: 300, outputTokens: 80, cacheWriteTokens: 0, routes: [] };
+  const tasks = [
+    task('w1', { title: 'Buy a little NVDA', state: 'waiting', group: 'you', strategy: 'cn-market', steps: ['Read the tape'], waitingFor: { kind: 'approval', id: 'c1', tool: 'mcp__account__portfolio_place_order' } }),
+    task('w2', { title: 'Pick a venue', state: 'waiting', group: 'you', waitingFor: { kind: 'question', id: 'c2', tool: 'ask_user_question' } }),
+    task('st', { title: 'Scan filings', state: 'stalled', group: 'you', steps: ['Opened EDGAR'] }),
+    task('bl', { title: 'Hedge the book', state: 'blocked', group: 'you', result: { status: 'blocked', text: 'No paper venue is granted' } }),
+    task('fa', { title: 'Read the brief', state: 'failed', group: 'you', result: { status: 'failed', text: 'The market did not answer' } }),
+    task('ru', { title: 'Price the basket', strategy: 'cn-market', steps: ['Read quotes', 'Priced three'] }),
+    task('dn', { title: 'Morning read', state: 'done', group: 'done', result: { status: 'ready', text: 'Nothing to do today' }, usage }),
+    task('sp', { title: 'Old idea', state: 'stopped', group: 'done' }),
+  ];
+  const workers = [conv('w1', { title: 'Buy a little NVDA' }), conv('w2', { title: 'Pick a venue' })];
+  let on = R.tasksLoaded(R.hostList(base, { conversations: [...base.conversations, ...workers] }), { conversation: 's1', tasks, at: NOW });
+  on = R.hostGate(on, { convId: 'w1', message: m('gw1', { kind: 'card', text: 'Buy 2 NVDA', seq: 1.5, data: { eventId: 'gw1', sessionId: 'w1', title: 'Buy 2 NVDA', venue: 'paper', line: 'limit 120' } }) });
+  on = R.hostGate(on, { convId: 'w2', message: m('gw2', { kind: 'question', text: '', seq: 1.5, data: { eventId: 'gw2', sessionId: 'w2', questions: [{ id: 'q1', header: 'Venue', question: 'Which paper venue?', options: [{ label: 'Paper US' }] }] } }) });
+  on = R.taskBusy(R.nav(on, { screen: 'messages', id: null }), { id: 'st', on: true });
+  const running = R.nav(R.tasksLoaded(base, { conversation: 's1', tasks: [task('ru', { title: 'Price the basket' })], at: NOW }), { screen: 'messages', id: null });
+  return [on, running];
+}
+
+// the desk folds into the rail (one-entry plan 3 Task 8): a task from each network's phone; a firing running, one done with
+// its session, one failed, an annotation with its text; the standing orders armed with a next firing, a last outcome and a
+// strategy, armed with none next, disabled and expired; then the scheduled group alone; then a strategy's page with its order
+function deskRailStates(base) {
+  const iso = ms => new Date(ms).toISOString();
+  const task = (id, over = {}) => ({ id, title: `Task ${id}`, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW - 12 * MIN, lastEventAt: NOW - MIN, lastSeq: 1, ...over });
+  const tasks = [task('ph', { title: 'Why did NVDA fall', origin: 'phone', network: 'telegram' }), task('sl', { title: 'Size the hedge', origin: 'phone', network: 'slack', state: 'done', group: 'done' })];
+  const desk = {
+    scheduled: [
+      { order: 'pre-close', strategy: 'cn-market', next: iso(NOW + 60 * MIN), last: { outcome: 'finished', t: iso(NOW - 24 * 60 * MIN), sessionId: 'desk-s1' }, enabled: true, expired: false },
+      { order: 'brief', enabled: true, expired: false },
+      { order: 'old-watch', enabled: false, expired: false, last: { outcome: 'failed', t: iso(NOW - 2 * 24 * 60 * MIN) } },
+      { order: 'report-q3', strategy: 'cn-market', enabled: true, expired: true },
+    ],
+    lines: [
+      { id: 'pre-close:2026-10-19', kind: 'firing', title: 'pre-close', state: 'running', startedAt: iso(NOW - 4 * MIN), sessionId: 'desk-s2' },
+      { id: 'brief:2026-10-19', kind: 'firing', title: 'brief', state: 'done', startedAt: iso(NOW - 90 * MIN), endedAt: iso(NOW - 80 * MIN), sessionId: 'desk-s3' },
+      { id: 'report:2026-10-19', kind: 'firing', title: 'report', state: 'failed', startedAt: iso(NOW - 70 * MIN), endedAt: iso(NOW - 69 * MIN) },
+      { id: 'annotation:p7', kind: 'annotation', title: 'NVDA AMD', state: 'done', startedAt: iso(NOW - 30 * MIN), endedAt: iso(NOW - 30 * MIN), sessionId: 'desk-s4', text: 'NVDA fell 6% on export news; AMD followed.' },
+    ],
+  };
+  const on = R.nav(R.tasksLoaded(base, { conversation: 's1', tasks, desk, at: NOW }), { screen: 'messages', id: null });
+  const alone = R.nav(R.tasksLoaded(base, { conversation: 's1', tasks: [], desk: { scheduled: desk.scheduled.slice(1, 2), lines: [] }, at: NOW }), { screen: 'messages', id: null });
+  const page = R.nav(R.tasksLoaded(base, { conversation: 's1', tasks: [], desk, at: NOW }), { screen: 'strategy', id: 'cn-market' });
+  const channel = base.channels.find(c => c.name === 'cn-market');
+  const strategy = R.channelLoaded(page, { workspaceId: channel.workspaceId, data: { ok: true, channel, status: { status: 'researching' }, body: {}, agents: [], bots: [], allBots: [] }, at: NOW });
+  return [on, alone, strategy];
+}
+
+// the read-only pages Tasks 7 and 8 of plan 2 replace: a task's page, a history session, one gone, one before the list, the
+// history list full and empty; and Messages while an old #/messages/<id> link waits for the tasks (no composer bound to it)
+function sessionPageStates(base) {
+  const task = { id: 'g', title: 'Debate', origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW, lastEventAt: NOW, lastSeq: 1 };
+  const ready = R.tasksLoaded(base, { conversation: 's1', tasks: [task], at: NOW });
+  const plain = R.tasksLoaded(base, { conversation: 's1', tasks: [], at: NOW });
+  return [
+    R.nav(ready, { screen: 'task', id: 'g' }), R.nav(plain, { screen: 'history', id: 'g' }), R.nav(plain, { screen: 'history', id: 'gone' }),
+    R.nav(emptyState(), { screen: 'history', id: 'x' }), R.nav(plain, { screen: 'history', id: null }), R.nav(ready, { screen: 'history', id: null }),
+    R.nav(base, { screen: 'messages', id: 's1' }),
   ];
 }
 
@@ -496,7 +677,7 @@ function laterStates() {
 // every kind, a folder walk with its crumb; the operator's words with a conversation mention, a chip in the bubble (D17); a draft
 // with each chip kind in the editor
 function composerBuild() {
-  const open = R.nav(R.hostList(emptyState(), { conversations: [conv('s1')], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, dir: '/r' }] }), { screen: 'messages', id: 's1' });
+  const open = onConv(R.hostList(emptyState(), { conversations: [conv('s1')], channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, dir: '/r' }] }), 's1');
   const menus = [
     { kind: '/', from: 0, query: '', groups: slashItems({ commands: [{ name: 'compact', description: 'Shrink' }], skills: [{ name: 'rules', description: 'R' }], query: '', atStart: true }), active: 0 },
     { kind: '/', from: 0, query: 'r', groups: slashItems({ commands: [], skills: [{ name: 'rules' }], query: 'r', atStart: true }), active: 0 },
@@ -544,7 +725,9 @@ function composerBuild() {
 export const composerPieces = () => composerBuild().pieces;
 export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
   : st.route.screen === 'trade' ? renderTradeScreen(st, now)
-  : st.route.screen === 'channel' ? renderChannelScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
+  : st.route.screen === 'strategy' ? renderStrategyScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
+  : st.route.screen === 'history' ? renderHistoryScreen(st, now)
+  : st.route.screen === 'task' ? renderTaskScreen(st, now)
   : st.route.screen === 'plugin' ? renderPlugin(st, now) : st.route.screen === 'module' ? renderModule(st, now) : renderMessagesScreen(st, now));
 
 // a state's page as css.test.js draws it: the rail, the screen, then every drawer and sheet that may stand over it
@@ -555,17 +738,25 @@ export function pageHtml(st, { mac = true } = {}) {
 
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0)); };
 
-// lines a host writes into the store from its own source, drawn as the page would: a module card's Run that could not send
-// (host/run-sheet.js); an Answer pressed with a question unanswered (app.js). The states come from running the host, so a
+// lines a host writes into the store from its own source, drawn as the page would: a module card's Run that could not send,
+// or found Gravit's conversation not known (host/run-sheet.js); an Answer pressed with a question unanswered (app.js). The states come from running the host, so a
 // word moved there shows here
 export async function hostCorpus() {
   const entries = [];
   {
-    const store = createStore({ initial: R.nav(emptyState(), { screen: 'discover', id: null }), reducers: R });
-    const sheet = startRunSheet({ store, actions: { newConversation: async () => null }, readListing: async () => modulesListing(), go: () => {}, now: () => NOW });
+    const known = R.tasksLoaded(R.nav(emptyState(), { screen: 'discover', id: null }), { conversation: 'c-gravit', tasks: [], at: NOW });
+    const store = createStore({ initial: known, reducers: R });
+    const sheet = startRunSheet({ store, actions: { send: async () => null }, readListing: async () => modulesListing(), go: () => {}, now: () => NOW });
     await sheet.open('theme');
     await sheet.run();
     entries.push(['host-run-sheet-failed', renderRunSheet(store.get(), NOW)]);
+  }
+  {
+    const store = createStore({ initial: R.nav(emptyState(), { screen: 'discover', id: null }), reducers: R });
+    const sheet = startRunSheet({ store, actions: { send: async () => null }, readListing: async () => modulesListing(), go: () => {}, now: () => NOW });
+    await sheet.open('theme');
+    await sheet.run();
+    entries.push(['host-run-sheet-no-conversation', renderRunSheet(store.get(), NOW)]);
   }
   {
     const f = fakeWindow({ hash: '' });
@@ -574,7 +765,7 @@ export async function hostCorpus() {
     const rows = [{ sessionId: 's1', updatedAt: 5, agentAvailable: false, running: false, blank: false }];
     const call = async endpoint => (endpoint === 'session/list' ? { items: rows } : endpoint === 'session/projections' ? { asOfSeq: 20, values: {} } : endpoint === 'session/page' ? { records: [] } : undefined);
     const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [{ workspaceId: 'w0', name: 'workbench', isRoot: true, sessionIds: [] }], ungrouped: [], archived: [], presets: {} }
-      : path === '/data/sessions-meta.json' ? { ok: true, archived: [], deleted: [] } : { ok: true, bots: [] });
+      : path === '/data/sessions-meta.json' ? { ok: true, archived: [], deleted: [] } : path === '/data/tasks' ? { ok: true, conversation: 's1', tasks: [] } : { ok: true, bots: [] });
     const store = boot(f.win, { editor: valueEditor, openMux: o => { opts = o; return mux; }, call, getJson, postJson: async () => ({ ok: true }), markdown: null, now: () => NOW });
     try {
       await settle();
@@ -597,11 +788,11 @@ export async function goldenEntries() {
   return [...corpus(), ...await hostCorpus()];
 }
 
-// the corpus, named and in order: every state, again off a Mac when it draws the list (whose search key names the chord), then
+// the corpus, named and in order: every state, again off a Mac when it draws the side panel (whose search key names the chord), then
 // the composer's pieces; the markdown renderer unset, as the screens draw with it
 export function corpus() {
   setMarkdown(null);
-  const states = everyState().flatMap((st, i) => [[`state-${i}`, pageHtml(st)], ...(renderList(st, NOW) ? [[`state-${i}-pc`, pageHtml(st, { mac: false })]] : [])]);
+  const states = everyState().flatMap((st, i) => [[`state-${i}`, pageHtml(st)], ...(renderSide(st, NOW) ? [[`state-${i}-pc`, pageHtml(st, { mac: false })]] : [])]);
   return [...states, ...composerPieces().map(([name, html]) => [`composer-${name}`, html])];
 }
 
@@ -614,7 +805,7 @@ const CONTENT_FIELDS = new Set([
   'text', 'title', 'name', 'label', 'note', 'notes', 'message', 'description', 'question', 'header', 'prompt', 'response', 'detail',
   'displayReason', 'reason', 'why', 'whyNot', 'said', 'error', 'words', 'what', 'example', 'via', 'readOnlyBecause', 'noTradeBecause',
   'proven', 'lands', 'guard', 'beast', 'door', 'request', 'plan', 'soul', 'legs', 'line', 'broken', 'setupIssues', 'freezes',
-  'placeholder', 'rate', 'whose', 'by', 'sub', 'subtitle', 'frontLine', 'category', 'age',
+  'placeholder', 'rate', 'whose', 'by', 'sub', 'subtitle', 'frontLine', 'category', 'age', 'steps', 'body',
   // names: a venue's, a product's, an agent's, an account's, a market's, a network's
   'productName', 'protocol', 'quoteFrom', 'sourceWord', 'venueName', 'accountName', 'agentName', 'byName', 'toName', 'unitWord',
   'network', 'networks', 'chain', 'chains', 'bridgeChains', 'funded', 'exchange', 'feed', 'source', 'model', 'route', 'runtime',
@@ -634,10 +825,11 @@ const CONTENT_FIELDS = new Set([
   'watch',
 ]);
 // the parts of a state that are an upstream's content as a whole, drawn as they come, every string in them and its keys too
-// (a metric's name): a run's view and its artifacts (Lunhui's output), a strategy's files (Gravit's), What you sign's lines
+// (a metric's name): a run's view and its artifacts (Lunhui's output), a strategy's files (Gravit's) and its paper positions
+// (the venue its status.yaml names and the Account's rows or refusal), What you sign's lines
 // (the Account's: every `shown`), and the two rows the face draws in the Account's own grammar, codes and all — an open
 // order (venue · side size · type · status · who) and an agent's limit (scope · status · allow); `*` is any one key
-const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['**', 'shown'],
+const CONTENT = [['lunhui', 'views', '*', 'view'], ['discover', 'shelves', 'modules', 'data'], ['channel', 'data'], ['channel', 'positions', 'venue'], ['channel', 'positions', 'rows'], ['**', 'shown'],
   ['account', 'data', 'orders'], ['account', 'agents', 'data', 'agents', 'limits']];
 const isContent = at => CONTENT.some(c => (c[0] === '**' ? at.at(-1) === c[1] : c.length === at.length && c.every((p, i) => p === '*' || p === at[i])));
 

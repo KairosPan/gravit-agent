@@ -696,7 +696,9 @@ export { formatDuration };
  * `deadlineFor` gives a source; `onTurnEnd`, the owner's hand for each record, synchronous or async;
  * `fence`, the instruction-chain check run at every turn's start (none when absent), and `fenceLabel`, the
  * repo-relative path a check that rejects counts as a violation at - the turn's cwd, `desk/journal` by default
- * (p2-m18); `clock`, the timers (the global ones by default); `log`, where a failure line goes (stderr). */
+ * (p2-m18); `clock`, the timers (the global ones by default); `log`, where a failure line goes (stderr);
+ * `skipKinds`, the message source kinds that never name a turn - context claimed before the message that does
+ * ({@link DESK_SKIPPED}, the desk state alone, by default; the router conversation adds its injected lines). */
 export interface SuperviseDeskTurnsDeps {
   on: SessionEventsOn;
   sessionId: string;
@@ -708,7 +710,12 @@ export interface SuperviseDeskTurnsDeps {
   fenceLabel?: string;
   deadlineFor?: (sourceKind: string) => number | undefined;
   log?: (line: string) => void;
+  skipKinds?: ReadonlySet<string>;
 }
+
+/** The source kinds that never name a desk turn unless the owner says otherwise: the desk state (`desk`,
+ * src/desk-conversation.ts's inject). */
+export const DESK_SKIPPED: ReadonlySet<string> = new Set(["desk"]);
 
 /** The turn a supervision has open, as {@link DeskSupervision}'s `openTurn` shows it: its number; once a message
  * named it, the source's name as a record gives it (`telegram`, `alert`, `wake`, ...); that message's id and logged
@@ -980,8 +987,8 @@ export function turnUsage(events: readonly EventLike[]): TurnUsage | undefined {
  * for the next post, if it finds a violation while the turn still runs. A
  * check that rejects while its turn runs counts as a violation at `desk/journal`, with one line; a check
  * that settles after the turn ended, either way, changes nothing and says nothing, and the next turn's
- * check runs again. When the turn's first `user/message` that is not the desk state (`source.kind`
- * `desk`, src/desk-conversation.ts's inject) arrives, the turn is named after it and `deadlineFor` is
+ * check runs again. When the turn's first `user/message` whose source kind is not in `skipKinds` - by default
+ * the desk state (`source.kind` `desk`, src/desk-conversation.ts's inject) - arrives, the turn is named after it and `deadlineFor` is
  * asked by the source's name as the record gives it. An answer below `deadlineMs` moves the deadline to
  * that long after `turn/start` - or cancels at once, when that moment has passed. No answer, or a non-finite one,
  * changes nothing; a finite one that is not a deadline a timer can hold (a whole number of milliseconds
@@ -1009,6 +1016,7 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): DeskSupervisio
   const clock = deps.clock ?? defaultClock;
   const log = deps.log ?? defaultLog;
   const where = `desk session ${deps.sessionId}`;
+  const skip = deps.skipKinds ?? DESK_SKIPPED;
   let open: OpenTurn | undefined;
   let disposed = false;
 
@@ -1065,12 +1073,12 @@ export function superviseDeskTurns(deps: SuperviseDeskTurnsDeps): DeskSupervisio
       );
   };
 
-  /** Name `turn` after `event`, its first message that is not the desk state - which is context, never a turn's
-   * name - and ask its deadline there. */
+  /** Name `turn` after `event`, its first message whose kind is not skipped - the desk state, and whatever else the
+   * owner names, is context, never a turn's name - and ask its deadline there. */
   const firstMessage = (turn: OpenTurn, event: EventLike): void => {
     const source = (event.data as { source?: unknown } | undefined)?.source;
     const kind = typeof source === "object" && source !== null ? (source as { kind?: unknown }).kind : undefined;
-    if (kind === "desk") return;
+    if (typeof kind === "string" && skip.has(kind)) return;
     turn.source = sourceName(kind);
     if (typeof source === "object" && source !== null) turn.message = source as Record<string, unknown>;
     const id = (event.data as { id?: unknown } | undefined)?.id;

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { SHORTCUTS, chordOf, chordLabel, shortcut, shortcutWords } from '../../client/js/keys.js';
 import { EN } from '../../client/js/i18n/en.js';
 
-const GENERAL = { newConversation: ['KeyN', 'alt'], searchConversations: ['KeyK', 'alt'], settings: ['Comma', 'alt'], shortcuts: ['Slash', ''] };
+const GENERAL = { writeToGravit: ['KeyN', 'alt'], searchConversations: ['KeyK', 'alt'], settings: ['Comma', 'alt'], shortcuts: ['Slash', ''] };
 const press = (code, { alt = false, meta = false, ctrl = false, shift = false, ...over } = {}) =>
   ({ code, key: '?', altKey: alt, metaKey: meta, ctrlKey: ctrl, shiftKey: shift, ...over });
 
@@ -18,7 +18,7 @@ test('each general key matches on its code with ⌘ as Meta on a Mac and Ctrl el
 });
 
 test('⌥ turning the key into another character still matches', () => {
-  assert.equal(chordOf(press('KeyN', { alt: true, meta: true, key: 'ñ' }), true), 'newConversation');
+  assert.equal(chordOf(press('KeyN', { alt: true, meta: true, key: 'ñ' }), true), 'writeToGravit');
   assert.equal(chordOf(press('Comma', { alt: true, meta: true, key: '≤' }), true), 'settings');
   assert.equal(chordOf(press('KeyM', { alt: true, meta: true, key: 'n' }), true), null, 'a key reading n on another place is not ⌥⌘N');
 });
@@ -45,7 +45,7 @@ test('a row marked unbound is never matched', () => {
   assert.ok(Object.isFrozen(SHORTCUTS) && Object.isFrozen(shortcut('settings')), 'the table is frozen');
   const table = SHORTCUTS.map(r => (r.id === 'settings' ? { ...r, bound: false } : r));
   assert.equal(chordOf(press('Comma', { alt: true, meta: true }), true, table), null);
-  assert.equal(chordOf(press('KeyN', { alt: true, meta: true }), true, table), 'newConversation', 'the others still match');
+  assert.equal(chordOf(press('KeyN', { alt: true, meta: true }), true, table), 'writeToGravit', 'the others still match');
 });
 
 test("dsh's rename, fork and archive chords are not in the table", () => {
@@ -59,7 +59,7 @@ test("dsh's rename, fork and archive chords are not in the table", () => {
 });
 
 test('the table: its sections, its labels by platform, and words from EN', () => {
-  assert.deepEqual(SHORTCUTS.filter(r => r.section === 'general').map(r => r.id), ['newConversation', 'searchConversations', 'settings', 'shortcuts']);
+  assert.deepEqual(SHORTCUTS.filter(r => r.section === 'general').map(r => r.id), ['writeToGravit', 'searchConversations', 'settings', 'shortcuts']);
   assert.deepEqual(SHORTCUTS.filter(r => r.section === 'composer').map(r => r.id), ['send', 'newLine', 'commands', 'references', 'close']);
   assert.deepEqual(SHORTCUTS.map(r => chordLabel(r, true)), ['⌥⌘N', '⌥⌘K', '⌥⌘,', '⌘/', 'Enter', '⇧Enter', '/', '@', 'Esc']);
   assert.deepEqual(SHORTCUTS.map(r => chordLabel(r, false)), ['Ctrl+Alt+N', 'Ctrl+Alt+K', 'Ctrl+Alt+,', 'Ctrl+/', 'Enter', 'Shift+Enter', '/', '@', 'Esc']);
@@ -67,7 +67,7 @@ test('the table: its sections, its labels by platform, and words from EN', () =>
     assert.ok(Object.hasOwn(EN, r.words), `${r.id}: ${r.words} is an EN key`);
     assert.equal(shortcutWords(r), EN[r.words]);
   }
-  assert.deepEqual(SHORTCUTS.map(shortcutWords), ['New conversation', 'Search conversations', 'Settings', 'This sheet', 'Send', 'New line',
+  assert.deepEqual(SHORTCUTS.map(shortcutWords), ['Write to Gravit', 'Search conversations', 'Settings', 'This sheet', 'Send', 'New line',
     'Commands and skills', 'Files, conversations, bots', 'Close a menu, sheet or drawer']);
 });
 
@@ -76,8 +76,8 @@ test('off a Mac AltGr (Ctrl+Alt with AltGraph held) is a character, never a key;
   assert.equal(chordOf(press('KeyN', { alt: true, ctrl: true, key: 'ń', ...altGr }), false), null, 'AltGr+N on a Polish layout');
   assert.equal(chordOf(press('KeyK', { alt: true, ctrl: true, ...altGr }), false), null, 'AltGr+K');
   assert.equal(chordOf(press('Comma', { alt: true, ctrl: true, ...altGr }), false), null, 'AltGr+,');
-  assert.equal(chordOf(press('KeyN', { alt: true, ctrl: true, getModifierState: () => false }), false), 'newConversation', 'Ctrl+Alt without AltGraph');
-  assert.equal(chordOf(press('KeyN', { alt: true, meta: true, ...altGr }), true), 'newConversation', 'a Mac');
+  assert.equal(chordOf(press('KeyN', { alt: true, ctrl: true, getModifierState: () => false }), false), 'writeToGravit', 'Ctrl+Alt without AltGraph');
+  assert.equal(chordOf(press('KeyN', { alt: true, meta: true, ...altGr }), true), 'writeToGravit', 'a Mac');
 });
 
 test('the two punctuation keys also match on the character, for layouts that put it elsewhere', () => {

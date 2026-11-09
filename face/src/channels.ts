@@ -90,7 +90,11 @@ export interface ChannelStatus {
   next?: string;
   /** Free key-value figures, stringified for display. */
   numbers?: Record<string, string>;
+  /** The strategy's paper venue, an id as the Account names one. */
+  venue?: string;
 }
+
+const VENUE_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 const str = (v: unknown): string | undefined =>
   typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
@@ -150,6 +154,7 @@ export function statusOfText(text: string): { status: ChannelStatus; malformed: 
   if (one !== undefined) out.one_line = one;
   const next = str(raw.next);
   if (next !== undefined) out.next = next;
+  if (typeof raw.venue === "string" && VENUE_RE.test(raw.venue)) out.venue = raw.venue;
   if (raw.numbers !== null && typeof raw.numbers === "object" && !Array.isArray(raw.numbers)) {
     const numbers: Record<string, string> = {};
     for (const [k, v] of Object.entries(raw.numbers as Record<string, unknown>)) {

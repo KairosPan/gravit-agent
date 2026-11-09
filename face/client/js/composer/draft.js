@@ -28,7 +28,6 @@ const unitsOf = r => (r.type === 'text' ? r.text.length : 1);
 export const lengthOf = runs => runs.reduce((n, r) => n + unitsOf(r), 0);
 export const isBlank = runs => runs.every(r => r.type === 'text' && !r.text.trim());
 export const plainText = runs => runs.map(r => (r.type === 'text' ? r.text : r.chip.label)).join('');
-export const hasChip = (runs, kind) => runs.some(r => r.type === 'chip' && r.chip.kind === kind);
 
 /** Replace caret units [from, to) with `insert` (a string or runs). A text run an edge falls in is split; a chip is whole. */
 export function replaceRange(runs, from, to, insert) {

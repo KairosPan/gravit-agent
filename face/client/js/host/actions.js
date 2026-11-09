@@ -1,9 +1,7 @@
 // face/client/js/host/actions.js — a data-action becomes the Remote the old client sent (spec 2026-10-19 §5, §7 "Composer").
 // Every wire shape here is chat.js's as it stood on main: session/prompt in queue mode with a client-minted requestId
-// and the browser's zone; a slash line to commands/execute first; an @ inside a channel to /data/rooms/say first.
+// and the browser's zone; a slash line to commands/execute first.
 import { randomUuid } from '../wire/api.js';
-import { isMentionText } from '../wire/room.js';
-import { needsAnswer } from '../messages.js';
 import { said, saidError } from '../i18n/words.js';
 
 // the status line's words for a 401, a said read when drawn
@@ -18,7 +16,7 @@ const zone = () => {
 const clean = text => (typeof text === 'string' ? text.trim() : '');
 
 // activate(sessionId) → Promise<boolean>: the conversation made live before a command runs on it (live.activate)
-export function makeActions({ store, call, answerGate, postJson, requestId = randomUuid, timeZone = zone, activate = async () => true }) {
+export function makeActions({ store, call, answerGate, requestId = randomUuid, timeZone = zone, activate = async () => true }) {
   const say = (line, bad = false) => store.dispatch('hostStatus', { line, bad });
   const fail = (err, what) => say(failLine(err, what), true);
   // the content: the text part when the words are not blank, then the attachments (already parts: an image inline, a file
@@ -62,16 +60,14 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     }
   }
 
-  // room: whether a channel conversation's words go to its room first (the composer decides by its chips; a bare call by
-  // an @ in the words, as before). attachments (content parts) go to Gravit: the room, which carries text only, is never
-  // tried with them. attachmentRefused(reason) answers a refusal of the attachments in place of the status line
-  async function send(text, { room, attachments = [], attachmentRefused } = {}) {
+  // the words and attachments (content parts) to the session the caller names — Gravit's one conversation (one-entry plan 2),
+  // which is never in a channel, so no room is tried. attachmentRefused(reason) answers a refusal of the attachments in place
+  // of the status line
+  async function send(text, { sessionId, attachments = [], attachmentRefused } = {}) {
     const words = clean(text);
     if (!words && !attachments.length) return null;
-    const s = store.get();
-    const id = s.route.screen === 'messages' ? s.route.id : null;
-    const conv = s.conversations.find(c => c.id === id);
-    if (!conv) return null;
+    if (typeof sessionId !== 'string' || sessionId === '') return null;
+    const id = sessionId;
     try {
       if (words.startsWith('/')) {
         const executed = await command(id, words, attachments);
@@ -83,44 +79,12 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
         }
         if (executed !== null) return { sent: 'command', sessionId: id };
       }
-      if (!attachments.length && conv.channel && (room ?? isMentionText(words))) {
-        const answer = await postJson('/data/rooms/say', { sessionId: id, text: words });
-        if (Array.isArray(answer?.addressed) && answer.addressed.length > 0) return { sent: 'say', sessionId: id };
-      }
       await prompt(id, words, attachments);
       return { sent: 'prompt', sessionId: id };
     } catch (err) {
       failSend(err, said('status.verb.send'), attachmentRefused);
       return null;
     }
-  }
-
-  // create (in a channel, or the host's default directory), name it when a title was typed, tell the caller its id, let
-  // it prepare the files there (their parts, or null when they did not go up), then the first words and the parts. A
-  // failure after the create still answers the id, with sent false, so the caller can open what was made
-  async function newConversationWith({ title, workspaceId, text, onCreated, prepare, attachmentRefused }) {
-    let sessionId = null;
-    try {
-      const created = await call('session/create', { request: workspaceId ? { workspaceId } : {} });
-      if (typeof created?.sessionId !== 'string') throw saidError('status.noSessionId', { remote: 'session/create' });
-      sessionId = created.sessionId;
-      onCreated?.(sessionId);   // before the rename: a failure from here on still leaves the draft with the conversation
-      const name = clean(title);
-      if (name) await call('session/rename', { request: { sessionId, title: name } });
-      const parts = prepare ? await prepare(sessionId) : [];
-      if (parts === null) return { id: sessionId, sent: false };
-      const words = clean(text);
-      if (words || parts.length) await prompt(sessionId, words, parts);
-      return { id: sessionId, sent: true };
-    } catch (err) {
-      failSend(err, said('status.verb.newMessage'), attachmentRefused);
-      return { id: sessionId, sent: false };
-    }
-  }
-  // the words alone (the Run sheet): the id when they went, else null
-  async function newConversation({ title, workspaceId, text }) {
-    const { id, sent } = await newConversationWith({ title, workspaceId, text });
-    return sent ? id : null;
   }
 
   // the mux's answer under the current generation; the card takes this tab's outcome at once. One answer per gate is
@@ -151,88 +115,6 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     }
   }
 
-  async function rename(sessionId, title) {
-    const name = clean(title);
-    if (!name) return;
-    try {
-      await call('session/rename', { request: { sessionId, title: name } });
-    } catch (err) {
-      fail(err, said('status.verb.rename'));
-    }
-  }
-
-  // the row actions (spec §7 Stage 3 "Row actions"): fork, archive / un-archive, delete. One fork per source in flight;
-  // archiving waits for a running turn or a waiting card to end, deleting for a running turn
-  const convOf = id => store.get().conversations.find(c => c.id === id);
-  const forking = new Set();
-  async function fork(sessionId) {
-    if (forking.has(sessionId)) return null;
-    forking.add(sessionId);
-    try {
-      const forked = await call('session/fork', { request: { sessionId } });
-      if (typeof forked?.sessionId !== 'string') throw saidError('status.noSessionId', { remote: 'session/fork' });
-      return forked.sessionId;
-    } catch (err) {
-      fail(err, said('status.verb.fork'));
-      return null;
-    } finally {
-      forking.delete(sessionId);
-    }
-  }
-
-  // pin / unpin: the answer is the whole set; a throw leaves the set as it was
-  async function setPin(remote, sessionId) {
-    try {
-      const answer = await call(remote, { request: { sessionId } });
-      if (!Array.isArray(answer?.pinnedSessionIds)) throw new TypeError(remote);   // said as Pin failed below
-      store.dispatch('hostPins', answer.pinnedSessionIds);
-      return true;
-    } catch {
-      say(said('status.pinFailed'), true);
-      return false;
-    }
-  }
-  const pin = sessionId => setPin('workspace/pinSession', sessionId);
-  const unpin = sessionId => setPin('workspace/unpinSession', sessionId);
-
-  async function archive(sessionId, archived) {
-    const c = convOf(sessionId);
-    if (archived && c?.running) { say(said('status.stopFirst'), true); return false; }
-    if (archived && c?.messages.some(needsAnswer)) { say(said('status.answerCardFirst'), true); return false; }
-    try {
-      await postJson('/data/sessions/archive', { sessionId, archived: archived === true });
-      if (archived === true && store.get().pinned?.includes(sessionId)) await unpin(sessionId); // an archived row is never pinned (D7)
-      return true;
-    } catch (err) {
-      fail(err, archived ? said('status.verb.archive') : said('status.verb.unarchive'));
-      return false;
-    }
-  }
-
-  async function remove(sessionId) {
-    if (convOf(sessionId)?.running) { say(said('status.stopFirst'), true); return false; }
-    try {
-      await postJson('/data/sessions/delete', { sessionId });
-      return true;
-    } catch (err) {
-      fail(err, said('status.verb.delete'));
-      return false;
-    }
-  }
-
-  // Talk to <bot>: its newest home conversation that is not archived, else a new one in the bot's home with its preset
-  async function talkTo(bot) {
-    const home = store.get().conversations.filter(c => c.kind === 'bot' && c.preset === bot?.id && !c.archived).sort((a, b) => b.updatedAt - a.updatedAt)[0];
-    if (home) return { id: home.id };
-    try {
-      const created = await call('session/create', { request: { cwd: bot.homeCwd, agentPreset: bot.id } });
-      if (typeof created?.sessionId !== 'string') throw saidError('status.noSessionId', { remote: 'session/create' });
-      return { id: created.sessionId };
-    } catch (err) {
-      return { error: said('status.fail', { what: said('status.verb.talkTo'), reason: err?.code ?? err?.said ?? err?.message ?? said('status.failed') }) };
-    }
-  }
-
   // a running continuable child, stopped by its parent: its current turn is interrupted (a one-shot child is never sent)
   async function stopChild(parentSessionId, childSessionId, label) {
     try {
@@ -246,5 +128,5 @@ export function makeActions({ store, call, answerGate, postJson, requestId = ran
     }
   }
 
-  return { send, newConversation, newConversationWith, answer, stop, rename, command, runCommand, fork, archive, pin, unpin, remove, talkTo, stopChild };
+  return { send, answer, stop, command, runCommand, stopChild };
 }

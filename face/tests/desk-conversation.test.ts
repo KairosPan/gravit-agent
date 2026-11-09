@@ -7,11 +7,13 @@
  * tests/tmp/<pid>/, as src/desk-session.ts's own tests keep theirs, and are removed afterwards. */
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import fsp, { chmod, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import fsp, { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
+import { installConversation } from "../src/conversation.ts";
 import { DESK_PATH, readDesk } from "../src/cycle.ts";
 import { OFF_FILE, appendEvent, clearOff, deskDir, readEvents, readOffState, writeOff, type BudgetState, type DeskEvent } from "../src/desk.ts";
 import {
@@ -402,11 +404,13 @@ test("the context is its own part between the provenance line and the operator's
   const agent = h.tree.agents[0];
   assert.deepEqual(result, { opened: true, sessionId: agent.id });
   assert.equal(agent.followups[0].id, "telegram:43", "still keyed");
-  assert.deepEqual(agent.followups[0].content, [
-    { type: "text", text: "[telegram · operator · 14:03 ET]" },
-    { type: "text", text: "the message this replies to:\nNVDA 169.82 · ROBINHOOD 10:21:03 ET\n\nannotation:\nStop met." },
-    { type: "text", text: "why did this fire?" },
-  ]);
+  const parts = agent.followups[0].content as { type: string; text: string }[];
+  assert.equal(parts.length, 3);
+  assert.deepEqual(parts[0], { type: "text", text: "[telegram · operator · 14:03 ET]" });
+  const fenced = /^the message this replies to:\n<<<desk-data ([0-9a-f]{16})>>>\n([\s\S]*)\n<<<end \1>>>$/.exec(parts[1].text);
+  assert.ok(fenced, parts[1].text);
+  assert.equal(fenced[2], "NVDA 169.82 · ROBINHOOD 10:21:03 ET\n\nannotation:\nStop met.", "the context, quoted as data");
+  assert.deepEqual(parts[2], { type: "text", text: "why did this fire?" });
   await post(h, "and a plain one");
   assert.deepEqual(agent.followups[1].content, [{ type: "text", text: "[telegram · operator · 14:03 ET]\nand a plain one" }], "no context, one part as before");
   assert.deepEqual(h.lines, []);
@@ -857,19 +861,25 @@ test("a send that never settles is given a minute, then one line, and the next r
   ]);
 });
 
-test("the conversation imports nothing but types: desk.ts, desk-session.ts and dsh-llm load on first use", async () => {
+test("the conversation imports nothing but types and the data fence's leaf: desk.ts, desk-session.ts and dsh-llm load on first use", async () => {
   const { readFile } = await import("node:fs/promises");
-  const source = await readFile(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "desk-conversation.ts"), "utf8");
+  const src = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
+  const source = await readFile(join(src, "desk-conversation.ts"), "utf8");
   const imports = source.match(/^import\b.*$/gm) ?? [];
   assert.ok(imports.some((line) => line.includes('"./desk.ts"')), "it does name desk.ts");
-  for (const line of imports) assert.match(line, /^import type /, `a value edge: ${line}`);
+  for (const line of imports) {
+    if (line === 'import { fenceData } from "./data-fence.ts";') continue;
+    assert.match(line, /^import type /, `a value edge: ${line}`);
+  }
+  /* the leaf imports nothing */
+  assert.deepEqual((await readFile(join(src, "data-fence.ts"), "utf8")).match(/^import\b.*$/gm) ?? [], []);
 });
 
 test("the desk contract says where each answer goes, as the delivery does", () => {
   const contract = readDesk(DESK_PATH);
   assert.ok(contract.includes(
-    "Your final text goes to the operator's phone, as plain text. A message with no bracketed line is the operator at the browser, "
-      + "where your answer stays; a background job's notice is answered to the phone.",
+    "Your final text goes to the operator's phone, as plain text; so does your answer to a background job's notice. "
+      + "While the conversation is off, a message with no bracketed line is the operator at the browser, where your answer stays.",
   ));
 });
 
@@ -2103,7 +2113,7 @@ test("a spent budget answers a post with the budget line and opens no turn; OFF 
   await put(h.root, "desk/journal/.git/"); // the budget is read before the fence: a spent desk refuses as spent
   assert.deepEqual(await post(h, "hi"), {
     refused: "budget",
-    line: "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET. It opens again at midnight ET, or raise budget.dailyTokens in standing.yml",
+    line: "the desk's token budget for today is spent: 2,013,402 of 2,000,000 tokens since 00:00 ET; your text was not taken. It opens again at 00:00 ET, or raise budget.dailyTokens in standing.yml",
   });
   assert.equal(h.tree.created.length, 0, "no session ensured, no turn");
   assert.deepEqual(await kinds(h), [], "and no event");
@@ -2121,6 +2131,36 @@ test("a spent budget answers a post with the budget line and opens no turn; OFF 
   assert.equal(asked, 2);
   assert.equal(h.tree.agents[0].followups.length, 1);
   assert.deepEqual(h.lines, []);
+});
+
+test("a spent budget no longer refuses a phone post routed to the conversation (the fallback path keeps its check)", async (t) => {
+  const SPENT: BudgetState = {
+    dailyTokens: 2_000_000,
+    used: { uncachedInputTokens: 13_402, outputTokens: 0, cacheReadTokens: 2_000_000, cacheWriteTokens: 0, total: 2_013_402 },
+    spent: true,
+  };
+  /* the fallback: the desk session (FACE_ROUTER=0) still refuses */
+  const h = await harness({ budget: async () => SPENT });
+  const fallback = await post(h, "hi");
+  assert.equal((fallback as { refused?: string }).refused, "budget");
+  /* routed: Gravit's one conversation, its home outside any repository and its ledger showing the day spent, opens it */
+  const home = await mkdtemp(join(tmpdir(), "face-desk-conv-routed-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  await appendEvent(home, { t: new Date(AT).toISOString(), kind: "budget-spent", date: "2026-10-20", used: 2_013_402, dailyTokens: 2_000_000 });
+  const tree = new FakeDeskTree();
+  const bus = fakeBus();
+  const conversation = installConversation({
+    ctx: { ...tree.ctx, on: bus.on, workingDirectory: { set: async (_agent, path) => path } },
+    home, route: ROUTE, installModelSelection: tree.install, now: () => AT, log: () => {},
+  });
+  t.after(() => conversation.dispose());
+  const routed = await conversation.post({
+    text: "hi", key: "telegram:7#1@2026-10-20T18:03:00.000Z",
+    source: { kind: "telegram", network: "telegram", at: AT },
+    message: { kind: "telegram", network: "telegram", messageId: "telegram:7" },
+  });
+  assert.ok("opened" in routed && routed.opened === true, JSON.stringify(routed));
+  assert.equal(tree.agents.at(-1)!.followups.length, 1, "the conversation's turn is opened");
 });
 
 test("a budget that cannot be read is one line, and the desk goes on", async () => {

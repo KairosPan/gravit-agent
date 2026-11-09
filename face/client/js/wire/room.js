@@ -2,7 +2,7 @@
  *
  * No DOM, no network, no state - session rows, a projection value and the
  * live maps in, chips / labels / folds out. Split out of chat.js for the
- * reason grouping.js and speaker.js are: the rules must be drillable
+ * reason speaker.js is: the rules must be drillable
  * without a browser.
  *
  * WHAT THE WIRE CARRIES (plan 2 of the bots-and-rooms spec): no `room/*`
@@ -29,11 +29,6 @@ export function avatarGlyph(id) {
   for (const ch of String(id)) h = (h * 31 + (ch.codePointAt(0) ?? 0)) >>> 0;
   return GLYPHS[h % GLYPHS.length];
 }
-
-/** The composer anchor: start of text or whitespace, then `@` and a token. An e-mail's `@` follows a non-space. */
-export const MENTION_RE = /(^|\s)@[^\s@]/u;
-/** @param {string} text @returns {boolean} */
-export const isMentionText = (text) => MENTION_RE.test(text);
 
 /** Whether a row runs the host: no preset, or a host id (the default or its pre-rename alias). @param {{agentPreset?: unknown}} row */
 const isHost = (row) => typeof row.agentPreset !== "string" || row.agentPreset === "" || isHostPreset(row.agentPreset);

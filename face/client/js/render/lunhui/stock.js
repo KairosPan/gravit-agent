@@ -127,8 +127,9 @@ export function stockDrawerHtml(state) {
   const pool = `<div class="lh-stk-pool"><span class="lh-stk-price">${fin(f.price) ? fix2(f.price) : '—'}</span>` +
     `<span class="${cls('chip', tone(f.pct))}">${esc(pctText(f.pct))}</span><span class="lh-stk-tag">${esc(poolTag(f))}</span></div>` +
     `<div class="lh-stk-from">${esc(t('lunhui.stock.from', { at: chinaStamp(view.frozenAt) }))}</div>`;
-  const keys = `<div class="btn-row">` +
-    `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'lunhuiAsk', 'data-code': code })}>${esc(t('lunhui.stock.ask', { name }))}</button>` +
+  // (Ask sends a message: not from a history page, where nothing would send it)
+  const ask = state.route?.screen === 'history' ? '' : `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'lunhuiAsk', 'data-code': code })}>${esc(t('lunhui.stock.ask', { name }))}</button>`;
+  const keys = `<div class="btn-row">${ask}` +
     `<button${attrs({ type: 'button', class: 'btn-sm', 'data-action': 'lunhuiMarkets', 'data-code': code })}>${th('lunhui.stock.openMarkets')}</button></div>`;
   return shell(name, pool + sec(t('lunhui.stock.minuteLine'), minuteLine(view, f)) + tiles(f) + sec(t('lunhui.stock.inRun'), cited(f)) + keys, sub);
 }

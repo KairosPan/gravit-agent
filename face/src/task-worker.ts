@@ -11,6 +11,7 @@
  * ({@link TaskInputError}).
  * @module
  */
+import type { PhoneNetwork } from "./phone.ts";
 import { randomUUID } from "node:crypto";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
@@ -40,7 +41,10 @@ export type TaskMessageSource = {
   form: "brief" | "steer" | "report" | "recovery" | "stopped";
   conversation?: string;
   task?: string;
-  origin?: "web";
+  /** A brief's: where the task was asked - the browser (`web`) or the phone, with the `network` the text came
+   * through (src/conversation.ts `TaskOrigin`). A brief from before plan 3 names none, and reads `web`. */
+  origin?: "web" | "phone";
+  network?: PhoneNetwork;
   status?: RelayStatus;
 };
 
@@ -123,13 +127,14 @@ export function workerSetup(deps: WorkerDeps): MemberSetup {
  * Start a worker: check the title (1-{@link TASK_TITLE_MAX} characters after trimming, one line), the brief
  * (1-{@link TASK_BRIEF_MAX}) and the strategy's folder - `root` itself when `strategy` is absent - before any session
  * exists; create the root session on `gravit` under `conversationId`; set its title; hand it the brief as one followup
- * with the fixed id `task-brief:<sessionId>`; flush the log.
+ * with the fixed id `task-brief:<sessionId>`, its source naming the task's `origin` (and, for a phone's, its `network`);
+ * flush the log.
  * @throws {TaskInputError} for input the face refuses; whatever `agents.create` rejects with otherwise.
  * @returns the session's id, its agent, and `dispose`, once however often called and never rejecting.
  */
 export async function startWorker(
   deps: WorkerDeps,
-  input: { conversationId: string; title: string; brief: string; strategy?: string; origin: "web" },
+  input: { conversationId: string; title: string; brief: string; strategy?: string; origin: "web" | "phone"; network?: PhoneNetwork },
 ): Promise<{ sessionId: string; agent: AgentLike; dispose(): Promise<void> }> {
   const log = deps.log ?? defaultLog;
   const title = input.title.trim();
@@ -160,7 +165,10 @@ export async function startWorker(
       id: MessageId(`task-brief:${sessionId}`),
       role: "user",
       content: [{ type: "text", text: briefText(title, input.brief) }],
-      source: { kind: "task", form: "brief", conversation: input.conversationId, origin: input.origin },
+      source: {
+        kind: "task", form: "brief", conversation: input.conversationId, origin: input.origin,
+        ...(input.origin === "phone" && input.network !== undefined ? { network: input.network } : {}),
+      },
     });
     handle.agent.followup(message as unknown as MessageLike);
     await deps.ctx.sessionPersistence?.flush();

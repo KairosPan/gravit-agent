@@ -1,7 +1,7 @@
 // Session rows become conversations (spec 2026-10-19 §5, §7 "List"): title, kind, members, channel, liveness.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { kindOf, conversationOf, listConversations, unreadOf, childRowsOf, firstOpen } from '../../client/js/host/sessions.js';
+import { kindOf, conversationOf, listConversations, unreadOf, childRowsOf } from '../../client/js/host/sessions.js';
 
 const ctx = (over = {}) => ({ presets: {}, bots: new Map([['buffett', { name: 'Buffett' }]]), channelOf: () => null, rooms: new Map(), lastSeen: {}, archived: new Set(), hostArchived: new Set(), deleted: new Set(), ...over });
 const row = (id, over = {}) => ({ sessionId: id, updatedAt: 5, agentAvailable: false, running: false, blank: false, ...over });
@@ -82,8 +82,3 @@ test('childRowsOf keeps the subagent rows with their parent and whether they run
   assert.deepEqual(childRowsOf(undefined), []);
 });
 
-test('firstOpen skips archived conversations', () => {
-  assert.equal(firstOpen([{ id: 'a', archived: 'face' }, { id: 'b', archived: false }]).id, 'b');
-  assert.equal(firstOpen([{ id: 'a', archived: 'host' }]), null);
-  assert.equal(firstOpen([]), null);
-});

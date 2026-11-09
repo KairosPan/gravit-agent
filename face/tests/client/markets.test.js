@@ -342,7 +342,7 @@ test('the page: no Buy, no Sell on a page that does not sign; the range seg; Acr
   ]);
   // Gravit on it: the conversations that name its base as a word
   const gravit = section(html, 'Gravit on it');
-  assert.match(gravit, /<a class="mk-line" href="#\/messages\/s1" data-action="open" data-id="s1">[\s\S]*?Is BTC breaking out\?/);
+  assert.match(gravit, /<a class="mk-line" href="#\/messages\/s1">[\s\S]*?Is BTC breaking out\?/);
   assert.doesNotMatch(gravit, /s2|cbBTC/);
   // before the Account's reads answer, nothing is claimed of what is held, working or stated: each part says Loading…
   const unread = page('coin:BTC', { account: false }).html;
@@ -628,7 +628,7 @@ test("an event's page finds the conversations that name it by its name, as Hand 
     conversations: [conv('s1', { title: `${fed} The odds into the meeting` }), conv('s2', { title: 'SI-FEDCUT-DEC sizing' })],
   }).html;
   const gravit = section(html, 'Gravit on it');
-  assert.match(gravit, /<a class="mk-line" href="#\/messages\/s1" data-action="open" data-id="s1">/);
+  assert.match(gravit, /<a class="mk-line" href="#\/messages\/s1">/);
   assert.doesNotMatch(gravit, /s2/);
 });
 

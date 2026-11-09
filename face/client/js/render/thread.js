@@ -53,13 +53,15 @@ function gateKeys(m, conv) {
 // pick or a typed answer again by its id; the free answer is dsh's `custom`, open beside a menu too
 function question(m, conv) {
   const qs = Array.isArray(m.data?.questions) ? m.data.questions : [];
+  // a question answered or closed takes nothing more: its inputs are drawn disabled
+  const off = needsAnswer(m) ? '' : ' disabled';
   const blocks = qs.map((q, i) => {
     const name = `q-${m.id}-${q?.id ?? i}`;
     const options = Array.isArray(q?.options) ? q.options : [];
     const type = q?.multiSelect === true ? 'checkbox' : 'radio';
-    const inputs = options.map((o, n) => `<label class="opt"><input type="${type}" id="${esc(`${name}-${n}`)}" name="${esc(name)}" value="${esc(o?.label ?? '')}"><span>${esc(o?.label ?? '')}</span>${o?.description ? `<span class="dim">${esc(o.description)}</span>` : ''}</label>`).join('');
+    const inputs = options.map((o, n) => `<label class="opt"><input type="${type}" id="${esc(`${name}-${n}`)}" name="${esc(name)}" value="${esc(o?.label ?? '')}"${off}><span>${esc(o?.label ?? '')}</span>${o?.description ? `<span class="dim">${esc(o.description)}</span>` : ''}</label>`).join('');
     const hint = options.length ? th('thread.question.other') : th('thread.question.yours');
-    const custom = `<input class="input small" type="text" id="${esc(`${name}-custom`)}" name="${esc(`${name}-custom`)}" placeholder="${hint}" aria-label="${hint}">`;
+    const custom = `<input class="input small" type="text" id="${esc(`${name}-custom`)}" name="${esc(`${name}-custom`)}" placeholder="${hint}" aria-label="${hint}"${off}>`;
     return `<div class="q" data-q="${esc(String(q?.id ?? i))}">${q?.header ? `<div class="card-title">${esc(q.header)}</div>` : ''}<div>${esc(q?.question ?? '')}</div>${q?.detail ? `<div class="dim">${esc(q.detail)}</div>` : ''}${inputs}${custom}</div>`;
   }).join('');
   const keys = needsAnswer(m) ? `<div class="keys right"><button type="button" class="btn-primary small" data-action="answerQuestion" data-conv="${esc(conv.id)}" data-msg="${esc(m.id)}">${th('thread.question.answer')}</button></div>` : '';
@@ -71,7 +73,8 @@ function body(m, conv, state) {
   switch (m.kind) {
     // Gravit's composed answer, drawn from its run's view as the lunhui slice holds it
     case 'composed':
-      return composedHtml(m, state?.lunhui?.views?.[viewOf(m).key], state?.lunhui?.ui?.[composedId(m, conv)], conv, state?.channels);
+      // (a history page reads its answers and sends nothing: their follow-ups are not drawn)
+      return composedHtml(m, state?.lunhui?.views?.[viewOf(m).key], state?.lunhui?.ui?.[composedId(m, conv)], conv, state?.channels, { asks: state?.route?.screen !== 'history' });
     case 'card':
       return `<div class="card orange"><div class="card-head"><div class="card-title">${esc(d.title ?? m.text)}</div>${stateChip(m)}</div>` +
         `<div class="dim">${esc([d.venue, d.line].filter(Boolean).join(' · '))}</div>${gateKeys(m, conv)}</div>`;
@@ -90,6 +93,11 @@ function body(m, conv, state) {
       return `<div class="bubble ${levelOf(m)}">${prose(m)}${d.interrupted ? `<div class="cut">${th('thread.interrupted')}</div>` : ''}</div>`;
   }
 }
+
+// one of the three gates (an order card, an approval, a question) as the thread draws it, for a line of the rail of tasks:
+// keyed by the worker's record and the message id, so the answer and answerQuestion actions take it unchanged
+const GATE_KINDS = new Set(['card', 'approval', 'question']);
+export const gateHtml = (conv, m, state) => (GATE_KINDS.has(m?.kind) ? body(m, conv, state) : '');
 
 // a room member's answer can open the turn that produced it: read on opening (host/traces.js), its context lines and
 // words drawn, its tool calls not; the slice and the disclosure's id name the conversation, since two rooms repeat
@@ -152,11 +160,34 @@ function youFiles(list, thumbs) {
   }).join('')}</div>`;
 }
 
+// a text from the operator's phone (host/kinds.js phoneMessage) is the operator's bubble under a Phone chip naming its network
+export const NETWORKS = { telegram: 'Telegram', slack: 'Slack', imessage: 'iMessage' }; // en-kept: the networks' own names
+const phoneChip = network => chip(Object.hasOwn(NETWORKS, network) ? t('thread.phone.on', { network: NETWORKS[network] }) : t('thread.phone'));
+
 function youMessage(m, conv, state, page) {
   const list = Array.isArray(m.data?.attachments) ? m.data.attachments : [];
-  if (!list.length) return `<div class="msg you"><div class="bubble you">${youText(m.text, m, conv, page)}</div>${avatar('you', 28)}</div>`;
+  const tag = m.data?.source === 'telegram' ? phoneChip(m.data.network) : '';
+  if (!list.length && !tag) return `<div class="msg you"><div class="bubble you">${youText(m.text, m, conv, page)}</div>${avatar('you', 28)}</div>`;
   const bubble = m.text ? `<div class="bubble you">${youText(m.text, m, conv, page)}</div>` : '';
-  return `<div class="msg you"><div class="you-body">${youFiles(list, state?.thumbs ?? {})}${bubble}</div>${avatar('you', 28)}</div>`;
+  const files = list.length ? youFiles(list, state?.thumbs ?? {}) : '';
+  return `<div class="msg you"><div class="you-body">${tag}${files}${bubble}</div>${avatar('you', 28)}</div>`;
+}
+
+// a desk line (host/kinds.js deskMessage): a firing of the face's clock or an alert of its watch, noted into the conversation.
+// A firing's body is the whole brief or report the phone got, so the line folds as a task's report does: its Scheduled or
+// Watch chip and its first line (masked, then clipped at DESK_SUMMARY_MAX) as the summary, the body under it (open across a render by its
+// id); a line with no body is the chip alone. Masked as a worker's words are: an agent wrote it, and it may hold a pasted key
+const DESK_CHIP = { schedule: () => t('thread.desk.schedule'), alert: () => t('thread.desk.alert') };
+export const DESK_SUMMARY_MAX = 120;
+function deskLine(m, conv) {
+  const line = m.data?.line;
+  const label = chip(Object.hasOwn(DESK_CHIP, line) ? DESK_CHIP[line]() : String(line ?? ''));
+  const body = m.text ?? '';
+  if (body.trim() === '') return `<div class="sysline desk-line">${label}</div>`;
+  // masked whole, then clipped: a key the cut falls inside is hidden before any piece of it is kept
+  const first = maskExcerpt(body.split('\n').find(l => l.trim() !== '') ?? '');
+  const clipped = first.length > DESK_SUMMARY_MAX ? `${first.slice(0, DESK_SUMMARY_MAX - 1)}…` : first;
+  return `<details class="sysline ctx desk-line" id="desk-${esc(conv.id)}-${esc(m.id)}"><summary>${label} <span class="desk-text">${esc(clipped)}</span></summary><pre>${esc(maskExcerpt(body))}</pre></details>`;
 }
 
 /** The conversation's operator images still to read from the host: not offloaded, with no entry in `thumbs` yet, each once. */
@@ -174,9 +205,35 @@ export function thumbsNeeded(conv, thumbs) {
   return out;
 }
 
+// a task's message (host/kinds.js): a report relayed into the conversation is one centred line linking its task's page, its
+// body folded under it (open across a render by its id); a worker's brief and a steer Gravit relayed are Gravit's bubbles
+// under their labels; a recovery note and a stop are centred lines in the face's words. A report's title is its head's, else
+// the task's own, else Task; its status in the table's words, one it does not name as it came. Masked as every worker's words
+const REPORT_STATUS = {
+  ready: () => t('thread.task.ready'), waiting: () => t('tasks.group.you'), blocked: () => t('tasks.status.blocked'),
+  failed: () => t('tasks.status.failed'), stalled: () => t('tasks.status.stalled'),
+};
+function taskMessage(m, conv, state) {
+  const d = m.data ?? {};
+  if (d.form === 'report') {
+    const known = typeof d.task === 'string' ? (state?.tasks?.items ?? []).find(task => task.id === d.task)?.title : null;
+    const title = maskExcerpt(d.title || known || t('thread.task.untitled'));
+    const status = typeof d.status === 'string' && Object.hasOwn(REPORT_STATUS, d.status) ? REPORT_STATUS[d.status]() : String(d.status ?? '');
+    const line = esc(t('thread.task.line', { title, status }));
+    const head = typeof d.task === 'string' ? `<a class="task-link" href="#/task/${esc(encodeURIComponent(d.task))}">${line}</a>` : line;
+    return `<details class="sysline ctx" id="relay-${esc(conv.id)}-${esc(m.id)}"><summary>${head}</summary><pre>${esc(maskExcerpt(d.body ?? ''))}</pre></details>`;
+  }
+  if (d.form === 'recovery') return `<div class="sysline">${th('thread.task.recovery')}</div>`;
+  if (d.form === 'stopped') return `<div class="sysline">${th('tasks.status.stopped')}</div>`;
+  const label = d.form === 'brief' ? th('thread.task.brief') : th('thread.task.steer');
+  return `<div class="msg left"><div class="sender-name">${label}</div><div class="msg-row">${avatar('gravit', 28)}<div class="msg-body"><div class="bubble grey">${markdownHtml(maskExcerpt(m.text ?? ''))}</div></div></div></div>`;
+}
+
 export function renderMessage(m, conv, state, page = {}) {
   // a tool call is drawn nowhere (the operator's word, 2026-10-28): its gate, receipt or refusal is a message of its own
   if (m.kind === 'tool') return '';
+  if (m.kind === 'task') return taskMessage(m, conv, state);
+  if (m.kind === 'desk') return deskLine(m, conv);
   // a producer-sourced user record (a runtime snapshot, a plugin notice, a member's delta) is context, folded away under its source;
   // a line the page itself writes (a round end, a child's report) stays a centred line
   if (m.from === 'system') {

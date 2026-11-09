@@ -270,7 +270,7 @@ test('a gate for a session the list does not know yet waits, and lands once the 
 test('host facts: status sets running, activity and added schedule a list refresh, an error reaches the status line', async () => {
   const r = rig({ rows: [row('s1')] });
   await r.ready();
-  r.store.dispatch('nav', { screen: 'messages', id: 's1' });
+  r.store.dispatch('nav', { screen: 'history', id: 's1' });
   const before = r.scheduled.length;
   r.opts().onEvent('api-session/status', ['s1', true]);
   assert.equal(r.store.get().conversations[0].running, true);
@@ -279,7 +279,9 @@ test('host facts: status sets running, activity and added schedule a list refres
   const refreshes = r.scheduled.slice(before).filter(s => s.ms === LIST_REFRESH_MS);
   assert.equal(refreshes.length, 1, 'a burst of host facts is one coalesced list refresh');
   r.opts().onEvent('api-session/error', ['s1', 'the model is out']);
-  assert.equal(r.store.get().status.line, 'the model is out'); assert.equal(r.store.get().status.bad, true);
+  assert.equal(r.store.get().status.line, 'the model is out', "an error of the session on screen"); assert.equal(r.store.get().status.bad, true);
+  r.opts().onEvent('api-session/error', ['s9', 'elsewhere']);
+  assert.equal(r.store.get().status.line, 'the model is out', "another session's error is not said");
 });
 
 test('control projections reach the conversation; a baseline seeds every listed session', async () => {
@@ -327,7 +329,8 @@ test('previews: a conversation that ends in a composed answer previews its summa
 test('opening marks the conversation seen; the list keeps the open one seen when its activity moves', async () => {
   const r = rig({ rows: [row('s1', { updatedAt: 50 })] });
   await r.ready();
-  r.store.dispatch('nav', { screen: 'messages', id: 's1' });
+  r.store.dispatch('tasksLoaded', { conversation: 's1', tasks: [], at: 1 });
+  r.store.dispatch('nav', { screen: 'messages', id: null });
   r.live.open('s1'); await settle();
   assert.equal(r.store.get().conversations[0].lastSeen, 50);
 });
@@ -439,33 +442,6 @@ test("a seat gate is titled from the host's line before its tool/call reaches th
   assert.equal(conv().messages.filter(m => m.id === 'ev-seat').length, 1);
 });
 
-test("the workspace follow's baseline sets the pin set and a pinned frame replaces it", async () => {
-  const r = rig();
-  const w = r.last('workspace/follow');
-  assert.deepEqual(w.args, {});
-  w.cbs.onItem({ type: 'baseline', value: { items: [], archivedSessionIds: [], pinnedSessionIds: ['a', 'b'] } });
-  assert.deepEqual(r.store.get().pinned, ['a', 'b']);
-  w.cbs.onItem({ type: 'pinned', pinnedSessionIds: ['c'] });
-  assert.deepEqual(r.store.get().pinned, ['c']);
-});
-
-test('the follow opens again after the mux reconnects, and the new baseline wins', async () => {
-  const r = rig();
-  r.last('workspace/follow').cbs.onItem({ type: 'baseline', value: { pinnedSessionIds: ['a'] } });
-  r.opts().onDown('lost');
-  assert.equal(r.last('workspace/follow').cancelled, true);
-  r.opts().onReady({ home: '/h' });
-  await settle();
-  const again = r.streams.filter(s => s.name === 'workspace/follow');
-  assert.equal(again.length, 2);
-  again[1].cbs.onItem({ type: 'baseline', value: { pinnedSessionIds: ['z'] } });
-  assert.deepEqual(r.store.get().pinned, ['z']);
-  // a stream the host ended is opened again on the retry timer, once
-  again[1].cbs.onEnd();
-  for (const t of r.scheduled.splice(0)) t.fn();
-  assert.equal(r.streams.filter(s => s.name === 'workspace/follow').length, 3);
-});
-
 // ---- activate (plan 3 task 8): a cold conversation opened before a command runs on it
 const watch = p => { const out = { done: false, value: undefined }; void p.then(v => { out.done = true; out.value = v; }); return out; };
 
@@ -488,6 +464,46 @@ test('activate follows a paged conversation and answers once its snapshot lands'
   await settle();
   assert.deepEqual(again, { done: true, value: true }, 'a follow that has its snapshot answers at once');
   assert.equal(r.follows().length, 1, 'and is not followed twice');
+});
+
+// one-entry plan 2 Task 7: a history session is read cold — paged, never followed, whatever the list says of it
+test('open cold pages the session and sends no session/follow', async () => {
+  const r = rig({ rows: [row('old', { agentAvailable: true })], pages: { old: [fixture(0)] } });
+  await r.ready();
+  assert.equal(r.store.get().conversations[0].live, true, 'the record says live');
+  r.live.open('old', { cold: true }); await settle();
+  assert.equal(r.follows().length, 0, 'a live record opened cold is not followed');
+  assert.equal(r.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 'old' && c[1].request.maxMessages === undefined), true, 'it is paged');
+  assert.equal(r.store.get().conversations[0].loaded, true);
+  // a list that lands again, a reconcile, a follow retry, a socket drop and its ready never turn it into a follow
+  r.live.reconcile(); await r.live.refresh(); await settle();
+  r.opts().onDown('closed'); r.live.reconcile(); await r.ready();
+  for (const t of r.scheduled.splice(0)) t.fn();
+  await settle();
+  assert.equal(r.follows().length, 0, 'still never followed');
+  // re-opened afresh (a reword) it stays cold
+  r.live.open('old', { cold: true }); await settle();
+  assert.equal(r.follows().length, 0);
+});
+
+test('promote and activate refuse a cold id', async () => {
+  const r = rig({ rows: [row('old'), row('hot', { agentAvailable: true })] });
+  await r.ready();
+  r.live.open('old', { cold: true }); await settle();
+  r.live.promote('old');
+  assert.equal(r.follows().length, 0, 'promote refuses');
+  const got = watch(r.live.activate('old'));
+  await settle();
+  assert.deepEqual(got, { done: true, value: false }, 'activate refuses');
+  assert.equal(r.follows().length, 0);
+  // a live record opened cold: activate does not answer true for it either
+  r.live.open('hot', { cold: true }); await settle();
+  const hot = watch(r.live.activate('hot'));
+  await settle();
+  assert.deepEqual(hot, { done: true, value: false });
+  // the same session opened warm afterwards follows as ever
+  r.live.open('hot'); await settle();
+  assert.equal(r.follows().length, 1);
 });
 
 test('activate is true at once for a live conversation, false when the follow fails or never answers', async () => {

@@ -69,11 +69,6 @@ export const reducers = {
     return { ...s, status: { line: line ?? s.status?.line ?? '', bad, connected: connected ?? s.status?.connected ?? false } };
   },
 
-  // the pin set, whole, as the host last said it
-  hostPins(s, ids) {
-    return { ...s, pinned: Array.isArray(ids) ? ids.filter(x => typeof x === 'string') : [] };
-  },
-
   // the list as the host gives it; a surviving conversation keeps its window and what the viewer did with it
   hostList(s, { conversations, channels, bots, childRows }) {
     const old = new Map(s.conversations.map(c => [c.id, c]));
@@ -85,9 +80,12 @@ export const reducers = {
     });
     return {
       ...s, conversations: next, channels: Array.isArray(channels) ? channels : s.channels, bots: Array.isArray(bots) ? bots : s.bots,
-      childRows: Array.isArray(childRows) ? childRows : s.childRows,
+      childRows: Array.isArray(childRows) ? childRows : s.childRows, channelsRead: true,
     };
   },
+  // the list read failed: the channels are as read as they will be until the next one, so a strategy or an old channel link
+  // that names none of them stops waiting (render/strategy.js, reducers/messages.js landingOf)
+  hostListFailed: s => (s.channelsRead === true ? s : { ...s, channelsRead: true }),
 
   // a follow snapshot or a page: the window whole, never appended to what was drawn. With a window that the old one
   // reaches (its cut or its last streamed message at least the seq before the new start), the earlier pages already

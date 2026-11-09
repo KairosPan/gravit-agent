@@ -1,8 +1,7 @@
-// face/client/js/reducers/messages.js — the conversation side on the host (spec 2026-10-19 §5, §7): routes, the draft, Details.
+// face/client/js/reducers/messages.js — the conversation side on the host (spec 2026-10-19 §5, §7): routes, Details.
 // What the host says about a conversation lives in reducers/host.js; what the operator does with the page lives here.
 import { canonicalId, isAccountKey } from '../host/market-view.js';
-import { firstOpen } from '../host/sessions.js';
-import { ARCHIVED_KEY } from '../wire/grouping.js';
+import { onScreenId } from '../host/sessions.js';
 import { sizeOf, cleanFont } from '../prefs.js';
 
 // one drawer at a time: an opener first closes whatever else was open, with any editor or confirm in it
@@ -15,23 +14,46 @@ export const closeOverlays = s => ({
 });
 const upd = (state, id, fn) => ({ ...state, conversations: state.conversations.map(c => (c.id === id ? fn(c) : c)) });
 
-// the channel a new conversation goes to by default: the root (the workbench), else the first listed
-const defaultWhere = s => s.channels?.find(c => c.isRoot)?.workspaceId ?? s.channels?.[0]?.workspaceId ?? null;
-
+const MESSAGES = { screen: 'messages', id: null };
+// where a route lands (plan 2 of one entry). Messages is the conversation and carries no id. An old #/messages/<id> link lands
+// on Messages (the conversation's id), the task's page (a task's) or history (any other id) once the tasks are read, and
+// waits while they load or while a failed first read has named no conversation; new (New message's, retired) is Messages. An
+// old #/channel/<workspaceId> link lands on its strategy's page once the channels are read, the root or an id no channel has
+// on Messages. A task page for a session the list knows that is no task is history; a history or task page for the
+// conversation's id is Messages, and a history page for a task's id is the task's page — each once a read says so; a task or
+// strategy page with no id is Messages. Every other route is as it was asked
+export function landingOf(state, route) {
+  const tasks = state.tasks ?? { status: 'loading', conversation: null, items: [] };
+  const loading = tasks.status === 'loading' || (tasks.status === 'failed' && tasks.conversation === null);
+  const isTask = id => tasks.items.some(t => t.id === id);
+  const isConversation = id => !loading && id != null && id === tasks.conversation;
+  if (route.screen === 'messages' && route.channel) {
+    const channels = state.channels ?? [];
+    if (channels.length === 0 && state.channelsRead !== true) return route;
+    const ch = channels.find(c => c.workspaceId === route.channel);
+    return ch && !ch.isRoot && ch.name ? { screen: 'strategy', id: ch.name } : MESSAGES;
+  }
+  if (route.screen === 'messages' && route.id) {
+    if (route.id === 'new') return MESSAGES;
+    if (loading) return route;
+    if (route.id === tasks.conversation) return MESSAGES;
+    return isTask(route.id) ? { screen: 'task', id: route.id } : { screen: 'history', id: route.id };
+  }
+  if ((route.screen === 'task' || route.screen === 'strategy') && !route.id) return MESSAGES;
+  if ((route.screen === 'task' || route.screen === 'history') && isConversation(route.id)) return MESSAGES;
+  if (route.screen === 'history' && route.id && !loading && isTask(route.id)) return { screen: 'task', id: route.id };
+  if (route.screen === 'task' && !loading && !isTask(route.id) && state.conversations.some(c => c.id === route.id)) return { screen: 'history', id: route.id };
+  return route;
+}
 export const reducers = {
   nav(state, route) {
-    // a missing id, or new without a draft, opens the first open conversation (an archived one opens by its id alone)
-    if (route.screen === 'messages' && !(route.id === 'new' && state.draft) && !state.conversations.some(c => c.id === route.id)) {
-      route = { screen: 'messages', id: firstOpen(state.conversations)?.id ?? null };
-    }
+    route = landingOf(state, route);
     // a market id is the Account's key as it is (coin:BTC, event:predict:…), or an A share's or an old face id (cn:600519 from
     // cn:sh600519, us:AAPL, crypto:BTC/USD) canonicalised; one that is neither opens Markets
     if (route.screen === 'markets' && route.id) route = { screen: 'markets', id: !String(route.id).startsWith('cn:') && isAccountKey(route.id) ? route.id : canonicalId(route.id) };
     // (and the lightbox: an image belongs to the conversation it was opened in; and the shortcut sheet)
     const changedRoute = state.route.screen !== route.screen || state.route.id !== route.id;
     let s = { ...state, route, listOpen: changedRoute ? false : state.listOpen, detailsOpen: false, settingsOpen: false, edit: null, confirm: null, lightbox: null, shortcuts: null, ...stockClosed(state) };
-    // the first level's Messages key returns to the conversation you last had open
-    if (route.screen === 'messages' && route.id && route.id !== 'new') s.lastConv = route.id;
     // the Statement and a venue's Details belong to Account
     if (route.screen !== 'account' && (s.account.statementOpen || s.account.detailsVenue)) s.account = { ...s.account, statementOpen: false, detailsVenue: null };
     // a Receive address read on the Money tab is drawn only while the tab stays on screen: leaving it forgets every one
@@ -42,25 +64,19 @@ export const reducers = {
     if (route.screen === 'discover') s.lastDiscover = route;
     else if (page(route.screen) && state.route.screen !== 'discover' && !page(state.route.screen)) s.lastDiscover = { screen: 'discover', id: null };
     // opening a conversation reads it: the dot goes until the host moves it again
-    if (route.screen === 'messages' && route.id && route.id !== 'new') {
-      const c = s.conversations.find(x => x.id === route.id);
+    const seen = onScreenId(s);
+    if (seen) {
+      const c = s.conversations.find(x => x.id === seen);
       if (c && (c.lastSeen ?? 0) < (c.updatedAt ?? 0)) {
         s = upd(s, c.id, x => ({ ...x, lastSeen: x.updatedAt }));
         s.lastSeen = { ...(s.lastSeen ?? {}), [c.id]: c.updatedAt };
       }
     }
-    if (!(route.screen === 'messages' && route.id === 'new')) s.draft = null;
     return s;
   },
   toggleRail: s => ({ ...s, railCollapsed: !s.railCollapsed }),
   toggleList: s => ({ ...s, listOpen: !s.listOpen }),
   setListOpen: (s, open) => (s.listOpen === !!open ? s : { ...s, listOpen: !!open }),
-  // a list group folds or opens; Archived starts folded (host/list-view.js)
-  toggleGroup(s, key) {
-    if (typeof key !== 'string' || key === '') return s;
-    const was = typeof s.collapsed?.[key] === 'boolean' ? s.collapsed[key] : key === ARCHIVED_KEY;
-    return { ...s, collapsed: { ...(s.collapsed ?? {}), [key]: !was } };
-  },
   setTheme: (s, theme) => ({ ...s, theme }),
   setLang: (s, lang) => ({ ...s, lang: lang === 'zh' ? 'zh' : 'en' }),
   // a size or a font from Settings, kept in range or cleaned to a family name (js/prefs.js); any other name is not a pref
@@ -68,23 +84,6 @@ export const reducers = {
     if (name === 'textSize' || name === 'codeSize') return { ...s, [name]: sizeOf(name, value) };
     if (name === 'textFont' || name === 'codeFont') return { ...s, [name]: cleanFont(value) };
     return s;
-  },
-
-  // the new-message screen: a title and where the session goes (a channel — the one New round names, else the
-  // default), then the first words send it
-  startDraft(s, { where } = {}) {
-    const known = typeof where === 'string' && (s.channels ?? []).some(c => c.workspaceId === where);
-    return { ...closeOverlays(s), listOpen: false, draft: { title: '', where: known ? where : defaultWhere(s) }, route: { screen: 'messages', id: 'new' } };
-  },
-  cancelDraft: s => ({ ...s, draft: null, route: { screen: 'messages', id: firstOpen(s.conversations)?.id ?? null } }),
-  setDraftTitle: (s, title) => (s.draft ? { ...s, draft: { ...s.draft, title } } : s),
-  setDraftWhere: (s, where) => (s.draft ? { ...s, draft: { ...s.draft, where: where || null } } : s),
-
-  // the optimistic half of Change words; the host's title projection confirms it
-  rename(s, { convId, title }) {
-    const t = (title ?? '').trim();
-    if (!t) return s;
-    return upd(s, convId, c => ({ ...c, title: t }));
   },
 
   toggleDetails: s => (s.detailsOpen ? { ...s, detailsOpen: false, edit: null, confirm: null } : { ...closeOverlays(s), detailsOpen: true }),

@@ -1,7 +1,7 @@
 // The thread draws the kind table (spec 2026-10-19 §6) on host-shaped messages: text, tool, card, approval, question, receipt, refusal.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { renderMessage, renderThread, setMarkdown, chip, key, ticker, withTickers, thumbsNeeded } from '../../client/js/render/thread.js';
+import { renderMessage, renderThread, setMarkdown, chip, key, ticker, withTickers, thumbsNeeded, DESK_SUMMARY_MAX } from '../../client/js/render/thread.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { MIN } from '../../client/js/time.js';
 import { sessionUri } from '../../client/js/composer/draft.js';
@@ -132,6 +132,20 @@ test('a question card lists each question with inputs named by the gate and the 
   const answered = renderMessage(gate('question', { text: '', answer: 'answered', data: { eventId: 'ev-2', sessionId: 's1', questions } }), conv(), state);
   assert.doesNotMatch(answered, /data-action="answerQuestion"/);
   assert.match(answered, />Answered</);
+});
+
+test('on a live thread a pending question\'s inputs are enabled and an answered one\'s disabled', () => {
+  const questions = [{ id: 'q1', question: 'Which venue?', options: [{ label: 'Paper' }, { label: 'Paper US' }] }];
+  const pending = gate('question', { id: 'ev-p', seq: 2, text: '', data: { eventId: 'ev-p', sessionId: 's1', questions } });
+  const done = gate('question', { id: 'ev-d', seq: 1, text: '', answer: 'answered', data: { eventId: 'ev-d', sessionId: 's1', questions } });
+  const html = renderThread(conv({ live: true, messages: [done, pending] }), state, NOW);
+  const inputsOf = id => [...html.matchAll(/<input [^>]*>/g)].map(m => m[0]).filter(i => i.includes(`name="q-${id}-`));
+  assert.equal(inputsOf('ev-p').length, 3, 'two options and the free answer');
+  assert.ok(inputsOf('ev-p').every(i => !/ disabled/.test(i)), 'the pending one takes an answer');
+  assert.equal(inputsOf('ev-d').length, 3);
+  assert.ok(inputsOf('ev-d').every(i => / disabled>$/.test(i)), 'the answered one takes nothing more');
+  assert.equal((html.match(/data-action="answerQuestion"/g) ?? []).length, 1, 'one Answer key, the pending one\'s');
+  assert.match(html, /data-action="answerQuestion" data-conv="s1" data-msg="ev-p"/);
 });
 
 test('a receipt is a green bubble, a refusal a red card', () => {
@@ -526,4 +540,103 @@ test("a conversation chip's label in a bubble is masked", () => {
 test("an image card's meta line is in the table's order", () => {
   const h = withTable({ 'thread.imageMeta': '{size} ({type})' }, () => renderMessage(you([PNG('i1', { offloaded: true })]), conv(), thumbed({})));
   assert.match(h, /<span class="file-meta">1\.2 MB \(PNG\)<\/span>/);
+});
+
+// ---- the task source kind (one-entry plan 2 Task 5)
+const taskMsg = (data, text = '') => msg({ id: 'e70', seq: 70, from: 'system', kind: 'task', text, data });
+
+test('a task line links its task and folds its body', () => {
+  const h = renderMessage(taskMsg({ form: 'report', task: 't1', status: 'ready', title: 'Read the tape', body: 'Held and sold' }), conv(), state);
+  assert.match(h, /^<details class="sysline ctx" id="relay-s1-e70"><summary><a class="task-link" href="#\/task\/t1">Task · Read the tape · Done<\/a><\/summary><pre>Held and sold<\/pre><\/details>$/);
+  // the title unread: the task's own from the tasks slice, else Task; a status no table names as it came
+  const named = { ...state, tasks: { ...state.tasks, items: [{ id: 't2', title: 'Scan filings' }] } };
+  assert.match(renderMessage(taskMsg({ form: 'report', task: 't2', status: 'blocked', title: null, body: '' }), conv(), named), />Task · Scan filings · Blocked</);
+  assert.match(renderMessage(taskMsg({ form: 'report', task: 't3', status: 'odd', title: null, body: '' }), conv(), state), />Task · Task · odd</);
+  // no task id: the line alone, no link
+  assert.match(renderMessage(taskMsg({ form: 'report', status: 'failed', title: 'X', body: 'b' }), conv(), state), /<summary>Task · X · Failed<\/summary>/);
+  // a worker's own lines: the brief and the steer are Gravit's bubbles under their labels, a recovery and a stop centred lines
+  const brief = renderMessage(taskMsg({ form: 'brief' }, 'Scan filings\n\nRead the 10-Q'), conv(), state);
+  assert.match(brief, /^<div class="msg left"><div class="sender-name">Task instructions<\/div><div class="msg-row"><span[^>]*class="av[^"]*"[\s\S]*<div class="bubble grey">/);
+  assert.match(brief, /Read the 10-Q/);
+  assert.match(renderMessage(taskMsg({ form: 'steer' }, 'Carry on'), conv(), state), /<div class="sender-name">Gravit relays<\/div>[\s\S]*Carry on/);
+  assert.match(renderMessage(taskMsg({ form: 'recovery' }, 'The face restarted while you worked.'), conv(), state), /^<div class="sysline">[^<]+<\/div>$/);
+  assert.equal(renderMessage(taskMsg({ form: 'stopped' }, 'Stopped by the conversation.'), conv(), state), '<div class="sysline">Stopped</div>');
+  withTable({ 'thread.task.line': '{status} — {title}' }, () => {
+    assert.match(renderMessage(taskMsg({ form: 'report', task: 't1', status: 'ready', title: 'R', body: '' }), conv(), state), />Done — R</);
+  });
+});
+
+test('the fenced body is escaped', () => {
+  const h = renderMessage(taskMsg({ form: 'report', task: 't<1>', status: 'ready', title: '<b>T</b>', body: '<script>x</script> & y' }), conv(), state);
+  assert.match(h, /href="#\/task\/t%3C1%3E"/);
+  assert.match(h, />Task · &lt;b&gt;T&lt;\/b&gt; · Done</);
+  assert.match(h, /<pre>&lt;script&gt;x&lt;\/script&gt; &amp; y<\/pre>/);
+  assert.doesNotMatch(h, /<script>|<b>T/);
+});
+
+// ---- the desk folds in (one-entry plan 3 Task 7)
+test('a phone bubble carries the 手机 chip', () => {
+  const phone = (data, text = 'NVDA now?') => renderMessage(msg({ id: 'e80', from: 'you', text, data }), conv(), state);
+  const h = phone({ source: 'telegram', network: 'slack' });
+  assert.match(h, /^<div class="msg you"><div class="you-body"><span class="chip grey">Phone · Slack<\/span><div class="bubble you">NVDA now\?<\/div><\/div>/);
+  assert.match(phone({ source: 'telegram', network: 'telegram' }), />Phone · Telegram</);
+  assert.match(phone({ source: 'telegram' }), /<span class="chip grey">Phone<\/span>/, 'no network named: the phone alone');
+  withTable({ 'thread.phone': '手机', 'thread.phone.on': '手机 · {network}' }, () => {
+    assert.match(phone({ source: 'telegram', network: 'telegram' }), /<span class="chip grey">手机 · Telegram<\/span>/);
+  });
+  // the browser's own words carry no chip
+  assert.doesNotMatch(renderMessage(msg({ from: 'you', text: 'hi', data: {} }), conv(), state), /chip/);
+  assert.match(phone({ source: 'telegram' }, '<b>x</b>'), /&lt;b&gt;x&lt;\/b&gt;/);
+});
+
+const deskMsg = (data, text) => msg({ id: 'e81', seq: 81, from: 'system', kind: 'desk', text, data });
+test('a schedule line carries 定时 and an alert line 盯盘', () => {
+  assert.equal(renderMessage(deskMsg({ line: 'schedule', order: 'preclose' }, 'Check the book.'), conv(), state),
+    '<details class="sysline ctx desk-line" id="desk-s1-e81"><summary><span class="chip grey">Scheduled</span> <span class="desk-text">Check the book.</span></summary><pre>Check the book.</pre></details>');
+  assert.match(renderMessage(deskMsg({ line: 'alert', symbol: 'NVDA' }, 'NVDA fell'), conv(), state), /<summary><span class="chip grey">Watch<\/span> /);
+  withTable({ 'thread.desk.schedule': '定时', 'thread.desk.alert': '盯盘' }, () => {
+    assert.match(renderMessage(deskMsg({ line: 'schedule' }, 'x'), conv(), state), />定时</);
+    assert.match(renderMessage(deskMsg({ line: 'alert' }, 'x'), conv(), state), />盯盘</);
+  });
+  assert.equal(renderMessage(deskMsg({ line: 'alert' }, ''), conv(), state), '<div class="sysline desk-line"><span class="chip grey">Watch</span></div>', 'no body: the chip alone');
+});
+
+test("a desk line folds: its first line clipped in the summary, its whole body under it", () => {
+  const long = 'B'.repeat(DESK_SUMMARY_MAX + 30);
+  const body = `\n${long}\n- hold NVDA\n- trim AMD`;
+  const h = renderMessage(deskMsg({ line: 'schedule' }, body), conv(), state);
+  const summary = /<summary>([\s\S]*)<\/summary>/.exec(h)[1];
+  assert.match(summary, new RegExp(`<span class="desk-text">B{${DESK_SUMMARY_MAX - 1}}…</span>$`), 'the first line with words, clipped');
+  assert.doesNotMatch(summary, /hold NVDA/, 'the rest stays under the fold');
+  assert.ok(h.includes(`<pre>\n${long}\n- hold NVDA\n- trim AMD</pre>`), 'the whole body under it, as written');
+});
+
+test('a desk line masks a pasted key in its summary and its body', () => {
+  const h = renderMessage(deskMsg({ line: 'schedule' }, `use ${SK}\nthen ${SK}`), conv(), state);
+  assert.ok(!h.includes(SK), 'the key appears nowhere raw');
+  assert.ok(h.includes(`<span class="desk-text">use ${MASKED}</span>`));
+  assert.ok(h.includes(`<pre>use ${MASKED}\nthen ${MASKED}</pre>`));
+});
+
+test('a desk line masks its first line before clipping it: a key the cut falls inside never shows a raw piece', () => {
+  // a bot token has no prefix the clip rule knows: only masking the whole line first hides its front
+  const token = `123456789:${'A1b2C3d4E5'.repeat(3)}xyz12`;
+  const first = `${'w'.repeat(DESK_SUMMARY_MAX - 25)} ${token} tail`;
+  const h = renderMessage(deskMsg({ line: 'alert' }, `${first}\nbody`), conv(), state);
+  const summary = /<span class="desk-text">([^<]*)<\/span>/.exec(h)[1];
+  assert.equal(summary.length, DESK_SUMMARY_MAX, 'clipped to the summary\'s length');
+  assert.ok(summary.endsWith('…'));
+  assert.ok(summary.includes(' 12345678*'), summary);
+  assert.ok(!summary.includes('123456789:A1b2'), 'no raw piece of the key');
+});
+
+test("a desk line's text is escaped and its head left out", async () => {
+  const { toMessages } = await import('../../client/js/host/kinds.js');
+  const { mapFrame } = await import('../../client/js/wire/mapper.js');
+  const text = '[alert · NVDA · annotation]\n<<<desk-data z1>>>\n<script>x</script> & y\n<<<end z1>>>';
+  const frame = { type: 'session/event', sessionId: 's1', event: { type: 'user/message', seq: 82, time: 1, surfaceOp: 'append', data: { id: 'm82', role: 'user', content: [{ type: 'text', text }], source: { kind: 'alert', alert: 'a', symbol: 'NVDA' } } } };
+  const [m] = toMessages(mapFrame(frame), new Map(), NOW);
+  const h = renderMessage(m, conv(), state);
+  assert.match(h, /<span class="desk-text">&lt;script&gt;x&lt;\/script&gt; &amp; y<\/span><\/summary><pre>&lt;script&gt;x&lt;\/script&gt; &amp; y<\/pre>/);
+  assert.doesNotMatch(h, /<script>|\[alert ·|desk-data|&lt;&lt;&lt;/);
 });

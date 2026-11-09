@@ -73,12 +73,18 @@ const err = over => Object.assign(new Error('boom'), over);
 function actionsRig(answers = {}, convs = [conv('s1')]) {
   const store = createStore({ initial: emptyState(), reducers });
   store.dispatch('hostList', { conversations: convs });
-  store.dispatch('nav', { screen: 'messages', id: 's1' });
+  store.dispatch('tasksLoaded', { conversation: 's1', tasks: [], at: 1 });
+  store.dispatch('nav', { screen: 'messages', id: null });
   const call = async endpoint => { const a = answers[endpoint]; if (a instanceof Error) throw a; return typeof a === 'function' ? a() : a; };
-  const postJson = async () => { throw err({ code: 'face/<refused>' }); };
-  const actions = makeActions({ store, call, answerGate: async () => { throw err({ code: 'gate/gone' }); }, postJson, requestId: () => 'r', timeZone: () => 'UTC' });
+  const actions = makeActions({ store, call, answerGate: async () => { throw err({ code: 'gate/gone' }); }, requestId: () => 'r', timeZone: () => 'UTC' });
   return { store, actions, line: () => store.get().status.line };
 }
+
+test('the tasks lines, each in its words', () => {
+  follows(said('tasks.stop.gone'), 'That task has already ended');
+  follows(said('tasks.stop.failed'), 'Could not stop the task');
+  follows(said('tasks.resume.failed'), 'Could not continue the task');
+});
 
 test('the boot line, and a failure line: its verb, then the code, the HTTP status or the message; a 401 as notSignedIn', () => {
   follows(emptyState().status.line, 'connecting…');
@@ -93,33 +99,19 @@ test('the boot line, and a failure line: its verb, then the code, the HTTP statu
 
 test("the actions' lines, each verb in its words", async () => {
   const r = actionsRig({
-    'session/cancel': err({ code: 'x/1' }), 'session/rename': err({ code: 'x/2' }), 'session/fork': () => ({}), 'commands/execute': () => undefined,
+    'session/cancel': err({ code: 'x/1' }), 'commands/execute': () => undefined,
     'session/prompt': err({ code: 'x/3' }), 'session/create': () => ({}), 'subagents/interruptByParent': () => ({ accepted: false }),
-    'workspace/pinSession': () => ({}),
   });
   await r.actions.stop('s1'); follows(r.line(), 'stop: x/1');
-  await r.actions.rename('s1', 'New'); follows(r.line(), 'rename: x/2');
-  await r.actions.fork('s1'); follows(r.line(), 'fork: session/fork returned no sessionId');
   await r.actions.runCommand('s1', '/<b>'); follows(r.line(), 'no command claimed /<b>');
-  await r.actions.send('hello'); follows(r.line(), 'send: x/3');
-  await r.actions.newConversation({ text: 'hi' }); follows(r.line(), 'new message: session/create returned no sessionId');
+  await r.actions.send('hello', { sessionId: 's1' }); follows(r.line(), 'send: x/3');
   await r.actions.stopChild('s1', 'c1', 'x'); follows(r.line(), 'stop: refused');
-  await r.actions.pin('s1'); follows(r.line(), 'Pin failed. Try again later.');
-  await r.actions.archive('s1', true); follows(r.line(), 'archive: face/<refused>');
-  await r.actions.archive('s1', false); follows(r.line(), 'un-archive: face/<refused>');
-  await r.actions.remove('s1'); follows(r.line(), 'delete: face/<refused>');
   await r.actions.answer('ev', 'rejected'); follows(r.line(), 'answer: gate/gone');
-  follows(await r.actions.talkTo({ id: 'b', homeCwd: '/b' }), { error: 'talk to: session/create returned no sessionId' });
 
   const ok = actionsRig({ 'session/cancel': () => ({}), 'subagents/interruptByParent': () => ({}) });
   await ok.actions.stop('s1'); follows(ok.line(), 'Stopped. A paused goal resumes with /goal resume');
   await ok.actions.stopChild('s1', 'c1', ''); follows(ok.line(), 'Stopping the child');
   await ok.actions.stopChild('s1', 'c1', '<Scout>'); follows(ok.line(), 'Stopping <Scout>');
-
-  const busy = actionsRig({}, [conv('s1', { running: true })]);
-  await busy.actions.archive('s1', true); follows(busy.line(), 'Stop Gravit first');
-  const waiting = actionsRig({}, [conv('s1', { messages: [{ id: 'q', kind: 'question', from: 'gravit', text: '', data: { questions: [] } }] })]);
-  await waiting.actions.archive('s1', true); follows(waiting.line(), 'Answer the waiting card first');
 });
 
 test("a command's own result and a desk refusal in the desk's words read as they came under any table", async () => {
@@ -165,7 +157,8 @@ test("the live layer's lines", async () => {
   const cold = liveRig({ call: async endpoint => (endpoint === 'session/list' ? { items: rows } : endpoint === 'session/projections' ? { values: {} } : undefined) });
   cold.opts().onReady({});
   await settle();
-  cold.store.dispatch('nav', { screen: 'messages', id: 's1' });
+  cold.store.dispatch('tasksLoaded', { conversation: 's1', tasks: [], at: 1 });
+  cold.store.dispatch('nav', { screen: 'messages', id: null });
   cold.opts().onEvent('api-session/error', ['s1', '']);
   follows(cold.line(), 'the agent failed');
 });
@@ -199,13 +192,13 @@ test("the jobs' chip and end lines, the pills, and the composer's file lines", (
 
 // app.js on a fake window: one live conversation, its mux and its uploads recorded for the test to answer
 async function appRig() {
-  const f = fakeWindow({ hash: '#/messages/s1' });
+  const f = fakeWindow({ hash: '#/messages' });
   const streams = [];
   let opts = null;
   const mux = { stream(name, args, cbs) { const st = { name, args, cbs }; streams.push(st); return { cancel() {} }; }, answer: async () => {}, close() {} };
   const rows = [{ sessionId: 's1', updatedAt: 5, agentAvailable: true, running: false, blank: false }];
   const call = async endpoint => (endpoint === 'session/list' ? { items: rows } : endpoint === 'session/projections' ? { asOfSeq: 20, values: {} } : endpoint === 'session/page' ? { records: [] } : undefined);
-  const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [], ungrouped: [], archived: [], presets: {} } : { ok: true, archived: [], deleted: [], bots: [] });
+  const getJson = async path => (path === '/data/channels.json' ? { ok: true, root: '/r', channels: [], ungrouped: [], archived: [], presets: {} } : path === '/data/tasks' ? { ok: true, conversation: 's1', tasks: [] } : { ok: true, archived: [], deleted: [], bots: [] });
   const uploads = [];
   const attachments = {
     limits: () => DEFAULT_LIMITS, readLimits: async () => true, thumb: async () => {},
@@ -421,15 +414,17 @@ test("Markets', Trade's and the desk's host lines as the store holds them: the d
 
 test("a channel's, Discover's, the Run sheet's and the run view's host lines as the store or the editor holds them", async () => {
   const odd = Object.assign(new Error("<no> & won't"), {});
-  // a channel's writes (host/channels.js): the name rule, a channel made but not listed, six bots, a refusal in its words
-  // or in none
+  // a channel's writes (host/channels.js): six bots, a refusal in its words or in none
   const cs = createStore({ initial: emptyState(), reducers });
-  const channels = startChannels({ store: cs, postJson: async path => { if (path === '/data/channels') return { dir: 'nowhere' }; throw path === '/data/channels/agents' ? odd : {}; }, getJson: async () => ({}), refresh: async () => {} });
-  follows(await channels.create('_template'), { error: 'Letters, digits, - or _' });
-  follows(await channels.create('alpha'), { error: 'Created, not listed yet' });
+  const channels = startChannels({ store: cs, postJson: async path => { throw path === '/data/channels/agents' ? odd : {}; }, getJson: async () => ({}) });
   follows(await channels.setBots('w', ['a', 'b', 'c', 'd', 'e', 'f', 'g']), { error: 'At most six bots' });
   asCame(await channels.setAgents('w', ['codex']), { error: "<no> & won't" });
   follows(await channels.setBots('w', ['a']), { error: 'failed' });
+  // a strategy's positions refused (host/channels.js): the Account's sentence, kept as it came
+  cs.dispatch('channelLoaded', { workspaceId: 'w', data: {}, at: 1 });
+  const ps = startChannels({ store: cs, postJson: async () => ({}), getJson: async () => { throw Object.assign(new Error('HTTP 409'), { status: 409, body: { ok: false, refusal: { message: "<no> & won't" } } }); } });
+  await ps.positions('paper-x', 'w');
+  asCame(cs.get().channel.positions.message, "<no> & won't");
   // Discover's line (host/discover.js): an agent write refused, in its words or none; a save refused; a new bot's refusals
   const ds = createStore({ initial: emptyState(), reducers });
   const discover = startDiscover({ store: ds, getJson: async () => ({ ok: true, bots: [], local: [] }), call: async () => ({}), postJson: async path => {
@@ -449,20 +444,23 @@ test("a channel's, Discover's, the Run sheet's and the run view's host lines as 
   follows(await discover.createBot({ name: 'Bot', id: '' }), { error: 'Created, not listed yet' });
   // the Run sheet's lines (host/run-sheet.js): no such module, the listing unread
   const rs = createStore({ initial: emptyState(), reducers });
-  const unread = startRunSheet({ store: rs, actions: { newConversation: async () => null }, readListing: async () => null, go: () => {}, now: () => 0 });
+  const unread = startRunSheet({ store: rs, actions: { send: async () => null }, readListing: async () => null, go: () => {}, now: () => 0 });
   await unread.open('nope');
   follows(rs.get().discover.status, { line: 'Not a module', bad: true });
   await unread.open('theme');
   follows(rs.get().runSheet.said, 'the modules listing could not be read');
-  const listed = startRunSheet({ store: rs, actions: { newConversation: async () => null }, readListing: async () => modulesListing(), go: () => {}, now: () => 0 });
+  const listed = startRunSheet({ store: rs, actions: { send: async () => null }, readListing: async () => modulesListing(), go: () => {}, now: () => 0 });
   await listed.open('theme');
   await listed.run();
-  follows(rs.get().runSheet.said, "Couldn't send — the conversation may exist untitled in the channel");
+  follows(rs.get().runSheet.said, "Gravit's conversation is not known yet — open Messages");
+  rs.dispatch('tasksLoaded', { conversation: 'c-gravit', tasks: [], at: 0 });
+  await listed.run();
+  follows(rs.get().runSheet.said, "Couldn't send to Gravit's conversation");
   // the run view's failure words (host/lunhui.js), as the slice holds them: an answer with no view, a read failed in no words
   const RUN = '20261027T201627Z-6937d208';
   const msg = id => ({ id, seq: 1, at: 1, from: 'gravit', kind: 'composed', text: 's', data: { strategy: 'cn-market', run: RUN, blocks: [], choices: [], modules: [id] } });
   const conv = { id: 'c1', title: 'c1', kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: true, updatedAt: 5, created: null, messages: [msg('a'), msg('b'), msg('c')], loaded: true, preview: null, usage: null, thinking: null, lastSeen: 0 };
-  const ls = createStore({ initial: { ...emptyState(), route: { screen: 'messages', id: 'c1' }, conversations: [conv] }, reducers });
+  const ls = createStore({ initial: { ...emptyState(), tasks: { ...emptyState().tasks, status: 'ready', conversation: 'c1' }, conversations: [conv] }, reducers });
   await ensureViews(ls, async path => { if (path.endsWith('=a')) return { ok: true }; if (path.endsWith('=b')) throw undefined; throw odd; });
   const errors = Object.values(ls.get().lunhui.views).map(v => v.error);
   follows(errors, ['the answer held no view', 'the view could not be read', "<no> & won't"]);

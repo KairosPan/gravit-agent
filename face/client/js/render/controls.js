@@ -1,7 +1,6 @@
-// gravit-ui/js/render/controls.js — the small shared controls: segs, key-value rows, drawer sections, inline editors, two-step confirms
+// gravit-ui/js/render/controls.js — the small shared controls: segs, key-value rows, drawer sections, two-step confirms
 import { esc, attrs, cls } from '../html.js';
-import { icon } from '../icons.js';
-import { th, sayOf } from '../i18n/words.js';
+import { th } from '../i18n/words.js';
 
 // each item a label, or a [label, value] pair when the action takes a value other than the words: the item whose value is
 // `pressed` is pressed, and each hands its value as data-value — and every item the same further data when it is given (a
@@ -23,24 +22,6 @@ export function kv(rows) {
 
 export function sec(label, lines, html = false) {
   return `<div class="dsec"><div class="dsec-label">${esc(label)}</div>${lines.map(l => `<div class="dsec-line">${html ? l : esc(l)}</div>`).join('')}</div>`;
-}
-
-// an inline editor: its inputs, a ✓ that commits and a × that cancels (app.js reads every [name] inside .inline-edit)
-// fields: { name, value, type = 'text' | 'number', label, options? } — the label is the box's accessible name; options make
-// a pick list
-export function inlineEdit(fields, line = null) {
-  const error = sayOf(line);
-  const input = f => {
-    const named = { 'aria-label': f.label };
-    const box = f.options
-      ? `<select${attrs({ id: `edit-${f.name}`, class: 'input small', name: f.name, ...named })}>${f.options.map(o => `<option${attrs({ value: o, selected: o === f.value })}>${esc(o)}</option>`).join('')}</select>`
-      : `<input${attrs({ id: `edit-${f.name}`, class: 'input small', name: f.name, type: f.type ?? 'text', value: f.value, ...named })}>`;
-    return box;
-  };
-  return `<span class="inline-edit">${fields.map(input).join('')}` +
-    `<button type="button" class="key yes" data-action="commitEdit" aria-label="${th('common.save')}">${icon('check', 14, 2.4)}</button>` +
-    `<button type="button" class="key no" data-action="cancelEdit" aria-label="${th('common.cancel')}">${icon('x', 14, 2.4)}</button>` +
-    `${error ? `<span class="field-error">${esc(error)}</span>` : ''}</span>`;
 }
 
 // the second step of a confirm, in place of the button that asked

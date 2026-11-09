@@ -40,10 +40,19 @@ test('parseHash and toHash round-trip; Messages and Markets route, every other s
   // Trade is a screen the face serves
   assert.deepEqual(routeOf('#/trade'), { screen: 'trade', id: null });
   assert.deepEqual(routeOf('#/trade/coin:BTC'), { screen: 'trade', id: 'coin:BTC' });
-  // a channel page and a plugin page take everything after the screen, decoded, as a market does
-  assert.deepEqual(parseHash('#/channel/ws-1'), { screen: 'channel', id: 'ws-1' });
-  assert.equal(toHash({ screen: 'channel', id: 'ws-1' }), '#/channel/ws-1');
-  assert.deepEqual(routeOf('#/channel/ws-1'), { screen: 'channel', id: 'ws-1' });
+  // a task, history (the list or one session) and a strategy page take everything after the screen, decoded, as a market does
+  for (const h of ['#/task/session-1', '#/history', '#/history/session-1', '#/strategy/cn-market']) assert.equal(toHash(parseHash(h)), h);
+  assert.deepEqual(routeOf('#/task/session-1'), { screen: 'task', id: 'session-1' });
+  assert.deepEqual(routeOf('#/history'), { screen: 'history', id: null });
+  assert.deepEqual(routeOf('#/history/'), { screen: 'history', id: null });
+  assert.deepEqual(routeOf('#/history/session-1'), { screen: 'history', id: 'session-1' });
+  assert.deepEqual(routeOf('#/strategy/cn-market'), { screen: 'strategy', id: 'cn-market' });
+  assert.equal(parseHash('#/strategy/cn%2Dmarket').id, 'cn-market', 'an encoded link reads the same');
+  // the channel screen is gone: an old channel link is Messages carrying the workspace it named, for settle to place
+  assert.notEqual(parseHash('#/channel/ws-1').screen, 'channel');
+  assert.notEqual(routeOf('#/channel/ws-1').screen, 'channel');
+  assert.deepEqual(routeOf('#/channel/ws-1'), { screen: 'messages', id: null, channel: 'ws-1' });
+  assert.equal(toHash(routeOf('#/channel/ws-1')), '#/channel/ws-1', 'it keeps its hash while it waits for the channels');
   assert.equal(parseHash('#/plugin/skill%3Arules').id, 'skill:rules');
   assert.equal(parseHash('#/plugin/mcp:alpaca-kit').id, 'mcp:alpaca-kit');
   assert.deepEqual(parseHash('#/account/venues'), { screen: 'account', tab: 'venues' });
@@ -52,17 +61,18 @@ test('parseHash and toHash round-trip; Messages and Markets route, every other s
 
 test('initialState is the empty state plus the viewer\'s prefs; garbage prefs are ignored', () => {
   const storage = memory();
+  // a lastConv or collapsed an older page saved (the channel list's, gone with it) is ignored
   storage.setItem(PREFS_KEY, JSON.stringify({ theme: 'black', railCollapsed: true, lastConv: 's9', lastSeen: { s9: 40 }, collapsed: { w1: true, __archived: false }, watch: ['BTC'] }));
   const s = initialState(storage);
-  assert.equal(s.theme, 'black'); assert.equal(s.railCollapsed, true); assert.equal(s.lastConv, 's9');
+  assert.equal(s.theme, 'black'); assert.equal(s.railCollapsed, true);
+  assert.equal('lastConv' in s, false); assert.equal('collapsed' in s, false);
   assert.deepEqual(s.lastSeen, { s9: 40 });
-  assert.deepEqual(s.collapsed, { w1: true, __archived: false });
   assert.deepEqual(s.markets.watch, [], 'the stars live under their own keys, never in the prefs');
   assert.deepEqual(s.markets.watchlist, []);
   assert.deepEqual(s.conversations, []);
-  storage.setItem(PREFS_KEY, '{"theme":"neon","lastSeen":[1],"collapsed":["w1"],"watch":"x"}');
+  storage.setItem(PREFS_KEY, '{"theme":"neon","lastSeen":[1],"watch":"x"}');
   const bad = initialState(storage);
-  assert.equal(bad.theme, 'system'); assert.deepEqual(bad.lastSeen, {}); assert.deepEqual(bad.collapsed, {});
+  assert.equal(bad.theme, 'system'); assert.deepEqual(bad.lastSeen, {});
   storage.setItem(PREFS_KEY, 'not json');
   assert.equal(initialState(storage).theme, 'system');
   assert.equal(initialState(null).theme, 'system');
@@ -75,15 +85,19 @@ test('the store writes only the prefs, never the conversations, and never loads 
   assert.deepEqual(store.get().conversations, []);
   store.dispatch('toggleRail');
   const saved = JSON.parse(storage.getItem(PREFS_KEY));
-  assert.deepEqual(Object.keys(saved).sort(), ['codeFont', 'codeSize', 'collapsed', 'lang', 'lastConv', 'lastSeen', 'railCollapsed', 'textFont', 'textSize', 'theme']);
+  assert.deepEqual(Object.keys(saved).sort(), ['codeFont', 'codeSize', 'lang', 'lastSeen', 'railCollapsed', 'textFont', 'textSize', 'theme']);
   assert.equal(saved.railCollapsed, true);
-  assert.deepEqual(prefsOf(emptyState()), { theme: 'system', lang: 'en', textSize: 15, codeSize: 12, textFont: '', codeFont: '', railCollapsed: false, lastConv: null, lastSeen: {}, collapsed: {} });
+  assert.deepEqual(prefsOf(emptyState()), { theme: 'system', lang: 'en', textSize: 15, codeSize: 12, textFont: '', codeFont: '', railCollapsed: false, lastSeen: {} });
 });
 
 test('settle routes by the hash and says which hash the address bar should show', () => {
   const store = makeStore(null);
-  assert.equal(settle(store, '#/messages/zz'), '#/messages', 'a missing conversation folds to none while the list is empty');
-  assert.equal(store.get().route.screen, 'messages');
+  assert.equal(settle(store, '#/messages/zz'), null, 'an old conversation link waits while the tasks load');
+  assert.deepEqual(store.get().route, { screen: 'messages', id: 'zz' });
+  store.dispatch('tasksOff', { at: 1 });
+  assert.equal(settle(store, '#/messages/zz'), '#/history/zz', 'with no conversation it is history');
+  assert.equal(settle(store, '#/messages'), null);
+  assert.deepEqual(store.get().route, { screen: 'messages', id: null });
   assert.equal(settle(store, '#/trade'), null, 'Trade routes as it is');
   assert.deepEqual(store.get().route, { screen: 'trade', id: null });
   assert.equal(settle(store, '#/markets/us:aapl'), '#/markets/us:AAPL', 'a market id is written in its canonical form');

@@ -7,8 +7,9 @@
  * restart that re-offers a relay already delivered sends nothing twice (the fixed-id pattern of
  * src/desk-conversation.ts's keyed posts). The caller (task 7) pumps on each offer and on each `agent/status` of the
  * conversation to `idle`, from a microtask, never inside the bus. */
-import { randomBytes } from "node:crypto";
 import { MessageId, freezeMessage } from "@deepseek-ai/dsh-llm";
+import { fenceData } from "./data-fence.ts";
+import { INJECTED_KINDS } from "./desk-names.ts";
 import { readSessionEvents, type DeskSessionCtxLike } from "./desk-session.ts";
 import type { AgentLike } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
@@ -17,18 +18,15 @@ import { TASK_TEXT_MAX, cut, type RelayItem } from "./task-view.ts";
 const BIN = "gravit-face";
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/** `text` quoted as task data: between `<<<task-data NONCE>>>` and `<<<end NONCE>>>` lines, with a fresh random nonce
- * per call, so a worker's words cannot close the quote; a line of the text - split at every line break, `\r`, U+2028
- * and U+2029 included - that starts with `[task ·` or `<<<` gets a leading space, so the text cannot forge a relay's
- * head or a fence either. Nothing is cut: the caller cuts first. The relay's message ({@link relayText}) and
- * `task_read`'s answer (src/task-tools.ts) both quote a worker's words this way.
+export { fenceData };
+
+/** `text` quoted as task data ({@link fenceData}): between `<<<task-data NONCE>>>` and `<<<end NONCE>>>` lines, a line
+ * that starts with `[task ·` or `<<<` given a leading space, so a worker's words can neither close the quote nor forge
+ * a relay's head. The relay's message ({@link relayText}) and `task_read`'s answer (src/task-tools.ts) both quote a
+ * worker's words this way.
  * @param nonce - the fence's nonce; a fresh 16-hex-digit one when omitted (tests pass their own). */
-export function fenceTaskData(text: string, nonce: string = randomBytes(8).toString("hex")): string {
-  const body = text
-    .split(/\r\n|\r|\n|\u2028|\u2029/)
-    .map((line) => (line.startsWith("[task ·") || line.startsWith("<<<") ? ` ${line}` : line))
-    .join("\n");
-  return `<<<task-data ${nonce}>>>\n${body}\n<<<end ${nonce}>>>`;
+export function fenceTaskData(text: string, nonce?: string): string {
+  return fenceData(text, { tag: "task-data", heads: ["[task ·"], ...(nonce === undefined ? {} : { nonce }) });
 }
 
 /** The relay's message text: the bracketed head `[task · <title> · <status>]` - every `]` and line break in the title
@@ -68,9 +66,17 @@ function inboxIds(agent: AgentLike): string[] {
   return [...(inbox?.nextTurn ?? []), ...(inbox?.nextStep ?? [])].map((message) => message.id);
 }
 
-/** Whether `agent` may take a relay now: idle, nothing on either inbox list. */
+/** Whether `agent` may take a relay now: idle, nothing on either inbox list but the lines the face injects
+ * (`INJECTED_KINDS`, src/conversation.ts's, a firing's or an alert's line on the next-step list): such a line wakes no
+ * turn, and the relay's turn claims it as context, so it never holds a report back. */
 function ready(agent: AgentLike): boolean {
-  return agent.status === "idle" && inboxIds(agent).length === 0;
+  if (agent.status !== "idle") return false;
+  const inbox = (agent as AgentLike & InboxAware).inbox;
+  if ((inbox?.nextTurn ?? []).length > 0) return false;
+  return (inbox?.nextStep ?? []).every((message) => {
+    const kind = (message.source as { kind?: unknown } | undefined)?.kind;
+    return typeof kind === "string" && INJECTED_KINDS.has(kind);
+  });
 }
 
 /** The id of the message a `user/message` event logs, when it has one. */

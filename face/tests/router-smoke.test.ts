@@ -17,8 +17,10 @@
  * workers' route), scripted per session by its header: the conversation (`gravit-router`) and the worker
  * (`parentSession` = the conversation). AKShare and the Account seat are off.
  *
- * ONE FILE, TWO BOOTS. The four tests share one boot, in order; the fourth disposes it and boots again on the same home,
- * as tests/subagents-smoke.test.ts does (a second boot in one process, `dshHome` passed both times).
+ * ONE FILE, THREE BOOTS. The four tests share one boot, in order; the fourth disposes it and boots again on the same home,
+ * as tests/subagents-smoke.test.ts does (a second boot in one process, `dshHome` passed both times). The fifth boots
+ * once more with the desk and its phone bridge as main.ts installs them (one-entry plan 3): a text from a fake account
+ * (tests/fake-phone-account.ts) reaches the conversation, and its answer reaches the account's send as `chat`.
  *
  * Own file, gated: FACE_SMOKE=1.
  * @module
@@ -36,14 +38,17 @@ import type { GenerateOptions } from "@deepseek-ai/dsh-llm";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import { bootFace, type BootedFace } from "../src/boot.ts";
 import { conversationDir, installConversation, type ConversationCtxLike, type ConversationHandle } from "../src/conversation.ts";
-import { readEvents } from "../src/desk.ts";
+import { claimsOf, installDesk, readEvents, type DeskHandle } from "../src/desk.ts";
+import type { DeskConversationCtxLike } from "../src/desk-conversation.ts";
 import { CONVERSATION_PRESET } from "../src/desk-names.ts";
 import { isTrustedDataRequest } from "../src/http.ts";
 import { DEFAULT_PRESET } from "../src/overlay.ts";
 import { setupFaceProfile } from "../src/setup.ts";
 import { OPERATOR_ONLY } from "../src/task-tools.ts";
-import { installRouter, installTasks, type TasksCtxLike, type TasksHandle } from "../src/tasks.ts";
+import { createPhoneClient } from "../src/phone.ts";
+import { installRouter, installTasks, phoneConversation, type TasksCtxLike, type TasksHandle } from "../src/tasks.ts";
 import { makeBotsRoot } from "./bots-fixture.ts";
+import { fakePhoneAccount, type FakePhoneAccount } from "./fake-phone-account.ts";
 import { mountClient, remote, signIn } from "./remote.ts";
 import { StubAdapter, type StubReply } from "./stub-llm.ts";
 
@@ -56,6 +61,8 @@ const TITLE = "FX probe";
 const BRIEF = "BRIEF_FX: read the fixture strategy and report.";
 /** What the worker reports. */
 const REPORT = "REPORT_FX: the fixture strategy holds nothing yet.";
+/** How the conversation answers a phone text. */
+const PHONE_HEARD = "PHONE_HEARD";
 
 type Message = GenerateOptions["messages"][number];
 type Ev = { type: string; data?: unknown };
@@ -67,7 +74,7 @@ const textOf = (m: Message): string => m.content.map((b) => ("text" in b ? b.tex
 function trigger(r: GenerateOptions): { message?: Message; results: number } {
   for (let i = r.messages.length - 1; i >= 0; i--) {
     const kind = sourceOf(r.messages[i]!).kind;
-    if (kind === "user" || kind === "task") {
+    if (kind === "user" || kind === "task" || kind === "telegram") {
       return { message: r.messages[i], results: r.messages.slice(i + 1).filter((m) => sourceOf(m).kind === "tool").length };
     }
   }
@@ -91,6 +98,7 @@ interface Face {
   base: string;
   cookie: string;
   lines: string[];
+  desk?: DeskHandle;
 }
 
 const made: string[] = [];
@@ -103,8 +111,10 @@ async function stopFace(): Promise<void> {
   const held = face;
   face = undefined;
   if (held === undefined) return;
+  await held.desk?.quiesce();
   await held.tasks.dispose();
   await held.conversation.dispose();
+  await held.desk?.dispose(0);
   await held.booted.dispose();
 }
 
@@ -114,7 +124,7 @@ after(async () => {
 });
 
 /** Boot the face on {@link home} and install the conversation and its tasks as main.ts does, on the stub route. */
-async function boot(): Promise<Face> {
+async function boot(phone?: FakePhoneAccount): Promise<Face> {
   const booted = await bootFace({ profileName: "face", port: 0, dshHome: home, botsRoot: bots });
   const { ctx } = booted;
   const script = (r: GenerateOptions): StubReply => {
@@ -126,6 +136,7 @@ async function boot(): Promise<Face> {
       if (kind === "user" && textOf(message!).includes(START)) {
         return results === 0 ? { kind: "tool", name: "task_start", args: { title: TITLE, brief: BRIEF, strategy: "fx" } } : { kind: "text", text: "STARTED" };
       }
+      if (kind === "telegram") return { kind: "text", text: `${PHONE_HEARD}: ${textOf(message!).split("\n").at(-1)}` };
       if (kind === "task") {
         /* a relay's turn is not the operator's: this start must be refused */
         return results === 0 ? { kind: "tool", name: "task_start", args: { title: "From a relay", brief: "must not start", strategy: "fx" } } : { kind: "text", text: "RELAYED" };
@@ -141,15 +152,27 @@ async function boot(): Promise<Face> {
   const lines: string[] = [];
   const log = (line: string): void => { lines.push(line); console.error(line); };
   const install = (agentCtx: object, ref: Parameters<typeof installModelSelection>[1]) => installModelSelection(agentCtx as unknown as Context, ref);
+  /* with a phone: the desk as main.ts installs it, before the conversation, its bridge waiting for the bind */
+  const desk = phone === undefined ? undefined : installDesk(ctx.webServer, {
+    home, enabled: true, root, route: STUB, sessionCtx: ctx as unknown as DeskConversationCtxLike, installModelSelection: install,
+    phone: createPhoneClient({ url: phone.url, secrets: [] }), router: true, log,
+  });
+  const deskConversation = desk?.conversation;
   const router = await installRouter({
-    conversation: () => installConversation({ ctx: ctx as unknown as ConversationCtxLike, home, route: STUB, installModelSelection: install, log }),
+    conversation: () => installConversation({
+      ctx: ctx as unknown as ConversationCtxLike, home, route: STUB, installModelSelection: install, log,
+      ...(deskConversation === undefined ? {} : { deliver: (text, opts) => deskConversation.deliver(text, opts) }),
+      onClaimed: claimsOf(ctx),
+    }),
     tasks: (held) => installTasks(ctx.webServer, {
       ctx: ctx as unknown as TasksCtxLike, root, route: STUB, installModelSelection: install, conversation: held,
       isTrusted: isTrustedDataRequest, log,
     }),
     log,
   });
+  desk?.bindRouter("sessionId" in router ? phoneConversation(router.conversation, router.tasks.ops) : undefined);
   if (!("sessionId" in router)) {
+    await desk?.dispose(1);
     await booted.dispose();
     throw new Error(`the conversation was not installed: ${lines.join(" | ")}`);
   }
@@ -157,7 +180,7 @@ async function boot(): Promise<Face> {
   const base = `http://127.0.0.1:${ctx.webServer.port}`;
   mountClient(ctx);
   const cookie = await signIn(ctx, base);
-  return { booted, conversation: router.conversation, tasks: router.tasks, sessionId: router.sessionId, base, cookie, lines };
+  return { booted, conversation: router.conversation, tasks: router.tasks, sessionId: router.sessionId, base, cookie, lines, ...(desk === undefined ? {} : { desk }) };
 }
 
 const held = (): Face => {
@@ -289,4 +312,29 @@ test("a second boot on the same home resumes the same conversation", { skip, tim
   assert.equal(relaysIn(convEvents(f)).length, 1, "the relay is not sent twice");
   const tasks = await f.tasks.ops.list();
   assert.deepEqual(tasks.map((t) => ({ id: t.id, state: t.state })), [{ id: worker!.id, state: "done" }]);
+});
+
+test("with the desk's phone bridge bound, a fake phone text reaches the conversation and its answer reaches the account's send", { skip, timeout: 120_000 }, async () => {
+  const before = held();
+  const sessionId = before.sessionId;
+  await stopFace();
+  const account = await fakePhoneAccount();
+  try {
+    face = await boot(account);
+    const f = face;
+    assert.equal(f.sessionId, sessionId, "the same conversation");
+    account.push({ network: "telegram", messageId: "telegram:4242", text: "PHONE_PING", at: new Date().toISOString() });
+    await waitFor("the answer at the account's send", () => account.sends.some((s) => String(s.text).startsWith(PHONE_HEARD)), 60_000);
+    const answers = account.sends.filter((s) => String(s.text).startsWith(PHONE_HEARD));
+    assert.deepEqual(answers, [{ kind: "chat", network: "telegram", text: `${PHONE_HEARD}: PHONE_PING` }], "one chat answer, to telegram");
+    const phoneTexts = convEvents(f).filter((e) => e.type === "user/message" && sourceOf((e.data ?? {}) as { source?: unknown }).kind === "telegram");
+    assert.equal(phoneTexts.length, 1, "the text is in the conversation's log");
+    assert.ok(eventText(phoneTexts[0]!).includes("PHONE_PING"));
+    const kinds = (await readEvents(home)).events.map((e) => e.kind);
+    assert.equal(kinds.includes("desk-session"), false, "no desk session was opened");
+    assert.equal(kinds.includes("desk-turn"), false, "and no desk turn recorded");
+  } finally {
+    await stopFace();
+    await account.close();
+  }
 });

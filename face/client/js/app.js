@@ -3,12 +3,15 @@
 import { createStore } from './store.js';
 import { chordOf } from './keys.js';
 import { reducers } from './reducers/index.js';
+import { landingOf } from './reducers/messages.js';
 import { emptyState } from './data/empty.js';
 import { sizeOf, cleanFont, applyPrefs } from './prefs.js';
 import { langOf, tableOf, htmlLangOf } from './i18n/langs.js';
 import { parseHash, toHash } from './router.js';
 import { renderRail } from './render/rail.js';
 import { renderMessagesScreen, currentConversation } from './render/messages.js';
+import { renderTaskScreen } from './render/task.js';
+import { renderHistoryScreen } from './render/history.js';
 import { renderMarketsScreen } from './render/markets.js';
 import { renderSettings, renderAccountScreen, renderSellMany } from './render/account.js';
 import { renderShortcuts } from './render/shortcuts.js';
@@ -20,13 +23,13 @@ import { call as wireCall, openMux as wireOpenMux } from './wire/api.js';
 import { mapFrame } from './wire/mapper.js';
 import { startLive } from './host/live.js';
 import { makeActions } from './host/actions.js';
-import { isMentionText } from './wire/room.js';
 import { startMarkets } from './host/markets.js';
 import { startDesk } from './host/desk.js';
 import { startAccount } from './host/account.js';
 import { startSeat } from './host/seat.js';
 import { startChannels } from './host/channels.js';
-import { renderChannelScreen } from './render/channel.js';
+import { startTasks, followUpText } from './host/tasks.js';
+import { renderStrategyScreen } from './render/strategy.js';
 import { startDiscover } from './host/discover.js';
 import { renderDiscover, renderPlugin } from './render/discover.js';
 import { startModules } from './host/modules.js';
@@ -44,7 +47,7 @@ import { rulesOf } from './host/rules-view.js';
 import { isAccountKey, handWordsOf, watchedOf, marketCategoryIds, marketScopeOf, marketSourceOf } from './host/market-view.js';
 import { isCnKey } from './wire/china.js';
 import { makeEditor } from './composer/dom.js';
-import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt, hasChip } from './composer/draft.js';
+import { textDraft, isBlank, lengthOf, normalize, replaceRange, serialize, serialContext, triggerAt } from './composer/draft.js';
 import { flatItems, slashItems, atItems, conversationChoices, moveActive, chipOf } from './composer/menus.js';
 import { renderMenu, menuAria, filesRail, dropOverlay, lightboxHtml } from './composer/view.js';
 import { thumbsNeeded, railHtml } from './render/thread.js';
@@ -69,7 +72,7 @@ import { startTrade } from './host/trade.js';
 import { startSearch } from './host/search.js';
 import { tradeableOf } from './host/trade-view.js';
 import { indexedDbKeys, memoryKeys, signedOutFlag } from './wire/key-store.js';
-import { firstOpen } from './host/sessions.js';
+import { onScreenId } from './host/sessions.js';
 import { createAccountStream } from './wire/account-stream.js';
 import { createMarketStream } from './wire/market-stream.js';
 import { discoverWallets, proveWallet } from './wire/wallet.js';
@@ -148,7 +151,7 @@ export function readPrefs(storage) {
     return {};
   }
 }
-export const prefsOf = s => ({ theme: s.theme, lang: s.lang, textSize: s.textSize, codeSize: s.codeSize, textFont: s.textFont, codeFont: s.codeFont, railCollapsed: s.railCollapsed, lastConv: s.lastConv, lastSeen: s.lastSeen, collapsed: s.collapsed });
+export const prefsOf = s => ({ theme: s.theme, lang: s.lang, textSize: s.textSize, codeSize: s.codeSize, textFont: s.textFont, codeFont: s.codeFont, railCollapsed: s.railCollapsed, lastSeen: s.lastSeen });
 export function initialState(storage, now = Date.now()) {
   const p = readPrefs(storage);
   const s = emptyState(now);
@@ -161,10 +164,7 @@ export function initialState(storage, now = Date.now()) {
     textFont: cleanFont(p.textFont),
     codeFont: cleanFont(p.codeFont),
     railCollapsed: p.railCollapsed === true,
-    lastConv: typeof p.lastConv === 'string' ? p.lastConv : null,
     lastSeen: p.lastSeen && typeof p.lastSeen === 'object' && !Array.isArray(p.lastSeen) ? p.lastSeen : {},
-    collapsed: p.collapsed && typeof p.collapsed === 'object' && !Array.isArray(p.collapsed)
-      ? Object.fromEntries(Object.entries(p.collapsed).filter(([, v]) => typeof v === 'boolean')) : {},
   };
 }
 // the store never loads a saved state (the host is the state); it writes the prefs on every change
@@ -172,11 +172,12 @@ export function makeStore(storage, now = Date.now()) {
   return createStore({ initial: initialState(storage, now), reducers, storage, key: PREFS_KEY, accept: () => false, persist: prefsOf });
 }
 
-// Messages (with a channel's page), Markets, Trade, Discover (with an item's page) and Account are served; every other screen
-// the router knows folds to Messages
-const SCREENS = new Set(['messages', 'channel', 'markets', 'trade', 'discover', 'plugin', 'module', 'account']);
+// Messages (with a task's page, history and a strategy's page), Markets, Trade, Discover (with an item's page) and Account are
+// served; every other screen the router knows folds to Messages
+const SCREENS = new Set(['messages', 'task', 'history', 'strategy', 'markets', 'trade', 'discover', 'plugin', 'module', 'account']);
 export const routeOf = hash => { const r = parseHash(hash); return SCREENS.has(r.screen) ? r : { screen: 'messages', id: null }; };
-// route by the address bar; a normalised route says which hash the bar should show instead
+// route by the address bar; a normalised route says which hash the bar should show instead. An old link lands where nav's
+// landing puts it (reducers/messages.js landingOf): a session on the conversation, its task or history, a channel on its strategy
 export function settle(store, hash) {
   const next = store.dispatch('nav', routeOf(hash)).route;
   const h = toHash(next);
@@ -471,7 +472,7 @@ export function boot(win, host = {}) {
   // timers after a host end or refusal; the open job's output stays there and is written into its pre on each frame
   let outEpoch = -1; // the words' epoch the open job's pre was last written under
   const jobs = host.jobs ?? startJobs({ store, mux: live.mux, call, timers, onOutput: () => writeOutput() });
-  const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), postJson, activate: id => live.activate(id) });
+  const actions = makeActions({ store, call, answerGate: (eventId, value) => live.answer(eventId, value), activate: id => live.activate(id) });
   // Markets: the market's reads and the Account's connected ones on the app's timers — the A shares' among them — a market's page
   // followed on the stream its line is on; the stars in this browser's storage
   const markets = startMarkets({ store, storage, getJson, win, now, stream, marketStream, schedule, cancelTimer, owner, afterAction });
@@ -480,19 +481,18 @@ export function boot(win, host = {}) {
   // Trade: the kinds' picks on screen, a ticket's order sheet, its line on the stream, Under way's Cancel
   const trade = startTrade({ store, getJson, owner, sheet, stream, schedule, cancelTimer, now, afterAction });
   // a channel's page: its overview read on entering it
-  const channels = startChannels({ store, postJson, getJson, refresh: () => live.refresh(), now });
+  const channels = startChannels({ store, postJson, getJson, now });
+  // the conversation's tasks: read at once, after each list refresh and on the poll
+  const tasks = host.tasks ?? startTasks({ store, getJson, postJson, timers, now });
   // Discover: the face's inventory, read on entering it; a page's own reads (the Gravit item, a skill) on opening it
   const discover = startDiscover({ store, getJson, postJson, call, now });
   // a Lunhui module's page: its latest artifact, through the overview of the run's channel the modules listing names
   const readListing = () => discover.read('modules').then(() => store.get().discover.shelves.modules.data);
   // and the Runs it sent: the listing read afresh when one ends, on the live layer's timers; mirrored in this browser
   const modules = startModules({ store, postJson, readListing, refreshListing: () => discover.read('modules', { fresh: true }), timers, storage, now });
-  // a module card's Run sheet: Run is a new conversation in the chosen channel, opened as a new message's is — the list read
-  // again first, so the row is there when the page moves to it, then followed
-  const runSheet = startRunSheet({
-    store, actions, readListing, now,
-    go: async route => { await live.refresh(); go(route); live.promote(route.id); },
-  });
+  // a module card's Run sheet: Run is one message to Gravit's conversation (one-entry plan 2), and the page goes to Messages,
+  // where it is; nothing is created, so nothing is promoted
+  const runSheet = startRunSheet({ store, actions, readListing, now, go: route => { go(route); } });
   // the list's search: the box's words in the store at once, the face's index read once the box is quiet
   const convSearch = startSearch({ store, getJson, timers });
   const mac = isMac(win);
@@ -507,20 +507,42 @@ export function boot(win, host = {}) {
   // the owner's keys act only for a page that signs (the renderers draw them for no other)
   const signs = () => store.get().owner.role === 'signs';
 
-  // the composer's drafts (D8), in memory: one per conversation by its id, `new` for New message, `empty` with neither;
-  // each its runs and its files (composer/files.js), the entry gone only when both are empty
+  // the session the one composer writes to (one-entry plan 2): Gravit's conversation as /data/tasks last named it (a failed
+  // re-read keeps it), on Messages with no old link waiting to land — listed or not yet (a fresh one); none while the tasks
+  // load, or once it is off or unknown
+  const writeTo = s => (s.route.screen === 'messages' && !s.route.id && !s.route.channel ? s.tasks?.conversation ?? null : null);
+  // the composer's drafts (D8), in memory: the conversation's by its id, `empty` with none to write to (words put there by Hand
+  // to Gravit while the conversation is unknown); each its runs and its files (composer/files.js), the entry gone only when
+  // both are empty
   const drafts = new Map();
-  const draftKey = s => (s.draft ? 'new' : currentConversation(s)?.id ?? 'empty');
-  // Messages is the one screen with a composer (a conversation, New message, the empty state)
-  const composerOn = s => s.route.screen === 'messages';
-  // a conversation's draft, whose files upload to it as they are added; New message's (and the empty state's) wait (D10)
-  const isConvKey = key => key !== 'new' && key !== 'empty';
+  const draftKey = s => writeTo(s) ?? 'empty';
+  // Messages is the one screen with a composer, drawn while there is a conversation to write to
+  const composerOn = s => writeTo(s) !== null;
+  // the session the screen draws a transcript of: the conversation on Messages, a task's or a history session's on theirs
+  const shownConv = s => { const id = onScreenId(s); return id ? s.conversations.find(c => c.id === id) ?? null : null; };
+  // a conversation's draft, whose files upload to it as they are added; the `empty` one's wait (D10)
+  const isConvKey = key => key !== 'empty';
   const runsOf = key => drafts.get(key)?.runs ?? [];
   const filesOf = key => drafts.get(key)?.files ?? [];
   const currentRuns = () => runsOf(draftKey(store.get()));
   const putDraft = (key, runs, files) => { if (runs.length || files.length) drafts.set(key, { runs, files }); else drafts.delete(key); };
   const setRuns = (runs, key = draftKey(store.get())) => putDraft(key, runs, filesOf(key));
   const setFiles = (files, key = draftKey(store.get())) => putDraft(key, runsOf(key), files);
+  // the `empty` draft taken over once, when the composer first has a conversation to write to: words Hand to Gravit put there
+  // while /data/tasks loaded move under the conversation's key (unless it holds a draft already), its waiting files uploading
+  let emptyAdopted = false;
+  function adoptEmptyDraft(s) {
+    if (emptyAdopted) return;
+    const conv = writeTo(s);
+    if (conv === null) return;
+    emptyAdopted = true;
+    const held = drafts.get('empty');
+    if (!held || drafts.has(conv)) return;
+    drafts.delete('empty');
+    drafts.set(conv, held);
+    if (notes.has('empty')) { notes.set(conv, notes.get('empty')); notes.delete('empty'); }
+    for (const f of held.files) startUpload(conv, f.key);
+  }
   // the attachments' reads: the image limits, a file's upload to its session, a history thumb (a test hands in its own)
   const attachments = host.attachments ?? startAttachments({ call, store, win, now });
   let connected = false;   // the live layer's link as the store last said: a reconnect frees the thumb reads a fence stopped
@@ -558,9 +580,10 @@ export function boot(win, host = {}) {
   let pressed = false;   // a primary press is down: a render now would replace the element the click is aimed at
   let pending = false;
   let openedId = null;   // the conversation the live layer was told to open
+  let openedCold = false; // and whether it was opened cold (a history page: paged, never followed)
   let detailsAt = null;  // the Details section the next render scrolls into view (a pill names Usage), then cleared
   let was = null;        // the route follow() last settled: entering a screen, a tab or a market's page reads what it draws
-  let wanted = null;     // a deep link the list has not answered yet
+  let overviewWs = null; // the workspace of the strategy page on screen whose overview follow() asked for
   let searchTimer = null;   // the Markets search waiting for the box to be quiet
   let tradeTimer = null;    // Trade's search, the same
   let ticketAsked = null;   // a market page's Buy or Sell on its way to Trade: the side follow() opens the ticket with
@@ -572,6 +595,9 @@ export function boot(win, host = {}) {
   // the operator's keys shown through their eye, as `<convId>|<msgId>|<n>` (render/thread.js): the page's, not the store's,
   // and forgotten once their conversation leaves the screen (D26)
   const revealed = new Set();
+  // the rail's lines the operator opened, by task id (render/tasks.js): the page's, so a render (the tasks' poll, a stream
+  // frame) never folds one, nor does a visit to another screen
+  const tasksOpen = new Set();
   let last = { lightbox: false, shortcuts: false, overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, start: null, anchor: null, editor: null, confirm: null, query: '', key: null };
   let confirmFrom = null;
   // the turn rail's page state (D22): the turn the view is on, the hovered or focused tick (its card drawn), the tick that
@@ -586,6 +612,7 @@ export function boot(win, host = {}) {
   let clockTimer = null;    // the jobs' ticking clocks in Details, written each second without a render while one is drawn
   let railHeld = false;     // a rail redraw asked for while a press is down: drawn when it lets go
   let searchFocus = false;  // ⌥⌘K from a screen with no list: the box takes focus once Messages draws it
+  let sayFocus = false;     // ⌥⌘N from another screen: the composer takes focus once Messages draws it
   let rowsAt = null;        // where the groups last stood: a query hides them, and they come back there when it clears (spec §5.1)
 
   function applyTheme(theme) {
@@ -599,7 +626,7 @@ export function boot(win, host = {}) {
 
   function render() {
     const s = store.get();
-    // a menu stands on its own draft's trigger: another draft on screen (another conversation, New message) closes it
+    // a menu stands on its own draft's trigger: another draft on screen (the conversation known, or gone) closes it
     if (menuTrig && menuTrig.key !== draftKey(s)) { forgetMenu(); dismissed = null; }
     // what the person had: focus and caret, typed text, picked radios, and where each scrolling box stood
     const active = doc.activeElement;
@@ -631,7 +658,7 @@ export function boot(win, host = {}) {
     const note0 = doc.getElementById('composer-note');
     const noteText = sayOf(notes.get(key));
     // the conversation on screen: another one (or none) than at the last render masks every key again
-    const open = s.route.screen === 'messages' ? currentConversation(s) : null;
+    const open = shownConv(s);
     const threadSig = open ? open.id : null;
     const threadStart = open?.window?.start ?? null;
     // the anchor seq stays on the message it marked while earlier pages land above it (the start falls or holds); a new
@@ -644,8 +671,10 @@ export function boot(win, host = {}) {
 
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
-      : s.route.screen === 'channel' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
-      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail });
+      : s.route.screen === 'strategy' ? renderStrategyScreen(s, now(), { open: tasksOpen }) : s.route.screen === 'discover' ? renderDiscover(s, now())
+      : s.route.screen === 'history' ? renderHistoryScreen(s, now(), { revealed, anchor: anchorSeq, rail })
+      : s.route.screen === 'task' ? renderTaskScreen(s, now(), { revealed, anchor: anchorSeq, rail })
+      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail, tasksOpen });
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
     const drawers = (s.settingsOpen ? renderSettings(s, { mac }) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (!sheetUp(s) && s.identity?.connect ? renderConnectDrawer(s) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     // the shortcut sheet over the drawers, under the drop overlay and the lightbox
@@ -679,8 +708,7 @@ export function boot(win, host = {}) {
     for (const [id, value] of typed) {
       const el = doc.getElementById(id);
       // an editor's box (edit-*) keeps what was typed only while the same editor stays open
-      // Where's channel is the store's (draft.where), never the box's: New channel… must not stick in it
-      if (el && id !== 'say' && id !== 'nm-where' && (sameEditor || !id.startsWith('edit-'))) el.value = value;
+      if (el && id !== 'say' && (sameEditor || !id.startsWith('edit-'))) el.value = value;
     }
     // a minute slider the person moved: the redraw drew its cursor at the last minute, put it back at the slider's
     reapplyCursors(root, doc, s);
@@ -773,8 +801,6 @@ export function boot(win, host = {}) {
     } else if (!overlay && last.overlay) {
       target = find(last.opener) ?? target;
       opener = null;
-    } else if (s.edit && editorOf(s.edit) !== last.editor) {
-      target = root.querySelector('.inline-edit [name]') ?? target; // an editor that just opened takes focus
     } else if (s.confirm && s.confirm !== last.confirm) {
       confirmFrom = last.confirm ? confirmFrom : activeKey;
       target = root.querySelector('.confirm [data-action="confirmYes"]') ?? target; // a confirm that just asked takes focus
@@ -785,6 +811,9 @@ export function boot(win, host = {}) {
       target = overlay ? root.querySelector(closeKeyOf(overlay)) : say;
     }
     if (searchFocus && doc.getElementById('cq')) { target = doc.getElementById('cq'); searchFocus = false; }
+    // ⌥⌘N's composer, its caret after what it holds
+    let sayEnd = false;
+    if (sayFocus && say) { target = say; sayFocus = false; sayEnd = true; }
     if (target) {
       // the same control focused again, or the composer after the earlier key went: never scrolled into view (the thread's
       // keep above stands)
@@ -798,6 +827,7 @@ export function boot(win, host = {}) {
       if (caret && target === find(activeKey) && typeof target.setSelectionRange === 'function') target.setSelectionRange(caret[0], caret[1]);
       // focus can move a contenteditable's caret: the editor's goes back where write put it
       if (target === say && keep !== null) editor.place(say, keep[0], keep[1]);
+      else if (sayEnd) editor.place(say, lengthOf(currentRuns()));
     }
     // the rail: a jump waiting for its mark scrolls to it once drawn; inputs changed (another conversation, its outline, its
     // window) measure the turn the view is on once
@@ -813,7 +843,7 @@ export function boot(win, host = {}) {
       }
     }
     const inputs = open ? [open.id, open.outline, open.window?.start, open.window?.hasMore] : null;
-    // (inputs that could not be measured, as under the draft screen, are not taken as seen: measured once they can be)
+    // (inputs that could not be measured, as with no thread on screen, are not taken as seen: measured once they can be)
     if (inputs ? !railSeen || inputs.some((v, i) => !Object.is(v, railSeen[i])) : railSeen !== null) {
       const moved = measureRail();
       if (moved !== null || !inputs) railSeen = inputs;
@@ -871,7 +901,7 @@ export function boot(win, host = {}) {
 
   // the turn rail alone, never the page (a scroll, a hover, a pulse, an arrow): its focused tick keeps focus by its id, or
   // focus goes to the tick an arrow named (to)
-  const railConv = () => { const s = store.get(); return s.route.screen === 'messages' && !s.draft ? currentConversation(s) ?? null : null; };
+  const railConv = () => { const s = store.get(); return s.route.screen === 'messages' ? currentConversation(s) ?? null : null; };
   function drawRail(to = null) {
     if (pressed) { railHeld = true; return; }   // as a render is held: the press's click must find its element
     const el = doc.getElementById('turn-rail');
@@ -953,14 +983,24 @@ export function boot(win, host = {}) {
     follow();
   }
 
+  // a history session is read cold (one-entry plan 2 Task 7): paged, live or not, and never followed, promoted or activated
+  const coldOn = s => s.route.screen === 'history';
+  // the session on screen the live layer has yet to open, or opened the other way (cold or not)
+  const opens = s => { const conv = shownConv(s); return !!conv && (conv.id !== openedId || coldOn(s) !== openedCold); };
+  // a strategy page's channel, by its name, once the channels are read (the root is no strategy)
+  const strategyWs = s => (s.route.screen === 'strategy' ? s.channels.find(c => c.name === s.route.id && !c.isRoot)?.workspaceId ?? null : null);
+  // what an answer of the list or the tasks leaves follow() to do
+  const followOwed = s => toHash(landingOf(s, s.route)) !== toHash(s.route) || opens(s) || (strategyWs(s) !== null && strategyWs(s) !== overviewWs)
+    || (openedId !== null && !shownConv(s) && !s.conversations.some(c => c.id === openedId));
+
   // route by the address bar, then tell the live layer which conversation is on screen
   function follow() {
-    const asked = routeOf(win.location.hash);
     const fixed = settle(store, win.location.hash);
     if (fixed) win.history.replaceState(null, '', fixed);
     const r = store.get().route;
     // ⌥⌘K's focus waits only for the list it was asked on: a route without one forgets it
-    if (r.screen !== 'messages' && r.screen !== 'channel') searchFocus = false;
+    if (!['messages', 'task', 'history', 'strategy'].includes(r.screen)) searchFocus = false;
+    if (r.screen !== 'messages') sayFocus = false;
     showMarkets();
     if (r.screen === 'markets' && was?.screen !== 'markets') readHiddenMarkets();
     showAccount();
@@ -995,7 +1035,10 @@ export function boot(win, host = {}) {
       pickTicket(r.id, ticketAsked?.id === r.id ? { side: ticketAsked.side } : {});
     }
     showTrade();
-    if (r.screen === 'channel' && !(was?.screen === 'channel' && was.id === r.id)) void channels.overview(r.id);
+    // a strategy's page reads its channel's overview, by the workspace its name has (once the channels are read)
+    const ws = strategyWs(store.get());
+    if (ws && ws !== overviewWs) void channels.overview(ws);
+    overviewWs = ws;
     const inDiscover = route => route?.screen === 'discover' || route?.screen === 'plugin' || route?.screen === 'module';
     if (inDiscover(r) && !inDiscover(was)) void discover.load();
     if (r.screen === 'plugin' && !(was?.screen === 'plugin' && was.id === r.id)) {
@@ -1005,16 +1048,18 @@ export function boot(win, host = {}) {
     if (r.screen === 'module' && !(was?.screen === 'module' && was.id === r.id)) void modules.latestArtifact(r.id);
     if (r.screen === 'discover' && r.id === 'create' && !(was?.screen === 'discover' && was.id === 'create')) void discover.modelChoices();
     was = r;
-    // a deep link the list does not carry yet waits for it
-    if (asked.screen === 'messages' && asked.id && asked.id !== 'new' && !store.get().conversations.some(c => c.id === asked.id)) wanted = asked.id;
-    // the jobs of the conversation on Messages; no screen else watches any
-    jobs.watch(r.screen === 'messages' && r.id && r.id !== 'new' ? r.id : null);
-    if (r.screen === 'messages' && r.id && r.id !== 'new' && r.id !== openedId) {
-      openedId = r.id;
-      live.open(r.id);
-      if (!limitsRead) void attachments.readLimits(r.id).then(ok => { if (ok === true) limitsRead = true; });
-    } else if (r.screen === 'messages' && !r.id && openedId && !store.get().conversations.some(c => c.id === openedId)) {
-      // the last open conversation went (deleted) and nothing took its place: stop reading it
+    // the session on screen: Messages opens the conversation, a task's page the worker's — each its jobs watched for Details —,
+    // a history page its session cold — paged, never followed; one the list does not carry yet waits for it
+    const conv = shownConv(store.get());
+    jobs.watch((r.screen === 'messages' || r.screen === 'task') && conv ? conv.id : null);
+    if (opens(store.get())) {
+      openedId = conv.id;
+      openedCold = coldOn(store.get());
+      live.open(conv.id, { cold: openedCold });
+      // (the image limits are the composer's: a history page has none)
+      if (!limitsRead && !openedCold) void attachments.readLimits(conv.id).then(ok => { if (ok === true) limitsRead = true; });
+    } else if (!conv && openedId && !store.get().conversations.some(c => c.id === openedId)) {
+      // the last open session went (deleted) and nothing took its place: stop reading it
       openedId = null;
       live.leave();
     }
@@ -1022,14 +1067,6 @@ export function boot(win, host = {}) {
 
   // a bot from Discover's bots listing, by its id
   const botOf = id => itemById(store.get().discover, `bot:${id}`)?.source ?? null;
-  async function talkToNow(id) {
-    const bot = botOf(id);
-    if (!bot) return;
-    const r = await actions.talkTo(bot);
-    if (r.error) { store.dispatch('discoverStatus', { line: r.error, bad: true }); return; }
-    await live.refresh();
-    go({ screen: 'messages', id: r.id });
-  }
   // the editor's boxes are read by the ids the page drew them with: the bot's id and the revision it was drawn from
   async function saveBotNow(id) {
     const bot = botOf(id);
@@ -1045,13 +1082,6 @@ export function boot(win, host = {}) {
     else store.dispatch('discoverStatus', { line: made.error, bad: true });
   }
 
-  // New channel… in Where: create it, then Where names it; a refusal stays in the editor
-  async function commitNewChannel(name) {
-    const made = await channels.create(name);
-    if (made.error) { store.dispatch('editFailed', { error: made.error }); return; }
-    store.dispatch('cancelEdit');
-    store.dispatch('setDraftWhere', made.workspaceId);
-  }
   // a channel's roster editor: what the store holds ticked goes to the face
   async function commitRoster(e) {
     const done = e.which === 'agents' ? await channels.setAgents(e.workspaceId, e.ticked) : await channels.setBots(e.workspaceId, e.ticked);
@@ -1070,36 +1100,10 @@ export function boot(win, host = {}) {
     store.dispatch('startEdit', { kind: 'roster', which, workspaceId, choices, ticked: [...rostered] });
   }
 
-  // commit the open editor with what its inputs hold; a rename also reaches the host
+  // commit the open editor: a roster's ticks go to the face (the one editor with a ✓ since the rename went, one-entry plan 2)
   function commitEdit() {
     const e = store.get().edit;
-    if (e?.kind === 'roster') { void commitRoster(e); return; }
-    const values = Object.fromEntries([...root.querySelectorAll('.inline-edit [name]')].map(el => [el.name, el.value]));
-    if (e?.kind === 'newChannel') { void commitNewChannel(values.channel); return; }
-    store.dispatch('commitEdit', { values });
-    if (e?.kind === 'rename' && store.get().edit === null) void actions.rename(e.convId, values.title);
-  }
-
-  // the conversation on screen went away (archived or deleted): the first open one takes its place
-  function leaveIfOpen(id) {
-    const s = store.get();
-    if (s.route.screen === 'messages' && s.route.id === id) go({ screen: 'messages', id: firstOpen(s.conversations)?.id ?? null });
-  }
-  async function archiveNow(id, archived) {
-    if (!(await actions.archive(id, archived))) return;
-    await live.refresh();
-    if (archived) leaveIfOpen(id);
-  }
-  async function deleteNow(id) {
-    if (!(await actions.remove(id))) return;
-    await live.refresh();
-    leaveIfOpen(id);
-  }
-  async function forkNow(id) {
-    const child = await actions.fork(id);
-    if (!child) return;
-    await live.refresh();
-    go({ screen: 'messages', id: child });
+    if (e?.kind === 'roster') void commitRoster(e);
   }
 
   // the second press of a two-step confirm
@@ -1125,7 +1129,6 @@ export function boot(win, host = {}) {
     if (c.action === 'stopJob') { confirmFrom = { id: `job-stopping-${c.id}` }; void stopJobNow(c.conv, c.id); }
     store.dispatch('cancelConfirm');
     if (c.action === 'stopGravit') void actions.stop(c.id);
-    if (c.action === 'deleteConv') void deleteNow(c.id);
     if (c.action === 'stopChild') void actions.stopChild(c.parent, c.id, c.label);
     // Revoke… and Disconnect…, asked twice: then their sheet, on a page that signs
     if (c.action === 'revoke' && signs()) void sheet.open('revoke', { name: c.name, address: c.address });
@@ -1327,9 +1330,10 @@ export function boot(win, host = {}) {
     void findConnectWallets();
   }
 
-  // the draft on screen, serialized against its conversation's channel (or New message's Where), cleared as it goes; a
-  // failure puts the whole draft, chips and files and all, back under the key it came from. Each refusal before the call
-  // keeps the draft as it stands. restaged: this send follows the re-upload of a receipt the host dropped (D18)
+  // the draft on screen to Gravit's conversation (one-entry plan 2), serialized against its channel (none: the conversation lives
+  // outside every checkout), cleared as it goes; a failure puts the whole draft, chips and files and all, back under the key it
+  // came from. Each refusal before the call keeps the draft as it stands. restaged: this send follows the re-upload of a
+  // receipt the host dropped (D18)
   async function sendNow({ restaged = false } = {}) {
     const s = store.get();
     const key = draftKey(s);
@@ -1337,28 +1341,19 @@ export function boot(win, host = {}) {
     const files = filesOf(key);
     if (isBlank(runs) && !files.length) return;
     const refuse = line => store.dispatch('hostStatus', { line, bad: true });
-    // the empty state (no conversation, no New message) has nowhere to send: said, the draft kept as it stands
+    // no conversation to write to (the tasks loading, or it is off): said, the draft kept as it stands
     if (key === 'empty') { refuse(said('status.openFirst')); return; }
-    // the room is a bot chip's, or an @ the operator typed (a chip reads as a space between words): a file or
-    // conversation chip's @ never sends to it alone. Files go to Gravit alone (D20): a bot chip with them is refused, and
-    // a typed @word beside them is a prompt
-    const toBot = hasChip(runs, 'bot');
-    if (files.length && toBot) { refuse(said('status.filesToGravit')); return; }
-    const room = !files.length && (toBot || isMentionText(runs.map(r => (r.type === 'text' ? r.text : ' ')).join('')));
-    // a room's bots cannot read a conversation chip (O9): a draft bound for the room with one is refused, kept as it stands
-    const toRoom = toBot || (room && !s.draft && !!currentConversation(s)?.channel);
-    if (toRoom && hasChip(runs, 'conversation')) { refuse(said('status.convsToGravit')); return; }
-    // a file not up yet (one New message moved here, a receipt being staged again) uploads now and holds the send too
+    // a file not up yet (one added before the conversation was known, a receipt being staged again) uploads now and holds the send too
     const waiting = isConvKey(key) ? files.filter(f => f.kind === 'file' && f.status === 'ready') : [];
     for (const f of waiting) startUpload(key, f.key);
     const held = blocking(filesOf(key));
     if (held) { refuse(held === 'uploading' ? said('status.uploading') : said('status.notUploaded')); if (waiting.length) render(); return; }
     if (isConvKey(key) && refusesImages.has(key) && hasImage(files)) { notes.set(key, modelLineFor(key)); render(); return; }
-    const workspaceId = s.draft ? s.draft.where : currentConversation(s)?.channel?.workspaceId ?? null;
+    const workspaceId = currentConversation(s)?.channel?.workspaceId ?? null;
     const text = serialize(runs, serialContext({ channels: s.channels, workspaceId })).trim();
     // a / line with files: a command the kept rows know takes them only when its input says so (D12); a name the rows do
     // not know is the host's to judge
-    if (!s.draft && files.length && text.startsWith('/')) {
+    if (files.length && text.startsWith('/')) {
       const name = text.slice(1).split(/\s/)[0];
       const row = (composerReads.keptCommands(currentConversation(s)) ?? []).find(r => r.name === name);
       if (row && row.input?.attachments !== true) { refuse(said('status.takesNoFiles', { name })); return; }
@@ -1385,30 +1380,7 @@ export function boot(win, host = {}) {
     // the draft left the screen during the read: it goes back under its key, unsent (the send goes to the screen's)
     if (data.size && draftKey(store.get()) !== key) { back(); return; }
     const parts = contentParts('', files, k => data.get(k));
-    if (s.draft) {
-      // New message: the draft moves to the conversation as it is made, its files upload there, then the first words
-      const got = await actions.newConversationWith({
-        title: s.draft.title, workspaceId: s.draft.where, text, attachmentRefused,
-        onCreated: id => {
-          putDraft(id, runs, files);
-          if (notes.has(key)) { notes.set(id, notes.get(key)); notes.delete(key); }
-        },
-        prepare: async id => {
-          const ups = await Promise.all(filesOf(id).filter(f => f.kind === 'file').map(f => startUpload(id, f.key)));
-          if (!ups.every(Boolean)) return null;
-          const staged = filesOf(id).filter(f => files.some(g => g.key === f.key));
-          return contentParts('', staged, k => data.get(k));
-        },
-      });
-      if (!got.id) { back(); return; }
-      if (got.sent) { putDraft(got.id, [], filesOf(got.id).filter(f => !files.some(g => g.key === f.key))); sentOff(got.id); }
-      else refused(got.id, reason);
-      await live.refresh();
-      go({ screen: 'messages', id: got.id });
-      live.promote(got.id);
-      return;
-    }
-    const sent = await sendText(text, { room, attachments: parts, attachmentRefused });
+    const sent = await sendText(text, { attachments: parts, attachmentRefused });
     if (sent) { sentOff(key); render(); return; }
     back();
     if (RESTAGED.has(reason) && !restaged) { void restage(key, reason); return; }
@@ -1446,12 +1418,28 @@ export function boot(win, host = {}) {
     const say = doc.getElementById('say');
     if (say) { say.focus(); editor.place(say, lengthOf(runs)); }
   }
-  // one message to the open conversation by the composer's own path (the composer, the stock drawer's Ask, a follow-up): what
-  // actions.send answers, the conversation promoted to a follow when it prompted; the composer's words are never touched
-  async function sendText(text, opts) {
-    const sent = await actions.send(text, opts);
-    if (sent && (sent.sent === 'prompt' || sent.sent === 'say')) live.promote(sent.sessionId);
+  // one message to Gravit's conversation by the composer's own path (the composer, the stock drawer's Ask, a follow-up): what
+  // actions.send answers, the conversation promoted to a follow when it prompted; the composer's words are never touched.
+  // Nothing goes while there is none to write to (off Messages, the tasks loading, the conversation off)
+  async function sendText(text, opts = {}) {
+    const sent = await actions.send(text, { ...opts, sessionId: writeTo(store.get()) });
+    if (sent && sent.sent === 'prompt') live.promote(sent.sessionId);
     return sent;
+  }
+
+  // a Lunhui follow-up (a composed answer's choice, the stock drawer's Ask): on Messages its words as they are; on a task's page
+  // the same words tagged with the task (followUpText), to Gravit's conversation — which passes them to the same worker — and
+  // the page goes to Messages to watch it; from anywhere else (a history page draws none) nothing
+  function followUp(text) {
+    const s = store.get();
+    if (s.route.screen === 'task') {
+      if (!s.tasks.conversation) return;
+      const task = s.tasks.items.find(x => x.id === s.route.id) ?? { id: s.route.id, title: s.conversations.find(c => c.id === s.route.id)?.title ?? '' };
+      go({ screen: 'messages', id: null });
+      void sendText(followUpText(task, text));
+      return;
+    }
+    void sendText(text);
   }
 
   // ---- the draft's files: added (picked, pasted, dropped), uploaded on a conversation, removed, retried ----
@@ -1547,11 +1535,11 @@ export function boot(win, host = {}) {
 
   // ---- the / and @ menus: opened, filtered and moved in #composer-menu alone, never by a page render ----
   const sameTrig = (a, b) => !!a && !!b && a.kind === b.kind && a.from === b.from && a.query === b.query && a.key === b.key;
-  // the conversation the composer writes to (none on New message), its channel, and that channel's folder relative to the
-  // root (undefined with no root, or a conversation in no channel)
+  // the conversation the composer writes to, its channel, and that channel's folder relative to the root (undefined with no
+  // root, or a conversation in no channel)
   function menuContext(s) {
-    const conv = s.draft ? null : currentConversation(s);
-    const workspaceId = s.draft ? s.draft.where : conv?.channel?.workspaceId ?? null;
+    const conv = currentConversation(s);
+    const workspaceId = conv?.channel?.workspaceId ?? null;
     const { repoRoot, cwd } = serialContext({ channels: s.channels, workspaceId });
     const root = repoRoot == null ? null : repoRoot.replace(/\/+$/, '');
     const dir = cwd == null ? null : cwd.replace(/\/+$/, '');
@@ -1675,10 +1663,7 @@ export function boot(win, host = {}) {
   }
 
   const act = {
-    open: el => { store.dispatch('setListOpen', false); go({ screen: 'messages', id: el.dataset.id }); },
-    startDraft: () => { store.dispatch('startDraft', { now: now() }); go({ screen: 'messages', id: 'new' }); },
-    // a channel's page: New round is a new message in that channel; Retry reads it again
-    newRound: el => { store.dispatch('startDraft', { now: now(), where: el.dataset.id }); go({ screen: 'messages', id: 'new' }); },
+    // a channel's page: Retry reads it again
     channelRetry: el => { void channels.overview(el.dataset.id); },
     editRoster: el => { void editRoster(el.dataset.which, el.dataset.id); },
     // Discover: a shelf read again, the CLI agents' three writes
@@ -1691,26 +1676,15 @@ export function boot(win, host = {}) {
     runSheetField: el => { void runSheet.field(el.name, el.value); },
     runSheetCancel: () => runSheet.close(),
     runSheetRun: () => { void runSheet.run(); },
-    // a bot: Talk to opens its conversation, Edit opens its editor (the model routes read for it)
-    talkTo: el => { void talkToNow(el.dataset.id); },
+    // a bot: Edit opens its editor (the model routes read for it)
     editBot: el => { store.dispatch('startEdit', { kind: 'bot', id: el.dataset.id }); void discover.modelChoices(); },
-    cancelDraft: () => { store.dispatch('cancelDraft'); go(store.get().route); },
     toggleRail: () => store.dispatch('toggleRail'),
     toggleList: () => store.dispatch('toggleList'),
-    toggleGroup: el => store.dispatch('toggleGroup', el.dataset.key),
     // inline editors (they replaced prompt): a button starts one, ✓ or Enter commits it, × or Escape cancels it
-    changeWords: el => store.dispatch('startEdit', { kind: 'rename', convId: el.dataset.conv }),
     commitEdit: () => commitEdit(),
     cancelEdit: () => store.dispatch('cancelEdit'),
     // two-step confirms (they replaced confirm): the first press asks in place, the second acts
     stopGravit: el => store.dispatch('askConfirm', { action: 'stopGravit', id: el.dataset.conv }),
-    // the row actions: Fork opens the new conversation; Archive and Delete leave the screen when it was this one
-    fork: el => { void forkNow(el.dataset.conv); },
-    pin: el => { void actions.pin(el.dataset.conv); },
-    unpin: el => { void actions.unpin(el.dataset.conv); },
-    archive: el => { void archiveNow(el.dataset.conv, true); },
-    unarchive: el => { void archiveNow(el.dataset.conv, false); },
-    deleteConv: el => store.dispatch('askConfirm', { action: 'deleteConv', id: el.dataset.conv }),
     // the research surfaces: a child stopped by its parent (asked twice), a member's trace read on opening
     stopChild: el => store.dispatch('askConfirm', { action: 'stopChild', id: el.dataset.child, parent: el.dataset.parent, label: el.dataset.label }),
     openTrace: el => { void traces.open(el.dataset.conv, el.dataset.msg); },
@@ -1720,8 +1694,8 @@ export function boot(win, host = {}) {
     // again. One read of each a call; a stored line is a said and needs none. A Run's title is the table's at its creation
     reword: () => {
       void live.refresh();
-      const r = store.get().route;
-      if (r.screen === 'messages' && typeof r.id === 'string' && r.id !== 'new' && r.id === openedId) live.open(r.id);
+      const id = onScreenId(store.get());
+      if (id !== null && id === openedId) live.open(id, { cold: openedCold });
       store.dispatch('lunhuiForgetFailed');
     },
     // a composed answer's view that could not be read: forget it, and the render asks again
@@ -1732,9 +1706,9 @@ export function boot(win, host = {}) {
     // a follow-up: a stock opens its drawer, anything else is one message through the composer's path
     lunhuiChoice: el => {
       if (el.dataset.code) store.dispatch('lunhuiStockOpen', { key: el.dataset.key, code: el.dataset.code });
-      else if (el.dataset.label) void sendText(el.dataset.label);
+      else if (el.dataset.label) followUp(el.dataset.label);
     },
-    lunhuiOpenRun: el => go({ screen: 'channel', id: el.dataset.id }),
+    lunhuiOpenRun: el => go({ screen: 'strategy', id: el.dataset.strategy }),
     lunhuiStockClose: () => store.dispatch('lunhuiStockClose'),
     // a pointer on a menu row chooses it (the press kept the editor's focus): the row under the press, though an answer
     // that landed before the click redrew the rows
@@ -1743,7 +1717,7 @@ export function boot(win, host = {}) {
       pressedItem = null;
       if (menu) chooseItem(item);
     },
-    lunhuiAsk: () => { const text = askText(store.get()); if (text) void sendText(text); },
+    lunhuiAsk: () => { const text = askText(store.get()); if (text) followUp(text); },
     lunhuiMarkets: () => { const code = stockCode(store.get().lunhui?.stock?.code); if (code) go({ screen: 'markets', id: marketKey(code) }); },
     // a composed answer's picks, by the answer's id: a verdict tile (pressed again, it closes), Counts or By change, a bucket
     lunhuiUi: el => {
@@ -1766,6 +1740,11 @@ export function boot(win, host = {}) {
       if (!complete(batch)) { store.dispatch('hostStatus', { line: said('status.answerAll'), bad: true }); return; }
       void actions.answer(m.id, batch);
     },
+    // a line of the rail of tasks: opened or folded by the page (its summary toggled first), held by its task id; Stop and
+    // Continue post once while one is in flight (host/tasks.js). A gate on a line is answered by answer and answerQuestion
+    toggleTask: el => { if (el.parentElement?.open) tasksOpen.add(el.dataset.task); else tasksOpen.delete(el.dataset.task); },
+    taskStop: el => { void tasks.stop(el.dataset.task); },
+    taskResume: el => { void tasks.resume(el.dataset.task); },
     toggleDetails: () => store.dispatch('toggleDetails'),
     // a figures pill: Details open (never closed by it) at Usage; Details open already changes no state, so a render is asked
     // for to carry the scroll
@@ -1957,13 +1936,12 @@ export function boot(win, host = {}) {
     removeAsked: el => markets.unwatch(el.dataset.id),
     openMarket: el => go({ screen: 'markets', id: el.dataset.id }),
     setRange: el => markets.range(el.dataset.id, el.dataset.value),
-    // a new message in the root channel with the market named in the composer: the operator says what to look for
+    // Gravit's conversation with the market named in the composer: the operator says what to look for
     handToGravit: el => {
       const s = store.get();
       const asset = handWordsOf(s.markets, s.account, el.dataset.id, now());
       if (!asset) return;
-      store.dispatch('startDraft', { now: now() });
-      go({ screen: 'messages', id: 'new' });
+      go({ screen: 'messages', id: null });
       putWords(asset.name && asset.name !== asset.symbol ? t('markets.lookAt.named', { symbol: asset.symbol, name: asset.name }) : t('markets.lookAt.symbol', { symbol: asset.symbol }));
     },
     // the owner device: the pair box's code, Sign in, and — on a page that signs — Settings › Devices' Sign out and Let it sign
@@ -2065,7 +2043,7 @@ export function boot(win, host = {}) {
     // a key's eye in the operator's bubble shows or hides it (display only); its id keeps the focus on it as its label flips
     // (a reveal is lost when an optimistic bubble is re-keyed to its seq id: D26 accepts it)
     toggleSecret: el => {
-      const open = currentConversation(store.get());
+      const open = shownConv(store.get());
       const id = el.dataset.secret ?? '';
       const cut = id.lastIndexOf('-');
       if (!open || cut < 0) return;
@@ -2086,19 +2064,21 @@ export function boot(win, host = {}) {
   };
 
   root.addEventListener('click', ev => {
+    // a row or a hit followed from the side panel folds it on a narrow window, the page it names already on screen too
+    if (ev.target.closest('.list-body a[href]')?.tagName === 'A') store.dispatch('setListOpen', false);
     const el = ev.target.closest('[data-action]');
     if (!el || el.tagName === 'FORM' || el.tagName === 'INPUT' || el.tagName === 'SELECT') return;
     const fn = act[el.dataset.action];
     if (!fn) return;
-    if (el.tagName === 'A' && el.dataset.action !== 'open') return;
-    if (el.tagName === 'A') ev.preventDefault();
+    // a link is the browser's to follow: the route moves on its hashchange
+    if (el.tagName === 'A') return;
     // a disclosure's own key (Trace): its action re-renders the page before the browser would toggle the <details>, so
     // the page toggles it first, where the render's keep-open pass finds it; the action runs on opening only
     if (el.tagName === 'SUMMARY' && el.parentElement?.tagName === 'DETAILS') {
       ev.preventDefault();
       el.parentElement.open = !el.parentElement.open;
-      // (a job's summary runs on closing too: it lets the follow go)
-      if (!el.parentElement.open && el.dataset.action !== 'openJob') return;
+      // (a job's summary runs on closing too: it lets the follow go; a task's line, to be folded again)
+      if (!el.parentElement.open && el.dataset.action !== 'openJob' && el.dataset.action !== 'toggleTask') return;
     }
     fn(el);
   });
@@ -2121,7 +2101,6 @@ export function boot(win, host = {}) {
   // typing: the composer keeps its words outside the store; the title, the searches and the fields go through it
   function typed(el) {
     if (sayBoxOf(el)) { setRuns(editor.read(sayBoxOf(el))); menuTick(); }
-    else if (el.dataset?.action === 'draftTitle') store.dispatch('setDraftTitle', el.value);
     else if (el.dataset?.action === 'mkQuery') { store.dispatch('setMarketsQuery', el.value); searchSoon(el.value); }
     else if (el.dataset?.action === 'tradeQuery') tradeSoon(el.value);   // trade.query moves the query (the box keeps the words)
     else if (el.dataset?.action === 'dq') store.dispatch('setDiscoverQuery', el.value);
@@ -2158,9 +2137,6 @@ export function boot(win, host = {}) {
   root.addEventListener('focusout', ev => { if (!refocusing && ev.target?.isConnected !== false && tickOf(ev.target) && !inRail(ev.relatedTarget)) hoverRail(null, null); });
   root.addEventListener('change', ev => {
     const el = ev.target;
-    if (el.tagName === 'SELECT' && el.dataset?.action === 'draftWhere') {
-      if (el.value === '__new') store.dispatch('startEdit', { kind: 'newChannel' }); else store.dispatch('setDraftWhere', el.value);
-    }
     if (el.type === 'checkbox' && el.name === 'roster') store.dispatch('toggleRosterTick', { value: el.value, on: el.checked === true });
     if (isField(el) && !typesWords(el)) changeField(el.name, fieldValueOf(el));
     if (el.dataset?.action === 'runSheetField' && !typesWords(el)) act.runSheetField(el);
@@ -2273,11 +2249,18 @@ export function boot(win, host = {}) {
       doc.getElementById('cq')?.focus();
       return;
     }
-    const lastOpen = s.lastConv && s.conversations.some(c => c.id === s.lastConv && !c.archived) ? s.lastConv : null;
     searchFocus = true;
-    go({ screen: 'messages', id: lastOpen ?? firstOpen(s.conversations)?.id ?? null });
+    go({ screen: 'messages', id: null });
     store.dispatch('setListOpen', true);
     doc.getElementById('cq')?.focus();
+  }
+  // ⌥⌘N: the conversation's composer takes focus, its caret after what it holds; from another screen once Messages draws it
+  function focusComposer() {
+    const s = store.get();
+    const say = doc.getElementById('say');
+    if (s.route.screen === 'messages' && say) { say.focus(); editor.place(say, lengthOf(currentRuns())); return; }
+    sayFocus = true;
+    go({ screen: 'messages', id: null });
   }
   doc.addEventListener('keydown', ev => {
     // while an IME composes (pinyin), its keys are the composition's: Esc dismisses the candidate, never the query
@@ -2300,7 +2283,7 @@ export function boot(win, host = {}) {
       // ⌘/ opens the shortcut sheet and closes it again; another key closes it first
       if (chord === 'shortcuts') { store.dispatch(s.shortcuts ? 'closeShortcuts' : 'openShortcuts'); return; }
       if (s.shortcuts) store.dispatch('closeShortcuts');
-      if (chord === 'newConversation') act.startDraft();
+      if (chord === 'writeToGravit') focusComposer();
       else if (chord === 'settings') store.dispatch('openSettings');
       return;
     }
@@ -2383,7 +2366,6 @@ export function boot(win, host = {}) {
     const onTo = { 'identity-app-token': '#identity-bot-token', 'identity-photon-project': '#identity-photon-secret', 'identity-photon-secret': '#identity-photon-phone' };
     if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && Object.hasOwn(onTo, a?.id ?? '')) { ev.preventDefault(); root.querySelector(onTo[a.id])?.focus?.(); return; }
     if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && ['identity-token', 'identity-bot-token', 'identity-photon-phone'].includes(a?.id)) { ev.preventDefault(); act.identityNext(); return; }
-    if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && store.get().edit && a?.closest?.('.inline-edit') && a.tagName !== 'BUTTON') { ev.preventDefault(); commitEdit(); }
   });
 
   // a hidden tab stops everything — the Markets polls and the face's wire, the Account's read, and both streams with the market a
@@ -2396,6 +2378,7 @@ export function boot(win, host = {}) {
     if (doc.hidden) { stream.close(); marketStream.close(); } else { stream.open(); marketStream.open(); }
   });
   store.subscribe((s, type) => {
+    adoptEmptyDraft(s);
     // the live layer back (connected again after a drop, or for the first time): thumb reads a fence stopped go again
     const linked = s.status?.connected === true;
     if (linked && !connected) attachments.reconnected?.();
@@ -2420,12 +2403,11 @@ export function boot(win, host = {}) {
     const otherClosed = type === 'sheetClose' && sheetKind !== 'order';
     sheetKind = s.sheet?.kind ?? null;
     if (type === 'ownerStanding' || otherClosed) schedule(resumeTicket, 0);
-    if (type !== 'hostList') return;
-    // the list answered a deep link, or there was no conversation on screen: open one
-    if (wanted && s.conversations.some(c => c.id === wanted)) { const id = wanted; wanted = null; go({ screen: 'messages', id }); }
-    // the conversation on screen left the list (deleted here or in another tab)
-    else if (s.route.screen === 'messages' && s.route.id && s.route.id !== 'new' && !s.conversations.some(c => c.id === s.route.id)) go({ screen: 'messages', id: firstOpen(s.conversations)?.id ?? null });
-    else if (s.route.screen === 'messages' && s.route.id === null && firstOpen(s.conversations)) go({ screen: 'messages', id: firstOpen(s.conversations).id });
+    if (type !== 'hostList' && type !== 'hostListFailed' && type !== 'tasksLoaded' && type !== 'tasksOff' && type !== 'tasksFailed') return;
+    if (type === 'hostList') void tasks.refresh();
+    // the list or the tasks answered: an old link waiting on them lands, the session on screen the list now carries opens (or,
+    // gone from it, is let go), a strategy page whose channel is now known reads it — each once, by follow()
+    if (followOwed(s)) follow();
   });
   // a module's Run reads Running while its conversation runs, and settles on the listing when it stops
   modules.trackRuns();
@@ -2436,7 +2418,7 @@ export function boot(win, host = {}) {
   follow();
   render();
   // reword is the Language switch's (plan 7 Task 9 calls act.reword after setTable); on the store for the tests that drive it
-  return Object.assign(store, { timers, live, reword: act.reword, actions, markets, channels, discover, owner, sheet, trade, walletSend, sellMany, identity });
+  return Object.assign(store, { timers, live, reword: act.reword, actions, markets, channels, tasks, discover, owner, sheet, trade, walletSend, sellMany, identity });
 }
 
 if (typeof window !== 'undefined' && window.document) boot(window);

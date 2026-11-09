@@ -14,12 +14,9 @@ export function emptyState() {
     textFont: '',
     codeFont: '',
     route: { screen: 'messages', id: null },
-    lastConv: null,
     railCollapsed: false,
     // the narrow-screen list is an in-page disclosure, never a saved preference
     listOpen: false,
-    collapsed: {},
-    draft: null,
     // files are being dragged over the page: the drop overlay shows over a screen with a composer (plan 4)
     dropping: false,
     detailsOpen: false,
@@ -29,16 +26,17 @@ export function emptyState() {
     // a room member's trace by the answer it explains, under its conversation (host/traces.js)
     traces: {},
     channels: [],
+    // the channels read has answered — listed, empty or failed (host/live.js): an unknown strategy is then not found, not waited on
+    channelsRead: false,
     // the operator's images in the thread by attachment id: a data: URL, or null for one the host cannot give back (plan 4)
     thumbs: {},
     // the image open at full size over the page, { attachmentId, name } (its src is its thumb), or null (plan 4)
     lightbox: null,
     // the shortcut sheet over the page, { q } (its box's words), or null (keys.js; ⌘/ opens and closes it)
     shortcuts: null,
-    // the workspace's pinned conversation ids (host/live.js, workspace/follow)
-    pinned: [],
-    // the channel page's read (host/channels.js)
-    channel: { id: null, status: 'idle', data: null, at: null },
+    // a strategy page's reads (host/channels.js): its channel's overview, and the paper positions of the venue its status.yaml
+    // names
+    channel: { id: null, status: 'idle', data: null, at: null, positions: { status: 'idle', venue: null, rows: [], message: null } },
     bots: [],
     status: { line: said('status.connecting'), bad: false, connected: false },
     orphanGates: {},
@@ -114,6 +112,9 @@ export function emptyState() {
     // the open conversation's background jobs (host/jobs.js): the one watched, its rows, the job open in Details, the finished
     // ids cleared by conversation; a job's output stays in host/jobs.js
     jobs: { convId: null, rows: [], open: null, cleared: {} },
+    // the conversation's tasks (host/tasks.js): GET /data/tasks as last read — `off` when the face has no conversation, `failed`
+    // keeping the last items — and the ids with a Stop or Continue in flight
+    tasks: { status: 'loading', conversation: null, items: [], desk: { scheduled: [], lines: [] }, at: null, busy: [] },
     // the owner device (host/owner.js): whether this page signs for the Account, its key's id there, the Account's last
     // refusal to it, a pairing or sign-out in the air
     owner: { role: 'unknown', kid: '', refusal: null, busy: false },

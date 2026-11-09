@@ -2,7 +2,7 @@
 // a composed message names its run and the view modules it reads; the open conversation's answers ask the face's view
 // route (GET /data/lunhui/view) once per key, and the answer lands in the lunhui slice — loaded, or failed with its words,
 // which the answer draws under its summary with a Retry. Pure but for the read it is handed.
-import { firstOpen } from './sessions.js';
+import { onScreenId } from './sessions.js';
 import { cursorPatch } from '../render/lunhui/intraday.js';
 import { t, said } from '../i18n/words.js';
 import { isChiNext } from '../wire/china.js';
@@ -21,11 +21,11 @@ export function viewOf(m) {
   return { key: viewKey(want), ...want };
 }
 
-// the open conversation, on Messages only (the render's currentConversation, without the screens it imports)
+// the session whose transcript is on screen: the conversation on Messages, a task's or a history session's on theirs
 function openConversation(state) {
-  if (state?.route?.screen !== 'messages') return null;
-  const all = Array.isArray(state.conversations) ? state.conversations : [];
-  return all.find(c => c.id === state.route.id) ?? firstOpen(all) ?? null;
+  const id = state?.route ? onScreenId(state) : null;
+  const all = Array.isArray(state?.conversations) ? state.conversations : [];
+  return id ? all.find(c => c.id === id) ?? null : null;
 }
 
 // the open conversation's composed answers whose view has no entry yet, each key once

@@ -85,6 +85,8 @@
  * @property {number} [from] - telegram bubbles: the sender's Telegram user id.
  * @property {number} [chat] - telegram bubbles: the Telegram chat the message came in.
  * @property {number} [messageId] - telegram bubbles: the message's id in that chat.
+ * @property {"telegram"|"slack"|"imessage"} [network] - telegram bubbles: the network an account inbox's text came through.
+ * @property {string} [said] - telegram bubbles: a reply's own words, apart from the context it replies to.
  * @property {string} [order] - desk-line `schedule`: the standing order that fired.
  * @property {string} [firing] - desk-line `schedule`: the firing's key.
  * @property {string} [date] - desk-line `schedule`: the trading date it fired for.
@@ -357,9 +359,12 @@ function bubble(role, message, base, interrupted) {
     interrupted,
     source: kind,
     form,
+    // a task's message (one-entry plan 2): the task a relay names and the status it reports, as the face writes them
+    ...(kind === "task" ? pick(src, ["task", "status"], isId) : {}),
     ...(mention !== undefined && mention.length > 0 ? { mention } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
-    ...(role === "operator" && kind === "telegram" ? pick(src, PHONE_FIELDS, Number.isSafeInteger) : {}),
+    ...(role === "operator" && kind === "telegram"
+      ? { ...pick(src, PHONE_FIELDS, Number.isSafeInteger), ...pick(src, ["network"], isPhoneNetwork), ...phoneSaid(message) } : {}),
     thinking: thinking === "" ? undefined : thinking,
   };
 }
@@ -367,8 +372,24 @@ function bubble(role, message, base, interrupted) {
 /** A phone message's fields: the Telegram sender, the chat and the message's
  * id there - integers, as the retired Telegram bridge wrote them. A text the
  * account's inbox brings (src/phone-bridge.ts) carries `network` and a string
- * `messageId` instead, which the bubble does not show, so none of these is picked. */
+ * `messageId` instead: the bubble keeps the network ({@link isPhoneNetwork}) and not the id, so none of these is picked. */
 const PHONE_FIELDS = ["from", "chat", "messageId"];
+
+/** The networks a phone text comes through (src/phone-bridge.ts): its bubble keeps the one it names. */
+const isPhoneNetwork = (value) => value === "telegram" || value === "slack" || value === "imessage";
+
+/** The line a phone reply's context opens with (src/desk-conversation.ts `CONTEXT_HEAD`). */
+const CONTEXT_HEAD = "the message this replies to:"; // en-kept: the face's wire text, never on screen
+
+/** A phone reply's own words (src/desk-conversation.ts `phoneContent`): a text that replies to an alert is three text
+ * parts - the provenance line, the context headed {@link CONTEXT_HEAD}, then the operator's words - kept here as `said`,
+ * since the joined text no longer says where the context ends. Any other shape keeps nothing.
+ * @param {unknown} message @returns {{said?: string}} */
+function phoneSaid(message) {
+  const parts = isObject(message) && Array.isArray(message.content) ? message.content.filter((b) => isObject(b) && b.type === "text" && typeof b.text === "string") : [];
+  if (parts.length !== 3 || !parts[1].text.startsWith(`${CONTEXT_HEAD}\n`)) return {};
+  return { said: parts[2].text.trim() };
+}
 
 /** A desk line's fields by its kind: a firing's standing order, its key and
  * the trading date it fires for; an alert's id and its symbol - strings. */

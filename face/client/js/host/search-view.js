@@ -1,10 +1,10 @@
-// face/client/js/host/search-view.js — the conversation list's search (plan 2 of the dsh UI port). Pure: no DOM, no store.
+// face/client/js/host/search-view.js — the side panel's search (plan 2 of the dsh UI port; render/side.js). Pure: no DOM, no store.
 // A query matches in two places: the titles the list already holds (at once, no wire) and the words inside the
 // conversations (GET /data/search). This merges the two into one list of at most twenty, title matches first, and names
 // the phase the panel is in. An item whose session the list does not hold is dropped (D1); a title match with no content
 // hit shows its preview line (D2). The preview is taken from the host's one-message page (conv.preview), else the last
-// spoken message's text - previewOf's order without its sender prefix, kept here so a host view imports no render code.
-import { channelLabel } from './list-view.js';
+// spoken message's text, without its sender's name.
+import { channelLabel } from './rail-view.js';
 import { isDeskPreset } from '../wire/speaker.js';
 import { attachmentsLine } from '../composer/files.js';
 import { t } from '../i18n/words.js';

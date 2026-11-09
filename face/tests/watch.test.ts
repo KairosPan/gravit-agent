@@ -15,6 +15,7 @@ import {
 } from "../src/desk.ts";
 import { alertText, WHY_INSTRUCTIONS, WHY_OUTSIDE_LINE } from "../src/alert-text.ts";
 import type { DeliverResult, PostResult } from "../src/desk-conversation.ts";
+import type { DeskLine } from "../src/conversation.ts";
 import type { EdgarFetch } from "../src/edgar.ts";
 import type { NewsAnswer } from "../src/market-news.ts";
 import { bjDate } from "../src/et.ts";
@@ -93,6 +94,8 @@ interface Harness {
   budgetCalls: () => number;
   lines: (pattern: RegExp) => string[];
   alertRecords: () => Promise<Record<string, unknown>[]>;
+  /** What the watch noted for the conversation (`deps.note`). */
+  notes: DeskLine[];
 }
 interface HarnessOpts {
   start: string;
@@ -126,6 +129,7 @@ async function harness(o: HarnessOpts): Promise<Harness> {
   const sent: Harness["sent"] = [];
   const posts: Harness["posts"] = [];
   const logs: string[] = [];
+  const notes: DeskLine[] = [];
   let n = 0;
   let budgetCalls = 0;
   const calendars = {
@@ -139,6 +143,7 @@ async function harness(o: HarnessOpts): Promise<Harness> {
       const k = n++;
       return o.deliver === undefined ? { sent: [`telegram:${100 + k}`] } : o.deliver(text, k);
     },
+    note: (line) => { notes.push(line); },
     post: async (input) => {
       posts.push(input);
       return o.post === undefined ? { opened: true, sessionId: "s" } : o.post(input);
@@ -155,7 +160,7 @@ async function harness(o: HarnessOpts): Promise<Harness> {
     log: (line) => { logs.push(line); },
   });
   return {
-    wall, watch, source, sent, posts, logs, home, root, calendars,
+    wall, watch, source, sent, posts, logs, home, root, calendars, notes,
     budgetCalls: () => budgetCalls,
     lines: (pattern) => sent.map((s) => s.text).filter((t) => pattern.test(t)),
     alertRecords: async () => {
@@ -573,6 +578,43 @@ test("a 09:30 burst records twelve, sends six, posts one annotation and batches 
   assert.equal(h.watch.status().pending, 0);
   await until("the batch record", async () => (await h.alertRecords()).some((r) => r.kind === "batch"));
   await h.watch.dispose();
+});
+
+test("a sent alert is noted once; a suppressed one is not", async () => {
+  const names = Array.from({ length: 8 }, (_, i) => `N${i}`);
+  const h = await harness({ start: "2026-11-30T14:30:05Z", files: { "desk/levels.yml": names.map((s) => level(s, "stop", 100, "cross_down")).join("") } });
+  for (const s of names) h.source.tables.us.set(s, us(90, "2026-11-30T14:30:01Z"));
+  await h.wall.advance(0);
+  await until("six alerts", () => h.sent.length === 6);
+  await until("eight records", async () => (await h.alertRecords()).filter((r) => r.kind === "alert").length === 8);
+  const alerts = (await h.alertRecords()).filter((r) => r.kind === "alert");
+  const sent = alerts.filter((r) => r.decision === "send");
+  assert.deepEqual(h.notes, sent.map((r, i) => ({ kind: "alert", alert: r.id, symbol: r.symbol, label: "stop", text: h.sent[i].text })),
+    "each sent alert once, with its id, symbol, rule and the text the phone got; the two the cap held, not");
+  /* the cap's batch at 10:00 is one line under the batch's id */
+  h.wall.set("2026-11-30T14:59:58Z");
+  await h.wall.advance(5_000);
+  await until("the batch", () => h.sent.length === 7);
+  await until("the batch record", async () => (await h.alertRecords()).some((r) => r.kind === "batch"));
+  const batch = (await h.alertRecords()).find((r) => r.kind === "batch");
+  assert.equal(h.notes.length, 7);
+  assert.deepEqual(h.notes[6], { kind: "alert", alert: batch?.id, symbol: "N6,N7", label: "batch", text: h.sent[6].text });
+  await h.watch.dispose();
+  /* OFF and an outlet that refuses: suppressed or undelivered, noted nothing */
+  const off = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") } });
+  await writeOff(off.home, { by: "terminal" }, () => off.wall.now());
+  off.source.tables.us.set("NVDA", us(169, "2026-11-30T15:20:44Z"));
+  await off.wall.advance(0);
+  await until("NVDA's record", async () => (await off.alertRecords()).some((r) => r.kind === "alert"));
+  assert.deepEqual(off.notes, []);
+  await off.watch.dispose();
+  const refused = await harness({ start: "2026-11-30T15:20:45Z", files: { "desk/levels.yml": level("NVDA", "stop", 170, "cross_down") }, deliver: () => ({ undelivered: "paused" }) });
+  refused.source.tables.us.set("NVDA", us(169, "2026-11-30T15:20:44Z"));
+  await refused.wall.advance(0);
+  await until("NVDA's delivery record", async () => (await refused.alertRecords()).some((r) => r.kind === "delivered"));
+  assert.equal(refused.sent.length, 1);
+  assert.deepEqual(refused.notes, []);
+  await refused.watch.dispose();
 });
 
 test("an annotation post that hangs 5 s does not delay the next pass's alert", async () => {

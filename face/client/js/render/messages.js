@@ -1,26 +1,27 @@
-// face/client/js/render/messages.js — the Messages screen on the host's facts (spec 2026-10-19 §7 "Stage 1"):
-// a conversation (head, thread, composer, the status line), the new-message screen, the empty state, Details.
+// face/client/js/render/messages.js — the Messages screen on the host's facts (spec 2026-10-19 §7 "Stage 1"; one-entry plan 2
+// Task 5): Gravit's one conversation (head, thread, composer, the status line) with the rail of tasks on its right, its empty
+// state, one line while it is off, unknown or loading, and Details.
 import { esc, attrs, cls } from '../html.js';
-import { t, th, thn, sayOf, rawHtml } from '../i18n/words.js';
+import { t, th, sayOf, rawHtml } from '../i18n/words.js';
 import { icon } from '../icons.js';
 import { maskExcerpt } from '../mask.js';
 import { fmtDate } from '../time.js';
-import { avatar, cluster } from './avatars.js';
+import { avatar } from './avatars.js';
 import { renderThread, railHtml } from './thread.js';
-import { senderName } from './rail.js';
+import { renderTaskRail } from './tasks.js';
 import { HOST_NAME } from '../wire/speaker.js';
-import { kv, inlineEdit, confirmPair } from './controls.js';
-import { firstOpen } from '../host/sessions.js';
-import { needsAnswer } from '../messages.js';
+import { kv, confirmPair } from './controls.js';
+import { onScreenId } from '../host/sessions.js';
 import { childrenOf } from '../host/children-view.js';
-import { channelLabel } from '../host/list-view.js';
 import { renderMenu, menuAria, filesRail } from '../composer/view.js';
 import { statsView, pillsText, durationText, clockText } from '../host/turns-view.js';
 import { jobsView, metaLine, isLive } from '../host/jobs-view.js';
 
+// the conversation Messages writes to (plan 2 of one entry): the one /data/tasks names, once the list carries it; none while
+// it is unknown (the tasks loading, off or failed) or on any other screen, so no composer is ever bound to another session
 export function currentConversation(state) {
-  const id = state.route.screen === 'messages' ? state.route.id : null;
-  return state.conversations.find(c => c.id === id) ?? firstOpen(state.conversations);
+  const id = state.route.screen === 'messages' ? onScreenId(state) : null;
+  return id ? state.conversations.find(c => c.id === id) ?? null : null;
 }
 
 // the menu's slot above the box, the note (a refusal of the draft's files), then the box: the files rail, then the input row
@@ -54,36 +55,42 @@ function jobsChip(conv, state) {
   return `<button type="button" class="btn-sm jobs-chip" data-action="openJobs"><span class="${cls('jobs-dot', v.running.length > 0 && 'live')}"></span>${esc(v.chip)}${icon('chevDown', 14, 2.2)}</button>`;
 }
 
-function headRight(conv, state) {
+export function headRight(conv, state) {
   const working = conv.running ? `<span class="status up"><span class="status-dot"></span>${th('thread.working')}</span>` : '';
   return jobsChip(conv, state) + working + `<button type="button"${attrs({ class: cls('btn-sm', state.detailsOpen && 'pressed'), 'data-action': 'toggleDetails', 'aria-expanded': state.detailsOpen ? 'true' : 'false' })}>${th('details.title')}${icon('chevRight', 14, 2.2)}</button>`; // words-order: Details' name and its chevron
 }
 
+// the conversation's head reads Gravit, whatever the session's own title (a title is derived from a first prompt): it is not
+// renamed, forked or archived
 export function renderHead(conv, state) {
-  if (conv.kind !== 'group') return `<header class="head"><h1 class="head-title">${esc(maskExcerpt(conv.title))}</h1>${headRight(conv, state)}</header>`;
-  const names = conv.members.map(m => senderName(m, state)).join(' · '); // words-order: the members' names under the visual separator
-  return `<header class="head centered"><div class="head-right">${headRight(conv, state)}</div>${cluster(conv.members, 44, state)}` +
-    `<div class="head-task">${esc(maskExcerpt(conv.title))}</div><div class="dim members">${thn('thread.members', conv.members.length, { names })}</div></header>`;
+  return `<header class="head"><h1 class="head-title">${esc(HOST_NAME)}</h1>${headRight(conv, state)}</header>`;
 }
 
-// the new-message screen: a title, Where (a channel, the root first), the first words in the composer
-function draftScreen(state, composer) {
-  const d = state.draft;
-  const channels = [...(state.channels ?? [])].sort((a, b) => (b.isRoot ? 1 : 0) - (a.isRoot ? 1 : 0));
-  const options = channels.map(c => `<option value="${esc(c.workspaceId)}"${c.workspaceId === d.where ? ' selected' : ''}>${esc(channelLabel(c))}</option>`).join('') +
-    `<option value="__new">${th('thread.draft.newChannel')}</option>`;
-  // New channel… opens a name box under Where; Where keeps its channel until the new one exists
-  const naming = state.edit?.kind === 'newChannel' ? `<div class="to-line">${inlineEdit([{ name: 'channel', value: '', label: t('thread.draft.nameChannel') }], state.edit.error)}</div>` : '';
-  return `<main class="main"><header class="head centered draft"><button type="button" class="btn-sm head-cancel" data-action="cancelDraft">${th('common.cancel')}</button>${avatar('gravit', 44)}` +
-    `<label for="nm-title" class="sr-only">${th('thread.draft.title')}</label><input id="nm-title" class="title-input" type="text" autocomplete="off" placeholder="${th('thread.draft.titleHint')}" data-action="draftTitle"${attrs({ value: d.title })}>` +
-    `<div class="to-line"><label class="to-label" for="nm-where">${th('thread.draft.where')}</label><select id="nm-where" name="where" class="input small" data-action="draftWhere">${options}</select></div>${naming}</header>` +
-    `<div class="thread" id="thread"></div>${renderComposer(composerOf(composer))}${renderStatus(state.status)}</main>`;
+// the conversation /data/tasks named, while Messages carries no old link waiting to land: none while the tasks load or once
+// they are off; a failed re-read keeps the one last read
+function conversationId(state) {
+  const r = state.route;
+  return r.id || r.channel ? null : state.tasks?.conversation ?? null;
 }
 
-function emptyScreen(state, composer) {
+// no conversation to write to: Loading… while the tasks load (or an old link waits on them), else one line saying it is off
+// (FACE_ROUTER=0, or a face that names none) or could not be read — no composer, no rail
+function goneScreen(state) {
+  const status = state.tasks?.status;
+  const waiting = status === 'loading' || !!state.route.id || !!state.route.channel;
+  const line = waiting ? th('common.loading') : status === 'failed' ? th('thread.conversation.failed') : th('thread.conversation.off');
+  return `<main class="main"><header class="head"><h1 class="head-title">${esc(HOST_NAME)}</h1></header><div class="empty"><div class="dim">${line}</div></div>${renderStatus(state.status)}</main>`;
+}
+
+// the conversation's two columns: its own (the thread or the empty state, the composer, the foot) and the rail of tasks on its
+// right (folded above it on a narrow window, by CSS)
+const columns = (inner, state, now, page) => `<div class="conv-cols"><div class="conv-col">${inner}</div>${renderTaskRail(state, now, { open: page.tasksOpen })}</div>`;
+
+// the conversation known but not listed yet (a fresh one, nothing said): three plain prompts above the composer
+function emptyScreen(state, now, composer, page) {
   const chips = [t('thread.suggest.buy'), t('thread.suggest.follow'), t('thread.suggest.check')].map(words => `<button type="button" class="btn-sm" data-action="suggest"${attrs({ 'data-text': words })}>${esc(words)}</button>`).join('');
-  return `<main class="main"><header class="head"><h1 class="head-title">${esc(HOST_NAME)}</h1></header><div class="empty">${avatar('gravit', 56)}` +
-    `<div class="empty-title">${th('thread.empty.title')}</div><div class="suggest">${chips}</div></div>${renderComposer(composerOf(composer))}${renderStatus(state.status)}</main>`;
+  return `<main class="main"><header class="head"><h1 class="head-title">${esc(HOST_NAME)}</h1></header>` +
+    columns(`<div class="empty">${avatar('gravit', 56)}<div class="empty-title">${th('thread.empty.title')}</div><div class="suggest">${chips}</div></div>${renderComposer(composerOf(composer))}${renderStatus(state.status)}`, state, now, page) + '</main>';
 }
 
 const fmtN = n => Math.round(n).toLocaleString('en-US');
@@ -120,28 +127,6 @@ export function statsPills(conv) {
 function threadFoot(conv, state) {
   const inner = renderStatus(state.status) + statsPills(conv);
   return inner ? `<div class="thread-foot">${inner}</div>` : '';
-}
-
-// where the conversation lives, named as the list names its channel
-const whereOf = (conv, state) => {
-  const ch = (state.channels ?? []).find(c => c.workspaceId === conv.channel?.workspaceId);
-  return ch ? channelLabel(ch) : conv.channel?.name ?? t('details.defaultDir');
-};
-
-// the row actions under This task: Fork once there is something to fork; Archive while nothing runs or waits, Un-archive for the face's own archive
-// (the host's cannot be undone here); Delete while nothing runs or waits, asked twice
-function rowKeys(conv, state) {
-  const key = (action, label, cls = 'btn-sm', id = null) => `<button type="button" class="${cls}" data-action="${action}" data-conv="${esc(conv.id)}"${id ? ` id="${esc(id)}"` : ''}>${label}</button>`;
-  const idle = !conv.running && !conv.messages.some(needsAnswer);
-  const deleting = state.confirm?.action === 'deleteConv' && state.confirm?.id === conv.id;
-  return [
-    key('changeWords', th('details.changeWords')),
-    // dsh forks from a completed turn: a conversation with nothing in it yet has none
-    conv.messages.length ? key('fork', th('details.fork')) : '',
-    conv.archived ? '' : state.pinned?.includes(conv.id) ? key('unpin', th('list.unpin'), 'btn-sm', `details-pin-${conv.id}`) : key('pin', th('list.pin'), 'btn-sm', `details-pin-${conv.id}`),
-    conv.archived === 'face' ? key('unarchive', th('list.unarchive')) : !conv.archived && idle ? key('archive', th('details.archive')) : '',
-    !idle ? '' : deleting ? confirmPair(t('details.yesDelete')) : key('deleteConv', th('details.delete'), 'btn-danger'),
-  ].join('');
 }
 
 // the conversation's subagent children: who, how they run, Stop (asked twice) on a running continuable one
@@ -199,38 +184,42 @@ function jobsSection(conv, state, now) {
   return `<section class="dsec" id="dsec-jobs"><div class="dsec-label">${th('jobs.title')}</div>${rows}${fold}</section>`;
 }
 
-export function renderDetails(conv, state, now = Date.now()) {
-  const e = state.edit;
-  const renaming = !!e && e.kind === 'rename' && e.convId === conv.id;
+// the conversation's Details: This task (Gravit, when it began, the agent) — nothing renames, forks, pins, archives or deletes
+// the one conversation —, its background jobs, children, usage, and Stop while a turn runs. A task's page (`task`, one-entry
+// plan 2 Task 8) draws its worker's (`worker`, whether or not the tasks list it): the task's title, else its session's, and
+// no Stop of its own (the page's head stops the task)
+export function renderDetails(conv, state, now = Date.now(), { worker = false, task = null } = {}) {
   const asking = state.confirm?.action === 'stopGravit' && state.confirm?.id === conv.id;
-  const title = renaming ? inlineEdit([{ name: 'title', value: conv.title, label: t('details.nameThis') }], e.error) : `<div class="dsec-title">${esc(maskExcerpt(conv.title))}</div>`;
-  const agent = conv.kind === 'bot' && conv.preset ? senderName(conv.preset, state) : HOST_NAME;
-  const facts = kv([...(conv.created ? [[t('details.created'), esc(fmtDate(conv.created))]] : []), [t('details.where'), esc(whereOf(conv, state))], [t('details.agent'), esc(agent)], ...(conv.archived === 'host' ? [[t('details.archived'), th('details.byHost')]] : [])]);
-  const members = conv.kind === 'group' ? `<section class="dsec"><div class="dsec-label">${th('details.members')}</div>${conv.members.map(m => `<div class="dsec-line">${esc(senderName(m, state))}</div>`).join('')}</section>` : '';
-  const stop = conv.running
+  const facts = kv([...(conv.created ? [[t('details.created'), esc(fmtDate(conv.created))]] : []), [t('details.agent'), esc(HOST_NAME)]]);
+  const title = worker ? esc(maskExcerpt(task?.title || conv.title || '')) : esc(HOST_NAME);
+  const stop = conv.running && !worker
     ? `<section class="dsec">${asking ? confirmPair(t('details.yesStopGravit')) : `<button type="button" class="btn-danger" data-action="stopGravit" data-conv="${esc(conv.id)}">${th('details.stopGravit')}</button>`}</section>`
     : '';
   return `<aside class="drawer details" aria-label="${th('details.title')}">
   <div class="drawer-head"><h2>${th('details.title')}</h2><button type="button" class="close-key" data-action="toggleDetails" aria-label="${th('common.close')}">×</button></div>
   <div class="drawer-body">
-    <section class="dsec"><div class="dsec-label">${th('details.thisTask')}</div>${title}${facts}${renaming ? '' : `<div class="btn-row">${rowKeys(conv, state)}</div>`}</section>
-    ${jobsSection(conv, state, now)}${members}${childrenSection(conv, state)}${usageRows(conv)}${stop}
+    <section class="dsec"><div class="dsec-label">${th('details.thisTask')}</div><div class="dsec-title">${title}</div>${facts}</section>
+    ${jobsSection(conv, state, now)}${childrenSection(conv, state)}${usageRows(conv)}${stop}
   </div>
 </aside>`;
 }
 
 // first in the thread while the window has more before it (D22): Earlier messages, or Loading… while a read runs —
 // aria-disabled, not disabled, so the key keeps focus across the read (the earlier action ignores it meanwhile)
-function earlierKey(conv) {
+export function earlierKey(conv) {
   const w = conv.window;
   if (!w?.hasMore) return '';
   return `<button${attrs({ class: 'btn-sm earlier-key', type: 'button', id: `earlier-${conv.id}`, 'data-action': 'earlier', 'data-conv': conv.id, 'aria-disabled': w.loading ? 'true' : null })}>${w.loading ? th('common.loading') : th('thread.earlier')}</button>`;
 }
 
+// Messages is Gravit's one conversation (one-entry plan 2): its head, then its column (the thread with the turn rail, the one
+// composer, the foot) beside the rail of tasks; its empty state while it is known but not listed; one line, no composer,
+// while there is none to write to
 export function renderMessagesScreen(state, now, composer = {}, page = {}) {
-  if (state.draft) return draftScreen(state, composer);
+  if (!conversationId(state)) return goneScreen(state);
   const conv = currentConversation(state);
-  if (!conv) return emptyScreen(state, composer);
-  const placeholder = conv.kind === 'group' ? t('composer.placeholderRoom') : t('composer.placeholder');
-  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="${th('thread.turns')}" role="toolbar" aria-orientation="vertical">${railHtml(conv, page.rail)}</nav></div>${renderComposer(composerOf(composer, { placeholder }))}${threadFoot(conv, state)}${state.detailsOpen ? renderDetails(conv, state, now) : ''}</main>`;
+  if (!conv) return emptyScreen(state, now, composer, page);
+  const thread = `<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="${th('thread.turns')}" role="toolbar" aria-orientation="vertical">${railHtml(conv, page.rail)}</nav></div>`;
+  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}` +
+    columns(`${thread}${renderComposer(composerOf(composer))}${threadFoot(conv, state)}`, state, now, page) + `${state.detailsOpen ? renderDetails(conv, state, now) : ''}</main>`;
 }
