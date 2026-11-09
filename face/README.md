@@ -3286,15 +3286,14 @@ such a channel like any other, its sessions in History, and its page reads empty
 
 **The browser after the channel list** (one entry's plan 2). Until plan 2 the
 browser's **New message** offered **Where** — a select of the channels by their
-display titles, then **New channel…** (`POST /data/channels`) — and the list
+display titles, then **New channel…** (`POST /data/channels`, removed in plan 4) — and the list
 grouped sessions by channel membership, with pins, folds, an **Archived** group
 and Details' row actions (Change words, Fork, Pin, Archive, Un-archive,
 Delete). All of that left the client: a session is now the conversation, one of
 its tasks (on the rail) or History (`#/history`, read cold and read-only: the
 title, the strategy its channel names, when, a one-line preview). Nothing in
 the browser creates, renames, forks, pins, archives, un-archives or deletes a
-session. The face's routes behind them stay (`POST /data/channels` until plan 4,
-`/data/sessions/archive`, `/data/sessions/delete`, `GET /data/sessions-meta.json`;
+session. The face's routes behind them stay (`/data/sessions/archive`, `/data/sessions/delete`, `GET /data/sessions-meta.json`;
 the session list still hides tombstoned ids and marks the archived — the
 UNION of the face's own `archived.json` and the host's one-way
 `workspaceRegistry.archivedSessionIds`), with no key calling the writes: a

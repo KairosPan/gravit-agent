@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 Descriptive, not prescriptive — present-tense facts about the tree, updated when the tree
-moves; the only CLAUDE.md in the repo. Owner: the operator. Last reviewed 2026-11-09 (one entry, plan 3; design docs local-only). Depth
+moves; the only CLAUDE.md in the repo. Owner: the operator. Last reviewed 2026-11-10 (one entry, plan 4; design docs local-only). Depth
 lives in `DEVELOPMENT.md`, `Gravit-Design.md`, `face/README.md`, docstrings, and `docs/`.
 
 ## What this is
