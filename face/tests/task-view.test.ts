@@ -375,3 +375,66 @@ test("TaskView.bot is the header's preset when it is not gravit, absent for grav
   assert.equal("bot" in of("gravit"), false);
   assert.equal("bot" in of(undefined), false);
 });
+
+/* ---------- a debate: a turn that ended after a dispatch waits on its round (final review, Important 1) ---------- */
+
+/** A worker's turn that dispatched a round and ended, as the dispatch protocol asks. */
+function dispatched(log: Log, turn: number, callId = `d${turn}`): Log {
+  return log.start(turn).call(turn, callId, "dispatch", { to: ["drill-bull", "drill-bear"], mode: "serial", brief: "q", reason: "r" })
+    .result(turn, callId).say(turn, `round ${turn} is under way`).stepEnd(turn).end(turn);
+}
+/** The room engine's wake: the round-end message (src/room.ts `finishRound`). */
+const roundEnd = (log: Log, round: number): Log =>
+  log.user(`round ${round} ended`, { kind: "room", form: "round-end", round, outcome: "settled", turns: [] });
+/** A member's answer appended to the room log while it is quiet (src/room.ts `answerMessage`). */
+const answer = (log: Log, bot: string, round: number): Log =>
+  log.user(`${bot} says`, { kind: "room", form: "answer", bot, name: bot, sessionId: `session-${bot}`, turn: 1, round });
+
+test("a worker that ended its turn after a dispatch is running and relays nothing while its round runs", () => {
+  const log = dispatched(new Log().brief(), 1);
+  const v = view(log);
+  assert.equal(v.state, "running");
+  assert.equal(v.group, "running");
+  assert.equal("result" in v, false);
+  assert.deepEqual(relaysOf(v, log.events), []);
+  answer(log, "drill-bull", 1);
+  assert.equal(view(log).state, "running", "an answer appended by the room opens no turn and ends no wait");
+  assert.deepEqual(relaysOf(view(log), log.events), []);
+  roundEnd(log, 1);
+  assert.equal(view(log).state, "running", "the wake is logged; its turn has not started yet");
+  assert.deepEqual(relaysOf(view(log), log.events), []);
+});
+
+test("a three-round debate relays once: the concluding turn's words, never the three turns that waited", () => {
+  const log = new Log().brief();
+  for (const n of [1, 2, 3]) {
+    dispatched(log, n);
+    answer(log, "drill-bull", n);
+    answer(log, "drill-bear", n);
+    roundEnd(log, n);
+  }
+  log.start(4).say(4, "Bull and bear disagree on margins; the bear's filing is the stronger evidence.").end(4);
+  const v = view(log);
+  assert.equal(v.state, "done");
+  const relays = relaysOf(v, log.events);
+  assert.equal(relays.length, 1, JSON.stringify(relays));
+  assert.deepEqual(relays.map((r) => [r.id, r.status]), [[`task-report:${ID}:turn-4`, "ready"]]);
+  assert.match(relays[0]!.text, /bear's filing/);
+});
+
+test("a dispatch refused (an error result) is no wait: the turn ends done as before", () => {
+  const log = new Log().brief().start(1).call(1, "d1", "dispatch", { to: ["nobody"] }).result(1, "d1", 1, true)
+    .say(1, "no bot could be called").end(1);
+  const v = view(log);
+  assert.equal(v.state, "done");
+  assert.equal(relaysOf(v, log.events).length, 1);
+});
+
+test("a round that never wakes its worker reads stalled after 20 quiet minutes, and stallOf relays it", () => {
+  const log = dispatched(new Log().brief(), 1);
+  assert.equal(view(log, log.t + STALL_MS - 1).state, "running");
+  const v = view(log, log.t + STALL_MS);
+  assert.equal(v.state, "stalled");
+  assert.equal(stallOf(v, log.events)?.id, `task-stall:${ID}:${log.events.length}`);
+  assert.deepEqual(relaysOf(v, log.events), []);
+});

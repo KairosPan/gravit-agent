@@ -8,7 +8,7 @@ import { RoomEngine, dispatchToolDefinition, eventsOf, gatePending, installRoom,
 import { ROOM_CAPS, type EventLike, type RosterBot } from "../src/room-rules.ts";
 import { ensureRoster, setAvailable } from "../src/roster.ts";
 import type { DiscussionSummary } from "../src/room-contract.ts";
-import { fakeRoomContext, legacyToolResultMessage, makeFakeTree, toolResultMessage, type FakeAgentCtx, type FakeTree } from "./room-fake.ts";
+import { fakeRoomContext, legacyToolResultMessage, makeFakeTree, preExecute, toolResultMessage, type FakeAgentCtx, type FakeTree } from "./room-fake.ts";
 import { recorder } from "./route-recorder.ts";
 
 /** The repository root the engine's places are named against. */
@@ -870,4 +870,44 @@ test("a corrupt roster refuses dispatch naming channels.json, and the file is le
     assert.equal(tree.agentsCreated.length, 0, "no member was created");
     engine.dispose();
   }
+});
+
+test("a debate member is refused ask_user_question, create_goal and update_goal; a bot task worker and Gravit are not; it holds after a restart", async () => {
+  const tree = makeFakeTree();
+  const home = await rosterHome(["buffett", "speculator"]);
+  tree.newRoom("session-conv", "/conversation", "gravit-router");
+  const room = tree.newRoom("session-room", CHANNEL.dir);
+  tree.script("buffett", () => ({ kind: "answer", text: "b" }));
+  const engine = installRoom({
+    ctx: fakeRoomContext(tree), home,
+    placeFor: (cwd) => placeOf(ROOT, cwd),
+    listBots: async () => roster, clock: tree.clock, installModelSelection: () => () => {}, log: () => {},
+  });
+  const member = await engine.ensureMember(engine.roomOf("session-room", CHANNEL), roster[0]);
+  /* a bot task: the bot's preset, its parent the conversation (src/task-worker.ts startWorker) */
+  const { agent: worker } = await tree.ctx.agents.create({ sessionId: "session-bot-task", meta: { cwd: "/repo/bots/buffett/journal", parentSession: "session-conv", agentPreset: "buffett" } });
+  const decide = (name: string, agent: unknown) => preExecute(tree, { name, arguments: "{}", agent });
+  for (const name of ["ask_user_question", "create_goal", "update_goal"]) {
+    const refused = await decide(name, member.agent);
+    assert.equal(refused.kind, "deny", name);
+    assert.match((refused as { reason: string }).reason, /in prose/, "the refusal tells the member to address the operator in its answer");
+    assert.deepEqual(await decide(name, worker), { kind: "allow" }, `a bot task worker keeps ${name}`);
+    assert.deepEqual(await decide(name, room), { kind: "allow" }, `Gravit keeps ${name}`);
+  }
+  assert.deepEqual(await decide("read", member.agent), { kind: "allow" }, "the member's other tools pass");
+  engine.dispose();
+  assert.equal(tree.preExecute.length, 0, "dispose removes the listener");
+
+  /* a restart: a fresh engine that has driven no member yet, the room cold (not live) - the header and the store tell */
+  tree.agents.delete("session-room");
+  tree.sessions.delete("session-room");
+  tree.persisted.push({ id: "session-room", cwd: CHANNEL.dir, agentPreset: "gravit", createdAt: 0 });
+  const again = installRoom({
+    ctx: fakeRoomContext(tree), home,
+    placeFor: (cwd) => placeOf(ROOT, cwd),
+    listBots: async () => roster, clock: tree.clock, installModelSelection: () => () => {}, log: () => {},
+  });
+  assert.equal((await decide("ask_user_question", member.agent)).kind, "deny", "a member is known by its header after a restart");
+  assert.deepEqual(await decide("ask_user_question", worker), { kind: "allow" });
+  again.dispose();
 });

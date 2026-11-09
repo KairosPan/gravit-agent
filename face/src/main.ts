@@ -320,9 +320,7 @@ const sessionPersistence = booted.ctx.get("sessionPersistence") as {
   }>;
 };
 /* Bots: the preset roster's view comes from the live service the overlay
- * mounted (boot.ts asserts it is there); the directories are read from disk.
- * Hoisted above the channel routes, which read the same roster for their
- * overview's `allBots`. */
+ * mounted (boot.ts asserts it is there); the directories are read from disk. */
 const agentPresets = booted.ctx.get("agentPresets") as { list(): Promise<{ id: string; broken?: string }[]> };
 /* The face's own declarations (src/bot-presets.ts, PLAN S6): dsh 0.2.0 reads
  * no bot directory itself, so `bootFace` declared every `bots/<id>/` but the

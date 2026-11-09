@@ -202,6 +202,7 @@ test("router.md names bot tasks and debates", () => {
   assert.ok(text.includes("`bot`"), "task_start's bot field");
   assert.ok(text.includes("dispatch"), "the worker hosts a debate with dispatch");
   assert.ok(/debate/i.test(text), "a debate is named");
+  assert.ok(text.includes("A debate's task names no `bot`"), "a debate's task takes no bot: its worker is Gravit, who hosts the bots");
 });
 
 /** Since one entry's plan 4 there are no channels and no rooms: no prompt any agent reads names them. */

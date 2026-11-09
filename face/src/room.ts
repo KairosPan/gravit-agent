@@ -3,9 +3,10 @@
  *
  * Installed on the booted ROOT context by main.ts (`installRoom`), the way Gate
  * 2 and the `agent_<bin>` tools are: a root-level `session/event` listener sees
- * every session, a root-created member is a runtime root (so it can ask the
- * operator a question - a runtime-owned child is refused `DELEGATED_CALLER`),
- * and the disposers ride the face's lifetime.
+ * every session, a root-created member is a runtime root, and the disposers
+ * ride the face's lifetime. A member cannot ask the operator a question or set
+ * a goal: nothing shows one, so the member guard refuses them
+ * (`installMemberGuard`) and the member says it in prose.
  *
  * HOW A ROOM FACT IS RECORDED (plan 2, deviation 1): only through KNOWN dsh
  * event types. dsh's persistence refuses to reload a log carrying a type
@@ -53,7 +54,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Context } from "@deepseek-ai/cordis";
 import { installModelSelection as installDshModelSelection } from "@deepseek-ai/dsh-agent";
 import { createUserMessage, type ReasoningEffortId } from "@deepseek-ai/dsh-llm";
-import type { BotRow } from "./bots.ts";
+import { isBotId, type BotRow } from "./bots.ts";
+import { CONVERSATION_PRESET } from "./desk-names.ts";
 import { FORBIDDEN, HttpError, isJsonBody, isTrustedDataRequest, readBody } from "./http.ts";
 import { isHostPreset } from "./overlay.ts";
 import { readRoster } from "./roster.ts";
@@ -156,6 +158,9 @@ export interface RoomContextLike {
    * successor of 0.1.1's `apiProxy.sessions.models` path (see `ensureLive`). */
   sessionController?: { resolveAgent(sessionId: string): Promise<ResolveAgentResultLike> };
   on(name: "session/event", listener: (session: SessionLike, event: EventLike) => void): () => boolean;
+  /** dsh-tools' `tools/pre-execute` waterfall on the ROOT context: a listener sees every agent's call before it runs
+   * and answers a decision, or hands it on through `next`; `prepend` puts it in front. */
+  on(name: "tools/pre-execute", listener: (exec: MemberGuardExecution, next: () => Promise<MemberPreDecision>) => Promise<MemberPreDecision>, options?: { prepend?: boolean }): () => unknown;
   logger?: { warn(message: string): void };
 }
 
@@ -1035,16 +1040,92 @@ export function dispatchToolDefinition(engine: RoomEngine, deps: Pick<RoomDeps, 
   };
 }
 
+/* ---------- the member guard (one-entry plan 4, final review Important 2) ---------- */
+
+/** The tools a debate's member is refused: a question or a goal waits on the operator, and nothing in the face shows a
+ * member's - it is no task, its parent is the worker that dispatched it - so its turn would hold the round to the
+ * hard cap. A bot TASK worker keeps them: its rail line carries its question. */
+export const MEMBER_HELD_TOOLS: ReadonlySet<string> = new Set(["ask_user_question", "create_goal", "update_goal"]);
+
+/** What a member is told when one of {@link MEMBER_HELD_TOOLS} is refused. */
+export const MEMBER_HELD_REASON =
+  "you are a voice in a debate: nothing shows the operator a question or a goal from you, and the round would wait on it. " +
+  "Say what you would ask the operator in your answer, in prose; Gravit reads it and asks.";
+
+/** dsh-tools' `PreToolDecision`, stated structurally: the guard makes only the deny and hands on any other. */
+export type MemberPreDecision =
+  | { kind: "allow" }
+  | { kind: "deny"; reason: string }
+  | { kind: "cancel" }
+  | { kind: "ask"; reason?: string };
+
+/** The slice of dsh-tools' `ToolExecution` the guard reads: the tool's name and the calling agent's session header. */
+export interface MemberGuardExecution {
+  name: string;
+  agent?: { session: { header: { parentSession?: string; agentPreset?: string; origin?: string } } };
+}
+
+/**
+ * Whether a session is a debate's member, from its header - the record that outlives a face restart, when the engine's
+ * own member list starts empty: a bot's preset ({@link isBotId}), a parent session, no `origin`, and a parent that is
+ * not the conversation. A bot task worker is the one bot session whose parent is the conversation (src/task-worker.ts
+ * `startWorker`); a member's parent is the session that dispatched it, a worker or a workbench session on `gravit`.
+ * The parent's preset is read live (`sessions.get`), else from the store; a parent found nowhere counts as no
+ * conversation, so the member is refused - it has no surface either way.
+ */
+export async function isRoomMember(
+  ctx: Pick<RoomContextLike, "sessions" | "sessionPersistence">,
+  header: { parentSession?: string; agentPreset?: string; origin?: string },
+): Promise<boolean> {
+  if (!isBotId(header.agentPreset) || header.origin !== undefined) return false;
+  const parent = header.parentSession;
+  if (typeof parent !== "string" || parent === "") return false;
+  let preset = ctx.sessions.get(parent)?.header.agentPreset;
+  if (preset === undefined) {
+    try {
+      preset = (await ctx.sessionPersistence?.list() ?? []).find((s) => s.header.id === parent)?.header.agentPreset;
+    } catch {
+      preset = undefined; // the store cannot be read: no conversation is proved, and the call is refused
+    }
+  }
+  return preset !== CONVERSATION_PRESET;
+}
+
+/**
+ * Refuse {@link MEMBER_HELD_TOOLS} to a debate's members ({@link isRoomMember}), with {@link MEMBER_HELD_REASON}, as
+ * the desk's guard refuses on the same waterfall (src/desk-tools.ts `installDeskGuard`): one listener on the ROOT
+ * context's `tools/pre-execute`, in front. Any other call, and every other agent's, is handed on. A failure to judge
+ * hands the call on, with a line: the mask still bounds the member.
+ * @returns the disposer.
+ */
+export function installMemberGuard(ctx: RoomContextLike, log: (line: string) => void): () => unknown {
+  return ctx.on("tools/pre-execute", async (exec, next) => {
+    if (!MEMBER_HELD_TOOLS.has(exec.name)) return next();
+    const header = exec.agent?.session.header;
+    if (header === undefined) return next();
+    let member: boolean;
+    try {
+      member = await isRoomMember(ctx, header);
+    } catch (err) {
+      log(`the member guard could not judge a ${exec.name} call (${errText(err)}); it goes on`);
+      return next();
+    }
+    return member ? { kind: "deny", reason: MEMBER_HELD_REASON } : next();
+  }, { prepend: true });
+}
+
 /* ---------- install ---------- */
 
-/** Register the tool, the projection unit and the bus on the ROOT context. Returns the engine; `dispose()` unwinds all three. */
+/** Register the tool, the projection unit, the member guard and the bus on the ROOT context. Returns the engine;
+ * `dispose()` unwinds all four. */
 export function installRoom(deps: RoomDeps): RoomEngine {
   const engine = new RoomEngine(deps);
   const unregister = deps.ctx.tools.register(dispatchToolDefinition(engine, deps));
+  const unguard = installMemberGuard(deps.ctx, deps.log ?? ((line) => console.log(`${BIN}: ${line}`)));
   const registry = deps.ctx.sessionProjections;
   const unproject = registry === undefined ? undefined : registerRoomProjection(registry as unknown as Parameters<typeof registerRoomProjection>[0]);
   if (registry === undefined) deps.ctx.logger?.warn(`${BIN}: sessionProjections is not in the tree; the room strip will have no state`);
-  engine.onDispose(() => { unregister(); unproject?.(); });
+  engine.onDispose(() => { unregister(); unproject?.(); unguard(); });
   return engine;
 }
 

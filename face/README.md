@@ -4068,7 +4068,11 @@ dispatch, naming `channels.json`), starts
 the round, and returns at once — the result text names who was called, how, **who was not
 called**, and tells the model to end its turn. The worker is woken once per round, by a
 `followup` that names who answered and who passed, and its `task_report` carries the conclusion
-into the conversation. A bot switched off in Discover is refused at the next `dispatch` naming
+into the conversation. While a round runs the task stays **running**: a worker turn that ended
+after a `dispatch` that succeeded relays nothing and reads as an open turn would
+(`src/task-view.ts` `waitsOnRound`) — so the rail shows no premature done, the conversation gets
+one report per debate, not one per round, and the idle disposal never takes the worker from under
+its round; a wake that never comes reads `stalled` after 20 quiet minutes, as an open turn does. A bot switched off in Discover is refused at the next `dispatch` naming
 it; a member mid-turn finishes, and within that round a peer's `@` continuation can still pull it
 in once.
 
@@ -4082,15 +4086,20 @@ worker's folder as `cwd` (`placeFor`, `RoomPlace`), `parentSession` = the room, 
 result), and — inside the same creation `setup`, before the session is published — the
 **`read-only`** permission preset: a bot in a room does not write files, by sandbox mode, not
 by mask (D12). A member that already exists is resumed, never recreated. Members are runtime
-roots (created from the root context, not from Gravit's), which is what lets a member ask the
-operator a question.
+roots (created from the root context, not from Gravit's). **A member cannot ask**: nothing shows
+a member's question — it is no task — so the member guard (`installMemberGuard`, a root
+`tools/pre-execute` listener) refuses `ask_user_question`, `create_goal` and `update_goal` to it,
+telling it to say what it would ask in its answer, in prose. A member is known by its header,
+which outlives a restart: a bot's preset, a parent, no `origin`, and a parent that is not the
+conversation (`isRoomMember`). A bot **task**'s worker — its parent the conversation — keeps all
+three.
 
 **What a member sees** each turn: the room delta — every operator prompt, Gravit reply and
 member answer since it last spoke, one attributed line each (`操作员:`, `Gravit:`, `<bot> (you):`,
 `<bot>:`) — the brief, and standing rules carried in the prompt (reply with your view or
 exactly `(pass)`; your original answer is retained in the room; this transcript covers this
-room and any own journal is historical context; address the operator directly when the
-judgment is theirs, write `@<bot>` to pull a peer in). Its cursor is
+room and any own journal is historical context; address the operator directly, in prose,
+when the judgment is theirs; write `@<bot>` to pull a peer in). Its cursor is
 the delta prompt in its own log (`source.form === 'delta'`, `messageIds`), so a member never
 re-reads what it saw. Parallel: everyone answers on the same delta and sees no peer this round.
 Serial: each later member sees the earlier answers.
@@ -4166,8 +4175,8 @@ transcript (coarse states from the projection, fine ones from one `session/follo
 member); the gravit-ui client draws none of the three. Its group head shows the members — a
 cluster and their names — from the `room` projection and the list's fold, and no member session
 is followed (following a cold session activates it, "The wire and the transcript"). A member's
-question or escalation card renders **inline in the room**, under the bot's name, and is answered
-against the member's own session. A member's answer that records its member session and turn
+approval card renders **inline in the room**, under the bot's name, and is answered against the
+member's own session (a member's question no longer arises: the guard refuses it). A member's answer that records its member session and turn
 carries a **Trace** disclosure under it: opening it reads that exact turn — the projections cut,
 then the history paged back as needed, never a follow — so it does not resume or prompt the
 member; it draws the turn's context lines and words — never a tool call — with `Loading…`, the
@@ -4175,7 +4184,8 @@ loader's words or `No steps` (`client/js/host/traces.js` over `client/js/wire/me
 follows the header: `parentSessionId` set, no `origin`, a bot preset, the parent running the host.
 Since one entry's plan 2 the Messages badge counts only the rail's waiting lines, and a debate's
 member is no task (its parent is the worker, not the conversation), so a member's pending gate
-badges nothing (`DEVELOPMENT.md` R111).
+would badge nothing (`DEVELOPMENT.md` R111): the guard refuses a member's question and goal
+tools, so none can wait on the operator.
 
 **The honest limits, in the register of the channels section.** Dispatch grants nothing and the
 mask is visibility; a member's write fence is its sandbox mode, its order fence is Gate 2,
@@ -5259,7 +5269,10 @@ its tools and `dispatch` and `bash` not, its report relayed, `bot` in the task l
     PASS, part ten: one task, Gravit's (no bot before its title), in `strategies/room-drill`; its page
     shows the worker's `dispatch`, both answers as bubbles in the bots' voices, the round line, the
     worker's synthesis naming the disagreements, and its report relayed into the conversation; the
-    two member sessions are `read-only` and their folder is `strategies/room-drill`.
+    two member sessions are `read-only` and their folder is `strategies/room-drill`. While the bots
+    speak the rail line stays under Running and no `Task · … · ready` line reaches the conversation;
+    exactly one report arrives, after the last round. A member that tries `ask_user_question` is
+    refused (its turn shows the refusal) and says it in its answer instead.
 11. **Switch a bot off, and see the next dispatch refused.** Switch `drill-bear` off in Discover
     (`available bot drill-bear = off` in `roster.log`), then tell Gravit to have that debate ask both
     voices once more. PASS, part eleven: the worker's next `dispatch` naming `drill-bear` is refused —

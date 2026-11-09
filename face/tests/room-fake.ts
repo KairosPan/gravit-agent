@@ -198,6 +198,8 @@ export class FakeTree {
   readonly agents = new Map<string, FakeAgent>();
   readonly scripts = new Map<string, (message: MessageLike, turn: number) => Script>();
   readonly listeners: Listener[] = [];
+  /** The root `tools/pre-execute` waterfall's listeners, in order (a `prepend` goes first). */
+  readonly preExecute: PreListener[] = [];
   readonly agentsCreated: unknown[] = [];
   readonly resumed: unknown[] = [];
   readonly mounts: { agent: string; preset: string }[] = [];
@@ -315,12 +317,32 @@ export class FakeTree {
         return live !== undefined ? { agent: live } : this.resolveCold(sessionId);
       },
     },
-    on: (_name: "session/event", listener: Listener) => { this.listeners.push(listener); return () => { const i = this.listeners.indexOf(listener); if (i >= 0) this.listeners.splice(i, 1); return i >= 0; }; },
+    on: ((name: string, listener: Listener | PreListener, options?: { prepend?: boolean }) => {
+      if (name === "tools/pre-execute") {
+        const pre = listener as PreListener;
+        if (options?.prepend === true) this.preExecute.unshift(pre); else this.preExecute.push(pre);
+        return () => { const i = this.preExecute.indexOf(pre); if (i >= 0) this.preExecute.splice(i, 1); return i >= 0; };
+      }
+      const l = listener as Listener;
+      this.listeners.push(l);
+      return () => { const i = this.listeners.indexOf(l); if (i >= 0) this.listeners.splice(i, 1); return i >= 0; };
+    }) as RoomContextLike["on"],
     logger: { warn: (_m: string) => {} },
   };
 }
 
 export const makeFakeTree = (): FakeTree => new FakeTree();
+
+/** dsh-tools' `tools/pre-execute` decision, as the fake waterfall hands it on. */
+export type PreDecision = { kind: "allow" } | { kind: "deny"; reason: string } | { kind: "cancel" } | { kind: "ask"; reason?: string };
+/** One `tools/pre-execute` listener: the pending call and `next`, the listeners behind it. */
+export type PreListener = (exec: { name: string; arguments?: unknown; agent?: unknown }, next: () => Promise<PreDecision>) => Promise<PreDecision>;
+/** Run the root `tools/pre-execute` waterfall over a call, as dsh-tools does; the end of the chain allows. */
+export function preExecute(tree: FakeTree, exec: { name: string; arguments?: unknown; agent?: unknown }): Promise<PreDecision> {
+  const chain = [...tree.preExecute];
+  const at = (i: number): Promise<PreDecision> => (i >= chain.length ? Promise.resolve({ kind: "allow" }) : chain[i]!(exec, () => at(i + 1)));
+  return at(0);
+}
 
 /* `tsc` holds the fake to the engine's contract: a `RoomContextLike` change
  * that the fake does not mirror is a type error here, not a green test over a

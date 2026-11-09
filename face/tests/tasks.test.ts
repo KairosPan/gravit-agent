@@ -793,3 +793,39 @@ test("task_start with bot starts a worker on the bot's preset in its home, throu
   assert.deepEqual(h.tree.mounts.filter((m) => m.agent === out.task).map((m) => m.preset), ["drill-bull"]);
   await assert.rejects(h.tool("task_start").execute({ title: "Bear case", brief: "argue it", bot: "drill-bear" }), /^Error: no bot available named drill-bear; available: drill-bull$|no bot available named drill-bear; available: drill-bull/);
 });
+
+test("a worker that ended its turn after dispatch is running, relays nothing and is not disposed after 10 min; after the round-end it relays once", async (t) => {
+  const h = await harness();
+  const tasks = await install(h);
+  t.after(() => tasks.dispose());
+  /* turn 1 hangs until the test ends it after its dispatch; turn 2, woken by the round-end, concludes */
+  h.tree.script("gravit", (_message, turn) => (turn === 1 ? { kind: "hang" } : { kind: "answer", text: "The bear's filing wins." }));
+  const view = await tasks.ops.start({ title: "Debate", brief: "bull against bear", strategy: "fx" });
+  const worker = h.tree.agents.get(view.id)!;
+  const emit = (type: string, data: unknown): void => { h.tree.emit(worker.session, { type, seq: worker.session.seq, data } as EventLike); };
+  emit("tool/call", { turn: 1, step: 1, callId: "d1", name: "dispatch", arguments: JSON.stringify({ to: ["drill-bull", "drill-bear"], mode: "serial" }) });
+  emit("tool/result", { turn: 1, step: 1, message: toolResultMessage("r-d1", "d1", false) });
+  emit("assistant/message", { turn: 1, step: 1, message: { id: "m-d1", role: "assistant", content: [{ type: "text", text: "round 1 is under way" }], source: { kind: "model", provider: "fake", model: "fake" } } });
+  emit("turn/end", { turn: 1, reason: { kind: "completed" } });
+  worker.status = "idle";
+  h.say(worker, "idle");
+  await h.tree.clock.flush();
+  const relayed = () => h.ids(CONV).filter((id) => id.startsWith("task-report:"));
+  assert.equal((await tasks.ops.read(view.id)).view.state, "running");
+  assert.deepEqual(relayed(), [], "no premature ready while the bots speak");
+  /* a serial round longer than the idle disposal: the answers land on the worker's log, opening no turn */
+  for (const minute of [6, 12]) {
+    await h.tree.clock.advance(6 * 60_000);
+    emit("user/message", { id: `answer-${minute}`, role: "user", content: [{ type: "text", text: "a view" }], source: { kind: "room", form: "answer", bot: "drill-bull", name: "Bull", sessionId: "session-bull", turn: 1, round: 1 } });
+  }
+  await h.tree.clock.advance(IDLE_DISPOSE_MS);
+  assert.deepEqual(h.disposed, [], "a worker waiting on its round is never disposed");
+  assert.equal(h.tree.agents.get(view.id), worker);
+  assert.deepEqual(relayed(), []);
+  /* the round ends: the room engine wakes the worker, which concludes */
+  worker.followup({ id: "round-end-1", role: "user", content: [{ type: "text", text: "round 1 ended" }], source: { kind: "room", form: "round-end", round: 1, outcome: "settled", turns: [] } } as unknown as MessageLike);
+  await h.tree.clock.advance(50);
+  await h.convTurn();
+  assert.equal((await tasks.ops.read(view.id)).view.state, "done");
+  assert.deepEqual(relayed(), [`task-report:${view.id}:turn-2`], "one report, the conclusion's");
+});

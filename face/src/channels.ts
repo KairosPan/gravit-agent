@@ -674,9 +674,10 @@ export interface RegistryLike {
   readonly archivedSessionIds: readonly string[];
   /** Look up by canonical directory path without creating or mutating
    * anything — the same `fs.realpath` canonicalization `create` applies, but
-   * a missing path rejects instead of being adopted as a new channel. This is
-   * the lookup a session's cwd needs (room.ts's `placeFor`): asking which
-   * channel a directory belongs to must never conjure one into existence. */
+   * a missing path rejects instead of being adopted as a new channel: asking
+   * which workspace a directory belongs to must never conjure one into
+   * existence. (A room's place no longer asks it: room.ts's `placeOf` names a
+   * folder against the repository root alone.) */
   resolveByPath(path: string): Promise<WorkspaceLike | undefined>;
 }
 
