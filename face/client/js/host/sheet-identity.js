@@ -1,5 +1,5 @@
 // face/client/js/host/sheet-identity.js — Account › Identity's signed sheets (plan B1b Tasks 2–3; Slack's words plan B2 Task 7):
-// connectNetwork, sheet 4 of Connect Telegram or Connect Slack (What you sign: the pending connection the account checked with Telegram and heard Say hi on, its bot, its operator, the
+// connectNetwork, sheet 4 of Connect Telegram, Slack or iMessage (What you sign: the pending connection the account checked with Telegram and heard Say hi on, its bot, its operator, the
 // routing a fresh connection sends and the token's fingerprint, never the token); and Task 3's three: disconnectNetwork (Disconnect
 // Telegram: the binding and its token gone), routing (What reaches you where: the grid's ticks as the account's routing string, and
 // quiet hours as two clocks or Off, which the account stores as null) and block (a stranger in Not you, by its reference).
@@ -101,20 +101,26 @@ export function identityLinesOf(kind, seed) {
     case 'connectNetwork': {
       const network = str(s.network) || 'telegram';
       const sends = rowsSentOn(s.routing, network);
+      const imessage = network === 'imessage';
+      // iMessage's: via Photon, and the project secret kept in the account by its fingerprint (the account's: keyHash's first 8)
+      const kept = imessage ? t('sheet.identity.keptInAccount', { fingerprint: str(s.keyHash).slice(0, 8) || '—' })
+        : network === 'slack' ? t('sheet.identity.keptInBoth') : t('sheet.identity.keptIn');
       return [
         t('sheet.identity.network', { network: NETWORK_NAME[network] ?? network }),
+        ...(imessage ? [t('identity.viaPhoton')] : []),
         t('sheet.identity.speaksAs', { who: str(s.speaksAs) || '—' }),
         t('sheet.identity.talksWith', { who: str(s.talksOnlyWith) || '—' }),
         sends.length ? t('sheet.identity.maySend', { rows: sends.join(t('common.list.sep')) }) : t('sheet.identity.maySendNone'),
-        network === 'slack' ? t('sheet.identity.keptInBoth') : t('sheet.identity.keptIn'),
+        kept,
         t('sheet.identity.signedBy'),
         t('sheet.identity.until'),
       ];
     }
     case 'disconnectNetwork': {
-      const slack = str(s.network) === 'slack';
+      const net = str(s.network);
       const network = networkName(s.network);
-      return [t('sheet.identity.stops', { name: HOST_NAME, network }), slack ? t('sheet.identity.tokensGone') : t('sheet.identity.tokenGone'), t('sheet.identity.deskKeeps')];
+      const gone = net === 'slack' ? t('sheet.identity.tokensGone') : net === 'imessage' ? t('sheet.identity.secretGone') : t('sheet.identity.tokenGone');
+      return [t('sheet.identity.stops', { name: HOST_NAME, network }), gone, t('sheet.identity.deskKeeps')];
     }
     case 'routing': {
       // a line for each network the seed names connected (none named: Telegram's alone, as before Slack)
@@ -139,9 +145,13 @@ export function identityStepsOf(kind, _seed) {
   }
 }
 
-/** The note drawn under the steps: Slack's sheet 4 alone; '' for the rest. */
+/** The note drawn under the steps: Slack's sheet 4 (its ! commands) and Disconnect iMessage (the Photon registration stays); '' for
+ *  the rest. */
 export function identityNoteOf(kind, seed) {
-  return kind === 'connectNetwork' && isRecord(seed) && seed.network === 'slack' ? slackSteps4Note() : '';
+  const network = isRecord(seed) ? seed.network : '';
+  if (kind === 'connectNetwork' && network === 'slack') return slackSteps4Note();
+  if (kind === 'disconnectNetwork' && network === 'imessage') return t('sheet.identity.photonStays');
+  return '';
 }
 
 const HEX64 = /^[0-9a-f]{64}$/;

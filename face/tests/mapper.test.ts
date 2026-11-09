@@ -612,7 +612,8 @@ test("a telegram bubble keeps its network", () => {
   assert.equal(v.network, "slack", "the network the text came through");
   assert.equal(Object.hasOwn(v, "messageId"), false, "a string id is not the retired bridge's integer");
   assert.equal(deskMessage(45, text, { kind: "telegram", network: "telegram", messageId: "telegram:1:2" }).network, "telegram");
-  for (const network of ["imessage", 7, ""]) {
+  assert.equal(deskMessage(45, text, { kind: "telegram", network: "imessage", messageId: "imessage:p:0/AB12" }).network, "imessage");
+  for (const network of ["whatsapp", 7, ""]) {
     assert.equal(Object.hasOwn(deskMessage(46, text, { kind: "telegram", network, messageId: "x" }), "network"), false, `${String(network)} is no network the face names`);
   }
   // a reply to an alert: three parts - the provenance line, the context, then the operator's words, kept apart as said

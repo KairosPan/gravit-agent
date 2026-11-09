@@ -103,6 +103,8 @@ import { applyBrainKey, BrainKeyStage, envBlocksOf, envWinsOf, type BrainKeyDone
 import { brainProviders, testBrain } from "./account/brains.ts";
 import { telegramApiBase } from "./identity/bot-api.ts";
 import { Identity } from "./identity/identity.ts";
+import { realPhotonLink } from "./identity/photon-real.ts";
+import type { PhotonLink } from "./identity/photon-link.ts";
 import { slackApiBase } from "./identity/slack-api.ts";
 import type { OpenSocket } from "./identity/slack-socket.ts";
 import type { IdentityClock } from "./identity/telegram.ts";
@@ -171,6 +173,9 @@ export interface ServiceOptions {
    * how its sockets are opened (Node's WebSocket), the fetch it is reached with, the pending connection's long poll in seconds (25), the connected poller's (50) and its clock. Tests
    * point it at a fake Bot API */
   identity?: { apiBase?: string | undefined; slackApiBase?: string | undefined; openSocket?: OpenSocket | undefined; fetch?: typeof fetch | undefined; pollTimeoutS?: number | undefined; connectedPollTimeoutS?: number | undefined; now?: (() => number) | undefined; clock?: IdentityClock | undefined } | undefined;
+  /** ACCOUNT › IDENTITY, iMessage's seam: Photon's link (identity/photon-link.ts). Absent: the account makes the real one (photon-real.ts), and
+   * disposes it when it closes; a link given is the caller's to dispose */
+  photon?: PhotonLink | undefined;
   /** THE VENUES' LIVE STREAMS: the market's hub as the account mirrors it (server.ts main: market/hub.ts RemoteHub), or a test's (a hub
    * over a stand-in WebSocket, or test/standin's stand-in prices); without one nothing is streamed — every price is a REST read, as before */
   streams?: MarketHub | undefined;
@@ -378,6 +383,9 @@ export class PortfolioService {
    * (its token held in memory alone), the networks connected, the routing and quiet hours, and the strangers who wrote to the bot. The four
    * owner types land here from the door (ExchangeHost.identity) */
   readonly identity: Identity | undefined;
+  /** Photon's link as Identity uses it, and the one this service made itself (and so disposes) */
+  private photon: PhotonLink | undefined;
+  private ownedPhoton: PhotonLink | undefined;
   /** the most one order or movement may be worth, in dollars: the server's `--live-cap` to start with, then what the owner last signed
    * (setPolicy cap), which a restart brings back from the ledger */
   private capUsd: number;
@@ -419,10 +427,27 @@ export class PortfolioService {
     if (this.account && !opts.freshLedger) this.rememberNonces(this.account);
   }
 
+  /** Identity cut, then the Photon link this service made (one given is its caller's) */
+  async disposeIdentity(): Promise<void> {
+    try {
+      await this.identity?.dispose();
+    } finally {
+      const link = this.ownedPhoton;
+      this.ownedPhoton = undefined;
+      await link?.dispose().catch(() => undefined);
+    }
+  }
+
   /** the identity on this home: its state and the strangers file read, no poll begun until a token is sent */
   private mountIdentity(): Identity {
     const o = this.opts.identity ?? {};
-    return new Identity({ home: this.opts.home, apiBase: o.apiBase ?? telegramApiBase(process.env, (l) => console.error(l)), slackApiBase: o.slackApiBase ?? slackApiBase(process.env, (l) => console.error(l)), openSocket: o.openSocket, fetch: o.fetch, pollTimeoutS: o.pollTimeoutS, connectedPollTimeoutS: o.connectedPollTimeoutS, now: o.now, clock: o.clock, readOnly: this.opts.liveWrites === undefined });
+    // a link the service made is the service's to dispose (ownedPhoton); one given is not
+    this.photon = this.opts.photon;
+    if (!this.photon) {
+      this.photon = realPhotonLink({ log: (l) => console.error(l) });
+      this.ownedPhoton = this.photon;
+    }
+    return new Identity({ home: this.opts.home, apiBase: o.apiBase ?? telegramApiBase(process.env, (l) => console.error(l)), slackApiBase: o.slackApiBase ?? slackApiBase(process.env, (l) => console.error(l)), openSocket: o.openSocket, fetch: o.fetch, pollTimeoutS: o.pollTimeoutS, connectedPollTimeoutS: o.connectedPollTimeoutS, now: o.now, clock: o.clock, readOnly: this.opts.liveWrites === undefined, photon: this.photon });
   }
 
   /** A signature outlives the process that first saw it. On start, every signed envelope in this home's ledgers has its nonce marked used again,

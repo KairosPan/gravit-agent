@@ -350,6 +350,15 @@ test("a phone-started task's view reads origin phone and its network from the br
   assert.deepEqual(briefOrigin(log.events), { conversation: "session-conv", origin: "phone", network: "telegram" });
 });
 
+test("an iMessage-started task's view keeps its network", () => {
+  const log = new Log().push("user/message", {
+    id: `task-brief:${ID}`, role: "user", content: [{ type: "text", text: briefText("T", "b") }],
+    source: { kind: "task", form: "brief", conversation: "session-conv", origin: "phone", network: "imessage" },
+  });
+  assert.equal(view(log).network, "imessage");
+  assert.deepEqual(briefOrigin(log.events), { conversation: "session-conv", origin: "phone", network: "imessage" });
+});
+
 test("an old brief without origin reads web", () => {
   const log = new Log().push("user/message", {
     id: `task-brief:${ID}`, role: "user", content: [{ type: "text", text: briefText("T", "b") }],

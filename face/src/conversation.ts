@@ -67,6 +67,7 @@
  * its phone texts again, as it does its task messages.
  * @module
  */
+import { isPhoneNetwork, type PhoneNetwork } from "./phone.ts";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -163,7 +164,7 @@ export const HELD_MAX = 64;
 
 /** Where the open turn came from, as a task it starts records it: the phone - with the network the text came
  * through - or the web (the browser, and every turn that is not a phone text's). */
-export type TaskOrigin = { kind: "web" } | { kind: "phone"; network: "telegram" | "slack" };
+export type TaskOrigin = { kind: "web" } | { kind: "phone"; network: PhoneNetwork };
 
 /** The conversation's folder under the harness home `home`: `<home>/face/conversation`. */
 export function conversationDir(home: string): string {
@@ -444,8 +445,6 @@ function cutText(text: string, max: number): string {
   return text.slice(0, code >= 0xd800 && code <= 0xdbff ? max - 1 : max);
 }
 
-/** The networks a phone text's message names (src/phone.ts `PHONE_NETWORKS`). */
-const isPhoneNetwork = (value: unknown): value is "telegram" | "slack" => value === "telegram" || value === "slack";
 
 /** How many turns' phone texts a supervision remembers before their ends are heard. */
 const PHONES_KEPT = 16;
@@ -498,7 +497,7 @@ interface Watch {
   /** The open turn's origin. */
   turnOrigin(): TaskOrigin;
   /** The open turn and, when it logged a phone text, that text's network and id - read for a shutdown's carry. */
-  openPhoneTurn(): { open: OpenTurnView; phone?: { network?: "telegram" | "slack"; id?: string } } | undefined;
+  openPhoneTurn(): { open: OpenTurnView; phone?: { network?: PhoneNetwork; id?: string } } | undefined;
 }
 
 /** One line for a turn that did not simply end; nothing for one that did. */
@@ -533,7 +532,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
   const watch = (agent: AgentLike, sessionId: string): Watch => {
     /* the phone texts each turn logged, by turn: a parked browser steer claimed first names the turn `user`, and a
      * phone text that follows it in the same turn must still be answered (and a task it starts is the phone's) */
-    const phones = new Map<number, { network?: "telegram" | "slack"; id?: string }>();
+    const phones = new Map<number, { network?: PhoneNetwork; id?: string }>();
     const supervision = superviseDeskTurns({
       on: deps.ctx.on,
       sessionId,
@@ -607,7 +606,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
 
   /** Where task `task`'s report goes: its phone's network when its brief says a phone on this conversation
    * (`conversationId`) asked for it; else `undefined`. The live log first, the stored one when it holds no brief. */
-  const taskNetwork = async (task: string, conversationId: string): Promise<"telegram" | "slack" | undefined> => {
+  const taskNetwork = async (task: string, conversationId: string): Promise<PhoneNetwork | undefined> => {
     let found = briefOrigin((deps.ctx.agents.get(task)?.session.snapshotEvents() ?? []) as readonly EventLike[]);
     if (found === undefined) {
       try {
@@ -623,7 +622,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
   /** How turn `r`'s answer goes ({@link ConversationDeps.deliver}): a turn that logged a phone text (`phone`, the last
    * one's network) - whatever message named it - to that network; a phone task's report to that task's; else
    * `undefined`. */
-  const answerOpts = async (r: DeskTurnRecord, phone: { network?: "telegram" | "slack" } | undefined): Promise<DeliverOpts | undefined> => {
+  const answerOpts = async (r: DeskTurnRecord, phone: { network?: PhoneNetwork } | undefined): Promise<DeliverOpts | undefined> => {
     if (phone !== undefined || r.source === "telegram") {
       const network = phone !== undefined ? phone.network : r.message?.network;
       return isPhoneNetwork(network) ? { kind: "chat", network } : { kind: "chat" };
@@ -635,7 +634,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
 
   /* a turn's answer, in turn order; the chain never rejects */
   let answering: Promise<void> = Promise.resolve();
-  const answer = (r: DeskTurnRecord, phone: { network?: "telegram" | "slack"; id?: string } | undefined): void => {
+  const answer = (r: DeskTurnRecord, phone: { network?: PhoneNetwork; id?: string } | undefined): void => {
     const deliver = deps.deliver;
     if (deliver === undefined) return;
     answering = answering.then(async () => {
@@ -731,7 +730,7 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
     /* checked, never cast: only a phone text's two sources open a phone turn */
     const msg = input?.message as { kind?: unknown; network?: unknown; messageId?: unknown } | undefined;
     if (input?.source?.kind !== "telegram" || msg?.kind !== "telegram" || !isPhoneNetwork(msg.network) || typeof msg.messageId !== "string" || typeof input.key !== "string") {
-      return failed("the post is not a phone text (telegram or slack)");
+      return failed("the post is not a phone text (telegram, slack or imessage)");
     }
     const network = input.source.network;
     const source = {

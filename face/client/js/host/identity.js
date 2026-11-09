@@ -1,11 +1,13 @@
 // face/client/js/host/identity.js — Account › Identity's Connect Telegram (plan B1b Task 2, spec §5.2–§5.3) and Install app… for
-// Slack (plan B2 Task 7): sheets 1 to 3 as the Identity drawer, over the account's pending connection (plan B1a's routes, through the
-// face's proxy), and sheet 4 handed to the owner sheet engine as the `connectNetwork` kind.
+// Slack (plan B2 Task 7) and Connect iMessage through Photon (the iMessage plan): sheets 1 to 3 as the Identity drawer, over the
+// account's pending connection (plan B1a's routes, through the face's proxy), and sheet 4 handed to the owner sheet engine as the
+// `connectNetwork` kind.
 //
-//   Sheet 1, Bot token (Telegram) or App tokens (Slack): Next reads the token, or Slack's app-level and bot tokens, from their password
-//     fields, clears the fields, makes the fingerprint in the browser (keyHash = hex sha256(salt ‖ token), Slack's over app ‖ 0x00 ‖
-//     bot, 16 random bytes of salt) and posts the tokens ONCE, beside it, to the network's token route. A token lives in this module's
-//     one call and nowhere else: never the store, a reducer, storage, a log or an error's words.
+//   Sheet 1, Bot token (Telegram), App tokens (Slack) or Photon project (iMessage): Next reads the token, Slack's app-level and bot
+//     tokens, or iMessage's project ID, project secret and number, from their fields, clears the secret ones, makes the fingerprint in
+//     the browser (keyHash = hex sha256(salt ‖ token), Slack's over app ‖ 0x00 ‖ bot, iMessage's over project ID ‖ 0x00 ‖ secret, 16
+//     random bytes of salt) and posts them ONCE, beside it, to the network's token route. A token or secret lives in this module's one
+//     call and nowhere else: never the store, a reducer, storage, a log or an error's words.
 //   Sheet 2, Say hi: the pending connection read every PENDING_POLL_MS until the bot hears a private message, never past the
 //     connection's time (its expiresAt; one that cannot be read, PENDING_WAIT_MS from when sheet 2 began); a read with no answer says
 //     the account is not answering and reads again.
@@ -23,7 +25,13 @@ export const PENDING_POLL_MS = 1_500;
 /** The account's own wait for a pending connection (ten minutes): the end of sheet 2 when its expiresAt cannot be read. */
 export const PENDING_WAIT_MS = 10 * 60_000;
 /** Each network's token route (the face's proxy to the account's). */
-export const TOKEN_PATHS = { telegram: '/data/account/identity/telegram/token', slack: '/data/account/identity/slack/token' };
+export const TOKEN_PATHS = {
+  telegram: '/data/account/identity/telegram/token', slack: '/data/account/identity/slack/token', imessage: '/data/account/identity/imessage/token',
+};
+/** A number as the account takes it on iMessage's sheet 1: E.164, a + then the country code and the number (photon-link.ts E164). */
+export const E164 = /^\+[1-9]\d{6,14}$/;
+/** A typed number as sheet 1 sends it: its spaces, dashes and parentheses gone. */
+export const phoneOf = typed => (typeof typed === 'string' ? typed.replace(/[\s()-]/g, '') : '');
 const PENDING_PATH = '/data/account/identity/pending';
 const NOT_ME_PATH = '/data/account/identity/pending/not-me';
 const DROP_PATH = '/data/account/identity/pending/drop';
@@ -37,6 +45,8 @@ export const CONNECT_WORDS = {
   slackNoApp: () => said('identity.connect.slackNoApp'),
   slackNoBot: () => said('identity.connect.slackNoBot'),
   slackNone: () => said('identity.connect.slackNone'),
+  imessageRefused: () => said('identity.connect.imessageRefused'),
+  imessageShape: () => said('identity.connect.imessageShape'),
   expired: () => said('identity.connect.expired'),
   noSender: () => said('identity.connect.noSender'),
 };
@@ -74,12 +84,14 @@ function pendingOf(body) {
     }
     : null;
   const workspace = str(p.workspace) || str(p.bot.workspace);
+  const heard = isRecord(p.strangerHeard) && str(p.strangerHeard.masked) ? { masked: str(p.strangerHeard.masked), at: str(p.strangerHeard.at) } : null;
   return {
     id: p.id, network: str(p.network) || 'telegram',
     bot: { id: str(p.bot.id), username: str(p.bot.username), name: str(p.bot.name) },
     ...(workspace ? { workspace } : {}),
     link: str(p.link), qr: str(p.qr), expiresAt: str(p.expiresAt), state: str(p.state),
     ...(sender ? { sender } : {}),
+    ...(heard ? { strangerHeard: heard } : {}),
   };
 }
 
@@ -169,7 +181,7 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     armPoll();
   }
 
-  /** Connect… (Telegram) or Install app… (Slack): the drawer at sheet 1 for that network (one open before is closed, its pending
+  /** Connect… (Telegram, iMessage) or Install app… (Slack): the drawer at sheet 1 for that network (one open before is closed, its pending
    *  connection dropped). */
   function openConnect(network = 'telegram') {
     if (connect()) close();
@@ -184,23 +196,29 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     return v;
   };
 
-  /** Sheet 1's Next: the token (Telegram: `first`) or the two tokens (Slack: `first` the app-level token, `second` the bot token) read
-   *  from their fields and every field cleared at once, fingerprinted here, posted once. A Slack field left empty posts nothing and
-   *  says which. */
-  async function next(first, second) {
+  /** Sheet 1's Next: the token (Telegram: `first`), the two tokens (Slack: `first` the app-level token, `second` the bot token) or the
+   *  Photon project (iMessage: `first` the project ID, `second` the project secret, `third` the operator's number) read from their
+   *  fields, the token and secret fields cleared at once, fingerprinted here, posted once. A Slack field left empty posts nothing and
+   *  says which; an iMessage field left empty, or a number that is not +, a country code and the number, posts nothing either. */
+  async function next(first, second, third) {
     const c = connect();
     if (!c || c.step !== 1 || c.busy || sending) return;
     const slack = c.network === 'slack';
-    let token = take(first);
-    let bot = slack ? take(second) : '';
-    if (slack ? !token || !bot : !token) {
-      const empty = !slack ? CONNECT_WORDS.empty : !token && !bot ? CONNECT_WORDS.slackNone : !token ? CONNECT_WORDS.slackNoApp : CONNECT_WORDS.slackNoBot;
+    const imessage = c.network === 'imessage';
+    // iMessage's project ID and number are no secret: their fields keep what was typed
+    const keep = input => (typeof input?.value === 'string' ? input.value.trim() : '');
+    let token = imessage ? keep(first) : take(first);
+    let bot = slack || imessage ? take(second) : '';
+    const phone = imessage ? phoneOf(keep(third)) : '';
+    const missing = slack ? !token || !bot : imessage ? !token || !bot || !E164.test(phone) : !token;
+    if (missing) {
+      const empty = imessage ? CONNECT_WORDS.imessageShape : !slack ? CONNECT_WORDS.empty : !token && !bot ? CONNECT_WORDS.slackNone : !token ? CONNECT_WORDS.slackNoApp : CONNECT_WORDS.slackNoBot;
       token = ''; bot = '';
       set({ error: empty() });
       return;
     }
     if (!subtle || typeof subtle.digest !== 'function') { token = ''; bot = ''; set({ error: CONNECT_WORDS.noSubtle() }); return; }
-    const refused = slack ? CONNECT_WORDS.slackRefused() : CONNECT_WORDS.refused();
+    const refused = slack ? CONNECT_WORDS.slackRefused() : imessage ? CONNECT_WORDS.imessageRefused() : CONNECT_WORDS.refused();
     const mine = gen;
     sending = true;
     set({ busy: true, error: null });
@@ -208,14 +226,17 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     let r = null;
     let words = '';
     try {
-      // Slack's fingerprint is over app ‖ 0x00 ‖ bot (neither token holds a NUL, so the join is unambiguous): the account's keyMatches
-      fp = await fingerprintOf(subtle, slack ? `${token}\u0000${bot}` : token, random);
+      // Slack's fingerprint is over app ‖ 0x00 ‖ bot, iMessage's over project ID ‖ 0x00 ‖ secret (none holds a NUL, so the join is
+      // unambiguous): the account's keyMatches
+      fp = await fingerprintOf(subtle, slack || imessage ? `${token}\u0000${bot}` : token, random);
       r = slack
         ? await post(TOKEN_PATHS.slack, { appToken: token, botToken: bot, keyHash: fp.keyHash, salt: fp.salt })
-        : await post(TOKEN_PATHS.telegram, { token, keyHash: fp.keyHash, salt: fp.salt });
-      // the account's words, never a token's: a sentence that carried one would be replaced
+        : imessage
+          ? await post(TOKEN_PATHS.imessage, { projectId: token, projectSecret: bot, phone, keyHash: fp.keyHash, salt: fp.salt })
+          : await post(TOKEN_PATHS.telegram, { token, keyHash: fp.keyHash, salt: fp.salt });
+      // the account's words, never a token's or a secret's: a sentence that carried one would be replaced
       words = whyOf(r);
-      if (typeof words === 'string' && (words.includes(token) || (bot && words.includes(bot)))) words = refused;
+      if (typeof words === 'string' && ((!imessage && words.includes(token)) || (bot && words.includes(bot)))) words = refused;
     } catch {
       words = fp ? refused : CONNECT_WORDS.noSubtle();
     } finally {
@@ -251,10 +272,12 @@ export function startIdentity({ store, getJson, post, subtle, schedule, cancelTi
     if (!c || c.step !== 3 || !c.pending?.sender || !c.fp) return;
     const p = c.pending;
     if (!p.sender.id || !p.bot.id || !p.bot.username) { set({ error: CONNECT_WORDS.noSender() }); return; }
-    const network = c.network === 'slack' ? 'slack' : 'telegram';
+    const network = c.network === 'slack' || c.network === 'imessage' ? c.network : 'telegram';
+    // iMessage's handles are numbers, with no @: the line Gravit speaks from, and the operator's number
+    const imessage = network === 'imessage';
     const seed = {
-      network, pending: p.id, botId: p.bot.id, speaksAs: `@${p.bot.username}`, operatorId: p.sender.id,
-      talksOnlyWith: p.sender.handle || p.sender.masked, routing: connectRoutingOf(store.get().identity?.data, network),
+      network, pending: p.id, botId: p.bot.id, speaksAs: imessage ? p.bot.username : `@${p.bot.username}`, operatorId: p.sender.id,
+      talksOnlyWith: imessage ? p.sender.handle : p.sender.handle || p.sender.masked, routing: connectRoutingOf(store.get().identity?.data, network),
       keyHash: c.fp.keyHash, salt: c.fp.salt,
     };
     gen += 1;

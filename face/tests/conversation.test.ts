@@ -774,20 +774,20 @@ test("a post that is not a phone text is refused as an error, logged, and opens 
   const bad: unknown[] = [
     { ...phonePost(), message: { kind: "user", network: "telegram", messageId: "telegram:1" } },
     { ...phonePost(), source: { kind: "schedule", order: "o", date: "2026-11-09" } },
-    { ...phonePost(), message: { kind: "telegram", network: "imessage", messageId: "imessage:1" } },
+    { ...phonePost(), message: { kind: "telegram", network: "whatsapp", messageId: "whatsapp:1" } },
   ];
   for (const input of bad) {
     const result = await handle.post(input as PhonePost);
-    assert.deepEqual(result, { refused: "error", line: "the conversation could not open a turn: the post is not a phone text (telegram or slack)" });
+    assert.deepEqual(result, { refused: "error", line: "the conversation could not open a turn: the post is not a phone text (telegram, slack or imessage)" });
   }
   assert.equal(lines.filter((line) => line.includes("not a phone text")).length, 3);
   /* nothing at all is refused the same way, never a rejection */
   for (const input of [null, undefined, 7]) {
-    assert.deepEqual(await handle.post(input as unknown as PhonePost), { refused: "error", line: "the conversation could not open a turn: the post is not a phone text (telegram or slack)" });
+    assert.deepEqual(await handle.post(input as unknown as PhonePost), { refused: "error", line: "the conversation could not open a turn: the post is not a phone text (telegram, slack or imessage)" });
   }
   assert.equal(tree.created.length, 0);
   /* an unknown provenance network is dropped, the line falling back to telegram */
-  const ok = await handle.post(phonePost({ source: { kind: "telegram", network: "imessage", at: AT } }));
+  const ok = await handle.post(phonePost({ source: { kind: "telegram", network: "whatsapp", at: AT } }));
   assert.ok("opened" in ok);
   assert.deepEqual(textsOf(tree.agent(ok.sessionId).followups[0]), ["[telegram · operator · 13:03 ET]\nhow is NVDA doing?"]);
 });
@@ -908,6 +908,10 @@ test("a phone turn's answer goes to its network as chat", async (t) => {
   wholeTurn(tree.bus, sessionId, 2, { kind: "telegram", network: "telegram", messageId: "telegram:2" }, "second");
   await until(() => sent.length === 2, "the second delivery");
   assert.deepEqual(sent[1], { text: "second", opts: { kind: "chat", network: "telegram" } });
+  // an iMessage text is a phone text too, and its answer goes back on iMessage
+  wholeTurn(tree.bus, sessionId, 3, { kind: "telegram", network: "imessage", messageId: "imessage:p:0/AB12" }, "third");
+  await until(() => sent.length === 3, "the iMessage delivery");
+  assert.deepEqual(sent[2], { text: "third", opts: { kind: "chat", network: "imessage" } });
 });
 
 test("dispose waits for an answer still being delivered, so a turn that ended just before a shutdown reaches the phone", async (t) => {

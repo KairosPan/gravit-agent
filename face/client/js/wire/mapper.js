@@ -85,7 +85,7 @@
  * @property {number} [from] - telegram bubbles: the sender's Telegram user id.
  * @property {number} [chat] - telegram bubbles: the Telegram chat the message came in.
  * @property {number} [messageId] - telegram bubbles: the message's id in that chat.
- * @property {"telegram"|"slack"} [network] - telegram bubbles: the network an account inbox's text came through.
+ * @property {"telegram"|"slack"|"imessage"} [network] - telegram bubbles: the network an account inbox's text came through.
  * @property {string} [said] - telegram bubbles: a reply's own words, apart from the context it replies to.
  * @property {string} [order] - desk-line `schedule`: the standing order that fired.
  * @property {string} [firing] - desk-line `schedule`: the firing's key.
@@ -376,7 +376,7 @@ function bubble(role, message, base, interrupted) {
 const PHONE_FIELDS = ["from", "chat", "messageId"];
 
 /** The networks a phone text comes through (src/phone-bridge.ts): its bubble keeps the one it names. */
-const isPhoneNetwork = (value) => value === "telegram" || value === "slack";
+const isPhoneNetwork = (value) => value === "telegram" || value === "slack" || value === "imessage";
 
 /** The line a phone reply's context opens with (src/desk-conversation.ts `CONTEXT_HEAD`). */
 const CONTEXT_HEAD = "the message this replies to:"; // en-kept: the face's wire text, never on screen

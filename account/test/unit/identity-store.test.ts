@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { isRefusal } from "../../src/core/errors.ts";
-import { formatRouting, parseRouting, quietHolds, ROUTE_ROWS, rowOf, type Routing } from "../../src/portfolio/identity/kinds.ts";
-import { readNetworkSecret, removeNetworkSecret, writeNetworkSecret } from "../../src/portfolio/identity/secret-file.ts";
-import { DEFAULT_STATE, loadIdentity, saveIdentity, Strangers, type IdentityState } from "../../src/portfolio/identity/store.ts";
+import { formatRouting, parseRouting, quietHolds, ROUTE_ROWS, rowOf, WIRE_ID, type Routing } from "../../src/portfolio/identity/kinds.ts";
+import { readNetworkSecret, removeNetworkSecret, secretsOf, writeNetworkSecret, type ImessageSecret } from "../../src/portfolio/identity/secret-file.ts";
+import { DEFAULT_STATE, loadIdentity, maskId, MASKED, saveIdentity, Strangers, type IdentityState } from "../../src/portfolio/identity/store.ts";
 
 /** THE IDENTITY STORE (identity/kinds.ts, store.ts, secret-file.ts): the routing string the owner signs, the kind of every message and its
  * row, quiet hours on New York's clock, the state file, the strangers (a count, a time and a masked id, never more) and a network's token
@@ -27,7 +27,7 @@ describe("the routing string", () => {
     const s = "chat=telegram;alerts=telegram;brief=;cards=telegram;fills=telegram";
     expect(formatRouting(parseRouting(s) as Routing)).toBe(s);
     expect(parseRouting("alerts=telegram;chat=telegram;brief=;cards=;fills=")).toMatch(/order/);
-    expect(parseRouting("chat=imessage;alerts=;brief=;cards=;fills=")).toMatch(/imessage/);
+    expect(parseRouting("chat=signal;alerts=;brief=;cards=;fills=")).toMatch(/signal/);
   });
   it("refuses a missing row, an extra row, a repeated network and a row without '='", () => {
     expect(typeof parseRouting("chat=;alerts=;brief=;cards=")).toBe("string");
@@ -156,4 +156,26 @@ describe("a network's token file", () => {
     expect(existsSync(join(elsewhere, "x.json"))).toBe(false);
     expect(readNetworkSecret(home, "telegram")).toBeUndefined();
   });
+});
+
+describe("iMessage as a network", () => {
+  const s: ImessageSecret = { projectId: "prj_1", projectSecret: "s".repeat(32), phone: "+14155550100", line: "+14155550123", userId: "usr_1", operatorId: "+14155550100", operatorHandle: "+14155550100" };
+  it("an iMessage token file round-trips with its seven fields, 0600", () => {
+    const home = newHome();
+    expect(writeNetworkSecret(home, "imessage", s)).toMatchObject({ ok: true });
+    expect(readNetworkSecret(home, "imessage")).toEqual(s);
+    expect(statSync(join(home, "credentials/networks/imessage.json")).mode & 0o777).toBe(0o600);
+  });
+  it("secretsOf an iMessage file is the secret and its Basic spelling", () => {
+    expect(secretsOf(s)).toEqual([s.projectSecret, Buffer.from(`${s.projectId}:${s.projectSecret}`).toString("base64")]);
+  });
+  it("WIRE_ID takes any iMessage GUID of 1 to 128 characters without white space", () => {
+    for (const ok of ["imessage:3F2504E0-4F89-11D3-9A0C-0305E82C3301", "imessage:p:0/3F2504E0-4F89-11D3-9A0C-0305E82C3301", `imessage:${"g".repeat(128)}`]) expect(WIRE_ID.test(ok)).toBe(true);
+    for (const no of ["imessage:", "imessage: ", "imessage:a b", "imessage:a\tb", `imessage:${"g".repeat(129)}`]) expect(WIRE_ID.test(no)).toBe(false);
+  });
+  it("the routing takes imessage, sorted before telegram", () => {
+    expect(parseRouting("chat=imessage,telegram;alerts=imessage;brief=;cards=;fills=")).toEqual({ chat: ["imessage", "telegram"], alerts: ["imessage"], brief: [], cards: [], fills: [] });
+    expect(typeof parseRouting("chat=telegram,imessage;alerts=;brief=;cards=;fills=")).toBe("string");
+  });
+  it("an email's masked tail is a masked handle", () => expect(MASKED.test(maskId("kairos@icloud.com"))).toBe(true));
 });

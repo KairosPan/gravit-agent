@@ -11,6 +11,10 @@
  *                                     keyHash, salt}                   beside their one fingerprint (keyHash = hex sha256(salt ‖ appToken ‖
  *                                                                      NUL ‖ botToken)), under the same reader, limit and fence, answered
  *                                                                      in Slack's own fixed sentences
+ *   POST /api/account/identity/imessage/token {projectId,              the same for iMessage through Photon: the project's ID and secret and
+ *                       projectSecret, phone, keyHash, salt}           the operator's number, beside one fingerprint (keyHash = hex sha256(salt
+ *                                                                      ‖ projectId ‖ NUL ‖ projectSecret)), under the same reader, limit and
+ *                                                                      fence, answered in iMessage's own fixed sentences
  *   GET  /api/account/identity/pending?id=                             sheets 2 and 3: the pending connection as it stands
  *   POST /api/account/identity/pending/not-me {id}                     sheet 3's "Not me": the sender counted as a stranger, waiting again
  *   POST /api/account/identity/pending/drop {id}                       the sheet closed: the token forgotten at once
@@ -37,8 +41,10 @@ import type { PendingConnections, PendingView } from "./pending.ts";
 export const IDENTITY_TOKEN_PATH = "/api/account/identity/telegram/token";
 /** Slack's token route: the app-level token and the bot token, together, beside their one fingerprint */
 export const SLACK_TOKEN_PATH = "/api/account/identity/slack/token";
-const TOKEN_PATHS: ReadonlySet<string> = new Set([IDENTITY_TOKEN_PATH, SLACK_TOKEN_PATH]);
-/** whether a request's path is one of the two token routes as express would match it: case and a trailing slash do not matter to
+/** iMessage's token route: the Photon project's ID and secret and the operator's number, beside one fingerprint */
+export const IMESSAGE_TOKEN_PATH = "/api/account/identity/imessage/token";
+const TOKEN_PATHS: ReadonlySet<string> = new Set([IDENTITY_TOKEN_PATH, SLACK_TOKEN_PATH, IMESSAGE_TOKEN_PATH]);
+/** whether a request's path is one of the three token routes as express would match it: case and a trailing slash do not matter to
  * express, so they do not matter here either (as brain-keys.ts isBrainKeyPath) */
 export const isIdentityTokenPath = (path: string): boolean => TOKEN_PATHS.has(path.toLowerCase().replace(/\/+$/, ""));
 /** the most a token route reads of a body: two tokens, a 64-hex fingerprint and a 32-hex salt fit in a fraction of it */
@@ -55,6 +61,9 @@ const TELEGRAM_MISMATCH = "The token does not match its fingerprint: nothing was
 const SLACK_MISMATCH = "The two tokens do not match their fingerprint: nothing was kept. Paste both tokens again.";
 const TELEGRAM_BOT_MISMATCH = "The bot signed is not the bot this connection checked with Telegram: nothing was written. Start again.";
 const SLACK_BOT_MISMATCH = "The bot signed is not the bot this connection checked with Slack: nothing was written. Start again.";
+const PHOTON_UNREACHABLE = "Photon did not answer: nothing was kept. Try again in a minute.";
+const IMESSAGE_MISMATCH = "The project ID and secret do not match their fingerprint: nothing was kept. Paste them again.";
+const IMESSAGE_BOT_MISMATCH = "The number signed is not the one this connection got from Photon: nothing was written. Start again.";
 
 /** the identity routes' fixed sentences: none repeats anything that was sent (`connectedOn` and `notConnectedOn` name only the network;
  * the `…On(network)` ones pick the network's own sentence — Telegram's as B1 wrote them, Slack's beside them) */
@@ -99,9 +108,19 @@ export const IDENTITY_WORDS = {
   slackMismatch: SLACK_MISMATCH,
   slackBotMismatch: SLACK_BOT_MISMATCH,
   slackTokenInField: "A Slack token is never a signed field: only the two tokens' fingerprint is. Nothing was written.",
-  unreachableOn: (network: Network): string => (network === "slack" ? SLACK_UNREACHABLE : TELEGRAM_UNREACHABLE),
-  mismatchOn: (network: Network): string => (network === "slack" ? SLACK_MISMATCH : TELEGRAM_MISMATCH),
-  botMismatchOn: (network: Network): string => (network === "slack" ? SLACK_BOT_MISMATCH : TELEGRAM_BOT_MISMATCH),
+  // iMessage's, through Photon: its token route, its check (the project, the number's registration) and its signed fields
+  imessageMalformed: "This route takes one JSON object, {projectId, projectSecret, phone, keyHash, salt}: what was sent is not that, and it was not kept.",
+  imessageShape: "That is not a Photon project and a phone number: the project ID and secret come from the project's Settings, and the number is written +, the country code, then the number (+14155550100). Nothing was kept.",
+  refusedByPhoton: "Photon does not know this project and secret: nothing was kept. Copy both from the project's Settings again.",
+  photonDedicated: "This Photon project has dedicated lines: Gravit uses the shared pool only. Use a project on the Free or Pro plan. Nothing was kept.",
+  photonUserLimit: "This Photon project has no room for another user: remove one in Photon, or use another project. Nothing was kept.",
+  photonNoNumber: "Photon has no free shared number for this phone: nothing was kept. Try again later.",
+  photonUnreachable: PHOTON_UNREACHABLE,
+  imessageMismatch: IMESSAGE_MISMATCH,
+  imessageBotMismatch: IMESSAGE_BOT_MISMATCH,
+  unreachableOn: (network: Network): string => (network === "slack" ? SLACK_UNREACHABLE : network === "imessage" ? PHOTON_UNREACHABLE : TELEGRAM_UNREACHABLE),
+  mismatchOn: (network: Network): string => (network === "slack" ? SLACK_MISMATCH : network === "imessage" ? IMESSAGE_MISMATCH : TELEGRAM_MISMATCH),
+  botMismatchOn: (network: Network): string => (network === "slack" ? SLACK_BOT_MISMATCH : network === "imessage" ? IMESSAGE_BOT_MISMATCH : TELEGRAM_BOT_MISMATCH),
 } as const;
 
 const NOT_MOUNTED = "the account layer is not mounted";
@@ -160,11 +179,33 @@ export function parseSlackTokenBody(raw: Buffer): SlackTokenBody {
   return { ok: true, appToken: b.appToken, botToken: b.botToken, keyHash: b.keyHash, salt: b.salt };
 }
 
+type ImessageTokenBody = { ok: true; projectId: string; projectSecret: string; phone: string; keyHash: string; salt: string } | { ok: false };
+const IMESSAGE_KEYS: ReadonlySet<string> = new Set(["projectId", "projectSecret", "phone", "keyHash", "salt"]);
+
+/** iMessage's token route's body: exactly {projectId, projectSecret, phone, keyHash, salt}, five strings — the buffer zeroed whatever it
+ * held */
+export function parseImessageTokenBody(raw: Buffer): ImessageTokenBody {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.toString("utf8"));
+  } catch {
+    return { ok: false };
+  } finally {
+    raw.fill(0);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { ok: false };
+  const b = parsed as Record<string, unknown>;
+  const keys = Object.keys(b);
+  if (keys.length !== IMESSAGE_KEYS.size || !keys.every((k) => IMESSAGE_KEYS.has(k))) return { ok: false };
+  if (typeof b.projectId !== "string" || typeof b.projectSecret !== "string" || typeof b.phone !== "string" || typeof b.keyHash !== "string" || typeof b.salt !== "string") return { ok: false };
+  return { ok: true, projectId: b.projectId, projectSecret: b.projectSecret, phone: b.phone, keyHash: b.keyHash, salt: b.salt };
+}
+
 /** the status a begin's refusal is answered with: a token of the wrong shape is the request's own fault (400), the network not answering
  * is a gateway's (502), everything else a conflict with what the account holds (409) */
 function statusOf(r: Refusal): number {
-  if (r.message === IDENTITY_WORDS.tokenShape || r.message === IDENTITY_WORDS.slackTokenShape) return 400;
-  if (r.message === IDENTITY_WORDS.unreachable || r.message === IDENTITY_WORDS.slackUnreachable) return 502;
+  if (r.message === IDENTITY_WORDS.tokenShape || r.message === IDENTITY_WORDS.slackTokenShape || r.message === IDENTITY_WORDS.imessageShape) return 400;
+  if (r.message === IDENTITY_WORDS.unreachable || r.message === IDENTITY_WORDS.slackUnreachable || r.message === IDENTITY_WORDS.photonUnreachable) return 502;
   if (r.message === IDENTITY_WORDS.noPending) return 404;
   return 409;
 }
@@ -230,6 +271,7 @@ export function registerIdentityRoutes(app: express.Express, deps: IdentityRoute
 
   tokenRoute(IDENTITY_TOKEN_PATH, IDENTITY_WORDS.malformed, parseTokenBody, (id, b) => id.pending.begin(b.token, b.keyHash, b.salt));
   tokenRoute(SLACK_TOKEN_PATH, IDENTITY_WORDS.slackMalformed, parseSlackTokenBody, (id, b) => id.pending.beginSlack(b.appToken, b.botToken, b.keyHash, b.salt));
+  tokenRoute(IMESSAGE_TOKEN_PATH, IDENTITY_WORDS.imessageMalformed, parseImessageTokenBody, (id, b) => id.pending.beginImessage(b.projectId, b.projectSecret, b.phone, b.keyHash, b.salt));
 
   // the Identity tab: the networks connected (no bot id, no operator id, no token), the routing, quiet hours and Not you
   app.get("/api/account/identity", wrap((_req, res) => {

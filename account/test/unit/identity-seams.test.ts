@@ -32,13 +32,13 @@ const SLACK_SECRET: SlackSecret = { appToken: slackTokens().app, botToken: slack
 describe("the seams for a second network", () => {
   it("the wire id takes Telegram's numbers and Slack's ts, nothing else", () => {
     for (const ok of ["telegram:41", "slack:1730812345.001200"]) expect(WIRE_ID.test(ok)).toBe(true);
-    for (const no of ["slack:41", "slack:D0123:1730812345.001200", "imessage:1", "telegram:4.1", "41"]) expect(WIRE_ID.test(no)).toBe(false);
+    for (const no of ["slack:41", "slack:D0123:1730812345.001200", "imessage:", "imessage:a b", "telegram:4.1", "41"]) expect(WIRE_ID.test(no)).toBe(false);
   });
 
   it("routing knows slack; a network the account does not speak on is refused", () => {
-    expect(NETWORKS).toEqual(["telegram", "slack"]);
+    expect(NETWORKS).toEqual(["telegram", "imessage", "slack"]);
     expect(formatRouting(parseRouting("chat=slack,telegram;alerts=telegram;brief=;cards=;fills=") as Routing)).toBe("chat=slack,telegram;alerts=telegram;brief=;cards=;fills=");
-    expect(parseRouting("chat=imessage;alerts=;brief=;cards=;fills=")).toMatch(/imessage/);
+    expect(parseRouting("chat=signal;alerts=;brief=;cards=;fills=")).toMatch(/signal/);
     expect(parseRouting("chat=telegram,slack;alerts=;brief=;cards=;fills=")).toMatch(/sorted/);
   });
 
@@ -66,7 +66,8 @@ describe("the seams for a second network", () => {
   it("a Slack masked id is blockable", () => {
     expect(MASKED.test("…7QK")).toBe(true);
     expect(MASKED.test("…123")).toBe(true);
-    expect(MASKED.test("…7qk")).toBe(false);
+    expect(MASKED.test("…7qk")).toBe(true);
+    expect(MASKED.test("…7q!")).toBe(false);
     expect(MASKED.test("…7QKX")).toBe(false);
   });
 
@@ -113,7 +114,7 @@ describe("the seams for a second network", () => {
 });
 
 /** a source the test drives by hand: each sender it is handed is put to the shell's admit, as a network's listener would */
-function scriptedSource(network: "slack" | "telegram", secrets: string[]) {
+function scriptedSource(network: "imessage" | "slack" | "telegram", secrets: string[]) {
   let hand: ((s: PendingSender) => void) | undefined;
   let conflict: ((on: boolean) => void) | undefined;
   const verdicts: string[] = [];

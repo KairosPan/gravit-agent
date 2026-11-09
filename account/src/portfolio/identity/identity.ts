@@ -26,10 +26,13 @@
  * urgent alert and the watchdog always go. Each text has the account's own tokens (every connected network's) taken out, in every spelling,
  * then every Slack token's shape (`<token>`), and every link to this machine (the face's own address among them) made `<local link>`, before
  * it is cut into parts. What a network cannot take waits in the outbox (outbox.ts), flushed in order before each poll and each send — and,
- * for Slack, which has no poll, again SLACK_FLUSH_MS (or Slack's Retry-After) after it could not take one, and at once at boot or a
- * connect when Slack's rows wait; what it refuses outright is
+ * for Slack and iMessage, which have no poll, again SLACK_FLUSH_MS (or the network's Retry-After) after it could not take one, and at once
+ * at boot or a connect when their rows wait. A network that answers "later" holds up only its own rows: the flush passes over them and
+ * goes on with the others', and a send waits only behind its own network's earlier row. An iMessage send is written to the outbox before it goes, cut into parts once, each part sent
+ * under its own id (`<row id>:<n>`, Photon's clientMessageId) and taken off the row as it goes, so a restart sends only what is left under
+ * the same ids (deliverRow); Telegram's and Slack's go straight out and are written only when they cannot. What a network refuses outright is
  * dropped with one line — a 403 makes Telegram's status read `blocked` until a line goes, and tokens a network no longer takes its
- * pollFailing. A network disconnected takes its queued messages with it: whoever connects next never
+ * pollFailing; an iMessage row whose line Photon moved (movedAt) is dropped, never sent. A network disconnected takes its queued messages with it: whoever connects next never
  * receives them. The account's own notices (notices.ts) go the same way: `onFill` for each fill the pages are told of, `onLedgerRow` for
  * each Guard card raised.
  *
@@ -37,6 +40,9 @@
  * is in no answer, no summary, no log line and no ledger row: the summary of a connect names the token by its fingerprint only. Every line the
  * identity logs, its connectors' and its pending connections' among them, has every connected network's tokens taken out in every spelling,
  * and every Slack token's shape. */
+import { randomBytes } from "node:crypto";
+import { readFileSync, rmSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { isRefusal, type Refusal } from "../../core/errors.ts";
 import { fingerprintOf, keyMatches } from "../account/brain-keys.ts";
 import type { Outcome } from "../account/exchange.ts";
@@ -46,20 +52,25 @@ import type { LedgerRow } from "../../agent/ledger.ts";
 import { formatRouting, isClock, NETWORK_NAME, NETWORKS, parseRouting, PHONE_KINDS, quietHolds, rowOf, SLACK_TOKEN_ANYWHERE, WIRE_ID, type Network, type PhoneKind, type Routing } from "./kinds.ts";
 import { redactorOf, splitMessage } from "./bot-api.ts";
 import { cardNotice, fillNotice, type FillFields } from "./notices.ts";
-import { lateLine, Outbox, OUTBOX_MAX, OUTBOX_MAX_AGE_MS } from "./outbox.ts";
+import { IMESSAGE_CURSOR_FILE, ImessageConnector, ImessageTransport } from "./imessage.ts";
+import { lateLine, Outbox, OUTBOX_MAX, OUTBOX_MAX_AGE_MS, type OutboxEntry } from "./outbox.ts";
 import { InboxRing, type InboxMessage } from "./inbox.ts";
-import { operatorHandleOf, PendingConnections, type PendingResume } from "./pending.ts";
+import { operatorHandleOf, PendingConnections, speaksAsOf, type PendingResume } from "./pending.ts";
+import { PhotonError, type PhotonLink } from "./photon-link.ts";
 import { IDENTITY_WORDS } from "./routes.ts";
-import { readNetworkSecret, removeNetworkSecret, secretsOf, writeNetworkSecret, type SlackSecret, type TelegramSecret } from "./secret-file.ts";
+import { readNetworkSecret, removeNetworkSecret, secretsOf, writeNetworkSecret, type ImessageSecret, type SlackSecret, type TelegramSecret } from "./secret-file.ts";
 import { CURSOR_FILE, SlackConnector, SlackTransport } from "./slack.ts";
 import { SLACK_API, SLACK_MANIFEST, SlackApi, SlackApiError } from "./slack-api.ts";
 import { SlackSocket, type OpenSocket } from "./slack-socket.ts";
-import { BLOCKED_MAX, loadIdentity, MASKED, saveIdentity, Strangers, writeIdentityFile, type Binding, type IdentityState, type Stranger } from "./store.ts";
+import { BLOCKED_MAX, identityDir, loadIdentity, MASKED, saveIdentity, Strangers, writeIdentityFile, type Binding, type IdentityState, type Stranger } from "./store.ts";
 import { OFFSET_FILE, realClock, TelegramConnector, TelegramTransport, type IdentityClock, type NetworkStatus } from "./telegram.ts";
 
 export type IdentityAction = Extract<OwnerAction, { type: "connectNetwork" | "disconnectNetwork" | "setRouting" | "blockSender" }>;
 export const IDENTITY_TYPES: ReadonlySet<string> = new Set(["connectNetwork", "disconnectNetwork", "setRouting", "blockSender"]);
 export const isIdentityAction = (a: { type: string }): a is IdentityAction => IDENTITY_TYPES.has(a.type);
+
+/** the line Photon refused to write to, kept in the home's identity directory: a connect registers the number again past it */
+export const IMESSAGE_REFUSED_FILE = "imessage.refused";
 
 export interface IdentityDeps {
   home: string;
@@ -68,6 +79,8 @@ export interface IdentityDeps {
   /** Slack's Web API (slack-api.ts slackApiBase: Slack's own unless set) and how its sockets are opened (Node's WebSocket unless set) */
   slackApiBase?: string | undefined;
   openSocket?: OpenSocket | undefined;
+  /** Photon's link, iMessage's seam (photon-link.ts): none, and iMessage cannot be connected */
+  photon?: PhotonLink | undefined;
   fetch?: typeof fetch | undefined;
   pollTimeoutS?: number | undefined;
   now?: (() => number) | undefined;
@@ -110,7 +123,7 @@ export type SendAnswer = { ok: true; sent: string[]; queued?: true } | { ok: tru
 
 export type IdentityView = {
   ok: true;
-  networks: Array<Omit<Binding, "botId" | "operatorId"> & { state: "connected"; polling: boolean; lastPollAt?: string; conflictAt?: string; blocked?: true; pollFailing?: { since: string; reason: string } }>;
+  networks: Array<Omit<Binding, "botId" | "operatorId"> & { state: "connected"; polling: boolean; lastPollAt?: string; conflictAt?: string; blocked?: true; pollFailing?: { since: string; reason: string }; gapAt?: string; movedAt?: string; refusedAt?: string }>;
   routing: Routing;
   quiet: { from: string; to: string; zone: "America/New_York" } | null;
   strangers: Stranger[];
@@ -135,9 +148,15 @@ const LOCAL_LINKS: readonly RegExp[] = [
   /\blocalhost(?::\d{1,5}(?:[/?#](?:[^\s]*[^\s,.;:!?)\]'"])?)?|[/?#](?:[^\s]*[^\s,.;:!?)\]'"])?)/gi,
 ];
 const withoutLocalLinks = (text: string): string => LOCAL_LINKS.reduce((out, re) => out.replace(re, "<local link>"), text);
-/** how long a Slack message that could not go waits in the outbox before it is tried again, unless Slack asked for longer (Retry-After):
- * Slack has no poll to flush it before, as Telegram has */
+/** how long a Slack or iMessage message that could not go waits in the outbox before it is tried again, unless the network asked for
+ * longer (Slack's Retry-After, Photon's retryAfterMs): neither has a poll to flush it before, as Telegram has */
 export const SLACK_FLUSH_MS = 30_000;
+/** the networks whose queued rows a timer flushes (they have no poll) */
+const TIMER_FLUSHED: ReadonlySet<Network> = new Set(["slack", "imessage"]);
+/** a written-ahead row's id: 16 random hex */
+const rowId = (): string => randomBytes(8).toString("hex");
+/** why an iMessage row is dropped once the connector says Photon moved the line (spec §5.4: it stops) */
+const IMESSAGE_MOVED = "Photon no longer names the signed line for the operator; disconnect and connect iMessage again";
 const codeOf = (err: unknown): string => (err instanceof Error ? ((err as NodeJS.ErrnoException).code ?? err.name) : "error");
 
 /** what a transport's failure means: sent again later (`retry`), refused outright (`refused`), a bot the operator blocked (`blocked`),
@@ -157,14 +176,22 @@ class SendFailure extends Error {
   }
 }
 
+/** a written-ahead row a send waits on, while the flush sends it: the wire ids of its parts that went, and why it was refused */
+interface RowWatch {
+  id: string;
+  ids: string[];
+  refused?: string;
+}
+
 /** One network the account sends on, bound to the operator's one chat there: a part at a time (at most `partMax` code units), answering
- * the part's wire id; `classify` says what a failure of `send` means; `secrets` are its tokens, taken out of every text; `dispose` cuts
- * it (and whatever shares its client) */
+ * the part's wire id ("" for a part the network already had: sent all the same); `partId` is the part's own id, which iMessage's
+ * transport needs and the others ignore; `classify` says what a failure of `send` means; `secrets` are its tokens, taken out of every
+ * text; `dispose` cuts it (and whatever shares its client) */
 export interface Transport {
   network: Network;
   secrets: readonly string[];
   partMax: number;
-  send(part: string, replyTo?: string): Promise<string>;
+  send(part: string, replyTo?: string, partId?: string): Promise<string>;
   classify(err: unknown): "retry" | "refused" | "blocked" | "auth";
   dispose(): void;
 }
@@ -207,6 +234,9 @@ export class Identity {
   private lineRedact: (text: string) => string = (t) => t;
   /** the flush armed after a Slack message could not go */
   private flushTimer: unknown;
+  /** when a network asked to be left alone until (Slack's Retry-After, Photon's retryAfterMs): the flush timer does not try it before
+   * (a send still flushes first, as ever); forgotten once a part goes to it or it is disconnected */
+  private readonly retryAt = new Map<Network, number>();
   /** a 403 on a send, for a network with no poller running (a read-only account) */
   private readonly sendBlocked = new Map<Network, boolean>();
   /** a send the network refused for its tokens (`auth`): the status reads pollFailing until a part goes */
@@ -224,12 +254,12 @@ export class Identity {
     this.store = new Strangers(deps.home);
     this.inboxRing = new InboxRing(deps.home);
     this.outbox = new Outbox(deps.home, OUTBOX_MAX, this.log);
-    this.pending = new PendingConnections({ apiBase: deps.apiBase, slackApiBase: deps.slackApiBase, openSocket: deps.openSocket, clock: this.clock, strangers: this.store, bound: (network) => this.bound(network) !== undefined, blocked: () => this.state.blocked, fetch: deps.fetch, pollTimeoutS: deps.pollTimeoutS, now: deps.now, log: this.log });
+    this.pending = new PendingConnections({ apiBase: deps.apiBase, slackApiBase: deps.slackApiBase, openSocket: deps.openSocket, clock: this.clock, photon: deps.photon, imessageRefusedLine: () => this.imessageRefusedLine(), strangers: this.store, bound: (network) => this.bound(network) !== undefined, blocked: () => this.state.blocked, fetch: deps.fetch, pollTimeoutS: deps.pollTimeoutS, now: deps.now, log: this.log });
     this.resume();
     // an earlier run may have queued what this one takes out
     this.outbox.rewrite((t) => this.clean(t));
     // and what it queued for Slack goes now: Slack has no poll to flush it before, and no send may come for hours
-    this.flushSlackQueued();
+    this.flushTimerQueued();
   }
 
   /** Send `m` as the account decides (see the top of this file). Never throws */
@@ -253,7 +283,9 @@ export class Identity {
     if (body.trim() === "") return { ok: true, sent: [] };
     return this.outbound(async (): Promise<SendAnswer> => {
       const t = new Date(this.now()).toISOString();
-      if (this.outbox.length > 0) await this.flush();
+      // the networks that answered "later" in this send: what waits for them stays, and their later rows wait behind it
+      const stalled = new Set<Network>();
+      if (this.outbox.length > 0) await this.flush(undefined, stalled);
       const sent: string[] = [];
       let queued = false;
       let refused: { network: Network; message: string } | undefined;
@@ -261,7 +293,25 @@ export class Identity {
         const transport = this.transports.get(network);
         if (!transport) continue;
         const replyTo = m.replyTo !== undefined && m.replyTo.startsWith(`${network}:`) ? m.replyTo : undefined;
-        if (this.disposed || this.outbox.length > 0) {
+        if (network === "imessage") {
+          // written ahead, cut once: in outbox.json before Photon is called, each part under its own id; behind an earlier iMessage row it waits
+          const ahead = this.outbox.holds(network);
+          const id = rowId();
+          const parts = splitMessage(body, transport.partMax).filter((p) => p.trim() !== "");
+          this.outbox.push({ t, network, kind: m.kind, text: body, ...(replyTo ? { replyTo } : {}), id, parts, next: 0 });
+          if (this.disposed || ahead) {
+            queued = true;
+            continue;
+          }
+          const watch: RowWatch = { id, ids: [] };
+          await this.flush(watch, stalled);
+          sent.push(...watch.ids);
+          if (watch.refused !== undefined) refused = { network, message: watch.refused };
+          else if (this.outbox.entries().some((e) => e.id === id)) queued = true;
+          continue;
+        }
+        // only a row of its own network's holds it: another network's waiting row does not
+        if (this.disposed || this.outbox.holds(network)) {
           this.outbox.push({ t, network, kind: m.kind, text: body, ...(replyTo ? { replyTo } : {}) });
           queued = true;
           continue;
@@ -280,6 +330,7 @@ export class Identity {
           this.log(`identity: a message could not be sent on ${NETWORK_NAME[network]} (${f.message}); it waits in the outbox`);
           this.outbox.push({ t, network, kind: m.kind, text: f.rest, ...(f.parts === 0 && replyTo ? { replyTo } : {}) });
           this.armFlush(network, f.error);
+          stalled.add(network);
           queued = true;
         }
       }
@@ -362,8 +413,8 @@ export class Identity {
         // a pending connection to another network is not the one signed for
         if (!p || p.network !== a.network) return IDENTITY_WORDS.noPending;
         if (!keyMatches(a.salt, p.keyInput, a.keyHash)) return IDENTITY_WORDS.mismatchOn(p.network);
-        if (a.botId !== p.bot.id || a.speaksAs !== `@${p.bot.username}`) return IDENTITY_WORDS.botMismatchOn(p.network);
-        if (a.operatorId !== p.sender.id || a.talksOnlyWith !== operatorHandleOf(p.sender)) return IDENTITY_WORDS.senderMismatch;
+        if (a.botId !== p.bot.id || a.speaksAs !== speaksAsOf(p.network, p.bot)) return IDENTITY_WORDS.botMismatchOn(p.network);
+        if (a.operatorId !== p.sender.id || a.talksOnlyWith !== operatorHandleOf(p.sender, p.network)) return IDENTITY_WORDS.senderMismatch;
         return null;
       }
       case "disconnectNetwork":
@@ -448,22 +499,29 @@ export class Identity {
     this.lineRedact = all.length > 0 ? redactorOf(all, "<token>") : (t) => t;
   }
 
-  /** a Slack message waits in the outbox: flushed again in SLACK_FLUSH_MS, or when Slack's Retry-After says, if it is longer — Telegram's
-   * poll flushes before each poll, Slack has none. One timer at a time; a send flushes first all the same */
+  /** a Slack or iMessage message waits in the outbox: flushed again in SLACK_FLUSH_MS, or when Slack's Retry-After or Photon's
+   * retryAfterMs says, if it is longer — Telegram's poll flushes before each poll, Slack and iMessage have none. One timer at a time; a
+   * send flushes first all the same */
   private armFlush(network: Network, err: unknown, ms = SLACK_FLUSH_MS): void {
-    if (network !== "slack" || this.disposed || this.flushTimer !== undefined) return;
-    const after = err instanceof SlackApiError && err.retryAfterS !== undefined ? err.retryAfterS * 1000 : 0;
+    if (!TIMER_FLUSHED.has(network) || this.disposed) return;
+    const after = err instanceof SlackApiError && err.retryAfterS !== undefined ? err.retryAfterS * 1000 : err instanceof PhotonError && err.retryAfterMs !== undefined ? err.retryAfterMs : 0;
+    // the network's own wait is kept whichever timer runs first: a timer flush due earlier passes it over and arms again for it
+    if (after > 0) this.retryAt.set(network, this.now() + after);
+    if (this.flushTimer !== undefined) return;
+    const delay = Math.max(ms, after);
+    const due = this.now() + delay;
     this.flushTimer = this.clock.setTimeout(() => {
       this.flushTimer = undefined;
-      if (this.outbox.length > 0 && !this.disposed) void this.outbound(() => this.flush()).catch(() => undefined);
-    }, Math.max(ms, after));
+      if (this.outbox.length > 0 && !this.disposed) void this.outbound(() => this.flush(undefined, new Set(), due)).catch(() => undefined);
+    }, delay);
   }
 
-  /** Slack's rows in the outbox (an earlier run's, or queued before a connect) flushed at once — at boot, and when Slack's transport
-   * starts. A read-only account writes nothing, so it flushes nothing */
-  private flushSlackQueued(): void {
-    if (this.deps.readOnly || !this.transports.has("slack") || !this.outbox.entries().some((e) => e.network === "slack")) return;
-    this.armFlush("slack", undefined, 0);
+  /** Slack's and iMessage's rows in the outbox (an earlier run's, or queued before a connect) flushed at once — at boot, and when either
+   * transport starts. A read-only account writes nothing, so it flushes nothing */
+  private flushTimerQueued(): void {
+    if (this.deps.readOnly) return;
+    const waiting = this.outbox.entries().find((e) => TIMER_FLUSHED.has(e.network) && this.transports.has(e.network));
+    if (waiting) this.armFlush(waiting.network, undefined, 0);
   }
 
   /** the account's tokens out of `text` in every spelling, then every Slack token's shape, then every link to this machine */
@@ -493,20 +551,60 @@ export class Identity {
       try {
         id = await transport.send(part, i === 0 ? replyTo : undefined);
       } catch (err) {
-        const verdict = transport.classify(err);
-        if (verdict === "blocked") this.setBlocked(network, true);
-        if (verdict === "auth") {
-          const reason = err instanceof Error ? err.message : String(err);
-          this.sendAuthFailing.set(network, { since: this.sendAuthFailing.get(network)?.since ?? new Date(this.now()).toISOString(), reason });
-          this.log(`identity: ${NETWORK_NAME[network]} no longer takes the account's tokens (${reason}): the message is dropped`);
-        }
-        throw new SendFailure(ids, i, parts.slice(i).join(""), err, verdict);
+        throw new SendFailure(ids, i, parts.slice(i).join(""), err, this.failedPart(network, transport, err));
       }
-      this.setBlocked(network, false);
-      this.sendAuthFailing.delete(network);
+      this.wentPart(network);
       ids.push(id);
     }
     return ids;
+  }
+
+  /** A written-ahead row's remaining parts (the row at `index`: iMessage's), each under its own id `<row id>:<number>` and taken off the row
+   * as it goes (Outbox.advanceAt), so a restart sends only what is left, under the same ids — the row is never cut again. A row sent late opens
+   * with the late line, in front of its first part when the two fit in `partMax`, else alone first as `<row id>:late`. The wire ids of the
+   * parts sent are added to `ids` ("" — a part the network already had — counts as sent and adds none); a SendFailure at the first that
+   * did not go, the row left with that part and the rest */
+  private async deliverRow(index: number, head: OutboxEntry, transport: Transport, ids: string[]): Promise<void> {
+    const network = head.network;
+    const first = head.next ?? 0;
+    const parts = [...(head.parts ?? [])];
+    const steps: Array<{ text: string; partId: string; replyTo?: string | undefined; part: boolean }> = [];
+    const late = first === 0 ? lateLine(head.t, this.now()) : "";
+    if (late !== "" && parts.length > 0) {
+      if (late.length + parts[0]!.length <= transport.partMax) parts[0] = `${late}${parts[0]}`;
+      else steps.push({ text: late.trimEnd(), partId: `${head.id}:late`, part: false });
+    }
+    for (const [i, text] of parts.entries()) steps.push({ text, partId: `${head.id}:${first + i}`, replyTo: first + i === 0 ? head.replyTo : undefined, part: true });
+    for (const [i, step] of steps.entries()) {
+      let id: string;
+      try {
+        id = await transport.send(step.text, step.replyTo, step.partId);
+      } catch (err) {
+        throw new SendFailure([...ids], i, "", err, this.failedPart(network, transport, err));
+      }
+      this.wentPart(network);
+      if (id !== "") ids.push(id);
+      if (step.part) this.outbox.advanceAt(index);
+    }
+  }
+
+  /** what a part that did not go means: a `blocked` sets the status's blocked, an `auth` its pollFailing, with one line */
+  private failedPart(network: Network, transport: Transport, err: unknown): Verdict {
+    const verdict = transport.classify(err);
+    if (verdict === "blocked") this.setBlocked(network, true);
+    if (verdict === "auth") {
+      const reason = err instanceof Error ? err.message : String(err);
+      this.sendAuthFailing.set(network, { since: this.sendAuthFailing.get(network)?.since ?? new Date(this.now()).toISOString(), reason });
+      this.log(`identity: ${NETWORK_NAME[network]} no longer takes the account's tokens (${reason}): the message is dropped`);
+    }
+    return verdict;
+  }
+
+  /** a part went: the network is neither blocked nor refusing the account's tokens */
+  private wentPart(network: Network): void {
+    this.retryAt.delete(network);
+    this.setBlocked(network, false);
+    this.sendAuthFailing.delete(network);
   }
 
   /** quiet hours as the state says them now (off when it cannot be read: a queued message is then dropped only by its age) */
@@ -524,43 +622,95 @@ export class Identity {
     else this.sendBlocked.delete(network);
   }
 
-  /** what waits in the outbox sent, in order, until it is empty or a message does not go — that one stays at the head, cut to what did not
-   * go — or one is refused outright, which is dropped with one line */
-  private async flush(): Promise<void> {
-    while (this.outbox.length > 0 && !this.disposed) {
-      const head = this.outbox.head()!;
+  /** what waits in the outbox sent, in order, network by network: a message that does not go (`retry`) stays where it is, cut to what did
+   * not go (a written-ahead row keeps its remaining parts and their ids), and its network is `stalled` for the rest of the pass — every
+   * later row of that network is passed over, so its order holds, while the other networks' rows go on. One refused outright is dropped
+   * with one line, as is one quiet hours hold now, one too old, and one for a network not connected. An iMessage row whose line Photon
+   * moved (the connector's movedAt) is dropped, never sent. `watch` names a written-ahead row a send is waiting on: the ids of its parts
+   * sent, and why it was refused, are noted there. `stalled` is shared by the flushes of one send. `waitsFrom`: set by the flush timer (the
+   * time it was armed for) and Telegram's poll (now), which keep each network's own wait — a network whose wait ends after it, or after
+   * now if that is later, is passed over; a send's flush leaves it unset and tries every row */
+  private async flush(watch?: RowWatch, stalled: Set<Network> = new Set(), waitsFrom?: number): Promise<void> {
+    let i = 0;
+    while (i < this.outbox.length && !this.disposed) {
+      const head = this.outbox.at(i)!;
+      if (stalled.has(head.network)) {
+        i += 1;
+        continue;
+      }
+      // a timer's or a poll's flush within the wait a network asked for passes it over, and arms again for when that wait ends
+      const at = this.retryAt.get(head.network);
+      const ref = waitsFrom === undefined ? undefined : Math.max(waitsFrom, this.now());
+      if (ref !== undefined && at !== undefined && at > ref) {
+        stalled.add(head.network);
+        this.armFlush(head.network, undefined, at - ref);
+        i += 1;
+        continue;
+      }
       const transport = this.transports.get(head.network);
       if (!transport) {
-        this.outbox.shift();
+        this.outbox.removeAt(i);
         this.log(`identity: a queued message for ${NETWORK_NAME[head.network]} is dropped: it is not connected`);
         continue;
       }
       // quiet hours are asked again now: a message held now is never sent later, whenever it was queued
       if (quietHolds(head.kind ?? "chat", this.now(), this.quietNow())) {
-        this.outbox.shift();
+        this.outbox.removeAt(i);
         this.log(`identity: a queued ${head.kind ?? "chat"} message for ${NETWORK_NAME[head.network]} is dropped: quiet hours hold it now`);
         continue;
       }
       if (this.now() - Date.parse(head.t) > OUTBOX_MAX_AGE_MS) {
-        this.outbox.shift();
+        this.outbox.removeAt(i);
         this.log(`identity: a queued message for ${NETWORK_NAME[head.network]} is dropped: it waited more than ${OUTBOX_MAX_AGE_MS / 3_600_000} hours`);
         continue;
       }
-      // the late line rides in the first part, so what does not go is always the head's own text
+      if (head.parts !== undefined) {
+        const mine = watch !== undefined && head.id === watch.id;
+        if (head.parts.length === 0) {
+          this.outbox.removeAt(i);
+          continue;
+        }
+        // a line Photon moved is not the one the operator signed: nothing more goes from it (the status keeps saying movedAt)
+        if (head.network === "imessage" && this.connectors.get("imessage")?.status().movedAt !== undefined) {
+          this.outbox.removeAt(i);
+          if (mine) watch.refused = IMESSAGE_MOVED;
+          this.log(`identity: a message for iMessage is dropped, not sent: ${IMESSAGE_MOVED}`);
+          continue;
+        }
+        try {
+          await this.deliverRow(i, head, transport, mine ? watch.ids : []);
+        } catch (err) {
+          const f = err as SendFailure;
+          if (f.verdict !== "retry") {
+            this.outbox.removeAt(i);
+            if (mine) watch.refused = this.redactLine(f.message);
+            // an `auth` failure said its one line already (deliverRow)
+            if (f.verdict !== "auth") this.log(mine ? `identity: ${NETWORK_NAME[head.network]} refused a message (${f.message}); it is dropped` : `identity: ${NETWORK_NAME[head.network]} refused a queued message (${f.message}); it is dropped from the outbox`);
+            continue;
+          }
+          if (mine) this.log(`identity: a message could not be sent on ${NETWORK_NAME[head.network]} (${f.message}); it waits in the outbox`);
+          this.armFlush(head.network, f.error);
+          stalled.add(head.network);
+          i += 1;
+        }
+        continue;
+      }
+      // the late line rides in the first part, so what does not go is always the row's own text
       try {
         await this.deliver(head.network, transport, `${lateLine(head.t, this.now())}${head.text}`, head.replyTo);
-        this.outbox.shift();
+        this.outbox.removeAt(i);
       } catch (err) {
         const f = err as SendFailure;
         if (f.verdict !== "retry") {
-          this.outbox.shift();
+          this.outbox.removeAt(i);
           // an `auth` failure said its one line already (deliver)
           if (f.verdict !== "auth") this.log(`identity: ${NETWORK_NAME[head.network]} refused a queued message (${f.message}); it is dropped from the outbox`);
           continue;
         }
-        if (f.parts > 0) this.outbox.cutHead(f.rest);
+        if (f.parts > 0) this.outbox.cutAt(i, f.rest);
         this.armFlush(head.network, f.error);
-        return;
+        stalled.add(head.network);
+        i += 1;
       }
     }
   }
@@ -602,11 +752,11 @@ export class Identity {
       const left = this.removeSecret(network);
       return left ? refusal(`${saved.message}; and ${left}`) : saved;
     }
-    // nothing queued before this binding ever goes to it
-    this.dropQueued(network);
+    // nothing queued before this binding ever goes to it — dropped in the send chain, so no flush has a row taken from under it
+    await this.outbound(async () => this.dropQueued(network));
     this.startConnector(binding, { ...taken.secret, operatorHandle: a.talksOnlyWith }, taken.resume);
     // Slack's fingerprint is of its two tokens together
-    return { ok: true, kind: "account", summary: `${NETWORK_NAME[network]} connected: Gravit speaks as ${a.speaksAs} and talks only with ${a.talksOnlyWith} · ${network === "slack" ? "tokens" : "token"} ${fingerprint}` };
+    return { ok: true, kind: "account", summary: `${NETWORK_NAME[network]} connected: Gravit speaks as ${a.speaksAs} and talks only with ${a.talksOnlyWith} · ${network === "slack" ? "tokens" : network === "imessage" ? "project secret" : "token"} ${fingerprint}` };
   }
 
   private async disconnect(a: Extract<IdentityAction, { type: "disconnectNetwork" }>): Promise<Outcome> {
@@ -618,14 +768,17 @@ export class Identity {
     const saved = this.save({ ...s, bindings: s.bindings.filter((b) => b.network !== network), routing });
     if (saved) return saved;
     await this.stopConnector(network);
-    this.dropQueued(network);
-    const left = this.removeSecret(network);
-    if (left) return refusal(`${NETWORK_NAME[network]} is disconnected and its poller stopped, but ${left}`);
+    // in the send chain, as connect's: a flush on its way finishes first, and its row positions hold
+    await this.outbound(async () => this.dropQueued(network));
+    // iMessage's cursor goes with its binding; its refused line stays, so a connect later registers the number again past it
+    const left = [this.removeSecret(network), network === "imessage" ? this.removeCursor() : undefined].filter((x): x is string => x !== undefined);
+    if (left.length > 0) return refusal(`${NETWORK_NAME[network]} is disconnected and its poller stopped, but ${left.join("; and ")}`);
     return { ok: true, kind: "account", summary: `${NETWORK_NAME[network]} disconnected: its token removed from the account` };
   }
 
   /** the network's queued messages dropped, with one line when there were any */
   private dropQueued(network: Network): void {
+    this.retryAt.delete(network);
     const dropped = this.outbox.dropNetwork(network);
     if (dropped > 0) this.log(`identity: ${dropped} queued message(s) for ${NETWORK_NAME[network]} are dropped: it was disconnected`);
   }
@@ -640,18 +793,52 @@ export class Identity {
     }
   }
 
+  /** iMessage's cursor taken away; what went wrong in words (its code, no path), or undefined when it is gone */
+  private removeCursor(): string | undefined {
+    try {
+      rmSync(join(identityDir(this.home), IMESSAGE_CURSOR_FILE), { force: true });
+      return undefined;
+    } catch (err) {
+      return `its cursor file could not be removed (${codeOf(err)})`;
+    }
+  }
+
+  /** the line Photon refused to write to, as <home>/identity/imessage.refused keeps it (trimmed), or undefined when there is none */
+  private imessageRefusedLine(): string | undefined {
+    try {
+      const line = readFileSync(join(identityDir(this.home), IMESSAGE_REFUSED_FILE), "utf8").trim();
+      return line !== "" ? line : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** when the line the binding speaks as was refused: the marker file's time, if it holds that line */
+  private imessageRefusedAt(): string | undefined {
+    const line = this.imessageRefusedLine();
+    const secret = readNetworkSecret(this.home, "imessage");
+    if (line === undefined || !secret || !("projectSecret" in secret) || secret.line !== line) return undefined;
+    try {
+      return statSync(join(identityDir(this.home), IMESSAGE_REFUSED_FILE)).mtime.toISOString();
+    } catch {
+      return undefined;
+    }
+  }
+
   /** at service creation: a binding whose token file is there listens again from where its connector kept (its own resumeFrom) */
   private resume(): void {
     for (const b of this.state.bindings) {
       const secret = readNetworkSecret(this.home, b.network);
-      if (!secret || secret.operatorId !== b.operatorId || secret.botId !== b.botId) continue;
+      // iMessage's file names no bot: its binding's bot is the project's line
+      const botId = secret && ("projectSecret" in secret ? `${secret.projectId}:${secret.line}` : secret.botId);
+      if (!secret || secret.operatorId !== b.operatorId || botId !== b.botId) continue;
       this.startConnector(b, secret);
     }
   }
 
   /** the network's transport and connector, by network: from `resume` after a connect (where the pending connection stood after the
    * message heard), else from where the connector's own file says it stopped */
-  private startConnector(binding: Binding, secret: TelegramSecret | SlackSecret, resume?: PendingResume): void {
+  private startConnector(binding: Binding, secret: TelegramSecret | SlackSecret | ImessageSecret, resume?: PendingResume): void {
     if (this.transports.has(binding.network) || this.connectors.has(binding.network)) return;
     if (binding.network === "telegram" && "token" in secret) {
       const offset = resume?.network === "telegram" ? resume.offset : TelegramConnector.resumeFrom(this.home);
@@ -660,6 +847,10 @@ export class Identity {
     if (binding.network === "slack" && "appToken" in secret) {
       const cursor = resume?.network === "slack" && resume.cursor !== "" ? resume.cursor : SlackConnector.resumeFrom(this.home);
       return this.startSlack(binding, secret, cursor);
+    }
+    if (binding.network === "imessage" && "projectSecret" in secret) {
+      const sequence = resume?.network === "imessage" ? resume.sequence : ImessageConnector.resumeFrom(this.home);
+      return this.startImessage(binding, secret, sequence);
     }
     this.log(`identity: ${NETWORK_NAME[binding.network]}'s binding and its token file do not agree: nothing is heard or sent on it`);
   }
@@ -704,7 +895,51 @@ export class Identity {
     });
     this.connectors.set(binding.network, connector);
     connector.start();
-    this.flushSlackQueued();
+    this.flushTimerQueued();
+  }
+
+  /** iMessage's transport and connector, through the account's Photon link, from `sequence` on (the connector keeps its own cursor as it
+   * goes). A refused send writes the line to identity/imessage.refused. The connector's own replies (chat-off, text only) go straight to
+   * the transport under a fresh random part id, not through the outbox. A read-only account sends on it, but opens no stream */
+  private startImessage(binding: Binding, secret: ImessageSecret, sequence: number | undefined): void {
+    const link = this.deps.photon;
+    if (!link) {
+      this.log("identity: iMessage is connected but the account has no Photon link: nothing is heard or sent on it");
+      return;
+    }
+    const transport = new ImessageTransport({
+      link,
+      secret,
+      refusedLine: (line) => {
+        try {
+          writeIdentityFile(this.home, IMESSAGE_REFUSED_FILE, line);
+        } catch (err) {
+          this.log(`identity: the line Photon refused could not be kept (${codeOf(err)})`);
+        }
+      },
+    });
+    this.transports.set(binding.network, transport);
+    this.redactLines(binding.network, transport.secrets);
+    if (this.deps.readOnly) return;
+    const connector = new ImessageConnector({
+      home: this.home,
+      link,
+      binding,
+      secret,
+      inbox: this.inboxRing,
+      strangers: this.store,
+      blocked: () => this.state.blocked,
+      chatOn: () => this.state.routing.chat.includes(binding.network),
+      reply: async (text) => {
+        await transport.send(text, undefined, `${rowId()}:0`);
+      },
+      sequence,
+      clock: this.clock,
+      log: this.log,
+    });
+    this.connectors.set(binding.network, connector);
+    connector.start();
+    this.flushTimerQueued();
   }
 
   /** Telegram's poller, from `offset` on: the offset written first — after a connect, the one after the message the operator was heard by,
@@ -741,7 +976,7 @@ export class Identity {
       clock: this.clock,
       log,
       pollTimeoutS: this.deps.connectedPollTimeoutS,
-      beforePoll: () => (this.outbox.length > 0 ? this.outbound(() => this.flush()) : Promise.resolve()),
+      beforePoll: () => (this.outbox.length > 0 ? this.outbound(() => this.flush(undefined, new Set(), this.now())) : Promise.resolve()),
     });
     this.connectors.set(binding.network, connector);
     connector.start();
@@ -763,6 +998,8 @@ export class Identity {
   private statusOf(network: Network): NetworkStatus {
     const st = this.connectors.get(network)?.status() ?? { network, polling: false, ...(this.sendBlocked.get(network) ? { blocked: true as const } : {}) };
     const auth = this.sendAuthFailing.get(network);
-    return auth && st.pollFailing === undefined ? { ...st, pollFailing: { ...auth } } : st;
+    const out = auth && st.pollFailing === undefined ? { ...st, pollFailing: { ...auth } } : st;
+    const refusedAt = network === "imessage" ? this.imessageRefusedAt() : undefined;
+    return refusedAt ? { ...out, refusedAt } : out;
   }
 }

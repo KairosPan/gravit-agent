@@ -11,6 +11,7 @@ import { renderSheet } from '../../client/js/render/owner.js';
 import { IDENTITY_KINDS, identityTitleOf, identityGoOf, identityFieldsOf, identityDraftOf, identityLinesOf, identityStepsOf, identityNoteOf, rowsSentOn, slackSteps4Note } from '../../client/js/host/sheet-identity.js';
 import { SHEET_KINDS, titleOf, goWord, fieldsOf, draftOf } from '../../client/js/host/sheet-view.js';
 import { connectRoutingOf } from '../../client/js/host/identity.js';
+import { t } from '../../client/js/i18n/words.js';
 
 const STEPS_1 = [
   'In Telegram, open @BotFather and send /newbot.',
@@ -171,7 +172,7 @@ test('disconnect drafts disconnectNetwork with its three lines', () => {
     'The token is deleted from the account.',
     'The desk keeps working in the face.',
   ]);
-  assert.equal(typeof identityDraftOf('disconnectNetwork', [], { network: 'imessage' }), 'string', 'only a network the account speaks on');
+  assert.equal(typeof identityDraftOf('disconnectNetwork', [], { network: 'fax' }), 'string', 'only a network the account speaks on');
   assert.equal(typeof identityDraftOf('disconnectNetwork', [], {}), 'string');
   // drawn: the three lines above the keys, Sign disconnect, no Start again
   const s = R.sheetOpen(R.ownerStanding(emptyState(NOW), { role: 'signs', kid: 'a5048199a8081854' }), { kind: 'disconnectNetwork', seed, fields: [] });
@@ -240,7 +241,8 @@ test('block drafts blockSender for the stranger\'s ref, shown by its masked id',
   assert.deepEqual(identityLinesOf('block', seed), ['Messages from …789 are dropped and no longer counted.']);
   assert.equal(typeof identityDraftOf('block', [], { ...seed, sender: '' }), 'string');
   assert.equal(typeof identityDraftOf('block', [], { ...seed, masked: '' }), 'string');
-  assert.equal(typeof identityDraftOf('block', [], { ...seed, network: 'imessage' }), 'string');
+  assert.equal(typeof identityDraftOf('block', [], { ...seed, network: 'fax' }), 'string');
+  assert.deepEqual(identityDraftOf('block', [], { ...seed, network: 'imessage', masked: '…com' }), { type: 'blockSender', network: 'imessage', sender: '0a1b2c3d4e5f', masked: '…com' });
   assert.deepEqual(identityDraftOf('block', [], { ...seed, network: 'slack', masked: '…7QK' }), { type: 'blockSender', network: 'slack', sender: '0a1b2c3d4e5f', masked: '…7QK' });
   // an account-supplied masked id is escaped where drawn
   const odd = { ...seed, masked: '<b>…7</b>' };
@@ -407,4 +409,91 @@ test("what a network may send is listed under the table's separator", async () =
     assert.equal(identityLinesOf('connectNetwork', SEED)[3], 'May send: Chat with Gravit、Watch alerts、Pre-close brief、Cards waiting、Fills and reports');
     assert.deepEqual(identityLinesOf('routing', { routing: SEED_ROUTING }), ['On Telegram: Chat with Gravit、Watch alerts、Cards waiting、Fills and reports']);
   });
+});
+
+// ── the iMessage plan: Connect iMessage's four sheets and Disconnect iMessage ──
+
+const IM_SEED = {
+  network: 'imessage', pending: 'aaaabbbbccccddddaaaabbbbccccdddd', botId: 'prj_1:+14155550123', speaksAs: '+14155550123', operatorId: '+14155550100', talksOnlyWith: '+14155550100',
+  routing: 'chat=imessage;alerts=imessage;brief=;cards=imessage;fills=imessage', keyHash: 'c'.repeat(8) + 'a'.repeat(56), salt: 'b'.repeat(32),
+};
+const draft = IM_SEED;
+const disconnectDraft = network => ({ network });
+const imAt = () => R.identityConnectOpen(R.nav(emptyState(NOW), { screen: 'account', tab: 'identity' }), 'imessage');
+
+test("iMessage's steps lists, word for word", () => {
+  assert.deepEqual(connectSteps(1, 'imessage'), [
+    'Make an account at Photon and create a project.',
+    "Open the project's Settings: it shows the project ID and the project secret.",
+    'Copy both into the first two fields, then type your own mobile number, starting with + and its country code.',
+    'Paste the secret only here, never in a chat, not even with Gravit.',
+  ]);
+  assert.deepEqual(connectSteps(2, 'imessage'), [
+    "On your iPhone, open the link or scan the code with the camera: a new message opens, addressed to Gravit's number. Send hi.",
+    'Wait here: this sheet moves on when Gravit hears you from your number.',
+  ]);
+  assert.deepEqual(connectSteps(3, 'imessage'), [
+    'This is me: Gravit talks only with this number, on iMessage.',
+    'Not me: that sender is listed under Not you and never reaches Gravit. Say hi again from your own iPhone.',
+  ]);
+  assert.deepEqual(connectSteps(4, 'imessage'), []);
+});
+
+test('sheet 1: Connect iMessage · 1 of 4 · Photon project — what Photon is, its link, three fields, a project alone, what Next does, where the secret is kept', () => {
+  const html = renderConnectDrawer(imAt());
+  assert.match(html, /<aside class="drawer sheet" aria-label="Connect iMessage · 1 of 4 · Photon project">/);
+  assert.match(decode(html), /Gravit's iMessage runs through Photon, a separate company, and your messages pass through its servers\./);
+  assert.match(html, /<a href="https:\/\/app\.photon\.codes" target="_blank" rel="noopener noreferrer">app\.photon\.codes<\/a>/);
+  assert.match(html, /<input id="identity-photon-project" class="input" type="text" autocomplete="off"/);
+  assert.match(html, /<input id="identity-photon-secret" class="input" type="password" autocomplete="off"/);
+  assert.match(html, /<input id="identity-photon-phone" class="input" type="tel" autocomplete="off"/);
+  for (const label of ['Project ID', 'Project secret', 'Your mobile number, with its country code']) assert.ok(html.includes(`>${label}</label>`), label);
+  assert.ok(decode(html).includes('Use a Photon project for Gravit alone'));
+  assert.ok(decode(html).includes('Next replaces your registration to get a new one.'));
+  assert.ok(html.includes('Kept in: Account · :4820'));
+  assert.ok(decode(html).includes("Never in: Gravit's box · ~/.dsh"));
+  assert.doesNotMatch(html, /<form/);
+  // the steps above the keys
+  const ol = html.indexOf('<ol class="sheet-steps">');
+  assert.ok(ol > html.indexOf('identity-photon-phone') && ol < html.lastIndexOf('<div class="btn-row">'));
+  assert.deepEqual(listOf(html), connectSteps(1, 'imessage'));
+});
+
+test('connectNetwork for iMessage lists via Photon, the secret kept in the Account and its fingerprint', () => {
+  const lines = identityLinesOf('connectNetwork', draft).join('\n');
+  assert.ok(lines.includes(t('identity.viaPhoton')));
+  assert.ok(lines.includes(t('sheet.identity.keptInAccount', { fingerprint: draft.keyHash.slice(0, 8) })));
+  assert.ok(lines.includes(draft.keyHash.slice(0, 8)));
+  assert.deepEqual(identityLinesOf('connectNetwork', draft), [
+    'Network: iMessage', 'via Photon', 'Speaks as: +14155550123', 'Talks only with: +14155550100',
+    'May send: Chat with Gravit, Watch alerts, Cards waiting, Fills and reports', 'Project secret kept in: Account · :4820 · fingerprint cccccccc',
+    'Signed by: this browser', 'Until: you disconnect',
+  ]);
+  assert.ok(!lines.includes('@'), 'no @ on iMessage');
+  assert.equal(identityTitleOf('connectNetwork', draft), 'Connect iMessage · 4 of 4 · What you sign');
+  assert.equal(identityNoteOf('connectNetwork', draft), '');
+  assert.deepEqual(identityDraftOf('connectNetwork', [], draft), {
+    type: 'connectNetwork', network: 'imessage', pending: draft.pending, botId: 'prj_1:+14155550123', speaksAs: '+14155550123', operatorId: '+14155550100',
+    talksOnlyWith: '+14155550100', routing: draft.routing, keyHash: draft.keyHash, salt: draft.salt,
+  });
+});
+
+test('Disconnect iMessage says the Photon registration stays', () => {
+  const seed = disconnectDraft('imessage');
+  assert.deepEqual(identityDraftOf('disconnectNetwork', [], seed), { type: 'disconnectNetwork', network: 'imessage' });
+  assert.equal(titleOf('disconnectNetwork', seed), 'Disconnect iMessage');
+  assert.deepEqual(identityLinesOf('disconnectNetwork', seed), [
+    'Gravit stops reading and sending on iMessage.',
+    'The project secret is deleted from the account.',
+    'The desk keeps working in the face.',
+  ]);
+  assert.ok(identityNoteOf('disconnectNetwork', seed).includes(t('sheet.identity.photonStays')));
+  assert.equal(identityNoteOf('disconnectNetwork', disconnectDraft('telegram')), '');
+  const html = renderSheet(R.sheetOpen(R.ownerStanding(emptyState(NOW), { role: 'signs', kid: 'a5048199a8081854' }), { kind: 'disconnectNetwork', seed, fields: [] }), NOW);
+  assert.ok(decode(html).includes("Your number stays registered in your Photon project, which is yours: to make the old secret useless, rotate it in the project's Settings."));
+});
+
+test('the routing sheet names iMessage when it is connected', () => {
+  assert.deepEqual(identityLinesOf('routing', { routing: { chat: ['imessage'], alerts: [], brief: [], cards: [], fills: [] }, networks: ['telegram', 'imessage'] }),
+    ['On Telegram: nothing', 'On iMessage: Chat with Gravit']);
 });

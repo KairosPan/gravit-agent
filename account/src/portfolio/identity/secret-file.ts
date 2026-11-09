@@ -34,8 +34,23 @@ export interface SlackSecret {
   operatorHandle: string;
 }
 
+/** iMessage's file (through Photon): the project and its secret, the operator's number, Gravit's line, the Photon user, and the one
+ * person it talks to */
+export interface ImessageSecret {
+  projectId: string;
+  projectSecret: string;
+  phone: string;
+  line: string;
+  userId: string;
+  operatorId: string;
+  operatorHandle: string;
+}
+
 /** the file a network keeps */
-export type SecretOf<N extends Network> = N extends "slack" ? SlackSecret : TelegramSecret;
+export type SecretOf<N extends Network> = N extends "slack" ? SlackSecret : N extends "imessage" ? ImessageSecret : TelegramSecret;
+
+/** the HTTP Basic spelling of a Photon project's credentials: base64 of `projectId:secret` */
+export const basicOf = (projectId: string, secret: string): string => Buffer.from(`${projectId}:${secret}`).toString("base64");
 
 export const NETWORK_SECRET_DIR = "credentials/networks";
 export const networkSecretRef = (network: Network): string => `${NETWORK_SECRET_DIR}/${network}.json`;
@@ -43,11 +58,13 @@ export const networkSecretRef = (network: Network): string => `${NETWORK_SECRET_
 /** each network's fields, in the order the file is written */
 const FIELDS: { readonly [N in Network]: ReadonlyArray<keyof SecretOf<N>> } = {
   telegram: ["token", "botId", "username", "operatorId", "operatorHandle"],
+  imessage: ["projectId", "projectSecret", "phone", "line", "userId", "operatorId", "operatorHandle"],
   slack: ["appToken", "botToken", "appId", "channel", "botId", "username", "operatorId", "operatorHandle"],
 };
 
 /** the token strings a network's file holds — what every line said and every text sent has taken out */
-export function secretsOf(s: TelegramSecret | SlackSecret): string[] {
+export function secretsOf(s: TelegramSecret | SlackSecret | ImessageSecret): string[] {
+  if ("projectSecret" in s) return [s.projectSecret, basicOf(s.projectId, s.projectSecret)];
   return "appToken" in s ? [s.appToken, s.botToken] : [s.token];
 }
 
@@ -146,8 +163,9 @@ export function removeNetworkSecret(home: string, network: Network): { ok: true;
 /** Read a network's token file: inside the home, a plain file, 0600, every field of that network's a non-empty string — or undefined */
 export function readNetworkSecret(home: string, network: "telegram"): TelegramSecret | undefined;
 export function readNetworkSecret(home: string, network: "slack"): SlackSecret | undefined;
+export function readNetworkSecret(home: string, network: "imessage"): ImessageSecret | undefined;
 export function readNetworkSecret<N extends Network>(home: string, network: N): SecretOf<N> | undefined;
-export function readNetworkSecret(home: string, network: Network): TelegramSecret | SlackSecret | undefined {
+export function readNetworkSecret(home: string, network: Network): TelegramSecret | SlackSecret | ImessageSecret | undefined {
   if (!known(network)) return undefined;
   const root = resolve(home);
   // no link on the way: the folders are checked as the writer checks them
@@ -168,5 +186,5 @@ export function readNetworkSecret(home: string, network: Network): TelegramSecre
     if (typeof v !== "string" || v === "") return undefined;
     out[f] = v;
   }
-  return out as unknown as TelegramSecret | SlackSecret;
+  return out as unknown as TelegramSecret | SlackSecret | ImessageSecret;
 }

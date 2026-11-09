@@ -161,7 +161,7 @@ function youFiles(list, thumbs) {
 }
 
 // a text from the operator's phone (host/kinds.js phoneMessage) is the operator's bubble under a Phone chip naming its network
-export const NETWORKS = { telegram: 'Telegram', slack: 'Slack' }; // en-kept: the networks' own names
+export const NETWORKS = { telegram: 'Telegram', slack: 'Slack', imessage: 'iMessage' }; // en-kept: the networks' own names
 const phoneChip = network => chip(Object.hasOwn(NETWORKS, network) ? t('thread.phone.on', { network: NETWORKS[network] }) : t('thread.phone'));
 
 function youMessage(m, conv, state, page) {

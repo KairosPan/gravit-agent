@@ -1,8 +1,8 @@
 // face/client/js/host/identity-view.js — the Identity tab's view (plan B1b Task 1): what the account's GET /api/account/identity
 // (through the face's proxy, /data/account/identity) says of how Gravit reaches the operator — the networks it is connected on
-// (Telegram, and Slack since plan B2 Task 7; iMessage later), what reaches them where (the routing's five rows, the face always on),
-// quiet hours on New York's clock, Not you, the strangers who wrote to the bot, and the Slack app manifest the account gives for
-// Install app…. And the routing as the string the owner signs (account/src/portfolio/identity/kinds.ts formatRouting, the same rule).
+// (Telegram, Slack since plan B2 Task 7, and iMessage through Photon since the iMessage plan), what reaches them where (the routing's
+// five rows, the face always on), quiet hours on New York's clock, Not you, the strangers who wrote to the bot, and the Slack app
+// manifest the account gives for Install app…. And the routing as the string the owner signs (account/src/portfolio/identity/kinds.ts formatRouting, the same rule).
 // No DOM, no store.
 import { HOST_NAME } from '../wire/speaker.js';
 import { t } from '../i18n/words.js';
@@ -18,11 +18,13 @@ const ROW_WORDS = {
 };
 /** the routing's rows, in the account's order, with their words (read when called: the words are the table's now) */
 export const routeRows = () => ROWS.map(row => [row, ROW_WORDS[row]()]);
-/** the networks the tab draws, in its order; Telegram and Slack connect, iMessage is later */
+/** the networks the tab draws, in its order; each one connects */
 export const NETWORKS = [['telegram', 'Telegram'], ['imessage', 'iMessage'], ['slack', 'Slack']]; // en-kept: the networks' names
 const nameOf = net => Object.fromEntries(NETWORKS)[net];
 /** the networks the account speaks on now (kinds.ts NETWORKS) */
-export const SPOKEN = ['telegram', 'slack'];
+export const SPOKEN = ['telegram', 'imessage', 'slack'];
+/** iMessage's gapAt (messages Photon could no longer give back) is the row's trouble this long, then no more */
+export const GAP_SHOWN_MS = 24 * 3_600_000;
 
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const str = v => (typeof v === 'string' ? v : '');
@@ -52,11 +54,14 @@ export function tickRouting(routing, row, network, on) {
   return { ...base, [row]: next };
 }
 
-// a connected network's trouble in one line, the worst first: the operator blocked the bot (Telegram's), another program holds the
-// token (Telegram's poller) or the app's socket (Slack's), the reads fail
-function problemOf(n, clock) {
+// a connected network's trouble in one line, the worst first: the operator blocked the bot (Telegram's); Photon moved the operator to
+// another number, or refuses to write to theirs (iMessage's); another program holds the token (Telegram's poller) or the app's socket
+// (Slack's); the reads fail (named by the row's own network); messages Photon could not give back (iMessage's gapAt, for a day)
+function problemOf(n, clock, now) {
   const slack = n.network === 'slack';
-  if (!slack && n.blocked === true) return t('identity.problem.blocked');
+  if (n.network === 'telegram' && n.blocked === true) return t('identity.problem.blocked');
+  if (str(n.movedAt)) return t('identity.problem.moved');
+  if (str(n.refusedAt)) return t('identity.problem.refused');
   const conflict = str(n.conflictAt);
   if (conflict) {
     const since = clock(conflict);
@@ -66,18 +71,20 @@ function problemOf(n, clock) {
   if (isRecord(n.pollFailing)) {
     const at = clock(str(n.pollFailing.since));
     const reason = str(n.pollFailing.reason);
-    const network = nameOf(slack ? 'slack' : 'telegram');
+    const network = nameOf(n.network) ?? nameOf('telegram');
     if (at && reason) return t('identity.problem.pollSinceWhy', { network, since: at, reason });
     if (at) return t('identity.problem.pollSince', { network, since: at });
     return reason ? t('identity.problem.pollWhy', { network, reason }) : t('identity.problem.poll', { network });
   }
+  const gap = Date.parse(str(n.gapAt));
+  if (Number.isFinite(gap) && now - gap < GAP_SHOWN_MS) return t('identity.problem.gap');
   return '';
 }
 
 // a network's row as read: connected, with its lines and its trouble, or none
-function networkOf(n, clock) {
+function networkOf(n, clock, now) {
   if (!n) return { state: 'none' };
-  const problem = problemOf(n, clock);
+  const problem = problemOf(n, clock, now);
   return {
     state: 'connected', speaksAs: str(n.speaksAs), talksOnlyWith: str(n.talksOnlyWith), since: str(n.since), fingerprint: str(n.fingerprint),
     polling: n.polling === true, ...(problem ? { problem } : {}),
@@ -87,32 +94,28 @@ function networkOf(n, clock) {
 // the account's answer's connected rows, or none for an answer the face does not recognise
 const connectedRows = read => (isRecord(read) && read.ok === true && Array.isArray(read.networks) ? read.networks.filter(n => isRecord(n) && n.state === 'connected') : []);
 
-/** The networks the account's answer shows connected, Telegram's and Slack's, read with no words: the reducers' test, so no
+/** The networks the account's answer shows connected, of those it speaks on, read with no words: the reducers' test, so no
  *  reducer reads the table. */
 export function connectedNetworks(read) {
-  return new Set(connectedRows(read).map(n => n.network).filter(n => n === 'telegram' || n === 'slack'));
+  return new Set(connectedRows(read).map(n => n.network).filter(n => SPOKEN.includes(n)));
 }
 
 /** The Identity tab's reading of the account's answer: `{ ok, networks: { telegram, imessage, slack }, grid, quiet, strangers,
- *  slackManifest }`. A connected Telegram or Slack row carries `speaksAs`, `talksOnlyWith`, `since`, `fingerprint`, `polling` and,
- *  when something is wrong, `problem` (one line); an unconnected one `state: 'none'`; iMessage is `later`. The grid's Telegram and
- *  Slack ticks are `draft`'s when one is given (the operator's unsaved ticks), else the account's, each enabled only once its network
- *  is connected; the face is always on, iMessage never. `slackManifest` is the account's app manifest text ('' when it gave none). An
- *  answer the face does not recognise is `ok: false` with nothing connected.
- *  `clock(iso)` words a time for a problem line (the renderer's; none given, the ISO as it came). */
-export function identityOf(read, draft = null, clock = iso => iso) {
+ *  slackManifest }`. A connected row carries `speaksAs`, `talksOnlyWith`, `since`, `fingerprint`, `polling` and, when something is
+ *  wrong, `problem` (one line); an unconnected one `state: 'none'`. The grid's network ticks are `draft`'s when one is given (the
+ *  operator's unsaved ticks), else the account's, each enabled only once its network is connected; the face is always on.
+ *  `slackManifest` is the account's app manifest text ('' when it gave none). An answer the face does not recognise is `ok: false`
+ *  with nothing connected.
+ *  `clock(iso)` words a time for a problem line (the renderer's; none given, the ISO as it came); `now` is when the tab is drawn
+ *  (iMessage's gapAt is a problem for a day after it). */
+export function identityOf(read, draft = null, clock = iso => iso, now = Date.now()) {
   const ok = isRecord(read) && read.ok === true;
   const list = connectedRows(read);
-  const telegram = networkOf(list.find(n => n.network === 'telegram'), clock);
-  const slack = networkOf(list.find(n => n.network === 'slack'), clock);
+  const networks = Object.fromEntries(SPOKEN.map(net => [net, networkOf(list.find(n => n.network === net), clock, now)]));
   const routing = isRecord(draft) ? routingOf({ routing: draft }) : routingOf(ok ? read : null);
-  const tgOn = telegram.state === 'connected';
-  const slOn = slack.state === 'connected';
   const grid = routeRows().map(([row, label]) => ({
     row, label, face: true,
-    telegram: { on: routing[row].includes('telegram'), enabled: tgOn },
-    imessage: { on: false, enabled: false },
-    slack: { on: routing[row].includes('slack'), enabled: slOn },
+    ...Object.fromEntries(SPOKEN.map(net => [net, { on: routing[row].includes(net), enabled: networks[net].state === 'connected' }])),
   }));
   const q = ok && isRecord(read.quiet) ? read.quiet : null;
   const quiet = q && CLOCK.test(str(q.from)) && CLOCK.test(str(q.to)) ? { from: q.from, to: q.to } : null;
@@ -120,5 +123,5 @@ export function identityOf(read, draft = null, clock = iso => iso) {
     .filter(s => isRecord(s) && typeof s.sender === 'string' && s.sender !== '' && typeof s.network === 'string')
     .map(s => ({ network: s.network, sender: s.sender, masked: str(s.masked), count: Number.isFinite(s.count) ? s.count : 0, last: str(s.last) }));
   const slackManifest = ok ? str(read.slackManifest) : '';
-  return { ok, networks: { telegram, imessage: { state: 'later' }, slack }, grid, quiet, strangers, slackManifest };
+  return { ok, networks: { telegram: networks.telegram, imessage: networks.imessage, slack: networks.slack }, grid, quiet, strangers, slackManifest };
 }

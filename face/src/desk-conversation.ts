@@ -165,7 +165,7 @@ const DELIVERED: ReadonlyMap<string, DeliverOpts> = new Map<string, DeliverOpts>
   ["wake", { kind: "report" }],
 ]);
 /** The networks a phone text comes through (src/phone.ts `PHONE_NETWORKS`; this module imports types alone). */
-const PHONE_NETWORKS: ReadonlySet<string> = new Set(["telegram", "slack"]);
+const PHONE_NETWORKS: ReadonlySet<string> = new Set(["telegram", "slack", "imessage"]);
 /** How a line answering a phone text the desk cut goes: `chat` with no network - no message names it here - which the
  * account sends to every network the Chat row ticks (plan B2, ruling 12). */
 const PHONE_LINE: DeliverOpts = { kind: "chat" };

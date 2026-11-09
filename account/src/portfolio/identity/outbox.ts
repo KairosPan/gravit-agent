@@ -5,9 +5,12 @@
  * kind (an entry without one reads as `chat`), its text (the account's tokens already taken out) and the message it answers, as
  * `<network>:<id>`. At flush, an entry quiet hours would hold now is dropped (a held message is never sent later, whenever it was queued),
  * and so is one older than OUTBOX_MAX_AGE_MS (12 hours: past that an alert, a brief or a reply is stale), each with one line. At most `max` (100) are kept; one more drops the
- * oldest, with one line. Identity (identity.ts) flushes it, in order, before each poll and before each send, so what waits there always
- * goes first; a message it sends more than two minutes after it was written opens with `(written <time>, sent late)`. A message a network
+ * oldest, with one line. Identity (identity.ts) flushes it, in order, before each poll and before each send, so what waits for a network
+ * always goes before that network's next message — a network that answers "later" holds up only its own rows, never another's; a message it sends more than two minutes after it was written opens with `(written <time>, sent late)`. A message a network
  * refuses outright (Telegram's 400, or 403 for a bot the operator blocked) is dropped with one line, so it cannot hold up the rest.
+ * iMessage's rows are written here before they go (written ahead), with an `id`, their `parts` cut once and the number `next` of the first
+ * part still to go: `advanceAt` takes a part off as it goes, and the row leaves when none is left. A row whose three do not read whole is
+ * not a message.
  *
  * The file is written whole at each change (store.ts writeIdentityFile: 0600 in a 0700 folder, no link on the way); a write that fails is
  * one line, and the outbox is held in memory until the next one goes. It is read once, when the account starts; a link at the file, or a
@@ -33,8 +36,14 @@ export interface OutboxEntry {
   text: string;
   /** the message it answers, `<network>:<id>` */
   replyTo?: string;
+  /** iMessage's rows alone, written ahead (identity.ts send): the row's id (16 random hex), the parts still to go — cut once, when the row
+   * was written, and never again — and the number of the first of them. A part goes as `<id>:<number>`, Photon's clientMessageId */
+  id?: string;
+  parts?: string[];
+  next?: number;
 }
 
+const ROW_ID = /^[0-9a-f]{16}$/;
 const isNetwork = (v: unknown): v is Network => typeof v === "string" && (NETWORKS as readonly string[]).includes(v);
 const codeOf = (err: unknown): string => (err instanceof Error ? ((err as NodeJS.ErrnoException).code ?? err.name) : "error");
 
@@ -44,8 +53,15 @@ function entryOf(v: unknown): OutboxEntry | undefined {
   if (typeof e.t !== "string" || Number.isNaN(Date.parse(e.t)) || !isNetwork(e.network) || typeof e.text !== "string") return undefined;
   if (e.replyTo !== undefined && typeof e.replyTo !== "string") return undefined;
   const kind = typeof e.kind === "string" && (PHONE_KINDS as readonly string[]).includes(e.kind) ? (e.kind as PhoneKind) : undefined;
-  return { t: e.t, network: e.network, ...(kind ? { kind } : {}), text: e.text, ...(typeof e.replyTo === "string" ? { replyTo: e.replyTo } : {}) };
+  const out: OutboxEntry = { t: e.t, network: e.network, ...(kind ? { kind } : {}), text: e.text, ...(typeof e.replyTo === "string" ? { replyTo: e.replyTo } : {}) };
+  if (e.id === undefined && e.parts === undefined && e.next === undefined) return out;
+  // a written-ahead row whole, or not a message: its parts' ids depend on all three
+  if (typeof e.id !== "string" || !ROW_ID.test(e.id) || !Array.isArray(e.parts) || !e.parts.every((p) => typeof p === "string") || !Number.isSafeInteger(e.next) || (e.next as number) < 0) return undefined;
+  return { ...out, id: e.id, parts: [...(e.parts as string[])], next: e.next as number };
 }
+
+/** a copy that shares no list with the outbox's own */
+const copyOf = (e: OutboxEntry): OutboxEntry => (e.parts ? { ...e, parts: [...e.parts] } : { ...e });
 
 const NEW_YORK = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 function nyParts(at: number): { date: string; time: string } {
@@ -82,17 +98,23 @@ export class Outbox {
 
   /** what waits, oldest first (copies) */
   entries(): OutboxEntry[] {
-    return this.list.map((e) => ({ ...e }));
+    return this.list.map(copyOf);
   }
 
-  head(): OutboxEntry | undefined {
-    const h = this.list[0];
-    return h ? { ...h } : undefined;
+  /** the row at `i` (a copy), or undefined past the end */
+  at(i: number): OutboxEntry | undefined {
+    const e = this.list[i];
+    return e ? copyOf(e) : undefined;
+  }
+
+  /** whether a row for `network` waits */
+  holds(network: Network): boolean {
+    return this.list.some((e) => e.network === network);
   }
 
   /** queued at the end; past `max` the oldest is dropped, with one line */
   push(e: OutboxEntry): void {
-    this.list.push({ ...e });
+    this.list.push(copyOf(e));
     if (this.list.length > this.max) {
       const oldest = this.list.shift()!;
       this.log(`identity: the outbox holds ${this.max} messages; the oldest, written ${oldest.t}, is dropped`);
@@ -100,16 +122,28 @@ export class Outbox {
     this.persist();
   }
 
-  /** the head gone: sent, or refused */
-  shift(): void {
-    if (this.list.shift()) this.persist();
+  /** the row at `i` gone: sent, or refused */
+  removeAt(i: number): void {
+    if (i < 0 || i >= this.list.length) return;
+    this.list.splice(i, 1);
+    this.persist();
   }
 
-  /** the head cut to what did not go (it no longer answers anything: its first part did) */
-  cutHead(rest: string): void {
-    const h = this.list[0];
+  /** the row at `i` cut to what did not go (it no longer answers anything: its first part did) */
+  cutAt(i: number, rest: string): void {
+    const h = this.list[i];
     if (!h) return;
-    this.list[0] = { t: h.t, network: h.network, ...(h.kind ? { kind: h.kind } : {}), text: rest };
+    this.list[i] = { t: h.t, network: h.network, ...(h.kind ? { kind: h.kind } : {}), text: rest };
+    this.persist();
+  }
+
+  /** the first remaining part of the row at `i` gone (a written-ahead row's: identity.ts flush), the row taken out once no part is left */
+  advanceAt(i: number): void {
+    const h = this.list[i];
+    if (!h?.parts) return;
+    const parts = h.parts.slice(1);
+    if (parts.length === 0) this.list.splice(i, 1);
+    else this.list[i] = { ...h, parts, next: (h.next ?? 0) + 1 };
     this.persist();
   }
 
@@ -127,8 +161,10 @@ export class Outbox {
     let changed = false;
     this.list = this.list.map((e) => {
       const text = f(e.text);
-      if (text !== e.text) changed = true;
-      return { ...e, text };
+      // a written-ahead row's parts too: each keeps its id, so nothing is cut again
+      const parts = e.parts?.map(f);
+      if (text !== e.text || parts?.some((p, i) => p !== e.parts![i])) changed = true;
+      return { ...e, text, ...(parts ? { parts } : {}) };
     });
     if (changed) this.persist();
   }

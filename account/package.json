@@ -13,14 +13,19 @@
     "account:service": "tsx src/portfolio/account-service.ts",
     "account:check": "tsx src/portfolio/account-check.ts",
     "account:owners": "tsx src/portfolio/owners-check.ts",
+    "photon:check": "tsx scripts/photon-check.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
+    "@grpc/grpc-js": "^1.14.7",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@photon-ai/advanced-imessage": "^2.5.0",
     "ccxt": "4.5.85",
     "express": "^4.22.0",
+    "nice-grpc": "^2.1.18",
+    "nice-grpc-common": "^2.0.4",
     "qrcode": "1.5.4",
     "viem": "^2.57.3",
     "zod": "^4.5.0"

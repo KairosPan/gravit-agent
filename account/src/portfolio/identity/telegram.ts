@@ -75,6 +75,12 @@ export interface NetworkStatus {
   conflictAt?: string;
   blocked?: true;
   pollFailing?: { since: string; reason: string };
+  /** iMessage: Photon could not reach back to the cursor, so messages may have been missed while the account was down */
+  gapAt?: string;
+  /** iMessage: Photon names another line for the operator than the one signed; the connector stopped */
+  movedAt?: string;
+  /** iMessage: Photon refused to write to the line */
+  refusedAt?: string;
 }
 
 export interface TelegramConnectorDeps {

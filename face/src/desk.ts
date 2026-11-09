@@ -685,10 +685,10 @@ export function installAsleepWatch(opts: AsleepWatchOptions): () => void {
 export const OFF_FILE = "OFF";
 
 /** What `OFF` holds: when the pause was set and by whom - the phone, by the network its `/pause` came through
- * (`telegram`, `slack`), the Desk panel or a terminal - and, for a timed pause, when it lifts; both times ISO-8601 UTC. */
+ * (`telegram`, `slack`, `imessage`), the Desk panel or a terminal - and, for a timed pause, when it lifts; both times ISO-8601 UTC. */
 export interface OffState {
   setAt: string;
-  by: "telegram" | "slack" | "page" | "terminal";
+  by: "telegram" | "slack" | "imessage" | "page" | "terminal";
   until?: string;
 }
 
@@ -697,11 +697,11 @@ export interface OffState {
 export const MUTE_FILE = "MUTE";
 
 /** What `MUTE` holds: when the mute was set and by whom - the phone, by the network its `/mute` came through
- * (`telegram`, `slack`), or, for a `MUTE` that says nothing a state can be read from, a terminal - and, for a timed
+ * (`telegram`, `slack`, `imessage`), or, for a `MUTE` that says nothing a state can be read from, a terminal - and, for a timed
  * mute, when it lifts; both times ISO-8601 UTC. */
 export interface MuteState {
   setAt: string;
-  by: "telegram" | "slack" | "terminal";
+  by: "telegram" | "slack" | "imessage" | "terminal";
   until?: string;
 }
 
@@ -731,7 +731,7 @@ interface Switch<S extends SwitchState> {
 /** The pause: `OFF`, set from the phone, the Desk panel or a terminal. */
 const OFF_SWITCH: Switch<OffState> = {
   file: OFF_FILE,
-  setters: { telegram: true, slack: true, page: true, terminal: true },
+  setters: { telegram: true, slack: true, imessage: true, page: true, terminal: true },
   set: (s) => ({ t: s.setAt, kind: "off-set", by: s.by, ...(s.until === undefined ? {} : { until: s.until }) }),
   cleared: (t, by) => ({ t, kind: "off-cleared", by }),
 };
@@ -739,7 +739,7 @@ const OFF_SWITCH: Switch<OffState> = {
 /** The mute: `MUTE`, set from the phone; a terminal only lifts it, or `touch`es it. */
 const MUTE_SWITCH: Switch<MuteState> = {
   file: MUTE_FILE,
-  setters: { telegram: true, slack: true, terminal: true },
+  setters: { telegram: true, slack: true, imessage: true, terminal: true },
   set: (s) => ({ t: s.setAt, kind: "mute-set", by: s.by, ...(s.until === undefined ? {} : { until: s.until }) }),
   cleared: (t, by) => ({ t, kind: "mute-cleared", by }),
 };
@@ -932,7 +932,7 @@ export async function readMuteState(home: string, now: () => number = Date.now):
  * @param now - the clock `setAt` is read from, default `Date.now`.
  * @returns the mute in force afterwards: the one written, or the one that stood.
  */
-export async function writeMute(home: string, input: { by: "telegram" | "slack"; until: number }, now: () => number = Date.now): Promise<MuteState> {
+export async function writeMute(home: string, input: { by: "telegram" | "slack" | "imessage"; until: number }, now: () => number = Date.now): Promise<MuteState> {
   return writeSwitch(MUTE_SWITCH, home, input, now);
 }
 

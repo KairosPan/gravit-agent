@@ -10,7 +10,7 @@
  *   lines), `urgent` (an alert of a rule marked `urgent: true` - it goes through quiet hours), `brief` (the pre-close
  *   brief's firing), `report` (every other firing, the standing orders' lines, a wake turn's answer), `card` (Gate 2's
  *   notices), `fill` (the account's own).
- * A message id is `<network>:<the network's own id>` - `telegram:4821`, `slack:1730812345.001200` ({@link WIRE_ID}).
+ * A message id is `<network>:<the network's own id>` - `telegram:4821`, `slack:1730812345.001200`, `imessage:<chat GUID>` ({@link WIRE_ID}).
  *
  * THE CLIENT ({@link createPhoneClient}) is the face's server side's alone - the browser never reaches these two
  * routes (src/account-proxy.ts proxies neither): `GET /api/account/identity/inbox?after=<n>&wait=<s>`, the operator's
@@ -68,14 +68,16 @@ export const INBOX_SLACK_MS = 10_000;
 
 const isRecord = (x: unknown): x is Record<string, unknown> => x !== null && typeof x === "object" && !Array.isArray(x);
 const optString = (x: unknown): boolean => x === undefined || typeof x === "string";
+/** A network a phone message comes through (the account's `Network`). */
+export type PhoneNetwork = "telegram" | "slack" | "imessage";
 /** The networks a phone message comes through (the account's `NETWORKS`). */
-export const PHONE_NETWORKS: readonly string[] = ["telegram", "slack"];
+export const PHONE_NETWORKS: readonly PhoneNetwork[] = ["telegram", "slack", "imessage"];
 /** Whether `x` names one of {@link PHONE_NETWORKS}. */
-export const isPhoneNetwork = (x: unknown): x is string => typeof x === "string" && PHONE_NETWORKS.includes(x);
-/** A message's id on the wire: Telegram's message_id, Slack's `ts`. The account's rule (account/src/portfolio/identity/kinds.ts
+export const isPhoneNetwork = (x: unknown): x is PhoneNetwork => typeof x === "string" && (PHONE_NETWORKS as readonly string[]).includes(x);
+/** A message's id on the wire: Telegram's message_id, Slack's `ts`, iMessage's chat GUID. The account's rule (account/src/portfolio/identity/kinds.ts
  * `WIRE_ID`), redeclared here byte for byte - the face does not import the account's package - and tied to it by
  * tests/phone-bridge.test.ts. */
-export const WIRE_ID = /^(?:telegram:\d{1,16}|slack:\d{9,12}\.\d{6})$/;
+export const WIRE_ID = /^(?:telegram:\d{1,16}|slack:\d{9,12}\.\d{6}|imessage:[^\s]{1,128})$/;
 
 /** A failure as one line: its message, and the code it or its cause carries when the message does not say it. */
 function reasonOf(err: unknown): string {

@@ -259,7 +259,7 @@ function taskMessage(b, view) {
 // operator's words alone (the mapper's `said`). On the router's path the alert it answers is a desk line of this same
 // conversation, so nothing is lost; under FACE_ROUTER=0 the reply lands in the desk session, whose thread need not hold
 // the alert they answer - a known loss, the context staying in the session's log
-const PROVENANCE = /^\[(telegram|slack) · operator · [^\n]*\]$/;
+const PROVENANCE = /^\[(telegram|slack|imessage) · operator · [^\n]*\]$/;
 function phoneMessage(b, view) {
   const text = view.text ?? '';
   const [first, ...rest] = text.split('\n');

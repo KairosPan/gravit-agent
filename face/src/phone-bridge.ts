@@ -14,7 +14,7 @@
  * desk conversation, as below. The desk conversation stays the outlet either way.
  *
  * WHAT A MESSAGE DOES. A text goes to the desk conversation (src/desk-conversation.ts) with the telegram source - the
- * kind keeps its name for every network, and `network` says which (`telegram`, `slack`) - and the time the operator
+ * kind keeps its name for every network, and `network` says which (`telegram`, `slack`, `imessage`) - and the time the operator
  * wrote it (the inbox's `at`). A text that replies to one of the desk's messages carries that
  * message's alert, and its annotation when there is one, as the post's context (spec §16 H1b, src/watch.ts
  * `contextFor`, asked the reply's `<network>:<id>`). A post the conversation refuses is answered with its line, and an
@@ -103,10 +103,10 @@ const defaultClock: DeskClock = {
 export const deliveryKey = (m: Pick<InboxMessage, "id" | "messageId" | "at">): string => `${m.messageId}#${m.id}@${m.at}`;
 
 /** Who a phone command's pause or mute is by: the network it came through (src/desk.ts `OffState`, `MuteState`). */
-type PhoneSetter = "telegram" | "slack";
-/** `network` as a setter: `slack` for Slack, `telegram` for anything else - the inbox admits only the two
+type PhoneSetter = "telegram" | "slack" | "imessage";
+/** `network` as a setter: the network itself when it is one of the three, `telegram` for anything else - the inbox admits only those
  * (src/phone.ts `WIRE_ID`). */
-const setterOf = (network: string): PhoneSetter => (network === "slack" ? "slack" : "telegram");
+const setterOf = (network: string): PhoneSetter => (network === "slack" || network === "imessage" ? network : "telegram");
 
 /** A command the bridge answers itself, and what followed it. */
 export type Command = { cmd: "status" | "pause" | "mute" | "new" | "stop"; arg?: string };
@@ -194,7 +194,7 @@ type Bounded<T> = { settled: true; value: T } | { settled: true; error: unknown 
  * Each message is taken in turn (see the module header): a command is answered by the bridge - `/status` with the
  * desk's lines (src/desk.ts `deskStatusLines`) and `desk session <id>` and `turns today <n>` after them, `/pause [d]`
  * with the pause in force once it is written (src/desk.ts `writeOff`, set by the network the command came through,
- * `telegram` or `slack`), `/mute <d>` with the mute in force once it is written, by that network too (src/desk.ts `writeMute`, `muteReplyLine`; no or a bad duration is `MUTE_USAGE`), `/new` and
+ * `telegram`, `slack` or `imessage`), `/mute <d>` with the mute in force once it is written, by that network too (src/desk.ts `writeMute`, `muteReplyLine`; no or a bad duration is `MUTE_USAGE`), `/new` and
  * `/stop` with what the conversation did; and a text is posted to the conversation, a refusal answered with its line.
  * A post or a `/new` still under way after 30 s on the clock is answered `the desk is slow to take this; it will answer
  * when it can`, and what it comes to is answered when it settles. Then the cursor is set past the message.

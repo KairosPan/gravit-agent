@@ -22,7 +22,7 @@ const KEPT_FILES = {
 };
 
 // the en-kept markers under client/js
-const EN_KEPT = 70;
+const EN_KEPT = 72;
 
 const texts = src => englishLiterals(src, 'snippet.js').map(l => l.text);
 
@@ -167,7 +167,7 @@ test("Identity's reducers read no table", async () => {
   const { withTable } = await import('../../client/js/i18n/words.js');
   const { connectedNetworks } = await import('../../client/js/host/identity-view.js');
   const read = { ok: true, routing: { brief: ['telegram'] }, networks: [{ network: 'telegram', state: 'connected', pollFailing: { reason: 'x' }, conflictAt: 'y' }, { network: 'slack', state: 'connected', blocked: true }, { network: 'imessage', state: 'connected' }] };
-  assert.deepEqual([...connectedNetworks(read)], ['telegram', 'slack']);
+  assert.deepEqual([...connectedNetworks(read)], ['telegram', 'slack', 'imessage']);
   assert.deepEqual([...connectedNetworks({ ok: false, networks: read.networks })], []);
   const boom = new Proxy({}, { getOwnPropertyDescriptor() { throw new Error('a reducer read the table'); } });
   const base = { ...emptyState(), owner: { ...emptyState().owner, role: 'signs' }, identity: { ...emptyState().identity, draft: { brief: ['telegram', 'slack'] } } };

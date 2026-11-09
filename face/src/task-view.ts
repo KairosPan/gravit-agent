@@ -12,6 +12,7 @@ import { relative, sep } from "node:path";
 import type { TurnUsage } from "./desk.ts";
 import { turnUsage } from "./desk-session.ts";
 import { DEFAULT_PRESET } from "./overlay.ts";
+import { isPhoneNetwork, type PhoneNetwork } from "./phone.ts";
 import { finalTextOf, type EventLike } from "./room-rules.ts";
 
 /** A worker with an open turn and no session event for this long is stalled (20 minutes). */
@@ -46,7 +47,7 @@ export interface TaskView {
   /** Where the task was asked: the brief's `origin` (src/task-worker.ts), `web` for a brief that names none. */
   origin: "web" | "phone";
   /** For a phone task, the network its text came through. */
-  network?: "telegram" | "slack";
+  network?: PhoneNetwork;
   state: TaskState;
   group: TaskGroup;
   waitingFor?: { kind: "approval" | "question"; id: string; tool: string };
@@ -128,13 +129,13 @@ interface Scan {
 export interface BriefOrigin {
   conversation?: string;
   origin: "web" | "phone";
-  network?: "telegram" | "slack";
+  network?: PhoneNetwork;
 }
 
 function originOfBrief(source: Data): BriefOrigin {
   const conversation = typeof source.conversation === "string" ? { conversation: source.conversation } : {};
   if (source.origin !== "phone") return { ...conversation, origin: "web" };
-  const network = source.network === "slack" || source.network === "telegram" ? source.network : "telegram";
+  const network = isPhoneNetwork(source.network) ? source.network : "telegram";
   return { ...conversation, origin: "phone", network };
 }
 

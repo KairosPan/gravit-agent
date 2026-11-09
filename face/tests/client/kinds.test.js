@@ -465,6 +465,9 @@ test("a phone text is the operator's message with its network", () => {
   assert.equal(m.text, 'NVDA now?\nand AMD', 'the provenance line left to the chip');
   assert.deepEqual(m.data, { source: 'telegram', network: 'slack' });
   assert.equal(m.id, 'e80'); assert.equal(m.seq, 80);
+  // an iMessage text: its network kept, its provenance line read off too
+  const [im] = toMessages(mapFrame(deskFrame({ kind: 'telegram', network: 'imessage', messageId: 'imessage:p:0/AB12' }, '[imessage · operator · 14:05 ET]\nsell half'), 81), new Map(), NOW);
+  assert.deepEqual(im.data, { source: 'telegram', network: 'imessage' }); assert.equal(im.text, 'sell half');
   // an old desk's text: no network, the provenance line still read off; a first line that is no provenance stays
   const [old] = toMessages(mapFrame(deskFrame({ kind: 'telegram', from: 1, chat: 1, messageId: 2 }, '[telegram · operator · 09:00 ET (carried over a restart)]\nhi')), new Map(), NOW);
   assert.deepEqual(old.data, { source: 'telegram' }); assert.equal(old.text, 'hi');

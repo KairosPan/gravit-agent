@@ -244,7 +244,7 @@ export function fenceRefusalLine(path: string): string {
 /** Where a message the face sends the desk came from, as its provenance line names it. A phone's text
  * carries `at`, when the operator wrote it in ms since the epoch (Telegram's own `date`), when the bridge
  * has it, and `carried` when the boot posts it again after a graceful stop carried it through the ledger
- * (src/desk-conversation.ts, spec §16 H3), and `network`, the network it came through (`slack`), when the bridge has it:
+ * (src/desk-conversation.ts, spec §16 H3), and `network`, the network it came through (`slack`, `imessage`), when the bridge has it:
  * the kind stays `telegram` - the ledger, the session logs and the carry read it (plan B2, ruling 12). `alerts` is a batch of `count` alerts the face has already sent at once; `state`, the face's view of
  * the desk injected just before a phone's text (src/desk-conversation.ts `setState`). */
 export type DeskSource =
@@ -256,7 +256,7 @@ export type DeskSource =
 
 /**
  * The bracketed first line of every message the face sends the desk:
- * `[telegram · operator · 14:03 ET]` - `[slack · operator · 14:03 ET]` for a text that came through Slack, the source's
+ * `[telegram · operator · 14:03 ET]` - `[slack · operator · 14:03 ET]` for a text that came through Slack (`imessage` likewise), the source's
  * `network` when it has one, else `telegram` - `[schedule · <order> · <YYYY-MM-DD>]`, `[alert · <SYMBOL> · <rule>]`,
  * `[alerts · <n> · 09:30 ET]` and `[desk · state · 14:03 ET]`, the last two at `now`. A phone's time is
  * when the operator wrote it - the source's `at`, else `now` - in America/New_York as src/desk.ts

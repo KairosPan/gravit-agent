@@ -200,8 +200,8 @@ describe("connect, disconnect, routing and block, signed at the door", () => {
       [connectOf(p, { operatorId: "555000124" }), undefined, IDENTITY_WORDS.senderMismatch],
       [connectOf(p, { talksOnlyWith: "@someone" }), undefined, IDENTITY_WORDS.senderMismatch],
       [connectOf(p, { pending: "f".repeat(32) }), undefined, IDENTITY_WORDS.noPending],
-      [connectOf(p, { network: "imessage" }), undefined, IDENTITY_WORDS.networkUnknown],
-      [connectOf(p, { routing: "chat=imessage;alerts=;brief=;cards=;fills=" }), undefined, /imessage/],
+      [connectOf(p, { network: "signal" }), undefined, IDENTITY_WORDS.networkUnknown],
+      [connectOf(p, { routing: "chat=signal;alerts=;brief=;cards=;fills=" }), undefined, /signal/],
       [connectOf(p), Date.now() - 11 * 60_000, /10 minutes/],
     ];
     for (const [a, at, words] of tries) {
@@ -311,8 +311,8 @@ describe("connect, disconnect, routing and block, signed at the door", () => {
   });
 
   it("prepare shows each type's fields and refuses what the door would", async () => {
-    const bad = await svc.account!.prepare({ type: "setRouting", routing: "chat=imessage;alerts=;brief=;cards=;fills=", quietFrom: "", quietTo: "" });
-    expect(isRefusal(bad) && bad.message).toMatch(/imessage/);
+    const bad = await svc.account!.prepare({ type: "setRouting", routing: "chat=signal;alerts=;brief=;cards=;fills=", quietFrom: "", quietTo: "" });
+    expect(isRefusal(bad) && bad.message).toMatch(/signal/);
     const shape = await svc.account!.prepare({ type: "setRouting", routing: NONE });
     expect(isRefusal(shape) && shape.message).toMatch(/quietFrom/);
     const unbound = await svc.account!.prepare({ type: "disconnectNetwork", network: "telegram" });

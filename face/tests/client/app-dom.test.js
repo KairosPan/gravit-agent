@@ -6924,6 +6924,61 @@ test('Install app… opens Slack\'s sheet 1; Next posts both fields once and cle
   store.timers.clear();
 });
 
+test('Connect iMessage opens its sheet 1; Next posts the three fields once, clears the secret; Enter moves field to field', async () => {
+  const SECRET = 'fake-photon-secret-for-tests-only-0123456789';
+  const PENDING = { id: 'aaaabbbbccccddddaaaabbbbccccdddd', network: 'imessage', bot: { id: 'prj_1:+14155550123', username: '+14155550123', name: 'iMessage' }, link: 'sms:+14155550123', qr: '', expiresAt: '2099-01-01T00:00:00.000Z', state: 'waiting' };
+  const READ = { ok: true, networks: [], routing: { chat: [], alerts: [], brief: [], cards: [], fills: [] }, quiet: null, strangers: [] };
+  const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
+  const project = f.withSelector('#identity-photon-project', { tagName: 'INPUT', type: 'text', id: 'identity-photon-project' });
+  const secret = f.withSelector('#identity-photon-secret', { tagName: 'INPUT', type: 'password', id: 'identity-photon-secret' });
+  const phone = f.withSelector('#identity-photon-phone', { tagName: 'INPUT', type: 'tel', id: 'identity-photon-phone' });
+  const focused = [];
+  for (const el of [project, secret, phone]) el.focus = () => { focused.push(el.id); f.doc.activeElement = el; };
+  const door = ownerDoor();
+  const posted = [];
+  const ownerPost = async (path, body) => {
+    if (path.startsWith('/data/account/identity/')) {
+      posted.push([path, body]);
+      return path.endsWith('/imessage/token') ? { status: 200, body: { ok: true, pending: PENDING } } : { status: 200, body: { ok: true } };
+    }
+    return door.post(path, body);
+  };
+  const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account': () => door.page(), '/data/account/identity': READ, '/data/account/identity/pending': { ok: true, pending: PENDING } } });
+  const store = bootAccount(f, h, fakeMarkets(), { ownerPost });
+  await h.ready();
+  await until(signs(store), 'the page to sign');
+  await settle();
+  assert.match(f.html(), /data-action="identityConnect" data-network="imessage">Connect…</);
+  assert.doesNotMatch(f.html(), /Later/);
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityConnect', network: 'imessage' } });
+  assert.match(f.html(), /<aside class="drawer sheet" aria-label="Connect iMessage · 1 of 4 · Photon project">/);
+  // Enter in the project ID moves on to the secret, and from the secret on to the number, posting nothing
+  project.value = 'prj_1';
+  f.doc.activeElement = project;
+  f.fire('doc', 'keydown', { key: 'Enter' });
+  secret.value = SECRET;
+  f.fire('doc', 'keydown', { key: 'Enter' });
+  assert.deepEqual(focused, ['identity-photon-secret', 'identity-photon-phone']);
+  assert.equal(posted.length, 0);
+  phone.value = '+1 415-555-0100';
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityNext' } });
+  f.click({ tagName: 'BUTTON', dataset: { action: 'identityNext' } });
+  await until(() => store.get().identity.connect?.step === 2, 'sheet 2');
+  const sent = posted.filter(([p]) => p === '/data/account/identity/imessage/token');
+  assert.equal(sent.length, 1, 'once');
+  assert.equal(sent[0][1].projectId, 'prj_1');
+  assert.equal(sent[0][1].projectSecret, SECRET);
+  assert.equal(sent[0][1].phone, '+14155550100');
+  assert.equal(secret.value, '');
+  assert.ok(!JSON.stringify(store.get()).includes(SECRET), 'no secret in the store');
+  assert.ok(!f.html().includes(SECRET), 'none on the page');
+  assert.match(f.html(), /Connect iMessage · 2 of 4 · Say hi/);
+  assert.match(f.html(), /href="sms:\+14155550123"/);
+  f.fire('doc', 'keydown', { key: 'Escape' });
+  assert.equal(store.get().identity.connect, null);
+  store.timers.clear();
+});
+
 test('a page that does not sign opens no Connect Telegram', async () => {
   const f = fakeWindow({ hash: '#/account/identity', storage: memoryStorage() });
   const h = accountHost({ rows: [row('s1')] }, { answers: { '/data/account/identity': { ok: true, networks: [], routing: {}, quiet: null, strangers: [] } } });

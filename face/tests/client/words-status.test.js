@@ -308,6 +308,7 @@ test("Connect Telegram's lines, and a connected network's trouble, each in its w
   follows(sr.get().identity.connect.error, 'This browser cannot fingerprint the token on this page: open the face at its 127.0.0.1 address.');
   follows(Object.values(CONNECT_WORDS).map(f => f()), ['Paste the token from BotFather first.', 'This browser cannot fingerprint the token on this page: open the face at its 127.0.0.1 address.',
     'The account refused the token.', 'The account refused the tokens.', 'Paste the app-level token (xapp-…) first.', 'Paste the bot token (xoxb-…) first.', 'Paste both tokens first.',
+    'The account refused the project.', 'Fill in all three: the project ID, the project secret, and your number written +, the country code, then the number (+14155550100).',
     'This connection waited ten minutes and expired: nothing was kept. Start again.', 'The account did not say who wrote: start again.']);
   const problem = n => identityOf({ ok: true, networks: [{ network: 'telegram', state: 'connected', ...n }] }).networks.telegram.problem;
   assert.deepEqual(problem({ pollFailing: {} }), 'Not hearing Telegram.');
@@ -317,6 +318,11 @@ test("Connect Telegram's lines, and a connected network's trouble, each in its w
   assert.deepEqual(slack({ pollFailing: { since: 'y', reason: 'socket closed' } }), 'Not hearing Slack since y: socket closed.');
   assert.deepEqual(slack({ conflictAt: 'x' }), "Another program holds this app's connection to Slack (since x): stop it, or Gravit hears nothing.");
   assert.equal(slack({ blocked: true }), undefined, 'blocked is Telegram\'s alone');
+  const imessage = n => identityOf({ ok: true, networks: [{ network: 'imessage', state: 'connected', ...n }] }, null, iso => iso, Date.parse('2026-11-04T15:00:00.000Z')).networks.imessage.problem;
+  assert.deepEqual(imessage({ pollFailing: { since: 'y', reason: 'auth' } }), 'Not hearing iMessage since y: auth.');
+  assert.deepEqual(imessage({ movedAt: 'x' }), 'Photon moved you to another number: disconnect and connect again.');
+  assert.deepEqual(imessage({ refusedAt: 'x' }), 'Photon refuses to write to your number (a deactivated line, or a user removed from the project): disconnect and connect again, and Connect asks Photon for a new number.');
+  assert.deepEqual(imessage({ gapAt: '2026-11-04T14:00:00.000Z' }), 'Some messages sent while the account was down too long could not be fetched from Photon.');
 });
 
 test("Sell many's line for a read that failed in no words of the Account's", async () => {

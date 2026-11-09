@@ -160,8 +160,8 @@ export const STRANGERS_MAX = 50;
 export const senderRef = (network: Network, id: string): string => createHash("sha256").update(`${network}:${id}`).digest("hex").slice(0, 12);
 export const maskId = (id: string): string => `…${id.slice(-3)}`;
 /** a masked id as Not you shows it and blockSender signs it: "…" and up to three of the id's last characters — digits for Telegram,
- * digits and capitals for Slack's user ids */
-export const MASKED = /^…[0-9A-Z]{1,3}$/;
+ * digits and capitals for Slack's user ids, and an iMessage handle's tail: a number's digits or an email's letters and dots */
+export const MASKED = /^…[0-9A-Za-z.+_-]{1,3}$/;
 
 function strangerOf(v: unknown): Stranger | undefined {
   if (!v || typeof v !== "object") return undefined;

@@ -1,5 +1,5 @@
 // Account › Identity (plan B1b Task 1): the account's GET /api/account/identity read through the face's proxy, drawn as three cards —
-// Gravit (the networks: Telegram connected or not, iMessage later, Slack soon), What reaches you where (the five routing rows and
+// Gravit (the networks: Telegram, iMessage and Slack, each connected or not), What reaches you where (the five routing rows and
 // quiet hours) and Not you (the strangers, each with Block) — with the owner's keys only on a page that signs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,6 +9,7 @@ import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { esc } from '../../client/js/html.js';
 import { fmtClock, fmtDate } from '../../client/js/time.js';
+import { t } from '../../client/js/i18n/words.js';
 
 const NOW = Date.parse('2026-11-04T15:00:00.000Z');
 const CJK = /[㐀-鿿]/;
@@ -44,12 +45,12 @@ test('formatRouting writes the account\'s string', () => {
   assert.equal(formatRouting(null), 'chat=;alerts=;brief=;cards=;fills=');
 });
 
-test('identityOf: a connected Telegram, Slack not connected, iMessage later, the grid, quiet hours and Not you', () => {
+test('identityOf: a connected Telegram, Slack and iMessage not connected, the grid, quiet hours and Not you', () => {
   const v = identityOf(CONNECTED_WITH_STRANGER);
   assert.equal(v.ok, true);
   assert.deepEqual(v.networks, {
     telegram: { state: 'connected', speaksAs: '@gravit_desk_bot', talksOnlyWith: '@pan', since: '2026-11-03T15:20:00.000Z', fingerprint: 'ab12cd34', polling: true },
-    imessage: { state: 'later' }, slack: { state: 'none' },
+    imessage: { state: 'none' }, slack: { state: 'none' },
   });
   assert.deepEqual(v.grid.map(g => g.row), ['chat', 'alerts', 'brief', 'cards', 'fills']);
   assert.deepEqual(v.grid[0], { row: 'chat', label: 'Chat with Gravit', face: true, telegram: { on: true, enabled: true }, imessage: { on: false, enabled: false }, slack: { on: false, enabled: false } });
@@ -110,7 +111,7 @@ test('a connected Telegram row: Connected, Speaks as, Talks only with, Details a
   assert.match(renderIdentityTab(R.identityDetails(signing(idle)), NOW), re('token ab12cd34 · not polling'));
 });
 
-test('Telegram not connected: Not connected and Connect…; Slack: Not connected and Install app…, no Soon; iMessage: Later and no button', () => {
+test('Telegram not connected: Not connected and Connect…; Slack: Not connected and Install app…, no Soon; iMessage: Not connected and Connect…, never Later', () => {
   const html = renderIdentityTab(signing(NOT_CONNECTED), NOW);
   const gravit = boxOf(html, 'Gravit');
   assert.ok(gravit, 'the Gravit card');
@@ -125,8 +126,10 @@ test('Telegram not connected: Not connected and Connect…; Slack: Not connected
   assert.match(sl, /Not connected/);
   assert.match(sl, /<button[^>]*data-action="identityConnect" data-network="slack"[^>]*>Install app…<\/button>/);
   assert.doesNotMatch(sl, /disabled/);
-  assert.match(im, /<b>iMessage<\/b> <span class="chip grey">Later<\/span>/);
-  assert.doesNotMatch(im, /<button/);
+  assert.match(im, /<b>iMessage<\/b><br>/);
+  assert.match(im, /Not connected/);
+  assert.match(im, /<button[^>]*data-action="identityConnect" data-network="imessage"[^>]*>Connect…<\/button>/);
+  assert.doesNotMatch(html, /Later|chip grey/);
   // the order: Telegram, iMessage, Slack
   assert.ok(gravit.indexOf('data-network="telegram"') < gravit.indexOf('data-network="imessage"'));
   assert.ok(gravit.indexOf('data-network="imessage"') < gravit.indexOf('data-network="slack"'));
@@ -336,4 +339,69 @@ test("a stranger's last message on another day is a day and a clock in the table
   const last = '2026-11-01T13:02:00.000Z';
   const html = withTable({ 'time.dayClock': '{clock} ({day})' }, () => renderIdentityTab(signing({ ...CONNECTED, strangers: [{ ...STRANGER, last }] }), NOW));
   assert.ok(html.includes(`${fmtClock(Date.parse(last))} (${fmtDate(Date.parse(last))})`), html);
+});
+
+// ── the iMessage plan: iMessage's row through Photon, its column and its troubles ──
+
+const IM_NET = { network: 'imessage', speaksAs: '+14155550123', talksOnlyWith: '+14155550100', since: '2026-11-04T14:00:00.000Z', fingerprint: 'ef90ab12', state: 'connected', polling: true };
+const readWith = over => (over ? { ...NOT_CONNECTED, networks: [{ ...IM_NET, ...over }], routing: { ...NONE_ROUTING, chat: ['imessage'] } } : NOT_CONNECTED);
+const iso = ms => new Date(ms).toISOString();
+const problemFor = over => identityOf(readWith(over), null, () => '09:30', NOW).networks.imessage.problem ?? '';
+
+test('a connected iMessage is a row of its own and its column is enabled', () => {
+  const v = identityOf(readWith({}));
+  assert.deepEqual(v.networks.imessage, { state: 'connected', speaksAs: '+14155550123', talksOnlyWith: '+14155550100', since: '2026-11-04T14:00:00.000Z', fingerprint: 'ef90ab12', polling: true });
+  assert.deepEqual(v.grid[0].imessage, { on: true, enabled: true });
+  assert.deepEqual(v.grid[1].imessage, { on: false, enabled: true });
+  const gravit = boxOf(renderIdentityTab(signing(readWith({})), NOW), 'Gravit');
+  const im = gravit.match(/<div class="venue"[^>]*data-network="imessage"[\s\S]*?<\/div>/)?.[0] ?? '';
+  for (const w of ['iMessage', 'Connected', 'Speaks as +14155550123', 'Talks only with +14155550100', 'via Photon', 'Details', 'Disconnect…']) assert.match(im, re(w), w);
+  assert.doesNotMatch(im, /@\+|Connect…<|Later/);
+  assert.match(im, /<button[^>]*data-action="openSheet" data-kind="disconnectNetwork" data-network="imessage"[^>]*>Disconnect…<\/button>/);
+  // Details: since, the project secret's fingerprint, polling
+  assert.match(renderIdentityTab(R.identityDetails(signing(readWith({})), 'imessage'), NOW), re(`Since ${fmtDate(Date.parse('2026-11-04T14:00:00.000Z'))} · secret ef90ab12 · polling`));
+  // its column: enabled, ticked where the routing says, a tick a draft
+  const grid = boxOf(renderIdentityTab(signing(readWith({})), NOW), 'What reaches you where');
+  const rows = grid.match(/<tr><td>[\s\S]*?<\/tr>/g);
+  for (const r of rows) {
+    const boxes = r.match(/<input[^>]*>/g);
+    assert.doesNotMatch(boxes[2], /disabled/, 'iMessage enabled');
+    assert.match(boxes[2], /data-action="identityTick" data-row="[a-z]+" data-network="imessage"/);
+  }
+  assert.match(rows[0].match(/<input[^>]*>/g)[2], /checked/);
+  const ticked = R.identityTick(signing(readWith({})), { row: 'brief', network: 'imessage', on: true });
+  assert.deepEqual(ticked.identity.draft.brief, ['imessage']);
+  assert.equal(R.identityTick(signing(CONNECTED), { row: 'chat', network: 'imessage', on: true }).identity.draft, null, 'not connected: no tick');
+  // a page that does not sign reads the row, no key
+  const ro = boxOf(renderIdentityTab(readOnly(readWith({})), NOW), 'Gravit');
+  assert.match(ro, /Speaks as \+14155550123/);
+  assert.doesNotMatch(ro, /Disconnect…/);
+});
+
+test('an unconnected iMessage offers Connect…, never Later', () => {
+  assert.equal(identityOf(readWith()).networks.imessage.state, 'none');
+  const html = renderIdentityTab(signing(readWith()), NOW);
+  assert.match(html, /data-action="identityConnect" data-network="imessage">Connect…</);
+  assert.doesNotMatch(html, /Later/);
+  assert.doesNotMatch(renderIdentityTab(readOnly(readWith()), NOW), /data-network="imessage">Connect…/, 'no key on a page that does not sign');
+});
+
+test("movedAt, refusedAt and a fresh gapAt are the row's problem; an old gapAt is not", () => {
+  const now = NOW;
+  assert.equal(problemFor({ movedAt: iso(now) }), t('identity.problem.moved'));
+  assert.equal(problemFor({ refusedAt: iso(now) }), t('identity.problem.refused'));
+  assert.equal(problemFor({ gapAt: iso(now - 3_600_000) }), t('identity.problem.gap'));
+  assert.equal(problemFor({ gapAt: iso(now - 25 * 3_600_000) }), '');
+  assert.equal(problemFor({}), '');
+  // the worst first: moved over refused over a failing read over a gap
+  assert.equal(problemFor({ movedAt: iso(now), refusedAt: iso(now), gapAt: iso(now) }), t('identity.problem.moved'));
+  assert.equal(problemFor({ refusedAt: iso(now), pollFailing: { since: iso(now), reason: 'auth' } }), t('identity.problem.refused'));
+  // a failing read is named by the row's own network
+  assert.equal(problemFor({ pollFailing: { since: iso(now), reason: 'auth' }, gapAt: iso(now) }), 'Not hearing iMessage since 09:30: auth.');
+  // blocking is Telegram's alone
+  assert.equal(problemFor({ blocked: true }), '');
+  // the row says it, in place of polling
+  const html = renderIdentityTab(R.identityDetails(signing(readWith({ refusedAt: iso(now) })), 'imessage'), NOW);
+  assert.match(html, re(t('identity.problem.refused')));
+  assert.doesNotMatch(html, / · polling/);
 });

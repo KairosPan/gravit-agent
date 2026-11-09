@@ -13,6 +13,7 @@
  * and dsh lists, unbroken; never the default, the desk's, the conversation's or a role's preset.
  * @module
  */
+import type { PhoneNetwork } from "./phone.ts";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -47,7 +48,7 @@ export type TaskMessageSource = {
   /** A brief's: where the task was asked - the browser (`web`) or the phone, with the `network` the text came
    * through (src/conversation.ts `TaskOrigin`). A brief from before plan 3 names none, and reads `web`. */
   origin?: "web" | "phone";
-  network?: "telegram" | "slack";
+  network?: PhoneNetwork;
   status?: RelayStatus;
 };
 
@@ -177,7 +178,7 @@ export function workerSetup(deps: WorkerDeps, preset: string = DEFAULT_PRESET): 
  */
 export async function startWorker(
   deps: WorkerDeps,
-  input: { conversationId: string; title: string; brief: string; strategy?: string; bot?: string; origin: "web" | "phone"; network?: "telegram" | "slack" },
+  input: { conversationId: string; title: string; brief: string; strategy?: string; bot?: string; origin: "web" | "phone"; network?: PhoneNetwork },
 ): Promise<{ sessionId: string; agent: AgentLike; dispose(): Promise<void> }> {
   const log = deps.log ?? defaultLog;
   const title = input.title.trim();
