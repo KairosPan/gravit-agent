@@ -11,9 +11,8 @@
  * since the bus calls them inside the session's own append, which refuses re-entry, and a `followup` there would
  * throw (src/desk-session.ts `superviseDeskTurns`' header).
  *
- * A RESTART. At install, for each worker in the window: a last turn left open in its log, or ended `interrupted`, that
- * no recovery note names yet gets one ({@link RECOVERY_NOTE}, id `task-recovery:<id>:<turn>`); a task waiting for the
- * operator stays waiting. Then every relay its log holds that the conversation's log does not is offered.
+ * A RESTART. At install, src/task-recovery.ts sends each worker whose turn the face's going cut one recovery note,
+ * and every relay a worker's log holds that the conversation's log does not is offered.
  * @module
  */
 import { randomUUID } from "node:crypto";
@@ -30,6 +29,7 @@ import { fencedGet } from "./http.ts";
 import type { AgentLike, PersistedSnapshotLike, RoomDeps } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
 import type { RouteRegistrar } from "./static.ts";
+import { recoverWorkers } from "./task-recovery.ts";
 import { createRelay } from "./task-relay.ts";
 import { TASK_READ_MAX, equipConversation, taskToolDefinitions, type TaskOps } from "./task-tools.ts";
 import { relaysOf, stallOf, taskViewOf, cut, type RelayItem, type TaskGroup, type TaskView, type TimedEvent } from "./task-view.ts";
@@ -46,9 +46,7 @@ const defaultLog = (line: string): void => { console.error(line); };
 export const IDLE_DISPOSE_MS = 600_000;
 /** How often the stalls and the idle workers are looked at (60 s). */
 export const TICK_MS = 60_000;
-/** What a worker whose turn a restart cut is told. */
-export const RECOVERY_NOTE =
-  "The face restarted while you worked. Check what you already did - files, the Account, your last tool results - before repeating anything outside, then carry on.";
+export { RECOVERY_NOTE } from "./task-recovery.ts";
 /** The stopped marker's text. */
 export const STOPPED_TEXT = "Stopped by the conversation.";
 
@@ -104,29 +102,6 @@ const createdAtOf = (header: object): number | undefined => {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 };
 
-/** The turn a restart cut, from the log: the last turn when it is still open, or when it ended `interrupted`. */
-export function cutTurn(events: readonly EventLike[]): number | undefined {
-  let last: { turn: number; open: boolean; kind?: unknown } | undefined;
-  for (const event of events) {
-    const data = event.data as { turn?: unknown; reason?: { kind?: unknown } } | undefined;
-    if (typeof data?.turn !== "number") continue;
-    if (event.type === "turn/start") last = { turn: data.turn, open: true };
-    else if (event.type === "turn/end") last = { turn: data.turn, open: false, kind: data.reason?.kind };
-  }
-  if (last === undefined) return undefined;
-  return last.open || last.kind === "interrupted" ? last.turn : undefined;
-}
-
-/** Whether the log names message `id`: logged as a `user/message`, or spliced into the inbox. */
-function names(events: readonly EventLike[], id: string): boolean {
-  return events.some((event) => {
-    const data = event.data as { id?: unknown; inserted?: unknown } | undefined;
-    if (event.type === "user/message") return data?.id === id;
-    if (event.type === "agent/inbox/spliced" && Array.isArray(data?.inserted)) return data.inserted.some((m) => (m as { id?: unknown } | null)?.id === id);
-    return false;
-  });
-}
-
 /** The last assistant message's text in the log, or "". */
 function lastAssistantText(events: readonly EventLike[]): string {
   for (let i = events.length - 1; i >= 0; i--) {
@@ -159,6 +134,21 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
   const convId = (): string | undefined => deps.conversation.current()?.sessionId;
   const held = new Map<string, Held>();
   const resuming = new Map<string, Promise<TaskAgent>>();
+  /** Workers a steer or a stop is acting on: the tick never disposes them meanwhile. */
+  const inUse = new Map<string, number>();
+  /** Run `act` with worker `id` marked in use, its idle clock stopped, from before the first await. */
+  const using = async <T>(id: string, act: () => Promise<T>): Promise<T> => {
+    inUse.set(id, (inUse.get(id) ?? 0) + 1);
+    const entry = held.get(id);
+    if (entry !== undefined) entry.idleSince = undefined;
+    try {
+      return await act();
+    } finally {
+      const left = (inUse.get(id) ?? 1) - 1;
+      if (left > 0) inUse.set(id, left);
+      else inUse.delete(id);
+    }
+  };
   /** Relay ids the conversation's log held at boot: never offered. */
   const delivered = new Set<string>();
   /** `task_report` calls seen on the bus and waiting for their result, keyed `<session>\0<callId>`. */
@@ -309,7 +299,7 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
       held.set(started.sessionId, { agent, dispose: started.dispose });
       return viewOf(rowOfLive(agent), agent.session.snapshotEvents() as readonly TimedEvent[]);
     },
-    async steer(id, text) {
+    steer: (id, text) => using(id, async () => {
       const { conv, row } = await find(id);
       const agent = await agentFor(row);
       await pointAtStrategy(agent, agent.session.header.cwd ?? row.cwd);
@@ -323,8 +313,8 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
       }) as unknown as MessageLike);
       await flush();
       return viewOf(rowOfLive(agent, row.createdAt), agent.session.snapshotEvents() as readonly TimedEvent[]);
-    },
-    async stop(id) {
+    }),
+    stop: (id) => using(id, async () => {
       const { conv, row } = await find(id);
       const agent = await agentFor(row);
       agent.cancel({ kind: "hook", reason: "task stopped" });
@@ -340,7 +330,7 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
       const view = viewOf(rowOfLive(agent, row.createdAt), agent.session.snapshotEvents() as readonly TimedEvent[]);
       noteIdle(id, agent, view);
       return view;
-    },
+    }),
     async read(id) {
       const { row } = await find(id);
       const events = await eventsOf(row);
@@ -426,7 +416,7 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
           held.delete(id);
           continue;
         }
-        if (entry.idleSince === undefined || entry.agent.status !== "idle" || now() - entry.idleSince < IDLE_DISPOSE_MS) continue;
+        if (inUse.has(id) || entry.idleSince === undefined || entry.agent.status !== "idle" || now() - entry.idleSince < IDLE_DISPOSE_MS) continue;
         held.delete(id);
         await entry.dispose();
       }
@@ -455,31 +445,17 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
     } catch (err) {
       log(`${BIN}: task: the conversation's log could not be read at boot (${errText(err)}); the relay checks it before each send`);
     }
-    for (const row of (await rows(conv)).values()) {
-      if (disposed) return;
-      try {
-        const events = await eventsOf(row);
-        const view = viewOf(row, events);
-        if (!inWindow(view)) continue;
-        const turn = cutTurn(events);
-        if (turn !== undefined && view.state !== "waiting" && view.state !== "stopped" && row.live?.status !== "running") {
-          const noteId = `task-recovery:${row.id}:${turn}`;
-          const agent = await agentFor(row);
-          if (!names(events, noteId) && !names(agent.session.snapshotEvents(), noteId)) {
-            agent.followup(freezeMessage({
-              id: MessageId(noteId),
-              role: "user",
-              content: [{ type: "text", text: RECOVERY_NOTE }],
-              source: { kind: "task", form: "recovery", conversation: conv, task: row.id },
-            }) as unknown as MessageLike);
-            log(`${BIN}: task: worker ${row.id}'s turn ${turn} was cut by a restart; it got the recovery note`);
-          }
-        }
-        offer(relaysOf(view, events));
-      } catch (err) {
-        log(`${BIN}: task: worker ${row.id} could not be recovered (${errText(err)})`);
-      }
-    }
+    await recoverWorkers({
+      conversation: conv,
+      rows: [...(await rows(conv)).values()],
+      eventsOf,
+      viewOf,
+      inWindow,
+      agentFor,
+      offer,
+      disposed: () => disposed,
+      log,
+    });
     await flush();
     await relay.pump();
   })().catch((err: unknown) => { log(`${BIN}: task: the boot's recovery failed (${errText(err)})`); });
@@ -505,4 +481,34 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
       return disposing;
     },
   };
+}
+
+/** What {@link installRouter} answers: both handles and the conversation's id, or nothing when the install failed. */
+export type RouterInstall = { conversation: ConversationHandle; tasks: TasksHandle; sessionId: string } | Record<string, never>;
+
+/**
+ * The conversation and its tasks as main.ts installs them: `open.conversation()`, its `ensure()`, then
+ * `open.tasks(conversation)`. A throw or rejection at any step is one line; the conversation already made is disposed
+ * (a failure there is one more line), and the answer is empty, so the face starts without them. Never rejects.
+ */
+export async function installRouter(open: {
+  conversation(): ConversationHandle;
+  tasks(conversation: ConversationHandle): TasksHandle;
+  log?: (line: string) => void;
+}): Promise<RouterInstall> {
+  const log = open.log ?? defaultLog;
+  let conversation: ConversationHandle | undefined;
+  try {
+    conversation = open.conversation();
+    const { sessionId } = await conversation.ensure();
+    return { conversation, tasks: open.tasks(conversation), sessionId };
+  } catch (err) {
+    log(`${BIN}: conversation: could not be installed (${errText(err)}); the face starts without the conversation and its tasks`);
+    try {
+      await conversation?.dispose();
+    } catch (disposeErr) {
+      log(`${BIN}: conversation: could not be disposed after the failed install (${errText(disposeErr)})`);
+    }
+    return {};
+  }
 }

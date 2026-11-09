@@ -34,7 +34,7 @@ import { deskDir, installDesk, type DeskHandle } from "./desk.ts";
 import type { DeskConversationCtxLike } from "./desk-conversation.ts";
 import { resolveDeskRoute } from "./desk-session.ts";
 import { installConversation, type ConversationCtxLike, type ConversationHandle } from "./conversation.ts";
-import { installTasks, routerEnabled, type TasksCtxLike, type TasksHandle } from "./tasks.ts";
+import { installRouter, installTasks, routerEnabled, type TasksCtxLike, type TasksHandle } from "./tasks.ts";
 import { createPhoneClient, type PhoneClient } from "./phone.ts";
 import { announceCard } from "./card-notice.ts";
 import { marketQuotes } from "./market-quotes.ts";
@@ -469,29 +469,34 @@ console.log(`${BIN}: desk: ${desk.enabled ? `ledger at ${deskDir(dshHome)}` : "r
 /* The conversation and its tasks (docs/superpowers/specs/2026-11-08-one-entry-router-design.md), unless
  * `FACE_ROUTER=0`: Gravit's one router session on `gravit-router` in `$DSH_HOME/face/conversation/`, found again
  * through the desk's ledger and supervised (src/conversation.ts), ensured here before any route can use it - a
- * conversation the face cannot open or trust fails the start, as a refused composition does - then the tasks over its
+ * conversation the face cannot open or trust is one line and the face starts without it (installRouter) - then the tasks over its
  * workers (src/tasks.ts): the five task tools, `task_report`, `GET /data/tasks`, the relays, the boot's recovery notes,
  * the stalls. Its route is `FACE_ROUTER_MODEL`, read as `FACE_DESK_MODEL` is; the workers run on the same route. The
  * root is this process's cwd, as the desk's is. */
 if (routerEnabled(process.env)) {
   const routerRoute = await resolveDeskRoute(booted.ctx as unknown as RoomContextLike, process.env.FACE_ROUTER_MODEL, console.log);
   const routerInstall = (agentCtx: object, ref: Parameters<typeof installModelSelection>[1]) => installModelSelection(agentCtx as unknown as Context, ref);
-  conversation = installConversation({
-    ctx: booted.ctx as unknown as ConversationCtxLike,
-    home: dshHome,
-    route: routerRoute,
-    installModelSelection: routerInstall,
+  const router = await installRouter({
+    conversation: () => installConversation({
+      ctx: booted.ctx as unknown as ConversationCtxLike,
+      home: dshHome,
+      route: routerRoute,
+      installModelSelection: routerInstall,
+    }),
+    tasks: (held) => installTasks(booted.ctx.webServer, {
+      ctx: booted.ctx as unknown as TasksCtxLike,
+      root: process.cwd(),
+      route: routerRoute,
+      installModelSelection: routerInstall,
+      conversation: held,
+      isTrusted: isTrustedDataRequest,
+    }),
   });
-  const opened = await conversation.ensure();
-  tasks = installTasks(booted.ctx.webServer, {
-    ctx: booted.ctx as unknown as TasksCtxLike,
-    root: process.cwd(),
-    route: routerRoute,
-    installModelSelection: routerInstall,
-    conversation,
-    isTrusted: isTrustedDataRequest,
-  });
-  console.log(`${BIN}: conversation: ${opened.sessionId} on ${routerRoute.provider}/${routerRoute.model}`);
+  if ("sessionId" in router) {
+    conversation = router.conversation;
+    tasks = router.tasks;
+    console.log(`${BIN}: conversation: ${router.sessionId} on ${routerRoute.provider}/${routerRoute.model}`);
+  }
 } else {
   console.log(`${BIN}: conversation: off (FACE_ROUTER=0)`);
 }

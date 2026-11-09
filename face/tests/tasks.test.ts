@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { routerEnabled, installTasks, RECOVERY_NOTE, IDLE_DISPOSE_MS, type TasksDeps, type TasksHandle } from "../src/tasks.ts";
+import { routerEnabled, installRouter, installTasks, RECOVERY_NOTE, IDLE_DISPOSE_MS, type TasksDeps, type TasksHandle } from "../src/tasks.ts";
 import type { ConversationHandle } from "../src/conversation.ts";
 import type { EventLike, MessageLike } from "../src/room-rules.ts";
 import type { AgentLike } from "../src/room.ts";
@@ -73,7 +73,15 @@ class Harness {
     };
     const handle = (agent: FakeAgent) => ({
       agent,
-      dispose: async () => { this.disposed.push(agent.id); tree.agents.delete(agent.id); },
+      /* as dsh's dispose: a turn under way ends aborted, its cause disposed */
+      dispose: async () => {
+        this.disposed.push(agent.id);
+        if (agent.status === "running") {
+          tree.emit(agent.session, { type: "turn/end", seq: agent.session.seq, data: { turn: agent.turn, reason: { kind: "aborted", reason: { kind: "disposed" } } } } as EventLike);
+          agent.status = "idle";
+        }
+        tree.agents.delete(agent.id);
+      },
     });
     const base = tree.ctx;
     this.ctx = {
@@ -312,8 +320,10 @@ test("after a boot, a worker whose turn a restart cut gets one recovery note; a 
   /* a note already on its way: a boot that died after the splice, before the turn */
   h.seed("w-queued", [brief("w-queued", "Queued", AT - 60_000), start(1, AT - 60_000),
     { type: "agent/inbox/spliced", data: { target: "next-turn", start: 0, inserted: [{ id: "task-recovery:w-queued:1", role: "user", content: [] }] } }]);
-  /* waiting for the operator: stays waiting */
+  /* waiting for the operator: the parked gate died with the process, so it is recovered too */
   h.seed("w-wait", [brief("w-wait", "Waiting", AT - 60_000), start(1, AT - 60_000), { type: "approval/asked", data: { id: "ap", toolName: "x", reason: "y" } }]);
+  /* a turn a hook cut (a deadline): not the restart's */
+  h.seed("w-hook", [brief("w-hook", "Hooked", AT - 60_000), start(1, AT - 60_000), { type: "turn/end", data: { turn: 1, reason: { kind: "aborted", reason: { kind: "hook", reason: "deadline" } } } }]);
   /* done: nothing to recover */
   h.seed("w-done", [brief("w-done", "Done", AT - 60_000), start(1, AT - 60_000), said(1, "ok"), end(1)]);
 
@@ -326,20 +336,22 @@ test("after a boot, a worker whose turn a restart cut gets one recovery note; a 
   assert.deepEqual(notes("w-open"), ["task-recovery:w-open:1"]);
   assert.deepEqual(notes("w-int"), ["task-recovery:w-int:1"]);
   assert.deepEqual(notes("w-queued"), ["task-recovery:w-queued:1"], "the spliced note is not sent again");
-  assert.deepEqual(notes("w-wait"), []);
+  assert.deepEqual(notes("w-wait"), ["task-recovery:w-wait:1"]);
+  assert.deepEqual(notes("w-hook"), []);
   assert.deepEqual(notes("w-done"), []);
   const note = h.tree.sessions.get("w-open")!.snapshotEvents().find((e) => e.type === "user/message" && (e.data as MessageLike).id === "task-recovery:w-open:1")!;
   assert.deepEqual((note.data as { content: unknown }).content, [{ type: "text", text: RECOVERY_NOTE }]);
   assert.equal(RECOVERY_NOTE, "The face restarted while you worked. Check what you already did - files, the Account, your last tool results - before repeating anything outside, then carry on.");
   assert.deepEqual((note.data as { source: unknown }).source, { kind: "task", form: "recovery", conversation: CONV, task: "w-open" });
-  assert.deepEqual(h.tree.resumed.map((r) => (r as { resumeSessionId: string }).resumeSessionId).sort(), ["w-int", "w-open", "w-queued"], "the queued one is resumed, so dsh runs what its inbox holds");
+  assert.deepEqual(h.tree.resumed.map((r) => (r as { resumeSessionId: string }).resumeSessionId).sort(), ["w-int", "w-open", "w-queued", "w-wait"], "the queued one is resumed, so dsh runs what its inbox holds");
 
   /* the recovered turns run to their end; then the face restarts */
   await h.tree.clock.advance(100);
   await first.dispose();
-  for (const id of ["w-open", "w-int"]) h.tree.agents.delete(id);
+  for (const id of ["w-open", "w-int", "w-wait"]) h.tree.agents.delete(id);
   const second = await install(h);
   assert.deepEqual(notes("w-open"), ["task-recovery:w-open:1"]);
+  assert.deepEqual(notes("w-wait"), ["task-recovery:w-wait:1"]);
   assert.deepEqual(notes("w-int"), ["task-recovery:w-int:1"]);
   assert.deepEqual(notes("w-queued"), ["task-recovery:w-queued:1"]);
   await second.dispose();
@@ -442,7 +454,10 @@ test("task_stop cancels the turn, waits for idle, and appends the stopped marker
   const stopped = await stopping;
   assert.deepEqual(worker.cancelled.map((c) => c.cause), [{ kind: "hook", reason: "task stopped" }]);
   assert.deepEqual(stopped, { task: view.id, state: "stopped" });
-  const marker = worker.session.snapshotEvents().filter((e) => e.type === "user/message").at(-1)!;
+  const log = worker.session.snapshotEvents();
+  const marker = log.filter((e) => e.type === "user/message").at(-1)!;
+  assert.ok(log.indexOf(marker) > log.findIndex((e) => e.type === "turn/end"), "the marker comes after the turn's end");
+  assert.ok(log.some((e) => e.type === "turn/end"));
   const data = marker.data as { id: string; content: unknown; source: unknown };
   assert.match(data.id, new RegExp(`^task-stopped:${view.id}:[0-9a-f-]{36}$`));
   assert.deepEqual(data.content, [{ type: "text", text: "Stopped by the conversation." }]);
@@ -470,6 +485,55 @@ test("steering a task whose strategy directory was renamed points the worker at 
   assert.equal(h.cwdSets.length, 1);
   await h.tree.clock.advance(50);
   assert.equal((await tasks.ops.read("w-here")).text, "(pass)");
+});
+
+test("a running worker the face disposes at shutdown gets one recovery note on the next boot", async () => {
+  const h = await harness();
+  h.tree.script("gravit", () => ({ kind: "hang" }));
+  const first = await install(h);
+  const view = await first.ops.start({ title: "Cut", brief: "work" });
+  assert.equal(h.tree.agents.get(view.id)!.status, "running");
+  await first.dispose();
+  assert.deepEqual(h.disposed, [view.id]);
+  const ended = h.tree.sessions.get(view.id)!.snapshotEvents().filter((e) => e.type === "turn/end");
+  assert.deepEqual(ended.map((e) => (e.data as { reason: unknown }).reason), [{ kind: "aborted", reason: { kind: "disposed" } }]);
+  const second = await install(h);
+  const notes = h.ids(view.id).filter((m) => m.startsWith("task-recovery:"));
+  assert.deepEqual(notes, [`task-recovery:${view.id}:1`]);
+  await second.dispose();
+});
+
+test("installRouter: a conversation that cannot be opened is one line, is disposed, and the face goes on without it", async () => {
+  const made: string[] = [];
+  const handle = (ensure: () => Promise<{ agent: AgentLike; sessionId: string }>): ConversationHandle => ({
+    ensure, current: () => undefined, operatorTurn: () => false, dispose: async () => { made.push("disposed"); },
+  });
+  const lines: string[] = [];
+  const failed = await installRouter({
+    conversation: () => handle(async () => { throw new Error("the ledger cannot be read"); }),
+    tasks: () => { made.push("tasks"); return {} as TasksHandle; },
+    log: (line) => { lines.push(line); },
+  });
+  assert.deepEqual(failed, {});
+  assert.deepEqual(made, ["disposed"], "no tasks over a conversation that is not there");
+  assert.deepEqual(lines, ["gravit-face: conversation: could not be installed (the ledger cannot be read); the face starts without the conversation and its tasks"]);
+
+  made.length = 0;
+  const noTasks = await installRouter({
+    conversation: () => handle(async () => ({ agent: {} as AgentLike, sessionId: "session-c" })),
+    tasks: () => { throw new Error("route taken"); },
+    log: () => {},
+  });
+  assert.deepEqual(noTasks, {});
+  assert.deepEqual(made, ["disposed"]);
+
+  const thrown = await installRouter({ conversation: () => { throw new Error("bad"); }, tasks: () => ({} as TasksHandle), log: () => {} });
+  assert.deepEqual(thrown, {});
+
+  const tasks = { ops: {}, ready: Promise.resolve(), dispose: async () => {} } as unknown as TasksHandle;
+  const conv = handle(async () => ({ agent: {} as AgentLike, sessionId: "session-c" }));
+  const ok = await installRouter({ conversation: () => conv, tasks: () => tasks, log: () => {} });
+  assert.deepEqual(ok, { conversation: conv, tasks, sessionId: "session-c" });
 });
 
 test("routerEnabled is false only for FACE_ROUTER=0", () => {
