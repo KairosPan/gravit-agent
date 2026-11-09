@@ -116,6 +116,8 @@ export const EN = Object.freeze({
   'history.title': 'History',
   'history.none': 'Nothing in history yet',
   'history.notFound': 'Not found',
+  'history.readOnly': 'Read-only',
+  'history.back': 'Back to History',
   'status.stopped': 'Stopped. A paused goal resumes with /goal resume',
   'status.stopping': 'Stopping {label}',
   'status.theChild': 'the child',

@@ -1,0 +1,70 @@
+// History (one-entry plan 2 Task 7): every session that is neither the conversation nor one of its tasks, listed newest first
+// with its strategy, when and a one-line preview; one opened is read-only — its transcript, no composer, no answer keys.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { renderHistoryScreen } from '../../client/js/render/history.js';
+import { reducers as R } from '../../client/js/reducers/index.js';
+import { emptyState } from '../../client/js/data/empty.js';
+import { MIN, rowTime } from '../../client/js/time.js';
+
+const NOW = new Date(2026, 9, 19, 14, 7).getTime();
+const conv = (id, over = {}) => ({ id, title: 'T ' + id, kind: 'gravit', members: ['gravit'], memberSessions: [], channel: null, preset: 'gravit', running: false, live: false, updatedAt: NOW - 5 * MIN, created: null, messages: [], loaded: false, preview: null, usage: null, thinking: null, lastSeen: 0, ...over });
+const task = (id, over = {}) => ({ id, title: id, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW, lastEventAt: NOW, lastSeq: 1, ...over });
+const CHANNELS = [
+  { workspaceId: 'w0', name: 'workbench', isRoot: true },
+  { workspaceId: 'w1', name: 'cn-market', title: 'CN market', isRoot: false },
+];
+const listed = (convs, { conversation = 'c', tasks = [], route = { screen: 'history', id: null } } = {}) => {
+  const s = R.hostList(emptyState(), { conversations: convs, channels: CHANNELS, bots: [] });
+  return R.nav(R.tasksLoaded(s, { conversation, tasks, at: NOW }), route);
+};
+const hrefs = h => [...h.matchAll(/<a class="hist-row" href="([^"]+)"/g)].map(m => m[1]);
+
+test('rows exclude the conversation and today\'s tasks', () => {
+  const s = listed([conv('c'), conv('t1'), conv('h1', { updatedAt: NOW - 9 * MIN }), conv('h2', { updatedAt: NOW - MIN })], { tasks: [task('t1')] });
+  const h = renderHistoryScreen(s, NOW);
+  assert.deepEqual(hrefs(h), ['#/history/h2', '#/history/h1'], 'newest first, neither the conversation nor the task');
+  assert.match(h, /<h1 class="head-title">History<\/h1>/);
+  assert.doesNotMatch(h, /data-action=/, 'no actions on a row');
+  assert.match(renderHistoryScreen(listed([conv('c'), conv('o', { title: '<i>old</i>' })]), NOW), /&lt;i&gt;old&lt;\/i&gt;/, 'a title escaped');
+  const none = renderHistoryScreen(listed([conv('c')]), NOW);
+  assert.match(none, /Nothing in history yet/);
+});
+
+test('a row names its strategy when it has one', () => {
+  const s = listed([conv('c'), conv('h1', { title: 'Lunhui read', channel: { workspaceId: 'w1', name: 'cn-market' }, preview: 'Held the line\nsold half' }), conv('h2', { channel: { workspaceId: 'w0', name: 'workbench' } })]);
+  const h = renderHistoryScreen(s, NOW);
+  const [first, second] = h.split('<a class="hist-row"').slice(1);
+  assert.match(first, /<span class="hist-title">Lunhui read<\/span>/);
+  assert.match(first, /<span class="hist-strategy">CN market<\/span>/, "its channel's strategy, by its title");
+  assert.ok(first.includes(`<span class="hist-when">${rowTime(NOW - 5 * MIN, NOW)}</span>`), 'when');
+  assert.match(first, /<span class="hist-preview">Held the line sold half<\/span>/, 'one line');
+  assert.doesNotMatch(second, /hist-strategy/, 'the root names no strategy');
+  assert.doesNotMatch(second, /hist-preview/, 'no preview read yet: none drawn');
+});
+
+test('an open history session draws no composer and no answer keys', () => {
+  const messages = [
+    { id: 'm1', from: 'you', kind: 'text', text: 'Price it', seq: 1, at: NOW - 9 * MIN },
+    { id: 'm2', from: 'gravit', kind: 'approval', text: 'run it', seq: 2, at: NOW - 8 * MIN, data: { eventId: 'm2', sessionId: 'h1', toolName: 'bash' } },
+    { id: 'm3', from: 'gravit', kind: 'question', text: '', seq: 3, at: NOW - 8 * MIN, data: { eventId: 'm3', sessionId: 'h1', questions: [{ id: 'q', question: 'Which?', options: [{ label: 'A' }] }] } },
+    { id: 'm4', from: 'gravit', kind: 'card', text: 'Buy 2', seq: 4, at: NOW - 8 * MIN, answer: 'approved', data: { eventId: 'm4', sessionId: 'h1', title: 'Buy 2' } },
+  ];
+  const s = listed([conv('c'), conv('h1', { title: 'Old read', messages, loaded: true, window: { start: 1, through: 4, hasMore: true } })], { route: { screen: 'history', id: 'h1' } });
+  const h = renderHistoryScreen(s, NOW);
+  assert.match(h, /<h1 class="head-title">Old read<\/h1>/);
+  assert.match(h, /<span class="chip grey hist-tag">Read-only<\/span>/);
+  assert.match(h, /<a class="hist-back" href="#\/history"/, 'back to History');
+  assert.match(h, /Price it/, 'its transcript');
+  assert.match(h, /data-action="earlier"/, 'earlier pages loadable');
+  assert.doesNotMatch(h, /class="composer"|id="say"/, 'no composer');
+  assert.doesNotMatch(h, /data-action="answer"|data-action="answerQuestion"/, 'no answer keys');
+  assert.doesNotMatch(h, /<input(?![^>]*disabled)/, 'nothing to type an answer into');
+  assert.equal((h.match(/>Closed</g) ?? []).length, 2, 'the open gates drawn closed');
+  assert.match(h, />Approved</, 'an answered one keeps its answer');
+});
+
+test('a history page the list does not carry reads Loading… then Not found', () => {
+  assert.match(renderHistoryScreen(R.nav(emptyState(), { screen: 'history', id: 'x' }), NOW), /Loading…/);
+  assert.match(renderHistoryScreen(listed([conv('c')], { route: { screen: 'history', id: 'gone' } }), NOW), /Not found/);
+});

@@ -3,7 +3,7 @@
 // task, Usage, Background jobs, the children and Stop.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { currentConversation, renderMessagesScreen, renderHead, renderComposer, renderDetails, renderStatus, renderSessionPage, renderHistoryList } from '../../client/js/render/messages.js';
+import { currentConversation, renderMessagesScreen, renderHead, renderComposer, renderDetails, renderStatus, renderSessionPage } from '../../client/js/render/messages.js';
 import { reducers as R } from '../../client/js/reducers/index.js';
 import { emptyState } from '../../client/js/data/empty.js';
 import { MIN } from '../../client/js/time.js';
@@ -373,24 +373,15 @@ test("Details' turns and steps, a child's mode and state and a live job's meta a
 test("a task's or a history session's page is its title and its transcript, with no composer; one gone reads Not found", () => {
   const said = { id: 'm1', seq: 1, at: NOW, from: 'gravit', kind: 'text', text: 'held <b>', data: {} };
   const s = listed([conv('a'), conv('w', { title: 'Read <the> tape', loaded: true, messages: [said] })], 'a');
-  for (const screen of ['task', 'history']) {
-    const h = renderSessionPage(R.nav(s, { screen, id: 'w' }), NOW);
+  {
+    const h = renderSessionPage(R.nav(s, { screen: 'task', id: 'w' }), NOW);
     assert.match(h, /<h1 class="head-title">Read &lt;the&gt; tape<\/h1>/);
     assert.match(h, /<div class="thread" id="thread">/);
     assert.match(h, /held &lt;b&gt;/);
     assert.doesNotMatch(h, /class="composer"|id="say"|data-action="toggleDetails"/);
   }
-  assert.match(renderSessionPage(R.nav(s, { screen: 'history', id: 'gone' }), NOW), /chan-none dim">Not found</);
-  assert.match(renderSessionPage({ ...emptyState(), route: { screen: 'history', id: 'x' } }, NOW), /chan-none dim">Loading…</, 'before the list lands');
-});
-
-test('History lists every session but the conversation and its tasks, newest first, each to its page', () => {
-  const s = R.tasksLoaded(listed([conv('a'), conv('t', { updatedAt: NOW }), conv('o1', { title: '<i>old</i>', updatedAt: NOW - 9 * MIN }), conv('o2', { updatedAt: NOW - MIN })], 'a'), { conversation: 'a', tasks: [{ id: 't', title: 't' }], at: NOW });
-  const h = renderHistoryList(R.nav(s, { screen: 'history', id: null }), NOW);
-  assert.match(h, /<h1 class="head-title">History<\/h1>/);
-  assert.deepEqual([...h.matchAll(/href="#\/history\/([^"]+)"/g)].map(m => m[1]), ['o2', 'o1']);
-  assert.match(h, /&lt;i&gt;old&lt;\/i&gt;/);
-  assert.match(renderHistoryList(R.nav(listed([conv('a')], 'a'), { screen: 'history', id: null }), NOW), /chan-none dim">Nothing in history yet</);
+  assert.match(renderSessionPage(R.nav(s, { screen: 'task', id: 'gone' }), NOW), /chan-none dim">Not found</);
+  assert.match(renderSessionPage({ ...emptyState(), route: { screen: 'task', id: 'x' } }, NOW), /chan-none dim">Loading…</, 'before the list lands');
 });
 
 // ---- Messages is the one conversation (one-entry plan 2 Task 5)

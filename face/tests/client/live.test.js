@@ -493,6 +493,46 @@ test('activate follows a paged conversation and answers once its snapshot lands'
   assert.equal(r.follows().length, 1, 'and is not followed twice');
 });
 
+// one-entry plan 2 Task 7: a history session is read cold — paged, never followed, whatever the list says of it
+test('open cold pages the session and sends no session/follow', async () => {
+  const r = rig({ rows: [row('old', { agentAvailable: true })], pages: { old: [fixture(0)] } });
+  await r.ready();
+  assert.equal(r.store.get().conversations[0].live, true, 'the record says live');
+  r.live.open('old', { cold: true }); await settle();
+  assert.equal(r.follows().length, 0, 'a live record opened cold is not followed');
+  assert.equal(r.calls.some(c => c[0] === 'session/page' && c[1].request.address.sessionId === 'old' && c[1].request.maxMessages === undefined), true, 'it is paged');
+  assert.equal(r.store.get().conversations[0].loaded, true);
+  // a list that lands again, a reconcile, a follow retry, a socket drop and its ready never turn it into a follow
+  r.live.reconcile(); await r.live.refresh(); await settle();
+  r.opts().onDown('closed'); r.live.reconcile(); await r.ready();
+  for (const t of r.scheduled.splice(0)) t.fn();
+  await settle();
+  assert.equal(r.follows().length, 0, 'still never followed');
+  // re-opened afresh (a reword) it stays cold
+  r.live.open('old', { cold: true }); await settle();
+  assert.equal(r.follows().length, 0);
+});
+
+test('promote and activate refuse a cold id', async () => {
+  const r = rig({ rows: [row('old'), row('hot', { agentAvailable: true })] });
+  await r.ready();
+  r.live.open('old', { cold: true }); await settle();
+  r.live.promote('old');
+  assert.equal(r.follows().length, 0, 'promote refuses');
+  const got = watch(r.live.activate('old'));
+  await settle();
+  assert.deepEqual(got, { done: true, value: false }, 'activate refuses');
+  assert.equal(r.follows().length, 0);
+  // a live record opened cold: activate does not answer true for it either
+  r.live.open('hot', { cold: true }); await settle();
+  const hot = watch(r.live.activate('hot'));
+  await settle();
+  assert.deepEqual(hot, { done: true, value: false });
+  // the same session opened warm afterwards follows as ever
+  r.live.open('hot'); await settle();
+  assert.equal(r.follows().length, 1);
+});
+
 test('activate is true at once for a live conversation, false when the follow fails or never answers', async () => {
   const r = rig({ rows: [row('live', { agentAvailable: true }), row('a'), row('b')] });
   await r.ready();

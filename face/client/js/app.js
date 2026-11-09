@@ -9,7 +9,8 @@ import { sizeOf, cleanFont, applyPrefs } from './prefs.js';
 import { langOf, tableOf, htmlLangOf } from './i18n/langs.js';
 import { parseHash, toHash } from './router.js';
 import { renderRail } from './render/rail.js';
-import { renderMessagesScreen, renderSessionPage, renderHistoryList, currentConversation } from './render/messages.js';
+import { renderMessagesScreen, renderSessionPage, currentConversation } from './render/messages.js';
+import { renderHistoryScreen } from './render/history.js';
 import { renderMarketsScreen } from './render/markets.js';
 import { renderSettings, renderAccountScreen, renderSellMany } from './render/account.js';
 import { renderShortcuts } from './render/shortcuts.js';
@@ -492,8 +493,8 @@ export function boot(win, host = {}) {
   // again first, so the row is there when the page moves to it, then followed
   const runSheet = startRunSheet({
     store, actions, readListing, now,
-    // (a session that lands on history is paged there, never followed: plan 2 of one entry)
-    go: async route => { await live.refresh(); go(route); if (store.get().route.screen !== 'history') live.promote(route.id); },
+    // (a session that lands on history is opened cold there, which promote refuses: plan 2 of one entry)
+    go: async route => { await live.refresh(); go(route); live.promote(route.id); },
   });
   // the list's search: the box's words in the store at once, the face's index read once the box is quiet
   const convSearch = startSearch({ store, getJson, timers });
@@ -567,6 +568,7 @@ export function boot(win, host = {}) {
   let pressed = false;   // a primary press is down: a render now would replace the element the click is aimed at
   let pending = false;
   let openedId = null;   // the conversation the live layer was told to open
+  let openedCold = false; // and whether it was opened cold (a history page: paged, never followed)
   let detailsAt = null;  // the Details section the next render scrolls into view (a pill names Usage), then cleared
   let was = null;        // the route follow() last settled: entering a screen, a tab or a market's page reads what it draws
   let overviewWs = null; // the workspace of the strategy page on screen whose overview follow() asked for
@@ -658,8 +660,8 @@ export function boot(win, host = {}) {
     const screen = s.route.screen === 'markets' ? renderMarketsScreen(s, now()) : s.route.screen === 'account' ? renderAccountScreen(s, now())
       : s.route.screen === 'trade' ? renderTradeScreen(s, now())
       : s.route.screen === 'strategy' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
-      : s.route.screen === 'history' && !s.route.id ? renderHistoryList(s, now())
-      : s.route.screen === 'task' || s.route.screen === 'history' ? renderSessionPage(s, now(), { revealed, anchor: anchorSeq, rail })
+      : s.route.screen === 'history' ? renderHistoryScreen(s, now(), { revealed, anchor: anchorSeq, rail })
+      : s.route.screen === 'task' ? renderSessionPage(s, now(), { revealed, anchor: anchorSeq, rail })
       : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail, tasksOpen });
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
     const drawers = (s.settingsOpen ? renderSettings(s, { mac }) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (!sheetUp(s) && s.identity?.connect ? renderConnectDrawer(s) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
@@ -969,9 +971,10 @@ export function boot(win, host = {}) {
     follow();
   }
 
-  // the session on screen the live layer has yet to open: a history session is paged only, never followed (Task 7 of plan 2 reads
-  // it cold), so a live one is left as it stands
-  const opens = s => { const conv = shownConv(s); return !!conv && conv.id !== openedId && !(s.route.screen === 'history' && conv.live); };
+  // a history session is read cold (one-entry plan 2 Task 7): paged, live or not, and never followed, promoted or activated
+  const coldOn = s => s.route.screen === 'history';
+  // the session on screen the live layer has yet to open, or opened the other way (cold or not)
+  const opens = s => { const conv = shownConv(s); return !!conv && (conv.id !== openedId || coldOn(s) !== openedCold); };
   // a strategy page's channel, by its name, once the channels are read (the root is no strategy)
   const strategyWs = s => (s.route.screen === 'strategy' ? s.channels.find(c => c.name === s.route.id && !c.isRoot)?.workspaceId ?? null : null);
   // what an answer of the list or the tasks leaves follow() to do
@@ -1034,13 +1037,15 @@ export function boot(win, host = {}) {
     if (r.screen === 'discover' && r.id === 'create' && !(was?.screen === 'discover' && was.id === 'create')) void discover.modelChoices();
     was = r;
     // the session on screen: Messages opens the conversation (its jobs watched), a task's page the worker's, a history page
-    // its session paged — never followed (Task 7 of plan 2 reads it cold); one the list does not carry yet waits for it
+    // its session cold — paged, never followed; one the list does not carry yet waits for it
     const conv = shownConv(store.get());
     jobs.watch(r.screen === 'messages' && conv ? conv.id : null);
     if (opens(store.get())) {
       openedId = conv.id;
-      live.open(conv.id);
-      if (!limitsRead) void attachments.readLimits(conv.id).then(ok => { if (ok === true) limitsRead = true; });
+      openedCold = coldOn(store.get());
+      live.open(conv.id, { cold: openedCold });
+      // (the image limits are the composer's: a history page has none)
+      if (!limitsRead && !openedCold) void attachments.readLimits(conv.id).then(ok => { if (ok === true) limitsRead = true; });
     } else if (!conv && openedId && !store.get().conversations.some(c => c.id === openedId)) {
       // the last open session went (deleted) and nothing took its place: stop reading it
       openedId = null;
@@ -1672,7 +1677,7 @@ export function boot(win, host = {}) {
     reword: () => {
       void live.refresh();
       const id = onScreenId(store.get());
-      if (id !== null && id === openedId) live.open(id);
+      if (id !== null && id === openedId) live.open(id, { cold: openedCold });
       store.dispatch('lunhuiForgetFailed');
     },
     // a composed answer's view that could not be read: forget it, and the render asks again

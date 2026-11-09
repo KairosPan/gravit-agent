@@ -35,7 +35,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   let memberBot = new Map();      // a room member's session → its bot id
   let openSeq = 0;
   let listSeq = 0;
-  let view = null;                // {id, token, mode: 'follow' | 'page', handle, stale?, failed?, snapped?, waiters?}
+  let view = null;                // {id, token, mode: 'follow' | 'page', handle, stale?, failed?, snapped?, waiters?, cold?}
   let listPending = false;
   let earlierRun = null;          // {id, token, promise}: the earlier read under way; a second call for it answers its promise
   const ownStart = new Map();     // sessionId → the start of its last snapshot's own records, below which lie earlier pages
@@ -137,6 +137,9 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   // a fresh window still owed to the conversation on screen (plan 7's reword): carried on the view until a window lands, so a
   // follow, page, promote, activate, a follow's end or a reconnect that replaces the read in flight owes it in its turn
   const carried = id => view !== null && view.id === id && view.fresh === true;
+  // a session opened cold (a history page, one-entry plan 2 Task 7): paged and paged again, never followed — no promote, no
+  // activate, no reconcile turns it into a follow, whatever the list says of it
+  const coldNow = id => view !== null && view.id === id && view.cold === true;
   function follow(id, token, fresh = carried(id)) {
     closeView();
     let handle = null;
@@ -167,9 +170,9 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     });
     view = { id, token, mode: 'follow', handle, snapped: false, waiters: [], fresh };
   }
-  async function page(id, token, fresh = carried(id)) {
+  async function page(id, token, fresh = carried(id), cold = coldNow(id)) {
     closeView();
-    const v = { id, token, mode: 'page', handle: null, fresh };
+    const v = { id, token, mode: 'page', handle: null, fresh, cold };
     view = v;
     try {
       const cut = await call('session/projections', { request: { sessionId: id } });
@@ -191,8 +194,9 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
   // a conversation opened afresh; the one already on screen too (plan 7's reword): its window then replaces everything folded
   // before it, earlier pages included, as a turn at the tail drops them, so every line is folded again under the table that
   // stands; Earlier messages reads the pages again. With the host down it waits: the view is stale with the fresh window owed,
-  // and the reconcile after ready reads it (a read sent now would fail and leave the view failed, which nothing re-opens)
-  function open(id) {
+  // and the reconcile after ready reads it (a read sent now would fail and leave the view failed, which nothing re-opens).
+  // cold: paged whether or not it is live, and held cold (coldNow) until another open
+  function open(id, { cold = false } = {}) {
     const token = ++openSeq;
     const conv = convOf(id);
     if (!conv) return;
@@ -200,20 +204,21 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     store.dispatch('markSeen', { convId: id, seq: conv.updatedAt });
     if (fresh && state().status?.connected !== true) {
       closeView();
-      view = { id, token, mode: 'page', handle: null, stale: true, fresh: true };
+      view = { id, token, mode: 'page', handle: null, stale: true, fresh: true, cold };
       return;
     }
-    if (viewFor(conv) === 'follow') follow(id, token, fresh);
-    else void page(id, token, fresh);
+    if (!cold && viewFor(conv) === 'follow') follow(id, token, fresh);
+    else void page(id, token, fresh, cold);
   }
   // this tab wrote to a paged session: following it now promotes nothing the prompt did not already
   function promote(id) {
-    if (view && view.id === id && view.mode === 'page' && !view.failed) follow(id, view.token);
+    if (view && view.id === id && view.mode === 'page' && !view.failed && !view.cold) follow(id, view.token);
   }
   // the conversation made live before a command runs on it (so the page follows it and the result draws): a live one at once; the
   // one paged on screen followed, as promote does, and true once the follow's first snapshot lands; false when that
   // follow ends or fails first, after ACTIVATE_MS, or when the screen shows another conversation
   function activate(id) {
+    if (coldNow(id)) return Promise.resolve(false);
     if (convOf(id)?.live) return Promise.resolve(true);
     if (!view || view.id !== id) return Promise.resolve(false);
     if (view.mode === 'page') follow(id, view.token);
@@ -290,7 +295,7 @@ export function startLive({ store, openMux, call, mapFrame, getJson, timers, now
     if (!view || view.failed) return;
     const conv = convOf(view.id);
     if (!conv) return;
-    if (view.mode === 'page' && conv.live) follow(view.id, view.token);
+    if (view.mode === 'page' && conv.live && !view.cold) follow(view.id, view.token);
     else if (view.stale) void page(view.id, view.token);
   }
   function suspend() {

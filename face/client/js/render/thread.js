@@ -53,13 +53,15 @@ function gateKeys(m, conv) {
 // pick or a typed answer again by its id; the free answer is dsh's `custom`, open beside a menu too
 function question(m, conv) {
   const qs = Array.isArray(m.data?.questions) ? m.data.questions : [];
+  // a question answered or closed takes nothing more: its inputs are drawn disabled
+  const off = needsAnswer(m) ? '' : ' disabled';
   const blocks = qs.map((q, i) => {
     const name = `q-${m.id}-${q?.id ?? i}`;
     const options = Array.isArray(q?.options) ? q.options : [];
     const type = q?.multiSelect === true ? 'checkbox' : 'radio';
-    const inputs = options.map((o, n) => `<label class="opt"><input type="${type}" id="${esc(`${name}-${n}`)}" name="${esc(name)}" value="${esc(o?.label ?? '')}"><span>${esc(o?.label ?? '')}</span>${o?.description ? `<span class="dim">${esc(o.description)}</span>` : ''}</label>`).join('');
+    const inputs = options.map((o, n) => `<label class="opt"><input type="${type}" id="${esc(`${name}-${n}`)}" name="${esc(name)}" value="${esc(o?.label ?? '')}"${off}><span>${esc(o?.label ?? '')}</span>${o?.description ? `<span class="dim">${esc(o.description)}</span>` : ''}</label>`).join('');
     const hint = options.length ? th('thread.question.other') : th('thread.question.yours');
-    const custom = `<input class="input small" type="text" id="${esc(`${name}-custom`)}" name="${esc(`${name}-custom`)}" placeholder="${hint}" aria-label="${hint}">`;
+    const custom = `<input class="input small" type="text" id="${esc(`${name}-custom`)}" name="${esc(`${name}-custom`)}" placeholder="${hint}" aria-label="${hint}"${off}>`;
     return `<div class="q" data-q="${esc(String(q?.id ?? i))}">${q?.header ? `<div class="card-title">${esc(q.header)}</div>` : ''}<div>${esc(q?.question ?? '')}</div>${q?.detail ? `<div class="dim">${esc(q.detail)}</div>` : ''}${inputs}${custom}</div>`;
   }).join('');
   const keys = needsAnswer(m) ? `<div class="keys right"><button type="button" class="btn-primary small" data-action="answerQuestion" data-conv="${esc(conv.id)}" data-msg="${esc(m.id)}">${th('thread.question.answer')}</button></div>` : '';

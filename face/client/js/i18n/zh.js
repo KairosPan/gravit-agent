@@ -118,6 +118,8 @@ export const ZH = Object.freeze({
   'history.title': '历史',
   'history.none': '历史里还没有内容',
   'history.notFound': '未找到',
+  'history.readOnly': '只读',
+  'history.back': '返回历史',
   'status.stopped': '已停止。暂停的目标可用 /goal resume 恢复',
   'status.stopping': '正在停止 {label}',
   'status.theChild': '子任务',

@@ -132,6 +132,44 @@ test('an old #/messages/<other id> opens history read-only — no composer in th
   store.timers.clear();
 });
 
+// one-entry plan 2 Task 7: a history session — live or not, its folder there or gone — is read cold and never written to
+test('opening #/history/<id> sends session/projections and session/page and never session/follow, session/prompt or commands/execute', async () => {
+  const f = fakeWindow({ hash: '#/history/old' });
+  const gate = { seq: 4, kind: 'message', role: 'assistant', parts: [{ type: 'text', text: 'held' }] };
+  const h = host({ rows: [row('conv', { updatedAt: 9 }), row('old', { agentAvailable: true, projections: { values: { title: 'Last week' } } })], conversation: 'conv', pages: { old: [gate] } });
+  const store = started(f, h);
+  await h.ready();
+  assert.deepEqual(store.get().route, { screen: 'history', id: 'old' });
+  assert.equal(store.get().conversations.find(c => c.id === 'old').live, true, 'the record says live');
+  const on = (name, id = 'old') => h.calls.filter(c => c[0] === name && (c[1]?.request?.sessionId ?? c[1]?.request?.address?.sessionId) === id);
+  assert.ok(on('session/projections').length >= 1, 'its cut read');
+  assert.ok(on('session/page').some(c => c[1].request.maxMessages === undefined), 'its window paged');
+  assert.match(f.html(), /head-title">Last week</);
+  assert.match(f.html(), /hist-tag">Read-only</);
+  assert.doesNotMatch(f.html(), /class="composer"|id="say"/);
+  // the list landing again, a reconcile, a reconnect: still never followed
+  await store.live.refresh(); store.live.reconcile(); h.opts().onDown('closed'); await h.ready(); store.live.reconcile(); await settle();
+  const follows = h.streams.filter(st => st.name === 'session/follow' && st.args.request.address.sessionId === 'old');
+  assert.deepEqual(follows, [], 'never followed');
+  assert.deepEqual(h.calls.filter(c => c[0] === 'session/prompt' || c[0] === 'commands/execute'), [], 'never prompted, no command run');
+  store.timers.clear();
+});
+
+test('Enter in the page sends nothing', async () => {
+  const f = fakeWindow({ hash: '#/history/old' });
+  const h = host({ rows: [row('conv', { updatedAt: 9 }), row('old', { projections: { values: { title: 'Last week' } } })], conversation: 'conv' });
+  const store = started(f, h);
+  await h.ready();
+  assert.deepEqual(store.get().route, { screen: 'history', id: 'old' });
+  f.fire('doc', 'keydown', { key: 'Enter', preventDefault() {} });
+  f.fire('doc', 'keydown', { key: 'Enter', metaKey: true, preventDefault() {} });
+  send(f);
+  await settle();
+  assert.deepEqual(h.calls.filter(c => c[0] === 'session/prompt' || c[0] === 'commands/execute'), [], 'nothing sent');
+  assert.deepEqual(h.streams.filter(st => st.name === 'session/follow'), [], 'nothing followed');
+  store.timers.clear();
+});
+
 test('clicking a row opens it: the page read happens and its dot clears; the composer sends a prompt and empties', async () => {
   const f = fakeWindow({ hash: '#/history' });
   const say = f.withId('say', { tagName: 'INPUT' });
@@ -4982,7 +5020,7 @@ test("a failed upload says why on the status line, the host's hint and all", asy
   store.timers.clear();
 });
 
-test('a failed image-limits read is tried again on the next conversation opened; a good one is never read again', async () => {
+test('a failed image-limits read is tried again on the next opening of the conversation; a good one is never read again; history reads none', async () => {
   const f = fakeWindow({ hash: '#/messages/s1' });
   composerEls(f);
   const h = host({ rows: [row('s1', { updatedAt: 50, agentAvailable: true }), row('s2', { updatedAt: 9 }), row('s3', { updatedAt: 8 })] });
@@ -4993,11 +5031,15 @@ test('a failed image-limits read is tried again on the next conversation opened;
   await settle();
   openSession(f, 's2');
   await settle();
+  assert.deepEqual(store.get().route, { screen: 'history', id: 's2' });
+  assert.deepEqual(att.limitReads, ['s1'], 'a history page has no composer: no limits read for it');
+  openSession(f, 's1');
+  await settle();
   openSession(f, 's3');
   await settle();
   openSession(f, 's1');
   await settle();
-  assert.deepEqual(att.limitReads, ['s1', 's2']);
+  assert.deepEqual(att.limitReads, ['s1', 's1']);
   store.timers.clear();
 });
 
@@ -7202,16 +7244,16 @@ test('an untitled conversation is drawn in the table standing after reword', asy
   const h = host({ rows: [row('s1', { updatedAt: 9 }), row('s2', { updatedAt: 5 })], conversation: 's1' });
   const store = started(f, h);
   await h.ready();
-  assert.match(f.html(), /chan-row-name">Untitled</);
+  assert.match(f.html(), /hist-title">Untitled</);
   try {
     setTable({ ...EN, 'list.untitled': 'PROBE-untitled' });
     store.dispatch('hostStatus', { line: 'a render' });
     await settle();
-    assert.match(f.html(), /chan-row-name">Untitled</, 'the title was folded when listed: a render alone keeps it');
+    assert.match(f.html(), /hist-title">Untitled</, 'the title was folded when listed: a render alone keeps it');
     store.reword();
     await settle();
-    assert.match(f.html(), /chan-row-name">PROBE-untitled</);
-    assert.doesNotMatch(f.html(), /chan-row-name">Untitled</);
+    assert.match(f.html(), /hist-title">PROBE-untitled</);
+    assert.doesNotMatch(f.html(), /hist-title">Untitled</);
   } finally {
     setTable(EN);
   }

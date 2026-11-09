@@ -69,6 +69,19 @@ button.link:disabled { color: var(--dim); cursor: default; }
 .chan-row-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .chan-row-meta { flex: 0 0 auto; color: var(--dim); font-size: calc(12px * var(--fs)); font-variant-numeric: tabular-nums; }
 .chan-none { padding: 24px 0; display: flex; align-items: center; gap: 10px; }
+/* History (one-entry plan 2 Task 7): a row per session (its title, strategy and when, then its one-line preview), and one read
+   read-only with its tag and the way back */
+.hist-list { gap: 2px; }
+.hist-row { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; margin: 0 -10px; border-radius: var(--radius-s); color: inherit; text-decoration: none; }
+.hist-row:hover { background: var(--hover); }
+.hist-top { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.hist-title { flex: 1 1 auto; min-width: 0; font-size: calc(14px * var(--fs)); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-strategy { flex: none; font-size: calc(12px * var(--fs)); font-weight: 600; color: var(--dim); }
+.hist-when { flex: none; font-size: calc(12px * var(--fs)); color: var(--dim); font-variant-numeric: tabular-nums; }
+.hist-preview { font-size: calc(13px * var(--fs)); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-back { flex: none; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-pill); color: var(--dim); }
+.hist-back:hover { background: var(--hover); color: var(--text); }
+.hist-tag { flex: none; }
 .chan-stale { display: flex; align-items: center; gap: 10px; font-size: calc(12px * var(--fs)); }
 .chan-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .roster-edit { display: flex; flex-direction: column; gap: 4px; }

@@ -5,7 +5,7 @@ import { esc, attrs, cls } from '../html.js';
 import { t, th, sayOf, rawHtml } from '../i18n/words.js';
 import { icon } from '../icons.js';
 import { maskExcerpt } from '../mask.js';
-import { fmtDate, rowTime } from '../time.js';
+import { fmtDate } from '../time.js';
 import { avatar } from './avatars.js';
 import { renderThread, railHtml } from './thread.js';
 import { renderTaskRail } from './tasks.js';
@@ -13,7 +13,6 @@ import { HOST_NAME } from '../wire/speaker.js';
 import { kv, confirmPair } from './controls.js';
 import { onScreenId } from '../host/sessions.js';
 import { childrenOf } from '../host/children-view.js';
-import { historyOf } from '../host/rail-view.js';
 import { renderMenu, menuAria, filesRail } from '../composer/view.js';
 import { statsView, pillsText, durationText, clockText } from '../host/turns-view.js';
 import { jobsView, metaLine, isLive } from '../host/jobs-view.js';
@@ -204,13 +203,13 @@ export function renderDetails(conv, state, now = Date.now()) {
 
 // first in the thread while the window has more before it (D22): Earlier messages, or Loading… while a read runs —
 // aria-disabled, not disabled, so the key keeps focus across the read (the earlier action ignores it meanwhile)
-function earlierKey(conv) {
+export function earlierKey(conv) {
   const w = conv.window;
   if (!w?.hasMore) return '';
   return `<button${attrs({ class: 'btn-sm earlier-key', type: 'button', id: `earlier-${conv.id}`, 'data-action': 'earlier', 'data-conv': conv.id, 'aria-disabled': w.loading ? 'true' : null })}>${w.loading ? th('common.loading') : th('thread.earlier')}</button>`;
 }
 
-// a task's or a history session's page (#/task/<id>, #/history/<id>), read-only until Tasks 7 and 8 of plan 2 draw their own:
+// a task's page (#/task/<id>), read-only until Task 8 of plan 2 draws its own:
 // its title and its transcript — no composer, no Details, nothing that writes to the session. One the list does not carry
 // reads Loading… until the list is in, then Not found
 export function renderSessionPage(state, now, page = {}) {
@@ -220,16 +219,6 @@ export function renderSessionPage(state, now, page = {}) {
     return `<main class="main chan"><header class="head"><h1 class="head-title">${esc(state.route.id ?? '')}</h1></header><div class="chan-body"><div class="chan-none dim">${word}</div></div></main>`;
   }
   return `<main class="main"><header class="head"><h1 class="head-title">${esc(maskExcerpt(conv.title))}</h1></header><div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div></div></main>`;
-}
-
-// History (#/history) until Task 7 of plan 2 draws its own: every session but the conversation and its tasks, newest first,
-// each a link to its read-only page
-export function renderHistoryList(state, now) {
-  const rows = historyOf(state);
-  const body = rows.length
-    ? rows.map(c => `<a class="chan-row" href="#/history/${esc(encodeURIComponent(c.id))}"><span class="chan-row-name">${esc(maskExcerpt(c.title))}</span><span class="chan-row-meta">${c.updatedAt ? rowTime(c.updatedAt, now) : ''}</span></a>`).join('')
-    : `<div class="chan-none dim">${th('history.none')}</div>`;
-  return `<main class="main chan"><header class="head"><h1 class="head-title">${th('history.title')}</h1></header><div class="chan-body">${body}</div></main>`;
 }
 
 // Messages is Gravit's one conversation (one-entry plan 2): its head, then its column (the thread with the turn rail, the one

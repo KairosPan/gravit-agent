@@ -3,7 +3,8 @@
 import { readFileSync } from 'node:fs';
 import { renderRail } from '../../../client/js/render/rail.js';
 import { renderSide } from '../../../client/js/render/side.js';
-import { renderMessagesScreen, renderSessionPage, renderHistoryList } from '../../../client/js/render/messages.js';
+import { renderMessagesScreen, renderSessionPage } from '../../../client/js/render/messages.js';
+import { renderHistoryScreen } from '../../../client/js/render/history.js';
 import { renderMarketsScreen } from '../../../client/js/render/markets.js';
 import { renderSettings, renderAccountScreen, renderSellMany } from '../../../client/js/render/account.js';
 import { renderSheet } from '../../../client/js/render/owner.js';
@@ -346,7 +347,25 @@ export function everyState() {
     // tasks' first read failed
     R.tasksLoaded(onConv(base, 'fresh'), { conversation: 'fresh', tasks: [{ id: 'ru', title: 'Price the basket', origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW - 3 * MIN, lastEventAt: NOW - MIN, lastSeq: 1 }], at: NOW }),
     R.tasksFailed(R.nav(R.hostList(emptyState(), { conversations: base.conversations, channels: base.channels }), { screen: 'messages', id: null }), { at: NOW }),
+    // plan 2 of one entry, Task 7: History's rows with a strategy and a preview, and one session read-only with its gates closed
+    ...historyStates(base),
   ];
+}
+
+// History (one-entry plan 2 Task 7): rows naming a strategy, with a preview and without; one session opened read-only, an
+// approval and a question still open in its record drawn closed, an answered card, earlier pages to load, one loading them
+function historyStates(base) {
+  const gates = [
+    m('h1', { from: 'you', text: 'Price the basket', seq: 1, at: NOW - 9 * MIN }),
+    m('h2', { kind: 'approval', text: 'run it', seq: 2, data: { eventId: 'h2', sessionId: 'old', toolName: 'bash', reason: 'reads the tape' } }),
+    m('h3', { kind: 'question', text: '', seq: 3, data: { eventId: 'h3', sessionId: 'old', questions: [{ id: 'q1', header: 'Venue', question: 'Which paper venue?', options: [{ label: 'Paper US' }] }] } }),
+    m('h4', { kind: 'card', text: 'Buy 2 NVDA', seq: 4, answer: 'approved', data: { eventId: 'h4', sessionId: 'old', title: 'Buy 2 NVDA', venue: 'paper', line: 'limit 120' } }),
+  ];
+  const old = conv('old', { title: 'Last week', channel: { workspaceId: 'w-cn', name: 'cn-market' }, preview: 'Held the line\nsold half', updatedAt: NOW - 2 * MIN, messages: gates, loaded: true, window: { start: 1, through: 4, hasMore: true } });
+  const quiet = conv('quiet', { title: 'A quiet one', channel: { workspaceId: 'w0', name: 'workbench' }, updatedAt: NOW - 3 * 24 * 60 * MIN });
+  const listed = R.tasksLoaded(R.hostList(base, { conversations: [...base.conversations, old, quiet] }), { conversation: 's1', tasks: [], at: NOW });
+  const loading = R.hostEarlierLoading(R.nav(listed, { screen: 'history', id: 'old' }), { convId: 'old', on: true });
+  return [R.nav(listed, { screen: 'history', id: null }), R.nav(listed, { screen: 'history', id: 'old' }), loading];
 }
 
 // the task source kind (one-entry plan 2 Task 5): a report relayed into the conversation (its title read, and one unread named
@@ -589,8 +608,8 @@ export const composerPieces = () => composerBuild().pieces;
 export const screenOf = (st, now) => (st.route.screen === 'markets' ? renderMarketsScreen(st, now) : st.route.screen === 'account' ? renderAccountScreen(st, now)
   : st.route.screen === 'trade' ? renderTradeScreen(st, now)
   : st.route.screen === 'strategy' ? renderChannelScreen(st, now) : st.route.screen === 'discover' ? renderDiscover(st, now)
-  : st.route.screen === 'history' && !st.route.id ? renderHistoryList(st, now)
-  : st.route.screen === 'task' || st.route.screen === 'history' ? renderSessionPage(st, now)
+  : st.route.screen === 'history' ? renderHistoryScreen(st, now)
+  : st.route.screen === 'task' ? renderSessionPage(st, now)
   : st.route.screen === 'plugin' ? renderPlugin(st, now) : st.route.screen === 'module' ? renderModule(st, now) : renderMessagesScreen(st, now));
 
 // a state's page as css.test.js draws it: the rail, the screen, then every drawer and sheet that may stand over it
