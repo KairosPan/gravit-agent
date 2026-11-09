@@ -90,6 +90,14 @@
  * that is not a fork) and never looks a tool up. Its text is literal, like the
  * cycle's.
  *
+ * THE CONVERSATION. `gravit:router` carries `dsh/profile/router.md` (src/cycle.ts
+ * `readRouter`) - how Gravit answers or starts a task in the operator's one
+ * conversation - in the same slot, gated as the desk's is, by the header alone.
+ * Its config is `{ text, root }`: every `<REPO>` in the text becomes `root`, the
+ * repository's absolute path, at mount. It carries no cycle and no desk, and
+ * {@link validateGravitConfig} refuses a row that carries it beside either; the
+ * `gravit-router` preset (src/router-preset.ts) mounts it.
+ *
  * SCOPED, NOT GLOBAL. `ctx.systemPrompt.section` registers into the CALLING
  * context's scope, the preset revision's standing layer, so each section
  * reaches every session joined to the preset that mounted the row, and nobody
@@ -138,6 +146,10 @@ export const CYCLE_SECTION = "gravit:cycle";
 /** The desk's contract. Registered only when the config carries `desk`; its own
  *  name, like the date's. */
 export const DESK_SECTION = "gravit:desk";
+
+/** The conversation's contract. Registered only when the config carries `router`; its own
+ *  name, like the date's. */
+export const ROUTER_SECTION = "gravit:router";
 /** The run protocol's section name. src/protocols.ts `LUNHUI_RUN_SECTION` hands it in the config;
  *  this file imports nothing, so it is spelled here too, and tests/protocols.test.ts pins the two
  *  equal. */
@@ -169,10 +181,16 @@ const ROLE_TOOL = /^role_[a-z0-9_]+$/;
  *  carries one contract or the other. */
 export function validateGravitConfig(config) {
   if (config === null || typeof config !== "object" || Array.isArray(config)) return "config must be an object";
-  const { cycle, desk, roles, protocols } = config;
+  const { cycle, desk, router, roles, protocols } = config;
   if (cycle !== undefined && (typeof cycle !== "string" || cycle.trim() === "")) return "cycle must be a non-empty string";
   if (desk !== undefined && (typeof desk !== "string" || desk.trim() === "")) return "desk must be a non-empty string";
   if (cycle !== undefined && desk !== undefined) return "a preset carries the cycle contract or the desk contract, not both";
+  if (router !== undefined) {
+    if (router === null || typeof router !== "object" || Array.isArray(router)
+      || typeof router.text !== "string" || router.text.trim() === ""
+      || typeof router.root !== "string" || router.root.trim() === "") return "router must be { text, root }, both non-empty strings";
+    if (cycle !== undefined || desk !== undefined) return "a preset carries the router contract alone, not the cycle's or the desk's";
+  }
   if (roles !== undefined) {
     if (!Array.isArray(roles)) return "roles must be an array of { tool, summary }";
     for (const [index, role] of roles.entries()) {
@@ -187,7 +205,7 @@ export function validateGravitConfig(config) {
     for (const [index, protocol] of protocols.entries()) {
       if (protocol === null || typeof protocol !== "object" || Array.isArray(protocol)) return `protocols[${index}] must be an object with name, probe and text`;
       if (typeof protocol.name !== "string" || !PROTOCOL_NAME.test(protocol.name)) return `protocols[${index}].name must match ${PROTOCOL_NAME}`;
-      if ([TODAY_SECTION, ROLES_SECTION, CYCLE_SECTION, DESK_SECTION].includes(protocol.name)) return `protocols[${index}].name ${protocol.name} is one of this plugin's own sections`;
+      if ([TODAY_SECTION, ROLES_SECTION, CYCLE_SECTION, DESK_SECTION, ROUTER_SECTION].includes(protocol.name)) return `protocols[${index}].name ${protocol.name} is one of this plugin's own sections`;
       if (seen.has(protocol.name)) return `protocols[${index}].name ${protocol.name} is given twice`;
       seen.add(protocol.name);
       if (typeof protocol.probe !== "string" || !TOOL_NAME.test(protocol.probe)) return `protocols[${index}].probe must be a tool name matching ${TOOL_NAME}`;
@@ -295,6 +313,17 @@ export function apply(ctx, config) {
       order: ctx.systemPrompt.getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 50,
       interpolate: false,
       text: (context) => isRootOrFork(context) ? config.desk : "",
+    }));
+  }
+  /* The cycle's slot again, gated as the desk's is - by the header alone. The text names the repository
+   * by a `<REPO>` placeholder, which the row's `root` fills, every occurrence, once at mount. */
+  if (config.router !== undefined) {
+    const text = config.router.text.replaceAll("<REPO>", config.router.root);
+    ctx.effect(() => ctx.systemPrompt.section({
+      name: ROUTER_SECTION,
+      order: ctx.systemPrompt.getSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 50,
+      interpolate: false,
+      text: (context) => isRootOrFork(context) ? text : "",
     }));
   }
   /* Ten before the cycle, in their listed order (the run protocol, then the module protocol, one

@@ -75,7 +75,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import { applyWebFetchTool, DEFAULT_FETCH_MAX_OUTPUT_CHARS, DEFAULT_WEB_TOOL_TIMEOUT_MS } from "@deepseek-ai/dsh-tool-web";
-import { agentFileNameOf, DESK_PRESET, fenceNameOf, foldName, isDotName, type AgentFileName, type FenceName } from "./desk-names.ts";
+import { agentFileNameOf, CONVERSATION_PRESET, DESK_PRESET, fenceNameOf, foldName, isDotName, type AgentFileName, type FenceName } from "./desk-names.ts";
 import type { DeskStatus } from "./desk.ts";
 import { bjStamp, etClock, etDate } from "./et.ts";
 import { HttpError } from "./http.ts";
@@ -1069,6 +1069,12 @@ function uncheckedFor(exec: unknown): string {
   return isDeskWriteTool(name) ? UNCHECKED : isDeskReadTool(name) ? READ_UNCHECKED : SECRET_UNCHECKED;
 }
 
+/** The presets whose agents {@link installDeskGuard} judges: the desk's and the conversation's. Both run unattended
+ * on text they do not control - the desk on the web, the conversation on its workers' reports - and neither has a
+ * shell, so the guard's reads, writes and secret check are their fence. {@link installDeskTools} still equips the
+ * desk's agents alone. */
+const GUARDED_PRESETS: ReadonlySet<string | undefined> = new Set([DESK_PRESET, CONVERSATION_PRESET]);
+
 /** What {@link installDeskGuard} takes beside the context and the root: `log`, where a line is written (default
  * `console.error`), and `env`, the environment the secret check takes its secrets from, once, at install (default
  * `process.env`) - both for tests; and `recordFetch`, given which the fetch record is installed and hands it each desk
@@ -1107,8 +1113,10 @@ function unrecordedLine(exec: DeskGuardExecution, error: unknown): string {
  * the secrets, and never reaches the registry. A desk agent is one whose preset
  * `ctx.agentPresets.composedPreset(agent.ctx)` reads as `gravit-desk` - read at the call, so a reloaded registry is
  * followed - or whose session was created as `gravit-desk` (its header's `agentPreset`, fixed then): its call gets
- * the three checks' answer, the write and the read over the session's cwd and `root`. Anyone else's call - Gravit's
- * workbench sessions, a bot's - is handed on unjudged.
+ * the three checks' answer, the write and the read over the session's cwd and `root`. The conversation's agents,
+ * `gravit-router` (src/router-preset.ts), are judged exactly as the desk's are, by the same two reads
+ * ({@link GUARDED_PRESETS}); a desk agent below means either. Anyone else's call - Gravit's workbench sessions, a
+ * task's worker, a bot's - is handed on unjudged.
  *
  * Neither ever throws. A failure to judge - an agent whose session or cwd cannot be read, or a registry that throws
  * for a session created as the desk's - is the fail-closed deny of the first check that would have judged the call
@@ -1167,22 +1175,23 @@ export function installDeskGuard(
       /* the decision stands without its line */
     }
   };
-  /** Whether `exec`'s agent is the desk's: its preset as the registry composes it, read at the call, or the preset its
-   * session was created with. A registry that throws for a session created as the desk's throws on; for any other
-   * session it leaves the session's word - not the desk's - with one line. */
+  /** Whether `exec`'s agent is one the guard judges - the desk's or the conversation's ({@link GUARDED_PRESETS}): its
+   * preset as the registry composes it, read at the call, or the preset its session was created with. A registry that
+   * throws for a session created on a guarded preset throws on; for any other session it leaves the session's word -
+   * not a guarded one - with one line. */
   const fromDesk = (exec: DeskGuardExecution, agent: NonNullable<DeskGuardExecution["agent"]>): boolean => {
     const header = agent.session.header;
     let composed: string | undefined;
     try {
       composed = ctx.agentPresets.composedPreset(agent.ctx);
     } catch (error) {
-      if (header.agentPreset !== DESK_PRESET) {
+      if (!GUARDED_PRESETS.has(header.agentPreset)) {
         tell(exec, headerLine(exec, error));
         return false;
       }
       throw error;
     }
-    return composed === DESK_PRESET || header.agentPreset === DESK_PRESET;
+    return GUARDED_PRESETS.has(composed) || GUARDED_PRESETS.has(header.agentPreset);
   };
   /** The guard's decision for `exec`, read afresh: `null` when the call is not its to judge, else the deny. Never throws. */
   const judge = (exec: DeskGuardExecution): DeskDeny | null => {

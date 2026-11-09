@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CONVERSATION_PRESET } from "../src/desk-names.ts";
 import { DESK_PRESET } from "../src/desk-preset.ts";
 import { appendEvent, installDesk, readEvents, type DeskEvent, type DeskRun, type DeskStatus } from "../src/desk.ts";
 import {
@@ -641,4 +642,49 @@ test("the fetch record takes a session's own word when the registry throws, and 
   assert.deepEqual(recorded.at(-1), { sessionId: "unknown", url: "https://example.com/c" });
   await dispose();
   assert.equal(root.executes.length, 0);
+});
+
+/** A call of `name` from the conversation's agent (`gravit-router`), its session in its own folder outside the
+ * repository, as `callFrom` builds a desk agent's. */
+function routerCall(name: string, args: unknown): DeskGuardExecution {
+  const header = { id: "router-session-1", cwd: "/home/face/conversation", agentPreset: CONVERSATION_PRESET };
+  return { name, arguments: args, agent: { id: "agent-router-session-1", ctx: { preset: CONVERSATION_PRESET }, session: { header } } };
+}
+
+test("the guard judges a gravit-router agent: <root>/.env.deepseek, a relative path from its folder, and a path outside the repository are denied; <root>/strategies/x/status.yaml is allowed", async () => {
+  const root = fakeRoot();
+  const dispose = installDeskGuard(root.ctx, "/repo", { env: {}, log: () => {} });
+  const deny = async (exec: DeskGuardExecution, why: string): Promise<void> => {
+    const { decision, ran } = await dispatch(root, exec);
+    assert.equal((decision as { kind?: unknown }).kind, "deny", why);
+    assert.equal(ran, false, why);
+  };
+  await deny(routerCall("read", { file_path: "/repo/.env.deepseek" }), "a key file at the root");
+  await deny(routerCall("read", { file_path: "strategies/x/status.yaml" }), "a relative path resolves from its folder, outside the repository");
+  await deny(routerCall("read", { file_path: "/Users/pan/.dsh/.credentials.yaml" }), "a path outside the repository");
+  await deny(routerCall("grep", { pattern: "x", path: "/etc" }), "a grep outside the repository");
+  assert.equal((await dispatch(root, routerCall("read", { file_path: "/repo/strategies/x/status.yaml" }))).ran, true, "a strategy's file by absolute path");
+  /* Gravit's own read of the key file is not this guard's to judge */
+  assert.equal((await dispatch(root, callFrom("gravit", "read", { file_path: "/repo/.env.deepseek" }, "gravit-session"))).ran, true);
+  await dispose();
+});
+
+test("a gravit-router call that carries an environment secret is denied", async () => {
+  const root = fakeRoot();
+  const SECRET = "made-up-router-secret-0004";
+  const dispose = installDeskGuard(root.ctx, "/repo", { env: { ROUTER_GUARD_TEST_TOKEN: SECRET }, log: () => {} });
+  const refused = await dispatch(root, routerCall("mcp__market__market_quotes", { symbols: [SECRET] }));
+  assert.equal(refused.ran, false);
+  assert.deepEqual(refused.decision, { kind: "deny", reason: "the desk never sends a secret: this call carries one" });
+  assert.equal((await dispatch(root, routerCall("mcp__market__market_quotes", { symbols: ["NVDA"] }))).ran, true, "the same call without it goes on");
+  await dispose();
+});
+
+test("the router's agent gets no desk tools: installDeskTools still equips gravit-desk alone", () => {
+  const root = fakeRoot();
+  installDeskTools(root.ctx, deskToolDefinitions({ quotes: fakeHub().hub, readState: readStatus }));
+  const router = fakeAgent("router-1", CONVERSATION_PRESET);
+  root.create(router.agent);
+  assert.deepEqual(router.names(), []);
+  assert.deepEqual(router.injected, []);
 });

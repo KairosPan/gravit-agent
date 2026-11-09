@@ -18,7 +18,8 @@
  *
  * The desk's contract, `dsh/profile/desk.md` - the `gravit:desk` section (plugins/gravit.js) - is
  * read the same way: {@link readDesk} shares {@link readCycle}'s private reader, so it is refused for
- * the same faults, path first, under its own cap, {@link DESK_MAX_BYTES}.
+ * the same faults, path first, under its own cap, {@link DESK_MAX_BYTES}. So is the conversation's,
+ * `dsh/profile/router.md` ({@link readRouter}, the `gravit:router` section), under {@link ROUTER_MAX_BYTES}.
  * @module
  */
 import { readFileSync } from "node:fs";
@@ -38,6 +39,17 @@ export const DESK_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "..
 
 /** The largest `desk.md`, in bytes as `wc -c` counts them. */
 export const DESK_MAX_BYTES = 3000;
+
+/** The repository's root, the directory two above this module (`face/src/..`/..), resolved as
+ * {@link DESK_PATH} is. The conversation's section names it in place of its `<REPO>` placeholder. */
+export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+/** The conversation's contract, `dsh/profile/router.md` - the `gravit:router` section of the
+ * `gravit-router` preset (src/router-preset.ts) - beside `desk.md`. */
+export const ROUTER_PATH = join(REPO_ROOT, "dsh", "profile", "router.md");
+
+/** The largest `router.md`, in bytes as `wc -c` counts them: it rides in every conversation turn. */
+export const ROUTER_MAX_BYTES = 2_000;
 
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
@@ -77,4 +89,12 @@ export function readCycle(path: string): string {
  * not interpolate. */
 export function readDesk(path: string): string {
   return readContract(path, DESK_MAX_BYTES, "desk contract");
+}
+
+/** The conversation's contract, trimmed, refused as {@link readDesk} refuses - the absolute path
+ * first - when the file is missing, cannot be read, is empty, or is over {@link ROUTER_MAX_BYTES}.
+ * `path` defaults to {@link ROUTER_PATH}. Its `<REPO>` placeholder is left as written: the section
+ * fills it (plugins/gravit.js). */
+export function readRouter(path: string = ROUTER_PATH): string {
+  return readContract(path, ROUTER_MAX_BYTES, "router contract");
 }

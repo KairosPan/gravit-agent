@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
-import { CYCLE_SECTION, DESK_SECTION, LUNHUI_MODULE_SECTION, LUNHUI_RUN_SECTION, ROLES_SECTION, TODAY_SECTION, apply, canCall, inject, isRootOrFork, name, resolveZone, rolesText, todayText, validateGravitConfig } from "../plugins/gravit.js";
+import { CYCLE_SECTION, DESK_SECTION, LUNHUI_MODULE_SECTION, LUNHUI_RUN_SECTION, ROLES_SECTION, ROUTER_SECTION, TODAY_SECTION, apply, canCall, inject, isRootOrFork, name, resolveZone, rolesText, todayText, validateGravitConfig } from "../plugins/gravit.js";
 
 const dshSectionOrder = (slot: "DEPLOYMENT_PERSONA_PREFIX" | "DEPLOYMENT_PERSONA_SUFFIX" | "TOOL_SUBAGENT"): number => SystemPrompt.prototype.getSectionOrder(slot);
 
@@ -260,6 +260,44 @@ test("the desk section registers only with a desk key, after the persona, and is
     apply(other.ctx, config);
     assert.equal(other.sections.some((s) => s.name === DESK_SECTION), false, `no desk key, no desk section: ${JSON.stringify(config)}`);
   }
+});
+
+/* The conversation's contract (`dsh/profile/router.md`, src/router-preset.ts) takes the cycle's slot too, gated as
+ * the desk's is - by the header alone - and names the repository by a placeholder the row's `root` fills. */
+test("a router config mounts gravit:router, its <REPO> replaced by root, and neither gravit:cycle nor gravit:desk", () => {
+  const tree = fakeScope();
+  apply(tree.ctx, { router: { text: "Read <REPO>/strategies; the repo is <REPO>.", root: "/r" } });
+  assert.equal(ROUTER_SECTION, "gravit:router");
+  assert.deepEqual(tree.sections.map((s) => s.name).sort(), [TODAY_SECTION, ROUTER_SECTION].sort(), "the date and the router: no cycle, no desk");
+  const section = tree.sections.find((s) => s.name === ROUTER_SECTION)!;
+  assert.equal(section.order, dshSectionOrder("DEPLOYMENT_PERSONA_SUFFIX") - 50, "the cycle's slot");
+  assert.equal(section.interpolate, false);
+  const text = section.text as (c: unknown) => string;
+  const filled = "Read /r/strategies; the repo is /r.";
+  assert.equal(text({ agent: { session: { header: {} } } }), filled, "a root session, every <REPO> replaced");
+  assert.equal(text({ agent: { session: { header: { origin: "subagent", isSeeded: true } } } }), filled, "a fork child");
+  assert.equal(text({ agent: { session: { header: { origin: "subagent" } } } }), "", "a delegated child that is not a fork");
+  assert.equal(text({ scope: { visible: [] }, agent: { session: { header: {} } } }), filled, "no tool gate");
+  assert.equal(tree.lookups.length, 0);
+  tree.unload();
+  assert.equal(tree.sections.length, 0);
+  for (const config of [{}, { desk: "D" }, { cycle: "C" }]) {
+    const other = fakeScope();
+    apply(other.ctx, config);
+    assert.equal(other.sections.some((s) => s.name === ROUTER_SECTION), false, `no router key, no router section: ${JSON.stringify(config)}`);
+  }
+});
+
+test("router excludes cycle and desk", () => {
+  const router = { text: "T", root: "/r" };
+  assert.equal(validateGravitConfig({ router }), undefined);
+  for (const other of [{ cycle: "c" }, { desk: "d" }]) {
+    const problem = validateGravitConfig({ router, ...other });
+    assert.equal(typeof problem, "string", JSON.stringify(other));
+    assert.throws(() => apply(fakeScope().ctx, { router, ...other }), (e: Error) => e.message === `gravit: ${problem}`);
+  }
+  for (const bad of [null, "T", [], {}, { text: "T" }, { root: "/r" }, { text: "", root: "/r" }, { text: "T", root: "" }, { text: 3, root: "/r" }])
+    assert.equal(typeof validateGravitConfig({ router: bad }), "string", JSON.stringify(bad));
 });
 
 const PROTOCOL = { name: "lunhui:run", probe: "lunhui_read_run", text: "# 市场研究运行\n\n先冻结 {run}。" };

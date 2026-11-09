@@ -126,8 +126,9 @@ import { BOTS_ROOT, DEFAULT_PRESET, LEGACY_PRESET, SYSTEM_PROMPT_ROW_ID, faceOve
 import { declareBots, declarePreset, definitionFor, type BotPresets } from "./bot-presets.ts";
 import { GRAVIT_PLUGIN_URL, ROLE_PLUGIN_URL, ROLES_ROOT, gravitRows, readRoles, rolePresetDefinition, roleRosterProblem, type RoleFile } from "./roles.ts";
 import { PERSONA_PATH, readPersona } from "./persona.ts";
-import { CYCLE_PATH, DESK_PATH, readCycle, readDesk } from "./cycle.ts";
+import { CYCLE_PATH, DESK_PATH, readCycle, readDesk, readRouter, REPO_ROOT, ROUTER_PATH } from "./cycle.ts";
 import { declareDeskPreset, deskPresetDefinition, deskRosterProblem } from "./desk-preset.ts";
+import { routerPresetDefinition } from "./router-preset.ts";
 import { readProtocols } from "./protocols.ts";
 import { AGENT_INSTRUCTIONS_ROW_ID, instructionsPatch } from "./instructions.ts";
 import { accountSeatPatches } from "./account-seat.ts";
@@ -235,6 +236,10 @@ export interface FaceBootOptions {
    * plugin loads - and {@link bootFace} declares the `gravit-desk` preset from it
    * (src/desk-preset.ts). */
   deskPath?: string;
+  /** The conversation's contract (`dsh/profile/router.md`); tests point it at a fixture. Defaults to the
+   * repository's. {@link bootFace} reads it (src/cycle.ts `readRouter`, refused as the desk's is) and declares the
+   * `gravit-router` preset from it right after the desk's (src/router-preset.ts). */
+  routerPath?: string;
   /** The directory the run protocols are read from (`dsh/profile/`, src/protocols.ts); tests point
    * it at a fixture. Defaults to the repository's. {@link composeFace} reads them beside the cycle
    * and hands them to Gravit's default preset as the `gravit` row's `protocols`, refusing the
@@ -1080,6 +1085,9 @@ export async function bootFace(opts: FaceBootOptions): Promise<BootedFace> {
      * try's catch, and a preset that declares but mounts broken is refused by
      * the roster check below. Disposed with the root, as the bots are. */
     await declareDeskPreset(ctx, deskPresetDefinition({ desk }));
+    /* The conversation's preset (src/router-preset.ts), right after the desk's and for the same reason: its mask
+     * is plugins/bot.js, mounted eagerly. Its section names the repository by `<REPO>`, filled with REPO_ROOT. */
+    await declarePreset(ctx, routerPresetDefinition({ router: { text: readRouter(opts.routerPath ?? ROUTER_PATH), root: REPO_ROOT } }), "router preset");
     /* One preset per role (D20/B1; src/roles.ts `rolePresetDefinition`), declared right after the desk
      * and for the same reason: each is plugins/bot.js carrying the role's persona and mask, mounted
      * eagerly at the declaration, so it must find the settled tree - a name the tree lacks is dropped

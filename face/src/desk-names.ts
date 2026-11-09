@@ -14,6 +14,11 @@
  * cycle can read it before it is set (tests/bots.test.ts refuses it as a bot id). */
 export const DESK_PRESET = "gravit-desk";
 
+/** The conversation's preset id (src/router-preset.ts): Gravit's one router conversation, which answers or starts
+ * a task and runs no shell. Here beside {@link DESK_PRESET} because the desk guard (src/desk-tools.ts
+ * `installDeskGuard`) judges both presets' agents, and that module loads this leaf alone. */
+export const CONVERSATION_PRESET = "gravit-router";
+
 /** The names that steer a desk session from inside its own tree: the workspace instruction files the
  * face's agent-instructions row reads, dsh's project-root marker, and the two project skill roots. */
 export const FENCE_NAMES = ["GRAVIT.md", "GRAVIT.local.md", ".git", ".dsh", ".agents"] as const;
