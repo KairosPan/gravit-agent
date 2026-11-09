@@ -80,6 +80,12 @@ function actionsRig(answers = {}, convs = [conv('s1')]) {
   return { store, actions, line: () => store.get().status.line };
 }
 
+test('the tasks lines, each in its words', () => {
+  follows(said('tasks.stop.gone'), 'That task has already ended');
+  follows(said('tasks.stop.failed'), 'Could not stop the task');
+  follows(said('tasks.resume.failed'), 'Could not continue the task');
+});
+
 test('the boot line, and a failure line: its verb, then the code, the HTTP status or the message; a 401 as notSignedIn', () => {
   follows(emptyState().status.line, 'connecting…');
   follows(notSignedIn(), 'Not signed in — open the URL gravit-face printed');

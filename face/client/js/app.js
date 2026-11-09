@@ -26,6 +26,7 @@ import { startDesk } from './host/desk.js';
 import { startAccount } from './host/account.js';
 import { startSeat } from './host/seat.js';
 import { startChannels } from './host/channels.js';
+import { startTasks } from './host/tasks.js';
 import { renderChannelScreen } from './render/channel.js';
 import { startDiscover } from './host/discover.js';
 import { renderDiscover, renderPlugin } from './render/discover.js';
@@ -481,6 +482,8 @@ export function boot(win, host = {}) {
   const trade = startTrade({ store, getJson, owner, sheet, stream, schedule, cancelTimer, now, afterAction });
   // a channel's page: its overview read on entering it
   const channels = startChannels({ store, postJson, getJson, refresh: () => live.refresh(), now });
+  // the conversation's tasks: read at once, after each list refresh and on the poll
+  const tasks = host.tasks ?? startTasks({ store, getJson, postJson, timers, now });
   // Discover: the face's inventory, read on entering it; a page's own reads (the Gravit item, a skill) on opening it
   const discover = startDiscover({ store, getJson, postJson, call, now });
   // a Lunhui module's page: its latest artifact, through the overview of the run's channel the modules listing names
@@ -2418,6 +2421,7 @@ export function boot(win, host = {}) {
     sheetKind = s.sheet?.kind ?? null;
     if (type === 'ownerStanding' || otherClosed) schedule(resumeTicket, 0);
     if (type !== 'hostList') return;
+    void tasks.refresh();
     // the list answered a deep link, or there was no conversation on screen: open one
     if (wanted && s.conversations.some(c => c.id === wanted)) { const id = wanted; wanted = null; go({ screen: 'messages', id }); }
     // the conversation on screen left the list (deleted here or in another tab)
@@ -2433,7 +2437,7 @@ export function boot(win, host = {}) {
   follow();
   render();
   // reword is the Language switch's (plan 7 Task 9 calls act.reword after setTable); on the store for the tests that drive it
-  return Object.assign(store, { timers, live, reword: act.reword, actions, markets, channels, discover, owner, sheet, trade, walletSend, sellMany, identity });
+  return Object.assign(store, { timers, live, reword: act.reword, actions, markets, channels, tasks, discover, owner, sheet, trade, walletSend, sellMany, identity });
 }
 
 if (typeof window !== 'undefined' && window.document) boot(window);

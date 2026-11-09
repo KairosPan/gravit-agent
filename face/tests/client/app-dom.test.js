@@ -1,4 +1,5 @@
 // boot() against a fake window and a fake host: what the person sees after the list lands, opening, sending, answering.
+import { TASKS_POLL_MS } from '../../client/js/host/tasks.js';
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -1196,7 +1197,7 @@ test('the Account page is read every 20 s while Account is on screen in a visibl
   const f = fakeWindow({ hash: '#/account/venues', storage: memoryStorage() });
   const h = accountHost({ rows: [row('s1')] });
   const st = fakeStream();
-  const timers = new HeldTimers();
+  const timers = new HeldTimers(ms => ms >= 5_000 && ms !== TASKS_POLL_MS);
   const store = bootAccount(f, h, fakeMarkets(), { createAccountStream: st.create, timers });
   await h.ready();
   assert.deepEqual(timers.delays(), [20_000], 'on screen, the stream connecting: every 20 s');
