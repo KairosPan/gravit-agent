@@ -32,7 +32,7 @@ A strategy directory carries:
 
 Git log is the audit trail of those decisions. Iterations between cycles are committed as they are made. A cycle commits once, with its verdict, or the operator makes that commit. That record is not a memory module.
 
-On 2026-10-24 the operator removed the point-in-time beds, the replay channel, and the lookahead guard (`DEVELOPMENT.md` §2). Evidence is a forward paper trade placed after the thesis and its falsification terms are written, with fills and the statement recorded by the Account as time passes.
+On 2026-10-24 the operator removed the point-in-time beds, the replay channel, and the lookahead guard. Evidence is a forward paper trade placed after the thesis and its falsification terms are written, with fills and the statement recorded by the Account as time passes.
 
 The desk is the face's always-on side.
 
@@ -89,9 +89,9 @@ cd account && npm ci && npm run account   # 127.0.0.1:4820
 | `bots/` | operator-authored bot voices |
 | `roles/` | one-shot roles Gravit can call |
 | `dsh/` | the harness profile template, the research-cycle contract, and the skill packs |
-| `docs/` | specs, plans, runbooks, and frozen research inputs |
+| `docs/` | frozen research inputs, the face's design prototypes, and the dsh upgrade guide |
 
-Depth lives in `Gravit-Design.md` (intent), `DEVELOPMENT.md` (mechanism), and `face/README.md` (the face's contracts). On a question of mechanism, the code is the fact.
+The project's design documents (the charter, the as-built reference, the roadmap, and the specs and plans) are kept private and are not part of this repository. Here, depth lives in `face/README.md` (the face's contracts) and the code's docstrings. On a question of mechanism, the code is the fact.
 
 ## License
 
