@@ -2,9 +2,11 @@
  * until an update is pushed or its timeout passes) and `sendMessage`, each answered as the Bot API answers ({ok, result} or {ok: false,
  * error_code, description}); any other token is answered 401 Unauthorized, as Telegram answers a token it does not know. No test ever
  * reaches api.telegram.org: every token in the tests is made up, shaped like BotFather's. */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
+import { PhotonError } from "../src/portfolio/identity/photon-link.ts";
+import type { PhotonEvent, PhotonLink, PhotonProject, PhotonStreamHandlers, PhotonUser } from "../src/portfolio/identity/photon-link.ts";
 
 /** the token the fake knows: digits, a colon, then letters — the shape BotFather gives, made up for the tests */
 export const FAKE_BOT_TOKEN = "7770001112:AAFakeTokenForTestsOnly_qzxwvkpmjhgfdsa";
@@ -460,9 +462,6 @@ export async function fakeSlack(o: FakeSlackOptions = {}): Promise<FakeSlack> {
 }
 
 // ---- a fake Photon link, in memory: the seam the iMessage connector is tested through ----
-import { randomUUID } from "node:crypto";
-import { PhotonError } from "../src/portfolio/identity/photon-link.ts";
-import type { PhotonEvent, PhotonLink, PhotonProject, PhotonStreamHandlers, PhotonUser } from "../src/portfolio/identity/photon-link.ts";
 
 export interface FakePhoton extends PhotonLink {
   /** every call, as "<method>" or "<method>:<arg>" */
@@ -483,7 +482,9 @@ export function fakePhotonLink(o: { project?: PhotonProject; users?: PhotonUser[
   const project = o.project ?? { projectId: "prj_1", secret: "photon-secret-for-tests" };
   const users = [...(o.users ?? [])];
   let seq = 0;
+  const opened = new Set<PhotonStreamHandlers>();
   let open: PhotonStreamHandlers | undefined;
+  let tail: Promise<void> = Promise.resolve();
   let since: number | undefined;
   let sendFailure: PhotonError | undefined;
   let duplicate = false;
@@ -526,11 +527,13 @@ export function fakePhotonLink(o: { project?: PhotonProject; users?: PhotonUser[
     stream(p, s, h) {
       enter("stream", p);
       open = h;
+      opened.add(h);
       since = s;
       return {
         async close() {
           calls.push("stream.close");
-          if (open === h) open = undefined;
+          opened.delete(h);
+          if (open === h) open = [...opened].pop();
         },
       };
     },
@@ -550,9 +553,14 @@ export function fakePhotonLink(o: { project?: PhotonProject; users?: PhotonUser[
     },
     async dispose() {
       calls.push("dispose");
+      opened.clear();
       open = undefined;
     },
-    push: (e) => stream().event(e),
+    push: (e) => {
+      const h = stream();
+      tail = tail.then(() => h.event(e));
+      return tail;
+    },
     beat: (at = Date.now()) => stream().heartbeat(at),
     gap: () => stream().gap(),
     fail: (err) => stream().failed(err),
@@ -562,7 +570,7 @@ export function fakePhotonLink(o: { project?: PhotonProject; users?: PhotonUser[
     duplicateNextSend: () => {
       duplicate = true;
     },
-    openStreams: () => (open ? 1 : 0),
+    openStreams: () => opened.size,
     lastSince: () => since,
   };
 }

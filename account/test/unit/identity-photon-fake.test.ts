@@ -42,6 +42,41 @@ describe("the Photon fake", () => {
     expect(order).toEqual(["start:1", "end:1", "start:2", "end:2"]);
   });
 
+  it("unawaited pushes still run one handler at a time", async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    fake.stream(p, undefined, {
+      async event(e) {
+        const n = (e as { sequence: number }).sequence;
+        order.push(`start:${n}`);
+        if (n === 1) await held;
+        order.push(`end:${n}`);
+      },
+      heartbeat: () => {},
+      gap: () => {},
+      failed: () => {},
+    });
+    const a = fake.push(ev(1));
+    const b = fake.push(ev(2));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(order).toEqual(["start:1"]);
+    release();
+    await Promise.all([a, b]);
+    expect(order).toEqual(["start:1", "end:1", "start:2", "end:2"]);
+  });
+
+  it("openStreams counts every stream not yet closed", async () => {
+    const h = { event: async () => {}, heartbeat: () => {}, gap: () => {}, failed: () => {} };
+    const s1 = fake.stream(p, undefined, h);
+    const s2 = fake.stream(p, undefined, { ...h });
+    expect(fake.openStreams()).toBe(2);
+    await s2.close();
+    expect(fake.openStreams()).toBe(1);
+    await s1.close();
+    expect(fake.openStreams()).toBe(0);
+  });
+
   it("beat, gap and fail reach the open stream; close drops it", async () => {
     const seen: string[] = [];
     const s = fake.stream(p, undefined, {
