@@ -386,6 +386,16 @@ test("writeOff, readOffState and clearOff round-trip with ledger events", async 
   assert.deepEqual((await readEvents(h)).events.map((e) => e.kind), ["off-set", "off-cleared"]);
 });
 
+test("a pause and a mute set from iMessage are by imessage, read back as written", async () => {
+  const h = await home(); const now = () => Date.parse("2026-10-20T18:00:00Z");
+  const off = await writeOff(h, { by: "imessage", until: now() + 7_200_000 }, now);
+  assert.equal(off.by, "imessage");
+  assert.deepEqual(await readOffState(h, now), { state: off, expired: false }, "imessage is one of OFF's setters");
+  const mute = await writeMute(h, { by: "imessage", until: now() + 3_600_000 }, now);
+  assert.equal(mute.by, "imessage");
+  assert.deepEqual((await readEvents(h)).events.map((e) => [e.kind, (e as { by?: unknown }).by]), [["off-set", "imessage"], ["mute-set", "imessage"]]);
+});
+
 test("a pause and a mute set from Slack are by slack, read back as written", async () => {
   const h = await home(); const now = () => Date.parse("2026-10-20T18:00:00Z");
   const off = await writeOff(h, { by: "slack", until: now() + 7_200_000 }, now);

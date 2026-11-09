@@ -278,6 +278,7 @@ const PHONE = { kind: "telegram", from: 42, chat: 42, messageId: 7 };
 /** A phone text as this face's bridge records it (plan B2): the network it came through, and its id there. */
 const PHONE_TG = { kind: "telegram", network: "telegram", messageId: "telegram:7" };
 const PHONE_SLACK = { kind: "telegram", network: "slack", messageId: "slack:1730812345.001200" };
+const PHONE_IMESSAGE = { kind: "telegram", network: "imessage", messageId: "imessage:0A1B2C3D-0000-4000-8000-0123456789ab" };
 const say = (text: string): { type: "text"; text: string }[] => [{ type: "text", text }];
 let ids = 0;
 /** A user message as the loop logs it on `user/message`. */
@@ -684,6 +685,16 @@ test("a Slack text's answer goes back to Slack, a Telegram text's to Telegram", 
     ["an older record", { kind: "chat" }],
     ["an unknown network", { kind: "chat" }],
   ]);
+});
+
+test("a reply to an iMessage text goes back to iMessage", async () => {
+  const h = await harness();
+  const asked: unknown[] = [];
+  h.desk.setOutlet({ send: (text, opts) => { asked.push([text, opts]); return Promise.resolve({ sent: [`x:${asked.length}`] }); } });
+  const { sessionId } = (await post(h, "hi")) as { sessionId: string };
+  turn(h, sessionId, 1, PHONE_IMESSAGE, "to imessage");
+  await waitFor("one delivery", () => asked.length === 1);
+  assert.deepEqual(asked, [["to imessage", { kind: "chat", network: "imessage" }]]);
 });
 
 test("a held send is recorded undelivered with the account's reason", async () => {

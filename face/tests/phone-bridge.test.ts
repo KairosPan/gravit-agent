@@ -649,6 +649,25 @@ test("/pause from Slack writes OFF by slack; /mute from Slack writes MUTE by sla
   }
 });
 
+test("/pause from iMessage writes OFF by imessage; /mute from iMessage writes MUTE by imessage", async () => {
+  const r = await rig("imessage-pause");
+  try {
+    await polled(r, 1);
+    const guid = (n: number): string => `imessage:0A1B2C3D-0000-4000-8000-0123456789a${n}`;
+    r.account.push({ network: "imessage", messageId: guid(1), text: "/pause 2h", at: AT });
+    await polled(r, 2);
+    assert.deepEqual(JSON.parse(await fileText(r.home, OFF_FILE)), { setAt: "2026-10-20T18:30:00.000Z", by: "imessage", until: "2026-10-20T20:30:00.000Z" });
+    r.account.push({ network: "imessage", messageId: guid(2), text: "/mute 2h", at: AT });
+    await polled(r, 3);
+    assert.deepEqual(JSON.parse(await fileText(r.home, MUTE_FILE)), { setAt: "2026-10-20T18:30:00.000Z", by: "imessage", until: "2026-10-20T20:30:00.000Z" });
+    const events = (await readEvents(r.home)).events;
+    assert.deepEqual(events.map((e) => [e.kind, (e as { by?: unknown }).by]), [["off-set", "imessage"], ["mute-set", "imessage"]]);
+    assert.ok(r.account.sends.every((s) => s.network === "imessage"));
+  } finally {
+    await r.bridge.dispose();
+  }
+});
+
 test("the wire id is the account's rule: face/src/phone.ts and the account's kinds.ts carry the same text", async () => {
   const rule = (path: string): string => {
     const m = /const WIRE_ID = (\/.*\/);/.exec(readFileSync(path, "utf8"));
@@ -656,9 +675,9 @@ test("the wire id is the account's rule: face/src/phone.ts and the account's kin
     return m[1];
   };
   assert.equal(rule(join(HERE, "../src/phone.ts")), rule(join(HERE, "../../account/src/portfolio/identity/kinds.ts")));
-  assert.equal(WIRE_ID.source, "^(?:telegram:\\d{1,16}|slack:\\d{9,12}\\.\\d{6})$");
-  for (const good of ["telegram:4821", "slack:1730812345.001200"]) assert.ok(WIRE_ID.test(good), good);
-  for (const bad of ["slack:4821", "slack:1730812345.0012", "slack:C0DM:1730812345.001200", "matrix:1", "telegram:1.000001"]) assert.ok(!WIRE_ID.test(bad), bad);
+  assert.equal(WIRE_ID.source, "^(?:telegram:\\d{1,16}|slack:\\d{9,12}\\.\\d{6}|imessage:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$");
+  for (const good of ["telegram:4821", "slack:1730812345.001200", "imessage:0A1B2C3D-0000-4000-8000-0123456789ab"]) assert.ok(WIRE_ID.test(good), good);
+  for (const bad of ["slack:4821", "slack:1730812345.0012", "slack:C0DM:1730812345.001200", "matrix:1", "telegram:1.000001", "imessage:42", "imessage:0A1B2C3D-0000-4000-8000-0123456789a"]) assert.ok(!WIRE_ID.test(bad), bad);
   /* an inbox message with an id of neither network is left out */
   const r = await rig("wire-id");
   try {

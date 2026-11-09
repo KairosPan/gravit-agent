@@ -69,13 +69,13 @@ export const INBOX_SLACK_MS = 10_000;
 const isRecord = (x: unknown): x is Record<string, unknown> => x !== null && typeof x === "object" && !Array.isArray(x);
 const optString = (x: unknown): boolean => x === undefined || typeof x === "string";
 /** The networks a phone message comes through (the account's `NETWORKS`). */
-export const PHONE_NETWORKS: readonly string[] = ["telegram", "slack"];
+export const PHONE_NETWORKS: readonly string[] = ["telegram", "slack", "imessage"];
 /** Whether `x` names one of {@link PHONE_NETWORKS}. */
 export const isPhoneNetwork = (x: unknown): x is string => typeof x === "string" && PHONE_NETWORKS.includes(x);
-/** A message's id on the wire: Telegram's message_id, Slack's `ts`. The account's rule (account/src/portfolio/identity/kinds.ts
+/** A message's id on the wire: Telegram's message_id, Slack's `ts`, iMessage's chat GUID. The account's rule (account/src/portfolio/identity/kinds.ts
  * `WIRE_ID`), redeclared here byte for byte - the face does not import the account's package - and tied to it by
  * tests/phone-bridge.test.ts. */
-export const WIRE_ID = /^(?:telegram:\d{1,16}|slack:\d{9,12}\.\d{6})$/;
+export const WIRE_ID = /^(?:telegram:\d{1,16}|slack:\d{9,12}\.\d{6}|imessage:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$/;
 
 /** A failure as one line: its message, and the code it or its cause carries when the message does not say it. */
 function reasonOf(err: unknown): string {

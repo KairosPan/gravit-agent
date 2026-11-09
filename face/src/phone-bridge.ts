@@ -95,10 +95,10 @@ const defaultClock: DeskClock = {
 export const deliveryKey = (m: Pick<InboxMessage, "id" | "messageId" | "at">): string => `${m.messageId}#${m.id}@${m.at}`;
 
 /** Who a phone command's pause or mute is by: the network it came through (src/desk.ts `OffState`, `MuteState`). */
-type PhoneSetter = "telegram" | "slack";
-/** `network` as a setter: `slack` for Slack, `telegram` for anything else - the inbox admits only the two
+type PhoneSetter = "telegram" | "slack" | "imessage";
+/** `network` as a setter: the network itself when it is one of the three, `telegram` for anything else - the inbox admits only those
  * (src/phone.ts `WIRE_ID`). */
-const setterOf = (network: string): PhoneSetter => (network === "slack" ? "slack" : "telegram");
+const setterOf = (network: string): PhoneSetter => (network === "slack" || network === "imessage" ? network : "telegram");
 
 /** A command the bridge answers itself, and what followed it. */
 export type Command = { cmd: "status" | "pause" | "mute" | "new" | "stop"; arg?: string };
