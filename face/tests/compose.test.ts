@@ -62,8 +62,12 @@ test("compose.yml runs the face, the account and the market as three boxes, the 
   for (const name of ["face", "strategies", "bots", "roles"]) {
     assert.ok(agentMounts.includes(`./${name}:\${PWD}/${name}`), `${name} read-write`);
   }
-  for (const name of ["account", "market", "dsh", "docs", "GRAVIT.md", "CLAUDE.md", "AGENTS.md", "Gravit-Design.md", "DEVELOPMENT.md", "ROADMAP.md"]) {
+  for (const name of ["account", "market", "dsh", "docs", "GRAVIT.md", "CLAUDE.md", "AGENTS.md"]) {
     assert.ok(agentMounts.includes(`./${name}:\${PWD}/${name}:ro`), `${name} read-only`);
+  }
+  // The root's design documents are gitignored (2026-11-09): a clone has none, so the box mounts none.
+  for (const name of ["Gravit-Design.md", "DEVELOPMENT.md", "ROADMAP.md", "Gravit-Docs-and-Prompt-Loops.html"]) {
+    assert.ok(agentMounts.every(v => !v.startsWith(`./${name}:`)), `${name} not mounted`);
   }
   const accountBind = agentMounts.filter(v => v.startsWith("./account:"));
   assert.deepEqual(accountBind, ["./account:${PWD}/account:ro"]);

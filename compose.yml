@@ -63,9 +63,9 @@ services:
     build: ./face
     working_dir: ${PWD}/face
     # An allowlist of the tree, never the root: the root holds .env* files (a venue's keys among
-    # them) and GRAVIT.local.md, none of which enter this box. account/ and market/ are read-only
-    # (the boxes' build contexts, the seat's and the mcp-market row's code); their node_modules
-    # are the volumes below.
+    # them), GRAVIT.local.md and the gitignored design documents, none of which enter this box.
+    # account/ and market/ are read-only (the boxes' build contexts, the seat's and the mcp-market
+    # row's code); their node_modules are the volumes below.
     volumes:
       - ./face:${PWD}/face
       - ./strategies:${PWD}/strategies
@@ -78,9 +78,6 @@ services:
       - ./GRAVIT.md:${PWD}/GRAVIT.md:ro
       - ./CLAUDE.md:${PWD}/CLAUDE.md:ro
       - ./AGENTS.md:${PWD}/AGENTS.md:ro
-      - ./Gravit-Design.md:${PWD}/Gravit-Design.md:ro
-      - ./DEVELOPMENT.md:${PWD}/DEVELOPMENT.md:ro
-      - ./ROADMAP.md:${PWD}/ROADMAP.md:ro
       - dsh-home:/dsh-home
       - seat-home:/seat-home
       # Linux node_modules over the host's macOS ones; the entrypoint runs npm ci when empty.
