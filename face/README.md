@@ -6459,7 +6459,8 @@ line token.
 7. **The compose box.** With the host's account stopped, `docker compose up` and connect iMessage
    from the boxed face. PASS: the same four sheets work and the answers come.
 8. **The watchdog.** With only iMessage connected, stop the account for ten minutes or more. PASS:
-   no account-is-down line arrives on iMessage: the watchdog phones Telegram or Slack alone.
+   nothing arrives on iMessage, and nothing goes anywhere else either: the watchdog phones
+   Telegram or Slack alone, so with neither connected it has no line to send.
 9. **Disconnect… iMessage** and sign. PASS: the number stops answering;
    `credentials/networks/imessage.json` and `identity/imessage.cursor` are gone. Your Photon
    registration stays; delete the project at Photon to retire it.
