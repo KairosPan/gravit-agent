@@ -5,11 +5,11 @@
  * kind (an entry without one reads as `chat`), its text (the account's tokens already taken out) and the message it answers, as
  * `<network>:<id>`. At flush, an entry quiet hours would hold now is dropped (a held message is never sent later, whenever it was queued),
  * and so is one older than OUTBOX_MAX_AGE_MS (12 hours: past that an alert, a brief or a reply is stale), each with one line. At most `max` (100) are kept; one more drops the
- * oldest, with one line. Identity (identity.ts) flushes it, in order, before each poll and before each send, so what waits there always
- * goes first; a message it sends more than two minutes after it was written opens with `(written <time>, sent late)`. A message a network
+ * oldest, with one line. Identity (identity.ts) flushes it, in order, before each poll and before each send, so what waits for a network
+ * always goes before that network's next message — a network that answers "later" holds up only its own rows, never another's; a message it sends more than two minutes after it was written opens with `(written <time>, sent late)`. A message a network
  * refuses outright (Telegram's 400, or 403 for a bot the operator blocked) is dropped with one line, so it cannot hold up the rest.
  * iMessage's rows are written here before they go (written ahead), with an `id`, their `parts` cut once and the number `next` of the first
- * part still to go: `advanceHead` takes a part off as it goes, and the row leaves when none is left. A row whose three do not read whole is
+ * part still to go: `advanceAt` takes a part off as it goes, and the row leaves when none is left. A row whose three do not read whole is
  * not a message.
  *
  * The file is written whole at each change (store.ts writeIdentityFile: 0600 in a 0700 folder, no link on the way); a write that fails is
@@ -101,9 +101,15 @@ export class Outbox {
     return this.list.map(copyOf);
   }
 
-  head(): OutboxEntry | undefined {
-    const h = this.list[0];
-    return h ? copyOf(h) : undefined;
+  /** the row at `i` (a copy), or undefined past the end */
+  at(i: number): OutboxEntry | undefined {
+    const e = this.list[i];
+    return e ? copyOf(e) : undefined;
+  }
+
+  /** whether a row for `network` waits */
+  holds(network: Network): boolean {
+    return this.list.some((e) => e.network === network);
   }
 
   /** queued at the end; past `max` the oldest is dropped, with one line */
@@ -116,26 +122,28 @@ export class Outbox {
     this.persist();
   }
 
-  /** the head gone: sent, or refused */
-  shift(): void {
-    if (this.list.shift()) this.persist();
-  }
-
-  /** the head cut to what did not go (it no longer answers anything: its first part did) */
-  cutHead(rest: string): void {
-    const h = this.list[0];
-    if (!h) return;
-    this.list[0] = { t: h.t, network: h.network, ...(h.kind ? { kind: h.kind } : {}), text: rest };
+  /** the row at `i` gone: sent, or refused */
+  removeAt(i: number): void {
+    if (i < 0 || i >= this.list.length) return;
+    this.list.splice(i, 1);
     this.persist();
   }
 
-  /** the head's first remaining part gone (a written-ahead row's: identity.ts flush), the row shifted out once no part is left */
-  advanceHead(): void {
-    const h = this.list[0];
+  /** the row at `i` cut to what did not go (it no longer answers anything: its first part did) */
+  cutAt(i: number, rest: string): void {
+    const h = this.list[i];
+    if (!h) return;
+    this.list[i] = { t: h.t, network: h.network, ...(h.kind ? { kind: h.kind } : {}), text: rest };
+    this.persist();
+  }
+
+  /** the first remaining part of the row at `i` gone (a written-ahead row's: identity.ts flush), the row taken out once no part is left */
+  advanceAt(i: number): void {
+    const h = this.list[i];
     if (!h?.parts) return;
     const parts = h.parts.slice(1);
-    if (parts.length === 0) this.list.shift();
-    else this.list[0] = { ...h, parts, next: (h.next ?? 0) + 1 };
+    if (parts.length === 0) this.list.splice(i, 1);
+    else this.list[i] = { ...h, parts, next: (h.next ?? 0) + 1 };
     this.persist();
   }
 

@@ -250,6 +250,113 @@ describe("sending on iMessage", () => {
   });
 });
 
+describe("a stalled network holds up only its own rows", () => {
+  let home: string;
+  let fake: FakePhoton;
+  let clock: ReturnType<typeof heldClock>;
+  let lines: string[];
+  let tgSent: string[];
+  let tgFailNext: number;
+  const made: Identity[] = [];
+  const T = new Date(START).toISOString();
+  const tgRow = (text: string) => ({ t: T, network: "telegram", kind: "alert", text });
+  let rowN = 0;
+  const imRow = (text: string) => ({ t: T, network: "imessage", kind: "alert", text, id: `00000000000000${String(++rowN).padStart(2, "0")}`, parts: [text], next: 0 });
+
+  const make = (): Identity => {
+    const i = new Identity({ home, apiBase: "http://127.0.0.1:9", photon: fake, clock, now: clock.now, log: (l) => lines.push(l) });
+    made.push(i);
+    const fakeTelegram: Transport = {
+      network: "telegram",
+      secrets: [],
+      partMax: 4_096,
+      send: async (text) => {
+        if (tgFailNext > 0) {
+          tgFailNext -= 1;
+          throw new Error("Telegram asks to wait");
+        }
+        tgSent.push(text);
+        return `telegram:${40 + tgSent.length}`;
+      },
+      classify: () => "retry",
+      dispose: () => {},
+    };
+    (i as unknown as { transports: Map<string, Transport> }).transports.set("telegram", fakeTelegram);
+    return i;
+  };
+  /** Photon answers retry to every send */
+  const photonStalls = () => {
+    fake.sendText = async () => {
+      throw new PhotonError("retry", "serviceUnavailable", "Photon asks to try again later (serviceUnavailable)");
+    };
+  };
+  const flushNow = async (i: Identity) => {
+    await (i as unknown as { outbound<T>(t: () => Promise<T>): Promise<T>; flush(): Promise<void> }).outbound(() => (i as unknown as { flush(): Promise<void> }).flush());
+  };
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "imessage-stall-"));
+    fake = fakePhotonLink({ project: PROJECT, users: [USER] });
+    clock = heldClock();
+    lines = [];
+    tgSent = [];
+    tgFailNext = 0;
+    const routing = emptyRouting();
+    routing.alerts = ["imessage", "telegram"];
+    saveIdentity(home, { bindings: [BINDING, TELEGRAM], routing, quiet: null, blocked: [] });
+    expect(writeNetworkSecret(home, "imessage", SECRET)).toMatchObject({ ok: true });
+  });
+  afterEach(async () => {
+    for (const i of made.splice(0)) await i.dispose();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it("an iMessage row in retry at the head does not hold a Telegram send: it goes straight out", async () => {
+    const identity = make();
+    await settle();
+    photonStalls();
+    expect(await identity.send({ kind: "alert", text: "first" })).toEqual({ ok: true, sent: ["telegram:41"], queued: true });
+    expect(await identity.send({ kind: "chat", network: "telegram", text: "second" })).toEqual({ ok: true, sent: ["telegram:42"] });
+    expect(tgSent).toEqual(["first", "second"]);
+    expect(readOutbox(home).map((e) => [e.network, e.text])).toEqual([["imessage", "first"]]);
+  });
+
+  it("a queued Telegram row behind a stalled iMessage row is sent at the next flush", async () => {
+    writeFileSync(join(identityDir(home), "outbox.json"), JSON.stringify([imRow("im"), tgRow("tg")]));
+    const identity = make();
+    photonStalls();
+    await flushNow(identity);
+    expect(tgSent).toEqual(["tg"]);
+    expect(readOutbox(home).map((e) => e.text)).toEqual(["im"]);
+  });
+
+  it("each network's own rows stay in order, whichever stalls", async () => {
+    writeFileSync(join(identityDir(home), "outbox.json"), JSON.stringify([imRow("im1"), tgRow("tg1"), imRow("im2"), tgRow("tg2")]));
+    const identity = make();
+    fake.failNextSend(new PhotonError("retry", "serviceUnavailable", "later"));
+    await flushNow(identity);
+    // im1 stalled: im2 waits behind it, Telegram's two go in their order
+    expect(fake.sent).toEqual([]);
+    expect(tgSent).toEqual(["tg1", "tg2"]);
+    expect(readOutbox(home).map((e) => e.text)).toEqual(["im1", "im2"]);
+    await flushNow(identity);
+    expect(fake.sent.map((x) => x.text)).toEqual(["im1", "im2"]);
+    expect(readOutbox(home)).toEqual([]);
+  });
+
+  it("a stalled Telegram row holds Telegram's later row, not iMessage's", async () => {
+    writeFileSync(join(identityDir(home), "outbox.json"), JSON.stringify([tgRow("tg1"), imRow("im1"), tgRow("tg2")]));
+    const identity = make();
+    tgFailNext = 1;
+    await flushNow(identity);
+    expect(tgSent).toEqual([]);
+    expect(fake.sent.map((x) => x.text)).toEqual(["im1"]);
+    expect(readOutbox(home).map((e) => e.text)).toEqual(["tg1", "tg2"]);
+    await flushNow(identity);
+    expect(tgSent).toEqual(["tg1", "tg2"]);
+  });
+});
+
 describe("the iMessage transport", () => {
   it("refuses a part with no id, and classifies Photon's failures", async () => {
     const fake = fakePhotonLink({ project: PROJECT, users: [USER] });

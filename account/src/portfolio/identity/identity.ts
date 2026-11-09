@@ -27,7 +27,8 @@
  * then every Slack token's shape (`<token>`), and every link to this machine (the face's own address among them) made `<local link>`, before
  * it is cut into parts. What a network cannot take waits in the outbox (outbox.ts), flushed in order before each poll and each send — and,
  * for Slack and iMessage, which have no poll, again SLACK_FLUSH_MS (or the network's Retry-After) after it could not take one, and at once
- * at boot or a connect when their rows wait. An iMessage send is written to the outbox before it goes, cut into parts once, each part sent
+ * at boot or a connect when their rows wait. A network that answers "later" holds up only its own rows: the flush passes over them and
+ * goes on with the others', and a send waits only behind its own network's earlier row. An iMessage send is written to the outbox before it goes, cut into parts once, each part sent
  * under its own id (`<row id>:<n>`, Photon's clientMessageId) and taken off the row as it goes, so a restart sends only what is left under
  * the same ids (deliverRow); Telegram's and Slack's go straight out and are written only when they cannot. What a network refuses outright is
  * dropped with one line — a 403 makes Telegram's status read `blocked` until a line goes, and tokens a network no longer takes its
@@ -277,7 +278,9 @@ export class Identity {
     if (body.trim() === "") return { ok: true, sent: [] };
     return this.outbound(async (): Promise<SendAnswer> => {
       const t = new Date(this.now()).toISOString();
-      if (this.outbox.length > 0) await this.flush();
+      // the networks that answered "later" in this send: what waits for them stays, and their later rows wait behind it
+      const stalled = new Set<Network>();
+      if (this.outbox.length > 0) await this.flush(undefined, stalled);
       const sent: string[] = [];
       let queued = false;
       let refused: { network: Network; message: string } | undefined;
@@ -286,23 +289,24 @@ export class Identity {
         if (!transport) continue;
         const replyTo = m.replyTo !== undefined && m.replyTo.startsWith(`${network}:`) ? m.replyTo : undefined;
         if (network === "imessage") {
-          // written ahead, cut once: in outbox.json before Photon is called, each part under its own id
-          const ahead = this.outbox.length;
+          // written ahead, cut once: in outbox.json before Photon is called, each part under its own id; behind an earlier iMessage row it waits
+          const ahead = this.outbox.holds(network);
           const id = rowId();
           const parts = splitMessage(body, transport.partMax).filter((p) => p.trim() !== "");
           this.outbox.push({ t, network, kind: m.kind, text: body, ...(replyTo ? { replyTo } : {}), id, parts, next: 0 });
-          if (this.disposed || ahead > 0) {
+          if (this.disposed || ahead) {
             queued = true;
             continue;
           }
           const watch: RowWatch = { id, ids: [] };
-          await this.flush(watch);
+          await this.flush(watch, stalled);
           sent.push(...watch.ids);
           if (watch.refused !== undefined) refused = { network, message: watch.refused };
           else if (this.outbox.entries().some((e) => e.id === id)) queued = true;
           continue;
         }
-        if (this.disposed || this.outbox.length > 0) {
+        // only a row of its own network's holds it: another network's waiting row does not
+        if (this.disposed || this.outbox.holds(network)) {
           this.outbox.push({ t, network, kind: m.kind, text: body, ...(replyTo ? { replyTo } : {}) });
           queued = true;
           continue;
@@ -544,12 +548,12 @@ export class Identity {
     return ids;
   }
 
-  /** A written-ahead row's remaining parts (the head's: iMessage's), each under its own id `<row id>:<number>` and taken off the row as it
-   * goes (Outbox.advanceHead), so a restart sends only what is left, under the same ids — the row is never cut again. A row sent late opens
+  /** A written-ahead row's remaining parts (the row at `index`: iMessage's), each under its own id `<row id>:<number>` and taken off the row
+   * as it goes (Outbox.advanceAt), so a restart sends only what is left, under the same ids — the row is never cut again. A row sent late opens
    * with the late line, in front of its first part when the two fit in `partMax`, else alone first as `<row id>:late`. The wire ids of the
    * parts sent are added to `ids` ("" — a part the network already had — counts as sent and adds none); a SendFailure at the first that
    * did not go, the row left with that part and the rest */
-  private async deliverRow(head: OutboxEntry, transport: Transport, ids: string[]): Promise<void> {
+  private async deliverRow(index: number, head: OutboxEntry, transport: Transport, ids: string[]): Promise<void> {
     const network = head.network;
     const first = head.next ?? 0;
     const parts = [...(head.parts ?? [])];
@@ -569,7 +573,7 @@ export class Identity {
       }
       this.wentPart(network);
       if (id !== "") ids.push(id);
-      if (step.part) this.outbox.advanceHead();
+      if (step.part) this.outbox.advanceAt(index);
     }
   }
 
@@ -606,41 +610,48 @@ export class Identity {
     else this.sendBlocked.delete(network);
   }
 
-  /** what waits in the outbox sent, in order, until it is empty or a message does not go — that one stays at the head, cut to what did not
-   * go (a written-ahead row keeps its remaining parts and their ids) — or one is refused outright, which is dropped with one line. `watch`
-   * names a written-ahead row a send is waiting on: the ids of its parts sent, and why it was refused, are noted there */
-  private async flush(watch?: RowWatch): Promise<void> {
-    while (this.outbox.length > 0 && !this.disposed) {
-      const head = this.outbox.head()!;
+  /** what waits in the outbox sent, in order, network by network: a message that does not go (`retry`) stays where it is, cut to what did
+   * not go (a written-ahead row keeps its remaining parts and their ids), and its network is `stalled` for the rest of the pass — every
+   * later row of that network is passed over, so its order holds, while the other networks' rows go on. One refused outright is dropped
+   * with one line, as is one quiet hours hold now, one too old, and one for a network not connected. `watch` names a written-ahead row a send is waiting on: the ids of its parts
+   * sent, and why it was refused, are noted there. `stalled` is shared by the flushes of one send */
+  private async flush(watch?: RowWatch, stalled: Set<Network> = new Set()): Promise<void> {
+    let i = 0;
+    while (i < this.outbox.length && !this.disposed) {
+      const head = this.outbox.at(i)!;
+      if (stalled.has(head.network)) {
+        i += 1;
+        continue;
+      }
       const transport = this.transports.get(head.network);
       if (!transport) {
-        this.outbox.shift();
+        this.outbox.removeAt(i);
         this.log(`identity: a queued message for ${NETWORK_NAME[head.network]} is dropped: it is not connected`);
         continue;
       }
       // quiet hours are asked again now: a message held now is never sent later, whenever it was queued
       if (quietHolds(head.kind ?? "chat", this.now(), this.quietNow())) {
-        this.outbox.shift();
+        this.outbox.removeAt(i);
         this.log(`identity: a queued ${head.kind ?? "chat"} message for ${NETWORK_NAME[head.network]} is dropped: quiet hours hold it now`);
         continue;
       }
       if (this.now() - Date.parse(head.t) > OUTBOX_MAX_AGE_MS) {
-        this.outbox.shift();
+        this.outbox.removeAt(i);
         this.log(`identity: a queued message for ${NETWORK_NAME[head.network]} is dropped: it waited more than ${OUTBOX_MAX_AGE_MS / 3_600_000} hours`);
         continue;
       }
       if (head.parts !== undefined) {
         const mine = watch !== undefined && head.id === watch.id;
         if (head.parts.length === 0) {
-          this.outbox.shift();
+          this.outbox.removeAt(i);
           continue;
         }
         try {
-          await this.deliverRow(head, transport, mine ? watch.ids : []);
+          await this.deliverRow(i, head, transport, mine ? watch.ids : []);
         } catch (err) {
           const f = err as SendFailure;
           if (f.verdict !== "retry") {
-            this.outbox.shift();
+            this.outbox.removeAt(i);
             if (mine) watch.refused = this.redactLine(f.message);
             // an `auth` failure said its one line already (deliverRow)
             if (f.verdict !== "auth") this.log(mine ? `identity: ${NETWORK_NAME[head.network]} refused a message (${f.message}); it is dropped` : `identity: ${NETWORK_NAME[head.network]} refused a queued message (${f.message}); it is dropped from the outbox`);
@@ -648,25 +659,27 @@ export class Identity {
           }
           if (mine) this.log(`identity: a message could not be sent on ${NETWORK_NAME[head.network]} (${f.message}); it waits in the outbox`);
           this.armFlush(head.network, f.error);
-          return;
+          stalled.add(head.network);
+          i += 1;
         }
         continue;
       }
-      // the late line rides in the first part, so what does not go is always the head's own text
+      // the late line rides in the first part, so what does not go is always the row's own text
       try {
         await this.deliver(head.network, transport, `${lateLine(head.t, this.now())}${head.text}`, head.replyTo);
-        this.outbox.shift();
+        this.outbox.removeAt(i);
       } catch (err) {
         const f = err as SendFailure;
         if (f.verdict !== "retry") {
-          this.outbox.shift();
+          this.outbox.removeAt(i);
           // an `auth` failure said its one line already (deliver)
           if (f.verdict !== "auth") this.log(`identity: ${NETWORK_NAME[head.network]} refused a queued message (${f.message}); it is dropped from the outbox`);
           continue;
         }
-        if (f.parts > 0) this.outbox.cutHead(f.rest);
+        if (f.parts > 0) this.outbox.cutAt(i, f.rest);
         this.armFlush(head.network, f.error);
-        return;
+        stalled.add(head.network);
+        i += 1;
       }
     }
   }
