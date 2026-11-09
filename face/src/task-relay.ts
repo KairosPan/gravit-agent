@@ -7,6 +7,7 @@
  * restart that re-offers a relay already delivered sends nothing twice (the fixed-id pattern of
  * src/desk-conversation.ts's keyed posts). The caller (task 7) pumps on each offer and on each `agent/status` of the
  * conversation to `idle`, from a microtask, never inside the bus. */
+import { randomBytes } from "node:crypto";
 import { MessageId, freezeMessage } from "@deepseek-ai/dsh-llm";
 import { readSessionEvents, type DeskSessionCtxLike } from "./desk-session.ts";
 import type { AgentLike } from "./room.ts";
@@ -17,10 +18,18 @@ const BIN = "gravit-face";
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /** The relay's message text: the bracketed head `[task · <title> · <status>]` - every `]` and line break in the title
- * a space, so the head stays one line and one bracket - then the text cut at {@link TASK_TEXT_MAX} characters. */
-export function relayText(item: RelayItem): string {
+ * a space, so the head stays one line and one bracket - then the text, cut at {@link TASK_TEXT_MAX} characters, quoted
+ * as data between `<<<task-data NONCE>>>` and `<<<end NONCE>>>` with a fresh random nonce per message, so a worker's
+ * words cannot close the quote; a line of the text that starts with `[task ·` or `<<<` gets a leading space, so the text
+ * cannot forge a relay's head or a fence either.
+ * @param nonce - the fence's nonce; a fresh 16-hex-digit one when omitted (tests pass their own). */
+export function relayText(item: RelayItem, nonce: string = randomBytes(8).toString("hex")): string {
   const title = item.title.replace(/\r\n|[\]\r\n\u2028\u2029]/g, " ");
-  return `[task · ${title} · ${item.status}]\n${cut(item.text, TASK_TEXT_MAX)}`;
+  const body = cut(item.text, TASK_TEXT_MAX)
+    .split(/\r\n|\r|\n|\u2028|\u2029/)
+    .map((line) => (line.startsWith("[task ·") || line.startsWith("<<<") ? ` ${line}` : line))
+    .join("\n");
+  return `[task · ${title} · ${item.status}]\n<<<task-data ${nonce}>>>\n${body}\n<<<end ${nonce}>>>`;
 }
 
 /** The relays waiting for the conversation, and the pump that delivers them. */
@@ -28,7 +37,8 @@ export interface Relay {
   /** Queue `item`, first in first out, once per id: an id already offered is ignored. */
   offer(item: RelayItem): void;
   /** Send the first item not yet in the conversation, when the conversation is idle with an empty inbox; at most one
-   * per call, and one delivery in flight at a time. Never rejects. */
+   * per call, and one delivery in flight at a time - a pump asked for during a flight that sent nothing runs once more
+   * after it, one asked for during a flight that sent shares that flight. Never rejects. */
   pump(): Promise<void>;
   /** The items still waiting, oldest first. */
   pending(): readonly RelayItem[];
@@ -74,18 +84,18 @@ export function createRelay(deps: RelayDeps): Relay {
   /** Every id ever offered: an id is queued once, and a sent one is not queued again. */
   const offered = new Set<string>();
   let inFlight: Promise<void> | undefined;
-  /** A pump asked for while one was in flight: run once more after it. */
+  /** A pump asked for while one was in flight: run once more after it, unless that flight sent. */
   let again = false;
 
   /** One delivery: at most one item sent. */
-  const deliver = async (): Promise<void> => {
-    if (queue.length === 0) return;
+  const deliver = async (): Promise<boolean> => {
+    if (queue.length === 0) return false;
     const conv = deps.conversation();
-    if (conv === undefined || !ready(conv.agent)) return;
+    if (conv === undefined || !ready(conv.agent)) return false;
     const persistence = deps.ctx.sessionPersistence;
     if (persistence === undefined) {
       log(`${BIN}: task: no session persistence; ${queue.length} relay(s) wait`);
-      return;
+      return false;
     }
     let seen: Set<string>;
     try {
@@ -97,15 +107,15 @@ export function createRelay(deps: RelayDeps): Relay {
       }
     } catch (err) {
       log(`${BIN}: task: the conversation's log could not be read (${errText(err)}); ${queue.length} relay(s) wait`);
-      return;
+      return false;
     }
     /* read again after the awaits: the conversation may have been replaced, started a turn, or taken a message */
     const now = deps.conversation();
-    if (now === undefined || now.sessionId !== conv.sessionId || now.agent !== conv.agent) return;
+    if (now === undefined || now.sessionId !== conv.sessionId || now.agent !== conv.agent) return false;
     for (const id of inboxIds(now.agent)) seen.add(id);
     while (queue.length > 0 && seen.has(queue[0]!.id)) queue.shift();
     const item = queue[0];
-    if (item === undefined || !ready(now.agent)) return;
+    if (item === undefined || !ready(now.agent)) return false;
     const message = freezeMessage({
       id: MessageId(item.id),
       role: "user",
@@ -116,7 +126,7 @@ export function createRelay(deps: RelayDeps): Relay {
       now.agent.followup(message as unknown as MessageLike);
     } catch (err) {
       log(`${BIN}: task: relay ${item.id} could not be sent (${errText(err)}); it waits`);
-      return;
+      return false;
     }
     queue.shift();
     try {
@@ -124,6 +134,7 @@ export function createRelay(deps: RelayDeps): Relay {
     } catch (err) {
       log(`${BIN}: task: the conversation's log could not be flushed after relay ${item.id} (${errText(err)})`);
     }
+    return true;
   };
 
   const pump = (): Promise<void> => {
@@ -133,14 +144,16 @@ export function createRelay(deps: RelayDeps): Relay {
     }
     inFlight = (async () => {
       try {
+        let sent = false;
         do {
           again = false;
           try {
-            await deliver();
+            sent = await deliver();
           } catch (err) {
+            sent = false;
             log(`${BIN}: task: a relay delivery failed (${errText(err)}); ${queue.length} relay(s) wait`);
           }
-        } while (again);
+        } while (again && !sent);
       } finally {
         inFlight = undefined;
       }
