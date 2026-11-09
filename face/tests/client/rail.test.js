@@ -51,14 +51,17 @@ test('Trade is in the first level between Markets and Discover, current on the T
   assert.match(renderNav({ ...base, railCollapsed: true }), /title="Trade"/);
 });
 
-test('the Messages badge counts the conversations holding an unanswered gate', () => {
-  let s = listed([conv('a'), conv('b'), conv('c')], 'a');
+test('the Messages badge counts the tasks waiting on you: a worker whose gate came, a failed one; never a session that is no task', () => {
+  const task = (id, over = {}) => ({ id, title: id, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW, lastEventAt: NOW, lastSeq: 1, ...over });
+  let s = R.tasksLoaded(listed([conv('a'), conv('b'), conv('c'), conv('x')], 'a'), { conversation: 'a', tasks: [task('b'), task('c'), task('f', { state: 'failed', group: 'you' }), task('r')], at: NOW });
   s = R.hostGate(s, { convId: 'b', message: gate });
   s = R.hostGate(s, { convId: 'c', message: { ...gate, id: 'ev-2', data: { eventId: 'ev-2', sessionId: 'c' } } });
   s = R.hostGate(s, { convId: 'c', message: { ...gate, id: 'ev-3', data: { eventId: 'ev-3', sessionId: 'c' } } });
-  assert.match(renderNav(s), /nav-badge">2</);
+  s = R.hostGate(s, { convId: 'x', message: { ...gate, id: 'ev-4', data: { eventId: 'ev-4', sessionId: 'x' } } });
+  assert.match(renderNav(s), /nav-badge">3</, 'b and c (a line each), the failed f; x is no task');
   const settled = R.hostGateGone(R.hostGateGone(R.hostGateGone(s, { eventId: 'ev-1', outcome: 'closed' }), { eventId: 'ev-2', outcome: 'approved' }), { eventId: 'ev-3', outcome: 'closed' });
-  assert.doesNotMatch(renderNav(settled), /nav-badge/);
+  assert.match(renderNav(settled), /nav-badge">1</, 'the failed task still waits on you');
+  assert.doesNotMatch(renderNav(listed([conv('a')])), /nav-badge/);
 });
 
 test('collapsed, the first level is a strip of icons with the names as titles', () => {

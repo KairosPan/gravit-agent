@@ -410,6 +410,37 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 .job-out:empty, .job-note:empty { display: none; }
 .job-note, .job-end { margin-top: 6px; font-size: calc(12px * var(--fs)); color: var(--dim); }
 .job-copy { margin-top: 6px; min-height: 28px; }
+/* the rail of tasks (one-entry plan 2 Task 4): under the head on Messages, a group head per group, a line per task — its
+   summary the state's dot, the title, the short status and a caret; expanded, its body. On a narrow window it folds (below) */
+.tasks { flex: 0 1 auto; max-height: 40vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 10px 28px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.tasks-fold { display: none; }
+.tasks-fold-key { cursor: pointer; font-size: calc(13px * var(--fs)); font-weight: 700; color: var(--text); }
+.tasks-title { margin: 0; font-size: calc(12px * var(--fs)); font-weight: 700; color: var(--dim); }
+.tasks-body { display: flex; flex-direction: column; gap: 8px; }
+.task-group { display: flex; flex-direction: column; gap: 2px; }
+.task-group-head { margin: 0; font-size: calc(11px * var(--fs)); font-weight: 700; color: var(--dim); }
+.task-line { border-radius: var(--radius-s); }
+.task-line > summary { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 8px; border-radius: var(--radius-s); cursor: pointer; list-style: none; }
+.task-line > summary::-webkit-details-marker { display: none; }
+.task-line > summary:hover { background: var(--hover); }
+.task-dot { flex: none; width: 8px; height: 8px; border-radius: var(--radius-pill); background: var(--dim); }
+.task-dot.running { background: var(--up); }
+.task-dot.waiting, .task-dot.stalled, .task-dot.blocked { background: var(--warn); }
+.task-dot.failed { background: var(--down); }
+.task-dot.done, .task-dot.stopped { background: var(--dim); }
+.task-title { flex: 1 1 auto; min-width: 0; font-size: calc(13px * var(--fs)); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-status { flex: none; font-size: calc(12px * var(--fs)); color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.task-caret { flex: none; display: inline-flex; color: var(--dim); }
+.task-line[open] > summary .task-caret { transform: rotate(180deg); }
+.task-body { display: flex; flex-direction: column; gap: 6px; padding: 4px 8px 10px 24px; font-size: calc(13px * var(--fs)); }
+.task-strategy { display: flex; gap: 8px; align-items: baseline; }
+.task-strategy-label { font-size: calc(12px * var(--fs)); color: var(--dim); }
+.task-strategy-link { color: var(--alloc-equity); font-weight: 600; }
+.task-steps { margin: 0; padding-left: 18px; color: var(--dim); }
+.task-gate { max-width: 560px; }
+.task-result { white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-usage { font-size: calc(12px * var(--fs)); color: var(--dim); font-variant-numeric: tabular-nums; }
+.task-keys { display: flex; flex-wrap: wrap; gap: 6px; }
 .jobs-finished > summary { cursor: pointer; font-size: calc(13px * var(--fs)); font-weight: 600; color: var(--dim); }
 .jobs-finished > .job, .jobs-finished > .btn-sm { margin-top: 8px; }
 .card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 18px 18px 18px 4px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-card); }
@@ -542,8 +573,8 @@ a.grp-name:hover { color: var(--text); text-decoration: underline; }
 @media (min-width: 861px) {
   .main.with-drawer > .head, .main.with-drawer > .thread-box, .main.with-drawer > .composer { margin-right: 400px; }
   .main.with-drawer.with-stock > .head, .main.with-drawer.with-stock > .thread-box, .main.with-drawer.with-stock > .composer { margin-right: 460px; }
-  .main.with-drawer > .thread-foot { margin-right: 400px; }
-  .main.with-drawer.with-stock > .thread-foot { margin-right: 460px; }
+  .main.with-drawer > .thread-foot, .main.with-drawer > .tasks { margin-right: 400px; }
+  .main.with-drawer.with-stock > .thread-foot, .main.with-drawer.with-stock > .tasks { margin-right: 460px; }
 }
 /* on a medium window the list folds away while Details is open, so the conversation keeps a usable width */
 @media (min-width: 861px) and (max-width: 1399px) {
@@ -1105,6 +1136,11 @@ button.tk-at:hover { border-color: var(--dim); }
   .list-head .new-key { margin-left: auto; width: 40px; height: 40px; }
   .list-body { max-height: min(42dvh, 360px); padding-bottom: 8px; }
   .list:not([data-list-open="true"]) .list-body { display: none; }
+  /* the rail of tasks folds above the thread: one summary counting the lines waiting on you, closed by default */
+  .tasks { max-height: 42dvh; padding: 6px 18px; }
+  .tasks-fold { display: block; }
+  .tasks-title { display: none; }
+  .tasks-fold:not([open]) ~ .tasks-body { display: none; }
   .rail-rows, .conv-results { min-height: 0; overflow-y: auto; }
   .conv-search { flex: 0 0 40px; margin: 0; }
   .conv-search input { font-size: calc(13px * var(--fs)); }

@@ -7821,3 +7821,75 @@ test('mobile list opens by its disclosure or search shortcut and folds after ope
   await settle();
   assert.equal(say.value, 'Unsent research question');
 });
+
+// the rail of tasks (one-entry plan 2 Task 4): a worker's gate counted on the Messages badge wherever the operator is, drawn
+// under its line and answered there; Stop on a line; a line opened stays open across renders
+const workerRig = (hash = '#/markets') => {
+  const f = fakeWindow({ hash });
+  const h = host({ rows: [row('conv', { updatedAt: 9 }), row('t1', { projections: { values: { title: 'Price NVDA' } } })], conversation: 'conv', tasks: [taskRow('t1', { title: 'Price NVDA' })] });
+  return { f, h, store: started(f, h) };
+};
+const workerGate = { type: 'waterfall', event: 'approval/request', eventId: 'ev-w1', agentId: 't1', request: { toolName: 'mcp__account__portfolio_place_order', callId: 'cw1', reason: 'PAPER order - place_order: side=buy' } };
+const toMessages = f => { f.win.location.hash = '#/messages'; f.fire('win', 'hashchange'); };
+
+test("a worker's gate raised while on Markets shows on the Messages badge and under 等你", async () => {
+  const { f, h, store } = workerRig();
+  await h.ready();
+  assert.doesNotMatch(f.html(), /nav-badge/);
+  h.opts().onGate(workerGate);
+  await settle();
+  assert.equal(store.get().route.screen, 'markets');
+  assert.match(f.html(), /href="#\/messages"[^>]*>[\s\S]*?<span class="nav-badge">1<\/span>/, 'the badge counts the line waiting on you');
+  toMessages(f);
+  await settle();
+  assert.match(f.html(), /class="task-group-head">Waiting on you<\/h3><details class="task-line" data-task="t1">/);
+  assert.match(f.html(), /task-status">Needs your approval</);
+  assert.match(f.html(), /data-action="answer" data-conv="t1" data-msg="ev-w1" data-value="allowed-once"/);
+  setTable(ZH);
+  try {
+    store.dispatch('hostStatus', { line: null });
+    assert.match(f.html(), /class="task-group-head">等你</);
+    assert.match(f.html(), /task-status">等你批</);
+  } finally {
+    setTable(EN);
+  }
+  store.timers.clear();
+});
+
+test('answering it from the line posts the answer once and clears the badge', async () => {
+  const { f, h, store } = workerRig('#/messages');
+  await h.ready();
+  h.opts().onGate(workerGate);
+  await settle();
+  assert.match(f.html(), /<span class="nav-badge">1<\/span>/);
+  const yes = { tagName: 'BUTTON', dataset: { action: 'answer', conv: 't1', msg: 'ev-w1', value: 'allowed-once' } };
+  f.click(yes);
+  f.click(yes);
+  await settle();
+  assert.deepEqual(h.answered, [['ev-w1', 'allowed-once']], 'one answer through the mux');
+  assert.doesNotMatch(f.html(), /nav-badge/, 'nothing waits on the operator');
+  assert.doesNotMatch(f.html(), /data-action="answer"/);
+  assert.match(f.html(), /class="task-group-head">Running<\/h3><details class="task-line" data-task="t1">/, 'the line runs on');
+  store.timers.clear();
+});
+
+test('Stop on a line posts /data/tasks/stop; a line opened stays open across a re-render', async () => {
+  const { f, h, store } = workerRig('#/messages');
+  await h.ready();
+  assert.match(f.html(), /<details class="task-line" data-task="t1">/, 'closed at first');
+  f.click({ tagName: 'SUMMARY', dataset: { action: 'toggleTask', task: 't1' }, parentElement: { tagName: 'DETAILS', open: false } });
+  await store.tasks.refresh();
+  await settle();
+  assert.match(f.html(), /<details class="task-line" data-task="t1" open>/, 'the poll re-rendered the page: the line stays open');
+  toMessages(f); f.win.location.hash = '#/history'; f.fire('win', 'hashchange'); await settle();
+  toMessages(f); await settle();
+  assert.match(f.html(), /<details class="task-line" data-task="t1" open>/, 'and across a visit to another screen');
+  f.click({ tagName: 'SUMMARY', dataset: { action: 'toggleTask', task: 't1' }, parentElement: { tagName: 'DETAILS', open: true } });
+  await store.tasks.refresh();
+  await settle();
+  assert.match(f.html(), /<details class="task-line" data-task="t1">/, 'folded again');
+  f.click({ tagName: 'BUTTON', dataset: { action: 'taskStop', task: 't1' } });
+  await settle();
+  assert.deepEqual(h.posted.filter(p => p[0].startsWith('/data/tasks/')), [['/data/tasks/stop', { task: 't1' }]]);
+  store.timers.clear();
+});

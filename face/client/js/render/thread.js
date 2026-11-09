@@ -91,6 +91,11 @@ function body(m, conv, state) {
   }
 }
 
+// one of the three gates (an order card, an approval, a question) as the thread draws it, for a line of the rail of tasks:
+// keyed by the worker's record and the message id, so the answer and answerQuestion actions take it unchanged
+const GATE_KINDS = new Set(['card', 'approval', 'question']);
+export const gateHtml = (conv, m, state) => (GATE_KINDS.has(m?.kind) ? body(m, conv, state) : '');
+
 // a room member's answer can open the turn that produced it: read on opening (host/traces.js), its context lines and
 // words drawn, its tool calls not; the slice and the disclosure's id name the conversation, since two rooms repeat
 // message ids

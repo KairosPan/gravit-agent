@@ -580,6 +580,9 @@ export function boot(win, host = {}) {
   // the operator's keys shown through their eye, as `<convId>|<msgId>|<n>` (render/thread.js): the page's, not the store's,
   // and forgotten once their conversation leaves the screen (D26)
   const revealed = new Set();
+  // the rail's lines the operator opened, by task id (render/tasks.js): the page's, so a render (the tasks' poll, a stream
+  // frame) never folds one, nor does a visit to another screen
+  const tasksOpen = new Set();
   let last = { lightbox: false, shortcuts: false, overlay: null, opener: null, under: null, screen: null, drawer: null, thread: null, start: null, anchor: null, editor: null, confirm: null, query: '', key: null };
   let confirmFrom = null;
   // the turn rail's page state (D22): the turn the view is on, the hovered or focused tick (its card drawn), the tick that
@@ -655,7 +658,7 @@ export function boot(win, host = {}) {
       : s.route.screen === 'strategy' ? renderChannelScreen(s, now()) : s.route.screen === 'discover' ? renderDiscover(s, now())
       : s.route.screen === 'history' && !s.route.id ? renderHistoryList(s, now())
       : s.route.screen === 'task' || s.route.screen === 'history' ? renderSessionPage(s, now(), { revealed, anchor: anchorSeq, rail })
-      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail });
+      : s.route.screen === 'plugin' ? renderPlugin(s) : s.route.screen === 'module' ? renderModule(s, now()) : renderMessagesScreen(s, now(), { menu, files: filesOf(key), note: noteText }, { revealed, anchor: anchorSeq, rail, tasksOpen });
     // the drawers of any screen, inside its <main>: Settings, the stock drawer, the owner sheet over whatever is open, a module card's Run sheet
     const drawers = (s.settingsOpen ? renderSettings(s, { mac }) : '') + stockDrawerHtml(s) + (s.sellMany ? renderSellMany(s) : '') + (sheetUp(s) ? renderSheet(s, now()) : '') + (!sheetUp(s) && s.identity?.connect ? renderConnectDrawer(s) : '') + (s.runSheet ? renderRunSheet(s, now()) : '');
     // the shortcut sheet over the drawers, under the drop overlay and the lightbox
@@ -1787,6 +1790,11 @@ export function boot(win, host = {}) {
       if (!complete(batch)) { store.dispatch('hostStatus', { line: said('status.answerAll'), bad: true }); return; }
       void actions.answer(m.id, batch);
     },
+    // a line of the rail of tasks: opened or folded by the page (its summary toggled first), held by its task id; Stop and
+    // Continue post once while one is in flight (host/tasks.js). A gate on a line is answered by answer and answerQuestion
+    toggleTask: el => { if (el.parentElement?.open) tasksOpen.add(el.dataset.task); else tasksOpen.delete(el.dataset.task); },
+    taskStop: el => { void tasks.stop(el.dataset.task); },
+    taskResume: el => { void tasks.resume(el.dataset.task); },
     toggleDetails: () => store.dispatch('toggleDetails'),
     // a figures pill: Details open (never closed by it) at Usage; Details open already changes no state, so a render is asked
     // for to carry the scroll
@@ -2116,8 +2124,8 @@ export function boot(win, host = {}) {
     if (el.tagName === 'SUMMARY' && el.parentElement?.tagName === 'DETAILS') {
       ev.preventDefault();
       el.parentElement.open = !el.parentElement.open;
-      // (a job's summary runs on closing too: it lets the follow go)
-      if (!el.parentElement.open && el.dataset.action !== 'openJob') return;
+      // (a job's summary runs on closing too: it lets the follow go; a task's line, to be folded again)
+      if (!el.parentElement.open && el.dataset.action !== 'openJob' && el.dataset.action !== 'toggleTask') return;
     }
     fn(el);
   });

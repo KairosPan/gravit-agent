@@ -5,13 +5,13 @@ import { t, th, thn } from '../i18n/words.js';
 import { icon } from '../icons.js';
 import { shortcut, chordLabel } from '../keys.js';
 import { rowTime } from '../time.js';
-import { needsAnswer } from '../messages.js';
 import { unreadOf, onScreenId } from '../host/sessions.js';
 import { worthOf, cardsOf } from '../host/account-view.js';
 import { money } from '../wire/account-model.js';
 import { avatar } from './avatars.js';
 import { HOST_NAME } from '../wire/speaker.js';
 import { groupsOf } from '../host/list-view.js';
+import { waitingCount } from '../host/rail-view.js';
 import { maskExcerpt } from '../mask.js';
 import { titleMatches, mergeResults, highlightRuns, searchPhase, moreThanTwenty, spoken, spokenLine } from '../host/search-view.js';
 
@@ -62,7 +62,7 @@ function navItem(href, name, label, current, mini, badge = 0) {
     `<span class="nav-label">${esc(label)}</span>${badge ? `<span class="nav-badge">${badge}</span>` : ''}</a>`;
 }
 
-// the first level: Messages (its badge counts the conversations with a card waiting on you), Markets, Trade, Discover, Account with its
+// the first level: Messages (its badge counts the tasks waiting on you, host/rail-view.js), Markets, Trade, Discover, Account with its
 // leading figure once the Account's read has answered — the paper book's, named so, when it leads — and its badge counting
 // the cards waiting for you on the Account, and the collapse key; it collapses to a strip of icons
 function worthLine(state) {
@@ -75,7 +75,7 @@ const cardsWaiting = state => cardsOf(state.account?.data).reduce((n, g) => n + 
 export function renderNav(state) {
   const { screen } = state.route;
   const mini = !!state.railCollapsed;
-  const waiting = state.conversations.filter(c => c.messages.some(needsAnswer)).length;
+  const waiting = waitingCount(state);
   const cards = cardsWaiting(state);
   return `<nav class="${cls('rail', mini && 'mini')}" aria-label="${esc(HOST_NAME)}">
   <div class="brand">${avatar('gravit', 28)}<span class="brand-name">${esc(HOST_NAME)}<span class="brand-caption">${th('nav.workspace')}</span></span>` +

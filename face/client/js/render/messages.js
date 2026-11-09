@@ -7,6 +7,7 @@ import { maskExcerpt } from '../mask.js';
 import { fmtDate, rowTime } from '../time.js';
 import { avatar, cluster } from './avatars.js';
 import { renderThread, railHtml } from './thread.js';
+import { renderTaskRail } from './tasks.js';
 import { senderName } from './rail.js';
 import { HOST_NAME } from '../wire/speaker.js';
 import { kv, inlineEdit, confirmPair } from './controls.js';
@@ -252,10 +253,12 @@ export function renderHistoryList(state, now) {
   return `<main class="main chan"><header class="head"><h1 class="head-title">${th('history.title')}</h1></header><div class="chan-body">${body}</div></main>`;
 }
 
+// the conversation's screen: its head, the rail of tasks under it (one-entry plan 2 Task 4; Task 5 lays the screen out around
+// it), the thread, the composer
 export function renderMessagesScreen(state, now, composer = {}, page = {}) {
   if (state.draft) return draftScreen(state, composer);
   const conv = currentConversation(state);
   if (!conv) return emptyScreen(state, composer);
   const placeholder = conv.kind === 'group' ? t('composer.placeholderRoom') : t('composer.placeholder');
-  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="${th('thread.turns')}" role="toolbar" aria-orientation="vertical">${railHtml(conv, page.rail)}</nav></div>${renderComposer(composerOf(composer, { placeholder }))}${threadFoot(conv, state)}${state.detailsOpen ? renderDetails(conv, state, now) : ''}</main>`;
+  return `<main class="${cls('main', (state.detailsOpen || state.lunhui?.stock) && 'with-drawer', state.lunhui?.stock && 'with-stock')}">${renderHead(conv, state)}${renderTaskRail(state, now, { open: page.tasksOpen })}<div class="thread-box"><div class="thread" id="thread">${earlierKey(conv)}${renderThread(conv, state, now, page)}</div><nav class="turn-rail" id="turn-rail" aria-label="${th('thread.turns')}" role="toolbar" aria-orientation="vertical">${railHtml(conv, page.rail)}</nav></div>${renderComposer(composerOf(composer, { placeholder }))}${threadFoot(conv, state)}${state.detailsOpen ? renderDetails(conv, state, now) : ''}</main>`;
 }

@@ -335,7 +335,34 @@ export function everyState() {
     ...providerMarketStates(),
     // plan 2 of one entry, Task 3: a task's page, history and its list, and an old link waiting on the tasks
     ...sessionPageStates(base),
+    // plan 2 of one entry, Task 4: the rail of tasks on Messages
+    ...taskRailStates(base),
   ];
+}
+
+// the rail of tasks under Messages' head: a line in every state — a worker's order card and a question waiting on it, one
+// stalled with Stop and Continue busy, one blocked and one failed with their results, one running with its strategy and
+// steps, one done with its tokens, one stopped — and a rail of running lines alone
+function taskRailStates(base) {
+  const task = (id, over = {}) => ({ id, title: `Task ${id}`, origin: 'web', state: 'running', group: 'running', steps: [], startedAt: NOW - 12 * MIN, lastEventAt: NOW - MIN, lastSeq: 1, ...over });
+  const usage = { uncachedInputTokens: 1200, cacheReadTokens: 300, outputTokens: 80, cacheWriteTokens: 0, routes: [] };
+  const tasks = [
+    task('w1', { title: 'Buy a little NVDA', state: 'waiting', group: 'you', strategy: 'cn-market', steps: ['Read the tape'], waitingFor: { kind: 'approval', id: 'c1', tool: 'mcp__account__portfolio_place_order' } }),
+    task('w2', { title: 'Pick a venue', state: 'waiting', group: 'you', waitingFor: { kind: 'question', id: 'c2', tool: 'ask_user_question' } }),
+    task('st', { title: 'Scan filings', state: 'stalled', group: 'you', steps: ['Opened EDGAR'] }),
+    task('bl', { title: 'Hedge the book', state: 'blocked', group: 'you', result: { status: 'blocked', text: 'No paper venue is granted' } }),
+    task('fa', { title: 'Read the brief', state: 'failed', group: 'you', result: { status: 'failed', text: 'The market did not answer' } }),
+    task('ru', { title: 'Price the basket', strategy: 'cn-market', steps: ['Read quotes', 'Priced three'] }),
+    task('dn', { title: 'Morning read', state: 'done', group: 'done', result: { status: 'ready', text: 'Nothing to do today' }, usage }),
+    task('sp', { title: 'Old idea', state: 'stopped', group: 'done' }),
+  ];
+  const workers = [conv('w1', { title: 'Buy a little NVDA' }), conv('w2', { title: 'Pick a venue' })];
+  let on = R.tasksLoaded(R.hostList(base, { conversations: [...base.conversations, ...workers] }), { conversation: 's1', tasks, at: NOW });
+  on = R.hostGate(on, { convId: 'w1', message: m('gw1', { kind: 'card', text: 'Buy 2 NVDA', seq: 1.5, data: { eventId: 'gw1', sessionId: 'w1', title: 'Buy 2 NVDA', venue: 'paper', line: 'limit 120' } }) });
+  on = R.hostGate(on, { convId: 'w2', message: m('gw2', { kind: 'question', text: '', seq: 1.5, data: { eventId: 'gw2', sessionId: 'w2', questions: [{ id: 'q1', header: 'Venue', question: 'Which paper venue?', options: [{ label: 'Paper US' }] }] } }) });
+  on = R.taskBusy(R.nav(on, { screen: 'messages', id: null }), { id: 'st', on: true });
+  const running = R.nav(R.tasksLoaded(base, { conversation: 's1', tasks: [task('ru', { title: 'Price the basket' })], at: NOW }), { screen: 'messages', id: null });
+  return [on, running];
 }
 
 // the read-only pages Tasks 7 and 8 of plan 2 replace: a task's page, a history session, one gone, one before the list, the
@@ -610,7 +637,7 @@ const CONTENT_FIELDS = new Set([
   'text', 'title', 'name', 'label', 'note', 'notes', 'message', 'description', 'question', 'header', 'prompt', 'response', 'detail',
   'displayReason', 'reason', 'why', 'whyNot', 'said', 'error', 'words', 'what', 'example', 'via', 'readOnlyBecause', 'noTradeBecause',
   'proven', 'lands', 'guard', 'beast', 'door', 'request', 'plan', 'soul', 'legs', 'line', 'broken', 'setupIssues', 'freezes',
-  'placeholder', 'rate', 'whose', 'by', 'sub', 'subtitle', 'frontLine', 'category', 'age',
+  'placeholder', 'rate', 'whose', 'by', 'sub', 'subtitle', 'frontLine', 'category', 'age', 'steps',
   // names: a venue's, a product's, an agent's, an account's, a market's, a network's
   'productName', 'protocol', 'quoteFrom', 'sourceWord', 'venueName', 'accountName', 'agentName', 'byName', 'toName', 'unitWord',
   'network', 'networks', 'chain', 'chains', 'bridgeChains', 'funded', 'exchange', 'feed', 'source', 'model', 'route', 'runtime',
