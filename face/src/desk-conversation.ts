@@ -377,12 +377,14 @@ const notOpenedLine = (reason: string): string => `the desk could not open a tur
 const NO_PERSISTENCE = "this face has no session persistence, so a phone text cannot be checked against the desk session's log";
 
 /** The lines {@link replyOf} is written with: src/desk-session.ts's three - the refusal line of the fence that cut the
- * turn, the cut line, and the duration's spelling. The desk passes the module itself; the router conversation
- * (src/conversation.ts) its own refusal line beside the other two. */
+ * turn, the cut line, and the duration's spelling - and, optionally, the line for a turn that failed before it said
+ * anything (the desk's own when absent). The desk passes the module itself; the router conversation
+ * (src/conversation.ts) its own refusal and failure lines beside the other two. */
 export type ReplyLines = {
   fenceRefusalLine(path: string): string;
   cutOffLine(r: DeskTurnRecord): string;
   formatDuration(ms: number): string;
+  notAnsweredLine?(error: string): string;
 };
 
 /** What a turn's end sends: the refusal line for a refused turn (at `fallbackPath`, the journal by default, when the
@@ -394,7 +396,7 @@ export function replyOf(r: DeskTurnRecord, lines: ReplyLines, fallbackPath: stri
   if (r.outcome === "refused") return lines.fenceRefusalLine(r.violation ?? fallbackPath);
   if (r.finalText !== "") return r.interrupted === true ? `${r.finalText}\n${lines.cutOffLine(r)}` : r.finalText;
   if (r.outcome === "timed-out") return timedOutLine(r.deadlineMs, lines.formatDuration);
-  if (r.outcome === "failed") return notAnsweredLine(r.error ?? "error");
+  if (r.outcome === "failed") return (lines.notAnsweredLine ?? notAnsweredLine)(r.error ?? "error");
   return "";
 }
 

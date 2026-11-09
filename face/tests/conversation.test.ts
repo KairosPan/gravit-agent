@@ -951,13 +951,39 @@ test("no desk-turn event is written", async (t) => {
   assert.deepEqual((await readEvents(home)).events.map((e) => e.kind), ["conversation"]);
 });
 
-test("with no deliver (the desk off) a phone turn sends nothing", async (t) => {
-  const home = await scratch("deliver-off");
+test("a phone text logged in a turn a browser steer named still answers the phone, once, and the turn's origin is phone", async (t) => {
+  const home = await scratch("deliver-steer-named");
   const tree = new FakeConversationTree();
-  const lines: string[] = [];
-  const handle = install(t, deps(tree, home, lines));
+  const sent: Delivered[] = [];
+  const handle = install(t, delivering(tree, home, [], sent));
   const { sessionId } = await handle.ensure();
-  wholeTurn(tree.bus, sessionId, 1, { kind: "telegram", network: "slack", messageId: "slack:1" }, "the answer");
+  /* the parked steer is claimed first and names the turn; the phone's text follows it in the same turn */
+  startTurn(tree.bus, sessionId, 1, { kind: "user", rpcId: "rpc-1" });
+  assert.deepEqual(handle.turnOrigin(), { kind: "web" }, "before the phone text");
+  tree.bus.emit(sessionId, "user/message", { id: "slack:9", role: "user", content: [], source: { kind: "telegram", network: "slack", messageId: "slack:9" } });
+  assert.deepEqual(handle.turnOrigin(), { kind: "phone", network: "slack" });
+  answer(tree.bus, sessionId, 1, "both answered");
+  tree.bus.emit(sessionId, "turn/end", { turn: 1, reason: { kind: "completed" } });
+  await until(() => sent.length === 1, "the delivery");
   await settle();
-  assert.deepEqual(lines, []);
+  assert.deepEqual(sent, [{ text: "both answered", opts: { kind: "chat", network: "slack" } }]);
+  /* the next turn, the browser's alone, is the web's and goes nowhere */
+  wholeTurn(tree.bus, sessionId, 2, { kind: "user", rpcId: "rpc-2" }, "browser only");
+  await settle();
+  assert.equal(sent.length, 1);
+  assert.deepEqual(handle.turnOrigin(), { kind: "web" });
+});
+
+test("a failed phone turn tells the phone Gravit could not answer, never the desk", async (t) => {
+  const home = await scratch("deliver-failed");
+  const tree = new FakeConversationTree();
+  const sent: Delivered[] = [];
+  const handle = install(t, delivering(tree, home, [], sent));
+  const { sessionId } = await handle.ensure();
+  startTurn(tree.bus, sessionId, 1, { kind: "telegram", network: "telegram", messageId: "telegram:1" });
+  tree.bus.emit(sessionId, "turn/end", { turn: 1, reason: { kind: "error", error: { message: "boom" } } });
+  await until(() => sent.length === 1, "the delivery");
+  assert.equal(sent[0]!.opts.network, "telegram");
+  assert.match(sent[0]!.text, /^Gravit could not answer: /);
+  assert.doesNotMatch(sent[0]!.text, /desk/);
 });

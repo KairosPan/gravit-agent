@@ -33,8 +33,9 @@
  *
  * ANSWERS (plan 3). At a turn's end the conversation answers the phone through `deps.deliver` - the desk
  * conversation's `deliver`, the pause's choke point (src/desk-conversation.ts), absent with the desk off, when nothing
- * is sent: a phone text's turn sends its reply (src/desk-conversation.ts `replyOf`: the answer, the cut line, the
- * refusal) as `chat` to the network the text came through; a task report's turn sends it to the network of the
+ * is sent: a turn that logged a phone text - whatever message named it, a parked browser steer claimed first included -
+ * sends its reply (src/desk-conversation.ts `replyOf`: the answer, the cut line, the
+ * refusal; its failure line saying Gravit, not the desk) as `chat` to the network the last such text came through; a task report's turn sends it to the network of the
  * phone that asked for the task (its brief's `origin`, src/task-view.ts `briefOrigin`); every other turn - the
  * browser's, a web task's report - sends nothing. Deliveries go in turn order. Still no `desk-turn` is written.
  * @module
@@ -156,6 +157,7 @@ const CONVERSATION_LINES: ReplyLines = {
     : conversationFenceRefusalLine(path)),
   cutOffLine,
   formatDuration,
+  notAnsweredLine: (error) => `Gravit could not answer: ${error}; nothing was done - send it again later`,
 };
 
 /** The conversation's composition, the desk's three steps (src/desk-session.ts `deskSetup`): the model selection, the
@@ -302,8 +304,9 @@ export interface ConversationHandle {
    * desk's state note and dsh's own context messages excepted - see NOT_A_SPEAKER). False with no turn, before a
    * message names it, and for a task's or a wake's turn. */
   operatorTurn(): boolean;
-  /** The open turn's origin: `{ kind: "phone", network }` while a turn a phone text named runs - its message's network,
-   * `telegram` when it names none it knows - else `{ kind: "web" }`. */
+  /** The open turn's origin: `{ kind: "phone", network }` once the running turn has logged a phone text - whatever
+   * message named the turn - with the last such text's network, `telegram` when it names none it knows; else
+   * `{ kind: "web" }`. */
   turnOrigin(): TaskOrigin;
   /** Post a phone text (the module header's THE PHONE): `{ opened, sessionId }`, `duplicate` when its key was
    * already there and nothing was sent; else the refusal and the line the phone gets - `paused`, `fence` (with the
@@ -329,6 +332,9 @@ const SKIPPED: ReadonlySet<string> = new Set(["desk", ...INJECTED_KINDS]);
 
 /** The networks a phone text's message names (src/phone.ts `PHONE_NETWORKS`). */
 const isPhoneNetwork = (value: unknown): value is "telegram" | "slack" => value === "telegram" || value === "slack";
+
+/** How many turns' phone texts a supervision remembers before their ends are heard. */
+const PHONES_KEPT = 16;
 
 /** The message source kind {@link requeueTasks} sends again: a task's relay, report or note (src/task-relay.ts). */
 const TASK_KIND = "task";
@@ -402,6 +408,9 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
   /** Supervise `agent` as session `sessionId`, and note, per turn, whether the turn has logged a message that is not
    * the operator's: once it has, the turn is not the operator's any more, whoever opened it. */
   const watch = (agent: AgentLike, sessionId: string): Watch => {
+    /* the phone texts each turn logged, by turn: a parked browser steer claimed first names the turn `user`, and a
+     * phone text that follows it in the same turn must still be answered (and a task it starts is the phone's) */
+    const phones = new Map<number, { network?: "telegram" | "slack" }>();
     const supervision = superviseDeskTurns({
       on: deps.ctx.on,
       sessionId,
@@ -417,12 +426,12 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       onTurnEnd: (record) => {
         const line = turnEndLine(record);
         if (line !== undefined) log(line);
-        answer(record);
+        answer(record, phones.get(record.turn));
+        phones.delete(record.turn);
       },
       log,
     });
-    /* `opener`: the source of the message that named the turn, found as the supervisor finds it (SKIPPED) */
-    const state: { turn?: number; foreign: boolean; opener?: Record<string, unknown> } = { foreign: false };
+    const state: { turn?: number; foreign: boolean } = { foreign: false };
     /* only notes: nothing here calls into the agent, so the session's own append is never re-entered */
     const off = deps.ctx.on("session/event", (session, event) => {
       if (session.id !== sessionId) return;
@@ -430,14 +439,16 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       if (event.type === "turn/start") {
         state.turn = typeof data?.turn === "number" ? data.turn : undefined;
         state.foreign = false;
-        state.opener = undefined;
         return;
       }
       if (event.type !== "user/message") return;
       const source = data?.source;
       const kind = typeof source === "object" && source !== null ? (source as { kind?: unknown }).kind : undefined;
-      if (state.opener === undefined && !(typeof kind === "string" && SKIPPED.has(kind))) {
-        state.opener = typeof source === "object" && source !== null ? source as Record<string, unknown> : {};
+      if (kind === "telegram" && state.turn !== undefined) {
+        const network = (source as { network?: unknown }).network;
+        phones.set(state.turn, isPhoneNetwork(network) ? { network } : {});
+        /* a turn whose end was never heard leaves its entry: keep the newest few */
+        if (phones.size > PHONES_KEPT) phones.delete(phones.keys().next().value as number);
       }
       if (typeof kind === "string" && (OPERATOR_SOURCES.has(kind) || NOT_A_SPEAKER.has(kind))) return;
       state.foreign = true;
@@ -458,9 +469,8 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       },
       turnOrigin: () => {
         const open = ended ? undefined : supervision.openTurn();
-        if (open?.source !== "telegram" || state.turn !== open.turn) return { kind: "web" };
-        const network = state.opener?.network;
-        return { kind: "phone", network: isPhoneNetwork(network) ? network : "telegram" };
+        const phone = open === undefined ? undefined : phones.get(open.turn);
+        return phone === undefined ? { kind: "web" } : { kind: "phone", network: phone.network ?? "telegram" };
       },
     };
   };
@@ -480,11 +490,12 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
     return found?.origin === "phone" && found.conversation === conversationId ? found.network : undefined;
   };
 
-  /** How turn `r`'s answer goes ({@link ConversationDeps.deliver}): a phone text's to its network, a phone task's
-   * report to that task's; else `undefined`. */
-  const answerOpts = async (r: DeskTurnRecord): Promise<DeliverOpts | undefined> => {
-    if (r.source === "telegram") {
-      const network = r.message?.network;
+  /** How turn `r`'s answer goes ({@link ConversationDeps.deliver}): a turn that logged a phone text (`phone`, the last
+   * one's network) - whatever message named it - to that network; a phone task's report to that task's; else
+   * `undefined`. */
+  const answerOpts = async (r: DeskTurnRecord, phone: { network?: "telegram" | "slack" } | undefined): Promise<DeliverOpts | undefined> => {
+    if (phone !== undefined || r.source === "telegram") {
+      const network = phone !== undefined ? phone.network : r.message?.network;
       return isPhoneNetwork(network) ? { kind: "chat", network } : { kind: "chat" };
     }
     if (r.source !== TASK_KIND || r.message?.form !== "report" || typeof r.message.task !== "string") return undefined;
@@ -494,11 +505,11 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
 
   /* a turn's answer, in turn order; the chain never rejects */
   let answering: Promise<void> = Promise.resolve();
-  const answer = (r: DeskTurnRecord): void => {
+  const answer = (r: DeskTurnRecord, phone: { network?: "telegram" | "slack" } | undefined): void => {
     const deliver = deps.deliver;
     if (deliver === undefined) return;
     answering = answering.then(async () => {
-      const opts = await answerOpts(r);
+      const opts = await answerOpts(r, phone);
       if (opts === undefined) return;
       const text = replyOf(r, CONVERSATION_LINES, FENCE_LABEL);
       if (text === "") return; // it ended on a tool: there is nothing to say
