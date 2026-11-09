@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { withFileLock } from "@deepseek-ai/dsh-atomic-write";
 import {
   ALERTS_FILE, ASLEEP_THRESHOLD_MS, ASLEEP_TICK_MS, EVENTS_FILE, FILINGS_FILE, FIRINGS_FILE, LEDGER_ROTATE_BYTES, MUTE_FILE, MUTE_USAGE, OFF_FILE,
-  ALERT_DEADLINE_MS, WATCH_LEASE_FILE, appendChain, appendEvent, appendRecord, appendRecordOnce, budgetLine, budgetPhoneLine, budgetReplyLine, budgetState, clearMute, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastConversation, lastDeskSession, noteBudgetSpent,
+  ALERT_DEADLINE_MS, WATCH_LEASE_FILE, deskLines, RAIL_TEXT_MAX, appendChain, appendEvent, appendRecord, appendRecordOnce, budgetLine, budgetPhoneLine, budgetReplyLine, budgetState, clearMute, clearOff, deskDir, deskStatus, deskStatusLines, deskTime, installAsleepWatch, installDesk, lastConversation, lastDeskSession, noteBudgetSpent,
   muteReplyLine, parseDuration, phoneLine, readBudget, readEvents, readMuteState, readOffState, readRecords, registerDeskRoutes, runsOf, standingLines, watchLines, writeMute,
   writeOff,
   type BudgetState, type DeskEvent, type DeskStatus, type PhoneStatus, type TurnUsage,
@@ -2070,4 +2070,70 @@ test("deskStatusLines appends the watch's lines after P2's", () => {
   };
   assert.deepEqual(deskStatusLines({ ...base, watch: watching() }, now), [...deskStatusLines(base, now), ...watchLines(watching(), now)]);
   assert.equal(deskStatusLines({ ...base, watch: watching() }, now).at(-1), "watch files refused: desk/levels.yml 2 of 9");
+});
+
+/* ---------- the rail's desk lines (one-entry plan 3 task 5) ---------- */
+
+const RAIL_NOW = Date.parse("2026-11-10T18:00:00.000Z"); /* 13:00 ET */
+const railOrder = (id: string, dir: string, extra: Partial<StandingStatus["orders"][number]> = {}): StandingStatus["orders"][number] => ({
+  id, dir, file: "x.md", at: "15:30", wake: true, enabled: true, expires: "2027-01-01", expired: false, hash: "ok", ...extra,
+});
+const railStanding = (over: Partial<StandingStatus> = {}): StandingStatus => ({
+  file: { path: "standing.yml", state: "loaded" }, calendar: { clock: "x", state: "ok" }, orders: [], queued: [], recent: [], ...over,
+});
+const firing = (key: string, over: Partial<FiringSummary> = {}): FiringSummary => {
+  const [order, date] = key.split(":") as [string, string];
+  return { key, order, date, kind: "finished", outcome: "ended", t: "2026-11-10T15:00:00.000Z", sessionId: "s-" + order, wallMs: 60_000, ...over };
+};
+
+test("rail: scheduled lines carry each order's next firing and last outcome", async () => {
+  const h = await home();
+  const last = firing("preclose:2026-11-09", { t: "2026-11-09T20:30:00.000Z" });
+  const standing = railStanding({ orders: [
+    railOrder("preclose", "desk", { nextAnchor: "2026-11-10T20:30:00.000Z", last }),
+    railOrder("report", "strategies/alpha", { enabled: false, expired: true }),
+  ] });
+  const got = await deskLines({ home: h, standing: () => standing, now: () => RAIL_NOW });
+  assert.deepEqual(got?.scheduled, [
+    { order: "preclose", next: "2026-11-10T20:30:00.000Z", last: { outcome: "ended", t: last.t, sessionId: "s-preclose" }, enabled: true, expired: false },
+    { order: "report", strategy: "alpha", enabled: false, expired: true },
+  ]);
+  assert.equal(await deskLines({ home: h, standing: () => undefined, now: () => RAIL_NOW }), undefined, "no standing status: no desk");
+});
+
+test("rail: today's firings are lines; yesterday's are not", async () => {
+  const h = await home();
+  const standing = railStanding({
+    running: { key: "preclose:2026-11-10", startedAt: "2026-11-10T17:55:00.000Z", sessionId: "s-run" },
+    recent: [firing("report:2026-11-10"), firing("old:2026-11-09", { t: "2026-11-10T04:00:00.000Z" })],
+  });
+  const got = await deskLines({ home: h, standing: () => standing, now: () => RAIL_NOW });
+  assert.deepEqual(got?.lines.map((l) => [l.id, l.title, l.state]), [["preclose:2026-11-10", "preclose", "running"], ["report:2026-11-10", "report", "done"]]);
+  assert.equal(got?.lines[1]?.startedAt, "2026-11-10T14:59:00.000Z");
+  assert.equal(got?.lines[1]?.endedAt, "2026-11-10T15:00:00.000Z");
+  assert.equal(got?.lines[1]?.sessionId, "s-report");
+});
+
+test("rail: a failed firing reads failed", async () => {
+  const h = await home();
+  const standing = railStanding({ recent: [
+    firing("a:2026-11-10", { outcome: "timed-out" }), firing("b:2026-11-10", { kind: "refused", outcome: "budget" }), firing("c:2026-11-10", { outcome: "fence" }),
+  ] });
+  const got = await deskLines({ home: h, standing: () => standing, now: () => RAIL_NOW });
+  assert.deepEqual(got?.lines.map((l) => l.state), ["failed", "failed", "failed"]);
+});
+
+test("rail: an annotation line carries its text, cut", async () => {
+  const h = await home();
+  const alert = { t: "2026-11-10T16:00:00.000Z", kind: "alert", id: "a1", pass: "p1", date: "2026-11-10", key: "k", market: "us", symbol: "NVDA", label: "x", trigger: "t", gap: 1, decision: "send" };
+  const alert2 = { ...alert, id: "a2", symbol: "AMD" };
+  const ann = (pass: string, t: string, text: string, outcome = "ended") => ({ t, kind: "annotated", pass, sessionId: "s-" + pass, outcome, sent: [], text });
+  await mkdir(deskDir(h), { recursive: true });
+  const lines = [alert, alert2, ann("p1", "2026-11-10T16:05:00.000Z", "x".repeat(900)), ann("p0", "2026-11-09T16:05:00.000Z", "yesterday"), ann("p2", "2026-11-10T17:00:00.000Z", "", "failed")];
+  await writeFile(join(deskDir(h), ALERTS_FILE), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const got = await deskLines({ home: h, standing: () => railStanding(), now: () => RAIL_NOW });
+  assert.deepEqual(got?.lines.map((l) => [l.id, l.title, l.state, l.kind]), [["annotation:p2", "p2", "failed", "annotation"], ["annotation:p1", "NVDA AMD", "done", "annotation"]]);
+  assert.equal(got?.lines[1]?.text?.length, RAIL_TEXT_MAX);
+  assert.equal(got?.lines[0]?.text, undefined);
+  assert.equal(got?.lines[1]?.sessionId, "s-p1");
 });

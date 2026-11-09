@@ -21,6 +21,7 @@ import { stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { MessageId, freezeMessage } from "@deepseek-ai/dsh-llm";
 import type { ConversationCtxLike, ConversationHandle } from "./conversation.ts";
+import type { DeskLines } from "./desk.ts";
 import { CONVERSATION_PRESET } from "./desk-names.ts";
 import { readSessionEvents, type DeskSessionPersistenceLike } from "./desk-session.ts";
 import type { DeskAgentLike, DeskToolsCtxLike } from "./desk-tools.ts";
@@ -87,6 +88,9 @@ export interface TasksDeps {
   route: { provider: string; model: string };
   installModelSelection: RoomDeps["installModelSelection"];
   conversation: ConversationHandle;
+  /** The desk's lines for the rail (src/desk.ts `deskLines`); `GET /data/tasks` carries them as `desk`. A provider that
+   * throws leaves `desk` out and the route answers. */
+  deskLines?: () => Promise<DeskLines | undefined>;
   isTrusted: (req: IncomingMessage) => boolean;
   now?: () => number;
   setInterval?: typeof setInterval;
@@ -139,6 +143,21 @@ function lastAssistantText(events: readonly EventLike[]): string {
 export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksHandle {
   const { ctx } = deps;
   const log = deps.log ?? defaultLog;
+  /* the desk's lines for the rail: a failure is logged once per kind of message, and the route answers without them */
+  const deskFailures = new Set<string>();
+  const deskOf = async (): Promise<DeskLines | undefined> => {
+    if (deps.deskLines === undefined) return undefined;
+    try {
+      return await deps.deskLines();
+    } catch (err) {
+      const why = errText(err);
+      if (!deskFailures.has(why)) {
+        deskFailures.add(why);
+        log(`${BIN}: task: the desk's lines could not be read (${why}); left out of the list`);
+      }
+      return undefined;
+    }
+  };
   const now = deps.now ?? Date.now;
   const every = deps.setInterval ?? setInterval;
   const stopEvery = deps.clearInterval ?? clearInterval;
@@ -375,7 +394,11 @@ export function installTasks(webServer: RouteRegistrar, deps: TasksDeps): TasksH
   webServer.register({
     kind: "exact",
     path: "/data/tasks",
-    handler: fencedGet(deps.isTrusted, async () => ({ conversation: convId() ?? null, tasks: await ops.list() })),
+    handler: fencedGet(deps.isTrusted, async () => {
+      const tasks = await ops.list();
+      const desk = await deskOf();
+      return { conversation: convId() ?? null, tasks, ...(desk === undefined ? {} : { desk }) };
+    }),
   });
 
   /* Stop and Continue from the task's page: `body.task` a non-empty string, an unknown id 404, a Stop on an ended task 409 */

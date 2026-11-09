@@ -705,3 +705,33 @@ test("task_start in a phone turn starts a phone task", async (t) => {
   const web = await h.tool("task_start").execute({ title: "From the browser", brief: "look" }) as { task: string };
   assert.equal((await tasks.ops.read(web.task)).view.origin, "web");
 });
+
+test("GET /data/tasks carries desk when a provider is given and omits it otherwise", async (t) => {
+  const h = await harness();
+  const none = recorder();
+  const a = await install(h, none);
+  t.after(() => a.dispose());
+  assert.equal(Object.hasOwn((await none.get("/data/tasks")).body, "desk"), false);
+
+  const h2 = await harness();
+  const desk = { scheduled: [{ order: "preclose", enabled: true, expired: false }], lines: [] };
+  const rec = recorder();
+  const b = installTasks(rec, { ...h2.deps(), deskLines: async () => desk });
+  await b.ready;
+  t.after(() => b.dispose());
+  assert.deepEqual((await rec.get("/data/tasks")).body.desk, desk);
+});
+
+test("a provider that throws leaves desk out and the route answers", async (t) => {
+  const h = await harness();
+  const rec = recorder();
+  const tasks = installTasks(rec, { ...h.deps(), deskLines: async () => { throw new Error("ledger gone"); } });
+  await tasks.ready;
+  t.after(() => tasks.dispose());
+  const got = await rec.get("/data/tasks");
+  assert.equal(got.status, 200);
+  assert.equal(got.body.ok, true);
+  assert.equal(Object.hasOwn(got.body, "desk"), false);
+  await rec.get("/data/tasks");
+  assert.equal(h.lines.filter((l) => l.includes("ledger gone")).length, 1, "logged once");
+});

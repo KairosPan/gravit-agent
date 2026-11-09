@@ -1661,6 +1661,8 @@ export interface DeskHandle {
    * with `FACE_ROUTER=0`, its own boot answering the carries. The first call counts; a desk without `deps.router`
    * ignores it, and a desk that is off only asks the target to `carry`. */
   bindRouter(target: PhoneConversation | undefined): void;
+  /** The rail's desk lines ({@link deskLines}) over the schedule once it runs; none while there is no schedule. */
+  lines(): Promise<DeskLines | undefined>;
   /** Stop reading the phone's inbox - the read under way cut, the message in hand waited for up to 2 s - keeping the
    * outlet, so the conversation's last answers still go out: main.ts calls it first at shutdown, before it disposes the
    * conversation, so no text is taken that a disposed conversation would refuse. Idempotent; never rejects. */
@@ -1679,6 +1681,133 @@ const watchClock = (now: () => number): DeskClock => ({
   setTimeout: (fn, ms) => setTimeout(fn, ms).unref(),
   clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
 });
+
+/* ---------- the rail's desk lines (one-entry plan 3 task 5) ---------- */
+
+/** One standing order as the rail's scheduled group draws it. */
+export interface ScheduledLine {
+  order: string;
+  strategy?: string;
+  next?: string;
+  last?: { outcome: string; t: string; sessionId?: string };
+  enabled: boolean;
+  expired: boolean;
+}
+
+/** One firing or annotation of today as the rail draws it; `text` is at most {@link RAIL_TEXT_MAX} characters. */
+export interface DeskRailLine {
+  id: string;
+  kind: "firing" | "annotation";
+  title: string;
+  state: "running" | "done" | "failed";
+  startedAt: string;
+  endedAt?: string;
+  sessionId?: string;
+  text?: string;
+}
+
+/** What `GET /data/tasks` carries as `desk`. */
+export interface DeskLines { scheduled: ScheduledLine[]; lines: DeskRailLine[] }
+
+/** An annotation line's text is cut to this many characters. */
+export const RAIL_TEXT_MAX = 600;
+
+/** Outcomes (a firing's, a turn's) the rail reads as a failure. */
+const FAILED_OUTCOMES: ReadonlySet<string> = new Set(["failed", "error", "timed-out", "refused", "fence"]);
+
+type RailAlert = { kind: "alert"; pass: string; symbol: string };
+type RailAnnotated = { kind: "annotated"; t: string; pass: string; sessionId: string; outcome: string; text: string };
+const isRailRecord = (x: unknown): x is RailAlert | RailAnnotated => {
+  if (typeof x !== "object" || x === null) return false;
+  const r = x as Record<string, unknown>;
+  if (r.kind === "alert") return typeof r.pass === "string" && typeof r.symbol === "string";
+  return r.kind === "annotated" && typeof r.t === "string" && typeof r.pass === "string" && typeof r.sessionId === "string"
+    && typeof r.outcome === "string" && typeof r.text === "string";
+};
+
+/** The rail's desk lines: every standing order as a scheduled line, and today's (since 00:00 New York) firings -
+ * the one running, the recent ones - and annotations as rail lines, newest first. Cheap: the status is in memory, and
+ * `alerts.jsonl` is re-read only when its size or mtime moved.
+ * @param deps - `home`; `standing`, the schedule's status; `now`.
+ * @returns `undefined` while there is no standing status. Rejects when `alerts.jsonl` cannot be read. */
+export async function deskLines(deps: { home: string; standing: () => StandingStatus | undefined; now?: () => number }): Promise<DeskLines | undefined> {
+  const standing = deps.standing();
+  if (standing === undefined) return undefined;
+  const at = (deps.now ?? Date.now)();
+  const dayStart = etDayStart(at);
+  const today = (iso: string): boolean => { const ms = Date.parse(iso); return Number.isFinite(ms) && ms >= dayStart; };
+  const strategyOf = (dir: string | undefined): string | undefined => {
+    const m = dir === undefined ? null : /^strategies\/([^/]+)$/.exec(dir);
+    return m === null || dir === undefined ? undefined : m[1];
+  };
+  const scheduled: ScheduledLine[] = standing.orders.map((o) => {
+    const strategy = strategyOf(o.dir);
+    return {
+      order: o.id,
+      ...(strategy === undefined ? {} : { strategy }),
+      ...(o.nextAnchor === undefined ? {} : { next: o.nextAnchor }),
+      ...(o.last === undefined ? {} : { last: { outcome: o.last.outcome, t: o.last.t, ...(o.last.sessionId === undefined ? {} : { sessionId: o.last.sessionId }) } }),
+      enabled: o.enabled,
+      expired: o.expired,
+    };
+  });
+  const lines: DeskRailLine[] = [];
+  const seen = new Set<string>();
+  const running = standing.running;
+  if (running !== undefined) {
+    seen.add(running.key);
+    lines.push({
+      id: running.key, kind: "firing", title: running.key.replace(/:[^:]*$/, ""), state: "running", startedAt: running.startedAt,
+      ...(running.sessionId === undefined ? {} : { sessionId: running.sessionId }),
+    });
+  }
+  for (const f of standing.recent) {
+    if (seen.has(f.key) || !today(f.t)) continue;
+    if (f.kind !== "finished" && f.kind !== "refused" && f.kind !== "interrupted") continue;
+    seen.add(f.key);
+    const ended = Date.parse(f.t);
+    const started = f.wallMs === undefined ? f.t : new Date(ended - f.wallMs).toISOString();
+    lines.push({
+      id: f.key, kind: "firing", title: f.order,
+      state: f.kind !== "finished" || FAILED_OUTCOMES.has(f.outcome) ? "failed" : "done",
+      startedAt: started, endedAt: f.t,
+      ...(f.sessionId === undefined ? {} : { sessionId: f.sessionId }),
+    });
+  }
+  const { records } = await readAlertsCached(deps.home);
+  const symbols = new Map<string, string[]>();
+  for (const r of records) {
+    if (r.kind !== "alert") continue;
+    const list = symbols.get(r.pass) ?? [];
+    if (!list.includes(r.symbol)) list.push(r.symbol);
+    symbols.set(r.pass, list);
+  }
+  for (const r of records) {
+    if (r.kind !== "annotated" || !today(r.t)) continue;
+    lines.push({
+      id: `annotation:${r.pass}`, kind: "annotation", title: (symbols.get(r.pass) ?? []).join(" ") || r.pass,
+      state: FAILED_OUTCOMES.has(r.outcome) ? "failed" : "done", startedAt: r.t, endedAt: r.t, sessionId: r.sessionId,
+      ...(r.text === "" ? {} : { text: r.text.length > RAIL_TEXT_MAX ? r.text.slice(0, RAIL_TEXT_MAX) : r.text }),
+    });
+  }
+  lines.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
+  return { scheduled, lines };
+}
+
+/** The last parse of `alerts.jsonl` per home, valid while its size and mtime hold. */
+const alertsCache = new Map<string, { key: string; records: (RailAlert | RailAnnotated)[] }>();
+async function readAlertsCached(home: string): Promise<{ records: (RailAlert | RailAnnotated)[] }> {
+  let key = "absent";
+  try {
+    const st = await stat(join(deskDir(home), ALERTS_FILE));
+    key = `${st.size}:${st.mtimeMs}`;
+  } catch { /* absent or unreadable: readRecords decides */ }
+  const hit = alertsCache.get(home);
+  if (hit !== undefined && hit.key === key) return hit;
+  const { records } = await readRecords(home, ALERTS_FILE, isRailRecord);
+  alertsCache.set(home, { key, records });
+  return { records };
+}
 
 /**
  * Mount the desk's rows on a booted face.
@@ -1832,6 +1961,7 @@ export function installDesk(
       enabled, bootedAt, ready: Promise.resolve(),
       /* no desk, no phone: the conversation still answers its carries, its answers sent nowhere */
       bindRouter: (target) => { void target?.carry(); },
+      lines: async () => undefined,
       quiesce: async () => {},
       dispose: async () => { removeTools(); await removeGuard(); },
     };
@@ -2023,6 +2153,7 @@ export function installDesk(
     ...(scheduling === undefined ? {} : { schedule: scheduling }),
     ...(watching === undefined ? {} : { watchRow: watching }),
     bindRouter,
+    lines: () => deskLines({ home, now, standing: () => schedule?.status() }),
     async quiesce() {
       decide();
       await bridging;

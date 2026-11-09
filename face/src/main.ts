@@ -505,6 +505,7 @@ if (routerEnabled(process.env)) {
       route: routerRoute,
       installModelSelection: routerInstall,
       conversation: held,
+      ...(desk?.enabled ? { deskLines: () => desk!.lines() } : {}),
       isTrusted: isTrustedDataRequest,
     }),
     fence: () => conversationFence(conversationDir(dshHome)),
