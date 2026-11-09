@@ -13,14 +13,15 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  CONVERSATION_DEADLINE_MS, OPERATOR_SOURCES, conversationDir, conversationFence, ensureConversation, installConversation,
+  CONVERSATION_DEADLINE_MS, INJECTED_KINDS, OPERATOR_SOURCES, conversationDir, conversationFence, ensureConversation, installConversation,
   type ConversationCtxLike, type ConversationDeps,
 } from "../src/conversation.ts";
-import { appendEvent, readEvents, type DeskEvent } from "../src/desk.ts";
+import { appendEvent, readEvents, writeOff, type DeskEvent } from "../src/desk.ts";
+import type { PhonePost } from "../src/desk-conversation.ts";
 import { CONVERSATION_PRESET } from "../src/desk-names.ts";
 import type { CreateDeskAgentOptions } from "../src/desk-session.ts";
 import type { AgentCtxLike, AgentLike, ModelSelectionRefLike, ResumeMemberOptions, SessionLike } from "../src/room.ts";
-import type { MessageLike } from "../src/room-rules.ts";
+import type { EventLike, MessageLike } from "../src/room-rules.ts";
 import { fakeBus, type FakeBus } from "./desk-fakes.ts";
 
 /* ---------- homes, outside any repository ---------- */
@@ -91,6 +92,9 @@ class FakeConversationTree {
   readonly bus: FakeBus = fakeBus();
   /** What a resumed session's inbox holds on its next-turn list: the durable projection a restart rebuilds. */
   readonly queued = new Map<string, MessageLike[]>();
+  /** Each session's log on disk, as the session persistence reads it; and every flush. */
+  readonly logs = new Map<string, EventLike[]>();
+  flushes = 0;
 
   /** A session on disk from an earlier boot. */
   persist(id: string, header: SessionLike["header"], preset = "workspace-write"): void {
@@ -138,6 +142,20 @@ class FakeConversationTree {
       current: (session) => this.stored.get(session.id) ?? "read-only",
     },
     on: (...args) => this.bus.on(...args),
+    sessionPersistence: {
+      open: async (id) => {
+        let given = false;
+        return {
+          read: async () => {
+            const events = given ? [] : [...(this.logs.get(id) ?? [])];
+            given = true;
+            return { events };
+          },
+          [Symbol.asyncDispose]: async () => {},
+        };
+      },
+      flush: async () => { this.flushes += 1; },
+    },
     workingDirectory: {
       set: async (agent, path) => {
         this.cwdSets.push({ agent: (agent as AgentLike).id, path });
@@ -391,7 +409,7 @@ test("a recorded conversation whose header names another folder is pointed at th
 /* ---------- 8-9: supervision ---------- */
 
 test("operatorTurn is true only while a turn that a source-kind user message opened runs; a task message's turn and a wake are not", async (t) => {
-  assert.deepEqual([...OPERATOR_SOURCES], ["user"]);
+  assert.deepEqual([...OPERATOR_SOURCES], ["user", "telegram"]);
   const home = await scratch("operator");
   const tree = new FakeConversationTree();
   const lines: string[] = [];
@@ -603,4 +621,146 @@ test("a resumed conversation with no task message waiting sends nothing again", 
   assert.deepEqual(tree.agent("session-n").followups, []);
   assert.deepEqual(lines, []);
   await handle.dispose();
+});
+
+/* ---------- plan 3: the phone's texts ---------- */
+
+/** A phone text as the bridge posts it, keyed `<id>#<inbox>@<at>`. */
+function phonePost(over: Partial<PhonePost> = {}): PhonePost {
+  return {
+    text: "how is NVDA doing?",
+    source: { kind: "telegram", network: "telegram", at: AT },
+    message: { kind: "telegram", network: "telegram", messageId: "telegram:77" },
+    key: "telegram:77#3@2026-11-08T18:03:00.000Z",
+    ...over,
+  };
+}
+const textsOf = (m: MessageLike): string[] => (m.content ?? []).map((part) => String(part.text));
+
+test("a phone post follows up one message with the provenance line and the text", async (t) => {
+  const home = await scratch("post");
+  const tree = new FakeConversationTree();
+  const lines: string[] = [];
+  const handle = install(t, deps(tree, home, lines));
+  const result = await handle.post(phonePost());
+  assert.ok("opened" in result && result.opened === true, JSON.stringify(result));
+  const { sessionId, agent } = handle.current()!;
+  assert.equal(result.sessionId, sessionId);
+  assert.equal(result.duplicate, undefined);
+  const sent = (agent as FakeConvAgent).followups;
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].id, "telegram:77#3@2026-11-08T18:03:00.000Z", "the message's id is the key");
+  assert.equal(sent[0].role, "user");
+  assert.deepEqual(sent[0].source, { kind: "telegram", network: "telegram", messageId: "telegram:77" });
+  assert.deepEqual(textsOf(sent[0]), ["[telegram · operator · 13:03 ET]\nhow is NVDA doing?"]);
+  assert.ok(tree.flushes >= 2, "the log is flushed before the dedupe read and after the followup");
+  /* a reply carries its context in its own part */
+  const reply = await handle.post(phonePost({
+    key: "slack:9#4@x", text: "why?", context: "NVDA +6% 13:01 ET",
+    source: { kind: "telegram", network: "slack", at: AT }, message: { kind: "telegram", network: "slack", messageId: "slack:9" },
+  }));
+  assert.ok("opened" in reply);
+  assert.deepEqual(textsOf(sent[1]), ["[slack · operator · 13:03 ET]", "the message this replies to:\nNVDA +6% 13:01 ET", "why?"]);
+});
+
+test("the same key twice opens once; a key already in the log or on the inbox opens nothing", async (t) => {
+  const home = await scratch("dupe");
+  const tree = new FakeConversationTree();
+  const handle = install(t, deps(tree, home, []));
+  const [a, b] = await Promise.all([handle.post(phonePost()), handle.post(phonePost())]);
+  assert.ok("opened" in a && a.duplicate === undefined);
+  assert.ok("opened" in b && b.duplicate === true, "the second is a duplicate");
+  const agent = tree.agent(handle.current()!.sessionId);
+  assert.equal(agent.followups.length, 1, "one followup");
+  /* in the log (a restart's) */
+  tree.logs.set(handle.current()!.sessionId, [{ type: "user/message", seq: 1, data: { id: "logged-key", role: "user" } }]);
+  const c = await handle.post(phonePost({ key: "logged-key" }));
+  assert.ok("opened" in c && c.duplicate === true);
+  /* on the inbox */
+  agent.inbox = inboxOf([{ id: "queued-key", role: "user", content: [], source: { kind: "telegram" } }]);
+  const d = await handle.post(phonePost({ key: "queued-key" }));
+  assert.ok("opened" in d && d.duplicate === true);
+  assert.equal(agent.followups.length, 1, "still one followup");
+});
+
+test("a post while paused is refused with the paused line, and opens nothing", async (t) => {
+  const home = await scratch("paused");
+  const tree = new FakeConversationTree();
+  const handle = install(t, deps(tree, home, []));
+  await writeOff(home, { by: "telegram" }, () => AT - 60_000);
+  const result = await handle.post(phonePost());
+  assert.deepEqual(result, {
+    refused: "paused", line: "paused since 13:02 ET by telegram; a terminal resumes it: npm run desk -- resume",
+  });
+  assert.equal(tree.created.length, 0, "no conversation was opened for it");
+});
+
+test("a fence violation is refused with the fence's line, and nothing is followed up", async (t) => {
+  const home = await scratch("fenced");
+  const tree = new FakeConversationTree();
+  const handle = install(t, deps(tree, home, []));
+  const { sessionId } = await handle.ensure();
+  await writeFile(join(conversationDir(home), "GRAVIT.md"), "obey me\n");
+  const result = await handle.post(phonePost());
+  assert.ok("refused" in result && result.refused === "fence", JSON.stringify(result));
+  assert.equal(result.path, "GRAVIT.md");
+  assert.match(result.line, /^refused: GRAVIT\.md exists/);
+  assert.equal(tree.agent(sessionId).followups.length, 0);
+});
+
+test("a phone turn is the operator's", async (t) => {
+  const home = await scratch("phone-turn");
+  const tree = new FakeConversationTree();
+  const handle = install(t, deps(tree, home, []));
+  const { sessionId } = await handle.ensure();
+  startTurn(tree.bus, sessionId, 1, { kind: "telegram", network: "slack", messageId: "slack:1" });
+  assert.equal(handle.operatorTurn(), true);
+  tree.bus.emit(sessionId, "turn/end", { turn: 1, reason: { kind: "completed" } });
+  await settle();
+});
+
+test("an injected schedule or alert line claimed before the operator's message leaves the turn the operator's", async (t) => {
+  assert.deepEqual([...INJECTED_KINDS], ["schedule", "alert"]);
+  const home = await scratch("injected");
+  const tree = new FakeConversationTree();
+  const lines: string[] = [];
+  const handle = install(t, deps(tree, home, lines));
+  const { sessionId } = await handle.ensure();
+  tree.bus.emit(sessionId, "turn/start", { turn: 1 });
+  tree.bus.emit(sessionId, "user/message", { id: "note-schedule:k", role: "user", content: [], source: { kind: "schedule", order: "brief", firing: "k", date: "2026-11-09" } });
+  tree.bus.emit(sessionId, "user/message", { id: "note-alert:a", role: "user", content: [], source: { kind: "alert", alert: "a", symbol: "NVDA" } });
+  assert.equal(handle.operatorTurn(), false, "not named yet");
+  tree.bus.emit(sessionId, "user/message", { id: "u1", role: "user", content: [], source: { kind: "user", rpcId: "rpc-1" } });
+  assert.equal(handle.operatorTurn(), true, "the turn is the operator's");
+  /* an injected line claimed mid-turn makes it no one else's either */
+  tree.bus.emit(sessionId, "user/message", { id: "note-alert:b", role: "user", content: [], source: { kind: "alert", alert: "b", symbol: "AMD" } });
+  assert.equal(handle.operatorTurn(), true, "still the operator's");
+  tree.bus.emit(sessionId, "turn/end", { turn: 1, reason: { kind: "completed" } });
+  await settle();
+  assert.ok(lines.every((line) => !line.includes("(schedule)") && !line.includes("(alert)")), lines.join("\n"));
+});
+
+test("turnOrigin is phone with its network in a phone turn and web otherwise", async (t) => {
+  const home = await scratch("origin");
+  const tree = new FakeConversationTree();
+  const handle = install(t, deps(tree, home, []));
+  assert.deepEqual(handle.turnOrigin(), { kind: "web" }, "no conversation");
+  const { sessionId } = await handle.ensure();
+  assert.deepEqual(handle.turnOrigin(), { kind: "web" }, "no turn");
+  tree.bus.emit(sessionId, "turn/start", { turn: 1 });
+  tree.bus.emit(sessionId, "user/message", { id: "note-schedule:k", role: "user", content: [], source: { kind: "schedule", order: "o", firing: "k", date: "2026-11-09" } });
+  tree.bus.emit(sessionId, "user/message", { id: "s1", role: "user", content: [], source: { kind: "telegram", network: "slack", messageId: "slack:1" } });
+  assert.deepEqual(handle.turnOrigin(), { kind: "phone", network: "slack" });
+  tree.bus.emit(sessionId, "turn/end", { turn: 1, reason: { kind: "completed" } });
+  assert.deepEqual(handle.turnOrigin(), { kind: "web" }, "over");
+  startTurn(tree.bus, sessionId, 2, { kind: "telegram", network: "telegram", messageId: "telegram:2" });
+  assert.deepEqual(handle.turnOrigin(), { kind: "phone", network: "telegram" });
+  tree.bus.emit(sessionId, "turn/end", { turn: 2, reason: { kind: "completed" } });
+  startTurn(tree.bus, sessionId, 3, { kind: "user", rpcId: "rpc-3" });
+  assert.deepEqual(handle.turnOrigin(), { kind: "web" }, "the browser's turn");
+  tree.bus.emit(sessionId, "turn/end", { turn: 3, reason: { kind: "completed" } });
+  startTurn(tree.bus, sessionId, 4, { kind: "task", form: "report" });
+  assert.deepEqual(handle.turnOrigin(), { kind: "web" }, "a task's turn");
+  tree.bus.emit(sessionId, "turn/end", { turn: 4, reason: { kind: "completed" } });
+  await settle();
 });

@@ -22,6 +22,14 @@
  * desk's 300 s cut ({@link CONVERSATION_DEADLINE_MS}): the router runs no shell, so a turn that long is stuck. Its turns
  * write no `desk-turn` and count against no budget; an abnormal end is one log line. The supervision is also how the
  * task tools know whose turn is running ({@link ConversationHandle.operatorTurn}).
+ *
+ * THE PHONE (plan 3). A text from the phone reaches the conversation through {@link ConversationHandle.post}, the desk
+ * conversation's post (src/desk-conversation.ts) without its budget and its desk state: one at a time, the pause first
+ * (a paused post refuses with the paused line), then the fence, then the key - the message's id - checked against the
+ * conversation's log, its inbox and what this handle sent, so a text the bridge sends twice opens one turn; then the
+ * message, its provenance line first, and the log flushed. A phone text's turn is the operator's, as the browser's is
+ * ({@link OPERATOR_SOURCES}); a schedule or alert line injected into the conversation ({@link INJECTED_KINDS}) never
+ * names a turn and never makes one someone else's.
  * @module
  */
 import { randomUUID } from "node:crypto";
@@ -29,10 +37,14 @@ import { lstat, mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import { installModelSelection as installDshModelSelection } from "@deepseek-ai/dsh-agent";
-import { appendEvent, lastConversation, readEvents } from "./desk.ts";
+import { MessageId, freezeMessage, type MessageSource } from "@deepseek-ai/dsh-llm";
+import { appendEvent, clearOff, deskTime, lastConversation, readEvents, readOffState } from "./desk.ts";
+import {
+  loggedId, pauseInForce, pausedLine, phoneContent, waiting, type PhonePost, type PostResult,
+} from "./desk-conversation.ts";
 import { CONVERSATION_PRESET } from "./desk-names.ts";
 import {
-  findFenceViolation, superviseDeskTurns,
+  fenceRefusalLine, findFenceViolation, provenanceLine, readSessionEvents, superviseDeskTurns,
   type DeskSessionCtxLike, type DeskTurnRecord, type SessionEventsOn,
 } from "./desk-session.ts";
 import type { AgentLike, MemberSetup, RoomDeps, SessionLike } from "./room.ts";
@@ -48,8 +60,16 @@ const WORKSPACE_WRITE = "workspace-write";
 export const CONVERSATION_DEADLINE_MS = 300_000;
 
 /** The message source kinds whose turn is the operator's - the only turns that may start, steer or stop a task
- * (spec §5.2). The browser's prompt is `user`; plan 3 adds the phone's `telegram`. */
-export const OPERATOR_SOURCES: ReadonlySet<string> = new Set(["user"]);
+ * (spec §5.2). The browser's prompt is `user`; the phone's text is `telegram`, for both networks (plan 3). */
+export const OPERATOR_SOURCES: ReadonlySet<string> = new Set(["user", "telegram"]);
+
+/** The source kinds of the lines the face injects into the conversation - a standing order's firing (`schedule`) and
+ * an alert (`alert`): context claimed at a turn's next step, never a turn's name and never another speaker in it. */
+export const INJECTED_KINDS: ReadonlySet<string> = new Set(["schedule", "alert"]);
+
+/** Where the open turn came from, as a task it starts records it: the phone - with the network the text came
+ * through - or the web (the browser, and every turn that is not a phone text's). */
+export type TaskOrigin = { kind: "web" } | { kind: "phone"; network: "telegram" | "slack" };
 
 /** The conversation's folder under the harness home `home`: `<home>/face/conversation`. */
 export function conversationDir(home: string): string {
@@ -244,6 +264,14 @@ export interface ConversationHandle {
    * desk's state note and dsh's own context messages excepted - see NOT_A_SPEAKER). False with no turn, before a
    * message names it, and for a task's or a wake's turn. */
   operatorTurn(): boolean;
+  /** The open turn's origin: `{ kind: "phone", network }` while a turn a phone text named runs - its message's network,
+   * `telegram` when it names none it knows - else `{ kind: "web" }`. */
+  turnOrigin(): TaskOrigin;
+  /** Post a phone text (the module header's THE PHONE): `{ opened, sessionId }`, `duplicate` when its key was
+   * already there and nothing was sent; else the refusal and the line the phone gets - `paused`, `fence` (with the
+   * violation's path), or `error` (disposed, no session persistence, the log unreadable, the open or followup
+   * failing). Posts run one at a time. Never rejects. */
+  post(input: PhonePost): Promise<PostResult>;
   /** Ends the supervision and disposes the agent this handle created or resumed; waits for an ensure under way. */
   dispose(): Promise<void>;
 }
@@ -255,8 +283,14 @@ export interface ConversationHandle {
  * dsh-repeat-tool-reminder's `repeat-tool-reminder` (its REMINDER_SOURCE) and dsh-plan-mode's `plan-mode` notice. */
 const NOT_A_SPEAKER: ReadonlySet<string> = new Set([
   "desk", "working-directory", "runtime-context", "agent-instructions", "model-selection",
-  "compact-checkpoint", "repeat-tool-reminder", "plan-mode",
+  "compact-checkpoint", "repeat-tool-reminder", "plan-mode", ...INJECTED_KINDS,
 ]);
+
+/** The kinds the conversation's supervisor skips when it names a turn: the desk state, and the injected lines. */
+const SKIPPED: ReadonlySet<string> = new Set(["desk", ...INJECTED_KINDS]);
+
+/** The networks a phone text's message names (src/phone.ts `PHONE_NETWORKS`). */
+const isPhoneNetwork = (value: unknown): value is "telegram" | "slack" => value === "telegram" || value === "slack";
 
 /** The message source kind {@link requeueTasks} sends again: a task's relay, report or note (src/task-relay.ts). */
 const TASK_KIND = "task";
@@ -297,6 +331,8 @@ interface Watch {
   end(): void;
   /** Whether the open turn is the operator's: opened by an operator source, and no other speaker logged in it since. */
   operatorTurn(): boolean;
+  /** The open turn's origin. */
+  turnOrigin(): TaskOrigin;
 }
 
 /** One line for a turn that did not simply end; nothing for one that did. */
@@ -339,13 +375,15 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
         return conversationFence(dir);
       },
       fenceLabel: "the conversation's folder",
+      skipKinds: SKIPPED,
       onTurnEnd: (record) => {
         const line = turnEndLine(record);
         if (line !== undefined) log(line);
       },
       log,
     });
-    const state: { turn?: number; foreign: boolean } = { foreign: false };
+    /* `opener`: the source of the message that named the turn, found as the supervisor finds it (SKIPPED) */
+    const state: { turn?: number; foreign: boolean; opener?: Record<string, unknown> } = { foreign: false };
     /* only notes: nothing here calls into the agent, so the session's own append is never re-entered */
     const off = deps.ctx.on("session/event", (session, event) => {
       if (session.id !== sessionId) return;
@@ -353,11 +391,15 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       if (event.type === "turn/start") {
         state.turn = typeof data?.turn === "number" ? data.turn : undefined;
         state.foreign = false;
+        state.opener = undefined;
         return;
       }
       if (event.type !== "user/message") return;
       const source = data?.source;
       const kind = typeof source === "object" && source !== null ? (source as { kind?: unknown }).kind : undefined;
+      if (state.opener === undefined && !(typeof kind === "string" && SKIPPED.has(kind))) {
+        state.opener = typeof source === "object" && source !== null ? source as Record<string, unknown> : {};
+      }
       if (typeof kind === "string" && (OPERATOR_SOURCES.has(kind) || NOT_A_SPEAKER.has(kind))) return;
       state.foreign = true;
     });
@@ -374,6 +416,12 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
         const open = supervision.openTurn();
         if (open?.source === undefined || !OPERATOR_SOURCES.has(open.source)) return false;
         return !(state.foreign && state.turn === open.turn);
+      },
+      turnOrigin: () => {
+        const open = ended ? undefined : supervision.openTurn();
+        if (open?.source !== "telegram" || state.turn !== open.turn) return { kind: "web" };
+        const network = state.opener?.network;
+        return { kind: "phone", network: isPhoneNetwork(network) ? network : "telegram" };
       },
     };
   };
@@ -409,11 +457,72 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
     return { agent: opened.agent, sessionId: opened.sessionId };
   };
 
+  const ensure = (): Promise<{ agent: AgentLike; sessionId: string }> => {
+    const next = tail.then(open, open);
+    tail = next.catch(() => undefined);
+    return next;
+  };
+
+  /** Keys this handle has followed up: a text dsh has claimed from the inbox and not yet logged is in neither. */
+  const sent = new Set<string>();
+  const failed = (reason: string): PostResult => {
+    const line = `the conversation could not open a turn: ${reason}`;
+    log(`${BIN}: conversation: ${line}`);
+    return { refused: "error", line };
+  };
+  const flush = async (what: string): Promise<void> => {
+    try {
+      await deps.ctx.sessionPersistence?.flush();
+    } catch (err) {
+      log(`${BIN}: conversation: the log could not be flushed ${what} (${errText(err)}); a crash before the next flush may lose a phone text`);
+    }
+  };
+
+  /** {@link ConversationHandle.post}'s work, in its turn. */
+  const postNow = async (input: PhonePost): Promise<PostResult> => {
+    if (disposed) return failed("the conversation is disposed");
+    try {
+      const clock = deps.now ?? Date.now;
+      const paused = await pauseInForce({ readOffState, clearOff }, deps.home, clock, log);
+      if (paused !== undefined) return { refused: "paused", line: pausedLine(paused, new Date(clock()), deskTime) };
+      await mkdir(dir, { recursive: true });
+      const path = await conversationFence(dir);
+      if (path !== undefined) {
+        log(`${BIN}: conversation: a phone text was refused: the fence found ${path}`);
+        return { refused: "fence", path, line: fenceRefusalLine(path) };
+      }
+      const persistence = deps.ctx.sessionPersistence;
+      if (persistence === undefined) return failed("this face has no session persistence, so a phone text cannot be checked against the conversation's log");
+      const { agent, sessionId } = await ensure();
+      await persistence.flush();
+      const seen = new Set<string>(sent);
+      for (const event of await readSessionEvents(deps.ctx, sessionId)) {
+        const id = loggedId(event);
+        if (id !== undefined) seen.add(id);
+      }
+      if (disposed) return failed("the conversation is disposed");
+      if (seen.has(input.key) || waiting(agent, input.key)) return { opened: true, sessionId, duplicate: true };
+      const content = phoneContent(provenanceLine(input.source, new Date(clock())), input.text, input.context);
+      const message = freezeMessage({ id: MessageId(input.key), role: "user", content, source: input.message as MessageSource });
+      agent.followup(message as unknown as MessageLike);
+      sent.add(input.key);
+      await flush(`after the phone text ${input.key}`);
+      return { opened: true, sessionId };
+    } catch (err) {
+      return failed(errText(err));
+    }
+  };
+  let posting: Promise<unknown> = Promise.resolve();
+
   return {
-    ensure() {
-      const next = tail.then(open, open);
-      tail = next.catch(() => undefined);
-      return next;
+    ensure,
+    post(input) {
+      const run = posting.then(() => postNow(input));
+      posting = run.catch(() => undefined);
+      return run;
+    },
+    turnOrigin() {
+      return held?.watch.turnOrigin() ?? { kind: "web" };
     },
     current() {
       return held === undefined ? undefined : { agent: held.agent, sessionId: held.sessionId };

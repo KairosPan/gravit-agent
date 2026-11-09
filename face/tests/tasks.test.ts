@@ -70,6 +70,8 @@ class Harness {
       ensure: async () => ({ agent: conv as unknown as AgentLike, sessionId: CONV }),
       current: () => ({ agent: conv as unknown as AgentLike, sessionId: CONV }),
       operatorTurn: () => this.operator,
+      turnOrigin: () => ({ kind: "web" }),
+      post: async () => ({ refused: "error", line: "no phone here" }),
       dispose: async () => {},
     };
     const handle = (agent: FakeAgent) => ({
@@ -521,7 +523,8 @@ test("a running worker the face disposes at shutdown gets one recovery note on t
 test("installRouter: a conversation that cannot be opened is one line, is disposed, and the face goes on without it", async () => {
   const made: string[] = [];
   const handle = (ensure: () => Promise<{ agent: AgentLike; sessionId: string }>): ConversationHandle => ({
-    ensure, current: () => undefined, operatorTurn: () => false, dispose: async () => { made.push("disposed"); },
+    ensure, current: () => undefined, operatorTurn: () => false, turnOrigin: () => ({ kind: "web" }),
+    post: async () => ({ refused: "error", line: "no phone here" }), dispose: async () => { made.push("disposed"); },
   });
   const lines: string[] = [];
   const failed = await installRouter({
@@ -574,7 +577,8 @@ test("task_read's text is the task's report when it has one, over its closing wo
 
 test("installRouter checks the conversation's fence once: a violation is one loud line naming it, and the face still starts", async () => {
   const handle = (): ConversationHandle => ({
-    ensure: async () => ({ agent: {} as AgentLike, sessionId: "session-c" }), current: () => undefined, operatorTurn: () => false, dispose: async () => {},
+    ensure: async () => ({ agent: {} as AgentLike, sessionId: "session-c" }), current: () => undefined, operatorTurn: () => false,
+    turnOrigin: () => ({ kind: "web" }), post: async () => ({ refused: "error", line: "no phone here" }), dispose: async () => {},
   });
   const tasks = { ops: {}, ready: Promise.resolve(), dispose: async () => {} } as unknown as TasksHandle;
   const lines: string[] = [];

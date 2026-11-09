@@ -922,6 +922,26 @@ test("the supervision says which turn it has open: its number, its source, its m
   assert.equal(h.dispose.openTurn(), undefined, "disposed");
 });
 
+test("the first-message skip set is honoured: an injected kind is skipped like desk, and by default only desk is", () => {
+  const h = supervise({ skipKinds: new Set(["desk", "schedule", "alert"]) });
+  h.emit("turn/start", { turn: 1 });
+  h.emit("user/message", { id: "note-schedule:k1", role: "user", content: say("[schedule]"), source: { kind: "schedule", order: "o", firing: "k1", date: "2026-11-09" } });
+  h.emit("user/message", { id: "note-alert:a1", role: "user", content: say("[alert]"), source: { kind: "alert", alert: "a1", symbol: "NVDA" } });
+  h.emit("user/message", { id: "desk-state", role: "user", content: say("state"), source: { kind: "desk", form: "state" } });
+  assert.deepEqual(h.dispose.openTurn(), { turn: 1, logged: ["note-schedule:k1", "note-alert:a1", "desk-state"] }, "not named yet");
+  h.emit("user/message", { id: "u1", role: "user", content: say("hi"), source: { kind: "user" } });
+  assert.equal(h.dispose.openTurn()?.source, "user", "the operator's message names the turn");
+  endTurn(h, 1);
+  h.dispose();
+  const d = supervise();
+  d.emit("turn/start", { turn: 2 });
+  d.emit("user/message", { id: "desk-state", role: "user", content: say("state"), source: { kind: "desk", form: "state" } });
+  d.emit("user/message", { id: "note-schedule:k2", role: "user", content: say("[schedule]"), source: { kind: "schedule", order: "o", firing: "k2", date: "2026-11-09" } });
+  assert.equal(d.dispose.openTurn()?.source, "schedule", "the desk session's default skips the desk state alone");
+  endTurn(d, 2);
+  d.dispose();
+});
+
 test("a second followup during a turn is supervised as its own turn", async () => {
   const h = supervise();
   const t0 = h.time.clock.now();

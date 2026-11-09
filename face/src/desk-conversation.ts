@@ -134,7 +134,7 @@ const DESK_DEADLINE_MS = 300_000;
 /** The longest a phone's post waits for the desk state before it goes without (the P3 plan's ruling 6). */
 export const STATE_WAIT_MS = 3_500;
 /** The line a phone reply's context opens with, in its own part of the message (spec §16 H1b). */
-const CONTEXT_HEAD = "the message this replies to:";
+export const CONTEXT_HEAD = "the message this replies to:";
 /** The longest a delivery waits on the outlet before the next one goes ahead. */
 const DELIVERY_MS = 60_000;
 /** How long {@link DeskConversation.dispose} gives an agent it cancelled to go idle, so the cut turn is recorded. */
@@ -191,6 +191,55 @@ export interface DeskOutlet {
  * `no phone`, the account's hold (`quiet hours`, `not routed`, `nothing connected`), `send failed: <reason>`,
  * `the outlet did not answer in 60 s`, `the pause could not be read: <reason>`, or `the desk could not load: <reason>`. */
 export type DeliverResult = { sent: string[]; queued?: true } | { queued: true } | { undelivered: string };
+
+/** A text from the phone as the bridge posts it (src/phone-bridge.ts): the operator's `text`, the provenance `source`, the
+ * logged `message` source (`<network>:<id>`), its delivery `key` - the message's id - and, for a reply to an alert or its
+ * annotation, the `context`. The desk conversation's {@link DeskConversation.post} takes it, and so does the router
+ * conversation's (src/conversation.ts `ConversationHandle.post`). */
+export type PhonePost = {
+  text: string;
+  source: { kind: "telegram"; network?: string; at?: number; carried?: true };
+  message: { kind: "telegram"; network: string; messageId: string };
+  key: string;
+  context?: string;
+};
+
+/** A phone message's content: one text part, the provenance line then `text`; or, with `context` (spec §16 H1b), three -
+ * the provenance line, the context headed {@link CONTEXT_HEAD}, then `text`. */
+export function phoneContent(provenance: string, text: string, context?: string): { type: "text"; text: string }[] {
+  return context === undefined
+    ? [{ type: "text", text: `${provenance}\n${text}` }]
+    : [
+      { type: "text", text: provenance },
+      { type: "text", text: `${CONTEXT_HEAD}\n${context}` },
+      { type: "text", text },
+    ];
+}
+
+/** The pause as a post reads it: an `OFF` past its `until` is lifted (a failure to lift is one line, and the post goes
+ * on), then the switch is read again - a pause set since stands. The one in force, or `undefined`. Rejects when the
+ * switch cannot be read: a post fails closed. `desk` is src/desk.ts, loaded by the caller.
+ * @param desk - src/desk.ts's `readOffState` and `clearOff`.
+ * @param home - the harness home, the switch's.
+ * @param now - the clock.
+ * @param log - where the line goes. */
+export async function pauseInForce(
+  desk: { readOffState: (typeof import("./desk.ts"))["readOffState"]; clearOff: (typeof import("./desk.ts"))["clearOff"] },
+  home: string,
+  now: () => number,
+  log: (line: string) => void,
+): Promise<OffState | undefined> {
+  let off = await desk.readOffState(home, now);
+  if (off.state !== undefined && off.expired) {
+    try {
+      await desk.clearOff(home, "expiry", now);
+    } catch (err) {
+      log(`${BIN}: desk: the expired pause could not be lifted (${errText(err)}); the desk goes on`);
+    }
+    off = await desk.readOffState(home, now);
+  }
+  return off.state !== undefined && !off.expired ? off.state : undefined;
+}
 
 /** What {@link DeskConversation.post} answers: the turn opened on `sessionId` - `duplicate` when its key was already
  * there, and nothing was sent - or why not, with the line the phone gets. */
@@ -349,13 +398,13 @@ type Injecting = { inject?: (message: MessageLike) => void };
 type InboxAware = { inbox?: { readonly nextTurn?: readonly MessageLike[]; readonly nextStep?: readonly MessageLike[]; remove(id: string): boolean } };
 
 /** Whether `agent`'s inbox holds a message with id `id` on either list. */
-function waiting(agent: AgentLike, id: string): boolean {
+export function waiting(agent: AgentLike, id: string): boolean {
   const inbox = (agent as AgentLike & InboxAware).inbox;
   return [...(inbox?.nextTurn ?? []), ...(inbox?.nextStep ?? [])].some((message) => message.id === id);
 }
 
 /** The id of the message a `user/message` event logs, when it has one. */
-function loggedId(event: EventLike): string | undefined {
+export function loggedId(event: EventLike): string | undefined {
   if (event.type !== "user/message" || event.data === null || typeof event.data !== "object") return undefined;
   const id = (event.data as { id?: unknown }).id;
   return typeof id === "string" ? id : undefined;
@@ -853,19 +902,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
   const shutDown = (): PostResult => ({ refused: "error", line: notOpenedLine(SHUT_DOWN) });
 
   /** The pause as a post reads it: lifted when past its `until`, then read again - a pause set since stands. */
-  const pause = async (m: Machinery): Promise<OffState | undefined> => {
-    const now = (): number => clock.now();
-    let off = await m.desk.readOffState(home, now);
-    if (off.state !== undefined && off.expired) {
-      try {
-        await m.desk.clearOff(home, "expiry", now);
-      } catch (err) {
-        log(`${BIN}: desk: the expired pause could not be lifted (${errText(err)}); the desk goes on`);
-      }
-      off = await m.desk.readOffState(home, now);
-    }
-    return off.state !== undefined && !off.expired ? off.state : undefined;
-  };
+  const pause = (m: Machinery): Promise<OffState | undefined> => pauseInForce(m.desk, home, () => clock.now(), log);
 
   /** The day's budget as a post reads it: its state when it is spent, else `undefined` - and `undefined`, with a
    * line, when it cannot be read, the budget failing open (the plan's ruling 8) where the pause and the fence fail
@@ -950,13 +987,7 @@ export function createDeskConversation(deps: DeskConversationDeps): DeskConversa
       const now = new Date(clock.now());
       const provenance = m.session.provenanceLine(input.source, now);
       /* a reply's context is its own part, between the provenance line and the operator's text (spec §16 H1b) */
-      const content = input.context === undefined
-        ? [{ type: "text" as const, text: `${provenance}\n${input.text}` }]
-        : [
-          { type: "text" as const, text: provenance },
-          { type: "text" as const, text: `${CONTEXT_HEAD}\n${input.context}` },
-          { type: "text" as const, text: input.text },
-        ];
+      const content = phoneContent(provenance, input.text, input.context);
       const source = input.message as MessageSource;
       const message = key === undefined
         ? m.createUserMessage({ content, source })
