@@ -86,8 +86,8 @@ async function main(): Promise<void> {
 
   say("4. two replies under one clientMessageId");
   const clientId = `photon-check:${Date.now()}`;
-  // sendText takes the phone and builds the 1:1 chat itself: the operator's number, as the hi came from it
-  const to = hi.from;
+  // sendText takes the phone and builds the 1:1 chat itself: the operator's number as typed (E.164), which the hi came from
+  const to = phone;
   let longest = 0;
   let replyGuid: string | undefined;
   // unknown until the second send answers: a send that throws, or never made, says nothing either way

@@ -172,6 +172,31 @@ describe("sending on iMessage", () => {
     expect(readOutbox(home)).toEqual([]);
   });
 
+  it("Photon's retryAfterMs holds the row past a flush timer armed earlier, which arms again for the wait's end", async () => {
+    const identity = make();
+    await settle();
+    // x fails with no wait asked: the timer is armed for 30 s
+    fake.failNextSend(new PhotonError("retry", "serviceUnavailable", "later"));
+    expect(await identity.send({ kind: "alert", text: "x" })).toEqual({ ok: true, queued: true });
+    // 10 s on, a send flushes x first; Photon now asks for 120 s, while the 30 s timer is still armed
+    clock.advance(10_000);
+    fake.failNextSend(new PhotonError("retry", "rateLimited", "wait", 120_000));
+    expect(await identity.send({ kind: "chat", network: "imessage", text: "y" })).toEqual({ ok: true, queued: true });
+    const tries = fake.calls.filter((c) => c.startsWith("sendText")).length;
+    // the 30 s timer runs, and Photon is not called before its 120 s are up
+    clock.advance(20_000);
+    await settle();
+    expect(fake.calls.filter((c) => c.startsWith("sendText")).length).toBe(tries);
+    clock.advance(99_000);
+    await settle();
+    expect(fake.sent).toEqual([]);
+    clock.advance(1_000);
+    await settle();
+    // x waited past the late line's threshold, so it carries it
+    expect(fake.sent.map((s) => s.text)).toEqual(["(written 10:00 ET, sent late)\nx", "y"]);
+    expect(readOutbox(home)).toEqual([]);
+  });
+
   it("a duplicate part counts as sent", async () => {
     const identity = make();
     await settle();
@@ -257,6 +282,9 @@ describe("a stalled network holds up only its own rows", () => {
   let lines: string[];
   let tgSent: string[];
   let tgFailNext: number;
+  /** while set, Telegram's next send waits on it */
+  let tgGate: Promise<void> | undefined;
+  let tgEntered: () => void = () => {};
   const made: Identity[] = [];
   const T = new Date(START).toISOString();
   const tgRow = (text: string) => ({ t: T, network: "telegram", kind: "alert", text });
@@ -271,6 +299,12 @@ describe("a stalled network holds up only its own rows", () => {
       secrets: [],
       partMax: 4_096,
       send: async (text) => {
+        if (tgGate) {
+          const gate = tgGate;
+          tgGate = undefined;
+          tgEntered();
+          await gate;
+        }
         if (tgFailNext > 0) {
           tgFailNext -= 1;
           throw new Error("Telegram asks to wait");
@@ -301,6 +335,7 @@ describe("a stalled network holds up only its own rows", () => {
     lines = [];
     tgSent = [];
     tgFailNext = 0;
+    tgGate = undefined;
     const routing = emptyRouting();
     routing.alerts = ["imessage", "telegram"];
     saveIdentity(home, { bindings: [BINDING, TELEGRAM], routing, quiet: null, blocked: [] });
@@ -354,6 +389,24 @@ describe("a stalled network holds up only its own rows", () => {
     expect(readOutbox(home).map((e) => e.text)).toEqual(["tg1", "tg2"]);
     await flushNow(identity);
     expect(tgSent).toEqual(["tg1", "tg2"]);
+  });
+
+  it("disconnecting iMessage while a Telegram row is on its way loses no Telegram row and sends none twice", async () => {
+    writeFileSync(join(identityDir(home), "outbox.json"), JSON.stringify([imRow("im1"), tgRow("tg1"), tgRow("tg2")]));
+    const identity = make();
+    photonStalls();
+    let open: () => void = () => {};
+    tgGate = new Promise<void>((r) => (open = r));
+    const entered = new Promise<void>((r) => (tgEntered = r));
+    const flushing = flushNow(identity);
+    await entered;
+    const leaving = (identity as unknown as { disconnect(a: { type: "disconnectNetwork"; network: string }): Promise<unknown> }).disconnect({ type: "disconnectNetwork", network: "imessage" });
+    await settle();
+    open();
+    await Promise.all([flushing, leaving]);
+    await flushNow(identity);
+    expect(tgSent).toEqual(["tg1", "tg2"]);
+    expect(readOutbox(home)).toEqual([]);
   });
 });
 
