@@ -33,9 +33,16 @@
  *
  * THE DESK'S LINES (plan 3). What a firing, an annotation or a watch alert sent the phone is noted in the conversation
  * ({@link ConversationHandle.note}, through src/desk.ts once the conversation is bound): one `user` message with a
- * fixed id, injected to the next step - it wakes nothing, and the next turn claims it as context. Its id is checked
- * as a phone text's key is, so a line noted twice is one message. Nothing sent, nothing noted: a paused desk notes
- * nothing. The relay (src/task-relay.ts) does not wait for such a line.
+ * fixed id, its body quoted as data in a `desk-data` fence ({@link noteMessage}), injected to the next step - it wakes
+ * nothing, and the next turn claims it as context. Never into a turn under way: dsh does not end a turn while its
+ * next-step list holds a message, so a line injected mid-turn would add a model step and the turn's answer - a phone's
+ * reply - could become the reaction to the alert. A line noted while the conversation is busy is held, by its id, and
+ * injected at the conversation's next `agent/status` idle, before the relay's pump, so the next relay or operator turn
+ * claims it. Its id is checked as a phone text's key is, so a line noted twice is one message. Nothing sent, nothing
+ * noted: a paused desk notes nothing; and with no conversation held - before the boot's ensure, or after dispose - a
+ * line is not noted (a note never opens the conversation). A line held, or injected on an idle conversation and never
+ * claimed, is dropped at shutdown: dsh's teardown clears the inbox, no carry names it, and the phone already has it.
+ * The relay (src/task-relay.ts) does not wait for such a line.
  *
  * ANSWERS (plan 3). At a turn's end the conversation answers the phone through `deps.deliver` - the desk
  * conversation's `deliver`, the pause's choke point (src/desk-conversation.ts), absent with the desk off, when nothing
@@ -71,13 +78,14 @@ import {
   CARRY_MAX, CARRY_TEXT_MAX, busy, loggedId, operatorText, pauseInForce, pausedLine, pendingCarries, phoneContent, replyOf, waiting,
   type Carry, type ClaimsOn, type DeliverOpts, type DeliverResult, type PhonePost, type PostResult, type ReplyLines,
 } from "./desk-conversation.ts";
-import { CONVERSATION_PRESET } from "./desk-names.ts";
+import { CONVERSATION_PRESET, INJECTED_KINDS } from "./desk-names.ts";
 import {
   cancelKeepingQueue, cutOffLine, cutPhoneTurnLine, findFenceViolation, formatDuration, provenanceLine, readSessionEvents, superviseDeskTurns,
   type DeskSessionCtxLike, type DeskTurnRecord, type OpenTurnView, type SessionEventsOn,
 } from "./desk-session.ts";
 import type { AgentLike, MemberSetup, RoomDeps, SessionLike } from "./room.ts";
 import type { EventLike, MessageLike } from "./room-rules.ts";
+import { fenceData } from "./task-relay.ts";
 import { briefOrigin } from "./task-view.ts";
 
 const BIN = "gravit-face";
@@ -95,7 +103,7 @@ export const OPERATOR_SOURCES: ReadonlySet<string> = new Set(["user", "telegram"
 
 /** The source kinds of the lines the face injects into the conversation - a standing order's firing (`schedule`) and
  * an alert (`alert`): context claimed at a turn's next step, never a turn's name and never another speaker in it. */
-export const INJECTED_KINDS: ReadonlySet<string> = new Set(["schedule", "alert"]);
+export { INJECTED_KINDS };
 
 /** What the desk sent the phone, as a line in the conversation ({@link ConversationHandle.note}): a standing order's
  * firing - its order's id, the firing's key and its date - or an alert - its id (the pass's, for several), its symbol
@@ -111,20 +119,26 @@ export const NOTE_TEXT_MAX = 4_000;
 /** A {@link DeskLine} as the message the conversation is injected: its fixed id - `note-schedule:<firing key>`,
  * `note-annotation:<pass>` for an annotation's reply, else `note-alert:<alert id>` - its source (the client's shapes:
  * `schedule` with `order`, `firing`, `date`; `alert` with `alert`, `symbol` and the `pass` when there is one), and its
- * text: the desk's bracketed head - `[schedule · <order> · <date>]`, `[alert · <symbol> · <label>]` - then the text
- * sent, cut at {@link NOTE_TEXT_MAX}. `undefined` for a line with an empty or non-string field.
+ * text: the desk's bracketed head - `[schedule · <order> · <date>]`, `[alert · <symbol> · <label>]`, every `]` and line
+ * break in a part a space - then the text sent, cut at {@link NOTE_TEXT_MAX} and quoted as data between
+ * `<<<desk-data NONCE>>>` and `<<<end NONCE>>>` (src/task-relay.ts `fenceData`, a fresh nonce per line): an
+ * annotation's reply can carry what a web page said, so no line of it may close the quote or forge a head - a line
+ * starting `<<<` or `[` gets a leading space. `undefined` for a line with an empty or non-string field.
  * @param line - the line.
+ * @param nonce - the fence's nonce; a fresh one when omitted (tests pass their own).
  */
-export function noteMessage(line: DeskLine): { id: string; source: Record<string, string>; text: string } | undefined {
+export function noteMessage(line: DeskLine, nonce?: string): { id: string; source: Record<string, string>; text: string } | undefined {
   const ok = (v: unknown): v is string => typeof v === "string" && v !== "";
   if (line === null || typeof line !== "object" || typeof line.text !== "string") return undefined;
-  const body = line.text.length > NOTE_TEXT_MAX ? `${line.text.slice(0, NOTE_TEXT_MAX - 1)}…` : line.text;
+  const part = (v: string): string => v.replace(/\r\n|[\]\r\n\u2028\u2029]/g, " ");
+  const cut = line.text.length > NOTE_TEXT_MAX ? `${line.text.slice(0, NOTE_TEXT_MAX - 1)}…` : line.text;
+  const body = fenceData(cut, { tag: "desk-data", heads: ["["], ...(nonce === undefined ? {} : { nonce }) });
   if (line.kind === "schedule") {
     if (!ok(line.order) || !ok(line.firing) || !ok(line.date)) return undefined;
     return {
       id: `note-schedule:${line.firing}`,
       source: { kind: "schedule", order: line.order, firing: line.firing, date: line.date },
-      text: `[schedule · ${line.order} · ${line.date}]\n${body}`,
+      text: `[schedule · ${part(line.order)} · ${part(line.date)}]\n${body}`,
     };
   }
   if (line.kind === "alert") {
@@ -134,7 +148,7 @@ export function noteMessage(line: DeskLine): { id: string; source: Record<string
     return {
       id: pass === undefined ? `note-alert:${line.alert}` : `note-annotation:${pass}`,
       source: { kind: "alert", alert: line.alert, symbol: line.symbol, ...(pass === undefined ? {} : { pass }) },
-      text: `[alert · ${line.symbol} · ${label}]\n${body}`,
+      text: `[alert · ${part(line.symbol)} · ${part(label)}]\n${body}`,
     };
   }
   return undefined;
@@ -383,9 +397,10 @@ export interface ConversationHandle {
    * failing). Posts run one at a time. Never rejects. */
   post(input: PhonePost): Promise<PostResult>;
   /** Note what the desk sent the phone as a line in the conversation (the module header's THE DESK'S LINES): injected
-   * with its fixed id ({@link noteMessage}) to the inbox's next step - it starts no turn; the next turn claims it -
-   * unless that id is already in the log, on the inbox, or noted by this handle. Runs on the posts' chain; a line that
-   * cannot be noted is one log line. Never throws. */
+   * with its fixed id ({@link noteMessage}) to the inbox's next step - it starts no turn; the next turn claims it - at
+   * once on an idle conversation, else held until its next idle; skipped when that id is already in the log, on the
+   * inbox, or noted by this handle, and when no conversation is held. Runs on the posts' chain; a line that cannot be
+   * noted is one log line. Never throws. */
   note(line: DeskLine): void;
   /** The phone's `/stop`: when the conversation's agent has work under way - a turn running, or one latched behind
    * maintenance (src/desk-conversation.ts `busy`) - cut it with `reason`, keeping the messages queued behind it
@@ -432,6 +447,10 @@ const PHONES_KEPT = 16;
 const TASK_KIND = "task";
 /** The message source kinds {@link requeueTasks} sends again: a task's message and the phone's text. */
 const REQUEUED: ReadonlySet<string> = new Set([TASK_KIND, "telegram"]);
+
+/** The root bus's `agent/status`, which {@link ConversationCtxLike}'s `on` (typed for `session/event`) also carries: an
+ * agent's id and its status. The payload is checked, never trusted: a bus that hands it something else is ignored. */
+type StatusOn = (name: "agent/status", listener: (payload: unknown) => void) => () => unknown;
 
 /** dsh-agent's `Agent.inbox`, its two lists and its `remove`, as src/desk-session.ts reads it. */
 type InboxAware = { inbox?: { readonly nextTurn: readonly MessageLike[]; readonly nextStep?: readonly MessageLike[]; remove(id: string): boolean } };
@@ -750,8 +769,52 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
   };
   let posting: Promise<unknown> = Promise.resolve();
 
-  /** The note ids this handle injected, the newest {@link NOTED_KEPT}. */
+  /** The note ids this handle injected or holds, the newest {@link NOTED_KEPT}. */
   const noted = new Set<string>();
+  /** The lines noted while the conversation was busy, by id, in order, with the agent they wait for: injected at its
+   * next `agent/status` idle ({@link injectHeld}) - never into a turn under way, which dsh would not let end while its
+   * next-step list holds one (the module header's THE DESK'S LINES). */
+  const heldLines = new Map<string, { agent: AgentLike; message: MessageLike }>();
+  const remember = (id: string): void => {
+    noted.add(id);
+    if (noted.size > NOTED_KEPT) noted.delete(noted.values().next().value as string);
+  };
+  /** Inject `message` into `agent`'s next step; `false`, with one line, when it cannot be. */
+  const injectInto = (agent: AgentLike, message: MessageLike): boolean => {
+    const inject = (agent as AgentLike & { inject?: (m: MessageLike) => void }).inject;
+    if (typeof inject !== "function") {
+      log(`${BIN}: conversation: the desk line ${message.id} was not noted: the conversation's agent takes no injected message`);
+      return false;
+    }
+    try {
+      inject.call(agent, message);
+      return true;
+    } catch (err) {
+      log(`${BIN}: conversation: the desk line ${message.id} could not be noted: ${errText(err)}`);
+      return false;
+    }
+  };
+  /** The held lines for `agentId`, injected in the order noted - synchronously, inside the `agent/status` idle
+   * listener, so they are on the inbox before the relay's pump (src/tasks.ts, a microtask later) looks. A line already
+   * on the inbox is skipped; lines held for an agent the conversation no longer holds are dropped. */
+  const injectHeld = (agentId: string): void => {
+    for (const [id, entry] of [...heldLines]) {
+      if (entry.agent.id !== agentId) continue;
+      heldLines.delete(id);
+      if (disposed || held?.agent !== entry.agent || waiting(entry.agent, id)) continue;
+      injectInto(entry.agent, entry.message);
+    }
+  };
+  let offStatus: (() => unknown) | undefined;
+  try {
+    offStatus = (deps.ctx.on as unknown as StatusOn)("agent/status", (payload) => {
+      const p = payload as { agent?: { id?: unknown }; status?: unknown } | undefined;
+      if (p?.status !== "idle" || typeof p.agent?.id !== "string") return;
+      injectHeld(p.agent.id);
+    });
+  } catch (err) {
+    log(`${BIN}: conversation: the conversation's idle could not be heard (${errText(err)}); a desk line noted mid-turn waits for the next note at idle`);
+  }
   /** {@link ConversationHandle.note}'s work, in its turn. Never rejects. */
   const noteNow = async (line: DeskLine): Promise<void> => {
     const made = noteMessage(line);
@@ -759,9 +822,11 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       log(`${BIN}: conversation: a desk line was not noted: it names no ${line?.kind === "schedule" ? "order, firing or date" : "alert or symbol"}`);
       return;
     }
-    if (disposed || noted.has(made.id)) return;
+    /* no conversation held - before the boot's ensure, or after dispose - and the line is not noted: a note never
+     * opens the conversation just to hold a line */
+    if (disposed || held === undefined || noted.has(made.id)) return;
+    const { agent, sessionId } = held;
     try {
-      const { agent, sessionId } = await ensure();
       const persistence = deps.ctx.sessionPersistence;
       if (persistence !== undefined) {
         await persistence.flush();
@@ -769,16 +834,17 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
           if (loggedId(event) === made.id) return;
         }
       }
-      if (disposed || noted.has(made.id) || waiting(agent, made.id)) return;
-      const inject = (agent as AgentLike & { inject?: (message: MessageLike) => void }).inject;
-      if (typeof inject !== "function") {
-        log(`${BIN}: conversation: the desk line ${made.id} was not noted: the conversation's agent takes no injected message`);
+      /* from here to the injection, no await: the status read is the one the injection acts on */
+      if (disposed || held?.agent !== agent || noted.has(made.id) || waiting(agent, made.id)) return;
+      const message = freezeMessage({ id: MessageId(made.id), role: "user", content: [{ type: "text", text: made.text }], source: made.source as unknown as MessageSource }) as unknown as MessageLike;
+      if (agent.status !== "idle") {
+        heldLines.set(made.id, { agent, message });
+        remember(made.id);
         return;
       }
-      const message = freezeMessage({ id: MessageId(made.id), role: "user", content: [{ type: "text", text: made.text }], source: made.source as unknown as MessageSource });
-      inject.call(agent, message as unknown as MessageLike);
-      noted.add(made.id);
-      if (noted.size > NOTED_KEPT) noted.delete(noted.values().next().value as string);
+      /* earlier lines held for this agent go first: an idle missed while the log was read */
+      injectHeld(agent.id);
+      if (injectInto(agent, message)) remember(made.id);
     } catch (err) {
       log(`${BIN}: conversation: the desk line ${made.id} could not be noted: ${errText(err)}`);
     }
@@ -937,6 +1003,9 @@ export function installConversation(deps: ConversationDeps): ConversationHandle 
       disposed = true;
       await posting;
       await tail;
+      offStatus?.();
+      offStatus = undefined;
+      heldLines.clear();
       const was = held;
       held = undefined;
       if (was === undefined) {

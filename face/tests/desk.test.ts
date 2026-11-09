@@ -16,6 +16,7 @@ import {
 } from "../src/desk.ts";
 import type { PhoneClient } from "../src/phone.ts";
 import type { DeskConversationCtxLike } from "../src/desk-conversation.ts";
+import type { DeskLine } from "../src/conversation.ts";
 import { DESK_PRESET } from "../src/desk-names.ts";
 import type { DeskGuardCtxLike, DeskToolDefinition } from "../src/desk-tools.ts";
 import type { AgentLike, SessionLike } from "../src/room.ts";
@@ -1911,6 +1912,69 @@ test("installDesk starts the watch with a source, shares the US calendar with th
   await desk.dispose(0);
   assert.deepEqual(atLetGo.at(-1), { schedule: 0, watch: 0, state: "stopped", lease: false }, "the clock row and the watch stopped, and the lease released, before the conversation let go");
   assert.equal(fake.listeners.size, 0, "the annotation's supervision and the conversation's both let go");
+});
+
+test("a delivered alert reaches the bound conversation's note with its source; unbound, nothing is noted", async () => {
+  const run = async (label: string, bind: boolean): Promise<{ notes: DeskLine[]; phone: string[] }> => {
+    const h = join(TMP, `note-${label}`);
+    const root = join(TMP, `repo-note-${label}`);
+    await mkdir(join(root, "desk", "journal"), { recursive: true });
+    await writeFile(join(root, "desk", "levels.yml"), "- symbol: \"600519\"\n  kind: watch\n  price: 1400\n  when: cross_down\n  plan: reread the thesis\n  expires: 2027-12-31\n");
+    const timer = fakeTimer();
+    const watchClock = new WallClock("2026-12-01T02:00:00Z");
+    let price: number | undefined;
+    const quotes: MarketQuoteSource = {
+      snapshot: async (assets) => {
+        const at = new Date(watchClock.now()).toISOString();
+        const priced = price === undefined ? [] : assets.filter((a) => a.symbol === "600519").map((a) => ({
+          ...a, change: null, volume: null, volume_as_of: null, source: "market", feed: "tencent", basis: "previous_close" as const,
+          cn: { phase: "trading", lastSession: null }, price: price!, prev_close: 1410, change_pct: null, as_of: at, received_at: at,
+          quote_status: "live", market_status: "open", message: "",
+        }));
+        return { ok: true, generated_at: at, quotes: priced, providers: [] } as Awaited<ReturnType<MarketQuoteSource["snapshot"]>>;
+      },
+    };
+    const cn = fakeCalendar({ "2026-12-01": { date: "2026-12-01", open: "2026-12-01T01:30:00Z", close: "2026-12-01T07:00:00Z", early: false } }, "fake XSHG", (n) => bjDate(new Date(n)));
+    const fake = conversationRoot(() => "");
+    const desk = installDesk(recorder(), {
+      enabled: true, router: true, watch: { setInterval: timer.setInterval, clearInterval: timer.clearInterval },
+      root, route: { provider: "stub", model: "echo" }, installModelSelection: () => () => {}, log: () => {},
+      home: h, sessionCtx: fake.ctx, quotes, alertDeadlineMs: 40,
+      schedule: { clock: new WallClock("2026-12-01T02:00:00Z"), calendar: fakeCalendar({ "2026-11-30": "closed" }), tickMs: 86_400_000 },
+      watchRow: { clock: watchClock, tickMs: 5_000, edgar: null, alive: () => false, calendars: { cn } },
+    });
+    const notes: DeskLine[] = [];
+    if (bind) {
+      desk.bindRouter({
+        post: async () => ({ opened: true, sessionId: "conv-1" }), stop: async () => false, carry: async () => {},
+        status: async () => ({ running: 0, waiting: 0 }), note: (line) => { notes.push(line); },
+      });
+    }
+    const phone: string[] = [];
+    desk.conversation!.setOutlet({ send: async (text) => { phone.push(text); return { sent: [`telegram:${phone.length}`] }; } });
+    const handle = await desk.watchRow;
+    assert.ok(handle !== undefined);
+    await watchClock.advance(0);
+    price = 1390;
+    await watchClock.advance(10_000);
+    await until("the alert", () => phone.some((t) => t.startsWith("600519")));
+    if (bind) await until("the note", () => notes.length >= 1);
+    else await new Promise((done) => setTimeout(done, 50));
+    await desk.dispose(0);
+    await rm(h, { recursive: true, force: true });
+    return { notes, phone };
+  };
+  const bound = await run("bound", true);
+  const alertNotes = bound.notes.filter((n) => n.kind === "alert" && n.label !== "annotation");
+  assert.equal(alertNotes.length, 1, JSON.stringify(bound));
+  const [n] = alertNotes as Extract<DeskLine, { kind: "alert" }>[];
+  assert.match(n.alert, /^a-/);
+  assert.equal(n.symbol, "600519");
+  assert.equal(n.label, "watch");
+  assert.equal(n.text, bound.phone.find((t) => t.startsWith("600519")), "the text the phone got");
+  const unbound = await run("unbound", false);
+  assert.ok(unbound.phone.length >= 1, "the alert still went to the phone");
+  assert.deepEqual(unbound.notes, [], "no conversation bound: nothing noted");
 });
 
 /* P3: the watch's lines (the P3 plan's Task 10), appended by deskStatusLines after P2's. */

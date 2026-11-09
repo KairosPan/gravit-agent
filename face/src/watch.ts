@@ -990,8 +990,10 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         let result: DeliverResult;
         if (stopped) result = { undelivered: "the face shut down" };
         else {
-          const text = alertText(rec, clock.now(), note);
+          /* the text built inside the try, as before: a throw is this alert's undelivered answer, never the pass's */
+          let text = "";
           try {
+            text = alertText(rec, clock.now(), note);
             result = await deps.deliver(text, rec.urgent === true ? URGENT : ALERT);
           } catch (err) {
             result = { undelivered: `send failed: ${errText(err)}` };
@@ -1177,8 +1179,9 @@ export function installWatch(deps: WatchDeps): WatchHandle {
         const byId = new Map(records.flatMap((r) => (r.kind === "alert" ? [[r.id, r] as const] : [])));
         const held = ids.flatMap((id) => { const r = byId.get(id); return r === undefined ? [] : [r]; });
         let delivery: DeliverResult;
-        const text = batchText(held, at);
+        let text = "";
         try {
+          text = batchText(held, at);
           delivery = held.length === 0 ? { undelivered: "the held alerts are not in memory" } : await deps.deliver(text, kindOfHits(held));
         } catch (err) {
           delivery = { undelivered: `send failed: ${errText(err)}` };
